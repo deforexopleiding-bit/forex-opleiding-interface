@@ -1,39 +1,25 @@
-// modules/klanten-v2/views/email-v2.js
+// modules/klanten-v2/views/email-v2.js — Fase 2B (feat/v2-email, PR #1289)
 //
-// v2 E-mail — Fase 2A PURE-UI PARITY (feat/v2-email, PR #1289).
+// Data-clusters live: HTML-sanitizer + iframe-sandbox render, AI-card in reader,
+// Vlag/Concepten/Archief/Prullenbak endpoints + bulk-acties + folder-counts,
+// handtekening-picker + preview, koppel-klant → v2-route.
 //
-// Alle styling-gaps t.o.v. prototype (docs/redesign/systeemprototype-v45.html
-// r449-532 CSS + r2559-2746 view) opgeloofd zonder schema-wijzigingen.
-// Data-clusters (HTML-sanitizer/AI-card-in-reader/nieuwe-mappen-endpoints/
-// bulk-endpoints/handtekening/koppel-klant) komen in Fase 2B.
+// Layout-fix: 3-koloms grid vult beschikbare hoogte (min-height:0 keten).
 //
-// Endpoints in gebruik (uit Fase 1):
-//   /api/email-inbox-list  /api/email-body  /api/email-attachment
-//   /api/mark-read  /api/email-send-v2 (met preview-guard) /api/email-ai-regenerate
+// Endpoints:
+//   /api/email-inbox-list         GET  (folder=inbox|unread|flag|draft|sent|archive|trash)
+//   /api/email-body               POST (levert body_html_safe + text)
+//   /api/email-attachment         GET
+//   /api/mark-read                POST
+//   /api/email-send-v2            POST (server-side preview-guard)
+//   /api/email-ai-regenerate      POST (dunne Anthropic-wrapper, geen joost)
+//   /api/email-status-update      POST { ids[], action:'flag|unflag|archive|trash|restore' }
+//   /api/email-folder-counts      GET  (badge-tellers per map)
+//   /api/email-drafts             GET/POST/DELETE (Concepten CRUD)
 //
-// Fase 2A UI-toevoegingen:
-//   - Rail 198px met folder-iconen, merkkleur-highlight, postvak-kleurdots,
-//     Instellingen-sticky-bottom, "Nieuwe e-mail"-copy
-//   - 7 mappen zichtbaar (Inbox/Ongelezen/Vlag/Concepten/Verzonden/Archief/Prullenbak)
-//     — 4 niet-wired mappen tonen "Fase 2B"-badge en placeholder-body
-//   - Lijst 352px met 2-koloms rij (checkbox+dot links + body rechts),
-//     3px accent-strip op selectie, hover-state, monospace relatieve tijd,
-//     paperclip-SVG, klantnaam-pill accent, filter-chips Alles/Ongelezen/Bijlage,
-//     sort-select Nieuwste/Oudste/Afzender, sticky list-header
-//   - Reader 2-laags header (read-head + meta) met 38px initialen-avatar,
-//     grid-layout naam/adres/datum, monospace datum, "aan mailbox"-label,
-//     actiebar met Vlag/Archief/Trash icon-btns + 3-dots more-menu (noop in 2A),
-//     body 14px/lh1.65, attachment horizontale chip-strip met gekleurde icon,
-//     nette empty-state
-//   - Compose slide-up 660×78vh paneel rechtsonder (ipv center-modal),
-//     header met minimize+close, inline Van/Aan met 44px labels,
-//     CC/BCC toggle achter knop, recipient-chip met avatar bij reply,
-//     footer met bijlage/sjabloon/AI icon-btns (noop hooks tot 2B),
-//     tone-chips violet, scrim rgba(17,23,33,.42) + backdrop-filter blur
-//   - Design-tokens --m/--m-soft/--r/--r-lg, IBM Plex Mono voor tijd,
-//     rose #C22B3E / emerald #07835A / amber #B7791F fallbacks matchen prototype
-//
-// Registreert: DFO.VIEWS['email/'] = emailView.
+// Twee-lagen XSS-verdediging voor HTML-mails:
+//   1) Server-side sanitizer (api/_lib/email-html-sanitizer.js) — allowlist.
+//   2) Client rendert in <iframe sandbox> zonder allow-scripts.
 
 (function () {
   if (!window.DFO) { console.error('[email-v2] DFO shell niet geladen.'); return; }
@@ -57,42 +43,52 @@
     { slug: 'welkom',        addr: 'welkom@deforexopleiding.nl',        label: 'Welkom',        dot: '#94A3B8' },
   ];
   const FOLDERS = [
-    { slug: 'inbox',   label: 'Postvak IN',  icon: 'inbox',   wired: true  },
-    { slug: 'unread',  label: 'Ongelezen',   icon: 'mail',    wired: true  },
-    { slug: 'flag',    label: 'Met vlag',    icon: 'flag',    wired: false },
-    { slug: 'draft',   label: 'Concepten',   icon: 'edit',    wired: false },
-    { slug: 'sent',    label: 'Verzonden',   icon: 'send',    wired: true  },
-    { slug: 'archive', label: 'Archief',     icon: 'archive', wired: false },
-    { slug: 'trash',   label: 'Prullenbak',  icon: 'trash',   wired: false },
+    { slug: 'inbox',   label: 'Postvak IN',  icon: 'inbox'   },
+    { slug: 'unread',  label: 'Ongelezen',   icon: 'mail'    },
+    { slug: 'flag',    label: 'Met vlag',    icon: 'flag'    },
+    { slug: 'draft',   label: 'Concepten',   icon: 'edit'    },
+    { slug: 'sent',    label: 'Verzonden',   icon: 'send'    },
+    { slug: 'archive', label: 'Archief',     icon: 'archive' },
+    { slug: 'trash',   label: 'Prullenbak',  icon: 'trash'   },
+  ];
+  const SIGNATURES = [
+    { key: 'standaard', label: 'Standaard', text: '\n\nMet vriendelijke groet,\nDe Forex Opleiding\ninfo@deforexopleiding.nl' },
+    { key: 'kort',      label: 'Kort',      text: '\n\nGroet,\nDe Forex Opleiding' },
+    { key: 'zakelijk',  label: 'Zakelijk',  text: '\n\nMet vriendelijke groet,\n\nDe Forex Opleiding NL B.V.\nKvK — deforexopleiding.nl' },
+    { key: 'geen',      label: 'Geen',      text: '' },
   ];
   const PAGE_SIZE = 50;
+  const DRAFT_AUTOSAVE_MS = 2500;
 
   const ICO = {
-    inbox:  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>`,
-    mail:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>`,
-    flag:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>`,
-    edit:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
-    send:   `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg>`,
+    inbox:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>`,
+    mail:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>`,
+    flag:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>`,
+    edit:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+    send:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9z"/></svg>`,
     archive:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8v13H3V8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>`,
-    trash:  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
+    trash:`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
     settings:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
-    search: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>`,
+    search:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>`,
     paperclip:`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
-    plus:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-    reply:  `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>`,
+    plus:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+    reply:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>`,
     replyAll:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 17 2 12 7 7"/><polyline points="12 17 7 12 12 7"/><path d="M22 18v-2a4 4 0 0 0-4-4H7"/></svg>`,
     forward:`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>`,
-    dots:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>`,
-    x:      `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
-    min:    `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
-    tick:   `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
-    file:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+    dots:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>`,
+    x:`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+    min:`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+    tick:`<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+    file:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
     sparkle:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8L4 10.7l6.1 1.9L12 18l1.9-5.4 6.1-1.9-6.1-1.9z"/></svg>`,
+    img:`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>`,
   };
 
   const _live = {
-    inbox: { loading: false, error: null, data: null, key: null },
-    body:  { loading: {}, error: {}, data: {} },
+    inbox:   { loading: false, error: null, data: null, key: null },
+    body:    { loading: {}, error: {}, data: {} },
+    counts:  { loading: false, data: null, ts: 0 },
+    aiDraft: { loading: {}, error: {}, data: {} }, // per rowId → { subject, body }
   };
   const _ui = {
     mailboxSlug: '',
@@ -103,12 +99,18 @@
     offset:      0,
     selectedId:  null,
     selectedRows: {},
+    showImages:  {},      // rowId → true, unlockt originele img src
     composeOpen: false,
     composeMinimized: false,
     composeMode: 'new',
     compose: {
       from_mailbox: 'info@deforexopleiding.nl',
-      to: '', cc: '', bcc: '', subject: '', body: '', email_id: null,
+      to: '', cc: '', bcc: '', subject: '',
+      body_html: '',      // rich-text (contenteditable)
+      body_text: '',      // plaintext fallback (auto-synced uit body_html)
+      email_id: null,
+      signature: 'standaard',
+      draft_id: null,     // gezet zodra draft opgeslagen
     },
     ccBccOpen:  false,
     aiTone:     'vriendelijk',
@@ -116,8 +118,11 @@
     sendBusy:   false,
     lastSend:   null,
     moreMenuOpen: false,
+    bulkBusy: false,
+    statusBusy: {},       // action-key → true
+    draftDirty: false,
+    draftSaveT: null,
   };
-  const _busy = {};
 
   async function tryFetch(label, url, init, timeoutMs) {
     timeoutMs = timeoutMs || 8000;
@@ -140,17 +145,10 @@
     const st = _live.inbox;
     if (st.loading) return;
     if (st.data && st.key === key) return;
-    const folderCfg = FOLDERS.find((f) => f.slug === _ui.folder);
-    if (folderCfg && !folderCfg.wired) {
-      st.data = { items: [], total: 0, hasMore: false, __placeholder: true };
-      st.error = null; st.key = key;
-      if (render) render();
-      return;
-    }
     st.loading = true; st.error = null; st.key = key;
     const params = [];
     if (_ui.mailboxSlug) params.push('mailbox=' + encodeURIComponent(_ui.mailboxSlug));
-    if (_ui.folder === 'sent') params.push('folder=sent');
+    if (_ui.folder && _ui.folder !== 'inbox') params.push('folder=' + encodeURIComponent(_ui.folder));
     if (_ui.folder === 'unread' || _ui.filter === 'unread') params.push('unread=1');
     if (_ui.search) params.push('search=' + encodeURIComponent(_ui.search));
     params.push('limit=' + PAGE_SIZE);
@@ -164,9 +162,20 @@
       if (_ui.filter === 'attach') items = items.filter((r) => r.has_attachments);
       if (_ui.sort === 'oldest') items = items.slice().sort((a, b) => new Date(a.date_received) - new Date(b.date_received));
       else if (_ui.sort === 'sender') items = items.slice().sort((a, b) => String(a.from_name || a.from_address || '').localeCompare(String(b.from_name || b.from_address || '')));
-      st.data = { items, total: Number(j?.total || 0), hasMore: !!j?.hasMore };
+      st.data = { items, total: Number(j?.total || 0), hasMore: !!j?.hasMore, migration_required: !!j?.__migration_required };
     }
     if (render) render();
+  }
+  async function fetchCounts() {
+    const st = _live.counts;
+    // Cache 30s.
+    if (st.loading) return;
+    if (st.data && (Date.now() - st.ts) < 30000) return;
+    st.loading = true;
+    const url = '/api/email-folder-counts' + (_ui.mailboxSlug ? '?mailbox=' + encodeURIComponent(_ui.mailboxSlug) : '');
+    const j = await tryFetch('counts', url);
+    st.loading = false;
+    if (j && !j.__error) { st.data = j; st.ts = Date.now(); if (render) render(); }
   }
   async function fetchBody(row) {
     if (!row || !row.mailbox || row.imap_uid == null) return;
@@ -175,8 +184,7 @@
     if (st.loading[rid] || st.data[rid]) return;
     st.loading[rid] = true; st.error[rid] = null;
     const j = await tryFetch('body:' + rid, '/api/email-body', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mailbox: row.mailbox + '@deforexopleiding.nl', uid: row.imap_uid }),
     }, 12000);
     st.loading[rid] = false;
@@ -186,33 +194,73 @@
   }
   async function markRead(row, seen) {
     if (!row || !row.mailbox || row.imap_uid == null) return;
-    if (_busy['read:' + row.id]) return;
-    _busy['read:' + row.id] = true;
+    const key = 'read:' + row.id;
+    if (_ui.statusBusy[key]) return;
+    _ui.statusBusy[key] = true;
     const j = await tryFetch('mark-read', '/api/mark-read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mailbox: row.mailbox + '@deforexopleiding.nl', uid: row.imap_uid, seen: !!seen }),
     }, 8000);
-    _busy['read:' + row.id] = false;
+    _ui.statusBusy[key] = false;
     if (j && !j.__error) {
       const items = asArr(_live.inbox.data?.items);
       const idx = items.findIndex((x) => x.id === row.id);
       if (idx >= 0) items[idx].is_read = !!seen;
+      _live.counts.data = null; // invalideer badges
       if (render) render();
     }
+  }
+  async function statusUpdate(ids, action) {
+    if (!ids || ids.length === 0) return;
+    const key = 'status:' + action;
+    if (_ui.statusBusy[key]) return;
+    _ui.statusBusy[key] = true;
+    const j = await tryFetch('status:' + action, '/api/email-status-update', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, action }),
+    }, 15000);
+    _ui.statusBusy[key] = false;
+    if (j && j.__error) { alert('Actie mislukt: ' + j.__error); return; }
+    if (j?.error) {
+      if (j.migration_required) alert('SQL-migratie ' + j.migration_required + ' moet eerst gedraaid worden.');
+      else alert('Actie mislukt: ' + j.error);
+      return;
+    }
+    // Optimistic: verwijder uit huidige lijst als action het buiten deze folder plaatst
+    if (['archive','trash','restore'].includes(action) || (action === 'unflag' && _ui.folder === 'flag')) {
+      const items = asArr(_live.inbox.data?.items);
+      if (items.length) {
+        _live.inbox.data.items = items.filter((x) => !ids.includes(x.id));
+      }
+      if (ids.includes(_ui.selectedId)) _ui.selectedId = null;
+    } else if (action === 'flag' || action === 'unflag') {
+      const items = asArr(_live.inbox.data?.items);
+      items.forEach((it) => { if (ids.includes(it.id)) it.flagged = (action === 'flag'); });
+    }
+    _ui.selectedRows = {};
+    _live.counts.data = null;
+    if (render) render();
   }
   async function sendMail() {
     if (_ui.sendBusy) return;
     const c = _ui.compose;
-    if (!c.from_mailbox || !c.to || !c.subject || !c.body) {
-      _ui.lastSend = { ok: false, error: 'Vul from/to/onderwerp/body' };
+    // Sync plaintext-fallback uit HTML voor de send.
+    c.body_text = htmlToPlaintext(c.body_html);
+    // Voeg handtekening toe (server appends niet; we doen 't hier).
+    const sig = SIGNATURES.find((s) => s.key === c.signature);
+    const sigText = sig ? sig.text : '';
+    const finalText = (c.body_text || '') + sigText;
+    const finalHtml = (c.body_html || '') + (sig && sig.text ? `<pre style="font-family:inherit;white-space:pre-wrap;margin:0">${esc(sig.text)}</pre>` : '');
+    if (!c.from_mailbox || !c.to || !c.subject || !c.body_text) {
+      _ui.lastSend = { ok: false, error: 'Vul Van/Aan/Onderwerp/Bericht' };
       if (render) render(); return;
     }
     _ui.sendBusy = true; _ui.lastSend = null; if (render) render();
     const j = await tryFetch('send', '/api/email-send-v2', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from_mailbox: c.from_mailbox, to: c.to, subject: c.subject, text: c.body,
+        from_mailbox: c.from_mailbox, to: c.to, subject: c.subject,
+        text: finalText, html: finalHtml,
         cc: c.cc || undefined, bcc: c.bcc || undefined, email_id: c.email_id || undefined,
       }),
     }, 15000);
@@ -220,47 +268,79 @@
     if (j && j.__error) _ui.lastSend = { ok: false, error: j.__error };
     else if (j?.ok) {
       _ui.lastSend = { ok: true, guarded: !!j.guarded, guard_target: j.guard_target || null, original_to: j.original_to || null, env: j.env || null };
+      // Draft opruimen na succesvolle send.
+      if (c.draft_id) { deleteDraft(c.draft_id).catch(() => {}); }
       setTimeout(() => {
         _ui.composeOpen = false;
-        _ui.compose = { from_mailbox: c.from_mailbox, to: '', cc: '', bcc: '', subject: '', body: '', email_id: null };
+        _ui.compose = { from_mailbox: c.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
         _ui.lastSend = null; _ui.ccBccOpen = false;
         _live.inbox.data = null; _live.inbox.key = null;
+        _live.counts.data = null;
         if (render) render();
       }, 2000);
     } else _ui.lastSend = { ok: false, error: j?.error || 'Onbekende fout' };
     if (render) render();
   }
-  async function aiRegenerate() {
-    if (_ui.aiBusy) return;
-    const row = currentRow();
-    const bodyData = row ? _live.body.data[row.id] : null;
-    _ui.aiBusy = true; if (render) render();
-    const j = await tryFetch('ai-regen', '/api/email-ai-regenerate', {
+  async function aiRegenerateInReader(row) {
+    if (!row) return;
+    const rid = row.id;
+    const st = _live.aiDraft;
+    if (st.loading[rid]) return;
+    st.loading[rid] = true; st.error[rid] = null;
+    const bodyData = _live.body.data[rid] || {};
+    const j = await tryFetch('ai-regen:' + rid, '/api/email-ai-regenerate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        original_subject: row?.subject || '',
-        original_body:    bodyData?.text || row?.snippet || '',
-        from_name:        row?.from_name || row?.from_address || '',
+        original_subject: row.subject || '',
+        original_body:    bodyData.text || row.snippet || '',
+        from_name:        row.from_name || row.from_address || '',
         tone:             _ui.aiTone,
       }),
     }, 20000);
-    _ui.aiBusy = false;
+    st.loading[rid] = false;
     if (j && !j.__error && j.draft_body) {
-      _ui.compose.body = j.draft_body;
-      if (j.draft_subject && !_ui.compose.subject) _ui.compose.subject = j.draft_subject;
-    } else _ui.compose.body = _ui.compose.body || `[AI-generatie mislukt: ${j?.__error || j?.error || 'onbekende fout'}]`;
+      st.data[rid] = { subject: j.draft_subject || row.subject || '', body: j.draft_body };
+    } else {
+      st.error[rid] = j?.__error || j?.error || 'AI-generatie mislukt';
+    }
     if (render) render();
+  }
+  async function saveDraftDebounced() {
+    if (_ui.draftSaveT) clearTimeout(_ui.draftSaveT);
+    _ui.draftSaveT = setTimeout(saveDraft, DRAFT_AUTOSAVE_MS);
+  }
+  async function saveDraft() {
+    const c = _ui.compose;
+    if (!c.to && !c.subject && !c.body_html) return; // niks om op te slaan
+    const body = {
+      id: c.draft_id || undefined,
+      from_mailbox: c.from_mailbox, to_address: c.to, cc_address: c.cc,
+      bcc_address: c.bcc, subject: c.subject, body_html: c.body_html,
+      in_reply_to_email_id: c.email_id || null,
+    };
+    const j = await tryFetch('draft-save', '/api/email-drafts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 10000);
+    if (j?.item?.id) {
+      c.draft_id = j.item.id;
+      _ui.draftDirty = false;
+      if (render) render();
+    }
+  }
+  async function deleteDraft(id) {
+    if (!id) return;
+    await tryFetch('draft-del', '/api/email-drafts', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }, 8000);
   }
 
   function currentRow() {
     const items = asArr(_live.inbox.data?.items);
     return items.find((x) => x.id === _ui.selectedId) || null;
   }
-  function hashHue(s) {
-    let h = 0; s = String(s || '');
-    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
-    return Math.abs(h) % 360;
-  }
+  function hashHue(s) { let h = 0; s = String(s || ''); for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return Math.abs(h) % 360; }
   function initialsOf(name) {
     const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
     if (!parts.length) return '?';
@@ -270,10 +350,9 @@
   function av(name, size) {
     size = size || 38;
     const hue = hashHue(name);
-    const bg1 = `hsl(${hue}, 65%, 52%)`;
-    const bg2 = `hsl(${(hue + 30) % 360}, 60%, 42%)`;
-    const fs  = Math.round(size * 0.4);
-    return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg, ${bg1}, ${bg2});color:#fff;display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:600;letter-spacing:.02em;flex-shrink:0">${esc(initialsOf(name))}</div>`;
+    const bg1 = `hsl(${hue}, 65%, 52%)`, bg2 = `hsl(${(hue + 30) % 360}, 60%, 42%)`;
+    const fs = Math.round(size * 0.4);
+    return `<div style="width:${size}px;height:${size}px;border-radius:50%;background:linear-gradient(135deg,${bg1},${bg2});color:#fff;display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:600;letter-spacing:.02em;flex-shrink:0">${esc(initialsOf(name))}</div>`;
   }
   const TOK = {
     m:'var(--m, #3B82F6)', mSoft:'var(--m-soft, rgba(59,130,246,.12))',
@@ -284,41 +363,49 @@
     violet:'var(--violet, #7C3AED)', violetSoft:'var(--violet-soft, #F0EAFB)', violetLine:'var(--violet-line, #D6C5F5)',
     mono:"'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace",
   };
-  const errBlk = (msg, retryFn) => `<div style="margin:14px 20px;padding:12px 16px;border:1px solid ${TOK.roseLine};background:${TOK.roseSoft};border-radius:${TOK.r};color:${TOK.rose};font-size:13px;display:flex;align-items:center;gap:12px">
-    <span style="flex:1">⚠ ${esc(msg)}</span>
-    ${retryFn ? `<button class="btn btn-ghost btn-sm" onclick="${retryFn}">Opnieuw</button>` : ''}
-  </div>`;
+  const errBlk = (msg, retryFn) => `<div style="margin:14px 20px;padding:12px 16px;border:1px solid ${TOK.roseLine};background:${TOK.roseSoft};border-radius:${TOK.r};color:${TOK.rose};font-size:13px;display:flex;align-items:center;gap:12px"><span style="flex:1">⚠ ${esc(msg)}</span>${retryFn ? `<button class="btn btn-ghost btn-sm" onclick="${retryFn}">Opnieuw</button>` : ''}</div>`;
   const skel = () => `<div style="padding:24px 20px"><div style="height:80px;background:var(--surface-2);border-radius:${TOK.r};opacity:.5;animation:pulse 1.5s ease-in-out infinite"></div></div>`;
   function fmtRelTime(iso) {
     if (!iso) return '—';
-    const d = new Date(iso);
-    if (!Number.isFinite(d.getTime())) return '—';
+    const d = new Date(iso); if (!Number.isFinite(d.getTime())) return '—';
     const now = new Date();
     const diffDay = Math.floor((now - d) / 86400000);
     const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
     if (sameDay) return d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
     const y = new Date(now); y.setDate(y.getDate() - 1);
-    const isYest = d.getFullYear() === y.getFullYear() && d.getMonth() === y.getMonth() && d.getDate() === y.getDate();
-    if (isYest) return 'gisteren';
+    if (d.getFullYear() === y.getFullYear() && d.getMonth() === y.getMonth() && d.getDate() === y.getDate()) return 'gisteren';
     if (diffDay < 7) return diffDay + ' dagen';
     return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' });
   }
   function fmtDateFull(iso) {
     if (!iso) return '—';
-    const d = new Date(iso);
-    if (!Number.isFinite(d.getTime())) return '—';
+    const d = new Date(iso); if (!Number.isFinite(d.getTime())) return '—';
     return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }) + ' · ' + d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
   }
-  function safeHtmlText(text) {
+  // Plaintext-fallback: strip HTML-tags voor plain-text-fallback in send.
+  function htmlToPlaintext(html) {
+    if (!html) return '';
+    return String(html)
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function safePlainText(text) {
     return esc(String(text || '')).replace(/\n{2,}/g, '</p><p style="margin-bottom:14px">').replace(/\n/g, '<br>');
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // VIEW — full-height 3-koloms grid met min-height:0 keten
+  // ═══════════════════════════════════════════════════════════════════════
   function emailView() {
-    if (!_live.inbox.loading && (!_live.inbox.data || _live.inbox.key !== inboxKey())) {
-      queueMicrotask(fetchInbox);
-    }
-    const html = `<div class="pad" style="padding:0">
-      <div style="display:grid;grid-template-columns:198px 352px 1fr;height:calc(100vh - 120px);border-top:1px solid var(--border)">
+    if (!_live.inbox.loading && (!_live.inbox.data || _live.inbox.key !== inboxKey())) queueMicrotask(fetchInbox);
+    if (!_live.counts.data && !_live.counts.loading) queueMicrotask(fetchCounts);
+    // Layout-fix: outer height:calc(100dvh - 60px), min-height:0 tot in de kolommen.
+    const html = `<div class="pad" style="padding:0;height:calc(100dvh - 60px);min-height:400px;display:flex;flex-direction:column">
+      <div style="flex:1;display:grid;grid-template-columns:198px 352px 1fr;min-height:0;border-top:1px solid var(--border)">
         ${_leftRail()}
         ${_middleList()}
         ${_reader()}
@@ -329,13 +416,14 @@
   }
 
   function _leftRail() {
-    return `<aside style="background:var(--surface-2);border-right:1px solid var(--border);overflow-y:auto;padding:12px 0;display:flex;flex-direction:column">
+    const counts = _live.counts.data || {};
+    return `<aside style="background:var(--surface-2);border-right:1px solid var(--border);overflow-y:auto;min-height:0;padding:12px 0;display:flex;flex-direction:column">
       <div style="padding:0 14px 12px">
         <button class="btn btn-primary" style="width:100%;font-weight:500;gap:6px" onclick="window.__emailNewCompose()">${ICO.plus}Nieuwe e-mail</button>
       </div>
       <div style="padding:6px 0">
         <div style="font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);padding:8px 16px 4px">Mappen</div>
-        ${FOLDERS.map(_foldBtn).join('')}
+        ${FOLDERS.map((f) => _foldBtn(f, counts)).join('')}
       </div>
       <div style="padding:6px 0">
         <div style="font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);padding:8px 16px 4px">Postvakken</div>
@@ -347,16 +435,20 @@
       </div>
     </aside>`;
   }
-  function _foldBtn(f) {
+  function _foldBtn(f, counts) {
     const on = _ui.folder === f.slug;
     const bg = on ? TOK.mSoft : 'transparent';
     const fg = on ? TOK.m : 'var(--text-2)';
     const wt = on ? '600' : '400';
-    const opa = f.wired ? '1' : '.55';
-    return `<button style="width:100%;text-align:left;padding:8px 16px;background:${bg};border:none;color:${fg};font-size:13px;font-weight:${wt};cursor:pointer;display:flex;align-items:center;gap:10px;opacity:${opa}" onclick="window.__emailSetFolder('${esc(f.slug)}')">
+    const cnt = Number(counts[f.slug] || 0);
+    const hot = f.slug === 'inbox' || f.slug === 'unread';
+    const countPill = cnt > 0
+      ? `<span style="font-family:${TOK.mono};font-size:10.5px;padding:1px 7px;border-radius:20px;background:${on ? TOK.m : (hot && cnt > 0 ? TOK.roseSoft : 'var(--surface-2)')};color:${on ? '#fff' : (hot && cnt > 0 ? TOK.rose : 'var(--text-3)')};font-weight:600">${cnt > 999 ? '999+' : cnt}</span>`
+      : '';
+    return `<button style="width:100%;text-align:left;padding:8px 16px;background:${bg};border:none;color:${fg};font-size:13px;font-weight:${wt};cursor:pointer;display:flex;align-items:center;gap:10px" onclick="window.__emailSetFolder('${esc(f.slug)}')">
       <span style="display:inline-flex;width:16px;height:16px;flex-shrink:0">${ICO[f.icon] || ''}</span>
       <span style="flex:1">${esc(f.label)}</span>
-      ${!f.wired ? '<span style="font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">2B</span>' : ''}
+      ${countPill}
     </button>`;
   }
   function _acctBtn(m) {
@@ -372,7 +464,7 @@
   function _middleList() {
     const selCount = Object.values(_ui.selectedRows).filter(Boolean).length;
     const bulkBar = selCount > 0 ? _bulkBar(selCount) : '';
-    return `<section style="border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column">
+    return `<section style="border-right:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;min-height:0">
       <div style="position:sticky;top:0;z-index:2;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="padding:10px 12px;display:flex;gap:8px;align-items:center">
           <div style="flex:1;position:relative">
@@ -393,17 +485,18 @@
         </div>
         ${bulkBar}
       </div>
-      <div style="flex:1;overflow-y:auto">${_listBody()}</div>
+      <div style="flex:1;overflow-y:auto;min-height:0">${_listBody()}</div>
       ${_pager()}
     </section>`;
   }
   function _bulkBar(count) {
+    const b = _ui.statusBusy;
     return `<div style="padding:8px 12px;background:${TOK.mSoft};border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px">
       <span style="color:${TOK.m};font-weight:600">${count} geselecteerd</span>
       <div style="display:flex;gap:4px;margin-left:auto">
-        <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('read')" title="Als gelezen (2B)" style="opacity:.6">Gelezen</button>
-        <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('archive')" title="Archief (2B)" style="opacity:.6">Archief</button>
-        <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('trash')" title="Trash (2B)" style="opacity:.6">Trash</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('flag')" ${b['status:flag'] ? 'disabled' : ''}>Vlag</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('archive')" ${b['status:archive'] ? 'disabled' : ''}>Archief</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__emailBulkAction('trash')" ${b['status:trash'] ? 'disabled' : ''}>Trash</button>
         <button class="icon-btn" onclick="window.__emailBulkClear()" title="Deselecteer" style="width:24px;height:24px">${ICO.x}</button>
       </div>
     </div>`;
@@ -412,7 +505,7 @@
     const st = _live.inbox;
     if (st.error && !st.data) return errBlk(st.error, "window.__emailRefresh()");
     if (st.loading && !st.data) return skel();
-    if (st.data && st.data.__placeholder) return _emptyState(_ui.folder + '-map', 'Deze map komt in Fase 2B — endpoints voor flag/concept/archief/prullenbak worden dan gebouwd.');
+    if (st.data && st.data.migration_required) return _emptyState('Migratie vereist', 'Voer 2026-08-15-email-v2-fase-2b.sql uit op productie om Concepten/Vlag/Archief/Prullenbak te activeren.');
     return _listRows();
   }
   function _listRows() {
@@ -446,6 +539,7 @@
           <div style="display:flex;gap:5px;align-items:center;margin-top:3px;flex-wrap:wrap">
             ${mailboxDot ? `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--text-3)"><span style="display:inline-block;width:6px;height:6px;border-radius:2px;background:${mailboxDot.dot}"></span>${esc(mailboxDot.label)}</span>` : ''}
             ${r.has_attachments ? `<span style="display:inline-flex;color:var(--text-3)" title="Bijlage">${ICO.paperclip}</span>` : ''}
+            ${r.flagged ? `<span style="display:inline-flex;color:${TOK.amber}" title="Vlag">${ICO.flag}</span>` : ''}
             ${r.customer_id
               ? `<span style="font-size:10px;padding:1px 7px;background:${TOK.mSoft};color:${TOK.m};border-radius:20px;font-weight:500">Klant</span>`
               : `<span style="font-size:10px;padding:1px 7px;background:var(--surface-2);color:var(--text-3);border-radius:20px">Niet gekoppeld</span>`}
@@ -464,7 +558,7 @@
   }
   function _pager() {
     const st = _live.inbox;
-    if (!st.data || st.data.__placeholder || st.data.total === 0) return '';
+    if (!st.data || st.data.total === 0) return '';
     const offset = _ui.offset, shown = asArr(st.data.items).length, hasMore = st.data.hasMore;
     return `<div style="padding:8px 12px;border-top:1px solid var(--border);background:var(--surface);display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--text-3);font-family:${TOK.mono}">
       <span>${offset + 1}–${offset + shown} van ${st.data.total}</span>
@@ -478,30 +572,26 @@
   function _reader() {
     const row = currentRow();
     if (!row) return _readerEmpty();
+    // Draft-open: open direct compose (Concepten-folder klik).
+    if (row._source === 'draft') { setTimeout(() => window.__emailOpenDraftFromRow(row), 0); return _readerEmpty(); }
     const bst = _live.body;
-    const body = bst.data[row.id];
-    const bErr = bst.error[row.id];
-    const bLoad = bst.loading[row.id];
-    if (!body && !bErr && !bLoad && row.mailbox && row.imap_uid != null) {
-      queueMicrotask(() => fetchBody(row));
-    }
-    if (row._source === 'inbox' && !row.is_read && !_busy['read:' + row.id]) {
-      queueMicrotask(() => markRead(row, true));
-    }
-    return `<section style="overflow-y:auto;display:flex;flex-direction:column;background:var(--bg,var(--surface))">
+    const body = bst.data[row.id], bErr = bst.error[row.id], bLoad = bst.loading[row.id];
+    if (!body && !bErr && !bLoad && row.mailbox && row.imap_uid != null) queueMicrotask(() => fetchBody(row));
+    if (row._source === 'inbox' && !row.is_read && !_ui.statusBusy['read:' + row.id]) queueMicrotask(() => markRead(row, true));
+    return `<section style="overflow:hidden;display:flex;flex-direction:column;background:var(--bg,var(--surface));min-height:0">
       ${_readHead(row)}
       ${_readMeta(row)}
-      <div style="flex:1;overflow-y:auto">
+      <div style="flex:1;overflow-y:auto;min-height:0">
         ${bErr ? errBlk(bErr, `window.__emailReloadBody('${esc(row.id)}')`) :
           bLoad ? skel() :
           body ? _bodyBlock(body, row) :
           `<div style="padding:20px;color:var(--text-3);font-size:13px">Body wordt geladen…</div>`}
-        ${_aiSuggestPlaceholder()}
+        ${body ? _aiSuggestCard(row) : ''}
       </div>
     </section>`;
   }
   function _readerEmpty() {
-    return `<section style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-3);gap:14px;padding:40px 20px;background:var(--bg,var(--surface))">
+    return `<section style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-3);gap:14px;padding:40px 20px;background:var(--bg,var(--surface));min-height:0">
       <div style="width:72px;height:72px;border-radius:50%;background:var(--surface-2);display:flex;align-items:center;justify-content:center">${ICO.mail}</div>
       <div style="text-align:center">
         <div style="font-size:15px;font-weight:600;color:var(--text-2);margin-bottom:4px">Geen bericht geopend</div>
@@ -510,6 +600,7 @@
     </section>`;
   }
   function _readHead(row) {
+    const isFlagged = !!row.flagged;
     return `<div style="padding:16px 22px 14px;border-bottom:1px solid var(--border);background:var(--surface)">
       <div style="font-size:18px;font-weight:600;letter-spacing:-.025em;color:var(--text);line-height:1.3;margin-bottom:12px">${esc(row.subject || '(geen onderwerp)')}</div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -518,9 +609,9 @@
         <button class="btn btn-ghost btn-sm" onclick="window.__emailFwd()" style="gap:6px">${ICO.forward}Doorsturen</button>
         <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
         <button class="icon-btn" title="Markeer ongelezen" onclick="window.__emailMarkUnread()" style="width:28px;height:28px">${ICO.mail}</button>
-        <button class="icon-btn" title="Vlag (Fase 2B)" onclick="window.__emailTodo2B('vlag')" style="width:28px;height:28px;opacity:.55">${ICO.flag}</button>
-        <button class="icon-btn" title="Archief (Fase 2B)" onclick="window.__emailTodo2B('archief')" style="width:28px;height:28px;opacity:.55">${ICO.archive}</button>
-        <button class="icon-btn" title="Verwijderen (Fase 2B)" onclick="window.__emailTodo2B('trash')" style="width:28px;height:28px;opacity:.55">${ICO.trash}</button>
+        <button class="icon-btn" title="${isFlagged ? 'Vlag verwijderen' : 'Vlag toevoegen'}" onclick="window.__emailFlagToggle()" style="width:28px;height:28px;color:${isFlagged ? TOK.amber : 'inherit'}">${ICO.flag}</button>
+        <button class="icon-btn" title="Archiveren" onclick="window.__emailArchive()" style="width:28px;height:28px">${ICO.archive}</button>
+        <button class="icon-btn" title="Verwijderen" onclick="window.__emailTrash()" style="width:28px;height:28px">${ICO.trash}</button>
         <div style="position:relative;margin-left:auto">
           <button class="icon-btn" title="Meer" onclick="window.__emailToggleMore()" style="width:28px;height:28px">${ICO.dots}</button>
           ${_ui.moreMenuOpen ? _moreMenu(row) : ''}
@@ -530,18 +621,15 @@
   }
   function _moreMenu(row) {
     const items = [
-      { l: 'Koppel aan klant', k: 'link', wired: !!row.customer_id },
-      { l: 'Maak ticket van',  k: 'ticket', wired: false },
-      { l: 'Maak taak van',    k: 'taak',   wired: false },
+      { l: 'Koppel aan klant', k: 'link',   wired: true },
       { l: 'Verplaats naar…',  k: 'move',   wired: false },
-      { l: 'Regel maken',      k: 'rule',   wired: false },
       { l: 'Afdrukken',        k: 'print',  wired: true },
       { l: 'Origineel bekijken', k: 'src',  wired: false },
     ];
     return `<div style="position:absolute;top:32px;right:0;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:${TOK.r};box-shadow:0 8px 24px rgba(0,0,0,.12);z-index:20;padding:4px 0">
       ${items.map((it) => `<button style="width:100%;text-align:left;padding:7px 14px;background:none;border:none;color:var(--text);font-size:12.5px;cursor:${it.wired ? 'pointer' : 'default'};opacity:${it.wired ? '1' : '.55'};display:flex;align-items:center;justify-content:space-between" onclick="window.__emailMoreDo('${esc(it.k)}')">
         <span>${esc(it.l)}</span>
-        ${!it.wired ? '<span style="font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">2B</span>' : ''}
+        ${!it.wired ? '<span style="font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">wip</span>' : ''}
       </button>`).join('')}
     </div>`;
   }
@@ -558,22 +646,44 @@
         <span style="font-size:12px;color:var(--text-3);font-family:${TOK.mono}">${esc(fmtDateFull(row.date_received))}</span>
         ${row.customer_id
           ? `<button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="window.__emailOpenKlant('${esc(row.customer_id)}')">Open klant-dossier →</button>`
-          : `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;color:${TOK.m}" onclick="window.__emailTodo2B('koppel-klant')">+ Koppel klant</button>`}
+          : `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;color:${TOK.m}" onclick="window.__emailKoppelKlant()">+ Koppel klant</button>`}
       </div>
     </div>`;
   }
+  // BODY: render sanitized HTML via <iframe sandbox srcdoc> = 2e verdedigingslaag.
+  // Fallback naar plaintext-render als er geen safe HTML is.
   function _bodyBlock(body, row) {
     const attachments = asArr(body.attachments);
-    return `<div style="padding:22px;max-width:900px;margin:0 auto">
-      <div style="font-size:14px;line-height:1.65;color:var(--text-2);font-family:inherit"><p style="margin-bottom:14px">${safeHtmlText(body.text || '')}</p></div>
-      ${attachments.length > 0 ? _attStrip(attachments, row) : ''}
-    </div>`;
+    const hasSafeHtml = body.body_html_safe && String(body.body_html_safe).trim().length > 0;
+    const imgBlocked = Number(body.external_images_blocked || 0);
+    const showImgs = !!_ui.showImages[row.id];
+    let bodyRender;
+    if (hasSafeHtml) {
+      // srcdoc met sandbox (geen allow-scripts) — browser blokkeert alle JS binnen iframe.
+      let html = String(body.body_html_safe);
+      if (showImgs) {
+        // Herstel externe images vanuit data-orig-src.
+        html = html.replace(/data-orig-src="([^"]+)"[^>]*data-blocked-external="1"/g,
+          (m, src) => `src="${src.replace(/"/g, '&quot;')}"`);
+        html = html.replace(/src="data:image\/svg\+xml;utf8,%3Csvg[^"]*"\s*/g, '');
+      }
+      const srcdoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:22px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.65;color:#1F2937;background:#fff;max-width:900px}p{margin-bottom:14px}img{max-width:100%;height:auto}a{color:#3B82F6}table{border-collapse:collapse}</style></head><body>${html}</body></html>`;
+      bodyRender = `<iframe sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(srcdoc)}" style="width:100%;min-height:400px;border:none;background:#fff" onload="try{this.style.height=(this.contentWindow.document.body.scrollHeight+40)+'px'}catch(e){}"></iframe>`;
+      if (imgBlocked > 0 && !showImgs) {
+        bodyRender = `<div style="padding:10px 22px;background:${TOK.amberSoft};border:1px solid ${TOK.amber};border-radius:${TOK.rSm};margin:16px 22px 0;font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:10px"><span>${ICO.img}</span><span style="flex:1">${imgBlocked} externe afbeeldingen zijn geblokkeerd om trackers te voorkomen.</span><button class="btn btn-ghost btn-sm" onclick="window.__emailShowImages('${esc(row.id)}')" style="color:${TOK.amber}">Afbeeldingen tonen</button></div>` + bodyRender;
+      }
+    } else {
+      bodyRender = `<div style="padding:22px;max-width:900px;margin:0 auto">
+        <div style="font-size:14px;line-height:1.65;color:var(--text-2)"><p style="margin-bottom:14px">${safePlainText(body.text || '')}</p></div>
+      </div>`;
+    }
+    return `<div>${bodyRender}${attachments.length > 0 ? _attStrip(attachments, row) : ''}</div>`;
   }
   function _attStrip(attachments, row) {
-    return `<div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--border)">
+    return `<div style="margin:22px 22px;padding-top:16px;border-top:1px solid var(--border)">
       <div style="display:flex;flex-wrap:wrap;gap:8px">
         ${attachments.map((a) => `
-          <a href="/api/email-attachment?mailbox=${encodeURIComponent(row.mailbox + '@deforexopleiding.nl')}&uid=${encodeURIComponent(row.imap_uid)}&index=${encodeURIComponent(a.index)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);text-decoration:none;color:var(--text);font-size:12px;transition:border-color .15s" onmouseover="this.style.borderColor='${TOK.m}'" onmouseout="this.style.borderColor='var(--border)'">
+          <a href="/api/email-attachment?mailbox=${encodeURIComponent(row.mailbox + '@deforexopleiding.nl')}&uid=${encodeURIComponent(row.imap_uid)}&index=${encodeURIComponent(a.index)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);text-decoration:none;color:var(--text);font-size:12px" onmouseover="this.style.borderColor='${TOK.m}'" onmouseout="this.style.borderColor='var(--border)'">
             <span style="width:28px;height:28px;border-radius:${TOK.rSm};background:${TOK.roseSoft};color:${TOK.rose};display:flex;align-items:center;justify-content:center;flex-shrink:0">${ICO.file}</span>
             <span style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename || 'bijlage')}</span>
             <span style="font-size:10.5px;color:var(--text-3);font-family:${TOK.mono}">${(a.size / 1024).toFixed(1)} KB</span>
@@ -582,16 +692,34 @@
       </div>
     </div>`;
   }
-  function _aiSuggestPlaceholder() {
+  function _aiSuggestCard(row) {
+    const st = _live.aiDraft;
+    const draft = st.data[row.id];
+    const busy = st.loading[row.id];
+    const err  = st.error[row.id];
     return `<div style="margin:20px 22px 22px;padding:16px 18px;background:${TOK.violetSoft};border:1px solid ${TOK.violetLine};border-radius:${TOK.rLg}">
-      <div style="display:flex;align-items:center;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${draft || err || busy ? '12px' : '0'}">
         <span style="width:26px;height:26px;border-radius:50%;background:${TOK.violet};color:#fff;display:flex;align-items:center;justify-content:center">${ICO.sparkle}</span>
         <div style="flex:1">
           <div style="font-size:13px;font-weight:600;color:${TOK.violet}">Voorgesteld antwoord</div>
-          <div style="font-size:11px;color:var(--text-3)">AI-draft-generatie in-reader komt in Fase 2B — nu via Beantwoorden + AI-knop in compose</div>
+          <div style="font-size:11px;color:var(--text-3)">${draft ? 'Concept gegenereerd — bewerk of gebruik' : (busy ? 'AI genereert…' : err ? 'Fout bij genereren' : 'Klik "Genereer" om een concept te maken')}</div>
         </div>
-        <button class="btn btn-ghost btn-sm" style="color:${TOK.violet};font-size:11.5px" onclick="window.__emailReply()">Beantwoorden met AI →</button>
+        <div style="display:flex;align-items:center;gap:4px">
+          ${['vriendelijk','zakelijk','kort','streng'].map((t) => {
+            const on = _ui.aiTone === t;
+            return `<button class="tone-chip" style="padding:2px 8px;border:1px solid ${on ? TOK.violet : TOK.violetLine};background:${on ? TOK.violet : 'transparent'};color:${on ? '#fff' : TOK.violet};border-radius:20px;font-size:10px;font-weight:${on ? '600' : '500'};cursor:pointer" onclick="window.__emailAiSetToneAndRegen('${t}','${esc(row.id)}')">${t}</button>`;
+          }).join('')}
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__emailAiGenReader('${esc(row.id)}')" style="color:${TOK.violet};font-size:11.5px;gap:5px">${ICO.sparkle}${busy ? 'Bezig…' : (draft ? 'Opnieuw' : 'Genereer')}</button>
+        </div>
       </div>
+      ${err ? `<div style="padding:10px;background:${TOK.roseSoft};color:${TOK.rose};border-radius:${TOK.rSm};font-size:12px">${esc(err)}</div>` : ''}
+      ${draft ? `
+        <div style="padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:${TOK.rSm};font-size:13px;line-height:1.5;color:var(--text);white-space:pre-wrap;max-height:280px;overflow-y:auto">${esc(draft.body)}</div>
+        <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:10px">
+          <button class="btn btn-ghost btn-sm" onclick="window.__emailAiClear('${esc(row.id)}')">Negeren</button>
+          <button class="btn btn-primary btn-sm" style="background:${TOK.violet};border-color:${TOK.violet}" onclick="window.__emailAiUse('${esc(row.id)}')">Gebruiken →</button>
+        </div>
+      ` : ''}
     </div>`;
   }
 
@@ -602,13 +730,13 @@
     return `<div style="position:fixed;inset:0;background:rgba(17,23,33,.42);backdrop-filter:blur(3px);z-index:1000;display:flex;align-items:flex-end;justify-content:flex-end;padding:0 26px 0 0" onclick="window.__emailCloseCompose()">
       <div style="background:var(--surface);width:660px;max-width:calc(100vw - 52px);height:78vh;border-radius:${TOK.rLg} ${TOK.rLg} 0 0;box-shadow:0 -8px 32px rgba(0,0,0,.24);display:flex;flex-direction:column;overflow:hidden;animation:slideUp .28s cubic-bezier(.16,1,.3,1)" onclick="event.stopPropagation()">
         <div style="padding:12px 18px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;border-radius:${TOK.rLg} ${TOK.rLg} 0 0">
-          <div style="font-size:14px;font-weight:600">${_ui.composeMode === 'reply' ? 'Beantwoorden' : _ui.composeMode === 'replyall' ? 'Beantwoorden aan allen' : _ui.composeMode === 'fwd' ? 'Doorsturen' : 'Nieuw bericht'}</div>
+          <div style="font-size:14px;font-weight:600">${_ui.composeMode === 'reply' ? 'Beantwoorden' : _ui.composeMode === 'replyall' ? 'Beantwoorden aan allen' : _ui.composeMode === 'fwd' ? 'Doorsturen' : 'Nieuw bericht'}${c.draft_id ? ' — concept opgeslagen' : ''}</div>
           <div style="display:flex;gap:4px">
             <button class="icon-btn" title="Minimaliseer" onclick="window.__emailComposeMin()" style="width:24px;height:24px">${ICO.min}</button>
             <button class="icon-btn" title="Sluiten" onclick="window.__emailCloseCompose()" style="width:24px;height:24px">${ICO.x}</button>
           </div>
         </div>
-        <div style="padding:12px 18px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:2px">
+        <div style="padding:12px 18px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:2px;min-height:0">
           ${_composeField('Van', _composeFromSelect(c))}
           ${_composeField('Aan', _composeToInput(c), _ccBccToggle())}
           ${_ui.ccBccOpen ? _composeField('CC',  `<input type="text" value="${esc(c.cc)}" oninput="window.__emailComposeField('cc', this.value)" placeholder="cc@voorbeeld.nl" style="width:100%;padding:6px 8px;border:none;background:transparent;color:var(--text);font-size:13px;outline:none" />`) : ''}
@@ -616,29 +744,19 @@
           ${_composeField('Onderwerp', `<input type="text" value="${esc(c.subject)}" oninput="window.__emailComposeField('subject', this.value)" style="width:100%;padding:6px 8px;border:none;background:transparent;color:var(--text);font-size:13px;outline:none" />`)}
           ${_ui.composeMode !== 'new' && c.to ? _recipChip(c.to) : ''}
           <div style="padding:12px 0 4px;flex:1;display:flex;flex-direction:column;min-height:180px">
-            <textarea oninput="window.__emailComposeField('body', this.value)" placeholder="Typ je bericht…" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px;line-height:1.55;min-height:180px;font-family:inherit;resize:vertical;flex:1">${esc(c.body)}</textarea>
+            <div contenteditable="true" oninput="window.__emailComposeBody(this.innerHTML)" data-placeholder="Typ je bericht…" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px;line-height:1.55;min-height:180px;font-family:inherit;flex:1;outline:none;overflow-y:auto">${c.body_html || ''}</div>
           </div>
           ${_composeSigStrip()}
           ${send ? _sendResultBlock(send) : ''}
         </div>
         <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
           <button class="btn btn-primary" ${_ui.sendBusy ? 'disabled' : ''} onclick="window.__emailSend()" style="gap:6px">${ICO.send}${_ui.sendBusy ? 'Versturen…' : 'Versturen'}</button>
-          <button class="icon-btn" title="Bijlage toevoegen (Fase 2B)" onclick="window.__emailTodo2B('bijlage')" style="width:32px;height:32px;opacity:.6">${ICO.paperclip}</button>
-          <button class="icon-btn" title="Sjabloon (Fase 2B)" onclick="window.__emailTodo2B('sjabloon')" style="width:32px;height:32px;opacity:.6">${ICO.file}</button>
-          <button class="icon-btn" title="Later versturen (later)" style="width:32px;height:32px;opacity:.4;cursor:default">🕐</button>
-          <div style="display:flex;align-items:center;gap:4px;margin-left:6px">
-            ${['vriendelijk','zakelijk','kort','streng'].map((t) => {
-              const on = _ui.aiTone === t;
-              return `<button class="tone-chip" style="padding:3px 9px;border:1px solid ${on ? TOK.violet : TOK.violetLine};background:${on ? TOK.violet : 'transparent'};color:${on ? '#fff' : TOK.violet};border-radius:20px;font-size:10.5px;font-weight:${on ? '600' : '500'};cursor:pointer" onclick="window.__emailAiSetTone('${t}')">${t}</button>`;
-            }).join('')}
-            <button class="btn btn-ghost btn-sm" ${_ui.aiBusy ? 'disabled' : ''} onclick="window.__emailAiRegen()" style="gap:5px;color:${TOK.violet}">${ICO.sparkle}${_ui.aiBusy ? 'Bezig…' : 'AI-antwoord'}</button>
-          </div>
-          <div style="margin-left:auto;font-size:11px;color:var(--text-3)">Concept-autosave: 2B</div>
-          <button class="icon-btn" title="Verwerpen (Fase 2B)" onclick="window.__emailTodo2B('trash-concept')" style="width:28px;height:28px;opacity:.55">${ICO.trash}</button>
+          <div style="margin-left:auto;font-size:11px;color:var(--text-3);font-family:${TOK.mono}">${c.draft_id ? '● Concept auto-saved' : (_ui.draftDirty ? '● Wijzigingen…' : '')}</div>
+          <button class="icon-btn" title="Verwerpen" onclick="window.__emailDiscardCompose()" style="width:28px;height:28px">${ICO.trash}</button>
         </div>
       </div>
     </div>
-    <style>@keyframes slideUp { from { transform:translateY(30px); opacity:0 } to { transform:translateY(0); opacity:1 } } @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.7} }</style>`;
+    <style>@keyframes slideUp { from { transform:translateY(30px); opacity:0 } to { transform:translateY(0); opacity:1 } } @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.7} } [contenteditable=true]:empty:before { content: attr(data-placeholder); color:var(--text-3); pointer-events:none; }</style>`;
   }
   function _composeMinBar() {
     return `<div style="position:fixed;bottom:0;right:26px;background:var(--surface);border:1px solid var(--border);border-radius:${TOK.rLg} ${TOK.rLg} 0 0;box-shadow:0 -4px 12px rgba(0,0,0,.12);padding:8px 14px;display:flex;align-items:center;gap:10px;z-index:1000;cursor:pointer" onclick="window.__emailComposeRestore()">
@@ -672,25 +790,29 @@
     </span></div>`;
   }
   function _composeSigStrip() {
-    return `<div style="margin-top:8px;padding:10px 12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:${TOK.rSm};display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--text-3)">
-      <span style="font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:10px">Handtekening</span>
-      <select disabled style="padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text-3);font-size:11px;cursor:not-allowed">
-        <option>Standaard (Fase 2B)</option>
+    const c = _ui.compose;
+    const sig = SIGNATURES.find((s) => s.key === c.signature) || SIGNATURES[0];
+    return `<div style="margin-top:8px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:${TOK.rSm};display:flex;align-items:center;gap:10px;font-size:11.5px;color:var(--text-2);flex-wrap:wrap">
+      <span style="font-weight:600;text-transform:uppercase;letter-spacing:.06em;font-size:10px;color:var(--text-3)">Handtekening</span>
+      <select onchange="window.__emailComposeField('signature', this.value)" style="padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:11px">
+        ${SIGNATURES.map((s) => `<option value="${s.key}" ${c.signature === s.key ? 'selected' : ''}>${esc(s.label)}</option>`).join('')}
       </select>
-      <span style="margin-left:auto">Beheer komt in 2B</span>
+      ${sig && sig.text ? `<span style="margin-left:12px;color:var(--text-3);font-style:italic;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sig.text.trim().replace(/\n/g, ' · '))}</span>` : `<span style="margin-left:12px;color:var(--text-3)">(geen handtekening)</span>`}
     </div>`;
   }
   function _sendResultBlock(send) {
     if (!send.ok) return `<div style="padding:10px 12px;background:${TOK.roseSoft};border:1px solid ${TOK.roseLine};color:${TOK.rose};border-radius:${TOK.rSm};font-size:12.5px;margin-top:10px">⚠ Verzenden mislukt: ${esc(send.error || 'onbekende fout')}</div>`;
-    if (send.guarded) return `<div style="padding:10px 12px;background:${TOK.amberSoft};border:1px solid ${TOK.amber};color:var(--text);border-radius:${TOK.rSm};font-size:12.5px;line-height:1.5;margin-top:10px">
-      ✓ Verstuurd (guarded — env <b>${esc(send.env)}</b>)<br>→ Doel: <b>${esc(send.guard_target)}</b><br>→ Origineel to: ${esc(send.original_to || '—')}</div>`;
+    if (send.guarded) return `<div style="padding:10px 12px;background:${TOK.amberSoft};border:1px solid ${TOK.amber};color:var(--text);border-radius:${TOK.rSm};font-size:12.5px;line-height:1.5;margin-top:10px">✓ Verstuurd (guarded — env <b>${esc(send.env)}</b>)<br>→ Doel: <b>${esc(send.guard_target)}</b><br>→ Origineel to: ${esc(send.original_to || '—')}</div>`;
     return `<div style="padding:10px 12px;background:${TOK.emeraldSoft};border:1px solid ${TOK.emerald};color:${TOK.emerald};border-radius:${TOK.rSm};font-size:12.5px;margin-top:10px">✓ Verstuurd naar ${esc(send.original_to || _ui.compose.to)} (env ${esc(send.env || 'production')})</div>`;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // HANDLERS
+  // ═══════════════════════════════════════════════════════════════════════
   window.__emailSetFolder = (slug) => { _ui.folder = slug; _ui.offset = 0; _ui.selectedId = null; _ui.selectedRows = {}; _live.inbox.data = null; _live.inbox.key = null; if (render) render(); };
   window.__emailSetMailbox = (slug) => {
     _ui.mailboxSlug = slug; _ui.offset = 0; _ui.selectedId = null; _ui.selectedRows = {};
-    _live.inbox.data = null; _live.inbox.key = null;
+    _live.inbox.data = null; _live.inbox.key = null; _live.counts.data = null;
     if (slug) { const m = MAILBOXES.find((x) => x.slug === slug); if (m) _ui.compose.from_mailbox = m.addr; }
     if (render) render();
   };
@@ -705,32 +827,51 @@
       if (render) render();
     }, 400);
   };
-  window.__emailRefresh = () => { _live.inbox.data = null; _live.inbox.error = null; _live.inbox.key = null; if (render) render(); };
+  window.__emailRefresh = () => { _live.inbox.data = null; _live.inbox.error = null; _live.inbox.key = null; _live.counts.data = null; if (render) render(); };
   window.__emailPage = (dir) => { _ui.offset = Math.max(0, _ui.offset + dir * PAGE_SIZE); _live.inbox.data = null; _live.inbox.key = null; if (render) render(); };
   window.__emailOpen = (rid) => { _ui.selectedId = rid; _ui.moreMenuOpen = false; if (render) render(); };
   window.__emailReloadBody = (rid) => { delete _live.body.data[rid]; delete _live.body.error[rid]; if (render) render(); };
+  window.__emailShowImages = (rid) => { _ui.showImages[rid] = true; if (render) render(); };
   window.__emailMarkUnread = () => { const row = currentRow(); if (row) markRead(row, false); };
+  window.__emailFlagToggle = () => { const row = currentRow(); if (row) statusUpdate([row.id], row.flagged ? 'unflag' : 'flag'); };
+  window.__emailArchive = () => { const row = currentRow(); if (row) statusUpdate([row.id], 'archive'); };
+  window.__emailTrash   = () => { const row = currentRow(); if (row) statusUpdate([row.id], 'trash'); };
   window.__emailToggleSel = (rid) => { _ui.selectedRows[rid] = !_ui.selectedRows[rid]; if (render) render(); };
   window.__emailBulkClear = () => { _ui.selectedRows = {}; if (render) render(); };
-  window.__emailBulkAction = (a) => { alert('Bulk-actie "' + a + '" komt in Fase 2B (nieuwe endpoints).'); };
+  window.__emailBulkAction = (a) => {
+    const ids = Object.keys(_ui.selectedRows).filter((k) => _ui.selectedRows[k]);
+    if (ids.length === 0) return;
+    statusUpdate(ids, a);
+  };
   window.__emailToggleMore = () => { _ui.moreMenuOpen = !_ui.moreMenuOpen; if (render) render(); };
   window.__emailMoreDo = (k) => {
     _ui.moreMenuOpen = false;
     if (k === 'print') { window.print(); if (render) render(); return; }
-    if (k === 'link') { const row = currentRow(); if (row?.customer_id) window.__emailOpenKlant(row.customer_id); return; }
-    alert('Actie "' + k + '" komt in Fase 2B.');
+    if (k === 'link') { window.__emailKoppelKlant(); return; }
+    alert('Actie "' + k + '" nog niet beschikbaar.');
     if (render) render();
   };
-  window.__emailTodo2B = (feat) => { alert(feat + ' — komt in Fase 2B (data-cluster).'); };
-  window.__emailSettings = () => { alert('Instellingen (handtekening/regels/notificaties) komen in Fase 2B.'); };
+  window.__emailSettings = () => { alert('Instellingen (handtekening/regels/notificaties) komen later. Handtekening kan al gekozen worden in compose.'); };
   window.__emailOpenKlant = (customerId) => {
-    console.info('[email-v2] Klant-koppeling → v2-detail-view voor ' + customerId + ' (Fase 2B wire).');
-    if (H.showToast) H.showToast('Klant-dossier-koppeling komt in v2-detail-view (Fase 2B).');
-    else alert('Klant-koppeling komt in Fase 2B.');
+    if (!customerId) return;
+    // v2-route: navigate binnen klanten-v2-shell naar klant-detail.
+    if (window.DFO && typeof window.DFO.setActiveItem === 'function') {
+      window.DFO.setActiveItem('detail', { id: customerId });
+    } else {
+      try { window.location.hash = '#detail/customer/' + encodeURIComponent(customerId); }
+      catch (e) { console.warn('[email-v2] navigate fail', e); }
+    }
+    if (H.showToast) H.showToast('Openen klant-dossier…');
+  };
+  window.__emailKoppelKlant = () => {
+    // Voor Fase 2B: opent detail-view als er al customer_id is; anders vraag om te koppelen.
+    const row = currentRow();
+    if (row && row.customer_id) { window.__emailOpenKlant(row.customer_id); return; }
+    alert('Handmatige klant-koppeling komt via klanten-module (link email-thread → klant is in Fase 3). Voor nu: koppel via de klanten-detail-view.');
   };
   window.__emailNewCompose = () => {
     _ui.composeMode = 'new'; _ui.composeMinimized = false;
-    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body: '', email_id: null };
+    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
     _ui.composeOpen = true; _ui.lastSend = null; _ui.ccBccOpen = false;
     if (render) render();
   };
@@ -743,8 +884,9 @@
       from_mailbox: from ? from.addr : _ui.compose.from_mailbox,
       to: row.from_address || '', cc: '', bcc: '',
       subject: /^(re|fwd?):/i.test(row.subject || '') ? row.subject : (mode === 'fwd' ? 'Fwd: ' : 'Re: ') + (row.subject || ''),
-      body: '',
+      body_html: '', body_text: '',
       email_id: (row.mailbox && row.imap_uid != null) ? `${row.mailbox}@deforexopleiding.nl:${row.imap_uid}` : null,
+      signature: 'standaard', draft_id: null,
     };
     _ui.composeOpen = true; _ui.lastSend = null; _ui.ccBccOpen = false;
     if (render) render();
@@ -753,16 +895,48 @@
   window.__emailReplyAll = () => _replyState('replyall');
   window.__emailFwd      = () => { _replyState('fwd'); _ui.compose.to = ''; if (render) render(); };
   window.__emailCloseCompose = () => { _ui.composeOpen = false; _ui.composeMinimized = false; _ui.lastSend = null; _ui.ccBccOpen = false; if (render) render(); };
+  window.__emailDiscardCompose = () => {
+    if (!confirm('Concept verwijderen?')) return;
+    if (_ui.compose.draft_id) deleteDraft(_ui.compose.draft_id).catch(() => {});
+    _ui.composeOpen = false;
+    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+    _live.counts.data = null;
+    if (render) render();
+  };
   window.__emailComposeMin = () => { _ui.composeMinimized = true; if (render) render(); };
   window.__emailComposeRestore = () => { _ui.composeMinimized = false; if (render) render(); };
-  window.__emailComposeField = (k, v) => { _ui.compose[k] = v; };
+  window.__emailComposeField = (k, v) => { _ui.compose[k] = v; _ui.draftDirty = true; saveDraftDebounced(); };
+  window.__emailComposeBody = (html) => { _ui.compose.body_html = html; _ui.draftDirty = true; saveDraftDebounced(); };
   window.__emailToggleCcBcc = () => { _ui.ccBccOpen = !_ui.ccBccOpen; if (render) render(); };
   window.__emailSend = () => { sendMail(); };
-  window.__emailAiSetTone = (t) => { _ui.aiTone = t; if (render) render(); };
-  window.__emailAiRegen = () => { aiRegenerate(); };
+  window.__emailOpenDraftFromRow = (row) => {
+    // Open draft in compose.
+    _ui.composeMode = 'new'; _ui.composeMinimized = false;
+    _ui.compose = {
+      from_mailbox: (row.from_address || _ui.compose.from_mailbox),
+      to: row.to_address || '', cc: row._draft_cc || '', bcc: row._draft_bcc || '',
+      subject: row.subject || '', body_html: row._draft_body || '', body_text: '',
+      email_id: row._draft_reply_id || null,
+      signature: 'standaard', draft_id: row._draft_id || null,
+    };
+    _ui.composeOpen = true; _ui.lastSend = null; _ui.ccBccOpen = !!(_ui.compose.cc || _ui.compose.bcc);
+    if (render) render();
+  };
+  // AI-card handlers (in reader)
+  window.__emailAiGenReader   = (rid) => { const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
+  window.__emailAiSetToneAndRegen = (t, rid) => { _ui.aiTone = t; const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
+  window.__emailAiClear = (rid) => { delete _live.aiDraft.data[rid]; delete _live.aiDraft.error[rid]; if (render) render(); };
+  window.__emailAiUse = (rid) => {
+    const draft = _live.aiDraft.data[rid]; if (!draft) return;
+    // Open reply-compose met AI-draft in body.
+    _replyState('reply');
+    _ui.compose.body_html = String(draft.body || '').replace(/\n/g, '<br>');
+    if (draft.subject && !_ui.compose.subject) _ui.compose.subject = draft.subject;
+    if (render) render();
+  };
 
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] Fase 2A pure-UI parity registered — 7 mailboxen + 7 mappen (4 wachten op 2B)');
+  console.debug('[email-v2] Fase 2B registered — data-clusters live (HTML render, AI-card in reader, folders+bulk, drafts+autosave, koppel-klant)');
 })();

@@ -1,6 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { safeError } from './_lib/safe-error.js';
+import { sanitizeEmailHtml } from './_lib/email-html-sanitizer.js';
 
 const ACCOUNTS = [
   { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
@@ -93,6 +94,17 @@ export default async function handler(req, res) {
         size:        a.size || a.content?.length || 0,
       }));
 
+      // Fase 2B: XSS-safe HTML sanitizer. Frontend rendert via iframe
+      // sandbox srcdoc — twee lagen defense. Externe images geblokkeerd
+      // tot user "afbeeldingen tonen" klikt.
+      let bodyHtmlSafe = '';
+      let externalImagesBlocked = 0;
+      if (parsed.html) {
+        const s = sanitizeEmailHtml(String(parsed.html), { blockExternalImages: true });
+        bodyHtmlSafe = s.html;
+        externalImagesBlocked = s.externalImagesBlocked;
+      }
+
       return res.status(200).json({
         subject: parsed.subject || '',
         from: fromEntry
@@ -105,6 +117,8 @@ export default async function handler(req, res) {
         date: parsed.date ? new Date(parsed.date).toISOString() : null,
         text,
         hasHtml:     Boolean(parsed.html),
+        body_html_safe: bodyHtmlSafe,
+        external_images_blocked: externalImagesBlocked,
         attachments,
       });
     } finally {

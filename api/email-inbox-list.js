@@ -81,6 +81,53 @@ export default async function handler(req, res) {
   const unreadOnly = String(q.unread || '') === '1' || String(q.unread || '').toLowerCase() === 'true';
 
   try {
+    // ── Concepten-folder — uit email_drafts ─────────────────────────────
+    if (folder === 'draft') {
+      try {
+        let qb = supabaseAdmin
+          .from('email_drafts')
+          .select('*', { count: 'exact' })
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .range(offset, offset + limit - 1);
+        if (search) {
+          const pat = `%${search.replace(/[%_\\]/g, '\\$&')}%`;
+          qb = qb.or(`subject.ilike.${pat},to_address.ilike.${pat}`);
+        }
+        const { data, error, count } = await qb;
+        if (error) {
+          // Tabel bestaat niet → migratie niet gedraaid; nette lege response.
+          if (/relation.*email_drafts.*does not exist/i.test(error.message || '')) {
+            return res.status(200).json({ items: [], total: 0, limit, offset, hasMore: false, folder: 'draft', __migration_required: true });
+          }
+          throw error;
+        }
+        const items = (data || []).map((r) => ({
+          id:              String(r.id),
+          mailbox:         (r.from_mailbox || '').split('@')[0] || null,
+          imap_uid:        null, message_id: null,
+          subject:         r.subject || '(geen onderwerp)',
+          from_address:    r.from_mailbox, from_name: null,
+          to_address:      r.to_address,
+          date_received:   r.updated_at,
+          snippet:         null,
+          is_read:         true,
+          has_attachments: false,
+          customer_id:     null, requires_action: false,
+          _source:         'draft',
+          _draft_id:       r.id,
+          _draft_body:     r.body_html || '',
+          _draft_cc:       r.cc_address || '',
+          _draft_bcc:      r.bcc_address || '',
+          _draft_reply_id: r.in_reply_to_email_id || null,
+        }));
+        return res.status(200).json({ items, total: Number(count || items.length), limit, offset, hasMore: (offset + items.length) < Number(count || 0), folder: 'draft' });
+      } catch (e) {
+        console.error('[email-inbox-list] drafts fail:', e?.message);
+        return res.status(500).json({ error: e?.message || 'drafts-fout' });
+      }
+    }
+
     if (folder === 'sent') {
       // ── Verzonden folder — uit email_replies ────────────────────────────
       // Kolommen: id, email_id, email_subject, final_reply, from_address,
@@ -123,20 +170,55 @@ export default async function handler(req, res) {
       return res.status(200).json({ items, total, limit, offset, hasMore, folder: 'sent' });
     }
 
-    // ── Inbox folder — uit email_messages ─────────────────────────────────
+    // ── Inbox/Ongelezen/Vlag/Archief/Prullenbak — uit email_messages ────
+    // status/flagged kolommen komen uit migratie 2026-08-15; runtime-detect
+    // valt fail-soft naar 'alles' als kolommen ontbreken.
+    let migrationReady = true;
     let qb = supabaseAdmin
       .from('email_messages')
-      .select('id, mailbox, imap_uid, message_id, from_address, from_name, subject, date_received, snippet, is_read, requires_action, category, attachments, customer_id', { count: 'exact' })
+      .select('id, mailbox, imap_uid, message_id, from_address, from_name, subject, date_received, snippet, is_read, requires_action, category, attachments, customer_id, flagged, status', { count: 'exact' })
       .order('date_received', { ascending: false })
       .range(offset, offset + limit - 1);
     if (mailbox) qb = qb.eq('mailbox', mailbox);
     if (unreadOnly) qb = qb.eq('is_read', false);
+    // Folder-mapping op status/flagged.
+    if (folder === 'inbox' || folder === 'unread' || !folder) {
+      // Default toont alleen inbox-status (excl. archief/trash).
+      qb = qb.eq('status', 'inbox');
+    } else if (folder === 'flag') {
+      qb = qb.eq('flagged', true).eq('status', 'inbox');
+    } else if (folder === 'archive') {
+      qb = qb.eq('status', 'archived');
+    } else if (folder === 'trash') {
+      qb = qb.eq('status', 'trashed');
+    }
     if (search) {
       const pat = `%${search.replace(/[%_\\]/g, '\\$&')}%`;
       qb = qb.or(`subject.ilike.${pat},from_address.ilike.${pat},snippet.ilike.${pat}`);
     }
-    const { data, error, count } = await qb;
-    if (error) throw error;
+    let { data, error, count } = await qb;
+    if (error) {
+      // Fail-safe: pre-migratie fallback (select zonder flagged/status).
+      if (/column.*(flagged|status).*does not exist/i.test(error.message || '')) {
+        migrationReady = false;
+        let qb2 = supabaseAdmin
+          .from('email_messages')
+          .select('id, mailbox, imap_uid, message_id, from_address, from_name, subject, date_received, snippet, is_read, requires_action, category, attachments, customer_id', { count: 'exact' })
+          .order('date_received', { ascending: false })
+          .range(offset, offset + limit - 1);
+        if (mailbox) qb2 = qb2.eq('mailbox', mailbox);
+        if (unreadOnly) qb2 = qb2.eq('is_read', false);
+        if (search) {
+          const pat = `%${search.replace(/[%_\\]/g, '\\$&')}%`;
+          qb2 = qb2.or(`subject.ilike.${pat},from_address.ilike.${pat},snippet.ilike.${pat}`);
+        }
+        const r2 = await qb2;
+        if (r2.error) throw r2.error;
+        data = r2.data; count = r2.count;
+      } else {
+        throw error;
+      }
+    }
     const items = (data || []).map((r) => ({
       id:              String(r.id),
       mailbox:         r.mailbox,
@@ -153,11 +235,13 @@ export default async function handler(req, res) {
       customer_id:     r.customer_id,
       requires_action: !!r.requires_action,
       category:        r.category || null,
+      flagged:         !!r.flagged,
+      status:          r.status || 'inbox',
       _source:         'inbox',
     }));
     const total   = typeof count === 'number' ? count : items.length;
     const hasMore = offset + items.length < total;
-    return res.status(200).json({ items, total, limit, offset, hasMore, folder: 'inbox' });
+    return res.status(200).json({ items, total, limit, offset, hasMore, folder: folder || 'inbox', __migration_ready: migrationReady });
   } catch (e) {
     console.error('[email-inbox-list]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
