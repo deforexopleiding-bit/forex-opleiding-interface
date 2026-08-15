@@ -1074,8 +1074,51 @@
     const scope = new Set(Array.isArray(auto.mailbox_scope) ? auto.mailbox_scope : []);
     if (scope.has(slug)) scope.delete(slug); else scope.add(slug);
     auto.mailbox_scope = Array.from(scope);
+    // Als een mailbox uit scope gehaald wordt: ook uit autonomous_mailboxes.
+    if (!scope.has(slug)) {
+      const armed = new Set(Array.isArray(auto.autonomous_mailboxes) ? auto.autonomous_mailboxes : []);
+      if (armed.has(slug)) { armed.delete(slug); auto.autonomous_mailboxes = Array.from(armed); }
+    }
     _ui.dirty['sanne'] = _ui.dirty['sanne'] || {};
     _ui.dirty['sanne'].autonomy_config = auto;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__sanneToggleAutonomousMailbox = (slug) => {
+    const cfg = _live.perConfig.data['email'];
+    const auto = _sanneAutonomyDraft(cfg);
+    const scope = new Set(Array.isArray(auto.mailbox_scope) ? auto.mailbox_scope : []);
+    // Kan alleen armen als 'ie in scope zit — anders zou Sanne 'em skippen voor 'ie de send bereikt.
+    if (!scope.has(slug)) { alert("Deze mailbox staat niet in Sanne's scope. Vink 'em eerst aan bij Mailboxen."); return; }
+    const armed = new Set(Array.isArray(auto.autonomous_mailboxes) ? auto.autonomous_mailboxes : []);
+    if (armed.has(slug)) armed.delete(slug); else armed.add(slug);
+    auto.autonomous_mailboxes = Array.from(armed);
+    _ui.dirty['sanne'] = _ui.dirty['sanne'] || {};
+    _ui.dirty['sanne'].autonomy_config = auto;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__sanneMandateSet = (key, val) => {
+    const cfg = _live.perConfig.data['email'];
+    const auto = _sanneAutonomyDraft(cfg);
+    const mandate = (auto.mandate && typeof auto.mandate === 'object') ? auto.mandate : {};
+    if (val === '' || val == null) delete mandate[key];
+    else if (['office_hours_only','require_customer_link'].includes(key)) mandate[key] = (val === true || val === 'true' || val === '1');
+    else if (['max_amount_mentioned_eur','office_hours_start','office_hours_end','max_sends_per_day','anti_loop_cooldown_seconds'].includes(key)) mandate[key] = Math.max(0, Math.floor(Number(val) || 0));
+    else if (['min_confidence_reactive','min_confidence_auto_draft','min_confidence_autonomous'].includes(key)) mandate[key] = Math.max(0, Math.min(1, Number(val) || 0));
+    else mandate[key] = val;
+    auto.mandate = mandate;
+    _ui.dirty['sanne'] = _ui.dirty['sanne'] || {};
+    _ui.dirty['sanne'].autonomy_config = auto;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__sanneStatsRefresh = async () => {
+    _live.sanneStats = _live.sanneStats || { loading: false, data: null, error: null };
+    if (_live.sanneStats.loading) return;
+    _live.sanneStats.loading = true; _live.sanneStats.error = null;
+    if (window.DFO?.render) window.DFO.render();
+    const j = await tryFetch('sanne-stats', '/api/sanne-stats?days=7');
+    _live.sanneStats.loading = false;
+    if (j && !j.__error) _live.sanneStats.data = j;
+    else _live.sanneStats.error = j?.__error || 'stats-fout';
     if (window.DFO?.render) window.DFO.render();
   };
   window.__sanneSave = async () => {
@@ -1162,27 +1205,85 @@
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-head">
-          <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.shield || I.lock || I.sliders)}</span>
-          <div class="card-title">Mandaat — hard-gates (schrijf-baar via SQL of admin-tool)</div>
+      <div class="card" style="margin-bottom:14px;border:1px solid var(--rose-line, #f5b4bc)">
+        <div class="card-head" style="background:var(--rose-soft, #fdecee)">
+          <span class="tile-ico" style="background:#fff;color:var(--rose, #c22b3e)">${svg(I.zap || I.warning || I.shield)}</span>
+          <div class="card-title" style="color:var(--rose, #c22b3e)">⚠ AUTONOOM-VERSTUREN — welke mailboxen mag Sanne ZÉLF versturen?</div>
         </div>
-        <div class="card-body" style="padding:14px 17px;font-size:12.5px;color:var(--text-2);line-height:1.55">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 22px">
-            <div><b>Max bedrag genoemd:</b> €${esc(String(mandate.max_amount_mentioned_eur ?? '—'))}</div>
-            <div><b>Kantooruren:</b> ${mandate.office_hours_only ? `${esc(String(mandate.office_hours_start ?? 9))}:00-${esc(String(mandate.office_hours_end ?? 17))}:00` : 'geen limiet'}</div>
-            <div><b>Max sends/dag:</b> ${esc(String(mandate.max_sends_per_day ?? '—'))}</div>
-            <div><b>Klant-koppeling vereist:</b> ${mandate.require_customer_link ? 'ja' : 'nee'}</div>
-            <div><b>Confidence suggest:</b> ≥ ${esc(String(mandate.min_confidence_reactive ?? '0.60'))}</div>
-            <div><b>Confidence auto-draft:</b> ≥ ${esc(String(mandate.min_confidence_auto_draft ?? '0.70'))}</div>
-            <div><b>Confidence autonoom:</b> ≥ ${esc(String(mandate.min_confidence_autonomous ?? '0.85'))}</div>
-            <div><b>Anti-loop cooldown:</b> ${esc(String(mandate.anti_loop_cooldown_seconds ?? '60'))}s</div>
+        <div class="card-body" style="padding:14px 17px">
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px;line-height:1.5">
+            <b style="color:var(--rose, #c22b3e)">Rood-alert:</b> vinkje = Sanne verstuurt zonder tussenkomst. Alleen effectief als:
+            (a) mailbox óók in scope hierboven staat, (b) master-status = "Autonoom", (c) mandaat-gates slagen bij ELKE send,
+            (d) binnen kantooruren. Default: leeg. Uit de suggest-lijst gehaalde mailboxen worden ook automatisch de-armed.
           </div>
-          <div style="margin-top:11px;padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3)">
-            Mandaat-limieten wijzigen: pas <span class="mono">joost_config.autonomy_config.mandate</span> aan via de admin/SQL. In Fase 2.1 komt een editor hier.
+          <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:8px">
+            ${SANNE_MAILBOXES.map((m) => {
+              const inScope = scope.has(m.slug);
+              const armed = (auto.autonomous_mailboxes || []).includes(m.slug);
+              const disabled = !inScope;
+              return `<label style="display:flex;gap:8px;align-items:center;padding:8px 11px;border:1.5px solid ${armed ? 'var(--rose, #c22b3e)' : 'var(--border)'};background:${armed ? 'var(--rose-soft, #fdecee)' : (disabled ? 'var(--surface-2)' : 'transparent')};border-radius:6px;cursor:${disabled ? 'not-allowed' : 'pointer'};opacity:${disabled ? '.5' : '1'};font-size:12.5px">
+                <input type="checkbox" ${armed ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="window.__sanneToggleAutonomousMailbox('${m.slug}')" />
+                <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${m.dot};flex-shrink:0"></span>
+                <span style="flex:1;font-weight:${armed ? '700' : '400'};color:${armed ? 'var(--rose, #c22b3e)' : 'var(--text)'}">${esc(m.label)}</span>
+                ${armed ? '<span style="font-size:9px;color:var(--rose, #c22b3e);font-weight:700">ARMED</span>' : ''}
+              </label>`;
+            }).join('')}
           </div>
         </div>
       </div>
+
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-head">
+          <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.shield || I.lock || I.sliders)}</span>
+          <div class="card-title">Mandaat — hard-gates (bewerkbaar)</div>
+        </div>
+        <div class="card-body" style="padding:14px 17px;font-size:12.5px;color:var(--text-2);line-height:1.55">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 22px">
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Max bedrag genoemd (€)</span>
+              <input type="number" min="0" step="10" value="${esc(String(mandate.max_amount_mentioned_eur ?? 500))}" oninput="window.__sanneMandateSet('max_amount_mentioned_eur', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Kantooruren</span>
+              <label style="display:flex;align-items:center;gap:6px;padding:5px 0;font-size:12px"><input type="checkbox" ${mandate.office_hours_only ? 'checked' : ''} onchange="window.__sanneMandateSet('office_hours_only', this.checked)" /> Alleen tijdens kantooruren</label>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Start (uur, 0-23)</span>
+              <input type="number" min="0" max="23" step="1" value="${esc(String(mandate.office_hours_start ?? 9))}" oninput="window.__sanneMandateSet('office_hours_start', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Eind (uur, 0-23)</span>
+              <input type="number" min="0" max="23" step="1" value="${esc(String(mandate.office_hours_end ?? 17))}" oninput="window.__sanneMandateSet('office_hours_end', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Max sends per dag (per mailbox)</span>
+              <input type="number" min="0" step="1" value="${esc(String(mandate.max_sends_per_day ?? 20))}" oninput="window.__sanneMandateSet('max_sends_per_day', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Klant-koppeling vereist</span>
+              <label style="display:flex;align-items:center;gap:6px;padding:5px 0;font-size:12px"><input type="checkbox" ${mandate.require_customer_link ? 'checked' : ''} onchange="window.__sanneMandateSet('require_customer_link', this.checked)" /> Alleen bij bekende klant</label>
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Min confidence — suggest</span>
+              <input type="number" min="0" max="1" step="0.05" value="${esc(String(mandate.min_confidence_reactive ?? 0.60))}" oninput="window.__sanneMandateSet('min_confidence_reactive', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Min confidence — auto-draft</span>
+              <input type="number" min="0" max="1" step="0.05" value="${esc(String(mandate.min_confidence_auto_draft ?? 0.70))}" oninput="window.__sanneMandateSet('min_confidence_auto_draft', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Min confidence — autonoom</span>
+              <input type="number" min="0" max="1" step="0.05" value="${esc(String(mandate.min_confidence_autonomous ?? 0.85))}" oninput="window.__sanneMandateSet('min_confidence_autonomous', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <label style="display:flex;flex-direction:column;gap:3px">
+              <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">Anti-loop cooldown (sec)</span>
+              <input type="number" min="0" step="10" value="${esc(String(mandate.anti_loop_cooldown_seconds ?? 60))}" oninput="window.__sanneMandateSet('anti_loop_cooldown_seconds', this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace" />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      ${_sannePrestatiesCard(a)}
 
       <div style="display:flex;gap:10px;align-items:center;padding:10px 0">
         <button class="btn btn-primary" ${(!dirty || saving) ? 'disabled' : ''} onclick="window.__sanneSave()">${saving ? 'Opslaan…' : 'Opslaan'}</button>
@@ -1190,6 +1291,60 @@
         ${savedRecent ? `<span style="color:var(--emerald);font-size:12px">✓ Opgeslagen</span>` : ''}
       </div>
     </div></div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SANNE PRESTATIES — tellers per status + skip-reason (Fase 2.1+)
+  // ═══════════════════════════════════════════════════════════════════════
+  function _sannePrestatiesCard(a) {
+    const st = _live.sanneStats || { loading: false, data: null, error: null };
+    if (!st.data && !st.loading && !st.error) queueMicrotask(() => window.__sanneStatsRefresh());
+    const data = st.data;
+    const statusColors = {
+      PROPOSED:          TOK ? TOK.violet : '#7C3AED',
+      DRAFT_SAVED:       'var(--amber, #B7791F)',
+      USED:              'var(--emerald, #07835A)',
+      EDITED:            'var(--emerald, #07835A)',
+      DISMISSED:         'var(--text-3)',
+      SENT_AUTONOMOUSLY: 'var(--rose, #C22B3E)',
+    };
+    return `<div class="card" style="margin-bottom:14px">
+      <div class="card-head">
+        <span class="tile-ico" style="background:var(--${a.c}-soft);color:var(--${a.c})">${svg(I.chart || I.bar || I.sliders)}</span>
+        <div class="card-title" style="flex:1">Prestaties (laatste 7 dagen)</div>
+        <button class="btn btn-ghost btn-sm" onclick="window.__sanneStatsRefresh()" ${st.loading ? 'disabled' : ''}>${st.loading ? 'Laden…' : '↻ Vernieuwen'}</button>
+      </div>
+      <div class="card-body" style="padding:14px 17px;font-size:12.5px">
+        ${st.error ? `<div style="color:var(--rose)">Fout: ${esc(st.error)}</div>` :
+          !data ? `<div style="color:var(--text-3)">${st.loading ? 'Laden…' : 'Klik ↻ Vernieuwen om te laden.'}</div>` :
+          `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+            <div>
+              <div style="font-weight:600;color:var(--text-2);margin-bottom:6px">Suggesties (${data.suggestions.total})</div>
+              ${Object.entries(data.suggestions.by_status).map(([k, v]) =>
+                `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)"><span style="color:${statusColors[k] || 'var(--text-2)'}">${esc(k)}</span><span class="mono" style="font-weight:600">${v}</span></div>`
+              ).join('') || '<div style="color:var(--text-3);font-style:italic">geen</div>'}
+            </div>
+            <div>
+              <div style="font-weight:600;color:var(--text-2);margin-bottom:6px">Overgeslagen (${data.skips.total})</div>
+              ${Object.entries(data.skips.by_reason).map(([k, v]) =>
+                `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)"><span>${esc(k)}</span><span class="mono" style="font-weight:600">${v}</span></div>`
+              ).join('') || '<div style="color:var(--text-3);font-style:italic">geen</div>'}
+            </div>
+          </div>
+          <div style="margin-top:14px">
+            <div style="font-weight:600;color:var(--text-2);margin-bottom:6px">Recent (laatste 20)</div>
+            <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+              ${(data.recent || []).map((r) => `<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;padding:6px 10px;border-bottom:1px solid var(--border);font-size:11.5px;align-items:center">
+                <span style="color:${statusColors[r.status] || 'var(--text-3)'};font-weight:600;font-size:10.5px">${esc(r.status)}</span>
+                <span class="mono" style="color:var(--text-3)">${esc(r.mailbox)}</span>
+                <span class="mono" style="color:var(--text-2)">${esc(r.detected_intent || '—')}</span>
+                <span class="mono" style="color:var(--text-3);font-size:10.5px">${new Date(r.created_at).toLocaleString('nl-NL', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</span>
+              </div>`).join('') || '<div style="padding:10px;color:var(--text-3);font-style:italic">nog geen suggesties</div>'}
+            </div>
+          </div>`
+        }
+      </div>
+    </div>`;
   }
 
   function _autonomyDraft(agId, cfg) {
@@ -1523,7 +1678,10 @@
         message: msg,
         history: st.history.slice(0, -1).slice(-10),   // exclusief zojuist-toegevoegd bericht
       };
-      const j = await window.KV.authedJson('/api/agent-sandbox-chat', {
+      // Sanne heeft z'n eigen sandbox-endpoint dat joost_config module='email'
+      // gebruikt (bestaande agent-sandbox-chat kent module='email' niet).
+      const sandboxUrl = (agId === 'sanne') ? '/api/sanne-sandbox' : '/api/agent-sandbox-chat';
+      const j = await window.KV.authedJson(sandboxUrl, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });

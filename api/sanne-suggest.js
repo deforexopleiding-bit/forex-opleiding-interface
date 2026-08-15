@@ -35,6 +35,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { anthropicStructuredOutput, AnthropicClientError } from './_lib/anthropic-client.js';
 import { evaluateSanneAutonomy } from './_lib/sanne-autonomy-evaluate.js';
+import { sanneSendMail } from './_lib/sanne-send-mail.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (s) => typeof s === 'string' && UUID_RE.test(s);
@@ -416,11 +417,28 @@ export default async function handler(req, res) {
 
     if (insertErr) throw new Error('suggestion-insert: ' + insertErr.message);
 
+    // ═══════════════════════════════════════════════════════════════════
+    // FASE 2.2 / 2.3 / 2.4 — post-insert autonomy actions
+    // Alles gedreven door decision.mode + defense-in-depth 2e config-read.
+    // Feature-flags default UIT → deze branches worden alleen bereikt als
+    // Jeffrey expliciet armt in AI Agents → Sanne.
+    // ═══════════════════════════════════════════════════════════════════
+    const postActions = await performPostSuggestActions({
+      supabase:      supabaseAdmin,
+      suggestionId:  inserted?.id,
+      email,
+      customer,
+      suggestion,
+      decision,
+      user,
+      autoTriggered,
+    });
+
     return res.status(200).json({
       skipped: false,
       suggestion: {
         id: inserted?.id,
-        status: inserted?.status || status,
+        status: postActions.finalStatus || inserted?.status || status,
         detected_intent: suggestion.detected_intent,
         confidence: suggestion.confidence,
         draft_subject: suggestion.draft_subject,
@@ -428,9 +446,181 @@ export default async function handler(req, res) {
         autonomy_decision: decision,
         created_at: inserted?.created_at,
       },
+      actions: postActions,
     });
   } catch (e) {
     console.error('[sanne-suggest]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });
   }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Post-suggest autonomy actions — Fase 2.2 / 2.3 / 2.4
+// ═════════════════════════════════════════════════════════════════════════
+async function performPostSuggestActions(ctx) {
+  const { supabase, suggestionId, email, customer, suggestion, decision, user, autoTriggered } = ctx;
+  const actions = { finalStatus: null, draft_id: null, reply_id: null, escalation_id: null, notes: [] };
+  if (!suggestionId) { actions.notes.push('no_suggestion_id'); return actions; }
+
+  // ── FASE 2.4 — Escalatie (loopt óók bij shadow) ─────────────────────────
+  // Als handoff_needed van LLM, of intent in blocked_intents → maak
+  // MANUAL_FOLLOWUP pending_action zodat een mens 'em oppakt.
+  const intent = String(suggestion.detected_intent || '').toLowerCase();
+  const blockedIntents = (decision?.block_reason === 'INTENT') ||
+                         (Array.isArray(decision?.block_detail?.blocked_list)
+                          && decision.block_detail.blocked_list.map(String).map((s) => s.toLowerCase()).includes(intent));
+  const shouldEscalate = !!suggestion.handoff_needed || blockedIntents;
+  if (shouldEscalate) {
+    try {
+      const { data: pa, error: paErr } = await supabase.from('pending_actions').insert({
+        action_type: 'MANUAL_FOLLOWUP',
+        customer_id: customer?.id || null,
+        payload: {
+          source:                'sanne',
+          reason:                suggestion.handoff_reason || (blockedIntents ? `intent "${intent}" is geblokkeerd` : 'handoff door LLM'),
+          intent:                suggestion.detected_intent,
+          confidence:            suggestion.confidence,
+          email_id:              email.id,
+          mailbox:               email.mailbox,
+          imap_uid:              email.imap_uid,
+          from_address:          email.from_address,
+          subject:               email.subject,
+          sanne_suggestion_id:   suggestionId,
+          draft_preview:         String(suggestion.draft_body_text || '').slice(0, 500),
+        },
+        status: 'pending',
+      }).select('id').maybeSingle();
+      if (paErr) actions.notes.push('escalation_insert_fail: ' + paErr.message);
+      else {
+        actions.escalation_id = pa?.id || null;
+        actions.notes.push('escalation_created');
+      }
+    } catch (e) {
+      actions.notes.push('escalation_threw: ' + (e?.message || 'onbekend'));
+    }
+  }
+
+  // ── FASE 2.3 — Autonomous send (DEFENSE IN DEPTH: 2e config-read + eval) ─
+  if (decision.mode === 'autonomous_send' && decision.allowed) {
+    // Herlees VERSE config + herbereken sends-today VLAK vóór send.
+    // Voorkomt dat een flag-flip / mailbox-disarm tussen initial suggest en
+    // send-moment gemist wordt. Ook: mocht caller state gemuteerd hebben
+    // in-memory (getest via unit-mock), verse read is ground truth.
+    const { data: freshConfig } = await supabase.from('joost_config')
+      .select('*').eq('module', 'email').maybeSingle();
+    if (!freshConfig || freshConfig.is_enabled === false) {
+      await supabase.from('sanne_suggestions').update({
+        status: 'BLOCKED_MODE',
+        autonomy_decision: { ...decision, defense_in_depth_block: 'config_disabled' },
+      }).eq('id', suggestionId);
+      actions.finalStatus = 'BLOCKED_MODE'; actions.notes.push('defense_in_depth: config disabled');
+      return actions;
+    }
+    const freshFlags = freshConfig.feature_flags || {};
+    if (freshFlags.sanne_autonomous_send !== true) {
+      await supabase.from('sanne_suggestions').update({
+        status: 'BLOCKED_MODE',
+        autonomy_decision: { ...decision, defense_in_depth_block: 'flag_off_at_send' },
+      }).eq('id', suggestionId);
+      actions.finalStatus = 'BLOCKED_MODE'; actions.notes.push('defense_in_depth: flag off');
+      return actions;
+    }
+    const freshAuto = freshConfig.autonomy_config || {};
+    const armedList = Array.isArray(freshAuto.autonomous_mailboxes) ? freshAuto.autonomous_mailboxes : [];
+    if (!armedList.includes(email.mailbox)) {
+      await supabase.from('sanne_suggestions').update({
+        status: 'BLOCKED_MODE',
+        autonomy_decision: { ...decision, defense_in_depth_block: 'mailbox_not_armed_at_send', armed: armedList },
+      }).eq('id', suggestionId);
+      actions.finalStatus = 'BLOCKED_MODE'; actions.notes.push('defense_in_depth: mailbox not armed');
+      return actions;
+    }
+    // Verse rate-limit + verse evaluate.
+    const freshSendsToday = await sendsTodayForMailbox(supabase, email.mailbox);
+    const freshDecision = evaluateSanneAutonomy({
+      config: freshConfig, suggestion, email, customer,
+      sendsToday: freshSendsToday, now: new Date(),
+    });
+    if (!(freshDecision.mode === 'autonomous_send' && freshDecision.allowed)) {
+      const blockStatus = freshDecision.block_reason ? ('BLOCKED_' + freshDecision.block_reason) : 'BLOCKED_MODE';
+      await supabase.from('sanne_suggestions').update({
+        status: blockStatus,
+        autonomy_decision: { ...decision, defense_in_depth_recheck: freshDecision },
+      }).eq('id', suggestionId);
+      actions.finalStatus = blockStatus;
+      actions.notes.push('defense_in_depth: recheck downgraded to ' + freshDecision.mode);
+      return actions;
+    }
+
+    // Alle gates groen — SEND.
+    try {
+      const sendResult = await sanneSendMail(supabase, {
+        mailbox:       email.mailbox,
+        to:            email.from_address,
+        subject:       suggestion.draft_subject,
+        text:          suggestion.draft_body_text,
+        html:          suggestion.draft_body_html,
+        sourceEmailId: email.id,
+        inReplyToMsgId: email.message_id || null,
+      });
+      await supabase.from('sanne_suggestions').update({
+        status: 'SENT_AUTONOMOUSLY',
+        linked_reply_id: sendResult.reply_id,
+        autonomy_decision: { ...decision, send_result: {
+          messageId: sendResult.messageId, guarded: sendResult.guarded,
+          guard_target: sendResult.guard_target, env: sendResult.env,
+        } },
+      }).eq('id', suggestionId);
+      actions.finalStatus = 'SENT_AUTONOMOUSLY';
+      actions.reply_id = sendResult.reply_id;
+      actions.notes.push('sent: ' + sendResult.messageId + (sendResult.guarded ? ' (guarded)' : ''));
+      return actions;
+    } catch (sendErr) {
+      console.error('[sanne-suggest] autonomous send threw:', sendErr?.message);
+      await supabase.from('sanne_suggestions').update({
+        status: 'FAILED_INTERNAL',
+        autonomy_decision: { ...decision, send_error: sendErr?.message || String(sendErr) },
+      }).eq('id', suggestionId);
+      actions.finalStatus = 'FAILED_INTERNAL';
+      actions.notes.push('send_threw: ' + (sendErr?.message || 'onbekend'));
+      return actions;
+    }
+  }
+
+  // ── FASE 2.2 — Auto-draft save ─────────────────────────────────────────
+  if (decision.mode === 'auto_draft_save' && decision.allowed) {
+    try {
+      const { data: draft, error: draftErr } = await supabase.from('email_drafts').insert({
+        user_id:              user ? user.id : null,
+        from_mailbox:         email.mailbox + '@deforexopleiding.nl',
+        to_address:           email.from_address,
+        subject:              suggestion.draft_subject,
+        body_html:            suggestion.draft_body_html,
+        in_reply_to_email_id: email.id,
+        source:               'sanne',
+      }).select('id').maybeSingle();
+      if (draftErr) {
+        actions.notes.push('draft_insert_fail: ' + draftErr.message);
+        // Draft-save is optioneel — laat suggestion op PROPOSED staan.
+        return actions;
+      }
+      await supabase.from('sanne_suggestions').update({
+        status: 'DRAFT_SAVED',
+        linked_draft_id: draft?.id || null,
+      }).eq('id', suggestionId);
+      actions.finalStatus = 'DRAFT_SAVED';
+      actions.draft_id = draft?.id || null;
+      actions.notes.push('draft_saved: ' + draft?.id);
+      return actions;
+    } catch (e) {
+      actions.notes.push('draft_threw: ' + (e?.message || 'onbekend'));
+      return actions;
+    }
+  }
+
+  // ── Fase 2.1 (reactive_suggest) — geen extra actie hier; UI leest ─────
+  // sanne_suggestions in de reader. Status blijft PROPOSED zolang de user
+  // niks doet; outcome-endpoint zet USED/EDITED/DISMISSED bij klik.
+
+  return actions;
 }

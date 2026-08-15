@@ -152,19 +152,32 @@ export function evaluateSanneAutonomy(input = {}) {
   let mode = 'shadow';
   let allowed = false;
 
+  // ── 8. Autonomous-mailbox armed? (aparte lijst naast mailbox_scope) ─
+  // autonomous_mailboxes is bewust een strikte SUB-set van mailbox_scope.
+  // Default leeg = geen mailbox verstuurt autonoom, ook al staat de flag aan.
+  const autonomousMailboxes = Array.isArray(autonomy.autonomous_mailboxes) ? autonomy.autonomous_mailboxes : [];
+  const mailboxArmed = autonomousMailboxes.includes(email.mailbox);
+  checks.push({ name: 'autonomous_mailbox_armed', passed: mailboxArmed,
+    note: mailboxArmed ? `${email.mailbox} armed` : `${email.mailbox} niet armed (armed: ${autonomousMailboxes.join(',') || 'geen'})` });
+
   if (!blockReason) {
-    if (flagAutonomous && canAutonomous && withinOfficeHours) {
+    if (flagAutonomous && canAutonomous && withinOfficeHours && mailboxArmed) {
       mode = 'autonomous_send'; allowed = true;
     } else if (flagAutoDraft && canAutoDraft) {
       mode = 'auto_draft_save'; allowed = true;
     } else if (flagReactive && canReactive) {
       mode = 'reactive_suggest'; allowed = true;
+    } else if (flagAutonomous && !mailboxArmed) {
+      // Autonoom-flag aan maar deze mailbox is niet armed → downgrade naar draft/suggest.
+      if (flagAutoDraft && canAutoDraft) { mode = 'auto_draft_save'; allowed = true; }
+      else if (flagReactive && canReactive) { mode = 'reactive_suggest'; allowed = true; }
+      else { mode = 'shadow'; allowed = false; blockReason = 'MODE'; blockDetail = { reason: 'mailbox_not_autonomous_armed', mailbox: email.mailbox, armed_mailboxes: autonomousMailboxes }; }
     } else if (flagAutonomous && !withinOfficeHours) {
-      // Autonoom aan maar buiten office-hours → block met specifieke reden.
-      mode = 'shadow'; allowed = false;
-      blockReason = 'OFFICE_HOURS';
-      blockDetail = { hour: now.getHours(), day: now.getDay(),
-        office_hours: `${mandate.office_hours_start}-${mandate.office_hours_end}` };
+      // Autonoom aan maar buiten office-hours → downgrade naar draft indien mogelijk.
+      if (flagAutoDraft && canAutoDraft) { mode = 'auto_draft_save'; allowed = true; }
+      else { mode = 'shadow'; allowed = false; blockReason = 'OFFICE_HOURS';
+        blockDetail = { hour: now.getHours(), day: now.getDay(),
+          office_hours: `${mandate.office_hours_start}-${mandate.office_hours_end}` }; }
     } else if (!flagReactive && !flagAutoDraft && !flagAutonomous) {
       // Alle flags uit -> pure shadow mode (Fase 2.0 default).
       mode = 'shadow'; allowed = false;
