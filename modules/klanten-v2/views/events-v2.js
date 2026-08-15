@@ -3628,8 +3628,13 @@
             const insTime = _fmtTime(r.received_at);
             // Bug 1A: wire rij aan __evAttOpen als er een gematchte attendee is;
             // anders subtiele "geen gekoppelde deelnemer"-melding via toast.
-            const attId = r.matched_attendee?.id || null;
-            const eventId = r.matched_event?.id || null;
+            // FIX: veld heet matched_attendee_id (flat), niet matched_attendee.id
+            // — endpoint api/events-signup-inbox-list.js:71 select't beide flat
+            // (matched_attendee_id / matched_event_id) én matched_event als
+            // nested-join. matched_attendee is GEEN nested object. Fallback op
+            // nested voor forward-compat als endpoint later join toevoegt.
+            const attId   = r.matched_attendee_id || r.matched_attendee?.id || null;
+            const eventId = r.matched_event_id    || r.matched_event?.id    || null;
             const nameCell = attId && eventId
               ? `<a href="#" onclick="event.preventDefault();window.__evAttOpen('${esc(attId)}','${esc(eventId)}')" title="Bekijk deelnemer-detail" style="color:inherit;text-decoration:none;display:block"><div class="row-avatar" style="cursor:pointer">${H.av(naam, 28)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}</span></div></a>`
               : `<div class="row-avatar" style="cursor:default" onclick="window.__evSignupNoMatch()" title="Nog geen gekoppelde deelnemer">${H.av(naam, 28)}<span class="cell-main" style="color:var(--text-2)">${esc(naam)}</span></div>`;
