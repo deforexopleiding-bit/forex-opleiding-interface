@@ -302,6 +302,49 @@ async function syncMailbox({ account, host, port, boxStart }) {
         } else {
           newCount = rows.length;
         }
+
+        // ── Sanne fire-and-forget trigger (Fase 2.0, Lesson 24) ───────────
+        // Per row een POST naar /api/sanne-suggest met (mailbox, imap_uid).
+        // GEEN await -> respons van sync-emails blokkeert niet op Anthropic.
+        // Skip-filter + config-check + LLM-call zit in sanne-suggest zelf,
+        // dus deze hook stuurt gewoon ALLE nieuwe rows door. In Fase 2.0
+        // draait Sanne in shadow-mode (alle send-flags UIT) — geen side-effect.
+        // Fail-soft: .catch() slikt het zodat een defect endpoint de sync
+        // nooit omvergooit.
+        if (!insertErr && rows.length > 0) {
+          const base = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}`
+            : (process.env.PUBLIC_URL || 'http://localhost:3000');
+          const internalToken = process.env.INTERNAL_API_TOKEN;
+          if (internalToken) {
+            for (const row of rows) {
+              try {
+                fetch(`${base}/api/sanne-suggest`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Internal-Token': internalToken,
+                  },
+                  body: JSON.stringify({
+                    mailbox: row.mailbox,
+                    imap_uid: row.imap_uid,
+                    auto_triggered: true,
+                  }),
+                }).then(async (resp) => {
+                  if (!resp.ok && resp.status !== 404) {
+                    console.warn(`[sync-emails] sanne-suggest ${row.mailbox}/${row.imap_uid} → ${resp.status}`);
+                  }
+                }).catch((e) => {
+                  console.warn(`[sync-emails] sanne-suggest fire-and-forget fail:`, e?.message);
+                });
+              } catch (e) {
+                console.warn('[sync-emails] sanne-suggest schedule fail:', e?.message);
+              }
+            }
+          } else {
+            console.warn('[sync-emails] INTERNAL_API_TOKEN ontbreekt — Sanne-suggest wordt niet getriggerd.');
+          }
+        }
       }
 
     } finally {
