@@ -1252,6 +1252,16 @@
       const safeUrl = /^(https?:|mailto:|\/)/i.test(url) ? url : '#';
       return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--m, #3B82F6);text-decoration:underline">${txt}</a>`;
     });
+    // Bare-URL auto-linkify — alleen http(s)://. Split om reeds bestaande <a>-tags
+    // zodat href-attributen niet dubbel gelinkt worden. Input is al esc'd -> geen XSS.
+    // Trailing punctuation (.,;:!?)) blijft buiten de link zodat "…zie https://x.com." OK is.
+    const parts = s.split(/(<a\s[^>]*>[\s\S]*?<\/a>)/gi);
+    for (let i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) continue; // dit is een reeds gemaakte <a>...</a> — laat staan
+      parts[i] = parts[i].replace(/(^|[\s(])(https?:\/\/[^\s<)]+?)([.,;:!?)\]]*)(?=\s|$|<)/g,
+        (m, pre, url, tail) => `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--m, #3B82F6);text-decoration:underline">${url}</a>${tail}`);
+    }
+    s = parts.join('');
     return s;
   }
   function _mdBlock(rawText) {
@@ -1836,11 +1846,12 @@
     });
   }
   function _agRemovePortal(portalId) {
-    if (typeof requestAnimationFrame === 'undefined') return;
-    requestAnimationFrame(() => {
-      const orphans = document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]');
-      orphans.forEach((n) => n.remove());
-    });
+    // SYNCHROON verwijderen — was via rAF, waardoor de backdrop nog ~16ms bleef
+    // hangen na close. De "eerstvolgende klik" landde dan op die stale backdrop
+    // ipv de UI eronder -> klik geslikt. Zelfde fix als Events commit 5c6970e3.
+    try {
+      document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]').forEach((n) => n.remove());
+    } catch (_) { /* geen DOM (SSR/tests) */ }
   }
   window.__agArtOpenNew = () => {
     _ui.artModal = { mode: 'create', item: { onderwerp: '', categorie: 'FAQ', content: '', agents: [] } };
