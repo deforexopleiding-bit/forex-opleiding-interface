@@ -1547,22 +1547,32 @@
   function _renderStats(stats, metrics) {
     const totals = stats?.totals || {};
     const perUser = asArr(stats?.per_user);
+    // BUG-FIX #2: aggregate conversie berekent NU op dezelfde formule als de
+    // per-user kolom (gewonnen/gebeld*100 int), NIET meer metrics.conversion_rate
+    // (dat leest gewonnen/outcomes_total en gaf 0 zolang outcomes_total leeg was).
+    const totalGebeld  = Number(totals.gebeld   || 0);
+    const totalGewonnen = Number(totals.gewonnen || 0);
+    const aggConversie = totalGebeld > 0 ? Math.round((totalGewonnen / totalGebeld) * 100) : 0;
     const kpis = [
       { l: 'Gebeld',    v: totals.gebeld || 0,    c: 'blue'    },
       { l: 'Bereikt',   v: totals.bereikt || 0,   c: 'violet'  },
       { l: 'Zoom',      v: totals.zoom || 0,      c: 'amber'   },
       { l: 'Offerte',   v: totals.offerte || 0,   c: 'amber'   },
       { l: 'Gewonnen',  v: totals.gewonnen || 0,  c: 'emerald' },
+      { l: 'Conversie', v: aggConversie + '%',    c: 'emerald' },
     ];
     const mKpis = metrics ? [
       { l: 'Afspraken',           v: metrics.appointments_total || 0,    c: 'blue'    },
       { l: '  waarvan completed', v: metrics.appointments_completed || 0, c: 'emerald' },
       { l: '  waarvan no-show',   v: metrics.appointments_no_show || 0,  c: 'rose'    },
       { l: 'Voicememos',          v: metrics.voicememos_sent || 0,        c: 'violet'  },
-      { l: 'Conversie',           v: (metrics.conversion_rate || 0) + '%', c: 'emerald' },
       { l: 'No-show rate',        v: (metrics.no_show_rate || 0) + '%',   c: 'rose'    },
       { l: 'Achterstallig',       v: metrics.achterstallig_totaal || 0,   c: 'amber'   },
     ] : [];
+    // BUG-FIX #1: top_bezwaren kan uit dashboard-metrics komen als
+    // metrics.top_bezwaren (jsonb array). In productie kwam die soms leeg terug
+    // waardoor het blok volledig verdween. Nu ALTIJD renderen met nette
+    // leeg-state ("nog geen bezwaren getagd deze periode").
     const bezwaren = asArr(metrics?.top_bezwaren);
     return `
       <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));gap:10px;margin-bottom:20px">
@@ -1586,12 +1596,21 @@
           <span class="mono" style="color:var(--m)">${u.conversie || 0}%</span>
         </div>`).join('')}
       </div>` : ''}
-      ${bezwaren.length > 0 ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
-        <div style="padding:10px 16px;background:var(--surface-2);font-size:12px;font-weight:600;color:var(--text-2);border-bottom:1px solid var(--border)">Top bezwaren</div>
-        ${bezwaren.slice(0, 10).map((b, i) => `<div style="padding:8px 16px;display:flex;justify-content:space-between;font-size:12.5px;${i < 9 && i < bezwaren.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
-          <span>${esc(safeStr(b.naam) || '—')}</span><span class="mono" style="font-weight:600">${b.count || 0}×</span>
-        </div>`).join('')}
-      </div>` : ''}`;
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <div style="padding:10px 16px;background:var(--surface-2);font-size:12px;font-weight:600;color:var(--text-2);border-bottom:1px solid var(--border)">Top bezwaren <span style="color:var(--text-3);font-weight:400">(uit call-uitkomsten)</span></div>
+        ${bezwaren.length === 0 ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12.5px;font-style:italic">Nog geen bezwaren getagd deze periode.</div>` :
+          bezwaren.slice(0, 10).map((b, i) => {
+            const maxCount = Math.max(1, ...bezwaren.map((x) => Number(x.count || 0)));
+            const pct = Math.round((Number(b.count || 0) / maxCount) * 100);
+            return `<div style="padding:10px 16px;${i < 9 && i < bezwaren.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+              <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px">
+                <span>${esc(safeStr(b.naam) || '—')}</span><span class="mono" style="font-weight:600">${b.count || 0}×</span>
+              </div>
+              <div style="height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--m)"></div></div>
+            </div>`;
+          }).join('')
+        }
+      </div>`;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -1975,7 +1994,7 @@
             <div style="word-break:break-word"><b>E-mail:</b> ${esc(safeStr(d.customer_context.email) || '—')}</div>
             <div style="word-break:break-word"><b>Bedrijf:</b> ${esc(safeStr(d.customer_context.company_name) || '—')}</div>
             <div><b>Verlengt niet:</b> ${d.customer_context.retention_not_renewing ? 'ja' : 'nee'}</div>
-          </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic">Geen klant-koppeling (lead is nog niet aan een customer gematched — check ghl_contact_id + email).</div>`}
+          </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic">Nog geen klant gekoppeld aan deze afspraak.</div>`}
         </div>
         ${d.outcome ? `<div style="padding:12px 14px;background:var(--emerald-soft);border-radius:8px;font-size:12.5px">
           <b>Uitkomst geregistreerd:</b> ${esc(safeStr(d.outcome.outcome) || '—')} · ${fmtDate(d.outcome.created_at)}
@@ -1984,7 +2003,7 @@
           <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Lead-historie${Array.isArray(d.lead_history) ? ` (${d.lead_history.length})` : ''}</div>
           ${Array.isArray(d.lead_history) && d.lead_history.length > 0 ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto">
             ${d.lead_history.map((h) => `<div style="padding:6px 10px;background:var(--surface-2);border-radius:4px;font-size:12px;display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="mono" style="color:var(--text-2)">${fmtDate(h.scheduled_at)}</span>${_apptStatusPill(h.status)}<span style="color:var(--text-3);font-size:11px">${esc(safeStr(h.voicememo_status) || '')}</span></div>`).join('')}
-          </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic;padding:6px 0">Geen eerdere afspraken gevonden voor deze lead.</div>`}
+          </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic;padding:6px 0">Dit is de eerste afspraak van deze lead.</div>`}
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-ghost" onclick="window.__fuApptClose()">Sluiten</button>
