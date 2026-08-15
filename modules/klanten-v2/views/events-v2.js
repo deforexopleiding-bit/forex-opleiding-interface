@@ -520,7 +520,15 @@
       : (_ui.mode === 'detail' && _ui.detailId) ? _detailView(_ui.detailId)
       : _lijstView();
     // Complete-modal + attendee-detail-modal renderen boven de content als open
-    return base + (_ui.completeModal ? _completeModal() : '') + (_ui.attDetail ? _attDetailModal() : '');
+    return base + _globalOverlays();
+  }
+  // Tab-agnostische overlays. MOET vanuit iedere events-view aangeroepen worden,
+  // anders bestaat de modal-markup niet als _ui.attDetail vanuit een andere tab
+  // (Inschrijvingen/Inbox/Statistieken) gezet wordt -> portal-node ontbreekt ->
+  // scrim/modal onzichtbaar. Zelfde helper wordt gebruikt door inboxView(),
+  // inschrijvingenView() en statistiekenView() zodat alle tabs de modal kunnen tonen.
+  function _globalOverlays() {
+    return (_ui.completeModal ? _completeModal() : '') + (_ui.attDetail ? _attDetailModal() : '');
   }
 
   // ── LIJST ────────────────────────────────────────────────────────────────
@@ -1403,6 +1411,17 @@
       }
     });
   }
+  // Escape-keydown → sluit open modal-overlays (attendee-detail eerst, dan
+  // complete-modal). De close-knop belooft "Sluiten (Esc)" maar de listener
+  // ontbrak. Guarded voor dubbele bind bij render.
+  if (!window.__evEscDocBound) {
+    window.__evEscDocBound = true;
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      if (_ui.attDetail) { ev.preventDefault(); if (typeof window.__evAttClose === 'function') window.__evAttClose(); return; }
+      if (_ui.completeModal) { ev.preventDefault(); _ui.completeModal = null; _evRemovePortal('ev-modal'); if (window.DFO?.render) window.DFO.render(); return; }
+    });
+  }
 
   // Kebab-actie handlers — thin wrappers over bestaande endpoints
   async function _post(url, body, okMsg, refreshEvent) {
@@ -1462,11 +1481,14 @@
   function _evEnsurePortal(portalId) {
     if (typeof requestAnimationFrame === 'undefined') return;
     requestAnimationFrame(() => {
-      const orphans = document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]');
-      orphans.forEach((n) => {
-        const inContent = document.querySelector('#content [data-portal-id="' + portalId + '"]');
-        if (!inContent) n.remove();
-      });
+      // BUG-FIX dubbel-portal: bij elke re-render zet _attDetailModal() opnieuw
+      // een portal-anchor in #content. Als we NIET alle bestaande body-versies
+      // eerst weghalen, blijft de oude in body staan + we voegen de nieuwe toe
+      // -> 2 nodes met dezelfde data-portal-id (één ge-portaled, één stale).
+      // De oude achtergrond vangt dan de sluit-klik zodat de eerste klik faalt.
+      // Fix: ALTIJD eerst body-orphans wegwerken, dan pas de #content-node
+      // (die is de single source of truth voor deze render-cyclus) verplaatsen.
+      document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]').forEach((n) => n.remove());
       const el = document.querySelector('#content [data-portal-id="' + portalId + '"]');
       if (!el) return;
       document.body.appendChild(el);
@@ -2055,7 +2077,8 @@
           ${_inboxRightPane(_ui.inboxConvId)}
         </div>
       </div>
-      ${_tplPickerModal()}`;
+      ${_tplPickerModal()}
+      ${_globalOverlays()}`;
   }
 
   // Zoek-handler: surgical re-render van alleen de left list (rows-container).
@@ -3676,7 +3699,7 @@
               `<div style="text-align:right"><div class="mono" style="font-size:12.5px;color:var(--text-2)">${esc(insDate)}</div><div class="mono" style="font-size:11px;color:var(--text-3)">${esc(insTime)}</div></div>`,
             ];
           })
-        )}`;
+        )}${_globalOverlays()}`;
   }
   window.__evSetSignupStatus = (v) => { _live.signups.data = null; _live.signups.error = null; fetchSignups(v); };
   // Bug 1A: subtiele melding voor niet-gematchte inschrijvingen (geen dode klik).
@@ -3764,7 +3787,7 @@
             })
           )}
     </div>
-    </div>`;
+    </div>${_globalOverlays()}`;
   }
 
   function _omzetMaandChart(events) {
