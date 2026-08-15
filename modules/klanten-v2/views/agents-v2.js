@@ -409,7 +409,13 @@
             <div class="card-title">${esc(a.n)}</div>
             <div style="font-size:12px;color:var(--text-3);margin-top:3px;line-height:1.45">${esc(a.d)}</div>
           </div>
-          ${stats ? H.pill('ok', 'Actief') : softPill()}
+          ${(() => {
+            // Bug 4: 3-status pill — Actief (activiteit>0), Wacht op werk
+            // (bron aangesloten maar 0), Nog niet gekoppeld (geen bron).
+            if (!stats) return softPill();
+            const anyActivity = Array.isArray(stats) && stats.some((row) => Number(String(row[0]).replace(/[^0-9.]/g, '')) > 0);
+            return anyActivity ? H.pill('ok', 'Actief') : H.pill('neutral', 'Wacht op werk');
+          })()}
         </div>
         ${stats ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border);margin:0 -17px -15px">
           ${stats.map(([v, l]) => `<div style="background:var(--surface);padding:8px 10px;text-align:center">
@@ -1228,12 +1234,66 @@
     </div></div>`;
   }
 
+  // Bug 2b — Mini-markdown renderer voor assistant-bubbels.
+  // Werkt op ge-esc()-de string zodat XSS uitgesloten is: HTML-tags in de
+  // originele content zijn al ge-escaped, alleen MD-patronen worden vervangen.
+  function _mdInline(escapedText) {
+    let s = String(escapedText || '');
+    // Bold **x** en __x__ → <strong>
+    s = s.replace(/\*\*([^\*\n]+?)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_\n]+?)__/g, '<strong>$1</strong>');
+    // Italic *x* en _x_ (niet als ** al gehandeld) → <em>
+    s = s.replace(/(^|[\s(])\*([^\*\n]+?)\*(?=[\s.,;:!?)\-]|$)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[\s(])_([^_\n]+?)_(?=[\s.,;:!?)\-]|$)/g, '$1<em>$2</em>');
+    // Inline code `x` → <code>
+    s = s.replace(/`([^`\n]+?)`/g, '<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;font-family:\'IBM Plex Mono\',monospace;font-size:.92em">$1</code>');
+    return s;
+  }
+  function _mdBlock(rawText) {
+    // Eerst esc, dan block-level (lists/paragraphs), dan inline.
+    const escd = esc(String(rawText || ''));
+    const lines = escd.split('\n');
+    let html = '';
+    let listType = null; // 'ul' | 'ol'
+    let paraBuf = [];
+    const flushPara = () => {
+      if (paraBuf.length) { html += `<p style="margin:0 0 8px 0">${_mdInline(paraBuf.join('<br>'))}</p>`; paraBuf = []; }
+    };
+    const flushList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
+    for (const raw of lines) {
+      const line = raw.replace(/\s+$/, '');
+      const ulMatch = /^\s*[-*]\s+(.+)$/.exec(line);
+      const olMatch = /^\s*\d+\.\s+(.+)$/.exec(line);
+      if (ulMatch) {
+        flushPara();
+        if (listType !== 'ul') { flushList(); listType = 'ul'; html += `<ul style="margin:0 0 8px 20px;padding:0">`; }
+        html += `<li style="margin:2px 0">${_mdInline(ulMatch[1])}</li>`;
+      } else if (olMatch) {
+        flushPara();
+        if (listType !== 'ol') { flushList(); listType = 'ol'; html += `<ol style="margin:0 0 8px 22px;padding:0">`; }
+        html += `<li style="margin:2px 0">${_mdInline(olMatch[1])}</li>`;
+      } else if (line.trim() === '') {
+        flushPara(); flushList();
+      } else {
+        if (listType) flushList();
+        paraBuf.push(line);
+      }
+    }
+    flushPara(); flushList();
+    return html || `<p style="margin:0">${_mdInline(escd)}</p>`;
+  }
+
   function _sandboxBubble(m, a) {
     const isUser = m.role === 'user';
     const bg = isUser ? 'var(--surface-2)' : `color-mix(in srgb, var(--${a.c}) 10%, var(--surface))`;
+    // Bug 2b: assistant-bubbels renderen met mini-markdown (**vet**, lijstjes).
+    // User-bubbels blijven pure esc + whitespace-pre-wrap.
+    const bodyHtml = isUser
+      ? `<div style="font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(m.content)}</div>`
+      : `<div style="font-size:13px;line-height:1.55">${_mdBlock(m.content)}</div>`;
     return `<div style="max-width:75%;padding:9px 12px;border-radius:12px;background:${bg};${isUser ? 'align-self:flex-end' : 'align-self:flex-start;border-left:2px solid var(--' + a.c + ')'}">
       <div style="font-size:10.5px;color:var(--text-3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em">${isUser ? 'Jij' : esc(a.n)}</div>
-      <div style="font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(m.content)}</div>
+      ${bodyHtml}
     </div>`;
   }
 
@@ -1598,7 +1658,7 @@
          <div class="empty-s">Bewerk agent-KB per agent via <b>Configuratie → Kennisbank</b>, of maak centrale artikelen aan met <b>+ Artikel</b>.</div></div>`
       : `
       ${centralArts.length > 0 ? `<div style="padding:14px 20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">Centrale artikelen (${centralArts.length})</div>
-        ${H.table(
+        ${(() => { window.__agKbCentralArts = centralArts; return H.table(
           [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}, {l:'Acties', cls:'r'}],
           centralArts.map((r) => [
             `<div><div class="cell-main">${esc(r.onderwerp)}</div>
@@ -1611,16 +1671,17 @@
             }).join('') || '<span style="color:var(--text-3);font-size:11.5px">nog niet gekoppeld</span>'}</div>`,
             `<span class="mono" style="color:var(--text-3);font-size:12.5px">${fmtDate(r.updated_at)}</span>`,
             `<div style="display:flex;gap:4px;justify-content:flex-end">
-              <button class="icon-btn" title="Promoveren naar agent" style="width:26px;height:26px" onclick="window.__agKbArtPromote('${r.id}')">${svg(I.send, 'width:13px;height:13px')}</button>
-              <button class="icon-btn" title="Bewerken" style="width:26px;height:26px" onclick="window.__agKbArtEdit('${r.id}')">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
-              <button class="icon-btn" title="Verwijderen" style="width:26px;height:26px" onclick="window.__agKbArtDelete('${r.id}')">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Promoveren naar agent" style="width:26px;height:26px" onclick="event.stopPropagation();window.__agKbArtPromote('${r.id}')">${svg(I.send, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Bewerken" style="width:26px;height:26px" onclick="event.stopPropagation();window.__agKbArtEdit('${r.id}')">${svg(I.edit || I.settings, 'width:13px;height:13px')}</button>
+              <button class="icon-btn" title="Verwijderen" style="width:26px;height:26px" onclick="event.stopPropagation();window.__agKbArtDelete('${r.id}')">${svg(I.trash || I.x, 'width:13px;height:13px')}</button>
             </div>`,
-          ])
-        )}
+          ]),
+          'window.__agKbCentralRowClick'
+        ); })()}
       </div>` : ''}
 
       ${all.length > 0 ? `<div style="padding:14px 20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px">Agent-kennisbank (${all.length})</div>
-        ${H.table(
+        ${(() => { window.__agKbAllArts = all; return H.table(
           [{l:'Onderwerp'}, {l:'Categorie'}, {l:'Wie gebruikt dit', cls:'optional'}, {l:'Bijgewerkt', cls:'r optional'}],
           all.map((r) => [
             `<div><div class="cell-main">${esc(r.onderwerp)}</div>
@@ -1632,8 +1693,9 @@
                 <span style="width:6px;height:6px;border-radius:50%;background:var(--${ag ? ag.c : 'slate'});display:inline-block;margin-right:4px"></span>${esc(w)}</span>`;
             }).join('')}</div>`,
             `<span class="mono" style="color:var(--text-3);font-size:12.5px">${fmtDate(r.updated)}</span>`,
-          ])
-        )}
+          ]),
+          'window.__agKbAllRowClick'
+        ); })()}
       </div>` : ''}
     `}
 
@@ -1734,6 +1796,29 @@
     if (!it) return;
     _ui.artModal = { mode: 'edit', item: { ...it } };
     if (window.DFO?.render) window.DFO.render();
+  };
+  // Bug 1: rij-klik-handlers voor kennisbank-tabellen (H.table verwacht een
+  // function-naam die met (rowIdx) wordt aangeroepen). Central rijen openen
+  // de bewerk-modal. Agent-KB rijen navigeren naar de eerste bijbehorende
+  // agent's Configuratie → Kennisbank (geen aparte bewerk-modal voor
+  // agent-KB items — dat gebeurt inline op agent-config).
+  window.__agKbCentralRowClick = (i) => {
+    const arr = window.__agKbCentralArts || [];
+    const it = arr[i]; if (!it) return;
+    window.__agKbArtEdit(it.id);
+  };
+  window.__agKbAllRowClick = (i) => {
+    const arr = window.__agKbAllArts || [];
+    const it = arr[i]; if (!it) return;
+    // agents is een array van namen; vind eerste bijbehorende agent-id.
+    const firstAgentName = Array.isArray(it.agents) && it.agents.length ? it.agents[0] : null;
+    if (!firstAgentName) { alert('Geen agent gekoppeld aan dit KB-item.'); return; }
+    const ag = AGENTS_STATIC.find((x) => x.n === firstAgentName || x.id === firstAgentName);
+    if (!ag) { alert('Bijbehorende agent niet gevonden.'); return; }
+    _ui.agSel = ag.id;
+    _ui.agCfgTab = 'Kennisbank';
+    if (window.DFO?.setTab) window.DFO.setTab('Configuratie');
+    else if (window.DFO?.render) window.DFO.render();
   };
   window.__agArtClose = () => { _ui.artModal = null; if (window.DFO?.render) window.DFO.render(); };
   window.__agArtSave = async () => {
@@ -1890,6 +1975,20 @@
       const zelf = msg ? Math.max(0, Math.round(100 * (1 - hnd / msg))) + '%' : '—';
       const cls = msg && hnd / Math.max(1, msg) < 0.15 ? 'ok' : (hnd / Math.max(1, msg) < 0.35 ? 'warn' : 'danger');
       perAgentRows.push({ ag: lisaAg, msg, zelf, hnd, res: fmtNum(lisa.call_booked) + ' calls', cls, rt: rt.lisa || null });
+    }
+    // Bug 3: Aisha (leadsonderhoud, uit berichten_log) + AI Manager (geen metriek → toon —).
+    const aishaAg = AGENTS_STATIC.find((a) => a.id === 'aisha');
+    if (aishaAg) {
+      const aisha = prest.aisha || {};
+      const msg = Number(aisha.messages_today || 0);
+      const errs = Number(aisha.errors_week || 0);
+      const zelf = msg ? Math.max(0, Math.round(100 * (1 - errs / Math.max(1, msg)))) + '%' : '—';
+      const cls = msg && errs / Math.max(1, msg) < 0.05 ? 'ok' : (errs / Math.max(1, msg) < 0.15 ? 'warn' : 'danger');
+      perAgentRows.push({ ag: aishaAg, msg, zelf, hnd: errs, res: errs ? fmtNum(errs) + ' fouten (7d)' : 'geen fouten', cls, rt: rt.aisha || null });
+    }
+    const managerAg = AGENTS_STATIC.find((a) => a.id === 'manager' || a.n === 'AI Manager' || /manager/i.test(a.n || ''));
+    if (managerAg) {
+      perAgentRows.push({ ag: managerAg, msg: '—', zelf: '—', hnd: '—', res: 'geen metriek', cls: 'neutral', rt: null, _placeholder: true });
     }
 
     return `${H.kpis([

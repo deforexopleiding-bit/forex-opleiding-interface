@@ -231,15 +231,44 @@ export default async function handler(req, res) {
       pnIdsByModule.set(r.module, arr);
     }
 
-    // Trio + Lisa parallel.
-    const [trioResults, lisa] = await Promise.all([
+    // Trio + Lisa + Aisha (leadsonderhoud) + Manager parallel.
+    // Aisha telt uit berichten_log (verstuurd_op vandaag).
+    // Manager heeft geen productie-metriek — expose neutrale nul-struct.
+    const aishaP = (async () => {
+      try {
+        const msgP = safeCount(supabaseAdmin
+          .from('berichten_log')
+          .select('id', { count: 'exact', head: true })
+          .gte('verstuurd_op', sinceTodayIso)
+          .eq('status', 'verstuurd'), 'aisha_msgs_today');
+        const errorP = safeCount(supabaseAdmin
+          .from('berichten_log')
+          .select('id', { count: 'exact', head: true })
+          .gte('verstuurd_op', sinceWeekIso)
+          .eq('status', 'fout'), 'aisha_errors_week');
+        const [msgs, errs] = await Promise.all([msgP, errorP]);
+        return { module: 'leadsonderhoud', messages_today: msgs, handoffs: 0, open_suggestions: 0, errors_week: errs, active_conv_count: 0, last_activity_at: null };
+      } catch (e) {
+        console.warn('[agents-activity] aisha', e?.message || e);
+        return { module: 'leadsonderhoud', messages_today: 0, handoffs: 0, open_suggestions: 0, errors_week: 0, active_conv_count: 0, last_activity_at: null };
+      }
+    })();
+    const managerP = Promise.resolve({
+      module: 'manager', messages_today: null, handoffs: null, open_suggestions: null,
+      note: 'geen productie-metriek — Manager staat klaar maar heeft geen telling-bron',
+    });
+
+    const [trioResults, lisa, aisha, manager] = await Promise.all([
       Promise.all(TRIO_MODULES.map((m) =>
         fetchModuleStats(m, pnIdsByModule.get(m) || [], sinceTodayIso, sinceWeekIso)
       )),
       fetchLisaStats(sinceTodayIso),
+      aishaP,
+      managerP,
     ]);
 
-    // team_totals: som van handoffs (trio) + human_takeover (lisa).
+    // team_totals: som van handoffs (trio) + human_takeover (lisa). Aisha/Manager
+    // tellen NIET mee in team_totals (verschillende semantiek).
     const team_totals = {
       open_suggestions: trioResults.reduce((acc, r) => acc + (r.open_suggestions || 0), 0),
       handoffs:         trioResults.reduce((acc, r) => acc + (r.handoffs || 0), 0)
@@ -251,6 +280,8 @@ export default async function handler(req, res) {
       generated_at: new Date().toISOString(),
       trio:         trioResults,
       lisa,
+      aisha,
+      manager,
       team_totals,
     });
   } catch (e) {

@@ -38,20 +38,50 @@ const ALLOWED_MODULES = new Set(Object.keys(MODULE_TO_AGENT));
 const MAX_MESSAGE_CHARS  = 2000;
 const MAX_HISTORY_ITEMS  = 12;
 
+// Bug 2a: fillTemplate ondersteunt zowel {{token}} als {token} (single brace)
+// zodat Simone/Mila-templates die single-brace tokens gebruiken (bv.
+// {next_event_title}, {prospect_naam}) in de sandbox correct resolven.
+// Na de bekende ronde wordt een safety-strip toegepast op ONBEKENDE
+// single-brace tokens zodat er nooit meer een ruwe placeholder in de
+// LLM-input (en dus response) belandt.
 function fillTemplate(str, vars) {
   if (!str || typeof str !== 'string') return '';
-  return str.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, k) => {
+  let out = str.replace(/\{\{\s*([a-z0-9_]+)\s*\}\}/gi, (_, k) => {
     const v = vars[k]; return v == null ? '' : String(v);
   });
+  out = out.replace(/\{\s*([a-z0-9_]+)\s*\}/gi, (m, k) => {
+    if (Object.prototype.hasOwnProperty.call(vars, k)) {
+      const v = vars[k]; return v == null ? '' : String(v);
+    }
+    // Onbekende single-brace token → strip volledig (safety, geen leak).
+    return '';
+  });
+  return out;
 }
 
-function buildTrioSystemPrompt(cfg, customerCtx) {
+function buildTrioSystemPrompt(cfg, customerCtx, moduleKey) {
+  // Basis-vars (bekend voor Joost + shared).
   const vars = {
     company_name:        process.env.COMPANY_NAME || 'De Forex Opleiding NL B.V.',
     customer_name:       customerCtx?.name || 'de klant',
     open_amount:         customerCtx?.open_amount != null ? String(customerCtx.open_amount) : '0',
     open_invoice_count:  customerCtx?.open_invoice_count != null ? String(customerCtx.open_invoice_count) : '0',
   };
+  // Bug 2a — Simone (events) + Mila (onboarding) single-brace tokens.
+  // Neutrale sandbox-defaults; sandbox is een test, dus geen echte klant/event nodig.
+  if (moduleKey === 'events') {
+    vars.prospect_naam    = customerCtx?.name || 'Testklant';
+    vars.next_event_title = 'geen event gepland (sandbox)';
+    vars.events_count     = '0';
+    vars.attendee_status  = 'sandbox';
+  }
+  if (moduleKey === 'onboarding') {
+    vars.klant_voornaam   = customerCtx?.name?.split(' ')?.[0] || 'Testklant';
+    vars.klant_achternaam = '';
+    vars.klant_email      = 'test@sandbox';
+    vars.onboarding_wizard_link = '(sandbox — geen wizard-link)';
+    vars.traject_type     = 'sandbox';
+  }
   const base = cfg?.system_prompt_template || '';
   const filled = fillTemplate(base, vars);
   const tone = cfg?.persona_tone ? `\n\nToon: ${cfg.persona_tone}` : '';
@@ -150,7 +180,7 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (error) throw error;
       if (!cfg) return res.status(500).json({ error: 'Geen config voor module ' + moduleKey });
-      systemPrompt = buildTrioSystemPrompt(cfg, custCtx);
+      systemPrompt = buildTrioSystemPrompt(cfg, custCtx, moduleKey);
       model = cfg.model || model;
       temperature = cfg.temperature != null ? Number(cfg.temperature) : temperature;
     }
