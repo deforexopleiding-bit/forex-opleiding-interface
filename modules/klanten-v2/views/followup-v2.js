@@ -159,7 +159,7 @@
     selectedLeadId:  null,
     detailTab:       'overzicht',       // overzicht / notities / retentie
     callModal:       null,               // { leadId, outcome, terugbel, snoozeMonths, warmte, bezwaren:Set, note, saving, error }
-    verplaatsModal:  null,               // { appointmentId, newDatetime, duration, saving, error }
+    // verplaatsModal verwijderd (dead-code) — verzetten-flow gaat via apptOutcomeModal + submitApptOutcome → /api/follow-up-verplaats-call.
     annuleerModal:   null,               // { appointmentId, mode, reden, saving, error }
     afschrijfModal:  null,               // { type, refId, reason, saving, error }
     confirmModal:    null,               // { msg, onOk, onCancel, tone }
@@ -823,30 +823,9 @@
     showToast('Lead bijgewerkt', 'success');
     if (render) render();
   }
-  async function submitVerplaats() {
-    const m = _ui.verplaatsModal;
-    if (!m || m.saving) return;
-    if (!m.newDatetime) { m.error = 'Nieuwe datum/tijd verplicht'; if (render) render(); return; }
-    m.saving = true; m.error = null; if (render) render();
-    const j = await tryFetch('verplaats', '/api/follow-up-verplaats-call', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        appointment_id: m.appointmentId,
-        new_datetime: m.newDatetime,
-        duration_minutes: Number(m.duration || 30),
-      }),
-    }, 15000);
-    m.saving = false;
-    if (j && (j.__error || j.error || !j.success)) {
-      m.error = j.__error || j.error || 'Verplaatsen mislukt' + (j?.ghl_status ? ` (GHL ${j.ghl_status})` : '');
-      if (render) render();
-      return;
-    }
-    _ui.verplaatsModal = null;
-    _live.leadsList.data = null; _live.leadsList.key = null;
-    showToast('Call verplaatst', 'success');
-    if (render) render();
-  }
+  // submitVerplaats verwijderd — de bereikbare verzetten-flow gaat via
+  // submitApptOutcome() (outcome === 'verzetten'), die dezelfde
+  // /api/follow-up-verplaats-call aanroept.
   async function submitAnnuleer() {
     const m = _ui.annuleerModal;
     if (!m || m.saving) return;
@@ -959,22 +938,17 @@
   window.__fuNoteDraft = (leadId, v) => { _ui.noteDraft[leadId] = v; if (render) render(); };
   window.__fuNoteSave = (leadId) => submitNote(leadId);
   window.__fuStatus = (leadId, status) => submitLeadUpdate(leadId, { lead_status: status });
-  window.__fuOpenVerplaats = (appointmentId) => {
-    _ui.verplaatsModal = { appointmentId, newDatetime: '', duration: 30, saving: false, error: null };
-    // Slots pre-fetchen bij open (default = vandaag+14d). Fail-soft; als leeg
-    // of error blijft de handmatige datetime-picker functioneel.
-    _live.freeSlots.data = null; _live.freeSlots.key = null;
-    queueMicrotask(() => fetchFreeSlots(null));
-    if (render) render();
-  };
+  // Slot-pick invult m.newDatetime van de OUTCOME-modal (verzetten-flow).
+  // De losse _verplaatsModal is verwijderd (dead-code): de bereikbare
+  // verzetten-flow gaat altijd via appt-outcome-modal → gedelegeerd naar
+  // /api/follow-up-verplaats-call.
   window.__fuPickSlot = (isoDateTime) => {
-    if (!_ui.verplaatsModal || !isoDateTime) return;
-    _ui.verplaatsModal.newDatetime = isoDateTime;
+    if (!_ui.apptOutcomeModal || !isoDateTime) return;
+    _ui.apptOutcomeModal.newDatetime = isoDateTime;
     if (render) render();
   };
-  window.__fuCloseVerplaats = () => { _ui.verplaatsModal = null; if (render) render(); };
-  window.__fuVerplaatsField = (k, v) => { if (_ui.verplaatsModal) { _ui.verplaatsModal[k] = v; if (render) render(); } };
-  window.__fuVerplaatsSave = () => submitVerplaats();
+  // window.__fuCloseVerplaats / __fuVerplaatsField / __fuVerplaatsSave verwijderd
+  // (dead-code, geen call-sites meer sinds _verplaatsModal weg is).
   window.__fuOpenAnnuleer = (appointmentId) => {
     _ui.annuleerModal = { appointmentId, mode: 'definitief', reden: '', saving: false, error: null };
     if (render) render();
@@ -1013,9 +987,19 @@
       const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0);
       _ui.apptOutcomeModal.terugbelDatum = inputForDatetimeLocal(d.toISOString());
     }
+    // Verzetten-flow: pre-fetch GHL free-slots zodat picker meteen data heeft.
+    // Fail-soft: bij error/empty blijft de handmatige datetime-input werken.
+    if (v === 'verzetten') {
+      _live.freeSlots.data = null; _live.freeSlots.key = null;
+      queueMicrotask(() => fetchFreeSlots(null));
+    }
     if (render) render();
   };
-  window.__fuApptOutcomeField = (k, v) => { if (_ui.apptOutcomeModal) { _ui.apptOutcomeModal[k] = v; if (render) render(); } };
+  // State-only handler — GEEN re-render tijdens typen. Fix voor focus-loss
+  // (NotFoundError: Failed to set 'innerHTML' … node no longer a child) op
+  // datetime-local / number / textarea inputs. Re-render gebeurt alleen bij
+  // slot-chip klik (__fuPickSlot) of outcome-radio (__fuApptOutcomeSet).
+  window.__fuApptOutcomeField = (k, v) => { if (_ui.apptOutcomeModal) { _ui.apptOutcomeModal[k] = v; } };
   const APPT_RISK_OUTCOMES = new Set(['sale','no_show','gesprek_gehad','wilt_niet_meer','niet_geschikt','later_opnieuw','terugbel','verzetten','annuleren']);
   window.__fuApptOutcomeSave = () => {
     const m = _ui.apptOutcomeModal; if (!m || !m.outcome) return;
@@ -1397,7 +1381,7 @@
   function _renderModals() {
     const html = [];
     if (_ui.callModal) html.push(_callModal());
-    if (_ui.verplaatsModal) html.push(_verplaatsModal());
+    // _verplaatsModal verwijderd — verzetten-flow zit in apptOutcomeModal.
     if (_ui.annuleerModal) html.push(_annuleerModal());
     if (_ui.afschrijfModal) html.push(_afschrijfModal());
     if (_ui.confirmModal) html.push(_confirmModal());
@@ -1491,7 +1475,7 @@
               ${times.map((t) => {
                 // Combineer d.date + t naar datetime-local waarde (YYYY-MM-DDTHH:MM)
                 const iso = `${d.date}T${t}`;
-                const isSelected = _ui.verplaatsModal?.newDatetime === iso;
+                const isSelected = _ui.apptOutcomeModal?.newDatetime === iso;
                 return `<button class="chip" style="padding:4px 10px;border:1px solid ${isSelected ? 'var(--m)' : 'var(--border)'};background:${isSelected ? 'var(--m-soft)' : 'var(--surface)'};color:${isSelected ? 'var(--m)' : 'var(--text-2)'};border-radius:6px;font-size:11.5px;font-family:'IBM Plex Mono',monospace;cursor:pointer;font-weight:${isSelected ? '600' : '400'}" onclick="window.__fuPickSlot('${esc(iso)}')">${esc(t)}</button>`;
               }).join('')}
             </div>
@@ -1501,24 +1485,9 @@
       <div style="font-size:10.5px;color:var(--text-3);margin-top:4px;font-style:italic">Klik een slot om datum/tijd hieronder in te vullen. Verplaatsen gebeurt pas bij klik op de Verplaatsen-knop.</div>
     </div>`;
   }
-  function _verplaatsModal() {
-    const m = _ui.verplaatsModal;
-    const body = `
-      ${_renderFreeSlotsPicker()}
-      <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Nieuwe datum & tijd (Europe/Amsterdam)</span>
-        <input type="datetime-local" value="${esc(m.newDatetime)}" oninput="window.__fuVerplaatsField('newDatetime', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
-      </label>
-      <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Duur (min)</span>
-        <input type="number" min="10" max="180" step="15" value="${esc(m.duration)}" oninput="window.__fuVerplaatsField('duration', Number(this.value))" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
-      </label>
-      <div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;margin-bottom:12px">⚠ GHL-agenda wordt bijgewerkt (blocking). Zoom-link: best-effort.</div>
-      ${m.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(m.error)}</div>` : ''}
-      <div style="display:flex;justify-content:flex-end;gap:8px">
-        <button class="btn btn-ghost" onclick="window.__fuCloseVerplaats()">Annuleren</button>
-        <button class="btn btn-primary" ${(!m.newDatetime || m.saving) ? 'disabled' : ''} onclick="window.__fuVerplaatsSave()">${m.saving ? 'Verplaatsen…' : 'Verplaatsen'}</button>
-      </div>`;
-    return _modalShell('Call verplaatsen', body, 'window.__fuCloseVerplaats()');
-  }
+  // _verplaatsModal verwijderd — dode code. Verzetten gaat via _apptOutcomeModalRender()
+  // (outcome === 'verzetten'), waar _renderFreeSlotsPicker() en de datetime-input
+  // nu direct in de outcome-modal staan.
   function _annuleerModal() {
     const m = _ui.annuleerModal;
     const body = `
@@ -2461,6 +2430,7 @@
           <input type="number" min="1" max="24" step="1" value="${esc(m.snoozeMonths)}" oninput="window.__fuApptOutcomeField('snoozeMonths', Number(this.value))" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
         </label>` : ''}
       ${m.outcome === 'verzetten' ? `
+        ${_renderFreeSlotsPicker()}
         <label style="display:block;margin-bottom:8px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Nieuwe datum & tijd</span>
           <input type="datetime-local" value="${esc(m.newDatetime)}" oninput="window.__fuApptOutcomeField('newDatetime', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
         </label>
