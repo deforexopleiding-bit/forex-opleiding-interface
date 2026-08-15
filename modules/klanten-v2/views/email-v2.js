@@ -91,6 +91,7 @@
     body:    { loading: {}, error: {}, data: {} },
     counts:  { loading: false, data: null, ts: 0 },
     aiDraft: { loading: {}, error: {}, data: {} }, // per rowId → { subject, body }
+    sanne:   { loading: {}, error: {}, data: {} }, // per rowId (email_id) → { suggestion, flags }
   };
   const _ui = {
     mailboxSlug: '',
@@ -329,6 +330,26 @@
       st.error[rid] = j?.__error || j?.error || 'AI-generatie mislukt';
     }
     if (render) render();
+  }
+  // ── Sanne (Fase 2.1) — reader-card fetcher ─────────────────────────────
+  async function fetchSanneForRow(rowId) {
+    if (!rowId) return;
+    const st = _live.sanne;
+    if (st.loading[rowId] || st.data[rowId]) return;
+    st.loading[rowId] = true; st.error[rowId] = null;
+    const j = await tryFetch('sanne:' + rowId, '/api/sanne-suggestion-get?email_id=' + encodeURIComponent(rowId), null, 8000);
+    st.loading[rowId] = false;
+    if (j && !j.__error) st.data[rowId] = j;
+    else st.error[rowId] = j?.__error || 'sanne-fetch fout';
+    if (render) render();
+  }
+  async function sanneOutcome(sugId, outcome, notes) {
+    if (!sugId || !outcome) return;
+    const j = await tryFetch('sanne-outcome:' + outcome, '/api/sanne-suggestion-outcome', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ suggestion_id: sugId, outcome, notes: notes || null }),
+    }, 8000);
+    return j;
   }
   async function saveDraftDebounced() {
     if (_ui.draftSaveT) clearTimeout(_ui.draftSaveT);
@@ -684,6 +705,8 @@
     // Alleen IMAP-fetch voor inbox/archief/prullenbak — die hebben een echte imap_uid.
     if (!body && !bErr && !bLoad && row._source !== 'sent' && row.mailbox && row.imap_uid != null) queueMicrotask(() => fetchBody(row));
     if (row._source === 'inbox' && !row.is_read && !_ui.statusBusy['read:' + row.id]) queueMicrotask(() => markRead(row, true));
+    // Sanne (Fase 2.1) — fetch suggestion voor inbox-rows (skip sent/draft).
+    if (row._source === 'inbox' && !_live.sanne.data[row.id] && !_live.sanne.loading[row.id]) queueMicrotask(() => fetchSanneForRow(row.id));
     return `<section style="overflow:hidden;display:flex;flex-direction:column;background:var(--bg,var(--surface));min-height:0">
       ${_readHead(row)}
       ${_readMeta(row)}
@@ -692,9 +715,49 @@
           bLoad ? skel() :
           body ? _bodyBlock(body, row) :
           `<div style="padding:20px;color:var(--text-3);font-size:13px">Body wordt geladen…</div>`}
+        ${row._source === 'inbox' ? _sanneCard(row) : ''}
         ${body && row._source !== 'sent' ? _aiSuggestCard(row) : ''}
       </div>
     </section>`;
+  }
+  // ═════════════════════════════════════════════════════════════════════
+  // SANNE (Fase 2.1) — reader-card met suggestie
+  // Verschijnt alleen als: sanne_enabled + reactive_suggest_flag + mailbox
+  // in scope + suggestie bestaat + status is PROPOSED/DRAFT_SAVED/USED/EDITED.
+  // Concept-tekst wordt via esc() weergegeven (XSS-veilig, geen ruwe HTML).
+  // ═════════════════════════════════════════════════════════════════════
+  function _sanneCard(row) {
+    const st = _live.sanne.data[row.id];
+    if (!st || !st.suggestion) return '';
+    if (!st.reactive_suggest_flag) return '';
+    if (!st.mailbox_in_scope) return '';
+    const s = st.suggestion;
+    const status = String(s.status || '').toUpperCase();
+    if (!['PROPOSED', 'DRAFT_SAVED', 'USED', 'EDITED'].includes(status)) return '';
+    const confPct = Math.round(Number(s.confidence || 0) * 100);
+    const confBadgeColor = confPct >= 80 ? TOK.emerald : (confPct >= 60 ? TOK.violet : TOK.amber);
+    const statusLabel = status === 'DRAFT_SAVED' ? 'Concept opgeslagen'
+      : status === 'USED' ? 'Gebruikt'
+      : status === 'EDITED' ? 'Bewerkt'
+      : 'Voorstel';
+    const bodyText = String(s.draft_body_text || '');
+    return `<div style="margin:20px 22px 6px;padding:16px 18px;background:${TOK.violetSoft};border:1px solid ${TOK.violetLine};border-radius:${TOK.rLg}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="width:26px;height:26px;border-radius:50%;background:${TOK.violet};color:#fff;display:flex;align-items:center;justify-content:center">${ICO.sparkle}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:${TOK.violet}">Sanne stelt voor · ${esc(statusLabel)}</div>
+          <div style="font-size:11px;color:var(--text-3)">Intent: <span class="mono">${esc(s.detected_intent || '—')}</span></div>
+        </div>
+        <span style="font-family:${TOK.mono};font-size:11px;padding:2px 8px;border-radius:20px;background:${confBadgeColor};color:#fff;font-weight:600">${confPct}%</span>
+      </div>
+      <div style="padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:${TOK.rSm};font-size:13px;line-height:1.5;color:var(--text);white-space:pre-wrap;max-height:280px;overflow-y:auto">${esc(bodyText)}</div>
+      ${s.draft_subject ? `<div style="margin-top:6px;font-size:11px;color:var(--text-3)">Onderwerp: <span style="color:var(--text-2)">${esc(s.draft_subject)}</span></div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:10px">
+        <button class="btn btn-ghost btn-sm" onclick="window.__emailSanneDismiss('${esc(s.id)}')">Negeer</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__emailSanneEdit('${esc(s.id)}','${esc(row.id)}')">Bewerken</button>
+        <button class="btn btn-primary btn-sm" style="background:${TOK.violet};border-color:${TOK.violet}" onclick="window.__emailSanneUse('${esc(s.id)}','${esc(row.id)}')">Plak in antwoord →</button>
+      </div>
+    </div>`;
   }
   function _readerEmpty() {
     return `<section style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text-3);gap:14px;padding:40px 20px;background:var(--bg,var(--surface));min-height:0">
@@ -1164,6 +1227,38 @@
   window.__emailAiGenReader   = (rid) => { const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
   window.__emailAiSetToneAndRegen = (t, rid) => { _ui.aiTone = t; const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
   window.__emailAiClear = (rid) => { delete _live.aiDraft.data[rid]; delete _live.aiDraft.error[rid]; if (render) render(); };
+  // ── Sanne-card handlers (Fase 2.1) ────────────────────────────────────
+  window.__emailSanneUse = async (sugId, rowId) => {
+    const st = _live.sanne.data[rowId]; if (!st || !st.suggestion) return;
+    const s = st.suggestion;
+    // Open reply-compose met Sanne-tekst 1-op-1
+    _replyState('reply');
+    _ui.compose.body_html = String(s.draft_body_text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    if (s.draft_subject && !_ui.compose.subject) _ui.compose.subject = s.draft_subject;
+    // Optimistic status-update in de card + fire outcome-endpoint.
+    st.suggestion.status = 'USED';
+    if (render) render();
+    sanneOutcome(sugId, 'used').catch(() => {});
+  };
+  window.__emailSanneEdit = async (sugId, rowId) => {
+    const st = _live.sanne.data[rowId]; if (!st || !st.suggestion) return;
+    const s = st.suggestion;
+    _replyState('reply');
+    _ui.compose.body_html = String(s.draft_body_text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    if (s.draft_subject && !_ui.compose.subject) _ui.compose.subject = s.draft_subject;
+    st.suggestion.status = 'EDITED';
+    if (render) render();
+    sanneOutcome(sugId, 'edited').catch(() => {});
+  };
+  window.__emailSanneDismiss = async (sugId) => {
+    // Verberg card door status-mutatie (DISMISSED valt buiten de whitelist).
+    for (const rid of Object.keys(_live.sanne.data || {})) {
+      const st = _live.sanne.data[rid];
+      if (st?.suggestion?.id === sugId) { st.suggestion.status = 'DISMISSED'; }
+    }
+    if (render) render();
+    sanneOutcome(sugId, 'dismissed').catch(() => {});
+  };
   window.__emailAiUse = (rid) => {
     const draft = _live.aiDraft.data[rid]; if (!draft) return;
     // Open reply-compose met AI-draft in body.
