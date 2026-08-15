@@ -533,15 +533,26 @@
     if (_live.events.error && !_live.events.data) return errBlk('events', _live.events.error);
     if (_live.events.loading && !_live.events.data) return skel();
 
-    const items = asArr(_live.events.data?.items);
+    // Bug 4: filter events met completed_at uit de Gepubliceerd-lijst.
+    // events-complete-core zet completed_at maar laat status='published' staan,
+    // waardoor 1 event in Gepubliceerd EN Afgerond verscheen. Client-side
+    // filter, backend niet aangeraakt (afrond-flow ongewijzigd).
+    let rawItems = asArr(_live.events.data?.items);
+    if (status === 'published') {
+      rawItems = rawItems.filter((e) => !e.completed_at);
+    }
+    const items = rawItems;
     const total = Number(_live.events.data?.total || items.length);
     // Client-side extra zoek (server-side q ondersteunt ook, dus overlap ok)
     const rows = q ? items.filter((e) => String(e.title || '').toLowerCase().includes(q.toLowerCase()) || String(e.location || '').toLowerCase().includes(q.toLowerCase())) : items;
 
-    const activeAttendees = items.reduce((a, e) => a + Number(e.attendee_count_active || 0), 0);
+    // Bug 3: gebruik attendee_count_total (= aanwezig+no_show+afgemeld, zelfde bron
+    // als detail/Aanwezigen-tab) ipv attendee_count_active (dat via getConfirmedCount
+    // op assessment_response_id IS NOT NULL filtert — dat is de vragenlijst-teller).
+    const activeAttendees = items.reduce((a, e) => a + Number(e.attendee_count_total || 0), 0);
     const totalCap = items.reduce((a, e) => a + Number(e.capacity || 0), 0);
     const bezetting = totalCap > 0 ? Math.round((activeAttendees / totalCap) * 100) : 0;
-    const bijnaVol = items.filter((e) => Number(e.capacity || 0) > 0 && Number(e.attendee_count_active || 0) / Number(e.capacity) >= 0.8).length;
+    const bijnaVol = items.filter((e) => Number(e.capacity || 0) > 0 && Number(e.attendee_count_total || 0) / Number(e.capacity) >= 0.8).length;
 
     const niveauOpts = asArr(_live.niveaus.data);
 
@@ -557,7 +568,7 @@
         <option value="">Alle niveaus</option>
         ${niveauOpts.map((n) => `<option value="${esc(n.slug || n.id || n.value || n)}" ${_ui.niveauFilter === (n.slug || n.id || n.value || n) ? 'selected' : ''}>${esc(n.label || n.name || n.slug || n)}</option>`).join('')}
       </select>
-      <div class="tb-search" style="flex:1;max-width:300px"><input type="search" placeholder="Zoek titel of locatie…" value="${esc(_ui.searchQ)}" oninput="window.__evSearch(this.value)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12.5px" /></div>
+      <div class="tb-search" style="flex:1;max-width:300px">${H && typeof H.stableSearch === 'function' ? H.stableSearch('ev-overview-q', 'Zoek titel of locatie…', _ui.searchQ) : `<input type="search" placeholder="Zoek titel of locatie…" value="${esc(_ui.searchQ)}" oninput="window.__evSearch(this.value)" onsearch="window.__evSearch(this.value)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12.5px" />`}</div>
       <div class="tb-right" style="display:flex;gap:6px;align-items:center">
         <button class="btn btn-ghost btn-sm" onclick="__evRetry('events')" title="Vernieuwen">${svg(I.refresh || I.tick, 'width:14px;height:14px')}</button>
         <button class="btn btn-primary btn-sm" onclick="window.__evWizardOpen('create')">${svg(I.plus)}Nieuw event</button>
@@ -569,7 +580,9 @@
       : H.table(
           [{l:'Event'},{l:'Datum',cls:'optional'},{l:'Locatie',cls:'optional'},{l:'Niveau',cls:'optional'},{l:'Aanm/Cap',cls:'r'},{l:'Sync',cls:'r optional'},{l:'Status'},{l:'',cls:'r'}],
           rows.map((e) => {
-            const aanm = Number(e.attendee_count_active || 0);
+            // Bug 3: attendee_count_total = echte aangemeld-teller (zelfde bron
+            // als detail/Aanwezigen). attendee_count_active is vragenlijst-teller.
+            const aanm = Number(e.attendee_count_total || 0);
             const cap = Number(e.capacity || 0);
             const ratio = cap > 0 ? aanm / cap : 0;
             const barCol = ratio >= 0.8 ? 'danger' : ratio >= 0.5 ? 'warn' : 'ok';
@@ -585,9 +598,10 @@
                 : `<span class="mono">${aanm}${e.status === 'afgerond' ? ' (afg)' : ''}</span>`,
               _syncCell(e),
               H.pill(sc, sl),
-              `<div style="display:flex;gap:3px;justify-content:flex-end">
+              `<div style="position:relative;display:flex;gap:3px;justify-content:flex-end">
                 <button class="icon-btn" title="Dupliceren" ${busy ? 'disabled' : ''} onclick="event.stopPropagation();window.__evDuplicate('${esc(e.id)}')" style="width:26px;height:26px;${busy === 'duplicate' ? 'opacity:.5' : ''}">${svg(I.copy || I.plus, 'width:13px;height:13px')}</button>
                 <button class="icon-btn" title="Meer acties" onclick="event.stopPropagation();window.__evRowMenu('${esc(e.id)}','${esc(e.status)}')" style="width:26px;height:26px">${svg(I.dots || I.settings, 'width:13px;height:13px')}</button>
+                ${_ui.rowMenuOpen === e.id ? _evRowMenuHtml(e) : ''}
               </div>`,
             ];
           })
@@ -614,13 +628,20 @@
     return `<div style="display:flex;gap:3px;justify-content:flex-end">${badge(wf, 'WF')}${badge(gh, 'GHL')}</div>`;
   }
 
-  window.__evSetStatus = (s) => { _live.events.data = null; _live.events.error = null; _live.events.filter = s; if (window.DFO?.render) window.DFO.render(); };
-  window.__evSetNiveau = (v) => { _ui.niveauFilter = v; _live.events.data = null; _live.events.error = null; if (window.DFO?.render) window.DFO.render(); };
-  window.__evSearch = (v) => {
-    _ui.searchQ = v;
-    // Debounce refetch alleen als server-side filter zinvol; voor nu client-only + trigger render
-    if (window.DFO?.render) window.DFO.render();
-  };
+  // Bug 3b: race-fix — nul ook loading zodat een orphan-fetch niet meer
+  // stale filter-A-data over filter-B heen schrijft (bootstrap-check
+  // `if (loading)` blokkeerde de refetch anders).
+  window.__evSetStatus = (s) => { _live.events.data = null; _live.events.error = null; _live.events.loading = false; _live.events.filter = s; if (window.DFO?.render) window.DFO.render(); };
+  window.__evSetNiveau = (v) => { _ui.niveauFilter = v; _live.events.data = null; _live.events.error = null; _live.events.loading = false; if (window.DFO?.render) window.DFO.render(); };
+  // Bug 5: overview-zoek gebruikt H.onSearch registratie; input rendert via
+  // H.stableSearch mount-slot dat DFO.render-swap overleeft (behoud focus+cursor).
+  window.__evSearch = (v) => { _ui.searchQ = v; if (window.DFO?.render) window.DFO.render(); };
+  if (H && typeof H.onSearch === 'function') {
+    H.onSearch('ev-overview-q', (v) => {
+      _ui.searchQ = String(v || '');
+      if (window.DFO?.render) window.DFO.render();
+    });
+  }
   window.__evGoDetail = (id) => { _ui.mode = 'detail'; _ui.detailId = id; _ui.detailTab = 'Info'; if (window.DFO?.render) window.DFO.render(); };
   window.__evBackToList = () => { _ui.mode = 'list'; _ui.detailId = null; _ui.wizard = null; if (window.DFO?.render) window.DFO.render(); };
 
@@ -644,12 +665,34 @@
     } catch (e) { alert('Dupliceren mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _ui.busy[id] = null; if (window.DFO?.render) window.DFO.render(); }
   };
-  window.__evRowMenu = async (id, status) => {
-    const opts = ['Archiveren', 'Annuleren'];
-    const choice = window.prompt('Actie voor dit event?\n\n1. Archiveren\n2. Annuleren\n\nTyp 1 of 2 (of cancel):');
-    if (!choice) return;
-    if (choice === '1') return window.__evArchive(id);
-    if (choice === '2') return window.__evCancel(id);
+  // Bug 2: kebab-dropdown ipv window.prompt(). State _ui.rowMenuOpen houdt
+  // welke event-rij open is. Dropdown rendert absoluut onder de knop.
+  // Document-listener sluit bij buiten-klik (installed eenmalig).
+  window.__evRowMenu = (id, status) => {
+    _ui.rowMenuOpen = _ui.rowMenuOpen === id ? null : id;
+    _ui.attKebabOpen = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  function _evRowMenuHtml(e) {
+    const items = [
+      { l: 'Publiceren', k: 'publish',   show: e.status === 'draft' },
+      { l: 'Bewerken',   k: 'edit',      show: true },
+      { l: 'Dupliceren', k: 'duplicate', show: true },
+      { l: 'Archiveren', k: 'archive',   show: e.status !== 'archived' },
+      { l: 'Annuleren',  k: 'cancel',    show: !['cancelled','archived'].includes(e.status) },
+    ].filter((it) => it.show);
+    return `<div class="ev-kebab-menu" style="position:absolute;top:30px;right:0;min-width:180px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:100;padding:4px 0" onclick="event.stopPropagation()">
+      ${items.map((it) => `<button style="width:100%;text-align:left;padding:8px 14px;background:none;border:none;color:var(--text);font-size:12.5px;cursor:pointer" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='none'" onclick="window.__evRowMenuDo('${esc(e.id)}','${esc(it.k)}')">${esc(it.l)}</button>`).join('')}
+    </div>`;
+  }
+  window.__evRowMenuDo = (id, k) => {
+    _ui.rowMenuOpen = null;
+    if (k === 'archive')   return window.__evArchive(id);
+    if (k === 'cancel')    return window.__evCancel(id);
+    if (k === 'duplicate') return window.__evDuplicate(id);
+    if (k === 'edit')      return window.__evWizardOpen('edit', id);
+    if (k === 'publish')   return window.__evPublish ? window.__evPublish(id) : alert('Publiceren-endpoint niet gevonden.');
+    if (window.DFO?.render) window.DFO.render();
   };
   window.__evArchive = async (id) => {
     if (!window.confirm('Event archiveren? Het verdwijnt uit de actieve lijst maar blijft bewaard.')) return;
@@ -1254,7 +1297,7 @@
                 ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
                 : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`,
               _belStatusDropdown(a, id),
-              `<button class="icon-btn" title="Meer" onclick="window.__evAttKebab('${esc(a.id)}','${esc(id)}')" style="width:26px;height:26px">${svg(I.dots || I.settings,'width:13px;height:13px')}</button>`,
+              `<div style="position:relative;display:inline-block"><button class="icon-btn" title="Meer" onclick="event.stopPropagation();window.__evAttKebab('${esc(a.id)}','${esc(id)}')" style="width:26px;height:26px">${svg(I.dots || I.settings,'width:13px;height:13px')}</button>${_ui.attKebabOpen === a.id ? _evAttKebabHtml(a.id, id) : ''}</div>`,
             ];
           })
         )}</div>`}`;
@@ -1313,32 +1356,53 @@
       + (tags.length > 3 ? `<span style="font-size:10px;color:var(--text-3)">+${tags.length - 3}</span>` : '');
   }
   window.__evAttFilter = (v) => { _ui.attStatusFilter = v; if (window.DFO?.render) window.DFO.render(); };
+  // Bug 2: attendee-kebab-dropdown ipv window.prompt() met 8 opties.
   window.__evAttKebab = (attId, eventId) => {
-    const choice = window.prompt(
-      'Actie voor deelnemer?\n\n' +
-      '1. Bewerken\n' +
-      '2. Stuur keuze-link\n' +
-      '3. Stuur vragenlijst\n' +
-      '4. Verplaatsen naar ander event\n' +
-      '5. Offerte aanmaken\n' +
-      '6. Tag toevoegen\n' +
-      '7. Tag verwijderen\n' +
-      '8. Verwijderen\n\n' +
-      'Typ 1-8 (of cancel):'
-    );
-    if (!choice) return;
-    const actions = {
-      '1': () => window.__evAttEdit(attId, eventId),
-      '2': () => window.__evAttSendInvite(attId, eventId),
-      '3': () => window.__evAttSendQuest(attId, eventId),
-      '4': () => window.__evAttMove(attId, eventId),
-      '5': () => window.__evAttToOfferte(attId, eventId),
-      '6': () => window.__evAttTagAdd(attId, eventId),
-      '7': () => window.__evAttTagRemove(attId, eventId),
-      '8': () => window.__evAttDelete(attId, eventId),
-    };
-    const fn = actions[choice.trim()]; if (fn) fn();
+    _ui.attKebabOpen = _ui.attKebabOpen === attId ? null : attId;
+    _ui.rowMenuOpen = null;
+    if (window.DFO?.render) window.DFO.render();
   };
+  function _evAttKebabHtml(attId, eventId) {
+    const items = [
+      { l: 'Bewerken',                     k: 'edit' },
+      { l: 'Stuur keuze-link',             k: 'invite' },
+      { l: 'Stuur vragenlijst',            k: 'quest' },
+      { l: 'Verplaatsen naar ander event', k: 'move' },
+      { l: 'Offerte aanmaken',             k: 'offerte' },
+      { l: 'Tag toevoegen',                k: 'tagadd' },
+      { l: 'Tag verwijderen',              k: 'tagrem' },
+      { l: 'Verwijderen',                  k: 'delete', danger: true },
+    ];
+    return `<div class="ev-kebab-menu" style="position:absolute;top:30px;right:0;min-width:220px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:100;padding:4px 0" onclick="event.stopPropagation()">
+      ${items.map((it) => `<button style="width:100%;text-align:left;padding:8px 14px;background:none;border:none;color:${it.danger ? 'var(--rose)' : 'var(--text)'};font-size:12.5px;cursor:pointer" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='none'" onclick="window.__evAttKebabDo('${esc(attId)}','${esc(eventId)}','${esc(it.k)}')">${esc(it.l)}</button>`).join('')}
+    </div>`;
+  }
+  window.__evAttKebabDo = (attId, eventId, k) => {
+    _ui.attKebabOpen = null;
+    const actions = {
+      edit:    () => window.__evAttEdit(attId, eventId),
+      invite:  () => window.__evAttSendInvite(attId, eventId),
+      quest:   () => window.__evAttSendQuest(attId, eventId),
+      move:    () => window.__evAttMove(attId, eventId),
+      offerte: () => window.__evAttToOfferte(attId, eventId),
+      tagadd:  () => window.__evAttTagAdd(attId, eventId),
+      tagrem:  () => window.__evAttTagRemove(attId, eventId),
+      delete:  () => window.__evAttDelete(attId, eventId),
+    };
+    const fn = actions[k]; if (fn) fn();
+    else if (window.DFO?.render) window.DFO.render();
+  };
+  // Document-level click-listener om kebab-dropdowns te sluiten bij buiten-klik.
+  // Eenmalig installeren (guard tegen dubbele bind bij render).
+  if (!window.__evKebabDocBound) {
+    window.__evKebabDocBound = true;
+    document.addEventListener('click', () => {
+      if (_ui.rowMenuOpen || _ui.attKebabOpen) {
+        _ui.rowMenuOpen = null; _ui.attKebabOpen = null;
+        if (window.DFO?.render) window.DFO.render();
+      }
+    });
+  }
 
   // Kebab-actie handlers — thin wrappers over bestaande endpoints
   async function _post(url, body, okMsg, refreshEvent) {
@@ -1609,7 +1673,7 @@
   }
 
   function _modalShell(title, body) {
-    return `<div class="ev-modal-backdrop" onclick="if(event.target===this)window.__evAttClose()" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px">
+    return `<div class="ev-modal-backdrop" onclick="if(event.target===this)window.__evAttClose()" style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px">
       <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:920px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
           <div style="font-size:14px;font-weight:600;flex:1">${esc(title)}</div>
@@ -1923,6 +1987,7 @@
               placeholder="Zoek op naam of nummer…"
               value="${esc(_ui.inboxSearchQ)}"
               oninput="window.__evInboxSearch(this.value)"
+              onsearch="window.__evInboxSearch(this.value)"
             />
             ${q ? `<div class="ev-inbox-search-count">${filtered.length} van ${items.length}</div>` : ''}
           </div>
@@ -2536,7 +2601,10 @@
         🤖 Simone bekijkt dit gesprek…
         <span style="margin-left:auto;font-size:10.5px;color:var(--text-3)" title="Suggesties verschijnen alleen bij inbound berichten ≥ 5 tekens die niet in de 'trivial replies'-set staan. Cooldown 60s na jouw laatste antwoord.">ⓘ</span>
         <style>@keyframes evPulse { 0%,100% { opacity:.35; } 50% { opacity:1; } }</style>
-      </div>` : '')}
+      </div>` : (isWA && simEnabled && simSuggest && !sugg && !_ui.suggestionHidden[convId] ? `<div style="padding:6px 10px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;color:var(--text-3);font-size:11px;display:flex;align-items:center;gap:6px">
+        <span style="display:inline-flex;width:14px;height:14px;align-items:center;justify-content:center;font-size:10px;color:var(--violet)">🤖</span>
+        <span style="flex:1">Geen recente Simone-suggestie. Nieuwe inbound-berichten (≥5 tekens) triggeren automatisch een concept — oude gesprekken (&gt;60min) worden niet meer gepolst.</span>
+      </div>` : ''))}
 
       <div style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-3);flex-wrap:wrap">
         <span style="display:inline-flex;align-items:center;gap:4px">
@@ -2909,7 +2977,7 @@
           `).join('')}
         </div>`}`;
     }
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__evCompTplClose()">
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__evCompTplClose()">
       <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:620px;width:100%;max-height:80vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column">
         <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
           <div style="font-size:14px;font-weight:600;flex:1">Kies een template</div>
@@ -3533,8 +3601,15 @@
               : `<span title="Nog geen match — vragenlijst onbekend" style="color:var(--text-3);font-size:12px">—</span>`;
             const insDate = _fmtDate(r.received_at);
             const insTime = _fmtTime(r.received_at);
+            // Bug 1A: wire rij aan __evAttOpen als er een gematchte attendee is;
+            // anders subtiele "geen gekoppelde deelnemer"-melding via toast.
+            const attId = r.matched_attendee?.id || null;
+            const eventId = r.matched_event?.id || null;
+            const nameCell = attId && eventId
+              ? `<a href="#" onclick="event.preventDefault();window.__evAttOpen('${esc(attId)}','${esc(eventId)}')" title="Bekijk deelnemer-detail" style="color:inherit;text-decoration:none;display:block"><div class="row-avatar" style="cursor:pointer">${H.av(naam, 28)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}</span></div></a>`
+              : `<div class="row-avatar" style="cursor:default" onclick="window.__evSignupNoMatch()" title="Nog geen gekoppelde deelnemer">${H.av(naam, 28)}<span class="cell-main" style="color:var(--text-2)">${esc(naam)}</span></div>`;
             return [
-              `<div class="row-avatar">${H.av(naam, 28)}<span class="cell-main">${esc(naam)}</span></div>`,
+              nameCell,
               `<span style="color:var(--text-3);font-size:12.5px">${esc(r.email || '—')}</span>`,
               `<div style="min-width:0"><div style="color:var(--text-2);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(evTitle)}</div>${evDate ? `<div class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(evDate)}</div>` : ''}</div>`,
               H.pill(mc, ml),
@@ -3545,6 +3620,11 @@
         )}`;
   }
   window.__evSetSignupStatus = (v) => { _live.signups.data = null; _live.signups.error = null; fetchSignups(v); };
+  // Bug 1A: subtiele melding voor niet-gematchte inschrijvingen (geen dode klik).
+  window.__evSignupNoMatch = () => {
+    if (typeof _showToast === 'function') _showToast('Nog geen gekoppelde deelnemer — wacht op auto-match of match handmatig.');
+    else alert('Nog geen gekoppelde deelnemer — wacht op auto-match of match handmatig.');
+  };
 
   // ═══════════════════════════════════════════════════════════════════════
   // STATISTIEKEN-tab (vervangt Mentor-grootboek)
