@@ -42,14 +42,28 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   // Defensieve coerce: sommige lead-velden (source, source_ref) kunnen een
-  // object zijn (join-shape uit backend). Voorkom "[object Object]" renderen.
+  // object zijn (join-shape uit backend). Voorkom "[object Object]" én
+  // voorkom ruwe JSON in de UI (die kwam in QA naar boven). Return '' als
+  // geen recognizable label-key beschikbaar is — nette lege plek is beter
+  // dan onleesbare blob.
   const safeStr = (v) => {
     if (v == null) return '';
     if (typeof v === 'string' || typeof v === 'number') return String(v);
     if (typeof v === 'object') {
-      return String(v.type || v.label || v.name || v.slug || v.id || JSON.stringify(v).slice(0, 80));
+      // Alleen bekende labelvelden. GEEN JSON-fallback (dat blowde de layout op).
+      return String(v.type || v.label || v.name || v.slug || v.id || '');
     }
     return String(v);
+  };
+  // Bron-label helper: normaliseert source (string of object) + optionele
+  // source_ref tot een kort, veilig label. "manual · no-show follow-up" i.p.v.
+  // ruw object of JSON-dump.
+  const sourceLabel = (src, ref) => {
+    const s = safeStr(src);
+    const r = safeStr(ref);
+    if (!s && !r) return '—';
+    if (s && r && s !== r) return s + ' · ' + r.slice(0, 30);
+    return s || r || '—';
   };
   const fmtDate = (iso, opts) => {
     if (!iso) return '—';
@@ -265,7 +279,12 @@
     if (st.loading) return;
     if (st.data && st.key === key) return;
     st.loading = true; st.error = null; st.key = key;
-    const j = await tryFetch('appts:' + key, '/api/follow-up-appointments?period=' + encodeURIComponent(key));
+    // BUG-FIX P1-4: past_week toonde 0 rijen omdat backend default status =
+    // [scheduled, in_progress] voor future-periods. Voor past_week zijn
+    // die statussen per definitie niet aanwezig; stuur completed/no_show/
+    // cancelled/verplaatst expliciet mee.
+    const statusForPeriod = key === 'past_week' ? '&status=completed,no_show,cancelled,verplaatst' : '';
+    const j = await tryFetch('appts:' + key, '/api/follow-up-appointments?period=' + encodeURIComponent(key) + statusForPeriod);
     st.loading = false;
     if (j && j.__error) st.error = j.__error;
     else st.data = { appointments: asArr(j?.appointments), count: Number(j?.count || 0), period: j?.period };
@@ -277,9 +296,16 @@
     if (st.loading[id] || st.data[id]) return;
     st.loading[id] = true; st.error[id] = null;
     const j = await tryFetch('appt-detail:' + id, '/api/follow-up-appointment-detail?id=' + encodeURIComponent(id));
+    if (j && j.__error) { st.error[id] = j.__error; st.loading[id] = false; if (render) render(); return; }
+    // BUG-FIX P1-2 fallback: als appointment-detail geen lead_history heeft
+    // (bv. leeg omdat lead_ghl_contact_id ontbreekt), probeer alsnog
+    // follow-up-appointment-history die op eigen wijze via andere joins zoekt.
+    if (j && (!Array.isArray(j.lead_history) || j.lead_history.length === 0)) {
+      const h = await tryFetch('appt-hist:' + id, '/api/follow-up-appointment-history?id=' + encodeURIComponent(id));
+      if (h && !h.__error && Array.isArray(h.history)) j.lead_history = h.history;
+    }
     st.loading[id] = false;
-    if (j && j.__error) st.error[id] = j.__error;
-    else st.data[id] = j || null;
+    st.data[id] = j || null;
     if (render) render();
   }
   async function fetchKalender() {
@@ -666,18 +692,10 @@
   window.__fuApptOutcomeSave = () => {
     const m = _ui.apptOutcomeModal; if (!m || !m.outcome) return;
     if (APPT_RISK_OUTCOMES.has(m.outcome)) {
-      const risk = {
-        sale: 'Afspraak → completed, GHL → showed, Zoom-link wordt verwijderd.',
-        gesprek_gehad: 'Afspraak → completed, GHL → showed, Zoom-link wordt verwijderd.',
-        wilt_niet_meer: 'Afspraak → cancelled, GHL → showed, Zoom-link wordt verwijderd.',
-        niet_geschikt: 'Afspraak → cancelled, GHL → showed, Zoom-link wordt verwijderd.',
-        no_show: 'Afspraak → no_show, GHL → noshow, nieuwe follow-up-lead met terugbel +2u.',
-        later_opnieuw: 'Afspraak → completed, GHL → showed, nieuwe snoozed lead.',
-        terugbel: 'Afspraak → completed, GHL → showed, nieuwe lead met terugbel-datum.',
-        verzetten: 'Gedelegeerd naar verplaats-call. GHL wordt bijgewerkt (blocking).',
-        annuleren: 'Gedelegeerd naar annuleer. GHL wordt bijgewerkt (blocking); Zoom NIET verwijderd.',
-      }[m.outcome];
-      openConfirm((risk || 'Klant-zichtbaar effect') + ' Weet je zeker dat je "' + m.outcome + '" wilt registreren?', submitApptOutcome, 'warn');
+      // APPT_OUTCOME_RISK is single-source-of-truth voor gevolg-tekst (ook getoond
+      // in-modal). Confirm herhaalt 'em zodat je 't nog eens leest voor de klik.
+      const risk = (typeof APPT_OUTCOME_RISK !== 'undefined' && APPT_OUTCOME_RISK[m.outcome]) || 'Klant-zichtbaar effect.';
+      openConfirm(risk + ' Weet je zeker dat je "' + m.outcome + '" wilt registreren?', submitApptOutcome, 'warn');
     } else {
       submitApptOutcome();
     }
@@ -732,11 +750,24 @@
     </div>`;
   }
   function _renderBucketsRow() {
-    const counts = _live.leadsList.data?.counts || {};
+    // BUG-FIX P1-1: single source of truth. Voor de ACTIEVE bucket toon
+    // altijd het geladen lijst-aantal (leads.length na client-side bucket-
+    // en zoek-filter). Voor niet-actieve buckets: backend-counts, MAAR
+    // alleen als de user 'em nog niet heeft geladen. Zo blijft badge=lijst
+    // wanneer je een bucket bekijkt.
+    // Root-cause 139/129: backend counts (uit een aparte SELECT) tellen
+    // eventueel gearchiveerde/klant-buiten-scope leads mee die de list-query
+    // wél filtert (RLS + owner-gate + snoozed-exclude in default view=open).
+    // Root-cause 11/1 (snoozed): identiek — counts.snoozed telt alle
+    // snoozed-rijen, list met view=snoozed filtert extra op RLS/owner.
+    const backendCounts = _live.leadsList.data?.counts || {};
+    const activeListLen = asArr(_live.leadsList.data?.leads).length;
     return `<div style="padding:10px 16px;display:flex;gap:6px;align-items:center;overflow-x:auto;border-bottom:1px solid var(--border);background:var(--surface)">
       ${BUCKETS.map((b) => {
         const on = _ui.view === b.slug;
-        const cnt = counts[b.slug === 'open' ? 'open' : b.slug] || 0;
+        // Voor de ACTIEVE bucket: gebruik ALTIJD list-length (waarheid van wat je ziet).
+        // Voor niet-actieve buckets: backend-count als leidraad.
+        const cnt = on ? activeListLen : (backendCounts[b.slug === 'open' ? 'open' : b.slug] || 0);
         return `<button class="chip ${on ? 'on' : ''}" style="padding:5px 12px;border:1px solid ${on ? `var(--${b.color}, var(--m))` : 'var(--border)'};background:${on ? `var(--${b.color}-soft, var(--m-soft))` : 'transparent'};color:${on ? `var(--${b.color}, var(--m))` : 'var(--text-2)'};border-radius:20px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:6px" onclick="window.__fuSetView('${b.slug}')">
           ${esc(b.label)}${cnt ? `<span class="mono" style="font-size:10.5px;opacity:.8">${cnt}</span>` : ''}
         </button>`;
@@ -830,7 +861,7 @@
             ${_statusPill(l.lead_status)}
             ${_bucketPill(l.bucket)}
             ${l.is_hot ? '<span style="font-size:10.5px;padding:1px 7px;background:var(--rose-soft);color:var(--rose);border-radius:20px;font-weight:600">🔥 HOT</span>' : ''}
-            <span style="font-size:10.5px;color:var(--text-3)">Bron: ${esc(safeStr(l.source) || '—')}</span>
+            <span style="font-size:10.5px;color:var(--text-3);word-break:break-word;max-width:100%">Bron: ${esc(sourceLabel(l.source, null))}</span>
             ${l.owner_name ? `<span style="font-size:10.5px;color:var(--text-3)">Eigenaar: ${esc(safeStr(l.owner_name))}</span>` : ''}
           </div>
         </div>
@@ -871,7 +902,7 @@
           <div><b>Eigenaar:</b> ${esc(l.owner_name || '(niet toegewezen)')}</div>
           <div><b>E-mail:</b> ${esc(l.lead_email || '—')}</div>
           <div><b>Telefoon:</b> ${esc(l.lead_phone || '—')}</div>
-          <div><b>Bron:</b> ${esc(safeStr(l.source) || '—')}${l.source_ref ? ` · <span class="mono" style="font-size:11.5px">${esc(safeStr(l.source_ref))}</span>` : ''}</div>
+          <div style="word-break:break-word;overflow-wrap:anywhere"><b>Bron:</b> ${esc(sourceLabel(l.source, l.source_ref))}</div>
           <div><b>Type:</b> ${l.lead_kind === 'zoom' ? 'Zoom' : 'Call'}</div>
           <div><b>Pogingen:</b> <span class="mono">${l.attempts || 0}×</span></div>
           <div><b>Laatste contact:</b> ${fmtDate(l.last_contact_at)}</div>
@@ -1109,11 +1140,17 @@
   function _renderOpvolglijst(data) {
     // BUG-FIX null-guard: data kan null zijn op eerste render vóór fetch.
     if (!data) return skel();
-    // BUG-FIX dedup: dedupe op uid (of ref_id+type als fallback) — bron-tabellen
-    // kunnen dezelfde attendee/appointment 2× teruggeven bij overlap-flags.
+    // BUG-FIX dedup (rev): uid bleek NIET stabiel — dedup gebruikte 'em maar
+    // 2 rijen kregen elk hun eigen uid ondanks identieke lead/tijd (bv. attendee-
+    // rij én appointment-rij voor dezelfde persoon). Nu een STABIELE composite
+    // key op de businesswaarden (email + scheduled_at + type). Val voor rijen
+    // zonder email terug op naam+tijd, want anders zou dedup te breed spannen.
     const seen = new Set();
     const items = asArr(data.items).filter((it) => {
-      const key = it.uid || `${it.type || 'x'}:${it.ref_id || ''}`;
+      const emailPart = String(it.email || it.name || '').toLowerCase().trim();
+      const timePart = String(it.scheduled_at || '').slice(0, 16); // "YYYY-MM-DDTHH:MM"
+      const typePart = String(it.type || 'x');
+      const key = `${typePart}|${emailPart}|${timePart}`;
       if (seen.has(key)) return false;
       seen.add(key); return true;
     });
@@ -1239,25 +1276,25 @@
           </div>
         </div>` : ''}
         ${d.appointment?.snelle_notitie ? `<div style="padding:10px 12px;background:var(--amber-soft);border-radius:6px;font-size:12.5px;line-height:1.5"><b>Snelle notitie:</b> ${esc(d.appointment.snelle_notitie)}</div>` : ''}
-        ${d.customer_context ? `<div style="padding:12px 14px;background:var(--surface-2);border-radius:8px">
+        <div style="padding:12px 14px;background:var(--surface-2);border-radius:8px">
           <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Klant-context</div>
-          <div style="font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
-            <div><b>Naam:</b> ${esc(safeStr(d.customer_context.name) || '—')}</div>
-            <div><b>Mentor:</b> ${esc(safeStr(d.customer_context.mentor_name) || '—')}</div>
-            <div><b>E-mail:</b> ${esc(safeStr(d.customer_context.email) || '—')}</div>
-            <div><b>Bedrijf:</b> ${esc(safeStr(d.customer_context.company_name) || '—')}</div>
+          ${d.customer_context ? `<div style="font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
+            <div style="word-break:break-word"><b>Naam:</b> ${esc(safeStr(d.customer_context.name) || '—')}</div>
+            <div style="word-break:break-word"><b>Mentor:</b> ${esc(safeStr(d.customer_context.mentor_name) || '—')}</div>
+            <div style="word-break:break-word"><b>E-mail:</b> ${esc(safeStr(d.customer_context.email) || '—')}</div>
+            <div style="word-break:break-word"><b>Bedrijf:</b> ${esc(safeStr(d.customer_context.company_name) || '—')}</div>
             <div><b>Verlengt niet:</b> ${d.customer_context.retention_not_renewing ? 'ja' : 'nee'}</div>
-          </div>
-        </div>` : ''}
+          </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic">Geen klant-koppeling (lead is nog niet aan een customer gematched — check ghl_contact_id + email).</div>`}
+        </div>
         ${d.outcome ? `<div style="padding:12px 14px;background:var(--emerald-soft);border-radius:8px;font-size:12.5px">
           <b>Uitkomst geregistreerd:</b> ${esc(safeStr(d.outcome.outcome) || '—')} · ${fmtDate(d.outcome.created_at)}
         </div>` : ''}
-        ${Array.isArray(d.lead_history) && d.lead_history.length > 0 ? `<div>
-          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Historie (${d.lead_history.length})</div>
-          <div style="display:flex;flex-direction:column;gap:4px">
-            ${d.lead_history.map((h) => `<div style="padding:6px 10px;background:var(--surface-2);border-radius:4px;font-size:12px;display:flex;justify-content:space-between;gap:8px"><span>${fmtDate(h.scheduled_at)}</span>${_apptStatusPill(h.status)}<span style="color:var(--text-3)">${esc(safeStr(h.voicememo_status) || '')}</span></div>`).join('')}
-          </div>
-        </div>` : ''}
+        <div>
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Lead-historie${Array.isArray(d.lead_history) ? ` (${d.lead_history.length})` : ''}</div>
+          ${Array.isArray(d.lead_history) && d.lead_history.length > 0 ? `<div style="display:flex;flex-direction:column;gap:4px;max-height:220px;overflow-y:auto">
+            ${d.lead_history.map((h) => `<div style="padding:6px 10px;background:var(--surface-2);border-radius:4px;font-size:12px;display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="mono" style="color:var(--text-2)">${fmtDate(h.scheduled_at)}</span>${_apptStatusPill(h.status)}<span style="color:var(--text-3);font-size:11px">${esc(safeStr(h.voicememo_status) || '')}</span></div>`).join('')}
+          </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic;padding:6px 0">Geen eerdere afspraken gevonden voor deze lead.</div>`}
+        </div>
         <div style="display:flex;justify-content:flex-end;gap:8px">
           <button class="btn btn-ghost" onclick="window.__fuApptClose()">Sluiten</button>
           <button class="btn btn-primary" onclick="window.__fuApptClose();window.__fuApptOutcomeOpen('${esc(id)}')">Uitkomst registreren →</button>
@@ -1276,14 +1313,28 @@
     { v: 'verzetten',      l: '↔ Verplaatsen',  c: 'amber' },
     { v: 'annuleren',      l: '✕ Annuleren',    c: 'rose' },
   ];
+  // Per-uitkomst gevolg-tekst (getoond zowel in modal-body ALS in confirm).
+  const APPT_OUTCOME_RISK = {
+    gesprek_gehad: 'Afspraak → completed · GHL → showed · Zoom-link wordt VERWIJDERD.',
+    sale:          'Afspraak → completed · GHL → showed · Zoom-link wordt VERWIJDERD.',
+    wilt_niet_meer:'Afspraak → cancelled · GHL → showed · Zoom-link wordt VERWIJDERD (call is al gebeurd).',
+    niet_geschikt: 'Afspraak → cancelled · GHL → showed · Zoom-link wordt VERWIJDERD.',
+    no_show:       'Afspraak → no_show · GHL → noshow · NIEUWE follow-up-lead met terugbel +2u.',
+    later_opnieuw: 'Afspraak → completed · GHL → showed · NIEUWE snoozed lead voor N maanden.',
+    terugbel:      'Afspraak → completed · GHL → showed · NIEUWE lead met terugbel-datum + kind.',
+    verzetten:     'Gedelegeerd naar verplaats-call · GHL-agenda wordt bijgewerkt (blocking) · ONOMKEERBAAR (geen undo).',
+    annuleren:     'Gedelegeerd naar annuleer · GHL wordt bijgewerkt (blocking) · Zoom-link wordt NIET verwijderd · ONOMKEERBAAR.',
+  };
   function _apptOutcomeModalRender() {
     const m = _ui.apptOutcomeModal;
     if (!m) return '';
     const meta = APPT_OUTCOMES.find((o) => o.v === m.outcome);
+    const riskText = m.outcome ? APPT_OUTCOME_RISK[m.outcome] : null;
     const body = `
       <div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:14px">
         ⚠ <b>Test-data eerst!</b> Deze acties raken GHL-agenda, Zoom, en kunnen follow-up-leads aanmaken. Verifieer preview-guard voor je op productie test.
       </div>
+      ${riskText ? `<div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber);color:var(--amber);border-radius:6px;font-size:12px;margin-bottom:14px;line-height:1.5"><b>Gevolg van "${esc(meta ? meta.l : m.outcome)}":</b><br>${esc(riskText)}</div>` : ''}
       <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Uitkomst</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:14px">
         ${APPT_OUTCOMES.map((o) => {
