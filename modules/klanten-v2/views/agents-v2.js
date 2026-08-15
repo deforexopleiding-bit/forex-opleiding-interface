@@ -1255,7 +1255,7 @@
     return s;
   }
   function _mdBlock(rawText) {
-    // Eerst esc, dan block-level (lists/paragraphs), dan inline.
+    // Eerst esc, dan block-level (headings/hr/lists/paragraphs), dan inline.
     const escd = esc(String(rawText || ''));
     const lines = escd.split('\n');
     let html = '';
@@ -1267,8 +1267,24 @@
     const flushList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
     for (const raw of lines) {
       const line = raw.replace(/\s+$/, '');
+      // Headings ## ... → h2 (of h1/h3/…) — match op begin-hashes.
+      const hMatch = /^(#{1,6})\s+(.+)$/.exec(line);
+      // Horizontal rule --- of *** of ___ (min 3 chars, alleen die tekens).
+      const hrMatch = /^\s*([-*_])\1{2,}\s*$/.exec(line);
       const ulMatch = /^\s*[-*]\s+(.+)$/.exec(line);
       const olMatch = /^\s*\d+\.\s+(.+)$/.exec(line);
+      if (hrMatch) {
+        flushPara(); flushList();
+        html += `<hr style="border:none;border-top:1px solid var(--border);margin:12px 0" />`;
+        continue;
+      }
+      if (hMatch) {
+        flushPara(); flushList();
+        const level = Math.min(6, hMatch[1].length);
+        const sizes = { 1: 18, 2: 16, 3: 14.5, 4: 13.5, 5: 13, 6: 12.5 };
+        html += `<h${level} style="font-size:${sizes[level]}px;font-weight:600;margin:12px 0 6px 0;line-height:1.3">${_mdInline(hMatch[2])}</h${level}>`;
+        continue;
+      }
       if (ulMatch) {
         flushPara();
         if (listType !== 'ul') { flushList(); listType = 'ul'; html += `<ul style="margin:0 0 8px 20px;padding:0">`; }
@@ -1848,18 +1864,37 @@
     const it = arr[i]; if (!it) return;
     window.__agKbArtEdit(it.id);
   };
+  // Bug: agent-KB rij-klik → opende alleen tab-nav via DFO.setTab (die bestaat
+  // NIET; alleen DFO.goTab is echt). Nu: open direct de bewerk-modal met de
+  // rij als item. Portal-route _agEnsurePortal zorgt dat de modal ook echt
+  // zichtbaar wordt (net als bij centrale artikelen). Agents-veld normaliseren:
+  // rij levert 'agents' als namen-array; modal-checkbox-render matcht op ids.
   window.__agKbAllRowClick = (i) => {
     const arr = window.__agKbAllArts || [];
     const it = arr[i]; if (!it) return;
-    // agents is een array van namen; vind eerste bijbehorende agent-id.
-    const firstAgentName = Array.isArray(it.agents) && it.agents.length ? it.agents[0] : null;
-    if (!firstAgentName) { alert('Geen agent gekoppeld aan dit KB-item.'); return; }
-    const ag = AGENTS_STATIC.find((x) => x.n === firstAgentName || x.id === firstAgentName);
-    if (!ag) { alert('Bijbehorende agent niet gevonden.'); return; }
-    _ui.agSel = ag.id;
-    _ui.agCfgTab = 'Kennisbank';
-    if (window.DFO?.setTab) window.DFO.setTab('Configuratie');
-    else if (window.DFO?.render) window.DFO.render();
+    // Zet in de bewerk-modal. `agents`-veld normaliseren naar ids zodat de
+    // checkbox-render matcht (${on ? checked : ''} op x.id === k).
+    const agentIds = (Array.isArray(it.agents) ? it.agents : []).map((n) => {
+      const ag = AGENTS_STATIC.find((x) => x.n === n || x.id === n);
+      return ag ? ag.id : n;
+    });
+    _ui.artModal = {
+      mode: 'edit',
+      item: {
+        onderwerp: it.onderwerp || '',
+        categorie: it.categorie || '',
+        content:   it.content   || '',
+        agents:    agentIds,
+        // Agent-KB items zitten niet in kennisbank_artikelen tabel — geen id.
+        // De save-flow gaat via een andere route (agent-config). Voor nu:
+        // mode='edit-agent-kb' zodat _artikelModal read-only kan tonen als
+        // toekomstige uitbreiding; save-endpoint faalt netjes voor items
+        // zonder id (agent-KB is inline-editable op agent-config-pagina).
+      },
+      agentKbSource: true,
+    };
+    if (window.DFO?.render) window.DFO.render();
+    _agEnsurePortal('agv-artmodal');
   };
   window.__agArtClose = () => { _ui.artModal = null; _agRemovePortal('agv-artmodal'); if (window.DFO?.render) window.DFO.render(); };
   window.__agArtSave = async () => {
