@@ -144,6 +144,12 @@
     stats:       { loading: false, error: null, data: null, key: null },    // cockpit-dashboard (period)
     metrics:     { loading: false, error: null, data: null, key: null },    // dashboard-metrics (period)
     search:      { loading: false, error: null, data: null, key: null },    // /api/follow-up-search
+    // BROK 5
+    voicememo:   { loading: false, error: null, data: null },               // GET follow-up-voicememo-round
+    messages:    { loading: {}, error: {}, data: {} },                      // per contact_id
+    freeSlots:   { loading: false, error: null, data: null, key: null },    // key = start-date
+    adminBackfillContacts: { loading: false, data: null, error: null },
+    adminGhlBackfill: { loading: false, data: null, error: null, mode: 'dry_run' },
   };
   const _ui = {
     view:            'open',            // buckets-slug (open/vandaag/te_laat/komende_7/snoozed/alle)
@@ -182,6 +188,13 @@
     eventFollowupOnly: false,              // toggle in Event-bellijst
     statsPeriod:       'today',            // today|week|month
     searchQ:           '',
+    // BROK 5
+    voicememoBusy:     {},        // per appointment_id
+    voicememoAllBusy:  false,
+    deleteApptModal:   null,      // { appointmentId, reden, saving, error }
+    adminBackfillBusy: false,
+    adminGhlBackfillConfirm: '',  // confirm-token input
+    adminGhlBackfillBusy: false,
   };
 
   // ── Helpers ─────────────────────────────────────────────────────────
@@ -572,6 +585,119 @@
     st.loading = false;
     if (j && j.__error) st.error = j.__error;
     else st.data = { q, results: asArr(j?.results) };
+    if (render) render();
+  }
+  // ── BROK 5 fetchers ─────────────────────────────────────────────────
+  async function fetchVoicememo() {
+    const st = _live.voicememo;
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('voicememo-round', '/api/follow-up-voicememo-round');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { leads: asArr(j?.leads), today: j?.today, counts: j?.counts || {} };
+    if (render) render();
+  }
+  async function fetchMessages(contactId) {
+    if (!contactId) return;
+    const st = _live.messages;
+    if (st.loading[contactId] || st.data[contactId]) return;
+    st.loading[contactId] = true; st.error[contactId] = null;
+    const j = await tryFetch('messages:' + contactId, '/api/follow-up-messages?contact_id=' + encodeURIComponent(contactId));
+    st.loading[contactId] = false;
+    if (j && j.__error) st.error[contactId] = j.__error;
+    else st.data[contactId] = asArr(j?.messages);
+    if (render) render();
+  }
+  async function fetchFreeSlots(startDate) {
+    const st = _live.freeSlots;
+    const key = startDate || '_today';
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    st.loading = true; st.error = null; st.key = key;
+    const url = '/api/follow-up-ghl-free-slots' + (startDate ? '?date=' + encodeURIComponent(startDate) : '');
+    const j = await tryFetch('free-slots', url);
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { slots: asArr(j?.slots), timezone: j?.timezone };
+    if (render) render();
+  }
+  // ── BROK 5 write-handlers ───────────────────────────────────────────
+  async function submitVoicememoSent(apptId, all) {
+    const key = all ? '_ALL' : apptId;
+    if (all) _ui.voicememoAllBusy = true; else _ui.voicememoBusy[apptId] = true;
+    if (render) render();
+    const body = all ? { all: true } : { appointment_id: apptId };
+    const j = await tryFetch('voicememo-mark', '/api/follow-up-voicememo-round', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }, 12000);
+    if (all) _ui.voicememoAllBusy = false; else _ui.voicememoBusy[apptId] = false;
+    if (j && (j.__error || j.error)) {
+      showToast('Markeren mislukt: ' + (j.__error || j.error), 'warn');
+      if (render) render(); return;
+    }
+    _live.voicememo.data = null;
+    showToast(all ? `${j.updated || 0} voicememos gemarkeerd als verzonden` : 'Voicememo gemarkeerd als verzonden', 'success');
+    if (render) render();
+  }
+  async function submitDeleteAppt() {
+    const m = _ui.deleteApptModal;
+    if (!m || m.saving) return;
+    m.saving = true; m.error = null; if (render) render();
+    const j = await tryFetch('appt-delete', '/api/follow-up-verwijder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appointment_id: m.appointmentId, reden: m.reden || null }),
+    }, 15000);
+    m.saving = false;
+    if (j && (j.__error || j.error || !j.success)) {
+      m.error = j.__error || j.error || 'Verwijderen mislukt';
+      if (render) render(); return;
+    }
+    _ui.deleteApptModal = null;
+    _ui.apptDetailId = null;
+    _live.appts.data = null; _live.appts.key = null;
+    _live.archief.data = null; _live.archief.key = null;
+    const parts = [];
+    if (j.ghl_cancelled) parts.push('GHL cancelled');
+    if (j.zoom_deleted) parts.push('Zoom deleted');
+    showToast('Afspraak verwijderd (soft-delete)' + (parts.length ? ' · ' + parts.join(', ') : ''), 'success');
+    if (render) render();
+  }
+  async function submitAdminBackfillContacts() {
+    if (_ui.adminBackfillBusy) return;
+    _ui.adminBackfillBusy = true; _live.adminBackfillContacts.data = null; _live.adminBackfillContacts.error = null;
+    if (render) render();
+    const j = await tryFetch('backfill-contacts', '/api/follow-up-backfill-contacts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }, 60000);
+    _ui.adminBackfillBusy = false;
+    if (j && (j.__error || j.error)) {
+      _live.adminBackfillContacts.error = j.__error || j.error;
+      showToast('Backfill mislukt: ' + _live.adminBackfillContacts.error, 'warn');
+    } else {
+      _live.adminBackfillContacts.data = { totaal: j.totaal || 0, updated: j.updated || 0, skipped: j.skipped || 0, errors: j.errors || 0 };
+      showToast(`Backfill klaar · ${j.updated || 0}/${j.totaal || 0} bijgewerkt`, 'success');
+    }
+    if (render) render();
+  }
+  async function submitAdminGhlBackfill(dryRun) {
+    if (_ui.adminGhlBackfillBusy) return;
+    _ui.adminGhlBackfillBusy = true; if (render) render();
+    const body = dryRun ? { dry_run: true, mode: 'strict', limit: 50 }
+      : { dry_run: false, mode: 'strict', limit: 50, confirm: _ui.adminGhlBackfillConfirm };
+    const j = await tryFetch('ghl-backfill', '/api/follow-up-ghl-status-backfill', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }, 60000);
+    _ui.adminGhlBackfillBusy = false;
+    if (j && (j.__error || j.error)) {
+      _live.adminGhlBackfill.error = j.__error || j.error;
+      showToast('GHL-backfill mislukt: ' + _live.adminGhlBackfill.error, 'warn');
+    } else {
+      _live.adminGhlBackfill.data = j;
+      _live.adminGhlBackfill.mode = dryRun ? 'dry_run' : 'executed';
+      showToast(dryRun ? `Dry-run: ${j.returned || 0} kandidaten` : `Executed: ${j.succeeded || 0}/${j.processed || 0} bijgewerkt`, 'success');
+      if (!dryRun) _ui.adminGhlBackfillConfirm = '';
+    }
     if (render) render();
   }
   async function submitReactivate(type, id) {
@@ -970,6 +1096,31 @@
       if (render) render();
     }, 400);
   };
+  // ── BROK 5 handlers ─────────────────────────────────────────────────
+  window.__fuVoicememoRefresh = () => { _live.voicememo.data = null; if (render) render(); };
+  window.__fuVoicememoMark = (apptId) => { submitVoicememoSent(apptId, false); };
+  window.__fuVoicememoMarkAll = () => {
+    openConfirm('Markeer alle vandaag-Zooms als voicememo-verzonden? Dit is bulk-actie voor de ochtendronde; alleen doen na dat je alle voicememos in WhatsApp hebt verstuurd.', () => submitVoicememoSent(null, true), 'warn');
+  };
+  window.__fuDeleteApptOpen = (apptId) => {
+    _ui.deleteApptModal = { appointmentId: apptId, reden: '', saving: false, error: null };
+    if (render) render();
+  };
+  window.__fuDeleteApptClose = () => { _ui.deleteApptModal = null; if (render) render(); };
+  window.__fuDeleteApptField = (k, v) => { if (_ui.deleteApptModal) { _ui.deleteApptModal[k] = v; if (render) render(); } };
+  window.__fuDeleteApptSave = () => {
+    const m = _ui.deleteApptModal; if (!m) return;
+    openConfirm('Verwijderen: soft-delete DB + GHL-cancel (klant krijgt cancel-mail via GHL) + Zoom-meeting delete. Onomkeerbaar. Weet je zeker?', submitDeleteAppt, 'warn');
+  };
+  window.__fuAdminBackfillContacts = () => {
+    openConfirm('Backfill GHL-contacts naar alle appointments met ontbrekende email/telefoon? Loopt door alle appts; kan lang duren (max 60s per run).', submitAdminBackfillContacts, 'warn');
+  };
+  window.__fuAdminGhlBackfillDry = () => submitAdminGhlBackfill(true);
+  window.__fuAdminGhlBackfillExecuteConfirm = (v) => { _ui.adminGhlBackfillConfirm = v; if (render) render(); };
+  window.__fuAdminGhlBackfillExecute = () => {
+    if (_ui.adminGhlBackfillConfirm !== 'IK BEGRIJP HET') { showToast('Typ letterlijk "IK BEGRIJP HET" in het confirm-veld', 'warn'); return; }
+    openConfirm('EXECUTE GHL-status-backfill (mode=strict, limit=50)? Muteert live GHL appointmentStatus → "showed". Alleen super_admin. Onomkeerbaar.', () => submitAdminGhlBackfill(false), 'warn');
+  };
   window.__fuSearchOpenResult = (source, targetJson) => {
     let target;
     try { target = JSON.parse(atob(targetJson)); } catch (_) { return; }
@@ -1241,6 +1392,7 @@
     if (_ui.annuleerModal) html.push(_annuleerModal());
     if (_ui.afschrijfModal) html.push(_afschrijfModal());
     if (_ui.confirmModal) html.push(_confirmModal());
+    if (_ui.deleteApptModal) html.push(_deleteApptModal());
     return html.join('');
   }
   function _modalShell(title, body, closeHandler) {
@@ -2005,12 +2157,206 @@
             ${d.lead_history.map((h) => `<div style="padding:6px 10px;background:var(--surface-2);border-radius:4px;font-size:12px;display:flex;justify-content:space-between;gap:8px;align-items:center"><span class="mono" style="color:var(--text-2)">${fmtDate(h.scheduled_at)}</span>${_apptStatusPill(h.status)}<span style="color:var(--text-3);font-size:11px">${esc(safeStr(h.voicememo_status) || '')}</span></div>`).join('')}
           </div>` : `<div style="font-size:12px;color:var(--text-3);font-style:italic;padding:6px 0">Dit is de eerste afspraak van deze lead.</div>`}
         </div>
-        <div style="display:flex;justify-content:flex-end;gap:8px">
-          <button class="btn btn-ghost" onclick="window.__fuApptClose()">Sluiten</button>
-          <button class="btn btn-primary" onclick="window.__fuApptClose();window.__fuApptOutcomeOpen('${esc(id)}')">Uitkomst registreren →</button>
+        ${d.appointment?.ghl_contact_id ? `<div>
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+            <span>Messages (GHL contact)</span>
+            <button class="btn btn-ghost btn-sm" onclick="window.__fuLoadMessages('${esc(d.appointment.ghl_contact_id)}')">Laad</button>
+          </div>
+          ${_renderMessagesBlock(d.appointment.ghl_contact_id)}
+        </div>` : ''}
+        <div style="display:flex;justify-content:space-between;gap:8px;padding-top:12px;border-top:1px solid var(--border)">
+          <button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__fuDeleteApptOpen('${esc(id)}')">🗑 Verwijderen</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" onclick="window.__fuApptClose()">Sluiten</button>
+            <button class="btn btn-primary" onclick="window.__fuApptClose();window.__fuApptOutcomeOpen('${esc(id)}')">Uitkomst registreren →</button>
+          </div>
         </div>
       </div>`;
     return _modalShell('Afspraak-detail', body, 'window.__fuApptClose()');
+  }
+  window.__fuLoadMessages = (contactId) => { if (contactId) fetchMessages(contactId); };
+  function _renderMessagesBlock(contactId) {
+    const st = _live.messages;
+    if (st.loading[contactId]) return skel();
+    if (st.error[contactId]) return errBlk(st.error[contactId]);
+    const msgs = st.data[contactId];
+    if (msgs === undefined) return `<div style="font-size:11.5px;color:var(--text-3);font-style:italic;padding:6px 0">Klik "Laad" om berichten op te halen.</div>`;
+    if (!msgs || msgs.length === 0) return `<div style="font-size:11.5px;color:var(--text-3);font-style:italic;padding:6px 0">Geen berichten in de laatste 90 dagen.</div>`;
+    return `<div style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">${msgs.slice(0, 30).map((m) => `
+      <div style="padding:6px 10px;background:${m.direction === 'inbound' ? 'var(--surface-2)' : 'var(--m-soft, rgba(59,130,246,.10))'};border-radius:6px;font-size:11.5px">
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:2px;color:var(--text-3);font-size:10.5px"><span>${esc(safeStr(m.direction))} · ${esc(safeStr(m.channel))}</span><span>${fmtDate(m.sent_at)}</span></div>
+        <div style="color:var(--text);white-space:pre-wrap;word-break:break-word">${esc(safeStr(m.body).slice(0, 500))}</div>
+      </div>`).join('')}</div>`;
+  }
+
+  // Verwijder-modal (klant-risk: GHL cancel + Zoom delete)
+  function _deleteApptModal() {
+    const m = _ui.deleteApptModal; if (!m) return '';
+    const body = `
+      <div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:14px;line-height:1.6">
+        <div style="font-weight:600;margin-bottom:4px">⚠ Klant-risk!</div>
+        Deze actie:
+        <ul style="margin:4px 0 0 20px;padding:0">
+          <li>Soft-delete in DB (status='verwijderd').</li>
+          <li>Cancelt de GHL-afspraak — <b>de klant krijgt automatisch een GHL-cancellation-mail</b>.</li>
+          <li>Delete de Zoom-meeting (link ongeldig).</li>
+        </ul>
+        Onomkeerbaar. Geen dry-run beschikbaar in de backend.
+      </div>
+      <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Reden (optioneel — wordt aan snelle-notitie toegevoegd)</span>
+        <textarea oninput="window.__fuDeleteApptField('reden', this.value)" style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit;min-height:60px;resize:vertical">${esc(m.reden)}</textarea>
+      </label>
+      ${m.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(m.error)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__fuDeleteApptClose()">Annuleren</button>
+        <button class="btn btn-primary" ${m.saving ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__fuDeleteApptSave()">${m.saving ? 'Verwijderen…' : '🗑 Bevestig verwijderen'}</button>
+      </div>`;
+    return _modalShell('Afspraak verwijderen — klant-risk', body, 'window.__fuDeleteApptClose()');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 5 — VOICEMEMO-RONDE (dagoverzicht + mark-as-sent)
+  // ═══════════════════════════════════════════════════════════════════════
+  function voicememoView() {
+    const st = _live.voicememo;
+    if (!st.loading && !st.data) queueMicrotask(fetchVoicememo);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <div>
+          <h2 style="font-size:16px;font-weight:600;margin:0">Voicememo-ronde ${st.data?.today ? `· ${fmtDateShort(st.data.today)}` : ''}</h2>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Vandaag-Zooms — noteer per lead wanneer je een voicememo hebt verstuurd</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="window.__fuVoicememoMarkAll()" ${_ui.voicememoAllBusy ? 'disabled' : ''}>${_ui.voicememoAllBusy ? 'Bezig…' : '✓ Markeer allen'}</button>
+          <button class="icon-btn" onclick="window.__fuVoicememoRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+        </div>
+      </div>
+      <div style="padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:11.5px;color:var(--text-3);margin-bottom:14px;line-height:1.5">
+        <b>Geen klant-verzending vanuit deze knop.</b> Voicememo neem je zelf op in WhatsApp; deze markering logt alleen dat het gedaan is.
+      </div>
+      ${st.data ? `<div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:120px"><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Totaal</div><div style="font-size:20px;font-weight:600;font-family:'IBM Plex Mono',monospace">${st.data.counts?.total || 0}</div></div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:120px"><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Verzonden</div><div style="font-size:20px;font-weight:600;color:var(--emerald);font-family:'IBM Plex Mono',monospace">${st.data.counts?.sent || 0}</div></div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:120px"><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Open</div><div style="font-size:20px;font-weight:600;color:var(--amber);font-family:'IBM Plex Mono',monospace">${st.data.counts?.open || 0}</div></div>
+      </div>` : ''}
+      ${st.error && !st.data ? errBlk(st.error, 'window.__fuVoicememoRefresh()') :
+        (st.loading && !st.data) ? skel() :
+        !st.data ? skel() :
+        _renderVoicememoList(st.data.leads)}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _renderVoicememoList(leads) {
+    if (!leads || leads.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">🎉 Geen open voicememos vandaag.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${leads.map((l, i) => {
+        const busy = _ui.voicememoBusy[l.id];
+        const sent = l.voicememo_status === 'sent';
+        return `<div style="padding:12px 16px;display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;${i < leads.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(l.lead_name) || '—')}</div>
+            <div style="font-size:11.5px;color:var(--text-3)">${esc(safeStr(l.lead_phone) || '—')}${l.terugbel_datum ? ` · ${fmtDate(l.terugbel_datum, { hour:'2-digit', minute:'2-digit' })}` : ''}</div>
+          </div>
+          ${sent ? H.pill('emerald', 'Verzonden') : H.pill('amber', 'Open')}
+          ${l.voicememo_sent_on ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3);white-space:nowrap">${fmtDateShort(l.voicememo_sent_on)}</span>` : '<span></span>'}
+          ${sent ? '<span style="width:120px;text-align:right;color:var(--emerald);font-size:12px">✓</span>' : `<button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuVoicememoMark('${esc(l.id)}')">${busy ? '…' : '✓ Verzonden'}</button>`}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // BROK 5 — ADMIN (super_admin: backfill-contacts + ghl-status-backfill)
+  // ═══════════════════════════════════════════════════════════════════════
+  function adminView() {
+    return `<div style="padding:14px 20px;max-width:900px">
+      <div style="margin-bottom:12px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Admin — beheer & backfill-tools</h2>
+        <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Alleen super-admin. Andere rollen krijgen 403.</div>
+      </div>
+      ${_adminBackfillContactsCard()}
+      ${_adminGhlBackfillCard()}
+      ${_adminReportenCard()}
+      ${_adminCronsCard()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+  function _adminBackfillContactsCard() {
+    const busy = _ui.adminBackfillBusy;
+    const d = _live.adminBackfillContacts.data;
+    const err = _live.adminBackfillContacts.error;
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:13px;font-weight:600">Backfill GHL-contacts</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Trekt email/telefoon bij van GHL voor appointments met ontbrekende contact-info.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuAdminBackfillContacts()">${busy ? 'Bezig…' : 'Start backfill'}</button>
+      </div>
+      ${d ? `<div style="padding:10px 16px;font-size:12px;color:var(--text-2)">Resultaat: <span class="mono">${d.updated}</span>/<span class="mono">${d.totaal}</span> bijgewerkt · <span class="mono">${d.skipped}</span> geskipped · <span class="mono" style="color:var(--rose)">${d.errors}</span> fouten.</div>` : ''}
+      ${err ? `<div style="padding:10px 16px;font-size:12px;color:var(--rose)">Fout: ${esc(err)}</div>` : ''}
+    </div>`;
+  }
+  function _adminGhlBackfillCard() {
+    const busy = _ui.adminGhlBackfillBusy;
+    const d = _live.adminGhlBackfill.data;
+    const err = _live.adminGhlBackfill.error;
+    const mode = _live.adminGhlBackfill.mode;
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--rose-line, #f5b4bc);border-radius:10px">
+      <div style="padding:12px 16px;background:var(--rose-soft);border-bottom:1px solid var(--rose-line, #f5b4bc);display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--rose)">⚠ GHL-status-backfill (klant-CRM-mutatie)</div>
+          <div style="font-size:11.5px;color:var(--rose);margin-top:2px">Zet historische appointments in GHL op status "showed". Muteert live CRM-data. Two-step: dry-run → confirm → execute.</div>
+        </div>
+      </div>
+      <div style="padding:12px 16px">
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuAdminGhlBackfillDry()">${busy && mode === 'dry_run' ? 'Bezig…' : '🔍 Dry-run (mode=strict, limit=50)'}</button>
+        </div>
+        ${d && mode === 'dry_run' ? `<div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;margin-bottom:10px">
+          <b>Dry-run resultaat:</b> ${d.total_candidates || 0} totaal kandidaten · toont eerste ${d.returned || 0} · limit ${d.limit || 50}${d.skipped_over_limit ? ` · ${d.skipped_over_limit} overgeslagen boven limit` : ''}<br>
+          ${d.note ? `<div style="margin-top:6px;font-style:italic">${esc(d.note)}</div>` : ''}
+        </div>` : ''}
+        ${d && mode === 'dry_run' ? `<div style="border-top:1px solid var(--border);padding-top:10px">
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Execute (na dry-run review)</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="text" placeholder='Typ "IK BEGRIJP HET"' value="${esc(_ui.adminGhlBackfillConfirm)}" oninput="window.__fuAdminGhlBackfillExecuteConfirm(this.value)" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px" />
+            <button class="btn btn-primary btn-sm" ${busy || _ui.adminGhlBackfillConfirm !== 'IK BEGRIJP HET' ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__fuAdminGhlBackfillExecute()">${busy && mode === 'executed' ? 'Executing…' : '🚨 EXECUTE'}</button>
+          </div>
+        </div>` : ''}
+        ${d && mode === 'executed' ? `<div style="padding:10px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:12px;margin-top:10px">
+          <b>Executed:</b> ${d.succeeded || 0}/${d.processed || 0} bijgewerkt${d.failed ? ` · ${d.failed} fouten` : ''}.
+        </div>` : ''}
+        ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-top:10px">${esc(err)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+  function _adminReportenCard() {
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">📧 Admin-rapporten (cron)</div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.6">
+          <b>follow-up-admin-daily</b> — verstuurt dagelijks 21:00 NL naar admins/managers via e-mail. Dedup per dag+recipient.<br>
+          <b>follow-up-admin-weekly</b> — verstuurt zondag 10:00 NL. Dedup per week.<br>
+          <span style="color:var(--text-3);font-size:11.5px">Beide draaien server-side (cron). Ontvangers: alle super_admin + manager. Interne mail — geen klant-verzending.</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  function _adminCronsCard() {
+    return `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">🔄 GHL-integratie (server-side)</div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.6">
+          <b>follow-up-ghl-appointment-poll</b> — cron elke 15 min. Sync GHL-appointments naar DB. Ghost-detectie.<br>
+          <b>follow-up-ghl-conversations-poll</b> — cron elke 15 min. Safety-net voor conversations-webhook.<br>
+          <b>follow-up-ghl-conversation-webhook</b> — inkomend van GHL bij nieuwe messages.<br>
+          <span style="color:var(--text-3);font-size:11.5px">Alle drie draaien automatisch. Geen UI-actie nodig — check via server-logs.</span>
+        </div>
+      </div>
+    </div>`;
   }
   const APPT_OUTCOMES = [
     { v: 'gesprek_gehad',  l: 'Gesprek gehad',  c: 'emerald' },
@@ -2255,8 +2601,10 @@
   window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;  // BROK 4 (live)
   window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;   // BROK 4 (live)
   window.DFO.VIEWS['followup/Zoeken']          = zoekenView;         // BROK 4 (nieuw)
+  window.DFO.VIEWS['followup/Voicememo']       = voicememoView;      // BROK 5 (nieuw)
+  window.DFO.VIEWS['followup/Admin']           = adminView;          // BROK 5 (nieuw)
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] BROK 4 registered — 14 tabs live, alleen BROK 5 (voicememo/screenshot/GHL/admin) blijft over.');
+  console.debug('[followup-v2] BROK 5 registered — 16 tabs live. Alle 45 endpoints gekoppeld (screenshot-review noteert upload-flow; ghl-poll/webhook draaien server-side).');
 })();
