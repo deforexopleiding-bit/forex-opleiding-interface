@@ -74,7 +74,7 @@
     { g: 'Leren & Events',         id: 'lms',              naam: 'LMS',               icon: I.book,     color: 'teal',    roles: ['super_admin', 'manager', 'mentor'], ext: 'https://dfo-lms-prototype.vercel.app/mentor', tabs: [] },
     { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,     badge: 8,  tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Statistieken'] },
     { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM,     badge: 2,  tabs: ['Actief', 'Inbox', 'Archief'] },
-    { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,       badge: 4,  tabs: ['Overzicht', 'Grootboek', 'Uitbetalingen', 'Beoordelingen', 'Certificaten', 'Signalen'] },
+    { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Rapporten', 'Certificaten', 'Beoordelingen', 'Trajecten', 'Sync'] },
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'), badge: 101, tabs: ['Actief', 'Gearchiveerd'] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
