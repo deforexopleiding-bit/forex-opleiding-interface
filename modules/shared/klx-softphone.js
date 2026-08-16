@@ -88,6 +88,81 @@
     activeCustomer : null,
   };
 
+  // ── Lokale ringback-toon (v=1dc) ─────────────────────────────────────────
+  // WebAudio-gegenereerde European ringback (ETSI EN 300 001): 425 Hz sine,
+  // cadence 1s aan / 4s uit. Speelt tijdens 'Establishing' zodat de user
+  // altijd hoort dat het toestel overgaat, óók wanneer Voys geen SIP early
+  // media (183 Session Progress met SDP) stuurt. Als Voys wél early media
+  // stuurt, geeft _bindRemoteAudio() daaraan voorrang en wordt de lokale
+  // toon direct gestopt om dubbele audio te voorkomen. Cleanup gebeurt bij
+  // Established / Terminated / error zodat er nooit een oscillator blijft
+  // hangen.
+  const ringback = (function () {
+    let ctx = null, osc = null, gain = null, cadenceTimer = null, playing = false;
+    function ensureCtx() {
+      if (!ctx) {
+        const AC = global.AudioContext || global.webkitAudioContext;
+        if (!AC) return null;
+        try { ctx = new AC(); } catch (_) { return null; }
+      }
+      if (ctx.state === 'suspended') {
+        try { ctx.resume(); } catch (_) { /* autoplay policy */ }
+      }
+      return ctx;
+    }
+    function schedulePhase(on) {
+      if (!playing || !ctx || !gain) return;
+      try {
+        const now = ctx.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        // Kleine ramp (10ms) om klik-artefacten te voorkomen bij aan/uit.
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.linearRampToValueAtTime(on ? 0.12 : 0.0, now + 0.01);
+      } catch (_) { /* AudioContext kan closed zijn */ }
+      cadenceTimer = setTimeout(() => schedulePhase(!on), on ? 1000 : 4000);
+    }
+    function start() {
+      if (playing) return;
+      const c = ensureCtx();
+      if (!c) return;
+      try {
+        osc  = c.createOscillator();
+        gain = c.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 425;
+        gain.gain.value = 0;
+        osc.connect(gain).connect(c.destination);
+        osc.start();
+        playing = true;
+        schedulePhase(true);
+      } catch (_) {
+        playing = false;
+      }
+    }
+    function stop() {
+      playing = false;
+      if (cadenceTimer) { clearTimeout(cadenceTimer); cadenceTimer = null; }
+      if (gain && ctx) {
+        try {
+          const now = ctx.currentTime;
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(gain.gain.value, now);
+          gain.gain.linearRampToValueAtTime(0, now + 0.02);
+        } catch (_) {}
+      }
+      if (osc) {
+        try { osc.stop(ctx ? ctx.currentTime + 0.03 : 0); } catch (_) {}
+        try { osc.disconnect(); } catch (_) {}
+        osc = null;
+      }
+      if (gain) {
+        try { gain.disconnect(); } catch (_) {}
+        gain = null;
+      }
+    }
+    return { start, stop };
+  })();
+
   // NL/BE line-detectie op basis van nummer (E.164). +32 = BE, alles anders = NL.
   // Zelfde regel als _wbxDetectLine in finance.html en fu-softphone in follow-up.
   function detectLine(phone) {
@@ -365,32 +440,60 @@
       // pas bij Established gebonden → gebruiker hoorde niets tijdens
       // "gaat over". Bindings zijn idempotent — we vervangen de srcObject
       // niet als 'ie al gezet is bij Established.
+      // v=1dc: returnt boolean zodat de caller kan zien of early media al
+      // beschikbaar is → local ringback kan dan direct stoppen.
       const _bindRemoteAudio = () => {
         const pc = inviter.sessionDescriptionHandler?.peerConnection;
-        if (!pc || !state.audioEl) return;
+        if (!pc || !state.audioEl) return false;
         const stream = new MediaStream();
         pc.getReceivers().forEach((rr) => { if (rr.track && rr.track.kind === 'audio') stream.addTrack(rr.track); });
-        if (stream.getAudioTracks().length === 0) return; // nog geen audio in SDP
+        if (stream.getAudioTracks().length === 0) return false; // nog geen audio in SDP
         // Alleen (re)binden als srcObject leeg is — voorkomt "click" bij
         // Establishing→Established overgang wanneer stream al loopt.
         if (!state.audioEl.srcObject) {
           state.audioEl.srcObject = stream;
           try { state.audioEl.play(); } catch (_) { /* autoplay policy */ }
         }
+        return true;
+      };
+      // v=1dc: als bij Establishing nog geen early media binnenkomt → start
+      // lokale ringback en poll elke 500ms of provider alsnog een stream
+      // aanlevert; zodra dat gebeurt stopt de lokale toon zodat er geen
+      // dubbele audio speelt. Poll wordt onvoorwaardelijk opgeruimd bij
+      // Established/Terminated en in de catch-branch hieronder.
+      let _earlyMediaPollTimer = null;
+      const _stopEarlyMediaPoll = () => {
+        if (_earlyMediaPollTimer) { clearInterval(_earlyMediaPollTimer); _earlyMediaPollTimer = null; }
       };
       inviter.stateChange.addListener((s) => {
         if (s === 'Establishing') {
           state.lastState = 'ringing';
-          _bindRemoteAudio(); // early media / ringback
+          const hasEarlyMedia = _bindRemoteAudio(); // early media / ringback
+          if (hasEarlyMedia) {
+            ringback.stop(); // safety — voor het geval 'ie ooit gestart is
+          } else {
+            ringback.start();
+            _stopEarlyMediaPoll();
+            _earlyMediaPollTimer = setInterval(() => {
+              if (_bindRemoteAudio()) {
+                ringback.stop();
+                _stopEarlyMediaPoll();
+              }
+            }, 500);
+          }
           updateCallbarStatus('Gaat over…', displayName ? `${displayName} — ${effPhone}` : effPhone);
           renderSheet();
         } else if (s === 'Established') {
+          ringback.stop();
+          _stopEarlyMediaPoll();
           state.lastState = 'connected';
           _bindRemoteAudio(); // zet audio als 'ie nog niet was gebonden
           updateCallbarStatus('In gesprek', displayName ? `${displayName} — ${effPhone}` : effPhone);
           startCallTimer();
           renderSheet();
         } else if (s === 'Terminated') {
+          ringback.stop();
+          _stopEarlyMediaPoll();
           state.lastState = 'ended';
           stopCallTimer();
           showCallbar(false);
@@ -403,6 +506,7 @@
       await inviter.invite();
       return { ok: true, line };
     } catch (e) {
+      ringback.stop(); // v=1dc: nooit een oscillator achterlaten bij invite-fout
       state.lastState = 'error';
       state.lastError = e?.message || String(e);
       stopCallTimer();
