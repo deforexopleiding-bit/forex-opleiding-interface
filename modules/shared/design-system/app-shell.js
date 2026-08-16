@@ -69,7 +69,7 @@
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
-    { g: 'Verkoop & Financiën',    id: 'verdiensten',      naam: 'Mijn verdiensten',  icon: I.euro,     color: 'blue',    roles: ['mentor'],           tabs: ['Overzicht', 'Uitbetalingen', 'Reiskosten', 'Certificaten'] },
+    { g: 'Verkoop & Financiën',    id: 'verdiensten',      naam: 'Mijn verdiensten',  icon: I.euro,     color: 'blue',    roles: ['mentor', 'manager', 'admin', 'super_admin'], tabs: ['Overzicht', 'Coaching', 'Events', 'Uitbetalingen', 'Reiskosten', 'Certificaten', 'Alle mentors'] },
 
     { g: 'Leren & Events',         id: 'lms',              naam: 'LMS',               icon: I.book,     color: 'teal',    roles: ['super_admin', 'manager', 'mentor'], ext: 'https://dfo-lms-prototype.vercel.app/mentor', tabs: [] },
     { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,     badge: 8,  tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Statistieken'] },
