@@ -950,6 +950,30 @@
     _ui.callModal = { leadId, outcome: null, terugbel: '', snoozeMonths: 6, warmte: 5, bezwaren: new Set(), note: '', saving: false, error: null };
     if (render) render();
   };
+  // Click-to-call via bestaande shared softphone (KlxSoftphone).
+  // Zelfde API die klanten-detail/wanbetalers/events gebruiken — GEEN
+  // klx-softphone.* wijziging (protected zone). Fail-soft: als de
+  // softphone niet geladen is (bijv. sip.min.js failed of iframe/preview),
+  // toon nette toast i.p.v. crash. Wanneer wél geladen: opent het rich
+  // belvenster met phone + name + lead_id als source.
+  window.__fuDial = (phone, displayName, leadId) => {
+    if (!phone) { showToast('Geen telefoonnummer bekend', 'warn'); return; }
+    if (!window.KlxSoftphone || typeof window.KlxSoftphone.open !== 'function') {
+      showToast('Softphone niet geladen — probeer hard-refresh of check SIP-config.', 'warn');
+      return;
+    }
+    try {
+      window.KlxSoftphone.open({
+        phone,
+        name: displayName || phone,
+        customerId: leadId || null,
+        source: 'followup.werklijst',
+      });
+    } catch (e) {
+      console.warn('[followup-v2] softphone.open fail:', e?.message || e);
+      showToast('Kon softphone niet openen: ' + (e?.message || 'onbekend'), 'warn');
+    }
+  };
   window.__fuCloseCall = () => { _ui.callModal = null; if (render) render(); };
   window.__fuCallSetOutcome = (v) => {
     if (!_ui.callModal) return;
@@ -1360,7 +1384,12 @@
             ${l.owner_name ? `<span style="font-size:10.5px;color:var(--text-3)">Eigenaar: ${esc(safeStr(l.owner_name))}</span>` : ''}
           </div>
         </div>
-        <button class="btn btn-primary" onclick="window.__fuOpenCall('${esc(l.id)}')">${svg(I.phone || I.call || '')} Bel-uitkomst</button>
+        <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+          ${l.lead_phone
+            ? `<button class="btn btn-primary" onclick="window.__fuDial('${esc(l.lead_phone)}','${esc((l.lead_name || l.lead_email || l.lead_phone || '').replace(/'/g, "\\'"))}','${esc(l.id)}')" title="Bel via softphone">📞 Bellen</button>`
+            : `<button class="btn btn-ghost" disabled title="Geen telefoonnummer bekend (uit GHL-contact)">📞 Geen nummer</button>`}
+          <button class="btn btn-ghost" onclick="window.__fuOpenCall('${esc(l.id)}')" title="Registreer de uitkomst van dit gesprek">${svg(I.phone || I.call || '')} Uitkomst</button>
+        </div>
       </div>
     </div>`;
   }
@@ -1688,7 +1717,9 @@
             ? `<button class="btn btn-primary btn-sm" onclick="window.__fuJumpToLead('${esc(it.lead_id)}')" title="Open lead in Werklijst (reset filters naar Alles)">📞 Openen</button>`
             : (it.attendee_id || it.followup_id)
               ? `<button class="btn btn-primary btn-sm" onclick="window.__fuAttendeeToLead('${esc(it.attendee_id || '')}','${esc(it.followup_id || '')}')" title="Maak lead van deze deelnemer en open in Werklijst">📞 Openen</button>`
-              : `<span style="font-size:11px;color:var(--text-3);font-style:italic" title="Geen lead + geen attendee-koppeling — kan niet openen">geen lead</span>`}
+              : it.phone
+                ? `<button class="btn btn-primary btn-sm" onclick="window.__fuDial('${esc(it.phone)}','${esc((it.name || it.phone).replace(/'/g, "\\'"))}','')" title="Bel direct via softphone (geen lead-koppeling beschikbaar)">📞 Bellen</button>`
+                : `<button class="btn btn-ghost btn-sm" disabled title="Geen contactgegevens beschikbaar op deze rij">📞 Geen contact</button>`}
           <button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__fuOpenAfschrijf('${esc(it.type)}','${esc(it.ref_id)}')">Afschrijven</button>
         </div>
       `).join('')}
@@ -2697,6 +2728,7 @@
       { tab: 'Sluimerpot', icon: '💤', desc: 'Leads die gepauzeerd zijn — komen automatisch terug op de wake-datum.' },
       { tab: 'Afgeboekt',  icon: '📉', desc: 'Verloren leads met reden (afgesloten, doorverwezen, dubbel).' },
       { tab: 'Archief',    icon: '📁', desc: 'Historische leads (>90 dagen inactief, gearchiveerd).' },
+      { tab: 'Opvolging',  icon: '🔁', desc: 'Terugbel-agenda: leads met een geplande terugbel-datum (chronologisch).' },
       { tab: 'Admin',      icon: '⚙',  desc: 'Instellingen, backfill, GHL-koppelingen, sync-status.' },
     ];
     return `<div class="pad" style="padding-top:16px">
