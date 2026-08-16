@@ -137,6 +137,7 @@
     bonusOverview:{ loading: false, error: null, data: null, mentorId: null },
     ledger:       { loading: false, error: null, data: null, mentorId: null },
     myEvents:     { loading: false, error: null, data: null, mentorId: null },
+    myCalendar:   { loading: false, error: null, data: null, mentorId: null },
     fundedCerts:  { loading: false, error: null, data: null, mentorId: null },
     assessments:  { loading: false, error: null, data: null, month: null, mentorId: null },
     // BROK 3 cash-trajects
@@ -153,6 +154,9 @@
     // Beoordelingen
     assessMonth:      currentMonthKey(),
     assessMentorId:   '',
+    assessSearch:     '',
+    // Certificaten
+    certSearch:       '',
     // Trajecten
     expandedTrajectId: null,
     // BROK 2 forms
@@ -340,6 +344,15 @@
     if (!j || j.__error) { _live.myEvents.error = j?.__error || 'Kon events niet laden'; render(); return; }
     _live.myEvents.data = j; render();
   }
+  async function fetchMyCalendar(mentorId) {
+    if (!mentorId) return;
+    if (_live.myCalendar.loading && _live.myCalendar.mentorId === mentorId) return;
+    _live.myCalendar.loading = true; _live.myCalendar.error = null; _live.myCalendar.mentorId = mentorId;
+    const j = await tryFetch('myCalendar', `/api/mentor-my-calendar?mentor_user_id=${encodeURIComponent(mentorId)}`);
+    _live.myCalendar.loading = false;
+    if (!j || j.__error) { _live.myCalendar.error = j?.__error || 'Kon kalender niet laden'; render(); return; }
+    _live.myCalendar.data = j; render();
+  }
   async function fetchFundedCerts(mentorId) {
     const mid = mentorId || null;
     if (_live.fundedCerts.loading && _live.fundedCerts.mentorId === mid) return;
@@ -390,6 +403,7 @@
   window.__mentRetryBonus        = () => { if (_ui.selectedMentorId) { _live.bonusOverview.data = null; _live.bonusOverview.mentorId = null; queueMicrotask(() => fetchBonusOverview(_ui.selectedMentorId)); } };
   window.__mentRetryLedger       = () => { if (_ui.selectedMentorId) { _live.ledger.data = null; _live.ledger.mentorId = null; queueMicrotask(() => fetchLedger(_ui.selectedMentorId)); } };
   window.__mentRetryMyEvents     = () => { if (_ui.selectedMentorId) { _live.myEvents.data = null; _live.myEvents.mentorId = null; queueMicrotask(() => fetchMyEvents(_ui.selectedMentorId)); } };
+  window.__mentRetryMyCalendar   = () => { if (_ui.selectedMentorId) { _live.myCalendar.data = null; _live.myCalendar.mentorId = null; queueMicrotask(() => fetchMyCalendar(_ui.selectedMentorId)); } };
   window.__mentRetryCerts        = () => { _live.fundedCerts.data = null; _live.fundedCerts.mentorId = null; queueMicrotask(() => fetchFundedCerts(_ui.selectedMentorId)); };
   window.__mentRetryAssess       = () => { _live.assessments.data = null; queueMicrotask(() => fetchAssessments(_ui.assessMonth, _ui.assessMentorId)); };
   window.__mentRetryTrajects     = () => { _live.trajects.data    = null; queueMicrotask(fetchTrajects); };
@@ -402,11 +416,13 @@
     _live.bonusOverview.data = null; _live.bonusOverview.mentorId = null;
     _live.ledger.data = null; _live.ledger.mentorId = null;
     _live.myEvents.data = null; _live.myEvents.mentorId = null;
+    _live.myCalendar.data = null; _live.myCalendar.mentorId = null;
     if (mid) {
       queueMicrotask(() => fetchSettings(mid));
       queueMicrotask(() => fetchBonusOverview(mid));
       queueMicrotask(() => fetchLedger(mid));
       queueMicrotask(() => fetchMyEvents(mid));
+      queueMicrotask(() => fetchMyCalendar(mid));
     }
     render();
   };
@@ -443,6 +459,27 @@
     _ui.assessMentorId = v || '';
     _live.assessments.data = null;
     queueMicrotask(() => fetchAssessments(_ui.assessMonth, v || ''));
+  };
+  // Zoek-inputs: state + surgische re-render van tabel-slot (om focus-loss
+  // te voorkomen). Voor eenvoud gebruiken we render() maar behouden focus
+  // via autofocus-trick op input met specifieke ID.
+  window.__mentSetCertSearch = (v) => {
+    _ui.certSearch = String(v || '');
+    // Surgische re-render: alleen tabel-body vervangen. Simpelste: full render()
+    // en dan focus terug op de search-input via requestAnimationFrame.
+    render();
+    requestAnimationFrame(() => {
+      const inp = document.getElementById('mentCertSearchInp');
+      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    });
+  };
+  window.__mentSetAssessSearch = (v) => {
+    _ui.assessSearch = String(v || '');
+    render();
+    requestAnimationFrame(() => {
+      const inp = document.getElementById('mentAssessSearchInp');
+      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    });
   };
   window.__mentTrajectSetStatus = (v) => {
     _live.trajects.statusFilter = v || 'all';
@@ -728,6 +765,19 @@
   };
   window.__mentTrajectClose = () => { _ui.trajectForm = null; render(); };
   window.__mentTrajectField = (k, v) => { if (_ui.trajectForm) _ui.trajectForm[k] = v; };
+  // Live-calc: surgische DOM-write op de calc-strip, geen full render → geen
+  // focus-loss tijdens typen. Fix voor bug: live-calc rekent niet met state-only
+  // oninput (oninput fired geen render).
+  window.__mentTrajectRecalcLive = () => {
+    const f = _ui.trajectForm; if (!f) return;
+    const el = document.querySelector('[data-ment-traject-livecalc]');
+    if (!el) return;
+    const total = Number(f.total_amount) || 0;
+    const bonus = total * 0.03;
+    const termCount = Number(f.term_count) || 0;
+    const perTerm = termCount > 0 ? bonus / termCount : 0;
+    el.innerHTML = `Live-calc: bonus <b>3%</b> van ${eur(total)} = <b class="mono">${eur(bonus)}</b> · per termijn = <b class="mono">${eur(perTerm)}</b> · verdeeld over aanwezige mentors (event_mentors.was_present=true).`;
+  };
   window.__mentTrajectSubmit = () => {
     const f = _ui.trajectForm; if (!f) return;
     if (!f.event_id) { f.error = 'Event kiezen verplicht'; render(); return; }
@@ -825,6 +875,37 @@
       <div class="card-title">${title}</div>${extra || ''}</div>
     <div class="card-body" style="padding:8px 17px 17px">${body}</div></div>`;
 
+  // Projection helpers — hergebruikt uit verdiensten v6: exact N labels
+  // matcht data-length (was bug: 43 labels bij 12 punten).
+  const MONTH_NAMES_NL_SHORT = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+  function shortMonthLabel(monthIso) {
+    if (typeof monthIso !== 'string' || monthIso.length < 7) return '';
+    const mm = parseInt(monthIso.slice(5, 7), 10);
+    if (!Number.isFinite(mm) || mm < 1 || mm > 12) return '';
+    return MONTH_NAMES_NL_SHORT[mm - 1];
+  }
+  function buildProjection12(projArr) {
+    const src = asArr(projArr).slice(0, 12);
+    const data   = src.map((r) => Number(r.amount) || 0);
+    const labels = src.map((r) => shortMonthLabel(r.month) || (typeof r.month === 'string' ? r.month.slice(5) : ''));
+    return { data, labels };
+  }
+  function areaChart(data, labels) {
+    const n = data.length;
+    if (!n) return `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen data.</div>`;
+    const w = 100, h = 42, mx = Math.max(...data, 1);
+    const pts = data.map((v, i) => [n > 1 ? i / (n - 1) * w : 0, h - (v / mx) * h * .88 - 2]);
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+    const shown = labels.slice(0, n);
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:64px;display:block">
+      <defs><linearGradient id="ment-proj-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--m)" stop-opacity=".22"/><stop offset="100%" stop-color="var(--m)" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path fill="url(#ment-proj-grad)" d="${line} L${w},${h} L0,${h} Z"/>
+      <path fill="none" stroke="var(--m)" stroke-width="1.5" vector-effect="non-scaling-stroke" d="${line}"/>
+    </svg><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:4px">${shown.map(l => `<span>${esc(l)}</span>`).join('')}</div>`;
+  }
+
   const PAYOUT_STATUS_PILL = {
     concept:     { c: 'neutral', l: 'Concept' },
     open:        { c: 'info',    l: 'Ter beoordeling' },
@@ -889,20 +970,36 @@
     const led = _live.ledger;
     const stg = _live.settings;
     const ev = _live.myEvents;
+    const cal = _live.myCalendar;
     const mentors = asArr(_live.mentors.data?.mentors);
     const m = mentors.find((mm) => (mm.user_id || mm.id) === mid);
     const mentorName = m?.name || m?.email || mid;
 
+    // KPI-spec v1: Saldo netto / Bonuspot bruto / Deze maand / Open.
+    // Saldo netto + Bonuspot bruto komen uit ledger.totals; Deze maand + Open
+    // komen uit bonus-overview.totals. Beide bronnen combined tot 1 KPI-strip.
+    const ledgerTotals = led.data?.totals || {};
+    const bonusTotals  = bo.data?.totals || {};
+
     return `<div class="pad" style="padding-top:16px">
       <div style="margin-bottom:14px;font-size:15px;font-weight:600">${esc(mentorName)}</div>
 
-      ${bo.loading && !bo.data ? skel()
-       : bo.error && !bo.data ? errBlk(bo.error, 'window.__mentRetryBonus()')
-       : bo.data ? renderMentorKpisAndProjection(bo.data) : ''}
+      ${(bo.loading && !bo.data) || (led.loading && !led.data) ? skel()
+       : (bo.error && !bo.data) ? errBlk(bo.error, 'window.__mentRetryBonus()')
+       : (bo.data || led.data) ? `${H.kpis([
+          { c: 'emerald', icon: I.euro,  label: 'Saldo netto',      val: eur(Number(ledgerTotals.netto) || 0),          sub: 'vrijgegeven − uitgaven' },
+          { c: 'violet',  icon: I.chart, label: 'Bonuspot bruto',   val: eur(Number(ledgerTotals.bonuspot) || 0),       sub: 'alle bonus-entries' },
+          { c: 'blue',    icon: I.clock, label: 'Deze maand',       val: eur(Number(bonusTotals.deze_maand) || 0),      sub: 'bonus-vrijgave' },
+          { c: 'amber',   icon: I.cal,   label: 'Open',             val: eur(Number(bonusTotals.open) || 0),            sub: 'niet-uitbetaald' },
+        ])}` : ''}
 
       ${led.loading && !led.data ? '' : led.error && !led.data ? errBlk(led.error, 'window.__mentRetryLedger()') : led.data ? `<div style="margin-top:14px">${renderLedgerCard(led.data)}</div>` : ''}
 
+      ${bo.data ? `<div style="margin-top:14px">${renderProjectionCard(bo.data)}</div>` : ''}
+
       ${bo.data && asArr(bo.data.per_event).length ? `<div style="margin-top:14px">${renderTermijnProjectieCard(bo.data)}</div>` : ''}
+
+      ${cal.loading && !cal.data ? '' : cal.error && !cal.data ? errBlk(cal.error, 'window.__mentRetryMyCalendar()') : cal.data ? `<div style="margin-top:14px">${renderKomendeSessiesCard(cal.data)}</div>` : ''}
 
       ${ev.loading && !ev.data ? '' : ev.error && !ev.data ? errBlk(ev.error, 'window.__mentRetryMyEvents()') : ev.data ? `<div style="margin-top:14px">${renderEventsCard(ev.data)}</div>` : ''}
 
@@ -910,29 +1007,45 @@
     </div>`;
   }
 
-  function renderMentorKpisAndProjection(d) {
-    const t = d.totals || {};
-    return `${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Deze maand',        val: eur(Number(t.deze_maand) || 0),     sub: 'bonus-vrijgave' },
-      { c: 'amber',   icon: I.clock, label: 'Volgende maand',    val: eur(Number(t.volgende_maand) || 0), sub: 'geplande vrijgave' },
-      { c: 'teal',    icon: I.cal,   label: 'Openstaand',        val: eur(Number(t.open) || 0),           sub: 'niet-uitbetaalde bonus' },
-      { c: 'emerald', icon: I.chart, label: 'Totaal verdiend',   val: eur(Number(t.earned_total) || 0),   sub: 'alle bonussen sinds start' },
-    ])}`;
+  // 12-maands projectie-chart (hergebruikt uit verdiensten v6, exact N labels)
+  function renderProjectionCard(d) {
+    const proj = buildProjection12(d.projection_12m);
+    if (!proj.data.length) return '';
+    return dashCard(`Projectie · ${proj.data.length} maand${proj.data.length === 1 ? '' : 'en'}`, 'blue', areaChart(proj.data, proj.labels));
   }
 
+  // Komende sessies (mentor-my-calendar — alleen toekomstige events).
+  function renderKomendeSessiesCard(d) {
+    const events = asArr(d.events);
+    if (!events.length) return dashCard('Komende sessies', 'teal', `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen komende sessies gepland.</div>`);
+    return dashCard('Komende sessies', 'teal',
+      H.table(
+        [{ l: 'Event' }, { l: 'Start' }, { l: 'Aanwezig' }],
+        events.slice(0, 20).map((e) => [
+          `<span class="cell-main">${esc(e.title || e.event_title || '—')}</span>`,
+          `<span style="color:var(--text-3)">${fmtDateTime(e.starts_at)}</span>`,
+          H.pill(e.was_present ? 'ok' : 'neutral', e.was_present ? 'Ja' : (e.was_present === false ? 'Nee' : '—')),
+        ]),
+      ),
+    );
+  }
+
+  // FIX 2026-08-16: leest nu d.byEvent (was: d.per_event — bestaat niet)
+  // en e.bonuspot / e.omzet / e.uitgaven / e.netto (was: e.bonus_bruto —
+  // bestaat niet). Verklaart waarom blok leeg was terwijl KPI wél bonus toonde.
   function renderLedgerCard(d) {
-    const perEvent = asArr(d.per_event);
-    if (!perEvent.length) return dashCard('Bonussen per event', 'blue', `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen ledger-entries.</div>`);
+    const byEvent = asArr(d.byEvent);
+    if (!byEvent.length) return dashCard('Bonussen per event', 'blue', `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen ledger-entries.</div>`);
     return dashCard('Bonussen per event', 'blue',
       H.table(
-        [{ l: 'Event' }, { l: 'Datum', cls: 'optional' }, { l: 'Bonus bruto', cls: 'r' }, { l: 'Uitgaven', cls: 'r optional' }, { l: 'Netto', cls: 'r' }, { l: 'Status' }],
-        perEvent.map((e) => [
-          `<span class="cell-main">${esc(e.event_title || e.title || '—')}</span>`,
-          `<span style="color:var(--text-3)">${fmtDate(e.starts_at || e.date)}</span>`,
-          `<span class="money">${eur(Number(e.bonus_bruto) || Number(e.bonus) || 0)}</span>`,
-          `<span class="money" style="color:var(--rose)">${e.uitgaven ? '− ' + eur(Number(e.uitgaven) || 0) : '—'}</span>`,
-          `<span class="money">${eur(Number(e.netto) || (Number(e.bonus_bruto || e.bonus || 0) - Number(e.uitgaven || 0)))}</span>`,
-          ledgerPill(e.status || 'vrijgegeven'),
+        [{ l: 'Event' }, { l: 'Datum', cls: 'optional' }, { l: 'Omzet', cls: 'r optional' }, { l: 'Bonuspot bruto', cls: 'r' }, { l: 'Uitgaven', cls: 'r optional' }, { l: 'Netto', cls: 'r' }],
+        byEvent.map((e) => [
+          `<span class="cell-main">${esc(e.event_title || '—')}</span>`,
+          `<span style="color:var(--text-3)">${fmtDate(e.starts_at)}</span>`,
+          `<span class="money">${eur(Number(e.omzet) || 0)}</span>`,
+          `<span class="money">${eur(Number(e.bonuspot) || 0)}</span>`,
+          `<span class="money" style="${e.uitgaven ? 'color:var(--rose)' : 'color:var(--text-3)'}">${e.uitgaven ? '− ' + eur(Number(e.uitgaven) || 0) : '—'}</span>`,
+          `<span class="money"><b>${eur(Number(e.netto) || 0)}</b></span>`,
         ]),
       ),
     );
@@ -1165,7 +1278,13 @@
     if (!_live.fundedCerts.loading && !_live.fundedCerts.data && !_live.fundedCerts.error) queueMicrotask(() => fetchFundedCerts(_ui.selectedMentorId));
 
     const mentors = asArr(_live.mentors.data?.mentors);
-    const certs = asArr(_live.fundedCerts.data?.certs);
+    const allCerts = asArr(_live.fundedCerts.data?.certs);
+    // Client-side zoek (naam / mentor / bestand)
+    const q = String(_ui.certSearch || '').toLowerCase().trim();
+    const certs = q ? allCerts.filter((c) => {
+      const s = `${c.student_name || ''} ${c.mentor_name || ''} ${c.mentor_email || ''} ${c.file_name || ''}`.toLowerCase();
+      return s.indexOf(q) !== -1;
+    }) : allCerts;
 
     return `${H.toolbar([
       `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Mentor:</span>
@@ -1174,7 +1293,8 @@
           ${mentors.map((m) => `<option value="${esc(m.user_id || m.id)}" ${_ui.selectedMentorId === (m.user_id || m.id) ? 'selected' : ''}>${esc(m.name || m.email || m.user_id)}</option>`).join('')}
         </select>
       </label>`,
-      `<span style="font-size:11.5px;color:var(--text-3)">${certs.length} certifica${certs.length === 1 ? 'at' : 'ten'} · download-URLs 1u geldig</span>`,
+      `<input id="mentCertSearchInp" type="search" placeholder="Zoek naam / mentor / bestand…" value="${esc(_ui.certSearch)}" oninput="window.__mentSetCertSearch(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:220px" />`,
+      `<span style="font-size:11.5px;color:var(--text-3)">${certs.length}${q ? ' van ' + allCerts.length : ''} certifica${certs.length === 1 ? 'at' : 'ten'} · download-URLs 1u geldig</span>`,
     ])}
     ${_live.fundedCerts.error && !_live.fundedCerts.data ? errBlk(_live.fundedCerts.error, 'window.__mentRetryCerts()')
      : _live.fundedCerts.loading && !_live.fundedCerts.data ? skel()
@@ -1213,7 +1333,10 @@
     if (!_live.assessments.loading && !_live.assessments.data && !_live.assessments.error) queueMicrotask(() => fetchAssessments(_ui.assessMonth, _ui.assessMentorId));
 
     const mentors = asArr(_live.mentors.data?.mentors);
-    const items = asArr(_live.assessments.data?.assessments);
+    const allItems = asArr(_live.assessments.data?.assessments);
+    // Client-side zoek op student-naam
+    const q = String(_ui.assessSearch || '').toLowerCase().trim();
+    const items = q ? allItems.filter((a) => String(a.student_name || '').toLowerCase().indexOf(q) !== -1) : allItems;
 
     return `${H.toolbar([
       `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Maand:</span>
@@ -1226,7 +1349,8 @@
           ${mentors.map((m) => `<option value="${esc(m.user_id || m.id)}" ${_ui.assessMentorId === (m.user_id || m.id) ? 'selected' : ''}>${esc(m.name || m.email || m.user_id)}</option>`).join('')}
         </select>
       </label>`,
-      `<span style="font-size:11.5px;color:var(--text-3)">${items.length} beoordelingen · read-only</span>`,
+      `<input id="mentAssessSearchInp" type="search" placeholder="Zoek naam student…" value="${esc(_ui.assessSearch)}" oninput="window.__mentSetAssessSearch(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:200px" />`,
+      `<span style="font-size:11.5px;color:var(--text-3)">${items.length}${q ? ' van ' + allItems.length : ''} beoordelingen · read-only</span>`,
     ])}
     ${_live.assessments.error && !_live.assessments.data ? errBlk(_live.assessments.error, 'window.__mentRetryAssess()')
      : _live.assessments.loading && !_live.assessments.data ? skel()
@@ -1281,11 +1405,43 @@
     ${renderModals()}`;
   }
 
+  // Bereken termijn N release-date uit start_month + release_day + (N-1) maanden.
+  // Payload heeft geen parts[]-array — we genereren 'em zelf uit metadata.
+  function computeTermijnen(t) {
+    const total = Number(t.term_count) || 0;
+    if (!total) return [];
+    const bonus = Number(t.bonus_total) || 0;
+    const perTerm = bonus / total;
+    const releasedIndicesRaw = t.released_terms;
+    // released_terms kan zijn: getal (count) OR array van indices OR set-achtig
+    let releasedSet = new Set();
+    if (Array.isArray(releasedIndicesRaw)) releasedSet = new Set(releasedIndicesRaw.map(Number));
+    else if (typeof releasedIndicesRaw === 'number') {
+      // count-mode: eerste N termijnen zijn vrijgegeven
+      for (let i = 1; i <= releasedIndicesRaw; i++) releasedSet.add(i);
+    }
+    // Parse start_month "YYYY-MM(-DD)?"
+    const startIso = typeof t.start_month === 'string' ? t.start_month : '';
+    const startY = parseInt(startIso.slice(0, 4), 10);
+    const startM = parseInt(startIso.slice(5, 7), 10);
+    const releaseDay = Math.min(28, Math.max(1, parseInt(t.release_day, 10) || 1)); // cap 28 = veilig voor feb
+    const parts = [];
+    for (let i = 1; i <= total; i++) {
+      let due = null;
+      if (Number.isFinite(startY) && Number.isFinite(startM)) {
+        const d = new Date(startY, startM - 1 + (i - 1), releaseDay);
+        due = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+      parts.push({ index: i, amount: perTerm, due_date: due, released: releasedSet.has(i) });
+    }
+    return parts;
+  }
+
   function renderTrajectCard(t) {
     const isOpen = _ui.expandedTrajectId === t.id;
-    const parts = asArr(t.parts || t.termijnen);
-    const released = Number(t.released_terms || t.released_count) || parts.filter((p) => p.released_at).length;
-    const total = Number(t.term_count) || parts.length || 0;
+    const parts = computeTermijnen(t);
+    const released = parts.filter((p) => p.released).length;
+    const total = Number(t.term_count) || 0;
     const pct = total ? Math.round(released / total * 100) : 0;
     const canRelease = t.status === 'active';
     const canPause = t.status === 'active';
@@ -1319,8 +1475,8 @@
       ${isOpen ? `<div style="padding:14px 16px">
         ${parts.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">
           <thead><tr style="color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-size:11px"><th style="text-align:left;padding:5px 0">Termijn</th><th style="text-align:right">Bedrag</th><th style="text-align:left">Release-datum</th><th style="text-align:left">Status</th></tr></thead>
-          <tbody>${parts.map((p, i) => `<tr><td style="padding:4px 0">${p.index || (i + 1)}</td><td style="text-align:right" class="money">${eur(Number(p.amount) || 0)}</td><td>${fmtDate(p.due_date || p.release_date)}</td><td>${p.released_at ? '<span style="color:var(--ok)">✓ vrijgegeven</span>' : '<span style="color:var(--text-3)">— nog niet</span>'}</td></tr>`).join('')}</tbody>
-        </table>` : ''}
+          <tbody>${parts.map((p) => `<tr><td style="padding:4px 0">${p.index}</td><td style="text-align:right" class="money">${eur(Number(p.amount) || 0)}</td><td>${fmtDate(p.due_date)}</td><td>${p.released ? '<span style="color:var(--ok)">✓ vrijgegeven</span>' : '<span style="color:var(--text-3)">— nog niet</span>'}</td></tr>`).join('')}</tbody>
+        </table>` : `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen termijnen (term_count = 0).</div>`}
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${canRelease ? `<button class="btn btn-primary btn-sm" onclick="window.__mentTrajectRelease('${esc(t.id)}','${esc(label).replace(/'/g, "\\'")}')">${svg(I.repeat)}Nu vrijgeven</button>` : ''}
           ${canPause ? `<button class="btn btn-ghost btn-sm" onclick="window.__mentTrajectStatus('${esc(t.id)}','pause','${esc(label).replace(/'/g, "\\'")}')">⏸ Pauzeren</button>` : ''}
@@ -1366,7 +1522,22 @@
         ${perCustomer.length ? `<div><div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Per klant (max 50)</div>
           ${H.table(
             [{ l: 'Klant' }, { l: 'Betaald', cls: 'r optional' }, { l: 'Parents', cls: 'r optional' }, { l: '# slices', cls: 'r' }, { l: 'Vrijgave', cls: 'r' }],
-            perCustomer.slice(0, 50).map((r) => [esc(r.customer_label || r.customer_id || '—'), `<span class="money">${eur(Number(r.paid_amount) || 0)}</span>`, `<span class="mono">${r.parents_count || 0}</span>`, `<span class="mono">${r.slices_count || 0}</span>`, `<span class="money">${eur(Number(r.release_amount) || 0)}</span>`]),
+            perCustomer.slice(0, 50).map((r) => {
+              // LOW 9 fix: endpoint levert alleen customer_id (geen label).
+              // Toon compacte UUID-prefix + tooltip met volledige id zodat
+              // rijen niet meer 36-char raw-UUID's tonen. Naam-resolve zou een
+              // extra fetch vereisen (customers batch-lookup) — buiten scope
+              // voor deze cosmetische fix.
+              const label = r.customer_label || r.customer_name || (r.customer_id ? `kl-${String(r.customer_id).slice(0, 8)}` : '—');
+              const title = r.customer_id ? String(r.customer_id) : '';
+              return [
+                `<span title="${esc(title)}" style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">${esc(label)}</span>`,
+                `<span class="money">${eur(Number(r.paid_amount) || Number(r.paid_total) || 0)}</span>`,
+                `<span class="mono">${r.parents_count || 0}</span>`,
+                `<span class="mono">${r.slices_count || 0}</span>`,
+                `<span class="money">${eur(Number(r.release_amount) || 0)}</span>`,
+              ];
+            }),
           )}
         </div>` : ''}
       `)}</div>` : `<div style="padding:20px;color:var(--text-3);font-size:12.5px">Draai eerst een preview om te zien wat er vrijgegeven zou worden. Geen wijzigingen tot je "Definitief vrijgeven" klikt.</div>`}
@@ -1456,7 +1627,8 @@
   function renderTrajectFormModal() {
     if (!_ui.trajectForm) return '';
     const f = _ui.trajectForm;
-    const events = asArr(_live.eventsList.data?.events);
+    // events-list returnt { items, total, ... } — was bug: las 'events' (undefined) → dropdown leeg.
+    const events = asArr(_live.eventsList.data?.items || _live.eventsList.data?.events);
     const total = Number(f.total_amount) || 0;
     const bonus = total * 0.03;
     const perTerm = f.term_count ? bonus / Number(f.term_count) : 0;
@@ -1478,12 +1650,12 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
         <label>
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Totaalprijs (€)</span>
-          <input type="number" step="0.01" min="0" value="${esc(f.total_amount)}" oninput="window.__mentTrajectField('total_amount', this.value)"
+          <input type="number" step="0.01" min="0" value="${esc(f.total_amount)}" oninput="window.__mentTrajectField('total_amount', this.value);window.__mentTrajectRecalcLive()"
             style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
         </label>
         <label>
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Aantal termijnen</span>
-          <input type="number" min="1" max="60" step="1" value="${esc(f.term_count)}" oninput="window.__mentTrajectField('term_count', this.value)"
+          <input type="number" min="1" max="60" step="1" value="${esc(f.term_count)}" oninput="window.__mentTrajectField('term_count', this.value);window.__mentTrajectRecalcLive()"
             style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
         </label>
       </div>
@@ -1503,7 +1675,7 @@
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Notitie (optioneel)</span>
         <textarea oninput="window.__mentTrajectField('note', this.value)" style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit;min-height:50px;resize:vertical">${esc(f.note)}</textarea>
       </label>
-      <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;color:var(--text-2);margin-bottom:12px">
+      <div data-ment-traject-livecalc style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;color:var(--text-2);margin-bottom:12px">
         Live-calc: bonus <b>3%</b> van ${eur(total)} = <b class="mono">${eur(bonus)}</b> · per termijn = <b class="mono">${eur(perTerm)}</b> · verdeeld over aanwezige mentors (event_mentors.was_present=true).
       </div>
       ${f.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(f.error)}</div>` : ''}
@@ -1528,5 +1700,5 @@
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('mentoren');
   }
 
-  console.debug('[mentoren-v2] v2 — 6 admin-views registered (Overzicht/Rapporten/Certificaten/Beoordelingen/Trajecten/Sync). Sync = super_admin only. Dormant tot allowlist of ?v2preview=mentoren.');
+  console.debug('[mentoren-v2] v3 — 6 admin-views registered (Overzicht/Rapporten/Certificaten/Beoordelingen/Trajecten/Sync). Sync = super_admin only. Dormant tot allowlist of ?v2preview=mentoren.');
 })();
