@@ -122,8 +122,8 @@ function renderEmpty() {
       <div class="ds-empty-ico" style="background:var(--slate-soft); color:var(--slate);">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>
       </div>
-      <div class="ds-empty-t">Geen audit-events</div>
-      <div class="ds-empty-s">Elke wijziging aan deze klant (aanmaak, edits, archief, tags, notities) verschijnt hier.</div>
+      <div class="ds-empty-t">Nog geen audit-events voor deze klant</div>
+      <div class="ds-empty-s">De audit-log registreert handmatige wijzigingen via het Klanten-dashboard (aanmaken, edits, tags, archiveren, notities). Klanten van vóór de audit-migratie of die alleen via imports/admin-tools zijn bewerkt verschijnen hier niet — zie Profiel → 'Laatst bijgewerkt' voor het laatste wijzig-tijdstip.</div>
     </div>`;
 }
 
