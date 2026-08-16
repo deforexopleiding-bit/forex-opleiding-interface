@@ -138,6 +138,10 @@
     archief:     { loading: false, error: null, data: null, key: null },
     openActies:  { loading: false, error: null, data: null },  // appointments?period=open_acties
     opvolging:   { loading: false, error: null, data: null, key: null },  // appointments?period=opvolging_*
+    // Agenda (ronde 8) — consolideert Open-acties + Opvolging in één tab
+    // met periode-picker (vandaag/week/open/actie_nodig). Zelfde endpoint
+    // (follow-up-appointments), verschillende period-param per keuze.
+    agenda:      { loading: false, error: null, data: null, key: null },
     // BROK 4
     eventPicker: { loading: false, error: null, data: null },              // events list voor picker
     eventBellijst: { loading: false, error: null, data: null, key: null },  // per event_id
@@ -183,6 +187,11 @@
     archiefQ:          '',
     archiefPage:       1,
     opvolgingSub:      'opvolging_today',  // opvolging_overdue|today|week|30d|verder
+    // Agenda-tab (ronde 8): periode-picker + Overige-hub inline sub-view.
+    // agendaPeriod: 'vandaag' | 'week' | 'open' | 'actie_nodig'
+    // overigeSub  : null (hub) | 'Sluimerpot' | 'Afgeboekt' | 'Archief' | 'Admin'
+    agendaPeriod:      'vandaag',
+    overigeSub:        null,
     // BROK 4
     eventSelectedId:   null,               // null = "next upcoming"
     eventFollowupOnly: false,              // toggle in Event-bellijst
@@ -498,6 +507,31 @@
     if (st.data && st.key === key) return;
     st.loading = true; st.error = null; st.key = key;
     const j = await tryFetch('opvolging:' + key, '/api/follow-up-appointments?period=' + encodeURIComponent(key));
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error;
+    else st.data = { appointments: asArr(j?.appointments), count: Number(j?.count || 0) };
+    if (render) render();
+  }
+  // Agenda-tab (ronde 8) — consolideert Open-acties + Opvolging. Periode-picker
+  // mapt op bestaande follow-up-appointments periods:
+  //   vandaag      → today
+  //   week         → week
+  //   open         → open_acties  (open afspraken zonder uitkomst)
+  //   actie_nodig  → opvolging_overdue (achterstallige terugbel-momenten)
+  async function fetchAgenda() {
+    const st = _live.agenda;
+    const key = _ui.agendaPeriod;
+    if (st.loading) return;
+    if (st.data && st.key === key) return;
+    const periodMap = {
+      vandaag:     'today',
+      week:        'week',
+      open:        'open_acties',
+      actie_nodig: 'opvolging_overdue',
+    };
+    const period = periodMap[key] || 'today';
+    st.loading = true; st.error = null; st.key = key;
+    const j = await tryFetch('agenda:' + key, '/api/follow-up-appointments?period=' + encodeURIComponent(period));
     st.loading = false;
     if (j && j.__error) st.error = j.__error;
     else st.data = { appointments: asArr(j?.appointments), count: Number(j?.count || 0) };
@@ -1154,6 +1188,10 @@
   };
   window.__fuArchiefRefresh = () => { _live.archief.data = null; _live.archief.key = null; if (render) render(); };
   window.__fuOpenActiesRefresh = () => { _live.openActies.data = null; if (render) render(); };
+  window.__fuAgendaPeriod   = (p) => { _ui.agendaPeriod = p; _live.agenda.data = null; _live.agenda.key = null; if (render) render(); };
+  window.__fuAgendaRefresh  = () => { _live.agenda.data = null; _live.agenda.key = null; if (render) render(); };
+  window.__fuOverigeSub     = (sub) => { _ui.overigeSub = sub || null; if (render) render(); };
+  window.__fuOverigeBack    = () => { _ui.overigeSub = null; if (render) render(); };
   window.__fuOpvolgingSub = (v) => { _ui.opvolgingSub = v; _live.opvolging.data = null; _live.opvolging.key = null; if (render) render(); };
   window.__fuOpvolgingRefresh = () => { _live.opvolging.data = null; _live.opvolging.key = null; if (render) render(); };
   // ── BROK 4 handlers ─────────────────────────────────────────────────
@@ -2044,6 +2082,66 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // AGENDA (ronde 8) — consolideert Open-acties + Opvolging in één tab
+  // met periode-picker + belknop/openen op elke rij.
+  // ═══════════════════════════════════════════════════════════════════════
+  const AGENDA_PERIODS = [
+    { v: 'vandaag',     l: 'Vandaag' },
+    { v: 'week',        l: 'Week' },
+    { v: 'open',        l: 'Open' },
+    { v: 'actie_nodig', l: '⏰ Actie nodig' },
+  ];
+  function _renderAgendaList(appts) {
+    if (!appts || appts.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3)">Geen items in deze weergave.</div>`;
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      ${appts.map((a, i) => {
+        const nameSafe = (a.lead_name || a.lead_email || a.lead_phone || '—').replace(/'/g, "\\'");
+        const canDial  = !!a.lead_phone;
+        const canOpen  = !!a.lead_id;
+        return `<div style="padding:12px 16px;display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;${i < appts.length - 1 ? 'border-bottom:1px solid var(--border);' : ''}">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3);white-space:nowrap">${fmtDate(a.scheduled_at)}</span>
+          <div style="min-width:0">
+            <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.lead_name) || '—')}</div>
+            <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(safeStr(a.lead_email) || safeStr(a.lead_phone) || '—')}${a.duration_minutes ? ` · ${a.duration_minutes} min` : ''}</div>
+          </div>
+          ${_apptStatusPill(a.status)}
+          <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end">
+            ${canDial ? `<button class="btn btn-primary btn-sm" onclick="window.__fuDial('${esc(a.lead_phone)}','${esc(nameSafe)}','${esc(a.lead_id || '')}')" title="Bel via softphone">📞 Bel</button>` : ''}
+            ${canOpen ? `<button class="btn btn-ghost btn-sm" onclick="window.__fuJumpToLead('${esc(a.lead_id)}')" title="Open lead in Werklijst">Openen</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="window.__fuApptOpen('${esc(a.id)}')">Detail</button>
+            <button class="btn btn-primary btn-sm" onclick="window.__fuApptOutcomeOpen('${esc(a.id)}')">Uitkomst</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  function agendaView() {
+    const st = _live.agenda;
+    if (!st.loading && (!st.data || st.key !== _ui.agendaPeriod)) queueMicrotask(fetchAgenda);
+    const body = st.error && !st.data ? errBlk(st.error, 'window.__fuAgendaRefresh()')
+      : (st.loading && !st.data) ? skel()
+      : !st.data ? skel()
+      : _renderAgendaList(st.data.appointments);
+    return `<div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+        <h2 style="font-size:16px;font-weight:600;margin:0">Agenda</h2>
+        <button class="icon-btn" onclick="window.__fuAgendaRefresh()" title="Vernieuw" style="width:28px;height:28px">↻</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+        ${AGENDA_PERIODS.map((p) => {
+          const on = _ui.agendaPeriod === p.v;
+          return `<button class="chip ${on ? 'on' : ''}" style="padding:5px 12px;border:1px solid ${on ? 'var(--m)' : 'var(--border)'};background:${on ? 'var(--m-soft)' : 'transparent'};color:${on ? 'var(--m)' : 'var(--text-2)'};border-radius:20px;font-size:12px;font-weight:${on ? '600' : '400'};cursor:pointer" onclick="window.__fuAgendaPeriod('${p.v}')">${esc(p.l)}</button>`;
+        }).join('')}
+      </div>
+      ${body}
+      ${_apptDetailModal()}
+      ${_apptOutcomeModalRender()}
+      ${_renderModals()}
+      ${_renderToast()}
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // BROK 3 — OPVOLGING (opvolging-per-period + wake-up buttons)
   // ═══════════════════════════════════════════════════════════════════════
   const OPVOLGING_SUBS = [
@@ -2720,26 +2818,46 @@
   // REGISTRATIE
   // ═══════════════════════════════════════════════════════════════════════
   /* ═══════════════════════════════════════════════════════════════════════
-     OVERIGE-tab (UX-ronde) — hub-menu naar admin/archief/afgeboekt/sluimerpot
-     Houdt de hoofd-tabbalk compact. Klik → DFO.goTab naar sub-view.
+     OVERIGE-tab (ronde 8) — hub-menu naar admin/archief/afgeboekt/sluimerpot.
+     BUG-FIX (v=16): eerdere versie riep DFO.goTab('<sub>') aan; die zet
+     S.tab en render() reset dan naar de eerste tab omdat de sub niet in
+     m.tabs staat → user viel stil terug op Werklijst. Nu: state-only sub
+     (_ui.overigeSub) + inline render van de sub-view + terug-knop. Blijft
+     binnen de "Overige"-tab van app-shell.
+     Opvolging is uit dit menu: opgegaan in nieuwe Agenda-tab (open/actie).
      ═══════════════════════════════════════════════════════════════════════ */
   function overigeView() {
     const items = [
-      { tab: 'Sluimerpot', icon: '💤', desc: 'Leads die gepauzeerd zijn — komen automatisch terug op de wake-datum.' },
-      { tab: 'Afgeboekt',  icon: '📉', desc: 'Verloren leads met reden (afgesloten, doorverwezen, dubbel).' },
-      { tab: 'Archief',    icon: '📁', desc: 'Historische leads (>90 dagen inactief, gearchiveerd).' },
-      { tab: 'Opvolging',  icon: '🔁', desc: 'Terugbel-agenda: leads met een geplande terugbel-datum (chronologisch).' },
-      { tab: 'Admin',      icon: '⚙',  desc: 'Instellingen, backfill, GHL-koppelingen, sync-status.' },
+      { sub: 'Sluimerpot', icon: '💤', desc: 'Leads die gepauzeerd zijn — komen automatisch terug op de wake-datum.' },
+      { sub: 'Afgeboekt',  icon: '📉', desc: 'Verloren leads met reden (afgesloten, doorverwezen, dubbel).' },
+      { sub: 'Archief',    icon: '📁', desc: 'Historische leads (>90 dagen inactief, gearchiveerd).' },
+      { sub: 'Admin',      icon: '⚙',  desc: 'Instellingen, backfill, GHL-koppelingen, sync-status.' },
     ];
+    const subMap = {
+      Sluimerpot: sluimerpotView,
+      Afgeboekt:  afgeboektView,
+      Archief:    archiefView,
+      Admin:      adminView,
+    };
+    const sub = _ui.overigeSub;
+    if (sub && typeof subMap[sub] === 'function') {
+      return `<div>
+        <div style="padding:10px 20px 0;display:flex;align-items:center;gap:10px">
+          <button class="btn btn-ghost btn-sm" onclick="window.__fuOverigeBack()" title="Terug naar Overige-menu">← Overige</button>
+          <span style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(sub)}</span>
+        </div>
+        ${subMap[sub]()}
+      </div>`;
+    }
     return `<div class="pad" style="padding-top:16px">
       <div style="max-width:640px">
         <div style="font-size:15px;font-weight:600;margin-bottom:6px">Overige weergaven</div>
         <div style="font-size:12.5px;color:var(--text-3);margin-bottom:14px">Deze weergaven staan buiten de dagelijkse werkstroom. Klik om te openen.</div>
         <div style="display:grid;gap:8px">
-          ${items.map((it) => `<button class="btn btn-ghost" onclick="try{window.DFO.goTab('${esc(it.tab)}')}catch(_){}" style="display:flex;align-items:center;gap:14px;padding:14px 16px;text-align:left;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);cursor:pointer">
+          ${items.map((it) => `<button class="btn btn-ghost" onclick="window.__fuOverigeSub('${esc(it.sub)}')" style="display:flex;align-items:center;gap:14px;padding:14px 16px;text-align:left;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);cursor:pointer">
             <span style="font-size:22px">${it.icon}</span>
             <div style="flex:1;min-width:0">
-              <div style="font-size:14px;font-weight:600;color:var(--text)">${esc(it.tab)} →</div>
+              <div style="font-size:14px;font-weight:600;color:var(--text)">${esc(it.sub)} →</div>
               <div style="font-size:12px;color:var(--text-3);margin-top:2px">${esc(it.desc)}</div>
             </div>
           </button>`).join('')}
@@ -2747,7 +2865,8 @@
         <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:11.5px;color:var(--text-3)">
           ℹ Voicememo-ronde en No-show-lijst zijn in de hoofd-flow geïntegreerd:
           voicememo verschijnt als popup + indicator bij openen van Follow-up,
-          en event-no-shows staan mee in de <b>Opvolglijst</b>.
+          en event-no-shows staan mee in de <b>Opvolglijst</b>. De vroegere
+          <b>Opvolging</b>-lijst is opgegaan in de nieuwe <b>Agenda</b>-tab.
         </div>
       </div>
     </div>`;
@@ -2783,34 +2902,38 @@
     </div>`;
   }
 
-  // UX-ronde 2026-08-16: Voicememo + No-show tabs verwijderd uit sub-nav.
-  // - Voicememo → popup-reminder bij open + kleine indicator in werklijst.
-  //   View blijft geregistreerd voor deep-link maar niet in tab-array.
-  // - No-show → gemerged in Opvolglijst (event-no-shows tonen daar mee).
-  // - Admin/Archief/Afgeboekt/Sluimerpot → verhuisd naar "Overige"-tab
-  //   (dropdown). Views blijven geregistreerd zodat de dropdown ze kan
-  //   openen; ze verschijnen niet in de hoofd-tabbalk.
+  // Ronde 8 (v=16) tab-topologie:
+  // Hoofd-tabbalk: Werklijst · Event-bellijst · Opvolglijst · Retenties ·
+  //                Afspraken · Kalender · Agenda · Statistieken · Zoeken ·
+  //                Overige (hub met Sluimerpot/Afgeboekt/Archief/Admin).
+  // - Agenda      → NIEUW: consolideert Open-acties + Opvolging in 4
+  //                 periodes (Vandaag/Week/Open/Actie-nodig).
+  // - Open-acties → UIT hoofd-tabbalk (VIEWS-registratie behouden voor
+  //                 legacy deep-link).
+  // - Opvolging   → UIT Overige-hub (opgegaan in Agenda; VIEWS blijft
+  //                 voor legacy deep-link).
+  // - Overige     → sub-view via _ui.overigeSub (state-only, geen goTab
+  //                 die zou resetten naar Werklijst).
   window.DFO.VIEWS['followup/Werklijst']       = werklijstView;
   window.DFO.VIEWS['followup/Opvolglijst']     = opvolglijstView;
   window.DFO.VIEWS['followup/Afspraken']       = afsprakenView;
   window.DFO.VIEWS['followup/Kalender']        = kalenderView;
   window.DFO.VIEWS['followup/Retenties']       = retentiesView;
-  window.DFO.VIEWS['followup/Sluimerpot']      = sluimerpotView;     // via Overige
-  window.DFO.VIEWS['followup/No-show']         = noshowView;         // deep-link only (niet in nav)
-  window.DFO.VIEWS['followup/Open-acties']     = openActiesView;
-  window.DFO.VIEWS['followup/Opvolging']       = opvolgingView;
-  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // via Overige
-  window.DFO.VIEWS['followup/Archief']         = archiefView;        // via Overige
+  window.DFO.VIEWS['followup/Sluimerpot']      = sluimerpotView;     // via Overige-hub
+  window.DFO.VIEWS['followup/No-show']         = noshowView;         // deep-link only
+  window.DFO.VIEWS['followup/Open-acties']     = openActiesView;     // deep-link only (opgegaan in Agenda)
+  window.DFO.VIEWS['followup/Opvolging']       = opvolgingView;      // deep-link only (opgegaan in Agenda)
+  window.DFO.VIEWS['followup/Agenda']          = agendaView;
+  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // via Overige-hub
+  window.DFO.VIEWS['followup/Archief']         = archiefView;        // via Overige-hub
   window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;
   window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;
   window.DFO.VIEWS['followup/Zoeken']          = zoekenView;
   window.DFO.VIEWS['followup/Voicememo']       = voicememoView;      // deep-link only (indicator + popup)
-  window.DFO.VIEWS['followup/Admin']           = adminView;          // via Overige
-  // Nieuwe hub-tab: "Overige" toont dropdown-menu naar Admin/Archief/
-  // Afgeboekt/Sluimerpot om de hoofd-tabbalk compact te houden.
+  window.DFO.VIEWS['followup/Admin']           = adminView;          // via Overige-hub
   window.DFO.VIEWS['followup/Overige']         = overigeView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] BROK 5 registered — 16 tabs live. Alle 45 endpoints gekoppeld (screenshot-review noteert upload-flow; ghl-poll/webhook draaien server-side).');
+  console.debug('[followup-v2] v=16 registered — Agenda-tab + Overige-hub state-fix (16 views, 10 in hoofd-tabbalk).');
 })();
