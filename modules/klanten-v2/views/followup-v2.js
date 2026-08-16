@@ -942,17 +942,31 @@
   // pattern is de meest robuuste route: geen dependency op de tabbar of
   // Overige-hub, werkt cross-view en is fail-soft. Render-hook staat in
   // de DFO.render monkey-patch verderop (naast _ensureVoicememoHeaderBtn).
+  // v=19 fix: de lokale `render` (destructured van window.DFO in de IIFE-
+  // head) roept intern niet de monkey-patched versie aan — de wrapper op
+  // window.DFO.render is een NIEUWE functie-referentie die na destructuring
+  // gemist wordt. Daardoor draaide _ensureVoicememoOverlay pas bij een
+  // shell-render (bijv. tab-switch of ESC-key), en deden ✕/knop niets.
+  // Fix: expliciet window.DFO.render() aanroepen zodat de wrapper — en
+  // dus _ensureVoicememoOverlay — meteen draait. `render` fallback voor
+  // het geval de monkey-patch niet actief is (defensief).
+  const _dfoRender = () => {
+    try {
+      if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+      else if (render) render();
+    } catch (_) { if (render) render(); }
+  };
   window.__fuVoicememoOpenView = () => {
     _ui.voicememoPopupDismissed = true;
     _ui.voicememoOverlayOpen = true;
     if (!_live.voicememo.data && !_live.voicememo.loading && !_live.voicememo.error) {
       queueMicrotask(fetchVoicememo);
     }
-    if (render) render();
+    _dfoRender();
   };
   window.__fuVoicememoOverlayClose = () => {
     _ui.voicememoOverlayOpen = false;
-    if (render) render();
+    _dfoRender();
   };
   window.__fuDetailTab = (t) => { _ui.detailTab = t; if (render) render(); };
   window.__fuOpenCall = (leadId) => {
@@ -2851,11 +2865,15 @@
         'background:var(--bg, #f6f7f9)', 'overflow-y:auto',
         'display:none',
       ].join(';');
-      // ESC-key sluit de overlay.
+      // ESC-key sluit de overlay. Route via window.DFO.render() zodat de
+      // monkey-patched _ensureVoicememoOverlay meteen draait (v=19).
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && _ui.voicememoOverlayOpen) {
           _ui.voicememoOverlayOpen = false;
-          if (render) render();
+          try {
+            if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+            else if (render) render();
+          } catch (_) { if (render) render(); }
         }
       });
       document.body.appendChild(overlay);
@@ -2931,5 +2949,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] v=18 registered — Voicememo header-btn + fullscreen-overlay open (fix: goTab route werkte niet, overlay bypassed router).');
+  console.debug('[followup-v2] v=19 registered — Voicememo overlay-hook fix: open/close route via window.DFO.render() zodat monkey-patched _ensureVoicememoOverlay direct draait.');
 })();
