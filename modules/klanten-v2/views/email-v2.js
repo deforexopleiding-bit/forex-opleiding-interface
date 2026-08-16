@@ -92,6 +92,7 @@
     counts:  { loading: false, data: null, ts: 0 },
     aiDraft: { loading: {}, error: {}, data: {} }, // per rowId → { subject, body }
     sanne:   { loading: {}, error: {}, data: {} }, // per rowId (email_id) → { suggestion, flags }
+    templates: { loading: false, error: null, data: null }, // v2 email-round DEEL 2
   };
   const _ui = {
     mailboxSlug: '',
@@ -114,6 +115,7 @@
       email_id: null,
       signature: 'standaard',
       draft_id: null,     // gezet zodra draft opgeslagen
+      attachments: [],    // v=24: [{filename, contentType, size, content(base64)}]
     },
     ccBccOpen:  false,
     aiTone:     'vriendelijk',
@@ -131,6 +133,9 @@
     // In-UI dialogs — vervangen native alert()/confirm() die de compose-modal bevroren.
     confirmDialog: null,  // { msg, onOk, onCancel } → gerenderd als portal
     infoDialog:    null,  // { title, msg, tone } tone: 'info'|'warn'
+    templatePickerOpen: false, // v2 email-round DEEL 2
+    _listScrollTop: 0,    // v2 email-round bug-4: list-scroll snapshot
+    klantModal:    null,  // v=21: { messageId, currentCustomerId, currentCustomerLabel, query, results, searching, busy, error }
   };
   function _showToastLocal(msg, tone) {
     try {
@@ -206,14 +211,24 @@
     if (j && !j.__error) { st.data = j; st.ts = Date.now(); if (render) render(); }
   }
   async function fetchBody(row) {
-    if (!row || !row.mailbox || row.imap_uid == null) return;
+    if (!row) return;
     const rid = row.id;
     const st = _live.body;
     if (st.loading[rid] || st.data[rid]) return;
+    // v=22: als row geen imap_uid heeft (intern gegenereerde notificatie-mail
+    // zoals leads@ "Nieuwe lead: …"), stuur alleen email_id — backend valt
+    // dan direct terug op DB (email_messages.body_html/text) i.p.v. IMAP.
+    // Bij WEL imap_uid: stuur allebei mee zodat backend IMAP eerst probeert
+    // en bij miss (mail niet meer in INBOX) valt op DB.
+    const payload = { email_id: rid };
+    if (row.mailbox && row.imap_uid != null) {
+      payload.mailbox = row.mailbox + '@deforexopleiding.nl';
+      payload.uid = row.imap_uid;
+    }
     st.loading[rid] = true; st.error[rid] = null;
     const j = await tryFetch('body:' + rid, '/api/email-body', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mailbox: row.mailbox + '@deforexopleiding.nl', uid: row.imap_uid }),
+      body: JSON.stringify(payload),
     }, 12000);
     st.loading[rid] = false;
     if (j && j.__error) st.error[rid] = j.__error;
@@ -283,26 +298,51 @@
   async function sendMail() {
     if (_ui.sendBusy) return;
     const c = _ui.compose;
-    // Sync plaintext-fallback uit HTML voor de send.
-    c.body_text = htmlToPlaintext(c.body_html);
-    // Voeg handtekening toe (server appends niet; we doen 't hier).
-    const sig = SIGNATURES.find((s) => s.key === c.signature);
-    const sigText = sig ? sig.text : '';
-    const finalText = (c.body_text || '') + sigText;
-    const finalHtml = (c.body_html || '') + (sig && sig.text ? `<pre style="font-family:inherit;white-space:pre-wrap;margin:0">${esc(sig.text)}</pre>` : '');
+    // v=20: als HTML een placement-marker heeft, spiegel dat naar de
+    // text-body op de juiste plek. htmlToPlaintext zou anders de marker
+    // verliezen (lege div wordt gestript) → server plakt handtekening
+    // aan het eind i.p.v. tussen eigen tekst en quote.
+    const HTML_MARKER_RE = /<div[^>]*data-sig-marker=["']1["'][^>]*>[\s\S]*?<\/div>/i;
+    const hasHtmlMarker = HTML_MARKER_RE.test(c.body_html || '');
+    if (hasHtmlMarker) {
+      const parts = String(c.body_html).split(HTML_MARKER_RE);
+      // Split geeft [voor, na] (regex zonder capture group).
+      const beforeText = htmlToPlaintext(parts[0] || '');
+      const afterText  = htmlToPlaintext(parts.slice(1).join('') || '');
+      c.body_text = beforeText.replace(/\s+$/, '') + '\n\n__SIG_HERE__\n\n' + afterText.replace(/^\s+/, '');
+    } else {
+      // Sync plaintext-fallback uit HTML voor de send.
+      c.body_text = htmlToPlaintext(c.body_html);
+    }
     if (!c.from_mailbox || !c.to || !c.subject || !c.body_text) {
       _ui.lastSend = { ok: false, error: 'Vul Van/Aan/Onderwerp/Bericht' };
       if (render) render(); return;
     }
+    // v2 email-round DEEL 3: server-side voegt de per-mailbox handtekening
+    // toe (of globale default) via handtekening:true flag. De legacy
+    // client-side SIGNATURES-blok is verwijderd — de user beheert nu de
+    // handtekening in Instellingen → Communicatie → E-mail-handtekeningen.
+    // c.signature (dropdown-keuze) blijft in de state maar wordt niet meer
+    // gebruikt bij send (Fase-A: één handtekening per mailbox, later evt.
+    // multi-signature per mailbox).
     _ui.sendBusy = true; _ui.lastSend = null; if (render) render();
+    // v=24: attachments mee — backend email-send-v2.js verwacht al
+    // {filename, contentType, size, content(base64)} en mapt 'em naar
+    // nodemailer. Omit key als leeg zodat oude paden ongewijzigd blijven.
+    const attList = Array.isArray(c.attachments) ? c.attachments : [];
+    const payload = {
+      from_mailbox: c.from_mailbox, to: c.to, subject: c.subject,
+      text: c.body_text, html: c.body_html || undefined,
+      cc: c.cc || undefined, bcc: c.bcc || undefined, email_id: c.email_id || undefined,
+      handtekening: true, // v2 email-round DEEL 3: server-side add
+    };
+    if (attList.length) payload.attachments = attList;
+    // Grotere timeout bij attachments (upload van base64 kan traag zijn op mobiel).
+    const timeoutMs = attList.length ? 60000 : 15000;
     const j = await tryFetch('send', '/api/email-send-v2', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from_mailbox: c.from_mailbox, to: c.to, subject: c.subject,
-        text: finalText, html: finalHtml,
-        cc: c.cc || undefined, bcc: c.bcc || undefined, email_id: c.email_id || undefined,
-      }),
-    }, 15000);
+      body: JSON.stringify(payload),
+    }, timeoutMs);
     _ui.sendBusy = false;
     if (j && j.__error) _ui.lastSend = { ok: false, error: j.__error };
     else if (j?.ok) {
@@ -311,7 +351,7 @@
       if (c.draft_id) { deleteDraft(c.draft_id).catch(() => {}); }
       setTimeout(() => {
         _ui.composeOpen = false;
-        _ui.compose = { from_mailbox: c.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+        _ui.compose = { from_mailbox: c.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
         _ui.lastSend = null; _ui.ccBccOpen = false;
         _live.inbox.data = null; _live.inbox.key = null;
         _live.counts.data = null;
@@ -511,7 +551,9 @@
   function _dialogsLayer() {
     const c = _ui.confirmDialog;
     const i = _ui.infoDialog;
-    if (!c && !i) return '';
+    const tp = _ui.templatePickerOpen;
+    const km = _ui.klantModal;
+    if (!c && !i && !tp && !km) return '';
     let html = '';
     if (c) {
       // z-index 2000 → boven compose (1000), boven overlay-modals. Native dialogs zijn hiermee vervangen.
@@ -534,6 +576,67 @@
           <div style="padding:14px 22px;background:${accentBg};color:${accentFg};font-size:14px;font-weight:600;border-bottom:1px solid var(--border)">${esc(i.title)}</div>
           <div style="padding:18px 22px;font-size:13px;color:var(--text-2);line-height:1.6">${esc(i.msg)}</div>
           <div style="padding:0 18px 16px;display:flex;justify-content:flex-end"><button class="btn btn-primary" onclick="window.__emailInfoClose()">Sluiten</button></div>
+        </div>
+      </div>`;
+    }
+    if (km) {
+      // v=21: klant-koppeling modal — zoek + resultaten + ontkoppel-actie.
+      const results = Array.isArray(km.results) ? km.results : [];
+      html += `<div style="position:fixed;inset:0;background:rgba(17,23,33,.48);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__emailKlantCancel()">
+        <div style="background:var(--surface);border-radius:${TOK.rLg};box-shadow:0 20px 60px rgba(0,0,0,.32);max-width:560px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+          <div style="padding:14px 22px;background:${TOK.mSoft};color:${TOK.m};font-size:14px;font-weight:600;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <span>Koppel aan klant</span>
+            <button class="icon-btn" onclick="window.__emailKlantCancel()" title="Sluiten" style="width:26px;height:26px">${ICO.x}</button>
+          </div>
+          ${km.currentCustomerId ? `
+            <div style="padding:10px 22px;background:${TOK.mSoft};border-bottom:1px solid var(--border);font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+              <span>Nu gekoppeld: <b>${esc(km.currentCustomerLabel || km.currentCustomerId.slice(0, 8))}</b></span>
+              <button class="btn btn-ghost btn-sm" onclick="window.__emailKlantUnlink()" style="color:var(--rose)" ${km.busy ? 'disabled' : ''}>Ontkoppelen</button>
+            </div>` : ''}
+          <div style="padding:14px 22px;border-bottom:1px solid var(--border)">
+            <input type="search" value="${esc(km.query)}" oninput="window.__emailKlantSearch(this.value)" placeholder="Zoek klant op naam, e-mail of bedrijf (min 2 tekens)…" autofocus style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px" />
+            ${km.error ? `<div style="margin-top:8px;padding:6px 10px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:11.5px">${esc(km.error)}</div>` : ''}
+          </div>
+          <div id="klantModalResults" style="padding:8px 0;overflow-y:auto;flex:1">${_renderKlantResults()}</div>
+          <div style="padding:10px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick="window.__emailKlantCancel()">Annuleren</button>
+          </div>
+        </div>
+      </div>`;
+    }
+    if (tp) {
+      // v2 email-round DEEL 2: template-picker modal.
+      const list = Array.isArray(_live.templates.data) ? _live.templates.data : [];
+      const byCategory = list.reduce((acc, t) => { (acc[t.category || 'algemeen'] ||= []).push(t); return acc; }, {});
+      const cats = Object.keys(byCategory).sort();
+      html += `<div style="position:fixed;inset:0;background:rgba(17,23,33,.48);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__emailTemplateCancel()">
+        <div style="background:var(--surface);border-radius:${TOK.rLg};box-shadow:0 20px 60px rgba(0,0,0,.32);max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+          <div style="padding:14px 22px;background:${TOK.mSoft};color:${TOK.m};font-size:14px;font-weight:600;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <span>Sjabloon invoegen</span>
+            <button class="icon-btn" onclick="window.__emailTemplateCancel()" title="Sluiten" style="width:26px;height:26px">${ICO.x}</button>
+          </div>
+          <div style="padding:14px 22px;overflow-y:auto;flex:1">
+            ${list.length === 0
+              ? `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Nog geen sjablonen aangemaakt.<br><br>Beheer sjablonen in <b>Instellingen → Communicatie → Berichtsjablonen</b>.</div>`
+              : cats.map((cat) => `
+                <div style="margin-bottom:14px">
+                  <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:6px">${esc(cat)}</div>
+                  <div style="display:grid;gap:6px">
+                    ${byCategory[cat].map((t) => `
+                      <button class="btn btn-ghost" onclick="window.__emailTemplateApply('${esc(t.id)}')" style="text-align:left;padding:10px 12px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:2px">
+                        <span style="font-size:13.5px;font-weight:600;color:var(--text)">${esc(t.name)}</span>
+                        ${t.subject ? `<span style="font-size:11.5px;color:var(--text-3)">${esc(String(t.subject).slice(0, 100))}</span>` : ''}
+                      </button>
+                    `).join('')}
+                  </div>
+                </div>
+              `).join('')
+            }
+          </div>
+          <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--text-3)">
+            <span>${list.length} sjabl${list.length === 1 ? 'oon' : 'onen'} · beheer in Instellingen</span>
+            <button class="btn btn-ghost" onclick="window.__emailTemplateCancel()">Annuleren</button>
+          </div>
         </div>
       </div>`;
     }
@@ -610,7 +713,7 @@
         </div>
         ${bulkBar}
       </div>
-      <div style="flex:1;overflow-y:auto;min-height:0">${_listBody()}</div>
+      <div id="emailListScroll" style="flex:1;overflow-y:auto;min-height:0" onscroll="window.__emailListScrollSnap && window.__emailListScrollSnap(this.scrollTop)">${_listBody()}</div>
       ${_pager()}
     </section>`;
   }
@@ -719,8 +822,12 @@
       body = { text: String(row._body_text || ''), body_html_safe: '', hasHtml: false, attachments: asArr(row._attachments), external_images_blocked: 0 };
       bst.data[row.id] = body;
     }
-    // Alleen IMAP-fetch voor inbox/archief/prullenbak — die hebben een echte imap_uid.
-    if (!body && !bErr && !bLoad && row._source !== 'sent' && row.mailbox && row.imap_uid != null) queueMicrotask(() => fetchBody(row));
+    // v=22: fetchBody trigger óók als imap_uid ontbreekt — interne notificatie-
+    // mails (leads@ "Nieuwe lead: …") hebben geen betrouwbare uid, maar wel
+    // body-kolommen in DB. fetchBody stuurt email_id mee en backend valt
+    // dan direct terug op DB. Enige uitzondering blijft _source='sent'
+    // (die wordt hierboven al inline gehydrateerd uit email_replies).
+    if (!body && !bErr && !bLoad && row._source !== 'sent') queueMicrotask(() => fetchBody(row));
     if (row._source === 'inbox' && !row.is_read && !_ui.statusBusy['read:' + row.id]) queueMicrotask(() => markRead(row, true));
     // Sanne (Fase 2.1) — fetch suggestion voor inbox-rows (skip sent/draft).
     if (row._source === 'inbox' && !_live.sanne.data[row.id] && !_live.sanne.loading[row.id]) queueMicrotask(() => fetchSanneForRow(row.id));
@@ -787,6 +894,12 @@
   }
   function _readHead(row) {
     const isFlagged = !!row.flagged;
+    // v=21: reader-toolbar rol-bewust per folder.
+    // Inbox/andere → archive/trash-knoppen.
+    // Archief       → "Terugzetten naar Postvak IN" i.p.v. archive.
+    // Prullenbak    → "Terugzetten" + "Permanent verwijderen" (met confirm).
+    const inArchief = _ui.folder === 'archive';
+    const inTrash   = _ui.folder === 'trash';
     return `<div style="padding:16px 22px 14px;border-bottom:1px solid var(--border);background:var(--surface)">
       <div style="font-size:18px;font-weight:600;letter-spacing:-.025em;color:var(--text);line-height:1.3;margin-bottom:12px">${esc(row.subject || '(geen onderwerp)')}</div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -796,13 +909,26 @@
         <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
         <button class="icon-btn" title="Markeer ongelezen" onclick="window.__emailMarkUnread()" style="width:28px;height:28px">${ICO.mail}</button>
         <button class="icon-btn" title="${isFlagged ? 'Vlag verwijderen' : 'Vlag toevoegen'}" onclick="window.__emailFlagToggle()" style="width:28px;height:28px;color:${isFlagged ? TOK.amber : 'inherit'}">${ICO.flag}</button>
-        <button class="icon-btn" title="Archiveren" onclick="window.__emailArchive()" style="width:28px;height:28px">${ICO.archive}</button>
-        <button class="icon-btn" title="Verwijderen" onclick="window.__emailTrash()" style="width:28px;height:28px">${ICO.trash}</button>
+        ${inArchief || inTrash
+          ? `<button class="btn btn-ghost btn-sm" onclick="window.__emailRestore()" style="gap:6px" title="Zet dit bericht terug naar Postvak IN">↺ Terugzetten</button>`
+          : `<button class="icon-btn" title="Archiveren" onclick="window.__emailArchive()" style="width:28px;height:28px">${ICO.archive}</button>`
+        }
+        ${inTrash
+          ? `<button class="btn btn-ghost btn-sm" onclick="window.__emailPurgeConfirm()" style="gap:6px;color:var(--rose)" title="Definitief verwijderen — NIET terug te halen">✕ Permanent verwijderen</button>`
+          : (!inArchief ? `<button class="icon-btn" title="Verwijderen" onclick="window.__emailTrash()" style="width:28px;height:28px">${ICO.trash}</button>` : '')
+        }
         <div style="position:relative;margin-left:auto">
           <button class="icon-btn" title="Meer" onclick="window.__emailToggleMore()" style="width:28px;height:28px">${ICO.dots}</button>
           ${_ui.moreMenuOpen ? _moreMenu(row) : ''}
         </div>
       </div>
+      ${row.customer_id
+        ? `<div style="margin-top:10px;padding:8px 12px;background:${TOK.mSoft};border-radius:${TOK.rSm};font-size:12px;display:flex;align-items:center;gap:8px">
+            <span style="color:${TOK.m};font-weight:600">🔗 Gekoppeld aan klant:</span>
+            <a href="#" onclick="event.preventDefault();window.__emailOpenKlant('${esc(row.customer_id)}')" style="color:${TOK.m};text-decoration:underline">${esc(row.customer_name || row.customer_label || row.customer_id.slice(0, 8))}</a>
+            <button class="btn btn-ghost btn-sm" onclick="window.__emailKoppelKlant()" style="margin-left:auto;font-size:11px">Wijzig / ontkoppel</button>
+          </div>`
+        : ''}
     </div>`;
   }
   function _moreMenu(row) {
@@ -886,15 +1012,40 @@
     return `<div>${bodyRender}${attachments.length > 0 ? _attStrip(attachments, row) : ''}</div>`;
   }
   function _attStrip(attachments, row) {
+    // v=24: attachment-URL resolve — 2 paden:
+    // 1. public_url uit sync-emails Storage (inbound-flow) — werkt altijd.
+    // 2. IMAP-stream via /api/email-attachment?mailbox&uid&index — vereist imap_uid.
+    // Fallback naar #  (disabled) als geen van beide.
+    const hasImap = row.mailbox && row.imap_uid != null;
+    const filenameKey = (a) => a.filename || a.mime_type || 'bijlage';
+    const bytes = (a) => Number(a.size || a.size_bytes || 0);
+    const urlFor = (a) => {
+      if (a.public_url) return a.public_url;
+      if (hasImap && a.index != null) {
+        return '/api/email-attachment?mailbox=' + encodeURIComponent(row.mailbox + '@deforexopleiding.nl')
+             + '&uid=' + encodeURIComponent(row.imap_uid)
+             + '&index=' + encodeURIComponent(a.index);
+      }
+      return null;
+    };
     return `<div style="margin:22px 22px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Bijlagen (${attachments.length})</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
-        ${attachments.map((a) => `
-          <a href="/api/email-attachment?mailbox=${encodeURIComponent(row.mailbox + '@deforexopleiding.nl')}&uid=${encodeURIComponent(row.imap_uid)}&index=${encodeURIComponent(a.index)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);text-decoration:none;color:var(--text);font-size:12px" onmouseover="this.style.borderColor='${TOK.m}'" onmouseout="this.style.borderColor='var(--border)'">
+        ${attachments.map((a) => {
+          const url = urlFor(a);
+          const name = filenameKey(a);
+          const kb = bytes(a) / 1024;
+          const sizeLabel = kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb.toFixed(1) + ' KB';
+          const linkOpen  = url
+            ? `<a href="${esc(url)}" target="_blank" rel="noopener" download="${esc(name)}"`
+            : `<span title="Bijlage niet downloadbaar (geen public_url, geen IMAP-uid)"`;
+          const linkClose = url ? '</a>' : '</span>';
+          return `${linkOpen} style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);text-decoration:none;color:var(--text);font-size:12px;${url ? '' : 'opacity:.55;cursor:not-allowed;'}" ${url ? `onmouseover="this.style.borderColor='${TOK.m}'" onmouseout="this.style.borderColor='var(--border)'"` : ''}>
             <span style="width:28px;height:28px;border-radius:${TOK.rSm};background:${TOK.roseSoft};color:${TOK.rose};display:flex;align-items:center;justify-content:center;flex-shrink:0">${ICO.file}</span>
-            <span style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename || 'bijlage')}</span>
-            <span style="font-size:10.5px;color:var(--text-3);font-family:${TOK.mono}">${(a.size / 1024).toFixed(1)} KB</span>
-          </a>
-        `).join('')}
+            <span style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+            <span style="font-size:10.5px;color:var(--text-3);font-family:${TOK.mono}">${sizeLabel}</span>
+          ${linkClose}`;
+        }).join('')}
       </div>
     </div>`;
   }
@@ -953,6 +1104,7 @@
             <div contenteditable="true" oninput="window.__emailComposeBody(this.innerHTML)" data-placeholder="Typ je bericht…" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px;line-height:1.55;min-height:180px;font-family:inherit;flex:1;outline:none;overflow-y:auto">${c.body_html || ''}</div>
           </div>
           ${_composeSigStrip()}
+          ${_composeAttachChips(c)}
           ${send ? _sendResultBlock(send) : ''}
         </div>
         <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
@@ -998,6 +1150,32 @@
       <button class="icon-btn" style="width:18px;height:18px" onclick="window.__emailComposeField('to','')">${ICO.x}</button>
     </span></div>`;
   }
+  // v=24: attachment-chips in compose (naam + grootte + ✕). Toont niks als
+  // geen bijlagen. Grootte-format: KB voor < 1 MB, anders MB (1 decimaal).
+  function _fmtBytes(n) {
+    const b = Number(n) || 0;
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+    return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+  function _composeAttachChips(c) {
+    const list = Array.isArray(c.attachments) ? c.attachments : [];
+    if (list.length === 0) return '';
+    const totalBytes = list.reduce((n, a) => n + (Number(a.size) || 0), 0);
+    return `<div style="padding:8px 0 4px;display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bijlagen (${list.length}) · totaal ${_fmtBytes(totalBytes)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${list.map((a, i) => `
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:20px;font-size:12px;color:var(--text-2)">
+            ${ICO.paperclip}
+            <span style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename || 'bijlage')}</span>
+            <span style="font-size:11px;color:var(--text-3)">${_fmtBytes(a.size)}</span>
+            <button class="icon-btn" title="Verwijderen" onclick="window.__emailComposeAttachRemove(${i})" style="width:18px;height:18px;padding:0;background:transparent;border:none;color:var(--text-3);cursor:pointer">${ICO.x}</button>
+          </span>
+        `).join('')}
+      </div>
+    </div>`;
+  }
   function _composeSigStrip() {
     const c = _ui.compose;
     const sig = SIGNATURES.find((s) => s.key === c.signature) || SIGNATURES[0];
@@ -1038,7 +1216,28 @@
   };
   window.__emailRefresh = () => { _live.inbox.data = null; _live.inbox.error = null; _live.inbox.key = null; _live.counts.data = null; if (render) render(); };
   window.__emailPage = (dir) => { _ui.offset = Math.max(0, _ui.offset + dir * PAGE_SIZE); _live.inbox.data = null; _live.inbox.key = null; if (render) render(); };
-  window.__emailOpen = (rid) => { _ui.selectedId = rid; _ui.moreMenuOpen = false; if (render) render(); };
+  // v2 email-round bug-4: snapshot + restore list-scrollTop bij open van een
+  // mail. De list-scroller (#emailListScroll) is een nested div die bij elke
+  // render() vernieuwd wordt → scrollTop reset naar 0. App-shell's scroll-
+  // restore werkt alleen op #content, niet op deze nested container.
+  window.__emailListScrollSnap = (top) => { _ui._listScrollTop = Number(top) || 0; };
+  window.__emailOpen = (rid) => {
+    _ui.selectedId = rid;
+    _ui.moreMenuOpen = false;
+    // Snapshot BEFORE render (in case scroll-listener miste een frame).
+    try {
+      const el = document.getElementById('emailListScroll');
+      if (el) _ui._listScrollTop = el.scrollTop;
+    } catch (_) {}
+    if (render) render();
+    // Restore NA render — 2 rAF zodat de layout definitief is.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      try {
+        const el = document.getElementById('emailListScroll');
+        if (el && typeof _ui._listScrollTop === 'number') el.scrollTop = _ui._listScrollTop;
+      } catch (_) {}
+    }));
+  };
   window.__emailReloadBody = (rid) => { delete _live.body.data[rid]; delete _live.body.error[rid]; if (render) render(); };
   window.__emailShowRawBody = (rid) => { _ui.bodyShowRaw[rid] = true; if (render) render(); };
   window.__emailShowImages = (rid) => { _ui.showImages[rid] = true; if (render) render(); };
@@ -1083,7 +1282,7 @@
     // Als compose openstond op een verwijderd concept: sluit + clear.
     if (_ui.composeOpen && _ui.compose.draft_id && ids.includes(_ui.compose.draft_id)) {
       _ui.composeOpen = false; _ui.composeMinimized = false;
-      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
     }
     _live.counts.data = null;
     _ui.statusBusy[key] = false;
@@ -1160,7 +1359,7 @@
     if (render) render();
   };
   window.__emailSettings = () => {
-    _openInfo('Instellingen', 'Handtekening kan al gekozen worden in het compose-venster. Regels/notificaties/handtekening-beheer komen in Fase 3.', 'info');
+    _openInfo('Instellingen', 'Handtekening beheer je nu in Instellingen → Communicatie → E-mail-handtekeningen (globaal + per-mailbox). Sjablonen in Instellingen → Communicatie → Berichtsjablonen.', 'info');
   };
   window.__emailOpenKlant = (customerId) => {
     if (!customerId) return;
@@ -1173,43 +1372,282 @@
     }
     _showToastLocal('Openen klant-dossier…', 'info');
   };
+  // v=21: klant-koppeling volledig — zoek-modal + POST /api/email-message-link-customer.
+  // Klant-veilig: ontkoppel-actie zichtbaar wanneer al gekoppeld; zoekt via
+  // /api/customers?search=... (min 2 chars, 300ms debounce).
   window.__emailKoppelKlant = () => {
-    // Voor Fase 2B: opent detail-view als er al customer_id is; anders in-UI melding
-    // (NIET blocking alert — die bevriest de compose-modal in Chrome).
     const row = currentRow();
-    if (row && row.customer_id) { window.__emailOpenKlant(row.customer_id); return; }
-    _openInfo(
-      'Klant-koppeling — komt in Fase 3',
-      'Handmatig koppelen van deze e-mail-thread aan een klant zit in Fase 3 van de v2-email-module. Voor nu: open de klanten-module, zoek de klant en de sync-cron matcht ze automatisch op e-mailadres.',
-      'info'
+    if (!row) { _showToastLocal('Selecteer eerst een bericht.', 'info'); return; }
+    _ui.klantModal = {
+      messageId: row.id,
+      currentCustomerId: row.customer_id || null,
+      currentCustomerLabel: row.customer_label || row.customer_name || null,
+      query: '', results: [], searching: false, busy: false, error: null,
+    };
+    if (render) render();
+  };
+  // v=22: uncontrolled-input patroon voor de klant-zoeker. oninput muteert
+  // alleen state + surgisch de #klantModalResults-container. NIET de hele
+  // modal (input-node) her-renderen — anders vervangt DOM-remount de <input>
+  // en valt document.activeElement op BODY (min-2-chars bereikt gebruiker
+  // nooit). Zelfde bug-family als Mentoren/Followup search-focus.
+  function _renderKlantResults() {
+    const km = _ui.klantModal;
+    if (!km) return '';
+    if (km.searching) return '<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12.5px">Zoeken…</div>';
+    const q = String(km.query || '').trim();
+    if (q.length < 2) return '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Typ minstens 2 tekens om te zoeken.</div>';
+    const results = Array.isArray(km.results) ? km.results : [];
+    if (results.length === 0) return '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Geen klanten gevonden voor <b>' + esc(q) + '</b>.</div>';
+    return results.map((c) => {
+      const label = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || c.email || c.id.slice(0, 8);
+      const sub = [c.email, c.phone, c.company_name].filter(Boolean).join(' · ');
+      const isCurrent = c.id === km.currentCustomerId;
+      return `<button class="btn btn-ghost" onclick="window.__emailKlantPick('${esc(c.id)}')" ${km.busy || isCurrent ? 'disabled' : ''} style="display:block;width:100%;padding:10px 22px;text-align:left;border:none;border-bottom:1px solid var(--border);background:${isCurrent ? TOK.mSoft : 'transparent'};cursor:${isCurrent ? 'default' : 'pointer'}">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(label)}${isCurrent ? ' <span style="font-size:10.5px;color:' + TOK.m + '">(huidig)</span>' : ''}</div>
+        <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sub || '—')}</div>
+      </button>`;
+    }).join('');
+  }
+  function _paintKlantResults() {
+    const el = document.getElementById('klantModalResults');
+    if (el) el.innerHTML = _renderKlantResults();
+  }
+  window.__emailKlantSearch = (v) => {
+    if (!_ui.klantModal) return;
+    _ui.klantModal.query = String(v || '');
+    if (_ui.klantModal._debounceT) clearTimeout(_ui.klantModal._debounceT);
+    const q = _ui.klantModal.query.trim();
+    if (q.length < 2) {
+      _ui.klantModal.results = []; _ui.klantModal.searching = false;
+      _paintKlantResults(); // surgisch — geen full render() → input-focus behouden
+      return;
+    }
+    _ui.klantModal.searching = true;
+    _paintKlantResults();
+    _ui.klantModal._debounceT = setTimeout(async () => {
+      const j = await tryFetch('cust-search', '/api/customers?search=' + encodeURIComponent(q) + '&page_size=20', undefined, 8000);
+      if (!_ui.klantModal) return;
+      _ui.klantModal.searching = false;
+      if (j?.__error || j?.error) { _ui.klantModal.error = j.__error || j.error; _ui.klantModal.results = []; }
+      else { _ui.klantModal.error = null; _ui.klantModal.results = Array.isArray(j?.customers) ? j.customers : []; }
+      _paintKlantResults();
+    }, 300);
+  };
+  window.__emailKlantPick = async (customerId) => {
+    if (!_ui.klantModal || _ui.klantModal.busy) return;
+    _ui.klantModal.busy = true; _ui.klantModal.error = null; if (render) render();
+    const j = await tryFetch('link-cust', '/api/email-message-link-customer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message_id: _ui.klantModal.messageId, customer_id: customerId }),
+    }, 10000);
+    if (j?.__error || j?.error) {
+      _ui.klantModal.busy = false; _ui.klantModal.error = j.__error || j.error;
+      if (render) render(); return;
+    }
+    // Reflect in de local row + close modal
+    const items = asArr(_live.inbox.data?.items);
+    const row = items.find((r) => r.id === _ui.klantModal.messageId);
+    if (row) {
+      row.customer_id = customerId;
+      const picked = _ui.klantModal.results.find((c) => c.id === customerId);
+      if (picked) {
+        row.customer_name = [picked.first_name, picked.last_name].filter(Boolean).join(' ') || picked.company_name || picked.email;
+        row.customer_label = row.customer_name;
+      }
+    }
+    _showToastLocal(customerId ? 'Klant gekoppeld' : 'Ontkoppeld', 'success');
+    _ui.klantModal = null;
+    if (render) render();
+  };
+  window.__emailKlantUnlink = () => {
+    if (!_ui.klantModal) return;
+    window.__emailKlantPick(null);
+  };
+  window.__emailKlantCancel = () => { _ui.klantModal = null; if (render) render(); };
+
+  // v=21: terugzet-acties in Archief + Prullenbak (blocker: bestond niet).
+  // Archief → restore (status='inbox'); Prullenbak → restore of purge (hard-delete
+  // met confirm). Klant-veilig: purge vraagt bevestiging via _openConfirm.
+  window.__emailRestore = () => {
+    const row = currentRow(); if (!row) return;
+    statusUpdate([row.id], 'restore');
+  };
+  window.__emailPurgeConfirm = () => {
+    const row = currentRow(); if (!row) return;
+    _openConfirm(
+      'Deze e-mail permanent verwijderen? Dit kan NIET ongedaan gemaakt worden. De rij wordt uit de database gewist.',
+      () => __emailPurgeDoIt([row.id]),
+      null
     );
   };
+  async function __emailPurgeDoIt(ids) {
+    if (!ids || !ids.length) return;
+    const key = 'bulk:purge';
+    if (_ui.statusBusy[key]) return;
+    _ui.statusBusy[key] = true; if (render) render();
+    const j = await tryFetch('purge', '/api/email-status-update', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, action: 'purge' }),
+    }, 10000);
+    _ui.statusBusy[key] = false;
+    if (j?.__error || j?.error) { _showToastLocal('Verwijderen mislukt: ' + (j.__error || j.error), 'warn'); if (render) render(); return; }
+    // Optimistic: verwijder uit lijst + clear selectie.
+    const items = asArr(_live.inbox.data?.items);
+    if (items.length) _live.inbox.data.items = items.filter((x) => !ids.includes(x.id));
+    ids.forEach((id) => { delete _ui.selectedRows[id]; });
+    if (_ui.selectedId && ids.includes(_ui.selectedId)) _ui.selectedId = null;
+    _live.counts.data = null;
+    _showToastLocal((j?.purged || ids.length) + ' permanent verwijderd.', 'success');
+    if (render) render();
+  }
   window.__emailNewCompose = () => {
     _ui.composeMode = 'new'; _ui.composeMinimized = false;
-    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
     _ui.composeOpen = true; _ui.lastSend = null; _ui.ccBccOpen = false;
     _ui.draftMigrationRequired = false;
     if (render) render();
   };
-  function _replyState(mode) {
+  // v=19: forward-quote helpers.
+  // Bouwt een header-blok + geciteerde body voor Doorsturen. Analoog aan
+  // Gmail/Outlook: "---------- Doorgestuurd bericht ----------" + meta +
+  // originele HTML (of platte tekst als HTML te groot is / ontbreekt).
+  function _fmtForwardDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  function _buildForwardQuote(row, bodyData) {
+    // Body-cap check: bij te grote HTML val terug op platte tekst (voorkomt
+    // freeze bij render/contenteditable van 500KB+ HTML). BODY_HTML_MAX is
+    // gedefinieerd verderop maar we redeclareren de waarde hier lokaal om
+    // ordering-issues te vermijden.
+    const CAP = 250 * 1024;
+    const rawHtml = bodyData?.body_html_safe ? String(bodyData.body_html_safe) : '';
+    const text    = bodyData?.text ? String(bodyData.text) : String(row?._body_text || '');
+    const useHtml = rawHtml && rawHtml.length <= CAP;
+    const header = [
+      '---------- Doorgestuurd bericht ----------',
+      'Van: '       + (row.from_name ? `${row.from_name} <${row.from_address || ''}>` : (row.from_address || '—')),
+      'Datum: '     + _fmtForwardDate(row.date_received || row.received_at || null),
+      'Onderwerp: ' + (row.subject || '—'),
+      'Aan: '       + (row.to_address || row.mailbox_address || '—'),
+    ];
+    const headerHtml = `<div style="margin:16px 0 8px;padding:0;color:#111;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5">
+      ${header.map((l) => `<div>${esc(l)}</div>`).join('')}
+    </div><hr style="border:0;border-top:1px solid #ddd;margin:8px 0">`;
+    const headerText = header.join('\n') + '\n\n';
+    // HTML-body: als beschikbaar en binnen cap → inline in een blockquote
+    // met left-border. Als te groot / geen HTML → pre-wrap text in <pre>.
+    const bodyHtml = useHtml
+      ? `<blockquote style="margin:0;padding:0 0 0 12px;border-left:3px solid #ddd">${rawHtml}</blockquote>`
+      : `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;padding:0 0 0 12px;border-left:3px solid #ddd">${esc(text)}</pre>`;
+    return {
+      html: `<div><br><br>${headerHtml}${bodyHtml}</div>`,
+      text: '\n\n' + headerText + text,
+      truncated: !useHtml && !!rawHtml, // true = we hadden HTML maar > cap
+    };
+  }
+  async function _replyState(mode) {
     const row = currentRow();
     if (!row) { _showToastLocal('Selecteer eerst een bericht.', 'info'); return; }
     const from = MAILBOXES.find((m) => m.slug === row.mailbox);
+    const emailId = (row.mailbox && row.imap_uid != null) ? `${row.mailbox}@deforexopleiding.nl:${row.imap_uid}` : null;
     _ui.composeMode = mode; _ui.composeMinimized = false;
+    // v2 email-round bug-3: zoek eerst een bestaand concept voor deze mail
+    // (in_reply_to_email_id) zodat Beantwoorden het opgeslagen concept
+    // teruglaadt i.p.v. leeg te openen. Fail-soft: als de lookup faalt of
+    // niet gevonden, val terug op verse compose.
+    let existingDraft = null;
+    if (emailId && (mode === 'reply' || mode === 'replyall')) {
+      try {
+        const j = await tryFetch('draft-find', '/api/email-drafts?in_reply_to_email_id=' + encodeURIComponent(emailId));
+        if (j && !j.__error && j.item) existingDraft = j.item;
+      } catch (_) { /* fail-soft */ }
+    }
+    if (existingDraft) {
+      _ui.compose = {
+        from_mailbox: existingDraft.from_mailbox || (from ? from.addr : _ui.compose.from_mailbox),
+        to:          existingDraft.to_address    || row.from_address || '',
+        cc:          existingDraft.cc_address    || '',
+        bcc:         existingDraft.bcc_address   || '',
+        subject:     existingDraft.subject       || ((/^(re|fwd?):/i.test(row.subject || '') ? row.subject : (mode === 'fwd' ? 'Fwd: ' : 'Re: ') + (row.subject || ''))),
+        body_html:   existingDraft.body_html     || '',
+        body_text:   '',
+        email_id:    emailId,
+        signature:   'standaard',
+        draft_id:    existingDraft.id || null,
+      };
+      _ui.ccBccOpen = !!(_ui.compose.cc || _ui.compose.bcc);
+      _ui.composeOpen = true; _ui.lastSend = null;
+      if (render) render();
+      return;
+    }
+    // v=19: FORWARD moet de originele body meenemen. Als de body nog niet
+    // gefetched is (reader nog niet geopend), fetch nu met 8s Promise.race
+    // timeout — dezelfde guard als tryFetch. Bij fout: open toch de compose,
+    // maar met alleen de header (fail-soft, geen blokker).
+    let bodyData = _live.body.data[row.id] || null;
+    if (mode === 'fwd' && !bodyData && row.mailbox && row.imap_uid != null) {
+      try {
+        _showToastLocal('Bericht laden voor doorsturen…', 'info');
+        // fetchBody schrijft resultaat naar _live.body.data[rid]; race met 8s.
+        await Promise.race([
+          fetchBody(row),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+        ]);
+        bodyData = _live.body.data[row.id] || null;
+      } catch (_) { /* fail-soft: open zonder body */ }
+    }
+    const subject = /^(re|fwd?):/i.test(row.subject || '')
+      ? row.subject
+      : (mode === 'fwd' ? 'Fwd: ' : 'Re: ') + (row.subject || '');
+    // v=20: placement-marker patroon voor handtekening. Server (_lib/
+    // email-handtekening.js) vervangt de marker met de per-mailbox
+    // handtekening. Zonder marker → append aan het eind (nieuwe mail).
+    // Volgorde bij reply/fwd: [eigen tekst] + MARKER + [quote/forward].
+    // Cursor landt in de contenteditable aan het begin → user typt vóór
+    // de marker (die er unzichtbaar via een lege div + comment staat).
+    const SIG_MARKER_HTML = '<div data-sig-marker="1"><!--__SIG_HERE__--></div>';
+    const SIG_MARKER_TEXT = '\n\n__SIG_HERE__\n\n';
+    let bodyHtml = '';
+    let bodyText = '';
+    if (mode === 'fwd') {
+      const q = _buildForwardQuote(row, bodyData);
+      // Structuur: leeg-typ-zone (br × 2) + marker + quote-blok.
+      bodyHtml = '<div><br><br></div>' + SIG_MARKER_HTML + q.html;
+      bodyText = SIG_MARKER_TEXT + q.text;
+      if (q.truncated) {
+        // Info-melding aan de user: HTML was > 250KB, teksversie gebruikt.
+        setTimeout(() => _showToastLocal('Originele mail te groot voor HTML-quote — platte tekst gebruikt.', 'info'), 100);
+      }
+    } else if (mode === 'reply' || mode === 'replyall') {
+      // Geen quote-bouw in reply-flow (out-of-scope voor deze ronde), wel
+      // marker inzetten zodat de handtekening straks direct onder de
+      // eigen typ-zone landt i.p.v. onderaan de mail (waar bij toekomstige
+      // reply-quote de handtekening onder het citaat zou belanden).
+      bodyHtml = '<div><br><br></div>' + SIG_MARKER_HTML;
+      bodyText = SIG_MARKER_TEXT;
+    }
     _ui.compose = {
       from_mailbox: from ? from.addr : _ui.compose.from_mailbox,
-      to: row.from_address || '', cc: '', bcc: '',
-      subject: /^(re|fwd?):/i.test(row.subject || '') ? row.subject : (mode === 'fwd' ? 'Fwd: ' : 'Re: ') + (row.subject || ''),
-      body_html: '', body_text: '',
-      email_id: (row.mailbox && row.imap_uid != null) ? `${row.mailbox}@deforexopleiding.nl:${row.imap_uid}` : null,
+      to: mode === 'fwd' ? '' : (row.from_address || ''),
+      cc: '', bcc: '',
+      subject,
+      body_html: bodyHtml,
+      body_text: bodyText,
+      email_id: emailId,
       signature: 'standaard', draft_id: null,
+      attachments: [],
     };
-    _ui.composeOpen = true; _ui.lastSend = null; _ui.ccBccOpen = false;
+    _ui.ccBccOpen = false;
+    _ui.composeOpen = true; _ui.lastSend = null;
     if (render) render();
   }
   window.__emailReply    = () => _replyState('reply');
   window.__emailReplyAll = () => _replyState('replyall');
-  window.__emailFwd      = () => { _replyState('fwd'); _ui.compose.to = ''; if (render) render(); };
+  window.__emailFwd      = () => _replyState('fwd'); // v=19: _replyState clear-t nu zelf `to` bij fwd + bouwt de quote uit body.
   window.__emailCloseCompose = () => {
     _ui.composeOpen = false; _ui.composeMinimized = false; _ui.lastSend = null; _ui.ccBccOpen = false;
     // KRITIEK: als selectedId een draft is, ontkoppel 'm — anders zou _reader() bij de
@@ -1227,7 +1665,7 @@
       const discardedDraftId = _ui.compose.draft_id;
       if (discardedDraftId) deleteDraft(discardedDraftId).catch(() => {});
       _ui.composeOpen = false;
-      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
       _ui.draftMigrationRequired = false;
       // Verwijder de discarded draft uit de zichtbare lijst + clear selectedId
       // (anders zou _reader() 'm meteen opnieuw willen openen).
@@ -1242,8 +1680,130 @@
       if (render) render();
     });
   };
-  window.__emailComposeAttach   = () => { _showToastLocal('Bijlage toevoegen komt in Fase 3 (multipart-upload via IMAP).', 'info'); };
-  window.__emailComposeTemplate = () => { _showToastLocal('Sjablonen invoegen komt in Fase 3 — dan koppelen we email_templates.', 'info'); };
+  // v=24: bijlagen — file-picker (hidden input) opent, geselecteerde files
+  // worden als base64 in compose.attachments gezet, chips getoond in de
+  // compose-toolbar. Limieten: 10 MB per bestand, 20 MB totaal, max 20
+  // bestanden. Nette fout bij overschrijding — voorkomt SMTP-reject.
+  const ATTACH_LIMITS = { perFileMB: 10, totalMB: 20, maxFiles: 20 };
+  function _totalAttachSize() {
+    return (_ui.compose.attachments || []).reduce((n, a) => n + (Number(a.size) || 0), 0);
+  }
+  function _readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload  = () => {
+        // dataURL = "data:mime;base64,BLOB" → strip prefix
+        const s = String(fr.result || '');
+        const idx = s.indexOf('base64,');
+        resolve(idx >= 0 ? s.slice(idx + 7) : s);
+      };
+      fr.onerror = () => reject(fr.error || new Error('FileReader fail'));
+      fr.readAsDataURL(file);
+    });
+  }
+  window.__emailComposeAttach = () => {
+    // Trigger hidden input; onchange handler doet de rest.
+    let inp = document.getElementById('emailComposeFilePicker');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file';
+      inp.id   = 'emailComposeFilePicker';
+      inp.multiple = true;
+      inp.style.display = 'none';
+      inp.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = ''; // reset zodat re-pick zelfde file werkt
+        if (!files.length) return;
+        const existing = _ui.compose.attachments || (_ui.compose.attachments = []);
+        // Limiet-checks vóór lezen (spare CPU op grote files).
+        if (existing.length + files.length > ATTACH_LIMITS.maxFiles) {
+          _showToastLocal(`Max ${ATTACH_LIMITS.maxFiles} bijlagen per mail (nu ${existing.length}, toegevoegd zou worden ${files.length}).`, 'warn');
+          return;
+        }
+        for (const f of files) {
+          if (f.size > ATTACH_LIMITS.perFileMB * 1024 * 1024) {
+            _showToastLocal(`"${f.name}" is te groot (max ${ATTACH_LIMITS.perFileMB} MB per bestand).`, 'warn');
+            continue;
+          }
+          if (_totalAttachSize() + f.size > ATTACH_LIMITS.totalMB * 1024 * 1024) {
+            _showToastLocal(`Totale bijlage-grootte overschrijdt ${ATTACH_LIMITS.totalMB} MB — "${f.name}" overgeslagen.`, 'warn');
+            continue;
+          }
+          try {
+            const b64 = await _readFileAsBase64(f);
+            existing.push({
+              filename: f.name || 'bijlage',
+              contentType: f.type || 'application/octet-stream',
+              size: f.size,
+              content: b64, // base64, gaat 1-op-1 naar nodemailer
+            });
+          } catch (err) {
+            _showToastLocal(`Lezen "${f.name}" mislukt: ${err?.message || 'onbekend'}`, 'warn');
+          }
+        }
+        if (render) render();
+      });
+      document.body.appendChild(inp);
+    }
+    inp.click();
+  };
+  window.__emailComposeAttachRemove = (idx) => {
+    const list = _ui.compose.attachments || [];
+    list.splice(Number(idx), 1);
+    if (render) render();
+  };
+  // v2 email-round DEEL 2: templates-picker. Klik → laad templates uit
+  // /api/email-templates (fail-soft), toon modale keuze, apply op body.
+  async function fetchTemplates() {
+    if (_live.templates.loading) return;
+    if (_live.templates.data && Array.isArray(_live.templates.data)) return; // cached
+    _live.templates.loading = true; _live.templates.error = null;
+    const j = await tryFetch('email-templates', '/api/email-templates', undefined, 8000);
+    _live.templates.loading = false;
+    if (j && j.__error) { _live.templates.error = j.__error; }
+    else if (j?.error && /migratie/i.test(String(j.error || ''))) { _live.templates.error = j.error; }
+    else { _live.templates.data = Array.isArray(j?.items) ? j.items : []; }
+  }
+  window.__emailComposeTemplate = async () => {
+    await fetchTemplates();
+    if (_live.templates.error) {
+      _openInfo('Sjablonen niet beschikbaar', _live.templates.error, 'warn');
+      return;
+    }
+    _ui.templatePickerOpen = true;
+    if (render) render();
+  };
+  window.__emailTemplateApply = (id) => {
+    const list = Array.isArray(_live.templates.data) ? _live.templates.data : [];
+    const t = list.find((x) => x.id === id);
+    if (!t) { _ui.templatePickerOpen = false; if (render) render(); return; }
+    // Vul body_html met template-body. Als subject leeg is en template heeft
+    // 'r een, vul die ook in. NIET overschrijven van bestaande subject om
+    // typefouten te voorkomen.
+    if (t.subject && !_ui.compose.subject) _ui.compose.subject = t.subject;
+    // v=23: sjabloon-insert positioneel — VOOR de sig-marker plakken.
+    // Bij reply/fwd staat de body op: [eigen-typ-zone] + [sig-marker div] +
+    // [quote]. Zonder marker-check zou de sjabloon achter de marker landen
+    // → server plakt handtekening ERVOOR → sjabloon verschijnt ONDER de
+    // handtekening. Fix: split op de marker en injecteer ertussen.
+    const insert = t.body_html || t.body_text || '';
+    const SIG_MARKER_RE = /<div[^>]*data-sig-marker=["']1["'][^>]*>[\s\S]*?<\/div>/i;
+    const current = String(_ui.compose.body_html || '');
+    const m = current.match(SIG_MARKER_RE);
+    if (m) {
+      const idx = current.indexOf(m[0]);
+      _ui.compose.body_html = current.slice(0, idx) + insert + current.slice(idx);
+    } else {
+      // Nieuwe mail (geen marker): plak achteraan zoals voorheen.
+      _ui.compose.body_html = current + insert;
+    }
+    _ui.draftDirty = true;
+    _ui.templatePickerOpen = false;
+    saveDraftDebounced();
+    if (render) render();
+    _showToastLocal(`Sjabloon "${t.name}" ingevoegd.`, 'success');
+  };
+  window.__emailTemplateCancel = () => { _ui.templatePickerOpen = false; if (render) render(); };
   window.__emailComposeAi       = () => { _showToastLocal('AI in compose: open eerst een bericht en gebruik "Voorgesteld antwoord" in de reader.', 'info'); };
   window.__emailConfirmOk     = () => { const d = _ui.confirmDialog; _ui.confirmDialog = null; if (render) render(); try { if (d?.onOk) d.onOk(); } catch (e) { console.warn('[email-v2] confirm onOk fail', e); } };
   window.__emailConfirmCancel = () => { const d = _ui.confirmDialog; _ui.confirmDialog = null; if (render) render(); try { if (d?.onCancel) d.onCancel(); } catch (_) {} };
@@ -1315,5 +1875,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] Fase 2B registered — data-clusters live (HTML render, AI-card in reader, folders+bulk, drafts+autosave, koppel-klant)');
+  console.debug('[email-v2] v=24 — bijlagen live: compose file-picker (chips, max 10MB/file · 20MB total · 20 files) + reader-download (public_url fallback voor mails zonder imap_uid). Fix drift api/email-attachment.js (onboarding/events mailboxen). Alles uit v=23 behouden.');
 })();

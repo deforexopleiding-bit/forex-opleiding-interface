@@ -51,6 +51,20 @@ export default async function handler(req, res) {
         if (!data) return res.status(404).json({ error: 'Concept niet gevonden' });
         return res.status(200).json({ item: data });
       }
+      // v2 email-round bug-3: find-by-reply. Compose/reply-flow zoekt hiermee
+      // een bestaand concept voor een specifieke mail (Beantwoorden) zodat de
+      // reply niet leeg opent maar het opgeslagen concept teruglaadt.
+      const inReplyTo = typeof req.query?.in_reply_to_email_id === 'string'
+        ? req.query.in_reply_to_email_id.trim() : '';
+      if (inReplyTo) {
+        const { data, error } = await supabaseAdmin
+          .from('email_drafts').select('*')
+          .eq('user_id', user.id)
+          .eq('in_reply_to_email_id', inReplyTo.slice(0, 300))
+          .order('updated_at', { ascending: false }).limit(1).maybeSingle();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ item: data || null });
+      }
       const { data, error } = await supabaseAdmin
         .from('email_drafts').select('*')
         .eq('user_id', user.id).order('updated_at', { ascending: false }).limit(100);

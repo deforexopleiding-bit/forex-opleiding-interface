@@ -2,11 +2,16 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { safeError } from './_lib/safe-error.js';
 
+// v=24 email-round: onboarding@ + events@ toegevoegd — was drift met
+// email-body.js (die had ze wel). Zonder deze fix: attachment-download
+// vanuit onboarding/events mailboxen → "Onbekende mailbox".
 const ACCOUNTS = [
   { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
   { user: 'info@deforexopleiding.nl',          passEnv: 'IMAP_PASS_INFO' },
   { user: 'partners@deforexopleiding.nl',      passEnv: 'IMAP_PASS_PARTNERS' },
   { user: 'administratie@deforexopleiding.nl', passEnv: 'IMAP_PASS_ADMINISTRATIE' },
+  { user: 'onboarding@deforexopleiding.nl',    passEnv: 'IMAP_PASS_ONBOARDING' },
+  { user: 'events@deforexopleiding.nl',        passEnv: 'IMAP_PASS_EVENTS' },
   { user: 'welkom@deforexopleiding.nl',        passEnv: 'IMAP_PASS_WELKOM' }
 ];
 

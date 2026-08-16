@@ -28,7 +28,8 @@
 import nodemailer from 'nodemailer';
 import { createUserClient } from './supabase.js';
 import { requirePermissionFailOpen } from './_lib/requirePermission.js';
-import { metHandtekening } from './_lib/email-handtekening.js';
+import { metHandtekening, metHandtekeningAsync } from './_lib/email-handtekening.js';
+import { supabaseAdmin } from './supabase.js';
 
 const SMTP_ACCOUNTS = {
   'leads@deforexopleiding.nl':         'IMAP_PASS',
@@ -96,7 +97,12 @@ export default async function handler(req, res) {
     // (variabelen worden hieronder niet doorgegeven bij guarded=true).
   }
 
-  const sig = handtekening ? metHandtekening(text, html) : { text, html: html || null };
+  // v2 email-round DEEL 3: haal per-mailbox handtekening uit DB
+  // (fallback op hardcoded als DB-lookup faalt of tabel ontbreekt).
+  const mailboxSlug = String(from_mailbox || '').toLowerCase().split('@')[0];
+  const sig = handtekening
+    ? await metHandtekeningAsync(text, html, { mailbox: mailboxSlug, supabaseAdmin })
+    : { text, html: html || null };
 
   const passEnv = SMTP_ACCOUNTS[String(from_mailbox).toLowerCase()];
   if (!passEnv) return res.status(400).json({ error: `Onbekende mailbox: ${from_mailbox}` });

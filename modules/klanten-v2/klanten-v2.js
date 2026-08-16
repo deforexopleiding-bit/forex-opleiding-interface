@@ -73,6 +73,10 @@ function toast(msg, opts = {}) {
  * al naar /login geredirect hebben tegen de tijd dat we hier komen.
  */
 async function authedFetch(url, init = {}) {
+  // Guard tegen expliciete `null` — default {} kicks alleen bij undefined,
+  // dus `authedFetch(url, null)` crashte op `init.headers`. Fix voor
+  // email-v2 Sanne-suggest ("Cannot read properties of null (reading 'headers')").
+  init = init || {};
   const token = (window.AuthShared && (await window.AuthShared.getAccessToken())) || null;
   const headers = new Headers(init.headers || {});
   if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -83,6 +87,7 @@ async function authedFetch(url, init = {}) {
 }
 
 async function authedJson(url, init = {}) {
+  init = init || {};
   const resp = await authedFetch(url, init);
   const text = await resp.text();
   let json = null;
