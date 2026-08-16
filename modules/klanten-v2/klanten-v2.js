@@ -114,6 +114,21 @@ window.KV = {
   $, esc, toast, authedFetch, authedJson, renderAvatar, initials,
 };
 
+// ── klx-softphone dependency shim ───────────────────────────────────────
+// Shared klx-softphone.js (r191) roept window.AgentShared.apiFetch aan
+// om /api/voys-sip-config te laden. In de v1-shell (klanten.html /
+// finance.html / follow-up.html) wordt AgentShared door agent-shared.js
+// gezet; de v2-shell laadt dat script BEWUST niet (het overschrijft
+// theme-key + injecteert overlays die v2 zelf al biedt).
+// Deze shim exposeert alleen wat klx-softphone nodig heeft: apiFetch +
+// showToast. Zonder deze shim faalde SIP-init in v2 stilletjes en toonde
+// de softphone permanent "Verbinding mislukt". Productie (v1-shell) werd
+// niet geraakt — die laadt agent-shared.js gewoon.
+window.AgentShared = window.AgentShared || {
+  apiFetch : authedFetch,
+  showToast: (msg, tone) => toast(msg, tone),
+};
+
 // ── Auth-gate ─────────────────────────────────────────────────────────────────
 // Rol-mapping Supabase -> DFO is sinds PR 0-D gecentraliseerd in
 // modules/shared/design-system/roles.js (window.DFORoles) en de spiegel

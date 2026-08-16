@@ -63,12 +63,105 @@
     // Overrides — user kan lijn en/of nummer wijzigen via de sheet.
     // lineOverride: 'auto' | 'nl' | 'be' (default auto = detectLine).
     // numberOverride: string of null (default = klantnummer uit open-call).
-    lineOverride   : 'auto',
+    // selectedCallerId: uitgaand telefoonnummer dat als CLI wordt getoond
+    //                   ('' = Voys · standaard → account-default). Komt uit
+    //                   /api/voys-sip-config caller_ids (per lijn of top-
+    //                   level). Send-flow: als gezet, wordt toegevoegd als
+    //                   P-Asserted-Identity + Remote-Party-ID header in de
+    //                   SIP INVITE (mirror follow-up.html:7359-7374).
+    // v=1da: lineOverride + selectedCallerId gepersisteerd in localStorage
+    // zodat de user zijn keuze niet elke call opnieuw hoeft te maken.
+    // Read-once bij init met try/catch (private browsing → fallback).
+    lineOverride   : (function () {
+      try {
+        const v = localStorage.getItem('klx-softphone-line');
+        return (v === 'nl' || v === 'be' || v === 'auto') ? v : 'auto';
+      } catch (_) { return 'auto'; }
+    })(),
     numberOverride : null,
+    selectedCallerId: (function () {
+      try { return localStorage.getItem('klx-softphone-caller-id') || ''; }
+      catch (_) { return ''; }
+    })(),
     // Actieve klant-context (naam + telefoon + optionele meta) voor de sheet-
     // header. Wordt gezet bij open() en gewist bij closeSheet().
     activeCustomer : null,
   };
+
+  // ── Lokale ringback-toon (v=1dc) ─────────────────────────────────────────
+  // WebAudio-gegenereerde European ringback (ETSI EN 300 001): 425 Hz sine,
+  // cadence 1s aan / 4s uit. Speelt tijdens 'Establishing' zodat de user
+  // altijd hoort dat het toestel overgaat, óók wanneer Voys geen SIP early
+  // media (183 Session Progress met SDP) stuurt. Als Voys wél early media
+  // stuurt, geeft _bindRemoteAudio() daaraan voorrang en wordt de lokale
+  // toon direct gestopt om dubbele audio te voorkomen. Cleanup gebeurt bij
+  // Established / Terminated / error zodat er nooit een oscillator blijft
+  // hangen.
+  const ringback = (function () {
+    let ctx = null, osc = null, gain = null, cadenceTimer = null, playing = false;
+    function ensureCtx() {
+      if (!ctx) {
+        const AC = global.AudioContext || global.webkitAudioContext;
+        if (!AC) return null;
+        try { ctx = new AC(); } catch (_) { return null; }
+      }
+      if (ctx.state === 'suspended') {
+        try { ctx.resume(); } catch (_) { /* autoplay policy */ }
+      }
+      return ctx;
+    }
+    function schedulePhase(on) {
+      if (!playing || !ctx || !gain) return;
+      try {
+        const now = ctx.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        // Kleine ramp (10ms) om klik-artefacten te voorkomen bij aan/uit.
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.linearRampToValueAtTime(on ? 0.12 : 0.0, now + 0.01);
+      } catch (_) { /* AudioContext kan closed zijn */ }
+      cadenceTimer = setTimeout(() => schedulePhase(!on), on ? 1000 : 4000);
+    }
+    function start() {
+      if (playing) return;
+      const c = ensureCtx();
+      if (!c) return;
+      try {
+        osc  = c.createOscillator();
+        gain = c.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = 425;
+        gain.gain.value = 0;
+        osc.connect(gain).connect(c.destination);
+        osc.start();
+        playing = true;
+        schedulePhase(true);
+      } catch (_) {
+        playing = false;
+      }
+    }
+    function stop() {
+      playing = false;
+      if (cadenceTimer) { clearTimeout(cadenceTimer); cadenceTimer = null; }
+      if (gain && ctx) {
+        try {
+          const now = ctx.currentTime;
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(gain.gain.value, now);
+          gain.gain.linearRampToValueAtTime(0, now + 0.02);
+        } catch (_) {}
+      }
+      if (osc) {
+        try { osc.stop(ctx ? ctx.currentTime + 0.03 : 0); } catch (_) {}
+        try { osc.disconnect(); } catch (_) {}
+        osc = null;
+      }
+      if (gain) {
+        try { gain.disconnect(); } catch (_) {}
+        gain = null;
+      }
+    }
+    return { start, stop };
+  })();
 
   // NL/BE line-detectie op basis van nummer (E.164). +32 = BE, alles anders = NL.
   // Zelfde regel als _wbxDetectLine in finance.html en fu-softphone in follow-up.
@@ -93,6 +186,28 @@
   }
   function isBeAvailable() {
     return state.config ? !!state.configuredLines?.be : false;
+  }
+  // v=1da: caller-ID resolvers.
+  // Bron-volgorde:
+  //   1. state.accByLine[line].caller_ids  (per-account, na SIP-init).
+  //   2. state.config.accounts[line]?.caller_ids (van cfg-payload).
+  //   3. state.config.caller_ids            (top-level backward-compat).
+  function callerIdsForLine(line) {
+    if (!state.config) return [];
+    const perAccount = state.accByLine?.[line]?.caller_ids
+      || state.config?.accounts?.[line]?.caller_ids
+      || [];
+    if (Array.isArray(perAccount) && perAccount.length) return perAccount;
+    return Array.isArray(state.config.caller_ids) ? state.config.caller_ids : [];
+  }
+  // Effectieve CID: alleen doorsturen als 'ie in de lijst van de huidige
+  // lijn zit (voorkomt dat een NL-nummer per ongeluk over de BE-lijn gaat).
+  // Lege waarde = "Voys · standaard" = geen extraHeaders in INVITE.
+  function resolveEffectiveCallerId(line) {
+    const cid = String(state.selectedCallerId || '').trim();
+    if (!cid) return '';
+    const list = callerIdsForLine(line);
+    return list.includes(cid) ? cid : '';
   }
   function registrationStatusForLine(line) {
     if (state.uaByLine?.[line]) return 'connected';
@@ -300,30 +415,85 @@
       const acc    = state.accByLine?.[line];
       const domain = acc?.domain || state.config?.domain || 'voipgrid.nl';
       const target = global.SIP.UserAgent.makeURI('sip:' + digits + '@' + domain);
+      // v=1da: als user een specifiek Voys-nummer heeft gekozen, stuur het
+      // mee als P-Asserted-Identity + Remote-Party-ID (RFC 3325 / historisch).
+      // Mirror van follow-up.html:7359-7374. Leeg = "Voys · standaard" →
+      // account-default CLI (geen extraHeaders).
+      const chosenCid = resolveEffectiveCallerId(line);
+      const extraHeaders = [];
+      if (chosenCid) {
+        const cidDigits = String(chosenCid).replace(/\D/g, '');
+        const cidUri = 'sip:' + cidDigits + '@' + domain;
+        extraHeaders.push('P-Asserted-Identity: <' + cidUri + '>');
+        extraHeaders.push('Remote-Party-ID: <' + cidUri + '>;privacy=off;screen=yes');
+      }
       const inviter = new global.SIP.Inviter(ua, target, {
         sessionDescriptionHandlerOptions: {
           constraints: { audio: true, video: false },
         },
+        extraHeaders: extraHeaders.length ? extraHeaders : undefined,
       });
       state.session = inviter;
+      // v=1da: bind audio al bij Establishing zodat SIP early media (183
+      // Session Progress met SDP → ringback-tone van de provider) hoorbaar
+      // wordt terwijl het gesprek nog niet is opgenomen. Voorheen werd
+      // pas bij Established gebonden → gebruiker hoorde niets tijdens
+      // "gaat over". Bindings zijn idempotent — we vervangen de srcObject
+      // niet als 'ie al gezet is bij Established.
+      // v=1dc: returnt boolean zodat de caller kan zien of early media al
+      // beschikbaar is → local ringback kan dan direct stoppen.
+      const _bindRemoteAudio = () => {
+        const pc = inviter.sessionDescriptionHandler?.peerConnection;
+        if (!pc || !state.audioEl) return false;
+        const stream = new MediaStream();
+        pc.getReceivers().forEach((rr) => { if (rr.track && rr.track.kind === 'audio') stream.addTrack(rr.track); });
+        if (stream.getAudioTracks().length === 0) return false; // nog geen audio in SDP
+        // Alleen (re)binden als srcObject leeg is — voorkomt "click" bij
+        // Establishing→Established overgang wanneer stream al loopt.
+        if (!state.audioEl.srcObject) {
+          state.audioEl.srcObject = stream;
+          try { state.audioEl.play(); } catch (_) { /* autoplay policy */ }
+        }
+        return true;
+      };
+      // v=1dc: als bij Establishing nog geen early media binnenkomt → start
+      // lokale ringback en poll elke 500ms of provider alsnog een stream
+      // aanlevert; zodra dat gebeurt stopt de lokale toon zodat er geen
+      // dubbele audio speelt. Poll wordt onvoorwaardelijk opgeruimd bij
+      // Established/Terminated en in de catch-branch hieronder.
+      let _earlyMediaPollTimer = null;
+      const _stopEarlyMediaPoll = () => {
+        if (_earlyMediaPollTimer) { clearInterval(_earlyMediaPollTimer); _earlyMediaPollTimer = null; }
+      };
       inviter.stateChange.addListener((s) => {
         if (s === 'Establishing') {
           state.lastState = 'ringing';
+          const hasEarlyMedia = _bindRemoteAudio(); // early media / ringback
+          if (hasEarlyMedia) {
+            ringback.stop(); // safety — voor het geval 'ie ooit gestart is
+          } else {
+            ringback.start();
+            _stopEarlyMediaPoll();
+            _earlyMediaPollTimer = setInterval(() => {
+              if (_bindRemoteAudio()) {
+                ringback.stop();
+                _stopEarlyMediaPoll();
+              }
+            }, 500);
+          }
           updateCallbarStatus('Gaat over…', displayName ? `${displayName} — ${effPhone}` : effPhone);
           renderSheet();
         } else if (s === 'Established') {
+          ringback.stop();
+          _stopEarlyMediaPoll();
           state.lastState = 'connected';
-          const pc = inviter.sessionDescriptionHandler?.peerConnection;
-          if (pc && state.audioEl) {
-            const stream = new MediaStream();
-            pc.getReceivers().forEach((rr) => { if (rr.track) stream.addTrack(rr.track); });
-            state.audioEl.srcObject = stream;
-            try { state.audioEl.play(); } catch (_) { /* autoplay policy */ }
-          }
+          _bindRemoteAudio(); // zet audio als 'ie nog niet was gebonden
           updateCallbarStatus('In gesprek', displayName ? `${displayName} — ${effPhone}` : effPhone);
           startCallTimer();
           renderSheet();
         } else if (s === 'Terminated') {
+          ringback.stop();
+          _stopEarlyMediaPoll();
           state.lastState = 'ended';
           stopCallTimer();
           showCallbar(false);
@@ -336,6 +506,7 @@
       await inviter.invite();
       return { ok: true, line };
     } catch (e) {
+      ringback.stop(); // v=1dc: nooit een oscillator achterlaten bij invite-fout
       state.lastState = 'error';
       state.lastError = e?.message || String(e);
       stopCallTimer();
@@ -391,10 +562,11 @@
   function openSheet(customer) {
     const sheet = ensureSheet();
     state.activeCustomer = customer || null;
-    // Reset overrides bij nieuwe klant zodat vorige call niet lekt naar
-    // deze sessie (bv. numberOverride van een andere klant).
+    // Reset numberOverride bij nieuwe klant zodat vorige call niet lekt
+    // naar deze sessie. lineOverride BEHOUDEN — die is gepersisteerd in
+    // localStorage zodat de user zijn NL/BE-keuze niet elke call opnieuw
+    // hoeft te maken (v=1da).
     state.numberOverride = null;
-    state.lineOverride   = 'auto';
     state.lastError      = null;
     const nm = String(customer?.name || '').trim();
     const t = document.getElementById('klxCallSheetTitle');
@@ -454,6 +626,11 @@
     const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
+    // v=1da: uitgaand-nummer keuze — dropdown "Voys · standaard" + per-lijn
+    // caller_ids uit /api/voys-sip-config. Alleen tonen wanneer er ≥1 optie
+    // beschikbaar is (anders zou 'ie een lege lijst tonen).
+    const availableCids = callerIdsForLine(line);
+    const selectedCid = String(state.selectedCallerId || '');
     body.innerHTML = `
       <div class="klx-call-sheet-top">
         <div class="klx-call-sheet-label"><i class="ti ti-phone"></i> Uitbellen via</div>
@@ -463,6 +640,15 @@
           ${beAvailable ? `<option value="be" ${ov === 'be' ? 'selected' : ''}>BE-lijn (+32)</option>` : ''}
         </select>
       </div>
+      ${availableCids.length ? `
+        <div class="klx-call-sheet-top" style="margin-top:6px">
+          <div class="klx-call-sheet-label"><i class="ti ti-user"></i> Uitgaand nummer</div>
+          <select class="klx-call-sheet-lineselect" id="klxCallCidSel" ${inCall ? 'disabled' : ''} title="Kies welk Voys-nummer als beller-ID uitgaat. 'Voys · standaard' laat Voys de account-default kiezen.">
+            <option value=""${selectedCid ? '' : ' selected'}>Voys · standaard</option>
+            ${availableCids.map((n) => `<option value="${esc(n)}"${selectedCid === n ? ' selected' : ''}>${esc(n)}</option>`).join('')}
+          </select>
+        </div>
+      ` : ''}
       <div class="klx-call-sheet-conn ${connState}" aria-live="polite">
         <span class="klx-call-sheet-conn-label">${esc(connLabel)}</span>
         <button type="button" class="klx-call-sheet-conn-retry" id="klxCallConnRetry" ${showConnRetry ? '' : 'hidden'} title="Opnieuw verbinden"><i class="ti ti-refresh"></i></button>
@@ -498,8 +684,20 @@
     const lineSel = body.querySelector('#klxCallLineSel');
     if (lineSel) {
       lineSel.addEventListener('change', (e) => {
-        state.lineOverride = String(e.target.value || 'auto');
+        const v = String(e.target.value || 'auto');
+        state.lineOverride = v;
+        // v=1da: onthoud de keuze cross-call/cross-session.
+        try { localStorage.setItem('klx-softphone-line', v); } catch (_) { /* private mode */ }
         renderSheet();
+      });
+    }
+    // v=1da: caller-ID keuze — persistente state.
+    const cidSel = body.querySelector('#klxCallCidSel');
+    if (cidSel) {
+      cidSel.addEventListener('change', (e) => {
+        const v = String(e.target.value || '');
+        state.selectedCallerId = v;
+        try { localStorage.setItem('klx-softphone-caller-id', v); } catch (_) { /* private mode */ }
       });
     }
     const retryBtn = body.querySelector('#klxCallConnRetry');
