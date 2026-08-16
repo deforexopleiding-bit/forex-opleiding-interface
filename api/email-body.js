@@ -2,6 +2,45 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { safeError } from './_lib/safe-error.js';
 import { sanitizeEmailHtml } from './_lib/email-html-sanitizer.js';
+import { supabaseAdmin } from './supabase.js';
+
+// v=22 email-round: DB-fallback voor intern-gegenereerde mails.
+// Interne notificatie-mails (bv. leads@ "Nieuwe lead: …" uit de forex-opleiding
+// notificatie-flow) worden direct in `email_messages` geschreven met
+// body_html/body_text kolommen, maar zitten NIET als IMAP-message met dat UID
+// in de INBOX (of zijn ondertussen verplaatst/gearchiveerd). fetchOne(uid)
+// returnt dan niks → 404. Fix: bij `email_id` in de body-payload, val terug
+// op de row in Supabase als IMAP faalt.
+async function loadBodyFromDb(emailId) {
+  if (!emailId) return null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('email_messages')
+      .select('subject, from_address, from_name, to_address, cc_address, date_received, body_text, body_html, attachments')
+      .eq('id', emailId)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data;
+  } catch (_) { return null; }
+}
+function buildResponseFromDbRow(row) {
+  const bodyHtmlSafe = row.body_html
+    ? sanitizeEmailHtml(String(row.body_html), { blockExternalImages: true }).html
+    : '';
+  return {
+    subject: row.subject || '',
+    from:    row.from_name ? `${row.from_name} <${row.from_address || ''}>` : (row.from_address || ''),
+    to:      row.to_address || '',
+    cc:      row.cc_address || '',
+    date:    row.date_received || null,
+    text:    row.body_text || (row.body_html ? String(row.body_html).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''),
+    hasHtml: !!row.body_html,
+    body_html_safe: bodyHtmlSafe,
+    external_images_blocked: 0,
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    source: 'db', // debug-hint: welke bron leverde de body
+  };
+}
 
 const ACCOUNTS = [
   { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
@@ -23,10 +62,20 @@ export default async function handler(req, res) {
   const body = typeof req.body === 'string'
     ? JSON.parse(req.body || '{}')
     : (req.body || {});
-  const { mailbox, uid } = body;
+  const { mailbox, uid, email_id: emailId } = body;
+
+  // v=22: als de caller alleen email_id doorstuurt (intern gegenereerde mail
+  // zonder betrouwbare IMAP-uid), sla IMAP volledig over.
+  if ((!mailbox || uid === undefined || uid === null || uid === '') && emailId) {
+    const dbRow = await loadBodyFromDb(emailId);
+    if (dbRow && (dbRow.body_text || dbRow.body_html)) {
+      return res.status(200).json(buildResponseFromDbRow(dbRow));
+    }
+    return res.status(404).json({ error: 'Geen body-inhoud in DB voor deze mail.' });
+  }
 
   if (!mailbox || uid === undefined || uid === null || uid === '') {
-    return res.status(400).json({ error: 'Body moet "mailbox" en "uid" bevatten.' });
+    return res.status(400).json({ error: 'Body moet "mailbox" en "uid" bevatten (of "email_id").' });
   }
 
   const account = ACCOUNTS.find((a) => a.user === mailbox);
@@ -57,7 +106,14 @@ export default async function handler(req, res) {
     try {
       const msg = await client.fetchOne(String(uid), { source: true, envelope: true }, { uid: true });
       if (!msg || !msg.source) {
-        return res.status(404).json({ error: 'E-mail niet gevonden in postvak.' });
+        // v=22: IMAP-miss → DB-fallback. Interne notificatie-mails
+        // (leads@ "Nieuwe lead: …") staan wel in email_messages met
+        // body-kolommen maar hun IMAP-uid komt niet (meer) voor in INBOX.
+        const dbRow = await loadBodyFromDb(emailId);
+        if (dbRow && (dbRow.body_text || dbRow.body_html)) {
+          return res.status(200).json(buildResponseFromDbRow(dbRow));
+        }
+        return res.status(404).json({ error: 'E-mail niet gevonden in postvak (en geen DB-fallback).' });
       }
       const parsed = await simpleParser(msg.source);
 
@@ -125,6 +181,15 @@ export default async function handler(req, res) {
       lock.release();
     }
   } catch (err) {
+    // v=22: hard IMAP-error (timeout, connect-fail) → DB-fallback als email_id
+    // aanwezig. Zo blijft de reader werken bij transient IMAP-issues.
+    if (emailId) {
+      const dbRow = await loadBodyFromDb(emailId);
+      if (dbRow && (dbRow.body_text || dbRow.body_html)) {
+        try { await client.logout(); } catch {}
+        return res.status(200).json(buildResponseFromDbRow(dbRow));
+      }
+    }
     return safeError(res, 500, err, 'Mailbody kon niet worden opgehaald.');
   } finally {
     try { await client.logout(); } catch {}

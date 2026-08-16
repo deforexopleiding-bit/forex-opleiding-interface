@@ -210,14 +210,24 @@
     if (j && !j.__error) { st.data = j; st.ts = Date.now(); if (render) render(); }
   }
   async function fetchBody(row) {
-    if (!row || !row.mailbox || row.imap_uid == null) return;
+    if (!row) return;
     const rid = row.id;
     const st = _live.body;
     if (st.loading[rid] || st.data[rid]) return;
+    // v=22: als row geen imap_uid heeft (intern gegenereerde notificatie-mail
+    // zoals leads@ "Nieuwe lead: …"), stuur alleen email_id — backend valt
+    // dan direct terug op DB (email_messages.body_html/text) i.p.v. IMAP.
+    // Bij WEL imap_uid: stuur allebei mee zodat backend IMAP eerst probeert
+    // en bij miss (mail niet meer in INBOX) valt op DB.
+    const payload = { email_id: rid };
+    if (row.mailbox && row.imap_uid != null) {
+      payload.mailbox = row.mailbox + '@deforexopleiding.nl';
+      payload.uid = row.imap_uid;
+    }
     st.loading[rid] = true; st.error[rid] = null;
     const j = await tryFetch('body:' + rid, '/api/email-body', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mailbox: row.mailbox + '@deforexopleiding.nl', uid: row.imap_uid }),
+      body: JSON.stringify(payload),
     }, 12000);
     st.loading[rid] = false;
     if (j && j.__error) st.error[rid] = j.__error;
@@ -578,20 +588,7 @@
             <input type="search" value="${esc(km.query)}" oninput="window.__emailKlantSearch(this.value)" placeholder="Zoek klant op naam, e-mail of bedrijf (min 2 tekens)…" autofocus style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px" />
             ${km.error ? `<div style="margin-top:8px;padding:6px 10px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:11.5px">${esc(km.error)}</div>` : ''}
           </div>
-          <div style="padding:8px 0;overflow-y:auto;flex:1">
-            ${km.searching ? '<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12.5px">Zoeken…</div>' : ''}
-            ${!km.searching && km.query.trim().length < 2 ? '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Typ minstens 2 tekens om te zoeken.</div>' : ''}
-            ${!km.searching && km.query.trim().length >= 2 && results.length === 0 ? '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Geen klanten gevonden voor <b>' + esc(km.query) + '</b>.</div>' : ''}
-            ${results.map((c) => {
-              const label = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || c.email || c.id.slice(0, 8);
-              const sub = [c.email, c.phone, c.company_name].filter(Boolean).join(' · ');
-              const isCurrent = c.id === km.currentCustomerId;
-              return `<button class="btn btn-ghost" onclick="window.__emailKlantPick('${esc(c.id)}')" ${km.busy || isCurrent ? 'disabled' : ''} style="display:block;width:100%;padding:10px 22px;text-align:left;border:none;border-bottom:1px solid var(--border);background:${isCurrent ? TOK.mSoft : 'transparent'};cursor:${isCurrent ? 'default' : 'pointer'}">
-                <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(label)}${isCurrent ? ' <span style="font-size:10.5px;color:' + TOK.m + '">(huidig)</span>' : ''}</div>
-                <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sub || '—')}</div>
-              </button>`;
-            }).join('')}
-          </div>
+          <div id="klantModalResults" style="padding:8px 0;overflow-y:auto;flex:1">${_renderKlantResults()}</div>
           <div style="padding:10px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
             <button class="btn btn-ghost btn-sm" onclick="window.__emailKlantCancel()">Annuleren</button>
           </div>
@@ -816,8 +813,12 @@
       body = { text: String(row._body_text || ''), body_html_safe: '', hasHtml: false, attachments: asArr(row._attachments), external_images_blocked: 0 };
       bst.data[row.id] = body;
     }
-    // Alleen IMAP-fetch voor inbox/archief/prullenbak — die hebben een echte imap_uid.
-    if (!body && !bErr && !bLoad && row._source !== 'sent' && row.mailbox && row.imap_uid != null) queueMicrotask(() => fetchBody(row));
+    // v=22: fetchBody trigger óók als imap_uid ontbreekt — interne notificatie-
+    // mails (leads@ "Nieuwe lead: …") hebben geen betrouwbare uid, maar wel
+    // body-kolommen in DB. fetchBody stuurt email_id mee en backend valt
+    // dan direct terug op DB. Enige uitzondering blijft _source='sent'
+    // (die wordt hierboven al inline gehydrateerd uit email_replies).
+    if (!body && !bErr && !bLoad && row._source !== 'sent') queueMicrotask(() => fetchBody(row));
     if (row._source === 'inbox' && !row.is_read && !_ui.statusBusy['read:' + row.id]) queueMicrotask(() => markRead(row, true));
     // Sanne (Fase 2.1) — fetch suggestion voor inbox-rows (skip sent/draft).
     if (row._source === 'inbox' && !_live.sanne.data[row.id] && !_live.sanne.loading[row.id]) queueMicrotask(() => fetchSanneForRow(row.id));
@@ -1324,21 +1325,52 @@
     };
     if (render) render();
   };
+  // v=22: uncontrolled-input patroon voor de klant-zoeker. oninput muteert
+  // alleen state + surgisch de #klantModalResults-container. NIET de hele
+  // modal (input-node) her-renderen — anders vervangt DOM-remount de <input>
+  // en valt document.activeElement op BODY (min-2-chars bereikt gebruiker
+  // nooit). Zelfde bug-family als Mentoren/Followup search-focus.
+  function _renderKlantResults() {
+    const km = _ui.klantModal;
+    if (!km) return '';
+    if (km.searching) return '<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12.5px">Zoeken…</div>';
+    const q = String(km.query || '').trim();
+    if (q.length < 2) return '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Typ minstens 2 tekens om te zoeken.</div>';
+    const results = Array.isArray(km.results) ? km.results : [];
+    if (results.length === 0) return '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Geen klanten gevonden voor <b>' + esc(q) + '</b>.</div>';
+    return results.map((c) => {
+      const label = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || c.email || c.id.slice(0, 8);
+      const sub = [c.email, c.phone, c.company_name].filter(Boolean).join(' · ');
+      const isCurrent = c.id === km.currentCustomerId;
+      return `<button class="btn btn-ghost" onclick="window.__emailKlantPick('${esc(c.id)}')" ${km.busy || isCurrent ? 'disabled' : ''} style="display:block;width:100%;padding:10px 22px;text-align:left;border:none;border-bottom:1px solid var(--border);background:${isCurrent ? TOK.mSoft : 'transparent'};cursor:${isCurrent ? 'default' : 'pointer'}">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(label)}${isCurrent ? ' <span style="font-size:10.5px;color:' + TOK.m + '">(huidig)</span>' : ''}</div>
+        <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sub || '—')}</div>
+      </button>`;
+    }).join('');
+  }
+  function _paintKlantResults() {
+    const el = document.getElementById('klantModalResults');
+    if (el) el.innerHTML = _renderKlantResults();
+  }
   window.__emailKlantSearch = (v) => {
     if (!_ui.klantModal) return;
     _ui.klantModal.query = String(v || '');
     if (_ui.klantModal._debounceT) clearTimeout(_ui.klantModal._debounceT);
     const q = _ui.klantModal.query.trim();
-    if (q.length < 2) { _ui.klantModal.results = []; _ui.klantModal.searching = false; if (render) render(); return; }
+    if (q.length < 2) {
+      _ui.klantModal.results = []; _ui.klantModal.searching = false;
+      _paintKlantResults(); // surgisch — geen full render() → input-focus behouden
+      return;
+    }
     _ui.klantModal.searching = true;
-    if (render) render();
+    _paintKlantResults();
     _ui.klantModal._debounceT = setTimeout(async () => {
       const j = await tryFetch('cust-search', '/api/customers?search=' + encodeURIComponent(q) + '&page_size=20', undefined, 8000);
       if (!_ui.klantModal) return;
       _ui.klantModal.searching = false;
       if (j?.__error || j?.error) { _ui.klantModal.error = j.__error || j.error; _ui.klantModal.results = []; }
       else { _ui.klantModal.error = null; _ui.klantModal.results = Array.isArray(j?.customers) ? j.customers : []; }
-      if (render) render();
+      _paintKlantResults();
     }, 300);
   };
   window.__emailKlantPick = async (customerId) => {
@@ -1695,5 +1727,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=21 — Archief/Prullenbak Terugzetten + Permanent verwijderen (confirm) + klant-koppeling modal (zoek /api/customers + POST /api/email-message-link-customer) + gekoppelde-klant banner in reader. Alles uit v=20 (placement-marker) behouden.');
+  console.debug('[email-v2] v=22 — klant-zoeker uncontrolled-input (surgische results-render, geen focus-loss) + body-fetch DB-fallback (leads@ notificatie-mails laden via email_id ipv IMAP-uid). Alles uit v=21 behouden.');
 })();

@@ -494,7 +494,7 @@
      ═════════════════════════════════════════════════════════════════════ */
   const MAILBOX_SLUGS = ['info', 'leads', 'partners', 'administratie', 'onboarding', 'events', 'welkom'];
   const _sig = {
-    loading: false, error: null,
+    loading: false, error: null, fetched: false,
     items: [],        // gehele lijst uit /api/email-signatures
     active: null,     // welke mailbox open in editor: null=global, of slug
     draft: null,      // { name, body_html, body_text, logo_url } bewerkt
@@ -505,6 +505,7 @@
     _sig.loading = true; _sig.error = null; if (render) render();
     const j = await tryFetch('email-signatures', '/api/email-signatures');
     _sig.loading = false;
+    _sig.fetched = true; // v=6: markeer geladen ook bij lege lijst → voorkomt render-loop
     if (j?.__error) _sig.error = j.__error;
     else if (j?.error) _sig.error = j.error;
     else _sig.items = Array.isArray(j?.items) ? j.items : [];
@@ -577,8 +578,10 @@
     if (!isSuperAdmin() && !(window.DFO?.S?.role === 'manager' || window.DFO?.S?.role === 'admin')) {
       return bodyAccessDenied();
     }
-    if (!_sig.loading && !_sig.items.length && !_sig.error) {
-      // Auto-load bij eerste render.
+    if (!_sig.loading && !_sig.fetched && !_sig.error) {
+      // v=6 auto-load: gate op `fetched` i.p.v. `items.length` — lege lijst is
+      // legitieme uitkomst (geen per-mailbox handtekeningen). Zonder deze
+      // fix triggerde !items.length de fetcher bij ELKE render → infinite loop.
       queueMicrotask(fetchSignatures);
     }
     const active = _sig.active; // null=global, of slug
@@ -664,7 +667,7 @@
      ═════════════════════════════════════════════════════════════════════ */
   const TPL_CATEGORIES = ['algemeen', 'sales', 'onboarding', 'events', 'wanbetalers', 'partners', 'welkom'];
   const _tpl = {
-    loading: false, error: null,
+    loading: false, error: null, fetched: false,
     items: [],          // gehele lijst (incl. inactive)
     active: null,       // id van bewerkt sjabloon; 'new' = nieuw
     draft: null,        // { name, subject, body_html, body_text, category, is_active }
@@ -676,6 +679,7 @@
     _tpl.loading = true; _tpl.error = null; if (render) render();
     const j = await tryFetch('email-templates', '/api/email-templates?include_inactive=1');
     _tpl.loading = false;
+    _tpl.fetched = true; // v=6: markeer geladen ook bij lege lijst → voorkomt render-loop
     if (j?.__error) _tpl.error = j.__error;
     else if (j?.error) _tpl.error = j.error;
     else _tpl.items = Array.isArray(j?.items) ? j.items : [];
@@ -793,7 +797,7 @@
     if (!isSuperAdmin() && !(window.DFO?.S?.role === 'manager' || window.DFO?.S?.role === 'admin')) {
       return bodyAccessDenied();
     }
-    if (!_tpl.loading && !_tpl.items.length && !_tpl.error) queueMicrotask(fetchEmailTemplates);
+    if (!_tpl.loading && !_tpl.fetched && !_tpl.error) queueMicrotask(fetchEmailTemplates); // v=6: gate op fetched (lege lijst = legitieme uitkomst — voorheen infinite fetch-loop)
     const draft = _tpl.draft;
     const active = _tpl.active;
     // Groepeer per categorie voor de lijst.
@@ -952,5 +956,5 @@
   window.DFO.VIEWS['instellingen/'] = instView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('instellingen');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('instellingen');
-  console.debug('[instellingen-v2] v=5 — Berichtsjablonen volledige CRUD-UI (lijst + editor + soft-delete + variabelen-chips). E-mail-handtekeningen ongewijzigd t.o.v. v=4.');
+  console.debug('[instellingen-v2] v=6 — infinite fetch-loop fix (guard op _fetched i.p.v. !items.length voor zowel _sig als _tpl). Lege lijst is nu legitieme uitkomst. Rest ongewijzigd t.o.v. v=5.');
 })();
