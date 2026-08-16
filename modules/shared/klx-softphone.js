@@ -63,7 +63,16 @@
     // Overrides — user kan lijn en/of nummer wijzigen via de sheet.
     // lineOverride: 'auto' | 'nl' | 'be' (default auto = detectLine).
     // numberOverride: string of null (default = klantnummer uit open-call).
-    lineOverride   : 'auto',
+    // v=1da: lineOverride wordt gepersisteerd in localStorage
+    // ('klx-softphone-line') zodat de user zijn keuze niet elke call
+    // opnieuw hoeft te maken. Read-once bij init met try/catch (private
+    // browsing / disabled storage → fallback 'auto').
+    lineOverride   : (function () {
+      try {
+        const v = localStorage.getItem('klx-softphone-line');
+        return (v === 'nl' || v === 'be' || v === 'auto') ? v : 'auto';
+      } catch (_) { return 'auto'; }
+    })(),
     numberOverride : null,
     // Actieve klant-context (naam + telefoon + optionele meta) voor de sheet-
     // header. Wordt gezet bij open() en gewist bij closeSheet().
@@ -306,20 +315,34 @@
         },
       });
       state.session = inviter;
+      // v=1da: bind audio al bij Establishing zodat SIP early media (183
+      // Session Progress met SDP → ringback-tone van de provider) hoorbaar
+      // wordt terwijl het gesprek nog niet is opgenomen. Voorheen werd
+      // pas bij Established gebonden → gebruiker hoorde niets tijdens
+      // "gaat over". Bindings zijn idempotent — we vervangen de srcObject
+      // niet als 'ie al gezet is bij Established.
+      const _bindRemoteAudio = () => {
+        const pc = inviter.sessionDescriptionHandler?.peerConnection;
+        if (!pc || !state.audioEl) return;
+        const stream = new MediaStream();
+        pc.getReceivers().forEach((rr) => { if (rr.track && rr.track.kind === 'audio') stream.addTrack(rr.track); });
+        if (stream.getAudioTracks().length === 0) return; // nog geen audio in SDP
+        // Alleen (re)binden als srcObject leeg is — voorkomt "click" bij
+        // Establishing→Established overgang wanneer stream al loopt.
+        if (!state.audioEl.srcObject) {
+          state.audioEl.srcObject = stream;
+          try { state.audioEl.play(); } catch (_) { /* autoplay policy */ }
+        }
+      };
       inviter.stateChange.addListener((s) => {
         if (s === 'Establishing') {
           state.lastState = 'ringing';
+          _bindRemoteAudio(); // early media / ringback
           updateCallbarStatus('Gaat over…', displayName ? `${displayName} — ${effPhone}` : effPhone);
           renderSheet();
         } else if (s === 'Established') {
           state.lastState = 'connected';
-          const pc = inviter.sessionDescriptionHandler?.peerConnection;
-          if (pc && state.audioEl) {
-            const stream = new MediaStream();
-            pc.getReceivers().forEach((rr) => { if (rr.track) stream.addTrack(rr.track); });
-            state.audioEl.srcObject = stream;
-            try { state.audioEl.play(); } catch (_) { /* autoplay policy */ }
-          }
+          _bindRemoteAudio(); // zet audio als 'ie nog niet was gebonden
           updateCallbarStatus('In gesprek', displayName ? `${displayName} — ${effPhone}` : effPhone);
           startCallTimer();
           renderSheet();
@@ -391,10 +414,11 @@
   function openSheet(customer) {
     const sheet = ensureSheet();
     state.activeCustomer = customer || null;
-    // Reset overrides bij nieuwe klant zodat vorige call niet lekt naar
-    // deze sessie (bv. numberOverride van een andere klant).
+    // Reset numberOverride bij nieuwe klant zodat vorige call niet lekt
+    // naar deze sessie. lineOverride BEHOUDEN — die is gepersisteerd in
+    // localStorage zodat de user zijn NL/BE-keuze niet elke call opnieuw
+    // hoeft te maken (v=1da).
     state.numberOverride = null;
-    state.lineOverride   = 'auto';
     state.lastError      = null;
     const nm = String(customer?.name || '').trim();
     const t = document.getElementById('klxCallSheetTitle');
@@ -498,7 +522,10 @@
     const lineSel = body.querySelector('#klxCallLineSel');
     if (lineSel) {
       lineSel.addEventListener('change', (e) => {
-        state.lineOverride = String(e.target.value || 'auto');
+        const v = String(e.target.value || 'auto');
+        state.lineOverride = v;
+        // v=1da: onthoud de keuze cross-call/cross-session.
+        try { localStorage.setItem('klx-softphone-line', v); } catch (_) { /* private mode */ }
         renderSheet();
       });
     }
