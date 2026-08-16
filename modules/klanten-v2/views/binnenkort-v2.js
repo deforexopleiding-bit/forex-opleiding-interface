@@ -1,19 +1,15 @@
 // modules/klanten-v2/views/binnenkort-v2.js
 //
-// Binnenkort-pagina — landing/index met WERKENDE deep-links naar bestaande
-// modules die (nog) niet in de v2-hoofdnav staan. Geen data-fetch; puur
-// een navigatie-hub. Kaarten met 'Werkt'/'Experiment' openen de bestaande
-// v1-pagina in een NIEUW tabblad (target=_blank + rel=noopener) — dat
-// bypassed de v2-router volledig en voorkomt de goTab-reset-bug die de
-// Overige-hub en de voicememo-knop eerder trof.
+// Binnenkort-pagina — puur informatieve overzichts-landing. GEEN klikbare
+// items; deze pagina laat alleen zien WAT eraan komt of wat als
+// v1-module buiten de v2-hoofdnav bestaat. Voor het openen van v1-modules
+// moet de gebruiker naar het v1-menu; deze pagina navigeert nergens meer
+// naartoe.
 //
-// Router-veilig patroon: <a href="..." target="_blank" rel="noopener">.
-// Modules die nog "In ontwikkeling" zijn krijgen géén klik — puur een
-// nette placeholder-kaart met pill "In ontwikkeling" (geen doodlopende
-// alert).
-//
-// Dormant — binnenkort NIET in V2_ACTIVE_ALLOWLIST. Preview via
-// ?v2preview=binnenkort.
+// v=3 (2026-08-16): alle deep-links verwijderd. Alle items zijn nu
+// display-only placeholder-kaarten (aria-disabled, geen <a>, geen
+// target=_blank). Nieuwsbrief expliciet als 'In ontwikkeling' item
+// aanwezig (was al zo sinds v=2 — geen dubbele entry).
 
 (function () {
   if (!window.DFO) { console.error('[binnenkort-v2] DFO shell niet geladen.'); return; }
@@ -28,10 +24,10 @@
   // Mapping status -> pill-color.
   const STATUS_TO_PILL = { 'Werkt': 'ok', 'In ontwikkeling': 'info', 'Experiment': 'warn' };
 
-  // Deep-links per module. `href` = null → onklikbaar (nog niet af).
-  // Bewuste keuze: werkende modules open we in een NIEUW tabblad zodat de
-  // v2-shell in het huidige tabblad blijft staan (geen router-hop nodig,
-  // geen tab-reset-risico). Externe URL → target=_blank + rel=noopener.
+  // v=3: alle items zijn display-only (geen href, geen navigatie).
+  // Statussen blijven informatief: 'Werkt' = bestaat als v1-module (open via
+  // v1-menu); 'In ontwikkeling' = wordt nog gebouwd; 'Experiment' = actief
+  // maar wisselvallig.
   const SOON = [
     {
       n: 'Kennisbank',
@@ -39,7 +35,6 @@
       ic: I.book || I.doc,
       c: 'teal',
       s: 'Werkt',
-      href: '/modules/kennisbank.html',
     },
     {
       n: 'Control Center',
@@ -47,7 +42,6 @@
       ic: I.settings,
       c: 'blue',
       s: 'Werkt',
-      href: '/modules/control-center.html',
     },
     {
       n: 'Vergaderruimte',
@@ -55,7 +49,6 @@
       ic: I.users,
       c: 'violet',
       s: 'Werkt',
-      href: '/modules/meetings.html',
     },
     {
       n: 'Secret Area',
@@ -63,7 +56,6 @@
       ic: I.shield,
       c: 'slate',
       s: 'Werkt',
-      href: '/modules/secret-area.html',
     },
     {
       n: 'Meta Ads',
@@ -71,7 +63,6 @@
       ic: I.target,
       c: 'blue',
       s: 'Werkt',
-      href: '/modules/meta-ads.html',
     },
     {
       n: 'Creative Studio',
@@ -79,7 +70,6 @@
       ic: I.image || I.file,
       c: 'pink',
       s: 'Werkt',
-      href: '/modules/meta-ads-studio.html',
     },
     {
       n: 'Simon / Leon / Aron',
@@ -87,7 +77,6 @@
       ic: I.bot,
       c: 'orange',
       s: 'Experiment',
-      href: '/modules/agents.html',
     },
     {
       n: 'Nieuwsbrief',
@@ -95,7 +84,6 @@
       ic: I.mail,
       c: 'teal',
       s: 'In ontwikkeling',
-      href: null,
     },
     {
       n: 'Enquêtes',
@@ -103,7 +91,6 @@
       ic: I.list || I.doc,
       c: 'violet',
       s: 'In ontwikkeling',
-      href: null,
     },
   ];
 
@@ -111,7 +98,7 @@
     return `${H.voorbeeldBanner()}
       <div class="soon-intro">
         <div class="soon-intro-t">Binnenkort</div>
-        <div class="soon-intro-d">Deze onderdelen bestaan buiten de v2-hoofdnavigatie — omdat ze zelden gebruikt worden, of nog in ontwikkeling zijn. Werkende links openen in een nieuw tabblad zodat je hier terug kunt komen.</div>
+        <div class="soon-intro-d">Puur informatief overzicht van wat er buiten de v2-hoofdnavigatie bestaat of nog in ontwikkeling is. Deze kaarten zijn niet klikbaar.</div>
       </div>
       <div class="soon-grid">
         ${SOON.map((item) => {
@@ -119,16 +106,14 @@
           const inner = `
             <div class="soon-card-head">
               <span class="tile-ico" style="background:var(--${item.c}-soft,var(--surface-2));color:var(--${item.c},var(--brand))">${svg(item.ic)}</span>
-              <div class="soon-card-title">${esc(item.n)}${item.href ? ' ↗' : ''}</div>
+              <div class="soon-card-title">${esc(item.n)}</div>
             </div>
             <div class="soon-card-desc">${esc(item.d)}</div>
             ${pill}
           `;
-          if (item.href) {
-            return `<a class="soon-card" href="${esc(item.href)}" target="_blank" rel="noopener" title="Opent ${esc(item.n)} in een nieuw tabblad">${inner}</a>`;
-          }
-          // Placeholder (nog niet af): geen klik, aria-disabled voor screenreaders.
-          return `<div class="soon-card" role="group" aria-disabled="true" style="opacity:.72;cursor:default" title="${esc(item.n)} — nog niet af, wordt geopend zodra ontwikkeling klaar is">${inner}</div>`;
+          // v=3: alle items zijn display-only placeholders (geen <a>, geen
+          // navigatie). aria-disabled voor screenreaders.
+          return `<div class="soon-card" role="group" aria-disabled="true" style="opacity:.85;cursor:default" title="${esc(item.n)} — informatief">${inner}</div>`;
         }).join('')}
       </div>`;
   }
@@ -136,5 +121,5 @@
   window.DFO.VIEWS['binnenkort/'] = soonView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('binnenkort');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('binnenkort');
-  console.debug('[binnenkort-v2] v=2 — landing/index met echte deep-links (target=_blank op werkende items; placeholders voor nog-niet-af).');
+  console.debug('[binnenkort-v2] v=3 — display-only overzicht (alle items niet-klikbaar; Nieuwsbrief + Enquêtes als "In ontwikkeling").');
 })();
