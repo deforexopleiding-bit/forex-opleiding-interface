@@ -89,7 +89,37 @@ function htmlUitTekstMetLogoBijHandtekening(signedText) {
  *    handtekeningregel, dus vóór het citaat.
  * Geeft altijd zowel text als html terug (HTML-mail met platte-tekst-fallback).
  */
+// v2 email-round v=20: placement-marker patroon.
+// Compose (email-v2.js) plaatst bij reply/forward een marker tussen de
+// eigen-tekst-zone en het quote/doorstuur-blok. Server (deze helper)
+// vervangt de marker door de handtekening. Bij nieuwe mails zonder
+// marker → append aan het eind (huidig, correct gedrag).
+//
+// HTML-marker: <div data-sig-marker="1"> … </div>  (attribute-based, robuust
+//              door contenteditable/HTML-sanitizers heen).
+// Text-marker: regel met alleen `__SIG_HERE__` (met omringende witregels).
+export const SIG_MARKER_HTML_RE = /<div[^>]*data-sig-marker=["']1["'][^>]*>[\s\S]*?<\/div>/i;
+export const SIG_MARKER_TEXT_RE = /\n?\s*__SIG_HERE__\s*\n?/;
+
 export function metHandtekening(text, html) {
+  const t = String(text == null ? '' : text);
+  const h = String(html == null ? '' : html);
+  const hasHtmlMarker = SIG_MARKER_HTML_RE.test(h);
+  const hasTextMarker = SIG_MARKER_TEXT_RE.test(t);
+  if (hasHtmlMarker || hasTextMarker) {
+    // Placement-mode: replace marker (idempotent — marker verdwijnt na
+    // vervanging dus tweede aanroep append niet nogmaals).
+    const sigHtmlBlock = handtekeningHtml();
+    const sigTextBlock = '\n\n' + HANDTEKENING_TEKST;
+    const outText = hasTextMarker
+      ? t.replace(SIG_MARKER_TEXT_RE, sigTextBlock)
+      : tekstMetHandtekening(t); // fallback: append aan text als alleen HTML marker
+    const outHtml = h
+      ? (hasHtmlMarker ? h.replace(SIG_MARKER_HTML_RE, sigHtmlBlock) : htmlMetHandtekening(h))
+      : tekstNaarHtml(outText);
+    return { text: outText, html: outHtml };
+  }
+  // Legacy path: nieuwe mail (geen quote/marker) — append aan eind.
   const signedText = tekstMetHandtekening(text);
   const signedHtml = html
     ? htmlMetHandtekening(html)
@@ -150,22 +180,36 @@ export async function metHandtekeningAsync(text, html, opts) {
     // Geen DB-rij gevonden — fallback op hardcoded.
     return metHandtekening(text, html);
   }
-  // Marker voor idempotentie: gebruik body_text als er inhoud is, anders
-  // een fragment van body_html. Naïef maar effectief.
-  const dbMarker = String(sig.body_text || sig.body_html || '').slice(0, 60);
   const inText = String(text || '');
   const inHtml = String(html || '');
+  const hasHtmlMarker = SIG_MARKER_HTML_RE.test(inHtml);
+  const hasTextMarker = SIG_MARKER_TEXT_RE.test(inText);
+  const sigTextBlock = sig.body_text ? ('\n\n' + sig.body_text) : '';
+  const sigHtmlBlock = sig.body_html || (sig.body_text ? tekstNaarHtml(sig.body_text) : '');
+  // v2 email-round v=20: placement-marker (analoog aan metHandtekening).
+  if (hasHtmlMarker || hasTextMarker) {
+    const outText = hasTextMarker
+      ? inText.replace(SIG_MARKER_TEXT_RE, sigTextBlock)
+      : (inText.replace(/\s+$/, '') + sigTextBlock);
+    let outHtml;
+    if (inHtml) {
+      outHtml = hasHtmlMarker ? inHtml.replace(SIG_MARKER_HTML_RE, sigHtmlBlock) : (inHtml + sigHtmlBlock);
+    } else {
+      outHtml = tekstNaarHtml(outText).replace(sigTextBlock.trim(), sigHtmlBlock);
+    }
+    return { text: outText, html: outHtml };
+  }
+  // Geen marker → append aan het eind (nieuwe mail, geen quote).
+  // Idempotent-check: als DB-body_text al in de body zit, skip.
+  const dbMarker = String(sig.body_text || sig.body_html || '').slice(0, 60);
   const alreadyInText = dbMarker && inText.includes(dbMarker);
   const alreadyInHtml = dbMarker && inHtml.includes(dbMarker.slice(0, 40));
-  const outText = alreadyInText
-    ? inText
-    : inText.replace(/\s+$/, '') + '\n\n' + (sig.body_text || '');
-  let outHtml = '';
+  const outText = alreadyInText ? inText : (inText.replace(/\s+$/, '') + sigTextBlock);
+  let outHtml;
   if (inHtml) {
-    outHtml = alreadyInHtml ? inHtml : (inHtml + (sig.body_html || ''));
+    outHtml = alreadyInHtml ? inHtml : (inHtml + sigHtmlBlock);
   } else {
-    // Bouw HTML uit signed-text; plak de DB body_html eronder.
-    outHtml = tekstNaarHtml(outText).replace(dbMarker, '') + (sig.body_html || '');
+    outHtml = tekstNaarHtml(outText).replace(sigTextBlock.trim(), '') + sigHtmlBlock;
   }
   return { text: outText, html: outHtml };
 }

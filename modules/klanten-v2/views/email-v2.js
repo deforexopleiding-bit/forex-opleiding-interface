@@ -286,8 +286,22 @@
   async function sendMail() {
     if (_ui.sendBusy) return;
     const c = _ui.compose;
-    // Sync plaintext-fallback uit HTML voor de send.
-    c.body_text = htmlToPlaintext(c.body_html);
+    // v=20: als HTML een placement-marker heeft, spiegel dat naar de
+    // text-body op de juiste plek. htmlToPlaintext zou anders de marker
+    // verliezen (lege div wordt gestript) → server plakt handtekening
+    // aan het eind i.p.v. tussen eigen tekst en quote.
+    const HTML_MARKER_RE = /<div[^>]*data-sig-marker=["']1["'][^>]*>[\s\S]*?<\/div>/i;
+    const hasHtmlMarker = HTML_MARKER_RE.test(c.body_html || '');
+    if (hasHtmlMarker) {
+      const parts = String(c.body_html).split(HTML_MARKER_RE);
+      // Split geeft [voor, na] (regex zonder capture group).
+      const beforeText = htmlToPlaintext(parts[0] || '');
+      const afterText  = htmlToPlaintext(parts.slice(1).join('') || '');
+      c.body_text = beforeText.replace(/\s+$/, '') + '\n\n__SIG_HERE__\n\n' + afterText.replace(/^\s+/, '');
+    } else {
+      // Sync plaintext-fallback uit HTML voor de send.
+      c.body_text = htmlToPlaintext(c.body_html);
+    }
     if (!c.from_mailbox || !c.to || !c.subject || !c.body_text) {
       _ui.lastSend = { ok: false, error: 'Vul Van/Aan/Onderwerp/Bericht' };
       if (render) render(); return;
@@ -1350,16 +1364,32 @@
     const subject = /^(re|fwd?):/i.test(row.subject || '')
       ? row.subject
       : (mode === 'fwd' ? 'Fwd: ' : 'Re: ') + (row.subject || '');
+    // v=20: placement-marker patroon voor handtekening. Server (_lib/
+    // email-handtekening.js) vervangt de marker met de per-mailbox
+    // handtekening. Zonder marker → append aan het eind (nieuwe mail).
+    // Volgorde bij reply/fwd: [eigen tekst] + MARKER + [quote/forward].
+    // Cursor landt in de contenteditable aan het begin → user typt vóór
+    // de marker (die er unzichtbaar via een lege div + comment staat).
+    const SIG_MARKER_HTML = '<div data-sig-marker="1"><!--__SIG_HERE__--></div>';
+    const SIG_MARKER_TEXT = '\n\n__SIG_HERE__\n\n';
     let bodyHtml = '';
     let bodyText = '';
     if (mode === 'fwd') {
       const q = _buildForwardQuote(row, bodyData);
-      bodyHtml = q.html;
-      bodyText = q.text;
+      // Structuur: leeg-typ-zone (br × 2) + marker + quote-blok.
+      bodyHtml = '<div><br><br></div>' + SIG_MARKER_HTML + q.html;
+      bodyText = SIG_MARKER_TEXT + q.text;
       if (q.truncated) {
         // Info-melding aan de user: HTML was > 250KB, teksversie gebruikt.
         setTimeout(() => _showToastLocal('Originele mail te groot voor HTML-quote — platte tekst gebruikt.', 'info'), 100);
       }
+    } else if (mode === 'reply' || mode === 'replyall') {
+      // Geen quote-bouw in reply-flow (out-of-scope voor deze ronde), wel
+      // marker inzetten zodat de handtekening straks direct onder de
+      // eigen typ-zone landt i.p.v. onderaan de mail (waar bij toekomstige
+      // reply-quote de handtekening onder het citaat zou belanden).
+      bodyHtml = '<div><br><br></div>' + SIG_MARKER_HTML;
+      bodyText = SIG_MARKER_TEXT;
     }
     _ui.compose = {
       from_mailbox: from ? from.addr : _ui.compose.from_mailbox,
@@ -1519,5 +1549,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=19 — forward-quote fix: originele body (HTML of text-fallback bij >250KB) + header-blok in doorstuur-compose. Alles uit v=18 behouden.');
+  console.debug('[email-v2] v=20 — handtekening-placement-marker patroon: reply/fwd zetten <div data-sig-marker=1> tussen eigen tekst en quote; server vervangt met handtekening. Nieuwe mail zonder marker → append aan eind (huidig gedrag).');
 })();
