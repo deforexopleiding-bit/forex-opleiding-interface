@@ -201,6 +201,7 @@
     voicememoBusy:     {},        // per appointment_id
     voicememoAllBusy:  false,
     voicememoPopupDismissed: false,  // per-sessie: user heeft popup weggeklikt
+    voicememoOverlayOpen:    false,  // v=18: fullscreen overlay met voicememo-view
     deleteApptModal:   null,      // { appointmentId, reden, saving, error }
     // v=17: admin-UI (adminBackfillBusy/adminGhlBackfill*) verhuisd naar
     // instellingen-v2.js. Bijbehorende handlers/fetchers ook.
@@ -934,13 +935,23 @@
     _ui.voicememoPopupDismissed = true;
     if (render) render();
   };
+  // v=18: Voicememo opent nu een FULL-SCREEN OVERLAY (fixed-position boven
+  // de app-shell) i.p.v. een goTab. Reden: 'Voicememo' staat niet in
+  // m.tabs, dus DFO.goTab('Voicememo') resette S.tab naar Werklijst
+  // (zelfde bug-family als Overige-sub-views vóór v=16 fix). Overlay-
+  // pattern is de meest robuuste route: geen dependency op de tabbar of
+  // Overige-hub, werkt cross-view en is fail-soft. Render-hook staat in
+  // de DFO.render monkey-patch verderop (naast _ensureVoicememoHeaderBtn).
   window.__fuVoicememoOpenView = () => {
     _ui.voicememoPopupDismissed = true;
-    if (window.DFO && typeof window.DFO.goTab === 'function') {
-      try { window.DFO.goTab('Overige'); } catch (_) {}
+    _ui.voicememoOverlayOpen = true;
+    if (!_live.voicememo.data && !_live.voicememo.loading && !_live.voicememo.error) {
+      queueMicrotask(fetchVoicememo);
     }
-    // Fallback: als Overige-tab geen sub-nav aanbiedt naar Voicememo, gebruik
-    // directe view-render via hash-manipulatie (mocht die pad bestaan).
+    if (render) render();
+  };
+  window.__fuVoicememoOverlayClose = () => {
+    _ui.voicememoOverlayOpen = false;
     if (render) render();
   };
   window.__fuDetailTab = (t) => { _ui.detailTab = t; if (render) render(); };
@@ -2826,14 +2837,62 @@
       : `🎙 Voicememo's`;
     btn.style.display = '';
   }
-  // Monkey-patch DFO.render — draai voortaan _ensureVoicememoHeaderBtn na
-  // elke shell-render. Guard tegen dubbele wrapping als followup-v2 twee
-  // keer wordt geëvalueerd (bv. bij hot-reload).
+  // v=18 — Voicememo fullscreen overlay (singleton aan document.body).
+  // Bovenop de app-shell; ESC of "Sluiten" ruimt op. voicememoView() rendert
+  // z'n eigen empty-state ("Geen open voicememos vandaag") dus we openen ook
+  // bij 0 open — de knop is nu een echte 'view voicememo-lijst'-actie.
+  function _ensureVoicememoOverlay() {
+    let overlay = document.getElementById('fuVoicememoOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'fuVoicememoOverlay';
+      overlay.style.cssText = [
+        'position:fixed', 'inset:0', 'z-index:1500',
+        'background:var(--bg, #f6f7f9)', 'overflow-y:auto',
+        'display:none',
+      ].join(';');
+      // ESC-key sluit de overlay.
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && _ui.voicememoOverlayOpen) {
+          _ui.voicememoOverlayOpen = false;
+          if (render) render();
+        }
+      });
+      document.body.appendChild(overlay);
+    }
+    if (!_ui.voicememoOverlayOpen) {
+      overlay.style.display = 'none';
+      overlay.innerHTML = '';
+      return;
+    }
+    overlay.style.display = 'block';
+    // Toon voicememoView() ingebed met een header-bar + sluit-knop.
+    let inner = '';
+    try { inner = (typeof voicememoView === 'function') ? voicememoView() : '<div style="padding:24px">Voicememo-view niet gevonden.</div>'; }
+    catch (e) { inner = `<div style="padding:24px;color:var(--rose)">Voicememo-render fout: ${(e?.message || e)}</div>`; }
+    overlay.innerHTML = `<div style="max-width:1200px;margin:0 auto;padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">🎙</span>
+          <div>
+            <div style="font-size:16px;font-weight:600;color:var(--text);line-height:1.2">Voicememo-ronde</div>
+            <div style="font-size:11.5px;color:var(--text-3)">ESC of "Sluiten" om terug te gaan</div>
+          </div>
+        </div>
+        <button class="btn btn-ghost" onclick="window.__fuVoicememoOverlayClose()" title="Sluiten (Esc)">✕ Sluiten</button>
+      </div>
+      <div>${inner}</div>
+    </div>`;
+  }
+  // Monkey-patch DFO.render — draai voortaan _ensureVoicememoHeaderBtn +
+  // _ensureVoicememoOverlay na elke shell-render. Guard tegen dubbele
+  // wrapping als followup-v2 twee keer wordt geëvalueerd (bv. bij hot-reload).
   if (window.DFO && typeof window.DFO.render === 'function' && !window.DFO.__fuHeaderBtnPatched) {
     const _origRender = window.DFO.render;
     window.DFO.render = function () {
       const r = _origRender.apply(this, arguments);
       try { _ensureVoicememoHeaderBtn(); } catch (_) { /* fail-soft */ }
+      try { _ensureVoicememoOverlay(); }  catch (_) { /* fail-soft */ }
       return r;
     };
     window.DFO.__fuHeaderBtnPatched = true;
@@ -2872,5 +2931,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] v=17 registered — Voicememo header-btn (fixed) + Admin verhuisd naar Instellingen (15 views, 10 in hoofd-tabbalk).');
+  console.debug('[followup-v2] v=18 registered — Voicememo header-btn + fullscreen-overlay open (fix: goTab route werkte niet, overlay bypassed router).');
 })();

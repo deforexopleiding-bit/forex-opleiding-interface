@@ -181,12 +181,12 @@
       { id: 'alg-meldingen',    n: 'Meldingen',            d: 'Wat je wanneer wilt horen',                                 ic: I.bell || I.warn },
       { id: 'alg-weergave',     n: 'Weergave',             d: 'Thema, taal en datumnotatie',                               ic: I.eye || I.settings },
     ]},
-    // v=2 — Systeem-groep. Alleen zichtbaar voor super_admin; body rendert
-    // "geen toegang" voor andere rollen (server-side gate op endpoints
-    // blijft de laatste laag). Volle set: backfill-tools + info-cards
-    // over de server-side crons/webhooks die Follow-up voedt.
+    // v=3 — Systeem-groep. Items markeren met `roles: ['super_admin']`;
+    // instView filtert die uit voor niet-super_admin (nav-level hide).
+    // Body-gate op sys-followup-admin (isSuperAdmin) blijft als 2e laag,
+    // en server-side gate op de endpoints blijft de laatste laag.
     { g: 'Systeem', items: [
-      { id: 'sys-followup-admin', n: 'Follow-up admin-tools', d: 'Backfill GHL-contacts + GHL-status-backfill · super_admin only', ic: I.settings },
+      { id: 'sys-followup-admin', n: 'Follow-up admin-tools', d: 'Backfill GHL-contacts + GHL-status-backfill', ic: I.settings, roles: ['super_admin'] },
     ]},
   ];
 
@@ -496,13 +496,24 @@
   }
 
   function instView() {
-    if (!S.setPage) S.setPage = 'sales-trajecten';
-    const flat = SETS.flatMap(g => g.items);
-    const cur  = flat.find(i => i.id === S.setPage) || flat[0];
+    // v=3: nav-level rol-filter. Items met een `roles`-veld worden alleen
+    // getoond als de huidige rol voorkomt. Groepen zonder overgebleven items
+    // worden verborgen. Als de huidige S.setPage niet meer zichtbaar is (bv.
+    // door role-switch via "Bekijk als"), fallback naar de eerste zichtbare.
+    const currentRole = (window.DFO?.S?.role || window.KV_V2?.role || '') || '';
+    const isVisible = (it) => !Array.isArray(it.roles) || it.roles.includes(currentRole);
+    const setsVisible = SETS
+      .map((g) => ({ g: g.g, items: g.items.filter(isVisible) }))
+      .filter((g) => g.items.length > 0);
+    const flat = setsVisible.flatMap((g) => g.items);
+    if (!S.setPage || !flat.some((i) => i.id === S.setPage)) {
+      S.setPage = flat[0]?.id || 'sales-trajecten';
+    }
+    const cur = flat.find((i) => i.id === S.setPage) || flat[0];
     return `${H.voorbeeldBanner()}
       <div class="set-split">
         <div class="set-nav">
-          ${SETS.map(g => `
+          ${setsVisible.map(g => `
             <div class="set-group">${g.g}</div>
             ${g.items.map(i => `<button class="set-item ${S.setPage === i.id ? 'is-on' : ''}" onclick="__setPick('${i.id}')">
               ${svg(i.ic)}<span>${i.n}</span>
@@ -523,5 +534,5 @@
   window.DFO.VIEWS['instellingen/'] = instView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('instellingen');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('instellingen');
-  console.debug('[instellingen-v2] v=2 — Systeem-groep + Follow-up admin-tools (super_admin only, verhuisd uit followup-v2 v=16)');
+  console.debug('[instellingen-v2] v=3 — nav-level rol-filter (items met roles-array worden voor niet-matches uit de nav verborgen); Systeem-groep = super_admin only.');
 })();
