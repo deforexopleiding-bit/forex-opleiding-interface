@@ -65,7 +65,7 @@
     { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,       badge: 32, tabs: ['Gesprekken', 'Acties', 'Overzicht', 'Brieven'] },
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,      badge: 3,  tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
-    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS,      badge: 12, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Open-acties', 'Statistieken', 'Zoeken', 'Overige'] },
+    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS,      badge: 12, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
