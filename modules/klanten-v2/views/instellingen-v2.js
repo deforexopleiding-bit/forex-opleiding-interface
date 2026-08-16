@@ -10,8 +10,122 @@
 (function () {
   if (!window.DFO) { console.error('[instellingen-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[instellingen-v2] KV_V2.helpers niet geladen.'); return; }
-  const { I, svg, F, setF, S } = window.DFO;
+  const { I, svg, F, setF, S, render } = window.DFO;
   const H = window.KV_V2.helpers;
+
+  // v=2 admin-tools state (verhuisd uit followup-v2.js).
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const _live = {
+    adminBackfillContacts: { data: null, error: null },
+    adminGhlBackfill:      { data: null, error: null, mode: 'dry_run' },
+  };
+  const _ui = {
+    adminBackfillBusy:       false,
+    adminGhlBackfillConfirm: '',    // "IK BEGRIJP HET" token
+    adminGhlBackfillBusy:    false,
+    confirmModal:            null,  // { msg, onOk, tone }
+    toast:                   null,
+  };
+
+  // Rol-check (super_admin only). Kijkt naar de v2 shell rol-state; als
+  // die niet aanwezig is (browser-preview zonder auth), toont het simpel
+  // een block.
+  function isSuperAdmin() {
+    try {
+      const role = window.DFO?.S?.role || window.KV_V2?.role || null;
+      return role === 'super_admin';
+    } catch (_) { return false; }
+  }
+  function showToast(msg, tone) {
+    if (window.KV_V2?.helpers?.showToast) { try { window.KV_V2.helpers.showToast(msg, tone); return; } catch (_) {} }
+    _ui.toast = { msg, tone: tone || 'info' };
+    if (render) render();
+    setTimeout(() => { _ui.toast = null; if (render) render(); }, 3000);
+  }
+  function openConfirm(msg, onOk, tone) {
+    _ui.confirmModal = { msg, onOk, tone: tone || 'warn' };
+    if (render) render();
+  }
+  async function tryFetch(label, url, init, timeoutMs) {
+    timeoutMs = timeoutMs || 60000;
+    try {
+      if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
+      return await Promise.race([
+        window.KV.authedJson(url, init),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) {
+      console.warn('[instellingen-v2] ' + label + ' fail:', e?.message);
+      return { __error: e?.message || 'onbekende fout' };
+    }
+  }
+
+  // Fetchers — 1-op-1 kopie uit followup-v2 v=16 (endpoints identiek,
+  // guards identiek). ghl-status-backfill blijft klant-risk met dezelfde
+  // 3-staps-guard: dry-run → typ "IK BEGRIJP HET" → confirm-modal.
+  async function submitAdminBackfillContacts() {
+    if (_ui.adminBackfillBusy) return;
+    _ui.adminBackfillBusy = true;
+    _live.adminBackfillContacts.data = null;
+    _live.adminBackfillContacts.error = null;
+    if (render) render();
+    const j = await tryFetch('backfill-contacts', '/api/follow-up-backfill-contacts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }, 60000);
+    _ui.adminBackfillBusy = false;
+    if (j && (j.__error || j.error)) {
+      _live.adminBackfillContacts.error = j.__error || j.error;
+      showToast('Backfill mislukt: ' + _live.adminBackfillContacts.error, 'warn');
+    } else {
+      _live.adminBackfillContacts.data = { totaal: j.totaal || 0, updated: j.updated || 0, skipped: j.skipped || 0, errors: j.errors || 0 };
+      showToast(`Backfill klaar · ${j.updated || 0}/${j.totaal || 0} bijgewerkt`, 'success');
+    }
+    if (render) render();
+  }
+  async function submitAdminGhlBackfill(dryRun) {
+    if (_ui.adminGhlBackfillBusy) return;
+    _ui.adminGhlBackfillBusy = true;
+    if (render) render();
+    const body = dryRun
+      ? { dry_run: true, mode: 'strict', limit: 50 }
+      : { dry_run: false, mode: 'strict', limit: 50, confirm: _ui.adminGhlBackfillConfirm };
+    const j = await tryFetch('ghl-backfill', '/api/follow-up-ghl-status-backfill', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }, 60000);
+    _ui.adminGhlBackfillBusy = false;
+    if (j && (j.__error || j.error)) {
+      _live.adminGhlBackfill.error = j.__error || j.error;
+      showToast('GHL-backfill mislukt: ' + _live.adminGhlBackfill.error, 'warn');
+    } else {
+      _live.adminGhlBackfill.data = j;
+      _live.adminGhlBackfill.mode = dryRun ? 'dry_run' : 'executed';
+      showToast(dryRun ? `Dry-run: ${j.returned || 0} kandidaten` : `Executed: ${j.succeeded || 0}/${j.processed || 0} bijgewerkt`, 'success');
+      if (!dryRun) _ui.adminGhlBackfillConfirm = '';
+    }
+    if (render) render();
+  }
+
+  // Handlers (global __setAdmin* naming om conflicts met followup-v2 te
+  // vermijden; die zijn daar geheel verwijderd).
+  window.__setAdminBackfillContacts = () => {
+    openConfirm('Backfill GHL-contacts naar alle appointments met ontbrekende email/telefoon? Loopt door alle appts; kan lang duren (max 60s per run).', submitAdminBackfillContacts, 'warn');
+  };
+  window.__setAdminGhlBackfillDry = () => submitAdminGhlBackfill(true);
+  window.__setAdminGhlBackfillConfirm = (v) => { _ui.adminGhlBackfillConfirm = v; if (render) render(); };
+  window.__setAdminGhlBackfillExecute = () => {
+    if (_ui.adminGhlBackfillConfirm !== 'IK BEGRIJP HET') { showToast('Typ letterlijk "IK BEGRIJP HET" in het confirm-veld', 'warn'); return; }
+    // Stap 3: harde confirm-modal vóór de mutatie live gaat.
+    openConfirm('EXECUTE GHL-status-backfill (mode=strict, limit=50)? Muteert live GHL appointmentStatus → "showed". Alleen super_admin. Onomkeerbaar.', () => submitAdminGhlBackfill(false), 'warn');
+  };
+  window.__setConfirmOk = () => {
+    const m = _ui.confirmModal; if (!m) return;
+    _ui.confirmModal = null;
+    if (render) render();
+    if (typeof m.onOk === 'function') { try { m.onOk(); } catch (_) {} }
+  };
+  window.__setConfirmCancel = () => { _ui.confirmModal = null; if (render) render(); };
 
   // Nav — 1-op-1 uit prototype r4167-4222 (9 groepen · 30 set-pages).
   const SETS = [
@@ -66,6 +180,13 @@
       { id: 'alg-bedrijf',      n: 'Bedrijfsgegevens',     d: 'Naam, adres, logo en btw-nummer',                           ic: I.building || I.file },
       { id: 'alg-meldingen',    n: 'Meldingen',            d: 'Wat je wanneer wilt horen',                                 ic: I.bell || I.warn },
       { id: 'alg-weergave',     n: 'Weergave',             d: 'Thema, taal en datumnotatie',                               ic: I.eye || I.settings },
+    ]},
+    // v=3 — Systeem-groep. Items markeren met `roles: ['super_admin']`;
+    // instView filtert die uit voor niet-super_admin (nav-level hide).
+    // Body-gate op sys-followup-admin (isSuperAdmin) blijft als 2e laag,
+    // en server-side gate op de endpoints blijft de laatste laag.
+    { g: 'Systeem', items: [
+      { id: 'sys-followup-admin', n: 'Follow-up admin-tools', d: 'Backfill GHL-contacts + GHL-status-backfill', ic: I.settings, roles: ['super_admin'] },
     ]},
   ];
 
@@ -254,22 +375,145 @@
     </div>`;
   }
 
+  /* ═════════════════════════════════════════════════════════════════════
+     v=2 — SYSTEEM · Follow-up admin-tools
+     Verhuisd 1-op-1 uit followup-v2 v=16 (adminView + 4 helper-cards).
+     Endpoints en 3-staps-guard identiek: dry-run → typ "IK BEGRIJP HET" →
+     confirm-modal (harde bevestiging vóór live mutatie).
+     ═════════════════════════════════════════════════════════════════════ */
+  function bodyAccessDenied() {
+    return `<div class="set-empty">
+      <span class="set-empty-ico">${svg(I.shield || I.settings)}</span>
+      <div class="set-empty-t">Alleen super_admin</div>
+      <div class="set-empty-s">Deze systeem-tools zijn zichtbaar voor super_admin. Vraag Amigo of Jeffrey om toegang, of gebruik "Bekijk als → Super admin" (dev/preview).</div>
+    </div>`;
+  }
+  function _sysBackfillContactsCard() {
+    const busy = _ui.adminBackfillBusy;
+    const d = _live.adminBackfillContacts.data;
+    const err = _live.adminBackfillContacts.error;
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:600">Backfill GHL-contacts</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Trekt email/telefoon bij van GHL voor appointments met ontbrekende contact-info.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setAdminBackfillContacts()">${busy ? 'Bezig…' : 'Start backfill'}</button>
+      </div>
+      ${d ? `<div style="padding:10px 16px;font-size:12px;color:var(--text-2)">Resultaat: <span class="mono">${d.updated}</span>/<span class="mono">${d.totaal}</span> bijgewerkt · <span class="mono">${d.skipped}</span> geskipped · <span class="mono" style="color:var(--rose)">${d.errors}</span> fouten.</div>` : ''}
+      ${err ? `<div style="padding:10px 16px;font-size:12px;color:var(--rose)">Fout: ${esc(err)}</div>` : ''}
+    </div>`;
+  }
+  function _sysGhlBackfillCard() {
+    const busy = _ui.adminGhlBackfillBusy;
+    const d = _live.adminGhlBackfill.data;
+    const err = _live.adminGhlBackfill.error;
+    const mode = _live.adminGhlBackfill.mode;
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--rose-line, #f5b4bc);border-radius:10px">
+      <div style="padding:12px 16px;background:var(--rose-soft);border-bottom:1px solid var(--rose-line, #f5b4bc)">
+        <div style="font-size:13px;font-weight:600;color:var(--rose)">⚠ GHL-status-backfill (klant-CRM-mutatie)</div>
+        <div style="font-size:11.5px;color:var(--rose);margin-top:2px">Zet historische appointments in GHL op status "showed". Muteert live CRM-data. 3 stappen: dry-run → typ "IK BEGRIJP HET" → confirm-modal → execute.</div>
+      </div>
+      <div style="padding:12px 16px">
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setAdminGhlBackfillDry()">${busy && mode === 'dry_run' ? 'Bezig…' : '🔍 1. Dry-run (mode=strict, limit=50)'}</button>
+        </div>
+        ${d && mode === 'dry_run' ? `<div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;margin-bottom:10px">
+          <b>Dry-run resultaat:</b> ${d.total_candidates || 0} totaal kandidaten · toont eerste ${d.returned || 0} · limit ${d.limit || 50}${d.skipped_over_limit ? ` · ${d.skipped_over_limit} overgeslagen boven limit` : ''}<br>
+          ${d.note ? `<div style="margin-top:6px;font-style:italic">${esc(d.note)}</div>` : ''}
+        </div>` : ''}
+        ${d && mode === 'dry_run' ? `<div style="border-top:1px solid var(--border);padding-top:10px">
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">2. Bevestigen door te typen  ·  3. Confirm-modal → Execute</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input type="text" placeholder='Typ "IK BEGRIJP HET"' value="${esc(_ui.adminGhlBackfillConfirm)}" oninput="window.__setAdminGhlBackfillConfirm(this.value)" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px" />
+            <button class="btn btn-primary btn-sm" ${busy || _ui.adminGhlBackfillConfirm !== 'IK BEGRIJP HET' ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__setAdminGhlBackfillExecute()">${busy && mode === 'executed' ? 'Executing…' : '🚨 EXECUTE'}</button>
+          </div>
+        </div>` : ''}
+        ${d && mode === 'executed' ? `<div style="padding:10px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:12px;margin-top:10px">
+          <b>Executed:</b> ${d.succeeded || 0}/${d.processed || 0} bijgewerkt${d.failed ? ` · ${d.failed} fouten` : ''}.
+        </div>` : ''}
+        ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-top:10px">${esc(err)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+  function _sysReportenCard() {
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">📧 Admin-rapporten (cron)</div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.6">
+          <b>follow-up-admin-daily</b> — verstuurt dagelijks 21:00 NL naar admins/managers via e-mail. Dedup per dag+recipient.<br>
+          <b>follow-up-admin-weekly</b> — verstuurt zondag 10:00 NL. Dedup per week.<br>
+          <span style="color:var(--text-3);font-size:11.5px">Beide draaien server-side (cron). Ontvangers: alle super_admin + manager. Interne mail — geen klant-verzending.</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  function _sysCronsCard() {
+    return `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">🔄 GHL-integratie (server-side)</div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.6">
+          <b>follow-up-ghl-appointment-poll</b> — cron elke 15 min. Sync GHL-appointments naar DB. Ghost-detectie.<br>
+          <b>follow-up-ghl-conversations-poll</b> — cron elke 15 min. Safety-net voor conversations-webhook.<br>
+          <b>follow-up-ghl-conversation-webhook</b> — inkomend van GHL bij nieuwe messages.<br>
+          <span style="color:var(--text-3);font-size:11.5px">Alle drie draaien automatisch. Geen UI-actie nodig — check via server-logs.</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bodySysFollowupAdmin() {
+    if (!isSuperAdmin()) return bodyAccessDenied();
+    return `<div style="max-width:900px">
+      ${_sysBackfillContactsCard()}
+      ${_sysGhlBackfillCard()}
+      ${_sysReportenCard()}
+      ${_sysCronsCard()}
+    </div>`;
+  }
+  function _renderConfirmModal() {
+    const m = _ui.confirmModal;
+    if (!m) return '';
+    const tone = m.tone === 'warn' ? 'rose' : 'blue';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setConfirmCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:520px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25);overflow:hidden">
+        <div style="padding:14px 18px;background:var(--${tone}-soft);color:var(--${tone});font-size:13px;font-weight:600">⚠ Bevestigen</div>
+        <div style="padding:16px 18px;font-size:13px;color:var(--text-2);line-height:1.55">${esc(m.msg)}</div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setConfirmCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" style="background:var(--${tone});border-color:var(--${tone})" onclick="window.__setConfirmOk()">Ja, uitvoeren</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function setBody(cur) {
-    if (cur.id === 'com-wa')       return bodyWhatsApp();
-    if (cur.id === 'team-rechten') return bodyRechten();
-    if (cur.id === 'alg-bedrijf')  return bodyBedrijf();
-    if (cur.id === 'wb-venster')   return bodyVenster();
+    if (cur.id === 'com-wa')            return bodyWhatsApp();
+    if (cur.id === 'team-rechten')      return bodyRechten();
+    if (cur.id === 'alg-bedrijf')       return bodyBedrijf();
+    if (cur.id === 'wb-venster')        return bodyVenster();
+    if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
   }
 
   function instView() {
-    if (!S.setPage) S.setPage = 'sales-trajecten';
-    const flat = SETS.flatMap(g => g.items);
-    const cur  = flat.find(i => i.id === S.setPage) || flat[0];
+    // v=3: nav-level rol-filter. Items met een `roles`-veld worden alleen
+    // getoond als de huidige rol voorkomt. Groepen zonder overgebleven items
+    // worden verborgen. Als de huidige S.setPage niet meer zichtbaar is (bv.
+    // door role-switch via "Bekijk als"), fallback naar de eerste zichtbare.
+    const currentRole = (window.DFO?.S?.role || window.KV_V2?.role || '') || '';
+    const isVisible = (it) => !Array.isArray(it.roles) || it.roles.includes(currentRole);
+    const setsVisible = SETS
+      .map((g) => ({ g: g.g, items: g.items.filter(isVisible) }))
+      .filter((g) => g.items.length > 0);
+    const flat = setsVisible.flatMap((g) => g.items);
+    if (!S.setPage || !flat.some((i) => i.id === S.setPage)) {
+      S.setPage = flat[0]?.id || 'sales-trajecten';
+    }
+    const cur = flat.find((i) => i.id === S.setPage) || flat[0];
     return `${H.voorbeeldBanner()}
       <div class="set-split">
         <div class="set-nav">
-          ${SETS.map(g => `
+          ${setsVisible.map(g => `
             <div class="set-group">${g.g}</div>
             ${g.items.map(i => `<button class="set-item ${S.setPage === i.id ? 'is-on' : ''}" onclick="__setPick('${i.id}')">
               ${svg(i.ic)}<span>${i.n}</span>
@@ -283,11 +527,12 @@
           </div>
           <div class="set-content">${setBody(cur)}</div>
         </div>
-      </div>`;
+      </div>
+      ${_renderConfirmModal()}`;
   }
 
   window.DFO.VIEWS['instellingen/'] = instView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('instellingen');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('instellingen');
-  console.debug('[instellingen-v2] registered 1 view (dormant)');
+  console.debug('[instellingen-v2] v=3 — nav-level rol-filter (items met roles-array worden voor niet-matches uit de nav verborgen); Systeem-groep = super_admin only.');
 })();
