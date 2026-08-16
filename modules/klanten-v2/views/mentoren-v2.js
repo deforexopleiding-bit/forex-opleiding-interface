@@ -1,281 +1,1532 @@
 // modules/klanten-v2/views/mentoren-v2.js
 //
-// Fase D module — Mentoren-beheer (layout-only, voorbeeld-data).
-// 1-op-1 render uit prototype:
-//   - MENTOREN mock                          r1404-1409
-//   - VIEWS['mentoren/Overzicht']            r5207-5230 (tabel met reiskosten-switch)
-//   - VIEWS['mentoren/Grootboek']            r5258       (= alias van events/Mentor-grootboek)
-//   - VIEWS['mentoren/Uitbetalingen']        r5287-5305 (4 sub-tabs: Rapporten/Declaraties/Handmatig/Tarieven)
-//   - VIEWS['mentoren/Beoordelingen']        r5474-5493
-//   - VIEWS['mentoren/Certificaten']         r2046-2062
-//   - VIEWS['mentoren/Signalen']             r5494-5513
+// Mentoren (admin-hub) — v2, volledige v1-parity build.
+// Module blijft DORMANT ('mentoren' NIET in V2_ACTIVE_ALLOWLIST).
 //
-// Bewuste vereenvoudigingen (in PR-body vermeld):
-//   - Uitbetalingen sub-tabs (Declaraties/Handmatige posten/Tarieven) hebben
-//     placeholder-tabellen met notitie; volledige tabel-content ingebouwd
-//     bij Rapporten.
-//   - Grootboek toont per-event + per-mentor tabellen (uit prototype r4710).
+// SCOPE: primaire admin-hub voor mentor-payouts + funded-certs +
+// assessments + cash-trajects + release-sync. Mentor-self (bonus-overview,
+// uitbetalingen, reiskosten, certificaten claim) blijft in Verdiensten-
+// module (mentor-only). Payout-admin-functies uit verdiensten BROK 4 zijn
+// hier 1-op-1 hergebruikt (commit 73b50bd7 van feat/v2-verdiensten-brok1).
 //
-// Dormant — 'mentoren' niet in V2_ACTIVE_ALLOWLIST. Preview ?v2preview=mentoren.
+// TABS (6, admin-only):
+//   BROK 1 — reads
+//     - Overzicht      → mentor-admin-list + mentor-payout-settings-get +
+//                        mentor-bonus-overview (dual-gate)
+//                        + mentor-ledger-overview + mentor-my-events
+//                        (per-mentor drilldown)
+//     - Rapporten      → mentor-payouts-admin-list + mentor-payout-detail
+//                        (row-expand)
+//     - Certificaten   → funded-certs-admin-list (signed URLs 1u)
+//     - Beoordelingen  → assessments-admin-list (read-only)
+//   BROK 2 — payout writes (hoog klant-risk)
+//     Zelfde flows als verdiensten BROK 4 (nu hier permanent):
+//     mentor-payout-generate + bulk-bar +
+//     mentor-payout-approve (mail-waarschuwing) +
+//     mentor-payout-mark-paid (typed "MARKEER BETAALD") +
+//     mentor-payout-reopen +
+//     mentor-payout-revert (super_admin + typed "REVERT") +
+//     mentor-payout-adjustment-save/-delete +
+//     mentor-payout-config-set + mentor-recurring-save/-delete
+//     (typed "VERWIJDER" voor recurring-delete) +
+//     mentor-ledger-set-status
+//   BROK 3 — cash-trajects
+//     mentor-cash-trajects-list + traject-kaart + termijn-uitklap +
+//     wizard-modal (events-list) + mentor-cash-traject-save/-status/-release
+//   BROK 4 — release-sync + polish
+//     admin/bonus-release-sync dry-run + definitief
+//     (super_admin only + typed "SYNC BEVESTIGEN") + coaching-debug knop.
+//
+// Bewust NIET (gedocumenteerd in recon):
+//   - Signalen-tab (was v1 mentoren-beheer NIET; hoort in follow-up).
+//   - Grootboek platform-brede view (v1 heeft mentor-grootboek.html als
+//     86-regel redirect — obsolete). Per-mentor ledger zit in drilldown.
+//   - Mentor toevoegen/deactiveren (accounts via /modules/admin.html).
+//   - Coaching-debug: als sub-knop in payout-detail (BROK 4).
+//
+// Guardrails: 8s Promise.race timeout · asArr() · in-flight loading-flag ·
+// fail-soft errBlk met "Opnieuw"-retry · geen render-loop · uncontrolled
+// inputs (state-only oninput) · runtime dep-check (KV) alleen in tryFetch/
+// tryPost, NOOIT top-level bail · elke write heeft een confirm-modal ·
+// HOOG-risk = typed-token confirm.
+//
+// v2.
 
 (function () {
   if (!window.DFO) { console.error('[mentoren-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[mentoren-v2] KV_V2.helpers niet geladen.'); return; }
 
-  const { I, svg, S, F, eur, eur0, render } = window.DFO;
+  const { I, svg, S, F, render } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  const MENTOREN = [
-    { naam: 'Dave Klaassen', leerlingen: 24, sessies: 18, beschikbaar: 'ma-do', vergoeding: 2400, status: 'actief',   reiskosten: true,  dagbedrag: 18 },
-    { naam: 'Mike de Vries', leerlingen: 19, sessies: 14, beschikbaar: 'di-vr', vergoeding: 1900, status: 'actief',   reiskosten: true,  dagbedrag: 22 },
-    { naam: 'Sarah Bosman',  leerlingen: 11, sessies:  9, beschikbaar: 'wo-vr', vergoeding: 1100, status: 'actief',   reiskosten: false, dagbedrag: 15 },
-    { naam: 'Tim Jacobs',    leerlingen:  0, sessies:  0, beschikbaar: '—',    vergoeding:    0, status: 'inactief', reiskosten: false, dagbedrag:  0 },
-  ];
-  const UITB = [
-    { n: 'Dave Klaassen', ev: 4, bonus: 2480, ses: 21, coach: 1260, reis: 180, corr:   0, btw: false, st: 'uitbetaald',  fact: 'DFO-2026-081' },
-    { n: 'Mike de Vries', ev: 3, bonus: 1720, ses: 18, coach: 1090, reis: 120, corr: -60, btw: false, st: 'goedgekeurd', fact: 'DFO-2026-082' },
-    { n: 'Sarah Bosman',  ev: 1, bonus:  760, ses:  9, coach:  520, reis:   0, corr:   0, btw: true,  st: 'concept',     fact: null },
-  ];
-  const UST = { concept: { l: 'Concept', c: 'neutral' }, goedgekeurd: { l: 'Goedgekeurd', c: 'accent' }, uitbetaald: { l: 'Uitbetaald', c: 'ok' } };
-  const utot = (u) => u.bonus + u.coach + u.reis + u.corr;
-  const CERTIFICATEN = [
-    { mentor: 'Dave Klaassen', naam: 'Advanced Technical Analysis',    uitgever: 'IFTA',                datum: '02-08-2026', status: 'goedgekeurd' },
-    { mentor: 'Dave Klaassen', naam: 'Risk Management Professional',   uitgever: 'CISI',                datum: '12-07-2026', status: 'goedgekeurd' },
-    { mentor: 'Mike de Vries', naam: 'Certified Financial Technician', uitgever: 'IFTA',                datum: '28-07-2026', status: 'ingediend' },
-    { mentor: 'Sarah Bosman',  naam: 'Trading Psychology Certificate', uitgever: 'Van Tharp Institute', datum: '20-07-2026', status: 'goedgekeurd' },
-  ];
-  const CERTST = { ingediend: { l: 'In beoordeling', c: 'warn' }, goedgekeurd: { l: 'Goedgekeurd', c: 'ok' }, afgewezen: { l: 'Afgewezen', c: 'danger' } };
-  const GRADICO = `<span style="width:26px;height:26px;border-radius:7px;background:var(--violet-soft);color:var(--violet);display:grid;place-items:center;flex-shrink:0">${svg(I.grad, 'width:14px;height:14px')}</span>`;
+  /* ── Helpers ─────────────────────────────────────────────────────────── */
+  const asArr = (v) => (Array.isArray(v) ? v : []);
+  const eur   = (n) => (n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(n));
+  const esc   = (v) => (H.esc ? H.esc(v) : String(v == null ? '' : v)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;'));
 
-  let uSub = 'Rapporten'; // sub-tab in Uitbetalingen
-
-  window.__mentNotice = (label) => {
-    console.info('[mentoren-v2] ' + label + ' (voorbeeld — komt in data-ronde)');
-    try { alert(label + ' — komt in de data-ronde.'); } catch (_) { /* ignore */ }
-  };
-  window.__mentSetUSub = (t) => { uSub = t; render(); };
-  window.__mentToggleReis = (i) => { MENTOREN[i].reiskosten = !MENTOREN[i].reiskosten; render(); };
-
-  function overzichtView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'violet',  icon: I.grad,  label: 'Actieve mentoren',        val: '3',        sub: '1 inactief' },
-      { c: 'emerald', icon: I.users, label: 'Leerlingen toegewezen',   val: '54', hi: 1, sub: 'gem. 18 per mentor' },
-      { c: 'amber',   icon: I.alert, label: 'Zonder mentor',           val: '7',  hi: 1, sub: 'wachten op toewijzing' },
-      { c: 'blue',    icon: I.euro,  label: 'Uit te betalen',          val: eur0(5400),  sub: 'deze maand' },
-    ])}
-    ${H.toolbar([
-      H.chips('st', [{ l: 'Actief', v: 'a', n: 3 }, { l: 'Inactief', v: 'i', n: 1 }], F('st', 'a')),
-      H.search('Zoek mentor…'),
-      `<div class="tb-right"><button class="btn btn-primary" onclick="__mentNotice('Mentor toevoegen')">${svg(I.plus)}Mentor toevoegen</button></div>`,
-    ])}
-    ${H.table(
-      [{ l: 'Mentor' }, { l: 'Leerlingen', cls: 'r' }, { l: 'Sessies', cls: 'r optional' }, { l: 'Saldo', cls: 'r' }, { l: 'Reiskosten' }, { l: 'Status' }],
-      MENTOREN.map((m, i) => [
-        `<div class="row-avatar">${H.av(m.naam, 30)}<div><div class="cell-main">${m.naam}</div><div class="cell-sub">${m.beschikbaar}</div></div></div>`,
-        `<span class="mono">${m.leerlingen}</span>`,
-        `<span class="mono">${m.sessies}</span>`,
-        `<span class="money" style="color:var(--emerald)">${eur0(m.vergoeding * .88)}</span>`,
-        `<div style="display:flex;align-items:center;gap:9px" onclick="event.stopPropagation()">
-          <button class="chip ${m.reiskosten ? 'on' : ''}" onclick="__mentToggleReis(${i})" style="font-size:11.5px;padding:3px 10px">${m.reiskosten ? 'Aan' : 'Uit'}</button>
-          ${m.reiskosten ? `<span style="font-size:12px;color:var(--text-2)">${eur0(m.dagbedrag)}/dag</span>` : ''}
-        </div>`,
-        H.pill(m.status === 'actief' ? 'ok' : 'neutral', m.status),
-      ])
-    )}
-    <div style="padding:12px 22px;font-size:11.5px;color:var(--text-3);display:flex;align-items:flex-start;gap:8px">${svg(I.route, 'width:14px;height:14px;flex-shrink:0;margin-top:1px')}<span>Staat reiskosten aan, dan krijgt de mentor rond de eerste vrijdag van de nieuwe maand automatisch de vraag hoeveel dagen hij reed.</span></div>`;
+  const MONTH_NAMES_NL = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+  function fmtMonth(iso) {
+    if (!iso) return '—';
+    try { const d = new Date(iso); if (Number.isNaN(d.getTime())) return String(iso); return `${MONTH_NAMES_NL[d.getMonth()]} ${d.getFullYear()}`; }
+    catch (_) { return String(iso); }
+  }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch (_) { return String(iso); }
+  }
+  function fmtDateTime(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (_) { return String(iso); }
+  }
+  function currentMonthKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  function prevMonthKey() {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   }
 
-  function grootboekView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Omzet uit events', val: eur0(24800), sub: 'dit kwartaal' },
-      { c: 'violet',  icon: I.grad,  label: 'Bonuspot',         val: eur0(4960),  hi: 1, sub: '20% van omzet' },
-      { c: 'amber',   icon: I.box,   label: 'Uitgaven',         val: eur0(3400),  hi: 1, sub: 'zaal, catering, materiaal' },
-      { c: 'emerald', icon: I.tick,  label: 'Netto',            val: eur0(16440), hi: 1, sub: 'na bonus en kosten' },
-    ])}
-    <div class="pad">
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-head"><span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.cal)}</span>
-          <div class="card-title">Per event</div></div>
-        ${H.table(
-          [{ l: 'Event' }, { l: 'Datum', cls: 'optional' }, { l: 'Omzet', cls: 'r' }, { l: 'Bonus', cls: 'r' }, { l: 'Uitgaven', cls: 'r' }, { l: 'Netto', cls: 'r' }, { l: 'Status' }],
-          [['Gent · 1 aug',  '01-08-2026', 12400, 2480, 680, 'uitbetaald'],
-           ['Gent · 25 jul', '25-07-2026', 12400, 2480, 720, 'open']]
-            .map(([e, d, o, b, u, st]) => [
-              `<span class="cell-main">${e}</span>`,
-              `<span class="mono" style="color:var(--text-3);font-size:12.5px">${d}</span>`,
-              `<span class="money">${eur0(o)}</span>`,
-              `<span class="money">${eur0(b)}</span>`,
-              `<span class="money">− ${eur0(u)}</span>`,
-              `<span class="money" style="color:var(--emerald)">${eur0(o - b - u)}</span>`,
-              H.pill(st === 'uitbetaald' ? 'ok' : 'warn', st),
-            ])
-        )}
+  /* ── Fetch-helpers (runtime KV-check, geen top-level bail) ───────────── */
+  async function tryFetch(label, url, timeoutMs = 8000) {
+    try {
+      if (!window.KV || typeof window.KV.authedJson !== 'function') {
+        throw new Error('KV.authedJson nog niet geladen (klanten-v2 bootstrap async)');
+      }
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout na ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) {
+      console.warn('[mentoren-v2] fetch fail:', label, '→', e?.message || e);
+      return { __error: e?.message || 'onbekende fout' };
+    }
+  }
+  async function tryPost(label, url, body, timeoutMs = 15000) {
+    try {
+      if (!window.KV || typeof window.KV.authedJson !== 'function') {
+        throw new Error('KV.authedJson nog niet geladen');
+      }
+      return await Promise.race([
+        window.KV.authedJson(url, { method: 'POST', body: JSON.stringify(body || {}) }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout na ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) {
+      console.warn('[mentoren-v2] post fail:', label, '→', e?.message || e);
+      return { __error: e?.message || 'onbekende fout', __status: e?.status || null };
+    }
+  }
+
+  /* ── RBAC ────────────────────────────────────────────────────────────── */
+  const ADMIN_ROLES = new Set(['super_admin', 'admin', 'manager']);
+  const SUPER_ADMIN_ROLES = new Set(['super_admin']);
+  function isAdminRole() { try { return ADMIN_ROLES.has(String(S.role || '').toLowerCase()); } catch (_) { return false; } }
+  function isSuperAdminRole() { try { return SUPER_ADMIN_ROLES.has(String(S.role || '').toLowerCase()); } catch (_) { return false; } }
+
+  /* ── State ───────────────────────────────────────────────────────────── */
+  const _live = {
+    // BROK 1 reads
+    mentors:      { loading: false, error: null, data: null },
+    payouts:      { loading: false, error: null, data: null, month: null },
+    payoutDetail: { loading: false, error: null, data: null, id: null },
+    settings:     { loading: false, error: null, data: null, mentorId: null },
+    bonusOverview:{ loading: false, error: null, data: null, mentorId: null },
+    ledger:       { loading: false, error: null, data: null, mentorId: null },
+    myEvents:     { loading: false, error: null, data: null, mentorId: null },
+    fundedCerts:  { loading: false, error: null, data: null, mentorId: null },
+    assessments:  { loading: false, error: null, data: null, month: null, mentorId: null },
+    // BROK 3 cash-trajects
+    trajects:     { loading: false, error: null, data: null, statusFilter: 'all' },
+    eventsList:   { loading: false, error: null, data: null },  // voor wizard event-select
+    // BROK 4 release-sync
+    syncPreview:  { loading: false, error: null, data: null },
+  };
+  const _ui = {
+    // BROK 1
+    selectedMentorId: null,
+    selectedMonth:    prevMonthKey(),
+    expandedPayoutId: null,
+    // Beoordelingen
+    assessMonth:      currentMonthKey(),
+    assessMentorId:   '',
+    // Trajecten
+    expandedTrajectId: null,
+    // BROK 2 forms
+    adjustmentForm:   null,     // { payoutId, id?, mentor_user_id, period_month, label, amount_incl, saving, error }
+    recurringForm:    null,     // { id?, mentor_user_id, label, amount_incl, active, start_month, saving, error }
+    configForm:       null,     // { mentor_user_id, travel_enabled, travel_day_rate_incl, saving, error }
+    // BROK 3 wizard
+    trajectForm:      null,     // { id?, event_id, client_label, total_amount, term_count, start_month, release_day, note, saving, error }
+    // Modals
+    confirmModal:      null,     // { msg, onOk, tone, danger }
+    typedConfirmModal: null,     // { msg, token, typed, onOk, saving, error, danger }
+    // Bulk-selectie in Rapporten-tab
+    bulkSelected:     new Set(),
+    bulkRunning:      false,
+    bulkResults:      null,      // { ok:[], skip:[], err:[] }
+  };
+
+  /* ── UI-blokken ──────────────────────────────────────────────────────── */
+  function skel() {
+    return `<div class="pad" style="padding-top:16px">
+      <div style="height:64px;border-radius:var(--r);background:linear-gradient(90deg,var(--surface-2),var(--surface) 50%,var(--surface-2));background-size:200% 100%;animation:kv-shim 1.4s linear infinite;margin-bottom:14px"></div>
+      <div style="height:180px;border-radius:var(--r);background:linear-gradient(90deg,var(--surface-2),var(--surface) 50%,var(--surface-2));background-size:200% 100%;animation:kv-shim 1.4s linear infinite"></div>
+    </div>`;
+  }
+  function errBlk(msg, retryHandler) {
+    return `<div class="pad" style="padding-top:16px">
+      <div style="padding:14px 16px;background:var(--rose-soft);border:1px solid var(--rose-line, var(--rose));color:var(--rose);border-radius:var(--r);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>⚠ ${esc(msg || 'Onbekende fout')}</span>
+        ${retryHandler ? `<button class="btn btn-ghost btn-sm" onclick="${retryHandler}">Opnieuw</button>` : ''}
       </div>
-      <div class="card">
-        <div class="card-head"><span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.users)}</span>
-          <div class="card-title">Per mentor</div>
-          <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="__mentNotice('Uitbetaling klaarzetten')">${svg(I.euro)}Uitbetaling klaarzetten</button></div>
-        ${H.table(
-          [{ l: 'Mentor' }, { l: 'Events', cls: 'r' }, { l: 'Bonus', cls: 'r' }, { l: 'Uitgaven', cls: 'r' }, { l: 'Saldo', cls: 'r' }, { l: 'Status' }],
-          MENTOREN.filter(m => m.status === 'actief').map(m => [
-            `<div class="row-avatar">${H.av(m.naam, 28)}<span class="cell-main">${m.naam}</span></div>`,
-            `<span class="mono">${Math.round(m.leerlingen / 8)}</span>`,
-            `<span class="money">${eur0(m.vergoeding)}</span>`,
-            `<span class="money">− ${eur0(m.vergoeding * .12)}</span>`,
-            `<span class="money" style="color:var(--emerald)">${eur0(m.vergoeding * .88)}</span>`,
-            H.pill(m.naam === 'Dave Klaassen' ? 'ok' : 'warn', m.naam === 'Dave Klaassen' ? 'Uitbetaald' : 'Open'),
-          ])
-        )}
+    </div>`;
+  }
+  function accessDeniedBlk(subMsg) {
+    return `<div class="empty" style="padding:72px 20px">
+      <div class="empty-ico">${svg(I.grad)}</div>
+      <div class="empty-t">Geen toegang</div>
+      <div class="empty-s">${esc(subMsg || 'Deze module is alleen zichtbaar voor rollen manager / admin / super_admin. Wissel via "Bekijk als" of vraag toegang aan.')}</div>
+    </div>${renderModals()}`;
+  }
+  function toast(msg, tone) {
+    try { if (window.KV?.toast) window.KV.toast(msg); else console.info('[mentoren-v2] toast:', tone || '', msg); }
+    catch (_) { console.info(msg); }
+  }
+  function modalShell(title, body, closeHandler, width) {
+    const w = width || 620;
+    return `<div style="position:fixed;inset:0;background:rgba(17,23,33,.48);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="${closeHandler}">
+      <div style="background:var(--surface);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);max-width:${w}px;width:100%;max-height:90vh;overflow:hidden;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+        <div style="padding:14px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:15px;font-weight:600">${esc(title)}</div>
+          <button class="icon-btn" onclick="${closeHandler}" style="width:26px;height:26px">✕</button>
+        </div>
+        <div style="padding:18px 22px;overflow-y:auto;flex:1;min-height:0">${body}</div>
       </div>
     </div>`;
   }
 
-  function uitbetalingenView() {
-    const som = UITB.reduce((a, u) => a + utot(u), 0);
-    const kpi = H.kpis([
-      { c: 'violet',  icon: I.grad,  label: 'Bonus uit events',  val: eur0(UITB.reduce((a, u) => a + u.bonus, 0)),  sub: '8 events' },
-      { c: 'emerald', icon: I.users, label: 'Coaching-sessies',   val: eur0(UITB.reduce((a, u) => a + u.coach, 0)),  hi: 1, sub: '48 sessies' },
-      { c: 'amber',   icon: I.euro,  label: 'Totaal te betalen', val: eur0(som), hi: 1, sub: '3 mentoren' },
-      { c: 'rose',    icon: I.alert, label: 'Wacht op akkoord',  val: '2', hi: 1, sub: 'rapporten' },
-    ]);
-    const subs = ['Rapporten', 'Declaraties', 'Handmatige posten', 'Tarieven'];
-    const tabs = `<div class="toolbar" style="padding-bottom:0;border-bottom:none">
-      ${subs.map(t => `<button class="chip ${uSub === t ? 'on' : ''}" onclick="__mentSetUSub('${t}')">${t}</button>`).join('')}</div>`;
-    let body = '';
-    if (uSub === 'Rapporten') {
-      body = H.table(
-        [{ l: 'Mentor' }, { l: 'Events', cls: 'r optional' }, { l: 'Bonus', cls: 'r' }, { l: 'Coaching', cls: 'r' }, { l: 'Reis', cls: 'r optional' }, { l: 'Handmatig', cls: 'r optional' }, { l: 'Totaal', cls: 'r' }, { l: 'Status' }, { l: '', cls: 'r' }],
-        UITB.map(u => [
-          `<div class="row-avatar">${H.av(u.n, 30)}<div><div class="cell-main">${u.n}</div><div class="cell-sub">${u.btw ? 'factureert met btw' : 'geen btw'}</div></div></div>`,
-          `<span class="mono">${u.ev}</span>`,
-          `<span class="money">${eur0(u.bonus)}</span>`,
-          `<span class="money">${eur0(u.coach)}</span>`,
-          `<span class="money" style="${u.reis ? '' : 'color:var(--text-3)'}">${u.reis ? eur0(u.reis) : '—'}</span>`,
-          `<span class="money" style="${u.corr ? 'color:var(--rose)' : 'color:var(--text-3)'}">${u.corr ? eur0(u.corr) : '—'}</span>`,
-          `<span class="money"><b>${eur0(utot(u))}</b></span>`,
-          H.pill(UST[u.st].c, UST[u.st].l),
-          u.st === 'concept'
-            ? `<button class="btn btn-primary btn-sm" onclick="__mentNotice('Goedkeuren ' + '${u.n.replace(/'/g, "\\'")}')">Goedkeuren</button>`
-            : u.st === 'goedgekeurd'
-              ? `<button class="btn btn-ghost btn-sm" onclick="__mentNotice('Markeer betaald ' + '${u.n.replace(/'/g, "\\'")}')">Markeer betaald</button>`
-              : `<button class="btn btn-ghost btn-sm" onclick="__mentNotice('PDF ' + '${u.n.replace(/'/g, "\\'")}')">${svg(I.down)}PDF</button>`,
-        ])
-      );
-    } else if (uSub === 'Declaraties') {
-      body = `<div style="padding:20px;color:var(--text-3);font-size:12.5px;line-height:1.6;max-width:760px">
-        <p><b>Declaraties</b> — mentoren dienen reiskosten in via hun eigen omgeving met datum, aanleiding, kilometers, tarief en bon. Goedgekeurde declaraties komen automatisch op het maandrapport (zichtbaar in Rapporten-tab).</p>
-        <p>Volledige tabel met per-declaratie goedkeur-flow, filter-chips (Ingediend/Goedgekeurd/Afgewezen), en bulk-acties komt in de data-ronde uit prototype r5357-5403.</p>
-        <button class="btn btn-primary" style="margin-top:12px" onclick="__mentNotice('Declaraties-tabel volledig openen')">${svg(I.eye)}Vol prototype-preview openen</button>
+  /* Confirm-modals — simple + typed */
+  window.__mentConfirmOk = () => {
+    const c = _ui.confirmModal; _ui.confirmModal = null; render();
+    try { if (c && typeof c.onOk === 'function') c.onOk(); } catch (e) { console.warn('[mentoren-v2] confirm onOk fail', e); }
+  };
+  window.__mentConfirmCancel = () => { _ui.confirmModal = null; render(); };
+  function openConfirm(msg, onOk, tone, danger) {
+    _ui.confirmModal = { msg, onOk, tone: tone || 'warn', danger: !!danger };
+    render();
+  }
+  function renderConfirmModal() {
+    if (!_ui.confirmModal) return '';
+    const c = _ui.confirmModal;
+    const body = `
+      <div style="padding:8px 0 16px;font-size:13.5px;line-height:1.6;color:var(--text)">${esc(c.msg)}</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__mentConfirmCancel()">Annuleren</button>
+        <button class="btn ${c.danger ? 'btn-danger' : 'btn-primary'}" onclick="window.__mentConfirmOk()">Bevestig</button>
       </div>`;
-    } else if (uSub === 'Handmatige posten') {
-      body = `<div style="padding:20px;color:var(--text-3);font-size:12.5px;line-height:1.6;max-width:760px">
-        <p><b>Handmatige posten</b> — bijtellingen (extra vergoedingen) en inhoudingen (correcties) die niet automatisch berekend worden. Elke post krijgt een omschrijving die de mentor ook op zijn specificatie ziet.</p>
-        <p>Modal-flow voor "Post toevoegen" met Mentor/Soort/Bedrag/Omschrijving/Periode-velden komt in de data-ronde uit prototype r5442-5472.</p>
-        <button class="btn btn-primary" style="margin-top:12px" onclick="__mentNotice('Post toevoegen')">${svg(I.plus)}Post toevoegen</button>
-      </div>`;
-    } else {
-      body = `<div style="padding:20px;color:var(--text-3);font-size:12.5px;line-height:1.6;max-width:760px">
-        <p><b>Tarieven per mentor</b> — 1-op-1 sessie, groepssessie, intake, km-tarief, event-bonus (%), btw-flag. Wijzigingen gelden vanaf eerstvolgende berekening; al goedgekeurde rapporten blijven ongemoeid.</p>
-        <p>Editable-tabel met inline inputs per mentor komt in de data-ronde uit prototype r5425-5440.</p>
-      </div>`;
+    return modalShell('Bevestig actie', body, 'window.__mentConfirmCancel()', 480);
+  }
+
+  window.__mentTypedField = (v) => { if (_ui.typedConfirmModal) _ui.typedConfirmModal.typed = v; };
+  window.__mentTypedCheck = () => {
+    const m = _ui.typedConfirmModal;
+    const btn = document.querySelector('[data-ment-typed-btn]');
+    if (m && btn) {
+      const ok = String(m.typed || '').trim() === String(m.token || '').trim();
+      if (ok) btn.removeAttribute('disabled'); else btn.setAttribute('disabled', 'disabled');
     }
-    return `${H.voorbeeldBanner()}${kpi}${tabs}${body}`;
+  };
+  window.__mentTypedOk = async () => {
+    const m = _ui.typedConfirmModal;
+    if (!m) return;
+    if (String(m.typed || '').trim() !== String(m.token || '').trim()) return;
+    if (m.saving) return;
+    _ui.typedConfirmModal.saving = true; render();
+    try { if (typeof m.onOk === 'function') await m.onOk(); }
+    catch (e) { console.warn('[mentoren-v2] typed-confirm onOk fail', e); }
+    _ui.typedConfirmModal = null; render();
+  };
+  window.__mentTypedCancel = () => { _ui.typedConfirmModal = null; render(); };
+  function openTypedConfirm(msg, token, onOk, danger) {
+    _ui.typedConfirmModal = { msg, token, typed: '', onOk, saving: false, error: null, danger: !!danger };
+    render();
+  }
+  function renderTypedConfirmModal() {
+    if (!_ui.typedConfirmModal) return '';
+    const m = _ui.typedConfirmModal;
+    const body = `
+      <div style="padding:8px 0 8px;font-size:13.5px;line-height:1.6;color:var(--text)">${esc(m.msg)}</div>
+      <div style="padding:12px 14px;background:${m.danger ? 'var(--rose-soft)' : 'var(--amber-soft)'};border:1px solid ${m.danger ? 'var(--rose)' : 'var(--amber)'};border-radius:6px;font-size:12.5px;color:${m.danger ? 'var(--rose)' : 'var(--amber)'};margin-bottom:14px">
+        ⚠ Om te bevestigen, typ hieronder exact: <code style="background:var(--surface);padding:2px 6px;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-weight:600">${esc(m.token)}</code>
+      </div>
+      <label style="display:block;margin-bottom:14px">
+        <input type="text" value="${esc(m.typed || '')}" oninput="window.__mentTypedField(this.value);window.__mentTypedCheck()" placeholder="typ hier: ${esc(m.token)}" style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;font-family:'IBM Plex Mono',monospace" />
+      </label>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__mentTypedCancel()">Annuleren</button>
+        <button class="btn ${m.danger ? 'btn-danger' : 'btn-primary'}" data-ment-typed-btn disabled onclick="window.__mentTypedOk()">${m.saving ? 'Bezig…' : 'Bevestig'}</button>
+      </div>`;
+    return modalShell(m.danger ? '⚠ Kritieke actie — dubbele bevestiging' : 'Bevestig actie', body, 'window.__mentTypedCancel()', 520);
+  }
+
+  function renderModals() {
+    return `${renderConfirmModal()}${renderTypedConfirmModal()}`;
+  }
+
+  /* ── Fetchers ────────────────────────────────────────────────────────── */
+  async function fetchMentors() {
+    if (_live.mentors.loading) return;
+    _live.mentors.loading = true; _live.mentors.error = null;
+    const j = await tryFetch('mentors', '/api/mentor-admin-list');
+    _live.mentors.loading = false;
+    if (!j || j.__error) { _live.mentors.error = j?.__error || 'Kon mentors niet laden'; render(); return; }
+    _live.mentors.data = j; render();
+  }
+  async function fetchPayouts(monthKeyStr) {
+    const month = monthKeyStr || _ui.selectedMonth || prevMonthKey();
+    if (_live.payouts.loading && _live.payouts.month === month) return;
+    _live.payouts.loading = true; _live.payouts.error = null; _live.payouts.month = month;
+    const j = await tryFetch('payouts', `/api/mentor-payouts-admin-list?period_month=${encodeURIComponent(month)}`);
+    _live.payouts.loading = false;
+    if (!j || j.__error) { _live.payouts.error = j?.__error || 'Kon payouts niet laden'; render(); return; }
+    _live.payouts.data = j; render();
+  }
+  async function fetchPayoutDetail(payoutId) {
+    if (!payoutId) return;
+    if (_live.payoutDetail.loading && _live.payoutDetail.id === payoutId) return;
+    _live.payoutDetail.loading = true; _live.payoutDetail.error = null; _live.payoutDetail.id = payoutId;
+    const j = await tryFetch('payoutDetail', `/api/mentor-payout-detail?payout_id=${encodeURIComponent(payoutId)}`);
+    _live.payoutDetail.loading = false;
+    if (!j || j.__error) { _live.payoutDetail.error = j?.__error || 'Kon detail niet laden'; render(); return; }
+    _live.payoutDetail.data = j; render();
+  }
+  async function fetchSettings(mentorId) {
+    if (!mentorId) return;
+    if (_live.settings.loading && _live.settings.mentorId === mentorId) return;
+    _live.settings.loading = true; _live.settings.error = null; _live.settings.mentorId = mentorId;
+    const j = await tryFetch('settings', `/api/mentor-payout-settings-get?mentor_user_id=${encodeURIComponent(mentorId)}`);
+    _live.settings.loading = false;
+    if (!j || j.__error) { _live.settings.error = j?.__error || 'Kon settings niet laden'; render(); return; }
+    _live.settings.data = j; render();
+  }
+  async function fetchBonusOverview(mentorId) {
+    if (!mentorId) return;
+    if (_live.bonusOverview.loading && _live.bonusOverview.mentorId === mentorId) return;
+    _live.bonusOverview.loading = true; _live.bonusOverview.error = null; _live.bonusOverview.mentorId = mentorId;
+    const j = await tryFetch('bonusOverview', `/api/mentor-bonus-overview?mentor_user_id=${encodeURIComponent(mentorId)}`);
+    _live.bonusOverview.loading = false;
+    if (!j || j.__error) { _live.bonusOverview.error = j?.__error || 'Kon overzicht niet laden'; render(); return; }
+    _live.bonusOverview.data = j; render();
+  }
+  async function fetchLedger(mentorId) {
+    if (!mentorId) return;
+    if (_live.ledger.loading && _live.ledger.mentorId === mentorId) return;
+    _live.ledger.loading = true; _live.ledger.error = null; _live.ledger.mentorId = mentorId;
+    const j = await tryFetch('ledger', `/api/mentor-ledger-overview?mentor_user_id=${encodeURIComponent(mentorId)}`);
+    _live.ledger.loading = false;
+    if (!j || j.__error) { _live.ledger.error = j?.__error || 'Kon grootboek niet laden'; render(); return; }
+    _live.ledger.data = j; render();
+  }
+  async function fetchMyEvents(mentorId) {
+    if (!mentorId) return;
+    if (_live.myEvents.loading && _live.myEvents.mentorId === mentorId) return;
+    _live.myEvents.loading = true; _live.myEvents.error = null; _live.myEvents.mentorId = mentorId;
+    const j = await tryFetch('myEvents', `/api/mentor-my-events?mentor_user_id=${encodeURIComponent(mentorId)}&scope=all`);
+    _live.myEvents.loading = false;
+    if (!j || j.__error) { _live.myEvents.error = j?.__error || 'Kon events niet laden'; render(); return; }
+    _live.myEvents.data = j; render();
+  }
+  async function fetchFundedCerts(mentorId) {
+    const mid = mentorId || null;
+    if (_live.fundedCerts.loading && _live.fundedCerts.mentorId === mid) return;
+    _live.fundedCerts.loading = true; _live.fundedCerts.error = null; _live.fundedCerts.mentorId = mid;
+    const url = mid ? `/api/funded-certs-admin-list?mentor_user_id=${encodeURIComponent(mid)}` : '/api/funded-certs-admin-list';
+    const j = await tryFetch('fundedCerts', url);
+    _live.fundedCerts.loading = false;
+    if (!j || j.__error) { _live.fundedCerts.error = j?.__error || 'Kon certs niet laden'; render(); return; }
+    _live.fundedCerts.data = j; render();
+  }
+  async function fetchAssessments(month, mentorId) {
+    const key = `${month || ''}|${mentorId || ''}`;
+    if (_live.assessments.loading && `${_live.assessments.month}|${_live.assessments.mentorId}` === key) return;
+    _live.assessments.loading = true; _live.assessments.error = null;
+    _live.assessments.month = month; _live.assessments.mentorId = mentorId;
+    const parts = [];
+    if (month)   parts.push(`month=${encodeURIComponent(month)}`);
+    if (mentorId) parts.push(`mentor_user_id=${encodeURIComponent(mentorId)}`);
+    const q = parts.length ? '?' + parts.join('&') : '';
+    const j = await tryFetch('assessments', `/api/assessments-admin-list${q}`);
+    _live.assessments.loading = false;
+    if (!j || j.__error) { _live.assessments.error = j?.__error || 'Kon beoordelingen niet laden'; render(); return; }
+    _live.assessments.data = j; render();
+  }
+  async function fetchTrajects() {
+    if (_live.trajects.loading) return;
+    _live.trajects.loading = true; _live.trajects.error = null;
+    const status = _live.trajects.statusFilter && _live.trajects.statusFilter !== 'all' ? `?status=${encodeURIComponent(_live.trajects.statusFilter)}` : '';
+    const j = await tryFetch('trajects', `/api/mentor-cash-trajects-list${status}`);
+    _live.trajects.loading = false;
+    if (!j || j.__error) { _live.trajects.error = j?.__error || 'Kon trajecten niet laden'; render(); return; }
+    _live.trajects.data = j; render();
+  }
+  async function fetchEventsList() {
+    if (_live.eventsList.loading) return;
+    _live.eventsList.loading = true; _live.eventsList.error = null;
+    const j = await tryFetch('eventsList', '/api/events-list?status=draft,published,archived');
+    _live.eventsList.loading = false;
+    if (!j || j.__error) { _live.eventsList.error = j?.__error || 'Kon events niet laden'; render(); return; }
+    _live.eventsList.data = j; render();
+  }
+
+  /* ── Retries ─────────────────────────────────────────────────────────── */
+  window.__mentRetryMentors      = () => { _live.mentors.data      = null; queueMicrotask(fetchMentors); };
+  window.__mentRetryPayouts      = () => { _live.payouts.data      = null; _live.payouts.month = null; queueMicrotask(() => fetchPayouts(_ui.selectedMonth)); };
+  window.__mentRetryPayoutDetail = () => { if (_ui.expandedPayoutId) { _live.payoutDetail.data = null; _live.payoutDetail.id = null; queueMicrotask(() => fetchPayoutDetail(_ui.expandedPayoutId)); } };
+  window.__mentRetrySettings     = () => { if (_ui.selectedMentorId) { _live.settings.data = null; _live.settings.mentorId = null; queueMicrotask(() => fetchSettings(_ui.selectedMentorId)); } };
+  window.__mentRetryBonus        = () => { if (_ui.selectedMentorId) { _live.bonusOverview.data = null; _live.bonusOverview.mentorId = null; queueMicrotask(() => fetchBonusOverview(_ui.selectedMentorId)); } };
+  window.__mentRetryLedger       = () => { if (_ui.selectedMentorId) { _live.ledger.data = null; _live.ledger.mentorId = null; queueMicrotask(() => fetchLedger(_ui.selectedMentorId)); } };
+  window.__mentRetryMyEvents     = () => { if (_ui.selectedMentorId) { _live.myEvents.data = null; _live.myEvents.mentorId = null; queueMicrotask(() => fetchMyEvents(_ui.selectedMentorId)); } };
+  window.__mentRetryCerts        = () => { _live.fundedCerts.data = null; _live.fundedCerts.mentorId = null; queueMicrotask(() => fetchFundedCerts(_ui.selectedMentorId)); };
+  window.__mentRetryAssess       = () => { _live.assessments.data = null; queueMicrotask(() => fetchAssessments(_ui.assessMonth, _ui.assessMentorId)); };
+  window.__mentRetryTrajects     = () => { _live.trajects.data    = null; queueMicrotask(fetchTrajects); };
+
+  /* ── Handlers — mentor-picker + maand-picker ─────────────────────────── */
+  window.__mentPickMentor = (mid) => {
+    _ui.selectedMentorId = mid || null;
+    // reset drilldown-state
+    _live.settings.data = null; _live.settings.mentorId = null;
+    _live.bonusOverview.data = null; _live.bonusOverview.mentorId = null;
+    _live.ledger.data = null; _live.ledger.mentorId = null;
+    _live.myEvents.data = null; _live.myEvents.mentorId = null;
+    if (mid) {
+      queueMicrotask(() => fetchSettings(mid));
+      queueMicrotask(() => fetchBonusOverview(mid));
+      queueMicrotask(() => fetchLedger(mid));
+      queueMicrotask(() => fetchMyEvents(mid));
+    }
+    render();
+  };
+  window.__mentSetMonth = (v) => {
+    if (!v || !/^\d{4}-\d{2}$/.test(v)) return;
+    _ui.selectedMonth = v;
+    _live.payouts.data = null; _live.payouts.month = null;
+    _ui.expandedPayoutId = null;
+    _live.payoutDetail.data = null; _live.payoutDetail.id = null;
+    _ui.bulkSelected = new Set();
+    _ui.bulkResults = null;
+    queueMicrotask(() => fetchPayouts(v));
+  };
+  window.__mentExpandPayout = (payoutId) => {
+    if (_ui.expandedPayoutId === payoutId) {
+      _ui.expandedPayoutId = null; render(); return;
+    }
+    _ui.expandedPayoutId = payoutId;
+    _live.payoutDetail.data = null; _live.payoutDetail.id = null;
+    queueMicrotask(() => fetchPayoutDetail(payoutId));
+  };
+  window.__mentSetCertsMentor = (mid) => {
+    _ui.selectedMentorId = mid || null;
+    _live.fundedCerts.data = null; _live.fundedCerts.mentorId = null;
+    queueMicrotask(() => fetchFundedCerts(mid || null));
+  };
+  window.__mentAssessSetMonth = (v) => {
+    if (!v || !/^\d{4}-\d{2}$/.test(v)) return;
+    _ui.assessMonth = v;
+    _live.assessments.data = null;
+    queueMicrotask(() => fetchAssessments(v, _ui.assessMentorId));
+  };
+  window.__mentAssessSetMentor = (v) => {
+    _ui.assessMentorId = v || '';
+    _live.assessments.data = null;
+    queueMicrotask(() => fetchAssessments(_ui.assessMonth, v || ''));
+  };
+  window.__mentTrajectSetStatus = (v) => {
+    _live.trajects.statusFilter = v || 'all';
+    _live.trajects.data = null;
+    queueMicrotask(fetchTrajects);
+  };
+  window.__mentExpandTraject = (id) => {
+    _ui.expandedTrajectId = (_ui.expandedTrajectId === id) ? null : id;
+    render();
+  };
+
+  /* ── Bulk-selectie helpers ───────────────────────────────────────────── */
+  window.__mentBulkToggle = (payoutId, checked) => {
+    if (checked) _ui.bulkSelected.add(payoutId); else _ui.bulkSelected.delete(payoutId);
+    render();
+  };
+  window.__mentBulkToggleAll = (checked) => {
+    const payouts = asArr(_live.payouts.data?.payouts);
+    _ui.bulkSelected = new Set(checked ? payouts.map((p) => p.id) : []);
+    render();
+  };
+  window.__mentBulkClear = () => { _ui.bulkSelected = new Set(); _ui.bulkResults = null; render(); };
+
+  async function refetchAfterWrite() {
+    _live.payouts.data = null; _live.payouts.month = null;
+    queueMicrotask(() => fetchPayouts(_ui.selectedMonth));
+    if (_ui.expandedPayoutId) {
+      _live.payoutDetail.data = null; _live.payoutDetail.id = null;
+      queueMicrotask(() => fetchPayoutDetail(_ui.expandedPayoutId));
+    }
+  }
+
+  /* ── BROK 2 — Write-acties (getrapte confirms) ───────────────────────── */
+  // MEDIUM: generate
+  window.__mentGenerate = (mentorId) => {
+    if (!isAdminRole()) return;
+    openConfirm(`Concept-rapport genereren/hertellen voor ${fmtMonth(_ui.selectedMonth + '-01')}${mentorId ? '' : ' (ALLE mentors)'}? Bestaande concepten worden overschreven; goedgekeurd/uitbetaald blijven ongemoeid.`, async () => {
+      const body = mentorId
+        ? { mentor_user_id: mentorId, period_month: _ui.selectedMonth }
+        : { all: true, period_month: _ui.selectedMonth };
+      const resp = await tryPost('generate', '/api/mentor-payout-generate', body);
+      if (!resp || resp.__error) { toast('Genereren mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast('Concept gegenereerd', 'success');
+      refetchAfterWrite();
+    }, 'warn');
+  };
+  // MEDIUM: approve (verstuurt mail)
+  window.__mentApprove = (payoutId) => {
+    if (!isAdminRole()) return;
+    openConfirm(`Rapport goedkeuren? ⚠ Er wordt automatisch een notificatie-mail naar de mentor gestuurd.`, async () => {
+      const resp = await tryPost('approve', '/api/mentor-payout-approve', { payout_id: payoutId });
+      if (!resp || resp.__error) { toast('Goedkeuren mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast('Rapport goedgekeurd + mail verstuurd', 'success');
+      refetchAfterWrite();
+    }, 'warn');
+  };
+  // HOOG: mark-paid (typed)
+  window.__mentMarkPaid = (payoutId, mentorName, amount) => {
+    if (!isAdminRole()) return;
+    openTypedConfirm(
+      `Rapport definitief markeren als UITBETAALD voor ${mentorName}? Ledger-entries worden gekoppeld en krijgen status 'uitbetaald' — administratief is het geld weg. ${amount ? 'Bedrag: ' + eur(amount) + '.' : ''} Terugdraaien vereist super_admin + revert-flow.`,
+      'MARKEER BETAALD',
+      async () => {
+        const resp = await tryPost('mark-paid', '/api/mentor-payout-mark-paid', { payout_id: payoutId });
+        if (!resp || resp.__error) { toast('Markeer betaald mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+        toast('Rapport uitbetaald', 'success');
+        refetchAfterWrite();
+      },
+      true,
+    );
+  };
+  // MEDIUM: reopen
+  window.__mentReopen = (payoutId) => {
+    if (!isAdminRole()) return;
+    openConfirm(`Rapport heropenen (goedgekeurd → concept)? De mentor krijgt dit terug te zien; wijzigingen worden opnieuw gegenereerd bij "Concept hertellen".`, async () => {
+      const resp = await tryPost('reopen', '/api/mentor-payout-reopen', { payout_id: payoutId });
+      if (!resp || resp.__error) { toast('Heropenen mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast('Rapport heropend', 'success');
+      refetchAfterWrite();
+    }, 'warn');
+  };
+  // HOOG: revert (typed, super_admin)
+  window.__mentRevert = (payoutId, mentorName) => {
+    if (!isSuperAdminRole()) { toast('Alleen super_admin mag terugdraaien', 'error'); return; }
+    openTypedConfirm(
+      `Uitbetaald rapport van ${mentorName} TERUGDRAAIEN? Ledger-entries worden ontboekt (status → vrijgegeven, payout_id → NULL). Alleen doen bij bewezen fout — deze actie is zichtbaar in audit-trail.`,
+      'REVERT',
+      async () => {
+        const resp = await tryPost('revert', '/api/mentor-payout-revert', { payout_id: payoutId });
+        if (!resp || resp.__error) { toast('Terugdraaien mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+        toast('Rapport teruggedraaid', 'success');
+        refetchAfterWrite();
+      },
+      true,
+    );
+  };
+  // MEDIUM: coaching-debug (informational, geen mutation)
+  window.__mentCoachingDebug = async (mentorId) => {
+    if (!isAdminRole()) return;
+    const month = _ui.selectedMonth;
+    const j = await tryFetch('coaching-debug', `/api/mentor-coaching-debug?mentor_user_id=${encodeURIComponent(mentorId)}&period_month=${encodeURIComponent(month)}`);
+    if (!j || j.__error) { toast('Coaching-debug fout: ' + (j?.__error || 'onbekend'), 'error'); return; }
+    const summary = `1-op-1 keys: ${asArr(j.one_on_one_keys).length} · Team: ${asArr(j.team_keys).length} · No-show: ${asArr(j.no_show_keys).length} · Funded: ${asArr(j.funded_keys).length}`;
+    openConfirm(`Coaching-debug voor ${fmtMonth(month + '-01')}:\n\n${summary}\n\nZie console.log voor volledige dump.`, () => {
+      console.log('[mentoren-v2] coaching-debug', j);
+    }, 'warn');
+  };
+
+  /* Bulk-flow: sequentieel + live-progress in _ui.bulkResults */
+  async function bulkExecute(kind) {
+    if (!isAdminRole() || _ui.bulkRunning) return;
+    const ids = Array.from(_ui.bulkSelected);
+    if (!ids.length) return;
+    const payouts = asArr(_live.payouts.data?.payouts);
+    const byId = new Map(payouts.map((p) => [p.id, p]));
+
+    _ui.bulkResults = { ok: [], skip: [], err: [] };
+    _ui.bulkRunning = true; render();
+
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row) { _ui.bulkResults.err.push({ id, msg: 'niet gevonden' }); render(); continue; }
+      const label = row.mentor_name || row.mentor_email || id;
+      let resp = null;
+      if (kind === 'generate') {
+        resp = await tryPost('bulk-gen', '/api/mentor-payout-generate', { mentor_user_id: row.mentor_user_id, period_month: _ui.selectedMonth });
+      } else if (kind === 'approve') {
+        if (row.status !== 'concept' && row.status !== 'open') { _ui.bulkResults.skip.push({ id, label, msg: 'status ≠ concept/open' }); render(); continue; }
+        resp = await tryPost('bulk-approve', '/api/mentor-payout-approve', { payout_id: id });
+      } else if (kind === 'mark-paid') {
+        if (row.status !== 'goedgekeurd') { _ui.bulkResults.skip.push({ id, label, msg: 'status ≠ goedgekeurd' }); render(); continue; }
+        resp = await tryPost('bulk-mp', '/api/mentor-payout-mark-paid', { payout_id: id });
+      }
+      if (!resp || resp.__error) _ui.bulkResults.err.push({ id, label, msg: resp?.__error || 'fout' });
+      else _ui.bulkResults.ok.push({ id, label });
+      render();
+    }
+    _ui.bulkRunning = false;
+    refetchAfterWrite();
+  }
+  window.__mentBulkGenerate  = () => {
+    openConfirm(`${_ui.bulkSelected.size} concept(en) genereren/hertellen? Bestaande concepten worden overschreven; goedgekeurd/uitbetaald blijven ongemoeid.`, () => bulkExecute('generate'), 'warn');
+  };
+  window.__mentBulkApprove   = () => {
+    openConfirm(`${_ui.bulkSelected.size} rapport(en) goedkeuren? ⚠ Elke mentor krijgt een notificatie-mail. Rapporten met status ≠ concept/open worden overgeslagen.`, () => bulkExecute('approve'), 'warn');
+  };
+  window.__mentBulkMarkPaid  = () => {
+    openTypedConfirm(
+      `${_ui.bulkSelected.size} rapport(en) definitief markeren als UITBETAALD? Alle ledger-entries worden geboekt. Rapporten met status ≠ goedgekeurd worden overgeslagen.`,
+      'MARKEER BETAALD',
+      () => bulkExecute('mark-paid'),
+      true,
+    );
+  };
+
+  /* Adjustment / recurring / config forms — state-only oninput */
+  window.__mentAdjOpen = (payoutId, mentorId, periodMonth, existing) => {
+    if (!isAdminRole()) return;
+    _ui.adjustmentForm = existing
+      ? { payoutId, id: existing.id, mentor_user_id: mentorId, period_month: periodMonth, label: existing.label || '', amount_incl: existing.amount_incl != null ? String(existing.amount_incl) : '', saving: false, error: null }
+      : { payoutId, id: null, mentor_user_id: mentorId, period_month: periodMonth, label: '', amount_incl: '', saving: false, error: null };
+    render();
+  };
+  window.__mentAdjClose = () => { _ui.adjustmentForm = null; render(); };
+  window.__mentAdjField = (k, v) => { if (_ui.adjustmentForm) _ui.adjustmentForm[k] = v; };
+  window.__mentAdjSubmit = () => {
+    const f = _ui.adjustmentForm; if (!f) return;
+    const label = String(f.label || '').trim();
+    const amt = Number(f.amount_incl);
+    if (!label) { f.error = 'Label vereist'; render(); return; }
+    if (!Number.isFinite(amt)) { f.error = 'Bedrag moet een getal zijn (mag negatief)'; render(); return; }
+    f.saving = true; f.error = null; render();
+    const body = f.id ? { id: f.id, label, amount_incl: amt }
+                      : { mentor_user_id: f.mentor_user_id, period_month: f.period_month, label, amount_incl: amt };
+    tryPost('adj-save', '/api/mentor-payout-adjustment-save', body).then((resp) => {
+      if (!resp || resp.__error) {
+        _ui.adjustmentForm.saving = false; _ui.adjustmentForm.error = resp?.__error || 'Opslaan mislukt'; render();
+        return;
+      }
+      toast('Post opgeslagen', 'success');
+      _ui.adjustmentForm = null;
+      refetchAfterWrite();
+    });
+  };
+  window.__mentAdjDelete = (id, label) => {
+    if (!isAdminRole()) return;
+    openConfirm(`Handmatige post "${label}" verwijderen? Concept wordt hertellen.`, async () => {
+      const resp = await tryPost('adj-delete', '/api/mentor-payout-adjustment-delete', { id });
+      if (!resp || resp.__error) { toast('Verwijderen mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast('Post verwijderd', 'success');
+      refetchAfterWrite();
+    }, 'warn');
+  };
+
+  window.__mentRecOpen = (mentorId, existing) => {
+    if (!isAdminRole()) return;
+    _ui.recurringForm = existing
+      ? { id: existing.id, mentor_user_id: mentorId, label: existing.label || '', amount_incl: existing.amount_incl != null ? String(existing.amount_incl) : '', active: !!existing.active, start_month: existing.start_month || '', saving: false, error: null }
+      : { id: null, mentor_user_id: mentorId, label: '', amount_incl: '', active: true, start_month: currentMonthKey(), saving: false, error: null };
+    render();
+  };
+  window.__mentRecClose = () => { _ui.recurringForm = null; render(); };
+  window.__mentRecField = (k, v) => { if (_ui.recurringForm) _ui.recurringForm[k] = v; };
+  window.__mentRecSubmit = () => {
+    const f = _ui.recurringForm; if (!f) return;
+    const label = String(f.label || '').trim();
+    const amt = Number(f.amount_incl);
+    if (!label) { f.error = 'Label vereist'; render(); return; }
+    if (!Number.isFinite(amt) || amt < 0) { f.error = 'Bedrag moet >= 0 zijn'; render(); return; }
+    f.saving = true; f.error = null; render();
+    const body = { label, amount_incl: amt, active: !!f.active, start_month: f.start_month ? (f.start_month.length === 7 ? f.start_month + '-01' : f.start_month) : null };
+    if (f.id) body.id = f.id; else body.mentor_user_id = f.mentor_user_id;
+    tryPost('rec-save', '/api/mentor-recurring-save', body).then((resp) => {
+      if (!resp || resp.__error) { f.saving = false; f.error = resp?.__error || 'Opslaan mislukt'; render(); return; }
+      toast('Maandpost opgeslagen', 'success');
+      _ui.recurringForm = null;
+      _live.settings.data = null; queueMicrotask(() => fetchSettings(_ui.selectedMentorId));
+    });
+  };
+  window.__mentRecDelete = (id, label) => {
+    if (!isAdminRole()) return;
+    openTypedConfirm(
+      `Vaste maandpost "${label}" DEFINITIEF verwijderen? Nieuwe rapporten bevatten deze post niet meer.`,
+      'VERWIJDER',
+      async () => {
+        const resp = await tryPost('rec-delete', '/api/mentor-recurring-delete', { id });
+        if (!resp || resp.__error) { toast('Verwijderen mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+        toast('Maandpost verwijderd', 'success');
+        _live.settings.data = null; queueMicrotask(() => fetchSettings(_ui.selectedMentorId));
+      },
+      false,
+    );
+  };
+
+  window.__mentCfgOpen = (mentorId, cfg) => {
+    if (!isAdminRole()) return;
+    _ui.configForm = {
+      mentor_user_id: mentorId,
+      travel_enabled: !!(cfg?.travel_enabled),
+      travel_day_rate_incl: cfg?.travel_day_rate_incl != null ? String(cfg.travel_day_rate_incl) : '0',
+      saving: false, error: null,
+    };
+    render();
+  };
+  window.__mentCfgClose = () => { _ui.configForm = null; render(); };
+  window.__mentCfgField = (k, v) => { if (_ui.configForm) _ui.configForm[k] = v; };
+  window.__mentCfgSubmit = () => {
+    const f = _ui.configForm; if (!f) return;
+    const rate = Number(f.travel_day_rate_incl);
+    if (!Number.isFinite(rate) || rate < 0) { f.error = 'Dagtarief moet >= 0 zijn'; render(); return; }
+    f.saving = true; f.error = null; render();
+    tryPost('cfg-set', '/api/mentor-payout-config-set', {
+      mentor_user_id: f.mentor_user_id,
+      travel_enabled: !!f.travel_enabled,
+      travel_day_rate_incl: rate,
+    }).then((resp) => {
+      if (!resp || resp.__error) { f.saving = false; f.error = resp?.__error || 'Opslaan mislukt'; render(); return; }
+      toast('Config opgeslagen', 'success');
+      _ui.configForm = null;
+      _live.settings.data = null; queueMicrotask(() => fetchSettings(_ui.selectedMentorId));
+    });
+  };
+
+  window.__mentLedgerSetStatus = (entryId, newStatus) => {
+    if (!isAdminRole()) return;
+    openConfirm(`Ledger-entry status wijzigen naar "${newStatus}"?`, async () => {
+      const resp = await tryPost('ledger-set-status', '/api/mentor-ledger-set-status', { entry_id: entryId, new_status: newStatus });
+      if (!resp || resp.__error) { toast('Status wijzigen mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast('Status gewijzigd', 'success');
+      _live.ledger.data = null; queueMicrotask(() => fetchLedger(_ui.selectedMentorId));
+      refetchAfterWrite();
+    }, 'warn');
+  };
+
+  /* ── BROK 3 — Cash-trajects ──────────────────────────────────────────── */
+  window.__mentTrajectOpen = (existing) => {
+    if (!isAdminRole()) return;
+    _ui.trajectForm = existing
+      ? { id: existing.id, event_id: existing.event_id || '', client_label: existing.client_label || '', total_amount: String(existing.total_amount || ''), term_count: String(existing.term_count || '12'), start_month: existing.start_month || currentMonthKey(), release_day: String(existing.release_day || '1'), note: existing.note || '', saving: false, error: null }
+      : { id: null, event_id: '', client_label: '', total_amount: '', term_count: '12', start_month: currentMonthKey(), release_day: '1', note: '', saving: false, error: null };
+    if (!_live.eventsList.data && !_live.eventsList.loading) queueMicrotask(fetchEventsList);
+    render();
+  };
+  window.__mentTrajectClose = () => { _ui.trajectForm = null; render(); };
+  window.__mentTrajectField = (k, v) => { if (_ui.trajectForm) _ui.trajectForm[k] = v; };
+  window.__mentTrajectSubmit = () => {
+    const f = _ui.trajectForm; if (!f) return;
+    if (!f.event_id) { f.error = 'Event kiezen verplicht'; render(); return; }
+    const clientLabel = String(f.client_label || '').trim();
+    if (!clientLabel) { f.error = 'Klant/omschrijving verplicht'; render(); return; }
+    const total = Number(f.total_amount);
+    const termCount = parseInt(f.term_count, 10);
+    const releaseDay = parseInt(f.release_day, 10);
+    if (!Number.isFinite(total) || total <= 0) { f.error = 'Totaalprijs moet > 0 zijn'; render(); return; }
+    if (!Number.isInteger(termCount) || termCount < 1 || termCount > 60) { f.error = 'Aantal termijnen moet 1..60 zijn'; render(); return; }
+    if (!Number.isInteger(releaseDay) || releaseDay < 1 || releaseDay > 31) { f.error = 'Vrijval-dag moet 1..31 zijn'; render(); return; }
+    f.saving = true; f.error = null; render();
+    const body = {
+      event_id: f.event_id,
+      client_label: clientLabel,
+      total_amount: total,
+      term_count: termCount,
+      start_month: f.start_month && f.start_month.length === 7 ? f.start_month + '-01' : f.start_month,
+      release_day: releaseDay,
+      note: f.note || null,
+    };
+    if (f.id) body.id = f.id;
+    tryPost('traject-save', '/api/mentor-cash-traject-save', body).then((resp) => {
+      if (!resp || resp.__error) { f.saving = false; f.error = resp?.__error || 'Opslaan mislukt'; render(); return; }
+      toast('Traject opgeslagen', 'success');
+      _ui.trajectForm = null;
+      _live.trajects.data = null; queueMicrotask(fetchTrajects);
+    });
+  };
+  window.__mentTrajectStatus = (id, action, label) => {
+    if (!isAdminRole()) return;
+    const label2 = { pause: 'pauzeren', resume: 'hervatten', delete: 'verwijderen' }[action] || action;
+    const isDanger = action === 'delete';
+    const cb = async () => {
+      const resp = await tryPost('traject-status', '/api/mentor-cash-traject-status', { id, action });
+      if (!resp || resp.__error) { toast(`${label2} mislukt: ` + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast(`Traject ${label2}`, 'success');
+      _live.trajects.data = null; queueMicrotask(fetchTrajects);
+    };
+    if (isDanger) {
+      openTypedConfirm(`Traject "${label}" DEFINITIEF verwijderen? Toekomstige vrijvallen stoppen; reeds vrijgegeven termijnen blijven in het grootboek.`, 'VERWIJDER', cb, false);
+    } else {
+      openConfirm(`Traject "${label}" ${label2}?`, cb, 'warn');
+    }
+  };
+  window.__mentTrajectRelease = (id, label) => {
+    if (!isAdminRole()) return;
+    openConfirm(`Vrijval-motor nu draaien voor "${label}"? Elke termijn die op basis van startmaand + vrijval-dag verschuldigd is, wordt geboekt op alle aanwezige mentors (event_mentors.was_present=true).`, async () => {
+      const resp = await tryPost('traject-release', '/api/mentor-cash-traject-release', { id });
+      if (!resp || resp.__error) { toast('Vrijgeven mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast('Vrijval-motor gedraaid', 'success');
+      _live.trajects.data = null; queueMicrotask(fetchTrajects);
+    }, 'warn');
+  };
+  window.__mentReleaseAll = () => {
+    if (!isAdminRole()) return;
+    openConfirm(`Vrijval-motor draaien voor ALLE actieve trajecten? Elke verschuldigde termijn wordt geboekt.`, async () => {
+      const resp = await tryPost('release-all', '/api/mentor-cash-traject-release', {});
+      if (!resp || resp.__error) { toast('Vrijgeven mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+      toast('Vrijval-motor gedraaid', 'success');
+      _live.trajects.data = null; queueMicrotask(fetchTrajects);
+    }, 'warn');
+  };
+
+  /* ── BROK 4 — Release-sync (super_admin, ONOMKEERBAAR) ───────────────── */
+  window.__mentSyncPreview = async () => {
+    if (!isSuperAdminRole()) { toast('Alleen super_admin', 'error'); return; }
+    _live.syncPreview.loading = true; _live.syncPreview.error = null; render();
+    const resp = await tryPost('sync-preview', '/api/admin/bonus-release-sync', { dry_run: true });
+    _live.syncPreview.loading = false;
+    if (!resp || resp.__error) { _live.syncPreview.error = resp?.__error || 'Preview mislukt'; render(); return; }
+    _live.syncPreview.data = resp; render();
+  };
+  window.__mentSyncCommit = () => {
+    if (!isSuperAdminRole()) { toast('Alleen super_admin', 'error'); return; }
+    if (!_live.syncPreview.data) { toast('Draai eerst een preview', 'warn'); return; }
+    openTypedConfirm(
+      `Release-sync DEFINITIEF uitvoeren? Onomkeerbaar / forward-only — er worden vrijgegeven-children op pending obligaties gespawnd. Deze actie kan alleen doorgaan als je eerst een succesvolle preview hebt gedraaid.`,
+      'SYNC BEVESTIGEN',
+      async () => {
+        const resp = await tryPost('sync-commit', '/api/admin/bonus-release-sync', { dry_run: false });
+        if (!resp || resp.__error) { toast('Sync mislukt: ' + (resp?.__error || 'onbekend'), 'error'); return; }
+        toast('Release-sync uitgevoerd', 'success');
+        _live.syncPreview.data = null;
+        refetchAfterWrite();
+      },
+      true,
+    );
+  };
+
+  /* ── Render-helpers ──────────────────────────────────────────────────── */
+  const dashCard = (title, dotColor, body, extra) => `<div class="card">
+    <div class="card-head" style="border-bottom:none;padding-bottom:6px">
+      <span class="title-dot" style="background:var(--${dotColor});box-shadow:0 0 0 3px var(--${dotColor}-soft)"></span>
+      <div class="card-title">${title}</div>${extra || ''}</div>
+    <div class="card-body" style="padding:8px 17px 17px">${body}</div></div>`;
+
+  const PAYOUT_STATUS_PILL = {
+    concept:     { c: 'neutral', l: 'Concept' },
+    open:        { c: 'info',    l: 'Ter beoordeling' },
+    goedgekeurd: { c: 'warn',    l: 'Goedgekeurd' },
+    uitbetaald:  { c: 'ok',      l: 'Uitbetaald' },
+  };
+  function payoutPill(status) {
+    const meta = PAYOUT_STATUS_PILL[String(status || '').toLowerCase()] || { c: 'neutral', l: status || '—' };
+    return H.pill(meta.c, meta.l);
+  }
+  const LEDGER_STATUS_PILL = {
+    pending:              { c: 'neutral', l: 'Pending' },
+    wachten_op_betaling:  { c: 'warn',    l: 'Wacht op betaling' },
+    vrijgegeven:          { c: 'info',    l: 'Vrijgegeven' },
+    uitbetaald:           { c: 'ok',      l: 'Uitbetaald' },
+    geannuleerd:          { c: 'neutral', l: 'Geannuleerd' },
+  };
+  function ledgerPill(status) {
+    const meta = LEDGER_STATUS_PILL[String(status || '').toLowerCase()] || { c: 'neutral', l: status || '—' };
+    return H.pill(meta.c, meta.l);
+  }
+  const TRAJECT_STATUS_PILL = {
+    active:    { c: 'ok',      l: 'Actief' },
+    paused:    { c: 'warn',    l: 'Gepauzeerd' },
+    completed: { c: 'neutral', l: 'Voltooid' },
+  };
+  function trajectPill(status) {
+    const meta = TRAJECT_STATUS_PILL[String(status || '').toLowerCase()] || { c: 'neutral', l: status || '—' };
+    return H.pill(meta.c, meta.l);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 1 — Overzicht (mentor-picker + drilldown)
+     ═══════════════════════════════════════════════════════════════════════ */
+  function overzichtView() {
+    if (!isAdminRole()) return accessDeniedBlk();
+    if (!_live.mentors.loading && !_live.mentors.data && !_live.mentors.error) queueMicrotask(fetchMentors);
+    if (_live.mentors.error && !_live.mentors.data) return errBlk(_live.mentors.error, 'window.__mentRetryMentors()') + renderModals();
+    if (!_live.mentors.data) return skel() + renderModals();
+
+    const mentors = asArr(_live.mentors.data.mentors);
+    return `${H.toolbar([
+      `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Mentor:</span>
+        <select onchange="window.__mentPickMentor(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:280px">
+          <option value="">— kies mentor —</option>
+          ${mentors.map((m) => `<option value="${esc(m.user_id || m.id)}" ${_ui.selectedMentorId === (m.user_id || m.id) ? 'selected' : ''}>${esc(m.name || m.email || m.user_id)}</option>`).join('')}
+        </select>
+      </label>`,
+      `<span style="font-size:11.5px;color:var(--text-3)">${mentors.length} mentors</span>`,
+    ])}
+    ${_ui.selectedMentorId ? renderMentorDrilldown() : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Kies een mentor om KPI's, grootboek, projectie en payout-instellingen te zien.</div>`}
+    ${renderAdjustmentFormModal()}
+    ${renderRecurringFormModal()}
+    ${renderConfigFormModal()}
+    ${renderModals()}`;
+  }
+
+  function renderMentorDrilldown() {
+    const mid = _ui.selectedMentorId;
+    if (!mid) return '';
+    const bo = _live.bonusOverview;
+    const led = _live.ledger;
+    const stg = _live.settings;
+    const ev = _live.myEvents;
+    const mentors = asArr(_live.mentors.data?.mentors);
+    const m = mentors.find((mm) => (mm.user_id || mm.id) === mid);
+    const mentorName = m?.name || m?.email || mid;
+
+    return `<div class="pad" style="padding-top:16px">
+      <div style="margin-bottom:14px;font-size:15px;font-weight:600">${esc(mentorName)}</div>
+
+      ${bo.loading && !bo.data ? skel()
+       : bo.error && !bo.data ? errBlk(bo.error, 'window.__mentRetryBonus()')
+       : bo.data ? renderMentorKpisAndProjection(bo.data) : ''}
+
+      ${led.loading && !led.data ? '' : led.error && !led.data ? errBlk(led.error, 'window.__mentRetryLedger()') : led.data ? `<div style="margin-top:14px">${renderLedgerCard(led.data)}</div>` : ''}
+
+      ${bo.data && asArr(bo.data.per_event).length ? `<div style="margin-top:14px">${renderTermijnProjectieCard(bo.data)}</div>` : ''}
+
+      ${ev.loading && !ev.data ? '' : ev.error && !ev.data ? errBlk(ev.error, 'window.__mentRetryMyEvents()') : ev.data ? `<div style="margin-top:14px">${renderEventsCard(ev.data)}</div>` : ''}
+
+      ${stg.loading && !stg.data ? '' : stg.error && !stg.data ? errBlk(stg.error, 'window.__mentRetrySettings()') : stg.data ? `<div style="margin-top:14px">${renderPayoutSettingsCard(stg.data, mid)}</div>` : ''}
+    </div>`;
+  }
+
+  function renderMentorKpisAndProjection(d) {
+    const t = d.totals || {};
+    return `${H.kpis([
+      { c: 'blue',    icon: I.euro,  label: 'Deze maand',        val: eur(Number(t.deze_maand) || 0),     sub: 'bonus-vrijgave' },
+      { c: 'amber',   icon: I.clock, label: 'Volgende maand',    val: eur(Number(t.volgende_maand) || 0), sub: 'geplande vrijgave' },
+      { c: 'teal',    icon: I.cal,   label: 'Openstaand',        val: eur(Number(t.open) || 0),           sub: 'niet-uitbetaalde bonus' },
+      { c: 'emerald', icon: I.chart, label: 'Totaal verdiend',   val: eur(Number(t.earned_total) || 0),   sub: 'alle bonussen sinds start' },
+    ])}`;
+  }
+
+  function renderLedgerCard(d) {
+    const perEvent = asArr(d.per_event);
+    if (!perEvent.length) return dashCard('Bonussen per event', 'blue', `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen ledger-entries.</div>`);
+    return dashCard('Bonussen per event', 'blue',
+      H.table(
+        [{ l: 'Event' }, { l: 'Datum', cls: 'optional' }, { l: 'Bonus bruto', cls: 'r' }, { l: 'Uitgaven', cls: 'r optional' }, { l: 'Netto', cls: 'r' }, { l: 'Status' }],
+        perEvent.map((e) => [
+          `<span class="cell-main">${esc(e.event_title || e.title || '—')}</span>`,
+          `<span style="color:var(--text-3)">${fmtDate(e.starts_at || e.date)}</span>`,
+          `<span class="money">${eur(Number(e.bonus_bruto) || Number(e.bonus) || 0)}</span>`,
+          `<span class="money" style="color:var(--rose)">${e.uitgaven ? '− ' + eur(Number(e.uitgaven) || 0) : '—'}</span>`,
+          `<span class="money">${eur(Number(e.netto) || (Number(e.bonus_bruto || e.bonus || 0) - Number(e.uitgaven || 0)))}</span>`,
+          ledgerPill(e.status || 'vrijgegeven'),
+        ]),
+      ),
+    );
+  }
+
+  function renderTermijnProjectieCard(d) {
+    const perEvent = asArr(d.per_event);
+    return dashCard('Termijn-projectie per event', 'violet', perEvent.map((ev) => {
+      const sales = asArr(ev.sales);
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">${esc(ev.event_title || '—')} <span style="color:var(--text-3);font-weight:400;font-size:11.5px">· ${fmtDate(ev.starts_at)}</span></div>
+        ${sales.map((s) => {
+          const parts = asArr(s.termijnen);
+          return `<div style="padding:6px 0 6px 12px;border-left:2px solid var(--border);margin-bottom:6px">
+            <div style="font-size:12.5px"><b>${esc(s.customer_label || s.customer_id || '—')}</b> · sale ${eur(Number(s.sale_total_incl) || 0)} → aandeel ${eur(Number(s.mentor_share_total) || 0)} · ${s.term_count} termijn(en)${s.schema_unknown ? ' <span style="color:var(--amber)">(schema onbekend)</span>' : ''}</div>
+            ${parts.length ? `<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-top:4px">
+              <thead><tr style="color:var(--text-3);text-transform:uppercase;letter-spacing:.06em"><th style="text-align:left;padding:3px 0">#</th><th style="text-align:left">Vervaldatum</th><th style="text-align:right">Bedrag</th><th style="text-align:left">Status</th></tr></thead>
+              <tbody>${parts.map((p) => `<tr><td style="padding:3px 0">${p.index}</td><td>${fmtDate(p.due_date)}</td><td style="text-align:right" class="money">${eur(Number(p.amount) || 0)}</td><td>${esc(p.status || '—')}</td></tr>`).join('')}</tbody>
+            </table>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+    }).join(''));
+  }
+
+  function renderEventsCard(d) {
+    const events = asArr(d.events);
+    if (!events.length) return dashCard('Events', 'pink', `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen events gekoppeld.</div>`);
+    return dashCard('Events', 'pink',
+      H.table(
+        [{ l: 'Event' }, { l: 'Start', cls: 'optional' }, { l: 'Aanwezig' }],
+        events.map((e) => [
+          `<span class="cell-main">${esc(e.title || e.event_title || '—')}</span>`,
+          `<span style="color:var(--text-3)">${fmtDateTime(e.starts_at)}</span>`,
+          H.pill(e.was_present ? 'ok' : 'neutral', e.was_present ? 'Ja' : (e.was_present === false ? 'Nee' : '—')),
+        ]),
+      ),
+    );
+  }
+
+  function renderPayoutSettingsCard(s, mid) {
+    const cfg = s.config || {};
+    const recurring = asArr(s.recurring);
+    return `${dashCard('Payout-config', 'blue', `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+        <div><div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Reiskosten</div><div style="font-size:14px;font-weight:600">${cfg.travel_enabled ? 'Ingeschakeld' : 'Uit'}</div></div>
+        <div><div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Dagtarief (incl.)</div><div class="mono" style="font-size:14px;font-weight:600">${eur(Number(cfg.travel_day_rate_incl) || 0)}</div></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end"><button class="btn btn-ghost btn-sm" onclick='window.__mentCfgOpen("${esc(mid)}",${JSON.stringify(cfg).replace(/"/g, "&quot;")})'>Bewerken</button></div>
+    `)}
+    <div style="margin-top:12px">${dashCard('Vaste maandposten', 'violet', `
+      ${recurring.length ? H.table(
+        [{ l: 'Label' }, { l: 'Bedrag (incl.)', cls: 'r' }, { l: 'Vanaf', cls: 'optional' }, { l: 'Actief' }, { l: '', cls: 'r' }],
+        recurring.map((r) => [
+          `<span class="cell-main">${esc(r.label)}</span>`,
+          `<span class="money">${eur(Number(r.amount_incl) || 0)}</span>`,
+          `<span style="color:var(--text-3)">${r.start_month ? fmtMonth(r.start_month) : 'vanaf altijd'}</span>`,
+          H.pill(r.active ? 'ok' : 'neutral', r.active ? 'Actief' : 'Inactief'),
+          `<div style="display:flex;gap:6px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick='window.__mentRecOpen("${esc(mid)}",${JSON.stringify(r).replace(/"/g, "&quot;")})'>Bewerken</button>
+            <button class="btn btn-danger btn-sm" onclick="window.__mentRecDelete('${esc(r.id)}','${esc(r.label).replace(/'/g, "\\'")}')">Verwijderen</button>
+          </div>`,
+        ]),
+      ) : `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen vaste maandposten.</div>`}
+      <div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="window.__mentRecOpen('${esc(mid)}',null)">${svg(I.plus)}Maandpost toevoegen</button></div>
+    `)}</div>`;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 2 — Rapporten (payout-lijst met bulk + drilldown)
+     ═══════════════════════════════════════════════════════════════════════ */
+  function rapportenView() {
+    if (!isAdminRole()) return accessDeniedBlk();
+    if (!_live.payouts.loading && !_live.payouts.data && !_live.payouts.error) queueMicrotask(() => fetchPayouts(_ui.selectedMonth));
+    if (_live.payouts.error && !_live.payouts.data) return errBlk(_live.payouts.error, 'window.__mentRetryPayouts()') + renderModals();
+
+    const payouts = asArr(_live.payouts.data?.payouts);
+    const totalIncl = payouts.reduce((a, p) => a + (Number(p.total) || 0), 0);
+    const bonusTot  = payouts.reduce((a, p) => a + (Number(p.bonus_total) || 0), 0);
+    const coachTot  = payouts.reduce((a, p) => a + (Number(p.coaching_total) || 0), 0);
+    const nWait     = payouts.filter((p) => p.status === 'concept' || p.status === 'open').length;
+
+    return `${H.kpis([
+      { c: 'blue',    icon: I.euro,  label: 'Rapporten',           val: String(payouts.length), sub: fmtMonth(_ui.selectedMonth + '-01') },
+      { c: 'violet',  icon: I.grad,  label: 'Bonus totaal',        val: eur(bonusTot),  sub: 'incl. btw' },
+      { c: 'emerald', icon: I.users, label: 'Coaching totaal',     val: eur(coachTot),  sub: 'incl. btw' },
+      { c: 'amber',   icon: I.clock, label: 'Wacht op akkoord',    val: String(nWait),  sub: 'concept / open' },
+    ])}
+    ${H.toolbar([
+      `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Periode:</span>
+        <input type="month" value="${esc(_ui.selectedMonth)}" onchange="window.__mentSetMonth(this.value)"
+               style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" /></label>`,
+      `<button class="btn btn-primary btn-sm" onclick="window.__mentGenerate(null)">${svg(I.plus)}Genereer alle concepten</button>`,
+      `<span style="font-size:11.5px;color:var(--text-3);margin-left:auto">Totaal incl. btw: <b>${eur(totalIncl)}</b></span>`,
+    ])}
+    ${renderBulkBar()}
+    ${_live.payouts.loading && !_live.payouts.data ? skel()
+     : payouts.length ? renderPayoutsTable(payouts)
+     : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen rapporten voor ${fmtMonth(_ui.selectedMonth + '-01')}. Klik "Genereer alle concepten" om te starten.</div>`}
+    ${renderAdjustmentFormModal()}
+    ${renderModals()}`;
+  }
+
+  function renderBulkBar() {
+    const count = _ui.bulkSelected.size;
+    const running = _ui.bulkRunning;
+    const res = _ui.bulkResults;
+    if (!count && !res) return '';
+    return `<div style="padding:12px 22px;background:var(--m-soft);border-top:1px solid var(--m);border-bottom:1px solid var(--m);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:13px;font-weight:600">${count} geselecteerd${running ? ' · bezig…' : ''}</span>
+        <button class="btn btn-ghost btn-sm" ${running ? 'disabled' : ''} onclick="window.__mentBulkGenerate()">${svg(I.repeat)}Genereer geselecteerde</button>
+        <button class="btn btn-primary btn-sm" ${running ? 'disabled' : ''} onclick="window.__mentBulkApprove()">${svg(I.tick)}Keur goed + mail</button>
+        <button class="btn btn-primary btn-sm" ${running ? 'disabled' : ''} onclick="window.__mentBulkMarkPaid()">${svg(I.euro)}Markeer uitbetaald…</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" ${running ? 'disabled' : ''} onclick="window.__mentBulkClear()">Deselecteer</button>
+      ${res ? `<div style="width:100%;font-size:12px;color:var(--text-2);padding-top:8px;border-top:1px solid var(--border)">
+        <b>Resultaat</b> · ✓ ${res.ok.length} ok · ⏭ ${res.skip.length} skip · ⚠ ${res.err.length} fout
+        ${res.err.length ? `<ul style="margin:4px 0 0 20px;color:var(--rose);font-size:11.5px">${res.err.slice(0, 5).map((e) => `<li>${esc(e.label || e.id)}: ${esc(e.msg)}</li>`).join('')}</ul>` : ''}
+      </div>` : ''}
+    </div>`;
+  }
+
+  function renderPayoutsTable(payouts) {
+    const allChecked = payouts.length > 0 && payouts.every((p) => _ui.bulkSelected.has(p.id));
+    return `<div class="card"><div class="card-body" style="padding:0">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="border-bottom:1px solid var(--border);color:var(--text-3);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em">
+          <th style="padding:10px 14px;width:30px"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="window.__mentBulkToggleAll(this.checked)"></th>
+          <th style="text-align:left;padding:10px 14px">Mentor</th>
+          <th style="text-align:right;padding:10px 14px">Bonus</th>
+          <th style="text-align:right;padding:10px 14px">Coaching</th>
+          <th style="text-align:right;padding:10px 14px">Excl.</th>
+          <th style="text-align:right;padding:10px 14px">BTW</th>
+          <th style="text-align:right;padding:10px 14px">Incl.</th>
+          <th style="text-align:left;padding:10px 14px">Status</th>
+          <th style="text-align:right;padding:10px 14px"></th>
+        </tr></thead>
+        <tbody>
+          ${payouts.map((p) => {
+            const isOpen = _ui.expandedPayoutId === p.id;
+            const isSel = _ui.bulkSelected.has(p.id);
+            return `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:10px 14px;text-align:center" onclick="event.stopPropagation()">
+                <input type="checkbox" ${isSel ? 'checked' : ''} onchange="window.__mentBulkToggle('${esc(p.id)}', this.checked)">
+              </td>
+              <td style="padding:10px 14px;cursor:pointer" onclick="window.__mentExpandPayout('${esc(p.id)}')">
+                <div class="cell-main">${esc(p.mentor_name || p.mentor_email || '—')}</div>
+                <div style="font-size:11.5px;color:var(--text-3)">${esc(p.mentor_email || '')}</div>
+              </td>
+              <td style="padding:10px 14px;text-align:right" class="money">${eur(Number(p.bonus_total) || 0)}</td>
+              <td style="padding:10px 14px;text-align:right" class="money">${eur(Number(p.coaching_total) || 0)}</td>
+              <td style="padding:10px 14px;text-align:right" class="money">${eur(Number(p.total_excl) || 0)}</td>
+              <td style="padding:10px 14px;text-align:right" class="money">${eur(Number(p.btw_amount) || 0)}</td>
+              <td style="padding:10px 14px;text-align:right" class="money"><b>${eur(Number(p.total) || 0)}</b></td>
+              <td style="padding:10px 14px">${payoutPill(p.status)}</td>
+              <td style="padding:10px 14px;text-align:right;font-size:12px;color:var(--text-3);cursor:pointer" onclick="window.__mentExpandPayout('${esc(p.id)}')">${isOpen ? '▲' : '▼'}</td>
+            </tr>
+            ${isOpen ? `<tr><td colspan="9" style="padding:0;background:var(--surface-2)"><div style="padding:16px 22px" onclick="event.stopPropagation()">${renderPayoutDetail(p)}</div></td></tr>` : ''}`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div></div>`;
+  }
+
+  function renderPayoutDetail(payoutRow) {
+    if (_live.payoutDetail.loading && (!_live.payoutDetail.data || _live.payoutDetail.id !== payoutRow.id)) return skel();
+    if (_live.payoutDetail.error && _live.payoutDetail.id === payoutRow.id) return errBlk(_live.payoutDetail.error, 'window.__mentRetryPayoutDetail()');
+    if (!_live.payoutDetail.data || _live.payoutDetail.id !== payoutRow.id) return skel();
+
+    const d = _live.payoutDetail.data.payout || _live.payoutDetail.data;
+    const lines = asArr(d.lines);
+    const adjustments = asArr(d.adjustments);
+
+    const canApprove   = d.status === 'concept' || d.status === 'open';
+    const canMarkPaid  = d.status === 'goedgekeurd';
+    const canReopen    = d.status === 'goedgekeurd';
+    const canRevert    = d.status === 'uitbetaald' && isSuperAdminRole();
+    const canRegen     = d.status === 'concept' || d.status === 'open';
+    const canEditAdj   = d.status === 'concept' || d.status === 'open';
+
+    return `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${canRegen ? `<button class="btn btn-ghost btn-sm" onclick="window.__mentGenerate('${esc(d.mentor_user_id)}')">${svg(I.repeat)}Concept hertellen</button>` : ''}
+      ${canApprove ? `<button class="btn btn-primary btn-sm" onclick="window.__mentApprove('${esc(d.id)}')">${svg(I.tick)}Goedkeuren + mail</button>` : ''}
+      ${canMarkPaid ? `<button class="btn btn-primary btn-sm" onclick="window.__mentMarkPaid('${esc(d.id)}','${esc(d.mentor_name || 'mentor').replace(/'/g, "\\'")}',${Number(d.total) || 0})">${svg(I.euro)}Markeer betaald…</button>` : ''}
+      ${canReopen ? `<button class="btn btn-ghost btn-sm" onclick="window.__mentReopen('${esc(d.id)}')">↩ Heropen</button>` : ''}
+      ${canRevert ? `<button class="btn btn-danger btn-sm" onclick="window.__mentRevert('${esc(d.id)}','${esc(d.mentor_name || 'mentor').replace(/'/g, "\\'")}')">⏪ Terugdraaien…</button>` : ''}
+      <button class="btn btn-ghost btn-sm" onclick="window.__mentCoachingDebug('${esc(d.mentor_user_id)}')" title="Coaching-debug"><span style="font-size:11px">🔍 Debug</span></button>
+    </div>
+    <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">
+      Gegenereerd: ${fmtDateTime(d.generated_at)} · Goedgekeurd: ${fmtDateTime(d.approved_at)} · Uitbetaald: ${fmtDateTime(d.paid_at)}
+    </div>
+    <div style="margin-bottom:14px">${dashCard('Regels', 'blue',
+      lines.length ? H.table(
+        [{ l: 'Categorie' }, { l: 'Label', cls: 'optional' }, { l: 'Aantal', cls: 'r optional' }, { l: 'Tarief incl.', cls: 'r optional' }, { l: 'Excl.', cls: 'r' }, { l: 'Incl.', cls: 'r' }],
+        lines.map((l) => [
+          `<span class="cell-main">${esc(l.kind || '—')}</span>`,
+          `<span style="color:var(--text-2);font-size:12.5px">${esc(l.label || '')}</span>`,
+          `<span class="mono">${l.qty != null ? l.qty : '—'}</span>`,
+          `<span class="money">${l.unit_incl != null ? eur(Number(l.unit_incl)) : '—'}</span>`,
+          `<span class="money">${eur(Number(l.amount_excl) || 0)}</span>`,
+          `<span class="money"><b>${eur(Number(l.amount_incl) || 0)}</b></span>`,
+        ]),
+      ) : `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen regels.</div>`)}
+    </div>
+    <div>${dashCard('Handmatige posten (adjustments)', 'violet', `
+      ${adjustments.length ? H.table(
+        [{ l: 'Label' }, { l: 'Excl.', cls: 'r optional' }, { l: 'Incl.', cls: 'r' }, { l: '', cls: 'r' }],
+        adjustments.map((a) => [
+          `<span class="cell-main">${esc(a.label || '—')}</span>`,
+          `<span class="money">${eur(Number(a.amount_excl) || 0)}</span>`,
+          `<span class="money"><b>${eur(Number(a.amount_incl) || 0)}</b></span>`,
+          canEditAdj ? `<div style="display:flex;gap:6px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick='window.__mentAdjOpen("${esc(d.id)}","${esc(d.mentor_user_id)}","${esc(d.period_month)}",${JSON.stringify({ id: a.id, label: a.label, amount_incl: a.amount_incl }).replace(/"/g, "&quot;")})'>Bewerken</button>
+            <button class="btn btn-danger btn-sm" onclick="window.__mentAdjDelete('${esc(a.id)}','${esc(a.label || '').replace(/'/g, "\\'")}')">Verwijderen</button>
+          </div>` : '',
+        ]),
+      ) : `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen handmatige posten.</div>`}
+      ${canEditAdj ? `<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick='window.__mentAdjOpen("${esc(d.id)}","${esc(d.mentor_user_id)}","${esc(d.period_month)}",null)'>${svg(I.plus)}Post toevoegen</button></div>`
+                   : `<div style="margin-top:10px;font-size:11.5px;color:var(--text-3);font-style:italic">Handmatige posten kunnen niet meer worden aangepast (rapport is ${d.status}).</div>`}
+    `)}</div>`;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 3 — Certificaten (funded-certs admin)
+     ═══════════════════════════════════════════════════════════════════════ */
+  function certificatenView() {
+    if (!isAdminRole()) return accessDeniedBlk();
+    if (!_live.mentors.loading && !_live.mentors.data && !_live.mentors.error) queueMicrotask(fetchMentors);
+    if (!_live.fundedCerts.loading && !_live.fundedCerts.data && !_live.fundedCerts.error) queueMicrotask(() => fetchFundedCerts(_ui.selectedMentorId));
+
+    const mentors = asArr(_live.mentors.data?.mentors);
+    const certs = asArr(_live.fundedCerts.data?.certs);
+
+    return `${H.toolbar([
+      `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Mentor:</span>
+        <select onchange="window.__mentSetCertsMentor(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:220px">
+          <option value="">— alle mentors —</option>
+          ${mentors.map((m) => `<option value="${esc(m.user_id || m.id)}" ${_ui.selectedMentorId === (m.user_id || m.id) ? 'selected' : ''}>${esc(m.name || m.email || m.user_id)}</option>`).join('')}
+        </select>
+      </label>`,
+      `<span style="font-size:11.5px;color:var(--text-3)">${certs.length} certifica${certs.length === 1 ? 'at' : 'ten'} · download-URLs 1u geldig</span>`,
+    ])}
+    ${_live.fundedCerts.error && !_live.fundedCerts.data ? errBlk(_live.fundedCerts.error, 'window.__mentRetryCerts()')
+     : _live.fundedCerts.loading && !_live.fundedCerts.data ? skel()
+     : certs.length ? H.table(
+      [{ l: 'Mentor' }, { l: 'Student' }, { l: 'Bestand', cls: 'optional' }, { l: 'Maand', cls: 'optional' }, { l: 'Ge-upload', cls: 'optional' }, { l: 'Bonus', cls: 'r' }, { l: '' }],
+      certs.map((c) => [
+        `<span>${esc(c.mentor_name || c.mentor_email || '—')}</span>`,
+        `<span class="cell-main">${esc(c.student_name || '—')}</span>`,
+        `<span style="color:var(--text-3);font-family:'IBM Plex Mono',monospace;font-size:11.5px">${esc(c.file_name || '—')}</span>`,
+        `<span>${fmtMonth(c.funded_month)}</span>`,
+        `<span style="color:var(--text-3)">${fmtDate(c.last_uploaded_at)}</span>`,
+        `<span class="money">${eur(100)}</span>`,
+        c.download_url ? `<a href="${esc(c.download_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${svg(I.down)}Download</a>` : `<span style="color:var(--text-3);font-size:11.5px">n.v.t.</span>`,
+      ]),
+    ) : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen certificaten gevonden.</div>`}
+    ${renderModals()}`;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 4 — Beoordelingen (student-assessments)
+     ═══════════════════════════════════════════════════════════════════════ */
+  const ASSESS_STATUS_PILL = {
+    op_schema:   { c: 'ok',      l: 'Op schema' },
+    aandacht:    { c: 'warn',    l: 'Aandacht' },
+    risico:      { c: 'danger',  l: 'Risico' },
+    niet_actief: { c: 'neutral', l: 'Niet actief' },
+  };
+  function assessPill(status) {
+    const meta = ASSESS_STATUS_PILL[String(status || '').toLowerCase()] || { c: 'neutral', l: status || '—' };
+    return H.pill(meta.c, meta.l);
   }
 
   function beoordelingenView() {
-    return `${H.voorbeeldBanner()}
-    ${H.toolbar([
-      `<input class="filter-sel" type="month" value="2026-08">`,
-      `<select class="filter-sel"><option>Alle mentoren</option>${MENTOREN.map(m => `<option>${m.naam}</option>`).join('')}</select>`,
-      H.chips('st', [{ l: 'Alles', v: 'all', n: 54 }, { l: 'Op schema', v: 'os', n: 38 }, { l: 'Aandacht', v: 'aa', n: 11 }, { l: 'Risico', v: 'ri', n: 3 }], F('st', 'all')),
-      H.search('Zoek leerling…'),
+    if (!isAdminRole()) return accessDeniedBlk();
+    if (!_live.mentors.loading && !_live.mentors.data && !_live.mentors.error) queueMicrotask(fetchMentors);
+    if (!_live.assessments.loading && !_live.assessments.data && !_live.assessments.error) queueMicrotask(() => fetchAssessments(_ui.assessMonth, _ui.assessMentorId));
+
+    const mentors = asArr(_live.mentors.data?.mentors);
+    const items = asArr(_live.assessments.data?.assessments);
+
+    return `${H.toolbar([
+      `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Maand:</span>
+        <input type="month" value="${esc(_ui.assessMonth)}" onchange="window.__mentAssessSetMonth(this.value)"
+               style="padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>`,
+      `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Mentor:</span>
+        <select onchange="window.__mentAssessSetMentor(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:200px">
+          <option value="">— alle mentors —</option>
+          ${mentors.map((m) => `<option value="${esc(m.user_id || m.id)}" ${_ui.assessMentorId === (m.user_id || m.id) ? 'selected' : ''}>${esc(m.name || m.email || m.user_id)}</option>`).join('')}
+        </select>
+      </label>`,
+      `<span style="font-size:11.5px;color:var(--text-3)">${items.length} beoordelingen · read-only</span>`,
     ])}
-    ${H.table(
-      [{ l: 'Leerling' }, { l: 'Mentor', cls: 'optional' }, { l: 'Maand', cls: 'optional' }, { l: 'Status' }, { l: 'Cijfer', cls: 'r' }, { l: 'Notitie', cls: 'optional' }, { l: 'Bijgewerkt', cls: 'r optional' }],
-      [
-        ['Cabdi Ibrahim',   'Dave Klaassen', 'aug 2026', 'op_schema', 8, 'Pakt het snel op, oefent dagelijks',       '4 aug'],
-        ['Nikita Bykov',    'Dave Klaassen', 'aug 2026', 'aandacht',  6, 'Minder actief laatste weken',              '3 aug'],
-        ['Dyami Van Praag', 'Mike de Vries', 'aug 2026', 'risico',    4, '3 weken geen activiteit',                  '2 aug'],
-        ['Jan Willem Bel',  'Dave Klaassen', 'aug 2026', 'op_schema', 9, 'Bovengemiddeld, klaar voor verdieping',    '4 aug'],
-      ].map(([l, m, mn, st, c, n, d]) => [
-        `<div class="row-avatar">${H.av(l, 28)}<span class="cell-main">${l}</span></div>`,
-        `<div class="row-avatar">${H.av(m, 24)}<span style="font-size:12.5px">${m}</span></div>`,
-        `<span style="color:var(--text-3);font-size:12.5px">${mn}</span>`,
-        H.pill(st === 'op_schema' ? 'ok' : st === 'aandacht' ? 'warn' : 'danger', st.replace('_', ' ')),
-        `<span class="mono" style="font-weight:600;color:var(--${c >= 8 ? 'emerald' : c >= 6 ? 'amber' : 'rose'})">${c}</span>`,
-        `<span style="color:var(--text-3);font-size:12.5px">${n}</span>`,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${d}</span>`,
-      ])
-    )}`;
+    ${_live.assessments.error && !_live.assessments.data ? errBlk(_live.assessments.error, 'window.__mentRetryAssess()')
+     : _live.assessments.loading && !_live.assessments.data ? skel()
+     : items.length ? H.table(
+      [{ l: 'Mentor' }, { l: 'Student' }, { l: 'Maand', cls: 'optional' }, { l: 'Status' }, { l: 'Cijfer', cls: 'r' }, { l: 'Actief & taken', cls: 'optional' }, { l: 'Notitie', cls: 'optional' }, { l: 'Bijgewerkt', cls: 'r optional' }],
+      items.map((a) => [
+        `<span>${esc(a.mentor_name || a.mentor_email || '—')}</span>`,
+        `<span class="cell-main">${esc(a.student_name || '—')}</span>`,
+        `<span style="color:var(--text-3)">${a.month ? fmtMonth(a.month) : '—'}</span>`,
+        assessPill(a.status),
+        `<span class="mono" style="font-weight:600">${a.cijfer != null ? a.cijfer : '—'}</span>`,
+        `<span style="color:var(--text-2);font-size:12.5px">${a.actief_taken == null ? '—' : (a.actief_taken ? 'Ja' : 'Nee')}</span>`,
+        `<span style="color:var(--text-3);font-size:12.5px">${esc(a.notitie || '—')}</span>`,
+        `<span class="mono" style="color:var(--text-3);font-size:11.5px">${fmtDate(a.updated_at)}</span>`,
+      ]),
+    ) : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen beoordelingen gevonden. Wijzigingen doet de mentor via z'n eigen dashboard.</div>`}
+    ${renderModals()}`;
   }
 
-  function certificatenView() {
-    const f = F('cf', 'all');
-    const rows = CERTIFICATEN.filter(c => f === 'all' || c.status === f);
-    const goed = CERTIFICATEN.filter(c => c.status === 'goedgekeurd').length;
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'violet',  icon: I.grad,  label: 'Certificaten totaal', val: String(CERTIFICATEN.length),                                            sub: 'van alle mentoren' },
-      { c: 'amber',   icon: I.clock, label: 'In beoordeling',       val: String(CERTIFICATEN.filter(c => c.status === 'ingediend').length),      hi: 1, sub: 'wacht op goedkeuring' },
-      { c: 'emerald', icon: I.euro,  label: 'Uitgekeerde bonus',    val: eur0(goed * 100),                                                        sub: goed + ' × € 100' },
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 5 — Trajecten (cash-trajects)
+     ═══════════════════════════════════════════════════════════════════════ */
+  function trajectenView() {
+    if (!isAdminRole()) return accessDeniedBlk();
+    if (!_live.trajects.loading && !_live.trajects.data && !_live.trajects.error) queueMicrotask(fetchTrajects);
+    if (_live.trajects.error && !_live.trajects.data) return errBlk(_live.trajects.error, 'window.__mentRetryTrajects()') + renderModals();
+
+    const trajects = asArr(_live.trajects.data?.trajects);
+    const nActief   = trajects.filter((t) => t.status === 'active').length;
+    const nPaused   = trajects.filter((t) => t.status === 'paused').length;
+    // "Vrijgevallen deze maand" — som van entries met released_at in huidige maand — endpoint niet apart, benader via released_amount van completed dit jaar
+    const releasedTot = trajects.reduce((a, t) => a + (Number(t.released_amount) || 0), 0);
+
+    return `${H.kpis([
+      { c: 'ok',      icon: I.tick,  label: 'Actief',              val: String(nActief), sub: 'lopende trajecten' },
+      { c: 'warn',    icon: I.clock, label: 'Gepauzeerd',          val: String(nPaused), sub: 'geen vrijval' },
+      { c: 'emerald', icon: I.euro,  label: 'Totaal vrijgegeven',  val: eur(releasedTot), sub: 'som van alle entries' },
     ])}
     ${H.toolbar([
-      H.chips('cf', [{ l: 'Alles', v: 'all', n: CERTIFICATEN.length }, { l: 'In beoordeling', v: 'ingediend' }, { l: 'Goedgekeurd', v: 'goedgekeurd' }], f),
-      H.search('Zoek mentor of certificaat…'),
+      `<div style="display:flex;gap:6px">
+        ${['all','active','paused','completed'].map((v) => `<button class="btn ${_live.trajects.statusFilter === v ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__mentTrajectSetStatus('${v}')">${v === 'all' ? 'Alle' : v === 'active' ? 'Actief' : v === 'paused' ? 'Gepauzeerd' : 'Voltooid'}</button>`).join('')}
+      </div>`,
+      `<div class="tb-right" style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="window.__mentReleaseAll()">${svg(I.repeat)}Vrijval nu draaien (alle)</button>
+        <button class="btn btn-primary btn-sm" onclick="window.__mentTrajectOpen(null)">${svg(I.plus)}Nieuw handmatig traject</button>
+      </div>`,
     ])}
-    ${H.table(
-      [{ l: 'Mentor' }, { l: 'Certificaat' }, { l: 'Uitgever', cls: 'optional' }, { l: 'Datum', cls: 'optional' }, { l: 'Bonus', cls: 'r optional' }, { l: 'Status' }, { l: '', cls: 'r' }],
-      rows.map(c => [
-        `<div class="row-avatar">${H.av(c.mentor, 26)}<span class="cell-main">${c.mentor}</span></div>`,
-        `<div style="display:flex;align-items:center;gap:10px">${GRADICO}<span class="cell-main">${c.naam}</span></div>`,
-        c.uitgever,
-        `<span class="mono" style="font-size:12.5px">${c.datum}</span>`,
-        `<span class="money">${eur0(100)}</span>`,
-        H.pill(CERTST[c.status].c, CERTST[c.status].l),
-        `<div style="display:flex;gap:6px;justify-content:flex-end">
-          ${c.status === 'ingediend' ? `<button class="btn btn-ghost btn-sm" onclick="__mentNotice('Goedkeuren cert')">${svg(I.tick)}Goedkeuren</button>` : ''}
-          <button class="btn btn-primary btn-sm" onclick="__mentNotice('Download cert')">${svg(I.down)}Download</button></div>`,
-      ])
-    )}`;
+    <div class="pad" style="padding-top:12px">
+      ${trajects.length ? trajects.map(renderTrajectCard).join('') : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen trajecten in deze selectie.</div>`}
+    </div>
+    ${renderTrajectFormModal()}
+    ${renderModals()}`;
   }
 
-  function signalenView() {
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'rose',    icon: I.alert,  label: 'Open signalen',      val: '4',  hi: 1, sub: 'vragen aandacht' },
-      { c: 'amber',   icon: I.repeat, label: 'Opnieuw opvolgen',   val: '2',  hi: 1, sub: 'geen gehoor gehad' },
-      { c: 'emerald', icon: I.tick,   label: 'Afgehandeld',        val: '18', hi: 1, sub: 'deze maand' },
-    ])}
-    ${H.toolbar([
-      H.chips('st', [{ l: 'Open', v: 'o', n: 4 }, { l: 'Opnieuw opvolgen', v: 'oo', n: 2 }, { l: 'Afgehandeld', v: 'a', n: 18 }], F('st', 'o')),
-      `<select class="filter-sel"><option>Alle mentoren</option>${MENTOREN.map(m => `<option>${m.naam}</option>`).join('')}</select>`,
-    ])}
-    ${H.table(
-      [{ l: 'Leerling' }, { l: 'Signaal' }, { l: 'Gemeld door', cls: 'optional' }, { l: 'Sinds', cls: 'optional' }, { l: '', cls: 'r' }],
-      [
-        ['Dyami Van Praag',  'Reageert niet op berichten', 'Mike de Vries', '5 d'],
-        ['Christa Noltus',   'Eerste call niet gelukt',     'Dave Klaassen', '3 d'],
-        ['Jennifer Botaka',  'No-show bij sessie',          'Systeem',       '2 d'],
-        ['Tom Verheyen',     'Niet bereikbaar',             'Sarah Bosman',  '1 d'],
-      ].map(([l, s, m, d]) => [
-        `<div class="row-avatar">${H.av(l, 28)}<span class="cell-main">${l}</span></div>`,
-        H.pill(s.includes('No-show') ? 'danger' : 'warn', s),
-        `<span style="font-size:12.5px">${m}</span>`,
-        `<span class="mono" style="color:var(--text-3);font-size:12.5px">${d}</span>`,
-        `<button class="btn btn-primary btn-sm" onclick="__mentNotice('Signaal afhandelen: ${l.replace(/'/g, "\\'")}')">Afhandelen</button>`,
-      ])
-    )}`;
+  function renderTrajectCard(t) {
+    const isOpen = _ui.expandedTrajectId === t.id;
+    const parts = asArr(t.parts || t.termijnen);
+    const released = Number(t.released_terms || t.released_count) || parts.filter((p) => p.released_at).length;
+    const total = Number(t.term_count) || parts.length || 0;
+    const pct = total ? Math.round(released / total * 100) : 0;
+    const canRelease = t.status === 'active';
+    const canPause = t.status === 'active';
+    const canResume = t.status === 'paused';
+    const canEdit = t.status !== 'completed';
+    const label = t.client_label || '—';
+
+    return `<div class="card" style="margin-bottom:12px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+          <div style="min-width:0;flex:1">
+            <div style="font-size:14px;font-weight:600">${esc(label)}</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">
+              ${esc(t.event_title || t.event_id || '—')} · ${fmtDate(t.event_starts_at)}
+              ${asArr(t.mentor_names).length ? ` · ${asArr(t.mentor_names).length} aanwezige mentor(s)` : ''}
+              · totaal ${eur(Number(t.total_amount) || 0)} · ${t.term_count} termijnen
+              · bonus ${eur(Number(t.bonus_total) || 0)}
+              · start ${fmtMonth(t.start_month)} · vrijval-dag ${t.release_day || '—'}
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${trajectPill(t.status)}
+            <button class="btn btn-ghost btn-sm" onclick="window.__mentExpandTraject('${esc(t.id)}')">${isOpen ? '▲' : '▼'}</button>
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-3);margin-bottom:4px"><span>Vrijgevallen ${released} van ${total}</span><span class="mono">${eur(Number(t.released_amount) || 0)} van ${eur(Number(t.bonus_total) || 0)}</span></div>
+          <div class="progress"><i style="width:${pct}%;background:var(--m)"></i></div>
+        </div>
+      </div>
+      ${isOpen ? `<div style="padding:14px 16px">
+        ${parts.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:12px">
+          <thead><tr style="color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-size:11px"><th style="text-align:left;padding:5px 0">Termijn</th><th style="text-align:right">Bedrag</th><th style="text-align:left">Release-datum</th><th style="text-align:left">Status</th></tr></thead>
+          <tbody>${parts.map((p, i) => `<tr><td style="padding:4px 0">${p.index || (i + 1)}</td><td style="text-align:right" class="money">${eur(Number(p.amount) || 0)}</td><td>${fmtDate(p.due_date || p.release_date)}</td><td>${p.released_at ? '<span style="color:var(--ok)">✓ vrijgegeven</span>' : '<span style="color:var(--text-3)">— nog niet</span>'}</td></tr>`).join('')}</tbody>
+        </table>` : ''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${canRelease ? `<button class="btn btn-primary btn-sm" onclick="window.__mentTrajectRelease('${esc(t.id)}','${esc(label).replace(/'/g, "\\'")}')">${svg(I.repeat)}Nu vrijgeven</button>` : ''}
+          ${canPause ? `<button class="btn btn-ghost btn-sm" onclick="window.__mentTrajectStatus('${esc(t.id)}','pause','${esc(label).replace(/'/g, "\\'")}')">⏸ Pauzeren</button>` : ''}
+          ${canResume ? `<button class="btn btn-ghost btn-sm" onclick="window.__mentTrajectStatus('${esc(t.id)}','resume','${esc(label).replace(/'/g, "\\'")}')">▶ Hervatten</button>` : ''}
+          ${canEdit ? `<button class="btn btn-ghost btn-sm" onclick='window.__mentTrajectOpen(${JSON.stringify(t).replace(/"/g, "&quot;")})'>${svg(I.edit || I.plus)}Bewerken</button>` : ''}
+          <button class="btn btn-danger btn-sm" onclick="window.__mentTrajectStatus('${esc(t.id)}','delete','${esc(label).replace(/'/g, "\\'")}')">Verwijderen</button>
+        </div>
+      </div>` : ''}
+    </div>`;
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 6 — Sync (release-sync, super_admin)
+     ═══════════════════════════════════════════════════════════════════════ */
+  function syncView() {
+    if (!isSuperAdminRole()) return accessDeniedBlk('Release-sync is alleen zichtbaar voor super_admin. Deze actie is onomkeerbaar.');
+
+    const sp = _live.syncPreview;
+    const p = sp.data || null;
+    const perMentor = p ? asArr(p.per_mentor) : [];
+    const perCustomer = p ? asArr(p.per_customer) : [];
+
+    return `<div class="pad" style="padding-top:16px">
+      <div style="padding:14px 16px;background:var(--rose-soft);border:1px solid var(--rose);color:var(--rose);border-radius:var(--r);font-size:13px;margin-bottom:14px">
+        <b>⚠ Kritieke actie · super_admin only</b><br>
+        Release-sync spawnt vrijgegeven-children op alle pending / gedeeltelijk-vrijgegeven bonus-obligaties (over alle klanten heen). <b>Forward-only en onomkeerbaar</b> — draai ALTIJD eerst een preview.
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn btn-ghost" ${sp.loading ? 'disabled' : ''} onclick="window.__mentSyncPreview()">${svg(I.eye || I.chart)}${sp.loading ? 'Preview laden…' : '🔍 Release-sync (preview / dry-run)'}</button>
+        <button class="btn btn-danger" ${!p ? 'disabled' : ''} onclick="window.__mentSyncCommit()">🔒 Definitief vrijgeven…</button>
+      </div>
+      ${sp.error ? errBlk(sp.error, 'window.__mentSyncPreview()') : ''}
+      ${p ? `<div>${dashCard('Preview-resultaat', 'blue', `
+        <div style="font-size:12.5px;color:var(--text-2);margin-bottom:10px">
+          Totaal: <b>${p.total_slices_created || 0}</b> nieuwe slices · <b>${eur(Number(p.total_release_amount) || 0)}</b> vrij te geven · ${perMentor.length} mentor(s) · ${perCustomer.length} klant(en) geraakt.
+        </div>
+        ${perMentor.length ? `<div style="margin-bottom:12px"><div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Per mentor</div>
+          ${H.table(
+            [{ l: 'Mentor' }, { l: 'Slices', cls: 'r' }, { l: 'Totaal vrij', cls: 'r' }],
+            perMentor.map((r) => [esc(r.mentor_name || r.mentor_user_id || '—'), `<span class="mono">${r.slices_count || 0}</span>`, `<span class="money">${eur(Number(r.release_amount) || 0)}</span>`]),
+          )}
+        </div>` : ''}
+        ${perCustomer.length ? `<div><div style="font-size:12px;font-weight:600;color:var(--text-2);margin-bottom:6px">Per klant (max 50)</div>
+          ${H.table(
+            [{ l: 'Klant' }, { l: 'Betaald', cls: 'r optional' }, { l: 'Parents', cls: 'r optional' }, { l: '# slices', cls: 'r' }, { l: 'Vrijgave', cls: 'r' }],
+            perCustomer.slice(0, 50).map((r) => [esc(r.customer_label || r.customer_id || '—'), `<span class="money">${eur(Number(r.paid_amount) || 0)}</span>`, `<span class="mono">${r.parents_count || 0}</span>`, `<span class="mono">${r.slices_count || 0}</span>`, `<span class="money">${eur(Number(r.release_amount) || 0)}</span>`]),
+          )}
+        </div>` : ''}
+      `)}</div>` : `<div style="padding:20px;color:var(--text-3);font-size:12.5px">Draai eerst een preview om te zien wat er vrijgegeven zou worden. Geen wijzigingen tot je "Definitief vrijgeven" klikt.</div>`}
+    </div>
+    ${renderModals()}`;
+  }
+
+  /* ── Form modals ─────────────────────────────────────────────────────── */
+  function renderAdjustmentFormModal() {
+    if (!_ui.adjustmentForm) return '';
+    const f = _ui.adjustmentForm;
+    const body = `
+      <div style="padding:8px 0 14px;font-size:12.5px;color:var(--text-2)">
+        Handmatige post voor ${fmtMonth(f.period_month)}. Bedrag mag negatief (inhouding).
+      </div>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Label</span>
+        <input type="text" value="${esc(f.label)}" oninput="window.__mentAdjField('label', this.value)"
+          style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>
+      <label style="display:block;margin-bottom:14px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bedrag (incl.) — negatief = inhouding</span>
+        <input type="number" step="0.01" value="${esc(f.amount_incl)}" oninput="window.__mentAdjField('amount_incl', this.value)"
+          style="display:block;width:180px;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>
+      ${f.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(f.error)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__mentAdjClose()">Annuleren</button>
+        <button class="btn btn-primary" ${f.saving ? 'disabled' : ''} onclick="window.__mentAdjSubmit()">${f.saving ? 'Opslaan…' : 'Opslaan'}</button>
+      </div>`;
+    return modalShell(f.id ? 'Post bewerken' : 'Post toevoegen', body, 'window.__mentAdjClose()', 520);
+  }
+
+  function renderRecurringFormModal() {
+    if (!_ui.recurringForm) return '';
+    const f = _ui.recurringForm;
+    const body = `
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Label</span>
+        <input type="text" value="${esc(f.label)}" oninput="window.__mentRecField('label', this.value)"
+          style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bedrag (incl.)</span>
+        <input type="number" step="0.01" min="0" value="${esc(f.amount_incl)}" oninput="window.__mentRecField('amount_incl', this.value)"
+          style="display:block;width:180px;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Vanaf maand (optioneel)</span>
+        <input type="month" value="${esc((f.start_month || '').slice(0,7))}" oninput="window.__mentRecField('start_month', this.value)"
+          style="display:block;width:180px;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:13px">
+        <input type="checkbox" ${f.active ? 'checked' : ''} onchange="window.__mentRecField('active', this.checked)"> Actief
+      </label>
+      ${f.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(f.error)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__mentRecClose()">Annuleren</button>
+        <button class="btn btn-primary" ${f.saving ? 'disabled' : ''} onclick="window.__mentRecSubmit()">${f.saving ? 'Opslaan…' : 'Opslaan'}</button>
+      </div>`;
+    return modalShell(f.id ? 'Maandpost bewerken' : 'Maandpost toevoegen', body, 'window.__mentRecClose()', 520);
+  }
+
+  function renderConfigFormModal() {
+    if (!_ui.configForm) return '';
+    const f = _ui.configForm;
+    const body = `
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:13px">
+        <input type="checkbox" ${f.travel_enabled ? 'checked' : ''} onchange="window.__mentCfgField('travel_enabled', this.checked)"> Reiskosten meerekenen
+      </label>
+      <label style="display:block;margin-bottom:14px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Dagtarief (incl.)</span>
+        <input type="number" step="0.01" min="0" value="${esc(f.travel_day_rate_incl)}" oninput="window.__mentCfgField('travel_day_rate_incl', this.value)"
+          style="display:block;width:180px;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>
+      <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3);margin-bottom:12px">
+        ℹ Wijzigingen gelden vanaf de eerstvolgende "Genereer concept"-run. Bestaande concepten worden niet automatisch hertellen.
+      </div>
+      ${f.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(f.error)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__mentCfgClose()">Annuleren</button>
+        <button class="btn btn-primary" ${f.saving ? 'disabled' : ''} onclick="window.__mentCfgSubmit()">${f.saving ? 'Opslaan…' : 'Opslaan'}</button>
+      </div>`;
+    return modalShell('Payout-config bewerken', body, 'window.__mentCfgClose()', 520);
+  }
+
+  function renderTrajectFormModal() {
+    if (!_ui.trajectForm) return '';
+    const f = _ui.trajectForm;
+    const events = asArr(_live.eventsList.data?.events);
+    const total = Number(f.total_amount) || 0;
+    const bonus = total * 0.03;
+    const perTerm = f.term_count ? bonus / Number(f.term_count) : 0;
+    const body = `
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Event</span>
+        ${_live.eventsList.loading && !_live.eventsList.data ? '<div style="padding:8px;color:var(--text-3);font-size:12.5px">Events laden…</div>' : ''}
+        ${_live.eventsList.error && !_live.eventsList.data ? errBlk(_live.eventsList.error) : ''}
+        <select onchange="window.__mentTrajectField('event_id', this.value)" style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px">
+          <option value="">— kies event —</option>
+          ${events.map((ev) => `<option value="${esc(ev.id)}" ${f.event_id === ev.id ? 'selected' : ''}>${esc(ev.title || ev.id)} · ${fmtDate(ev.starts_at)}</option>`).join('')}
+        </select>
+      </label>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Klant / traject-omschrijving</span>
+        <input type="text" value="${esc(f.client_label)}" oninput="window.__mentTrajectField('client_label', this.value)"
+          style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+      </label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <label>
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Totaalprijs (€)</span>
+          <input type="number" step="0.01" min="0" value="${esc(f.total_amount)}" oninput="window.__mentTrajectField('total_amount', this.value)"
+            style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>
+        <label>
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Aantal termijnen</span>
+          <input type="number" min="1" max="60" step="1" value="${esc(f.term_count)}" oninput="window.__mentTrajectField('term_count', this.value)"
+            style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <label>
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Startmaand</span>
+          <input type="month" value="${esc((f.start_month || '').slice(0,7))}" oninput="window.__mentTrajectField('start_month', this.value)"
+            style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>
+        <label>
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Vrijval-dag (1..31)</span>
+          <input type="number" min="1" max="31" step="1" value="${esc(f.release_day)}" oninput="window.__mentTrajectField('release_day', this.value)"
+            style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+        </label>
+      </div>
+      <label style="display:block;margin-bottom:12px">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Notitie (optioneel)</span>
+        <textarea oninput="window.__mentTrajectField('note', this.value)" style="display:block;width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit;min-height:50px;resize:vertical">${esc(f.note)}</textarea>
+      </label>
+      <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;color:var(--text-2);margin-bottom:12px">
+        Live-calc: bonus <b>3%</b> van ${eur(total)} = <b class="mono">${eur(bonus)}</b> · per termijn = <b class="mono">${eur(perTerm)}</b> · verdeeld over aanwezige mentors (event_mentors.was_present=true).
+      </div>
+      ${f.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(f.error)}</div>` : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost" onclick="window.__mentTrajectClose()">Annuleren</button>
+        <button class="btn btn-primary" ${f.saving ? 'disabled' : ''} onclick="window.__mentTrajectSubmit()">${f.saving ? 'Opslaan…' : 'Opslaan'}</button>
+      </div>`;
+    return modalShell(f.id ? 'Handmatig traject bewerken' : 'Nieuw handmatig traject', body, 'window.__mentTrajectClose()', 680);
+  }
+
+  /* ── Registratie (6 views, admin-only via app-shell MODS.roles=SAM) ─── */
   window.DFO.VIEWS['mentoren/Overzicht']     = overzichtView;
-  window.DFO.VIEWS['mentoren/Grootboek']     = grootboekView;
-  window.DFO.VIEWS['mentoren/Uitbetalingen'] = uitbetalingenView;
-  window.DFO.VIEWS['mentoren/Beoordelingen'] = beoordelingenView;
+  window.DFO.VIEWS['mentoren/Rapporten']     = rapportenView;
   window.DFO.VIEWS['mentoren/Certificaten']  = certificatenView;
-  window.DFO.VIEWS['mentoren/Signalen']      = signalenView;
-  if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('mentoren');
-  else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('mentoren');
-  console.debug('[mentoren-v2] registered 6 views (dormant)');
+  window.DFO.VIEWS['mentoren/Beoordelingen'] = beoordelingenView;
+  window.DFO.VIEWS['mentoren/Trajecten']     = trajectenView;
+  window.DFO.VIEWS['mentoren/Sync']          = syncView;
+
+  if (typeof window.KV_V2_ADD === 'function') {
+    window.KV_V2_ADD('mentoren');
+  } else {
+    (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('mentoren');
+  }
+
+  console.debug('[mentoren-v2] v2 — 6 admin-views registered (Overzicht/Rapporten/Certificaten/Beoordelingen/Trajecten/Sync). Sync = super_admin only. Dormant tot allowlist of ?v2preview=mentoren.');
 })();
