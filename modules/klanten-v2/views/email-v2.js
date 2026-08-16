@@ -1255,6 +1255,47 @@
     _ui.draftMigrationRequired = false;
     if (render) render();
   };
+  // v=19: forward-quote helpers.
+  // Bouwt een header-blok + geciteerde body voor Doorsturen. Analoog aan
+  // Gmail/Outlook: "---------- Doorgestuurd bericht ----------" + meta +
+  // originele HTML (of platte tekst als HTML te groot is / ontbreekt).
+  function _fmtForwardDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '—';
+    return d.toLocaleString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+  function _buildForwardQuote(row, bodyData) {
+    // Body-cap check: bij te grote HTML val terug op platte tekst (voorkomt
+    // freeze bij render/contenteditable van 500KB+ HTML). BODY_HTML_MAX is
+    // gedefinieerd verderop maar we redeclareren de waarde hier lokaal om
+    // ordering-issues te vermijden.
+    const CAP = 250 * 1024;
+    const rawHtml = bodyData?.body_html_safe ? String(bodyData.body_html_safe) : '';
+    const text    = bodyData?.text ? String(bodyData.text) : String(row?._body_text || '');
+    const useHtml = rawHtml && rawHtml.length <= CAP;
+    const header = [
+      '---------- Doorgestuurd bericht ----------',
+      'Van: '       + (row.from_name ? `${row.from_name} <${row.from_address || ''}>` : (row.from_address || '—')),
+      'Datum: '     + _fmtForwardDate(row.date_received || row.received_at || null),
+      'Onderwerp: ' + (row.subject || '—'),
+      'Aan: '       + (row.to_address || row.mailbox_address || '—'),
+    ];
+    const headerHtml = `<div style="margin:16px 0 8px;padding:0;color:#111;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5">
+      ${header.map((l) => `<div>${esc(l)}</div>`).join('')}
+    </div><hr style="border:0;border-top:1px solid #ddd;margin:8px 0">`;
+    const headerText = header.join('\n') + '\n\n';
+    // HTML-body: als beschikbaar en binnen cap → inline in een blockquote
+    // met left-border. Als te groot / geen HTML → pre-wrap text in <pre>.
+    const bodyHtml = useHtml
+      ? `<blockquote style="margin:0;padding:0 0 0 12px;border-left:3px solid #ddd">${rawHtml}</blockquote>`
+      : `<pre style="font-family:inherit;white-space:pre-wrap;margin:0;padding:0 0 0 12px;border-left:3px solid #ddd">${esc(text)}</pre>`;
+    return {
+      html: `<div><br><br>${headerHtml}${bodyHtml}</div>`,
+      text: '\n\n' + headerText + text,
+      truncated: !useHtml && !!rawHtml, // true = we hadden HTML maar > cap
+    };
+  }
   async function _replyState(mode) {
     const row = currentRow();
     if (!row) { _showToastLocal('Selecteer eerst een bericht.', 'info'); return; }
@@ -1286,23 +1327,57 @@
         draft_id:    existingDraft.id || null,
       };
       _ui.ccBccOpen = !!(_ui.compose.cc || _ui.compose.bcc);
-    } else {
-      _ui.compose = {
-        from_mailbox: from ? from.addr : _ui.compose.from_mailbox,
-        to: row.from_address || '', cc: '', bcc: '',
-        subject: /^(re|fwd?):/i.test(row.subject || '') ? row.subject : (mode === 'fwd' ? 'Fwd: ' : 'Re: ') + (row.subject || ''),
-        body_html: '', body_text: '',
-        email_id: emailId,
-        signature: 'standaard', draft_id: null,
-      };
-      _ui.ccBccOpen = false;
+      _ui.composeOpen = true; _ui.lastSend = null;
+      if (render) render();
+      return;
     }
+    // v=19: FORWARD moet de originele body meenemen. Als de body nog niet
+    // gefetched is (reader nog niet geopend), fetch nu met 8s Promise.race
+    // timeout — dezelfde guard als tryFetch. Bij fout: open toch de compose,
+    // maar met alleen de header (fail-soft, geen blokker).
+    let bodyData = _live.body.data[row.id] || null;
+    if (mode === 'fwd' && !bodyData && row.mailbox && row.imap_uid != null) {
+      try {
+        _showToastLocal('Bericht laden voor doorsturen…', 'info');
+        // fetchBody schrijft resultaat naar _live.body.data[rid]; race met 8s.
+        await Promise.race([
+          fetchBody(row),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000)),
+        ]);
+        bodyData = _live.body.data[row.id] || null;
+      } catch (_) { /* fail-soft: open zonder body */ }
+    }
+    const subject = /^(re|fwd?):/i.test(row.subject || '')
+      ? row.subject
+      : (mode === 'fwd' ? 'Fwd: ' : 'Re: ') + (row.subject || '');
+    let bodyHtml = '';
+    let bodyText = '';
+    if (mode === 'fwd') {
+      const q = _buildForwardQuote(row, bodyData);
+      bodyHtml = q.html;
+      bodyText = q.text;
+      if (q.truncated) {
+        // Info-melding aan de user: HTML was > 250KB, teksversie gebruikt.
+        setTimeout(() => _showToastLocal('Originele mail te groot voor HTML-quote — platte tekst gebruikt.', 'info'), 100);
+      }
+    }
+    _ui.compose = {
+      from_mailbox: from ? from.addr : _ui.compose.from_mailbox,
+      to: mode === 'fwd' ? '' : (row.from_address || ''),
+      cc: '', bcc: '',
+      subject,
+      body_html: bodyHtml,
+      body_text: bodyText,
+      email_id: emailId,
+      signature: 'standaard', draft_id: null,
+    };
+    _ui.ccBccOpen = false;
     _ui.composeOpen = true; _ui.lastSend = null;
     if (render) render();
   }
   window.__emailReply    = () => _replyState('reply');
   window.__emailReplyAll = () => _replyState('replyall');
-  window.__emailFwd      = () => { _replyState('fwd'); _ui.compose.to = ''; if (render) render(); };
+  window.__emailFwd      = () => _replyState('fwd'); // v=19: _replyState clear-t nu zelf `to` bij fwd + bouwt de quote uit body.
   window.__emailCloseCompose = () => {
     _ui.composeOpen = false; _ui.composeMinimized = false; _ui.lastSend = null; _ui.ccBccOpen = false;
     // KRITIEK: als selectedId een draft is, ontkoppel 'm — anders zou _reader() bij de
@@ -1444,5 +1519,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=18 — reader-freeze fix (v=17 uit #1320) + 4-bug-fixes (mark-read DB persist, sanne null-guard, reply-concept reload, list-scroll preserve) + templates-picker + handtekening server-side.');
+  console.debug('[email-v2] v=19 — forward-quote fix: originele body (HTML of text-fallback bij >250KB) + header-blok in doorstuur-compose. Alles uit v=18 behouden.');
 })();
