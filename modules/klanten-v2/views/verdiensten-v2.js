@@ -1,60 +1,157 @@
 // modules/klanten-v2/views/verdiensten-v2.js
 //
-// Fase C module #3 — Verdiensten-module (mentor-finance) voor v2-shell.
-// Layout-only, voorbeeld-data. 1-op-1 render uit prototype:
-//   - MENTOREN                              r1404-1409  (mentor-profiel)
-//   - myMentor + MIJNUITB + reisBedrag      r1851-1858  (uitbetalingen + reiskosten)
-//   - VIEWS['verdiensten/Overzicht']        r1928-1957
-//   - VIEWS['verdiensten/Uitbetalingen']    r1958-1973
-//   - VIEWS['verdiensten/Reiskosten']       r1974-2007
-//   - CERTIFICATEN / CERTST / GRADICO       r2010-2017
-//   - VIEWS['verdiensten/Certificaten']     r2019-2045
-//   - hbar / dashCard / areaChart           r1441-1463 (inline)
-//   - uclbl                                 r3927
+// Verdiensten (mentor) — BROK 1: mentor-self reads. Alle mock vervangen door
+// echte fetches op /api/mentor-* self-endpoints. Read-only in BROK 1 (write-
+// acties komen in BROK 3). Module blijft DORMANT — 'verdiensten' staat NIET
+// in V2_ACTIVE_ALLOWLIST; alleen bereikbaar via ?v2preview=verdiensten met
+// rol "Mentor" via "Bekijk als".
 //
-// Rol-context: mentor. Voor andere rollen toont de shell deze module niet
-// via visMods() — Verdiensten heeft roles:['mentor'] in MODS.
+// Endpoints gewired (self-scope, RBAC: mentor.module.access):
+//   - /api/mentor-bonus-overview         → totals + projection_12m + per_event
+//   - /api/mentor-payouts-list-self      → historie payouts (goedgekeurd/uitbetaald)
+//   - /api/mentor-travel-days-self?period_month=YYYY-MM → huidige maand reisdagen + config
+//   - /api/mentor-funded-certs-self      → funded-certs (€100 per claim per maand)
 //
-// Registreert 4 views + KV_V2_ADD('verdiensten') — dormant. Preview via
-// ?v2preview=verdiensten (én rol Mentor via 'Bekijk als').
+// Guardrails: 8s Promise.race timeout · asArr()-guards · in-flight loading-
+// flag · fail-soft errBlk met "Opnieuw"-retry · geen render-loop (queueMicrotask
+// + loading-guard). BTW-splitsing (total_excl vs btw_amount vs total) getoond
+// waar de payload het geeft (payouts-lijst).
+//
+// v3.
 
 (function () {
   if (!window.DFO) { console.error('[verdiensten-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[verdiensten-v2] KV_V2.helpers niet geladen.'); return; }
+  if (!window.KV || !window.KV.authedJson) { console.error('[verdiensten-v2] KV.authedJson niet geladen — auth ontbreekt.'); return; }
 
-  const { I, svg, S, F, eur0, goTab, render } = window.DFO;
+  const { I, svg, S, F, eur0, render } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  /* ── Voorbeeld-data (prototype r1404-1858) ────────────────────────── */
-  const MENTOREN = [
-    { naam: 'Dave Klaassen', leerlingen: 24, sessies: 18, beschikbaar: 'ma-do', vergoeding: 2400, status: 'actief',   reiskosten: true,  dagbedrag: 18 },
-    { naam: 'Mike de Vries', leerlingen: 19, sessies: 14, beschikbaar: 'di-vr', vergoeding: 1900, status: 'actief',   reiskosten: true,  dagbedrag: 22 },
-    { naam: 'Sarah Bosman',  leerlingen: 11, sessies:  9, beschikbaar: 'wo-vr', vergoeding: 1100, status: 'actief',   reiskosten: false, dagbedrag: 15 },
-    { naam: 'Tim Jacobs',    leerlingen:  0, sessies:  0, beschikbaar: '—',    vergoeding:    0, status: 'inactief', reiskosten: false, dagbedrag:  0 },
-  ];
-  const MIJNUITB = [
-    { maand: 'Juli 2026',   sessies: 24, vergoeding: 2112, bonus: 400, rijdagen: null, status: 'open' },
-    { maand: 'Juni 2026',   sessies: 26, vergoeding: 2288, bonus: 480, rijdagen: 16,   status: 'uitbetaald' },
-    { maand: 'Mei 2026',    sessies: 22, vergoeding: 1936, bonus:   0, rijdagen: 15,   status: 'uitbetaald' },
-    { maand: 'April 2026',  sessies: 25, vergoeding: 2200, bonus: 240, rijdagen: 16,   status: 'uitbetaald' },
-  ];
-  const CERTIFICATEN = [
-    { mentor: 'Dave Klaassen', naam: 'Advanced Technical Analysis',    uitgever: 'IFTA',                    datum: '02-08-2026', bestand: 'ifta-ta-dave.pdf',    status: 'goedgekeurd' },
-    { mentor: 'Dave Klaassen', naam: 'Risk Management Professional',   uitgever: 'CISI',                    datum: '12-07-2026', bestand: 'cisi-risk-dave.pdf', status: 'goedgekeurd' },
-    { mentor: 'Mike de Vries', naam: 'Certified Financial Technician', uitgever: 'IFTA',                    datum: '28-07-2026', bestand: 'cft-mike.pdf',       status: 'ingediend' },
-    { mentor: 'Sarah Bosman',  naam: 'Trading Psychology Certificate', uitgever: 'Van Tharp Institute',     datum: '20-07-2026', bestand: 'psych-sarah.pdf',    status: 'goedgekeurd' },
-  ];
-  const CERTST = {
-    ingediend:    { l: 'In beoordeling', c: 'warn'   },
-    goedgekeurd:  { l: 'Goedgekeurd',    c: 'ok'     },
-    afgewezen:    { l: 'Afgewezen',      c: 'danger' },
+  /* ── Helpers (data + utils) ───────────────────────────────────────────── */
+  const asArr = (v) => (Array.isArray(v) ? v : []);
+  const eur   = (n) => (n == null ? '—' : new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 }).format(n));
+
+  // period_month bv "2026-07-01" → "juli 2026"
+  const MONTH_NAMES_NL = ['januari','februari','maart','april','mei','juni','juli','augustus','september','oktober','november','december'];
+  function fmtMonth(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return String(iso);
+      return `${MONTH_NAMES_NL[d.getMonth()]} ${d.getFullYear()}`;
+    } catch (_) { return String(iso); }
+  }
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch (_) { return String(iso); }
+  }
+  // "2026-07-01" → "2026-07" (voor grouping/filter)
+  function monthKey(iso) { return typeof iso === 'string' ? iso.slice(0, 7) : ''; }
+  // Actuele maand als "YYYY-MM"
+  function currentMonthKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  /* ── Fetch-helper (8s timeout, fail-soft) ─────────────────────────────── */
+  async function tryFetch(label, url, timeoutMs = 8000) {
+    try {
+      return await Promise.race([
+        window.KV.authedJson(url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout na ' + timeoutMs + 'ms')), timeoutMs)),
+      ]);
+    } catch (e) {
+      console.warn('[verdiensten-v2] fetch fail:', label, '→', e?.message || e);
+      return { __error: e?.message || 'onbekende fout' };
+    }
+  }
+
+  /* ── State ────────────────────────────────────────────────────────────── */
+  const _live = {
+    overview: { loading: false, error: null, data: null },  // /api/mentor-bonus-overview
+    payouts:  { loading: false, error: null, data: null },  // /api/mentor-payouts-list-self
+    travel:   { loading: false, error: null, data: null, key: null }, // huidige maand
+    certs:    { loading: false, error: null, data: null },  // /api/mentor-funded-certs-self
+  };
+  const _ui = {
+    py: '26',  // periode-chip: '26' of '25' (jaartal-2-digit, mapt op yyyy)
+  };
+  const YEAR_OF = { '26': '2026', '25': '2025' };
+
+  /* ── Loading-state helpers ────────────────────────────────────────────── */
+  function skel() {
+    return `<div class="pad" style="padding-top:16px">
+      <div style="height:64px;border-radius:var(--r);background:linear-gradient(90deg,var(--surface-2),var(--surface) 50%,var(--surface-2));background-size:200% 100%;animation:kv-shim 1.4s linear infinite;margin-bottom:14px"></div>
+      <div style="height:180px;border-radius:var(--r);background:linear-gradient(90deg,var(--surface-2),var(--surface) 50%,var(--surface-2));background-size:200% 100%;animation:kv-shim 1.4s linear infinite"></div>
+    </div>`;
+  }
+  function errBlk(msg, retryHandler) {
+    return `<div class="pad" style="padding-top:16px">
+      <div style="padding:14px 16px;background:var(--rose-soft);border:1px solid var(--rose-line, var(--rose));color:var(--rose);border-radius:var(--r);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <span>⚠ ${String(msg || 'Onbekende fout')}</span>
+        ${retryHandler ? `<button class="btn btn-ghost btn-sm" onclick="${retryHandler}">Opnieuw</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  /* ── Fetchers (met re-entrancy guard) ─────────────────────────────────── */
+  async function fetchOverview() {
+    if (_live.overview.loading) return;
+    _live.overview.loading = true; _live.overview.error = null;
+    const j = await tryFetch('overview', '/api/mentor-bonus-overview');
+    _live.overview.loading = false;
+    if (!j || j.__error) { _live.overview.error = j?.__error || 'Kon overzicht niet laden'; render(); return; }
+    _live.overview.data = j;
+    render();
+  }
+  async function fetchPayouts() {
+    if (_live.payouts.loading) return;
+    _live.payouts.loading = true; _live.payouts.error = null;
+    const j = await tryFetch('payouts', '/api/mentor-payouts-list-self');
+    _live.payouts.loading = false;
+    if (!j || j.__error) { _live.payouts.error = j?.__error || 'Kon uitbetalingen niet laden'; render(); return; }
+    _live.payouts.data = j;
+    render();
+  }
+  async function fetchTravel(monthKeyStr) {
+    const key = monthKeyStr || currentMonthKey();
+    if (_live.travel.loading && _live.travel.key === key) return;
+    _live.travel.loading = true; _live.travel.error = null; _live.travel.key = key;
+    const j = await tryFetch('travel', `/api/mentor-travel-days-self?period_month=${encodeURIComponent(key)}`);
+    _live.travel.loading = false;
+    if (!j || j.__error) { _live.travel.error = j?.__error || 'Kon reisdagen niet laden'; render(); return; }
+    _live.travel.data = j;
+    render();
+  }
+  async function fetchCerts() {
+    if (_live.certs.loading) return;
+    _live.certs.loading = true; _live.certs.error = null;
+    const j = await tryFetch('certs', '/api/mentor-funded-certs-self');
+    _live.certs.loading = false;
+    if (!j || j.__error) { _live.certs.error = j?.__error || 'Kon certificaten niet laden'; render(); return; }
+    _live.certs.data = j;
+    render();
+  }
+
+  /* ── Window handlers (retry-knoppen + periode-chip) ───────────────────── */
+  window.__verdRetryOverview = () => { _live.overview.data = null; queueMicrotask(fetchOverview); };
+  window.__verdRetryPayouts  = () => { _live.payouts.data  = null; queueMicrotask(fetchPayouts);  };
+  window.__verdRetryTravel   = () => { _live.travel.data   = null; queueMicrotask(() => fetchTravel(currentMonthKey())); };
+  window.__verdRetryCerts    = () => { _live.certs.data    = null; queueMicrotask(fetchCerts);    };
+  window.__verdSetPy         = (v) => {
+    if (v !== '25' && v !== '26') return;
+    _ui.py = v;
+    // F('py', v) heeft de shell-filter al gezet; wij re-renderen zodat de
+    // client-side jaar-filter direct doorwerkt op payouts + certs.
+    render();
   };
 
-  /* ── Helpers (prototype r1441-1463, r1851-1858, r3927) ────────────── */
+  /* ── Inline UI-helpers (viz + kaartjes) ───────────────────────────────── */
   const hbar = (label, val, max, color, right) => `<div style="display:flex;align-items:center;gap:12px;margin-bottom:11px">
-    <div style="width:118px;font-size:12.5px;color:var(--text-2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</div>
+    <div style="width:158px;font-size:12.5px;color:var(--text-2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</div>
     <div class="progress" style="flex:1;height:8px"><i style="width:${max ? Math.round(val / max * 100) : 0}%;background:var(--${color})"></i></div>
-    <div style="width:82px;text-align:right;font-size:12.5px;font-weight:600;font-family:'IBM Plex Mono',monospace">${right}</div></div>`;
+    <div style="width:100px;text-align:right;font-size:12.5px;font-weight:600;font-family:'IBM Plex Mono',monospace">${right}</div></div>`;
 
   const dashCard = (title, dotColor, body, extra) => `<div class="card">
     <div class="card-head" style="border-bottom:none;padding-bottom:6px">
@@ -64,7 +161,7 @@
 
   function areaChart(data, labels) {
     const w = 100, h = 42, mx = Math.max(...data, 1);
-    const pts = data.map((v, i) => [i / (data.length - 1) * w, h - (v / mx) * h * .88 - 2]);
+    const pts = data.map((v, i) => [data.length > 1 ? i / (data.length - 1) * w : 0, h - (v / mx) * h * .88 - 2]);
     const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
     return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:64px;display:block">
       <defs><linearGradient id="verd-grad" x1="0" y1="0" x2="0" y2="1">
@@ -75,220 +172,248 @@
     </svg><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:4px">${labels.map(l => `<span>${l}</span>`).join('')}</div>`;
   }
 
-  const uclbl = (t) => `<div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:7px">${t}</div>`;
-
-  // Rol-persona → mentor lookup. In v2-shell zit ROLES[S.role].persoon niet
-  // altijd op de mentor-namen; fallback naar Dave Klaassen zodat de preview
-  // altijd data toont voor review.
-  function myMentor() {
-    try {
-      const persoon = window.DFO.ROLES?.[S.role]?.persoon;
-      const match = MENTOREN.find(m => m.naam === persoon);
-      if (match) return match;
-    } catch (_) { /* fall through */ }
-    return MENTOREN[0]; // Dave Klaassen als default voor preview
-  }
-  const reisBedrag = (u) => (u.rijdagen || 0) * myMentor().dagbedrag;
-
   const GRADICO = `<span style="width:26px;height:26px;border-radius:7px;background:var(--violet-soft);color:var(--violet);display:grid;place-items:center;flex-shrink:0">${svg(I.grad, 'width:14px;height:14px')}</span>`;
 
-  /* ── Notice-handlers voor dode action-knoppen ─────────────────────── */
-  window.__verdNotice = (label) => {
-    console.info('[verdiensten-v2] ' + label + ' (voorbeeld — komt in data-ronde)');
-    try { alert(label + ' — komt in de data-ronde.'); } catch (_) { /* ignore */ }
+  // Rapport-status → pill-mapping
+  const PAYOUT_STATUS_PILL = {
+    concept:      { c: 'neutral', l: 'Concept' },
+    open:         { c: 'info',    l: 'Ter beoordeling' },
+    goedgekeurd:  { c: 'warn',    l: 'Goedgekeurd' },
+    uitbetaald:   { c: 'ok',      l: 'Uitbetaald' },
   };
-  window.__verdDienRijdagen = () => {
-    const el = document.getElementById('rijdagenInp');
-    const v = el ? parseInt(el.value) : NaN;
-    if (isNaN(v) || v < 0) { alert('Vul een geldig aantal rijdagen in.'); return; }
-    // Layout-only: muteer in-memory mock zodat de re-render de nieuwe status toont.
-    const open = MIJNUITB.find(u => u.rijdagen === null);
-    if (open) open.rijdagen = v;
-    console.info('[verdiensten-v2] Rijdagen doorgegeven (voorbeeld): ' + v);
-    render();
-  };
-  window.__verdUploadCert = () => {
-    const naam = (document.getElementById('certNaam')?.value || '').trim();
-    if (!naam) { alert('Geef het certificaat een naam.'); return; }
-    console.info('[verdiensten-v2] Certificaat indienen (voorbeeld): ' + naam);
-    // Layout-only: prepend een mock-rij zodat het lijstje "leeft".
-    CERTIFICATEN.unshift({ mentor: myMentor().naam, naam, uitgever: document.getElementById('certUitg')?.value || '—', datum: 'zojuist', bestand: '(mock)', status: 'ingediend' });
-    render();
-  };
-  window.__verdGoToReiskosten = () => { try { goTab('Reiskosten'); } catch (_) { /* ignore */ } };
+  function payoutPill(status) {
+    const meta = PAYOUT_STATUS_PILL[String(status || '').toLowerCase()] || { c: 'neutral', l: status || '—' };
+    return H.pill(meta.c, meta.l);
+  }
 
-  /* ── VIEW 1: Verdiensten/Overzicht (prototype r1928-1957) ─────────── */
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 1 — Verdiensten/Overzicht
+     ═══════════════════════════════════════════════════════════════════════ */
   function overzichtView() {
-    const m = MIJNUITB[0];
-    const reis = reisBedrag(m);
-    const pending = m.rijdagen === null;
-    const tot = m.vergoeding + m.bonus + reis;
-    const mx = Math.max(m.vergoeding, m.bonus, Math.max(reis, 1));
-    const ytd = MIJNUITB.reduce((a, x) => a + x.vergoeding + x.bonus + reisBedrag(x), 0);
+    if (!_live.overview.loading && !_live.overview.data && !_live.overview.error) queueMicrotask(fetchOverview);
+    if (_live.overview.error && !_live.overview.data) return errBlk(_live.overview.error, 'window.__verdRetryOverview()');
+    if (!_live.overview.data) return skel();
 
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Verdiensten ' + m.maand.split(' ')[0].toLowerCase(), val: eur0(tot), sub: m.maand,               trend: H.trend('+9%', true) },
-      { c: 'amber',   icon: I.clock, label: 'Uit te betalen',                                     val: eur0(tot), sub: 'vrijdag 7 augustus' },
-      { c: 'teal',    icon: I.cal,   label: 'Sessies deze maand',                                 val: String(m.sessies), sub: 'à € 88 per sessie' },
-      { c: 'emerald', icon: I.chart, label: 'Dit jaar verdiend',                                  val: eur0(ytd), sub: '2026 · YTD' },
+    const d = _live.overview.data;
+    const t = d.totals || {};
+    const projArr = asArr(d.projection_12m);
+    const perEvent = asArr(d.per_event);
+
+    // 12-mnd projectie voor de areachart
+    const chartData = projArr.map((r) => Number(r.amount) || 0);
+    const chartLabels = projArr.map((r) => (typeof r.month === 'string' ? r.month.slice(5) : ''));
+
+    // Opbouw-blok (max voor hbar-schaal)
+    const dezeMaand    = Number(t.deze_maand)      || 0;
+    const volgendeMnd  = Number(t.volgende_maand)  || 0;
+    const openTotaal   = Number(t.open)            || 0;
+    const betaaldUit   = Number(t.betaald_uit)     || 0;
+    const earnedTotal  = Number(t.earned_total)    || 0;
+    const mx = Math.max(dezeMaand, volgendeMnd, openTotaal, 1);
+
+    return `${H.kpis([
+      { c: 'blue',    icon: I.euro,  label: 'Deze maand',        val: eur(dezeMaand),   sub: 'bonus-vrijgave' },
+      { c: 'amber',   icon: I.clock, label: 'Volgende maand',    val: eur(volgendeMnd), sub: 'geplande vrijgave' },
+      { c: 'teal',    icon: I.cal,   label: 'Openstaand totaal', val: eur(openTotaal),  sub: 'niet-uitbetaalde bonus' },
+      { c: 'emerald', icon: I.chart, label: 'Totaal verdiend',   val: eur(earnedTotal), sub: 'alle bonussen sinds start' },
     ])}
     <div class="pad" style="padding-top:16px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
-        ${dashCard('Opbouw — ' + m.maand, 'blue',
-          hbar('Sessievergoeding', m.vergoeding, mx, 'teal',   eur0(m.vergoeding))
-          + hbar('Event-bonussen',   m.bonus,      mx, 'violet', eur0(m.bonus))
-          + (pending
-              ? `<div style="display:flex;align-items:center;gap:12px;margin-bottom:11px"><div style="width:118px;font-size:12.5px;color:var(--text-2)">Reiskosten</div>
-                <button class="btn btn-ghost btn-sm" style="color:var(--amber);padding-left:0" onclick="__verdGoToReiskosten()">${svg(I.alert, 'width:13px;height:13px')}Rijdagen nog doorgeven →</button></div>`
-              : hbar('Reiskosten', reis, mx, 'amber', eur0(reis)))
-          + `<div style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px"><b>Totaal${pending ? ' (excl. reiskosten)' : ''}</b><b class="mono">${eur0(tot)}</b></div>`)}
-        ${dashCard('Volgende uitbetaling', 'emerald',
-          `<div style="text-align:center;padding:8px 0">
-            <div style="font-size:30px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:var(--emerald)">${eur0(tot)}</div>
-            <div style="font-size:12px;color:var(--text-3);margin:4px 0 14px">gepland op vrijdag 7 augustus 2026</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">
-              <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 13px"><div style="font-size:11.5px;color:var(--text-2);margin-bottom:4px">Sessies</div><div class="mono" style="font-size:17px;font-weight:600">${m.sessies}</div></div>
-              <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 13px"><div style="font-size:11.5px;color:var(--text-2);margin-bottom:4px">Reiskosten</div><div class="mono" style="font-size:17px;font-weight:600">${pending ? '<span style="color:var(--amber);font-size:12.5px">nog doorgeven</span>' : eur0(reis)}</div></div></div>
-          </div>`)}
+        ${dashCard('Bonus-status', 'blue',
+          hbar('Betaald uit',       betaaldUit,  Math.max(earnedTotal, 1), 'emerald', eur(betaaldUit))
+          + hbar('Open (nog niet uitbetaald)', openTotaal, Math.max(earnedTotal, 1), 'amber',   eur(openTotaal))
+          + `<div style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px"><b>Totaal verdiend</b><b class="mono">${eur(earnedTotal)}</b></div>`)}
+        ${dashCard('Deze maand vs volgende maand', 'emerald',
+          hbar('Deze maand',      dezeMaand,     mx, 'blue',  eur(dezeMaand))
+          + hbar('Volgende maand', volgendeMnd,  mx, 'amber', eur(volgendeMnd))
+          + `<div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Cash-release-schema: bonus wordt vrijgegeven op het moment dat de bijbehorende factuur betaald is (of via cash-traject).</div>`)}
       </div>
-      <div style="margin-top:14px">${dashCard('Verdiensten per maand', 'blue',
-        areaChart(
-          MIJNUITB.map(x => x.vergoeding + x.bonus + reisBedrag(x)).reverse(),
-          MIJNUITB.map(x => x.maand.split(' ')[0].slice(0, 3).toLowerCase()).reverse()
-        ))}</div>
+      ${chartData.length ? `<div style="margin-top:14px">${dashCard('12-maands projectie', 'blue', areaChart(chartData, chartLabels))}</div>` : ''}
+      ${perEvent.length ? `<div style="margin-top:14px">${dashCard('Per event', 'violet',
+        perEvent.map((ev) => {
+          const sales = asArr(ev.sales);
+          const total = sales.reduce((a, s) => a + (Number(s.mentor_share_total) || 0), 0);
+          return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600"><span>${H.esc ? H.esc(ev.event_title || '—') : (ev.event_title || '—')}</span><span class="mono">${eur(total)}</span></div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${fmtDate(ev.starts_at)} · ${sales.length} sale${sales.length === 1 ? '' : 's'}</div>
+          </div>`;
+        }).join(''))}</div>` : ''}
     </div>`;
   }
 
-  /* ── VIEW 2: Verdiensten/Uitbetalingen (prototype r1958-1973) ─────── */
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 2 — Verdiensten/Uitbetalingen
+     ═══════════════════════════════════════════════════════════════════════ */
   function uitbetalingenView() {
-    const uitbetaald = MIJNUITB.filter(u => u.status !== 'open').reduce((a, u) => a + u.vergoeding + u.bonus + reisBedrag(u), 0);
-    const open = MIJNUITB.find(u => u.status === 'open');
-    const openTotaal = open ? open.vergoeding + open.bonus + reisBedrag(open) : 0;
-    const gem = Math.round(MIJNUITB.reduce((a, u) => a + u.vergoeding + u.bonus + reisBedrag(u), 0) / MIJNUITB.length);
+    if (!_live.payouts.loading && !_live.payouts.data && !_live.payouts.error) queueMicrotask(fetchPayouts);
+    if (_live.payouts.error && !_live.payouts.data) return errBlk(_live.payouts.error, 'window.__verdRetryPayouts()');
+    if (!_live.payouts.data) return skel();
 
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'emerald', icon: I.tick,  label: 'Uitbetaald dit jaar', val: eur0(uitbetaald), sub: '2026' },
-      { c: 'amber',   icon: I.clock, label: 'Openstaand',          val: eur0(openTotaal),  sub: open ? open.maand : '—' },
-      { c: 'blue',    icon: I.cal,   label: 'Gem. per maand',      val: eur0(gem),         sub: 'laatste 4 maanden' },
+    const allPayouts = asArr(_live.payouts.data.payouts);
+    const py = String(F('py', _ui.py) || _ui.py);
+    const yr = YEAR_OF[py] || YEAR_OF['26'];
+
+    // Client-side filter op jaar
+    const rows = allPayouts.filter((p) => monthKey(p.period_month).startsWith(yr + '-'));
+    const uitbetaald = rows.filter((r) => r.status === 'uitbetaald').reduce((a, r) => a + (Number(r.total) || 0), 0);
+    const goedgekeurd = rows.filter((r) => r.status === 'goedgekeurd').reduce((a, r) => a + (Number(r.total) || 0), 0);
+    const gem = rows.length ? Math.round(rows.reduce((a, r) => a + (Number(r.total) || 0), 0) / rows.length) : 0;
+
+    return `${H.kpis([
+      { c: 'emerald', icon: I.tick,  label: 'Uitbetaald',    val: eur(uitbetaald),   sub: yr + ' · ' + rows.filter((r) => r.status === 'uitbetaald').length + ' rapport(en)' },
+      { c: 'warn',    icon: I.clock, label: 'Goedgekeurd',   val: eur(goedgekeurd),  sub: 'wacht op uitbetaling' },
+      { c: 'blue',    icon: I.cal,   label: 'Gem. per maand', val: eur(gem),         sub: rows.length + ' maanden' },
     ])}
     ${H.toolbar([
-      H.chips('py', [{ l: '2026', v: '26' }, { l: '2025', v: '25' }], F('py', '26')),
-      H.search('Zoek maand…'),
+      `<div style="display:flex;gap:6px">
+        <button class="btn ${py === '26' ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetPy('26')">2026</button>
+        <button class="btn ${py === '25' ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetPy('25')">2025</button>
+      </div>`,
     ])}
-    ${H.table(
-      [{ l: 'Periode' }, { l: 'Sessies', cls: 'r' }, { l: 'Sessievergoeding', cls: 'r optional' }, { l: 'Bonus', cls: 'r optional' }, { l: 'Rijdagen', cls: 'r optional' }, { l: 'Reiskosten', cls: 'r optional' }, { l: 'Totaal', cls: 'r' }, { l: 'Status' }],
-      MIJNUITB.map(u => [
-        `<span class="cell-main">${u.maand}</span>`,
-        `<span class="mono">${u.sessies}</span>`,
-        `<span class="money">${eur0(u.vergoeding)}</span>`,
-        `<span class="money">${eur0(u.bonus)}</span>`,
-        `<span class="mono">${u.rijdagen === null ? '—' : u.rijdagen}</span>`,
-        `<span class="money">${u.rijdagen === null ? '—' : eur0(reisBedrag(u))}</span>`,
-        `<span class="money"><b>${eur0(u.vergoeding + u.bonus + reisBedrag(u))}</b></span>`,
-        u.status === 'open' ? H.pill('warn', 'Openstaand') : H.pill('ok', 'Uitbetaald'),
-      ])
-    )}`;
+    ${rows.length ? H.table(
+      [
+        { l: 'Periode' },
+        { l: 'Totaal excl.', cls: 'r optional' },
+        { l: 'BTW',          cls: 'r optional' },
+        { l: 'Totaal incl.', cls: 'r' },
+        { l: 'Uitbetaald op', cls: 'optional' },
+        { l: 'Status' },
+      ],
+      rows.map((p) => [
+        `<span class="cell-main">${fmtMonth(p.period_month)}</span>`,
+        `<span class="money">${eur(Number(p.total_excl) || 0)}</span>`,
+        `<span class="money">${eur(Number(p.btw_amount) || 0)}</span>`,
+        `<span class="money"><b>${eur(Number(p.total) || 0)}</b></span>`,
+        `<span style="color:var(--text-3)">${fmtDate(p.paid_at)}</span>`,
+        payoutPill(p.status),
+      ]),
+    ) : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen uitbetalingen in ${yr}. Concept- en 'open'-rapporten zijn hier niet zichtbaar (die staan bij finance ter beoordeling).</div>`}`;
   }
 
-  /* ── VIEW 3: Verdiensten/Reiskosten (prototype r1974-2007) ────────── */
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 3 — Verdiensten/Reiskosten
+     ═══════════════════════════════════════════════════════════════════════ */
   function reiskostenView() {
-    const M = myMentor();
-    if (!M.reiskosten) {
-      return `${H.voorbeeldBanner()}
-      <div class="empty" style="padding:72px 20px">
+    const mk = currentMonthKey();
+    if (!_live.travel.loading && !_live.travel.data && !_live.travel.error) queueMicrotask(() => fetchTravel(mk));
+    if (_live.travel.error && !_live.travel.data) return errBlk(_live.travel.error, 'window.__verdRetryTravel()');
+    if (!_live.travel.data) return skel();
+
+    const t = _live.travel.data;
+    if (!t.travel_enabled) {
+      return `<div class="empty" style="padding:72px 20px">
         <div class="empty-ico">${svg(I.route)}</div>
         <div class="empty-t">Reiskostenvergoeding staat niet aan</div>
         <div class="empty-s">Voor jou is de reiskostenvergoeding (nog) niet ingeschakeld. Neem contact op met kantoor als dit wel zou moeten.</div>
       </div>`;
     }
-    const open = MIJNUITB.find(u => u.rijdagen === null);
-    const done = MIJNUITB.filter(u => u.rijdagen !== null);
-    const jaar = done.reduce((a, u) => a + reisBedrag(u), 0);
 
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Vergoeding per rijdag', val: eur0(M.dagbedrag),  sub: 'jouw vaste bedrag' },
-      { c: 'amber',   icon: I.route, label: 'Open aanvraag',         val: open ? '1' : '0',   hi: open ? 1 : 0, sub: open ? open.maand : 'niets openstaand' },
-      { c: 'emerald', icon: I.chart, label: 'Reiskosten dit jaar',   val: eur0(jaar),          sub: done.length + ' maanden' },
+    const dayRate = Number(t.day_rate_incl) || 0;
+    const days    = Number(t.days)          || 0;
+    const amount  = dayRate * days;
+    const editable = !!t.editable;
+    const status   = t.status || null;
+
+    return `${H.kpis([
+      { c: 'blue',    icon: I.euro,  label: 'Vergoeding per rijdag', val: eur(dayRate),                sub: 'jouw vaste bedrag' },
+      { c: 'amber',   icon: I.route, label: 'Doorgegeven deze maand', val: String(days),              sub: fmtMonth(t.period_month) },
+      { c: 'emerald', icon: I.chart, label: 'Vergoeding deze maand',  val: eur(amount),                sub: days + ' × ' + eur(dayRate) },
     ])}
     <div class="pad" style="padding-top:16px">
-      ${open
-        ? dashCard('Rijdagen doorgeven — ' + open.maand, 'amber', `
-            <div style="display:flex;align-items:flex-start;gap:11px;padding-bottom:14px;font-size:12.5px;color:var(--text-2)">
-              ${svg(I.clock, 'width:16px;height:16px;flex-shrink:0;margin-top:1px;color:var(--amber)')}
-              <span>Hoeveel dagen heb je in <b>${open.maand}</b> gereden? Geef het door vóór de uitbetaling van <b>vrijdag 7 augustus</b>, dan gaat het automatisch mee.</span></div>
-            <div style="display:grid;grid-template-columns:160px auto 1fr;gap:14px;align-items:end">
-              <div>${uclbl('Aantal rijdagen')}<input class="inp" id="rijdagenInp" type="number" min="0" max="31" style="max-width:none" placeholder="0" oninput="var b=document.getElementById('rijBedrag');if(b)b.textContent='€ '+((parseInt(this.value)||0)*${M.dagbedrag})"></div>
-              <button class="btn btn-primary" onclick="__verdDienRijdagen()">${svg(I.tick)}Doorgeven</button>
-              <div style="text-align:right;font-size:12.5px;color:var(--text-3)">Vergoeding: <b id="rijBedrag" class="mono" style="color:var(--text);font-size:15px">€ 0</b> <span>(${eur0(M.dagbedrag)}/dag)</span></div>
-            </div>`)
-        : `<div style="display:flex;align-items:center;gap:11px;padding:14px 16px;background:var(--emerald-soft);border:1px solid var(--emerald-line);border-radius:var(--r);font-size:13px;color:var(--emerald)">${svg(I.tick, 'width:16px;height:16px')}Je hebt alles doorgegeven — niets openstaand. Rond de eerste vrijdag van de nieuwe maand vragen we je rijdagen weer op.</div>`}
-      <div style="margin-top:14px">${dashCard('Doorgegeven rijdagen', 'blue',
-        H.table(
-          [{ l: 'Maand' }, { l: 'Rijdagen', cls: 'r' }, { l: 'Per dag', cls: 'r optional' }, { l: 'Vergoeding', cls: 'r' }, { l: 'Status' }],
-          done.map(u => [
-            `<span class="cell-main">${u.maand}</span>`,
-            `<span class="mono">${u.rijdagen}</span>`,
-            `<span class="money">${eur0(M.dagbedrag)}</span>`,
-            `<span class="money">${eur0(reisBedrag(u))}</span>`,
-            u.status === 'open' ? H.pill('warn', 'Wordt verwerkt') : H.pill('ok', 'Uitbetaald'),
-          ])
-        ))}</div>
+      ${dashCard('Huidige maand · ' + fmtMonth(t.period_month), 'blue', `
+        <div style="display:flex;align-items:flex-start;gap:11px;padding-bottom:12px;font-size:12.5px;color:var(--text-2)">
+          ${svg(I.clock, 'width:16px;height:16px;flex-shrink:0;margin-top:1px;color:var(--amber)')}
+          <span>Reisdagen worden pas verwerkt in het maandrapport. Rapport-status: ${status ? payoutPill(status) : '<i>nog geen concept aangemaakt</i>'}. ${editable ? 'Nog aanpasbaar tot goedkeuring door finance.' : '<b>Vergrendeld</b> — rapport is al goedgekeurd/uitbetaald.'}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2)">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Doorgegeven</div>
+            <div class="mono" style="font-size:20px;font-weight:600">${days} <span style="font-size:12px;color:var(--text-3);font-weight:400">dagen</span></div>
+          </div>
+          <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2)">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Vergoeding</div>
+            <div class="mono" style="font-size:20px;font-weight:600;color:var(--emerald)">${eur(amount)}</div>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r);font-size:11.5px;color:var(--text-3)">
+          ℹ Doorgeven / bijwerken van reisdagen komt in BROK 3 (write-actie met validatie tegen goedgekeurd rapport).
+        </div>
+      `)}
     </div>`;
   }
 
-  /* ── VIEW 4: Verdiensten/Certificaten (prototype r2019-2045) ──────── */
+  /* ═══════════════════════════════════════════════════════════════════════
+     VIEW 4 — Verdiensten/Certificaten (HERONTWORPEN → funded-certs)
+     ═══════════════════════════════════════════════════════════════════════ */
   function certificatenView() {
-    const mine = CERTIFICATEN.filter(c => c.mentor === myMentor().naam);
-    const goed = mine.filter(c => c.status === 'goedgekeurd').length;
+    if (!_live.certs.loading && !_live.certs.data && !_live.certs.error) queueMicrotask(fetchCerts);
+    if (_live.certs.error && !_live.certs.data) return errBlk(_live.certs.error, 'window.__verdRetryCerts()');
+    if (!_live.certs.data) return skel();
 
-    return `${H.voorbeeldBanner()}
-    ${H.kpis([
-      { c: 'violet',  icon: I.grad, label: 'Mijn certificaten',    val: String(mine.length), sub: mine.filter(c => c.status === 'ingediend').length + ' in beoordeling' },
-      { c: 'emerald', icon: I.tick, label: 'Goedgekeurd',          val: String(goed),         sub: 'tellen mee voor bonus' },
-      { c: 'blue',    icon: I.euro, label: 'Certificaat-bonus',   val: eur0(goed * 100),     sub: '€ 100 per certificaat' },
+    const allCerts = asArr(_live.certs.data.certs);
+    const py = String(F('py', _ui.py) || _ui.py);
+    const yr = YEAR_OF[py] || YEAR_OF['26'];
+
+    // Filter op jaar (client-side)
+    const rows = allCerts.filter((c) => monthKey(c.funded_month).startsWith(yr + '-'));
+
+    // Group by funded_month (YYYY-MM-01)
+    const byMonth = new Map();
+    rows.forEach((c) => {
+      const k = monthKey(c.funded_month);
+      if (!byMonth.has(k)) byMonth.set(k, { period: c.funded_month, items: [] });
+      byMonth.get(k).items.push(c);
+    });
+    const months = Array.from(byMonth.values()).sort((a, b) => (b.period || '').localeCompare(a.period || ''));
+
+    const totalCerts = rows.length;
+    const totalMonths = months.length;
+    const totalBonus = totalCerts * 100;
+
+    return `${H.kpis([
+      { c: 'violet',  icon: I.grad, label: 'Funded-certs ' + yr, val: String(totalCerts), sub: totalMonths + ' maand(en)' },
+      { c: 'emerald', icon: I.tick, label: 'Bonus ' + yr,        val: eur(totalBonus),    sub: '€ 100 per geclaimd cert' },
+    ])}
+    ${H.toolbar([
+      `<div style="display:flex;gap:6px">
+        <button class="btn ${py === '26' ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetPy('26')">2026</button>
+        <button class="btn ${py === '25' ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetPy('25')">2025</button>
+      </div>`,
     ])}
     <div class="pad" style="padding-top:16px">
-      ${dashCard('Certificaat uploaden', 'violet', `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
-          <div>${uclbl('Naam certificaat')}<input class="inp" id="certNaam" style="max-width:none" placeholder="bv. Advanced Technical Analysis"></div>
-          <div>${uclbl('Uitgever')}<input class="inp" id="certUitg" style="max-width:none" placeholder="bv. IFTA"></div>
-        </div>
-        <input type="file" id="certFile" accept="application/pdf,image/*" style="display:none" onchange="var el=document.getElementById('certFileName');if(el)el.textContent=this.files[0]?this.files[0].name:'Geen bestand gekozen'">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <button class="btn btn-ghost" onclick="document.getElementById('certFile').click()">${svg(I.doc)}Bestand kiezen</button>
-          <span id="certFileName" style="font-size:12.5px;color:var(--text-3)">Geen bestand gekozen</span>
-          <button class="btn btn-primary" style="margin-left:auto" onclick="__verdUploadCert()">${svg(I.plus)}Certificaat indienen</button>
-        </div>
-        <div style="font-size:11.5px;color:var(--text-3);margin-top:11px">Elk goedgekeurd certificaat levert automatisch <b>€ 100 bonus</b> op, meegenomen in je eerstvolgende uitbetaling. PDF of afbeelding.</div>`)}
-      <div style="margin-top:14px">${dashCard('Mijn certificaten', 'blue',
-        mine.length
-          ? H.table(
-              [{ l: 'Certificaat' }, { l: 'Uitgever', cls: 'optional' }, { l: 'Ingediend', cls: 'optional' }, { l: 'Bonus', cls: 'r' }, { l: 'Status' }],
-              mine.map(c => [
-                `<div style="display:flex;align-items:center;gap:10px">${GRADICO}<span class="cell-main">${c.naam}</span></div>`,
-                c.uitgever,
-                `<span style="color:var(--text-3)">${c.datum}</span>`,
-                c.status === 'goedgekeurd' ? `<span class="money">${eur0(100)}</span>` : `<span style="color:var(--text-3)">—</span>`,
-                H.pill(CERTST[c.status].c, CERTST[c.status].l),
-              ])
-            )
-          : `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">Nog geen certificaten ingediend.</div>`)}</div>
+      <div style="padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);font-size:12.5px;color:var(--text-2);margin-bottom:14px">
+        ℹ Elke geclaimde funded-cert = <b>€ 100 bonus</b> in het maandrapport. Uploaden gebeurt per student vanuit de <b>Mijn studenten</b>-flow (komt in BROK 3). De <code>funded_month</code> wordt gelockt bij de eerste upload — geen dubbele claims mogelijk.
+      </div>
+      ${months.length ? months.map((m) => `${dashCard(fmtMonth(m.period) + ' · ' + m.items.length + ' cert(s)', 'violet',
+        H.table(
+          [
+            { l: 'Student' },
+            { l: 'Bestand',  cls: 'optional' },
+            { l: 'Ge-upload', cls: 'optional' },
+            { l: 'Bonus',    cls: 'r' },
+          ],
+          m.items.map((c) => [
+            `<div style="display:flex;align-items:center;gap:10px">${GRADICO}<span class="cell-main">${H.esc ? H.esc(c.student_name || '—') : (c.student_name || '—')}</span></div>`,
+            `<span style="color:var(--text-3);font-family:'IBM Plex Mono',monospace;font-size:11.5px">${H.esc ? H.esc(c.file_name || '—') : (c.file_name || '—')}</span>`,
+            `<span style="color:var(--text-3)">${fmtDate(c.last_uploaded_at)}</span>`,
+            `<span class="money">${eur(100)}</span>`,
+          ]),
+        ),
+      )}<div style="height:12px"></div>`).join('') : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen funded-certificaten in ${yr} geclaimd.</div>`}
     </div>`;
   }
 
-  /* ── Registratie ───────────────────────────────────────────────────── */
+  /* ── Registratie ──────────────────────────────────────────────────────── */
   window.DFO.VIEWS['verdiensten/Overzicht']     = overzichtView;
   window.DFO.VIEWS['verdiensten/Uitbetalingen'] = uitbetalingenView;
   window.DFO.VIEWS['verdiensten/Reiskosten']    = reiskostenView;
   window.DFO.VIEWS['verdiensten/Certificaten']  = certificatenView;
+
   if (typeof window.KV_V2_ADD === 'function') {
     window.KV_V2_ADD('verdiensten');
   } else {
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('verdiensten');
   }
 
-  console.debug('[verdiensten-v2] registered 4 Verdiensten views (dormant tot allowlist of ?v2preview=verdiensten)');
+  console.debug('[verdiensten-v2] BROK 1 (v3) — 4 views geregistreerd met echte /api/mentor-* endpoints (dormant tot allowlist of ?v2preview=verdiensten met rol Mentor)');
 })();
