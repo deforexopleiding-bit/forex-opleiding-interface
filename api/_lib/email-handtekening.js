@@ -96,3 +96,76 @@ export function metHandtekening(text, html) {
     : htmlUitTekstMetLogoBijHandtekening(signedText);
   return { text: signedText, html: signedHtml };
 }
+
+/**
+ * v2 email-round DEEL 3: per-mailbox handtekening uit DB laden.
+ *
+ * Query-order (per-mailbox rij wint van global):
+ *   SELECT * FROM email_signatures
+ *   WHERE (mailbox = $1 OR mailbox IS NULL) AND is_active = true
+ *   ORDER BY mailbox NULLS LAST LIMIT 1
+ *
+ * Als de tabel niet bestaat (migratie nog niet gedraaid) OF de query faalt,
+ * valt hij fail-soft terug op de bestaande hardcoded metHandtekening().
+ * Idempotent: als de handtekening-tekst al in de body zit, geen dubbeling.
+ *
+ * Aanroepen vanuit send-endpoints:
+ *   const { text, html } = await metHandtekeningAsync(text, html, {
+ *     mailbox: fromMailboxSlug, // 'info' | 'leads' | ... (NIET full addr)
+ *     supabaseAdmin: <admin client>,
+ *   });
+ *
+ * Als `supabaseAdmin` niet meegegeven: skip DB-lookup en fallback op sync-variant.
+ */
+export async function metHandtekeningAsync(text, html, opts) {
+  const mailbox = String(opts?.mailbox || '').trim().toLowerCase() || null;
+  const supabaseAdmin = opts?.supabaseAdmin || null;
+  if (!supabaseAdmin) return metHandtekening(text, html);
+  let sig = null;
+  try {
+    // Per-mailbox eerst (mailbox=X); global (mailbox IS NULL) als fallback.
+    if (mailbox) {
+      const q = await supabaseAdmin
+        .from('email_signatures')
+        .select('body_html, body_text, logo_url')
+        .eq('mailbox', mailbox)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (!q.error && q.data) sig = q.data;
+    }
+    if (!sig) {
+      const q = await supabaseAdmin
+        .from('email_signatures')
+        .select('body_html, body_text, logo_url')
+        .is('mailbox', null)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (!q.error && q.data) sig = q.data;
+    }
+  } catch (e) {
+    console.warn('[email-handtekening] DB-lookup failed:', e?.message || e);
+    return metHandtekening(text, html); // fallback
+  }
+  if (!sig || (!sig.body_html && !sig.body_text)) {
+    // Geen DB-rij gevonden — fallback op hardcoded.
+    return metHandtekening(text, html);
+  }
+  // Marker voor idempotentie: gebruik body_text als er inhoud is, anders
+  // een fragment van body_html. Naïef maar effectief.
+  const dbMarker = String(sig.body_text || sig.body_html || '').slice(0, 60);
+  const inText = String(text || '');
+  const inHtml = String(html || '');
+  const alreadyInText = dbMarker && inText.includes(dbMarker);
+  const alreadyInHtml = dbMarker && inHtml.includes(dbMarker.slice(0, 40));
+  const outText = alreadyInText
+    ? inText
+    : inText.replace(/\s+$/, '') + '\n\n' + (sig.body_text || '');
+  let outHtml = '';
+  if (inHtml) {
+    outHtml = alreadyInHtml ? inHtml : (inHtml + (sig.body_html || ''));
+  } else {
+    // Bouw HTML uit signed-text; plak de DB body_html eronder.
+    outHtml = tekstNaarHtml(outText).replace(dbMarker, '') + (sig.body_html || '');
+  }
+  return { text: outText, html: outHtml };
+}

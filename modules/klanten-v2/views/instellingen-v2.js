@@ -161,9 +161,10 @@
     ]},
     { g: 'Communicatie', items: [
       { id: 'com-mail',         n: 'E-mailaccounts',       d: 'Postvakken die het systeem uitleest',                       ic: I.mail },
+      { id: 'com-handtekening', n: 'E-mail-handtekeningen', d: 'Globale + per-mailbox handtekening (server-side aan mails toegevoegd)', ic: I.mail },
       { id: 'com-wa',           n: 'WhatsApp',             d: 'Meta-koppeling en goedgekeurde templates',                  ic: I.chat || I.mail },
       { id: 'com-tel',          n: 'Telefonie',            d: 'Voys-koppeling en belinstellingen',                         ic: I.phone },
-      { id: 'com-sjabloon',     n: 'Berichtsjablonen',     d: 'Alle standaardteksten op één plek',                         ic: I.doc },
+      { id: 'com-sjabloon',     n: 'Berichtsjablonen',     d: 'E-mail-sjablonen voor compose/reply · beheer via API',       ic: I.doc },
     ]},
     { g: 'Marketing', items: [
       { id: 'mk-meta',          n: 'Meta-koppeling',       d: 'Advertentieaccount en pixel',                               ic: I.target },
@@ -486,11 +487,205 @@
     </div>`;
   }
 
+  /* ═════════════════════════════════════════════════════════════════════
+     v=4 — COMMUNICATIE · E-mail-handtekeningen (DEEL 3 v2 email-round).
+     Beheer 1 globale default + optionele per-mailbox override. Server-side
+     voegt de handtekening toe via /api/email-send-v2 (handtekening:true).
+     ═════════════════════════════════════════════════════════════════════ */
+  const MAILBOX_SLUGS = ['info', 'leads', 'partners', 'administratie', 'onboarding', 'events', 'welkom'];
+  const _sig = {
+    loading: false, error: null,
+    items: [],        // gehele lijst uit /api/email-signatures
+    active: null,     // welke mailbox open in editor: null=global, of slug
+    draft: null,      // { name, body_html, body_text, logo_url } bewerkt
+    busy: false, note: '',
+  };
+  async function fetchSignatures() {
+    if (_sig.loading) return;
+    _sig.loading = true; _sig.error = null; if (render) render();
+    const j = await tryFetch('email-signatures', '/api/email-signatures');
+    _sig.loading = false;
+    if (j?.__error) _sig.error = j.__error;
+    else if (j?.error) _sig.error = j.error;
+    else _sig.items = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
+  }
+  function _sigFor(mailbox) {
+    // mailbox=null → global (mailbox IS NULL in DB).
+    return _sig.items.find((s) => (mailbox == null ? s.mailbox == null : s.mailbox === mailbox)) || null;
+  }
+  window.__setSigOpen = (mailbox) => {
+    const key = mailbox === '' ? null : mailbox;
+    _sig.active = key;
+    const row = _sigFor(key);
+    _sig.draft = {
+      name:      row?.name || (key ? `Handtekening (${key})` : 'Globale standaard'),
+      body_html: row?.body_html || '',
+      body_text: row?.body_text || '',
+      logo_url:  row?.logo_url  || '',
+    };
+    _sig.note = '';
+    if (render) render();
+  };
+  window.__setSigField = (k, v) => {
+    if (!_sig.draft) return;
+    _sig.draft[k] = String(v == null ? '' : v);
+    _sig.note = '';
+  };
+  window.__setSigSave = async () => {
+    if (_sig.busy || !_sig.draft) return;
+    _sig.busy = true; _sig.note = 'Opslaan…'; if (render) render();
+    const payload = {
+      mailbox: _sig.active || null,
+      name:      _sig.draft.name || 'Standaard',
+      body_html: _sig.draft.body_html || '',
+      body_text: _sig.draft.body_text || '',
+      logo_url:  _sig.draft.logo_url  || null,
+      is_active: true,
+    };
+    const j = await tryFetch('sig-save', '/api/email-signatures', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }, 15000);
+    _sig.busy = false;
+    if (j?.__error || j?.error) {
+      _sig.note = 'Fout: ' + (j.__error || j.error);
+      if (render) render(); return;
+    }
+    _sig.note = 'Opgeslagen';
+    // Refresh
+    _sig.items = _sig.items.filter((s) => (payload.mailbox ? s.mailbox !== payload.mailbox : s.mailbox != null));
+    if (j?.item) _sig.items.push(j.item);
+    if (render) render();
+    setTimeout(() => { _sig.note = ''; if (render) render(); }, 2500);
+  };
+  window.__setSigDelete = async () => {
+    if (!_sig.active) { _sig.note = 'De globale default kan niet verwijderd worden.'; if (render) render(); return; }
+    if (_sig.busy) return;
+    _sig.busy = true; _sig.note = 'Verwijderen…'; if (render) render();
+    const j = await tryFetch('sig-delete', '/api/email-signatures?mailbox=' + encodeURIComponent(_sig.active), { method: 'DELETE' }, 10000);
+    _sig.busy = false;
+    if (j?.__error || j?.error) { _sig.note = 'Fout: ' + (j.__error || j.error); if (render) render(); return; }
+    _sig.items = _sig.items.filter((s) => s.mailbox !== _sig.active);
+    _sig.active = null;
+    _sig.draft = null;
+    _sig.note = 'Verwijderd';
+    if (render) render();
+    setTimeout(() => { _sig.note = ''; if (render) render(); }, 2500);
+  };
+  function bodyEmailHandtekeningen() {
+    if (!isSuperAdmin() && !(window.DFO?.S?.role === 'manager' || window.DFO?.S?.role === 'admin')) {
+      return bodyAccessDenied();
+    }
+    if (!_sig.loading && !_sig.items.length && !_sig.error) {
+      // Auto-load bij eerste render.
+      queueMicrotask(fetchSignatures);
+    }
+    const active = _sig.active; // null=global, of slug
+    const draft = _sig.draft;
+    const globalRow = _sigFor(null);
+    const perMailbox = MAILBOX_SLUGS.map((mb) => ({ mb, row: _sigFor(mb) }));
+    return `<div style="max-width:900px">
+      ${_sig.error ? `<div class="card" style="padding:12px 16px;background:var(--rose-soft);color:var(--rose);border-radius:10px;margin-bottom:14px">Fout: ${esc(_sig.error)}</div>` : ''}
+      ${_sig.loading ? `<div style="padding:20px;color:var(--text-3);text-align:center">Laden…</div>` : ''}
+
+      <div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+          <div style="font-size:13px;font-weight:600">Beheer handtekeningen</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Klik op een rij om te bewerken. De globale handtekening wordt gebruikt als een mailbox geen eigen handtekening heeft.</div>
+        </div>
+        <div>
+          <button class="btn btn-ghost" onclick="window.__setSigOpen('')" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:12px 16px;border:none;border-bottom:1px solid var(--border);background:${active === null && draft ? 'var(--surface-2)' : 'transparent'};cursor:pointer;text-align:left">
+            <div>
+              <div style="font-size:13px;font-weight:600">🌐 Globaal (standaard)</div>
+              <div style="font-size:11.5px;color:var(--text-3)">${globalRow?.name || 'Standaard'} · ${globalRow?.body_html ? 'geconfigureerd' : 'leeg — vul in'}</div>
+            </div>
+            <span style="font-size:11.5px;color:var(--text-3)">bewerken →</span>
+          </button>
+          ${perMailbox.map((x) => `
+            <button class="btn btn-ghost" onclick="window.__setSigOpen('${esc(x.mb)}')" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:12px 16px;border:none;border-bottom:1px solid var(--border);background:${active === x.mb && draft ? 'var(--surface-2)' : 'transparent'};cursor:pointer;text-align:left">
+              <div>
+                <div style="font-size:13px;font-weight:600">📮 ${esc(x.mb)}@deforexopleiding.nl</div>
+                <div style="font-size:11.5px;color:var(--text-3)">${x.row ? (x.row.name || 'Eigen handtekening') : 'geen eigen — valt terug op globale'}</div>
+              </div>
+              <span style="font-size:11.5px;color:var(--text-3)">bewerken →</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      ${draft ? `
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface-2)">
+          <div style="font-size:13px;font-weight:600">${active === null ? '🌐 Globale handtekening bewerken' : '📮 Handtekening voor ' + esc(active) + '@deforexopleiding.nl bewerken'}</div>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+          <label>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Naam (intern label)</div>
+            <input type="text" value="${esc(draft.name)}" oninput="window.__setSigField('name', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px" />
+          </label>
+          <label>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">HTML (voor mail-clients met opmaak)</div>
+            <textarea oninput="window.__setSigField('body_html', this.value)" rows="6" placeholder="<br><br>Met vriendelijke groet,<br>Team – De Forex Opleiding<br><a href='https://deforexopleiding.nl'>deforexopleiding.nl</a>" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;line-height:1.5;resize:vertical">${esc(draft.body_html)}</textarea>
+          </label>
+          <label>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Platte tekst (voor mail-clients zonder HTML)</div>
+            <textarea oninput="window.__setSigField('body_text', this.value)" rows="4" placeholder="\n\nMet vriendelijke groet,\nTeam – De Forex Opleiding" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;line-height:1.5;resize:vertical">${esc(draft.body_text)}</textarea>
+          </label>
+          <label>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Logo-URL (optioneel, publieke URL — bv. https://forex-opleiding-interface.vercel.app/dfo-logo-email.png)</div>
+            <input type="url" value="${esc(draft.logo_url)}" oninput="window.__setSigField('logo_url', this.value)" placeholder="https://…" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px" />
+          </label>
+          <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-3);line-height:1.55">
+            <b>Tip:</b> voor betrouwbaardere weergave in Outlook/iOS Mail kan een toekomstige versie het logo als inline attachment (CID) versturen. Nu wordt de URL rechtstreeks in de HTML gebruikt. Sommige clients tonen die pas na klik op "afbeeldingen tonen".
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:11.5px;color:${/fout/i.test(_sig.note) ? 'var(--rose)' : /opgeslagen|verwijderd/i.test(_sig.note) ? 'var(--emerald)' : 'var(--text-3)'}">${esc(_sig.note)}</div>
+            <div style="display:flex;gap:8px">
+              ${active ? `<button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__setSigDelete()" ${_sig.busy ? 'disabled' : ''}>Verwijderen</button>` : ''}
+              <button class="btn btn-primary btn-sm" onclick="window.__setSigSave()" ${_sig.busy ? 'disabled' : ''}>${_sig.busy ? 'Bezig…' : 'Opslaan'}</button>
+            </div>
+          </div>
+        </div>
+      </div>` : `
+      <div class="set-empty">
+        <span class="set-empty-ico">${svg(I.mail)}</span>
+        <div class="set-empty-t">Kies een handtekening om te bewerken</div>
+        <div class="set-empty-s">Klik hierboven op "Globaal" of op een specifieke mailbox.</div>
+      </div>`}
+    </div>`;
+  }
+
+  function bodyEmailSjablonen() {
+    if (!isSuperAdmin() && !(window.DFO?.S?.role === 'manager' || window.DFO?.S?.role === 'admin')) {
+      return bodyAccessDenied();
+    }
+    // Volledige beheer-UI komt later; nu een placeholder met endpoint-info.
+    return `<div style="max-width:800px">
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">E-mail-sjablonen</div>
+        <div style="font-size:12.5px;color:var(--text-2);line-height:1.55;margin-bottom:10px">
+          Sjablonen zijn beschikbaar in de compose/reply-picker (📄-knop in de compose-toolbar). De picker toont alle <b>active</b> sjablonen, gegroepeerd op categorie.
+        </div>
+        <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;color:var(--text-2);line-height:1.55">
+          <b>Beheer via API</b> (deze UI komt in een volgende ronde):<br>
+          <span class="mono" style="color:var(--text-3);font-size:11.5px">GET /api/email-templates</span><br>
+          <span class="mono" style="color:var(--text-3);font-size:11.5px">POST /api/email-templates &lt;{name, subject, body_html, body_text, category, is_active}&gt;</span><br>
+          <span class="mono" style="color:var(--text-3);font-size:11.5px">DELETE /api/email-templates?id=…</span>
+          <br><br>
+          Tabel: <span class="mono">email_templates</span> · migratie <span class="mono">2026-08-16-email-templates-and-signatures.sql</span>.
+        </div>
+      </div>
+    </div>`;
+  }
+
   function setBody(cur) {
-    if (cur.id === 'com-wa')            return bodyWhatsApp();
-    if (cur.id === 'team-rechten')      return bodyRechten();
-    if (cur.id === 'alg-bedrijf')       return bodyBedrijf();
-    if (cur.id === 'wb-venster')        return bodyVenster();
+    if (cur.id === 'com-wa')             return bodyWhatsApp();
+    if (cur.id === 'com-handtekening')   return bodyEmailHandtekeningen();
+    if (cur.id === 'com-sjabloon')       return bodyEmailSjablonen();
+    if (cur.id === 'team-rechten')       return bodyRechten();
+    if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
+    if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
   }
@@ -534,5 +729,5 @@
   window.DFO.VIEWS['instellingen/'] = instView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('instellingen');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('instellingen');
-  console.debug('[instellingen-v2] v=3 — nav-level rol-filter (items met roles-array worden voor niet-matches uit de nav verborgen); Systeem-groep = super_admin only.');
+  console.debug('[instellingen-v2] v=4 — Communicatie: E-mail-handtekeningen (globaal + per-mailbox) editor + Berichtsjablonen info-card.');
 })();

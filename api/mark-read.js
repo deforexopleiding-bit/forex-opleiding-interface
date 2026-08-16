@@ -1,5 +1,14 @@
 import { ImapFlow } from 'imapflow';
 import { safeError } from './_lib/safe-error.js';
+import { supabaseAdmin } from './supabase.js';
+
+// v2 email-round: mailbox-full-address → short-label voor email_messages.mailbox
+// (die kolom bevat 'info' / 'leads' / etc, zoals sync-emails.js schrijft).
+function mailboxSlug(mailbox) {
+  const s = String(mailbox || '').trim().toLowerCase();
+  const at = s.indexOf('@');
+  return at > 0 ? s.slice(0, at) : s;
+}
 
 // Houd deze lijst in sync met api/emails.js — dezelfde mailboxen,
 // dezelfde env-vars voor de wachtwoorden. onboarding@ is toegevoegd zodat
@@ -86,6 +95,26 @@ export default async function handler(req, res) {
         await client.messageFlagsRemove(uidArg, ['\\Seen'], { uid: true });
       } else {
         await client.messageFlagsAdd(uidArg, ['\\Seen'], { uid: true });
+      }
+      // v2 email-round: mirror de \Seen flag naar Supabase (email_messages.is_read)
+      // zodat de UI-status persisteert. Sync-emails.js fetcht alleen NIEUWE UIDs
+      // (from lastUid+1), dus IMAP-flags op oude rijen worden nooit her-gelezen —
+      // zonder deze DB-write toont refetch de mail weer als 'ongelezen'.
+      // Fail-soft: als de DB-write faalt, log en return alsnog ok (IMAP is
+      // authoritative; UI-refetch corrigeert bij volgende sync).
+      try {
+        const slug = mailboxSlug(mailbox);
+        const uidNums = uidList.map((u) => Number(u)).filter((n) => Number.isFinite(n));
+        if (uidNums.length) {
+          const { error: upErr } = await supabaseAdmin
+            .from('email_messages')
+            .update({ is_read: seen !== false })
+            .eq('mailbox', slug)
+            .in('imap_uid', uidNums);
+          if (upErr) console.warn('[mark-read] DB is_read update:', upErr.message);
+        }
+      } catch (dbErr) {
+        console.warn('[mark-read] DB is_read update threw:', dbErr?.message || dbErr);
       }
       return res.status(200).json({ ok: true, seen: seen !== false, count: uidList.length });
     } finally {
