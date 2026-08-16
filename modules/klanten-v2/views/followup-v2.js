@@ -152,8 +152,8 @@
     voicememo:   { loading: false, error: null, data: null },               // GET follow-up-voicememo-round
     messages:    { loading: {}, error: {}, data: {} },                      // per contact_id
     freeSlots:   { loading: false, error: null, data: null, key: null },    // key = start-date
-    adminBackfillContacts: { loading: false, data: null, error: null },
-    adminGhlBackfill: { loading: false, data: null, error: null, mode: 'dry_run' },
+    // v=17: admin-state (adminBackfillContacts/adminGhlBackfill) is
+    // verhuisd naar instellingen-v2.js.
   };
   const _ui = {
     view:            'open',            // buckets-slug (open/vandaag/te_laat/komende_7/snoozed/alle)
@@ -202,9 +202,8 @@
     voicememoAllBusy:  false,
     voicememoPopupDismissed: false,  // per-sessie: user heeft popup weggeklikt
     deleteApptModal:   null,      // { appointmentId, reden, saving, error }
-    adminBackfillBusy: false,
-    adminGhlBackfillConfirm: '',  // confirm-token input
-    adminGhlBackfillBusy: false,
+    // v=17: admin-UI (adminBackfillBusy/adminGhlBackfill*) verhuisd naar
+    // instellingen-v2.js. Bijbehorende handlers/fetchers ook.
   };
 
   // ── Helpers ─────────────────────────────────────────────────────────
@@ -698,43 +697,8 @@
     showToast('Afspraak verwijderd (soft-delete)' + (parts.length ? ' · ' + parts.join(', ') : ''), 'success');
     if (render) render();
   }
-  async function submitAdminBackfillContacts() {
-    if (_ui.adminBackfillBusy) return;
-    _ui.adminBackfillBusy = true; _live.adminBackfillContacts.data = null; _live.adminBackfillContacts.error = null;
-    if (render) render();
-    const j = await tryFetch('backfill-contacts', '/api/follow-up-backfill-contacts', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    }, 60000);
-    _ui.adminBackfillBusy = false;
-    if (j && (j.__error || j.error)) {
-      _live.adminBackfillContacts.error = j.__error || j.error;
-      showToast('Backfill mislukt: ' + _live.adminBackfillContacts.error, 'warn');
-    } else {
-      _live.adminBackfillContacts.data = { totaal: j.totaal || 0, updated: j.updated || 0, skipped: j.skipped || 0, errors: j.errors || 0 };
-      showToast(`Backfill klaar · ${j.updated || 0}/${j.totaal || 0} bijgewerkt`, 'success');
-    }
-    if (render) render();
-  }
-  async function submitAdminGhlBackfill(dryRun) {
-    if (_ui.adminGhlBackfillBusy) return;
-    _ui.adminGhlBackfillBusy = true; if (render) render();
-    const body = dryRun ? { dry_run: true, mode: 'strict', limit: 50 }
-      : { dry_run: false, mode: 'strict', limit: 50, confirm: _ui.adminGhlBackfillConfirm };
-    const j = await tryFetch('ghl-backfill', '/api/follow-up-ghl-status-backfill', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    }, 60000);
-    _ui.adminGhlBackfillBusy = false;
-    if (j && (j.__error || j.error)) {
-      _live.adminGhlBackfill.error = j.__error || j.error;
-      showToast('GHL-backfill mislukt: ' + _live.adminGhlBackfill.error, 'warn');
-    } else {
-      _live.adminGhlBackfill.data = j;
-      _live.adminGhlBackfill.mode = dryRun ? 'dry_run' : 'executed';
-      showToast(dryRun ? `Dry-run: ${j.returned || 0} kandidaten` : `Executed: ${j.succeeded || 0}/${j.processed || 0} bijgewerkt`, 'success');
-      if (!dryRun) _ui.adminGhlBackfillConfirm = '';
-    }
-    if (render) render();
-  }
+  // v=17: submitAdminBackfillContacts + submitAdminGhlBackfill verhuisd
+  // naar instellingen-v2.js (Systeem → Follow-up admin-tools).
   async function submitReactivate(type, id) {
     if (!id || _ui.afgeboektReactBusy[id]) return;
     _ui.afgeboektReactBusy[id] = true; if (render) render();
@@ -1234,15 +1198,8 @@
     const m = _ui.deleteApptModal; if (!m) return;
     openConfirm('Verwijderen: soft-delete DB + GHL-cancel (klant krijgt cancel-mail via GHL) + Zoom-meeting delete. Onomkeerbaar. Weet je zeker?', submitDeleteAppt, 'warn');
   };
-  window.__fuAdminBackfillContacts = () => {
-    openConfirm('Backfill GHL-contacts naar alle appointments met ontbrekende email/telefoon? Loopt door alle appts; kan lang duren (max 60s per run).', submitAdminBackfillContacts, 'warn');
-  };
-  window.__fuAdminGhlBackfillDry = () => submitAdminGhlBackfill(true);
-  window.__fuAdminGhlBackfillExecuteConfirm = (v) => { _ui.adminGhlBackfillConfirm = v; if (render) render(); };
-  window.__fuAdminGhlBackfillExecute = () => {
-    if (_ui.adminGhlBackfillConfirm !== 'IK BEGRIJP HET') { showToast('Typ letterlijk "IK BEGRIJP HET" in het confirm-veld', 'warn'); return; }
-    openConfirm('EXECUTE GHL-status-backfill (mode=strict, limit=50)? Muteert live GHL appointmentStatus → "showed". Alleen super_admin. Onomkeerbaar.', () => submitAdminGhlBackfill(false), 'warn');
-  };
+  // v=17: __fuAdmin* handlers verhuisd naar instellingen-v2.js
+  // (Systeem → Follow-up admin-tools).
   window.__fuSearchOpenResult = (source, targetJson) => {
     let target;
     try { target = JSON.parse(atob(targetJson)); } catch (_) { return; }
@@ -2498,98 +2455,11 @@
     </div>`;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // BROK 5 — ADMIN (super_admin: backfill-contacts + ghl-status-backfill)
-  // ═══════════════════════════════════════════════════════════════════════
-  function adminView() {
-    return `<div style="padding:14px 20px;max-width:900px">
-      <div style="margin-bottom:12px">
-        <h2 style="font-size:16px;font-weight:600;margin:0">Admin — beheer & backfill-tools</h2>
-        <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Alleen super-admin. Andere rollen krijgen 403.</div>
-      </div>
-      ${_adminBackfillContactsCard()}
-      ${_adminGhlBackfillCard()}
-      ${_adminReportenCard()}
-      ${_adminCronsCard()}
-      ${_renderModals()}
-      ${_renderToast()}
-    </div>`;
-  }
-  function _adminBackfillContactsCard() {
-    const busy = _ui.adminBackfillBusy;
-    const d = _live.adminBackfillContacts.data;
-    const err = _live.adminBackfillContacts.error;
-    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-size:13px;font-weight:600">Backfill GHL-contacts</div>
-          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Trekt email/telefoon bij van GHL voor appointments met ontbrekende contact-info.</div>
-        </div>
-        <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuAdminBackfillContacts()">${busy ? 'Bezig…' : 'Start backfill'}</button>
-      </div>
-      ${d ? `<div style="padding:10px 16px;font-size:12px;color:var(--text-2)">Resultaat: <span class="mono">${d.updated}</span>/<span class="mono">${d.totaal}</span> bijgewerkt · <span class="mono">${d.skipped}</span> geskipped · <span class="mono" style="color:var(--rose)">${d.errors}</span> fouten.</div>` : ''}
-      ${err ? `<div style="padding:10px 16px;font-size:12px;color:var(--rose)">Fout: ${esc(err)}</div>` : ''}
-    </div>`;
-  }
-  function _adminGhlBackfillCard() {
-    const busy = _ui.adminGhlBackfillBusy;
-    const d = _live.adminGhlBackfill.data;
-    const err = _live.adminGhlBackfill.error;
-    const mode = _live.adminGhlBackfill.mode;
-    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--rose-line, #f5b4bc);border-radius:10px">
-      <div style="padding:12px 16px;background:var(--rose-soft);border-bottom:1px solid var(--rose-line, #f5b4bc);display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-size:13px;font-weight:600;color:var(--rose)">⚠ GHL-status-backfill (klant-CRM-mutatie)</div>
-          <div style="font-size:11.5px;color:var(--rose);margin-top:2px">Zet historische appointments in GHL op status "showed". Muteert live CRM-data. Two-step: dry-run → confirm → execute.</div>
-        </div>
-      </div>
-      <div style="padding:12px 16px">
-        <div style="display:flex;gap:8px;margin-bottom:10px">
-          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__fuAdminGhlBackfillDry()">${busy && mode === 'dry_run' ? 'Bezig…' : '🔍 Dry-run (mode=strict, limit=50)'}</button>
-        </div>
-        ${d && mode === 'dry_run' ? `<div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;margin-bottom:10px">
-          <b>Dry-run resultaat:</b> ${d.total_candidates || 0} totaal kandidaten · toont eerste ${d.returned || 0} · limit ${d.limit || 50}${d.skipped_over_limit ? ` · ${d.skipped_over_limit} overgeslagen boven limit` : ''}<br>
-          ${d.note ? `<div style="margin-top:6px;font-style:italic">${esc(d.note)}</div>` : ''}
-        </div>` : ''}
-        ${d && mode === 'dry_run' ? `<div style="border-top:1px solid var(--border);padding-top:10px">
-          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Execute (na dry-run review)</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input type="text" placeholder='Typ "IK BEGRIJP HET"' value="${esc(_ui.adminGhlBackfillConfirm)}" oninput="window.__fuAdminGhlBackfillExecuteConfirm(this.value)" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px" />
-            <button class="btn btn-primary btn-sm" ${busy || _ui.adminGhlBackfillConfirm !== 'IK BEGRIJP HET' ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__fuAdminGhlBackfillExecute()">${busy && mode === 'executed' ? 'Executing…' : '🚨 EXECUTE'}</button>
-          </div>
-        </div>` : ''}
-        ${d && mode === 'executed' ? `<div style="padding:10px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:12px;margin-top:10px">
-          <b>Executed:</b> ${d.succeeded || 0}/${d.processed || 0} bijgewerkt${d.failed ? ` · ${d.failed} fouten` : ''}.
-        </div>` : ''}
-        ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-top:10px">${esc(err)}</div>` : ''}
-      </div>
-    </div>`;
-  }
-  function _adminReportenCard() {
-    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
-      <div style="padding:12px 16px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:6px">📧 Admin-rapporten (cron)</div>
-        <div style="font-size:12px;color:var(--text-2);line-height:1.6">
-          <b>follow-up-admin-daily</b> — verstuurt dagelijks 21:00 NL naar admins/managers via e-mail. Dedup per dag+recipient.<br>
-          <b>follow-up-admin-weekly</b> — verstuurt zondag 10:00 NL. Dedup per week.<br>
-          <span style="color:var(--text-3);font-size:11.5px">Beide draaien server-side (cron). Ontvangers: alle super_admin + manager. Interne mail — geen klant-verzending.</span>
-        </div>
-      </div>
-    </div>`;
-  }
-  function _adminCronsCard() {
-    return `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
-      <div style="padding:12px 16px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:6px">🔄 GHL-integratie (server-side)</div>
-        <div style="font-size:12px;color:var(--text-2);line-height:1.6">
-          <b>follow-up-ghl-appointment-poll</b> — cron elke 15 min. Sync GHL-appointments naar DB. Ghost-detectie.<br>
-          <b>follow-up-ghl-conversations-poll</b> — cron elke 15 min. Safety-net voor conversations-webhook.<br>
-          <b>follow-up-ghl-conversation-webhook</b> — inkomend van GHL bij nieuwe messages.<br>
-          <span style="color:var(--text-3);font-size:11.5px">Alle drie draaien automatisch. Geen UI-actie nodig — check via server-logs.</span>
-        </div>
-      </div>
-    </div>`;
-  }
+  // v=17: adminView + 4 helper-cards (_adminBackfillContactsCard /
+  // _adminGhlBackfillCard / _adminReportenCard / _adminCronsCard) zijn
+  // verhuisd naar instellingen-v2.js → Systeem → Follow-up admin-tools.
+  // Endpoints en 3-staps-guard (dry-run → typ "IK BEGRIJP HET" →
+  // confirm-modal) blijven identiek — alleen de UI verhuist.
   const APPT_OUTCOMES = [
     { v: 'gesprek_gehad',  l: 'Gesprek gehad',  c: 'emerald' },
     { v: 'sale',           l: '✅ Verkocht',    c: 'emerald' },
@@ -2827,17 +2697,17 @@
      Opvolging is uit dit menu: opgegaan in nieuwe Agenda-tab (open/actie).
      ═══════════════════════════════════════════════════════════════════════ */
   function overigeView() {
+    // v=17: Admin-item is verhuisd naar Instellingen (super_admin only).
+    // Overige-hub houdt: Sluimerpot / Afgeboekt / Archief.
     const items = [
       { sub: 'Sluimerpot', icon: '💤', desc: 'Leads die gepauzeerd zijn — komen automatisch terug op de wake-datum.' },
       { sub: 'Afgeboekt',  icon: '📉', desc: 'Verloren leads met reden (afgesloten, doorverwezen, dubbel).' },
       { sub: 'Archief',    icon: '📁', desc: 'Historische leads (>90 dagen inactief, gearchiveerd).' },
-      { sub: 'Admin',      icon: '⚙',  desc: 'Instellingen, backfill, GHL-koppelingen, sync-status.' },
     ];
     const subMap = {
       Sluimerpot: sluimerpotView,
       Afgeboekt:  afgeboektView,
       Archief:    archiefView,
-      Admin:      adminView,
     };
     const sub = _ui.overigeSub;
     if (sub && typeof subMap[sub] === 'function') {
@@ -2902,6 +2772,73 @@
     </div>`;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // v=17 — VOICEMEMO HEADER-KNOP (altijd zichtbaar in Follow-up)
+  // ─────────────────────────────────────────────────────────────────────
+  // Klein fixed-position knopje rechtsboven onder de topbar, ALLEEN
+  // zichtbaar wanneer de user in de Follow-up-module zit. Klik opent de
+  // voicememo-view (deep-link naar VIEWS['followup/Voicememo'] via
+  // __fuVoicememoOpenView, ook bij 0 open — die view heeft een eigen nette
+  // empty-state). Bij >0 open wordt een badge met de count getoond.
+  //
+  // Implementatie: singleton <button> aan document.body, met display-toggle
+  // op basis van DFO.S.mod. Sync gebeurt via een lichte monkey-patch van
+  // DFO.render (guard tegen dubbele wrapping). De bestaande popup-nag
+  // (_voicememoPopup) blijft ongewijzigd — dat is een aparte proactieve
+  // reminder bij openen van Follow-up.
+  // ═══════════════════════════════════════════════════════════════════════
+  function _voicememoOpenCount() {
+    const d = _live.voicememo.data;
+    if (!d) return 0;
+    const items = asArr(d.items || d.rounds || d);
+    return items.filter((it) => !it.voicememo_sent && !it.done).length;
+  }
+  function _ensureVoicememoHeaderBtn() {
+    let btn = document.getElementById('fuVoicememoHeaderBtn');
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = 'fuVoicememoHeaderBtn';
+      btn.type = 'button';
+      btn.title = 'Open voicememo-ronde';
+      btn.style.cssText = [
+        'position:fixed', 'top:14px', 'right:24px', 'z-index:1400',
+        'padding:6px 12px', 'border:1px solid var(--violet)',
+        'background:var(--violet-soft)', 'color:var(--violet)',
+        'border-radius:20px', 'font-size:12px', 'font-weight:600',
+        'cursor:pointer', 'font-family:inherit', 'line-height:1.2',
+        'display:none',
+      ].join(';');
+      btn.addEventListener('click', () => {
+        if (typeof window.__fuVoicememoOpenView === 'function') window.__fuVoicememoOpenView();
+      });
+      document.body.appendChild(btn);
+    }
+    const isFollowup = window.DFO && window.DFO.S && window.DFO.S.mod === 'followup';
+    if (!isFollowup) { btn.style.display = 'none'; return; }
+    // Trigger fetch als nog niet geladen (fail-soft; als endpoint faalt
+    // toont het knopje gewoon "🎙 Voicememo's" zonder badge).
+    if (!_live.voicememo.data && !_live.voicememo.loading && !_live.voicememo.error) {
+      queueMicrotask(fetchVoicememo);
+    }
+    const n = _voicememoOpenCount();
+    btn.innerHTML = n > 0
+      ? `🎙 Voicememo's · <span style="background:var(--violet);color:#fff;padding:1px 7px;border-radius:20px;margin-left:2px;font-weight:700">${n}</span>`
+      : `🎙 Voicememo's`;
+    btn.style.display = '';
+  }
+  // Monkey-patch DFO.render — draai voortaan _ensureVoicememoHeaderBtn na
+  // elke shell-render. Guard tegen dubbele wrapping als followup-v2 twee
+  // keer wordt geëvalueerd (bv. bij hot-reload).
+  if (window.DFO && typeof window.DFO.render === 'function' && !window.DFO.__fuHeaderBtnPatched) {
+    const _origRender = window.DFO.render;
+    window.DFO.render = function () {
+      const r = _origRender.apply(this, arguments);
+      try { _ensureVoicememoHeaderBtn(); } catch (_) { /* fail-soft */ }
+      return r;
+    };
+    window.DFO.__fuHeaderBtnPatched = true;
+  }
+
   // Ronde 8 (v=16) tab-topologie:
   // Hoofd-tabbalk: Werklijst · Event-bellijst · Opvolglijst · Retenties ·
   //                Afspraken · Kalender · Agenda · Statistieken · Zoeken ·
@@ -2930,10 +2867,10 @@
   window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;
   window.DFO.VIEWS['followup/Zoeken']          = zoekenView;
   window.DFO.VIEWS['followup/Voicememo']       = voicememoView;      // deep-link only (indicator + popup)
-  window.DFO.VIEWS['followup/Admin']           = adminView;          // via Overige-hub
+  // v=17: Admin verhuisd naar Instellingen module (Systeem-sectie).
   window.DFO.VIEWS['followup/Overige']         = overigeView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
-  console.debug('[followup-v2] v=16 registered — Agenda-tab + Overige-hub state-fix (16 views, 10 in hoofd-tabbalk).');
+  console.debug('[followup-v2] v=17 registered — Voicememo header-btn (fixed) + Admin verhuisd naar Instellingen (15 views, 10 in hoofd-tabbalk).');
 })();
