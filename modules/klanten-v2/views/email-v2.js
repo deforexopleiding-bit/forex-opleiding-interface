@@ -1648,7 +1648,22 @@
     // 'r een, vul die ook in. NIET overschrijven van bestaande subject om
     // typefouten te voorkomen.
     if (t.subject && !_ui.compose.subject) _ui.compose.subject = t.subject;
-    _ui.compose.body_html = (_ui.compose.body_html || '') + (t.body_html || t.body_text || '');
+    // v=23: sjabloon-insert positioneel — VOOR de sig-marker plakken.
+    // Bij reply/fwd staat de body op: [eigen-typ-zone] + [sig-marker div] +
+    // [quote]. Zonder marker-check zou de sjabloon achter de marker landen
+    // → server plakt handtekening ERVOOR → sjabloon verschijnt ONDER de
+    // handtekening. Fix: split op de marker en injecteer ertussen.
+    const insert = t.body_html || t.body_text || '';
+    const SIG_MARKER_RE = /<div[^>]*data-sig-marker=["']1["'][^>]*>[\s\S]*?<\/div>/i;
+    const current = String(_ui.compose.body_html || '');
+    const m = current.match(SIG_MARKER_RE);
+    if (m) {
+      const idx = current.indexOf(m[0]);
+      _ui.compose.body_html = current.slice(0, idx) + insert + current.slice(idx);
+    } else {
+      // Nieuwe mail (geen marker): plak achteraan zoals voorheen.
+      _ui.compose.body_html = current + insert;
+    }
     _ui.draftDirty = true;
     _ui.templatePickerOpen = false;
     saveDraftDebounced();
@@ -1727,5 +1742,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=22 — klant-zoeker uncontrolled-input (surgische results-render, geen focus-loss) + body-fetch DB-fallback (leads@ notificatie-mails laden via email_id ipv IMAP-uid). Alles uit v=21 behouden.');
+  console.debug('[email-v2] v=23 — template-insert positioneel: sjabloon-body wordt nu VOOR de sig-marker geplakt (was: erna → handtekening kwam boven sjabloon-tekst). Alles uit v=22 behouden.');
 })();
