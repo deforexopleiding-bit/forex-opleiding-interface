@@ -938,14 +938,32 @@
   window.__fuNoteDraft = (leadId, v) => { _ui.noteDraft[leadId] = v; if (render) render(); };
   window.__fuNoteSave = (leadId) => submitNote(leadId);
   window.__fuStatus = (leadId, status) => submitLeadUpdate(leadId, { lead_status: status });
+  // Surgische DOM-sync voor slot-chip highlights + datetime-input value.
+  // GEEN full re-render → geen scroll-reset, geen focus-loss.
+  function _syncSlotChipHighlight(iso) {
+    try {
+      const chips = document.querySelectorAll('[data-fu-slot-chip]');
+      chips.forEach((btn) => {
+        const slotIso = btn.getAttribute('data-fu-slot-iso');
+        const active = slotIso && iso && slotIso === iso;
+        btn.style.borderColor = active ? 'var(--m)' : 'var(--border)';
+        btn.style.background = active ? 'var(--m-soft)' : 'var(--surface)';
+        btn.style.color = active ? 'var(--m)' : 'var(--text-2)';
+        btn.style.fontWeight = active ? '600' : '400';
+      });
+    } catch (_) { /* no-op */ }
+  }
   // Slot-pick invult m.newDatetime van de OUTCOME-modal (verzetten-flow).
-  // De losse _verplaatsModal is verwijderd (dead-code): de bereikbare
-  // verzetten-flow gaat altijd via appt-outcome-modal → gedelegeerd naar
-  // /api/follow-up-verplaats-call.
+  // Surgische DOM-write (input + chip-highlight) i.p.v. re-render — voorkomt
+  // scroll-reset naar top van modal-body én behoudt focus in het datetime-veld.
   window.__fuPickSlot = (isoDateTime) => {
     if (!_ui.apptOutcomeModal || !isoDateTime) return;
     _ui.apptOutcomeModal.newDatetime = isoDateTime;
-    if (render) render();
+    try {
+      const inp = document.querySelector('[data-fu-appt-datetime]');
+      if (inp) inp.value = isoDateTime;
+    } catch (_) { /* no-op */ }
+    _syncSlotChipHighlight(isoDateTime);
   };
   // window.__fuCloseVerplaats / __fuVerplaatsField / __fuVerplaatsSave verwijderd
   // (dead-code, geen call-sites meer sinds _verplaatsModal weg is).
@@ -998,8 +1016,14 @@
   // State-only handler — GEEN re-render tijdens typen. Fix voor focus-loss
   // (NotFoundError: Failed to set 'innerHTML' … node no longer a child) op
   // datetime-local / number / textarea inputs. Re-render gebeurt alleen bij
-  // slot-chip klik (__fuPickSlot) of outcome-radio (__fuApptOutcomeSet).
-  window.__fuApptOutcomeField = (k, v) => { if (_ui.apptOutcomeModal) { _ui.apptOutcomeModal[k] = v; } };
+  // outcome-radio (__fuApptOutcomeSet); slot-pick doet surgische DOM-update.
+  // Bij handmatige newDatetime-wijziging: sync ook de chip-highlight surgisch
+  // zodat een oude actieve chip niet blijft staan bij manueel wijzigen.
+  window.__fuApptOutcomeField = (k, v) => {
+    if (!_ui.apptOutcomeModal) return;
+    _ui.apptOutcomeModal[k] = v;
+    if (k === 'newDatetime') _syncSlotChipHighlight(v);
+  };
   const APPT_RISK_OUTCOMES = new Set(['sale','no_show','gesprek_gehad','wilt_niet_meer','niet_geschikt','later_opnieuw','terugbel','verzetten','annuleren']);
   window.__fuApptOutcomeSave = () => {
     const m = _ui.apptOutcomeModal; if (!m || !m.outcome) return;
@@ -1476,7 +1500,7 @@
                 // Combineer d.date + t naar datetime-local waarde (YYYY-MM-DDTHH:MM)
                 const iso = `${d.date}T${t}`;
                 const isSelected = _ui.apptOutcomeModal?.newDatetime === iso;
-                return `<button class="chip" style="padding:4px 10px;border:1px solid ${isSelected ? 'var(--m)' : 'var(--border)'};background:${isSelected ? 'var(--m-soft)' : 'var(--surface)'};color:${isSelected ? 'var(--m)' : 'var(--text-2)'};border-radius:6px;font-size:11.5px;font-family:'IBM Plex Mono',monospace;cursor:pointer;font-weight:${isSelected ? '600' : '400'}" onclick="window.__fuPickSlot('${esc(iso)}')">${esc(t)}</button>`;
+                return `<button class="chip" data-fu-slot-chip data-fu-slot-iso="${esc(iso)}" style="padding:4px 10px;border:1px solid ${isSelected ? 'var(--m)' : 'var(--border)'};background:${isSelected ? 'var(--m-soft)' : 'var(--surface)'};color:${isSelected ? 'var(--m)' : 'var(--text-2)'};border-radius:6px;font-size:11.5px;font-family:'IBM Plex Mono',monospace;cursor:pointer;font-weight:${isSelected ? '600' : '400'}" onclick="window.__fuPickSlot('${esc(iso)}')">${esc(t)}</button>`;
               }).join('')}
             </div>
           </div>`;
@@ -2432,7 +2456,7 @@
       ${m.outcome === 'verzetten' ? `
         ${_renderFreeSlotsPicker()}
         <label style="display:block;margin-bottom:8px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Nieuwe datum & tijd</span>
-          <input type="datetime-local" value="${esc(m.newDatetime)}" oninput="window.__fuApptOutcomeField('newDatetime', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
+          <input type="datetime-local" data-fu-appt-datetime value="${esc(m.newDatetime)}" oninput="window.__fuApptOutcomeField('newDatetime', this.value)" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
         </label>
         <label style="display:block;margin-bottom:14px"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Duur (min)</span>
           <input type="number" min="10" max="180" step="15" value="${esc(m.duration)}" oninput="window.__fuApptOutcomeField('duration', Number(this.value))" style="display:block;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px" />
