@@ -47,12 +47,20 @@
 // op elke destructieve/geld-actie · typ-token op HOOG-risico (mark-paid /
 // revert / delete).
 //
-// v4.
+// v5. Fix (2026-08-16): eerdere versie had een top-level guard op
+// `window.KV.authedJson` die de hele module abort — MAAR: window.KV wordt
+// gezet door klanten-v2.js (ES-module, async geladen) en dat draait
+// meestal ná deze classic-script view. Andere v2-views (finance-v2,
+// followup-v2, sales-v2) checken KV alleen INSIDE hun tryFetch (runtime),
+// niet als top-level bail. Nu gelijk getrokken: registreer views altijd,
+// en tryFetch checkt KV pas op het moment dat de user daadwerkelijk
+// fetcht. Ontbrekende Supabase Storage voor cert-upload = warn.
 
 (function () {
   if (!window.DFO) { console.error('[verdiensten-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[verdiensten-v2] KV_V2.helpers niet geladen.'); return; }
-  if (!window.KV || !window.KV.authedJson) { console.error('[verdiensten-v2] KV.authedJson niet geladen.'); return; }
+  // GEEN top-level bail op window.KV — die is er wél tegen fetch-tijd (klanten-v2.js
+  // ES-module bootstrap zet 'em vóór de user een tab opent).
   if (!window.supabase || !window.AuthShared) { console.warn('[verdiensten-v2] window.supabase/AuthShared ontbreekt — cert-upload werkt niet.'); }
 
   const { I, svg, S, F, render } = window.DFO;
@@ -108,6 +116,9 @@
      ───────────────────────────────────────────────────────────────────── */
   async function tryFetch(label, url, timeoutMs = 8000) {
     try {
+      if (!window.KV || typeof window.KV.authedJson !== 'function') {
+        throw new Error('KV.authedJson nog niet geladen (klanten-v2 bootstrap async)');
+      }
       return await Promise.race([
         window.KV.authedJson(url),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout na ' + timeoutMs + 'ms')), timeoutMs)),
@@ -119,6 +130,9 @@
   }
   async function tryPost(label, url, body, timeoutMs = 12000) {
     try {
+      if (!window.KV || typeof window.KV.authedJson !== 'function') {
+        throw new Error('KV.authedJson nog niet geladen (klanten-v2 bootstrap async)');
+      }
       return await Promise.race([
         window.KV.authedJson(url, { method: 'POST', body: JSON.stringify(body || {}) }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout na ' + timeoutMs + 'ms')), timeoutMs)),
@@ -1461,5 +1475,5 @@
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('verdiensten');
   }
 
-  console.debug('[verdiensten-v2] BROK 1+2+3+4 (v4) — 7 views geregistreerd. Dormant tot allowlist of ?v2preview=verdiensten.');
+  console.debug('[verdiensten-v2] BROK 1+2+3+4 (v5) — 7 views registered (Overzicht/Coaching/Events/Uitbetalingen/Reiskosten/Certificaten/Alle mentors). Dormant tot allowlist of ?v2preview=verdiensten.');
 })();
