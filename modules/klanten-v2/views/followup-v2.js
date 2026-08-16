@@ -191,6 +191,7 @@
     // BROK 5
     voicememoBusy:     {},        // per appointment_id
     voicememoAllBusy:  false,
+    voicememoPopupDismissed: false,  // per-sessie: user heeft popup weggeklikt
     deleteApptModal:   null,      // { appointmentId, reden, saving, error }
     adminBackfillBusy: false,
     adminGhlBackfillConfirm: '',  // confirm-token input
@@ -902,6 +903,48 @@
     }
     if (render) render();
   };
+  // UX-ronde 2026-08-16: "Openen"-actie voor deelnemers/opvolglijst-rijen
+  // zonder lead. Find-or-create via POST /api/event-followup-to-lead met
+  // attendee_id OF followup_id (endpoint accepteert beide). Klant-veilig:
+  // maakt max 1 lead (endpoint idempotent — `already:true` bij herhaling),
+  // mirror v1-gedrag. Bij success → __fuJumpToLead naar de resulterende lead
+  // → Werklijst met filters=alle zodat de lead direct werkbaar is.
+  window.__fuAttendeeToLead = async (attendeeId, followupId) => {
+    if (!attendeeId && !followupId) { showToast('Geen attendee/followup-id', 'warn'); return; }
+    const body = {};
+    if (followupId) body.followup_id = followupId;
+    else            body.attendee_id = attendeeId;
+    const j = await tryFetch('to-lead', '/api/event-followup-to-lead', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, 10000);
+    if (!j || j.__error) {
+      showToast('Openen mislukt: ' + (j?.__error || 'onbekend'), 'warn');
+      return;
+    }
+    if (j.code === 'MIGRATION_REQUIRED') {
+      showToast('follow_up_leads-tabel ontbreekt — migratie moet nog draaien.', 'warn');
+      return;
+    }
+    if (!j.lead_id) { showToast('Geen lead-id terug uit endpoint', 'warn'); return; }
+    if (j.already) showToast('Bestaande lead geopend', 'success');
+    else           showToast('Lead aangemaakt + geopend', 'success');
+    window.__fuJumpToLead(j.lead_id);
+  };
+  // Voicememo-popup dismiss (per sessie; blijft dicht tot volgende page-load).
+  window.__fuVoicememoDismissPopup = () => {
+    _ui.voicememoPopupDismissed = true;
+    if (render) render();
+  };
+  window.__fuVoicememoOpenView = () => {
+    _ui.voicememoPopupDismissed = true;
+    if (window.DFO && typeof window.DFO.goTab === 'function') {
+      try { window.DFO.goTab('Overige'); } catch (_) {}
+    }
+    // Fallback: als Overige-tab geen sub-nav aanbiedt naar Voicememo, gebruik
+    // directe view-render via hash-manipulatie (mocht die pad bestaan).
+    if (render) render();
+  };
   window.__fuDetailTab = (t) => { _ui.detailTab = t; if (render) render(); };
   window.__fuOpenCall = (leadId) => {
     _ui.callModal = { leadId, outcome: null, terugbel: '', snoozeMonths: 6, warmte: 5, bezwaren: new Set(), note: '', saving: false, error: null };
@@ -1186,6 +1229,7 @@
         <div style="border-right:1px solid var(--border);overflow-y:auto;min-height:0">${listPane}</div>
         <div style="overflow-y:auto;min-height:0;background:var(--bg, var(--surface))">${detailPane}</div>
       </div>
+      ${_voicememoPopup()}
       ${_renderModals()}
       ${_renderToast()}
     </div>`;
@@ -1229,8 +1273,18 @@
         </select>
       </label>
       <input type="search" placeholder="Zoek naam / e-mail / telefoon…" value="${esc(_ui.search)}" oninput="window.__fuSearch(this.value)" style="flex:1;max-width:280px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px" />
-      ${_live.leadsList.data ? `<span style="margin-left:auto;color:var(--text-3);font-family:'IBM Plex Mono',monospace;font-size:11.5px">${asArr(_live.leadsList.data.leads).length} leads</span>` : ''}
+      ${_renderVoicememoIndicator()}
+      ${_live.leadsList.data ? `<span style="color:var(--text-3);font-family:'IBM Plex Mono',monospace;font-size:11.5px">${asArr(_live.leadsList.data.leads).length} leads</span>` : ''}
     </div>`;
+  }
+  // Kleine voicememo-indicator (mirror v1) — badge met openstaand-count +
+  // klik-actie naar de deep-link view. Vervangt de eigen "Voicememo"-tab.
+  function _renderVoicememoIndicator() {
+    if (!_live.voicememo.data) return '';
+    const items = asArr(_live.voicememo.data.items || _live.voicememo.data.rounds || _live.voicememo.data);
+    const openCount = items.filter((it) => !it.voicememo_sent && !it.done).length;
+    if (openCount <= 0) return '';
+    return `<button class="btn btn-ghost btn-sm" style="margin-left:auto;gap:6px;color:var(--violet);border-color:var(--violet)" onclick="window.__fuVoicememoOpenView()" title="Voicememo-ronde (${openCount} openstaand)">🎙 ${openCount}</button>`;
   }
   function _renderLeadsList() {
     const leads = asArr(_live.leadsList.data?.leads);
@@ -1630,7 +1684,11 @@
             <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.email || it.phone || '—')}${it.event_title ? ` · ${esc(it.event_title)}` : ''}${it.scheduled_at ? ` · ${fmtDate(it.scheduled_at)}` : ''}</div>
             ${it.actie_hint ? `<div style="font-size:11px;color:var(--text-2);margin-top:2px;font-style:italic">${esc(it.actie_hint)}</div>` : ''}
           </div>
-          ${it.lead_id ? `<button class="btn btn-ghost btn-sm" onclick="window.__fuJumpToLead('${esc(it.lead_id)}')" title="Open lead in Werklijst (reset filters naar Alles)">Open lead →</button>` : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
+          ${it.lead_id
+            ? `<button class="btn btn-primary btn-sm" onclick="window.__fuJumpToLead('${esc(it.lead_id)}')" title="Open lead in Werklijst (reset filters naar Alles)">📞 Openen</button>`
+            : (it.attendee_id || it.followup_id)
+              ? `<button class="btn btn-primary btn-sm" onclick="window.__fuAttendeeToLead('${esc(it.attendee_id || '')}','${esc(it.followup_id || '')}')" title="Maak lead van deze deelnemer en open in Werklijst">📞 Openen</button>`
+              : `<span style="font-size:11px;color:var(--text-3);font-style:italic" title="Geen lead + geen attendee-koppeling — kan niet openen">geen lead</span>`}
           <button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__fuOpenAfschrijf('${esc(it.type)}','${esc(it.ref_id)}')">Afschrijven</button>
         </div>
       `).join('')}
@@ -1699,7 +1757,11 @@
             </div>
             ${callStatus !== '—' ? H.pill(callColor, callStatus) : '<span style="font-size:11px;color:var(--text-3)">—</span>'}
             ${a.call_status_at ? `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3);white-space:nowrap">${fmtDateShort(a.call_status_at)}</span>` : '<span></span>'}
-            ${a.lead_id ? `<button class="btn btn-primary btn-sm" onclick="window.__fuJumpToLead('${esc(a.lead_id)}')">Open lead →</button>` : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
+            ${a.lead_id
+              ? `<button class="btn btn-primary btn-sm" onclick="window.__fuJumpToLead('${esc(a.lead_id)}')" title="Open lead in Werklijst">📞 Openen</button>`
+              : (a.id || a.attendee_id || a.followup_id)
+                ? `<button class="btn btn-primary btn-sm" onclick="window.__fuAttendeeToLead('${esc(a.id || a.attendee_id || '')}','${esc(a.followup_id || '')}')" title="Maak werkbare lead + open in Werklijst">📞 Openen</button>`
+                : `<span style="font-size:11px;color:var(--text-3);font-style:italic">geen lead</span>`}
           </div>`;
         }).join('')}
       </div>`}`;
@@ -2428,9 +2490,6 @@
     const meta = APPT_OUTCOMES.find((o) => o.v === m.outcome);
     const riskText = m.outcome ? APPT_OUTCOME_RISK[m.outcome] : null;
     const body = `
-      <div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:14px">
-        ⚠ <b>Test-data eerst!</b> Deze acties raken GHL-agenda, Zoom, en kunnen follow-up-leads aanmaken. Verifieer preview-guard voor je op productie test.
-      </div>
       ${riskText ? `<div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber);color:var(--amber);border-radius:6px;font-size:12px;margin-bottom:14px;line-height:1.5"><b>Gevolg van "${esc(meta ? meta.l : m.outcome)}":</b><br>${esc(riskText)}</div>` : ''}
       <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Uitkomst</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:14px">
@@ -2629,22 +2688,95 @@
   // ═══════════════════════════════════════════════════════════════════════
   // REGISTRATIE
   // ═══════════════════════════════════════════════════════════════════════
+  /* ═══════════════════════════════════════════════════════════════════════
+     OVERIGE-tab (UX-ronde) — hub-menu naar admin/archief/afgeboekt/sluimerpot
+     Houdt de hoofd-tabbalk compact. Klik → DFO.goTab naar sub-view.
+     ═══════════════════════════════════════════════════════════════════════ */
+  function overigeView() {
+    const items = [
+      { tab: 'Sluimerpot', icon: '💤', desc: 'Leads die gepauzeerd zijn — komen automatisch terug op de wake-datum.' },
+      { tab: 'Afgeboekt',  icon: '📉', desc: 'Verloren leads met reden (afgesloten, doorverwezen, dubbel).' },
+      { tab: 'Archief',    icon: '📁', desc: 'Historische leads (>90 dagen inactief, gearchiveerd).' },
+      { tab: 'Admin',      icon: '⚙',  desc: 'Instellingen, backfill, GHL-koppelingen, sync-status.' },
+    ];
+    return `<div class="pad" style="padding-top:16px">
+      <div style="max-width:640px">
+        <div style="font-size:15px;font-weight:600;margin-bottom:6px">Overige weergaven</div>
+        <div style="font-size:12.5px;color:var(--text-3);margin-bottom:14px">Deze weergaven staan buiten de dagelijkse werkstroom. Klik om te openen.</div>
+        <div style="display:grid;gap:8px">
+          ${items.map((it) => `<button class="btn btn-ghost" onclick="try{window.DFO.goTab('${esc(it.tab)}')}catch(_){}" style="display:flex;align-items:center;gap:14px;padding:14px 16px;text-align:left;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);cursor:pointer">
+            <span style="font-size:22px">${it.icon}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600;color:var(--text)">${esc(it.tab)} →</div>
+              <div style="font-size:12px;color:var(--text-3);margin-top:2px">${esc(it.desc)}</div>
+            </div>
+          </button>`).join('')}
+        </div>
+        <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:11.5px;color:var(--text-3)">
+          ℹ Voicememo-ronde en No-show-lijst zijn in de hoofd-flow geïntegreerd:
+          voicememo verschijnt als popup + indicator bij openen van Follow-up,
+          en event-no-shows staan mee in de <b>Opvolglijst</b>.
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /* Voicememo popup-reminder (mirror v1). Verschijnt bij openen van Follow-up
+     als er >0 vandaag-zooms te versturen zijn. Fetch draait fail-soft: bij
+     endpoint-fout wordt de popup gewoon niet getoond (geen blokker). */
+  function _voicememoPopup() {
+    if (_ui.voicememoPopupDismissed) return '';
+    // Trigger fetch als nog niet geladen (fail-soft; endpoint-fout = geen popup)
+    if (!_live.voicememo.data && !_live.voicememo.loading && !_live.voicememo.error) {
+      queueMicrotask(fetchVoicememo);
+      return '';
+    }
+    if (!_live.voicememo.data) return '';
+    const items = asArr(_live.voicememo.data.items || _live.voicememo.data.rounds || _live.voicememo.data);
+    const openCount = items.filter((it) => !it.voicememo_sent && !it.done).length;
+    if (openCount <= 0) return '';
+    return `<div style="position:fixed;top:80px;right:24px;z-index:1500;max-width:360px;background:var(--surface);border:1px solid var(--violet);border-radius:var(--r);box-shadow:0 12px 32px rgba(0,0,0,.18);padding:16px 18px">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <div style="width:36px;height:36px;border-radius:50%;background:var(--violet-soft);color:var(--violet);display:grid;place-items:center;flex-shrink:0;font-size:18px">🎙</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:4px">Voicememo-ronde</div>
+          <div style="font-size:12.5px;color:var(--text-2);line-height:1.5;margin-bottom:10px">Je hebt <b>${openCount}</b> voicememo${openCount === 1 ? '' : "'s"} te versturen vandaag (vandaag-Zooms).</div>
+          <div style="display:flex;gap:6px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick="window.__fuVoicememoDismissPopup()">Later</button>
+            <button class="btn btn-primary btn-sm" style="background:var(--violet);border-color:var(--violet)" onclick="window.__fuVoicememoOpenView()">Open lijst →</button>
+          </div>
+        </div>
+        <button class="icon-btn" onclick="window.__fuVoicememoDismissPopup()" style="width:22px;height:22px;font-size:12px" title="Sluiten">✕</button>
+      </div>
+    </div>`;
+  }
+
+  // UX-ronde 2026-08-16: Voicememo + No-show tabs verwijderd uit sub-nav.
+  // - Voicememo → popup-reminder bij open + kleine indicator in werklijst.
+  //   View blijft geregistreerd voor deep-link maar niet in tab-array.
+  // - No-show → gemerged in Opvolglijst (event-no-shows tonen daar mee).
+  // - Admin/Archief/Afgeboekt/Sluimerpot → verhuisd naar "Overige"-tab
+  //   (dropdown). Views blijven geregistreerd zodat de dropdown ze kan
+  //   openen; ze verschijnen niet in de hoofd-tabbalk.
   window.DFO.VIEWS['followup/Werklijst']       = werklijstView;
   window.DFO.VIEWS['followup/Opvolglijst']     = opvolglijstView;
-  window.DFO.VIEWS['followup/Afspraken']       = afsprakenView;      // BROK 2
-  window.DFO.VIEWS['followup/Kalender']        = kalenderView;       // BROK 2
-  window.DFO.VIEWS['followup/Retenties']       = retentiesView;      // BROK 2
-  window.DFO.VIEWS['followup/Sluimerpot']      = sluimerpotView;     // BROK 2
-  window.DFO.VIEWS['followup/No-show']         = noshowView;         // BROK 3 (nieuw)
-  window.DFO.VIEWS['followup/Open-acties']     = openActiesView;     // BROK 3 (nieuw)
-  window.DFO.VIEWS['followup/Opvolging']       = opvolgingView;      // BROK 3 (nieuw)
-  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // BROK 3
-  window.DFO.VIEWS['followup/Archief']         = archiefView;        // BROK 3 (nieuw)
-  window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;  // BROK 4 (live)
-  window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;   // BROK 4 (live)
-  window.DFO.VIEWS['followup/Zoeken']          = zoekenView;         // BROK 4 (nieuw)
-  window.DFO.VIEWS['followup/Voicememo']       = voicememoView;      // BROK 5 (nieuw)
-  window.DFO.VIEWS['followup/Admin']           = adminView;          // BROK 5 (nieuw)
+  window.DFO.VIEWS['followup/Afspraken']       = afsprakenView;
+  window.DFO.VIEWS['followup/Kalender']        = kalenderView;
+  window.DFO.VIEWS['followup/Retenties']       = retentiesView;
+  window.DFO.VIEWS['followup/Sluimerpot']      = sluimerpotView;     // via Overige
+  window.DFO.VIEWS['followup/No-show']         = noshowView;         // deep-link only (niet in nav)
+  window.DFO.VIEWS['followup/Open-acties']     = openActiesView;
+  window.DFO.VIEWS['followup/Opvolging']       = opvolgingView;
+  window.DFO.VIEWS['followup/Afgeboekt']       = afgeboektView;      // via Overige
+  window.DFO.VIEWS['followup/Archief']         = archiefView;        // via Overige
+  window.DFO.VIEWS['followup/Event-bellijst']  = eventBellijstView;
+  window.DFO.VIEWS['followup/Statistieken']    = statistiekenView;
+  window.DFO.VIEWS['followup/Zoeken']          = zoekenView;
+  window.DFO.VIEWS['followup/Voicememo']       = voicememoView;      // deep-link only (indicator + popup)
+  window.DFO.VIEWS['followup/Admin']           = adminView;          // via Overige
+  // Nieuwe hub-tab: "Overige" toont dropdown-menu naar Admin/Archief/
+  // Afgeboekt/Sluimerpot om de hoofd-tabbalk compact te houden.
+  window.DFO.VIEWS['followup/Overige']         = overigeView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('followup');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('followup');
 
