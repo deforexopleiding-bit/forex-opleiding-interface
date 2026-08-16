@@ -460,26 +460,34 @@
     _live.assessments.data = null;
     queueMicrotask(() => fetchAssessments(_ui.assessMonth, v || ''));
   };
-  // Zoek-inputs: state + surgische re-render van tabel-slot (om focus-loss
-  // te voorkomen). Voor eenvoud gebruiken we render() maar behouden focus
-  // via autofocus-trick op input met specifieke ID.
+  // v=4: uncontrolled-input patroon. oninput mag ALLEEN de state bijwerken
+  // + surgisch de results-slot + count-span her-renderen — NIET de hele
+  // filterbalk of het input-node. Full render() zou het <input>-element
+  // vernietigen bij elke toets → focus valt weg, toetsen tijdens remount
+  // gaan verloren. Slot-refresh raakt de input niet aan; focus blijft
+  // vanzelf. Fallback op full render() alleen als de slots niet gevonden
+  // worden (view nog niet gemount / andere tab actief).
   window.__mentSetCertSearch = (v) => {
     _ui.certSearch = String(v || '');
-    // Surgische re-render: alleen tabel-body vervangen. Simpelste: full render()
-    // en dan focus terug op de search-input via requestAnimationFrame.
-    render();
-    requestAnimationFrame(() => {
-      const inp = document.getElementById('mentCertSearchInp');
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
-    });
+    const slot = document.getElementById('mentCertResultsSlot');
+    const cnt  = document.getElementById('mentCertResultsCount');
+    if (slot && cnt) {
+      slot.innerHTML = _renderCertResults();
+      cnt.textContent = _renderCertCountText();
+    } else {
+      render();
+    }
   };
   window.__mentSetAssessSearch = (v) => {
     _ui.assessSearch = String(v || '');
-    render();
-    requestAnimationFrame(() => {
-      const inp = document.getElementById('mentAssessSearchInp');
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
-    });
+    const slot = document.getElementById('mentAssessResultsSlot');
+    const cnt  = document.getElementById('mentAssessResultsCount');
+    if (slot && cnt) {
+      slot.innerHTML = _renderAssessResults();
+      cnt.textContent = _renderAssessCountText();
+    } else {
+      render();
+    }
   };
   window.__mentTrajectSetStatus = (v) => {
     _live.trajects.statusFilter = v || 'all';
@@ -1271,34 +1279,32 @@
 
   /* ═══════════════════════════════════════════════════════════════════════
      VIEW 3 — Certificaten (funded-certs admin)
+     ─────────────────────────────────────────────────────────────────────
+     v=4: search-input is nu een uncontrolled input. oninput muteert alleen
+     _ui.certSearch en her-rendert twee slot-nodes (#mentCertResultsSlot +
+     #mentCertResultsCount) via querySelector + innerHTML — geen full
+     render(). Het <input>-element wordt daardoor niet vernietigd, focus
+     blijft, geen verloren toetsen bij snel typen.
      ═══════════════════════════════════════════════════════════════════════ */
-  function certificatenView() {
-    if (!isAdminRole()) return accessDeniedBlk();
-    if (!_live.mentors.loading && !_live.mentors.data && !_live.mentors.error) queueMicrotask(fetchMentors);
-    if (!_live.fundedCerts.loading && !_live.fundedCerts.data && !_live.fundedCerts.error) queueMicrotask(() => fetchFundedCerts(_ui.selectedMentorId));
-
-    const mentors = asArr(_live.mentors.data?.mentors);
+  function _certFiltered() {
     const allCerts = asArr(_live.fundedCerts.data?.certs);
-    // Client-side zoek (naam / mentor / bestand)
     const q = String(_ui.certSearch || '').toLowerCase().trim();
     const certs = q ? allCerts.filter((c) => {
       const s = `${c.student_name || ''} ${c.mentor_name || ''} ${c.mentor_email || ''} ${c.file_name || ''}`.toLowerCase();
       return s.indexOf(q) !== -1;
     }) : allCerts;
-
-    return `${H.toolbar([
-      `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Mentor:</span>
-        <select onchange="window.__mentSetCertsMentor(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:220px">
-          <option value="">— alle mentors —</option>
-          ${mentors.map((m) => `<option value="${esc(m.user_id || m.id)}" ${_ui.selectedMentorId === (m.user_id || m.id) ? 'selected' : ''}>${esc(m.name || m.email || m.user_id)}</option>`).join('')}
-        </select>
-      </label>`,
-      `<input id="mentCertSearchInp" type="search" placeholder="Zoek naam / mentor / bestand…" value="${esc(_ui.certSearch)}" oninput="window.__mentSetCertSearch(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:220px" />`,
-      `<span style="font-size:11.5px;color:var(--text-3)">${certs.length}${q ? ' van ' + allCerts.length : ''} certifica${certs.length === 1 ? 'at' : 'ten'} · download-URLs 1u geldig</span>`,
-    ])}
-    ${_live.fundedCerts.error && !_live.fundedCerts.data ? errBlk(_live.fundedCerts.error, 'window.__mentRetryCerts()')
-     : _live.fundedCerts.loading && !_live.fundedCerts.data ? skel()
-     : certs.length ? H.table(
+    return { certs, allCerts, q };
+  }
+  function _renderCertCountText() {
+    const { certs, allCerts, q } = _certFiltered();
+    return `${certs.length}${q ? ' van ' + allCerts.length : ''} certifica${certs.length === 1 ? 'at' : 'ten'} · download-URLs 1u geldig`;
+  }
+  function _renderCertResults() {
+    if (_live.fundedCerts.error && !_live.fundedCerts.data) return errBlk(_live.fundedCerts.error, 'window.__mentRetryCerts()');
+    if (_live.fundedCerts.loading && !_live.fundedCerts.data) return skel();
+    const { certs } = _certFiltered();
+    if (!certs.length) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen certificaten gevonden.</div>`;
+    return H.table(
       [{ l: 'Mentor' }, { l: 'Student' }, { l: 'Bestand', cls: 'optional' }, { l: 'Maand', cls: 'optional' }, { l: 'Ge-upload', cls: 'optional' }, { l: 'Bonus', cls: 'r' }, { l: '' }],
       certs.map((c) => [
         `<span>${esc(c.mentor_name || c.mentor_email || '—')}</span>`,
@@ -1309,7 +1315,26 @@
         `<span class="money">${eur(100)}</span>`,
         c.download_url ? `<a href="${esc(c.download_url)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">${svg(I.down)}Download</a>` : `<span style="color:var(--text-3);font-size:11.5px">n.v.t.</span>`,
       ]),
-    ) : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen certificaten gevonden.</div>`}
+    );
+  }
+  function certificatenView() {
+    if (!isAdminRole()) return accessDeniedBlk();
+    if (!_live.mentors.loading && !_live.mentors.data && !_live.mentors.error) queueMicrotask(fetchMentors);
+    if (!_live.fundedCerts.loading && !_live.fundedCerts.data && !_live.fundedCerts.error) queueMicrotask(() => fetchFundedCerts(_ui.selectedMentorId));
+
+    const mentors = asArr(_live.mentors.data?.mentors);
+
+    return `${H.toolbar([
+      `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Mentor:</span>
+        <select onchange="window.__mentSetCertsMentor(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:220px">
+          <option value="">— alle mentors —</option>
+          ${mentors.map((m) => `<option value="${esc(m.user_id || m.id)}" ${_ui.selectedMentorId === (m.user_id || m.id) ? 'selected' : ''}>${esc(m.name || m.email || m.user_id)}</option>`).join('')}
+        </select>
+      </label>`,
+      `<input id="mentCertSearchInp" type="search" placeholder="Zoek naam / mentor / bestand…" value="${esc(_ui.certSearch)}" oninput="window.__mentSetCertSearch(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:220px" />`,
+      `<span id="mentCertResultsCount" style="font-size:11.5px;color:var(--text-3)">${_renderCertCountText()}</span>`,
+    ])}
+    <div id="mentCertResultsSlot">${_renderCertResults()}</div>
     ${renderModals()}`;
   }
 
@@ -1327,16 +1352,42 @@
     return H.pill(meta.c, meta.l);
   }
 
+  // v=4: identiek uncontrolled-input patroon als certificatenView.
+  function _assessFiltered() {
+    const allItems = asArr(_live.assessments.data?.assessments);
+    const q = String(_ui.assessSearch || '').toLowerCase().trim();
+    const items = q ? allItems.filter((a) => String(a.student_name || '').toLowerCase().indexOf(q) !== -1) : allItems;
+    return { items, allItems, q };
+  }
+  function _renderAssessCountText() {
+    const { items, allItems, q } = _assessFiltered();
+    return `${items.length}${q ? ' van ' + allItems.length : ''} beoordelingen · read-only`;
+  }
+  function _renderAssessResults() {
+    if (_live.assessments.error && !_live.assessments.data) return errBlk(_live.assessments.error, 'window.__mentRetryAssess()');
+    if (_live.assessments.loading && !_live.assessments.data) return skel();
+    const { items } = _assessFiltered();
+    if (!items.length) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen beoordelingen gevonden. Wijzigingen doet de mentor via z'n eigen dashboard.</div>`;
+    return H.table(
+      [{ l: 'Mentor' }, { l: 'Student' }, { l: 'Maand', cls: 'optional' }, { l: 'Status' }, { l: 'Cijfer', cls: 'r' }, { l: 'Actief & taken', cls: 'optional' }, { l: 'Notitie', cls: 'optional' }, { l: 'Bijgewerkt', cls: 'r optional' }],
+      items.map((a) => [
+        `<span>${esc(a.mentor_name || a.mentor_email || '—')}</span>`,
+        `<span class="cell-main">${esc(a.student_name || '—')}</span>`,
+        `<span style="color:var(--text-3)">${a.month ? fmtMonth(a.month) : '—'}</span>`,
+        assessPill(a.status),
+        `<span class="mono" style="font-weight:600">${a.cijfer != null ? a.cijfer : '—'}</span>`,
+        `<span style="color:var(--text-2);font-size:12.5px">${a.actief_taken == null ? '—' : (a.actief_taken ? 'Ja' : 'Nee')}</span>`,
+        `<span style="color:var(--text-3);font-size:12.5px">${esc(a.notitie || '—')}</span>`,
+        `<span class="mono" style="color:var(--text-3);font-size:11.5px">${fmtDate(a.updated_at)}</span>`,
+      ]),
+    );
+  }
   function beoordelingenView() {
     if (!isAdminRole()) return accessDeniedBlk();
     if (!_live.mentors.loading && !_live.mentors.data && !_live.mentors.error) queueMicrotask(fetchMentors);
     if (!_live.assessments.loading && !_live.assessments.data && !_live.assessments.error) queueMicrotask(() => fetchAssessments(_ui.assessMonth, _ui.assessMentorId));
 
     const mentors = asArr(_live.mentors.data?.mentors);
-    const allItems = asArr(_live.assessments.data?.assessments);
-    // Client-side zoek op student-naam
-    const q = String(_ui.assessSearch || '').toLowerCase().trim();
-    const items = q ? allItems.filter((a) => String(a.student_name || '').toLowerCase().indexOf(q) !== -1) : allItems;
 
     return `${H.toolbar([
       `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><span style="color:var(--text-3)">Maand:</span>
@@ -1350,23 +1401,9 @@
         </select>
       </label>`,
       `<input id="mentAssessSearchInp" type="search" placeholder="Zoek naam student…" value="${esc(_ui.assessSearch)}" oninput="window.__mentSetAssessSearch(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px;min-width:200px" />`,
-      `<span style="font-size:11.5px;color:var(--text-3)">${items.length}${q ? ' van ' + allItems.length : ''} beoordelingen · read-only</span>`,
+      `<span id="mentAssessResultsCount" style="font-size:11.5px;color:var(--text-3)">${_renderAssessCountText()}</span>`,
     ])}
-    ${_live.assessments.error && !_live.assessments.data ? errBlk(_live.assessments.error, 'window.__mentRetryAssess()')
-     : _live.assessments.loading && !_live.assessments.data ? skel()
-     : items.length ? H.table(
-      [{ l: 'Mentor' }, { l: 'Student' }, { l: 'Maand', cls: 'optional' }, { l: 'Status' }, { l: 'Cijfer', cls: 'r' }, { l: 'Actief & taken', cls: 'optional' }, { l: 'Notitie', cls: 'optional' }, { l: 'Bijgewerkt', cls: 'r optional' }],
-      items.map((a) => [
-        `<span>${esc(a.mentor_name || a.mentor_email || '—')}</span>`,
-        `<span class="cell-main">${esc(a.student_name || '—')}</span>`,
-        `<span style="color:var(--text-3)">${a.month ? fmtMonth(a.month) : '—'}</span>`,
-        assessPill(a.status),
-        `<span class="mono" style="font-weight:600">${a.cijfer != null ? a.cijfer : '—'}</span>`,
-        `<span style="color:var(--text-2);font-size:12.5px">${a.actief_taken == null ? '—' : (a.actief_taken ? 'Ja' : 'Nee')}</span>`,
-        `<span style="color:var(--text-3);font-size:12.5px">${esc(a.notitie || '—')}</span>`,
-        `<span class="mono" style="color:var(--text-3);font-size:11.5px">${fmtDate(a.updated_at)}</span>`,
-      ]),
-    ) : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen beoordelingen gevonden. Wijzigingen doet de mentor via z'n eigen dashboard.</div>`}
+    <div id="mentAssessResultsSlot">${_renderAssessResults()}</div>
     ${renderModals()}`;
   }
 
@@ -1700,5 +1737,5 @@
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('mentoren');
   }
 
-  console.debug('[mentoren-v2] v3 — 6 admin-views registered (Overzicht/Rapporten/Certificaten/Beoordelingen/Trajecten/Sync). Sync = super_admin only. Dormant tot allowlist of ?v2preview=mentoren.');
+  console.debug('[mentoren-v2] v4 — 6 admin-views registered (Overzicht/Rapporten/Certificaten/Beoordelingen/Trajecten/Sync). Search-inputs (Certificaten + Beoordelingen) nu uncontrolled — geen focus-loss. Dormant tot allowlist of ?v2preview=mentoren.');
 })();
