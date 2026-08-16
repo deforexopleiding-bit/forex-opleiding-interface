@@ -123,6 +123,8 @@
     moreMenuOpen: false,
     bulkBusy: false,
     statusBusy: {},       // action-key → true
+    markReadAttempted: {}, // per-row markRead-attempted flag (voorkomt re-render loop bij fail)
+    bodyShowRaw: {},      // per-row: user heeft expliciet grote HTML aangeklikt om te tonen
     draftDirty: false,
     draftSaveT: null,
     draftMigrationRequired: false,
@@ -222,6 +224,14 @@
     if (!row || !row.mailbox || row.imap_uid == null) return;
     const key = 'read:' + row.id;
     if (_ui.statusBusy[key]) return;
+    // Attempted-flag: voorkomt dat een gefaalde markRead bij ELKE volgende
+    // render() opnieuw wordt gescheduled. Bug (2026-08-16 v16 → v17): _reader()
+    // scheduled markRead met guard alleen op statusBusy — als de fetch faalt
+    // (500/403/timeout), wordt statusBusy weer op false gezet zonder dat
+    // row.is_read gemuteerd is → volgende render fires opnieuw → fetch-storm
+    // → UI-thread bezet → reader "hangt".
+    if (_ui.markReadAttempted[key]) return;
+    _ui.markReadAttempted[key] = true;
     _ui.statusBusy[key] = true;
     const j = await tryFetch('mark-read', '/api/mark-read', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -235,6 +245,9 @@
       _live.counts.data = null; // invalideer badges
       if (render) render();
     }
+    // Bij failure: attempted-flag blijft true → geen retry-loop. User kan
+    // handmatig "markeer ongelezen"/"markeer gelezen" gebruiken (die reset
+    // de flag via __emailMarkUnread).
   }
   async function statusUpdate(ids, action) {
     if (!ids || ids.length === 0) return;
@@ -335,7 +348,11 @@
   async function fetchSanneForRow(rowId) {
     if (!rowId) return;
     const st = _live.sanne;
-    if (st.loading[rowId] || st.data[rowId]) return;
+    // Guard: data OF loading OF eerder attempted (bij failure zetten we
+    // error[rowId] — die telt ook als "attempted" en voorkomt re-render
+    // loop). Zonder deze extra check herhaalt sanne-fetch bij elke render
+    // wanneer de vorige call errored is → dubbele storm samen met markRead.
+    if (st.loading[rowId] || st.data[rowId] || st.error[rowId]) return;
     st.loading[rowId] = true; st.error[rowId] = null;
     const j = await tryFetch('sanne:' + rowId, '/api/sanne-suggestion-get?email_id=' + encodeURIComponent(rowId), null, 8000);
     st.loading[rowId] = false;
@@ -821,15 +838,24 @@
   }
   // BODY: render sanitized HTML via <iframe sandbox srcdoc> = 2e verdedigingslaag.
   // Fallback naar plaintext-render als er geen safe HTML is.
+  // BODY_HTML_MAX: cap op sync-render van srcdoc via esc(). Boven cap doet
+  // esc() 5x replace op megabyte-strings → UI-thread blokkade van 500ms+
+  // (root-cause tab-freeze v16). Boven cap: toon plaintext + expliciete
+  // "HTML tonen (traag)" knop die de check overslaat.
+  const BODY_HTML_MAX = 250 * 1024; // 250 KB
   function _bodyBlock(body, row) {
     const attachments = asArr(body.attachments);
-    const hasSafeHtml = body.body_html_safe && String(body.body_html_safe).trim().length > 0;
+    const rawHtml = body.body_html_safe ? String(body.body_html_safe) : '';
+    const htmlLen = rawHtml.trim().length;
+    const hasSafeHtml = htmlLen > 0;
+    const isTooLarge = htmlLen > BODY_HTML_MAX;
+    const showRaw = !!_ui.bodyShowRaw[row.id];
     const imgBlocked = Number(body.external_images_blocked || 0);
     const showImgs = !!_ui.showImages[row.id];
     let bodyRender;
-    if (hasSafeHtml) {
+    if (hasSafeHtml && (!isTooLarge || showRaw)) {
       // srcdoc met sandbox (geen allow-scripts) — browser blokkeert alle JS binnen iframe.
-      let html = String(body.body_html_safe);
+      let html = rawHtml;
       if (showImgs) {
         // Herstel externe images vanuit data-orig-src.
         html = html.replace(/data-orig-src="([^"]+)"[^>]*data-blocked-external="1"/g,
@@ -841,6 +867,17 @@
       if (imgBlocked > 0 && !showImgs) {
         bodyRender = `<div style="padding:10px 22px;background:${TOK.amberSoft};border:1px solid ${TOK.amber};border-radius:${TOK.rSm};margin:16px 22px 0;font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:10px"><span>${ICO.img}</span><span style="flex:1">${imgBlocked} externe afbeeldingen zijn geblokkeerd om trackers te voorkomen.</span><button class="btn btn-ghost btn-sm" onclick="window.__emailShowImages('${esc(row.id)}')" style="color:${TOK.amber}">Afbeeldingen tonen</button></div>` + bodyRender;
       }
+    } else if (hasSafeHtml && isTooLarge && !showRaw) {
+      // Body > cap: plaintext + expliciete opt-in voor HTML-render (traag).
+      const sizeKb = Math.round(htmlLen / 1024);
+      bodyRender = `<div style="padding:10px 22px;background:${TOK.amberSoft};border:1px solid ${TOK.amber};border-radius:${TOK.rSm};margin:16px 22px 0;font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span>${ICO.mail}</span>
+        <span style="flex:1;min-width:220px">Grote HTML-mail (${sizeKb} KB) — tekstversie wordt getoond om trage rendering te voorkomen.</span>
+        <button class="btn btn-ghost btn-sm" onclick="window.__emailShowRawBody('${esc(row.id)}')" style="color:${TOK.amber}">HTML tonen (traag)</button>
+      </div>
+      <div style="padding:22px;max-width:900px;margin:0 auto">
+        <div style="font-size:14px;line-height:1.65;color:var(--text-2)"><p style="margin-bottom:14px">${safePlainText(body.text || '')}</p></div>
+      </div>`;
     } else {
       bodyRender = `<div style="padding:22px;max-width:900px;margin:0 auto">
         <div style="font-size:14px;line-height:1.65;color:var(--text-2)"><p style="margin-bottom:14px">${safePlainText(body.text || '')}</p></div>
@@ -1003,8 +1040,15 @@
   window.__emailPage = (dir) => { _ui.offset = Math.max(0, _ui.offset + dir * PAGE_SIZE); _live.inbox.data = null; _live.inbox.key = null; if (render) render(); };
   window.__emailOpen = (rid) => { _ui.selectedId = rid; _ui.moreMenuOpen = false; if (render) render(); };
   window.__emailReloadBody = (rid) => { delete _live.body.data[rid]; delete _live.body.error[rid]; if (render) render(); };
+  window.__emailShowRawBody = (rid) => { _ui.bodyShowRaw[rid] = true; if (render) render(); };
   window.__emailShowImages = (rid) => { _ui.showImages[rid] = true; if (render) render(); };
-  window.__emailMarkUnread = () => { const row = currentRow(); if (row) markRead(row, false); };
+  window.__emailMarkUnread = () => {
+    const row = currentRow(); if (!row) return;
+    // User-initiated: reset attempted-flag zodat een eerder gefaalde
+    // auto-markRead niet blijft blokkeren op handmatig retry.
+    delete _ui.markReadAttempted['read:' + row.id];
+    markRead(row, false);
+  };
   window.__emailFlagToggle = () => { const row = currentRow(); if (row) statusUpdate([row.id], row.flagged ? 'unflag' : 'flag'); };
   window.__emailArchive = () => {
     const row = currentRow(); if (!row) return;
