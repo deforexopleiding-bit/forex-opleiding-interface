@@ -1444,5 +1444,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=17 — bug-4-fixes (mark-read DB persist, sanne null-guard, reply-concept reload, list-scroll preserve) + templates-picker + handtekening server-side.');
+  console.debug('[email-v2] v=18 — reader-freeze fix (v=17 uit #1320) + 4-bug-fixes (mark-read DB persist, sanne null-guard, reply-concept reload, list-scroll preserve) + templates-picker + handtekening server-side.');
 })();
