@@ -115,6 +115,7 @@
       email_id: null,
       signature: 'standaard',
       draft_id: null,     // gezet zodra draft opgeslagen
+      attachments: [],    // v=24: [{filename, contentType, size, content(base64)}]
     },
     ccBccOpen:  false,
     aiTone:     'vriendelijk',
@@ -325,15 +326,23 @@
     // gebruikt bij send (Fase-A: één handtekening per mailbox, later evt.
     // multi-signature per mailbox).
     _ui.sendBusy = true; _ui.lastSend = null; if (render) render();
+    // v=24: attachments mee — backend email-send-v2.js verwacht al
+    // {filename, contentType, size, content(base64)} en mapt 'em naar
+    // nodemailer. Omit key als leeg zodat oude paden ongewijzigd blijven.
+    const attList = Array.isArray(c.attachments) ? c.attachments : [];
+    const payload = {
+      from_mailbox: c.from_mailbox, to: c.to, subject: c.subject,
+      text: c.body_text, html: c.body_html || undefined,
+      cc: c.cc || undefined, bcc: c.bcc || undefined, email_id: c.email_id || undefined,
+      handtekening: true, // v2 email-round DEEL 3: server-side add
+    };
+    if (attList.length) payload.attachments = attList;
+    // Grotere timeout bij attachments (upload van base64 kan traag zijn op mobiel).
+    const timeoutMs = attList.length ? 60000 : 15000;
     const j = await tryFetch('send', '/api/email-send-v2', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from_mailbox: c.from_mailbox, to: c.to, subject: c.subject,
-        text: c.body_text, html: c.body_html || undefined,
-        cc: c.cc || undefined, bcc: c.bcc || undefined, email_id: c.email_id || undefined,
-        handtekening: true, // v2 email-round DEEL 3: server-side add
-      }),
-    }, 15000);
+      body: JSON.stringify(payload),
+    }, timeoutMs);
     _ui.sendBusy = false;
     if (j && j.__error) _ui.lastSend = { ok: false, error: j.__error };
     else if (j?.ok) {
@@ -342,7 +351,7 @@
       if (c.draft_id) { deleteDraft(c.draft_id).catch(() => {}); }
       setTimeout(() => {
         _ui.composeOpen = false;
-        _ui.compose = { from_mailbox: c.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+        _ui.compose = { from_mailbox: c.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
         _ui.lastSend = null; _ui.ccBccOpen = false;
         _live.inbox.data = null; _live.inbox.key = null;
         _live.counts.data = null;
@@ -1003,15 +1012,40 @@
     return `<div>${bodyRender}${attachments.length > 0 ? _attStrip(attachments, row) : ''}</div>`;
   }
   function _attStrip(attachments, row) {
+    // v=24: attachment-URL resolve — 2 paden:
+    // 1. public_url uit sync-emails Storage (inbound-flow) — werkt altijd.
+    // 2. IMAP-stream via /api/email-attachment?mailbox&uid&index — vereist imap_uid.
+    // Fallback naar #  (disabled) als geen van beide.
+    const hasImap = row.mailbox && row.imap_uid != null;
+    const filenameKey = (a) => a.filename || a.mime_type || 'bijlage';
+    const bytes = (a) => Number(a.size || a.size_bytes || 0);
+    const urlFor = (a) => {
+      if (a.public_url) return a.public_url;
+      if (hasImap && a.index != null) {
+        return '/api/email-attachment?mailbox=' + encodeURIComponent(row.mailbox + '@deforexopleiding.nl')
+             + '&uid=' + encodeURIComponent(row.imap_uid)
+             + '&index=' + encodeURIComponent(a.index);
+      }
+      return null;
+    };
     return `<div style="margin:22px 22px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Bijlagen (${attachments.length})</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px">
-        ${attachments.map((a) => `
-          <a href="/api/email-attachment?mailbox=${encodeURIComponent(row.mailbox + '@deforexopleiding.nl')}&uid=${encodeURIComponent(row.imap_uid)}&index=${encodeURIComponent(a.index)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);text-decoration:none;color:var(--text);font-size:12px" onmouseover="this.style.borderColor='${TOK.m}'" onmouseout="this.style.borderColor='var(--border)'">
+        ${attachments.map((a) => {
+          const url = urlFor(a);
+          const name = filenameKey(a);
+          const kb = bytes(a) / 1024;
+          const sizeLabel = kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : kb.toFixed(1) + ' KB';
+          const linkOpen  = url
+            ? `<a href="${esc(url)}" target="_blank" rel="noopener" download="${esc(name)}"`
+            : `<span title="Bijlage niet downloadbaar (geen public_url, geen IMAP-uid)"`;
+          const linkClose = url ? '</a>' : '</span>';
+          return `${linkOpen} style="display:inline-flex;align-items:center;gap:8px;padding:6px 10px 6px 6px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);text-decoration:none;color:var(--text);font-size:12px;${url ? '' : 'opacity:.55;cursor:not-allowed;'}" ${url ? `onmouseover="this.style.borderColor='${TOK.m}'" onmouseout="this.style.borderColor='var(--border)'"` : ''}>
             <span style="width:28px;height:28px;border-radius:${TOK.rSm};background:${TOK.roseSoft};color:${TOK.rose};display:flex;align-items:center;justify-content:center;flex-shrink:0">${ICO.file}</span>
-            <span style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename || 'bijlage')}</span>
-            <span style="font-size:10.5px;color:var(--text-3);font-family:${TOK.mono}">${(a.size / 1024).toFixed(1)} KB</span>
-          </a>
-        `).join('')}
+            <span style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+            <span style="font-size:10.5px;color:var(--text-3);font-family:${TOK.mono}">${sizeLabel}</span>
+          ${linkClose}`;
+        }).join('')}
       </div>
     </div>`;
   }
@@ -1070,6 +1104,7 @@
             <div contenteditable="true" oninput="window.__emailComposeBody(this.innerHTML)" data-placeholder="Typ je bericht…" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px;line-height:1.55;min-height:180px;font-family:inherit;flex:1;outline:none;overflow-y:auto">${c.body_html || ''}</div>
           </div>
           ${_composeSigStrip()}
+          ${_composeAttachChips(c)}
           ${send ? _sendResultBlock(send) : ''}
         </div>
         <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
@@ -1114,6 +1149,32 @@
       <span>${esc(to)}</span>
       <button class="icon-btn" style="width:18px;height:18px" onclick="window.__emailComposeField('to','')">${ICO.x}</button>
     </span></div>`;
+  }
+  // v=24: attachment-chips in compose (naam + grootte + ✕). Toont niks als
+  // geen bijlagen. Grootte-format: KB voor < 1 MB, anders MB (1 decimaal).
+  function _fmtBytes(n) {
+    const b = Number(n) || 0;
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+    return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+  function _composeAttachChips(c) {
+    const list = Array.isArray(c.attachments) ? c.attachments : [];
+    if (list.length === 0) return '';
+    const totalBytes = list.reduce((n, a) => n + (Number(a.size) || 0), 0);
+    return `<div style="padding:8px 0 4px;display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bijlagen (${list.length}) · totaal ${_fmtBytes(totalBytes)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${list.map((a, i) => `
+          <span style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:20px;font-size:12px;color:var(--text-2)">
+            ${ICO.paperclip}
+            <span style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.filename || 'bijlage')}</span>
+            <span style="font-size:11px;color:var(--text-3)">${_fmtBytes(a.size)}</span>
+            <button class="icon-btn" title="Verwijderen" onclick="window.__emailComposeAttachRemove(${i})" style="width:18px;height:18px;padding:0;background:transparent;border:none;color:var(--text-3);cursor:pointer">${ICO.x}</button>
+          </span>
+        `).join('')}
+      </div>
+    </div>`;
   }
   function _composeSigStrip() {
     const c = _ui.compose;
@@ -1221,7 +1282,7 @@
     // Als compose openstond op een verwijderd concept: sluit + clear.
     if (_ui.composeOpen && _ui.compose.draft_id && ids.includes(_ui.compose.draft_id)) {
       _ui.composeOpen = false; _ui.composeMinimized = false;
-      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
     }
     _live.counts.data = null;
     _ui.statusBusy[key] = false;
@@ -1442,7 +1503,7 @@
   }
   window.__emailNewCompose = () => {
     _ui.composeMode = 'new'; _ui.composeMinimized = false;
-    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+    _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
     _ui.composeOpen = true; _ui.lastSend = null; _ui.ccBccOpen = false;
     _ui.draftMigrationRequired = false;
     if (render) render();
@@ -1578,6 +1639,7 @@
       body_text: bodyText,
       email_id: emailId,
       signature: 'standaard', draft_id: null,
+      attachments: [],
     };
     _ui.ccBccOpen = false;
     _ui.composeOpen = true; _ui.lastSend = null;
@@ -1603,7 +1665,7 @@
       const discardedDraftId = _ui.compose.draft_id;
       if (discardedDraftId) deleteDraft(discardedDraftId).catch(() => {});
       _ui.composeOpen = false;
-      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
+      _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null, attachments: [] };
       _ui.draftMigrationRequired = false;
       // Verwijder de discarded draft uit de zichtbare lijst + clear selectedId
       // (anders zou _reader() 'm meteen opnieuw willen openen).
@@ -1618,7 +1680,78 @@
       if (render) render();
     });
   };
-  window.__emailComposeAttach   = () => { _showToastLocal('Bijlage toevoegen komt in Fase 3 (multipart-upload via IMAP).', 'info'); };
+  // v=24: bijlagen — file-picker (hidden input) opent, geselecteerde files
+  // worden als base64 in compose.attachments gezet, chips getoond in de
+  // compose-toolbar. Limieten: 10 MB per bestand, 20 MB totaal, max 20
+  // bestanden. Nette fout bij overschrijding — voorkomt SMTP-reject.
+  const ATTACH_LIMITS = { perFileMB: 10, totalMB: 20, maxFiles: 20 };
+  function _totalAttachSize() {
+    return (_ui.compose.attachments || []).reduce((n, a) => n + (Number(a.size) || 0), 0);
+  }
+  function _readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload  = () => {
+        // dataURL = "data:mime;base64,BLOB" → strip prefix
+        const s = String(fr.result || '');
+        const idx = s.indexOf('base64,');
+        resolve(idx >= 0 ? s.slice(idx + 7) : s);
+      };
+      fr.onerror = () => reject(fr.error || new Error('FileReader fail'));
+      fr.readAsDataURL(file);
+    });
+  }
+  window.__emailComposeAttach = () => {
+    // Trigger hidden input; onchange handler doet de rest.
+    let inp = document.getElementById('emailComposeFilePicker');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file';
+      inp.id   = 'emailComposeFilePicker';
+      inp.multiple = true;
+      inp.style.display = 'none';
+      inp.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = ''; // reset zodat re-pick zelfde file werkt
+        if (!files.length) return;
+        const existing = _ui.compose.attachments || (_ui.compose.attachments = []);
+        // Limiet-checks vóór lezen (spare CPU op grote files).
+        if (existing.length + files.length > ATTACH_LIMITS.maxFiles) {
+          _showToastLocal(`Max ${ATTACH_LIMITS.maxFiles} bijlagen per mail (nu ${existing.length}, toegevoegd zou worden ${files.length}).`, 'warn');
+          return;
+        }
+        for (const f of files) {
+          if (f.size > ATTACH_LIMITS.perFileMB * 1024 * 1024) {
+            _showToastLocal(`"${f.name}" is te groot (max ${ATTACH_LIMITS.perFileMB} MB per bestand).`, 'warn');
+            continue;
+          }
+          if (_totalAttachSize() + f.size > ATTACH_LIMITS.totalMB * 1024 * 1024) {
+            _showToastLocal(`Totale bijlage-grootte overschrijdt ${ATTACH_LIMITS.totalMB} MB — "${f.name}" overgeslagen.`, 'warn');
+            continue;
+          }
+          try {
+            const b64 = await _readFileAsBase64(f);
+            existing.push({
+              filename: f.name || 'bijlage',
+              contentType: f.type || 'application/octet-stream',
+              size: f.size,
+              content: b64, // base64, gaat 1-op-1 naar nodemailer
+            });
+          } catch (err) {
+            _showToastLocal(`Lezen "${f.name}" mislukt: ${err?.message || 'onbekend'}`, 'warn');
+          }
+        }
+        if (render) render();
+      });
+      document.body.appendChild(inp);
+    }
+    inp.click();
+  };
+  window.__emailComposeAttachRemove = (idx) => {
+    const list = _ui.compose.attachments || [];
+    list.splice(Number(idx), 1);
+    if (render) render();
+  };
   // v2 email-round DEEL 2: templates-picker. Klik → laad templates uit
   // /api/email-templates (fail-soft), toon modale keuze, apply op body.
   async function fetchTemplates() {
@@ -1742,5 +1875,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=23 — template-insert positioneel: sjabloon-body wordt nu VOOR de sig-marker geplakt (was: erna → handtekening kwam boven sjabloon-tekst). Alles uit v=22 behouden.');
+  console.debug('[email-v2] v=24 — bijlagen live: compose file-picker (chips, max 10MB/file · 20MB total · 20 files) + reader-download (public_url fallback voor mails zonder imap_uid). Fix drift api/email-attachment.js (onboarding/events mailboxen). Alles uit v=23 behouden.');
 })();
