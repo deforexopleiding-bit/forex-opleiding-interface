@@ -111,7 +111,7 @@ function onTopbarSearch(ev) {
   if (!state) return;
   state.filter.search = (ev.detail && ev.detail.value) || '';
   state.page = 1;
-  loadList().then(() => renderTablePart());
+  loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
 }
 
 // ── Data-fetches ─────────────────────────────────────────────────────────────
@@ -316,13 +316,14 @@ function renderToolbar() {
     </div>
   `;
 
-  // Status-chips
+  // Status-chips — sync teller + pager mét tabel-render, ná fetch (bug-fix
+  // 2026-08-16: renderToolbar() draaide vóór loadList() klaar was → teller
+  // liep 1 filter achter tot een pager-klik. Fix: alles in de .then()-callback.
   el.querySelectorAll('[data-status]').forEach((btn) => {
     btn.addEventListener('click', () => {
       state.filter.status = btn.getAttribute('data-status');
       state.page = 1;
-      loadList().then(() => renderTablePart());
-      renderToolbar();
+      loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
     });
   });
 
@@ -340,23 +341,24 @@ function renderToolbar() {
         if (cb.checked) { if (!state.filter.tags.includes(slug)) state.filter.tags.push(slug); }
         else            { state.filter.tags = state.filter.tags.filter((s) => s !== slug); }
         state.page = 1;
-        loadList().then(() => { renderTablePart(); renderToolbar(); });
+        loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
       });
     });
     const clearBtn = dd.querySelector('[data-act="tags-clear"]');
     if (clearBtn) clearBtn.addEventListener('click', () => {
       state.filter.tags = []; state.page = 1;
-      loadList().then(() => { renderTablePart(); renderToolbar(); });
+      loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
     });
     document.addEventListener('click', (e) => {
       if (!dd.contains(e.target)) menu.classList.remove('open');
     }, { once: true });
   }
 
-  // Sort
+  // Sort — teller kan blijven (sort verandert total niet), maar pager wel
+  // resetten voor consistente refresh.
   el.querySelector('[data-act="sort"]').addEventListener('change', (e) => {
     state.sort = e.target.value;
-    loadList().then(() => renderTablePart());
+    loadList().then(() => { renderTablePart(); renderPager(); });
   });
 
   // Date range
@@ -365,23 +367,23 @@ function renderToolbar() {
   const bounce = (fn) => { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), 250); }; };
   fromEl && fromEl.addEventListener('change', () => {
     state.filter.created_from = fromEl.value || '';
-    state.page = 1; loadList().then(() => { renderTablePart(); renderToolbar(); });
+    state.page = 1; loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
   });
   toEl && toEl.addEventListener('change', () => {
     state.filter.created_to = toEl.value || '';
-    state.page = 1; loadList().then(() => { renderTablePart(); renderToolbar(); });
+    state.page = 1; loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
   });
   const dClear = el.querySelector('[data-act="date-clear"]');
   if (dClear) dClear.addEventListener('click', () => {
     state.filter.created_from = ''; state.filter.created_to = '';
-    state.page = 1; loadList().then(() => { renderTablePart(); renderToolbar(); });
+    state.page = 1; loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
   });
 
-  // In-toolbar search (naast topbar-search)
+  // In-toolbar search (naast topbar-search) — teller + pager syncen ná fetch.
   const searchInput = el.querySelector('[data-act="search"]');
   const debSearch = bounce(() => {
     state.filter.search = searchInput.value || ''; state.page = 1;
-    loadList().then(() => renderTablePart());
+    loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
   });
   searchInput.addEventListener('input', debSearch);
 }

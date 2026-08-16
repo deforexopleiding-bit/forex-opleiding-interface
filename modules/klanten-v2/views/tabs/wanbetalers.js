@@ -95,40 +95,82 @@ async function actLoad(rootEl) {
   }
 }
 
-// ── Dunning-fase card (uit customer-dossier) ────────────────────────────────
+// ── Aanmaan-status card (uit customer-dossier) ──────────────────────────────
+//
+// FIX 2026-08-16: eerdere versie las niet-bestaande velden op verkeerd pad
+// (nu.dunning_stage / nu.pipeline_stage / nu.open_invoices). De endpoint
+// levert echter:
+//   nu.data.dunning.state        → 'active' | 'paused' | 'none' (aanmaan-run)
+//   nu.data.dunning.next_action_at / paused_at / reason
+//   nu.data.financial.open_invoice_count / open_total_amount
+//   nu.data.financial.live_arrangement (met type_label + status_label)
+// De kanban-pipeline-fase (nieuw / aangemaand / …) zit NIET in dit endpoint —
+// dat is dunning_pipeline_customers.stage_slug, alleen zichtbaar in
+// Finance › Wanbetalers.
+
+const DUNNING_STATE_LABEL = {
+  active: 'Aanmaan-run loopt',
+  paused: 'Gepauzeerd',
+  none:   'Geen actieve run',
+};
 
 function renderDunningFaseCard() {
   const nu = state.dossier?.blocks?.nu;
   if (!nu || nu.granted === false) {
     return `
       <div class="kv-prof-card kv-wbp-fase">
-        <div class="kv-prof-card-title">Dunning-fase</div>
+        <div class="kv-prof-card-title">Aanmaan-status</div>
         <div class="kv-prof-empty">
-          ${nu?.granted === false ? 'Geen leesrechten (finance.dunning.view vereist).' : 'Geen dunning-status bekend.'}
+          ${nu?.granted === false ? 'Geen leesrechten (finance.dunning.view vereist).' : 'Geen aanmaan-status bekend.'}
         </div>
       </div>`;
   }
-  const fase       = nu.dunning_stage || nu.pipeline_stage || '—';
-  const lastAction = nu.last_dunning_action_at || nu.last_dunning_sent_at;
-  const openInvs   = Array.isArray(nu.open_invoices) ? nu.open_invoices : [];
-  const openTotal  = openInvs.reduce((s, i) => s + (Number(i.open_amount) || Number(i.amount_total) || 0), 0);
+  const dunning   = nu.data?.dunning || {};
+  const financial = nu.data?.financial || {};
+  const finGranted = financial.granted !== false;
+  const finError   = financial.status === 'error';
+
+  const stateKey = String(dunning.state || 'none').toLowerCase();
+  const stateLabel = DUNNING_STATE_LABEL[stateKey] || (dunning.state || '—');
+  const reason = dunning.reason ? ` (${dunning.reason})` : '';
+  const fase = stateLabel + (stateKey === 'paused' ? reason : '');
+
+  const nextAt   = dunning.next_action_at || null;
+  const pausedAt = dunning.paused_at || null;
+  const subLine =
+    stateKey === 'active' && nextAt  ? `Volgende actie: ${fmtDateTime(nextAt)}`
+    : stateKey === 'paused' && pausedAt ? `Gepauzeerd sinds: ${fmtDateTime(pausedAt)}`
+    : null;
+
+  // Financiële cijfers uit dossier.nu.financial (bron: invoices met amount_open > 0)
+  const openCount = Number(financial.open_invoice_count) || 0;
+  const openTotal = Number(financial.open_total_amount) || 0;
+  const liveArr   = financial.live_arrangement || null;
+
   return `
     <div class="kv-prof-card kv-wbp-fase">
-      <div class="kv-prof-card-title">Dunning-fase (nu)</div>
+      <div class="kv-prof-card-title">Aanmaan-status</div>
       <div class="kv-wbp-fase-head">
         <div class="kv-wbp-fase-name">${K().esc(fase)}</div>
-        ${lastAction ? `<div class="kv-wbp-fase-sub">Laatste actie: ${K().esc(fmtDateTime(lastAction))}</div>` : ''}
+        ${subLine ? `<div class="kv-wbp-fase-sub">${K().esc(subLine)}</div>` : ''}
       </div>
+      ${liveArr ? `
+        <div style="margin:6px 0 10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--text-2)">
+          <span style="color:var(--text-3);text-transform:uppercase;font-size:10.5px;letter-spacing:.06em">Actieve regeling:</span>
+          <span class="ds-pill ds-pill-accent">${K().esc(liveArr.type_label || liveArr.type || '—')}</span>
+          ${liveArr.status_label ? `<span class="ds-cell-sub">${K().esc(liveArr.status_label)}</span>` : ''}
+        </div>` : ''}
       <div class="kv-wbp-fase-row">
         <div class="kv-wbp-fase-stat">
           <div class="kv-wbp-fase-stat-l">Open facturen</div>
-          <div class="kv-wbp-fase-stat-v">${openInvs.length}</div>
+          <div class="kv-wbp-fase-stat-v">${finGranted && !finError ? openCount : '—'}</div>
         </div>
         <div class="kv-wbp-fase-stat">
           <div class="kv-wbp-fase-stat-l">Openstaand bedrag</div>
-          <div class="kv-wbp-fase-stat-v mono">${K().esc(fmtEur(openTotal))}</div>
+          <div class="kv-wbp-fase-stat-v mono">${finGranted && !finError ? K().esc(fmtEur(openTotal)) : '—'}</div>
         </div>
       </div>
+      ${finError ? `<div style="margin-top:8px;font-size:11.5px;color:var(--rose)">⚠ Financiële cijfers niet volledig geladen. Zie Facturen-tab voor de authoritative lijst.</div>` : ''}
     </div>`;
 }
 
@@ -218,7 +260,7 @@ function renderProtectedBanner() {
         <div style="font-size:12px; opacity:.85; margin-top:2px;">
           Alle wanbetaler-acties (aanmanen · regelingen voorstellen · escaleren · stoppen) blijven in
           <a href="/modules/finance.html#view-wanbetalers" target="_blank" rel="noopener" style="color:var(--m); text-decoration:underline; font-weight:600;">Finance › Wanbetalers</a>.
-          Deze tab toont alleen wat er nu speelt voor deze klant — geen mutation-flow.
+          Voor de pipeline-fase (nieuw / aangemaand / in gesprek / …) zie ook Finance › Wanbetalers — deze tab toont alleen de aanmaan-run-status en actieve regelingen van deze klant.
         </div>
       </div>
       <a class="ds-btn ds-btn-primary ds-btn-sm" href="/modules/finance.html#view-wanbetalers" target="_blank" rel="noopener" style="margin-left:auto;">
