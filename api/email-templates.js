@@ -60,14 +60,19 @@ export default async function handler(req, res) {
       return res.status(200).json({ items: data || [] });
     }
 
-    if (req.method === 'POST') {
-      // Alleen super_admin/admin/manager mogen templates beheren.
+    if (req.method === 'POST' || req.method === 'PATCH') {
+      // POST = insert (nieuw) of upsert bij aanwezige id. PATCH = expliciete
+      // update-alias; vereist een `id` in de body. Beide vragen dezelfde
+      // super_admin/admin/manager gate.
       if (!(await requirePermission(req, 'admin.email_templates'))) {
         // Fallback voor rollen zonder deze specifieke permission: check op super_admin via profiel.
         const { data: prof } = await supabaseAdmin.from('profiles').select('role').eq('id', user.id).maybeSingle();
         if (!prof || !['super_admin', 'admin', 'manager'].includes(prof.role)) {
           return res.status(403).json({ error: 'Alleen super_admin/admin/manager mag templates beheren' });
         }
+      }
+      if (req.method === 'PATCH' && !(req.body?.id)) {
+        return res.status(400).json({ error: 'PATCH vereist een `id` in de body — gebruik POST voor insert' });
       }
       const b = req.body || {};
       const name = (b.name ? String(b.name).trim() : '').slice(0, 200);

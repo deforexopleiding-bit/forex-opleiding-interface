@@ -164,7 +164,7 @@
       { id: 'com-handtekening', n: 'E-mail-handtekeningen', d: 'Globale + per-mailbox handtekening (server-side aan mails toegevoegd)', ic: I.mail },
       { id: 'com-wa',           n: 'WhatsApp',             d: 'Meta-koppeling en goedgekeurde templates',                  ic: I.chat || I.mail },
       { id: 'com-tel',          n: 'Telefonie',            d: 'Voys-koppeling en belinstellingen',                         ic: I.phone },
-      { id: 'com-sjabloon',     n: 'Berichtsjablonen',     d: 'E-mail-sjablonen voor compose/reply · beheer via API',       ic: I.doc },
+      { id: 'com-sjabloon',     n: 'Berichtsjablonen',     d: 'E-mail-sjablonen voor compose/reply · lijst + editor',       ic: I.doc },
     ]},
     { g: 'Marketing', items: [
       { id: 'mk-meta',          n: 'Meta-koppeling',       d: 'Advertentieaccount en pixel',                               ic: I.target },
@@ -656,26 +656,249 @@
     </div>`;
   }
 
+  /* ═════════════════════════════════════════════════════════════════════
+     v=5 — COMMUNICATIE · E-mail-sjablonen (DEEL 2 v2 email-round afbouw).
+     Volledige CRUD: lijst + editor + soft-delete. Writes via
+     POST /api/email-templates (supabaseAdmin, super_admin/admin/manager
+     gate). RLS is deny-all voor client — service-role in endpoint.
+     ═════════════════════════════════════════════════════════════════════ */
+  const TPL_CATEGORIES = ['algemeen', 'sales', 'onboarding', 'events', 'wanbetalers', 'partners', 'welkom'];
+  const _tpl = {
+    loading: false, error: null,
+    items: [],          // gehele lijst (incl. inactive)
+    active: null,       // id van bewerkt sjabloon; 'new' = nieuw
+    draft: null,        // { name, subject, body_html, body_text, category, is_active }
+    busy: false, note: '',
+    confirm: null,      // { id, name } → delete-confirm modal
+  };
+  async function fetchEmailTemplates() {
+    if (_tpl.loading) return;
+    _tpl.loading = true; _tpl.error = null; if (render) render();
+    const j = await tryFetch('email-templates', '/api/email-templates?include_inactive=1');
+    _tpl.loading = false;
+    if (j?.__error) _tpl.error = j.__error;
+    else if (j?.error) _tpl.error = j.error;
+    else _tpl.items = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
+  }
+  function _tplBlank() {
+    return { name: '', subject: '', body_html: '', body_text: '', category: 'algemeen', is_active: true };
+  }
+  function _extractVars(text) {
+    // {{voornaam}}, {{klant.naam}}, etc. Uniek, gesorteerd, max 30 chars/each.
+    const s = String(text || '');
+    const set = new Set();
+    const re = /\{\{\s*([a-zA-Z0-9_.-]{1,40})\s*\}\}/g;
+    let m; while ((m = re.exec(s)) !== null) set.add(m[1]);
+    return Array.from(set).sort();
+  }
+  window.__setTplOpen = (id) => {
+    const row = _tpl.items.find((t) => t.id === id);
+    if (!row) { _tpl.active = null; _tpl.draft = null; if (render) render(); return; }
+    _tpl.active = id;
+    _tpl.draft = {
+      name: row.name || '', subject: row.subject || '',
+      body_html: row.body_html || '', body_text: row.body_text || '',
+      category: row.category || 'algemeen',
+      is_active: row.is_active !== false,
+    };
+    _tpl.note = '';
+    if (render) render();
+  };
+  window.__setTplNew = () => {
+    _tpl.active = 'new';
+    _tpl.draft = _tplBlank();
+    _tpl.note = '';
+    if (render) render();
+  };
+  window.__setTplCancel = () => {
+    _tpl.active = null; _tpl.draft = null; _tpl.note = '';
+    if (render) render();
+  };
+  window.__setTplField = (k, v) => {
+    if (!_tpl.draft) return;
+    if (k === 'is_active') _tpl.draft.is_active = !!v;
+    else _tpl.draft[k] = String(v == null ? '' : v);
+    _tpl.note = '';
+  };
+  window.__setTplSave = async () => {
+    if (_tpl.busy || !_tpl.draft) return;
+    const d = _tpl.draft;
+    if (!String(d.name || '').trim()) { _tpl.note = 'Naam is verplicht'; if (render) render(); return; }
+    _tpl.busy = true; _tpl.note = 'Opslaan…'; if (render) render();
+    // Verzamel variabelen client-side (endpoint accepteert ze). Extraheer uit
+    // beide body-velden zodat we een complete set hebben.
+    const vars = Array.from(new Set([..._extractVars(d.body_html), ..._extractVars(d.body_text)])).sort();
+    const payload = {
+      name: d.name.trim(),
+      subject: d.subject || null,
+      body_html: d.body_html || '',
+      body_text: d.body_text || '',
+      category: d.category || 'algemeen',
+      variables: vars,
+      is_active: !!d.is_active,
+    };
+    if (_tpl.active && _tpl.active !== 'new') payload.id = _tpl.active;
+    const j = await tryFetch('tpl-save', '/api/email-templates', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }, 15000);
+    _tpl.busy = false;
+    if (j?.__error || j?.error) {
+      _tpl.note = 'Fout: ' + (j.__error || j.error);
+      if (render) render(); return;
+    }
+    // Merge terug in de lijst
+    if (j?.item) {
+      const idx = _tpl.items.findIndex((t) => t.id === j.item.id);
+      if (idx >= 0) _tpl.items[idx] = j.item;
+      else _tpl.items.push(j.item);
+      _tpl.active = j.item.id;
+      _tpl.draft = {
+        name: j.item.name || '', subject: j.item.subject || '',
+        body_html: j.item.body_html || '', body_text: j.item.body_text || '',
+        category: j.item.category || 'algemeen',
+        is_active: j.item.is_active !== false,
+      };
+    }
+    _tpl.note = 'Opgeslagen';
+    if (render) render();
+    setTimeout(() => { _tpl.note = ''; if (render) render(); }, 2500);
+  };
+  window.__setTplDeleteConfirm = (id) => {
+    const row = _tpl.items.find((t) => t.id === id);
+    if (!row) return;
+    _tpl.confirm = { id, name: row.name || '(zonder naam)' };
+    if (render) render();
+  };
+  window.__setTplDeleteCancel = () => { _tpl.confirm = null; if (render) render(); };
+  window.__setTplDeleteOk = async () => {
+    const c = _tpl.confirm; if (!c) return;
+    _tpl.confirm = null;
+    _tpl.busy = true; _tpl.note = 'Verwijderen…'; if (render) render();
+    const j = await tryFetch('tpl-del', '/api/email-templates?id=' + encodeURIComponent(c.id), { method: 'DELETE' }, 10000);
+    _tpl.busy = false;
+    if (j?.__error || j?.error) { _tpl.note = 'Fout: ' + (j.__error || j.error); if (render) render(); return; }
+    // Soft-delete: is_active=false lokaal spiegelen zodat de rij zichtbaar
+    // blijft (grijs) — user kan 'em reactiveren via de active-toggle.
+    const idx = _tpl.items.findIndex((t) => t.id === c.id);
+    if (idx >= 0) _tpl.items[idx].is_active = false;
+    if (_tpl.active === c.id && _tpl.draft) _tpl.draft.is_active = false;
+    _tpl.note = 'Gedeactiveerd (soft-delete)';
+    if (render) render();
+    setTimeout(() => { _tpl.note = ''; if (render) render(); }, 3000);
+  };
+
   function bodyEmailSjablonen() {
     if (!isSuperAdmin() && !(window.DFO?.S?.role === 'manager' || window.DFO?.S?.role === 'admin')) {
       return bodyAccessDenied();
     }
-    // Volledige beheer-UI komt later; nu een placeholder met endpoint-info.
-    return `<div style="max-width:800px">
-      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:6px">E-mail-sjablonen</div>
-        <div style="font-size:12.5px;color:var(--text-2);line-height:1.55;margin-bottom:10px">
-          Sjablonen zijn beschikbaar in de compose/reply-picker (📄-knop in de compose-toolbar). De picker toont alle <b>active</b> sjablonen, gegroepeerd op categorie.
+    if (!_tpl.loading && !_tpl.items.length && !_tpl.error) queueMicrotask(fetchEmailTemplates);
+    const draft = _tpl.draft;
+    const active = _tpl.active;
+    // Groepeer per categorie voor de lijst.
+    const byCat = {};
+    for (const t of _tpl.items) { (byCat[t.category || 'algemeen'] ||= []).push(t); }
+    const cats = Object.keys(byCat).sort();
+    const varsPreview = draft
+      ? Array.from(new Set([..._extractVars(draft.body_html), ..._extractVars(draft.body_text)])).sort()
+      : [];
+    return `<div style="max-width:1100px">
+      ${_tpl.error ? `<div class="card" style="padding:12px 16px;background:var(--rose-soft);color:var(--rose);border-radius:10px;margin-bottom:14px">Fout: ${esc(_tpl.error)}</div>` : ''}
+      <div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:13px;font-weight:600">Berichtsjablonen</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Beschikbaar in de compose/reply-picker (📄-knop). Alleen <b>active</b> sjablonen tonen daar.</div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="window.__setTplNew()" ${_tpl.busy ? 'disabled' : ''}>+ Nieuw sjabloon</button>
         </div>
-        <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12px;color:var(--text-2);line-height:1.55">
-          <b>Beheer via API</b> (deze UI komt in een volgende ronde):<br>
-          <span class="mono" style="color:var(--text-3);font-size:11.5px">GET /api/email-templates</span><br>
-          <span class="mono" style="color:var(--text-3);font-size:11.5px">POST /api/email-templates &lt;{name, subject, body_html, body_text, category, is_active}&gt;</span><br>
-          <span class="mono" style="color:var(--text-3);font-size:11.5px">DELETE /api/email-templates?id=…</span>
-          <br><br>
-          Tabel: <span class="mono">email_templates</span> · migratie <span class="mono">2026-08-16-email-templates-and-signatures.sql</span>.
+        <div>
+          ${_tpl.loading ? '<div style="padding:20px;text-align:center;color:var(--text-3)">Laden…</div>' : ''}
+          ${!_tpl.loading && _tpl.items.length === 0 ? `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Nog geen sjablonen. Klik "+ Nieuw sjabloon" om je eerste aan te maken.</div>` : ''}
+          ${cats.map((cat) => `
+            <div style="padding:8px 16px 4px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);border-top:1px solid var(--border);background:var(--surface-2)">${esc(cat)}</div>
+            ${byCat[cat].map((t) => `
+              <div style="padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--border);${active === t.id ? 'background:var(--surface-2)' : ''};${!t.is_active ? 'opacity:.55' : ''}">
+                <div style="flex:1;min-width:0;cursor:pointer" onclick="window.__setTplOpen('${esc(t.id)}')">
+                  <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(t.name)}${!t.is_active ? ' <span style="font-size:10.5px;color:var(--text-3);font-weight:400">(inactief)</span>' : ''}</div>
+                  <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(String(t.subject || '(geen onderwerp)').slice(0, 120))}</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="window.__setTplOpen('${esc(t.id)}')">Bewerken</button>
+                ${t.is_active ? `<button class="btn btn-ghost btn-sm" style="color:var(--rose)" onclick="window.__setTplDeleteConfirm('${esc(t.id)}')">Verwijderen</button>` : ''}
+              </div>
+            `).join('')}
+          `).join('')}
         </div>
       </div>
+
+      ${draft ? `
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface-2);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:13px;font-weight:600">${active === 'new' ? '📄 Nieuw sjabloon' : '✏ Sjabloon bewerken'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setTplCancel()">Sluit</button>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+            <label>
+              <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Naam <span style="color:var(--rose)">*</span></div>
+              <input type="text" value="${esc(draft.name)}" oninput="window.__setTplField('name', this.value)" placeholder="Bijv. Welkom nieuwe klant" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px" />
+            </label>
+            <label>
+              <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Categorie</div>
+              <select onchange="window.__setTplField('category', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px">
+                ${TPL_CATEGORIES.map((c) => `<option value="${esc(c)}" ${draft.category === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+              </select>
+            </label>
+          </div>
+          <label>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Onderwerp (optioneel — vult subject als leeg bij invoegen)</div>
+            <input type="text" value="${esc(draft.subject)}" oninput="window.__setTplField('subject', this.value)" placeholder="Bijv. Welkom bij De Forex Opleiding" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px" />
+          </label>
+          <label>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Body HTML (voor mail-clients met opmaak)</div>
+            <textarea oninput="window.__setTplField('body_html', this.value)" rows="8" placeholder="<p>Hoi {{voornaam}},</p>" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;line-height:1.5;resize:vertical">${esc(draft.body_html)}</textarea>
+          </label>
+          <label>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Body platte tekst (voor mail-clients zonder HTML)</div>
+            <textarea oninput="window.__setTplField('body_text', this.value)" rows="5" placeholder="Hoi {{voornaam}},\n\n..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;line-height:1.5;resize:vertical">${esc(draft.body_text)}</textarea>
+          </label>
+          <div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Variabelen (auto-gedetecteerd uit <span class="mono">{{key}}</span>-placeholders)</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              ${varsPreview.length === 0
+                ? `<span style="font-size:11.5px;color:var(--text-3);font-style:italic">Geen variabelen in body — gebruik <span class="mono">{{voornaam}}</span> / <span class="mono">{{klant.naam}}</span> etc.</span>`
+                : varsPreview.map((v) => `<span style="padding:3px 10px;background:var(--violet-soft, var(--surface-2));color:var(--violet, var(--text-2));border-radius:20px;font-size:11.5px;font-family:'IBM Plex Mono',monospace">{{${esc(v)}}}</span>`).join('')
+              }
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer">
+            <input type="checkbox" ${draft.is_active ? 'checked' : ''} onchange="window.__setTplField('is_active', this.checked)" style="width:16px;height:16px;cursor:pointer" />
+            <span>Actief (zichtbaar in compose-picker)</span>
+          </label>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:11.5px;color:${/fout/i.test(_tpl.note) ? 'var(--rose)' : /opgeslagen|gedeactiveerd/i.test(_tpl.note) ? 'var(--emerald)' : 'var(--text-3)'}">${esc(_tpl.note)}</div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="window.__setTplCancel()">Annuleren</button>
+              <button class="btn btn-primary btn-sm" onclick="window.__setTplSave()" ${_tpl.busy ? 'disabled' : ''}>${_tpl.busy ? 'Bezig…' : (active === 'new' ? 'Aanmaken' : 'Opslaan')}</button>
+            </div>
+          </div>
+        </div>
+      </div>` : ''}
+
+      ${_tpl.confirm ? `
+      <div style="position:fixed;inset:0;background:rgba(17,23,33,.48);z-index:2100;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__setTplDeleteCancel()">
+        <div style="background:var(--surface);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.32);max-width:440px;width:100%;padding:22px 24px" onclick="event.stopPropagation()">
+          <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:8px">Sjabloon deactiveren?</div>
+          <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px">
+            Sjabloon <b>${esc(_tpl.confirm.name)}</b> wordt gedeactiveerd (soft-delete). Het verdwijnt uit de compose-picker maar blijft bewaard — je kunt 'm later reactiveren via de "Actief"-toggle.
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="window.__setTplDeleteCancel()">Annuleren</button>
+            <button class="btn btn-primary btn-sm" style="background:var(--rose);border-color:var(--rose)" onclick="window.__setTplDeleteOk()">Deactiveren</button>
+          </div>
+        </div>
+      </div>` : ''}
     </div>`;
   }
 
@@ -729,5 +952,5 @@
   window.DFO.VIEWS['instellingen/'] = instView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('instellingen');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('instellingen');
-  console.debug('[instellingen-v2] v=4 — Communicatie: E-mail-handtekeningen (globaal + per-mailbox) editor + Berichtsjablonen info-card.');
+  console.debug('[instellingen-v2] v=5 — Berichtsjablonen volledige CRUD-UI (lijst + editor + soft-delete + variabelen-chips). E-mail-handtekeningen ongewijzigd t.o.v. v=4.');
 })();
