@@ -63,10 +63,15 @@
     // Overrides — user kan lijn en/of nummer wijzigen via de sheet.
     // lineOverride: 'auto' | 'nl' | 'be' (default auto = detectLine).
     // numberOverride: string of null (default = klantnummer uit open-call).
-    // v=1da: lineOverride wordt gepersisteerd in localStorage
-    // ('klx-softphone-line') zodat de user zijn keuze niet elke call
-    // opnieuw hoeft te maken. Read-once bij init met try/catch (private
-    // browsing / disabled storage → fallback 'auto').
+    // selectedCallerId: uitgaand telefoonnummer dat als CLI wordt getoond
+    //                   ('' = Voys · standaard → account-default). Komt uit
+    //                   /api/voys-sip-config caller_ids (per lijn of top-
+    //                   level). Send-flow: als gezet, wordt toegevoegd als
+    //                   P-Asserted-Identity + Remote-Party-ID header in de
+    //                   SIP INVITE (mirror follow-up.html:7359-7374).
+    // v=1da: lineOverride + selectedCallerId gepersisteerd in localStorage
+    // zodat de user zijn keuze niet elke call opnieuw hoeft te maken.
+    // Read-once bij init met try/catch (private browsing → fallback).
     lineOverride   : (function () {
       try {
         const v = localStorage.getItem('klx-softphone-line');
@@ -74,6 +79,10 @@
       } catch (_) { return 'auto'; }
     })(),
     numberOverride : null,
+    selectedCallerId: (function () {
+      try { return localStorage.getItem('klx-softphone-caller-id') || ''; }
+      catch (_) { return ''; }
+    })(),
     // Actieve klant-context (naam + telefoon + optionele meta) voor de sheet-
     // header. Wordt gezet bij open() en gewist bij closeSheet().
     activeCustomer : null,
@@ -102,6 +111,28 @@
   }
   function isBeAvailable() {
     return state.config ? !!state.configuredLines?.be : false;
+  }
+  // v=1da: caller-ID resolvers.
+  // Bron-volgorde:
+  //   1. state.accByLine[line].caller_ids  (per-account, na SIP-init).
+  //   2. state.config.accounts[line]?.caller_ids (van cfg-payload).
+  //   3. state.config.caller_ids            (top-level backward-compat).
+  function callerIdsForLine(line) {
+    if (!state.config) return [];
+    const perAccount = state.accByLine?.[line]?.caller_ids
+      || state.config?.accounts?.[line]?.caller_ids
+      || [];
+    if (Array.isArray(perAccount) && perAccount.length) return perAccount;
+    return Array.isArray(state.config.caller_ids) ? state.config.caller_ids : [];
+  }
+  // Effectieve CID: alleen doorsturen als 'ie in de lijst van de huidige
+  // lijn zit (voorkomt dat een NL-nummer per ongeluk over de BE-lijn gaat).
+  // Lege waarde = "Voys · standaard" = geen extraHeaders in INVITE.
+  function resolveEffectiveCallerId(line) {
+    const cid = String(state.selectedCallerId || '').trim();
+    if (!cid) return '';
+    const list = callerIdsForLine(line);
+    return list.includes(cid) ? cid : '';
   }
   function registrationStatusForLine(line) {
     if (state.uaByLine?.[line]) return 'connected';
@@ -309,10 +340,23 @@
       const acc    = state.accByLine?.[line];
       const domain = acc?.domain || state.config?.domain || 'voipgrid.nl';
       const target = global.SIP.UserAgent.makeURI('sip:' + digits + '@' + domain);
+      // v=1da: als user een specifiek Voys-nummer heeft gekozen, stuur het
+      // mee als P-Asserted-Identity + Remote-Party-ID (RFC 3325 / historisch).
+      // Mirror van follow-up.html:7359-7374. Leeg = "Voys · standaard" →
+      // account-default CLI (geen extraHeaders).
+      const chosenCid = resolveEffectiveCallerId(line);
+      const extraHeaders = [];
+      if (chosenCid) {
+        const cidDigits = String(chosenCid).replace(/\D/g, '');
+        const cidUri = 'sip:' + cidDigits + '@' + domain;
+        extraHeaders.push('P-Asserted-Identity: <' + cidUri + '>');
+        extraHeaders.push('Remote-Party-ID: <' + cidUri + '>;privacy=off;screen=yes');
+      }
       const inviter = new global.SIP.Inviter(ua, target, {
         sessionDescriptionHandlerOptions: {
           constraints: { audio: true, video: false },
         },
+        extraHeaders: extraHeaders.length ? extraHeaders : undefined,
       });
       state.session = inviter;
       // v=1da: bind audio al bij Establishing zodat SIP early media (183
@@ -478,6 +522,11 @@
     const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
+    // v=1da: uitgaand-nummer keuze — dropdown "Voys · standaard" + per-lijn
+    // caller_ids uit /api/voys-sip-config. Alleen tonen wanneer er ≥1 optie
+    // beschikbaar is (anders zou 'ie een lege lijst tonen).
+    const availableCids = callerIdsForLine(line);
+    const selectedCid = String(state.selectedCallerId || '');
     body.innerHTML = `
       <div class="klx-call-sheet-top">
         <div class="klx-call-sheet-label"><i class="ti ti-phone"></i> Uitbellen via</div>
@@ -487,6 +536,15 @@
           ${beAvailable ? `<option value="be" ${ov === 'be' ? 'selected' : ''}>BE-lijn (+32)</option>` : ''}
         </select>
       </div>
+      ${availableCids.length ? `
+        <div class="klx-call-sheet-top" style="margin-top:6px">
+          <div class="klx-call-sheet-label"><i class="ti ti-user"></i> Uitgaand nummer</div>
+          <select class="klx-call-sheet-lineselect" id="klxCallCidSel" ${inCall ? 'disabled' : ''} title="Kies welk Voys-nummer als beller-ID uitgaat. 'Voys · standaard' laat Voys de account-default kiezen.">
+            <option value=""${selectedCid ? '' : ' selected'}>Voys · standaard</option>
+            ${availableCids.map((n) => `<option value="${esc(n)}"${selectedCid === n ? ' selected' : ''}>${esc(n)}</option>`).join('')}
+          </select>
+        </div>
+      ` : ''}
       <div class="klx-call-sheet-conn ${connState}" aria-live="polite">
         <span class="klx-call-sheet-conn-label">${esc(connLabel)}</span>
         <button type="button" class="klx-call-sheet-conn-retry" id="klxCallConnRetry" ${showConnRetry ? '' : 'hidden'} title="Opnieuw verbinden"><i class="ti ti-refresh"></i></button>
@@ -527,6 +585,15 @@
         // v=1da: onthoud de keuze cross-call/cross-session.
         try { localStorage.setItem('klx-softphone-line', v); } catch (_) { /* private mode */ }
         renderSheet();
+      });
+    }
+    // v=1da: caller-ID keuze — persistente state.
+    const cidSel = body.querySelector('#klxCallCidSel');
+    if (cidSel) {
+      cidSel.addEventListener('change', (e) => {
+        const v = String(e.target.value || '');
+        state.selectedCallerId = v;
+        try { localStorage.setItem('klx-softphone-caller-id', v); } catch (_) { /* private mode */ }
       });
     }
     const retryBtn = body.querySelector('#klxCallConnRetry');
