@@ -29,7 +29,7 @@ import { ImapFlow } from 'imapflow';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
-const ACTIONS = ['flag','unflag','archive','trash','restore'];
+const ACTIONS = ['flag','unflag','archive','trash','restore','purge'];
 const IMAP_MAILBOXES = {
   'leads':         { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
   'info':          { user: 'info@deforexopleiding.nl',          passEnv: 'IMAP_PASS_INFO' },
@@ -80,6 +80,17 @@ export default async function handler(req, res) {
     .in('id', ids);
   if (fetchErr) return res.status(500).json({ error: fetchErr.message });
   if (!rows || rows.length === 0) return res.status(404).json({ error: 'Geen matches op ids' });
+
+  // v=21: purge = hard-delete uit DB (alleen vanuit Prullenbak, met confirm).
+  // Voor purge slaan we de update-payload over en doen direct DELETE.
+  if (action === 'purge') {
+    const { error: delErr, count: delCount } = await supabaseAdmin
+      .from('email_messages')
+      .delete({ count: 'exact' })
+      .in('id', ids);
+    if (delErr) return res.status(500).json({ error: delErr.message });
+    return res.status(200).json({ ok: true, purged: delCount || 0 });
+  }
 
   // Bouw update-payload per action.
   const patch = {};

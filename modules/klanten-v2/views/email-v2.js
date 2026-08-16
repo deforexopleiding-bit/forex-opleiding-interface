@@ -134,6 +134,7 @@
     infoDialog:    null,  // { title, msg, tone } tone: 'info'|'warn'
     templatePickerOpen: false, // v2 email-round DEEL 2
     _listScrollTop: 0,    // v2 email-round bug-4: list-scroll snapshot
+    klantModal:    null,  // v=21: { messageId, currentCustomerId, currentCustomerLabel, query, results, searching, busy, error }
   };
   function _showToastLocal(msg, tone) {
     try {
@@ -532,7 +533,8 @@
     const c = _ui.confirmDialog;
     const i = _ui.infoDialog;
     const tp = _ui.templatePickerOpen;
-    if (!c && !i && !tp) return '';
+    const km = _ui.klantModal;
+    if (!c && !i && !tp && !km) return '';
     let html = '';
     if (c) {
       // z-index 2000 → boven compose (1000), boven overlay-modals. Native dialogs zijn hiermee vervangen.
@@ -555,6 +557,44 @@
           <div style="padding:14px 22px;background:${accentBg};color:${accentFg};font-size:14px;font-weight:600;border-bottom:1px solid var(--border)">${esc(i.title)}</div>
           <div style="padding:18px 22px;font-size:13px;color:var(--text-2);line-height:1.6">${esc(i.msg)}</div>
           <div style="padding:0 18px 16px;display:flex;justify-content:flex-end"><button class="btn btn-primary" onclick="window.__emailInfoClose()">Sluiten</button></div>
+        </div>
+      </div>`;
+    }
+    if (km) {
+      // v=21: klant-koppeling modal — zoek + resultaten + ontkoppel-actie.
+      const results = Array.isArray(km.results) ? km.results : [];
+      html += `<div style="position:fixed;inset:0;background:rgba(17,23,33,.48);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="window.__emailKlantCancel()">
+        <div style="background:var(--surface);border-radius:${TOK.rLg};box-shadow:0 20px 60px rgba(0,0,0,.32);max-width:560px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+          <div style="padding:14px 22px;background:${TOK.mSoft};color:${TOK.m};font-size:14px;font-weight:600;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <span>Koppel aan klant</span>
+            <button class="icon-btn" onclick="window.__emailKlantCancel()" title="Sluiten" style="width:26px;height:26px">${ICO.x}</button>
+          </div>
+          ${km.currentCustomerId ? `
+            <div style="padding:10px 22px;background:${TOK.mSoft};border-bottom:1px solid var(--border);font-size:12.5px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+              <span>Nu gekoppeld: <b>${esc(km.currentCustomerLabel || km.currentCustomerId.slice(0, 8))}</b></span>
+              <button class="btn btn-ghost btn-sm" onclick="window.__emailKlantUnlink()" style="color:var(--rose)" ${km.busy ? 'disabled' : ''}>Ontkoppelen</button>
+            </div>` : ''}
+          <div style="padding:14px 22px;border-bottom:1px solid var(--border)">
+            <input type="search" value="${esc(km.query)}" oninput="window.__emailKlantSearch(this.value)" placeholder="Zoek klant op naam, e-mail of bedrijf (min 2 tekens)…" autofocus style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px" />
+            ${km.error ? `<div style="margin-top:8px;padding:6px 10px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:11.5px">${esc(km.error)}</div>` : ''}
+          </div>
+          <div style="padding:8px 0;overflow-y:auto;flex:1">
+            ${km.searching ? '<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12.5px">Zoeken…</div>' : ''}
+            ${!km.searching && km.query.trim().length < 2 ? '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Typ minstens 2 tekens om te zoeken.</div>' : ''}
+            ${!km.searching && km.query.trim().length >= 2 && results.length === 0 ? '<div style="padding:14px 22px;color:var(--text-3);font-size:12.5px">Geen klanten gevonden voor <b>' + esc(km.query) + '</b>.</div>' : ''}
+            ${results.map((c) => {
+              const label = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || c.email || c.id.slice(0, 8);
+              const sub = [c.email, c.phone, c.company_name].filter(Boolean).join(' · ');
+              const isCurrent = c.id === km.currentCustomerId;
+              return `<button class="btn btn-ghost" onclick="window.__emailKlantPick('${esc(c.id)}')" ${km.busy || isCurrent ? 'disabled' : ''} style="display:block;width:100%;padding:10px 22px;text-align:left;border:none;border-bottom:1px solid var(--border);background:${isCurrent ? TOK.mSoft : 'transparent'};cursor:${isCurrent ? 'default' : 'pointer'}">
+                <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(label)}${isCurrent ? ' <span style="font-size:10.5px;color:' + TOK.m + '">(huidig)</span>' : ''}</div>
+                <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sub || '—')}</div>
+              </button>`;
+            }).join('')}
+          </div>
+          <div style="padding:10px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick="window.__emailKlantCancel()">Annuleren</button>
+          </div>
         </div>
       </div>`;
     }
@@ -844,6 +884,12 @@
   }
   function _readHead(row) {
     const isFlagged = !!row.flagged;
+    // v=21: reader-toolbar rol-bewust per folder.
+    // Inbox/andere → archive/trash-knoppen.
+    // Archief       → "Terugzetten naar Postvak IN" i.p.v. archive.
+    // Prullenbak    → "Terugzetten" + "Permanent verwijderen" (met confirm).
+    const inArchief = _ui.folder === 'archive';
+    const inTrash   = _ui.folder === 'trash';
     return `<div style="padding:16px 22px 14px;border-bottom:1px solid var(--border);background:var(--surface)">
       <div style="font-size:18px;font-weight:600;letter-spacing:-.025em;color:var(--text);line-height:1.3;margin-bottom:12px">${esc(row.subject || '(geen onderwerp)')}</div>
       <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -853,13 +899,26 @@
         <span style="width:1px;height:20px;background:var(--border);margin:0 4px"></span>
         <button class="icon-btn" title="Markeer ongelezen" onclick="window.__emailMarkUnread()" style="width:28px;height:28px">${ICO.mail}</button>
         <button class="icon-btn" title="${isFlagged ? 'Vlag verwijderen' : 'Vlag toevoegen'}" onclick="window.__emailFlagToggle()" style="width:28px;height:28px;color:${isFlagged ? TOK.amber : 'inherit'}">${ICO.flag}</button>
-        <button class="icon-btn" title="Archiveren" onclick="window.__emailArchive()" style="width:28px;height:28px">${ICO.archive}</button>
-        <button class="icon-btn" title="Verwijderen" onclick="window.__emailTrash()" style="width:28px;height:28px">${ICO.trash}</button>
+        ${inArchief || inTrash
+          ? `<button class="btn btn-ghost btn-sm" onclick="window.__emailRestore()" style="gap:6px" title="Zet dit bericht terug naar Postvak IN">↺ Terugzetten</button>`
+          : `<button class="icon-btn" title="Archiveren" onclick="window.__emailArchive()" style="width:28px;height:28px">${ICO.archive}</button>`
+        }
+        ${inTrash
+          ? `<button class="btn btn-ghost btn-sm" onclick="window.__emailPurgeConfirm()" style="gap:6px;color:var(--rose)" title="Definitief verwijderen — NIET terug te halen">✕ Permanent verwijderen</button>`
+          : (!inArchief ? `<button class="icon-btn" title="Verwijderen" onclick="window.__emailTrash()" style="width:28px;height:28px">${ICO.trash}</button>` : '')
+        }
         <div style="position:relative;margin-left:auto">
           <button class="icon-btn" title="Meer" onclick="window.__emailToggleMore()" style="width:28px;height:28px">${ICO.dots}</button>
           ${_ui.moreMenuOpen ? _moreMenu(row) : ''}
         </div>
       </div>
+      ${row.customer_id
+        ? `<div style="margin-top:10px;padding:8px 12px;background:${TOK.mSoft};border-radius:${TOK.rSm};font-size:12px;display:flex;align-items:center;gap:8px">
+            <span style="color:${TOK.m};font-weight:600">🔗 Gekoppeld aan klant:</span>
+            <a href="#" onclick="event.preventDefault();window.__emailOpenKlant('${esc(row.customer_id)}')" style="color:${TOK.m};text-decoration:underline">${esc(row.customer_name || row.customer_label || row.customer_id.slice(0, 8))}</a>
+            <button class="btn btn-ghost btn-sm" onclick="window.__emailKoppelKlant()" style="margin-left:auto;font-size:11px">Wijzig / ontkoppel</button>
+          </div>`
+        : ''}
     </div>`;
   }
   function _moreMenu(row) {
@@ -1238,7 +1297,7 @@
     if (render) render();
   };
   window.__emailSettings = () => {
-    _openInfo('Instellingen', 'Handtekening kan al gekozen worden in het compose-venster. Regels/notificaties/handtekening-beheer komen in Fase 3.', 'info');
+    _openInfo('Instellingen', 'Handtekening beheer je nu in Instellingen → Communicatie → E-mail-handtekeningen (globaal + per-mailbox). Sjablonen in Instellingen → Communicatie → Berichtsjablonen.', 'info');
   };
   window.__emailOpenKlant = (customerId) => {
     if (!customerId) return;
@@ -1251,17 +1310,104 @@
     }
     _showToastLocal('Openen klant-dossier…', 'info');
   };
+  // v=21: klant-koppeling volledig — zoek-modal + POST /api/email-message-link-customer.
+  // Klant-veilig: ontkoppel-actie zichtbaar wanneer al gekoppeld; zoekt via
+  // /api/customers?search=... (min 2 chars, 300ms debounce).
   window.__emailKoppelKlant = () => {
-    // Voor Fase 2B: opent detail-view als er al customer_id is; anders in-UI melding
-    // (NIET blocking alert — die bevriest de compose-modal in Chrome).
     const row = currentRow();
-    if (row && row.customer_id) { window.__emailOpenKlant(row.customer_id); return; }
-    _openInfo(
-      'Klant-koppeling — komt in Fase 3',
-      'Handmatig koppelen van deze e-mail-thread aan een klant zit in Fase 3 van de v2-email-module. Voor nu: open de klanten-module, zoek de klant en de sync-cron matcht ze automatisch op e-mailadres.',
-      'info'
+    if (!row) { _showToastLocal('Selecteer eerst een bericht.', 'info'); return; }
+    _ui.klantModal = {
+      messageId: row.id,
+      currentCustomerId: row.customer_id || null,
+      currentCustomerLabel: row.customer_label || row.customer_name || null,
+      query: '', results: [], searching: false, busy: false, error: null,
+    };
+    if (render) render();
+  };
+  window.__emailKlantSearch = (v) => {
+    if (!_ui.klantModal) return;
+    _ui.klantModal.query = String(v || '');
+    if (_ui.klantModal._debounceT) clearTimeout(_ui.klantModal._debounceT);
+    const q = _ui.klantModal.query.trim();
+    if (q.length < 2) { _ui.klantModal.results = []; _ui.klantModal.searching = false; if (render) render(); return; }
+    _ui.klantModal.searching = true;
+    if (render) render();
+    _ui.klantModal._debounceT = setTimeout(async () => {
+      const j = await tryFetch('cust-search', '/api/customers?search=' + encodeURIComponent(q) + '&page_size=20', undefined, 8000);
+      if (!_ui.klantModal) return;
+      _ui.klantModal.searching = false;
+      if (j?.__error || j?.error) { _ui.klantModal.error = j.__error || j.error; _ui.klantModal.results = []; }
+      else { _ui.klantModal.error = null; _ui.klantModal.results = Array.isArray(j?.customers) ? j.customers : []; }
+      if (render) render();
+    }, 300);
+  };
+  window.__emailKlantPick = async (customerId) => {
+    if (!_ui.klantModal || _ui.klantModal.busy) return;
+    _ui.klantModal.busy = true; _ui.klantModal.error = null; if (render) render();
+    const j = await tryFetch('link-cust', '/api/email-message-link-customer', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message_id: _ui.klantModal.messageId, customer_id: customerId }),
+    }, 10000);
+    if (j?.__error || j?.error) {
+      _ui.klantModal.busy = false; _ui.klantModal.error = j.__error || j.error;
+      if (render) render(); return;
+    }
+    // Reflect in de local row + close modal
+    const items = asArr(_live.inbox.data?.items);
+    const row = items.find((r) => r.id === _ui.klantModal.messageId);
+    if (row) {
+      row.customer_id = customerId;
+      const picked = _ui.klantModal.results.find((c) => c.id === customerId);
+      if (picked) {
+        row.customer_name = [picked.first_name, picked.last_name].filter(Boolean).join(' ') || picked.company_name || picked.email;
+        row.customer_label = row.customer_name;
+      }
+    }
+    _showToastLocal(customerId ? 'Klant gekoppeld' : 'Ontkoppeld', 'success');
+    _ui.klantModal = null;
+    if (render) render();
+  };
+  window.__emailKlantUnlink = () => {
+    if (!_ui.klantModal) return;
+    window.__emailKlantPick(null);
+  };
+  window.__emailKlantCancel = () => { _ui.klantModal = null; if (render) render(); };
+
+  // v=21: terugzet-acties in Archief + Prullenbak (blocker: bestond niet).
+  // Archief → restore (status='inbox'); Prullenbak → restore of purge (hard-delete
+  // met confirm). Klant-veilig: purge vraagt bevestiging via _openConfirm.
+  window.__emailRestore = () => {
+    const row = currentRow(); if (!row) return;
+    statusUpdate([row.id], 'restore');
+  };
+  window.__emailPurgeConfirm = () => {
+    const row = currentRow(); if (!row) return;
+    _openConfirm(
+      'Deze e-mail permanent verwijderen? Dit kan NIET ongedaan gemaakt worden. De rij wordt uit de database gewist.',
+      () => __emailPurgeDoIt([row.id]),
+      null
     );
   };
+  async function __emailPurgeDoIt(ids) {
+    if (!ids || !ids.length) return;
+    const key = 'bulk:purge';
+    if (_ui.statusBusy[key]) return;
+    _ui.statusBusy[key] = true; if (render) render();
+    const j = await tryFetch('purge', '/api/email-status-update', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, action: 'purge' }),
+    }, 10000);
+    _ui.statusBusy[key] = false;
+    if (j?.__error || j?.error) { _showToastLocal('Verwijderen mislukt: ' + (j.__error || j.error), 'warn'); if (render) render(); return; }
+    // Optimistic: verwijder uit lijst + clear selectie.
+    const items = asArr(_live.inbox.data?.items);
+    if (items.length) _live.inbox.data.items = items.filter((x) => !ids.includes(x.id));
+    ids.forEach((id) => { delete _ui.selectedRows[id]; });
+    if (_ui.selectedId && ids.includes(_ui.selectedId)) _ui.selectedId = null;
+    _live.counts.data = null;
+    _showToastLocal((j?.purged || ids.length) + ' permanent verwijderd.', 'success');
+    if (render) render();
+  }
   window.__emailNewCompose = () => {
     _ui.composeMode = 'new'; _ui.composeMinimized = false;
     _ui.compose = { from_mailbox: _ui.compose.from_mailbox, to: '', cc: '', bcc: '', subject: '', body_html: '', body_text: '', email_id: null, signature: 'standaard', draft_id: null };
@@ -1549,5 +1695,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=20 — handtekening-placement-marker patroon: reply/fwd zetten <div data-sig-marker=1> tussen eigen tekst en quote; server vervangt met handtekening. Nieuwe mail zonder marker → append aan eind (huidig gedrag).');
+  console.debug('[email-v2] v=21 — Archief/Prullenbak Terugzetten + Permanent verwijderen (confirm) + klant-koppeling modal (zoek /api/customers + POST /api/email-message-link-customer) + gekoppelde-klant banner in reader. Alles uit v=20 (placement-marker) behouden.');
 })();
