@@ -107,6 +107,10 @@
       "schedule": "*/3 * * * *"
     },
     {
+      "path": "/api/cron-leadsonderhoud-bulk-send",
+      "schedule": "*/3 * * * *"
+    },
+    {
       "path": "/api/cron-dunning-conversation-reminders",
       "schedule": "*/15 * * * *"
     },

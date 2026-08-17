@@ -45,6 +45,18 @@ export default async function handler(req, res) {
   const search = q.q ? String(q.q).trim() : null;
   const limit  = Math.max(1, Math.min(500, Number(q.limit)  || 50));
   const offset = Math.max(0, Number(q.offset) || 0);
+  // v=fase3: warmte-score range voor leadsonderhoud-bulk segment-builder.
+  // Additief: als niet gezet -> geen filter. Beide inclusive.
+  const scoreMinRaw = q.score_min != null && q.score_min !== '' ? Number(q.score_min) : null;
+  const scoreMaxRaw = q.score_max != null && q.score_max !== '' ? Number(q.score_max) : null;
+  const scoreMin = Number.isFinite(scoreMinRaw) ? scoreMinRaw : null;
+  const scoreMax = Number.isFinite(scoreMaxRaw) ? scoreMaxRaw : null;
+  // Multi-traject via ?traject_in=slug1,slug2 (comma-separated). Werkt naast
+  // de bestaande ?traject=<single>. Als beide gezet zijn wint traject_in.
+  const trajectInRaw = q.traject_in ? String(q.traject_in).trim() : '';
+  const trajectIn = trajectInRaw
+    ? trajectInRaw.split(',').map(s => s.trim()).filter(Boolean)
+    : [];
   // Soft-delete: standaard alleen actieve leads; ?archief=1 toont het archief.
   const archief = q.archief === '1' || q.archief === 'true';
 
@@ -63,9 +75,14 @@ export default async function handler(req, res) {
     qy = archief ? qy.not('verwijderd_op', 'is', null) : qy.is('verwijderd_op', null);
 
     if (soort)   qy = qy.eq('soort', soort);
+    // Multi-traject wint van single-traject als beide gezet zijn.
+    if (trajectIn.length) qy = qy.in('traject', trajectIn);
     // CASE-INSENSITIVE: trajectwaarden zijn gemengd ('Membership'). ilike zonder
     // %/_ = exacte, hoofdletter-ongevoelige match. Escape wildcards uit de input.
-    if (traject) qy = qy.ilike('traject', traject.replace(/[%_]/g, m => '\\' + m));
+    else if (traject) qy = qy.ilike('traject', traject.replace(/[%_]/g, m => '\\' + m));
+    // Warmte-score range.
+    if (scoreMin != null) qy = qy.gte('score', scoreMin);
+    if (scoreMax != null) qy = qy.lte('score', scoreMax);
     if (bron)   qy = qy.eq('bron',   bron);
     if (status) qy = qy.eq('status', status);
     if (kwal === 'geen') qy = qy.is('kwalificatie', null);
