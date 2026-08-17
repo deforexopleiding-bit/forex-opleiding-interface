@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/inbox-v2.js
 //
-// Inbox v2 — BROK 2 (v=4, 2026-08-17): unified werkplek — write-flows.
+// Inbox v2 — BROK 2 (v=5, 2026-08-17): + pre-src hint via sessionStorage.
 // LEES-only in deze brok: alle 8 bronnen tonen echte counts + rows, en
 // voor conversation-bronnen (WA + Lisa) rendert de detail-pane een
 // echte thread. Compose komt in BROK 2.
@@ -83,6 +83,26 @@
 
   /* ── State ─────────────────────────────────────────────────────────── */
   let ibSrc = 'wb';
+  // BROK 2 follow-up: pre-src via sessionStorage['inbox-pre-src']. Andere
+  // modules (bv. Onboarding "Inbox is verhuisd"-tab) kunnen die zetten
+  // vlak vóór DFO.goMod('inbox'), zodat de rail meteen op de juiste
+  // bron opent. Gelezen + gewist bij inboxView() (niet in IIFE-scope,
+  // want die draait maar 1× bij script-load — módule-navigatie triggert
+  // die niet opnieuw).
+  const _VALID_SRCS = ['wb', 'ev', 'ob', 'lisa', 'lo', 'm_adm', 'm_info', 'tk'];
+  function _applyPreSrcHint() {
+    try {
+      const pre = sessionStorage.getItem('inbox-pre-src');
+      if (pre && _VALID_SRCS.includes(pre)) {
+        sessionStorage.removeItem('inbox-pre-src');
+        if (ibSrc !== pre) {
+          ibSrc = pre;
+          ibSel = null;
+          _resetThread && _resetThread();
+        }
+      }
+    } catch (_) { /* private mode */ }
+  }
   let ibSel = null; // id van geselecteerde rij (uuid/int, source-afhankelijk)
   const _live = {
     loading: false,
@@ -1026,6 +1046,8 @@
 
   /* ── VIEW ─────────────────────────────────────────────────────────── */
   function inboxView() {
+    // Pre-src hint uit sessionStorage (zie Onboarding "Inbox is verhuisd"-tab).
+    _applyPreSrcHint();
     // Trigger bundle-fetch als nog niet geladen.
     if (!_live.fetched && !_live.loading) {
       queueMicrotask(() => fetchInboxBundle());

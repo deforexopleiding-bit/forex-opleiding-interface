@@ -584,12 +584,28 @@
       ${(!st.error && (!st.loading || st.rows)) ? paginator('archived', pageMeta) : ''}`;
   }
   function inboxPlaceholder() {
+    // De unified Inbox-module is nu LIVE en toont Onboarding-WhatsApp-
+    // conversaties als eigen bron. Deze tab wordt daarom een deep-link
+    // naar Inbox (voorgefilterd op 'ob' via sessionStorage — inbox-v2
+    // leest die key bij mount, past ibSrc aan en clearet de key).
     return `<div class="empty" style="padding:60px 20px;">
       <div class="empty-ico">${svg(I.mail || I.doc)}</div>
-      <div class="empty-t">Inbox komt later</div>
-      <div class="empty-s">De WhatsApp-inbox voor Onboarding zit nog in de v1-hub. Gebruik <a href="/modules/onboarding-hub.html#inbox" style="color:var(--m); text-decoration:underline;">de oude hub</a> voor inbox-berichten.</div>
+      <div class="empty-t">Onboarding-Inbox is verhuisd</div>
+      <div class="empty-s" style="max-width:520px;margin:8px auto 18px">
+        WhatsApp-berichten voor Onboarding zitten nu in de unified <b>Inbox</b>-module. Deze
+        opent voorgefilterd op de Onboarding-bron — thread + versturen + koppelen werkt daar.
+      </div>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="__onbGoInbox()">Open in Inbox →</button>
+        <a class="btn btn-ghost btn-sm" href="/modules/onboarding-hub.html#inbox" style="text-decoration:none">Nog even de v1-hub</a>
+      </div>
     </div>`;
   }
+  // Deep-link helper: zet sessionStorage-hint + navigeer via DFO.
+  window.__onbGoInbox = () => {
+    try { sessionStorage.setItem('inbox-pre-src', 'ob'); } catch (_) {}
+    try { window.DFO && window.DFO.goMod && window.DFO.goMod('inbox'); } catch (_) {}
+  };
 
   window.DFO.VIEWS['onboarding/Actief']  = actiefView;
   window.DFO.VIEWS['onboarding/Archief'] = archiefView;
@@ -597,5 +613,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('onboarding');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('onboarding');
 
-  console.debug('[onb-v2] parity-ronde — 12 kolommen · sort · inline mentor · kebab · intake-filter');
+  console.debug('[onb-v2] v=10 — Inbox-tab is nu deep-link naar unified Inbox (pre-src=ob via sessionStorage).');
 })();
