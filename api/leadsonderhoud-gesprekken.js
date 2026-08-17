@@ -79,6 +79,11 @@ export default async function handler(req, res) {
     }
 
     // WhatsApp-gesprekken op de lijn, gekoppeld aan een lead via het nummer.
+    // v=9 FIX-FLAG (has_wa): een conv zonder ANY whatsapp_messages telt niet
+    // als has_wa=true (Anne Janssens: WA-conv geregistreerd, 0 berichten →
+    // spookbadge zonder inhoud). We haalt daarom eerst de conv-ids op en
+    // filteren dan op conv-ids die minstens 1 message hebben. Één extra
+    // batch-query, geen N+1.
     const waOpLeadId = new Map();
     if (lijn.phoneNumberId && leadOpNummer.size) {
       const { data: convs } = await supabaseAdmin
@@ -86,18 +91,42 @@ export default async function handler(req, res) {
         .select('id, phone_number, last_message_at, last_message_preview, unread_count, last_inbound_at')
         .eq('phone_number_id', lijn.phoneNumberId)
         .limit(500);
+      // Kandidaat-convs = convs waarvan het nummer matcht met een lead-telnr.
+      const kandidaatMap = new Map(); // convId -> {conv, lead}
       for (const c of convs || []) {
         if (!c.phone_number || c.phone_number.startsWith('+99999')) continue;
         const lead = leadOpNummer.get(normNummer(c.phone_number));
-        if (lead) waOpLeadId.set(lead.id, c);
+        if (lead) kandidaatMap.set(c.id, { conv: c, lead });
+      }
+      // Batch-check: welke van deze conv-ids heeft ≥1 whatsapp_messages?
+      const convIds = Array.from(kandidaatMap.keys());
+      if (convIds.length) {
+        const { data: msgIds } = await supabaseAdmin
+          .from('whatsapp_messages')
+          .select('conversation_id')
+          .in('conversation_id', convIds);
+        const nonEmpty = new Set((msgIds || []).map(m => m.conversation_id));
+        for (const [cid, entry] of kandidaatMap.entries()) {
+          if (nonEmpty.has(cid)) waOpLeadId.set(entry.lead.id, entry.conv);
+        }
       }
     }
 
-    // Mail-aggregatie per e-mailadres. v=6 FIX 3: telt ZOWEL inbound (email_messages)
-    // ALS outbound (email_replies + berichten_log soort=mail) mee. Vroeger was
-    // has_mail=false voor leads waar wij WEL naartoe stuurden maar die niet
-    // inbound reageerden (drip-mails van de motor). Nu toont has_mail=true zodra
-    // er langs beide kanten óók maar één mail-uitwisseling is.
+    // v=9 FIX-FLAG (has_mail): filters spiegelen -berichten precies zodat
+    // een badge ALTIJD hoort bij ≥1 renderbaar bericht in de draad:
+    //   inbound  = email_messages.mailbox=postvak & from_address ilike email
+    //              & adresUit(from) === email (strikt na ilike).
+    //   outbound handmatig = email_replies met from_address ilike mailAfzender()
+    //              & to_address ilike email & adresUit(to) === email.
+    //   outbound motor = berichten_log met kanaal='mail' & status='verstuurd'
+    //              & soort != 'handmatig-antwoord' & naar ilike email.
+    // Verschillen met v=6/v=8 (die false-positives opleverde):
+    //   - berichten_log status = 'verstuurd' (NIET 'ok') + from_address ilike
+    //     op mail-afzender is nu geen filter meer (want die kolom bestaat niet
+    //     op berichten_log).
+    //   - berichten_log soort != 'handmatig-antwoord' (spiegel -berichten
+    //     regel 133: die bubbel komt uit email_replies, niet uit log).
+    //   - email_replies from_address moet mail-afzender zijn (mailAfzender()).
     const mailOpEmail = new Map();
     const bump = (adres, dateIso, isUnread, tekst) => {
       if (!emailSet.has(adres)) return;
@@ -111,7 +140,9 @@ export default async function handler(req, res) {
       }
     };
     if (emailSet.size) {
-      // Inbound in het motor-postvak.
+      const emails = Array.from(emailSet);
+      const afzender = (mailAfzender() || '').toLowerCase();
+      // 1. Inbound in het motor-postvak.
       const { data: mails } = await supabaseAdmin
         .from('email_messages')
         .select('from_address, date_received, is_read, snippet, subject')
@@ -119,33 +150,39 @@ export default async function handler(req, res) {
         .order('date_received', { ascending: false })
         .limit(3000);
       for (const m of mails || []) {
-        bump(adresUit(m.from_address), m.date_received, !m.is_read, m.snippet || m.subject || '');
+        const adr = adresUit(m.from_address);
+        if (!emailSet.has(adr)) continue; // strikte match
+        bump(adr, m.date_received, !m.is_read, m.snippet || m.subject || '');
       }
-      // Outbound handmatig-antwoord (email_replies met to_address==lead.email).
-      const emails = Array.from(emailSet);
+      // 2. Outbound handmatig-antwoord (email_replies vanaf mailAfzender).
       const { data: replies } = await supabaseAdmin
         .from('email_replies')
-        .select('to_address, email_subject, sent_at, final_reply')
+        .select('to_address, from_address, email_subject, sent_at, final_reply')
         .in('to_address', emails)
         .order('sent_at', { ascending: false })
         .limit(2000);
       for (const r of replies || []) {
-        const adr = adresUit(r.to_address);
-        // Preview alleen als 'ie nieuwer is dan bestaande last_date; anders wel tellen
-        // maar preview niet overschrijven (bump doet dat via new Date-vergelijking).
-        bump(adr, r.sent_at, false, r.email_subject || (r.final_reply || '').slice(0, 120));
+        const fromAdr = String(r.from_address || '').toLowerCase();
+        if (afzender && !fromAdr.includes(afzender)) continue; // alleen van welkom@
+        const toAdr = adresUit(r.to_address);
+        if (!emailSet.has(toAdr)) continue;
+        bump(toAdr, r.sent_at, false, r.email_subject || (r.final_reply || '').slice(0, 120));
       }
-      // Outbound motor-mails uit berichten_log (soort=mail).
+      // 3. Outbound motor-mails (berichten_log kanaal=mail, status='verstuurd',
+      //    NIET 'handmatig-antwoord' — die zit in email_replies).
       const { data: motorMails } = await supabaseAdmin
         .from('berichten_log')
         .select('naar, verstuurd_op, soort, status')
         .eq('kanaal', 'mail')
-        .eq('status', 'ok')
+        .eq('status', 'verstuurd')
+        .neq('soort', 'handmatig-antwoord')
         .in('naar', emails)
         .order('verstuurd_op', { ascending: false })
         .limit(3000);
       for (const b of motorMails || []) {
-        bump(adresUit(b.naar), b.verstuurd_op, false, b.soort ? ('motor: ' + b.soort) : '');
+        const adr = adresUit(b.naar);
+        if (!emailSet.has(adr)) continue;
+        bump(adr, b.verstuurd_op, false, b.soort ? ('motor: ' + b.soort) : '');
       }
     }
 

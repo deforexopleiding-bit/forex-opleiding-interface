@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 2 (v=8, 2026-08-17): 8 Gesprekken polish-fixes.
+// Leadsonderhoud v2 — BROK 2 (v=9, 2026-08-17): 4 laatste Gesprekken-fixes.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -611,13 +611,15 @@
     if (nearBottom) container.scrollTop = container.scrollHeight;
   }
   function _lsInbRenderMsg(m) {
-    // v=8 FIX A (herzien): het display:flex+inline-block+fit-content pattern
-    // uit v=7 werkte niet strak genoeg — flex-items negeren display:inline-
-    // block. Nieuw patroon: wrapper met text-align (left/right), inner
-    // <span> met display:inline-block + max-width. Werkt overal, geen
-    // flex-stretch. Kleinere padding + line-height voor compacte bubble.
-    // Ook FIX B side-effect: --brand bestaat niet in tokens; outbound bg
-    // krijgt hex-fallback #0A7490-soft (approx) via var-fallback.
+    // v=9 FIX-HOOGTE (A-restant): "Hey" bubble was compact-breed maar 201px
+    // HOOG. Root cause: white-space:pre-wrap stond op de bubble-WRAPPER,
+    // dus de whitespace-tekstnodes tussen de tags in de template-literal
+    // (indentation "\n        ") renderden als échte lege regels — 4x
+    // regelhoogte extra per bubble.
+    // Fix: white-space:pre-wrap alleen op de body-<div> zetten (waar de
+    // tekst zelf staat), NIET op de wrapper. Wrapper krijgt de default
+    // white-space (normal) → collapse van indentation-tekstnodes.
+    // Multi-line berichten behouden hun \n's want die staan in body.
     const isOut = m.direction === 'outbound';
     const body = esc(m.body || '');
     const at = m.at ? esc(fmtDatum(m.at)) : '';
@@ -625,20 +627,18 @@
     const bg = isOut ? 'var(--brand-soft, #E2F1F5)' : 'var(--surface-2)';
     const color = isOut ? 'var(--brand, #0A7490)' : 'var(--text-1)';
     const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
-    // Kanaal-badge — WA = teal / mail = blue.
     const chanColor = m.channel === 'mail' ? 'blue' : 'teal';
     const chanLabel = m.channel === 'mail' ? 'mail' : 'WA';
     const subjHtml = m.channel === 'mail' && m.subject
       ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:3px">${esc(m.subject)}</div>`
       : '';
-    return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${align};margin-bottom:6px">
-      <span style="display:inline-block;text-align:left;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;vertical-align:top">
-        <span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--${chanColor}-soft);color:var(--${chanColor});font-weight:600;letter-spacing:.04em;margin-bottom:3px;opacity:.85">${chanLabel}</span>
-        ${subjHtml}
-        <div>${body || '<span style="opacity:.55">(leeg bericht)</span>'}</div>
-        <div style="font-size:10px;opacity:.5;font-family:'IBM Plex Mono',monospace;margin-top:3px;text-align:right">${at}</div>
-      </span>
-    </div>`;
+    // Bewust GEEN indentation tussen bubble-tags — kleine restanten tekst-
+    // nodes tussen tags stuwen anders alsnog de hoogte op als iemand ooit
+    // vergeet white-space te tunen. Alle tags aan elkaar.
+    const bodyHtml = body
+      ? `<div style="white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">${body}</div>`
+      : `<div style="opacity:.55">(leeg bericht)</div>`;
+    return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${align};margin-bottom:6px"><span style="display:inline-block;text-align:left;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;vertical-align:top"><span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--${chanColor}-soft);color:var(--${chanColor});font-weight:600;letter-spacing:.04em;margin-bottom:3px;opacity:.85">${chanLabel}</span>${subjHtml}${bodyHtml}<div style="font-size:10px;opacity:.5;font-family:'IBM Plex Mono',monospace;margin-top:3px;text-align:right">${at}</div></span></div>`;
   }
 
   /* ── Handlers op window ──────────────────────────────────────────────── */
@@ -838,18 +838,21 @@
     { title: 'Bedankt voor reactie',body: 'Dank voor je bericht! Ik pak het zsm op en laat het je weten.' },
   ];
 
-  window.__lsInbQuickPicker = () => {
+  // v=9 FIX-SNEL-DOEL: target ('wa' of 'mail') expliciet meegeven vanuit
+  // de knop-context. Voorkomt dat een Snel-klik vanuit de mail-toolbar
+  // tekst in het WA-veld plakt. Zonder target: heuristiek (mail-form
+  // open → mail; anders WA) — legacy fallback voor eventuele callers.
+  window.__lsInbQuickPicker = (target) => {
     const conv = _lsInbCurrentConv();
     if (!conv) return;
     const leadId = conv.lead_id;
-    // Bepaal actief compose-veld: als mail-form open staat en WA disabled →
-    // vullen we mail; anders WA.
     const mailOpen = !!_lsInb.compose.showMail[leadId];
-    const waEnabled = !!(conv.has_wa && conv.can_send_text);
-    const preferMail = mailOpen && !waEnabled;
+    const explicit = (target === 'wa' || target === 'mail') ? target : null;
+    const useMail = explicit ? (explicit === 'mail') : mailOpen; // default = WA
+    const label = useMail ? 'e-mail' : 'WhatsApp';
     _lsInbOpenModal(`
       <div style="font-size:15px;font-weight:600;margin-bottom:6px">Snel-antwoord invoegen</div>
-      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Kies er één. De tekst wordt in het ${preferMail ? '<b>mail</b>' : '<b>WhatsApp</b>'}-veld gezet; je kan 'em nog aanpassen vóór verzenden.</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Kies er één. De tekst wordt in het <b>${esc(label)}</b>-veld gezet (achter een eventuele bestaande draft, gescheiden door een lege regel). Je kan 'em nog aanpassen vóór verzenden.</div>
       <div id="lsInbQrList" style="display:flex;flex-direction:column;gap:6px;max-height:60vh;overflow-y:auto">
         ${_LS_QUICK_REPLIES.map((it, i) => `
           <button class="btn btn-ghost btn-sm" data-qr-idx="${i}" style="text-align:left;justify-content:flex-start;padding:10px 12px;height:auto;white-space:normal">
@@ -860,15 +863,24 @@
       <div style="margin-top:14px;text-align:right"><button id="lsInbQrCancel" class="btn btn-ghost btn-sm">Sluiten</button></div>
     `, { maxWidth: 560 });
     document.getElementById('lsInbQrCancel').addEventListener('click', _lsInbCloseModal);
+    // Helper: append met scheidingsteken.
+    const appendWithSep = (existing, addition) => {
+      const ex = String(existing || '');
+      if (!ex.trim()) return addition;
+      // Als bestaande draft niet op newline eindigt: dubbele newline ertussen.
+      return ex.replace(/\s+$/, '') + '\n\n' + addition;
+    };
     document.querySelectorAll('#lsInbQrList [data-qr-idx]').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = Number(btn.getAttribute('data-qr-idx'));
         const it = _LS_QUICK_REPLIES[idx];
         if (!it) return;
-        if (preferMail) {
-          _lsInb.compose.draftsMailText[leadId] = (String(_lsInb.compose.draftsMailText[leadId] || '') + it.body).trimStart();
+        if (useMail) {
+          _lsInb.compose.draftsMailText[leadId] = appendWithSep(_lsInb.compose.draftsMailText[leadId], it.body);
+          // Zorg dat het mail-form open staat na invoegen.
+          _lsInb.compose.showMail[leadId] = true;
         } else {
-          _lsInb.compose.draftsWa[leadId] = (String(_lsInb.compose.draftsWa[leadId] || '') + it.body).trimStart();
+          _lsInb.compose.draftsWa[leadId] = appendWithSep(_lsInb.compose.draftsWa[leadId], it.body);
         }
         _lsInbRepaintCompose();
         _lsInbCloseModal();
@@ -918,34 +930,55 @@
       listEl.innerHTML = `<div style="padding:22px;color:var(--text-3);font-size:13px">Geen goedgekeurde templates voor de leadsonderhoud-lijn.</div>`;
       return;
     }
-    // v=8 FIX F: alle templates zijn Meta-category=UTILITY dus per-category-
-    // grouping werkt niet. Vervangen door NAAM-PREFIX-groepering (deel vóór
-    // eerste underscore: vragenlijst_* / warmup_* / welkom_* / aanmaning_*).
-    // Chips-filter voor snel schakelen + inklapbare secties per prefix.
+    // v=9 FIX-GROEP-RUIS: alleen echte categorie-groepen (≥2 templates
+    // delen de prefix). Alle prefix-eenlingen → één 'overig'-bucket.
+    // Dedup impliciet want groepen worden op key gemaakt (Set semantics).
     const prefixOf = (name) => {
       const s = String(name || '').trim();
       const i = s.indexOf('_');
       return (i > 0 ? s.slice(0, i) : (s || 'overig')).toLowerCase();
     };
+    // Preliminary count: welke prefix komt ≥2x voor?
+    const prefixCountAll = new Map();
+    for (const it of items) {
+      const p = prefixOf(it.name);
+      prefixCountAll.set(p, (prefixCountAll.get(p) || 0) + 1);
+    }
+    // effectivePrefix() = prefix als deze ≥2 heeft, anders 'overig'.
+    const effectivePrefix = (name) => {
+      const p = prefixOf(name);
+      return (prefixCountAll.get(p) || 0) >= 2 ? p : 'overig';
+    };
+    // Chips: unieke effective-prefixes, gesorteerd, met de count.
+    const uniquePrefixes = Array.from(new Set(items.map(it => effectivePrefix(it.name))));
+    // 'overig' altijd onderaan de chip-rij en groups-lijst.
+    uniquePrefixes.sort((a, b) => {
+      if (a === 'overig') return 1;
+      if (b === 'overig') return -1;
+      return a.localeCompare(b);
+    });
     let activePrefix = 'ALL';
     const renderList = () => {
-      const filtered = activePrefix === 'ALL' ? items : items.filter(it => prefixOf(it.name) === activePrefix);
+      const filtered = activePrefix === 'ALL' ? items : items.filter(it => effectivePrefix(it.name) === activePrefix);
       const byPrefix = new Map();
       for (const it of filtered) {
-        const key = prefixOf(it.name);
+        const key = effectivePrefix(it.name);
         if (!byPrefix.has(key)) byPrefix.set(key, []);
         byPrefix.get(key).push(it);
       }
-      // Prefix-lijst uit alle items voor de chips (niet uit filtered).
-      const allPrefixes = Array.from(new Set(items.map(it => prefixOf(it.name)))).sort();
       const chipsHtml = `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
         <button class="chip ${activePrefix === 'ALL' ? 'on' : ''}" data-prefix="ALL" style="font-size:11.5px;padding:3px 10px">Alle (${items.length})</button>
-        ${allPrefixes.map(p => {
-          const n = items.filter(it => prefixOf(it.name) === p).length;
-          return `<button class="chip ${activePrefix === p ? 'on' : ''}" data-prefix="${esc(p)}" style="font-size:11.5px;padding:3px 10px">${esc(p)} (${n})</button>`;
+        ${uniquePrefixes.map(p => {
+          const n = items.filter(it => effectivePrefix(it.name) === p).length;
+          const label = p === 'overig' ? 'overig' : p;
+          return `<button class="chip ${activePrefix === p ? 'on' : ''}" data-prefix="${esc(p)}" style="font-size:11.5px;padding:3px 10px">${esc(label)} (${n})</button>`;
         }).join('')}
       </div>`;
-      const groups = Array.from(byPrefix.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+      const groups = Array.from(byPrefix.entries()).sort((a, b) => {
+        if (a[0] === 'overig') return 1;
+        if (b[0] === 'overig') return -1;
+        return a[0].localeCompare(b[0]);
+      });
       const groupsHtml = groups.length
         ? groups.map(([prefix, tpls]) => `
             <div style="margin-bottom:14px">
@@ -1278,7 +1311,7 @@
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
           ${waEnabled ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="__lsInbSendWa()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur WA'}</button>` : `<button class="btn btn-ghost btn-sm" disabled title="Buiten 24u-venster — kies een sjabloon">Verstuur WA</button>`}
           <button class="${tplBtnClass}" ${tplBtnStyle} onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Kies een goedgekeurde WA-template">${svg(I.doc || I.mail, 'width:13px;height:13px')} Sjabloon</button>
-          <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker()" ${sending ? 'disabled' : ''} title="Canned snel-antwoord invoegen">Snel</button>
+          <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker('wa')" ${sending ? 'disabled' : ''} title="Canned snel-antwoord invoegen">Snel</button>
           <button class="btn btn-ghost btn-sm" onclick="__lsInbToggleMailForm()" ${!mailEnabled ? 'disabled' : ''} title="${mailEnabled ? 'Antwoord per mail' : 'Geen e-mailadres bekend'}">${showMail ? 'Verberg mail' : 'Ook / alleen mail…'}</button>
         </div>
       </div>
@@ -1305,8 +1338,9 @@
         oninput="__lsInbDraftMailTxt('${String(leadId).replace(/'/g, "\\'")}', this.value)"
         ${sending || !mailEnabled ? 'disabled' : ''}
         style="width:100%;min-height:100px;max-height:260px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;line-height:1.5;font-family:inherit;resize:vertical;box-sizing:border-box">${txt}</textarea>
-      <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
-        <button class="btn btn-primary btn-sm" onclick="__lsInbSendMail()" ${sending || !mailEnabled ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur mail'}</button>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lsInbSendMail()" ${sending || !mailEnabled ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur mail'}</button>
+        <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker('mail')" ${sending || !mailEnabled ? 'disabled' : ''} title="Canned snel-antwoord invoegen in dit mail-veld">Snel</button>
         <span style="font-size:11px;color:var(--text-3);margin-left:auto">verzonden vanaf welkom@deforexopleiding.nl</span>
       </div>
     </div>`;
@@ -1645,5 +1679,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=8 Gesprekken polish (8 fixes) — A bubble text-align+inline-block (v=7 flex-fix werkte niet), B --brand hex-fallback (var(--brand) bestaat niet → onzichtbare knoppen), C has_wa/has_mail client-sync uit thread-items (backend-mismatch bij dubbele lead-rijen), D fmtDatumAbsoluut voor afspraak_op (toekomst was "1m"), E Sjabloon+Snel altijd in compose (was al in v=7), F prefix-groepering ipv Meta-category, G universele placeholder-parser ({{key}} niet alleen {{N}}), H behoud variabele-waarden na Annuleren.');
+  console.debug('[ls-v2] v=9 Gesprekken laatste 4 — HOOGTE bubble was 201px voor "Hey" (pre-wrap op wrapper + template-literal indentation = lege regels; fix: pre-wrap alleen op body-div + tags aan elkaar), FLAG backend has_wa/has_mail nu strikt uit dezelfde bron als -berichten (WA-conv-with-messages check + strikte email-filters: status=verstuurd niet ok, mailAfzender-check, adresUit strict-match), SNEL target-veld expliciet (wa/mail via param + eigen Snel-knop in mail-toolbar + append met scheidingsteken), GROEP alleen prefix ≥2 templates, rest naar overig-bucket + dedup chips.');
 })();
