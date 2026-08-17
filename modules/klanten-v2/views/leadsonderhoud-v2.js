@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 2 (v=7, 2026-08-17): 3 Gesprekken UI-fixes.
+// Leadsonderhoud v2 — BROK 2 (v=8, 2026-08-17): 8 Gesprekken polish-fixes.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -159,6 +159,20 @@
       return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
     } catch (_) { return '—'; }
   }
+  // v=8 FIX D: absolute-datum-formatter voor afspraak_op (toekomstige data
+  // krijgen anders "1m" van de relatieve formatter -> betekenisloos). Toont
+  // "do 20 aug 09:00" (Europe/Amsterdam). Als tijd 00:00 = alleen datum.
+  function fmtDatumAbsoluut(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      const dateStr = d.toLocaleDateString('nl-NL', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Europe/Amsterdam' });
+      const timeStr = d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Europe/Amsterdam' });
+      // Als er echt geen tijd-info is (00:00 exact) → toon alleen de datum.
+      if (timeStr === '00:00') return dateStr;
+      return dateStr + ' ' + timeStr;
+    } catch (_) { return '—'; }
+  }
   function warmteBar(score) {
     const s = Math.max(0, Math.min(45, Number(score || 0)));
     const pct = Math.round((s / 45) * 100);
@@ -308,7 +322,7 @@
                 </td>
                 <td style="padding:8px 10px">${esc(l.traject || '—')}</td>
                 <td style="padding:8px 10px">${warmteBar(l.score)}</td>
-                <td style="padding:8px 10px">${callBadge}${heeftCall ? `<div style="color:var(--text-3);font-size:11px;margin-top:2px">${esc(fmtDatum(l.afspraak_op))}</div>` : ''}</td>
+                <td style="padding:8px 10px">${callBadge}${heeftCall ? `<div style="color:var(--text-3);font-size:11px;margin-top:2px">${esc(fmtDatumAbsoluut(l.afspraak_op))}</div>` : ''}</td>
                 <td style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span></td>
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
@@ -453,19 +467,21 @@
   function _lsInbAskConfirm(title, body, opts) {
     const okLabel     = esc(opts?.okLabel     || 'Bevestig');
     const cancelLabel = esc(opts?.cancelLabel || 'Annuleren');
-    const tone        = opts?.tone === 'danger' ? 'rose' : 'brand';
-    // v=6 FIX 2: expliciet color:#fff op de primaire knop. Zonder deze regel
-    // erfde de knop de brand-color voor tekst -> onzichtbare tekst tegen
-    // brand-background. Op verzend-acties is een onleesbare 'Verstuur'-knop
-    // een echt veiligheidsrisico. Zowel rose als brand hebben genoeg contrast
-    // tegen wit, dus dezelfde color-regel voor beide tones.
+    // v=8 FIX B (ROOT CAUSE): design-tokens.css definieert wél --rose/--emerald/
+    // --amber (hex #C22B3E / #07835A / #C2700A) maar GEEN --brand. Onze
+    // btn-primary background verwees naar var(--brand) → invalid-at-computed-
+    // value → transparent → wit-op-wit. Voor deze modal: gebruik --brand
+    // met een hex-fallback (#0A7490, matcht de teal-primary-tint die
+    // .btn-primary elders gebruikt).
+    const isRose = opts?.tone === 'danger';
+    const bgVar  = isRose ? 'var(--rose, #C22B3E)'  : 'var(--brand, #0A7490)';
     return new Promise((resolve) => {
       _lsInbOpenModal(`
         <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
         <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px;white-space:pre-wrap">${esc(body)}</div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button id="lsInbModalCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
-          <button id="lsInbModalOk" class="btn btn-primary btn-sm" style="background:var(--${tone});border-color:var(--${tone});color:#fff">${okLabel}</button>
+          <button id="lsInbModalOk" class="btn btn-primary btn-sm" style="background:${bgVar};border-color:${bgVar};color:#fff">${okLabel}</button>
         </div>`);
       document.getElementById('lsInbModalCancel').addEventListener('click', () => { _lsInbCloseModal(); resolve(false); });
       document.getElementById('lsInbModalOk').addEventListener('click',    () => { _lsInbCloseModal(); resolve(true);  });
@@ -533,6 +549,33 @@
     }));
     _lsInb.thread.conversation = j.conversation || null;
     _lsInb.thread.loading = false;
+    // v=8 FIX C: has_wa/has_mail synchronizeren met de ECHTE thread-inhoud
+    // zodra we die geladen hebben. Backend -gesprekken-endpoint mist soms
+    // een channel (dubbele lead-rijen die niet consistent samensmelten,
+    // WA-lead zonder email vs. mail-lead zonder telnr) -> mismatch tussen
+    // lijst-badges en draad-inhoud. Client-side sync garandeert: badge in
+    // lijstrij = channel bestaat écht in de draad die je zo opent. Update
+    // lokale row + het DOM badges-blok surgisch (geen render-trigger).
+    try {
+      const idx2 = _lsInb.convs.items.findIndex(it => String(it.lead_id) === String(leadId));
+      if (idx2 >= 0) {
+        const hasMailReal = _lsInb.thread.items.some(m => m.channel === 'mail');
+        const hasWaReal   = _lsInb.thread.items.some(m => m.channel === 'whatsapp');
+        _lsInb.convs.items[idx2] = { ..._lsInb.convs.items[idx2], has_mail: hasMailReal, has_wa: hasWaReal };
+        // Surgisch: patch de badge-row in de lijst (geen full render, scroll blijft).
+        const rowEl2 = document.querySelector('#lsInbList .ls-inb-row[data-row-id="' + String(leadId).replace(/"/g, '\\"') + '"]');
+        if (rowEl2) {
+          const tagRow = rowEl2.querySelector('.ls-inb-tagrow');
+          if (tagRow) {
+            const waB   = hasWaReal   ? '<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--teal-soft);color:var(--teal);font-weight:600">WA</span>' : '';
+            const mailB = hasMailReal ? '<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--blue-soft);color:var(--blue);font-weight:600">mail</span>' : '';
+            const nwDot = rowEl2.classList.contains('nw')
+              ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--rose);margin-left:auto"></span>' : '';
+            tagRow.innerHTML = (waB + ' ' + mailB).trim() + nwDot;
+          }
+        }
+      }
+    } catch (e) { /* fail-soft */ }
     // Lokale WA-teller bijwerken + surgische DOM-patch (was mark_as_read=true).
     if (!alreadyMarked) {
       _lsInb.thread._markedFor = leadId;
@@ -568,21 +611,19 @@
     if (nearBottom) container.scrollTop = container.scrollHeight;
   }
   function _lsInbRenderMsg(m) {
-    // v=7 FIX A: bubble hoort de INHOUD te omhullen, niet als een block-div
-    // uit te rekken tot max-width. De bubble-div was default display:block,
-    // dus in de flex-wrapper stretchte 'ie naar de max-width van 82% —
-    // reuzengrote box om "Hey".
-    // Fix: display:inline-block + width:fit-content + max-width 70% zodat
-    // korte tekst een compacte bubble is en lange tekst netjes wrapt tot
-    // 70% van de thread-kolom (vergelijkbaar met onboarding-inbox styling).
-    // Ook: kleinere padding 8px/12px + kanaal-badge als klein span BOVEN de
-    // tekst met eigen inline-flex (geen full-width flex-row meer).
+    // v=8 FIX A (herzien): het display:flex+inline-block+fit-content pattern
+    // uit v=7 werkte niet strak genoeg — flex-items negeren display:inline-
+    // block. Nieuw patroon: wrapper met text-align (left/right), inner
+    // <span> met display:inline-block + max-width. Werkt overal, geen
+    // flex-stretch. Kleinere padding + line-height voor compacte bubble.
+    // Ook FIX B side-effect: --brand bestaat niet in tokens; outbound bg
+    // krijgt hex-fallback #0A7490-soft (approx) via var-fallback.
     const isOut = m.direction === 'outbound';
     const body = esc(m.body || '');
     const at = m.at ? esc(fmtDatum(m.at)) : '';
-    const side = isOut ? 'flex-end' : 'flex-start';
-    const bg = isOut ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)';
-    const color = isOut ? 'var(--brand)' : 'var(--text-1)';
+    const align = isOut ? 'right' : 'left';
+    const bg = isOut ? 'var(--brand-soft, #E2F1F5)' : 'var(--surface-2)';
+    const color = isOut ? 'var(--brand, #0A7490)' : 'var(--text-1)';
     const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
     // Kanaal-badge — WA = teal / mail = blue.
     const chanColor = m.channel === 'mail' ? 'blue' : 'teal';
@@ -590,13 +631,13 @@
     const subjHtml = m.channel === 'mail' && m.subject
       ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:3px">${esc(m.subject)}</div>`
       : '';
-    return `<div data-msg-id="${esc(String(m.id))}" style="display:flex;justify-content:${side};margin-bottom:6px">
-      <div style="display:inline-block;width:fit-content;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">
+    return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${align};margin-bottom:6px">
+      <span style="display:inline-block;text-align:left;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;vertical-align:top">
         <span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--${chanColor}-soft);color:var(--${chanColor});font-weight:600;letter-spacing:.04em;margin-bottom:3px;opacity:.85">${chanLabel}</span>
         ${subjHtml}
         <div>${body || '<span style="opacity:.55">(leeg bericht)</span>'}</div>
         <div style="font-size:10px;opacity:.5;font-family:'IBM Plex Mono',monospace;margin-top:3px;text-align:right">${at}</div>
-      </div>
+      </span>
     </div>`;
   }
 
@@ -877,42 +918,39 @@
       listEl.innerHTML = `<div style="padding:22px;color:var(--text-3);font-size:13px">Geen goedgekeurde templates voor de leadsonderhoud-lijn.</div>`;
       return;
     }
-    // v=7 FIX C: groepeer templates per Meta-category (MARKETING / UTILITY /
-    // AUTHENTICATION / null=Overig). Category zit al in de payload
-    // (whatsapp_meta_templates.category, mee-geselecteerd in
-    // leadsonderhoud-gesprek-templates.js SELECT_COLS). Chips voor snel
-    // filteren + collapse-headers per categorie. Filter-state in closure.
-    let activeCat = 'ALL';
+    // v=8 FIX F: alle templates zijn Meta-category=UTILITY dus per-category-
+    // grouping werkt niet. Vervangen door NAAM-PREFIX-groepering (deel vóór
+    // eerste underscore: vragenlijst_* / warmup_* / welkom_* / aanmaning_*).
+    // Chips-filter voor snel schakelen + inklapbare secties per prefix.
+    const prefixOf = (name) => {
+      const s = String(name || '').trim();
+      const i = s.indexOf('_');
+      return (i > 0 ? s.slice(0, i) : (s || 'overig')).toLowerCase();
+    };
+    let activePrefix = 'ALL';
     const renderList = () => {
-      const filtered = activeCat === 'ALL' ? items : items.filter(it => (it.category || 'OVERIG').toUpperCase() === activeCat);
-      const byCat = new Map();
+      const filtered = activePrefix === 'ALL' ? items : items.filter(it => prefixOf(it.name) === activePrefix);
+      const byPrefix = new Map();
       for (const it of filtered) {
-        const key = (it.category || 'OVERIG').toUpperCase();
-        if (!byCat.has(key)) byCat.set(key, []);
-        byCat.get(key).push(it);
+        const key = prefixOf(it.name);
+        if (!byPrefix.has(key)) byPrefix.set(key, []);
+        byPrefix.get(key).push(it);
       }
-      // Vaste sortering: MARKETING boven, dan UTILITY, dan AUTHENTICATION,
-      // dan OVERIG, alfabetisch daarbinnen.
-      const CAT_ORDER = ['MARKETING', 'UTILITY', 'AUTHENTICATION', 'OVERIG'];
-      const groups = Array.from(byCat.entries()).sort((a, b) => {
-        const ai = CAT_ORDER.indexOf(a[0]); const bi = CAT_ORDER.indexOf(b[0]);
-        return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-      });
-      const catColor = { MARKETING: 'violet', UTILITY: 'blue', AUTHENTICATION: 'amber', OVERIG: 'text-3' };
-      const catLabel = { MARKETING: 'Marketing', UTILITY: 'Utility', AUTHENTICATION: 'Auth', OVERIG: 'Overig' };
+      // Prefix-lijst uit alle items voor de chips (niet uit filtered).
+      const allPrefixes = Array.from(new Set(items.map(it => prefixOf(it.name)))).sort();
       const chipsHtml = `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
-        <button class="chip ${activeCat === 'ALL' ? 'on' : ''}" data-cat="ALL" style="font-size:11.5px;padding:3px 10px">Alle (${items.length})</button>
-        ${['MARKETING', 'UTILITY', 'AUTHENTICATION', 'OVERIG'].map(cat => {
-          const n = items.filter(it => (it.category || 'OVERIG').toUpperCase() === cat).length;
-          if (!n) return '';
-          return `<button class="chip ${activeCat === cat ? 'on' : ''}" data-cat="${cat}" style="font-size:11.5px;padding:3px 10px">${catLabel[cat]} (${n})</button>`;
+        <button class="chip ${activePrefix === 'ALL' ? 'on' : ''}" data-prefix="ALL" style="font-size:11.5px;padding:3px 10px">Alle (${items.length})</button>
+        ${allPrefixes.map(p => {
+          const n = items.filter(it => prefixOf(it.name) === p).length;
+          return `<button class="chip ${activePrefix === p ? 'on' : ''}" data-prefix="${esc(p)}" style="font-size:11.5px;padding:3px 10px">${esc(p)} (${n})</button>`;
         }).join('')}
       </div>`;
+      const groups = Array.from(byPrefix.entries()).sort((a, b) => a[0].localeCompare(b[0]));
       const groupsHtml = groups.length
-        ? groups.map(([cat, tpls]) => `
+        ? groups.map(([prefix, tpls]) => `
             <div style="margin-bottom:14px">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-                <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:10px;background:var(--${catColor[cat] || 'text-3'}-soft,var(--surface-2));color:var(--${catColor[cat] || 'text-3'})">${esc(catLabel[cat] || cat)}</span>
+                <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:10px;background:var(--teal-soft);color:var(--teal)">${esc(prefix)}</span>
                 <span style="font-size:11px;color:var(--text-3)">${tpls.length} sjablonen</span>
               </div>
               <div style="display:flex;flex-direction:column;gap:5px">
@@ -925,12 +963,12 @@
                 }).join('')}
               </div>
             </div>`).join('')
-        : `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Geen sjablonen in deze categorie.</div>`;
+        : `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Geen sjablonen in deze groep.</div>`;
       listEl.innerHTML = chipsHtml + groupsHtml;
       // (Re)bind chips + template-clicks.
-      listEl.querySelectorAll('[data-cat]').forEach(chip => {
+      listEl.querySelectorAll('[data-prefix]').forEach(chip => {
         chip.addEventListener('click', () => {
-          activeCat = chip.getAttribute('data-cat');
+          activePrefix = chip.getAttribute('data-prefix');
           renderList();
         });
       });
@@ -944,23 +982,49 @@
     };
     renderList();
   }
+  // v=8 FIX H: bewaar template-variabelewaarden per template-naam over
+  // form-remounts heen (bv. na Annuleren op de confirm-modal). Key =
+  // tpl.name; value = { [placeholderKey]: value }.
+  const _lsTplValues = {};
+
   function _lsInbOpenTemplateForm(conv, tpl) {
     const bodyText = String(tpl.body_text || '');
-    // Detecteer variabelen — positional {{1}}, {{2}}, …
-    const posKeys = [];
-    const re = /\{\{(\d+)\}\}/g; let m;
-    while ((m = re.exec(bodyText))) if (!posKeys.includes(m[1])) posKeys.push(m[1]);
-    posKeys.sort((a, b) => Number(a) - Number(b));
+    // v=8 FIX G: universele placeholder-parser — ondersteunt genummerd
+    // ({{1}}, {{2}}) EN benoemd ({{klant.voornaam}}, {{factuur.nummer}}).
+    // Meta accepteert positional variables[]; we mappen invulwaarden naar
+    // de volgorde-van-voorkomen in de body_text. Server-side wordt de
+    // template met deze positional values verstuurd (Meta's approved
+    // template heeft z'n eigen {{N}} in de goedgekeurde tekst; onze
+    // body_text-preview mag benoemd zijn voor leesbaarheid).
+    const keys = [];   // unique placeholders in volgorde van voorkomen
+    const re = /\{\{\s*([^{}]+?)\s*\}\}/g; let m;
+    while ((m = re.exec(bodyText))) { const k = m[1].trim(); if (k && !keys.includes(k)) keys.push(k); }
 
-    const previewHtml = esc(bodyText).replace(/\{\{(\d+)\}\}/g, '<b id="lsTplPh_$1" style="background:var(--brand-soft,var(--surface-2));padding:0 4px;border-radius:3px">{{$1}}</b>');
-    const varsForm = posKeys.length
+    // Vorige waarden pre-fillen (FIX H).
+    const saved = _lsTplValues[tpl.name] || {};
+
+    // Placeholder → veilige HTML-id (elke niet-woord char wordt _).
+    const idFor = (k) => 'lsTplPh_' + String(k).replace(/[^a-zA-Z0-9_]/g, '_');
+    const inpIdFor = (k) => 'lsTplVar_' + String(k).replace(/[^a-zA-Z0-9_]/g, '_');
+
+    // Preview: elke {{...}}-match omzetten naar een span met unieke id.
+    const previewHtml = esc(bodyText).replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (mm, k) => {
+      const key = String(k).trim();
+      const val = saved[key];
+      const shown = val && String(val).length ? esc(val) : ('{{' + esc(key) + '}}');
+      return `<b id="${idFor(key)}" style="background:var(--brand-soft,#E2F1F5);padding:0 4px;border-radius:3px">${shown}</b>`;
+    });
+
+    const varsForm = keys.length
       ? `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
-           ${posKeys.map(k => `
-             <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
-               <span style="color:var(--text-3)">Variabele {{${esc(k)}}}</span>
-               <input class="input" id="lsTplVar_${esc(k)}" data-var-key="${esc(k)}" placeholder="waarde voor {{${esc(k)}}}"
+           ${keys.map(k => {
+             const val = esc(saved[k] || '');
+             return `<label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
+               <span style="color:var(--text-3)">Variabele <code style="font-family:'IBM Plex Mono',monospace">${esc('{{' + k + '}}')}</code></span>
+               <input class="input" id="${inpIdFor(k)}" data-var-key="${esc(k)}" value="${val}" placeholder="waarde voor ${esc(k)}"
                  style="padding:8px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
-             </label>`).join('')}
+             </label>`;
+           }).join('')}
          </div>`
       : `<div style="font-size:12px;color:var(--text-3);padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);margin-bottom:12px">Deze template heeft geen variabelen.</div>`;
 
@@ -971,29 +1035,36 @@
       ${varsForm}
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button id="lsTplBack" class="btn btn-ghost btn-sm">Terug</button>
-        <button id="lsTplSend" class="btn btn-primary btn-sm" style="color:#fff">Verstuur template</button>
+        <button id="lsTplSend" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff">Verstuur template</button>
       </div>`, { maxWidth: 580 });
 
-    // Live preview: input-change vervangt de placeholder-span content.
+    // Live preview + write-through naar _lsTplValues (FIX H).
     document.querySelectorAll('#lsInbModalBox [data-var-key]').forEach(inp => {
       inp.addEventListener('input', () => {
         const key = inp.getAttribute('data-var-key');
-        const ph = document.getElementById('lsTplPh_' + key);
+        // Bewaar in _lsTplValues zodat na Annuleren-remount de waarde nog staat.
+        if (!_lsTplValues[tpl.name]) _lsTplValues[tpl.name] = {};
+        _lsTplValues[tpl.name][key] = inp.value;
+        // Live preview: alle spans met dezelfde id updaten (kan meerdere zijn
+        // als dezelfde placeholder in de body herhaalt).
+        const ph = document.getElementById(idFor(key));
         if (ph) ph.textContent = inp.value || ('{{' + key + '}}');
       });
     });
 
     document.getElementById('lsTplBack').addEventListener('click', _lsInbOpenTemplatePicker);
     document.getElementById('lsTplSend').addEventListener('click', async () => {
-      // Verzamel variabelen (positional in volgorde).
-      const variables = posKeys.map(k => {
-        const el = document.getElementById('lsTplVar_' + k);
-        return el ? String(el.value || '') : '';
+      // Verzamel variabelen in de volgorde van voorkomen in body_text.
+      const variables = keys.map(k => {
+        const el = document.getElementById(inpIdFor(k));
+        return el ? String(el.value || '') : (saved[k] || '');
       });
-      // Render de tekst met ingevulde waarden voor confirm-preview + optimistic append.
-      const rendered = bodyText.replace(/\{\{(\d+)\}\}/g, (mm, k) => {
-        const idx = posKeys.indexOf(String(k));
-        return idx >= 0 ? (variables[idx] || ('{{' + k + '}}')) : mm;
+      // Preview: substitueer per token op exact match (elke placeholder-token
+      // met matching key -> value; ongebruikte tokens blijven staan als hint).
+      const rendered = bodyText.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (mm, k) => {
+        const key = String(k).trim();
+        const idx = keys.indexOf(key);
+        return idx >= 0 ? (variables[idx] || ('{{' + key + '}}')) : mm;
       });
       const preview = rendered.length > 200 ? rendered.slice(0, 200) + '…' : rendered;
       const ok = await _lsInbAskConfirm(
@@ -1021,6 +1092,10 @@
         }
         _lsInbOptimisticAppend(conv.lead_id, 'whatsapp', rendered);
         _lsInb.compose.mode[conv.lead_id] = 'text';
+        // v=8: bij succesvolle send de bewaarde variabelewaarden voor deze
+        // template opruimen (voorkomt dat de volgende template-send met
+        // stale data start).
+        try { delete _lsTplValues[tpl.name]; } catch (_) {}
         _lsInbToast('Template verzonden', 'ok');
       } catch (e) {
         console.warn('[ls-inb] template-send fail:', e && e.message);
@@ -1243,8 +1318,9 @@
     // consistent met de Contacten-tab styling. Datum-tooltip toont wanneer
     // 'ie geboekt is.
     const heeftCall = !!row.afspraak_op;
+    // v=8 FIX D: absolute datum ipv relatief (toekomst "1m" was betekenisloos).
     const callBadge = heeftCall
-      ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)" title="Geboekt op ${esc(row.afspraak_op)}">✓ call geboekt · ${esc(fmtDatum(row.afspraak_op))}</span>`
+      ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)" title="Geboekt op ${esc(row.afspraak_op)}">✓ call geboekt · ${esc(fmtDatumAbsoluut(row.afspraak_op))}</span>`
       : `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--amber-soft);color:var(--amber)">— nog geen call</span>`;
     const chanBadges = [
       row.has_wa   ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--teal-soft);color:var(--teal)">WA</span>` : '',
@@ -1276,7 +1352,7 @@
           </div>
         </div>
       </div>
-      <div id="lsInbThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column"></div>
+      <div id="lsInbThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:20px;display:block"></div>
       ${status}
       ${_lsInbRenderCompose()}
     </div>`;
@@ -1569,5 +1645,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=7 Gesprekken UI-fixes — FIX A bubble display:inline-block+width:fit-content+max-width 70% (was reuze-blokken om korte tekst), FIX B Sjabloon-knop altijd zichtbaar in WA-compose (primary bij !waEnabled/buiten venster, ghost binnen), FIX C templates in de picker gegroepeerd per Meta-category (MARKETING/UTILITY/AUTHENTICATION/OVERIG) + chips-filter.');
+  console.debug('[ls-v2] v=8 Gesprekken polish (8 fixes) — A bubble text-align+inline-block (v=7 flex-fix werkte niet), B --brand hex-fallback (var(--brand) bestaat niet → onzichtbare knoppen), C has_wa/has_mail client-sync uit thread-items (backend-mismatch bij dubbele lead-rijen), D fmtDatumAbsoluut voor afspraak_op (toekomst was "1m"), E Sjabloon+Snel altijd in compose (was al in v=7), F prefix-groepering ipv Meta-category, G universele placeholder-parser ({{key}} niet alleen {{N}}), H behoud variabele-waarden na Annuleren.');
 })();
