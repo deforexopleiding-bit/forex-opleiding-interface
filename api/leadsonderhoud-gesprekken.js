@@ -17,7 +17,15 @@
 //
 // Response: { configured, wa_configured, module, label, postvak,
 //   items:[{ lead_id, naam, phone_number, email, last_activity_at, last_preview,
-//            unread, can_send_text, has_wa, has_mail }] }
+//            unread, can_send_text, has_wa, has_mail, afspraak_op }] }
+//
+// v=6 fixes (BROK 2):
+//   FIX 3: has_mail was altijd false voor leads waar wij WEL mail naartoe stuurden
+//     maar zij niet inbound reageerden — de bron keek alleen naar email_messages
+//     (inbound). We tellen nu ook outbound mee: berichten_log (soort=mail) EN
+//     email_replies waar to_address == lead.email → has_mail true.
+//   FIX 4: afspraak_op meegeleverd zodat de Gesprekken-pane header de call-
+//     status badge (✓geboekt/nog niet) kan tonen, consistent met Contacten.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -50,6 +58,26 @@ export default async function handler(req, res) {
       if (l.email) emailSet.add(l.email.toLowerCase());
     }
 
+    // v=6 FIX 4: lookup afspraak_op per lead (kern-metric 'call geboekt').
+    // leadsInTraject() haalt niet alle leads-kolommen op → aparte batch-query.
+    // Fail-soft: bij fout gaan we door met lege map, alle items krijgen dan
+    // afspraak_op=null (badge = 'nog niet').
+    const afspraakByLeadId = new Map();
+    try {
+      const leadIds = leads.map(l => l.id).filter(Boolean);
+      if (leadIds.length) {
+        const { data: afspraken } = await supabaseAdmin
+          .from('leads')
+          .select('id, afspraak_op')
+          .in('id', leadIds);
+        for (const a of afspraken || []) {
+          if (a.afspraak_op) afspraakByLeadId.set(a.id, a.afspraak_op);
+        }
+      }
+    } catch (e) {
+      console.warn('[ls-gesprekken] afspraak-lookup soft-fail:', e?.message || e);
+    }
+
     // WhatsApp-gesprekken op de lijn, gekoppeld aan een lead via het nummer.
     const waOpLeadId = new Map();
     if (lijn.phoneNumberId && leadOpNummer.size) {
@@ -65,9 +93,25 @@ export default async function handler(req, res) {
       }
     }
 
-    // Inkomende mail in het motor-postvak, samengevat per afzenderadres.
+    // Mail-aggregatie per e-mailadres. v=6 FIX 3: telt ZOWEL inbound (email_messages)
+    // ALS outbound (email_replies + berichten_log soort=mail) mee. Vroeger was
+    // has_mail=false voor leads waar wij WEL naartoe stuurden maar die niet
+    // inbound reageerden (drip-mails van de motor). Nu toont has_mail=true zodra
+    // er langs beide kanten óók maar één mail-uitwisseling is.
     const mailOpEmail = new Map();
+    const bump = (adres, dateIso, isUnread, tekst) => {
+      if (!emailSet.has(adres)) return;
+      let agg = mailOpEmail.get(adres);
+      if (!agg) { agg = { count: 0, unread: 0, last_date: null, last_tekst: '' }; mailOpEmail.set(adres, agg); }
+      agg.count++;
+      if (isUnread) agg.unread++;
+      if (!agg.last_date || (dateIso && new Date(dateIso) > new Date(agg.last_date))) {
+        agg.last_date = dateIso;
+        if (tekst) agg.last_tekst = tekst;
+      }
+    };
     if (emailSet.size) {
+      // Inbound in het motor-postvak.
       const { data: mails } = await supabaseAdmin
         .from('email_messages')
         .select('from_address, date_received, is_read, snippet, subject')
@@ -75,16 +119,33 @@ export default async function handler(req, res) {
         .order('date_received', { ascending: false })
         .limit(3000);
       for (const m of mails || []) {
-        const adres = adresUit(m.from_address);
-        if (!emailSet.has(adres)) continue;
-        let agg = mailOpEmail.get(adres);
-        if (!agg) { agg = { count: 0, unread: 0, last_date: null, last_tekst: '' }; mailOpEmail.set(adres, agg); }
-        agg.count++;
-        if (!m.is_read) agg.unread++;
-        if (!agg.last_date || new Date(m.date_received) > new Date(agg.last_date)) {
-          agg.last_date = m.date_received;
-          agg.last_tekst = m.snippet || m.subject || '';
-        }
+        bump(adresUit(m.from_address), m.date_received, !m.is_read, m.snippet || m.subject || '');
+      }
+      // Outbound handmatig-antwoord (email_replies met to_address==lead.email).
+      const emails = Array.from(emailSet);
+      const { data: replies } = await supabaseAdmin
+        .from('email_replies')
+        .select('to_address, email_subject, sent_at, final_reply')
+        .in('to_address', emails)
+        .order('sent_at', { ascending: false })
+        .limit(2000);
+      for (const r of replies || []) {
+        const adr = adresUit(r.to_address);
+        // Preview alleen als 'ie nieuwer is dan bestaande last_date; anders wel tellen
+        // maar preview niet overschrijven (bump doet dat via new Date-vergelijking).
+        bump(adr, r.sent_at, false, r.email_subject || (r.final_reply || '').slice(0, 120));
+      }
+      // Outbound motor-mails uit berichten_log (soort=mail).
+      const { data: motorMails } = await supabaseAdmin
+        .from('berichten_log')
+        .select('naar, verstuurd_op, soort, status')
+        .eq('kanaal', 'mail')
+        .eq('status', 'ok')
+        .in('naar', emails)
+        .order('verstuurd_op', { ascending: false })
+        .limit(3000);
+      for (const b of motorMails || []) {
+        bump(adresUit(b.naar), b.verstuurd_op, false, b.soort ? ('motor: ' + b.soort) : '');
       }
     }
 
@@ -115,6 +176,14 @@ export default async function handler(req, res) {
       const laatste = Math.max(waTijd, mailTijd);
       const preview = (mailTijd >= waTijd ? mail?.last_tekst : wa?.last_message_preview) || '';
 
+      // v=6 FIX 4: afspraak_op — kijk over alle rijen in de groep, kies de meest
+      // recente niet-null afspraak (dubbele lead-rijen kunnen elk hun eigen
+      // afspraak-status hebben).
+      let afspraakOp = null;
+      for (const l of rijen) {
+        const a = afspraakByLeadId.get(l.id);
+        if (a && (!afspraakOp || new Date(a) > new Date(afspraakOp))) afspraakOp = a;
+      }
       items.push({
         lead_id: rep.id,
         naam: [rep.voornaam, rep.achternaam].filter(Boolean).join(' ') || email || (wa ? wa.phone_number : '') || 'Onbekend',
@@ -126,6 +195,7 @@ export default async function handler(req, res) {
         can_send_text: wa ? binnenVenster(wa.last_inbound_at) : false,
         has_wa: !!wa,
         has_mail: !!mail,
+        afspraak_op: afspraakOp,
         _t: laatste,
       });
     }

@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 2 FASE 2 (v=5, 2026-08-17): + Afspraak inschieten (hybride).
+// Leadsonderhoud v2 — BROK 2 (v=6, 2026-08-17): 4 verify-fixes + echte templates.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -454,13 +454,18 @@
     const okLabel     = esc(opts?.okLabel     || 'Bevestig');
     const cancelLabel = esc(opts?.cancelLabel || 'Annuleren');
     const tone        = opts?.tone === 'danger' ? 'rose' : 'brand';
+    // v=6 FIX 2: expliciet color:#fff op de primaire knop. Zonder deze regel
+    // erfde de knop de brand-color voor tekst -> onzichtbare tekst tegen
+    // brand-background. Op verzend-acties is een onleesbare 'Verstuur'-knop
+    // een echt veiligheidsrisico. Zowel rose als brand hebben genoeg contrast
+    // tegen wit, dus dezelfde color-regel voor beide tones.
     return new Promise((resolve) => {
       _lsInbOpenModal(`
         <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
         <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px;white-space:pre-wrap">${esc(body)}</div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button id="lsInbModalCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
-          <button id="lsInbModalOk" class="btn btn-primary btn-sm" style="background:var(--${tone});border-color:var(--${tone})">${okLabel}</button>
+          <button id="lsInbModalOk" class="btn btn-primary btn-sm" style="background:var(--${tone});border-color:var(--${tone});color:#fff">${okLabel}</button>
         </div>`);
       document.getElementById('lsInbModalCancel').addEventListener('click', () => { _lsInbCloseModal(); resolve(false); });
       document.getElementById('lsInbModalOk').addEventListener('click',    () => { _lsInbCloseModal(); resolve(true);  });
@@ -762,35 +767,210 @@
     }
   };
 
-  // ── Quick-replies + template-picker (WA only) ────────────────────────
-  window.__lsInbQuickPicker = async () => {
-    const leadId = _lsInb.thread.leadId;
-    if (!leadId) return;
-    // De quick-replies endpoint verwacht conversation_id (WA-conv). Voor
-    // leadsonderhoud is die niet altijd aanwezig — fall-back naar lege lijst.
-    _lsInbToast('Snel-antwoorden vereisen een WA-conversatie (niet beschikbaar per lead)', 'warn');
-  };
-  window.__lsInbTemplatePicker = () => { _lsInbOpenTemplatePicker(_lsInb.thread.leadId); };
-  async function _lsInbOpenTemplatePicker(leadId) {
-    if (!leadId) return;
-    // inbox-template-list vereist conversation_id — voor leadsonderhoud
-    // hebben we die niet consistent (mail-only leads). Geef nette melding
-    // en bied vrije-tekst-fallback aan.
+  /* ══════════════════════════════════════════════════════════════════
+     v=6 FIX 5 — Quick-replies (canned) + ECHTE WA-templates op lead_id
+     ══════════════════════════════════════════════════════════════════
+     DEEL A: quick-replies = vaste canned-teksten (client-side), vult
+             actieve compose-veld (WA of mail). Geen conversation_id nodig.
+     DEEL D: template-picker leest /api/leadsonderhoud-gesprek-templates
+             (WABA-scoped approved templates), variabelen-invulform,
+             live preview met vervangingen, confirm-modal (leesbare
+             brand-knop uit FIX 2), verzenden via
+             /api/leadsonderhoud-gesprek-template.
+     ══════════════════════════════════════════════════════════════════ */
+
+  // Canned quick-replies — bewust een korte vaste leadsonderhoud-set (niet
+  // afhankelijk van whatsapp_quick_replies-tabel die conversation_id vereist).
+  // Uitbreidbaar in code; later evt. server-side per module.
+  const _LS_QUICK_REPLIES = [
+    { title: 'Vraag om check-in',   body: 'Hey! Hoe gaat het met de proefperiode? Zijn er nog vragen die ik kan beantwoorden?' },
+    { title: 'Herinnering call',    body: 'Zullen we een korte kennismakingscall inplannen? Kies gerust een moment dat jou uitkomt.' },
+    { title: 'Vraag om feedback',   body: 'Wat vind je tot nu toe van de lessen? Ik ben benieuwd naar je eerste indruk.' },
+    { title: 'Extra hulp aanbieden',body: 'Als je ergens tegenaan loopt: laat het weten, ik help je graag verder.' },
+    { title: 'Bedankt voor reactie',body: 'Dank voor je bericht! Ik pak het zsm op en laat het je weten.' },
+  ];
+
+  window.__lsInbQuickPicker = () => {
+    const conv = _lsInbCurrentConv();
+    if (!conv) return;
+    const leadId = conv.lead_id;
+    // Bepaal actief compose-veld: als mail-form open staat en WA disabled →
+    // vullen we mail; anders WA.
+    const mailOpen = !!_lsInb.compose.showMail[leadId];
+    const waEnabled = !!(conv.has_wa && conv.can_send_text);
+    const preferMail = mailOpen && !waEnabled;
     _lsInbOpenModal(`
-      <div style="font-size:15px;font-weight:600;margin-bottom:8px">Templates niet beschikbaar</div>
-      <div style="font-size:12.5px;color:var(--text-2);line-height:1.55;margin-bottom:14px">
-        De template-picker vereist een WhatsApp-conversatie op de lead. Leadsonderhoud werkt op
-        <b>lead_id</b>, dus wanneer de lead nog geen WA-conversatie heeft (of buiten 24u-venster valt)
-        kunnen we hier geen approved template ophalen.
-        <br><br>
-        Stuur in dit geval liever een <b>e-mail</b> vanuit dezelfde compose — die heeft geen
-        24u-restrictie.
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Snel-antwoord invoegen</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Kies er één. De tekst wordt in het ${preferMail ? '<b>mail</b>' : '<b>WhatsApp</b>'}-veld gezet; je kan 'em nog aanpassen vóór verzenden.</div>
+      <div id="lsInbQrList" style="display:flex;flex-direction:column;gap:6px;max-height:60vh;overflow-y:auto">
+        ${_LS_QUICK_REPLIES.map((it, i) => `
+          <button class="btn btn-ghost btn-sm" data-qr-idx="${i}" style="text-align:left;justify-content:flex-start;padding:10px 12px;height:auto;white-space:normal">
+            <div style="font-weight:600;margin-bottom:2px">${esc(it.title)}</div>
+            <div style="font-size:12px;color:var(--text-3);white-space:pre-wrap;line-height:1.45">${esc(it.body)}</div>
+          </button>`).join('')}
       </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button id="lsInbTplClose" class="btn btn-primary btn-sm">Sluiten</button>
+      <div style="margin-top:14px;text-align:right"><button id="lsInbQrCancel" class="btn btn-ghost btn-sm">Sluiten</button></div>
+    `, { maxWidth: 560 });
+    document.getElementById('lsInbQrCancel').addEventListener('click', _lsInbCloseModal);
+    document.querySelectorAll('#lsInbQrList [data-qr-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-qr-idx'));
+        const it = _LS_QUICK_REPLIES[idx];
+        if (!it) return;
+        if (preferMail) {
+          _lsInb.compose.draftsMailText[leadId] = (String(_lsInb.compose.draftsMailText[leadId] || '') + it.body).trimStart();
+        } else {
+          _lsInb.compose.draftsWa[leadId] = (String(_lsInb.compose.draftsWa[leadId] || '') + it.body).trimStart();
+        }
+        _lsInbRepaintCompose();
+        _lsInbCloseModal();
+      });
+    });
+  };
+
+  // Template-cache — één per open sessie (server-refetch na 5 min zou beter zijn,
+  // maar approved templates wijzigen zelden; TTL later toevoegen als 't nodig blijkt).
+  const _lsTpl = { loading: false, items: null, error: null, fetchedAt: 0 };
+  async function _lsInbFetchTemplates() {
+    // Simpele 5-min cache; skip als recent + geen fout.
+    if (_lsTpl.items && (Date.now() - _lsTpl.fetchedAt) < 5 * 60 * 1000 && !_lsTpl.error) return _lsTpl.items;
+    if (_lsTpl.loading) return _lsTpl.items || [];
+    _lsTpl.loading = true; _lsTpl.error = null;
+    const j = await tryFetch('ls-templates', '/api/leadsonderhoud-gesprek-templates');
+    _lsTpl.loading = false;
+    if (!j) { _lsTpl.error = 'Kon templates niet laden'; return _lsTpl.items || []; }
+    _lsTpl.items = Array.isArray(j.items) ? j.items : [];
+    _lsTpl.fetchedAt = Date.now();
+    return _lsTpl.items;
+  }
+
+  window.__lsInbTemplatePicker = () => { _lsInbOpenTemplatePicker(); };
+  async function _lsInbOpenTemplatePicker() {
+    const conv = _lsInbCurrentConv();
+    if (!conv) return;
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">Kies een goedgekeurde template</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">
+        Voor <b>${esc(_lsInbRowVan(conv))}</b>${conv.phone_number ? ` · ${esc(conv.phone_number)}` : ''}. Templates mogen ook buiten het 24u-venster verstuurd worden.
       </div>
-    `, { maxWidth: 500 });
+      <div id="lsInbTplList" style="max-height:55vh;overflow-y:auto">
+        <div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">Templates laden…</div>
+      </div>
+      <div style="margin-top:14px;text-align:right"><button id="lsInbTplClose" class="btn btn-ghost btn-sm">Sluiten</button></div>
+    `, { maxWidth: 620 });
     document.getElementById('lsInbTplClose').addEventListener('click', _lsInbCloseModal);
+    const items = await _lsInbFetchTemplates();
+    const listEl = document.getElementById('lsInbTplList');
+    if (!listEl) return;
+    if (_lsTpl.error) {
+      listEl.innerHTML = `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ ${esc(_lsTpl.error)}</div>`;
+      return;
+    }
+    if (!items.length) {
+      listEl.innerHTML = `<div style="padding:22px;color:var(--text-3);font-size:13px">Geen goedgekeurde templates voor de leadsonderhoud-lijn.</div>`;
+      return;
+    }
+    listEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px">
+      ${items.map((it, i) => `
+        <button class="btn btn-ghost btn-sm" data-tpl-idx="${i}" style="text-align:left;justify-content:flex-start;padding:10px 12px;height:auto;white-space:normal">
+          <div style="font-weight:600;margin-bottom:2px">${esc(it.name)} <span style="font-size:10.5px;color:var(--text-3);font-weight:400">· ${esc(it.language || 'nl')} · ${esc(it.category || '')}</span></div>
+          <div style="font-size:12px;color:var(--text-3);white-space:pre-wrap;line-height:1.45">${esc((it.body_text || '').slice(0, 200))}</div>
+        </button>`).join('')}
+    </div>`;
+    listEl.querySelectorAll('[data-tpl-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-tpl-idx'));
+        const tpl = items[idx];
+        if (tpl) _lsInbOpenTemplateForm(conv, tpl);
+      });
+    });
+  }
+  function _lsInbOpenTemplateForm(conv, tpl) {
+    const bodyText = String(tpl.body_text || '');
+    // Detecteer variabelen — positional {{1}}, {{2}}, …
+    const posKeys = [];
+    const re = /\{\{(\d+)\}\}/g; let m;
+    while ((m = re.exec(bodyText))) if (!posKeys.includes(m[1])) posKeys.push(m[1]);
+    posKeys.sort((a, b) => Number(a) - Number(b));
+
+    const previewHtml = esc(bodyText).replace(/\{\{(\d+)\}\}/g, '<b id="lsTplPh_$1" style="background:var(--brand-soft,var(--surface-2));padding:0 4px;border-radius:3px">{{$1}}</b>');
+    const varsForm = posKeys.length
+      ? `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+           ${posKeys.map(k => `
+             <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
+               <span style="color:var(--text-3)">Variabele {{${esc(k)}}}</span>
+               <input class="input" id="lsTplVar_${esc(k)}" data-var-key="${esc(k)}" placeholder="waarde voor {{${esc(k)}}}"
+                 style="padding:8px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
+             </label>`).join('')}
+         </div>`
+      : `<div style="font-size:12px;color:var(--text-3);padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);margin-bottom:12px">Deze template heeft geen variabelen.</div>`;
+
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">${esc(tpl.name)}</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">${esc(tpl.language || 'nl')}${tpl.category ? ' · ' + esc(tpl.category) : ''}</div>
+      <div id="lsTplPreview" style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:13px;line-height:1.55;white-space:pre-wrap;margin-bottom:14px">${previewHtml}</div>
+      ${varsForm}
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button id="lsTplBack" class="btn btn-ghost btn-sm">Terug</button>
+        <button id="lsTplSend" class="btn btn-primary btn-sm" style="color:#fff">Verstuur template</button>
+      </div>`, { maxWidth: 580 });
+
+    // Live preview: input-change vervangt de placeholder-span content.
+    document.querySelectorAll('#lsInbModalBox [data-var-key]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const key = inp.getAttribute('data-var-key');
+        const ph = document.getElementById('lsTplPh_' + key);
+        if (ph) ph.textContent = inp.value || ('{{' + key + '}}');
+      });
+    });
+
+    document.getElementById('lsTplBack').addEventListener('click', _lsInbOpenTemplatePicker);
+    document.getElementById('lsTplSend').addEventListener('click', async () => {
+      // Verzamel variabelen (positional in volgorde).
+      const variables = posKeys.map(k => {
+        const el = document.getElementById('lsTplVar_' + k);
+        return el ? String(el.value || '') : '';
+      });
+      // Render de tekst met ingevulde waarden voor confirm-preview + optimistic append.
+      const rendered = bodyText.replace(/\{\{(\d+)\}\}/g, (mm, k) => {
+        const idx = posKeys.indexOf(String(k));
+        return idx >= 0 ? (variables[idx] || ('{{' + k + '}}')) : mm;
+      });
+      const preview = rendered.length > 200 ? rendered.slice(0, 200) + '…' : rendered;
+      const ok = await _lsInbAskConfirm(
+        `Verstuur template naar ${_lsInbRowVan(conv)}?`,
+        `Template: ${tpl.name} (${tpl.language || 'nl'})\n\n${preview}`,
+        { okLabel: 'Ja, verstuur' }
+      );
+      if (!ok) { _lsInbOpenTemplateForm(conv, tpl); return; }
+      _lsInbCloseModal();
+      _lsInb.compose.sending = conv.lead_id;
+      _lsInbRepaintCompose();
+      try {
+        const resp = await window.KV.authedFetch('/api/leadsonderhoud-gesprek-template', {
+          method: 'POST',
+          body: JSON.stringify({
+            lead_id: conv.lead_id,
+            template_name: tpl.name,
+            language: tpl.language || 'nl',
+            variables,
+          }),
+        });
+        if (!resp.ok) {
+          const j = await resp.json().catch(() => ({}));
+          throw new Error(j.error || j.meta_error || ('HTTP ' + resp.status));
+        }
+        _lsInbOptimisticAppend(conv.lead_id, 'whatsapp', rendered);
+        _lsInb.compose.mode[conv.lead_id] = 'text';
+        _lsInbToast('Template verzonden', 'ok');
+      } catch (e) {
+        console.warn('[ls-inb] template-send fail:', e && e.message);
+        _lsInbToast('Template versturen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        _lsInb.compose.sending = null;
+        _lsInbRepaintCompose();
+      }
+    });
   }
 
   // ── Live-refresh poll (18s) ──────────────────────────────────────────
@@ -801,14 +981,45 @@
   function _lsInbStopPoll() {
     if (_lsInb.poll.handle) { clearInterval(_lsInb.poll.handle); _lsInb.poll.handle = null; }
   }
+  // v=6 FIX 1: hash van de convs-lijst zodat we niet meer re-renderen als er
+  // niks veranderd is (voorkomt onnodige node-vervanging elke poll-tick).
+  function _lsInbConvsHash() {
+    const items = asArr(_lsInb.convs.items);
+    return items.map(x => [x.lead_id, x.last_activity_at || '', x.unread || 0, x.last_preview || ''].join('|')).join('||');
+  }
   async function _lsInbPollTick() {
     if (_lsInb.poll.running) return;
     if (!document.querySelector('.ls-inb-split')) { _lsInbStopPoll(); return; }
     if (document.hidden) return;
     _lsInb.poll.running = true;
     try {
-      _lsInb.convs.fetched = false;
-      await _lsInbFetchConvs();
+      // v=6 FIX 1: scroll behouden op de conv-lijst tijdens poll-refresh.
+      // Vroegere flow: convs.fetched=false -> fetch -> DFO.render() rebuild
+      // de hele view -> #lsInbList wordt vervangen -> scrollTop reset naar 0.
+      // Nieuwe flow:
+      //   1. Bereken hash vóór fetch.
+      //   2. Fetch DIRECT via tryFetch (skip render-triggerende _lsInbFetchConvs).
+      //   3. Alleen als hash veranderde -> capture scrollTop, doe DFO.render(),
+      //      restore scrollTop in RAF.
+      //   Als er niks nieuws is doen we geen render en blijft de lijst staan.
+      const preHash = _lsInbConvsHash();
+      const jList = await tryFetch('ls-poll-convs', '/api/leadsonderhoud-gesprekken');
+      if (jList && Array.isArray(jList.items)) {
+        _lsInb.convs.items = jList.items;
+        _lsInb.convs.fetched = true;
+        _lsInb.convs.error = null;
+        const postHash = _lsInbConvsHash();
+        if (postHash !== preHash) {
+          const listEl = document.getElementById('lsInbList');
+          const savedScroll = listEl ? listEl.scrollTop : 0;
+          if (window.DFO?.render) window.DFO.render();
+          // RAF zodat de nieuwe #lsInbList in de DOM staat.
+          requestAnimationFrame(() => {
+            const el = document.getElementById('lsInbList');
+            if (el) el.scrollTop = savedScroll;
+          });
+        }
+      }
       if (_lsInb.thread.leadId) {
         const j = await tryFetch('ls-poll-thread', '/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(_lsInb.thread.leadId));
         if (j && Array.isArray(j.items)) {
@@ -954,6 +1165,13 @@
   function _lsInbRenderRight(row) {
     const naam = _lsInbRowVan(row);
     const ctx  = row.email || row.phone_number || '';
+    // v=6 FIX 4: call-status badge in de header (Jeffrey's noord-ster) —
+    // consistent met de Contacten-tab styling. Datum-tooltip toont wanneer
+    // 'ie geboekt is.
+    const heeftCall = !!row.afspraak_op;
+    const callBadge = heeftCall
+      ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)" title="Geboekt op ${esc(row.afspraak_op)}">✓ call geboekt · ${esc(fmtDatum(row.afspraak_op))}</span>`
+      : `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--amber-soft);color:var(--amber)">— nog geen call</span>`;
     const chanBadges = [
       row.has_wa   ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--teal-soft);color:var(--teal)">WA</span>` : '',
       row.has_mail ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--blue-soft);color:var(--blue)">mail</span>` : '',
@@ -969,6 +1187,7 @@
       <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap">
           <span style="font-size:11.5px;padding:3px 10px;border-radius:12px;background:var(--teal-soft);color:var(--teal)">Leadsonderhoud</span>
+          ${callBadge}
           ${chanBadges}
           <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="__lsInbOpenAppointmentPicker()" title="Direct een Zoom-afspraak inschieten (bestaande GHL-contact vereist)">${svg(I.cal || I.check, 'width:13px;height:13px')} Direct inschieten</button>
@@ -1276,5 +1495,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=5 BROK 2 FASE 2 — Gesprekken + Afspraak inschieten (Route A direct via leadsonderhoud-appointment-create + free-slots-picker; Route B boekingslink is uitleg-modal totdat GHL_BOOKING_URL wordt geconfigureerd). Free-slots-endpoint gate uitgebreid met leads.update fallback (breekt geen bestaande sales-caller).');
+  console.debug('[ls-v2] v=6 BROK 2 verify-fixes — FIX 1 poll behoudt lijst-scroll (hash-diff + capture/restore), FIX 2 confirm-modal knop color:#fff (leesbare Verstuur), FIX 3 has_mail telt outbound (email_replies + berichten_log motor-mail) + afspraak_op meegeleverd (FIX 4 header-badge). FIX 5 quick-replies canned + ECHTE WA-templates via /api/leadsonderhoud-gesprek-templates + -template (WABA-scoped, sendTemplate met variabelen).');
 })();
