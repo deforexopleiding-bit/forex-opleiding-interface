@@ -1,63 +1,108 @@
 // modules/klanten-v2/views/inbox-v2.js
 //
-// Fase A — Centrale Inbox voor v2-shell (LAYOUT + LIVE DATA).
-// 1-op-1 render uit docs/redesign/systeemprototype-v45.html:
-//   - VIEWS['inbox/']  r4505-4601  (3-koloms rail + list + detail)
-//   - CSS r614-641    (.ib-* classes uit prototype)
+// Inbox v2 — BROK 1 (v=2, 2026-08-17): "unified werkplek" landing.
+// LEES-only in deze brok: alle 8 bronnen tonen echte counts + rows, en
+// voor conversation-bronnen (WA + Lisa) rendert de detail-pane een
+// echte thread. Compose komt in BROK 2.
 //
-// DATA-BRON:
-//   - Wanbetalers (finance)  → /api/inbox-conversations-list?module=finance (LIVE)
-//   - Events                  → /api/inbox-conversations-list?module=events (LIVE)
-//   - Onboarding              → /api/inbox-conversations-list?module=onboarding (LIVE)
-//   - Overige sources         → MOCK-tellers (geen aggregate-endpoint)
+// Bron-mapping (per source in IB_SRC → endpoint):
+//   Wanbetalers      wb      /api/inbox-conversations-list?module=finance
+//   Events           ev      /api/inbox-conversations-list?module=events
+//   Onboarding       ob      /api/inbox-conversations-list?module=onboarding
+//   Lisa AI          lisa    /api/lisa-conversations?action=list_live&status=active
+//   Leadsonderhoud   lo      /api/leadsonderhoud-overzicht                (deep-link only)
+//   E-mail admin@    m_adm   /api/email-inbox-list?mailbox=administratie  (deep-link only)
+//   E-mail info@     m_info  /api/email-inbox-list?mailbox=info           (deep-link only)
+//   Tickets          tk      /api/tickets?status=open                     (deep-link only)
 //
-// DATA-REGELS (streng volgens dashboard-v2 pattern):
-//   1. Render meteen met skeleton → geen page-freeze op initial load.
-//   2. Parallel fetch via Promise.all + tryFetch (fail-soft).
-//   3. 8s timeout per call via Promise.race.
-//   4. Faalt een call → source-teller wordt '—', geen crash, geen retry-loop.
-//   5. Render-loop-guard: !_live.loading in dashManager-achtige trigger.
-//   6. Sequence-tracking (_fetchSeq) tegen race bij snelle source-switch.
+// Thread-render:
+//   - WA-bronnen (wb/ev/ob): /api/inbox-messages-list?conversation_id=X
+//     → append-only: nieuwe items worden erbij ge-appendt via data-msg-id,
+//       bestaande DOM blijft staan, scrollTop bewaard.
+//     → Op eerste render van een conv: scrollTop = scrollHeight (naar onder).
+//     → mark-read fire-and-forget bij openen (inbox-mark-read POST),
+//       fail-soft: 1 poging, geen retry.
+//   - Lisa: /api/lisa-conversations?id=X → items met role user/assistant.
+//     → Zelfde append-only pattern.
+//   - lo/tk/m_adm/m_info: geen thread. Detail-pane toont preview + knop
+//     "Open in <module>" naar de bron-module (E-mail / Tickets /
+//     Leadsonderhoud). Vermijdt dupliceren met de nu-live modules.
+//
+// Dashboard-veiligheidsregels (dashboard-pattern):
+//   1. Skeleton bij eerste load.
+//   2. 8s timeout op elke fetch (tryFetch).
+//   3. try/catch per source: 1 fail = source-teller '—', geen crash.
+//   4. Sequence-tracking (_fetchSeq) tegen race bij snelle source-switch.
+//   5. Render-loop guard: fetch trigger via queueMicrotask, in bundle-fn
+//      wordt _fetched flag gezet zodat dezelfde tab niet blijft refetchen.
+//   6. Append-only thread render: DOM-diff via data-msg-id, geen full
+//      innerHTML rebuild, scroll-preserve.
+//   7. Mark-read fail-soft (console.warn, geen retry-loop).
+//
+// Dormant — 'inbox' NIET in V2_ACTIVE_ALLOWLIST. Preview via ?v2preview=inbox.
+// Protected zone leeg (geen klx-softphone / wbx-softphone raakvlak).
 
 (function () {
   if (!window.DFO) { console.error('[inbox-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[inbox-v2] KV_V2.helpers niet geladen.'); return; }
-
-  const { I, svg, S, F, render, goMod } = window.DFO;
+  const { I, svg, F } = window.DFO;
   const H = window.KV_V2.helpers;
 
-  /* ── Rail-configuratie ────────────────────────────────────────────── */
-  // v = source-slug (matcht IB_SRC-key in prototype), n = weergave-naam,
-  // ic = icon, col = accent-kleur, module = API-module of null (=MOCK),
-  // mod = shell-target voor "Open in X" knop.
+  /* ── Source-registry ───────────────────────────────────────────────── */
+  // v = source-slug, n = label, ic = icon, col = accent,
+  // kind = 'wa'|'lisa'|'leadsonderhoud'|'tickets'|'email' (bepaalt fetcher +
+  //         detail-render), mod = shell-target voor "Open in X"-knop.
   const IB_SRC = [
-    // v          n                        ic          col       module       mod
-    ['wb',       'Wanbetalers',           I.alert,    'amber',   'finance',    'wanbetalers'],
-    ['ev',       'Events',                I.cal,      'pink',    'events',     'events'],
-    ['ob',       'Onboarding',            I.route,    'emerald', 'onboarding', 'onboarding'],
-    ['lisa',     'Lisa AI',               I.bot,      'violet',  null,         'lisa'],
-    ['lo',       'Leadsonderhoud',        I.repeat,   'teal',    null,         'leadsonderhoud'],
-    ['m_adm',    'E-mail administratie@', I.mail,     'blue',    null,         'email'],
-    ['m_info',   'E-mail info@',          I.mail,     'emerald', null,         'email'],
-    ['tk',       'Tickets',               I.ticket,   'rose',    null,         'tickets'],
+    // v         n                        ic          col       kind             mod
+    ['wb',      'Wanbetalers',           I.alert,    'amber',   'wa',            'wanbetalers'],
+    ['ev',      'Events',                I.cal,      'pink',    'wa',            'events'],
+    ['ob',      'Onboarding',            I.route,    'emerald', 'wa',            'onboarding'],
+    ['lisa',    'Lisa AI',               I.bot,      'violet',  'lisa',          'lisa'],
+    ['lo',      'Leadsonderhoud',        I.repeat,   'teal',    'leadsonderhoud','leadsonderhoud'],
+    ['m_adm',   'E-mail administratie@', I.mail,     'blue',    'email',         'email'],
+    ['m_info',  'E-mail info@',          I.mail,     'emerald', 'email',         'email'],
+    ['tk',      'Tickets',               I.ticket,   'rose',    'tickets',       'tickets'],
   ];
   const IB_GRP = [
-    ['Aandacht',    IB_SRC.filter(x => ['wb','lisa'].includes(x[0]))],
-    ['Klantcontact', IB_SRC.filter(x => ['ev','ob','m_adm','m_info'].includes(x[0]))],
-    ['Overig',       IB_SRC.filter(x => ['lo','tk'].includes(x[0]))],
+    ['Aandacht',     IB_SRC.filter(x => ['wb', 'lisa'].includes(x[0]))],
+    ['Klantcontact', IB_SRC.filter(x => ['ev', 'ob', 'm_adm', 'm_info'].includes(x[0]))],
+    ['Overig',       IB_SRC.filter(x => ['lo', 'tk'].includes(x[0]))],
   ];
-  // Fallback MOCK-tellers voor sources zonder endpoint
-  const MOCK_COUNTS = { lisa: 2, lo: 5, m_adm: 12, m_info: 8, tk: 3 };
+  // Per-source endpoint-map + response-key voor de items array. `mailbox`
+  // is een email-source-specifieke parameter.
+  const SRC_ENDPOINTS = {
+    wb:     { url: '/api/inbox-conversations-list?module=finance&status_filter=active&limit=200',    itemsKey: 'items' },
+    ev:     { url: '/api/inbox-conversations-list?module=events&status_filter=active&limit=200',     itemsKey: 'items' },
+    ob:     { url: '/api/inbox-conversations-list?module=onboarding&status_filter=active&limit=200', itemsKey: 'items' },
+    lisa:   { url: '/api/lisa-conversations?action=list_live&status=active&limit=100',               itemsKey: 'conversations' },
+    lo:     { url: '/api/leadsonderhoud-overzicht',                                                  itemsKey: 'items' },
+    m_adm:  { url: '/api/email-inbox-list?mailbox=administratie&folder=inbox&limit=100',             itemsKey: 'items', mailbox: 'administratie' },
+    m_info: { url: '/api/email-inbox-list?mailbox=info&folder=inbox&limit=100',                      itemsKey: 'items', mailbox: 'info' },
+    tk:     { url: '/api/tickets?status=open',                                                       itemsKey: 'tickets' },
+  };
 
   /* ── State ─────────────────────────────────────────────────────────── */
   let ibSrc = 'wb';
-  let ibSel = null; // conversation_id (uuid van geselecteerde conv)
+  let ibSel = null; // id van geselecteerde rij (uuid/int, source-afhankelijk)
   const _live = {
     loading: false,
     error: null,
-    sources: { wb: null, ev: null, ob: null }, // per source: {items, total, configured, module} of null bij fail
+    fetched: false, // eenmalige-bundle-guard
+    // per source: { items:[], raw:<response>, error:<msg|null> } of null bij fail
+    sources: { wb: null, ev: null, ob: null, lisa: null, lo: null, m_adm: null, m_info: null, tk: null },
   };
   let _fetchSeq = 0;
+
+  // Thread-state (WA/Lisa). Reset bij ibSel-wissel.
+  const _thread = {
+    loading: false,
+    error: null,
+    convId: null,        // waar de items bij horen (voor DOM-diff detectie)
+    src: null,           // source-slug waaruit convId komt
+    items: [],           // { id, direction: 'inbound'|'outbound', body, at }
+    _paintedFor: null,   // convId waarvoor DOM al gepaint is (append-guard)
+    _markedFor: null,    // convId waarvoor mark-read al is aangeroepen
+  };
 
   /* ── tryFetch met 8s timeout (dashboard-pattern) ──────────────────── */
   async function tryFetch(label, url, timeoutMs = 8000) {
@@ -73,30 +118,38 @@
     }
   }
 
-  /* ── Bundle-fetch: 3 live sources parallel ────────────────────────── */
+  /* ── Bundle-fetch: 8 bronnen parallel ─────────────────────────────── */
   async function fetchInboxBundle() {
-    // Skip als al geladen en geen error
-    if (_live.sources.wb && !_live.error) return;
+    if (_live.fetched && !_live.error) return; // eenmalige guard
+    if (_live.loading) return;                 // race-guard
     const seq = ++_fetchSeq;
     _live.loading = true;
     _live.error = null;
     console.debug('[inbox-v2] bundle start seq=' + seq);
     if (window.DFO && window.DFO.render) window.DFO.render();
+
     try {
       if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
-      const [wb, ev, ob] = await Promise.all([
-        tryFetch('inbox-list finance',    '/api/inbox-conversations-list?module=finance&status=active&limit=200'),
-        tryFetch('inbox-list events',     '/api/inbox-conversations-list?module=events&status=active&limit=200'),
-        tryFetch('inbox-list onboarding', '/api/inbox-conversations-list?module=onboarding&status=active&limit=200'),
-      ]);
+      const keys = Object.keys(SRC_ENDPOINTS);
+      const results = await Promise.all(
+        keys.map(k => tryFetch('src ' + k, SRC_ENDPOINTS[k].url))
+      );
       if (seq !== _fetchSeq) { console.debug('[inbox-v2] discard stale seq=' + seq); return; }
-      _live.sources.wb = wb;
-      _live.sources.ev = ev;
-      _live.sources.ob = ob;
-      _live.error = wb || ev || ob ? null : 'Alle inbox-endpoints faalden';
-      console.debug('[inbox-v2] bundle done seq=' + seq, {
-        wbItems: wb?.items?.length, evItems: ev?.items?.length, obItems: ob?.items?.length,
+      let anyOk = false;
+      keys.forEach((k, i) => {
+        const resp = results[i];
+        if (resp && typeof resp === 'object') {
+          const itemsKey = SRC_ENDPOINTS[k].itemsKey;
+          const arr = Array.isArray(resp[itemsKey]) ? resp[itemsKey] : [];
+          _live.sources[k] = { items: arr, raw: resp, error: null };
+          anyOk = true;
+        } else {
+          _live.sources[k] = { items: [], raw: null, error: 'fetch failed' };
+        }
       });
+      _live.fetched = true;
+      _live.error = anyOk ? null : 'Alle inbox-endpoints faalden';
+      console.debug('[inbox-v2] bundle done seq=' + seq, Object.fromEntries(keys.map(k => [k, _live.sources[k]?.items?.length ?? '—'])));
     } catch (e) {
       if (seq !== _fetchSeq) return;
       console.error('[inbox-v2] bundle fail seq=' + seq, e && e.message);
@@ -110,98 +163,310 @@
   }
 
   /* ── Handler-stubs op window ──────────────────────────────────────── */
-  window.__ibSetSrc = (v) => { ibSrc = v; ibSel = null; render(); };
-  window.__ibSel = (id) => { ibSel = id; render(); };
+  window.__ibSetSrc = (v) => {
+    ibSrc = v;
+    ibSel = null;
+    _resetThread();
+    if (window.DFO && window.DFO.render) window.DFO.render();
+  };
+  window.__ibSel = (id) => {
+    if (ibSel === id) return;
+    ibSel = id;
+    _resetThread();
+    if (window.DFO && window.DFO.render) window.DFO.render();
+  };
+  window.__ibGoMod = (mod) => { try { if (window.DFO && window.DFO.goMod) window.DFO.goMod(mod); } catch (_) {} };
 
-  /* ── Helper: source-teller (live of mock) ─────────────────────────── */
+  /* ── Source-teller ─────────────────────────────────────────────────── */
   function srcCount(v) {
-    // Voor 3 live sources: item.length uit response
-    if (v === 'wb') return _live.sources.wb ? _live.sources.wb.items.length : null;
-    if (v === 'ev') return _live.sources.ev ? _live.sources.ev.items.length : null;
-    if (v === 'ob') return _live.sources.ob ? _live.sources.ob.items.length : null;
-    // Rest = mock
-    return MOCK_COUNTS[v] != null ? MOCK_COUNTS[v] : 0;
+    const s = _live.sources[v];
+    if (!s) return null;                             // nog niet geladen
+    if (s.error) return null;                        // fetch mislukt → '—'
+    // tickets: filter op open/in_progress voor het "aandacht"-getal.
+    if (v === 'tk') {
+      const counts = s.raw?.counts || {};
+      const open = (counts.open || 0) + (counts.in_progress || 0);
+      return open;
+    }
+    // Overige: aantal items uit response.
+    return s.items.length;
   }
 
-  /* ── Helper: rows voor huidige source ─────────────────────────────── */
+  /* ── Row-mapping per source-kind ──────────────────────────────────── */
   function currentRows() {
-    const live = ['wb', 'ev', 'ob'].includes(ibSrc) ? _live.sources[ibSrc] : null;
-    if (!live || !Array.isArray(live.items)) return [];
-    // Map conv-list items naar UI-row-shape.
-    return live.items.map(c => {
-      const custName = c.customer
-        ? (c.customer.is_company ? c.customer.company_name : [c.customer.first_name, c.customer.last_name].filter(Boolean).join(' '))
-        : (c.attendee ? [c.attendee.first_name, c.attendee.last_name].filter(Boolean).join(' ') : null);
-      const van = custName || c.display_name || c.phone_number || 'Onbekend';
-      // Tijd-hint uit last_message_at (fallback: last_activity_at)
-      const isoTijd = c.last_message_at || c.last_activity_at || null;
-      let tijd = '—';
-      if (isoTijd) {
-        try {
-          const d = new Date(isoTijd);
-          const delta = Date.now() - d.getTime();
-          if (delta < 3600000) tijd = Math.round(delta / 60000) + 'm';
-          else if (delta < 86400000) tijd = Math.round(delta / 3600000) + 'u';
-          else if (delta < 7 * 86400000) tijd = Math.round(delta / 86400000) + 'd';
-          else tijd = d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
-        } catch (_) { /* ignore */ }
-      }
-      return {
-        id: c.id,
-        van,
-        t: c.last_message_preview || '—',
-        p: c.attendee?.event?.title || c.customer?.email || '—',
-        tijd,
-        nw: (c.unread_count || 0) > 0,
-        ai: false, // AI-suggestie hint is source-specifiek, buiten scope
-        src: ibSrc,
-        kan: 'WhatsApp',
-        ctx: c.customer?.email || c.phone_number || '',
-        acties: ['Openen in module'],
-      };
-    });
+    const s = _live.sources[ibSrc];
+    if (!s || !Array.isArray(s.items)) return [];
+    const kind = (IB_SRC.find(x => x[0] === ibSrc) || [])[4];
+
+    if (kind === 'wa')          return s.items.map(mapWaRow);
+    if (kind === 'lisa')        return s.items.map(mapLisaRow);
+    if (kind === 'leadsonderhoud') return s.items.slice(0, 50).map(mapLoRow);
+    if (kind === 'email')       return s.items.map(mapEmailRow);
+    if (kind === 'tickets') {
+      // Alleen open/in_progress; sorteer nieuwste eerst.
+      return s.items
+        .filter(t => t.status === 'open' || t.status === 'in_progress')
+        .map(mapTicketRow);
+    }
+    return [];
+  }
+
+  function _fmtTijd(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      const delta = Date.now() - d.getTime();
+      if (delta < 0) return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+      if (delta < 3600000) return Math.max(1, Math.round(delta / 60000)) + 'm';
+      if (delta < 86400000) return Math.round(delta / 3600000) + 'u';
+      if (delta < 7 * 86400000) return Math.round(delta / 86400000) + 'd';
+      return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+    } catch (_) { return '—'; }
+  }
+
+  function mapWaRow(c) {
+    const custName = c.customer
+      ? (c.customer.is_company ? c.customer.company_name : [c.customer.first_name, c.customer.last_name].filter(Boolean).join(' '))
+      : (c.attendee ? [c.attendee.first_name, c.attendee.last_name].filter(Boolean).join(' ') : null);
+    const van = custName || c.display_name || c.phone_number || 'Onbekend';
+    return {
+      id: c.id,
+      van,
+      t: c.last_message_preview || '—',
+      p: c.attendee?.event?.title || c.customer?.email || '',
+      tijd: _fmtTijd(c.last_message_at || c.last_activity_at),
+      nw: (c.unread_count || 0) > 0,
+      kan: 'WhatsApp',
+      ctx: c.customer?.email || c.phone_number || '',
+      _raw: c,
+    };
+  }
+  function mapLisaRow(c) {
+    const van = c.contact_name || c.instagram_handle || c.ghl_contact_id || 'Onbekend';
+    return {
+      id: c.id,
+      van,
+      t: c.preview || '—',
+      p: c.phase ? ('fase: ' + c.phase) : '',
+      tijd: _fmtTijd(c.last_message_at || c.created_at),
+      nw: false, // Lisa levert geen unread-state
+      kan: 'Lisa AI',
+      ctx: c.instagram_handle || '',
+      _raw: c,
+    };
+  }
+  function mapLoRow(l) {
+    const van = l.naam || l.email || 'Onbekend';
+    return {
+      id: l.id || l.contact_id || l.email,
+      van,
+      t: l.laatste_bericht_preview || l.traject || l.status || '—',
+      p: l.email || '',
+      tijd: _fmtTijd(l.laatste_activiteit || l.last_contact_at || l.updated_at || l.created_at),
+      nw: false,
+      kan: 'Leadsonderhoud',
+      ctx: l.email || '',
+      _raw: l,
+    };
+  }
+  function mapEmailRow(m) {
+    const van = m.from_name || m.from_address || 'Onbekend';
+    return {
+      id: m.id,
+      van,
+      t: m.subject || '(geen onderwerp)',
+      p: (m.snippet || '').slice(0, 120),
+      tijd: _fmtTijd(m.date_received),
+      nw: !m.is_read,
+      kan: 'E-mail',
+      ctx: m.from_address || '',
+      _raw: m,
+    };
+  }
+  function mapTicketRow(t) {
+    return {
+      id: t.id,
+      van: t.creator_name || t.assignee_name || t.type || 'Ticket',
+      t: t.title || '(geen titel)',
+      p: (t.description || '').slice(0, 120),
+      tijd: _fmtTijd(t.updated_at || t.created_at),
+      nw: t.status === 'open',
+      kan: 'Tickets',
+      ctx: (t.priority || '') + (t.module ? ' · ' + t.module : ''),
+      _raw: t,
+    };
+  }
+
+  /* ── Thread reset (bij source- of item-wissel) ────────────────────── */
+  function _resetThread() {
+    _thread.loading = false;
+    _thread.error = null;
+    _thread.convId = null;
+    _thread.src = null;
+    _thread.items = [];
+    _thread._paintedFor = null;
+    _thread._markedFor = null;
+  }
+
+  /* ── Thread-fetch (WA / Lisa) ─────────────────────────────────────── */
+  async function _loadThread(row, src) {
+    const kind = (IB_SRC.find(x => x[0] === src) || [])[4];
+    if (!row || !row.id) return;
+    if (kind !== 'wa' && kind !== 'lisa') return; // deep-link kinds hebben geen thread
+    // Bewaak per-conv: skip als al voor deze conv geladen is.
+    if (_thread.convId === row.id && !_thread.error) return;
+    _thread.loading = true;
+    _thread.error = null;
+    _thread.convId = row.id;
+    _thread.src = src;
+    _thread.items = [];
+    _thread._paintedFor = null;
+    if (window.DFO && window.DFO.render) window.DFO.render();
+
+    const seq = ++_fetchSeq;
+    let resp = null;
+    if (kind === 'wa') {
+      resp = await tryFetch('thread wa ' + row.id, '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(row.id) + '&limit=200');
+    } else if (kind === 'lisa') {
+      resp = await tryFetch('thread lisa ' + row.id, '/api/lisa-conversations?id=' + encodeURIComponent(row.id));
+    }
+    if (seq !== _fetchSeq) return;
+    if (_thread.convId !== row.id) return; // user is doorgeklikt naar andere conv
+
+    if (!resp) {
+      _thread.loading = false;
+      _thread.error = 'Kon berichten niet laden';
+      if (window.DFO && window.DFO.render) window.DFO.render();
+      return;
+    }
+
+    if (kind === 'wa') {
+      // items van inbox-messages-list: { id, direction, body, sent_at, created_at, ... }
+      _thread.items = (resp.items || []).map(m => ({
+        id: m.id,
+        direction: m.direction === 'outbound' ? 'outbound' : 'inbound',
+        body: m.body || '',
+        at: m.sent_at || m.created_at || null,
+        meta: { status: m.status, template_name: m.template_name, media_url: m.media_url },
+      }));
+      // Mark-read fire-and-forget (1 poging, geen retry).
+      _markReadOnce(row.id);
+    } else if (kind === 'lisa') {
+      // Lisa-response: { conversation, messages: [{ id, direction, content, sent_at, role }] }
+      const msgs = resp.messages || resp.conversation?.messages || [];
+      _thread.items = msgs.map(m => ({
+        id: m.id,
+        direction: (m.direction === 'outbound' || m.role === 'assistant') ? 'outbound' : 'inbound',
+        body: m.content || m.body || '',
+        at: m.sent_at || m.created_at || null,
+        meta: { role: m.role },
+      }));
+    }
+    _thread.loading = false;
+    if (window.DFO && window.DFO.render) window.DFO.render();
+  }
+
+  /* ── Mark-read fire-and-forget (WA only) ──────────────────────────── */
+  function _markReadOnce(conversationId) {
+    if (!conversationId) return;
+    if (_thread._markedFor === conversationId) return; // 1 poging per conv
+    _thread._markedFor = conversationId;
+    try {
+      window.KV.authedFetch('/api/inbox-mark-read', {
+        method: 'POST',
+        body: JSON.stringify({ conversation_id: conversationId }),
+      }).then(r => { if (!r.ok) console.warn('[inbox-v2] mark-read HTTP', r.status); })
+        .catch(e => console.warn('[inbox-v2] mark-read fail:', e && e.message));
+    } catch (e) {
+      console.warn('[inbox-v2] mark-read setup fail:', e && e.message);
+    }
+  }
+
+  /* ── Append-only thread paint ─────────────────────────────────────── */
+  // Runt na elke render via queueMicrotask. Als de thread-container voor
+  // deze conv al bestaat en items zijn nieuw → append de nieuwe onder-aan.
+  // Als de conv is gewisseld → full rebuild + scroll naar onder.
+  function _paintThread() {
+    const container = document.getElementById('ibThreadScroll');
+    if (!container) return; // detail-pane niet in DOM (bv. deep-link kind)
+    if (!_thread.convId) { container.innerHTML = ''; return; }
+
+    const isNewConv = _thread._paintedFor !== _thread.convId;
+    if (isNewConv) {
+      container.innerHTML = _thread.items.map(_renderMsgHtml).join('');
+      _thread._paintedFor = _thread.convId;
+      // Scroll naar onder (nieuwste onderaan).
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+    // Append-only: welke IDs staan er al?
+    const seen = new Set();
+    container.querySelectorAll('[data-msg-id]').forEach(el => seen.add(el.getAttribute('data-msg-id')));
+    const additions = _thread.items.filter(m => !seen.has(String(m.id)));
+    if (!additions.length) return;
+    // Behoud scrollpositie tenzij user aan de onderkant hangt (autoscroll dan).
+    const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
+    container.insertAdjacentHTML('beforeend', additions.map(_renderMsgHtml).join(''));
+    if (nearBottom) container.scrollTop = container.scrollHeight;
+  }
+
+  function _renderMsgHtml(m) {
+    const isOut = m.direction === 'outbound';
+    const at = m.at ? _fmtTijd(m.at) : '';
+    const body = String(m.body || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const side = isOut ? 'flex-end' : 'flex-start';
+    const bg = isOut ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)';
+    const color = isOut ? 'var(--brand)' : 'var(--text-1)';
+    const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
+    return `<div data-msg-id="${String(m.id)}" style="display:flex;justify-content:${side};margin-bottom:8px">
+      <div style="max-width:78%;padding:10px 14px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
+        ${body || '<span style="opacity:.55">(leeg bericht)</span>'}
+        <div style="font-size:10.5px;opacity:.55;font-family:'IBM Plex Mono',monospace;margin-top:4px;text-align:right">${at}${m.meta?.template_name ? ' · template' : ''}</div>
+      </div>
+    </div>`;
   }
 
   /* ── VIEW ─────────────────────────────────────────────────────────── */
   function inboxView() {
-    // Trigger fetch als nog niet geladen, met render-loop guard.
-    if (!_live.sources.wb && !_live.loading) {
+    // Trigger bundle-fetch als nog niet geladen.
+    if (!_live.fetched && !_live.loading) {
       queueMicrotask(() => fetchInboxBundle());
     }
 
     const totaal = IB_SRC.reduce((a, x) => a + (srcCount(x[0]) || 0), 0);
     const rows = currentRows();
     const q = (F('q', '') || '').toLowerCase();
-    const filtered = q ? rows.filter(r => r.van.toLowerCase().includes(q) || r.t.toLowerCase().includes(q)) : rows;
+    const filtered = q ? rows.filter(r => r.van.toLowerCase().includes(q) || (r.t || '').toLowerCase().includes(q)) : rows;
     const flOnlyNw = F('fl', 'all') === 'nw';
     const list = flOnlyNw ? filtered.filter(r => r.nw) : filtered;
     const c = list.find(r => r.id === ibSel) || list[0] || null;
     const srcInfo = IB_SRC.find(x => x[0] === ibSrc) || IB_SRC[0];
+    const [, srcName, srcIc, srcCol, srcKind, srcMod] = srcInfo;
 
-    // Amber-banner: uitleg dat 3 sources live zijn, rest mock, en dat detail-messages
-    // niet-live zijn (out of scope voor deze PR).
-    const infoBanner = `<div style="margin:14px 20px 0;padding:11px 14px;border:1px solid var(--amber-line);background:var(--amber-soft);border-radius:var(--r);
-      display:flex;align-items:center;gap:11px;font-size:12.5px;color:var(--amber)">
-      ${svg(I.alert, 'width:16px;height:16px;flex-shrink:0')}
-      <span><b>LIVE DATA</b> voor 3 sources (Wanbetalers/Events/Onboarding via <code>/api/inbox-conversations-list</code>).
-      Overige sources en detail-messages tonen mock — data-uitbreiding volgt na layout-goedkeuring.</span></div>`;
+    // Trigger thread-load voor conversation-kinds (WA/Lisa) zodra er een
+    // geselecteerde row is en de convId van _thread nog niet matcht.
+    if (c && (srcKind === 'wa' || srcKind === 'lisa')) {
+      if (_thread.convId !== c.id && !_thread.loading) {
+        queueMicrotask(() => _loadThread(c, ibSrc));
+      }
+    }
+    // Post-render paint van thread (append-only).
+    queueMicrotask(_paintThread);
 
-    return `${infoBanner}
+    return `
     <div class="ib-split">
       <div class="ib-rail">
-        <button class="ib-src ${ibSrc === 'all' ? 'on' : ''}" onclick="__ibSetSrc('wb')" style="margin-bottom:4px" title="Alles = Wanbetalers-source (default)">
+        <button class="ib-src" onclick="__ibSetSrc('wb')" style="margin-bottom:4px" title="Alles = default source (Wanbetalers)">
           <span class="ic" style="background:var(--teal-soft);color:var(--teal)">${svg(I.inbox)}</span>
-          <span style="flex:1">Alles</span><span class="n ${totaal ? '' : 'zero'}">${_live.loading ? '…' : totaal}</span></button>
+          <span style="flex:1">Alles</span><span class="n ${totaal ? '' : 'zero'}">${_live.loading && !_live.fetched ? '…' : totaal}</span></button>
         ${IB_GRP.map(([g, items]) => `
           <div style="font-size:10px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);padding:14px 9px 6px">${g}</div>
-          ${items.map(([v, n, ic, col, module]) => {
+          ${items.map(([v, n, ic, col]) => {
             const cnt = srcCount(v);
-            const isLive = module != null;
-            const disp = cnt == null ? '…' : cnt;
-            return `<button class="ib-src ${ibSrc === v ? 'on' : ''}" onclick="__ibSetSrc('${v}')"
-              title="${isLive ? 'Live via /api/inbox-conversations-list?module=' + module : 'MOCK — geen live-endpoint'}">
+            const disp = cnt == null ? (_live.loading ? '…' : '—') : cnt;
+            return `<button class="ib-src ${ibSrc === v ? 'on' : ''}" onclick="__ibSetSrc('${v}')">
               <span class="ic" style="background:var(--${col}-soft);color:var(--${col})">${svg(ic)}</span>
-              <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}${isLive ? '' : `<span style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--amber);background:var(--amber-soft);padding:0 4px;border-radius:3px;margin-left:5px;vertical-align:1px">MOCK</span>`}</span>
+              <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${n}</span>
               <span class="n ${cnt ? '' : 'zero'}">${disp}</span></button>`;
           }).join('')}`).join('')}
         <div style="margin-top:16px;padding:11px 12px;background:var(--surface-2);border-radius:var(--r);font-size:11.5px;color:var(--text-3);line-height:1.5">
@@ -212,7 +477,7 @@
       <div class="ib-list">
         <div class="ib-top">
           <div class="tb-search" style="width:100%">${svg('<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>')}
-            <input placeholder="Zoek in ${srcInfo[1]}…" value="${(F('q','') || '').replace(/"/g, '&quot;')}"
+            <input placeholder="Zoek in ${srcName}…" value="${(F('q','') || '').replace(/"/g, '&quot;')}"
               oninput="S.filters[DFO.key()+'::q']=this.value;DFO.render();this.focus();this.setSelectionRange(this.value.length,this.value.length)"></div>
           <div style="display:flex;gap:6px;margin-top:9px;align-items:center">
             <button class="chip ${!flOnlyNw ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="DFO.setF('fl','all')">Alles</button>
@@ -221,7 +486,7 @@
         </div>
         ${_live.loading && !list.length
           ? renderSkeletonRows(6)
-          : (list.map(i => renderRow(i, srcInfo)).join('') || `<div class="empty" style="padding:44px 20px"><div class="empty-t">${['wb','ev','ob'].includes(ibSrc) ? 'Alles afgehandeld 🎉' : 'Geen items voor deze source (MOCK — geen live-endpoint)'}</div></div>`)}
+          : (list.map(i => renderRow(i, srcInfo)).join('') || `<div class="empty" style="padding:44px 20px"><div class="empty-t">Alles afgehandeld 🎉</div></div>`)}
       </div>
 
       ${c
@@ -234,7 +499,7 @@
   /* ── Rij-renderer ─────────────────────────────────────────────────── */
   function renderRow(i, srcInfo) {
     const [, n, ic, col] = srcInfo;
-    return `<div class="ib-row ${i.nw ? 'nw' : ''} ${ibSel === i.id ? 'on' : ''}" onclick="__ibSel('${i.id}')">
+    return `<div class="ib-row ${i.nw ? 'nw' : ''} ${ibSel === i.id ? 'on' : ''}" onclick="__ibSel('${String(i.id).replace(/'/g, "\\'")}')">
       ${H.av(i.van, 34)}
       <div class="ib-b">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
@@ -250,39 +515,107 @@
 
   /* ── Detail-renderer ──────────────────────────────────────────────── */
   function renderDetail(c, srcInfo) {
-    const [, n, ic, col, , mod] = srcInfo;
-    return `<div class="ib-detail">
+    const [, n, ic, col, kind, mod] = srcInfo;
+    const modShort = String(n).split(/[ /]/)[0];
+    const headerHtml = `
       <div style="padding:16px 22px;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;flex-wrap:wrap">
           <span class="ib-src-tag" style="background:var(--${col}-soft);color:var(--${col});font-size:11.5px;padding:3px 10px">
             ${svg(ic, 'width:12px;height:12px')}${n}</span>
           <span class="pill pill-neutral nodot">${c.kan}</span>
-          <span style="font-size:12px;color:var(--text-3)">${c.tijd} geleden</span>
-          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="DFO.goMod('${mod}')">
-            Open in ${n.split(' ')[0]} ${svg('<path d="m9 18 6-6-6-6"/>', 'width:13px;height:13px')}</button>
+          <span style="font-size:12px;color:var(--text-3)">${c.tijd}</span>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="__ibGoMod('${mod}')">
+            Open in ${modShort} ${svg('<path d="m9 18 6-6-6-6"/>', 'width:13px;height:13px')}</button>
         </div>
         <div style="display:flex;align-items:center;gap:13px">
           ${H.av(c.van, 42)}
-          <div style="flex:1;min-width:0"><div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.van}</div>
-            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.ctx}</div></div>
-          <button class="btn btn-ghost btn-sm" onclick="console.info('[inbox-v2] Open dossier (voorbeeld)')">${svg(I.users)}Dossier</button>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.van}</div>
+            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.ctx || ''}</div>
+          </div>
         </div>
-      </div>
-      <div style="flex:1;min-height:0;overflow-y:auto;padding:22px">
-        <div style="max-width:660px">
-          <div style="padding:14px 18px;background:var(--surface-2);border-radius:14px 14px 14px 4px;margin-bottom:10px;font-size:14px;line-height:1.55">${c.t}</div>
-          <div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-bottom:20px">
-            ${c.van} · ${c.tijd} geleden via ${c.kan}</div>
-          <div style="margin-top:16px;padding:10px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12px;color:var(--text-3)">
-            <b>Volledige bericht-thread + compose</b> volgen in de tweede iteratie (huidige preview toont alleen last_message_preview per conversation).</div>
-        </div>
-      </div>
-      <div style="padding:13px 22px;background:var(--surface);border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${c.acties.map((a, i) => `<button class="btn ${i === 0 ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="DFO.goMod('${mod}')">${a}</button>`).join('')}
-        <button class="icon-btn" style="margin-left:auto" title="Markeer ongelezen">${svg(I.mail)}</button>
-        <button class="icon-btn" title="Later">${svg(I.clock)}</button>
-        <button class="icon-btn" title="Archiveren">${svg(I.box)}</button>
-      </div>
+      </div>`;
+
+    // Body per source-kind
+    let bodyHtml = '';
+    if (kind === 'wa' || kind === 'lisa') {
+      // Echte thread. Container blijft leeg; _paintThread vult 'm append-only.
+      // NB: id="ibThreadScroll" wordt door _paintThread opgezocht.
+      const status = _thread.loading
+        ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Berichten laden…</div>`
+        : _thread.error
+          ? `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ ${_thread.error}</div>`
+          : (!_thread.items.length && _thread.convId === c.id)
+            ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Nog geen berichten in deze conversatie.</div>`
+            : '';
+      bodyHtml = `
+        <div id="ibThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:22px;display:flex;flex-direction:column"></div>
+        ${status}
+        <div style="padding:11px 22px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-3);text-align:center">
+          Antwoorden vanuit Inbox komt in BROK 2. Nu: klik <b>Open in ${modShort}</b> om te reageren.
+        </div>`;
+    } else if (kind === 'email') {
+      // E-mail admin@/info@ — geen inline thread; deep-link naar E-mail-module.
+      const raw = c._raw || {};
+      const snippet = raw.snippet || '';
+      const hasAtt = !!raw.has_attachments;
+      bodyHtml = `
+        <div style="flex:1;min-height:0;overflow-y:auto;padding:22px">
+          <div style="max-width:660px">
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${(raw.subject || '(geen onderwerp)').replace(/</g, '&lt;')}</div>
+            <div style="font-size:12.5px;color:var(--text-3);margin-bottom:16px">
+              van <b>${(raw.from_name || raw.from_address || '').replace(/</g, '&lt;')}</b> · ${_fmtTijd(raw.date_received)}${hasAtt ? ' · 📎 bijlage' : ''}
+            </div>
+            <div style="padding:14px 18px;background:var(--surface-2);border-radius:14px 14px 14px 4px;font-size:14px;line-height:1.6;white-space:pre-wrap">${(snippet || '(geen preview)').replace(/</g, '&lt;')}</div>
+            <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-3);line-height:1.55">
+              Volledig bericht + reageren gebeurt in de <b>E-mail-module</b>. Klik hieronder om te openen.
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" onclick="__ibGoMod('email')">Open in E-mail</button>
+            </div>
+          </div>
+        </div>`;
+    } else if (kind === 'tickets') {
+      const raw = c._raw || {};
+      bodyHtml = `
+        <div style="flex:1;min-height:0;overflow-y:auto;padding:22px">
+          <div style="max-width:660px">
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${(raw.title || '(geen titel)').replace(/</g, '&lt;')}</div>
+            <div style="font-size:12.5px;color:var(--text-3);margin-bottom:16px">
+              ${(raw.type || '').toUpperCase()} · ${raw.priority || '—'} · status <b>${raw.status || '?'}</b> · ${_fmtTijd(raw.updated_at || raw.created_at)}
+            </div>
+            <div style="padding:14px 18px;background:var(--surface-2);border-radius:var(--r);font-size:14px;line-height:1.6;white-space:pre-wrap">${(raw.description || '(geen beschrijving)').replace(/</g, '&lt;')}</div>
+            <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-3)">
+              Comments + status wijzigen gebeurt in het ticket-detail. Klik hieronder om te openen.
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" onclick="__ibGoMod('tickets')">Open in Tickets</button>
+            </div>
+          </div>
+        </div>`;
+    } else if (kind === 'leadsonderhoud') {
+      const raw = c._raw || {};
+      bodyHtml = `
+        <div style="flex:1;min-height:0;overflow-y:auto;padding:22px">
+          <div style="max-width:660px">
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${(raw.naam || '(onbekend)').replace(/</g, '&lt;')}</div>
+            <div style="font-size:12.5px;color:var(--text-3);margin-bottom:16px">
+              ${(raw.email || '').replace(/</g, '&lt;')}${raw.traject ? ' · traject: ' + raw.traject : ''}${raw.status ? ' · ' + raw.status : ''}
+            </div>
+            <div style="padding:14px 18px;background:var(--surface-2);border-radius:var(--r);font-size:14px;line-height:1.6">${(raw.laatste_bericht_preview || raw.warmte_reden || '(geen preview)').replace(/</g, '&lt;')}</div>
+            <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-3)">
+              Volledige historie + acties in de Leadsonderhoud-module.
+            </div>
+            <div style="margin-top:14px;display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" onclick="__ibGoMod('leadsonderhoud')">Open in Leadsonderhoud</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    return `<div class="ib-detail" style="display:flex;flex-direction:column;min-height:0">
+      ${headerHtml}
+      ${bodyHtml}
     </div>`;
   }
 
@@ -306,5 +639,5 @@
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('inbox');
   }
 
-  console.debug('[inbox-v2] registered VIEWS[inbox/]');
+  console.debug('[inbox-v2] v=2 BROK 1 — 8 bronnen live (WA/Lisa/leadsonderhoud/tickets/email); thread-render voor WA+Lisa (append-only, scroll-preserve); mark-read fail-soft; email/tickets/leadsonderhoud via deep-link naar bron-module.');
 })();
