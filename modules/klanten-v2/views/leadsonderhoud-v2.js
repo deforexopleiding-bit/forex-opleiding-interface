@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 3 FASE 3 (v=11, 2026-08-17): Bulk-tab QA-fixes.
+// Leadsonderhoud v2 — BROK 3 FASE 3 (v=12, 2026-08-17): 500-fix + hardening.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -1621,7 +1621,8 @@
     testSendError: null,      // v=11 blocker 3: expliciete fout-state
     approveLoading: false,
     testNumber: '',
-    liveMode: null,           // v=11 H2: { live, uit, checked_at } uit preview-response
+    liveMode: null,           // v=12: { live, uit, checked_at } uit -bulk-status (los van preview)
+    liveModeError: null,      // v=12: als status niet leesbaar → operator ziet 'onbekend'
     jobs: [],
     jobsLoading: false,
     _jobsPollHandle: null,
@@ -1808,8 +1809,14 @@
       });
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        _lsBulk.previewError = j.error || ('HTTP ' + resp.status);
+        // v=12: toon server-detail + stacktrace-first-line indien aanwezig.
+        const parts = [j.error || ('HTTP ' + resp.status)];
+        if (j.detail && j.detail !== j.error) parts.push(j.detail);
+        if (j.stack_first_line) parts.push(j.stack_first_line);
+        _lsBulk.previewError = parts.join(' · ');
         if (j.summary && j.summary.over_cap) _lsBulk.previewError = j.error + ' (matched: ' + j.summary.total + ', cap: ' + j.summary.hard_cap + ')';
+        // Ook: als live-mode uit response komt (bij over_cap-response), update.
+        if (j.live_mode) _lsBulk.liveMode = j.live_mode;
         return;
       }
       _lsBulk.currentJob = { job_id: j.job_id, summary: j.summary, sample_previews: j.sample_previews || [], test_sent_at: null, test_target: null };
@@ -1942,6 +1949,33 @@
       _lsInbToast('Annuleren mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
   };
+
+  // v=12: laadt live-mode status uit dedicated endpoint (niet uit preview-
+  // response). Bij fout: liveMode blijft null en liveModeError toont dat de
+  // status onbekend is. UI behandelt onbekend als NIET-veilig.
+  async function _lsBulkFetchStatus() {
+    try {
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-bulk-status');
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        _lsBulk.liveModeError = j.error || ('HTTP ' + resp.status);
+        _lsBulk.liveMode = null;
+      } else {
+        _lsBulk.liveMode = { live: !!j.live, uit: !!j.uit, checked_at: j.checked_at || new Date().toISOString() };
+        _lsBulk.liveModeError = null;
+      }
+    } catch (e) {
+      _lsBulk.liveMode = null;
+      _lsBulk.liveModeError = 'Netwerkfout: ' + (e?.message || 'onbekend');
+    }
+    // Herrender alleen de banner via een sub-render (simpel: hertekenen van
+    // de root — de banner is buiten builder/preview/jobs).
+    const root = document.querySelector('.content');
+    if (root) {
+      const bannerEl = root.querySelector('[data-ls-bulk-banner]');
+      if (bannerEl) bannerEl.outerHTML = _lsBulkRenderBanner();
+    }
+  }
 
   async function _lsBulkFetchJobs() {
     _lsBulk.jobsLoading = true;
@@ -2081,7 +2115,11 @@
     const s = cur.summary || {};
     const b = s.skipped_breakdown || {};
     const testDone = !!cur.test_sent_at;
-    const canApprove = testDone && (s.will_send || 0) > 0 && !_lsBulk.approveLoading;
+    // v=12 veiligheid: approve GEBLOKKEERD als live-mode onbekend is
+    // (liveMode === null). Onbekend = niet-veilig, nooit als "uit"
+    // behandelen. Ook geblokkeerd als KILL-SWITCH (uit) aan staat.
+    const lmSafe = !!_lsBulk.liveMode && !_lsBulk.liveMode.uit;
+    const canApprove = testDone && (s.will_send || 0) > 0 && !_lsBulk.approveLoading && lmSafe;
     return `<div id="lsBulkPreview" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px">
       <div style="font-weight:600;font-size:14px;margin-bottom:10px">Preview <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3);font-weight:400">job ${esc(String(cur.job_id).slice(0, 8))}…</span></div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
@@ -2162,34 +2200,45 @@
     // Trigger initial fetches + poll.
     if (!_lsBulk.jobs.length && !_lsBulk.jobsLoading) queueMicrotask(_lsBulkFetchJobs);
     queueMicrotask(_lsBulkStartJobsPoll);
+    // v=12: laad live-mode status onafhankelijk van preview zodat de banner
+    // ook zonder preview-actie klopt (en approve correct blokkeert bij onbekend).
+    if (!_lsBulk.liveMode && !_lsBulk.liveModeError) queueMicrotask(_lsBulkFetchStatus);
     // Trigger ook contacten-fetch als traject-opts leeg zijn.
     if (!_live.contacten.data && !_live.contacten.loading) {
       queueMicrotask(() => fetchContacten('/api/leads-list?limit=500', '/api/leads-list?limit=500'));
     }
-    // v=11 H2: dynamische banner uit echte serverstatus (kwam via preview-
-    // response mee). Groen 'UIT' → veilig, rood 'LIVE' → cron verstuurt.
-    const lm = _lsBulk.liveMode;
-    const bannerHtml = lm
-      ? (lm.uit
-          ? `<div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:14px;line-height:1.55">
-              <b>⛔ KILL-SWITCH AAN (LEADSONDERHOUD_UIT):</b> alle bulk-sends geblokkeerd op de server. Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}.
-            </div>`
-          : (lm.live
-              ? `<div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:14px;line-height:1.55;font-weight:600">
-                  ⚠ LIVE-MODUS AAN: goedgekeurde jobs worden ECHT verzonden door de cron. Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}.
-                </div>`
-              : `<div style="padding:12px 14px;background:var(--emerald-soft);border:1px solid var(--emerald-line,var(--emerald));border-radius:var(--r-sm);color:var(--emerald);font-size:12.5px;margin-bottom:14px;line-height:1.55">
-                  ✓ Live-modus: UIT — cron verstuurt NIETS (LEADSONDERHOUD_LIVE≠1). Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}. Test-send werkt wel (buiten cron om).
-                </div>`))
-      : `<div style="padding:12px 14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);color:var(--text-3);font-size:12.5px;margin-bottom:14px;line-height:1.55">
-          Live-modus onbekend — druk op <b>Preview segment</b> om de echte serverstatus te lezen.
-        </div>`;
     return `
-      ${bannerHtml}
+      ${_lsBulkRenderBanner()}
       ${_lsBulkRenderBuilder()}
       ${_lsBulkRenderPreview()}
       ${_lsBulkRenderJobs()}
     `;
+  }
+
+  // v=12: banner los van preview. Bij liveMode=null → onbekend → NIET-veilig
+  // (approve-guard leest ook liveMode-veld). Toont ook liveModeError als de
+  // status-fetch faalde, zodat operator weet WAAROM 't onbekend is.
+  function _lsBulkRenderBanner() {
+    const lm = _lsBulk.liveMode;
+    const err = _lsBulk.liveModeError;
+    if (!lm) {
+      return `<div data-ls-bulk-banner style="padding:12px 14px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:var(--r-sm);color:var(--amber);font-size:12.5px;margin-bottom:14px;line-height:1.55">
+        <b>⚠ Live-modus onbekend — approve GEBLOKKEERD.</b> ${err ? '(' + esc(err) + ') ' : ''}De cron-status kon niet gelezen worden; we behandelen dit als NIET-veilig. Ververs de pagina of check de server-env <code>LEADSONDERHOUD_LIVE</code> / <code>LEADSONDERHOUD_UIT</code>.
+      </div>`;
+    }
+    if (lm.uit) {
+      return `<div data-ls-bulk-banner style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:14px;line-height:1.55">
+        <b>⛔ KILL-SWITCH AAN (LEADSONDERHOUD_UIT):</b> alle bulk-sends geblokkeerd op de server. Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}.
+      </div>`;
+    }
+    if (lm.live) {
+      return `<div data-ls-bulk-banner style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:14px;line-height:1.55;font-weight:600">
+        ⚠ LIVE-MODUS AAN: goedgekeurde jobs worden ECHT verzonden door de cron. Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}.
+      </div>`;
+    }
+    return `<div data-ls-bulk-banner style="padding:12px 14px;background:var(--emerald-soft);border:1px solid var(--emerald-line,var(--emerald));border-radius:var(--r-sm);color:var(--emerald);font-size:12.5px;margin-bottom:14px;line-height:1.55">
+      ✓ Live-modus: UIT — cron verstuurt NIETS (LEADSONDERHOUD_LIVE≠1). Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}. Test-send werkt wel (buiten cron om).
+    </div>`;
   }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -2272,5 +2321,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=11 Bulk QA-fixes — Blocker1: mail-inputs via __lsBulkField (S/--brand-klasse fix), Blocker2: template-picker met prefix-groepen + meta_param_mapping variabele-analyzer + per-lead auto-resolve + static-var-form + sample-lead-tokens in test-send, Blocker3: expliciete testSendError-block met Meta-code, S1: lege score = geen filter, S2: null-score = 0 (include in gte/lte ranges), S3: text/number-inputs zonder repaint (focus behouden), H1: preview dedup oude drafts, H2: dynamische live-mode-banner uit env-status, H3: disabled approve-knop echt uit-styling, H4: NL-fouten. Cron gebruikt shared template-resolver (drip-motor bouwVariabelen+keyWaarde).');
+  console.debug('[ls-v2] v=12 500-fix + hardening — ROOT CAUSE: keyWaarde was in v=11 als named-import bedoeld uit leadsonderhoud-sjabloon.js maar die functie is niet exported → SyntaxError bij module-load → FUNCTION_INVOCATION_FAILED op elk request naar bulk-preview/test-send/cron. Fix: keyWaarde intern gekopieerd in _lib/leadsonderhoud-bulk-template.js. Hardening: top-level try/catch op alle 4 bulk-endpoints (nette JSON i.p.v. kale 500). Nieuw endpoint /api/leadsonderhoud-bulk-status voedt banner los van preview; onbekende status = approve GEBLOKKEERD (niet-veilig default). UI toont preview-fout-detail (server-message + stack-first-line).');
 })();

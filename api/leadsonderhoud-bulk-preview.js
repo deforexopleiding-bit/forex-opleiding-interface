@@ -60,6 +60,25 @@ function amsterdamStartOfTodayIso() {
 }
 
 export default async function handler(req, res) {
+  // v=12 hardening: top-level try/catch zodat een broadcast-endpoint nooit
+  // een kale FUNCTION_INVOCATION_FAILED teruggeeft. Fouten worden nette JSON.
+  try {
+    return await _handleImpl(req, res);
+  } catch (e) {
+    console.error('[ls-bulk-preview] TOP-LEVEL CRASH:', e && e.stack || e?.message || e);
+    if (!res.headersSent) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(500).json({
+        error: 'Preview kon niet worden uitgevoerd.',
+        detail: e?.message || String(e),
+        stack_first_line: (e?.stack || '').split('\n')[1] || null,
+      });
+    }
+  }
+}
+
+async function _handleImpl(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'POST only' }); }

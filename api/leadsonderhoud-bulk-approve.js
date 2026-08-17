@@ -15,6 +15,17 @@ import { requirePermission } from './_lib/requirePermission.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default async function handler(req, res) {
+  try { return await _handleImpl(req, res); }
+  catch (e) {
+    console.error('[ls-bulk-approve] TOP-LEVEL CRASH:', e && e.stack || e?.message || e);
+    if (!res.headersSent) {
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/json');
+      return res.status(500).json({ error: 'Approve kon niet worden uitgevoerd.', detail: e?.message || String(e) });
+    }
+  }
+}
+async function _handleImpl(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
   if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); return res.status(405).json({ error: 'POST only' }); }

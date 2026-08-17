@@ -6,7 +6,22 @@
 // resolutie in drip én bulk (preview, test-send, cron).
 
 import { supabaseAdmin } from '../supabase.js';
-import { bouwVariabelen, keyWaarde } from './leadsonderhoud-sjabloon.js';
+import { bouwVariabelen } from './leadsonderhoud-sjabloon.js';
+
+// v=12 fix: keyWaarde was in v=11 als named-import bedoeld, maar de functie
+// wordt in leadsonderhoud-sjabloon.js NIET geëxporteerd (module-private).
+// Named-import van non-existent export = SyntaxError bij module-load →
+// FUNCTION_INVOCATION_FAILED op elk request naar bulk-preview/test-send.
+// Kopie hier zodat de bulk-flow niet leunt op interne symbolen van de
+// drip-motor. Semantiek identiek (spiegel van sjabloon.js:53).
+function keyWaarde(key, lead, vars) {
+  const m = /^lead\.(\w+)$/.exec(String(key || ''));
+  if (m) {
+    const v = (lead || {})[m[1]];
+    return v == null ? '' : String(v);
+  }
+  return vars[key] != null ? String(vars[key]) : '';
+}
 
 export function liveModeStatus() {
   const uit = ['1', 'true', 'aan', 'on', 'ja'].includes(String(process.env.LEADSONDERHOUD_UIT || '').trim().toLowerCase());
