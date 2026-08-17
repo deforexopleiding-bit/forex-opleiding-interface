@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 1 (v=2, 2026-08-17): read-tabs met echte data.
+// Leadsonderhoud v2 — BROK 1 (v=3, 2026-08-17): read-tabs + 2 bugfixes.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -40,15 +40,20 @@
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
   /* ── State (dashboard-pattern per fetch) ────────────────────────────── */
+  // BROK 1 bug A fix: elk state-object heeft z'n eigen _seq. Één globale
+  // teller sloopt parallelle fetches naar verschillende endpoints — een
+  // fetch die later start bumpt de globale teller en de eerder-gestarte
+  // fetch krijgt onterecht de stale-guard en droppt zijn eigen respons.
+  // Per-target _seq laat alleen herstart van DEZELFDE fetcher de vorige
+  // in-flight respons droppen — parallel-veilig.
   const _live = {
-    overzicht:    { loading: false, fetched: false, error: null, data: null }, // {items,totaal}
-    droogloop:    { loading: false, fetched: false, error: null, data: null }, // {items,totaal}
-    wachtrij:     { loading: false, fetched: false, error: null, data: null }, // {items,totaal}
-    leadsAll:     { loading: false, fetched: false, error: null, data: null }, // {items,total} — voor tellingen
-    leadsMet:     { loading: false, fetched: false, error: null, data: null }, // {total} met afspraak
-    contacten:    { loading: false, fetched: false, error: null, data: null, lastKey: null }, // {items,total,has_more}
+    overzicht:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
+    droogloop:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
+    wachtrij:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
+    leadsAll:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
+    leadsMet:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
+    contacten:    { loading: false, fetched: false, error: null, data: null, lastKey: null, _seq: 0 },
   };
-  let _fetchSeq = 0;
 
   /* ── tryFetch (8s timeout, non-throwing) ────────────────────────────── */
   async function tryFetch(label, url, timeoutMs) {
@@ -69,10 +74,10 @@
   async function fetchOverzicht() {
     const st = _live.overzicht; if (st.loading || (st.fetched && !st.error)) return;
     st.loading = true; st.error = null;
-    const seq = ++_fetchSeq;
+    const seq = ++st._seq;
     if (window.DFO?.render) window.DFO.render();
     const j = await tryFetch('overzicht', '/api/leadsonderhoud-overzicht');
-    if (seq !== _fetchSeq) return;
+    if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j) st.error = 'Kon overzicht niet laden'; else st.data = { items: asArr(j.items), totaal: j.totaal || 0 };
     if (window.DFO?.render) window.DFO.render();
@@ -80,9 +85,9 @@
   async function fetchDroogloop() {
     const st = _live.droogloop; if (st.loading || (st.fetched && !st.error)) return;
     st.loading = true; st.error = null;
-    const seq = ++_fetchSeq;
+    const seq = ++st._seq;
     const j = await tryFetch('droogloop', '/api/leadsonderhoud-droogloop-log');
-    if (seq !== _fetchSeq) return;
+    if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j) st.error = 'Kon droogloop niet laden'; else st.data = { items: asArr(j.items), totaal: j.totaal || 0 };
     if (window.DFO?.render) window.DFO.render();
@@ -90,20 +95,21 @@
   async function fetchWachtrij() {
     const st = _live.wachtrij; if (st.loading || (st.fetched && !st.error)) return;
     st.loading = true; st.error = null;
-    const seq = ++_fetchSeq;
+    const seq = ++st._seq;
     const j = await tryFetch('wachtrij', '/api/leadsonderhoud-wachtrij');
-    if (seq !== _fetchSeq) return;
+    if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j) st.error = 'Kon wachtrij niet laden'; else st.data = { items: asArr(j.items), totaal: j.totaal || 0 };
     if (window.DFO?.render) window.DFO.render();
   }
   // Twee count-calls voor Overzicht/Stats: totaal + met-afspraak.
+  // Elk eigen state → elk eigen _seq → parallel-veilig.
   async function fetchLeadCounts() {
     const st = _live.leadsAll; if (!(st.loading || (st.fetched && !st.error))) {
       st.loading = true; st.error = null;
-      const seq = ++_fetchSeq;
+      const seq = ++st._seq;
       const j = await tryFetch('leads-all', '/api/leads-list?limit=1');
-      if (seq === _fetchSeq) {
+      if (seq === st._seq) {
         st.loading = false; st.fetched = true;
         if (!j) st.error = 'Kon leads-tellingen niet laden'; else st.data = { total: Number(j.total || 0) };
         if (window.DFO?.render) window.DFO.render();
@@ -111,9 +117,9 @@
     }
     const st2 = _live.leadsMet; if (!(st2.loading || (st2.fetched && !st2.error))) {
       st2.loading = true; st2.error = null;
-      const seq = ++_fetchSeq;
+      const seq = ++st2._seq;
       const j2 = await tryFetch('leads-met', '/api/leads-list?limit=1&afspraak=ja');
-      if (seq === _fetchSeq) {
+      if (seq === st2._seq) {
         st2.loading = false; st2.fetched = true;
         if (!j2) st2.error = 'Kon call-teller niet laden'; else st2.data = { total: Number(j2.total || 0) };
         if (window.DFO?.render) window.DFO.render();
@@ -125,10 +131,10 @@
     const st = _live.contacten;
     if (st.loading || st.lastKey === key) return;
     st.loading = true; st.error = null; st.lastKey = key;
-    const seq = ++_fetchSeq;
+    const seq = ++st._seq;
     if (window.DFO?.render) window.DFO.render();
     const j = await tryFetch('contacten', url);
-    if (seq !== _fetchSeq) return;
+    if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j) st.error = 'Kon contacten niet laden';
     else st.data = { items: asArr(j.items), total: Number(j.total || 0), has_more: !!j.has_more };
@@ -316,7 +322,7 @@
     // Filter-toolbar (uncontrolled input voor search — focus behouden).
     const currentTraj = traject;
     const trajFilterHtml = `
-      <select onchange="S.filters[DFO.key()+'::ls-traj']=this.value;DFO.render()" style="padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)">
+      <select onchange="DFO.S.filters[DFO.key()+'::ls-traj']=this.value;DFO.render()" style="padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)">
         <option value="">Alle trajecten</option>
         ${trajectOpts.map(t => `<option value="${esc(t)}" ${currentTraj === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}
       </select>`;
@@ -325,7 +331,7 @@
     const toolbar = `
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <input placeholder="Zoek op naam of e-mail…" value="${searchQ}"
-          oninput="S.filters[DFO.key()+'::ls-q']=this.value;DFO.render();this.focus();this.setSelectionRange(this.value.length,this.value.length)"
+          oninput="DFO.S.filters[DFO.key()+'::ls-q']=this.value;DFO.render();this.focus();this.setSelectionRange(this.value.length,this.value.length)"
           style="flex:1;min-width:200px;padding:7px 11px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)">
         ${trajFilterHtml}
         <div style="display:flex;gap:4px">
@@ -501,5 +507,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=2 BROK 1 — 6 tabs, 4 READ-tabs echt (Overzicht/Contacten/Wachtrij/Statistieken via leadsonderhoud-overzicht + -droogloop-log + -wachtrij + leads-list met call-status uit afspraak_op); Gesprekken + Bulk = BROK 2 placeholder.');
+  console.debug('[ls-v2] v=3 BROK 1 (fix) — bug A per-fetcher _seq (parallelle KPI-fetches vielen weg door globale teller), bug B S -> DFO.S in oninput/onchange (S was ReferenceError, filter-handlers crashten pre-render).');
 })();
