@@ -41,6 +41,23 @@ import { haalLijn, normNummer, binnenVenster } from './_lib/leadsonderhoud-gespr
 const HARD_CAP = 500;
 const VALID_CHANNELS = ['whatsapp', 'email', 'both'];
 
+// v=CommitA-patch (d) — Amsterdam-start-of-today ISO. Consistent met cron.
+// UTC-start zou 22:00-24:00 UTC = 00:00-02:00 CEST kunnen missen.
+function amsterdamStartOfTodayIso() {
+  const now = new Date();
+  const dateStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }).format(now);
+  const [Y, M, D] = dateStr.split('-').map(Number);
+  const utcMidnight = Date.UTC(Y, M - 1, D, 0, 0, 0);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMidnight));
+  const mp = {}; for (const p of parts) mp[p.type] = p.value;
+  const asUtc = Date.UTC(+mp.year, +mp.month - 1, +mp.day, +mp.hour, +mp.minute, +mp.second);
+  const offMin = Math.round((asUtc - utcMidnight) / 60000);
+  return new Date(utcMidnight - offMin * 60000).toISOString();
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -102,14 +119,20 @@ export default async function handler(req, res) {
     try {
       const leadIds = rows.map(r => r.id);
       if (leadIds.length) {
-        const startOfDayIso = new Date(new Date().toISOString().slice(0, 10)).toISOString();
+        // v=CommitA-patch (d) — Amsterdam-day-boundary (was UTC).
+        const startOfDayIso = amsterdamStartOfTodayIso();
         const { data: dripLogs } = await supabaseAdmin
           .from('berichten_log')
-          .select('lead_id, verstuurd_op')
+          .select('lead_id, verstuurd_op, agent')
           .in('lead_id', leadIds)
           .gte('verstuurd_op', startOfDayIso)
           .limit(2000);
-        for (const b of dripLogs || []) if (b.lead_id) dripTodaySet.add(b.lead_id);
+        // Skip alleen als DRIP zelf (niet onze bulk of handmatige antwoorden).
+        for (const b of dripLogs || []) {
+          if (!b.lead_id) continue;
+          if (b.agent === 'cron-bulk') continue;
+          dripTodaySet.add(b.lead_id);
+        }
       }
     } catch (e) {
       console.warn('[ls-bulk-preview] drip-vandaag lookup soft-fail:', e?.message || e);

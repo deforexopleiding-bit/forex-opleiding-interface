@@ -36,6 +36,25 @@ function aanUit(v) { return ['1', 'true', 'aan', 'on', 'ja'].includes(String(v |
 function amsUur() {
   return Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Amsterdam', hour: '2-digit', hour12: false }).format(new Date()));
 }
+// v=CommitA-patch: Amsterdam-day-start als ISO. Zorgt dat "vandaag" voor
+// drip-today-check consistent is met stille-uren-boundary (beide Amsterdam).
+// UTC-start zou 22:00-24:00 UTC = 00:00-02:00 CEST kunnen missen.
+function amsterdamStartOfTodayIso() {
+  const now = new Date();
+  const dtf = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam' }); // YYYY-MM-DD
+  const dateStr = dtf.format(now); // '2026-08-17'
+  // Bouw midnight-Amsterdam als UTC-ISO. Amsterdam-offset op deze dag via Intl.
+  const [Y, M, D] = dateStr.split('-').map(Number);
+  const utcMidnight = Date.UTC(Y, M - 1, D, 0, 0, 0);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMidnight));
+  const mp = {}; for (const p of parts) mp[p.type] = p.value;
+  const asUtc = Date.UTC(+mp.year, +mp.month - 1, +mp.day, +mp.hour, +mp.minute, +mp.second);
+  const offMin = Math.round((asUtc - utcMidnight) / 60000);
+  return new Date(utcMidnight - offMin * 60000).toISOString();
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -130,6 +149,67 @@ export default async function handler(req, res) {
       }
     }
 
+    // v=CommitA-patch (a) — consent re-check vlak vóór send. Batch-lookup op
+    // leads.toestemming_whatsapp voor deze batch; als consent inmiddels
+    // is ingetrokken → skip 'consent_revoked' (geen retry, deterministisch).
+    const consentByLeadId = new Map();
+    const leadIdsForBatch = pending.map(r => r.lead_id).filter(Boolean);
+    if (leadIdsForBatch.length) {
+      try {
+        const { data: leadRows } = await supabaseAdmin
+          .from('leads')
+          .select('id, toestemming_whatsapp')
+          .in('id', leadIdsForBatch);
+        for (const l of (leadRows || [])) consentByLeadId.set(l.id, l.toestemming_whatsapp === true);
+      } catch (e) {
+        console.warn('[cron-ls-bulk] consent-lookup soft-fail:', e?.message || e);
+        // Fail-safe: bij lookup-fout → defaulten alle recipients op false-consent
+        // (skip WA-tak; mail-only recipients gaan door). Beter niks sturen dan
+        // per ongeluk naar iemand die z'n consent introk.
+        for (const id of leadIdsForBatch) consentByLeadId.set(id, false);
+      }
+    }
+
+    // v=CommitA-patch (b+d) — drip-today re-check vlak vóór send. Batch-lookup
+    // op berichten_log voor de Amsterdam-vandaag-boundary (consistent met
+    // preview én stille-uren-check). Als drip diezelfde dag al iets stuurde
+    // naar deze lead → skip 'drip_today' (geen retry).
+    const dripTodaySet = new Set();
+    if (leadIdsForBatch.length) {
+      try {
+        const amsStart = amsterdamStartOfTodayIso();
+        const { data: dripLogs } = await supabaseAdmin
+          .from('berichten_log')
+          .select('lead_id, verstuurd_op, agent')
+          .in('lead_id', leadIdsForBatch)
+          .gte('verstuurd_op', amsStart)
+          .limit(2000);
+        for (const b of (dripLogs || [])) {
+          if (!b.lead_id) continue;
+          // Skip alleen als DRIP zelf (niet onze bulk of handmatige antwoorden).
+          // 'cron-bulk' agent = onze eigen tick; die telt niet mee als drip.
+          if (b.agent === 'cron-bulk') continue;
+          dripTodaySet.add(b.lead_id);
+        }
+      } catch (e) {
+        console.warn('[cron-ls-bulk] drip-today lookup soft-fail:', e?.message || e);
+        // Bij lookup-fout: gaan we door zonder skip (open policy — anders zou
+        // een DB-hikje de hele bulk stilleggen).
+      }
+    }
+
+    // Helper: recipient markeren als skipped + skipped_count++ + telemetrie.
+    async function markSkip(rec, job, reason) {
+      summary.skipped++;
+      await supabaseAdmin.from('leadsonderhoud_bulk_recipients').update({
+        status: 'skipped', skip_reason: reason,
+      }).eq('id', rec.id);
+      await supabaseAdmin.from('leadsonderhoud_bulk_jobs').update({
+        skipped_count: (job.skipped_count || 0) + 1,
+      }).eq('id', job.id);
+      job.skipped_count = (job.skipped_count || 0) + 1;
+    }
+
     for (const rec of pending) {
       summary.processed++;
       const job = jobById.get(rec.job_id);
@@ -142,54 +222,65 @@ export default async function handler(req, res) {
         .select('id');
       if (!claim || claim.length === 0) continue; // andere worker heeft 'em al.
 
+      // v=CommitA-patch (b) — drip-today re-check (per recipient). Skip als
+      // drip diezelfde dag al stuurde. Geen retry, deterministisch.
+      if (dripTodaySet.has(rec.lead_id)) {
+        await markSkip(rec, job, 'drip_today');
+        continue;
+      }
+
       const nowIso = new Date().toISOString();
       let waResult = null, mailResult = null;
       let sentAny = false, failedAny = false, failReason = null;
+      let waSkipped = false; // WA werd bewust overgeslagen (consent/no-template), NIET een fout
 
-      // 3b) WA-branch.
+      // 3b) WA-branch — met patch (a) consent re-check + patch (c) skip-
+      //     semantiek buiten venster zonder template.
+      let waSkipReason = null; // 'consent_revoked' | 'no_template_out_of_window' | 'wa_no_template'
       if (rec.channel_whatsapp && (job.channel === 'whatsapp' || job.channel === 'both') && rec.phone) {
-        const conv = convByPhoneKey.get(normNummer(rec.phone));
-        const insideWindow = !!(conv && binnenVenster(conv.last_inbound_at));
-        // Buiten venster → template verplicht. Als job geen template heeft: skip.
-        const useTemplate = !insideWindow || !!job.template_name;
-        try {
-          if (useTemplate && job.template_name) {
-            waResult = await sendTemplate({
-              to: rec.phone,
-              templateName: job.template_name,
-              languageCode: job.template_language || 'nl',
-              variables: [],
-              phoneNumberId: lijn.phoneNumberId,
-            });
-          } else if (insideWindow) {
-            // Binnen venster + geen template = niet ondersteund in bulk (bulk zonder
-            // template is te generiek voor consent-context).
-            throw new Error('bulk zonder template niet toegestaan');
+        const hasConsent = consentByLeadId.get(rec.lead_id) === true;
+        if (!hasConsent) {
+          waSkipped = true;
+          waSkipReason = 'consent_revoked';
+        } else {
+          const conv = convByPhoneKey.get(normNummer(rec.phone));
+          const insideWindow = !!(conv && binnenVenster(conv.last_inbound_at));
+          if (!job.template_name) {
+            // Bulk zonder template mag niet — deterministische skip (geen retry).
+            waSkipped = true;
+            waSkipReason = insideWindow ? 'wa_no_template' : 'no_template_out_of_window';
           } else {
-            throw new Error('buiten 24u-venster + geen template');
+            try {
+              waResult = await sendTemplate({
+                to: rec.phone,
+                templateName: job.template_name,
+                languageCode: job.template_language || 'nl',
+                variables: [],
+                phoneNumberId: lijn.phoneNumberId,
+              });
+              sentAny = true;
+              try {
+                await supabaseAdmin.from('berichten_log').insert({
+                  lead_id: rec.lead_id, traject: rec.traject || null,
+                  soort: 'bulk-' + (job.template_name || 'wa'),
+                  kanaal: 'whatsapp', naar: rec.phone, agent: 'cron-bulk',
+                  status: 'ok', verstuurd_op: nowIso, meta_template: job.template_name,
+                });
+              } catch (_) {}
+            } catch (e) {
+              if (e instanceof MetaNotConfiguredError) { failedAny = true; failReason = 'META_NOT_CONFIGURED'; }
+              else { failedAny = true; failReason = (e?.message || 'WA-send fail').slice(0, 300); }
+              console.warn('[cron-ls-bulk] WA fail', rec.id, failReason);
+              try {
+                await supabaseAdmin.from('berichten_log').insert({
+                  lead_id: rec.lead_id, traject: rec.traject || null,
+                  soort: 'bulk-' + (job.template_name || 'wa'),
+                  kanaal: 'whatsapp', naar: rec.phone, agent: 'cron-bulk',
+                  status: 'fout', verstuurd_op: nowIso, meta_template: job.template_name,
+                });
+              } catch (_) {}
+            }
           }
-          sentAny = true;
-          // berichten_log audit.
-          try {
-            await supabaseAdmin.from('berichten_log').insert({
-              lead_id: rec.lead_id, traject: rec.traject || null,
-              soort: 'bulk-' + (job.template_name || 'wa'),
-              kanaal: 'whatsapp', naar: rec.phone, agent: 'cron-bulk',
-              status: 'ok', verstuurd_op: nowIso, meta_template: job.template_name,
-            });
-          } catch (_) {}
-        } catch (e) {
-          if (e instanceof MetaNotConfiguredError) { failedAny = true; failReason = 'META_NOT_CONFIGURED'; }
-          else { failedAny = true; failReason = (e?.message || 'WA-send fail').slice(0, 300); }
-          console.warn('[cron-ls-bulk] WA fail', rec.id, failReason);
-          try {
-            await supabaseAdmin.from('berichten_log').insert({
-              lead_id: rec.lead_id, traject: rec.traject || null,
-              soort: 'bulk-' + (job.template_name || 'wa'),
-              kanaal: 'whatsapp', naar: rec.phone, agent: 'cron-bulk',
-              status: 'fout', verstuurd_op: nowIso, meta_template: job.template_name,
-            });
-          } catch (_) {}
         }
       }
       // 3c) Mail-branch.
@@ -222,7 +313,6 @@ export default async function handler(req, res) {
           status: 'sent', sent_at: nowIso,
           wamid: (waResult && waResult.wamid) || null,
         }).eq('id', rec.id);
-        await supabaseAdmin.rpc('increment_bulk_sent', {}).catch(() => {}); // no-op als rpc niet bestaat
         await supabaseAdmin.from('leadsonderhoud_bulk_jobs').update({
           sent_count: (job.sent_count || 0) + 1,
         }).eq('id', job.id);
@@ -245,11 +335,12 @@ export default async function handler(req, res) {
           job.failed_count = (job.failed_count || 0) + 1;
         }
       } else {
-        // Geen kanaal actief voor deze recipient → skip.
-        summary.skipped++;
-        await supabaseAdmin.from('leadsonderhoud_bulk_recipients').update({
-          status: 'skipped', skip_reason: 'no_active_channel',
-        }).eq('id', rec.id);
+        // Niets verstuurd + geen fout → skip. v=CommitA-patch: gebruik de
+        // specifieke skip_reason als WA werd geskipt (consent_revoked /
+        // no_template_out_of_window / wa_no_template) i.p.v. generiek
+        // 'no_active_channel'. skipped_count wordt via markSkip bijgewerkt.
+        const reason = waSkipReason || 'no_active_channel';
+        await markSkip(rec, job, reason);
       }
     }
 
