@@ -32,10 +32,23 @@ export async function queryLeadsBySegment(segment, opts) {
   if (seg.afspraak === 'ja')      qy = qy.not('afspraak_op', 'is', null);
   else if (seg.afspraak === 'nee') qy = qy.is('afspraak_op', null);
 
-  const sMin = Number.isFinite(Number(seg.score_min)) ? Number(seg.score_min) : null;
-  const sMax = Number.isFinite(Number(seg.score_max)) ? Number(seg.score_max) : null;
-  if (sMin != null) qy = qy.gte('score', sMin);
-  if (sMax != null) qy = qy.lte('score', sMax);
+  // S1 fix: strikt lege input = geen filter (null blijft null, undefined blijft
+  // null). Nummer-parse alleen als er echt iets in staat.
+  const parseNum = (v) => {
+    if (v === '' || v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const sMin = parseNum(seg.score_min);
+  const sMax = parseNum(seg.score_max);
+  // S2 fix: null-score behandeld als 0. Als sMin ≤ 0 én sMax ≥ 45 → geen
+  // filter (default range). Anders: gebruik .or() met is.null-inclusie bij
+  // sMin === 0 (dan telt null-score als 0 en past). Bij sMin > 0: null-score
+  // valt buiten (correcte semantiek: user filtert bewust op warm+).
+  if (sMin != null && sMin > 0) qy = qy.gte('score', sMin);
+  else if (sMin === 0) qy = qy.or('score.gte.0,score.is.null'); // include null-score
+  if (sMax != null && sMax < 45) qy = qy.or(`score.lte.${sMax},score.is.null`); // include null als "0"
+  // Als sMax >= 45 én sMin <= 0 → geen filter (alle scores + null).
 
   if (seg.bron) qy = qy.eq('bron', String(seg.bron).trim());
 

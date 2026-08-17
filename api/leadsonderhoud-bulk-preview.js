@@ -37,6 +37,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { queryLeadsBySegment } from './_lib/leadsonderhoud-bulk-segment.js';
 import { haalLijn, normNummer, binnenVenster } from './_lib/leadsonderhoud-gesprekken.js';
+import { liveModeStatus, analyzeTemplate, resolveVariables, renderTemplateBody, fetchTemplateMeta } from './_lib/leadsonderhoud-bulk-template.js';
 
 const HARD_CAP = 500;
 const VALID_CHANNELS = ['whatsapp', 'email', 'both'];
@@ -73,17 +74,19 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const segment = body.segment && typeof body.segment === 'object' ? body.segment : {};
   const channel = String(body.channel || '').toLowerCase();
-  if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: `channel vereist (${VALID_CHANNELS.join('|')})` });
+  // H4: NL-fouten.
+  if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: 'Kies een kanaal (WhatsApp, E-mail of Beide).' });
   const templateName = body.template_name ? String(body.template_name).trim() : null;
   const templateLang = body.template_language ? String(body.template_language).trim() : 'nl';
   const emailSubject = body.email_subject ? String(body.email_subject).trim() : null;
   const emailBody    = body.email_body    ? String(body.email_body).trim()    : null;
+  const staticVars   = (body.static_vars && typeof body.static_vars === 'object') ? body.static_vars : {};
 
   if ((channel === 'whatsapp' || channel === 'both') && !templateName) {
-    return res.status(400).json({ error: 'template_name vereist voor WhatsApp-kanaal' });
+    return res.status(400).json({ error: 'Kies eerst een WhatsApp-template (verplicht voor WA-bulk).' });
   }
   if ((channel === 'email' || channel === 'both') && (!emailSubject || !emailBody)) {
-    return res.status(400).json({ error: 'email_subject + email_body vereist voor mail-kanaal' });
+    return res.status(400).json({ error: 'Vul onderwerp en body voor de e-mail in.' });
   }
 
   try {
@@ -91,10 +94,15 @@ export default async function handler(req, res) {
     // Hard cap: als segment groter is dan HARD_CAP → JOB NIET aanmaken.
     if (total > HARD_CAP) {
       return res.status(400).json({
-        error: `Segment overschrijdt hard cap (${total} > ${HARD_CAP} leads). Verfijn de filters.`,
+        error: `Segment is te groot (${total} leads, max ${HARD_CAP}). Verfijn de filters.`,
         summary: { total, hard_cap: HARD_CAP, over_cap: true },
+        live_mode: liveModeStatus(),
       });
     }
+
+    // Template-meta ophalen voor per-recipient resolver + preview.
+    const tplMeta = await fetchTemplateMeta(templateName);
+    const tplAnalysis = tplMeta ? analyzeTemplate(templateName, tplMeta.meta_param_mapping, tplMeta.body_text) : { positions: [] };
 
     // WA-lijn + WA-conv-lookup voor 24u-venster (needs_template) — batch op nummers.
     const lijn = await haalLijn();
@@ -177,8 +185,16 @@ export default async function handler(req, res) {
         const conv = waConvByPhoneKey.get(normNummer(l.telefoon_e164));
         needsTemplate = !(conv && binnenVenster(conv.last_inbound_at));
       }
-      // Preview-bodies (simpel: template_name of first-160-chars-tekst).
-      const previewWa    = channelWa    ? (templateName ? ('[template] ' + templateName) : '(vrije tekst)') : null;
+      // Preview-bodies met per-recipient template-resolutie (bulk B2 blocker 2).
+      let previewWa = null;
+      if (channelWa && tplMeta && tplAnalysis.positions.length) {
+        const vals = resolveVariables(tplAnalysis.positions, l, staticVars);
+        previewWa = renderTemplateBody(tplMeta.body_text || '', tplAnalysis.positions, vals).slice(0, 500);
+      } else if (channelWa && tplMeta) {
+        previewWa = (tplMeta.body_text || '').slice(0, 500);
+      } else if (channelWa) {
+        previewWa = '[template] ' + templateName;
+      }
       const previewESub  = channelEmail ? (emailSubject || '(geen onderwerp)') : null;
       const previewEBody = channelEmail ? (emailBody || '').slice(0, 500) : null;
       const status = skipReason ? 'skipped' : 'pending';
@@ -198,9 +214,25 @@ export default async function handler(req, res) {
       }
     }
 
+    // H1 hygiene: dedup — verwijder eerdere drafts van deze user zonder
+    // test_sent_at zodat er niet 36 concept-jobs blijven staan bij herhaald
+    // klikken op Preview. Alleen drafts (approved/running blijven staan).
+    try {
+      await supabaseAdmin
+        .from('leadsonderhoud_bulk_jobs')
+        .delete()
+        .eq('created_by_user_id', user.id)
+        .eq('status', 'draft')
+        .is('test_sent_at', null);
+    } catch (e) {
+      console.warn('[ls-bulk-preview] draft-dedup soft-fail:', e?.message || e);
+    }
+
     // JOB insert (status='draft'). Bij schema-fout: 503 (tabel nog niet gemigreerd).
     let job;
     try {
+      // static_vars in segment.static_vars zodat cron ze straks kan lezen.
+      const segmentToStore = { ...segment, static_vars: staticVars };
       const { data, error } = await supabaseAdmin
         .from('leadsonderhoud_bulk_jobs')
         .insert({
@@ -210,7 +242,7 @@ export default async function handler(req, res) {
           template_language: templateLang,
           email_subject: emailSubject,
           email_body: emailBody,
-          segment,
+          segment: segmentToStore,
           status: 'draft',
           total_recipients: recipients.length,
           skipped_count: recipients.length - willSend,
@@ -253,9 +285,11 @@ export default async function handler(req, res) {
         over_cap: false,
       },
       sample_previews: samples,
+      template_analysis: tplAnalysis.positions,  // frontend toont welke tokens auto vs static
+      live_mode: liveModeStatus(),               // H2 real serverstatus
     });
   } catch (e) {
     console.error('[ls-bulk-preview] fout:', e?.message || e);
-    return res.status(500).json({ error: e?.message || 'Preview mislukt' });
+    return res.status(500).json({ error: 'Preview mislukt: ' + (e?.message || 'onbekende fout'), live_mode: liveModeStatus() });
   }
 }

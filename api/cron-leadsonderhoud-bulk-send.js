@@ -29,6 +29,7 @@ import { sendTemplate, sendText, MetaNotConfiguredError } from './_lib/meta-what
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { createNotification } from './_lib/notify.js';
 import { haalLijn, mailAfzender, normNummer, binnenVenster } from './_lib/leadsonderhoud-gesprekken.js';
+import { fetchTemplateMeta, analyzeTemplate, resolveVariables } from './_lib/leadsonderhoud-bulk-template.js';
 
 const BATCH_SIZE = 10;
 
@@ -198,6 +199,32 @@ export default async function handler(req, res) {
       }
     }
 
+    // v=CommitB-patch: pre-load lead-rows voor deze batch (voor per-recipient
+    // template-variabele-resolutie). We hebben lead.voornaam/telefoon/etc.
+    // nodig voor de sendTemplate variables[]-array.
+    const leadById = new Map();
+    if (leadIdsForBatch.length) {
+      try {
+        const { data: leadRows } = await supabaseAdmin
+          .from('leads')
+          .select('id, voornaam, achternaam, email, telefoon_e164, traject, score')
+          .in('id', leadIdsForBatch);
+        for (const l of (leadRows || [])) leadById.set(l.id, l);
+      } catch (e) {
+        console.warn('[cron-ls-bulk] lead-batch-lookup soft-fail:', e?.message || e);
+      }
+    }
+    // Cache template-meta per template-naam (jobs kunnen ≠ template hebben).
+    const tplCache = new Map();
+    async function getTplAnalysis(name) {
+      if (tplCache.has(name)) return tplCache.get(name);
+      const meta = await fetchTemplateMeta(name);
+      const analysis = meta ? analyzeTemplate(name, meta.meta_param_mapping, meta.body_text) : { positions: [] };
+      const entry = { meta, analysis };
+      tplCache.set(name, entry);
+      return entry;
+    }
+
     // Helper: recipient markeren als skipped + skipped_count++ + telemetrie.
     async function markSkip(rec, job, reason) {
       summary.skipped++;
@@ -251,11 +278,19 @@ export default async function handler(req, res) {
             waSkipReason = insideWindow ? 'wa_no_template' : 'no_template_out_of_window';
           } else {
             try {
+              // v=CommitB-patch: resolve template-variabelen per recipient via
+              // gedeelde helper (zelfde bron als preview/test-send + drip-motor).
+              const { meta: tplMeta, analysis } = await getTplAnalysis(job.template_name);
+              const leadRow = leadById.get(rec.lead_id) || null;
+              const staticVars = (job.segment && job.segment.static_vars) || {};
+              const variables = analysis.positions.length
+                ? resolveVariables(analysis.positions, leadRow || {}, staticVars)
+                : [];
               waResult = await sendTemplate({
                 to: rec.phone,
                 templateName: job.template_name,
                 languageCode: job.template_language || 'nl',
-                variables: [],
+                variables,
                 phoneNumberId: lijn.phoneNumberId,
               });
               sentAny = true;

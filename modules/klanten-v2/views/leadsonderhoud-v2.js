@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 3 FASE 3 COMMIT B (v=10, 2026-08-17): Bulk-tab UI.
+// Leadsonderhoud v2 — BROK 3 FASE 3 (v=11, 2026-08-17): Bulk-tab QA-fixes.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -1610,18 +1610,51 @@
     template_name: null,
     template_language: 'nl',
     template_body_preview: '',
+    template_positions: [],   // v=11: [{ pos, key, isLead }] uit meta_param_mapping.body
+    static_vars: {},          // v=11: values voor niet-lead placeholders
     email_subject: '',
     email_body: '',
-    currentJob: null,        // { job_id, summary, sample_previews, test_sent_at, test_target }
+    currentJob: null,         // { job_id, summary, sample_previews, test_sent_at, test_target }
     previewLoading: false,
     previewError: null,
     testSendLoading: false,
+    testSendError: null,      // v=11 blocker 3: expliciete fout-state
     approveLoading: false,
-    testNumber: '',          // gebruiker overschrijft de env-default
+    testNumber: '',
+    liveMode: null,           // v=11 H2: { live, uit, checked_at } uit preview-response
     jobs: [],
     jobsLoading: false,
     _jobsPollHandle: null,
   };
+
+  // v=11 blocker 2: client-side template-analyzer die meta_param_mapping.body
+  // gebruikt (autoritatief) of body_text-parser als fallback. Spiegel van
+  // server-side analyzeTemplate — één bron van waarheid voor tokens.
+  function _lsBulkAnalyzeTpl(tpl) {
+    const positions = [];
+    const mapping = tpl && tpl.meta_param_mapping && (tpl.meta_param_mapping.body || tpl.meta_param_mapping);
+    if (mapping && typeof mapping === 'object' && !Array.isArray(mapping)) {
+      const posKeys = Object.keys(mapping).filter(k => /^\d+$/.test(k)).sort((a, b) => Number(a) - Number(b));
+      for (const p of posKeys) {
+        const key = String(mapping[p] || '').trim();
+        if (!key) continue;
+        positions.push({ pos: Number(p), key, isLead: /^lead\./.test(key) });
+      }
+    } else if (tpl && tpl.body_text) {
+      const seen = new Map();
+      const re = /\{\{\s*([^{}]+?)\s*\}\}/g; let m;
+      while ((m = re.exec(tpl.body_text))) {
+        const k = m[1].trim();
+        if (!seen.has(k)) seen.set(k, seen.size + 1);
+      }
+      // Bekende drip-vars-namen = auto ('voornaam', 'lessen', etc.); rest = static.
+      const dripKeys = ['voornaam', 'dagen_over', 'dag', 'lessen', 'trades', 'score', 'agendalink', 'inloglink', 'datum', 'tijd', 'logo'];
+      for (const [k, pos] of seen.entries()) {
+        positions.push({ pos, key: k, isLead: /^lead\./.test(k) || dripKeys.includes(k) });
+      }
+    }
+    return positions;
+  }
 
   // Traject-opties: haal uit huidige Contacten-data of hardcoded lijst; hier
   // afgeleid van de Contacten-cache als beschikbaar, anders gebruiker typt eigen slugs.
@@ -1635,11 +1668,31 @@
     return [];
   }
 
+  // v=11 S3 fix: text/number-inputs mogen GEEN repaint triggeren (dat verwijdert
+  // de input-node → focus-loss per toetsaanslag). Alleen state-mutatie hier.
+  // Chips (afspraak/kanaal/traject) doen wel repaint via dedicated setters.
   window.__lsBulkSegField = (key, val) => {
     _lsBulk.segment[key] = val;
-    // Reset currentJob als filter wijzigt (voorkomt approve op verouderde preview).
     if (_lsBulk.currentJob) _lsBulk.currentJob = null;
-    _lsBulkRepaintBuilder();
+    // GEEN _lsBulkRepaintBuilder() — voorkom focus-loss.
+  };
+  window.__lsBulkSegFieldChip = (key, val) => {
+    _lsBulk.segment[key] = val;
+    if (_lsBulk.currentJob) _lsBulk.currentJob = null;
+    _lsBulkRepaintBuilder(); // chip-selectie mag wel repainten
+  };
+  // v=11 blocker 1: top-level state setter voor mail-subject/body + static_vars.
+  // Vervangt de inline '_lsBulk.email_subject=this.value' die ReferenceError gaf
+  // (state was niet exposed op window).
+  window.__lsBulkField = (key, val) => {
+    _lsBulk[key] = val;
+    if (_lsBulk.currentJob) _lsBulk.currentJob = null;
+    // GEEN repaint — mail-inputs mogen focus behouden.
+  };
+  window.__lsBulkStaticVar = (key, val) => {
+    if (!_lsBulk.static_vars) _lsBulk.static_vars = {};
+    _lsBulk.static_vars[key] = val;
+    if (_lsBulk.currentJob) _lsBulk.currentJob = null;
   };
   window.__lsBulkSegTrajectToggle = (slug) => {
     const arr = _lsBulk.segment.traject.slice();
@@ -1654,38 +1707,74 @@
     if (_lsBulk.currentJob) _lsBulk.currentJob = null;
     _lsBulkRepaintBuilder();
   };
+  // v=11 blocker 2: bulk-template-picker met prefix-groepen (zelfde als
+  // Gesprekken) + variabele-analyse. Na kies: static-var-form + live preview.
   window.__lsBulkPickTemplate = async () => {
-    // Hergebruik de bestaande template-cache + picker uit Gesprekken (fetcht via
-    // -gesprek-templates). Kies-callback vullen we via een aparte flow: we
-    // openen dezelfde picker maar met on-select naar bulk-state.
     const items = await _lsInbFetchTemplates();
     if (_lsTpl.error) { _lsInbToast(_lsTpl.error, 'error'); return; }
     if (!items.length) { _lsInbToast('Geen goedgekeurde templates', 'warn'); return; }
+
+    // Prefix-grouping (spiegel Gesprekken v=8): ≥2 templates delen prefix = eigen groep, rest = 'overig'.
+    const prefixOf = (name) => { const s = String(name || '').trim(); const i = s.indexOf('_'); return (i > 0 ? s.slice(0, i) : (s || 'overig')).toLowerCase(); };
+    const pcount = new Map();
+    for (const it of items) { const p = prefixOf(it.name); pcount.set(p, (pcount.get(p) || 0) + 1); }
+    const eff = (name) => (pcount.get(prefixOf(name)) || 0) >= 2 ? prefixOf(name) : 'overig';
+    const uniq = Array.from(new Set(items.map(it => eff(it.name)))).sort((a, b) => a === 'overig' ? 1 : b === 'overig' ? -1 : a.localeCompare(b));
+    let activePrefix = 'ALL';
+
     _lsInbOpenModal(`
-      <div style="font-size:15px;font-weight:600;margin-bottom:12px">Kies template voor bulk</div>
-      <div id="lsBulkTplList" style="display:flex;flex-direction:column;gap:5px;max-height:60vh;overflow-y:auto">
-        ${items.map((it, i) => `
-          <button class="btn btn-ghost btn-sm" data-tpl-idx="${i}" style="text-align:left;justify-content:flex-start;padding:9px 12px;height:auto;white-space:normal">
-            <div style="font-weight:600;font-size:12.5px">${esc(it.name)} <span style="font-size:10.5px;color:var(--text-3);font-weight:400">· ${esc(it.language || 'nl')}</span></div>
-            <div style="font-size:11.5px;color:var(--text-3);line-height:1.4;margin-top:2px">${esc((it.body_text || '').slice(0, 180))}${(it.body_text || '').length > 180 ? '…' : ''}</div>
-          </button>`).join('')}
-      </div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Kies template voor bulk</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Prefix-groepen (≥2 templates delen naam vóór eerste underscore).</div>
+      <div id="lsBulkTplList" style="max-height:60vh;overflow-y:auto"></div>
       <div style="margin-top:12px;text-align:right"><button id="lsBulkTplClose" class="btn btn-ghost btn-sm">Sluiten</button></div>
-    `, { maxWidth: 620 });
+    `, { maxWidth: 640 });
     document.getElementById('lsBulkTplClose').addEventListener('click', _lsInbCloseModal);
-    document.querySelectorAll('#lsBulkTplList [data-tpl-idx]').forEach(btn => {
-      btn.addEventListener('click', () => {
+    const listEl = document.getElementById('lsBulkTplList');
+    const render = () => {
+      const filtered = activePrefix === 'ALL' ? items : items.filter(it => eff(it.name) === activePrefix);
+      const byPfx = new Map();
+      for (const it of filtered) { const k = eff(it.name); if (!byPfx.has(k)) byPfx.set(k, []); byPfx.get(k).push(it); }
+      const groups = Array.from(byPfx.entries()).sort((a, b) => a[0] === 'overig' ? 1 : b[0] === 'overig' ? -1 : a[0].localeCompare(b[0]));
+      const chips = `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="chip ${activePrefix === 'ALL' ? 'on' : ''}" data-pfx="ALL" style="font-size:11.5px;padding:3px 10px">Alle (${items.length})</button>
+        ${uniq.map(p => `<button class="chip ${activePrefix === p ? 'on' : ''}" data-pfx="${esc(p)}" style="font-size:11.5px;padding:3px 10px">${esc(p)} (${items.filter(it => eff(it.name) === p).length})</button>`).join('')}
+      </div>`;
+      const gr = groups.map(([pfx, tpls]) => `
+        <div style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+            <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:10px;background:var(--teal-soft);color:var(--teal)">${esc(pfx)}</span>
+            <span style="font-size:11px;color:var(--text-3)">${tpls.length}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            ${tpls.sort((a, b) => String(a.name).localeCompare(String(b.name))).map(it => {
+              const globalIdx = items.indexOf(it);
+              return `<button class="btn btn-ghost btn-sm" data-tpl-idx="${globalIdx}" style="text-align:left;justify-content:flex-start;padding:9px 12px;height:auto;white-space:normal">
+                <div style="font-weight:600;font-size:12.5px">${esc(it.name)} <span style="font-size:10.5px;color:var(--text-3);font-weight:400">· ${esc(it.language || 'nl')}</span></div>
+                <div style="font-size:11.5px;color:var(--text-3);line-height:1.4;margin-top:2px">${esc((it.body_text || '').slice(0, 180))}${(it.body_text || '').length > 180 ? '…' : ''}</div>
+              </button>`;
+            }).join('')}
+          </div>
+        </div>`).join('');
+      listEl.innerHTML = chips + (groups.length ? gr : `<div style="padding:22px;text-align:center;color:var(--text-3)">Geen sjablonen in deze groep.</div>`);
+      listEl.querySelectorAll('[data-pfx]').forEach(chip => chip.addEventListener('click', () => { activePrefix = chip.getAttribute('data-pfx'); render(); }));
+      listEl.querySelectorAll('[data-tpl-idx]').forEach(btn => btn.addEventListener('click', () => {
         const idx = Number(btn.getAttribute('data-tpl-idx'));
         const tpl = items[idx];
         if (!tpl) return;
         _lsBulk.template_name = tpl.name;
         _lsBulk.template_language = tpl.language || 'nl';
         _lsBulk.template_body_preview = tpl.body_text || '';
+        _lsBulk.template_positions = _lsBulkAnalyzeTpl(tpl);
+        // Reset static_vars behalve keys die nog voorkomen in de nieuwe template.
+        const kept = {};
+        for (const p of _lsBulk.template_positions) if (!p.isLead && _lsBulk.static_vars[p.key] != null) kept[p.key] = _lsBulk.static_vars[p.key];
+        _lsBulk.static_vars = kept;
         if (_lsBulk.currentJob) _lsBulk.currentJob = null;
         _lsInbCloseModal();
         _lsBulkRepaintBuilder();
-      });
-    });
+      }));
+    };
+    render();
   };
 
   window.__lsBulkPreview = async () => {
@@ -1698,8 +1787,11 @@
       segment: {
         traject: _lsBulk.segment.traject,
         afspraak: _lsBulk.segment.afspraak === 'all' ? null : _lsBulk.segment.afspraak,
-        score_min: _lsBulk.segment.score_min,
-        score_max: _lsBulk.segment.score_max,
+        // v=11 S1 fix: lege input = null; server heeft geen filter. Werd al
+        // zo door de setter gedaan, maar defensief hier: expliciet niet 0
+        // sturen als user niets invulde.
+        score_min: (_lsBulk.segment.score_min === '' || _lsBulk.segment.score_min == null) ? null : Number(_lsBulk.segment.score_min),
+        score_max: (_lsBulk.segment.score_max === '' || _lsBulk.segment.score_max == null) ? null : Number(_lsBulk.segment.score_max),
         bron: _lsBulk.segment.bron || null,
         q: _lsBulk.segment.q || null,
       },
@@ -1708,6 +1800,7 @@
       template_language: _lsBulk.template_language,
       email_subject: (_lsBulk.channel === 'email' || _lsBulk.channel === 'both') ? _lsBulk.email_subject : null,
       email_body: (_lsBulk.channel === 'email' || _lsBulk.channel === 'both') ? _lsBulk.email_body : null,
+      static_vars: _lsBulk.static_vars || {},
     };
     try {
       const resp = await window.KV.authedFetch('/api/leadsonderhoud-bulk-preview', {
@@ -1720,6 +1813,8 @@
         return;
       }
       _lsBulk.currentJob = { job_id: j.job_id, summary: j.summary, sample_previews: j.sample_previews || [], test_sent_at: null, test_target: null };
+      // v=11 H2: live-mode status uit response bewaren voor droogloop-banner.
+      if (j.live_mode) _lsBulk.liveMode = j.live_mode;
     } catch (e) {
       _lsBulk.previewError = e?.message || 'preview fail';
     } finally {
@@ -1741,18 +1836,29 @@
     );
     if (!ok) return;
     _lsBulk.testSendLoading = true;
+    _lsBulk.testSendError = null; // v=11 blocker 3: reset vóór send
     _lsBulkRepaintPreview();
     try {
       const resp = await window.KV.authedFetch('/api/leadsonderhoud-bulk-test-send', {
         method: 'POST', body: JSON.stringify({ job_id: jobId, test_number: testNumber || undefined }),
       });
       const j = await resp.json().catch(() => ({}));
-      if (!resp.ok) { _lsInbToast('Test-send mislukt: ' + (j.error || 'HTTP ' + resp.status), 'error'); return; }
+      if (!resp.ok) {
+        // v=11 blocker 3: expliciete fout-state met Meta-detail (niet alleen toast).
+        const parts = [j.error || ('HTTP ' + resp.status)];
+        if (j.meta_code) parts.push('Meta code: ' + j.meta_code);
+        if (Array.isArray(j.variables_used) && j.variables_used.length) parts.push('Variables meegestuurd: [' + j.variables_used.map(v => JSON.stringify(v)).join(', ') + ']');
+        _lsBulk.testSendError = parts.join(' · ');
+        _lsInbToast('Test-send mislukt — zie foutblok', 'error');
+        return;
+      }
       _lsBulk.currentJob.test_sent_at = new Date().toISOString();
       _lsBulk.currentJob.test_target = j.test_target || testNumber || '(env-default)';
+      _lsBulk.testSendError = null;
       _lsInbToast('Test verzonden', 'ok');
     } catch (e) {
-      _lsInbToast('Test-send fout: ' + (e?.message || 'onbekend'), 'error');
+      _lsBulk.testSendError = 'Netwerkfout: ' + (e?.message || 'onbekend');
+      _lsInbToast('Test-send fout — zie foutblok', 'error');
     } finally {
       _lsBulk.testSendLoading = false;
       _lsBulkRepaintPreview();
@@ -1888,22 +1994,23 @@
             style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
         </label>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:6px">
         <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
-          <span style="color:var(--text-3)">Warmte-score min (0-45)</span>
+          <span style="color:var(--text-3)">Warmte-score min (0-45, leeg = geen filter)</span>
           <input type="number" min="0" max="45" value="${s.score_min ?? ''}" oninput="__lsBulkSegField('score_min', this.value === '' ? null : Number(this.value))"
             style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
         </label>
         <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
-          <span style="color:var(--text-3)">Warmte-score max</span>
+          <span style="color:var(--text-3)">Warmte-score max (leeg = geen filter)</span>
           <input type="number" min="0" max="45" value="${s.score_max ?? ''}" oninput="__lsBulkSegField('score_max', this.value === '' ? null : Number(this.value))"
             style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
         </label>
       </div>
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:10px;font-style:italic">Leads zonder score tellen als 0 (worden meegenomen wanneer min = 0 of leeg).</div>
       <div style="margin-bottom:10px">
         <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">Call-status</div>
         <div style="display:flex;gap:5px;flex-wrap:wrap">
-          ${['all', 'nee', 'ja'].map(v => `<button class="chip ${s.afspraak === v ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lsBulkSegField('afspraak', '${v}')">${v === 'all' ? 'Alle' : v === 'ja' ? '✓ geboekt' : '— nog niet'}</button>`).join('')}
+          ${['all', 'nee', 'ja'].map(v => `<button class="chip ${s.afspraak === v ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lsBulkSegFieldChip('afspraak', '${v}')">${v === 'all' ? 'Alle' : v === 'ja' ? '✓ geboekt' : '— nog niet'}</button>`).join('')}
         </div>
       </div>
       <div style="margin-bottom:14px">
@@ -1925,16 +2032,31 @@
           <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">WhatsApp-template (verplicht)</div>
           ${_lsBulk.template_name
             ? `<div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(_lsBulk.template_name)} <span style="font-size:11px;color:var(--text-3);font-weight:400">· ${esc(_lsBulk.template_language)}</span></div>
-               <div style="font-size:11.5px;color:var(--text-3);white-space:pre-wrap;line-height:1.4;margin-bottom:6px">${esc((_lsBulk.template_body_preview || '').slice(0, 160))}${(_lsBulk.template_body_preview || '').length > 160 ? '…' : ''}</div>`
+               <div style="font-size:11.5px;color:var(--text-3);white-space:pre-wrap;line-height:1.4;margin-bottom:6px">${esc((_lsBulk.template_body_preview || '').slice(0, 160))}${(_lsBulk.template_body_preview || '').length > 160 ? '…' : ''}</div>
+               ${_lsBulk.template_positions.length ? `
+                 <div style="font-size:11.5px;color:var(--text-3);margin-top:6px;margin-bottom:4px">Variabelen:</div>
+                 <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
+                   ${_lsBulk.template_positions.map(p => p.isLead
+                     ? `<div style="display:flex;align-items:center;gap:8px;font-size:12px">
+                          <code style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:1px 6px;background:var(--surface);border-radius:4px">{{${esc(p.key)}}}</code>
+                          <span style="color:var(--emerald);font-size:11px">✓ automatisch per lead</span>
+                        </div>`
+                     : `<label style="display:flex;flex-direction:column;gap:3px;font-size:12px">
+                          <span style="color:var(--text-3)"><code style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:1px 6px;background:var(--surface);border-radius:4px">{{${esc(p.key)}}}</code> — voor iedereen gelijk</span>
+                          <input value="${esc((_lsBulk.static_vars && _lsBulk.static_vars[p.key]) || '')}" oninput="__lsBulkStaticVar('${esc(p.key)}', this.value)"
+                            placeholder="waarde voor ${esc(p.key)}"
+                            style="padding:6px 9px;font-size:12.5px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text-1)">
+                        </label>`).join('')}
+                 </div>` : ''}`
             : ''}
           <button class="btn btn-ghost btn-sm" onclick="__lsBulkPickTemplate()">${_lsBulk.template_name ? 'Wijzig template' : 'Kies template'}</button>
         </div>` : ''}
       ${(chan === 'email' || chan === 'both') ? `
         <div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm)">
           <div style="font-size:12px;color:var(--text-3);margin-bottom:6px">E-mail</div>
-          <input placeholder="Onderwerp" value="${esc(_lsBulk.email_subject)}" oninput="_lsBulk.email_subject=this.value;if(_lsBulk.currentJob){_lsBulk.currentJob=null;}"
+          <input placeholder="Onderwerp" value="${esc(_lsBulk.email_subject)}" oninput="__lsBulkField('email_subject', this.value)"
             style="width:100%;padding:8px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);margin-bottom:6px;box-sizing:border-box">
-          <textarea placeholder="Body-tekst" oninput="_lsBulk.email_body=this.value;if(_lsBulk.currentJob){_lsBulk.currentJob=null;}"
+          <textarea placeholder="Body-tekst" oninput="__lsBulkField('email_body', this.value)"
             style="width:100%;min-height:100px;padding:8px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-family:inherit;resize:vertical;box-sizing:border-box">${esc(_lsBulk.email_body)}</textarea>
         </div>` : ''}
       <div style="display:flex;gap:8px;align-items:center">
@@ -1984,11 +2106,12 @@
             style="flex:1;padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
           <button class="btn btn-ghost btn-sm" onclick="__lsBulkTestSend()" ${_lsBulk.testSendLoading ? 'disabled' : ''}>${_lsBulk.testSendLoading ? 'Bezig…' : 'Stuur test'}</button>
         </div>
+        ${_lsBulk.testSendError ? `<div style="font-size:12px;color:var(--rose);padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);margin-bottom:6px;white-space:pre-wrap;word-wrap:break-word">⚠ ${esc(_lsBulk.testSendError)}</div>` : ''}
         ${testDone ? `<div style="font-size:11.5px;color:var(--emerald);padding:6px 10px;background:var(--emerald-soft);border-radius:var(--r-sm)">✓ Test verstuurd naar ${esc(cur.test_target || '(env)')} om ${esc(fmtDatumAbsoluut(cur.test_sent_at))}</div>` : `<div style="font-size:11.5px;color:var(--text-3)">Approve-knop hieronder blijft uit tot de test is verstuurd.</div>`}
       </div>
       <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
         <div style="font-weight:600;font-size:13px;margin-bottom:8px">2. Approve → cron pikt op</div>
-        <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lsBulkApprove()" ${canApprove ? '' : 'disabled'}>
+        <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;${canApprove ? '' : 'opacity:.45;cursor:not-allowed;pointer-events:none'}" onclick="__lsBulkApprove()" ${canApprove ? '' : 'disabled'}>
           ${_lsBulk.approveLoading ? 'Bezig…' : 'Approve bulk (typ-to-confirm)'}
         </button>
         <span style="font-size:11.5px;color:var(--text-3);margin-left:10px">Approve gaat naar de cron (BATCH_SIZE 10 per 3 min).</span>
@@ -2043,13 +2166,26 @@
     if (!_live.contacten.data && !_live.contacten.loading) {
       queueMicrotask(() => fetchContacten('/api/leads-list?limit=500', '/api/leads-list?limit=500'));
     }
+    // v=11 H2: dynamische banner uit echte serverstatus (kwam via preview-
+    // response mee). Groen 'UIT' → veilig, rood 'LIVE' → cron verstuurt.
+    const lm = _lsBulk.liveMode;
+    const bannerHtml = lm
+      ? (lm.uit
+          ? `<div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:14px;line-height:1.55">
+              <b>⛔ KILL-SWITCH AAN (LEADSONDERHOUD_UIT):</b> alle bulk-sends geblokkeerd op de server. Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}.
+            </div>`
+          : (lm.live
+              ? `<div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:14px;line-height:1.55;font-weight:600">
+                  ⚠ LIVE-MODUS AAN: goedgekeurde jobs worden ECHT verzonden door de cron. Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}.
+                </div>`
+              : `<div style="padding:12px 14px;background:var(--emerald-soft);border:1px solid var(--emerald-line,var(--emerald));border-radius:var(--r-sm);color:var(--emerald);font-size:12.5px;margin-bottom:14px;line-height:1.55">
+                  ✓ Live-modus: UIT — cron verstuurt NIETS (LEADSONDERHOUD_LIVE≠1). Gecontroleerd om ${esc(fmtDatumAbsoluut(lm.checked_at))}. Test-send werkt wel (buiten cron om).
+                </div>`))
+      : `<div style="padding:12px 14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);color:var(--text-3);font-size:12.5px;margin-bottom:14px;line-height:1.55">
+          Live-modus onbekend — druk op <b>Preview segment</b> om de echte serverstatus te lezen.
+        </div>`;
     return `
-      <div style="padding:12px 14px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:var(--r-sm);color:var(--amber);font-size:12.5px;margin-bottom:14px;line-height:1.55">
-        <b>Droogloop-check:</b> de cron gaat pas écht verzenden zodra
-        <code>LEADSONDERHOUD_LIVE=1</code> op de server staat. Zonder deze env
-        blijven approved jobs in de wachtrij en verstuurt de cron NIETS.
-        Test-send hierboven werkt WEL (die gaat rechtstreeks buiten de cron om).
-      </div>
+      ${bannerHtml}
       ${_lsBulkRenderBuilder()}
       ${_lsBulkRenderPreview()}
       ${_lsBulkRenderJobs()}
@@ -2136,5 +2272,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=10 BROK 3 FASE 3 COMMIT B — Bulk-tab UI: segment-builder (multi-traject + call-status + warmte-range + bron + zoek) -> preview via -bulk-preview (skip-breakdown + samples + hard-cap-guard) -> verplichte test-send via -bulk-test-send -> approve met TYP-TO-CONFIRM "IK STUUR NAAR N LEADS" via -bulk-approve -> jobs-lijst met live tellers (15s poll) + Annuleren via -bulk-cancel. Droogloop-banner over LEADSONDERHOUD_LIVE=1.');
+  console.debug('[ls-v2] v=11 Bulk QA-fixes — Blocker1: mail-inputs via __lsBulkField (S/--brand-klasse fix), Blocker2: template-picker met prefix-groepen + meta_param_mapping variabele-analyzer + per-lead auto-resolve + static-var-form + sample-lead-tokens in test-send, Blocker3: expliciete testSendError-block met Meta-code, S1: lege score = geen filter, S2: null-score = 0 (include in gte/lte ranges), S3: text/number-inputs zonder repaint (focus behouden), H1: preview dedup oude drafts, H2: dynamische live-mode-banner uit env-status, H3: disabled approve-knop echt uit-styling, H4: NL-fouten. Cron gebruikt shared template-resolver (drip-motor bouwVariabelen+keyWaarde).');
 })();

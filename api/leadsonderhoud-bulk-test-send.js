@@ -20,6 +20,8 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { haalLijn, mailAfzender } from './_lib/leadsonderhoud-gesprekken.js';
 import { sendTemplate, sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
+import { fetchTemplateMeta, analyzeTemplate, resolveVariables } from './_lib/leadsonderhoud-bulk-template.js';
+import { queryLeadsBySegment } from './_lib/leadsonderhoud-bulk-segment.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -51,28 +53,51 @@ export default async function handler(req, res) {
     if (job.status !== 'draft') return res.status(422).json({ error: `Job status is '${job.status}' — test-send alleen op draft` });
 
     const sent = { wa: false, email: false };
-    // WA-test (template).
+    // WA-test (template) — blocker 2e: resolve lead.*-tokens tegen sample-lead
+    // (eerste segment-recipient) zodat de test ECHTE parameters meestuurt.
     if ((job.channel === 'whatsapp' || job.channel === 'both') && job.template_name) {
-      if (!testNumber) return res.status(400).json({ error: 'test_number vereist (of env TEST_SEND_TARGET_NUMBER)' });
+      if (!testNumber) return res.status(400).json({ error: 'Vul een test-nummer in (of stel env TEST_SEND_TARGET_NUMBER in).' });
       const lijn = await haalLijn();
-      if (!lijn.phoneNumberId) return res.status(409).json({ error: 'Geen WhatsApp-lijn ingesteld voor leadsonderhoud' });
+      if (!lijn.phoneNumberId) return res.status(409).json({ error: 'Geen WhatsApp-lijn ingesteld voor leadsonderhoud (whatsapp_module_config module=leadsonderhoud ontbreekt).' });
+
+      // Sample-lead ophalen uit segment (eerste treffer).
+      let sampleLead = null;
+      try {
+        const seg = job.segment || {};
+        const { rows } = await queryLeadsBySegment(seg, { limit: 1 });
+        sampleLead = (rows && rows[0]) || null;
+      } catch (_) {}
+      const tplMeta = await fetchTemplateMeta(job.template_name);
+      const analysis = tplMeta ? analyzeTemplate(job.template_name, tplMeta.meta_param_mapping, tplMeta.body_text) : { positions: [] };
+      const staticVars = (job.segment && job.segment.static_vars) || {};
+      const variables = analysis.positions.length ? resolveVariables(analysis.positions, sampleLead || {}, staticVars) : [];
+
       try {
         await sendTemplate({
           to: testNumber,
           templateName: job.template_name,
           languageCode: job.template_language || 'nl',
-          variables: [], // test: geen variabele-substitutie (bepalend is dat template correct verzendt)
+          variables,
           phoneNumberId: lijn.phoneNumberId,
         });
         sent.wa = true;
       } catch (e) {
-        if (e instanceof MetaNotConfiguredError) return res.status(503).json({ error: 'Meta WA niet geconfigureerd', missing: e.missing });
-        return res.status(502).json({ error: 'WA-test-send mislukt', detail: e?.message });
+        if (e instanceof MetaNotConfiguredError) return res.status(503).json({ error: 'Meta WA niet geconfigureerd op de server.', missing: e.missing });
+        // Blocker 3: geef Meta-error-detail terug zodat UI het kan tonen.
+        const metaCode = e && e.metaCode ? String(e.metaCode) : null;
+        const detail = (e?.message || 'onbekende fout') + (metaCode ? ' (Meta code ' + metaCode + ')' : '');
+        return res.status(502).json({
+          error: 'WhatsApp-test mislukt: ' + detail,
+          meta_error: e?.message || null,
+          meta_code: metaCode,
+          variables_used: variables,
+          positions: analysis.positions,
+        });
       }
     }
     // Mail-test.
     if ((job.channel === 'email' || job.channel === 'both') && job.email_subject && job.email_body) {
-      if (!testEmail) return res.status(400).json({ error: 'test_email vereist (of env TEST_SEND_TARGET_EMAIL)' });
+      if (!testEmail) return res.status(400).json({ error: 'Vul een test-e-mailadres in (of stel env TEST_SEND_TARGET_EMAIL in).' });
       try {
         await sendEmailViaSmtp({
           from: mailAfzender(),
@@ -82,12 +107,12 @@ export default async function handler(req, res) {
         });
         sent.email = true;
       } catch (e) {
-        return res.status(502).json({ error: 'Mail-test-send mislukt', detail: e?.message });
+        return res.status(502).json({ error: 'E-mail-test mislukt: ' + (e?.message || 'onbekende fout') });
       }
     }
 
     if (!sent.wa && !sent.email) {
-      return res.status(400).json({ error: 'Geen test verstuurd (kanaal-config klopt niet)' });
+      return res.status(400).json({ error: 'Geen test verstuurd — kanaal- of template-configuratie ontbreekt.' });
     }
 
     const testTarget = [sent.wa ? testNumber : null, sent.email ? testEmail : null].filter(Boolean).join(' | ');
