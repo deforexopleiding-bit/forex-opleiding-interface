@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 2 (v=9, 2026-08-17): 4 laatste Gesprekken-fixes.
+// Leadsonderhoud v2 — BROK 3 FASE 3 COMMIT B (v=10, 2026-08-17): Bulk-tab UI.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -1585,18 +1585,475 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
-     TAB 5 — BULK VERSTUREN (placeholder — BROK 2)
+     TAB 5 — BULK VERSTUREN (COMMIT B — v=10)
+     ══════════════════════════════════════════════════════════════════
+     UI voor de bulk-broadcast flow. Alle rails:
+       1. Segment-builder (multi-traject, afspraak, warmte-range, bron, q).
+       2. Kanaal WA/mail/beide + template-picker (WA verplicht template) +
+          mail subject/body.
+       3. Preview via -bulk-preview → summary + skip-breakdown.
+       4. VERPLICHTE test-send via -bulk-test-send (approve blijft disabled
+          tot test_sent_at terugkomt).
+       5. Approve via -bulk-approve met TYP-TO-CONFIRM modal (exacte match
+          "IK STUUR NAAR N LEADS"). Cron pikt approved+is_test=false op.
+       6. Jobs-lijst met live tellers via -bulk-job-status + Annuleren-knop
+          via -bulk-cancel.
+       7. Droogloop-banner: waarschuwt dat LEADSONDERHOUD_LIVE=1 vereist is
+          voor daadwerkelijk verzenden.
+     Alle sends achter de custom confirm-modal + typ-to-confirm approve;
+     enige directe verzending is test-send naar eigen nummer.
      ══════════════════════════════════════════════════════════════════ */
-  function bulkView() {
-    return `<div style="padding:60px 20px;text-align:center;color:var(--text-3)">
-      <div style="font-size:38px;margin-bottom:12px">${svg(I.send || I.mail, 'width:38px;height:38px;color:var(--text-3)')}</div>
-      <div style="font-size:15px;font-weight:600;color:var(--text-1);margin-bottom:6px">Bulk versturen volgt in BROK 2</div>
-      <div style="font-size:12.5px;max-width:520px;margin:0 auto">
-        Broadcast-flow (masterclass-herinnering / marktupdate / event-uitnodiging) naar segmenten.
-        Vereist nieuw endpoint (<code>/api/leadsonderhoud-bulk-send</code>) + segment-builder + testmail + confirm.
-        Product-keuze staat op de agenda — deze tab blijft leeg tot dat is beslist.
+
+  const _lsBulk = {
+    segment: { traject: [], afspraak: 'all', score_min: null, score_max: null, bron: '', q: '' },
+    channel: 'whatsapp',
+    template_name: null,
+    template_language: 'nl',
+    template_body_preview: '',
+    email_subject: '',
+    email_body: '',
+    currentJob: null,        // { job_id, summary, sample_previews, test_sent_at, test_target }
+    previewLoading: false,
+    previewError: null,
+    testSendLoading: false,
+    approveLoading: false,
+    testNumber: '',          // gebruiker overschrijft de env-default
+    jobs: [],
+    jobsLoading: false,
+    _jobsPollHandle: null,
+  };
+
+  // Traject-opties: haal uit huidige Contacten-data of hardcoded lijst; hier
+  // afgeleid van de Contacten-cache als beschikbaar, anders gebruiker typt eigen slugs.
+  function _lsBulkTrajectOpts() {
+    const s = _live.contacten;
+    if (s && s.data && Array.isArray(s.data.items)) {
+      const set = new Set();
+      for (const it of s.data.items) if (it.traject) set.add(String(it.traject));
+      return Array.from(set).sort();
+    }
+    return [];
+  }
+
+  window.__lsBulkSegField = (key, val) => {
+    _lsBulk.segment[key] = val;
+    // Reset currentJob als filter wijzigt (voorkomt approve op verouderde preview).
+    if (_lsBulk.currentJob) _lsBulk.currentJob = null;
+    _lsBulkRepaintBuilder();
+  };
+  window.__lsBulkSegTrajectToggle = (slug) => {
+    const arr = _lsBulk.segment.traject.slice();
+    const idx = arr.indexOf(slug);
+    if (idx >= 0) arr.splice(idx, 1); else arr.push(slug);
+    _lsBulk.segment.traject = arr;
+    if (_lsBulk.currentJob) _lsBulk.currentJob = null;
+    _lsBulkRepaintBuilder();
+  };
+  window.__lsBulkSetChannel = (ch) => {
+    _lsBulk.channel = ch;
+    if (_lsBulk.currentJob) _lsBulk.currentJob = null;
+    _lsBulkRepaintBuilder();
+  };
+  window.__lsBulkPickTemplate = async () => {
+    // Hergebruik de bestaande template-cache + picker uit Gesprekken (fetcht via
+    // -gesprek-templates). Kies-callback vullen we via een aparte flow: we
+    // openen dezelfde picker maar met on-select naar bulk-state.
+    const items = await _lsInbFetchTemplates();
+    if (_lsTpl.error) { _lsInbToast(_lsTpl.error, 'error'); return; }
+    if (!items.length) { _lsInbToast('Geen goedgekeurde templates', 'warn'); return; }
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:12px">Kies template voor bulk</div>
+      <div id="lsBulkTplList" style="display:flex;flex-direction:column;gap:5px;max-height:60vh;overflow-y:auto">
+        ${items.map((it, i) => `
+          <button class="btn btn-ghost btn-sm" data-tpl-idx="${i}" style="text-align:left;justify-content:flex-start;padding:9px 12px;height:auto;white-space:normal">
+            <div style="font-weight:600;font-size:12.5px">${esc(it.name)} <span style="font-size:10.5px;color:var(--text-3);font-weight:400">· ${esc(it.language || 'nl')}</span></div>
+            <div style="font-size:11.5px;color:var(--text-3);line-height:1.4;margin-top:2px">${esc((it.body_text || '').slice(0, 180))}${(it.body_text || '').length > 180 ? '…' : ''}</div>
+          </button>`).join('')}
+      </div>
+      <div style="margin-top:12px;text-align:right"><button id="lsBulkTplClose" class="btn btn-ghost btn-sm">Sluiten</button></div>
+    `, { maxWidth: 620 });
+    document.getElementById('lsBulkTplClose').addEventListener('click', _lsInbCloseModal);
+    document.querySelectorAll('#lsBulkTplList [data-tpl-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-tpl-idx'));
+        const tpl = items[idx];
+        if (!tpl) return;
+        _lsBulk.template_name = tpl.name;
+        _lsBulk.template_language = tpl.language || 'nl';
+        _lsBulk.template_body_preview = tpl.body_text || '';
+        if (_lsBulk.currentJob) _lsBulk.currentJob = null;
+        _lsInbCloseModal();
+        _lsBulkRepaintBuilder();
+      });
+    });
+  };
+
+  window.__lsBulkPreview = async () => {
+    _lsBulk.previewLoading = true;
+    _lsBulk.previewError = null;
+    _lsBulk.currentJob = null;
+    _lsBulkRepaintPreview();
+    // Verzamel body-state voor payload.
+    const body = {
+      segment: {
+        traject: _lsBulk.segment.traject,
+        afspraak: _lsBulk.segment.afspraak === 'all' ? null : _lsBulk.segment.afspraak,
+        score_min: _lsBulk.segment.score_min,
+        score_max: _lsBulk.segment.score_max,
+        bron: _lsBulk.segment.bron || null,
+        q: _lsBulk.segment.q || null,
+      },
+      channel: _lsBulk.channel,
+      template_name: (_lsBulk.channel === 'whatsapp' || _lsBulk.channel === 'both') ? _lsBulk.template_name : null,
+      template_language: _lsBulk.template_language,
+      email_subject: (_lsBulk.channel === 'email' || _lsBulk.channel === 'both') ? _lsBulk.email_subject : null,
+      email_body: (_lsBulk.channel === 'email' || _lsBulk.channel === 'both') ? _lsBulk.email_body : null,
+    };
+    try {
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-bulk-preview', {
+        method: 'POST', body: JSON.stringify(body),
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        _lsBulk.previewError = j.error || ('HTTP ' + resp.status);
+        if (j.summary && j.summary.over_cap) _lsBulk.previewError = j.error + ' (matched: ' + j.summary.total + ', cap: ' + j.summary.hard_cap + ')';
+        return;
+      }
+      _lsBulk.currentJob = { job_id: j.job_id, summary: j.summary, sample_previews: j.sample_previews || [], test_sent_at: null, test_target: null };
+    } catch (e) {
+      _lsBulk.previewError = e?.message || 'preview fail';
+    } finally {
+      _lsBulk.previewLoading = false;
+      _lsBulkRepaintPreview();
+    }
+  };
+
+  window.__lsBulkTestNumber = (v) => { _lsBulk.testNumber = v; };
+
+  window.__lsBulkTestSend = async () => {
+    if (!_lsBulk.currentJob) return;
+    const jobId = _lsBulk.currentJob.job_id;
+    const testNumber = _lsBulk.testNumber || '';
+    const ok = await _lsInbAskConfirm(
+      'Test-bericht versturen?',
+      (testNumber ? 'Naar: ' + testNumber : '(env-default TEST_SEND_TARGET_NUMBER wordt gebruikt)') + '\n\nDit is een ECHTE send naar het test-nummer.',
+      { okLabel: 'Verstuur test' }
+    );
+    if (!ok) return;
+    _lsBulk.testSendLoading = true;
+    _lsBulkRepaintPreview();
+    try {
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-bulk-test-send', {
+        method: 'POST', body: JSON.stringify({ job_id: jobId, test_number: testNumber || undefined }),
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok) { _lsInbToast('Test-send mislukt: ' + (j.error || 'HTTP ' + resp.status), 'error'); return; }
+      _lsBulk.currentJob.test_sent_at = new Date().toISOString();
+      _lsBulk.currentJob.test_target = j.test_target || testNumber || '(env-default)';
+      _lsInbToast('Test verzonden', 'ok');
+    } catch (e) {
+      _lsInbToast('Test-send fout: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _lsBulk.testSendLoading = false;
+      _lsBulkRepaintPreview();
+    }
+  };
+
+  window.__lsBulkApprove = async () => {
+    if (!_lsBulk.currentJob || !_lsBulk.currentJob.test_sent_at) return;
+    const jobId = _lsBulk.currentJob.job_id;
+    const willSend = Number(_lsBulk.currentJob.summary?.will_send || 0);
+    if (!willSend) { _lsInbToast('will_send = 0 (niks te versturen)', 'warn'); return; }
+    // Typ-to-confirm modal.
+    const target = 'IK STUUR NAAR ' + willSend + ' LEADS';
+    _lsInbOpenModal(`
+      <div style="font-size:15.5px;font-weight:600;margin-bottom:8px;color:var(--rose,#C22B3E)">⚠ Definitieve approve</div>
+      <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:14px">
+        Je staat op het punt <b>${willSend}</b> leads te berichten via
+        <b>${esc(_lsBulk.channel)}</b>. De cron pakt de job op en verstuurt in
+        batches van 10 per 3 min. <b>Dit kan niet ongedaan gemaakt worden</b>
+        (alleen annuleren stopt verdere sends, al verstuurde berichten blijven).
+        <br><br>
+        Typ letterlijk het volgende ter bevestiging:<br>
+        <code style="display:block;background:var(--surface-2);padding:8px 10px;margin-top:6px;border-radius:6px;font-family:'IBM Plex Mono',monospace">${esc(target)}</code>
+      </div>
+      <input id="lsBulkTypConfirm" placeholder="typ hier de tekst hierboven"
+        style="width:100%;padding:9px 11px;font-size:13px;border:2px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1);margin-bottom:14px;box-sizing:border-box">
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button id="lsBulkTypCancel" class="btn btn-ghost btn-sm">Annuleren</button>
+        <button id="lsBulkTypOk" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" disabled>Approve</button>
+      </div>
+    `, { maxWidth: 560 });
+    const input = document.getElementById('lsBulkTypConfirm');
+    const okBtn = document.getElementById('lsBulkTypOk');
+    input.focus();
+    input.addEventListener('input', () => {
+      okBtn.disabled = input.value !== target;
+    });
+    document.getElementById('lsBulkTypCancel').addEventListener('click', _lsInbCloseModal);
+    okBtn.addEventListener('click', async () => {
+      if (input.value !== target) return;
+      _lsInbCloseModal();
+      _lsBulk.approveLoading = true;
+      _lsBulkRepaintPreview();
+      try {
+        const resp = await window.KV.authedFetch('/api/leadsonderhoud-bulk-approve', {
+          method: 'POST', body: JSON.stringify({ job_id: jobId }),
+        });
+        const j = await resp.json().catch(() => ({}));
+        if (!resp.ok) { _lsInbToast('Approve mislukt: ' + (j.error || 'HTTP ' + resp.status), 'error'); return; }
+        _lsInbToast('Job goedgekeurd — cron pikt op binnen 3 min', 'ok');
+        _lsBulk.currentJob = null;
+        _lsBulk.template_name = null;
+        _lsBulk.template_body_preview = '';
+        _lsBulk.email_subject = '';
+        _lsBulk.email_body = '';
+        _lsBulkFetchJobs();
+      } catch (e) {
+        _lsInbToast('Approve fout: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        _lsBulk.approveLoading = false;
+        _lsBulkRepaintPreview();
+      }
+    });
+  };
+
+  window.__lsBulkCancel = async (jobId) => {
+    const ok = await _lsInbAskConfirm(
+      'Annuleer bulk-job?',
+      'Verdere sends worden gestopt. Al verstuurde berichten blijven staan.',
+      { okLabel: 'Annuleer job', tone: 'danger' }
+    );
+    if (!ok) return;
+    try {
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-bulk-cancel', {
+        method: 'POST', body: JSON.stringify({ job_id: jobId }),
+      });
+      if (!resp.ok) { const j = await resp.json().catch(() => ({})); throw new Error(j.error || 'HTTP ' + resp.status); }
+      _lsInbToast('Job geannuleerd', 'ok');
+      _lsBulkFetchJobs();
+    } catch (e) {
+      _lsInbToast('Annuleren mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  };
+
+  async function _lsBulkFetchJobs() {
+    _lsBulk.jobsLoading = true;
+    _lsBulkRepaintJobs();
+    try {
+      const j = await tryFetch('bulk-jobs', '/api/leadsonderhoud-bulk-jobs-list');
+      _lsBulk.jobs = (j && Array.isArray(j.jobs)) ? j.jobs : [];
+    } catch (_) { _lsBulk.jobs = []; }
+    _lsBulk.jobsLoading = false;
+    _lsBulkRepaintJobs();
+  }
+  function _lsBulkStartJobsPoll() {
+    if (_lsBulk._jobsPollHandle) return;
+    _lsBulk._jobsPollHandle = setInterval(() => {
+      if (!document.querySelector('#lsBulkJobs')) { clearInterval(_lsBulk._jobsPollHandle); _lsBulk._jobsPollHandle = null; return; }
+      if (document.hidden) return;
+      _lsBulkFetchJobs();
+    }, 15000);
+  }
+
+  function _lsBulkRepaintBuilder() {
+    const el = document.getElementById('lsBulkBuilder');
+    if (el) el.outerHTML = _lsBulkRenderBuilder();
+  }
+  function _lsBulkRepaintPreview() {
+    const el = document.getElementById('lsBulkPreview');
+    if (el) el.outerHTML = _lsBulkRenderPreview();
+  }
+  function _lsBulkRepaintJobs() {
+    const el = document.getElementById('lsBulkJobs');
+    if (el) el.outerHTML = _lsBulkRenderJobs();
+  }
+
+  function _lsBulkRenderBuilder() {
+    const s = _lsBulk.segment;
+    const opts = _lsBulkTrajectOpts();
+    const chan = _lsBulk.channel;
+    return `<div id="lsBulkBuilder" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px">
+      <div style="font-weight:600;font-size:14px;margin-bottom:12px">Segment</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+          <span style="color:var(--text-3)">Zoek naam/e-mail</span>
+          <input value="${esc(s.q)}" oninput="__lsBulkSegField('q', this.value)"
+            style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+          <span style="color:var(--text-3)">Bron</span>
+          <input value="${esc(s.bron)}" oninput="__lsBulkSegField('bron', this.value)"
+            placeholder="bv. handmatig / website / meta"
+            style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+          <span style="color:var(--text-3)">Warmte-score min (0-45)</span>
+          <input type="number" min="0" max="45" value="${s.score_min ?? ''}" oninput="__lsBulkSegField('score_min', this.value === '' ? null : Number(this.value))"
+            style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px">
+          <span style="color:var(--text-3)">Warmte-score max</span>
+          <input type="number" min="0" max="45" value="${s.score_max ?? ''}" oninput="__lsBulkSegField('score_max', this.value === '' ? null : Number(this.value))"
+            style="padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
+        </label>
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">Call-status</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          ${['all', 'nee', 'ja'].map(v => `<button class="chip ${s.afspraak === v ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lsBulkSegField('afspraak', '${v}')">${v === 'all' ? 'Alle' : v === 'ja' ? '✓ geboekt' : '— nog niet'}</button>`).join('')}
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">Traject (klik om te (de)selecteren; leeg = alle)</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          ${opts.length
+            ? opts.map(t => `<button class="chip ${s.traject.includes(t) ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lsBulkSegTrajectToggle('${esc(t)}')">${esc(t)}</button>`).join('')
+            : `<span style="font-size:12px;color:var(--text-3)">Open eerst de Contacten-tab om trajecten in te laden</span>`}
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">Kanaal</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">
+          ${['whatsapp', 'email', 'both'].map(ch => `<button class="chip ${chan === ch ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lsBulkSetChannel('${ch}')">${ch === 'whatsapp' ? 'WhatsApp' : ch === 'email' ? 'E-mail' : 'Beide'}</button>`).join('')}
+        </div>
+      </div>
+      ${(chan === 'whatsapp' || chan === 'both') ? `
+        <div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm)">
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">WhatsApp-template (verplicht)</div>
+          ${_lsBulk.template_name
+            ? `<div style="font-weight:600;font-size:13px;margin-bottom:4px">${esc(_lsBulk.template_name)} <span style="font-size:11px;color:var(--text-3);font-weight:400">· ${esc(_lsBulk.template_language)}</span></div>
+               <div style="font-size:11.5px;color:var(--text-3);white-space:pre-wrap;line-height:1.4;margin-bottom:6px">${esc((_lsBulk.template_body_preview || '').slice(0, 160))}${(_lsBulk.template_body_preview || '').length > 160 ? '…' : ''}</div>`
+            : ''}
+          <button class="btn btn-ghost btn-sm" onclick="__lsBulkPickTemplate()">${_lsBulk.template_name ? 'Wijzig template' : 'Kies template'}</button>
+        </div>` : ''}
+      ${(chan === 'email' || chan === 'both') ? `
+        <div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm)">
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:6px">E-mail</div>
+          <input placeholder="Onderwerp" value="${esc(_lsBulk.email_subject)}" oninput="_lsBulk.email_subject=this.value;if(_lsBulk.currentJob){_lsBulk.currentJob=null;}"
+            style="width:100%;padding:8px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);margin-bottom:6px;box-sizing:border-box">
+          <textarea placeholder="Body-tekst" oninput="_lsBulk.email_body=this.value;if(_lsBulk.currentJob){_lsBulk.currentJob=null;}"
+            style="width:100%;min-height:100px;padding:8px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-family:inherit;resize:vertical;box-sizing:border-box">${esc(_lsBulk.email_body)}</textarea>
+        </div>` : ''}
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lsBulkPreview()" ${_lsBulk.previewLoading ? 'disabled' : ''}>${_lsBulk.previewLoading ? 'Bezig…' : 'Preview segment'}</button>
+        <span style="font-size:11.5px;color:var(--text-3);margin-left:auto">Preview toont het aantal leads dat de bulk zou ontvangen. Verstuurt niks.</span>
       </div>
     </div>`;
+  }
+
+  function _lsBulkRenderPreview() {
+    const cur = _lsBulk.currentJob;
+    if (_lsBulk.previewError) {
+      return `<div id="lsBulkPreview" style="background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;color:var(--rose);font-size:13px">
+        ⚠ ${esc(_lsBulk.previewError)}
+      </div>`;
+    }
+    if (!cur) {
+      return `<div id="lsBulkPreview" style="background:var(--surface);border:1px dashed var(--border);border-radius:var(--r);padding:22px;margin-bottom:14px;text-align:center;color:var(--text-3);font-size:13px">
+        Nog geen preview — druk op <b>Preview segment</b> hierboven.
+      </div>`;
+    }
+    const s = cur.summary || {};
+    const b = s.skipped_breakdown || {};
+    const testDone = !!cur.test_sent_at;
+    const canApprove = testDone && (s.will_send || 0) > 0 && !_lsBulk.approveLoading;
+    return `<div id="lsBulkPreview" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px">
+      <div style="font-weight:600;font-size:14px;margin-bottom:10px">Preview <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3);font-weight:400">job ${esc(String(cur.job_id).slice(0, 8))}…</span></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+        <div style="padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm)"><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Totaal</div><div style="font-size:22px;font-weight:600">${s.total || 0}</div></div>
+        <div style="padding:10px 12px;background:var(--emerald-soft);border-radius:var(--r-sm);color:var(--emerald)"><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;opacity:.85">Will send</div><div style="font-size:22px;font-weight:600">${s.will_send || 0}</div></div>
+        <div style="padding:10px 12px;background:var(--amber-soft);border-radius:var(--r-sm);color:var(--amber)"><div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;opacity:.85">Skipped</div><div style="font-size:22px;font-weight:600">${s.skipped || 0}</div></div>
+        <div style="padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm)"><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Cap</div><div style="font-size:22px;font-weight:600">${s.hard_cap || 500}</div></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:10px">
+        Skip-breakdown: no_phone ${b.no_phone || 0} · no_email ${b.no_email || 0} · no_consent ${b.no_consent || 0} · drip_today ${b.drip_today || 0}
+      </div>
+      ${(cur.sample_previews && cur.sample_previews.length) ? `
+        <details style="margin-bottom:14px"><summary style="font-size:12px;color:var(--text-3);cursor:pointer">Sample previews (${cur.sample_previews.length})</summary>
+        <ul style="margin:6px 0 0;padding-left:18px;font-size:11.5px;color:var(--text-2)">
+          ${cur.sample_previews.map(p => `<li>${esc(p.lead_naam)} · ${esc(p.traject || '—')} · ${p.needs_template ? '<b>template</b>' : 'binnen 24u'} · ${esc(p.preview_wa || p.preview_email_subject || '')}</li>`).join('')}
+        </ul></details>` : ''}
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">1. Verplichte test-send</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <input placeholder="Test-nummer (leeg = env-default TEST_SEND_TARGET_NUMBER)" value="${esc(_lsBulk.testNumber)}"
+            oninput="__lsBulkTestNumber(this.value)"
+            style="flex:1;padding:7px 10px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text-1)">
+          <button class="btn btn-ghost btn-sm" onclick="__lsBulkTestSend()" ${_lsBulk.testSendLoading ? 'disabled' : ''}>${_lsBulk.testSendLoading ? 'Bezig…' : 'Stuur test'}</button>
+        </div>
+        ${testDone ? `<div style="font-size:11.5px;color:var(--emerald);padding:6px 10px;background:var(--emerald-soft);border-radius:var(--r-sm)">✓ Test verstuurd naar ${esc(cur.test_target || '(env)')} om ${esc(fmtDatumAbsoluut(cur.test_sent_at))}</div>` : `<div style="font-size:11.5px;color:var(--text-3)">Approve-knop hieronder blijft uit tot de test is verstuurd.</div>`}
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">2. Approve → cron pikt op</div>
+        <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lsBulkApprove()" ${canApprove ? '' : 'disabled'}>
+          ${_lsBulk.approveLoading ? 'Bezig…' : 'Approve bulk (typ-to-confirm)'}
+        </button>
+        <span style="font-size:11.5px;color:var(--text-3);margin-left:10px">Approve gaat naar de cron (BATCH_SIZE 10 per 3 min).</span>
+      </div>
+    </div>`;
+  }
+
+  function _lsBulkRenderJobs() {
+    const jobs = _lsBulk.jobs;
+    return `<div id="lsBulkJobs" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="font-weight:600;font-size:14px">Jobs (laatste 50)</div>
+        <button class="btn btn-ghost btn-sm" onclick="__lsBulkFetchJobs()" style="margin-left:auto" ${_lsBulk.jobsLoading ? 'disabled' : ''}>${_lsBulk.jobsLoading ? 'Bezig…' : '↻ Refresh'}</button>
+      </div>
+      ${jobs.length ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+          <th style="padding:6px 8px">Status</th>
+          <th style="padding:6px 8px">Kanaal</th>
+          <th style="padding:6px 8px">Template</th>
+          <th style="padding:6px 8px">Totaal</th>
+          <th style="padding:6px 8px">Sent</th>
+          <th style="padding:6px 8px">Fail</th>
+          <th style="padding:6px 8px">Skip</th>
+          <th style="padding:6px 8px">Aangemaakt</th>
+          <th style="padding:6px 8px"></th>
+        </tr></thead>
+        <tbody>
+          ${jobs.map(j => `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:6px 8px"><span style="font-size:10.5px;padding:2px 7px;border-radius:8px;background:var(--${j.status === 'completed' ? 'emerald' : j.status === 'cancelled' ? 'rose' : j.status === 'running' ? 'blue' : 'text-3'}-soft);color:var(--${j.status === 'completed' ? 'emerald' : j.status === 'cancelled' ? 'rose' : j.status === 'running' ? 'blue' : 'text-3'})">${esc(j.status)}</span></td>
+            <td style="padding:6px 8px">${esc(j.channel)}</td>
+            <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">${esc(j.template_name || '—')}</td>
+            <td style="padding:6px 8px">${j.total_recipients || 0}</td>
+            <td style="padding:6px 8px;color:var(--emerald)">${j.sent_count || 0}</td>
+            <td style="padding:6px 8px;color:var(--rose)">${j.failed_count || 0}</td>
+            <td style="padding:6px 8px;color:var(--amber)">${j.skipped_count || 0}</td>
+            <td style="padding:6px 8px;color:var(--text-3);font-size:11.5px">${esc(fmtDatum(j.created_at))}</td>
+            <td style="padding:6px 8px;text-align:right">
+              ${['approved', 'running', 'draft'].includes(j.status) ? `<button class="btn btn-ghost btn-sm" onclick="__lsBulkCancel('${esc(j.id)}')" style="font-size:11px;padding:3px 8px">Annuleer</button>` : ''}
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table></div>` : `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">${_lsBulk.jobsLoading ? 'Jobs laden…' : 'Nog geen bulk-jobs.'}</div>`}
+    </div>`;
+  }
+  window.__lsBulkFetchJobs = _lsBulkFetchJobs;
+
+  function bulkView() {
+    // Trigger initial fetches + poll.
+    if (!_lsBulk.jobs.length && !_lsBulk.jobsLoading) queueMicrotask(_lsBulkFetchJobs);
+    queueMicrotask(_lsBulkStartJobsPoll);
+    // Trigger ook contacten-fetch als traject-opts leeg zijn.
+    if (!_live.contacten.data && !_live.contacten.loading) {
+      queueMicrotask(() => fetchContacten('/api/leads-list?limit=500', '/api/leads-list?limit=500'));
+    }
+    return `
+      <div style="padding:12px 14px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:var(--r-sm);color:var(--amber);font-size:12.5px;margin-bottom:14px;line-height:1.55">
+        <b>Droogloop-check:</b> de cron gaat pas écht verzenden zodra
+        <code>LEADSONDERHOUD_LIVE=1</code> op de server staat. Zonder deze env
+        blijven approved jobs in de wachtrij en verstuurt de cron NIETS.
+        Test-send hierboven werkt WEL (die gaat rechtstreeks buiten de cron om).
+      </div>
+      ${_lsBulkRenderBuilder()}
+      ${_lsBulkRenderPreview()}
+      ${_lsBulkRenderJobs()}
+    `;
   }
 
   /* ══════════════════════════════════════════════════════════════════
@@ -1679,5 +2136,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=9 Gesprekken laatste 4 — HOOGTE bubble was 201px voor "Hey" (pre-wrap op wrapper + template-literal indentation = lege regels; fix: pre-wrap alleen op body-div + tags aan elkaar), FLAG backend has_wa/has_mail nu strikt uit dezelfde bron als -berichten (WA-conv-with-messages check + strikte email-filters: status=verstuurd niet ok, mailAfzender-check, adresUit strict-match), SNEL target-veld expliciet (wa/mail via param + eigen Snel-knop in mail-toolbar + append met scheidingsteken), GROEP alleen prefix ≥2 templates, rest naar overig-bucket + dedup chips.');
+  console.debug('[ls-v2] v=10 BROK 3 FASE 3 COMMIT B — Bulk-tab UI: segment-builder (multi-traject + call-status + warmte-range + bron + zoek) -> preview via -bulk-preview (skip-breakdown + samples + hard-cap-guard) -> verplichte test-send via -bulk-test-send -> approve met TYP-TO-CONFIRM "IK STUUR NAAR N LEADS" via -bulk-approve -> jobs-lijst met live tellers (15s poll) + Annuleren via -bulk-cancel. Droogloop-banner over LEADSONDERHOUD_LIVE=1.');
 })();
