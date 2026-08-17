@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/inbox-v2.js
 //
-// Inbox v2 — BROK 1 (v=2, 2026-08-17): "unified werkplek" landing.
+// Inbox v2 — BROK 1 (v=3, 2026-08-17): "unified werkplek" landing + 3 bugfixes.
 // LEES-only in deze brok: alle 8 bronnen tonen echte counts + rows, en
 // voor conversation-bronnen (WA + Lisa) rendert de detail-pane een
 // echte thread. Compose komt in BROK 2.
@@ -162,6 +162,19 @@
     }
   }
 
+  /* ── HTML-escape helper (BROK 1 bug 3 fix) ─────────────────────────── */
+  // Root cause bug 3: mapEmailRow zet raw m.from_name in de row-HTML.
+  // E-mail from_name bevat vaak RFC 5322 formaat "Naam <email@x.nl>".
+  // Elk '<' opende een fake tag → 85 rijen cascadeerden in elkaar en
+  // .ib-detail belandde als grandchild van .ib-list i.p.v. sibling.
+  // Alle user-strings die in innerHTML landen worden nu via _esc gerend.
+  function _esc(v) {
+    if (v == null) return '';
+    return String(v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   /* ── Handler-stubs op window ──────────────────────────────────────── */
   window.__ibSetSrc = (v) => {
     ibSrc = v;
@@ -169,11 +182,43 @@
     _resetThread();
     if (window.DFO && window.DFO.render) window.DFO.render();
   };
+  // BROK 1 bug 1 fix: surgische selectie zonder full DFO.render().
+  // Full render zou .ib-list innerHTML herbouwen → scrollTop 1800 → 0.
+  // Nu: toggle 'on'-class op de rijen (behoud scrollpositie in .ib-list),
+  // vervang alleen de .ib-detail sibling, trigger thread-load. Router-
+  // filters (F('q'/'fl')) blijven staan.
   window.__ibSel = (id) => {
-    if (ibSel === id) return;
+    if (String(ibSel) === String(id)) return;
     ibSel = id;
     _resetThread();
-    if (window.DFO && window.DFO.render) window.DFO.render();
+    // 1) Selection-highlight surgisch bijwerken.
+    document.querySelectorAll('.ib-row.on').forEach(el => el.classList.remove('on'));
+    const newRow = document.querySelector('.ib-row[data-row-id="' + String(id).replace(/"/g, '\\"') + '"]');
+    if (newRow) newRow.classList.add('on');
+    // 2) Detail-pane vervangen. Zoek gekozen row-data + srcInfo, render
+    //    detail-HTML, vervang bestaande .ib-detail (of injecteer als sibling
+    //    in .ib-split als 'ie er nog niet is).
+    const srcInfo = IB_SRC.find(x => x[0] === ibSrc) || IB_SRC[0];
+    const row = currentRows().find(r => String(r.id) === String(id));
+    const split = document.querySelector('.ib-split');
+    const oldDetail = split ? split.querySelector('.ib-detail') : null;
+    if (split && row) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = renderDetail(row, srcInfo);
+      const newDetail = wrap.firstElementChild;
+      if (newDetail) {
+        if (oldDetail) split.replaceChild(newDetail, oldDetail);
+        else split.appendChild(newDetail);
+      }
+    }
+    // 3) Thread-load voor WA/Lisa (loadThread doet zelf paint via microtask).
+    const kind = srcInfo[4];
+    if (row && (kind === 'wa' || kind === 'lisa')) {
+      queueMicrotask(() => _loadThread(row, ibSrc));
+    } else {
+      // Deep-link kinds: geen thread; paint alsnog om lege container te clearen.
+      queueMicrotask(_paintThread);
+    }
   };
   window.__ibGoMod = (mod) => { try { if (window.DFO && window.DFO.goMod) window.DFO.goMod(mod); } catch (_) {} };
 
@@ -350,7 +395,7 @@
         meta: { status: m.status, template_name: m.template_name, media_url: m.media_url },
       }));
       // Mark-read fire-and-forget (1 poging, geen retry).
-      _markReadOnce(row.id);
+      _markReadOnce(row.id, src);
     } else if (kind === 'lisa') {
       // Lisa-response: { conversation, messages: [{ id, direction, content, sent_at, role }] }
       const msgs = resp.messages || resp.conversation?.messages || [];
@@ -367,7 +412,10 @@
   }
 
   /* ── Mark-read fire-and-forget (WA only) ──────────────────────────── */
-  function _markReadOnce(conversationId) {
+  // BROK 1 bug 2 fix: bij succes-response reset unread lokaal + patch de
+  // DOM van díe rij surgisch (verwijder .nw + het rose-stip-element).
+  // Geen full render — behoudt scrollpositie in .ib-list.
+  function _markReadOnce(conversationId, src) {
     if (!conversationId) return;
     if (_thread._markedFor === conversationId) return; // 1 poging per conv
     _thread._markedFor = conversationId;
@@ -375,8 +423,33 @@
       window.KV.authedFetch('/api/inbox-mark-read', {
         method: 'POST',
         body: JSON.stringify({ conversation_id: conversationId }),
-      }).then(r => { if (!r.ok) console.warn('[inbox-v2] mark-read HTTP', r.status); })
-        .catch(e => console.warn('[inbox-v2] mark-read fail:', e && e.message));
+      }).then(async (r) => {
+        if (!r.ok) { console.warn('[inbox-v2] mark-read HTTP', r.status); return; }
+        // Lokale state: reset unread_count in _live.sources[src].items[X]
+        // zodat srcCount() correct blijft bij re-render + toekomstige row-map.
+        const srcKey = src || ibSrc;
+        const s = _live.sources[srcKey];
+        if (s && Array.isArray(s.items)) {
+          const idx = s.items.findIndex(it => String(it.id) === String(conversationId));
+          if (idx >= 0) {
+            s.items[idx] = { ...s.items[idx], unread_count: 0 };
+          }
+        }
+        // Surgische DOM-patch op de rij (geen full render → scroll blijft).
+        try {
+          const rowEl = document.querySelector('.ib-row[data-row-id="' + String(conversationId).replace(/"/g, '\\"') + '"]');
+          if (rowEl) {
+            rowEl.classList.remove('nw');
+            // Rose-stip zit als laatste child in de tag-row; herken aan
+            // background:var(--rose) inline-style-marker (uit renderRow).
+            const dots = rowEl.querySelectorAll('span[style*="background:var(--rose)"]');
+            dots.forEach(d => d.remove());
+            // Van-label was font-weight:600 bij nw; die staat inline maar
+            // valt niet in de weg — geen probleem als 'ie blijft. Volgende
+            // re-render pikt de nieuwe unread_count=0 op via mapWaRow.
+          }
+        } catch (e) { /* fail-soft */ }
+      }).catch(e => console.warn('[inbox-v2] mark-read fail:', e && e.message));
     } catch (e) {
       console.warn('[inbox-v2] mark-read setup fail:', e && e.message);
     }
@@ -497,18 +570,24 @@
   }
 
   /* ── Rij-renderer ─────────────────────────────────────────────────── */
+  // BROK 1 bug 3 fix: escape ALLE user-strings (van/t/p) — anders breekt
+  // een RFC 5322 e-mail-adres "Naam <x@y.nl>" of een subject met '<' de
+  // hele row-markup en nested vervolgens 85 rijen in elkaar.
+  // data-row-id gebruikt door __ibSel voor surgische highlight-swap.
   function renderRow(i, srcInfo) {
     const [, n, ic, col] = srcInfo;
-    return `<div class="ib-row ${i.nw ? 'nw' : ''} ${ibSel === i.id ? 'on' : ''}" onclick="__ibSel('${String(i.id).replace(/'/g, "\\'")}')">
-      ${H.av(i.van, 34)}
+    const rowIdAttr  = String(i.id).replace(/"/g, '&quot;');
+    const rowIdClick = String(i.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `<div class="ib-row ${i.nw ? 'nw' : ''} ${String(ibSel) === String(i.id) ? 'on' : ''}" data-row-id="${rowIdAttr}" onclick="__ibSel('${rowIdClick}')">
+      ${H.av(String(i.van || '?'), 34)}
       <div class="ib-b">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
-          <span style="font-size:13.5px;font-weight:${i.nw ? '600' : '500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.van}</span>
-          <span style="margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);flex-shrink:0">${i.tijd}</span></div>
-        <div class="ib-t">${i.t}</div>
-        <div class="ib-p">${i.p}</div>
+          <span style="font-size:13.5px;font-weight:${i.nw ? '600' : '500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(i.van)}</span>
+          <span style="margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);flex-shrink:0">${_esc(i.tijd)}</span></div>
+        <div class="ib-t">${_esc(i.t)}</div>
+        <div class="ib-p">${_esc(i.p)}</div>
         <div style="margin-top:7px;display:flex;gap:6px;align-items:center">
-          <span class="ib-src-tag" style="background:var(--${col}-soft);color:var(--${col})">${svg(ic, 'width:11px;height:11px')}${n}</span>
+          <span class="ib-src-tag" style="background:var(--${col}-soft);color:var(--${col})">${svg(ic, 'width:11px;height:11px')}${_esc(n)}</span>
           ${i.nw ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--rose);margin-left:auto"></span>' : ''}</div>
       </div></div>`;
   }
@@ -521,17 +600,17 @@
       <div style="padding:16px 22px;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;flex-wrap:wrap">
           <span class="ib-src-tag" style="background:var(--${col}-soft);color:var(--${col});font-size:11.5px;padding:3px 10px">
-            ${svg(ic, 'width:12px;height:12px')}${n}</span>
-          <span class="pill pill-neutral nodot">${c.kan}</span>
-          <span style="font-size:12px;color:var(--text-3)">${c.tijd}</span>
-          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="__ibGoMod('${mod}')">
-            Open in ${modShort} ${svg('<path d="m9 18 6-6-6-6"/>', 'width:13px;height:13px')}</button>
+            ${svg(ic, 'width:12px;height:12px')}${_esc(n)}</span>
+          <span class="pill pill-neutral nodot">${_esc(c.kan)}</span>
+          <span style="font-size:12px;color:var(--text-3)">${_esc(c.tijd)}</span>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="__ibGoMod('${_esc(mod)}')">
+            Open in ${_esc(modShort)} ${svg('<path d="m9 18 6-6-6-6"/>', 'width:13px;height:13px')}</button>
         </div>
         <div style="display:flex;align-items:center;gap:13px">
-          ${H.av(c.van, 42)}
+          ${H.av(String(c.van || '?'), 42)}
           <div style="flex:1;min-width:0">
-            <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.van}</div>
-            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.ctx || ''}</div>
+            <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(c.van)}</div>
+            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(c.ctx)}</div>
           </div>
         </div>
       </div>`;
@@ -556,17 +635,17 @@
         </div>`;
     } else if (kind === 'email') {
       // E-mail admin@/info@ — geen inline thread; deep-link naar E-mail-module.
+      // BROK 1 bug 3: consistent _esc() gebruiken i.p.v. partial replace.
       const raw = c._raw || {};
-      const snippet = raw.snippet || '';
       const hasAtt = !!raw.has_attachments;
       bodyHtml = `
         <div style="flex:1;min-height:0;overflow-y:auto;padding:22px">
           <div style="max-width:660px">
-            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${(raw.subject || '(geen onderwerp)').replace(/</g, '&lt;')}</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${_esc(raw.subject || '(geen onderwerp)')}</div>
             <div style="font-size:12.5px;color:var(--text-3);margin-bottom:16px">
-              van <b>${(raw.from_name || raw.from_address || '').replace(/</g, '&lt;')}</b> · ${_fmtTijd(raw.date_received)}${hasAtt ? ' · 📎 bijlage' : ''}
+              van <b>${_esc(raw.from_name || raw.from_address || '')}</b> · ${_esc(_fmtTijd(raw.date_received))}${hasAtt ? ' · 📎 bijlage' : ''}
             </div>
-            <div style="padding:14px 18px;background:var(--surface-2);border-radius:14px 14px 14px 4px;font-size:14px;line-height:1.6;white-space:pre-wrap">${(snippet || '(geen preview)').replace(/</g, '&lt;')}</div>
+            <div style="padding:14px 18px;background:var(--surface-2);border-radius:14px 14px 14px 4px;font-size:14px;line-height:1.6;white-space:pre-wrap">${_esc(raw.snippet || '(geen preview)')}</div>
             <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-3);line-height:1.55">
               Volledig bericht + reageren gebeurt in de <b>E-mail-module</b>. Klik hieronder om te openen.
             </div>
@@ -580,11 +659,11 @@
       bodyHtml = `
         <div style="flex:1;min-height:0;overflow-y:auto;padding:22px">
           <div style="max-width:660px">
-            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${(raw.title || '(geen titel)').replace(/</g, '&lt;')}</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${_esc(raw.title || '(geen titel)')}</div>
             <div style="font-size:12.5px;color:var(--text-3);margin-bottom:16px">
-              ${(raw.type || '').toUpperCase()} · ${raw.priority || '—'} · status <b>${raw.status || '?'}</b> · ${_fmtTijd(raw.updated_at || raw.created_at)}
+              ${_esc((raw.type || '').toUpperCase())} · ${_esc(raw.priority || '—')} · status <b>${_esc(raw.status || '?')}</b> · ${_esc(_fmtTijd(raw.updated_at || raw.created_at))}
             </div>
-            <div style="padding:14px 18px;background:var(--surface-2);border-radius:var(--r);font-size:14px;line-height:1.6;white-space:pre-wrap">${(raw.description || '(geen beschrijving)').replace(/</g, '&lt;')}</div>
+            <div style="padding:14px 18px;background:var(--surface-2);border-radius:var(--r);font-size:14px;line-height:1.6;white-space:pre-wrap">${_esc(raw.description || '(geen beschrijving)')}</div>
             <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-3)">
               Comments + status wijzigen gebeurt in het ticket-detail. Klik hieronder om te openen.
             </div>
@@ -598,11 +677,11 @@
       bodyHtml = `
         <div style="flex:1;min-height:0;overflow-y:auto;padding:22px">
           <div style="max-width:660px">
-            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${(raw.naam || '(onbekend)').replace(/</g, '&lt;')}</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">${_esc(raw.naam || '(onbekend)')}</div>
             <div style="font-size:12.5px;color:var(--text-3);margin-bottom:16px">
-              ${(raw.email || '').replace(/</g, '&lt;')}${raw.traject ? ' · traject: ' + raw.traject : ''}${raw.status ? ' · ' + raw.status : ''}
+              ${_esc(raw.email || '')}${raw.traject ? ' · traject: ' + _esc(raw.traject) : ''}${raw.status ? ' · ' + _esc(raw.status) : ''}
             </div>
-            <div style="padding:14px 18px;background:var(--surface-2);border-radius:var(--r);font-size:14px;line-height:1.6">${(raw.laatste_bericht_preview || raw.warmte_reden || '(geen preview)').replace(/</g, '&lt;')}</div>
+            <div style="padding:14px 18px;background:var(--surface-2);border-radius:var(--r);font-size:14px;line-height:1.6">${_esc(raw.laatste_bericht_preview || raw.warmte_reden || '(geen preview)')}</div>
             <div style="margin-top:20px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12.5px;color:var(--text-3)">
               Volledige historie + acties in de Leadsonderhoud-module.
             </div>
@@ -639,5 +718,5 @@
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('inbox');
   }
 
-  console.debug('[inbox-v2] v=2 BROK 1 — 8 bronnen live (WA/Lisa/leadsonderhoud/tickets/email); thread-render voor WA+Lisa (append-only, scroll-preserve); mark-read fail-soft; email/tickets/leadsonderhoud via deep-link naar bron-module.');
+  console.debug('[inbox-v2] v=3 BROK 1 (fix) — bug 1 surgische selectie (scroll behouden), bug 2 mark-read lokale state + DOM-patch, bug 3 escape user-strings in row + detail (RFC 5322 emails braken layout).');
 })();
