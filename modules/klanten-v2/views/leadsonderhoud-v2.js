@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 2 (v=6, 2026-08-17): 4 verify-fixes + echte templates.
+// Leadsonderhoud v2 — BROK 2 (v=7, 2026-08-17): 3 Gesprekken UI-fixes.
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -568,6 +568,15 @@
     if (nearBottom) container.scrollTop = container.scrollHeight;
   }
   function _lsInbRenderMsg(m) {
+    // v=7 FIX A: bubble hoort de INHOUD te omhullen, niet als een block-div
+    // uit te rekken tot max-width. De bubble-div was default display:block,
+    // dus in de flex-wrapper stretchte 'ie naar de max-width van 82% —
+    // reuzengrote box om "Hey".
+    // Fix: display:inline-block + width:fit-content + max-width 70% zodat
+    // korte tekst een compacte bubble is en lange tekst netjes wrapt tot
+    // 70% van de thread-kolom (vergelijkbaar met onboarding-inbox styling).
+    // Ook: kleinere padding 8px/12px + kanaal-badge als klein span BOVEN de
+    // tekst met eigen inline-flex (geen full-width flex-row meer).
     const isOut = m.direction === 'outbound';
     const body = esc(m.body || '');
     const at = m.at ? esc(fmtDatum(m.at)) : '';
@@ -579,16 +588,14 @@
     const chanColor = m.channel === 'mail' ? 'blue' : 'teal';
     const chanLabel = m.channel === 'mail' ? 'mail' : 'WA';
     const subjHtml = m.channel === 'mail' && m.subject
-      ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:4px">${esc(m.subject)}</div>`
+      ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:3px">${esc(m.subject)}</div>`
       : '';
-    return `<div data-msg-id="${esc(String(m.id))}" style="display:flex;justify-content:${side};margin-bottom:8px">
-      <div style="max-width:82%;padding:10px 14px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:${subjHtml ? '4' : '2'}px;font-size:10.5px;opacity:.6">
-          <span style="padding:1px 6px;border-radius:8px;background:var(--${chanColor}-soft);color:var(--${chanColor});font-weight:600;letter-spacing:.04em">${chanLabel}</span>
-        </div>
+    return `<div data-msg-id="${esc(String(m.id))}" style="display:flex;justify-content:${side};margin-bottom:6px">
+      <div style="display:inline-block;width:fit-content;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">
+        <span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--${chanColor}-soft);color:var(--${chanColor});font-weight:600;letter-spacing:.04em;margin-bottom:3px;opacity:.85">${chanLabel}</span>
         ${subjHtml}
-        ${body || '<span style="opacity:.55">(leeg bericht)</span>'}
-        <div style="font-size:10.5px;opacity:.55;font-family:'IBM Plex Mono',monospace;margin-top:4px;text-align:right">${at}</div>
+        <div>${body || '<span style="opacity:.55">(leeg bericht)</span>'}</div>
+        <div style="font-size:10px;opacity:.5;font-family:'IBM Plex Mono',monospace;margin-top:3px;text-align:right">${at}</div>
       </div>
     </div>`;
   }
@@ -870,20 +877,72 @@
       listEl.innerHTML = `<div style="padding:22px;color:var(--text-3);font-size:13px">Geen goedgekeurde templates voor de leadsonderhoud-lijn.</div>`;
       return;
     }
-    listEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px">
-      ${items.map((it, i) => `
-        <button class="btn btn-ghost btn-sm" data-tpl-idx="${i}" style="text-align:left;justify-content:flex-start;padding:10px 12px;height:auto;white-space:normal">
-          <div style="font-weight:600;margin-bottom:2px">${esc(it.name)} <span style="font-size:10.5px;color:var(--text-3);font-weight:400">· ${esc(it.language || 'nl')} · ${esc(it.category || '')}</span></div>
-          <div style="font-size:12px;color:var(--text-3);white-space:pre-wrap;line-height:1.45">${esc((it.body_text || '').slice(0, 200))}</div>
-        </button>`).join('')}
-    </div>`;
-    listEl.querySelectorAll('[data-tpl-idx]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = Number(btn.getAttribute('data-tpl-idx'));
-        const tpl = items[idx];
-        if (tpl) _lsInbOpenTemplateForm(conv, tpl);
+    // v=7 FIX C: groepeer templates per Meta-category (MARKETING / UTILITY /
+    // AUTHENTICATION / null=Overig). Category zit al in de payload
+    // (whatsapp_meta_templates.category, mee-geselecteerd in
+    // leadsonderhoud-gesprek-templates.js SELECT_COLS). Chips voor snel
+    // filteren + collapse-headers per categorie. Filter-state in closure.
+    let activeCat = 'ALL';
+    const renderList = () => {
+      const filtered = activeCat === 'ALL' ? items : items.filter(it => (it.category || 'OVERIG').toUpperCase() === activeCat);
+      const byCat = new Map();
+      for (const it of filtered) {
+        const key = (it.category || 'OVERIG').toUpperCase();
+        if (!byCat.has(key)) byCat.set(key, []);
+        byCat.get(key).push(it);
+      }
+      // Vaste sortering: MARKETING boven, dan UTILITY, dan AUTHENTICATION,
+      // dan OVERIG, alfabetisch daarbinnen.
+      const CAT_ORDER = ['MARKETING', 'UTILITY', 'AUTHENTICATION', 'OVERIG'];
+      const groups = Array.from(byCat.entries()).sort((a, b) => {
+        const ai = CAT_ORDER.indexOf(a[0]); const bi = CAT_ORDER.indexOf(b[0]);
+        return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
       });
-    });
+      const catColor = { MARKETING: 'violet', UTILITY: 'blue', AUTHENTICATION: 'amber', OVERIG: 'text-3' };
+      const catLabel = { MARKETING: 'Marketing', UTILITY: 'Utility', AUTHENTICATION: 'Auth', OVERIG: 'Overig' };
+      const chipsHtml = `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="chip ${activeCat === 'ALL' ? 'on' : ''}" data-cat="ALL" style="font-size:11.5px;padding:3px 10px">Alle (${items.length})</button>
+        ${['MARKETING', 'UTILITY', 'AUTHENTICATION', 'OVERIG'].map(cat => {
+          const n = items.filter(it => (it.category || 'OVERIG').toUpperCase() === cat).length;
+          if (!n) return '';
+          return `<button class="chip ${activeCat === cat ? 'on' : ''}" data-cat="${cat}" style="font-size:11.5px;padding:3px 10px">${catLabel[cat]} (${n})</button>`;
+        }).join('')}
+      </div>`;
+      const groupsHtml = groups.length
+        ? groups.map(([cat, tpls]) => `
+            <div style="margin-bottom:14px">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:10px;background:var(--${catColor[cat] || 'text-3'}-soft,var(--surface-2));color:var(--${catColor[cat] || 'text-3'})">${esc(catLabel[cat] || cat)}</span>
+                <span style="font-size:11px;color:var(--text-3)">${tpls.length} sjablonen</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:5px">
+                ${tpls.sort((a, b) => String(a.name).localeCompare(String(b.name))).map(it => {
+                  const globalIdx = items.indexOf(it);
+                  return `<button class="btn btn-ghost btn-sm" data-tpl-idx="${globalIdx}" style="text-align:left;justify-content:flex-start;padding:9px 12px;height:auto;white-space:normal">
+                    <div style="font-weight:600;font-size:12.5px;margin-bottom:2px">${esc(it.name)} <span style="font-size:10.5px;color:var(--text-3);font-weight:400">· ${esc(it.language || 'nl')}</span></div>
+                    <div style="font-size:11.5px;color:var(--text-3);white-space:pre-wrap;line-height:1.4">${esc((it.body_text || '').slice(0, 180))}${(it.body_text || '').length > 180 ? '…' : ''}</div>
+                  </button>`;
+                }).join('')}
+              </div>
+            </div>`).join('')
+        : `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Geen sjablonen in deze categorie.</div>`;
+      listEl.innerHTML = chipsHtml + groupsHtml;
+      // (Re)bind chips + template-clicks.
+      listEl.querySelectorAll('[data-cat]').forEach(chip => {
+        chip.addEventListener('click', () => {
+          activeCat = chip.getAttribute('data-cat');
+          renderList();
+        });
+      });
+      listEl.querySelectorAll('[data-tpl-idx]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = Number(btn.getAttribute('data-tpl-idx'));
+          const tpl = items[idx];
+          if (tpl) _lsInbOpenTemplateForm(conv, tpl);
+        });
+      });
+    };
+    renderList();
   }
   function _lsInbOpenTemplateForm(conv, tpl) {
     const bodyText = String(tpl.body_text || '');
@@ -1096,17 +1155,26 @@
     const waEnabled = !!(conv.has_wa && conv.can_send_text);
     const mailEnabled = !!conv.email;
 
-    // Buiten-venster / geen-WA → template-modus (met uitleg dat template-picker
-    // niet beschikbaar is voor leadsonderhoud — gebruik mail).
+    // v=7 FIX B: Sjabloon-knop moet ALTIJD zichtbaar zijn in het WA-compose-
+    // gebied. Vroegere flow: mode='text' toonde géén sjabloon-knop -> buiten
+    // 24u/geen-WA verscheen alleen disabled 'Verstuur WA' + mail-knop. De
+    // template-route bleef verborgen tot user handmatig probeerde te verzenden
+    // en de 422-fallback triggerde. Nu:
+    //   BUITEN venster / mode=template: Sjabloon is PRIMARY (naast mail-knop).
+    //   BINNEN venster / mode=text:     Sjabloon naast Verstuur-WA (ghost).
+    //   BUITEN venster / mode=text:     'Verstuur WA' disabled + Sjabloon
+    //                                    PRIMARY (want dat is de enige WA-route).
+
+    // Template-mode (na 422 of expliciete switch) — banner + directe knoppen.
     if (mode === 'template') {
       return `<div id="lsInbComposeBlock" style="padding:12px 20px;background:var(--surface);border-top:1px solid var(--border)">
         <div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:var(--r-sm);font-size:12.5px;color:var(--amber);margin-bottom:10px">
-          Buiten het 24u-venster — vrije-tekst WA is dan niet toegestaan.
-          Kies een <b>e-mail</b>-antwoord (welkom@) of een goedgekeurde template.
+          Buiten het 24u-venster — vrije-tekst WA is niet toegestaan.
+          Kies een <b>goedgekeurde template</b> of stuur een <b>e-mail</b>.
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-sm" onclick="__lsInbToggleMailForm()">${showMail ? 'Verberg mail' : 'Antwoord per mail'}</button>
-          <button class="btn btn-ghost btn-sm" onclick="__lsInbTemplatePicker()">Templates…</button>
+          <button class="btn btn-primary btn-sm" style="color:#fff" onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''}>${svg(I.doc || I.mail, 'width:13px;height:13px')} Kies sjabloon</button>
+          <button class="btn btn-ghost btn-sm" onclick="__lsInbToggleMailForm()" ${!mailEnabled ? 'disabled' : ''}>${showMail ? 'Verberg mail' : 'Antwoord per mail'}</button>
           <button class="btn btn-ghost btn-sm" onclick="__lsInbResetMode()">Probeer WA-tekst</button>
         </div>
         ${showMail ? _lsInbRenderMailForm(conv, sending) : ''}
@@ -1116,20 +1184,26 @@
     const waDraft = esc(_lsInb.compose.draftsWa[leadId] || '');
     const mailBlock = showMail ? _lsInbRenderMailForm(conv, sending) : '';
 
+    // Sjabloon-primary bij !waEnabled (buiten venster), ghost bij waEnabled.
+    const tplBtnClass = waEnabled ? 'btn btn-ghost btn-sm' : 'btn btn-primary btn-sm';
+    const tplBtnStyle = waEnabled ? '' : 'style="color:#fff"';
+
     return `<div id="lsInbComposeBlock" style="padding:12px 20px;background:var(--surface);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px">
       <div>
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
           <span style="font-size:10.5px;padding:2px 7px;border-radius:8px;background:var(--teal-soft);color:var(--teal);font-weight:600">WhatsApp</span>
-          ${waEnabled ? '<span style="font-size:11px;color:var(--text-3)">binnen 24u-venster</span>' : '<span style="font-size:11px;color:var(--amber)">buiten venster / geen WA</span>'}
+          ${waEnabled ? '<span style="font-size:11px;color:var(--text-3)">binnen 24u-venster</span>' : '<span style="font-size:11px;color:var(--amber)">buiten 24u — alleen sjabloon</span>'}
         </div>
         <textarea
-          placeholder="${waEnabled ? 'Typ een WhatsApp-antwoord… (Ctrl+Enter om te verzenden)' : 'WhatsApp niet beschikbaar — schakel naar mail hieronder'}"
+          placeholder="${waEnabled ? 'Typ een WhatsApp-antwoord… (Ctrl+Enter om te verzenden)' : 'Buiten 24u-venster — gebruik "Sjabloon" hieronder of stuur mail'}"
           oninput="__lsInbDraftWa('${String(leadId).replace(/'/g, "\\'")}', this.value)"
           onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();__lsInbSendWa();}"
           ${sending || !waEnabled ? 'disabled' : ''}
           style="width:100%;min-height:64px;max-height:180px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;line-height:1.5;font-family:inherit;resize:vertical;${!waEnabled ? 'opacity:.5' : ''}">${waDraft}</textarea>
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
-          <button class="btn btn-primary btn-sm" onclick="__lsInbSendWa()" ${sending || !waEnabled ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur WA'}</button>
+          ${waEnabled ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="__lsInbSendWa()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur WA'}</button>` : `<button class="btn btn-ghost btn-sm" disabled title="Buiten 24u-venster — kies een sjabloon">Verstuur WA</button>`}
+          <button class="${tplBtnClass}" ${tplBtnStyle} onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Kies een goedgekeurde WA-template">${svg(I.doc || I.mail, 'width:13px;height:13px')} Sjabloon</button>
+          <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker()" ${sending ? 'disabled' : ''} title="Canned snel-antwoord invoegen">Snel</button>
           <button class="btn btn-ghost btn-sm" onclick="__lsInbToggleMailForm()" ${!mailEnabled ? 'disabled' : ''} title="${mailEnabled ? 'Antwoord per mail' : 'Geen e-mailadres bekend'}">${showMail ? 'Verberg mail' : 'Ook / alleen mail…'}</button>
         </div>
       </div>
@@ -1495,5 +1569,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=6 BROK 2 verify-fixes — FIX 1 poll behoudt lijst-scroll (hash-diff + capture/restore), FIX 2 confirm-modal knop color:#fff (leesbare Verstuur), FIX 3 has_mail telt outbound (email_replies + berichten_log motor-mail) + afspraak_op meegeleverd (FIX 4 header-badge). FIX 5 quick-replies canned + ECHTE WA-templates via /api/leadsonderhoud-gesprek-templates + -template (WABA-scoped, sendTemplate met variabelen).');
+  console.debug('[ls-v2] v=7 Gesprekken UI-fixes — FIX A bubble display:inline-block+width:fit-content+max-width 70% (was reuze-blokken om korte tekst), FIX B Sjabloon-knop altijd zichtbaar in WA-compose (primary bij !waEnabled/buiten venster, ghost binnen), FIX C templates in de picker gegroepeerd per Meta-category (MARKETING/UTILITY/AUTHENTICATION/OVERIG) + chips-filter.');
 })();
