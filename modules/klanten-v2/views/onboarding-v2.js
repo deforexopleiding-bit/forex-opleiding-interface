@@ -583,35 +583,686 @@
         : onbTable(pageMeta.slice, 'archived', '__onbRowClickArchived')}
       ${(!st.error && (!st.loading || st.rows)) ? paginator('archived', pageMeta) : ''}`;
   }
-  function inboxPlaceholder() {
-    // De unified Inbox-module is nu LIVE en toont Onboarding-WhatsApp-
-    // conversaties als eigen bron. Deze tab wordt daarom een deep-link
-    // naar Inbox (voorgefilterd op 'ob' via sessionStorage — inbox-v2
-    // leest die key bij mount, past ibSrc aan en clearet de key).
-    return `<div class="empty" style="padding:60px 20px;">
-      <div class="empty-ico">${svg(I.mail || I.doc)}</div>
-      <div class="empty-t">Onboarding-Inbox is verhuisd</div>
-      <div class="empty-s" style="max-width:520px;margin:8px auto 18px">
-        WhatsApp-berichten voor Onboarding zitten nu in de unified <b>Inbox</b>-module. Deze
-        opent voorgefilterd op de Onboarding-bron — thread + versturen + koppelen werkt daar.
-      </div>
-      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-        <button class="btn btn-primary btn-sm" onclick="__onbGoInbox()">Open in Inbox →</button>
-        <a class="btn btn-ghost btn-sm" href="/modules/onboarding-hub.html#inbox" style="text-decoration:none">Nog even de v1-hub</a>
+  /* ══════════════════════════════════════════════════════════════════
+     ONBOARDING INLINE INBOX (v=11) — scoped op ?module=onboarding
+     Patroon overgenomen uit inbox-v2 (unified). Namespaces: _onbInb / __onbInb*.
+     ══════════════════════════════════════════════════════════════════ */
+
+  const _onbInb = {
+    convs:    { loading: false, fetched: false, error: null, items: [] },
+    sel:      null,      // conversation_id
+    thread: {
+      convId: null, src: 'ob', items: [], loading: false, error: null,
+      _paintedFor: null, _markedFor: null,
+    },
+    compose: {
+      drafts: {}, mode: {}, sending: null,
+      templateCache: {}, quickCache: {},
+    },
+    poll:     { handle: null, running: false, intervalMs: 18000 },
+    _fetchSeq: 0,
+  };
+
+  // ── Helpers (tryFetch, modal, toast — spiegel inbox-v2) ─────────────
+  async function _onbInbFetch(label, url, timeoutMs) {
+    timeoutMs = timeoutMs || 8000;
+    try {
+      const p = window.KV.authedJson(url);
+      return await Promise.race([
+        p,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+      ]);
+    } catch (e) {
+      console.warn('[onb-inbox] ' + label + ' fail:', e && e.message);
+      return null;
+    }
+  }
+  function _onbInbCloseModal() {
+    const m = document.getElementById('onbInbModalRoot');
+    if (m) m.remove();
+    document.removeEventListener('keydown', _onbInbModalKey, true);
+  }
+  function _onbInbModalKey(e) { if (e.key === 'Escape') { e.preventDefault(); _onbInbCloseModal(); } }
+  function _onbInbOpenModal(html, opts) {
+    _onbInbCloseModal();
+    const root = document.createElement('div');
+    root.id = 'onbInbModalRoot';
+    root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)';
+    root.innerHTML = `<div id="onbInbModalBox" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+      padding:22px;max-width:${opts?.maxWidth || 460}px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">${html}</div>`;
+    root.addEventListener('click', (e) => { if (e.target === root) _onbInbCloseModal(); });
+    document.body.appendChild(root);
+    document.addEventListener('keydown', _onbInbModalKey, true);
+    return root;
+  }
+  function _onbInbAskConfirm(title, body, opts) {
+    const okLabel     = esc(opts?.okLabel     || 'Bevestig');
+    const cancelLabel = esc(opts?.cancelLabel || 'Annuleren');
+    const tone        = opts?.tone === 'danger' ? 'rose' : 'brand';
+    return new Promise((resolve) => {
+      _onbInbOpenModal(`
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px;white-space:pre-wrap">${esc(body)}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="onbInbModalCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
+          <button id="onbInbModalOk" class="btn btn-primary btn-sm" style="background:var(--${tone});border-color:var(--${tone})">${okLabel}</button>
+        </div>`);
+      document.getElementById('onbInbModalCancel').addEventListener('click', () => { _onbInbCloseModal(); resolve(false); });
+      document.getElementById('onbInbModalOk').addEventListener('click',    () => { _onbInbCloseModal(); resolve(true);  });
+    });
+  }
+  function _onbInbToast(msg, tone) { try { window.KV && window.KV.toast && window.KV.toast(msg, { tone }); } catch (_) {} }
+
+  function _onbInbFmtTijd(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      const delta = Date.now() - d.getTime();
+      if (delta < 0) return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+      if (delta < 3600000)      return Math.max(1, Math.round(delta / 60000)) + 'm';
+      if (delta < 86400000)     return Math.round(delta / 3600000) + 'u';
+      if (delta < 7 * 86400000) return Math.round(delta / 86400000) + 'd';
+      return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+    } catch (_) { return '—'; }
+  }
+
+  // ── Fetchers ────────────────────────────────────────────────────────
+  async function _onbInbFetchConvs() {
+    const st = _onbInb.convs;
+    if (st.fetched && !st.error) return;
+    if (st.loading) return;
+    st.loading = true; st.error = null;
+    const seq = ++_onbInb._fetchSeq;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await _onbInbFetch('convs', '/api/inbox-conversations-list?module=onboarding&status_filter=active&limit=200');
+      if (seq !== _onbInb._fetchSeq) return;
+      if (j && Array.isArray(j.items)) {
+        st.items = j.items;
+        st.fetched = true;
+      } else {
+        st.error = 'Kon conversaties niet laden';
+      }
+    } finally {
+      if (seq === _onbInb._fetchSeq) {
+        st.loading = false;
+        if (window.DFO?.render) window.DFO.render();
+      }
+    }
+  }
+  function _onbInbResetThread() {
+    _onbInb.thread.convId = null;
+    _onbInb.thread.items = [];
+    _onbInb.thread.loading = false;
+    _onbInb.thread.error = null;
+    _onbInb.thread._paintedFor = null;
+    _onbInb.thread._markedFor = null;
+  }
+  async function _onbInbLoadThread(convId) {
+    if (!convId) return;
+    if (_onbInb.thread.convId === convId && !_onbInb.thread.error) return;
+    _onbInb.thread.loading = true;
+    _onbInb.thread.error = null;
+    _onbInb.thread.convId = convId;
+    _onbInb.thread.items = [];
+    _onbInb.thread._paintedFor = null;
+    if (window.DFO?.render) window.DFO.render();
+    const seq = ++_onbInb._fetchSeq;
+    const j = await _onbInbFetch('thread ' + convId, '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(convId) + '&limit=200');
+    if (seq !== _onbInb._fetchSeq) return;
+    if (_onbInb.thread.convId !== convId) return;
+    if (!j) {
+      _onbInb.thread.loading = false;
+      _onbInb.thread.error = 'Kon berichten niet laden';
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
+    _onbInb.thread.items = (j.items || []).map(m => ({
+      id: m.id,
+      direction: m.direction === 'outbound' ? 'outbound' : 'inbound',
+      body: m.body || '',
+      at: m.sent_at || m.created_at || null,
+      meta: { status: m.status, template_name: m.template_name },
+    }));
+    _onbInb.thread.loading = false;
+    _onbInbMarkReadOnce(convId);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  function _onbInbMarkReadOnce(convId) {
+    if (!convId) return;
+    if (_onbInb.thread._markedFor === convId) return;
+    _onbInb.thread._markedFor = convId;
+    try {
+      window.KV.authedFetch('/api/inbox-mark-read', {
+        method: 'POST',
+        body: JSON.stringify({ conversation_id: convId }),
+      }).then(r => {
+        if (!r.ok) { console.warn('[onb-inbox] mark-read HTTP', r.status); return; }
+        // Lokale state + surgische DOM-patch (spiegel inbox-v2).
+        const idx = _onbInb.convs.items.findIndex(it => String(it.id) === String(convId));
+        if (idx >= 0) _onbInb.convs.items[idx] = { ..._onbInb.convs.items[idx], unread_count: 0 };
+        const rowEl = document.querySelector('#onbInbList .onb-inb-row[data-row-id="' + String(convId).replace(/"/g, '\\"') + '"]');
+        if (rowEl) {
+          rowEl.classList.remove('nw');
+          rowEl.querySelectorAll('span[style*="background:var(--rose)"]').forEach(d => d.remove());
+        }
+      }).catch(e => console.warn('[onb-inbox] mark-read fail:', e && e.message));
+    } catch (e) { console.warn('[onb-inbox] mark-read setup fail:', e && e.message); }
+  }
+
+  // ── Append-only thread paint ────────────────────────────────────────
+  function _onbInbPaintThread() {
+    const container = document.getElementById('onbInbThreadScroll');
+    if (!container) return;
+    if (!_onbInb.thread.convId) { container.innerHTML = ''; return; }
+    const isNewConv = _onbInb.thread._paintedFor !== _onbInb.thread.convId;
+    if (isNewConv) {
+      container.innerHTML = _onbInb.thread.items.map(_onbInbRenderMsg).join('');
+      _onbInb.thread._paintedFor = _onbInb.thread.convId;
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+    const seen = new Set();
+    container.querySelectorAll('[data-msg-id]').forEach(el => seen.add(el.getAttribute('data-msg-id')));
+    const additions = _onbInb.thread.items.filter(m => !seen.has(String(m.id)));
+    if (!additions.length) return;
+    const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
+    container.insertAdjacentHTML('beforeend', additions.map(_onbInbRenderMsg).join(''));
+    if (nearBottom) container.scrollTop = container.scrollHeight;
+  }
+  function _onbInbRenderMsg(m) {
+    const isOut = m.direction === 'outbound';
+    const body = esc(m.body || '');
+    const at = m.at ? esc(_onbInbFmtTijd(m.at)) : '';
+    const side = isOut ? 'flex-end' : 'flex-start';
+    const bg = isOut ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)';
+    const color = isOut ? 'var(--brand)' : 'var(--text-1)';
+    const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
+    return `<div data-msg-id="${esc(String(m.id))}" style="display:flex;justify-content:${side};margin-bottom:8px">
+      <div style="max-width:78%;padding:10px 14px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
+        ${body || '<span style="opacity:.55">(leeg bericht)</span>'}
+        <div style="font-size:10.5px;opacity:.55;font-family:\\'IBM Plex Mono\\',monospace;margin-top:4px;text-align:right">${at}${m.meta?.template_name ? ' · template' : ''}</div>
       </div>
     </div>`;
   }
-  // Deep-link helper: zet sessionStorage-hint + navigeer via DFO.
-  window.__onbGoInbox = () => {
-    try { sessionStorage.setItem('inbox-pre-src', 'ob'); } catch (_) {}
-    try { window.DFO && window.DFO.goMod && window.DFO.goMod('inbox'); } catch (_) {}
+
+  // ── Handlers op window ──────────────────────────────────────────────
+  window.__onbInbSel = (id) => {
+    if (String(_onbInb.sel) === String(id)) return;
+    _onbInb.sel = id;
+    _onbInbResetThread();
+    // Surgische highlight-swap (behoud scrollpositie in de lijst).
+    document.querySelectorAll('#onbInbList .onb-inb-row.on').forEach(el => el.classList.remove('on'));
+    const newRow = document.querySelector('#onbInbList .onb-inb-row[data-row-id="' + String(id).replace(/"/g, '\\"') + '"]');
+    if (newRow) newRow.classList.add('on');
+    // Detail-pane vervangen (right-side).
+    const split = document.querySelector('.onb-inb-split');
+    const oldRight = split ? split.querySelector('.onb-inb-right') : null;
+    const row = _onbInb.convs.items.find(c => String(c.id) === String(id));
+    if (split && row) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = _onbInbRenderRight(row);
+      const el = wrap.firstElementChild;
+      if (el) { if (oldRight) split.replaceChild(el, oldRight); else split.appendChild(el); }
+    }
+    queueMicrotask(() => _onbInbLoadThread(id));
   };
+  window.__onbInbDraftInput = (convId, val) => { _onbInb.compose.drafts[convId] = val; };
+  window.__onbInbResetMode = () => {
+    const convId = _onbInb.thread.convId;
+    if (!convId) return;
+    _onbInb.compose.mode[convId] = 'text';
+    _onbInbRepaintCompose();
+  };
+
+  function _onbInbOptimisticAppend(convId, body) {
+    if (_onbInb.thread.convId !== convId) return;
+    _onbInb.thread.items.push({
+      id: 'opt-' + Date.now(),
+      direction: 'outbound',
+      body,
+      at: new Date().toISOString(),
+      meta: {},
+    });
+    _onbInbPaintThread();
+  }
+  function _onbInbRepaintCompose() {
+    const el = document.getElementById('onbInbComposeBlock');
+    if (!el) return;
+    el.outerHTML = _onbInbRenderCompose();
+  }
+
+  window.__onbInbSend = async () => {
+    const convId = _onbInb.thread.convId;
+    if (!convId) return;
+    if (_onbInb.compose.sending === convId) return;
+    const body = String(_onbInb.compose.drafts[convId] || '').trim();
+    if (!body) { _onbInbToast('Bericht is leeg', 'warn'); return; }
+    const row = _onbInb.convs.items.find(c => String(c.id) === String(convId));
+    const naam = _onbInbRowVan(row);
+    const preview = body.length > 140 ? body.slice(0, 140) + '…' : body;
+    const ok = await _onbInbAskConfirm(`Verstuur bericht naar ${naam}?`, preview, { okLabel: 'Verstuur' });
+    if (!ok) return;
+    _onbInb.compose.sending = convId;
+    _onbInbRepaintCompose();
+    try {
+      const resp = await window.KV.authedFetch('/api/inbox-send', {
+        method: 'POST',
+        body: JSON.stringify({ conversation_id: convId, mode: 'text', body }),
+      });
+      if (resp.status === 422) {
+        const j = await resp.json().catch(() => ({}));
+        const reason = j.error || '24h_window_expired';
+        if (String(reason).includes('24h') || String(reason).includes('window')) {
+          _onbInb.compose.mode[convId] = 'template';
+          _onbInbToast('Buiten 24u-venster — kies een goedgekeurde template', 'warn');
+          _onbInbOpenTemplatePicker(convId);
+          return;
+        }
+        throw new Error(reason);
+      }
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.error || ('HTTP ' + resp.status));
+      }
+      _onbInbOptimisticAppend(convId, body);
+      _onbInb.compose.drafts[convId] = '';
+      _onbInbToast('WhatsApp verzonden', 'ok');
+    } catch (e) {
+      console.warn('[onb-inbox] send fail:', e && e.message);
+      _onbInbToast('Versturen mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _onbInb.compose.sending = null;
+      _onbInbRepaintCompose();
+    }
+  };
+
+  window.__onbInbQuickPicker = async () => {
+    const convId = _onbInb.thread.convId;
+    if (!convId) return;
+    let items = _onbInb.compose.quickCache[convId];
+    if (!items) {
+      const j = await _onbInbFetch('quick', '/api/inbox-quick-replies-list?conversation_id=' + encodeURIComponent(convId));
+      items = (j && Array.isArray(j.items)) ? j.items : [];
+      _onbInb.compose.quickCache[convId] = items;
+    }
+    if (!items.length) { _onbInbToast('Geen snel-antwoorden geconfigureerd', 'warn'); return; }
+    _onbInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:12px">Snel-antwoord kiezen</div>
+      <div style="display:flex;flex-direction:column;gap:6px;max-height:60vh;overflow-y:auto">
+        ${items.map(it => `
+          <button class="btn btn-ghost btn-sm" data-qr-id="${esc(it.id)}" style="text-align:left;justify-content:flex-start;padding:10px 12px;height:auto;white-space:normal">
+            <div style="font-weight:600;margin-bottom:2px">${esc(it.title || '(zonder titel)')}</div>
+            <div style="font-size:12px;color:var(--text-3);white-space:pre-wrap;line-height:1.45">${esc(it.body_text || '')}</div>
+          </button>`).join('')}
+      </div>
+      <div style="margin-top:14px;text-align:right"><button id="onbInbQrCancel" class="btn btn-ghost btn-sm">Sluiten</button></div>`, { maxWidth: 560 });
+    document.getElementById('onbInbQrCancel').addEventListener('click', _onbInbCloseModal);
+    document.querySelectorAll('#onbInbModalBox [data-qr-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-qr-id');
+        const it = items.find(x => String(x.id) === String(id));
+        if (it) {
+          _onbInb.compose.drafts[convId] = (String(_onbInb.compose.drafts[convId] || '') + (it.body_text || '')).trimStart();
+          _onbInbRepaintCompose();
+          _onbInbCloseModal();
+        }
+      });
+    });
+  };
+
+  window.__onbInbTemplatePicker = () => { _onbInbOpenTemplatePicker(_onbInb.thread.convId); };
+  async function _onbInbOpenTemplatePicker(convId) {
+    if (!convId) return;
+    let items = _onbInb.compose.templateCache[convId];
+    if (!items) {
+      const j = await _onbInbFetch('tpl-list', '/api/inbox-template-list?conversation_id=' + encodeURIComponent(convId));
+      items = (j && Array.isArray(j.items)) ? j.items : [];
+      _onbInb.compose.templateCache[convId] = items;
+    }
+    if (!items.length) { _onbInbToast('Geen goedgekeurde templates', 'warn'); return; }
+    _onbInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">Kies een goedgekeurde template</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Templates mogen ook buiten het 24u-venster verstuurd worden.</div>
+      <div id="onbInbTplList" style="display:flex;flex-direction:column;gap:6px;max-height:55vh;overflow-y:auto">
+        ${items.map(it => `
+          <button class="btn btn-ghost btn-sm" data-tpl-id="${esc(it.id)}" style="text-align:left;justify-content:flex-start;padding:10px 12px;height:auto;white-space:normal">
+            <div style="font-weight:600;margin-bottom:2px">${esc(it.name)} <span style="font-size:10.5px;color:var(--text-3);font-weight:400">· ${esc(it.language || 'nl')} · ${esc(it.category || '')}</span></div>
+            <div style="font-size:12px;color:var(--text-3);white-space:pre-wrap;line-height:1.45">${esc((it.body_text || '').slice(0, 200))}</div>
+          </button>`).join('')}
+      </div>
+      <div style="margin-top:14px;text-align:right"><button id="onbInbTplCancel" class="btn btn-ghost btn-sm">Sluiten</button></div>`, { maxWidth: 620 });
+    document.getElementById('onbInbTplCancel').addEventListener('click', _onbInbCloseModal);
+    document.querySelectorAll('#onbInbTplList [data-tpl-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-tpl-id');
+        const it = items.find(x => String(x.id) === String(id));
+        if (it) _onbInbOpenTemplateForm(convId, it);
+      });
+    });
+  }
+  function _onbInbOpenTemplateForm(convId, tpl) {
+    const bodyText = String(tpl.body_text || '');
+    const namedMapping = tpl.meta_param_mapping && typeof tpl.meta_param_mapping === 'object' && tpl.meta_param_mapping.body;
+    const positionalKeys = [];
+    const re = /\{\{(\d+)\}\}/g; let m;
+    while ((m = re.exec(bodyText))) if (!positionalKeys.includes(m[1])) positionalKeys.push(m[1]);
+    positionalKeys.sort((a, b) => Number(a) - Number(b));
+    const previewHtml = esc(bodyText).replace(/\{\{(\d+)\}\}/g, '<b style="background:var(--brand-soft,var(--surface-2));padding:0 4px;border-radius:3px">{{$1}}</b>');
+    const variablesForm = (namedMapping || positionalKeys.length === 0)
+      ? `<div style="font-size:12px;color:var(--text-3);padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);margin-bottom:12px">
+           ${namedMapping ? 'Variabelen worden automatisch ingevuld (klant + factuur-context).' : 'Deze template heeft geen variabelen.'}
+         </div>`
+      : `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+           ${positionalKeys.map(k => `
+             <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
+               <span style="color:var(--text-3)">Variabele {{${esc(k)}}}</span>
+               <input class="input" id="onbInbTplVar_${esc(k)}" placeholder="waarde voor {{${esc(k)}}}" style="padding:8px 10px;font-size:13px">
+             </label>`).join('')}
+         </div>`;
+    _onbInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">${esc(tpl.name)}</div>
+      <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:13px;line-height:1.55;white-space:pre-wrap;margin-bottom:14px">${previewHtml}</div>
+      ${variablesForm}
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button id="onbInbTplBack" class="btn btn-ghost btn-sm">Terug</button>
+        <button id="onbInbTplSend" class="btn btn-primary btn-sm">Verstuur template</button>
+      </div>`, { maxWidth: 560 });
+    document.getElementById('onbInbTplBack').addEventListener('click', () => _onbInbOpenTemplatePicker(convId));
+    document.getElementById('onbInbTplSend').addEventListener('click', async () => {
+      const variables = {};
+      if (!namedMapping) {
+        positionalKeys.forEach(k => { const el = document.getElementById('onbInbTplVar_' + k); if (el) variables[k] = el.value || ''; });
+      }
+      const row = _onbInb.convs.items.find(c => String(c.id) === String(convId));
+      const naam = _onbInbRowVan(row);
+      const ok = await _onbInbAskConfirm(
+        `Verstuur template naar ${naam}?`,
+        `Template: ${tpl.name}\n${namedMapping ? '(auto-resolve variabelen)' : (positionalKeys.length ? 'Ingevulde variabelen: ' + positionalKeys.map(k => '{{' + k + '}}=' + (variables[k] || '(leeg)')).join(', ') : 'geen variabelen')}`,
+        { okLabel: 'Verstuur template' }
+      );
+      if (!ok) { _onbInbOpenTemplateForm(convId, tpl); return; }
+      _onbInbCloseModal();
+      _onbInb.compose.sending = convId;
+      _onbInbRepaintCompose();
+      try {
+        const payload = {
+          conversation_id: convId, template_name: tpl.name,
+          meta_template_id: tpl.meta_template_id || undefined,
+          language: tpl.language || 'nl', variables,
+        };
+        const resp = await window.KV.authedFetch('/api/inbox-send-template', { method: 'POST', body: JSON.stringify(payload) });
+        if (!resp.ok) {
+          const j = await resp.json().catch(() => ({}));
+          throw new Error(j.error || ('HTTP ' + resp.status));
+        }
+        _onbInbOptimisticAppend(convId, bodyText.replace(/\{\{(\d+)\}\}/g, (mm, k) => variables[k] || ('{{' + k + '}}')));
+        _onbInb.compose.mode[convId] = 'text';
+        _onbInbToast('Template verzonden', 'ok');
+      } catch (e) {
+        console.warn('[onb-inbox] template-send fail:', e && e.message);
+        _onbInbToast('Template versturen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      } finally {
+        _onbInb.compose.sending = null;
+        _onbInbRepaintCompose();
+      }
+    });
+  }
+
+  window.__onbInbSetStatus = async (uiStatus) => {
+    const convId = _onbInb.thread.convId;
+    if (!convId) return;
+    const row = _onbInb.convs.items.find(c => String(c.id) === String(convId));
+    const naam = _onbInbRowVan(row);
+    const label = uiStatus === 'gearchiveerd' ? 'Archiveren' : uiStatus === 'open' ? 'Heropenen' : 'Afhandelen';
+    const ok = await _onbInbAskConfirm(
+      `${label} — ${naam}?`,
+      uiStatus === 'gearchiveerd' ? 'Deze conversatie verdwijnt uit de actieve lijst en komt NIET vanzelf terug bij een nieuwe inbound.'
+        : uiStatus === 'afgehandeld' ? 'Tijdelijk uit de lijst; komt terug zodra de klant weer inbound stuurt.'
+        : 'Verplaats terug naar de actieve lijst.',
+      { okLabel: label, tone: uiStatus === 'gearchiveerd' ? 'danger' : 'brand' }
+    );
+    if (!ok) return;
+    try {
+      const resp = await window.KV.authedFetch('/api/inbox-conversation-set-status', {
+        method: 'POST', body: JSON.stringify({ conversation_id: convId, status: uiStatus }),
+      });
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.error || ('HTTP ' + resp.status));
+      }
+      _onbInb.convs.items = _onbInb.convs.items.filter(it => String(it.id) !== String(convId));
+      const rowEl = document.querySelector('#onbInbList .onb-inb-row[data-row-id="' + String(convId).replace(/"/g, '\\"') + '"]');
+      if (rowEl) rowEl.remove();
+      _onbInb.sel = null;
+      _onbInbResetThread();
+      const split = document.querySelector('.onb-inb-split');
+      const oldRight = split ? split.querySelector('.onb-inb-right') : null;
+      if (oldRight) oldRight.remove();
+      _onbInbToast(label + ' — gelukt', 'ok');
+    } catch (e) {
+      console.warn('[onb-inbox] set-status fail:', e && e.message);
+      _onbInbToast('Status wijzigen mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  };
+
+  window.__onbInbMarkUnread = async () => {
+    const convId = _onbInb.thread.convId;
+    if (!convId) return;
+    try {
+      const resp = await window.KV.authedFetch('/api/inbox-mark-unread', {
+        method: 'POST', body: JSON.stringify({ conversation_id: convId }),
+      });
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.error || ('HTTP ' + resp.status));
+      }
+      const idx = _onbInb.convs.items.findIndex(it => String(it.id) === String(convId));
+      if (idx >= 0) _onbInb.convs.items[idx] = { ..._onbInb.convs.items[idx], unread_count: (_onbInb.convs.items[idx].unread_count || 0) + 1 };
+      const rowEl = document.querySelector('#onbInbList .onb-inb-row[data-row-id="' + String(convId).replace(/"/g, '\\"') + '"]');
+      if (rowEl && !rowEl.classList.contains('nw')) {
+        rowEl.classList.add('nw');
+        const tagRow = rowEl.querySelector('.onb-inb-tagrow');
+        if (tagRow && !tagRow.querySelector('span[style*="background:var(--rose)"]')) {
+          const dot = document.createElement('span');
+          dot.style.cssText = 'width:7px;height:7px;border-radius:50%;background:var(--rose);margin-left:auto';
+          tagRow.appendChild(dot);
+        }
+      }
+      _onbInb.thread._markedFor = null;
+      _onbInbToast('Gemarkeerd als ongelezen', 'ok');
+    } catch (e) {
+      console.warn('[onb-inbox] mark-unread fail:', e && e.message);
+      _onbInbToast('Ongelezen markeren mislukt: ' + (e?.message || 'onbekend'), 'error');
+    }
+  };
+
+  // ── Poll (18s) — refresh convs + open thread append-only ────────────
+  function _onbInbStartPoll() {
+    if (_onbInb.poll.handle) return;
+    _onbInb.poll.handle = setInterval(_onbInbPollTick, _onbInb.poll.intervalMs);
+  }
+  function _onbInbStopPoll() {
+    if (_onbInb.poll.handle) { clearInterval(_onbInb.poll.handle); _onbInb.poll.handle = null; }
+  }
+  async function _onbInbPollTick() {
+    if (_onbInb.poll.running) return;
+    if (!document.querySelector('.onb-inb-split')) { _onbInbStopPoll(); return; }
+    if (document.hidden) return;
+    _onbInb.poll.running = true;
+    try {
+      _onbInb.convs.fetched = false;
+      await _onbInbFetchConvs();
+      if (_onbInb.thread.convId) {
+        const j = await _onbInbFetch('poll-thread', '/api/inbox-messages-list?conversation_id=' + encodeURIComponent(_onbInb.thread.convId) + '&limit=200');
+        if (j && Array.isArray(j.items)) {
+          const seen = new Set(_onbInb.thread.items.map(x => String(x.id)));
+          const additions = j.items
+            .filter(x => !seen.has(String(x.id)))
+            .map(x => ({ id: x.id, direction: x.direction === 'outbound' ? 'outbound' : 'inbound', body: x.body || '', at: x.sent_at || x.created_at || null, meta: { status: x.status, template_name: x.template_name } }));
+          if (additions.length) {
+            _onbInb.thread.items = _onbInb.thread.items.concat(additions);
+            _onbInbPaintThread();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[onb-inbox] poll error:', e && e.message);
+    } finally {
+      _onbInb.poll.running = false;
+    }
+  }
+
+  // ── Helpers voor rendering ──────────────────────────────────────────
+  function _onbInbRowVan(row) {
+    if (!row) return 'Onbekend';
+    const c = row.customer, a = row.attendee;
+    if (c) return c.is_company ? c.company_name : [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || 'Onbekend';
+    if (a) return [a.first_name, a.last_name].filter(Boolean).join(' ') || a.email || 'Onbekend';
+    return row.display_name || row.phone_number || 'Onbekend';
+  }
+  function _onbInbRenderRow(row) {
+    const naam    = _onbInbRowVan(row);
+    const nw      = (row.unread_count || 0) > 0;
+    const tijd    = _onbInbFmtTijd(row.last_message_at || row.last_activity_at);
+    const preview = row.last_message_preview || '—';
+    const ctx     = row.customer?.email || row.phone_number || '';
+    const rowIdAttr  = String(row.id).replace(/"/g, '&quot;');
+    const rowIdClick = String(row.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const onCls   = String(_onbInb.sel) === String(row.id) ? 'on' : '';
+    return `<div class="onb-inb-row ${nw ? 'nw' : ''} ${onCls}" data-row-id="${rowIdAttr}" onclick="__onbInbSel('${rowIdClick}')"
+      style="display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;${onCls === 'on' ? 'background:var(--surface-2)' : ''}">
+      ${H.av(naam || '?', 34)}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
+          <span style="font-size:13.5px;font-weight:${nw ? '600' : '500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</span>
+          <span style="margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);flex-shrink:0">${esc(tijd)}</span>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</div>
+        <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ctx)}</div>
+        <div class="onb-inb-tagrow" style="margin-top:6px;display:flex;gap:6px;align-items:center">
+          <span style="font-size:10.5px;padding:2px 7px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)">Onboarding</span>
+          ${nw ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--rose);margin-left:auto"></span>' : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+  function _onbInbRenderCompose() {
+    const convId = _onbInb.thread.convId;
+    if (!convId) return '';
+    const draft = esc(_onbInb.compose.drafts[convId] || '');
+    const sending = _onbInb.compose.sending === convId;
+    const mode = _onbInb.compose.mode[convId] || 'text';
+    if (mode === 'template') {
+      return `<div id="onbInbComposeBlock" style="padding:12px 20px;background:var(--surface);border-top:1px solid var(--border)">
+        <div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:var(--r-sm);font-size:12.5px;color:var(--amber);margin-bottom:10px">
+          Buiten het 24u-venster — alleen goedgekeurde <b>templates</b> mogen verstuurd worden.
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="__onbInbTemplatePicker()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Kies template'}</button>
+          <button class="btn btn-ghost btn-sm" onclick="__onbInbResetMode()">Probeer tekst</button>
+        </div>
+      </div>`;
+    }
+    return `<div id="onbInbComposeBlock" style="padding:12px 20px;background:var(--surface);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+      <textarea
+        placeholder="Typ een bericht… (Ctrl+Enter om te verzenden)"
+        oninput="__onbInbDraftInput('${String(convId).replace(/'/g, "\\'")}', this.value)"
+        onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();__onbInbSend();}"
+        ${sending ? 'disabled' : ''}
+        style="width:100%;min-height:70px;max-height:200px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;line-height:1.5;font-family:inherit;resize:vertical">${draft}</textarea>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="__onbInbQuickPicker()" ${sending ? 'disabled' : ''} title="Snel-antwoord invoegen">Snel</button>
+        <button class="btn btn-ghost btn-sm" onclick="__onbInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Verstuur goedgekeurde template">Template</button>
+        <span style="font-size:11px;color:var(--text-3);margin-left:auto">WhatsApp — binnen 24u-venster</span>
+        <button class="btn btn-primary btn-sm" onclick="__onbInbSend()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur'}</button>
+      </div>
+    </div>`;
+  }
+  function _onbInbRenderRight(row) {
+    const naam = _onbInbRowVan(row);
+    const ctx  = row.customer?.email || row.phone_number || '';
+    const linkedName = row.customer
+      ? (row.customer.is_company ? row.customer.company_name : [row.customer.first_name, row.customer.last_name].filter(Boolean).join(' '))
+      : null;
+    const linkedBadge = linkedName
+      ? `<span style="font-size:11.5px;color:var(--emerald);background:var(--emerald-soft);padding:2px 8px;border-radius:12px">✓ gekoppeld: ${esc(linkedName)}</span>`
+      : `<span style="font-size:11.5px;color:var(--amber);background:var(--amber-soft);padding:2px 8px;border-radius:12px">⚠ niet gekoppeld</span>`;
+    const status = _onbInb.thread.loading
+      ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Berichten laden…</div>`
+      : _onbInb.thread.error
+        ? `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ ${esc(_onbInb.thread.error)}</div>`
+        : (!_onbInb.thread.items.length && _onbInb.thread.convId === row.id)
+          ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Nog geen berichten in deze conversatie.</div>`
+          : '';
+    return `<div class="onb-inb-right" style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
+      <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap">
+          <span style="font-size:11.5px;padding:3px 10px;border-radius:12px;background:var(--emerald-soft);color:var(--emerald)">Onboarding</span>
+          ${linkedBadge}
+          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="__onbInbMarkUnread()" title="Markeer als ongelezen">Ongelezen</button>
+            <button class="btn btn-ghost btn-sm" onclick="__onbInbSetStatus('afgehandeld')" title="Afhandelen (komt terug bij inbound)">Afhandelen</button>
+            <button class="btn btn-ghost btn-sm" onclick="__onbInbSetStatus('gearchiveerd')" title="Permanent uit lijst">Archief</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:13px">
+          ${H.av(naam || '?', 42)}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</div>
+            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ctx)}</div>
+          </div>
+        </div>
+      </div>
+      <div id="onbInbThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:20px;display:flex;flex-direction:column"></div>
+      ${status}
+      ${_onbInbRenderCompose()}
+    </div>`;
+  }
+
+  // ── VIEW-callback (registratie hieronder als 'onboarding/Inbox') ────
+  function onbInboxView() {
+    // Eerste render triggert fetch + poll.
+    if (!_onbInb.convs.fetched && !_onbInb.convs.loading) {
+      queueMicrotask(_onbInbFetchConvs);
+    }
+    // Selected row → thread-load + post-render paint.
+    const rows = asArr(_onbInb.convs.items);
+    const sel  = rows.find(r => String(r.id) === String(_onbInb.sel)) || rows[0] || null;
+    if (sel && _onbInb.thread.convId !== sel.id && !_onbInb.thread.loading) {
+      queueMicrotask(() => _onbInbLoadThread(sel.id));
+    }
+    queueMicrotask(_onbInbPaintThread);
+    queueMicrotask(_onbInbStartPoll);
+
+    const listHtml = _onbInb.convs.loading && !rows.length
+      ? Array.from({ length: 5 }).map(() => `<div style="padding:14px 16px;border-bottom:1px solid var(--border);opacity:.5">
+          <div style="height:12px;width:60%;background:var(--surface-2);border-radius:4px;margin-bottom:6px"></div>
+          <div style="height:11px;width:85%;background:var(--surface-2);border-radius:4px"></div></div>`).join('')
+      : rows.length
+        ? rows.map(_onbInbRenderRow).join('')
+        : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Alles afgehandeld 🎉</div>`;
+
+    return `<div class="onb-inb-split" style="display:flex;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+      <div id="onbInbList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto">
+        <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
+          <span>Onboarding-conversaties</span>
+          <span>${rows.length} items</span>
+        </div>
+        ${_onbInb.convs.error ? `<div style="padding:16px;color:var(--rose);font-size:12.5px">⚠ ${esc(_onbInb.convs.error)}</div>` : ''}
+        ${listHtml}
+      </div>
+      ${sel
+        ? _onbInbRenderRight(sel)
+        : `<div class="onb-inb-right" style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px">Selecteer een conversatie</div>`}
+    </div>`;
+  }
 
   window.DFO.VIEWS['onboarding/Actief']  = actiefView;
   window.DFO.VIEWS['onboarding/Archief'] = archiefView;
-  window.DFO.VIEWS['onboarding/Inbox']   = inboxPlaceholder;
+  window.DFO.VIEWS['onboarding/Inbox']   = onbInboxView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('onboarding');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('onboarding');
 
-  console.debug('[onb-v2] v=10 — Inbox-tab is nu deep-link naar unified Inbox (pre-src=ob via sessionStorage).');
+  console.debug('[onb-v2] v=11 — Inbox-tab is nu VOLLEDIGE inline inbox (module=onboarding): conversations-list + messages-list append-only + reply text + 24u-fallback template-picker + quick-replies + mark-read + status-wijzigen + 18s live-poll.');
 })();
