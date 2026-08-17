@@ -67,21 +67,35 @@ export async function queryLeadsBySegment(segment, opts) {
   // niet in schema) -> we hangen null aan en de caller neemt geen consent-
   // check aan die kant. Voor WA is toestemming_whatsapp de bepalende kolom.
   if (rows.length) {
+    // v=13 fix: leads_overzicht view heeft alleen 'naam' (volledig); voor de
+    // template-resolver hebben we voornaam/achternaam/telefoon_e164/traject
+    // uit de RAW leads-tabel nodig (spiegel van wat Gesprekken-flow doet:
+    // leadsonderhoud-gesprek-template.js:42 fetcht ook voornaam+achternaam).
+    // Zonder deze velden gaf bouwVariabelen(lead).voornaam = '' → Meta 131008.
     try {
       const ids = rows.map(r => r.id);
       const { data: raw } = await supabaseAdmin
         .from('leads')
-        .select('id, telefoon_e164, toestemming_whatsapp')
+        .select('id, voornaam, achternaam, email, telefoon_e164, traject, toestemming_whatsapp')
         .in('id', ids);
       const byId = new Map((raw || []).map(l => [l.id, l]));
       for (const r of rows) {
         const l = byId.get(r.id) || {};
+        // Verrijk alle drip-vars-relevante velden zodat bouwVariabelen +
+        // keyWaarde ze kunnen resolven (voornaam/achternaam/email/telefoon).
+        r.voornaam = l.voornaam || null;
+        r.achternaam = l.achternaam || null;
         r.telefoon_e164 = l.telefoon_e164 || null;
+        // traject uit raw wint van view als beschikbaar (zelfde waarde meestal;
+        // defensief bij view-drift).
+        if (l.traject) r.traject = l.traject;
         r.toestemming_whatsapp = l.toestemming_whatsapp === true;
       }
     } catch (e) {
       console.warn('[ls-bulk-segment] verrijking soft-fail:', e?.message || e);
       for (const r of rows) {
+        r.voornaam = null;
+        r.achternaam = null;
         r.telefoon_e164 = null;
         r.toestemming_whatsapp = false; // veilige default: geen consent
       }

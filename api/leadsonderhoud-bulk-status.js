@@ -8,7 +8,20 @@
 // Gate: leads.view.
 //
 // Response 200: { live: bool, uit: bool, checked_at: iso }
-// Response 500: { error, detail }
+//
+// SEMANTIEK (v=13 documentatie):
+//   - `uit`  = LEADSONDERHOUD_UIT env kill-switch is aangezet. Onafhankelijk
+//              van `live`. Overheerst ALTIJD: bij uit=true zal de cron NIETS
+//              verzenden ongeacht LEADSONDERHOUD_LIVE. UI toont rode kill-
+//              switch banner en approve is geblokkeerd.
+//   - `live` = LEADSONDERHOUD_LIVE='1' EN uit=false. Zonder deze combi zit
+//              de cron in droogloop (fetch + skip claim). Bij live=true én
+//              uit=false zal de cron ECHT versturen.
+//
+// UI-mapping (leadsonderhoud-v2.js _lsBulkRenderBanner):
+//   uit=true             → rood "KILL-SWITCH AAN"    (highest priority)
+//   uit=false, live=true → rood "LIVE-MODUS AAN — jobs worden ECHT verzonden"
+//   uit=false, live=false → groen "UIT — cron verstuurt niets"
 //
 // Veiligheid: bij onbekend (crash / netwerkfout aan client-kant) MOET de
 // UI de status als NIET-veilig behandelen (approve geblokkeerd).

@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 3 FASE 3 (v=12, 2026-08-17): 500-fix + hardening.
+// Leadsonderhoud v2 — BROK 3 FASE 3 (v=13, 2026-08-17): resolver-fix (lege vars).
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -2321,5 +2321,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=12 500-fix + hardening — ROOT CAUSE: keyWaarde was in v=11 als named-import bedoeld uit leadsonderhoud-sjabloon.js maar die functie is niet exported → SyntaxError bij module-load → FUNCTION_INVOCATION_FAILED op elk request naar bulk-preview/test-send/cron. Fix: keyWaarde intern gekopieerd in _lib/leadsonderhoud-bulk-template.js. Hardening: top-level try/catch op alle 4 bulk-endpoints (nette JSON i.p.v. kale 500). Nieuw endpoint /api/leadsonderhoud-bulk-status voedt banner los van preview; onbekende status = approve GEBLOKKEERD (niet-veilig default). UI toont preview-fout-detail (server-message + stack-first-line).');
+  console.debug('[ls-v2] v=13 resolver-fix — ROOT CAUSE: segment-helper fetchte alleen leads_overzicht (heeft "naam", geen "voornaam"). bouwVariabelen leest lead.voornaam → undefined → keyWaarde returnt "" voor {{lead.voornaam}} → Meta 131008. Fix: segment-helper haalt nu voornaam/achternaam/telefoon/traject uit RAW leads-tabel (spiegel Gesprekken-flow leadsonderhoud-gesprek-template.js:42). resolveVariables: static_vars[key] is nu OVERRIDE (check EERST) → user kan manueel invullen ook voor lead-tokens. Sample-preview rendert altijd resolved-tekst als template gekozen (voorheen null bij no-phone). Status-endpoint gedocumenteerd: uit=kill-switch overheerst live.');
 })();

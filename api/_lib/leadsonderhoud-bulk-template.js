@@ -58,17 +58,27 @@ export function analyzeTemplate(templateName, metaMapping, bodyText) {
 
 // Bouw variables[] voor Meta sendTemplate voor ÉÉN specifieke lead.
 // Positional in volgorde van meta_param_mapping.body-posities.
-// - lead.X-tokens en drip-vars-tokens (voornaam/dag/tijd/...) → resolved via lead-row.
-// - unknown tokens → static_vars-value (of leeg).
+// v=13 lookup-volgorde (fix voor 'static_vars werd genegeerd voor lead-tokens'):
+//   1. static_vars[key] (als niet-leeg) → override / manual value
+//   2. keyWaarde(key, lead, vars) via lead-row + drip-vars (voornaam/dag/…)
+//   3. leeg
+// Override-eerste zodat de user in de UI een lead-veld kan overschrijven met
+// een handmatige waarde als het lead-veld leeg blijkt (of voor test-flows).
 export function resolveVariables(positions, leadRow, staticVars) {
   const lead = leadRow || {};
   const vars = bouwVariabelen(lead, {});
+  const sv = staticVars || {};
   const out = [];
   for (const p of positions) {
+    const override = sv[p.key];
+    if (override != null && String(override).length > 0) {
+      out.push(String(override));
+      continue;
+    }
     if (p.isLead || vars[p.key] != null) {
       out.push(keyWaarde(p.key, lead, vars));
     } else {
-      out.push(String((staticVars && staticVars[p.key]) || ''));
+      out.push('');
     }
   }
   return out;

@@ -229,7 +229,15 @@ async function _handleImpl(req, res) {
         status, skip_reason: skipReason,
       });
       if (samples.length < 5 && status === 'pending') {
-        samples.push({ lead_naam: l.naam || l.email, traject: l.traject, needs_template: needsTemplate, preview_wa: previewWa, preview_email_subject: previewESub });
+        // v=13: als template gekozen maar deze recipient géén channelWa
+        // (bv. geen phone), render toch een sample-preview met dezelfde
+        // lead-values zodat de UI de resolved-tekst ziet i.p.v. null.
+        let sampleWa = previewWa;
+        if (!sampleWa && tplMeta && tplAnalysis.positions.length) {
+          const vals = resolveVariables(tplAnalysis.positions, l, staticVars);
+          sampleWa = renderTemplateBody(tplMeta.body_text || '', tplAnalysis.positions, vals).slice(0, 500);
+        }
+        samples.push({ lead_naam: l.naam || l.email, traject: l.traject, needs_template: needsTemplate, preview_wa: sampleWa, preview_email_subject: previewESub });
       }
     }
 
