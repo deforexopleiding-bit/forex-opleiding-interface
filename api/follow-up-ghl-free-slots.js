@@ -139,6 +139,10 @@ export default async function handler(req, res) {
 
   let allowed = await requirePermission(req, 'sales.tab.retentie');
   if (!allowed) allowed = await requirePermission(req, 'sales.customer.view');
+  // BROK 2 FASE 2 (leadsonderhoud): leadsonderhoud-Gesprekken 'Direct inschieten'-
+  // knop leest deze free-slots. Rol heeft leads.update maar niet altijd de
+  // sales-perms. Additief — bestaande sales-callers blijven byte-identiek.
+  if (!allowed) allowed = await requirePermission(req, 'leads.update');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten' });
 
   const q = req.query || {};

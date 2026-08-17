@@ -1,6 +1,6 @@
 // modules/klanten-v2/views/leadsonderhoud-v2.js
 //
-// Leadsonderhoud v2 — BROK 2 FASE 1 (v=4, 2026-08-17): Gesprekken-tab live.
+// Leadsonderhoud v2 — BROK 2 FASE 2 (v=5, 2026-08-17): + Afspraak inschieten (hybride).
 // Scope: lead-relatie-werkplek. Config (trajecten/sjablonen/quiz) blijft in
 // Automatiseringen. Bulk / Gesprekken (writes) komen in BROK 2.
 //
@@ -970,6 +970,10 @@
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap">
           <span style="font-size:11.5px;padding:3px 10px;border-radius:12px;background:var(--teal-soft);color:var(--teal)">Leadsonderhoud</span>
           ${chanBadges}
+          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="__lsInbOpenAppointmentPicker()" title="Direct een Zoom-afspraak inschieten (bestaande GHL-contact vereist)">${svg(I.cal || I.check, 'width:13px;height:13px')} Direct inschieten</button>
+            <button class="btn btn-ghost btn-sm" onclick="__lsInbBookingLinkHelp()" title="Boekingslink verstuurroute (Route B)">Boekingslink…</button>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:13px">
           ${H.av(naam || '?', 42)}
@@ -984,6 +988,164 @@
       ${_lsInbRenderCompose()}
     </div>`;
   }
+
+  /* ══════════════════════════════════════════════════════════════════
+     BROK 2 FASE 2 — Afspraak inschieten (hybride)
+     ══════════════════════════════════════════════════════════════════
+     ROUTE A: Direct inschieten (Zoom via GHL) — /api/leadsonderhoud-appointment-create
+     ROUTE B: Boekingslink versturen — nog niet automatisch (geen
+              GHL_BOOKING_URL env-var); toont uitleg + suggestie om
+              handmatig een boekingslink in de compose te plakken.
+
+     Free-slots via /api/follow-up-ghl-free-slots (gate uitgebreid met
+     leads.update in dezelfde brok). Response: { slots:[{date,times[]}],
+     timezone:'Europe/Amsterdam' }. Timezone-hint tonen zodat de user
+     weet in welke TZ de tijden staan.
+
+     Bij NO_GHL_CONTACT (422): nette toast + suggestie Route B.
+     ══════════════════════════════════════════════════════════════════ */
+  const _lsAppt = { loading: false, error: null, slotsByDate: null, tz: null, sending: false };
+
+  window.__lsInbOpenAppointmentPicker = async () => {
+    const conv = _lsInbCurrentConv();
+    if (!conv) return;
+    _lsAppt.loading = true; _lsAppt.error = null; _lsAppt.slotsByDate = null; _lsAppt.tz = null;
+    // Standaard 14-daagse window (default van free-slots).
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px">Afspraak inschieten voor ${esc(_lsInbRowVan(conv))}</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Dave's Zoom-agenda (komende 14 dagen). Kies een tijd en bevestig.</div>
+      <div id="lsApptBody" style="max-height:60vh;overflow-y:auto">
+        <div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">Vrije slots laden…</div>
+      </div>
+      <div style="margin-top:14px;text-align:right"><button id="lsApptCancel" class="btn btn-ghost btn-sm">Sluiten</button></div>
+    `, { maxWidth: 640 });
+    document.getElementById('lsApptCancel').addEventListener('click', _lsInbCloseModal);
+    // Fetch slots.
+    const j = await tryFetch('ls-freeslots', '/api/follow-up-ghl-free-slots');
+    _lsAppt.loading = false;
+    const bodyEl = document.getElementById('lsApptBody');
+    if (!bodyEl) return; // modal ondertussen dicht
+    if (!j) {
+      bodyEl.innerHTML = `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ Kon vrije slots niet laden</div>`;
+      return;
+    }
+    if (j.error === 'onbeschikbaar' || !Array.isArray(j.slots) || !j.slots.length) {
+      bodyEl.innerHTML = `<div style="padding:22px;color:var(--text-3);font-size:13px">Geen vrije slots gevonden in de komende 14 dagen.</div>`;
+      return;
+    }
+    _lsAppt.slotsByDate = j.slots;
+    _lsAppt.tz = j.timezone || 'Europe/Amsterdam';
+    bodyEl.innerHTML = _lsInbRenderSlots(conv);
+    // Bind tijd-klikken.
+    bodyEl.querySelectorAll('[data-slot-time]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const dateStr = btn.getAttribute('data-slot-date');
+        const timeStr = btn.getAttribute('data-slot-time');
+        _lsInbConfirmAppointment(conv, dateStr, timeStr);
+      });
+    });
+  };
+  function _lsInbRenderSlots(conv) {
+    const tz = esc(_lsAppt.tz || 'Europe/Amsterdam');
+    return `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Tijden in ${tz}</div>
+      ${_lsAppt.slotsByDate.map(day => {
+        const dateFmt = _lsInbFmtSlotDate(day.date);
+        const times = Array.isArray(day.times) ? day.times : [];
+        if (!times.length) return '';
+        return `<div style="margin-bottom:14px">
+          <div style="font-weight:600;font-size:12.5px;margin-bottom:6px;color:var(--text-2)">${esc(dateFmt)}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${times.map(t => `<button class="btn btn-ghost btn-sm" data-slot-date="${esc(day.date)}" data-slot-time="${esc(t)}" style="font-family:'IBM Plex Mono',monospace;font-size:12.5px;padding:5px 10px">${esc(t)}</button>`).join('')}
+          </div>
+        </div>`;
+      }).join('')}`;
+  }
+  function _lsInbFmtSlotDate(iso) {
+    try {
+      const d = new Date(iso + 'T00:00:00');
+      return d.toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
+    } catch (_) { return iso; }
+  }
+  async function _lsInbConfirmAppointment(conv, dateStr, timeStr) {
+    // Combineer datum + tijd tot Amsterdam-lokale wall-clock -> ISO met TZ-offset.
+    // Gebruikt Intl om te bepalen wat de UTC-offset op die datum is (DST-veilig).
+    const [Y, M, D] = dateStr.split('-').map(Number);
+    const [h, m]    = timeStr.split(':').map(Number);
+    const utcMs = Date.UTC(Y, M - 1, D, h, m, 0);
+    // Amsterdam-offset op deze wall-clock berekenen.
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const parts = dtf.formatToParts(new Date(utcMs));
+    const mp = {}; for (const p of parts) mp[p.type] = p.value;
+    const asUtc = Date.UTC(+mp.year, +mp.month - 1, +mp.day, +mp.hour, +mp.minute, +mp.second);
+    const offMin = Math.round((asUtc - utcMs) / 60000);
+    const scheduledAt = new Date(utcMs - offMin * 60000).toISOString();
+
+    _lsInbCloseModal();
+    const naam = _lsInbRowVan(conv);
+    const ok = await _lsInbAskConfirm(
+      `Afspraak inschieten voor ${naam}?`,
+      `${_lsInbFmtSlotDate(dateStr)} om ${timeStr} (${_lsAppt.tz || 'Europe/Amsterdam'})\n\nDit maakt een echte GHL/Zoom-afspraak aan. De call-status komt binnen ~1 min tevoorschijn in het Contacten-overzicht (sync via poll-cron).`,
+      { okLabel: 'Ja, plan de afspraak' }
+    );
+    if (!ok) return;
+    _lsAppt.sending = true;
+    try {
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-appointment-create', {
+        method: 'POST',
+        body: JSON.stringify({
+          lead_id: conv.lead_id,
+          scheduledAt,
+          durationMinutes: 30,
+        }),
+      });
+      if (resp.status === 422) {
+        const j = await resp.json().catch(() => ({}));
+        if (j.code === 'NO_GHL_CONTACT') {
+          _lsInbToast('Geen GHL-contact voor deze lead — verstuur eerst een boekingslink (Route B).', 'warn');
+          return;
+        }
+        throw new Error(j.error || 'Configuratie-fout');
+      }
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.error || ('HTTP ' + resp.status));
+      }
+      _lsInbToast('Afspraak ingeschoten — sync loopt (~1 min)', 'ok');
+      // Trigger een refresh van de conv-lijst zodat updated preview later te zien is.
+      _lsInb.convs.fetched = false;
+      queueMicrotask(_lsInbFetchConvs);
+    } catch (e) {
+      console.warn('[ls-inb] appointment-create fail:', e && e.message);
+      _lsInbToast('Afspraak inschieten mislukt: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _lsAppt.sending = false;
+    }
+  }
+
+  window.__lsInbBookingLinkHelp = () => {
+    const conv = _lsInbCurrentConv();
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:10px">Boekingslink versturen (Route B)</div>
+      <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;margin-bottom:14px">
+        Er is nog geen automatische boekingslink-flow geconfigureerd (geen <code>GHL_BOOKING_URL</code>
+        env-var op de server). Voorlopig kan je een boekingslink handmatig plakken in het
+        <b>WhatsApp</b>- of <b>mail</b>-compose-veld en versturen — de lead boekt zelf, en
+        <code>afspraak_op</code> wordt binnen ~1 min door de bestaande GHL-poll-cron
+        gesynchroniseerd (zichtbaar in het Contacten-overzicht).
+        <br><br>
+        Gebruik <b>Direct inschieten</b> hierboven wanneer je zelf een tijd wilt kiezen én de
+        lead een bestaand GHL-contact heeft.
+      </div>
+      ${conv ? `<div style="padding:10px 12px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);margin-bottom:14px">
+        Geselecteerd: <b>${esc(_lsInbRowVan(conv))}</b>${conv.email ? ` · ${esc(conv.email)}` : ''}${conv.phone_number ? ` · ${esc(conv.phone_number)}` : ''}
+      </div>` : ''}
+      <div style="text-align:right"><button id="lsBookHelpClose" class="btn btn-primary btn-sm">Sluiten</button></div>
+    `, { maxWidth: 560 });
+    document.getElementById('lsBookHelpClose').addEventListener('click', _lsInbCloseModal);
+  };
 
   function gesprekkenView() {
     // Eerste render triggert fetch + poll.
@@ -1114,5 +1276,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=4 BROK 2 FASE 1 — Gesprekken-tab live: lead-gesleutelde inbox (WA + mail door elkaar) via leadsonderhoud-gesprekken/-berichten/-antwoord/-mailantwoord; twee send-knoppen (WA vrije-tekst + mail met subject), 24u-guard, mark-read surgical, append-only thread, poll 18s.');
+  console.debug('[ls-v2] v=5 BROK 2 FASE 2 — Gesprekken + Afspraak inschieten (Route A direct via leadsonderhoud-appointment-create + free-slots-picker; Route B boekingslink is uitleg-modal totdat GHL_BOOKING_URL wordt geconfigureerd). Free-slots-endpoint gate uitgebreid met leads.update fallback (breekt geen bestaande sales-caller).');
 })();
