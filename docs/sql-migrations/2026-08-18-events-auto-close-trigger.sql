@@ -68,10 +68,12 @@ LANGUAGE sql
 STABLE
 PARALLEL SAFE
 AS $$
+  -- status::text want event_attendees.status is een enum (event_attendee_status);
+  -- Postgres cast enum niet impliciet naar text voor function-arg matching.
   SELECT COUNT(*)::int
   FROM event_attendees
   WHERE event_id = p_event_id
-    AND event_attendee_is_confirmed(status, assessment_response_id, is_test);
+    AND event_attendee_is_confirmed(status::text, assessment_response_id, is_test);
 $$;
 
 COMMENT ON FUNCTION event_confirmed_count(uuid) IS
@@ -94,14 +96,15 @@ BEGIN
   IF TG_OP = 'INSERT' THEN
     v_event_id := NEW.event_id;
     v_rise_to_confirmed := event_attendee_is_confirmed(
-      NEW.status, NEW.assessment_response_id, NEW.is_test
+      NEW.status::text, NEW.assessment_response_id, NEW.is_test
     );
   ELSIF TG_OP = 'UPDATE' THEN
     v_event_id := NEW.event_id;
     -- RISE: was NIET-confirmed vóór, IS confirmed nu.
+    -- status::text want event_attendees.status is een enum (event_attendee_status).
     v_rise_to_confirmed :=
-          event_attendee_is_confirmed(NEW.status, NEW.assessment_response_id, NEW.is_test)
-      AND NOT event_attendee_is_confirmed(OLD.status, OLD.assessment_response_id, OLD.is_test);
+          event_attendee_is_confirmed(NEW.status::text, NEW.assessment_response_id, NEW.is_test)
+      AND NOT event_attendee_is_confirmed(OLD.status::text, OLD.assessment_response_id, OLD.is_test);
   END IF;
 
   -- Skip: geen rise -> geen capaciteits-check nodig. Verlaagt trigger-load
