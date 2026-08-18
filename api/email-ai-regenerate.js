@@ -107,6 +107,8 @@ export default async function handler(req, res) {
         `INSTRUCTIE VAN DE GEBRUIKER: ${extra || '(geen extra instructie — polish alleen wat evident kan)'}\n\n` +
         `Herschrijf het concept volgens de instructie; behoud wat goed is, ` +
         `verander alleen wat de instructie vraagt. Gebruik dezelfde taal als het origineel. ` +
+        `Behoud de bestaande aanspreekvorm (u of je) consistent in het hele bericht, ` +
+        `tenzij de instructie expliciet vraagt die te veranderen. ` +
         `Geef het herschreven concept terug via de tool "produce_email_draft".`
       )
     : (

@@ -401,7 +401,20 @@
       // direct opnieuw kan bijsturen op de nieuwe draft.
       if (mode === 'refine') delete _ui.aiExtra[rid];
     } else {
-      st.error[rid] = j?.__error || j?.error || (mode === 'refine' ? 'AI-verfijning mislukt' : 'AI-generatie mislukt');
+      // v=26: nette NL-tekst i.p.v. ruwe fetch-exception ('Failed to fetch',
+      // 'timeout', etc.). Ruwe error blijft beschikbaar in console voor debug.
+      const rawErr = j?.__error || j?.error || null;
+      if (rawErr) console.warn('[email-ai-regen]', mode, 'raw error:', rawErr);
+      let friendly;
+      if (!j || j.__error) {
+        friendly = 'Kon de AI niet bereiken — probeer het opnieuw.';
+      } else if (j.error) {
+        // Server-side NL-tekst — die tonen we 1-op-1.
+        friendly = j.error;
+      } else {
+        friendly = mode === 'refine' ? 'AI-verfijning mislukt — probeer het opnieuw.' : 'AI-generatie mislukt — probeer het opnieuw.';
+      }
+      st.error[rid] = friendly;
     }
     if (render) render();
   }
@@ -1928,11 +1941,31 @@
     if (render) render();
     sanneOutcome(sugId, 'dismissed').catch(() => {});
   };
-  window.__emailAiUse = (rid) => {
-    const draft = _live.aiDraft.data[rid]; if (!draft) return;
-    // Open reply-compose met AI-draft in body.
-    _replyState('reply');
-    _ui.compose.body_html = String(draft.body || '').replace(/\n/g, '<br>');
+  window.__emailAiUse = async (rid) => {
+    // v=26 BLOCKER-FIX: _replyState is async (draft-find tryFetch) — als we
+    // 'em NIET awaiten, resolvet de fetch NA onze body_html-set en overschrijft
+    // _ui.compose (regel ~1675 / ~1611) met een lege body → 'Gebruiken'
+    // leverde een leeg compose-veld op. Awaiten + daarna body invoegen VÓÓR
+    // de handtekening-marker (SIG_MARKER blijft intact zodat de server de
+    // handtekening op de juiste plek plakt).
+    const draft = _live.aiDraft.data[rid];
+    if (!draft || !draft.body) return;
+    await _replyState('reply');
+    const draftHtml = String(draft.body)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
+    const SIG_MARKER_HTML = '<div data-sig-marker="1"><!--__SIG_HERE__--></div>';
+    const cur = _ui.compose.body_html || '';
+    if (cur.includes(SIG_MARKER_HTML)) {
+      // Vervang alles VÓÓR de marker met de draft; behoud marker + alles erna
+      // (typisch quote-blok bij fwd; leeg bij reply).
+      const idx = cur.indexOf(SIG_MARKER_HTML);
+      const after = cur.slice(idx + SIG_MARKER_HTML.length);
+      _ui.compose.body_html = '<div>' + draftHtml + '</div>' + SIG_MARKER_HTML + after;
+    } else {
+      // Geen marker (existingDraft-pad): prepend + spacer als er al iets stond.
+      _ui.compose.body_html = '<div>' + draftHtml + '</div>' + (cur ? '<div><br></div>' + cur : '');
+    }
     if (draft.subject && !_ui.compose.subject) _ui.compose.subject = draft.subject;
     if (render) render();
   };
@@ -1940,5 +1973,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=24 — bijlagen live: compose file-picker (chips, max 10MB/file · 20MB total · 20 files) + reader-download (public_url fallback voor mails zonder imap_uid). Fix drift api/email-attachment.js (onboarding/events mailboxen). Alles uit v=23 behouden.');
+  console.debug('[email-v2] v=26 — Gebruiken → fix: await _replyState + slim body-insert vóór SIG_MARKER (blocker uit v=25 waar draft-find-race het body-veld leeg overschreef). Verfijn-prompt behoudt aanspreekvorm (u/je). Nette NL-foutmelding i.p.v. ruwe fetch-exception. Alles uit v=25 (verfijn-flow) + v=24 (bijlagen) behouden.');
 })();
