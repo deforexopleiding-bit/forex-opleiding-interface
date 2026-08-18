@@ -514,9 +514,17 @@ export default async function handler(req, res) {
 
       // Definitieve billing_cycle-shape (uit live discovery + TL-docs):
       //   periodicity.unit = 'month' (NIET 'monthly'); period (NIET quantity).
-      // days_in_advance: factuur X dagen vóór de termijndatum aanmaken (default 7).
+      // days_in_advance: factuur op de periode-startdatum; default 0 (TL
+      // biedt 0/7/14/21/28). Override via env-var TEAMLEADER_SUB_DAYS_IN_ADVANCE.
+      // Zetten op 0 factureert op de start-datum zelf; payment_term (14d na
+      // factuurdatum) geeft de klant dan de gebruikelijke betaaltermijn.
+      // NB: expliciete null/empty-check zodat env='0' correct als 0 wordt
+      // geïnterpreteerd (falsy || fallback zou 0 verkeerd naar de default sturen).
+      const _rawDIA = process.env.TEAMLEADER_SUB_DAYS_IN_ADVANCE;
+      const DAYS_IN_ADVANCE = (_rawDIA != null && _rawDIA !== '' && Number.isFinite(Number(_rawDIA)))
+        ? Number(_rawDIA)
+        : 0;
       // payment_term verplicht: 14 dagen na factuurdatum.
-      const DAYS_IN_ADVANCE = Number(process.env.TEAMLEADER_SUB_DAYS_IN_ADVANCE) || 7;
       const billing_cycle = { periodicity: { unit: 'month', period: 1 }, days_in_advance: DAYS_IN_ADVANCE };
       // invoice_generation correcte oneOf-shape (uit live discovery): book_and_send
       // VEREIST sending_methods. Default factuur automatisch per e-mail versturen
