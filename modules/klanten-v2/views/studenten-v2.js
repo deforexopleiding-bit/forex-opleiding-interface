@@ -45,6 +45,23 @@
     _searchTimer: null,
     selectedId:   null,        // bubble_student_id
     detailTab:    'Overzicht', // 'Overzicht' | 'Sessies' | 'Facturen' | 'Notities'
+    // v=3 BROK 2: per-student notitie/beoordeling edit-state. Prefill uit
+    // _live.notes.byId[id] bij eerste render van de Notities-tab.
+    // Shape: { status, score, active_tasks_done, note, saving, savedAt, error, _prefilled }
+    noteEdit:     {},
+  };
+  const ASSESSMENT_STATUSES = ['op_schema', 'aandacht', 'risico', 'niet_actief'];
+  const ASSESSMENT_STATUS_LABELS = {
+    op_schema:    'Op schema',
+    aandacht:     'Vraagt aandacht',
+    risico:       'Risico',
+    niet_actief:  'Niet actief',
+  };
+  const ASSESSMENT_STATUS_COLORS = {
+    op_schema:    'emerald',
+    aandacht:     'amber',
+    risico:       'rose',
+    niet_actief:  'text-3',
   };
 
   /* ── Helpers ──────────────────────────────────────────────────────── */
@@ -225,6 +242,118 @@
     if (tab === 'Sessies' && !_live.sessions.data && !_live.sessions.loading) queueMicrotask(_fetchSessions);
     _repaintDetailPane();
   };
+  /* ── BROK 2 — Notitie/beoordeling edit-state ─────────────────────────
+     Prefill uit bestaande assessment (indien geladen); anders defaults.
+     State-only setters tijdens typen zodat de textarea + score-input hun
+     focus houden (geen render). Repaint van submit-knop-enable-state via
+     directe DOM-toggle. Bij Opslaan: race-guard + POST + optimistic
+     update + tijdstempel. */
+  function _noteState(id) {
+    if (!_ui.noteEdit[id]) _ui.noteEdit[id] = { status: 'op_schema', score: 7, active_tasks_done: false, note: '', saving: false, savedAt: null, error: null, _prefilled: false };
+    return _ui.noteEdit[id];
+  }
+  function _prefillNoteFromServer(id) {
+    const ns = _noteState(id);
+    if (ns._prefilled) return;
+    const existing = _live.notes.byId ? _live.notes.byId[String(id)] : null;
+    if (existing) {
+      if (existing.status && ASSESSMENT_STATUSES.includes(existing.status)) ns.status = existing.status;
+      if (Number.isInteger(Number(existing.score))) ns.score = Number(existing.score);
+      if (typeof existing.active_tasks_done === 'boolean') ns.active_tasks_done = existing.active_tasks_done;
+      ns.note = String(existing.note || existing.notes || existing.body || '') || '';
+    }
+    ns._prefilled = true;
+  }
+  function _updateNoteSaveBtn(id) {
+    const btn = document.getElementById('stNoteSaveBtn_' + id);
+    if (!btn) return;
+    const ns = _noteState(id);
+    const disabled = !!ns.saving;
+    btn.disabled = disabled;
+    btn.textContent = ns.saving ? 'Opslaan…' : 'Opslaan';
+    btn.style.opacity = disabled ? '.55' : '1';
+    btn.style.cursor  = disabled ? 'not-allowed' : 'pointer';
+  }
+  // State-only setters (geen render → textarea/input focus behouden).
+  window.__stNoteSetStatus = (id, val) => {
+    if (!ASSESSMENT_STATUSES.includes(val)) return;
+    const ns = _noteState(id);
+    ns.status = val; ns.error = null; ns.savedAt = null;
+    // Status-wissel: score/tasks-block moet mogelijk verschijnen/verdwijnen
+    // (bij 'niet_actief' vervalt score+tasks). Volledige tab-render is nodig.
+    _repaintDetailPane();
+  };
+  window.__stNoteSetScore = (id, val) => {
+    const ns = _noteState(id);
+    const n = Math.max(1, Math.min(10, Math.round(Number(val) || 0)));
+    ns.score = n; ns.error = null; ns.savedAt = null;
+  };
+  window.__stNoteSetTasksDone = (id, el) => {
+    const ns = _noteState(id);
+    ns.active_tasks_done = !!(el && el.checked);
+    ns.error = null; ns.savedAt = null;
+  };
+  window.__stNoteSetText = (id, val) => {
+    const ns = _noteState(id);
+    ns.note = String(val || '');
+    ns.error = null; ns.savedAt = null;
+    // 'Opgeslagen'-badge verbergen bij typen na een succesvolle save.
+    const savedEl = document.getElementById('stNoteSaved_' + id);
+    if (savedEl && savedEl.style.display !== 'none') savedEl.style.display = 'none';
+  };
+  window.__stNoteSave = async (id) => {
+    const ns = _noteState(id);
+    if (ns.saving) return;
+    const rows = asArr(_live.students.data);
+    const s = rows.find((x) => String(x.bubble_student_id || x.id) === String(id));
+    if (!s) return;
+    const name = s.name || s.email || '';
+    if (!name) { ns.error = 'Student-naam ontbreekt — kan niet opslaan.'; _repaintDetailPane(); return; }
+    ns.saving = true; ns.error = null; ns.savedAt = null;
+    _updateNoteSaveBtn(id);
+    const payload = {
+      student_id: String(id),
+      student_name: name,
+      status: ns.status,
+      note: (ns.note && ns.note.trim()) ? ns.note.trim() : null,
+    };
+    if (ns.status !== 'niet_actief') {
+      payload.score = ns.score;
+      payload.active_tasks_done = !!ns.active_tasks_done;
+    }
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/mentor-assessment-save', {
+        method: 'POST', headers, body: JSON.stringify(payload),
+      });
+      let j = null; try { j = await resp.json(); } catch (_) {}
+      ns.saving = false;
+      if (!resp.ok) {
+        ns.error = (j && j.error) || ('HTTP ' + resp.status);
+        _repaintDetailPane();
+        return;
+      }
+      // Optimistic: update _live.notes.byId[id] met de teruggegeven rij
+      // (autoritatief; server heeft period_month + updated_at).
+      const saved = j.assessment || null;
+      if (!_live.notes.byId) _live.notes.byId = {};
+      if (saved) _live.notes.byId[String(id)] = saved;
+      ns.savedAt = new Date().toISOString();
+      _repaintDetailPane();
+      setTimeout(() => {
+        const el = document.getElementById('stNoteSaved_' + id);
+        if (el) el.style.display = 'none';
+      }, 3000);
+    } catch (e) {
+      ns.saving = false;
+      ns.error = 'Netwerkfout — probeer het opnieuw.';
+      console.warn('[studenten-v2 note-save] fail:', e?.message || e);
+      _repaintDetailPane();
+    }
+  };
+
   window.__stOpenLms = (email) => {
     // Deep-link: LMS-root openen; email in query voor context (bubble
     // admin-search accepteert dit). Als het exacte user-detail-URL-patroon
@@ -415,15 +544,74 @@
         </div>
       </div>`;
     } else if (_ui.detailTab === 'Notities') {
-      const note = _live.notes.byId ? _live.notes.byId[id] : null;
-      if (_live.notes.loading && !_live.notes.byId) body = `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Notities laden…</div>`;
-      else if (!note) body = `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Geen notitie voor deze student. <div style="font-size:11px;margin-top:6px">Bewerken komt in BROK 2.</div></div>`;
-      else body = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;font-size:12.5px">
-        ${note.status ? `<div style="margin-bottom:8px"><span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-2);font-weight:600">${esc(note.status)}</span></div>` : ''}
-        <div style="white-space:pre-wrap;line-height:1.55">${esc(note.notes || note.body || note.text || '(leeg)')}</div>
-        ${note.updated_at ? `<div style="margin-top:10px;font-size:10.5px;color:var(--text-3)">Laatst bijgewerkt: ${esc(new Date(note.updated_at).toLocaleString('nl-NL'))}</div>` : ''}
-        <div style="margin-top:10px;font-size:11px;color:var(--text-3);font-style:italic">Bewerken komt in BROK 2 — deze weergave is read-only.</div>
-      </div>`;
+      // BROK 2: interactief. Wacht op notes-fetch bij eerste laden zodat we
+      // met bestaande waarden kunnen prefillen. Daarna full edit-form.
+      if (_live.notes.loading && !_live.notes.byId) {
+        body = `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Notities laden…</div>`;
+      } else {
+        _prefillNoteFromServer(id);
+        const ns = _noteState(id);
+        const serverNote = _live.notes.byId ? _live.notes.byId[String(id)] : null;
+        const statusChips = ASSESSMENT_STATUSES.map((v) => {
+          const on = ns.status === v;
+          const col = ASSESSMENT_STATUS_COLORS[v] || 'text-3';
+          const bg = on ? `var(--${col})` : 'transparent';
+          const fg = on ? '#fff' : `var(--${col})`;
+          const bd = `var(--${col}-line, var(--${col}))`;
+          return `<button class="chip" style="padding:4px 12px;border:1px solid ${bd};background:${bg};color:${fg};border-radius:20px;font-size:11.5px;font-weight:${on ? '600' : '500'};cursor:pointer" onclick="__stNoteSetStatus('${esc(id)}','${v}')">${esc(ASSESSMENT_STATUS_LABELS[v])}</button>`;
+        }).join('');
+        const showScoreBlock = ns.status !== 'niet_actief';
+        const savedRecently = ns.savedAt && (Date.now() - new Date(ns.savedAt).getTime() < 3500);
+        const lastUpdatedTxt = serverNote && serverNote.updated_at
+          ? 'Laatst opgeslagen: ' + new Date(serverNote.updated_at).toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+          : 'Nog niet eerder opgeslagen deze maand.';
+        body = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Beoordeling</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">${statusChips}</div>
+          </div>
+          ${showScoreBlock ? `
+            <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end">
+              <div>
+                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Score (1-10)</div>
+                <input type="number" min="1" max="10" step="1" value="${esc(String(ns.score))}"
+                  oninput="__stNoteSetScore('${esc(id)}', this.value)"
+                  style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;outline:none;box-sizing:border-box" />
+              </div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding-bottom:9px;cursor:pointer">
+                <input type="checkbox" ${ns.active_tasks_done ? 'checked' : ''}
+                  onchange="__stNoteSetTasksDone('${esc(id)}', this)"
+                  style="width:16px;height:16px;cursor:pointer" />
+                <span>Actieve taken gedaan</span>
+              </label>
+            </div>
+          ` : ''}
+          <div>
+            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Notitie</div>
+            <textarea placeholder="Notitie over deze student… (optioneel)"
+              oninput="__stNoteSetText('${esc(id)}', this.value)"
+              style="width:100%;min-height:100px;max-height:280px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;line-height:1.5;resize:vertical;outline:none;box-sizing:border-box">${esc(ns.note || '')}</textarea>
+          </div>
+          ${ns.error ? `<div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <span>⚠ ${esc(ns.error)}</span>
+            <button class="btn btn-ghost btn-sm" onclick="__stNoteSave('${esc(id)}')" style="font-size:11px">Opnieuw</button>
+          </div>` : ''}
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="font-size:11px;color:var(--text-3)">
+              ${esc(lastUpdatedTxt)}
+              <span id="stNoteSaved_${esc(id)}" style="display:${savedRecently ? 'inline' : 'none'};margin-left:8px;color:var(--emerald);font-weight:600">✓ Opgeslagen</span>
+            </div>
+            <button id="stNoteSaveBtn_${esc(id)}" class="btn btn-primary btn-sm"
+              ${ns.saving ? 'disabled' : ''}
+              style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:12px;opacity:${ns.saving ? '.55' : '1'};cursor:${ns.saving ? 'not-allowed' : 'pointer'}"
+              onclick="__stNoteSave('${esc(id)}')">${ns.saving ? 'Opslaan…' : 'Opslaan'}</button>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-3);line-height:1.45">
+            Beoordeling geldt voor de <b>huidige maand</b> en wordt maandelijks opnieuw ingevuld.
+            De status-badge in de lijst en het detail werken automatisch mee met wat je hier zet.
+          </div>
+        </div>`;
+      }
     }
 
     return `<div style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
@@ -559,5 +747,5 @@
   window.DFO.VIEWS['studenten/'] = studentenView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('studenten');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('studenten');
-  console.debug('[studenten-v2] v=2 BROK 1 — reads bedraad: mentor-my-students (Bubble-proxy, mentor-self of admin-override via window.__stMentorOverride) + mentor-students-invoice-status (betaalstatus) + mentor-assessments-self (read-only notities) + mentor-1on1-sessions (lazy bij Sessies-tab). VOORBEELD-mock volledig verwijderd. Uncontrolled zoekveld (focus-behoud + surgical _repaintListBody). LMS-link naar dashboard.deforexopleiding.nl root (deep-link-patroon niet code-side vindbaar).');
+  console.debug('[studenten-v2] v=3 BROK 2 — Notities-tab interactief: status-chips (op_schema/aandacht/risico/niet_actief) + score 1-10 + active_tasks_done + notitie-textarea. POST /api/mentor-assessment-save (upsert per huidige maand). State-only setters (focus behouden). Race-guard op save. "✓ Opgeslagen"-feedback ~3s. Fail-soft + Opnieuw-knop. Bij niet_actief: score+tasks weggelaten (server forceert null). BROK 1 (reads) uit v=2 byte-identiek behouden.');
 })();
