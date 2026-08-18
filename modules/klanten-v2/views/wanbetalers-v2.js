@@ -1946,6 +1946,342 @@
     </div>`;
   }
 
+  /* ── BROK 7 (v=9): Case-sheet overlay (klant-dossier + bellen) ──────
+     Full-screen modal via document.body.appendChild (losgekoppeld van
+     DFO.render). Secties: open facturen, timeline (WanbetalersTimeline),
+     brieven, belgeschiedenis. Softphone via window.KlxSoftphone.call().
+     Belpoging-form met custom confirm + race-guard → POST /api/dunning-
+     call-log-create. Alle andere reads. */
+  _live.caseSheet = {
+    invoicesByCust: {},   // cid → { loading, items, error }
+    briefsByCust:   {},   // cid → { loading, items, error }
+    dossierByCust:  {},   // cid → { loading, data, error } (customer-dossier)
+  };
+  _ui.caseSheet = { cid: null, tab: 'invoices' };
+  _ui.callFormOpen = {};  // cid → true (belpoging-form uit case-sheet)
+
+  async function _fetchCaseInvoices(cid) {
+    if (!cid) return;
+    const bag = _live.caseSheet.invoicesByCust[cid] = _live.caseSheet.invoicesByCust[cid] || { loading: false, items: [], error: null };
+    if (bag.loading) return;
+    bag.loading = true; bag.error = null;
+    // customer-dossier levert een facturen-lijst per klant (wanbetalers-invoices-list heeft geen ?customer_id).
+    const j = await tryFetch('case:invoices:' + cid, `/api/customer-dossier?customer_id=${encodeURIComponent(cid)}`, 8000);
+    if (j && j.error) bag.error = j.error;
+    else {
+      const inv = asArr(j?.invoices || j?.open_invoices || j?.data?.invoices);
+      bag.items = inv.filter((x) => !x.paid && !x.credited);
+    }
+    bag.loading = false; _renderCaseSheet();
+  }
+  async function _fetchCaseBriefs(cid) {
+    if (!cid) return;
+    const bag = _live.caseSheet.briefsByCust[cid] = _live.caseSheet.briefsByCust[cid] || { loading: false, items: [], error: null };
+    if (bag.loading) return;
+    bag.loading = true; bag.error = null;
+    const j = await tryFetch('case:briefs:' + cid, `/api/dunning-briefs-list?customer_id=${encodeURIComponent(cid)}`, 8000);
+    if (j && j.error) bag.error = j.error;
+    else bag.items = asArr(j?.items);
+    bag.loading = false; _renderCaseSheet();
+  }
+
+  function _findOvRow(cid) {
+    return asArr(_live.overzicht.items).find((x) => String(x.customer_id || x.id) === String(cid)) || null;
+  }
+  function _customerPhone(row) {
+    return row?.phone || row?.customer?.phone || row?.mobile_phone || null;
+  }
+
+  // Overschrijf de forward-ref uit BROK 9:
+  window.__wbxOpenCase = (cid) => {
+    if (!cid) return;
+    _ui.caseSheet.cid = String(cid);
+    _ui.caseSheet.tab = 'invoices';
+    // Warm de per-tab data.
+    if (!_live.callLog.byCust[cid])  queueMicrotask(() => _fetchCallLog(cid));
+    if (!_live.timeline.byCust[cid]) queueMicrotask(() => _fetchTimeline(cid));
+    if (!_live.arrangements.byCust) queueMicrotask(_fetchArrangements);
+    queueMicrotask(() => _fetchCaseInvoices(cid));
+    queueMicrotask(() => _fetchCaseBriefs(cid));
+    _openCaseSheetDom();
+  };
+  window.__wbxCloseCase = () => {
+    _ui.caseSheet.cid = null;
+    _ui.callFormOpen = {};
+    const el = document.getElementById('wbxCaseSheet');
+    if (el) el.remove();
+    document.removeEventListener('keydown', _caseSheetKey);
+  };
+  window.__wbxCaseTab = (tab) => {
+    _ui.caseSheet.tab = String(tab || 'invoices');
+    _renderCaseSheet();
+  };
+
+  function _caseSheetKey(e) { if (e.key === 'Escape') window.__wbxCloseCase(); }
+
+  function _openCaseSheetDom() {
+    let el = document.getElementById('wbxCaseSheet');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'wbxCaseSheet';
+      el.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.42);display:flex;justify-content:center;align-items:center;padding:20px';
+      document.body.appendChild(el);
+      document.addEventListener('keydown', _caseSheetKey);
+    }
+    _renderCaseSheet();
+  }
+
+  function _renderCaseSheet() {
+    const el = document.getElementById('wbxCaseSheet');
+    if (!el || !_ui.caseSheet.cid) return;
+    el.innerHTML = _caseSheetHtml();
+  }
+
+  function _caseSheetHtml() {
+    const cid = _ui.caseSheet.cid;
+    const row = _findOvRow(cid);
+    const name = row?.customer_name || row?.name || 'Onbekend';
+    const openAmt = Number.isFinite(Number(row?.total_open_cents)) ? Number(row.total_open_cents) / 100 : 0;
+    const days = Number.isFinite(Number(row?.days_overdue)) ? Number(row.days_overdue) : 0;
+    const stage = row?.stage_slug || '—';
+    const arrs = (_live.arrangements.byCust || {})[cid] || [];
+    const activeArr = arrs.length > 0;
+    const phone = _customerPhone(row);
+    const tab = _ui.caseSheet.tab || 'invoices';
+
+    const tabBtn = (id, label, count) => `<button class="chip ${tab === id ? 'on' : ''}" style="font-size:11.5px;padding:4px 11px" onclick="__wbxCaseTab('${id}')">${esc(label)}${count != null ? ` <span style="opacity:.6">${count}</span>` : ''}</button>`;
+
+    let body = '';
+    if (tab === 'invoices')  body = _caseSheetInvoicesHtml(cid);
+    else if (tab === 'timeline') body = _caseSheetTimelineHtml(cid);
+    else if (tab === 'briefs')   body = _caseSheetBriefsHtml(cid);
+    else if (tab === 'calls')    body = _caseSheetCallsHtml(cid, phone);
+
+    const invCount = asArr(_live.caseSheet.invoicesByCust[cid]?.items).length;
+    const tlCount  = asArr(_live.timeline.byCust[cid]).length;
+    const brCount  = asArr(_live.caseSheet.briefsByCust[cid]?.items).length;
+    const clCount  = asArr(_live.callLog.byCust[cid]).length;
+
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);width:min(960px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:14px">
+        <div style="min-width:0;flex:1">
+          <div style="font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}${activeArr ? ` <span style="font-size:10.5px;padding:2px 8px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600;vertical-align:middle;margin-left:6px">⏸ Arrangement</span>` : ''}</div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${eur(openAmt)} · ${days} dagen · fase <b style="color:var(--text-1)">${esc(stage)}</b></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${phone ? `<button class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="__wbxCallDial('${esc(cid)}','${esc(phone)}','${esc(name)}')" title="Softphone: ${esc(phone)}">📞 Bel</button>` : ''}
+          <button class="icon-btn" onclick="__wbxCloseCase()" title="Sluit (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+      </div>
+      <div style="padding:9px 18px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">
+        ${tabBtn('invoices', 'Open facturen', invCount)}
+        ${tabBtn('timeline', 'Tijdlijn', tlCount)}
+        ${tabBtn('briefs',   'Brieven',  brCount)}
+        ${tabBtn('calls',    'Belhistorie', clCount)}
+      </div>
+      <div style="flex:1;overflow-y:auto;background:var(--surface-2)">${body}</div>
+    </div>`;
+  }
+
+  function _caseSheetInvoicesHtml(cid) {
+    const bag = _live.caseSheet.invoicesByCust[cid] || { loading: true, items: [] };
+    if (bag.loading && !bag.items.length) return `<div style="padding:14px">${_skelRows(3)}</div>`;
+    if (bag.error && !bag.items.length)   return `<div style="padding:14px">${_errBlkCase(bag.error, 'invoices', cid)}</div>`;
+    if (!bag.items.length) return `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:13px">Geen open facturen.</div>`;
+    return `<div style="padding:14px 18px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="display:grid;grid-template-columns:130px 1fr 120px 120px;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
+          <div>Factuurnr.</div><div>Beschrijving</div><div style="text-align:right">Openstaand</div><div>Vervaldatum</div>
+        </div>
+        ${bag.items.map((inv) => {
+          const num = inv.invoice_number || inv.number || inv.id?.slice(0,8) || '—';
+          const desc = inv.description || inv.subject || '—';
+          const cents = Number(inv.open_amount_cents ?? (Number(inv.open_amount || 0) * 100)) || 0;
+          const due = inv.due_date || inv.due_on || null;
+          const overdue = Number(inv.days_overdue || 0);
+          return `<div style="display:grid;grid-template-columns:130px 1fr 120px 120px;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+            <div style="font-family:'IBM Plex Mono',monospace">${esc(num)}</div>
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(desc)}</div>
+            <div style="text-align:right;font-family:'IBM Plex Mono',monospace">${eur(cents / 100)}</div>
+            <div style="font-size:11.5px;color:${overdue > 0 ? 'var(--rose)' : 'var(--text-3)'}">${esc(_fmtDate(due))}${overdue > 0 ? ` · <b>${overdue}d</b>` : ''}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  function _caseSheetTimelineHtml(cid) {
+    const st = _live.timeline;
+    if (st.loading && !st.byCust[cid]) return `<div style="padding:14px">${_skelRows(4)}</div>`;
+    const items = asArr(st.byCust[cid]);
+    if (!items.length) return `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:13px">Geen tijdlijn-events.</div>`;
+    // Gebruik gedeelde WanbetalersTimeline.describe(item) → { icon, title } als beschikbaar.
+    const WT = window.WanbetalersTimeline || null;
+    return `<div style="padding:14px 18px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r)">
+        ${items.map((it) => {
+          const d = WT?.describe ? WT.describe(it) : { icon: '·', title: it.title || it.type };
+          const actor = it.actor?.name || '';
+          return `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:10px;font-size:12.5px">
+            <div style="font-size:15px;line-height:1;color:var(--text-3);min-width:20px;text-align:center">${esc(d.icon || '·')}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600">${esc(d.title || it.title || it.type || 'Event')}</div>
+              ${it.description ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(it.description)}</div>` : ''}
+              <div style="font-size:10.5px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${esc(_fmtDateTime(it.at))}${actor ? ` · ${esc(actor)}` : ''}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  function _caseSheetBriefsHtml(cid) {
+    const bag = _live.caseSheet.briefsByCust[cid] || { loading: true, items: [] };
+    if (bag.loading && !bag.items.length) return `<div style="padding:14px">${_skelRows(2)}</div>`;
+    if (bag.error && !bag.items.length)   return `<div style="padding:14px">${_errBlkCase(bag.error, 'briefs', cid)}</div>`;
+    if (!bag.items.length) return `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:13px">Geen brieven.</div>`;
+    return `<div style="padding:14px 18px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        ${bag.items.map((b) => {
+          const tpl = b.template_code || '—';
+          const when = b.generated_at || b.created_at;
+          const sent = b.sent_at || b.sent_via;
+          const url = b.download_url || null;
+          return `<div style="display:grid;grid-template-columns:140px 1fr 120px auto;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px">${esc(tpl)}</div>
+            <div style="color:var(--text-3);font-size:11.5px">${sent ? `Verstuurd${b.sent_via ? ' · ' + esc(b.sent_via) : ''}` : 'Aangemaakt'}</div>
+            <div class="mono" style="color:var(--text-3)">${esc(_fmtDate(when))}</div>
+            <div>${url ? `<a class="btn btn-ghost btn-sm" style="font-size:11px" href="${esc(url)}" target="_blank" rel="noopener">PDF →</a>` : '—'}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  function _caseSheetCallsHtml(cid, phone) {
+    const items = asArr(_live.callLog.byCust[cid]);
+    const formOpen = !!_ui.callFormOpen[cid];
+    const rowsHtml = items.length ? items.map((c) => {
+      const outcome = c.outcome || '—';
+      const at = _fmtDateTime(c.attempted_at || c.created_at);
+      const cb = c.callback_at ? `<span style="color:var(--amber);font-size:11px"> · terugbellen ${esc(_fmtDateTime(c.callback_at))}</span>` : '';
+      const note = c.note ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:3px">${esc(c.note)}</div>` : '';
+      return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px">
+        <div><b>${esc(outcome)}</b> ${cb}</div>
+        <div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:2px">${esc(at)}${c.created_by_name ? ' · ' + esc(c.created_by_name) : ''}</div>
+        ${note}
+      </div>`;
+    }).join('') : `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:13px">Geen belpogingen.</div>`;
+
+    const formHtml = formOpen ? _caseSheetCallFormHtml(cid) : `<div style="padding:12px 18px;text-align:right"><button class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="__wbxCaseCallOpen('${esc(cid)}')" ${_rbac.canExecute ? '' : 'disabled title="Geen rechten (finance.dunning.execute)"'}>+ Belpoging loggen</button></div>`;
+
+    return `<div>${formHtml}<div style="padding:0 18px 18px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r)">${rowsHtml}</div>
+    </div></div>`;
+  }
+
+  function _caseSheetCallFormHtml(cid) {
+    const f = _ui.callForm[cid] = _ui.callForm[cid] || { outcome: '', note: '', callback_at: '', saving: false, error: null };
+    const outcomes = [
+      ['no_answer', 'Geen gehoor'], ['voicemail', 'Voicemail'], ['callback', 'Terugbelafspraak'],
+      ['payment_promise', 'Betaaltoezegging'], ['payment_plan', 'Regeling voorgesteld'],
+      ['refused', 'Weigert'], ['wrong_number', 'Verkeerd nummer'],
+      ['paid_during_call', 'Betaald tijdens gesprek'], ['disputed', 'Betwist'], ['info_sent', 'Info verzonden'],
+    ];
+    const needsCb = f.outcome === 'callback';
+    return `<div style="padding:14px 18px;background:var(--surface);border-bottom:1px solid var(--border)">
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:9px">Belpoging loggen</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:9px">
+        <div>
+          <label style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Uitkomst *</label>
+          <select onchange="__wbxCaseCallField('${esc(cid)}','outcome',this.value)" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-top:3px">
+            <option value="">— kies —</option>
+            ${outcomes.map(([v, l]) => `<option value="${esc(v)}" ${f.outcome === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="${needsCb ? '' : 'opacity:.5'}">
+          <label style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Terugbellen op${needsCb ? ' *' : ''}</label>
+          <input type="datetime-local" value="${esc(f.callback_at || '')}" oninput="__wbxCaseCallField('${esc(cid)}','callback_at',this.value)" ${needsCb ? '' : 'disabled'} style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-top:3px" />
+        </div>
+      </div>
+      <div>
+        <label style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Notitie</label>
+        <textarea oninput="__wbxCaseCallField('${esc(cid)}','note',this.value)" rows="2" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-top:3px;resize:vertical;font-family:inherit">${esc(f.note || '')}</textarea>
+      </div>
+      ${f.error ? `<div style="color:var(--rose);font-size:11.5px;margin-top:6px">⚠ ${esc(f.error)}</div>` : ''}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:9px">
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxCaseCallCancel('${esc(cid)}')">Annuleren</button>
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="__wbxCaseCallSave('${esc(cid)}')" ${f.saving ? 'disabled' : ''}>${f.saving ? 'Bezig…' : 'Log belpoging'}</button>
+      </div>
+    </div>`;
+  }
+
+  window.__wbxCaseCallOpen = (cid) => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    _ui.callFormOpen[cid] = true; _renderCaseSheet();
+  };
+  window.__wbxCaseCallCancel = (cid) => { _ui.callFormOpen[cid] = false; delete _ui.callForm[cid]; _renderCaseSheet(); };
+  window.__wbxCaseCallField = (cid, field, val) => {
+    _ui.callForm[cid] = _ui.callForm[cid] || {};
+    _ui.callForm[cid][field] = val;
+    if (field === 'outcome') _renderCaseSheet(); // callback-veld enable/disable
+  };
+  window.__wbxCaseCallSave = async (cid) => {
+    if (!_rbac.canExecute) { _toast('Geen rechten.', 'error'); return; }
+    const f = _ui.callForm[cid] || {};
+    if (!f.outcome) { f.error = 'Kies een uitkomst.'; _renderCaseSheet(); return; }
+    if (f.outcome === 'callback' && !f.callback_at) { f.error = 'Terugbeltijd verplicht bij callback.'; _renderCaseSheet(); return; }
+    if (f.saving) return;
+    const row = _findOvRow(cid);
+    const name = row?.customer_name || row?.name || 'klant';
+    const cbLine = f.callback_at ? `<div><b>Terugbellen:</b> ${esc(_fmtDateTime(new Date(f.callback_at).toISOString()))}</div>` : '';
+    const noteLine = f.note ? `<div style="margin-top:6px"><b>Notitie:</b> ${esc(f.note)}</div>` : '';
+    const ok = await _askConfirm('Belpoging loggen?', `<div><b>Klant:</b> ${esc(name)}</div><div><b>Uitkomst:</b> ${esc(f.outcome)}</div>${cbLine}${noteLine}`, { okLabel: 'Ja, log' });
+    if (!ok) return;
+    f.saving = true; f.error = null; _renderCaseSheet();
+    const body = { customer_id: String(cid), outcome: f.outcome };
+    if (f.note) body.note = f.note;
+    if (f.outcome === 'callback' && f.callback_at) body.callback_at = new Date(f.callback_at).toISOString();
+    // BROK 7 RECON: endpoint = dunning-call-log-create (niet -save)
+    const r = await apiPost('/api/dunning-call-log-create', body);
+    f.saving = false;
+    if (!r.ok) { f.error = r.error || 'Kon niet loggen.'; _renderCaseSheet(); return; }
+    _ui.callFormOpen[cid] = false; delete _ui.callForm[cid];
+    // Cache invalideren + refetch.
+    delete _live.callLog.byCust[cid];
+    _fetchCallLog(cid);
+    _toast('Belpoging gelogd.', 'success');
+    _renderCaseSheet();
+  };
+
+  window.__wbxCallDial = async (cid, phone, name) => {
+    if (!phone) { _toast('Geen telefoonnummer bekend.', 'error'); return; }
+    try {
+      if (window.KlxSoftphone && typeof window.KlxSoftphone.call === 'function') {
+        const r = await window.KlxSoftphone.call(String(phone), { displayName: String(name || '') });
+        if (r && r.ok === false) { _toast('Bellen faalde: ' + (r.error || 'onbekend'), 'error'); return; }
+        _toast(`Belt ${name || phone}…`, 'success');
+      } else {
+        // Fallback: browser tel:-link.
+        window.location.href = 'tel:' + encodeURIComponent(String(phone));
+      }
+    } catch (e) {
+      _toast('Belfout: ' + (e?.message || e), 'error');
+    }
+  };
+
+  window.__wbxRetryCase = (what, cid) => {
+    if (what === 'invoices') { delete _live.caseSheet.invoicesByCust[cid]; _fetchCaseInvoices(cid); }
+    if (what === 'briefs')   { delete _live.caseSheet.briefsByCust[cid];   _fetchCaseBriefs(cid); }
+    _renderCaseSheet();
+  };
+  function _errBlkCase(msg, what, cid) {
+    return `<div style="padding:14px 16px;background:var(--rose-soft);border:1px solid var(--rose-line, var(--rose));color:var(--rose);border-radius:var(--r);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <span>⚠ ${esc(msg)}</span>
+      <button class="btn btn-ghost btn-sm" onclick="__wbxRetryCase('${esc(what)}','${esc(cid)}')">Opnieuw</button>
+    </div>`;
+  }
+
   /* ── BROK 9 (v=8): Pipeline-kanban per dunning-fase ─────────────────
      Kolommen uit /api/dunning-pipeline-stages (is_active=true). Kaarten
      uit gedeelde _live.overzicht.items — geen extra fetch. Per kaart
