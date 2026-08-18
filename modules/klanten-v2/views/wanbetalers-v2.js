@@ -1963,6 +1963,7 @@
   };
   _ui.inbox = {
     selectedConv:  null,
+    _selectSeq:    0,                  // BROK 5-fix (v=11): per __wbxInboxSelect stale-guard
     searchQ:       '',
     _searchTimer:  null,
     statusFilter:  'active',           // 'active' | 'afgehandeld' | 'archief' | 'all'
@@ -1991,12 +1992,18 @@
     st.loading = false;
     try { window.DFO?.render?.(); } catch (_) {}
   }
-  async function _fetchInboxThread(convId) {
+  // BROK 5-fix (v=11): stale-guard via _seq per __wbxInboxSelect.
+  // Snel klikken A → B → A → fetches van eerder-verlaten convs die later
+  // returnen mogen state niet meer overschrijven. Elke fetch capturet
+  // 'mySeq' bij start en checkt bij state-write of dat nog === _selectSeq.
+  async function _fetchInboxThread(convId, mySeq) {
     if (!convId) return;
     const bag = _live.inbox.thread.byConv[convId] = _live.inbox.thread.byConv[convId] || { items: [], conversation: null };
     if (_live.inbox.thread.loading[convId]) return;
     _live.inbox.thread.loading[convId] = true; delete _live.inbox.thread.error[convId];
     const j = await tryFetch('inbox:thread:' + convId, `/api/inbox-thread-unified?conversation_id=${encodeURIComponent(convId)}&include_email=1&limit=200`, 10000);
+    // Stale? User heeft doorgeklikt naar een andere conv → skip state-write.
+    if (mySeq != null && mySeq !== _ui.inbox._selectSeq) { _live.inbox.thread.loading[convId] = false; return; }
     if (j && j.error) _live.inbox.thread.error[convId] = j.error;
     else {
       bag.items = asArr(j?.items);
@@ -2008,31 +2015,38 @@
     _live.inbox.thread.loading[convId] = false;
     try { window.DFO?.render?.(); } catch (_) {}
   }
-  async function _fetchInboxCtx(convId) {
+  async function _fetchInboxCtx(convId, mySeq) {
     if (!convId) return;
     if (_live.inbox.ctx.loading[convId] || _live.inbox.ctx.byConv[convId]) return;
     _live.inbox.ctx.loading[convId] = true;
     const j = await tryFetch('inbox:ctx:' + convId, `/api/inbox-conversation-context?conversation_id=${encodeURIComponent(convId)}`, 8000);
     _live.inbox.ctx.loading[convId] = false;
+    if (mySeq != null && mySeq !== _ui.inbox._selectSeq) return;
     if (j && !j.error) _live.inbox.ctx.byConv[convId] = j;
     try { window.DFO?.render?.(); } catch (_) {}
   }
-  async function _fetchInboxTemplates(convId) {
+  async function _fetchInboxTemplates(convId, mySeq) {
     if (!convId) return;
     if (_live.inbox.templates.loading[convId] || _live.inbox.templates.byConv[convId]) return;
     _live.inbox.templates.loading[convId] = true;
     const j = await tryFetch('inbox:tpl:' + convId, `/api/inbox-template-list?conversation_id=${encodeURIComponent(convId)}`, 8000);
     _live.inbox.templates.loading[convId] = false;
+    if (mySeq != null && mySeq !== _ui.inbox._selectSeq) return;
     if (j && !j.error) _live.inbox.templates.byConv[convId] = asArr(j?.items);
     try { window.DFO?.render?.(); } catch (_) {}
   }
 
   window.__wbxInboxSelect = (convId) => {
     _ui.inbox.selectedConv = String(convId);
+    // BROK 5-fix (v=11): increment select-seq zodat oudere in-flight
+    // fetches (van eerdere convId) hun state-write skippen zodra ze
+    // eindelijk resolven. Voorkomt race waarbij een trage thread-fetch
+    // van conv A de zojuist gekozen conv B overschrijft.
+    const mySeq = ++_ui.inbox._selectSeq;
     _ui.inbox.compose = { channel: 'wa', text: '', subject: '', templateName: '', sending: false, waWindowExpired: false, error: null };
-    _fetchInboxThread(convId);
-    _fetchInboxCtx(convId);
-    _fetchInboxTemplates(convId);
+    _fetchInboxThread(convId, mySeq);
+    _fetchInboxCtx(convId, mySeq);
+    _fetchInboxTemplates(convId, mySeq);
     // Mark-read (silent, fire-and-forget).
     apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
     try { window.DFO?.render?.(); } catch (_) {}
@@ -2756,6 +2770,27 @@
   };
   _ui.motorPollTimer = null;
 
+  // BROK 10-fix (v=11): canonical poll teardown-pattern, spiegel van
+  // lisa-v2 / inbox-v2 / leadsonderhoud-v2 / onboarding-v2. Tick checkt
+  // eerst of data-wbx-view="motor" nog in DOM zit; als user weg-genaviged
+  // is (tab-wissel binnen shell OF module-unload) → clearInterval en stop.
+  function _startMotorPoll() {
+    if (_ui.motorPollTimer) return;
+    _ui.motorPollTimer = setInterval(_motorPollTick, 18_000);
+  }
+  function _stopMotorPoll() {
+    if (_ui.motorPollTimer) { try { clearInterval(_ui.motorPollTimer); } catch (_) {} _ui.motorPollTimer = null; }
+  }
+  function _motorPollTick() {
+    // Tab-leave / module-unload detectie via DOM-marker (motorView zet
+    // data-wbx-view="motor"). Weg → stop de poll voor de rest van de sessie
+    // tot user 'm zelf heropent (motorView() start dan _startMotorPoll opnieuw).
+    if (!document.querySelector('[data-wbx-view="motor"]')) { _stopMotorPoll(); return; }
+    if (typeof document !== 'undefined' && document.hidden) return;
+    _live.motor.fetched = false; _fetchMotor();
+  }
+  window.addEventListener('beforeunload', _stopMotorPoll);
+
   async function _fetchMotor() {
     const st = _live.motor;
     if (st.loading) return;
@@ -2809,13 +2844,8 @@
 
   function motorView() {
     if (!_live.motor.fetched && !_live.motor.loading) queueMicrotask(_fetchMotor);
-    // Poll 18s met document.hidden pause.
-    if (!_ui.motorPollTimer) {
-      _ui.motorPollTimer = setInterval(() => {
-        if (typeof document !== 'undefined' && document.hidden) return;
-        _live.motor.fetched = false; _fetchMotor();
-      }, 18_000);
-    }
+    // Poll 18s met document.hidden pause + auto-stop op tab-leave / unload.
+    _startMotorPoll();
     if (_live.motor.loading && !_live.motor.fetched) {
       return `<div class="pad" style="padding:14px 20px">${_skelKpis()}${_skelRows(5)}</div>`;
     }
@@ -2905,5 +2935,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=6 BROK 4 — 8 fixes: (1) confirm ALTIJD op call-log; (2) veld-mapping overzicht: total_open_cents/100, days_overdue, open_invoice_count; (3) customer.name (nested) ipv customer_id op pending-actions + arrangements; (4) dedupe arrangements (één fetch, byCust van _arrLive.items); (5) bulk-modal telt distinct klanten + typ-to-confirm zonder backdrop-dismiss; (6) waarschuwing bij nieuw arrangement op klant met actief arrangement; (7) RBAC client-side gates via window.RBAC; (8) brieven kolommen template_code+generated_at+download_url+PDF-preview via wanbetalers-brief-pdf?preview=1. BROK 3 TL-mutaties/arrangements/bulk-workflow behouden.');
+  console.debug('[wanbetalers-v2] v=11 perf-fix — (a) FIX 1 Motor-poll leak dichtgezet: _startMotorPoll/_stopMotorPoll met tick-guard [data-wbx-view="motor"] + beforeunload — spiegel van lisa-v2/inbox-v2/leadsonderhoud-v2/onboarding-v2/events-v2. Poll stopt echt bij tab-leave i.p.v. eeuwig door te draaien op elke 18s. (b) FIX 2 Inbox stale-guard: _ui.inbox._selectSeq incrementeert per __wbxInboxSelect; _fetchInboxThread/Ctx/Templates capturen mySeq en skippen state-write als user al doorklikte. BROKKEN 3-10 functionaliteit ongewijzigd. Audit: enige setInterval in v2-views die geen clearInterval-pair had was Motor — nu gefixt.');
 })();
