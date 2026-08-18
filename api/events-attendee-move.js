@@ -38,7 +38,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendEventAttendeeInvite } from './_lib/events-invite.js';
-import { getConfirmedCount } from './_lib/event-registration.js';
+import { getConfirmedCount, autoCloseIfFull } from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE_STATUSES = ['aangemeld', 'aanwezig', 'sale'];
@@ -281,6 +281,21 @@ export default async function handler(req, res) {
         console.error('[events-attendee-move invite]', e?.message || e);
         invite = { ok: false, error: e?.message || 'invite send failed' };
       }
+    }
+
+    // FIX (2026-08-18): auto-close-hook op target-event. Move-flow had een
+    // pre-check maar geen post-insert autoCloseIfFull — als een move het
+    // target exact vol maakt (cnt=7 → move → cnt=8, cap=8) bleef signups
+    // onterecht open. Zelfde patroon als assessment-register / assessment-
+    // submit / event-choice-submit / events-attendee-add / events-attendee-
+    // status-change / events-signup-inbound. Fail-soft: mag de move-response
+    // NOOIT breken. autoCloseIfFull is idempotent (guard op >=capacity &&
+    // !signups_closed).
+    try {
+      const targetCount = await getConfirmedCount(targetEventId);
+      await autoCloseIfFull(targetEvent, targetCount);
+    } catch (e) {
+      console.warn('[events-attendee-move] auto-close (soft):', targetEventId, e?.message || e);
     }
 
     return res.status(201).json({

@@ -554,13 +554,16 @@
     // Client-side extra zoek (server-side q ondersteunt ook, dus overlap ok)
     const rows = q ? items.filter((e) => String(e.title || '').toLowerCase().includes(q.toLowerCase()) || String(e.location || '').toLowerCase().includes(q.toLowerCase())) : items;
 
-    // Bug 3: gebruik attendee_count_total (= aanwezig+no_show+afgemeld, zelfde bron
-    // als detail/Aanwezigen-tab) ipv attendee_count_active (dat via getConfirmedCount
-    // op assessment_response_id IS NOT NULL filtert — dat is de vragenlijst-teller).
-    const activeAttendees = items.reduce((a, e) => a + Number(e.attendee_count_total || 0), 0);
+    // FIX (2026-08-18): 'bezetting' hangt overal aan dezelfde definitie
+    // als getConfirmedCount: status IN ('aangemeld','aanwezig') AND
+    // is_test=false AND assessment_response_id IS NOT NULL. Server geeft
+    // dit door als attendee_count_active. Een 'switched_to_other_event'/
+    // 'geannuleerd'/'wachtlijst'/'no_show'-attendee mag NIET meetellen
+    // voor bezetting — anders zeg je vol terwijl er plek vrij is.
+    const activeAttendees = items.reduce((a, e) => a + Number(e.attendee_count_active || 0), 0);
     const totalCap = items.reduce((a, e) => a + Number(e.capacity || 0), 0);
     const bezetting = totalCap > 0 ? Math.round((activeAttendees / totalCap) * 100) : 0;
-    const bijnaVol = items.filter((e) => Number(e.capacity || 0) > 0 && Number(e.attendee_count_total || 0) / Number(e.capacity) >= 0.8).length;
+    const bijnaVol = items.filter((e) => Number(e.capacity || 0) > 0 && Number(e.attendee_count_active || 0) / Number(e.capacity) >= 0.8).length;
 
     const niveauOpts = asArr(_live.niveaus.data);
 
@@ -835,11 +838,22 @@
     const attList = asArr(_live.attendees.data[ev.id]);
     const attLoading = _live.attendees.loading[ev.id];
     const attErr = _live.attendees.error[ev.id];
-    // Confirmed (met vragenlijst): tel attendees met assessment_response_id.
-    const confirmed = attList.filter((a) => !!a.assessment_response_id).length;
-    const showTot = attErr ? '—' : attLoading && attList.length === 0 ? '…' : String(attList.length);
+    // FIX (2026-08-18): 'Aangemeld' toont de bezetting-teller — exact dezelfde
+    // definitie als getConfirmedCount (status IN ('aangemeld','aanwezig') AND
+    // is_test=false AND assessment_response_id IS NOT NULL). Een switched_to_
+    // other_event / geannuleerd / wachtlijst / no_show / is_test-attendee valt
+    // buiten de bezetting — anders leek een event vol terwijl er plek was.
+    // Sub-teller toont het totaal aantal rijen in de lijst (voor context bij
+    // afwijking); alleen zichtbaar als verschillend van de bezetting.
+    const CONFIRMED_STATUSES = ['aangemeld', 'aanwezig'];
+    const confirmed = attList.filter((a) =>
+      !a.is_test &&
+      CONFIRMED_STATUSES.includes(a.status) &&
+      !!a.assessment_response_id
+    ).length;
+    const showTot = attErr ? '—' : attLoading && attList.length === 0 ? '…' : String(confirmed);
     const showSub = (attList.length > 0 && confirmed !== attList.length)
-      ? ` <span style="font-size:11px;color:var(--text-3)">(${confirmed} met vragenlijst)</span>`
+      ? ` <span style="font-size:11px;color:var(--text-3)">(van ${attList.length} in lijst)</span>`
       : '';
     // ?debug=1 log: response-shape + getelde waarde, zodat Jeffrey in console
     // kan verifiëren dat we exact dezelfde list.length nemen als de tab.
