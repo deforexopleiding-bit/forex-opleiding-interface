@@ -64,6 +64,11 @@
     callForm:     {},            // customer_id → { outcome, note, callback_at, saving, error }
     noteForm:     {},            // customer_id → { body, saving, savedAt, error }
     stageBusy:    {},            // customer_id → true (fase-mutatie in flight)
+    // v=4 BROK 3: TL-mutaties + arrangements + bulk-workflow.
+    paBusy:       {},            // pending_action id → true (race-guard)
+    arrBusy:      {},            // arrangement id → true
+    ovSelected:   {},            // customer_id → true (overzicht bulk-select)
+    bulkBusy:     false,         // bulk-start in flight
   };
   const NOOP_B3 = () => { try { window.KV && window.KV.toast && window.KV.toast('Komt in BROK 3 (approve/reject + arrangement + bulk) — nog niet actief.'); } catch (_) {} };
   window.__wbxNoopB3 = NOOP_B3;
@@ -101,6 +106,78 @@
       document.getElementById('wbxConfirmOk').addEventListener('click',    () => { _closeConfirmModal(); resolve(true);  });
     });
   }
+  // Typ-to-confirm modal — extra rails voor destructive bulk-writes.
+  // Gebruiker moet exact een phrase overtypen voordat de OK-knop enabled
+  // wordt. Focus in de input; Esc/backdrop = cancel.
+  function _askTypedConfirm(title, bodyHtml, requiredPhrase, opts) {
+    const okLabel     = esc((opts && opts.okLabel)     || 'Bevestig');
+    const cancelLabel = esc((opts && opts.cancelLabel) || 'Annuleren');
+    const bgVar       = 'var(--rose,#C22B3E)';
+    return new Promise((resolve) => {
+      _closeConfirmModal();
+      const root = document.createElement('div');
+      root.id = 'wbxConfirmRoot';
+      root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.55);padding:20px';
+      root.innerHTML = `<div style="background:var(--surface);border:2px solid var(--rose,#C22B3E);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:22px;max-width:560px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto">
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px;color:var(--rose)">${esc(title)}</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:14px">${bodyHtml}</div>
+        <div style="margin-bottom:14px">
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:5px">Typ letterlijk om te bevestigen:</div>
+          <div style="padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:13px;margin-bottom:8px;user-select:all">${esc(requiredPhrase)}</div>
+          <input id="wbxTypedInput" type="text" autocomplete="off" spellcheck="false"
+            style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;outline:none;box-sizing:border-box" placeholder="Typ hier…" />
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="wbxConfirmCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
+          <button id="wbxConfirmOk" class="btn btn-primary btn-sm" disabled style="background:${bgVar};border-color:${bgVar};color:#fff;opacity:.5;cursor:not-allowed">${okLabel}</button>
+        </div>
+      </div>`;
+      root.addEventListener('click', (e) => { if (e.target === root) { _closeConfirmModal(); resolve(false); } });
+      document.body.appendChild(root);
+      document.addEventListener('keydown', _confirmModalKey, true);
+      const inp = document.getElementById('wbxTypedInput');
+      const okBtn = document.getElementById('wbxConfirmOk');
+      setTimeout(() => inp && inp.focus(), 20);
+      inp.addEventListener('input', () => {
+        const match = String(inp.value || '') === requiredPhrase;
+        okBtn.disabled = !match;
+        okBtn.style.opacity = match ? '1' : '.5';
+        okBtn.style.cursor  = match ? 'pointer' : 'not-allowed';
+      });
+      document.getElementById('wbxConfirmCancel').addEventListener('click', () => { _closeConfirmModal(); resolve(false); });
+      okBtn.addEventListener('click', () => { if (String(inp.value || '') === requiredPhrase) { _closeConfirmModal(); resolve(true); } });
+    });
+  }
+  // Reason-prompt modal — Promise<string|null>.
+  function _askReason(title, hint, opts) {
+    const okLabel = esc((opts && opts.okLabel) || 'OK');
+    return new Promise((resolve) => {
+      _closeConfirmModal();
+      const root = document.createElement('div');
+      root.id = 'wbxConfirmRoot';
+      root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.48);padding:20px';
+      root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:520px;width:calc(100vw - 40px)">
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
+        <div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">${esc(hint || '')}</div>
+        <textarea id="wbxReasonInput" style="width:100%;min-height:80px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;resize:vertical;outline:none;box-sizing:border-box" placeholder="Reden…"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <button id="wbxReasonCancel" class="btn btn-ghost btn-sm">Annuleren</button>
+          <button id="wbxReasonOk" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff">${okLabel}</button>
+        </div>
+      </div>`;
+      root.addEventListener('click', (e) => { if (e.target === root) { _closeConfirmModal(); resolve(null); } });
+      document.body.appendChild(root);
+      document.addEventListener('keydown', _confirmModalKey, true);
+      const ta = document.getElementById('wbxReasonInput');
+      setTimeout(() => ta && ta.focus(), 20);
+      document.getElementById('wbxReasonCancel').addEventListener('click', () => { _closeConfirmModal(); resolve(null); });
+      document.getElementById('wbxReasonOk').addEventListener('click', () => {
+        const v = String(ta.value || '').trim();
+        _closeConfirmModal(); resolve(v || null);
+      });
+    });
+  }
+
   // Shared POST-helper: authenticated fetch met 20s timeout, non-throwing.
   async function apiPost(url, body) {
     try {
@@ -614,6 +691,508 @@
     if (window.DFO?.render) window.DFO.render();
   };
 
+  /* ── BROK 3 WRITE-HANDLERS — pending-actions ─────────────────────── */
+
+  window.__wbxPaApprove = async (action_id) => {
+    if (!action_id || _ui.paBusy[action_id]) return;
+    const a = asArr(_live.pendingActs.items).find((x) => String(x.id) === String(action_id));
+    if (!a) return;
+    const customer = a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'onbekend';
+    const type = a.action_type || a.type || 'actie';
+    const isTlAction = String(type).startsWith('TL_');
+    const ok = await _askConfirm(
+      isTlAction ? 'TeamLeader-mutatie uitvoeren?' : 'Actie goedkeuren?',
+      isTlAction
+        ? `<div style="margin-bottom:10px">Dit voert de <strong>ECHTE TeamLeader-mutatie</strong> uit:</div>
+           <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;margin-bottom:12px">
+             <div><b>Klant:</b> ${esc(customer)}</div>
+             <div><b>Actie:</b> ${esc(type)}</div>
+           </div>
+           <div style="padding:9px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.5">
+             ⚠ Dit muteert facturen/abonnementen in TeamLeader. Niet terug te draaien vanuit dit systeem.
+           </div>`
+        : `Actie voor <b>${esc(customer)}</b> (${esc(type)}) wordt goedgekeurd en uitgevoerd door de motor-executor.`,
+      { okLabel: 'Ja, voer uit' }
+    );
+    if (!ok) return;
+    _ui.paBusy[action_id] = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/pending-actions-approve', { id: action_id });
+    _ui.paBusy[action_id] = false;
+    if (!r.ok) { _toast('Approve faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    // Optimistic: verwijder uit pending-lijst.
+    _live.pendingActs.items = asArr(_live.pendingActs.items).filter((x) => String(x.id) !== String(action_id));
+    _toast('Actie goedgekeurd — motor voert uit.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  window.__wbxPaReject = async (action_id) => {
+    if (!action_id || _ui.paBusy[action_id]) return;
+    const a = asArr(_live.pendingActs.items).find((x) => String(x.id) === String(action_id));
+    if (!a) return;
+    const customer = a.customer_name || a.customer_id || 'onbekend';
+    const reason = await _askReason(
+      `Actie afwijzen — ${customer}`,
+      'Waarom wijs je deze actie af? (verplicht — komt in de audit-log en op de pending_action).',
+      { okLabel: 'Afwijzen' }
+    );
+    if (!reason) return;
+    _ui.paBusy[action_id] = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/pending-actions-reject', { id: action_id, rejection_reason: reason });
+    _ui.paBusy[action_id] = false;
+    if (!r.ok) { _toast('Reject faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    _live.pendingActs.items = asArr(_live.pendingActs.items).filter((x) => String(x.id) !== String(action_id));
+    _toast('Actie afgewezen.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  window.__wbxPaMarkExecuted = async (action_id) => {
+    if (!action_id || _ui.paBusy[action_id]) return;
+    const a = asArr(_live.pendingActs.items).find((x) => String(x.id) === String(action_id));
+    if (!a) return;
+    const type = a.action_type || a.type || 'actie';
+    const isTlAction = String(type).startsWith('TL_');
+    const ok = await _askConfirm(
+      'Handmatig markeren als uitgevoerd?',
+      `<div style="margin-bottom:10px">Actie: <b>${esc(type)}</b>.</div>
+       <div style="padding:9px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.5">
+         ⚠ Gebruik dit alleen als je de ${isTlAction ? 'TeamLeader-mutatie' : 'actie'} <b>zelf al hebt uitgevoerd</b>
+         buiten dit systeem om. Er wordt NIETS nieuws gemuteerd — alleen de status flipt naar EXECUTED en
+         de motor tikt door naar de volgende stap.
+       </div>`,
+      { okLabel: 'Ja, markeer' }
+    );
+    if (!ok) return;
+    _ui.paBusy[action_id] = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/pending-actions-mark-executed', { id: action_id });
+    _ui.paBusy[action_id] = false;
+    if (!r.ok) { _toast('Markeren faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    _live.pendingActs.items = asArr(_live.pendingActs.items).filter((x) => String(x.id) !== String(action_id));
+    _toast('Actie gemarkeerd als uitgevoerd.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  window.__wbxPaMarkNotExecuted = async (action_id) => {
+    if (!action_id || _ui.paBusy[action_id]) return;
+    const reason = await _askReason(
+      'Terugzetten naar approved',
+      'Waarom werd de actie NIET uitgevoerd? (optioneel — helpt bij audit).',
+      { okLabel: 'Terugzetten' }
+    );
+    // reason mag null zijn (endpoint accepteert het).
+    _ui.paBusy[action_id] = true;
+    const r = await apiPost('/api/pending-actions-mark-not-executed', { id: action_id, reason: reason || undefined });
+    _ui.paBusy[action_id] = false;
+    if (!r.ok) { _toast('Terugzetten faalde: ' + (r.error || 'onbekend'), 'error'); return; }
+    _toast('Terug naar approved.', 'success');
+    _live.pendingActs.fetched = false; _fetchPendingActs();
+  };
+
+  window.__wbxPaRestore = async (action_id) => {
+    if (!action_id || _ui.paBusy[action_id]) return;
+    const reason = await _askReason(
+      'Herstel geannuleerde actie',
+      'Waarom herstel je deze actie? (optioneel).',
+      { okLabel: 'Herstel' }
+    );
+    _ui.paBusy[action_id] = true;
+    const r = await apiPost('/api/pending-actions-restore', { id: action_id, reason: reason || undefined });
+    _ui.paBusy[action_id] = false;
+    if (!r.ok) { _toast('Restore faalde: ' + (r.error || 'onbekend'), 'error'); return; }
+    _toast('Actie hersteld naar approved.', 'success');
+    _live.pendingActs.fetched = false; _fetchPendingActs();
+  };
+
+  /* ── BROK 3 WRITE-HANDLERS — arrangements ────────────────────────── */
+
+  const ARR_TYPES = [
+    ['UITSTEL',          'Uitstel (consolideer + herstart)'],
+    ['SPLITSING',        'Splitsing in termijnen'],
+    ['ABONNEMENT_PAUZE', 'Abonnement pauzeren'],
+    ['ABONNEMENT_STOP',  'Abonnement stoppen'],
+    ['KWIJTSCHELDING',   'Kwijtschelding (afboeking)'],
+  ];
+  const _arrLive = { loading: false, error: null, items: [], fetched: false, _seq: 0 };
+
+  async function _fetchArrangementsList(scope) {
+    if (_arrLive.loading) return;
+    _arrLive.loading = true; _arrLive.error = null;
+    const seq = ++_arrLive._seq;
+    const url = '/api/arrangements-list?limit=200' + (scope ? '&status=' + encodeURIComponent(scope) : '');
+    const j = await tryFetch('arr-list', url);
+    if (seq !== _arrLive._seq) return;
+    _arrLive.loading = false; _arrLive.fetched = true;
+    if (!j) { _arrLive.error = 'Kon arrangementen niet laden'; }
+    else if (j.error) { _arrLive.error = j.error; }
+    else { _arrLive.items = asArr(j.items || j.arrangements); }
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  window.__wbxArrCancel = async (arrangement_id, arrLabel) => {
+    if (!arrangement_id || _ui.arrBusy[arrangement_id]) return;
+    const ok = await _askConfirm(
+      'Arrangement annuleren?',
+      `<div style="margin-bottom:10px">${esc(arrLabel || 'Dit arrangement')} wordt geannuleerd.</div>
+       <div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;line-height:1.5">
+         ⚠ Alle openstaande pending_actions bij dit arrangement worden ingetrokken (rejected).
+         De dunning-motor gaat weer verder met deze klant zodra de status ACTIEF verlaat.
+       </div>`,
+      { okLabel: 'Ja, annuleer', tone: 'danger' }
+    );
+    if (!ok) return;
+    _ui.arrBusy[arrangement_id] = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/arrangements-cancel', { id: arrangement_id });
+    _ui.arrBusy[arrangement_id] = false;
+    if (!r.ok) { _toast('Annuleren faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    _arrLive.fetched = false; _fetchArrangementsList('ACTIEF');
+    _live.pendingActs.fetched = false; _fetchPendingActs();
+    _toast('Arrangement geannuleerd.', 'success');
+  };
+
+  // Arrangement propose — modal met type-select + type-specifieke velden.
+  // Contract per type (uit api/arrangements-propose.js):
+  //   UITSTEL          → { termijnen: 2..60, starts_on?: 'YYYY-MM-DD' }
+  //   SPLITSING        → { parts: [{amount, due_date}] } (>=2, sum == invoice.total)
+  //   ABONNEMENT_PAUZE → { subscription_id, pause_from, pause_until, reason }
+  //   ABONNEMENT_STOP  → { subscription_id, stop_date, reason }
+  //   KWIJTSCHELDING   → { write_off_amount, reason }
+  const _arrForm = { open: false, customer_id: null, type: 'UITSTEL', invoice_ids: [], rationale: '', details: {}, saving: false, error: null };
+  window.__wbxArrPropose = (customer_id) => {
+    _arrForm.open = true;
+    _arrForm.customer_id = String(customer_id || '');
+    _arrForm.type = 'UITSTEL';
+    _arrForm.invoice_ids = [];
+    _arrForm.rationale = '';
+    _arrForm.details = { termijnen: 3 };
+    _arrForm.saving = false; _arrForm.error = null;
+    _renderArrModal();
+  };
+  window.__wbxArrCancelForm = () => { _arrForm.open = false; _closeConfirmModal(); };
+  window.__wbxArrSetType = (t) => {
+    if (!ARR_TYPES.some(([v]) => v === t)) return;
+    _arrForm.type = t;
+    // Reset type-specifieke details.
+    if (t === 'UITSTEL')         _arrForm.details = { termijnen: 3 };
+    if (t === 'SPLITSING')       _arrForm.details = { parts: [{ amount: '', due_date: '' }, { amount: '', due_date: '' }] };
+    if (t === 'ABONNEMENT_PAUZE')_arrForm.details = { subscription_id: '', pause_from: '', pause_until: '', reason: '' };
+    if (t === 'ABONNEMENT_STOP') _arrForm.details = { subscription_id: '', stop_date: '', reason: '' };
+    if (t === 'KWIJTSCHELDING')  _arrForm.details = { write_off_amount: '', reason: '' };
+    _renderArrModal();
+  };
+  window.__wbxArrSetDetail = (key, val) => { _arrForm.details[key] = val; };
+  window.__wbxArrSetPart = (idx, field, val) => {
+    if (!Array.isArray(_arrForm.details.parts)) _arrForm.details.parts = [];
+    while (_arrForm.details.parts.length <= idx) _arrForm.details.parts.push({ amount: '', due_date: '' });
+    _arrForm.details.parts[idx][field] = val;
+  };
+  window.__wbxArrAddPart = () => {
+    if (!Array.isArray(_arrForm.details.parts)) _arrForm.details.parts = [];
+    _arrForm.details.parts.push({ amount: '', due_date: '' });
+    _renderArrModal();
+  };
+  window.__wbxArrRemovePart = (idx) => {
+    if (!Array.isArray(_arrForm.details.parts)) return;
+    if (_arrForm.details.parts.length <= 2) { _toast('Minimaal 2 termijnen vereist.', 'warn'); return; }
+    _arrForm.details.parts.splice(idx, 1);
+    _renderArrModal();
+  };
+  window.__wbxArrSetRationale = (val) => { _arrForm.rationale = String(val || ''); };
+  window.__wbxArrSubmit = async () => {
+    if (_arrForm.saving) return;
+    const t = _arrForm.type;
+    const isSubAction = t === 'ABONNEMENT_PAUZE' || t === 'ABONNEMENT_STOP';
+    if (!_arrForm.customer_id) { _arrForm.error = 'customer_id ontbreekt'; _renderArrModal(); return; }
+    if (!isSubAction && (!_arrForm.invoice_ids || !_arrForm.invoice_ids.length)) {
+      _arrForm.error = 'Kies minstens 1 factuur.'; _renderArrModal(); return;
+    }
+    // Preflight type-validatie (spiegel server-guard).
+    const d = _arrForm.details || {};
+    if (t === 'UITSTEL') {
+      const n = Number(d.termijnen);
+      if (!Number.isInteger(n) || n < 2 || n > 60) { _arrForm.error = 'Termijnen: integer 2..60.'; _renderArrModal(); return; }
+    }
+    if (t === 'SPLITSING') {
+      const parts = Array.isArray(d.parts) ? d.parts : [];
+      if (parts.length < 2) { _arrForm.error = 'Splitsing: minimaal 2 termijnen.'; _renderArrModal(); return; }
+      for (const p of parts) {
+        if (!Number(p.amount) || Number(p.amount) <= 0) { _arrForm.error = 'Elk termijn-bedrag > 0.'; _renderArrModal(); return; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(p.due_date || ''))) { _arrForm.error = 'Elke vervaldatum YYYY-MM-DD.'; _renderArrModal(); return; }
+      }
+    }
+    if (t === 'ABONNEMENT_PAUZE') {
+      if (!d.subscription_id) { _arrForm.error = 'subscription_id (uuid) vereist.'; _renderArrModal(); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.pause_from || ''))) { _arrForm.error = 'pause_from YYYY-MM-DD.'; _renderArrModal(); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.pause_until || ''))) { _arrForm.error = 'pause_until YYYY-MM-DD.'; _renderArrModal(); return; }
+      if (!d.reason) { _arrForm.error = 'reason vereist.'; _renderArrModal(); return; }
+    }
+    if (t === 'ABONNEMENT_STOP') {
+      if (!d.subscription_id) { _arrForm.error = 'subscription_id (uuid) vereist.'; _renderArrModal(); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.stop_date || ''))) { _arrForm.error = 'stop_date YYYY-MM-DD.'; _renderArrModal(); return; }
+      if (!d.reason) { _arrForm.error = 'reason vereist.'; _renderArrModal(); return; }
+    }
+    if (t === 'KWIJTSCHELDING') {
+      if (!Number(d.write_off_amount) || Number(d.write_off_amount) <= 0) { _arrForm.error = 'write_off_amount > 0.'; _renderArrModal(); return; }
+      if (!d.reason) { _arrForm.error = 'reason vereist.'; _renderArrModal(); return; }
+    }
+    // Confirm-samenvatting vóór POST.
+    const summary = `<div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12.5px;line-height:1.6">
+      <div><b>Type:</b> ${esc((ARR_TYPES.find(x => x[0] === t) || [])[1] || t)}</div>
+      ${!isSubAction ? `<div><b>Facturen:</b> ${_arrForm.invoice_ids.length}</div>` : ''}
+      ${t === 'UITSTEL' ? `<div><b>Termijnen:</b> ${d.termijnen}</div>` : ''}
+      ${t === 'SPLITSING' ? `<div><b>Termijnen:</b> ${d.parts.length}</div>` : ''}
+      ${t === 'KWIJTSCHELDING' ? `<div><b>Bedrag:</b> ${eur(Number(d.write_off_amount))}</div>` : ''}
+    </div>
+    <div style="margin-top:10px;padding:9px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.5">
+      Dit maakt een <b>payment_arrangement</b> aan + pending_actions per stap. Geen TL-mutatie tot Approve.
+    </div>`;
+    _closeConfirmModal();
+    const ok = await _askConfirm('Arrangement voorstellen?', summary, { okLabel: 'Ja, maak aan' });
+    if (!ok) { _renderArrModal(); return; }
+    _arrForm.saving = true; _renderArrModal();
+    const payload = {
+      customer_id: _arrForm.customer_id,
+      type: t,
+      invoice_ids: isSubAction ? [] : _arrForm.invoice_ids,
+      details: d,
+      rationale: _arrForm.rationale || '(geen)',
+    };
+    const r = await apiPost('/api/arrangements-propose', payload);
+    _arrForm.saving = false;
+    if (!r.ok) { _arrForm.error = r.error || 'Voorstellen faalde'; _renderArrModal(); return; }
+    _arrForm.open = false; _closeConfirmModal();
+    _arrLive.fetched = false; _fetchArrangementsList('ACTIEF');
+    _live.pendingActs.fetched = false; _fetchPendingActs();
+    _toast('Arrangement voorgesteld — bekijk pending_actions voor de uitvoerstappen.', 'success');
+  };
+  window.__wbxArrToggleInvoice = (invoice_id) => {
+    const s = new Set(_arrForm.invoice_ids);
+    if (s.has(invoice_id)) s.delete(invoice_id); else s.add(invoice_id);
+    _arrForm.invoice_ids = Array.from(s);
+    _renderArrModal();
+  };
+  // We laden invoices per customer lazy in de modal.
+  const _arrInvoices = { loading: false, byCust: {} };
+  async function _fetchInvoicesForCustomer(cid) {
+    if (!cid) return;
+    if (_arrInvoices.byCust[cid] || _arrInvoices.loading) return;
+    _arrInvoices.loading = true;
+    const j = await tryFetch('inv:' + cid, '/api/wanbetalers-invoices-list?customer_id=' + encodeURIComponent(cid));
+    _arrInvoices.loading = false;
+    _arrInvoices.byCust[cid] = j && !j.error ? asArr(j.items || j.invoices) : [];
+    _renderArrModal();
+  }
+  function _renderArrModal() {
+    if (!_arrForm.open) { _closeConfirmModal(); return; }
+    const cid = _arrForm.customer_id;
+    const custRow = asArr(_live.overzicht.items).find((x) => String(x.customer_id || x.id) === String(cid));
+    const custName = custRow ? (custRow.customer_name || custRow.name || cid) : cid;
+    const t = _arrForm.type;
+    const d = _arrForm.details || {};
+    const invoices = _arrInvoices.byCust[cid];
+    if (!invoices && !_arrInvoices.loading) queueMicrotask(() => _fetchInvoicesForCustomer(cid));
+    const isSubAction = t === 'ABONNEMENT_PAUZE' || t === 'ABONNEMENT_STOP';
+
+    const typeChips = ARR_TYPES.map(([v, l]) => {
+      const on = _arrForm.type === v;
+      return `<button class="chip ${on ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="__wbxArrSetType('${v}')">${esc(l)}</button>`;
+    }).join('');
+
+    let invoicesBlock = '';
+    if (!isSubAction) {
+      if (!invoices) {
+        invoicesBlock = `<div style="padding:14px;color:var(--text-3);font-size:12.5px;text-align:center">Facturen laden…</div>`;
+      } else if (!invoices.length) {
+        invoicesBlock = `<div style="padding:14px;color:var(--text-3);font-size:12.5px;text-align:center">Geen openstaande facturen voor deze klant.</div>`;
+      } else {
+        invoicesBlock = invoices.map((inv) => {
+          const iid = inv.id;
+          const sel = _arrForm.invoice_ids.includes(iid);
+          return `<label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12.5px" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
+            <input type="checkbox" ${sel ? 'checked' : ''} onchange="__wbxArrToggleInvoice('${esc(iid)}')" style="width:15px;height:15px;cursor:pointer" />
+            <span style="flex:1;min-width:0"><span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3)">${esc(inv.invoice_number || iid.slice(0, 8))}</span> · ${esc(inv.description || '')}</span>
+            <span class="mono" style="color:var(--amber);font-weight:600">${eur(Number(inv.amount_total || inv.amount || 0))}</span>
+          </label>`;
+        }).join('');
+      }
+    }
+
+    let detailsBlock = '';
+    if (t === 'UITSTEL') {
+      detailsBlock = `<div>
+        <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Aantal termijnen (2-60)</div>
+        <input type="number" min="2" max="60" step="1" value="${esc(String(d.termijnen || 3))}" oninput="__wbxArrSetDetail('termijnen', Number(this.value))" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;outline:none;box-sizing:border-box" />
+        <div style="font-size:11px;color:var(--text-3);margin-top:4px">Startdatum optioneel (default = eerstvolgende betaaltermijn).</div>
+        <div style="margin-top:6px"><input type="date" value="${esc(d.starts_on || '')}" oninput="__wbxArrSetDetail('starts_on', this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none" placeholder="Startdatum" /></div>
+      </div>`;
+    } else if (t === 'SPLITSING') {
+      const parts = Array.isArray(d.parts) ? d.parts : [];
+      detailsBlock = `<div>
+        <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Termijnen (bedrag + vervaldatum)</div>
+        ${parts.map((p, i) => `<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:6px;align-items:center">
+          <input type="number" step="0.01" min="0" value="${esc(String(p.amount || ''))}" oninput="__wbxArrSetPart(${i}, 'amount', this.value)" placeholder="Bedrag" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+          <input type="date" value="${esc(p.due_date || '')}" oninput="__wbxArrSetPart(${i}, 'due_date', this.value)" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+          <button class="btn btn-ghost btn-sm" onclick="__wbxArrRemovePart(${i})" style="font-size:11px;color:var(--rose)">×</button>
+        </div>`).join('')}
+        <button class="btn btn-ghost btn-sm" onclick="__wbxArrAddPart()" style="font-size:11.5px">+ Termijn toevoegen</button>
+        <div style="font-size:11px;color:var(--text-3);margin-top:6px">Som moet gelijk zijn aan totaal van geselecteerde facturen (server valideert; 1ct tolerantie).</div>
+      </div>`;
+    } else if (t === 'ABONNEMENT_PAUZE' || t === 'ABONNEMENT_STOP') {
+      const dateKey = t === 'ABONNEMENT_PAUZE' ? 'pause_from' : 'stop_date';
+      const dateKey2 = t === 'ABONNEMENT_PAUZE' ? 'pause_until' : null;
+      detailsBlock = `<div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Subscription ID (uuid)</div>
+          <input type="text" value="${esc(d.subscription_id || '')}" oninput="__wbxArrSetDetail('subscription_id', this.value)" placeholder="00000000-0000-0000-0000-000000000000" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+        </div>
+        <div style="display:grid;grid-template-columns:${dateKey2 ? '1fr 1fr' : '1fr'};gap:10px">
+          <div>
+            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">${dateKey === 'pause_from' ? 'Pauze vanaf' : 'Stop-datum'}</div>
+            <input type="date" value="${esc(d[dateKey] || '')}" oninput="__wbxArrSetDetail('${dateKey}', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+          </div>
+          ${dateKey2 ? `<div>
+            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Pauze tot</div>
+            <input type="date" value="${esc(d[dateKey2] || '')}" oninput="__wbxArrSetDetail('${dateKey2}', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+          </div>` : ''}
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Reden</div>
+          <input type="text" value="${esc(d.reason || '')}" oninput="__wbxArrSetDetail('reason', this.value)" placeholder="Waarom?" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+        </div>
+      </div>`;
+    } else if (t === 'KWIJTSCHELDING') {
+      detailsBlock = `<div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Af te boeken bedrag (EUR)</div>
+          <input type="number" step="0.01" min="0" value="${esc(String(d.write_off_amount || ''))}" oninput="__wbxArrSetDetail('write_off_amount', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;outline:none;box-sizing:border-box" />
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Reden</div>
+          <input type="text" value="${esc(d.reason || '')}" oninput="__wbxArrSetDetail('reason', this.value)" placeholder="Waarom?" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+        </div>
+      </div>`;
+    }
+
+    _closeConfirmModal();
+    const root = document.createElement('div');
+    root.id = 'wbxConfirmRoot';
+    root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.48);padding:20px';
+    root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:640px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto">
+      <div style="font-size:15.5px;font-weight:600;margin-bottom:6px">Nieuw arrangement voorstellen</div>
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:14px">Klant: <b style="color:var(--text-1)">${esc(custName)}</b></div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Type</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${typeChips}</div>
+      </div>
+      ${!isSubAction ? `<div style="margin-bottom:14px">
+        <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Facturen</div>
+        <div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">${invoicesBlock}</div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:4px">${_arrForm.invoice_ids.length} geselecteerd</div>
+      </div>` : ''}
+      <div style="margin-bottom:14px">${detailsBlock}</div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Rationale / toelichting</div>
+        <textarea oninput="__wbxArrSetRationale(this.value)" style="width:100%;min-height:56px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box">${esc(_arrForm.rationale || '')}</textarea>
+      </div>
+      ${_arrForm.error ? `<div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">⚠ ${esc(_arrForm.error)}</div>` : ''}
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="__wbxArrCancelForm()">Annuleren</button>
+        <button class="btn btn-primary btn-sm" ${_arrForm.saving ? 'disabled' : ''} style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;opacity:${_arrForm.saving ? '.55' : '1'};cursor:${_arrForm.saving ? 'not-allowed' : 'pointer'}" onclick="__wbxArrSubmit()">${_arrForm.saving ? 'Voorstellen…' : 'Voorstellen'}</button>
+      </div>
+    </div>`;
+    root.addEventListener('click', (e) => { if (e.target === root) window.__wbxArrCancelForm(); });
+    document.body.appendChild(root);
+    document.addEventListener('keydown', _confirmModalKey, true);
+  }
+
+  /* ── BROK 3 WRITE-HANDLERS — bulk-workflow ───────────────────────── */
+
+  const _bulkJobs = { loading: false, error: null, items: [], fetched: false, _seq: 0 };
+  async function _fetchBulkJobs() {
+    if (_bulkJobs.loading) return;
+    _bulkJobs.loading = true; _bulkJobs.error = null;
+    const seq = ++_bulkJobs._seq;
+    const j = await tryFetch('bulk-jobs', '/api/wanbetalers-bulk-jobs-list?limit=50');
+    if (seq !== _bulkJobs._seq) return;
+    _bulkJobs.loading = false; _bulkJobs.fetched = true;
+    if (!j) { _bulkJobs.error = 'Kon bulk-jobs niet laden'; }
+    else if (j.error) { _bulkJobs.error = j.error; }
+    else { _bulkJobs.items = asArr(j.items || j.jobs); }
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  window.__wbxOvToggleSel = (cid) => {
+    _ui.ovSelected[cid] = !_ui.ovSelected[cid];
+    if (!_ui.ovSelected[cid]) delete _ui.ovSelected[cid];
+    _repaintOverzichtList();
+    _repaintOvSelBar();
+  };
+  window.__wbxOvClearSel = () => {
+    _ui.ovSelected = {};
+    if (window.DFO?.render) window.DFO.render();
+  };
+  function _selOvCustIds() { return Object.keys(_ui.ovSelected).filter((k) => _ui.ovSelected[k]); }
+  function _repaintOvSelBar() {
+    const bar = document.getElementById('wbxOvSelBar');
+    if (!bar) return;
+    const ids = _selOvCustIds();
+    bar.style.display = ids.length ? 'flex' : 'none';
+    const cnt = document.getElementById('wbxOvSelCount');
+    if (cnt) cnt.textContent = ids.length + ' klant' + (ids.length === 1 ? '' : 'en');
+  }
+
+  window.__wbxBulkStart = async () => {
+    if (_ui.bulkBusy) return;
+    const custIds = _selOvCustIds();
+    if (!custIds.length) return;
+    // Server accepteert invoice_ids[] (max 100). Voor bulk-workflow-start
+    // resolven we per customer 1 primaire factuur (oudste openstaande).
+    // Bron: overzicht-rows die we al hebben (of anders lazy per klant fetch).
+    // Voor MVP: gebruik customer_id → we roepen /invoices-list op per klant.
+    const invoiceIdsByCust = {};
+    for (const cid of custIds) {
+      if (!_arrInvoices.byCust[cid]) await _fetchInvoicesForCustomer(cid);
+      const list = _arrInvoices.byCust[cid] || [];
+      if (list.length) invoiceIdsByCust[cid] = list[0].id;
+    }
+    const invoiceIds = Object.values(invoiceIdsByCust);
+    if (!invoiceIds.length) {
+      _toast('Geen openstaande facturen gevonden bij de selectie.', 'warn');
+      return;
+    }
+    if (invoiceIds.length > 100) {
+      _toast('Max 100 klanten per bulk-start (server-guard).', 'warn');
+      return;
+    }
+    // Typ-to-confirm.
+    const phrase = `START DUNNING VOOR ${invoiceIds.length} KLANTEN`;
+    const bodyHtml = `
+      <div style="margin-bottom:10px">Je gaat de dunning-motor starten voor <b>${invoiceIds.length}</b> klant${invoiceIds.length === 1 ? '' : 'en'}
+      (${invoiceIds.length} factu${invoiceIds.length === 1 ? 'ur' : 'ren'}). Elke klant krijgt één workflow-run bij stap 1.</div>
+      <div style="padding:10px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.55;margin-bottom:10px">
+        <b>Engine-guards blijven gelden</b>:<br>
+        · Kantooruren (SEND-stappen alleen 08:00-20:00 Europe/Amsterdam)<br>
+        · Cooldown (default 7 dagen tussen sends per klant)<br>
+        · Klanten met actief arrangement → gepauzeerd, geen send<br>
+        · Sandbox-klanten (is_test) → skipped<br>
+        · Klanten met open pending_action (MANUAL_*) → geblokkeerd
+      </div>
+      <div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;line-height:1.5">
+        ⚠ <b>Er is geen dry-run</b>: als je bevestigt, worden runs echt aangemaakt. Geen sandbox-optie beschikbaar op dit endpoint.
+      </div>`;
+    const ok = await _askTypedConfirm('Bulk dunning-workflow starten', bodyHtml, phrase, { okLabel: 'START' });
+    if (!ok) return;
+    _ui.bulkBusy = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/wanbetalers-bulk-start-workflow', { invoice_ids: invoiceIds });
+    _ui.bulkBusy = false;
+    if (!r.ok) { _toast('Bulk-start faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    const added   = asArr(r.json?.added).length;
+    const skipped = asArr(r.json?.skipped).length;
+    const errors  = asArr(r.json?.errors).length;
+    _toast(`Bulk-start: ${added} runs gestart · ${skipped} geskipt · ${errors} fout${errors === 1 ? '' : 'en'}.`, 'success');
+    _ui.ovSelected = {};
+    _bulkJobs.fetched = false; _fetchBulkJobs();
+    if (window.DFO?.render) window.DFO.render();
+  };
+
   /* ── Surgical repaint helpers ─────────────────────────────────────── */
   function _repaintOverzichtList() {
     const body = document.getElementById('wbxOvBody');
@@ -691,10 +1270,15 @@
       const category = _categorizeOverzichtRow(r);
       const catCol = category === 'stuck' ? 'rose' : category === 'chat' ? 'blue' : 'emerald';
       const hasArr = cid && Array.isArray(arrsMap[cid]) && arrsMap[cid].length > 0;
+      const isSel = !!_ui.ovSelected[cid];
+      const cidAttr  = String(cid || '').replace(/"/g, '&quot;');
       const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      return `<div style="display:grid;grid-template-columns:2fr 1fr 90px 100px 1.4fr 1.2fr 90px;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;align-items:center;font-size:12.5px" onclick="__wbxOvOpen('${cidClick}')"
-        onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
-        <div>
+      return `<div style="display:grid;grid-template-columns:32px 2fr 1fr 90px 100px 1.4fr 1.2fr auto;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);align-items:center;font-size:12.5px${isSel ? ';background:var(--surface-2)' : ''}"
+        onmouseover="if(!this.dataset.sel)this.style.background='var(--surface-2)'" onmouseout="if(!this.dataset.sel)this.style.background='transparent'" ${isSel ? 'data-sel="1"' : ''}>
+        <label style="display:flex;align-items:center;cursor:pointer" onclick="event.stopPropagation()">
+          <input type="checkbox" ${isSel ? 'checked' : ''} onchange="__wbxOvToggleSel('${cidClick}')" style="width:15px;height:15px;cursor:pointer" />
+        </label>
+        <div style="cursor:pointer" onclick="__wbxOvOpen('${cidClick}')">
           <div style="font-weight:500">${esc(name)}</div>
           ${hasArr ? `<div style="font-size:10.5px;color:var(--amber);margin-top:2px" title="Actief payment_arrangement: dunning gepauzeerd">⏸ Dunning gepauzeerd (arrangement actief)</div>` : ''}
         </div>
@@ -703,7 +1287,10 @@
         <div class="mono" style="text-align:right;color:${oldestDays > 90 ? 'var(--rose)' : oldestDays > 30 ? 'var(--amber)' : 'var(--text-3)'}">${oldestDays}d</div>
         <div><span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--${catCol}-soft,var(--surface-2));color:var(--${catCol});font-weight:600">${esc(stage)}</span></div>
         <div style="color:var(--text-3);font-size:11.5px">${esc(nextTxt)}</div>
-        <div style="text-align:right;color:var(--text-3);font-size:11px" title="Open in klanten-detail (tijdlijn)">→</div>
+        <div style="text-align:right;display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="font-size:10.5px" onclick="event.stopPropagation();__wbxArrPropose('${cidClick}')" title="Nieuw arrangement voorstellen">📋 Arr</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:10.5px;color:var(--text-3)" onclick="event.stopPropagation();__wbxOvOpen('${cidClick}')" title="Open klant-detail">→</button>
+        </div>
       </div>`;
     }).join('');
   }
@@ -767,11 +1354,16 @@
             </div>
             <div style="font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between">
               <span id="wbxOvCount">${filtered.length} klant${filtered.length === 1 ? '' : 'en'}</span>
-              <span>Klik een rij voor de tijdlijn in Klanten-detail →</span>
+              <span>Vink klanten aan voor bulk-start · klik rij voor tijdlijn →</span>
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:2fr 1fr 90px 100px 1.4fr 1.2fr 90px;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
-            <div>Klant</div><div style="text-align:right">Open</div><div style="text-align:right">Fact.</div><div style="text-align:right">Oudste</div><div>Fase</div><div>Volgende actie</div><div></div>
+          <div id="wbxOvSelBar" style="display:${_selOvCustIds().length ? 'flex' : 'none'};padding:10px 14px;background:var(--brand-soft,#E2F1F5);border-bottom:1px solid var(--border);align-items:center;gap:10px;font-size:12.5px">
+            <b><span id="wbxOvSelCount">${_selOvCustIds().length} klant${_selOvCustIds().length === 1 ? '' : 'en'}</span></b>
+            <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" ${_ui.bulkBusy ? 'disabled' : ''} onclick="__wbxBulkStart()">${_ui.bulkBusy ? 'Starten…' : '▶ Start dunning-workflow (typ-to-confirm)'}</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:auto" onclick="__wbxOvClearSel()">Wissen</button>
+          </div>
+          <div style="display:grid;grid-template-columns:32px 2fr 1fr 90px 100px 1.4fr 1.2fr auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
+            <div></div><div>Klant</div><div style="text-align:right">Open</div><div style="text-align:right">Fact.</div><div style="text-align:right">Oudste</div><div>Fase</div><div>Volgende actie</div><div style="text-align:right">Acties</div>
           </div>
           <div id="wbxOvBody">${_overzichtRowsHtml(filtered)}</div>
         </div>
@@ -844,16 +1436,44 @@
         const customer = a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'Onbekend';
         const type = a.action_type || a.type || '—';
         const amt  = a.amount || (a.payload && a.payload.amount) || null;
-        const ct   = a.created_at ? _fmtDateTime(a.created_at) : '';
+        const isTl = String(type).startsWith('TL_');
+        const busy = !!_ui.paBusy[a.id];
+        const dis = busy ? 'disabled' : '';
+        const disStyle = busy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer';
         return `<div style="display:grid;grid-template-columns:2fr 2fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
           <div>${esc(customer)}</div>
-          <div style="color:var(--text-2);font-size:11.5px">${esc(type)}</div>
+          <div style="color:var(--text-2);font-size:11.5px">${esc(type)}${isTl ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600;margin-left:4px">TL</span>' : ''}</div>
           <div class="mono" style="text-align:right;color:var(--text-3)">${amt != null ? eur(amt) : '—'}</div>
-          <div style="text-align:right"><button class="btn btn-ghost btn-sm" disabled title="Approve komt in BROK 2" style="font-size:11px;opacity:.5;cursor:not-allowed">Approve →</button></div>
+          <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="__wbxPaApprove('${esc(a.id)}')" title="${isTl ? 'Voer TL-mutatie uit' : 'Goedkeuren'}">${busy ? '…' : '✓ Approve'}</button>
+            <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="__wbxPaReject('${esc(a.id)}')" title="Afwijzen (met reden)">✕ Reject</button>
+            <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--text-3);${disStyle}" onclick="__wbxPaMarkExecuted('${esc(a.id)}')" title="Handmatig al uitgevoerd">Al gedaan</button>
+          </div>
         </div>`;
       }).join('')}
-      <div style="padding:9px 14px;font-size:11px;color:var(--text-3);background:var(--surface-2)">Approve/reject-flow komt in BROK 2 (writes).</div>
     </div>` : '';
+
+    // Arrangementen-sectie (actieve).
+    if (!_arrLive.fetched && !_arrLive.loading) queueMicrotask(() => _fetchArrangementsList('ACTIEF'));
+    const arrangements = asArr(_arrLive.items);
+    const arrBlock = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-top:14px">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:600;font-size:13px">Actieve arrangementen</div>
+        <span style="font-size:11px;color:var(--text-3)">${arrangements.length} ACTIEF · dunning gepauzeerd</span>
+      </div>
+      ${_arrLive.loading && !arrangements.length ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Arrangementen laden…</div>` :
+       !arrangements.length ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Geen actieve arrangementen.</div>` :
+       arrangements.slice(0, 20).map((arr) => {
+         const nm = arr.customer_name || arr.customer_id || 'Onbekend';
+         const busy = !!_ui.arrBusy[arr.id];
+         return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+           <div>${esc(nm)}</div>
+           <div style="font-size:11.5px;color:var(--text-2)">${esc(arr.type || '—')}</div>
+           <div style="font-size:11px;color:var(--text-3)">${esc(arr.status || '—')}</div>
+           <div><button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} style="font-size:11px;color:var(--rose);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" onclick="__wbxArrCancel('${esc(arr.id)}','${esc(nm + ' — ' + (arr.type || ''))}')">Annuleer</button></div>
+         </div>`;
+       }).join('')}
+    </div>`;
 
     return `<div data-wbx-view="acties">
       <div class="pad" style="padding:14px 20px 0">
@@ -869,8 +1489,28 @@
           ${sectionBlock('Stil / vastgelopen',stale,    'Geen stille dossiers.',          'text-3')}
         </div>
         ${pendingBlock}
+        ${arrBlock}
+        ${_bulkJobsBlock()}
       </div>
       ${_officeHoursBanner()}
+    </div>`;
+  }
+
+  function _bulkJobsBlock() {
+    if (!_bulkJobs.fetched && !_bulkJobs.loading) queueMicrotask(_fetchBulkJobs);
+    const jobs = asArr(_bulkJobs.items);
+    if (!jobs.length && !_bulkJobs.loading) return '';
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-top:14px">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:600;font-size:13px">Bulk-workflow-jobs (recent)</div>
+        <span style="font-size:11px;color:var(--text-3)">${jobs.length} job${jobs.length === 1 ? '' : 's'}</span>
+      </div>
+      ${jobs.slice(0, 15).map((j) => `<div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;align-items:center">
+        <div>${esc(j.workflow_name || j.workflow_id || 'workflow')}</div>
+        <div style="font-size:11px;color:var(--text-3)">${esc(_fmtDateTime(j.created_at || j.started_at))}</div>
+        <div class="mono" style="font-size:11px">✓ ${j.added_count || 0} · ~ ${j.skipped_count || 0} · ⚠ ${j.errors_count || 0}</div>
+        <div style="font-size:11px;color:var(--text-3);text-align:right">${esc(j.status || 'gestart')}</div>
+      </div>`).join('')}
     </div>`;
   }
 
@@ -1196,5 +1836,5 @@
   window.DFO.VIEWS['wanbetalers/Brieven']    = brievenView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=3 BROK 2 — routine writes per-klant. Brieven: mail-verzenden (POST dunning-brief-email-send, ECHT), per-post-markeren, verwijderen, bulk-mark-sent, bulk-print (PDF-bundel download). Gesprekken: belpoging loggen (POST dunning-call-log-create met outcome+note+callback_at, callback_at verplicht bij outcome=callback; pending_action_id-cascade indien meegegeven), notitie op klant (POST dunning-pipeline-add-log). Acties: fase-mutatie via dropdown in Gesprekken-detail-header (POST dunning-pipeline-set-stage, terminale fases → tone=danger confirm). Custom confirm-modal + race-guard + optimistic + fail-soft overal. RBAC gate: server-side hard; UI toast bij 403. Approve/reject/arrangement/bulk-workflow-start blijven disabled (komt in BROK 3).');
+  console.debug('[wanbetalers-v2] v=4 BROK 3 — TL-mutaties + arrangements + bulk-workflow. DEEL A (Acties-tab): pending-actions Approve (TL-mutatie via executor)/Reject (met reden)/Mark-executed (handmatig al gedaan)/Restore. DEEL B: nieuwe arrangement-modal (5 types: UITSTEL/SPLITSING/ABONNEMENT_PAUZE/ABONNEMENT_STOP/KWIJTSCHELDING, type-specifieke validatie spiegelt server), arrangement-cancel (danger-confirm). DEEL C (Overzicht-tab): bulk-workflow-start met checkbox-selectie + typ-to-confirm ("START DUNNING VOOR N KLANTEN"). Engine-guards blijven: office-hours, cooldown, arrangement-pauze, sandbox, pending-action-guard. Geen dry-run beschikbaar op bulk-start endpoint — typ-to-confirm is de enige stop. Motor NIET geraakt: alleen bestaande UI-endpoints.');
 })();
