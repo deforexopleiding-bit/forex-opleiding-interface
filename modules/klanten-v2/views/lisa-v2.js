@@ -58,7 +58,7 @@
     stats:    { loading: false, fetched: false, error: null, data: null, _seq: 0, period: 'week' },
     settings: { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     logs:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
-    convs:    { loading: false, fetched: false, error: null, items: [], _seq: 0, statusFilter: 'active' },
+    convs:    { loading: false, fetched: false, error: null, items: [], _seq: 0, statusFilter: 'active', q: '', _searchTimer: null, _searchSeq: 0 },
     statsAll: {},
   };
   const _thread = {
@@ -202,19 +202,66 @@
     else st.data = j;
     if (window.DFO?.render) window.DFO.render();
   }
-  async function _fetchConvs() {
+  // opts.surgical=true → alleen de lijst-container innerHTML swap (behoudt
+  // scroll + zoekveld-focus/cursor tijdens typen). opts.silent=true skipt
+  // de eerste DFO.render (initial-fetch geeft skeleton via de reguliere view).
+  async function _fetchConvs(opts) {
     const st = _live.convs;
+    const surgical = !!(opts && opts.surgical);
+    const silent   = !!(opts && opts.silent);
     if (st.loading) return;
     st.loading = true; st.error = null;
     const seq = ++st._seq;
-    if (window.DFO?.render) window.DFO.render();
-    const url = '/api/lisa-conversations?action=list_live&status=' + encodeURIComponent(st.statusFilter || 'active') + '&limit=100';
+    if (!surgical && !silent && window.DFO?.render) window.DFO.render();
+    const parts = [
+      'action=list_live',
+      'status=' + encodeURIComponent(st.statusFilter || 'active'),
+      'limit=100',
+    ];
+    const qTrim = String(st.q || '').trim();
+    if (qTrim) parts.push('q=' + encodeURIComponent(qTrim));
+    const url = '/api/lisa-conversations?' + parts.join('&');
     const j = await tryFetch('convs', url);
     if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j || j.error) st.error = (j && j.error) || 'Kon gesprekken niet laden';
     else st.items = asArr(j.conversations);
-    if (window.DFO?.render) window.DFO.render();
+    if (surgical) _repaintListBody();
+    else if (window.DFO?.render) window.DFO.render();
+  }
+  // Surgical swap van alleen de lijst-items binnen #lisaConvList (behoudt
+  // toolbar-container met zoekveld → focus/cursor blijft tijdens typen).
+  function _repaintListBody() {
+    const listEl = document.getElementById('lisaConvList');
+    if (!listEl) return;
+    const bodyEl = listEl.querySelector('#lisaConvListBody');
+    if (!bodyEl) return;
+    const st = _live.convs;
+    const rows = asArr(st.items);
+    const html = st.loading && !rows.length
+      ? renderSkeletonRows(6)
+      : rows.length
+        ? rows.map(_renderConvRow).join('')
+        : `<div style="padding:44px 20px;text-align:center;color:var(--text-3);font-size:13px">${st.error ? '⚠ ' + esc(st.error) : (String(st.q || '').trim() ? 'Geen gesprekken die op "' + esc(st.q) + '" matchen.' : 'Geen gesprekken in dit filter.')} ${st.error ? `<button class="btn btn-ghost btn-sm" onclick="__lisaRetry('convs')" style="margin-left:8px">Opnieuw</button>` : ''}</div>`;
+    bodyEl.innerHTML = html;
+    // Update de counter naast de status-chip regel.
+    const counterEl = listEl.querySelector('#lisaConvListCount');
+    if (counterEl) counterEl.textContent = rows.length + ' gesprek' + (rows.length === 1 ? '' : 'ken') + (String(st.q || '').trim() ? ' · zoekterm actief' : '');
+    // Als de huidige geselecteerde conv niet meer in de results zit,
+    // reset thread + swap right-pane naar neutrale placeholder zodat je
+    // geen dood detail ziet.
+    if (_thread.convId && !rows.some((r) => String(r.id) === String(_thread.convId))) {
+      _resetThread();
+      const split = document.querySelector('.lisa-gesp-split');
+      const oldRight = split ? split.querySelector('.lisa-gesp-right') : null;
+      if (split && oldRight) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'lisa-gesp-right';
+        placeholder.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px';
+        placeholder.textContent = 'Selecteer een gesprek';
+        split.replaceChild(placeholder, oldRight);
+      }
+    }
   }
   function _resetThread() {
     _thread.convId = null; _thread.conversation = null; _thread.messages = [];
@@ -307,6 +354,38 @@
     _live.convs.fetched = false;
     _resetThread();
     _fetchConvs();
+  };
+  // Zoekveld: state-only setter tijdens typen (GEEN render → focus/cursor
+  // in het input-element blijft). Debounce 300 ms → surgical list-body swap
+  // via _fetchConvs({surgical:true}). Bij lege input direct terug naar de
+  // volle lijst (geen debounce nodig, korte roundtrip).
+  window.__lisaSearchInput = (val) => {
+    const v = String(val || '');
+    _live.convs.q = v;
+    // Toggle de wis-knop zichtbaar/verborgen zonder render.
+    const clr = document.getElementById('lisaSearchClear');
+    if (clr) clr.style.visibility = v.trim() ? 'visible' : 'hidden';
+    if (_live.convs._searchTimer) { clearTimeout(_live.convs._searchTimer); _live.convs._searchTimer = null; }
+    const seq = ++_live.convs._searchSeq;
+    const delayMs = v.trim() ? 300 : 0;
+    _live.convs._searchTimer = setTimeout(async () => {
+      if (seq !== _live.convs._searchSeq) return;
+      // Reset guard: forceer refetch (dezelfde q kan opnieuw geldig zijn na
+      // filter-wissel of eerdere fout). Loading-guard blijft actief via _seq.
+      _live.convs.loading = false;
+      await _fetchConvs({ surgical: true });
+    }, delayMs);
+  };
+  window.__lisaSearchClear = () => {
+    _live.convs.q = '';
+    const inp = document.getElementById('lisaSearchInput');
+    if (inp) { inp.value = ''; inp.focus(); }
+    const clr = document.getElementById('lisaSearchClear');
+    if (clr) clr.style.visibility = 'hidden';
+    if (_live.convs._searchTimer) { clearTimeout(_live.convs._searchTimer); _live.convs._searchTimer = null; }
+    _live.convs._searchSeq++;
+    _live.convs.loading = false;
+    _fetchConvs({ surgical: true });
   };
   window.__lisaSetStatsPeriod = (p) => { _fetchStats(p); };
   window.__lisaSelConv = (id) => {
@@ -604,11 +683,14 @@
           const hashNew = items.map(x => [x.id, x.last_message_at || '', x.phase, x.preview || ''].join('|')).join('||');
           if (hashOld !== hashNew) {
             _live.convs.items = items;
-            const listEl = document.getElementById('lisaConvList');
-            const savedScroll = listEl ? listEl.scrollTop : 0;
-            if (window.DFO?.render) window.DFO.render();
+            // v=7: scroll-container is #lisaConvListBody (was #lisaConvList).
+            // Ook surgical repaint i.p.v. DFO.render — behoudt zoekveld-focus
+            // + toolbar-node intact.
+            const bodyEl = document.getElementById('lisaConvListBody');
+            const savedScroll = bodyEl ? bodyEl.scrollTop : 0;
+            _repaintListBody();
             requestAnimationFrame(() => {
-              const el = document.getElementById('lisaConvList');
+              const el = document.getElementById('lisaConvListBody');
               if (el) el.scrollTop = savedScroll;
             });
           }
@@ -795,18 +877,36 @@
       ? renderSkeletonRows(6)
       : rows.length
         ? rows.map(_renderConvRow).join('')
-        : `<div style="padding:44px 20px;text-align:center;color:var(--text-3);font-size:13px">${st.error ? '⚠ ' + esc(st.error) : 'Geen gesprekken in dit filter.'} ${st.error ? `<button class="btn btn-ghost btn-sm" onclick="__lisaRetry('convs')" style="margin-left:8px">Opnieuw</button>` : ''}</div>`;
+        : `<div style="padding:44px 20px;text-align:center;color:var(--text-3);font-size:13px">${st.error ? '⚠ ' + esc(st.error) : (String(st.q || '').trim() ? 'Geen gesprekken die op "' + esc(st.q) + '" matchen.' : 'Geen gesprekken in dit filter.')} ${st.error ? `<button class="btn btn-ghost btn-sm" onclick="__lisaRetry('convs')" style="margin-left:8px">Opnieuw</button>` : ''}</div>`;
+
+    const qVal = String(st.q || '');
+    const qHasVal = qVal.trim().length > 0;
+    // Zoekveld: uncontrolled input (defaultValue = 'value' attr, oninput
+    // is state-only → focus/cursor blijft tijdens typen). Wis-knopje
+    // rechts binnen het input-blok. Zelfde violet-tint als de rest.
+    const searchBar = `
+      <div style="position:relative">
+        <input id="lisaSearchInput" type="text" value="${esc(qVal)}"
+          oninput="__lisaSearchInput(this.value)"
+          placeholder="Zoek op naam of @handle…"
+          style="width:100%;padding:6px 28px 6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font-size:12px;outline:none;box-sizing:border-box"
+          autocomplete="off" spellcheck="false" />
+        <button id="lisaSearchClear" title="Wis zoekterm"
+          onclick="__lisaSearchClear()"
+          style="position:absolute;top:50%;right:6px;transform:translateY(-50%);width:20px;height:20px;padding:0;border:0;background:transparent;color:var(--text-3);font-size:14px;cursor:pointer;visibility:${qHasVal ? 'visible' : 'hidden'}">×</button>
+      </div>`;
 
     return `<div data-lisa-view="gesprekken" class="lisa-gesp-split" style="display:flex;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
-      <div id="lisaConvList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto">
-        <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+      <div id="lisaConvList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
+        <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px;flex-shrink:0">
+          ${searchBar}
           <div style="display:flex;gap:5px;flex-wrap:wrap">${filterChips}</div>
           <div style="font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between">
-            <span>${rows.length} gesprekken</span>
+            <span id="lisaConvListCount">${rows.length} gesprek${rows.length === 1 ? '' : 'ken'}${qHasVal ? ' · zoekterm actief' : ''}</span>
             ${st.loading ? '<span>laden…</span>' : ''}
           </div>
         </div>
-        ${listHtml}
+        <div id="lisaConvListBody" style="flex:1;overflow-y:auto;min-height:0">${listHtml}</div>
       </div>
       ${sel
         ? _renderConvDetail(sel)
@@ -1012,5 +1112,5 @@
   window.DFO.VIEWS['lisa/Statistieken'] = statsView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('lisa');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('lisa');
-  console.debug('[lisa-v2] v=6 — Boekingslink-only: zelf-inschieten (free-slots-picker + POST lisa-appointment-create) verwijderd uit de UI. Enige afspraakroute is nu de knop Stuur boekingslink (prefill compose met LISA_BOOKING_URL). Endpoint + additieve free-slots-permissie dormant in repo.');
+  console.debug('[lisa-v2] v=7 — Zoekveld bij Gesprekken-lijst (server-side q op contact_name/instagram_handle/ghl_contact_id, debounce 300ms, wis-knop, focus-behoud via uncontrolled input + surgical #lisaConvListBody swap). Poll-tick ook naar surgical. Combineert met status-chips.');
 })();
