@@ -58,9 +58,67 @@
     gspSearchQ:     '',
     _gspSearchTimer: null,
     brStatusFilter: 'new',       // 'new' | 'downloaded' | 'sent' | 'all'
+    // v=3 BROK 2: write-state.
+    briefBusy:    {},            // brief_id → true (race-guard per brief-write)
+    brSelected:   {},            // brief_id → true (bulk-select)
+    callForm:     {},            // customer_id → { outcome, note, callback_at, saving, error }
+    noteForm:     {},            // customer_id → { body, saving, savedAt, error }
+    stageBusy:    {},            // customer_id → true (fase-mutatie in flight)
   };
-  const NOOP = () => { try { window.KV && window.KV.toast && window.KV.toast('Komt in BROK 2 (writes) — deze knop is nog niet actief.'); } catch (_) {} };
-  window.__wbxNoop = NOOP;
+  const NOOP_B3 = () => { try { window.KV && window.KV.toast && window.KV.toast('Komt in BROK 3 (approve/reject + arrangement + bulk) — nog niet actief.'); } catch (_) {} };
+  window.__wbxNoopB3 = NOOP_B3;
+  function _toast(msg, tone) { try { window.KV && window.KV.toast && window.KV.toast(msg, tone ? { tone } : undefined); } catch (_) {} }
+
+  /* ── Custom confirm-modal (Promise-based, geen native confirm) ───── */
+  function _closeConfirmModal() {
+    const m = document.getElementById('wbxConfirmRoot');
+    if (m) m.remove();
+    document.removeEventListener('keydown', _confirmModalKey, true);
+  }
+  function _confirmModalKey(e) { if (e.key === 'Escape') { e.preventDefault(); _closeConfirmModal(); } }
+  function _askConfirm(title, bodyHtml, opts) {
+    const okLabel     = esc((opts && opts.okLabel)     || 'Bevestig');
+    const cancelLabel = esc((opts && opts.cancelLabel) || 'Annuleren');
+    const isDanger    = opts && opts.tone === 'danger';
+    const bgVar       = isDanger ? 'var(--rose,#C22B3E)' : 'var(--brand,#0A7490)';
+    return new Promise((resolve) => {
+      _closeConfirmModal();
+      const root = document.createElement('div');
+      root.id = 'wbxConfirmRoot';
+      root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.48);padding:20px';
+      root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:520px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto">
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px">${bodyHtml}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="wbxConfirmCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
+          <button id="wbxConfirmOk" class="btn btn-primary btn-sm" style="background:${bgVar};border-color:${bgVar};color:#fff">${okLabel}</button>
+        </div>
+      </div>`;
+      root.addEventListener('click', (e) => { if (e.target === root) { _closeConfirmModal(); resolve(false); } });
+      document.body.appendChild(root);
+      document.addEventListener('keydown', _confirmModalKey, true);
+      document.getElementById('wbxConfirmCancel').addEventListener('click', () => { _closeConfirmModal(); resolve(false); });
+      document.getElementById('wbxConfirmOk').addEventListener('click',    () => { _closeConfirmModal(); resolve(true);  });
+    });
+  }
+  // Shared POST-helper: authenticated fetch met 20s timeout, non-throwing.
+  async function apiPost(url, body) {
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 20000);
+      let resp;
+      try {
+        resp = await fetch(url, { method: 'POST', headers, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal });
+      } finally { clearTimeout(to); }
+      let j = null; try { j = await resp.json(); } catch (_) {}
+      return { ok: resp.ok, status: resp.status, json: j, error: resp.ok ? null : ((j && (j.error || j.message)) || ('HTTP ' + resp.status)) };
+    } catch (e) {
+      return { ok: false, status: 0, json: null, error: (e && e.message) || 'netwerkfout' };
+    }
+  }
 
   /* ── HTTP-helper ────────────────────────────────────────────────────── */
   async function tryFetch(label, url, timeoutMs) {
@@ -253,6 +311,306 @@
   window.__wbxBrSetStatus = (val) => {
     if (!['new', 'downloaded', 'sent', 'all'].includes(val)) return;
     _ui.brStatusFilter = val;
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  /* ── BROK 2 WRITE-HANDLERS ────────────────────────────────────────── */
+
+  // ── Brieven: mail-verzenden (ECHT bericht) ─────────────────────────
+  window.__wbxBriefEmail = async (brief_id) => {
+    if (!brief_id || _ui.briefBusy[brief_id]) return;
+    const brief = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
+    if (!brief) return;
+    const name  = brief.customer_name || brief.customer?.name || 'Onbekend';
+    const email = brief.customer_email || brief.customer?.email || '';
+    const kind  = brief.brief_type || brief.type || 'brief';
+    const bodyHtml = `
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:6px">Ontvanger</div>
+      <div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:12px">
+        <div style="font-weight:500">${esc(name)}</div>
+        <div style="font-size:11.5px;color:var(--text-3)">${esc(email || '(geen e-mailadres op klant — server valt terug op default)')}</div>
+      </div>
+      <div style="margin-bottom:10px;color:var(--text-2)">Type: <b>${esc(kind)}</b>. De <b>bewaarde PDF</b> wordt als bijlage meegestuurd — geen nieuwe generatie.</div>
+      <div style="padding:9px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.5">
+        ⚠ ECHTE mail. Handmatige brief-verzending vertrekt DIRECT — deze omzeilt de kantooruren-wachtrij van de motor.
+      </div>`;
+    const ok = await _askConfirm('Brief per e-mail versturen?', bodyHtml, { okLabel: 'Ja, verstuur', cancelLabel: 'Annuleren' });
+    if (!ok) return;
+    _ui.briefBusy[brief_id] = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/dunning-brief-email-send', { brief_id });
+    _ui.briefBusy[brief_id] = false;
+    if (!r.ok) {
+      _toast('Verzenden faalde: ' + (r.error || 'onbekende fout'), 'error');
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
+    // Optimistic update: markeer als sent (server geeft sent_at terug).
+    const saved = r.json || {};
+    const listRow = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
+    if (listRow) {
+      listRow.sent_at = saved.sent_at || new Date().toISOString();
+      listRow.sent_via = 'email';
+      if (saved.sent_to_email) listRow.sent_to_email = saved.sent_to_email;
+    }
+    _toast('Brief verstuurd naar ' + (saved.sent_to_email || email || name), 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  // ── Brieven: markeer per post verstuurd ────────────────────────────
+  window.__wbxBriefMarkPost = async (brief_id) => {
+    if (!brief_id || _ui.briefBusy[brief_id]) return;
+    const brief = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
+    if (!brief) return;
+    const name  = brief.customer_name || 'Onbekend';
+    const ok = await _askConfirm(
+      'Markeer als per post verstuurd?',
+      `Voor <strong>${esc(name)}</strong> markeer je de brief als handmatig per post verstuurd. Er wordt niets naar de klant gestuurd; dit is puur een status-mutatie.`,
+      { okLabel: 'Ja, markeer' }
+    );
+    if (!ok) return;
+    _ui.briefBusy[brief_id] = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/dunning-brief-mark-post', { brief_id });
+    _ui.briefBusy[brief_id] = false;
+    if (!r.ok) { _toast('Kon niet markeren: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    const listRow = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
+    if (listRow) { listRow.sent_at = new Date().toISOString(); listRow.sent_via = 'post'; }
+    _toast('Gemarkeerd als per post verstuurd.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  // ── Brieven: verwijderen (brief-row + PDF-storage) ─────────────────
+  window.__wbxBriefDelete = async (brief_id) => {
+    if (!brief_id || _ui.briefBusy[brief_id]) return;
+    const brief = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
+    if (!brief) return;
+    const name = brief.customer_name || 'Onbekend';
+    const ok = await _askConfirm(
+      'Brief verwijderen?',
+      `Voor <strong>${esc(name)}</strong> verwijder je de brief én de bijbehorende PDF permanent. Dit is niet ongedaan te maken.`,
+      { okLabel: 'Ja, verwijder', cancelLabel: 'Annuleren', tone: 'danger' }
+    );
+    if (!ok) return;
+    _ui.briefBusy[brief_id] = true; if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/dunning-brief-delete', { brief_id });
+    _ui.briefBusy[brief_id] = false;
+    if (!r.ok) { _toast('Verwijderen faalde: ' + (r.error || 'onbekend'), 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    // Optimistic: uit lijst verwijderen.
+    _live.briefs.items = asArr(_live.briefs.items).filter((b) => String(b.id) !== String(brief_id));
+    delete _ui.brSelected[brief_id];
+    _toast('Brief verwijderd.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  // ── Brieven: bulk mark-verstuurd + bulk-print ──────────────────────
+  window.__wbxBriefToggleSel = (brief_id) => {
+    _ui.brSelected[brief_id] = !_ui.brSelected[brief_id];
+    if (!_ui.brSelected[brief_id]) delete _ui.brSelected[brief_id];
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__wbxBriefClearSel = () => { _ui.brSelected = {}; if (window.DFO?.render) window.DFO.render(); };
+  function _selBriefIds() { return Object.keys(_ui.brSelected).filter((k) => _ui.brSelected[k]); }
+
+  window.__wbxBriefBulkMarkSent = async () => {
+    const ids = _selBriefIds();
+    if (!ids.length) return;
+    const ok = await _askConfirm(
+      'Bulk markeer als verstuurd',
+      `Je markeert <strong>${ids.length}</strong> brie${ids.length === 1 ? 'f' : 'ven'} als handmatig verstuurd. Geen e-mail naar klanten — puur status-mutatie.`,
+      { okLabel: 'Ja, markeer ' + ids.length }
+    );
+    if (!ok) return;
+    const r = await apiPost('/api/dunning-briefs-bulk-mark-sent', { brief_ids: ids });
+    if (!r.ok) { _toast('Bulk markeren faalde: ' + (r.error || 'onbekend'), 'error'); return; }
+    for (const id of ids) {
+      const b = asArr(_live.briefs.items).find((x) => String(x.id) === String(id));
+      if (b) { b.sent_at = new Date().toISOString(); b.sent_via = b.sent_via || 'bulk'; }
+    }
+    _ui.brSelected = {};
+    _toast(`Gemarkeerd als verstuurd: ${ids.length} brief${ids.length === 1 ? '' : 'ven'}.`, 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__wbxBriefBulkPrint = async () => {
+    const ids = _selBriefIds();
+    if (!ids.length) return;
+    const ok = await _askConfirm(
+      'Bulk-print PDF-bundel',
+      `Er wordt een gebundelde PDF gedownload met <strong>${ids.length}</strong> brie${ids.length === 1 ? 'f' : 'ven'}. Geen mailing.`,
+      { okLabel: 'Ja, download' }
+    );
+    if (!ok) return;
+    // Deze endpoint returnt een PDF-blob → open in nieuwe tab i.p.v. json-parse.
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/dunning-briefs-bulk-print', { method: 'POST', headers, body: JSON.stringify({ brief_ids: ids }) });
+      if (!resp.ok) { _toast('Bulk-print faalde: HTTP ' + resp.status, 'error'); return; }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      _toast('PDF-bundel gedownload.', 'success');
+    } catch (e) { _toast('Bulk-print netwerkfout: ' + (e?.message || 'onbekend'), 'error'); }
+  };
+
+  // ── Gesprekken: belpoging loggen ───────────────────────────────────
+  function _callFormState(cid) {
+    if (!_ui.callForm[cid]) _ui.callForm[cid] = { outcome: '', note: '', callback_at: '', saving: false, error: null };
+    return _ui.callForm[cid];
+  }
+  const CALL_OUTCOMES = [
+    ['no_answer',        'Geen gehoor'],
+    ['voicemail',        'Voicemail'],
+    ['callback',         'Terugbelafspraak'],
+    ['payment_promise',  'Betaal-toezegging'],
+    ['payment_plan',     'Betalingsregeling besproken'],
+    ['refused',          'Weigert'],
+    ['wrong_number',     'Verkeerd nummer'],
+    ['paid_during_call', 'Betaald tijdens gesprek'],
+  ];
+  window.__wbxCallSetOutcome = (cid, val) => {
+    const f = _callFormState(cid); f.outcome = String(val || ''); f.error = null;
+    _repaintGspDetail();
+  };
+  window.__wbxCallSetNote = (cid, val) => {
+    const f = _callFormState(cid); f.note = String(val || ''); f.error = null;
+    // state-only, geen render (textarea focus behouden). Save-btn-toggle
+    // via _updateCallSaveBtn.
+    _updateCallSaveBtn(cid);
+  };
+  window.__wbxCallSetCallbackAt = (cid, val) => {
+    const f = _callFormState(cid); f.callback_at = String(val || ''); f.error = null;
+    _updateCallSaveBtn(cid);
+  };
+  function _callIsSaveable(f) {
+    if (!f || !f.outcome) return false;
+    // Server-guard spiegelen: callback → callback_at verplicht.
+    if (f.outcome === 'callback' && !String(f.callback_at || '').trim()) return false;
+    return true;
+  }
+  function _updateCallSaveBtn(cid) {
+    const btn = document.getElementById('wbxCallSaveBtn_' + cid);
+    if (!btn) return;
+    const f = _callFormState(cid);
+    const canSave = _callIsSaveable(f);
+    const disabled = !!f.saving || !canSave;
+    btn.disabled = disabled;
+    btn.textContent = f.saving ? 'Opslaan…' : 'Log belpoging';
+    btn.title = f.saving ? '' : (canSave ? '' : (f.outcome === 'callback' ? 'Bij terugbelafspraak: datum/tijd verplicht' : 'Kies eerst een uitkomst'));
+    btn.style.opacity = disabled ? '.55' : '1';
+    btn.style.cursor  = disabled ? 'not-allowed' : 'pointer';
+  }
+  window.__wbxCallSave = async (cid, pending_action_id) => {
+    const f = _callFormState(cid);
+    if (f.saving) return;
+    if (!_callIsSaveable(f)) return;
+    let confirmed = true;
+    if (pending_action_id) {
+      confirmed = await _askConfirm(
+        'Belpoging loggen + open actie afvinken?',
+        `Deze belpoging wordt gekoppeld aan een openstaande MANUAL_FOLLOWUP-taak; die wordt daarmee <strong>PENDING → EXECUTED</strong> gezet en de dunning-motor tikt door naar de volgende stap.`,
+        { okLabel: 'Ja, log + tik door' }
+      );
+    } else if (f.outcome === 'payment_promise' || f.outcome === 'paid_during_call') {
+      confirmed = await _askConfirm(
+        'Belpoging loggen',
+        `Uitkomst: <strong>${esc(CALL_OUTCOMES.find(x => x[0] === f.outcome)?.[1] || f.outcome)}</strong>. Wordt in het bel-log geregistreerd; geen bericht naar klant.`,
+        { okLabel: 'Ja, log' }
+      );
+    }
+    if (!confirmed) return;
+    f.saving = true; _updateCallSaveBtn(cid);
+    const payload = {
+      customer_id: String(cid),
+      outcome: f.outcome,
+    };
+    if (f.note && f.note.trim()) payload.note = f.note.trim();
+    if (f.outcome === 'callback' && f.callback_at) payload.callback_at = f.callback_at;
+    if (pending_action_id) payload.pending_action_id = pending_action_id;
+    const r = await apiPost('/api/dunning-call-log-create', payload);
+    f.saving = false;
+    if (!r.ok) { f.error = r.error || 'Loggen faalde'; _repaintGspDetail(); return; }
+    // Reset form + refresh call-log + timeline.
+    _ui.callForm[cid] = { outcome: '', note: '', callback_at: '', saving: false, error: null };
+    delete _live.callLog.byCust[cid];
+    delete _live.timeline.byCust[cid];
+    _fetchCallLog(cid);
+    _fetchTimeline(cid);
+    _toast('Belpoging gelogd.', 'success');
+    _repaintGspDetail();
+  };
+
+  // ── Gesprekken: notitie op klant ───────────────────────────────────
+  function _noteFormState(cid) {
+    if (!_ui.noteForm[cid]) _ui.noteForm[cid] = { body: '', saving: false, savedAt: null, error: null };
+    return _ui.noteForm[cid];
+  }
+  window.__wbxNoteSetBody = (cid, val) => {
+    const f = _noteFormState(cid); f.body = String(val || ''); f.error = null; f.savedAt = null;
+    _updateNoteSaveBtn(cid);
+    const saved = document.getElementById('wbxNoteSaved_' + cid);
+    if (saved && saved.style.display !== 'none') saved.style.display = 'none';
+  };
+  function _updateNoteSaveBtn(cid) {
+    const btn = document.getElementById('wbxNoteSaveBtn_' + cid);
+    if (!btn) return;
+    const f = _noteFormState(cid);
+    const canSave = !!(f.body && f.body.trim()) && !f.saving;
+    btn.disabled = !canSave;
+    btn.textContent = f.saving ? 'Opslaan…' : 'Notitie opslaan';
+    btn.style.opacity = canSave ? '1' : '.55';
+    btn.style.cursor  = canSave ? 'pointer' : 'not-allowed';
+  }
+  window.__wbxNoteSave = async (cid) => {
+    const f = _noteFormState(cid);
+    if (f.saving || !f.body || !f.body.trim()) return;
+    f.saving = true; _updateNoteSaveBtn(cid);
+    const r = await apiPost('/api/dunning-pipeline-add-log', { customer_id: String(cid), body: f.body.trim() });
+    f.saving = false;
+    if (!r.ok) { f.error = r.error || 'Notitie opslaan faalde'; _repaintGspDetail(); return; }
+    f.body = ''; f.savedAt = new Date().toISOString();
+    delete _live.timeline.byCust[cid];
+    _fetchTimeline(cid);
+    _repaintGspDetail();
+    _toast('Notitie opgeslagen.', 'success');
+    setTimeout(() => {
+      const el = document.getElementById('wbxNoteSaved_' + cid);
+      if (el) el.style.display = 'none';
+    }, 3000);
+  };
+
+  // ── Acties: fase zetten ───────────────────────────────────────────
+  const PIPELINE_STAGES = [
+    ['nieuw',           'Nieuw'],
+    ['aangemaand',      'Aangemaand'],
+    ['in_gesprek',      'In gesprek'],
+    ['regeling',        'Regeling'],
+    ['brief_verstuurd', 'Brief verstuurd'],
+    ['incasso',         'Incasso'],
+    ['afschrijven',     'Afschrijven'],
+    ['opgelost',        'Opgelost'],
+  ];
+  window.__wbxSetStage = async (cid, newStage) => {
+    if (!cid || !newStage) return;
+    if (_ui.stageBusy[cid]) return;
+    const stageLabel = (PIPELINE_STAGES.find(s => s[0] === newStage) || [])[1] || newStage;
+    const isTerminal = newStage === 'opgelost' || newStage === 'afschrijven';
+    const ok = await _askConfirm(
+      `Fase wijzigen naar "${stageLabel}"?`,
+      `De pipeline-fase wordt bijgewerkt${isTerminal ? ' naar een <strong>terminale</strong> fase — de dunning-motor stopt met deze klant' : ''}. Actie wordt in de audit-log opgenomen.`,
+      { okLabel: 'Ja, wijzig', tone: isTerminal ? 'danger' : undefined }
+    );
+    if (!ok) return;
+    _ui.stageBusy[cid] = true;
+    const r = await apiPost('/api/dunning-pipeline-set-stage', { customer_id: String(cid), stage: newStage });
+    _ui.stageBusy[cid] = false;
+    if (!r.ok) { _toast('Fase-mutatie faalde: ' + (r.error || 'onbekend'), 'error'); return; }
+    // Optimistic: update de row in overzicht + refresh timeline.
+    const row = asArr(_live.overzicht.items).find((x) => String(x.customer_id || x.id) === String(cid));
+    if (row) { row.stage_slug = newStage; row.stage_label = stageLabel; }
+    delete _live.timeline.byCust[cid];
+    if (_ui.gspSelectedId === cid) _fetchTimeline(cid);
+    _toast(`Fase gezet: ${stageLabel}.`, 'success');
     if (window.DFO?.render) window.DFO.render();
   };
 
@@ -585,32 +943,85 @@
           }).join('')
         : `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Geen events in de tijdlijn.</div>`;
 
+    // v=3 BROK 2: call-log + notitie forms.
+    const f    = _callFormState(cid);
+    const nf   = _noteFormState(cid);
+    const callSaveable = _callIsSaveable(f);
+    const outcomeOpts = '<option value="">— Kies uitkomst —</option>' + CALL_OUTCOMES.map(([v, l]) => `<option value="${v}" ${f.outcome === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    const showCbAt = f.outcome === 'callback';
+    const savedRecently = nf.savedAt && (Date.now() - new Date(nf.savedAt).getTime() < 3500);
+
+    // Fase-select. Huidige stage uit de row.
+    const curStage = String(row.stage_slug || '').toLowerCase();
+    const stageOpts = '<option value="">— Wijzig fase —</option>' + PIPELINE_STAGES.filter(([v]) => v !== curStage).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
+
     return `<div style="display:flex;flex-direction:column;flex:1;min-height:0;background:var(--surface)">
-      <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <div style="min-width:0">
           <div style="font-size:16px;font-weight:600;letter-spacing:-.02em">${esc(name)}</div>
-          <div style="font-size:12.5px;color:var(--amber);font-weight:500">${eur(openAmt)} openstaand</div>
+          <div style="font-size:12.5px;color:var(--amber);font-weight:500">${eur(openAmt)} openstaand · fase: ${esc(row.stage_label || curStage || '—')}</div>
         </div>
-        <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" onclick="__wbxOvOpen('${cidClick}')" title="Open klant-detail met wanbetalers-tijdlijn en notitie-post">Open in klanten-detail →</button>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select onchange="if(this.value){__wbxSetStage('${cidClick}', this.value);this.value='';}" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);cursor:pointer" ${_ui.stageBusy[cid] ? 'disabled' : ''} title="Fase-mutatie (audit-log + confirm)">${stageOpts}</select>
+          <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" onclick="__wbxOvOpen('${cidClick}')" title="Open klant-detail met tijdlijn en communicatie">Open in klanten-detail →</button>
+        </div>
       </div>
       <div style="flex:1;overflow-y:auto;min-height:0;padding:14px 20px;display:flex;flex-direction:column;gap:14px">
+        <!-- Belpoging loggen -->
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-          <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <div style="font-weight:600;font-size:13px">Belpogingen</div>
+          <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px">Belpoging loggen</div>
+          <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:grid;grid-template-columns:1fr ${showCbAt ? '1fr' : ''};gap:10px;align-items:end">
+              <div>
+                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Uitkomst</div>
+                <select onchange="__wbxCallSetOutcome('${cidClick}', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box">${outcomeOpts}</select>
+              </div>
+              ${showCbAt ? `<div>
+                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Terugbeltijd <span style="color:var(--rose);text-transform:none;letter-spacing:0">*verplicht</span></div>
+                <input type="datetime-local" value="${esc(f.callback_at || '')}" oninput="__wbxCallSetCallbackAt('${cidClick}', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+              </div>` : ''}
+            </div>
+            <textarea placeholder="Notitie bij belpoging (optioneel)…" oninput="__wbxCallSetNote('${cidClick}', this.value)"
+              style="width:100%;min-height:60px;max-height:160px;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box">${esc(f.note || '')}</textarea>
+            ${f.error ? `<div style="padding:8px 11px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(f.error)}</div>` : ''}
+            <div style="display:flex;justify-content:flex-end">
+              <button id="wbxCallSaveBtn_${cidClick}" class="btn btn-primary btn-sm" ${(!callSaveable || f.saving) ? 'disabled' : ''}
+                style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:12px;opacity:${(!callSaveable || f.saving) ? '.55' : '1'};cursor:${(!callSaveable || f.saving) ? 'not-allowed' : 'pointer'}"
+                title="${!callSaveable ? (f.outcome === 'callback' ? 'Bij terugbelafspraak: datum/tijd verplicht' : 'Kies eerst een uitkomst') : ''}"
+                onclick="__wbxCallSave('${cidClick}')">${f.saving ? 'Opslaan…' : 'Log belpoging'}</button>
+            </div>
+          </div>
+          <div style="padding:11px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:600;font-size:12.5px">Vorige belpogingen</div>
             <span style="font-size:11px;color:var(--text-3)">${calls.length} log-regel${calls.length === 1 ? '' : 's'}</span>
           </div>
           ${callsBlock}
-          <div style="padding:9px 14px;font-size:11px;color:var(--text-3);background:var(--surface-2)">Belpoging loggen komt in BROK 2.</div>
         </div>
+
+        <!-- Notitie op klant -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+          <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px">Notitie op klant (pipeline-log)</div>
+          <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+            <textarea placeholder="Interne notitie op deze klant…" oninput="__wbxNoteSetBody('${cidClick}', this.value)"
+              style="width:100%;min-height:70px;max-height:200px;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box">${esc(nf.body || '')}</textarea>
+            ${nf.error ? `<div style="padding:8px 11px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(nf.error)}</div>` : ''}
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+              <span id="wbxNoteSaved_${cidClick}" style="display:${savedRecently ? 'inline' : 'none'};color:var(--emerald);font-weight:600;font-size:11.5px">✓ Notitie opgeslagen</span>
+              <span></span>
+              <button id="wbxNoteSaveBtn_${cidClick}" class="btn btn-ghost btn-sm" ${(!nf.body || !nf.body.trim() || nf.saving) ? 'disabled' : ''}
+                style="font-size:12px;opacity:${(!nf.body || !nf.body.trim() || nf.saving) ? '.55' : '1'};cursor:${(!nf.body || !nf.body.trim() || nf.saving) ? 'not-allowed' : 'pointer'}"
+                onclick="__wbxNoteSave('${cidClick}')">${nf.saving ? 'Opslaan…' : 'Notitie opslaan'}</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tijdlijn (read) -->
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
           <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
             <div style="font-weight:600;font-size:13px">Tijdlijn</div>
             <span style="font-size:11px;color:var(--text-3)">${timeline.length} event${timeline.length === 1 ? '' : 's'}</span>
           </div>
           ${tlBlock}
-        </div>
-        <div style="padding:12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);font-size:12px;color:var(--text-3)">
-          <b>Reageren</b> vanuit deze view komt in BROK 2. Voor nu: klik <i>Open in klanten-detail</i> voor de notitie-post en de bestaande communicatie-tab.
         </div>
       </div>
     </div>`;
@@ -682,28 +1093,52 @@
       ['all',        'Alle',       counts.all],
     ].map(([v, l, n]) => `<button class="chip ${_ui.brStatusFilter === v ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__wbxBrSetStatus('${v}')">${esc(l)}<span class="cnt" style="margin-left:5px;opacity:.7">${n}</span></button>`).join('');
 
+    const selIds = _selBriefIds();
     const rowsHtml = filtered.length ? filtered.map((b) => {
+      const bid = String(b.id);
       const name = b.customer_name || b.customer?.name || 'Onbekend';
       const openAmt = Number(b.open_amount || b.amount || 0);
       const created = b.created_at ? _fmtDate(b.created_at) : '—';
       const cat = categorize(b);
+      const busy = !!_ui.briefBusy[bid];
+      const isSel = !!_ui.brSelected[bid];
       const statusPill = cat === 'sent'
         ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">Verstuurd${b.sent_via ? ' · ' + esc(b.sent_via) : ''}</span>`
         : cat === 'downloaded'
           ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">Gedownload</span>`
           : `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--blue-soft);color:var(--blue);font-weight:600">Aangemaakt</span>`;
       const pdfPath = b.pdf_path || null;
-      const pdfBtn = pdfPath
-        ? `<button class="btn btn-ghost btn-sm" style="font-size:11px" disabled title="PDF-preview komt in BROK 2 (via signed URL)">PDF →</button>`
-        : `<span style="font-size:11px;color:var(--text-3)">—</span>`;
-      return `<div style="display:grid;grid-template-columns:2fr 1fr 100px 130px 80px;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+      const pdfUrl  = b.pdf_url || b.preview_url || null;
+      // v=3: PDF-preview enabled — link (nieuwe tab) als er een direct-URL is;
+      // anders val terug op een POST-based preview via brief-pdf?preview=1.
+      const pdfBtn = pdfUrl
+        ? `<a class="btn btn-ghost btn-sm" href="${esc(pdfUrl)}" target="_blank" rel="noopener" style="font-size:11px;text-decoration:none">PDF →</a>`
+        : pdfPath
+          ? `<span style="font-size:11px;color:var(--text-3)" title="PDF beschikbaar via storage-pad; open via Klanten-detail">📎</span>`
+          : `<span style="font-size:11px;color:var(--text-3)">—</span>`;
+      const emailBtn  = cat === 'sent'
+        ? '<span style="font-size:11px;color:var(--text-3)">—</span>'
+        : `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--brand,#0A7490);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" ${busy ? 'disabled' : ''} onclick="__wbxBriefEmail('${esc(bid)}')" title="Mail de bewaarde PDF naar de klant (echt bericht)">${busy ? 'Bezig…' : '📧 Mail'}</button>`;
+      const markBtn = cat === 'sent'
+        ? '<span style="font-size:11px;color:var(--text-3)">—</span>'
+        : `<button class="btn btn-ghost btn-sm" style="font-size:11px;opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" ${busy ? 'disabled' : ''} onclick="__wbxBriefMarkPost('${esc(bid)}')" title="Handmatig per post verstuurd">✉ Post</button>`;
+      const delBtn = `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" ${busy ? 'disabled' : ''} onclick="__wbxBriefDelete('${esc(bid)}')" title="Brief + PDF permanent verwijderen">🗑</button>`;
+      return `<div style="display:grid;grid-template-columns:32px 2fr 1fr 100px 130px auto;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+        <label style="display:flex;align-items:center;cursor:pointer"><input type="checkbox" ${isSel ? 'checked' : ''} onchange="__wbxBriefToggleSel('${esc(bid)}')" style="width:15px;height:15px;cursor:pointer" /></label>
         <div style="font-weight:500">${esc(name)}</div>
         <div class="mono" style="text-align:right;color:${openAmt > 0 ? 'var(--amber)' : 'var(--text-3)'}">${eur(openAmt)}</div>
         <div class="mono" style="text-align:right;color:var(--text-3)">${esc(created)}</div>
         <div>${statusPill}</div>
-        <div style="text-align:right">${pdfBtn}</div>
+        <div style="display:flex;gap:4px;justify-content:flex-end;align-items:center;flex-wrap:wrap">${pdfBtn}${emailBtn}${markBtn}${delBtn}</div>
       </div>`;
     }).join('') : `<div style="padding:44px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen brieven in dit filter.</div>`;
+
+    const bulkBar = selIds.length ? `<div style="padding:10px 14px;background:var(--brand-soft,#E2F1F5);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;font-size:12.5px">
+      <b>${selIds.length} geselecteerd</b>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefBulkPrint()">🖨 Bulk-print PDF-bundel</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefBulkMarkSent()">✓ Markeer verstuurd</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:auto" onclick="__wbxBriefClearSel()">Wissen</button>
+    </div>` : '';
 
     return `<div data-wbx-view="brieven">
       <div class="pad" style="padding:14px 20px 0">
@@ -712,11 +1147,12 @@
             <div style="display:flex;gap:5px;flex-wrap:wrap">${chips}</div>
             <div style="font-size:11px;color:var(--text-3)">${filtered.length} brie${filtered.length === 1 ? 'f' : 'ven'}</div>
           </div>
-          <div style="display:grid;grid-template-columns:2fr 1fr 100px 130px 80px;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
-            <div>Klant</div><div style="text-align:right">Openstaand</div><div style="text-align:right">Aangemaakt</div><div>Status</div><div></div>
+          ${bulkBar}
+          <div style="display:grid;grid-template-columns:32px 2fr 1fr 100px 130px auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
+            <div></div><div>Klant</div><div style="text-align:right">Openstaand</div><div style="text-align:right">Aangemaakt</div><div>Status</div><div style="text-align:right">Acties</div>
           </div>
           <div>${rowsHtml}</div>
-          <div style="padding:10px 14px;font-size:11px;color:var(--text-3);background:var(--surface-2)">Bulk-print / mail-verstuur / mark-verstuurd komen in BROK 2 (writes).</div>
+          <div style="padding:9px 14px;font-size:11px;color:var(--text-3);background:var(--surface-2)">Handmatige mail vertrekt <b>direct</b> (omzeilt de kantooruren-wachtrij).</div>
         </div>
       </div>
       ${_officeHoursBanner()}
@@ -760,5 +1196,5 @@
   window.DFO.VIEWS['wanbetalers/Brieven']    = brievenView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=2 BROK 1 — reads bedraad: Overzicht (wanbetalers-overzicht-list + arrangements-list actief + dunning-settings-get), Acties (dunning-pipeline-actions + pending-actions-list pending), Gesprekken (overzicht-lijst + dunning-call-log-list + wanbetalers-timeline bij drilldown), Brieven (dunning-briefs-list-all). GEEN writes; alle actie-knoppen disabled met "komt in BROK 2". Kantooruren-banner uit dunning-settings-get. Deep-link naar klanten.html-wanbetalers-tab voor per-klant tijdlijn/notitie.');
+  console.debug('[wanbetalers-v2] v=3 BROK 2 — routine writes per-klant. Brieven: mail-verzenden (POST dunning-brief-email-send, ECHT), per-post-markeren, verwijderen, bulk-mark-sent, bulk-print (PDF-bundel download). Gesprekken: belpoging loggen (POST dunning-call-log-create met outcome+note+callback_at, callback_at verplicht bij outcome=callback; pending_action_id-cascade indien meegegeven), notitie op klant (POST dunning-pipeline-add-log). Acties: fase-mutatie via dropdown in Gesprekken-detail-header (POST dunning-pipeline-set-stage, terminale fases → tone=danger confirm). Custom confirm-modal + race-guard + optimistic + fail-soft overal. RBAC gate: server-side hard; UI toast bij 403. Approve/reject/arrangement/bulk-workflow-start blijven disabled (komt in BROK 3).');
 })();
