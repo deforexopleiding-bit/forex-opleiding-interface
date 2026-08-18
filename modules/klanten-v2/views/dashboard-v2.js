@@ -247,6 +247,29 @@
 
   /* ── Dashboard: manager/super_admin/sales (breed overzicht) ───────── */
   function dashManager() {
+    // GUARD 1 (v=8, 2026-08-18 post-mortem): KV.authedJson-availability-check.
+    // Als klanten-v2.js boot() nog niet gerund heeft (window.KV.authedJson
+    // undefined), rendert dashManager een placeholder ZONDER fetch te
+    // triggeren. Zodra klanten-v2.js z'n boot() afmaakt en window.KV
+    // toewijst, triggert de volgende render de fetch normaal.
+    // ROOT-CAUSE: app-shell.js roept render() aan (via setRoles/goMod)
+    // VÓÓR klanten-v2.js's KV-init. fetchDashboardBundle throwt dan direct
+    // 'KV.authedJson niet beschikbaar' → catch → _live.loading=false +
+    // render → dashManager runt opnieuw → guard `_live.period !==
+    // curPeriod && !_live.loading` blijft true (want _live.period nooit
+    // gezet) → INFINITE LOOP. Puppeteer meldt 91.990 iteraties in ~10s
+    // → CPU 100%, main-thread frozen, shell hangt op "Laden…".
+    if (!window.KV || !window.KV.authedJson) {
+      return `<div class="pad" style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Sessie laden…</div>`;
+    }
+    // GUARD 2 (v=8): na een terminal error retry-loop breken. Fallback
+    // toont de foutmelding + wacht op user-actie (refresh / navigate) i.p.v.
+    // opnieuw fetch → error → render → fetch. Zonder deze guard zou een
+    // tweede foutbron (bv. tijdelijke 500 op /api/dashboard-stats) dezelfde
+    // loop kunnen introduceren.
+    if (_live.error && !_live.loading) {
+      return `<div class="pad" style="padding:24px 20px"><div style="padding:14px 16px;background:var(--rose-soft);border:1px solid var(--rose);color:var(--rose);border-radius:8px;font-size:13px">⚠ Kan dashboard niet laden: ${String(_live.error).replace(/[<>&]/g, (c) => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]))}</div></div>`;
+    }
     const persoon = (ROLES[S.role] && ROLES[S.role].persoon) || 'Jeffrey Biemold';
     const voornaam = persoon.split(' ')[0];
     const curPeriod = F('per', 'Maand');
