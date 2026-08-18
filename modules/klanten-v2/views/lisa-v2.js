@@ -1,6 +1,9 @@
 // modules/klanten-v2/views/lisa-v2.js
 //
-// Lisa (Appointmentsetter) v2 — v=3 (2026-08-18): BROK 1-fix + BROK 2 writes.
+// Lisa (Appointmentsetter) v2 — v=6 (2026-08-18): boekingslink-only.
+// (v=3 introduceerde intervene + status-mutaties + afspraak-picker;
+//  v=6 verwijdert de picker, laat 'Stuur boekingslink' als enige route
+//  naar een afspraak — volger plant zelf via LISA_BOOKING_URL.)
 //
 // DEEL 0 (fix vanuit v=2):
 //   - Thread-klik laadde niet: guard in _loadThread controleerde op
@@ -23,17 +26,15 @@
 //   overname aan/uit. Elke actie: confirm-modal → PATCH
 //   /api/lisa-conversations?id=<>. Optimistic + rollback bij 4xx/5xx.
 //
-// BROK 2 DEEL C — Afspraak inschieten:
-//   Header-knop 'Afspraak inschieten' → free-slots-modal (GET
-//   /api/follow-up-ghl-free-slots, Dave's Zoom-agenda, Amsterdam-tz).
-//   Duur-keuze (15/30/45/60 min). Confirm-modal met naam + datum/tijd
-//   → POST /api/lisa-appointment-create. Bij success: CALL-badge + toast.
-//   Fallback wanneer conv geen ghl_contact_id: modal met uitleg (geen POST).
-//
-// Free-slots permissie-keuze:
-//   ADDITIEF gate in follow-up-ghl-free-slots.js: 'lisa.config.publish'
-//   toegevoegd aan de bestaande OR-lijst (sales.tab.retentie /
-//   sales.customer.view / leads.update). Bestaande callers byte-identiek.
+// BROK 2 DEEL C — Boekingslink (v=6):
+//   Header-knop 'Stuur boekingslink' prefillt de compose-textarea met
+//   een korte standaard-zin + de agenda-URL uit env-var LISA_BOOKING_URL.
+//   Verzenden via de bestaande intervene-flow (confirm-modal = de stop).
+//   Als env-var ontbreekt: setup-modal met exacte instructies.
+//   Zelf-inschieten van Zoom-afspraken (free-slots-picker +
+//   /api/lisa-appointment-create) is verwijderd in v=6 — dat endpoint +
+//   de additieve 'lisa.config.publish' gate op follow-up-ghl-free-slots
+//   staan dormant in de repo (geen actieve caller vanuit deze UI).
 //
 // Safety: skeleton, 8s tryFetch-timeout, asArr, esc(), fail-soft +
 // Opnieuw-knop, per-fetcher _seq, race-guard op send (_compose.sending),
@@ -65,7 +66,6 @@
     loading: false, error: null, _paintedFor: null, _seq: 0,
   };
   const _compose = { text: '', sending: false };
-  const _slots   = { open: false, loading: false, error: null, days: [], picked: null, duration: 30, saving: false };
   const _booking = { fetched: false, loading: false, url: null, configured: false };
   const _poll    = { handle: null, running: false, intervalMs: 18000 };
 
@@ -574,153 +574,12 @@
     _toast('Standaardtekst ingevuld — bewerken kan; klik Verstuur om te versturen.', 'info');
   };
 
-  /* ── Afspraak inschieten (DEEL C) ───────────────────────────────────── */
-  window.__lisaOpenAppt = async () => {
-    const conv = _thread.conversation;
-    if (!conv) { _toast('Geen conversatie geladen.', 'error'); return; }
-    if (conv.is_sandbox) { _toast('Sandbox-conversatie — afspraken worden niet ondersteund.', 'error'); return; }
-    if (!conv.ghl_contact_id) {
-      _openModal(`
-        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">Geen GHL-contact gekoppeld</div>
-        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:14px">
-          Deze conversatie heeft nog geen <code>ghl_contact_id</code>. Lisa kan pas een Zoom-afspraak boeken
-          zodra het contact bestaat in GHL — dat gebeurt bij de eerste sync of via een handmatige koppeling.
-        </div>
-        <div style="display:flex;justify-content:flex-end">
-          <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="document.getElementById('lisaModalRoot')?.remove()">OK</button>
-        </div>`);
-      return;
-    }
-    _slots.open = true; _slots.picked = null;
-    await _fetchAndRenderSlots();
-  };
-  async function _fetchAndRenderSlots() {
-    _slots.loading = true; _slots.error = null; _slots.days = [];
-    _renderApptModal();
-    const url = '/api/follow-up-ghl-free-slots?duration=' + encodeURIComponent(_slots.duration);
-    const j = await tryFetch('slots:' + _slots.duration, url);
-    _slots.loading = false;
-    if (!j) { _slots.error = 'Kon slots niet ophalen'; _renderApptModal(); return; }
-    if (j.error) { _slots.error = 'GHL: ' + j.error; _renderApptModal(); return; }
-    _slots.days = asArr(j.slots).filter(d => Array.isArray(d.times) && d.times.length);
-    _renderApptModal();
-  }
-  // KLEIN 2 FIX (v=5): duur-wissel herlaadt de slots. Beschikbaarheid kan
-  // per duur verschillen (60-min-slot vereist langere gap in GHL-kalender).
-  // De keuze wordt ge-clamped en gereset zodat we niet een oude 15-min
-  // picked-slot per ongeluk als 60-min doorsturen.
-  window.__lisaSetApptDuration = (d) => {
-    const nd = parseInt(d, 10) || 30;
-    if (nd === _slots.duration) return;
-    _slots.duration = nd; _slots.picked = null;
-    _fetchAndRenderSlots();
-  };
-  window.__lisaPickSlot = (date, time) => {
-    _slots.picked = { date, time };
-    _renderApptModal();
-  };
-  window.__lisaConfirmAppt = async () => {
-    if (_slots.saving) return;
-    const conv = _thread.conversation;
-    if (!conv || !_slots.picked) return;
-    const iso = _amsIsoFromDateTime(_slots.picked.date, _slots.picked.time);
-    if (!iso) { _toast('Ongeldige tijd geselecteerd', 'error'); return; }
-    const handle = conv.instagram_handle ? '@' + String(conv.instagram_handle).replace(/^@/, '') : (conv.contact_name || 'contact');
-    const when = new Date(iso).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-    _closeModal();
-    const ok = await _askConfirm(
-      'Zoom-afspraak inschieten?',
-      `Er wordt in Dave's GHL-kalender een echte Zoom-afspraak aangemaakt voor <strong>${esc(handle)}</strong>
-       op <strong>${esc(when)}</strong> (${_slots.duration} min). De klant krijgt de standaard GHL-invite met Zoom-link.`,
-      { okLabel: 'Ja, boek' }
-    );
-    if (!ok) { _slots.open = true; _renderApptModal(); return; }
-    _slots.saving = true;
-    const r = await apiCall('POST', '/api/lisa-appointment-create', {
-      conversation_id: conv.id,
-      scheduledAt   : iso,
-      durationMinutes: _slots.duration,
-    }, { timeoutMs: 20000 });
-    _slots.saving = false;
-    if (!r.ok) {
-      const msg = r.error || 'Boeken faalde';
-      _toast(msg, 'error');
-      _slots.open = true; _renderApptModal();
-      return;
-    }
-    // Success: update conv + list-row (CALL-badge), append system-message optimistic.
-    if (_thread.conversation) { _thread.conversation.call_booked = true; }
-    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
-    if (listRow) listRow.call_booked = true;
-    _thread.messages.push({
-      id: 'local_appt_' + Date.now(),
-      direction: 'out',
-      content: `✓ Zoom-afspraak ingeschoten voor ${when} (${_slots.duration} min).`,
-      sent_at: new Date().toISOString(),
-      ai_generated: false, human_override: true, is_system: true,
-    });
-    _toast('Afspraak geboekt (sync via GHL).', 'success');
-    _slots.open = false; _slots.picked = null;
-    _replaceRightPane();
-    _repaintListRow(conv.id);
-  };
-  function _amsIsoFromDateTime(date, time) {
-    // date=YYYY-MM-DD, time=HH:mm, timezone Amsterdam → return UTC ISO.
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
-    const [y, mo, d] = date.split('-').map(Number);
-    const [hh, mm]   = time.split(':').map(Number);
-    const utc = Date.UTC(y, mo - 1, d, hh, mm, 0);
-    const dtf = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-    const parts = dtf.formatToParts(new Date(utc));
-    const m = {}; for (const p of parts) m[p.type] = p.value;
-    const asUtc = Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour, +m.minute, +m.second);
-    const offMin = Math.round((asUtc - utc) / 60000);
-    return new Date(utc - offMin * 60000).toISOString();
-  }
-  function _renderApptModal() {
-    if (!_slots.open) { _closeModal(); return; }
-    const durationChips = [15, 30, 45, 60].map(d =>
-      `<button class="chip ${_slots.duration === d ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lisaSetApptDuration(${d})">${d} min</button>`
-    ).join('');
-    let body;
-    if (_slots.loading) {
-      body = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Vrije slots laden…</div>`;
-    } else if (_slots.error) {
-      body = `<div style="padding:14px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12.5px">⚠ ${esc(_slots.error)}</div>`;
-    } else if (!_slots.days.length) {
-      body = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Geen vrije slots gevonden in de komende 14 dagen.</div>`;
-    } else {
-      body = _slots.days.map(d => {
-        const dLabel = new Date(d.date + 'T12:00:00Z').toLocaleDateString('nl-NL', { timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'short' });
-        const chips = d.times.map(t => {
-          const isPicked = _slots.picked && _slots.picked.date === d.date && _slots.picked.time === t;
-          const dateAttr = esc(d.date), timeAttr = esc(t);
-          return `<button class="chip ${isPicked ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px;margin:0 4px 4px 0" onclick="__lisaPickSlot('${dateAttr}','${timeAttr}')">${esc(t)}</button>`;
-        }).join('');
-        return `<div style="margin-bottom:12px">
-          <div style="font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${esc(dLabel)}</div>
-          <div>${chips}</div>
-        </div>`;
-      }).join('');
-    }
-    const okDisabled = !_slots.picked || _slots.saving;
-    const okStyle = 'background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff' + (okDisabled ? ';opacity:.55;cursor:not-allowed' : '');
-    _openModal(`
-      <div style="font-size:16px;font-weight:600;margin-bottom:10px">Afspraak inschieten (Dave's Zoom)</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
-        <span style="font-size:12px;color:var(--text-3)">Duur:</span>
-        ${durationChips}
-      </div>
-      <div style="max-height:340px;overflow:auto;padding-right:6px;border:1px solid var(--border);border-radius:var(--r-sm);padding:12px">${body}</div>
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('lisaModalRoot')?.remove()">Annuleren</button>
-        <button class="btn btn-primary btn-sm" style="${okStyle}" ${okDisabled ? 'disabled' : ''} onclick="__lisaConfirmAppt()">${_slots.saving ? 'Bezig…' : 'Volgende (bevestig)'}</button>
-      </div>`, { maxWidth: 560 });
-  }
+  // v=6: 'Afspraak inschieten' free-slots-picker + lisa-appointment-create
+  // aanroep verwijderd. Boekingsflow loopt nu uitsluitend via 'Stuur
+  // boekingslink' (prefill compose met LISA_BOOKING_URL). Zie header-comment.
+  // Endpoint api/lisa-appointment-create.js blijft dormant in de repo staan;
+  // de additieve free-slots permissie 'lisa.config.publish' in
+  // api/follow-up-ghl-free-slots.js idem — geen actieve caller vanuit deze UI.
 
   /* ── Poll 18s ────────────────────────────────────────────────────────── */
   function _startPoll() {
@@ -1011,8 +870,7 @@
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaMarkDisqualified()" title="Markeer als disqualified">Disq.</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaTogglePause()" title="Pauzeer/hervat follow-ups">${conv.followup_paused ? '▶ Hervat FU' : '⏸ Pauzeer FU'}</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleTakeover()" title="Mens-overname aan/uit">${conv.human_takeover ? 'Lisa terug' : 'Mens over'}</button>
-        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaSendBookingLink()" title="Prefill compose met agenda-link zodat de volger zelf boekt">🔗 Stuur boekingslink</button>
-        <button class="btn btn-primary btn-sm" style="font-size:11.5px;background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lisaOpenAppt()" title="Zoom-afspraak inschieten via Dave's kalender">📅 Afspraak inschieten</button>
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px;background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lisaSendBookingLink()" title="Prefill compose met agenda-link zodat de volger zelf boekt">🔗 Stuur boekingslink</button>
       </div>` : '';
 
     const status = _thread.loading
@@ -1154,5 +1012,5 @@
   window.DFO.VIEWS['lisa/Statistieken'] = statsView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('lisa');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('lisa');
-  console.debug('[lisa-v2] v=5 — QA-fixes: (1) lijst-scroll blijft staan bij thread-wissel (surgical _replaceRightPane + _repaintListRow ipv DFO.render), (2) fase-dropdown reset naar server-waarde bij Annuleren, (3) free-slots refetchen bij duur-wissel (backend accepteert nu ?duration=). Send-flows byte-identiek.');
+  console.debug('[lisa-v2] v=6 — Boekingslink-only: zelf-inschieten (free-slots-picker + POST lisa-appointment-create) verwijderd uit de UI. Enige afspraakroute is nu de knop Stuur boekingslink (prefill compose met LISA_BOOKING_URL). Endpoint + additieve free-slots-permissie dormant in repo.');
 })();
