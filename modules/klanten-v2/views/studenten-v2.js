@@ -492,42 +492,59 @@
     return `<span title="Beoordeling deze maand" style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--${col}-soft,var(--surface-2));color:var(--${col});font-weight:600">${esc(label)}</span>`;
   }
 
+  // v=6 FIX 2: v1-status-badge (rechtsboven in de rij). Prioriteit (eerste
+  // match wint): Betaalachterstand > No-show recent > Geen call ingepland >
+  // Op schema. Data: no_shows uit mentor-my-students; invoice-status uit
+  // mentor-students-invoice-status (overdue > 0). Los van de beoordelings-
+  // badge (BROK 2), die staat ook nog naast de naam.
+  function _rowStatusBadge(s, inv) {
+    const email = s.email || '';
+    const iv = inv && email ? inv[email.toLowerCase()] : null;
+    const overdue = iv ? Number(iv.overdue || 0) : 0;
+    const noShows = Number(s.no_shows || 0);
+    const one1Done  = Number(s.calls_1on1_done  || 0);
+    const one1Total = Number(s.calls_1on1_total || 0);
+    if (overdue > 0) {
+      return `<span title="${overdue} openstaande factuur/facturen te laat" style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--rose-soft);color:var(--rose);font-weight:600">Betaalachterstand</span>`;
+    }
+    if (noShows > 0) {
+      return `<span title="${noShows} no-show${noShows === 1 ? '' : 's'}" style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">No-show recent</span>`;
+    }
+    // Heuristiek "Geen call ingepland": geen enkele 1-op-1 call in het systeem
+    // (done=0 AND total=0). Als er wel calls gepland zijn (total > 0) blijft
+    // de student op 'Op schema' — die telt als goed geregisseerd.
+    if (one1Done === 0 && one1Total === 0) {
+      return `<span title="Geen 1-op-1 call zichtbaar in de LMS" style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-3);font-weight:600;font-style:italic">Geen call ingepland</span>`;
+    }
+    return `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">Op schema</span>`;
+  }
+
   function _renderStudentRow(s, inv) {
     const id = String(s.bubble_student_id || s.id || '');
     const name = s.name || s.email || 'Onbekend';
-    const email = s.email || '';
     const program = s.program || s.membership || '—';
+    // v=6 FIX 1: groep-progressie volledig verwijderd (Jeffrey wil geen
+    // enkele groeps-verwijzing meer). Alleen 1-op-1 blijft.
     const oneOnOne = { done: Number(s.calls_1on1_done || 0), total: Number(s.calls_1on1_total || 0) };
-    const group    = { done: Number(s.group_done      || 0), total: Number(s.group_total      || 0) };
     const oneCol = _sessieKleur(oneOnOne.done, oneOnOne.total);
-    const grpCol = _sessieKleur(group.done, group.total);
     const noShows = Number(s.no_shows || 0);
-    const iv = inv && email ? inv[email.toLowerCase()] : null;
-    const invBadge = iv
-      ? (iv.overdue > 0
-          ? `<span style="font-size:9.5px;padding:2px 6px;border-radius:6px;background:var(--rose-soft);color:var(--rose);font-weight:600">${iv.overdue} achterstallig</span>`
-          : iv.open > 0
-            ? `<span style="font-size:9.5px;padding:2px 6px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">${iv.open} open</span>`
-            : `<span style="font-size:9.5px;padding:2px 6px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">betaald</span>`)
-      : `<span style="font-size:9.5px;padding:2px 6px;border-radius:6px;background:var(--surface-2);color:var(--text-3);font-weight:500">—</span>`;
     const onCls = String(_ui.selectedId) === id ? 'on' : '';
     const idAttr  = id.replace(/"/g, '&quot;');
     const idClick = id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const assessBadge = _assessmentBadgeHtml(id, { hideWhileLoading: true });
+    const statusBadge = _rowStatusBadge(s, inv);
     return `<div class="st-row ${onCls}" data-id="${idAttr}" onclick="__stSelectStudent('${idClick}')"
       style="display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;${onCls ? 'background:var(--surface-2)' : ''}">
       ${_av(name, 34)}
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
           <span style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
-          ${assessBadge ? `<span style="margin-left:auto;flex-shrink:0">${assessBadge}</span>` : ''}
+          <span style="margin-left:auto;flex-shrink:0;display:inline-flex;gap:5px;align-items:center">${assessBadge}${statusBadge}</span>
         </div>
         <div style="font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(program)}</div>
         <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:10.5px">
           <span style="padding:2px 6px;border-radius:6px;background:var(--${oneCol}-soft,var(--surface-2));color:var(--${oneCol},var(--text-3));font-weight:600">1-op-1 ${oneOnOne.done}/${oneOnOne.total || '—'}</span>
-          <span style="padding:2px 6px;border-radius:6px;background:var(--${grpCol}-soft,var(--surface-2));color:var(--${grpCol},var(--text-3));font-weight:600">Groep ${group.done}/${group.total || '—'}</span>
           ${noShows > 0 ? `<span style="padding:2px 6px;border-radius:6px;background:var(--rose-soft);color:var(--rose);font-weight:600">${noShows} no-show${noShows === 1 ? '' : 's'}</span>` : ''}
-          ${invBadge}
         </div>
       </div>
     </div>`;
@@ -542,8 +559,8 @@
     const membership = s.membership || '—';
     const onbStatus = s.onboarding_status || '—';
     const noShows = Number(s.no_shows || 0);
+    // v=6 FIX 1: group volledig weg. Alleen 1-op-1 blijft in detail-pane.
     const oneOnOne = { done: Number(s.calls_1on1_done || 0), total: Number(s.calls_1on1_total || 0) };
-    const group    = { done: Number(s.group_done      || 0), total: Number(s.group_total      || 0) };
     const inv = _live.invoices.byEmail && email ? _live.invoices.byEmail[email.toLowerCase()] : null;
 
     const tabs = ['Overzicht', 'Sessies', 'Facturen', 'Notities'];
@@ -564,7 +581,6 @@
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px">
           <div style="font-weight:600;font-size:13px;margin-bottom:10px">Sessies-progressie</div>
           ${_progressRow('1-op-1', oneOnOne.done, oneOnOne.total)}
-          ${_progressRow('Groepscalls', group.done, group.total)}
         </div>
       </div>`;
     } else if (_ui.detailTab === 'Sessies') {
@@ -812,5 +828,5 @@
   window.DFO.VIEWS['studenten/'] = studentenView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('studenten');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('studenten');
-  console.debug('[studenten-v2] v=5 — FIX A: admin-override op READ. Backend mentor-assessments-self.js dual-gate (mentor.admin.view + ?mentor_user_id=<uuid>). Frontend stuurde de override al mee. Persistentie voor admin-testers werkt nu na F5. FIX B: beoordelings-badge in lijst-rij (rechtsboven, alleen als beoordeling deze maand bestaat) + detail-header (naast naam, met subtle "nog niet beoordeeld" als geen). Optimistic repaint: na succesvolle save wordt zowel detail-pane als list-body gerepaint.');
+  console.debug('[studenten-v2] v=6 — FIX 1: groepscall-info volledig verwijderd (rij-badge + detail progress-bar). Alleen 1-op-1 blijft. FIX 2: v1-status-badge terug per rij (prio: Betaalachterstand>No-show recent>Geen call ingepland>Op schema). Naast bestaande beoordelings-badge (BROK 2). Betaalstatus uit mentor-students-invoice-status (al gekoppeld).');
 })();
