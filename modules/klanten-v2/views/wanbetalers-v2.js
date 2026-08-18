@@ -759,6 +759,9 @@
     );
     if (!ok) return;
     _ui.stageBusy[cid] = true;
+    // BROK 8 minor: forceer render direct na busy-set zodat de dropdown
+    // meteen z'n disabled-attribuut krijgt (voorheen 1 tick vertraging).
+    try { window.DFO?.render?.(); } catch (_) {}
     // BROK 9 FIX: server verwacht 'stage_slug' (api/dunning-pipeline-set-stage.js:28),
     // niet 'stage'. Voorheen kreeg elke fase-mutatie 400 "stage_slug vereist"
     // en werd de fase server-side niet gewijzigd (alleen UI-side optimistisch).
@@ -2051,13 +2054,21 @@
     apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
     try { window.DFO?.render?.(); } catch (_) {}
   };
+  // BROK 8 fix 5 (v=13): state-only oninput + surgical repaint van alleen de
+  // conv-lijst. Voorheen: elke keystroke triggerde _fetchInboxConvs (server-side
+  // search) die daarna DFO.render() aanriep → hele shell re-render → input-node
+  // vervangen → focus verloren naar body. Nu: client-side substring-filter over
+  // huidige items, alleen #wbxInboxList wordt vervangen. Zelfde patroon als
+  // _repaintOverzichtList. Server-search alleen bij nieuwe status-filter of
+  // handmatige retry.
+  function _repaintInboxList() {
+    const el = document.getElementById('wbxInboxList');
+    if (el) el.innerHTML = _inboxConvsListHtml();
+  }
   window.__wbxInboxSearch = (val) => {
     _ui.inbox.searchQ = String(val || '');
     if (_ui.inbox._searchTimer) clearTimeout(_ui.inbox._searchTimer);
-    _ui.inbox._searchTimer = setTimeout(() => {
-      _live.inbox.convs.fetched = false;
-      _fetchInboxConvs();
-    }, 250);
+    _ui.inbox._searchTimer = setTimeout(_repaintInboxList, 200);
   };
   window.__wbxInboxStatus = (val) => {
     _ui.inbox.statusFilter = String(val || 'active');
@@ -2094,7 +2105,19 @@
     if (c.sending) return;
     const bag = _live.inbox.thread.byConv[convId];
     const conv = bag?.conversation || null;
-    const custName = conv?.customer_name || (_live.inbox.convs.items.find((x) => x.id === convId) || {}).display_name || 'klant';
+    // BROK 8 fix 2 (v=13, INCASSO-KRITISCH): confirm moet de KLANT-naam tonen,
+    // niet het WA-profielnaam (display_name is de WA-profielnaam die de klant
+    // zelf zet — vaak alias/afwijkend van de echte klantnaam in ons systeem).
+    // Volgorde: customer_name (uit inbox-conv join) → customer_name uit convs-
+    // list (zelfde source, andere fetch) → display_name (WA-profiel, laatste
+    // resort) → threadkop 'klant' als niets werkt. Confirm-body toont zelfde
+    // naam als de threadkop rendert (_inboxCtxHtml: cust.name = customer_name).
+    const convRow  = (_live.inbox.convs.items || []).find((x) => x.id === convId) || {};
+    const custName = conv?.customer_name
+                  || convRow.customer_name
+                  || convRow.display_name
+                  || conv?.display_name
+                  || 'klant';
 
     // Build payload per channel.
     if (c.channel === 'wa') {
@@ -2167,8 +2190,27 @@
     const st = _live.inbox.convs;
     if (st.loading && !st.items.length) return _skelRows(6);
     if (st.error  && !st.items.length) return `<div style="padding:14px">${_errBlk(st.error, 'inbox')}</div>`;
-    if (!st.items.length) return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">Geen gesprekken in dit filter.</div>`;
-    return st.items.map((c) => {
+
+    // BROK 8 fix 4 (v=13): scope op wanbetalers-set. module=finance geeft ALLE
+    // finance-inbox convs (156 zonder scoping, waarvan 39% niet-wanbetalers).
+    // Endpoint accepteert geen customer_id-filter, dus client-side intersect
+    // met _live.overzicht.items (wanbetalers-lijst). Fallback: als overzicht
+    // nog niet geladen is → toon alle (tijdelijk breed) i.p.v. lege lijst.
+    const wbCids = new Set(asArr(_live.overzicht.items).map((r) => String(r.customer_id || r.id)));
+    let items = wbCids.size
+      ? st.items.filter((c) => c.customer_id && wbCids.has(String(c.customer_id)))
+      : st.items;
+    // BROK 8 fix 5: client-side substring-filter op naam/nummer.
+    const q = String(_ui.inbox.searchQ || '').trim().toLowerCase();
+    if (q) {
+      items = items.filter((c) => (
+        (c.customer_name || '') + ' ' +
+        (c.display_name  || '') + ' ' +
+        (c.phone_number  || '')
+      ).toLowerCase().includes(q));
+    }
+    if (!items.length) return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">Geen wanbetaler-gesprekken in dit filter.</div>`;
+    return items.map((c) => {
       const cid = String(c.id);
       const active = _ui.inbox.selectedConv === cid;
       const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
@@ -2278,6 +2320,8 @@
 
   function inboxView() {
     if (!_live.inbox.convs.fetched && !_live.inbox.convs.loading && !_live.inbox.convs.error) queueMicrotask(_fetchInboxConvs);
+    // BROK 8 fix 4: overzicht nodig voor client-side wanbetalers-scoping.
+    if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(_fetchOverzicht);
     const convId = _ui.inbox.selectedConv;
     const qVal = String(_ui.inbox.searchQ || '');
     const statusBtn = (v, l) => `<button class="chip ${_ui.inbox.statusFilter === v ? 'on' : ''}" style="font-size:11px;padding:3px 9px" onclick="__wbxInboxStatus('${v}')">${esc(l)}</button>`;
@@ -2325,12 +2369,22 @@
     const bag = _live.caseSheet.invoicesByCust[cid] = _live.caseSheet.invoicesByCust[cid] || { loading: false, items: [], error: null };
     if (bag.loading) return;
     bag.loading = true; bag.error = null;
-    // customer-dossier levert een facturen-lijst per klant (wanbetalers-invoices-list heeft geen ?customer_id).
-    const j = await tryFetch('case:invoices:' + cid, `/api/customer-dossier?customer_id=${encodeURIComponent(cid)}`, 8000);
+    // BROK 8 fix 3 (v=13): switch naar finance-invoices?customer_id=X&status=overdue.
+    // Levert echte factuur-rijen (invoice_number/due_date/open_amount) i.p.v. de
+    // customer-dossier-blocks-shape die alleen aggregate-counts had. Endpoint
+    // bestaat al (RBAC finance.invoice.view); shape: { items: [{...}], counts }.
+    // Fallback naar &status=open als overdue leeg is (klant kan open zonder-
+    // overdue facturen hebben, bv. arrangement die uitstel geeft).
+    const j = await tryFetch('case:invoices:' + cid, `/api/finance-invoices?customer_id=${encodeURIComponent(cid)}&status=overdue&page_size=50`, 8000);
     if (j && j.error) bag.error = j.error;
     else {
-      const inv = asArr(j?.invoices || j?.open_invoices || j?.data?.invoices);
-      bag.items = inv.filter((x) => !x.paid && !x.credited);
+      let items = asArr(j?.items);
+      if (!items.length) {
+        // Fallback: geen overdue → probeer alle open
+        const j2 = await tryFetch('case:invoices2:' + cid, `/api/finance-invoices?customer_id=${encodeURIComponent(cid)}&status=open&page_size=50`, 8000);
+        if (j2 && !j2.error) items = asArr(j2?.items);
+      }
+      bag.items = items;
     }
     bag.loading = false; _renderCaseSheet();
   }
@@ -2349,7 +2403,9 @@
     return asArr(_live.overzicht.items).find((x) => String(x.customer_id || x.id) === String(cid)) || null;
   }
   function _customerPhone(row) {
-    return row?.phone || row?.customer?.phone || row?.mobile_phone || null;
+    // BROK 8 fix 1 (v=13): wanbetalers-overzicht-list levert 'customer_phone';
+    // fallbacks behouden voor andere shapes (customer-dossier, sales-detail).
+    return row?.customer_phone || row?.phone || row?.customer?.phone || row?.mobile_phone || null;
   }
 
   // Overschrijf de forward-ref uit BROK 9:
@@ -2403,7 +2459,13 @@
     const name = row?.customer_name || row?.name || 'Onbekend';
     const openAmt = Number.isFinite(Number(row?.total_open_cents)) ? Number(row.total_open_cents) / 100 : 0;
     const days = Number.isFinite(Number(row?.days_overdue)) ? Number(row.days_overdue) : 0;
-    const stage = row?.stage_slug || '—';
+    // BROK 8 minor: NL-label lookup via PIPELINE_STAGES i.p.v. ruwe slug tonen.
+    // Fallback: stages uit /api/dunning-pipeline-stages (BROK 9 _live.stages)
+    // → dan slug als laatste redmiddel.
+    const stageSlug = row?.stage_slug || row?.stage || null;
+    const stageFromApi = (asArr(_live.stages?.items).find((s) => s.slug === stageSlug) || {}).label;
+    const stageFromConst = ((typeof PIPELINE_STAGES !== 'undefined' && PIPELINE_STAGES.find((s) => s[0] === stageSlug)) || [])[1];
+    const stage = row?.stage_label || stageFromApi || stageFromConst || stageSlug || '—';
     const arrs = (_live.arrangements.byCust || {})[cid] || [];
     const activeArr = arrs.length > 0;
     const phone = _customerPhone(row);
@@ -2456,9 +2518,20 @@
         ${bag.items.map((inv) => {
           const num = inv.invoice_number || inv.number || inv.id?.slice(0,8) || '—';
           const desc = inv.description || inv.subject || '—';
-          const cents = Number(inv.open_amount_cents ?? (Number(inv.open_amount || 0) * 100)) || 0;
+          // finance-invoices levert amount_total/amount_paid/credited_amount in euros;
+          // open = total - paid - credited. Fallback naar open_amount_cents (dossier) of open_amount (dossier).
+          const openEur = inv.open_amount != null
+            ? Number(inv.open_amount)
+            : (inv.open_amount_cents != null ? Number(inv.open_amount_cents) / 100
+              : Math.max(0, (Number(inv.amount_total) || 0) - (Number(inv.amount_paid) || 0) - (Number(inv.credited_amount) || 0)));
+          const cents = Math.round(openEur * 100);
           const due = inv.due_date || inv.due_on || null;
-          const overdue = Number(inv.days_overdue || 0);
+          // Client-side days_overdue als server niet levert (finance-invoices doet niet).
+          let overdue = Number(inv.days_overdue || 0);
+          if (!overdue && due) {
+            const t = new Date(due).getTime();
+            if (Number.isFinite(t)) overdue = Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+          }
           return `<div style="display:grid;grid-template-columns:130px 1fr 120px 120px;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
             <div style="font-family:'IBM Plex Mono',monospace">${esc(num)}</div>
             <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(desc)}</div>
@@ -2477,15 +2550,32 @@
     if (!items.length) return `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:13px">Geen tijdlijn-events.</div>`;
     // Gebruik gedeelde WanbetalersTimeline.describe(item) → { icon, title } als beschikbaar.
     const WT = window.WanbetalersTimeline || null;
+    // BROK 8 minor: NL-labels voor tijdlijn-enums (pending_actions action_types).
+    // WanbetalersTimeline dekt de meeste, maar MANUAL_* / TL_* lekten door.
+    const ENUM_NL = {
+      MANUAL_CONFIRM_PROMISE:    'Handmatig: betaal-toezegging bevestigd',
+      MANUAL_VERIFY_PAYMENT:     'Handmatig: betaling verifiëren',
+      MANUAL_PROPOSE_ARRANGEMENT:'Handmatig: arrangement voorstellen',
+      MANUAL_FOLLOWUP:           'Handmatig: opvolg-actie',
+      MANUAL_ESCALATION:         'Handmatig: escalatie',
+      TL_INVOICE_UPDATE_DUE:     'TL: factuur-vervaldatum bijwerken',
+      TL_INVOICE_SPLIT:          'TL: factuur splitsen (termijnen)',
+      TL_SUBSCRIPTION_PAUSE:     'TL: abonnement pauzeren',
+      TL_SUBSCRIPTION_STOP:      'TL: abonnement stoppen',
+      TL_INVOICE_WRITEOFF:       'TL: factuur afschrijven',
+    };
+    const nlLabel = (raw) => ENUM_NL[raw] || raw;
     return `<div style="padding:14px 18px">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r)">
         ${items.map((it) => {
           const d = WT?.describe ? WT.describe(it) : { icon: '·', title: it.title || it.type };
           const actor = it.actor?.name || '';
+          const rawTitle = d.title || it.title || it.type || 'Event';
+          const title = nlLabel(rawTitle);
           return `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:10px;font-size:12.5px">
             <div style="font-size:15px;line-height:1;color:var(--text-3);min-width:20px;text-align:center">${esc(d.icon || '·')}</div>
             <div style="flex:1;min-width:0">
-              <div style="font-weight:600">${esc(d.title || it.title || it.type || 'Event')}</div>
+              <div style="font-weight:600">${esc(title)}</div>
               ${it.description ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(it.description)}</div>` : ''}
               <div style="font-size:10.5px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${esc(_fmtDateTime(it.at))}${actor ? ` · ${esc(actor)}` : ''}</div>
             </div>
@@ -2584,6 +2674,10 @@
   window.__wbxCaseCallField = (cid, field, val) => {
     _ui.callForm[cid] = _ui.callForm[cid] || {};
     _ui.callForm[cid][field] = val;
+    // BROK 8 minor: inline-fout wissen zodra de user het probleem oplost.
+    // Voorheen bleef "Terugbeltijd verplicht"-error zichtbaar nadat gebruiker
+    // een datum invulde — verwarrend. Wissen ook bij outcome-wissel.
+    if (_ui.callForm[cid].error) _ui.callForm[cid].error = null;
     if (field === 'outcome') _renderCaseSheet(); // callback-veld enable/disable
   };
   window.__wbxCaseCallSave = async (cid) => {
@@ -2797,7 +2891,13 @@
     const mySeq = ++st._seq;
     st.loading = true; st.error = null;
     try {
-      const [settings, toggles, pending, pipe, bulk, inc, arr] = await Promise.all([
+      // BROK 8 fix 6 (v=13): per-endpoint error onderscheiden van echt-leeg.
+      // Voorheen: bij fetch-fout viel elke `?? default` terug op nullen/lege
+      // arrays → UI toonde "Geen bulk-jobs" / "0 acties" alsof dat waar was.
+      // Nu: sub-error-flags per endpoint zodat de UI expliciet kan onderscheiden
+      // FOUT (toon errblk + Opnieuw) vs LEEG (toon lege-lijst-tekst).
+      // Ook: sandbox_mode uit app-settings meenemen (minor: motor sandbox aan/uit).
+      const [settings, toggles, pending, pipe, bulk, inc, arr, sandboxRaw] = await Promise.all([
         tryFetch('motor:settings',   '/api/dunning-settings-get',                                    8000),
         tryFetch('motor:toggles',    '/api/dunning-pipeline-settings',                               8000),
         tryFetch('motor:pending',    '/api/pending-actions-list?limit=1',                            8000),
@@ -2805,21 +2905,42 @@
         tryFetch('motor:bulk',       '/api/wanbetalers-bulk-jobs-list?limit=25',                     8000),
         tryFetch('motor:incasso',    '/api/incasso-dossiers-list',                                   8000),
         tryFetch('motor:arr',        '/api/arrangements-list?status=ACTIEF&limit=1',                 8000),
+        tryFetch('motor:sandbox',    '/api/app-settings?key=dunning_sandbox_mode',                   8000),
       ]);
       if (mySeq !== st._seq) return;
       const incCounts = {};
-      for (const r of asArr(inc?.items)) {
+      const incOk = !!inc && !inc.error;
+      if (incOk) for (const r of asArr(inc?.items)) {
         const s = String(r.status || 'unknown');
         incCounts[s] = (incCounts[s] || 0) + 1;
       }
+      // Sandbox-flag: server retourneert { key, value } waar value een jsonb
+      // is (bv. { enabled: true } of true zelf). Fallback null bij fetch-fout.
+      let sandboxEnabled = null;
+      if (sandboxRaw && !sandboxRaw.error) {
+        const v = sandboxRaw?.value;
+        sandboxEnabled = v === true || v === 'true' || (v && v.enabled === true);
+      }
       st.data = {
-        cooldownDays:     Number.isFinite(Number(settings?.dunning_cooldown_days)) ? Number(settings.dunning_cooldown_days) : null,
-        pipelineToggles:  toggles?.toggles || null,
-        pendingCounts:    pending?.counts  || { PENDING: 0, APPROVED: 0, REJECTED: 0, EXECUTED: 0, FAILED: 0 },
-        pipelineKpis:     pipe?.kpis       || { appointments_today: 0, awaiting_reply: 0, stale_count: 0 },
-        bulkJobs:         asArr(bulk?.items),
-        incassoByStatus:  incCounts,
-        arrActiveTotal:   Number.isFinite(Number(arr?.total)) ? Number(arr.total) : 0,
+        cooldownDays:     (settings && !settings.error && Number.isFinite(Number(settings.dunning_cooldown_days))) ? Number(settings.dunning_cooldown_days) : null,
+        pipelineToggles:  (toggles && !toggles.error) ? (toggles.toggles || null) : null,
+        pendingCounts:    (pending && !pending.error) ? (pending.counts || { PENDING: 0, APPROVED: 0, REJECTED: 0, EXECUTED: 0, FAILED: 0 }) : null,
+        pipelineKpis:     (pipe && !pipe.error) ? (pipe.kpis || { appointments_today: 0, awaiting_reply: 0, stale_count: 0 }) : null,
+        bulkJobs:         (bulk && !bulk.error) ? asArr(bulk.items) : null,
+        incassoByStatus:  incOk ? incCounts : null,
+        arrActiveTotal:   (arr && !arr.error && Number.isFinite(Number(arr.total))) ? Number(arr.total) : null,
+        sandboxEnabled,
+        // sub-error-flags voor UI-render (fault vs leeg-scherm onderscheid)
+        errs: {
+          settings: !settings || !!settings.error,
+          toggles:  !toggles  || !!toggles.error,
+          pending:  !pending  || !!pending.error,
+          pipe:     !pipe     || !!pipe.error,
+          bulk:     !bulk     || !!bulk.error,
+          incasso:  !inc      || !!inc.error,
+          arr:      !arr      || !!arr.error,
+          sandbox:  !sandboxRaw || !!sandboxRaw.error,
+        },
       };
       st.fetched = true;
     } catch (e) {
@@ -2854,6 +2975,7 @@
     }
 
     const d = _live.motor.data;
+    const errs = d.errs || {};
     const isOpen = _isOfficeHoursNow();
     const openBadge = isOpen === true
       ? `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">Nu open</span>`
@@ -2864,14 +2986,35 @@
     const activeToggles = ['on_overdue_to_nieuw','on_bulk_sent_to_aangemaand','on_inbound_to_in_gesprek','on_paid_to_opgelost']
       .filter((k) => toggles[k] !== false).length;
 
+    // Sandbox-badge: expliciet aan/uit/onbekend (BROK 8 minor).
+    const sbBadge = d.sandboxEnabled === true
+      ? `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">Sandbox AAN</span>`
+      : d.sandboxEnabled === false
+        ? `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">Sandbox UIT</span>`
+        : `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-3)">Sandbox ?</span>`;
+
+    // BROK 8 fix 6: KPI-cell die "?" toont bij fetch-fout i.p.v. 0.
+    const errMark = '<span style="color:var(--rose);font-size:14px" title="Kon niet laden">⚠</span>';
+    const kpiVal = (val, isErr) => isErr ? errMark : (val == null ? '—' : val);
     const kpis = [
-      ['Openstaand approvals', d.pendingCounts.PENDING || 0, 'var(--amber)'],
-      ['Acties vandaag',       (d.pipelineKpis.appointments_today || 0) + (d.pipelineKpis.awaiting_reply || 0) + (d.pipelineKpis.stale_count || 0), 'var(--brand,#0A7490)'],
-      ['Incasso actief',       (d.incassoByStatus.lopend || 0) + (d.incassoByStatus.aangemeld || 0), 'var(--rose)'],
-      ['Arrangements actief',  d.arrActiveTotal, 'var(--emerald)'],
+      ['Openstaand approvals',
+        kpiVal(d.pendingCounts?.PENDING || 0, errs.pending),
+        'var(--amber)'],
+      ['Acties vandaag',
+        kpiVal((d.pipelineKpis?.appointments_today || 0) + (d.pipelineKpis?.awaiting_reply || 0) + (d.pipelineKpis?.stale_count || 0), errs.pipe),
+        'var(--brand,#0A7490)'],
+      ['Incasso actief',
+        kpiVal((d.incassoByStatus?.lopend || 0) + (d.incassoByStatus?.aangemeld || 0), errs.incasso),
+        'var(--rose)'],
+      ['Arrangements actief',
+        kpiVal(d.arrActiveTotal, errs.arr),
+        'var(--emerald)'],
     ];
 
-    const bulkRows = d.bulkJobs.length ? d.bulkJobs.map((j) => {
+    const bulkJobsArr = asArr(d.bulkJobs);
+    const bulkRows = errs.bulk
+      ? `<div style="padding:14px">${_errBlkMotor('Kon bulk-jobs niet laden.')}</div>`
+      : (bulkJobsArr.length ? bulkJobsArr.map((j) => {
       const st = String(j.status || '');
       const tone = st === 'running' ? 'var(--amber)' : st === 'completed' ? 'var(--emerald)' : st === 'cancelled' ? 'var(--rose)' : 'var(--text-3)';
       const total = Number(j.total_recipients) || 0;
@@ -2885,7 +3028,7 @@
         <div style="font-size:11px;color:var(--text-3)">${esc(_fmtDateTime(when))}</div>
         <div style="font-size:11px;color:var(--text-3);text-align:right">${esc(j.id).slice(0, 8)}</div>
       </div>`;
-    }).join('') : `<div style="padding:34px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen bulk-jobs.</div>`;
+    }).join('') : `<div style="padding:34px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen bulk-jobs.</div>`);
 
     return `<div data-wbx-view="motor">
       <div class="pad" style="padding:14px 20px">
@@ -2894,7 +3037,9 @@
           <div style="width:1px;height:22px;background:var(--border)"></div>
           <div><span style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Cooldown</span> <b>${d.cooldownDays == null ? '—' : d.cooldownDays + ' dgn'}</b></div>
           <div style="width:1px;height:22px;background:var(--border)"></div>
-          <div><span style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Pipeline-auto</span> <b>${activeToggles}/4 aan</b></div>
+          <div><span style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Pipeline-auto</span> <b>${errs.toggles ? errMark : activeToggles + '/4 aan'}</b></div>
+          <div style="width:1px;height:22px;background:var(--border)"></div>
+          ${sbBadge}
           <div style="margin-left:auto;font-size:11px;color:var(--text-3)">Poll 18s · pauze op tab-hide</div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
@@ -2906,7 +3051,7 @@
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:14px">
           <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
             <b style="font-size:13px">Bulk-jobs (laatste 25)</b>
-            <span style="font-size:11px;color:var(--text-3)">${d.bulkJobs.length} rijen</span>
+            <span style="font-size:11px;color:var(--text-3)">${errs.bulk ? '?' : bulkJobsArr.length + ' rijen'}</span>
           </div>
           <div style="display:grid;grid-template-columns:1fr 90px 130px 150px 130px;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
             <div>Template</div><div>Status</div><div style="text-align:right">Sent/Total</div><div>Wanneer</div><div style="text-align:right">Job-id</div>
@@ -2914,7 +3059,7 @@
           <div>${bulkRows}</div>
         </div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;font-size:12.5px;color:var(--text-3)">
-          <b style="color:var(--text)">Pending queue-detail</b> — PENDING <b style="color:var(--text)">${d.pendingCounts.PENDING || 0}</b> · APPROVED <b style="color:var(--text)">${d.pendingCounts.APPROVED || 0}</b> · REJECTED <b style="color:var(--text)">${d.pendingCounts.REJECTED || 0}</b> · EXECUTED <b style="color:var(--text)">${d.pendingCounts.EXECUTED || 0}</b> · FAILED <b style="color:var(--text)">${d.pendingCounts.FAILED || 0}</b>
+          <b style="color:var(--text)">Pending queue-detail</b> — ${errs.pending ? '<span style="color:var(--rose)">⚠ kon niet laden</span>' : `PENDING <b style="color:var(--text)">${d.pendingCounts?.PENDING || 0}</b> · APPROVED <b style="color:var(--text)">${d.pendingCounts?.APPROVED || 0}</b> · REJECTED <b style="color:var(--text)">${d.pendingCounts?.REJECTED || 0}</b> · EXECUTED <b style="color:var(--text)">${d.pendingCounts?.EXECUTED || 0}</b> · FAILED <b style="color:var(--text)">${d.pendingCounts?.FAILED || 0}</b>`}
         </div>
       </div>
     </div>`;
@@ -2935,5 +3080,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=12 herrol BROK 5/7/9/10 + loop-guard: alle 9 fetch-on-render triggers hebben nu !error-guard (spiegel van dashboard-v2 fix d22ab8c8). Bij fetch-fail: state.error gezet, render toont _errBlk met Opnieuw-knop, GEEN retry-loop. Bevat: BROK 5 WA+mail inbox, BROK 7 case-sheet+softphone, BROK 9 pipeline-kanban+setStage-fix, BROK 10 motor-monitoring, poll-cleanup (_startMotorPoll/_stopMotorPoll met tick-guard + beforeunload), inbox _selectSeq stale-guard.');
+  console.debug('[wanbetalers-v2] v=13 BROK 8 verify-fixes: (1) softphone _customerPhone leest customer_phone eerst; (2) confirm-naam via customer_name i.p.v. display_name (WA-profiel); (3) case-sheet open-facturen via finance-invoices?customer_id=X&status=overdue met fallback open + client-side days_overdue; (4) inbox scoping client-side intersect met wanbetalers-set; (5) inbox-zoek state-only + surgical _repaintInboxList (geen focus-verlies); (6) motor onderscheidt fetch-fout vs echt-leeg (errs-flags per endpoint, ⚠ mark in KPI-cell) + sandbox-badge; minors: NL-stage-label in case-sheet-kop, NL-labels voor MANUAL_/TL_-enums in tijdlijn, callback error-clear bij veld-input, set-stage disabled direct via forced render.');
 })();
