@@ -313,22 +313,7 @@
     }
     const c = document.getElementById('content');
     if (c) {
-      // Safety-net (2026-08-18): view-call in try/catch zodat een throw in
-      // één view-function NOOIT de shell-render breekt (bv. tab-strip
-      // update, crumb, andere modules kunnen dan nog steeds klikken). Toont
-      // een compacte error-block met de message in plaats van hangen.
-      let view;
-      try {
-        view = locked ? comingSoonView(m) : ((VIEWS[m.id + '/' + S.tab] || VIEWS[m.id + '/'] || genericView)());
-      } catch (e) {
-        console.error(`[app-shell] view crash mod=${m.id} tab=${S.tab}:`, e);
-        const msg = (e && e.message) ? String(e.message) : 'onbekende fout';
-        view = `<div style="padding:24px;background:var(--rose-soft, #fef2f2);border:1px solid var(--rose, #ef4444);color:var(--rose, #b91c1c);border-radius:8px;margin:16px;font-size:13px">
-          <div style="font-weight:600;margin-bottom:6px">⚠ Kan '${m.naam || m.id} / ${S.tab || ''}' niet weergeven</div>
-          <div style="font-size:12px;opacity:.85">${msg.replace(/[<>&]/g, (ch) => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[ch]))}</div>
-          <div style="font-size:11px;opacity:.6;margin-top:6px">Andere tabs en modules blijven werken. Ga terug of open een andere tab.</div>
-        </div>`;
-      }
+      const view = locked ? comingSoonView(m) : ((VIEWS[m.id + '/' + S.tab] || VIEWS[m.id + '/'] || genericView)());
       c.innerHTML = view;
       const sk = key();
       requestAnimationFrame(() => { c.scrollTop = S.scroll[sk] || 0; });
