@@ -376,6 +376,9 @@
       if (saved) _live.notes.byId[String(id)] = saved;
       ns.savedAt = new Date().toISOString();
       _repaintDetailPane();
+      // v=5 FIX B: badge in lijst-rij ook direct bijwerken (rij bevat een
+      // gekleurde beoordelings-badge die uit _live.notes.byId leest).
+      _repaintListBody();
       setTimeout(() => {
         const el = document.getElementById('stNoteSaved_' + id);
         if (el) el.style.display = 'none';
@@ -472,6 +475,23 @@
   }
 
   /* ── Row-render ────────────────────────────────────────────────────── */
+  // v=5 FIX B: beoordelings-badge helper. Bron: _live.notes.byId[id].status
+  // (per-mentor upsert huidige maand). Ontbrekend / nog niet geladen →
+  // subtiel 'nog niet beoordeeld'-tekst (badge:false optie geeft leeg).
+  function _assessmentBadgeHtml(id, opts) {
+    const note = _live.notes.byId ? _live.notes.byId[String(id)] : null;
+    const notLoaded = !_live.notes.byId;
+    if (notLoaded && !(opts && opts.hideWhileLoading)) return '';
+    if (!note || !note.status || !ASSESSMENT_STATUSES.includes(note.status)) {
+      // Geen beoordeling deze maand.
+      if (opts && opts.subtle) return `<span style="font-size:10px;padding:2px 6px;border-radius:6px;background:var(--surface-2);color:var(--text-3);font-weight:500;font-style:italic">nog niet beoordeeld</span>`;
+      return '';
+    }
+    const col = ASSESSMENT_STATUS_COLORS[note.status] || 'text-3';
+    const label = ASSESSMENT_STATUS_LABELS[note.status] || note.status;
+    return `<span title="Beoordeling deze maand" style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--${col}-soft,var(--surface-2));color:var(--${col});font-weight:600">${esc(label)}</span>`;
+  }
+
   function _renderStudentRow(s, inv) {
     const id = String(s.bubble_student_id || s.id || '');
     const name = s.name || s.email || 'Onbekend';
@@ -493,12 +513,14 @@
     const onCls = String(_ui.selectedId) === id ? 'on' : '';
     const idAttr  = id.replace(/"/g, '&quot;');
     const idClick = id.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const assessBadge = _assessmentBadgeHtml(id, { hideWhileLoading: true });
     return `<div class="st-row ${onCls}" data-id="${idAttr}" onclick="__stSelectStudent('${idClick}')"
       style="display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;${onCls ? 'background:var(--surface-2)' : ''}">
       ${_av(name, 34)}
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
           <span style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+          ${assessBadge ? `<span style="margin-left:auto;flex-shrink:0">${assessBadge}</span>` : ''}
         </div>
         <div style="font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(program)}</div>
         <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:10.5px">
@@ -650,13 +672,20 @@
       }
     }
 
+    // v=5 FIX B: beoordelings-badge in header (naast naam). Toon 'nog niet
+    // beoordeeld'-subtekst wanneer geen assessment deze maand (helpt de
+    // mentor te zien wat 'ie nog moet doen).
+    const headerAssessBadge = _assessmentBadgeHtml(id, { subtle: true });
     return `<div style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
       <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:13px;margin-bottom:10px">
           ${_av(name, 42)}
           <div style="flex:1;min-width:0">
-            <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
-            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(email || '—')}</div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
+              ${headerAssessBadge}
+            </div>
+            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px">${esc(email || '—')}</div>
           </div>
           <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" onclick="__stOpenLms('${esc(email || '')}')" title="Open student in Bubble LMS (dashboard.deforexopleiding.nl)">Open in LMS →</button>
         </div>
@@ -783,5 +812,5 @@
   window.DFO.VIEWS['studenten/'] = studentenView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('studenten');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('studenten');
-  console.debug('[studenten-v2] v=4 — FIX 1: admin-override op save. Payload stuurt nu mentor_user_id uit window.__stMentorOverride; backend mentor-assessment-save.js dual-gate (mentor-self OF admin-met-override, identiek aan mentor-my-students). FIX 2: score-clamp UX weg — leeg veld → null, Save disabled + rode inline-hint "vul een score 1-10 in", geen stille auto-clamp meer. BROK 2-writes uit v=3 behouden.');
+  console.debug('[studenten-v2] v=5 — FIX A: admin-override op READ. Backend mentor-assessments-self.js dual-gate (mentor.admin.view + ?mentor_user_id=<uuid>). Frontend stuurde de override al mee. Persistentie voor admin-testers werkt nu na F5. FIX B: beoordelings-badge in lijst-rij (rechtsboven, alleen als beoordeling deze maand bestaat) + detail-header (naast naam, met subtle "nog niet beoordeeld" als geen). Optimistic repaint: na succesvolle save wordt zowel detail-pane als list-body gerepaint.');
 })();

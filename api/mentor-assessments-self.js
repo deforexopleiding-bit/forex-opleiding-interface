@@ -1,14 +1,17 @@
 // api/mentor-assessments-self.js
 //
-// SELF — lijst assessments van de ingelogde mentor voor een maand.
+// SELF / ADMIN — lijst assessments van een mentor voor een maand.
 //
-// Permission: mentor.module.access.
+// Permission (dual-gate, identiek aan mentor-my-students / mentor-assessment-save):
+//   - ?mentor_user_id afwezig → self (mentor.module.access, auth.uid).
+//   - ?mentor_user_id aanwezig → admin (mentor.admin.view, die uuid).
 //
 // Query:
-//   ?month=YYYY-MM  (optioneel; default = huidige maand UTC)
+//   ?month=YYYY-MM       (optioneel; default = huidige maand UTC)
+//   ?mentor_user_id=uuid (optioneel; admin-override)
 //
 // Response 200:
-//   { ok, period_month,
+//   { ok, scope: 'self'|'admin', period_month,
 //     assessments: [ { student_id, student_name, status, score,
 //                      active_tasks_done, note, updated_at } ] }
 
@@ -16,6 +19,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const MONTH_RE = /^(\d{4})-(\d{2})$/;
+const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function currentMonthStartUtc() {
   const n = new Date();
@@ -43,8 +47,30 @@ export default async function handler(req, res) {
   const supabase = createUserClient(req);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  if (!(await requirePermission(req, 'mentor.module.access'))) {
-    return res.status(403).json({ error: 'Geen rechten (mentor.module.access)' });
+
+  // Dual-gate — identiek aan mentor-my-students + mentor-assessment-save.
+  // Zonder deze gate viel de read voor admin-testers met __stMentorOverride
+  // altijd terug op auth.uid() → [] resultaat → veld-defaults na herladen
+  // (persistentie leek te falen terwijl de save wel gelukt was).
+  const requestedMentorId = typeof req.query?.mentor_user_id === 'string'
+    ? req.query.mentor_user_id.trim() : '';
+  let effectiveUserId;
+  let scope;
+  if (requestedMentorId) {
+    if (!UUID_RE.test(requestedMentorId)) {
+      return res.status(400).json({ error: 'mentor_user_id (uuid) ongeldig' });
+    }
+    if (!(await requirePermission(req, 'mentor.admin.view'))) {
+      return res.status(403).json({ error: 'Geen rechten (mentor.admin.view)' });
+    }
+    effectiveUserId = requestedMentorId;
+    scope = 'admin';
+  } else {
+    if (!(await requirePermission(req, 'mentor.module.access'))) {
+      return res.status(403).json({ error: 'Geen rechten (mentor.module.access)' });
+    }
+    effectiveUserId = user.id;
+    scope = 'self';
   }
 
   let periodMonth = currentMonthStartUtc();
@@ -58,7 +84,7 @@ export default async function handler(req, res) {
     const { data, error } = await supabaseAdmin
       .from('mentor_student_assessments')
       .select('student_id, student_name, status, score, active_tasks_done, note, updated_at')
-      .eq('mentor_user_id', user.id)
+      .eq('mentor_user_id', effectiveUserId)
       .eq('period_month', periodMonth)
       .order('updated_at', { ascending: false })
       .limit(500);
@@ -66,6 +92,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok           : true,
+      scope,
       period_month : periodMonth,
       assessments  : (data || []).map((r) => ({
         student_id        : r.student_id,
