@@ -431,8 +431,19 @@
       const convTitle = hasSub ? 'Er bestaat al een abonnement voor deze offerte. Klik om (opnieuw) om te zetten.' : '';
       // V2 in-shell wizard (2026-08-12); fallback naar v1 als handler niet geladen.
       const convertBtn = `<a class="${convClass}" href="javascript:void(0)" onclick="if(window.__subwOpen){window.__subwOpen({dealId:'${esc(deal.id)}'})}else{window.location.href='/modules/subscription-wizard.html?deal_id=${encodeURIComponent(deal.id)}'}"${convTitle ? ` title="${esc(convTitle)}"` : ''}>${convLabel}</a>`;
+      // Onboarding-knop kent 2 states op basis van d.existing_onboarding
+      // (server-side lookup in sales-deal-detail; bron: onboardings.status !=
+      // 'gearchiveerd' voor deze customer_id — spiegel de guard in
+      // onboarding-create.js). Bij bestaand traject → klikbare 'al aangemeld'-
+      // knop die de onboarding-detail-modal in de v2-onboarding-module opent.
+      // Bij geen bestaand traject → normale aanmeld-knop (huidig gedrag).
+      // De 409-afvang in obSubmit blijft staan als vangnet voor de race dat
+      // iemand net tussen page-load en submit is aangemeld.
+      const ob = d.existing_onboarding || null;
       const onboardBtn = c.id
-        ? `<button class="btn" style="background:#0a2f63;color:#fff" onclick="obOpen()" title="Onboarding-traject aanmelden (F0.2 modal)">📋 Onboarding aanmelden</button>`
+        ? (ob && ob.id
+            ? `<button class="btn btn-success" style="background:var(--emerald,#07835A);border-color:var(--emerald,#07835A);color:#fff" onclick="__odvOpenOnboarding('${esc(ob.id)}')" title="Bekijk het lopende onboarding-traject van deze klant (status: ${esc(String(ob.status || 'onbekend'))})">✓ Onboarding al aangemeld</button>`
+            : `<button class="btn" style="background:#0a2f63;color:#fff" onclick="obOpen()" title="Onboarding-traject aanmelden (F0.2 modal)">📋 Onboarding aanmelden</button>`)
         : '';
       return `${convertBtn} ${onboardBtn} ${copyBtn}`;
     }
@@ -802,6 +813,40 @@
     const dt = document.getElementById('odvObStart');
     if (dt) dt.value = '';
   }
+  // Deep-link: open het bestaande onboarding-traject in de v2-onboarding-
+  // module. Navigeert eerst naar de module (DFO.goMod) en opent daarna de
+  // detail-modal via __onbOpen(id) (aangeboden door onboarding-v2.js).
+  // Fail-soft: als de handler nog niet gemount is (net na navigatie), doen
+  // we een korte retry-loop (max 8 × 100 ms) — anders toast met fallback-
+  // tip. Race-guard voorkomt dubbele in-flight opens.
+  window.__odvOpenOnboarding = function (obId) {
+    const id = String(obId || '').trim();
+    if (!id) { toast('Geen onboarding-id'); return; }
+    if (window.__odvOpenOnboarding._busy) return;
+    window.__odvOpenOnboarding._busy = true;
+    try {
+      if (window.DFO && typeof window.DFO.goMod === 'function') {
+        try { window.DFO.goMod('onboarding'); } catch (_) {}
+      }
+    } catch (_) {}
+    let tries = 0;
+    const tryOpen = () => {
+      tries += 1;
+      if (typeof window.__onbOpen === 'function') {
+        try { window.__onbOpen(id); } catch (e) { console.error('[odv] __onbOpen fail:', e); toast('Kon onboarding-detail niet openen'); }
+        window.__odvOpenOnboarding._busy = false;
+        return;
+      }
+      if (tries >= 8) {
+        window.__odvOpenOnboarding._busy = false;
+        toast('Onboarding-module niet beschikbaar');
+        return;
+      }
+      setTimeout(tryOpen, 100);
+    };
+    setTimeout(tryOpen, 60);
+  };
+
   window.obOpen = function () {
     _ensureModalsRoot();
     const cust = _odv.data?.customer || {};

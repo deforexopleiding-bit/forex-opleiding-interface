@@ -121,11 +121,35 @@ export default async function handler(req, res) {
       has_subscription = (deal.subscription_marked_done === true);
     }
 
+    // Detectie 'al aangemeld voor onboarding-traject' — spiegelt de guard in
+    // api/onboarding-create.js:132-146: er mag max 1 rij bestaan voor deze
+    // customer met status != 'gearchiveerd'. Frontend (offerte-detail-v2)
+    // toont dan een 'Onboarding al aangemeld'-knop i.p.v. de aanmeld-knop.
+    // NIET verwarren met customers.onboarding_status — dat is de welkomstmail-
+    // tracking, iets anders. Fail-soft: bij lookup-fout returnen we null en
+    // vertrouwen op de bestaande 409-afvang na klik.
+    let existing_onboarding = null;
+    if (customer?.id) {
+      try {
+        const { data: obRow } = await supabaseAdmin
+          .from('onboardings')
+          .select('id, status')
+          .eq('customer_id', customer.id)
+          .neq('status', 'gearchiveerd')
+          .limit(1)
+          .maybeSingle();
+        if (obRow?.id) existing_onboarding = { id: obRow.id, status: obRow.status || null };
+      } catch (obErr) {
+        console.warn('[sales-deal-detail] onboardings lookup (soft):', obErr?.message || obErr);
+      }
+    }
+
     return res.status(200).json({
       deal, customer, line_items: lineItems || [], traject, entity,
       discount_percentage: Number(deal.discount_percentage) || 0,
       totals: { excl: Math.round(excl * 100) / 100, incl: Math.round(incl * 100) / 100 },
       has_subscription,
+      existing_onboarding,
     });
   } catch (e) {
     console.error('[sales-deal-detail]', e.message);
