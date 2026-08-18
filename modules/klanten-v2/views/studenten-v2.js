@@ -249,6 +249,8 @@
      directe DOM-toggle. Bij Opslaan: race-guard + POST + optimistic
      update + tijdstempel. */
   function _noteState(id) {
+    // v=4: score default is nu 7 (integer) — leeg maken door user zet 'em
+    // op null; save-knop is dan gedisabled bij status != niet_actief.
     if (!_ui.noteEdit[id]) _ui.noteEdit[id] = { status: 'op_schema', score: 7, active_tasks_done: false, note: '', saving: false, savedAt: null, error: null, _prefilled: false };
     return _ui.noteEdit[id];
   }
@@ -264,15 +266,27 @@
     }
     ns._prefilled = true;
   }
+  function _noteIsSaveable(ns) {
+    if (!ns) return false;
+    if (ns.status === 'niet_actief') return true; // score/tasks vervallen
+    const n = Number(ns.score);
+    return Number.isFinite(n) && Number.isInteger(n) && n >= 1 && n <= 10;
+  }
   function _updateNoteSaveBtn(id) {
     const btn = document.getElementById('stNoteSaveBtn_' + id);
     if (!btn) return;
     const ns = _noteState(id);
-    const disabled = !!ns.saving;
+    const canSave = _noteIsSaveable(ns);
+    const disabled = !!ns.saving || !canSave;
     btn.disabled = disabled;
     btn.textContent = ns.saving ? 'Opslaan…' : 'Opslaan';
+    btn.title = ns.saving ? '' : (canSave ? '' : 'Vul een score 1-10 in');
     btn.style.opacity = disabled ? '.55' : '1';
     btn.style.cursor  = disabled ? 'not-allowed' : 'pointer';
+    // Score-hint alleen tonen wanneer de knop geblokkeerd is door
+    // ontbrekende score (niet tijdens saving).
+    const hint = document.getElementById('stNoteScoreHint_' + id);
+    if (hint) hint.style.display = (!ns.saving && !canSave && ns.status !== 'niet_actief') ? 'inline' : 'none';
   }
   // State-only setters (geen render → textarea/input focus behouden).
   window.__stNoteSetStatus = (id, val) => {
@@ -284,9 +298,23 @@
     _repaintDetailPane();
   };
   window.__stNoteSetScore = (id, val) => {
+    // v=4: GEEN stille auto-clamp meer. Leeg / niet-numeriek → null,
+    // Save-knop wordt automatisch gedisabled via _updateNoteSaveBtn.
+    // Nummer buiten 1..10 → null. Alleen geldige 1..10 wordt bewaard.
     const ns = _noteState(id);
-    const n = Math.max(1, Math.min(10, Math.round(Number(val) || 0)));
-    ns.score = n; ns.error = null; ns.savedAt = null;
+    const raw = String(val == null ? '' : val).trim();
+    if (raw === '') {
+      ns.score = null;
+    } else {
+      const n = Number(raw);
+      if (Number.isFinite(n) && Number.isInteger(n) && n >= 1 && n <= 10) {
+        ns.score = n;
+      } else {
+        ns.score = null;
+      }
+    }
+    ns.error = null; ns.savedAt = null;
+    _updateNoteSaveBtn(id);
   };
   window.__stNoteSetTasksDone = (id, el) => {
     const ns = _noteState(id);
@@ -321,6 +349,12 @@
       payload.score = ns.score;
       payload.active_tasks_done = !!ns.active_tasks_done;
     }
+    // v=4 FIX 1: admin-override doorsturen. Zonder dit valt de server
+    // terug op auth.uid() → 403 'Mentor heeft geen bubble-koppeling' voor
+    // admin/super_admin die met __stMentorOverride namens een mentor test.
+    // Reads gebruikten al _mentorOverrideParam(); nu writes ook.
+    const overrideRaw = String(window.__stMentorOverride || '').trim();
+    if (overrideRaw) payload.mentor_user_id = overrideRaw;
     try {
       const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
       const headers = { 'Content-Type': 'application/json' };
@@ -573,9 +607,10 @@
           ${showScoreBlock ? `
             <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end">
               <div>
-                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Score (1-10)</div>
-                <input type="number" min="1" max="10" step="1" value="${esc(String(ns.score))}"
+                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Score (1-10) <span id="stNoteScoreHint_${esc(id)}" style="display:${_noteIsSaveable(ns) ? 'none' : 'inline'};color:var(--rose);text-transform:none;letter-spacing:0;font-weight:500;margin-left:6px">· vul een score 1-10 in</span></div>
+                <input type="number" min="1" max="10" step="1" value="${ns.score == null ? '' : esc(String(ns.score))}"
                   oninput="__stNoteSetScore('${esc(id)}', this.value)"
+                  placeholder="1-10"
                   style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;outline:none;box-sizing:border-box" />
               </div>
               <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding-bottom:9px;cursor:pointer">
@@ -602,8 +637,9 @@
               <span id="stNoteSaved_${esc(id)}" style="display:${savedRecently ? 'inline' : 'none'};margin-left:8px;color:var(--emerald);font-weight:600">✓ Opgeslagen</span>
             </div>
             <button id="stNoteSaveBtn_${esc(id)}" class="btn btn-primary btn-sm"
-              ${ns.saving ? 'disabled' : ''}
-              style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:12px;opacity:${ns.saving ? '.55' : '1'};cursor:${ns.saving ? 'not-allowed' : 'pointer'}"
+              ${ns.saving || !_noteIsSaveable(ns) ? 'disabled' : ''}
+              title="${ns.saving ? '' : (_noteIsSaveable(ns) ? '' : 'Vul een score 1-10 in')}"
+              style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:12px;opacity:${ns.saving || !_noteIsSaveable(ns) ? '.55' : '1'};cursor:${ns.saving || !_noteIsSaveable(ns) ? 'not-allowed' : 'pointer'}"
               onclick="__stNoteSave('${esc(id)}')">${ns.saving ? 'Opslaan…' : 'Opslaan'}</button>
           </div>
           <div style="font-size:10.5px;color:var(--text-3);line-height:1.45">
@@ -747,5 +783,5 @@
   window.DFO.VIEWS['studenten/'] = studentenView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('studenten');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('studenten');
-  console.debug('[studenten-v2] v=3 BROK 2 — Notities-tab interactief: status-chips (op_schema/aandacht/risico/niet_actief) + score 1-10 + active_tasks_done + notitie-textarea. POST /api/mentor-assessment-save (upsert per huidige maand). State-only setters (focus behouden). Race-guard op save. "✓ Opgeslagen"-feedback ~3s. Fail-soft + Opnieuw-knop. Bij niet_actief: score+tasks weggelaten (server forceert null). BROK 1 (reads) uit v=2 byte-identiek behouden.');
+  console.debug('[studenten-v2] v=4 — FIX 1: admin-override op save. Payload stuurt nu mentor_user_id uit window.__stMentorOverride; backend mentor-assessment-save.js dual-gate (mentor-self OF admin-met-override, identiek aan mentor-my-students). FIX 2: score-clamp UX weg — leeg veld → null, Save disabled + rode inline-hint "vul een score 1-10 in", geen stille auto-clamp meer. BROK 2-writes uit v=3 behouden.');
 })();
