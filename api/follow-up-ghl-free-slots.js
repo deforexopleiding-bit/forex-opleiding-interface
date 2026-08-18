@@ -96,11 +96,17 @@ function normalizeGhlSlots(raw) {
   return out;
 }
 
-async function fetchGhlFreeSlots({ calendarId, token, startMs, endMs }) {
+async function fetchGhlFreeSlots({ calendarId, token, startMs, endMs, slotDurationMin }) {
   const url = new URL(`${GHL_BASE}/calendars/${encodeURIComponent(calendarId)}/free-slots`);
   url.searchParams.set('startDate', String(startMs));
   url.searchParams.set('endDate',   String(endMs));
   url.searchParams.set('timezone',  'Europe/Amsterdam');
+  // Optioneel: langere slot-duur (bv. 60 min) bepaalt welke tijdstippen
+  // door GHL als 'vrij' worden teruggegeven — een 60-min-slot vereist een
+  // langere gap dan een 15-min-slot. GHL-param is in MINUTEN.
+  if (Number.isFinite(slotDurationMin) && slotDurationMin > 0) {
+    url.searchParams.set('slotDuration', String(slotDurationMin));
+  }
 
   const res = await fetch(url.toString(), {
     method : 'GET',
@@ -172,6 +178,15 @@ export default async function handler(req, res) {
   const startMs = amsMidnightMs(startDate);
   const endMs   = amsMidnightMs(endDate) + (24 * 3600 * 1000) - 1;
 
+  // Optionele slot-duur (minuten) — clamp 15..120 zodat een spoof-caller
+  // niet uren-lange gaps kan afdwingen. Ongeldig → weggelaten (GHL gebruikt
+  // dan de kalender-default).
+  let slotDurationMin = null;
+  const durationRaw = Number(q.duration);
+  if (Number.isFinite(durationRaw) && durationRaw >= 15 && durationRaw <= 120) {
+    slotDurationMin = Math.round(durationRaw);
+  }
+
   const calendarId = process.env.GHL_CALENDAR_ID;
   const token      = process.env.GHL_PIT_TOKEN || process.env.GHL_API_KEY;
 
@@ -206,7 +221,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { raw, status: ghlStatus, requestPathQuery } = await fetchGhlFreeSlots({ calendarId, token, startMs, endMs });
+    const { raw, status: ghlStatus, requestPathQuery } = await fetchGhlFreeSlots({ calendarId, token, startMs, endMs, slotDurationMin });
     const slots = normalizeGhlSlots(raw);
     // Ook bij 200 loggen: helpt om te zien wanneer GHL wel/geen slots
     // meestuurt zonder DevTools open te hoeven. GEEN token in de log.

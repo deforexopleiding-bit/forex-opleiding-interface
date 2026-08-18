@@ -224,13 +224,13 @@
   }
   async function _loadThread(convId) {
     if (!convId) return;
-    // FIX (DEEL 0): guard op de daadwerkelijk geladen conversation-id,
-    // niet op _thread.convId (die door __lisaSelConv al gezet is).
     if (_thread.conversation && String(_thread.conversation.id) === String(convId) && !_thread.error) return;
     if (_thread.loading && String(_thread.convId) === String(convId)) return;
     _thread.loading = true; _thread.error = null;
     _thread.convId = convId; _thread.messages = []; _thread._paintedFor = null;
-    if (window.DFO?.render) window.DFO.render();
+    // v=5 BLOCKER-FIX: alleen de rechter-pane vervangen ipv DFO.render()
+    // (die #content innerHTML swapt en de LIJST-scroll naar 0 slaat).
+    _replaceRightPane();
     const seq = ++_thread._seq;
     const j = await tryFetch('thread:' + convId, '/api/lisa-conversations?id=' + encodeURIComponent(convId));
     if (seq !== _thread._seq) return;
@@ -238,7 +238,7 @@
     if (!j || j.error) {
       _thread.loading = false;
       _thread.error = (j && j.error) || 'Kon thread niet laden';
-      if (window.DFO?.render) window.DFO.render();
+      _replaceRightPane();
       return;
     }
     _thread.conversation = j.conversation || null;
@@ -246,7 +246,52 @@
     _thread.feedback = asArr(j.feedback);
     _thread.qualification = j.qualification || null;
     _thread.loading = false;
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
+  }
+
+  /* ── Surgical UI-helpers (v=5) ──────────────────────────────────────────
+     _replaceRightPane / _repaintListRow bewaren de lijst-scrollpositie:
+     alleen de exacte DOM-nodes die veranderen worden vervangen. Zonder deze
+     helpers slaat DFO.render() heel #content om waardoor #lisaConvList
+     opnieuw wordt gebouwd en scrollTop naar 0 valt.
+     _replaceRightPane() gebruikt _thread.conversation als bron van waarheid
+     zodra die geladen is; fallback op de lijst-row (voor eerste-mount).
+     _paintThread() en _updateSendBtn() worden na de swap in queueMicrotask
+     opgeroepen zodat mount/focus stabiel is. */
+  function _replaceRightPane() {
+    const split = document.querySelector('.lisa-gesp-split');
+    if (!split) return;
+    const convId = _thread.convId;
+    if (!convId) return;
+    const rowFromList = _live.convs.items.find(c => String(c.id) === String(convId)) || null;
+    const rowForRender = (_thread.conversation && String(_thread.conversation.id) === String(convId))
+      ? _thread.conversation
+      : rowFromList;
+    if (!rowForRender) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _renderConvDetail(rowForRender);
+    const fresh = wrap.firstElementChild;
+    if (!fresh) return;
+    const old = split.querySelector('.lisa-gesp-right');
+    if (old) split.replaceChild(fresh, old); else split.appendChild(fresh);
+    queueMicrotask(_paintThread);
+    queueMicrotask(_updateSendBtn);
+  }
+  function _repaintListRow(convId) {
+    if (!convId) return;
+    const listEl = document.getElementById('lisaConvList');
+    if (!listEl) return;
+    const row = _live.convs.items.find(c => String(c.id) === String(convId));
+    if (!row) return;
+    const oldNode = listEl.querySelector('.lisa-conv-row[data-row-id="' + String(convId).replace(/"/g, '\\"') + '"]');
+    if (!oldNode) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = _renderConvRow(row);
+    const fresh = wrap.firstElementChild;
+    if (!fresh) return;
+    // Behoud .on-highlight zodat active-styling niet flickert.
+    if (oldNode.classList.contains('on')) fresh.classList.add('on');
+    oldNode.replaceWith(fresh);
   }
 
   /* ── Handlers op window ─────────────────────────────────────────────── */
@@ -336,7 +381,9 @@
     const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
     if (listRow) { listRow.human_takeover = true; listRow.last_message_at = new Date().toISOString(); listRow.preview = text.slice(0, 60); }
     _toast('Bericht verzonden — Lisa staat nu uit voor dit gesprek.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    // v=5: surgical i.p.v. DFO.render() → lijst-scroll blijft staan.
+    _replaceRightPane();
+    _repaintListRow(conv.id);
     if (r.json?.ghl_send_ok === false && r.json?.ghl_error) {
       _toast('GHL waarschuwing: ' + r.json.ghl_error, 'error');
     }
@@ -352,20 +399,28 @@
     if (conv.phase === val) return;
     const label = String(val);
     const ok = await _askConfirm('Zet fase op "' + label + '"?', `De fase van dit gesprek wordt op de server bijgewerkt naar <strong>${esc(label)}</strong>.`, { okLabel: 'Zet fase' });
-    if (!ok) return;
+    if (!ok) {
+      // KLEIN 1 FIX (v=5): dropdown zette zichzelf al op de nieuwe waarde
+      // via onchange — bij Annuleren terug naar de echte server-waarde
+      // zodat visuele state == echte state.
+      const sel = document.getElementById('lisaPhaseSelect');
+      if (sel) sel.value = conv.phase || '';
+      return;
+    }
     const prev = conv.phase;
-    conv.phase = val; if (window.DFO?.render) window.DFO.render();
+    conv.phase = val; _replaceRightPane();
     const r = await _patchConv(conv.id, { phase: val });
     if (!r.ok) {
-      conv.phase = prev; if (window.DFO?.render) window.DFO.render();
+      conv.phase = prev; _replaceRightPane();
       _toast(r.error || 'Kon fase niet wijzigen', 'error');
       return;
     }
-    // Sync met lijst-row.
+    // Sync met lijst-row (fase-chip kleurt mee, geen scroll-reset).
     const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
     if (listRow) listRow.phase = val;
     _toast('Fase bijgewerkt: ' + label, 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
+    _repaintListRow(conv.id);
   };
   window.__lisaToggleQualified = async () => {
     const conv = _thread.conversation;
@@ -377,17 +432,18 @@
     const ok = await _askConfirm(next ? 'Markeer gekwalificeerd?' : 'Kwalificatie ongedaan maken?', bodyText, { okLabel: next ? 'Ja, kwalificeer' : 'Ja, verwijder' });
     if (!ok) return;
     const prev = conv.qualified;
-    conv.qualified = next; if (window.DFO?.render) window.DFO.render();
+    conv.qualified = next; _replaceRightPane();
     const r = await _patchConv(conv.id, { qualified: next });
     if (!r.ok) {
-      conv.qualified = prev; if (window.DFO?.render) window.DFO.render();
+      conv.qualified = prev; _replaceRightPane();
       _toast(r.error || 'Kon niet bijwerken', 'error');
       return;
     }
     const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
     if (listRow) listRow.qualified = next;
     _toast(next ? 'Gemarkeerd als gekwalificeerd.' : 'Kwalificatie verwijderd.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
+    _repaintListRow(conv.id);
   };
   window.__lisaMarkDisqualified = async () => {
     const conv = _thread.conversation;
@@ -398,18 +454,19 @@
     const prevReason = conv.disqualified_reason || null;
     conv.phase = 'disqualified';
     conv.disqualified_reason = reason;
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
     const r = await _patchConv(conv.id, { phase: 'disqualified', disqualified_reason: reason });
     if (!r.ok) {
       conv.phase = prevPhase; conv.disqualified_reason = prevReason;
-      if (window.DFO?.render) window.DFO.render();
+      _replaceRightPane();
       _toast(r.error || 'Kon niet bijwerken', 'error');
       return;
     }
     const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
     if (listRow) listRow.phase = 'disqualified';
     _toast('Gemarkeerd als disqualified.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
+    _repaintListRow(conv.id);
   };
   window.__lisaTogglePause = async () => {
     const conv = _thread.conversation;
@@ -424,15 +481,15 @@
     );
     if (!ok) return;
     const prev = conv.followup_paused;
-    conv.followup_paused = next; if (window.DFO?.render) window.DFO.render();
+    conv.followup_paused = next; _replaceRightPane();
     const r = await _patchConv(conv.id, { followup_paused: next });
     if (!r.ok) {
-      conv.followup_paused = prev; if (window.DFO?.render) window.DFO.render();
+      conv.followup_paused = prev; _replaceRightPane();
       _toast(r.error || 'Kon niet bijwerken', 'error');
       return;
     }
     _toast(next ? 'Follow-ups gepauzeerd.' : 'Follow-ups hervat.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
   };
   window.__lisaToggleTakeover = async () => {
     const conv = _thread.conversation;
@@ -447,17 +504,18 @@
     );
     if (!ok) return;
     const prev = conv.human_takeover;
-    conv.human_takeover = next; if (window.DFO?.render) window.DFO.render();
+    conv.human_takeover = next; _replaceRightPane();
     const r = await _patchConv(conv.id, { human_takeover: next });
     if (!r.ok) {
-      conv.human_takeover = prev; if (window.DFO?.render) window.DFO.render();
+      conv.human_takeover = prev; _replaceRightPane();
       _toast(r.error || 'Kon niet bijwerken', 'error');
       return;
     }
     const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
     if (listRow) listRow.human_takeover = next;
     _toast(next ? 'Mens neemt over.' : 'Lisa is weer actief.', 'success');
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
+    _repaintListRow(conv.id);
   };
 
   /* ── Boekingslink versturen ────────────────────────────────────────── */
@@ -503,18 +561,16 @@
     const opener = firstName ? `Top ${firstName}!` : 'Top!';
     const prefill = `${opener} Plan hier een moment dat jou uitkomt: ${_booking.url}`;
     _compose.text = prefill;
-    if (window.DFO?.render) window.DFO.render();
-    // Focus + scroll na render zodat gebruiker direct kan aanpassen.
-    queueMicrotask(() => {
-      const ta = document.getElementById('lisaComposeInput');
-      if (ta) {
-        ta.value = prefill; // zorg dat oninput-listener sync is
-        ta.focus();
-        try { ta.setSelectionRange(prefill.length, prefill.length); } catch (_) {}
-        ta.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }
-      _updateSendBtn();
-    });
+    // v=5: direct de textarea zetten zonder DFO.render() zodat de lijst-
+    // scroll (en de rest van de UI) niet omgeklapt worden.
+    const ta = document.getElementById('lisaComposeInput');
+    if (ta) {
+      ta.value = prefill;
+      ta.focus();
+      try { ta.setSelectionRange(prefill.length, prefill.length); } catch (_) {}
+      ta.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+    _updateSendBtn();
     _toast('Standaardtekst ingevuld — bewerken kan; klik Verstuur om te versturen.', 'info');
   };
 
@@ -535,17 +591,30 @@
         </div>`);
       return;
     }
-    _slots.open = true; _slots.loading = true; _slots.error = null; _slots.days = []; _slots.picked = null;
+    _slots.open = true; _slots.picked = null;
+    await _fetchAndRenderSlots();
+  };
+  async function _fetchAndRenderSlots() {
+    _slots.loading = true; _slots.error = null; _slots.days = [];
     _renderApptModal();
-    // Fetch 14-daagse venster.
-    const j = await tryFetch('slots', '/api/follow-up-ghl-free-slots');
+    const url = '/api/follow-up-ghl-free-slots?duration=' + encodeURIComponent(_slots.duration);
+    const j = await tryFetch('slots:' + _slots.duration, url);
     _slots.loading = false;
     if (!j) { _slots.error = 'Kon slots niet ophalen'; _renderApptModal(); return; }
     if (j.error) { _slots.error = 'GHL: ' + j.error; _renderApptModal(); return; }
     _slots.days = asArr(j.slots).filter(d => Array.isArray(d.times) && d.times.length);
     _renderApptModal();
+  }
+  // KLEIN 2 FIX (v=5): duur-wissel herlaadt de slots. Beschikbaarheid kan
+  // per duur verschillen (60-min-slot vereist langere gap in GHL-kalender).
+  // De keuze wordt ge-clamped en gereset zodat we niet een oude 15-min
+  // picked-slot per ongeluk als 60-min doorsturen.
+  window.__lisaSetApptDuration = (d) => {
+    const nd = parseInt(d, 10) || 30;
+    if (nd === _slots.duration) return;
+    _slots.duration = nd; _slots.picked = null;
+    _fetchAndRenderSlots();
   };
-  window.__lisaSetApptDuration = (d) => { _slots.duration = parseInt(d, 10) || 30; _renderApptModal(); };
   window.__lisaPickSlot = (date, time) => {
     _slots.picked = { date, time };
     _renderApptModal();
@@ -592,7 +661,8 @@
     });
     _toast('Afspraak geboekt (sync via GHL).', 'success');
     _slots.open = false; _slots.picked = null;
-    if (window.DFO?.render) window.DFO.render();
+    _replaceRightPane();
+    _repaintListRow(conv.id);
   };
   function _amsIsoFromDateTime(date, time) {
     // date=YYYY-MM-DD, time=HH:mm, timezone Amsterdam → return UTC ISO.
@@ -936,7 +1006,7 @@
     // Actie-knoppen in de header
     const actionButtons = !isSandbox ? `
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-        <select onchange="__lisaSetPhase(this.value)" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);cursor:pointer" title="Fase wijzigen">${phaseOpts}</select>
+        <select id="lisaPhaseSelect" onchange="__lisaSetPhase(this.value)" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);cursor:pointer" title="Fase wijzigen">${phaseOpts}</select>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleQualified()" title="Markeer/verwijder gekwalificeerd">${conv.qualified ? '✓ Gekwal.' : 'Kwalificeer'}</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaMarkDisqualified()" title="Markeer als disqualified">Disq.</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaTogglePause()" title="Pauzeer/hervat follow-ups">${conv.followup_paused ? '▶ Hervat FU' : '⏸ Pauzeer FU'}</button>
@@ -1084,5 +1154,5 @@
   window.DFO.VIEWS['lisa/Statistieken'] = statsView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('lisa');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('lisa');
-  console.debug('[lisa-v2] v=4 — DEEL A/B/C uit v=3 + NIEUW: knop Stuur boekingslink (prefillt compose met LISA_BOOKING_URL, valt terug op setup-modal als env-var ontbreekt).');
+  console.debug('[lisa-v2] v=5 — QA-fixes: (1) lijst-scroll blijft staan bij thread-wissel (surgical _replaceRightPane + _repaintListRow ipv DFO.render), (2) fase-dropdown reset naar server-waarde bij Annuleren, (3) free-slots refetchen bij duur-wissel (backend accepteert nu ?duration=). Send-flows byte-identiek.');
 })();
