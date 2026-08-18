@@ -143,6 +143,11 @@ export default async function handler(req, res) {
   // knop leest deze free-slots. Rol heeft leads.update maar niet altijd de
   // sales-perms. Additief — bestaande sales-callers blijven byte-identiek.
   if (!allowed) allowed = await requirePermission(req, 'leads.update');
+  // Lisa Appointmentsetter (BROK 2 DEEL C): free-slots-picker in de
+  // Lisa-Gesprekken-header. Zelfde kalender-env (Dave's Zoom) — de Lisa-
+  // rol heeft lisa.config.publish maar niet noodzakelijk sales-/leads-perms.
+  // Additief — bestaande callers blijven byte-identiek.
+  if (!allowed) allowed = await requirePermission(req, 'lisa.config.publish');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten' });
 
   const q = req.query || {};

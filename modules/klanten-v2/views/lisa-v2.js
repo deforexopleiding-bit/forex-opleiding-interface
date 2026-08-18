@@ -1,26 +1,44 @@
 // modules/klanten-v2/views/lisa-v2.js
 //
-// Lisa (Appointmentsetter) v2 — BROK 1 (v=2, 2026-08-17): 3 read-tabs live.
-// Dashboard / Gesprekken / Statistieken. Alle mock vervangen door echte
-// endpoints. Geen writes in deze brok — puur zicht op Lisa's productie.
+// Lisa (Appointmentsetter) v2 — v=3 (2026-08-18): BROK 1-fix + BROK 2 writes.
 //
-// Endpoints (allemaal RBAC verifyAdmin / lisa.config.*):
-//   Dashboard:    GET /api/lisa-stats?period=week            (kern-KPIs)
-//                 GET /api/lisa-settings                     (live-mode + office-hours)
-//                 GET /api/lisa-logs?action=summary          (versies + webhook + cron)
-//   Gesprekken:   GET /api/lisa-conversations?action=list_live&status=<>&limit=100
-//                 GET /api/lisa-conversations?id=<uuid>      (thread + messages + feedback)
-//   Statistieken: GET /api/lisa-stats?period=today|week|month|all
+// DEEL 0 (fix vanuit v=2):
+//   - Thread-klik laadde niet: guard in _loadThread controleerde op
+//     _thread.convId (die __lisaSelConv net had gezet) → early-return.
+//     Nu: guard op _thread.conversation.id (blijft null tot fetch klaar).
+//     Ook _paintedFor per-conv → cache.
+//   - Lege staat 'Nog geen berichten.' verscheen soms naast bubbles;
+//     nu strikt: alleen na paint klaar + messages.length===0.
 //
-// Dashboard-safety: skeleton, 8s tryFetch-timeout, non-throwing, per-tab
-// try/catch, _fetched-guard tegen render-loop.
+// BROK 2 DEEL A — Reageren (intervene):
+//   Compose-textarea in thread-footer + custom confirm-modal
+//   ('Verstuur echt IG-DM naar @<handle>?' + preview) → POST
+//   /api/lisa-conversations?action=intervene&id=<>. Bij succes:
+//   optimistic append (direction:out, human_override:true) +
+//   human_takeover-banner in header. Sandbox: send-knop disabled.
 //
-// Gesprekken-safety: surgical row-highlight-swap (behoud scrollpositie),
-// append-only thread-render via data-msg-id, 18s live-poll met
-// document.hidden-pause + stop-detect bij tab-verlaten.
+// BROK 2 DEEL B — Status-mutaties:
+//   Header-actiemenu: fase-wijziging (dropdown), Markeer gekwal./
+//   Disqualified (+reason-prompt), Pauzeer/Hervat follow-ups, Mens-
+//   overname aan/uit. Elke actie: confirm-modal → PATCH
+//   /api/lisa-conversations?id=<>. Optimistic + rollback bij 4xx/5xx.
 //
-// Rename: nav-label 'Lisa — Appointmentsetter' (was 'Lisa — Instagram').
-// Interne module-id + preview-id blijven 'lisa'.
+// BROK 2 DEEL C — Afspraak inschieten:
+//   Header-knop 'Afspraak inschieten' → free-slots-modal (GET
+//   /api/follow-up-ghl-free-slots, Dave's Zoom-agenda, Amsterdam-tz).
+//   Duur-keuze (15/30/45/60 min). Confirm-modal met naam + datum/tijd
+//   → POST /api/lisa-appointment-create. Bij success: CALL-badge + toast.
+//   Fallback wanneer conv geen ghl_contact_id: modal met uitleg (geen POST).
+//
+// Free-slots permissie-keuze:
+//   ADDITIEF gate in follow-up-ghl-free-slots.js: 'lisa.config.publish'
+//   toegevoegd aan de bestaande OR-lijst (sales.tab.retentie /
+//   sales.customer.view / leads.update). Bestaande callers byte-identiek.
+//
+// Safety: skeleton, 8s tryFetch-timeout, asArr, esc(), fail-soft +
+// Opnieuw-knop, per-fetcher _seq, race-guard op send (_compose.sending),
+// surgical list-scroll-preservering, poll 18s met document.hidden-pause
+// + stop-detect bij verlaten module.
 //
 // Dormant — 'lisa' NIET in V2_ACTIVE_ALLOWLIST. Preview: ?v2preview=lisa.
 
@@ -40,15 +58,17 @@
     settings: { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     logs:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     convs:    { loading: false, fetched: false, error: null, items: [], _seq: 0, statusFilter: 'active' },
-    statsAll: {}, // per period cache voor Statistieken-tab
+    statsAll: {},
   };
   const _thread = {
     convId: null, conversation: null, messages: [], feedback: [], qualification: null,
     loading: false, error: null, _paintedFor: null, _seq: 0,
   };
-  const _poll = { handle: null, running: false, intervalMs: 18000 };
+  const _compose = { text: '', sending: false };
+  const _slots   = { open: false, loading: false, error: null, days: [], picked: null, duration: 30, saving: false };
+  const _poll    = { handle: null, running: false, intervalMs: 18000 };
 
-  /* ── tryFetch (8s timeout, non-throwing) ────────────────────────────── */
+  /* ── HTTP-helpers ────────────────────────────────────────────────────── */
   async function tryFetch(label, url, timeoutMs) {
     timeoutMs = timeoutMs || 8000;
     try {
@@ -62,12 +82,89 @@
       return null;
     }
   }
+  async function apiCall(method, url, body, opts) {
+    // Retourneert { ok, status, json, error }. Nooit throws.
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const timeoutMs = (opts && opts.timeoutMs) || 15000;
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), timeoutMs);
+      let resp;
+      try {
+        resp = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal });
+      } finally { clearTimeout(to); }
+      let j = null;
+      try { j = await resp.json(); } catch (_) {}
+      return { ok: resp.ok, status: resp.status, json: j, error: resp.ok ? null : (j && (j.error || j.message)) || ('HTTP ' + resp.status) };
+    } catch (e) {
+      return { ok: false, status: 0, json: null, error: (e && e.message) || 'netwerkfout' };
+    }
+  }
+
+  /* ── Modal helpers (custom confirm — geen native window.confirm) ─────── */
+  function _closeModal() {
+    const m = document.getElementById('lisaModalRoot');
+    if (m) m.remove();
+    document.removeEventListener('keydown', _modalKey, true);
+  }
+  function _modalKey(e) { if (e.key === 'Escape') { e.preventDefault(); _closeModal(); } }
+  function _openModal(html, opts) {
+    _closeModal();
+    const root = document.createElement('div');
+    root.id = 'lisaModalRoot';
+    root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)';
+    root.innerHTML = `<div id="lisaModalBox" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+      padding:22px;max-width:${(opts && opts.maxWidth) || 520}px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">${html}</div>`;
+    root.addEventListener('click', (e) => { if (e.target === root) _closeModal(); });
+    document.body.appendChild(root);
+    document.addEventListener('keydown', _modalKey, true);
+    return root;
+  }
+  function _askConfirm(title, bodyHtml, opts) {
+    const okLabel     = esc((opts && opts.okLabel)     || 'Bevestig');
+    const cancelLabel = esc((opts && opts.cancelLabel) || 'Annuleren');
+    const isRose = opts && opts.tone === 'danger';
+    const bgVar  = isRose ? 'var(--rose, #C22B3E)' : 'var(--brand, #0A7490)';
+    return new Promise((resolve) => {
+      _openModal(`
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px">${bodyHtml}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="lisaModalCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
+          <button id="lisaModalOk" class="btn btn-primary btn-sm" style="background:${bgVar};border-color:${bgVar};color:#fff">${okLabel}</button>
+        </div>`);
+      document.getElementById('lisaModalCancel').addEventListener('click', () => { _closeModal(); resolve(false); });
+      document.getElementById('lisaModalOk').addEventListener('click',    () => { _closeModal(); resolve(true);  });
+    });
+  }
+  function _askPrompt(title, hint, placeholder, opts) {
+    const okLabel = esc((opts && opts.okLabel) || 'OK');
+    return new Promise((resolve) => {
+      _openModal(`
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
+        <div style="font-size:13px;color:var(--text-2);margin-bottom:12px">${esc(hint || '')}</div>
+        <textarea id="lisaPromptInput" style="width:100%;min-height:80px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font:inherit;font-size:13px;background:var(--surface);color:var(--text-1);resize:vertical" placeholder="${esc(placeholder || '')}"></textarea>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <button id="lisaPromptCancel" class="btn btn-ghost btn-sm">Annuleren</button>
+          <button id="lisaPromptOk" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff">${okLabel}</button>
+        </div>`);
+      const inp = document.getElementById('lisaPromptInput');
+      setTimeout(() => inp && inp.focus(), 20);
+      document.getElementById('lisaPromptCancel').addEventListener('click', () => { _closeModal(); resolve(null); });
+      document.getElementById('lisaPromptOk').addEventListener('click', () => {
+        const v = String((inp && inp.value) || '').trim();
+        _closeModal(); resolve(v || null);
+      });
+    });
+  }
+  function _toast(msg, tone) { try { window.KV && window.KV.toast && window.KV.toast(msg, { tone }); } catch (_) {} }
 
   /* ── Fetchers ───────────────────────────────────────────────────────── */
   async function _fetchStats(period) {
     const st = _live.stats;
     const p = period || st.period || 'week';
-    // Cache per period voor Statistieken-tab.
     if (_live.statsAll[p]) { st.data = _live.statsAll[p]; st.fetched = true; st.period = p; return; }
     if (st.loading) return;
     st.loading = true; st.error = null; st.period = p;
@@ -122,17 +219,21 @@
     _thread.convId = null; _thread.conversation = null; _thread.messages = [];
     _thread.feedback = []; _thread.qualification = null;
     _thread.loading = false; _thread.error = null; _thread._paintedFor = null;
+    _compose.text = ''; _compose.sending = false;
   }
   async function _loadThread(convId) {
     if (!convId) return;
-    if (_thread.convId === convId && !_thread.error) return;
+    // FIX (DEEL 0): guard op de daadwerkelijk geladen conversation-id,
+    // niet op _thread.convId (die door __lisaSelConv al gezet is).
+    if (_thread.conversation && String(_thread.conversation.id) === String(convId) && !_thread.error) return;
+    if (_thread.loading && String(_thread.convId) === String(convId)) return;
     _thread.loading = true; _thread.error = null;
     _thread.convId = convId; _thread.messages = []; _thread._paintedFor = null;
     if (window.DFO?.render) window.DFO.render();
     const seq = ++_thread._seq;
     const j = await tryFetch('thread:' + convId, '/api/lisa-conversations?id=' + encodeURIComponent(convId));
     if (seq !== _thread._seq) return;
-    if (_thread.convId !== convId) return;
+    if (String(_thread.convId) !== String(convId)) return;
     if (!j || j.error) {
       _thread.loading = false;
       _thread.error = (j && j.error) || 'Kon thread niet laden';
@@ -161,16 +262,12 @@
     _resetThread();
     _fetchConvs();
   };
-  window.__lisaSetStatsPeriod = (p) => {
-    _fetchStats(p);
-  };
+  window.__lisaSetStatsPeriod = (p) => { _fetchStats(p); };
   window.__lisaSelConv = (id) => {
     if (String(_thread.convId) === String(id)) return;
-    // Surgische row-highlight-swap: behoud scrollpositie in de lijst.
     document.querySelectorAll('#lisaConvList .lisa-conv-row.on').forEach(el => el.classList.remove('on'));
     const newRow = document.querySelector('#lisaConvList .lisa-conv-row[data-row-id="' + String(id).replace(/"/g, '\\"') + '"]');
     if (newRow) newRow.classList.add('on');
-    // Detail-pane vervangen.
     const split = document.querySelector('.lisa-gesp-split');
     const oldRight = split ? split.querySelector('.lisa-gesp-right') : null;
     const row = _live.convs.items.find(c => String(c.id) === String(id));
@@ -185,6 +282,317 @@
     queueMicrotask(() => _loadThread(id));
   };
 
+  /* ── Compose (DEEL A intervene) ─────────────────────────────────────── */
+  window.__lisaComposeInput = (el) => { _compose.text = el.value; _updateSendBtn(); };
+  function _updateSendBtn() {
+    const btn = document.getElementById('lisaSendBtn');
+    if (!btn) return;
+    const conv = _thread.conversation;
+    const disabled = _compose.sending || !conv || conv.is_sandbox || _compose.text.trim().length < 2;
+    btn.disabled = !!disabled;
+    btn.style.opacity = disabled ? '0.55' : '1';
+    btn.style.cursor  = disabled ? 'not-allowed' : 'pointer';
+  }
+  window.__lisaSend = async () => {
+    if (_compose.sending) return;
+    const conv = _thread.conversation;
+    if (!conv || !conv.id) { _toast('Geen conversatie geladen.', 'error'); return; }
+    if (conv.is_sandbox) { _toast('Sandbox-conversatie — intervene is niet toegestaan.', 'error'); return; }
+    const text = String(_compose.text || '').trim();
+    if (text.length < 2) return;
+    const handle = conv.instagram_handle ? '@' + String(conv.instagram_handle).replace(/^@/, '') : (conv.contact_name || 'contact');
+    const previewHtml = `
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:6px">Naar: <strong style="color:var(--text-1)">${esc(handle)}</strong></div>
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:11px 13px;font-size:13px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;max-height:200px;overflow:auto">${esc(text)}</div>
+      <div style="margin-top:12px;padding:9px 12px;background:var(--amber-soft);border-radius:var(--r-sm);font-size:12px;color:var(--amber);line-height:1.5">
+        ⚠ Bij verzenden neemt jij (mens) dit gesprek over. Lisa antwoordt niet meer autonoom totdat je 'mens-overname' weer uitzet.
+      </div>`;
+    const ok = await _askConfirm(`Verstuur echt Instagram-DM naar ${handle}?`, previewHtml, { okLabel: 'Ja, verstuur', tone: 'primary' });
+    if (!ok) return;
+
+    _compose.sending = true; _updateSendBtn();
+    const r = await apiCall('POST', '/api/lisa-conversations?action=intervene&id=' + encodeURIComponent(conv.id), { content: text });
+    _compose.sending = false;
+    if (!r.ok) {
+      _toast(r.error || 'Versturen faalde', 'error');
+      _updateSendBtn();
+      return;
+    }
+    // Optimistic append + state-updates.
+    const tempId = r.json?.message_id || ('local_' + Date.now());
+    _thread.messages.push({
+      id: tempId,
+      direction: 'out',
+      content: text,
+      sent_at: new Date().toISOString(),
+      ai_generated: false,
+      human_override: true,
+      is_system: false,
+    });
+    _compose.text = '';
+    if (_thread.conversation) _thread.conversation.human_takeover = true;
+    // Sync met lijst-row zodat MENS-badge direct verschijnt.
+    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
+    if (listRow) { listRow.human_takeover = true; listRow.last_message_at = new Date().toISOString(); listRow.preview = text.slice(0, 60); }
+    _toast('Bericht verzonden — Lisa staat nu uit voor dit gesprek.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+    if (r.json?.ghl_send_ok === false && r.json?.ghl_error) {
+      _toast('GHL waarschuwing: ' + r.json.ghl_error, 'error');
+    }
+  };
+
+  /* ── Status-mutaties (DEEL B) ───────────────────────────────────────── */
+  async function _patchConv(id, patch) {
+    return apiCall('PATCH', '/api/lisa-conversations?id=' + encodeURIComponent(id), patch);
+  }
+  window.__lisaSetPhase = async (val) => {
+    const conv = _thread.conversation;
+    if (!conv || !val) return;
+    if (conv.phase === val) return;
+    const label = String(val);
+    const ok = await _askConfirm('Zet fase op "' + label + '"?', `De fase van dit gesprek wordt op de server bijgewerkt naar <strong>${esc(label)}</strong>.`, { okLabel: 'Zet fase' });
+    if (!ok) return;
+    const prev = conv.phase;
+    conv.phase = val; if (window.DFO?.render) window.DFO.render();
+    const r = await _patchConv(conv.id, { phase: val });
+    if (!r.ok) {
+      conv.phase = prev; if (window.DFO?.render) window.DFO.render();
+      _toast(r.error || 'Kon fase niet wijzigen', 'error');
+      return;
+    }
+    // Sync met lijst-row.
+    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
+    if (listRow) listRow.phase = val;
+    _toast('Fase bijgewerkt: ' + label, 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__lisaToggleQualified = async () => {
+    const conv = _thread.conversation;
+    if (!conv) return;
+    const next = !conv.qualified;
+    const bodyText = next
+      ? 'Dit gesprek markeren als <strong>gekwalificeerd</strong>. Zet qualified_at op nu.'
+      : 'Kwalificatie ongedaan maken. qualified_at wordt op NULL gezet.';
+    const ok = await _askConfirm(next ? 'Markeer gekwalificeerd?' : 'Kwalificatie ongedaan maken?', bodyText, { okLabel: next ? 'Ja, kwalificeer' : 'Ja, verwijder' });
+    if (!ok) return;
+    const prev = conv.qualified;
+    conv.qualified = next; if (window.DFO?.render) window.DFO.render();
+    const r = await _patchConv(conv.id, { qualified: next });
+    if (!r.ok) {
+      conv.qualified = prev; if (window.DFO?.render) window.DFO.render();
+      _toast(r.error || 'Kon niet bijwerken', 'error');
+      return;
+    }
+    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
+    if (listRow) listRow.qualified = next;
+    _toast(next ? 'Gemarkeerd als gekwalificeerd.' : 'Kwalificatie verwijderd.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__lisaMarkDisqualified = async () => {
+    const conv = _thread.conversation;
+    if (!conv) return;
+    const reason = await _askPrompt('Markeer als disqualified', 'Waarom valt deze lead af? (verplicht — komt in de audit-log)', 'bv. geen budget / geen interesse / bot / andere leeftijd', { okLabel: 'Zet disqualified' });
+    if (!reason) return;
+    const prevPhase = conv.phase;
+    const prevReason = conv.disqualified_reason || null;
+    conv.phase = 'disqualified';
+    conv.disqualified_reason = reason;
+    if (window.DFO?.render) window.DFO.render();
+    const r = await _patchConv(conv.id, { phase: 'disqualified', disqualified_reason: reason });
+    if (!r.ok) {
+      conv.phase = prevPhase; conv.disqualified_reason = prevReason;
+      if (window.DFO?.render) window.DFO.render();
+      _toast(r.error || 'Kon niet bijwerken', 'error');
+      return;
+    }
+    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
+    if (listRow) listRow.phase = 'disqualified';
+    _toast('Gemarkeerd als disqualified.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__lisaTogglePause = async () => {
+    const conv = _thread.conversation;
+    if (!conv) return;
+    const next = !conv.followup_paused;
+    const ok = await _askConfirm(
+      next ? 'Pauzeer follow-ups?' : 'Hervat follow-ups?',
+      next
+        ? 'Lisa stopt met geplande follow-up-berichten voor dit gesprek. Manuele antwoorden blijven mogelijk.'
+        : 'Lisa mag weer follow-ups sturen voor dit gesprek.',
+      { okLabel: next ? 'Pauzeer' : 'Hervat' }
+    );
+    if (!ok) return;
+    const prev = conv.followup_paused;
+    conv.followup_paused = next; if (window.DFO?.render) window.DFO.render();
+    const r = await _patchConv(conv.id, { followup_paused: next });
+    if (!r.ok) {
+      conv.followup_paused = prev; if (window.DFO?.render) window.DFO.render();
+      _toast(r.error || 'Kon niet bijwerken', 'error');
+      return;
+    }
+    _toast(next ? 'Follow-ups gepauzeerd.' : 'Follow-ups hervat.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__lisaToggleTakeover = async () => {
+    const conv = _thread.conversation;
+    if (!conv) return;
+    const next = !conv.human_takeover;
+    const ok = await _askConfirm(
+      next ? 'Mens-overname aanzetten?' : 'Mens-overname uitzetten?',
+      next
+        ? 'Lisa antwoordt vanaf nu NIET meer autonoom in dit gesprek. Alle reacties komen van jou.'
+        : 'Lisa mag weer autonoom antwoorden op nieuwe inbound berichten in dit gesprek.',
+      { okLabel: next ? 'Zet aan' : 'Zet uit' }
+    );
+    if (!ok) return;
+    const prev = conv.human_takeover;
+    conv.human_takeover = next; if (window.DFO?.render) window.DFO.render();
+    const r = await _patchConv(conv.id, { human_takeover: next });
+    if (!r.ok) {
+      conv.human_takeover = prev; if (window.DFO?.render) window.DFO.render();
+      _toast(r.error || 'Kon niet bijwerken', 'error');
+      return;
+    }
+    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
+    if (listRow) listRow.human_takeover = next;
+    _toast(next ? 'Mens neemt over.' : 'Lisa is weer actief.', 'success');
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  /* ── Afspraak inschieten (DEEL C) ───────────────────────────────────── */
+  window.__lisaOpenAppt = async () => {
+    const conv = _thread.conversation;
+    if (!conv) { _toast('Geen conversatie geladen.', 'error'); return; }
+    if (conv.is_sandbox) { _toast('Sandbox-conversatie — afspraken worden niet ondersteund.', 'error'); return; }
+    if (!conv.ghl_contact_id) {
+      _openModal(`
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">Geen GHL-contact gekoppeld</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:14px">
+          Deze conversatie heeft nog geen <code>ghl_contact_id</code>. Lisa kan pas een Zoom-afspraak boeken
+          zodra het contact bestaat in GHL — dat gebeurt bij de eerste sync of via een handmatige koppeling.
+        </div>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="document.getElementById('lisaModalRoot')?.remove()">OK</button>
+        </div>`);
+      return;
+    }
+    _slots.open = true; _slots.loading = true; _slots.error = null; _slots.days = []; _slots.picked = null;
+    _renderApptModal();
+    // Fetch 14-daagse venster.
+    const j = await tryFetch('slots', '/api/follow-up-ghl-free-slots');
+    _slots.loading = false;
+    if (!j) { _slots.error = 'Kon slots niet ophalen'; _renderApptModal(); return; }
+    if (j.error) { _slots.error = 'GHL: ' + j.error; _renderApptModal(); return; }
+    _slots.days = asArr(j.slots).filter(d => Array.isArray(d.times) && d.times.length);
+    _renderApptModal();
+  };
+  window.__lisaSetApptDuration = (d) => { _slots.duration = parseInt(d, 10) || 30; _renderApptModal(); };
+  window.__lisaPickSlot = (date, time) => {
+    _slots.picked = { date, time };
+    _renderApptModal();
+  };
+  window.__lisaConfirmAppt = async () => {
+    if (_slots.saving) return;
+    const conv = _thread.conversation;
+    if (!conv || !_slots.picked) return;
+    const iso = _amsIsoFromDateTime(_slots.picked.date, _slots.picked.time);
+    if (!iso) { _toast('Ongeldige tijd geselecteerd', 'error'); return; }
+    const handle = conv.instagram_handle ? '@' + String(conv.instagram_handle).replace(/^@/, '') : (conv.contact_name || 'contact');
+    const when = new Date(iso).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    _closeModal();
+    const ok = await _askConfirm(
+      'Zoom-afspraak inschieten?',
+      `Er wordt in Dave's GHL-kalender een echte Zoom-afspraak aangemaakt voor <strong>${esc(handle)}</strong>
+       op <strong>${esc(when)}</strong> (${_slots.duration} min). De klant krijgt de standaard GHL-invite met Zoom-link.`,
+      { okLabel: 'Ja, boek' }
+    );
+    if (!ok) { _slots.open = true; _renderApptModal(); return; }
+    _slots.saving = true;
+    const r = await apiCall('POST', '/api/lisa-appointment-create', {
+      conversation_id: conv.id,
+      scheduledAt   : iso,
+      durationMinutes: _slots.duration,
+    }, { timeoutMs: 20000 });
+    _slots.saving = false;
+    if (!r.ok) {
+      const msg = r.error || 'Boeken faalde';
+      _toast(msg, 'error');
+      _slots.open = true; _renderApptModal();
+      return;
+    }
+    // Success: update conv + list-row (CALL-badge), append system-message optimistic.
+    if (_thread.conversation) { _thread.conversation.call_booked = true; }
+    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
+    if (listRow) listRow.call_booked = true;
+    _thread.messages.push({
+      id: 'local_appt_' + Date.now(),
+      direction: 'out',
+      content: `✓ Zoom-afspraak ingeschoten voor ${when} (${_slots.duration} min).`,
+      sent_at: new Date().toISOString(),
+      ai_generated: false, human_override: true, is_system: true,
+    });
+    _toast('Afspraak geboekt (sync via GHL).', 'success');
+    _slots.open = false; _slots.picked = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  function _amsIsoFromDateTime(date, time) {
+    // date=YYYY-MM-DD, time=HH:mm, timezone Amsterdam → return UTC ISO.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
+    const [y, mo, d] = date.split('-').map(Number);
+    const [hh, mm]   = time.split(':').map(Number);
+    const utc = Date.UTC(y, mo - 1, d, hh, mm, 0);
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Amsterdam', hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const parts = dtf.formatToParts(new Date(utc));
+    const m = {}; for (const p of parts) m[p.type] = p.value;
+    const asUtc = Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour, +m.minute, +m.second);
+    const offMin = Math.round((asUtc - utc) / 60000);
+    return new Date(utc - offMin * 60000).toISOString();
+  }
+  function _renderApptModal() {
+    if (!_slots.open) { _closeModal(); return; }
+    const durationChips = [15, 30, 45, 60].map(d =>
+      `<button class="chip ${_slots.duration === d ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lisaSetApptDuration(${d})">${d} min</button>`
+    ).join('');
+    let body;
+    if (_slots.loading) {
+      body = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Vrije slots laden…</div>`;
+    } else if (_slots.error) {
+      body = `<div style="padding:14px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12.5px">⚠ ${esc(_slots.error)}</div>`;
+    } else if (!_slots.days.length) {
+      body = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Geen vrije slots gevonden in de komende 14 dagen.</div>`;
+    } else {
+      body = _slots.days.map(d => {
+        const dLabel = new Date(d.date + 'T12:00:00Z').toLocaleDateString('nl-NL', { timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'short' });
+        const chips = d.times.map(t => {
+          const isPicked = _slots.picked && _slots.picked.date === d.date && _slots.picked.time === t;
+          const dateAttr = esc(d.date), timeAttr = esc(t);
+          return `<button class="chip ${isPicked ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px;margin:0 4px 4px 0" onclick="__lisaPickSlot('${dateAttr}','${timeAttr}')">${esc(t)}</button>`;
+        }).join('');
+        return `<div style="margin-bottom:12px">
+          <div style="font-size:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${esc(dLabel)}</div>
+          <div>${chips}</div>
+        </div>`;
+      }).join('');
+    }
+    const okDisabled = !_slots.picked || _slots.saving;
+    const okStyle = 'background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff' + (okDisabled ? ';opacity:.55;cursor:not-allowed' : '');
+    _openModal(`
+      <div style="font-size:16px;font-weight:600;margin-bottom:10px">Afspraak inschieten (Dave's Zoom)</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+        <span style="font-size:12px;color:var(--text-3)">Duur:</span>
+        ${durationChips}
+      </div>
+      <div style="max-height:340px;overflow:auto;padding-right:6px;border:1px solid var(--border);border-radius:var(--r-sm);padding:12px">${body}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('lisaModalRoot')?.remove()">Annuleren</button>
+        <button class="btn btn-primary btn-sm" style="${okStyle}" ${okDisabled ? 'disabled' : ''} onclick="__lisaConfirmAppt()">${_slots.saving ? 'Bezig…' : 'Volgende (bevestig)'}</button>
+      </div>`, { maxWidth: 560 });
+  }
+
   /* ── Poll 18s ────────────────────────────────────────────────────────── */
   function _startPoll() {
     if (_poll.handle) return;
@@ -195,12 +603,10 @@
   }
   async function _pollTick() {
     if (_poll.running) return;
-    // Stop-detect: als geen Lisa-view meer in DOM → poll uit.
     if (!document.querySelector('[data-lisa-view]')) { _stopPoll(); return; }
     if (document.hidden) return;
     _poll.running = true;
     try {
-      // Gesprekken-tab open? Refresh convs-lijst + open thread append-only.
       if (document.querySelector('.lisa-gesp-split')) {
         const url = '/api/lisa-conversations?action=list_live&status=' + encodeURIComponent(_live.convs.statusFilter || 'active') + '&limit=100';
         const j = await tryFetch('poll-convs', url);
@@ -235,7 +641,7 @@
     finally { _poll.running = false; }
   }
 
-  /* ── Thread append-only paint ───────────────────────────────────────── */
+  /* ── Thread paint ──────────────────────────────────────────────────── */
   function _paintThread() {
     const container = document.getElementById('lisaThreadScroll');
     if (!container) return;
@@ -265,7 +671,6 @@
     const bg = isOut ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface-2)';
     const color = isOut ? 'var(--brand,#0A7490)' : 'var(--text-1)';
     const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
-    // Badges: ai_generated (Lisa AI) / human_override (mens)
     const badges = [];
     if (m.ai_generated) badges.push('<span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--violet-soft,#EDE4FA);color:var(--violet,#6D3FD4);font-weight:600;letter-spacing:.04em">AI</span>');
     if (m.human_override) badges.push('<span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600;letter-spacing:.04em">mens</span>');
@@ -285,15 +690,6 @@
       return d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
     } catch (_) { return '—'; }
   }
-  function _fmtDateAbs(iso) {
-    if (!iso) return '—';
-    try {
-      const d = new Date(iso);
-      return d.toLocaleString('nl-NL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-    } catch (_) { return '—'; }
-  }
-
-  /* ── Office-hours helper ────────────────────────────────────────────── */
   function _inOfficeHours(settings) {
     if (!settings) return null;
     const start = settings.office_hours_start || '09:00';
@@ -307,7 +703,7 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
-     TAB 1 — DASHBOARD
+     TAB 1 — DASHBOARD (ongewijzigd t.o.v. v=2)
      ══════════════════════════════════════════════════════════════════ */
   function dashboardView() {
     if (!_live.stats.fetched && !_live.stats.loading) queueMicrotask(() => _fetchStats('week'));
@@ -318,8 +714,6 @@
     const stats = _live.stats.data;
     const settings = _live.settings.data;
     const logs = _live.logs.data;
-
-    // Live-mode status
     const liveOn = settings && !!settings.live_mode_enabled;
     const inOffice = _inOfficeHours(settings);
     const officeText = settings
@@ -331,7 +725,6 @@
     const liveBadgeColor = liveOn ? (inOffice === false ? 'amber' : 'emerald') : 'rose';
     const liveBadge = `<span style="display:inline-block;font-size:11px;padding:3px 10px;border-radius:12px;background:var(--${liveBadgeColor}-soft);color:var(--${liveBadgeColor});font-weight:600">${liveOn ? '● LIVE' : '● UIT'}</span>`;
 
-    // Kern-KPIs uit stats
     const kpiCell = (label, val, sub, color) => `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px">${esc(label)}</div>
@@ -348,10 +741,7 @@
         ${kpiCell('Call geboekt', t.call_booked, f.booked_pct != null ? f.booked_pct + '%' : null, 'blue')}
         ${kpiCell('Berichten in/uit', (t.messages_in != null && t.messages_out != null) ? (t.messages_in + ' / ' + t.messages_out) : null, 'binnen / verstuurd', 'text-1')}
       </div>`;
-
     const errBanner = (msg, what) => `<div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(msg)} <button class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:11px" onclick="__lisaRetry('${what}')">Opnieuw</button></div>`;
-
-    // Status-blok
     const statusBlock = _live.settings.error
       ? errBanner(_live.settings.error, 'settings')
       : `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px">
@@ -366,8 +756,6 @@
             <div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Nu binnen?</div><div style="font-weight:500;color:var(--${inOffice === true ? 'emerald' : inOffice === false ? 'amber' : 'text-3'})">${inOffice == null ? '—' : (inOffice ? 'ja' : 'nee (buiten venster, wachtrij)')}</div></div>
           </div>
         </div>`;
-
-    // Recente activiteit uit logs.summary
     const recentActivity = logs && (logs.webhook_events || logs.cron_events)
       ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px">
           <div style="font-weight:600;font-size:14px;margin-bottom:10px">Recente activiteit</div>
@@ -393,17 +781,18 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
-     TAB 2 — GESPREKKEN
+     TAB 2 — GESPREKKEN (BROK 2 writes)
      ══════════════════════════════════════════════════════════════════ */
   function gesprekkenView() {
     if (!_live.convs.fetched && !_live.convs.loading) queueMicrotask(_fetchConvs);
     queueMicrotask(_startPoll);
     queueMicrotask(_paintThread);
+    queueMicrotask(_updateSendBtn);
 
     const st = _live.convs;
     const rows = asArr(st.items);
     const sel  = rows.find(r => String(r.id) === String(_thread.convId)) || rows[0] || null;
-    if (sel && _thread.convId !== sel.id && !_thread.loading) {
+    if (sel && (!_thread.conversation || String(_thread.conversation.id) !== String(sel.id)) && !_thread.loading) {
       queueMicrotask(() => _loadThread(sel.id));
     }
 
@@ -463,43 +852,83 @@
     </div>`;
   }
   function _renderConvDetail(row) {
-    const name = row.contact_name || row.instagram_handle || 'Onbekend';
-    const handle = row.instagram_handle ? '@' + String(row.instagram_handle).replace(/^@/, '') : '';
-    const takeoverBanner = row.human_takeover
+    // Prefer full thread-conversation als geladen (heeft is_sandbox, ghl_contact_id).
+    const conv = (_thread.conversation && String(_thread.conversation.id) === String(row.id))
+      ? _thread.conversation : row;
+    const name   = conv.contact_name || conv.instagram_handle || 'Onbekend';
+    const handle = conv.instagram_handle ? '@' + String(conv.instagram_handle).replace(/^@/, '') : '';
+    const isSandbox = !!conv.is_sandbox;
+
+    const takeoverBanner = conv.human_takeover
       ? `<div style="padding:8px 14px;background:var(--amber-soft);color:var(--amber);font-size:11.5px;border-bottom:1px solid var(--border);font-weight:500">⚠ Mens heeft dit gesprek overgenomen — Lisa antwoordt niet meer autonoom.</div>`
       : '';
-    const bookedBanner = row.call_booked
+    const bookedBanner = conv.call_booked
       ? `<div style="padding:8px 14px;background:var(--emerald-soft);color:var(--emerald);font-size:11.5px;border-bottom:1px solid var(--border);font-weight:500">✓ Call is geboekt via deze conversatie.</div>`
       : '';
+    const sandboxBanner = isSandbox
+      ? `<div style="padding:8px 14px;background:var(--violet-soft,#EDE4FA);color:var(--violet,#6D3FD4);font-size:11.5px;border-bottom:1px solid var(--border);font-weight:500">🧪 Sandbox — geen echte klant. Reageren en afspraken zijn uitgeschakeld.</div>`
+      : '';
+
+    // Fase-opties (dropdown)
+    const PHASES = ['intro', 'doel', 'situatie', 'band', 'call', 'qualified', 'disqualified', 'done', 'cold'];
+    const phaseOpts = PHASES.map(p => `<option value="${p}" ${conv.phase === p ? 'selected' : ''}>${p}</option>`).join('');
+
+    // Actie-knoppen in de header
+    const actionButtons = !isSandbox ? `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <select onchange="__lisaSetPhase(this.value)" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);cursor:pointer" title="Fase wijzigen">${phaseOpts}</select>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleQualified()" title="Markeer/verwijder gekwalificeerd">${conv.qualified ? '✓ Gekwal.' : 'Kwalificeer'}</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaMarkDisqualified()" title="Markeer als disqualified">Disq.</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaTogglePause()" title="Pauzeer/hervat follow-ups">${conv.followup_paused ? '▶ Hervat FU' : '⏸ Pauzeer FU'}</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleTakeover()" title="Mens-overname aan/uit">${conv.human_takeover ? 'Lisa terug' : 'Mens over'}</button>
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px;background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lisaOpenAppt()" title="Zoom-afspraak inschieten via Dave's kalender">📅 Afspraak inschieten</button>
+      </div>` : '';
+
     const status = _thread.loading
       ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Berichten laden…</div>`
       : _thread.error
         ? `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ ${esc(_thread.error)} <button class="btn btn-ghost btn-sm" onclick="__lisaRetry('thread')" style="margin-left:8px">Opnieuw</button></div>`
-        : (!_thread.messages.length && _thread.convId === row.id)
-          ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Nog geen berichten.</div>`
+        : (!_thread.messages.length && _thread._paintedFor === row.id)
+          ? `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Nog geen berichten.</div>`
           : '';
+
+    // Compose footer (DEEL A)
+    const composeDisabled = isSandbox;
+    const composeHint = isSandbox
+      ? `<span style="color:var(--violet,#6D3FD4);font-weight:500">Sandbox — reageren uitgeschakeld.</span>`
+      : `<span>Reageren zet Lisa uit voor dit gesprek (human takeover).</span>`;
+    const composeFooter = `
+      <div style="padding:11px 14px;background:var(--surface-2);border-top:1px solid var(--border)">
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <textarea id="lisaComposeInput" oninput="__lisaComposeInput(this)" placeholder="${composeDisabled ? 'Sandbox — reageren uitgeschakeld' : 'Typ een IG-DM…'}" ${composeDisabled ? 'disabled' : ''}
+            style="flex:1;min-height:56px;max-height:200px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font:inherit;font-size:13px;background:var(--surface);color:var(--text-1);resize:vertical;line-height:1.4">${esc(_compose.text || '')}</textarea>
+          <button id="lisaSendBtn" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;padding:8px 16px;font-weight:600" ${composeDisabled ? 'disabled' : ''} onclick="__lisaSend()">Verstuur</button>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-3)">${composeHint}</div>
+      </div>`;
+
     return `<div class="lisa-gesp-right" style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
       <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:13px">
+        <div style="display:flex;align-items:center;gap:13px;margin-bottom:${!isSandbox ? '10px' : '0'}">
           ${H.av(name || '?', 42)}
           <div style="flex:1;min-width:0">
             <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
-            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(handle)}${row.source ? ' · via ' + esc(row.source) : ''}${row.phase ? ' · fase: ' + esc(row.phase) : ''}</div>
+            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(handle)}${conv.source ? ' · via ' + esc(conv.source) : ''}${conv.phase ? ' · fase: ' + esc(conv.phase) : ''}</div>
           </div>
         </div>
+        ${actionButtons}
       </div>
+      ${sandboxBanner}
       ${takeoverBanner}
       ${bookedBanner}
       <div id="lisaThreadScroll" style="flex:1;min-height:0;overflow-y:auto;padding:20px;display:block"></div>
       ${status}
-      <div style="padding:11px 20px;background:var(--surface-2);border-top:1px solid var(--border);font-size:11.5px;color:var(--text-3);text-align:center">
-        Reageren vanuit deze module komt in BROK 2. Nu: lees-modus. De Inbox-module ondersteunt wel reply via <code>lisa-conversations intervene</code>.
-      </div>
+      ${composeFooter}
     </div>`;
   }
 
   /* ══════════════════════════════════════════════════════════════════
-     TAB 3 — STATISTIEKEN
+     TAB 3 — STATISTIEKEN (ongewijzigd t.o.v. v=2)
      ══════════════════════════════════════════════════════════════════ */
   function statsView() {
     const period = _live.stats.period || 'week';
@@ -507,26 +936,21 @@
     queueMicrotask(_startPoll);
     const stats = _live.statsAll[period] || _live.stats.data;
     const errBanner = (msg) => `<div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(msg)} <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="__lisaRetry('stats')">Opnieuw</button></div>`;
-
     const periodChips = ['today', 'week', 'month', 'all'].map(p => {
       const label = p === 'today' ? 'Vandaag' : p === 'week' ? 'Week' : p === 'month' ? '30 dagen' : 'Alles';
       return `<button class="chip ${period === p ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lisaSetStatsPeriod('${p}')">${label}</button>`;
     }).join('');
-
     const t = stats && stats.totals ? stats.totals : {};
     const f = stats && stats.conversion_funnel ? stats.conversion_funnel : {};
     const phaseDist = stats && stats.phase_distribution ? stats.phase_distribution : {};
     const disq = stats && Array.isArray(stats.disqualified_top5) ? stats.disqualified_top5 : [];
     const fu = stats && stats.followups ? stats.followups : {};
-
     const kpi = (label, val, sub, color) => `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px">
         <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px">${esc(label)}</div>
         <div style="font-size:22px;font-weight:600;color:var(--${color || 'text-1'})">${val == null ? '<span style="opacity:.4">…</span>' : esc(String(val))}</div>
         ${sub ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:4px">${esc(sub)}</div>` : ''}
       </div>`;
-
-    // Phase-distribution als tabel
     const phaseRows = Object.entries(phaseDist).map(([p, n]) => [p, String(n)]);
     const phaseTable = phaseRows.length ? `<table style="width:100%;border-collapse:collapse;font-size:12.5px">
       <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
@@ -537,7 +961,6 @@
         ${phaseRows.map(([p, n]) => `<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px 8px">${esc(p)}</td><td style="padding:6px 8px;text-align:right;font-family:'IBM Plex Mono',monospace">${esc(n)}</td></tr>`).join('')}
       </tbody>
     </table>` : `<div style="padding:14px;color:var(--text-3);font-size:12.5px;text-align:center">Geen fase-data.</div>`;
-
     const disqTable = disq.length ? `<table style="width:100%;border-collapse:collapse;font-size:12.5px">
       <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
         <th style="padding:6px 8px">Reden</th>
@@ -600,5 +1023,5 @@
   window.DFO.VIEWS['lisa/Statistieken'] = statsView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('lisa');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('lisa');
-  console.debug('[lisa-v2] v=2 BROK 1 — 3 read-tabs bedraad (stats + settings + logs + conversations); Dashboard live-mode-status + KPI-strip + recente activiteit; Gesprekken split-view met filters + append-only thread + poll 18s; Statistieken periode-schakelaar + fase-verdeling + disqualified-top5. Reply via intervene komt in BROK 2.');
+  console.debug('[lisa-v2] v=3 BROK 1-fix + BROK 2 writes — thread-guard hersteld (conversation-based); DEEL A intervene (compose + confirm + optimistic + human_takeover-sync); DEEL B status-mutaties (fase-select + kwalificeer/disq/pauzeer/mens-overname + rollback bij fout); DEEL C afspraak-picker (free-slots 14d, duur 15/30/45/60m, confirm + POST lisa-appointment-create). Vrije-slots-gate additief uitgebreid met lisa.config.publish.');
 })();
