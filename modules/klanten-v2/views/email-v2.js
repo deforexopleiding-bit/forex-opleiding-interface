@@ -122,6 +122,8 @@
     aiExtra:    {},          // per-row refine-textarea (state-only, geen render tijdens typen)
     aiRefining: {},          // per-row 'AI verfijnt…' busy-vlag
     aiBusy:     false,
+    composeAiBusy: false,    // v=27: compose-✦ AI-call in-flight
+    composeAiErr:  null,     // v=27: laatste NL-fout uit compose-AI
     sendBusy:   false,
     lastSend:   null,
     moreMenuOpen: false,
@@ -1088,17 +1090,40 @@
     const draft = st.data[row.id];
     const busy = st.loading[row.id];
     const refining = !!_ui.aiRefining[row.id];
+    const anyBusy = busy || refining;
     const err  = st.error[row.id];
     // Sub-status: prioriteit 'verfijnt' > 'genereert' > 'concept' > 'error' > 'idle'.
     const subStatus = refining
       ? 'AI verfijnt…'
-      : (draft
-          ? 'Concept gegenereerd — bewerk, verfijn of gebruik'
-          : (busy ? 'AI genereert…' : err ? 'Fout bij genereren' : 'Klik "Genereer" om een concept te maken'));
+      : (busy
+          ? 'AI schrijft je concept…'
+          : (draft
+              ? 'Concept gegenereerd — bewerk, verfijn of gebruik'
+              : (err ? 'Fout bij genereren' : 'Klik "Genereer" om een concept te maken')));
     const extraVal = String(_ui.aiExtra[row.id] || '');
-    const refineDisabled = refining || busy || !draft || !extraVal.trim();
-    return `<div style="margin:20px 22px 22px;padding:16px 18px;background:${TOK.violetSoft};border:1px solid ${TOK.violetLine};border-radius:${TOK.rLg}">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${draft || err || busy || refining ? '12px' : '0'}">
+    const refineDisabled = anyBusy || !draft || !extraVal.trim();
+    // v=27: SVG-spinner (rotating) + prominente in-card laad-banner tijdens
+    // elke AI-call. keyframes 'spin' + 'pulse' worden onderaan de compose
+    // gedefinieerd; hier extra 'spin' guard voor als de card zonder compose
+    // wordt gerenderd.
+    const SPIN_ICO = '<svg viewBox="0 0 20 20" width="12" height="12" style="animation:spin 0.9s linear infinite;flex-shrink:0"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 20" stroke-linecap="round"/></svg>';
+    const genBtnLabel = busy ? 'Genereren…' : (draft ? 'Opnieuw' : 'Genereer');
+    const genBtnIco = busy ? SPIN_ICO : ICO.sparkle;
+    const refineBtnLabel = refining ? 'Verfijnen…' : 'Verfijn';
+    const refineBtnIco = refining ? SPIN_ICO : ICO.sparkle;
+    // Prominente laad-banner: alleen zichtbaar tijdens actieve call.
+    const loadBanner = anyBusy
+      ? `<div style="margin-bottom:12px;padding:11px 14px;background:var(--surface);border:1px dashed ${TOK.violet};border-radius:${TOK.rSm};display:flex;align-items:center;gap:10px;animation:pulse 1.6s ease-in-out infinite">
+          <span style="color:${TOK.violet};display:flex;align-items:center">${SPIN_ICO}</span>
+          <div style="flex:1;font-size:12.5px;color:${TOK.violet};font-weight:500">✦ ${refining ? 'AI verfijnt je concept…' : 'AI schrijft je concept…'} <span style="font-weight:400;color:var(--text-3)">(~10-15s)</span></div>
+        </div>`
+      : '';
+    // Style-block met keyframes voor spin (pulse zit al in compose-block, maar
+    // deze card kan ook zonder open compose renderen). animation-name uniek
+    // om conflicts te voorkomen.
+    const cardStyle = '<style>@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.55}50%{opacity:.9}}</style>';
+    return `${cardStyle}<div style="margin:20px 22px 22px;padding:16px 18px;background:${TOK.violetSoft};border:1px solid ${TOK.violetLine};border-radius:${TOK.rLg}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${draft || err || anyBusy ? '12px' : '0'}">
         <span style="width:26px;height:26px;border-radius:50%;background:${TOK.violet};color:#fff;display:flex;align-items:center;justify-content:center">${ICO.sparkle}</span>
         <div style="flex:1">
           <div style="font-size:13px;font-weight:600;color:${TOK.violet}">Voorgesteld antwoord</div>
@@ -1107,12 +1132,13 @@
         <div style="display:flex;align-items:center;gap:4px">
           ${['vriendelijk','zakelijk','kort','streng'].map((t) => {
             const on = _ui.aiTone === t;
-            return `<button class="tone-chip" style="padding:2px 8px;border:1px solid ${on ? TOK.violet : TOK.violetLine};background:${on ? TOK.violet : 'transparent'};color:${on ? '#fff' : TOK.violet};border-radius:20px;font-size:10px;font-weight:${on ? '600' : '500'};cursor:pointer" onclick="window.__emailAiSetToneAndRegen('${t}','${esc(row.id)}')">${t}</button>`;
+            return `<button class="tone-chip" ${anyBusy ? 'disabled' : ''} style="padding:2px 8px;border:1px solid ${on ? TOK.violet : TOK.violetLine};background:${on ? TOK.violet : 'transparent'};color:${on ? '#fff' : TOK.violet};border-radius:20px;font-size:10px;font-weight:${on ? '600' : '500'};cursor:${anyBusy ? 'not-allowed' : 'pointer'};opacity:${anyBusy ? '.55' : '1'}" onclick="window.__emailAiSetToneAndRegen('${t}','${esc(row.id)}')">${t}</button>`;
           }).join('')}
-          <button class="btn btn-ghost btn-sm" ${busy || refining ? 'disabled' : ''} onclick="window.__emailAiGenReader('${esc(row.id)}')" style="color:${TOK.violet};font-size:11.5px;gap:5px">${ICO.sparkle}${busy ? 'Bezig…' : (draft ? 'Opnieuw' : 'Genereer')}</button>
+          <button class="btn btn-ghost btn-sm" ${anyBusy ? 'disabled' : ''} onclick="window.__emailAiGenReader('${esc(row.id)}')" style="color:${TOK.violet};font-size:11.5px;gap:5px;display:inline-flex;align-items:center">${genBtnIco}${genBtnLabel}</button>
         </div>
       </div>
-      ${err ? `<div style="padding:10px;background:${TOK.roseSoft};color:${TOK.rose};border-radius:${TOK.rSm};font-size:12px">${esc(err)}</div>` : ''}
+      ${loadBanner}
+      ${err && !anyBusy ? `<div style="padding:10px;background:${TOK.roseSoft};color:${TOK.rose};border-radius:${TOK.rSm};font-size:12px">${esc(err)}</div>` : ''}
       ${draft ? `
         <div style="padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:${TOK.rSm};font-size:13px;line-height:1.5;color:var(--text);white-space:pre-wrap;max-height:280px;overflow-y:auto">${esc(draft.body)}</div>
         <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
@@ -1125,8 +1151,8 @@
               <button class="btn btn-ghost btn-sm" onclick="window.__emailAiClear('${esc(row.id)}')">Negeren</button>
               <button id="emailAiRefine_${esc(row.id)}" class="btn btn-ghost btn-sm"
                 ${refineDisabled ? 'disabled' : ''}
-                style="color:${TOK.violet};font-size:11.5px;gap:5px;opacity:${refineDisabled ? '.5' : '1'};cursor:${refineDisabled ? 'not-allowed' : 'pointer'}"
-                onclick="window.__emailAiRefine('${esc(row.id)}')">${ICO.sparkle}${refining ? 'Verfijnt…' : 'Verfijn'}</button>
+                style="color:${TOK.violet};font-size:11.5px;gap:5px;display:inline-flex;align-items:center;opacity:${refineDisabled ? '.5' : '1'};cursor:${refineDisabled ? 'not-allowed' : 'pointer'}"
+                onclick="window.__emailAiRefine('${esc(row.id)}')">${refineBtnIco}${refineBtnLabel}</button>
               <button class="btn btn-primary btn-sm" style="background:${TOK.violet};border-color:${TOK.violet}" onclick="window.__emailAiUse('${esc(row.id)}')">Gebruiken →</button>
             </div>
           </div>
@@ -1156,6 +1182,11 @@
           ${_composeField('Onderwerp', `<input type="text" value="${esc(c.subject)}" oninput="window.__emailComposeField('subject', this.value)" style="width:100%;padding:6px 8px;border:none;background:transparent;color:var(--text);font-size:13px;outline:none" />`)}
           ${_ui.composeMode !== 'new' && c.to ? _recipChip(c.to) : ''}
           <div style="padding:12px 0 4px;flex:1;display:flex;flex-direction:column;min-height:180px">
+            ${_ui.composeAiBusy ? `<div style="margin-bottom:8px;padding:9px 12px;background:${TOK.violetSoft};border:1px dashed ${TOK.violet};border-radius:${TOK.rSm};display:flex;align-items:center;gap:9px;animation:pulse 1.6s ease-in-out infinite">
+              <span style="color:${TOK.violet};display:flex;align-items:center"><svg viewBox="0 0 20 20" width="13" height="13" style="animation:spin 0.9s linear infinite"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 20" stroke-linecap="round"/></svg></span>
+              <div style="flex:1;font-size:12.5px;color:${TOK.violet};font-weight:500">✦ AI schrijft je concept… <span style="font-weight:400;color:var(--text-3)">(~10-15s)</span></div>
+            </div>` : ''}
+            ${_ui.composeAiErr ? `<div style="margin-bottom:8px;padding:9px 12px;background:${TOK.roseSoft};color:${TOK.rose};border-radius:${TOK.rSm};font-size:12px">${esc(_ui.composeAiErr)}</div>` : ''}
             <div contenteditable="true" oninput="window.__emailComposeBody(this.innerHTML)" data-placeholder="Typ je bericht…" style="width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:13.5px;line-height:1.55;min-height:180px;font-family:inherit;flex:1;outline:none;overflow-y:auto">${c.body_html || ''}</div>
           </div>
           ${_composeSigStrip()}
@@ -1166,13 +1197,16 @@
           <button class="btn btn-primary" ${_ui.sendBusy ? 'disabled' : ''} onclick="window.__emailSend()" style="gap:6px">${ICO.send}${_ui.sendBusy ? 'Versturen…' : 'Versturen'}</button>
           <button class="icon-btn" title="Bijlage toevoegen" onclick="window.__emailComposeAttach()" style="width:28px;height:28px">${ICO.attach}</button>
           <button class="icon-btn" title="Sjabloon invoegen" onclick="window.__emailComposeTemplate()" style="width:28px;height:28px">${ICO.template}</button>
-          <button class="icon-btn" title="AI-suggestie" onclick="window.__emailComposeAi()" style="width:28px;height:28px;color:${TOK.violet}">${ICO.sparkle}</button>
+          <button class="icon-btn" title="${_ui.compose._orig ? 'AI-concept genereren op basis van origineel' : 'AI-suggestie (open eerst een bericht)'}"
+            ${_ui.composeAiBusy ? 'disabled' : ''}
+            onclick="window.__emailComposeAi()"
+            style="width:28px;height:28px;color:${TOK.violet};opacity:${_ui.composeAiBusy ? '.55' : '1'};cursor:${_ui.composeAiBusy ? 'not-allowed' : 'pointer'}">${_ui.composeAiBusy ? '<svg viewBox="0 0 20 20" width="14" height="14" style="animation:spin 0.9s linear infinite"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 20" stroke-linecap="round"/></svg>' : ICO.sparkle}</button>
           <div style="margin-left:auto;font-size:11px;color:var(--text-3);font-family:${TOK.mono}">${_ui.draftMigrationRequired ? '⚠ Concepten uit — migratie vereist' : (c.draft_id ? '● Concept auto-saved' : (_ui.draftDirty ? '● Wijzigingen…' : ''))}</div>
           <button class="icon-btn" title="Verwerpen" onclick="window.__emailDiscardCompose()" style="width:28px;height:28px">${ICO.trash}</button>
         </div>
       </div>
     </div>
-    <style>@keyframes slideUp { from { transform:translateY(30px); opacity:0 } to { transform:translateY(0); opacity:1 } } @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.7} } [contenteditable=true]:empty:before { content: attr(data-placeholder); color:var(--text-3); pointer-events:none; }</style>`;
+    <style>@keyframes slideUp { from { transform:translateY(30px); opacity:0 } to { transform:translateY(0); opacity:1 } } @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:.7} } @keyframes spin { to { transform:rotate(360deg) } } [contenteditable=true]:empty:before { content: attr(data-placeholder); color:var(--text-3); pointer-events:none; }</style>`;
   }
   function _composeMinBar() {
     return `<div style="position:fixed;bottom:0;right:26px;background:var(--surface);border:1px solid var(--border);border-radius:${TOK.rLg} ${TOK.rLg} 0 0;box-shadow:0 -4px 12px rgba(0,0,0,.12);padding:8px 14px;display:flex;align-items:center;gap:10px;z-index:1000;cursor:pointer" onclick="window.__emailComposeRestore()">
@@ -1621,6 +1655,18 @@
         if (j && !j.__error && j.item) existingDraft = j.item;
       } catch (_) { /* fail-soft */ }
     }
+    // v=27: cache origineel-context zodat de compose-✦-knop een AI-concept
+    // kan genereren zonder de reader te hoeven openen. Bron: de row die
+    // reply/fwd initieert (subject + from_name + best-beschikbare body-tekst).
+    const bodyForCache = _live.body.data[row.id] || null;
+    const origContext = (mode === 'reply' || mode === 'replyall' || mode === 'fwd')
+      ? {
+          subject : row.subject || '',
+          body    : (bodyForCache && bodyForCache.text) ? String(bodyForCache.text) : (row.snippet || ''),
+          fromName: row.from_name || row.from_address || '',
+        }
+      : null;
+
     if (existingDraft) {
       _ui.compose = {
         from_mailbox: existingDraft.from_mailbox || (from ? from.addr : _ui.compose.from_mailbox),
@@ -1633,6 +1679,7 @@
         email_id:    emailId,
         signature:   'standaard',
         draft_id:    existingDraft.id || null,
+        _orig:       origContext,
       };
       _ui.ccBccOpen = !!(_ui.compose.cc || _ui.compose.bcc);
       _ui.composeOpen = true; _ui.lastSend = null;
@@ -1695,6 +1742,7 @@
       email_id: emailId,
       signature: 'standaard', draft_id: null,
       attachments: [],
+      _orig: origContext,
     };
     _ui.ccBccOpen = false;
     _ui.composeOpen = true; _ui.lastSend = null;
@@ -1859,7 +1907,74 @@
     _showToastLocal(`Sjabloon "${t.name}" ingevoegd.`, 'success');
   };
   window.__emailTemplateCancel = () => { _ui.templatePickerOpen = false; if (render) render(); };
-  window.__emailComposeAi       = () => { _showToastLocal('AI in compose: open eerst een bericht en gebruik "Voorgesteld antwoord" in de reader.', 'info'); };
+  // v=27: compose-✦ genereert een AI-concept op basis van de originele mail
+  // (gecached in _ui.compose._orig door _replyState). Bij een 'new'-compose
+  // valt 'ie terug op de oude hint want er is geen origineel om op te
+  // genereren. Als de body-preview meer bevat dan alleen de handtekening-
+  // marker: confirm vóór vervangen (niet stil overschrijven).
+  const SIG_MARKER_HTML = '<div data-sig-marker="1"><!--__SIG_HERE__--></div>';
+  function _composeBodyHasUserContent(bodyHtml) {
+    if (!bodyHtml) return false;
+    // Splits op de marker; wat er VÓÓR staat is de eigen-typ-zone. Strip HTML
+    // en whitespace — als er iets substantieels overblijft, heeft de gebruiker
+    // getypt en moeten we vragen voor we overschrijven.
+    const idx = bodyHtml.indexOf(SIG_MARKER_HTML);
+    const before = idx >= 0 ? bodyHtml.slice(0, idx) : bodyHtml;
+    const stripped = before.replace(/<[^>]*>/g, '').replace(/&nbsp;/gi, ' ').replace(/\s+/g, '').trim();
+    return stripped.length > 0;
+  }
+  function _composeInsertDraftBody(draftText, draftSubject) {
+    // Zelfde plaatsings-algoritme als __emailAiUse: draft vóór SIG_MARKER,
+    // marker + evt. quote-blok blijven staan.
+    const draftHtml = String(draftText || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
+    const cur = _ui.compose.body_html || '';
+    if (cur.includes(SIG_MARKER_HTML)) {
+      const idx = cur.indexOf(SIG_MARKER_HTML);
+      const after = cur.slice(idx + SIG_MARKER_HTML.length);
+      _ui.compose.body_html = '<div>' + draftHtml + '</div>' + SIG_MARKER_HTML + after;
+    } else {
+      _ui.compose.body_html = '<div>' + draftHtml + '</div>';
+    }
+    if (draftSubject && !_ui.compose.subject) _ui.compose.subject = draftSubject;
+  }
+  window.__emailComposeAi = async () => {
+    const orig = _ui.compose && _ui.compose._orig ? _ui.compose._orig : null;
+    if (!orig || (!orig.subject && !orig.body)) {
+      _showToastLocal('AI in compose: open eerst een bericht en gebruik "Voorgesteld antwoord" in de reader.', 'info');
+      return;
+    }
+    if (_ui.composeAiBusy) return;
+    // Confirm bij bestaande user-content in de body — stil overschrijven
+    // ontlaadt eigen werk.
+    if (_composeBodyHasUserContent(_ui.compose.body_html)) {
+      if (!window.confirm('Huidige tekst vervangen door AI-concept?')) return;
+    }
+    _ui.composeAiBusy = true; _ui.composeAiErr = null;
+    if (render) render();
+    const j = await tryFetch('compose-ai', '/api/email-ai-regenerate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        original_subject: orig.subject || '',
+        original_body:    orig.body    || '',
+        from_name:        orig.fromName || '',
+        tone:             _ui.aiTone,
+      }),
+    }, 20000);
+    _ui.composeAiBusy = false;
+    if (j && !j.__error && j.draft_body) {
+      _composeInsertDraftBody(j.draft_body, j.draft_subject);
+      _ui.composeAiErr = null;
+    } else {
+      const rawErr = j?.__error || j?.error || null;
+      if (rawErr) console.warn('[email-v2 compose-ai] raw error:', rawErr);
+      if (!j || j.__error) _ui.composeAiErr = 'Kon de AI niet bereiken — probeer het opnieuw.';
+      else if (j.error)    _ui.composeAiErr = j.error;
+      else                 _ui.composeAiErr = 'AI-generatie mislukt — probeer het opnieuw.';
+    }
+    if (render) render();
+  };
   window.__emailConfirmOk     = () => { const d = _ui.confirmDialog; _ui.confirmDialog = null; if (render) render(); try { if (d?.onOk) d.onOk(); } catch (e) { console.warn('[email-v2] confirm onOk fail', e); } };
   window.__emailConfirmCancel = () => { const d = _ui.confirmDialog; _ui.confirmDialog = null; if (render) render(); try { if (d?.onCancel) d.onCancel(); } catch (_) {} };
   window.__emailInfoClose     = () => { _ui.infoDialog = null; if (render) render(); };
@@ -1973,5 +2088,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=26 — Gebruiken → fix: await _replyState + slim body-insert vóór SIG_MARKER (blocker uit v=25 waar draft-find-race het body-veld leeg overschreef). Verfijn-prompt behoudt aanspreekvorm (u/je). Nette NL-foutmelding i.p.v. ruwe fetch-exception. Alles uit v=25 (verfijn-flow) + v=24 (bijlagen) behouden.');
+  console.debug('[email-v2] v=27 — Laad-indicator (spinner + pulserende in-card banner) op Genereer/Verfijn/tone-chip; tone-chips gedisabled tijdens busy. Compose-✦ functioneel: bij reply/replyall/fwd → AI-concept op basis van origineel (gecached in _ui.compose._orig door _replyState), confirm bij overschrijven bestaande tekst, laad-indicator + nette NL-fout. Bij "new" compose → oude hint.');
 })();
