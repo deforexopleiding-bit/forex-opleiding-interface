@@ -62,7 +62,7 @@
 
     { g: 'Klanten & communicatie', id: 'klanten',          naam: 'Klanten',           icon: I.users,    color: 'emerald', roles: SAMS,                 tabs: ['Overzicht'] },
     { g: 'Klanten & communicatie', id: 'studenten',        naam: 'Studenten',         icon: I.grad,     color: 'teal',    roles: ['mentor'],           tabs: [] },
-    { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,       badge: 32, tabs: ['Gesprekken', 'Acties', 'Overzicht', 'Brieven', 'Motor'] },
+    { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,       badge: 32, tabs: ['Gesprekken', 'Acties', 'Overzicht', 'Pipeline', 'Brieven', 'Motor'] },
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,      badge: 3,  tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS,      badge: 12, tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },

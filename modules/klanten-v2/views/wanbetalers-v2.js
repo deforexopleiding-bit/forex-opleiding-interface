@@ -759,7 +759,10 @@
     );
     if (!ok) return;
     _ui.stageBusy[cid] = true;
-    const r = await apiPost('/api/dunning-pipeline-set-stage', { customer_id: String(cid), stage: newStage });
+    // BROK 9 FIX: server verwacht 'stage_slug' (api/dunning-pipeline-set-stage.js:28),
+    // niet 'stage'. Voorheen kreeg elke fase-mutatie 400 "stage_slug vereist"
+    // en werd de fase server-side niet gewijzigd (alleen UI-side optimistisch).
+    const r = await apiPost('/api/dunning-pipeline-set-stage', { customer_id: String(cid), stage_slug: newStage });
     _ui.stageBusy[cid] = false;
     if (!r.ok) { _toast('Fase-mutatie faalde: ' + (r.error || 'onbekend'), 'error'); return; }
     // Optimistic: update de row in overzicht + refresh timeline.
@@ -1943,6 +1946,116 @@
     </div>`;
   }
 
+  /* ── BROK 9 (v=8): Pipeline-kanban per dunning-fase ─────────────────
+     Kolommen uit /api/dunning-pipeline-stages (is_active=true). Kaarten
+     uit gedeelde _live.overzicht.items — geen extra fetch. Per kaart
+     "Verplaats naar…" dropdown → __wbxSetStage (met custom confirm en
+     terminal-warning). Klik op kaart → __wbxOpenCase(cid) (BROK 7). */
+  _live.stages = { loading: false, fetched: false, error: null, items: [], _seq: 0 };
+
+  async function _fetchStages() {
+    const st = _live.stages;
+    if (st.loading) return;
+    const mySeq = ++st._seq;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('stages', '/api/dunning-pipeline-stages', 8000);
+    if (mySeq !== st._seq) return;
+    if (j && j.error) { st.error = j.error; st.loading = false; try { window.DFO?.render?.(); } catch (_) {} return; }
+    st.items = asArr(j?.items);
+    st.fetched = true; st.loading = false;
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+  window.__wbxRetryStages = () => { _live.stages.fetched = false; _fetchStages(); };
+
+  // BROK 7 forward-ref: overschreven door case-sheet. Fallback = Gesprekken-drilldown.
+  if (typeof window.__wbxOpenCase !== 'function') {
+    window.__wbxOpenCase = (cid) => {
+      try { window.__wbxGspSelect && window.__wbxGspSelect(cid); } catch (_) {}
+    };
+  }
+
+  function pipelineView() {
+    if (!_live.stages.fetched && !_live.stages.loading) queueMicrotask(_fetchStages);
+    if (!_live.overzicht.fetched && !_live.overzicht.loading) queueMicrotask(_fetchOverzicht);
+    if (!_live.arrangements.fetched && !_live.arrangements.loading) queueMicrotask(_fetchArrangements);
+
+    if ((_live.stages.loading && !_live.stages.fetched) || (_live.overzicht.loading && !_live.overzicht.fetched)) {
+      return `<div class="pad" style="padding:14px 20px">${_skelRows(4)}</div>`;
+    }
+    if (_live.stages.error && !_live.stages.fetched) {
+      return `<div class="pad" style="padding:14px 20px">${_errBlk(_live.stages.error, 'stages')}</div>`;
+    }
+    if (_live.overzicht.error && !_live.overzicht.fetched) {
+      return `<div class="pad" style="padding:14px 20px">${_errBlk(_live.overzicht.error, 'overzicht')}</div>`;
+    }
+
+    const stages = asArr(_live.stages.items);
+    const items  = asArr(_live.overzicht.items);
+    const arrsMap = _live.arrangements.byCust || {};
+
+    // Group items per stage.
+    const bySlug = {};
+    for (const s of stages) bySlug[s.slug] = [];
+    for (const r of items) {
+      const slug = r.stage_slug || 'nieuw';
+      if (!bySlug[slug]) bySlug[slug] = [];
+      bySlug[slug].push(r);
+    }
+
+    // Stage-options voor de "Verplaats naar" dropdown (alle actieve stages).
+    const stageOpts = stages.map((s) =>
+      `<option value="${esc(s.slug)}">${esc(s.label || s.slug)}${s.is_terminal ? ' ⛔' : ''}</option>`
+    ).join('');
+
+    const columns = stages.map((s) => {
+      const rows = bySlug[s.slug] || [];
+      const totalOpen = rows.reduce((acc, r) => acc + (Number.isFinite(Number(r.total_open_cents)) ? Number(r.total_open_cents) : 0), 0) / 100;
+      const color = s.color || 'var(--brand,#0A7490)';
+      const cards = rows.length ? rows.map((r) => {
+        const cid       = String(r.customer_id || r.id);
+        const name      = r.customer_name || r.name || 'Onbekend';
+        const openAmt   = Number.isFinite(Number(r.total_open_cents)) ? Number(r.total_open_cents) / 100 : 0;
+        const days      = Number.isFinite(Number(r.days_overdue)) ? Number(r.days_overdue) : 0;
+        const invCount  = Number.isFinite(Number(r.open_invoice_count)) ? Number(r.open_invoice_count) : 0;
+        const busy      = !!_ui.stageBusy[cid];
+        const activeArr = Array.isArray(arrsMap[cid]) && arrsMap[cid].length > 0;
+        const pauseBadge = activeArr
+          ? `<span style="font-size:9.5px;padding:1px 6px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600;margin-left:5px" title="Actief arrangement — dunning gepauzeerd">⏸ ARR</span>`
+          : '';
+        return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:9px 11px;margin-bottom:8px;cursor:pointer;transition:transform .08s ease" onclick="__wbxOpenCase('${esc(cid)}')" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}${pauseBadge}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${eur(openAmt)} · ${days}d · ${invCount} fact</div>
+          <div style="margin-top:6px" onclick="event.stopPropagation()">
+            <select onchange="if(this.value){__wbxSetStage('${esc(cid)}',this.value);this.value='';}" style="width:100%;font-size:10.5px;padding:3px 6px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);cursor:pointer" ${busy ? 'disabled' : ''}>
+              <option value="">Verplaats naar…</option>
+              ${stageOpts}
+            </select>
+          </div>
+        </div>`;
+      }).join('') : `<div style="padding:22px 8px;text-align:center;color:var(--text-3);font-size:11px;font-style:italic">Leeg</div>`;
+
+      return `<div style="min-width:240px;flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);padding:10px;display:flex;flex-direction:column">
+        <div style="padding-bottom:8px;margin-bottom:8px;border-bottom:2px solid ${color}">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <b style="font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;color:${color}">${esc(s.label || s.slug)}${s.is_terminal ? ' ⛔' : ''}</b>
+            <span style="font-size:11px;color:var(--text-3);font-weight:600">${rows.length}</span>
+          </div>
+          <div style="font-size:10.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:2px">${eur0(totalOpen)}</div>
+        </div>
+        <div style="overflow-y:auto;max-height:calc(100vh - 260px)">${cards}</div>
+      </div>`;
+    }).join('');
+
+    return `<div data-wbx-view="pipeline">
+      <div class="pad" style="padding:14px 20px">
+        <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:14px;align-items:stretch">
+          ${columns}
+        </div>
+        <div style="font-size:11px;color:var(--text-3);padding:6px 2px">Klik een kaart voor case-sheet · Verplaats via dropdown (custom confirm + audit-log) · ⛔ = terminale fase (motor stopt).</div>
+      </div>
+    </div>`;
+  }
+
   /* ── BROK 10 (v=7): Motor-monitoring (PUUR read) ─────────────────────
      Statusstrip (kantooruren-venster + cooldown + sandbox), KPI-grid
      (pending / acties-vandaag / incasso / arrangements-actief), bulk-jobs.
@@ -2107,6 +2220,7 @@
   window.DFO.VIEWS['wanbetalers/Overzicht']  = overzichtView;
   window.DFO.VIEWS['wanbetalers/Brieven']    = brievenView;
   window.DFO.VIEWS['wanbetalers/Motor']      = motorView;
+  window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
   console.debug('[wanbetalers-v2] v=6 BROK 4 — 8 fixes: (1) confirm ALTIJD op call-log; (2) veld-mapping overzicht: total_open_cents/100, days_overdue, open_invoice_count; (3) customer.name (nested) ipv customer_id op pending-actions + arrangements; (4) dedupe arrangements (één fetch, byCust van _arrLive.items); (5) bulk-modal telt distinct klanten + typ-to-confirm zonder backdrop-dismiss; (6) waarschuwing bij nieuw arrangement op klant met actief arrangement; (7) RBAC client-side gates via window.RBAC; (8) brieven kolommen template_code+generated_at+download_url+PDF-preview via wanbetalers-brief-pdf?preview=1. BROK 3 TL-mutaties/arrangements/bulk-workflow behouden.');
