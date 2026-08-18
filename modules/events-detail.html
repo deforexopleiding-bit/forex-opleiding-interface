@@ -677,7 +677,7 @@ function can(key) {
 // Webflow status: success | failure | unpublished | null
 // GHL status    : success | failure | skipped_graceful | null
 function renderSyncBadgeLg(target, status, lastSyncedAt) {
-  const labelPrefix = target === 'webflow' ? 'Webflow' : 'GoHighLevel';
+  const labelPrefix = target === 'webflow' ? 'deforexopleiding.nl' : 'GoHighLevel';
   let cls = 'sync-none';
   let label = labelPrefix + ': nog niet gesynct';
   if (status === 'success')          { cls = 'sync-ok';    label = labelPrefix + ': OK'; }
@@ -767,7 +767,7 @@ function renderPage() {
     signupsIconHtml = '<button onclick="closeSignupsAction()" title="Aanmelding sluiten"><i class="ti ti-lock"></i></button>';
   }
   const cancelIconHtml  = (canCancel && (isDraft || isPublished)) ? '<button class="danger" onclick="cancelEvent()" title="Annuleren"><i class="ti ti-x"></i></button>' : '';
-  const archiveIconHtml = (canCancel && !isArchived) ? '<button onclick="archiveEvent()" title="Archiveren — verberg uit live-lijsten en unpublish op Webflow"><i class="ti ti-archive"></i></button>' : '';
+  const archiveIconHtml = (canCancel && !isArchived) ? '<button onclick="archiveEvent()" title="Archiveren — verberg uit live-lijsten en unpublish op deforexopleiding.nl"><i class="ti ti-archive"></i></button>' : '';
   const iconRowHtml = (editIconHtml || signupsIconHtml || cancelIconHtml || archiveIconHtml)
     ? `<div class="ev-icon-row">${editIconHtml}${signupsIconHtml}${cancelIconHtml}${archiveIconHtml}</div>`
     : '';
@@ -1154,7 +1154,7 @@ function renderAttendeesTab() {
         // SOURCE-badge: kanaal waarvia attendee is binnengekomen.
         // NULL (pre-migration data) → geen badge.
         const SOURCE_STYLES = {
-          webflow         : { label: 'Webflow',   bg: 'var(--emerald-soft)', fg: 'var(--emerald)', border: 'var(--emerald-line)', title: 'Aangemaakt via publieke Webflow-flow (assessment / event-keuze)' },
+          webflow         : { label: 'DFO-site',  bg: 'var(--emerald-soft)', fg: 'var(--emerald)', border: 'var(--emerald-line)', title: 'Aangemaakt via publieke deforexopleiding.nl-flow (assessment / event-keuze)' },
           ghl             : { label: 'GHL',       bg: 'var(--blue-soft)',    fg: 'var(--blue)',    border: 'var(--blue-line)',    title: 'Aangemaakt via GHL inbound-webhook' },
           manual          : { label: 'Handmatig', bg: 'var(--slate-soft)',   fg: 'var(--slate)',   border: 'var(--slate-line)',   title: 'Handmatig toegevoegd door een admin' },
           automation_test : { label: 'Test',      bg: 'var(--amber-soft)',   fg: 'var(--amber)',   border: 'var(--amber-line)',   title: 'Synthetische attendee uit automation-tester' },
@@ -2203,7 +2203,7 @@ async function cancelEvent() {
 // de filters Concept/Live/Geannuleerd moeten verdwijnen maar wel met de
 // hele history blijven bestaan.
 async function archiveEvent() {
-  if (!confirm('Dit event archiveren? Het wordt onzichtbaar voor klanten (Webflow unpublish) en uit de standaard-overzichten gefilterd. Aangemelde deelnemers + alle data blijven bewaard.')) return;
+  if (!confirm('Dit event archiveren? Het wordt onzichtbaar voor klanten (deforexopleiding.nl unpublish) en uit de standaard-overzichten gefilterd. Aangemelde deelnemers + alle data blijven bewaard.')) return;
   try {
     const res = await window.AgentShared.apiFetch('/api/events-update?id=' + encodeURIComponent(state.eventId), {
       method: 'PATCH',

@@ -640,17 +640,17 @@
     const wf = e.webflow_sync_status || (e.webflow_last_synced_at ? 'synced' : null);
     const gh = e.ghl_sync_status || (e.ghl_last_synced_at ? 'synced' : null);
     if (!wf && !gh) return '<span style="color:var(--text-3);font-size:11px">—</span>';
-    const badge = (s, label) => {
+    // display = korte badge-tekst (kolom is smal), tooltip = volle naam.
+    // Site heet extern 'deforexopleiding.nl'; interne integratie blijft
+    // webflow_* op sync-veld/env-niveau — dit label is puur user-facing.
+    const badge = (s, display, tooltip) => {
       if (!s) return '';
-      // BUG 2 FIX — 'success' is de canonieke waarde in webflow/ghl-sync-kolommen;
-      // 'synced'/'ok' als alias behouden. Alleen 'pending'/'queued' warn; 'error'
-      // en de rest danger.
       const cls = ['success','synced','ok'].includes(s) ? 'ok'
                 : ['pending','queued','in_progress'].includes(s) ? 'warn'
                 : 'danger';
-      return `<span class="pill pill-${cls} nodot" style="font-size:10px;padding:1px 5px" title="${esc(label + ': ' + s)}">${label}</span>`;
+      return `<span class="pill pill-${cls} nodot" style="font-size:10px;padding:1px 5px" title="${esc((tooltip || display) + ': ' + s)}">${display}</span>`;
     };
-    return `<div style="display:flex;gap:3px;justify-content:flex-end">${badge(wf, 'WF')}${badge(gh, 'GHL')}</div>`;
+    return `<div style="display:flex;gap:3px;justify-content:flex-end">${badge(wf, 'DFO', 'deforexopleiding.nl')}${badge(gh, 'GHL', 'GoHighLevel')}</div>`;
   }
 
   // Bug 3b: race-fix — nul ook loading zodat een orphan-fetch niet meer

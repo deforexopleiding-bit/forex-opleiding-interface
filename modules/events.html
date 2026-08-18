@@ -579,7 +579,8 @@ function capPillClass(active, capacity) {
 //
 // renderSyncBadge returnt 1 badge HTML met label + tooltip (last_synced_at).
 function renderSyncBadge(target, status, lastSyncedAt) {
-  const labelPrefix = target === 'webflow' ? 'WF' : 'GHL';
+  // Compacte badge-tekst; volle naam ('deforexopleiding.nl') zit in tooltip.
+  const labelPrefix = target === 'webflow' ? 'DFO' : 'GHL';
   let cls = 'sync-none';
   let label = '-';
   if (status === 'success') { cls = 'sync-ok';   label = `${labelPrefix} OK`; }
@@ -588,7 +589,7 @@ function renderSyncBadge(target, status, lastSyncedAt) {
   else if (status === 'unpublished') { cls = 'sync-unpub'; label = `${labelPrefix} UNPUB`; }
 
   const tooltipParts = [];
-  tooltipParts.push(target === 'webflow' ? 'Webflow' : 'GoHighLevel');
+  tooltipParts.push(target === 'webflow' ? 'deforexopleiding.nl' : 'GoHighLevel');
   tooltipParts.push('status: ' + (status || 'nog niet gesynct'));
   if (lastSyncedAt) tooltipParts.push('laatst: ' + fmtDate(lastSyncedAt));
   const tooltip = tooltipParts.join(' | ');
@@ -3447,7 +3448,7 @@ if (!window._evOverviewKebabGlobalWired) {
 async function archiveEvent(eventId, title) {
   if (!eventId) return;
   const t = title ? ` "${title}"` : '';
-  if (!confirm(`Event${t} archiveren? Het wordt onzichtbaar voor klanten (Webflow unpublish) en uit de standaard-overzichten gefilterd. Aangemelde deelnemers + alle data blijven bewaard.`)) return;
+  if (!confirm(`Event${t} archiveren? Het wordt onzichtbaar voor klanten (deforexopleiding.nl unpublish) en uit de standaard-overzichten gefilterd. Aangemelde deelnemers + alle data blijven bewaard.`)) return;
   try {
     const res = await window.AgentShared.apiFetch('/api/events-update?id=' + encodeURIComponent(eventId), {
       method: 'PATCH',
