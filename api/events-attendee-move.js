@@ -38,7 +38,8 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendEventAttendeeInvite } from './_lib/events-invite.js';
-import { getConfirmedCount, autoCloseIfFull } from './_lib/event-registration.js';
+import { getConfirmedCount } from './_lib/event-registration.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE_STATUSES = ['aangemeld', 'aanwezig', 'sale'];
@@ -283,20 +284,15 @@ export default async function handler(req, res) {
       }
     }
 
-    // FIX (2026-08-18): auto-close-hook op target-event. Move-flow had een
-    // pre-check maar geen post-insert autoCloseIfFull — als een move het
-    // target exact vol maakt (cnt=7 → move → cnt=8, cap=8) bleef signups
-    // onterecht open. Zelfde patroon als assessment-register / assessment-
-    // submit / event-choice-submit / events-attendee-add / events-attendee-
-    // status-change / events-signup-inbound. Fail-soft: mag de move-response
-    // NOOIT breken. autoCloseIfFull is idempotent (guard op >=capacity &&
-    // !signups_closed).
-    try {
-      const targetCount = await getConfirmedCount(targetEventId);
-      await autoCloseIfFull(targetEvent, targetCount);
-    } catch (e) {
-      console.warn('[events-attendee-move] auto-close (soft):', targetEventId, e?.message || e);
-    }
+    // Shared helper: target-cascade (recount + gastenlijst + autoClose) +
+    // source-cascade (recount + gastenlijst + reopen-check). Voorheen enkel
+    // target-autoClose; source-auto-reopen was gemist waardoor een auto_full
+    // bron-event dicht bleef ondanks vrijgekomen plek. DB-trigger flipt reeds
+    // signups_closed op target bij confirmed rise.
+    await onConfirmedAttendeeMutation(
+      [targetEventId, source.event_id],
+      { reason: 'events-attendee-move' }
+    );
 
     return res.status(201).json({
       source_attendee_id: source.id,

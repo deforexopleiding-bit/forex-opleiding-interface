@@ -46,10 +46,8 @@ import { checkRateLimit } from './_lib/rate-limit.js';
 import { safeError } from './_lib/safe-error.js';
 import {
   isNiveauMatch,
-  getConfirmedCount,
-  syncGastenlijstWebflow,
-  autoCloseIfFull,
 } from './_lib/event-registration.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -219,19 +217,22 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Inschrijving kon niet worden opgeslagen.' });
   }
 
-  // ── 5) Side-effects (best-effort) ─────────────────────────────────────
-  const confirmedCount = await getConfirmedCount(event.id);
-  const gastenlijst    = await syncGastenlijstWebflow(event, confirmedCount);
-  const autoClose      = await autoCloseIfFull(event, confirmedCount);
+  // ── 5) Side-effects (best-effort) via shared helper ───────────────────
+  // Shared helper draait getConfirmedCount + syncGastenlijstWebflow +
+  // autoCloseIfFull + herevalueerCapaciteit fail-soft. Voorkomt drift met
+  // andere confirmed-attendee endpoints.
+  const [cascade] = await onConfirmedAttendeeMutation(event.id, {
+    reason: 'assessment-register',
+  });
 
   return res.status(200).json({
     ok               : true,
     attendee_id      : attendeeId,
     event_id         : event.id,
-    confirmed_count  : confirmedCount,
+    confirmed_count  : cascade?.confirmed_count ?? 0,
     capacity         : event.capacity,
-    gastenlijst_label: gastenlijst.label || null,
-    gastenlijst_sync : gastenlijst.ok && !gastenlijst.skipped ? 'updated' : (gastenlijst.skipped ? 'skipped' : 'failed'),
-    auto_closed      : !!autoClose.auto_closed,
+    gastenlijst_label: cascade?.gastenlijst_label || null,
+    gastenlijst_sync : cascade?.gastenlijst_sync || 'failed',
+    auto_closed      : !!cascade?.auto_closed,
   });
 }

@@ -81,9 +81,8 @@ import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
 import {
   CONFIRMED_STATUSES,
   getConfirmedCount,
-  syncGastenlijstWebflow,
-  autoCloseIfFull,
 } from './_lib/event-registration.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -341,25 +340,12 @@ export default async function handler(req, res) {
     }
 
     // Auto-close-check per uniek event waar de confirmed_count kan zijn
-    // gestegen door de late-koppeling. Hergebruikt de bestaande triplet
-    // (getConfirmedCount + syncGastenlijstWebflow + autoCloseIfFull);
-    // autoCloseIfFull is idempotent. Fail-soft — mag de submit NOOIT breken.
+    // gestegen door de late-koppeling. Shared helper draait de triplet
+    // fail-soft; DB-trigger flipt de flag reeds bij confirmed rise.
     if (eventIdsToCheck.size > 0) {
-      for (const evId of eventIdsToCheck) {
-        try {
-          const { data: ev } = await supabaseAdmin
-            .from('events')
-            .select('id, capacity, signups_closed, webflow_item_id')
-            .eq('id', evId)
-            .maybeSingle();
-          if (!ev) continue;
-          const cnt = await getConfirmedCount(evId);
-          await syncGastenlijstWebflow(ev, cnt);
-          await autoCloseIfFull(ev, cnt);
-        } catch (e) {
-          console.warn('[assessment-submit] auto-close (soft):', evId, e?.message || e);
-        }
-      }
+      await onConfirmedAttendeeMutation([...eventIdsToCheck], {
+        reason: 'assessment-submit-late-link',
+      });
     }
 
     // Fail-soft dual-write: notify de mentor van de deelnemer (via

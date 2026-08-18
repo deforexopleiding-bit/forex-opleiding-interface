@@ -24,13 +24,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import {
-  CONFIRMED_STATUSES,
-  getConfirmedCount,
-  syncGastenlijstWebflow,
-  autoCloseIfFull,
-  herevalueerCapaciteit,
-} from './_lib/event-registration.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_STATUS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
@@ -154,41 +148,14 @@ export default async function handler(req, res) {
       console.error('[events-attendee-status-change audit]', e.message);
     }
 
-    // Auto-close-check: bij een transitie NAAR een CONFIRMED_STATUS kan de
-    // confirmed_count over capacity heen tikken. Alleen firen bij een echte
-    // in-transitie (before.status was NIET confirmed, newStatus WEL) — bij een
-    // uit-transitie zakt de count juist en is autoCloseIfFull een no-op.
-    // autoCloseIfFull is idempotent. Fail-soft — mag de status-change NOOIT
-    // breken.
-    const roseToConfirmed = CONFIRMED_STATUSES.includes(newStatus)
-                         && !CONFIRMED_STATUSES.includes(before.status);
-    if (roseToConfirmed) {
-      try {
-        const { data: ev } = await supabaseAdmin
-          .from('events')
-          .select('id, capacity, signups_closed, webflow_item_id')
-          .eq('id', row.event_id)
-          .maybeSingle();
-        if (ev) {
-          const cnt = await getConfirmedCount(row.event_id);
-          await syncGastenlijstWebflow(ev, cnt);
-          await autoCloseIfFull(ev, cnt);
-        }
-      } catch (e) {
-        console.warn('[events-attendee-status-change] auto-close (soft):', e?.message || e);
-      }
-    }
-
-    // Auto-reopen (breed): elke statuswijziging kan de bevestigde telling laten
-    // zakken (uit-transitie naar geannuleerd/no_show/switched/…). herevalueer-
-    // Capaciteit heropent uitsluitend een auto_full-gesloten event dat nu weer
-    // plek heeft en de reopen-deadline niet is gepasseerd (self-guarded, dus
-    // veilig om bij élke wijziging aan te roepen). Fail-soft.
-    try {
-      await herevalueerCapaciteit(row.event_id);
-    } catch (e) {
-      console.warn('[events-attendee-status-change] auto-reopen (soft):', e?.message || e);
-    }
+    // Shared helper: complete cascade (recount + gastenlijst + close-check +
+    // reopen-check). Elke statuswijziging kan de count omhoog OF omlaag
+    // duwen; helper is idempotent en fail-soft, dus veilig om altijd aan te
+    // roepen. DB-trigger flipt reeds signups_closed=true bij rise-naar-
+    // confirmed op de nieuwe rij.
+    await onConfirmedAttendeeMutation(row.event_id, {
+      reason: 'events-attendee-status-change',
+    });
 
     return res.status(200).json({ attendee: row });
   } catch (e) {

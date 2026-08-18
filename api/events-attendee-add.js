@@ -36,9 +36,8 @@ import { requirePermission } from './_lib/requirePermission.js';
 import {
   CONFIRMED_STATUSES,
   getConfirmedCount,
-  syncGastenlijstWebflow,
-  autoCloseIfFull,
 } from './_lib/event-registration.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 // Sinds opt-in herontwerp: 'send_invite' triggert nu automation_enabled i.p.v.
 // een one-shot invite. De sendEventAttendeeInvite-helper is dus niet meer nodig
 // hier (blijft beschikbaar voor andere callers zoals de move-flow).
@@ -218,19 +217,14 @@ export default async function handler(req, res) {
       console.error('[events-attendee-add audit]', e.message);
     }
 
-    // Auto-close-check: bij een nieuwe rij in CONFIRMED_STATUSES kan de
-    // confirmed_count over capacity heen tikken. Hergebruikt de bestaande
-    // triplet (getConfirmedCount + syncGastenlijstWebflow + autoCloseIfFull);
-    // autoCloseIfFull is idempotent (guard op >=capacity && !signups_closed).
-    // Fail-soft — mag de attendee-insert NOOIT breken.
+    // Shared helper: recount + gastenlijst + autoClose. Skip als de status
+    // geen CONFIRMED_STATUS is (helper zou ook gewoon no-op zijn maar we
+    // besparen een DB-round-trip). Fail-soft binnen de helper zelf.
     if (CONFIRMED_STATUSES.includes(status)) {
-      try {
-        const cnt = await getConfirmedCount(eventId);
-        await syncGastenlijstWebflow(ev, cnt);
-        await autoCloseIfFull(ev, cnt);
-      } catch (e) {
-        console.warn('[events-attendee-add] auto-close (soft):', e?.message || e);
-      }
+      await onConfirmedAttendeeMutation(eventId, {
+        reason: 'events-attendee-add',
+        skipReopen: true,
+      });
     }
 
     // GEEN one-shot invite meer vanuit deze endpoint. send_invite=true zet

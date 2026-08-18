@@ -60,10 +60,8 @@ import { extractClientIp, hashIp } from './_lib/assessment-validation.js';
 import {
   isNiveauMatch,
   getConfirmedCount,
-  syncGastenlijstWebflow,
-  autoCloseIfFull,
-  herevalueerCapaciteit,
 } from './_lib/event-registration.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RATE_LIMIT_MAX_PER_MINUTE = 30;
@@ -282,17 +280,12 @@ export default async function handler(req, res) {
           console.error('[event-choice-submit] same-event link:', linkErr.message);
           return res.status(500).json({ error: 'Kon assessment niet koppelen.' });
         }
-        // Cascade: deze rij telt nu mee → recount + gastenlijst + autoClose.
-        let count = 0;
-        let gast  = { ok: true, skipped: true, label: null };
-        let autoclose = { ok: true, skipped: true };
-        try {
-          count = await getConfirmedCount(targetEvent.id);
-          gast  = await syncGastenlijstWebflow(targetEvent, count);
-          autoclose = await autoCloseIfFull(targetEvent, count);
-        } catch (e) {
-          console.error('[event-choice-submit] same-event link cascade:', e?.message || e);
-        }
+        // Cascade: deze rij telt nu mee → shared helper (recount + gastenlijst
+        // + autoClose + reopen-check). DB-trigger flipt reeds signups_closed
+        // bij confirmed rise.
+        const [cascade] = await onConfirmedAttendeeMutation(targetEvent.id, {
+          reason: 'event-choice-submit-same-event-link',
+        });
         const capForResp = Number.isInteger(Number(targetEvent.capacity))
           ? Number(targetEvent.capacity) : null;
         return res.status(200).json({
@@ -302,11 +295,11 @@ export default async function handler(req, res) {
           old_attendee_id          : attendee.id,
           target_event_id          : targetEvent.id,
           old_event_id             : targetEvent.id,
-          confirmed_count_target   : count,
+          confirmed_count_target   : cascade?.confirmed_count ?? 0,
           capacity_target          : capForResp,
-          gastenlijst_label_target : gast?.label || null,
+          gastenlijst_label_target : cascade?.gastenlijst_label || null,
           gastenlijst_label_old    : null,
-          auto_closed_target       : !!autoclose?.auto_closed,
+          auto_closed_target       : !!cascade?.auto_closed,
         });
       }
       // Geen body-id of al gekoppeld → bestaand NO_OP gedrag.
@@ -431,36 +424,15 @@ export default async function handler(req, res) {
     //           een plek vrij hebben en moet heropenen).
     const oldEventId = attendee.event_id;
 
-    let targetCount        = 0;
-    let targetGastenlijst  = { ok: true, skipped: true, label: null };
-    let targetAutoClose    = { ok: true, skipped: true };
-    try {
-      targetCount = await getConfirmedCount(targetEvent.id);
-      targetGastenlijst = await syncGastenlijstWebflow(targetEvent, targetCount);
-      targetAutoClose   = await autoCloseIfFull(targetEvent, targetCount);
-    } catch (e) {
-      console.error('[event-choice-submit] target cascade:', e?.message || e);
-    }
-
-    let oldGastenlijst = { ok: true, skipped: true, label: null };
-    try {
-      const oldCount = await getConfirmedCount(oldEventId);
-      // Oud event-row ophalen voor webflow_item_id + capacity (nodig voor label).
-      const { data: oldEv } = await supabaseAdmin
-        .from('events')
-        .select('id, capacity, webflow_item_id')
-        .eq('id', oldEventId)
-        .maybeSingle();
-      if (oldEv) {
-        oldGastenlijst = await syncGastenlijstWebflow(oldEv, oldCount);
-      }
-      // Auto-reopen: de switch-away maakte mogelijk een plek vrij op het oude
-      // event. herevalueerCapaciteit heropent alleen een auto_full-sluiting die
-      // nu weer plek heeft en de deadline niet is gepasseerd (self-guarded).
-      await herevalueerCapaciteit(oldEventId);
-    } catch (e) {
-      console.error('[event-choice-submit] old recompute:', e?.message || e);
-    }
+    // Shared helper draait target + source in één call (dedup + fail-soft).
+    // Op target: recount + gastenlijst + autoClose + herevalueer.
+    // Op source: recount + gastenlijst + herevalueer (auto-reopen).
+    const cascade   = await onConfirmedAttendeeMutation(
+      [targetEvent.id, oldEventId],
+      { reason: 'event-choice-submit-move' }
+    );
+    const targetRes = cascade.find((c) => c.event_id === targetEvent.id) || {};
+    const oldRes    = cascade.find((c) => c.event_id === oldEventId)     || {};
 
     return res.status(200).json({
       ok                        : true,
@@ -468,11 +440,11 @@ export default async function handler(req, res) {
       old_attendee_id           : attendee.id,
       target_event_id           : targetEvent.id,
       old_event_id              : oldEventId,
-      confirmed_count_target    : targetCount,
+      confirmed_count_target    : targetRes?.confirmed_count ?? 0,
       capacity_target           : targetCap,
-      gastenlijst_label_target  : targetGastenlijst.label || null,
-      gastenlijst_label_old     : oldGastenlijst.label || null,
-      auto_closed_target        : !!targetAutoClose.auto_closed,
+      gastenlijst_label_target  : targetRes?.gastenlijst_label || null,
+      gastenlijst_label_old     : oldRes?.gastenlijst_label    || null,
+      auto_closed_target        : !!targetRes?.auto_closed,
     });
   } catch (e) {
     console.error('[event-choice-submit] fatal:', e?.message || e);
