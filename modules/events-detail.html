@@ -2093,7 +2093,7 @@ function renderSignupsClosedBanner(ev) {
 }
 
 async function closeSignupsAction() {
-  if (!confirm('Inschrijvingen voor dit event handmatig sluiten? Webflow-item wordt op draft gezet en GHL-dropdown wordt bijgewerkt.')) return;
+  if (!confirm('Inschrijvingen voor dit event handmatig sluiten? deforexopleiding.nl-item wordt op draft gezet en GHL-dropdown wordt bijgewerkt.')) return;
   try {
     const res = await window.AgentShared.apiFetch('/api/events-close-signups?id=' + encodeURIComponent(state.eventId), {
       method: 'POST',
@@ -2113,7 +2113,7 @@ async function closeSignupsAction() {
 }
 
 async function reopenSignupsAction() {
-  if (!confirm('Inschrijvingen voor dit event heropenen? Webflow-item wordt republished en GHL-dropdown wordt bijgewerkt.')) return;
+  if (!confirm('Inschrijvingen voor dit event heropenen? deforexopleiding.nl-item wordt republished en GHL-dropdown wordt bijgewerkt.')) return;
   try {
     const res = await window.AgentShared.apiFetch('/api/events-reopen-signups?id=' + encodeURIComponent(state.eventId), {
       method: 'POST',

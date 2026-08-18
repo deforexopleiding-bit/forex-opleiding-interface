@@ -871,7 +871,7 @@
       <div class="card">
         <div class="card-head"><span class="tile-ico" style="background:var(--blue-soft);color:var(--blue)">${svg(I.refresh || I.tick)}</span><div class="card-title">Sync-status</div></div>
         <div class="card-body">
-          <div class="kv"><dt>Webflow</dt><dd>${_syncBadge(ev.webflow_sync_status, ev.webflow_last_synced_at)}</dd></div>
+          <div class="kv"><dt>deforexopleiding.nl</dt><dd>${_syncBadge(ev.webflow_sync_status, ev.webflow_last_synced_at)}</dd></div>
           <div class="kv"><dt>GoHighLevel</dt><dd>${_syncBadge(ev.ghl_sync_status, ev.ghl_last_synced_at)}</dd></div>
         </div>
         <div style="padding:11px 17px;background:var(--surface-2);border-top:1px solid var(--border);display:flex;gap:8px">
