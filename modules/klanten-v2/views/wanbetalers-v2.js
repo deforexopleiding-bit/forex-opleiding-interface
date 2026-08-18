@@ -1946,6 +1946,352 @@
     </div>`;
   }
 
+  /* ── BROK 5 (v=10): WA+mail inbox (split-pane, vervangt Gesprekken) ─
+     Hergebruikt module='finance' endpoints (zelfde als andere inboxen).
+     Links: /api/inbox-conversations-list (search + status-filter).
+     Midden: /api/inbox-thread-unified (WA+mail chronologisch).
+     Rechts: /api/inbox-conversation-context (klant + open facturen).
+     Compose: WA text → 422 24h_window_expired schakelt naar templates
+     (via /api/inbox-send-template + /api/inbox-template-list). Mail via
+     /api/email-send-v2. Custom confirm-modal vóór ELKE send. */
+  _live.inbox = {
+    convs:        { loading: false, fetched: false, error: null, items: [], _seq: 0 },
+    thread:       { loading: {}, error: {}, byConv: {}, _seq: 0 }, // per conv
+    ctx:          { loading: {}, byConv: {} },
+    templates:    { loading: {}, byConv: {} },
+    quickReplies: { loading: {}, byConv: {} },
+  };
+  _ui.inbox = {
+    selectedConv:  null,
+    searchQ:       '',
+    _searchTimer:  null,
+    statusFilter:  'active',           // 'active' | 'afgehandeld' | 'archief' | 'all'
+    compose: {
+      channel:          'wa',          // 'wa' | 'mail'
+      text:             '',
+      subject:          '',
+      templateName:     '',
+      sending:          false,
+      waWindowExpired:  false,
+      error:            null,
+    },
+  };
+
+  async function _fetchInboxConvs() {
+    const st = _live.inbox.convs;
+    if (st.loading) return;
+    const mySeq = ++st._seq;
+    st.loading = true; st.error = null;
+    const q = new URLSearchParams({ module: 'finance', limit: '200', status_filter: _ui.inbox.statusFilter || 'active' });
+    if (_ui.inbox.searchQ && _ui.inbox.searchQ.trim()) q.set('search', _ui.inbox.searchQ.trim());
+    const j = await tryFetch('inbox:convs', '/api/inbox-conversations-list?' + q.toString(), 8000);
+    if (mySeq !== st._seq) return;
+    if (j && j.error) st.error = j.error;
+    else { st.items = asArr(j?.items); st.fetched = true; }
+    st.loading = false;
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+  async function _fetchInboxThread(convId) {
+    if (!convId) return;
+    const bag = _live.inbox.thread.byConv[convId] = _live.inbox.thread.byConv[convId] || { items: [], conversation: null };
+    if (_live.inbox.thread.loading[convId]) return;
+    _live.inbox.thread.loading[convId] = true; delete _live.inbox.thread.error[convId];
+    const j = await tryFetch('inbox:thread:' + convId, `/api/inbox-thread-unified?conversation_id=${encodeURIComponent(convId)}&include_email=1&limit=200`, 10000);
+    if (j && j.error) _live.inbox.thread.error[convId] = j.error;
+    else {
+      bag.items = asArr(j?.items);
+      bag.conversation = j?.conversation || null;
+      // Als 24u-venster nog niet expired volgens conv, reset de UI-toggle.
+      if (bag.conversation && bag.conversation.can_send_text) _ui.inbox.compose.waWindowExpired = false;
+      else if (bag.conversation && bag.conversation.can_send_text === false) _ui.inbox.compose.waWindowExpired = true;
+    }
+    _live.inbox.thread.loading[convId] = false;
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+  async function _fetchInboxCtx(convId) {
+    if (!convId) return;
+    if (_live.inbox.ctx.loading[convId] || _live.inbox.ctx.byConv[convId]) return;
+    _live.inbox.ctx.loading[convId] = true;
+    const j = await tryFetch('inbox:ctx:' + convId, `/api/inbox-conversation-context?conversation_id=${encodeURIComponent(convId)}`, 8000);
+    _live.inbox.ctx.loading[convId] = false;
+    if (j && !j.error) _live.inbox.ctx.byConv[convId] = j;
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+  async function _fetchInboxTemplates(convId) {
+    if (!convId) return;
+    if (_live.inbox.templates.loading[convId] || _live.inbox.templates.byConv[convId]) return;
+    _live.inbox.templates.loading[convId] = true;
+    const j = await tryFetch('inbox:tpl:' + convId, `/api/inbox-template-list?conversation_id=${encodeURIComponent(convId)}`, 8000);
+    _live.inbox.templates.loading[convId] = false;
+    if (j && !j.error) _live.inbox.templates.byConv[convId] = asArr(j?.items);
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+
+  window.__wbxInboxSelect = (convId) => {
+    _ui.inbox.selectedConv = String(convId);
+    _ui.inbox.compose = { channel: 'wa', text: '', subject: '', templateName: '', sending: false, waWindowExpired: false, error: null };
+    _fetchInboxThread(convId);
+    _fetchInboxCtx(convId);
+    _fetchInboxTemplates(convId);
+    // Mark-read (silent, fire-and-forget).
+    apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
+    try { window.DFO?.render?.(); } catch (_) {}
+  };
+  window.__wbxInboxSearch = (val) => {
+    _ui.inbox.searchQ = String(val || '');
+    if (_ui.inbox._searchTimer) clearTimeout(_ui.inbox._searchTimer);
+    _ui.inbox._searchTimer = setTimeout(() => {
+      _live.inbox.convs.fetched = false;
+      _fetchInboxConvs();
+    }, 250);
+  };
+  window.__wbxInboxStatus = (val) => {
+    _ui.inbox.statusFilter = String(val || 'active');
+    _live.inbox.convs.fetched = false;
+    _fetchInboxConvs();
+  };
+  window.__wbxInboxToggleChannel = (ch) => {
+    _ui.inbox.compose.channel = String(ch || 'wa');
+    _ui.inbox.compose.error = null;
+    try { window.DFO?.render?.(); } catch (_) {}
+  };
+  window.__wbxInboxComposeField = (field, val) => {
+    _ui.inbox.compose[field] = val;
+  };
+  window.__wbxInboxPickTemplate = (name) => {
+    _ui.inbox.compose.templateName = String(name || '');
+  };
+  window.__wbxInboxSetStatus = async (newStatus) => {
+    const convId = _ui.inbox.selectedConv;
+    if (!convId) return;
+    const labelMap = { open: 'Open', afgehandeld: 'Afgehandeld', gearchiveerd: 'Gearchiveerd' };
+    const ok = await _askConfirm('Gesprek verplaatsen?', `Zet dit gesprek op <b>${esc(labelMap[newStatus] || newStatus)}</b>.`, { okLabel: 'Ja' });
+    if (!ok) return;
+    const r = await apiPost('/api/inbox-conversation-set-status', { conversation_id: convId, status: newStatus });
+    if (!r.ok) { _toast('Kon status niet zetten: ' + (r.error || 'onbekend'), 'error'); return; }
+    _live.inbox.convs.fetched = false; _fetchInboxConvs();
+    _toast('Status bijgewerkt.', 'success');
+  };
+
+  window.__wbxInboxSend = async () => {
+    const c = _ui.inbox.compose;
+    const convId = _ui.inbox.selectedConv;
+    if (!convId) return;
+    if (c.sending) return;
+    const bag = _live.inbox.thread.byConv[convId];
+    const conv = bag?.conversation || null;
+    const custName = conv?.customer_name || (_live.inbox.convs.items.find((x) => x.id === convId) || {}).display_name || 'klant';
+
+    // Build payload per channel.
+    if (c.channel === 'wa') {
+      // WA text of template
+      const useTemplate = c.waWindowExpired || !!c.templateName;
+      if (useTemplate) {
+        if (!c.templateName) { c.error = 'Kies een template (24u-venster is verlopen).'; try { window.DFO?.render?.(); } catch (_) {} return; }
+        const tplLabel = c.templateName;
+        const ok = await _askConfirm(`Template versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> WhatsApp (template)</div><div><b>Template:</b> <span style="font-family:'IBM Plex Mono',monospace">${esc(tplLabel)}</span></div>`, { okLabel: 'Ja, verstuur' });
+        if (!ok) return;
+        c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
+        const r = await apiPost('/api/inbox-send-template', { conversation_id: convId, template_name: tplLabel, language: 'nl', variables: {} });
+        c.sending = false;
+        if (!r.ok) { c.error = r.error || 'Template-send faalde.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+        c.templateName = ''; c.text = '';
+      } else {
+        const body = (c.text || '').trim();
+        if (!body) { c.error = 'Bericht is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+        const ok = await _askConfirm(`Bericht versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> WhatsApp</div><div style="margin-top:6px;padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px">${esc(body)}</div>`, { okLabel: 'Ja, verstuur' });
+        if (!ok) return;
+        c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
+        const r = await apiPost('/api/inbox-send', { conversation_id: convId, mode: 'text', body });
+        c.sending = false;
+        if (!r.ok) {
+          // 24h_window_expired detectie
+          const errStr = String(r.error || '').toLowerCase();
+          if (errStr.includes('24h_window_expired') || errStr.includes('24h window') || r.status === 422) {
+            c.waWindowExpired = true;
+            c.error = '24u-venster verlopen — kies een template.';
+            _fetchInboxTemplates(convId);
+          } else {
+            c.error = r.error || 'WA-send faalde.';
+          }
+          try { window.DFO?.render?.(); } catch (_) {}
+          return;
+        }
+        c.text = '';
+      }
+    } else if (c.channel === 'mail') {
+      const body = (c.text || '').trim();
+      const subject = (c.subject || '').trim();
+      if (!subject) { c.error = 'Onderwerp is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+      if (!body)    { c.error = 'Bericht is leeg.';   try { window.DFO?.render?.(); } catch (_) {} return; }
+      const ctx = _live.inbox.ctx.byConv[convId];
+      const toEmail = ctx?.customer?.email;
+      if (!toEmail) { c.error = 'Geen e-mailadres bij deze klant.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+      const ok = await _askConfirm(`Mail versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> E-mail</div><div><b>Aan:</b> ${esc(toEmail)}</div><div><b>Onderwerp:</b> ${esc(subject)}</div><div style="margin-top:6px;padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px;white-space:pre-wrap">${esc(body)}</div>`, { okLabel: 'Ja, verstuur' });
+      if (!ok) return;
+      c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
+      const r = await apiPost('/api/email-send-v2', {
+        from_mailbox: 'administratie',
+        to: toEmail,
+        subject,
+        text: body,
+      });
+      c.sending = false;
+      if (!r.ok) { c.error = r.error || 'Mail-send faalde.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+      c.text = ''; c.subject = '';
+    }
+
+    // Refetch thread + convs (nieuwe outbound + last_message_at).
+    delete _live.inbox.thread.byConv[convId];
+    _fetchInboxThread(convId);
+    _live.inbox.convs.fetched = false; _fetchInboxConvs();
+    _toast('Bericht verstuurd.', 'success');
+  };
+  window.__wbxRetryInbox = () => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); };
+
+  function _inboxConvsListHtml() {
+    const st = _live.inbox.convs;
+    if (st.loading && !st.items.length) return _skelRows(6);
+    if (st.error  && !st.items.length) return `<div style="padding:14px">${_errBlk(st.error, 'inbox')}</div>`;
+    if (!st.items.length) return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">Geen gesprekken in dit filter.</div>`;
+    return st.items.map((c) => {
+      const cid = String(c.id);
+      const active = _ui.inbox.selectedConv === cid;
+      const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
+      const preview = c.last_message_preview || '';
+      const when = c.last_message_at ? _fmtDateTime(c.last_message_at) : '';
+      const unread = Number(c.unread_count) || 0;
+      const briefBadge = c.brief_sent ? '<span title="Brief verstuurd" style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue);font-weight:600;margin-left:4px">✉</span>' : '';
+      return `<div onclick="__wbxInboxSelect('${esc(cid)}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${active ? 'var(--brand-soft,#E2F1F5)' : 'transparent'};transition:background .08s">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <div style="font-weight:${unread > 0 ? '700' : '500'};font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(name)}${briefBadge}</div>
+          <div style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(when)}</div>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px">${esc(preview)}</div>
+        ${unread > 0 ? `<div style="margin-top:3px"><span style="display:inline-block;background:var(--rose);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${unread}</span></div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function _inboxThreadHtml(convId) {
+    if (!convId) return `<div style="padding:60px 20px;text-align:center;color:var(--text-3);font-size:13px">← Kies een gesprek links.</div>`;
+    const loading = _live.inbox.thread.loading[convId];
+    const error   = _live.inbox.thread.error[convId];
+    const bag     = _live.inbox.thread.byConv[convId];
+    if (loading && (!bag || !bag.items.length)) return `<div style="padding:14px">${_skelRows(6)}</div>`;
+    if (error && (!bag || !bag.items.length)) return `<div style="padding:14px">${_errBlk(error, 'thread')}</div>`;
+    const items = asArr(bag?.items);
+    if (!items.length) return `<div style="padding:60px 20px;text-align:center;color:var(--text-3);font-size:13px">Nog geen berichten.</div>`;
+    return items.map((m) => {
+      const isOut = m.direction === 'outbound' || m.direction === 'out';
+      const bg = isOut ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface-2)';
+      const align = isOut ? 'flex-end' : 'flex-start';
+      const chBadge = m.channel === 'email'
+        ? '<span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue);font-weight:600;margin-right:4px">✉ MAIL</span>'
+        : '<span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--emerald-soft);color:var(--emerald);font-weight:600;margin-right:4px">💬 WA</span>';
+      const subj = m.channel === 'email' && m.meta?.subject ? `<div style="font-weight:600;margin-bottom:3px;font-size:12px">${esc(m.meta.subject)}</div>` : '';
+      return `<div style="display:flex;justify-content:${align};margin-bottom:9px">
+        <div style="max-width:78%;padding:8px 11px;background:${bg};border:1px solid var(--border);border-radius:var(--r-sm)">
+          <div style="font-size:10.5px;color:var(--text-3);margin-bottom:3px">${chBadge}${esc(_fmtDateTime(m.at))}</div>
+          ${subj}
+          <div style="font-size:12.5px;white-space:pre-wrap;word-break:break-word">${esc(m.body || '')}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function _inboxComposeHtml(convId) {
+    if (!convId) return '';
+    const c = _ui.inbox.compose;
+    const bag = _live.inbox.thread.byConv[convId];
+    const conv = bag?.conversation || null;
+    const canSendText = conv?.can_send_text !== false && !c.waWindowExpired;
+    const tpls = asArr(_live.inbox.templates.byConv[convId]);
+    const chBtn = (id, label) => `<button class="chip ${c.channel === id ? 'on' : ''}" style="font-size:11px;padding:3px 10px" onclick="__wbxInboxToggleChannel('${id}')">${esc(label)}</button>`;
+    const errLine = c.error ? `<div style="color:var(--rose);font-size:11.5px;margin-top:4px">⚠ ${esc(c.error)}</div>` : '';
+    const statBtn = (v, l) => `<button class="btn btn-ghost btn-sm" style="font-size:10.5px;padding:3px 8px" onclick="__wbxInboxSetStatus('${v}')">${esc(l)}</button>`;
+
+    let composerHtml = '';
+    if (c.channel === 'wa') {
+      if (canSendText) {
+        composerHtml = `<textarea placeholder="Typ een WhatsApp-bericht…" oninput="__wbxInboxComposeField('text',this.value)" rows="3" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
+      } else {
+        composerHtml = `<div style="font-size:11.5px;color:var(--amber);margin-bottom:6px">24u-venster is verlopen — vrije tekst geblokkeerd. Kies een template:</div>
+          <select onchange="__wbxInboxPickTemplate(this.value)" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1)">
+            <option value="">— kies template —</option>
+            ${tpls.filter((t) => (t.category || '').toLowerCase().includes('wanbetaler') || (t.category || '').toLowerCase() === 'utility' || !t.category).map((t) => `<option value="${esc(t.name || t.template_name)}" ${c.templateName === (t.name || t.template_name) ? 'selected' : ''}>${esc(t.name || t.template_name)}${t.category ? ' · ' + esc(t.category) : ''}</option>`).join('')}
+          </select>`;
+      }
+    } else if (c.channel === 'mail') {
+      composerHtml = `<input type="text" placeholder="Onderwerp" value="${esc(c.subject || '')}" oninput="__wbxInboxComposeField('subject',this.value)" style="width:100%;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-bottom:6px;box-sizing:border-box" />
+        <textarea placeholder="Typ een mail…" oninput="__wbxInboxComposeField('text',this.value)" rows="4" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
+    }
+
+    return `<div style="border-top:1px solid var(--border);background:var(--surface);padding:10px 14px">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
+        ${chBtn('wa', '💬 WhatsApp')}
+        ${chBtn('mail', '✉ E-mail')}
+        <div style="flex:1"></div>
+        ${statBtn('open', 'Open')}
+        ${statBtn('afgehandeld', 'Afgehandeld')}
+        ${statBtn('gearchiveerd', 'Archiveer')}
+      </div>
+      ${composerHtml}
+      ${errLine}
+      <div style="display:flex;justify-content:flex-end;margin-top:6px">
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="__wbxInboxSend()" ${c.sending ? 'disabled' : ''}>${c.sending ? 'Bezig…' : 'Verstuur'}</button>
+      </div>
+    </div>`;
+  }
+
+  function _inboxCtxHtml(convId) {
+    const ctx = _live.inbox.ctx.byConv[convId];
+    if (!ctx) return '';
+    const cust = ctx.customer || {};
+    const invs = asArr(ctx.open_invoices);
+    const totalOpen = Number(ctx.totals?.total_open_cents || 0) / 100;
+    return `<div style="border-bottom:1px solid var(--border);background:var(--surface-2);padding:9px 14px;font-size:12px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline">
+        <b>${esc(cust.name || 'Onbekende klant')}</b>
+        ${cust.email ? `<span style="color:var(--text-3);font-size:11px">${esc(cust.email)}</span>` : ''}
+        <div style="flex:1"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;color:var(--rose);font-weight:600">${eur(totalOpen)}</span>
+        <span style="font-size:11px;color:var(--text-3)">${invs.length} open fact</span>
+        ${cust.id ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="__wbxOpenCase('${esc(cust.id)}')" title="Open case-sheet">Dossier →</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  function inboxView() {
+    if (!_live.inbox.convs.fetched && !_live.inbox.convs.loading) queueMicrotask(_fetchInboxConvs);
+    const convId = _ui.inbox.selectedConv;
+    const qVal = String(_ui.inbox.searchQ || '');
+    const statusBtn = (v, l) => `<button class="chip ${_ui.inbox.statusFilter === v ? 'on' : ''}" style="font-size:11px;padding:3px 9px" onclick="__wbxInboxStatus('${v}')">${esc(l)}</button>`;
+
+    return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">
+      <div style="display:flex;gap:0;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+        <div style="width:320px;min-width:260px;max-width:38%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border)">
+            <input id="wbxInboxSearch" type="text" value="${esc(qVal)}" oninput="__wbxInboxSearch(this.value)" placeholder="Zoek naam / nummer / e-mail…" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font-size:12px;box-sizing:border-box" autocomplete="off" spellcheck="false" />
+            <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
+              ${statusBtn('active', 'Actief')}
+              ${statusBtn('afgehandeld', 'Afgehandeld')}
+              ${statusBtn('archief', 'Archief')}
+              ${statusBtn('all', 'Alle')}
+            </div>
+          </div>
+          <div id="wbxInboxList" style="flex:1;overflow-y:auto;min-height:0">${_inboxConvsListHtml()}</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          ${convId ? _inboxCtxHtml(convId) : ''}
+          <div style="flex:1;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
+          ${_inboxComposeHtml(convId)}
+        </div>
+      </div>
+      ${_officeHoursBanner()}
+    </div>`;
+  }
+
   /* ── BROK 7 (v=9): Case-sheet overlay (klant-dossier + bellen) ──────
      Full-screen modal via document.body.appendChild (losgekoppeld van
      DFO.render). Secties: open facturen, timeline (WanbetalersTimeline),
@@ -2551,7 +2897,7 @@
   }
 
   /* ── Registratie ────────────────────────────────────────────────────── */
-  window.DFO.VIEWS['wanbetalers/Gesprekken'] = gesprekkenView;
+  window.DFO.VIEWS['wanbetalers/Gesprekken'] = inboxView;
   window.DFO.VIEWS['wanbetalers/Acties']     = actiesView;
   window.DFO.VIEWS['wanbetalers/Overzicht']  = overzichtView;
   window.DFO.VIEWS['wanbetalers/Brieven']    = brievenView;
