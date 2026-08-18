@@ -74,6 +74,38 @@
   window.__wbxNoopB3 = NOOP_B3;
   function _toast(msg, tone) { try { window.KV && window.KV.toast && window.KV.toast(msg, tone ? { tone } : undefined); } catch (_) {} }
 
+  // v=6 FIX 7 — RBAC: lazy-load window.RBAC (uit /modules/shared/permissions.js).
+  // Boot in de first-view-render. Cache-vlaggen per permissie zodat de
+  // knop-rendering niet elke frame een sync-check hoeft te doen.
+  const _rbac = { loaded: false, loading: false,
+    // Permission-mapping (bevestigd door endpoints in api/ recon):
+    canBrief:    false, // finance.incasso.manage
+    canExecute:  false, // finance.dunning.execute
+    canPropose:  false, // finance.arrangements.propose
+    canApprove:  false, // finance.arrangements.approve
+  };
+  async function _ensureRbac() {
+    if (_rbac.loaded || _rbac.loading) return;
+    _rbac.loading = true;
+    try {
+      if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+        await window.RBAC.ensurePermissionsLoaded();
+        const can = (k) => !!(window.RBAC.canSync && window.RBAC.canSync(k));
+        _rbac.canBrief   = can('finance.incasso.manage');
+        _rbac.canExecute = can('finance.dunning.execute');
+        _rbac.canPropose = can('finance.arrangements.propose');
+        _rbac.canApprove = can('finance.arrangements.approve');
+      } else {
+        // Fallback: RBAC-lib niet geladen → laat alle knoppen zichtbaar,
+        // server-side gate blijft de harde stop (403 toast bij poging).
+        _rbac.canBrief = _rbac.canExecute = _rbac.canPropose = _rbac.canApprove = true;
+      }
+    } catch (e) { console.warn('[wanbetalers-v2] RBAC load fail:', e?.message || e); _rbac.canBrief = _rbac.canExecute = _rbac.canPropose = _rbac.canApprove = true; }
+    _rbac.loaded = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  queueMicrotask(_ensureRbac);
+
   /* ── Custom confirm-modal (Promise-based, geen native confirm) ───── */
   function _closeConfirmModal() {
     const m = document.getElementById('wbxConfirmRoot');
@@ -132,7 +164,8 @@
           <button id="wbxConfirmOk" class="btn btn-primary btn-sm" disabled style="background:${bgVar};border-color:${bgVar};color:#fff;opacity:.5;cursor:not-allowed">${okLabel}</button>
         </div>
       </div>`;
-      root.addEventListener('click', (e) => { if (e.target === root) { _closeConfirmModal(); resolve(false); } });
+      // v=6 FIX 5: GEEN backdrop-dismiss op typ-to-confirm — te makkelijk
+      // om per ongeluk weg te klikken vlak vóór START. Alleen Cancel / Esc.
       document.body.appendChild(root);
       document.addEventListener('keydown', _confirmModalKey, true);
       const inp = document.getElementById('wbxTypedInput');
@@ -253,18 +286,27 @@
     else st.items = asArr(j.items || j.actions);
     if (window.DFO?.render) window.DFO.render();
   }
+  // v=6 FIX 4: dedupe — _fetchArrangements consumeert nu de gedeelde
+  // _arrLive.items en bouwt daaruit de byCust-map. Voorkomt de 6-vs-8-
+  // inconsistentie (twee aparte fetches met verschillende limits).
   async function _fetchArrangements() {
     const st = _live.arrangements;
     if (st.loading || st.fetched) return;
     st.loading = true; st.error = null;
-    const seq = ++st._seq;
-    const j = await tryFetch('arrangements', '/api/arrangements-list?status=ACTIEF&limit=500');
-    if (seq !== st._seq) return;
+    // Reuse de _arrLive-fetch als bron van waarheid.
+    if (!_arrLive.fetched && !_arrLive.loading) await _fetchArrangementsList('ACTIEF');
+    // Als _arrLive nog loading is: wacht met een simpele poll (max 8s).
+    let waited = 0;
+    while (_arrLive.loading && waited < 8000) { await new Promise(r => setTimeout(r, 100)); waited += 100; }
     st.loading = false; st.fetched = true;
-    if (!j || j.error) { st.error = (j && j.error) || 'Kon arrangements niet laden'; return; }
-    const items = asArr(j.items || j.arrangements);
+    if (_arrLive.error) { st.error = _arrLive.error; return; }
+    const items = asArr(_arrLive.items);
+    // Dedup op arrangement-id (verdedigt tegen dubbele rows in server-response).
+    const seenIds = new Set();
     const map = {};
     for (const a of items) {
+      if (seenIds.has(a.id)) continue;
+      seenIds.add(a.id);
       const cid = a.customer_id;
       if (!cid) continue;
       if (!map[cid]) map[cid] = [];
@@ -395,6 +437,7 @@
 
   // ── Brieven: mail-verzenden (ECHT bericht) ─────────────────────────
   window.__wbxBriefEmail = async (brief_id) => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     if (!brief_id || _ui.briefBusy[brief_id]) return;
     const brief = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
     if (!brief) return;
@@ -435,6 +478,7 @@
 
   // ── Brieven: markeer per post verstuurd ────────────────────────────
   window.__wbxBriefMarkPost = async (brief_id) => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     if (!brief_id || _ui.briefBusy[brief_id]) return;
     const brief = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
     if (!brief) return;
@@ -457,6 +501,7 @@
 
   // ── Brieven: verwijderen (brief-row + PDF-storage) ─────────────────
   window.__wbxBriefDelete = async (brief_id) => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     if (!brief_id || _ui.briefBusy[brief_id]) return;
     const brief = asArr(_live.briefs.items).find((b) => String(b.id) === String(brief_id));
     if (!brief) return;
@@ -488,6 +533,7 @@
   function _selBriefIds() { return Object.keys(_ui.brSelected).filter((k) => _ui.brSelected[k]); }
 
   window.__wbxBriefBulkMarkSent = async () => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     const ids = _selBriefIds();
     if (!ids.length) return;
     const ok = await _askConfirm(
@@ -506,7 +552,27 @@
     _toast(`Gemarkeerd als verstuurd: ${ids.length} brief${ids.length === 1 ? '' : 'ven'}.`, 'success');
     if (window.DFO?.render) window.DFO.render();
   };
+  // v=6 FIX 8: PDF-preview fallback wanneer download_url mist.
+  window.__wbxBriefPreview = async (brief_id) => {
+    if (!brief_id) return;
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/wanbetalers-brief-pdf?preview=1', {
+        method: 'POST', headers, body: JSON.stringify({ brief_id }),
+      });
+      if (!resp.ok) { _toast('Preview faalde: HTTP ' + resp.status, 'error'); return; }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) { _toast('Preview netwerkfout: ' + (e?.message || 'onbekend'), 'error'); }
+  };
+
   window.__wbxBriefBulkPrint = async () => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
     const ids = _selBriefIds();
     if (!ids.length) return;
     const ok = await _askConfirm(
@@ -578,23 +644,35 @@
     btn.style.cursor  = disabled ? 'not-allowed' : 'pointer';
   }
   window.__wbxCallSave = async (cid, pending_action_id) => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
     const f = _callFormState(cid);
     if (f.saving) return;
     if (!_callIsSaveable(f)) return;
-    let confirmed = true;
-    if (pending_action_id) {
-      confirmed = await _askConfirm(
-        'Belpoging loggen + open actie afvinken?',
-        `Deze belpoging wordt gekoppeld aan een openstaande MANUAL_FOLLOWUP-taak; die wordt daarmee <strong>PENDING → EXECUTED</strong> gezet en de dunning-motor tikt door naar de volgende stap.`,
-        { okLabel: 'Ja, log + tik door' }
-      );
-    } else if (f.outcome === 'payment_promise' || f.outcome === 'paid_during_call') {
-      confirmed = await _askConfirm(
-        'Belpoging loggen',
-        `Uitkomst: <strong>${esc(CALL_OUTCOMES.find(x => x[0] === f.outcome)?.[1] || f.outcome)}</strong>. Wordt in het bel-log geregistreerd; geen bericht naar klant.`,
-        { okLabel: 'Ja, log' }
-      );
-    }
+    // v=6 FIX 1 URGENT: confirm-modal ALTIJD vóór de POST. Voorheen was
+    // 'ie conditioneel (alleen bij pending_action_id of payment_promise/
+    // paid_during_call) → een simpele klik op 'Log belpoging' bij no_answer/
+    // voicemail/callback etc. schreef direct weg. Nu: iedere save vraagt
+    // bevestiging met klant + uitkomst + optionele terugbeltijd.
+    const outcomeLabel = (CALL_OUTCOMES.find(x => x[0] === f.outcome) || [])[1] || f.outcome;
+    const rows = asArr(_live.overzicht.items);
+    const row = rows.find((x) => String(x.customer_id || x.id) === String(cid));
+    const custName = row ? (row.customer_name || row.name || 'klant') : 'klant';
+    let extra = '';
+    if (pending_action_id) extra = '<div style="margin-top:10px;padding:9px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.5">⚠ Gekoppeld aan open MANUAL_FOLLOWUP-taak → status wordt <b>PENDING → EXECUTED</b>, motor tikt door.</div>';
+    else if (f.outcome === 'payment_promise' || f.outcome === 'paid_during_call') extra = '<div style="margin-top:10px;padding:9px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:12px">Wordt geregistreerd; geen bericht naar klant.</div>';
+    const cbLine = f.outcome === 'callback' && f.callback_at
+      ? `<div style="margin-top:4px"><b>Terugbellen:</b> ${esc(_fmtDateTime(f.callback_at))}</div>`
+      : '';
+    const noteLine = f.note && f.note.trim()
+      ? `<div style="margin-top:4px;padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:12px;white-space:pre-wrap">${esc(f.note.trim())}</div>`
+      : '';
+    const confirmed = await _askConfirm(
+      'Belpoging loggen?',
+      `<div><b>Klant:</b> ${esc(custName)}</div>
+       <div><b>Uitkomst:</b> ${esc(outcomeLabel)}</div>
+       ${cbLine}${noteLine}${extra}`,
+      { okLabel: 'Ja, log' }
+    );
     if (!confirmed) return;
     f.saving = true; _updateCallSaveBtn(cid);
     const payload = {
@@ -639,6 +717,7 @@
     btn.style.cursor  = canSave ? 'pointer' : 'not-allowed';
   }
   window.__wbxNoteSave = async (cid) => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
     const f = _noteFormState(cid);
     if (f.saving || !f.body || !f.body.trim()) return;
     f.saving = true; _updateNoteSaveBtn(cid);
@@ -668,6 +747,7 @@
     ['opgelost',        'Opgelost'],
   ];
   window.__wbxSetStage = async (cid, newStage) => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
     if (!cid || !newStage) return;
     if (_ui.stageBusy[cid]) return;
     const stageLabel = (PIPELINE_STAGES.find(s => s[0] === newStage) || [])[1] || newStage;
@@ -694,10 +774,11 @@
   /* ── BROK 3 WRITE-HANDLERS — pending-actions ─────────────────────── */
 
   window.__wbxPaApprove = async (action_id) => {
+    if (!_rbac.canApprove) { _toast('Geen rechten (finance.arrangements.approve).', 'error'); return; }
     if (!action_id || _ui.paBusy[action_id]) return;
     const a = asArr(_live.pendingActs.items).find((x) => String(x.id) === String(action_id));
     if (!a) return;
-    const customer = a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'onbekend';
+    const customer = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'onbekend';
     const type = a.action_type || a.type || 'actie';
     const isTlAction = String(type).startsWith('TL_');
     const ok = await _askConfirm(
@@ -726,10 +807,11 @@
   };
 
   window.__wbxPaReject = async (action_id) => {
+    if (!_rbac.canApprove) { _toast('Geen rechten (finance.arrangements.approve).', 'error'); return; }
     if (!action_id || _ui.paBusy[action_id]) return;
     const a = asArr(_live.pendingActs.items).find((x) => String(x.id) === String(action_id));
     if (!a) return;
-    const customer = a.customer_name || a.customer_id || 'onbekend';
+    const customer = (a.customer && a.customer.name) || a.customer_name || a.customer_id || 'onbekend';
     const reason = await _askReason(
       `Actie afwijzen — ${customer}`,
       'Waarom wijs je deze actie af? (verplicht — komt in de audit-log en op de pending_action).',
@@ -746,6 +828,7 @@
   };
 
   window.__wbxPaMarkExecuted = async (action_id) => {
+    if (!_rbac.canApprove) { _toast('Geen rechten (finance.arrangements.approve).', 'error'); return; }
     if (!action_id || _ui.paBusy[action_id]) return;
     const a = asArr(_live.pendingActs.items).find((x) => String(x.id) === String(action_id));
     if (!a) return;
@@ -828,6 +911,7 @@
   }
 
   window.__wbxArrCancel = async (arrangement_id, arrLabel) => {
+    if (!_rbac.canApprove) { _toast('Geen rechten (finance.arrangements.approve).', 'error'); return; }
     if (!arrangement_id || _ui.arrBusy[arrangement_id]) return;
     const ok = await _askConfirm(
       'Arrangement annuleren?',
@@ -856,9 +940,27 @@
   //   ABONNEMENT_STOP  → { subscription_id, stop_date, reason }
   //   KWIJTSCHELDING   → { write_off_amount, reason }
   const _arrForm = { open: false, customer_id: null, type: 'UITSTEL', invoice_ids: [], rationale: '', details: {}, saving: false, error: null };
-  window.__wbxArrPropose = (customer_id) => {
+  window.__wbxArrPropose = async (customer_id) => {
+    const cid = String(customer_id || '');
+    // v=6 FIX 6: waarschuw als klant al actief arrangement heeft — server
+    // laat 't waarschijnlijk staan maar UX moet dat vóór klik zichtbaar
+    // maken (dunning is dan gepauzeerd, nieuwe voorstel kan verwarrend
+    // schuiven met de bestaande).
+    const arrsMap = _live.arrangements.byCust || {};
+    const existing = cid && Array.isArray(arrsMap[cid]) ? arrsMap[cid] : [];
+    if (existing.length) {
+      const cont = await _askConfirm(
+        'Klant heeft al een actief arrangement',
+        `Deze klant heeft <b>${existing.length}</b> actief arrangement (dunning gepauzeerd).
+         Een nieuw voorstel maken naast een actief arrangement kan verwarrend zijn —
+         eerst annuleren of afwikkelen is meestal duidelijker.<br><br>
+         Toch doorgaan met een nieuw voorstel?`,
+        { okLabel: 'Toch nieuw voorstellen', cancelLabel: 'Annuleren' }
+      );
+      if (!cont) return;
+    }
     _arrForm.open = true;
-    _arrForm.customer_id = String(customer_id || '');
+    _arrForm.customer_id = cid;
     _arrForm.type = 'UITSTEL';
     _arrForm.invoice_ids = [];
     _arrForm.rationale = '';
@@ -897,6 +999,7 @@
   };
   window.__wbxArrSetRationale = (val) => { _arrForm.rationale = String(val || ''); };
   window.__wbxArrSubmit = async () => {
+    if (!_rbac.canPropose) { _toast('Geen rechten (finance.arrangements.propose).', 'error'); return; }
     if (_arrForm.saving) return;
     const t = _arrForm.type;
     const isSubAction = t === 'ABONNEMENT_PAUZE' || t === 'ABONNEMENT_STOP';
@@ -1140,6 +1243,7 @@
   }
 
   window.__wbxBulkStart = async () => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
     if (_ui.bulkBusy) return;
     const custIds = _selOvCustIds();
     if (!custIds.length) return;
@@ -1162,11 +1266,15 @@
       _toast('Max 100 klanten per bulk-start (server-guard).', 'warn');
       return;
     }
-    // Typ-to-confirm.
-    const phrase = `START DUNNING VOOR ${invoiceIds.length} KLANTEN`;
+    // v=6 FIX 5: typ-phrase telt DISTINCT klanten (custIds.length), niet
+    // invoice_ids. Elke geselecteerde klant → één workflow-run; server
+    // resolvet zelf de customer per invoice, maar de UX moet de klant-
+    // eenheid noemen die de gebruiker heeft aangevinkt.
+    const distinctCust = custIds.length;
+    const phrase = `START DUNNING VOOR ${distinctCust} KLANTEN`;
     const bodyHtml = `
-      <div style="margin-bottom:10px">Je gaat de dunning-motor starten voor <b>${invoiceIds.length}</b> klant${invoiceIds.length === 1 ? '' : 'en'}
-      (${invoiceIds.length} factu${invoiceIds.length === 1 ? 'ur' : 'ren'}). Elke klant krijgt één workflow-run bij stap 1.</div>
+      <div style="margin-bottom:10px">Je gaat de dunning-motor starten voor <b>${distinctCust}</b> klant${distinctCust === 1 ? '' : 'en'}
+      (${invoiceIds.length} factu${invoiceIds.length === 1 ? 'ur' : 'ren'} meegestuurd — 1 per klant). Elke klant krijgt één workflow-run bij stap 1.</div>
       <div style="padding:10px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.55;margin-bottom:10px">
         <b>Engine-guards blijven gelden</b>:<br>
         · Kantooruren (SEND-stappen alleen 08:00-20:00 Europe/Amsterdam)<br>
@@ -1261,9 +1369,12 @@
     return rows.map((r) => {
       const cid = r.customer_id || r.id;
       const name = r.customer_name || r.name || 'Onbekend';
-      const openAmt = Number(r.total_open_amount || r.open_amount || 0);
-      const invCount = Number(r.invoice_count || r.open_invoice_count || 0);
-      const oldestDays = Number(r.oldest_open_days || 0);
+      // v=6 FIX 2: server retourneert 'total_open_cents' (int in centen) +
+      // 'days_overdue' + 'open_invoice_count'. v=4 las 'total_open_amount' /
+      // 'oldest_open_days' → altijd 0. Nu correct gemapt.
+      const openAmt = Number(r.total_open_cents || 0) / 100;
+      const invCount = Number(r.open_invoice_count || 0);
+      const oldestDays = Number(r.days_overdue || 0);
       const stage = r.stage_label || r.stage_slug || r.stage || '—';
       const nextAt = r.next_action_at || r.next_action || null;
       const nextTxt = nextAt ? _fmtDateTime(nextAt) : '—';
@@ -1306,7 +1417,8 @@
     }
 
     const items = asArr(_live.overzicht.items);
-    const totalOpen = items.reduce((a, r) => a + Number(r.total_open_amount || r.open_amount || 0), 0);
+    // v=6 FIX 2: sum in centen, delen door 100 voor euro's.
+    const totalOpen = items.reduce((a, r) => a + Number(r.total_open_cents || 0), 0) / 100;
     const totalCust = items.length;
     const inIncasso = items.filter((r) => String(r.stage_slug || '').toLowerCase().includes('incasso')).length;
     const arrCount  = Object.keys(_live.arrangements.byCust || {}).length;
@@ -1433,7 +1545,7 @@
         <span style="font-size:11px;color:var(--text-3)">${pending.length} PENDING</span>
       </div>
       ${pending.slice(0, 30).map((a) => {
-        const customer = a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'Onbekend';
+        const customer = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'Onbekend';
         const type = a.action_type || a.type || '—';
         const amt  = a.amount || (a.payload && a.payload.amount) || null;
         const isTl = String(type).startsWith('TL_');
@@ -1464,7 +1576,7 @@
       ${_arrLive.loading && !arrangements.length ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Arrangementen laden…</div>` :
        !arrangements.length ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Geen actieve arrangementen.</div>` :
        arrangements.slice(0, 20).map((arr) => {
-         const nm = arr.customer_name || arr.customer_id || 'Onbekend';
+         const nm = (arr.customer && arr.customer.name) || arr.customer_name || arr.customer_id || 'Onbekend';
          const busy = !!_ui.arrBusy[arr.id];
          return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
            <div>${esc(nm)}</div>
@@ -1529,7 +1641,7 @@
     return filtered.map((r) => {
       const cid = r.customer_id || r.id;
       const name = r.customer_name || r.name || 'Onbekend';
-      const openAmt = Number(r.total_open_amount || r.open_amount || 0);
+      const openAmt = Number(r.total_open_cents || 0) / 100;
       const stage = r.stage_label || r.stage_slug || '—';
       const onCls = String(_ui.gspSelectedId) === String(cid) ? 'on' : '';
       const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -1550,7 +1662,7 @@
     const row = asArr(_live.overzicht.items).find((r) => String(r.customer_id || r.id) === String(cid));
     if (!row) return `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px">Klant niet gevonden in overzicht.</div>`;
     const name = row.customer_name || row.name || 'Onbekend';
-    const openAmt = Number(row.total_open_amount || row.open_amount || 0);
+    const openAmt = Number(row.total_open_cents || 0) / 100;
     const cidClick = String(cid).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
     const calls = asArr(_live.callLog.byCust[cid]);
@@ -1736,9 +1848,12 @@
     const selIds = _selBriefIds();
     const rowsHtml = filtered.length ? filtered.map((b) => {
       const bid = String(b.id);
+      // v=6 FIX 8: endpoint dunning-briefs-list-all levert 'customer_name',
+      // 'generated_at', 'sent_via', 'sent_at' + 'download_url' (signed
+      // storage URL). GEEN open_amount — die kolom verwijderd. Aangemaakt
+      // = 'generated_at' (was 'created_at' → altijd —).
       const name = b.customer_name || b.customer?.name || 'Onbekend';
-      const openAmt = Number(b.open_amount || b.amount || 0);
-      const created = b.created_at ? _fmtDate(b.created_at) : '—';
+      const created = b.generated_at ? _fmtDate(b.generated_at) : (b.created_at ? _fmtDate(b.created_at) : '—');
       const cat = categorize(b);
       const busy = !!_ui.briefBusy[bid];
       const isSel = !!_ui.brSelected[bid];
@@ -1747,15 +1862,13 @@
         : cat === 'downloaded'
           ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">Gedownload</span>`
           : `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--blue-soft);color:var(--blue);font-weight:600">Aangemaakt</span>`;
-      const pdfPath = b.pdf_path || null;
-      const pdfUrl  = b.pdf_url || b.preview_url || null;
-      // v=3: PDF-preview enabled — link (nieuwe tab) als er een direct-URL is;
-      // anders val terug op een POST-based preview via brief-pdf?preview=1.
+      // v=6 FIX 8: server retourneert 'download_url' (signed URL, 5min TTL).
+      // Fallback: POST /api/wanbetalers-brief-pdf?preview=1 zou een preview-
+      // blob leveren; hier via een preview-handler.
+      const pdfUrl = b.download_url || null;
       const pdfBtn = pdfUrl
-        ? `<a class="btn btn-ghost btn-sm" href="${esc(pdfUrl)}" target="_blank" rel="noopener" style="font-size:11px;text-decoration:none">PDF →</a>`
-        : pdfPath
-          ? `<span style="font-size:11px;color:var(--text-3)" title="PDF beschikbaar via storage-pad; open via Klanten-detail">📎</span>`
-          : `<span style="font-size:11px;color:var(--text-3)">—</span>`;
+        ? `<a class="btn btn-ghost btn-sm" href="${esc(pdfUrl)}" target="_blank" rel="noopener" style="font-size:11px;text-decoration:none" title="Signed URL, 5 min geldig">PDF →</a>`
+        : `<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefPreview('${esc(bid)}')" title="Genereer preview via wanbetalers-brief-pdf?preview=1">👁 Preview</button>`;
       const emailBtn  = cat === 'sent'
         ? '<span style="font-size:11px;color:var(--text-3)">—</span>'
         : `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--brand,#0A7490);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" ${busy ? 'disabled' : ''} onclick="__wbxBriefEmail('${esc(bid)}')" title="Mail de bewaarde PDF naar de klant (echt bericht)">${busy ? 'Bezig…' : '📧 Mail'}</button>`;
@@ -1763,12 +1876,13 @@
         ? '<span style="font-size:11px;color:var(--text-3)">—</span>'
         : `<button class="btn btn-ghost btn-sm" style="font-size:11px;opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" ${busy ? 'disabled' : ''} onclick="__wbxBriefMarkPost('${esc(bid)}')" title="Handmatig per post verstuurd">✉ Post</button>`;
       const delBtn = `<button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" ${busy ? 'disabled' : ''} onclick="__wbxBriefDelete('${esc(bid)}')" title="Brief + PDF permanent verwijderen">🗑</button>`;
-      return `<div style="display:grid;grid-template-columns:32px 2fr 1fr 100px 130px auto;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+      const tpl = b.template_code || '—';
+      return `<div style="display:grid;grid-template-columns:32px 2fr 1fr 130px 140px auto;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
         <label style="display:flex;align-items:center;cursor:pointer"><input type="checkbox" ${isSel ? 'checked' : ''} onchange="__wbxBriefToggleSel('${esc(bid)}')" style="width:15px;height:15px;cursor:pointer" /></label>
         <div style="font-weight:500">${esc(name)}</div>
-        <div class="mono" style="text-align:right;color:${openAmt > 0 ? 'var(--amber)' : 'var(--text-3)'}">${eur(openAmt)}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--text-3)">${esc(tpl)}</div>
         <div class="mono" style="text-align:right;color:var(--text-3)">${esc(created)}</div>
-        <div>${statusPill}</div>
+        <div>${statusPill}${b.sent_at ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px;font-family:'IBM Plex Mono',monospace">${esc(_fmtDate(b.sent_at))}</div>` : ''}</div>
         <div style="display:flex;gap:4px;justify-content:flex-end;align-items:center;flex-wrap:wrap">${pdfBtn}${emailBtn}${markBtn}${delBtn}</div>
       </div>`;
     }).join('') : `<div style="padding:44px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen brieven in dit filter.</div>`;
@@ -1788,8 +1902,8 @@
             <div style="font-size:11px;color:var(--text-3)">${filtered.length} brie${filtered.length === 1 ? 'f' : 'ven'}</div>
           </div>
           ${bulkBar}
-          <div style="display:grid;grid-template-columns:32px 2fr 1fr 100px 130px auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
-            <div></div><div>Klant</div><div style="text-align:right">Openstaand</div><div style="text-align:right">Aangemaakt</div><div>Status</div><div style="text-align:right">Acties</div>
+          <div style="display:grid;grid-template-columns:32px 2fr 1fr 130px 140px auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
+            <div></div><div>Klant</div><div>Template</div><div style="text-align:right">Aangemaakt</div><div>Status</div><div style="text-align:right">Acties</div>
           </div>
           <div>${rowsHtml}</div>
           <div style="padding:9px 14px;font-size:11px;color:var(--text-3);background:var(--surface-2)">Handmatige mail vertrekt <b>direct</b> (omzeilt de kantooruren-wachtrij).</div>
@@ -1836,5 +1950,5 @@
   window.DFO.VIEWS['wanbetalers/Brieven']    = brievenView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=4 BROK 3 — TL-mutaties + arrangements + bulk-workflow. DEEL A (Acties-tab): pending-actions Approve (TL-mutatie via executor)/Reject (met reden)/Mark-executed (handmatig al gedaan)/Restore. DEEL B: nieuwe arrangement-modal (5 types: UITSTEL/SPLITSING/ABONNEMENT_PAUZE/ABONNEMENT_STOP/KWIJTSCHELDING, type-specifieke validatie spiegelt server), arrangement-cancel (danger-confirm). DEEL C (Overzicht-tab): bulk-workflow-start met checkbox-selectie + typ-to-confirm ("START DUNNING VOOR N KLANTEN"). Engine-guards blijven: office-hours, cooldown, arrangement-pauze, sandbox, pending-action-guard. Geen dry-run beschikbaar op bulk-start endpoint — typ-to-confirm is de enige stop. Motor NIET geraakt: alleen bestaande UI-endpoints.');
+  console.debug('[wanbetalers-v2] v=6 BROK 4 — 8 fixes: (1) confirm ALTIJD op call-log; (2) veld-mapping overzicht: total_open_cents/100, days_overdue, open_invoice_count; (3) customer.name (nested) ipv customer_id op pending-actions + arrangements; (4) dedupe arrangements (één fetch, byCust van _arrLive.items); (5) bulk-modal telt distinct klanten + typ-to-confirm zonder backdrop-dismiss; (6) waarschuwing bij nieuw arrangement op klant met actief arrangement; (7) RBAC client-side gates via window.RBAC; (8) brieven kolommen template_code+generated_at+download_url+PDF-preview via wanbetalers-brief-pdf?preview=1. BROK 3 TL-mutaties/arrangements/bulk-workflow behouden.');
 })();
