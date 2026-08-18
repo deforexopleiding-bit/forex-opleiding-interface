@@ -200,7 +200,7 @@
   function dashboardView() {
     const label = F('fin-p', 'Maand');
     const wantedPeriod = PERIOD_LABEL_TO_PARAM[label] || 'month';
-    if (!_dash.loading && (!_dash.data || _dash.period !== wantedPeriod)) queueMicrotask(fetchDashboard);
+    if (!_dash.loading && !_dash.error && (!_dash.data || _dash.period !== wantedPeriod)) queueMicrotask(fetchDashboard);
     const d = _dash.data || {};
     // Bank-saldo bron-preferentie: camt-balance (Bank-tab bron), fallback
     // op dashboard-counts.bankBalans (legacy). value in EUR (niet cents).
@@ -546,7 +546,7 @@
       if (iid && typeof window.__fnRenderInv === 'function') return window.__fnRenderInv(iid);
     } catch (_) { /* fall through */ }
     const st = F('fin-inv-st', 'all');
-    if (!_inv.loading && (!_inv.data || _inv.params !== invoicesParams())) queueMicrotask(fetchInvoices);
+    if (!_inv.loading && !_inv.error && (!_inv.data || _inv.params !== invoicesParams())) queueMicrotask(fetchInvoices);
     const items = _inv.data?.items || [];
     const k = _inv.data?.kpis || {};
     const total = _inv.data?.total ?? null;
@@ -682,7 +682,7 @@
       if (sid && typeof window.__fnRenderSub === 'function') return window.__fnRenderSub(sid);
     } catch (_) { /* fall through */ }
     const st = F('fin-sub-st', 'active');
-    if (!_sub.loading && (!_sub.data || _sub.params !== subsParams())) queueMicrotask(fetchSubs);
+    if (!_sub.loading && !_sub.error && (!_sub.data || _sub.params !== subsParams())) queueMicrotask(fetchSubs);
     let items = (_sub.data?.items || []).slice();
     const total = _sub.data?.total ?? null;
 
@@ -830,7 +830,7 @@
   }
 
   function cnView() {
-    if (!_cn.loading && (!_cn.data || _cn.params !== cnParams())) queueMicrotask(fetchCn);
+    if (!_cn.loading && !_cn.error && (!_cn.data || _cn.params !== cnParams())) queueMicrotask(fetchCn);
     const items = _cn.data?.items || [];
     const kpi = _cn.data?.kpi || {};
     const total = _cn.data?.total ?? null;
@@ -900,7 +900,7 @@
 
   function bankView() {
     const dir = F('fin-bank-dir', 'all');
-    if (!_bnk.loading && (!_bnk.tx || _bnk.params !== bankParams())) queueMicrotask(fetchBank);
+    if (!_bnk.loading && !_bnk.error && (!_bnk.tx || _bnk.params !== bankParams())) queueMicrotask(fetchBank);
     const items = _bnk.tx?.items || [];
     const bal = _bnk.bal || {};
     const kpis = _bnk.tx?.kpis || {};
@@ -1070,7 +1070,7 @@
   }
 
   function mrrView() {
-    if (!_mrr.loading && (!_mrr.report || _mrr.params !== 'v1')) queueMicrotask(fetchMrr);
+    if (!_mrr.loading && !_mrr.error && (!_mrr.report || _mrr.params !== 'v1')) queueMicrotask(fetchMrr);
     const r = _mrr.report || {};
     const k = r.kpis || {};
     const trend = Array.isArray(r.trend) ? r.trend : [];

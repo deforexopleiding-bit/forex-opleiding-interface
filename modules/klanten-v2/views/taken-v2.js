@@ -376,7 +376,7 @@
   function kanbanView() {
     const scope = currentScope();
     const st = _live[scope];
-    if (!st.taken && !st.loading) queueMicrotask(() => fetchScope(scope));
+    if (!st.taken && !st.loading && !st.error) queueMicrotask(() => fetchScope(scope));
     return `${viewToggle()}
       ${window.KV_V2.kanban ? window.KV_V2.kanban.html('taken') : '<div class="sv-empty">Kanban laden…</div>'}
       ${st.error ? errorBlock(st.error) : ''}`;
@@ -390,7 +390,7 @@
   function mijnView() {
     wireSearch('taken:mine');
     const st = _live.mine;
-    if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('mine'));
+    if (!st.taken && !st.loading && !st.error) queueMicrotask(() => fetchScope('mine'));
     // `all` blijft raw (nodig voor KPI-strip die zelf open+afgerond telt).
     // `open` = alleen niet-afgeronde taken → dat is wat de lijst toont.
     // Afgeronde taken verhuizen naar de "Afgerond"-tab (archief).
@@ -409,7 +409,7 @@
   function byMeView() {
     wireSearch('taken:byMe');
     const st = _live.byMe;
-    if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('byMe'));
+    if (!st.taken && !st.loading && !st.error) queueMicrotask(() => fetchScope('byMe'));
     // Zie mijnView: raw voor KPI, gefilterd voor lijst.
     const all = asArr(st.taken);
     const open = all.filter((t) => t.status !== 'done');
@@ -426,7 +426,7 @@
   function afgerondView() {
     wireSearch('taken:afgerond');
     const st = _live.mine;
-    if (!st.taken && !st.loading) queueMicrotask(() => fetchScope('mine'));
+    if (!st.taken && !st.loading && !st.error) queueMicrotask(() => fetchScope('mine'));
     const all = asArr(st.taken);
     // FIX: filter op canonieke 'done' i.p.v. legacy 'klaar'.
     const done = all.filter((t) => t.status === 'done');

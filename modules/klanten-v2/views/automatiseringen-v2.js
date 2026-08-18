@@ -1596,7 +1596,7 @@
 
   window.__autLsSjabNew = () => {
     // Trajectenlijst is nodig voor slug-picker; borg dat 'ie geladen is
-    if (!_live.lsTraj.data && !_live.lsTraj.loading) queueMicrotask(fetchLsTraj);
+    if (!_live.lsTraj.data && !_live.lsTraj.loading && !_live.lsTraj.error) queueMicrotask(fetchLsTraj);
     _ui.ls.editingSjabloon = {
       id: null,
       traject_slug: '',
@@ -1616,7 +1616,7 @@
   window.__autLsSjabEdit = (id) => {
     const s = asArr(_live.lsSjab.data?.items).find((x) => x.id === id);
     if (!s) return;
-    if (!_live.lsTraj.data && !_live.lsTraj.loading) queueMicrotask(fetchLsTraj);
+    if (!_live.lsTraj.data && !_live.lsTraj.loading && !_live.lsTraj.error) queueMicrotask(fetchLsTraj);
     _ui.ls.editingSjabloon = {
       ...s,
       variabele_volgorde: Array.isArray(s.variabele_volgorde) ? s.variabele_volgorde.join(', ') : (s.variabele_volgorde || ''),
@@ -2005,7 +2005,7 @@
     const busy = _busy('lsStapSave');
     // Quiz-picker preload
     if (s.kanaal === 'quiz' || s.soort === 'quiz' || s.quiz_slug !== undefined) {
-      if (!_live.lsQuiz.data && !_live.lsQuiz.loading) queueMicrotask(fetchLsQuiz);
+      if (!_live.lsQuiz.data && !_live.lsQuiz.loading && !_live.lsQuiz.error) queueMicrotask(fetchLsQuiz);
     }
     const quizzes = asArr(_live.lsQuiz.data);
     return `<div style="padding:12px 20px;background:var(--surface-2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">

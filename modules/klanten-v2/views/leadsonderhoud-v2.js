@@ -191,9 +191,9 @@
      TAB 1 — OVERZICHT
      ══════════════════════════════════════════════════════════════════ */
   function overzichtView() {
-    if (!_live.overzicht.fetched && !_live.overzicht.loading) queueMicrotask(fetchOverzicht);
-    if (!_live.droogloop.fetched && !_live.droogloop.loading) queueMicrotask(fetchDroogloop);
-    if (!_live.leadsAll.fetched && !_live.leadsAll.loading)   queueMicrotask(fetchLeadCounts);
+    if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(fetchOverzicht);
+    if (!_live.droogloop.fetched && !_live.droogloop.loading && !_live.droogloop.error) queueMicrotask(fetchDroogloop);
+    if (!_live.leadsAll.fetched && !_live.leadsAll.loading && !_live.leadsAll.error) queueMicrotask(fetchLeadCounts);
 
     const ov = _live.overzicht.data;
     const dr = _live.droogloop.data;
@@ -369,7 +369,7 @@
      TAB 3 — WACHTRIJ
      ══════════════════════════════════════════════════════════════════ */
   function wachtrijView() {
-    if (!_live.wachtrij.fetched && !_live.wachtrij.loading) queueMicrotask(fetchWachtrij);
+    if (!_live.wachtrij.fetched && !_live.wachtrij.loading && !_live.wachtrij.error) queueMicrotask(fetchWachtrij);
     const st = _live.wachtrij;
     const items = st.data ? st.data.items : [];
     const rowsHtml = items.length ? `<div style="overflow-x:auto">
@@ -1591,9 +1591,9 @@
      TAB 6 — STATISTIEKEN (afgeleide KPIs uit dezelfde bronnen)
      ══════════════════════════════════════════════════════════════════ */
   function statsView() {
-    if (!_live.overzicht.fetched && !_live.overzicht.loading) queueMicrotask(fetchOverzicht);
-    if (!_live.droogloop.fetched && !_live.droogloop.loading) queueMicrotask(fetchDroogloop);
-    if (!_live.leadsAll.fetched && !_live.leadsAll.loading)   queueMicrotask(fetchLeadCounts);
+    if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(fetchOverzicht);
+    if (!_live.droogloop.fetched && !_live.droogloop.loading && !_live.droogloop.error) queueMicrotask(fetchDroogloop);
+    if (!_live.leadsAll.fetched && !_live.leadsAll.loading && !_live.leadsAll.error) queueMicrotask(fetchLeadCounts);
 
     const ov = _live.overzicht.data;
     const dr = _live.droogloop.data;

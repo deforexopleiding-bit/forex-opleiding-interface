@@ -570,8 +570,8 @@
   // VIEW — full-height 3-koloms grid met min-height:0 keten
   // ═══════════════════════════════════════════════════════════════════════
   function emailView() {
-    if (!_live.inbox.loading && (!_live.inbox.data || _live.inbox.key !== inboxKey())) queueMicrotask(fetchInbox);
-    if (!_live.counts.data && !_live.counts.loading) queueMicrotask(fetchCounts);
+    if (!_live.inbox.loading && !_live.inbox.error && (!_live.inbox.data || _live.inbox.key !== inboxKey())) queueMicrotask(fetchInbox);
+    if (!_live.counts.data && !_live.counts.loading && !_live.counts.error) queueMicrotask(fetchCounts);
     // Layout-fix: outer height:calc(100dvh - 60px), min-height:0 tot in de kolommen.
     const html = `<div class="pad" style="padding:0;height:calc(100dvh - 60px);min-height:400px;display:flex;flex-direction:column">
       <div style="flex:1;display:grid;grid-template-columns:198px 352px 1fr;min-height:0;border-top:1px solid var(--border)">
@@ -866,7 +866,7 @@
     if (!body && !bErr && !bLoad && row._source !== 'sent') queueMicrotask(() => fetchBody(row));
     if (row._source === 'inbox' && !row.is_read && !_ui.statusBusy['read:' + row.id]) queueMicrotask(() => markRead(row, true));
     // Sanne (Fase 2.1) — fetch suggestion voor inbox-rows (skip sent/draft).
-    if (row._source === 'inbox' && !_live.sanne.data[row.id] && !_live.sanne.loading[row.id]) queueMicrotask(() => fetchSanneForRow(row.id));
+    if (row._source === 'inbox' && !_live.sanne.data[row.id] && !_live.sanne.loading[row.id] && !_live.sanne.error[row.id]) queueMicrotask(() => fetchSanneForRow(row.id));
     return `<section style="overflow:hidden;display:flex;flex-direction:column;background:var(--bg,var(--surface));min-height:0">
       ${_readHead(row)}
       ${_readMeta(row)}

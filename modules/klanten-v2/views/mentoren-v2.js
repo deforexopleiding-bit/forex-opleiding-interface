@@ -768,7 +768,7 @@
     _ui.trajectForm = existing
       ? { id: existing.id, event_id: existing.event_id || '', client_label: existing.client_label || '', total_amount: String(existing.total_amount || ''), term_count: String(existing.term_count || '12'), start_month: existing.start_month || currentMonthKey(), release_day: String(existing.release_day || '1'), note: existing.note || '', saving: false, error: null }
       : { id: null, event_id: '', client_label: '', total_amount: '', term_count: '12', start_month: currentMonthKey(), release_day: '1', note: '', saving: false, error: null };
-    if (!_live.eventsList.data && !_live.eventsList.loading) queueMicrotask(fetchEventsList);
+    if (!_live.eventsList.data && !_live.eventsList.loading && !_live.eventsList.error) queueMicrotask(fetchEventsList);
     render();
   };
   window.__mentTrajectClose = () => { _ui.trajectForm = null; render(); };

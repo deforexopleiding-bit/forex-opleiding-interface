@@ -330,7 +330,7 @@
     }
     // Trigger fetch bij eerste render OF wanneer filter-params veranderd zijn.
     const wanted = offertesParams();
-    if (!_off.loading && (!_off.data || _off.params !== wanted)) queueMicrotask(fetchOffertes);
+    if (!_off.loading && !_off.error && (!_off.data || _off.params !== wanted)) queueMicrotask(fetchOffertes);
     const items = _off.data?.quotations || [];
     const total = _off.data?.total ?? null;
     return `${previewHeader('Offertes', _off)}
@@ -392,7 +392,7 @@
   function retentieView() {
     const mine = F('sv-ret-mine', '0');
     const wanted = retentieParams();
-    if (!_ret.loading && (!_ret.data || _ret.params !== wanted)) queueMicrotask(fetchRetentie);
+    if (!_ret.loading && !_ret.error && (!_ret.data || _ret.params !== wanted)) queueMicrotask(fetchRetentie);
     const items = _ret.data?.items || [];
     return `${previewHeader('Retentie', _ret)}
       ${H.kpis([
@@ -505,7 +505,7 @@
   function prestatiesView() {
     const label = F('sv-rep-p', 'Maand');
     const wanted = reportsParams();
-    if (!_rep.loading && (!_rep.data || _rep.params !== wanted)) queueMicrotask(fetchReports);
+    if (!_rep.loading && !_rep.error && (!_rep.data || _rep.params !== wanted)) queueMicrotask(fetchReports);
     const k = _rep.data?.kpis || {};
     const period = _rep.data?.period || rangeForLabel(label);
     const agg = acceptedAggReports(period.from, period.to);

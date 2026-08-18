@@ -378,7 +378,7 @@
   /* Cert-upload (supabase/AuthShared check pas runtime in __verdCertSubmit) */
   window.__verdCertOpenUpload = () => {
     _ui.certUpload = { studentId: '', studentName: '', file: null, fileName: '', saving: false, error: null, step: 'pick' };
-    if (!_live.myStudents.data && !_live.myStudents.loading) queueMicrotask(fetchMyStudents);
+    if (!_live.myStudents.data && !_live.myStudents.loading && !_live.myStudents.error) queueMicrotask(fetchMyStudents);
     render();
   };
   window.__verdCertCloseUpload = () => { _ui.certUpload = null; render(); };

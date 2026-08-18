@@ -478,7 +478,7 @@
 
   function actiefListView() {
     // Ronde 7b: dropdown-filters vervangen chip-rijen. F-defaults zijn '' (= alle).
-    if (!_traj.list && !_traj.loading) queueMicrotask(fetchTrajecten);
+    if (!_traj.list && !_traj.loading && !_traj.error) queueMicrotask(fetchTrajecten);
     const fSoort   = F('lead-soort', '');
     const fTraject = F('lead-traject', '');
     const fKwal    = F('lead-kwal', '');
@@ -709,7 +709,7 @@
   function actiefView() {
     if (urlParam('lead')) return detailView();
     if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
-    if (!_act.loading && (!_act.data || _act.params !== actiefParams())) queueMicrotask(fetchActief);
+    if (!_act.loading && !_act.error && (!_act.data || _act.params !== actiefParams())) queueMicrotask(fetchActief);
     const list = actiefListView();
     const modal = urlParam('lead-new') === '1' ? createModal() : '';
     const editM = _edit.open ? editModal() : '';
@@ -768,7 +768,7 @@
   function archiefView() {
     if (urlParam('lead')) return detailView();
     if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
-    if (!_arc.loading && (!_arc.data || _arc.params !== archiefParams())) queueMicrotask(fetchArchief);
+    if (!_arc.loading && !_arc.error && (!_arc.data || _arc.params !== archiefParams())) queueMicrotask(fetchArchief);
     const list = archiefListView();
     const modal = urlParam('lead-new') === '1' ? createModal() : '';
     const editM = _edit.open ? editModal() : '';
@@ -925,7 +925,7 @@
   function detailView() {
     const id = urlParam('lead');
     if (!id) return '';
-    if (!_det.loading && (!_det.data || _det.id !== id)) queueMicrotask(() => fetchDetail(id));
+    if (!_det.loading && !_det.error && (!_det.data || _det.id !== id)) queueMicrotask(() => fetchDetail(id));
     const d = _det.data || {};
     const l = d.lead || {};
     const antw = Array.isArray(d.antwoorden) ? d.antwoorden : [];

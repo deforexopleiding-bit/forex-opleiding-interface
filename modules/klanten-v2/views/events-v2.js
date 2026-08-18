@@ -1536,8 +1536,8 @@
   window.__evAttOpen = (attId, eventId) => {
     const dbg = /(?:^|[?&])debug=1(?:$|&)/.test(location.search);
     _ui.attDetail = { attId, eventId };
-    if (!_live.assessments.data[attId] && !_live.assessments.loading[attId]) queueMicrotask(() => fetchAssessment(attId));
-    if (!_live.attComms.data[attId] && !_live.attComms.loading[attId]) queueMicrotask(() => fetchAttComms(attId));
+    if (!_live.assessments.data[attId] && !_live.assessments.loading[attId] && !(_live.assessments.error && _live.assessments.error[attId])) queueMicrotask(() => fetchAssessment(attId));
+    if (!_live.attComms.data[attId] && !_live.attComms.loading[attId] && !(_live.attComms.error && _live.attComms.error[attId])) queueMicrotask(() => fetchAttComms(attId));
     // ROOT-CAUSE BUG-A: de modal-render leest `_live.attendees.data[eventId]` om
     // de attendee-details te vinden. Vanuit Aanwezigen is die lijst al gefetched
     // (tab-init), vanuit Inschrijvingen NIET -> lookup faalt -> "Deelnemer niet
@@ -1660,7 +1660,7 @@
       else {
         // Fetch messages lazy als nog niet gefetched
         const msgSt = _live.inboxMsgs;
-        if (!msgSt.data[convId] && !msgSt.loading[convId]) queueMicrotask(() => fetchInboxMsgs(convId));
+        if (!msgSt.data[convId] && !msgSt.loading[convId] && !(msgSt.error && msgSt.error[convId])) queueMicrotask(() => fetchInboxMsgs(convId));
         if (msgSt.loading[convId]) contactBlock = `<div style="font-size:12.5px;color:var(--text-3)">Berichten laden…</div>`;
         else if (msgSt.error[convId]) contactBlock = `<div style="font-size:12.5px;color:var(--rose)">Berichten-fout: ${esc(msgSt.error[convId])}</div>`;
         else {
@@ -2957,7 +2957,7 @@
   window.__evCompTplOpen = (convId) => {
     _ui.tplPickerOpen = convId;
     _ui.tplPickerQ = '';
-    if (!_live.inboxTpls.data[convId] && !_live.inboxTpls.loading[convId]) queueMicrotask(() => fetchInboxTpls(convId));
+    if (!_live.inboxTpls.data[convId] && !_live.inboxTpls.loading[convId] && !(_live.inboxTpls.error && _live.inboxTpls.error[convId])) queueMicrotask(() => fetchInboxTpls(convId));
     if (window.DFO?.render) window.DFO.render();
   };
   window.__evCompTplClose = () => {

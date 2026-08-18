@@ -776,9 +776,9 @@
      TAB 1 — DASHBOARD (ongewijzigd t.o.v. v=2)
      ══════════════════════════════════════════════════════════════════ */
   function dashboardView() {
-    if (!_live.stats.fetched && !_live.stats.loading) queueMicrotask(() => _fetchStats('week'));
-    if (!_live.settings.fetched && !_live.settings.loading) queueMicrotask(_fetchSettings);
-    if (!_live.logs.fetched && !_live.logs.loading) queueMicrotask(_fetchLogs);
+    if (!_live.stats.fetched && !_live.stats.loading && !_live.stats.error) queueMicrotask(() => _fetchStats('week'));
+    if (!_live.settings.fetched && !_live.settings.loading && !_live.settings.error) queueMicrotask(_fetchSettings);
+    if (!_live.logs.fetched && !_live.logs.loading && !_live.logs.error) queueMicrotask(_fetchLogs);
     queueMicrotask(_startPoll);
 
     const stats = _live.stats.data;
@@ -854,8 +854,8 @@
      TAB 2 — GESPREKKEN (BROK 2 writes)
      ══════════════════════════════════════════════════════════════════ */
   function gesprekkenView() {
-    if (!_live.convs.fetched && !_live.convs.loading) queueMicrotask(_fetchConvs);
-    if (!_booking.fetched && !_booking.loading) queueMicrotask(_fetchBookingUrl);
+    if (!_live.convs.fetched && !_live.convs.loading && !_live.convs.error) queueMicrotask(_fetchConvs);
+    if (!_booking.fetched && !_booking.loading && !_booking.error) queueMicrotask(_fetchBookingUrl);
     queueMicrotask(_startPoll);
     queueMicrotask(_paintThread);
     queueMicrotask(_updateSendBtn);
@@ -1021,7 +1021,7 @@
      ══════════════════════════════════════════════════════════════════ */
   function statsView() {
     const period = _live.stats.period || 'week';
-    if (!_live.statsAll[period] && !_live.stats.loading) queueMicrotask(() => _fetchStats(period));
+    if (!_live.statsAll[period] && !_live.stats.loading && !_live.stats.error) queueMicrotask(() => _fetchStats(period));
     queueMicrotask(_startPoll);
     const stats = _live.statsAll[period] || _live.stats.data;
     const errBanner = (msg) => `<div style="padding:12px 14px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(msg)} <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="__lisaRetry('stats')">Opnieuw</button></div>`;

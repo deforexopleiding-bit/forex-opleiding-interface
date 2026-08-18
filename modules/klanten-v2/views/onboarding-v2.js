@@ -547,7 +547,7 @@
     if (!_trajecten) queueMicrotask(loadTrajecten);
     if (!_mentors)   queueMicrotask(loadMentors);
     const st = _live.active;
-    if (!st.rows && !st.loading) queueMicrotask(() => fetchScope('active'));
+    if (!st.rows && !st.loading && !st.error) queueMicrotask(() => fetchScope('active'));
     const raw = asArr(st.rows);
     // Filter-pipeline: startgroep-tabs (enige primaire filter) → sort → pagineren.
     const afterStart  = startFilter(raw);
@@ -568,7 +568,7 @@
     if (!_trajecten) queueMicrotask(loadTrajecten);
     if (!_mentors)   queueMicrotask(loadMentors);
     const st = _live.archived;
-    if (!st.rows && !st.loading) queueMicrotask(() => fetchScope('archived'));
+    if (!st.rows && !st.loading && !st.error) queueMicrotask(() => fetchScope('archived'));
     const raw = asArr(st.rows);
     // Archief: geen filter-rij (alles daar is terminal), alleen sortering +
     // paginering. Startgroep-tabs zijn niet zinvol op gearchiveerde rijen.

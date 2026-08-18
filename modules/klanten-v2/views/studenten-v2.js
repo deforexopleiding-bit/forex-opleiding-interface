@@ -239,7 +239,7 @@
   window.__stSetDetailTab = (tab) => {
     if (!['Overzicht', 'Sessies', 'Facturen', 'Notities'].includes(tab)) return;
     _ui.detailTab = tab;
-    if (tab === 'Sessies' && !_live.sessions.data && !_live.sessions.loading) queueMicrotask(_fetchSessions);
+    if (tab === 'Sessies' && !_live.sessions.data && !_live.sessions.loading && !_live.sessions.error && !_live.sessions.error) queueMicrotask(_fetchSessions);
     _repaintDetailPane();
   };
   /* ── BROK 2 — Notitie/beoordeling edit-state ─────────────────────────

@@ -1256,7 +1256,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function werklijstView() {
     const st = _live.leadsList;
-    if (!st.loading && (!st.data || st.key !== _leadsKey()) && !st.migrationRequired) queueMicrotask(fetchLeads);
+    if (!st.loading && !st.error && (!st.data || st.key !== _leadsKey()) && !st.migrationRequired) queueMicrotask(fetchLeads);
 
     const bucketsRow = _renderBucketsRow();
     const filtersRow = _renderFilters();
@@ -1459,7 +1459,7 @@
     </div>`;
   }
   function _detailNotities(l) {
-    if (!_live.notes.data[l.id] && !_live.notes.loading[l.id]) queueMicrotask(() => fetchNotes(l.id));
+    if (!_live.notes.data[l.id] && !_live.notes.loading[l.id] && !(_live.notes.error && _live.notes.error[l.id])) queueMicrotask(() => fetchNotes(l.id));
     const notes = _live.notes.data[l.id];
     const draft = _ui.noteDraft[l.id] || '';
     const busy = _ui.noteBusy[l.id];
@@ -1484,7 +1484,7 @@
   }
   function _detailRetentie(l) {
     if (!l.customer_id) return `<div style="padding:24px;color:var(--text-3);font-size:13px">Deze lead heeft (nog) geen gekoppelde klant — geen retentie-context beschikbaar.</div>`;
-    if (!_live.retention.data[l.customer_id] && !_live.retention.loading[l.customer_id]) queueMicrotask(() => fetchRetention(l.customer_id));
+    if (!_live.retention.data[l.customer_id] && !_live.retention.loading[l.customer_id] && !(_live.retention.error && _live.retention.error[l.customer_id])) queueMicrotask(() => fetchRetention(l.customer_id));
     if (_live.retention.error[l.customer_id]) return errBlk(_live.retention.error[l.customer_id]);
     if (_live.retention.loading[l.customer_id]) return skel();
     const r = _live.retention.data[l.customer_id];
@@ -1672,7 +1672,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function opvolglijstView() {
     const st = _live.opvolglijst;
-    if (!st.loading && !st.data && !st.migrationRequired) queueMicrotask(fetchOpvolglijst);
+    if (!st.loading && !st.data && !st.error && !st.migrationRequired) queueMicrotask(fetchOpvolglijst);
     const body = st.migrationRequired ? migrationBanner('follow-up opvolglijst-flags')
       : (st.error && !st.data) ? errBlk(st.error, 'window.__fuRefresh()')
       : (st.loading && !st.data) ? skel()
@@ -1762,10 +1762,10 @@
   // ═══════════════════════════════════════════════════════════════════════
   function eventBellijstView() {
     const stP = _live.eventPicker;
-    if (!stP.loading && !stP.data) queueMicrotask(fetchEventPicker);
+    if (!stP.loading && !stP.data && !stP.error) queueMicrotask(fetchEventPicker);
     const stB = _live.eventBellijst;
     const key = _ui.eventSelectedId || '_next';
-    if (!stB.loading && (!stB.data || stB.key !== key)) queueMicrotask(fetchEventBellijst);
+    if (!stB.loading && !stB.error && (!stB.data || stB.key !== key)) queueMicrotask(fetchEventBellijst);
     return `<div style="padding:14px 20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
         <h2 style="font-size:16px;font-weight:600;margin:0">Event-bellijst</h2>
@@ -1830,8 +1830,8 @@
     const stS = _live.stats;
     const stM = _live.metrics;
     const key = _ui.statsPeriod;
-    if (!stS.loading && (!stS.data || stS.key !== key)) queueMicrotask(fetchStats);
-    if (!stM.loading && (!stM.data || stM.key !== key)) queueMicrotask(fetchMetrics);
+    if (!stS.loading && !stS.error && (!stS.data || stS.key !== key)) queueMicrotask(fetchStats);
+    if (!stM.loading && !stM.error && (!stM.data || stM.key !== key)) queueMicrotask(fetchMetrics);
     return `<div style="padding:14px 20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
         <h2 style="font-size:16px;font-weight:600;margin:0">Statistieken</h2>
@@ -1924,7 +1924,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function zoekenView() {
     const st = _live.search;
-    if (_ui.searchQ && _ui.searchQ.length >= 2 && !st.loading && (!st.data || st.key !== _ui.searchQ)) queueMicrotask(fetchSearch);
+    if (_ui.searchQ && _ui.searchQ.length >= 2 && !st.loading && !st.error && (!st.data || st.key !== _ui.searchQ)) queueMicrotask(fetchSearch);
     return `<div style="padding:14px 20px;max-width:900px;margin:0 auto">
       <div style="margin-bottom:14px">
         <h2 style="font-size:16px;font-weight:600;margin:0 0 10px 0">Zoeken — leads · afspraken · event-deelnemers · klanten</h2>
@@ -1979,7 +1979,7 @@
   ];
   function noshowView() {
     const st = _live.noshow;
-    if (!st.loading && !st.data) queueMicrotask(fetchNoshow);
+    if (!st.loading && !st.data && !st.error) queueMicrotask(fetchNoshow);
     const body = st.error && !st.data ? errBlk(st.error, 'window.__fuNoshowRefresh()')
       : (st.loading && !st.data) ? skel()
       : !st.data ? skel()
@@ -2045,7 +2045,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function openActiesView() {
     const st = _live.openActies;
-    if (!st.loading && !st.data) queueMicrotask(fetchOpenActies);
+    if (!st.loading && !st.data && !st.error) queueMicrotask(fetchOpenActies);
     const body = st.error && !st.data ? errBlk(st.error, 'window.__fuOpenActiesRefresh()')
       : (st.loading && !st.data) ? skel()
       : !st.data ? skel()
@@ -2099,7 +2099,7 @@
   }
   function agendaView() {
     const st = _live.agenda;
-    if (!st.loading && (!st.data || st.key !== _ui.agendaPeriod)) queueMicrotask(fetchAgenda);
+    if (!st.loading && !st.error && (!st.data || st.key !== _ui.agendaPeriod)) queueMicrotask(fetchAgenda);
     const body = st.error && !st.data ? errBlk(st.error, 'window.__fuAgendaRefresh()')
       : (st.loading && !st.data) ? skel()
       : !st.data ? skel()
@@ -2135,7 +2135,7 @@
   ];
   function opvolgingView() {
     const st = _live.opvolging;
-    if (!st.loading && (!st.data || st.key !== _ui.opvolgingSub)) queueMicrotask(fetchOpvolging);
+    if (!st.loading && !st.error && (!st.data || st.key !== _ui.opvolgingSub)) queueMicrotask(fetchOpvolging);
     return `<div style="padding:14px 20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h2 style="font-size:16px;font-weight:600;margin:0">Opvolging — geplande terugkom-momenten per afspraak</h2>
@@ -2170,7 +2170,7 @@
   ];
   function afgeboektView() {
     const st = _live.afgeboekt;
-    if (!st.loading && (!st.data || st.key !== _ui.afgeboektReden) && !st.migrationRequired) queueMicrotask(fetchAfgeboekt);
+    if (!st.loading && !st.error && (!st.data || st.key !== _ui.afgeboektReden) && !st.migrationRequired) queueMicrotask(fetchAfgeboekt);
     const body = st.migrationRequired ? migrationBanner('follow-up afgeboekt-tabel')
       : (st.error && !st.data) ? errBlk(st.error, 'window.__fuAfgeboektRefresh()')
       : (st.loading && !st.data) ? skel()
@@ -2219,7 +2219,7 @@
   function archiefView() {
     const st = _live.archief;
     const key = `${_ui.archiefQ}|${_ui.archiefPage}`;
-    if (!st.loading && (!st.data || st.key !== key)) queueMicrotask(fetchArchief);
+    if (!st.loading && !st.error && (!st.data || st.key !== key)) queueMicrotask(fetchArchief);
     const body = st.error && !st.data ? errBlk(st.error, 'window.__fuArchiefRefresh()')
       : (st.loading && !st.data) ? skel()
       : !st.data ? skel()
@@ -2290,7 +2290,7 @@
   }
   function afsprakenView() {
     const st = _live.appts;
-    if (!st.loading && (!st.data || st.key !== _ui.apptPeriod)) queueMicrotask(fetchAppointments);
+    if (!st.loading && !st.error && (!st.data || st.key !== _ui.apptPeriod)) queueMicrotask(fetchAppointments);
     return `<div style="padding:14px 20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
         <h2 style="font-size:16px;font-weight:600;margin:0">Afspraken</h2>
@@ -2335,7 +2335,7 @@
   function _apptDetailModal() {
     const id = _ui.apptDetailId;
     if (!id) return '';
-    if (!_live.apptDetail.data[id] && !_live.apptDetail.loading[id]) queueMicrotask(() => fetchAppointmentDetail(id));
+    if (!_live.apptDetail.data[id] && !_live.apptDetail.loading[id] && !(_live.apptDetail.error && _live.apptDetail.error[id])) queueMicrotask(() => fetchAppointmentDetail(id));
     const d = _live.apptDetail.data[id];
     const err = _live.apptDetail.error[id];
     const body = err ? errBlk(err) : !d ? skel() : `
@@ -2433,7 +2433,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function voicememoView() {
     const st = _live.voicememo;
-    if (!st.loading && !st.data) queueMicrotask(fetchVoicememo);
+    if (!st.loading && !st.data && !st.error) queueMicrotask(fetchVoicememo);
     return `<div style="padding:14px 20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px">
         <div>
@@ -2561,7 +2561,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function kalenderView() {
     const st = _live.kalender;
-    if (!st.loading && !st.data) queueMicrotask(fetchKalender);
+    if (!st.loading && !st.data && !st.error) queueMicrotask(fetchKalender);
     const body = st.error && !st.data ? errBlk(st.error, 'window.__fuKalenderRefresh()')
       : (st.loading && !st.data) ? skel()
       : !st.data ? skel()
@@ -2622,7 +2622,7 @@
   ];
   function retentiesView() {
     const st = _live.retenties;
-    if (!st.loading && (!st.data || st.key !== _ui.retentieReden) && !st.migrationRequired) queueMicrotask(fetchRetenties);
+    if (!st.loading && !st.error && (!st.data || st.key !== _ui.retentieReden) && !st.migrationRequired) queueMicrotask(fetchRetenties);
     const body = st.migrationRequired ? migrationBanner('follow_up_leads-tabel')
       : (st.error && !st.data) ? errBlk(st.error, 'window.__fuRefresh()')
       : (st.loading && !st.data) ? skel()
@@ -2675,7 +2675,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   function sluimerpotView() {
     const st = _live.sluimerpot;
-    if (!st.loading && !st.data) queueMicrotask(fetchSluimerpot);
+    if (!st.loading && !st.data && !st.error) queueMicrotask(fetchSluimerpot);
     const body = st.error && !st.data ? errBlk(st.error, 'window.__fuSluimerRefresh()')
       : (st.loading && !st.data) ? skel()
       : !st.data ? skel()

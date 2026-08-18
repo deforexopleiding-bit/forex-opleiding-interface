@@ -665,7 +665,7 @@
   function detailView() {
     const id = urlParam('ticket');
     if (!id) return '';
-    if (!_det.loading && (!_det.data || _det.id !== id)) queueMicrotask(() => fetchDetail(id));
+    if (!_det.loading && !_det.error && (!_det.data || _det.id !== id)) queueMicrotask(() => fetchDetail(id));
     const d = _det.data || {};
     const t = d.ticket || {};
     const comments = Array.isArray(d.comments) ? d.comments : [];
@@ -828,9 +828,9 @@
   }
   function ticketsKanbanView() {
     // Trigger fetches als data ontbreekt zodat de kanban vult.
-    if (!_open.loading && (!_open.data || _open.params !== ('open|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_open, ['open']));
-    if (!_wait.loading && (!_wait.data || _wait.params !== ('in_progress|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_wait, ['in_progress']));
-    if (!_done.loading && (!_done.data || _done.params !== ('resolved,closed|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_done, ['resolved', 'closed']));
+    if (!_open.loading && !_open.error && (!_open.data || _open.params !== ('open|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_open, ['open']));
+    if (!_wait.loading && !_wait.error && (!_wait.data || _wait.params !== ('in_progress|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_wait, ['in_progress']));
+    if (!_done.loading && !_done.error && (!_done.data || _done.params !== ('resolved,closed|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_done, ['resolved', 'closed']));
     return `${previewHeader('Pipeline · alle statussen', _open)}
       ${ticketsViewToggle()}
       ${window.KV_V2.kanban ? window.KV_V2.kanban.html('tickets') : '<div class="sv-empty">Kanban laden…</div>'}`;
@@ -852,7 +852,7 @@
   }
 
   function openView() {
-    if (!_open.loading && (!_open.data || _open.params !== ('open|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_open, ['open']));
+    if (!_open.loading && !_open.error && (!_open.data || _open.params !== ('open|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_open, ['open']));
     const items = _open.data?.tickets || [];
     return `${previewHeader('Open', _open)}
       ${kpiStrip(_open.data?.counts)}
@@ -860,7 +860,7 @@
       ${ticketTable(items, _open.loading, _open.error)}`;
   }
   function waitView() {
-    if (!_wait.loading && (!_wait.data || _wait.params !== ('in_progress|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_wait, ['in_progress']));
+    if (!_wait.loading && !_wait.error && (!_wait.data || _wait.params !== ('in_progress|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_wait, ['in_progress']));
     const items = _wait.data?.tickets || [];
     return `${previewHeader('Wacht op klant · maps naar status=in_progress', _wait)}
       ${kpiStrip(_wait.data?.counts)}
@@ -868,7 +868,7 @@
       ${ticketTable(items, _wait.loading, _wait.error)}`;
   }
   function doneView() {
-    if (!_done.loading && (!_done.data || _done.params !== ('resolved,closed|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_done, ['resolved', 'closed']));
+    if (!_done.loading && !_done.error && (!_done.data || _done.params !== ('resolved,closed|' + F('tk-type', 'all')))) queueMicrotask(() => fetchTab(_done, ['resolved', 'closed']));
     const items = _done.data?.tickets || [];
     return `${previewHeader('Afgehandeld · resolved + closed samengevoegd', _done)}
       ${kpiStrip(_done.data?.counts)}
