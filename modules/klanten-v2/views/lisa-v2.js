@@ -66,6 +66,7 @@
   };
   const _compose = { text: '', sending: false };
   const _slots   = { open: false, loading: false, error: null, days: [], picked: null, duration: 30, saving: false };
+  const _booking = { fetched: false, loading: false, url: null, configured: false };
   const _poll    = { handle: null, running: false, intervalMs: 18000 };
 
   /* ── HTTP-helpers ────────────────────────────────────────────────────── */
@@ -459,6 +460,64 @@
     if (window.DFO?.render) window.DFO.render();
   };
 
+  /* ── Boekingslink versturen ────────────────────────────────────────── */
+  async function _fetchBookingUrl() {
+    if (_booking.fetched || _booking.loading) return;
+    _booking.loading = true;
+    const j = await tryFetch('booking-url', '/api/lisa-booking-url');
+    _booking.loading = false;
+    _booking.fetched = true;
+    if (j && !j.error) {
+      _booking.url = j.url || null;
+      _booking.configured = !!j.configured;
+    }
+  }
+  window.__lisaSendBookingLink = async () => {
+    const conv = _thread.conversation;
+    if (!conv) { _toast('Geen conversatie geladen.', 'error'); return; }
+    if (conv.is_sandbox) { _toast('Sandbox-conversatie — reageren uitgeschakeld.', 'error'); return; }
+    // Lazy-fetch bij eerste klik (endpoint is snel + admin-only).
+    if (!_booking.fetched) await _fetchBookingUrl();
+    if (!_booking.configured || !_booking.url) {
+      _openModal(`
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">Agenda-link nog niet ingesteld</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:14px">
+          Er is nog geen boekings-URL geconfigureerd voor Lisa. Zet in <strong>Vercel &rarr; Project Settings &rarr; Environment Variables</strong> de env-var
+          <code style="background:var(--surface-2);padding:1px 6px;border-radius:4px">LISA_BOOKING_URL</code>
+          op alle environments (Production / Preview / Development). Bijvoorbeeld:
+        </div>
+        <div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-family:'IBM Plex Mono',monospace;font-size:12px;margin-bottom:14px">
+          LISA_BOOKING_URL=https://agenda.deforexopleiding.nl/dave-15min
+        </div>
+        <div style="font-size:12.5px;color:var(--text-3);line-height:1.55;margin-bottom:14px">
+          Na redeploy verschijnt de link hier automatisch. Voor nu kan je een link handmatig plakken in het compose-veld hieronder.
+        </div>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="document.getElementById('lisaModalRoot')?.remove()">OK</button>
+        </div>`);
+      return;
+    }
+    // Prefill compose met een korte standaard-zin + de link. User bewerkt en
+    // verstuurt via de bestaande __lisaSend flow (confirm-modal = de stop).
+    const firstName = (String(conv.contact_name || '').trim().split(/\s+/)[0]) || '';
+    const opener = firstName ? `Top ${firstName}!` : 'Top!';
+    const prefill = `${opener} Plan hier een moment dat jou uitkomt: ${_booking.url}`;
+    _compose.text = prefill;
+    if (window.DFO?.render) window.DFO.render();
+    // Focus + scroll na render zodat gebruiker direct kan aanpassen.
+    queueMicrotask(() => {
+      const ta = document.getElementById('lisaComposeInput');
+      if (ta) {
+        ta.value = prefill; // zorg dat oninput-listener sync is
+        ta.focus();
+        try { ta.setSelectionRange(prefill.length, prefill.length); } catch (_) {}
+        ta.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+      _updateSendBtn();
+    });
+    _toast('Standaardtekst ingevuld — bewerken kan; klik Verstuur om te versturen.', 'info');
+  };
+
   /* ── Afspraak inschieten (DEEL C) ───────────────────────────────────── */
   window.__lisaOpenAppt = async () => {
     const conv = _thread.conversation;
@@ -785,6 +844,7 @@
      ══════════════════════════════════════════════════════════════════ */
   function gesprekkenView() {
     if (!_live.convs.fetched && !_live.convs.loading) queueMicrotask(_fetchConvs);
+    if (!_booking.fetched && !_booking.loading) queueMicrotask(_fetchBookingUrl);
     queueMicrotask(_startPoll);
     queueMicrotask(_paintThread);
     queueMicrotask(_updateSendBtn);
@@ -881,6 +941,7 @@
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaMarkDisqualified()" title="Markeer als disqualified">Disq.</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaTogglePause()" title="Pauzeer/hervat follow-ups">${conv.followup_paused ? '▶ Hervat FU' : '⏸ Pauzeer FU'}</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleTakeover()" title="Mens-overname aan/uit">${conv.human_takeover ? 'Lisa terug' : 'Mens over'}</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaSendBookingLink()" title="Prefill compose met agenda-link zodat de volger zelf boekt">🔗 Stuur boekingslink</button>
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lisaOpenAppt()" title="Zoom-afspraak inschieten via Dave's kalender">📅 Afspraak inschieten</button>
       </div>` : '';
 
@@ -1023,5 +1084,5 @@
   window.DFO.VIEWS['lisa/Statistieken'] = statsView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('lisa');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('lisa');
-  console.debug('[lisa-v2] v=3 BROK 1-fix + BROK 2 writes — thread-guard hersteld (conversation-based); DEEL A intervene (compose + confirm + optimistic + human_takeover-sync); DEEL B status-mutaties (fase-select + kwalificeer/disq/pauzeer/mens-overname + rollback bij fout); DEEL C afspraak-picker (free-slots 14d, duur 15/30/45/60m, confirm + POST lisa-appointment-create). Vrije-slots-gate additief uitgebreid met lisa.config.publish.');
+  console.debug('[lisa-v2] v=4 — DEEL A/B/C uit v=3 + NIEUW: knop Stuur boekingslink (prefillt compose met LISA_BOOKING_URL, valt terug op setup-modal als env-var ontbreekt).');
 })();
