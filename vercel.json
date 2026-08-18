@@ -103,6 +103,10 @@
       "schedule": "0 3 * * *"
     },
     {
+      "path": "/api/cron-events-close-reconcile",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron-dunning-bulk-send",
       "schedule": "*/3 * * * *"
     },
