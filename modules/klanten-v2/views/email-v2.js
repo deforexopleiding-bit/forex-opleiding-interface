@@ -1939,6 +1939,40 @@
     }
     if (draftSubject && !_ui.compose.subject) _ui.compose.subject = draftSubject;
   }
+  // v=28: custom in-app confirm-modal (Promise-based). Vervangt window.confirm,
+  // dat de tab-runtime bevroor tijdens de dialoog → auto-save + poll stonden
+  // stil. Zelfde look-and-feel als de Lisa fase-modal / leadsonderhoud confirm.
+  function _emailCloseConfirmModal() {
+    const m = document.getElementById('emailConfirmModalRoot');
+    if (m) m.remove();
+    document.removeEventListener('keydown', _emailConfirmModalKey, true);
+  }
+  function _emailConfirmModalKey(e) { if (e.key === 'Escape') { e.preventDefault(); _emailCloseConfirmModal(); } }
+  function _emailAskConfirm(title, bodyText, opts) {
+    return new Promise((resolve) => {
+      _emailCloseConfirmModal();
+      const okLabel     = esc((opts && opts.okLabel)     || 'Ja');
+      const cancelLabel = esc((opts && opts.cancelLabel) || 'Annuleren');
+      const bgVar       = 'var(--brand,#0A7490)';
+      const root = document.createElement('div');
+      root.id = 'emailConfirmModalRoot';
+      root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.48);padding:20px';
+      root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:480px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto">
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px;white-space:pre-wrap">${esc(bodyText)}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="emailConfirmCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
+          <button id="emailConfirmOk" class="btn btn-primary btn-sm" style="background:${bgVar};border-color:${bgVar};color:#fff">${okLabel}</button>
+        </div>
+      </div>`;
+      root.addEventListener('click', (e) => { if (e.target === root) { _emailCloseConfirmModal(); resolve(false); } });
+      document.body.appendChild(root);
+      document.addEventListener('keydown', _emailConfirmModalKey, true);
+      document.getElementById('emailConfirmCancel').addEventListener('click', () => { _emailCloseConfirmModal(); resolve(false); });
+      document.getElementById('emailConfirmOk').addEventListener('click',    () => { _emailCloseConfirmModal(); resolve(true);  });
+    });
+  }
+
   window.__emailComposeAi = async () => {
     const orig = _ui.compose && _ui.compose._orig ? _ui.compose._orig : null;
     if (!orig || (!orig.subject && !orig.body)) {
@@ -1949,7 +1983,14 @@
     // Confirm bij bestaande user-content in de body — stil overschrijven
     // ontlaadt eigen werk.
     if (_composeBodyHasUserContent(_ui.compose.body_html)) {
-      if (!window.confirm('Huidige tekst vervangen door AI-concept?')) return;
+      // v=28: custom modal i.p.v. window.confirm — voorkomt tab-freeze
+      // (auto-save + poll blijven doorlopen tijdens de vraag).
+      const ok = await _emailAskConfirm(
+        'Huidige tekst vervangen door AI-concept?',
+        'Wat je nu getypt hebt wordt overschreven door het AI-concept. De handtekening blijft staan.',
+        { okLabel: 'Ja, vervang', cancelLabel: 'Annuleren' }
+      );
+      if (!ok) return;
     }
     _ui.composeAiBusy = true; _ui.composeAiErr = null;
     if (render) render();
@@ -2088,5 +2129,5 @@
   window.DFO.VIEWS['email/'] = emailView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('email');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('email');
-  console.debug('[email-v2] v=27 — Laad-indicator (spinner + pulserende in-card banner) op Genereer/Verfijn/tone-chip; tone-chips gedisabled tijdens busy. Compose-✦ functioneel: bij reply/replyall/fwd → AI-concept op basis van origineel (gecached in _ui.compose._orig door _replyState), confirm bij overschrijven bestaande tekst, laad-indicator + nette NL-fout. Bij "new" compose → oude hint.');
+  console.debug('[email-v2] v=28 — Custom in-app confirm-modal voor compose-✦ vervang-bevestiging (was window.confirm dat de tab bevroor — auto-save + poll stonden stil tijdens de dialoog). Zelfde look als Lisa fase-modal. Alles uit v=27 behouden.');
 })();
