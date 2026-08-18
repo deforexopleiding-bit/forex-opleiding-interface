@@ -196,7 +196,7 @@ END $$;
 
 -- ═══ Verificatie-queries (mag je apart draaien na de migratie) ══════════
 -- Alle events die na de migratie nog exact-vol-maar-open zijn (moet 0 zijn):
---   SELECT e.id, e.title, e.event_date, e.capacity, event_confirmed_count(e.id) AS cnt
+--   SELECT e.id, e.title, e.starts_at, e.capacity, event_confirmed_count(e.id) AS cnt
 --   FROM events e
 --   WHERE e.status <> 'archived' AND e.signups_closed = false
 --     AND e.capacity IS NOT NULL AND e.capacity > 0
