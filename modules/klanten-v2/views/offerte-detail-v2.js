@@ -93,6 +93,41 @@
     _toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
   }
 
+  // BROK 9 (v=10, 2026-08-18): custom confirm-modal via document.body.
+  // Vervangt native window.confirm() bij destructieve/mutatieve acties
+  // (Markeer als getekend + Offerte verwijderen). Returnt Promise<bool>.
+  // Losgekoppeld van view-render, dus DFO.render-cycle blijft rustig.
+  const _escOdv = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  function _odvConfirm(title, bodyHtml, opts) {
+    return new Promise((resolve) => {
+      const okLabel = _escOdv(opts?.okLabel || 'Bevestig');
+      const cancelLabel = _escOdv(opts?.cancelLabel || 'Annuleren');
+      const danger = opts?.danger === true;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px';
+      wrap.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden" onclick="event.stopPropagation()">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600">${_escOdv(title)}</div>
+        <div style="padding:14px 18px;font-size:13px;line-height:1.55;color:var(--text-2)">${bodyHtml}</div>
+        <div style="padding:11px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" data-cancel style="padding:6px 14px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-1);border-radius:6px;font-size:12.5px;cursor:pointer">${cancelLabel}</button>
+          <button type="button" data-ok style="padding:6px 14px;border:0;background:${danger ? 'var(--rose)' : 'var(--brand,#0A7490)'};color:#fff;border-radius:6px;font-size:12.5px;cursor:pointer;font-weight:600">${okLabel}</button>
+        </div>
+      </div>`;
+      const close = (result) => {
+        try { wrap.remove(); } catch (_) {}
+        document.removeEventListener('keydown', onKey);
+        resolve(result);
+      };
+      const onKey = (e) => { if (e.key === 'Escape') close(false); };
+      wrap.addEventListener('click', () => close(false));
+      wrap.querySelector('[data-cancel]').addEventListener('click', () => close(false));
+      wrap.querySelector('[data-ok]').addEventListener('click', () => close(true));
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(wrap);
+      setTimeout(() => wrap.querySelector('[data-ok]').focus(), 0);
+    });
+  }
+
   // ── Scoped CSS-injectie (1x per session) ────────────────────────────────
   // Zelfde tokens/kleuren als standalone HTML; puur .odv-* namespace zodat
   // klanten-v2 core niet vervuild raakt.
@@ -616,7 +651,13 @@
 
   window.__odvDoMarkAccepted = async function () {
     if (!_odv.dealId) return;
-    if (!confirm('Markeert deze offerte handmatig als getekend (gebruik vóór de TL-webhook actief is). Doorgaan?')) return;
+    // BROK 9 (v=10): custom confirm i.p.v. native window.confirm.
+    const ok = await _odvConfirm(
+      'Offerte handmatig markeren als getekend?',
+      'Deze actie is bedoeld voor gebruik <b>vóór</b> de TeamLeader-webhook actief is. Zet <code>tl_quotation_status = accepted</code> in de deals-tabel; er wordt <b>geen factuur/inschrijving/commissie/TL-push</b> uit dit endpoint gegenereerd. Wél kan een andere flow op de status-transitie reageren.',
+      { okLabel: 'Ja, markeer getekend' }
+    );
+    if (!ok) return;
     try {
       await apiJson('/api/sales-quotation-mark-accepted', { method: 'POST', body: JSON.stringify({ deal_id: _odv.dealId }) });
       toast('Gemarkeerd als getekend');
@@ -662,7 +703,14 @@
 
   window.__odvDoDelete = async function () {
     if (!_odv.dealId) return;
-    if (!confirm('Offerte verwijderen? Dit trekt hem ook in TeamLeader in (indien gekoppeld). Kan niet ongedaan gemaakt worden.')) return;
+    // BROK 9 (v=10): danger custom confirm — verwijderen is destructief +
+    // wordt in TeamLeader ingetrokken. Danger-styled knop (rose) i.p.v. blauw.
+    const ok = await _odvConfirm(
+      'Offerte verwijderen?',
+      'De offerte wordt lokaal verwijderd én in TeamLeader ingetrokken (indien gekoppeld). <b>Kan niet ongedaan gemaakt worden.</b>',
+      { okLabel: 'Ja, verwijder', danger: true }
+    );
+    if (!ok) return;
     try {
       await apiJson('/api/teamleader-delete-quotation', { method: 'POST', body: JSON.stringify({ deal_id: _odv.dealId }) });
       toast('Offerte verwijderd');

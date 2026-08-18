@@ -312,6 +312,55 @@
     }
     _updateFootIndicator();
   }
+  // BROK 9 (v=19, 2026-08-18): custom confirm + alert modals via document.body.
+  // Vervangen native window.confirm/alert (sluiten-met-wijzigingen + error-toasts).
+  const _escSw = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  function _swConfirm(title, bodyHtml, opts) {
+    return new Promise((resolve) => {
+      const okLabel = _escSw(opts?.okLabel || 'Bevestig');
+      const cancelLabel = _escSw(opts?.cancelLabel || 'Annuleren');
+      const danger = opts?.danger === true;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9700;display:flex;align-items:center;justify-content:center;padding:20px';
+      wrap.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden" onclick="event.stopPropagation()">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600">${_escSw(title)}</div>
+        <div style="padding:14px 18px;font-size:13px;line-height:1.55;color:var(--text-2)">${bodyHtml}</div>
+        <div style="padding:11px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" data-cancel style="padding:6px 14px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-1);border-radius:6px;font-size:12.5px;cursor:pointer">${cancelLabel}</button>
+          <button type="button" data-ok style="padding:6px 14px;border:0;background:${danger ? 'var(--rose)' : 'var(--brand,#0A7490)'};color:#fff;border-radius:6px;font-size:12.5px;cursor:pointer;font-weight:600">${okLabel}</button>
+        </div>
+      </div>`;
+      const close = (r) => { try { wrap.remove(); } catch (_) {} document.removeEventListener('keydown', onKey); resolve(r); };
+      const onKey = (e) => { if (e.key === 'Escape') close(false); };
+      wrap.addEventListener('click', () => close(false));
+      wrap.querySelector('[data-cancel]').addEventListener('click', () => close(false));
+      wrap.querySelector('[data-ok]').addEventListener('click', () => close(true));
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(wrap);
+      setTimeout(() => wrap.querySelector('[data-ok]').focus(), 0);
+    });
+  }
+  function _swAlert(title, bodyHtml) {
+    return new Promise((resolve) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9700;display:flex;align-items:center;justify-content:center;padding:20px';
+      wrap.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden" onclick="event.stopPropagation()">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600">${_escSw(title)}</div>
+        <div style="padding:14px 18px;font-size:13px;line-height:1.55;color:var(--text-2)">${bodyHtml}</div>
+        <div style="padding:11px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+          <button type="button" data-ok style="padding:6px 14px;border:0;background:var(--brand,#0A7490);color:#fff;border-radius:6px;font-size:12.5px;cursor:pointer;font-weight:600">OK</button>
+        </div>
+      </div>`;
+      const close = () => { try { wrap.remove(); } catch (_) {} document.removeEventListener('keydown', onKey); resolve(); };
+      const onKey = (e) => { if (e.key === 'Escape' || e.key === 'Enter') close(); };
+      wrap.addEventListener('click', close);
+      wrap.querySelector('[data-ok]').addEventListener('click', close);
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(wrap);
+      setTimeout(() => wrap.querySelector('[data-ok]').focus(), 0);
+    });
+  }
+
   function _swMarkDirty() {
     // BUGFIX 2026-08-12: hier stond `_swMarkDirty();` als eerste regel —
     // infinite recursion → RangeError bij ELKE handler die _swMarkDirty()
@@ -695,10 +744,17 @@
       console.warn('[sw-v2] initial body-render throw:', e?.message);
     }
   };
-  window.__swClose = (reason) => {
+  window.__swClose = async (reason) => {
     // Dirty-guard: alleen prompten als er ONopgeslagen wijzigingen zijn.
-    // Bij confirm-cancel bailen we — user wil niet sluiten.
-    if (_sw.dirty && !confirm('Er zijn niet-opgeslagen wijzigingen. Wizard sluiten?')) return;
+    // Custom confirm i.p.v. native — consistent met andere v2-views.
+    if (_sw.dirty) {
+      const ok = await _swConfirm(
+        'Wizard sluiten?',
+        'Er zijn niet-opgeslagen wijzigingen. Weet je zeker dat je de wizard wilt sluiten?',
+        { okLabel: 'Ja, sluit', danger: true }
+      );
+      if (!ok) return;
+    }
     // BUGFIX 2026-08-13 (reopen): één helper voor state + DOM cleanup.
     // Alle sluitpaden (× · Annuleren · backdrop · Esc · post-submit)
     // gaan hierdoorheen zodat state en DOM ALTIJD consistent leeg zijn
@@ -793,7 +849,7 @@
     const email = String(_sw.wizard.email || '').trim();
     const phone = String(_sw.wizard.phone || '').trim();
     if (!email && !phone) {
-      alert('Vul email of telefoon in voordat je zoekt.');
+      await _swAlert('Kan niet zoeken', 'Vul een email <b>of</b> telefoonnummer in voordat je op zoek klikt.');
       return;
     }
     _sw.dupModal.open = true;
@@ -1098,7 +1154,7 @@
         _sw.wizard.duration_months = Number(data.variant.default_duration_months);
       }
     } catch (e) {
-      alert('Traject laden mislukt: ' + (e?.message || 'onbekende fout'));
+      await _swAlert('Traject laden mislukt', _escSw(e?.message || 'Onbekende fout — probeer het opnieuw of neem contact op met support.'));
     }
     renderWizard();
   }
