@@ -277,10 +277,6 @@
             ${['Dag', 'Week', 'Maand', 'Jaar'].map(p => `<button class="chip ${curPeriod === p ? 'on' : ''}" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO_dashPeriodClick('${p}')">${p}</button>`).join('')}
             <button class="chip" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO_dashPeriodClick('Custom')">Custom ▾</button>
           </div>
-          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('offerte')">${svg(I.doc)}Offerte</button>
-          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('traject')">${svg(I.grad)}Traject aanmelden</button>
-          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('factuur')">${svg(I.file)}Factuur</button>
-          <button class="btn btn-ghost" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('lead')">${svg(I.target)}Nieuwe lead</button>
           <button class="btn btn-primary" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('nieuw')">${svg(I.plus)}Nieuw</button>
         </div>
       </div>

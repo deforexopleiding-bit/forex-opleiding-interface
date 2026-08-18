@@ -416,47 +416,27 @@ function wireLegacyNavClickCatcher() {
 }
 
 // ── Rol-bewuste topbar-actieknoppen ─────────────────────────────────────────
-// Rendert Nieuw + rol-shortcuts (Offerte / Traject aanmelden / Factuur) in
-// de topbar, filtert op DFO.S.roles. Klik-handlers zijn nog placeholders —
-// worden aangesloten wanneer de betreffende module gebouwd wordt.
+// v=1ek (2026-08-18): topbar-simplificatie — losse shortcut-knoppen (Offerte,
+// Factuur, Nieuwe lead, Traject aanmelden) zijn verwijderd. Alleen de primary
+// '+ Nieuw'-knop blijft; die opent een rol-gefilterde dropdown met dezelfde
+// acties (minus Traject — helemaal weg per opdracht). Dashboard-hero volgt
+// dezelfde simplificatie (zie dashboard-v2.js).
 
 function renderTopbarActions() {
   const host = document.getElementById('topbarActions');
   if (!host || !window.DFO || !window.DFO.S) return;
-  // Dashboard heeft eigen actiebalk in de hero-band; verberg de topbar-acties
-  // daar om dubbeling te vermijden. Andere modules hebben geen eigen hero
-  // en tonen de topbar-acties wel.
+  // Dashboard heeft z'n eigen + Nieuw-knop in de hero-band (naast de
+  // periode-schakelaar); verberg de topbar-versie daar om dubbeling
+  // te vermijden. Andere modules tonen 'em altijd.
   if (window.DFO.S.mod === 'dashboard') { host.innerHTML = ''; return; }
   const svg  = window.DFO.svg;
   const I    = window.DFO.I;
-  const has  = (r) => (window.DFO.S.roles || []).includes(r);
-  const anyAdmin = has('super_admin') || has('manager');
-
-  const btns = [];
-  // Sales-shortcut: Offerte (sales + admin-rollen)
-  if (has('sales') || anyAdmin) {
-    btns.push(`<button class="btn btn-ghost" onclick="DFO.KV.newAction('offerte')" title="Nieuwe offerte">${svg(I.doc)}<span>Offerte</span></button>`);
-  }
-  // Traject aanmelden — sales + mentor + admin (voor onboarding-flow)
-  if (has('sales') || has('mentor') || anyAdmin) {
-    btns.push(`<button class="btn btn-ghost" onclick="DFO.KV.newAction('traject')" title="Traject aanmelden">${svg(I.grad)}<span>Traject aanmelden</span></button>`);
-  }
-  // Factuur — finance-toegang = super_admin/manager/sales
-  if (has('sales') || anyAdmin) {
-    btns.push(`<button class="btn btn-ghost" onclick="DFO.KV.newAction('factuur')" title="Nieuwe factuur">${svg(I.file)}<span>Factuur</span></button>`);
-  }
-  // Altijd "Nieuw"-primary (context-afhankelijk in productie)
-  btns.push(`<button class="btn btn-primary" onclick="DFO.KV.newAction('nieuw')" title="Nieuw">${svg(I.plus)}<span>Nieuw</span></button>`);
-
-  host.innerHTML = btns.join('');
+  host.innerHTML = `<button class="btn btn-primary" onclick="DFO.KV.newAction('nieuw')" title="Nieuw">${svg(I.plus)}<span>Nieuw</span></button>`;
 }
 
-// Topbar-acties bedrading (2026-08-18): elke knop delegeert naar de
-// bestaande module-handler. Voor traject-aanmelden bestaat geen generieke
-// modal (obOpen in offerte-detail-v2 is deal-context-bound) → dat blok
-// hangt hier als standalone modal, hergebruikt /api/onboarding-trajecten-
-// list + /api/onboarding-create (met dezelfde 409-guard als de knop op
-// offerte-detail).
+// Topbar-acties bedrading: DFO.KV.newAction(kind) delegeert naar de
+// bestaande module-handler per kind. De + Nieuw-knop opent een rol-
+// gefilterde dropdown die intern dezelfde kinds aanroept.
 window.DFO = window.DFO || {};
 window.DFO.KV = window.DFO.KV || {};
 
@@ -483,19 +463,17 @@ window.DFO.KV.newAction = function newAction(kind) {
       toast('Sales-wizard niet geladen — probeer opnieuw over een paar seconden.');
       return;
     case 'factuur':
-      // Finance nieuwe-factuur-modal. Handler wordt in de finance-v2 IIFE
-      // op window gehangen bij page-load — moet altijd beschikbaar zijn.
-      // Fallback: navigeer naar Finance-module en open dan (dekt edge-case
-      // dat het bestand nog niet geparsed is bij pre-hydration klik).
-      if (typeof window.__finInvNew === 'function') { window.__finInvNew(); return; }
+      // FIX (2026-08-18): de nieuwe-factuur-modal is JSX BINNEN de finance-
+      // view render (finance-v2.js:287 zet alleen _newInv.open=true +
+      // DFO.render()). Vanuit een andere module (bv. Dashboard) is de
+      // active view een ander bestand → de modal wordt niet gerenderd.
+      // Vroeger deed we hier eerst 'als handler bestaat, roep direct aan';
+      // dat werkte alleen ON finance. Nu ALTIJD eerst goMod('finance'),
+      // dan handler — goMod is een no-op als je al op finance zit.
       _kvGoModAnd('finance', () => {
         if (typeof window.__finInvNew === 'function') window.__finInvNew();
         else toast('Kon nieuwe-factuur-modal niet openen.');
       });
-      return;
-    case 'traject':
-      // Standalone modal voor "Klant → Traject → Startdatum → Aanmelden".
-      _kvOpenTrajectModal();
       return;
     case 'lead':
       // Leads-module deep-link: __leadNew zet URL-param 'lead-new=1' en de
@@ -533,13 +511,12 @@ function _kvOpenNieuwMenu() {
   const has  = (r) => roles.includes(r);
   const anyAdmin = has('super_admin') || has('manager');
   const items = [];
-  if (has('sales') || anyAdmin) items.push({ kind: 'offerte', label: 'Offerte',         icon: '📝' });
-  if (has('sales') || has('mentor') || anyAdmin) items.push({ kind: 'traject', label: 'Traject aanmelden', icon: '🎓' });
-  if (has('sales') || anyAdmin) items.push({ kind: 'factuur', label: 'Factuur',         icon: '📄' });
-  // 'lead' zit alleen in dashboard-hero, maar ook zichtbaar in het + Nieuw-menu
-  // (zelfde rol-gate als de dashboard-hero-versie: iedereen die leads ziet).
+  // v=1ek: Traject aanmelden verwijderd uit het menu (per opdracht).
+  // Rol-filter gespiegeld aan de vorige losse-knoppen-config.
+  if (has('sales') || anyAdmin) items.push({ kind: 'offerte', label: 'Offerte',     icon: '📝' });
+  if (has('sales') || anyAdmin) items.push({ kind: 'factuur', label: 'Factuur',     icon: '📄' });
   if (has('sales') || has('marketing') || anyAdmin) items.push({ kind: 'lead', label: 'Nieuwe lead', icon: '🎯' });
-  if (!items.length) { window.DFO.KV.newAction('offerte'); return; } // fallback
+  if (!items.length) { toast('Geen acties beschikbaar voor je rol.'); return; }
   // Positie: rechter-topbar. Anker: de + Nieuw knop.
   const anchor = document.querySelector('#topbarActions .btn.btn-primary');
   const rect = anchor ? anchor.getBoundingClientRect() : { bottom: 60, right: window.innerWidth - 20 };
@@ -560,194 +537,6 @@ function _kvOpenNieuwMenu() {
     document.addEventListener('click', _kvNieuwMenuOutside, true);
     document.addEventListener('keydown', _kvNieuwMenuKey, true);
   }, 0);
-}
-
-/* ── Traject aanmelden — standalone modal ─────────────────────────────── */
-const _kvTraject = { customers: [], trajecten: [], search: '', pickedCustomer: null, pickedTraject: null, startDate: '', saving: false };
-function _kvEscHtml(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-function _kvCloseTrajectModal() {
-  const m = document.getElementById('kvTrajectModal');
-  if (m) m.remove();
-  document.removeEventListener('keydown', _kvTrajectModalKey, true);
-}
-function _kvTrajectModalKey(e) { if (e.key === 'Escape') _kvCloseTrajectModal(); }
-async function _kvOpenTrajectModal() {
-  _kvTraject.search = ''; _kvTraject.pickedCustomer = null; _kvTraject.pickedTraject = null;
-  _kvTraject.startDate = _kvMinStartDate(); _kvTraject.saving = false;
-  _kvTraject.customers = []; _kvTraject.trajecten = [];
-  _kvRenderTrajectModal();
-  // Trajecten pre-fetchen (klantlijst pas op zoek-input; volle klantlijst kan
-  // duizenden rijen zijn).
-  try {
-    const j = await window.KV.authedJson('/api/onboarding-trajecten-list');
-    _kvTraject.trajecten = Array.isArray(j?.trajecten) ? j.trajecten : (Array.isArray(j?.items) ? j.items : []);
-    _kvRenderTrajectModal();
-  } catch (e) { console.warn('[kv traject] trajecten-fetch fail:', e?.message || e); }
-}
-function _kvMinStartDate() {
-  // Zelfde regel als obOpen: min = vandaag + 3 kalenderdagen (server-guard).
-  const d = new Date(); d.setDate(d.getDate() + 3);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return y + '-' + m + '-' + day;
-}
-let _kvTrajectSearchTimer = null;
-async function _kvSearchCustomers(q) {
-  _kvTraject.search = q;
-  if (_kvTrajectSearchTimer) { clearTimeout(_kvTrajectSearchTimer); _kvTrajectSearchTimer = null; }
-  if (!q || q.trim().length < 2) { _kvTraject.customers = []; _kvRepaintCustomerList(); return; }
-  _kvTrajectSearchTimer = setTimeout(async () => {
-    try {
-      const j = await window.KV.authedJson('/api/sales-customers?q=' + encodeURIComponent(q.trim()) + '&limit=20');
-      _kvTraject.customers = Array.isArray(j?.customers) ? j.customers : (Array.isArray(j?.items) ? j.items : []);
-    } catch (e) { console.warn('[kv traject] customer-search fail:', e?.message || e); _kvTraject.customers = []; }
-    _kvRepaintCustomerList();
-  }, 250);
-}
-function _kvRepaintCustomerList() {
-  const list = document.getElementById('kvTrajectCustList');
-  if (!list) return;
-  const rows = _kvTraject.customers;
-  if (!_kvTraject.search || _kvTraject.search.trim().length < 2) {
-    list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12.5px">Typ minstens 2 tekens om te zoeken…</div>`;
-    return;
-  }
-  if (!rows.length) {
-    list.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12.5px">Geen klanten gevonden voor "${_kvEscHtml(_kvTraject.search)}".</div>`;
-    return;
-  }
-  list.innerHTML = rows.map((c) => {
-    const name = c.is_company ? (c.company_name || '(bedrijf zonder naam)') : ((c.first_name || '') + ' ' + (c.last_name || '')).trim() || '(klant zonder naam)';
-    const isPicked = _kvTraject.pickedCustomer && String(_kvTraject.pickedCustomer.id) === String(c.id);
-    return `<button type="button" onclick="_kvPickCustomer('${_kvEscHtml(c.id)}')" style="display:flex;flex-direction:column;gap:2px;width:100%;padding:9px 12px;border:0;background:${isPicked ? 'var(--surface-2)' : 'transparent'};color:var(--text-1);text-align:left;cursor:pointer;border-bottom:1px solid var(--border);font:inherit;font-size:12.5px" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='${isPicked ? 'var(--surface-2)' : 'transparent'}'"><span style="font-weight:500">${_kvEscHtml(name)}</span><span style="font-size:11px;color:var(--text-3)">${_kvEscHtml(c.email || '—')}</span></button>`;
-  }).join('');
-}
-window._kvPickCustomer = function (id) {
-  const c = _kvTraject.customers.find((x) => String(x.id) === String(id));
-  if (!c) return;
-  _kvTraject.pickedCustomer = c;
-  _kvRenderTrajectModal();
-};
-window._kvPickTraject = function (id) {
-  const t = _kvTraject.trajecten.find((x) => String(x.id) === String(id));
-  if (!t) return;
-  _kvTraject.pickedTraject = t;
-  _kvRepaintTrajectStatus();
-};
-function _kvRepaintTrajectStatus() {
-  const btn = document.getElementById('kvTrajectSubmit');
-  if (btn) {
-    const canSubmit = !_kvTraject.saving && _kvTraject.pickedCustomer && _kvTraject.pickedTraject && _kvTraject.startDate;
-    btn.disabled = !canSubmit;
-    btn.style.opacity = canSubmit ? '1' : '.55';
-    btn.style.cursor  = canSubmit ? 'pointer' : 'not-allowed';
-  }
-  // Update de traject-select ui alleen als 'ie bestaat en de picked veranderd is.
-  const sel = document.getElementById('kvTrajectSel');
-  if (sel && _kvTraject.pickedTraject) sel.value = String(_kvTraject.pickedTraject.id);
-}
-window._kvTrajectStartDateInput = function (val) { _kvTraject.startDate = String(val || ''); _kvRepaintTrajectStatus(); };
-window._kvTrajectSearchInput   = function (val) { _kvSearchCustomers(String(val || '')); };
-window._kvTrajectSelChange     = function (val) { window._kvPickTraject(val); };
-window._kvTrajectSubmit        = async function () {
-  if (_kvTraject.saving) return;
-  const c = _kvTraject.pickedCustomer, t = _kvTraject.pickedTraject, d = _kvTraject.startDate;
-  if (!c || !t || !d) return;
-  const min = _kvMinStartDate();
-  if (d < min) {
-    const err = document.getElementById('kvTrajectErr');
-    if (err) { err.textContent = 'Startdatum moet minimaal 3 kalenderdagen vooruit liggen (vanaf ' + min + ').'; err.style.display = 'block'; }
-    return;
-  }
-  _kvTraject.saving = true; _kvRepaintTrajectStatus();
-  const errEl = document.getElementById('kvTrajectErr'); if (errEl) errEl.style.display = 'none';
-  const btn = document.getElementById('kvTrajectSubmit'); if (btn) btn.textContent = 'Bezig…';
-  try {
-    const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = 'Bearer ' + token;
-    const resp = await fetch('/api/onboarding-create', {
-      method: 'POST', headers,
-      body: JSON.stringify({ customer_id: c.id, traject_id: t.id, start_date: d, lms_provision: false }),
-    });
-    let j = null; try { j = await resp.json(); } catch (_) {}
-    if (resp.status === 409) {
-      if (errEl) { errEl.textContent = 'Er bestaat al een actieve onboarding voor deze klant.'; errEl.style.display = 'block'; }
-      _kvTraject.saving = false;
-      if (btn) btn.textContent = 'Aanmelden'; _kvRepaintTrajectStatus();
-      return;
-    }
-    if (!resp.ok) {
-      const msg = (j && j.error) || ('HTTP ' + resp.status);
-      if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; }
-      _kvTraject.saving = false;
-      if (btn) btn.textContent = 'Aanmelden'; _kvRepaintTrajectStatus();
-      return;
-    }
-    toast('Klant aangemeld voor traject "' + (t.label || t.name || 'traject') + '".');
-    _kvCloseTrajectModal();
-  } catch (e) {
-    if (errEl) { errEl.textContent = 'Aanmelden faalde: ' + (e?.message || 'netwerkfout'); errEl.style.display = 'block'; }
-    _kvTraject.saving = false;
-    if (btn) btn.textContent = 'Aanmelden'; _kvRepaintTrajectStatus();
-  }
-};
-function _kvRenderTrajectModal() {
-  _kvCloseTrajectModal();
-  const trajOpts = _kvTraject.trajecten.length
-    ? '<option value="">— Kies traject —</option>' + _kvTraject.trajecten.map((t) => {
-        const label = t.label || t.name || t.slug || t.id;
-        const sel = _kvTraject.pickedTraject && String(_kvTraject.pickedTraject.id) === String(t.id) ? 'selected' : '';
-        return `<option value="${_kvEscHtml(t.id)}" ${sel}>${_kvEscHtml(label)}</option>`;
-      }).join('')
-    : '<option value="">Trajecten laden…</option>';
-  const picked = _kvTraject.pickedCustomer;
-  const pickedName = picked
-    ? (picked.is_company ? (picked.company_name || '(bedrijf)') : ((picked.first_name || '') + ' ' + (picked.last_name || '')).trim() || '(klant)')
-    : '';
-  const minDate = _kvMinStartDate();
-  const html = `
-    <div id="kvTrajectModal" role="dialog" aria-modal="true" style="position:fixed;inset:0;z-index:2400;background:rgba(17,23,33,.45);display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)_kvCloseTrajectModal()">
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);width:min(560px, calc(100vw - 40px));max-height:calc(100vh - 60px);overflow:hidden;display:flex;flex-direction:column">
-        <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-          <div style="font-size:15.5px;font-weight:600">Traject aanmelden</div>
-          <button onclick="_kvCloseTrajectModal()" style="width:26px;height:26px;padding:0;border:0;background:transparent;color:var(--text-3);font-size:18px;cursor:pointer">×</button>
-        </div>
-        <div style="padding:18px 20px;overflow-y:auto;flex:1;min-height:0;display:flex;flex-direction:column;gap:14px">
-          <div>
-            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">Klant</div>
-            ${picked
-              ? `<div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px"><div style="min-width:0"><div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_kvEscHtml(pickedName)}</div><div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_kvEscHtml(picked.email || '—')}</div></div><button onclick="_kvPickCustomer('')" style="border:0;background:transparent;color:var(--text-3);font-size:11.5px;cursor:pointer;text-decoration:underline">Wijzigen</button></div>`
-              : `<input type="text" placeholder="Zoek klant op naam of email (min 2 tekens)…" oninput="_kvTrajectSearchInput(this.value)" style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" autocomplete="off" spellcheck="false" />
-                <div id="kvTrajectCustList" style="margin-top:6px;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:var(--surface)"><div style="padding:16px;text-align:center;color:var(--text-3);font-size:12.5px">Typ minstens 2 tekens om te zoeken…</div></div>`}
-          </div>
-          <div>
-            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">Traject</div>
-            <select id="kvTrajectSel" onchange="_kvTrajectSelChange(this.value)" style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none" ${_kvTraject.trajecten.length ? '' : 'disabled'}>${trajOpts}</select>
-          </div>
-          <div>
-            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px">Startdatum</div>
-            <input type="date" min="${minDate}" value="${_kvEscHtml(_kvTraject.startDate)}" oninput="_kvTrajectStartDateInput(this.value)" style="width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
-            <div style="font-size:11px;color:var(--text-3);margin-top:5px">Minstens 3 kalenderdagen vooruit (${minDate} of later).</div>
-          </div>
-          <div id="kvTrajectErr" style="display:none;padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12px"></div>
-        </div>
-        <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-          <button onclick="_kvCloseTrajectModal()" class="btn btn-ghost btn-sm">Annuleren</button>
-          <button id="kvTrajectSubmit" onclick="_kvTrajectSubmit()" class="btn btn-primary btn-sm" disabled style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;opacity:.55;cursor:not-allowed">Aanmelden</button>
-        </div>
-      </div>
-    </div>`;
-  const root = document.createElement('div');
-  root.innerHTML = html;
-  document.body.appendChild(root.firstElementChild);
-  document.addEventListener('keydown', _kvTrajectModalKey, true);
-  _kvRepaintTrajectStatus();
 }
 
 // Hook: DFO.setRoles / setRole / goMod triggeren re-render van actiebalk.
