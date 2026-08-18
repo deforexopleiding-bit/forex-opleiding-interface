@@ -585,25 +585,42 @@
     </div>
     ${rows.length === 0
       ? emptyBlk('Geen events', 'Er zijn geen events die aan de filter voldoen.')
-      : H.table(
-          [{l:'Event'},{l:'Datum',cls:'optional'},{l:'Locatie',cls:'optional'},{l:'Niveau',cls:'optional'},{l:'Aanm/Cap',cls:'r'},{l:'Sync',cls:'r optional'},{l:'Status'},{l:'',cls:'r'}],
+      : `<style>
+          .kv-evcap-cell{text-align:center;vertical-align:middle}
+          .kv-evcap-inner{display:inline-flex;flex-direction:column;align-items:center;gap:4px;min-width:96px}
+          .kv-evcap-num{font-size:12.5px;font-family:'IBM Plex Mono',monospace;line-height:1;color:var(--text-1)}
+          .kv-evcap-bar{position:relative;width:96px;height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden;border:1px solid var(--border)}
+          .kv-evcap-bar > i{display:block;height:100%;border-radius:3px}
+          .kv-evcap-bar > i.ok{background:var(--emerald,#07835A)}
+          .kv-evcap-bar > i.warn{background:var(--amber,#C2700A)}
+          .kv-evcap-bar > i.danger{background:var(--rose,#C22B3E)}
+        </style>` + H.table(
+          [{l:'Event'},{l:'Datum',cls:'optional'},{l:'Locatie',cls:'optional'},{l:'Niveau',cls:'optional'},{l:'<div style="text-align:center">Aanm/Cap</div>',cls:'kv-evcap-cell'},{l:'Sync',cls:'r optional'},{l:'Status'},{l:'',cls:'r'}],
           rows.map((e) => {
-            // Bug 3: attendee_count_total = echte aangemeld-teller (zelfde bron
-            // als detail/Aanwezigen). attendee_count_active is vragenlijst-teller.
-            const aanm = Number(e.attendee_count_total || 0);
+            // Aanm = BEVESTIGDE deelnemers (vragenlijst ingevuld):
+            // attendee_count_active telt attendees waar assessment_response_id
+            // IS NOT NULL (zie server-lib getConfirmedCount + events-v2.js:822).
+            // Was voorheen attendee_count_total (alle aanmeldingen incl.
+            // no-show/afgemeld) — die is niet wat de mentor als 'bezetting' wil.
+            const aanm = Number(e.attendee_count_active || 0);
             const cap = Number(e.capacity || 0);
             const ratio = cap > 0 ? aanm / cap : 0;
-            const barCol = ratio >= 0.8 ? 'danger' : ratio >= 0.5 ? 'warn' : 'ok';
+            // Kleur consistent met KPI-drempel 'Bijna vol ≥80%':
+            //   < 80%   → groen (ok)
+            //   80-99%  → oranje (warn)
+            //   ≥ 100%  → rood (danger, incl. overboekt)
+            const barCol = ratio >= 1.0 ? 'danger' : ratio >= 0.8 ? 'warn' : 'ok';
             const [sc, sl] = STATUS_META[e.status] || ['neutral', e.status || '—'];
             const busy = _ui.busy[e.id];
+            const capCell = cap > 0
+              ? `<div class="kv-evcap-inner" title="${aanm} bevestigd · cap ${cap} (${Math.round(ratio * 100)}%)"><span class="kv-evcap-num">${aanm}/${cap}</span><div class="kv-evcap-bar"><i class="${barCol}" style="width:${Math.min(100, ratio * 100)}%"></i></div></div>`
+              : `<span class="kv-evcap-num">${aanm}${e.status === 'afgerond' ? ' (afg)' : ''}</span>`;
             return [
               `<a href="#" onclick="event.preventDefault();window.__evGoDetail('${esc(e.id)}')" style="color:inherit;text-decoration:none"><span class="cell-main">${esc(e.title || '—')}</span></a>`,
               `<span class="mono" style="color:var(--text-3);font-size:12.5px">${esc(_fmtDate(e.starts_at))} ${esc(_fmtTime(e.starts_at))}</span>`,
               `<span style="color:var(--text-2);font-size:12.5px">${esc(e.location || '—')}</span>`,
               `<span style="font-size:11.5px;color:var(--text-3)">${esc(e.niveau || '')}</span>`,
-              cap > 0
-                ? `<div style="min-width:100px"><div style="display:flex;justify-content:space-between;font-size:11.5px"><span class="mono">${aanm}/${cap}</span></div><div class="progress" style="max-width:100px"><i style="width:${Math.min(100, ratio * 100)}%;background:var(--${barCol})"></i></div></div>`
-                : `<span class="mono">${aanm}${e.status === 'afgerond' ? ' (afg)' : ''}</span>`,
+              capCell,
               _syncCell(e),
               H.pill(sc, sl),
               `<div style="position:relative;display:flex;gap:3px;justify-content:flex-end">

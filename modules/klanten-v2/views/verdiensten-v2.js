@@ -131,7 +131,7 @@
     payouts:     { loading: false, error: null, data: null },
     travel:      { loading: false, error: null, data: null, key: null },
     certs:       { loading: false, error: null, data: null },
-    coaching:    { loading: false, error: null, data: null, from: null, to: null },
+    coaching:    { loading: false, error: null, data: null, from: null, to: null, key: null },
     myEvents:    { loading: false, error: null, data: null, scope: 'all' },
     myStudents:  { loading: false, error: null, data: null },
   };
@@ -140,6 +140,10 @@
     travelForm:      null,           // { days, saving, error }
     certUpload:      null,           // { studentId, studentName, file, fileName, saving, error, step }
     confirmModal:    null,           // { msg, onOk, tone }
+    // Coaching-tab periode-selectie. `preset` ∈ day|week|month|year|custom.
+    // customFrom/customTo zijn strings YYYY-MM-DD (state-only tijdens typen —
+    // pas na 'Toepassen' triggeren ze een refetch → focus behouden).
+    coachPeriod: { preset: 'month', customFrom: '', customTo: '' },
   };
   const YEAR_OF = { '26': '2026', '25': '2025' };
 
@@ -231,14 +235,56 @@
     if (!j || j.__error) { _live.certs.error = j?.__error || 'Kon certificaten niet laden'; render(); return; }
     _live.certs.data = j; render();
   }
-  async function fetchCoaching() {
-    if (_live.coaching.loading) return;
-    _live.coaching.loading = true; _live.coaching.error = null;
-    const j = await tryFetch('coaching', '/api/mentor-coaching-earnings');
+  async function fetchCoaching(fromArg, toArg) {
+    // fromArg/toArg optioneel — als weggelaten gebruikt de server default
+    // (huidige maand). Bij bekende periode geven we ze mee als YYYY-MM-DD.
+    const from = fromArg || null;
+    const to   = toArg   || null;
+    const key = (from && to) ? (from + '..' + to) : 'default';
+    if (_live.coaching.loading && _live.coaching.key === key) return;
+    // Bij expliciete refetch (zelfde key kan opnieuw wanneer data=null):
+    _live.coaching.loading = true; _live.coaching.error = null; _live.coaching.key = key;
+    render();
+    const url = (from && to)
+      ? `/api/mentor-coaching-earnings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+      : '/api/mentor-coaching-earnings';
+    const j = await tryFetch('coaching', url);
     _live.coaching.loading = false;
     if (!j || j.__error) { _live.coaching.error = j?.__error || 'Kon coaching-verdiensten niet laden'; render(); return; }
-    _live.coaching.data = j; _live.coaching.from = j.from || null; _live.coaching.to = j.to || null;
+    _live.coaching.data = j; _live.coaching.from = j.from || from; _live.coaching.to = j.to || to;
     render();
+  }
+  // Bereken from/to op basis van de gekozen preset. Werkt in lokale tijd
+  // (Europe/Amsterdam-consistent — de mentor kijkt naar zijn eigen dagen).
+  function _coachRangeFor(preset, customFrom, customTo) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const fmt = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const now = new Date();
+    if (preset === 'day') {
+      const s = fmt(now); return { from: s, to: s };
+    }
+    if (preset === 'week') {
+      // ISO-week: maandag t/m zondag rond `now`.
+      const d = new Date(now);
+      const day = d.getDay(); // 0=zon, 1=maa...
+      const diffToMon = (day + 6) % 7; // aantal dagen terug naar maandag
+      const mon = new Date(d); mon.setDate(d.getDate() - diffToMon);
+      const zon = new Date(mon); zon.setDate(mon.getDate() + 6);
+      return { from: fmt(mon), to: fmt(zon) };
+    }
+    if (preset === 'year') {
+      const y = now.getFullYear();
+      return { from: y + '-01-01', to: y + '-12-31' };
+    }
+    if (preset === 'custom') {
+      if (!customFrom || !customTo) return null; // wacht op user-input
+      if (customFrom > customTo) return null;
+      return { from: customFrom, to: customTo };
+    }
+    // month (default)
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const last  = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { from: fmt(first), to: fmt(last) };
   }
   async function fetchMyEvents() {
     if (_live.myEvents.loading) return;
@@ -262,7 +308,33 @@
   window.__verdRetryPayouts  = () => { _live.payouts.data  = null; queueMicrotask(fetchPayouts);  };
   window.__verdRetryTravel   = () => { _live.travel.data   = null; queueMicrotask(() => fetchTravel(currentMonthKey())); };
   window.__verdRetryCerts    = () => { _live.certs.data    = null; queueMicrotask(fetchCerts);    };
-  window.__verdRetryCoaching = () => { _live.coaching.data = null; queueMicrotask(fetchCoaching); };
+  window.__verdRetryCoaching = () => {
+    _live.coaching.data = null; _live.coaching.key = null;
+    const cp = _ui.coachPeriod;
+    const r = _coachRangeFor(cp.preset, cp.customFrom, cp.customTo);
+    queueMicrotask(() => fetchCoaching(r?.from || null, r?.to || null));
+  };
+  // Periode-preset wissel (Dag/Week/Maand/Jaar/Aangepast).
+  window.__verdCoachSetPreset = (p) => {
+    const allowed = ['day', 'week', 'month', 'year', 'custom'];
+    if (!allowed.includes(p)) return;
+    _ui.coachPeriod.preset = p;
+    _live.coaching.data = null; _live.coaching.error = null; _live.coaching.key = null;
+    // Bij niet-custom: direct refetch. Bij custom: wacht op 'Toepassen'.
+    if (p === 'custom') { render(); return; }
+    const r = _coachRangeFor(p);
+    queueMicrotask(() => fetchCoaching(r?.from || null, r?.to || null));
+  };
+  // State-only setters (geen render) → focus behouden op de datepickers.
+  window.__verdCoachSetCustomFrom = (el) => { _ui.coachPeriod.customFrom = String(el?.value || '').trim(); };
+  window.__verdCoachSetCustomTo   = (el) => { _ui.coachPeriod.customTo   = String(el?.value || '').trim(); };
+  window.__verdCoachApplyCustom = () => {
+    const cp = _ui.coachPeriod;
+    if (!cp.customFrom || !cp.customTo) { toast('Kies zowel een van- als een tot-datum.', 'warn'); return; }
+    if (cp.customFrom > cp.customTo) { toast('Van-datum moet vóór tot-datum liggen.', 'warn'); return; }
+    _live.coaching.data = null; _live.coaching.error = null; _live.coaching.key = null;
+    queueMicrotask(() => fetchCoaching(cp.customFrom, cp.customTo));
+  };
   window.__verdRetryMyEvents = () => { _live.myEvents.data = null; queueMicrotask(fetchMyEvents); };
   window.__verdRetryMyStudents = () => { _live.myStudents.data = null; queueMicrotask(fetchMyStudents); };
 
@@ -495,9 +567,50 @@
      VIEW 2 — Coaching
      ═══════════════════════════════════════════════════════════════════════ */
   function coachingView() {
-    if (!_live.coaching.loading && !_live.coaching.data && !_live.coaching.error) queueMicrotask(fetchCoaching);
-    if (_live.coaching.error && !_live.coaching.data) return errBlk(_live.coaching.error, 'window.__verdRetryCoaching()') + renderConfirmModal();
-    if (!_live.coaching.data) return skel() + renderConfirmModal();
+    // Bootstrap: fetch met de huidige preset (default 'month' — matcht
+    // eerder gedrag). Bij 'custom' zonder van/tot: geen fetch, alleen UI.
+    if (!_live.coaching.loading && !_live.coaching.data && !_live.coaching.error) {
+      const cp = _ui.coachPeriod;
+      const r = _coachRangeFor(cp.preset, cp.customFrom, cp.customTo);
+      if (r) queueMicrotask(() => fetchCoaching(r.from, r.to));
+    }
+    // Header (chips + custom-range) rendert altijd, ook bij loading/error/empty.
+    const cp = _ui.coachPeriod;
+    const presetChips = [
+      ['day',   'Dag'],
+      ['week',  'Week'],
+      ['month', 'Maand'],
+      ['year',  'Jaar'],
+      ['custom','Aangepast'],
+    ].map(([v, label]) => `<button class="btn ${cp.preset === v ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdCoachSetPreset('${v}')">${esc(label)}</button>`).join('');
+    const customFromVal = esc(cp.customFrom || '');
+    const customToVal   = esc(cp.customTo   || '');
+    const customBlock = cp.preset === 'custom' ? `
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:11.5px;color:var(--text-3)">Van
+          <input type="date" value="${customFromVal}" oninput="window.__verdCoachSetCustomFrom(this)" style="margin-left:6px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font:inherit;font-size:12.5px;color:var(--text-1)"/>
+        </label>
+        <label style="font-size:11.5px;color:var(--text-3)">Tot
+          <input type="date" value="${customToVal}" oninput="window.__verdCoachSetCustomTo(this)" style="margin-left:6px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font:inherit;font-size:12.5px;color:var(--text-1)"/>
+        </label>
+        <button class="btn btn-primary btn-sm" onclick="window.__verdCoachApplyCustom()">Toepassen</button>
+      </div>` : '';
+    const headerToolbar = H.toolbar([
+      `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${presetChips}</div>`,
+      customBlock,
+    ]);
+
+    // Wacht op user-input bij custom zonder van/tot.
+    if (cp.preset === 'custom' && (!cp.customFrom || !cp.customTo)) {
+      return `${headerToolbar}
+        <div class="pad" style="padding-top:16px">
+          <div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px;background:var(--surface-2);border-radius:var(--r)">Kies een van- en tot-datum en klik <b>Toepassen</b> om coaching-cijfers voor deze periode te laden.</div>
+        </div>
+        ${renderConfirmModal()}`;
+    }
+
+    if (_live.coaching.error && !_live.coaching.data) return `${headerToolbar}${errBlk(_live.coaching.error, 'window.__verdRetryCoaching()')}${renderConfirmModal()}`;
+    if (!_live.coaching.data) return `${headerToolbar}${skel()}${renderConfirmModal()}`;
 
     const d = _live.coaching.data;
     const bd = d.breakdown || d;
@@ -517,7 +630,8 @@
     const from = d.from || _live.coaching.from || '—';
     const to   = d.to   || _live.coaching.to   || '—';
 
-    return `${H.kpis([
+    return `${headerToolbar}
+    ${H.kpis([
       { c: 'blue',    icon: I.users, label: '1-op-1 sessies', val: String(b.one_on_one), sub: eur(a.one_on_one) + ' · €35/sessie' },
       { c: 'violet',  icon: I.users, label: 'Team-trainingen', val: String(b.team),       sub: eur(a.team) + ' · €50/sessie' },
       { c: 'amber',   icon: I.alert, label: 'No-show',         val: String(b.no_show),    sub: eur(a.no_show) + ' · €25/sessie' },
@@ -525,7 +639,7 @@
     ])}
     <div class="pad" style="padding-top:16px">
       <div style="padding:10px 14px;background:var(--surface-2);border-radius:var(--r);font-size:12px;color:var(--text-3);margin-bottom:12px">
-        Periode: <b>${esc(from)}</b> → <b>${esc(to)}</b> (default = huidige maand).
+        Periode: <b>${esc(from)}</b> → <b>${esc(to)}</b> · schakelaar bovenaan om te wisselen (default = huidige maand).
       </div>
       ${dashCard('Subtotaal coaching', 'emerald', `
         <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -821,5 +935,5 @@
     (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('verdiensten');
   }
 
-  console.debug('[verdiensten-v2] v6 — 6 views registered (Overzicht/Coaching/Events/Uitbetalingen/Reiskosten/Certificaten). Alle-mentors-admin verhuisd naar Mentoren-module. Dormant tot allowlist of ?v2preview=verdiensten.');
+  console.debug('[verdiensten-v2] v7 — Coaching-tab vrije periode-selectie (Dag/Week/Maand/Jaar/Aangepast met van-tot datepicker + Toepassen). Endpoint mentor-coaching-earnings accepteert al ?from=&to=. State-only setter op datepickers → focus behouden. 6 views registered.');
 })();
