@@ -29,12 +29,14 @@
   <link rel="stylesheet" href="../shared/klx-softphone.css?v=1d9">
   <link rel="stylesheet" href="klanten-v2.css?v=1r4">
 
-  <!-- Supabase auth (bestaande shared client) -->
-  <script src="../shared/supabase-client.js"></script>
+  <!-- Supabase auth (bestaande shared client). defer: HTML-parser blokkeert
+       niet op pending scripts tijdens Vercel-deploy-transitie (incident v=11). -->
+  <script src="../shared/supabase-client.js" defer></script>
 
   <!-- SIP.js dependency voor klx-softphone (PR 0-E). Lazy-init: wordt pas
-       gebruikt zodra iemand "Bel via softphone" klikt. -->
-  <script src="../shared/sip.min.js"></script>
+       gebruikt zodra iemand "Bel via softphone" klikt. defer OK — module hoeft
+       pas beschikbaar te zijn bij eerste bel-klik, niet tijdens parse. -->
+  <script src="../shared/sip.min.js" defer></script>
 </head>
 <body class="klanten-v2">
 
@@ -129,44 +131,53 @@
   <div class="ds-toast" id="kv-toast" role="status" aria-live="polite"></div>
   <div class="hint" id="hint"></div>
 
-  <!-- ═══ APP-SHELL SCRIPTS (0-B2 + 0-D roles-helper) ═══ -->
-  <script src="../shared/design-system/icons.js?v=1b1"></script>
-  <script src="../shared/design-system/app-shell.js?v=1bf"></script>
-  <script src="../shared/design-system/roles.js?v=1b1"></script>
-  <script src="../shared/klx-softphone.js?v=1dc"></script>
+  <!-- ═══ APP-SHELL SCRIPTS (0-B2 + 0-D roles-helper) ═══
+       Alle externe scripts hieronder gebruiken defer zodat de HTML-parser
+       niet blocked wordt tijdens Vercel-deploy-transitie (incident v=11:
+       synchrone <script>-tag naar een file die 30s pending was → shell
+       hang op "Laden…"). defer garandeert in-source-volgorde executie
+       na DOMContentLoaded; type=module (klanten-v2.js hieronder) is
+       standaard defer en runt na alle classic-defer scripts. -->
+  <script src="../shared/design-system/icons.js?v=1b1" defer></script>
+  <script src="../shared/design-system/app-shell.js?v=1bf" defer></script>
+  <script src="../shared/design-system/roles.js?v=1b1" defer></script>
+  <script src="../shared/klx-softphone.js?v=1dc" defer></script>
 
   <!-- V2-module-views (klassieke scripts; registeren zichzelf in DFO.VIEWS) -->
-  <script src="views/_shared-v2.js?v=4"></script>
-  <script src="views/dashboard-v2.js?v=7"></script>
-  <script src="views/studenten-v2.js?v=6"></script>
-  <script src="views/email-v2.js?v=28"></script>
-  <script src="views/kanban-v2.js?v=3"></script>
-  <script src="views/tickets-v2.js?v=5"></script>
-  <script src="views/followup-v2.js?v=19"></script>
-  <script src="views/inbox-v2.js?v=5"></script>
-  <script src="views/taken-v2.js?v=11"></script>
-  <script src="views/sales-v2.js?v=10"></script>
-  <script src="views/sales-wizard-v2.js?v=18"></script>
-  <script src="views/subscription-wizard-v2.js?v=6"></script>
-  <script src="views/offerte-detail-v2.js?v=9"></script>
-  <script src="views/finance-v2.js?v=10"></script>
-  <script src="views/finance-detail-v2.js?v=3"></script>
-  <script src="views/verdiensten-v2.js?v=7"></script>
-  <script src="views/events-v2.js?v=44"></script>
-  <script src="views/onboarding-v2.js?v=11"></script>
-  <script src="views/mentoren-v2.js?v=4"></script>
-  <script src="views/automatiseringen-v2.js?v=14"></script>
-  <script src="views/agents-v2.js?v=16"></script>
-  <script src="views/logboek-v2.js?v=3"></script>
-  <script src="views/nieuwsbrief-v2.js?v=1"></script>
-  <script src="views/leads-v2.js?v=15"></script>
-  <script src="views/leadsonderhoud-v2.js?v=14"></script>
-  <script src="views/lisa-v2.js?v=7"></script>
-  <script src="views/instellingen-v2.js?v=6"></script>
-  <script src="views/binnenkort-v2.js?v=3"></script>
-  <script src="views/wanbetalers-v2.js?v=10"></script>
+  <script src="views/_shared-v2.js?v=4" defer></script>
+  <script src="views/dashboard-v2.js?v=7" defer></script>
+  <script src="views/studenten-v2.js?v=6" defer></script>
+  <script src="views/email-v2.js?v=28" defer></script>
+  <script src="views/kanban-v2.js?v=3" defer></script>
+  <script src="views/tickets-v2.js?v=5" defer></script>
+  <script src="views/followup-v2.js?v=19" defer></script>
+  <script src="views/inbox-v2.js?v=5" defer></script>
+  <script src="views/taken-v2.js?v=11" defer></script>
+  <script src="views/sales-v2.js?v=10" defer></script>
+  <script src="views/sales-wizard-v2.js?v=18" defer></script>
+  <script src="views/subscription-wizard-v2.js?v=6" defer></script>
+  <script src="views/offerte-detail-v2.js?v=9" defer></script>
+  <script src="views/finance-v2.js?v=10" defer></script>
+  <script src="views/finance-detail-v2.js?v=3" defer></script>
+  <script src="views/verdiensten-v2.js?v=7" defer></script>
+  <script src="views/events-v2.js?v=44" defer></script>
+  <script src="views/onboarding-v2.js?v=11" defer></script>
+  <script src="views/mentoren-v2.js?v=4" defer></script>
+  <script src="views/automatiseringen-v2.js?v=14" defer></script>
+  <script src="views/agents-v2.js?v=16" defer></script>
+  <script src="views/logboek-v2.js?v=3" defer></script>
+  <script src="views/nieuwsbrief-v2.js?v=1" defer></script>
+  <script src="views/leads-v2.js?v=15" defer></script>
+  <script src="views/leadsonderhoud-v2.js?v=14" defer></script>
+  <script src="views/lisa-v2.js?v=7" defer></script>
+  <script src="views/instellingen-v2.js?v=6" defer></script>
+  <script src="views/binnenkort-v2.js?v=3" defer></script>
+  <script src="views/wanbetalers-v2.js?v=10" defer></script>
 
-  <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
+  <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══
+       type=module is standaard defer — runt automatisch NA alle classic
+       defer scripts hierboven. Volgorde-garantie: view-registraties
+       (window.DFO.VIEWS[key] = fn) zijn compleet voordat boot() runt. -->
   <script type="module" src="klanten-v2.js?v=1ek"></script>
 </body>
 </html>
