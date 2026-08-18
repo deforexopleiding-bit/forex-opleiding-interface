@@ -1943,11 +1943,170 @@
     </div>`;
   }
 
+  /* ── BROK 10 (v=7): Motor-monitoring (PUUR read) ─────────────────────
+     Statusstrip (kantooruren-venster + cooldown + sandbox), KPI-grid
+     (pending / acties-vandaag / incasso / arrangements-actief), bulk-jobs.
+     Poll 18s met document.hidden pause. GEEN writes. */
+  _live.motor = {
+    loading: false, fetched: false, error: null, _seq: 0,
+    data: {
+      cooldownDays: null,
+      pipelineToggles: null,
+      pendingCounts: { PENDING: 0, APPROVED: 0, REJECTED: 0, EXECUTED: 0, FAILED: 0 },
+      pipelineKpis: { appointments_today: 0, awaiting_reply: 0, stale_count: 0 },
+      bulkJobs: [],
+      incassoByStatus: {},
+      arrActiveTotal: 0,
+    },
+  };
+  _ui.motorPollTimer = null;
+
+  async function _fetchMotor() {
+    const st = _live.motor;
+    if (st.loading) return;
+    const mySeq = ++st._seq;
+    st.loading = true; st.error = null;
+    try {
+      const [settings, toggles, pending, pipe, bulk, inc, arr] = await Promise.all([
+        tryFetch('motor:settings',   '/api/dunning-settings-get',                                    8000),
+        tryFetch('motor:toggles',    '/api/dunning-pipeline-settings',                               8000),
+        tryFetch('motor:pending',    '/api/pending-actions-list?limit=1',                            8000),
+        tryFetch('motor:pipeline',   '/api/dunning-pipeline-actions',                                8000),
+        tryFetch('motor:bulk',       '/api/wanbetalers-bulk-jobs-list?limit=25',                     8000),
+        tryFetch('motor:incasso',    '/api/incasso-dossiers-list',                                   8000),
+        tryFetch('motor:arr',        '/api/arrangements-list?status=ACTIEF&limit=1',                 8000),
+      ]);
+      if (mySeq !== st._seq) return;
+      const incCounts = {};
+      for (const r of asArr(inc?.items)) {
+        const s = String(r.status || 'unknown');
+        incCounts[s] = (incCounts[s] || 0) + 1;
+      }
+      st.data = {
+        cooldownDays:     Number.isFinite(Number(settings?.dunning_cooldown_days)) ? Number(settings.dunning_cooldown_days) : null,
+        pipelineToggles:  toggles?.toggles || null,
+        pendingCounts:    pending?.counts  || { PENDING: 0, APPROVED: 0, REJECTED: 0, EXECUTED: 0, FAILED: 0 },
+        pipelineKpis:     pipe?.kpis       || { appointments_today: 0, awaiting_reply: 0, stale_count: 0 },
+        bulkJobs:         asArr(bulk?.items),
+        incassoByStatus:  incCounts,
+        arrActiveTotal:   Number.isFinite(Number(arr?.total)) ? Number(arr.total) : 0,
+      };
+      st.fetched = true;
+    } catch (e) {
+      if (mySeq === st._seq) st.error = e?.message || 'Kon monitoring niet laden.';
+    } finally {
+      if (mySeq === st._seq) st.loading = false;
+      try { window.DFO && window.DFO.render && window.DFO.render(); } catch (_) {}
+    }
+  }
+  window.__wbxRetryMotor = () => { _live.motor.fetched = false; _fetchMotor(); };
+
+  function _isOfficeHoursNow() {
+    // Europe/Amsterdam 08:00-20:00 (CLAUDE.md convention). Client-side
+    // benadering — precieze server-side check zit in _lib/dunning-office-hours.
+    try {
+      const now = new Date();
+      const fmt = new Intl.DateTimeFormat('nl-NL', { timeZone: 'Europe/Amsterdam', hour: 'numeric', hour12: false });
+      const h = Number(fmt.format(now));
+      return Number.isFinite(h) && h >= 8 && h < 20;
+    } catch (_) { return null; }
+  }
+
+  function motorView() {
+    if (!_live.motor.fetched && !_live.motor.loading) queueMicrotask(_fetchMotor);
+    // Poll 18s met document.hidden pause.
+    if (!_ui.motorPollTimer) {
+      _ui.motorPollTimer = setInterval(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        _live.motor.fetched = false; _fetchMotor();
+      }, 18_000);
+    }
+    if (_live.motor.loading && !_live.motor.fetched) {
+      return `<div class="pad" style="padding:14px 20px">${_skelKpis()}${_skelRows(5)}</div>`;
+    }
+    if (_live.motor.error && !_live.motor.fetched) {
+      return `<div class="pad" style="padding:14px 20px">${_errBlkMotor(_live.motor.error)}</div>`;
+    }
+
+    const d = _live.motor.data;
+    const isOpen = _isOfficeHoursNow();
+    const openBadge = isOpen === true
+      ? `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">Nu open</span>`
+      : isOpen === false
+        ? `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">Nu dicht</span>`
+        : `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-3)">?</span>`;
+    const toggles = d.pipelineToggles || {};
+    const activeToggles = ['on_overdue_to_nieuw','on_bulk_sent_to_aangemaand','on_inbound_to_in_gesprek','on_paid_to_opgelost']
+      .filter((k) => toggles[k] !== false).length;
+
+    const kpis = [
+      ['Openstaand approvals', d.pendingCounts.PENDING || 0, 'var(--amber)'],
+      ['Acties vandaag',       (d.pipelineKpis.appointments_today || 0) + (d.pipelineKpis.awaiting_reply || 0) + (d.pipelineKpis.stale_count || 0), 'var(--brand,#0A7490)'],
+      ['Incasso actief',       (d.incassoByStatus.lopend || 0) + (d.incassoByStatus.aangemeld || 0), 'var(--rose)'],
+      ['Arrangements actief',  d.arrActiveTotal, 'var(--emerald)'],
+    ];
+
+    const bulkRows = d.bulkJobs.length ? d.bulkJobs.map((j) => {
+      const st = String(j.status || '');
+      const tone = st === 'running' ? 'var(--amber)' : st === 'completed' ? 'var(--emerald)' : st === 'cancelled' ? 'var(--rose)' : 'var(--text-3)';
+      const total = Number(j.total_recipients) || 0;
+      const sent  = Number(j.sent_count) || 0;
+      const failed = Number(j.failed_count) || 0;
+      const when = j.completed_at || j.approved_at || j.created_at;
+      return `<div style="display:grid;grid-template-columns:1fr 90px 130px 150px 130px;gap:8px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+        <div style="min-width:0"><div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.template_name || 'Bulk-job')}</div><div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(j.channel || '')}</div></div>
+        <div style="font-size:11px;font-weight:600;color:${tone}">${esc(st)}</div>
+        <div class="mono" style="text-align:right;color:var(--text-3)">${sent}/${total}${failed ? ` <span style="color:var(--rose)">(-${failed})</span>` : ''}</div>
+        <div style="font-size:11px;color:var(--text-3)">${esc(_fmtDateTime(when))}</div>
+        <div style="font-size:11px;color:var(--text-3);text-align:right">${esc(j.id).slice(0, 8)}</div>
+      </div>`;
+    }).join('') : `<div style="padding:34px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen bulk-jobs.</div>`;
+
+    return `<div data-wbx-view="motor">
+      <div class="pad" style="padding:14px 20px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;margin-bottom:14px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12.5px">
+          <div><span style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Kantooruren</span> <span style="font-family:'IBM Plex Mono',monospace">08:00–20:00 NL</span> ${openBadge}</div>
+          <div style="width:1px;height:22px;background:var(--border)"></div>
+          <div><span style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Cooldown</span> <b>${d.cooldownDays == null ? '—' : d.cooldownDays + ' dgn'}</b></div>
+          <div style="width:1px;height:22px;background:var(--border)"></div>
+          <div><span style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Pipeline-auto</span> <b>${activeToggles}/4 aan</b></div>
+          <div style="margin-left:auto;font-size:11px;color:var(--text-3)">Poll 18s · pauze op tab-hide</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+          ${kpis.map(([label, val, color]) => `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px">
+            <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:600;margin-bottom:6px">${esc(label)}</div>
+            <div style="font-size:24px;font-weight:700;color:${color}">${val}</div>
+          </div>`).join('')}
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:14px">
+          <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <b style="font-size:13px">Bulk-jobs (laatste 25)</b>
+            <span style="font-size:11px;color:var(--text-3)">${d.bulkJobs.length} rijen</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 90px 130px 150px 130px;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
+            <div>Template</div><div>Status</div><div style="text-align:right">Sent/Total</div><div>Wanneer</div><div style="text-align:right">Job-id</div>
+          </div>
+          <div>${bulkRows}</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;font-size:12.5px;color:var(--text-3)">
+          <b style="color:var(--text)">Pending queue-detail</b> — PENDING <b style="color:var(--text)">${d.pendingCounts.PENDING || 0}</b> · APPROVED <b style="color:var(--text)">${d.pendingCounts.APPROVED || 0}</b> · REJECTED <b style="color:var(--text)">${d.pendingCounts.REJECTED || 0}</b> · EXECUTED <b style="color:var(--text)">${d.pendingCounts.EXECUTED || 0}</b> · FAILED <b style="color:var(--text)">${d.pendingCounts.FAILED || 0}</b>
+        </div>
+      </div>
+    </div>`;
+  }
+  function _errBlkMotor(msg) {
+    return `<div style="padding:14px 16px;background:var(--rose-soft);border:1px solid var(--rose-line, var(--rose));color:var(--rose);border-radius:var(--r);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <span>⚠ ${esc(msg)}</span>
+      <button class="btn btn-ghost btn-sm" onclick="__wbxRetryMotor()">Opnieuw</button>
+    </div>`;
+  }
+
   /* ── Registratie ────────────────────────────────────────────────────── */
   window.DFO.VIEWS['wanbetalers/Gesprekken'] = gesprekkenView;
   window.DFO.VIEWS['wanbetalers/Acties']     = actiesView;
   window.DFO.VIEWS['wanbetalers/Overzicht']  = overzichtView;
   window.DFO.VIEWS['wanbetalers/Brieven']    = brievenView;
+  window.DFO.VIEWS['wanbetalers/Motor']      = motorView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
   console.debug('[wanbetalers-v2] v=6 BROK 4 — 8 fixes: (1) confirm ALTIJD op call-log; (2) veld-mapping overzicht: total_open_cents/100, days_overdue, open_invoice_count; (3) customer.name (nested) ipv customer_id op pending-actions + arrangements; (4) dedupe arrangements (één fetch, byCust van _arrLive.items); (5) bulk-modal telt distinct klanten + typ-to-confirm zonder backdrop-dismiss; (6) waarschuwing bij nieuw arrangement op klant met actief arrangement; (7) RBAC client-side gates via window.RBAC; (8) brieven kolommen template_code+generated_at+download_url+PDF-preview via wanbetalers-brief-pdf?preview=1. BROK 3 TL-mutaties/arrangements/bulk-workflow behouden.');
