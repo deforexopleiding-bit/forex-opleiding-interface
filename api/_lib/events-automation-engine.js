@@ -8,6 +8,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { sendEventEmail, sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapSendStatus } from './comms-log.js';
+import { onConfirmedAttendeeMutation } from './event-attendee-mutations.js';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
@@ -508,6 +509,13 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
               .update({ status: newStatus, updated_at: nowIso })
               .eq('id', attendee.id);
             if (error) return { ok: false, error: error.message };
+            // Fill: status kan aangepast worden naar 'aangemeld'/'aanwezig' op
+            // een rij met assessment_response_id → confirmed rise → event kan
+            // vol raken. DB-trigger flipt signups_closed; helper doet Webflow/
+            // GHL outbound + reopen-check.
+            await onConfirmedAttendeeMutation(event.id, {
+              reason: 'automation-updateAttendeeStatus',
+            });
             return { ok: true, new_status: newStatus, previous_status: attendee.status };
           } catch (e) {
             return { ok: false, error: e?.message || 'status-update failed' };

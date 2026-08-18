@@ -23,6 +23,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 
 // Feature-flag: cockpit-uitkomst 'zoom_ingepland' maakt een ECHTE
 // GHL-afspraak + Zoom-link i.p.v. alleen een kale lead te patchen.
@@ -295,6 +296,22 @@ export default async function handler(req, res) {
                 }
               } else {
                 console.warn('[follow-up-lead-outcome] attendee undo-restore:', aErr.message);
+              }
+            }
+            // Fill: undo kan status terugzetten (bv. 'geannuleerd' → 'aangemeld'
+            // = confirmed rise → event kan vol raken). Helper draait cascade.
+            if (restoreAttendee.status !== undefined) {
+              try {
+                const { data: aEv } = await supabaseAdmin
+                  .from('event_attendees').select('event_id')
+                  .eq('id', attendeeId).maybeSingle();
+                if (aEv?.event_id) {
+                  await onConfirmedAttendeeMutation(aEv.event_id, {
+                    reason: 'follow-up-lead-outcome-undo',
+                  });
+                }
+              } catch (e) {
+                console.warn('[follow-up-lead-outcome] undo auto-close hook (soft):', e?.message || e);
               }
             }
           }
@@ -777,6 +794,24 @@ export default async function handler(req, res) {
             .from('event_attendees')
             .update(patchAttendee)
             .eq('id', sourceRef.attendee_id);
+          // Fill: patchAttendee.status kan naar 'aangemeld' (rise) of
+          // 'geannuleerd' (drop). Beide muteren confirmed_count → helper
+          // opent/sluit event indien nodig. Alleen bij succesvolle write
+          // draaien; fetch event_id éénmaal.
+          if (!aErr && patchAttendee.status !== undefined) {
+            try {
+              const { data: aEv } = await supabaseAdmin
+                .from('event_attendees').select('event_id')
+                .eq('id', sourceRef.attendee_id).maybeSingle();
+              if (aEv?.event_id) {
+                await onConfirmedAttendeeMutation(aEv.event_id, {
+                  reason: 'follow-up-lead-outcome',
+                });
+              }
+            } catch (e) {
+              console.warn('[follow-up-lead-outcome] auto-close hook (soft):', e?.message || e);
+            }
+          }
           if (aErr) {
             // Retry-scope: alleen "kolom mist"-fouten (42703 PG + PGRST204
             // PostgREST cache-miss + "could not find the / schema cache"-
