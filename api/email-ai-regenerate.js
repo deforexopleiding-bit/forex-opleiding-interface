@@ -7,8 +7,13 @@
 // joost_config-tabel. Eigen persona-defaults hier hardcoded, eigen prompt.
 //
 // Body (POST):
-//   { original_subject, original_body, from_name?, tone?, extra_instructions? }
+//   { original_subject, original_body, from_name?, tone?, extra_instructions?,
+//     current_draft? }
 //     tone: 'vriendelijk' | 'zakelijk' | 'kort' | 'streng' (default 'vriendelijk')
+//     current_draft: als aanwezig → iteratieve BIJSTELLING i.p.v. verse
+//       generatie. Model krijgt 'HUIDIG CONCEPT' + 'INSTRUCTIE VAN DE
+//       GEBRUIKER' en herschrijft alleen wat de instructie vraagt.
+//       Zonder current_draft = huidig gedrag (verse generatie), byte-identiek.
 //
 // Response:
 //   200 { draft_subject, draft_body, model, tokens_out }
@@ -63,6 +68,10 @@ export default async function handler(req, res) {
   const tone            = TONES[body.tone] ? body.tone : 'vriendelijk';
   const extra           = typeof body.extra_instructions === 'string'
     ? body.extra_instructions.trim().slice(0, 500) : '';
+  // Ruime cap voor current_draft (4000 chars) — een e-mail-concept blijft
+  // ruim binnen dat budget, maar het houdt spoof-callers uit token-bloat.
+  const currentDraft    = typeof body.current_draft === 'string'
+    ? body.current_draft.trim().slice(0, 4000) : '';
 
   if (!originalSubject && !originalBody) {
     return res.status(400).json({ error: 'original_subject of original_body vereist' });
@@ -82,13 +91,32 @@ export default async function handler(req, res) {
     },
   };
 
-  const userMessage =
-    `TOON: ${TONES[tone]}\n\n` +
-    (fromName ? `AFZENDER: ${fromName}\n` : '') +
-    `ORIGINEEL ONDERWERP: ${originalSubject || '(leeg)'}\n\n` +
-    `ORIGINELE BODY:\n${originalBody || '(leeg)'}\n\n` +
-    (extra ? `EXTRA INSTRUCTIES VAN DE GEBRUIKER: ${extra}\n\n` : '') +
-    `Geef een concept-antwoord terug via de tool "produce_email_draft".`;
+  // Twee prompt-varianten:
+  //   1. current_draft aanwezig → iteratieve BIJSTELLING. Model krijgt het
+  //      lopende concept + de gebruiker-instructie, en herschrijft alleen
+  //      wat de instructie vraagt. Behoudt taal + toon van het huidige
+  //      concept (voorkomt drift bij meerdere ronden).
+  //   2. current_draft leeg → verse generatie (huidig gedrag, byte-identiek).
+  const userMessage = currentDraft
+    ? (
+        `TOON: ${TONES[tone]}\n\n` +
+        (fromName ? `AFZENDER: ${fromName}\n` : '') +
+        `ORIGINEEL ONDERWERP: ${originalSubject || '(leeg)'}\n\n` +
+        `ORIGINELE BODY:\n${originalBody || '(leeg)'}\n\n` +
+        `HUIDIG CONCEPT:\n${currentDraft}\n\n` +
+        `INSTRUCTIE VAN DE GEBRUIKER: ${extra || '(geen extra instructie — polish alleen wat evident kan)'}\n\n` +
+        `Herschrijf het concept volgens de instructie; behoud wat goed is, ` +
+        `verander alleen wat de instructie vraagt. Gebruik dezelfde taal als het origineel. ` +
+        `Geef het herschreven concept terug via de tool "produce_email_draft".`
+      )
+    : (
+        `TOON: ${TONES[tone]}\n\n` +
+        (fromName ? `AFZENDER: ${fromName}\n` : '') +
+        `ORIGINEEL ONDERWERP: ${originalSubject || '(leeg)'}\n\n` +
+        `ORIGINELE BODY:\n${originalBody || '(leeg)'}\n\n` +
+        (extra ? `EXTRA INSTRUCTIES VAN DE GEBRUIKER: ${extra}\n\n` : '') +
+        `Geef een concept-antwoord terug via de tool "produce_email_draft".`
+      );
 
   try {
     const result = await anthropicMessages({

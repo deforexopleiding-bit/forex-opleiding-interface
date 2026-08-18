@@ -119,6 +119,8 @@
     },
     ccBccOpen:  false,
     aiTone:     'vriendelijk',
+    aiExtra:    {},          // per-row refine-textarea (state-only, geen render tijdens typen)
+    aiRefining: {},          // per-row 'AI verfijnt…' busy-vlag
     aiBusy:     false,
     sendBusy:   false,
     lastSend:   null,
@@ -360,27 +362,46 @@
     } else _ui.lastSend = { ok: false, error: j?.error || 'Onbekende fout' };
     if (render) render();
   }
-  async function aiRegenerateInReader(row) {
+  // opts = { currentDraft?: string, extraInstructions?: string, mode?: 'fresh'|'refine' }
+  //   mode 'refine' zet _ui.aiRefining[rid] (aparte 'AI verfijnt…'-status),
+  //   'fresh' (default) zet _live.aiDraft.loading[rid] ('AI genereert…').
+  async function aiRegenerateInReader(row, opts) {
     if (!row) return;
     const rid = row.id;
     const st = _live.aiDraft;
-    if (st.loading[rid]) return;
-    st.loading[rid] = true; st.error[rid] = null;
+    const mode = (opts && opts.mode) || 'fresh';
+    if (mode === 'refine') {
+      if (_ui.aiRefining[rid]) return;
+      _ui.aiRefining[rid] = true; st.error[rid] = null;
+    } else {
+      if (st.loading[rid]) return;
+      st.loading[rid] = true; st.error[rid] = null;
+    }
     const bodyData = _live.body.data[rid] || {};
+    const payload = {
+      original_subject: row.subject || '',
+      original_body:    bodyData.text || row.snippet || '',
+      from_name:        row.from_name || row.from_address || '',
+      tone:             _ui.aiTone,
+    };
+    if (opts && typeof opts.currentDraft === 'string' && opts.currentDraft.trim()) {
+      payload.current_draft = opts.currentDraft.trim();
+    }
+    if (opts && typeof opts.extraInstructions === 'string' && opts.extraInstructions.trim()) {
+      payload.extra_instructions = opts.extraInstructions.trim();
+    }
     const j = await tryFetch('ai-regen:' + rid, '/api/email-ai-regenerate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        original_subject: row.subject || '',
-        original_body:    bodyData.text || row.snippet || '',
-        from_name:        row.from_name || row.from_address || '',
-        tone:             _ui.aiTone,
-      }),
+      body: JSON.stringify(payload),
     }, 20000);
-    st.loading[rid] = false;
+    if (mode === 'refine') _ui.aiRefining[rid] = false; else st.loading[rid] = false;
     if (j && !j.__error && j.draft_body) {
       st.data[rid] = { subject: j.draft_subject || row.subject || '', body: j.draft_body };
+      // Bij succesvolle verfijning: leeg de textarea zodat de gebruiker
+      // direct opnieuw kan bijsturen op de nieuwe draft.
+      if (mode === 'refine') delete _ui.aiExtra[rid];
     } else {
-      st.error[rid] = j?.__error || j?.error || 'AI-generatie mislukt';
+      st.error[rid] = j?.__error || j?.error || (mode === 'refine' ? 'AI-verfijning mislukt' : 'AI-generatie mislukt');
     }
     if (render) render();
   }
@@ -1053,28 +1074,49 @@
     const st = _live.aiDraft;
     const draft = st.data[row.id];
     const busy = st.loading[row.id];
+    const refining = !!_ui.aiRefining[row.id];
     const err  = st.error[row.id];
+    // Sub-status: prioriteit 'verfijnt' > 'genereert' > 'concept' > 'error' > 'idle'.
+    const subStatus = refining
+      ? 'AI verfijnt…'
+      : (draft
+          ? 'Concept gegenereerd — bewerk, verfijn of gebruik'
+          : (busy ? 'AI genereert…' : err ? 'Fout bij genereren' : 'Klik "Genereer" om een concept te maken'));
+    const extraVal = String(_ui.aiExtra[row.id] || '');
+    const refineDisabled = refining || busy || !draft || !extraVal.trim();
     return `<div style="margin:20px 22px 22px;padding:16px 18px;background:${TOK.violetSoft};border:1px solid ${TOK.violetLine};border-radius:${TOK.rLg}">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${draft || err || busy ? '12px' : '0'}">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${draft || err || busy || refining ? '12px' : '0'}">
         <span style="width:26px;height:26px;border-radius:50%;background:${TOK.violet};color:#fff;display:flex;align-items:center;justify-content:center">${ICO.sparkle}</span>
         <div style="flex:1">
           <div style="font-size:13px;font-weight:600;color:${TOK.violet}">Voorgesteld antwoord</div>
-          <div style="font-size:11px;color:var(--text-3)">${draft ? 'Concept gegenereerd — bewerk of gebruik' : (busy ? 'AI genereert…' : err ? 'Fout bij genereren' : 'Klik "Genereer" om een concept te maken')}</div>
+          <div style="font-size:11px;color:var(--text-3)">${esc(subStatus)}</div>
         </div>
         <div style="display:flex;align-items:center;gap:4px">
           ${['vriendelijk','zakelijk','kort','streng'].map((t) => {
             const on = _ui.aiTone === t;
             return `<button class="tone-chip" style="padding:2px 8px;border:1px solid ${on ? TOK.violet : TOK.violetLine};background:${on ? TOK.violet : 'transparent'};color:${on ? '#fff' : TOK.violet};border-radius:20px;font-size:10px;font-weight:${on ? '600' : '500'};cursor:pointer" onclick="window.__emailAiSetToneAndRegen('${t}','${esc(row.id)}')">${t}</button>`;
           }).join('')}
-          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__emailAiGenReader('${esc(row.id)}')" style="color:${TOK.violet};font-size:11.5px;gap:5px">${ICO.sparkle}${busy ? 'Bezig…' : (draft ? 'Opnieuw' : 'Genereer')}</button>
+          <button class="btn btn-ghost btn-sm" ${busy || refining ? 'disabled' : ''} onclick="window.__emailAiGenReader('${esc(row.id)}')" style="color:${TOK.violet};font-size:11.5px;gap:5px">${ICO.sparkle}${busy ? 'Bezig…' : (draft ? 'Opnieuw' : 'Genereer')}</button>
         </div>
       </div>
       ${err ? `<div style="padding:10px;background:${TOK.roseSoft};color:${TOK.rose};border-radius:${TOK.rSm};font-size:12px">${esc(err)}</div>` : ''}
       ${draft ? `
         <div style="padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:${TOK.rSm};font-size:13px;line-height:1.5;color:var(--text);white-space:pre-wrap;max-height:280px;overflow-y:auto">${esc(draft.body)}</div>
-        <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:10px">
-          <button class="btn btn-ghost btn-sm" onclick="window.__emailAiClear('${esc(row.id)}')">Negeren</button>
-          <button class="btn btn-primary btn-sm" style="background:${TOK.violet};border-color:${TOK.violet}" onclick="window.__emailAiUse('${esc(row.id)}')">Gebruiken →</button>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+          <textarea placeholder="Wat wil je anders? (bv. korter, noem de betaalregeling, wat formeler)"
+            oninput="window.__emailAiSetExtra('${esc(row.id)}', this.value)"
+            style="width:100%;padding:9px 11px;border:1px solid ${TOK.violetLine};border-radius:${TOK.rSm};background:var(--surface);color:var(--text);font-size:12.5px;line-height:1.45;resize:vertical;min-height:52px;max-height:160px;font-family:inherit;outline:none">${esc(extraVal)}</textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+            <div style="font-size:10.5px;color:var(--text-3)">${refining ? 'AI verfijnt op basis van je instructie…' : 'Verfijn herschrijft het bovenstaande concept volgens je instructie.'}</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="window.__emailAiClear('${esc(row.id)}')">Negeren</button>
+              <button id="emailAiRefine_${esc(row.id)}" class="btn btn-ghost btn-sm"
+                ${refineDisabled ? 'disabled' : ''}
+                style="color:${TOK.violet};font-size:11.5px;gap:5px;opacity:${refineDisabled ? '.5' : '1'};cursor:${refineDisabled ? 'not-allowed' : 'pointer'}"
+                onclick="window.__emailAiRefine('${esc(row.id)}')">${ICO.sparkle}${refining ? 'Verfijnt…' : 'Verfijn'}</button>
+              <button class="btn btn-primary btn-sm" style="background:${TOK.violet};border-color:${TOK.violet}" onclick="window.__emailAiUse('${esc(row.id)}')">Gebruiken →</button>
+            </div>
+          </div>
         </div>
       ` : ''}
     </div>`;
@@ -1830,7 +1872,30 @@
   // AI-card handlers (in reader)
   window.__emailAiGenReader   = (rid) => { const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
   window.__emailAiSetToneAndRegen = (t, rid) => { _ui.aiTone = t; const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
-  window.__emailAiClear = (rid) => { delete _live.aiDraft.data[rid]; delete _live.aiDraft.error[rid]; if (render) render(); };
+  window.__emailAiClear = (rid) => { delete _live.aiDraft.data[rid]; delete _live.aiDraft.error[rid]; delete _ui.aiExtra[rid]; if (render) render(); };
+  // Textarea state-only setter — GEEN render tijdens typen (focus behouden).
+  // Verfijn-knop enable-state werkt via directe DOM-lookup, geen re-render nodig.
+  window.__emailAiSetExtra = (rid, val) => {
+    const v = String(val || '');
+    if (v) _ui.aiExtra[rid] = v; else delete _ui.aiExtra[rid];
+    const btn = document.getElementById('emailAiRefine_' + rid);
+    if (btn) {
+      const enabled = v.trim().length > 0;
+      btn.disabled = !enabled;
+      btn.style.opacity = enabled ? '1' : '.5';
+      btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
+    }
+  };
+  window.__emailAiRefine = (rid) => {
+    const items = asArr(_live.inbox.data?.items);
+    const row = items.find((x) => x.id === rid);
+    if (!row) return;
+    const draft = _live.aiDraft.data[rid];
+    if (!draft || !draft.body) return;
+    const extra = String(_ui.aiExtra[rid] || '').trim();
+    if (!extra) return;
+    aiRegenerateInReader(row, { currentDraft: draft.body, extraInstructions: extra, mode: 'refine' });
+  };
   // ── Sanne-card handlers (Fase 2.1) ────────────────────────────────────
   window.__emailSanneUse = async (sugId, rowId) => {
     const st = _live.sanne.data[rowId]; if (!st || !st.suggestion) return;
