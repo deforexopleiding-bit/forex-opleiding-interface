@@ -93,6 +93,17 @@
     _toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
   }
 
+  // BROK SALES-1 (v=11, 2026-08-19): destructieve-actie RBAC-gate.
+  // "Offerte verwijderen" trekt in bij TeamLeader → alleen super_admin/manager.
+  // Server-side is dit sales.deal.edit (breed genoeg voor mentor/sales) →
+  // client-side extra gate op DFO.S.role tegen ADMIN_ROLES. DFO.setRole
+  // triggert render() → knop verschijnt/verdwijnt bij rol-wissel.
+  const _ODV_ADMIN_ROLES = ['super_admin', 'manager'];
+  function _odvCanDelete() {
+    const r = String(window.DFO?.S?.role || '').toLowerCase();
+    return _ODV_ADMIN_ROLES.includes(r);
+  }
+
   // BROK 9 (v=10, 2026-08-18): custom confirm-modal via document.body.
   // Vervangt native window.confirm() bij destructieve/mutatieve acties
   // (Markeer als getekend + Offerte verwijderen). Returnt Promise<bool>.
@@ -266,7 +277,7 @@
       <div class="odv-modal-back" id="odvSendBack">
         <div class="odv-modal">
           <div class="odv-modal-head">
-            <div class="odv-modal-title">Offerte versturen</div>
+            <div class="odv-modal-title" id="odvSendTitle">Offerte versturen</div>
             <button class="icon-btn" onclick="odvSendClose()" title="Sluiten" aria-label="Sluiten">×</button>
           </div>
           <div class="odv-modal-body">
@@ -497,7 +508,7 @@
         <button class="btn" style="background:var(--amber, #C2700A);color:#fff" onclick="__odvDoMarkAccepted()">Markeer als getekend</button>
         <button class="btn btn-ghost" onclick="__odvEditDeal('${esc(deal.id)}')" title="Bewerken in v2-wizard (wijzigingen lokaal — TL-quotation niet auto-geüpdatet)">Bewerken</button>
         ${copyBtn}
-        <button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>`;
+        ${_odvCanDelete() ? '<button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>' : '<button class="btn btn-danger" disabled title="Alleen super admin / manager mag verwijderen" style="opacity:.4;cursor:not-allowed">Verwijderen</button>'}`;
     }
     if (st === 'draft') {
       const sendOrPush = deal.tl_quotation_id
@@ -506,7 +517,7 @@
       return `${sendOrPush}
         <button class="btn btn-ghost" onclick="__odvEditDeal('${esc(deal.id)}')" title="Bewerken in v2-wizard (in-shell)">Bewerken</button>
         ${copyBtn}
-        <button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>`;
+        ${_odvCanDelete() ? '<button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>' : '<button class="btn btn-danger" disabled title="Alleen super admin / manager mag verwijderen" style="opacity:.4;cursor:not-allowed">Verwijderen</button>'}`;
     }
     // declined / expired / other
     return `${copyBtn}`;
@@ -703,6 +714,10 @@
 
   window.__odvDoDelete = async function () {
     if (!_odv.dealId) return;
+    // BROK SALES-1 (v=11): belt-and-braces role-guard voor het geval iemand
+    // de disabled-knop probeert te omzeilen via console. Server-check
+    // (sales.deal.edit) is te breed voor deze destructieve actie.
+    if (!_odvCanDelete()) { toast('Alleen super admin / manager mag verwijderen'); return; }
     // BROK 9 (v=10): danger custom confirm — verwijderen is destructief +
     // wordt in TeamLeader ingetrokken. Danger-styled knop (rose) i.p.v. blauw.
     const ok = await _odvConfirm(
@@ -729,6 +744,13 @@
     errEl.hidden = true; errEl.textContent = '';
     const cust = _odv.data?.customer || {};
     recip.textContent = (cust.email || '(geen e-mail — vul eerst in klant-detail)');
+    // BROK SALES-1 (v=11): klantnaam terug in modal-titel (v1 had 'em ook,
+    // v2 verloor 'em bij redesign). Company_name > full_name > '(onbekend)'.
+    const titleEl = document.getElementById('odvSendTitle');
+    const custName = cust.is_company
+      ? (cust.company_name || '(onbekend bedrijf)')
+      : ((cust.first_name || '') + ' ' + (cust.last_name || '')).trim() || '(onbekend)';
+    if (titleEl) titleEl.textContent = 'Offerte versturen naar ' + custName;
     sel.innerHTML = '<option value="">Standaard (instelling)</option>';
     hint.textContent = 'Templates laden…';
     back.classList.add('is-open');

@@ -297,6 +297,11 @@
   }
   async function _swAutoSave() {
     if (_sw.editDealId) return; // skip in edit-mode
+    // BROK SALES-1 (v=20, 2026-08-19): skip als de wizard nooit dirty is
+    // geraakt (bv. auto-save-tick door open zonder input). Voorheen: elke
+    // wizard-open schreef meteen een lege draft naar de server. Nu: alleen
+    // schrijven als _sw.dirty=true is gezet door een echte input.
+    if (!_sw.dirty) return;
     _sw.saveStatus = 'saving';
     _updateFootIndicator();
     try {

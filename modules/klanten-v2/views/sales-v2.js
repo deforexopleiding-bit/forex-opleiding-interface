@@ -110,6 +110,32 @@
   //
   // Sales-dashboard-metrics.my_revenue_month is excl-BTW — die blijft voor
   // "mijn"-view zoals-is (matcht wat sales.html toont voor Sales-rol).
+  // BROK SALES-1 (v=11, 2026-08-19): paginate helper voor accepted-deals.
+  // Voorheen: page_size=250 vaste cap → omzet + hoogste-deal berekend op
+  // eerste 250 rijen (v1: 783 rijen). Nu: eerste pagina bepaalt total →
+  // loop overige pagina's parallel → concat. Backward-compatible: nieuwe
+  // helper, bestaande endpoint ongewijzigd → v1 sales.html blijft werken.
+  // Cap: 10 pagina's (= 2500 rijen) als hard safety-net tegen runaway.
+  async function _fetchAllAcceptedPages(baseLabel, baseUrl) {
+    const first = await tryFetch(baseLabel + ':p1', baseUrl + '&page=1&page_size=250');
+    if (!first || first.error) return first; // errored → laat caller error afhandelen
+    const total = Number(first.total || 0);
+    const pageSize = 250;
+    const totalPages = Math.min(10, Math.ceil(total / pageSize));
+    if (totalPages <= 1) return first;
+    const extraPages = [];
+    for (let p = 2; p <= totalPages; p++) {
+      extraPages.push(tryFetch(baseLabel + ':p' + p, baseUrl + '&page=' + p + '&page_size=' + pageSize));
+    }
+    const results = await Promise.all(extraPages);
+    const combined = [...(first.quotations || first.items || [])];
+    for (const r of results) {
+      if (!r || r.error) continue;
+      combined.push(...(r.quotations || r.items || []));
+    }
+    return { ...first, quotations: combined, items: combined, total };
+  }
+
   async function fetchDashboard() {
     if (_dash.loading) return;
     const admin = isAdminRole();
@@ -121,7 +147,7 @@
       tryFetch('sales-dashboard-stats',       '/api/sales-dashboard-stats'),
       tryFetch('sales-dashboard-metrics',     '/api/sales-dashboard-metrics'),
       tryFetch('sales-pending-subscriptions', '/api/sales-pending-subscriptions'),
-      admin ? tryFetch('sales-accepted-month', '/api/sales-quotations?status=accepted&page=1&page_size=250') : Promise.resolve(null),
+      admin ? _fetchAllAcceptedPages('sales-accepted-month', '/api/sales-quotations?status=accepted') : Promise.resolve(null),
     ];
     const [stats, metrics, pending, companyAccepted] = await Promise.all(calls);
     if (seq !== _dash.seq) return;
@@ -129,8 +155,11 @@
     _dash.companyAccepted = companyAccepted;
     _dash.loading = false;
     if (stats == null && metrics == null && pending == null) _dash.error = 'Alle dashboard-calls faalden';
-    if (admin && companyAccepted && companyAccepted.total > 250) {
-      console.warn('[sales-v2] company-accepted total > 250 (' + companyAccepted.total + ') — omzet+hoogste-deal berekend op eerste 250 rijen');
+    // BROK SALES-1 (v=11): 250-cap opgeheven via paginate helper. Log
+    // alleen als het HARDE plafond (10 pagina's = 2500) bereikt is —
+    // dat betekent dat we méér data missen dan we konden ophalen.
+    if (admin && companyAccepted && companyAccepted.total > 2500) {
+      console.warn('[sales-v2] company-accepted total > 2500 (' + companyAccepted.total + ') — omzet+hoogste-deal berekend op eerste 2500 rijen (cap safety-net)');
     }
     window.DFO.render();
   }
@@ -367,8 +396,15 @@
         ]),
         '__svOfferteRowClick'
       )}
-      ${!items.length && !_off.loading ? `<div class="sv-empty">${_off.error ? _off.error : 'Geen offertes met deze filters.'}</div>` : ''}`;
+      ${!items.length && !_off.loading ? (
+        _off.error
+          ? `<div class="sv-empty">${esc(_off.error)} <button class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:11.5px" onclick="__svRetryOff()">↻ Opnieuw</button></div>`
+          : `<div class="sv-empty">Geen offertes met deze filters.</div>`
+      ) : ''}`;
   }
+  window.__svRetryOff = () => { _off.error = null; _off.data = null; _off.params = ''; queueMicrotask(fetchOffertes); if (window.DFO?.render) window.DFO.render(); };
+  window.__svRetryRet = () => { _ret.error = null; _ret.data = null; _ret.params = ''; queueMicrotask(fetchRetentie); if (window.DFO?.render) window.DFO.render(); };
+  window.__svRetryRep = () => { _rep.error = null; _rep.data = null; _rep.accepted = null; _rep.params = ''; queueMicrotask(fetchReports); if (window.DFO?.render) window.DFO.render(); };
 
   // ── RETENTIE ─────────────────────────────────────────────────────────────
   function retentieParams() {
@@ -421,7 +457,11 @@
           ];
         })
       )}
-      ${!items.length && !_ret.loading ? `<div class="sv-empty">${_ret.error ? _ret.error : 'Geen retentie-klanten in dit venster.'}</div>` : ''}`;
+      ${!items.length && !_ret.loading ? (
+        _ret.error
+          ? `<div class="sv-empty">${esc(_ret.error)} <button class="btn btn-ghost btn-sm" style="margin-left:8px;font-size:11.5px" onclick="__svRetryRet()">↻ Opnieuw</button></div>`
+          : `<div class="sv-empty">Geen retentie-klanten in dit venster.</div>`
+      ) : ''}`;
   }
 
   // ── VERKOOPPRESTATIES ───────────────────────────────────────────────────
@@ -461,13 +501,14 @@
     // signed/paid — allemaal incl-BTW client-side gesommeerd).
     const [data, accepted] = await Promise.all([
       tryFetch('sales-reports',         '/api/sales-reports?' + wanted),
-      tryFetch('sales-accepted-period', '/api/sales-quotations?status=accepted&page=1&page_size=250'),
+      _fetchAllAcceptedPages('sales-accepted-period', '/api/sales-quotations?status=accepted'),
     ]);
     if (seq !== _rep.seq) return;
     _rep.loading = false; _rep.data = data; _rep.accepted = accepted;
     if (!data && !accepted) _rep.error = 'Kon rapport + accepted niet laden';
-    if (accepted && accepted.total > 250) {
-      console.warn('[sales-v2] accepted total > 250 (' + accepted.total + ') — omzet+per-verkoper berekend op eerste 250 rijen');
+    // BROK SALES-1 (v=11): 250-cap opgeheven via paginate helper.
+    if (accepted && accepted.total > 2500) {
+      console.warn('[sales-v2] accepted total > 2500 (' + accepted.total + ') — cap safety-net');
     }
     window.DFO.render();
   }
@@ -536,7 +577,12 @@
     return `${previewHeader('Verkoopprestaties', _rep)}
       ${H.kpis([
         { c: 'violet',  icon: I.trend,  label: 'Pipeline-waarde',    val: eur0(k.pipeline_value),          hi: 1, sub: 'open + verzonden · excl. BTW' },
-        { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: agg.signedCount ? eur0(agg.totalIncl) : eur0(0), hi: 1, sub: `${num(agg.signedCount)} getekend · incl. BTW · (${eur0(agg.totalExcl)} excl.)` },
+        { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: agg.signedCount ? eur0(agg.totalIncl) : eur0(0), hi: 1,
+          // BROK SALES-1 (v=11): toon '(excl.)' ALLEEN als daadwerkelijk
+          // verschillend van incl (BTW-splits werd zichtbaar in de data).
+          // Als incl==excl (deal miste line_items → fallback naar excl),
+          // is de tussenhaakjes-tekst misleidend → weglaten.
+          sub: `${num(agg.signedCount)} getekend · incl. BTW${(agg.totalExcl && agg.totalIncl && agg.totalExcl < agg.totalIncl) ? ` · (${eur0(agg.totalExcl)} excl.)` : ''}` },
         { c: 'blue',    icon: I.doc,    label: 'Bonus openstaand',   val: eur0(k.bonus_pending) },
         { c: 'orange',  icon: I.repeat, label: 'Retentie-ratio',     val: k.retention_rate != null ? Math.round(k.retention_rate * 100) + '%' : '—' },
       ])}
@@ -589,5 +635,5 @@
   window.DFO.VIEWS['sales/Verkoopprestaties'] = prestatiesView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('sales');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('sales');
-  console.debug('[sales-v2] registered 4 views (data-round · live endpoints)');
+  console.debug('[sales-v2] v=12 BROK SALES-1: (2) paginate _fetchAllAcceptedPages tot alle rijen (cap 10p=2500); (3) BTW-tussenhaakjes (X excl.) alleen tonen als excl<incl; (4) error-block Opnieuw-knop op offertes + retentie + reports (via __svRetryOff/Ret/Rep). Beschermde zone ongemoeid.');
 })();
