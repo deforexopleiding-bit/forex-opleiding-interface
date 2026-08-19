@@ -4019,7 +4019,169 @@
     }
   }
 
+  /* ── BROK 6 STRUCT-1: Vandaag-tab (default) ──────────────────────────
+     Command-center voor de start van de dag. KPI-strip met live-tellers,
+     "Direct doen"-tegel (vandaag's afspraken + pending scheduled_for<=now),
+     "Op reactie wachtend", en "Late facturen (top 10)"-worklist uit
+     overzicht. Alles readonly hier — actie via klik-through naar
+     Case-sheet (dossier) of naar Acties-tab.
+     Read-only view; alle mutaties gebeuren via bestaande flows. */
+  function vandaagView() {
+    if (!_live.pipelineActs.fetched && !_live.pipelineActs.loading && !_live.pipelineActs.error) queueMicrotask(_fetchPipelineActs);
+    if (!_live.pendingActs.fetched  && !_live.pendingActs.loading  && !_live.pendingActs.error)  queueMicrotask(_fetchPendingActs);
+    if (!_live.overzicht.fetched    && !_live.overzicht.loading    && !_live.overzicht.error)    queueMicrotask(_fetchOverzicht);
+    if (!_arrLive.fetched           && !_arrLive.loading           && !_arrLive.error)           queueMicrotask(() => _fetchArrangementsList('ACTIEF'));
+
+    const pa       = _live.pipelineActs.data || {};
+    const apDue    = asArr(pa.appointments_due);
+    const awaiting = asArr(pa.awaiting_reply);
+    const stale    = asArr(pa.stale);
+
+    const overzicht = asArr(_live.overzicht.items);
+    const pending   = asArr(_live.pendingActs.items);
+    const now       = Date.now();
+    const arrs      = asArr(_arrLive.items);
+
+    // KPI-berekeningen (defensive tegen NaN).
+    const totalOpenCents = overzicht.reduce((s, r) => s + (Number(r.total_open_cents) || 0), 0);
+    const totalOpen      = totalOpenCents / 100;
+    const openKlanten    = overzicht.length;
+    const late30         = overzicht.filter((r) => (Number(r.days_overdue) || 0) >= 30).length;
+    const late60         = overzicht.filter((r) => (Number(r.days_overdue) || 0) >= 60).length;
+    const actiesVandaag  = pending.filter((a) => {
+      const s = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
+      return !s || s <= now;
+    }).length + apDue.length;
+    const arrCount = arrs.length;
+
+    const loadingAny = _live.overzicht.loading || _live.pipelineActs.loading || _live.pendingActs.loading;
+    if (loadingAny && !overzicht.length && !apDue.length && !pending.length) {
+      return `<div class="pad" style="padding:14px 20px">${_skelKpis()}${_skelRows(5)}</div>`;
+    }
+
+    const kpi = (label, val, sub, color, extra) => `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;${extra || ''}">
+        <div style="font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px">${esc(label)}</div>
+        <div style="font-size:22px;font-weight:600;color:var(--${color || 'text-1'})">${val}</div>
+        ${sub ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:4px">${esc(sub)}</div>` : ''}
+      </div>`;
+
+    // Late facturen top-10 (uit overzicht — per klant, sorted by days_overdue desc)
+    const late = overzicht.slice()
+      .sort((a, b) => (Number(b.days_overdue) || 0) - (Number(a.days_overdue) || 0))
+      .slice(0, 10);
+    const lateHtml = late.length
+      ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:600;font-size:13px;color:var(--rose)">Late facturen — top 10</div>
+            <span style="font-size:11px;color:var(--text-3)">${late30} klanten ≥30d · ${late60} ≥60d</span>
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
+            <div>Klant</div><div style="text-align:right">Openstaand</div><div style="text-align:right">Dagen te laat</div><div></div>
+          </div>
+          ${late.map((r) => {
+            const cid  = r.customer_id || r.id;
+            const name = r.customer_name || r.name || 'Onbekend';
+            const openEur = (Number(r.total_open_cents) || 0) / 100;
+            const days = Number(r.days_overdue) || 0;
+            const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;cursor:pointer" onclick="__wbxOpenCase('${cidClick}')"
+              onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
+              <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
+              <div class="mono" style="text-align:right;color:var(--rose);font-weight:600">${eur(openEur)}</div>
+              <div class="mono" style="text-align:right;color:${days >= 60 ? 'var(--rose)' : (days >= 30 ? 'var(--amber)' : 'var(--text-3)')}">${days}d</div>
+              <div style="font-size:10.5px;color:var(--text-3)">Dossier →</div>
+            </div>`;
+          }).join('')}
+        </div>`
+      : `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:32px 20px;text-align:center;color:var(--text-3);font-size:13px">
+          🎉 Geen wanbetalers vandaag. Alles betaald.
+        </div>`;
+
+    // "Direct doen" — appointments + hoogste-prio pending (scheduled_for<=now).
+    const directPending = pending.filter((a) => {
+      const s = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
+      return !s || s <= now;
+    }).slice(0, 8);
+    const directHtml = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:600;font-size:13px;color:var(--amber)">Direct doen</div>
+        <span style="font-size:11px;color:var(--text-3)">${apDue.length} afspraak · ${directPending.length} taak</span>
+      </div>
+      ${(apDue.length + directPending.length) === 0
+        ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Niets op de rol voor vandaag.</div>`
+        : ''}
+      ${apDue.slice(0, 5).map((r) => {
+        const cid = r.customer_id || r.id;
+        const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const name = r.customer_name || r.name || 'Onbekend';
+        const info = r.title || r.due_at || '';
+        return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}')"` : ''}>
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+            <span style="font-weight:500;font-size:12.5px">📅 ${esc(name)}</span>
+            <span style="font-size:10.5px;color:var(--text-3)">${esc(_fmtDateTime(r.due_at || '').slice(5))}</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(String(info).slice(0, 80))}</div>
+        </div>`;
+      }).join('')}
+      ${directPending.map((a) => {
+        const name = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || 'Onbekend';
+        const type = a.action_type || '—';
+        const isTl = String(type).startsWith('TL_');
+        return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+            <span style="font-weight:500">✅ ${esc(name)}</span>
+            ${isTl ? '<span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600">TL</span>' : ''}
+          </div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(type)}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+    // "Wacht op reactie" + "Stille dossiers" side-by-side.
+    const listBlock = (title, rows, colorAcc, iconEmoji, emptyTxt) => `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="font-weight:600;font-size:13px;color:var(--${colorAcc})">${esc(title)}</div>
+        <span style="font-size:11px;color:var(--text-3)">${rows.length}</span>
+      </div>
+      ${!rows.length
+        ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(emptyTxt)}</div>`
+        : rows.slice(0, 6).map((r) => {
+            const cid = r.customer_id || r.id;
+            const name = r.customer_name || r.name || 'Onbekend';
+            const days = r.days_since != null ? r.days_since : (r.days_stale != null ? r.days_stale : null);
+            const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return `<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}')"` : ''}>
+              <span>${iconEmoji} ${esc(name)}</span>
+              ${days != null ? `<span class="mono" style="font-size:10.5px;color:var(--text-3)">${days}d</span>` : ''}
+            </div>`;
+          }).join('')}
+    </div>`;
+
+    return `<div data-wbx-view="vandaag">
+      <div class="pad" style="padding:14px 20px 0">
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+          ${kpi('Openstaand',       eur(totalOpen),       `${openKlanten} klant${openKlanten === 1 ? '' : 'en'}`, totalOpen > 0 ? 'rose' : 'text-3')}
+          ${kpi('Late facturen',    String(late30),       '≥ 30 dagen',       late30 > 0 ? 'rose' : 'text-3')}
+          ${kpi('Acties vandaag',   String(actiesVandaag),'te doen',          actiesVandaag > 0 ? 'amber' : 'text-3')}
+          ${kpi('Wacht op reactie', String(awaiting.length), '> 2 dagen',      awaiting.length > 0 ? 'amber' : 'text-3')}
+          ${kpi('Arrangementen',    String(arrCount),     'actief · flow gepauzeerd', 'text-1')}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+          ${directHtml}
+          <div style="display:flex;flex-direction:column;gap:12px">
+            ${listBlock('Wacht op reactie',  awaiting, 'amber', '💬', 'Niemand wacht op ons.')}
+            ${listBlock('Stille dossiers',   stale,    'text-3','😴', 'Alle dossiers actief.')}
+          </div>
+        </div>
+        ${lateHtml}
+      </div>
+      ${_officeHoursBanner()}
+    </div>`;
+  }
+
   /* ── Registratie ────────────────────────────────────────────────────── */
+  window.DFO.VIEWS['wanbetalers/Vandaag']    = vandaagView;
   window.DFO.VIEWS['wanbetalers/Gesprekken'] = inboxView;
   window.DFO.VIEWS['wanbetalers/Acties']     = actiesView;
   window.DFO.VIEWS['wanbetalers/Overzicht']  = overzichtView;
