@@ -11,8 +11,7 @@
 // Auth: vereist admin-rol (super_admin / admin / manager) via Bearer.
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
-
-const SITE_URL = 'https://forex-opleiding-interface.vercel.app';
+import { authRedirectUrlForRole } from './_lib/crm-roles.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -33,10 +32,21 @@ export default async function handler(req, res) {
   }
 
   try {
+    // De redirect volgt de rol van de doelgebruiker: CRM-staff landt op de
+    // CRM-reset-pagina, een viewer/student op het LMS. Profiel onvindbaar →
+    // rol null → LMS (whitelist, dus de veilige kant).
+    const { data: targetProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('role')
+      .eq('email', email)
+      .maybeSingle();
+
+    const redirectTo = authRedirectUrlForRole(targetProfile?.role || null);
+
     const { data, error } = await supabaseAdmin.auth.admin.generateLink({
       type:    'recovery',
       email,
-      options: { redirectTo: `${SITE_URL}/reset-password.html` },
+      options: { redirectTo },
     });
 
     if (error) {

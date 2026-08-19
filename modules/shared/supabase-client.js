@@ -99,6 +99,9 @@ window._authSharedReady = (async function () {
     },
 
     async signOut() {
+      // Guard-oordeel wissen, anders houdt de volgende (student-)sessie op
+      // dit apparaat 12 uur lang een 'staff'-uitspraak in localStorage.
+      try { window.CrmGuard?.clear(); } catch (e) { /* no-op */ }
       await window.supabase.auth.signOut();
       window.location.href = '/login.html';
     },
@@ -242,9 +245,30 @@ window._authSharedReady = (async function () {
   // toch een lege sessie + tokenLen=0 zien (Supabase laadt de persisted sessie
   // namelijk lazy bij de eerste auth-call). Door hier 1x getSession() te
   // awaiten is "ready" gegarandeerd "sessie beschikbaar".
+  let _warmSession = null;
   try {
-    await window.AuthShared.getSession();
+    _warmSession = await window.AuthShared.getSession();
   } catch (e) {
     console.warn('[supabase-client] session warmup faalde:', e?.message || e);
+  }
+
+  // ── CRM-toegangsguard (laag 2 bovenop RLS) ─────────────────────────────
+  // Studenten/viewers mogen geen enkel deel van de CRM-UI zien. crm-guard.js
+  // heeft de pagina al verborgen; hier valt het oordeel. Bewust AWAIT: geen
+  // enkele module mag data renderen voordat dit rond is. Faalt de check zelf
+  // (netwerk/PostgREST), dan geven we de pagina vrij — RLS blijft de
+  // autoritatieve laag.
+  if (window.CrmGuard && !window.CrmGuard.isExemptPath()) {
+    try {
+      const guardProfile = _warmSession ? await window.AuthShared.getProfile() : null;
+      const redirecting  = window.CrmGuard.applyVerdict(guardProfile, !!_warmSession);
+      if (redirecting) {
+        // Navigatie loopt al; de rest van de pagina niet meer laten booten.
+        await new Promise(() => {});
+      }
+    } catch (e) {
+      console.warn('[supabase-client] crm-guard check faalde:', e?.message || e);
+      window.CrmGuard.release();
+    }
   }
 })();
