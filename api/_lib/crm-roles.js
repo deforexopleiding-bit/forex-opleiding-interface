@@ -57,13 +57,15 @@ export function authRedirectUrlForRole(role) {
  * @returns {Promise<{user: object, profile: object}|null>} null = weigeren (403)
  */
 export async function requireCrmStaff(req) {
-  const { supabaseAdmin } = await import('../supabase.js');
-
+  // Header-check vóór de import: zonder token is er niets op te zoeken, en zo
+  // heeft de weiger-tak geen enkele side-effect (handig in tests).
   const authHeader = req?.headers?.authorization || '';
   if (!authHeader.startsWith('Bearer ')) return null;
 
   const token = authHeader.slice('Bearer '.length).trim();
   if (!token) return null;
+
+  const { supabaseAdmin } = await import('../supabase.js');
 
   const { data, error } = await supabaseAdmin.auth.getUser(token);
   const user = data?.user || null;

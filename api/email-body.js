@@ -3,6 +3,7 @@ import { simpleParser } from 'mailparser';
 import { safeError } from './_lib/safe-error.js';
 import { sanitizeEmailHtml } from './_lib/email-html-sanitizer.js';
 import { supabaseAdmin } from './supabase.js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
 
 // v=22 email-round: DB-fallback voor intern-gegenereerde mails.
 // Interne notificatie-mails (bv. leads@ "Nieuwe lead: …" uit de forex-opleiding
@@ -58,6 +59,13 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed — use POST' });
   }
+
+  // Dit endpoint gaf de VOLLEDIGE mailbody terug zonder enige auth-check: een
+  // POST met mailbox+uid (of email_id) was genoeg. Nu een expliciete rolpoort,
+  // dezelfde als public.is_crm_staff() in RLS — een geldig JWT alleen is niet
+  // genoeg, want elk auto-aangemaakt viewer/student-account heeft er een.
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-rol vereist.' });
 
   const body = typeof req.body === 'string'
     ? JSON.parse(req.body || '{}')
