@@ -242,15 +242,19 @@
       const incl = subExcl + btwAmt;
       totalExcl += subExcl;
       if (rate > 0) btwByRate[rate] = (btwByRate[rate] || 0) + btwAmt;
+      // BROK FINANCE-INVOICE-DETAIL: BTW €-kolom naast BTW% zodat medewerker
+      // per regel direct ziet welk bedrag onder welk tarief valt (was tot
+      // dusver alleen aggregate in totalen-blok).
       return `<tr>
         <td>${esc(l.description || '—')}</td>
         <td class="center">${q}×</td>
         <td class="num">${eur(p)}</td>
         <td class="center">${rate}%</td>
+        <td class="num">${eur(btwAmt)}</td>
         <td class="num">${eur(subExcl)}</td>
         <td class="num"><b>${eur(incl)}</b></td>
       </tr>`;
-    }).join('') : '<tr><td colspan="6" style="text-align:center;color:var(--text-3);padding:20px">Geen regels</td></tr>';
+    }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-3);padding:20px">Geen regels</td></tr>';
     const totalBtw = Object.values(btwByRate).reduce((a, b) => a + b, 0);
     const totalIncl = totalExcl + totalBtw;
     // Totalen-blok (1-op-1 met offerte-detail-v2 patroon: subtotaal excl + BTW
@@ -318,7 +322,7 @@
           <table class="fnd-tbl">
             <thead><tr>
               <th>Regel</th><th class="center">Aantal</th><th class="num">Prijs excl.</th>
-              <th class="center">BTW</th><th class="num">Subtotaal excl.</th><th class="num">Incl. BTW</th>
+              <th class="center">BTW %</th><th class="num">BTW €</th><th class="num">Subtotaal excl.</th><th class="num">Incl. BTW</th>
             </tr></thead>
             <tbody>${linesHtml}</tbody>
           </table>

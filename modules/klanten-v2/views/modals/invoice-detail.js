@@ -176,23 +176,37 @@ function renderLinesBlock() {
   if (state.linesLoading) return `<div class="kv-inv-loading">Line-items laden…</div>`;
   if (state.linesError)  return `<div class="kv-inv-warn">Line-items niet geladen: ${esc(state.linesError)}</div>`;
   if (!state.lines.length) return `<div class="kv-prof-empty">Geen line-items (TL heeft geen tl_invoice_id-koppeling).</div>`;
+  // BROK FINANCE-INVOICE-DETAIL: 2 extra kolommen (BTW €, Regel incl.) —
+  // client-side berekend uit regel-data. Geen endpoint-wijziging.
   return `
     <table class="kv-abo-lines">
       <thead><tr>
         <th>Omschrijving</th>
         <th class="r">Aantal</th>
         <th class="r">Prijs excl.</th>
-        <th class="r">BTW</th>
-        <th class="r">Regel-totaal</th>
+        <th class="r">BTW %</th>
+        <th class="r">BTW €</th>
+        <th class="r">Regel excl.</th>
+        <th class="r">Regel incl.</th>
       </tr></thead>
-      <tbody>${state.lines.map(l => `
+      <tbody>${state.lines.map(l => {
+        const rate    = Number(l.tax_rate);
+        const subExcl = Number(l.line_total_excl);
+        const hasRate = Number.isFinite(rate);
+        const hasExcl = Number.isFinite(subExcl);
+        const btwAmt  = (hasRate && hasExcl) ? (subExcl * rate / 100) : null;
+        const incl    = (hasExcl && btwAmt != null) ? (subExcl + btwAmt) : null;
+        return `
         <tr>
           <td>${esc(l.description || '—')}</td>
           <td class="r mono">${esc(String(l.quantity != null ? l.quantity : 1))}</td>
           <td class="r mono">${esc(fmtEur(l.unit_price_excl))}</td>
-          <td class="r mono">${esc(String(l.tax_rate != null ? l.tax_rate + '%' : '—'))}</td>
+          <td class="r mono">${esc(hasRate ? rate + '%' : '—')}</td>
+          <td class="r mono">${esc(fmtEur(btwAmt))}</td>
           <td class="r mono">${esc(fmtEur(l.line_total_excl))}</td>
-        </tr>`).join('')}
+          <td class="r mono"><b>${esc(fmtEur(incl))}</b></td>
+        </tr>`;
+      }).join('')}
       </tbody>
     </table>`;
 }

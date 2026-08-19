@@ -9,7 +9,7 @@
 // gate: finance.invoice.view (super_admin + manager) — sales zonder
 // permission ziet 403 → error-state met duidelijke boodschap.
 
-import { openInvoiceDetailModal } from '../modals/invoice-detail.js';
+import { openInvoiceDetailModal } from '../modals/invoice-detail.js?v=2';
 import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
 import { openInvoicePaymentModal } from '../modals/invoice-payment.js';
 import { openInvoiceSendModal } from '../modals/invoice-send.js';
