@@ -1,6 +1,8 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { safeError } from './_lib/safe-error.js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
+import { verifyAttachmentToken } from './_lib/attachment-token.js';
 
 // v=24 email-round: onboarding@ + events@ toegevoegd — was drift met
 // email-body.js (die had ze wel). Zonder deze fix: attachment-download
@@ -27,7 +29,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed — use GET' });
   }
 
-  const { mailbox, uid, index } = req.query;
+  const { mailbox, uid, index, t: attachToken } = req.query;
   const attachIndex = parseInt(index || '0', 10);
 
   if (!mailbox || !uid) {
@@ -35,6 +37,29 @@ export default async function handler(req, res) {
   }
   if (isNaN(attachIndex) || attachIndex < 0 || attachIndex > 49) {
     return res.status(400).json({ error: 'Parameter "index" moet een getal zijn tussen 0 en 49.' });
+  }
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+  // Dit endpoint had GEEN enkele auth-check: mailbox+uid+index in de URL was
+  // genoeg om elke bijlage uit elke gekoppelde mailbox te downloaden.
+  //
+  // Twee toegestane bewijzen, want de aanroep gebeurt op twee manieren:
+  //   1. Bearer-token — voor callers die wél een header kunnen zetten (fetch,
+  //      scripts, toekomstige server-to-server).
+  //   2. `?t=` — een kortlevend HMAC-token, uitgegeven door /api/email-body
+  //      (dat zelf achter requireCrmStaff zit). Nodig omdat de e-mailmodule
+  //      bijlagen opent via <a href download> en window.open(): browser-
+  //      navigaties die geen Authorization-header kunnen meesturen.
+  //
+  // Token eerst: dat is het normale pad en kost geen DB-call.
+  const tokenCheck = verifyAttachmentToken(attachToken, { mailbox, uid });
+  if (!tokenCheck.ok) {
+    const viaBearer = await requireCrmStaff(req);
+    if (!viaBearer) {
+      // Reden wél loggen, niet teruggeven — anders is het een orakel.
+      console.warn('[email-attachment] geweigerd:', tokenCheck.reason, 'mailbox=', mailbox);
+      return res.status(403).json({ error: 'Toegang geweigerd. Geldig token of CRM-rol vereist.' });
+    }
   }
 
   const account = ACCOUNTS.find((a) => a.user === mailbox);
