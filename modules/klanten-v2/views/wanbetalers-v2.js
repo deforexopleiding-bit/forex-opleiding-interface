@@ -1500,12 +1500,16 @@
       const isSel = !!_ui.ovSelected[cid];
       const cidAttr  = String(cid || '').replace(/"/g, '&quot;');
       const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      return `<div style="display:grid;grid-template-columns:32px 2fr 1fr 90px 100px 1.4fr 1.2fr auto;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);align-items:center;font-size:12.5px${isSel ? ';background:var(--surface-2)' : ''}"
-        onmouseover="if(!this.dataset.sel)this.style.background='var(--surface-2)'" onmouseout="if(!this.dataset.sel)this.style.background='transparent'" ${isSel ? 'data-sel="1"' : ''}>
+      // BROK WB-FIX-3 #1: hele rij klikbaar → drawer. Klik op knoppen/
+      // checkbox gebruikt event.stopPropagation zodat die niet meetriggert.
+      return `<div style="display:grid;grid-template-columns:32px 2fr 1fr 90px 100px 1.4fr 1.2fr auto;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);align-items:center;font-size:12.5px;cursor:pointer${isSel ? ';background:var(--surface-2)' : ''}"
+        onclick="__wbxOpenCase('${cidClick}')"
+        onmouseover="if(!this.dataset.sel)this.style.background='var(--surface-2)'" onmouseout="if(!this.dataset.sel)this.style.background='transparent'" ${isSel ? 'data-sel="1"' : ''}
+        title="Open dossier">
         <label style="display:flex;align-items:center;cursor:pointer" onclick="event.stopPropagation()">
-          <input type="checkbox" ${isSel ? 'checked' : ''} onchange="__wbxOvToggleSel('${cidClick}')" style="width:15px;height:15px;cursor:pointer" />
+          <input type="checkbox" ${isSel ? 'checked' : ''} onchange="event.stopPropagation();__wbxOvToggleSel('${cidClick}')" style="width:15px;height:15px;cursor:pointer" />
         </label>
-        <div style="cursor:pointer" onclick="__wbxOvOpen('${cidClick}')">
+        <div>
           <div style="font-weight:500">${esc(name)}</div>
           ${hasArr ? `<div style="font-size:10.5px;color:var(--amber);margin-top:2px" title="Actief payment_arrangement: dunning gepauzeerd">⏸ Dunning gepauzeerd (arrangement actief)</div>` : ''}
         </div>
@@ -1516,7 +1520,7 @@
         <div style="color:var(--text-3);font-size:11.5px">${esc(nextTxt)}</div>
         <div style="text-align:right;display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" style="font-size:10.5px" onclick="event.stopPropagation();__wbxArrPropose('${cidClick}')" title="Nieuw arrangement voorstellen">📋 Arr</button>
-          <button class="btn btn-ghost btn-sm" style="font-size:10.5px;color:var(--text-3)" onclick="event.stopPropagation();__wbxOvOpen('${cidClick}')" title="Open klant-detail">→</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:10.5px;color:var(--text-3)" onclick="event.stopPropagation();__wbxOpenCase('${cidClick}')" title="Open dossier">→</button>
         </div>
       </div>`;
     }).join('');
@@ -1584,7 +1588,7 @@
             </div>
             <div style="font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between">
               <span id="wbxOvCount">${filtered.length} klant${filtered.length === 1 ? '' : 'en'}</span>
-              <span>Vink klanten aan voor bulk-start · klik rij voor tijdlijn →</span>
+              <span>Vink klanten aan voor bulk-start · klik rij voor dossier →</span>
             </div>
           </div>
           <div id="wbxOvSelBar" style="display:${_selOvCustIds().length ? 'flex' : 'none'};padding:10px 14px;background:var(--brand-soft,#E2F1F5);border-bottom:1px solid var(--border);align-items:center;gap:10px;font-size:12.5px">
@@ -1958,7 +1962,7 @@
     }
 
     return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);cursor:${cid ? 'pointer' : 'default'};transition:background .08s"
-      ${cid ? `onclick="__wbxOpenCase('${cidClick}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
+      ${cid ? `onclick="__wbxOpenCase('${cidClick}',{customer_name:'${esc(name).replace(/'/g,"\\'")}'})" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
       <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start">
         <div style="min-width:0">
           <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(customer)}</div>
@@ -3484,8 +3488,17 @@
     if (!convId) return '';
     const bag  = _live.inbox.thread.byConv[convId];
     const conv = bag?.conversation || null;
-    const row  = (_live.inbox.convs.items || []).find((x) => x.id === convId) || {};
-    const name = conv?.customer_name || row.customer_name || row.display_name || 'Onbekende klant';
+    // BROK WB-FIX-3 nit: zoek op UNFILTERED convs.items (raw list, niet
+    // client-side gefilterd door zoekbalk of tab). Kop moet gebonden blijven
+    // aan het GEOPENDE gesprek, ongeacht of dat gesprek nu in de zichtbare
+    // lijst zit. Fallback: thread-bag conversation → phone_number.
+    const row  = (_live.inbox.convs.items || []).find((x) => String(x.id) === String(convId)) || {};
+    const name = conv?.customer_name
+              || row.customer_name
+              || row.display_name
+              || conv?.display_name
+              || bag?.conversation?.phone_number
+              || 'Onbekende klant';
     const isArchived   = row.status === 'gearchiveerd' || conv?.status === 'gearchiveerd';
     const isDone       = row.status === 'afgehandeld'  || conv?.status === 'afgehandeld';
     const canSend24h   = conv?.can_send_text !== false;
@@ -3649,9 +3662,13 @@
 
   // SURFACE B: __wbxOpenCase opent een body-level right-slide drawer met scrim.
   // Warmt pipeline-detail (fase + facturen), conv+chat, briefs, timeline, call-log.
-  window.__wbxOpenCase = (cid) => {
+  // BROK WB-FIX-3 #2: 2e arg = opts { customer_name?, phone? } zodat call-sites
+  // die WEL een naam kennen die kunnen doorgeven — voorkomt "Onbekend"-flash
+  // wanneer pipeline-detail leeg customer-object teruggeeft.
+  window.__wbxOpenCase = (cid, opts) => {
     if (!cid) return;
     _ui.caseSheet.cid = String(cid);
+    _ui.caseSheet.openOpts = opts && typeof opts === 'object' ? opts : {};
     // Reset joost/pipeline cache zodat verse data komt bij re-open.
     delete _live.caseFaithful.pipeByCust[cid];
     delete _live.caseFaithful.convByCust[cid];
@@ -3719,11 +3736,16 @@
     const pipe = pipeBag?.data || null;
     const pipeLoading = !!(pipeBag && pipeBag.loading);
     const row  = _findOvRow(cid);
-    // BROK WB-FIX-2 #2: toon "Laden…" tijdens pipe-fetch i.p.v. "Onbekend"
-    // (dat suggereerde ten onrechte dat de klant niet bestond). Alleen als
-    // pipe klaar is EN geen naam heeft, val terug op overzicht-row of
-    // "Onbekend".
+    // BROK WB-FIX-3 #2: bronrij-first — vandaag-tegel geeft altijd
+    // customer_name mee (Wacht op reactie / Stille dossiers). Pipeline-detail
+    // returnt soms 200 met leeg customer-object (klant zonder open factuur/
+    // active dunning-rij). Fix: gebruik pipeline-name IF gezet, anders bronrij
+    // customer_name, anders opengeklikt-context row.customer_name (kan uit
+    // pipeline-actions komen: awaiting/stale/apDue rows) — pas als laatste
+    // fallback "Onbekend".
+    const opts = _ui.caseSheet.openOpts || {};
     const name = pipe?.customer?.name
+              || opts.customer_name
               || row?.customer_name
               || row?.name
               || (pipeLoading ? 'Laden…' : 'Onbekend');
@@ -3828,8 +3850,23 @@
   }
 
   function _caseFactuurCardHtml(cid, pipe, focus, daysN) {
+    const pipeBag = _live.caseFaithful.pipeByCust[cid];
+    const pipeLoading = !!(pipeBag && pipeBag.loading);
     const openInvs = asArr(pipe?.open_invoices);
     const nOpen = openInvs.length;
+    // BROK WB-FIX-3 #2: nette "geen open factuur"-empty-state i.p.v.
+    // "— / €0,00 / 0d / —". Klant heeft mogelijk WEL een dunning-history
+    // maar op dit moment geen open factuur (bv. na betaling voor cron
+    // 'em heeft geresolved). Toon dat expliciet.
+    if (!pipeLoading && nOpen === 0) {
+      return `<div class="wbx-drawer-card">
+        <div class="wbx-drawer-card-h">De factuur</div>
+        <div class="wbx-drawer-card-b" style="color:var(--text-3)">
+          <div style="padding:6px 0">Deze klant heeft momenteel <b>geen open factuur</b>.</div>
+          <div style="font-size:11.5px;margin-top:2px">Achterstand kan zojuist zijn opgelost — check de tijdlijn voor recente betalingen.</div>
+        </div>
+      </div>`;
+    }
     const nr = focus?.invoice_number || '—';
     const openEur = Number(focus?.amount_open ?? focus?.open_amount ?? 0);
     const isMulti = nOpen > 1;
@@ -3897,8 +3934,9 @@
     }
     let joostHtml = '';
     const jItem = asArr(jbag?.items)[0] || null;
-    if (jbag?.loading) joostHtml = '<div style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:11.5px;color:var(--text-3)">Joost denkt na…</div>';
-    else if (jItem) {
+    if (jbag?.loading) {
+      joostHtml = '<div style="margin-top:10px;padding:10px;border:1px dashed var(--brand);border-radius:6px;font-size:11.5px;color:var(--brand);background:var(--surface-2)">🤖 Joost denkt na…</div>';
+    } else if (jItem) {
       const intent = jItem.detected_intent || 'suggestie';
       const conf = jItem.confidence != null ? Math.round(jItem.confidence * 100) + '%' : '';
       const reply = String(jItem.suggested_reply || '').slice(0, 500);
@@ -3909,6 +3947,13 @@
         </div>
         <div style="font-size:12.5px;color:var(--text-2);white-space:pre-wrap">${esc(reply)}</div>
       </div>`;
+    } else if (jbag?.error) {
+      // BROK WB-FIX-3 #3: fout in-card i.p.v. onzichtbare toast.
+      joostHtml = `<div style="margin-top:10px;padding:10px 12px;border:1px solid var(--rose);background:var(--rose-soft);border-radius:6px;font-size:11.5px;color:var(--rose)">🤖 Joost: ${esc(jbag.error)}</div>`;
+    } else if (jbag?.no_suggestion) {
+      // BROK WB-FIX-3 #3: expliciete "no suggestion" state — user vroeg
+      // Joost, maar niets zinvolls om te suggereren nu.
+      joostHtml = `<div style="margin-top:10px;padding:10px 12px;border:1px dashed var(--border);border-radius:6px;font-size:11.5px;color:var(--text-3);background:var(--surface-2)">🤖 Joost heeft op dit moment geen suggestie voor dit gesprek.</div>`;
     }
     return `<div class="wbx-drawer-card">
       <div class="wbx-drawer-card-h">Gesprek</div>
@@ -4035,7 +4080,7 @@
       ${b('promise',   '🤝', 'Betaalafspraak',  'ok',    'Betaalbelofte loggen (bedrag + datum)',  isTerminal)}
       ${b('reminder',  '📩', 'Herinnering',     'text',  'Log handmatige herinnering',              isTerminal)}
       ${b('askjoost',  '🤖', 'Vraag Joost',     'brand', 'Vraag Joost om een suggestie',            isTerminal)}
-      ${b('close',     '✅', 'Sluit dossier',   'danger','Klant afhandelen (opgelost) — irreversibel', false)}
+      ${b('close',     '🛑', 'Sluit dossier',   'danger','Klant afhandelen (opgelost) — irreversibel', false)}
       ${isDispute
         ? b('resolvedispute', '⚖', 'Geschil opgelost', 'ok', 'Klant heeft ongelijk / geschil is opgelost', false)
         : b('dispute',        '⚖', 'Geschil',           'warn', 'Geschil markeren — flow parkeren', isTerminal)}
@@ -4129,43 +4174,64 @@
     if (window.DFO?.render) window.DFO.render();
   }
 
-  // Vraag Joost — genereert een nieuwe suggestie voor het conversation-id
-  // van de klant. BROK WB-FIX-2 #5: awaits nu op de suggest-call (blocking
-  // tot Joost antwoord terug is; typisch 1-3s) i.p.v. fire-and-forget met
-  // vaste 1.8s poll. Zorgt dat de suggestie DIRECT in de drawer verschijnt
-  // ipv "denkt na"-toast zonder resultaat. Toont "Joost denkt na…"-placeholder
-  // in de Gesprek-card tijdens de wait via joostByCust.loading=true.
+  /* Vraag Joost — genereert een nieuwe suggestie. BROK WB-FIX-3 #3: GEEN
+     toast meer (viel achter de action-bar). Alle state in de Gesprek-card:
+       loading=true            → "Joost denkt na…"
+       response OK + items>0   → Joost-blurb rendert (bestaande render)
+       response OK + items=0   → "Joost heeft nu geen suggestie" in-card
+       response failed         → error in-card
+     De suggest-endpoint kan zelf { suggestion } teruggeven of async
+     doorschrijven naar joost_suggestions. We proberen suggest -> als
+     response.suggestion aanwezig is: direct in items zetten; anders
+     refetch joost-suggestions-recent (met kleine 300ms delay om de
+     write-race te vermijden). */
   async function _caseActAskJoost(cid) {
     const cbag = _live.caseFaithful.convByCust[cid];
-    if (!cbag?.convId) { _toast('Geen WA-gesprek met deze klant.', 'warn'); return; }
+    if (!cbag?.convId) {
+      // Card-visible fallback: geen conv → toon informatieve state.
+      _live.caseFaithful.joostByCust[cid] = { loading: false, items: [], error: 'Geen WA-gesprek met deze klant.' };
+      _repaintCaseSheet();
+      return;
+    }
     if (_ui.caseActBusy['askjoost:' + cid]) return;
     _ui.caseActBusy['askjoost:' + cid] = true;
-    // Zet joostByCust op loading zodat de card "Joost denkt na…" toont.
     _live.caseFaithful.joostByCust[cid] = { loading: true, items: [], error: null };
     _repaintCaseSheet();
     try {
-      // Blocking wait op de suggest-endpoint. Response bevat vaak direct
-      // { suggestion: {...} }; anders vragen we recent op na de call.
       const r = await apiPost('/api/joost-suggest', { conversation_id: cbag.convId });
       if (!r.ok) {
-        _toast('Joost antwoord mislukt: ' + r.error, 'error');
-        _live.caseFaithful.joostByCust[cid] = { loading: false, items: [], error: r.error };
+        _live.caseFaithful.joostByCust[cid] = {
+          loading: false, items: [], error: r.error || 'Joost-verzoek mislukt.',
+        };
         return;
       }
-      // Meest robuust: refetch joost-suggestions-recent (max_age 60m) — dat
-      // pakt zowel de zojuist-aangemaakte suggestie op als eerdere.
-      const jj = await tryFetch(
-        'case:joost:refresh:' + cid,
-        `/api/joost-suggestions-recent?conversation_id=${encodeURIComponent(cbag.convId)}&max_age_minutes=60`,
-        6000
-      );
-      const items = (jj && !jj.error) ? asArr(jj.items) : [];
-      _live.caseFaithful.joostByCust[cid] = { loading: false, items, error: null };
-      if (items.length) _toast('Joost heeft geantwoord — zie Gesprek-card.', 'success');
-      else _toast('Joost gaf geen suggestie terug.', 'warn');
+      // Sommige joost-suggest responses bevatten de suggestion inline —
+      // gebruik die direct als aanwezig.
+      let items = [];
+      if (r.json?.suggestion && typeof r.json.suggestion === 'object') {
+        items = [r.json.suggestion];
+      } else if (Array.isArray(r.json?.items)) {
+        items = r.json.items;
+      }
+      // Als suggest niet inline gaf: refetch recent na een korte delay.
+      if (!items.length) {
+        await new Promise((res) => setTimeout(res, 300));
+        const jj = await tryFetch(
+          'case:joost:refresh:' + cid,
+          `/api/joost-suggestions-recent?conversation_id=${encodeURIComponent(cbag.convId)}&max_age_minutes=60`,
+          6000,
+        );
+        if (jj && !jj.error) items = asArr(jj.items);
+      }
+      _live.caseFaithful.joostByCust[cid] = {
+        loading: false, items, error: null,
+        // BROK WB-FIX-3 #3: expliciete "no-suggestion"-vlag voor de card
+        // zodat we netjes 'Joost heeft nu geen suggestie' kunnen renderen.
+        // Onderscheid van 'never-fetched' (dan geen render).
+        no_suggestion: items.length === 0,
+      };
     } catch (e) {
       _live.caseFaithful.joostByCust[cid] = { loading: false, items: [], error: e?.message || 'onbekend' };
-      _toast('Joost fout: ' + (e?.message || 'onbekend'), 'error');
     } finally {
       _ui.caseActBusy['askjoost:' + cid] = false;
       _repaintCaseSheet();
@@ -5504,7 +5570,7 @@
         const name = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || 'Onbekend';
         const type = a.action_type || '—';
         const isTl = String(type).startsWith('TL_');
-        return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
+        return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}',{customer_name:'${esc(name).replace(/'/g,"\\'")}'})" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
           <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
             <span style="font-weight:500">✅ ${esc(name)}</span>
             ${isTl ? '<span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600">TL</span>' : ''}
@@ -5530,7 +5596,7 @@
             const name = r.customer_name || r.name || 'Onbekend';
             const days = r.days_since != null ? r.days_since : (r.days_stale != null ? r.days_stale : (r.days_waiting != null ? r.days_waiting : (r.days_since_activity != null ? r.days_since_activity : null)));
             const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            return `<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
+            return `<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}',{customer_name:'${esc(name).replace(/'/g,"\\'")}'})" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
               <span>${iconEmoji} ${esc(name)}</span>
               ${days != null ? `<span class="mono" style="font-size:10.5px;color:var(--text-3)">${days}d</span>` : ''}
             </div>`;
@@ -5569,5 +5635,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=26 BROK WB-FIX-2: (#1) __wbxOvOpen -> __wbxOpenCase (drawer i.p.v. deeplink); (#2) vandaagView strikt customer_id + directPending klikbaar + "Laden…" tijdens pipe-load; (#3) mark-read gebruikt /api/inbox-email-mark-read (IMAP-batch, v1-parity); (#4) thread scroll-to-bottom RAF-loop + surgical repaint van klantpaneel + templates silent-cache (voorkomt DFO.render-clobber); (#5) askJoost awaits + toont result in Gesprek-card met loading; (#6) Sluit dossier danger-styled (rood); (#7) default sort=latest; console-banner + responsive thread-kop.');
+  console.debug('[wanbetalers-v2] v=27 BROK WB-FIX-3: (#1) overzicht HELE rij klikbaar -> drawer + stopPropagation op knoppen; (#2) drawer accepteert customer_name via opts, Vandaag-klik geeft naam mee, factuur-card "geen open factuur"-empty-state; (#3) Joost result in Gesprek-card (loading/reply/no-suggestion/error) i.p.v. toast; nits: sluit-icoon 🛑 (rood), thread-kop losgekoppeld van lijstfilter.');
 })();
