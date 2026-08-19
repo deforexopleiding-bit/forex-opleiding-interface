@@ -2215,7 +2215,11 @@
     _selectSeq:    0,                  // BROK 5-fix (v=11): per __wbxInboxSelect stale-guard
     searchQ:       '',
     _searchTimer:  null,
-    statusFilter:  'active',           // 'active' | 'afgehandeld' | 'archief' | 'all'
+    statusFilter:  'all',              // SURFACE A: default = ALLE (v1-parity)
+    sortMode:      'unread_first',     // SURFACE A: 'unread_first' | 'latest'
+    autoOpenedFirst: false,            // SURFACE A: auto-open first conv na eerste fetch
+    kebabOpen:     false,              // SURFACE A: ⋮ kebab-menu open/dicht
+    composeMenuOpen: false,            // SURFACE A: compose-⋮ sub-menu open/dicht
     compose: {
       channel:          'wa',          // 'wa' | 'mail'
       text:             '',
@@ -2226,20 +2230,79 @@
       error:            null,
     },
   };
+  // SURFACE A: realtime + poll-fallback state.
+  _live.inboxRealtime = {
+    channel:      null,      // Supabase RealtimeChannel
+    pollTimer:    null,      // setInterval handle (6s)
+    active:       false,     // subscribed?
+    lastRefresh:  0,         // ms epoch — laatste _fetchInboxConvs()
+  };
 
   async function _fetchInboxConvs() {
     const st = _live.inbox.convs;
     if (st.loading) return;
     const mySeq = ++st._seq;
     st.loading = true; st.error = null;
-    const q = new URLSearchParams({ module: 'finance', limit: '200', status_filter: _ui.inbox.statusFilter || 'active' });
+    // SURFACE A: default 'all' + limit 1000 (v1-parity — v1 cap sinds 2026-08-04).
+    // Server-side search-param blijft (helpt bij groot volume).
+    const q = new URLSearchParams({ module: 'finance', limit: '1000', status_filter: _ui.inbox.statusFilter || 'all' });
     if (_ui.inbox.searchQ && _ui.inbox.searchQ.trim()) q.set('search', _ui.inbox.searchQ.trim());
-    const j = await tryFetch('inbox:convs', '/api/inbox-conversations-list?' + q.toString(), 8000);
+    const j = await tryFetch('inbox:convs', '/api/inbox-conversations-list?' + q.toString(), 10000);
     if (mySeq !== st._seq) return;
     if (j && j.error) st.error = j.error;
     else { st.items = asArr(j?.items); st.fetched = true; }
     st.loading = false;
+    _live.inboxRealtime.lastRefresh = Date.now();
+    // SURFACE A: auto-open eerste gesprek na eerste fetch. Filtert de wanbetaler-
+    // set client-side (zelfde criteria als _inboxConvsListHtml zodat auto-open
+    // niet naar een niet-zichtbare conv wijst).
+    if (!_ui.inbox.autoOpenedFirst && !_ui.inbox.selectedConv) {
+      const debtorItems = _selectVisibleInboxItems(asArr(st.items));
+      const first = debtorItems[0];
+      if (first?.id) {
+        _ui.inbox.autoOpenedFirst = true;
+        // queueMicrotask zodat de render eerst een lijst rendert vóór de select-race.
+        queueMicrotask(() => window.__wbxInboxSelect(String(first.id)));
+      }
+    }
     try { window.DFO?.render?.(); } catch (_) {}
+  }
+  // SURFACE A: gedeelde filter+sort-helper. Server retourneert alle finance-convs;
+  // wij tonen alleen wanbetaler-convs (is_debtor=true) + client-side searchQ +
+  // sortMode 'unread_first' (v1-default). Fallback: als backend nog geen is_debtor
+  // meelevert (legacy respons), val terug op overzicht-intersect zoals eerder.
+  function _selectVisibleInboxItems(items) {
+    const hasDebtorFlag = items.some((c) => 'is_debtor' in c);
+    let out;
+    if (hasDebtorFlag) {
+      out = items.filter((c) => !!c.is_debtor);
+    } else {
+      // Fallback (legacy respons): overzicht-intersect als voorheen.
+      const wbCids = new Set(asArr(_live.overzicht.items).map((r) => String(r.customer_id || r.id)));
+      out = wbCids.size
+        ? items.filter((c) => c.customer_id && wbCids.has(String(c.customer_id)))
+        : items;
+    }
+    const q = String(_ui.inbox.searchQ || '').trim().toLowerCase();
+    if (q) {
+      out = out.filter((c) => (
+        (c.customer_name || '') + ' ' +
+        (c.display_name  || '') + ' ' +
+        (c.phone_number  || '')
+      ).toLowerCase().includes(q));
+    }
+    const mode = _ui.inbox.sortMode || 'unread_first';
+    out = out.slice().sort((a, b) => {
+      const ta = a.last_activity_at ? Date.parse(a.last_activity_at) : (a.last_message_at ? Date.parse(a.last_message_at) : 0);
+      const tb = b.last_activity_at ? Date.parse(b.last_activity_at) : (b.last_message_at ? Date.parse(b.last_message_at) : 0);
+      if (mode === 'unread_first') {
+        const ua = Number(a.total_unread ?? a.unread_count) > 0 ? 1 : 0;
+        const ub = Number(b.total_unread ?? b.unread_count) > 0 ? 1 : 0;
+        if (ua !== ub) return ub - ua;
+      }
+      return tb - ta;
+    });
+    return out;
   }
   // BROK 5-fix (v=11): stale-guard via _seq per __wbxInboxSelect.
   // Snel klikken A → B → A → fetches van eerder-verlaten convs die later
@@ -2450,44 +2513,280 @@
   };
   window.__wbxRetryInbox = () => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); };
 
+  /* ── SURFACE A — sort / kebab / realtime / mark-read/unread / pause ─── */
+  window.__wbxInboxSort = (mode) => {
+    _ui.inbox.sortMode = (mode === 'latest' ? 'latest' : 'unread_first');
+    _repaintInboxList();
+    try { window.DFO?.render?.(); } catch (_) {}
+  };
+  window.__wbxInboxKebab = () => {
+    _ui.inbox.kebabOpen = !_ui.inbox.kebabOpen;
+    try { window.DFO?.render?.(); } catch (_) {}
+    // Klik-buiten sluit kebab.
+    if (_ui.inbox.kebabOpen) {
+      setTimeout(() => {
+        const closeOnce = (e) => {
+          if (!e.target.closest('#wbxInboxKebab')) {
+            document.removeEventListener('click', closeOnce, true);
+            _ui.inbox.kebabOpen = false;
+            try { window.DFO?.render?.(); } catch (_) {}
+          }
+        };
+        document.addEventListener('click', closeOnce, true);
+      }, 20);
+    }
+  };
+  window.__wbxInboxKebabClose = () => { _ui.inbox.kebabOpen = false; };
+
+  window.__wbxInboxMarkRead = async (convId) => {
+    if (!convId) return;
+    // Fire parallel WA + email mark-read.
+    const bag = _live.inbox.thread.byConv[convId];
+    apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
+    if (bag?.items) {
+      const inboundEmails = bag.items.filter((m) => m.channel === 'email' && (m.direction === 'inbound' || m.direction === 'in'));
+      for (const m of inboundEmails) {
+        const emailId = String(m.id || '').replace(/^email:/, '').replace(/^reply:/, '');
+        if (emailId) apiPost('/api/email-actions', { email_id: emailId, action: 'mark-read' }).catch(() => {});
+      }
+    }
+    _toast('Gemarkeerd als gelezen.', 'success');
+    _live.inbox.convs.fetched = false;
+    _fetchInboxConvs();
+  };
+  window.__wbxInboxMarkUnread = async (convId) => {
+    if (!convId) return;
+    const r = await apiPost('/api/inbox-mark-unread', { conversation_id: convId });
+    if (!r.ok) { _toast('Markeren mislukt: ' + r.error, 'error'); return; }
+    _toast('Gemarkeerd als ongelezen.', 'success');
+    _live.inbox.convs.fetched = false;
+    _fetchInboxConvs();
+  };
+  window.__wbxInboxPauseFlow = async (cid) => {
+    if (!cid) return;
+    const reason = await _askReason('Aanmaan-flow pauzeren', 'Waarom? (bv. "Wacht op klant-terugkoppeling")', { okLabel: 'Pauzeer' });
+    if (!reason) return;
+    const r = await apiPost('/api/finance-dunning-pause-by-customer', { customer_id: cid, reason });
+    if (r.status === 404) { _toast('Geen actieve dunning-run gevonden.', 'warn'); return; }
+    if (!r.ok) { _toast('Pauzeren mislukt: ' + r.error, 'error'); return; }
+    const prev = r.json?.previous_status;
+    _toast(prev === 'paused' ? 'Flow was al gepauzeerd.' : 'Flow gepauzeerd.', 'success');
+  };
+
+  // SURFACE A: Supabase realtime channel op whatsapp_messages INSERT +
+  // 6s poll-fallback. Cleanup bij tab-switch (view-unmount detectie via
+  // afwezigheid van #wbxInboxList in de DOM). Silent-fail als supabase-
+  // client of RLS geen realtime toestaat — poll dekt dan alles.
+  async function _startInboxRealtime() {
+    if (_live.inboxRealtime.active) return;
+    _live.inboxRealtime.active = true;
+    // 6s poll (v1-parity). Refresh alleen als er ≥5s sinds laatste fetch is
+    // voorbij (voorkomt dubbele fetches vlak na realtime-event).
+    if (_live.inboxRealtime.pollTimer) clearInterval(_live.inboxRealtime.pollTimer);
+    _live.inboxRealtime.pollTimer = setInterval(() => {
+      // View-unmount detectie: als #wbxInboxList weg is, stop de poll.
+      if (!document.getElementById('wbxInboxList')) { _stopInboxRealtime(); return; }
+      if (Date.now() - _live.inboxRealtime.lastRefresh < 5000) return;
+      _live.inbox.convs.fetched = false;
+      _fetchInboxConvs();
+    }, 6000);
+    // Realtime channel — best-effort.
+    try {
+      if (window.supabase && typeof window.supabase.channel === 'function') {
+        const ch = window.supabase
+          .channel('wbx-inbox-live')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' }, () => {
+            // Debounce: als recent ge-refreshed, skip.
+            if (Date.now() - _live.inboxRealtime.lastRefresh < 2000) return;
+            _live.inbox.convs.fetched = false;
+            _fetchInboxConvs();
+          })
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') console.debug('[wanbetalers-v2] inbox realtime subscribed');
+            else if (status === 'CHANNEL_ERROR') console.warn('[wanbetalers-v2] inbox realtime CHANNEL_ERROR — fallback op 6s poll');
+          });
+        _live.inboxRealtime.channel = ch;
+      }
+    } catch (e) {
+      console.warn('[wanbetalers-v2] realtime setup fail (fallback op poll):', e?.message || e);
+    }
+  }
+  /* ── SURFACE A — compose-actie handlers ─────────────────────────────
+     Bijlage: file-input trigger → POST /api/whatsapp-media-upload → send
+     Template-picker: opent overlay met inbox-template-list + auto-fill
+     Snel antwoord: overlay met inbox-quick-replies-list → prefill textarea
+     Vraag Joost: POST /api/joost-suggest (refetch via SURFACE B pattern
+                  wordt hier niet zichtbaar; komt binnen als recent-item)
+     Compose-menu / Bel-taak: submenu + POST /api/tasks-create-followup */
+  window.__wbxInboxComposeMenu = () => {
+    _ui.inbox.composeMenuOpen = !_ui.inbox.composeMenuOpen;
+    try { window.DFO?.render?.(); } catch (_) {}
+    if (_ui.inbox.composeMenuOpen) {
+      setTimeout(() => {
+        const closeOnce = (e) => {
+          if (!e.target.closest('#wbxInboxComposeMenu')) {
+            document.removeEventListener('click', closeOnce, true);
+            _ui.inbox.composeMenuOpen = false;
+            try { window.DFO?.render?.(); } catch (_) {}
+          }
+        };
+        document.addEventListener('click', closeOnce, true);
+      }, 20);
+    }
+  };
+  window.__wbxInboxComposeMenuClose = () => { _ui.inbox.composeMenuOpen = false; };
+
+  window.__wbxInboxAttach = () => {
+    const convId = _ui.inbox.selectedConv;
+    if (!convId) return;
+    // Hidden file-input → upload → send in één flow.
+    let inp = document.getElementById('wbxInboxAttachInput');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file';
+      inp.id = 'wbxInboxAttachInput';
+      inp.accept = 'image/*,application/pdf,video/mp4';
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+    }
+    inp.value = '';
+    inp.onchange = async () => {
+      const file = inp.files && inp.files[0];
+      if (!file) return;
+      // Grootte-limiet 16MB (WA limiet).
+      if (file.size > 16 * 1024 * 1024) { _toast('Bestand > 16MB, WA weigert.', 'error'); return; }
+      const mode = file.type.startsWith('image/') ? 'image'
+                 : file.type.startsWith('video/') ? 'video'
+                 : 'document';
+      const ok = await _askConfirm('Bijlage versturen?', `<div><b>Bestand:</b> ${esc(file.name)}</div><div><b>Type:</b> ${esc(mode)}</div><div><b>Grootte:</b> ${Math.round(file.size / 1024)} kB</div>`, { okLabel: 'Ja, verstuur' });
+      if (!ok) return;
+      try {
+        _toast('Uploaden…', 'info');
+        const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+        const headers = {};
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('conversation_id', convId);
+        const upResp = await fetch('/api/whatsapp-media-upload', { method: 'POST', headers, body: fd });
+        if (!upResp.ok) { const t = await upResp.text().catch(() => ''); _toast('Upload faalde: ' + (t || 'HTTP ' + upResp.status), 'error'); return; }
+        const upJ = await upResp.json();
+        const mediaId = upJ.media_id || upJ.id || null;
+        if (!mediaId) { _toast('Upload lukte maar geen media_id ontvangen.', 'error'); return; }
+        const r = await apiPost('/api/inbox-send', { conversation_id: convId, mode, media_id: mediaId, filename: file.name });
+        if (!r.ok) { _toast('Verzenden mislukt: ' + r.error, 'error'); return; }
+        _toast('Bijlage verstuurd.', 'success');
+        delete _live.inbox.thread.byConv[convId];
+        _fetchInboxThread(convId);
+        _live.inbox.convs.fetched = false; _fetchInboxConvs();
+      } catch (e) { _toast('Fout: ' + (e?.message || e), 'error'); }
+    };
+    inp.click();
+  };
+
+  window.__wbxInboxOpenTplPicker = async () => {
+    const convId = _ui.inbox.selectedConv;
+    if (!convId) return;
+    // Fetch templates as needed (BROK 5 al aanwezig).
+    if (!_live.inbox.templates.byConv[convId]) await _fetchInboxTemplates(convId);
+    const tpls = asArr(_live.inbox.templates.byConv[convId]);
+    if (!tpls.length) { _toast('Geen templates beschikbaar.', 'warn'); return; }
+    const opts = tpls.map((t) => `<option value="${esc(t.name || t.template_name)}">${esc(t.name || t.template_name)}${t.category ? ' · ' + esc(t.category) : ''}</option>`).join('');
+    const bodyHtml = `
+      <div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Kies WA-template</div>
+        <select id="wbxTplPick" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">${opts}</select>
+        <div style="font-size:11px;color:var(--text-3);margin-top:8px;line-height:1.5">Template wordt direct verstuurd na bevestigen — via het WA-template-endpoint. Bij vrij-tekst-modus met open 24u-venster kun je beter de textarea gebruiken.</div>
+      </div>`;
+    const form = await _askForm('Template versturen', bodyHtml, (root) => {
+      const name = root.querySelector('#wbxTplPick')?.value || '';
+      if (!name) { _toast('Kies een template.', 'warn'); return null; }
+      return { name };
+    }, { okLabel: 'Volgende' });
+    if (!form) return;
+    _ui.inbox.compose.templateName = form.name;
+    _ui.inbox.compose.channel = 'wa';
+    // Trigger de bestaande send-flow (die pakt templateName op).
+    window.__wbxInboxSend();
+  };
+
+  window.__wbxInboxOpenQr = async () => {
+    const convId = _ui.inbox.selectedConv;
+    if (!convId) return;
+    // Fetch quick-replies (cached per conv).
+    _live.inbox.quickReplies = _live.inbox.quickReplies || { loading: {}, byConv: {} };
+    if (!_live.inbox.quickReplies.byConv[convId]) {
+      const j = await tryFetch('qr:' + convId, `/api/inbox-quick-replies-list?conversation_id=${encodeURIComponent(convId)}`, 6000);
+      if (j && !j.error) _live.inbox.quickReplies.byConv[convId] = asArr(j.items);
+    }
+    const items = asArr(_live.inbox.quickReplies.byConv[convId]);
+    if (!items.length) { _toast('Geen snel-antwoorden beschikbaar.', 'warn'); return; }
+    const opts = items.map((q) => `<option value="${esc(q.body || q.text || '')}">${esc((q.title || q.name || '').slice(0, 60))}</option>`).join('');
+    const bodyHtml = `
+      <div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Kies snel-antwoord</div>
+        <select id="wbxQrPick" onchange="const t=this.value;document.getElementById('wbxQrPreview').value=t" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">${opts}</select>
+        <div style="font-size:11.5px;color:var(--text-3);margin:8px 0 4px">Voorvertoning (bewerken kan)</div>
+        <textarea id="wbxQrPreview" rows="4" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box">${esc(items[0]?.body || items[0]?.text || '')}</textarea>
+      </div>`;
+    const form = await _askForm('Snel-antwoord invoegen', bodyHtml, (root) => {
+      const text = String(root.querySelector('#wbxQrPreview')?.value || '').trim();
+      if (!text) { _toast('Leeg — vul een tekst.', 'warn'); return null; }
+      return { text };
+    }, { okLabel: 'Voeg in' });
+    if (!form) return;
+    _ui.inbox.compose.text = form.text;
+    _ui.inbox.compose.channel = 'wa';
+    try { window.DFO?.render?.(); } catch (_) {}
+    _toast('Voorvertoning geladen — druk Verstuur.', 'success');
+  };
+
+  window.__wbxInboxAskJoost = async (convId) => {
+    if (!convId) return;
+    const r = await apiPost('/api/joost-suggest', { conversation_id: convId });
+    if (!r.ok) { _toast('Joost-verzoek mislukt: ' + r.error, 'error'); return; }
+    _toast('Joost denkt na — nieuwe suggestie verschijnt zo op de klantkaart (Dossier).', 'success');
+  };
+
+  window.__wbxInboxCreateFollowup = async (cid, convId) => {
+    if (!cid) return;
+    const reason = await _askReason('Bel-taak aanmaken', 'Waarover moet er teruggebeld worden?', { okLabel: 'Maak taak' });
+    if (!reason) return;
+    const r = await apiPost('/api/tasks-create-followup', {
+      customer_id: cid, source: 'inbox', reason, kind: 'bel-taak',
+      title: 'Bel-taak vanuit inbox', note: reason,
+    });
+    if (!r.ok) { _toast('Taak mislukt: ' + r.error, 'error'); return; }
+    _toast('Bel-taak aangemaakt.', 'success');
+  };
+
+  function _stopInboxRealtime() {
+    if (_live.inboxRealtime.pollTimer) { clearInterval(_live.inboxRealtime.pollTimer); _live.inboxRealtime.pollTimer = null; }
+    if (_live.inboxRealtime.channel && window.supabase && typeof window.supabase.removeChannel === 'function') {
+      try { window.supabase.removeChannel(_live.inboxRealtime.channel); } catch (_) {}
+    }
+    _live.inboxRealtime.channel = null;
+    _live.inboxRealtime.active  = false;
+  }
+
   function _inboxConvsListHtml() {
     const st = _live.inbox.convs;
     if (st.loading && !st.items.length) return _skelRows(6);
     if (st.error  && !st.items.length) return `<div style="padding:14px">${_errBlk(st.error, 'inbox')}</div>`;
-
-    // BROK 8 fix 4 (v=13): scope op wanbetalers-set. module=finance geeft ALLE
-    // finance-inbox convs (156 zonder scoping, waarvan 39% niet-wanbetalers).
-    // Endpoint accepteert geen customer_id-filter, dus client-side intersect
-    // met _live.overzicht.items (wanbetalers-lijst). Fallback: als overzicht
-    // nog niet geladen is → toon alle (tijdelijk breed) i.p.v. lege lijst.
-    const wbCids = new Set(asArr(_live.overzicht.items).map((r) => String(r.customer_id || r.id)));
-    let items = wbCids.size
-      ? st.items.filter((c) => c.customer_id && wbCids.has(String(c.customer_id)))
-      : st.items;
-    // BROK 8 fix 5: client-side substring-filter op naam/nummer.
-    const q = String(_ui.inbox.searchQ || '').trim().toLowerCase();
-    if (q) {
-      items = items.filter((c) => (
-        (c.customer_name || '') + ' ' +
-        (c.display_name  || '') + ' ' +
-        (c.phone_number  || '')
-      ).toLowerCase().includes(q));
-    }
+    // SURFACE A (v1-parity): scoping via server-side is_debtor-veld (fallback
+    // op overzicht-intersect voor legacy respons), ongelezen-eerst sortering.
+    // Volledige logic in _selectVisibleInboxItems zodat _fetchInboxConvs auto-
+    // open dezelfde criteria hanteert.
+    const items = _selectVisibleInboxItems(asArr(st.items));
     if (!items.length) return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">Geen wanbetaler-gesprekken in dit filter.</div>`;
-    // BROK 1 INBOX-1: sorteer op laatste bericht (nieuwste bovenaan). Ongelezen
-    // convs uit dezelfde tijdsband komen daarmee natuurlijk boven eerder-gelezen.
-    items = items.slice().sort((a, b) => {
-      const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0;
-      const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0;
-      return tb - ta;
-    });
     return items.map((c) => {
       const cid = String(c.id);
       const active = _ui.inbox.selectedConv === cid;
       const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
       const preview = c.last_message_preview || '';
       const when = c.last_message_at ? _fmtDateTime(c.last_message_at) : '';
-      const unread = Number(c.unread_count) || 0;
+      // SURFACE A: total_unread = WA + e-mail unread (v1-parity).
+      const unread = Number(c.total_unread ?? c.unread_count) || 0;
       const briefBadge = c.brief_sent ? '<span title="Brief verstuurd" style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue);font-weight:600;margin-left:4px">✉</span>' : '';
       // BROK 1 INBOX-1: unread-indicatie versterken — 3px rose left-stripe +
       // iets warmere rij-achtergrond zodat ongelezen op afstand herkenbaar zijn.
@@ -2560,21 +2859,44 @@
         <textarea placeholder="Typ een mail…" oninput="__wbxInboxComposeField('text',this.value)" rows="4" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
     }
 
+    /* SURFACE A: compose action-bar met 6 v1-knoppen. Bijlage / Template /
+       Snel antwoord / Vraag Joost / ⋮ (submenu Bel-taak, Regeling) / Verstuur.
+       Kanaal-toggle (WA/mail) blijft bovenaan; status-knoppen verhuisd naar
+       de kebab-menu bovenin de thread. */
+    const composeMenu = _ui.inbox.composeMenuOpen ? _inboxComposeMenuHtml(convId, conv) : '';
+    const attachBtn = c.channel === 'wa' && canSendText
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 9px" onclick="__wbxInboxAttach()" title="Bestand als bijlage sturen">📎</button>` : '';
+    const tplBtn = c.channel === 'wa'
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 9px" onclick="__wbxInboxOpenTplPicker()" title="Template kiezen">Template</button>` : '';
+    const qrBtn = c.channel === 'wa' && canSendText
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 9px" onclick="__wbxInboxOpenQr()" title="Snel antwoord">Snel antw.</button>` : '';
+    const joostBtn = `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 9px;color:var(--brand)" onclick="__wbxInboxAskJoost('${esc(convId)}')" title="Vraag Joost om een suggestie">🤖 Joost</button>`;
+    const moreBtn = `<button class="btn btn-ghost btn-sm" style="font-size:12.5px;padding:4px 9px;font-weight:700;position:relative" onclick="event.stopPropagation();__wbxInboxComposeMenu()" title="Meer">⋮${composeMenu}</button>`;
+
     return `<div style="border-top:1px solid var(--border);background:var(--surface);padding:10px 14px">
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap">
         ${chBtn('wa', '💬 WhatsApp')}
         ${chBtn('mail', '✉ E-mail')}
-        <div style="flex:1"></div>
-        ${statBtn('open', 'Open')}
-        ${statBtn('afgehandeld', 'Afgehandeld')}
-        ${statBtn('gearchiveerd', 'Archiveer')}
       </div>
       ${composerHtml}
       ${errLine}
-      <div style="display:flex;justify-content:flex-end;margin-top:6px">
-        <button class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="__wbxInboxSend()" ${c.sending ? 'disabled' : ''}>${c.sending ? 'Bezig…' : 'Verstuur'}</button>
+      <div style="display:flex;justify-content:flex-end;gap:5px;margin-top:8px;align-items:center;flex-wrap:wrap">
+        ${attachBtn}${tplBtn}${qrBtn}${joostBtn}${moreBtn}
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px;margin-left:6px" onclick="__wbxInboxSend()" ${c.sending ? 'disabled' : ''}>${c.sending ? 'Bezig…' : 'Verstuur'}</button>
       </div>
     </div>`;
+  }
+
+  /* SURFACE A: compose-⋮ submenu — Bel-taak / Regeling / Pauzeer flow.
+     Zelfde pattern als de thread-kop kebab: klik buiten sluit. */
+  function _inboxComposeMenuHtml(convId, conv) {
+    const custId = conv?.customer_id || null;
+    const item = (label, icon, onclick) => `<button style="display:flex;align-items:center;gap:9px;padding:8px 12px;background:transparent;border:none;border-bottom:1px solid var(--border);text-align:left;width:100%;cursor:pointer;font-size:12px;color:var(--text-1);font:inherit" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation();__wbxInboxComposeMenuClose();${onclick}"><span style="font-size:14px;line-height:1;min-width:18px">${icon}</span><span style="flex:1;white-space:nowrap">${esc(label)}</span></button>`;
+    const items = [];
+    if (custId) items.push(item('Bel-taak aanmaken', '📞', `__wbxInboxCreateFollowup('${esc(custId)}','${esc(convId)}')`));
+    if (custId) items.push(item('Regeling voorstellen', '🤝', `__wbxOpenCase('${esc(custId)}')`));
+    if (custId) items.push(item('Pauzeer aanmaan-flow', '⏸', `__wbxInboxPauseFlow('${esc(custId)}')`));
+    return `<div id="wbxInboxComposeMenu" style="position:absolute;bottom:100%;right:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 -6px 18px rgba(0,0,0,.14);min-width:210px;overflow:hidden;margin-bottom:4px">${items.join('')}</div>`;
   }
 
   function _inboxCtxHtml(convId) {
@@ -2701,11 +3023,15 @@
 
   function inboxView() {
     if (!_live.inbox.convs.fetched && !_live.inbox.convs.loading && !_live.inbox.convs.error) queueMicrotask(_fetchInboxConvs);
-    // BROK 8 fix 4: overzicht nodig voor client-side wanbetalers-scoping.
+    // Overzicht behouden voor legacy-fallback scoping (als backend geen is_debtor levert).
     if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(_fetchOverzicht);
+    // SURFACE A: realtime subscribe + poll-fallback bij eerste render.
+    if (!_live.inboxRealtime.active) queueMicrotask(_startInboxRealtime);
     const convId = _ui.inbox.selectedConv;
     const qVal = String(_ui.inbox.searchQ || '');
-    const statusBtn = (v, l) => `<button class="chip ${_ui.inbox.statusFilter === v ? 'on' : ''}" style="font-size:11px;padding:3px 9px" onclick="__wbxInboxStatus('${v}')">${esc(l)}</button>`;
+    // SURFACE A (v1-parity): filter-chips volgorde ACTIEF · AFGEHANDELD · ARCHIEF (icon-only) · ALLE.
+    const statusBtn = (v, l, iconOnly) => `<button class="chip ${_ui.inbox.statusFilter === v ? 'on' : ''}" style="font-size:11px;padding:3px 9px" onclick="__wbxInboxStatus('${v}')" title="${esc(l)}">${iconOnly ? '📦' : esc(l)}</button>`;
+    const sortBtn = (v, l) => `<button class="chip ${_ui.inbox.sortMode === v ? 'on' : ''}" style="font-size:10.5px;padding:2px 7px" onclick="__wbxInboxSort('${v}')" title="${esc(l)}">${esc(l)}</button>`;
 
     return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">
       <div style="display:flex;gap:0;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
@@ -2715,13 +3041,19 @@
             <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
               ${statusBtn('active', 'Actief')}
               ${statusBtn('afgehandeld', 'Afgehandeld')}
-              ${statusBtn('archief', 'Archief')}
+              ${statusBtn('archief', 'Archief', true)}
               ${statusBtn('all', 'Alle')}
+            </div>
+            <div style="display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;align-items:center">
+              <span style="font-size:9.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Sort</span>
+              ${sortBtn('unread_first', 'Ongelezen eerst')}
+              ${sortBtn('latest', 'Laatste bericht')}
             </div>
           </div>
           <div id="wbxInboxList" style="flex:1;overflow-y:auto;min-height:0">${_inboxConvsListHtml()}</div>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          ${_inboxThreadHeaderHtml(convId)}
           <div style="flex:1;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
           ${_inboxComposeHtml(convId)}
         </div>
@@ -2730,6 +3062,77 @@
         </div>
       </div>
       ${_officeHoursBanner()}
+    </div>`;
+  }
+
+  /* SURFACE A — Thread-header: v1-faithful topbar boven de messages.
+     Bevat: naam · Brief-tag · <spacer> · 24h-badge · ✓ Afhandelen · + Nieuwe
+     actie · 👤 Klantgegevens · ⋮ kebab-menu (8 v1-items).
+     Klik op ⋮ toont dropdown-panel; klik buiten (of nieuwe klik) sluit. */
+  function _inboxThreadHeaderHtml(convId) {
+    if (!convId) return '';
+    const bag  = _live.inbox.thread.byConv[convId];
+    const conv = bag?.conversation || null;
+    const row  = (_live.inbox.convs.items || []).find((x) => x.id === convId) || {};
+    const name = conv?.customer_name || row.customer_name || row.display_name || 'Onbekende klant';
+    const isArchived   = row.status === 'gearchiveerd' || conv?.status === 'gearchiveerd';
+    const isDone       = row.status === 'afgehandeld'  || conv?.status === 'afgehandeld';
+    const canSend24h   = conv?.can_send_text !== false;
+    const briefSent    = !!row.brief_sent;
+    const custId       = conv?.customer_id || row.customer_id || null;
+    const totalUnread  = Number(row.total_unread ?? row.unread_count) || 0;
+
+    const briefBadge = briefSent
+      ? '<span title="WIK-brief verstuurd" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">✓ Brief</span>'
+      : '<span title="Nog geen WIK-brief" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--surface-2);color:var(--text-3);font-weight:600">× Brief</span>';
+    const window24 = canSend24h
+      ? '<span title="24u-venster open — vrije tekst mag" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">24u ✓</span>'
+      : '<span title="24u-venster verlopen — alleen templates" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">24u ×</span>';
+
+    const kebab = _ui.inbox.kebabOpen ? _inboxKebabMenuHtml(convId, { isArchived, isDone, totalUnread, custId }) : '';
+
+    // Klik-buiten-om-te-sluiten: onclick=stopPropagation op knop; onblur op kebab-container.
+    return `<div style="padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative">
+      <div style="min-width:0;flex:1;overflow:hidden">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</b>
+          ${briefBadge}
+        </div>
+      </div>
+      ${window24}
+      ${!isDone ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;color:var(--emerald)" onclick="__wbxInboxSetStatus('afgehandeld')" title="Markeer als afgehandeld">✓</button>` : ''}
+      ${custId ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;color:var(--brand)" onclick="__wbxOpenActieMenu('${esc(custId)}')" title="Nieuwe actie">+</button>` : ''}
+      ${custId ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxOpenCase('${esc(custId)}')" title="Dossier openen">👤</button>` : ''}
+      <button class="btn btn-ghost btn-sm" style="font-size:13px;padding:3px 8px;font-weight:700" onclick="event.stopPropagation();__wbxInboxKebab()" title="Meer">⋮</button>
+      ${kebab}
+    </div>`;
+  }
+
+  /* SURFACE A: 8-item kebab menu (v1-parity). Elk item aan een bestaand
+     endpoint. Volgorde en zichtbaarheid volgt v1 — bv. Uit archief halen
+     alleen als isArchived, Heropenen alleen als isDone. */
+  function _inboxKebabMenuHtml(convId, ctx) {
+    const { isArchived, isDone, totalUnread, custId } = ctx;
+    const item = (label, icon, onclick, extra) => `<button style="display:flex;align-items:center;gap:9px;padding:8px 12px;background:transparent;border:none;border-bottom:1px solid var(--border);text-align:left;width:100%;cursor:pointer;font-size:12.5px;color:var(--text-1);font:inherit" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation();__wbxInboxKebabClose();${onclick}"><span style="font-size:14px;line-height:1;min-width:18px">${icon}</span><span style="flex:1">${esc(label)}</span>${extra || ''}</button>`;
+    const items = [];
+    // 1. Archiveren (verberg als reeds gearchiveerd)
+    if (!isArchived) items.push(item('Archiveren',   '📦', `__wbxInboxSetStatus('gearchiveerd')`));
+    // 2. Heropenen (alleen als afgehandeld)
+    if (isDone)     items.push(item('Heropenen',    '↩',  `__wbxInboxSetStatus('open')`));
+    // 3. Uit archief halen (alleen als gearchiveerd)
+    if (isArchived) items.push(item('Uit archief halen','📤', `__wbxInboxSetStatus('open')`));
+    // 4. Markeer gelezen (alleen zichtbaar als er unread staan)
+    if (totalUnread > 0) items.push(item('Markeer gelezen',   '✓', `__wbxInboxMarkRead('${esc(convId)}')`));
+    // 5. Markeer ongelezen (alleen zichtbaar als er GEEN unread staan)
+    if (totalUnread === 0) items.push(item('Markeer ongelezen', '●', `__wbxInboxMarkUnread('${esc(convId)}')`));
+    // 6. Dossier openen (opent SURFACE B drawer)
+    if (custId) items.push(item('Dossier openen', '👤', `__wbxOpenCase('${esc(custId)}')`));
+    // 7. Stuur een brief (WIK-brief NL, opent generatie-flow)
+    if (custId) items.push(item('Stuur een brief', '✉', `__wbxWikGen('${esc(custId)}','NL')`));
+    // 8. Pauzeer aanmaan-flow
+    if (custId) items.push(item('Pauzeer aanmaan-flow', '⏸', `__wbxInboxPauseFlow('${esc(custId)}')`));
+    return `<div id="wbxInboxKebab" style="position:absolute;top:100%;right:8px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.14);min-width:230px;overflow:hidden">
+      ${items.join('')}
     </div>`;
   }
 
