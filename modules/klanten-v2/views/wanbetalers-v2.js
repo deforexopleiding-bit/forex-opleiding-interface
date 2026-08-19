@@ -1748,11 +1748,13 @@
        arrangements.slice(0, 20).map((arr) => {
          const nm = (arr.customer && arr.customer.name) || arr.customer_name || arr.customer_id || 'Onbekend';
          const busy = !!_ui.arrBusy[arr.id];
-         return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+         // BROK WB-POLISH-3: rij klikbaar → arrangement-detail drawer.
+         // event.stopPropagation op knop zodat cancel niet ook drawer opent.
+         return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;cursor:pointer" onclick="__wbxOpenArrDetail('${esc(arr.id)}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'" title="Detail bekijken">
            <div>${esc(nm)}</div>
            <div style="font-size:11.5px;color:var(--text-2)">${esc(arr.type || '—')}</div>
            <div style="font-size:11px;color:var(--text-3)">${esc(arr.status || '—')}</div>
-           <div><button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} style="font-size:11px;color:var(--rose);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" onclick="__wbxArrCancel('${esc(arr.id)}','${esc(nm + ' — ' + (arr.type || ''))}')">Annuleer</button></div>
+           <div><button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} style="font-size:11px;color:var(--rose);opacity:${busy ? '.55' : '1'};cursor:${busy ? 'not-allowed' : 'pointer'}" onclick="event.stopPropagation();__wbxArrCancel('${esc(arr.id)}','${esc(nm + ' — ' + (arr.type || ''))}')">Annuleer</button></div>
          </div>`;
        }).join('')}
     </div>`;
@@ -5218,6 +5220,217 @@
     </div>`;
   }
 
+  /* ── BROK WB-POLISH-3: arrangement-detail drawer ────────────────────
+     Body-level right-slide drawer met scrim. Data uit /api/arrangements-
+     detail?id=<uuid>. Toont: header (typeLabel · klant + status-pill),
+     Arrangement-sectie (kv-grid: type/status/dates/reden/details JSON),
+     Pending Actions-tabel (id/type/status/dates/acties). Cancel-knop
+     in footer met danger-confirm — delegates naar bestaande
+     __wbxArrCancel (POST /api/arrangements-cancel). */
+  _live.arrDetail = { byId: {}, loading: {}, error: {} };
+  _ui.arrDetail = { id: null };
+
+  async function _fetchArrangementDetail(id) {
+    if (!id) return;
+    if (_live.arrDetail.loading[id]) return;
+    _live.arrDetail.loading[id] = true;
+    delete _live.arrDetail.error[id];
+    const j = await tryFetch('arr-detail:' + id, `/api/arrangements-detail?id=${encodeURIComponent(id)}`, 8000);
+    _live.arrDetail.loading[id] = false;
+    if (!j || j.error) _live.arrDetail.error[id] = (j && j.error) || 'Kon detail niet laden';
+    else _live.arrDetail.byId[id] = j;
+    _renderArrDetail();
+  }
+
+  window.__wbxOpenArrDetail = (id) => {
+    if (!id) return;
+    _ui.arrDetail.id = String(id);
+    if (!_live.arrDetail.byId[id]) queueMicrotask(() => _fetchArrangementDetail(id));
+    _openArrDetailDom();
+  };
+  window.__wbxCloseArrDetail = () => {
+    _ui.arrDetail.id = null;
+    const scrim = document.getElementById('wbxArrDetailScrim');
+    const drawer = document.getElementById('wbxArrDetailDrawer');
+    if (scrim) scrim.remove();
+    if (drawer) drawer.remove();
+    document.removeEventListener('keydown', _arrDetailKey);
+  };
+  function _arrDetailKey(e) { if (e.key === 'Escape') window.__wbxCloseArrDetail(); }
+
+  function _openArrDetailDom() {
+    let scrim = document.getElementById('wbxArrDetailScrim');
+    if (!scrim) {
+      scrim = document.createElement('div');
+      scrim.id = 'wbxArrDetailScrim';
+      scrim.style.cssText = 'position:fixed;inset:0;z-index:9700;background:rgba(17,23,33,.42);animation:wbxScrimFade .15s ease';
+      scrim.addEventListener('click', window.__wbxCloseArrDetail);
+      document.body.appendChild(scrim);
+    }
+    let drawer = document.getElementById('wbxArrDetailDrawer');
+    if (!drawer) {
+      drawer = document.createElement('aside');
+      drawer.id = 'wbxArrDetailDrawer';
+      drawer.setAttribute('role', 'dialog');
+      drawer.setAttribute('aria-modal', 'true');
+      drawer.style.cssText = 'position:fixed;top:0;right:0;bottom:0;z-index:9800;width:min(720px,100vw);background:var(--surface);border-left:1px solid var(--border);box-shadow:-6px 0 22px rgba(0,0,0,.14);display:flex;flex-direction:column;overflow:hidden;animation:wbxSlideIn .22s ease';
+      document.body.appendChild(drawer);
+      document.addEventListener('keydown', _arrDetailKey);
+    }
+    _renderArrDetail();
+  }
+
+  function _renderArrDetail() {
+    const drawer = document.getElementById('wbxArrDetailDrawer');
+    if (!drawer || !_ui.arrDetail.id) return;
+    drawer.innerHTML = _arrDetailHtml();
+  }
+
+  function _arrDetailHtml() {
+    const id = _ui.arrDetail.id;
+    const loading = _live.arrDetail.loading[id];
+    const error   = _live.arrDetail.error[id];
+    const data    = _live.arrDetail.byId[id] || null;
+    if (loading && !data) {
+      return `<div style="padding:20px">${_skelRows(5)}</div>`;
+    }
+    if (error && !data) {
+      return `<div style="padding:20px">${_errBlk(error, 'arrangement-detail')}</div>
+        <div style="padding:0 20px 20px"><button class="btn btn-ghost btn-sm" onclick="__wbxCloseArrDetail()">Sluiten</button></div>`;
+    }
+    if (!data) return `<div style="padding:20px;color:var(--text-3)">Geen data.</div>`;
+
+    const arr  = data.arrangement || {};
+    const cust = data.customer || {};
+    const acts = asArr(data.pending_actions);
+    const invs = asArr(data.invoices);
+
+    const typeLabel = String(arr.type || '—');
+    const status    = String(arr.status || '—');
+    const statusColor = status === 'ACTIEF' ? 'var(--emerald)'
+                      : status === 'NAGEKOMEN' ? 'var(--emerald)'
+                      : status === 'VERBROKEN' ? 'var(--rose)'
+                      : status === 'GEANNULEERD' ? 'var(--text-3)'
+                      : 'var(--brand)';
+    const statusBg = status === 'ACTIEF' || status === 'NAGEKOMEN' ? 'var(--emerald-soft)'
+                    : status === 'VERBROKEN' ? 'var(--rose-soft)'
+                    : status === 'GEANNULEERD' ? 'var(--surface-2)' : 'var(--brand-soft)';
+
+    const kvRow = (label, val) => `<div class="wbx-kv-row"><div class="wbx-kv-l">${esc(label)}</div><div>${val || '—'}</div></div>`;
+    const arrKvHtml = [
+      kvRow('Type',              esc(typeLabel)),
+      kvRow('Status',            `<span style="font-size:10.5px;padding:2px 8px;border-radius:5px;background:${statusBg};color:${statusColor};font-weight:600">${esc(status)}</span>`),
+      kvRow('Voorgesteld op',    esc(arr.created_at ? _fmtDateTime(arr.created_at) : '—')),
+      kvRow('Goedgekeurd op',    esc(arr.approved_at ? _fmtDateTime(arr.approved_at) : '—')),
+      kvRow('Effectief vanaf',   esc(arr.effective_from ? _fmtDate(arr.effective_from) : '—')),
+      kvRow('Effectief tot',     esc(arr.effective_to ? _fmtDate(arr.effective_to) : '—')),
+      kvRow('Reden / notitie',   esc(arr.reason || arr.notes || '—')),
+    ].join('');
+    const cancelReasonRow = status === 'GEANNULEERD'
+      ? kvRow('Annuleringsreden', esc(arr.cancel_reason || '—'))
+      : '';
+
+    const actRows = acts.length ? acts.map((a) => {
+      const at = _fmtDateTime(a.created_at);
+      const closed = a.executed_at || a.rejected_at;
+      const closedTxt = closed ? _fmtDateTime(closed) : '';
+      const statLabel = String(a.status || '—');
+      const statColor = statLabel === 'EXECUTED' || statLabel === 'APPROVED' ? 'var(--emerald)'
+                      : statLabel === 'REJECTED' || statLabel === 'FAILED' ? 'var(--rose)'
+                      : 'var(--amber)';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px">${esc(a.action_type || '—')}</td>
+        <td style="padding:6px 8px"><span style="font-size:10.5px;padding:2px 7px;border-radius:5px;background:var(--surface-2);color:${statColor};font-weight:600">${esc(statLabel)}</span></td>
+        <td style="padding:6px 8px;font-size:11px;color:var(--text-3)">${esc(at)}</td>
+        <td style="padding:6px 8px;font-size:11px;color:var(--text-3)">${esc(closedTxt)}</td>
+      </tr>`;
+    }).join('') : '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--text-3);font-size:12px">Geen pending actions.</td></tr>';
+
+    const invsHtml = invs.length ? invs.slice(0, 12).map((iv) => {
+      const nr = iv.invoice_number || iv.id;
+      const openEur = (iv.amount_open != null) ? Number(iv.amount_open)
+                    : Math.max(0, (Number(iv.amount_total) || 0) - (Number(iv.amount_paid) || 0));
+      return `<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px">
+        <span style="font-family:'IBM Plex Mono',monospace">${esc(nr)}</span>
+        <span style="font-family:'IBM Plex Mono',monospace">${eur(openEur)}</span>
+      </div>`;
+    }).join('') : '';
+
+    const canCancel = ['ACTIEF', 'VOORGESTELD'].includes(status);
+    const cancelBtn = canCancel
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;color:var(--rose)" onclick="__wbxArrDetailCancel('${esc(arr.id)}','${esc(typeLabel)} — ' + '${esc(cust.name || '')}')">✕ Annuleer arrangement</button>`
+      : '';
+
+    return `<style>
+      @keyframes wbxScrimFade { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes wbxSlideIn   { from { transform: translateX(100%) } to { transform: translateX(0) } }
+    </style>
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+      <div style="min-width:0;flex:1">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+          <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxCloseArrDetail()">← Terug</button>
+        </div>
+        <div style="font-size:15px;font-weight:700">${esc(typeLabel)} — ${esc(cust.name || 'Onbekend')}</div>
+        <div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:2px">ID ${esc(String(arr.id || '').slice(0, 8))}…</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        <span style="font-size:11px;padding:3px 10px;border-radius:5px;background:${statusBg};color:${statusColor};font-weight:600">${esc(status)}</span>
+        <button class="icon-btn" onclick="__wbxCloseArrDetail()" title="Sluiten (Esc)" style="border:none;background:transparent;cursor:pointer;color:var(--text-2)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px 18px;background:var(--surface-2)">
+      <div class="wbx-drawer-card">
+        <div class="wbx-drawer-card-h">Arrangement</div>
+        <div class="wbx-drawer-card-b">
+          ${arrKvHtml}
+          ${cancelReasonRow}
+          ${arr.details && Object.keys(arr.details).length ? `
+            <details style="margin-top:10px">
+              <summary style="cursor:pointer;font-size:11.5px;color:var(--text-3)">Details (JSON)</summary>
+              <pre style="margin:6px 0 0;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:'IBM Plex Mono',monospace;overflow:auto;max-height:200px">${esc(JSON.stringify(arr.details, null, 2))}</pre>
+            </details>` : ''}
+        </div>
+      </div>
+
+      ${invs.length ? `<div class="wbx-drawer-card">
+        <div class="wbx-drawer-card-h">Facturen bij dit arrangement (${invs.length})</div>
+        <div class="wbx-drawer-card-b">${invsHtml}</div>
+      </div>` : ''}
+
+      <div class="wbx-drawer-card">
+        <div class="wbx-drawer-card-h">Pending actions (${acts.length})</div>
+        <div class="wbx-drawer-card-b" style="padding:0">
+          <table style="width:100%;border-collapse:collapse;font-size:11.5px">
+            <thead>
+              <tr style="background:var(--surface-2);border-bottom:1px solid var(--border);text-align:left">
+                <th style="padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)">Type</th>
+                <th style="padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)">Status</th>
+                <th style="padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)">Voorgesteld</th>
+                <th style="padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)">Afgerond</th>
+              </tr>
+            </thead>
+            <tbody>${actRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div style="padding:10px 18px;border-top:1px solid var(--border);background:var(--surface);display:flex;gap:8px;justify-content:flex-end">
+      ${cancelBtn}
+      <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxCloseArrDetail()">Sluiten</button>
+    </div>`;
+  }
+
+  window.__wbxArrDetailCancel = async (arrId, label) => {
+    // Delegate naar bestaande cancel-handler; die doet danger-confirm +
+    // POST /api/arrangements-cancel + cache-invalidatie.
+    if (typeof window.__wbxArrCancel === 'function') {
+      await window.__wbxArrCancel(arrId, label || 'Arrangement');
+      // Herfetch dit arrangement zodat status='GEANNULEERD' zichtbaar wordt.
+      delete _live.arrDetail.byId[arrId];
+      _fetchArrangementDetail(arrId);
+    }
+  };
+
   /* BROK WB-POLISH-2: pipeline bulk-select state + handlers.
      __wbxPipeToggleSel(cid, stageSlug, shift) — toggle een kaart; met shift
        + laatste selectie in dezelfde stage → selecteer alle daartussen (range).
@@ -6216,6 +6429,7 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+  console.debug('[wanbetalers-v2] v=32 BROK WB-POLISH-3: arrangement-detail drawer. Body-level right-slide (760px) + scrim + Escape. Data via /api/arrangements-detail?id=X. Secties: header (type — klant + status-pill), Arrangement kv-grid (type/status/dates/reden), Facturen-lijst (indien invs), Pending actions-tabel, footer met ✕ Annuleer (danger, delegates naar __wbxArrCancel voor ACTIEF/VOORGESTELD). Klik op Actieve arrangementen-rij (actiesView) opent drawer; cancel-btn heeft event.stopPropagation.');
   console.debug('[wanbetalers-v2] v=31 BROK WB-POLISH-2: pipeline multi-select — checkbox per kaart, shift-klik range binnen dezelfde fase, bulk-bar met count + fase-picker + Verplaats-knop. Typ-to-confirm "VERPLAATS" (of "TERMINAAL" bij opgelost/afschrijven met extra rood-danger-hint "motor stopt voor N klanten"). Race-guard per cid (stageBusy) + globale pipeBulkBusy. Skip no-ops (klant al in target-fase). Invalidate overzicht na move -> kolom-tellingen updaten zonder scroll-reset.');
   console.debug('[wanbetalers-v2] v=30 BROK WB-POLISH-1: overzicht klikbare kolom-headers (open/dagen/fase/next/name sort, asc/desc toggle, next-null onderaan). Brieven: zoek-input (naam/e-mail 200ms debounce), select-all in header (per zichtbare filter), bulk-verwijderen met typ-to-confirm "VERWIJDER".');
   console.debug('[wanbetalers-v2] v=29 BROK WB-FIX-4: (#1) BE-lijn regressie -> altijd tonen (+ ensureReady on-demand); (#2) Volgende-badge "actie g,..." fix -> kanaal-mapping + volle datetime; (#3) thread scroll: sync+RAF, 5s loop, force clear pas na daadwerkelijk bodemen; (#4) type-label chip OP de kaart (v1-parity); (#5) drawer-kop lege staat "Geen open factuur" i.p.v. "Factuur — · €0,00 · 0 dagen"; (#6) thread-kop fallback KLANTNAAM (via ctx.customer.name) i.p.v. phone. Minor: klant-info-blok +e-mail; invoice-modal accepteert c.name; poging-teller min 4 dots + cadence store in _fetchCallLog.');
