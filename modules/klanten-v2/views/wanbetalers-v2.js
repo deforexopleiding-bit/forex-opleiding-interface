@@ -329,6 +329,22 @@
   }
   // BROK 5 ACT-2: per-status cache voor Afgehandeld/Afgewezen tabs.
   _live.pendingActsByStatus = { EXECUTED: null, REJECTED: null };
+  // SURFACE D: read-only lijst voor "Gepauzeerd (in gesprek)"-groep (alleen
+  // zichtbaar op Vandaag-tab). Endpoint finance-dunning-paused-list levert
+  // dunning-runs die geblokkeerd zijn door een actief gesprek.
+  _live.pausedList = { loading: false, fetched: false, error: null, items: [], _seq: 0 };
+  async function _fetchPausedList() {
+    const st = _live.pausedList;
+    if (st.loading || (st.fetched && !st.error)) return;
+    st.loading = true; st.error = null;
+    const seq = ++st._seq;
+    const j = await tryFetch('paused', '/api/finance-dunning-paused-list', 8000);
+    if (seq !== st._seq) return;
+    st.loading = false; st.fetched = true;
+    if (!j || j.error) st.error = (j && j.error) || 'Kon paused-lijst niet laden';
+    else st.items = asArr(j.items);
+    if (window.DFO?.render) window.DFO.render();
+  }
   async function _fetchPendingActsByStatus(status) {
     const key = String(status).toUpperCase();
     if (!_live.pendingActsByStatus[key]) _live.pendingActsByStatus[key] = { loading: false, fetched: false, error: null, items: [], _seq: 0 };
@@ -1748,59 +1764,236 @@
       <input id="wbxActiesSearch" type="text" value="${esc(q)}" oninput="__wbxActiesSearch(this.value)" placeholder="Zoek naam / type / reden…" style="width:220px;max-width:100%;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:12px;box-sizing:border-box" autocomplete="off" spellcheck="false" />
     </div>`;
 
-    // Row-renderer per tab: PENDING toont approve/reject/al-gedaan/snooze;
-    // EXECUTED en REJECTED tonen alleen read-info + timestamp.
+    // SURFACE D: PENDING-tabs (vandaag/komend) tonen groepen per action_type
+    // (Belafspraak / Betaaltoezegging bevestigen / …). Vandaag krijgt bovendien
+    // een read-only "Gepauzeerd (in gesprek)"-groep uit
+    // /api/finance-dunning-paused-list. Terminal-tabs blijven flat listing.
     const isPendingTab = tab === 'vandaag' || tab === 'komend';
-    const bodyHtml = (() => {
-      if (stateInfo.loading && !items.length) return `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Laden…</div>`;
-      if (stateInfo.error && !items.length) return `<div style="padding:22px;text-align:center;color:var(--rose);font-size:12.5px">⚠ ${esc(stateInfo.error)}</div>`;
+    let bodyHtml;
+    if (stateInfo.loading && !items.length && !(tab === 'vandaag' && asArr(_live.pausedList.items).length)) {
+      bodyHtml = `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Laden…</div>`;
+    } else if (stateInfo.error && !items.length) {
+      bodyHtml = `<div style="padding:22px;text-align:center;color:var(--rose);font-size:12.5px">⚠ ${esc(stateInfo.error)}</div>`;
+    } else if (isPendingTab) {
+      bodyHtml = _actiesGroupedBodyHtml(items, tab, q);
+    } else {
+      // Terminal-tabs: flat listing.
       if (!items.length) {
-        const empty = tab === 'vandaag' ? 'Geen open acties voor vandaag.'
-                    : tab === 'komend'  ? 'Geen ingeplande acties.'
-                    : tab === 'afgehandeld' ? 'Nog geen afgehandelde acties.'
-                    : 'Nog geen afgewezen acties.';
-        return `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(empty)}</div>`;
-      }
-      return items.slice(0, 50).map((a) => {
-        const customer = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'Onbekend';
-        const type = a.action_type || a.type || '—';
-        const amt  = a.amount || (a.payload && a.payload.amount) || null;
-        const isTl = String(type).startsWith('TL_');
-        const busy = !!_ui.paBusy[a.id];
-        const scheduled = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
-        const whenBadge = scheduled ? `<span class="mono" style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--text-3);margin-left:4px">${_fmtDateTime(a.scheduled_for).slice(5)}</span>` : '';
-        const disStyle = busy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer';
-        const dis = busy ? 'disabled' : '';
-        if (isPendingTab) {
-          return `<div style="display:grid;grid-template-columns:2fr 2fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+        const empty = tab === 'afgehandeld' ? 'Nog geen afgehandelde acties.' : 'Nog geen afgewezen acties.';
+        bodyHtml = `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(empty)}</div>`;
+      } else {
+        bodyHtml = items.slice(0, 50).map((a) => {
+          const customer = _actieCustomerName(a);
+          const type = a.action_type || a.type || '—';
+          const amt  = a.amount || (a.payload && a.payload.amount) || null;
+          const isTl = String(type).startsWith('TL_');
+          const ts = a.executed_at || a.rejected_at || a.updated_at || a.created_at;
+          const tsText = ts ? _fmtDateTime(ts) : '';
+          return `<div style="display:grid;grid-template-columns:2fr 2fr 1fr 140px;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
             <div>${esc(customer)}</div>
-            <div style="color:var(--text-2);font-size:11.5px">${esc(type)}${isTl ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600;margin-left:4px">TL</span>' : ''}${whenBadge}</div>
+            <div style="color:var(--text-2);font-size:11.5px">${esc(_actieTypeLabel(type))}${isTl ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600;margin-left:4px">TL</span>' : ''}</div>
             <div class="mono" style="text-align:right;color:var(--text-3)">${amt != null ? eur(amt) : '—'}</div>
-            <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
-              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="__wbxPaApprove('${esc(a.id)}')" title="${isTl ? 'Voer TL-mutatie uit' : 'Goedkeuren'}">${busy ? '…' : '✓'}</button>
-              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="__wbxPaReject('${esc(a.id)}')" title="Afwijzen (met reden)">✕</button>
-              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--amber);${disStyle}" onclick="__wbxActSnooze('${esc(a.id)}')" title="Later plannen">⏰</button>
-              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--text-3);${disStyle}" onclick="__wbxPaMarkExecuted('${esc(a.id)}')" title="Handmatig al uitgevoerd">✓ Gedaan</button>
-            </div>
+            <div style="font-size:11px;color:var(--text-3);text-align:right">${esc(tsText)}</div>
           </div>`;
-        }
-        // Terminal-tabs: alleen read-info.
-        const ts = a.executed_at || a.rejected_at || a.updated_at || a.created_at;
-        const tsText = ts ? _fmtDateTime(ts) : '';
-        return `<div style="display:grid;grid-template-columns:2fr 2fr 1fr 140px;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
-          <div>${esc(customer)}</div>
-          <div style="color:var(--text-2);font-size:11.5px">${esc(type)}${isTl ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600;margin-left:4px">TL</span>' : ''}</div>
-          <div class="mono" style="text-align:right;color:var(--text-3)">${amt != null ? eur(amt) : '—'}</div>
-          <div style="font-size:11px;color:var(--text-3);text-align:right">${esc(tsText)}</div>
-        </div>`;
-      }).join('');
-    })();
+        }).join('');
+      }
+    }
 
     return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-top:14px">
       ${headerHtml}
       ${bodyHtml}
     </div>`;
   }
+
+  /* SURFACE D — Klant-naam helper. Volgt overzicht-row-fallback zodat de
+     kaart-body en de kebab dezelfde weergave gebruiken. */
+  function _actieCustomerName(a) {
+    return (a.customer && a.customer.name)
+        || a.customer_name
+        || (a.payload && a.payload.customer_name)
+        || (asArr(_live.overzicht.items).find((r) => String(r.customer_id || r.id) === String(a.customer_id))?.customer_name)
+        || a.customer_id
+        || 'Onbekend';
+  }
+
+  /* SURFACE D — NL-labels + iconen per action_type (v1-parity). */
+  const _ACT_META = {
+    MANUAL_FOLLOWUP:          { label: 'Belafspraak',              icon: '📞', order: 1 },
+    MANUAL_CONFIRM_PROMISE:   { label: 'Betaaltoezegging bevestigen', icon: '🤝', order: 2 },
+    MANUAL_VERIFY_PAYMENT:    { label: 'Betaling verifiëren',      icon: '✅', order: 3 },
+    MANUAL_ESCALATION:        { label: 'Escalatie',                icon: '⚠',  order: 4 },
+    MANUAL_PROPOSE_ARRANGEMENT: { label: 'Arrangement voorstellen', icon: '🤝', order: 5 },
+    TL_INVOICE_UPDATE_DUE:    { label: 'TL: factuur-vervaldatum bijwerken', icon: '📅', order: 10 },
+    TL_INVOICE_SPLIT:         { label: 'TL: factuur splitsen',     icon: '✂', order: 11 },
+    TL_SUBSCRIPTION_PAUSE:    { label: 'TL: abonnement pauzeren',  icon: '⏸', order: 12 },
+    TL_SUBSCRIPTION_STOP:     { label: 'TL: abonnement stoppen',   icon: '⏹', order: 13 },
+    TL_INVOICE_WRITEOFF:      { label: 'TL: factuur afschrijven',  icon: '🗑', order: 14 },
+  };
+  function _actieTypeLabel(type) { return (_ACT_META[type]?.label) || type; }
+  function _actieTypeIcon (type) { return (_ACT_META[type]?.icon)  || '•'; }
+  function _actieTypeOrder(type) { return (_ACT_META[type]?.order) || 99; }
+
+  /* SURFACE D — Groep-body voor Vandaag / Komend tabs. Groepeert pending
+     items per action_type in vaste v1-volgorde (Belafspraak eerst, dan
+     Betaaltoezegging, verify, escalatie, arrangement, TL_*). Op Vandaag-
+     tab wordt onderaan de "Gepauzeerd (in gesprek)"-groep read-only
+     ingevoegd uit _live.pausedList.items (client-side search-filter). */
+  function _actiesGroupedBodyHtml(pendingItems, tab, q) {
+    const groups = new Map();
+    for (const a of asArr(pendingItems)) {
+      const type = a.action_type || 'OVERIG';
+      if (!groups.has(type)) groups.set(type, []);
+      groups.get(type).push(a);
+    }
+    const sortedTypes = Array.from(groups.keys()).sort((a, b) => _actieTypeOrder(a) - _actieTypeOrder(b));
+    const groupHtmls = sortedTypes.map((type) => {
+      const arr = groups.get(type).slice().sort((a, b) => {
+        // Vroegst geplande eerst; anders created_at oud eerst.
+        const sa = a.scheduled_for ? Date.parse(a.scheduled_for) : (a.created_at ? Date.parse(a.created_at) : 0);
+        const sb = b.scheduled_for ? Date.parse(b.scheduled_for) : (b.created_at ? Date.parse(b.created_at) : 0);
+        return sa - sb;
+      });
+      const isFollowup = type === 'MANUAL_FOLLOWUP';
+      const isPromise  = type === 'MANUAL_CONFIRM_PROMISE';
+      return `<div style="border-top:1px solid var(--border)">
+        <div style="padding:7px 14px;background:var(--surface-2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
+          <span>${_actieTypeIcon(type)} ${esc(_actieTypeLabel(type))}</span>
+          <span style="opacity:.7">${arr.length}</span>
+        </div>
+        ${arr.map((a) => _actieCardHtml(a, { isFollowup, isPromise })).join('')}
+      </div>`;
+    });
+
+    let pausedHtml = '';
+    if (tab === 'vandaag') {
+      if (!_live.pausedList.fetched && !_live.pausedList.loading && !_live.pausedList.error) queueMicrotask(_fetchPausedList);
+      const paused = asArr(_live.pausedList.items).filter((r) => {
+        if (!q) return true;
+        const nm = (r.customer_name || '').toLowerCase();
+        return nm.includes(q);
+      });
+      pausedHtml = `<div style="border-top:1px solid var(--border)">
+        <div style="padding:7px 14px;background:var(--surface-2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
+          <span>⏸ Gepauzeerd (in gesprek)</span>
+          <span style="opacity:.7">${paused.length}</span>
+        </div>
+        ${_live.pausedList.loading && !paused.length
+          ? `<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12px">Laden…</div>`
+          : (paused.length
+            ? paused.slice(0, 25).map((r) => _actieCardPausedHtml(r)).join('')
+            : `<div style="padding:14px 18px;text-align:center;color:var(--text-3);font-size:12px">Geen dossiers gepauzeerd door een lopend gesprek.</div>`)}
+      </div>`;
+    }
+
+    if (!groupHtmls.length && !pausedHtml) {
+      const empty = tab === 'vandaag' ? 'Geen open acties voor vandaag.' : 'Geen ingeplande acties.';
+      return `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(empty)}</div>`;
+    }
+    return groupHtmls.join('') + pausedHtml;
+  }
+
+  /* SURFACE D — Per-kaart render met typegespecialiseerde knop-labels.
+     Belafspraak: Bel / Afgehandeld / Overslaan / Later
+     Betaaltoezegging: Bevestigen / Niet nagekomen / Later
+     Overige (verify/escalatie/arrangement/TL_*): default ✓ / ✕ / ⏰ / ✓ Gedaan.
+     Kaart-body-klik opent SURFACE B dossier-drawer via __wbxOpenCase(cid). */
+  function _actieCardHtml(a, opts) {
+    const customer = _actieCustomerName(a);
+    const cid = a.customer_id || null;
+    const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const amt  = a.amount || (a.payload && a.payload.amount) || null;
+    const scheduled = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
+    const whenBadge = scheduled ? `<span class="mono" style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface);color:var(--text-3);border:1px solid var(--border)">${_fmtDateTime(a.scheduled_for).slice(5)}</span>` : '';
+    const reason = (a.payload && (a.payload.reason || a.payload.title || a.payload.note)) || '';
+    const busy = !!_ui.paBusy[a.id];
+    const dis = busy ? 'disabled' : '';
+    const disStyle = busy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer';
+
+    // Get context uit overzicht: openstaand + dagen te laat.
+    const ov = asArr(_live.overzicht.items).find((r) => String(r.customer_id || r.id) === String(cid));
+    const openEur = ov ? (Number(ov.total_open_cents) || 0) / 100 : (amt != null ? Number(amt) : null);
+    const days = ov ? Number(ov.days_overdue) || 0 : null;
+    const ctxLine = (openEur != null || days != null) ? `<div style="font-size:11px;color:var(--text-3);margin-top:2px">${openEur != null ? '<span class="mono">' + eur(openEur) + '</span>' : ''}${(openEur != null && days != null) ? ' · ' : ''}${days != null ? `${days} dagen` : ''}${whenBadge ? ' · ' + whenBadge : ''}</div>` : (whenBadge ? `<div style="margin-top:2px">${whenBadge}</div>` : '');
+
+    // Type-specifieke knoppen.
+    let btns;
+    if (opts.isFollowup) {
+      btns = `
+        ${cid ? `<button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--brand);${disStyle}" onclick="event.stopPropagation();__wbxActFollowupBel('${esc(cid)}')" title="Bel via softphone">📞 Bel</button>` : ''}
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="event.stopPropagation();__wbxPaApprove('${esc(a.id)}')" title="Belafspraak afgehandeld">${busy ? '…' : 'Afgehandeld'}</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="event.stopPropagation();__wbxPaReject('${esc(a.id)}')" title="Overslaan (met reden)">Overslaan</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--amber);${disStyle}" onclick="event.stopPropagation();__wbxActSnooze('${esc(a.id)}')" title="Later inplannen">🕒 Later</button>`;
+    } else if (opts.isPromise) {
+      btns = `
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="event.stopPropagation();__wbxPaApprove('${esc(a.id)}')" title="Toezegging is nagekomen">${busy ? '…' : 'Bevestigen'}</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="event.stopPropagation();__wbxPaReject('${esc(a.id)}')" title="Toezegging is NIET nagekomen">Niet nagekomen</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--amber);${disStyle}" onclick="event.stopPropagation();__wbxActSnooze('${esc(a.id)}')" title="Later opnieuw kijken">🕒 Later</button>`;
+    } else {
+      // Generic (verify/escalatie/arrangement/TL_*).
+      const isTl = String(a.action_type || '').startsWith('TL_');
+      btns = `
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="event.stopPropagation();__wbxPaApprove('${esc(a.id)}')" title="${isTl ? 'Voer TL-mutatie uit' : 'Goedkeuren'}">${busy ? '…' : '✓'}</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="event.stopPropagation();__wbxPaReject('${esc(a.id)}')" title="Afwijzen (met reden)">✕</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--amber);${disStyle}" onclick="event.stopPropagation();__wbxActSnooze('${esc(a.id)}')" title="Later plannen">🕒</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--text-3);${disStyle}" onclick="event.stopPropagation();__wbxPaMarkExecuted('${esc(a.id)}')" title="Handmatig al uitgevoerd">✓ Gedaan</button>`;
+    }
+
+    return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);cursor:${cid ? 'pointer' : 'default'};transition:background .08s"
+      ${cid ? `onclick="__wbxOpenCase('${cidClick}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start">
+        <div style="min-width:0">
+          <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(customer)}</div>
+          ${reason ? `<div style="font-size:11.5px;color:var(--text-2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(String(reason).slice(0, 200))}</div>` : ''}
+          ${ctxLine}
+        </div>
+        <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">${btns}</div>
+      </div>
+    </div>`;
+  }
+
+  /* SURFACE D — Read-only kaart voor de "Gepauzeerd"-groep (vanuit
+     finance-dunning-paused-list; niet gekoppeld aan pending_actions). */
+  function _actieCardPausedHtml(r) {
+    const cid = r.customer_id || null;
+    const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const name = r.customer_name || 'Onbekend';
+    const since = r.paused_since ? _fmtDateTime(r.paused_since) : '';
+    const reminders = Number(r.reminder_count) || 0;
+    const lastRem = r.last_reminder_at ? _fmtDateTime(r.last_reminder_at) : '';
+    return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);cursor:${cid ? 'pointer' : 'default'};transition:background .08s;background:var(--surface)"
+      ${cid ? `onclick="__wbxOpenCase('${cidClick}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='var(--surface)'"` : ''}>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center">
+        <div style="min-width:0">
+          <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px">
+            ⏸ Sinds ${esc(since || '—')}${reminders > 0 ? ` · ${reminders} reminders${lastRem ? ' (laatste ' + esc(lastRem.slice(5)) + ')' : ''}` : ''}
+          </div>
+        </div>
+        <div style="font-size:10.5px;color:var(--text-3)">Dossier →</div>
+      </div>
+    </div>`;
+  }
+
+  /* SURFACE D — Bel-actie voor Belafspraak-kaart. Opent SURFACE B drawer
+     zodat medewerker de call-cockpit ziet, EN start direct KlxSoftphone.open
+     op de klant-telefoon (best-effort — als geen phone bekend, blijft
+     alleen de drawer open). */
+  window.__wbxActFollowupBel = (cid) => {
+    if (!cid) return;
+    // Eerst drawer openen (SURFACE B) — laadt pipeline + call-log context.
+    window.__wbxOpenCase(cid);
+    // Zoek telefoonnummer uit overzicht-row (customer_phone).
+    const row = asArr(_live.overzicht.items).find((r) => String(r.customer_id || r.id) === String(cid));
+    const phone = _customerPhone(row);
+    const name  = row?.customer_name || row?.name || 'klant';
+    if (phone && window.KlxSoftphone && typeof window.KlxSoftphone.open === 'function') {
+      // Delay 250ms zodat de drawer render kan afronden vóór KlxSoftphone
+      // z'n eigen sheet erover legt.
+      setTimeout(() => {
+        window.KlxSoftphone.open({ phone, name, customerId: cid, source: 'wanbetalers.acties.followup' });
+      }, 250);
+    }
+  };
   window.__wbxActiesTab = (tab) => {
     if (!_ui.acties) _ui.acties = { tab: 'vandaag', searchQ: '', _timer: null };
     _ui.acties.tab = String(tab || 'vandaag');
