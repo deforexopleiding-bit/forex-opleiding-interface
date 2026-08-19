@@ -291,7 +291,7 @@
     // + `_newInv`-state hierbeneden zijn dead-code — kunnen weg in
     // vervolg-cleanup-brok.
     try {
-      const mod = await import('./modals/invoice-create.js?v=3');
+      const mod = await import('./modals/invoice-create.js?v=4');
       mod.openInvoiceCreateModal({
         onSuccess: () => {
           if (typeof window.__finLoadInv === 'function') window.__finLoadInv();

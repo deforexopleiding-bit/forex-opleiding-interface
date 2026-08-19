@@ -870,15 +870,35 @@ function wire() {
   if (typeInp) {
     bindOnce(typeInp, 'input', (e) => {
       state.typedGateBookSend = e.target.value;
-      rerenderFoot();
-      // Hint sync — als match-status verandert, body bij.
-      // NB: CSS-class op regel 328 is 'kv-invcredit-typegate' (historisch —
-      // gedeeld met invoice-credit). Werkt want de div bestaat met die naam.
-      const wasMatch = state.typedGateBookSend.trim().toUpperCase() === TYPE_GATE_TEXT;
-      const hint = box.querySelector('.kv-invcredit-typegate .kv-edit-field-msg');
-      const shouldShowHint = state.typedGateBookSend && !wasMatch;
-      if (shouldShowHint && !hint) rerenderBody();
-      else if (!shouldShowHint && hint) rerenderBody();
+      // BROK FINANCE-INVOICE-2 (v=4): surgical DOM-updates i.p.v.
+      // rerenderBody/rerenderFoot bij elke keystroke. Voorheen: match-flip
+      // triggerde volledige body-rerender → input-node vervangen → focus
+      // weg midden in het typen. Nu: alleen (a) fout-hint toggle in de
+      // typegate-container en (b) submit-knop disabled-flag. Zelfde
+      // patroon als inbox-zoek + case-sheet callback-err fix.
+      const val = state.typedGateBookSend.trim().toUpperCase();
+      const isMatch = val === TYPE_GATE_TEXT;
+      const gate = box.querySelector('.kv-invcredit-typegate');
+      if (gate) {
+        const hint = gate.querySelector('.kv-edit-field-msg');
+        const shouldShow = state.typedGateBookSend && !isMatch;
+        if (shouldShow && !hint) {
+          const div = document.createElement('div');
+          div.className = 'kv-edit-field-msg';
+          div.textContent = 'Komt niet overeen';
+          gate.appendChild(div);
+        } else if (!shouldShow && hint) {
+          hint.remove();
+        }
+      }
+      // Submit-knop enable/disable + label — surgical, geen render.
+      const submitBtn = box.querySelector('[data-kv-invnew-bs-submit]');
+      if (submitBtn) {
+        const canSubmit = isMatch && state.selectedTemplateId && !state.saving && !state.unknownStatus;
+        submitBtn.disabled = !canSubmit;
+        submitBtn.style.opacity = canSubmit ? '' : '.55';
+        submitBtn.style.cursor  = canSubmit ? 'pointer' : 'not-allowed';
+      }
     });
     bindOnce(typeInp, 'keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); typeInp.blur(); }
@@ -896,16 +916,22 @@ async function loadTemplates() {
     const j = await K().authedJson('/api/finance-mail-templates');
     const tpls = Array.isArray(j?.templates) ? j.templates : [];
     state.templates = tpls;
-    // BROK FINANCE-INVOICE (2026-08-19): default naar FACTUUR-template i.p.v.
-    // TL's is_default (dat kan "3e herinnering" zijn). Prefereer templates
-    // waarvan naam/subject 'factuur' of 'invoice' matcht, fallback naar
-    // is_default, fallback naar eerste.
+    // BROK FINANCE-INVOICE-2 (v=4, 2026-08-19): default expliciet FACTUUR-template
+    // + downrank "herinnering/reminder" zodat die NOOIT preselect wordt.
+    // Volgorde: (1) name/subject bevat 'factuur' of 'invoice' EN NIET
+    // 'herinnering'/'reminder' → gepakt. (2) is_default van TL, mits geen
+    // herinnering. (3) eerste NIET-herinnering. (4) laatste fallback tpls[0].
+    const isReminder = (t) => {
+      const s = ((t.name || '') + ' ' + (t.subject || '')).toLowerCase();
+      return /herinner|reminder|aanmaning|sommatie|ingebrek/.test(s);
+    };
     const looksInvoice = (t) => {
       const s = ((t.name || '') + ' ' + (t.subject || '')).toLowerCase();
-      return s.includes('factuur') || s.includes('invoice');
+      return (s.includes('factuur') || s.includes('invoice')) && !isReminder(t);
     };
     const def = tpls.find(looksInvoice)
-             || tpls.find((t) => t.is_default)
+             || tpls.find((t) => t.is_default && !isReminder(t))
+             || tpls.find((t) => !isReminder(t))
              || tpls[0];
     if (def) state.selectedTemplateId = def.id;
   } catch (e) {
@@ -939,10 +965,13 @@ function rerenderFoot() {
 
 /**
  * openInvoiceCreateModal({ customer, onSuccess })
+ * BROK FINANCE-INVOICE-2 (v=4, 2026-08-19): oude early-return op ontbrekende
+ * customer is weggehaald. Zonder customer opent modal in selector-mode
+ * (needsCustomer=true → renderCustomerSelector) zodat "+ Nieuwe factuur"
+ * vanuit Finance-tab/topbar-snelknop de klant-typeahead toont.
  */
 export function openInvoiceCreateModal({ customer, onSuccess } = {}) {
-  if (!customer?.id) { K().toast('Geen klant geselecteerd'); return; }
   if (!D() || typeof D().openModal !== 'function') { K().toast('Modal-primitive niet beschikbaar.'); return; }
-  initState(customer, { onSuccess });
+  initState(customer || null, { onSuccess });
   rerender();
 }
