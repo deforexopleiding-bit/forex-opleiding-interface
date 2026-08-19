@@ -184,18 +184,24 @@
   // Reason-prompt modal — Promise<string|null>.
   function _askReason(title, hint, opts) {
     const okLabel = esc((opts && opts.okLabel) || 'OK');
+    // BROK WB-FIX-2 #6: optionele tone='danger' (rode header + rode OK-btn +
+    // rode border) voor destructive-actions als "Sluit dossier".
+    const isDanger    = opts && opts.tone === 'danger';
+    const okBgVar     = isDanger ? 'var(--rose,#C22B3E)' : 'var(--brand,#0A7490)';
+    const titleColor  = isDanger ? 'var(--rose)' : 'inherit';
+    const boxBorder   = isDanger ? '2px solid var(--rose,#C22B3E)' : '1px solid var(--border)';
     return new Promise((resolve) => {
       _closeConfirmModal();
       const root = document.createElement('div');
       root.id = 'wbxConfirmRoot';
       root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.48);padding:20px';
-      root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:520px;width:calc(100vw - 40px)">
-        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px">${esc(title)}</div>
+      root.innerHTML = `<div style="background:var(--surface);border:${boxBorder};border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:520px;width:calc(100vw - 40px)">
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px;color:${titleColor}">${esc(title)}</div>
         <div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">${esc(hint || '')}</div>
         <textarea id="wbxReasonInput" style="width:100%;min-height:80px;padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;resize:vertical;outline:none;box-sizing:border-box" placeholder="Reden…"></textarea>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
           <button id="wbxReasonCancel" class="btn btn-ghost btn-sm">Annuleren</button>
-          <button id="wbxReasonOk" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff">${okLabel}</button>
+          <button id="wbxReasonOk" class="btn btn-primary btn-sm" style="background:${okBgVar};border-color:${okBgVar};color:#fff">${okLabel}</button>
         </div>
       </div>`;
       root.addEventListener('click', (e) => { if (e.target === root) { _closeConfirmModal(); resolve(null); } });
@@ -468,6 +474,19 @@
     _repaintOverzichtList();
   };
   window.__wbxOvOpen = (cid) => {
+    // BROK WB-FIX-2 #1 (2026-08-19): overzicht-rij opende de klanten-pagina in
+    // een NIEUWE TAB via window.open — verwijderd. Alle klik-paden routeren
+    // nu naar de SURFACE B dossier-drawer (in-place). Zelfde patroon als
+    // Acties-kaart + inbox-Dossier + Vandaag-tegel.
+    if (!cid) return;
+    if (typeof window.__wbxOpenCase === 'function') return window.__wbxOpenCase(String(cid));
+    return _wbxOvOpen_legacyDeeplink(cid);
+  };
+  // Legacy fallback — alleen aangeroepen als __wbxOpenCase (SURFACE B) niet
+  // beschikbaar is (bv. race bij script-load). Bewust nog bereikbaar zodat
+  // catastrofale fouten in de drawer niet betekenen dat gebruikers gestrand
+  // zijn zonder klant-context.
+  function _wbxOvOpen_legacyDeeplink(cid) {
     if (!cid) return;
     _ui.ovSelectedId = String(cid);
     // Deep-link naar klanten.html-wanbetalers-tab (bestaande mature tijdlijn).
@@ -2409,7 +2428,7 @@
     searchQ:       '',
     _searchTimer:  null,
     statusFilter:  'all',              // SURFACE A: default = ALLE (v1-parity)
-    sortMode:      'unread_first',     // SURFACE A: 'unread_first' | 'latest'
+    sortMode:      'latest',           // BROK WB-FIX-2 #7: default = laatste bericht (meest recent boven)
     autoOpenedFirst: false,            // SURFACE A: auto-open first conv na eerste fetch
     kebabOpen:     false,              // SURFACE A: ⋮ kebab-menu open/dicht
     composeMenuOpen: false,            // SURFACE A: compose-⋮ sub-menu open/dicht
@@ -2568,7 +2587,10 @@
     _live.inbox.ctx.loading[convId] = false;
     if (mySeq != null && mySeq !== _ui.inbox._selectSeq) return;
     if (j && !j.error) _live.inbox.ctx.byConv[convId] = j;
-    try { window.DFO?.render?.(); } catch (_) {}
+    // BROK WB-FIX-2 #4: surgical repaint alleen van het rechter klantpaneel
+    // + de compose-status. Full DFO.render zou de thread-container opnieuw
+    // renderen → scrollTop reset naar 0 (dat brak scroll-to-bottom bij openen).
+    if (convId === _ui.inbox.selectedConv) _repaintInboxRightPane();
   }
   async function _fetchInboxTemplates(convId, mySeq) {
     if (!convId) return;
@@ -2578,7 +2600,16 @@
     _live.inbox.templates.loading[convId] = false;
     if (mySeq != null && mySeq !== _ui.inbox._selectSeq) return;
     if (j && !j.error) _live.inbox.templates.byConv[convId] = asArr(j?.items);
-    try { window.DFO?.render?.(); } catch (_) {}
+    // BROK WB-FIX-2 #4: templates zijn silent cache-fill. UI leest ze on-demand
+    // (template-picker modal + compose-fallback bij 24h-expired). Geen render
+    // triggeren — voorkomt thread-scroll-reset.
+  }
+  // BROK WB-FIX-2 #4: surgical repaint van het rechter klantgegevens-paneel.
+  // Andere shell-render zou de thread-container vervangen → scrollTop=0.
+  function _repaintInboxRightPane() {
+    const el = document.getElementById('wbxInboxRightPane');
+    if (!el) return;
+    el.innerHTML = _inboxKlantgegevensHtml(_ui.inbox.selectedConv);
   }
 
   window.__wbxInboxSelect = (convId) => {
@@ -2597,6 +2628,12 @@
     _fetchInboxThread(convId, mySeq);
     _fetchInboxCtx(convId, mySeq);
     _fetchInboxTemplates(convId, mySeq);
+    // BROK WB-FIX-2 #4: robust scroll-to-bottom bij openen. RAF-loop scant
+    // tot #wbxInboxThreadScroll bestaat EN scrollHeight > clientHeight, dan
+    // zet scrollTop=scrollHeight. Nodig omdat DFO.render (die hierna via
+    // catch-all volgt) de container mogelijk vervangt tussen surgical repaints
+    // in — zonder deze loop bleef de user bovenaan hangen bij openen.
+    _wbxScrollThreadToBottomSoon(convId, 0);
     // Mark-read (silent, fire-and-forget). WA via inbox-mark-read;
     // email via email-actions?action=mark-read per email-id (BROK 9 v=14:
     // /api/inbox-mark-read raakt alleen WA-unread → email_unread_count bleef
@@ -2653,6 +2690,29 @@
          scroll mee naar onder (chat-behaviour).
        - Anders: behoud scrollTop (voorkomt dat realtime/poll de user naar
          een oude positie werpt terwijl 'ie omhoog is gescrold). */
+  /* BROK WB-FIX-2 #4: scroll-to-bottom loop met kleine polling (max ~600ms /
+     30 frames). Retries tot de thread-container in DOM staat EN content genoeg
+     is om te scrollen. Robuust tegen races met DFO.render die de container
+     opnieuw kan renderen na een surgical repaint. Loop wordt beëindigd zodra
+     de conv-selectie verandert (user klikt naar andere conv) of we scrollen.  */
+  function _wbxScrollThreadToBottomSoon(convId, attempts) {
+    attempts = attempts || 0;
+    if (attempts > 30) return; // ~600ms max
+    if (String(_ui.inbox.selectedConv) !== String(convId)) return; // user is verder geklikt
+    const fire = () => {
+      const el = document.getElementById('wbxInboxThreadScroll');
+      if (!el) return _wbxScrollThreadToBottomSoon(convId, attempts + 1);
+      if (el.scrollHeight > el.clientHeight + 4) {
+        el.scrollTop = el.scrollHeight;
+        // Update tracker zodat _repaintInboxThread's "was-at-bottom" check klopt.
+        _ui.inbox.threadItemCountByConv[String(convId)] = asArr(_live.inbox.thread.byConv[String(convId)]?.items).length;
+      } else {
+        setTimeout(() => _wbxScrollThreadToBottomSoon(convId, attempts + 1), 20);
+      }
+    };
+    requestAnimationFrame(fire);
+  }
+
   function _repaintInboxThread(convId) {
     const el = document.getElementById('wbxInboxThreadScroll');
     if (!el) return;
@@ -2863,23 +2923,39 @@
 
   window.__wbxInboxMarkRead = async (convId) => {
     if (!convId) return;
+    // BROK WB-FIX-2 #3: v=25 gebruikte /api/email-actions {action:'mark-read'}
+    // per-email — dat is een AUDIT-QUEUE tabel-insert, geen IMAP \Seen-toggle.
+    // Server-side email_unread_count bleef dus 5 → badge kwam terug bij poll +
+    // ook na refresh. Fix: v1's endpoint /api/inbox-email-mark-read gebruikt,
+    // dat gaat DIRECT naar IMAP + invalidateert email-unread-cache zodat de
+    // volgende conversations-list fetch email_unread_count=0 teruggeeft.
+    // Customer_id ophalen uit de conv-row (nodig voor het email-endpoint).
+    const row = (_live.inbox.convs.items || []).find((x) => String(x.id) === String(convId));
+    const custId = row?.customer_id || null;
+
     // 1) Optimistic: badge/stripe DIRECT weg.
     _wbxOptimisticSetUnread(convId, 0);
-    // 2) Zorg dat bag geladen is voor de email-loop.
-    const bag = await _wbxLoadInboxThreadIfNeeded(convId);
-    // 3) Fire WA + email mark-read parallel.
+
+    // 2) WA-side (silent — geen await, kan parallel).
     apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
-    if (bag?.items) {
-      const inboundEmails = bag.items.filter((m) => m.channel === 'email' && (m.direction === 'inbound' || m.direction === 'in'));
-      for (const m of inboundEmails) {
-        const emailId = String(m.id || '').replace(/^email:/, '').replace(/^reply:/, '');
-        if (emailId) apiPost('/api/email-actions', { email_id: emailId, action: 'mark-read' }).catch(() => {});
+
+    // 3) E-mail-side (v1-parity endpoint). Await zodat we een echte
+    //    error kunnen tonen bij falen (i.p.v. stille toast-lie).
+    let emailOk = true;
+    if (custId) {
+      const r = await apiPost('/api/inbox-email-mark-read', { customer_id: custId, module: 'finance' });
+      if (!r.ok) {
+        emailOk = false;
+        console.warn('[wbx mark-read] email side failed:', r.error);
       }
     }
-    _toast('Gemarkeerd als gelezen.', 'success');
-    // 4) Reconcile (silent). Faalt de server-side markering, dan komt de
-    //    volgende poll de badge terug — geen force nu.
-    setTimeout(() => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); }, 1200);
+
+    if (emailOk) _toast('Gemarkeerd als gelezen.', 'success');
+    else _toast('WA gelezen, e-mail-flag mislukt.', 'warn');
+
+    // 4) Reconcile (silent) — server-side status ophalen zodat evt. failure
+    //    van de WA-mark de badge terug laat komen.
+    setTimeout(() => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); }, 1500);
   };
 
   window.__wbxInboxMarkUnread = async (convId) => {
@@ -3392,7 +3468,7 @@
           <div id="wbxInboxThreadScroll" style="flex:1;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
           ${_inboxComposeHtml(convId)}
         </div>
-        <div style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+        <div id="wbxInboxRightPane" style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
           ${_inboxKlantgegevensHtml(convId)}
         </div>
       </div>
@@ -3426,19 +3502,25 @@
 
     const kebab = _ui.inbox.kebabOpen ? _inboxKebabMenuHtml(convId, { isArchived, isDone, totalUnread, custId }) : '';
 
-    // Klik-buiten-om-te-sluiten: onclick=stopPropagation op knop; onblur op kebab-container.
-    return `<div style="padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative">
-      <div style="min-width:0;flex:1;overflow:hidden">
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <b style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</b>
+    // BROK WB-FIX-2 (minor): responsive thread-kop. Twee rows in flex-column
+    // zodat op smalle breedte (~1068px) de naam niet naar 'D.' krimpt en de
+    // brief-tag niet afbreekt. Rij 1: naam + brief-tag + 24u-badge (mag
+    // wrappen). Rij 2: actie-knoppen (rechts uitgelijnd). Klik-buiten sluit
+    // via document.addEventListener in __wbxInboxKebab.
+    return `<div style="padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;gap:6px;position:relative">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0">
+        <b style="font-size:13px;min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${esc(name)}</b>
+        <span style="display:flex;gap:5px;align-items:center;flex-shrink:0">
           ${briefBadge}
-        </div>
+          ${window24}
+        </span>
       </div>
-      ${window24}
-      ${!isDone ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;color:var(--emerald)" onclick="__wbxInboxSetStatus('afgehandeld')" title="Markeer als afgehandeld">✓</button>` : ''}
-      ${custId ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;color:var(--brand)" onclick="__wbxOpenActieMenu('${esc(custId)}')" title="Nieuwe actie">+</button>` : ''}
-      ${custId ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxOpenCase('${esc(custId)}')" title="Dossier openen">👤</button>` : ''}
-      <button class="btn btn-ghost btn-sm" style="font-size:13px;padding:3px 8px;font-weight:700" onclick="event.stopPropagation();__wbxInboxKebab()" title="Meer">⋮</button>
+      <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end;flex-wrap:wrap">
+        ${!isDone ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;color:var(--emerald)" onclick="__wbxInboxSetStatus('afgehandeld')" title="Markeer als afgehandeld">✓ Afhandelen</button>` : ''}
+        ${custId ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;color:var(--brand)" onclick="__wbxOpenActieMenu('${esc(custId)}')" title="Nieuwe actie">+ Actie</button>` : ''}
+        ${custId ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxOpenCase('${esc(custId)}')" title="Dossier openen">👤 Dossier</button>` : ''}
+        <button class="btn btn-ghost btn-sm" style="font-size:13px;padding:3px 8px;font-weight:700" onclick="event.stopPropagation();__wbxInboxKebab()" title="Meer">⋮</button>
+      </div>
       ${kebab}
     </div>`;
   }
@@ -3633,9 +3715,18 @@
      dunning-briefs-list voor WIK; wanbetalers-timeline voor tijdlijn). */
   function _caseSheetHtml() {
     const cid = _ui.caseSheet.cid;
-    const pipe = _live.caseFaithful.pipeByCust[cid]?.data || null;
+    const pipeBag = _live.caseFaithful.pipeByCust[cid] || null;
+    const pipe = pipeBag?.data || null;
+    const pipeLoading = !!(pipeBag && pipeBag.loading);
     const row  = _findOvRow(cid);
-    const name = pipe?.customer?.name || row?.customer_name || row?.name || 'Onbekend';
+    // BROK WB-FIX-2 #2: toon "Laden…" tijdens pipe-fetch i.p.v. "Onbekend"
+    // (dat suggereerde ten onrechte dat de klant niet bestond). Alleen als
+    // pipe klaar is EN geen naam heeft, val terug op overzicht-row of
+    // "Onbekend".
+    const name = pipe?.customer?.name
+              || row?.customer_name
+              || row?.name
+              || (pipeLoading ? 'Laden…' : 'Onbekend');
     const stageSlug = pipe?.pipeline?.stage_slug || pipe?.stage_slug || row?.stage_slug || row?.stage || null;
     const openInvs  = asArr(pipe?.open_invoices);
     const focus     = openInvs[0] || null;
@@ -3944,7 +4035,7 @@
       ${b('promise',   '🤝', 'Betaalafspraak',  'ok',    'Betaalbelofte loggen (bedrag + datum)',  isTerminal)}
       ${b('reminder',  '📩', 'Herinnering',     'text',  'Log handmatige herinnering',              isTerminal)}
       ${b('askjoost',  '🤖', 'Vraag Joost',     'brand', 'Vraag Joost om een suggestie',            isTerminal)}
-      ${b('close',     '✅', 'Sluit dossier',   'ok',    'Klant afhandelen (opgelost)',              false)}
+      ${b('close',     '✅', 'Sluit dossier',   'danger','Klant afhandelen (opgelost) — irreversibel', false)}
       ${isDispute
         ? b('resolvedispute', '⚖', 'Geschil opgelost', 'ok', 'Klant heeft ongelijk / geschil is opgelost', false)
         : b('dispute',        '⚖', 'Geschil',           'warn', 'Geschil markeren — flow parkeren', isTerminal)}
@@ -4039,29 +4130,46 @@
   }
 
   // Vraag Joost — genereert een nieuwe suggestie voor het conversation-id
-  // van de klant. Fire-and-forget POST; na 2s refetch joost-suggestions-recent.
+  // van de klant. BROK WB-FIX-2 #5: awaits nu op de suggest-call (blocking
+  // tot Joost antwoord terug is; typisch 1-3s) i.p.v. fire-and-forget met
+  // vaste 1.8s poll. Zorgt dat de suggestie DIRECT in de drawer verschijnt
+  // ipv "denkt na"-toast zonder resultaat. Toont "Joost denkt na…"-placeholder
+  // in de Gesprek-card tijdens de wait via joostByCust.loading=true.
   async function _caseActAskJoost(cid) {
     const cbag = _live.caseFaithful.convByCust[cid];
     if (!cbag?.convId) { _toast('Geen WA-gesprek met deze klant.', 'warn'); return; }
     if (_ui.caseActBusy['askjoost:' + cid]) return;
     _ui.caseActBusy['askjoost:' + cid] = true;
+    // Zet joostByCust op loading zodat de card "Joost denkt na…" toont.
+    _live.caseFaithful.joostByCust[cid] = { loading: true, items: [], error: null };
     _repaintCaseSheet();
-    const r = await apiPost('/api/joost-suggest', { conversation_id: cbag.convId });
-    _ui.caseActBusy['askjoost:' + cid] = false;
-    if (!r.ok) { _toast('Joost antwoord mislukt: ' + r.error, 'error'); _repaintCaseSheet(); return; }
-    _toast('Joost denkt na — antwoord verschijnt zo.', 'success');
-    // Refetch na korte delay (Joost is best-effort — meestal <2s).
-    setTimeout(() => {
-      delete _live.caseFaithful.joostByCust[cid];
-      const jbag = _live.caseFaithful.joostByCust[cid] = { loading: true, items: [], error: null };
-      tryFetch('case:joost:refresh:' + cid, `/api/joost-suggestions-recent?conversation_id=${encodeURIComponent(cbag.convId)}&max_age_minutes=60`, 6000)
-        .then((jj) => {
-          jbag.loading = false;
-          if (jj && !jj.error) jbag.items = asArr(jj.items);
-          _repaintCaseSheet();
-        });
-    }, 1800);
-    _repaintCaseSheet();
+    try {
+      // Blocking wait op de suggest-endpoint. Response bevat vaak direct
+      // { suggestion: {...} }; anders vragen we recent op na de call.
+      const r = await apiPost('/api/joost-suggest', { conversation_id: cbag.convId });
+      if (!r.ok) {
+        _toast('Joost antwoord mislukt: ' + r.error, 'error');
+        _live.caseFaithful.joostByCust[cid] = { loading: false, items: [], error: r.error };
+        return;
+      }
+      // Meest robuust: refetch joost-suggestions-recent (max_age 60m) — dat
+      // pakt zowel de zojuist-aangemaakte suggestie op als eerdere.
+      const jj = await tryFetch(
+        'case:joost:refresh:' + cid,
+        `/api/joost-suggestions-recent?conversation_id=${encodeURIComponent(cbag.convId)}&max_age_minutes=60`,
+        6000
+      );
+      const items = (jj && !jj.error) ? asArr(jj.items) : [];
+      _live.caseFaithful.joostByCust[cid] = { loading: false, items, error: null };
+      if (items.length) _toast('Joost heeft geantwoord — zie Gesprek-card.', 'success');
+      else _toast('Joost gaf geen suggestie terug.', 'warn');
+    } catch (e) {
+      _live.caseFaithful.joostByCust[cid] = { loading: false, items: [], error: e?.message || 'onbekend' };
+      _toast('Joost fout: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _ui.caseActBusy['askjoost:' + cid] = false;
+      _repaintCaseSheet();
+    }
   }
 
   // ─── SURFACE B window-handlers (WIK / tijdlijn / call-sheet-open) ───
@@ -4240,7 +4348,8 @@
 
   async function _caseActClose(cid) {
     if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
-    const reason = await _askReason('Dossier sluiten', 'Waarom sluit je dit dossier af? (bv. "Volledig betaald op 12/8", "Kwijtschelding akkoord").', { okLabel: 'Sluit' });
+    // BROK WB-FIX-2 #6: danger-styling (rood) op sluit-flow — analoog Naar incasso.
+    const reason = await _askReason('Dossier sluiten', '⚠ Dossier definitief afsluiten. Waarom sluit je af? (bv. "Volledig betaald op 12/8", "Kwijtschelding akkoord").', { okLabel: 'Sluit definitief', tone: 'danger' });
     if (!reason || reason.length < 5) { if (reason) _toast('Reden min 5 tekens.', 'warn'); return; }
     if (_ui.caseActBusy['close:' + cid]) return;
     _ui.caseActBusy['close:' + cid] = true;
@@ -5373,7 +5482,9 @@
         ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Niets op de rol voor vandaag.</div>`
         : ''}
       ${apDue.slice(0, 5).map((r) => {
-        const cid = r.customer_id || r.id;
+        // BROK WB-FIX-2 #2: STRIKT customer_id — géén fallback naar r.id (dat is
+        // een appointment-id, geen klant-id). Alleen klikbaar bij valide UUID.
+        const cid = r.customer_id || null;
         const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const name = r.customer_name || r.name || 'Onbekend';
         const info = r.title || r.due_at || '';
@@ -5386,10 +5497,14 @@
         </div>`;
       }).join('')}
       ${directPending.map((a) => {
+        // BROK WB-FIX-2 #2: directPending nu KLIKBAAR — opent SURFACE B drawer
+        // op a.customer_id (pending_actions.customer_id = customer-uuid).
+        const cid = a.customer_id || null;
+        const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const name = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || 'Onbekend';
         const type = a.action_type || '—';
         const isTl = String(type).startsWith('TL_');
-        return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px">
+        return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
           <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
             <span style="font-weight:500">✅ ${esc(name)}</span>
             ${isTl ? '<span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600">TL</span>' : ''}
@@ -5408,11 +5523,14 @@
       ${!rows.length
         ? `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(emptyTxt)}</div>`
         : rows.slice(0, 6).map((r) => {
-            const cid = r.customer_id || r.id;
+            // BROK WB-FIX-2 #2: STRIKT customer_id (geen fallback op r.id;
+            // pipeline-actions objecten hebben géén 'id'-veld, alleen
+            // appointment_id/conversation_id die géén klant-uuid zijn).
+            const cid = r.customer_id || null;
             const name = r.customer_name || r.name || 'Onbekend';
-            const days = r.days_since != null ? r.days_since : (r.days_stale != null ? r.days_stale : null);
+            const days = r.days_since != null ? r.days_since : (r.days_stale != null ? r.days_stale : (r.days_waiting != null ? r.days_waiting : (r.days_since_activity != null ? r.days_since_activity : null)));
             const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            return `<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}')"` : ''}>
+            return `<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center;cursor:${cid ? 'pointer' : 'default'}" ${cid ? `onclick="__wbxOpenCase('${cidClick}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
               <span>${iconEmoji} ${esc(name)}</span>
               ${days != null ? `<span class="mono" style="font-size:10.5px;color:var(--text-3)">${days}d</span>` : ''}
             </div>`;
@@ -5451,5 +5569,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=15 BROK 9.1: (1) case-sheet callback err surgical DOM-clear via _updateCaseCallErrRow bij __wbxCaseCallField(callback_at|note); (2) motor error-tegels krijgen "↻" retry-knop naast ⚠ die __wbxRetryMotor triggert. NB: dead-code cleanup (gesprekkenView/_gsp*Html/etc) uit deze brok gehaald — te risky per-Edit, wordt aparte cleanup-brok.');
+  console.debug('[wanbetalers-v2] v=26 BROK WB-FIX-2: (#1) __wbxOvOpen -> __wbxOpenCase (drawer i.p.v. deeplink); (#2) vandaagView strikt customer_id + directPending klikbaar + "Laden…" tijdens pipe-load; (#3) mark-read gebruikt /api/inbox-email-mark-read (IMAP-batch, v1-parity); (#4) thread scroll-to-bottom RAF-loop + surgical repaint van klantpaneel + templates silent-cache (voorkomt DFO.render-clobber); (#5) askJoost awaits + toont result in Gesprek-card met loading; (#6) Sluit dossier danger-styled (rood); (#7) default sort=latest; console-banner + responsive thread-kop.');
 })();
