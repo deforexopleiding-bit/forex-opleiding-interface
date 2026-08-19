@@ -1932,11 +1932,26 @@
     const dis = busy ? 'disabled' : '';
     const disStyle = busy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer';
 
-    // Get context uit overzicht: openstaand + dagen te laat.
+    // BROK WB-FIDELITY-1 #4: rijkere kaart-context.
+    //   Meta-regel: € · N fact · X dg · Volgende-badge · Gepauzeerd-badge
+    //   Volgende: uit overzicht.next_action_at (bv. "Volgende: WhatsApp <datum>")
+    //   Gepauzeerd: als klant in _live.pausedList staat (actief gesprek pauzeert flow)
     const ov = asArr(_live.overzicht.items).find((r) => String(r.customer_id || r.id) === String(cid));
     const openEur = ov ? (Number(ov.total_open_cents) || 0) / 100 : (amt != null ? Number(amt) : null);
     const days = ov ? Number(ov.days_overdue) || 0 : null;
-    const ctxLine = (openEur != null || days != null) ? `<div style="font-size:11px;color:var(--text-3);margin-top:2px">${openEur != null ? '<span class="mono">' + eur(openEur) + '</span>' : ''}${(openEur != null && days != null) ? ' · ' : ''}${days != null ? `${days} dagen` : ''}${whenBadge ? ' · ' + whenBadge : ''}</div>` : (whenBadge ? `<div style="margin-top:2px">${whenBadge}</div>` : '');
+    const nFact = ov ? Number(ov.open_invoice_count) || 0 : null;
+    const nextAt   = ov?.next_action_at || null;
+    const nextType = ov?.next_action_type || ov?.next_action_channel || 'actie';
+    const nextBadge = nextAt ? `<span style="font-size:10.5px;color:var(--brand);margin-left:4px" title="Volgende geplande actie">↪ ${esc(nextType)} ${esc(_fmtDateTime(nextAt).slice(5))}</span>` : '';
+    const isPaused = !!(asArr(_live.pausedList?.items).find((r) => String(r.customer_id) === String(cid)));
+    const pausedBadge = isPaused ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--amber-soft);color:var(--amber);font-weight:600;margin-left:4px">⏸ Gepauzeerd</span>' : '';
+    const metaParts = [];
+    if (openEur != null) metaParts.push('<span class="mono">' + eur(openEur) + '</span>');
+    if (nFact != null && nFact > 0) metaParts.push(`${nFact} fact`);
+    if (days != null) metaParts.push(`${days} dg`);
+    const ctxLine = (metaParts.length || whenBadge || nextBadge || pausedBadge)
+      ? `<div style="font-size:11px;color:var(--text-3);margin-top:2px">${metaParts.join(' · ')}${whenBadge ? ' · ' + whenBadge : ''}${nextBadge}${pausedBadge}</div>`
+      : '';
 
     // Type-specifieke knoppen.
     let btns;
@@ -1989,7 +2004,7 @@
         <div style="min-width:0">
           <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
           <div style="font-size:11px;color:var(--text-3);margin-top:2px">
-            ⏸ Sinds ${esc(since || '—')}${reminders > 0 ? ` · ${reminders} reminders${lastRem ? ' (laatste ' + esc(lastRem.slice(5)) + ')' : ''}` : ''}
+            ⏸ Gepauzeerd sinds ${esc(since || 'onbekend')}${reminders > 0 ? ` · ${reminders} reminder${reminders === 1 ? '' : 's'} verstuurd${lastRem ? ' (laatste ' + esc(lastRem.slice(5)) + ')' : ''}` : ''}
           </div>
         </div>
         <div style="font-size:10.5px;color:var(--text-3)">Dossier →</div>
@@ -3199,25 +3214,80 @@
       const active = _ui.inbox.selectedConv === cid;
       const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
       const preview = c.last_message_preview || '';
-      const when = c.last_message_at ? _fmtDateTime(c.last_message_at) : '';
-      // SURFACE A: total_unread = WA + e-mail unread (v1-parity).
+      // BROK WB-FIDELITY-1 goedkoop: relatieve tijd i.p.v. absolute.
+      const when = c.last_activity_at
+        ? _wbxRelativeTime(c.last_activity_at)
+        : (c.last_message_at ? _wbxRelativeTime(c.last_message_at) : '');
       const unread = Number(c.total_unread ?? c.unread_count) || 0;
       const briefBadge = c.brief_sent ? '<span title="Brief verstuurd" style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue);font-weight:600;margin-left:4px">✉</span>' : '';
-      // BROK 1 INBOX-1: unread-indicatie versterken — 3px rose left-stripe +
-      // iets warmere rij-achtergrond zodat ongelezen op afstand herkenbaar zijn.
+      // BROK WB-FIDELITY-1 goedkoop: avatar-initialen cirkel links.
+      const initials = _wbxInitialsFor(name);
       const bg = active
         ? 'var(--brand-soft,#E2F1F5)'
         : (unread > 0 ? 'var(--rose-soft, rgba(244,63,94,.06))' : 'transparent');
       const stripe = unread > 0 && !active ? 'border-left:3px solid var(--rose);padding-left:9px;' : '';
-      return `<div onclick="__wbxInboxSelect('${esc(cid)}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${bg};transition:background .08s;${stripe}">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
-          <div style="font-weight:${unread > 0 ? '700' : '500'};font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(name)}${briefBadge}</div>
-          <div style="font-size:10.5px;color:${unread > 0 ? 'var(--rose)' : 'var(--text-3)'};white-space:nowrap;font-weight:${unread > 0 ? '600' : '400'}">${esc(when)}</div>
+      return `<div onclick="__wbxInboxSelect('${esc(cid)}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${bg};transition:background .08s;${stripe};display:flex;gap:9px;align-items:flex-start">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--brand-soft,#E2F1F5);color:var(--brand);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;letter-spacing:.05em;text-transform:uppercase">${esc(initials)}</div>
+        <div style="min-width:0;flex:1">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+            <div style="font-weight:${unread > 0 ? '700' : '500'};font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(name)}${briefBadge}</div>
+            <div style="font-size:10.5px;color:${unread > 0 ? 'var(--rose)' : 'var(--text-3)'};white-space:nowrap;font-weight:${unread > 0 ? '600' : '400'}">${esc(when)}</div>
+          </div>
+          <div style="font-size:11.5px;color:${unread > 0 ? 'var(--text-1)' : 'var(--text-3)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;font-weight:${unread > 0 ? '500' : '400'}">${esc(preview)}</div>
+          ${unread > 0 ? `<div style="margin-top:3px"><span style="display:inline-block;background:var(--rose);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${unread}</span></div>` : ''}
         </div>
-        <div style="font-size:11.5px;color:${unread > 0 ? 'var(--text-1)' : 'var(--text-3)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;font-weight:${unread > 0 ? '500' : '400'}">${esc(preview)}</div>
-        ${unread > 0 ? `<div style="margin-top:3px"><span style="display:inline-block;background:var(--rose);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${unread}</span></div>` : ''}
       </div>`;
     }).join('');
+  }
+
+  /* BROK WB-FIDELITY-1 goedkoop: helpers avatar-initialen + relatieve tijd. */
+  function _wbxInitialsFor(name) {
+    if (!name || typeof name !== 'string') return '?';
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2);
+    return parts[0][0] + parts[parts.length - 1][0];
+  }
+  function _wbxRelativeTime(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return '';
+    const now = Date.now();
+    const diffSec = Math.max(0, Math.floor((now - t) / 1000));
+    if (diffSec < 45) return 'net';
+    if (diffSec < 60 * 45) return Math.round(diffSec / 60) + 'm';
+    if (diffSec < 60 * 60 * 24) return Math.round(diffSec / 3600) + 'u';
+    if (diffSec < 60 * 60 * 24 * 7) return Math.round(diffSec / 86400) + 'd';
+    // > 7 dagen: datum kort.
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+  }
+
+  /* BROK WB-FIDELITY-1 goedkoop: no-reply cyclus-banner. Lazy-fetch via
+     inbox-noreply-context; toon in thread wanneer paused + next_reminder
+     bekend is. Silent-fail (no banner) als endpoint faalt of geen data. */
+  _live.inbox.noreply = _live.inbox.noreply || { byConv: {}, loading: {} };
+  async function _fetchInboxNoreply(convId) {
+    if (!convId) return;
+    const bag = _live.inbox.noreply;
+    if (bag.loading[convId] || bag.byConv[convId] != null) return;
+    bag.loading[convId] = true;
+    const j = await tryFetch('inbox:noreply:' + convId, `/api/inbox-noreply-context?conversation_id=${encodeURIComponent(convId)}`, 6000);
+    bag.loading[convId] = false;
+    bag.byConv[convId] = (j && !j.error) ? j : null;
+    // Silent — surgical repaint van thread-scroll behoudt scroll (via _repaintInboxThread).
+    if (convId === _ui.inbox.selectedConv) _repaintInboxThread(convId);
+  }
+  function _inboxNoreplyBannerHtml(convId) {
+    const nr = _live.inbox.noreply?.byConv?.[convId];
+    if (!nr) return '';
+    if (!nr.paused && (!nr.next_reminder_at || !nr.next_reminder_kind)) return '';
+    const kind = nr.next_reminder_kind ? String(nr.next_reminder_kind).toUpperCase() : '—';
+    const when = nr.next_reminder_at ? _fmtDateTime(nr.next_reminder_at) : '';
+    return `<div style="padding:6px 12px;background:var(--amber-soft,#FFF4E5);border:1px solid var(--amber);border-radius:6px;font-size:11.5px;color:var(--amber);margin-bottom:10px">
+      ⏸ No-reply cyclus: <b>${esc(kind)}</b> volgt ${esc(when || 'binnenkort')}${nr.reminder_count ? ' · ' + esc(String(nr.reminder_count)) + ' reminders verstuurd' : ''}
+    </div>`;
   }
 
   function _inboxThreadHtml(convId) {
@@ -3229,7 +3299,12 @@
     if (error && (!bag || !bag.items.length)) return `<div style="padding:14px">${_errBlk(error, 'thread')}</div>`;
     const items = asArr(bag?.items);
     if (!items.length) return `<div style="padding:60px 20px;text-align:center;color:var(--text-3);font-size:13px">Nog geen berichten.</div>`;
-    return items.map((m) => {
+    // BROK WB-FIDELITY-1 goedkoop: lazy-fetch no-reply-context bij eerste render.
+    if (_live.inbox.noreply?.byConv?.[convId] == null && !_live.inbox.noreply?.loading?.[convId]) {
+      queueMicrotask(() => _fetchInboxNoreply(convId));
+    }
+    const noreplyBanner = _inboxNoreplyBannerHtml(convId);
+    return noreplyBanner + items.map((m) => {
       const isOut = m.direction === 'outbound' || m.direction === 'out';
       const bg = isOut ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface-2)';
       const align = isOut ? 'flex-end' : 'flex-start';
@@ -3363,17 +3438,25 @@
       </div>`;
     }
 
-    const callBtn = phone
-      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxCall('${esc(cust.id)}','${esc(phone)}')" title="Bel via softphone">📞 Bel</button>`
-      : '';
-    const mailBtn = cust.email
-      ? `<a class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;text-decoration:none" href="mailto:${esc(cust.email)}" title="Mail-client openen">✉ Mail</a>`
-      : '';
-    const dossierBtn = `<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 10px" onclick="__wbxOpenCase('${esc(cust.id)}')" title="Open case-sheet">Dossier →</button>`;
-    // BROK 2 ACT-1: "Nieuwe actie ▾" menu — bel / verify / escalatie /
-    // vrije taak / toewijzen. Elke sub-flow via bestaande endpoints met
-    // custom confirm-modal + race-guard.
-    const actieBtn = `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px;color:var(--brand);border-color:var(--brand)" onclick="__wbxOpenActieMenu('${esc(cust.id)}')" title="Nieuwe actie starten">➕ Actie</button>`;
+    // BROK WB-FIDELITY-1 #1: 5-knops v1-actiesbar als DIRECTE knoppen +
+    // klant-info-blok + "oudste X dagen te laat"-banner + section-headers.
+    // Endpoints allemaal bestaand:
+    //   Bekijk in klanten → deeplink /modules/klanten.html?id=X (v1-parity)
+    //   Maak factuur aan  → openInvoiceCreateModal({customer}) via dynamic import
+    //   Claimt betaald    → verify-flow (per-factuur; opent invoice-picker)
+    //   Leg afspraak vast → dunning-pipeline-appointment
+    //   Escaleren         → tasks-create-escalation
+    //   + Actie (bestaand ▾-menu blijft als aanvullend)
+    const oldestOverdue = invs.reduce((m, iv) => Math.max(m, Number(iv.days_overdue) || 0), 0);
+    const custSince = cust.created_at ? _fmtDate(cust.created_at) : null;
+    const btn = (label, icon, onclick, tone) => {
+      const color = tone === 'brand'  ? 'var(--brand)'
+                  : tone === 'ok'     ? 'var(--emerald)'
+                  : tone === 'warn'   ? 'var(--amber)'
+                  : tone === 'danger' ? 'var(--rose)'
+                  : 'var(--text-2)';
+      return `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:5px 9px;color:${color};text-align:left;justify-content:flex-start;width:100%" onclick="${onclick}"><span style="margin-right:6px;display:inline-block;width:14px;text-align:center">${icon}</span>${esc(label)}</button>`;
+    };
 
     const invsHtml = invs.length
       ? invs.slice(0, 8).map((iv) => {
@@ -3396,18 +3479,29 @@
       : '';
 
     return `<div style="display:flex;flex-direction:column;height:100%;overflow-y:auto">
-      <div style="padding:14px 14px 10px;border-bottom:1px solid var(--border);background:var(--surface-2)">
+      <div style="padding:14px 14px 12px;border-bottom:1px solid var(--border);background:var(--surface-2)">
         <div style="font-weight:700;font-size:13.5px;margin-bottom:3px">${esc(cust.name || 'Onbekende klant')}</div>
         ${cust.email ? `<div style="font-size:11.5px;color:var(--text-2);word-break:break-all;margin-bottom:2px">✉ ${esc(cust.email)}</div>` : ''}
         ${phone ? `<div style="font-size:11.5px;color:var(--text-2)">📞 ${esc(phone)}</div>` : ''}
-        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-          ${callBtn}${mailBtn}${dossierBtn}${actieBtn}
+        ${oldestOverdue > 0 ? `<div style="font-size:11px;color:var(--rose);font-weight:600;margin-top:6px">⚠ Oudste ${oldestOverdue} dagen te laat</div>` : ''}
+      </div>
+
+      <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:3px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;padding:2px 2px 6px">Acties</div>
+        ${btn('Bekijk in klanten',   '↗', `__wbxRightGoToKlant('${esc(cust.id)}')`,          'text')}
+        ${btn('Maak factuur aan',    '📄', `__wbxRightNewInvoice('${esc(cust.id)}')`,        'brand')}
+        ${btn('Klant claimt betaald', '✓', `__wbxRightVerifyPaid('${esc(cust.id)}')`,        'ok')}
+        ${btn('Leg afspraak vast',   '📅', `__wbxRightMakeAppointment('${esc(cust.id)}')`,   'text')}
+        ${btn('Escaleren',           '⚠', `__wbxRightEscalate('${esc(cust.id)}')`,          'warn')}
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" style="font-size:11px;padding:5px 10px;flex:1" onclick="__wbxOpenCase('${esc(cust.id)}')">Dossier →</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:5px 10px;color:var(--brand)" onclick="__wbxOpenActieMenu('${esc(cust.id)}')" title="Meer acties via menu">➕ Actie</button>
         </div>
       </div>
 
       <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);font-weight:600">Openstaand</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700">Open facturen</div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:var(--rose)">${eur(totalOpen)}</div>
         </div>
         <div style="font-size:11px;color:var(--text-3);margin-bottom:4px">${invs.length} factuur${invs.length === 1 ? '' : 'en'}</div>
@@ -3416,13 +3510,83 @@
 
       ${subs.length ? `<div style="padding:12px 14px;border-bottom:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);font-weight:600">Abonnementen</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700">Actieve abonnementen</div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-2)">${eur(mrr)}/m</div>
         </div>
         ${subsHtml}
       </div>` : ''}
+
+      <div style="padding:10px 14px;font-size:11px;color:var(--text-3);border-top:1px solid var(--border);margin-top:auto">
+        <div style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:3px">Klant info</div>
+        ${custSince ? `<div>Klant sinds ${esc(custSince)}</div>` : '<div style="opacity:.6">Datum onbekend</div>'}
+      </div>
     </div>`;
   }
+
+  /* BROK WB-FIDELITY-1 #1: rechter-paneel 5-knops action-handlers.
+     Alle via bestaande endpoints; custom confirms + race-guards. */
+  window.__wbxRightGoToKlant = (cid) => {
+    if (!cid) return;
+    // v1-parity: deeplink naar klanten-detail-tab.
+    try { window.open('/modules/klanten.html?id=' + encodeURIComponent(cid) + '#wanbetalers', '_blank', 'noopener'); } catch (_) {}
+  };
+  window.__wbxRightNewInvoice = async (cid) => {
+    if (!cid) return;
+    // Lazy load klant-object (voor customer-selector prefill in de modal).
+    const ctx = _live.inbox.ctx.byConv[_ui.inbox.selectedConv];
+    const cust = ctx?.customer && ctx.customer.id === cid ? ctx.customer : { id: cid };
+    try {
+      const mod = await import('./modals/invoice-create.js?v=4');
+      mod.openInvoiceCreateModal({ customer: cust, onSuccess: () => _toast('Factuur aangemaakt.', 'success') });
+    } catch (e) { _toast('Modal laden mislukt: ' + (e?.message || e), 'error'); }
+  };
+  window.__wbxRightVerifyPaid = (cid) => {
+    // Delegate naar bestaande verify-flow uit BROK 2 ACT-1.
+    if (typeof _actieVerify === 'function') {
+      const ctx = _live.inbox.ctx.byConv[_ui.inbox.selectedConv];
+      _actieVerify(cid, asArr(ctx?.open_invoices));
+    } else if (typeof window.__wbxOpenActieMenu === 'function') {
+      window.__wbxOpenActieMenu(cid);
+    }
+  };
+  window.__wbxRightMakeAppointment = async (cid) => {
+    if (!cid) return;
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Titel</div>
+          <input id="wbxApptTitle" type="text" maxlength="200" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" placeholder="Bv. Bel-terug maandag 10:00" />
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Datum + tijd</div>
+          <input id="wbxApptDue" type="datetime-local" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Notitie (optioneel)</div>
+          <textarea id="wbxApptNote" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+      </div>`;
+    const form = await _askForm('Afspraak vastleggen', bodyHtml, (root) => {
+      const title = String(root.querySelector('#wbxApptTitle')?.value || '').trim();
+      const due   = root.querySelector('#wbxApptDue')?.value || null;
+      const note  = String(root.querySelector('#wbxApptNote')?.value || '').trim();
+      if (!title) { _toast('Titel is vereist.', 'warn'); return null; }
+      if (!due)   { _toast('Datum + tijd is vereist.', 'warn'); return null; }
+      return { title, due_at: new Date(due).toISOString(), note };
+    }, { okLabel: 'Vastleggen' });
+    if (!form) return;
+    const r = await apiPost('/api/dunning-pipeline-appointment', {
+      customer_id: cid, title: form.title, due_at: form.due_at, note: form.note || null,
+    });
+    if (!r.ok) { _toast('Afspraak-aanmaak mislukt: ' + r.error, 'error'); return; }
+    _toast('Afspraak vastgelegd.', 'success');
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+  };
+  window.__wbxRightEscalate = (cid) => {
+    // Delegate naar bestaande escalatie-flow uit BROK 2 ACT-1.
+    if (typeof _actieEscalatie === 'function') _actieEscalatie(cid);
+    else if (typeof window.__wbxOpenActieMenu === 'function') window.__wbxOpenActieMenu(cid);
+  };
 
   // Softphone-call vanuit klantgegevens-paneel — hergebruikt bel-flow uit
   // case-sheet (custom confirm-modal + race-guard zit in __wbxSoftphoneCall).
@@ -3499,8 +3663,12 @@
               || conv?.display_name
               || bag?.conversation?.phone_number
               || 'Onbekende klant';
-    const isArchived   = row.status === 'gearchiveerd' || conv?.status === 'gearchiveerd';
-    const isDone       = row.status === 'afgehandeld'  || conv?.status === 'afgehandeld';
+    // BROK WB-FIDELITY-1 #2: DB-status = 'open|closed|archived' (per CLAUDE.md);
+    // UI-status vertaalt 'closed'->'afgehandeld' en 'archived'->'gearchiveerd'.
+    // Check BEIDE zodat Heropenen (op afgehandeld) en Uit archief (op archived)
+    // in de kebab verschijnen ongeacht welke naam het endpoint teruggeeft.
+    const isArchived   = ['gearchiveerd', 'archived'].includes(row.status) || ['gearchiveerd', 'archived'].includes(conv?.status);
+    const isDone       = ['afgehandeld', 'closed'].includes(row.status)    || ['afgehandeld', 'closed'].includes(conv?.status);
     const canSend24h   = conv?.can_send_text !== false;
     const briefSent    = !!row.brief_sent;
     const custId       = conv?.customer_id || row.customer_id || null;
@@ -3881,29 +4049,67 @@
     </div>`;
   }
 
-  /* Bellen-card — hergebruikt shared KlxSoftphone. Behoudt aparte
-     "Uitkomst noteren"-knop + poging-tracker uit dunning_call_log
-     (zodat MANUAL_FOLLOWUP-auto-open flow blijft werken). */
+  /* BROK WB-FIDELITY-1 #3: Bellen-card met INLINE lijnkeuze + connect-status
+     + bewerkbaar nummer + "Bel nu" (direct KlxSoftphone.call, geen sheet-
+     opening tussenstap). Poging-teller /4 (v1-parity) — v1 gebruikt 4-slag
+     cyclus (dunning-config max_attempts default 4). Uitkomst-noteren blijft
+     apart voor MANUAL_FOLLOWUP-auto-outcome-flow. */
   function _caseBellenCardHtml(cid, phone, name) {
     const calls = asArr(_live.callLog.byCust[cid]);
-    const cadence = _live.callLog.cadenceByCust?.[cid] || { max_attempts: 3 };
+    // v1-parity: default 4 pogingen (v2 had 3 als typo/heritage).
+    const cadence = _live.callLog.cadenceByCust?.[cid] || { max_attempts: 4 };
+    const maxAttempts = cadence.max_attempts || 4;
     const attempts = calls.length;
     const dots = [];
-    for (let i = 0; i < (cadence.max_attempts || 3); i++) {
+    for (let i = 0; i < maxAttempts; i++) {
       const cls = i < attempts ? 'wbx-done' : (i === attempts ? 'wbx-here' : '');
-      dots.push(`<span class="wbx-bul" style="width:8px;height:8px;border-radius:50%;background:${cls === 'wbx-done' ? 'var(--emerald)' : (cls === 'wbx-here' ? 'var(--brand)' : 'var(--border)')};display:inline-block"></span>`);
+      dots.push(`<span style="width:8px;height:8px;border-radius:50%;background:${cls === 'wbx-done' ? 'var(--emerald)' : (cls === 'wbx-here' ? 'var(--brand)' : 'var(--border)')};display:inline-block"></span>`);
     }
     const last = calls[0] || null;
     const lastLine = last ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:6px">Laatste poging: <b>${esc(last.outcome || '—')}</b> · ${esc(_fmtDateTime(last.attempted_at || last.created_at))}</div>` : '';
     const formOpen = !!_ui.callFormOpen[cid];
+
+    // KlxSoftphone status snapshot — configured lines + registration.
+    const sp = (window.KlxSoftphone && typeof window.KlxSoftphone.getStatus === 'function')
+      ? window.KlxSoftphone.getStatus() : { configuredLines: { nl: false, be: false }, state: 'idle' };
+    const beAvail = !!sp.configuredLines?.be;
+    const stateLabel = sp.state === 'connected'  ? '● Verbonden'
+                     : sp.state === 'connecting' ? '● Bellen…'
+                     : sp.state === 'failed'     ? '⚠ Fout'
+                     : '○ Klaar';
+    const stateColor = sp.state === 'connected'  ? 'var(--emerald)'
+                     : sp.state === 'connecting' ? 'var(--brand)'
+                     : sp.state === 'failed'     ? 'var(--rose)'
+                     : 'var(--text-3)';
+
+    // Read stored line-override (KlxSoftphone persist in localStorage).
+    let lineOverride = 'auto';
+    try { lineOverride = localStorage.getItem('klx-softphone-line') || 'auto'; } catch (_) {}
+
     return `<div class="wbx-drawer-card">
-      <div class="wbx-drawer-card-h">Bellen ${phone ? `<span style="font-family:'IBM Plex Mono',monospace;font-weight:500;color:var(--text-3);font-size:11.5px">${esc(phone)}</span>` : ''}</div>
+      <div class="wbx-drawer-card-h">Bellen</div>
       <div class="wbx-drawer-card-b">
         ${!phone ? '<div style="color:var(--text-3);font-size:12.5px">Geen telefoonnummer bij deze klant.</div>' : `
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" style="font-size:12px" onclick="__wbxCaseCallSheetOpen('${esc(cid)}','${esc(phone)}','${esc(name)}')" title="Softphone openen (lijnkeuze NL/BE + connect-status in de sheet)">📞 Bel via softphone</button>
+          <div style="display:grid;grid-template-columns:110px 1fr;gap:6px 10px;align-items:center;font-size:12px">
+            <div style="color:var(--text-3)">Uitbellen via</div>
+            <select id="wbxBellenLine_${esc(cid)}" onchange="__wbxBellenLineChange(this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12px">
+              <option value="auto" ${lineOverride === 'auto' ? 'selected' : ''}>Lijn · automatisch</option>
+              <option value="nl"   ${lineOverride === 'nl'   ? 'selected' : ''}>NL-lijn (+31)</option>
+              ${beAvail ? `<option value="be" ${lineOverride === 'be' ? 'selected' : ''}>BE-lijn (+32)</option>` : ''}
+            </select>
+            <div style="color:var(--text-3)">Status</div>
+            <div><span style="font-size:11.5px;color:${stateColor};font-weight:600">${stateLabel}</span></div>
+            <div style="color:var(--text-3)">Nummer</div>
+            <input id="wbxBellenNum_${esc(cid)}" type="tel" value="${esc(phone)}" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px">
+            <button class="btn btn-primary btn-sm" style="font-size:12px" onclick="__wbxBellenCallNow('${esc(cid)}','${esc(name)}')" title="Direct bellen via softphone">📞 Bel nu</button>
             <button class="btn btn-ghost btn-sm" style="font-size:12px" onclick="__wbxCaseCallOpen('${esc(cid)}')" ${_rbac.canExecute ? '' : 'disabled title="Geen rechten"'}>Uitkomst noteren</button>
-            <div style="display:flex;gap:5px;align-items:center;margin-left:8px" title="Poging ${attempts} van ${cadence.max_attempts || 3}">${dots.join('')}<span style="font-size:11px;color:var(--text-3);margin-left:6px">${attempts}/${cadence.max_attempts || 3}</span></div>
+            <div style="display:flex;gap:5px;align-items:center;margin-left:auto" title="Poging ${attempts} van ${maxAttempts}">
+              <span style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-right:4px">POGING</span>
+              ${dots.join('')}
+              <span style="font-size:11px;color:var(--text-3);margin-left:6px">${attempts}/${maxAttempts}</span>
+            </div>
           </div>
           ${lastLine}
         `}
@@ -3911,6 +4117,33 @@
       </div>
     </div>`;
   }
+
+  // BROK WB-FIDELITY-1 #3: inline line-select + call-now handlers.
+  window.__wbxBellenLineChange = (val) => {
+    try { localStorage.setItem('klx-softphone-line', String(val || 'auto')); } catch (_) {}
+    // KlxSoftphone leest de override bij volgende place-call automatisch.
+  };
+  window.__wbxBellenCallNow = async (cid, name) => {
+    const inp = document.getElementById('wbxBellenNum_' + cid);
+    const phone = inp ? String(inp.value || '').trim() : '';
+    if (!phone) { _toast('Geen telefoonnummer ingevuld.', 'warn'); return; }
+    // Custom confirm vóór bellen (incasso-context — voorkomt per-ongeluk-klik).
+    const ok = await _askConfirm(
+      'Bellen naar ' + (name || 'klant') + '?',
+      '<div><b>Klant:</b> ' + esc(name || 'onbekend') + '</div>'
+      + '<div><b>Nummer:</b> <span style="font-family:\'IBM Plex Mono\',monospace">' + esc(phone) + '</span></div>',
+      { okLabel: 'Bellen' }
+    );
+    if (!ok) return;
+    if (window.KlxSoftphone && typeof window.KlxSoftphone.call === 'function') {
+      const r = await window.KlxSoftphone.call(phone, { displayName: String(name || ''), customerId: cid });
+      if (r && r.ok === false) _toast('Bellen faalde: ' + (r.error || 'onbekend'), 'error');
+      // Herrender case-sheet zodat state-label updatet.
+      setTimeout(() => _repaintCaseSheet(), 400);
+    } else {
+      _toast('Softphone niet beschikbaar.', 'warn');
+    }
+  };
 
   /* Gesprek-card — laatste 8 chat-bubbles uit inbox-messages-list.
      Joost-suggestie (max_age_minutes=60) inline eronder. */
@@ -4077,16 +4310,18 @@
       return `<button class="btn btn-ghost btn-sm" ${isBusy ? 'disabled' : ''} style="font-size:11.5px;padding:5px 10px;color:${color};${isBusy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer'}" onclick="__wbxCaseAction('${esc(fn)}','${esc(cid)}')" title="${esc(title || label)}">${icon} ${esc(label)}</button>`;
     };
     return `<div style="padding:10px 18px;border-top:1px solid var(--border);background:var(--surface);display:flex;gap:6px;flex-wrap:wrap;align-items:center;box-shadow:0 -2px 8px rgba(0,0,0,.04)">
-      ${b('promise',   '🤝', 'Betaalafspraak',  'ok',    'Betaalbelofte loggen (bedrag + datum)',  isTerminal)}
-      ${b('reminder',  '📩', 'Herinnering',     'text',  'Log handmatige herinnering',              isTerminal)}
-      ${b('askjoost',  '🤖', 'Vraag Joost',     'brand', 'Vraag Joost om een suggestie',            isTerminal)}
-      ${b('close',     '🛑', 'Sluit dossier',   'danger','Klant afhandelen (opgelost) — irreversibel', false)}
+      ${b('viewchat',  '💬', 'Bekijk gesprek', 'brand', 'Naar WA-inbox met dit gesprek geopend',   false)}
+      ${b('newtask',   '➕', 'Nieuwe taak',    'text',  'Vrije taak aanmaken (opent actie-menu)',   false)}
+      ${b('promise',   '🤝', 'Betaalafspraak', 'ok',    'Betaalbelofte loggen (bedrag + datum)',   isTerminal)}
+      ${b('reminder',  '📩', 'Herinnering',    'text',  'Log handmatige herinnering',              isTerminal)}
+      ${b('askjoost',  '🤖', 'Vraag Joost',    'brand', 'Vraag Joost om een suggestie',            isTerminal)}
+      ${b('close',     '🛑', 'Sluit dossier',  'danger','Klant afhandelen (opgelost) — irreversibel', false)}
       ${isDispute
         ? b('resolvedispute', '⚖', 'Geschil opgelost', 'ok', 'Klant heeft ongelijk / geschil is opgelost', false)
         : b('dispute',        '⚖', 'Geschil',           'warn', 'Geschil markeren — flow parkeren', isTerminal)}
-      ${b('bewind',    '🛡', 'Bewind',          'warn',  'Klant onder schuldbewind — flow parkeren', isTerminal)}
-      ${b('pause',     '⏸',  'Pauzeer flow',   'warn',  'Aanmaan-flow tijdelijk stoppen',           isTerminal)}
-      ${b('incasso',   '⚖',  'Naar incasso',   'danger','Incasso-dossier aanmaken',                  isTerminal)}
+      ${b('bewind',    '🛡', 'Bewind',         'warn',  'Klant onder schuldbewind — flow parkeren', isTerminal)}
+      ${b('pause',     '⏸',  'Pauzeer flow',  'warn',  'Aanmaan-flow tijdelijk stoppen',           isTerminal)}
+      ${b('incasso',   '⚖',  'Naar incasso',  'danger','Incasso-dossier aanmaken',                  isTerminal)}
     </div>`;
   }
 
@@ -4101,7 +4336,30 @@
     else if (fn === 'incasso')         _caseActIncasso(cid);
     else if (fn === 'pause')           _caseActPause(cid);
     else if (fn === 'askjoost')        _caseActAskJoost(cid);
+    // BROK WB-FIDELITY-1 #5:
+    else if (fn === 'viewchat')        _caseActViewChat(cid);
+    else if (fn === 'newtask')         _caseActNewTask(cid);
   };
+
+  // BROK WB-FIDELITY-1 #5: "Bekijk gesprek" — navigeert naar Gesprekken-tab
+  // en selecteert de conv van deze klant (uit case-faithful convByCust cache).
+  function _caseActViewChat(cid) {
+    const cbag = _live.caseFaithful.convByCust[cid];
+    const convId = cbag?.convId;
+    if (!convId) { _toast('Geen gekoppeld WA-gesprek.', 'warn'); return; }
+    // Sluit drawer, switch tab, select conv.
+    window.__wbxCloseCase();
+    try { if (window.DFO && typeof window.DFO.goTab === 'function') window.DFO.goTab('Gesprekken'); } catch (_) {}
+    // Kleine delay zodat inboxView render kan afronden vóór select.
+    setTimeout(() => { try { window.__wbxInboxSelect(String(convId)); } catch (_) {} }, 60);
+  }
+
+  // BROK WB-FIDELITY-1 #5: "+ Nieuwe taak" — opent bestaande actie-menu
+  // (bel/verify/escalatie/vrije taak/toewijzen) op deze klant.
+  function _caseActNewTask(cid) {
+    if (typeof window.__wbxOpenActieMenu === 'function') window.__wbxOpenActieMenu(cid);
+    else _toast('Actie-menu niet beschikbaar.', 'warn');
+  }
 
   // SURFACE B nieuwe handlers.
   async function _caseActResolveDispute(cid) {
@@ -5635,5 +5893,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=27 BROK WB-FIX-3: (#1) overzicht HELE rij klikbaar -> drawer + stopPropagation op knoppen; (#2) drawer accepteert customer_name via opts, Vandaag-klik geeft naam mee, factuur-card "geen open factuur"-empty-state; (#3) Joost result in Gesprek-card (loading/reply/no-suggestion/error) i.p.v. toast; nits: sluit-icoon 🛑 (rood), thread-kop losgekoppeld van lijstfilter.');
+  console.debug('[wanbetalers-v2] v=28 BROK WB-FIDELITY-1: (#1) rechter-paneel 5-knops v1-actiesbar (Bekijk klanten/Maak factuur/Verify betaald/Afspraak/Escaleren) + klant-info + oudste-days-banner + section-headers; (#2) kebab Heropenen/Uit archief detecteert DB+UI status; (#3) Bellen-card INLINE lijnkeuze + connect-status + Bel nu + poging /4 (v1-parity); (#4) Acties-kaart meta uitgebreid met N fact + Volgende-actie-badge + Gepauzeerd-badge; (#5) drawer action-bar +Bekijk gesprek +Nieuwe taak. Goedkoop: avatar-initialen + relatieve tijd in lijst; no-reply cyclus-banner in thread (inbox-noreply-context); gepauzeerd-rij wording verfijnd.');
 })();
