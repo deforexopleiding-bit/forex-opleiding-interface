@@ -3356,6 +3356,7 @@
         ${optBtn('⚠',  'Escaleren',            'Boos / juridisch / naar incasso-hand',   'esc')}
         ${optBtn('📝', 'Vrije taak',          'Losse follow-up-taak',                   'vrij')}
         ${optBtn('👥', 'Toewijzen aan collega','Nieuwe taken-item met assignee',        'assign')}
+        ${optBtn('✉',  'Nieuwe WIK-brief',    '14-dagenbrief (NL) / eerste herinnering (BE)', 'brief')}
       </div>
       <div style="display:flex;justify-content:flex-end;margin-top:12px">
         <button id="wbxActieMenuCancel" class="btn btn-ghost btn-sm">Sluiten</button>
@@ -3373,6 +3374,7 @@
         if (fn === 'esc')    _actieEscalatie(cid);
         if (fn === 'vrij')   _actieVrijeTaak(cid);
         if (fn === 'assign') _actieToewijzen(cid);
+        if (fn === 'brief')  _actieWikBrief(cid);
       });
     });
   }
@@ -3580,6 +3582,78 @@
     if (!r.ok) { _toast('Toewijzen mislukt: ' + r.error, 'error'); return; }
     _toast('Taak toegewezen.', 'success');
     if (window.DFO?.render) window.DFO.render();
+  }
+
+  /* ── BROK 3 BRIEF-1: Nieuwe WIK-brief aanmaken vanuit klantgegevens ──
+     POST /api/incasso-pre-brief levert een PDF-stream (attachment) + headers
+     X-Brief-Id / X-Brief-Path. Bij 422 ADDRESS_INCOMPLETE toont welke
+     TL-velden nog ontbreken zodat medewerker weet wat aan te vullen.
+     RBAC: finance.incasso.manage (server-side hard, client-side toast). */
+  async function _actieWikBrief(cid) {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:12.5px;color:var(--text-2);padding:8px 11px;background:var(--amber-soft, rgba(245,158,11,.08));border:1px solid var(--amber);border-radius:6px;line-height:1.5">
+          ⚠ Genereert een <b>wettelijke 14-dagenbrief (NL)</b> of <b>eerste kosteloze herinnering (BE)</b>.
+          De brief wordt bewaard als bewijs; download start direct.
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Land</div>
+          <select id="wbxBriefLand" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">
+            <option value="NL" selected>Nederland — WIK-14-dagenbrief</option>
+            <option value="BE">België — eerste kosteloze herinnering</option>
+          </select>
+        </div>
+      </div>`;
+    const form = await _askForm('WIK-brief aanmaken?', bodyHtml, (root) => {
+      const country = root.querySelector('#wbxBriefLand')?.value || 'NL';
+      if (country !== 'NL' && country !== 'BE') { _toast('Ongeldig land.', 'warn'); return null; }
+      return { country };
+    }, { okLabel: 'Genereer PDF' });
+    if (!form) return;
+    if (_ui.actieBusy['brief:' + cid]) return;
+    _ui.actieBusy['brief:' + cid] = true;
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/incasso-pre-brief', {
+        method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: form.country }),
+      });
+      if (!resp.ok) {
+        // JSON-error verwacht bij 4xx/5xx (endpoint zet Content-Type: application/json bij fouten).
+        let j = null; try { j = await resp.json(); } catch (_) {}
+        if (resp.status === 422 && j?.code === 'ADDRESS_INCOMPLETE') {
+          const missing = Array.isArray(j.missing_fields) && j.missing_fields.length
+            ? j.missing_fields.join(', ')
+            : 'adres-velden';
+          await _askConfirm('Adres onvolledig', `Deze velden ontbreken in TeamLeader: <b>${esc(missing)}</b>.<br><br>Vul aan in TL (sync haalt 'm binnen een uur op) of via het klantdossier, en probeer opnieuw.`, { okLabel: 'OK' });
+        } else {
+          _toast('Brief-generatie mislukt: ' + (j?.error || ('HTTP ' + resp.status)), 'error');
+        }
+        return;
+      }
+      // Success: stream is een PDF-attachment.
+      const briefId   = resp.headers.get('X-Brief-Id')   || null;
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `WIK-brief_${form.country}_${cid.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      _toast(`WIK-brief aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
+      // Herlaad brieven-lijst + case-briefs zodat nieuwe brief zichtbaar is.
+      if (_live.brieven) _live.brieven.fetched = false;
+      if (_live.caseSheet?.briefsByCust?.[cid]) delete _live.caseSheet.briefsByCust[cid];
+      if (window.DFO?.render) window.DFO.render();
+    } catch (e) {
+      _toast('Netwerkfout: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _ui.actieBusy['brief:' + cid] = false;
+    }
   }
 
   /* ── Registratie ────────────────────────────────────────────────────── */
