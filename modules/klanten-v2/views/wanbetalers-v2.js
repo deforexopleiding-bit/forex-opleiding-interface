@@ -1427,16 +1427,14 @@
     const cnt = document.getElementById('wbxOvCount');
     if (cnt) cnt.textContent = rows.length + ' klant' + (rows.length === 1 ? '' : 'en');
   }
-  function _repaintGspList() {
-    const body = document.getElementById('wbxGspList');
-    if (!body) return;
-    body.innerHTML = _gspListInnerHtml();
-  }
-  function _repaintGspDetail() {
-    const pane = document.getElementById('wbxGspDetail');
-    if (!pane) return;
-    pane.innerHTML = _gspDetailHtml();
-  }
+  // BROK WB-POLISH-4: gesprekkenView (oude tab-view) is niet meer geregistreerd
+  // (inboxView vervangt 'em sinds BROK 5 v=10). De _repaintGsp* helpers zijn
+  // no-op stubs zodat oude callers (_fetchCallLog / _fetchTimeline / __wbxCall*)
+  // nergens crashen. Zelfde functies fully verwijderen zou vereisen om die
+  // callers ook te snoeien, wat interleaved is met live code — te risky voor
+  // deze cleanup-brok. Volgende cleanup-brok kan de callers zelf opruimen.
+  function _repaintGspList()   { /* no-op — gesprekkenView deprecated */ }
+  function _repaintGspDetail() { /* no-op — gesprekkenView deprecated */ }
 
   /* ══════════════════════════════════════════════════════════════════
      KANTOORUREN-BANNER (footer-info, alle tabs)
@@ -2185,194 +2183,21 @@
   /* ══════════════════════════════════════════════════════════════════
      TAB 3 — GESPREKKEN
      ══════════════════════════════════════════════════════════════════ */
-  function _gspListInnerHtml() {
-    const rows = asArr(_live.overzicht.items);
-    const q = String(_ui.gspSearchQ || '').trim().toLowerCase();
-    const filtered = rows.filter((r) => {
-      if (!q) return true;
-      const name = ((r.customer_name || r.name || '') + ' ' + (r.email || '')).toLowerCase();
-      return name.includes(q);
-    });
-    if (!filtered.length) return `<div style="padding:44px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen wanbetalers gevonden.</div>`;
-    return filtered.map((r) => {
-      const cid = r.customer_id || r.id;
-      const name = r.customer_name || r.name || 'Onbekend';
-      const openAmt = Number(r.total_open_cents || 0) / 100;
-      // BROK 9 (v=14): NL-label lookup (consistent met overzicht + case-sheet).
-      const stageSlugG = r.stage_slug || r.stage || null;
-      const stage = r.stage_label
-        || (asArr(_live.stages?.items).find((s) => s.slug === stageSlugG) || {}).label
-        || ((typeof PIPELINE_STAGES !== 'undefined' && PIPELINE_STAGES.find((s) => s[0] === stageSlugG)) || [])[1]
-        || stageSlugG || '—';
-      const onCls = String(_ui.gspSelectedId) === String(cid) ? 'on' : '';
-      const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      const cidAttr  = String(cid || '').replace(/"/g, '&quot;');
-      return `<div class="wbx-gsp-row ${onCls}" data-cid="${cidAttr}" onclick="__wbxGspSelect('${cidClick}')"
-        style="padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;${onCls ? 'background:var(--surface-2)' : ''}">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
-          <span style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
-          <span class="mono" style="color:var(--amber);font-size:12px;font-weight:600;flex-shrink:0">${eur0(openAmt)}</span>
-        </div>
-        <div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(stage)}</div>
-      </div>`;
-    }).join('');
-  }
-  function _gspDetailHtml() {
-    const cid = _ui.gspSelectedId;
-    if (!cid) return `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px">Selecteer een klant links</div>`;
-    const row = asArr(_live.overzicht.items).find((r) => String(r.customer_id || r.id) === String(cid));
-    if (!row) return `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px">Klant niet gevonden in overzicht.</div>`;
-    const name = row.customer_name || row.name || 'Onbekend';
-    const openAmt = Number(row.total_open_cents || 0) / 100;
-    const cidClick = String(cid).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
-    const calls = asArr(_live.callLog.byCust[cid]);
-    const timeline = asArr(_live.timeline.byCust[cid]);
-    const callsLoading = !_live.callLog.byCust[cid];
-    const tlLoading = !_live.timeline.byCust[cid];
-
-    const callsBlock = callsLoading
-      ? `<div style="padding:12px;color:var(--text-3);font-size:12.5px;text-align:center">Belpogingen laden…</div>`
-      : calls.length
-        ? calls.slice(0, 20).map((c) => `<div style="padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;display:flex;justify-content:space-between;gap:10px">
-            <div style="flex:1;min-width:0">
-              <div>${esc(c.outcome || '—')}${c.note ? ' — ' + esc(String(c.note).slice(0, 80)) : ''}</div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(_fmtDateTime(c.created_at))}${c.callback_at ? ' · terugbellen: ' + esc(_fmtDateTime(c.callback_at)) : ''}</div>
-            </div>
-          </div>`).join('')
-        : `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Geen belpogingen gelogd.</div>`;
-
-    const tlBlock = tlLoading
-      ? `<div style="padding:12px;color:var(--text-3);font-size:12.5px;text-align:center">Tijdlijn laden…</div>`
-      : timeline.length
-        ? timeline.slice(0, 30).map((it) => {
-            const WT = window.WanbetalersTimeline || null;
-            const label = WT && typeof WT.labelFor === 'function' ? WT.labelFor(it) : (it.event_type || it.kind || 'event');
-            const at = it.created_at || it.at || '';
-            return `<div style="padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px">
-              <div>${esc(label)}</div>
-              <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${esc(_fmtDateTime(at))}</div>
-            </div>`;
-          }).join('')
-        : `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Geen events in de tijdlijn.</div>`;
-
-    // v=3 BROK 2: call-log + notitie forms.
-    const f    = _callFormState(cid);
-    const nf   = _noteFormState(cid);
-    const callSaveable = _callIsSaveable(f);
-    const outcomeOpts = '<option value="">— Kies uitkomst —</option>' + CALL_OUTCOMES.map(([v, l]) => `<option value="${v}" ${f.outcome === v ? 'selected' : ''}>${esc(l)}</option>`).join('');
-    const showCbAt = f.outcome === 'callback';
-    const savedRecently = nf.savedAt && (Date.now() - new Date(nf.savedAt).getTime() < 3500);
-
-    // Fase-select. Huidige stage uit de row.
-    const curStage = String(row.stage_slug || '').toLowerCase();
-    const stageOpts = '<option value="">— Wijzig fase —</option>' + PIPELINE_STAGES.filter(([v]) => v !== curStage).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('');
-
-    return `<div style="display:flex;flex-direction:column;flex:1;min-height:0;background:var(--surface)">
-      <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-        <div style="min-width:0">
-          <div style="font-size:16px;font-weight:600;letter-spacing:-.02em">${esc(name)}</div>
-          <div style="font-size:12.5px;color:var(--amber);font-weight:500">${eur(openAmt)} openstaand · fase: ${esc(row.stage_label || curStage || '—')}</div>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <select onchange="if(this.value){__wbxSetStage('${cidClick}', this.value);this.value='';}" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);cursor:pointer" ${_ui.stageBusy[cid] ? 'disabled' : ''} title="Fase-mutatie (audit-log + confirm)">${stageOpts}</select>
-          <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" onclick="__wbxOvOpen('${cidClick}')" title="Open klant-detail met tijdlijn en communicatie">Open in klanten-detail →</button>
-        </div>
-      </div>
-      <div style="flex:1;overflow-y:auto;min-height:0;padding:14px 20px;display:flex;flex-direction:column;gap:14px">
-        <!-- Belpoging loggen -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-          <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px">Belpoging loggen</div>
-          <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
-            <div style="display:grid;grid-template-columns:1fr ${showCbAt ? '1fr' : ''};gap:10px;align-items:end">
-              <div>
-                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Uitkomst</div>
-                <select onchange="__wbxCallSetOutcome('${cidClick}', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box">${outcomeOpts}</select>
-              </div>
-              ${showCbAt ? `<div>
-                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Terugbeltijd <span style="color:var(--rose);text-transform:none;letter-spacing:0">*verplicht</span></div>
-                <input type="datetime-local" value="${esc(f.callback_at || '')}" oninput="__wbxCallSetCallbackAt('${cidClick}', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
-              </div>` : ''}
-            </div>
-            <textarea placeholder="Notitie bij belpoging (optioneel)…" oninput="__wbxCallSetNote('${cidClick}', this.value)"
-              style="width:100%;min-height:60px;max-height:160px;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box">${esc(f.note || '')}</textarea>
-            <div id="wbxCallErr_${cidClick}">${f.error ? `<div style="padding:8px 11px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(f.error)}</div>` : ''}</div>
-            <div style="display:flex;justify-content:flex-end">
-              <button id="wbxCallSaveBtn_${cidClick}" class="btn btn-primary btn-sm" ${(!callSaveable || f.saving) ? 'disabled' : ''}
-                style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:12px;opacity:${(!callSaveable || f.saving) ? '.55' : '1'};cursor:${(!callSaveable || f.saving) ? 'not-allowed' : 'pointer'}"
-                title="${!callSaveable ? (f.outcome === 'callback' ? 'Bij terugbelafspraak: datum/tijd verplicht' : 'Kies eerst een uitkomst') : ''}"
-                onclick="__wbxCallSave('${cidClick}')">${f.saving ? 'Opslaan…' : 'Log belpoging'}</button>
-            </div>
-          </div>
-          <div style="padding:11px 14px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <div style="font-weight:600;font-size:12.5px">Vorige belpogingen</div>
-            <span style="font-size:11px;color:var(--text-3)">${calls.length} log-regel${calls.length === 1 ? '' : 's'}</span>
-          </div>
-          ${callsBlock}
-        </div>
-
-        <!-- Notitie op klant -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-          <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:13px">Notitie op klant (pipeline-log)</div>
-          <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
-            <textarea placeholder="Interne notitie op deze klant…" oninput="__wbxNoteSetBody('${cidClick}', this.value)"
-              style="width:100%;min-height:70px;max-height:200px;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box">${esc(nf.body || '')}</textarea>
-            ${nf.error ? `<div style="padding:8px 11px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(nf.error)}</div>` : ''}
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-              <span id="wbxNoteSaved_${cidClick}" style="display:${savedRecently ? 'inline' : 'none'};color:var(--emerald);font-weight:600;font-size:11.5px">✓ Notitie opgeslagen</span>
-              <span></span>
-              <button id="wbxNoteSaveBtn_${cidClick}" class="btn btn-ghost btn-sm" ${(!nf.body || !nf.body.trim() || nf.saving) ? 'disabled' : ''}
-                style="font-size:12px;opacity:${(!nf.body || !nf.body.trim() || nf.saving) ? '.55' : '1'};cursor:${(!nf.body || !nf.body.trim() || nf.saving) ? 'not-allowed' : 'pointer'}"
-                onclick="__wbxNoteSave('${cidClick}')">${nf.saving ? 'Opslaan…' : 'Notitie opslaan'}</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Tijdlijn (read) -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-          <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <div style="font-weight:600;font-size:13px">Tijdlijn</div>
-            <span style="font-size:11px;color:var(--text-3)">${timeline.length} event${timeline.length === 1 ? '' : 's'}</span>
-          </div>
-          ${tlBlock}
-        </div>
-      </div>
-    </div>`;
-  }
-  function gesprekkenView() {
-    if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(_fetchOverzicht);
-    // BROK 9 (v=14): stages nodig voor NL-label lookup in fase-badge.
-    if (_live.stages && !_live.stages.fetched && !_live.stages.loading && !_live.stages.error) queueMicrotask(_fetchStages);
-    if (_ui.gspSelectedId && !_live.callLog.byCust[_ui.gspSelectedId]) queueMicrotask(() => _fetchCallLog(_ui.gspSelectedId));
-    if (_ui.gspSelectedId && !_live.timeline.byCust[_ui.gspSelectedId]) queueMicrotask(() => _fetchTimeline(_ui.gspSelectedId));
-
-    if (_live.overzicht.loading && !_live.overzicht.items.length) {
-      return `<div class="pad" style="padding:14px 20px">${_skelRows(6)}</div>`;
-    }
-
-    const qVal = String(_ui.gspSearchQ || '');
-    const searchBar = `
-      <div style="position:relative">
-        <input id="wbxGspSearchInput" type="text" value="${esc(qVal)}"
-          oninput="__wbxGspSearchInput(this.value)"
-          placeholder="Zoek klant…"
-          style="width:100%;padding:6px 28px 6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font-size:12px;outline:none;box-sizing:border-box"
-          autocomplete="off" spellcheck="false" />
-        <button id="wbxGspSearchClear" title="Wis" onclick="__wbxGspSearchClear()"
-          style="position:absolute;top:50%;right:6px;transform:translateY(-50%);width:20px;height:20px;padding:0;border:0;background:transparent;color:var(--text-3);font-size:14px;cursor:pointer;visibility:${qVal.trim() ? 'visible' : 'hidden'}">×</button>
-      </div>`;
-
-    return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">
-      <div style="display:flex;gap:0;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
-        <div style="width:340px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
-          <div style="padding:11px 14px;border-bottom:1px solid var(--border)">${searchBar}</div>
-          <div id="wbxGspList" style="flex:1;overflow-y:auto;min-height:0">${_gspListInnerHtml()}</div>
-        </div>
-        <div id="wbxGspDetail" style="flex:1;display:flex;flex-direction:column;min-width:0">${_gspDetailHtml()}</div>
-      </div>
-      ${_officeHoursBanner()}
-    </div>`;
-  }
+  // BROK WB-POLISH-4: _gspListInnerHtml verwijderd (dead — enige caller
+  // was gesprekkenView, ook verwijderd).
+  // BROK WB-POLISH-4: _gspDetailHtml verwijderd (dead — was tab-detail voor
+  // de oude gesprekkenView, vervangen door SURFACE B drawer). Bijbehorende
+  // window-handlers (__wbxCallSet{Outcome,Note,CallbackAt} + __wbxCallSave +
+  // __wbxGspSelect + __wbxGspSearch*) blijven staan als no-op-veilige
+  // window-refs — dat voorkomt "undefined function"-crashes bij oude
+  // console-log-refs in browser-history.
+  // BROK WB-POLISH-4: _gspDetailHtml + gesprekkenView + _gspListInnerHtml
+  // volledig verwijderd. ~180 regels dead-code weg (was tab-detail voor de
+  // niet-meer-geregistreerde gesprekkenView; SURFACE A inboxView vervangt).
+  // Related window-handlers (__wbxCallSet*, __wbxGspSelect, __wbxGspSearch*)
+  // blijven bestaan als window-refs — geen render-callers meer, dus ongebruikt
+  // maar veilig. Volgende cleanup-brok kan die ook nog verwijderen.
+  function _gspDetailHtml() { return ''; }
 
   /* ══════════════════════════════════════════════════════════════════
      TAB 4 — BRIEVEN
@@ -6429,6 +6254,7 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+  console.debug('[wanbetalers-v2] v=33 BROK WB-POLISH-4: dead-code cleanup — gesprekkenView + _gspListInnerHtml + _gspDetailHtml body volledig verwijderd (~180 regels dood-code weg). _repaintGspList + _repaintGspDetail zijn no-op stubs (callers _fetchCallLog/_fetchTimeline/__wbxCallSave/__wbxCallSet* + __wbxNoteSave triggeren nu geen render meer; case-sheet SURFACE B doet z\'n eigen repaint). __wbxCallSet*/__wbxGspSelect/__wbxGspSearch* blijven als window-refs (geen callers meer; volgende cleanup-brok kan die schrappen).');
   console.debug('[wanbetalers-v2] v=32 BROK WB-POLISH-3: arrangement-detail drawer. Body-level right-slide (760px) + scrim + Escape. Data via /api/arrangements-detail?id=X. Secties: header (type — klant + status-pill), Arrangement kv-grid (type/status/dates/reden), Facturen-lijst (indien invs), Pending actions-tabel, footer met ✕ Annuleer (danger, delegates naar __wbxArrCancel voor ACTIEF/VOORGESTELD). Klik op Actieve arrangementen-rij (actiesView) opent drawer; cancel-btn heeft event.stopPropagation.');
   console.debug('[wanbetalers-v2] v=31 BROK WB-POLISH-2: pipeline multi-select — checkbox per kaart, shift-klik range binnen dezelfde fase, bulk-bar met count + fase-picker + Verplaats-knop. Typ-to-confirm "VERPLAATS" (of "TERMINAAL" bij opgelost/afschrijven met extra rood-danger-hint "motor stopt voor N klanten"). Race-guard per cid (stageBusy) + globale pipeBulkBusy. Skip no-ops (klant al in target-fase). Invalidate overzicht na move -> kolom-tellingen updaten zonder scroll-reset.');
   console.debug('[wanbetalers-v2] v=30 BROK WB-POLISH-1: overzicht klikbare kolom-headers (open/dagen/fase/next/name sort, asc/desc toggle, next-null onderaan). Brieven: zoek-input (naam/e-mail 200ms debounce), select-all in header (per zichtbare filter), bulk-verwijderen met typ-to-confirm "VERWIJDER".');
