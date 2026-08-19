@@ -119,8 +119,12 @@ function newRow() {
 function customerLabel() {
   const c = state.customer;
   if (!c) return '— kies eerst een klant —';   // BROK FINANCE-INVOICE selector-mode
-  if (c.is_company) return c.company_name || 'Bedrijfsklant';
-  return [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Klant';
+  // BROK WB-FIX-4 minor: also accept c.name (samengestelde weergave uit
+  // ctx.customer / overzicht-rij) zodat wanbetalers-drawer klantnaam
+  // netjes toont i.p.v. "Klant"-fallback.
+  if (c.is_company) return c.company_name || c.name || 'Bedrijfsklant';
+  const composed = [c.first_name, c.last_name].filter(Boolean).join(' ');
+  return composed || c.name || 'Klant';
 }
 // BROK FINANCE-INVOICE: helper voor incl→excl conversie per regel.
 function lineExclAmount(l) {

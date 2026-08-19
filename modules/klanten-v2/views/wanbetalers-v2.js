@@ -426,7 +426,13 @@
     st.loading = true;
     const j = await tryFetch('call-log:' + cid, '/api/dunning-call-log-list?customer_id=' + encodeURIComponent(cid));
     st.loading = false;
-    if (j && !j.error) st.byCust[cid] = asArr(j.items || j.calls);
+    if (j && !j.error) {
+      st.byCust[cid] = asArr(j.items || j.calls);
+      // BROK WB-FIX-4 minor: store cadence per klant zodat Bellen-card de
+      // echte max_attempts uit dunning_call_cadence app_setting toont.
+      st.cadenceByCust = st.cadenceByCust || {};
+      if (j.cadence) st.cadenceByCust[cid] = j.cadence;
+    }
     else st.byCust[cid] = [];
     _repaintGspDetail();
   }
@@ -1940,9 +1946,23 @@
     const openEur = ov ? (Number(ov.total_open_cents) || 0) / 100 : (amt != null ? Number(amt) : null);
     const days = ov ? Number(ov.days_overdue) || 0 : null;
     const nFact = ov ? Number(ov.open_invoice_count) || 0 : null;
-    const nextAt   = ov?.next_action_at || null;
-    const nextType = ov?.next_action_type || ov?.next_action_channel || 'actie';
-    const nextBadge = nextAt ? `<span style="font-size:10.5px;color:var(--brand);margin-left:4px" title="Volgende geplande actie">↪ ${esc(nextType)} ${esc(_fmtDateTime(nextAt).slice(5))}</span>` : '';
+    // BROK WB-FIX-4 #2: kanaal-mapping (WhatsApp/E-mail/etc) + volle _fmtDateTime
+    // (v=28 had ".slice(5)" die "16 aug 15:01" tot "g 15:01" verminkt en
+    // fallback "actie" doorschemerde). Nu: "Volgende: <kanaal> <datum tijd>".
+    const nextAt      = ov?.next_action_at || null;
+    const nextRawType = String(ov?.next_action_type || ov?.next_action_channel || ov?.next_action_kind || '').toLowerCase().trim();
+    const NEXT_LABEL = {
+      whatsapp: 'WhatsApp', wa: 'WhatsApp',
+      email: 'E-mail', mail: 'E-mail',
+      brief: 'Brief', letter: 'Brief',
+      call: 'Bel-actie', phone: 'Bel-actie',
+      reminder: 'Herinnering', reminder_email: 'Herinnering (e-mail)', reminder_wa: 'Herinnering (WA)',
+      task: 'Taak', followup: 'Follow-up',
+    };
+    const nextLabel = NEXT_LABEL[nextRawType] || (nextRawType ? nextRawType.charAt(0).toUpperCase() + nextRawType.slice(1) : 'Actie');
+    const nextBadge = nextAt
+      ? `<span style="font-size:10.5px;color:var(--brand);margin-left:4px" title="Volgende geplande actie">↪ Volgende: <b>${esc(nextLabel)}</b> ${esc(_fmtDateTime(nextAt))}</span>`
+      : '';
     const isPaused = !!(asArr(_live.pausedList?.items).find((r) => String(r.customer_id) === String(cid)));
     const pausedBadge = isPaused ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--amber-soft);color:var(--amber);font-weight:600;margin-left:4px">⏸ Gepauzeerd</span>' : '';
     const metaParts = [];
@@ -1976,11 +1996,17 @@
         <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--text-3);${disStyle}" onclick="event.stopPropagation();__wbxPaMarkExecuted('${esc(a.id)}')" title="Handmatig al uitgevoerd">✓ Gedaan</button>`;
     }
 
+    // BROK WB-FIX-4 #4: type-label OP kaart (icoon + NL-label) — v1-parity.
+    // Ook: fix ReferenceError uit v=27 waar `name` gebruikt werd — moet
+    // `customer` zijn (dat is de var in scope).
+    const typeIcon  = _actieTypeIcon(a.action_type);
+    const typeLabel = _actieTypeLabel(a.action_type);
+    const typeChip  = `<span style="font-size:9.5px;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--text-3);font-weight:600;letter-spacing:.03em;margin-left:6px;vertical-align:middle">${typeIcon} ${esc(typeLabel)}</span>`;
     return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);cursor:${cid ? 'pointer' : 'default'};transition:background .08s"
-      ${cid ? `onclick="__wbxOpenCase('${cidClick}',{customer_name:'${esc(name).replace(/'/g,"\\'")}'})" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
+      ${cid ? `onclick="__wbxOpenCase('${cidClick}',{customer_name:'${String(customer).replace(/'/g,"\\'")}'})" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
       <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start">
         <div style="min-width:0">
-          <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(customer)}</div>
+          <div style="font-weight:500;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(customer)}${typeChip}</div>
           ${reason ? `<div style="font-size:11.5px;color:var(--text-2);margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(String(reason).slice(0, 200))}</div>` : ''}
           ${ctxLine}
         </div>
@@ -2709,22 +2735,36 @@
          scroll mee naar onder (chat-behaviour).
        - Anders: behoud scrollTop (voorkomt dat realtime/poll de user naar
          een oude positie werpt terwijl 'ie omhoog is gescrold). */
-  /* BROK WB-FIX-2 #4: scroll-to-bottom loop met kleine polling (max ~600ms /
-     30 frames). Retries tot de thread-container in DOM staat EN content genoeg
-     is om te scrollen. Robuust tegen races met DFO.render die de container
-     opnieuw kan renderen na een surgical repaint. Loop wordt beëindigd zodra
-     de conv-selectie verandert (user klikt naar andere conv) of we scrollen.  */
+  /* BROK WB-FIX-4 #3: scroll-to-bottom LOOP herzien.
+     v=28 wachtte tot 30 attempts (~600ms) — te kort omdat een late DFO.render
+     de container kan vervangen NA het einde van de loop → user zag 10-18s
+     "bovenaan" totdat de 6s poll rerenderde met force=true.
+     Fix:
+       1. LONGER window: ~5000ms (250 attempts) zodat late DFO.render nog
+          door de loop worden gevangen.
+       2. Loop clear ALLEEN als het echt gelukt is (scrollTop reached bottom).
+          v=28 clearde threadScrollBottomOnNext op ELKE repaint → force verloor
+          effect voor de eerste render die geen content had.
+       3. _repaintInboxThread doet nu SYNCHROON een sync-scroll VOOR de rAF-
+          check zodat content dat direct in DOM staat instant scrollt.  */
   function _wbxScrollThreadToBottomSoon(convId, attempts) {
     attempts = attempts || 0;
-    if (attempts > 30) return; // ~600ms max
-    if (String(_ui.inbox.selectedConv) !== String(convId)) return; // user is verder geklikt
+    if (attempts > 250) return; // ~5s max (was 600ms)
+    if (String(_ui.inbox.selectedConv) !== String(convId)) return;
     const fire = () => {
       const el = document.getElementById('wbxInboxThreadScroll');
       if (!el) return _wbxScrollThreadToBottomSoon(convId, attempts + 1);
       if (el.scrollHeight > el.clientHeight + 4) {
         el.scrollTop = el.scrollHeight;
-        // Update tracker zodat _repaintInboxThread's "was-at-bottom" check klopt.
+        // Update tracker; verify daadwerkelijk gelukt vóór clear.
         _ui.inbox.threadItemCountByConv[String(convId)] = asArr(_live.inbox.thread.byConv[String(convId)]?.items).length;
+        // BROK WB-FIX-4 #3: check dat we ECHT onderaan staan (browsers negeren
+        // scrollTop-set als het element nog geen layout heeft). Anders retry.
+        if (Math.abs(el.scrollTop - (el.scrollHeight - el.clientHeight)) < 4) {
+          _ui.inbox.threadScrollBottomOnNext[String(convId)] = false;
+        } else {
+          setTimeout(() => _wbxScrollThreadToBottomSoon(convId, attempts + 1), 20);
+        }
       } else {
         setTimeout(() => _wbxScrollThreadToBottomSoon(convId, attempts + 1), 20);
       }
@@ -2743,17 +2783,30 @@
     const prevMax    = el.scrollHeight - el.clientHeight;
     const wasAtBottom = (prevMax - prevTop) < 60; // 60px tolerantie
     const forceBottom = !!_ui.inbox.threadScrollBottomOnNext[convId];
-    _ui.inbox.threadScrollBottomOnNext[convId] = false;
+    // BROK WB-FIX-4 #3: NIET direct clearen — de loop clear'ret pas als
+    // scroll ECHT gelukt is (voorkomt dat een late DFO.render de force
+    // verliest voordat we bodemen).
 
     el.innerHTML = _inboxThreadHtml(convId);
     _ui.inbox.threadItemCountByConv[convId] = itemsCount;
 
-    // requestAnimationFrame zodat scrollHeight is bijgewerkt vóór we scroll zetten.
+    // BROK WB-FIX-4 #3: SYNCHROON scroll als forceBottom of eerste render
+    // — content staat vaak al in de DOM direct na innerHTML-swap (WA-
+    // bubbles hebben geen image-loading race). Snelle path voor happy case.
+    if ((forceBottom || prevCount === 0) && el.scrollHeight > el.clientHeight) {
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // requestAnimationFrame voor de "was-at-bottom"-case (chat-behaviour bij poll).
     requestAnimationFrame(() => {
       const el2 = document.getElementById('wbxInboxThreadScroll');
       if (!el2) return;
       if (forceBottom || (hasNew && wasAtBottom) || prevCount === 0) {
         el2.scrollTop = el2.scrollHeight;
+        // Clear force alleen als we DAADWERKELIJK onderaan zitten.
+        if (Math.abs(el2.scrollTop - (el2.scrollHeight - el2.clientHeight)) < 4) {
+          _ui.inbox.threadScrollBottomOnNext[convId] = false;
+        }
       } else {
         el2.scrollTop = prevTop;
       }
@@ -3519,6 +3572,7 @@
       <div style="padding:10px 14px;font-size:11px;color:var(--text-3);border-top:1px solid var(--border);margin-top:auto">
         <div style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin-bottom:3px">Klant info</div>
         ${custSince ? `<div>Klant sinds ${esc(custSince)}</div>` : '<div style="opacity:.6">Datum onbekend</div>'}
+        ${cust.email ? `<div style="margin-top:2px;word-break:break-all">${esc(cust.email)}</div>` : ''}
       </div>
     </div>`;
   }
@@ -3536,7 +3590,7 @@
     const ctx = _live.inbox.ctx.byConv[_ui.inbox.selectedConv];
     const cust = ctx?.customer && ctx.customer.id === cid ? ctx.customer : { id: cid };
     try {
-      const mod = await import('./modals/invoice-create.js?v=4');
+      const mod = await import('./modals/invoice-create.js?v=5');
       mod.openInvoiceCreateModal({ customer: cust, onSuccess: () => _toast('Factuur aangemaakt.', 'success') });
     } catch (e) { _toast('Modal laden mislukt: ' + (e?.message || e), 'error'); }
   };
@@ -3652,16 +3706,16 @@
     if (!convId) return '';
     const bag  = _live.inbox.thread.byConv[convId];
     const conv = bag?.conversation || null;
-    // BROK WB-FIX-3 nit: zoek op UNFILTERED convs.items (raw list, niet
-    // client-side gefilterd door zoekbalk of tab). Kop moet gebonden blijven
-    // aan het GEOPENDE gesprek, ongeacht of dat gesprek nu in de zichtbare
-    // lijst zit. Fallback: thread-bag conversation → phone_number.
+    // BROK WB-FIX-3 nit + WB-FIX-4 #6: unfiltered convs.items + ctx-fallback
+    // NAAR KLANTNAAM (niet telefoonnummer). ctx.customer.name uit
+    // inbox-conversation-context wint als convs.items niet in cache staat.
     const row  = (_live.inbox.convs.items || []).find((x) => String(x.id) === String(convId)) || {};
+    const ctx  = _live.inbox.ctx.byConv[convId] || null;
     const name = conv?.customer_name
               || row.customer_name
+              || ctx?.customer?.name
               || row.display_name
               || conv?.display_name
-              || bag?.conversation?.phone_number
               || 'Onbekende klant';
     // BROK WB-FIDELITY-1 #2: DB-status = 'open|closed|archived' (per CLAUDE.md);
     // UI-status vertaalt 'closed'->'afgehandeld' en 'archived'->'gearchiveerd'.
@@ -3962,7 +4016,10 @@
           ${_caseBriefBadgeHtml(cid)}
         </div>
         <div style="font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
-        <div style="font-size:12px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">Factuur ${esc(focusNr)} · ${eur(focusOpen)} · ${daysN} dagen te laat</div>
+        ${openInvs.length === 0 && !pipeLoading
+          ? `<div style="font-size:12px;color:var(--text-3);margin-top:3px">Geen open factuur</div>`
+          : `<div style="font-size:12px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">Factuur ${esc(focusNr)} · ${eur(focusOpen)} · ${daysN} dagen te laat</div>`
+        }
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
         ${_caseStagePillHtml(stageSlug)}
@@ -4056,9 +4113,11 @@
      apart voor MANUAL_FOLLOWUP-auto-outcome-flow. */
   function _caseBellenCardHtml(cid, phone, name) {
     const calls = asArr(_live.callLog.byCust[cid]);
-    // v1-parity: default 4 pogingen (v2 had 3 als typo/heritage).
-    const cadence = _live.callLog.cadenceByCust?.[cid] || { max_attempts: 4 };
-    const maxAttempts = cadence.max_attempts || 4;
+    // BROK WB-FIX-4 minor: v1-parity min 4 dots. Cadence uit server als
+    // hoger, maar altijd minimaal 4 (voorkomt "/4 met 3 bolletjes"-mismatch
+    // van v=28 waar server-side default 3 was).
+    const cadence = _live.callLog.cadenceByCust?.[cid] || {};
+    const maxAttempts = Math.max(4, Number(cadence.max_attempts) || 4);
     const attempts = calls.length;
     const dots = [];
     for (let i = 0; i < maxAttempts; i++) {
@@ -4072,7 +4131,17 @@
     // KlxSoftphone status snapshot — configured lines + registration.
     const sp = (window.KlxSoftphone && typeof window.KlxSoftphone.getStatus === 'function')
       ? window.KlxSoftphone.getStatus() : { configuredLines: { nl: false, be: false }, state: 'idle' };
-    const beAvail = !!sp.configuredLines?.be;
+    // BROK WB-FIX-4 #1: TOON ALTIJD BE-optie (v1-parity + regressie-fix).
+    // v=28 gated BE achter sp.configuredLines.be, maar KlxSoftphone.ensureReady
+    // is lazy — bij eerste render is configuredLines nog {nl:false, be:false}
+    // → BE optie verdween voor Belgische klanten. KlxSoftphone.call zal alsnog
+    // een duidelijke error geven als BE niet geregistreerd is; kans op typo
+    // < kans op frustratie bij ontbrekende optie.
+    const beAvail = true;
+    // Trigger SIP-init on-demand zodat state-badge geleidelijk correct wordt.
+    if (window.KlxSoftphone && typeof window.KlxSoftphone.ensureReady === 'function' && sp.state === 'idle') {
+      try { window.KlxSoftphone.ensureReady(); } catch (_) {}
+    }
     const stateLabel = sp.state === 'connected'  ? '● Verbonden'
                      : sp.state === 'connecting' ? '● Bellen…'
                      : sp.state === 'failed'     ? '⚠ Fout'
@@ -5893,5 +5962,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=28 BROK WB-FIDELITY-1: (#1) rechter-paneel 5-knops v1-actiesbar (Bekijk klanten/Maak factuur/Verify betaald/Afspraak/Escaleren) + klant-info + oudste-days-banner + section-headers; (#2) kebab Heropenen/Uit archief detecteert DB+UI status; (#3) Bellen-card INLINE lijnkeuze + connect-status + Bel nu + poging /4 (v1-parity); (#4) Acties-kaart meta uitgebreid met N fact + Volgende-actie-badge + Gepauzeerd-badge; (#5) drawer action-bar +Bekijk gesprek +Nieuwe taak. Goedkoop: avatar-initialen + relatieve tijd in lijst; no-reply cyclus-banner in thread (inbox-noreply-context); gepauzeerd-rij wording verfijnd.');
+  console.debug('[wanbetalers-v2] v=29 BROK WB-FIX-4: (#1) BE-lijn regressie -> altijd tonen (+ ensureReady on-demand); (#2) Volgende-badge "actie g,..." fix -> kanaal-mapping + volle datetime; (#3) thread scroll: sync+RAF, 5s loop, force clear pas na daadwerkelijk bodemen; (#4) type-label chip OP de kaart (v1-parity); (#5) drawer-kop lege staat "Geen open factuur" i.p.v. "Factuur — · €0,00 · 0 dagen"; (#6) thread-kop fallback KLANTNAAM (via ctx.customer.name) i.p.v. phone. Minor: klant-info-blok +e-mail; invoice-modal accepteert c.name; poging-teller min 4 dots + cadence store in _fetchCallLog.');
 })();
