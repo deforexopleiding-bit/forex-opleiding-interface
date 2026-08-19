@@ -1,6 +1,7 @@
 import { ImapFlow } from 'imapflow';
 import { safeError } from './_lib/safe-error.js';
 import { supabaseAdmin } from './supabase.js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
 
 // v2 email-round: mailbox-full-address → short-label voor email_messages.mailbox
 // (die kolom bevat 'info' / 'leads' / etc, zoals sync-emails.js schrijft).
@@ -30,6 +31,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed — use POST' });
   }
+
+  // Dit endpoint zette IMAP-vlaggen zonder enige auth-check. Nu een expliciete
+  // rolpoort, dezelfde als public.is_crm_staff() in RLS — een geldig JWT alleen
+  // is niet genoeg, want elk auto-aangemaakt viewer/student-account heeft er een.
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-rol vereist.' });
 
   // Vercel parseert application/json automatisch, maar voor de zekerheid:
   const body = typeof req.body === 'string'

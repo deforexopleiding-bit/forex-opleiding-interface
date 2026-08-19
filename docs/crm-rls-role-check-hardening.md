@@ -193,15 +193,36 @@ door en lazen daarna CRM-data — hetzelfde lek, andere laag:
 
 Beide gebruiken nu `requireCrmStaff(req)` → `403` voor niet-staff.
 
-### Nog open (bewust buiten deze PR)
+### Opgelost in de vervolg-PR (branch `claude/email-endpoints-auth-fix`)
 
-| Endpoint | Bevinding | Waarom niet hier |
-|---|---|---|
-| `api/email-body.js` | **Geen enkele auth-check.** POST met `mailbox`+`uid` (of `email_id`) geeft de volledige mailbody terug. | Andere bugklasse (ontbrekende auth, niet ontbrekende rolcheck). `modules/email.html` roept het aan met een kale `fetch()` zónder Bearer-token, dus een gate vereist óók een frontend-wijziging + eigen testronde. |
-| `api/mark-read.js` | Idem: geen auth-check, markeert IMAP-mail als gelezen. | Zelfde reden. |
+| Endpoint | Bevinding |
+|---|---|
+| `api/email-body.js` | Had **geen enkele** auth-check: POST met `mailbox`+`uid` (of `email_id`) gaf de volledige mailbody terug. |
+| `api/mark-read.js` | Idem: geen auth-check, zette de IMAP `\Seen`-vlag. |
 
-Aanbeveling: PR 2 — Bearer-token toevoegen aan de e-mailmodule-calls
-(`apiFetch` i.p.v. `fetch`) en dan `requireCrmStaff` op beide endpoints.
+Beide hebben nu `requireCrmStaff()`, en de drie kale `fetch()`-aanroepen in
+`modules/email.html` gaan via `AgentShared.apiFetch` zodat er een Bearer-token
+meegaat. De aanroepers in `modules/klanten-v2/views/email-v2.js`
+(`KV.authedJson`), `modules/mentor-onboarding.html` en
+`modules/shared/onboarding-overzicht.js` (`AgentShared.apiFetch`) stuurden dat
+token al mee.
+
+### Nog open — `api/email-attachment.js`
+
+Zelfde bugklasse, maar **niet** met dezelfde ingreep op te lossen: dit endpoint
+heeft ook geen auth-check en levert mail-bijlagen uit, maar wordt aangeroepen
+als `<a href>` / `window.open()` (`modules/email.html` regels ~2755 en ~4731).
+Dat zijn browser-navigaties; die kunnen geen `Authorization`-header meesturen.
+
+Twee routes, allebei een echte wijziging:
+1. **Signed short-lived token** — endpoint accepteert `?t=<HMAC over
+   mailbox+uid+index+exp>`, uitgegeven door een klein geauthenticeerd
+   endpoint. Href blijft werken, link is ~5 minuten geldig.
+2. **Fetch → blob** — bijlage via `apiFetch` ophalen en met
+   `URL.createObjectURL` aanbieden. Werkt niet voor `target="_blank"`-preview
+   van PDF's zonder extra plumbing.
+
+Aanbeveling: route 1, als aparte PR met eigen testronde.
 
 ---
 

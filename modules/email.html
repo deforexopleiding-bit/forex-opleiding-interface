@@ -2715,7 +2715,9 @@
     state.bodyCache[email.uid] = { loading: true };
     updateCardPreview(email.uid);
     try {
-      const res = await fetch('/api/email-body', {
+      // apiFetch i.p.v. kale fetch: /api/email-body vereist sinds de
+      // auth-fix een Bearer-token + CRM-rol (403 zonder).
+      const res = await window.AgentShared.apiFetch('/api/email-body', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(email.uid) })
@@ -3277,7 +3279,9 @@
 
   async function pushReadFlagToImap(email) {
     try {
-      const res = await fetch('/api/mark-read', {
+      // apiFetch i.p.v. kale fetch: /api/mark-read vereist sinds de auth-fix
+      // een Bearer-token + CRM-rol (403 zonder).
+      const res = await window.AgentShared.apiFetch('/api/mark-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(String(email.uid||'')) })
@@ -3298,7 +3302,9 @@
 
   async function pushUnreadFlagToImap(email) {
     try {
-      const res = await fetch('/api/mark-read', {
+      // apiFetch i.p.v. kale fetch: /api/mark-read vereist sinds de auth-fix
+      // een Bearer-token + CRM-rol (403 zonder).
+      const res = await window.AgentShared.apiFetch('/api/mark-read', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mailbox: email.mailbox, uid: extractImapUid(String(email.uid||'')), seen: false })
