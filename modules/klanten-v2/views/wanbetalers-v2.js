@@ -2697,8 +2697,193 @@
         ${tabBtn('briefs',   'Brieven',  brCount)}
         ${tabBtn('calls',    'Belhistorie', clCount)}
       </div>
+      ${_caseSheetActionBarHtml(cid, stageSlug)}
       <div style="flex:1;overflow-y:auto;background:var(--surface-2)">${body}</div>
     </div>`;
+  }
+
+  /* ── BROK 4 INCASSO-1: case-sheet action-bar ─────────────────────────
+     6 knoppen bovenaan de case-sheet:
+       📩 Herinnering  — add-log note ("handmatige herinnering")
+       🤝 Toezegging   — add-log note (bedrag/datum/notitie)
+       ✅ Close        — finance-dunning-close-customer (409 HAS_OPEN_INVOICES
+                        → force-retry via confirm-modal)
+       ⚠ Dispuut       — finance-dunning-mark-disputed (reden verplicht)
+       ⚖ Incasso       — incasso-dossier-create (needs_brief → confirm-flow)
+       ⏸ Pauzeer       — finance-dunning-pause-by-customer
+     Elke actie via custom confirm/form-modal + race-guard in _ui.caseActBusy. */
+  _ui.caseActBusy = _ui.caseActBusy || {};
+
+  function _caseSheetActionBarHtml(cid, stageSlug) {
+    // Terminal stages: verberg destructive actions die geen zin hebben.
+    const isTerminal = stageSlug === 'opgelost' || stageSlug === 'afschrijven';
+    const busy = (k) => !!_ui.caseActBusy[k + ':' + cid];
+    const b = (fn, icon, label, tone, title, hidden) => {
+      if (hidden) return '';
+      const busyKey = 'act:' + fn;
+      const isBusy = busy(fn);
+      const color = tone === 'danger' ? 'var(--rose)' : (tone === 'warn' ? 'var(--amber)' : (tone === 'ok' ? 'var(--emerald)' : 'var(--text-2)'));
+      return `<button class="btn btn-ghost btn-sm" ${isBusy ? 'disabled' : ''} style="font-size:11.5px;padding:5px 10px;color:${color};${isBusy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer'}" onclick="__wbxCaseAction('${esc(fn)}','${esc(cid)}')" title="${esc(title || label)}">${icon} ${esc(label)}</button>`;
+    };
+    return `<div style="padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface-2);display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:600;margin-right:4px">Acties</span>
+      ${b('reminder',  '📩', 'Herinnering',  'text',    'Log handmatige herinnering (note in tijdlijn)', isTerminal)}
+      ${b('promise',   '🤝', 'Toezegging',   'ok',      'Betaalbelofte loggen (bedrag + datum)',         isTerminal)}
+      ${b('close',     '✅', 'Sluit dossier','ok',      'Klant afhandelen (opgelost)',                    false)}
+      ${b('dispute',   '⚠',  'Dispuut',      'warn',    'Geschil markeren — flow parkeren',              isTerminal)}
+      ${b('incasso',   '⚖',  'Naar incasso', 'danger',  'Incasso-dossier aanmaken',                       isTerminal)}
+      ${b('pause',     '⏸',  'Pauzeer flow', 'warn',    'Aanmaan-flow tijdelijk stoppen',                 isTerminal)}
+    </div>`;
+  }
+
+  window.__wbxCaseAction = (fn, cid) => {
+    if (!fn || !cid) return;
+    if (fn === 'reminder') _caseActReminder(cid);
+    else if (fn === 'promise') _caseActPromise(cid);
+    else if (fn === 'close')   _caseActClose(cid);
+    else if (fn === 'dispute') _caseActDispute(cid);
+    else if (fn === 'incasso') _caseActIncasso(cid);
+    else if (fn === 'pause')   _caseActPause(cid);
+  };
+
+  async function _caseActReminder(cid) {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const reason = await _askReason('Herinnering loggen', 'Kort wat je hebt verstuurd (bv. "WhatsApp-reminder verstuurd" of "Belafspraak gemaakt om vrijdag terug te bellen").', { okLabel: 'Log' });
+    if (!reason) return;
+    if (_ui.caseActBusy['reminder:' + cid]) return;
+    _ui.caseActBusy['reminder:' + cid] = true;
+    const r = await apiPost('/api/dunning-pipeline-add-log', { customer_id: cid, body: '📩 Herinnering: ' + reason });
+    _ui.caseActBusy['reminder:' + cid] = false;
+    if (!r.ok) { _toast('Loggen mislukt: ' + r.error, 'error'); return; }
+    _toast('Herinnering gelogd.', 'success');
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _repaintCaseSheet();
+  }
+
+  async function _caseActPromise(cid) {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Bedrag (€)</div>
+            <input id="wbxProAmt" type="number" step="0.01" min="0.01" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+          </div>
+          <div style="flex:1">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Belofte-datum</div>
+            <input id="wbxProDate" type="date" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Toelichting (optioneel)</div>
+          <textarea id="wbxProNote" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box" placeholder="Klant zegt volgende week betaald te hebben na salaris…"></textarea>
+        </div>
+      </div>`;
+    const form = await _askForm('Betaalbelofte loggen?', bodyHtml, (root) => {
+      const amt  = Number(root.querySelector('#wbxProAmt')?.value || 0);
+      const date = root.querySelector('#wbxProDate')?.value || null;
+      const note = String(root.querySelector('#wbxProNote')?.value || '').trim();
+      if (!(amt > 0))  { _toast('Bedrag > 0 vereist.', 'warn'); return null; }
+      if (!date) { _toast('Datum vereist.', 'warn'); return null; }
+      return { amt, date, note };
+    }, { okLabel: 'Log' });
+    if (!form) return;
+    if (_ui.caseActBusy['promise:' + cid]) return;
+    _ui.caseActBusy['promise:' + cid] = true;
+    const body = `🤝 Toezegging: ${eur(form.amt)} op ${form.date}${form.note ? ' — ' + form.note : ''}`;
+    const r = await apiPost('/api/dunning-pipeline-add-log', { customer_id: cid, body });
+    _ui.caseActBusy['promise:' + cid] = false;
+    if (!r.ok) { _toast('Loggen mislukt: ' + r.error, 'error'); return; }
+    _toast('Toezegging gelogd.', 'success');
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _repaintCaseSheet();
+  }
+
+  async function _caseActClose(cid) {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const reason = await _askReason('Dossier sluiten', 'Waarom sluit je dit dossier af? (bv. "Volledig betaald op 12/8", "Kwijtschelding akkoord").', { okLabel: 'Sluit' });
+    if (!reason || reason.length < 5) { if (reason) _toast('Reden min 5 tekens.', 'warn'); return; }
+    if (_ui.caseActBusy['close:' + cid]) return;
+    _ui.caseActBusy['close:' + cid] = true;
+    let r = await apiPost('/api/finance-dunning-close-customer', { customer_id: cid, reason });
+    if (!r.ok && r.status === 409 && r.json?.code === 'HAS_OPEN_INVOICES') {
+      _ui.caseActBusy['close:' + cid] = false;
+      const openEur = Number(r.json.open_amount_eur ?? 0);
+      const openCnt = Number(r.json.open_count ?? 0);
+      const force = await _askConfirm('Openstaand bedrag — sluiten alsnog forceren?',
+        `Deze klant heeft nog <b>${eur(openEur)}</b> open over <b>${openCnt}</b> factuur/facturen. Wil je toch sluiten?`,
+        { okLabel: 'Ja, forceer sluiten', tone: 'danger' });
+      if (!force) return;
+      _ui.caseActBusy['close:' + cid] = true;
+      r = await apiPost('/api/finance-dunning-close-customer', { customer_id: cid, reason, force: true });
+    }
+    _ui.caseActBusy['close:' + cid] = false;
+    if (!r.ok) { _toast('Sluiten mislukt: ' + r.error, 'error'); return; }
+    _toast('Dossier gesloten.', 'success');
+    _live.overzicht.fetched = false;
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _repaintCaseSheet();
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  async function _caseActDispute(cid) {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const reason = await _askReason('Dispuut markeren', 'Waarom betwist de klant de factuur? (min 5 tekens)', { okLabel: 'Markeer' });
+    if (!reason || reason.length < 5) { if (reason) _toast('Reden min 5 tekens.', 'warn'); return; }
+    if (_ui.caseActBusy['dispute:' + cid]) return;
+    _ui.caseActBusy['dispute:' + cid] = true;
+    const r = await apiPost('/api/finance-dunning-mark-disputed', { customer_id: cid, reason });
+    _ui.caseActBusy['dispute:' + cid] = false;
+    if (!r.ok) { _toast('Dispuut mislukt: ' + r.error, 'error'); return; }
+    _toast('Klant staat op dispuut — flow geparkeerd.', 'success');
+    _live.overzicht.fetched = false;
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _repaintCaseSheet();
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  async function _caseActIncasso(cid) {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    const ok = await _askConfirm('Incasso-dossier aanmaken?',
+      `Klant wordt overgedragen aan het incasso-bureau. De dunning-flow stopt. Dit is een <b>zware stap</b> — zorg dat WIK-brief en gesprekken uitputtend zijn geweest.`,
+      { okLabel: 'Ja, maak dossier', tone: 'danger' });
+    if (!ok) return;
+    if (_ui.caseActBusy['incasso:' + cid]) return;
+    _ui.caseActBusy['incasso:' + cid] = true;
+    let r = await apiPost('/api/incasso-dossier-create', { customer_id: cid });
+    // 200 met needs_brief=true → particulier zonder WIK-brief → bevestigen
+    if (r.ok && r.json?.needs_brief) {
+      _ui.caseActBusy['incasso:' + cid] = false;
+      const cont = await _askConfirm('Geen WIK-brief gevonden',
+        `Er is nog géén 14-dagenbrief verstuurd naar deze particulier. Wettelijk is dat verplicht vóór incasso. Wil je toch doorgaan (bv. omdat brief per andere weg is verstuurd)?`,
+        { okLabel: 'Ja, doorgaan zonder brief', tone: 'danger' });
+      if (!cont) return;
+      _ui.caseActBusy['incasso:' + cid] = true;
+      r = await apiPost('/api/incasso-dossier-create', { customer_id: cid, confirm_no_brief: true });
+    }
+    _ui.caseActBusy['incasso:' + cid] = false;
+    if (!r.ok) { _toast('Incasso-dossier mislukt: ' + r.error, 'error'); return; }
+    _toast('Incasso-dossier aangemaakt.', 'success');
+    _live.overzicht.fetched = false;
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _repaintCaseSheet();
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  async function _caseActPause(cid) {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const reason = await _askReason('Aanmaan-flow pauzeren', 'Waarom pauzeer je? (bv. "Wacht op klant-terugkoppeling", "Interne discussie")', { okLabel: 'Pauzeer' });
+    if (!reason) return;
+    if (_ui.caseActBusy['pause:' + cid]) return;
+    _ui.caseActBusy['pause:' + cid] = true;
+    const r = await apiPost('/api/finance-dunning-pause-by-customer', { customer_id: cid, reason });
+    _ui.caseActBusy['pause:' + cid] = false;
+    if (r.status === 404) { _toast('Geen actieve dunning-run gevonden.', 'warn'); return; }
+    if (!r.ok) { _toast('Pauzeren mislukt: ' + r.error, 'error'); return; }
+    const prev = r.json?.previous_status;
+    _toast(prev === 'paused' ? 'Flow was al gepauzeerd.' : 'Flow gepauzeerd.', 'success');
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _repaintCaseSheet();
   }
 
   function _caseSheetInvoicesHtml(cid) {
