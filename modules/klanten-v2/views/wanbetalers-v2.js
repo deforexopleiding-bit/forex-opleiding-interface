@@ -2255,6 +2255,13 @@
       ).toLowerCase().includes(q));
     }
     if (!items.length) return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">Geen wanbetaler-gesprekken in dit filter.</div>`;
+    // BROK 1 INBOX-1: sorteer op laatste bericht (nieuwste bovenaan). Ongelezen
+    // convs uit dezelfde tijdsband komen daarmee natuurlijk boven eerder-gelezen.
+    items = items.slice().sort((a, b) => {
+      const ta = a.last_message_at ? Date.parse(a.last_message_at) : 0;
+      const tb = b.last_message_at ? Date.parse(b.last_message_at) : 0;
+      return tb - ta;
+    });
     return items.map((c) => {
       const cid = String(c.id);
       const active = _ui.inbox.selectedConv === cid;
@@ -2263,12 +2270,18 @@
       const when = c.last_message_at ? _fmtDateTime(c.last_message_at) : '';
       const unread = Number(c.unread_count) || 0;
       const briefBadge = c.brief_sent ? '<span title="Brief verstuurd" style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue);font-weight:600;margin-left:4px">✉</span>' : '';
-      return `<div onclick="__wbxInboxSelect('${esc(cid)}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${active ? 'var(--brand-soft,#E2F1F5)' : 'transparent'};transition:background .08s">
+      // BROK 1 INBOX-1: unread-indicatie versterken — 3px rose left-stripe +
+      // iets warmere rij-achtergrond zodat ongelezen op afstand herkenbaar zijn.
+      const bg = active
+        ? 'var(--brand-soft,#E2F1F5)'
+        : (unread > 0 ? 'var(--rose-soft, rgba(244,63,94,.06))' : 'transparent');
+      const stripe = unread > 0 && !active ? 'border-left:3px solid var(--rose);padding-left:9px;' : '';
+      return `<div onclick="__wbxInboxSelect('${esc(cid)}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${bg};transition:background .08s;${stripe}">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
           <div style="font-weight:${unread > 0 ? '700' : '500'};font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(name)}${briefBadge}</div>
-          <div style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(when)}</div>
+          <div style="font-size:10.5px;color:${unread > 0 ? 'var(--rose)' : 'var(--text-3)'};white-space:nowrap;font-weight:${unread > 0 ? '600' : '400'}">${esc(when)}</div>
         </div>
-        <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px">${esc(preview)}</div>
+        <div style="font-size:11.5px;color:${unread > 0 ? 'var(--text-1)' : 'var(--text-3)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;font-weight:${unread > 0 ? '500' : '400'}">${esc(preview)}</div>
         ${unread > 0 ? `<div style="margin-top:3px"><span style="display:inline-block;background:var(--rose);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">${unread}</span></div>` : ''}
       </div>`;
     }).join('');
@@ -2350,7 +2363,7 @@
     if (!ctx) return '';
     const cust = ctx.customer || {};
     const invs = asArr(ctx.open_invoices);
-    const totalOpen = Number(ctx.totals?.total_open_cents || 0) / 100;
+    const totalOpen = Number(ctx.totals?.open_amount ?? 0);
     return `<div style="border-bottom:1px solid var(--border);background:var(--surface-2);padding:9px 14px;font-size:12px">
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:baseline">
         <b>${esc(cust.name || 'Onbekende klant')}</b>
@@ -2362,6 +2375,106 @@
       </div>
     </div>`;
   }
+
+  /* BROK 1 INBOX-1: Klantgegevens-paneel (right-side, 300px). Toont naam,
+     contactkanalen (mail/telefoon met klik-acties), open facturen (compact),
+     actieve abo's, MRR, en snelle dossier-link. Placeholder als er nog geen
+     conv-selectie is; skeleton als ctx nog laadt. */
+  function _inboxKlantgegevensHtml(convId) {
+    if (!convId) {
+      return `<div style="padding:60px 16px;text-align:center;color:var(--text-3);font-size:12px">
+        <div style="font-size:22px;margin-bottom:6px;opacity:.5">👤</div>
+        Selecteer een gesprek om klantgegevens te tonen.
+      </div>`;
+    }
+    const ctx = _live.inbox.ctx.byConv[convId];
+    const loading = _live.inbox.ctx.loading[convId];
+    if (!ctx && loading) return `<div style="padding:14px">${_skelRows(5)}</div>`;
+    if (!ctx) return `<div style="padding:60px 16px;text-align:center;color:var(--text-3);font-size:12px">Geen klant-context beschikbaar.</div>`;
+    const cust = ctx.customer || {};
+    const invs = asArr(ctx.open_invoices);
+    const subs = asArr(ctx.active_subscriptions);
+    const t = ctx.totals || {};
+    const totalOpen = Number(t.open_amount ?? 0);
+    const mrr = Number(t.subscriptions_total_mrr ?? 0);
+    const phone = cust.phone || ctx.conversation?.phone_number || null;
+
+    if (!cust.id) {
+      return `<div style="padding:14px;font-size:12px">
+        <div style="color:var(--text-3);margin-bottom:8px;font-weight:600">Onbekende klant</div>
+        ${phone ? `<div style="font-size:11.5px;color:var(--text-2)">📞 ${esc(phone)}</div>` : ''}
+        <div style="margin-top:10px;font-size:11.5px;color:var(--amber)">Nummer nog niet gekoppeld aan een klant.</div>
+      </div>`;
+    }
+
+    const callBtn = phone
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxCall('${esc(cust.id)}','${esc(phone)}')" title="Bel via softphone">📞 Bel</button>`
+      : '';
+    const mailBtn = cust.email
+      ? `<a class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;text-decoration:none" href="mailto:${esc(cust.email)}" title="Mail-client openen">✉ Mail</a>`
+      : '';
+    const dossierBtn = `<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 10px" onclick="__wbxOpenCase('${esc(cust.id)}')" title="Open case-sheet">Dossier →</button>`;
+
+    const invsHtml = invs.length
+      ? invs.slice(0, 8).map((iv) => {
+          const num = iv.invoice_number || iv.id;
+          const overdue = iv.days_overdue > 0;
+          return `<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px dashed var(--border);font-size:11.5px">
+            <div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <span style="font-family:'IBM Plex Mono',monospace">${esc(num)}</span>
+              ${overdue ? `<span style="color:var(--rose);font-size:10px;margin-left:4px">+${iv.days_overdue}d</span>` : ''}
+            </div>
+            <div style="font-family:'IBM Plex Mono',monospace;color:var(--text-1);font-weight:600">${eur(iv.amount_open)}</div>
+          </div>`;
+        }).join('')
+      : `<div style="font-size:11.5px;color:var(--text-3);padding:6px 0">Geen open facturen.</div>`;
+    const subsHtml = subs.length
+      ? subs.slice(0, 4).map((s) => `<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 0;font-size:11.5px">
+          <div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.description || 'Abonnement')}</div>
+          <div style="font-family:'IBM Plex Mono',monospace;color:var(--text-3)">${eur(s.mrr)}/m</div>
+        </div>`).join('')
+      : '';
+
+    return `<div style="display:flex;flex-direction:column;height:100%;overflow-y:auto">
+      <div style="padding:14px 14px 10px;border-bottom:1px solid var(--border);background:var(--surface-2)">
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:3px">${esc(cust.name || 'Onbekende klant')}</div>
+        ${cust.email ? `<div style="font-size:11.5px;color:var(--text-2);word-break:break-all;margin-bottom:2px">✉ ${esc(cust.email)}</div>` : ''}
+        ${phone ? `<div style="font-size:11.5px;color:var(--text-2)">📞 ${esc(phone)}</div>` : ''}
+        <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+          ${callBtn}${mailBtn}${dossierBtn}
+        </div>
+      </div>
+
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);font-weight:600">Openstaand</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:700;color:var(--rose)">${eur(totalOpen)}</div>
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-bottom:4px">${invs.length} factuur${invs.length === 1 ? '' : 'en'}</div>
+        ${invsHtml}
+      </div>
+
+      ${subs.length ? `<div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);font-weight:600">Abonnementen</div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-2)">${eur(mrr)}/m</div>
+        </div>
+        ${subsHtml}
+      </div>` : ''}
+    </div>`;
+  }
+
+  // Softphone-call vanuit klantgegevens-paneel — hergebruikt bel-flow uit
+  // case-sheet (custom confirm-modal + race-guard zit in __wbxSoftphoneCall).
+  window.__wbxCall = (cid, phone) => {
+    if (typeof window.__wbxSoftphoneCall === 'function') {
+      window.__wbxSoftphoneCall(cid, phone);
+    } else if (window.KlxSoftphone?.call) {
+      window.KlxSoftphone.call(phone);
+    } else {
+      _toast('Softphone niet beschikbaar.', 'warn');
+    }
+  };
 
   function inboxView() {
     if (!_live.inbox.convs.fetched && !_live.inbox.convs.loading && !_live.inbox.convs.error) queueMicrotask(_fetchInboxConvs);
@@ -2386,9 +2499,11 @@
           <div id="wbxInboxList" style="flex:1;overflow-y:auto;min-height:0">${_inboxConvsListHtml()}</div>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-          ${convId ? _inboxCtxHtml(convId) : ''}
           <div style="flex:1;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
           ${_inboxComposeHtml(convId)}
+        </div>
+        <div style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+          ${_inboxKlantgegevensHtml(convId)}
         </div>
       </div>
       ${_officeHoursBanner()}
