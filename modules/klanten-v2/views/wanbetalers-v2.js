@@ -1897,22 +1897,52 @@
         || 'Onbekend';
   }
 
-  /* SURFACE D — NL-labels + iconen per action_type (v1-parity). */
+  /* SURFACE D — NL-labels + iconen per action_type (v1-parity).
+     BROK WB-FIX-5 #2: MANUAL_FOLLOWUP-splitting op payload.kind (uit
+     dunning-step-executors.js — 'call' voor bel-taken, 'letter' voor
+     WIK-brief-taken, 'other' voor generic). Effectieve type-key wordt
+     _actieEffectiveType(a) — die produceert MANUAL_FOLLOWUP_CALL /
+     _LETTER / _OTHER. Zo krijgt "Stuur WIK-brief" niet meer de generieke
+     "📞 Belafspraak" chip + Bel-knop, maar een correcte "✉ Brief-taak"
+     chip zonder Bel-knop. */
   const _ACT_META = {
-    MANUAL_FOLLOWUP:          { label: 'Belafspraak',              icon: '📞', order: 1 },
-    MANUAL_CONFIRM_PROMISE:   { label: 'Betaaltoezegging bevestigen', icon: '🤝', order: 2 },
-    MANUAL_VERIFY_PAYMENT:    { label: 'Betaling verifiëren',      icon: '✅', order: 3 },
-    MANUAL_ESCALATION:        { label: 'Escalatie',                icon: '⚠',  order: 4 },
-    MANUAL_PROPOSE_ARRANGEMENT: { label: 'Arrangement voorstellen', icon: '🤝', order: 5 },
-    TL_INVOICE_UPDATE_DUE:    { label: 'TL: factuur-vervaldatum bijwerken', icon: '📅', order: 10 },
-    TL_INVOICE_SPLIT:         { label: 'TL: factuur splitsen',     icon: '✂', order: 11 },
-    TL_SUBSCRIPTION_PAUSE:    { label: 'TL: abonnement pauzeren',  icon: '⏸', order: 12 },
-    TL_SUBSCRIPTION_STOP:     { label: 'TL: abonnement stoppen',   icon: '⏹', order: 13 },
-    TL_INVOICE_WRITEOFF:      { label: 'TL: factuur afschrijven',  icon: '🗑', order: 14 },
+    MANUAL_FOLLOWUP_CALL:      { label: 'Belafspraak',                    icon: '📞', order: 1,  showBel: true  },
+    MANUAL_FOLLOWUP_LETTER:    { label: 'Brief-taak',                     icon: '✉',  order: 2,  showBel: false },
+    MANUAL_FOLLOWUP_OTHER:     { label: 'Follow-up',                      icon: '📝', order: 3,  showBel: false },
+    MANUAL_FOLLOWUP:           { label: 'Follow-up',                      icon: '📝', order: 3,  showBel: false }, // legacy zonder kind
+    MANUAL_CONFIRM_PROMISE:    { label: 'Betaaltoezegging bevestigen',    icon: '🤝', order: 4,  showBel: false },
+    MANUAL_VERIFY_PAYMENT:     { label: 'Betaling verifiëren',            icon: '✅', order: 5,  showBel: false },
+    MANUAL_ESCALATION:         { label: 'Escalatie',                      icon: '⚠',  order: 6,  showBel: false },
+    MANUAL_PROPOSE_ARRANGEMENT:{ label: 'Regeling voorstellen',           icon: '🤝', order: 7,  showBel: false },
+    TL_INVOICE_UPDATE_DUE:     { label: 'TL: factuur-vervaldatum bijwerken', icon: '📅', order: 10, showBel: false },
+    TL_INVOICE_SPLIT:          { label: 'TL: factuur splitsen',           icon: '✂',  order: 11, showBel: false },
+    TL_SUBSCRIPTION_PAUSE:     { label: 'TL: abonnement pauzeren',        icon: '⏸',  order: 12, showBel: false },
+    TL_SUBSCRIPTION_STOP:      { label: 'TL: abonnement stoppen',         icon: '⏹',  order: 13, showBel: false },
+    TL_INVOICE_WRITEOFF:       { label: 'TL: factuur afschrijven',        icon: '🗑', order: 14, showBel: false },
   };
+  /* Bepaalt effectieve type-key inclusief MANUAL_FOLLOWUP kind-split.
+     Volgorde: payload.kind (canonical uit dunning-step-executors) →
+     payload.title regex-fallback (bv. handmatige vrije-taken zonder
+     kind-veld) → raw action_type. */
+  function _actieEffectiveType(a) {
+    const at = String(a?.action_type || '').trim();
+    if (at !== 'MANUAL_FOLLOWUP') return at;
+    const kind = String(a?.payload?.kind || '').toLowerCase().trim();
+    if (kind === 'call')                                       return 'MANUAL_FOLLOWUP_CALL';
+    if (kind === 'letter' || kind === 'brief')                 return 'MANUAL_FOLLOWUP_LETTER';
+    if (kind === 'other' || kind === '')                       {
+      // Fallback op title-heuristiek voor legacy rows zonder kind.
+      const title = String(a?.payload?.title || '').toLowerCase();
+      if (/^bel\s|^bel-taak|bel klant/i.test(title))           return 'MANUAL_FOLLOWUP_CALL';
+      if (/wik|brief|aangetekend|incasso.*voorbereid/i.test(title)) return 'MANUAL_FOLLOWUP_LETTER';
+      return 'MANUAL_FOLLOWUP_OTHER';
+    }
+    return 'MANUAL_FOLLOWUP_OTHER';
+  }
   function _actieTypeLabel(type) { return (_ACT_META[type]?.label) || type; }
   function _actieTypeIcon (type) { return (_ACT_META[type]?.icon)  || '•'; }
   function _actieTypeOrder(type) { return (_ACT_META[type]?.order) || 99; }
+  function _actieTypeShowBel(type) { return !!_ACT_META[type]?.showBel; }
 
   /* SURFACE D — Groep-body voor Vandaag / Komend tabs. Groepeert pending
      items per action_type in vaste v1-volgorde (Belafspraak eerst, dan
@@ -1922,7 +1952,10 @@
   function _actiesGroupedBodyHtml(pendingItems, tab, q) {
     const groups = new Map();
     for (const a of asArr(pendingItems)) {
-      const type = a.action_type || 'OVERIG';
+      // BROK WB-FIX-5 #2: groepeer op effectieve type (incl. FOLLOWUP-kind-
+      // split) zodat WIK-brief-taken en bel-taken elk in hun eigen groep
+      // vallen (met correcte label + knoppen).
+      const type = _actieEffectiveType(a) || 'OVERIG';
       if (!groups.has(type)) groups.set(type, []);
       groups.get(type).push(a);
     }
@@ -1934,14 +1967,15 @@
         const sb = b.scheduled_for ? Date.parse(b.scheduled_for) : (b.created_at ? Date.parse(b.created_at) : 0);
         return sa - sb;
       });
-      const isFollowup = type === 'MANUAL_FOLLOWUP';
+      const isFollowup = type === 'MANUAL_FOLLOWUP_CALL';
       const isPromise  = type === 'MANUAL_CONFIRM_PROMISE';
+      const isLetter   = type === 'MANUAL_FOLLOWUP_LETTER';
       return `<div style="border-top:1px solid var(--border)">
         <div style="padding:7px 14px;background:var(--surface-2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
           <span>${_actieTypeIcon(type)} ${esc(_actieTypeLabel(type))}</span>
           <span style="opacity:.7">${arr.length}</span>
         </div>
-        ${arr.map((a) => _actieCardHtml(a, { isFollowup, isPromise })).join('')}
+        ${arr.map((a) => _actieCardHtml(a, { isFollowup, isPromise, isLetter })).join('')}
       </div>`;
     });
 
@@ -1998,22 +2032,35 @@
     const openEur = ov ? (Number(ov.total_open_cents) || 0) / 100 : (amt != null ? Number(amt) : null);
     const days = ov ? Number(ov.days_overdue) || 0 : null;
     const nFact = ov ? Number(ov.open_invoice_count) || 0 : null;
-    // BROK WB-FIX-4 #2: kanaal-mapping (WhatsApp/E-mail/etc) + volle _fmtDateTime
-    // (v=28 had ".slice(5)" die "16 aug 15:01" tot "g 15:01" verminkt en
-    // fallback "actie" doorschemerde). Nu: "Volgende: <kanaal> <datum tijd>".
-    const nextAt      = ov?.next_action_at || null;
-    const nextRawType = String(ov?.next_action_type || ov?.next_action_channel || ov?.next_action_kind || '').toLowerCase().trim();
-    const NEXT_LABEL = {
-      whatsapp: 'WhatsApp', wa: 'WhatsApp',
-      email: 'E-mail', mail: 'E-mail',
-      brief: 'Brief', letter: 'Brief',
-      call: 'Bel-actie', phone: 'Bel-actie',
-      reminder: 'Herinnering', reminder_email: 'Herinnering (e-mail)', reminder_wa: 'Herinnering (WA)',
-      task: 'Taak', followup: 'Follow-up',
+    // BROK WB-FIX-5 #1: mapping op REAL veldnamen uit /api/wanbetalers-
+    // overzicht-list: `next_action_step_type` (step_type enum uit
+    // dunning_workflow_steps: email/whatsapp/wait/task/stop/resume_dunning)
+    // en `next_action_step_title` (bv. "Bel klant" / "Stuur WIK-14-
+    // dagenbrief"). Voorheen: mijn code checkte non-bestaande velden
+    // (next_action_type/_channel/_kind) → altijd fallback "Actie".
+    // Nu: prioriteit voor step_title heuristiek (specifieker), dan step_type.
+    const nextAt        = ov?.next_action_at || null;
+    const nextStepType  = String(ov?.next_action_step_type || '').toLowerCase().trim();
+    const nextStepTitle = String(ov?.next_action_step_title || '').trim();
+    const STEP_TYPE_LABEL = {
+      email:          'E-mail',
+      whatsapp:       'WhatsApp',
+      wait:           'Wachten',
+      task:           'Taak',
+      stop:           'Einde flow',
+      resume_dunning: 'Herstart flow',
     };
-    const nextLabel = NEXT_LABEL[nextRawType] || (nextRawType ? nextRawType.charAt(0).toUpperCase() + nextRawType.slice(1) : 'Actie');
+    // Titel-heuristiek voor task-steps (specifieker dan generieke "Taak").
+    let nextLabel;
+    if (/^bel(\s|klant)/i.test(nextStepTitle))              nextLabel = 'Bel';
+    else if (/wik|aangetekend|brief/i.test(nextStepTitle))   nextLabel = 'Brief';
+    else if (/incasso/i.test(nextStepTitle))                 nextLabel = 'Incasso';
+    else if (/herinner/i.test(nextStepTitle))                nextLabel = 'Herinnering';
+    else if (STEP_TYPE_LABEL[nextStepType])                  nextLabel = STEP_TYPE_LABEL[nextStepType];
+    else if (nextStepTitle)                                  nextLabel = nextStepTitle.length > 22 ? nextStepTitle.slice(0, 22) + '…' : nextStepTitle;
+    else                                                     nextLabel = 'Actie';
     const nextBadge = nextAt
-      ? `<span style="font-size:10.5px;color:var(--brand);margin-left:4px" title="Volgende geplande actie">↪ Volgende: <b>${esc(nextLabel)}</b> ${esc(_fmtDateTime(nextAt))}</span>`
+      ? `<span style="font-size:10.5px;color:var(--brand);margin-left:4px" title="Volgende geplande actie${nextStepTitle ? ' — ' + esc(nextStepTitle) : ''}">↪ Volgende: <b>${esc(nextLabel)}</b> ${esc(_fmtDateTime(nextAt))}</span>`
       : '';
     const isPaused = !!(asArr(_live.pausedList?.items).find((r) => String(r.customer_id) === String(cid)));
     const pausedBadge = isPaused ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--amber-soft);color:var(--amber);font-weight:600;margin-left:4px">⏸ Gepauzeerd</span>' : '';
@@ -2028,9 +2075,19 @@
     // Type-specifieke knoppen.
     let btns;
     if (opts.isFollowup) {
+      // MANUAL_FOLLOWUP kind='call' — bel-taak met softphone-shortcut.
       btns = `
         ${cid ? `<button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--brand);${disStyle}" onclick="event.stopPropagation();__wbxActFollowupBel('${esc(cid)}')" title="Bel via softphone">📞 Bel</button>` : ''}
         <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="event.stopPropagation();__wbxPaApprove('${esc(a.id)}')" title="Belafspraak afgehandeld">${busy ? '…' : 'Afgehandeld'}</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="event.stopPropagation();__wbxPaReject('${esc(a.id)}')" title="Overslaan (met reden)">Overslaan</button>
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--amber);${disStyle}" onclick="event.stopPropagation();__wbxActSnooze('${esc(a.id)}')" title="Later inplannen">🕒 Later</button>`;
+    } else if (opts.isLetter) {
+      // BROK WB-FIX-5 #2: MANUAL_FOLLOWUP kind='letter' — brief-taak. GEEN
+      // Bel-knop (die suggereerde ten onrechte een bel-actie op een brief).
+      // Wel: link naar WIK-brief-flow uit SURFACE B (openCase -> WIK-card).
+      btns = `
+        ${cid ? `<button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--brand);${disStyle}" onclick="event.stopPropagation();__wbxOpenCase('${esc(cid)}')" title="Open dossier -> WIK-brief-card">✉ Naar brief-flow</button>` : ''}
+        <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="event.stopPropagation();__wbxPaApprove('${esc(a.id)}')" title="Brief verstuurd / afgehandeld">${busy ? '…' : 'Afgehandeld'}</button>
         <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="event.stopPropagation();__wbxPaReject('${esc(a.id)}')" title="Overslaan (met reden)">Overslaan</button>
         <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--amber);${disStyle}" onclick="event.stopPropagation();__wbxActSnooze('${esc(a.id)}')" title="Later inplannen">🕒 Later</button>`;
     } else if (opts.isPromise) {
@@ -2048,11 +2105,12 @@
         <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--text-3);${disStyle}" onclick="event.stopPropagation();__wbxPaMarkExecuted('${esc(a.id)}')" title="Handmatig al uitgevoerd">✓ Gedaan</button>`;
     }
 
-    // BROK WB-FIX-4 #4: type-label OP kaart (icoon + NL-label) — v1-parity.
-    // Ook: fix ReferenceError uit v=27 waar `name` gebruikt werd — moet
-    // `customer` zijn (dat is de var in scope).
-    const typeIcon  = _actieTypeIcon(a.action_type);
-    const typeLabel = _actieTypeLabel(a.action_type);
+    // BROK WB-FIX-4 #4 + WB-FIX-5 #2: type-label op kaart. Gebruik
+    // _actieEffectiveType (met FOLLOWUP-kind-split) zodat brief-taken
+    // "✉ Brief-taak" krijgen i.p.v. "📞 Belafspraak".
+    const effType   = _actieEffectiveType(a);
+    const typeIcon  = _actieTypeIcon(effType);
+    const typeLabel = _actieTypeLabel(effType);
     const typeChip  = `<span style="font-size:9.5px;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--text-3);font-weight:600;letter-spacing:.03em;margin-left:6px;vertical-align:middle">${typeIcon} ${esc(typeLabel)}</span>`;
     return `<div style="padding:9px 14px;border-bottom:1px solid var(--border);cursor:${cid ? 'pointer' : 'default'};transition:background .08s"
       ${cid ? `onclick="__wbxOpenCase('${cidClick}',{customer_name:'${String(customer).replace(/'/g,"\\'")}'})" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'"` : ''}>
@@ -6254,6 +6312,7 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+  console.debug('[wanbetalers-v2] v=34 BROK WB-FIX-5: (#1) Volgende-badge mapt nu op ECHTE overzicht-velden next_action_step_type (email/whatsapp/wait/task/stop/resume_dunning) + next_action_step_title heuristiek (Bel/Brief/Incasso/Herinnering). Voorheen: mijn code checkte non-bestaande velden -> altijd "Actie"-fallback. (#2) MANUAL_FOLLOWUP-splitting op payload.kind: kind=call -> "📞 Belafspraak" (Bel-knop OK), kind=letter -> "✉ Brief-taak" (Bel-knop weg, "Naar brief-flow"-knop naar SURFACE B WIK-card), kind=other -> "📝 Follow-up". Fallback: title-regex (bv. "Stuur WIK-14-dagenbrief" -> letter). Groepering ook via effectieve type — brief-taken en bel-taken vallen nu in APARTE groepen. Ook: MANUAL_PROPOSE_ARRANGEMENT label naar "Regeling voorstellen" (v1-parity, was "Arrangement voorstellen").');
   console.debug('[wanbetalers-v2] v=33 BROK WB-POLISH-4: dead-code cleanup — gesprekkenView + _gspListInnerHtml + _gspDetailHtml body volledig verwijderd (~180 regels dood-code weg). _repaintGspList + _repaintGspDetail zijn no-op stubs (callers _fetchCallLog/_fetchTimeline/__wbxCallSave/__wbxCallSet* + __wbxNoteSave triggeren nu geen render meer; case-sheet SURFACE B doet z\'n eigen repaint). __wbxCallSet*/__wbxGspSelect/__wbxGspSearch* blijven als window-refs (geen callers meer; volgende cleanup-brok kan die schrappen).');
   console.debug('[wanbetalers-v2] v=32 BROK WB-POLISH-3: arrangement-detail drawer. Body-level right-slide (760px) + scrim + Escape. Data via /api/arrangements-detail?id=X. Secties: header (type — klant + status-pill), Arrangement kv-grid (type/status/dates/reden), Facturen-lijst (indien invs), Pending actions-tabel, footer met ✕ Annuleer (danger, delegates naar __wbxArrCancel voor ACTIEF/VOORGESTELD). Klik op Actieve arrangementen-rij (actiesView) opent drawer; cancel-btn heeft event.stopPropagation.');
   console.debug('[wanbetalers-v2] v=31 BROK WB-POLISH-2: pipeline multi-select — checkbox per kaart, shift-klik range binnen dezelfde fase, bulk-bar met count + fase-picker + Verplaats-knop. Typ-to-confirm "VERPLAATS" (of "TERMINAAL" bij opgelost/afschrijven met extra rood-danger-hint "motor stopt voor N klanten"). Race-guard per cid (stageBusy) + globale pipeBulkBusy. Skip no-ops (klant al in target-fase). Invalidate overzicht na move -> kolom-tellingen updaten zonder scroll-reset.');
