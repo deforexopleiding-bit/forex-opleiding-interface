@@ -193,18 +193,27 @@ async function doSave() {
 
 // ── Wire ───────────────────────────────────────────────────────────────────
 
+// BROK SALES-2 (v=2, 2026-08-19): idempotente bindOnce (zie invoice-create.js).
+function bindOnce(node, evt, handler) {
+  if (!node) return;
+  const k = '__kvBound_' + evt;
+  if (node[k]) return;
+  node[k] = true;
+  node.addEventListener(evt, handler);
+}
+
 function wire() {
   const box = document.getElementById('dfoModal');
   if (!box) return;
 
   box.querySelectorAll('[data-kv-invpay-close], [data-kv-invpay-cancel]').forEach((b) => {
-    b.addEventListener('click', () => D().closeModal());
+    bindOnce(b, 'click', () => D().closeModal());
   });
-  box.querySelector('[data-kv-invpay-submit]')?.addEventListener('click', doSave);
-  box.querySelector('#kv-invpay-form')?.addEventListener('submit', (e) => { e.preventDefault(); doSave(); });
+  bindOnce(box.querySelector('[data-kv-invpay-submit]'), 'click', doSave);
+  bindOnce(box.querySelector('#kv-invpay-form'), 'submit', (e) => { e.preventDefault(); doSave(); });
 
   box.querySelectorAll('[data-kv-invpay-input]').forEach((inp) => {
-    inp.addEventListener('input', (e) => {
+    bindOnce(inp, 'input', (e) => {
       state.form[e.target.name] = e.target.value;
       if (state.errors[e.target.name]) { delete state.errors[e.target.name]; rerenderBody(); }
     });

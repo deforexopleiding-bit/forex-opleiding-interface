@@ -532,16 +532,31 @@ async function doBookAndSend() {
 
 // ── Wire ───────────────────────────────────────────────────────────────────
 
+// BROK SALES-2 (v=2, 2026-08-19): idempotente bindOnce.
+// FIX: freeze bij TYPEN in "BOEK EN VERZEND" type-gate. rerenderFoot()
+// vervangt alleen #dfoModalFoot; type-gate zit in body → body-nodes
+// blijven bestaan → wire()'s addEventListener stapelde 2^N listeners op
+// (exponential explosion, freeze bij ~14 keystrokes = 2^13 = 8192
+// listeners). bindOnce markeert node[__kvBound_<evt>]=true zodat ze
+// niet 2× gebind worden.
+function bindOnce(node, evt, handler) {
+  if (!node) return;
+  const k = '__kvBound_' + evt;
+  if (node[k]) return;
+  node[k] = true;
+  node.addEventListener(evt, handler);
+}
+
 function wire() {
   const box = document.getElementById('dfoModal');
   if (!box) return;
 
   box.querySelectorAll('[data-kv-invnew-close], [data-kv-invnew-cancel]').forEach((b) => {
-    b.addEventListener('click', () => { if (!state.saving) D().closeModal(); });
+    bindOnce(b, 'click', () => { if (!state.saving) D().closeModal(); });
   });
 
   // Overlay-back
-  box.querySelector('[data-kv-invnew-overlay-back]')?.addEventListener('click', () => {
+  bindOnce(box.querySelector('[data-kv-invnew-overlay-back]'), 'click', () => {
     if (state.saving) return;
     state.overlay = null;
     state.confirmBookChecked = false;
@@ -553,11 +568,11 @@ function wire() {
 
   // Base form inputs — meta
   box.querySelectorAll('[data-kv-invnew-meta]').forEach((inp) => {
-    inp.addEventListener('input', (e) => {
+    bindOnce(inp, 'input', (e) => {
       state.form[e.target.name] = e.target.value;
       if (state.errors[e.target.name]) { delete state.errors[e.target.name]; }
     });
-    inp.addEventListener('change', (e) => { state.form[e.target.name] = e.target.value; });
+    bindOnce(inp, 'change', (e) => { state.form[e.target.name] = e.target.value; });
   });
   // Base form inputs — line-fields.
   // KRITIEK: NIET rerenderBody() bij typen. Dat vernietigt het <input>
@@ -588,14 +603,14 @@ function wire() {
       updateFootTotals();
     };
     // Numerieke inputs vuren 'input' events; <select> vuurt 'change'. Beide binden.
-    inp.addEventListener('input', handler);
-    inp.addEventListener('change', handler);
+    bindOnce(inp, 'input', handler);
+    bindOnce(inp, 'change', handler);
   });
-  box.querySelector('[data-kv-invnew-add]')?.addEventListener('click', () => {
+  bindOnce(box.querySelector('[data-kv-invnew-add]'), 'click', () => {
     state.form.lines.push(newRow()); rerenderBody();
   });
   box.querySelectorAll('[data-kv-invnew-del]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    bindOnce(btn, 'click', () => {
       const idx = Number(btn.getAttribute('data-kv-invnew-del'));
       if (state.form.lines.length <= 1) return;
       state.form.lines.splice(idx, 1);
@@ -606,7 +621,7 @@ function wire() {
 
   // Main-foot actie-knoppen — openen overlay of doDraft (dat één-knop-guard)
   box.querySelectorAll('[data-kv-invnew-act]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    bindOnce(btn, 'click', () => {
       const act = btn.getAttribute('data-kv-invnew-act');
       // Valideer altijd eerst — geen overlay openen op onvolledig formulier
       state.errors = validateForm();
@@ -632,34 +647,36 @@ function wire() {
   });
 
   // Overlay book — checkbox + submit
-  box.querySelector('[data-kv-invnew-book-check]')?.addEventListener('change', (e) => {
+  bindOnce(box.querySelector('[data-kv-invnew-book-check]'), 'change', (e) => {
     state.confirmBookChecked = !!e.target.checked;
     rerenderFoot();
   });
-  box.querySelector('[data-kv-invnew-book-submit]')?.addEventListener('click', doBook);
+  bindOnce(box.querySelector('[data-kv-invnew-book-submit]'), 'click', doBook);
 
   // Overlay bookSend — template + typegate + submit
-  box.querySelector('[data-kv-invnew-bs-tpl]')?.addEventListener('change', (e) => {
+  bindOnce(box.querySelector('[data-kv-invnew-bs-tpl]'), 'change', (e) => {
     state.selectedTemplateId = e.target.value;
     rerenderBody();
   });
   const typeInp = box.querySelector('[data-kv-invnew-bs-typegate]');
   if (typeInp) {
-    typeInp.addEventListener('input', (e) => {
+    bindOnce(typeInp, 'input', (e) => {
       state.typedGateBookSend = e.target.value;
       rerenderFoot();
-      // Hint sync — als match-status verandert, body bij
+      // Hint sync — als match-status verandert, body bij.
+      // NB: CSS-class op regel 328 is 'kv-invcredit-typegate' (historisch —
+      // gedeeld met invoice-credit). Werkt want de div bestaat met die naam.
       const wasMatch = state.typedGateBookSend.trim().toUpperCase() === TYPE_GATE_TEXT;
       const hint = box.querySelector('.kv-invcredit-typegate .kv-edit-field-msg');
       const shouldShowHint = state.typedGateBookSend && !wasMatch;
       if (shouldShowHint && !hint) rerenderBody();
       else if (!shouldShowHint && hint) rerenderBody();
     });
-    typeInp.addEventListener('keydown', (e) => {
+    bindOnce(typeInp, 'keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); typeInp.blur(); }
     });
   }
-  box.querySelector('[data-kv-invnew-bs-submit]')?.addEventListener('click', doBookAndSend);
+  bindOnce(box.querySelector('[data-kv-invnew-bs-submit]'), 'click', doBookAndSend);
 }
 
 // ── Templates laden (lazy voor bookSend overlay) ───────────────────────────

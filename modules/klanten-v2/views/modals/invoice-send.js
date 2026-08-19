@@ -310,42 +310,51 @@ async function doSubmit() {
 
 // ── Wire ───────────────────────────────────────────────────────────────────
 
+// BROK SALES-2 (v=2, 2026-08-19): idempotente bindOnce (zie invoice-create.js).
+function bindOnce(node, evt, handler) {
+  if (!node) return;
+  const k = '__kvBound_' + evt;
+  if (node[k]) return;
+  node[k] = true;
+  node.addEventListener(evt, handler);
+}
+
 function wire() {
   const box = document.getElementById('dfoModal');
   if (!box) return;
 
   box.querySelectorAll('[data-kv-invsend-close], [data-kv-invsend-cancel]').forEach((b) => {
-    b.addEventListener('click', () => { if (!state.saving) D().closeModal(); });
+    bindOnce(b, 'click', () => { if (!state.saving) D().closeModal(); });
   });
 
   if (state.step === 1) {
     box.querySelectorAll('[data-kv-invsend-input]').forEach((inp) => {
-      inp.addEventListener('input', (e) => {
+      bindOnce(inp, 'input', (e) => {
         state.form[e.target.name] = e.target.value;
         if (state.errors[e.target.name]) { delete state.errors[e.target.name]; }
         // Bij template-wisseling → volledige preview refresh; anders alleen lokaal.
         if (e.target.name === 'mail_template_id') rerenderBody();
       });
     });
-    box.querySelector('[data-kv-invsend-toggle-body]')?.addEventListener('click', () => {
+    bindOnce(box.querySelector('[data-kv-invsend-toggle-body]'), 'click', () => {
       state.form.showFullBody = !state.form.showFullBody;
       rerenderBody();
     });
     // Enter in stap 1 → volgende (veilig).
-    box.querySelector('#kv-invsend-form')?.addEventListener('submit', (e) => { e.preventDefault(); goNext(); });
-    box.querySelector('[data-kv-invsend-next]')?.addEventListener('click', goNext);
+    bindOnce(box.querySelector('#kv-invsend-form'), 'submit', (e) => { e.preventDefault(); goNext(); });
+    bindOnce(box.querySelector('[data-kv-invsend-next]'), 'click', goNext);
   } else {
     // Stap 2 — Enter geblokkeerd (geen form-submit, geen keydown-hijack nodig want geen form-el).
-    box.querySelector('[data-kv-invsend-back]')?.addEventListener('click', () => {
+    bindOnce(box.querySelector('[data-kv-invsend-back]'), 'click', () => {
       if (state.saving) return;
       state.step = 1; state.confirmChecked = false; state.unknownStatus = false;
       rerender();
     });
-    box.querySelector('[data-kv-invsend-confirm-check]')?.addEventListener('change', (e) => {
+    bindOnce(box.querySelector('[data-kv-invsend-confirm-check]'), 'change', (e) => {
       state.confirmChecked = !!e.target.checked;
       rerenderFoot();
     });
-    box.querySelector('[data-kv-invsend-submit]')?.addEventListener('click', doSubmit);
+    bindOnce(box.querySelector('[data-kv-invsend-submit]'), 'click', doSubmit);
   }
 }
 

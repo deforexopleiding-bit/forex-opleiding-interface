@@ -262,31 +262,43 @@ async function doSubmit() {
 
 // ── Wire ───────────────────────────────────────────────────────────────────
 
+// BROK SALES-2 (v=2, 2026-08-19): idempotente bindOnce — voorkomt
+// listener-explosion bij rerenderFoot()/rerenderBody() die wire() opnieuw
+// aanroepen. Zonder deze guard krijgt elke ongewijzigde body-node bij
+// elke per-keystroke rerender een extra listener → 2^N-cascade.
+function bindOnce(node, evt, handler) {
+  if (!node) return;
+  const k = '__kvBound_' + evt;
+  if (node[k]) return;
+  node[k] = true;
+  node.addEventListener(evt, handler);
+}
+
 function wire() {
   const box = document.getElementById('dfoModal');
   if (!box) return;
 
   box.querySelectorAll('[data-kv-invcredit-close], [data-kv-invcredit-cancel]').forEach((b) => {
-    b.addEventListener('click', () => { if (!state.saving) D().closeModal(); });
+    bindOnce(b, 'click', () => { if (!state.saving) D().closeModal(); });
   });
 
   if (state.step === 1) {
     box.querySelectorAll('[data-kv-invcredit-input]').forEach((inp) => {
-      inp.addEventListener('input', (e) => {
+      bindOnce(inp, 'input', (e) => {
         state.form[e.target.name] = e.target.value;
         if (state.errors.reason) { delete state.errors.reason; }
         if (e.target.name === 'reason_key') rerenderBody();
       });
     });
-    box.querySelector('#kv-invcredit-form')?.addEventListener('submit', (e) => { e.preventDefault(); goNext(); });
-    box.querySelector('[data-kv-invcredit-next]')?.addEventListener('click', goNext);
+    bindOnce(box.querySelector('#kv-invcredit-form'), 'submit', (e) => { e.preventDefault(); goNext(); });
+    bindOnce(box.querySelector('[data-kv-invcredit-next]'), 'click', goNext);
   } else {
-    box.querySelector('[data-kv-invcredit-back]')?.addEventListener('click', () => {
+    bindOnce(box.querySelector('[data-kv-invcredit-back]'), 'click', () => {
       if (state.saving) return;
       state.step = 1; state.unknownStatus = false;
       rerender();
     });
-    box.querySelector('[data-kv-invcredit-submit]')?.addEventListener('click', doSubmit);
+    bindOnce(box.querySelector('[data-kv-invcredit-submit]'), 'click', doSubmit);
   }
 }
 

@@ -561,7 +561,7 @@
   window.__fnInvPay = async function () {
     const inv = _invOrToast(); if (!inv) return;
     try {
-      const mod = await import('./modals/invoice-payment.js');
+      const mod = await import('./modals/invoice-payment.js?v=2');
       mod.openInvoicePaymentModal({ invoice: inv, onSuccess: _refreshInv });
     } catch (e) { console.error('[fnd] invoice-payment import fail:', e); window.KV.toast('Kon betaling-modal niet laden'); }
   };
@@ -575,21 +575,21 @@
   window.__fnInvSend = async function () {
     const inv = _invOrToast(); if (!inv) return;
     try {
-      const mod = await import('./modals/invoice-send.js');
+      const mod = await import('./modals/invoice-send.js?v=2');
       mod.openInvoiceSendModal({ invoice: inv, onSuccess: _refreshInv });
     } catch (e) { console.error('[fnd] invoice-send import fail:', e); window.KV.toast('Kon verzend-modal niet laden'); }
   };
   window.__fnInvUpdate = async function () {
     const inv = _invOrToast(); if (!inv) return;
     try {
-      const mod = await import('./modals/invoice-update.js');
+      const mod = await import('./modals/invoice-update.js?v=2');
       mod.openInvoiceUpdateModal({ invoice: inv, onSuccess: _refreshInv });
     } catch (e) { console.error('[fnd] invoice-update import fail:', e); window.KV.toast('Kon aanpas-modal niet laden'); }
   };
   window.__fnInvCredit = async function () {
     const inv = _invOrToast(); if (!inv) return;
     try {
-      const mod = await import('./modals/invoice-credit.js');
+      const mod = await import('./modals/invoice-credit.js?v=2');
       mod.openInvoiceCreditModal({ invoice: inv, onSuccess: _refreshInv });
     } catch (e) { console.error('[fnd] invoice-credit import fail:', e); window.KV.toast('Kon credit-modal niet laden'); }
   };
