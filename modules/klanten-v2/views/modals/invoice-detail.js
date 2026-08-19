@@ -61,6 +61,12 @@ function initState(invoice, opts) {
     paymentLink:  invoice?.payment_url || null,
     plLoading:    false,
     plError:      null,
+    // BROK FINANCE-INVOICE-PDF: als de bron-row al aangeeft dat er geen TL-
+    // koppeling is (en geen invoice_number waar we op zouden kunnen self-healen)
+    // pre-primen we de knop op unavailable — voorkomt een lookup-round-trip die
+    // toch met NOT_IN_TL terugkomt.
+    pdfUnavailable: !!invoice && !invoice.tl_invoice_id
+                    && (!invoice.invoice_number || String(invoice.invoice_number).startsWith('CONCEPT-')),
     onEdit:       opts?.onEdit    || null,
     onPay:        opts?.onPay     || null,
     onSend:       opts?.onSend    || null,
@@ -93,12 +99,31 @@ async function loadAll() {
 // ── Actions (side-effect-vrij aan de modal-kant; sub-modals doen het echte werk) ──
 
 async function openPdf() {
+  // BROK FINANCE-INVOICE-PDF (2026-08-19): endpoint accepteert nu invoice_id
+  // met self-heal via TL invoices.list op invoice_number. Bij 404 NOT_IN_TL
+  // (echt geen TL-koppeling) tonen we een nette toast + markeren de knop als
+  // niet-beschikbaar zodat volgende klikken niet weer een lookup triggeren.
+  if (state.pdfUnavailable) {
+    K().toast('Geen TeamLeader-factuur — PDF niet beschikbaar.');
+    return;
+  }
   try {
     const j = await K().authedJson(`/api/finance-invoice-pdf?invoice_id=${encodeURIComponent(state.invoiceId)}`);
     if (j?.url) window.open(j.url, '_blank', 'noopener');
     else throw new Error('Geen PDF-URL beschikbaar');
   } catch (e) {
-    K().toast(`PDF ophalen mislukt: ${e?.message || 'onbekend'}`);
+    // K().authedJson throwt op non-2xx. Endpoint retourneert bij NOT_IN_TL een
+    // 404 met code='NOT_IN_TL' en een leesbare error-text — die text bevat
+    // "PDF niet beschikbaar" waar we op matchen zodat we de knop lokaal
+    // kunnen uitschakelen. Fallback: rauwe error-tekst tonen.
+    const msg = String(e?.message || '');
+    if (/PDF niet beschikbaar|NOT_IN_TL/i.test(msg)) {
+      state.pdfUnavailable = true;
+      rerender();
+      K().toast('Geen TeamLeader-factuur — PDF niet beschikbaar.');
+    } else {
+      K().toast(`PDF ophalen mislukt: ${msg || 'onbekend'}`);
+    }
   }
 }
 async function copyPaymentLink() {
@@ -239,9 +264,10 @@ function renderBody() {
       ${renderCreditNotesBlock()}
 
       <div class="kv-inv-extlinks">
-        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-inv-pdf>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-inv-pdf
+          ${state.pdfUnavailable ? 'disabled title="Geen TeamLeader-factuur — PDF niet beschikbaar" style="opacity:.55;cursor:not-allowed"' : ''}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 18 15 15"/></svg>
-          PDF (opent extern)
+          ${state.pdfUnavailable ? 'PDF (niet beschikbaar)' : 'PDF (opent extern)'}
         </button>
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-inv-paylink ${state.plLoading ? 'disabled' : ''}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>

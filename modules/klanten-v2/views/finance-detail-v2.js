@@ -539,17 +539,29 @@
   }
 
   // ── Actions ─────────────────────────────────────────────────────────────
-  // PDF-download: endpoint verwacht tl_invoice_id (TeamLeader factuur-id),
-  // niet de lokale factuur-id. De caller (Header-actie) geeft nu al de
-  // tl_invoice_id mee (button-render checkt inv.tl_invoice_id vóór weergave).
+  // PDF-download: endpoint accepteert sinds BROK FINANCE-INVOICE-PDF (2026-08-19)
+  // ook `invoice_id=` — dan lookup DB, self-heal via TL /invoices.list op
+  // invoice_number bij ontbrekende tl_invoice_id, en 404 NOT_IN_TL als de
+  // factuur echt niet in TL bestaat. We geven bij voorkeur invoice_id door
+  // (via _inv.data.id) zodat de server kan zelf-helen; fallback op de
+  // meegegeven tl_invoice_id-arg voor legacy callers.
   window.__fnInvPdf = async function (tlInvoiceId) {
-    if (!tlInvoiceId) { alert('Geen TL-factuur-id beschikbaar'); return; }
+    const localId = _inv?.data?.id || null;
+    let qs;
+    if (localId)          qs = 'invoice_id=' + encodeURIComponent(localId);
+    else if (tlInvoiceId) qs = 'tl_invoice_id=' + encodeURIComponent(tlInvoiceId);
+    else { window.KV.toast('Geen factuur-id beschikbaar'); return; }
     try {
-      const j = await window.KV.authedJson('/api/finance-invoice-pdf?tl_invoice_id=' + encodeURIComponent(tlInvoiceId));
+      const j = await window.KV.authedJson('/api/finance-invoice-pdf?' + qs);
       if (j?.url) window.open(j.url, '_blank', 'noopener');
-      else alert('Geen PDF-URL beschikbaar');
+      else window.KV.toast('Geen PDF-URL beschikbaar');
     } catch (e) {
-      alert('PDF ophalen mislukt: ' + (e?.message || e));
+      const msg = String(e?.message || e || '');
+      if (/PDF niet beschikbaar|NOT_IN_TL/i.test(msg)) {
+        window.KV.toast('Geen TeamLeader-factuur — PDF niet beschikbaar.');
+      } else {
+        window.KV.toast('PDF ophalen mislukt: ' + (msg || 'onbekend'));
+      }
     }
   };
 
