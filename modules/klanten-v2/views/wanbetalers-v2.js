@@ -631,7 +631,20 @@
     if (f.outcome === 'callback' && !String(f.callback_at || '').trim()) return false;
     return true;
   }
+  // BROK 9 (v=14, 2026-08-19): surgical err-row update. Voorheen wisten
+  // __wbxCallSet{Outcome,Note,CallbackAt} f.error=null maar renderden alleen
+  // de save-btn — de foutregel bleef staan tot next full render. Nu: clear
+  // wbxCallErr_<cid> innerHTML direct bij state-clear.
+  function _updateCallErrRow(cid) {
+    const el = document.getElementById('wbxCallErr_' + cid);
+    if (!el) return;
+    const f = _callFormState(cid);
+    el.innerHTML = f.error
+      ? `<div style="padding:8px 11px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(f.error)}</div>`
+      : '';
+  }
   function _updateCallSaveBtn(cid) {
+    _updateCallErrRow(cid);
     const btn = document.getElementById('wbxCallSaveBtn_' + cid);
     if (!btn) return;
     const f = _callFormState(cid);
@@ -1381,7 +1394,12 @@
       const openAmt = Number(r.total_open_cents || 0) / 100;
       const invCount = Number(r.open_invoice_count || 0);
       const oldestDays = Number(r.days_overdue || 0);
-      const stage = r.stage_label || r.stage_slug || r.stage || '—';
+      // BROK 9 (v=14): NL-label lookup consistent met case-sheet-kop.
+      const stageSlug = r.stage_slug || r.stage || null;
+      const stage = r.stage_label
+        || (asArr(_live.stages?.items).find((s) => s.slug === stageSlug) || {}).label
+        || ((typeof PIPELINE_STAGES !== 'undefined' && PIPELINE_STAGES.find((s) => s[0] === stageSlug)) || [])[1]
+        || stageSlug || '—';
       const nextAt = r.next_action_at || r.next_action || null;
       const nextTxt = nextAt ? _fmtDateTime(nextAt) : '—';
       const category = _categorizeOverzichtRow(r);
@@ -1414,6 +1432,8 @@
   function overzichtView() {
     if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(_fetchOverzicht);
     if (!_live.settings.fetched && !_live.settings.loading && !_live.settings.error) queueMicrotask(_fetchSettings);
+    // BROK 9 (v=14): stages nodig voor NL-label lookup in de fase-badge.
+    if (_live.stages && !_live.stages.fetched && !_live.stages.loading && !_live.stages.error) queueMicrotask(_fetchStages);
 
     if (_live.overzicht.loading && !_live.overzicht.items.length) {
       return `<div class="pad" style="padding:14px 20px">${_skelKpis()}${_skelRows(6)}</div>`;
@@ -1462,7 +1482,7 @@
           ${kpi('Totaal open',       eur0(totalOpen), totalCust + ' klanten',      totalOpen > 0 ? 'amber' : 'text-3')}
           ${kpi('Wanbetalers',       totalCust,        'in overzicht',              'text-1')}
           ${kpi('In incasso',        inIncasso,        inIncasso > 0 ? 'dossier open' : 'geen',  inIncasso > 0 ? 'rose' : 'text-3')}
-          ${kpi('Arrangementen',     arrCount,         'actief · dunning gepauzeerd', arrCount > 0 ? 'violet' : 'text-3')}
+          ${kpi('Klanten met arrangement', arrCount, 'dunning gepauzeerd', arrCount > 0 ? 'violet' : 'text-3')}
         </div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
           <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
@@ -1648,7 +1668,12 @@
       const cid = r.customer_id || r.id;
       const name = r.customer_name || r.name || 'Onbekend';
       const openAmt = Number(r.total_open_cents || 0) / 100;
-      const stage = r.stage_label || r.stage_slug || '—';
+      // BROK 9 (v=14): NL-label lookup (consistent met overzicht + case-sheet).
+      const stageSlugG = r.stage_slug || r.stage || null;
+      const stage = r.stage_label
+        || (asArr(_live.stages?.items).find((s) => s.slug === stageSlugG) || {}).label
+        || ((typeof PIPELINE_STAGES !== 'undefined' && PIPELINE_STAGES.find((s) => s[0] === stageSlugG)) || [])[1]
+        || stageSlugG || '—';
       const onCls = String(_ui.gspSelectedId) === String(cid) ? 'on' : '';
       const cidClick = String(cid || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const cidAttr  = String(cid || '').replace(/"/g, '&quot;');
@@ -1741,7 +1766,7 @@
             </div>
             <textarea placeholder="Notitie bij belpoging (optioneel)…" oninput="__wbxCallSetNote('${cidClick}', this.value)"
               style="width:100%;min-height:60px;max-height:160px;padding:8px 11px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box">${esc(f.note || '')}</textarea>
-            ${f.error ? `<div style="padding:8px 11px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(f.error)}</div>` : ''}
+            <div id="wbxCallErr_${cidClick}">${f.error ? `<div style="padding:8px 11px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(f.error)}</div>` : ''}</div>
             <div style="display:flex;justify-content:flex-end">
               <button id="wbxCallSaveBtn_${cidClick}" class="btn btn-primary btn-sm" ${(!callSaveable || f.saving) ? 'disabled' : ''}
                 style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:12px;opacity:${(!callSaveable || f.saving) ? '.55' : '1'};cursor:${(!callSaveable || f.saving) ? 'not-allowed' : 'pointer'}"
@@ -1786,6 +1811,8 @@
   }
   function gesprekkenView() {
     if (!_live.overzicht.fetched && !_live.overzicht.loading && !_live.overzicht.error) queueMicrotask(_fetchOverzicht);
+    // BROK 9 (v=14): stages nodig voor NL-label lookup in fase-badge.
+    if (_live.stages && !_live.stages.fetched && !_live.stages.loading && !_live.stages.error) queueMicrotask(_fetchStages);
     if (_ui.gspSelectedId && !_live.callLog.byCust[_ui.gspSelectedId]) queueMicrotask(() => _fetchCallLog(_ui.gspSelectedId));
     if (_ui.gspSelectedId && !_live.timeline.byCust[_ui.gspSelectedId]) queueMicrotask(() => _fetchTimeline(_ui.gspSelectedId));
 
@@ -2050,8 +2077,26 @@
     _fetchInboxThread(convId, mySeq);
     _fetchInboxCtx(convId, mySeq);
     _fetchInboxTemplates(convId, mySeq);
-    // Mark-read (silent, fire-and-forget).
+    // Mark-read (silent, fire-and-forget). WA via inbox-mark-read;
+    // email via email-actions?action=mark-read per email-id (BROK 9 v=14:
+    // /api/inbox-mark-read raakt alleen WA-unread → email_unread_count bleef
+    // staan). Loop over thread-items met channel=email + direction=inbound.
     apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
+    // Wait tot thread is geladen om email-ids op te halen.
+    setTimeout(() => {
+      const bag = _live.inbox.thread.byConv[convId];
+      if (!bag || !bag.items) return;
+      const inboundEmails = bag.items.filter((m) =>
+        m.channel === 'email' && (m.direction === 'inbound' || m.direction === 'in')
+      );
+      for (const m of inboundEmails) {
+        // Fire-and-forget per email. email-actions is idempotent, dubbele
+        // mark-read is no-op.
+        const emailId = String(m.id || '').replace(/^email:/, '').replace(/^reply:/, '');
+        if (!emailId) continue;
+        apiPost('/api/email-actions', { email_id: emailId, action: 'mark-read' }).catch(() => {});
+      }
+    }, 1500); // 1.5s = ruim voldoende voor thread-fetch (typisch 200-500ms).
     try { window.DFO?.render?.(); } catch (_) {}
   };
   // BROK 8 fix 5 (v=13): state-only oninput + surgical repaint van alleen de
@@ -2369,23 +2414,14 @@
     const bag = _live.caseSheet.invoicesByCust[cid] = _live.caseSheet.invoicesByCust[cid] || { loading: false, items: [], error: null };
     if (bag.loading) return;
     bag.loading = true; bag.error = null;
-    // BROK 8 fix 3 (v=13): switch naar finance-invoices?customer_id=X&status=overdue.
-    // Levert echte factuur-rijen (invoice_number/due_date/open_amount) i.p.v. de
-    // customer-dossier-blocks-shape die alleen aggregate-counts had. Endpoint
-    // bestaat al (RBAC finance.invoice.view); shape: { items: [{...}], counts }.
-    // Fallback naar &status=open als overdue leeg is (klant kan open zonder-
-    // overdue facturen hebben, bv. arrangement die uitstel geeft).
-    const j = await tryFetch('case:invoices:' + cid, `/api/finance-invoices?customer_id=${encodeURIComponent(cid)}&status=overdue&page_size=50`, 8000);
+    // BROK 9 (v=14, 2026-08-19): fetch status=open i.p.v. status=overdue zodat
+    // de count in de sub-tab matched met Overzicht/threadkop (die tellen alle
+    // open incl. niet-verlopen). De render markeert verlopen rijen apart via
+    // days_overdue > 0 (client-side berekend uit due_date). Voorheen: 5 rijen
+    // "Open facturen" terwijl overzicht 7 toonde → verwarring voor incasso.
+    const j = await tryFetch('case:invoices:' + cid, `/api/finance-invoices?customer_id=${encodeURIComponent(cid)}&status=open&page_size=100`, 8000);
     if (j && j.error) bag.error = j.error;
-    else {
-      let items = asArr(j?.items);
-      if (!items.length) {
-        // Fallback: geen overdue → probeer alle open
-        const j2 = await tryFetch('case:invoices2:' + cid, `/api/finance-invoices?customer_id=${encodeURIComponent(cid)}&status=open&page_size=50`, 8000);
-        if (j2 && !j2.error) items = asArr(j2?.items);
-      }
-      bag.items = items;
-    }
+    else bag.items = asArr(j?.items);
     bag.loading = false; _renderCaseSheet();
   }
   async function _fetchCaseBriefs(cid) {
@@ -2710,6 +2746,18 @@
 
   window.__wbxCallDial = async (cid, phone, name) => {
     if (!phone) { _toast('Geen telefoonnummer bekend.', 'error'); return; }
+    // BROK 9 (v=14, 2026-08-19): custom confirm VÓÓR het bellen. Eén-klik-
+    // bel is in een incasso-scherm te riskant (per ongeluk klikken, dubbele
+    // klik na open case-sheet, WA-nummer waar je niet meteen wilde bellen).
+    // Nu: confirm-modal met klant + nummer, pas op OK KlxSoftphone / tel:.
+    const ok = await _askConfirm(
+      'Bellen naar ' + (name || 'klant') + '?',
+      '<div><b>Klant:</b> ' + esc(name || 'onbekend') + '</div>'
+      + '<div><b>Nummer:</b> <span style="font-family:\'IBM Plex Mono\',monospace">' + esc(phone) + '</span></div>'
+      + '<div style="font-size:11.5px;color:var(--text-3);margin-top:6px">Softphone start of tel:-link opent.</div>',
+      { okLabel: 'Bellen' }
+    );
+    if (!ok) return;
     try {
       if (window.KlxSoftphone && typeof window.KlxSoftphone.call === 'function') {
         const r = await window.KlxSoftphone.call(String(phone), { displayName: String(name || '') });
@@ -2905,7 +2953,10 @@
         tryFetch('motor:bulk',       '/api/wanbetalers-bulk-jobs-list?limit=25',                     8000),
         tryFetch('motor:incasso',    '/api/incasso-dossiers-list',                                   8000),
         tryFetch('motor:arr',        '/api/arrangements-list?status=ACTIEF&limit=1',                 8000),
-        tryFetch('motor:sandbox',    '/api/app-settings?key=dunning_sandbox_mode',                   8000),
+        // BROK 9 (v=14, 2026-08-19): key was 'dunning_sandbox_mode' → 404.
+        // Server-key is 'dunning_dry_run' (bron: api/_lib/dunning-dry-run.js
+        // regel 20 DRY_RUN_KEY). Value-shape: { enabled: true|false }.
+        tryFetch('motor:sandbox',    '/api/app-settings?key=dunning_dry_run',                        8000),
       ]);
       if (mySeq !== st._seq) return;
       const incCounts = {};
@@ -2914,12 +2965,15 @@
         const s = String(r.status || 'unknown');
         incCounts[s] = (incCounts[s] || 0) + 1;
       }
-      // Sandbox-flag: server retourneert { key, value } waar value een jsonb
-      // is (bv. { enabled: true } of true zelf). Fallback null bij fetch-fout.
+      // Sandbox-flag: app_settings.dunning_dry_run heeft shape { enabled: bool }.
+      // Fallback: als key niet bestaat in DB, server returnt { key, value: null }
+      // → dan value.enabled undefined → sandboxEnabled = false (default = live).
       let sandboxEnabled = null;
       if (sandboxRaw && !sandboxRaw.error) {
         const v = sandboxRaw?.value;
-        sandboxEnabled = v === true || v === 'true' || (v && v.enabled === true);
+        if (v && typeof v === 'object' && 'enabled' in v) sandboxEnabled = v.enabled === true;
+        else if (v === true || v === 'true') sandboxEnabled = true;
+        else if (v === false || v === 'false' || v === null) sandboxEnabled = false;
       }
       st.data = {
         cooldownDays:     (settings && !settings.error && Number.isFinite(Number(settings.dunning_cooldown_days))) ? Number(settings.dunning_cooldown_days) : null,
@@ -3006,7 +3060,10 @@
       ['Incasso actief',
         kpiVal((d.incassoByStatus?.lopend || 0) + (d.incassoByStatus?.aangemeld || 0), errs.incasso),
         'var(--rose)'],
-      ['Arrangements actief',
+      // BROK 9 (v=14) label expliciet: motor telt arrangements-list.total
+      // (records), overzicht telt distinct klanten. Verschillende metrics
+      // → verschillende labels om verwarring te voorkomen.
+      ['Actieve arrangementen (records)',
         kpiVal(d.arrActiveTotal, errs.arr),
         'var(--emerald)'],
     ];
@@ -3080,5 +3137,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=13 BROK 8 verify-fixes: (1) softphone _customerPhone leest customer_phone eerst; (2) confirm-naam via customer_name i.p.v. display_name (WA-profiel); (3) case-sheet open-facturen via finance-invoices?customer_id=X&status=overdue met fallback open + client-side days_overdue; (4) inbox scoping client-side intersect met wanbetalers-set; (5) inbox-zoek state-only + surgical _repaintInboxList (geen focus-verlies); (6) motor onderscheidt fetch-fout vs echt-leeg (errs-flags per endpoint, ⚠ mark in KPI-cell) + sandbox-badge; minors: NL-stage-label in case-sheet-kop, NL-labels voor MANUAL_/TL_-enums in tijdlijn, callback error-clear bij veld-input, set-stage disabled direct via forced render.');
+  console.debug('[wanbetalers-v2] v=14 BROK 9 restpunten: (b1) softphone custom confirm vóór bellen (klant+nummer, Annuleren/Bellen); (b2) case-sheet open-facturen fetch status=open i.p.v. overdue (count matcht overzicht+threadkop); (m3) callback err-line surgical DOM-clear bij __wbxCallSet{Outcome,Note,CallbackAt}; (m4) sandbox endpoint key dunning_dry_run (was dunning_sandbox_mode → 404); (m5) stage-label NL lookup in overzicht-tabel + gesprekken-list (was ruwe slug); (m6) arrangementen-labels expliciet: motor "Actieve arrangementen (records)" / overzicht "Klanten met arrangement"; (m7) email-mark-read loop per email-id via email-actions bij __wbxInboxSelect (setTimeout 1.5s zodat thread geladen is).');
 })();
