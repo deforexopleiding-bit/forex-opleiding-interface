@@ -2710,6 +2710,16 @@
     return m ? m[1] : (email.from || '');
   }
 
+  // Bijlage-links dragen een kortlevend token uit de email-body-respons: het
+  // downloaden gebeurt via <a href download> / window.open(), en zulke
+  // browser-navigaties kunnen geen Authorization-header meesturen. Ontbreekt
+  // het token (oude cache, mislukte body-load), dan geeft de server 403 en
+  // haalt een refresh van de mail een vers token op.
+  function attachTokenParam(uid) {
+    const t = state.bodyCache[uid]?.attachment_token;
+    return t ? '&t=' + encodeURIComponent(t) : '';
+  }
+
   async function fetchEmailBody(email) {
     if (state.bodyCache[email.uid] && !state.bodyCache[email.uid].error) return;
     state.bodyCache[email.uid] = { loading: true };
@@ -2752,8 +2762,11 @@
     }
     if (pdfs.length > 1) showToast(pdfs.length + ' PDFs gevonden — eerste wordt geopend', 'info');
     const imapUid = extractImapUid(uid);
+    // &t= : kortlevend token uit de email-body-respons. window.open() is een
+    // browser-navigatie en kan geen Authorization-header meesturen.
     const url = '/api/email-attachment?mailbox=' + encodeURIComponent(email.mailbox) +
-      '&uid=' + encodeURIComponent(imapUid) + '&index=' + pdfs[0].index + '&disposition=inline';
+      '&uid=' + encodeURIComponent(imapUid) + '&index=' + pdfs[0].index + '&disposition=inline' +
+      attachTokenParam(uid);
     window.open(url, '_blank');
   }
 
@@ -4728,7 +4741,7 @@
     const items = cache.attachments.map((a) => {
       const icon = attachIcon(a.contentType);
       const size = formatFileSize(a.size);
-      const href = `/api/email-attachment?mailbox=${encodeURIComponent(mailbox)}&uid=${encodeURIComponent(imapUid)}&index=${a.index}`;
+      const href = `/api/email-attachment?mailbox=${encodeURIComponent(mailbox)}&uid=${encodeURIComponent(imapUid)}&index=${a.index}${attachTokenParam(uid)}`;
       return `<li><a class="attach-item" href="${escapeHtml(href)}" download="${escapeHtml(a.filename)}" target="_blank">` +
         `<span class="attach-icon">${icon}</span>` +
         `<span class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</span>` +

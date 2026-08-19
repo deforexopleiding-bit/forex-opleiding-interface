@@ -4,6 +4,7 @@ import { safeError } from './_lib/safe-error.js';
 import { sanitizeEmailHtml } from './_lib/email-html-sanitizer.js';
 import { supabaseAdmin } from './supabase.js';
 import { requireCrmStaff } from './_lib/crm-roles.js';
+import { signAttachmentToken } from './_lib/attachment-token.js';
 
 // v=22 email-round: DB-fallback voor intern-gegenereerde mails.
 // Interne notificatie-mails (bv. leads@ "Nieuwe lead: …" uit de forex-opleiding
@@ -86,6 +87,22 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Body moet "mailbox" en "uid" bevatten (of "email_id").' });
   }
 
+  // Kortlevend token voor /api/email-attachment. De frontend hangt dit als
+  // `&t=` aan de bijlage-links, want die worden via een browser-navigatie
+  // geopend en kunnen geen Authorization-header meesturen. Mint hier omdat
+  // deze call al geauthenticeerd is én al de bijlagenlijst teruggeeft — geen
+  // extra round-trip nodig. Fail-soft: zonder token blijft de body gewoon
+  // laden, alleen de bijlage-links werken dan niet.
+  let attachmentToken = null;
+  let attachmentTokenExpiresAt = null;
+  try {
+    const t = signAttachmentToken({ mailbox, uid });
+    attachmentToken          = t.token;
+    attachmentTokenExpiresAt = t.expiresAt;
+  } catch (e) {
+    console.error('[email-body] attachment-token minten mislukt:', e.message);
+  }
+
   const account = ACCOUNTS.find((a) => a.user === mailbox);
   if (!account) return res.status(400).json({ error: `Onbekende mailbox: ${mailbox}` });
 
@@ -119,7 +136,11 @@ export default async function handler(req, res) {
         // body-kolommen maar hun IMAP-uid komt niet (meer) voor in INBOX.
         const dbRow = await loadBodyFromDb(emailId);
         if (dbRow && (dbRow.body_text || dbRow.body_html)) {
-          return res.status(200).json(buildResponseFromDbRow(dbRow));
+          return res.status(200).json({
+            attachment_token:            attachmentToken,
+            attachment_token_expires_at: attachmentTokenExpiresAt,
+            ...buildResponseFromDbRow(dbRow),
+          });
         }
         return res.status(404).json({ error: 'E-mail niet gevonden in postvak (en geen DB-fallback).' });
       }
@@ -170,6 +191,8 @@ export default async function handler(req, res) {
       }
 
       return res.status(200).json({
+        attachment_token:            attachmentToken,
+        attachment_token_expires_at: attachmentTokenExpiresAt,
         subject: parsed.subject || '',
         from: fromEntry
           ? (fromEntry.name ? `${fromEntry.name} <${fromEntry.address}>` : fromEntry.address)
@@ -195,7 +218,11 @@ export default async function handler(req, res) {
       const dbRow = await loadBodyFromDb(emailId);
       if (dbRow && (dbRow.body_text || dbRow.body_html)) {
         try { await client.logout(); } catch {}
-        return res.status(200).json(buildResponseFromDbRow(dbRow));
+        return res.status(200).json({
+          attachment_token:            attachmentToken,
+          attachment_token_expires_at: attachmentTokenExpiresAt,
+          ...buildResponseFromDbRow(dbRow),
+        });
       }
     }
     return safeError(res, 500, err, 'Mailbody kon niet worden opgehaald.');

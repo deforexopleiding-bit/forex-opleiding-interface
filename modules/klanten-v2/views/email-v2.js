@@ -1045,14 +1045,20 @@
         <div style="font-size:14px;line-height:1.65;color:var(--text-2)"><p style="margin-bottom:14px">${safePlainText(body.text || '')}</p></div>
       </div>`;
     }
-    return `<div>${bodyRender}${attachments.length > 0 ? _attStrip(attachments, row) : ''}</div>`;
+    return `<div>${bodyRender}${attachments.length > 0 ? _attStrip(attachments, row, body.attachment_token) : ''}</div>`;
   }
-  function _attStrip(attachments, row) {
+  function _attStrip(attachments, row, attachToken) {
     // v=24: attachment-URL resolve — 2 paden:
     // 1. public_url uit sync-emails Storage (inbound-flow) — werkt altijd.
     // 2. IMAP-stream via /api/email-attachment?mailbox&uid&index — vereist imap_uid.
     // Fallback naar #  (disabled) als geen van beide.
+    //
+    // Pad 2 draagt sinds de auth-fix een kortlevend token (`&t=`) uit de
+    // email-body-respons: de link wordt via een browser-navigatie geopend en
+    // kan dus geen Authorization-header meesturen. Zonder token geeft de
+    // server 403 — de mail opnieuw openen levert een vers token.
     const hasImap = row.mailbox && row.imap_uid != null;
+    const tokenParam = attachToken ? '&t=' + encodeURIComponent(attachToken) : '';
     const filenameKey = (a) => a.filename || a.mime_type || 'bijlage';
     const bytes = (a) => Number(a.size || a.size_bytes || 0);
     const urlFor = (a) => {
@@ -1060,7 +1066,8 @@
       if (hasImap && a.index != null) {
         return '/api/email-attachment?mailbox=' + encodeURIComponent(row.mailbox + '@deforexopleiding.nl')
              + '&uid=' + encodeURIComponent(row.imap_uid)
-             + '&index=' + encodeURIComponent(a.index);
+             + '&index=' + encodeURIComponent(a.index)
+             + tokenParam;
       }
       return null;
     };
