@@ -1463,10 +1463,14 @@
     if (stage.includes('gepauzeerd') || stage.includes('vastgelopen') || stage.includes('incasso')) return 'stuck';
     return 'ok';
   }
+  // BROK WB-POLISH-1: sort-state + stage-order voor logische fase-sortering.
+  _ui.ovSortKey = _ui.ovSortKey || 'open';  // 'open' | 'days' | 'stage' | 'next' | 'name'
+  _ui.ovSortDir = _ui.ovSortDir || 'desc';  // 'asc' | 'desc'
+  const _OZN_STAGE_ORDER = { nieuw: 1, aangemaand: 2, brief_verstuurd: 3, in_gesprek: 4, regeling: 5, dispuut: 6, bewind: 6, incasso: 7, opgelost: 8, afschrijven: 9 };
   function _filteredOverzicht() {
     const rows = asArr(_live.overzicht.items);
     const q = String(_ui.ovSearchQ || '').trim().toLowerCase();
-    return rows.filter((r) => {
+    const filtered = rows.filter((r) => {
       if (_ui.ovStatusFilter !== 'all' && _categorizeOverzichtRow(r) !== _ui.ovStatusFilter) return false;
       if (q) {
         const name = ((r.customer_name || r.name || '') + ' ' + (r.email || '')).toLowerCase();
@@ -1474,6 +1478,56 @@
       }
       return true;
     });
+    // BROK WB-POLISH-1: client-side sortering. Rijen zonder next_action_at
+    // altijd onderaan bij sortKey='next' (v1-parity).
+    const dir = _ui.ovSortDir === 'asc' ? 1 : -1;
+    const key = _ui.ovSortKey || 'open';
+    return filtered.slice().sort((a, b) => {
+      if (key === 'name') {
+        return dir * String(a.customer_name || a.name || '').localeCompare(String(b.customer_name || b.name || ''));
+      }
+      if (key === 'stage') {
+        const sa = _OZN_STAGE_ORDER[a.stage_slug || ''] || 999;
+        const sb = _OZN_STAGE_ORDER[b.stage_slug || ''] || 999;
+        return dir * (sa - sb);
+      }
+      if (key === 'next') {
+        const ta = a.next_action_at ? Date.parse(a.next_action_at) : null;
+        const tb = b.next_action_at ? Date.parse(b.next_action_at) : null;
+        // Null altijd onderaan (v1-parity).
+        if (ta == null && tb == null) return 0;
+        if (ta == null) return 1;
+        if (tb == null) return -1;
+        return dir * (ta - tb);
+      }
+      // 'open' (cents) of 'days'
+      const va = key === 'days' ? Number(a.days_overdue) || 0 : Number(a.total_open_cents) || 0;
+      const vb = key === 'days' ? Number(b.days_overdue) || 0 : Number(b.total_overdue) || Number(b.total_open_cents) || 0;
+      return dir * (va - vb);
+    });
+  }
+  window.__wbxOvSort = (key) => {
+    if (_ui.ovSortKey === key) {
+      _ui.ovSortDir = _ui.ovSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      _ui.ovSortKey = String(key || 'open');
+      _ui.ovSortDir = key === 'name' ? 'asc' : 'desc';
+    }
+    _repaintOverzichtBody();
+  };
+  function _repaintOverzichtBody() {
+    const bodyEl = document.getElementById('wbxOvBody');
+    if (bodyEl) bodyEl.innerHTML = _overzichtRowsHtml(_filteredOverzicht());
+    const hdrEl = document.getElementById('wbxOvHdr');
+    if (hdrEl) hdrEl.innerHTML = _overzichtHdrHtml();
+    const cntEl = document.getElementById('wbxOvCount');
+    if (cntEl) { const n = _filteredOverzicht().length; cntEl.textContent = n + ' klant' + (n === 1 ? '' : 'en'); }
+  }
+  function _overzichtHdrHtml() {
+    const k = _ui.ovSortKey;
+    const d = _ui.ovSortDir === 'asc' ? '↑' : '↓';
+    const h = (label, key, align) => `<div style="cursor:pointer;user-select:none;${align ? 'text-align:' + align + ';' : ''}color:${k === key ? 'var(--brand)' : 'var(--text-3)'}" onclick="__wbxOvSort('${key}')" title="Sorteer op ${esc(label)}">${esc(label)}${k === key ? ' ' + d : ''}</div>`;
+    return `<div></div>${h('Klant', 'name')}${h('Open', 'open', 'right')}<div style="text-align:right">Fact.</div>${h('Oudste', 'days', 'right')}${h('Fase', 'stage')}${h('Volgende actie', 'next')}<div style="text-align:right">Acties</div>`;
   }
   function _overzichtRowsHtml(rows) {
     if (!rows.length) {
@@ -1602,9 +1656,7 @@
             <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" ${_ui.bulkBusy ? 'disabled' : ''} onclick="__wbxBulkStart()">${_ui.bulkBusy ? 'Starten…' : '▶ Start dunning-workflow (typ-to-confirm)'}</button>
             <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:auto" onclick="__wbxOvClearSel()">Wissen</button>
           </div>
-          <div style="display:grid;grid-template-columns:32px 2fr 1fr 90px 100px 1.4fr 1.2fr auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
-            <div></div><div>Klant</div><div style="text-align:right">Open</div><div style="text-align:right">Fact.</div><div style="text-align:right">Oudste</div><div>Fase</div><div>Volgende actie</div><div style="text-align:right">Acties</div>
-          </div>
+          <div id="wbxOvHdr" style="display:grid;grid-template-columns:32px 2fr 1fr 90px 100px 1.4fr 1.2fr auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${_overzichtHdrHtml()}</div>
           <div id="wbxOvBody">${_overzichtRowsHtml(filtered)}</div>
         </div>
       </div>
@@ -2333,13 +2385,23 @@
       return `<div class="pad" style="padding:14px 20px">${_errBlk(_live.briefs.error, 'briefs')}</div>`;
     }
 
+    // BROK WB-POLISH-1: init zoek-state.
+    _ui.brSearchQ = _ui.brSearchQ || '';
     const items = asArr(_live.briefs.items);
     const categorize = (b) => {
       if (b.sent_at || b.status === 'sent' || b.sent_via) return 'sent';
       if (b.downloaded_at || b.status === 'downloaded') return 'downloaded';
       return 'new';
     };
-    const filtered = items.filter((b) => _ui.brStatusFilter === 'all' || categorize(b) === _ui.brStatusFilter);
+    const q = String(_ui.brSearchQ || '').trim().toLowerCase();
+    const filtered = items.filter((b) => {
+      if (_ui.brStatusFilter !== 'all' && categorize(b) !== _ui.brStatusFilter) return false;
+      if (q) {
+        const hay = ((b.customer_name || '') + ' ' + (b.customer?.email || b.email || '')).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
 
     const counts = {
       all: items.length,
@@ -2400,19 +2462,39 @@
       <b>${selIds.length} geselecteerd</b>
       <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefBulkPrint()">🖨 Bulk-print PDF-bundel</button>
       <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxBriefBulkMarkSent()">✓ Markeer verstuurd</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose)" onclick="__wbxBriefBulkDelete()">🗑 Verwijderen</button>
       <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:auto" onclick="__wbxBriefClearSel()">Wissen</button>
     </div>` : '';
+
+    // BROK WB-POLISH-1: search-input + select-all in kop.
+    const qVal = String(_ui.brSearchQ || '');
+    const searchBar = `<div style="position:relative;flex:1;min-width:220px;max-width:340px">
+      <input id="wbxBrSearchInput" type="text" value="${esc(qVal)}"
+        oninput="__wbxBrSearchInput(this.value)"
+        placeholder="Zoek op klant of e-mail…"
+        style="width:100%;padding:6px 28px 6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font-size:12px;outline:none;box-sizing:border-box"
+        autocomplete="off" spellcheck="false" />
+      <button title="Wis zoekterm" onclick="__wbxBrSearchClear()"
+        style="position:absolute;top:50%;right:6px;transform:translateY(-50%);width:20px;height:20px;padding:0;border:0;background:transparent;color:var(--text-3);font-size:14px;cursor:pointer;visibility:${qVal.trim() ? 'visible' : 'hidden'}">×</button>
+    </div>`;
+
+    // Select-all: alle in filtered checked? Zo ja, toggle uncheck; anders check alle filtered.
+    const allChecked = filtered.length > 0 && filtered.every((b) => _ui.brSelected[String(b.id)]);
 
     return `<div data-wbx-view="brieven">
       <div class="pad" style="padding:14px 20px 0">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
           <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-            <div style="display:flex;gap:5px;flex-wrap:wrap">${chips}</div>
+            <div style="display:flex;gap:10px;align-items:center;flex:1;flex-wrap:wrap">
+              ${searchBar}
+              <div style="display:flex;gap:5px;flex-wrap:wrap">${chips}</div>
+            </div>
             <div style="font-size:11px;color:var(--text-3)">${filtered.length} brie${filtered.length === 1 ? 'f' : 'ven'}</div>
           </div>
           ${bulkBar}
           <div style="display:grid;grid-template-columns:32px 2fr 1fr 130px 140px auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);font-weight:600">
-            <div></div><div>Klant</div><div>Template</div><div style="text-align:right">Aangemaakt</div><div>Status</div><div style="text-align:right">Acties</div>
+            <label style="display:flex;align-items:center;cursor:pointer" title="${allChecked ? 'Deselecteer' : 'Selecteer'} alle zichtbaar"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="__wbxBrToggleSelAll()" style="width:14px;height:14px;cursor:pointer" /></label>
+            <div>Klant</div><div>Template</div><div style="text-align:right">Aangemaakt</div><div>Status</div><div style="text-align:right">Acties</div>
           </div>
           <div>${rowsHtml}</div>
           <div style="padding:9px 14px;font-size:11px;color:var(--text-3);background:var(--surface-2)">Handmatige mail vertrekt <b>direct</b> (omzeilt de kantooruren-wachtrij).</div>
@@ -2421,6 +2503,57 @@
       ${_officeHoursBanner()}
     </div>`;
   }
+
+  /* BROK WB-POLISH-1: brieven search + select-all + bulk-delete handlers. */
+  window.__wbxBrSearchInput = (val) => {
+    _ui.brSearchQ = String(val || '');
+    if (_ui.brSearchTimer) clearTimeout(_ui.brSearchTimer);
+    _ui.brSearchTimer = setTimeout(() => { if (window.DFO?.render) window.DFO.render(); }, 200);
+  };
+  window.__wbxBrSearchClear = () => { _ui.brSearchQ = ''; if (window.DFO?.render) window.DFO.render(); };
+  window.__wbxBrToggleSelAll = () => {
+    const items = asArr(_live.briefs.items);
+    const categorize = (b) => (b.sent_at || b.status === 'sent' || b.sent_via) ? 'sent'
+                             : (b.downloaded_at || b.status === 'downloaded') ? 'downloaded' : 'new';
+    const q = String(_ui.brSearchQ || '').trim().toLowerCase();
+    const filtered = items.filter((b) => {
+      if (_ui.brStatusFilter !== 'all' && categorize(b) !== _ui.brStatusFilter) return false;
+      if (q) {
+        const hay = ((b.customer_name || '') + ' ' + (b.customer?.email || b.email || '')).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const allChecked = filtered.length > 0 && filtered.every((b) => _ui.brSelected[String(b.id)]);
+    if (allChecked) {
+      for (const b of filtered) delete _ui.brSelected[String(b.id)];
+    } else {
+      for (const b of filtered) _ui.brSelected[String(b.id)] = true;
+    }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__wbxBriefBulkDelete = async () => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    const ids = _selBriefIds();
+    if (!ids.length) return;
+    const ok = await _askTypedConfirm(
+      `Bulk-verwijder ${ids.length} brie${ids.length === 1 ? 'f' : 'ven'}?`,
+      `<div style="font-size:12.5px;line-height:1.55">Deze <b>${ids.length}</b> brieven worden <b>permanent</b> verwijderd (row + PDF-storage). Kan niet ongedaan gemaakt worden.</div>`,
+      'VERWIJDER',
+      { okLabel: 'Ja, verwijder ' + ids.length }
+    );
+    if (!ok) return;
+    _toast(`Verwijderen van ${ids.length} brie${ids.length === 1 ? 'f' : 'ven'}…`, 'info');
+    let done = 0, failed = 0;
+    for (const bid of ids) {
+      const r = await apiPost('/api/dunning-brief-delete', { brief_id: bid });
+      if (r.ok) done++; else failed++;
+    }
+    _ui.brSelected = {};
+    _live.briefs.fetched = false;
+    _fetchBriefs();
+    _toast(`Verwijderd: ${done}${failed ? ' · ' + failed + ' fout' : ''}.`, failed ? 'warn' : 'success');
+  };
 
   /* ── Formatters + skeletons + err ─────────────────────────────────── */
   function _fmtDate(iso) {
@@ -5962,5 +6095,6 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+  console.debug('[wanbetalers-v2] v=30 BROK WB-POLISH-1: overzicht klikbare kolom-headers (open/dagen/fase/next/name sort, asc/desc toggle, next-null onderaan). Brieven: zoek-input (naam/e-mail 200ms debounce), select-all in header (per zichtbare filter), bulk-verwijderen met typ-to-confirm "VERWIJDER".');
   console.debug('[wanbetalers-v2] v=29 BROK WB-FIX-4: (#1) BE-lijn regressie -> altijd tonen (+ ensureReady on-demand); (#2) Volgende-badge "actie g,..." fix -> kanaal-mapping + volle datetime; (#3) thread scroll: sync+RAF, 5s loop, force clear pas na daadwerkelijk bodemen; (#4) type-label chip OP de kaart (v1-parity); (#5) drawer-kop lege staat "Geen open factuur" i.p.v. "Factuur — · €0,00 · 0 dagen"; (#6) thread-kop fallback KLANTNAAM (via ctx.customer.name) i.p.v. phone. Minor: klant-info-blok +e-mail; invoice-modal accepteert c.name; poging-teller min 4 dots + cadence store in _fetchCallLog.');
 })();
