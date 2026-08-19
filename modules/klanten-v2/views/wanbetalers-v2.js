@@ -2744,8 +2744,53 @@
     briefsByCust:   {},   // cid → { loading, items, error }
     dossierByCust:  {},   // cid → { loading, data, error } (customer-dossier)
   };
-  _ui.caseSheet = { cid: null, tab: 'invoices' };
+  // SURFACE B: v1-faithful drawer data — pipeline-detail (fase + open_invoices),
+  // conv+laatste chat-bubbles, Joost-suggestie (60min max age).
+  _live.caseFaithful = {
+    pipeByCust:    {},   // cid → { loading, data, error }  (dunning-pipeline-detail)
+    convByCust:    {},   // cid → { loading, convId, error } (inbox-conversation-by-customer)
+    chatByCust:    {},   // cid → { loading, items, error }  (inbox-messages-list, last 8)
+    joostByCust:   {},   // cid → { loading, items, error }  (joost-suggestions-recent)
+  };
+  _ui.caseSheet = { cid: null };
   _ui.callFormOpen = {};  // cid → true (belpoging-form uit case-sheet)
+
+  async function _fetchCasePipeline(cid) {
+    if (!cid) return;
+    const bag = _live.caseFaithful.pipeByCust[cid] = _live.caseFaithful.pipeByCust[cid] || { loading: false, data: null, error: null };
+    if (bag.loading || bag.data) return;
+    bag.loading = true; bag.error = null;
+    const j = await tryFetch('case:pipe:' + cid, `/api/dunning-pipeline-detail?customer_id=${encodeURIComponent(cid)}`, 8000);
+    if (j && j.error) bag.error = j.error;
+    else bag.data = j;
+    bag.loading = false; _renderCaseSheet();
+  }
+  async function _fetchCaseConvChat(cid) {
+    if (!cid) return;
+    const cbag = _live.caseFaithful.convByCust[cid] = _live.caseFaithful.convByCust[cid] || { loading: false, convId: null, error: null };
+    if (cbag.loading || cbag.convId || cbag.error) return;
+    cbag.loading = true;
+    const cj = await tryFetch('case:conv:' + cid, `/api/inbox-conversation-by-customer?customer_id=${encodeURIComponent(cid)}`, 6000);
+    cbag.loading = false;
+    if (!cj || cj.error) { cbag.error = (cj && cj.error) || 'geen conv'; _renderCaseSheet(); return; }
+    cbag.convId = cj.conversation_id || cj.id || null;
+    if (!cbag.convId) { cbag.error = 'geen conv'; _renderCaseSheet(); return; }
+    // Berichten ophalen (laatste 20 → render neemt laatste 8 er uit voor de card).
+    const mbag = _live.caseFaithful.chatByCust[cid] = _live.caseFaithful.chatByCust[cid] || { loading: false, items: [], error: null };
+    mbag.loading = true;
+    const mj = await tryFetch('case:msgs:' + cid, `/api/inbox-messages-list?conversation_id=${encodeURIComponent(cbag.convId)}&limit=20`, 6000);
+    mbag.loading = false;
+    if (mj && mj.error) mbag.error = mj.error;
+    else mbag.items = asArr(mj?.items);
+    // Joost-suggestie (parallel, aparte call).
+    const jbag = _live.caseFaithful.joostByCust[cid] = _live.caseFaithful.joostByCust[cid] || { loading: false, items: [], error: null };
+    jbag.loading = true;
+    const jj = await tryFetch('case:joost:' + cid, `/api/joost-suggestions-recent?conversation_id=${encodeURIComponent(cbag.convId)}&max_age_minutes=60`, 6000);
+    jbag.loading = false;
+    if (jj && jj.error) jbag.error = jj.error;
+    else jbag.items = asArr(jj?.items);
+    _renderCaseSheet();
+  }
 
   async function _fetchCaseInvoices(cid) {
     if (!cid) return;
@@ -2782,101 +2827,352 @@
     return row?.customer_phone || row?.phone || row?.customer?.phone || row?.mobile_phone || null;
   }
 
-  // Overschrijf de forward-ref uit BROK 9:
+  // SURFACE B: __wbxOpenCase opent een body-level right-slide drawer met scrim.
+  // Warmt pipeline-detail (fase + facturen), conv+chat, briefs, timeline, call-log.
   window.__wbxOpenCase = (cid) => {
     if (!cid) return;
     _ui.caseSheet.cid = String(cid);
-    _ui.caseSheet.tab = 'invoices';
-    // Warm de per-tab data.
+    // Reset joost/pipeline cache zodat verse data komt bij re-open.
+    delete _live.caseFaithful.pipeByCust[cid];
+    delete _live.caseFaithful.convByCust[cid];
+    delete _live.caseFaithful.chatByCust[cid];
+    delete _live.caseFaithful.joostByCust[cid];
+    queueMicrotask(() => _fetchCasePipeline(cid));
+    queueMicrotask(() => _fetchCaseConvChat(cid));
     if (!_live.callLog.byCust[cid])  queueMicrotask(() => _fetchCallLog(cid));
     if (!_live.timeline.byCust[cid]) queueMicrotask(() => _fetchTimeline(cid));
     if (!_live.arrangements.byCust) queueMicrotask(_fetchArrangements);
-    queueMicrotask(() => _fetchCaseInvoices(cid));
     queueMicrotask(() => _fetchCaseBriefs(cid));
     _openCaseSheetDom();
   };
   window.__wbxCloseCase = () => {
     _ui.caseSheet.cid = null;
     _ui.callFormOpen = {};
-    const el = document.getElementById('wbxCaseSheet');
-    if (el) el.remove();
+    const scrim = document.getElementById('wbxCaseScrim');
+    const drawer = document.getElementById('wbxCaseDrawer');
+    if (scrim)  scrim.remove();
+    if (drawer) drawer.remove();
     document.removeEventListener('keydown', _caseSheetKey);
-  };
-  window.__wbxCaseTab = (tab) => {
-    _ui.caseSheet.tab = String(tab || 'invoices');
-    _renderCaseSheet();
   };
 
   function _caseSheetKey(e) { if (e.key === 'Escape') window.__wbxCloseCase(); }
 
   function _openCaseSheetDom() {
-    let el = document.getElementById('wbxCaseSheet');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'wbxCaseSheet';
-      el.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.42);display:flex;justify-content:center;align-items:center;padding:20px';
-      document.body.appendChild(el);
+    let scrim = document.getElementById('wbxCaseScrim');
+    if (!scrim) {
+      scrim = document.createElement('div');
+      scrim.id = 'wbxCaseScrim';
+      scrim.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(17,23,33,.42);animation:wbxScrimFade .15s ease';
+      scrim.addEventListener('click', window.__wbxCloseCase);
+      document.body.appendChild(scrim);
+    }
+    let drawer = document.getElementById('wbxCaseDrawer');
+    if (!drawer) {
+      drawer = document.createElement('aside');
+      drawer.id = 'wbxCaseDrawer';
+      drawer.setAttribute('role', 'dialog');
+      drawer.setAttribute('aria-modal', 'true');
+      drawer.style.cssText = 'position:fixed;top:0;right:0;bottom:0;z-index:9600;width:min(760px,100vw);background:var(--surface);border-left:1px solid var(--border);box-shadow:-6px 0 22px rgba(0,0,0,.14);display:flex;flex-direction:column;overflow:hidden;animation:wbxSlideIn .22s ease';
+      document.body.appendChild(drawer);
       document.addEventListener('keydown', _caseSheetKey);
     }
     _renderCaseSheet();
   }
 
   function _renderCaseSheet() {
-    const el = document.getElementById('wbxCaseSheet');
-    if (!el || !_ui.caseSheet.cid) return;
-    el.innerHTML = _caseSheetHtml();
+    const drawer = document.getElementById('wbxCaseDrawer');
+    if (!drawer || !_ui.caseSheet.cid) return;
+    drawer.innerHTML = _caseSheetHtml();
   }
+  // Backward-compat forward-ref voor callers uit BROK 4/5/6 die _repaintCaseSheet noemen.
+  function _repaintCaseSheet() { _renderCaseSheet(); }
 
+  /* SURFACE B — v1-faithful drawer render. Single-scroll met 5 cards
+     (Factuur / Bellen / Gesprek / WIK-brief / Tijdlijn), fase-progress
+     bovenaan en 8-item action-bar onderaan. Alle data via bestaande
+     endpoints (dunning-pipeline-detail voor factuur + fase; inbox-conv +
+     -messages voor gesprek; joost-suggestions-recent voor Joost-blurb;
+     dunning-briefs-list voor WIK; wanbetalers-timeline voor tijdlijn). */
   function _caseSheetHtml() {
     const cid = _ui.caseSheet.cid;
-    const row = _findOvRow(cid);
-    const name = row?.customer_name || row?.name || 'Onbekend';
-    const openAmt = Number.isFinite(Number(row?.total_open_cents)) ? Number(row.total_open_cents) / 100 : 0;
-    const days = Number.isFinite(Number(row?.days_overdue)) ? Number(row.days_overdue) : 0;
-    // BROK 8 minor: NL-label lookup via PIPELINE_STAGES i.p.v. ruwe slug tonen.
-    // Fallback: stages uit /api/dunning-pipeline-stages (BROK 9 _live.stages)
-    // → dan slug als laatste redmiddel.
-    const stageSlug = row?.stage_slug || row?.stage || null;
-    const stageFromApi = (asArr(_live.stages?.items).find((s) => s.slug === stageSlug) || {}).label;
-    const stageFromConst = ((typeof PIPELINE_STAGES !== 'undefined' && PIPELINE_STAGES.find((s) => s[0] === stageSlug)) || [])[1];
-    const stage = row?.stage_label || stageFromApi || stageFromConst || stageSlug || '—';
+    const pipe = _live.caseFaithful.pipeByCust[cid]?.data || null;
+    const row  = _findOvRow(cid);
+    const name = pipe?.customer?.name || row?.customer_name || row?.name || 'Onbekend';
+    const stageSlug = pipe?.pipeline?.stage_slug || pipe?.stage_slug || row?.stage_slug || row?.stage || null;
+    const openInvs  = asArr(pipe?.open_invoices);
+    const focus     = openInvs[0] || null;
+    const focusNr   = focus?.invoice_number || focus?.number || row?.invoice_number || '—';
+    const focusOpen = Number(focus?.amount_open ?? focus?.open_amount ?? row?.total_open_cents / 100) || 0;
+    // Dagen te laat: pipeline levert 'em vaak; fallback overzicht-row.
+    let daysN = Number(focus?.days_overdue);
+    if (!Number.isFinite(daysN) && focus?.due_date) {
+      const t = new Date(focus.due_date).getTime();
+      if (Number.isFinite(t) && t < Date.now()) daysN = Math.floor((Date.now() - t) / 86_400_000);
+    }
+    if (!Number.isFinite(daysN)) daysN = Number(row?.days_overdue) || 0;
+
     const arrs = (_live.arrangements.byCust || {})[cid] || [];
     const activeArr = arrs.length > 0;
-    const phone = _customerPhone(row);
-    const tab = _ui.caseSheet.tab || 'invoices';
+    const phone = pipe?.customer?.phone || _customerPhone(row);
 
-    const tabBtn = (id, label, count) => `<button class="chip ${tab === id ? 'on' : ''}" style="font-size:11.5px;padding:4px 11px" onclick="__wbxCaseTab('${id}')">${esc(label)}${count != null ? ` <span style="opacity:.6">${count}</span>` : ''}</button>`;
-
-    let body = '';
-    if (tab === 'invoices')  body = _caseSheetInvoicesHtml(cid);
-    else if (tab === 'timeline') body = _caseSheetTimelineHtml(cid);
-    else if (tab === 'briefs')   body = _caseSheetBriefsHtml(cid);
-    else if (tab === 'calls')    body = _caseSheetCallsHtml(cid, phone);
-
-    const invCount = asArr(_live.caseSheet.invoicesByCust[cid]?.items).length;
-    const tlCount  = asArr(_live.timeline.byCust[cid]).length;
-    const brCount  = asArr(_live.caseSheet.briefsByCust[cid]?.items).length;
-    const clCount  = asArr(_live.callLog.byCust[cid]).length;
-
-    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);width:min(960px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:14px">
-        <div style="min-width:0;flex:1">
-          <div style="font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}${activeArr ? ` <span style="font-size:10.5px;padding:2px 8px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600;vertical-align:middle;margin-left:6px">⏸ Arrangement</span>` : ''}</div>
-          <div style="font-size:12px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${eur(openAmt)} · ${days} dagen · fase <b style="color:var(--text-1)">${esc(stage)}</b></div>
+    return `<style>
+      @keyframes wbxScrimFade { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes wbxSlideIn   { from { transform: translateX(100%) } to { transform: translateX(0) } }
+      .wbx-drawer-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; background: var(--surface-2); padding: 14px 18px }
+      .wbx-drawer-card   { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); margin-bottom: 12px; overflow: hidden }
+      .wbx-drawer-card-h { padding: 10px 14px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 13px }
+      .wbx-drawer-card-b { padding: 10px 14px; font-size: 12.5px; color: var(--text-2) }
+      .wbx-kv-row        { display: grid; grid-template-columns: 130px 1fr; gap: 8px; padding: 4px 0; font-size: 12.5px }
+      .wbx-kv-l          { color: var(--text-3); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; padding-top: 2px }
+      .wbx-flow-strip    { display: flex; align-items: center; gap: 6px; padding: 8px 18px 10px; border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap }
+      .wbx-step          { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-3); font-weight: 500 }
+      .wbx-step .wbx-bul { width: 8px; height: 8px; border-radius: 50%; background: var(--border); display: inline-block }
+      .wbx-step.wbx-done { color: var(--emerald) } .wbx-step.wbx-done .wbx-bul { background: var(--emerald) }
+      .wbx-step.wbx-here { color: var(--brand); font-weight: 700 } .wbx-step.wbx-here .wbx-bul { background: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft, rgba(10,116,144,.16)) }
+      .wbx-bar           { flex: 1; height: 2px; background: var(--border); min-width: 12px; max-width: 40px }
+      .wbx-bar.wbx-done  { background: var(--emerald) }
+      .wbx-msg-in, .wbx-msg-out { max-width: 78%; padding: 7px 11px; border: 1px solid var(--border); border-radius: var(--r-sm); font-size: 12px; margin-bottom: 6px; word-break: break-word }
+      .wbx-msg-in  { background: var(--surface-2); align-self: flex-start }
+      .wbx-msg-out { background: var(--brand-soft, #E2F1F5); align-self: flex-end; margin-left: auto }
+    </style>
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;justify-content:space-between;align-items:flex-start;gap:14px">
+      <div style="min-width:0;flex:1">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
+          <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxCloseCase()" title="Sluit (Esc)">← Terug</button>
+          ${activeArr ? '<span style="font-size:10.5px;padding:2px 8px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">⏸ Arrangement</span>' : ''}
+          ${_caseBriefBadgeHtml(cid)}
         </div>
-        <div style="display:flex;gap:6px;align-items:center">
-          ${phone ? `<button class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="__wbxCallDial('${esc(cid)}','${esc(phone)}','${esc(name)}')" title="Softphone: ${esc(phone)}">📞 Bel</button>` : ''}
-          <button class="icon-btn" onclick="__wbxCloseCase()" title="Sluit (Esc)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        <div style="font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
+        <div style="font-size:12px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">Factuur ${esc(focusNr)} · ${eur(focusOpen)} · ${daysN} dagen te laat</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+        ${_caseStagePillHtml(stageSlug)}
+        <button class="icon-btn" onclick="__wbxCloseCase()" title="Sluit (Esc)" style="border:none;background:transparent;cursor:pointer;color:var(--text-2)"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+    </div>
+    ${_caseFlowStripHtml(stageSlug)}
+    <div class="wbx-drawer-scroll">
+      ${_caseFactuurCardHtml(cid, pipe, focus, daysN)}
+      ${_caseBellenCardHtml(cid, phone, name)}
+      ${_caseGesprekCardHtml(cid)}
+      ${_caseWikCardHtml(cid)}
+      ${_caseTijdlijnCardHtml(cid)}
+    </div>
+    ${_caseSheetActionBarHtml(cid, stageSlug)}`;
+  }
+
+  function _caseStagePillHtml(stageSlug) {
+    if (!stageSlug) return '';
+    const stageFromApi   = (asArr(_live.stages?.items).find((s) => s.slug === stageSlug) || {}).label;
+    const stageFromConst = ((typeof PIPELINE_STAGES !== 'undefined' && PIPELINE_STAGES.find((s) => s[0] === stageSlug)) || [])[1];
+    const label = stageFromApi || stageFromConst || stageSlug;
+    const bg = stageSlug === 'opgelost' ? 'var(--emerald-soft)' : (stageSlug === 'incasso' ? 'var(--rose-soft)' : (stageSlug === 'dispuut' ? 'var(--amber-soft)' : 'var(--surface-2)'));
+    const fg = stageSlug === 'opgelost' ? 'var(--emerald)'      : (stageSlug === 'incasso' ? 'var(--rose)'      : (stageSlug === 'dispuut' ? 'var(--amber)'      : 'var(--text-2)'));
+    return `<span style="font-size:11px;padding:3px 10px;border-radius:5px;background:${bg};color:${fg};font-weight:600">${esc(label)}</span>`;
+  }
+
+  function _caseBriefBadgeHtml(cid) {
+    const bag = _live.caseSheet.briefsByCust[cid];
+    if (!bag || !bag.items) return '';
+    const briefSent = bag.items.some((b) => b.sent_via === 'email' || b.sent_via === 'post');
+    if (briefSent) return '<span title="WIK-brief verstuurd" style="font-size:10.5px;padding:2px 7px;border-radius:5px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">✓ Brief</span>';
+    const hasBrief = bag.items.length > 0;
+    if (hasBrief) return '<span title="Brief aangemaakt, nog niet verstuurd" style="font-size:10.5px;padding:2px 7px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">Brief · nog niet verstuurd</span>';
+    return '<span title="Nog geen WIK-brief" style="font-size:10.5px;padding:2px 7px;border-radius:5px;background:var(--surface-2);color:var(--text-3);font-weight:600">× Geen brief</span>';
+  }
+
+  /* Fase-progress-bar. 4 vaste steps: Nieuw te laat → Aangemaand →
+     In gesprek → <endLabel>. Slug-mapping bepaalt active step-index. */
+  function _caseFlowStripHtml(stageSlug) {
+    const map = { nieuw: 0, aangemaand: 1, brief_verstuurd: 1, in_gesprek: 2, regeling: 3, opgelost: 3, incasso: 3, afschrijven: 3, dispuut: 2, bewind: 2 };
+    const endLabelMap = { regeling: 'Regeling', opgelost: 'Betaald', incasso: 'Incasso', afschrijven: 'Afgeschreven' };
+    const idx = (stageSlug != null && map[stageSlug] != null) ? map[stageSlug] : 0;
+    const endLabel = endLabelMap[stageSlug] || 'Uitkomst';
+    const steps = ['Nieuw te laat', 'Aangemaand', 'In gesprek', endLabel];
+    const parts = [];
+    steps.forEach((label, i) => {
+      const cls = i < idx ? 'wbx-done' : (i === idx ? 'wbx-here' : '');
+      parts.push(`<div class="wbx-step ${cls}"><span class="wbx-bul"></span>${esc(label)}</div>`);
+      if (i < steps.length - 1) parts.push(`<span class="wbx-bar ${i < idx ? 'wbx-done' : ''}"></span>`);
+    });
+    return `<div class="wbx-flow-strip">${parts.join('')}</div>`;
+  }
+
+  function _caseFactuurCardHtml(cid, pipe, focus, daysN) {
+    const openInvs = asArr(pipe?.open_invoices);
+    const nOpen = openInvs.length;
+    const nr = focus?.invoice_number || '—';
+    const openEur = Number(focus?.amount_open ?? focus?.open_amount ?? 0);
+    const isMulti = nOpen > 1;
+    return `<div class="wbx-drawer-card">
+      <div class="wbx-drawer-card-h">De factuur</div>
+      <div class="wbx-drawer-card-b">
+        <div class="wbx-kv-row"><div class="wbx-kv-l">Factuurnummer</div><div style="font-family:'IBM Plex Mono',monospace">${esc(nr)}</div></div>
+        <div class="wbx-kv-row"><div class="wbx-kv-l">Bedrag</div><div style="font-family:'IBM Plex Mono',monospace;color:var(--rose);font-weight:600">${eur(openEur)}</div></div>
+        <div class="wbx-kv-row"><div class="wbx-kv-l">Dagen te laat</div><div><b style="color:${daysN >= 30 ? 'var(--rose)' : (daysN >= 14 ? 'var(--amber)' : 'var(--text-1)')}">${daysN}d</b></div></div>
+        <div class="wbx-kv-row"><div class="wbx-kv-l">Open facturen</div><div>${isMulti ? `<b>${nOpen}</b> — achterstand` : (nOpen === 1 ? '1 — enkel deze factuur' : '—')}</div></div>
+      </div>
+    </div>`;
+  }
+
+  /* Bellen-card — hergebruikt shared KlxSoftphone. Behoudt aparte
+     "Uitkomst noteren"-knop + poging-tracker uit dunning_call_log
+     (zodat MANUAL_FOLLOWUP-auto-open flow blijft werken). */
+  function _caseBellenCardHtml(cid, phone, name) {
+    const calls = asArr(_live.callLog.byCust[cid]);
+    const cadence = _live.callLog.cadenceByCust?.[cid] || { max_attempts: 3 };
+    const attempts = calls.length;
+    const dots = [];
+    for (let i = 0; i < (cadence.max_attempts || 3); i++) {
+      const cls = i < attempts ? 'wbx-done' : (i === attempts ? 'wbx-here' : '');
+      dots.push(`<span class="wbx-bul" style="width:8px;height:8px;border-radius:50%;background:${cls === 'wbx-done' ? 'var(--emerald)' : (cls === 'wbx-here' ? 'var(--brand)' : 'var(--border)')};display:inline-block"></span>`);
+    }
+    const last = calls[0] || null;
+    const lastLine = last ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:6px">Laatste poging: <b>${esc(last.outcome || '—')}</b> · ${esc(_fmtDateTime(last.attempted_at || last.created_at))}</div>` : '';
+    const formOpen = !!_ui.callFormOpen[cid];
+    return `<div class="wbx-drawer-card">
+      <div class="wbx-drawer-card-h">Bellen ${phone ? `<span style="font-family:'IBM Plex Mono',monospace;font-weight:500;color:var(--text-3);font-size:11.5px">${esc(phone)}</span>` : ''}</div>
+      <div class="wbx-drawer-card-b">
+        ${!phone ? '<div style="color:var(--text-3);font-size:12.5px">Geen telefoonnummer bij deze klant.</div>' : `
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" style="font-size:12px" onclick="__wbxCaseCallSheetOpen('${esc(cid)}','${esc(phone)}','${esc(name)}')" title="Softphone openen (lijnkeuze NL/BE + connect-status in de sheet)">📞 Bel via softphone</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:12px" onclick="__wbxCaseCallOpen('${esc(cid)}')" ${_rbac.canExecute ? '' : 'disabled title="Geen rechten"'}>Uitkomst noteren</button>
+            <div style="display:flex;gap:5px;align-items:center;margin-left:8px" title="Poging ${attempts} van ${cadence.max_attempts || 3}">${dots.join('')}<span style="font-size:11px;color:var(--text-3);margin-left:6px">${attempts}/${cadence.max_attempts || 3}</span></div>
+          </div>
+          ${lastLine}
+        `}
+        ${formOpen ? '<div style="margin-top:12px">' + _caseSheetCallFormHtml(cid) + '</div>' : ''}
+      </div>
+    </div>`;
+  }
+
+  /* Gesprek-card — laatste 8 chat-bubbles uit inbox-messages-list.
+     Joost-suggestie (max_age_minutes=60) inline eronder. */
+  function _caseGesprekCardHtml(cid) {
+    const cbag = _live.caseFaithful.convByCust[cid];
+    const mbag = _live.caseFaithful.chatByCust[cid];
+    const jbag = _live.caseFaithful.joostByCust[cid];
+    let msgsHtml = '';
+    if (!cbag || cbag.loading) msgsHtml = '<div style="color:var(--text-3);font-size:12px">Gesprek laden…</div>';
+    else if (cbag.error === 'geen conv' || !cbag.convId) msgsHtml = '<div style="color:var(--text-3);font-size:12px">Nog geen WA-gesprek met deze klant.</div>';
+    else if (mbag?.loading) msgsHtml = '<div style="color:var(--text-3);font-size:12px">Berichten laden…</div>';
+    else {
+      const items = asArr(mbag?.items).slice(-8);
+      if (!items.length) msgsHtml = '<div style="color:var(--text-3);font-size:12px">Geen berichten.</div>';
+      else msgsHtml = '<div style="display:flex;flex-direction:column;gap:4px">' + items.map((m) => {
+        const isOut = m.direction === 'outbound' || m.direction === 'out';
+        const cls = isOut ? 'wbx-msg-out' : 'wbx-msg-in';
+        const body = String(m.body || m.text || '').slice(0, 400);
+        return `<div class="${cls}">${esc(body)}<div style="font-size:9.5px;color:var(--text-3);margin-top:2px">${esc(_fmtDateTime(m.at || m.created_at))}</div></div>`;
+      }).join('') + '</div>';
+    }
+    let joostHtml = '';
+    const jItem = asArr(jbag?.items)[0] || null;
+    if (jbag?.loading) joostHtml = '<div style="margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:11.5px;color:var(--text-3)">Joost denkt na…</div>';
+    else if (jItem) {
+      const intent = jItem.detected_intent || 'suggestie';
+      const conf = jItem.confidence != null ? Math.round(jItem.confidence * 100) + '%' : '';
+      const reply = String(jItem.suggested_reply || '').slice(0, 500);
+      joostHtml = `<div style="margin-top:10px;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
+          <span style="font-size:11px;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:.06em">🤖 Joost · ${esc(intent)}</span>
+          ${conf ? `<span style="font-size:10.5px;color:var(--text-3)">${conf}</span>` : ''}
         </div>
+        <div style="font-size:12.5px;color:var(--text-2);white-space:pre-wrap">${esc(reply)}</div>
+      </div>`;
+    }
+    return `<div class="wbx-drawer-card">
+      <div class="wbx-drawer-card-h">Gesprek</div>
+      <div class="wbx-drawer-card-b">${msgsHtml}${joostHtml}</div>
+    </div>`;
+  }
+
+  /* WIK-brief-card. Toont laatste brief + generatie-knoppen NL/BE.
+     Verstuur-knoppen (mail via administratie / markeer per post) enkel
+     als de laatste nog niet verstuurd is. */
+  function _caseWikCardHtml(cid) {
+    const bag = _live.caseSheet.briefsByCust[cid] || { loading: false, items: [] };
+    const items = asArr(bag.items);
+    const latest = items[0] || null;
+    let statusLine = '';
+    let sendActions = '';
+    if (!latest) {
+      statusLine = '<div style="color:var(--text-3);font-size:12.5px">Nog geen WIK-brief aangemaakt.</div>';
+    } else {
+      const when = _fmtDate(latest.generated_at || latest.created_at);
+      const country = latest.country || '—';
+      let sv = '';
+      if (latest.sent_via === 'email') sv = `<b style="color:var(--emerald)">✓ Verstuurd per e-mail</b>${latest.sent_at ? ' · ' + esc(_fmtDate(latest.sent_at)) : ''}`;
+      else if (latest.sent_via === 'post') sv = `<b style="color:var(--emerald)">✓ Verstuurd per post</b>${latest.sent_at ? ' · ' + esc(_fmtDate(latest.sent_at)) : ''}`;
+      else if (latest.downloaded_at) sv = `<span style="color:var(--amber)">↓ Gedownload · nog niet gemarkeerd verstuurd</span>`;
+      else sv = '<span style="color:var(--text-3)">Nog niet verstuurd — alleen aangemaakt</span>';
+      statusLine = `<div style="font-size:12.5px;margin-bottom:4px"><b>Laatst gegenereerd:</b> ${esc(when)} · land <b>${esc(country)}</b></div>
+        <div style="font-size:12px">${sv}</div>`;
+      if (!latest.sent_via) {
+        sendActions = `
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikSendEmail('${esc(latest.id)}','${esc(cid)}')">✉ Mail via administratie@</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikMarkPost('${esc(latest.id)}','${esc(cid)}')">✉ Markeer verstuurd per post</button>`;
+      }
+    }
+    const downloadBtn = latest?.download_url
+      ? `<a class="btn btn-ghost btn-sm" style="font-size:11.5px;text-decoration:none" href="${esc(latest.download_url)}" target="_blank" rel="noopener">↓ Bewijs</a>` : '';
+    return `<div class="wbx-drawer-card">
+      <div class="wbx-drawer-card-h">WIK-brief — bewijs</div>
+      <div class="wbx-drawer-card-b">
+        ${statusLine}
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+          ${downloadBtn}
+          ${sendActions}
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','NL')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe NL' : '📄 Genereer NL'}</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxWikGen('${esc(cid)}','BE')" ${_rbac.canBrief ? '' : 'disabled title="Geen rechten"'}>${latest ? '↻ Nieuwe BE' : '📄 Genereer BE'}</button>
+        </div>
+        ${items.length > 1 ? `<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--text-3);font-size:11.5px">Eerdere brieven (${items.length - 1})</summary>
+          <div style="margin-top:6px">${items.slice(1).map((b) => `<div style="padding:4px 0;border-top:1px dashed var(--border);font-size:11.5px;color:var(--text-3)">${esc(_fmtDate(b.generated_at || b.created_at))} · ${esc(b.country || '?')} · ${b.sent_via ? esc(b.sent_via) : 'niet verstuurd'}${b.download_url ? ' · <a href="' + esc(b.download_url) + '" target="_blank" rel="noopener">PDF</a>' : ''}</div>`).join('')}</div>
+        </details>` : ''}
       </div>
-      <div style="padding:9px 18px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap">
-        ${tabBtn('invoices', 'Open facturen', invCount)}
-        ${tabBtn('timeline', 'Tijdlijn', tlCount)}
-        ${tabBtn('briefs',   'Brieven',  brCount)}
-        ${tabBtn('calls',    'Belhistorie', clCount)}
+    </div>`;
+  }
+
+  /* Tijdlijn & notities. Feed uit wanbetalers-timeline + notitie-input. */
+  function _caseTijdlijnCardHtml(cid) {
+    const st = _live.timeline;
+    const items = asArr(st.byCust[cid]);
+    const WT = window.WanbetalersTimeline || null;
+    const noteState = _ui.caseNoteByCust = _ui.caseNoteByCust || {};
+    const nf = noteState[cid] = noteState[cid] || { text: '', saving: false, error: null, expanded: false };
+    const shown = nf.expanded ? items : items.slice(0, 3);
+    let listHtml = '';
+    if (!items.length && st.loading) listHtml = `<div style="color:var(--text-3);font-size:12px">Tijdlijn laden…</div>`;
+    else if (!items.length) listHtml = `<div style="color:var(--text-3);font-size:12px">Geen tijdlijn-events.</div>`;
+    else listHtml = shown.map((it) => {
+      const d = WT?.describe ? WT.describe(it) : { icon: '·', title: it.title || it.type };
+      const actor = it.actor?.name || '';
+      const title = d.title || it.title || it.type || 'Event';
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;gap:9px">
+        <div style="font-size:14px;line-height:1;color:var(--text-3);min-width:18px;text-align:center">${esc(d.icon || '·')}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:12.5px">${esc(title)}</div>
+          ${it.description ? `<div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(it.description)}</div>` : ''}
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:2px;font-family:'IBM Plex Mono',monospace">${esc(_fmtDateTime(it.at))}${actor ? ' · ' + esc(actor) : ''}</div>
+        </div>
+      </div>`;
+    }).join('');
+    const moreBtn = items.length > 3
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;margin-top:8px" onclick="__wbxCaseTlToggle('${esc(cid)}')">${nf.expanded ? 'Inklappen' : 'Toon meer (' + (items.length - 3) + ')'}</button>` : '';
+    return `<div class="wbx-drawer-card">
+      <div class="wbx-drawer-card-h">Tijdlijn & notities</div>
+      <div class="wbx-drawer-card-b">
+        <div style="margin-bottom:10px">
+          <textarea id="wbxCaseTlNote_${esc(cid)}" rows="2" oninput="__wbxCaseTlNoteInput('${esc(cid)}',this.value)" placeholder="Notitie toevoegen…" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12px;resize:vertical;box-sizing:border-box">${esc(nf.text || '')}</textarea>
+          ${nf.error ? `<div style="color:var(--rose);font-size:11px;margin-top:4px">⚠ ${esc(nf.error)}</div>` : ''}
+          <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
+            <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="__wbxCaseTlRefresh('${esc(cid)}')">↻</button>
+            <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="__wbxCaseTlSave('${esc(cid)}')" ${nf.saving ? 'disabled' : ''}>${nf.saving ? 'Opslaan…' : 'Notitie plaatsen'}</button>
+          </div>
+        </div>
+        <div>${listHtml}</div>
+        ${moreBtn}
       </div>
-      ${_caseSheetActionBarHtml(cid, stageSlug)}
-      <div style="flex:1;overflow-y:auto;background:var(--surface-2)">${body}</div>
     </div>`;
   }
 
@@ -2892,36 +3188,263 @@
      Elke actie via custom confirm/form-modal + race-guard in _ui.caseActBusy. */
   _ui.caseActBusy = _ui.caseActBusy || {};
 
+  /* SURFACE B action-bar — v1-faithful 8-knop layout, bottom-anchored.
+     Volgorde: Betaalafspraak · Herinnering · Vraag Joost · ✓ Sluit dossier ·
+     ⚖ Geschil (of Geschil opgelost) · 🛡 Bewind · ⏸ Pauzeer · ⚖ Naar incasso.
+     Terminal stages verbergen 5 v.d. 8 destructive/mutation-acties. */
   function _caseSheetActionBarHtml(cid, stageSlug) {
-    // Terminal stages: verberg destructive actions die geen zin hebben.
     const isTerminal = stageSlug === 'opgelost' || stageSlug === 'afschrijven';
+    const isDispute  = stageSlug === 'dispuut';
     const busy = (k) => !!_ui.caseActBusy[k + ':' + cid];
     const b = (fn, icon, label, tone, title, hidden) => {
       if (hidden) return '';
-      const busyKey = 'act:' + fn;
       const isBusy = busy(fn);
-      const color = tone === 'danger' ? 'var(--rose)' : (tone === 'warn' ? 'var(--amber)' : (tone === 'ok' ? 'var(--emerald)' : 'var(--text-2)'));
+      const color = tone === 'danger' ? 'var(--rose)' : (tone === 'warn' ? 'var(--amber)' : (tone === 'ok' ? 'var(--emerald)' : (tone === 'brand' ? 'var(--brand)' : 'var(--text-2)')));
       return `<button class="btn btn-ghost btn-sm" ${isBusy ? 'disabled' : ''} style="font-size:11.5px;padding:5px 10px;color:${color};${isBusy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer'}" onclick="__wbxCaseAction('${esc(fn)}','${esc(cid)}')" title="${esc(title || label)}">${icon} ${esc(label)}</button>`;
     };
-    return `<div style="padding:8px 18px;border-bottom:1px solid var(--border);background:var(--surface-2);display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-      <span style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);font-weight:600;margin-right:4px">Acties</span>
-      ${b('reminder',  '📩', 'Herinnering',  'text',    'Log handmatige herinnering (note in tijdlijn)', isTerminal)}
-      ${b('promise',   '🤝', 'Toezegging',   'ok',      'Betaalbelofte loggen (bedrag + datum)',         isTerminal)}
-      ${b('close',     '✅', 'Sluit dossier','ok',      'Klant afhandelen (opgelost)',                    false)}
-      ${b('dispute',   '⚠',  'Dispuut',      'warn',    'Geschil markeren — flow parkeren',              isTerminal)}
-      ${b('incasso',   '⚖',  'Naar incasso', 'danger',  'Incasso-dossier aanmaken',                       isTerminal)}
-      ${b('pause',     '⏸',  'Pauzeer flow', 'warn',    'Aanmaan-flow tijdelijk stoppen',                 isTerminal)}
+    return `<div style="padding:10px 18px;border-top:1px solid var(--border);background:var(--surface);display:flex;gap:6px;flex-wrap:wrap;align-items:center;box-shadow:0 -2px 8px rgba(0,0,0,.04)">
+      ${b('promise',   '🤝', 'Betaalafspraak',  'ok',    'Betaalbelofte loggen (bedrag + datum)',  isTerminal)}
+      ${b('reminder',  '📩', 'Herinnering',     'text',  'Log handmatige herinnering',              isTerminal)}
+      ${b('askjoost',  '🤖', 'Vraag Joost',     'brand', 'Vraag Joost om een suggestie',            isTerminal)}
+      ${b('close',     '✅', 'Sluit dossier',   'ok',    'Klant afhandelen (opgelost)',              false)}
+      ${isDispute
+        ? b('resolvedispute', '⚖', 'Geschil opgelost', 'ok', 'Klant heeft ongelijk / geschil is opgelost', false)
+        : b('dispute',        '⚖', 'Geschil',           'warn', 'Geschil markeren — flow parkeren', isTerminal)}
+      ${b('bewind',    '🛡', 'Bewind',          'warn',  'Klant onder schuldbewind — flow parkeren', isTerminal)}
+      ${b('pause',     '⏸',  'Pauzeer flow',   'warn',  'Aanmaan-flow tijdelijk stoppen',           isTerminal)}
+      ${b('incasso',   '⚖',  'Naar incasso',   'danger','Incasso-dossier aanmaken',                  isTerminal)}
     </div>`;
   }
 
   window.__wbxCaseAction = (fn, cid) => {
     if (!fn || !cid) return;
-    if (fn === 'reminder') _caseActReminder(cid);
-    else if (fn === 'promise') _caseActPromise(cid);
-    else if (fn === 'close')   _caseActClose(cid);
-    else if (fn === 'dispute') _caseActDispute(cid);
-    else if (fn === 'incasso') _caseActIncasso(cid);
-    else if (fn === 'pause')   _caseActPause(cid);
+    if (fn === 'reminder')            _caseActReminder(cid);
+    else if (fn === 'promise')         _caseActPromise(cid);
+    else if (fn === 'close')           _caseActClose(cid);
+    else if (fn === 'dispute')         _caseActDispute(cid);
+    else if (fn === 'resolvedispute')  _caseActResolveDispute(cid);
+    else if (fn === 'bewind')          _caseActBewind(cid);
+    else if (fn === 'incasso')         _caseActIncasso(cid);
+    else if (fn === 'pause')           _caseActPause(cid);
+    else if (fn === 'askjoost')        _caseActAskJoost(cid);
+  };
+
+  // SURFACE B nieuwe handlers.
+  async function _caseActResolveDispute(cid) {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const reason = await _askReason('Geschil oplossen', 'Wat was de uitkomst? (bv. "Klant had ongelijk, factuur staat", "Factuur gecrediteerd — klant had gelijk")', { okLabel: 'Los op' });
+    if (!reason || reason.length < 5) { if (reason) _toast('Reden min 5 tekens.', 'warn'); return; }
+    if (_ui.caseActBusy['resolvedispute:' + cid]) return;
+    _ui.caseActBusy['resolvedispute:' + cid] = true;
+    const r = await apiPost('/api/finance-dunning-resolve-dispute', { customer_id: cid, resolution: 'resume', reason });
+    _ui.caseActBusy['resolvedispute:' + cid] = false;
+    if (!r.ok) { _toast('Oplossen mislukt: ' + r.error, 'error'); return; }
+    _toast('Geschil opgelost — flow hervat.', 'success');
+    _live.overzicht.fetched = false;
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    delete _live.caseFaithful.pipeByCust[cid];
+    _fetchCasePipeline(cid);
+    _repaintCaseSheet();
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  async function _caseActBewind(cid) {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:12.5px;color:var(--text-2);padding:8px 11px;background:var(--amber-soft, rgba(245,158,11,.08));border:1px solid var(--amber);border-radius:6px;line-height:1.5">
+          ⚠ Klant staat onder <b>schuldbewind / curator / faillissement</b>. Alle contact naar de klant zelf wordt gestopt; vervolg loopt via de bewindvoerder.
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Reden (min 5 tekens)</div>
+          <textarea id="wbxBewReason" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Bewindvoerder / curator — naam (verplicht)</div>
+          <input id="wbxBewName" type="text" maxlength="200" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">E-mail</div>
+            <input id="wbxBewEmail" type="email" maxlength="200" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+          </div>
+          <div style="flex:1">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Telefoon</div>
+            <input id="wbxBewPhone" type="tel" maxlength="60" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+          </div>
+        </div>
+      </div>`;
+    const form = await _askForm('Bewind markeren?', bodyHtml, (root) => {
+      const reason = String(root.querySelector('#wbxBewReason')?.value || '').trim();
+      const name   = String(root.querySelector('#wbxBewName')?.value || '').trim();
+      const email  = String(root.querySelector('#wbxBewEmail')?.value || '').trim();
+      const phone  = String(root.querySelector('#wbxBewPhone')?.value || '').trim();
+      if (reason.length < 5) { _toast('Reden min 5 tekens.', 'warn'); return null; }
+      if (name.length < 2)   { _toast('Naam bewindvoerder verplicht.', 'warn'); return null; }
+      return { reason, curator: { name, email: email || undefined, phone: phone || undefined } };
+    }, { okLabel: 'Markeer' });
+    if (!form) return;
+    if (_ui.caseActBusy['bewind:' + cid]) return;
+    _ui.caseActBusy['bewind:' + cid] = true;
+    const r = await apiPost('/api/finance-dunning-mark-bewind', {
+      customer_id: cid, reason: form.reason, curator_contact: form.curator,
+    });
+    _ui.caseActBusy['bewind:' + cid] = false;
+    if (!r.ok) { _toast('Bewind mislukt: ' + r.error, 'error'); return; }
+    _toast('Klant onder bewind — flow geparkeerd.', 'success');
+    _live.overzicht.fetched = false;
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    delete _live.caseFaithful.pipeByCust[cid];
+    _fetchCasePipeline(cid);
+    _repaintCaseSheet();
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Vraag Joost — genereert een nieuwe suggestie voor het conversation-id
+  // van de klant. Fire-and-forget POST; na 2s refetch joost-suggestions-recent.
+  async function _caseActAskJoost(cid) {
+    const cbag = _live.caseFaithful.convByCust[cid];
+    if (!cbag?.convId) { _toast('Geen WA-gesprek met deze klant.', 'warn'); return; }
+    if (_ui.caseActBusy['askjoost:' + cid]) return;
+    _ui.caseActBusy['askjoost:' + cid] = true;
+    _repaintCaseSheet();
+    const r = await apiPost('/api/joost-suggest', { conversation_id: cbag.convId });
+    _ui.caseActBusy['askjoost:' + cid] = false;
+    if (!r.ok) { _toast('Joost antwoord mislukt: ' + r.error, 'error'); _repaintCaseSheet(); return; }
+    _toast('Joost denkt na — antwoord verschijnt zo.', 'success');
+    // Refetch na korte delay (Joost is best-effort — meestal <2s).
+    setTimeout(() => {
+      delete _live.caseFaithful.joostByCust[cid];
+      const jbag = _live.caseFaithful.joostByCust[cid] = { loading: true, items: [], error: null };
+      tryFetch('case:joost:refresh:' + cid, `/api/joost-suggestions-recent?conversation_id=${encodeURIComponent(cbag.convId)}&max_age_minutes=60`, 6000)
+        .then((jj) => {
+          jbag.loading = false;
+          if (jj && !jj.error) jbag.items = asArr(jj.items);
+          _repaintCaseSheet();
+        });
+    }, 1800);
+    _repaintCaseSheet();
+  }
+
+  // ─── SURFACE B window-handlers (WIK / tijdlijn / call-sheet-open) ───
+  window.__wbxCaseCallSheetOpen = (cid, phone, name) => {
+    if (!phone) { _toast('Geen telefoonnummer.', 'warn'); return; }
+    if (window.KlxSoftphone && typeof window.KlxSoftphone.open === 'function') {
+      window.KlxSoftphone.open({ phone: String(phone), name: String(name || ''), customerId: String(cid), source: 'wanbetalers.case-sheet' });
+    } else {
+      // Fallback: bestaande __wbxCallDial-flow (confirm + tel:).
+      window.__wbxCallDial(cid, phone, name);
+    }
+  };
+
+  window.__wbxWikGen = async (cid, country) => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    const c = (country === 'BE') ? 'BE' : 'NL';
+    const ok = await _askConfirm(
+      `Nieuwe WIK-brief (${c}) aanmaken?`,
+      `<div style="font-size:12.5px;line-height:1.55">Genereert een <b>${c === 'NL' ? '14-dagenbrief' : 'eerste kosteloze herinnering'}</b>. De brief wordt bewaard als bewijs; download start direct.</div>`,
+      { okLabel: 'Genereer PDF' }
+    );
+    if (!ok) return;
+    if (_ui.caseActBusy['wikgen:' + cid]) return;
+    _ui.caseActBusy['wikgen:' + cid] = true;
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/incasso-pre-brief', { method: 'POST', headers, body: JSON.stringify({ customer_id: cid, country: c }) });
+      if (!resp.ok) {
+        let j = null; try { j = await resp.json(); } catch (_) {}
+        if (resp.status === 422 && j?.code === 'ADDRESS_INCOMPLETE') {
+          const missing = Array.isArray(j.missing_fields) && j.missing_fields.length ? j.missing_fields.join(', ') : 'adres-velden';
+          await _askConfirm('Adres onvolledig', `Ontbrekend in TL: <b>${esc(missing)}</b>.<br><br>Vul aan in TL of klantdossier en probeer opnieuw.`, { okLabel: 'OK' });
+        } else {
+          _toast('Brief-generatie mislukt: ' + (j?.error || ('HTTP ' + resp.status)), 'error');
+        }
+        return;
+      }
+      const briefId = resp.headers.get('X-Brief-Id') || null;
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `WIK-brief_${c}_${cid.slice(0, 8)}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      _toast(`WIK-brief aangemaakt${briefId ? ' (' + briefId.slice(0, 8) + '…)' : ''}.`, 'success');
+      // Cache invalideren + refetch.
+      delete _live.caseSheet.briefsByCust[cid];
+      _fetchCaseBriefs(cid);
+    } catch (e) {
+      _toast('Netwerkfout: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _ui.caseActBusy['wikgen:' + cid] = false;
+      _repaintCaseSheet();
+    }
+  };
+
+  window.__wbxWikSendEmail = async (briefId, cid) => {
+    if (!_rbac.canBrief) { _toast('Geen rechten.', 'error'); return; }
+    const ok = await _askConfirm(
+      'WIK-brief per e-mail versturen?',
+      '<div style="font-size:12.5px;line-height:1.55">De brief wordt namens <b>administratie@deforexopleiding.nl</b> naar de klant gemaild. Dit is een <b>echte send</b> — geen preview-guard.</div>',
+      { okLabel: 'Ja, verstuur', tone: 'danger' }
+    );
+    if (!ok) return;
+    if (_ui.caseActBusy['wikmail:' + briefId]) return;
+    _ui.caseActBusy['wikmail:' + briefId] = true;
+    const r = await apiPost('/api/dunning-brief-email-send', { brief_id: briefId });
+    _ui.caseActBusy['wikmail:' + briefId] = false;
+    if (!r.ok) { _toast('Verzenden mislukt: ' + r.error, 'error'); return; }
+    _toast('Brief verstuurd per e-mail.', 'success');
+    delete _live.caseSheet.briefsByCust[cid];
+    _fetchCaseBriefs(cid);
+  };
+
+  window.__wbxWikMarkPost = async (briefId, cid) => {
+    if (!_rbac.canBrief) { _toast('Geen rechten.', 'error'); return; }
+    const ok = await _askConfirm('Markeer als per post verstuurd?', 'Dit stempelt de brief als "verstuurd via post" (audit + trigger volgende dunning-stap). Geen fysieke verzending.', { okLabel: 'Ja, markeer' });
+    if (!ok) return;
+    if (_ui.caseActBusy['wikpost:' + briefId]) return;
+    _ui.caseActBusy['wikpost:' + briefId] = true;
+    const r = await apiPost('/api/dunning-brief-mark-post', { brief_id: briefId });
+    _ui.caseActBusy['wikpost:' + briefId] = false;
+    if (!r.ok) { _toast('Markeren mislukt: ' + r.error, 'error'); return; }
+    _toast('Brief gemarkeerd verstuurd per post.', 'success');
+    delete _live.caseSheet.briefsByCust[cid];
+    _fetchCaseBriefs(cid);
+  };
+
+  window.__wbxCaseTlNoteInput = (cid, val) => {
+    _ui.caseNoteByCust = _ui.caseNoteByCust || {};
+    _ui.caseNoteByCust[cid] = _ui.caseNoteByCust[cid] || {};
+    _ui.caseNoteByCust[cid].text = String(val || '');
+    // Surgical clear van error (geen full render zodat textarea focus behoudt).
+    if (_ui.caseNoteByCust[cid].error) _ui.caseNoteByCust[cid].error = null;
+  };
+  window.__wbxCaseTlToggle = (cid) => {
+    _ui.caseNoteByCust = _ui.caseNoteByCust || {};
+    _ui.caseNoteByCust[cid] = _ui.caseNoteByCust[cid] || {};
+    _ui.caseNoteByCust[cid].expanded = !_ui.caseNoteByCust[cid].expanded;
+    _repaintCaseSheet();
+  };
+  window.__wbxCaseTlRefresh = (cid) => {
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _fetchTimeline(cid);
+    _toast('Tijdlijn vernieuwd.', 'success');
+  };
+  window.__wbxCaseTlSave = async (cid) => {
+    const nf = (_ui.caseNoteByCust && _ui.caseNoteByCust[cid]) || {};
+    const text = String(nf.text || '').trim();
+    if (!text) { nf.error = 'Leeg — typ eerst een notitie.'; _repaintCaseSheet(); return; }
+    if (nf.saving) return;
+    nf.saving = true; nf.error = null; _repaintCaseSheet();
+    const r = await apiPost('/api/customer-notes', { customer_id: cid, body: text });
+    nf.saving = false;
+    if (!r.ok) { nf.error = r.error || 'Kon notitie niet plaatsen.'; _repaintCaseSheet(); return; }
+    nf.text = '';
+    _toast('Notitie geplaatst.', 'success');
+    if (_live.timeline?.byCust) delete _live.timeline.byCust[cid];
+    _fetchTimeline(cid);
+    _repaintCaseSheet();
   };
 
   async function _caseActReminder(cid) {
