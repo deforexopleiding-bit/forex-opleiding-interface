@@ -211,6 +211,47 @@
     });
   }
 
+  /* ── Form-modal helper — leest values VÓÓR sluiten via extractFn(root) ─
+     Gebruik voor multi-veld modals (verify / escalatie / vrije taak /
+     toewijzen). extractFn krijgt de root-element en moet een waarde-object
+     teruggeven; validate mag null returnen om afwijzen te forceren. Resolvet
+     met de waarde-object (OK) of null (cancel/backdrop/Esc). */
+  function _askForm(title, bodyHtml, extractFn, opts) {
+    const okLabel     = esc((opts && opts.okLabel)     || 'OK');
+    const cancelLabel = esc((opts && opts.cancelLabel) || 'Annuleren');
+    const bgVar       = 'var(--brand,#0A7490)';
+    return new Promise((resolve) => {
+      _closeConfirmModal();
+      const root = document.createElement('div');
+      root.id = 'wbxConfirmRoot';
+      root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.48);padding:20px';
+      root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:560px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto">
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:12px">${esc(title)}</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:16px">${bodyHtml}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button id="wbxFormCancel" class="btn btn-ghost btn-sm">${cancelLabel}</button>
+          <button id="wbxFormOk" class="btn btn-primary btn-sm" style="background:${bgVar};border-color:${bgVar};color:#fff">${okLabel}</button>
+        </div>
+      </div>`;
+      const done = (val) => { _closeConfirmModal(); resolve(val); };
+      root.addEventListener('click', (e) => { if (e.target === root) done(null); });
+      document.body.appendChild(root);
+      document.addEventListener('keydown', _confirmModalKey, true);
+      document.getElementById('wbxFormCancel').addEventListener('click', () => done(null));
+      document.getElementById('wbxFormOk').addEventListener('click', () => {
+        let val = null;
+        try { val = extractFn(root); } catch (e) { val = null; }
+        if (val == null) return; // extractFn faalde validatie — toast is de verantwoordelijkheid van extractFn
+        done(val);
+      });
+      // Focus eerste input/textarea/select
+      setTimeout(() => {
+        const first = root.querySelector('input, textarea, select');
+        if (first) first.focus();
+      }, 20);
+    });
+  }
+
   // Shared POST-helper: authenticated fetch met 20s timeout, non-throwing.
   async function apiPost(url, body) {
     try {
@@ -2414,6 +2455,10 @@
       ? `<a class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;text-decoration:none" href="mailto:${esc(cust.email)}" title="Mail-client openen">✉ Mail</a>`
       : '';
     const dossierBtn = `<button class="btn btn-primary btn-sm" style="font-size:11px;padding:3px 10px" onclick="__wbxOpenCase('${esc(cust.id)}')" title="Open case-sheet">Dossier →</button>`;
+    // BROK 2 ACT-1: "Nieuwe actie ▾" menu — bel / verify / escalatie /
+    // vrije taak / toewijzen. Elke sub-flow via bestaande endpoints met
+    // custom confirm-modal + race-guard.
+    const actieBtn = `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 10px;color:var(--brand);border-color:var(--brand)" onclick="__wbxOpenActieMenu('${esc(cust.id)}')" title="Nieuwe actie starten">➕ Actie</button>`;
 
     const invsHtml = invs.length
       ? invs.slice(0, 8).map((iv) => {
@@ -2441,7 +2486,7 @@
         ${cust.email ? `<div style="font-size:11.5px;color:var(--text-2);word-break:break-all;margin-bottom:2px">✉ ${esc(cust.email)}</div>` : ''}
         ${phone ? `<div style="font-size:11.5px;color:var(--text-2)">📞 ${esc(phone)}</div>` : ''}
         <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
-          ${callBtn}${mailBtn}${dossierBtn}
+          ${callBtn}${mailBtn}${dossierBtn}${actieBtn}
         </div>
       </div>
 
@@ -3260,6 +3305,281 @@
       <span>⚠ ${esc(msg)}</span>
       <button class="btn btn-ghost btn-sm" onclick="__wbxRetryMotor()">Opnieuw</button>
     </div>`;
+  }
+
+  /* ── BROK 2 ACT-1: "Nieuwe actie"-menu per klant ─────────────────────
+     Menu met 5 opties: bel / verify / escalatie / vrije taak / toewijzen.
+     Alle sub-flows via bestaande endpoints:
+       - Bel        → __wbxCall (softphone; race-guard in __wbxSoftphoneCall)
+       - Verify     → POST /api/tasks-create-verify-payment
+       - Escalatie  → POST /api/tasks-create-escalation
+       - Vrije taak → POST /api/tasks-create-followup
+       - Toewijzen  → POST /api/taken (met assigned_to_id) — nieuw taken_items
+     Elke write voorafgegaan door custom confirm-modal + race-guard.       */
+  _live.profielen = { loading: false, fetched: false, error: null, items: [] };
+  async function _fetchProfielen() {
+    if (_live.profielen.loading || _live.profielen.fetched) return;
+    _live.profielen.loading = true;
+    const j = await tryFetch('profielen', '/api/finance-active-profiles-list', 8000);
+    _live.profielen.loading = false;
+    _live.profielen.fetched = true;
+    if (j && !j.error) _live.profielen.items = asArr(j.items);
+    else _live.profielen.error = (j && j.error) || 'onbekende fout';
+  }
+
+  function _closeActieMenu() {
+    const m = document.getElementById('wbxActieMenuRoot');
+    if (m) m.remove();
+  }
+
+  function _openWbxActieMenu(cid, opts) {
+    opts = opts || {};
+    _closeActieMenu();
+    const invoices = asArr(opts.openInvoices);
+    const root = document.createElement('div');
+    root.id = 'wbxActieMenuRoot';
+    root.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(17,23,33,.32);display:flex;align-items:center;justify-content:center;padding:20px';
+    const optBtn = (icon, label, sub, fn) =>
+      `<button data-fn="${esc(fn)}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--border);background:var(--surface);border-radius:10px;cursor:pointer;text-align:left;width:100%;color:var(--text-1);font:inherit;transition:background .1s" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='var(--surface)'">
+        <span style="font-size:20px;line-height:1;flex-shrink:0">${icon}</span>
+        <span style="min-width:0;flex:1">
+          <span style="display:block;font-size:13.5px;font-weight:600">${esc(label)}</span>
+          <span style="display:block;font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(sub)}</span>
+        </span>
+      </button>`;
+    root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:16px;max-width:420px;width:calc(100vw - 40px)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:4px">Nieuwe actie</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:12px">Kies wat je wilt doen voor deze klant.</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${optBtn('📞', 'Bel klant',           'Softphone starten',                     'bel')}
+        ${optBtn('✅', 'Verify betaling',     'Klant zegt al betaald te hebben',        'verify')}
+        ${optBtn('⚠',  'Escaleren',            'Boos / juridisch / naar incasso-hand',   'esc')}
+        ${optBtn('📝', 'Vrije taak',          'Losse follow-up-taak',                   'vrij')}
+        ${optBtn('👥', 'Toewijzen aan collega','Nieuwe taken-item met assignee',        'assign')}
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button id="wbxActieMenuCancel" class="btn btn-ghost btn-sm">Sluiten</button>
+      </div>
+    </div>`;
+    root.addEventListener('click', (e) => { if (e.target === root) _closeActieMenu(); });
+    document.body.appendChild(root);
+    document.getElementById('wbxActieMenuCancel').addEventListener('click', _closeActieMenu);
+    root.querySelectorAll('button[data-fn]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const fn = b.getAttribute('data-fn');
+        _closeActieMenu();
+        if (fn === 'bel')    _actieBel(cid, opts);
+        if (fn === 'verify') _actieVerify(cid, invoices);
+        if (fn === 'esc')    _actieEscalatie(cid);
+        if (fn === 'vrij')   _actieVrijeTaak(cid);
+        if (fn === 'assign') _actieToewijzen(cid);
+      });
+    });
+  }
+  window.__wbxOpenActieMenu = (cid) => {
+    const conv = _ui.inbox.selectedConv;
+    const ctx = conv ? _live.inbox.ctx.byConv[conv] : null;
+    _openWbxActieMenu(String(cid), {
+      phone:         ctx?.customer?.phone || ctx?.conversation?.phone_number || null,
+      openInvoices:  ctx?.open_invoices || [],
+    });
+  };
+
+  function _actieBel(cid, opts) {
+    const phone = opts?.phone || null;
+    if (!phone) { _toast('Geen telefoonnummer bij deze klant.', 'warn'); return; }
+    if (typeof window.__wbxCall === 'function') window.__wbxCall(cid, phone);
+  }
+
+  // ── Verify-flow ────────────────────────────────────────────────────
+  _ui.actieBusy = _ui.actieBusy || {};
+  async function _actieVerify(cid, invoices) {
+    const invs = asArr(invoices);
+    if (!invs.length) { _toast('Geen open facturen — verify-taak vereist een factuur.', 'warn'); return; }
+    const invOpts = invs.map((iv) => `<option value="${esc(iv.id)}" data-amt="${Number(iv.amount_open || 0)}">${esc(iv.invoice_number || iv.id)} · ${eur(iv.amount_open)}${iv.days_overdue > 0 ? ' · +' + iv.days_overdue + 'd' : ''}</option>`).join('');
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Factuur</div>
+          <select id="wbxVerifyInv" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">${invOpts}</select>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Gevraagd bedrag (€)</div>
+          <input id="wbxVerifyAmt" type="number" step="0.01" min="0.01" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Klant-quote / toelichting (min 10 tekens)</div>
+          <textarea id="wbxVerifyText" rows="3" placeholder="'Ik heb gisteren betaald via …'" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+      </div>`;
+    const form = await _askForm('Verify-payment taak aanmaken?', bodyHtml, (root) => {
+      const invId = root.querySelector('#wbxVerifyInv')?.value || null;
+      const amt   = Number(root.querySelector('#wbxVerifyAmt')?.value || 0);
+      const text  = String(root.querySelector('#wbxVerifyText')?.value || '').trim();
+      if (!invId)              { _toast('Kies een factuur.', 'warn'); return null; }
+      if (!(amt > 0))          { _toast('Bedrag > 0 vereist.', 'warn'); return null; }
+      if (text.length < 10)    { _toast('Toelichting min 10 tekens.', 'warn'); return null; }
+      return { invId, amt, text };
+    }, { okLabel: 'Aanmaken' });
+    if (!form) return;
+    const { invId, amt, text } = form;
+    if (_ui.actieBusy['verify:' + cid]) return;
+    _ui.actieBusy['verify:' + cid] = true;
+    const r = await apiPost('/api/tasks-create-verify-payment', {
+      invoice_id: invId, customer_id: cid, claimed_amount: amt, claim_text: text, source: 'wanbetalers-v2',
+    });
+    _ui.actieBusy['verify:' + cid] = false;
+    if (!r.ok) { _toast('Verify-taak mislukt: ' + r.error, 'error'); return; }
+    _toast('Verify-taak aangemaakt.', 'success');
+    _live.pendingActs.fetched = false;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // ── Escalatie-flow ────────────────────────────────────────────────
+  async function _actieEscalatie(cid) {
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Ernst</div>
+          <select id="wbxEscSev" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">
+            <option value="low">Laag</option>
+            <option value="medium" selected>Middel</option>
+            <option value="high">Hoog</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Reden (min 10 tekens)</div>
+          <textarea id="wbxEscReason" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box" placeholder="Boos, dreigt met klacht, wil incasso-stop…"></textarea>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Context (optioneel)</div>
+          <textarea id="wbxEscCtx" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+      </div>`;
+    const form = await _askForm('Escalatie-taak aanmaken?', bodyHtml, (root) => {
+      const sev    = root.querySelector('#wbxEscSev')?.value || 'medium';
+      const reason = String(root.querySelector('#wbxEscReason')?.value || '').trim();
+      const ctx    = String(root.querySelector('#wbxEscCtx')?.value || '').trim();
+      if (reason.length < 10) { _toast('Reden min 10 tekens.', 'warn'); return null; }
+      return { sev, reason, ctx };
+    }, { okLabel: 'Aanmaken' });
+    if (!form) return;
+    const { sev, reason, ctx } = form;
+    if (_ui.actieBusy['esc:' + cid]) return;
+    _ui.actieBusy['esc:' + cid] = true;
+    const r = await apiPost('/api/tasks-create-escalation', {
+      customer_id: cid, severity: sev, reason, context_summary: ctx || null, source: 'wanbetalers-v2',
+    });
+    _ui.actieBusy['esc:' + cid] = false;
+    if (!r.ok) { _toast('Escalatie mislukt: ' + r.error, 'error'); return; }
+    _toast('Escalatie aangemaakt.', 'success');
+    _live.pendingActs.fetched = false;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // ── Vrije-taak-flow (MANUAL_FOLLOWUP) ─────────────────────────────
+  async function _actieVrijeTaak(cid) {
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Titel (kort)</div>
+          <input id="wbxVrijTitle" type="text" maxlength="200" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" placeholder="Bv. Bel-terug maandag" />
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Toelichting (optioneel)</div>
+          <textarea id="wbxVrijNote" rows="3" maxlength="2000" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Type / label (optioneel)</div>
+          <input id="wbxVrijKind" type="text" maxlength="40" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" placeholder="bv. bel-taak / mail-taak" />
+        </div>
+      </div>`;
+    const form = await _askForm('Vrije taak aanmaken?', bodyHtml, (root) => {
+      const title = String(root.querySelector('#wbxVrijTitle')?.value || '').trim();
+      const note  = String(root.querySelector('#wbxVrijNote')?.value || '').trim();
+      const kind  = String(root.querySelector('#wbxVrijKind')?.value || '').trim();
+      if (!title) { _toast('Titel is vereist.', 'warn'); return null; }
+      return { title, note, kind };
+    }, { okLabel: 'Aanmaken' });
+    if (!form) return;
+    const { title, note, kind } = form;
+    if (_ui.actieBusy['vrij:' + cid]) return;
+    _ui.actieBusy['vrij:' + cid] = true;
+    const r = await apiPost('/api/tasks-create-followup', {
+      customer_id: cid, source: 'wanbetalers-v2', title, note, kind, reason: title,
+    });
+    _ui.actieBusy['vrij:' + cid] = false;
+    if (!r.ok) { _toast('Taak-aanmaak mislukt: ' + r.error, 'error'); return; }
+    _toast('Vrije taak aangemaakt.', 'success');
+    _live.pendingActs.fetched = false;
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // ── Toewijzen-aan-collega-flow (taken_items via /api/taken) ───────
+  async function _actieToewijzen(cid) {
+    await _fetchProfielen();
+    const profs = asArr(_live.profielen.items);
+    if (!profs.length) { _toast('Geen actieve collega\'s beschikbaar.', 'warn'); return; }
+    const profOpts = profs.map((p) => `<option value="${esc(p.id)}">${esc(p.full_name)}${p.role ? ' · ' + esc(p.role) : ''}</option>`).join('');
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Toewijzen aan</div>
+          <select id="wbxAssignWie" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">${profOpts}</select>
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Titel</div>
+          <input id="wbxAssignTitle" type="text" maxlength="200" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" placeholder="Bv. Bel klant terug over factuur X" />
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Toelichting (optioneel)</div>
+          <textarea id="wbxAssignNote" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Prioriteit</div>
+            <select id="wbxAssignPrio" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px">
+              <option value="Laag">Laag</option>
+              <option value="Normaal" selected>Normaal</option>
+              <option value="Hoog">Hoog</option>
+            </select>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Deadline (optioneel)</div>
+            <input id="wbxAssignDl" type="date" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+          </div>
+        </div>
+      </div>`;
+    const form = await _askForm('Taak toewijzen aan collega?', bodyHtml, (root) => {
+      const wie   = root.querySelector('#wbxAssignWie')?.value || null;
+      const title = String(root.querySelector('#wbxAssignTitle')?.value || '').trim();
+      const note  = String(root.querySelector('#wbxAssignNote')?.value || '').trim();
+      const prio  = root.querySelector('#wbxAssignPrio')?.value || 'Normaal';
+      const dl    = root.querySelector('#wbxAssignDl')?.value || null;
+      if (!wie)   { _toast('Kies een collega.', 'warn'); return null; }
+      if (!title) { _toast('Titel is vereist.', 'warn'); return null; }
+      return { wie, title, note, prio, dl };
+    }, { okLabel: 'Toewijzen' });
+    if (!form) return;
+    const { wie, title, note, prio, dl } = form;
+    if (_ui.actieBusy['assign:' + cid]) return;
+    _ui.actieBusy['assign:' + cid] = true;
+    const r = await apiPost('/api/taken', {
+      task: {
+        titel:         title,
+        omschrijving:  note,
+        prioriteit:    prio,
+        categorie:     'Wanbetalers',
+        assignedToId:  wie,
+        customerId:    cid,
+        deadline:      dl,
+        status:        'todo',
+      },
+    });
+    _ui.actieBusy['assign:' + cid] = false;
+    if (!r.ok) { _toast('Toewijzen mislukt: ' + r.error, 'error'); return; }
+    _toast('Taak toegewezen.', 'success');
+    if (window.DFO?.render) window.DFO.render();
   }
 
   /* ── Registratie ────────────────────────────────────────────────────── */
