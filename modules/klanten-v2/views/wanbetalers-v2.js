@@ -327,6 +327,22 @@
     else st.items = asArr(j.items || j.actions);
     if (window.DFO?.render) window.DFO.render();
   }
+  // BROK 5 ACT-2: per-status cache voor Afgehandeld/Afgewezen tabs.
+  _live.pendingActsByStatus = { EXECUTED: null, REJECTED: null };
+  async function _fetchPendingActsByStatus(status) {
+    const key = String(status).toUpperCase();
+    if (!_live.pendingActsByStatus[key]) _live.pendingActsByStatus[key] = { loading: false, fetched: false, error: null, items: [], _seq: 0 };
+    const st = _live.pendingActsByStatus[key];
+    if (st.loading || (st.fetched && !st.error)) return;
+    st.loading = true; st.error = null;
+    const seq = ++st._seq;
+    const j = await tryFetch('pending-actions:' + key, `/api/pending-actions-list?status=${encodeURIComponent(key.toLowerCase())}&limit=100`);
+    if (seq !== st._seq) return;
+    st.loading = false; st.fetched = true;
+    if (!j || j.error) st.error = (j && j.error) || 'Kon lijst niet laden';
+    else st.items = asArr(j.items || j.actions);
+    if (window.DFO?.render) window.DFO.render();
+  }
   // v=6 FIX 4: dedupe — _fetchArrangements consumeert nu de gedeelde
   // _arrLive.items en bouwt daaruit de byCust-map. Voorkomt de 6-vs-8-
   // inconsistentie (twee aparte fetches met verschillende limits).
@@ -1567,6 +1583,17 @@
 
     const pending = asArr(_live.pendingActs.items);
 
+    // BROK 5 ACT-2: init tab-state + zoek. Trigger fetch als tab een terminale
+    // status vereist en cache nog leeg.
+    _ui.acties = _ui.acties || { tab: 'vandaag', searchQ: '', _timer: null };
+    if (_ui.acties.tab === 'afgehandeld') {
+      const s = _live.pendingActsByStatus.EXECUTED;
+      if (!s || (!s.fetched && !s.loading && !s.error)) queueMicrotask(() => _fetchPendingActsByStatus('EXECUTED'));
+    } else if (_ui.acties.tab === 'afgewezen') {
+      const s = _live.pendingActsByStatus.REJECTED;
+      if (!s || (!s.fetched && !s.loading && !s.error)) queueMicrotask(() => _fetchPendingActsByStatus('REJECTED'));
+    }
+
     if (_live.pipelineActs.loading && !_live.pipelineActs.data) {
       return `<div class="pad" style="padding:14px 20px">${_skelKpis()}${_skelRows(6)}</div>`;
     }
@@ -1606,31 +1633,10 @@
       </div>`;
     };
 
-    const pendingBlock = pending.length ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-top:14px">
-      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-        <div style="font-weight:600;font-size:13px">Open acties (queue)</div>
-        <span style="font-size:11px;color:var(--text-3)">${pending.length} PENDING</span>
-      </div>
-      ${pending.slice(0, 30).map((a) => {
-        const customer = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'Onbekend';
-        const type = a.action_type || a.type || '—';
-        const amt  = a.amount || (a.payload && a.payload.amount) || null;
-        const isTl = String(type).startsWith('TL_');
-        const busy = !!_ui.paBusy[a.id];
-        const dis = busy ? 'disabled' : '';
-        const disStyle = busy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer';
-        return `<div style="display:grid;grid-template-columns:2fr 2fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
-          <div>${esc(customer)}</div>
-          <div style="color:var(--text-2);font-size:11.5px">${esc(type)}${isTl ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600;margin-left:4px">TL</span>' : ''}</div>
-          <div class="mono" style="text-align:right;color:var(--text-3)">${amt != null ? eur(amt) : '—'}</div>
-          <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
-            <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="__wbxPaApprove('${esc(a.id)}')" title="${isTl ? 'Voer TL-mutatie uit' : 'Goedkeuren'}">${busy ? '…' : '✓ Approve'}</button>
-            <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="__wbxPaReject('${esc(a.id)}')" title="Afwijzen (met reden)">✕ Reject</button>
-            <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--text-3);${disStyle}" onclick="__wbxPaMarkExecuted('${esc(a.id)}')" title="Handmatig al uitgevoerd">Al gedaan</button>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>` : '';
+    // BROK 5 ACT-2: pendingBlock met tabs (vandaag/komend/afgehandeld/afgewezen)
+    // + zoek + per-rij snooze-knop. Terminal tabs fetchen on-demand via
+    // _fetchPendingActsByStatus; snooze via /api/pending-action-snooze.
+    const pendingBlock = _actiesTabbedBlockHtml(pending);
 
     // Arrangementen-sectie (actieve).
     if (!_arrLive.fetched && !_arrLive.loading && !_arrLive.error) queueMicrotask(() => _fetchArrangementsList('ACTIEF'));
@@ -1674,6 +1680,178 @@
       ${_officeHoursBanner()}
     </div>`;
   }
+
+  /* BROK 5 ACT-2: Acties-tab tabbed block ─────────────────────────────
+     Tabs: Vandaag (PENDING, scheduled_for null of <= now)
+           Komend  (PENDING, scheduled_for > now)
+           Afgehandeld (EXECUTED — aparte fetch)
+           Afgewezen   (REJECTED — aparte fetch)
+     Zoek: client-side substring op klantnaam / action_type / payload.reason.
+     Snooze: per-rij → modal met datum-input → /api/pending-action-snooze.  */
+  function _actiesTabbedBlockHtml(pendingItems) {
+    const now = Date.now();
+    const tab = _ui.acties?.tab || 'vandaag';
+    const q   = String(_ui.acties?.searchQ || '').trim().toLowerCase();
+
+    // Bepaal welke items in welke tab horen.
+    let items = [];
+    let stateInfo = { loading: false, error: null };
+    if (tab === 'vandaag' || tab === 'komend') {
+      items = asArr(pendingItems).filter((a) => {
+        const s = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
+        return tab === 'vandaag' ? (!s || s <= now) : (s && s > now);
+      });
+      stateInfo = { loading: _live.pendingActs.loading, error: _live.pendingActs.error };
+    } else if (tab === 'afgehandeld') {
+      const s = _live.pendingActsByStatus.EXECUTED || {};
+      items = asArr(s.items);
+      stateInfo = { loading: s.loading, error: s.error };
+    } else if (tab === 'afgewezen') {
+      const s = _live.pendingActsByStatus.REJECTED || {};
+      items = asArr(s.items);
+      stateInfo = { loading: s.loading, error: s.error };
+    }
+
+    // Zoek-filter (client-side).
+    if (q) {
+      items = items.filter((a) => {
+        const nm = ((a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || '').toLowerCase();
+        const at = String(a.action_type || '').toLowerCase();
+        const rs = String((a.payload && (a.payload.reason || a.payload.title || a.payload.note)) || '').toLowerCase();
+        return nm.includes(q) || at.includes(q) || rs.includes(q);
+      });
+    }
+
+    // Counts per tab (voor pill-badges).
+    const pendAll = asArr(pendingItems);
+    const cntVandaag = pendAll.filter((a) => {
+      const s = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
+      return !s || s <= now;
+    }).length;
+    const cntKomend  = pendAll.filter((a) => {
+      const s = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
+      return s && s > now;
+    }).length;
+    const cntDone    = asArr(_live.pendingActsByStatus.EXECUTED?.items).length;
+    const cntRej     = asArr(_live.pendingActsByStatus.REJECTED?.items).length;
+
+    const tabBtn = (id, label, count) =>
+      `<button class="chip ${tab === id ? 'on' : ''}" style="font-size:11.5px;padding:4px 11px" onclick="__wbxActiesTab('${id}')">${esc(label)}${count != null ? ` <span style="opacity:.6;margin-left:3px">${count}</span>` : ''}</button>`;
+
+    const headerHtml = `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${tabBtn('vandaag',     'Vandaag',     cntVandaag)}
+        ${tabBtn('komend',      'Komend',      cntKomend)}
+        ${tabBtn('afgehandeld', 'Afgehandeld', cntDone > 0 ? cntDone : null)}
+        ${tabBtn('afgewezen',   'Afgewezen',   cntRej > 0 ? cntRej : null)}
+      </div>
+      <input id="wbxActiesSearch" type="text" value="${esc(q)}" oninput="__wbxActiesSearch(this.value)" placeholder="Zoek naam / type / reden…" style="width:220px;max-width:100%;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:12px;box-sizing:border-box" autocomplete="off" spellcheck="false" />
+    </div>`;
+
+    // Row-renderer per tab: PENDING toont approve/reject/al-gedaan/snooze;
+    // EXECUTED en REJECTED tonen alleen read-info + timestamp.
+    const isPendingTab = tab === 'vandaag' || tab === 'komend';
+    const bodyHtml = (() => {
+      if (stateInfo.loading && !items.length) return `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Laden…</div>`;
+      if (stateInfo.error && !items.length) return `<div style="padding:22px;text-align:center;color:var(--rose);font-size:12.5px">⚠ ${esc(stateInfo.error)}</div>`;
+      if (!items.length) {
+        const empty = tab === 'vandaag' ? 'Geen open acties voor vandaag.'
+                    : tab === 'komend'  ? 'Geen ingeplande acties.'
+                    : tab === 'afgehandeld' ? 'Nog geen afgehandelde acties.'
+                    : 'Nog geen afgewezen acties.';
+        return `<div style="padding:34px 18px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(empty)}</div>`;
+      }
+      return items.slice(0, 50).map((a) => {
+        const customer = (a.customer && a.customer.name) || a.customer_name || (a.payload && a.payload.customer_name) || a.customer_id || 'Onbekend';
+        const type = a.action_type || a.type || '—';
+        const amt  = a.amount || (a.payload && a.payload.amount) || null;
+        const isTl = String(type).startsWith('TL_');
+        const busy = !!_ui.paBusy[a.id];
+        const scheduled = a.scheduled_for ? Date.parse(a.scheduled_for) : null;
+        const whenBadge = scheduled ? `<span class="mono" style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--text-3);margin-left:4px">${_fmtDateTime(a.scheduled_for).slice(5)}</span>` : '';
+        const disStyle = busy ? 'opacity:.55;cursor:not-allowed' : 'cursor:pointer';
+        const dis = busy ? 'disabled' : '';
+        if (isPendingTab) {
+          return `<div style="display:grid;grid-template-columns:2fr 2fr 1fr auto;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+            <div>${esc(customer)}</div>
+            <div style="color:var(--text-2);font-size:11.5px">${esc(type)}${isTl ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600;margin-left:4px">TL</span>' : ''}${whenBadge}</div>
+            <div class="mono" style="text-align:right;color:var(--text-3)">${amt != null ? eur(amt) : '—'}</div>
+            <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--emerald);${disStyle}" onclick="__wbxPaApprove('${esc(a.id)}')" title="${isTl ? 'Voer TL-mutatie uit' : 'Goedkeuren'}">${busy ? '…' : '✓'}</button>
+              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--rose);${disStyle}" onclick="__wbxPaReject('${esc(a.id)}')" title="Afwijzen (met reden)">✕</button>
+              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--amber);${disStyle}" onclick="__wbxActSnooze('${esc(a.id)}')" title="Later plannen">⏰</button>
+              <button class="btn btn-ghost btn-sm" ${dis} style="font-size:11px;color:var(--text-3);${disStyle}" onclick="__wbxPaMarkExecuted('${esc(a.id)}')" title="Handmatig al uitgevoerd">✓ Gedaan</button>
+            </div>
+          </div>`;
+        }
+        // Terminal-tabs: alleen read-info.
+        const ts = a.executed_at || a.rejected_at || a.updated_at || a.created_at;
+        const tsText = ts ? _fmtDateTime(ts) : '';
+        return `<div style="display:grid;grid-template-columns:2fr 2fr 1fr 140px;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:center">
+          <div>${esc(customer)}</div>
+          <div style="color:var(--text-2);font-size:11.5px">${esc(type)}${isTl ? ' <span style="font-size:9.5px;padding:1px 5px;border-radius:5px;background:var(--rose-soft);color:var(--rose);font-weight:600;margin-left:4px">TL</span>' : ''}</div>
+          <div class="mono" style="text-align:right;color:var(--text-3)">${amt != null ? eur(amt) : '—'}</div>
+          <div style="font-size:11px;color:var(--text-3);text-align:right">${esc(tsText)}</div>
+        </div>`;
+      }).join('');
+    })();
+
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-top:14px">
+      ${headerHtml}
+      ${bodyHtml}
+    </div>`;
+  }
+  window.__wbxActiesTab = (tab) => {
+    if (!_ui.acties) _ui.acties = { tab: 'vandaag', searchQ: '', _timer: null };
+    _ui.acties.tab = String(tab || 'vandaag');
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__wbxActiesSearch = (val) => {
+    if (!_ui.acties) _ui.acties = { tab: 'vandaag', searchQ: '', _timer: null };
+    _ui.acties.searchQ = String(val || '');
+    if (_ui.acties._timer) clearTimeout(_ui.acties._timer);
+    _ui.acties._timer = setTimeout(() => {
+      if (window.DFO?.render) window.DFO.render();
+    }, 180);
+  };
+  window.__wbxActSnooze = async (id) => {
+    if (!id) return;
+    // Default: morgen 09:00 lokale tijd.
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    const defaultVal = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
+    const bodyHtml = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="font-size:12.5px;color:var(--text-2);line-height:1.55">
+          Deze actie verdwijnt uit "Vandaag" en komt terug wanneer de gekozen datum is bereikt.
+        </div>
+        <div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:4px">Later oppikken op</div>
+          <input id="wbxSnoozeDate" type="datetime-local" value="${defaultVal}" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;box-sizing:border-box" />
+        </div>
+      </div>`;
+    const form = await _askForm('Actie later plannen (snooze)?', bodyHtml, (root) => {
+      const raw = root.querySelector('#wbxSnoozeDate')?.value || null;
+      if (!raw) { _toast('Kies een datum.', 'warn'); return null; }
+      const iso = new Date(raw).toISOString();
+      if (Date.parse(iso) <= Date.now() + 60000) {
+        _toast('Datum moet minimaal 1 minuut in de toekomst zijn.', 'warn'); return null;
+      }
+      return { iso };
+    }, { okLabel: 'Snooze' });
+    if (!form) return;
+    if (_ui.paBusy[id]) return;
+    _ui.paBusy[id] = true;
+    if (window.DFO?.render) window.DFO.render();
+    const r = await apiPost('/api/pending-action-snooze', { id, scheduled_for: form.iso });
+    _ui.paBusy[id] = false;
+    if (!r.ok) { _toast('Snooze mislukt: ' + r.error, 'error'); if (window.DFO?.render) window.DFO.render(); return; }
+    _toast('Actie ingepland.', 'success');
+    _live.pendingActs.fetched = false;
+    _fetchPendingActs();
+  };
 
   function _bulkJobsBlock() {
     if (!_bulkJobs.fetched && !_bulkJobs.loading && !_bulkJobs.error) queueMicrotask(_fetchBulkJobs);
