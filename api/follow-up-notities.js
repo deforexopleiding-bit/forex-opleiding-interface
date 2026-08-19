@@ -4,6 +4,7 @@
 // POST body: { appointment_id, body } — voeg nieuwe notitie toe
 
 import { createClient } from '@supabase/supabase-js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -14,22 +15,14 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Niet geauthenticeerd' });
-  }
+  // Dit endpoint leest én schrijft CRM-data via de service-role client (RLS
+  // wordt dus omzeild). Een check op "geldig JWT" alleen is niet genoeg: elk
+  // auto-aangemaakt viewer/student-account heeft een geldig JWT. Daarom een
+  // expliciete rolcheck — zelfde poort als public.is_crm_staff() in RLS.
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-rol vereist.' });
 
-  const token = authHeader.replace('Bearer ', '');
-  const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
-  if (authErr || !user) {
-    return res.status(401).json({ error: 'Ongeldige token' });
-  }
-
-  const { data: profile } = await supabaseAdmin
-    .from('profiles')
-    .select('id, role, naam')
-    .eq('id', user.id)
-    .maybeSingle();
+  const { user, profile } = auth;
 
   if (req.method === 'GET') {
     const { appointment_id } = req.query;
@@ -59,7 +52,7 @@ export default async function handler(req, res) {
         appointment_id,
         body: noteBody.trim(),
         created_by: user.id,
-        created_by_name: profile?.naam || user.email,
+        created_by_name: profile?.full_name || user.email,
       })
       .select()
       .single();

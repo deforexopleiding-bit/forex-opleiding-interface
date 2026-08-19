@@ -149,6 +149,10 @@
     .btn-success { background: var(--emerald, #07835A); color: #fff; border-color: var(--emerald, #07835A); }
     .btn-success:hover { filter: brightness(1.08); }
   </style>
+  <!-- CRM-toegangsguard (laag 2 bovenop RLS): verbergt de pagina en stuurt
+       niet-CRM-rollen (viewer/student) door naar het LMS. MOET vóór elk
+       ander script staan — zie modules/shared/crm-guard.js. -->
+  <script src="/modules/shared/crm-guard.js"></script>
 </head>
 <body class="odv">
 

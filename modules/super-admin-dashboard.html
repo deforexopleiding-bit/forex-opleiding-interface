@@ -250,6 +250,10 @@
   .sad-modal-foot button{padding:8px 16px;border-radius:8px;border:1px solid var(--sad-border);background:var(--sad-surface-2);color:var(--sad-text);font-weight:600;cursor:pointer;font-size:12.5px}
   .sad-modal-foot button.primary{background:linear-gradient(135deg,var(--brand-500),var(--brand-700));color:#fff;border-color:transparent}
 </style>
+  <!-- CRM-toegangsguard (laag 2 bovenop RLS): verbergt de pagina en stuurt
+       niet-CRM-rollen (viewer/student) door naar het LMS. MOET vóór elk
+       ander script staan — zie modules/shared/crm-guard.js. -->
+  <script src="/modules/shared/crm-guard.js"></script>
 </head>
 <body class="sad-body" style="visibility:hidden">
 <div class="sad-aurora"></div>

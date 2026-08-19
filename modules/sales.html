@@ -129,6 +129,10 @@
     }
     @media (max-width: 880px) { .app { margin-left: 0; padding: 14px; } .field-row { grid-template-columns: 1fr; } }
   </style>
+  <!-- CRM-toegangsguard (laag 2 bovenop RLS): verbergt de pagina en stuurt
+       niet-CRM-rollen (viewer/student) door naar het LMS. MOET vóór elk
+       ander script staan — zie modules/shared/crm-guard.js. -->
+  <script src="/modules/shared/crm-guard.js"></script>
 </head>
 <body>
 <div id="sidebar-mount"></div>

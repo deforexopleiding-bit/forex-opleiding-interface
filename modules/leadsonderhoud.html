@@ -205,6 +205,10 @@
     .lo-q-opt { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .lo-q-opt input[type=text] { flex:1; min-width:150px; }
   </style>
+  <!-- CRM-toegangsguard (laag 2 bovenop RLS): verbergt de pagina en stuurt
+       niet-CRM-rollen (viewer/student) door naar het LMS. MOET vóór elk
+       ander script staan — zie modules/shared/crm-guard.js. -->
+  <script src="/modules/shared/crm-guard.js"></script>
 </head>
 <body>
 <div id="sidebar-mount"></div>

@@ -626,6 +626,10 @@
     .kb-ai-tag-row .spacer { flex:1; }
     .kb-ai-reason { font-size:12px; color:var(--text-dim); background:var(--bg); border-radius:8px; padding:10px; line-height:1.5; }
   </style>
+  <!-- CRM-toegangsguard (laag 2 bovenop RLS): verbergt de pagina en stuurt
+       niet-CRM-rollen (viewer/student) door naar het LMS. MOET vóór elk
+       ander script staan — zie modules/shared/crm-guard.js. -->
+  <script src="/modules/shared/crm-guard.js"></script>
 </head>
 <body>
 <div id="sidebar-mount"></div>

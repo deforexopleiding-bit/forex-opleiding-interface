@@ -4,9 +4,11 @@
 
 import nodemailer from 'nodemailer';
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
+import { authRedirectUrlForRole, isCrmStaffRole } from './_lib/crm-roles.js';
 
 const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'viewer'];
-const SITE_URL    = 'https://forex-opleiding-interface.vercel.app';
+// SITE_URL/LMS-URL + de rollen-whitelist wonen in api/_lib/crm-roles.js,
+// zodat CRM-frontend, API en RLS dezelfde definitie van 'CRM-staff' delen.
 
 // Rol-hiërarchie (hoog → laag). Gebruikt om profiles.role (primair, voor legacy
 // requireAuth) te syncen met de hoogste rol uit user_roles. Houd identiek aan
@@ -45,6 +47,11 @@ const FROM_ADDRESS = 'info@deforexopleiding.nl';
 function buildInviteMailOpts({ toEmail, fullName, role, actionLink }) {
   const displayName = fullName || toEmail;
   const rolLabel    = role.charAt(0).toUpperCase() + role.slice(1);
+  // Niet-CRM-rollen (viewer/student) krijgen een link naar het LMS, niet naar
+  // het Command Center. De tekst moet dat spiegelen, anders stuurt de mail ze
+  // alsnog mentaal naar het CRM.
+  const isStaff     = isCrmStaffRole(role);
+  const platformNaam = isStaff ? 'Agency Command Center' : 'leeromgeving';
 
   const html = `<!DOCTYPE html>
 <html lang="nl">
@@ -67,7 +74,7 @@ function buildInviteMailOpts({ toEmail, fullName, role, actionLink }) {
         <tr><td style="padding:36px 40px 28px;">
           <p style="margin:0 0 16px;font-size:15px;color:#1a2333;font-weight:600;">Welkom, ${displayName}!</p>
           <p style="margin:0 0 20px;font-size:14px;color:#4a5568;line-height:1.6;">
-            Je bent toegevoegd als gebruiker van het <strong>Agency Command Center</strong> van De Forex Opleiding.
+            Je bent toegevoegd als gebruiker van de <strong>${platformNaam}</strong> van De Forex Opleiding.
             Je hebt toegang als <strong>${rolLabel}</strong>.
           </p>
           <p style="margin:0 0 28px;font-size:14px;color:#4a5568;line-height:1.6;">
@@ -104,7 +111,7 @@ function buildInviteMailOpts({ toEmail, fullName, role, actionLink }) {
 </body>
 </html>`;
 
-  const text = `Welkom bij De Forex Opleiding — Agency Command Center
+  const text = `Welkom bij De Forex Opleiding — ${platformNaam}
 
 Hallo ${displayName},
 
@@ -142,11 +149,15 @@ async function sendInviteMail({ toEmail, fullName, role, actionLink }) {
 
 // ── Generate recovery link ────────────────────────────────────────────────────
 
-async function generateRecoveryLink(email) {
+// role bepaalt WAAR de link op uitkomt. Een student/viewer mag nooit in het
+// CRM landen, dus die krijgt het LMS als redirectTo mee. De algemene Supabase
+// Site URL blijft ongemoeid — die gebruiken CRM-staff voor login/reset.
+async function generateRecoveryLink(email, role) {
+  const redirectTo = authRedirectUrlForRole(role);
   const { data, error } = await supabaseAdmin.auth.admin.generateLink({
     type:    'recovery',
     email,
-    options: { redirectTo: `${SITE_URL}/reset-password.html` },
+    options: { redirectTo },
   });
   if (error) throw new Error(`Kon recovery link niet genereren: ${error.message}`);
   const actionLink = data?.properties?.action_link;
@@ -231,7 +242,7 @@ export default async function handler(req, res) {
       }
 
       try {
-        const actionLink = await generateRecoveryLink(email);
+        const actionLink = await generateRecoveryLink(email, existingProfile.role);
         await sendInviteMail({
           toEmail:    email,
           fullName:   existingProfile.full_name || email,
@@ -305,7 +316,7 @@ export default async function handler(req, res) {
     let mailSent = false;
     let mailError = null;
     try {
-      const actionLink = await generateRecoveryLink(email);
+      const actionLink = await generateRecoveryLink(email, role);
       await sendInviteMail({
         toEmail:    email,
         fullName:   full_name || email,

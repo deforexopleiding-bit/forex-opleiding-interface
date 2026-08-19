@@ -324,6 +324,10 @@
     .sr-table tbody tr.clickable-row:hover { background: var(--bg-elev-2, #f9fafb); }
     /* klx-softphone styling verplaatst naar /modules/shared/klx-softphone.css (PR 0-E). */
   </style>
+  <!-- CRM-toegangsguard (laag 2 bovenop RLS): verbergt de pagina en stuurt
+       niet-CRM-rollen (viewer/student) door naar het LMS. MOET vóór elk
+       ander script staan — zie modules/shared/crm-guard.js. -->
+  <script src="/modules/shared/crm-guard.js"></script>
 </head>
 <body>
 
