@@ -59,19 +59,30 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
   }
 
   // 2. Line items → TL-shape (met vat-validatie + tax_rate-lookup).
+  // BROK FINANCE-INVOICE (2026-08-19): incl/excl per regel via
+  // l.price_includes_vat (backward-compat: default false = excluding).
+  // Payload accepteert unit_price_excl OF unit_price (dat laatste wordt
+  // dan naar TL doorgegeven met 'including'-tax-flag zodat TL zelf
+  // narekent — geen sub-cent-drift). Line-level saleType override kan
+  // via l.sale_type (voor mixed facturen); factuur-niveau saleType via
+  // opts.saleType is de default.
   const lineItems = lines.map((l, idx) => {
     const desc = String(l.description || '').trim();
     const qty  = Number(l.quantity) || 1;
-    const unit = Number(l.unit_price_excl);
+    const includesVat = l.price_includes_vat === true;
+    const unit = includesVat
+      ? Number(l.unit_price_incl != null ? l.unit_price_incl : l.unit_price_excl)
+      : Number(l.unit_price_excl);
     const vat  = Number(l.vat_percentage);
     if (!desc) throw Object.assign(new Error(`Regel ${idx + 1}: omschrijving ontbreekt`), { stage: 'validate' });
     if (!Number.isFinite(unit) || unit < 0) throw Object.assign(new Error(`Regel ${idx + 1}: ongeldige eenheidsprijs`), { stage: 'validate' });
     if (![0, 6, 9, 21].includes(vat)) throw Object.assign(new Error(`Regel ${idx + 1}: ongeldig BTW-percentage (${vat})`), { stage: 'validate' });
+    const lineSaleType = l.sale_type || saleType;
     const li = {
       description: desc,
       quantity:    qty,
-      unit_price:  { amount: r2(unit), currency: 'EUR', tax: 'excluding' },
-      tax_rate_id: taxRateIdFor(vat, departmentId, saleType),
+      unit_price:  { amount: r2(unit), currency: 'EUR', tax: includesVat ? 'including' : 'excluding' },
+      tax_rate_id: taxRateIdFor(vat, departmentId, lineSaleType),
     };
     if (l.product_id) li.product_id = String(l.product_id);
     return li;

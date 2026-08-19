@@ -59,6 +59,17 @@ const LANG_OPTIONS = [
   { v: 'en', l: 'English' },
 ];
 
+// BROK FINANCE-INVOICE (2026-08-19): factuur-niveau BTW-regime.
+// Bepaalt tax_rate_id-lookup server-side (taxRateIdFor(vat, dept, saleType)).
+// Vereiste envs op productie:
+//   - TEAMLEADER_TAX_RATE_ID_INTRA (intracommunautair, 0% btw-verlegd)
+//   - TEAMLEADER_TAX_RATE_ID_INTRA_ONLINE / _FYSIEK / _RETENTIE (dept-override, optioneel)
+// Zonder INTRA-env → server 500 met "Geen TEAMLEADER_TAX_RATE_ID_INTRA geconfigureerd".
+const SALE_TYPE_OPTIONS = [
+  { v: 'domestic',           l: 'Binnenland (21% / 9% / 0%)' },
+  { v: 'intracommunautair',  l: 'Intracommunautair (0% btw verlegd)' },
+];
+
 const TYPE_GATE_TEXT = 'BOEK EN VERZEND';
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -67,11 +78,15 @@ let state = null;
 function initState(customer, opts) {
   state = {
     customer,                          // {id, first_name, last_name, company_name, email, is_company, tl_contact_id, tl_company_id}
+    // BROK FINANCE-INVOICE: als zonder customer geopend → klant-selector.
+    needsCustomer: !customer?.id,
+    customerSearch: { q: '', loading: false, results: [], error: null },
     form: {
       department_id: ENTITIES[0].id,
       lines: [newRow()],
       purchase_order_number: '',
       language: 'nl',
+      sale_type: 'domestic',  // BROK FINANCE-INVOICE: factuur-niveau BTW-regime
     },
     // Confirm-overlays voor destructive acties
     overlay: null,                     // null | 'book' | 'bookSend'
@@ -91,24 +106,40 @@ function initState(customer, opts) {
     onSuccess:   opts?.onSuccess || null,
   };
 }
-function newRow() { return { description: '', quantity: 1, unit_price_excl: 0, vat_percentage: 21 }; }
+function newRow() {
+  // BROK FINANCE-INVOICE: incl/excl per regel. Default: excl-invoer (huidige
+  // gedrag; user typt in "Prijs excl." kolom). Bij typen in "Prijs incl."
+  // wordt price_includes_vat=true gezet en unit_price_excl afgeleid uit
+  // unit_price_incl / (1 + vat/100). Server neemt de kant die true is.
+  return { description: '', quantity: 1, unit_price_excl: 0, unit_price_incl: 0, vat_percentage: 21, price_includes_vat: false };
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function customerLabel() {
   const c = state.customer;
-  if (c?.is_company) return c.company_name || 'Bedrijfsklant';
-  return [c?.first_name, c?.last_name].filter(Boolean).join(' ') || 'Klant';
+  if (!c) return '— kies eerst een klant —';   // BROK FINANCE-INVOICE selector-mode
+  if (c.is_company) return c.company_name || 'Bedrijfsklant';
+  return [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Klant';
+}
+// BROK FINANCE-INVOICE: helper voor incl→excl conversie per regel.
+function lineExclAmount(l) {
+  const q = Number(l.quantity) || 0;
+  const v = Number(l.vat_percentage) || 0;
+  if (l.price_includes_vat === true) {
+    const uIncl = Number(l.unit_price_incl) || 0;
+    const uExcl = v > 0 ? (uIncl / (1 + v / 100)) : uIncl;
+    return { excl: q * uExcl, vatPct: v };
+  }
+  const uExcl = Number(l.unit_price_excl) || 0;
+  return { excl: q * uExcl, vatPct: v };
 }
 function computeTotals(lines) {
   let excl = 0, tax = 0;
   for (const l of lines) {
-    const q = Number(l.quantity) || 0;
-    const u = Number(l.unit_price_excl) || 0;
-    const v = Number(l.vat_percentage) || 0;
-    const line = q * u;
-    excl += line;
-    tax += line * (v / 100);
+    const { excl: lineExcl, vatPct } = lineExclAmount(l);
+    excl += lineExcl;
+    tax += lineExcl * (vatPct / 100);
   }
   return { excl, tax, incl: excl + tax };
 }
@@ -121,9 +152,11 @@ function goodLines() {
 function updateLineTotal(idx) {
   const l = state.form.lines[idx];
   if (!l) return;
-  const total = (Number(l.quantity) || 0) * (Number(l.unit_price_excl) || 0);
+  // BROK FINANCE-INVOICE: regel-totaal = qty * unit_excl (voor 'Regel-totaal'-
+  // kolom die "excl" toont). tfoot toont subtotaal + BTW + incl.
+  const { excl } = lineExclAmount(l);
   const cell = document.querySelector(`[data-kv-invnew-row-total="${idx}"]`);
-  if (cell) cell.textContent = fmtEur(total);
+  if (cell) cell.textContent = fmtEur(excl);
 }
 function updateFootTotals() {
   const totals = computeTotals(state.form.lines);
@@ -170,8 +203,11 @@ function renderLineRow(l, idx) {
         ${errKeyQty ? `<div class="kv-edit-field-msg">${esc(errKeyQty)}</div>` : ''}
       </td>
       <td class="r">
-        <input type="number" class="kv-invupd-inp kv-invupd-inp-num" data-kv-invnew-lf="unit_price_excl" data-kv-invnew-li="${idx}" value="${esc(String(l.unit_price_excl))}" min="0" step="0.01" inputmode="decimal" />
+        <input type="number" class="kv-invupd-inp kv-invupd-inp-num" data-kv-invnew-lf="unit_price_excl" data-kv-invnew-li="${idx}" value="${esc(String(l.unit_price_excl))}" min="0" step="0.01" inputmode="decimal" title="Prijs exclusief BTW (bewerken zet regel op excl-modus)" />
         ${errKeyPri ? `<div class="kv-edit-field-msg">${esc(errKeyPri)}</div>` : ''}
+      </td>
+      <td class="r">
+        <input type="number" class="kv-invupd-inp kv-invupd-inp-num" data-kv-invnew-lf="unit_price_incl" data-kv-invnew-li="${idx}" value="${esc(String(l.unit_price_incl))}" min="0" step="0.01" inputmode="decimal" title="Prijs inclusief BTW (bewerken zet regel op incl-modus)" />
       </td>
       <td class="r">
         <select class="kv-invupd-inp kv-invupd-inp-vat" data-kv-invnew-lf="vat_percentage" data-kv-invnew-li="${idx}">
@@ -194,17 +230,18 @@ function renderLinesTable() {
       <table class="ds-tbl kv-invupd-tbl">
         <thead><tr>
           <th>Omschrijving</th>
-          <th class="r" style="width:90px">Aantal</th>
-          <th class="r" style="width:120px">Prijs excl.</th>
-          <th class="r" style="width:90px">BTW</th>
-          <th class="r" style="width:110px">Regel-totaal</th>
+          <th class="r" style="width:80px">Aantal</th>
+          <th class="r" style="width:110px">Prijs excl.</th>
+          <th class="r" style="width:110px">Prijs incl.</th>
+          <th class="r" style="width:80px">BTW</th>
+          <th class="r" style="width:110px">Regel excl.</th>
           <th class="r" style="width:44px"></th>
         </tr></thead>
         <tbody>${state.form.lines.map((l, i) => renderLineRow(l, i)).join('')}</tbody>
         <tfoot>
-          <tr><td colspan="4" class="r"><strong>Subtotaal (excl.)</strong></td><td class="r mono" data-kv-invnew-total="excl"><strong>${esc(fmtEur(totals.excl))}</strong></td><td></td></tr>
-          <tr><td colspan="4" class="r">BTW</td><td class="r mono" data-kv-invnew-total="tax">${esc(fmtEur(totals.tax))}</td><td></td></tr>
-          <tr><td colspan="4" class="r"><strong>Totaal (incl. BTW)</strong></td><td class="r mono" data-kv-invnew-total="incl"><strong>${esc(fmtEur(totals.incl))}</strong></td><td></td></tr>
+          <tr><td colspan="5" class="r"><strong>Subtotaal (excl.)</strong></td><td class="r mono" data-kv-invnew-total="excl"><strong>${esc(fmtEur(totals.excl))}</strong></td><td></td></tr>
+          <tr><td colspan="5" class="r">BTW</td><td class="r mono" data-kv-invnew-total="tax">${esc(fmtEur(totals.tax))}</td><td></td></tr>
+          <tr><td colspan="5" class="r"><strong>Totaal (incl. BTW)</strong></td><td class="r mono" data-kv-invnew-total="incl"><strong>${esc(fmtEur(totals.incl))}</strong></td><td></td></tr>
         </tfoot>
       </table>
     </div>
@@ -239,9 +276,15 @@ function renderForm() {
       <div class="kv-edit-section-h">Regels ${eLines ? `<span class="kv-invnew-h-err">${esc(eLines)}</span>` : ''}</div>
       ${renderLinesTable()}
 
-      <div class="kv-edit-section-h">Meta (optioneel)</div>
+      <div class="kv-edit-section-h">BTW-regime + meta</div>
       <div class="kv-edit-grid">
-        <div class="kv-edit-field kv-edit-field-full">
+        <div class="kv-edit-field">
+          <label for="kv-invnew-saletype">BTW-regime</label>
+          <select id="kv-invnew-saletype" name="sale_type" data-kv-invnew-meta title="Kies 'Intracommunautair' voor B2B binnen EU met geldig VAT-nummer">
+            ${SALE_TYPE_OPTIONS.map((o) => `<option value="${o.v}" ${state.form.sale_type === o.v ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="kv-edit-field">
           <label for="kv-invnew-po">PO-nummer</label>
           <input id="kv-invnew-po" name="purchase_order_number" type="text" value="${esc(state.form.purchase_order_number)}" data-kv-invnew-meta />
         </div>
@@ -340,7 +383,41 @@ function renderOverlayBookSend() {
     </div>`;
 }
 
+// BROK FINANCE-INVOICE (2026-08-19): klant-selector als modal opent zonder
+// customer (bv. vanuit Finance-tab "+ Nieuwe factuur" of snelknop).
+// Gebruikt bestaand /api/inbox-customer-search endpoint (RBAC: finance/
+// events/onboarding-send OR). Selectie → state.customer + needsCustomer=false
+// + rerender. Voorkomt duplicatie tussen Finance-tab en klant-detail modals.
+function renderCustomerSelector() {
+  const cs = state.customerSearch;
+  const results = cs.results || [];
+  return `
+    <div class="kv-edit-form">
+      <div class="kv-edit-section-h">Kies een klant</div>
+      <div class="kv-edit-field kv-edit-field-full">
+        <label for="kv-invnew-custq">Zoek op naam / e-mail / bedrijf</label>
+        <input id="kv-invnew-custq" type="text" value="${esc(cs.q || '')}"
+               data-kv-invnew-custq placeholder="Minimaal 2 tekens…" autocomplete="off" autofocus />
+      </div>
+      <div id="kv-invnew-custresults" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface)">
+        ${cs.loading ? '<div style="padding:14px;color:var(--text-3);font-size:12.5px">Zoeken…</div>'
+          : cs.error ? `<div style="padding:14px;color:var(--rose);font-size:12.5px">⚠ ${esc(cs.error)}</div>`
+          : !cs.q || cs.q.trim().length < 2 ? '<div style="padding:14px;color:var(--text-3);font-size:12.5px">Typ minimaal 2 tekens.</div>'
+          : !results.length ? '<div style="padding:14px;color:var(--text-3);font-size:12.5px">Geen klanten gevonden.</div>'
+          : results.map((r) => {
+              const name = r.is_company ? (r.name || r.company_name || 'Bedrijf') : (r.name || '(onbekend)');
+              return `<div data-kv-invnew-custpick="${esc(r.id)}" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12.5px" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
+                <div style="font-weight:500">${esc(name)}${r.is_company ? ' <span style="font-size:10px;color:var(--text-3)">· bedrijf</span>' : ''}</div>
+                <div style="font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(r.email || '(geen e-mail)')}${r.phone ? ' · ' + esc(r.phone) : ''}</div>
+              </div>`;
+            }).join('')}
+      </div>
+    </div>`;
+}
+
 function renderBody() {
+  // BROK FINANCE-INVOICE: klant-selector-view als opened zonder customer.
+  if (state.needsCustomer) return renderCustomerSelector();
   const base = renderForm();
   if (state.overlay === 'book')     return base + renderOverlayBook();
   if (state.overlay === 'bookSend') return base + renderOverlayBookSend();
@@ -350,13 +427,16 @@ function renderBody() {
 // ── Foot ───────────────────────────────────────────────────────────────────
 
 function renderFootMain() {
+  // BROK FINANCE-INVOICE (2026-08-19): "Concept opslaan" verwijderd —
+  // was verwarrend (concept moest je toch nog boeken/versturen). Nu 2
+  // knoppen: "Direct boeken" (2-klik guard) + "Boeken + verzenden"
+  // (type-gate). Beide onomkeerbaar (creditnota is enige undo).
   return `
     <div class="kv-edit-foot kv-invnew-foot">
       <button type="button" class="ds-btn ds-btn-ghost" data-kv-invnew-cancel>Annuleren</button>
       <div class="kv-invnew-foot-actions">
-        <button type="button" class="ds-btn ds-btn-primary" data-kv-invnew-act="draft">Concept opslaan</button>
-        <button type="button" class="ds-btn" data-kv-invnew-act="book">Concept + direct boeken</button>
-        <button type="button" class="ds-btn kv-invnew-btn-danger-soft" data-kv-invnew-act="bookSend">Concept + boeken + verzenden</button>
+        <button type="button" class="ds-btn" data-kv-invnew-act="book">Direct boeken</button>
+        <button type="button" class="ds-btn ds-btn-primary kv-invnew-btn-danger-soft" data-kv-invnew-act="bookSend">Boeken + verzenden</button>
       </div>
     </div>`;
 }
@@ -385,6 +465,11 @@ function renderFootOverlayBookSend() {
     </div>`;
 }
 function renderFoot() {
+  // BROK FINANCE-INVOICE: selector-mode heeft alleen Annuleren.
+  if (state.needsCustomer) return `
+    <div class="kv-edit-foot kv-invnew-foot">
+      <button type="button" class="ds-btn ds-btn-ghost" data-kv-invnew-cancel>Annuleren</button>
+    </div>`;
   if (state.overlay === 'book')     return renderFootOverlayBook();
   if (state.overlay === 'bookSend') return renderFootOverlayBookSend();
   return renderFootMain();
@@ -415,10 +500,20 @@ function buildBasePayload(action) {
   return {
     customer_id:  state.customer.id,
     department_id: state.form.department_id,
+    // BROK FINANCE-INVOICE: sale_type meesturen (default 'domestic'
+    // → backward-compat). Endpoint routet 'intracommunautair' naar
+    // taxRateIdFor met INTRA-envs (server vereiste: TEAMLEADER_TAX_RATE_ID_INTRA).
+    sale_type: state.form.sale_type || 'domestic',
     lines: goodLines().map((l) => ({
       description:     String(l.description).trim(),
       quantity:        Number(l.quantity),
+      // BROK FINANCE-INVOICE: incl/excl per regel. Server neemt de zijde
+      // die matched met price_includes_vat en zet TL unit_price.tax
+      // ('including' of 'excluding') zodat TL zelf narekent — geen
+      // sub-cent-drift tussen client-berekening en TL-narekening.
       unit_price_excl: Number(l.unit_price_excl) || 0,
+      unit_price_incl: Number(l.unit_price_incl) || 0,
+      price_includes_vat: l.price_includes_vat === true,
       vat_percentage:  Number(l.vat_percentage) || 21,
     })),
     purchase_order_number: state.form.purchase_order_number || undefined,
@@ -547,12 +642,96 @@ function bindOnce(node, evt, handler) {
   node.addEventListener(evt, handler);
 }
 
+// BROK FINANCE-INVOICE: surgical repaint van klant-selector results
+// zodat de zoek-input z'n focus behoudt bij elke keystroke.
+function _repaintCustResults() {
+  const el = document.getElementById('kv-invnew-custresults');
+  if (!el) return;
+  // Bouw de results-div HTML opnieuw uit renderCustomerSelector.
+  const wrap = document.createElement('div');
+  wrap.innerHTML = renderCustomerSelector();
+  const fresh = wrap.querySelector('#kv-invnew-custresults');
+  if (!fresh) return;
+  el.innerHTML = fresh.innerHTML;
+  // Rewire click-handlers op de nieuwe rijen.
+  const box = document.getElementById('dfoModal');
+  if (!box) return;
+  box.querySelectorAll('[data-kv-invnew-custpick]').forEach((it) => {
+    // bindOnce is idempotent
+    bindOnce(it, 'click', async () => {
+      const id = it.getAttribute('data-kv-invnew-custpick');
+      const picked = (state.customerSearch.results || []).find((r) => String(r.id) === String(id));
+      if (!picked) return;
+      state.customer = {
+        id: picked.id, email: picked.email || null,
+        is_company: !!picked.is_company,
+        company_name: picked.is_company ? (picked.name || picked.company_name) : null,
+        first_name: !picked.is_company ? (picked.name || '').split(' ')[0] : null,
+        last_name:  !picked.is_company ? (picked.name || '').split(' ').slice(1).join(' ') : null,
+      };
+      state.needsCustomer = false;
+      state.customerSearch = { q: '', loading: false, results: [], error: null };
+      rerender();
+    });
+  });
+}
+
 function wire() {
   const box = document.getElementById('dfoModal');
   if (!box) return;
 
   box.querySelectorAll('[data-kv-invnew-close], [data-kv-invnew-cancel]').forEach((b) => {
     bindOnce(b, 'click', () => { if (!state.saving) D().closeModal(); });
+  });
+
+  // BROK FINANCE-INVOICE (2026-08-19): klant-selector inputs
+  const custQ = box.querySelector('[data-kv-invnew-custq]');
+  if (custQ) {
+    bindOnce(custQ, 'input', (e) => {
+      state.customerSearch.q = e.target.value;
+      state.customerSearch.error = null;
+      if (state._custTimer) clearTimeout(state._custTimer);
+      state._custTimer = setTimeout(async () => {
+        const q = (state.customerSearch.q || '').trim();
+        if (q.length < 2) {
+          state.customerSearch.results = [];
+          _repaintCustResults();
+          return;
+        }
+        state.customerSearch.loading = true;
+        _repaintCustResults();
+        try {
+          const j = await K().authedJson('/api/inbox-customer-search?q=' + encodeURIComponent(q) + '&limit=25');
+          state.customerSearch.results = Array.isArray(j?.results) ? j.results : [];
+        } catch (e) {
+          state.customerSearch.error = e?.message || 'Zoeken mislukt';
+          state.customerSearch.results = [];
+        } finally {
+          state.customerSearch.loading = false;
+          _repaintCustResults();
+        }
+      }, 220);
+    });
+  }
+  box.querySelectorAll('[data-kv-invnew-custpick]').forEach((el) => {
+    bindOnce(el, 'click', async () => {
+      const id = el.getAttribute('data-kv-invnew-custpick');
+      const picked = (state.customerSearch.results || []).find((r) => String(r.id) === String(id));
+      if (!picked) return;
+      // Zet compact customer-obj; overige velden worden server-side gefetched
+      // in api/finance-invoice-create (het select't customer volledig via id).
+      state.customer = {
+        id: picked.id,
+        email: picked.email || null,
+        is_company: !!picked.is_company,
+        company_name: picked.is_company ? (picked.name || picked.company_name) : null,
+        first_name: !picked.is_company ? (picked.name || '').split(' ')[0] : null,
+        last_name:  !picked.is_company ? (picked.name || '').split(' ').slice(1).join(' ') : null,
+      };
+      state.needsCustomer = false;
+      state.customerSearch = { q: '', loading: false, results: [], error: null };
+      rerender();
+    });
   });
 
   // Overlay-back
@@ -583,11 +762,40 @@ function wire() {
     const handler = (e) => {
       const idx = Number(e.target.getAttribute('data-kv-invnew-li'));
       const field = e.target.getAttribute('data-kv-invnew-lf');
-      if (!state.form.lines[idx]) return;
+      const line = state.form.lines[idx];
+      if (!line) return;
       if (field === 'description') {
-        state.form.lines[idx][field] = e.target.value;
+        line[field] = e.target.value;
       } else {
-        state.form.lines[idx][field] = e.target.value === '' ? '' : Number(e.target.value);
+        line[field] = e.target.value === '' ? '' : Number(e.target.value);
+      }
+      // BROK FINANCE-INVOICE: incl/excl-sync per regel.
+      // - Typ in "Prijs excl." → price_includes_vat=false, unit_price_incl = excl * (1 + vat/100)
+      // - Typ in "Prijs incl." → price_includes_vat=true,  unit_price_excl = incl / (1 + vat/100)
+      // - Wissel BTW% → herbereken de "andere" op basis van huidige modus.
+      const vat = Number(line.vat_percentage) || 0;
+      const factor = 1 + vat / 100;
+      if (field === 'unit_price_excl') {
+        line.price_includes_vat = false;
+        line.unit_price_incl = Math.round((Number(line.unit_price_excl) || 0) * factor * 100) / 100;
+        const otherInp = document.querySelector(`[data-kv-invnew-lf="unit_price_incl"][data-kv-invnew-li="${idx}"]`);
+        if (otherInp && document.activeElement !== otherInp) otherInp.value = String(line.unit_price_incl);
+      } else if (field === 'unit_price_incl') {
+        line.price_includes_vat = true;
+        line.unit_price_excl = factor > 0 ? Math.round((Number(line.unit_price_incl) || 0) / factor * 100) / 100 : 0;
+        const otherInp = document.querySelector(`[data-kv-invnew-lf="unit_price_excl"][data-kv-invnew-li="${idx}"]`);
+        if (otherInp && document.activeElement !== otherInp) otherInp.value = String(line.unit_price_excl);
+      } else if (field === 'vat_percentage') {
+        // Herbereken op basis van huidige modus.
+        if (line.price_includes_vat === true) {
+          line.unit_price_excl = factor > 0 ? Math.round((Number(line.unit_price_incl) || 0) / factor * 100) / 100 : 0;
+          const otherInp = document.querySelector(`[data-kv-invnew-lf="unit_price_excl"][data-kv-invnew-li="${idx}"]`);
+          if (otherInp) otherInp.value = String(line.unit_price_excl);
+        } else {
+          line.unit_price_incl = Math.round((Number(line.unit_price_excl) || 0) * factor * 100) / 100;
+          const otherInp = document.querySelector(`[data-kv-invnew-lf="unit_price_incl"][data-kv-invnew-li="${idx}"]`);
+          if (otherInp) otherInp.value = String(line.unit_price_incl);
+        }
       }
       // Error surgical wissen (msg-div is next-sibling van de input)
       const errKey = `lines.${idx}.${field}`;
@@ -688,7 +896,17 @@ async function loadTemplates() {
     const j = await K().authedJson('/api/finance-mail-templates');
     const tpls = Array.isArray(j?.templates) ? j.templates : [];
     state.templates = tpls;
-    const def = tpls.find((t) => t.is_default) || tpls[0];
+    // BROK FINANCE-INVOICE (2026-08-19): default naar FACTUUR-template i.p.v.
+    // TL's is_default (dat kan "3e herinnering" zijn). Prefereer templates
+    // waarvan naam/subject 'factuur' of 'invoice' matcht, fallback naar
+    // is_default, fallback naar eerste.
+    const looksInvoice = (t) => {
+      const s = ((t.name || '') + ' ' + (t.subject || '')).toLowerCase();
+      return s.includes('factuur') || s.includes('invoice');
+    };
+    const def = tpls.find(looksInvoice)
+             || tpls.find((t) => t.is_default)
+             || tpls[0];
     if (def) state.selectedTemplateId = def.id;
   } catch (e) {
     state.templatesError = e?.message || 'Templates niet geladen';

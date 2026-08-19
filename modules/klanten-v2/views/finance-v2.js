@@ -284,9 +284,23 @@
     guardTyped: '',
   };
 
-  window.__finInvNew  = () => {
-    _newInv.open = true;
-    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  window.__finInvNew  = async () => {
+    // BROK FINANCE-INVOICE (2026-08-19): route naar unified invoice-create.js
+    // modal (dezelfde als klant-detail-tab). Zonder customer-arg opent 'ie
+    // met de klant-selector bovenaan. Oude inline `invoiceCreateModal()`
+    // + `_newInv`-state hierbeneden zijn dead-code — kunnen weg in
+    // vervolg-cleanup-brok.
+    try {
+      const mod = await import('./modals/invoice-create.js?v=3');
+      mod.openInvoiceCreateModal({
+        onSuccess: () => {
+          if (typeof window.__finLoadInv === 'function') window.__finLoadInv();
+        },
+      });
+    } catch (e) {
+      console.error('[finance-v2] invoice-create modal fail:', e);
+      if (window.KV && window.KV.toast) window.KV.toast('Kon factuur-modal niet laden');
+    }
   };
   window.__finInvNewClose = () => {
     _newInv.open = false;
