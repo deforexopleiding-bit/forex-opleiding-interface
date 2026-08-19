@@ -5218,6 +5218,97 @@
     </div>`;
   }
 
+  /* BROK WB-POLISH-2: pipeline bulk-select state + handlers.
+     __wbxPipeToggleSel(cid, stageSlug, shift) — toggle een kaart; met shift
+       + laatste selectie in dezelfde stage → selecteer alle daartussen (range).
+     __wbxPipeClearSel — wis alle selectie.
+     __wbxPipeBulkMove — schrijft #wbxPipeBulkTarget waarde, typ-to-confirm
+       vóór N × POST /api/dunning-pipeline-set-stage. Terminale target-fase
+       (opgelost/afschrijven) triggert extra danger-hint in de modal. */
+  _ui.pipeSelected = _ui.pipeSelected || {};
+  _ui.pipeLastSelId = null;
+  _ui.pipeLastSelStage = null;
+  window.__wbxPipeToggleSel = (cid, stageSlug, shift) => {
+    if (!cid) return;
+    if (shift && _ui.pipeLastSelId && _ui.pipeLastSelStage === stageSlug) {
+      // Range-select: alle kaarten in dezelfde stage tussen last en cid.
+      const items = asArr(_live.overzicht.items).filter((r) => (r.stage_slug || 'nieuw') === stageSlug);
+      const idsInStage = items.map((r) => String(r.customer_id || r.id));
+      const idxA = idsInStage.indexOf(String(_ui.pipeLastSelId));
+      const idxB = idsInStage.indexOf(String(cid));
+      if (idxA !== -1 && idxB !== -1) {
+        const [lo, hi] = idxA < idxB ? [idxA, idxB] : [idxB, idxA];
+        for (let i = lo; i <= hi; i++) _ui.pipeSelected[idsInStage[i]] = true;
+      } else {
+        _ui.pipeSelected[cid] = !_ui.pipeSelected[cid];
+        if (!_ui.pipeSelected[cid]) delete _ui.pipeSelected[cid];
+      }
+    } else {
+      _ui.pipeSelected[cid] = !_ui.pipeSelected[cid];
+      if (!_ui.pipeSelected[cid]) delete _ui.pipeSelected[cid];
+    }
+    _ui.pipeLastSelId = cid;
+    _ui.pipeLastSelStage = stageSlug;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__wbxPipeClearSel = () => {
+    _ui.pipeSelected = {};
+    _ui.pipeLastSelId = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__wbxPipeBulkMove = async () => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const sel = document.getElementById('wbxPipeBulkTarget');
+    const target = sel ? String(sel.value || '').trim() : '';
+    if (!target) { _toast('Kies eerst een doelfase.', 'warn'); return; }
+    const ids = Object.keys(_ui.pipeSelected).filter((k) => _ui.pipeSelected[k]);
+    if (!ids.length) return;
+    const stageMeta = asArr(_live.stages.items).find((s) => s.slug === target) || { label: target };
+    const isTerminal = !!stageMeta.is_terminal;
+    // Filter out kaarten die AL in target-fase staan (no-op).
+    const items = asArr(_live.overzicht.items);
+    const toMove = ids.filter((cid) => {
+      const r = items.find((x) => String(x.customer_id || x.id) === String(cid));
+      return r && (r.stage_slug || 'nieuw') !== target;
+    });
+    if (!toMove.length) { _toast('Alle geselecteerden staan al in deze fase.', 'warn'); return; }
+
+    const dangerBlock = isTerminal
+      ? `<div style="margin-top:10px;padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose);border-radius:6px;color:var(--rose);font-size:12px;font-weight:600">⚠ Terminale fase — de aanmaan-motor STOPT voor deze ${toMove.length} klant${toMove.length === 1 ? '' : 'en'}. Alleen doorzetten als deze dossiers écht klaar zijn.</div>`
+      : '';
+    const bodyHtml = `<div style="font-size:12.5px;line-height:1.55">
+      Bulk-verplaats <b>${toMove.length}</b> klant${toMove.length === 1 ? '' : 'en'} naar fase
+      <span style="font-family:'IBM Plex Mono',monospace;padding:2px 7px;border-radius:5px;background:var(--surface-2);border:1px solid var(--border)">${esc(stageMeta.label || target)}</span>.
+      Elke verplaatsing is een aparte audit-log-entry.
+    </div>${dangerBlock}`;
+
+    const ok = await _askTypedConfirm(
+      `Bulk-verplaats ${toMove.length} klant${toMove.length === 1 ? '' : 'en'} naar ${stageMeta.label || target}?`,
+      bodyHtml,
+      isTerminal ? 'TERMINAAL' : 'VERPLAATS',
+      { okLabel: 'Ja, verplaats ' + toMove.length }
+    );
+    if (!ok) return;
+    if (_ui.pipeBulkBusy) return;
+    _ui.pipeBulkBusy = true;
+    if (window.DFO?.render) window.DFO.render();
+    let done = 0, failed = 0;
+    for (const cid of toMove) {
+      // Per-cid race-guard is stageBusy — set + clear.
+      _ui.stageBusy[cid] = true;
+      const r = await apiPost('/api/dunning-pipeline-set-stage', { customer_id: cid, stage_slug: target, reason: 'bulk-verplaats via pipeline' });
+      _ui.stageBusy[cid] = false;
+      if (r.ok) done++; else failed++;
+    }
+    _ui.pipeBulkBusy = false;
+    _ui.pipeSelected = {};
+    _ui.pipeLastSelId = null;
+    // Invalidate overzicht cache zodat kolom-tellingen updaten.
+    _live.overzicht.fetched = false;
+    _fetchOverzicht();
+    _toast(`Verplaatst: ${done}${failed ? ' · ' + failed + ' fout' : ''}.`, failed ? 'warn' : 'success');
+  };
+
   /* ── BROK 9 (v=8): Pipeline-kanban per dunning-fase ─────────────────
      Kolommen uit /api/dunning-pipeline-stages (is_active=true). Kaarten
      uit gedeelde _live.overzicht.items — geen extra fetch. Per kaart
@@ -5294,14 +5385,25 @@
         const pauseBadge = activeArr
           ? `<span style="font-size:9.5px;padding:1px 6px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600;margin-left:5px" title="Actief arrangement — dunning gepauzeerd">⏸ ARR</span>`
           : '';
-        return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:9px 11px;margin-bottom:8px;cursor:pointer;transition:transform .08s ease" onclick="__wbxOpenCase('${esc(cid)}')" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
-          <div style="font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}${pauseBadge}</div>
-          <div style="font-size:11px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${eur(openAmt)} · ${days}d · ${invCount} fact</div>
-          <div style="margin-top:6px" onclick="event.stopPropagation()">
-            <select onchange="if(this.value){__wbxSetStage('${esc(cid)}',this.value);this.value='';}" style="width:100%;font-size:10.5px;padding:3px 6px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);cursor:pointer" ${busy ? 'disabled' : ''}>
-              <option value="">Verplaats naar…</option>
-              ${stageOpts}
-            </select>
+        // BROK WB-POLISH-2: checkbox voor multi-select (shift-select ondersteund
+        // via __wbxPipeToggleSel-shiftKey). event.stopPropagation zodat card-klik
+        // (case-sheet) niet trigged bij checkbox-klik.
+        const isSel = !!_ui.pipeSelected[cid];
+        return `<div data-pipe-card="${esc(cid)}" data-pipe-stage="${esc(s.slug)}" style="background:${isSel ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface)'};border:1px solid ${isSel ? 'var(--brand,#0A7490)' : 'var(--border)'};border-radius:var(--r-sm);padding:9px 11px;margin-bottom:8px;cursor:pointer;transition:transform .08s ease" onclick="__wbxOpenCase('${esc(cid)}')" onmouseover="this.style.transform='translateY(-1px)'" onmouseout="this.style.transform='translateY(0)'">
+          <div style="display:flex;gap:6px;align-items:start">
+            <label style="display:flex;align-items:center;cursor:pointer;padding-top:1px" onclick="event.stopPropagation()">
+              <input type="checkbox" ${isSel ? 'checked' : ''} onclick="event.stopPropagation();__wbxPipeToggleSel('${esc(cid)}','${esc(s.slug)}',event.shiftKey)" style="width:14px;height:14px;cursor:pointer" />
+            </label>
+            <div style="min-width:0;flex:1">
+              <div style="font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}${pauseBadge}</div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${eur(openAmt)} · ${days}d · ${invCount} fact</div>
+              <div style="margin-top:6px" onclick="event.stopPropagation()">
+                <select onchange="if(this.value){__wbxSetStage('${esc(cid)}',this.value);this.value='';}" style="width:100%;font-size:10.5px;padding:3px 6px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);cursor:pointer" ${busy ? 'disabled' : ''}>
+                  <option value="">Verplaats naar…</option>
+                  ${stageOpts}
+                </select>
+              </div>
+            </div>
           </div>
         </div>`;
       }).join('') : `<div style="padding:22px 8px;text-align:center;color:var(--text-3);font-size:11px;font-style:italic">Leeg</div>`;
@@ -5318,12 +5420,31 @@
       </div>`;
     }).join('');
 
+    // BROK WB-POLISH-2: bulk-bar met count + fase-picker + Verplaats-knop.
+    // Verschijnt zodra ≥1 kaart geselecteerd is. Terminale target-fase
+    // triggert extra danger-waarschuwing in de typ-to-confirm modal.
+    const selIds = Object.keys(_ui.pipeSelected).filter((k) => _ui.pipeSelected[k]);
+    const bulkStageOpts = stages.map((s) =>
+      `<option value="${esc(s.slug)}">${esc(s.label || s.slug)}${s.is_terminal ? ' ⛔' : ''}</option>`
+    ).join('');
+    const bulkBar = selIds.length ? `<div style="padding:10px 14px;background:var(--brand-soft,#E2F1F5);border:1px solid var(--brand,#0A7490);border-radius:var(--r);margin-bottom:10px;display:flex;align-items:center;gap:10px;font-size:12.5px;flex-wrap:wrap">
+      <b>${selIds.length} klant${selIds.length === 1 ? '' : 'en'} geselecteerd</b>
+      <span style="color:var(--text-3);font-size:11px">Bulk-verplaats naar fase:</span>
+      <select id="wbxPipeBulkTarget" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)">
+        <option value="">— kies fase —</option>
+        ${bulkStageOpts}
+      </select>
+      <button class="btn btn-primary btn-sm" style="font-size:11.5px" ${_ui.pipeBulkBusy ? 'disabled' : ''} onclick="__wbxPipeBulkMove()">${_ui.pipeBulkBusy ? 'Verplaatsen…' : '→ Verplaats'}</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:auto" onclick="__wbxPipeClearSel()">Wissen</button>
+    </div>` : '';
+
     return `<div data-wbx-view="pipeline">
       <div class="pad" style="padding:14px 20px">
+        ${bulkBar}
         <div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:14px;align-items:stretch">
           ${columns}
         </div>
-        <div style="font-size:11px;color:var(--text-3);padding:6px 2px">Klik een kaart voor case-sheet · Verplaats via dropdown (custom confirm + audit-log) · ⛔ = terminale fase (motor stopt).</div>
+        <div style="font-size:11px;color:var(--text-3);padding:6px 2px">Klik kaart-body voor case-sheet · Vink 2+ voor bulk-verplaats · shift-klik voor range · ⛔ = terminale fase (motor stopt).</div>
       </div>
     </div>`;
   }
@@ -6095,6 +6216,7 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+  console.debug('[wanbetalers-v2] v=31 BROK WB-POLISH-2: pipeline multi-select — checkbox per kaart, shift-klik range binnen dezelfde fase, bulk-bar met count + fase-picker + Verplaats-knop. Typ-to-confirm "VERPLAATS" (of "TERMINAAL" bij opgelost/afschrijven met extra rood-danger-hint "motor stopt voor N klanten"). Race-guard per cid (stageBusy) + globale pipeBulkBusy. Skip no-ops (klant al in target-fase). Invalidate overzicht na move -> kolom-tellingen updaten zonder scroll-reset.');
   console.debug('[wanbetalers-v2] v=30 BROK WB-POLISH-1: overzicht klikbare kolom-headers (open/dagen/fase/next/name sort, asc/desc toggle, next-null onderaan). Brieven: zoek-input (naam/e-mail 200ms debounce), select-all in header (per zichtbare filter), bulk-verwijderen met typ-to-confirm "VERWIJDER".');
   console.debug('[wanbetalers-v2] v=29 BROK WB-FIX-4: (#1) BE-lijn regressie -> altijd tonen (+ ensureReady on-demand); (#2) Volgende-badge "actie g,..." fix -> kanaal-mapping + volle datetime; (#3) thread scroll: sync+RAF, 5s loop, force clear pas na daadwerkelijk bodemen; (#4) type-label chip OP de kaart (v1-parity); (#5) drawer-kop lege staat "Geen open factuur" i.p.v. "Factuur — · €0,00 · 0 dagen"; (#6) thread-kop fallback KLANTNAAM (via ctx.customer.name) i.p.v. phone. Minor: klant-info-blok +e-mail; invoice-modal accepteert c.name; poging-teller min 4 dots + cadence store in _fetchCallLog.');
 })();
