@@ -2694,7 +2694,7 @@
         <label style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Notitie</label>
         <textarea oninput="__wbxCaseCallField('${esc(cid)}','note',this.value)" rows="2" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-top:3px;resize:vertical;font-family:inherit">${esc(f.note || '')}</textarea>
       </div>
-      ${f.error ? `<div style="color:var(--rose);font-size:11.5px;margin-top:6px">⚠ ${esc(f.error)}</div>` : ''}
+      <div id="wbxCaseCallErr_${esc(cid)}">${f.error ? `<div style="color:var(--rose);font-size:11.5px;margin-top:6px">⚠ ${esc(f.error)}</div>` : ''}</div>
       <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:9px">
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__wbxCaseCallCancel('${esc(cid)}')">Annuleren</button>
         <button class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="__wbxCaseCallSave('${esc(cid)}')" ${f.saving ? 'disabled' : ''}>${f.saving ? 'Bezig…' : 'Log belpoging'}</button>
@@ -2702,6 +2702,20 @@
     </div>`;
   }
 
+  // BROK 9.1 (v=15): surgical err-clear voor case-sheet call-form.
+  // v=14-fix zat op de dode __wbxCallSet* (gesprekkenView) — nutteloos want
+  // die view is niet geregistreerd. De LEVENDE case-sheet gebruikt
+  // __wbxCaseCallField die alleen re-rendert bij field==='outcome' →
+  // foutregel bleef zichtbaar bij invullen datum/notitie. Nu: surgical
+  // DOM-clear van #wbxCaseCallErr_<cid> bij elk veld-input (behoudt focus).
+  function _updateCaseCallErrRow(cid) {
+    const el = document.getElementById('wbxCaseCallErr_' + cid);
+    if (!el) return;
+    const f = _ui.callForm[cid] || {};
+    el.innerHTML = f.error
+      ? `<div style="color:var(--rose);font-size:11.5px;margin-top:6px">⚠ ${esc(f.error)}</div>`
+      : '';
+  }
   window.__wbxCaseCallOpen = (cid) => {
     if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
     _ui.callFormOpen[cid] = true; _renderCaseSheet();
@@ -2710,10 +2724,11 @@
   window.__wbxCaseCallField = (cid, field, val) => {
     _ui.callForm[cid] = _ui.callForm[cid] || {};
     _ui.callForm[cid][field] = val;
-    // BROK 8 minor: inline-fout wissen zodra de user het probleem oplost.
-    // Voorheen bleef "Terugbeltijd verplicht"-error zichtbaar nadat gebruiker
-    // een datum invulde — verwarrend. Wissen ook bij outcome-wissel.
-    if (_ui.callForm[cid].error) _ui.callForm[cid].error = null;
+    // BROK 9.1 fix: wissen inline-fout zodra user het probleem oplost.
+    if (_ui.callForm[cid].error) {
+      _ui.callForm[cid].error = null;
+      _updateCaseCallErrRow(cid);   // surgical DOM-clear
+    }
     if (field === 'outcome') _renderCaseSheet(); // callback-veld enable/disable
   };
   window.__wbxCaseCallSave = async (cid) => {
@@ -3048,7 +3063,11 @@
         : `<span style="font-size:11px;padding:2px 8px;border-radius:6px;background:var(--surface-2);color:var(--text-3)">Sandbox ?</span>`;
 
     // BROK 8 fix 6: KPI-cell die "?" toont bij fetch-fout i.p.v. 0.
-    const errMark = '<span style="color:var(--rose);font-size:14px" title="Kon niet laden">⚠</span>';
+    // BROK 9.1 (v=15): retry-knop naast ⚠ op elke motor-tegel/pill die
+    // sub-endpoint-fout heeft. Voorheen: alleen icoon, user moest hele
+    // tab-refresh. Nu: klein "↻" naast ⚠ → __wbxRetryMotor (herlaadt alle
+    // motor-endpoints tegelijk; per-endpoint retry zou overkill zijn).
+    const errMark = '<span style="color:var(--rose);font-size:14px" title="Kon niet laden">⚠</span> <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="__wbxRetryMotor()" title="Opnieuw laden">↻</button>';
     const kpiVal = (val, isErr) => isErr ? errMark : (val == null ? '—' : val);
     const kpis = [
       ['Openstaand approvals',
@@ -3137,5 +3156,5 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
-  console.debug('[wanbetalers-v2] v=14 BROK 9 restpunten: (b1) softphone custom confirm vóór bellen (klant+nummer, Annuleren/Bellen); (b2) case-sheet open-facturen fetch status=open i.p.v. overdue (count matcht overzicht+threadkop); (m3) callback err-line surgical DOM-clear bij __wbxCallSet{Outcome,Note,CallbackAt}; (m4) sandbox endpoint key dunning_dry_run (was dunning_sandbox_mode → 404); (m5) stage-label NL lookup in overzicht-tabel + gesprekken-list (was ruwe slug); (m6) arrangementen-labels expliciet: motor "Actieve arrangementen (records)" / overzicht "Klanten met arrangement"; (m7) email-mark-read loop per email-id via email-actions bij __wbxInboxSelect (setTimeout 1.5s zodat thread geladen is).');
+  console.debug('[wanbetalers-v2] v=15 BROK 9.1: (1) case-sheet callback err surgical DOM-clear via _updateCaseCallErrRow bij __wbxCaseCallField(callback_at|note); (2) motor error-tegels krijgen "↻" retry-knop naast ⚠ die __wbxRetryMotor triggert. NB: dead-code cleanup (gesprekkenView/_gsp*Html/etc) uit deze brok gehaald — te risky per-Edit, wordt aparte cleanup-brok.');
 })();
