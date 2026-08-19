@@ -3551,7 +3551,8 @@
 
     return `<div style="display:flex;flex-direction:column;height:100%;overflow-y:auto">
       <div style="padding:14px 14px 12px;border-bottom:1px solid var(--border);background:var(--surface-2)">
-        <div style="font-weight:700;font-size:13.5px;margin-bottom:3px">${esc(cust.name || 'Onbekende klant')}</div>
+        <div style="font-weight:700;font-size:13.5px;margin-bottom:3px;${cust.id ? 'cursor:pointer;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px;transition:text-decoration-color .12s' : ''}"
+          ${cust.id ? `onclick="event.stopPropagation();__wbxOpenCase('${esc(cust.id)}',{customer_name:'${String(cust.name || '').replace(/'/g,"\\'")}'})" onmouseover="this.style.textDecorationColor='var(--brand)'" onmouseout="this.style.textDecorationColor='transparent'" title="Klik voor dossier"` : ''}>${esc(cust.name || 'Onbekende klant')}</div>
         ${cust.email ? `<div style="font-size:11.5px;color:var(--text-2);word-break:break-all;margin-bottom:2px">✉ ${esc(cust.email)}</div>` : ''}
         ${phone ? `<div style="font-size:11.5px;color:var(--text-2)">📞 ${esc(phone)}</div>` : ''}
         ${oldestOverdue > 0 ? `<div style="font-size:11px;color:var(--rose);font-weight:600;margin-top:6px">⚠ Oudste ${oldestOverdue} dagen te laat</div>` : ''}
@@ -3762,7 +3763,9 @@
     // via document.addEventListener in __wbxInboxKebab.
     return `<div style="padding:8px 14px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;gap:6px;position:relative">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0">
-        <b style="font-size:13px;min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${esc(name)}</b>
+        ${custId
+          ? `<b style="font-size:13px;min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;cursor:pointer;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px;transition:text-decoration-color .12s" onclick="event.stopPropagation();__wbxOpenCase('${esc(custId)}',{customer_name:'${String(name).replace(/'/g,"\\'")}'})" onmouseover="this.style.textDecorationColor='var(--brand)'" onmouseout="this.style.textDecorationColor='transparent'" title="Klik voor dossier">${esc(name)}</b>`
+          : `<b style="font-size:13px;min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">${esc(name)}</b>`}
         <span style="display:flex;gap:5px;align-items:center;flex-shrink:0">
           ${briefBadge}
           ${window24}
@@ -6312,6 +6315,7 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+  console.debug('[wanbetalers-v2] v=35 BROK WB-FIX-6: klantnaam als klikdoel — thread-header <b>naam</b> + right klantgegevens-paneel naam-heading. Beide krijgen cursor:pointer + hover-underline (brand-color) + click -> __wbxOpenCase(cid, {customer_name}). event.stopPropagation zodat kop-knoppen (✓/+/👤/⋮) niet dubbel triggeren. Wordt niet klikbaar als cust.id ontbreekt (unmatched-nummer conv).');
   console.debug('[wanbetalers-v2] v=34 BROK WB-FIX-5: (#1) Volgende-badge mapt nu op ECHTE overzicht-velden next_action_step_type (email/whatsapp/wait/task/stop/resume_dunning) + next_action_step_title heuristiek (Bel/Brief/Incasso/Herinnering). Voorheen: mijn code checkte non-bestaande velden -> altijd "Actie"-fallback. (#2) MANUAL_FOLLOWUP-splitting op payload.kind: kind=call -> "📞 Belafspraak" (Bel-knop OK), kind=letter -> "✉ Brief-taak" (Bel-knop weg, "Naar brief-flow"-knop naar SURFACE B WIK-card), kind=other -> "📝 Follow-up". Fallback: title-regex (bv. "Stuur WIK-14-dagenbrief" -> letter). Groepering ook via effectieve type — brief-taken en bel-taken vallen nu in APARTE groepen. Ook: MANUAL_PROPOSE_ARRANGEMENT label naar "Regeling voorstellen" (v1-parity, was "Arrangement voorstellen").');
   console.debug('[wanbetalers-v2] v=33 BROK WB-POLISH-4: dead-code cleanup — gesprekkenView + _gspListInnerHtml + _gspDetailHtml body volledig verwijderd (~180 regels dood-code weg). _repaintGspList + _repaintGspDetail zijn no-op stubs (callers _fetchCallLog/_fetchTimeline/__wbxCallSave/__wbxCallSet* + __wbxNoteSave triggeren nu geen render meer; case-sheet SURFACE B doet z\'n eigen repaint). __wbxCallSet*/__wbxGspSelect/__wbxGspSearch* blijven als window-refs (geen callers meer; volgende cleanup-brok kan die schrappen).');
   console.debug('[wanbetalers-v2] v=32 BROK WB-POLISH-3: arrangement-detail drawer. Body-level right-slide (760px) + scrim + Escape. Data via /api/arrangements-detail?id=X. Secties: header (type — klant + status-pill), Arrangement kv-grid (type/status/dates/reden), Facturen-lijst (indien invs), Pending actions-tabel, footer met ✕ Annuleer (danger, delegates naar __wbxArrCancel voor ACTIEF/VOORGESTELD). Klik op Actieve arrangementen-rij (actiesView) opent drawer; cancel-btn heeft event.stopPropagation.');
