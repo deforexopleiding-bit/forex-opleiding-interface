@@ -2458,7 +2458,38 @@
         queueMicrotask(() => window.__wbxInboxSelect(String(first.id)));
       }
     }
-    try { window.DFO?.render?.(); } catch (_) {}
+    // SURFACE A polish (v=24-fix): surgical repaint van alleen de list (behoudt
+    // list-scrollTop) én de thread-header (kan unread/brief-badge veranderen).
+    // Alleen als er GEEN #wbxInboxList (view weg is) → dan is er niks te repainten;
+    // bij een tab-switch of full-render vervolgens rendert de shell alles opnieuw.
+    if (document.getElementById('wbxInboxList')) {
+      _repaintInboxList();
+      _repaintInboxThreadHeader();
+    } else {
+      try { window.DFO?.render?.(); } catch (_) {}
+    }
+  }
+  // Repaint alleen de thread-header (boven de messages). Header toont
+  // 24h-badge / brief-tag / totalUnread — deze data komt uit convs.items en
+  // moet dus bijgewerkt worden bij elke conv-refetch. NIET de messages-scroll
+  // aanraken (dat is _repaintInboxThread).
+  function _repaintInboxThreadHeader() {
+    const el = document.getElementById('wbxInboxThreadScroll');
+    if (!el) return;
+    const parent = el.parentElement;
+    if (!parent) return;
+    const oldHeader = parent.querySelector(':scope > div:first-child');
+    // De header is de EERSTE div-child van de kolom (mag ook '' zijn als
+    // convId=null). Vervangende innerHTML van de wrapper garandeert dat we
+    // niet de scroll-container aanraken.
+    const convId = _ui.inbox.selectedConv;
+    const newHeaderHtml = _inboxThreadHeaderHtml(convId);
+    if (oldHeader && oldHeader.id !== 'wbxInboxThreadScroll') {
+      const tmp = document.createElement('template');
+      tmp.innerHTML = newHeaderHtml.trim();
+      const newNode = tmp.content.firstElementChild;
+      if (newNode) parent.replaceChild(newNode, oldHeader);
+    }
   }
   // SURFACE A: gedeelde filter+sort-helper. Server retourneert alle finance-convs;
   // wij tonen alleen wanbetaler-convs (is_debtor=true) + client-side searchQ +
@@ -2518,7 +2549,16 @@
       else if (bag.conversation && bag.conversation.can_send_text === false) _ui.inbox.compose.waWindowExpired = true;
     }
     _live.inbox.thread.loading[convId] = false;
-    try { window.DFO?.render?.(); } catch (_) {}
+    // SURFACE A polish (v=24-fix): surgical repaint van alleen de thread-scroll
+    // (behoudt scrollTop, scrollt naar onder als user onderaan was of dit een
+    // fresh-select was). Full DFO.render valt terug op de shell alleen als de
+    // thread-scroll niet in DOM staat.
+    if (convId === _ui.inbox.selectedConv && document.getElementById('wbxInboxThreadScroll')) {
+      _repaintInboxThread(convId);
+      _repaintInboxThreadHeader();
+    } else {
+      try { window.DFO?.render?.(); } catch (_) {}
+    }
   }
   async function _fetchInboxCtx(convId, mySeq) {
     if (!convId) return;
@@ -2549,6 +2589,11 @@
     // van conv A de zojuist gekozen conv B overschrijft.
     const mySeq = ++_ui.inbox._selectSeq;
     _ui.inbox.compose = { channel: 'wa', text: '', subject: '', templateName: '', sending: false, waWindowExpired: false, error: null };
+    // SURFACE A polish (v=24-fix): eerste-render + expliciete select forceren
+    // scroll naar onder (nieuwste bericht in beeld). Reset item-count-tracker
+    // zodat _repaintInboxThread hasNew-detect klopt.
+    _ui.inbox.threadScrollBottomOnNext[String(convId)] = true;
+    _ui.inbox.threadItemCountByConv[String(convId)] = 0;
     _fetchInboxThread(convId, mySeq);
     _fetchInboxCtx(convId, mySeq);
     _fetchInboxTemplates(convId, mySeq);
@@ -2581,9 +2626,59 @@
   // huidige items, alleen #wbxInboxList wordt vervangen. Zelfde patroon als
   // _repaintOverzichtList. Server-search alleen bij nieuwe status-filter of
   // handmatige retry.
+  /* SURFACE A polish (v=24-fix): scroll-preservering — voorkomt dat de
+     6s poll / Supabase-realtime tick de user naar de top spingt.
+     Bewaart scrollTop van #wbxInboxList (links) over elke repaint. */
   function _repaintInboxList() {
     const el = document.getElementById('wbxInboxList');
-    if (el) el.innerHTML = _inboxConvsListHtml();
+    if (!el) return;
+    const prevTop = el.scrollTop;
+    el.innerHTML = _inboxConvsListHtml();
+    // Restore synchroon — de nieuwe DOM heeft dezelfde scroll-hoogte tenzij
+    // conv-count drastisch veranderd is. Voor die randgevallen accepteren we
+    // een kleine skip (nooit een terugsprong naar 0).
+    el.scrollTop = prevTop;
+  }
+  // Per-conv scroll-state voor thread-scroll-preservation.
+  _ui.inbox.threadScrollByConv = _ui.inbox.threadScrollByConv || {};
+  _ui.inbox.threadItemCountByConv = _ui.inbox.threadItemCountByConv || {};
+  // scrollBottomOnNext = true dwingt scroll naar onder na de eerstvolgende
+  // _repaintInboxThread; wordt gezet bij __wbxInboxSelect en bij eigen send.
+  _ui.inbox.threadScrollBottomOnNext = {};
+
+  /* Thread-repaint: surgical innerHTML-swap van #wbxInboxThreadScroll.
+     Gedrag per conv:
+       - Bij eerste render (of __wbxInboxSelect / eigen send) → scroll naar onder
+       - Stond user vlak boven onder (binnen 60px) én zijn er NIEUWE messages →
+         scroll mee naar onder (chat-behaviour).
+       - Anders: behoud scrollTop (voorkomt dat realtime/poll de user naar
+         een oude positie werpt terwijl 'ie omhoog is gescrold). */
+  function _repaintInboxThread(convId) {
+    const el = document.getElementById('wbxInboxThreadScroll');
+    if (!el) return;
+    const bag = _live.inbox.thread.byConv[convId];
+    const itemsCount = asArr(bag?.items).length;
+    const prevCount  = Number(_ui.inbox.threadItemCountByConv[convId]) || 0;
+    const hasNew     = itemsCount > prevCount;
+    const prevTop    = el.scrollTop;
+    const prevMax    = el.scrollHeight - el.clientHeight;
+    const wasAtBottom = (prevMax - prevTop) < 60; // 60px tolerantie
+    const forceBottom = !!_ui.inbox.threadScrollBottomOnNext[convId];
+    _ui.inbox.threadScrollBottomOnNext[convId] = false;
+
+    el.innerHTML = _inboxThreadHtml(convId);
+    _ui.inbox.threadItemCountByConv[convId] = itemsCount;
+
+    // requestAnimationFrame zodat scrollHeight is bijgewerkt vóór we scroll zetten.
+    requestAnimationFrame(() => {
+      const el2 = document.getElementById('wbxInboxThreadScroll');
+      if (!el2) return;
+      if (forceBottom || (hasNew && wasAtBottom) || prevCount === 0) {
+        el2.scrollTop = el2.scrollHeight;
+      } else {
+        el2.scrollTop = prevTop;
+      }
+    });
   }
   window.__wbxInboxSearch = (val) => {
     _ui.inbox.searchQ = String(val || '');
@@ -2699,6 +2794,9 @@
     }
 
     // Refetch thread + convs (nieuwe outbound + last_message_at).
+    // SURFACE A polish: eigen verstuur = force scroll-to-bottom bij de refetch.
+    _ui.inbox.threadScrollBottomOnNext[String(convId)] = true;
+    _ui.inbox.threadItemCountByConv[String(convId)] = 0; // reset zodat hasNew triggert
     delete _live.inbox.thread.byConv[convId];
     _fetchInboxThread(convId);
     _live.inbox.convs.fetched = false; _fetchInboxConvs();
@@ -2731,10 +2829,45 @@
   };
   window.__wbxInboxKebabClose = () => { _ui.inbox.kebabOpen = false; };
 
+  /* SURFACE A polish (v=24-fix): mark-read/unread markeert nu ALLE kanalen
+     (WA + e-mail) én update de list-row optimistisch zodat badge/stripe
+     direct verdwijnt (bug: David Sanfilippo email-badge 5 bleef staan omdat
+     inbox-mark-read alleen WA-unread raakt).
+
+     Als de thread nog niet geladen is (kebab-klik zonder eerst thread-open):
+     eerst lazy-load zodat we de email-ids kennen; anders slaan we email-
+     markering over → badge zou terugkomen bij volgende fetch. */
+  async function _wbxLoadInboxThreadIfNeeded(convId) {
+    if (!convId) return null;
+    const existing = _live.inbox.thread.byConv[convId];
+    if (existing && existing.items && existing.items.length) return existing;
+    // Fire+await een fetch (silent — geen render triggeren).
+    const j = await tryFetch('mark:thread:' + convId, `/api/inbox-thread-unified?conversation_id=${encodeURIComponent(convId)}&include_email=1&limit=200`, 8000);
+    if (!j || j.error) return existing || null;
+    const bag = _live.inbox.thread.byConv[convId] = _live.inbox.thread.byConv[convId] || { items: [], conversation: null };
+    bag.items = asArr(j.items);
+    bag.conversation = j.conversation || bag.conversation;
+    return bag;
+  }
+  // Zet lokaal alle unread-counters op 0 (of ≥1 bij mark-unread) en repaint
+  // de list surgical zodat badge direct weg is.
+  function _wbxOptimisticSetUnread(convId, value) {
+    const row = (_live.inbox.convs.items || []).find((x) => String(x.id) === String(convId));
+    if (!row) return;
+    row.unread_count       = value;
+    row.email_unread_count = value;
+    row.total_unread       = value;
+    _repaintInboxList();
+    _repaintInboxThreadHeader();
+  }
+
   window.__wbxInboxMarkRead = async (convId) => {
     if (!convId) return;
-    // Fire parallel WA + email mark-read.
-    const bag = _live.inbox.thread.byConv[convId];
+    // 1) Optimistic: badge/stripe DIRECT weg.
+    _wbxOptimisticSetUnread(convId, 0);
+    // 2) Zorg dat bag geladen is voor de email-loop.
+    const bag = await _wbxLoadInboxThreadIfNeeded(convId);
+    // 3) Fire WA + email mark-read parallel.
     apiPost('/api/inbox-mark-read', { conversation_id: convId }).catch(() => {});
     if (bag?.items) {
       const inboundEmails = bag.items.filter((m) => m.channel === 'email' && (m.direction === 'inbound' || m.direction === 'in'));
@@ -2744,16 +2877,25 @@
       }
     }
     _toast('Gemarkeerd als gelezen.', 'success');
-    _live.inbox.convs.fetched = false;
-    _fetchInboxConvs();
+    // 4) Reconcile (silent). Faalt de server-side markering, dan komt de
+    //    volgende poll de badge terug — geen force nu.
+    setTimeout(() => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); }, 1200);
   };
+
   window.__wbxInboxMarkUnread = async (convId) => {
     if (!convId) return;
+    // 1) Optimistic: badge=1 direct zichtbaar.
+    _wbxOptimisticSetUnread(convId, 1);
+    // 2) WA-side mark-unread. NB: /api/email-actions ondersteunt geen
+    //    'mark-unread' action-type (alleen 'mark-read'), dus e-mail-kant
+    //    blijft \Seen — acceptabel voor mark-unread als "flag deze conv
+    //    weer als todo"-signaal. Als de conv puur email-only was, is de
+    //    WA-toggle een no-op maar de optimistic-badge blijft correct staan
+    //    tot de volgende poll.
     const r = await apiPost('/api/inbox-mark-unread', { conversation_id: convId });
-    if (!r.ok) { _toast('Markeren mislukt: ' + r.error, 'error'); return; }
+    if (!r.ok) { _toast('Markeren mislukt: ' + r.error, 'error'); _live.inbox.convs.fetched = false; _fetchInboxConvs(); return; }
     _toast('Gemarkeerd als ongelezen.', 'success');
-    _live.inbox.convs.fetched = false;
-    _fetchInboxConvs();
+    setTimeout(() => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); }, 1200);
   };
   window.__wbxInboxPauseFlow = async (cid) => {
     if (!cid) return;
@@ -3247,7 +3389,7 @@
         </div>
         <div style="flex:1;display:flex;flex-direction:column;min-width:0">
           ${_inboxThreadHeaderHtml(convId)}
-          <div style="flex:1;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
+          <div id="wbxInboxThreadScroll" style="flex:1;overflow-y:auto;padding:12px 14px;background:var(--surface-2)">${_inboxThreadHtml(convId)}</div>
           ${_inboxComposeHtml(convId)}
         </div>
         <div style="width:300px;min-width:260px;max-width:34%;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
