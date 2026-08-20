@@ -46,10 +46,12 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'lead_id (uuid) is verplicht.' });
   }
 
-  // Lookup lead (voor voornaam + fallback-email).
+  // Lookup lead (voor voornaam + fallback-email). NB: leads-tabel heeft
+  // GEEN 'naam'-kolom — alleen voornaam + achternaam. stuurWelkom neemt
+  // voornaam als parameter, dus we hebben alleen die twee nodig.
   const { data: lead, error: leadErr } = await supabaseAdmin
     .from('leads')
-    .select('id, voornaam, achternaam, email, naam')
+    .select('id, voornaam, achternaam, email')
     .eq('id', leadId)
     .maybeSingle();
   if (leadErr) {
