@@ -291,16 +291,21 @@ export async function hasReplyAfterLastSend(customerId, runId, db = supabaseAdmi
   if (!lastSentAt) return { replied: false };
 
   // ── WhatsApp-tak ─────────────────────────────────────────────────────
+  // Ook conv-id meenemen zodat caller `paused_by_conversation_id` kan zetten
+  // (FIX #2A wees-run reden). Recentste inbound bepaalt welke conv wint als
+  // de klant meerdere gesprekken heeft.
   const { data: convRows, error: convErr } = await db
     .from('whatsapp_conversations')
-    .select('last_inbound_at')
+    .select('id, last_inbound_at')
     .eq('customer_id', customerId)
     .not('last_inbound_at', 'is', null);
   if (convErr) throw convErr;
   let mostRecentWa = '';
+  let mostRecentWaConvId = null;
   for (const row of convRows || []) {
     if (row.last_inbound_at && row.last_inbound_at > mostRecentWa) {
       mostRecentWa = row.last_inbound_at;
+      mostRecentWaConvId = row.id || null;
     }
   }
   const waReplied = !!(mostRecentWa && mostRecentWa > lastSentAt);
@@ -329,9 +334,9 @@ export async function hasReplyAfterLastSend(customerId, runId, db = supabaseAdmi
     mailReplied = !!(mailRows && mailRows.length > 0);
   }
 
-  if (waReplied && mailReplied) return { replied: true, channel: 'both' };
-  if (waReplied)                 return { replied: true, channel: 'whatsapp' };
-  if (mailReplied)               return { replied: true, channel: 'email' };
+  if (waReplied && mailReplied) return { replied: true, channel: 'both',     conversation_id: mostRecentWaConvId };
+  if (waReplied)                 return { replied: true, channel: 'whatsapp', conversation_id: mostRecentWaConvId };
+  if (mailReplied)               return { replied: true, channel: 'email',    conversation_id: null };
   return { replied: false };
 }
 
@@ -973,9 +978,26 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         try {
           const reply = await hasReplyAfterLastSend(run.customer_id, run.id);
           if (reply?.replied) {
+            // FIX #2A — vul reden-kolommen zodat de classifier
+            // (wanbetalers-diagnose-data.js, pipeline-overview-helpers.js) de
+            // pause herkent en niet als 'wees' bestempelt.
+            //   WhatsApp / both  → paused_by_conversation_id = reply.conversation_id
+            //   Email-only       → paused_manual_reason='reply_email' + paused_at
+            // Verandert NIETS aan wanneer/of we pauzeren; alleen dat er nu een
+            // reden bij staat. Zelfde dunning_log-event blijft.
+            const nowStamp = nowIso();
+            const runUpdate = { status: 'paused', updated_at: nowStamp };
+            if ((reply.channel === 'whatsapp' || reply.channel === 'both') && reply.conversation_id) {
+              runUpdate.paused_by_conversation_id = reply.conversation_id;
+            } else {
+              // Email-reply (of WA-tak zonder conv-id-terugkoppeling): schrijf
+              // een handmatige-reden zodat de classifier het als non-wees ziet.
+              runUpdate.paused_manual_reason = `reply_${reply.channel || 'unknown'}`;
+              runUpdate.paused_at = nowStamp;
+            }
             await supabaseAdmin
               .from('dunning_workflow_runs')
-              .update({ status: 'paused', updated_at: nowIso() })
+              .update(runUpdate)
               .eq('id', run.id);
             await supabaseAdmin.from('dunning_log').insert({
               run_id: run.id,
