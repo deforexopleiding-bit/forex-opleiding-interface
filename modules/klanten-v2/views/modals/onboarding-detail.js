@@ -275,15 +275,71 @@ function humanizeKey(k) {
   const s = String(k || '').replace(/_/g, ' ').trim();
   return s ? (s.charAt(0).toUpperCase() + s.slice(1)) : '';
 }
+// Fix ronde-9 P2: antwoord-slug → NL-label mapping. Onboarding-wizard
+// slaat waardes op als enum-slugs (bv 'bootcamp_dan_online', 'beginner').
+// Deze map dekt de bekende sets; onbekende slugs krijgen humanizeSlug()
+// als fallback (snake_case → 'Snake case', geen rauwe 'extra_inkomen').
+const ANSWER_VALUE_LABELS = {
+  // Ervaring
+  beginner:          'Beginner',
+  gevorderd:         'Gevorderd',
+  ervaren:           'Ervaren',
+  geen_ervaring:     'Geen ervaring',
+  // Doel
+  extra_inkomen:     'Extra inkomen',
+  fulltime_trader:   'Fulltime trader',
+  vermogensopbouw:   'Vermogensopbouw',
+  hobby:             'Hobby / interesse',
+  // Voorkeur
+  bootcamp_dan_online: 'Bootcamp gevolgd door online',
+  alleen_bootcamp:   'Alleen bootcamp',
+  alleen_online:     'Alleen online',
+  hybride:           'Hybride',
+  // Handelsstijl
+  daytrading:        'Daytrading',
+  swing:             'Swing trading',
+  scalping:          'Scalping',
+  positie:           'Positie / lange termijn',
+  // Markt-focus
+  forex:             'Forex',
+  crypto:            'Crypto',
+  aandelen:          'Aandelen',
+  indices:           'Indices',
+  grondstoffen:      'Grondstoffen',
+  // Tijd beschikbaar
+  minder_dan_5:      '< 5 uur/week',
+  '5_tot_10':        '5–10 uur/week',
+  '10_tot_20':       '10–20 uur/week',
+  meer_dan_20:       '> 20 uur/week',
+  // Ja/Nee-variants
+  ja:                'Ja',
+  nee:               'Nee',
+  onbekend:          'Onbekend',
+};
+function humanizeSlug(s) {
+  const raw = String(s || '').replace(/_/g, ' ').trim();
+  if (!raw) return '';
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+function humanizeAnswerLeaf(v) {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'Ja' : 'Nee';
+  const str = String(v);
+  if (ANSWER_VALUE_LABELS[str]) return ANSWER_VALUE_LABELS[str];
+  // Alleen slug-achtige strings (snake_case, geen spaties) auto-humanizen —
+  // vrije-tekst-antwoorden ('Ik wil graag…') niet stiekem hoofdlettergevoelig
+  // omgooien.
+  if (/^[a-z0-9]+(_[a-z0-9]+)+$/.test(str)) return humanizeSlug(str);
+  return str;
+}
 function humanizeAnswerValue(v) {
   if (v == null || v === '') return '<span style="color:var(--text-3)">—</span>';
   if (Array.isArray(v)) {
     if (!v.length) return '<span style="color:var(--text-3)">—</span>';
-    return v.map((x) => esc(String(x))).join(', ');
+    return v.map((x) => esc(humanizeAnswerLeaf(x))).join(', ');
   }
   if (typeof v === 'object') return `<pre style="margin:0;font-size:11.5px;white-space:pre-wrap">${esc(JSON.stringify(v, null, 2))}</pre>`;
-  if (typeof v === 'boolean') return v ? 'Ja' : 'Nee';
-  return esc(String(v));
+  return esc(humanizeAnswerLeaf(v));
 }
 function renderAnswersList(ans) {
   if (!ans || typeof ans !== 'object') return '<div class="kv-onb-empty">Nog geen antwoorden ingevuld.</div>';

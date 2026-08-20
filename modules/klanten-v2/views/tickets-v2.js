@@ -557,6 +557,20 @@
               ${_cre.pendingUrls.map((u, i) => {
                 const e = detectEmbed(u);
                 const domain = e?.domain || '';
+                // Fix ronde-9 P1: bij een echte video-embed-URL (YT/Vimeo/
+                // Loom/Drive) → toon iframe in aspect-ratio-container, i.p.v.
+                // de kale SVG-linkrij. Rijhoogte cap via .tk-embed-card
+                // max-width:640px in klanten-v2.css.
+                if (e && e.kind === 'iframe') {
+                  return `<div class="tk-att-link-item" style="display:block">
+                    <div class="tk-embed-card"><iframe src="${esc(e.src)}" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px">
+                      <span class="tk-att-link-url" title="${esc(u)}" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-3)">${esc(u)}</span>
+                      ${domain ? `<span class="tk-att-file-mime">${esc(domain)}</span>` : ''}
+                      <button class="icon-btn" onclick="__ticketCreateRemoveUrl(${i})" title="Verwijder">${svg(I.x || I.warn)}</button>
+                    </div>
+                  </div>`;
+                }
                 return `<div class="tk-att-link-item">
                   ${svg(I.mail || I.doc)}
                   <span class="tk-att-link-url" title="${esc(u)}">${esc(u)}</span>
@@ -823,6 +837,8 @@
         try {
           await tryPatch('ticket-status', '/api/ticket-detail?id=' + encodeURIComponent(id), { status: newStatus });
           // Surgical: verplaats de kaart in-memory ipv alle 3 tabs herladen.
+          // Fix ronde-9 P3: geen DFO.render() meer — kanban._drop doet nu de
+          // DOM-move zelf; extra render zou de hele view opnieuw bouwen.
           if (before) {
             before.cache.data.tickets = (before.cache.data.tickets || []).filter((t) => String(t.id) !== String(id));
             const target = (newStatus === 'open')        ? _open
@@ -833,7 +849,6 @@
               target.data.tickets = [{ ...before.ticket, status: newStatus }, ...(target.data.tickets || [])];
             }
           }
-          if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
         } catch (e) {
           console.warn('[tickets-v2 kanban] status-update fail:', e?.message);
           // Rollback via full-refetch (server-waarheid wint) alleen bij fail.

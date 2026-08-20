@@ -123,13 +123,57 @@
     if (!cfg) return;
     const id = _drag.itemId;
     _drag.itemId = null; _drag.moduleKey = null;
-    // Optimistic UI: laat onMove de state muteren + render triggeren.
+    // Fix ronde-9 P3: surgical DOM-move i.p.v. full DFO.render(). Capture
+    // de kaart-node + oude kolom vóór onMove; na success verplaats de node
+    // fysiek en update de kolom-tellers. Full render alleen bij fout
+    // (rollback via getItems + herbouwde HTML).
+    const board  = document.querySelector('.kv-kanban[data-kanban-module="' + String(moduleKey).replace(/"/g, '\\"') + '"]');
+    const card   = board ? board.querySelector('.kv-kanban-card[data-item-id="' + String(id).replace(/"/g, '\\"') + '"]') : null;
+    const srcCol = card ? card.closest('.kv-kanban-col') : null;
+    const dstCol = board ? board.querySelector('.kv-kanban-col[data-status-key="' + String(newStatus).replace(/"/g, '\\"') + '"]') : null;
+    const noOp   = srcCol && dstCol && srcCol === dstCol;
     try {
       await cfg.onMove(id, newStatus);
     } catch (e) {
       console.warn('[kanban-v2] onMove failed:', e?.message);
       alert('Verplaatsen mislukt: ' + (e?.message || 'onbekende fout'));
+      // Rollback via full re-render (module heeft optimistic state al gecorrigeerd
+      // in de catch-tak van onMove — of getItems levert nu de server-waarheid).
+      if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+      return;
     }
+    // No-op: onMove heeft in dit geval al geretourneerd zonder mutatie
+    // (module-guard). Geen DOM-move nodig.
+    if (noOp) return;
+    // Surgical DOM-move + tellers updaten.
+    if (card && dstCol) {
+      const dstBody = dstCol.querySelector('.kv-kanban-col-body');
+      if (dstBody) {
+        // Als de doel-kolom nog het 'Sleep hier'-placeholder toont, verwijder die eerst.
+        const emptyPh = dstBody.querySelector('.kv-kanban-col-empty');
+        if (emptyPh) emptyPh.remove();
+        dstBody.insertBefore(card, dstBody.firstChild);
+        // Update tellers op beide kolommen.
+        if (srcCol) {
+          const srcBody = srcCol.querySelector('.kv-kanban-col-body');
+          const srcCnt  = srcCol.querySelector('.kv-kanban-col-cnt');
+          const srcNum  = srcBody ? srcBody.querySelectorAll('.kv-kanban-card').length : 0;
+          if (srcCnt) srcCnt.textContent = String(srcNum);
+          // Als bron nu leeg is → toon 'Sleep hier'-placeholder terug.
+          if (srcBody && srcNum === 0 && !srcBody.querySelector('.kv-kanban-col-empty')) {
+            const ph = document.createElement('div');
+            ph.className = 'kv-kanban-col-empty';
+            ph.textContent = 'Sleep hier';
+            srcBody.appendChild(ph);
+          }
+        }
+        const dstCnt = dstCol.querySelector('.kv-kanban-col-cnt');
+        const dstNum = dstBody.querySelectorAll('.kv-kanban-card').length;
+        if (dstCnt) dstCnt.textContent = String(dstNum);
+        return;
+      }
+    }
+    // Fallback: geen DOM-anchors gevonden → full render (shouldn't happen).
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   }
 

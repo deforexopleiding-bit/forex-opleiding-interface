@@ -357,13 +357,14 @@
           return; // zelfde kolom → niks doen
         }
         // Optimistic mutatie in alle scope-caches (met asArr-guard).
+        // Fix ronde-9 P3: geen DFO.render() meer — kanban._drop doet nu de
+        // DOM-move zelf; extra render zou de hele view opnieuw bouwen.
         for (const key of Object.keys(_live)) {
           const arr = asArr(_live[key] && _live[key].taken);
           if (!arr.length) continue;
           const t = arr.find((x) => x.id === id);
           if (t) t.status = newStatus;
         }
-        if (window.DFO?.render) window.DFO.render();
         if (!window.KV?.authedFetch) {
           console.warn('[taken-v2 kanban] KV.authedFetch niet beschikbaar');
           return;

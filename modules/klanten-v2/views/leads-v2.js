@@ -1234,8 +1234,8 @@
       variant: 'btn',
     } : {
       title: 'Offerte aanmaken uit deze lead?',
-      body: `Je wordt doorgestuurd naar de <b>offerte-aanmaak-flow</b> voor <b>${esc(lead.naam) || '—'}</b> met alle lead-gegevens (naam / e-mail / telefoon) al vooringevuld. Zodra de offerte wordt afgerond wordt de lead-klant-koppeling automatisch gelegd (source_lead_id).<br><br><span style="font-size:11.5px;color:var(--text-3)">Tijdelijk routeert dit naar de oude wizard. Zodra de v2-offerte-wizard live is (Batch 2) wordt dit een in-app modal.</span>`,
-      cta: 'Ja, open offerte-flow',
+      body: `De <b>offerte-wizard</b> opent voor <b>${esc(lead.naam) || '—'}</b> met alle lead-gegevens (naam / e-mail / telefoon) al vooringevuld. Zodra de offerte wordt afgerond wordt de lead-klant-koppeling automatisch gelegd (source_lead_id).`,
+      cta: 'Ja, open offerte-wizard',
       variant: 'btn btn-primary',
     };
     const dis = _act2.submitting ? ' disabled' : '';
