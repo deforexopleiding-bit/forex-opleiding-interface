@@ -142,6 +142,8 @@
     events:   null,  // /api/events-list?limit=6 (items[])
     sales:    null,  // /api/sales-dashboard-stats (Zoom counts)
     retention:null,  // /api/sales-retention (items[].length)
+    mrr:      null,  // /api/sales-mrr-report (by_traject[])
+    tasks:    null,  // /api/tasks-list?status=PENDING (counts.byCategory + MANUAL_FOLLOWUP filter)
   };
   // Sequence-nummer voorkomt race conditions als user snel klikt.
   let _fetchSeq = 0;
@@ -176,13 +178,17 @@
     try {
       if (!window.KV || !window.KV.authedJson) throw new Error('KV.authedJson niet beschikbaar');
       // Parallel fetch — elk endpoint is fail-soft (null bij error).
-      const [stats, finance, tickets, events, sales, retention] = await Promise.all([
+      // Ronde-14: + sales-mrr-report (by_traject-live), tasks-list (bel-acties
+      // via MANUAL_FOLLOWUP-pending count).
+      const [stats, finance, tickets, events, sales, retention, mrr, tasks] = await Promise.all([
         tryFetch('dashboard-stats',       '/api/dashboard-stats?period=' + paramPeriod),
         tryFetch('finance-counts',        '/api/finance-dashboard-counts?period=' + paramPeriod),
         tryFetch('tickets',               '/api/tickets'),
         tryFetch('events-list',           '/api/events-list?limit=6&status=draft,published'),
         tryFetch('sales-dashboard-stats', '/api/sales-dashboard-stats'),
         tryFetch('sales-retention',       '/api/sales-retention'),
+        tryFetch('sales-mrr-report',      '/api/sales-mrr-report'),
+        tryFetch('tasks-followup',        '/api/tasks-list?action_type=MANUAL_FOLLOWUP&status=PENDING&limit=1'),
       ]);
       if (seq !== _fetchSeq) {
         console.debug('[dashboard-v2] discard stale seq=' + seq + ' (current=' + _fetchSeq + ')');
@@ -195,6 +201,8 @@
       _live.events    = events;
       _live.sales     = sales;
       _live.retention = retention;
+      _live.mrr       = mrr;
+      _live.tasks     = tasks;
       _live.error     = stats ? null : 'dashboard-stats faalde';
       console.debug('[dashboard-v2] bundle done seq=' + seq, {
         leads:      stats?.kpis_groot?.nieuwe_leads?.value,
@@ -384,10 +392,21 @@
               return dualChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue');
             })()}
             <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
-              <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">Trajecten verkocht</div>
+              <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">
+                Trajecten verkocht${_live.mrr ? liveBadgeFor(_live.mrr, 'Live uit /api/sales-mrr-report by_traject') : mockBadge('sales-mrr-report faalde')}
+              </div>
               <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px">
-                ${[['6 maand 1-op-1', 3, 11850, 'violet'], ['12 maand 1-op-1', 2, 14400, 'violet'],
-                   ['24 maand 1-op-1', 0, 0, 'violet'], ['Membership', 0, 0, 'blue']]
+                ${(() => {
+                  // Ronde-14: LIVE uit /api/sales-mrr-report by_traject[].
+                  // Elk item = { traject, mrr, count }. Toon top-4 op count DESC,
+                  // val terug op MOCK-rij als endpoint faalde.
+                  const byT = _live.mrr && Array.isArray(_live.mrr.by_traject) ? _live.mrr.by_traject : null;
+                  const cols = ['violet','violet','violet','blue'];
+                  const rows = byT
+                    ? byT.slice().sort((a,b)=>(b.count||0)-(a.count||0)).slice(0,4).map((t,i)=>[t.traject || 'Onbekend', t.count || 0, t.mrr || 0, cols[i] || 'violet'])
+                    : [['6 maand 1-op-1', 3, 11850, 'violet'], ['12 maand 1-op-1', 2, 14400, 'violet'], ['24 maand 1-op-1', 0, 0, 'violet'], ['Membership', 0, 0, 'blue']];
+                  return rows;
+                })()
                   .map(([n, c, b, col]) => `<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
                     <div style="font-size:11px;color:var(--${col});font-weight:500;margin-bottom:4px">${n}</div>
                     <div style="font-size:20px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.035em;line-height:1;${c > 0 ? '' : 'color:var(--text-3)'}">${c}</div>
@@ -421,7 +440,10 @@
                 [retentie != null ? retentie : 6,       'Retentie te laat',        'Sales · afloop <30d',  'amber', 'sales',       retentie != null],
                 [approvals != null ? approvals : 0,     'Goedkeuringen open',      'Control Center',       'slate', 'binnenkort',  approvals != null],
                 [escalaties != null ? escalaties : 41,  'Vastgelopen gesprekken',  'Wanbetalers-escalatie','rose',  'wanbetalers', escalaties != null],
-                [54,                                    'Bel-acties te doen',      'Wanbetalers',          'amber', 'wanbetalers', false],
+                // Ronde-14: Bel-acties live via tasks-list MANUAL_FOLLOWUP+PENDING.
+                // tasks-list returns total (all MANUAL_FOLLOWUP-tasks in pending);
+                // niet-kind-specifiek maar 'follow-up-task' dekt bel-acties + brieven.
+                [(_live.tasks && typeof _live.tasks.total === 'number') ? _live.tasks.total : 54, 'Bel-acties te doen', 'Follow-up-taken', 'amber', 'wanbetalers', !!(_live.tasks && typeof _live.tasks.total === 'number')],
                 [openFacturen != null ? openFacturen : 210, 'Openstaande facturen','Wanbetalers',          'amber', 'finance',     openFacturen != null],
               ];
               return items
