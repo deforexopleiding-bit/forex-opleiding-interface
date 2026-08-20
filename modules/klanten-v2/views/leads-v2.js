@@ -292,8 +292,15 @@
   }
   function _wrFootHtml(email, isValid) {
     const disabled = _wr.submitting || !isValid;
+    // Ronde 3-polish: expliciete disabled-styling zodat 'uit'-zijn ook
+    // visueel klopt (browser-default op btn-primary is soms alleen een
+    // subtiel greyed-out label — user zag geen verschil). Geen hover-
+    // effect meer bij disabled.
+    const primaryStyle = disabled
+      ? 'opacity:.5;cursor:not-allowed;pointer-events:none'
+      : '';
     return `<button class="btn" onclick="__leadWelkomResendClose()" ${_wr.submitting ? 'disabled' : ''}>Annuleren</button>
-      <button class="btn btn-primary" onclick="__leadWelkomResendConfirm()" ${disabled ? 'disabled' : ''}>
+      <button class="btn btn-primary" onclick="__leadWelkomResendConfirm()" ${disabled ? 'disabled' : ''}${primaryStyle ? ' style="' + primaryStyle + '"' : ''}>
         ${_wr.submitting ? svg(I.clock || I.settings) + 'Versturen…' : svg(I.mail || I.check) + 'Verstuur naar ' + esc(email || '—')}
       </button>`;
   }
