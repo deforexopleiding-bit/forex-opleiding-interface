@@ -27,9 +27,9 @@
   // _cre.form.productSlugs = array voor multi-select (mini-cursus + 7-daagse
   // combineerbaar; endpoint accepteert producten: [{slug,van,tot}] array).
   // Ronde 7b: dropdown-filterbalk (v1 parity) — 6 filters + traject-list lazy.
-  const _act = { loading: false, error: null, data: null, stats: null, seq: 0, params: '', search: '', sortBy: 'aangemaakt', sortDir: 'desc' };
+  const _act = { loading: false, error: null, data: null, stats: null, seq: 0, params: '', search: '', sortBy: 'aangemaakt', sortDir: 'desc', page: 1, pageSize: 50 };
   const _traj = { loading: false, list: null };
-  const _arc = { loading: false, error: null, data: null, seq: 0, params: '', search: '' };
+  const _arc = { loading: false, error: null, data: null, seq: 0, params: '', search: '', page: 1, pageSize: 50 };
   const _det = { loading: false, error: null, data: null, seq: 0, id: null, saving: false, notitieDraft: '' };
   const _cre = {
     submitting: false,
@@ -405,6 +405,22 @@
     else { _act.sortBy = by; _act.sortDir = by === 'aangemaakt' ? 'desc' : 'desc'; }
     window.DFO.render();
   };
+  // Ronde 6 — paginering (voorheen limit=50&offset=0 hardcoded → 102/152
+  // leads onbereikbaar). Pager-buttons vuren __leadActPage/__leadArcPage.
+  window.__leadActPage = (p) => {
+    const pageCount = Math.max(1, Math.ceil((_act.data?.total || 0) / (_act.pageSize || 50)));
+    const target = Math.min(Math.max(1, Number(p) || 1), pageCount);
+    if (target === _act.page) return;
+    _act.page = target; _act.data = null;
+    fetchActief();
+  };
+  window.__leadArcPage = (p) => {
+    const pageCount = Math.max(1, Math.ceil((_arc.data?.total || 0) / (_arc.pageSize || 50)));
+    const target = Math.min(Math.max(1, Number(p) || 1), pageCount);
+    if (target === _arc.page) return;
+    _arc.page = target; _arc.data = null;
+    fetchArchief();
+  };
   function actiefParams() {
     // Ronde 7b: 6 dropdown-filters (v1-parity). Elke filter default '' = geen.
     const soort   = F('lead-soort', '');
@@ -423,8 +439,8 @@
     if (afspr)   p.set('afspraak', afspr);
     if (q)       p.set('q', q);
     p.set('archief', '0');
-    p.set('limit', '50');
-    p.set('offset', '0');
+    p.set('limit', String(_act.pageSize || 50));
+    p.set('offset', String(((_act.page || 1) - 1) * (_act.pageSize || 50)));
     return p.toString();
   }
   // Traject-list lazy-fetch (vult Traject-dropdown; 1x per module-load).
@@ -523,7 +539,7 @@
         { c: 'teal',    icon: I.users,  label: 'Nieuw vandaag',        val: num(s.vandaag),          hi: 1 },
         { c: 'blue',    icon: I.mail,   label: 'Nieuw totaal',         val: num(s.nieuw),                   sub: 'status = nieuw' },
         { c: 'emerald', icon: I.check,  label: 'Gekwalificeerd (week)',val: num(s.week_gekwalificeerd),     sub: 'deze week' },
-        { c: 'violet',  icon: I.trend,  label: 'Gem. score (page)',    val: avgScore != null ? String(avgScore) : '—', sub: 'op zichtbare 50' },
+        { c: 'violet',  icon: I.trend,  label: 'Gem. score (deze pagina)', val: avgScore != null ? String(avgScore) : '—', sub: `op zichtbare ${(_act.data?.items || []).length}` },
       ])}
       ${H.toolbar([
         // Ronde 7b — 6 dropdown-filters (v1 parity uit modules/leads.html:163-195).
@@ -579,7 +595,25 @@
           <button class="btn btn-primary" onclick="__leadNew()">${svg(I.plus)}Nieuwe lead</button>
         </div>`,
       ])}
-      <div class="sv-total">${_act.loading ? 'Laden…' : (total != null ? `${total} lead${total === 1 ? '' : 's'}` : '—')}</div>
+      <div class="sv-total" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <span>${_act.loading ? 'Laden…' : (() => {
+          if (total == null) return '—';
+          const first = ((_act.page || 1) - 1) * (_act.pageSize || 50) + 1;
+          const last  = Math.min(total, first + (items.length ? items.length - 1 : 0));
+          return items.length
+            ? `${first}–${last} van ${total} lead${total === 1 ? '' : 's'}`
+            : `0 van ${total} lead${total === 1 ? '' : 's'}`;
+        })()}</span>
+        ${(total != null && total > (_act.pageSize || 50)) ? (() => {
+          const pageCount = Math.max(1, Math.ceil(total / (_act.pageSize || 50)));
+          const curPage = _act.page || 1;
+          return `<span style="display:inline-flex;gap:6px;align-items:center">
+            <button class="btn btn-sm" ${curPage <= 1 ? 'disabled' : ''} onclick="__leadActPage(${curPage - 1})">‹ Vorige</button>
+            <span style="font-size:12.5px;color:var(--text-3)">${curPage} / ${pageCount}</span>
+            <button class="btn btn-sm" ${curPage >= pageCount ? 'disabled' : ''} onclick="__leadActPage(${curPage + 1})">Volgende ›</button>
+          </span>`;
+        })() : ''}
+      </div>
       ${_act.error ? `<div class="sv-empty" style="border:1px solid var(--warn-line, var(--rose-line, var(--line)));background:var(--warn-soft, var(--rose-soft, var(--surface-2)));color:var(--warn, var(--rose));display:flex;align-items:center;gap:12px;padding:14px 18px;margin:12px 20px;border-radius:8px">
         ${svg(I.alert || I.warn, 'width:20px;height:20px;flex-shrink:0')}
         <span style="flex:1"><b>Kon leads niet laden:</b> ${esc(_act.error)}</span>
@@ -706,7 +740,23 @@
     </div>`;
   }
 
+  // Nav-fix (Ronde 6): tab-wissel tussen Actief ↔ Gearchiveerd moet de
+  // detail-URL stripen zodat het geopende lead-detail niet blijft hangen.
+  let _lastLeadFn = null;
+  function _navResetIfSwitched(fn) {
+    if (_lastLeadFn && _lastLeadFn !== fn && urlParam('lead')) {
+      try {
+        const u = new URL(location.href);
+        u.searchParams.delete('lead');
+        window.history.replaceState({}, '', u);
+      } catch (_) {}
+      _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = '';
+    }
+    _lastLeadFn = fn;
+  }
+
   function actiefView() {
+    _navResetIfSwitched(actiefView);
     if (urlParam('lead')) return detailView();
     if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
     if (!_act.loading && !_act.error && (!_act.data || _act.params !== actiefParams())) queueMicrotask(fetchActief);
@@ -721,8 +771,8 @@
     const p = new URLSearchParams();
     if (q) p.set('q', q);
     p.set('archief', '1');
-    p.set('limit', '50');
-    p.set('offset', '0');
+    p.set('limit', String(_arc.pageSize || 50));
+    p.set('offset', String(((_arc.page || 1) - 1) * (_arc.pageSize || 50)));
     return p.toString();
   }
 
@@ -747,7 +797,25 @@
     if (H.getSearchValue('leads-arc') !== (_arc.search || '')) H.setSearchValue('leads-arc', _arc.search || '');
     return `${previewHeader('Gearchiveerd (soft-delete via verwijderd_op)', _arc)}
       ${H.toolbar([H.stableSearch('leads-arc', 'Zoek naam / e-mail / telefoon…')])}
-      <div class="sv-total">${_arc.loading ? 'Laden…' : (total != null ? `${total} gearchiveerd${total === 1 ? '' : 'e leads'}` : '—')}</div>
+      <div class="sv-total" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <span>${_arc.loading ? 'Laden…' : (() => {
+          if (total == null) return '—';
+          const first = ((_arc.page || 1) - 1) * (_arc.pageSize || 50) + 1;
+          const last  = Math.min(total, first + (items.length ? items.length - 1 : 0));
+          return items.length
+            ? `${first}–${last} van ${total} gearchiveerd${total === 1 ? '' : 'e leads'}`
+            : `0 van ${total} gearchiveerd${total === 1 ? '' : 'e leads'}`;
+        })()}</span>
+        ${(total != null && total > (_arc.pageSize || 50)) ? (() => {
+          const pageCount = Math.max(1, Math.ceil(total / (_arc.pageSize || 50)));
+          const curPage = _arc.page || 1;
+          return `<span style="display:inline-flex;gap:6px;align-items:center">
+            <button class="btn btn-sm" ${curPage <= 1 ? 'disabled' : ''} onclick="__leadArcPage(${curPage - 1})">‹ Vorige</button>
+            <span style="font-size:12.5px;color:var(--text-3)">${curPage} / ${pageCount}</span>
+            <button class="btn btn-sm" ${curPage >= pageCount ? 'disabled' : ''} onclick="__leadArcPage(${curPage + 1})">Volgende ›</button>
+          </span>`;
+        })() : ''}
+      </div>
       ${H.table(
         [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
         items.map(l => {
@@ -766,6 +834,7 @@
   }
 
   function archiefView() {
+    _navResetIfSwitched(archiefView);
     if (urlParam('lead')) return detailView();
     if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; _det.notitieDraft = ''; }
     if (!_arc.loading && !_arc.error && (!_arc.data || _arc.params !== archiefParams())) queueMicrotask(fetchArchief);
@@ -1020,7 +1089,6 @@
             <div class="sv-card-body">
               ${eigenaar ? `<div class="sv-row"><span>Naam</span><b>${esc(eigenaar.naam) || '—'}</b></div>
                 <div class="sv-row"><span>E-mail</span><b class="mono" style="font-size:11.5px">${esc(eigenaar.email) || '—'}</b></div>` : `<div style="font-size:12.5px;color:var(--text-3)">${_det.loading ? 'Laden…' : 'Nog geen eigenaar toegewezen.'}</div>`}
-              <div style="margin-top:8px;font-size:11.5px;color:var(--text-3)">Eigenaar-wijziging via /modules/leads-detail.html (v2-picker komt in ronde 3)</div>
             </div>
           </div>
 
@@ -1046,10 +1114,6 @@
                   : (l.status === 'gewonnen' ? `<div style="font-size:11.5px;color:var(--text-3)">Al omgezet naar klant.</div>` : '')
                 }
                 <button class="btn btn-sm" onclick="__leadEditOpen('${esc(l.id || '')}')" style="margin-top:6px">${svg(I.settings, 'width:14px;height:14px')}Uitgebreid bewerken…</button>
-                <div style="font-size:11px;color:var(--text-3);line-height:1.45">
-                  Opent v2-bewerk-modal met naam / e-mail / telefoon / herkomst / toegang-beheer.
-                  Endpoint <code>/api/lead-bijwerken</code> (incl. e-mail→auth-sync).
-                </div>
               </div>
             </div>
           </div>
