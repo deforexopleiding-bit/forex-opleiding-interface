@@ -202,6 +202,9 @@
     st.loading[id] = false;
     if (j && j.__error) st.error[id] = j.__error; else st.data[id] = asArr(j?.attendees || j?.items);
     if (window.DFO?.render) window.DFO.render();
+    // Fix ronde-13: als de deelnemer-modal open is (open vanuit
+    // Inschrijvingen wacht op deze fetch), re-portal na render.
+    if (typeof _ensureAttPortalIfOpen === 'function') _ensureAttPortalIfOpen();
   }
   async function fetchCompletedOne(id) {
     const st = _live.completedOne; if (st.loading[id] || st.data[id]) return;
@@ -298,18 +301,20 @@
     if (j && j.__error) st.error[attId] = j.__error;
     else st.data[attId] = j || { items: [] };
     if (window.DFO?.render) window.DFO.render();
+    _ensureAttPortalIfOpen();
   }
   async function fetchAttConv(attId, customerId) {
     // Resolve attendee → conversation via /api/inbox-conversation-by-customer.
     // Werkt alleen als attendee.customer_id gezet is; anders return null.
     const st = _live.attConv; if (st.loading[attId] || attId in st.data) return;
-    if (!customerId) { st.data[attId] = null; if (window.DFO?.render) window.DFO.render(); return; }
+    if (!customerId) { st.data[attId] = null; if (window.DFO?.render) window.DFO.render(); _ensureAttPortalIfOpen(); return; }
     st.loading[attId] = true; st.error[attId] = null;
     const j = await tryFetch('attConv:' + attId, '/api/inbox-conversation-by-customer?customer_id=' + encodeURIComponent(customerId));
     st.loading[attId] = false;
     if (j && j.__error) st.error[attId] = j.__error;
     else st.data[attId] = j?.found ? j.conversation_id : null;
     if (window.DFO?.render) window.DFO.render();
+    _ensureAttPortalIfOpen();
   }
   // Punt 3 — Comms-historie per attendee (WhatsApp/email — verzonden + gepland)
   async function fetchAttComms(attId) {
@@ -320,6 +325,7 @@
     if (j && j.__error) st.error[attId] = j.__error;
     else st.data[attId] = { items: asArr(j?.items), note: j?.note || null };
     if (window.DFO?.render) window.DFO.render();
+    _ensureAttPortalIfOpen();
   }
 
   // Punt 4 — Unified thread (WhatsApp + e-mail door elkaar).
@@ -1510,20 +1516,25 @@
   // document.body zodat position:fixed viewport-relatief blijft (fix voor
   // "modal opent niet" bij containing-block/transform op ancestor van #content).
   function _evEnsurePortal(portalId) {
-    if (typeof requestAnimationFrame === 'undefined') return;
-    requestAnimationFrame(() => {
-      // BUG-FIX dubbel-portal: bij elke re-render zet _attDetailModal() opnieuw
-      // een portal-anchor in #content. Als we NIET alle bestaande body-versies
-      // eerst weghalen, blijft de oude in body staan + we voegen de nieuwe toe
-      // -> 2 nodes met dezelfde data-portal-id (één ge-portaled, één stale).
-      // De oude achtergrond vangt dan de sluit-klik zodat de eerste klik faalt.
-      // Fix: ALTIJD eerst body-orphans wegwerken, dan pas de #content-node
-      // (die is de single source of truth voor deze render-cyclus) verplaatsen.
+    // Fix ronde-13 (2026-08-20): rAF verwijderd + SYNCHROON verplaats.
+    // Oude gedrag: rAF-wrapper vertraagde de portal-move één frame; als
+    // ondertussen een fetch resolvet + render triggert, zit er even
+    // DUBBELE modal: node A in body (van vorige rAF) én node B in #content
+    // (nog niet verplaatst). Fix: (a) sync-move, (b) elke render triggert
+    // _ensureAttPortalIfOpen() zodat re-renders na fetch de node opnieuw
+    // uit #content naar body verplaatsen — geen dubbelling meer.
+    try {
       document.body.querySelectorAll('body > [data-portal-id="' + portalId + '"]').forEach((n) => n.remove());
       const el = document.querySelector('#content [data-portal-id="' + portalId + '"]');
       if (!el) return;
       document.body.appendChild(el);
-    });
+    } catch (_) { /* geen DOM */ }
+  }
+  // Helper: als de deelnemer-modal open is, zorg dat na een re-render de
+  // portal opnieuw uit #content naar body verplaatst wordt. Aan te roepen
+  // in elke fetch-completion die DFO.render() triggert.
+  function _ensureAttPortalIfOpen() {
+    if (_ui && _ui.attDetail) _evEnsurePortal('ev-modal');
   }
   function _evRemovePortal(portalId) {
     // SYNCHROON verwijderen — was via rAF, waardoor de backdrop nog ~16ms bleef
