@@ -146,7 +146,10 @@ export function taxRateIdFor(vatPercentage, departmentId, saleType) {
 // detecteren die fout ONgeacht welk TL-endpoint hem gooit (deals.create,
 // quotations.create) zodat we de gecachte tl_contact_id/tl_company_id
 // kunnen wissen + re-resolven.
-function _isTlCustomerNotFound(err) {
+// BROK A (2026-08-19): geëxporteerd zodat invoice-create-core hetzelfde
+// self-heal patroon kan hergebruiken (i.p.v. duplicaten). Signatuur
+// ongewijzigd — 2e arg `deal` is optioneel voor callers zonder deal.
+export function _isTlCustomerNotFound(err) {
   const msg = String(err?.message || '');
   // Match "Customer <uuid> not found" of "Customer with id X not found".
   return /customer[^"]{0,80}not\s+found/i.test(msg);
@@ -154,7 +157,7 @@ function _isTlCustomerNotFound(err) {
 // Wis de gecachte TL-id op de klant + optionele stale tl_deal_id op de
 // deal. Muteert ook het in-memory customer/deal-object zodat de caller
 // direct met verse state werkt.
-async function _healStaleTlCache(customer, deal) {
+export async function _healStaleTlCache(customer, deal) {
   const wipeField = customer.is_company ? 'tl_company_id' : 'tl_contact_id';
   try {
     await supabaseAdmin.from('customers').update({ [wipeField]: null }).eq('id', customer.id);

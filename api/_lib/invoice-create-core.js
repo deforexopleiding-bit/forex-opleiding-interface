@@ -35,7 +35,15 @@
 
 import { tlFetch } from './teamleader-token.js';
 import { getOrCreateTlCustomer } from './teamleader-contact.js';
-import { taxRateIdFor } from './teamleader-quotation.js';
+import {
+  taxRateIdFor,
+  // BROK A (2026-08-19): self-heal helpers hergebruiken uit offerte-flow.
+  // TL geeft bij een verwezen-maar-verwijderde/gemergde customer een 400
+  // met body "Customer <id> not found" — de offerte-flow wist dan de
+  // gecachte tl_contact_id / tl_company_id, en re-resolvet in de retry.
+  _isTlCustomerNotFound,
+  _healStaleTlCache,
+} from './teamleader-quotation.js';
 import { upsertInvoiceFromTl } from './invoice-upsert.js';
 
 const r2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
@@ -50,6 +58,10 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
   const language = opts.language || 'nl';
 
   // 1. TL customer-referentie (idempotent).
+  // BROK A: self-heal ingebed in stap 1 + stap 3 samen — als de draft-call
+  // faalt met "customer not found", wissen we de stale tl_contact_id /
+  // tl_company_id en re-resolven exact ÉÉN keer. Zie retry-loop rond de
+  // draft-call verder in deze function.
   let customerRef;
   try { customerRef = await getOrCreateTlCustomer(customer); }
   catch (e) {
@@ -88,29 +100,75 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
     return li;
   });
 
-  // 3. Draft.
-  const draftBody = {
-    invoicee:      { customer: customerRef },
-    department_id: String(departmentId),
-    grouped_lines: [{ line_items: lineItems }],
+  // 3. Draft — met self-heal-retry (BROK A). Max 1 heal (geen loop) om
+  // te voorkomen dat we blijven hangen op een structureel-verwijderde klant.
+  // Bij success: gewoon door. Bij "customer not found": wis stale
+  // tl_contact_id / tl_company_id, re-resolve customerRef, retry ÉÉN keer.
+  // Elk ander soort fout (adres/tax_rate/etc) blijft direct throwen zoals
+  // voorheen — geen retry op onbekende oorzaken.
+  const buildDraftBody = (ref) => {
+    const body = {
+      invoicee:      { customer: ref },
+      department_id: String(departmentId),
+      grouped_lines: [{ line_items: lineItems }],
+    };
+    if (opts.purchase_order_number) body.purchase_order_number = String(opts.purchase_order_number);
+    if (opts.payment_term_id)       body.payment_term_id       = String(opts.payment_term_id);
+    if (language)                   body.language              = String(language);
+    return body;
   };
-  if (opts.purchase_order_number) draftBody.purchase_order_number = String(opts.purchase_order_number);
-  if (opts.payment_term_id)       draftBody.payment_term_id       = String(opts.payment_term_id);
-  if (language)                   draftBody.language              = String(language);
 
-  let dr, dText = '';
-  try { dr = await tlFetch('/invoices.draft', { method: 'POST', body: JSON.stringify(draftBody) }); dText = await dr.text().catch(() => ''); }
-  catch (netErr) {
-    const err = new Error('Kon Teamleader niet bereiken: ' + netErr.message);
-    err.stage = 'draft_network';
-    throw err;
-  }
-  if (!dr.ok) {
-    console.error('[invoice-core] draft GEWEIGERD | HTTP', dr.status, '| payload=', JSON.stringify(draftBody), '| response=', dText);
-    const err = new Error(`Teamleader weigerde de concept-factuur (HTTP ${dr.status}).`);
+  let dr, dText = '', draftBody = buildDraftBody(customerRef);
+  let healedOnce = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { dr = await tlFetch('/invoices.draft', { method: 'POST', body: JSON.stringify(draftBody) }); dText = await dr.text().catch(() => ''); }
+    catch (netErr) {
+      const err = new Error('Kon Teamleader niet bereiken: ' + netErr.message);
+      err.stage = 'draft_network';
+      throw err;
+    }
+    if (dr.ok) break;
+
+    // Not-ok: check of het "customer not found" is → self-heal + 1 retry.
+    // TL geeft dat als HTTP 400 met body die matcht /customer.*not found/i.
+    const notFound = _isTlCustomerNotFound({ message: dText });
+    if (notFound && !healedOnce) {
+      console.warn('[invoice-core] TL customer-not-found bij draft — self-heal + retry', {
+        customer_id:            customer.id,
+        is_company:             !!customer.is_company,
+        stale_tl_contact_id:    customer.tl_contact_id || null,
+        stale_tl_company_id:    customer.tl_company_id || null,
+        tl_response_snippet:    String(dText).slice(0, 200),
+      });
+      try {
+        await _healStaleTlCache(customer);
+      } catch (healErr) {
+        console.warn('[invoice-core] _healStaleTlCache faalde (fail-soft):', healErr?.message);
+      }
+      let newRef;
+      try { newRef = await getOrCreateTlCustomer(customer); }
+      catch (relinkErr) {
+        const err = new Error('TeamLeader-klant kon niet worden hersteld — controleer de klantkoppeling.');
+        err.stage       = 'customer_link_heal';
+        err.tl_response = String(relinkErr?.message || '').slice(0, 200);
+        throw err;
+      }
+      customerRef = newRef;
+      draftBody = buildDraftBody(customerRef);
+      healedOnce = true;
+      continue;
+    }
+
+    // Andere fout OF al gehealed en nog steeds fail → fail-loud.
+    console.error('[invoice-core] draft GEWEIGERD | HTTP', dr.status, '| payload=', JSON.stringify(draftBody), '| response=', dText, '| healed:', healedOnce);
+    const isNotFoundAfterHeal = notFound && healedOnce;
+    const err = new Error(isNotFoundAfterHeal
+      ? 'TeamLeader-klant kon niet worden hersteld — controleer de klantkoppeling.'
+      : `Teamleader weigerde de concept-factuur (HTTP ${dr.status}).`);
     err.stage       = 'draft';
     err.tl_status   = dr.status;
     err.tl_response = dText;
+    err.healed      = healedOnce;
     throw err;
   }
   let tlInvoiceId = null;
@@ -120,6 +178,12 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
     err.stage       = 'draft_no_id';
     err.tl_response = dText;
     throw err;
+  }
+  if (healedOnce) {
+    console.log('[invoice-core] self-heal SUCCES — factuur aangemaakt na re-link', {
+      customer_id: customer.id,
+      tl_invoice_id: tlInvoiceId,
+    });
   }
 
   let booked = false, sent = false, bookErr = null, sendErr = null;
