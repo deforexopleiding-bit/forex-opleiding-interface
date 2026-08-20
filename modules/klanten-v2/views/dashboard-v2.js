@@ -144,6 +144,7 @@
     retention:null,  // /api/sales-retention (items[].length)
     mrr:      null,  // /api/sales-mrr-report (by_traject[])
     tasks:    null,  // /api/tasks-list?status=PENDING (counts.byCategory + MANUAL_FOLLOWUP filter)
+    leadsPer: null,  // /api/leads-per-traject-count?period=X (total + by_traject)
   };
   // Sequence-nummer voorkomt race conditions als user snel klikt.
   let _fetchSeq = 0;
@@ -180,7 +181,7 @@
       // Parallel fetch — elk endpoint is fail-soft (null bij error).
       // Ronde-14: + sales-mrr-report (by_traject-live), tasks-list (bel-acties
       // via MANUAL_FOLLOWUP-pending count).
-      const [stats, finance, tickets, events, sales, retention, mrr, tasks] = await Promise.all([
+      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer] = await Promise.all([
         tryFetch('dashboard-stats',       '/api/dashboard-stats?period=' + paramPeriod),
         tryFetch('finance-counts',        '/api/finance-dashboard-counts?period=' + paramPeriod),
         tryFetch('tickets',               '/api/tickets'),
@@ -189,6 +190,7 @@
         tryFetch('sales-retention',       '/api/sales-retention'),
         tryFetch('sales-mrr-report',      '/api/sales-mrr-report'),
         tryFetch('tasks-followup',        '/api/tasks-list?action_type=MANUAL_FOLLOWUP&status=PENDING&limit=1'),
+        tryFetch('leads-per-traject',     '/api/leads-per-traject-count?period=' + paramPeriod),
       ]);
       if (seq !== _fetchSeq) {
         console.debug('[dashboard-v2] discard stale seq=' + seq + ' (current=' + _fetchSeq + ')');
@@ -203,6 +205,7 @@
       _live.retention = retention;
       _live.mrr       = mrr;
       _live.tasks     = tasks;
+      _live.leadsPer  = leadsPer;
       _live.error     = stats ? null : 'dashboard-stats faalde';
       console.debug('[dashboard-v2] bundle done seq=' + seq, {
         leads:      stats?.kpis_groot?.nieuwe_leads?.value,
@@ -321,22 +324,48 @@
           <div class="card-body" style="padding:10px 17px 14px">
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
               ${(() => {
-                // Live: nieuwe_leads.value uit dashboard-stats (totaal deze periode).
-                // Per-traject-breakdown vereist eigen endpoint (leads?groupBy=traject).
-                // Voor nu: eerste tile toont TOTAAL van nieuwe leads (live), rest = mock.
-                const totLeads = d && d.kpis_groot && d.kpis_groot.nieuwe_leads && d.kpis_groot.nieuwe_leads.value;
-                const tiles = [
-                  ['Alle bronnen', totLeads != null ? totLeads : 21, 100, 'emerald', 'leads', true],
-                  ['Event-aanmeldingen', 12, 36, 'teal', 'events', false],
-                  ['Webinar', 0, 0, 'blue', 'leads', false],
-                  ['Mini cursus', 0, 0, 'violet', 'leads', false],
-                ];
-                return tiles.map(([n, c, p, col, mod, isLive]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
+                // Ronde-15: LIVE uit /api/leads-per-traject-count?period=X.
+                //   total          → 'Alle bronnen'-tegel
+                //   by_traject[k]  → per-label-tegel (fuzzy substring-match)
+                // Als de endpoint faalt (_live.leadsPer=null): TOTAAL valt terug
+                // op dashboard-stats.kpis_groot.nieuwe_leads.value (was er al);
+                // per-traject-tegels verbergen we (geen mock-cijfer).
+                // Als endpoint OK maar een label heeft geen matching traject-key:
+                // tegel verbergen (data bestaat niet voor dat label).
+                const lp = _live.leadsPer;
+                const totLive = lp && typeof lp.total === 'number' ? lp.total : null;
+                const totFallback = d && d.kpis_groot && d.kpis_groot.nieuwe_leads && d.kpis_groot.nieuwe_leads.value;
+                const totLeads = totLive != null ? totLive : totFallback;
+                // Fuzzy match: substring van label of traject-slug in DB-key.
+                function findCount(matchers) {
+                  if (!lp || !lp.by_traject) return null;
+                  const keys = Object.keys(lp.by_traject);
+                  let sum = 0; let hit = false;
+                  for (const k of keys) {
+                    const lk = String(k).toLowerCase();
+                    if (matchers.some(m => lk.includes(m))) { sum += lp.by_traject[k] || 0; hit = true; }
+                  }
+                  return hit ? sum : null;
+                }
+                const evCnt   = findCount(['event']);       // 'event', 'events', '7-daagse-event' etc.
+                const webCnt  = findCount(['webinar']);
+                const miniCnt = findCount(['mini']);         // 'mini-cursus', 'minicursus'
+                const isLive  = !!lp;
+                const tiles = [];
+                // Alle bronnen: altijd tonen (live of fallback).
+                tiles.push(['Alle bronnen', totLeads != null ? totLeads : 0, 100, 'emerald', 'leads', totLive != null || totFallback != null]);
+                // Per-traject: alleen tonen als endpoint OK én label-match bestaat.
+                if (isLive && evCnt   != null) tiles.push(['Event-aanmeldingen', evCnt,   totLeads ? Math.round(evCnt/totLeads*100)   : 0, 'teal',   'events', true]);
+                if (isLive && webCnt  != null) tiles.push(['Webinar',            webCnt,  totLeads ? Math.round(webCnt/totLeads*100)  : 0, 'blue',   'leads',  true]);
+                if (isLive && miniCnt != null) tiles.push(['Mini cursus',        miniCnt, totLeads ? Math.round(miniCnt/totLeads*100) : 0, 'violet', 'leads',  true]);
+                // Padding tot 4 kolommen: als er minder dan 4 tegels, geen mock-fillers.
+                // Grid met minder items schaalt (leeg-cellen worden ingenomen door grid-flow).
+                return tiles.map(([n, c, p, col, mod, tileLive]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
                   onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
-                  <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}${isLive && d ? '' : mockBadge()}</div>
+                  <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}${tileLive ? '' : mockBadge()}</div>
                   <div style="font-size:26px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${c}</div>
                   <div class="progress" style="margin-top:9px;height:3px"><i style="width:${p}%;background:var(--${col})"></i></div>
-                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${isLive && d ? 'live totaal' : `${p}% van totaal`}</div></div>`).join('');
+                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${tileLive ? (n === 'Alle bronnen' ? 'live totaal' : `${p}% van totaal`) : `${p}% van totaal`}</div></div>`).join('');
               })()}
             </div>
           </div>
