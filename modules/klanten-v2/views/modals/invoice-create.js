@@ -398,17 +398,11 @@ function renderOverlayBookSend() {
               `}
         </div>
 
-        <div class="kv-invcredit-typegate">
-          <label for="kv-invnew-typegate-inp">
-            Typ <span class="mono">${TYPE_GATE_TEXT}</span> om te bevestigen:
-          </label>
-          <input id="kv-invnew-typegate-inp" type="text" value="${esc(state.typedGateBookSend)}"
-                 data-kv-invnew-bs-typegate autocomplete="off" spellcheck="false"
-                 placeholder="${TYPE_GATE_TEXT}"
-                 ${state.saving ? 'disabled' : ''} />
-          ${state.typedGateBookSend && state.typedGateBookSend.trim().toUpperCase() !== TYPE_GATE_TEXT
-            ? '<div class="kv-edit-field-msg">Komt niet overeen</div>' : ''}
-        </div>
+        <!-- FIX-5 (2026-08-20): type-gate 'BOEK EN VERZEND' verwijderd.
+             De rode danger-banner + recap + mail-template-keuze zijn samen
+             al de confirm-context; één klik op 'Boeken en verzenden' in
+             de foot is de bevestiging. Geen extra native confirm() — dat
+             zou een tweede modal-laag introduceren. -->
       </div>
     </div>`;
 }
@@ -483,8 +477,9 @@ function renderFootOverlayBook() {
     </div>`;
 }
 function renderFootOverlayBookSend() {
-  const gateOk    = state.typedGateBookSend.trim().toUpperCase() === TYPE_GATE_TEXT;
-  const canSubmit = gateOk && state.selectedTemplateId && !state.saving && !state.unknownStatus;
+  // FIX-5 (2026-08-20): type-gate weggehaald → knop direct actief zodra
+  // een mail-template geselecteerd is en er geen saving/unknown-state loopt.
+  const canSubmit = state.selectedTemplateId && !state.saving && !state.unknownStatus;
   return `
     <div class="kv-edit-foot kv-invsend-foot-danger">
       <button type="button" class="ds-btn ds-btn-ghost" data-kv-invnew-overlay-back ${state.saving ? 'disabled' : ''}>← Terug naar concept</button>
@@ -604,7 +599,8 @@ async function doBook() {
 
 async function doBookAndSend() {
   if (state.saving || state.unknownStatus) return;
-  if (state.typedGateBookSend.trim().toUpperCase() !== TYPE_GATE_TEXT) return;
+  // FIX-5: type-gate-check verwijderd — knop is alleen actief als de
+  // canSubmit-guard groen is; klik = bevestiging.
   if (!state.selectedTemplateId) return;
 
   state.saving = true; state.globalError = null;
@@ -769,6 +765,8 @@ function wire() {
     if (state.saving) return;
     state.overlay = null;
     state.confirmBookChecked = false;
+    // FIX-5: typedGateBookSend obsoleet — laat 'em als lege string voor
+    // backward-compat mocht extern iets deze state lezen.
     state.typedGateBookSend = '';
     state.globalError = null;
     state.unknownStatus = false;
@@ -879,7 +877,6 @@ function wire() {
       if (act === 'book')  { state.overlay = 'book'; state.confirmBookChecked = false; rerender(); return; }
       if (act === 'bookSend') {
         state.overlay = 'bookSend';
-        state.typedGateBookSend = '';
         // Templates lazy laden bij eerste opening van deze overlay
         if (!state.templates.length && !state.templatesLoading && !state.templatesError) {
           loadTemplates();
@@ -902,45 +899,46 @@ function wire() {
     state.selectedTemplateId = e.target.value;
     rerenderBody();
   });
-  const typeInp = box.querySelector('[data-kv-invnew-bs-typegate]');
-  if (typeInp) {
-    bindOnce(typeInp, 'input', (e) => {
-      state.typedGateBookSend = e.target.value;
-      // BROK FINANCE-INVOICE-2 (v=4): surgical DOM-updates i.p.v.
-      // rerenderBody/rerenderFoot bij elke keystroke. Voorheen: match-flip
-      // triggerde volledige body-rerender → input-node vervangen → focus
-      // weg midden in het typen. Nu: alleen (a) fout-hint toggle in de
-      // typegate-container en (b) submit-knop disabled-flag. Zelfde
-      // patroon als inbox-zoek + case-sheet callback-err fix.
-      const val = state.typedGateBookSend.trim().toUpperCase();
-      const isMatch = val === TYPE_GATE_TEXT;
-      const gate = box.querySelector('.kv-invcredit-typegate');
-      if (gate) {
-        const hint = gate.querySelector('.kv-edit-field-msg');
-        const shouldShow = state.typedGateBookSend && !isMatch;
-        if (shouldShow && !hint) {
-          const div = document.createElement('div');
-          div.className = 'kv-edit-field-msg';
-          div.textContent = 'Komt niet overeen';
-          gate.appendChild(div);
-        } else if (!shouldShow && hint) {
-          hint.remove();
-        }
-      }
-      // Submit-knop enable/disable + label — surgical, geen render.
-      const submitBtn = box.querySelector('[data-kv-invnew-bs-submit]');
-      if (submitBtn) {
-        const canSubmit = isMatch && state.selectedTemplateId && !state.saving && !state.unknownStatus;
-        submitBtn.disabled = !canSubmit;
-        submitBtn.style.opacity = canSubmit ? '' : '.55';
-        submitBtn.style.cursor  = canSubmit ? 'pointer' : 'not-allowed';
-      }
-    });
-    bindOnce(typeInp, 'keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); typeInp.blur(); }
-    });
-  }
-  bindOnce(box.querySelector('[data-kv-invnew-bs-submit]'), 'click', doBookAndSend);
+  // FIX-5 (2026-08-20): typegate-input verwijderd → geen typInp-binding meer.
+  // Voorheen was er surgical DOM-update-code hier voor match-hint + submit-
+  // knop enable/disable. Beide overbodig: submit-knop is nu gewoon actief
+  // zodra er een mail-template is geselecteerd (zie renderFootOverlayBookSend).
+
+  // FIX-5 (2026-08-20): submit-klik → custom confirm-modal (geen native
+  // confirm; z-index boven DFO-modal). OK → doBookAndSend, Annuleren → dismiss.
+  // Vervangt de eerdere 'Typ BOEK EN VERZEND'-type-gate: één klik-guard i.p.v.
+  // typewerk, maar wel een expliciete bevestiging — het is een onomkeerbare
+  // mail naar de klant.
+  bindOnce(box.querySelector('[data-kv-invnew-bs-submit]'), 'click', () => {
+    askBookSendConfirm().then((ok) => { if (ok) doBookAndSend(); });
+  });
+}
+
+function askBookSendConfirm() {
+  return new Promise((resolve) => {
+    const scrim = document.createElement('div');
+    scrim.setAttribute('data-kv-bs-confirm', '');
+    scrim.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    scrim.innerHTML = `
+      <div role="dialog" aria-modal="true" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:20px 22px">
+        <div style="font-size:15.5px;font-weight:600;margin-bottom:8px;color:var(--text-1)">Dit boekt én mailt de factuur — doorgaan?</div>
+        <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:18px">Zodra je klikt: de factuur wordt geboekt in TeamLeader én een mail met factuur-PDF wordt verstuurd naar de klant. Beide acties zijn onomkeerbaar (mail is alleen tegen te gaan door creditnota + rectificatie).</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" class="ds-btn ds-btn-ghost" data-kv-bs-cancel>Annuleren</button>
+          <button type="button" class="ds-btn ds-btn-danger" data-kv-bs-ok>Boeken en verzenden</button>
+        </div>
+      </div>`;
+    document.body.appendChild(scrim);
+    const cleanup = (v) => { scrim.remove(); resolve(v); };
+    scrim.addEventListener('click', (e) => { if (e.target === scrim) cleanup(false); });
+    scrim.querySelector('[data-kv-bs-cancel]').addEventListener('click', () => cleanup(false));
+    scrim.querySelector('[data-kv-bs-ok]').addEventListener('click', () => cleanup(true));
+    // Focus op OK-knop zodat Enter direct bevestigt (Esc annuleert via document-listener).
+    const onKey = (e) => {
+      if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); cleanup(false); }
+    };
+    document.addEventListener('keydown', onKey);
+  });
 }
 
 // ── Templates laden (lazy voor bookSend overlay) ───────────────────────────
