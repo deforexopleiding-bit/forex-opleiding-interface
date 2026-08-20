@@ -146,6 +146,7 @@
     tasks:    null,  // /api/tasks-list?status=PENDING (counts.byCategory + MANUAL_FOLLOWUP filter)
     leadsPer: null,  // /api/leads-per-traject-count?period=X (total + by_traject)
     signed:   null,  // /api/sales-signed-deals-total?period=X (total_incl_vat + count)
+    lsOpen:   null,  // /api/leadsonderhoud-open-count (open_count)
   };
   // Sequence-nummer voorkomt race conditions als user snel klikt.
   let _fetchSeq = 0;
@@ -182,7 +183,7 @@
       // Parallel fetch — elk endpoint is fail-soft (null bij error).
       // Ronde-14: + sales-mrr-report (by_traject-live), tasks-list (bel-acties
       // via MANUAL_FOLLOWUP-pending count).
-      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed] = await Promise.all([
+      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed, lsOpen] = await Promise.all([
         tryFetch('dashboard-stats',       '/api/dashboard-stats?period=' + paramPeriod),
         tryFetch('finance-counts',        '/api/finance-dashboard-counts?period=' + paramPeriod),
         tryFetch('tickets',               '/api/tickets'),
@@ -193,6 +194,7 @@
         tryFetch('tasks-followup',        '/api/tasks-list?action_type=MANUAL_FOLLOWUP&status=PENDING&limit=1'),
         tryFetch('leads-per-traject',     '/api/leads-per-traject-count?period=' + paramPeriod),
         tryFetch('signed-deals-total',    '/api/sales-signed-deals-total?period=' + paramPeriod),
+        tryFetch('ls-open-count',         '/api/leadsonderhoud-open-count'),
       ]);
       if (seq !== _fetchSeq) {
         console.debug('[dashboard-v2] discard stale seq=' + seq + ' (current=' + _fetchSeq + ')');
@@ -209,6 +211,7 @@
       _live.tasks     = tasks;
       _live.leadsPer  = leadsPer;
       _live.signed    = signed;
+      _live.lsOpen    = lsOpen;
       _live.error     = stats ? null : 'dashboard-stats faalde';
       console.debug('[dashboard-v2] bundle done seq=' + seq, {
         leads:      stats?.kpis_groot?.nieuwe_leads?.value,
@@ -548,9 +551,11 @@
                 ? (f.openVerifyPayment || 0) + (f.openEscalations || 0)
                 : null;
               const eventsCount = _live.events && Array.isArray(_live.events.items) ? _live.events.items.length : null;
+              // Ronde-15: Leadsonderhoud LIVE via /api/leadsonderhoud-open-count.
+              const lsOpenCnt = _live.lsOpen && typeof _live.lsOpen.open_count === 'number' ? _live.lsOpen.open_count : null;
               const tiles = [
                 ['Wanbetalers',    wbxCount != null ? wbxCount : 4,   'amber',  I.alert,  'wanbetalers',    wbxCount != null],
-                ['Leadsonderhoud', 0,                                 'teal',   I.repeat, 'leadsonderhoud', false],
+                ['Leadsonderhoud', lsOpenCnt != null ? lsOpenCnt : 0, 'teal',   I.repeat, 'leadsonderhoud', lsOpenCnt != null],
                 ['Onboarding',     0,                                 'emerald', I.route, 'onboarding',     false],
                 ['Lisa AI',        2,                                 'violet', I.bot,    'lisa',           false],
                 ['Events',         eventsCount != null ? eventsCount : 3, 'pink', I.cal,  'events',         eventsCount != null],
