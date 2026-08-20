@@ -263,7 +263,7 @@ function renderLinesTable() {
           <th class="r" style="width:80px">Aantal</th>
           <th class="r" style="width:110px">Prijs excl.</th>
           <th class="r" style="width:110px">Prijs incl.</th>
-          <th class="r" style="width:80px">BTW</th>
+          <th class="r" style="width:130px">BTW</th>
           <th class="r" style="width:110px">Regel excl.</th>
           <th class="r" style="width:44px"></th>
         </tr></thead>

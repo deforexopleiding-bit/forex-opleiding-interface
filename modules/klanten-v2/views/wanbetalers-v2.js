@@ -3609,7 +3609,7 @@
     const ctx = _live.inbox.ctx.byConv[_ui.inbox.selectedConv];
     const cust = ctx?.customer && ctx.customer.id === cid ? ctx.customer : { id: cid };
     try {
-      const mod = await import('./modals/invoice-create.js?v=8');
+      const mod = await import('./modals/invoice-create.js?v=9');
       mod.openInvoiceCreateModal({ customer: cust, onSuccess: () => _toast('Factuur aangemaakt.', 'success') });
     } catch (e) { _toast('Modal laden mislukt: ' + (e?.message || e), 'error'); }
   };
