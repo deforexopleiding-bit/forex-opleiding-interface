@@ -591,7 +591,7 @@
   window.__fnInvSend = async function () {
     const inv = _invOrToast(); if (!inv) return;
     try {
-      const mod = await import('./modals/invoice-send.js?v=2');
+      const mod = await import('./modals/invoice-send.js?v=3');
       mod.openInvoiceSendModal({ invoice: inv, onSuccess: _refreshInv });
     } catch (e) { console.error('[fnd] invoice-send import fail:', e); window.KV.toast('Kon verzend-modal niet laden'); }
   };

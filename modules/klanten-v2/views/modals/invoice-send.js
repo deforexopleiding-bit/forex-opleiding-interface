@@ -70,9 +70,23 @@ async function loadTemplates() {
     const j = await K().authedJson('/api/finance-mail-templates');
     const tpls = Array.isArray(j?.templates) ? j.templates : [];
     state.templates = tpls;
-    // Auto-select is_default (of eerste) zodat preview meteen zinvol is.
+    // BROK D1 (2026-08-19): auto-select nooit een herinnering/dunning-template.
+    // Voorheen: tpls.find(is_default) || tpls[0] → als de eerste template
+    // "3e herinnering" was, mailde verzenden een aanmaning i.p.v. de factuur.
+    // Fix (identiek aan invoice-create.js cascade): isReminder-blocklist.
     if (tpls.length && !state.form.mail_template_id) {
-      const def = tpls.find((t) => t.is_default) || tpls[0];
+      const isReminder = (t) => {
+        const s = ((t.name || '') + ' ' + (t.subject || '')).toLowerCase();
+        return /herinner|reminder|aanmaning|sommatie|ingebrek/.test(s);
+      };
+      const looksInvoice = (t) => {
+        const s = ((t.name || '') + ' ' + (t.subject || '')).toLowerCase();
+        return (s.includes('factuur') || s.includes('invoice')) && !isReminder(t);
+      };
+      const def = tpls.find(looksInvoice)
+               || tpls.find((t) => t.is_default && !isReminder(t))
+               || tpls.find((t) => !isReminder(t))
+               || tpls[0];
       state.form.mail_template_id = def.id;
     }
   } catch (e) {

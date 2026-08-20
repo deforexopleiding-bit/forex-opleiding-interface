@@ -169,7 +169,16 @@ function renderMetaGrid(inv) {
   const total   = Number(inv?.amount_total) || 0;
   const paid    = Number(inv?.amount_paid)  || 0;
   const cred    = Number(inv?.credited_amount) || 0;
-  const open    = Math.max(0, total - paid - cred);
+  // BROK D2/D3 (2026-08-19): gebruik de door de API berekende amount_open
+  // als bron van waarheid (finance-invoices.js:155 = max(0, total - paid)).
+  // Voorheen: eigen client-side (total - paid - cred) → verschilde met de
+  // lijst + betaal-modal (die WEL amount_open van de API gebruikte). Gaf
+  // "Open € 0,00" bij een factuur met credited_amount > 0 en een 1-cent-
+  // drift bij r2-rounding-mismatches. Fallback voor legacy-responses die
+  // amount_open missen: houd de oude berekening aan.
+  const open = (inv && typeof inv.amount_open === 'number')
+    ? Number(inv.amount_open)
+    : Math.max(0, total - paid - cred);
   return `
     <div class="kv-inv-meta-grid">
       <div class="kv-inv-meta-cell">
