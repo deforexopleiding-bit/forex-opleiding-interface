@@ -667,18 +667,27 @@
   // FEAT-2: toggle gelezen/ongelezen — hergebruikt bestaande
   // /api/leadsonderhoud-gesprek-mark-read endpoint. Surgical DOM-update
   // op de rij (geen render-trigger → geen scroll-sprong).
+  // Fix-ronde 3: gebruikt window.KV.authedFetch (dezelfde helper als de
+  // reply-verzending in deze module) i.p.v. het niet-bestaande tryPost.
+  // Alle native alerts vervangen door _lsInbToast.
   window.__lsInbToggleRead = async (convId, unread, leadIdAttr) => {
     if (!convId) return;
     try {
-      const j = await tryPost('ls-mark-read', '/api/leadsonderhoud-gesprek-mark-read', {
-        conversation_id: convId,
-        unread: !!unread,
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-gesprek-mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: convId,
+          unread: !!unread,
+        }),
       });
-      if (!j || j.error) throw new Error(j?.error || 'mark-read fail');
+      let j = null;
+      try { j = await resp.json(); } catch (_) { /* body-parse-fail */ }
+      if (!resp.ok) throw new Error((j && j.error) || ('HTTP ' + resp.status));
       // Sync lokale state.
       const idx = _lsInb.convs.items.findIndex((c) => String(c.conversation_id) === String(convId));
       if (idx >= 0) {
-        _lsInb.convs.items[idx] = { ..._lsInb.convs.items[idx], unread: j.unread_count || 0 };
+        _lsInb.convs.items[idx] = { ..._lsInb.convs.items[idx], unread: j?.unread_count || 0 };
       }
       // Surgical row-repaint: vervang de rij-DOM in-place zonder full render.
       const row = _lsInb.convs.items[idx];
@@ -689,9 +698,22 @@
         const el = wrap.firstElementChild;
         if (el) oldRow.replaceWith(el);
       }
+      // Ook de thread-header knop patchen als deze conv geopend is.
+      const openLead = String(_lsInb.thread?.leadId || '');
+      if (row && openLead === String(row.lead_id)) {
+        const right = document.querySelector('.ls-inb-right');
+        const split = document.querySelector('.ls-inb-split');
+        if (right && split) {
+          const wrap2 = document.createElement('div');
+          wrap2.innerHTML = _lsInbRenderRight(row);
+          const el2 = wrap2.firstElementChild;
+          if (el2) split.replaceChild(el2, right);
+        }
+      }
+      _lsInbToast(unread ? 'Gemarkeerd als ongelezen' : 'Gemarkeerd als gelezen', 'ok');
     } catch (e) {
       console.warn('[leadsonderhoud] mark-read toggle fail:', e?.message);
-      alert('Kon lees-status niet wijzigen: ' + (e?.message || 'onbekende fout'));
+      _lsInbToast('Kon lees-status niet wijzigen: ' + (e?.message || 'onbekende fout'), 'error');
     }
   };
 
@@ -1277,12 +1299,16 @@
     const convIdAttr = String(row.conversation_id || '').replace(/"/g, '&quot;');
     const canToggle = !!row.conversation_id;
     const toggleTitle = nw ? 'Markeer als gelezen' : 'Markeer als ongelezen';
-    const toggleIcon = nw ? '✓' : '●';
+    // Fix-ronde 3: tekst is nu een ACTIE-label (was statuslabel dat als
+    // knop las verkeerd op een gelezen rij: "● ongelezen" → leek de
+    // status, is de actie). Gelijk aan de knop in de thread-header:
+    // '✓ Markeer gelezen' / '● Markeer ongelezen'.
+    const toggleLabel = nw ? '✓ Markeer gelezen' : '● Markeer ongelezen';
     const toggleBtn = canToggle
       ? `<button class="ls-inb-read-toggle" data-conv-id="${convIdAttr}" data-target-unread="${nw ? '0' : '1'}"
           onclick="event.stopPropagation();__lsInbToggleRead('${convIdAttr}', ${nw ? 'false' : 'true'}, '${rowIdAttr}')"
           title="${toggleTitle}"
-          style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-3);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;flex-shrink:0">${toggleIcon} ${nw ? 'gelezen' : 'ongelezen'}</button>`
+          style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-3);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;flex-shrink:0">${toggleLabel}</button>`
       : '';
     const rowStyle = [
       'display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative',
