@@ -426,6 +426,12 @@
 }
 .kv-fac-actions { white-space: nowrap; }
 .kv-fac-actions .ds-icon-btn + .ds-icon-btn { margin-left: 2px; }
+/* FIX-7 (2026-08-20): kv-fac-actions td MOET zijn kinderen (icon-btns)
+   naast elkaar laten. Zonder deze regel wrapte de 2e btn onder de 1e
+   in de 90px-brede kolom → rijhoogte 71px. Icon-btns display:inline-flex
+   met nowrap; kolom-th al 120px in facturen.js. */
+.kv-fac-tbl .kv-fac-actions { display: table-cell; text-align: right; }
+.kv-fac-tbl .kv-fac-actions .ds-icon-btn { display: inline-flex; vertical-align: middle; }
 
 @media (max-width: 760px) {
   .kv-fac-tbl { border-left: 0; border-right: 0; border-radius: 0; margin: 0 -12px; }

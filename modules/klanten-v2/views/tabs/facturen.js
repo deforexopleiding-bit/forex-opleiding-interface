@@ -161,7 +161,7 @@ function renderTable() {
           <th style="width:130px">Vervaldatum</th>
           <th class="r" style="width:130px">Bedrag</th>
           <th style="width:130px">Status</th>
-          <th class="r" style="width:90px"></th>
+          <th class="r" style="width:120px"></th>
         </tr></thead>
         <tbody>${state.items.map(renderRow).join('')}</tbody>
       </table>
