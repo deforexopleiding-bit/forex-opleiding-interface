@@ -148,6 +148,7 @@
     signed:   null,  // /api/sales-signed-deals-total?period=X (total_incl_vat + count)
     lsOpen:   null,  // /api/leadsonderhoud-open-count (open_count)
     onbCounts:null,  // /api/onboarding-counts (active_count)
+    lisaCnt:  null,  // /api/lisa-conversations-count?status=active (count)
   };
   // Sequence-nummer voorkomt race conditions als user snel klikt.
   let _fetchSeq = 0;
@@ -184,7 +185,7 @@
       // Parallel fetch — elk endpoint is fail-soft (null bij error).
       // Ronde-14: + sales-mrr-report (by_traject-live), tasks-list (bel-acties
       // via MANUAL_FOLLOWUP-pending count).
-      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed, lsOpen, onbCounts] = await Promise.all([
+      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed, lsOpen, onbCounts, lisaCnt] = await Promise.all([
         tryFetch('dashboard-stats',       '/api/dashboard-stats?period=' + paramPeriod),
         tryFetch('finance-counts',        '/api/finance-dashboard-counts?period=' + paramPeriod),
         tryFetch('tickets',               '/api/tickets'),
@@ -197,6 +198,7 @@
         tryFetch('signed-deals-total',    '/api/sales-signed-deals-total?period=' + paramPeriod),
         tryFetch('ls-open-count',         '/api/leadsonderhoud-open-count'),
         tryFetch('onboarding-counts',     '/api/onboarding-counts'),
+        tryFetch('lisa-conv-count',       '/api/lisa-conversations-count?status=active'),
       ]);
       if (seq !== _fetchSeq) {
         console.debug('[dashboard-v2] discard stale seq=' + seq + ' (current=' + _fetchSeq + ')');
@@ -215,6 +217,7 @@
       _live.signed    = signed;
       _live.lsOpen    = lsOpen;
       _live.onbCounts = onbCounts;
+      _live.lisaCnt   = lisaCnt;
       _live.error     = stats ? null : 'dashboard-stats faalde';
       console.debug('[dashboard-v2] bundle done seq=' + seq, {
         leads:      stats?.kpis_groot?.nieuwe_leads?.value,
@@ -554,14 +557,15 @@
                 ? (f.openVerifyPayment || 0) + (f.openEscalations || 0)
                 : null;
               const eventsCount = _live.events && Array.isArray(_live.events.items) ? _live.events.items.length : null;
-              // Ronde-15: Leadsonderhoud + Onboarding LIVE.
+              // Ronde-15: Leadsonderhoud + Onboarding + Lisa LIVE.
               const lsOpenCnt = _live.lsOpen && typeof _live.lsOpen.open_count === 'number' ? _live.lsOpen.open_count : null;
               const onbActive = _live.onbCounts && typeof _live.onbCounts.active_count === 'number' ? _live.onbCounts.active_count : null;
+              const lisaAct   = _live.lisaCnt && typeof _live.lisaCnt.count === 'number' ? _live.lisaCnt.count : null;
               const tiles = [
                 ['Wanbetalers',    wbxCount != null ? wbxCount : 4,   'amber',  I.alert,  'wanbetalers',    wbxCount != null],
                 ['Leadsonderhoud', lsOpenCnt != null ? lsOpenCnt : 0, 'teal',   I.repeat, 'leadsonderhoud', lsOpenCnt != null],
                 ['Onboarding',     onbActive != null ? onbActive : 0, 'emerald', I.route, 'onboarding',     onbActive != null],
-                ['Lisa AI',        2,                                 'violet', I.bot,    'lisa',           false],
+                ['Lisa AI',        lisaAct != null ? lisaAct : 0,     'violet', I.bot,    'lisa',           lisaAct != null],
                 ['Events',         eventsCount != null ? eventsCount : 3, 'pink', I.cal,  'events',         eventsCount != null],
                 ['E-mail',         mails != null ? mails : 989,       'blue',   I.mail,  'email',           mails != null],
               ];
