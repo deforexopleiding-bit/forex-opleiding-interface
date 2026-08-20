@@ -138,12 +138,19 @@ function lineExclAmount(l) {
   const uExcl = Number(l.unit_price_excl) || 0;
   return { excl: q * uExcl, vatPct: v };
 }
-function computeTotals(lines) {
+function computeTotals(lines, saleType) {
+  // BROK E (2026-08-19): intracommunautair (0% btw verlegd) én outside_eu →
+  // effectieve BTW = 0% ongeacht wat op de regels staat. Server-side gebruikt
+  // taxRateIdFor(vat, dept, saleType) waar 'intracommunautair' altijd naar de
+  // 0%-INTRA rate mapt (fail-loud als env ontbreekt). Client-side moet dus
+  // ook 0 tonen om preview + factuur-totaal 1-op-1 te laten kloppen.
+  const st = String(saleType || 'domestic');
+  const btwWaived = (st === 'intracommunautair' || st === 'outside_eu');
   let excl = 0, tax = 0;
   for (const l of lines) {
     const { excl: lineExcl, vatPct } = lineExclAmount(l);
     excl += lineExcl;
-    tax += lineExcl * (vatPct / 100);
+    if (!btwWaived) tax += lineExcl * (vatPct / 100);
   }
   return { excl, tax, incl: excl + tax };
 }
@@ -163,7 +170,7 @@ function updateLineTotal(idx) {
   if (cell) cell.textContent = fmtEur(excl);
 }
 function updateFootTotals() {
-  const totals = computeTotals(state.form.lines);
+  const totals = computeTotals(state.form.lines, state.form.sale_type);
   const eEx = document.querySelector('[data-kv-invnew-total="excl"]');
   const eTx = document.querySelector('[data-kv-invnew-total="tax"]');
   const eIn = document.querySelector('[data-kv-invnew-total="incl"]');
@@ -228,8 +235,15 @@ function renderLineRow(l, idx) {
 }
 
 function renderLinesTable() {
-  const totals = computeTotals(state.form.lines);
+  const totals = computeTotals(state.form.lines, state.form.sale_type);
+  // BROK E (2026-08-19): "BTW verlegd"-banner + BTW-regel dimmen bij intracomm.
+  const st = String(state.form.sale_type || 'domestic');
+  const btwWaived = (st === 'intracommunautair' || st === 'outside_eu');
+  const btwLabel  = btwWaived
+    ? `<span title="BTW verlegd — regel-BTW wordt 0% (server gebruikt TEAMLEADER_TAX_RATE_ID_INTRA/_OUTSIDE_EU)">BTW <b>verlegd</b> (0%)</span>`
+    : 'BTW';
   return `
+    ${btwWaived ? `<div class="kv-edit-banner" style="background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber);padding:8px 11px;border-radius:6px;font-size:12px;margin-bottom:8px">⚠ Regime <b>${esc(st === 'intracommunautair' ? 'Intracommunautair' : 'Buiten EU')}</b> — BTW wordt <b>verlegd</b> (0%). Regel-BTW-veld wordt genegeerd; totaal = som excl.</div>` : ''}
     <div class="ds-tbl-wrap kv-invupd-tbl-wrap">
       <table class="ds-tbl kv-invupd-tbl">
         <thead><tr>
@@ -244,7 +258,7 @@ function renderLinesTable() {
         <tbody>${state.form.lines.map((l, i) => renderLineRow(l, i)).join('')}</tbody>
         <tfoot>
           <tr><td colspan="5" class="r"><strong>Subtotaal (excl.)</strong></td><td class="r mono" data-kv-invnew-total="excl"><strong>${esc(fmtEur(totals.excl))}</strong></td><td></td></tr>
-          <tr><td colspan="5" class="r">BTW</td><td class="r mono" data-kv-invnew-total="tax">${esc(fmtEur(totals.tax))}</td><td></td></tr>
+          <tr><td colspan="5" class="r"${btwWaived ? ' style="opacity:.55"' : ''}>${btwLabel}</td><td class="r mono" data-kv-invnew-total="tax"${btwWaived ? ' style="opacity:.55"' : ''}>${esc(fmtEur(totals.tax))}</td><td></td></tr>
           <tr><td colspan="5" class="r"><strong>Totaal (incl. BTW)</strong></td><td class="r mono" data-kv-invnew-total="incl"><strong>${esc(fmtEur(totals.incl))}</strong></td><td></td></tr>
         </tfoot>
       </table>
@@ -299,7 +313,7 @@ function renderForm() {
 // ── Confirm-overlays voor destructive acties ───────────────────────────────
 
 function renderOverlayBook() {
-  const totals = computeTotals(goodLines());
+  const totals = computeTotals(goodLines(), state.form.sale_type);
   return `
     <div class="kv-invnew-overlay">
       <div class="kv-invnew-overlay-inner">
@@ -331,7 +345,7 @@ function renderOverlayBook() {
 }
 
 function renderOverlayBookSend() {
-  const totals = computeTotals(goodLines());
+  const totals = computeTotals(goodLines(), state.form.sale_type);
   const clientEmail = state.customer?.email || '';
   const tpl = state.templates.find((t) => t.id === state.selectedTemplateId);
   return `
@@ -755,7 +769,13 @@ function wire() {
       state.form[e.target.name] = e.target.value;
       if (state.errors[e.target.name]) { delete state.errors[e.target.name]; }
     });
-    bindOnce(inp, 'change', (e) => { state.form[e.target.name] = e.target.value; });
+    bindOnce(inp, 'change', (e) => {
+      state.form[e.target.name] = e.target.value;
+      // BROK E (2026-08-19): bij sale_type-wissel MUST de preview
+      // (lines-tabel + totalen + banner) opnieuw renderen — totals
+      // hangen van saleType af (BTW verlegd bij intracomm/outside_eu).
+      if (e.target.name === 'sale_type') rerender();
+    });
   });
   // Base form inputs — line-fields.
   // KRITIEK: NIET rerenderBody() bij typen. Dat vernietigt het <input>
