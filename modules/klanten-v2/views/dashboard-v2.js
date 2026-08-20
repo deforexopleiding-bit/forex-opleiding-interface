@@ -149,6 +149,7 @@
     lsOpen:   null,  // /api/leadsonderhoud-open-count (open_count)
     onbCounts:null,  // /api/onboarding-counts (active_count)
     lisaCnt:  null,  // /api/lisa-conversations-count?status=active (count)
+    evStatus: null,  // /api/events-status-aggregate?event_ids=... (items[])
   };
   // Sequence-nummer voorkomt race conditions als user snel klikt.
   let _fetchSeq = 0;
@@ -219,6 +220,19 @@
       _live.onbCounts = onbCounts;
       _live.lisaCnt   = lisaCnt;
       _live.error     = stats ? null : 'dashboard-stats faalde';
+      // 2e roundtrip (chained): events-status-aggregate voor VL/GB per event.
+      // Alleen aanroepen als events.items geladen zijn en ids beschikbaar.
+      const evIds = events && Array.isArray(events.items)
+        ? events.items.slice(0, 6).map(ev => ev && ev.id).filter(Boolean)
+        : [];
+      if (evIds.length) {
+        const evStatus = await tryFetch('events-status-aggregate',
+          '/api/events-status-aggregate?event_ids=' + encodeURIComponent(evIds.join(',')));
+        if (seq !== _fetchSeq) return; // Race: bail bij stale.
+        _live.evStatus = evStatus;
+      } else {
+        _live.evStatus = null;
+      }
       console.debug('[dashboard-v2] bundle done seq=' + seq, {
         leads:      stats?.kpis_groot?.nieuwe_leads?.value,
         mails:      stats?.kpis_klein?.mails_period,
@@ -639,6 +653,12 @@
                 return `${days[dObj.getDay()]} ${dObj.getDate()} ${months[dObj.getMonth()]} · ${hh}:${mm}`;
               } catch (_) { return iso; }
             };
+            // Ronde-15: events-status-aggregate LIVE per event.
+            // Map van event_id -> { active_count, questionnaire_count, called_count }.
+            const statusMap = new Map();
+            if (_live.evStatus && Array.isArray(_live.evStatus.items)) {
+              for (const it of _live.evStatus.items) statusMap.set(it.event_id, it);
+            }
             const rows = evItems && evItems.length
               ? evItems.slice(0, 5).map(ev => [
                   ev.title || 'Event',
@@ -647,13 +667,17 @@
                   typeof ev.attendee_count_active === 'number' ? ev.attendee_count_active : 0,
                   typeof ev.capacity === 'number' ? ev.capacity : 8,
                   true, // live
+                  ev.id || null,
                 ])
-              : MOCK_ROWS.map(r => [...r, false]);
-            return rows.map(([title, dt, loc, ing, cap, isLive]) => {
-              // Mock voor vragenlijst + gebeld — geen aggregate endpoint per event.
-              const vl = isLive ? 0 : Math.min(cap, ing);
+              : MOCK_ROWS.map(r => [...r, false, null]);
+            return rows.map(([title, dt, loc, ing, cap, isLive, eventId]) => {
+              // Live: haal VL/GB uit status-aggregate. Fallback bij mock: symmetric getal.
+              const st = eventId ? statusMap.get(eventId) : null;
+              const vlLive = !!st;
+              const gbLive = !!st;
+              const vl = st ? st.questionnaire_count : (isLive ? 0 : Math.min(cap, ing));
               const vlt = cap;
-              const gb = isLive ? 0 : Math.min(cap, ing);
+              const gb = st ? st.called_count : (isLive ? 0 : Math.min(cap, ing));
               const gbt = cap;
               return `<button style="display:flex;align-items:center;gap:22px;padding:13px 15px;border:1px solid var(--border);
                 border-radius:var(--r);background:var(--surface);width:100%;text-align:left;transition:all .15s"
@@ -663,7 +687,7 @@
                 <span style="flex:1;max-width:230px;text-align:center">
                   <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em">
                     ${vl}<span style="font-size:11px;color:var(--text-3)">/${vlt}</span></span>
-                  <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">VRAGENLIJST${mockBadge('Geen aggregate endpoint per event')}</span>
+                  <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">VRAGENLIJST${vlLive ? '' : mockBadge()}</span>
                   <span class="progress" style="display:block;height:3px"><i style="width:${vlt ? vl / vlt * 100 : 0}%;background:var(--teal)"></i></span></span>
                 <span style="width:96px;text-align:center">
                   <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;${ing > 0 ? '' : 'color:var(--text-3)'}">${ing}</span>
@@ -671,7 +695,7 @@
                 <span style="flex:1;max-width:230px;text-align:center">
                   <span style="display:block;font-size:15px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.02em;${gb > 0 ? '' : 'color:var(--text-3)'}">
                     ${gb}<span style="font-size:11px;color:var(--text-3)">/${gbt}</span></span>
-                  <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">GEBELD${mockBadge('Geen aggregate endpoint per event')}</span>
+                  <span style="display:block;font-size:9.5px;letter-spacing:.09em;color:var(--text-3);margin:3px 0 6px">GEBELD${gbLive ? '' : mockBadge()}</span>
                   <span class="progress" style="display:block;height:3px"><i style="width:${gbt ? gb / gbt * 100 : 0}%;background:var(--emerald)"></i></span></span>
               </button>`;
             }).join('');
