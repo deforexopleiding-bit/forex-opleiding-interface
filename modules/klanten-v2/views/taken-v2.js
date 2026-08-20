@@ -259,7 +259,7 @@
     return H.kpis([
       { c: 'blue',    icon: I.check2, label: 'Open taken',          val: String(open.length), hi: 1, sub: vandaag + ' vandaag' },
       { c: 'rose',    icon: I.alert,  label: 'Te laat',             val: String(teLaat),                                    sub: 'deadline verstreken' },
-      { c: 'emerald', icon: I.tick,   label: 'Afgerond (in scope)', val: String(list.filter((t) => t.status === 'done').length),        sub: 'lifetime' },
+      { c: 'emerald', icon: I.tick,   label: 'Afgerond (lifetime)', val: String(list.filter((t) => t.status === 'done').length),        sub: 'alle historische' },
     ]);
   }
   function kpisByMe(all) {
@@ -269,15 +269,18 @@
     return H.kpis([
       { c: 'blue',    icon: I.check2, label: 'Uitgezet & open',     val: String(open.length), hi: 1 },
       { c: 'rose',    icon: I.alert,  label: 'Te laat',             val: String(teLaat),                                    sub: 'deadline verstreken' },
-      { c: 'emerald', icon: I.tick,   label: 'Afgerond',            val: String(list.filter((t) => t.status === 'done').length),        sub: 'lifetime' },
+      { c: 'emerald', icon: I.tick,   label: 'Afgerond (lifetime)', val: String(list.filter((t) => t.status === 'done').length),        sub: 'alle historische' },
     ]);
   }
   function kpisAfgerond(rows) {
     const list = asArr(rows);
     const week = list.filter((t) => t.afgerond_op && (Date.now() - new Date(t.afgerond_op).getTime()) < 7 * 86400e3).length;
+    // Fix ronde-6 (P3): label vroeger 'Afgerond totaal (in mijn scope)' terwijl
+    // Mijn-taken-tab 'Afgerond (in scope) lifetime' toont met een andere teller.
+    // Nu consistent: 'Afgerond (in tab-filter)' = wat je zichtbaar ziet.
     return H.kpis([
-      { c: 'emerald', icon: I.tick, label: 'Afgerond totaal', val: String(list.length), hi: 1, sub: 'in mijn scope' },
-      { c: 'blue',    icon: I.check2, label: 'Deze week',     val: String(week) },
+      { c: 'emerald', icon: I.tick, label: 'Afgerond (in tab-filter)', val: String(list.length), hi: 1, sub: 'zichtbaar op deze tab' },
+      { c: 'blue',    icon: I.check2, label: 'Deze week',              val: String(week) },
     ]);
   }
 
