@@ -1,0 +1,81 @@
+# RLS drift-check — bewaakt dat er geen nieuwe open tabellen ontstaan.
+#
+# Postgres zet RLS standaard UIT op een nieuwe tabel, en een `USING (true)`-
+# policy is in tien seconden geschreven. Zo ontstond het lek van augustus 2026.
+# Deze workflow draait docs/sql-migrations/rls-drift-check.sql tegen de live DB
+# en faalt zodra er een risico-tabel bijkomt.
+#
+# ── EENMALIGE SETUP (door Maxim) ────────────────────────────────────────────
+# Zet één repository-secret: SUPABASE_DB_URL
+#   Supabase-dashboard → Project Settings → Database → Connection string → URI
+#   Voorbeeld: postgresql://<user>:<wachtwoord>@<host>:5432/postgres?sslmode=require
+#
+# Gebruik bij voorkeur een APARTE, alleen-lezen rol in plaats van de
+# postgres-superuser. Het script leest alleen catalogus-views, dus dit volstaat:
+#
+#   CREATE ROLE rls_monitor LOGIN PASSWORD '<sterk-wachtwoord>';
+#   GRANT pg_read_all_stats TO rls_monitor;   -- optioneel, niet vereist
+#   -- pg_policies en pg_class zijn voor elke rol leesbaar; meer is niet nodig.
+#   -- has_table_privilege() werkt ook zonder extra rechten.
+#
+# Zolang het secret NIET is gezet slaat de workflow zichzelf netjes over
+# (geen rode builds voor iedereen) — zie de "geen secret" stap hieronder.
+# ────────────────────────────────────────────────────────────────────────────
+
+name: RLS drift-check
+
+on:
+  schedule:
+    - cron: '0 6 * * *'        # elke dag 06:00 UTC
+  workflow_dispatch:            # handmatig startbaar vanuit de Actions-tab
+  pull_request:
+    paths:                      # ook bij elke wijziging aan de RLS-SQL
+      - 'docs/sql-migrations/**.sql'
+      - '.github/workflows/rls-drift-check.yml'
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: psql installeren
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Drift-check draaien
+        env:
+          DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DB_URL:-}" ]; then
+            echo "::notice title=RLS drift-check overgeslagen::Secret SUPABASE_DB_URL is niet gezet. Zie de kop van .github/workflows/rls-drift-check.yml voor de setup."
+            exit 0
+          fi
+
+          echo "── Volledig rapport ──────────────────────────────────────────"
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f docs/sql-migrations/rls-drift-check.sql
+
+          # Sectie 9 van het script geeft één getal terug: het aantal
+          # risico-tabellen. -tA => alleen de waarde, geen kop of opmaak.
+          AANTAL="$(psql "$DB_URL" -v ON_ERROR_STOP=1 -tA \
+            -f docs/sql-migrations/rls-drift-check.sql | tail -n 1 | tr -d '[:space:]')"
+
+          echo "── Resultaat ─────────────────────────────────────────────────"
+          echo "Risico-tabellen: ${AANTAL}"
+
+          case "$AANTAL" in
+            ''|*[!0-9]*)
+              echo "::error title=RLS drift-check::Kon het aantal risico-tabellen niet lezen (kreeg: '${AANTAL}'). Draai het script handmatig."
+              exit 1
+              ;;
+            0)
+              echo "::notice title=RLS drift-check::Schoon — geen open tabellen."
+              ;;
+            *)
+              echo "::error title=RLS drift-check::${AANTAL} risico-tabel(len) gevonden. Elke nieuwe tabel hoort RLS aan te hebben met een policy op is_crm_staff() (CRM) of de student-check (LMS) — nooit USING (true). Zie docs/rls-regels-nieuwe-tabellen.md."
+              exit 1
+              ;;
+          esac
