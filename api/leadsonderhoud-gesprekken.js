@@ -223,6 +223,7 @@ export default async function handler(req, res) {
       }
       items.push({
         lead_id: rep.id,
+        conversation_id: wa?.id || null,
         naam: [rep.voornaam, rep.achternaam].filter(Boolean).join(' ') || email || (wa ? wa.phone_number : '') || 'Onbekend',
         phone_number: rep.telefoon_e164 || (wa ? wa.phone_number : null),
         email: email,

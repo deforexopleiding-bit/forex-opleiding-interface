@@ -664,6 +664,37 @@
     }
     queueMicrotask(() => _lsInbLoadThread(id));
   };
+  // FEAT-2: toggle gelezen/ongelezen — hergebruikt bestaande
+  // /api/leadsonderhoud-gesprek-mark-read endpoint. Surgical DOM-update
+  // op de rij (geen render-trigger → geen scroll-sprong).
+  window.__lsInbToggleRead = async (convId, unread, leadIdAttr) => {
+    if (!convId) return;
+    try {
+      const j = await tryPost('ls-mark-read', '/api/leadsonderhoud-gesprek-mark-read', {
+        conversation_id: convId,
+        unread: !!unread,
+      });
+      if (!j || j.error) throw new Error(j?.error || 'mark-read fail');
+      // Sync lokale state.
+      const idx = _lsInb.convs.items.findIndex((c) => String(c.conversation_id) === String(convId));
+      if (idx >= 0) {
+        _lsInb.convs.items[idx] = { ..._lsInb.convs.items[idx], unread: j.unread_count || 0 };
+      }
+      // Surgical row-repaint: vervang de rij-DOM in-place zonder full render.
+      const row = _lsInb.convs.items[idx];
+      const oldRow = document.querySelector('#lsInbList .ls-inb-row[data-row-id="' + String(leadIdAttr).replace(/"/g, '\\"') + '"]');
+      if (oldRow && row) {
+        const wrap = document.createElement('div');
+        wrap.innerHTML = _lsInbRenderRow(row);
+        const el = wrap.firstElementChild;
+        if (el) oldRow.replaceWith(el);
+      }
+    } catch (e) {
+      console.warn('[leadsonderhoud] mark-read toggle fail:', e?.message);
+      alert('Kon lees-status niet wijzigen: ' + (e?.message || 'onbekende fout'));
+    }
+  };
+
   window.__lsInbDraftWa       = (leadId, val) => { _lsInb.compose.draftsWa[leadId] = val; };
   window.__lsInbDraftMailSub  = (leadId, val) => { _lsInb.compose.draftsMailSubject[leadId] = val; };
   window.__lsInbDraftMailTxt  = (leadId, val) => { _lsInb.compose.draftsMailText[leadId] = val; };
@@ -1238,19 +1269,41 @@
     const mailBadge = row.has_mail
       ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--blue-soft);color:var(--blue);font-weight:600">mail</span>`
       : '';
+    // FEAT-2: duidelijke ongelezen-styling + toggle-knop op de rij.
+    // Ongelezen: linker rose-strip (4px), primary background-tint, dikke
+    // vette naam. Gelezen: gedempt (opacity), naam normaal-gewicht.
+    // Toggle: klein 'gelezen/ongelezen'-knopje rechtsonder (stop-propagation
+    // zodat de rij niet ook opent).
+    const convIdAttr = String(row.conversation_id || '').replace(/"/g, '&quot;');
+    const canToggle = !!row.conversation_id;
+    const toggleTitle = nw ? 'Markeer als gelezen' : 'Markeer als ongelezen';
+    const toggleIcon = nw ? '✓' : '●';
+    const toggleBtn = canToggle
+      ? `<button class="ls-inb-read-toggle" data-conv-id="${convIdAttr}" data-target-unread="${nw ? '0' : '1'}"
+          onclick="event.stopPropagation();__lsInbToggleRead('${convIdAttr}', ${nw ? 'false' : 'true'}, '${rowIdAttr}')"
+          title="${toggleTitle}"
+          style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text-3);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer;flex-shrink:0">${toggleIcon} ${nw ? 'gelezen' : 'ongelezen'}</button>`
+      : '';
+    const rowStyle = [
+      'display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative',
+      nw ? 'background:var(--rose-soft, rgba(220,53,90,.06));border-left:4px solid var(--rose, #DC355A);padding-left:10px' : 'padding-left:14px',
+      onCls === 'on' ? 'background:var(--surface-2)' : '',
+      !nw ? 'opacity:.88' : '',
+    ].filter(Boolean).join(';');
     return `<div class="ls-inb-row ${nw ? 'nw' : ''} ${onCls}" data-row-id="${rowIdAttr}" onclick="__lsInbSel('${rowIdClick}')"
-      style="display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;${onCls === 'on' ? 'background:var(--surface-2)' : ''}">
+      style="${rowStyle}">
       ${H.av(naam || '?', 34)}
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
-          <span style="font-size:13.5px;font-weight:${nw ? '600' : '500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</span>
-          <span style="margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);flex-shrink:0">${esc(tijd)}</span>
+          <span style="font-size:13.5px;font-weight:${nw ? '700' : '500'};color:${nw ? 'var(--text-1)' : 'var(--text-2)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</span>
+          ${nw ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--rose);flex-shrink:0" title="Ongelezen"></span>' : ''}
+          <span style="margin-left:auto;font-size:10.5px;font-family:\'IBM Plex Mono\',monospace;color:var(--text-3);flex-shrink:0">${esc(tijd)}</span>
         </div>
-        <div style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</div>
+        <div style="font-size:12.5px;color:${nw ? 'var(--text-1)' : 'var(--text-2)'};font-weight:${nw ? '500' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</div>
         <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ctx)}</div>
-        <div style="margin-top:6px;display:flex;gap:5px;align-items:center">
+        <div class="ls-inb-tagrow" style="margin-top:6px;display:flex;gap:5px;align-items:center">
           ${waBadge} ${mailBadge}
-          ${nw ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--rose);margin-left:auto"></span>' : ''}
+          ${toggleBtn}
         </div>
       </div>
     </div>`;
@@ -1375,7 +1428,17 @@
           <span style="font-size:11.5px;padding:3px 10px;border-radius:12px;background:var(--teal-soft);color:var(--teal)">Leadsonderhoud</span>
           ${callBadge}
           ${chanBadges}
-          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+          <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            ${row.conversation_id ? (() => {
+              const isUnread = (row.unread || 0) > 0;
+              const targetUnread = !isUnread;
+              const rowIdEsc = String(row.lead_id || '').replace(/'/g, "\\'");
+              const convIdEsc = String(row.conversation_id).replace(/'/g, "\\'");
+              return `<button class="btn btn-ghost btn-sm" onclick="__lsInbToggleRead('${convIdEsc}', ${targetUnread}, '${rowIdEsc}')"
+                title="${isUnread ? 'Markeer als gelezen' : 'Markeer als ongelezen'}">
+                ${isUnread ? '✓ Markeer gelezen' : '● Markeer ongelezen'}
+              </button>`;
+            })() : ''}
             <button class="btn btn-primary btn-sm" onclick="__lsInbOpenAppointmentPicker()" title="Direct een Zoom-afspraak inschieten (bestaande GHL-contact vereist)">${svg(I.cal || I.check, 'width:13px;height:13px')} Direct inschieten</button>
             <button class="btn btn-ghost btn-sm" onclick="__lsInbBookingLinkHelp()" title="Boekingslink verstuurroute (Route B)">Boekingslink…</button>
           </div>
