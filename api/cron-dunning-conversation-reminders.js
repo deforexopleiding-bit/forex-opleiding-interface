@@ -192,7 +192,15 @@ export async function loadRenderContext(customerId) {
         .eq('customer_id', customerId)
         .in('status', ['open', 'partially_paid', 'overdue'])
         .order('due_date', { ascending: true });
-      ctx.openInvoices = Array.isArray(invs) ? invs : [];
+      // Send-time open-filter: status blijft soms nog 'open' terwijl amount_paid
+      // al gelijk aan amount_total is (TL-sync-race). Filter dat er hier uit
+      // zodat de guardrail hieronder (openInvoices.length===0 → skip) triggert.
+      ctx.openInvoices = (Array.isArray(invs) ? invs : []).filter((inv) => {
+        const tot  = Number(inv?.amount_total)    || 0;
+        const paid = Number(inv?.amount_paid)     || 0;
+        const cred = Number(inv?.credited_amount) || 0;
+        return Math.max(0, tot - paid - cred) > 0;
+      });
     }
   } catch (e) {
     console.warn('[conv-reminder-cron] loadRenderContext fail:', e?.message);
@@ -491,6 +499,15 @@ export async function processReminderRun({
         const { customer, openInvoices } = await loadRenderContext(run.customer_id);
         if (!customer) {
           summary.skipped.push({ run_id: run.id, reason: 'CUSTOMER_NOT_FOUND' });
+          return;
+        }
+        // Send-time hercheck: geen open bedrag meer → geen reminder. Klant kan
+        // hebben betaald na de laatste engine-send. Verstuur niets; markeer
+        // via summary. De reminder-run zelf blijft in dezelfde staat — de
+        // dunning-engine ruimt hem bij de eerstvolgende tick op (regel ~940
+        // → status='completed', reason='paid').
+        if (!openInvoices || openInvoices.length === 0) {
+          summary.skipped.push({ run_id: run.id, reason: 'NO_OPEN_AMOUNT' });
           return;
         }
         const sendTo = conv.phone_number || customer.phone;

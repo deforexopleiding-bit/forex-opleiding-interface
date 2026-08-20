@@ -85,6 +85,7 @@ export default async function handler(req, res) {
     processed      : 0,
     sent           : 0,
     failed         : 0,
+    skipped        : 0,
     jobs_touched   : 0,
     jobs_completed : 0,
     errors         : [],
@@ -192,6 +193,28 @@ export default async function handler(req, res) {
           openInvoices = (invs || []).filter((inv) => openAmount(inv) > 0);
         }
       } catch (_) { /* fail-soft */ }
+
+      // 3b-guard) Send-time hercheck: klant betaalde mogelijk NADAT de
+      // approval-preview werd gerenderd (kan uren/dagen terug zijn). Als er
+      // op verzendmoment geen open bedrag meer is: skip beide kanalen, markeer
+      // recipient 'skipped' + reason. Geen send-calls; tel in summary.skipped.
+      // CHECK-constraint dunning_bulk_recipients.status ('pending','sent',
+      // 'failed','skipped') — 'skipped' is een geldige waarde (migratie 031).
+      if (openInvoices.length === 0) {
+        const { error: skipErr } = await supabaseAdmin
+          .from('dunning_bulk_recipients')
+          .update({
+            status      : 'skipped',
+            skip_reason : 'no_open_amount',
+            error       : 'send-time skip: klant heeft 0 open bedrag op verzendmoment',
+          })
+          .eq('id', rec.id);
+        if (skipErr) {
+          summary.errors.push({ recipient_id: rec.id, error: 'skip-mark: ' + skipErr.message });
+        }
+        summary.skipped++;
+        continue;
+      }
 
       // 3c) WhatsApp send.
       if (rec.channel_whatsapp && job && job.template_name && customerRow) {
