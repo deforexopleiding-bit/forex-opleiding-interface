@@ -78,22 +78,40 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
   // narekent — geen sub-cent-drift). Line-level saleType override kan
   // via l.sale_type (voor mixed facturen); factuur-niveau saleType via
   // opts.saleType is de default.
+  // FIX-4 (2026-08-20): TeamLeader accepteert ALLEEN tax:'excluding' voor
+  // grouped_lines.line_items.unit_price (TL-400 met body
+  // "tax must be in { excluding }"). Onze eerdere 'including'-tak
+  // (l.price_includes_vat === true) triggerde die 400 sinds de incl-BTW-
+  // toggle in de v2-invoice-modal. Fix: reken altijd terug naar EXCL en
+  // stuur tax:'excluding'. TL narekent zelf incl vanuit tax_rate_id.
   const lineItems = lines.map((l, idx) => {
     const desc = String(l.description || '').trim();
     const qty  = Number(l.quantity) || 1;
-    const includesVat = l.price_includes_vat === true;
-    const unit = includesVat
-      ? Number(l.unit_price_incl != null ? l.unit_price_incl : l.unit_price_excl)
-      : Number(l.unit_price_excl);
     const vat  = Number(l.vat_percentage);
     if (!desc) throw Object.assign(new Error(`Regel ${idx + 1}: omschrijving ontbreekt`), { stage: 'validate' });
-    if (!Number.isFinite(unit) || unit < 0) throw Object.assign(new Error(`Regel ${idx + 1}: ongeldige eenheidsprijs`), { stage: 'validate' });
     if (![0, 6, 9, 21].includes(vat)) throw Object.assign(new Error(`Regel ${idx + 1}: ongeldig BTW-percentage (${vat})`), { stage: 'validate' });
+
+    // Bepaal EXCL-prijs. Voorkeur: unit_price_excl. Fallback: incl → /(1+vat).
+    const includesVat = l.price_includes_vat === true;
+    let unitExcl;
+    if (includesVat && l.unit_price_incl != null) {
+      const incl = Number(l.unit_price_incl);
+      if (!Number.isFinite(incl) || incl < 0) {
+        throw Object.assign(new Error(`Regel ${idx + 1}: ongeldige eenheidsprijs (incl)`), { stage: 'validate' });
+      }
+      unitExcl = vat > 0 ? (incl / (1 + vat / 100)) : incl;
+    } else {
+      unitExcl = Number(l.unit_price_excl);
+      if (!Number.isFinite(unitExcl) || unitExcl < 0) {
+        throw Object.assign(new Error(`Regel ${idx + 1}: ongeldige eenheidsprijs (excl)`), { stage: 'validate' });
+      }
+    }
+
     const lineSaleType = l.sale_type || saleType;
     const li = {
       description: desc,
       quantity:    qty,
-      unit_price:  { amount: r2(unit), currency: 'EUR', tax: includesVat ? 'including' : 'excluding' },
+      unit_price:  { amount: r2(unitExcl), currency: 'EUR', tax: 'excluding' },
       tax_rate_id: taxRateIdFor(vat, departmentId, lineSaleType),
     };
     if (l.product_id) li.product_id = String(l.product_id);
@@ -162,9 +180,28 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
     // Andere fout OF al gehealed en nog steeds fail → fail-loud.
     console.error('[invoice-core] draft GEWEIGERD | HTTP', dr.status, '| payload=', JSON.stringify(draftBody), '| response=', dText, '| healed:', healedOnce);
     const isNotFoundAfterHeal = notFound && healedOnce;
+
+    // FIX-4: haal de concrete TL-foutreden uit de body i.p.v. alleen HTTP-code.
+    // TL response-shape: {errors:[{status, code, title, detail, meta:{field, rule}}, ...]}
+    // Voorbeeld: "line_items -> tax must be in { excluding }" wordt zo direct
+    // zichtbaar in de UI-toast + Vercel-logs.
+    let reasonSuffix = '';
+    try {
+      const parsed = JSON.parse(dText || '{}');
+      const errs   = Array.isArray(parsed?.errors) ? parsed.errors : [];
+      if (errs.length) {
+        const parts = errs.slice(0, 3).map((e) => {
+          const field = e?.meta?.field ? String(e.meta.field) : '';
+          const title = e?.title || e?.detail || e?.code || '';
+          return field ? `${field}: ${title}` : title;
+        }).filter(Boolean);
+        if (parts.length) reasonSuffix = ' — ' + parts.join('; ');
+      }
+    } catch (_) { /* niet-JSON body — geen suffix */ }
+
     const err = new Error(isNotFoundAfterHeal
       ? 'TeamLeader-klant kon niet worden hersteld — controleer de klantkoppeling.'
-      : `Teamleader weigerde de concept-factuur (HTTP ${dr.status}).`);
+      : `Teamleader weigerde de concept-factuur (HTTP ${dr.status})${reasonSuffix}`);
     err.stage       = 'draft';
     err.tl_status   = dr.status;
     err.tl_response = dText;
