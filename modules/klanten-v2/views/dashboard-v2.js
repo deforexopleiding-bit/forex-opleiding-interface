@@ -504,21 +504,22 @@
             <div class="card-title">Zoom-afspraken${liveBadgeFor(_live.sales, 'Live uit /api/sales-dashboard-stats')}</div></div>
           <div class="card-body" style="text-align:center;padding-top:10px">
             ${(() => {
-              // Live: appointments_today_count + tomorrow uit sales-dashboard-stats.
-              // Week-count komt uit week.appointments (aggregate over huidige week).
-              // Maand-count heeft geen endpoint-veld → MOCK.
+              // Live: appointments_today_count + tomorrow + week + month uit sales-dashboard-stats.
+              // Ronde-15: month.appointments toegevoegd aan endpoint (rolling 30d).
               const s = _live.sales;
               const todayCnt = s && typeof s.appointments_today_count === 'number' ? s.appointments_today_count : null;
               const tomorrowCnt = s && typeof s.appointments_tomorrow_count === 'number' ? s.appointments_tomorrow_count : null;
               const weekCnt = s && s.week && typeof s.week.appointments === 'number' ? s.week.appointments : null;
+              const monthCnt = s && s.month && typeof s.month.appointments === 'number' ? s.month.appointments : null;
               const bigVal = todayCnt != null ? todayCnt : 4;
               return `
                 <div style="font-size:44px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.05em;color:var(--teal);line-height:1">${bigVal}</div>
                 <div style="font-size:12px;color:var(--text-3);margin-top:5px;margin-bottom:16px">vandaag gepland${todayCnt != null ? '' : mockBadge()}</div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px">
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px">
                   ${[[todayCnt != null ? todayCnt : 4, 'VANDAAG', todayCnt != null],
                      [tomorrowCnt != null ? tomorrowCnt : 3, 'MORGEN', tomorrowCnt != null],
-                     [weekCnt != null ? weekCnt : 22, 'WEEK', weekCnt != null]]
+                     [weekCnt != null ? weekCnt : 22, 'WEEK', weekCnt != null],
+                     [monthCnt != null ? monthCnt : 0, 'MAAND', monthCnt != null]]
                     .map(([v, l, isLive]) => `
                     <div style="border:1px solid var(--border);border-radius:var(--r);padding:11px 6px">
                       <div style="font-size:18px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.03em">${v}</div>

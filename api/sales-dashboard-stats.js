@@ -73,6 +73,7 @@ export default async function handler(req, res) {
     const [
       todayMetrics,
       weekMetrics,
+      monthMetrics,
       tomorrowApptCount,
       openFollowUpsCount,
       nextAppt,
@@ -81,6 +82,7 @@ export default async function handler(req, res) {
     ] = await Promise.all([
       computeMetrics(supabaseAdmin, { period: 'today', ownerScope, overdueMode: 'broad' }),
       computeMetrics(supabaseAdmin, { period: 'week',  ownerScope, overdueMode: 'broad' }),
+      computeMetrics(supabaseAdmin, { period: 'month', ownerScope, overdueMode: 'broad' }),
       fetchTomorrowAppointmentsCount(ownerScope),
       fetchOpenFollowUpsCount(ownerScope),
       fetchNextAppointment(ownerScope),
@@ -104,6 +106,10 @@ export default async function handler(req, res) {
         leads:        leadsCounts.week,
         events:       eventsCounts.week,
         appointments: weekMetrics.appointments_total,
+      },
+      month: {
+        // Rolling 30 dagen (follow-up-metrics 'month' = today-30d..tomorrow).
+        appointments: monthMetrics.appointments_total,
       },
       open_follow_ups:             openFollowUpsCount,
       appointments_today_count:    todayMetrics.appointments_total,
