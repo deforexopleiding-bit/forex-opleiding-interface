@@ -145,6 +145,7 @@
     mrr:      null,  // /api/sales-mrr-report (by_traject[])
     tasks:    null,  // /api/tasks-list?status=PENDING (counts.byCategory + MANUAL_FOLLOWUP filter)
     leadsPer: null,  // /api/leads-per-traject-count?period=X (total + by_traject)
+    signed:   null,  // /api/sales-signed-deals-total?period=X (total_incl_vat + count)
   };
   // Sequence-nummer voorkomt race conditions als user snel klikt.
   let _fetchSeq = 0;
@@ -181,7 +182,7 @@
       // Parallel fetch — elk endpoint is fail-soft (null bij error).
       // Ronde-14: + sales-mrr-report (by_traject-live), tasks-list (bel-acties
       // via MANUAL_FOLLOWUP-pending count).
-      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer] = await Promise.all([
+      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed] = await Promise.all([
         tryFetch('dashboard-stats',       '/api/dashboard-stats?period=' + paramPeriod),
         tryFetch('finance-counts',        '/api/finance-dashboard-counts?period=' + paramPeriod),
         tryFetch('tickets',               '/api/tickets'),
@@ -191,6 +192,7 @@
         tryFetch('sales-mrr-report',      '/api/sales-mrr-report'),
         tryFetch('tasks-followup',        '/api/tasks-list?action_type=MANUAL_FOLLOWUP&status=PENDING&limit=1'),
         tryFetch('leads-per-traject',     '/api/leads-per-traject-count?period=' + paramPeriod),
+        tryFetch('signed-deals-total',    '/api/sales-signed-deals-total?period=' + paramPeriod),
       ]);
       if (seq !== _fetchSeq) {
         console.debug('[dashboard-v2] discard stale seq=' + seq + ' (current=' + _fetchSeq + ')');
@@ -206,6 +208,7 @@
       _live.mrr       = mrr;
       _live.tasks     = tasks;
       _live.leadsPer  = leadsPer;
+      _live.signed    = signed;
       _live.error     = stats ? null : 'dashboard-stats faalde';
       console.debug('[dashboard-v2] bundle done seq=' + seq, {
         leads:      stats?.kpis_groot?.nieuwe_leads?.value,
@@ -399,16 +402,19 @@
           <div class="card-body" style="padding:6px 17px 16px">
             <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px">
               ${(() => {
-                // MRR live uit finance-dashboard-counts. Totaal-getekende-offertes-in-periode
-                // heeft geen aggregate endpoint — mock voorlopig met MOCK-badge.
+                // Ronde-15: Totaal incl BTW LIVE uit /api/sales-signed-deals-total.
+                // MRR blijft live uit finance-dashboard-counts (fase 1).
                 const mrr = f && typeof f.mrrSubscriptions === 'number' ? f.mrrSubscriptions : null;
+                const sd  = _live.signed;
+                const sdTotal = sd && typeof sd.total_incl_vat === 'number' ? sd.total_incl_vat : null;
+                const sdCount = sd && typeof sd.count === 'number' ? sd.count : null;
                 const tiles = [
                   { l: 'Abonnementen (MRR)', v: mrr != null ? mrr : 47612, s: mrr != null ? 'live · som(amount/cycle)' : '86 actief', c: 'teal', live: mrr != null },
-                  { l: 'Totaal incl. btw',   v: 26250, s: '5 offertes',                                                            c: 'blue', live: false },
+                  { l: 'Totaal incl. btw',   v: sdTotal != null ? sdTotal : 0, s: sdTotal != null ? `${sdCount || 0} offertes` : '—', c: 'blue', live: sdTotal != null },
                 ];
                 return tiles.map(t => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:13px 15px">
                   <div style="font-size:11.5px;color:var(--text-2);margin-bottom:6px;display:flex;align-items:center;gap:6px">
-                    <span class="legend-dot" style="background:var(--${t.c})"></span>${t.l}${t.live ? '' : mockBadge('Geen aggregate-endpoint voor global omzet-total in periode')}</div>
+                    <span class="legend-dot" style="background:var(--${t.c})"></span>${t.l}${t.live ? '' : mockBadge('Endpoint faalde')}</div>
                   <div style="font-size:25px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${eur0(t.v)}</div>
                   <div style="font-size:11px;color:var(--text-3);margin-top:6px">${t.s}</div></div>`).join('');
               })()}
