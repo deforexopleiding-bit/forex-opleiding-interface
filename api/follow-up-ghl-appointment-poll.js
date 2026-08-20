@@ -183,6 +183,24 @@ export default async function handler(req, res) {
       }
       results.push({ id: event.id, ok: !error, email: leadEmail ? 'ja' : 'nee', error: error?.message || null });
 
+      // Sync-brug (2026-08-20 fix Kandidaat F): schrijf leads.afspraak_op
+      // op basis van deze appointment. Alleen bij succesvolle upsert; fail-
+      // soft (een fout hier mag de poll niet stoppen).
+      if (!error) {
+        try {
+          const leadSync = await syncLeadAfspraakOp({
+            leadEmail:   leadEmail,
+            scheduledAt: event.startTime,
+            status:      useStatus,
+          });
+          if (leadSync && leadSync.matched === 'email') {
+            console.log('[follow-up-ghl-poll] leads.afspraak_op gesynct:', event.id, leadEmail, '→', leadSync.afspraak_op);
+          }
+        } catch (e) {
+          console.warn('[follow-up-ghl-poll] lead-sync faalde (fail-soft):', event.id, e?.message || e);
+        }
+      }
+
       // GHL-rollback detectie: parent was 'verplaatst' maar GHL zette hem terug naar scheduled.
       // Cancel wees-children (ghl_id=null) zodat ze niet dubbel in de UI verschijnen.
       if (wasVerplaatst && useStatus === 'scheduled' && !error) {
@@ -320,6 +338,54 @@ export default async function handler(req, res) {
     console.error('[follow-up-ghl-poll] onverwachte fout:', err.message);
     return res.status(500).json({ error: err.message });
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sync-brug: schrijf leads.afspraak_op na iedere follow_up_appointments-
+// upsert of status-flip in deze poll. Kandidaat F uit DIAGNOSE-3 (2026-08-20):
+// tot dusver zette alleen api/lisa-ghl-appointment-webhook.js dat veld —
+// call-boekingen via de Follow-up/GHL-agenda (deze poll) verschenen niet in
+// de Leads-module omdat de brug ontbrak. Spiegelt exact het gedrag van
+// koppelAfspraakAanLead in de Lisa-webhook: case-insensitive email-match,
+// verwijderd_op-filter, fail-soft. Alleen email — de leads-tabel heeft
+// GEEN ghl_contact_id, dus phone-fallback is hier niet zinvol.
+//
+// IDEMPOTENT: fetcht huidige leads.afspraak_op en schrijft alleen bij
+// verschil. Anders zou elke 15-min-poll-cyclus onnodig N writes doen.
+async function syncLeadAfspraakOp({ leadEmail, scheduledAt, status }) {
+  const activeStatuses = ['scheduled', 'confirmed', 'rescheduled'];
+  const cancelStatuses = ['cancelled', 'canceled', 'no_show', 'noshow'];
+  const stLower = String(status || '').toLowerCase();
+  let target;
+  if (activeStatuses.includes(stLower)) target = scheduledAt || null;
+  else if (cancelStatuses.includes(stLower)) target = null;
+  else return { skipped: 'status_no_change', status };
+
+  const email = String(leadEmail || '').trim().toLowerCase();
+  if (!email) return { skipped: 'no_email' };
+
+  const escLike = (s) => s.replace(/[%_\\]/g, (m) => '\\' + m);
+  const { data: cur, error: selErr } = await supabaseAdmin
+    .from('leads')
+    .select('id, afspraak_op')
+    .ilike('email', escLike(email))
+    .is('verwijderd_op', null);
+  if (selErr) throw new Error('leads-select: ' + selErr.message);
+  if (!cur || !cur.length) return { matched: 'none', email };
+
+  const targetIso = target ? new Date(target).toISOString() : null;
+  const toUpdate = cur.filter((l) => {
+    const curIso = l.afspraak_op ? new Date(l.afspraak_op).toISOString() : null;
+    return curIso !== targetIso;
+  });
+  if (!toUpdate.length) return { matched: 'noop', count: cur.length };
+
+  const { error: updErr } = await supabaseAdmin
+    .from('leads')
+    .update({ afspraak_op: target })
+    .in('id', toUpdate.map((l) => l.id));
+  if (updErr) throw new Error('leads-update: ' + updErr.message);
+  return { matched: 'email', count: toUpdate.length, afspraak_op: target };
 }
 
 function mapGhlStatus(ghlStatus) {
