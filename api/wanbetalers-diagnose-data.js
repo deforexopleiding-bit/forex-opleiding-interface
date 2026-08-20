@@ -238,6 +238,24 @@ function buildCustomerRecord(ctx) {
         + (activeRun.paused_manual_reason ? ' (' + activeRun.paused_manual_reason + ')' : '')
         + (activeRun.paused_at ? ' — ' + new Date(activeRun.paused_at).toISOString().slice(0,10) : '');
     }
+    else if (activeRun.paused_manual_reason) {
+      // Consistentie-fix (2026-08-20) — erken paused_manual_reason ook als
+      // non-wees-signaal, spiegel van pipeline-overview-helpers.js:107.
+      // Bron: engine reply-stop (FIX #2A) zet reply_email / reply_unknown,
+      // of een toekomstige backfill van historische reply-runs.
+      // Prefix 'reply_' → reply-classificatie; anders manual-zonder-user.
+      const reason = String(activeRun.paused_manual_reason);
+      if (/^reply[_-]/i.test(reason)) {
+        const chan = reason.replace(/^reply[_-]/i, '') || 'onbekend';
+        runReason = 'inbox_reply';
+        runReasonLabel = 'Klant reageerde (' + chan + ')'
+          + (activeRun.paused_at ? ' — ' + new Date(activeRun.paused_at).toISOString().slice(0,10) : '');
+      } else {
+        runReason = 'manual';
+        runReasonLabel = 'Handmatig gepauzeerd (' + reason + ')'
+          + (activeRun.paused_at ? ' — ' + new Date(activeRun.paused_at).toISOString().slice(0,10) : '');
+      }
+    }
     else { runReason = 'wees'; runReasonLabel = 'GEEN REDEN (wees-run — pre-fix)'; }
   }
 
