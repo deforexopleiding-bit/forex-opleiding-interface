@@ -291,9 +291,12 @@ function renderSubCard(sub) {
         ${dealLink}
         ${tlLink}
         <div style="flex:1"></div>
-        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-update="${K().esc(sub.id)}" ${hasInv ? 'disabled title="Al gefactureerd — bewerken niet toegestaan"' : 'title="Abonnement aanpassen"'}>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-update="${K().esc(sub.id)}"
+          ${hasInv
+            ? 'disabled title="Al gefactureerd — aanpassen niet toegestaan. Gebruik crediteren + nieuw abo." style="opacity:.5;cursor:not-allowed"'
+            : 'title="Abonnement aanpassen (omschrijving/bedrag/termijnen/data)"'}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          Aanpassen
+          ${hasInv ? 'Aanpassen (niet mogelijk)' : 'Aanpassen'}
         </button>
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-postpone="${K().esc(sub.id)}" title="Uitstellen of verlengen (1-12 mnd)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>

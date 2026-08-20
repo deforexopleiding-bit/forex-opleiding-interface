@@ -348,17 +348,38 @@ function _upWire() {
 }
 function _upRerender() { D().openModal({ head: _upHead(), body: _upBody(), foot: _upFoot() }); _upWire(); }
 
+// BROK G1 (2026-08-19): termijnbedrag-fallback. sub-endpoint retourneert
+// soms `amount`, soms `amount_per_termijn`, soms alleen `line_items[0].amount`
+// (per CLAUDE.md subscription-notes). Voorheen: alleen sub.amount → "€ 0,00"
+// bij subs waar dat veld null was, ondanks bestaand bedrag elders.
+function _subAmountExcl(s) {
+  if (s == null) return 0;
+  const cand = [
+    s.amount,
+    s.amount_per_termijn,
+    s.amount_excl,
+    (s.line_items && s.line_items[0] && s.line_items[0].amount),
+    (s.line_items && s.line_items[0] && s.line_items[0].amount_excl),
+  ];
+  for (const v of cand) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
 export function openSubscriptionUpdateModal({ sub, onSuccess } = {}) {
   if (!sub?.id) { K().toast('Geen abonnement geselecteerd'); return; }
   if (sub.has_any_invoice) {
     K().toast('Al gefactureerd — bewerken niet toegestaan. Gebruik crediteren + nieuw abo.');
     return;
   }
+  const initAmount = _subAmountExcl(sub);
   _up = {
     sub,
     form: {
       description: sub.description || '',
-      amount: sub.amount != null ? String(sub.amount) : '0',
+      amount: initAmount ? String(initAmount) : '0',
       vat_percentage: sub.vat_percentage != null ? String(sub.vat_percentage) : '21',
       term_count: sub.term_count != null ? String(sub.term_count) : '1',
       start_date: sub.start_date || '',
@@ -397,7 +418,7 @@ function _dlBody() {
         Weet je zeker dat je <strong>${esc(s.description || 'dit abonnement')}</strong> wilt deactiveren?
       </p>
       <p style="font-size:12px;color:var(--text-2);margin:0 0 8px">
-        Het abonnement stopt en wordt ${hasTl ? '<strong>in TeamLeader gedeactiveerd</strong>' : 'lokaal beëindigd'} (blijft in de historie staan). Termijnbedrag: ${esc(fmtEur(Number(s.amount) || 0))} excl.
+        Het abonnement stopt en wordt ${hasTl ? '<strong>in TeamLeader gedeactiveerd</strong>' : 'lokaal beëindigd'} (blijft in de historie staan). Termijnbedrag: ${esc(fmtEur(_subAmountExcl(s)))} excl.
       </p>
       ${_dl.tlFailed ? `<p style="font-size:12px;color:var(--rose);margin:8px 0 0"><strong>TL-deactivatie mislukte.</strong> Wil je alleen lokaal deactiveren (TL handmatig afhandelen)?</p>` : ''}
     </form>`;
