@@ -365,7 +365,42 @@ dezelfde 20 als op `main` vóór deze branch.
 
 ---
 
-## 10. Bestanden in deze PR
+## 10. Ronde 2 — de open `USING (true)`-tabellen (2026-08-20)
+
+Ronde 1 hierboven sloot 69 policies die alléén checkten óf er een profiel
+bestond. Bewust buiten scope bleven de policies **zonder enige auth-referentie**
+(`USING (true)`), omdat daar publieke token-pagina's en webhook-inserts tussen
+zitten. Maxim telde er 34 met `in_log = 0` — waaronder `customer_notes`,
+`audit_log`, `customer_tags`, `avg_data_requests`, `customer_tag_definitions`.
+
+Ronde 2 zet die dicht met dezelfde rolpoort:
+
+| Bestand | Wat |
+|---|---|
+| `docs/sql-migrations/2026-08-20-crm-rls-open-tables-audit.sql` | Read-only inventaris, toont per policy welk besluit de migratie neemt |
+| `docs/sql-migrations/2026-08-20-crm-rls-open-tables-hardening.sql` | Zet elke PERMISSIVE `true`-policy die **uitsluitend** aan `authenticated` toebehoort op `USING (public.is_crm_staff())` |
+| `docs/sql-migrations/2026-08-20-crm-rls-open-tables-rollback.sql` | Rollback, gefilterd op `rls_hardening_log.batch` zodat ronde 1 ongemoeid blijft |
+
+Scope-regel: alleen `roles = {authenticated}`. Policies die óók aan `anon` of
+`public` toebehoren blijven staan — dat zijn de publieke routes (website-quiz,
+event-keuze, webhook-inserts). RESTRICTIVE policies en `lms_*` / `hlms_*`
+blijven eveneens ongemoeid.
+
+Waarom dit de CRM-UI niet breekt: de browser praat maar met acht tabellen
+rechtstreeks via PostgREST (`customers`, `email_replies`,
+`follow_up_appointments`, `follow_up_screenshot_audit`, `profiles`,
+`role_permissions`, `taken_attachments`, `taken_watchers`) en dat gebeurt
+uitsluitend vanaf staff-pagina's. Al het andere loopt via `/api/*` op de
+service-role client, die RLS volledig omzeilt — de publieke assessment-pagina
+haalt haar vragen bijvoorbeeld via `/api/assessment-questions` → `supabaseAdmin`,
+niet via de policy op `assessment_questions`.
+
+`rls_hardening_log` krijgt een `batch`-kolom: `NULL` = ronde 1,
+`'2026-08-20-open-tables'` = ronde 2.
+
+---
+
+## 11. Bestanden in deze PR
 
 | Bestand | Wat |
 |---|---|
