@@ -35,6 +35,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { periodRange } from './_lib/nl-period.js';
 import { classifyDeal, CATEGORY_ORDER, CATEGORY_LABELS } from './_lib/deal-classify.js';
+import { computeCurrentMrr, REQUIRED_SUB_COLUMNS as MRR_COLS } from './_lib/mrr-compute.js';
 
 // Paginatie-helper (identiek patroon als dunning-engine.fetchAllRows). Inline
 // gehouden om cross-file import naar dunning-scope te vermijden.
@@ -251,25 +252,26 @@ export default async function handler(req, res) {
       else         trendMap.get(pk).los_incl_btw       += inclBtw;
     }
 
-    // 5) MRR-snapshot: actieve subs op einde periode. Per sub: som line_items
-    //    INCL BTW / cycle_months. Fallback: legacy amount + vat_percentage / cycle.
-    let mrrInclBtw = 0;
+    // 5) MRR-snapshot: via gedeelde helper api/_lib/mrr-compute.js.
+    //    Populatie = snapshot (start ≤ to AND (end NULL OR end ≥ to)); NIET
+    //    status='active'. Per-term = amount * (1+vat/100) (DB-check bevestigde
+    //    amount == sum(line_items)). NULL billing_cycle wordt afgeleid of
+    //    uitgesloten (voorheen: NULL→1 = jaar-groot als maandbedrag = landmijn).
+    //    Zelfde helper voedt v2-dashboard-tegel + Omzet-tab → 3-way identieke MRR.
     const { data: subsAll } = await supabaseAdmin
       .from('subscriptions')
-      .select('id, deal_id, amount, vat_percentage, billing_cycle, line_items, status, start_date, end_date');
-    const toDate = new Date(to);
-    for (const s of subsAll || []) {
-      // Actief op `to`-datum: status='active' en start <= to en (end null of end > to).
-      if (s.status !== 'active') continue;
-      if (s.start_date && new Date(s.start_date) > toDate) continue;
-      if (s.end_date && new Date(s.end_date) <= toDate) continue;
-      const cycleM = billingCycleMonths(s.billing_cycle);
-      let perTerm = sumInclBtw(s.line_items);
-      if (perTerm <= 0) {
-        // Legacy: amount + vat_percentage veld.
-        perTerm = (Number(s.amount) || 0) * (1 + (Number(s.vat_percentage) || 0) / 100);
-      }
-      mrrInclBtw += perTerm / cycleM;
+      .select(MRR_COLS.join(', '))
+      .limit(5000);
+    const mrrResult = computeCurrentMrr(subsAll || [], { asOf: to });
+    const mrrInclBtw = mrrResult.mrr;
+    if (mrrResult.nullCycle.excluded > 0 || mrrResult.excludedMrr > 0) {
+      console.log('[super-admin-omzet] MRR summary:',
+        'mrr=€' + mrrResult.mrr,
+        'count=' + mrrResult.count,
+        'nullCycle.total=' + mrrResult.nullCycle.total,
+        'nullCycle.inferred=' + mrrResult.nullCycle.inferred,
+        'nullCycle.excluded=' + mrrResult.nullCycle.excluded,
+        'excludedMrr=€' + mrrResult.excludedMrr);
     }
 
     // 6) Verkoop per producttype (voor prod-strip).
