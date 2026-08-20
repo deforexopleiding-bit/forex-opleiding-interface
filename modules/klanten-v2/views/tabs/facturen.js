@@ -75,7 +75,7 @@ async function actLoad(rootEl) {
 }
 
 function calcLocalKpis(items) {
-  let count = items.length, openCount = 0, openAmount = 0, overdueCount = 0, paidCount = 0;
+  let count = items.length, openCount = 0, openAmount = 0, overdueCount = 0, paidCount = 0, creditedCount = 0;
   for (const i of items) {
     const st = i.display_status || i.status;
     const amt = Number(i.amount_total) || 0;
@@ -84,31 +84,33 @@ function calcLocalKpis(items) {
     if (st === 'open')       { openCount++; openAmount += openAmt; }
     if (st === 'overdue')    { overdueCount++; openCount++; openAmount += openAmt; }
     if (st === 'paid')       paidCount++;
+    if (st === 'credited' || st === 'partially_credited') creditedCount++;
   }
-  return { count, openCount, openAmount, overdueCount, paidCount };
+  return { count, openCount, openAmount, overdueCount, paidCount, creditedCount };
 }
 
 function renderKpiStrip() {
   if (!state.items.length) return '';
   const k = calcLocalKpis(state.items);
+  // Ronde-13: gelijke 4-tegel-set als Abonnementen/Offertes/Creditnota's —
+  // per user-spec: Betaald · Openstaand · Gecrediteerd · Openstaand bedrag (€).
   return `
     <div class="ds-kpi-grid kv-fac-kpis">
-      <div class="ds-kpi" style="--kc:var(--blue);--kc-soft:var(--blue-soft)">
-        <div class="ds-kpi-top"><div class="ds-kpi-label">Facturen totaal</div></div>
-        <div class="ds-kpi-val">${k.count}</div>
-      </div>
-      <div class="ds-kpi" style="--kc:var(--amber);--kc-soft:var(--amber-soft)">
-        <div class="ds-kpi-top"><div class="ds-kpi-label">Open</div></div>
-        <div class="ds-kpi-val">${k.openCount}</div>
-        <div class="ds-kpi-foot"><span>${K().esc(fmtEur(k.openAmount))} openstaand</span></div>
-      </div>
-      <div class="ds-kpi" style="--kc:var(--rose);--kc-soft:var(--rose-soft)">
-        <div class="ds-kpi-top"><div class="ds-kpi-label">Verlopen</div></div>
-        <div class="ds-kpi-val">${k.overdueCount}</div>
-      </div>
       <div class="ds-kpi" style="--kc:var(--emerald);--kc-soft:var(--emerald-soft)">
         <div class="ds-kpi-top"><div class="ds-kpi-label">Betaald</div></div>
         <div class="ds-kpi-val">${k.paidCount}</div>
+      </div>
+      <div class="ds-kpi" style="--kc:var(--amber);--kc-soft:var(--amber-soft)">
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Openstaand</div></div>
+        <div class="ds-kpi-val">${k.openCount}</div>
+      </div>
+      <div class="ds-kpi" style="--kc:var(--violet);--kc-soft:var(--violet-soft)">
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Gecrediteerd</div></div>
+        <div class="ds-kpi-val">${k.creditedCount}</div>
+      </div>
+      <div class="ds-kpi" style="--kc:var(--slate);--kc-soft:var(--slate-soft)">
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Openstaand bedrag</div></div>
+        <div class="ds-kpi-val">${K().esc(fmtEur(k.openAmount))}</div>
       </div>
     </div>`;
 }

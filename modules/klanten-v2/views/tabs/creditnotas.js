@@ -86,10 +86,18 @@ function renderTable() {
 
 function renderKpiStrip() {
   if (!state.kpi) return '';
+  // Ronde-13: consistente ds-kpi-grid + accent-balken (--kc/--kc-soft),
+  // gelijk aan Abonnementen/Offertes/Facturen.
   return `
-    <div class="ds-kpi-strip">
-      <div class="ds-kpi"><div class="ds-kpi-l">Totaal creditnota's</div><div class="ds-kpi-v">${K().esc(String(state.kpi.count || 0))}</div></div>
-      <div class="ds-kpi"><div class="ds-kpi-l">Som bedragen</div><div class="ds-kpi-v mono">${K().esc(fmtEur(state.kpi.sum_amount))}</div></div>
+    <div class="ds-kpi-grid kv-cn-kpis">
+      <div class="ds-kpi" style="--kc:var(--violet);--kc-soft:var(--violet-soft)">
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Aantal creditnota's</div></div>
+        <div class="ds-kpi-val">${K().esc(String(state.kpi.count || 0))}</div>
+      </div>
+      <div class="ds-kpi" style="--kc:var(--slate);--kc-soft:var(--slate-soft)">
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Totaal gecrediteerd</div></div>
+        <div class="ds-kpi-val">${K().esc(fmtEur(state.kpi.sum_amount))}</div>
+      </div>
     </div>`;
 }
 

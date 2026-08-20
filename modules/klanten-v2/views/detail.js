@@ -16,7 +16,7 @@ import { renderCommunicatieTab } from './tabs/communicatie.js';
 import { renderOffertesTab }     from './tabs/offertes.js';
 import { renderAbonnementenTab } from './tabs/abonnementen.js?v=7';
 import { renderFacturenTab }     from './tabs/facturen.js';
-import { renderCreditnotasTab }  from './tabs/creditnotas.js?v=1';
+import { renderCreditnotasTab }  from './tabs/creditnotas.js?v=2';
 import { renderWanbetalersTab }  from './tabs/wanbetalers.js';
 import { renderAuditTab }        from './tabs/audit.js';
 

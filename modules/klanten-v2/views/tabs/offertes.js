@@ -115,20 +115,20 @@ function renderKpiStrip() {
   const k = calcKpis(state.rows);
   return `
     <div class="ds-kpi-grid kv-off-kpis">
-      <div class="ds-kpi" style="--kc:var(--blue);--kc-soft:var(--blue-soft)">
-        <div class="ds-kpi-top"><div class="ds-kpi-label">Offertes totaal</div></div>
-        <div class="ds-kpi-val">${k.count}</div>
-      </div>
-      <div class="ds-kpi" style="--kc:var(--emerald);--kc-soft:var(--emerald-soft)">
-        <div class="ds-kpi-top"><div class="ds-kpi-label">Bevestigd</div></div>
-        <div class="ds-kpi-val">${k.confirmed}</div>
-      </div>
       <div class="ds-kpi" style="--kc:var(--amber);--kc-soft:var(--amber-soft)">
-        <div class="ds-kpi-top"><div class="ds-kpi-label">Open</div></div>
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Open / uitstaand</div></div>
         <div class="ds-kpi-val">${k.open}</div>
       </div>
+      <div class="ds-kpi" style="--kc:var(--emerald);--kc-soft:var(--emerald-soft)">
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Geaccepteerd</div></div>
+        <div class="ds-kpi-val">${k.confirmed}</div>
+      </div>
+      <div class="ds-kpi" style="--kc:var(--rose);--kc-soft:var(--rose-soft)">
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Verlopen / afgewezen</div></div>
+        <div class="ds-kpi-val">${k.declined}</div>
+      </div>
       <div class="ds-kpi" style="--kc:var(--slate);--kc-soft:var(--slate-soft)">
-        <div class="ds-kpi-top"><div class="ds-kpi-label">Waarde (incl. BTW)</div></div>
+        <div class="ds-kpi-top"><div class="ds-kpi-label">Totale waarde</div></div>
         <div class="ds-kpi-val">${K().esc(fmtEur(k.totalAmount))}</div>
       </div>
     </div>`;
