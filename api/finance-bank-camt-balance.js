@@ -64,18 +64,23 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Actieve bank_accounts (canonical source). Bij lege lijst → geen
-    //    filter (fallback op alle CAMT-IBANs).
+    // 1. Alle bank_accounts (canonical registry). Voor F2 fix-ronde-2:
+    //    haal ook INACTIEVE rijen op zodat we onderscheid kunnen maken
+    //    tussen 'registered' (actief), 'inactive' (bekend maar uitgeschakeld)
+    //    en 'unregistered' (niet in bank_accounts). Filter voor grand-total
+    //    blijft actief-only via activeIbansSet.
     const { data: accts, error: acctsErr } = await supabaseAdmin
       .from('bank_accounts')
-      .select('iban')
-      .eq('is_active', true);
+      .select('iban, is_active');
     if (acctsErr) throw new Error('bank_accounts: ' + acctsErr.message);
-    const activeIbansSet = new Set(
-      (accts || [])
-        .map(a => normalizeIban(a.iban))
-        .filter(Boolean)
-    );
+    const activeIbansSet = new Set();
+    const inactiveIbansSet = new Set();
+    for (const a of (accts || [])) {
+      const k = normalizeIban(a.iban);
+      if (!k) continue;
+      if (a.is_active) activeIbansSet.add(k);
+      else             inactiveIbansSet.add(k);
+    }
     const filterOnActive = activeIbansSet.size > 0;
 
     // 2. Fetch camt_statements (recente eerst). Limit 500 = ruim voldoende
@@ -103,15 +108,15 @@ export default async function handler(req, res) {
     }
 
     // 3. Per-IBAN pak de EERSTE rij (= meest recente statement_to, tiebreak
-    //    op uploaded_at). Skip IBANs die niet in bank_accounts staan (indien
-    //    filter actief).
+    //    op uploaded_at). FIX-RONDE-2 F2: bewaar ALLE geldige IBAN's — ook
+    //    inactive en unregistered — zodat de UI ze zichtbaar kan maken met
+    //    een status-label. Grand-total telt alleen de actieve set.
     const byIban = new Map();
-    let ignoredCount = 0;
+    let ignoredCount = 0; // pseudo-accounts + rijen zonder IBAN
     for (const s of stmts) {
       const key = normalizeIban(s.account_iban);
-      if (!key) { ignoredCount++; continue; } // rij zonder IBAN — skip
-      if (!isValidIban(key)) { ignoredCount++; continue; } // pseudo-account (PAYPAL etc) — skip
-      if (filterOnActive && !activeIbansSet.has(key)) { ignoredCount++; continue; }
+      if (!key) { ignoredCount++; continue; }
+      if (!isValidIban(key)) { ignoredCount++; continue; } // PAYPAL etc.
       if (!byIban.has(key)) byIban.set(key, s);
     }
 
@@ -130,17 +135,34 @@ export default async function handler(req, res) {
       });
     }
 
-    const perAccount = Array.from(byIban.entries()).map(([iban, r]) => ({
-      account_iban:  iban,
-      balance_cents: Number(r.closing_balance_cents) || 0, // parser levert al signed
-      as_of_date:    r.statement_to,
-      statement_id:  r.id,
-      file_name:     r.file_name,
-      source:        'camt',
-    }));
+    // FIX-RONDE-2 F2: per-account met status-label.
+    //   'registered'   → IBAN in bank_accounts + is_active=true (telt in totaal)
+    //   'inactive'     → IBAN in bank_accounts + is_active=false
+    //   'unregistered' → IBAN nergens in bank_accounts (CAMT-only)
+    const perAccount = Array.from(byIban.entries()).map(([iban, r]) => {
+      let status = 'unregistered';
+      if (activeIbansSet.has(iban))        status = 'registered';
+      else if (inactiveIbansSet.has(iban)) status = 'inactive';
+      return {
+        account_iban:  iban,
+        balance_cents: Number(r.closing_balance_cents) || 0, // parser levert al signed
+        as_of_date:    r.statement_to,
+        statement_id:  r.id,
+        file_name:     r.file_name,
+        source:        'camt',
+        status,
+      };
+    });
+    // Grand-total telt alleen registered accounts (voorheen: alle passeerden
+    // sowieso al de filter). Behoud num_accounts_ignored voor UI-samenvatting.
+    const registeredAccounts = perAccount.filter(a => a.status === 'registered');
+    // num_accounts_ignored = accounts die NIET actief in bank_accounts staan
+    // (dus inactive + unregistered) plus pseudo-accounts/lege IBAN's.
+    ignoredCount += perAccount.filter(a => a.status !== 'registered').length;
 
     // 4. Sommering + peildatum + dominant-IBAN voor backwards-compat.
-    const totalCents = perAccount.reduce((a, x) => a + x.balance_cents, 0);
+    //    Alleen registered accounts tellen mee in grand-total.
+    const totalCents = registeredAccounts.reduce((a, x) => a + x.balance_cents, 0);
     const asOfDate = perAccount.reduce(
       (max, x) => (!max || (x.as_of_date && x.as_of_date > max)) ? x.as_of_date : max,
       null

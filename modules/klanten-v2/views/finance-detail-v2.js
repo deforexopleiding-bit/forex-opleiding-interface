@@ -231,13 +231,19 @@
 
     // Line-items — v1 hangt line_total_excl in aparte field. Fallback zelf berekenen.
     // Aggregate voor totalen-blok (subtotaal excl + BTW per tarief + totaal incl).
+    // FIX-RONDE-2 D3: bereken ONgerond en rond alleen bij weergave. Regelblok-
+    // TOTAAL komt uit inv.amount_total (single source of truth) — voorkomt
+    // cent-drift (€79,99 vs €80,00) tussen header en regelblok.
     let totalExcl = 0;
     const btwByRate = {};
     const linesHtml = _inv.lines.length ? _inv.lines.map(l => {
       const q = Number(l.quantity) || 0;
       const p = Number(l.unit_price_excl) || 0;
       const rate = Number(l.tax_rate) || 0;
-      const subExcl = Number(l.line_total_excl) || (q * p);
+      // Prefer q*p (ongerond) boven l.line_total_excl (backend-gerond op 2 dec).
+      const subExcl = (Number.isFinite(q) && Number.isFinite(p) && (q > 0 || p > 0))
+        ? (q * p)
+        : (Number(l.line_total_excl) || 0);
       const btwAmt = subExcl * rate / 100;
       const incl = subExcl + btwAmt;
       totalExcl += subExcl;
@@ -256,16 +262,16 @@
       </tr>`;
     }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-3);padding:20px">Geen regels</td></tr>';
     const totalBtw = Object.values(btwByRate).reduce((a, b) => a + b, 0);
-    const totalIncl = totalExcl + totalBtw;
-    // Totalen-blok (1-op-1 met offerte-detail-v2 patroon: subtotaal excl + BTW
-    // per tarief in oplopende volgorde + totaal incl).
+    // FIX-RONDE-2 D3: header-totaal (inv.amount_total) is de canonical bron.
+    // Regelblok toont EXACT dit getal — voorkomt drift bij ronding-mismatch.
+    const canonicalTotalIncl = Number(inv.amount_total || inv.total || (totalExcl + totalBtw));
     const totalsHtml = _inv.lines.length ? `
       <div style="padding: 8px 12px 12px;">
         <div class="fnd-row"><span class="lbl">Subtotaal excl. BTW</span><span class="num mono">${eur(totalExcl)}</span></div>
         ${Object.keys(btwByRate).sort((a, b) => Number(a) - Number(b)).map(r =>
           `<div class="fnd-row"><span class="lbl">BTW ${r}%</span><span class="num mono">${eur(btwByRate[r])}</span></div>`
         ).join('')}
-        <div class="fnd-total-big"><span>Totaal incl. BTW</span><span>${eur(totalIncl)}</span></div>
+        <div class="fnd-total-big"><span>Totaal incl. BTW</span><span>${eur(canonicalTotalIncl)}</span></div>
       </div>` : '';
 
     return `<div class="fnd-app">
@@ -309,9 +315,23 @@
           <div class="fnd-card-b">
             <div class="fnd-row"><span class="lbl">Factuurdatum</span><span>${esc(fmtDate(inv.issue_date))}</span></div>
             <div class="fnd-row"><span class="lbl">Vervaldatum</span><span>${esc(fmtDate(inv.due_date))}</span></div>
-            <div class="fnd-row"><span class="lbl">Totaal</span><span><b>${eur(inv.amount_total || inv.total)}</b></span></div>
-            <div class="fnd-row"><span class="lbl">Betaald</span><span>${eur(inv.paid || 0)}</span></div>
-            <div class="fnd-row"><span class="lbl">Open</span><span><b style="color:${(inv.open || 0) > 0 ? 'var(--rose)' : 'var(--emerald)'}">${eur(inv.open || 0)}</b></span></div>
+            ${(() => {
+              // FIX-RONDE-2 D2: leid Open af als max(0, total - paid - credited).
+              // inv.open uit backend kan stale/0 zijn terwijl total & paid dat
+              // niet zijn — dat gaf "Open €0" bij een factuur met €80 open.
+              // Alleen inv.amount_open honoreren als hij overeenkomt.
+              const totNumC  = Number(inv.amount_total || inv.total || 0);
+              const paidNumC = Number(inv.paid || inv.amount_paid || 0);
+              const credNumC = Number(inv.credited_amount || 0);
+              const derivedOpen = Math.max(0, totNumC - paidNumC - credNumC);
+              const backendOpen = (typeof inv.amount_open === 'number') ? Number(inv.amount_open) : null;
+              const backendMatches = backendOpen != null && Math.abs(backendOpen - derivedOpen) < 0.01;
+              const openShown = backendMatches ? backendOpen : derivedOpen;
+              return `
+            <div class="fnd-row"><span class="lbl">Totaal</span><span><b>${eur(totNumC)}</b></span></div>
+            <div class="fnd-row"><span class="lbl">Betaald</span><span>${eur(paidNumC)}</span></div>
+            <div class="fnd-row"><span class="lbl">Open</span><span><b style="color:${openShown > 0 ? 'var(--rose)' : 'var(--emerald)'}">${eur(openShown)}</b></span></div>`;
+            })()}
           </div>
         </div>
       </div>

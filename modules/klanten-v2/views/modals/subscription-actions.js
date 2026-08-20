@@ -348,19 +348,23 @@ function _upWire() {
 }
 function _upRerender() { D().openModal({ head: _upHead(), body: _upBody(), foot: _upFoot() }); _upWire(); }
 
-// BROK G1 (2026-08-19): termijnbedrag-fallback. sub-endpoint retourneert
-// soms `amount`, soms `amount_per_termijn`, soms alleen `line_items[0].amount`
-// (per CLAUDE.md subscription-notes). Voorheen: alleen sub.amount → "€ 0,00"
-// bij subs waar dat veld null was, ondanks bestaand bedrag elders.
+// FIX-RONDE-2 G1: termijnbedrag = SOM van álle line_items (excl. BTW), niet
+// alleen line_items[0]. Bij multi-rate abo's (bv. Somchai: 1350@9% + 2600@21%
+// = 3950 excl. per termijn) toonde de vorige fallback €1350 — het eerste
+// item — waardoor het bedrag met factor >2 miste. TL heeft geen amount-update
+// endpoint dus het veld blijft read-only; alleen de weergave klopte niet.
+// Fallback-order: som(line_items) → sub.amount → amount_per_termijn → amount_excl.
 function _subAmountExcl(s) {
   if (s == null) return 0;
-  const cand = [
-    s.amount,
-    s.amount_per_termijn,
-    s.amount_excl,
-    (s.line_items && s.line_items[0] && s.line_items[0].amount),
-    (s.line_items && s.line_items[0] && s.line_items[0].amount_excl),
-  ];
+  if (Array.isArray(s.line_items) && s.line_items.length) {
+    let sum = 0;
+    for (const li of s.line_items) {
+      const n = Number(li?.amount ?? li?.amount_excl);
+      if (Number.isFinite(n)) sum += n;
+    }
+    if (sum > 0) return sum;
+  }
+  const cand = [s.amount, s.amount_per_termijn, s.amount_excl];
   for (const v of cand) {
     const n = Number(v);
     if (Number.isFinite(n) && n > 0) return n;

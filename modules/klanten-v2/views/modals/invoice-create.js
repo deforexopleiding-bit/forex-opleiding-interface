@@ -202,9 +202,19 @@ function renderLineRow(l, idx) {
   const errKeyDesc = state.errors[`lines.${idx}.description`];
   const errKeyQty  = state.errors[`lines.${idx}.quantity`];
   const errKeyPri  = state.errors[`lines.${idx}.unit_price_excl`];
-  const total = (Number(l.quantity) || 0) * (Number(l.unit_price_excl) || 0);
+  // FIX-RONDE-2 E4: bij IC/outside_eu → regel-BTW forceren op 0% + prijs incl.
+  // = prijs excl. + dropdown disabled. Anders zag men "€1000 excl. + 21% =
+  // €1210 incl." per regel terwijl het totaal wel klopte (BTW verlegd).
+  const st = String(state.form.sale_type || 'domestic');
+  const btwWaived = (st === 'intracommunautair' || st === 'outside_eu');
+  const priceExcl = Number(l.unit_price_excl) || 0;
+  const qty       = Number(l.quantity) || 0;
+  const total     = qty * priceExcl;
+  // Bij btwWaived: toon incl == excl, geen BTW-opslag.
+  const inclShown = btwWaived ? priceExcl : (Number(l.unit_price_incl) || 0);
+  const vatDisAttr = btwWaived ? 'disabled title="BTW verlegd — regel-tarief geldt niet"' : '';
   return `
-    <tr>
+    <tr${btwWaived ? ' data-kv-btw-waived="1"' : ''}>
       <td>
         <input type="text" class="kv-invupd-inp" data-kv-invnew-lf="description" data-kv-invnew-li="${idx}" value="${esc(l.description)}" placeholder="Omschrijving…" />
         ${errKeyDesc ? `<div class="kv-edit-field-msg">${esc(errKeyDesc)}</div>` : ''}
@@ -218,11 +228,13 @@ function renderLineRow(l, idx) {
         ${errKeyPri ? `<div class="kv-edit-field-msg">${esc(errKeyPri)}</div>` : ''}
       </td>
       <td class="r">
-        <input type="number" class="kv-invupd-inp kv-invupd-inp-num" data-kv-invnew-lf="unit_price_incl" data-kv-invnew-li="${idx}" value="${esc(String(l.unit_price_incl))}" min="0" step="0.01" inputmode="decimal" title="Prijs inclusief BTW (bewerken zet regel op incl-modus)" />
+        <input type="number" class="kv-invupd-inp kv-invupd-inp-num" data-kv-invnew-lf="unit_price_incl" data-kv-invnew-li="${idx}" value="${esc(String(inclShown))}" min="0" step="0.01" inputmode="decimal" ${btwWaived ? 'disabled title="BTW verlegd — incl. = excl."' : 'title="Prijs inclusief BTW (bewerken zet regel op incl-modus)"'} />
       </td>
       <td class="r">
-        <select class="kv-invupd-inp kv-invupd-inp-vat" data-kv-invnew-lf="vat_percentage" data-kv-invnew-li="${idx}">
-          ${VAT_OPTIONS.map((v) => `<option value="${v}" ${Number(l.vat_percentage) === v ? 'selected' : ''}>${v}%</option>`).join('')}
+        <select class="kv-invupd-inp kv-invupd-inp-vat" data-kv-invnew-lf="vat_percentage" data-kv-invnew-li="${idx}" ${vatDisAttr}>
+          ${btwWaived
+            ? `<option value="0" selected>0% (verlegd)</option>`
+            : VAT_OPTIONS.map((v) => `<option value="${v}" ${Number(l.vat_percentage) === v ? 'selected' : ''}>${v}%</option>`).join('')}
         </select>
       </td>
       <td class="r mono" data-kv-invnew-row-total="${idx}">${esc(fmtEur(total))}</td>

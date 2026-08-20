@@ -291,7 +291,7 @@
     // + `_newInv`-state hierbeneden zijn dead-code — kunnen weg in
     // vervolg-cleanup-brok.
     try {
-      const mod = await import('./modals/invoice-create.js?v=6');
+      const mod = await import('./modals/invoice-create.js?v=7');
       mod.openInvoiceCreateModal({
         onSuccess: () => {
           if (typeof window.__finLoadInv === 'function') window.__finLoadInv();
@@ -905,17 +905,26 @@
         fnSearch(_cn, 'Zoek creditnota-nr / klant…', fetchCn),
       ])}
       ${fnPager(_cn, total, fetchCn)}
-      ${H.table(
-        [{ l: 'Creditnota-nr' }, { l: 'Klant' }, { l: 'Bij factuur', cls: 'optional' }, { l: 'Datum', cls: 'r optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Status' }],
-        items.map(cn => [
-          `<span class="sv-off-nr">${cn.credit_note_number || ('#' + String(cn.id || '').slice(0, 8))}</span>`,
-          `<div class="cell-main-wrap"><div class="av av-sm">${H.av(cn.customer_name || '?')}</div><span class="cell-main">${cn.customer_name || '—'}</span></div>`,
-          `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${cn.invoice_number || '—'}</span>`,
-          `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(cn.credit_note_date)}</span>`,
-          `<span class="mono">${eur(cn.amount_total)}</span>`,
-          H.pill('neutral', cn.status || '—'),
-        ])
-      )}
+      <div class="kv-cn-readonly-tbl">
+        ${H.table(
+          [{ l: 'Creditnota-nr' }, { l: 'Klant' }, { l: 'Bij factuur', cls: 'optional' }, { l: 'Datum', cls: 'r optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Status' }],
+          items.map(cn => [
+            `<span class="sv-off-nr">${cn.credit_note_number || ('#' + String(cn.id || '').slice(0, 8))}</span>`,
+            `<div class="cell-main-wrap"><div class="av av-sm">${H.av(cn.customer_name || '?')}</div><span class="cell-main">${cn.customer_name || '—'}</span></div>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${cn.invoice_number || '—'}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(cn.credit_note_date)}</span>`,
+            `<span class="mono">${eur(cn.amount_total)}</span>`,
+            H.pill('neutral', cn.status || '—'),
+          ])
+        )}
+      </div>
+      <style>
+        /* FIX-RONDE-2 F1: creditnota-rijen zijn read-only (geen klikdoel).
+           Neutraliseer cursor:pointer + hover-highlight die default op tbody
+           tr in de shared table-stijl staan. */
+        .kv-cn-readonly-tbl table tbody tr { cursor: default !important; }
+        .kv-cn-readonly-tbl table tbody tr:hover { background: transparent !important; }
+      </style>
       ${fnPager(_cn, total, fetchCn)}
       ${!items.length && !_cn.loading ? `<div class="sv-empty">${_cn.error || 'Geen creditnota\'s in deze view.'}</div>` : ''}`;
   }
@@ -982,17 +991,26 @@
         if (!per.length) {
           return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-top:10px;font-size:12px;color:var(--text-3)">Geen bank-accounts met CAMT-statements. Upload een CAMT-file of controleer bank_accounts.is_active.</div>`;
         }
+        // FIX-RONDE-2 F2: endpoint stuurt nu ALLE geldige IBAN's mee met
+        // status-label ('registered' / 'inactive' / 'unregistered'). Toon
+        // ze allemaal — pastel-badge maakt duidelijk waarom een IBAN niet
+        // meetelt in de grand-total. Waarschuwing blijft als samenvatting.
         return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-top:10px">
           <div style="padding:9px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:12.5px">Slotsaldo per IBAN (${per.length})</div>
           ${per.map((a) => {
             const sign = a.balance_cents == null ? 'text-3' : (a.balance_cents > 0 ? 'emerald' : (a.balance_cents < 0 ? 'rose' : 'text-3'));
-            return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;align-items:center">
-              <div class="mono">${a.account_iban || a.iban || '—'}</div>
+            const st = String(a.status || 'registered');
+            const badge = st === 'registered' ? '' :
+                          st === 'inactive'   ? '<span style="display:inline-block;margin-left:8px;padding:1px 6px;border-radius:6px;font-size:10.5px;font-weight:600;background:var(--amber-soft);color:var(--amber);border:1px solid var(--amber-line)" title="Bank-account bestaat maar is_active=false — telt niet mee in grand-total">inactief</span>' :
+                          '<span style="display:inline-block;margin-left:8px;padding:1px 6px;border-radius:6px;font-size:10.5px;font-weight:600;background:var(--rose-soft);color:var(--rose);border:1px solid var(--rose-line)" title="IBAN staat niet in bank_accounts — voeg toe om te laten meetellen">niet-geregistreerd</span>';
+            const rowOpacity = st === 'registered' ? '' : 'opacity:.85';
+            return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;align-items:center;${rowOpacity}">
+              <div class="mono">${a.account_iban || a.iban || '—'}${badge}</div>
               <div class="mono" style="text-align:right;color:var(--${sign});font-weight:600">${a.balance_cents == null ? '<span style="color:var(--text-3);font-weight:400">geen data</span>' : eurC(a.balance_cents)}</div>
               <div style="text-align:right;font-size:11px;color:var(--text-3)">${a.as_of_date ? 't/m ' + dstr(a.as_of_date) : '—'}${a.file_name ? ' · <span title="' + a.file_name + '">' + (String(a.file_name).length > 20 ? String(a.file_name).slice(0, 20) + '…' : a.file_name) + '</span>' : ''}</div>
             </div>`;
           }).join('')}
-          ${bal.num_accounts_ignored > 0 ? `<div style="padding:8px 14px;font-size:11px;color:var(--amber);background:var(--amber-soft)">⚠ ${bal.num_accounts_ignored} CAMT-IBAN(s) genegeerd — niet in bank_accounts of niet is_active.</div>` : ''}
+          ${bal.num_accounts_ignored > 0 ? `<div style="padding:8px 14px;font-size:11px;color:var(--amber);background:var(--amber-soft)">⚠ ${bal.num_accounts_ignored} IBAN(s) niet meegeteld — inactief of niet-geregistreerd (zie labels boven).</div>` : ''}
         </div>`;
       })()}
       ${H.toolbar([
