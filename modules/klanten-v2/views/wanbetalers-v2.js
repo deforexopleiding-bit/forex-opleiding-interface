@@ -3835,6 +3835,30 @@
     if (!cid) return;
     const bag = _live.caseFaithful.pipeByCust[cid] = _live.caseFaithful.pipeByCust[cid] || { loading: false, data: null, error: null };
     if (bag.loading || bag.data) return;
+    // BROK C (2026-08-19): skip fetch als overzicht al zegt dat er GEEN open
+    // factuur is. dunning-pipeline-detail geeft dan 404 (klant is niet in
+    // pipeline-customers zonder actieve dunning-run) — dat is een verwachte
+    // lege staat, niet een fout. Rode 404 in de console = ruis; door voor-
+    // check te skippen voorkomen we zowel de netwerk-call ALS de log.
+    // Fallback: als overzicht nog niet geladen is, doen we de fetch alsnog
+    // (server is bron van waarheid; we willen geen valse "geen data" bij
+    // race op de eerste render).
+    const ovRow = asArr(_live.overzicht.items).find((r) => String(r.customer_id || r.id) === String(cid));
+    const knownZero = ovRow && Number(ovRow.open_invoice_count) === 0;
+    if (knownZero) {
+      // Synthetische lege-state-response — same shape als de endpoint.
+      // De UI (_caseFactuurCardHtml) checkt op openInvs.length === 0 → toont
+      // netjes "Geen open factuur"-empty-state.
+      bag.data = {
+        customer:       { id: cid, name: ovRow.customer_name || null },
+        pipeline:       null,
+        open_invoices:  [],
+        _synthetic:     true,  // debug-marker
+      };
+      bag.loading = false;
+      _renderCaseSheet();
+      return;
+    }
     bag.loading = true; bag.error = null;
     const j = await tryFetch('case:pipe:' + cid, `/api/dunning-pipeline-detail?customer_id=${encodeURIComponent(cid)}`, 8000);
     if (j && j.error) bag.error = j.error;
@@ -6315,6 +6339,7 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+  console.debug('[wanbetalers-v2] v=36 BROK C: _fetchCasePipeline skipt de /api/dunning-pipeline-detail-call bij een klant met open_invoice_count === 0 in overzicht — synthetische empty-response (open_invoices:[], _synthetic:true) i.p.v. netwerk-404. Voorkomt rode "GET .. 404" in console + de tryFetch console.warn. Fallback: zonder overzicht (race) fetchen we nog steeds. UI-render onveranderd — _caseFactuurCardHtml toont "Geen open factuur" bij lege lijst.');
   console.debug('[wanbetalers-v2] v=35 BROK WB-FIX-6: klantnaam als klikdoel — thread-header <b>naam</b> + right klantgegevens-paneel naam-heading. Beide krijgen cursor:pointer + hover-underline (brand-color) + click -> __wbxOpenCase(cid, {customer_name}). event.stopPropagation zodat kop-knoppen (✓/+/👤/⋮) niet dubbel triggeren. Wordt niet klikbaar als cust.id ontbreekt (unmatched-nummer conv).');
   console.debug('[wanbetalers-v2] v=34 BROK WB-FIX-5: (#1) Volgende-badge mapt nu op ECHTE overzicht-velden next_action_step_type (email/whatsapp/wait/task/stop/resume_dunning) + next_action_step_title heuristiek (Bel/Brief/Incasso/Herinnering). Voorheen: mijn code checkte non-bestaande velden -> altijd "Actie"-fallback. (#2) MANUAL_FOLLOWUP-splitting op payload.kind: kind=call -> "📞 Belafspraak" (Bel-knop OK), kind=letter -> "✉ Brief-taak" (Bel-knop weg, "Naar brief-flow"-knop naar SURFACE B WIK-card), kind=other -> "📝 Follow-up". Fallback: title-regex (bv. "Stuur WIK-14-dagenbrief" -> letter). Groepering ook via effectieve type — brief-taken en bel-taken vallen nu in APARTE groepen. Ook: MANUAL_PROPOSE_ARRANGEMENT label naar "Regeling voorstellen" (v1-parity, was "Arrangement voorstellen").');
   console.debug('[wanbetalers-v2] v=33 BROK WB-POLISH-4: dead-code cleanup — gesprekkenView + _gspListInnerHtml + _gspDetailHtml body volledig verwijderd (~180 regels dood-code weg). _repaintGspList + _repaintGspDetail zijn no-op stubs (callers _fetchCallLog/_fetchTimeline/__wbxCallSave/__wbxCallSet* + __wbxNoteSave triggeren nu geen render meer; case-sheet SURFACE B doet z\'n eigen repaint). __wbxCallSet*/__wbxGspSelect/__wbxGspSearch* blijven als window-refs (geen callers meer; volgende cleanup-brok kan die schrappen).');
