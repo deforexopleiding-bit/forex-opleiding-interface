@@ -136,7 +136,7 @@
   .sad-card{background:var(--sad-surface);backdrop-filter:blur(18px);border:1px solid var(--sad-border);border-radius:var(--r);padding:22px;position:relative;overflow:hidden;box-shadow:0 20px 50px -30px rgba(0,0,0,.4)}
 
   /* Omzet-card */
-  .sad-otop{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
+  .sad-otop{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:14px}
   .sad-ot{background:var(--sad-surface-2);border:1px solid var(--sad-border);border-radius:12px;padding:12px 14px}
   .sad-ot .sad-l{font-size:11px;color:var(--sad-dim);font-weight:600;margin-bottom:4px}
   .sad-ot .sad-v{font-family:var(--fd);font-size:22px;font-weight:800;letter-spacing:-.5px}
@@ -352,12 +352,11 @@
         <span id="sadOmzetTag" style="font-size:11px;color:var(--sad-dim)">deze maand</span>
       </div>
       <div class="sad-otop">
-        <div class="sad-ot"><div class="sad-l">Losse verkopen</div><div class="sad-v">€<span id="sadKpiLos">—</span></div><div class="sad-chg" id="sadKpiLosSub">—</div></div>
         <div class="sad-ot mrr"><div class="sad-l">Abonnementen (MRR)</div><div class="sad-v">€<span id="sadKpiMrr">—</span></div><div class="sad-chg" id="sadKpiMrrSub">—</div></div>
         <div class="sad-ot"><div class="sad-l">Totaal incl. btw</div><div class="sad-v">€<span id="sadKpiTot">—</span></div><div class="sad-chg" id="sadKpiTotSub">— offertes</div></div>
       </div>
       <div class="sad-chart-wrap"><canvas id="sadOmzetChart"></canvas></div>
-      <div class="sad-lg"><span><i style="background:var(--brand-400)"></i>Losse verkopen</span><span><i style="background:var(--accent)"></i>Abonnementen (MRR)</span></div>
+      <div class="sad-lg"><span><i style="background:var(--brand-400)"></i>Omzet offertes</span><span><i style="background:var(--accent)"></i>Abonnementen (MRR)</span></div>
       <div class="sad-prodstrip">
         <div class="sad-ps-lbl">Verkocht <span id="sadPsPeriod">deze maand</span></div>
         <!-- Product-strip 2026-08-04: 6 tiles (was 4). TL-imports die vroeger
@@ -537,7 +536,6 @@ async function sadLoadOmzet() {
   try {
     const d = await sadFetch(`/api/super-admin-omzet?${qs}`);
     const k = d.kpis || {};
-    document.getElementById('sadKpiLos').textContent = sadFmtEur(k.los_incl_btw);
     document.getElementById('sadKpiMrr').textContent = sadFmtEur(k.abo_mrr_incl_btw);
     document.getElementById('sadKpiTot').textContent = sadFmtEur(k.totaal_incl_btw);
     document.getElementById('sadKpiTotSub').textContent = (k.deal_count || 0) + ' offertes';
@@ -570,7 +568,6 @@ async function sadLoadOmzet() {
     sadRenderChart(d.trend || []);
   } catch (e) {
     console.warn('[sad-omzet]', e?.message || e);
-    document.getElementById('sadKpiLos').textContent = 'fout';
     document.getElementById('sadKpiMrr').textContent = 'fout';
     document.getElementById('sadKpiTot').textContent = 'fout';
   }
@@ -581,14 +578,19 @@ function sadRenderChart(trend) {
   if (!canvas || !window.Chart) return;
   if (sadState.chart) sadState.chart.destroy();
   const labels = trend.map((t) => t.period);
-  const losData = trend.map((t) => t.los_incl_btw || 0);
+  // "Omzet offertes" = getekende-offertes-omzet per periode-bucket.
+  // Zelfde databron als de "Totaal incl. btw"-KPI (super-admin-omzet.js
+  // definieert kpis.totaal_incl_btw = losInclBtw + aboNieuwInclBtw). Per
+  // periode-punt is dat de som van trend.los_incl_btw + trend.abo_nieuw_incl_btw
+  // — aparte cumulatie in dezelfde trendMap.
+  const offertesData = trend.map((t) => (t.los_incl_btw || 0) + (t.abo_nieuw_incl_btw || 0));
   const abo = trend.map((t) => t.abo_mrr_incl_btw || 0);
   sadState.chart = new Chart(canvas, {
     type: 'line',
     data: {
       labels,
       datasets: [
-        { label: 'Losse verkopen', data: losData, borderColor: '#46a5cc', backgroundColor: 'rgba(70,165,204,.15)', fill: true, tension: 0.3, borderWidth: 2 },
+        { label: 'Omzet offertes', data: offertesData, borderColor: '#46a5cc', backgroundColor: 'rgba(70,165,204,.15)', fill: true, tension: 0.3, borderWidth: 2 },
         { label: 'Abonnementen (MRR)', data: abo, borderColor: '#46e0c8', backgroundColor: 'rgba(70,224,200,.10)', fill: true, tension: 0.3, borderWidth: 2 },
       ],
     },
