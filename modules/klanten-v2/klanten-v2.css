@@ -432,6 +432,37 @@
   .kv-fac-tbl .ds-tbl thead th, .kv-fac-tbl .ds-tbl tbody td { padding: 8px 10px; }
 }
 
+/* ═══ FIX-2 (2026-08-20): Compacte klant-detail lijst-blokken ════════════
+   Abonnementen (kv-abo-*), Facturen (kv-fac-*) — en Creditnota's die
+   dezelfde ds-tbl-vorm gebruiken. Kleinere padding + rijhoogte zodat
+   meer rijen in beeld passen zonder scrollen. Kolommen + status-pills
+   blijven leesbaar; bedragen rechts uitgelijnd via bestaande .r-class. */
+
+/* Abonnementen: cards compacter — smaller padding, minder tussenruimte. */
+.kv-abo-list { gap: 8px; }
+.kv-abo-card { padding: 10px 12px; }
+.kv-abo-card-head { margin-bottom: 6px; }
+.kv-abo-card-name { font-size: 14px; }
+.kv-abo-card-amount .mono { font-size: 15px; }
+.kv-abo-card-amount-sub { font-size: 10.5px; }
+.kv-abo-card-grid { padding: 6px 0; gap: 2px 14px; }
+.kv-abo-card-foot { padding-top: 8px; gap: 6px; }
+.kv-abo-card-foot .ds-btn-sm { padding: 3px 8px; font-size: 11.5px; }
+
+/* Facturen + Creditnota's: table-rows compacter. */
+.kv-fac-tbl .ds-tbl thead th,
+.kv-fac-tbl .ds-tbl tbody td { padding: 6px 10px; font-size: 12.5px; }
+.kv-fac-tbl .ds-tbl thead th { font-size: 10.5px; }
+.kv-fac-tbl .ds-tbl tbody tr td { line-height: 1.35; }
+
+/* Zelfde compacte look toepassen op eventuele creditnota-tabel-wrapper. */
+.kv-cn-tbl .ds-tbl thead th,
+.kv-cn-tbl .ds-tbl tbody td { padding: 6px 10px; font-size: 12.5px; }
+.kv-cn-tbl .ds-tbl thead th { font-size: 10.5px; }
+
+/* Header-blok gelijktrekken: alle drie krijgen dezelfde head-styling. */
+.kv-fac { gap: 10px; }
+
 /* ═══ Wanbetalers-tab (PR-B6, READ-ONLY, beschermde zone) ═════════════════ */
 
 .kv-wbp { display: flex; flex-direction: column; gap: 14px; }
@@ -1059,26 +1090,39 @@
   background: var(--rose-soft, var(--surface-2));
 }
 
-/* Confirm-overlay boven de form (in-modal, geen 2e DFO-modal) */
+/* Confirm-overlay boven de form (in-modal, geen 2e DFO-modal).
+   FIX-3 (2026-08-20): kleinere top-padding + inner-max-height + inner-
+   scroll zodat de type-gate ('Typ BOEK EN VERZEND …') + input altijd
+   in beeld blijven, ook op kleinere schermen. Modal-foot (Terug / Boeken
+   en verzenden) leeft buiten deze overlay (in #dfoModalFoot) en blijft
+   dus altijd sticky-onderaan zichtbaar. */
 .kv-invnew-overlay {
   position: absolute; inset: 0;
   background: rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(2px);
   display: flex; align-items: flex-start; justify-content: center;
-  padding: 40px 20px;
+  padding: 16px 20px;
   z-index: 5;
   overflow-y: auto;
 }
 :root[data-theme="dark"] .kv-invnew-overlay { background: rgba(0, 0, 0, 0.55); }
 .kv-invnew-overlay-inner {
   width: 100%; max-width: 520px;
+  max-height: calc(100% - 0px);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-lg, 0 12px 40px rgba(0, 0, 0, 0.2));
-  padding: 18px 20px;
-  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 10px;
+  overflow-y: auto;
 }
+/* Compacte content-blocks binnen de overlay: notice + recap + type-gate. */
+.kv-invnew-overlay .kv-invsend-notice { padding: 10px 12px; }
+.kv-invnew-overlay .kv-invsend-notice-t { font-size: 13px; margin-bottom: 2px; }
+.kv-invnew-overlay .kv-invsend-notice-s { font-size: 12px; line-height: 1.35; }
+.kv-invnew-overlay .kv-invsend-recap-row { padding: 3px 0; font-size: 12.5px; }
+.kv-invnew-overlay .kv-invcredit-typegate { margin-top: 4px; }
 /* Zodat overlay t.o.v. modal-body positioneert */
 #dfoModalBody { position: relative; }
 

@@ -731,7 +731,7 @@
     }
     return `<div class="sw-step">
       <h2 class="sw-step-title">Kies klant</h2>
-      <p class="sw-step-sub">Zoek een bestaande klant. Voor een nieuwe klant: <a href="/modules/subscription-wizard.html" style="color:var(--m);text-decoration:underline">gebruik de v1-wizard</a> (voegt nieuwe klant + TL-lookup toe).</p>
+      <p class="sw-step-sub">Zoek een bestaande klant.</p>
       ${_sub.customer ? `
         <div class="kv-onb-meta">
           <div class="kv-onb-meta-row"><span>Gekozen klant</span><b>${esc(_sub.customer.name || (_sub.customer.first_name + ' ' + (_sub.customer.last_name || '')))}</b></div>
