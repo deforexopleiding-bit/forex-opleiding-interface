@@ -10,6 +10,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
+import { computeCurrentMrr } from './_lib/mrr-compute.js';
 
 const CYCLE_M = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
 function cycleMonths(label) {
@@ -59,8 +60,23 @@ export default async function handler(req, res) {
     const activeInPeriod = list.filter(s => s.start_date && s.start_date <= periodEnd && (!s.end_date || s.end_date >= periodStart));
     const churnedInPeriod = list.filter(s => s.end_date && s.end_date >= periodStart && s.end_date <= periodEnd);
 
-    const currentMrr = active.reduce((a, s) => a + mrrOf(s), 0);
-    const avgMrr = active.length ? currentMrr / active.length : 0;
+    // current_mrr via gedeelde helper zodat dit getal 1:1 gelijk is aan
+    // finance-dashboard-counts.mrrSubscriptions én super-admin dashboard.
+    // Populatie = snapshot op periodEnd (NIET status='active'), NULL-cycle
+    // wordt afgeleid of uitgesloten (voorkomt landmijn van jaar-groot subs
+    // die als maandbedrag zouden tellen). Rest van dit endpoint (trend +
+    // drilldown + by_traject) blijft eigen mrrOf() gebruiken — die aggregeert
+    // per-maand bucket met eigen semantiek.
+    const mrrResult = computeCurrentMrr(list, { asOf: periodEnd });
+    const currentMrr = mrrResult.mrr;
+    if (mrrResult.nullCycle.excluded > 0) {
+      console.log('[sales-mrr-report] MRR summary:',
+        'mrr=€' + mrrResult.mrr,
+        'count=' + mrrResult.count,
+        'nullCycle.excluded=' + mrrResult.nullCycle.excluded,
+        'excludedMrr=€' + mrrResult.excludedMrr);
+    }
+    const avgMrr = mrrResult.count ? currentMrr / mrrResult.count : 0;
     const cancellationRate = activeInPeriod.length ? churnedInPeriod.length / activeInPeriod.length : 0;
 
     // Maand-reeks -12..+12 (MRR-bijdrage gedeeld door cyclus). Altijd 12+12, ongeacht periode.

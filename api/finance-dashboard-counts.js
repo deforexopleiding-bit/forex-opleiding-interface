@@ -34,6 +34,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { aggregateActiveBankBalances } from './_lib/bank-balance.js';
+import { computeCurrentMrr, REQUIRED_SUB_COLUMNS as MRR_COLS } from './_lib/mrr-compute.js';
 
 const VALID_PERIODS = ['today', 'week', 'month', 'quarter', 'year'];
 const SWR_TTL_MS = 5 * 60 * 1000; // 5 min
@@ -289,23 +290,32 @@ async function computeMentorBonusPending() {
 }
 
 async function computeMrrSubscriptions() {
-  // Som van amount / billingCycleMonths(billing_cycle) over actieve subs.
+  // Delegeert aan gedeelde helper api/_lib/mrr-compute.js zodat dit getal
+  // 1:1 gelijk is aan sales-mrr-report.current_mrr. Populatie = SNAPSHOT
+  // (start ≤ vandaag AND (end NULL OR end ≥ vandaag)), NIET status='active'.
+  // NULL billing_cycle wordt afgeleid uit term_count/duur/description; kan het
+  // niet betrouwbaar → sub uitgesloten (de €10k-landmijn: 34 subs met amount
+  // ≥ €1000 die als maandbedrag telde bij NULL→1-default).
   try {
     const { data, error } = await supabaseAdmin
       .from('subscriptions')
-      .select('amount, billing_cycle')
-      .eq('status', 'active');
+      .select(MRR_COLS.join(', '))
+      .limit(5000);
     if (error) {
       console.error('[finance-dashboard-counts] MRR fail:', error.message);
       return 0;
     }
-    let mrr = 0;
-    for (const r of (data || [])) {
-      const amt = Number(r.amount) || 0;
-      const months = billingCycleMonths(r.billing_cycle);
-      mrr += amt / months;
+    const r = computeCurrentMrr(data || []);
+    if (r.nullCycle.excluded > 0 || r.excludedMrr > 0) {
+      console.log('[finance-dashboard-counts] MRR summary:',
+        'mrr=€' + r.mrr,
+        'count=' + r.count,
+        'nullCycle.total=' + r.nullCycle.total,
+        'nullCycle.inferred=' + r.nullCycle.inferred,
+        'nullCycle.excluded=' + r.nullCycle.excluded,
+        'excludedMrr=€' + r.excludedMrr);
     }
-    return Math.round(mrr * 100) / 100;
+    return r.mrr;
   } catch (e) {
     console.error('[finance-dashboard-counts] MRR exception:', e?.message);
     return 0;
