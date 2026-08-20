@@ -84,7 +84,8 @@
     if (teamMembersPromise) return teamMembersPromise;
     teamMembersPromise = (async function () {
       try {
-        var res = await window.AgentShared.apiFetch('/api/profiles-list');
+        // FEAT-4 (2026-08-20): staff_only filter server-side.
+        var res = await window.AgentShared.apiFetch('/api/profiles-list?staff_only=1');
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var data = await res.json();
         teamMembersCache = data.members || [];

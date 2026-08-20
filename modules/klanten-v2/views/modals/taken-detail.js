@@ -76,10 +76,11 @@ function cleanFilename(name) {
   return base.slice(0, 80) + ext.slice(0, 10);
 }
 
-// STAFF_ROLES filter (zelfde als taken-create.js). /api/profiles-list
-// levert alle actieve accounts (incl. klant/student); wij pikken alleen
-// interne staf voor de watcher-picker.
-const STAFF_ROLES = new Set(['super_admin', 'manager', 'sales', 'mentor', 'marketing']);
+// STAFF_ROLES filter (zelfde als taken-create.js). FEAT-4 ronde 8:
+// admin + administratie toegevoegd, marketing verwijderd. Server-side
+// filter via ?staff_only=1 doet primary filtering; deze isStaff blijft
+// als vangnet voor backward-compat.
+const STAFF_ROLES = new Set(['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie']);
 const isStaff = (m) => STAFF_ROLES.has(String(m?.role || '').toLowerCase());
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -91,7 +92,7 @@ const _signedUrls = new Map();
 async function loadMembers() {
   if (_membersCache) return _membersCache;
   try {
-    const j = await K().authedJson('/api/profiles-list');
+    const j = await K().authedJson('/api/profiles-list?staff_only=1');
     const all = Array.isArray(j?.members) ? j.members : [];
     _membersCache = all.filter(isStaff);
   } catch (_) { _membersCache = []; }

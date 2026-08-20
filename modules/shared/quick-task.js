@@ -162,7 +162,8 @@
     var sel = document.getElementById('qtToegewezen');
     if (!sel) return;
     try {
-      var r = await window.AgentShared.apiFetch('/api/profiles-list');
+      // FEAT-4 (2026-08-20): staff_only filter server-side.
+      var r = await window.AgentShared.apiFetch('/api/profiles-list?staff_only=1');
       if (!r.ok) throw new Error('HTTP ' + r.status);
       var d = await r.json();
       var list = Array.isArray(d && d.members) ? d.members : [];

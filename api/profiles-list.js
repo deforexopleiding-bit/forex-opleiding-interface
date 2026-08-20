@@ -22,12 +22,21 @@ export default async function handler(req, res) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  const { data, error } = await supabaseAdmin
+  // FEAT-4 (ronde 8): query-param ?staff_only=1 filtert op interne team-
+  // rollen server-side. Backward-compat: zonder param → alle actieve
+  // profiles (bestaand gedrag). Zie STAFF_ROLES hieronder — 'admin' en
+  // 'administratie' zijn ook interne team-leden (Finance / systeem-beheer).
+  const STAFF_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie'];
+  const staffOnly = String(req.query?.staff_only || '') === '1';
+
+  let q = supabaseAdmin
     .from('profiles')
     .select('id, full_name, email, role')
     .eq('is_active', true)
     .order('full_name', { ascending: true, nullsFirst: false });
+  if (staffOnly) q = q.in('role', STAFF_ROLES);
 
+  const { data, error } = await q;
   if (error) {
     console.error('[profiles-list]', error.message);
     return res.status(500).json({ error: error.message });
