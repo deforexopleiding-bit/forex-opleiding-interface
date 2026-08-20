@@ -34,13 +34,14 @@ function esc(v) { return K().esc(v); }
 const CATEGORIEEN = ['Sales', 'Onboarding', 'Mentoring', 'Finance', 'Klant', 'Marketing', 'Intern', 'Overige'];
 const PRIORITEITEN = ['Urgent', 'Hoog', 'Normaal', 'Laag'];
 
-// FEAT-4 (ronde 8): server-side filter via ?staff_only=1 op /api/profiles-list.
-// Client-side isStaff blijft als vangnet voor het geval de endpoint zonder
-// filter draait (backward-compat, oude cache). STAFF_ROLES uitgebreid met
-// 'admin' + 'administratie' — beide zijn interne team-rollen (Maxim/Dave
-// als admin, Finance-medewerkers als administratie). 'marketing' verwijderd
-// (niet in CLAUDE.md canonical role-set). 'viewer' expliciet uitgesloten.
-const STAFF_ROLES = new Set(['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie']);
+// FEAT-4 (ronde 8, aangescherpt ronde 3): server-side filter via
+// ?staff_only=1 op /api/profiles-list. Client-side isStaff blijft als
+// vangnet voor backward-compat. Allowlist (moet gelijk zijn aan server-
+// side STAFF_ROLES in api/profiles-list.js):
+//   super_admin, manager, sales, mentor, administratie
+// 'admin' bewust verwijderd (DFO gebruikt super_admin voor platform-beheer;
+// admin-rol bestaat in DB-CHECK maar wordt niet toegewezen aan teamleden).
+const STAFF_ROLES = new Set(['super_admin', 'manager', 'sales', 'mentor', 'administratie']);
 function isStaff(member) {
   return STAFF_ROLES.has(String(member?.role || '').toLowerCase());
 }

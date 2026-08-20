@@ -76,11 +76,12 @@ function cleanFilename(name) {
   return base.slice(0, 80) + ext.slice(0, 10);
 }
 
-// STAFF_ROLES filter (zelfde als taken-create.js). FEAT-4 ronde 8:
-// admin + administratie toegevoegd, marketing verwijderd. Server-side
-// filter via ?staff_only=1 doet primary filtering; deze isStaff blijft
-// als vangnet voor backward-compat.
-const STAFF_ROLES = new Set(['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie']);
+// STAFF_ROLES filter (zelfde als taken-create.js). FEAT-4 ronde 3-aangescherpt:
+// 'admin' verwijderd (DFO gebruikt super_admin voor platform-beheer;
+// admin-rol bestaat in DB-CHECK maar wordt niet toegewezen aan teamleden).
+// Server-side filter via ?staff_only=1 doet primary filtering; deze isStaff
+// blijft als vangnet voor backward-compat.
+const STAFF_ROLES = new Set(['super_admin', 'manager', 'sales', 'mentor', 'administratie']);
 const isStaff = (m) => STAFF_ROLES.has(String(m?.role || '').toLowerCase());
 
 // ── State ──────────────────────────────────────────────────────────────────

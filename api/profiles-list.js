@@ -22,11 +22,26 @@ export default async function handler(req, res) {
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  // FEAT-4 (ronde 8): query-param ?staff_only=1 filtert op interne team-
-  // rollen server-side. Backward-compat: zonder param → alle actieve
-  // profiles (bestaand gedrag). Zie STAFF_ROLES hieronder — 'admin' en
-  // 'administratie' zijn ook interne team-leden (Finance / systeem-beheer).
-  const STAFF_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie'];
+  // FEAT-4 (ronde 8, aangescherpt ronde 3): query-param ?staff_only=1
+  // filtert op interne team-rollen server-side. Backward-compat: zonder
+  // param → alle actieve profiles (bestaand gedrag).
+  //
+  // ALLOWLIST (exact wat je krijgt bij staff_only=1):
+  //   super_admin  — platform-beheer (Amigo)
+  //   manager      — team-lead (Jeffrey)  ← EXPLICIET opgenomen
+  //   sales        — sales-team
+  //   mentor       — mentoren
+  //   administratie — Finance/administratie
+  //
+  // NIET in de allowlist:
+  //   admin        — verwijderd; de DB-CHECK (migratie 002) accepteert 'admin'
+  //                  wel, maar in de praktijk gebruikt DFO alleen super_admin
+  //                  voor platform-beheer. Als er ooit 'admin'-users komen die
+  //                  wél teamleden zijn, moet 'admin' weer in deze set.
+  //   marketing    — niet-team (externe agency-flow)
+  //   viewer       — read-only extern (klant/lead-portalen)
+  //   NULL / anders — klant/student-accounts
+  const STAFF_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'administratie'];
   const staffOnly = String(req.query?.staff_only || '') === '1';
 
   let q = supabaseAdmin
