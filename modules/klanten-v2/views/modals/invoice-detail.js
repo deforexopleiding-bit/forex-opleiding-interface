@@ -249,11 +249,15 @@ function renderCreditNotesBlock() {
   if (state.cnLoading) return `<div class="kv-inv-loading">Creditnota's laden…</div>`;
   if (state.cnError)   return `<div class="kv-inv-warn">Creditnota's niet geladen: ${esc(state.cnError)}</div>`;
   if (!state.creditNotes.length) return '';
+  // BROK F1 (2026-08-19): creditnota-detail-endpoint bestaat niet →
+  // rij expliciet read-only maken. cursor:default + title-hint zodat
+  // duidelijk is dat er niks te klikken valt. TL-link naar creditnota
+  // valt buiten scope van deze fix.
   return `
     <div class="kv-edit-section-h">Creditnota's (${state.creditNotes.length})</div>
     <ul class="kv-inv-cn-list">
       ${state.creditNotes.map(c => `
-        <li class="kv-inv-cn-row">
+        <li class="kv-inv-cn-row" style="cursor:default" title="Read-only — creditnota-detail is beschikbaar in TeamLeader">
           <span class="mono">${esc(c.number || '—')}</span>
           <span class="ds-cell-sub">${esc(fmtDate(c.date))}</span>
           ${statusPill(c.status)}

@@ -553,6 +553,46 @@
   // Expose voor finance-detail-v2 (lookup zonder extra fetch bij factuur-detail).
   window.__finGetInvById = (id) => (_inv.data?.items || []).find(x => String(x.id) === String(id)) || null;
 
+  // BROK F3 (2026-08-19): client-side kolom-sort op de facturenlijst.
+  // Zelfde patroon als wanbetalers-Overzicht sort: klikbare headers,
+  // asc/desc-toggle, lege/null altijd onderaan, surgical repaint waar
+  // mogelijk (H.table interpoleert echter alles → we vertrouwen op
+  // shell-render-cycle voor de kolom-sort; scroll-behoud niet nodig
+  // omdat de tabel géén eigen scroll-container heeft).
+  _inv.sortBy  = _inv.sortBy  || 'issue_date';
+  _inv.sortDir = _inv.sortDir || 'desc';
+  window.__finInvSort = (key) => {
+    if (_inv.sortBy === key) _inv.sortDir = _inv.sortDir === 'asc' ? 'desc' : 'asc';
+    else { _inv.sortBy = String(key || 'issue_date'); _inv.sortDir = key === 'customer_name' || key === 'invoice_number' ? 'asc' : 'desc'; }
+    window.DFO.render();
+  };
+  function _sortedInvoices(items) {
+    const key = _inv.sortBy;
+    const dir = _inv.sortDir === 'asc' ? 1 : -1;
+    return items.slice().sort((a, b) => {
+      if (key === 'invoice_number' || key === 'customer_name') {
+        return dir * String(a[key] || '').localeCompare(String(b[key] || ''));
+      }
+      if (key === 'issue_date' || key === 'due_date') {
+        const ta = a[key] ? Date.parse(a[key]) : null;
+        const tb = b[key] ? Date.parse(b[key]) : null;
+        if (ta == null && tb == null) return 0;
+        if (ta == null) return 1;
+        if (tb == null) return -1;
+        return dir * (ta - tb);
+      }
+      const va = Number(a[key]) || 0;
+      const vb = Number(b[key]) || 0;
+      return dir * (va - vb);
+    });
+  }
+  function _invSortHdr(label, key, rightAlign) {
+    const active = _inv.sortBy === key;
+    const arrow = active ? (_inv.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+    const color = active ? 'var(--brand)' : 'inherit';
+    return `<span style="cursor:pointer;user-select:none;color:${color}" onclick="__finInvSort('${key}')" title="Sorteer op ${label}">${label}${arrow}</span>`;
+  }
+
   function invoicesView() {
     // In-shell factuur-detail: als URL invoice_id, delegeer aan finance-detail-v2.
     try {
@@ -561,7 +601,7 @@
     } catch (_) { /* fall through */ }
     const st = F('fin-inv-st', 'all');
     if (!_inv.loading && !_inv.error && (!_inv.data || _inv.params !== invoicesParams())) queueMicrotask(fetchInvoices);
-    const items = _inv.data?.items || [];
+    const items = _sortedInvoices(_inv.data?.items || []);
     const k = _inv.data?.kpis || {};
     const total = _inv.data?.total ?? null;
     return `${previewHeader('Facturen', _inv)}
@@ -585,7 +625,15 @@
       ])}
       ${fnPager(_inv, total, fetchInvoices)}
       ${H.table(
-        [{ l: 'Factuur-nr' }, { l: 'Klant' }, { l: 'Uitgifte', cls: 'r optional' }, { l: 'Vervaldatum', cls: 'r optional' }, { l: 'Totaal', cls: 'r' }, { l: 'Open', cls: 'r' }, { l: 'Status' }],
+        [
+          { l: _invSortHdr('Factuur-nr', 'invoice_number') },
+          { l: _invSortHdr('Klant',       'customer_name') },
+          { l: _invSortHdr('Uitgifte',    'issue_date'), cls: 'r optional' },
+          { l: _invSortHdr('Vervaldatum', 'due_date'),   cls: 'r optional' },
+          { l: _invSortHdr('Totaal',      'amount_total'), cls: 'r' },
+          { l: _invSortHdr('Open',        'amount_open'),  cls: 'r' },
+          { l: 'Status' },
+        ],
         items.map(v => {
           const [c, l] = INV_STATUS_TO_PILL[v.display_status] || INV_STATUS_TO_PILL[v.status] || ['neutral', v.display_status || v.status || '—'];
           return [
@@ -925,6 +973,28 @@
         { c: 'emerald', icon: I.trend, label: 'Inkomend (view)',     val: eurC(kpis.sum_in_cents),                sub: `${num(kpis.count_in)} transacties` },
         { c: 'orange',  icon: I.warn,  label: 'Uitgaand (view)',     val: eurC(kpis.sum_out_cents),               sub: `${num(kpis.count_out)} transacties` },
       ]); })()}
+      ${(() => {
+        // BROK F2 (2026-08-19): slotsaldo per IBAN uit endpoint.per_account.
+        // Vroeger: alleen grand-total zichtbaar → 2 rekeningen stilzwijgend
+        // gesommeerd. Nu: expliciete rij per IBAN + "geen data" bij lege
+        // per_account (nooit meer stil ignore-en).
+        const per = Array.isArray(bal.per_account) ? bal.per_account : [];
+        if (!per.length) {
+          return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;margin-top:10px;font-size:12px;color:var(--text-3)">Geen bank-accounts met CAMT-statements. Upload een CAMT-file of controleer bank_accounts.is_active.</div>`;
+        }
+        return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-top:10px">
+          <div style="padding:9px 14px;border-bottom:1px solid var(--border);font-weight:600;font-size:12.5px">Slotsaldo per IBAN (${per.length})</div>
+          ${per.map((a) => {
+            const sign = a.balance_cents == null ? 'text-3' : (a.balance_cents > 0 ? 'emerald' : (a.balance_cents < 0 ? 'rose' : 'text-3'));
+            return `<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;align-items:center">
+              <div class="mono">${a.account_iban || a.iban || '—'}</div>
+              <div class="mono" style="text-align:right;color:var(--${sign});font-weight:600">${a.balance_cents == null ? '<span style="color:var(--text-3);font-weight:400">geen data</span>' : eurC(a.balance_cents)}</div>
+              <div style="text-align:right;font-size:11px;color:var(--text-3)">${a.as_of_date ? 't/m ' + dstr(a.as_of_date) : '—'}${a.file_name ? ' · <span title="' + a.file_name + '">' + (String(a.file_name).length > 20 ? String(a.file_name).slice(0, 20) + '…' : a.file_name) + '</span>' : ''}</div>
+            </div>`;
+          }).join('')}
+          ${bal.num_accounts_ignored > 0 ? `<div style="padding:8px 14px;font-size:11px;color:var(--amber);background:var(--amber-soft)">⚠ ${bal.num_accounts_ignored} CAMT-IBAN(s) genegeerd — niet in bank_accounts of niet is_active.</div>` : ''}
+        </div>`;
+      })()}
       ${H.toolbar([
         H.chips('fin-bank-dir', [
           { l: 'Alle',      v: 'all' },
