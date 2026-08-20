@@ -6,7 +6,7 @@
 // (bestaan niet 100% geverifieerd) + deals.lose als fallback-signaal. TL-fouten
 // blokkeren de lokale verwijdering niet.
 
-import { createUserClient, supabaseAdmin } from './supabase.js';
+import { createUserClient, supabaseAdmin, verifyAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 
@@ -20,6 +20,15 @@ export default async function handler(req, res) {
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
   if (!(await requirePermission(req, 'sales.deal.edit'))) {
     return res.status(403).json({ error: 'Geen rechten (sales.deal.edit)' });
+  }
+  // BROK B #1 (2026-08-19): destructive verwijder-actie — TL-mutatie
+  // + lokale archived_at. Extra gate: alleen super_admin / admin / manager.
+  // Server-side 403 zodat een sales/mentor met sales.deal.edit-permissie
+  // TOCH geen delete kan doen — UI verbergt de knop maar hoort niet de
+  // enige gate te zijn.
+  const admin = await verifyAdmin(req);
+  if (!admin) {
+    return res.status(403).json({ error: 'Alleen admin / manager mag offertes verwijderen.' });
   }
 
   const { deal_id } = req.body || {};

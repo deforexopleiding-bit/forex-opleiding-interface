@@ -463,16 +463,20 @@ window.DFO.KV.newAction = function newAction(kind) {
       toast('Sales-wizard niet geladen — probeer opnieuw over een paar seconden.');
       return;
     case 'factuur':
-      // FIX (2026-08-18): de nieuwe-factuur-modal is JSX BINNEN de finance-
-      // view render (finance-v2.js:287 zet alleen _newInv.open=true +
-      // DFO.render()). Vanuit een andere module (bv. Dashboard) is de
-      // active view een ander bestand → de modal wordt niet gerenderd.
-      // Vroeger deed we hier eerst 'als handler bestaat, roep direct aan';
-      // dat werkte alleen ON finance. Nu ALTIJD eerst goMod('finance'),
-      // dan handler — goMod is een no-op als je al op finance zit.
+      // BROK B #4 (2026-08-19): defensieve intent-check. Factuur-optie MOET
+      // naar __finInvNew (invoice-create-modal), NOOIT naar __swOpen
+      // (sales-wizard = offerte-flow). Log welke handler pakt zodat een
+      // toekomstige regressie makkelijk gespot wordt. Ook: als __finInvNew
+      // niet bestaat is een expliciete toast zichtbaarder dan silent
+      // fallback naar iets anders.
+      console.debug('[kv topbar] newAction(factuur) → goMod(finance) + __finInvNew');
       _kvGoModAnd('finance', () => {
-        if (typeof window.__finInvNew === 'function') window.__finInvNew();
-        else toast('Kon nieuwe-factuur-modal niet openen.');
+        if (typeof window.__finInvNew === 'function') {
+          window.__finInvNew();
+        } else {
+          console.warn('[kv topbar] __finInvNew ontbreekt na goMod(finance) — geen fallback naar __swOpen (dat is offerte-flow, niet factuur).');
+          toast('Kon nieuwe-factuur-modal niet openen — herlaad de pagina.');
+        }
       });
       return;
     case 'lead':

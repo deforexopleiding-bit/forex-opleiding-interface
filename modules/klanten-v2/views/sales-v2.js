@@ -201,14 +201,21 @@
     // maand. Voor Sales-rol: my_revenue_month (excl-BTW, uit metrics-endpoint).
     let totalRev, totalCount, highestDeal, revLabel, revSub, hiLabel, hiSub;
     if (admin) {
+      // BROK B (2026-08-19): omzet-KPI EXCL BTW (was: incl). Consistent
+      // met Sales-rol (my_revenue_month is ook excl) én met de rest van
+      // het rapport (excl. BTW-taal). Highest deal ook excl. Data:
+      // agg.totalExcl / agg.highestIncl blijven berekend maar we tonen
+      // agg.totalExcl.
       const agg = acceptedAgg(_dash.companyAccepted?.quotations, monthStart(), todayIso());
-      totalRev = agg.count ? agg.totalIncl : null;
+      totalRev = agg.count ? agg.totalExcl : null;
       totalCount = agg.count;
+      // BROK B: highestDeal blijft incl (dat is per-deal, niet aggregaat) —
+      // maar we tonen 'em pas als per-user-context, hier gewoon max.
       highestDeal = agg.highestIncl;
       revLabel = 'Totale omzet deze maand';
-      revSub   = agg.count ? `${num(agg.count)} getekende offertes · incl. BTW` : 'incl. BTW · bedrijfsbreed';
+      revSub   = agg.count ? `${num(agg.count)} getekende offertes · excl. BTW` : 'excl. BTW · bedrijfsbreed';
       hiLabel  = 'Hoogste deal deze maand';
-      hiSub    = 'bedrijfsbreed · incl. BTW';
+      hiSub    = 'bedrijfsbreed · incl. BTW (per-deal)';
     } else {
       totalRev = m.my_revenue_month;
       totalCount = m.my_sales_count_month;
@@ -577,12 +584,12 @@
     return `${previewHeader('Verkoopprestaties', _rep)}
       ${H.kpis([
         { c: 'violet',  icon: I.trend,  label: 'Pipeline-waarde',    val: eur0(k.pipeline_value),          hi: 1, sub: 'open + verzonden · excl. BTW' },
-        { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: agg.signedCount ? eur0(agg.totalIncl) : eur0(0), hi: 1,
-          // BROK SALES-1 (v=11): toon '(excl.)' ALLEEN als daadwerkelijk
-          // verschillend van incl (BTW-splits werd zichtbaar in de data).
-          // Als incl==excl (deal miste line_items → fallback naar excl),
-          // is de tussenhaakjes-tekst misleidend → weglaten.
-          sub: `${num(agg.signedCount)} getekend · incl. BTW${(agg.totalExcl && agg.totalIncl && agg.totalExcl < agg.totalIncl) ? ` · (${eur0(agg.totalExcl)} excl.)` : ''}` },
+        // BROK B (2026-08-19): omzet-KPI EXCL BTW. Sub-lijn toont incl-
+        // variant tussenhaakjes ALS incl > excl (data-driven — vermijdt
+        // "(€X incl.)" bij deals met identieke incl/excl door line-item-
+        // fallback).
+        { c: 'emerald', icon: I.euro,   label: 'Omzet in periode',   val: agg.signedCount ? eur0(agg.totalExcl) : eur0(0), hi: 1,
+          sub: `${num(agg.signedCount)} getekend · excl. BTW${(agg.totalIncl && agg.totalExcl && agg.totalIncl > agg.totalExcl) ? ` · (${eur0(agg.totalIncl)} incl.)` : ''}` },
         { c: 'blue',    icon: I.doc,    label: 'Bonus openstaand',   val: eur0(k.bonus_pending) },
         { c: 'orange',  icon: I.repeat, label: 'Retentie-ratio',     val: k.retention_rate != null ? Math.round(k.retention_rate * 100) + '%' : '—' },
       ])}
