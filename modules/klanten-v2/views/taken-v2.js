@@ -341,6 +341,18 @@
       // Klik op kaart opent detail-modal.
       onCardClick: (t) => window.__takenOpen && window.__takenOpen(t.id),
       onMove: async (id, newStatus) => {
+        // No-op guard: als de kaart in dezelfde kolom wordt losgelaten, geen
+        // write en geen optimistic update. Bepaal huidige status via lookup
+        // over alle scope-caches.
+        let currentStatus = null;
+        for (const key of Object.keys(_live)) {
+          const arr = asArr(_live[key] && _live[key].taken);
+          const t = arr.find((x) => x.id === id);
+          if (t) { currentStatus = t.status; break; }
+        }
+        if (currentStatus != null && String(currentStatus) === String(newStatus)) {
+          return; // zelfde kolom → niks doen
+        }
         // Optimistic mutatie in alle scope-caches (met asArr-guard).
         for (const key of Object.keys(_live)) {
           const arr = asArr(_live[key] && _live[key].taken);

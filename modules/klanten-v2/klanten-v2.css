@@ -2995,7 +2995,8 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .tk-att-file-name:hover { color: var(--m, #6D3FD4); text-decoration: underline; }
 .tk-att-file-mime { font-size: 11px; color: var(--text-3, #8B95A5); font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 
-/* Video-embed cards (YouTube / Vimeo / Loom / Drive) — 16:9 responsive. */
+/* Video-embed cards (YouTube / Vimeo / Loom / Drive) — 16:9 responsive.
+   Cap op 640px zodat de kaart niet full-width uitrekt en 600px hoog wordt. */
 .tk-embed-wrap { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .tk-embed-row { display: flex; align-items: flex-start; gap: 6px; }
 .tk-embed-row > .tk-embed-body { flex: 1; min-width: 0; }
@@ -3003,6 +3004,7 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
   position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden;
   background: #000; border-radius: 8px;
   border: 1px solid var(--border, #E2E7EE);
+  max-width: 640px;
 }
 .tk-embed-card iframe {
   position: absolute; inset: 0; width: 100%; height: 100%; border: 0;

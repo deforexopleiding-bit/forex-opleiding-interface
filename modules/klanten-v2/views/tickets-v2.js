@@ -181,7 +181,7 @@
     const u = String(url).trim();
     if (!u) return null;
     let m;
-    if ((m = u.match(/loom\.com\/share\/([a-f0-9]+)/i))) {
+    if ((m = u.match(/loom\.com\/(?:share|embed)\/([\w-]+)/i))) {
       return { kind: 'iframe', src: `https://www.loom.com/embed/${m[1]}`, label: 'Loom video', domain: 'loom.com' };
     }
     if ((m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]+)/i))) {
@@ -618,7 +618,7 @@
           ${links.map(a => {
             const e = detectEmbed(a.external_url);
             const body = (e && e.kind === 'iframe')
-              ? `<div class="tk-embed-card"><iframe src="${esc(e.src)}" allowfullscreen loading="lazy" referrerpolicy="no-referrer"></iframe></div>`
+              ? `<div class="tk-embed-card"><iframe src="${esc(e.src)}" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`
               : `<a class="tk-embed-link" href="${esc(a.external_url)}" target="_blank" rel="noopener">
                    ${svg(I.mail || I.doc)}
                    <span class="tk-embed-link-name">${esc(a.filename || (e && e.label) || a.external_url)}</span>
@@ -805,14 +805,38 @@
           </div>`;
       },
       onMove: async (id, newStatus) => {
+        // No-op guard: als de kaart in dezelfde kolom wordt losgelaten, geen
+        // write en geen refetch. Bepaal huidige status via lookup over de 3
+        // tab-caches (surgical — vermijdt full-refetch).
+        const findCard = () => {
+          for (const cache of [_open, _wait, _done]) {
+            const arr = cache?.data?.tickets || [];
+            const hit = arr.find((t) => String(t.id) === String(id));
+            if (hit) return { cache, ticket: hit };
+          }
+          return null;
+        };
+        const before = findCard();
+        if (before && String(before.ticket.status) === String(newStatus)) {
+          return; // zelfde kolom → niks doen
+        }
         try {
           await tryPatch('ticket-status', '/api/ticket-detail?id=' + encodeURIComponent(id), { status: newStatus });
-          // Force refetch alle 3 tabs (invalidate params).
-          _open.params = ''; _wait.params = ''; _done.params = '';
+          // Surgical: verplaats de kaart in-memory ipv alle 3 tabs herladen.
+          if (before) {
+            before.cache.data.tickets = (before.cache.data.tickets || []).filter((t) => String(t.id) !== String(id));
+            const target = (newStatus === 'open')        ? _open
+                         : (newStatus === 'in_progress') ? _wait
+                         : (['resolved','closed'].includes(newStatus)) ? _done
+                         : null;
+            if (target && target.data) {
+              target.data.tickets = [{ ...before.ticket, status: newStatus }, ...(target.data.tickets || [])];
+            }
+          }
           if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
         } catch (e) {
           console.warn('[tickets-v2 kanban] status-update fail:', e?.message);
-          // Rollback via refetch (data van server wint).
+          // Rollback via full-refetch (server-waarheid wint) alleen bij fail.
           _open.params = ''; _wait.params = ''; _done.params = '';
           if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
         }
@@ -836,8 +860,20 @@
       ${window.KV_V2.kanban ? window.KV_V2.kanban.html('tickets') : '<div class="sv-empty">Kanban laden…</div>'}`;
   }
 
+  // Nav-fix: tab-wissel (Open ↔ Wacht ↔ Afgehandeld) moet de detail-URL
+  // stripen, anders blijft het geopende ticket zichtbaar op de nieuwe tab.
+  let _lastFn = null;
   function wrapView(fn) {
     return () => {
+      if (_lastFn && _lastFn !== fn && urlParam('ticket')) {
+        try {
+          const u = new URL(location.href);
+          u.searchParams.delete('ticket');
+          window.history.replaceState({}, '', u);
+        } catch (_) {}
+        _det.id = null; _det.data = null; _det.error = null;
+      }
+      _lastFn = fn;
       if (urlParam('ticket')) return detailView();
       if (_det.id != null) { _det.id = null; _det.data = null; _det.error = null; }
       // Kanban-mode: één pipeline over alle 3 tabs, geen tab-specifieke lijst.
