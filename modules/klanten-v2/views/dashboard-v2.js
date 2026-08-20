@@ -108,7 +108,22 @@
         <b style="margin-left:auto;font-family:'IBM Plex Mono',monospace">${eur0(d.b[i])}</b></div>`;
     tip.style.opacity = '1';
     const px = cx / vb * r.width;
-    tip.style.left = Math.min(Math.max(px - 72, 0), r.width - 165) + 'px';
+    // Flip-positionering: meet actuele tooltip-breedte NA render (offsetWidth)
+    // en flip zodat de tip volledig binnen de container blijft. Voorkomt dat
+    // de rechterzijde afgekapt wordt op het laatste maand-punt.
+    tip.style.left = '0px'; // reset zodat offsetWidth stabiel is
+    const tipW = Math.max(140, tip.offsetWidth || 165);
+    let left;
+    if (px + tipW / 2 > r.width - 4) {
+      // Rechterrand: laat tip eindigen 8px voor de rechter-container-rand.
+      left = Math.max(4, r.width - tipW - 8);
+    } else if (px - tipW / 2 < 4) {
+      // Linkerrand: pin tip 4px vanaf de linker-container-rand.
+      left = 4;
+    } else {
+      left = px - tipW / 2;
+    }
+    tip.style.left = left + 'px';
     tip.style.top = '6px';
   };
   window.chartOut = function (id) {
@@ -443,9 +458,31 @@
               })()}
             </div>
             ${(() => {
-              const a = [41200, 42800, 43900, 44600, 45800, 46400, 47100, 47612];
-              const b = [62000, 78000, 95000, 88000, 120000, 104000, 86000, 26250];
-              const lb = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug'];
+              // MRR-lijn (a) LIVE uit sales-mrr-report.trend[] — zelfde helper
+              // die de MRR-tegel voedt (api/_lib/mrr-compute.js). Laatste 8
+              // maanden ≤ huidige maand. Fallback op mock als geen trend.
+              // Totaal-incl-btw-lijn (b): geen per-maand-endpoint, blijft mock
+              // (out-of-scope voor deze MRR-brok — user vroeg alleen MRR-fix).
+              const M_ABBR = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
+              const trend = _live.mrr && Array.isArray(_live.mrr.trend) ? _live.mrr.trend : null;
+              let a, b, lb;
+              if (trend && trend.length) {
+                const now = new Date();
+                const curYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+                const past = trend.filter(t => t && t.period && t.period <= curYm).slice(-8);
+                if (past.length) {
+                  a  = past.map(t => Number(t.mrr) || 0);
+                  lb = past.map(t => { const m = parseInt(String(t.period).slice(5,7),10); return M_ABBR[m-1] || String(m); });
+                  // b vult voor now naar 0-array met zelfde lengte (mock-mid — laten we b uitzetten
+                  // met alle-nullen zodat lijn plat onder x-as ligt; visueel niet-ingevuld).
+                  b  = past.map(() => 0);
+                }
+              }
+              if (!a) {
+                a  = [41200, 42800, 43900, 44600, 45800, 46400, 47100, 47612];
+                b  = [62000, 78000, 95000, 88000, 120000, 104000, 86000, 26250];
+                lb = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug'];
+              }
               CHARTDATA['omz'] = { a, b, labels: lb, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue' };
               return dualChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue');
             })()}

@@ -87,15 +87,21 @@ export default async function handler(req, res) {
       months.push({ key: ymKey(d), start: d.toISOString().slice(0, 10), nextStart: next.toISOString().slice(0, 10) });
     }
     const trend = months.map(m => {
-      let mrr = 0, count = 0, added = 0, churned = 0;
+      // MRR + count per maand via gedeelde helper (asOf = laatste dag maand).
+      // Zo is elk trend-punt op dezelfde manier berekend als de kpis.current_mrr
+      // en de v2-dashboard-MRR-tegel: snapshot + NULL-cycle inferentie.
+      const monthEndISO = new Date(new Date(m.nextStart).getTime() - 86400000).toISOString().slice(0, 10);
+      const r = computeCurrentMrr(list, { asOf: monthEndISO });
+      // added/churned: bewuste andere semantiek (nieuwe/vertrokken subs in kalendermaand,
+      // niet de snapshot). Blijft oude berekening; toont bewegingen binnen de maand.
+      let added = 0, churned = 0;
       for (const s of list) {
         if (!s.start_date) continue;
         const contrib = mrrOf(s);
-        if (s.start_date < m.nextStart && (!s.end_date || s.end_date >= m.start)) { mrr += contrib; count++; }
         if (s.start_date >= m.start && s.start_date < m.nextStart) added += contrib;
         if (s.end_date && s.end_date >= m.start && s.end_date < m.nextStart) churned += contrib;
       }
-      return { period: m.key, mrr: r2(mrr), count, new_mrr: r2(added), churned_mrr: r2(churned) };
+      return { period: m.key, mrr: r.mrr, count: r.count, new_mrr: r2(added), churned_mrr: r2(churned) };
     });
 
     // Inkomende omzet: som van de maand-MRR over ELKE kalendermaand in [periode].
