@@ -273,9 +273,9 @@
     </div>
     <div class="sad-greet-act" style="position:relative">
       <div class="sad-seg" id="sadPageSeg">
-        <button data-p="dag">Dag</button>
+        <button class="on" data-p="dag">Vandaag</button>
         <button data-p="week">Week</button>
-        <button class="on" data-p="maand">Maand</button>
+        <button data-p="maand">Maand</button>
         <button data-p="jaar">Jaar</button>
         <button data-p="custom" id="sadPageCustom">Custom ▾</button>
       </div>
@@ -308,7 +308,7 @@
   <!-- TOPZONE: leads (placeholder → PR2) + AI-manager (visueel, geen backend) -->
   <div class="sad-topzone">
     <div class="sad-leadstrip">
-      <div class="sad-ch"><h3><span class="sad-d"></span> Leads per traject <span style="font-size:11px;color:var(--sad-faint);margin-left:8px" id="sadLeadsPeriodLbl">deze maand</span></h3></div>
+      <div class="sad-ch"><h3><span class="sad-d"></span> Leads per traject <span style="font-size:11px;color:var(--sad-faint);margin-left:8px" id="sadLeadsPeriodLbl">vandaag</span></h3></div>
       <div class="sad-lgrid" id="sadLeadsGrid">
         <a class="sad-ltile" data-key="7-daagse"   href="/modules/leads.html?traject=7-daagse"   style="text-decoration:none;color:inherit"><div class="sad-lname">7-daagse</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">laden…</div></a>
         <a class="sad-ltile" data-key="event"      href="/modules/events.html" style="text-decoration:none;color:inherit"><div class="sad-lname">Event-aanmeldingen</div><div class="sad-lnum">—</div><div class="sad-lbar"></div><div class="sad-lchg">laden…</div></a>
@@ -349,7 +349,7 @@
     <div class="sad-card">
       <div class="sad-ch">
         <h3><span class="sad-d"></span> Omzet — getekende offertes <span style="font-size:11px;color:var(--sad-faint);margin-left:8px">INCL BTW</span></h3>
-        <span id="sadOmzetTag" style="font-size:11px;color:var(--sad-dim)">deze maand</span>
+        <span id="sadOmzetTag" style="font-size:11px;color:var(--sad-dim)">vandaag</span>
       </div>
       <div class="sad-otop">
         <div class="sad-ot mrr"><div class="sad-l">Abonnementen (MRR)</div><div class="sad-v">€<span id="sadKpiMrr">—</span></div><div class="sad-chg" id="sadKpiMrrSub">—</div></div>
@@ -358,7 +358,7 @@
       <div class="sad-chart-wrap"><canvas id="sadOmzetChart"></canvas></div>
       <div class="sad-lg"><span><i style="background:var(--brand-400)"></i>Omzet offertes</span><span><i style="background:var(--accent)"></i>Abonnementen (MRR)</span></div>
       <div class="sad-prodstrip">
-        <div class="sad-ps-lbl">Verkocht <span id="sadPsPeriod">deze maand</span></div>
+        <div class="sad-ps-lbl">Verkocht <span id="sadPsPeriod">vandaag</span></div>
         <!-- Product-strip 2026-08-04: 6 tiles (was 4). TL-imports die vroeger
              in Memberships-fallback vielen, komen nu via classifyDeal in
              hun echte bucket (1-op-1 6/12/24/overig). 'Onbekend' toont
@@ -477,7 +477,7 @@
 
 // ── State ─────────────────────────────────────────────────────────────
 const sadState = {
-  period: 'maand',
+  period: 'dag',
   customFrom: null,
   customTo: null,
   chart: null,
@@ -505,7 +505,7 @@ function sadGroupByFor(period) {
 }
 function sadPeriodLabel(period, custom) {
   if (custom) return custom;
-  return ({ dag: 'vandaag', week: 'deze week', maand: 'deze maand', jaar: 'dit jaar' })[period] || 'deze maand';
+  return ({ dag: 'vandaag', week: 'deze week', maand: 'deze maand', jaar: 'dit jaar' })[period] || 'vandaag';
 }
 function sadFmtEur(n) {
   const val = Number(n) || 0;
