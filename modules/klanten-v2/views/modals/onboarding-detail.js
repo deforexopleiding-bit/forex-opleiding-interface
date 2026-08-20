@@ -248,8 +248,53 @@ function renderVragenlijstTab() {
     </div>
     <div class="kv-onb-section">
       <div class="kv-onb-section-title">Antwoorden (wizard)</div>
-      ${ans ? `<pre class="kv-onb-json">${esc(JSON.stringify(ans, null, 2))}</pre>` : '<div class="kv-onb-empty">Nog geen antwoorden ingevuld.</div>'}
+      ${renderAnswersList(ans)}
     </div>`;
+}
+
+// Fix ronde-6 (P3): humanize answers-jsonb (was raw JSON.stringify).
+// Key → NL-label mapping voor bekende velden; onbekende keys krijgen
+// een gehumaniseerde variant (snake_case → 'Snake case'). Lege objecten
+// tonen 'Nog geen antwoorden ingevuld' i.p.v. '{}'.
+const ANSWER_KEY_LABELS = {
+  ervaring_trading:    'Ervaring met trading',
+  jaren_actief:        'Jaren actief',
+  gemiddelde_inleg:    'Gemiddelde inleg (€)',
+  huidig_kapitaal:     'Huidig kapitaal (€)',
+  handelsstijl:        'Handelsstijl',
+  markt_focus:         'Markt-focus',
+  doel_maandinkomen:   'Doel maandinkomen (€)',
+  tijd_beschikbaar:    'Tijd beschikbaar per week',
+  belangrijkste_doel:  'Belangrijkste doel',
+  grootste_uitdaging:  'Grootste uitdaging',
+  eerder_gevolgde_cursussen: 'Eerder gevolgde cursussen',
+  extra_toelichting:   'Extra toelichting',
+};
+function humanizeKey(k) {
+  if (ANSWER_KEY_LABELS[k]) return ANSWER_KEY_LABELS[k];
+  const s = String(k || '').replace(/_/g, ' ').trim();
+  return s ? (s.charAt(0).toUpperCase() + s.slice(1)) : '';
+}
+function humanizeAnswerValue(v) {
+  if (v == null || v === '') return '<span style="color:var(--text-3)">—</span>';
+  if (Array.isArray(v)) {
+    if (!v.length) return '<span style="color:var(--text-3)">—</span>';
+    return v.map((x) => esc(String(x))).join(', ');
+  }
+  if (typeof v === 'object') return `<pre style="margin:0;font-size:11.5px;white-space:pre-wrap">${esc(JSON.stringify(v, null, 2))}</pre>`;
+  if (typeof v === 'boolean') return v ? 'Ja' : 'Nee';
+  return esc(String(v));
+}
+function renderAnswersList(ans) {
+  if (!ans || typeof ans !== 'object') return '<div class="kv-onb-empty">Nog geen antwoorden ingevuld.</div>';
+  const keys = Object.keys(ans);
+  if (keys.length === 0) return '<div class="kv-onb-empty">Nog geen antwoorden ingevuld.</div>';
+  return `<dl class="kv-onb-answers" style="display:grid;grid-template-columns:minmax(160px,auto) 1fr;gap:6px 14px;margin:0">
+    ${keys.map((k) => `
+      <dt style="font-weight:600;font-size:12.5px;color:var(--text-2)">${esc(humanizeKey(k))}</dt>
+      <dd style="margin:0;font-size:13px;color:var(--text-1)">${humanizeAnswerValue(ans[k])}</dd>
+    `).join('')}
+  </dl>`;
 }
 
 // ── Sub-tab 4: Tijdlijn ────────────────────────────────────────────────────
@@ -337,15 +382,19 @@ async function actCancelPreview() {
   state.savingAction = 'cancel-preview'; state.globalError = null; state.saveOk = null;
   rerender();
   try {
-    const j = await K().authedJson('/api/onboarding-cancel', {
-      method: 'POST',
-      body: JSON.stringify({ onboarding_id: state.id, preview: true }),
-    });
+    // Fix ronde-6: gebruik dedicated read-only impact-endpoint (GET) i.p.v.
+    // POST /api/onboarding-cancel {preview:true}. Splitsing zorgt dat het
+    // OPENEN van de bevestigings-dialoog fysiek onmogelijk kan cascaden —
+    // geen shared body-vlaggen met de destructieve execute-endpoint meer.
+    const j = await K().authedJson(
+      '/api/onboarding-cancel-impact?onboarding_id=' + encodeURIComponent(state.id),
+      { method: 'GET' },
+    );
     state.savingAction = null;
     openCancelConfirmModal(j);
   } catch (e) {
     state.savingAction = null;
-    state.globalError = e?.message || 'Cancel-preview mislukt';
+    state.globalError = e?.message || 'Cancel-impact mislukt';
     rerender();
   }
 }

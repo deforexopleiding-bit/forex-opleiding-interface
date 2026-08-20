@@ -389,11 +389,17 @@
     const list = asArr(rows);
     const done = list.filter((r) => r.status === 'afgerond').length;
     const cancelled = list.filter((r) => r.status === 'geannuleerd').length;
-    return H.kpis([
+    const archived  = list.filter((r) => r.status === 'gearchiveerd').length;
+    // Fix ronde-6 (P3): 3e tegel toonde 'Geannuleerd 0' terwijl alle rijen
+    // op 'gearchiveerd' stonden — misleidend. Tegels tonen nu de werkelijke
+    // status-verdeling van het archief; nul-tegels worden verborgen.
+    const tiles = [
       { c: 'slate',   icon: I.folder || I.doc, label: 'Archief totaal', val: String(list.length), hi: 1 },
-      { c: 'emerald', icon: I.tick,            label: 'Afgerond',       val: String(done) },
-      { c: 'rose',    icon: I.x,               label: 'Geannuleerd',    val: String(cancelled) },
-    ]);
+    ];
+    if (done > 0)      tiles.push({ c: 'emerald', icon: I.tick, label: 'Afgerond',       val: String(done) });
+    if (cancelled > 0) tiles.push({ c: 'rose',    icon: I.x,    label: 'Geannuleerd',    val: String(cancelled) });
+    if (archived > 0)  tiles.push({ c: 'slate',   icon: I.folder || I.doc, label: 'Gearchiveerd', val: String(archived) });
+    return H.kpis(tiles);
   }
 
   const STATUS_PILL = {

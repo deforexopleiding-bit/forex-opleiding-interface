@@ -1228,11 +1228,12 @@
     if (!body) return;
     body.innerHTML = '<div style="padding:18px;text-align:center;color:var(--text-faint)">Preview ophalen…</div>';
     try {
-      const r = await window.AgentShared.apiFetch('/api/onboarding-cancel', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ onboarding_id: onboardingId, preview: true }),
-      });
+      // Fix ronde-6: read-only impact-endpoint (GET) i.p.v. destructieve
+      // POST met preview:true-vlag. Openen van dialoog kan nu niet cascaden.
+      const r = await window.AgentShared.apiFetch(
+        '/api/onboarding-cancel-impact?onboarding_id=' + encodeURIComponent(onboardingId),
+        { method: 'GET' },
+      );
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
       if (d.already_cancelled) {
