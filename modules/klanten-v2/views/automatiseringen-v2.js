@@ -35,6 +35,15 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+  // Ronde-13: native _toast() → custom toast. Automatisering-tests
+  // gebruikten alert voor 'gestart'-notificaties + fout-meldingen; die
+  // blokkeerden de renderer én werden door automation-flows automatisch
+  // geaccepteerd. Custom toast via KV.toast (deelt #kv-toast in shell).
+  function _toast(msg, tone) {
+    try { window.KV && window.KV.toast && window.KV.toast(String(msg), { tone: tone || 'warn' }); }
+    catch (_) { /* stil falen liever dan native alert */ }
+  }
+
   // Toast helper — kopie van events-v2.js pattern. Deelt DOM-element #kv-toast
   // uit modules/klanten-v2/index.html (r129).
   function _showToast(msg) {
@@ -417,7 +426,7 @@
     if (!m) return;
     _ui.confirmModal = null;
     if (window.DFO?.render) window.DFO.render();
-    try { await m.onConfirm(); } catch (e) { alert('Actie mislukt: ' + (e?.message || 'onbekende fout')); }
+    try { await m.onConfirm(); } catch (e) { _toast('Actie mislukt: ' + (e?.message || 'onbekende fout')); }
   };
   window.__autConfirmNo = () => { _ui.confirmModal = null; if (window.DFO?.render) window.DFO.render(); };
 
@@ -689,7 +698,7 @@
   };
   window.__autEvEdit = (id) => {
     const a = asArr(_live.evAutos.data).find((x) => x.id === id);
-    if (!a) return alert('Automation niet gevonden.');
+    if (!a) return _toast('Automation niet gevonden.');
     // Deep-copy + on-open normalize (in-memory, geen DB-write) — dekt eventuele
     // legacy velden af zodat een re-save altijd de canonieke shape stuurt.
     _ui.ev.editing = _normalizeAutoOnOpen(JSON.parse(JSON.stringify(a)), 'ev');
@@ -708,7 +717,7 @@
       });
       if (j?.error) throw new Error(j.error);
       _live.evAutos.data = null; queueMicrotask(fetchEvAutos);
-    } catch (e) { alert('Toggle mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Toggle mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('evTog:' + id, false); }
   };
   window.__autEvDelete = (id, name) => {
@@ -730,7 +739,7 @@
   window.__autEvTest = (id) => {
     const a = asArr(_live.evAutos.data).find((x) => x.id === id);
     if (!a) return;
-    if (!a.enabled) return alert('Zet de automation eerst aan voordat je een test-run doet.');
+    if (!a.enabled) return _toast('Zet de automation eerst aan voordat je een test-run doet.');
     _ui.ev.testModal = {
       automation_id: id,
       automation_name: a.name || '—',
@@ -752,7 +761,7 @@
   window.__autEvTestField = (k, v) => { if (_ui.ev.testModal) _ui.ev.testModal[k] = v; };
   window.__autEvTestSubmit = async () => {
     const t = _ui.ev.testModal; if (!t) return;
-    if (!t.event_id || !t.first_name || !t.last_name || !t.email || !t.phone) return alert('Alle velden zijn verplicht.');
+    if (!t.event_id || !t.first_name || !t.last_name || !t.email || !t.phone) return _toast('Alle velden zijn verplicht.');
     _setBusy('evTestSubmit', true);
     try {
       const j = await window.KV.authedJson('/api/events-automation-test', {
@@ -763,10 +772,10 @@
         }),
       });
       if (j?.error) throw new Error(j.error);
-      alert('Test gestart. Attendee-ID: ' + (j?.attendee_id || '—') + '\nRun-ID: ' + (j?.run_id || '—') + '\n\nDe automation loopt nu ECHT met versnelde wait-stappen. Berichten worden verstuurd naar het opgegeven email/nummer.');
+      _toast('Test gestart. Attendee-ID: ' + (j?.attendee_id || '—') + '\nRun-ID: ' + (j?.run_id || '—') + '\n\nDe automation loopt nu ECHT met versnelde wait-stappen. Berichten worden verstuurd naar het opgegeven email/nummer.');
       _ui.ev.testModal = null;
       if (window.DFO?.render) window.DFO.render();
-    } catch (e) { alert('Test mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Test mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('evTestSubmit', false); }
   };
 
@@ -1078,7 +1087,7 @@
   };
   window.__autEvSave = async () => {
     const a = _ui.ev.editing; if (!a) return;
-    if (!a.name || !a.name.trim()) return alert('Naam is verplicht.');
+    if (!a.name || !a.name.trim()) return _toast('Naam is verplicht.');
     _setBusy('evSave', true);
     try {
       const j = await window.KV.authedJson('/api/events-automation-save', {
@@ -1088,7 +1097,7 @@
       if (j?.error) throw new Error(j.error);
       _ui.ev.editing = null;
       _live.evAutos.data = null; queueMicrotask(fetchEvAutos);
-    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('evSave', false); }
   };
 
@@ -1188,7 +1197,7 @@
       });
       if (j?.error) throw new Error(j.error);
       _live.obAutos.data = null; queueMicrotask(fetchObAutos);
-    } catch (e) { alert('Toggle mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Toggle mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('obTog:' + id, false); }
   };
   window.__autObDelete = (id, name) => {
@@ -1209,7 +1218,7 @@
   window.__autObTest = (id) => {
     const a = asArr(_live.obAutos.data).find((x) => x.id === id);
     if (!a) return;
-    if (!a.enabled) return alert('Zet de automation eerst aan voordat je een test-run doet.');
+    if (!a.enabled) return _toast('Zet de automation eerst aan voordat je een test-run doet.');
     _ui.ob.testModal = {
       automation_id: id,
       automation_name: a.name || '—',
@@ -1230,7 +1239,7 @@
   window.__autObTestField = (k, v) => { if (_ui.ob.testModal) _ui.ob.testModal[k] = v; };
   window.__autObTestSubmit = async () => {
     const t = _ui.ob.testModal; if (!t) return;
-    if (!t.traject_id || !t.name || !t.email || !t.phone) return alert('Alle velden zijn verplicht.');
+    if (!t.traject_id || !t.name || !t.email || !t.phone) return _toast('Alle velden zijn verplicht.');
     _setBusy('obTestSubmit', true);
     try {
       const j = await window.KV.authedJson('/api/onboarding-automation-test', {
@@ -1241,10 +1250,10 @@
         }),
       });
       if (j?.error) throw new Error(j.error);
-      alert('Test gestart. Run-ID: ' + (j?.run_id || '—') + '\nOnboarding-ID: ' + (j?.onboarding_id || '—') + '\n\nDe automation loopt nu ECHT met versnelde wait-stappen. Berichten worden verstuurd naar het opgegeven email/nummer.');
+      _toast('Test gestart. Run-ID: ' + (j?.run_id || '—') + '\nOnboarding-ID: ' + (j?.onboarding_id || '—') + '\n\nDe automation loopt nu ECHT met versnelde wait-stappen. Berichten worden verstuurd naar het opgegeven email/nummer.');
       _ui.ob.testModal = null;
       if (window.DFO?.render) window.DFO.render();
-    } catch (e) { alert('Test mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Test mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('obTestSubmit', false); }
   };
 
@@ -1481,7 +1490,7 @@
   };
   window.__autObSave = async () => {
     const a = _ui.ob.editing; if (!a) return;
-    if (!a.name || !a.name.trim()) return alert('Naam is verplicht.');
+    if (!a.name || !a.name.trim()) return _toast('Naam is verplicht.');
     _setBusy('obSave', true);
     try {
       const j = await window.KV.authedJson('/api/onboarding-automation-save', {
@@ -1491,7 +1500,7 @@
       if (j?.error) throw new Error(j.error);
       _ui.ob.editing = null;
       _live.obAutos.data = null; queueMicrotask(fetchObAutos);
-    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('obSave', false); }
   };
 
@@ -1636,10 +1645,10 @@
   };
   window.__autLsSjabSave = async () => {
     const s = _ui.ls.editingSjabloon; if (!s) return;
-    if (!s.traject_slug || !s.traject_slug.trim()) return alert('Traject is verplicht.');
-    if (!s.soort || !s.soort.trim()) return alert('Soort is verplicht.');
-    if (!s.kanaal || !['mail','whatsapp'].includes(s.kanaal)) return alert("Kanaal moet 'mail' of 'whatsapp' zijn.");
-    if (!s.tekst || !s.tekst.trim()) return alert('Tekst is verplicht (mail-body of WA-preview).');
+    if (!s.traject_slug || !s.traject_slug.trim()) return _toast('Traject is verplicht.');
+    if (!s.soort || !s.soort.trim()) return _toast('Soort is verplicht.');
+    if (!s.kanaal || !['mail','whatsapp'].includes(s.kanaal)) return _toast("Kanaal moet 'mail' of 'whatsapp' zijn.");
+    if (!s.tekst || !s.tekst.trim()) return _toast('Tekst is verplicht (mail-body of WA-preview).');
     _setBusy('lsSjabSave', true);
     try {
       // Normaliseer variabele_volgorde naar array
@@ -1655,7 +1664,7 @@
       if (j?.error) throw new Error(j.error);
       _ui.ls.editingSjabloon = null;
       _live.lsSjab.data = null; queueMicrotask(fetchLsSjab);
-    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('lsSjabSave', false); }
   };
   window.__autLsSjabDelete = (id, label) => {
@@ -1885,8 +1894,8 @@
   window.__autLsTrajFieldBool = (k, v) => { if (_ui.ls.editingTraject) _ui.ls.editingTraject[k] = !!v; };
   window.__autLsTrajSave = async () => {
     const t = _ui.ls.editingTraject; if (!t) return;
-    if (!t.naam || !t.naam.trim()) return alert('Naam is verplicht.');
-    if (!t.slug || !t.slug.trim()) return alert('Slug is verplicht.');
+    if (!t.naam || !t.naam.trim()) return _toast('Naam is verplicht.');
+    if (!t.slug || !t.slug.trim()) return _toast('Slug is verplicht.');
     _setBusy('lsTrajSave', true);
     try {
       const j = await window.KV.authedJson('/api/leadsonderhoud-traject-opslaan', {
@@ -1896,7 +1905,7 @@
       if (j?.error) throw new Error(j.error);
       _ui.ls.editingTraject = null;
       _live.lsTraj.data = null; queueMicrotask(fetchLsTraj);
-    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('lsTrajSave', false); }
   };
   window.__autLsTrajDelete = (id, naam) => {
@@ -1941,8 +1950,8 @@
   window.__autLsStapFieldTri = (k, v) => { if (_ui.ls.editingStap) _ui.ls.editingStap[k] = v === '' ? null : (v === 'true'); };
   window.__autLsStapSave = async () => {
     const s = _ui.ls.editingStap; if (!s) return;
-    if (!s.naam || !s.naam.trim()) return alert('Naam is verplicht.');
-    if (!s.traject_id) return alert('Traject-ID ontbreekt.');
+    if (!s.naam || !s.naam.trim()) return _toast('Naam is verplicht.');
+    if (!s.traject_id) return _toast('Traject-ID ontbreekt.');
     _setBusy('lsStapSave', true);
     try {
       const j = await window.KV.authedJson('/api/leadsonderhoud-stap-opslaan', {
@@ -1952,7 +1961,7 @@
       if (j?.error) throw new Error(j.error);
       _ui.ls.editingStap = null;
       _live.lsTraj.data = null; queueMicrotask(fetchLsTraj);
-    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('lsStapSave', false); }
   };
   window.__autLsStapDelete = (id, naam) => {
@@ -2181,11 +2190,11 @@
       else await fetchObAutoById(automationId);
     }
     const auto = _live[cacheKey].data[automationId];
-    if (!auto) return alert('Automation niet gevonden.');
+    if (!auto) return _toast('Automation niet gevonden.');
     const step = asArr(auto.steps)[stepIndex];
-    if (!step) return alert('Stap niet gevonden.');
+    if (!step) return _toast('Stap niet gevonden.');
     if (step.type !== 'send_email' && step.type !== 'send_whatsapp') {
-      return alert('Deze stap is geen bericht-stap.');
+      return _toast('Deze stap is geen bericht-stap.');
     }
     const target = moduleKey === 'ev' ? _ui.ev : _ui.ob;
     target.berichtEdit = {
@@ -2219,13 +2228,13 @@
     const be = target.berichtEdit; if (!be) return;
     const cacheKey = moduleKey === 'ev' ? 'evAutoById' : 'obAutoById';
     const auto = _live[cacheKey].data[be.automation_id];
-    if (!auto) return alert('Automation niet meer in cache.');
+    if (!auto) return _toast('Automation niet meer in cache.');
     // SURGICAL: kopieer de VOLLEDIGE automation, wijzig alleen die ene
     // step.config, en stuur alles 1-op-1 terug via bestaande save-endpoint.
     // Dit voorkomt dat andere velden (trigger/scope/andere steps) muteren.
     const payload = JSON.parse(JSON.stringify(auto));
     const step = asArr(payload.steps)[be.step_index];
-    if (!step) return alert('Stap niet meer aanwezig.');
+    if (!step) return _toast('Stap niet meer aanwezig.');
     step.config = { ...(step.config || {}), ...be.cfg };
     _setBusy('berichtSave', true);
     try {
@@ -2241,7 +2250,7 @@
       if (moduleKey === 'ev') { _live.evBerichten.data = null; _live.evAutos.data = null; queueMicrotask(fetchEvBerichten); queueMicrotask(fetchEvAutos); }
       else { _live.obBerichten.data = null; _live.obAutos.data = null; queueMicrotask(fetchObBerichten); queueMicrotask(fetchObAutos); }
       _showToast('Bericht opgeslagen');
-    } catch (e) { alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) { _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout')); }
     finally { _setBusy('berichtSave', false); }
   };
 

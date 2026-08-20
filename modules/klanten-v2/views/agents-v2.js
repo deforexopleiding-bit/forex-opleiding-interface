@@ -51,6 +51,59 @@
   const fmtNum = (n) => (Number(n || 0)).toLocaleString('nl-NL');
   const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
 
+  // ─── Custom dialoog-helpers (ronde-13, geen native alert/confirm/prompt) ───
+  // Native alert/confirm/prompt blokkeren de renderer én worden door
+  // automation-tests altijd geaccepteerd. Vervanging: KV.toast voor
+  // meldingen; promise-based askConfirm / askPrompt met scrim + Esc-close.
+  function _toast(msg, tone) {
+    try { window.KV && window.KV.toast && window.KV.toast(String(msg), { tone: tone || 'warn' }); }
+    catch (_) { /* geen KV.toast beschikbaar — stil falen liever dan native alert */ }
+  }
+  function _askDialog({ title, body, okLabel, cancelLabel, tone, kind, defaultVal, placeholder }) {
+    return new Promise((resolve) => {
+      const scrim = document.createElement('div');
+      scrim.setAttribute('data-kv-agents-dlg', '');
+      scrim.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+      const isPrompt = kind === 'prompt';
+      const okStyle = tone === 'danger'
+        ? 'background:var(--rose,#C22B3E);border-color:var(--rose-line,#F5C2C9);color:#fff'
+        : '';
+      scrim.innerHTML = `
+        <div role="dialog" aria-modal="true" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:20px 22px">
+          ${title ? `<div style="font-size:15.5px;font-weight:600;margin-bottom:8px;color:var(--text-1)">${esc(title)}</div>` : ''}
+          <div style="font-size:13px;color:var(--text-2);line-height:1.55;margin-bottom:${isPrompt ? '10' : '18'}px;white-space:pre-wrap">${esc(body || '')}</div>
+          ${isPrompt ? `<input type="text" data-kv-dlg-inp value="${esc(defaultVal || '')}" placeholder="${esc(placeholder || '')}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:18px" autofocus />` : ''}
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button type="button" class="ds-btn ds-btn-ghost" data-kv-dlg-cancel>${esc(cancelLabel || 'Annuleren')}</button>
+            <button type="button" class="ds-btn ds-btn-primary" data-kv-dlg-ok style="${okStyle}">${esc(okLabel || (isPrompt ? 'Bevestigen' : 'OK'))}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(scrim);
+      const inp = scrim.querySelector('[data-kv-dlg-inp]');
+      const cleanup = (v) => { scrim.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+      const onKey = (e) => {
+        if (e.key === 'Escape') cleanup(isPrompt ? null : false);
+        else if (e.key === 'Enter' && (isPrompt || document.activeElement === scrim.querySelector('[data-kv-dlg-ok]'))) {
+          cleanup(isPrompt ? (inp ? inp.value : '') : true);
+        }
+      };
+      document.addEventListener('keydown', onKey);
+      scrim.addEventListener('click', (e) => { if (e.target === scrim) cleanup(isPrompt ? null : false); });
+      scrim.querySelector('[data-kv-dlg-cancel]').addEventListener('click', () => cleanup(isPrompt ? null : false));
+      scrim.querySelector('[data-kv-dlg-ok]').addEventListener('click', () => cleanup(isPrompt ? (inp ? inp.value : '') : true));
+      if (inp) setTimeout(() => inp.focus(), 0);
+    });
+  }
+  function _askConfirm(bodyOrOpts, opts) {
+    // Overloads: _askConfirm('Weet je het zeker?') OR _askConfirm({title,body,okLabel,tone})
+    if (typeof bodyOrOpts === 'string') return _askDialog({ ...(opts||{}), body: bodyOrOpts, kind: 'confirm' });
+    return _askDialog({ ...(bodyOrOpts||{}), kind: 'confirm' });
+  }
+  function _askPrompt(bodyOrOpts, defaultVal) {
+    if (typeof bodyOrOpts === 'string') return _askDialog({ body: bodyOrOpts, defaultVal, kind: 'prompt' });
+    return _askDialog({ ...(bodyOrOpts||{}), kind: 'prompt' });
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // CANONICAL AGENT LIST
   // ═══════════════════════════════════════════════════════════════════════
@@ -461,7 +514,7 @@
     } else {
       msg = 'De ' + a.n + '-flow wordt hiermee ' + (next ? 'geactiveerd' : 'gepauzeerd') + '.';
     }
-    if (!window.confirm(a.n + ' ' + label + '?\n\n' + msg)) return;
+    if (!await _askConfirm(a.n + ' ' + label + '?\n\n' + msg)) return;
 
     _ui.toggling[agId] = true;
     if (window.DFO?.render) window.DFO.render();
@@ -495,7 +548,7 @@
       queueMicrotask(fetchConfigList);
       queueMicrotask(fetchLisaSettings);
     } catch (e) {
-      alert('Kon niet ' + label + ': ' + (e?.message || 'onbekende fout'));
+      _toast('Kon niet ' + label + ': ' + (e?.message || 'onbekende fout'));
     } finally {
       _ui.toggling[agId] = false;
       if (window.DFO?.render) window.DFO.render();
@@ -767,8 +820,8 @@
   window.__agKbNewKey = (agId) => {
     const input = document.getElementById('ag_' + agId + '_newkbkey');
     const key = (input?.value || '').trim(); if (!key) return;
-    if (['dos','donts','stop_keywords'].includes(key)) { alert(key + ' is een gereserveerde sleutel (heeft eigen editor hierboven).'); return; }
-    const kb = _getKbDraft(agId); if (kb[key] !== undefined) { alert('Sleutel bestaat al.'); return; }
+    if (['dos','donts','stop_keywords'].includes(key)) { _toast(key + ' is een gereserveerde sleutel (heeft eigen editor hierboven).'); return; }
+    const kb = _getKbDraft(agId); if (kb[key] !== undefined) { _toast('Sleutel bestaat al.'); return; }
     kb[key] = ''; _setKbDraft(agId, kb);
     if (window.DFO?.render) window.DFO.render();
   };
@@ -920,7 +973,7 @@
     const a = AGENTS_STATIC.find((x) => x.id === agId);
     if (!a || !a.backend) return;
     const dirty = _ui.dirty[agId] || {};
-    if (!Object.keys(dirty).length) { alert('Niets gewijzigd.'); return; }
+    if (!Object.keys(dirty).length) { _toast('Niets gewijzigd.'); return; }
 
     // Lisa bridge — delegate naar lisa-config
     if (a.backend === 'lisa') { return _agSaveLisa('save_draft'); }
@@ -931,7 +984,7 @@
       const touched = sensitive.filter((f) => dirty[f] !== undefined);
       if (touched.length) {
         const list = touched.map((f) => '• ' + f).join('\n');
-        if (!window.confirm(`Je wijzigt gevoelige velden voor Joost:\n\n${list}\n\nDit kan de kwaliteit van intent-classificatie en autonoom gedrag beïnvloeden. De wijziging wordt vastgelegd in het audit-log (joost.config_updated).\n\nDoorgaan?`)) return;
+        if (!await _askConfirm(`Je wijzigt gevoelige velden voor Joost:\n\n${list}\n\nDit kan de kwaliteit van intent-classificatie en autonoom gedrag beïnvloeden. De wijziging wordt vastgelegd in het audit-log (joost.config_updated).\n\nDoorgaan?`)) return;
       }
     }
 
@@ -956,7 +1009,7 @@
       partial[k] = v;
       n++;
     }
-    if (!n) { alert('Geen bekende velden om op te slaan.'); return; }
+    if (!n) { _toast('Geen bekende velden om op te slaan.'); return; }
 
     _ui.saving[agId] = true; if (window.DFO?.render) window.DFO.render();
     try {
@@ -984,7 +1037,7 @@
       queueMicrotask(fetchConfigList);
     } catch (e) {
       console.error('[ag-v2] save fail', e);
-      alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout'));
+      _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout'));
     } finally {
       _ui.saving[agId] = false;
       if (window.DFO?.render) window.DFO.render();
@@ -1088,7 +1141,7 @@
     const auto = _sanneAutonomyDraft(cfg);
     const scope = new Set(Array.isArray(auto.mailbox_scope) ? auto.mailbox_scope : []);
     // Kan alleen armen als 'ie in scope zit — anders zou Sanne 'em skippen voor 'ie de send bereikt.
-    if (!scope.has(slug)) { alert("Deze mailbox staat niet in Sanne's scope. Vink 'em eerst aan bij Mailboxen."); return; }
+    if (!scope.has(slug)) { _toast("Deze mailbox staat niet in Sanne's scope. Vink 'em eerst aan bij Mailboxen."); return; }
     const armed = new Set(Array.isArray(auto.autonomous_mailboxes) ? auto.autonomous_mailboxes : []);
     if (armed.has(slug)) armed.delete(slug); else armed.add(slug);
     auto.autonomous_mailboxes = Array.from(armed);
@@ -1138,7 +1191,7 @@
       // Vernieuw cache
       _live.perConfig.data['email'] = j.config;
     } else {
-      alert('Sanne-config opslaan mislukt: ' + (j?.__error || j?.error || 'onbekende fout'));
+      _toast('Sanne-config opslaan mislukt: ' + (j?.__error || j?.error || 'onbekende fout'));
     }
     if (window.DFO?.render) window.DFO.render();
   };
@@ -1754,7 +1807,7 @@
     </div>`;
   }
   window.__agLisaRollback = async (version) => {
-    if (!window.confirm(`Lisa-versie v${version} terugzetten als live? Er wordt een nieuwe versie aangemaakt met de inhoud van v${version}.`)) return;
+    if (!await _askConfirm(`Lisa-versie v${version} terugzetten als live? Er wordt een nieuwe versie aangemaakt met de inhoud van v${version}.`)) return;
     try {
       const j = await window.KV.authedJson('/api/lisa-config?action=rollback', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1763,14 +1816,14 @@
       if (j?.error) throw new Error(j.error);
       _live.lisa.data = null; _live.lisaHist.data = null;
       queueMicrotask(fetchLisaConfig); queueMicrotask(fetchLisaHistory);
-      alert('Rollback naar v' + version + ' geslaagd.');
-    } catch (e) { alert('Rollback mislukt: ' + (e?.message || 'onbekende fout')); }
+      _toast('Rollback naar v' + version + ' geslaagd.');
+    } catch (e) { _toast('Rollback mislukt: ' + (e?.message || 'onbekende fout')); }
   };
   window.__agLisaSave = async (kind) => {
     const dirty = _ui.dirty.lisa || {};
-    if (kind === 'save_draft' && !Object.keys(dirty).length) { alert('Niets gewijzigd.'); return; }
+    if (kind === 'save_draft' && !Object.keys(dirty).length) { _toast('Niets gewijzigd.'); return; }
     if (kind === 'publish') {
-      if (!window.confirm('Wijzigingen publiceren?\n\nEen nieuwe actieve Lisa-versie wordt aangemaakt en gaat direct in productie.')) return;
+      if (!await _askConfirm('Wijzigingen publiceren?\n\nEen nieuwe actieve Lisa-versie wordt aangemaakt en gaat direct in productie.')) return;
     }
     _ui.saving.lisa = true; _ui.saving.lisaKind = kind;
     if (window.DFO?.render) window.DFO.render();
@@ -1785,7 +1838,7 @@
       _live.lisa.data = null; _live.lisaHist.data = null;
       queueMicrotask(fetchLisaConfig); queueMicrotask(fetchLisaHistory);
     } catch (e) {
-      alert((kind === 'publish' ? 'Publiceren' : 'Opslaan') + ' mislukt: ' + (e?.message || 'onbekende fout'));
+      _toast((kind === 'publish' ? 'Publiceren' : 'Opslaan') + ' mislukt: ' + (e?.message || 'onbekende fout'));
     } finally {
       _ui.saving.lisa = false; _ui.saving.lisaKind = null;
       if (window.DFO?.render) window.DFO.render();
@@ -2239,7 +2292,7 @@
   window.__agArtSave = async () => {
     const m = _ui.artModal; if (!m) return;
     const onderwerp = (document.getElementById('art_onderwerp')?.value || '').trim();
-    if (!onderwerp) { alert('Onderwerp vereist.'); return; }
+    if (!onderwerp) { _toast('Onderwerp vereist.'); return; }
     const categorie = (document.getElementById('art_categorie')?.value || '').trim() || null;
     const content   = (document.getElementById('art_content')?.value || '');
     const agents = Array.from(document.querySelectorAll('input[data-art-agent]:checked')).map((el) => el.getAttribute('data-art-agent'));
@@ -2262,25 +2315,25 @@
       _live.kbArt.data = null; queueMicrotask(fetchKbArt);
       _showToast(m.mode === 'create' ? 'Artikel aangemaakt' : 'Artikel bijgewerkt');
     } catch (e) {
-      alert('Opslaan mislukt: ' + (e?.message || 'onbekende fout'));
+      _toast('Opslaan mislukt: ' + (e?.message || 'onbekende fout'));
     }
   };
   window.__agKbArtDelete = async (id) => {
-    if (!window.confirm('Artikel verwijderen? Dit kan niet ongedaan gemaakt worden.')) return;
+    if (!await _askConfirm('Artikel verwijderen? Dit kan niet ongedaan gemaakt worden.')) return;
     try {
       const j = await window.KV.authedJson('/api/kennisbank-artikelen?id=' + encodeURIComponent(id), { method: 'DELETE' });
       if (j?.error) throw new Error(j.error);
       _live.kbArt.data = null; queueMicrotask(fetchKbArt);
       _showToast('Artikel verwijderd');
     } catch (e) {
-      alert('Verwijderen mislukt: ' + (e?.message || 'onbekende fout'));
+      _toast('Verwijderen mislukt: ' + (e?.message || 'onbekende fout'));
     }
   };
   window.__agKbArtPromote = async (id) => {
-    const target = window.prompt('Naar welke agent promoveren?\n\nTyp: joost / simone / mila / lisa');
+    const target = await _askPrompt('Naar welke agent promoveren?\n\nTyp: joost / simone / mila / lisa');
     if (!target) return;
     const t = target.trim().toLowerCase();
-    if (!['joost','simone','mila','lisa'].includes(t)) { alert('Onbekende agent.'); return; }
+    if (!['joost','simone','mila','lisa'].includes(t)) { _toast('Onbekende agent.'); return; }
     try {
       const j = await window.KV.authedJson('/api/kennisbank-promote-to-agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2296,7 +2349,7 @@
       }
       _showToast('Gepromoveerd naar ' + t);
     } catch (e) {
-      alert('Promoveren mislukt: ' + (e?.message || 'onbekende fout'));
+      _toast('Promoveren mislukt: ' + (e?.message || 'onbekende fout'));
     }
   };
   window.__agKbUnmPromote = (id, question, agentKey) => {
@@ -2307,7 +2360,7 @@
     if (window.DFO?.render) window.DFO.render();
   };
   window.__agKbUnmDismiss = async (id) => {
-    if (!window.confirm('Verbergen uit de lijst? De vraag wordt gemarkeerd als afgehandeld.')) return;
+    if (!await _askConfirm('Verbergen uit de lijst? De vraag wordt gemarkeerd als afgehandeld.')) return;
     try {
       const j = await window.KV.authedJson('/api/kennisbank-unmatched?action=dismiss', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2316,7 +2369,7 @@
       if (j?.error) throw new Error(j.error);
       _live.kbUnm.data = null; queueMicrotask(fetchKbUnm);
     } catch (e) {
-      alert('Verbergen mislukt: ' + (e?.message || 'onbekende fout'));
+      _toast('Verbergen mislukt: ' + (e?.message || 'onbekende fout'));
     }
   };
 
@@ -2508,7 +2561,7 @@
       }
       _showToast('Feedback ' + (rating === 'up' ? 'positief' : 'negatief') + ' opgeslagen voor ' + a.n);
     } catch (e) {
-      alert('Feedback opslaan mislukt: ' + (e?.message || 'onbekende fout'));
+      _toast('Feedback opslaan mislukt: ' + (e?.message || 'onbekende fout'));
     } finally {
       _ui.saving[key] = false;
       if (window.DFO?.render) window.DFO.render();
