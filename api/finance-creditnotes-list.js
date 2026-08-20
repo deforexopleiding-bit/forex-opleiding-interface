@@ -53,12 +53,29 @@ export default async function handler(req, res) {
   const entity      = q.entity ? String(q.entity) : null;
   const periodStart = q.period_start ? String(q.period_start).slice(0, 10) : null;
   const periodEnd   = q.period_end   ? String(q.period_end).slice(0, 10)   : null;
+  // Ronde-11: per-klant filter voor klanten-v2 Creditnota's-tab. Volgt
+  // credit_notes → invoice → customer_id-koppeling (credit_notes hebben
+  // zelf geen customer_id-kolom). Werkt idempotent samen met search/entity.
+  const customerId  = q.customer_id ? String(q.customer_id).trim() : null;
   const sortField   = VALID_SORT.includes(q.sort) ? q.sort : 'credit_note_date';
   const dir         = q.dir === 'asc' ? 'asc' : 'desc';
   const page        = Math.max(1, Number(q.page) || 1);
   const pageSize    = Math.min(Math.max(Number(q.page_size) || 50, 1), 500);
 
   try {
+    // Ronde-11: als per-klant filter → resolve invoice_ids via invoices.
+    // Alleen credit_notes met invoice_id in die set worden getoond.
+    let customerInvIds = null; // null = geen filter; [] = geen matches → lege result
+    if (customerId) {
+      const { data: invs, error: invErr } = await supabaseAdmin
+        .from('invoices')
+        .select('id')
+        .eq('customer_id', customerId)
+        .limit(5000);
+      if (invErr) throw new Error('invoices-for-customer: ' + invErr.message);
+      customerInvIds = (invs || []).map((i) => i.id);
+    }
+
     // Bij zoekterm eerst matching customer-ids ophalen zodat we credit_notes
     // via de invoice→customer chain kunnen filteren. TL koppelt creditnota
     // rechtstreeks aan invoice (invoice_id op onze tabel); customer zit alleen
@@ -104,6 +121,13 @@ export default async function handler(req, res) {
     if (entity)      lq = lq.eq('department_id', entity);
     if (periodStart) lq = lq.gte('credit_note_date', periodStart);
     if (periodEnd)   lq = lq.lte('credit_note_date', periodEnd);
+    if (customerInvIds !== null) {
+      if (customerInvIds.length === 0) {
+        // Klant heeft 0 facturen → 0 creditnota's mogelijk. Return direct.
+        return res.status(200).json({ items: [], kpi: { count: 0, sum_amount: 0 }, page, page_size: pageSize, total: 0 });
+      }
+      lq = lq.in('invoice_id', customerInvIds);
+    }
     if (search) {
       const s = search.replace(/[,()]/g, ' ').trim();
       const ors = [`credit_note_number.ilike.%${s}%`];
@@ -124,6 +148,9 @@ export default async function handler(req, res) {
     if (entity)      kq = kq.eq('department_id', entity);
     if (periodStart) kq = kq.gte('credit_note_date', periodStart);
     if (periodEnd)   kq = kq.lte('credit_note_date', periodEnd);
+    if (customerInvIds !== null && customerInvIds.length > 0) {
+      kq = kq.in('invoice_id', customerInvIds);
+    }
     if (search) {
       const s = search.replace(/[,()]/g, ' ').trim();
       const ors = [`credit_note_number.ilike.%${s}%`];

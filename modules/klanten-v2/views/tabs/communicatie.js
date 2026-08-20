@@ -359,13 +359,12 @@ function renderEmailCard() {
 // ── Render + wire ───────────────────────────────────────────────────────────
 
 function render(rootEl) {
+  // Ronde-11: WhatsApp-thread + E-mail-thread placeholder-blokken
+  // verwijderd — verwezen naar v1/redesign-PR, hoort niet in klant-facing
+  // weergave. renderNotesSection nu volledig-breedte.
   rootEl.innerHTML = `
-    <div class="kv-comm-grid">
+    <div class="kv-comm-grid kv-comm-grid-nosides">
       ${renderNotesSection()}
-      <div class="kv-comm-side">
-        ${renderWhatsAppCard()}
-        ${renderEmailCard()}
-      </div>
     </div>`;
   wire(rootEl);
   // Textarea auto-focus + cursor-behoud

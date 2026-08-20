@@ -290,7 +290,10 @@ function render(rootEl) {
     body = renderError();
   } else {
     body = `
-      ${renderProtectedBanner()}
+      <!-- Ronde-11: renderProtectedBanner() weggehaald op klant-detail (helptekst
+           over 'Alle wanbetaler-acties blijven in Finance › Wanbetalers'). De
+           tab-inhoud (run-status + actieve regelingen) blijft ongewijzigd. -->
+
       ${renderDunningFaseCard()}
       ${renderArrangementsCard()}
       ${renderTimelinePreview()}

@@ -218,6 +218,56 @@ function inclPerTerm(sub) {
   return excl * (1 + vat / 100);
 }
 
+// Ronde-11: compacte tabel-view voor consistentie met Facturen +
+// Creditnota's. Kolommen: Titel / Bedrag / Startdatum / Termijn /
+// Hernieuwingsdatum (= einddatum voor eenmalige termijn / start_date +
+// term_count) / Status. Actions verplaatst naar een 3-dots-menu per rij.
+function renderSubRow(sub) {
+  const st       = sub.status;
+  const ended    = ['cancelled', 'deactivated', 'completed'].includes(String(st || '').toLowerCase());
+  const isPostponed = Number(sub.postponed_months) > 0;
+  const hasInv   = !!sub.has_any_invoice;
+  const desc     = sub.description || 'Abonnement';
+  const termLabel = sub.term_count != null ? String(sub.term_count) + ' termijn' + (sub.term_count === 1 ? '' : 'en') : '—';
+  const renewLabel = fmtDate(sub.end_date) || '—';
+  return `
+    <tr data-kv-abo-row="${K().esc(sub.id)}">
+      <td>
+        <div class="cell-main-wrap"><span class="cell-main">${K().esc(desc)}</span></div>
+        ${isPostponed ? `<div style="font-size:11px;color:var(--amber);margin-top:2px">Uitgesteld · ${K().esc(String(sub.postponed_months))} mnd</div>` : ''}
+      </td>
+      <td class="r kv-fac-amount"><span class="mono">${K().esc(fmtEur(inclPerTerm(sub)))}</span></td>
+      <td>${K().esc(fmtDate(sub.start_date) || '—')}</td>
+      <td>${K().esc(termLabel)}</td>
+      <td>${K().esc(renewLabel)}</td>
+      <td>${statusPill(st)}</td>
+      <td class="r kv-fac-actions">
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-update="${K().esc(sub.id)}"
+          ${hasInv ? 'disabled title="Al gefactureerd — aanpassen niet toegestaan"' : 'title="Aanpassen"'}>✎</button>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-abo-postpone="${K().esc(sub.id)}" title="Uitstellen">⏱</button>
+        ${ended ? '' : `<button type="button" class="ds-btn ds-btn-ghost ds-btn-sm kv-abo-btn-danger" data-kv-abo-delete="${K().esc(sub.id)}" title="Deactiveren">⊘</button>`}
+      </td>
+    </tr>`;
+}
+
+function renderSubTable() {
+  return `
+    <div class="ds-tbl-wrap kv-fac-tbl kv-abo-tbl">
+      <table class="ds-tbl">
+        <thead><tr>
+          <th style="min-width:180px">Titel</th>
+          <th class="r" style="width:130px">Bedrag</th>
+          <th style="width:130px">Startdatum</th>
+          <th style="width:110px">Termijn</th>
+          <th style="width:130px">Hernieuwingsdatum</th>
+          <th style="width:130px">Status</th>
+          <th class="r" style="width:120px"></th>
+        </tr></thead>
+        <tbody>${state.subs.map(renderSubRow).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
 function renderSubCard(sub) {
   const st          = sub.status;
   // Beëindigd abonnement (cancelled/deactivated/completed) → geen "Deactiveren"
@@ -369,10 +419,9 @@ function render(rootEl) {
   } else {
     body = `
       ${renderKpiStrip()}
-      ${renderBypassBanner()}
-      <div class="kv-abo-list">
-        ${state.subs.map(renderSubCard).join('')}
-      </div>`;
+<!-- Ronde-11: bypass-audit-banner weggehaald uit klant-facing weergave. -->
+
+      ${renderSubTable()}`;
   }
 
   // Bulk-postpone header-knop: alleen als er >=2 actieve abo's zijn.

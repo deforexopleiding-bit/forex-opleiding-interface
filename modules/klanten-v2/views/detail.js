@@ -14,8 +14,9 @@ import { openEditCustomerModal }    from './modals/edit-customer.js';
 import { openArchiveCustomerModal } from './modals/archive-customer.js';
 import { renderCommunicatieTab } from './tabs/communicatie.js';
 import { renderOffertesTab }     from './tabs/offertes.js';
-import { renderAbonnementenTab } from './tabs/abonnementen.js?v=6';
+import { renderAbonnementenTab } from './tabs/abonnementen.js?v=7';
 import { renderFacturenTab }     from './tabs/facturen.js';
+import { renderCreditnotasTab }  from './tabs/creditnotas.js?v=1';
 import { renderWanbetalersTab }  from './tabs/wanbetalers.js';
 import { renderAuditTab }        from './tabs/audit.js';
 
@@ -34,6 +35,8 @@ const TABS = [
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>' },
   { key: 'facturen',     label: 'Facturen',     renderer: renderFacturenTab,
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v18l-3-2-2 2-2-2-2 2-2-2-2 2-3-2z"/><path d="M8 9h8M8 13h5"/></svg>' },
+  { key: 'creditnotas',  label: "Creditnota's", renderer: renderCreditnotasTab,
+    ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 12h8"/></svg>' },
   { key: 'wanbetalers',  label: 'Wanbetalers',  renderer: renderWanbetalersTab,
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 22h20L12 2z"/><path d="M12 9v5M12 18h.01"/></svg>' },
   { key: 'audit',        label: 'Audit',        renderer: renderAuditTab,
