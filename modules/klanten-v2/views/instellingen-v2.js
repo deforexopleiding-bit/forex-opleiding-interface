@@ -685,43 +685,82 @@
   /* Wave-3 · fin-bank — bank_accounts read via direct-supabase (zoals fin-
      entiteiten). CRUD + CAMT-upload vragen eigen brok: verkeerde IBAN hier
      beïnvloedt dashboard-saldo direct (zie eerdere post-mortem: F2 fix). */
-  const _bnk = { loading: false, fetched: false, error: null, items: [] };
+  const _bnk = { loading: false, fetched: false, error: null, items: [], camt: null, camtError: null };
   async function fetchBank() {
     if (_bnk.loading || _bnk.fetched) return;
     _bnk.loading = true; _bnk.error = null; if (render) render();
+    // Ronde-28 · fin-bank zinvol: fetch parallel: registratie-tabel (metadata)
+    // + CAMT-saldo-endpoint (dezelfde bron als dashboard-banksaldo). Toon per
+    // valid-IBAN het slotsaldo + peildatum zodat sectie klopt met dashboard.
     try {
       if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-      // BLOCKER-2 fix: tabel heeft `iban, is_active, gocardless_account_id`
-      // (geen label/currency-kolommen). Bevestigd via api/_lib/bank-balance.js:145.
-      const { data, error } = await window.supabase.from('bank_accounts').select('id, iban, is_active, gocardless_account_id, balance_fetched_at').order('iban');
-      if (error) throw error;
-      _bnk.items = data || [];
+      const [regRes, camtRes] = await Promise.all([
+        window.supabase.from('bank_accounts').select('id, iban, is_active, gocardless_account_id, balance_fetched_at').order('iban'),
+        tryFetch('bank-camt', '/api/finance-bank-camt-balance'),
+      ]);
+      if (regRes.error) throw regRes.error;
+      _bnk.items = regRes.data || [];
+      if (camtRes?.__error || camtRes?.error) _bnk.camtError = camtRes.__error || camtRes.error;
+      else _bnk.camt = camtRes || null;
     } catch (e) { _bnk.error = e?.message || 'onbekend'; }
     _bnk.loading = false; _bnk.fetched = true;
     if (render) render();
   }
   function bodyFinBank() {
     if (!_bnk.fetched && !_bnk.loading) queueMicrotask(() => fetchBank());
-    const rows = _bnk.items.map(a => `<tr style="border-top:1px solid var(--border)">
-      <td style="padding:8px 12px;font-size:12.5px;font-family:'IBM Plex Mono',monospace">${esc(a.iban || '—')}</td>
-      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(a.gocardless_account_id || '—')}</td>
-      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${a.balance_fetched_at ? esc(String(a.balance_fetched_at).slice(0,10)) : '—'}</td>
-      <td style="padding:8px 12px;font-size:11.5px">${a.is_active ? '✓ actief' : '⨯ inactief'}</td>
+    const eurFmt = (cents) => {
+      const v = (Number(cents) || 0) / 100;
+      return v.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2 });
+    };
+    const c = _bnk.camt;
+    const camtRows = (c?.per_account || []).map(a => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:10px 12px;font-size:12.5px;font-family:'IBM Plex Mono',monospace">${esc(a.account_iban || '—')}</td>
+      <td style="padding:10px 12px;font-size:13px;font-weight:600;text-align:right;font-family:'IBM Plex Mono',monospace;color:${(a.balance_cents || 0) < 0 ? 'var(--rose)' : 'var(--emerald)'}">${eurFmt(a.balance_cents)}</td>
+      <td style="padding:10px 12px;font-size:11.5px;color:var(--text-3)">${a.as_of_date ? esc(String(a.as_of_date).slice(0, 10)) : '—'}</td>
+      <td style="padding:10px 12px;font-size:11.5px">${a.status === 'registered' ? '✓ registered' : a.status === 'inactive' ? '⚠ inactive' : '◇ unregistered'}</td>
     </tr>`).join('');
-    return `<div style="max-width:1000px">
+    const grandTotal = (c?.per_account || []).reduce((sum, a) => sum + (Number(a.balance_cents) || 0), 0);
+    const regRows = _bnk.items.map(a => `<tr style="border-top:1px solid var(--border);${a.is_active ? '' : 'opacity:.55'}">
+      <td style="padding:6px 12px;font-size:12px;font-family:'IBM Plex Mono',monospace">${esc(a.iban || '—')}</td>
+      <td style="padding:6px 12px;font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(a.gocardless_account_id || '—')}</td>
+      <td style="padding:6px 12px;font-size:11px">${a.is_active ? '✓ actief' : '⨯ inactief'}</td>
+    </tr>`).join('');
+    return `<div style="max-width:1100px">
       <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Read-only.</b> Deze tabel toont de <code>bank_accounts</code>-registratie. Bij lege tabel is het dashboard-saldo NOG steeds correct — <code>finance-bank-camt-balance.js</code> sommeert alle valid-IBAN accounts uit de CAMT-data (F2-postmortem-fix), niet uit deze tabel. In een latere fin-bank CRUD-brok kan deze sectie beter de CAMT-accounts tonen die daadwerkelijk saldo hebben.
+        <b>Read-only.</b> Bank-account CRUD + CAMT-upload volgen in aparte brok — verkeerd IBAN of onbedoelde deactivate raakt dashboard-saldo direct.
+        Bovenste tabel = actuele slotsaldo's per IBAN (dezelfde bron als dashboard: <code>finance-bank-camt-balance</code>). Onderste tabel = <code>bank_accounts</code>-registratie (metadata + GoCardless-koppeling).
       </div>
-      ${_bnk.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_bnk.error)}</div>` : ''}
+      ${_bnk.error   ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_bnk.error)}</div>` : ''}
+      ${_bnk.camtError ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ CAMT-saldo laden mislukt: ${esc(_bnk.camtError)}</div>` : ''}
+
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Actueel saldo per IBAN (CAMT)</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">IBAN</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Slotsaldo</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Peildatum</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Registratie</th>
+          </tr></thead>
+          <tbody>${camtRows || `<tr><td colspan="4" style="padding:16px;color:var(--text-3);font-size:12.5px">${_bnk.loading ? 'Laden…' : (c ? 'Nog geen CAMT-bestand geüpload.' : '—')}</td></tr>`}
+            ${camtRows ? `<tr style="border-top:2px solid var(--border);background:var(--surface-2);font-weight:600">
+              <td style="padding:10px 12px;font-size:12.5px">Totaal</td>
+              <td style="padding:10px 12px;font-size:13px;text-align:right;font-family:'IBM Plex Mono',monospace;color:${grandTotal < 0 ? 'var(--rose)' : 'var(--emerald)'}">${eurFmt(grandTotal)}</td>
+              <td colspan="2" style="padding:10px 12px;font-size:11.5px;color:var(--text-3)">${c?.as_of_date ? 'per ' + esc(String(c.as_of_date).slice(0,10)) : ''}</td>
+            </tr>` : ''}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">bank_accounts-registratie (metadata)</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="background:var(--surface-2)">
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">IBAN</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">GoCardless account-id</th>
-            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Saldo-fetch</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
           </tr></thead>
-          <tbody>${rows || `<tr><td colspan="4" style="padding:16px;color:var(--text-3);font-size:12.5px">${_bnk.loading ? 'Laden…' : 'Geen bank-accounts geregistreerd (verwacht — saldo komt uit CAMT-data).'}</td></tr>`}</tbody>
+          <tbody>${regRows || `<tr><td colspan="3" style="padding:16px;color:var(--text-3);font-size:12.5px">${_bnk.loading ? 'Laden…' : 'Geen registratie-rijen. Saldo is toch correct (via CAMT hierboven).'}</td></tr>`}</tbody>
         </table>
       </div>
     </div>`;
