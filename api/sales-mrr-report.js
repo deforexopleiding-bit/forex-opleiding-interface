@@ -11,6 +11,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 import { computeCurrentMrr } from './_lib/mrr-compute.js';
+import { fetchTestDealIds } from './_lib/test-data-filter.js';
 
 const CYCLE_M = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
 function cycleMonths(label) {
@@ -53,7 +54,12 @@ export default async function handler(req, res) {
       .select('id, deal_id, status, amount, vat_percentage, term_count, start_date, end_date, line_items, description, billing_cycle, tl_department_id').limit(5000);
     if (entityId) sq = sq.eq('tl_department_id', entityId);
     const { data: subs } = await sq;
-    const list = subs || [];
+    // Test-subs uitsluiten (subs op deals van is_test=true customers).
+    const testDealIds = await fetchTestDealIds(supabaseAdmin);
+    const rawList = subs || [];
+    const list = rawList.filter(s => !s.deal_id || !testDealIds.has(s.deal_id));
+    const testExcluded = rawList.length - list.length;
+    if (testExcluded > 0) console.log('[sales-mrr-report] test-subs excluded:', testExcluded);
     // Snapshot: subs die op periode-eind liepen (datumvenster, status-onafhankelijk
     // voor historische correctheid). 'active' = snapshot-set → voedt KPI/traject/drilldown.
     const active = list.filter(s => s.start_date && s.start_date <= periodEnd && (!s.end_date || s.end_date >= periodEnd));

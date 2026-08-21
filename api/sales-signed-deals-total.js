@@ -14,6 +14,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { fetchTestDealIds } from './_lib/test-data-filter.js';
 
 function isoDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -81,9 +82,17 @@ export default async function handler(req, res) {
     const { data: deals, error: dErr } = await qy;
     if (dErr) throw new Error('deals: ' + dErr.message);
 
-    const ids = (deals || []).map(d => d.id);
+    // Test-deals uitsluiten (deals waarvan customer.is_test=true). Deals-tabel
+    // zelf heeft geen is_test-vlag → route via customers.
+    const testDealIds = await fetchTestDealIds(supabaseAdmin);
+    const allIds = (deals || []).map(d => d.id);
+    const ids = allIds.filter(id => !testDealIds.has(id));
+    const testExcluded = allIds.length - ids.length;
+    if (testExcluded > 0) {
+      console.log('[sales-signed-deals-total] test-deals excluded:', testExcluded, 'of', allIds.length);
+    }
     if (!ids.length) {
-      return res.status(200).json({ total_incl_vat: 0, count: 0, period, since });
+      return res.status(200).json({ total_incl_vat: 0, count: 0, period, since, test_excluded: testExcluded });
     }
 
     // Stap 2: line-items voor deze deals → som incl BTW.
@@ -104,6 +113,7 @@ export default async function handler(req, res) {
       count: ids.length,
       period,
       since,
+      test_excluded: testExcluded,
     });
   } catch (e) {
     console.error('[sales-signed-deals-total]', e.message);

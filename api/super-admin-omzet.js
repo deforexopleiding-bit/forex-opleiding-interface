@@ -36,6 +36,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { periodRange } from './_lib/nl-period.js';
 import { classifyDeal, CATEGORY_ORDER, CATEGORY_LABELS } from './_lib/deal-classify.js';
 import { computeCurrentMrr, REQUIRED_SUB_COLUMNS as MRR_COLS } from './_lib/mrr-compute.js';
+import { fetchTestDealIds } from './_lib/test-data-filter.js';
 
 // Paginatie-helper (identiek patroon als dunning-engine.fetchAllRows). Inline
 // gehouden om cross-file import naar dunning-scope te vermijden.
@@ -258,11 +259,16 @@ export default async function handler(req, res) {
     //    amount == sum(line_items)). NULL billing_cycle wordt afgeleid of
     //    uitgesloten (voorheen: NULL→1 = jaar-groot als maandbedrag = landmijn).
     //    Zelfde helper voedt v2-dashboard-tegel + Omzet-tab → 3-way identieke MRR.
+    // Test-subs uitsluiten (subs op deals van is_test=true customers).
+    const testDealIds = await fetchTestDealIds(supabaseAdmin);
     const { data: subsAll } = await supabaseAdmin
       .from('subscriptions')
-      .select(MRR_COLS.join(', '))
+      .select((MRR_COLS.join(', ')) + ', deal_id')
       .limit(5000);
-    const mrrResult = computeCurrentMrr(subsAll || [], { asOf: to });
+    const cleanSubs = (subsAll || []).filter(s => !s.deal_id || !testDealIds.has(s.deal_id));
+    const testExcludedSubs = (subsAll || []).length - cleanSubs.length;
+    if (testExcludedSubs > 0) console.log('[super-admin-omzet] test-subs excluded:', testExcludedSubs);
+    const mrrResult = computeCurrentMrr(cleanSubs, { asOf: to });
     const mrrInclBtw = mrrResult.mrr;
     if (mrrResult.nullCycle.excluded > 0 || mrrResult.excludedMrr > 0) {
       console.log('[super-admin-omzet] MRR summary:',

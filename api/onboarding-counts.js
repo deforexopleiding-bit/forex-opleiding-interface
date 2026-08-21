@@ -34,9 +34,12 @@ export default async function handler(req, res) {
   try {
     // Alle statussen in één ronde ophalen — onboardings-tabel blijft klein
     // (typisch <1000 rows). Group-by in JS voor eenvoud.
+    // Test-data (is_test=true) uitgesloten — automation-tester zet die vlag
+    // op ~zelf-onboarding-rijen en die horen niet in het dashboard-getal.
     const { data, error } = await supabaseAdmin
       .from('onboardings')
       .select('status')
+      .eq('is_test', false)
       .limit(20000);
     if (error) throw new Error('onboardings: ' + error.message);
 

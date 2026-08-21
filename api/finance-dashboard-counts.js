@@ -35,6 +35,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { aggregateActiveBankBalances } from './_lib/bank-balance.js';
 import { computeCurrentMrr, REQUIRED_SUB_COLUMNS as MRR_COLS } from './_lib/mrr-compute.js';
+import { fetchTestDealIds } from './_lib/test-data-filter.js';
 
 const VALID_PERIODS = ['today', 'week', 'month', 'quarter', 'year'];
 const SWR_TTL_MS = 5 * 60 * 1000; // 5 min
@@ -297,15 +298,22 @@ async function computeMrrSubscriptions() {
   // niet betrouwbaar → sub uitgesloten (de €10k-landmijn: 34 subs met amount
   // ≥ €1000 die als maandbedrag telde bij NULL→1-default).
   try {
+    // Test-data uitsluiten: subs zonder deal_id (los) blijven; subs op een
+    // test-deal (customer.is_test=true) worden geskipt.
+    const testDealIds = await fetchTestDealIds(supabaseAdmin);
     const { data, error } = await supabaseAdmin
       .from('subscriptions')
-      .select(MRR_COLS.join(', '))
+      .select((MRR_COLS.join(', ')) + ', deal_id')
       .limit(5000);
     if (error) {
       console.error('[finance-dashboard-counts] MRR fail:', error.message);
       return 0;
     }
-    const r = computeCurrentMrr(data || []);
+    const allSubs = data || [];
+    const clean = allSubs.filter(s => !s.deal_id || !testDealIds.has(s.deal_id));
+    const testExcluded = allSubs.length - clean.length;
+    if (testExcluded > 0) console.log('[finance-dashboard-counts] test-subs excluded:', testExcluded);
+    const r = computeCurrentMrr(clean);
     if (r.nullCycle.excluded > 0 || r.excludedMrr > 0) {
       console.log('[finance-dashboard-counts] MRR summary:',
         'mrr=€' + r.mrr,
