@@ -261,6 +261,115 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
+  /* Ronde-28 C1 · mk-bronnen — read-native. leads.bron + leads.traject count-
+     verdeling via direct-supabase op leads_overzicht. Editor blijft aparte brok
+     (bron-config bewerken raakt intake-flow); toont wel de actuele verdeling
+     zodat je ziet welke bronnen actief zijn. */
+  const _lb = { loading: false, fetched: false, error: null, byBron: [], byTraject: [], total: 0 };
+  async function fetchLeadBronnen() {
+    if (_lb.loading || _lb.fetched) return;
+    _lb.loading = true; _lb.error = null; if (render) render();
+    try {
+      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+      const { data, error } = await window.supabase.from('leads_overzicht').select('bron, traject').is('verwijderd_op', null).limit(50000);
+      if (error) throw error;
+      const rows = data || [];
+      _lb.total = rows.length;
+      const bMap = {}, tMap = {};
+      for (const r of rows) {
+        const b = String(r.bron || '(leeg)');
+        const t = String(r.traject || '(leeg)');
+        bMap[b] = (bMap[b] || 0) + 1;
+        tMap[t] = (tMap[t] || 0) + 1;
+      }
+      _lb.byBron    = Object.entries(bMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
+      _lb.byTraject = Object.entries(tMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
+    } catch (e) { _lb.error = e?.message || 'onbekend'; }
+    _lb.loading = false; _lb.fetched = true;
+    if (render) render();
+  }
+  function bodyLeadBronnen() {
+    if (!_lb.fetched && !_lb.loading) queueMicrotask(() => fetchLeadBronnen());
+    const rowsB = _lb.byBron.map(x => `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 12px;font-size:12.5px">${esc(x.name)}</td><td style="padding:6px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${x.count}</td><td style="padding:6px 12px;font-size:11px;color:var(--text-3);text-align:right">${_lb.total ? Math.round(x.count/_lb.total*100) : 0}%</td></tr>`).join('');
+    const rowsT = _lb.byTraject.map(x => `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 12px;font-size:12.5px">${esc(x.name)}</td><td style="padding:6px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${x.count}</td><td style="padding:6px 12px;font-size:11px;color:var(--text-3);text-align:right">${_lb.total ? Math.round(x.count/_lb.total*100) : 0}%</td></tr>`).join('');
+    return `<div style="max-width:1000px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Read-only overzicht.</b> Toont de actuele verdeling van <code>leads.bron</code> + <code>leads.traject</code> uit <code>leads_overzicht</code> (${_lb.total} leads). Bron-mapping bewerken (welke intake-bron mapt naar welk traject) raakt de intake-flow → vraagt eigen brok.
+      </div>
+      ${_lb.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_lb.error)}</div>` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Per bron</div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr style="background:var(--surface-2)"><th style="text-align:left;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Bron</th><th style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Aantal</th><th style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">%</th></tr></thead>
+              <tbody>${rowsB || `<tr><td colspan="3" style="padding:12px;color:var(--text-3);font-size:12px">${_lb.loading?'Laden…':'—'}</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Per traject</div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr style="background:var(--surface-2)"><th style="text-align:left;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Traject</th><th style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Aantal</th><th style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">%</th></tr></thead>
+              <tbody>${rowsT || `<tr><td colspan="3" style="padding:12px;color:var(--text-3);font-size:12px">${_lb.loading?'Laden…':'—'}</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /* Ronde-28 C2 · sales-trajecten — read-native. Trajecten + varianten via
+     direct-supabase op traject_variants + trajects (parent). Volledige editor
+     blijft deep-link naar sales-wizard (complex: variant-products join, prijs-
+     berekening, TL-sync). */
+  const _tr = { loading: false, fetched: false, error: null, items: [] };
+  async function fetchTrajecten() {
+    if (_tr.loading || _tr.fetched) return;
+    _tr.loading = true; _tr.error = null; if (render) render();
+    try {
+      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+      const [tRes, vRes] = await Promise.all([
+        window.supabase.from('trajects').select('id, name').order('name'),
+        window.supabase.from('traject_variants').select('id, name, traject_id, default_duration_months').order('name'),
+      ]);
+      if (tRes.error) throw tRes.error;
+      if (vRes.error) throw vRes.error;
+      const tById = {};
+      for (const t of (tRes.data || [])) tById[t.id] = t.name;
+      _tr.items = (vRes.data || []).map(v => ({ ...v, traject_name: tById[v.traject_id] || '—' }))
+        .sort((a,b) => (a.traject_name||'').localeCompare(b.traject_name||'') || (a.name||'').localeCompare(b.name||''));
+    } catch (e) { _tr.error = e?.message || 'onbekend'; }
+    _tr.loading = false; _tr.fetched = true;
+    if (render) render();
+  }
+  function bodyTrajecten() {
+    if (!_tr.fetched && !_tr.loading) queueMicrotask(() => fetchTrajecten());
+    const rows = _tr.items.map(v => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;font-size:12.5px">${esc(v.traject_name)}</td>
+      <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(v.name || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);text-align:center">${v.default_duration_months || '—'}</td>
+    </tr>`).join('');
+    return `<div style="max-width:1000px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Read-only lijst.</b> Toont trajecten + hun varianten uit <code>trajects</code> + <code>traject_variants</code>. Varianten aanmaken/prijzen wijzigen/product-koppelingen bewerken vraagt eigen brok (variant-products-join + TL-sync).
+        <button class="btn btn-primary btn-sm" style="margin-left:10px" onclick="DFO.goMod('sales')">Open Sales →</button>
+      </div>
+      ${_tr.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_tr.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Traject</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Variant</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Looptijd (mnd)</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="3" style="padding:16px;color:var(--text-3);font-size:12.5px">${_tr.loading?'Laden…':'Geen trajecten gevonden'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   /* Wave-2 · DEEL B — deep-link body voor niet-geporte config-secties.
      Reden per sectie is beknopt uitgelegd zodat de gebruiker snapt WAAROM
      de instelling nu in een andere module leeft. Bij `modKey` opgegeven:
@@ -2431,7 +2540,7 @@
     if (cur.id === 'agents-lisa')        return bodyDeepLink('AI Agents', 'De Lisa-config (persona/fases/follow-ups) staat in de AI Agents-module. Verhuizen naar hier vereist port van de agents-config-UI + endpoints — aparte brok.', 'agents');
     if (cur.id === 'agents-manager')     return bodyDeepLink('AI Agents', 'AI Manager-instellingen (system-prompt, kennis, autonomie) staan in de AI Agents-module. Het werkende endpoint /api/super-admin-ai-manager voedt de widget op het dashboard.', 'agents');
     if (cur.id === 'agents-kennis')      return bodyDeepLink('AI Agents', 'Kennisbank voor AI (Lisa/Joost) staat verspreid over de AI Agents-module + Joost-config. Aparte brok om te centraliseren.', 'agents');
-    if (cur.id === 'sales-trajecten')    return bodyDeepLink('Sales', 'Trajecten (looptijden/prijzen/termijnen) worden in de Sales-wizard beheerd. Directe editor volgt in Wave 3.', 'sales');
+    if (cur.id === 'sales-trajecten')    return bodyTrajecten();
     if (cur.id === 'sales-producten')    return bodyDeepLink('Sales', 'Losse producten (E-books, lascursus, consultancy) staan in de Sales-catalogus/wizard. Aparte brok voor centrale editor.', 'sales');
     if (cur.id === 'sales-bonus')        return bodyDeepLink('Sales', 'Verkopers en bonus-config zit in de Sales-module + team_members-tabel. Bonus-berekening is server-side; UI-editor volgt in Wave 3.', 'sales');
     if (cur.id === 'ev-auto')            return bodyDeepLink('Automatiseringen', 'Event-automatiseringen worden in de Automatiseringen-module bewerkt (per-trigger flows). Directe centralisatie vereist port van die UI.', 'automatiseringen');
@@ -2439,7 +2548,7 @@
     if (cur.id === 'ev-locaties')        return bodyDeepLink('Events', 'Locaties (zalen/adressen/routes) staan in de events-config; centrale editor volgt.', 'events');
     if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in Bubble; het CRM leest via bubble-api. Zie sys-bubble-schema voor diagnostiek.', null);
     if (cur.id === 'mk-meta')            return bodyDeepLink(null, 'Meta-koppeling (ads-account + pixel) wordt beheerd in Meta Business Manager. Alleen de WhatsApp-Cloud-API-koppeling wordt hier bewerkt (zie com-wa).', 'com-wa');
-    if (cur.id === 'mk-bronnen')         return bodyDeepLink('Leads', 'Lead-bronnen (leads.bron / leads.traject-mapping) worden in de Leads-module gezet; dashboard-tegels lezen /api/leads-per-traject-count. Centrale editor vraagt eigen brok.', 'leads');
+    if (cur.id === 'mk-bronnen')         return bodyLeadBronnen();
     if (cur.id === 'mk-sequenties')      return bodyDeepLink('Leadsonderhoud', 'Sequenties (automatische lead-opvolging) worden in de Leadsonderhoud-module beheerd. Aparte brok voor centralisatie.', 'leadsonderhoud');
     if (cur.id === 'alg-meldingen')      return bodyDeepLink(null, 'Notification-preferences (dagelijkse/wekelijkse admin-mails) zijn server-side geconfigureerd via cron + rol-lookup. Voor per-user meldingen: aparte brok om notification_preferences-tabel + UI toe te voegen.', null);
     // (alg-bedrijf verplaatst naar Wave-3 bovenaan setBody; bodyBedrijf placeholder blijft ongebruikt)
@@ -2476,6 +2585,8 @@
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
+      // Ronde-28 C1+C2: uit deep-link naar read-native met eigen fetches.
+      'mk-bronnen','sales-trajecten',
     ]);
     // Ronde-28: fin-entiteiten upgraded READ-ONLY → LIVE (CRUD wired).
     if (READONLY.has('fin-entiteiten')) READONLY.delete('fin-entiteiten');
@@ -2483,9 +2594,9 @@
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
       'agents-lisa','agents-manager','agents-kennis',
-      'sales-trajecten','sales-producten','sales-bonus',
+      'sales-producten','sales-bonus',
       'ev-auto','ev-templates','ev-locaties','lms-instel',
-      'mk-meta','mk-bronnen','mk-sequenties',
+      'mk-meta','mk-sequenties',
       // Polish v26: alg-meldingen krijgt DEEP-LINK badge (was voorbeeld-data);
       // notice-only sectie (server-side crons + rol-lookup, aparte brok voor per-user-prefs).
     ]);
