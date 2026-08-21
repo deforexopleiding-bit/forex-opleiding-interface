@@ -124,7 +124,16 @@ export default async function handler(req, res) {
     const testDealIds = await fetchTestDealIds(supabaseAdmin);
     const clean = deals.filter(d => !testDealIds.has(d.id));
     const testExcluded = deals.length - clean.length;
-    if (testExcluded > 0) console.log('[sales-signed-deals-total] test-deals excluded:', testExcluded, 'of', allDeals.length);
+    // Ronde-20 diagnose: log altijd de flow-counts zodat we kunnen bewijzen
+    // dat een tegel-nul-uitkomst uit lege data komt en niet uit over-filtering.
+    console.log('[sales-signed-deals-total]', {
+      period, since, until, group_by: groupByMonth ? 'month' : 'none',
+      raw_deals_from_db: (dealsRaw || []).length,
+      after_date_range:  deals.length,
+      test_customer_deal_ids: testDealIds.size,
+      test_excluded_from_range: testExcluded,
+      final_deal_count: clean.length,
+    });
 
     const ids = clean.map(d => d.id);
     if (!ids.length) {
