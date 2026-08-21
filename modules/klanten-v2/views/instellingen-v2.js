@@ -1359,6 +1359,23 @@
     const vars = (String(val || '').match(/\{\{\d+\}\}/g) || []).length;
     el.textContent = `${String(val || '').length}/1024 chars · ${vars} variabele${vars===1?'':'n'} gevonden`;
   };
+  // Ronde-31 FIX 4: Naam live-preview + on-blur sanitize (zonder re-render,
+  // focus behouden). User typt vrij; setter bewaart raw; preview toont wat er
+  // straks wordt opgeslagen; on blur wordt het input-veld zelf gesynchroniseerd.
+  window.__updMetaNamePreview = (val) => {
+    const raw = String(val || '');
+    _metaEd.fields.name = raw;   // raw state; sanitize gebeurt bij blur/save.
+    const el = document.getElementById('kv-metaed-name-preview'); if (!el) return;
+    const cleaned = raw.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    if (cleaned && cleaned !== raw) el.textContent = 'wordt opgeslagen als: ' + cleaned;
+    else                            el.textContent = '';
+  };
+  window.__setMetaEdNameBlur = (val) => {
+    const cleaned = String(val || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+    _metaEd.fields.name = cleaned;
+    const input = document.querySelector('[data-metaed-name]'); if (input && input.value !== cleaned) input.value = cleaned;
+    const el = document.getElementById('kv-metaed-name-preview'); if (el) el.textContent = '';
+  };
   async function _metaEdOpenEditor(id, template) {
     if (!id) return;
     _metaEdReset();
@@ -1439,7 +1456,14 @@
     _wa.fetched = false; fetchWaTemplates(); // 1x refetch — binnen fetched-guard
     if (render) render();
   }
-  window.__setMetaEdSave       = () => { _metaEdSave(false); };
+  // Ronde-31 FIX 2: "Opslaan als concept" achter custom confirm (was direct upsert
+  // zonder bevestiging — inconsistent met rest en kostte eerder een test-template).
+  window.__setMetaEdSave       = () => {
+    const err = _metaEdValidate();
+    if (err) { _metaEd.error = err; if (render) render(); return; }
+    const nm = String(_metaEd.fields.name || '').trim();
+    openConfirm(`Concept-template "${esc(nm) || '(zonder naam)'}" opslaan? Wordt niet naar Meta gestuurd — blijft lokaal totdat je Submit → Meta klikt.`, () => _metaEdSave(false));
+  };
   window.__setMetaEdSaveSubmit = () => {
     openConfirm(`Concept opslaan én DIRECT indienen bij Meta? Meta beoordeelt de template; kan uren duren en niet ongedaan gemaakt worden.`, () => _metaEdSave(true), 'warn');
   };
@@ -1460,7 +1484,8 @@
           ${_metaEd.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">⚠ ${esc(_metaEd.error)}</div>` : ''}
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-bottom:14px">
             <label style="font-size:11.5px;color:var(--text-2)">Naam (lowercase, _, max 50)
-              <input type="text" value="${esc(f.name)}" oninput="window.__setMetaEdField('name',this.value.toLowerCase().replace(/[^a-z0-9_]/g,''))" ${_metaEd.mode === 'edit' ? 'readonly' : ''} maxlength="50" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" placeholder="bv. eerste_herinnering" />
+              <input type="text" data-metaed-name value="${esc(f.name)}" oninput="window.__updMetaNamePreview(this.value)" onblur="window.__setMetaEdNameBlur(this.value)" ${_metaEd.mode === 'edit' ? 'readonly' : ''} maxlength="50" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" placeholder="bv. eerste_herinnering" />
+              <div id="kv-metaed-name-preview" style="font-size:10.5px;color:var(--text-3);margin-top:2px;min-height:12px;font-family:'IBM Plex Mono',monospace"></div>
             </label>
             <label style="font-size:11.5px;color:var(--text-2)">Taal
               <select onchange="window.__setMetaEdField('language',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">

@@ -6364,29 +6364,45 @@
   const _WB_BADGE_TTL_MS = 2 * 60 * 1000;
   let   _wbBadgeFetchedAt = 0;
   let   _wbBadgeInflight  = false;
+  let   _wbBadgeLastCount = null;   // Ronde-31 FIX 1: cache voor re-paint na nav-re-render.
+  function _paintWbBadge(cnt) {
+    // Ronde-31 FIX 1: querySelectorAll (alle matching buttons — nav kan re-renderen
+    // + roles-switcher toont soms 2x dezelfde module). Fallback naar id-match als
+    // onclick geen 'wanbetalers' bevat.
+    const btns = document.querySelectorAll('.nav-item[onclick*="wanbetalers"], .nav-item[data-mod="wanbetalers"]');
+    if (!btns.length) return;
+    btns.forEach((btn) => {
+      let badge = btn.querySelector('.nav-badge');
+      if (cnt > 0) {
+        if (!badge) { badge = document.createElement('span'); badge.className = 'nav-badge'; btn.appendChild(badge); }
+        badge.textContent = String(cnt); badge.style.display = '';
+      } else if (badge) {
+        badge.textContent = '0'; badge.style.display = 'none';
+      }
+    });
+  }
   async function refreshWbApprovalsBadge(force) {
     if (_wbBadgeInflight) return;
-    if (!force && (Date.now() - _wbBadgeFetchedAt) < _WB_BADGE_TTL_MS) return;
+    if (!force && (Date.now() - _wbBadgeFetchedAt) < _WB_BADGE_TTL_MS) {
+      if (_wbBadgeLastCount != null) _paintWbBadge(_wbBadgeLastCount);
+      return;
+    }
     _wbBadgeInflight = true;
     try {
       const r = await (window.KV && window.KV.authedFetch
         ? window.KV.authedFetch('/api/pending-actions-list?status=PENDING&limit=1')
         : fetch('/api/pending-actions-list?status=PENDING&limit=1'));
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) return;
+      if (!r.ok) { console.debug('[wb-badge] fetch !ok', r.status, d?.error); return; }
+      // counts.PENDING is de canonieke telling (is_test uitgesloten server-side); total is fallback.
       const cnt = (d.counts && typeof d.counts.PENDING === 'number')
         ? d.counts.PENDING
         : (typeof d.total === 'number' ? d.total : 0);
       _wbBadgeFetchedAt = Date.now();
-      const btn   = document.querySelector('.nav-item[onclick*="wanbetalers"]');
-      const badge = btn ? btn.querySelector('.nav-badge') : null;
-      if (btn && !badge && cnt > 0) {
-        const s = document.createElement('span'); s.className = 'nav-badge'; s.textContent = String(cnt); btn.appendChild(s);
-      } else if (badge) {
-        if (cnt > 0) { badge.textContent = String(cnt); badge.style.display = ''; }
-        else         { badge.style.display = 'none'; }
-      }
-    } catch (_) { /* fail-soft */ }
+      _wbBadgeLastCount = cnt;
+      _paintWbBadge(cnt);
+      console.debug('[wb-badge] painted', cnt);
+    } catch (e) { console.debug('[wb-badge] fail-soft', e?.message || e); }
     finally { _wbBadgeInflight = false; }
   }
   window.__refreshWbApprovalsBadge = refreshWbApprovalsBadge;
@@ -6394,6 +6410,18 @@
   const _kick = () => { try { refreshWbApprovalsBadge(false); } catch (_) {} };
   if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(_kick, 800);
   else document.addEventListener('DOMContentLoaded', () => setTimeout(_kick, 800), { once: true });
+  // Ronde-31 FIX 1: MutationObserver op #nav — bij re-render (bv. na role-switch)
+  // opnieuw de badge painten met de laatst-bekende count. Géén nieuwe fetch — puur
+  // DOM-mutatie op de badge-span. Fail-soft als #nav nog niet bestaat.
+  const _hookNavObserver = () => {
+    const nav = document.getElementById('nav'); if (!nav) return;
+    try {
+      const mo = new MutationObserver(() => { if (_wbBadgeLastCount != null) _paintWbBadge(_wbBadgeLastCount); });
+      mo.observe(nav, { childList: true, subtree: true });
+    } catch (_) { /* fail-soft */ }
+  };
+  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(_hookNavObserver, 1200);
+  else document.addEventListener('DOMContentLoaded', () => setTimeout(_hookNavObserver, 1200), { once: true });
   console.debug('[wanbetalers-v2] v=36 BROK C: _fetchCasePipeline skipt de /api/dunning-pipeline-detail-call bij een klant met open_invoice_count === 0 in overzicht — synthetische empty-response (open_invoices:[], _synthetic:true) i.p.v. netwerk-404. Voorkomt rode "GET .. 404" in console + de tryFetch console.warn. Fallback: zonder overzicht (race) fetchen we nog steeds. UI-render onveranderd — _caseFactuurCardHtml toont "Geen open factuur" bij lege lijst.');
   console.debug('[wanbetalers-v2] v=35 BROK WB-FIX-6: klantnaam als klikdoel — thread-header <b>naam</b> + right klantgegevens-paneel naam-heading. Beide krijgen cursor:pointer + hover-underline (brand-color) + click -> __wbxOpenCase(cid, {customer_name}). event.stopPropagation zodat kop-knoppen (✓/+/👤/⋮) niet dubbel triggeren. Wordt niet klikbaar als cust.id ontbreekt (unmatched-nummer conv).');
   console.debug('[wanbetalers-v2] v=34 BROK WB-FIX-5: (#1) Volgende-badge mapt nu op ECHTE overzicht-velden next_action_step_type (email/whatsapp/wait/task/stop/resume_dunning) + next_action_step_title heuristiek (Bel/Brief/Incasso/Herinnering). Voorheen: mijn code checkte non-bestaande velden -> altijd "Actie"-fallback. (#2) MANUAL_FOLLOWUP-splitting op payload.kind: kind=call -> "📞 Belafspraak" (Bel-knop OK), kind=letter -> "✉ Brief-taak" (Bel-knop weg, "Naar brief-flow"-knop naar SURFACE B WIK-card), kind=other -> "📝 Follow-up". Fallback: title-regex (bv. "Stuur WIK-14-dagenbrief" -> letter). Groepering ook via effectieve type — brief-taken en bel-taken vallen nu in APARTE groepen. Ook: MANUAL_PROPOSE_ARRANGEMENT label naar "Regeling voorstellen" (v1-parity, was "Arrangement voorstellen").');

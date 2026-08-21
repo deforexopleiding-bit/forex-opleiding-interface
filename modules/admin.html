@@ -1572,8 +1572,9 @@ async function init() {
       'assessment':          '/modules/events.html#settings-assessment',
       'simone-config':       '/modules/events.html#settings-simone',
       // Ronde-31 STAP 1: approval-queue verhuisd naar Wanbetalers-module.
-      // Oude bookmarks + hoofdnav-badge-links landen nu in wanbetalers-v2 Acties.
-      'approval-queue':      '/modules/klanten-v2/?v2preview=wanbetalers',
+      // Ronde-31 FIX 3: land direct in de Acties-tab (waar de queue zit), niet
+      // op de Vandaag-default. v2tab wordt afgehandeld in klanten-v2.js boot.
+      'approval-queue':      '/modules/klanten-v2/?v2preview=wanbetalers&v2tab=Acties',
     };
     if (hash && legacyRedirectMap[hash]) {
       location.replace(legacyRedirectMap[hash]);
