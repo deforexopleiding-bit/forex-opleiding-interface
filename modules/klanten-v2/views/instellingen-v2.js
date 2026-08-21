@@ -1089,14 +1089,33 @@
   }
   window.__setRbacMod = (mk) => { _rbac.activeModule = mk; if (render) render(); };
   window.__setRbacSearch = (q) => { _rbac.search = String(q || ''); if (render) render(); };
+  function _rbacCountDirty() {
+    if (!window.KV_RBAC?.FEATURE_REGISTRY) return 0;
+    let n = 0;
+    for (const r of window.KV_RBAC.RBAC_ROLES) {
+      if (r.auto) continue;
+      for (const m of window.KV_RBAC.FEATURE_REGISTRY) {
+        for (const f of m.features) {
+          const cur  = !!(_rbac.matrix[r.key]   && _rbac.matrix[r.key][f.key]);
+          const prev = !!(_rbac.snapshot[r.key] && _rbac.snapshot[r.key][f.key]);
+          if (cur !== prev) n++;
+        }
+      }
+    }
+    return n;
+  }
   window.__setRbacToggle = (role, key, checked) => {
     if (!_rbac.matrix[role]) _rbac.matrix[role] = {};
     _rbac.matrix[role][key] = !!checked;
-    _rbac.dirty = true; if (render) render();
+    // Clear-on-revert: bij 0 werkelijke diff → dirty weg (i.p.v. sticky true).
+    _rbac.dirty = _rbacCountDirty() > 0;
+    if (render) render();
   };
   window.__setRbacSave = () => {
     if (!_rbac.dirty || _rbac.saveBusy) return;
-    openConfirm('Rechten-wijzigingen opslaan? Alleen gewijzigde cellen worden weggeschreven (diff-save).', async () => {
+    const diffN = _rbacCountDirty();
+    if (diffN === 0) { _rbac.dirty = false; if (render) render(); return; }
+    openConfirm(`${diffN} rechten-wijziging${diffN === 1 ? '' : 'en'} opslaan? Alleen de veranderde cellen worden weggeschreven (diff-save).`, async () => {
       _rbac.saveBusy = true; if (render) render();
       try {
         const now = new Date().toISOString();
@@ -1175,7 +1194,7 @@
         <div style="font-size:12.5px;color:var(--text-3)">${rolesSum.map(([r,c]) => `${esc(r)}: ${r === 'super_admin' ? '<span style="color:var(--emerald);font-weight:600">bypass</span>' : `<b>${c}</b>`}`).join(' · ')}</div>
         <div style="display:flex;gap:8px;align-items:center">
           <input type="text" placeholder="Zoek functie…" value="${esc(_rbac.search)}" oninput="window.__setRbacSearch(this.value)" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);max-width:220px" />
-          ${_rbac.dirty ? '<span style="font-size:11px;color:var(--amber)">niet-opgeslagen wijzigingen</span>' : ''}
+          ${_rbac.dirty ? `<span style="font-size:11px;color:var(--amber);font-weight:600">${_rbacCountDirty()} niet-opgeslagen wijziging${_rbacCountDirty() === 1 ? '' : 'en'}</span>` : ''}
           <button class="btn btn-primary btn-sm" ${!_rbac.dirty || _rbac.saveBusy ? 'disabled' : ''} onclick="window.__setRbacSave()">${_rbac.saveBusy ? 'Opslaan…' : 'Opslaan'}</button>
         </div>
       </div>
@@ -2341,14 +2360,19 @@
       'sales-trajecten','sales-producten','sales-bonus',
       'ev-auto','ev-templates','ev-locaties','lms-instel',
       'mk-meta','mk-bronnen','mk-sequenties',
-      'alg-meldingen',
+      // Polish v26: alg-meldingen krijgt DEEP-LINK badge (was voorbeeld-data);
+      // notice-only sectie (server-side crons + rol-lookup, aparte brok voor per-user-prefs).
     ]);
+    // Notice-only secties (geen deep-link naar module, wél uitleg met bron).
+    const NOTICE = new Set(['alg-meldingen']);
     const bannerHtml = LIVE.has(cur.id)
       ? `<div style="padding:6px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">● LIVE DATA — instellingen op deze pagina zijn echt en worden direct opgeslagen</div>`
       : READONLY.has(cur.id)
         ? `<div style="padding:6px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">● READ-ONLY — toont data, schrijven gebeurt elders</div>`
       : DEEPLINK.has(cur.id)
         ? `<div style="padding:6px 12px;background:var(--blue-soft, var(--surface-2));color:var(--blue, var(--text-2));border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">◇ DEEP-LINK — instelling leeft in een andere module (uitleg hieronder)</div>`
+      : NOTICE.has(cur.id)
+        ? `<div style="padding:6px 12px;background:var(--blue-soft, var(--surface-2));color:var(--blue, var(--text-2));border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">◇ NOTICE — informatie over waar deze instelling nu leeft (nog geen editor)</div>`
         : H.voorbeeldBanner();
     return `${bannerHtml}
       <div class="set-split">
