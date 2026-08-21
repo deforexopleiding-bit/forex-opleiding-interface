@@ -680,7 +680,7 @@
      Submit/sync/delete via bestaande endpoints achter custom confirm (echte Meta-
      actie). Edit/detail = deep-link (form is complex). WA-nummer registreren:
      custom confirm + POST /api/whatsapp-register-number. */
-  const _wa = { loading: false, fetched: false, error: null, items: [], busy: {}, modules: [], moduleId: null };
+  const _wa = { loading: false, fetched: false, error: null, items: [], busy: {}, modules: [], moduleId: null, folders: [], collapsed: {} };
   async function fetchWaTemplates() {
     if (_wa.loading || _wa.fetched) return;
     _wa.loading = true; _wa.error = null; if (render) render();
@@ -701,15 +701,25 @@
       if (render) render();
       return;
     }
-    const j = await tryFetch('meta-tpls', '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(_wa.moduleId));
+    // Parallel: templates + folders per WABA (folders is optioneel; super_admin-
+    // only endpoint dus 403 voor manager → nette fallback op Meta category).
+    const [j, fj] = await Promise.all([
+      tryFetch('meta-tpls',    '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(_wa.moduleId)),
+      tryFetch('meta-folders', '/api/admin-template-folders-list?business_account_id=' + encodeURIComponent(_wa.moduleId)),
+    ]);
     _wa.loading = false; _wa.fetched = true;
     if (j?.__error) _wa.error = j.__error;
     else _wa.items = Array.isArray(j?.items) ? j.items : [];
+    _wa.folders = Array.isArray(fj?.folders) ? fj.folders : [];
     if (render) render();
   }
+  window.__setWaToggleCat = (key) => { _wa.collapsed[key] = !_wa.collapsed[key]; if (render) render(); };
   window.__setWaModule = (id) => {
-    if (!id || id === _wa.moduleId) return;
-    _wa.moduleId = id; _wa.fetched = false; _wa.items = []; _wa.error = null;
+    // Picker-guard: lege waarde (module zonder gekoppelde WABA) → nette
+    // waarschuwing i.p.v. stille no-op die de vorige tabel laat staan.
+    if (!id) { showToast('Deze module heeft geen gekoppeld WhatsApp-account', 'warn'); return; }
+    if (id === _wa.moduleId) return;
+    _wa.moduleId = id; _wa.fetched = false; _wa.items = []; _wa.folders = []; _wa.error = null;
     fetchWaTemplates();
   };
   async function waCall(id, url, method, label, body) {
@@ -751,31 +761,80 @@
     if (!_wa.fetched && !_wa.loading) queueMicrotask(() => fetchWaTemplates());
     const rows = _wa.items;
     const busySync = !!_wa.busy.__sync;
+    // Ronde-25: categorie-groepering. Bron-prioriteit: folder_id (admin-
+    // template-folders-list) → Meta category (MARKETING/UTILITY/AUTHENTICATION)
+    // → 'Ongesorteerd'. Folders zijn super_admin-only; bij 403 valt de picker
+    // netjes op Meta category terug (elke template heeft er één).
+    const folderById = {};
+    for (const f of (_wa.folders || [])) folderById[f.id] = f.name;
+    const categoryFor = (t) => {
+      if (t.folder_id && folderById[t.folder_id]) return folderById[t.folder_id];
+      if (t.category) return String(t.category).charAt(0).toUpperCase() + String(t.category).slice(1).toLowerCase();
+      return 'Ongesorteerd';
+    };
+    const grouped = new Map();
+    for (const t of rows) {
+      const cat = categoryFor(t);
+      if (!grouped.has(cat)) grouped.set(cat, []);
+      grouped.get(cat).push(t);
+    }
+    // Sortering: bekende folders eerst (in folder-sort_order), dan Meta-cats
+    // alfabetisch, dan 'Ongesorteerd' onderaan.
+    const folderNamesInOrder = (_wa.folders || []).slice().sort((a,b) => (a.sort_order||0) - (b.sort_order||0)).map(f => f.name);
+    const seenCats = new Set();
+    const orderedCats = [];
+    for (const n of folderNamesInOrder) if (grouped.has(n) && !seenCats.has(n)) { orderedCats.push(n); seenCats.add(n); }
+    for (const c of Array.from(grouped.keys()).sort()) if (c !== 'Ongesorteerd' && !seenCats.has(c)) { orderedCats.push(c); seenCats.add(c); }
+    if (grouped.has('Ongesorteerd')) orderedCats.push('Ongesorteerd');
+
+    function renderRow(t) {
+      const status = (t.status || 'unknown').toLowerCase();
+      const pill = status === 'approved' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">approved</span>'
+                : status === 'pending' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--amber-soft);color:var(--amber);font-weight:600">pending</span>'
+                : status === 'rejected' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--rose-soft);color:var(--rose);font-weight:600">rejected</span>'
+                : `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--text-3);font-weight:600">${esc(status)}</span>`;
+      const busy = !!_wa.busy[t.id];
+      const canSubmit = ['draft','local','concept','rejected'].includes(status);
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(t.name || '—')} <span style="color:var(--text-3);font-size:11px">· ${esc(t.language || 'nl')}</span></div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px;font-family:'IBM Plex Mono',monospace">${esc(t.meta_template_id || '(nog geen meta-id)')}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${pill}
+          ${canSubmit ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaSubmit('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px">Submit</button>` : ''}
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaDelete('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px;color:var(--rose)">Delete</button>
+        </div>
+      </div>`;
+    }
     const rowsHtml = rows.length
-      ? rows.map(t => {
-          const status = (t.status || 'unknown').toLowerCase();
-          const pill = status === 'approved' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">approved</span>'
-                    : status === 'pending' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--amber-soft);color:var(--amber);font-weight:600">pending</span>'
-                    : status === 'rejected' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--rose-soft);color:var(--rose);font-weight:600">rejected</span>'
-                    : `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--text-3);font-weight:600">${esc(status)}</span>`;
-          const busy = !!_wa.busy[t.id];
-          const canSubmit = ['draft','local','concept','rejected'].includes(status);
-          return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600">${esc(t.name || '—')} <span style="color:var(--text-3);font-size:11px">· ${esc(t.language || 'nl')}</span></div>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px;font-family:'IBM Plex Mono',monospace">${esc(t.meta_template_id || '(nog geen meta-id)')}</div>
-            </div>
-            <div style="display:flex;gap:6px;align-items:center">
-              ${pill}
-              ${canSubmit ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaSubmit('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px">Submit</button>` : ''}
-              <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaDelete('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px;color:var(--rose)">Delete</button>
-            </div>
+      ? orderedCats.map(cat => {
+          const items = grouped.get(cat).slice().sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
+          const isOpen = !_wa.collapsed[cat]; // default open
+          return `<div style="border-bottom:1px solid var(--border)">
+            <button onclick="window.__setWaToggleCat('${esc(cat).replace(/'/g,"\\'")}')" style="width:100%;display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface-2);border:none;text-align:left;cursor:pointer;font:inherit;color:var(--text-1)">
+              <span style="font-size:11px;color:var(--text-3);width:12px">${isOpen ? '▼' : '▶'}</span>
+              <span style="font-size:12.5px;font-weight:600;flex:1">${esc(cat)}</span>
+              <span style="font-size:11px;color:var(--text-3)">${items.length} template${items.length === 1 ? '' : 's'}</span>
+            </button>
+            ${isOpen ? items.map(renderRow).join('') : ''}
           </div>`;
         }).join('')
-      : (_wa.loading ? '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Laden…</div>' : '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Geen templates (of admin-permission ontbreekt).</div>');
+      : (_wa.loading ? '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Laden…</div>' : '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Geen templates voor deze WABA.</div>');
+    // Ronde-25 picker-fix: opties zonder gekoppelde WABA (leeg business_account_id)
+    // krijgen `disabled` + label "— geen WhatsApp-account —". Modules die dezelfde
+    // WABA delen worden herkenbaar via het gedeelde id (badge achter label).
+    const wabaCount = {};
+    for (const m of _wa.modules) if (m.business_account_id) wabaCount[m.business_account_id] = (wabaCount[m.business_account_id] || 0) + 1;
     const moduleSel = _wa.modules.length > 1
-      ? `<select onchange="window.__setWaModule(this.value)" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
-          ${_wa.modules.map(m => `<option value="${esc(m.business_account_id)}" ${_wa.moduleId === m.business_account_id ? 'selected' : ''}>${esc(m.display_label || m.module || m.business_account_id)}</option>`).join('')}
+      ? `<select onchange="window.__setWaModule(this.value)" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);max-width:280px">
+          ${_wa.modules.map(m => {
+            const baid = m.business_account_id;
+            const shared = baid && wabaCount[baid] > 1 ? ' (gedeelde WABA)' : '';
+            const label = esc((m.display_label || m.module || baid || 'onbekend') + shared);
+            if (!baid) return `<option value="" disabled>${esc(m.display_label || m.module || 'module')} — geen WhatsApp-account</option>`;
+            return `<option value="${esc(baid)}" ${_wa.moduleId === baid ? 'selected' : ''}>${label}</option>`;
+          }).join('')}
         </select>`
       : (_wa.modules.length === 1 ? `<span style="font-size:11.5px;color:var(--text-3)">${esc(_wa.modules[0].display_label || _wa.modules[0].module || '')}</span>` : '');
     return `<div style="max-width:900px">
