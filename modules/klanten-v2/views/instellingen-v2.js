@@ -39,6 +39,20 @@
     } catch (_) { return false; }
   }
   function showToast(msg, tone) {
+    // BLOCKER-5: helpers.showToast bestaat niet altijd (v2 shell heeft z'n
+    // eigen toast-container #kv-toast). Probeer eerst de v2-shell-toast, dan
+    // KV_V2.helpers, dan fallback naar in-page ui.toast (renderer via
+    // _renderInPageToast() als onderdeel van elke render). Nooit stil falen.
+    try {
+      const el = document.getElementById('kv-toast');
+      if (el) {
+        const cls = tone === 'warn' || tone === 'error' ? 'ds-toast-error' : (tone === 'ok' || tone === 'success' ? 'ds-toast-ok' : '');
+        el.className = 'ds-toast show ' + cls;
+        el.textContent = String(msg || '');
+        setTimeout(() => { try { el.className = 'ds-toast'; } catch (_) {} }, 3500);
+        return;
+      }
+    } catch (_) { /* fall through */ }
     if (window.KV_V2?.helpers?.showToast) { try { window.KV_V2.helpers.showToast(msg, tone); return; } catch (_) {} }
     _ui.toast = { msg, tone: tone || 'info' };
     if (render) render();
@@ -57,8 +71,12 @@
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs)),
       ]);
     } catch (e) {
-      console.warn('[instellingen-v2] ' + label + ' fail:', e?.message);
-      return { __error: e?.message || 'onbekende fout' };
+      // BLOCKER-5 hardening: log altijd naar console.error (was console.warn
+      // die stille failures gaf), status meenemen zodat de call-site kan
+      // tonen welke HTTP-fout het was.
+      const status = e && e.status ? ` [HTTP ${e.status}]` : '';
+      console.error('[instellingen-v2] ' + label + ' fail:' + status, e?.message, e?.body);
+      return { __error: (e?.message || 'onbekende fout') + status };
     }
   }
 
@@ -312,28 +330,34 @@
   async function fetchRbacSummary() {
     if (_rbac.loading || _rbac.fetched) return;
     _rbac.loading = true; _rbac.error = null; if (render) render();
-    // Hergebruikt bestaande API: /api/permissions returnt de matrix in één call.
-    const j = await tryFetch('permissions', '/api/permissions');
-    _rbac.loading = false; _rbac.fetched = true;
-    if (j?.__error) _rbac.error = j.__error;
-    else if (j?.error) _rbac.error = j.error;
-    else {
-      // Verwacht {items:[{role,feature_key,allowed}]} of {matrix:{role:{key:bool}}}.
+    // BLOCKER-3 fix: /api/permissions bestaat niet op deze deploy. Admin leest
+    // via direct-supabase op public.role_permissions. Zelfde pad hier via
+    // window.supabase (shared client is al geladen door supabase-client.js).
+    // Fail-soft: bij RLS-403 tonen we een nette fallback + deep-link.
+    try {
+      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
       const byRole = {};
-      const items = Array.isArray(j?.items) ? j.items : (j?.matrix ? null : []);
-      if (items) {
-        for (const it of items) {
-          if (!it || !it.role) continue;
-          if (!byRole[it.role]) byRole[it.role] = 0;
-          if (it.allowed) byRole[it.role] += 1;
+      let from = 0; const PAGE = 1000;
+      while (true) {
+        const { data, error } = await window.supabase
+          .from('role_permissions')
+          .select('role, allowed')
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const rows = data || [];
+        for (const r of rows) {
+          if (!r || !r.role) continue;
+          if (!byRole[r.role]) byRole[r.role] = 0;
+          if (r.allowed === true) byRole[r.role] += 1;
         }
-      } else if (j?.matrix) {
-        for (const [role, keys] of Object.entries(j.matrix)) {
-          byRole[role] = Object.values(keys || {}).filter(Boolean).length;
-        }
+        if (rows.length < PAGE) break;
+        from += PAGE;
       }
       _rbac.byRole = byRole;
+    } catch (e) {
+      _rbac.error = e?.message || 'onbekende fout';
     }
+    _rbac.loading = false; _rbac.fetched = true;
     if (render) render();
   }
   window.__setRbacBackfill = () => {
@@ -1215,17 +1239,23 @@
   async function fetchSalesOfferte() {
     if (_sof.loading || _sof.fetched) return;
     _sof.loading = true; _sof.error = null; if (render) render();
-    const [tpls, def, minT, maxD] = await Promise.all([
+    // BLOCKER-1/2 fix: shape matcht admin.html — value.amount + value.days
+    // (objecten, geen scalars). Template zit op teamleader-settings, niet
+    // app-settings. Templates-endpoint kan verschillende keys leveren.
+    const [tpls, tlSettings, minT, maxD] = await Promise.all([
       tryFetch('tl-email-tpls',  '/api/teamleader-email-templates'),
-      tryFetch('sof-default',    '/api/app-settings?key=default_offerte_template'),
+      tryFetch('tl-settings',    '/api/teamleader-settings'),
       tryFetch('sof-min',        '/api/app-settings?key=sales_min_term_amount'),
       tryFetch('sof-maxdays',    '/api/app-settings?key=sales_max_start_days'),
     ]);
     _sof.loading = false; _sof.fetched = true;
     _sof.tplList     = Array.isArray(tpls?.items || tpls?.templates) ? (tpls.items || tpls.templates) : [];
-    _sof.tplDefault  = def?.value ?? def?.data?.value ?? null;
-    _sof.minTerm     = String((minT?.value ?? minT?.data?.value ?? 400) || 400);
-    _sof.maxDays     = String((maxD?.value ?? maxD?.data?.value ?? 40)  || 40);
+    _sof.tplDefault  = tlSettings?.settings?.default_email_template_id ?? tlSettings?.default_email_template_id ?? null;
+    const mObj = minT?.value; const dObj = maxD?.value;
+    const mNum = (mObj && typeof mObj === 'object' && Number.isFinite(Number(mObj.amount))) ? Number(mObj.amount) : (Number.isFinite(Number(minT?.value)) ? Number(minT.value) : 400);
+    const dNum = (dObj && typeof dObj === 'object' && Number.isFinite(Number(dObj.days)))   ? Number(dObj.days)   : (Number.isFinite(Number(maxD?.value)) ? Number(maxD.value) : 40);
+    _sof.minTerm = String(mNum);
+    _sof.maxDays = String(dNum);
     _sof.tplChanged      = false;
     _sof.settingsChanged = false;
     if (render) render();
@@ -1237,9 +1267,11 @@
     if (!_sof.tplChanged || _sof.busy) return;
     openConfirm('Standaard offerte-mail-template opslaan? Nieuwe offertes gebruiken deze template.', async () => {
       _sof.busy = true; if (render) render();
-      const j = await tryFetch('sof-put-tpl', '/api/app-settings', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'default_offerte_template', value: _sof.tplDefault || null }),
+      // BLOCKER-1 fix: PUT /api/teamleader-settings (admin gebruikt dit endpoint,
+      // niet app-settings). Key = default_email_template_id.
+      const j = await tryFetch('sof-put-tpl', '/api/teamleader-settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'default_email_template_id', value: _sof.tplDefault || null }),
       });
       _sof.busy = false;
       if (j?.__error || j?.error) showToast('Opslaan mislukt: ' + (j.__error || j.error), 'warn');
@@ -1251,9 +1283,11 @@
     if (!_sof.settingsChanged || _sof.busy) return;
     openConfirm(`Sales-uitzonderingen opslaan? Onder min-termijnbedrag € ${_sof.minTerm} of boven ${_sof.maxDays} dagen start vraagt de wizard om manager-goedkeuring.`, async () => {
       _sof.busy = true; if (render) render();
+      // BLOCKER-1/2 fix: PUT (was POST → 405), value-shape = {amount:N} / {days:N}
+      // — exact zoals admin.html:saveSalesExceptionSettings.
       const [a, b] = await Promise.all([
-        tryFetch('sof-put-min', '/api/app-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'sales_min_term_amount', value: Number(_sof.minTerm) || 0 }) }),
-        tryFetch('sof-put-max', '/api/app-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'sales_max_start_days', value: Number(_sof.maxDays) || 0 }) }),
+        tryFetch('sof-put-min', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'sales_min_term_amount', value: { amount: Number(_sof.minTerm) || 0 } }) }),
+        tryFetch('sof-put-max', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'sales_max_start_days', value: { days:   Number(_sof.maxDays) || 0 } }) }),
       ]);
       _sof.busy = false;
       if (a?.__error || a?.error || b?.__error || b?.error) showToast('Opslaan mislukt: ' + (a?.__error || a?.error || b?.__error || b?.error), 'warn');
@@ -1449,7 +1483,17 @@
       S.setPage = flat[0]?.id || 'sales-trajecten';
     }
     const cur = flat.find((i) => i.id === S.setPage) || flat[0];
-    return `${H.voorbeeldBanner()}
+    // BLOCKER-4 fix: banner alleen op placeholder-secties. Wired secties (Wave-1)
+    // hebben echte data en verdienen géén "voorbeeld"-badge; wél een subtiel
+    // live-label. Systeem-tools (super_admin-only) ook echt-live.
+    const WIRED = new Set([
+      'team-gebruikers','team-rechten','alg-weergave','fin-teamleader','sales-offerte','team-mentoren',
+      'com-handtekening','com-sjabloon','sys-followup-admin',
+    ]);
+    const bannerHtml = WIRED.has(cur.id)
+      ? `<div style="padding:6px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">● LIVE DATA — instellingen op deze pagina zijn echt en worden direct opgeslagen</div>`
+      : H.voorbeeldBanner();
+    return `${bannerHtml}
       <div class="set-split">
         <div class="set-nav">
           ${setsVisible.map(g => `
