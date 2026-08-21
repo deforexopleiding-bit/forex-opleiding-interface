@@ -194,13 +194,31 @@
   }
   const CHARTDATA = {};
   window.chartHover = function (e, id, n, pl, pr) {
-    const svgEl = e.currentTarget, r = svgEl.getBoundingClientRect();
-    // Ronde-19: lees viewBox width dynamisch (omzChart heeft w=640, dualChart
-    // heeft w=560). Vroeger hardgecodeerd vb=560 → hover-index viel op de
-    // laatste maand naast het glow-punt → tooltip toonde 'mei' bij een aug-punt.
-    const vb = (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) || 560;
-    const x = (e.clientX - r.left) / r.width * vb;
-    let i = Math.round((x - pl) / ((pr - pl) / (n - 1))); i = Math.max(0, Math.min(n - 1, i));
+    const svgEl = e.currentTarget;
+    // Ronde-22 PUNT-2: gebruik SVG createSVGPoint + getScreenCTM.inverse()
+    // voor exacte viewBox-coord conversion. Vorige formule (r.width * vb) was
+    // fout wanneer preserveAspectRatio="xMidYMid meet" (default) padding aan
+    // de zijkanten introduceerde omdat wrapper-aspect-ratio ≠ viewBox-ratio.
+    // Concreet: wrapper 700×210px, viewBox 640×200 → SVG rendert 672px breed
+    // met 14px meet-padding l/r → hover-index viel systematisch te vroeg.
+    let x;
+    try {
+      const pt  = svgEl.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const ctm = svgEl.getScreenCTM();
+      if (!ctm) throw new Error('no ctm');
+      x = pt.matrixTransform(ctm.inverse()).x;
+    } catch (_) {
+      // Fallback: naïeve bounding-rect mapping (voor SVG's zonder CTM).
+      const r  = svgEl.getBoundingClientRect();
+      const vb = (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) || 560;
+      x = (e.clientX - r.left) / (r.width || 1) * vb;
+    }
+    // Bereken index binnen de plot-area [pl..pr]. n = aantal punten.
+    // pr in signature = w - pr_marge = rechter-plot-edge. Step = (pr-pl)/(n-1).
+    let i;
+    if (n <= 1) i = 0;
+    else i = Math.round((x - pl) / ((pr - pl) / (n - 1)));
+    i = Math.max(0, Math.min(n - 1, i));
     const d = CHARTDATA[id]; if (!d) return;
     const line = document.getElementById(id + '-vline');
     const cx = pl + (i / (n - 1)) * (pr - pl);
