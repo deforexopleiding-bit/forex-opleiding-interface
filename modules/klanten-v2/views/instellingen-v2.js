@@ -256,69 +256,106 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
-  function bodyWhatsApp() {
-    const f = F('waf', 'all');
-    const rows = WA_TPL.filter(t => f === 'all' || t.cat === f);
-    const cnt = c => WA_TPL.filter(t => c === 'all' || t.cat === c).length;
-    return `
-      <div class="wa-conn">
-        <span class="wa-conn-ico">${svg(I.chat || I.mail)}</span>
-        <div class="wa-conn-body">
-          <div class="wa-conn-t">WhatsApp Business — verbonden</div>
-          <div class="wa-conn-s">+31 6 12 34 56 78 · WABA via Meta · ${WA_TPL.filter(t => t.status === 'goedgekeurd').length} goedgekeurde templates</div>
-        </div>
-        ${H.pill('ok', 'Actief')}
-        <button class="btn btn-sm" onclick="__setNotice('Meta-koppeling')">${svg(I.settings)}Meta-koppeling</button>
-      </div>
-
-      ${H.toolbar([
-        H.search('Zoek in templates…'),
-        H.chips('wst', [
-          { l: 'Alle statussen', v: 'all' },
-          { l: 'Goedgekeurd', v: 'goedgekeurd' },
-          { l: 'In review', v: 'in_review' },
-        ], F('wst', 'all')),
-        `<div class="tb-right"><button class="btn btn-primary" onclick="__setNotice('Nieuwe template')">${svg(I.plus)}Nieuwe template</button></div>`,
-      ])}
-
-      <div class="wa-folders-lbl">Mappen</div>
-      <div class="wa-folders">
-        ${WA_FOLDERS.map(([id, naam, ic, c]) => {
-          const sel = f === id;
-          return `<button class="wa-folder ${sel ? 'is-sel' : ''}" onclick="__waPick('${id}')">
-            <span class="tile-ico wa-folder-ic" style="background:var(--${c}-soft,var(--surface-2));color:var(--${c},var(--brand))">${svg(ic)}</span>
-            <div class="wa-folder-txt">
-              <div class="wa-folder-n">${naam}</div>
-              <div class="wa-folder-c">${cnt(id)} templates</div>
-            </div>
-          </button>`;
-        }).join('')}
-      </div>
-
-      <div class="wa-cards">
-        ${rows.length ? rows.map(t => `
-          <div class="wa-card">
-            <div class="wa-card-head">
-              <div class="wa-card-title">
-                <div class="cell-main">${t.n}</div>
-                <div class="wa-card-meta">${WA_FOLDERS.find(f => f[0] === t.cat)?.[1] || t.cat} · ${t.taal}</div>
-              </div>
-              ${H.pill(WA_STAT[t.status].c, WA_STAT[t.status].l)}
-            </div>
-            <div class="wa-card-body">
-              <div class="wa-bubble">${highlightVars(t.tekst)}</div>
-            </div>
-            <div class="wa-card-foot">
-              <span class="wa-card-count">${t.gebruikt ? t.gebruikt + '× gebruikt' : 'nog niet gebruikt'}</span>
-              <div class="wa-card-acts">
-                <button class="btn btn-sm" onclick="__setNotice('Dupliceer template')" title="Dupliceren">${svg(I.copy || I.plus)}</button>
-                <button class="btn btn-sm" onclick="__setNotice('Bewerk template')">${svg(I.edit || I.settings)}Bewerken</button>
-              </div>
-            </div>
-          </div>`).join('') : `<div class="set-empty" style="grid-column:1/-1"><span class="set-empty-ico">${svg(I.chat || I.mail)}</span><div class="set-empty-t">Geen templates in deze map</div><div class="set-empty-s">Maak een nieuwe template of kies een andere map.</div></div>`}
-      </div>`;
+  /* Wave-2 · com-wa LIVE via /api/admin-meta-templates-list. Mock-data is weg.
+     Submit/sync/delete via bestaande endpoints achter custom confirm (echte Meta-
+     actie). Edit/detail = deep-link (form is complex). WA-nummer registreren:
+     custom confirm + POST /api/whatsapp-register-number. */
+  const _wa = { loading: false, fetched: false, error: null, items: [], busy: {} };
+  async function fetchWaTemplates() {
+    if (_wa.loading || _wa.fetched) return;
+    _wa.loading = true; _wa.error = null; if (render) render();
+    const j = await tryFetch('meta-tpls', '/api/admin-meta-templates-list');
+    _wa.loading = false; _wa.fetched = true;
+    if (j?.__error) _wa.error = j.__error;
+    else _wa.items = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
   }
-  window.__waPick = (id) => { setF('waf', id); };
+  async function waCall(id, url, method, label) {
+    _wa.busy[id] = true; if (render) render();
+    const j = await tryFetch('meta-' + label, url, { method });
+    _wa.busy[id] = false;
+    if (j?.__error || j?.error) showToast(label + ' mislukt: ' + (j?.__error || j?.error), 'warn');
+    else { showToast(label + ' gelukt', 'ok'); _wa.fetched = false; fetchWaTemplates(); }
+  }
+  window.__setWaSubmit = (id, name) => openConfirm(`Template "${name}" indienen bij Meta voor review? Kan enige uren duren. Kan niet ongedaan gemaakt worden.`, () => waCall(id, '/api/admin-meta-templates-submit?id=' + encodeURIComponent(id), 'POST', 'Submit'), 'warn');
+  window.__setWaDelete = (id, name) => openConfirm(`Template "${name}" definitief verwijderen bij Meta? Kan NIET ongedaan gemaakt worden.`, () => waCall(id, '/api/admin-meta-templates-delete?id=' + encodeURIComponent(id), 'DELETE', 'Delete'), 'warn');
+  window.__setWaSync = () => openConfirm('Sync alle templates vanaf Meta? Haalt actuele status/versies binnen.', () => waCall('__sync', '/api/admin-meta-templates-sync', 'POST', 'Sync'), 'warn');
+  const _waReg = { pnid: '', pin: '', busy: false, msg: '' };
+  window.__setWaRegPnid = (v) => { _waReg.pnid = String(v || ''); if (render) render(); };
+  window.__setWaRegPin  = (v) => { _waReg.pin  = String(v || ''); if (render) render(); };
+  window.__setWaRegSubmit = () => {
+    const pnid = _waReg.pnid.trim(); const pin = _waReg.pin.trim();
+    if (!/^\d{5,20}$/.test(pnid)) { showToast('Ongeldig phone_number_id', 'warn'); return; }
+    if (!/^\d{6}$/.test(pin))     { showToast('PIN moet 6 cijfers zijn', 'warn'); return; }
+    openConfirm(`WhatsApp-nummer registreren bij Meta? phone_number_id ${pnid} met PIN ******. Éénmalige actie, kan niet worden teruggedraaid via deze UI.`, async () => {
+      _waReg.busy = true; if (render) render();
+      const j = await tryFetch('wa-register', '/api/whatsapp-register-number', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone_number_id: pnid, pin }),
+      });
+      _waReg.busy = false;
+      if (j?.__error || j?.error) { showToast('Registratie mislukt: ' + (j?.__error || j?.error), 'warn'); }
+      else { _waReg.pnid = ''; _waReg.pin = ''; showToast('WA-nummer geregistreerd', 'ok'); }
+      if (render) render();
+    }, 'warn');
+  };
+  function bodyWhatsApp() {
+    if (!_wa.fetched && !_wa.loading) queueMicrotask(() => fetchWaTemplates());
+    const rows = _wa.items;
+    const busySync = !!_wa.busy.__sync;
+    const rowsHtml = rows.length
+      ? rows.map(t => {
+          const status = (t.status || 'unknown').toLowerCase();
+          const pill = status === 'approved' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">approved</span>'
+                    : status === 'pending' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--amber-soft);color:var(--amber);font-weight:600">pending</span>'
+                    : status === 'rejected' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--rose-soft);color:var(--rose);font-weight:600">rejected</span>'
+                    : `<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface-2);color:var(--text-3);font-weight:600">${esc(status)}</span>`;
+          const busy = !!_wa.busy[t.id];
+          const canSubmit = ['draft','local','concept','rejected'].includes(status);
+          return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">${esc(t.name || '—')} <span style="color:var(--text-3);font-size:11px">· ${esc(t.language || 'nl')}</span></div>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px;font-family:'IBM Plex Mono',monospace">${esc(t.meta_template_id || '(nog geen meta-id)')}</div>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              ${pill}
+              ${canSubmit ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaSubmit('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px">Submit</button>` : ''}
+              <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaDelete('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px;color:var(--rose)">Delete</button>
+            </div>
+          </div>`;
+        }).join('')
+      : (_wa.loading ? '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Laden…</div>' : '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Geen templates (of admin-permission ontbreekt).</div>');
+    return `<div style="max-width:900px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
+        <b>Template-editor:</b> voor nieuwe/complexe wijzigingen: <a href="/modules/admin.html#tab-integraties" style="color:inherit;text-decoration:underline">admin.html</a>. Deze pagina toont live-status + Submit/Delete/Sync + WA-nummer-registratie.
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:13px;font-weight:600">Meta-templates</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${rows.length} template(s) ${_wa.error ? '· ⚠ ' + esc(_wa.error) : ''}</div>
+          </div>
+          <button class="btn btn-primary btn-sm" ${busySync ? 'disabled' : ''} onclick="window.__setWaSync()">${busySync ? 'Sync…' : '↻ Sync vanaf Meta'}</button>
+        </div>
+        <div>${rowsHtml}</div>
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:12px 14px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">WhatsApp-nummer registreren (éénmalig)</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Cloud API phone_number_id + 6-cijferige PIN. Alleen bij setup van een nieuwe lijn.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+            <label style="font-size:11.5px;color:var(--text-2)">phone_number_id
+              <input type="text" value="${esc(_waReg.pnid)}" oninput="window.__setWaRegPnid(this.value)" placeholder="bv. 123456789012345" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">PIN (6 cijfers)
+              <input type="password" value="${esc(_waReg.pin)}" oninput="window.__setWaRegPin(this.value)" maxlength="6" placeholder="••••••" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;letter-spacing:.12em" />
+            </label>
+            <button class="btn btn-primary btn-sm" ${_waReg.busy ? 'disabled' : ''} onclick="window.__setWaRegSubmit()">${_waReg.busy ? 'Bezig…' : 'Registreer'}</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+  window.__waPick = (id) => { setF('waf', id); }; // legacy filter — Wave-2 nieuwe bodyWhatsApp gebruikt geen folder-tabs meer
 
   /* Wave-1 · team-rechten — role-sync backfill werkend + samenvatting live.
      Volledige RBAC-matrix editor blijft in /modules/admin.html (gebruikt directe
