@@ -84,10 +84,28 @@ export default async function handler(req, res) {
     }
     const trajectLabels = Object.keys(by).sort((a, b) => a.localeCompare(b, 'nl'));
 
+    // ALL-time traject-labels: welke labels bestaan überhaupt in de DB,
+    // ongeacht periode. Voedt het dashboard zodat een tegel met period-count
+    // 0 nog steeds getoond wordt (Event-aanmeldingen op Dag = 0 maar bestaat).
+    // Alleen labels die HELEMAAL niet in de DB voorkomen worden verborgen.
+    let allLabels = trajectLabels;
+    if (since) {
+      const { data: allData, error: allErr } = await supabaseAdmin
+        .from('leads_overzicht')
+        .select('traject')
+        .is('verwijderd_op', null)
+        .not('traject', 'is', null)
+        .limit(50000);
+      if (allErr) throw new Error('leads_overzicht(all): ' + allErr.message);
+      allLabels = [...new Set((allData || []).map(r => String(r.traject)).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'nl'));
+    }
+
     return res.status(200).json({
       total,
       by_traject: by,
       traject_labels: trajectLabels,
+      all_traject_labels: allLabels,
       period,
       since,
     });

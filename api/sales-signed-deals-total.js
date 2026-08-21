@@ -28,12 +28,14 @@ function mondayOfWeek(d) {
   return m;
 }
 function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+function startOfYear(d)  { return new Date(d.getFullYear(), 0, 1); }
 
 function sinceForPeriod(p) {
   const now = new Date();
   if (p === 'today') return isoDate(now);
   if (p === 'week')  return isoDate(mondayOfWeek(now));
   if (p === 'month') return isoDate(startOfMonth(now));
+  if (p === 'year')  return isoDate(startOfYear(now));
   return null;
 }
 
@@ -64,20 +66,23 @@ export default async function handler(req, res) {
   try {
     const q = req.query || {};
     const periodRaw = String(q.period || 'month').toLowerCase();
-    const period = ['today', 'week', 'month', 'all'].includes(periodRaw) ? periodRaw : 'month';
+    const period = ['today', 'week', 'month', 'year', 'all'].includes(periodRaw) ? periodRaw : 'month';
     const since  = sinceForPeriod(period);
 
-    // Stap 1: accepted/signed deals ophalen binnen periode.
-    // Filter op tl_quotation_accepted_at OR tl_quotation_signed_at ≥ since.
+    // Stap 1: aanvaarde deals ophalen binnen periode.
+    // TeamLeader = bron-van-waarheid: dealfase "07. Aanvaard" telt op DATUM
+    // AANVAARD (tl_quotation_accepted_at). NIET status='signed' + NIET
+    // tl_quotation_signed_at — die veranderen anders/eerder dan aanvaard-
+    // moment en gaven te hoge dashboardcijfers t.o.v. TL-officieel.
     let qy = supabaseAdmin
       .from('deals')
-      .select('id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at')
-      .in('tl_quotation_status', ['accepted', 'signed'])
+      .select('id, tl_quotation_status, tl_quotation_accepted_at')
+      .eq('tl_quotation_status', 'accepted')
+      .not('tl_quotation_accepted_at', 'is', null)
       .limit(5000);
     if (since) {
-      // PostgREST-syntax: .or() met 2 velden ≥ since (inclusief). Één moet matchen.
       const iso = since + 'T00:00:00';
-      qy = qy.or(`tl_quotation_accepted_at.gte.${iso},tl_quotation_signed_at.gte.${iso}`);
+      qy = qy.gte('tl_quotation_accepted_at', iso);
     }
     const { data: deals, error: dErr } = await qy;
     if (dErr) throw new Error('deals: ' + dErr.message);

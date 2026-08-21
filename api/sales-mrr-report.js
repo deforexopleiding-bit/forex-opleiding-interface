@@ -133,7 +133,22 @@ export default async function handler(req, res) {
       const { data: vs } = await supabaseAdmin.from('traject_variants').select('id, name, traject_id').in('id', variantIds);
       const tIds = [...new Set((vs || []).map(v => v.traject_id).filter(Boolean))];
       const tName = {}; if (tIds.length) { const { data: ts } = await supabaseAdmin.from('trajects').select('id, name').in('id', tIds); for (const t of ts || []) tName[t.id] = t.name; }
-      for (const v of vs || []) variantLabel[v.id] = [tName[v.traject_id], v.name].filter(Boolean).join(' > ');
+      for (const v of vs || []) {
+        // Dedup "A > A"-herhaling: als traject-naam en variant-naam identiek
+        // zijn (of één is een prefix van de ander), toon één schone label.
+        // Voorbeeld: "1-op-1 begeleiding (12 maanden) > 1-op-1 begeleiding
+        // (12 maanden)" → "1-op-1 begeleiding (12 maanden)".
+        const t = tName[v.traject_id] || '';
+        const n = v.name || '';
+        let label;
+        if (!t)                          label = n;
+        else if (!n)                     label = t;
+        else if (t === n)                label = t;
+        else if (n.startsWith(t))        label = n;
+        else if (t.startsWith(n))        label = t;
+        else                             label = `${t} > ${n}`;
+        variantLabel[v.id] = label;
+      }
     }
     const deptIds = [...new Set(active.map(s => s.tl_department_id).filter(Boolean))];
     const entLabel = {};

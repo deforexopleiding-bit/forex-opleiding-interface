@@ -324,7 +324,7 @@
     }
     const persoon = (ROLES[S.role] && ROLES[S.role].persoon) || 'Jeffrey Biemold';
     const voornaam = persoon.split(' ')[0];
-    const curPeriod = F('per', 'Maand');
+    const curPeriod = F('per', 'Dag');
     // Trigger fetch als de gekozen periode nog niet geladen is (én backend-supported).
     // KRITIEK: !_live.loading-guard voorkomt render-loop. fetchDashboardBundle roept
     // render() aan met loading=true VOORDAT de bundle resolvet — dashManager loopt
@@ -363,50 +363,60 @@
             <span class="title-dot" style="background:var(--emerald);box-shadow:0 0 0 3px var(--emerald-soft)"></span>
             <div class="card-title">Leads per traject${d ? liveBadge() : mockBadge()}</div></div>
           <div class="card-body" style="padding:10px 17px 14px">
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
               ${(() => {
-                // Ronde-15: LIVE uit /api/leads-per-traject-count?period=X.
-                //   total          → 'Alle bronnen'-tegel
-                //   by_traject[k]  → per-label-tegel (fuzzy substring-match)
-                // Als de endpoint faalt (_live.leadsPer=null): TOTAAL valt terug
-                // op dashboard-stats.kpis_groot.nieuwe_leads.value (was er al);
-                // per-traject-tegels verbergen we (geen mock-cijfer).
-                // Als endpoint OK maar een label heeft geen matching traject-key:
-                // tegel verbergen (data bestaat niet voor dat label).
+                // Ronde-16: tegels ALTIJD tonen voor labels die überhaupt in
+                // de DB bestaan (uit lp.all_traject_labels — periode-onafhankelijk).
+                // Enkel labels die HELEMAAL niet in de DB voorkomen (zoals
+                // 'webinar' zonder rijen) worden verborgen. Periode-count kan
+                // 0 zijn — tegel blijft staan (op Dag zag je anders alleen
+                // 'Alle bronnen'-tegel omdat de period-by_traject leeg was).
+                //
+                // NIEUWE tegel: Calls geboekt uit _live.sales
+                // (sales-dashboard-stats appointments per periode). Op Jaar
+                // geen data → verberg.
                 const lp = _live.leadsPer;
                 const totLive = lp && typeof lp.total === 'number' ? lp.total : null;
                 const totFallback = d && d.kpis_groot && d.kpis_groot.nieuwe_leads && d.kpis_groot.nieuwe_leads.value;
                 const totLeads = totLive != null ? totLive : totFallback;
-                // Fuzzy match: substring van label of traject-slug in DB-key.
+                const isLive  = !!lp;
+                // Determineer welke labels überhaupt in DB bestaan.
+                const allLabels = (lp && Array.isArray(lp.all_traject_labels)) ? lp.all_traject_labels.map(x => String(x).toLowerCase()) : null;
+                function anyLabelMatches(matchers) {
+                  if (!allLabels) return true; // Endpoint geen all-list geleverd → toon default (backward-compat).
+                  return allLabels.some(l => matchers.some(m => l.includes(m)));
+                }
                 function findCount(matchers) {
-                  if (!lp || !lp.by_traject) return null;
+                  if (!lp || !lp.by_traject) return 0;
                   const keys = Object.keys(lp.by_traject);
-                  let sum = 0; let hit = false;
+                  let sum = 0;
                   for (const k of keys) {
                     const lk = String(k).toLowerCase();
-                    if (matchers.some(m => lk.includes(m))) { sum += lp.by_traject[k] || 0; hit = true; }
+                    if (matchers.some(m => lk.includes(m))) sum += lp.by_traject[k] || 0;
                   }
-                  return hit ? sum : null;
+                  return sum;
                 }
-                const evCnt   = findCount(['event']);       // 'event', 'events', '7-daagse-event' etc.
-                const webCnt  = findCount(['webinar']);
-                const miniCnt = findCount(['mini']);         // 'mini-cursus', 'minicursus'
-                const isLive  = !!lp;
+                // Calls geboekt: kies veld o.b.v. huidige periode.
+                const s = _live.sales;
+                let callsCnt = null;
+                if (s) {
+                  if (curPeriod === 'Dag')       callsCnt = typeof s.appointments_today_count === 'number' ? s.appointments_today_count : null;
+                  else if (curPeriod === 'Week') callsCnt = (s.week   && typeof s.week.appointments   === 'number') ? s.week.appointments   : null;
+                  else if (curPeriod === 'Maand')callsCnt = (s.month  && typeof s.month.appointments  === 'number') ? s.month.appointments  : null;
+                  // Jaar: geen data → callsCnt blijft null → tegel verborgen.
+                }
                 const tiles = [];
-                // Alle bronnen: altijd tonen (live of fallback).
                 tiles.push(['Alle bronnen', totLeads != null ? totLeads : 0, 100, 'emerald', 'leads', totLive != null || totFallback != null]);
-                // Per-traject: alleen tonen als endpoint OK én label-match bestaat.
-                if (isLive && evCnt   != null) tiles.push(['Event-aanmeldingen', evCnt,   totLeads ? Math.round(evCnt/totLeads*100)   : 0, 'teal',   'events', true]);
-                if (isLive && webCnt  != null) tiles.push(['Webinar',            webCnt,  totLeads ? Math.round(webCnt/totLeads*100)  : 0, 'blue',   'leads',  true]);
-                if (isLive && miniCnt != null) tiles.push(['Mini cursus',        miniCnt, totLeads ? Math.round(miniCnt/totLeads*100) : 0, 'violet', 'leads',  true]);
-                // Padding tot 4 kolommen: als er minder dan 4 tegels, geen mock-fillers.
-                // Grid met minder items schaalt (leeg-cellen worden ingenomen door grid-flow).
+                if (isLive && anyLabelMatches(['event']))   tiles.push(['Event-aanmeldingen', findCount(['event']),  totLeads ? Math.round(findCount(['event'])/totLeads*100)  : 0, 'teal',   'events', true]);
+                if (isLive && anyLabelMatches(['webinar'])) tiles.push(['Webinar',            findCount(['webinar']),totLeads ? Math.round(findCount(['webinar'])/totLeads*100): 0, 'blue',   'leads',  true]);
+                if (isLive && anyLabelMatches(['mini']))    tiles.push(['Mini cursus',        findCount(['mini']),   totLeads ? Math.round(findCount(['mini'])/totLeads*100)   : 0, 'violet', 'leads',  true]);
+                if (callsCnt != null) tiles.push(['Calls geboekt', callsCnt, 100, 'accent', 'sales', true]);
                 return tiles.map(([n, c, p, col, mod, tileLive]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
                   onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
                   <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}${tileLive ? '' : mockBadge()}</div>
                   <div style="font-size:26px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${c}</div>
                   <div class="progress" style="margin-top:9px;height:3px"><i style="width:${p}%;background:var(--${col})"></i></div>
-                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${tileLive ? (n === 'Alle bronnen' ? 'live totaal' : `${p}% van totaal`) : `${p}% van totaal`}</div></div>`).join('');
+                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${tileLive ? (n === 'Alle bronnen' ? 'live totaal' : (n === 'Calls geboekt' ? 'in periode' : `${p}% van totaal`)) : `${p}% van totaal`}</div></div>`).join('');
               })()}
             </div>
           </div>
