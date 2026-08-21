@@ -1015,6 +1015,82 @@
       setTimeout(() => { try { window.location.href = '/'; } catch (_) {} }, 800);
     }, 'warn');
   };
+  /* Wave-1 · alg-weergave — sidebar-layout (menu-beheer). Toon huidige items
+     met visible-toggle per item; save via POST /api/sidebar-layout-save.
+     Drag-drop volgorde-editor blijft in admin.html (complexe UI); hier alleen
+     zichtbaarheid + rol-selectie. 'admin' item wordt server-side geforceerd
+     visible (anti-lockout) — we tonen dat als disabled toggle. */
+  const _menu = { loading: false, error: null, fetched: false, role: '', items: [], busy: false, dirty: false };
+  async function fetchMenu() {
+    if (_menu.loading) return;
+    _menu.loading = true; _menu.error = null; if (render) render();
+    const key = _menu.role ? ('sidebar_layout:' + _menu.role) : 'sidebar_layout';
+    const j = await tryFetch('menu-layout', '/api/app-settings?key=' + encodeURIComponent(key));
+    _menu.loading = false; _menu.fetched = true;
+    if (j?.__error) _menu.error = j.__error;
+    else if (j?.error && !j.value) _menu.items = []; // 404 = nog niet geconfigureerd
+    else {
+      const v = j?.value || null;
+      _menu.items = (v && Array.isArray(v.items)) ? v.items : [];
+    }
+    _menu.dirty = false;
+    if (render) render();
+  }
+  window.__setMenuToggle = (key) => {
+    const it = _menu.items.find(x => x.key === key);
+    if (!it || it.key === 'admin') return; // admin verplicht visible
+    it.visible = !it.visible; _menu.dirty = true; if (render) render();
+  };
+  window.__setMenuRoleChange = (role) => {
+    if (_menu.dirty) {
+      openConfirm('Niet-opgeslagen wijzigingen. Wisselen zonder opslaan?', () => {
+        _menu.role = role; _menu.fetched = false; fetchMenu();
+      }, 'warn');
+      return;
+    }
+    _menu.role = role; _menu.fetched = false; fetchMenu();
+  };
+  window.__setMenuSave = () => {
+    if (_menu.busy || !_menu.dirty) return;
+    openConfirm(`Menu-layout opslaan voor ${_menu.role ? 'rol "' + _menu.role + '"' : 'STANDAARD (alle rollen)'}?`, async () => {
+      _menu.busy = true; if (render) render();
+      const payload = { role: _menu.role || 'default', items: _menu.items.map(i => ({ key: i.key, visible: !!i.visible, ...(i.group ? { group: i.group } : {}) })) };
+      const j = await tryFetch('menu-save', '/api/sidebar-layout-save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      _menu.busy = false;
+      if (j?.__error || j?.error) { showToast('Opslaan mislukt: ' + (j.__error || j.error), 'warn'); }
+      else { _menu.dirty = false; showToast('Menu-layout opgeslagen', 'ok'); }
+      if (render) render();
+    }, 'warn');
+  };
+  function bodyWeergave() {
+    if (!_menu.fetched && !_menu.loading) queueMicrotask(() => fetchMenu());
+    const rolesOpts = ['','super_admin','manager','sales','mentor','marketing','administratie']
+      .map(r => `<option value="${r}" ${_menu.role === r ? 'selected' : ''}>${r ? r : 'Standaard (alle rollen)'}</option>`).join('');
+    const list = _menu.items.length
+      ? _menu.items.map(it => {
+          const locked = it.key === 'admin';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border)">
+            <div style="flex:1;font-size:12.5px">${esc(it.key)}${it.group ? ` <span style="color:var(--text-3);font-size:11px">· ${esc(it.group)}</span>` : ''}${locked ? ` <span style="font-size:10px;color:var(--text-3)">(verplicht zichtbaar)</span>` : ''}</div>
+            <button class="btn btn-ghost btn-sm" ${locked ? 'disabled' : ''} onclick="window.__setMenuToggle('${esc(it.key)}')" style="font-size:11.5px">${it.visible ? '✓ zichtbaar' : '⨯ verborgen'}</button>
+          </div>`;
+        }).join('')
+      : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Nog geen items geconfigureerd voor deze rol — sidebar toont standaard-set.</div>`;
+    return `<div style="max-width:900px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
+        <b>Volgorde slepen</b> (drag-drop) en <b>groep-toewijzing</b> zitten nog in <a href="/modules/admin.html#tab-menu-manager" style="color:inherit;text-decoration:underline">admin.html · Menu beheer</a>. Hier kun je items <b>tonen/verbergen</b> per rol.
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-2)">Rol:
+          <select onchange="window.__setMenuRoleChange(this.value)" style="margin-left:6px;padding:5px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">${rolesOpts}</select>
+        </label>
+        <button class="btn btn-primary btn-sm" ${!_menu.dirty || _menu.busy ? 'disabled' : ''} onclick="window.__setMenuSave()" style="margin-left:auto">${_menu.busy ? 'Opslaan…' : 'Opslaan'}</button>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">${list}</div>
+    </div>`;
+  }
+
   function bodyGebruikers() {
     if (!_users.fetched && !_users.loading) queueMicrotask(() => fetchUsers());
     if (_users.loading && !_users.items.length) return `<div style="padding:24px;color:var(--text-3);font-size:13px">Laden…</div>`;
@@ -1068,6 +1144,7 @@
     if (cur.id === 'com-sjabloon')       return bodyEmailSjablonen();
     if (cur.id === 'team-rechten')       return bodyRechten();
     if (cur.id === 'team-gebruikers')    return bodyGebruikers();
+    if (cur.id === 'alg-weergave')       return bodyWeergave();
     if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
