@@ -17,12 +17,12 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**4 quick-adds open · 11 grote-brokken open · 13 deferred · 10 done** (totaal 38)
+**3 quick-adds open · 11 grote-brokken open · 13 deferred · 11 done** (totaal 38)
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 10 | — |
-| open (quick-add)   | 4  | Top-5-bouwprompt aankomend |
+| done         | 11 | — |
+| open (quick-add)   | 3  | team-mentoren, sys-bubble-schema, alg-weergave |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -79,7 +79,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `com-mail`         | deferred | bewust-deferred | env-vars (STRATO_*) | secrets-brok |
 | `com-handtekening` | done | — | ja (`/api/email-signatures`) | ≤v=30 |
-| `com-wa`           | open | quick-add | **ja — endpoint accepteert media/buttons/examples al** | **Top-1 quick-add: 3 gaps (media-headers / buttons / body_examples)** |
+| `com-wa`           | done | — | ja | v=40 (media-headers IMAGE/VIDEO/DOCUMENT + example_url + upload; buttons URL/PHONE/QUICK_REPLY max 3; body_examples per {{N}}) |
 | `com-tel`          | deferred | bewust-deferred | env-vars (Voys) | secrets-brok |
 | `com-sjabloon`     | done | — | ja (`/api/email-templates`) | ≤v=30 |
 

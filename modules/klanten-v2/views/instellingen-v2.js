@@ -1340,7 +1340,10 @@
   const _METAED_CATS  = ['MARKETING','UTILITY','AUTHENTICATION'];
   function _metaEdReset() {
     _metaEd.mode = 'create'; _metaEd.id = null; _metaEd.error = null;
-    _metaEd.fields = { name:'', language:'nl', category:'UTILITY', header_type:'NONE', header_text:'', body_text:'', footer_text:'' };
+    // Ronde-31 BLOK A: uitgebreid met header_url (voor IMAGE/VIDEO/DOCUMENT),
+    // examples ({"1":val,"2":val}), buttons (array {type,text,url?,phone_number?}).
+    _metaEd.fields = { name:'', language:'nl', category:'UTILITY', header_type:'NONE', header_text:'', header_url:'', body_text:'', footer_text:'', examples:{}, buttons:[] };
+    _metaEd.uploading = false;
   }
   window.__setMetaEdOpen = () => {
     if (!_wa.moduleId) { showToast('Kies eerst een WABA-module', 'warn'); return; }
@@ -1390,8 +1393,18 @@
       _metaEd.fields.category     = String(t.category || 'UTILITY').toUpperCase();
       _metaEd.fields.header_type  = String(t.header_type || 'NONE').toUpperCase();
       _metaEd.fields.header_text  = (t.header_content && typeof t.header_content === 'object' && t.header_content.text) ? String(t.header_content.text) : '';
+      _metaEd.fields.header_url   = (t.header_content && typeof t.header_content === 'object' && t.header_content.example_url) ? String(t.header_content.example_url) : '';
       _metaEd.fields.body_text    = String(t.body_text || '');
       _metaEd.fields.footer_text  = String(t.footer_text || '');
+      // Examples: obj {"1":val,"2":val,...} of null.
+      _metaEd.fields.examples     = (t.body_examples && typeof t.body_examples === 'object') ? { ...t.body_examples } : {};
+      // Buttons: array van {type, text, url?, phone_number?}. Normaliseer.
+      _metaEd.fields.buttons      = Array.isArray(t.buttons) ? t.buttons.map(b => ({
+        type: String(b?.type || 'URL').toUpperCase(),
+        text: String(b?.text || ''),
+        url: String(b?.url || ''),
+        phone_number: String(b?.phone_number || ''),
+      })) : [];
     }
     if (render) render();
   }
@@ -1420,18 +1433,42 @@
     return null;
   }
   async function _metaEdSave(alsoSubmit) {
+    // Ronde-31 BLOK A: lees DOM-values voor uncontrolled inputs (buttons + examples
+    // + header_url + header_text). Sync fields voor validatie + payload-build.
+    _metaSyncFieldsFromDom();
     const err = _metaEdValidate();
     if (err) { _metaEd.error = err; if (render) render(); return; }
     _metaEd.busy = true; _metaEd.error = null; if (render) render();
     const f = _metaEd.fields;
+    // header_content: null (NONE), {text:} (TEXT), {example_url:} (IMAGE/VIDEO/DOCUMENT).
+    let headerContent = null;
+    if (f.header_type === 'TEXT')                                                       headerContent = { text: f.header_text };
+    else if (['IMAGE','VIDEO','DOCUMENT'].includes(f.header_type) && f.header_url)      headerContent = { example_url: f.header_url };
+    // Buttons: filter lege rijen, normaliseer per type.
+    const btns = (f.buttons || []).map(b => {
+      const t = String(b.type || 'URL').toUpperCase();
+      const o = { type: t, text: String(b.text || '').trim() };
+      if (t === 'URL')          o.url = String(b.url || '').trim();
+      if (t === 'PHONE_NUMBER') o.phone_number = String(b.phone_number || '').trim();
+      return o;
+    }).filter(b => b.text || b.url || b.phone_number);
+    // Examples: alleen keys 1..N met niet-lege value; enum uit body_text-vars.
+    const bodyVarsN = (String(f.body_text || '').match(/\{\{\d+\}\}/g) || []).length;
+    const exObj = {};
+    for (let i = 1; i <= bodyVarsN; i++) {
+      const v = String((f.examples || {})[i] || '').trim();
+      if (v) exObj[String(i)] = v;
+    }
     const payload = {
       business_account_id: _wa.moduleId,
       name: f.name, language: f.language, category: f.category,
       header_type: f.header_type,
-      header_content: f.header_type === 'TEXT' ? { text: f.header_text } : null,
+      header_content: headerContent,
       body_text: f.body_text,
       footer_text: f.footer_text || null,
     };
+    if (btns.length) payload.buttons = btns;
+    if (Object.keys(exObj).length) payload.body_examples = exObj;
     const method = _metaEd.mode === 'edit' ? 'PATCH' : 'POST';
     const url = _metaEd.mode === 'edit'
       ? '/api/admin-meta-templates-upsert?id=' + encodeURIComponent(_metaEd.id)
@@ -1465,6 +1502,88 @@
   window.__setMetaEdSaveSubmit = () => {
     openConfirm(`Concept opslaan én DIRECT indienen bij Meta? Meta beoordeelt de template; kan uren duren en niet ongedaan gemaakt worden.`, () => _metaEdSave(true), 'warn');
   };
+  /* Ronde-31 BLOK A · com-wa dynamische sub-editors (media/buttons/examples).
+     FREEZE-LES: typen in een button/example/header-url veld = GEEN modal-re-render.
+     Alleen structuurwijzigingen (btn add/remove, header_type switch) → render.
+     Uncontrolled inputs met data-attrs; DOM-lezen bij save via _metaSyncFieldsFromDom. */
+  const _META_HEADER_TYPES = ['NONE','TEXT','IMAGE','VIDEO','DOCUMENT'];
+  const _META_BTN_TYPES    = ['URL','PHONE_NUMBER','QUICK_REPLY'];
+  const _META_MAX_BUTTONS  = 3;
+  const _META_UPLOAD_ACCEPT = {
+    IMAGE:    'image/jpeg,image/png',
+    VIDEO:    'video/mp4,video/3gpp',
+    DOCUMENT: 'application/pdf',
+  };
+  // Sync alle uncontrolled inputs (buttons/examples/header_url/header_text/name/body/footer)
+  // uit DOM naar _metaEd.fields — vóór validatie/save/type-switch.
+  function _metaSyncFieldsFromDom() {
+    const q = (sel) => document.querySelector(sel);
+    const qAll = (sel) => document.querySelectorAll(sel);
+    const f = _metaEd.fields;
+    // Simpele inputs.
+    const nameEl = q('[data-metaed-name]');       if (nameEl)   f.name        = String(nameEl.value || '').toLowerCase().replace(/[^a-z0-9_]/g, '');
+    const bodyEl = q('[data-metaed-body]');       if (bodyEl)   f.body_text   = String(bodyEl.value || '');
+    const footEl = q('[data-metaed-footer]');     if (footEl)   f.footer_text = String(footEl.value || '');
+    const hTxt   = q('[data-metaed-header-text]');if (hTxt)     f.header_text = String(hTxt.value || '');
+    const hUrl   = q('[data-metaed-header-url]'); if (hUrl)     f.header_url  = String(hUrl.value || '');
+    // Examples per index.
+    f.examples = {};
+    qAll('[data-metaed-example]').forEach((el) => { const idx = el.getAttribute('data-metaed-example'); if (idx) f.examples[idx] = String(el.value || ''); });
+    // Buttons per index (type/text/url/phone).
+    (f.buttons || []).forEach((_, i) => {
+      const bt = q(`[data-btn-idx="${i}"][data-btn-field="text"]`);  if (bt) f.buttons[i].text = String(bt.value || '');
+      const bu = q(`[data-btn-idx="${i}"][data-btn-field="url"]`);   if (bu) f.buttons[i].url = String(bu.value || '');
+      const bp = q(`[data-btn-idx="${i}"][data-btn-field="phone"]`); if (bp) f.buttons[i].phone_number = String(bp.value || '');
+    });
+  }
+  // Structuur-wijzigende actions → re-render (focus was op knop, niet input).
+  window.__setMetaAddBtn = () => {
+    _metaSyncFieldsFromDom();
+    if (!Array.isArray(_metaEd.fields.buttons)) _metaEd.fields.buttons = [];
+    if (_metaEd.fields.buttons.length >= _META_MAX_BUTTONS) { showToast(`Max ${_META_MAX_BUTTONS} knoppen`, 'warn'); return; }
+    _metaEd.fields.buttons.push({ type: 'URL', text: '', url: '', phone_number: '' });
+    if (render) render();
+  };
+  window.__setMetaRmBtn = (idx) => {
+    _metaSyncFieldsFromDom();
+    const i = Number(idx);
+    if (!Number.isInteger(i) || i < 0) return;
+    _metaEd.fields.buttons.splice(i, 1);
+    if (render) render();
+  };
+  window.__setMetaBtnType = (idx, val) => {
+    _metaSyncFieldsFromDom();
+    const i = Number(idx); if (!_metaEd.fields.buttons[i]) return;
+    const t = String(val || 'URL').toUpperCase();
+    _metaEd.fields.buttons[i].type = _META_BTN_TYPES.includes(t) ? t : 'URL';
+    // Wis niet-relevante velden.
+    if (t !== 'URL')          _metaEd.fields.buttons[i].url = '';
+    if (t !== 'PHONE_NUMBER') _metaEd.fields.buttons[i].phone_number = '';
+    if (render) render();
+  };
+  // Media-upload via bestaand /api/whatsapp-media-upload. Zet response-URL in
+  // header_url en re-render (structuur — nieuw thumbnail).
+  window.__setMetaUpload = async (inputEl) => {
+    const file = inputEl?.files?.[0]; if (!file) return;
+    const ht = _metaEd.fields.header_type;
+    if (!['IMAGE','VIDEO','DOCUMENT'].includes(ht)) { showToast('Kies eerst media-header (IMAGE/VIDEO/DOCUMENT)', 'warn'); inputEl.value = ''; return; }
+    if (file.size > 3 * 1024 * 1024) { showToast('Max 3 MB', 'warn'); inputEl.value = ''; return; }
+    _metaSyncFieldsFromDom();
+    _metaEd.uploading = true; if (render) render();
+    try {
+      const fd = new FormData(); fd.append('file', file); fd.append('type', ht);
+      const r = await (window.KV && window.KV.authedFetch
+        ? window.KV.authedFetch('/api/whatsapp-media-upload', { method: 'POST', body: fd })
+        : fetch('/api/whatsapp-media-upload', { method: 'POST', body: fd }));
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+      const url = j?.url || j?.public_url || j?.example_url;
+      if (!url) throw new Error('geen URL in response');
+      _metaEd.fields.header_url = url;
+      showToast('Upload gelukt', 'ok');
+    } catch (e) { showToast('Upload mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    finally { _metaEd.uploading = false; if (render) render(); }
+  };
   function _renderMetaEdModal() {
     if (!_metaEd.open) return '';
     const f = _metaEd.fields;
@@ -1497,23 +1616,64 @@
             </label>
             <label style="font-size:11.5px;color:var(--text-2)">Header
               <select onchange="window.__setMetaEdSelect('header_type',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
-                <option value="NONE"  ${f.header_type === 'NONE' ? 'selected' : ''}>Geen</option>
-                <option value="TEXT"  ${f.header_type === 'TEXT' ? 'selected' : ''}>Tekst</option>
+                <option value="NONE"     ${f.header_type === 'NONE' ? 'selected' : ''}>Geen</option>
+                <option value="TEXT"     ${f.header_type === 'TEXT' ? 'selected' : ''}>Tekst</option>
+                <option value="IMAGE"    ${f.header_type === 'IMAGE' ? 'selected' : ''}>Afbeelding</option>
+                <option value="VIDEO"    ${f.header_type === 'VIDEO' ? 'selected' : ''}>Video</option>
+                <option value="DOCUMENT" ${f.header_type === 'DOCUMENT' ? 'selected' : ''}>Document (PDF)</option>
               </select>
             </label>
           </div>
           ${f.header_type === 'TEXT' ? `<label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Header-tekst (max 60)
-            <input type="text" value="${esc(f.header_text)}" oninput="window.__setMetaEdField('header_text',this.value)" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            <input type="text" data-metaed-header-text value="${esc(f.header_text)}" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>` : ''}
+          ${['IMAGE','VIDEO','DOCUMENT'].includes(f.header_type) ? `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px">
+            <label style="font-size:11.5px;color:var(--text-2);display:block">Media-URL (example_url, max 2000) <span style="color:var(--text-3)">— publiek bereikbare URL</span>
+              <input type="url" data-metaed-header-url value="${esc(f.header_url || '')}" maxlength="2000" placeholder="https://…" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+            </label>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;font-size:11.5px">
+                ${_metaEd.uploading ? 'Uploading…' : `📎 Upload ${f.header_type.toLowerCase()} (max 3 MB)`}
+                <input type="file" accept="${_META_UPLOAD_ACCEPT[f.header_type] || '*'}" onchange="window.__setMetaUpload(this)" ${_metaEd.uploading ? 'disabled' : ''} style="display:none" />
+              </label>
+              ${f.header_url ? `<a href="${esc(f.header_url)}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-3);text-decoration:underline">preview ↗</a>` : ''}
+              <span style="font-size:10.5px;color:var(--text-3)">accept: ${esc(_META_UPLOAD_ACCEPT[f.header_type] || '—')}</span>
+            </div>
+          </div>` : ''}
           <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Body (max 1024) — gebruik <code>{{1}}</code>, <code>{{2}}</code>… voor variabelen
-            <textarea oninput="window.__updMetaBodyMeta(this.value)" maxlength="1024" rows="6" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(f.body_text)}</textarea>
+            <textarea data-metaed-body oninput="window.__updMetaBodyMeta(this.value)" maxlength="1024" rows="6" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(f.body_text)}</textarea>
             <div id="kv-metaed-body-meta" style="font-size:10.5px;color:var(--text-3);margin-top:4px">${f.body_text.length}/1024 chars · ${bodyVars} variabele${bodyVars===1?'':'n'} gevonden</div>
           </label>
-          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:6px">Footer (optioneel, max 60)
-            <input type="text" value="${esc(f.footer_text)}" oninput="window.__setMetaEdField('footer_text',this.value)" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          ${bodyVars > 0 ? `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px">
+            <div style="font-size:11.5px;font-weight:600;color:var(--text-2);margin-bottom:6px">Voorbeeldwaarden per variabele <span style="color:var(--text-3);font-weight:normal">— vereist door Meta voor review, max 1024/veld</span></div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">
+              ${Array.from({length: bodyVars}, (_, i) => {
+                const n = i + 1;
+                return `<label style="font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:6px">
+                  <code style="font-size:10.5px">{{${n}}}</code>
+                  <input type="text" data-metaed-example="${n}" value="${esc((f.examples||{})[n]||'')}" maxlength="1024" placeholder="voorbeeld voor {{${n}}}" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+                </label>`;
+              }).join('')}
+            </div>
+          </div>` : ''}
+          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Footer (optioneel, max 60)
+            <input type="text" data-metaed-footer value="${esc(f.footer_text)}" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>
-          <div style="padding:8px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);margin-top:12px;line-height:1.5">
-            <b>Beperkingen in deze editor:</b> IMAGE/VIDEO/DOCUMENT-header, body-voorbeeldwaarden en interactieve buttons (URL/PHONE/QUICK_REPLY) zijn nog niet geport — voor die opties: <a href="/modules/admin.html#tab-integraties" style="color:inherit;text-decoration:underline">admin.html</a>.
+          <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <div style="font-size:11.5px;font-weight:600;color:var(--text-2)">Interactieve buttons <span style="color:var(--text-3);font-weight:normal">— max ${_META_MAX_BUTTONS}, per type conditionele velden</span></div>
+              <button class="btn btn-ghost btn-sm" ${(f.buttons||[]).length >= _META_MAX_BUTTONS ? 'disabled' : ''} onclick="window.__setMetaAddBtn()" style="font-size:11px">➕ Knop</button>
+            </div>
+            ${(f.buttons||[]).length ? (f.buttons||[]).map((b, i) => `<div style="display:grid;grid-template-columns:130px 1fr 1fr 30px;gap:6px;align-items:center;padding:6px 0;border-top:${i>0?'1px dashed var(--border)':'none'}">
+              <select onchange="window.__setMetaBtnType(${i}, this.value)" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                ${_META_BTN_TYPES.map(t => `<option value="${t}" ${b.type===t?'selected':''}>${t}</option>`).join('')}
+              </select>
+              <input type="text" data-btn-idx="${i}" data-btn-field="text" value="${esc(b.text||'')}" maxlength="25" placeholder="label (max 25)" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+              ${b.type==='URL' ? `<input type="url" data-btn-idx="${i}" data-btn-field="url" value="${esc(b.url||'')}" maxlength="2000" placeholder="https://…" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:'IBM Plex Mono',monospace" />` :
+                b.type==='PHONE_NUMBER' ? `<input type="tel" data-btn-idx="${i}" data-btn-field="phone" value="${esc(b.phone_number||'')}" placeholder="+31612345678 (E.164)" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:'IBM Plex Mono',monospace" />` :
+                `<div style="font-size:11px;color:var(--text-3);padding:4px 6px">— (quick reply)</div>`}
+              <button class="btn btn-ghost btn-sm" onclick="window.__setMetaRmBtn(${i})" style="font-size:12px;color:var(--rose);padding:2px 6px">✕</button>
+            </div>`).join('') : `<div style="font-size:11px;color:var(--text-3);padding:4px 2px">Geen knoppen toegevoegd.</div>`}
           </div>
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
