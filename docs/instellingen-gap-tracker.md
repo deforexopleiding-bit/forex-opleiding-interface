@@ -17,12 +17,13 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**1 quick-add open · 11 grote-brokken open · 13 deferred · 13 done** (totaal 38)
+**0 quick-adds open · 11 grote-brokken open · 13 deferred · 14 done** (totaal 38) — **alle top-5 quick-adds klaar ✓**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 13 | — |
-| open (quick-add)   | 1  | alg-weergave (menu-items add/remove) |
+| done         | 14 | — |
+| open (quick-add)   | 0  | — |
+| open (grote-brok) | 11 | agents-lisa als eerste (na advies) |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -107,7 +108,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `alg-bedrijf`     | deferred | bewust-deferred | env-vars COMPANY_* | secrets-brok (incasso-zone raakvlak) |
 | `alg-meldingen`   | open | grote-brok | nee (notification_preferences schema + endpoint nieuw) | deep-link/notice v=27 |
-| `alg-weergave`    | open | quick-add | ja (`/api/sidebar-layout-save`) | **Top-5 quick-add: items add/remove drawer** |
+| `alg-weergave`    | done | — | ja | v=43 (drag-reorder + toggle + add/remove: ✕-knop per rij, + Toevoegen-picker met beschikbare DFO.MODS) |
 
 ## Systeem
 

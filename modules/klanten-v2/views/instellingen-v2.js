@@ -2745,6 +2745,26 @@
     if (!it || it.key === 'admin') return; // admin verplicht visible
     it.visible = !it.visible; _menu.dirty = true; if (render) render();
   };
+  // Ronde-31 BLOK D · alg-weergave items toevoegen/verwijderen.
+  window.__setMenuRemove = (key) => {
+    if (key === 'admin') return; // anti-lockout
+    const it = _menu.items.find(x => x.key === key); if (!it) return;
+    openConfirm(`Menu-item "${key}" verbergen door 'm uit de layout te halen? Kan altijd terug via de + Toevoegen-knop.`, () => {
+      _menu.items = _menu.items.filter(x => x.key !== key);
+      _menu.dirty = true; if (render) render();
+    });
+  };
+  window.__setMenuAddOpen  = () => { _menu.addOpen = true; if (render) render(); };
+  window.__setMenuAddClose = () => { _menu.addOpen = false; if (render) render(); };
+  window.__setMenuAdd = (key) => {
+    if (!key) return;
+    if (_menu.items.some(x => x.key === key)) { showToast('Al aanwezig', 'warn'); return; }
+    // Vind default group uit DFO.MODS (voor consistente rendering na load).
+    const mod = (window.DFO?.MODS || []).find(m => m.id === key);
+    const group = mod?.g || undefined;
+    _menu.items.push({ key, visible: true, ...(group ? { group } : {}) });
+    _menu.addOpen = false; _menu.dirty = true; if (render) render();
+  };
   window.__setMenuDragStart = (idx) => { _menu.dragIdx = idx; };
   window.__setMenuDragOver  = (evt) => { evt.preventDefault(); };
   window.__setMenuDrop = (targetIdx, evt) => {
@@ -2796,17 +2816,37 @@
             <span style="color:var(--text-3);font-size:14px;cursor:grab;user-select:none" title="Slepen om te herordenen">⋮⋮</span>
             <div style="flex:1;font-size:12.5px">${esc(it.key)}${it.group ? ` <span style="color:var(--text-3);font-size:11px">· ${esc(it.group)}</span>` : ''}${locked ? ` <span style="font-size:10px;color:var(--text-3)">(verplicht zichtbaar)</span>` : ''}</div>
             <button class="btn btn-ghost btn-sm" ${locked ? 'disabled' : ''} onclick="window.__setMenuToggle('${esc(it.key)}')" style="font-size:11.5px">${it.visible ? '✓ zichtbaar' : '⨯ verborgen'}</button>
+            <button class="btn btn-ghost btn-sm" ${locked ? 'disabled' : ''} onclick="window.__setMenuRemove('${esc(it.key)}')" style="font-size:11px;color:var(--rose)" title="Uit layout halen">✕</button>
           </div>`;
         }).join('')
-      : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Nog geen items geconfigureerd voor deze rol — sidebar toont standaard-set. Sleep items uit een andere rol (via bovenstaande dropdown) om te starten.</div>`;
+      : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Nog geen items geconfigureerd voor deze rol — sidebar toont standaard-set. Voeg items toe via de + Toevoegen-knop, of sleep uit een andere rol.</div>`;
+    // Ronde-31 BLOK D: add-picker met alle DFO.MODS-items die nog niet in de layout zitten.
+    const usedKeys = new Set(_menu.items.map(x => x.key));
+    const available = (window.DFO?.MODS || []).filter(m => !usedKeys.has(m.id));
+    const addPicker = _menu.addOpen ? `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setMenuAddClose()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">Menu-item toevoegen</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setMenuAddClose()">✕</button>
+        </div>
+        <div style="overflow-y:auto;flex:1">
+          ${available.length ? available.map(m => `<button onclick="window.__setMenuAdd('${esc(m.id)}')" style="display:flex;justify-content:space-between;align-items:center;width:100%;padding:9px 14px;background:transparent;border:none;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;font:inherit;color:var(--text)">
+            <div><div style="font-size:12.5px;font-weight:500">${esc(m.naam || m.id)}</div><div style="font-size:10.5px;color:var(--text-3);margin-top:1px">${esc(m.id)}${m.g ? ` · ${esc(m.g)}` : ''}</div></div>
+            <span style="font-size:11px;color:var(--emerald)">+ Voeg toe</span>
+          </button>`).join('') : `<div style="padding:20px;color:var(--text-3);font-size:12.5px;text-align:center">Alle beschikbare modules staan al in de layout.</div>`}
+        </div>
+      </div>
+    </div>` : '';
     return `<div style="max-width:900px">
+      ${addPicker}
       <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
-        <b>Menu-editor in-sectie.</b> Sleep items met het ⋮⋮-handvat om te herordenen; klik ✓/⨯ om te tonen/verbergen. Opslaan schrijft de layout per rol naar <code>app_settings.sidebar_layout[:role]</code>. Wijzigingen zichtbaar na herladen.
+        <b>Menu-editor in-sectie.</b> Sleep items met het ⋮⋮-handvat om te herordenen; klik ✓/⨯ om te tonen/verbergen; ✕ om uit de layout te halen; + Toevoegen om ontbrekende modules terug te zetten. Opslaan schrijft de layout per rol naar <code>app_settings.sidebar_layout[:role]</code>. Wijzigingen zichtbaar na herladen.
       </div>
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <label style="font-size:12px;color:var(--text-2)">Rol:
           <select onchange="window.__setMenuRoleChange(this.value)" style="margin-left:6px;padding:5px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">${rolesOpts}</select>
         </label>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setMenuAddOpen()" style="font-size:11.5px">+ Toevoegen (${available.length})</button>
         ${_menu.dirty ? '<span style="font-size:11px;color:var(--amber)">niet-opgeslagen wijzigingen</span>' : ''}
         <button class="btn btn-primary btn-sm" ${!_menu.dirty || _menu.busy ? 'disabled' : ''} onclick="window.__setMenuSave()" style="margin-left:auto">${_menu.busy ? 'Opslaan…' : 'Opslaan'}</button>
       </div>
