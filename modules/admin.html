@@ -1571,12 +1571,17 @@ async function init() {
       'joost-config':        '/modules/finance.html?tab=instellingen&sub=joost',
       'assessment':          '/modules/events.html#settings-assessment',
       'simone-config':       '/modules/events.html#settings-simone',
+      // Ronde-31 STAP 1: approval-queue verhuisd naar Wanbetalers-module.
+      // Oude bookmarks + hoofdnav-badge-links landen nu in wanbetalers-v2 Acties.
+      'approval-queue':      '/modules/klanten-v2/?v2preview=wanbetalers',
     };
     if (hash && legacyRedirectMap[hash]) {
       location.replace(legacyRedirectMap[hash]);
       return;
     }
-    var allowedHashes = ['approval-queue', 'integraties', 'rechten', 'gebruikers'];
+    // approval-queue verwijderd uit allowedHashes — panel is hidden (display:none)
+    // en oude routes redirecten via legacyRedirectMap hierboven.
+    var allowedHashes = ['integraties', 'rechten', 'gebruikers'];
     if (hash && allowedHashes.indexOf(hash) !== -1) switchAdminTab(hash);
   } catch (_) { /* fail-soft */ }
 }

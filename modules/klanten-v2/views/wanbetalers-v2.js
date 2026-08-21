@@ -6355,6 +6355,45 @@
   window.DFO.VIEWS['wanbetalers/Pipeline']   = pipelineView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('wanbetalers');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('wanbetalers');
+
+  /* Ronde-31 · STAP 1 (approval-queue verhuizing) — nav-badge met PENDING-count.
+     Vervangt de hardcoded badge:32 in app-shell.js. Loop-safety: fetched-guard
+     met TTL 2 min (geen setInterval). Wordt aangeroepen bij (a) module-load
+     (setTimeout 800ms na DCL, 1×), (b) na approve/reject/mark-executed via
+     event-listener op window (wanbetalers-v2 dispatcht 'kv-wb-approvals-changed'). */
+  const _WB_BADGE_TTL_MS = 2 * 60 * 1000;
+  let   _wbBadgeFetchedAt = 0;
+  let   _wbBadgeInflight  = false;
+  async function refreshWbApprovalsBadge(force) {
+    if (_wbBadgeInflight) return;
+    if (!force && (Date.now() - _wbBadgeFetchedAt) < _WB_BADGE_TTL_MS) return;
+    _wbBadgeInflight = true;
+    try {
+      const r = await (window.KV && window.KV.authedFetch
+        ? window.KV.authedFetch('/api/pending-actions-list?status=PENDING&limit=1')
+        : fetch('/api/pending-actions-list?status=PENDING&limit=1'));
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      const cnt = (d.counts && typeof d.counts.PENDING === 'number')
+        ? d.counts.PENDING
+        : (typeof d.total === 'number' ? d.total : 0);
+      _wbBadgeFetchedAt = Date.now();
+      const btn   = document.querySelector('.nav-item[onclick*="wanbetalers"]');
+      const badge = btn ? btn.querySelector('.nav-badge') : null;
+      if (btn && !badge && cnt > 0) {
+        const s = document.createElement('span'); s.className = 'nav-badge'; s.textContent = String(cnt); btn.appendChild(s);
+      } else if (badge) {
+        if (cnt > 0) { badge.textContent = String(cnt); badge.style.display = ''; }
+        else         { badge.style.display = 'none'; }
+      }
+    } catch (_) { /* fail-soft */ }
+    finally { _wbBadgeInflight = false; }
+  }
+  window.__refreshWbApprovalsBadge = refreshWbApprovalsBadge;
+  window.addEventListener('kv-wb-approvals-changed', () => refreshWbApprovalsBadge(true));
+  const _kick = () => { try { refreshWbApprovalsBadge(false); } catch (_) {} };
+  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(_kick, 800);
+  else document.addEventListener('DOMContentLoaded', () => setTimeout(_kick, 800), { once: true });
   console.debug('[wanbetalers-v2] v=36 BROK C: _fetchCasePipeline skipt de /api/dunning-pipeline-detail-call bij een klant met open_invoice_count === 0 in overzicht — synthetische empty-response (open_invoices:[], _synthetic:true) i.p.v. netwerk-404. Voorkomt rode "GET .. 404" in console + de tryFetch console.warn. Fallback: zonder overzicht (race) fetchen we nog steeds. UI-render onveranderd — _caseFactuurCardHtml toont "Geen open factuur" bij lege lijst.');
   console.debug('[wanbetalers-v2] v=35 BROK WB-FIX-6: klantnaam als klikdoel — thread-header <b>naam</b> + right klantgegevens-paneel naam-heading. Beide krijgen cursor:pointer + hover-underline (brand-color) + click -> __wbxOpenCase(cid, {customer_name}). event.stopPropagation zodat kop-knoppen (✓/+/👤/⋮) niet dubbel triggeren. Wordt niet klikbaar als cust.id ontbreekt (unmatched-nummer conv).');
   console.debug('[wanbetalers-v2] v=34 BROK WB-FIX-5: (#1) Volgende-badge mapt nu op ECHTE overzicht-velden next_action_step_type (email/whatsapp/wait/task/stop/resume_dunning) + next_action_step_title heuristiek (Bel/Brief/Incasso/Herinnering). Voorheen: mijn code checkte non-bestaande velden -> altijd "Actie"-fallback. (#2) MANUAL_FOLLOWUP-splitting op payload.kind: kind=call -> "📞 Belafspraak" (Bel-knop OK), kind=letter -> "✉ Brief-taak" (Bel-knop weg, "Naar brief-flow"-knop naar SURFACE B WIK-card), kind=other -> "📝 Follow-up". Fallback: title-regex (bv. "Stuur WIK-14-dagenbrief" -> letter). Groepering ook via effectieve type — brief-taken en bel-taken vallen nu in APARTE groepen. Ook: MANUAL_PROPOSE_ARRANGEMENT label naar "Regeling voorstellen" (v1-parity, was "Arrangement voorstellen").');
