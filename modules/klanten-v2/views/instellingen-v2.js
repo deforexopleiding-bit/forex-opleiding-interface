@@ -1091,6 +1091,118 @@
     </div>`;
   }
 
+  /* Wave-1 · team-mentoren ← Mentor↔Bubble-koppeling. Toont per actieve
+     mentor de huidige koppel-status + picker om te (ont)koppelen. Endpoints:
+     GET team-members-bubble-status (lijst), GET bubble-mentors-list (picker),
+     POST mentor-bubble-link (koppel), POST team-member-ensure (fallback als
+     mentor nog geen team_member-rij heeft). Custom confirm bij ontkoppel. */
+  const _mnt = { loading: false, fetched: false, error: null, mentors: [], bubbleList: [], bubbleFetched: false, pickerFor: null, pickerQ: '', busy: {} };
+  async function fetchMentoren() {
+    if (_mnt.loading || _mnt.fetched) return;
+    _mnt.loading = true; _mnt.error = null; if (render) render();
+    const j = await tryFetch('mnt-status', '/api/team-members-bubble-status');
+    _mnt.loading = false; _mnt.fetched = true;
+    if (j?.__error) _mnt.error = j.__error;
+    else if (j?.error) _mnt.error = j.error;
+    else _mnt.mentors = Array.isArray(j?.mentors) ? j.mentors : [];
+    if (render) render();
+  }
+  async function fetchBubbleList() {
+    if (_mnt.bubbleFetched) return;
+    const j = await tryFetch('mnt-bubble', '/api/bubble-mentors-list');
+    _mnt.bubbleFetched = true;
+    _mnt.bubbleList = Array.isArray(j?.mentors) ? j.mentors : [];
+    if (render) render();
+  }
+  window.__setMntOpenPicker = (teamMemberId) => {
+    _mnt.pickerFor = teamMemberId;
+    _mnt.pickerQ = '';
+    if (!_mnt.bubbleFetched) fetchBubbleList();
+    else if (render) render();
+  };
+  window.__setMntClosePicker = () => { _mnt.pickerFor = null; if (render) render(); };
+  window.__setMntPickerQ    = (v) => { _mnt.pickerQ = String(v || ''); if (render) render(); };
+  async function linkMentor(teamMemberId, bubbleUserId, label) {
+    _mnt.busy[teamMemberId] = true; if (render) render();
+    const j = await tryFetch('mnt-link', '/api/mentor-bubble-link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ team_member_id: teamMemberId, bubble_user_id: bubbleUserId }),
+    });
+    _mnt.busy[teamMemberId] = false;
+    if (j?.__error || j?.error) showToast('Koppelen mislukt: ' + (j.__error || j.error), 'warn');
+    else { showToast(label || 'Koppeling bijgewerkt', 'ok'); _mnt.fetched = false; fetchMentoren(); }
+    _mnt.pickerFor = null;
+    if (render) render();
+  }
+  window.__setMntPickBubble = (bubbleUserId) => {
+    if (!_mnt.pickerFor) return;
+    linkMentor(_mnt.pickerFor, bubbleUserId, 'Gekoppeld aan Bubble');
+  };
+  window.__setMntUnlink = (teamMemberId, mentorName) => {
+    openConfirm(`Bubble-koppeling verbreken voor ${mentorName || 'deze mentor'}? Het mentor-dashboard verliest z'n Bubble-data-koppeling.`, () => {
+      linkMentor(teamMemberId, null, 'Bubble-koppeling verbroken');
+    }, 'warn');
+  };
+  function bodyMentoren() {
+    if (!_mnt.fetched && !_mnt.loading) queueMicrotask(() => fetchMentoren());
+    if (_mnt.loading && !_mnt.mentors.length) return `<div style="padding:24px;color:var(--text-3)">Laden…</div>`;
+    if (_mnt.error) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${esc(_mnt.error)}</div>`;
+    const rows = _mnt.mentors.map(m => {
+      const busy = !!_mnt.busy[m.id];
+      const linked = !!m.bubble_user_id;
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:8px 12px;font-size:12.5px">${esc(m.name || '—')}</td>
+        <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(m.email || '—')}</td>
+        <td style="padding:8px 12px;font-size:11.5px">${linked ? `<span style="color:var(--emerald)">✓ ${esc(m.bubble_user_id).slice(0,10)}…</span>` : `<span style="color:var(--text-3)">niet gekoppeld</span>`}</td>
+        <td style="padding:8px 12px;text-align:right">
+          ${linked
+            ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMntUnlink('${m.id}', '${esc(m.name || '')}')" style="font-size:11px;color:var(--rose)">Ontkoppel</button>`
+            : `<button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMntOpenPicker('${m.id}')" style="font-size:11px">Koppel Bubble…</button>`}
+        </td>
+      </tr>`;
+    }).join('');
+    const picker = _mnt.pickerFor ? _renderMntPicker() : '';
+    return `<div style="max-width:1000px">
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_mnt.mentors.length} mentor(en)</div>
+      <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">E-mail</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Bubble</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Actie</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${picker}
+    </div>`;
+  }
+  function _renderMntPicker() {
+    const q = _mnt.pickerQ.toLowerCase().trim();
+    const filtered = q ? _mnt.bubbleList.filter(x => (x.name || '').toLowerCase().includes(q) || (x.email || '').toLowerCase().includes(q)) : _mnt.bubbleList;
+    const list = _mnt.bubbleFetched
+      ? (filtered.length
+          ? filtered.slice(0, 50).map(x => `<button onclick="window.__setMntPickBubble('${esc(x.bubble_user_id)}')" style="display:flex;flex-direction:column;padding:8px 12px;background:transparent;border:none;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;font:inherit;width:100%">
+              <span style="font-size:12.5px;font-weight:500;color:var(--text)">${esc(x.name || '—')}</span>
+              <span style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(x.email || '')} · ${esc(x.bubble_user_id).slice(0,12)}…</span>
+            </button>`).join('')
+          : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Geen resultaten</div>`)
+      : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Bubble-lijst laden…</div>`;
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setMntClosePicker()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">Kies Bubble-user</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setMntClosePicker()">✕</button>
+        </div>
+        <div style="padding:12px 18px;border-bottom:1px solid var(--border)">
+          <input type="text" placeholder="Zoek op naam of e-mail…" value="${esc(_mnt.pickerQ)}" oninput="window.__setMntPickerQ(this.value)" style="width:100%;padding:7px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);box-sizing:border-box" />
+        </div>
+        <div style="overflow-y:auto;flex:1">${list}</div>
+      </div>
+    </div>`;
+  }
+
   /* Wave-1 · sales-offerte — TL email-template + sales-uitzonderingen
      (min term / max start-dagen). Reads via /api/app-settings + /api/teamleader-
      email-templates. Writes via /api/app-settings PUT. Custom confirm bij save. */
@@ -1315,6 +1427,7 @@
     if (cur.id === 'alg-weergave')       return bodyWeergave();
     if (cur.id === 'fin-teamleader')     return bodyTeamleader();
     if (cur.id === 'sales-offerte')      return bodySalesOfferte();
+    if (cur.id === 'team-mentoren')      return bodyMentoren();
     if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
