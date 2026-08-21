@@ -17,8 +17,11 @@ const AUTO_SETTINGS_KEY = 'dunning_pipeline_auto';
 // resolve uit zodra now() >= resolve_scheduled_at én nog steeds alles betaald is
 // (anders: annuleren).
 export const PAID_GRACE_MINUTES = 60;
-// Statussen die als "open factuur" gelden (spiegelt de count-check bij betalen).
-const OPEN_INVOICE_STATUSES = ['open', 'partially_paid', 'overdue'];
+// Enige bron-van-waarheid voor "een factuur telt als openstaand" (spiegelt de
+// count-check bij betalen). Gedeeld met dunning-engine.js (daar geïmporteerd
+// als OPEN_STATUSES) zodat de "alles betaald"-definitie nooit tussen de twee
+// modules uit elkaar kan lopen.
+export const OPEN_INVOICE_STATUSES = ['open', 'partially_paid', 'overdue'];
 // TERMINAL = "definitief afgerond" (opgelost/afschrijven). Blijft bestaan
 // voor de setStage() auto-lock (auto-callers mogen een terminal-klant NIET
 // per ongeluk uit terminal weghalen) en voor semantische UI-labels.

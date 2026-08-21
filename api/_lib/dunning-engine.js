@@ -35,7 +35,7 @@ import {
   hasOpenBlockingAction,
   loadOpenActionsByCustomer,
 } from './pending-actions-guard.js';
-import { shouldSkipDueToTerminalStage } from './dunning-pipeline.js';
+import { shouldSkipDueToTerminalStage, OPEN_INVOICE_STATUSES as OPEN_STATUSES } from './dunning-pipeline.js';
 import {
   isSendStep,
   isWithinOfficeHours,
@@ -43,7 +43,8 @@ import {
   officeHoursLabel,
 } from './dunning-office-hours.js';
 
-const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
+// OPEN_STATUSES komt nu uit dunning-pipeline.js (OPEN_INVOICE_STATUSES) — één
+// gedeelde bron-van-waarheid voor "open factuur", zie import bovenaan.
 
 // PostgREST-default max-rows is 1000. Bij grotere sets moet je via .range()
 // pagineren, anders wordt de resultaatset stil afgekapt — precies wat de
@@ -556,18 +557,26 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   //   • grace verstreken + nog 0 open → afronden (finalizePaidResolve: stage
   //     'opgelost' + FASE 7 MANUAL_FOLLOWUP-cascade)
   //   • grace nog niet om + nog 0 open → laten staan (badge telt af)
-  // is_test-scope wordt HERBEVESTIGD via een count op invoices; de count zelf
-  // is statusgebaseerd (open/partially_paid/overdue) zoals bij het betalen.
-  // FAIL-SOFT + time-budget-guard, net als de instroom-loop.
+  // is_test-SCOPE wordt AL BIJ DE FETCH afgedwongen via een inner-join op
+  // customers.is_test (production → false, test → true). Zo komt een klant die
+  // buiten de run-scope valt NOOIT in de lus. Dit dicht een lek: zonder deze
+  // filter werd een productieklant scope-loos opgehaald, telde de is_test-
+  // gefilterde count 0 open facturen, en sloot een TEST-run die productieklant
+  // ten onrechte af. De per-rij count (reopen-detectie) blijft, nu met dezelfde
+  // scope. Back-compat-scope (geen production/test) filtert niet op is_test,
+  // net als elders in de engine. FAIL-SOFT + time-budget-guard.
   try {
     const { cancelPaidResolve, finalizePaidResolve } = await import('./dunning-pipeline.js');
     const nowMs = Date.now();
-    const pendingRows = await fetchAllRows(() =>
-      supabaseAdmin
+    const pendingRows = await fetchAllRows(() => {
+      let q = supabaseAdmin
         .from('dunning_pipeline_customers')
-        .select('customer_id, stage_slug, resolve_scheduled_at')
-        .not('resolve_scheduled_at', 'is', null)
-    );
+        .select('customer_id, stage_slug, resolve_scheduled_at, customers!inner(is_test)')
+        .not('resolve_scheduled_at', 'is', null);
+      if      (scope === 'production') q = q.eq('customers.is_test', false);
+      else if (scope === 'test')       q = q.eq('customers.is_test', true);
+      return q;
+    });
     let resolvedCount = 0, cancelledCount = 0, waitingCount = 0;
     for (const row of pendingRows || []) {
       if (elapsed(startedAt) > abortMs) break;
