@@ -96,7 +96,7 @@
     _omzData[id] = { serieA, serieB, labels: labels || [], years: years || [], labelA, labelB, colA, colB, nowIdx };
     return `<div id="${id}-wrap" class="omz-chart-container" style="position:relative;height:230px;width:100%">
       <div id="${id}-tip" style="position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;z-index:5;background:var(--text);color:var(--bg);border-radius:9px;padding:9px 12px;font-size:12px;box-shadow:var(--shadow-lg);white-space:nowrap"></div>
-      <div style="position:absolute;bottom:-4px;left:0;display:flex;gap:18px;font-size:11.5px;color:var(--text-3)">
+      <div style="position:absolute;bottom:-4px;left:17px;right:17px;display:flex;gap:18px;font-size:11.5px;color:var(--text-3)">
         <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colA})"></span>${labelA}</span>
         <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colB})"></span>${labelB}</span>
       </div>
