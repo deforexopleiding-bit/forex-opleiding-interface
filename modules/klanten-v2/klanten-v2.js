@@ -634,6 +634,19 @@ function wireTopbarActionsToShell() {
     }
   } catch (_) { /* URLSearchParams-fail: houd 'klanten' als default */ }
   window.DFO.goMod(bootMod);
+  // Ronde-31 FIX 3: `?v2tab=<naam>` schakelt direct naar die tab. Gebruikt door
+  // admin.html legacy-redirect (#approval-queue → v2preview=wanbetalers&v2tab=Acties)
+  // zodat oude bookmarks in de queue zelf landen, niet in de Vandaag-default.
+  try {
+    const wantTab = new URLSearchParams(window.location.search).get('v2tab');
+    if (wantTab) {
+      const modsList = window.DFO.MODS || [];
+      const mm = modsList.find((m) => m.id === bootMod);
+      const tabs = (mm && Array.isArray(mm.tabs)) ? mm.tabs : [];
+      const hit = tabs.find((t) => t === wantTab) || tabs.find((t) => String(t).toLowerCase() === String(wantTab).toLowerCase());
+      if (hit) window.DFO.goTab(hit);
+    }
+  } catch (_) { /* fail-soft */ }
 
   // Eerste render van topbar-actions (na goMod triggert wrap 'em ook, maar
   // eerste render moet expliciet want boot-goMod is idempotent na wrap).
