@@ -83,115 +83,146 @@
         <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colB})"></span>${labelB}</span></div>
     </div>`;
   }
-  // Premium omzet-chart: monotone-cubic Bezier, rijke gradient-fills,
-  // subtiele draw-in animatie + glow op laatste datapunt.
-  // Signature-compatible met dualChart (dezelfde chartHover/chartOut).
-  // Ronde-19: serieB mag null-waarden bevatten (toekomst-punten worden niet
-  // getekend voor de b-lijn). nowIdx tekent een verticale "nu"-markering.
-  function omzChart(id, serieA, serieB, labels, labelA, labelB, colA, colB, nowIdx) {
-    const w = 640, h = 200, pl = 34, pr = 12, pt = 18, pb = 30;
-    const all = [...(serieA || []), ...(serieB || [])].filter(v => Number.isFinite(v));
-    const mx  = Math.max(1, Math.max(...(all.length ? all : [1])) * 1.12);
-    const X = i => pl + (i / Math.max(1, labels.length - 1)) * (w - pl - pr);
-    const Y = v => pt + (1 - v / mx) * (h - pt - pb);
-    // Monotone-cubic Bezier — bewaart lokale monotonie (voorkomt overshoot
-    // die je bij eenvoudige Catmull-Rom soms krijgt tussen twee dalen).
-    function monotonePath(pts) {
-      if (pts.length < 2) return '';
-      const n = pts.length;
-      const dx = new Array(n - 1), dy = new Array(n - 1), m = new Array(n - 1);
-      for (let i = 0; i < n - 1; i++) {
-        dx[i] = pts[i+1][0] - pts[i][0];
-        dy[i] = pts[i+1][1] - pts[i][1];
-        m[i]  = dy[i] / (dx[i] || 1);
-      }
-      const tan = new Array(n);
-      tan[0] = m[0]; tan[n-1] = m[n-2];
-      for (let i = 1; i < n - 1; i++) {
-        if (m[i-1] * m[i] <= 0) tan[i] = 0;
-        else                    tan[i] = (m[i-1] + m[i]) / 2;
-      }
-      let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
-      for (let i = 0; i < n - 1; i++) {
-        const cp1x = pts[i][0]   + dx[i] / 3;
-        const cp1y = pts[i][1]   + tan[i]   * dx[i] / 3;
-        const cp2x = pts[i+1][0] - dx[i] / 3;
-        const cp2y = pts[i+1][1] - tan[i+1] * dx[i] / 3;
-        d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${pts[i+1][0].toFixed(1)},${pts[i+1][1].toFixed(1)}`;
-      }
-      return d;
-    }
-    const ptsA = serieA.map((v, i) => [X(i), Y(Number.isFinite(v) ? v : 0)]);
-    // B: skip null-punten (toekomst). Alleen contigue actuals tot laatste non-null.
-    const ptsB = [];
-    for (let i = 0; i < serieB.length; i++) {
-      const v = serieB[i];
-      if (v == null) break; // Stop bij eerste null (toekomst).
-      ptsB.push([X(i), Y(v)]);
-    }
-    const pathA = monotonePath(ptsA);
-    const pathB = monotonePath(ptsB);
-    const areaA = ptsA.length ? `${pathA} L${ptsA[ptsA.length-1][0].toFixed(1)},${(h-pb).toFixed(1)} L${ptsA[0][0].toFixed(1)},${(h-pb).toFixed(1)} Z` : '';
-    const areaB = ptsB.length ? `${pathB} L${ptsB[ptsB.length-1][0].toFixed(1)},${(h-pb).toFixed(1)} L${ptsB[0][0].toFixed(1)},${(h-pb).toFixed(1)} Z` : '';
-    // "Nu"-marker: verticale stippellijn op nowIdx (huidige maand). Punt vóór
-    // die lijn = actuals, punt erna = MRR-projectie. Alleen als nowIdx geldig.
-    const nowLine = (typeof nowIdx === 'number' && nowIdx >= 0 && nowIdx < labels.length)
-      ? `<line x1="${X(nowIdx).toFixed(1)}" y1="${pt}" x2="${X(nowIdx).toFixed(1)}" y2="${(h-pb).toFixed(1)}" stroke="var(--text-3)" stroke-width="1" stroke-dasharray="2 4" opacity=".4"/>
-         <text x="${X(nowIdx).toFixed(1)}" y="${(pt - 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--text-3)" font-family="IBM Plex Mono">nu</text>`
-      : '';
-    // MRR glow: op de LAATSTE actual (nowIdx of eind reeks als nowIdx=-1).
-    // Signed glow: op de laatste b-actual.
-    const glowAIdx = (typeof nowIdx === 'number' && nowIdx >= 0) ? nowIdx : ptsA.length - 1;
-    const lastA = ptsA[glowAIdx];
-    const lastB = ptsB[ptsB.length - 1];
-    // Y-as ticks: 4 gelijke gridlines. Labels in €k voor leesbaarheid.
-    const gridY = [0, .25, .5, .75, 1].map(f => pt + f * (h - pt - pb));
-    const gridLabels = [0, .25, .5, .75, 1].map(f => {
-      const v = mx * (1 - f);
-      return v >= 1000 ? `€${Math.round(v/1000)}k` : `€${Math.round(v)}`;
-    });
-    return `<div style="position:relative" id="${id}-wrap">
-      <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:210px;display:block;overflow:visible"
-        onmousemove="chartHover(event,'${id}',${labels.length},${pl},${w - pr})" onmouseleave="chartOut('${id}')">
-        <defs>
-          <linearGradient id="${id}-gA" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--${colA})" stop-opacity=".35"/>
-            <stop offset="55%" stop-color="var(--${colA})" stop-opacity=".08"/>
-            <stop offset="100%" stop-color="var(--${colA})" stop-opacity="0"/>
-          </linearGradient>
-          <linearGradient id="${id}-gB" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--${colB})" stop-opacity=".28"/>
-            <stop offset="55%" stop-color="var(--${colB})" stop-opacity=".06"/>
-            <stop offset="100%" stop-color="var(--${colB})" stop-opacity="0"/>
-          </linearGradient>
-          <filter id="${id}-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="blur"/>
-            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        ${gridY.map((yy, i) => `<line x1="${pl}" y1="${yy.toFixed(1)}" x2="${w - pr}" y2="${yy.toFixed(1)}" stroke="var(--border)" stroke-width="0.6" stroke-dasharray="${i === gridY.length - 1 ? '' : '3 4'}"/>`).join('')}
-        ${gridLabels.map((lbl, i) => `<text x="${pl - 6}" y="${(gridY[i] + 3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--text-3)" font-family="IBM Plex Mono">${lbl}</text>`).join('')}
-        ${nowLine}
-        <path d="${areaB}" fill="url(#${id}-gB)"/>
-        <path d="${areaA}" fill="url(#${id}-gA)"/>
-        <path d="${pathB}" fill="none" stroke="var(--${colB})" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2000" stroke-dashoffset="2000" style="animation:omzDraw 1.15s .1s cubic-bezier(.5,.05,.35,1) forwards"/>
-        <path d="${pathA}" fill="none" stroke="var(--${colA})" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2000" stroke-dashoffset="2000" style="animation:omzDraw 1.25s cubic-bezier(.5,.05,.35,1) forwards"/>
-        <line id="${id}-vline" x1="0" y1="${pt}" x2="0" y2="${h - pb}" stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
-        ${ptsA.map((p, i) => `<circle id="${id}-dA${i}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.8" fill="var(--surface)" stroke="var(--${colA})" stroke-width="2.2" opacity="0" style="transition:opacity .12s"/>`).join('')}
-        ${ptsB.map((p, i) => `<circle id="${id}-dB${i}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.8" fill="var(--surface)" stroke="var(--${colB})" stroke-width="2.2" opacity="0" style="transition:opacity .12s"/>`).join('')}
-        ${lastA ? `<circle cx="${lastA[0].toFixed(1)}" cy="${lastA[1].toFixed(1)}" r="5" fill="var(--${colA})" filter="url(#${id}-glow)" opacity=".85"/>` : ''}
-        ${lastB ? `<circle cx="${lastB[0].toFixed(1)}" cy="${lastB[1].toFixed(1)}" r="5" fill="var(--${colB})" filter="url(#${id}-glow)" opacity=".85"/>` : ''}
-        ${labels.map((l, i) => `<text x="${X(i).toFixed(1)}" y="${(h - 8).toFixed(1)}" text-anchor="middle" font-size="10.5" fill="var(--text-3)" font-family="IBM Plex Mono">${l}</text>`).join('')}
-      </svg>
-      <div id="${id}-tip" style="position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;z-index:5;
-        background:var(--text);color:var(--bg);border-radius:9px;padding:9px 12px;font-size:12px;box-shadow:var(--shadow-lg);white-space:nowrap"></div>
-      <div style="display:flex;gap:18px;margin-top:8px;font-size:11.5px;color:var(--text-3)">
+  // Premium omzet-chart — Ronde-23 definitieve full-width fix.
+  // Aanpak: omzChart() rendert alleen een PLACEHOLDER-container met vaste
+  // hoogte. _mountOmzChart() meet clientWidth en tekent de SVG met viewBox
+  // = "0 0 W H" (1 user-unit = 1 px) → nooit preserveAspectRatio-padding,
+  // dus geen witruimte + geen hover-offset. ResizeObserver herbeschouwt bij
+  // container-resize. Data bewaart in _omzData[id]; DFO.render() regenereert
+  // de placeholder, ensure-mount hook triggert de tekening opnieuw.
+  const _omzData = {};
+  const _omzObservers = new Map(); // wrapEl → ResizeObserver
+  function omzChart(id, serieA, serieB, labels, labelA, labelB, colA, colB, nowIdx, years) {
+    _omzData[id] = { serieA, serieB, labels: labels || [], years: years || [], labelA, labelB, colA, colB, nowIdx };
+    return `<div id="${id}-wrap" class="omz-chart-container" style="position:relative;height:230px;width:100%">
+      <div id="${id}-tip" style="position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;z-index:5;background:var(--text);color:var(--bg);border-radius:9px;padding:9px 12px;font-size:12px;box-shadow:var(--shadow-lg);white-space:nowrap"></div>
+      <div style="position:absolute;bottom:-4px;left:0;display:flex;gap:18px;font-size:11.5px;color:var(--text-3)">
         <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colA})"></span>${labelA}</span>
         <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colB})"></span>${labelB}</span>
       </div>
       <style>@keyframes omzDraw { to { stroke-dashoffset:0 } }</style>
     </div>`;
   }
+  function _ensureOmzMounted(id) {
+    const wrap = document.getElementById(id + '-wrap');
+    if (!wrap || !_omzData[id]) return;
+    _renderOmzInto(wrap, id);
+    // (Her)hook ResizeObserver zodat het bij window/panel-resize herbeschouwt.
+    // Oude observer op vorige element auto-cleaned door WeakMap? Nee — Map,
+    // dus we cleanen expliciet als er een oude entry aan een ander element
+    // hing. Als deze wrap-element al observed → niets doen (idempotent).
+    if (_omzObservers.has(wrap)) return;
+    const ro = new ResizeObserver(() => _renderOmzInto(wrap, id));
+    ro.observe(wrap);
+    _omzObservers.set(wrap, ro);
+    // Cleanup wanneer element verdwijnt (via MutationObserver op body — één
+    // instance genoeg voor alle chart-obs). Simpel: bij nieuwe render van de
+    // dashboard verliest wrap z'n parent; volgende _ensureOmzMounted-run
+    // krijgt een nieuw element en oude observer + Map-entry raakt de node
+    // die niet meer bestaat — laat 'm gewoon met de garbage naar geheugen
+    // (ResizeObserver houdt geen strong ref naar geobserveerde node; wij wel
+    // in de Map — daarom hier defensive prune bij elke render).
+    for (const [el, obs] of _omzObservers) {
+      if (!el.isConnected) { obs.disconnect(); _omzObservers.delete(el); }
+    }
+  }
+  function _renderOmzInto(wrap, id) {
+    const d = _omzData[id];
+    if (!d) return;
+    const rect = wrap.getBoundingClientRect();
+    const W = Math.max(200, Math.round(rect.width || wrap.clientWidth || 640));
+    const H = 200;
+    const pl = 42, pr = 12, pt = 18, pb = 42;
+    const n  = d.labels.length;
+    const all = [...(d.serieA || []), ...(d.serieB || [])].filter(v => Number.isFinite(v));
+    const mx  = Math.max(1, Math.max(...(all.length ? all : [1])) * 1.12);
+    const X = i => pl + (i / Math.max(1, n - 1)) * (W - pl - pr);
+    const Y = v => pt + (1 - v / mx) * (H - pt - pb);
+    function monotonePath(pts) {
+      if (pts.length < 2) return '';
+      const nn = pts.length;
+      const dx = new Array(nn - 1), dy = new Array(nn - 1), m = new Array(nn - 1);
+      for (let i = 0; i < nn - 1; i++) { dx[i] = pts[i+1][0] - pts[i][0]; dy[i] = pts[i+1][1] - pts[i][1]; m[i] = dy[i] / (dx[i] || 1); }
+      const tan = new Array(nn); tan[0] = m[0]; tan[nn-1] = m[nn-2];
+      for (let i = 1; i < nn - 1; i++) { if (m[i-1] * m[i] <= 0) tan[i] = 0; else tan[i] = (m[i-1] + m[i]) / 2; }
+      let out = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+      for (let i = 0; i < nn - 1; i++) {
+        const c1x = pts[i][0]   + dx[i] / 3;
+        const c1y = pts[i][1]   + tan[i]   * dx[i] / 3;
+        const c2x = pts[i+1][0] - dx[i] / 3;
+        const c2y = pts[i+1][1] - tan[i+1] * dx[i] / 3;
+        out += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${pts[i+1][0].toFixed(1)},${pts[i+1][1].toFixed(1)}`;
+      }
+      return out;
+    }
+    const ptsA = d.serieA.map((v, i) => [X(i), Y(Number.isFinite(v) ? v : 0)]);
+    const ptsB = [];
+    for (let i = 0; i < d.serieB.length; i++) {
+      const v = d.serieB[i]; if (v == null) break;
+      ptsB.push([X(i), Y(v)]);
+    }
+    const pathA = monotonePath(ptsA);
+    const pathB = monotonePath(ptsB);
+    const areaA = ptsA.length ? `${pathA} L${ptsA[ptsA.length-1][0].toFixed(1)},${(H-pb).toFixed(1)} L${ptsA[0][0].toFixed(1)},${(H-pb).toFixed(1)} Z` : '';
+    const areaB = ptsB.length ? `${pathB} L${ptsB[ptsB.length-1][0].toFixed(1)},${(H-pb).toFixed(1)} L${ptsB[0][0].toFixed(1)},${(H-pb).toFixed(1)} Z` : '';
+    const nowLine = (typeof d.nowIdx === 'number' && d.nowIdx >= 0 && d.nowIdx < n)
+      ? `<line x1="${X(d.nowIdx).toFixed(1)}" y1="${pt}" x2="${X(d.nowIdx).toFixed(1)}" y2="${(H-pb).toFixed(1)}" stroke="var(--text-3)" stroke-width="1" stroke-dasharray="2 4" opacity=".4"/>
+         <text x="${X(d.nowIdx).toFixed(1)}" y="${(pt - 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--text-3)" font-family="IBM Plex Mono">nu</text>`
+      : '';
+    const glowAIdx = (typeof d.nowIdx === 'number' && d.nowIdx >= 0) ? d.nowIdx : ptsA.length - 1;
+    const lastA = ptsA[glowAIdx];
+    const lastB = ptsB[ptsB.length - 1];
+    const gridY = [0, .25, .5, .75, 1].map(f => pt + f * (H - pt - pb));
+    const gridLabels = [0, .25, .5, .75, 1].map(f => { const v = mx * (1 - f); return v >= 1000 ? `€${Math.round(v/1000)}k` : `€${Math.round(v)}`; });
+    // X-as: maand-labels + jaar-labels bij i=0 én bij elke januari-tick.
+    const monthLabels = d.labels.map((l, i) => `<text x="${X(i).toFixed(1)}" y="${(H - 22).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--text-3)" font-family="IBM Plex Mono">${l}</text>`).join('');
+    const yearLabels = d.labels.map((l, i) => {
+      const showYear = (i === 0) || String(l).toLowerCase() === 'jan';
+      if (!showYear || !d.years[i]) return '';
+      return `<text x="${X(i).toFixed(1)}" y="${(H - 8).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--text-3)" font-family="IBM Plex Mono" opacity=".7">${d.years[i]}</text>`;
+    }).join('');
+    const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block"
+      onmousemove="chartHover(event,'${id}',${n},${pl},${W - pr})" onmouseleave="chartOut('${id}')">
+      <defs>
+        <linearGradient id="${id}-gA" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--${d.colA})" stop-opacity=".35"/>
+          <stop offset="55%" stop-color="var(--${d.colA})" stop-opacity=".08"/>
+          <stop offset="100%" stop-color="var(--${d.colA})" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="${id}-gB" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--${d.colB})" stop-opacity=".28"/>
+          <stop offset="55%" stop-color="var(--${d.colB})" stop-opacity=".06"/>
+          <stop offset="100%" stop-color="var(--${d.colB})" stop-opacity="0"/>
+        </linearGradient>
+        <filter id="${id}-glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      ${gridY.map((yy, i) => `<line x1="${pl}" y1="${yy.toFixed(1)}" x2="${W - pr}" y2="${yy.toFixed(1)}" stroke="var(--border)" stroke-width="0.6" stroke-dasharray="${i === gridY.length - 1 ? '' : '3 4'}"/>`).join('')}
+      ${gridLabels.map((lbl, i) => `<text x="${pl - 6}" y="${(gridY[i] + 3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--text-3)" font-family="IBM Plex Mono">${lbl}</text>`).join('')}
+      ${nowLine}
+      <path d="${areaB}" fill="url(#${id}-gB)"/>
+      <path d="${areaA}" fill="url(#${id}-gA)"/>
+      <path d="${pathB}" fill="none" stroke="var(--${d.colB})" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2000" stroke-dashoffset="2000" style="animation:omzDraw 1.15s .1s cubic-bezier(.5,.05,.35,1) forwards"/>
+      <path d="${pathA}" fill="none" stroke="var(--${d.colA})" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2000" stroke-dashoffset="2000" style="animation:omzDraw 1.25s cubic-bezier(.5,.05,.35,1) forwards"/>
+      <line id="${id}-vline" x1="0" y1="${pt}" x2="0" y2="${H - pb}" stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+      ${ptsA.map((p, i) => `<circle id="${id}-dA${i}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.8" fill="var(--surface)" stroke="var(--${d.colA})" stroke-width="2.2" opacity="0" style="transition:opacity .12s"/>`).join('')}
+      ${ptsB.map((p, i) => `<circle id="${id}-dB${i}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.8" fill="var(--surface)" stroke="var(--${d.colB})" stroke-width="2.2" opacity="0" style="transition:opacity .12s"/>`).join('')}
+      ${lastA ? `<circle cx="${lastA[0].toFixed(1)}" cy="${lastA[1].toFixed(1)}" r="5" fill="var(--${d.colA})" filter="url(#${id}-glow)" opacity=".85"/>` : ''}
+      ${lastB ? `<circle cx="${lastB[0].toFixed(1)}" cy="${lastB[1].toFixed(1)}" r="5" fill="var(--${d.colB})" filter="url(#${id}-glow)" opacity=".85"/>` : ''}
+      ${monthLabels}
+      ${yearLabels}
+    </svg>`;
+    // Vervang bestaande SVG (indien aanwezig), NIET tip/legend/style-nodes.
+    const oldSvg = wrap.querySelector('svg');
+    if (oldSvg) oldSvg.remove();
+    wrap.insertAdjacentHTML('afterbegin', svg);
+    // CHARTDATA-slot voor hover (labels + waarden per index).
+    CHARTDATA[id] = { a: d.serieA, b: d.serieB, labels: d.labels, years: d.years, labelA: d.labelA, labelB: d.labelB, colA: d.colA, colB: d.colB, nowIdx: d.nowIdx };
+  }
+  // Public mount-hook: dashManager roept dit via queueMicrotask na render.
+  window._omzEnsureMounted = _ensureOmzMounted;
   const CHARTDATA = {};
   window.chartHover = function (e, id, n, pl, pr) {
     const svgEl = e.currentTarget;
@@ -230,7 +261,8 @@
     const tip = document.getElementById(id + '-tip');
     const bVal = d.b[i];
     const isProjection = typeof d.nowIdx === 'number' && d.nowIdx >= 0 && i > d.nowIdx;
-    tip.innerHTML = `<div style="font-weight:600;margin-bottom:5px;opacity:.7;font-size:11px">${d.labels[i]}${isProjection ? ' · <span style="opacity:.6">projectie</span>' : ''}</div>
+    const yr = (d.years && d.years[i]) ? ' ' + d.years[i] : '';
+    tip.innerHTML = `<div style="font-weight:600;margin-bottom:5px;opacity:.7;font-size:11px">${d.labels[i]}${yr}${isProjection ? ' · <span style="opacity:.6">projectie</span>' : ''}</div>
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:3px">
         <span style="width:7px;height:7px;border-radius:2px;background:var(--${d.colA})"></span>
         <span style="opacity:.75">${d.labelA}</span>
@@ -727,8 +759,8 @@
 
             <div class="card-title">Omzet — getekende offertes${liveBadgeFor(f, 'Live uit /api/finance-dashboard-counts')}</div>
             <span style="font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--text-3)">INCL BTW</span></div>
-          <div class="card-body" style="padding:6px 17px 16px">
-            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px">
+          <div class="card-body" style="padding:6px 0 16px">
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:0 17px 14px">
               ${(() => {
                 // Ronde-15: Totaal incl BTW LIVE uit /api/sales-signed-deals-total.
                 // MRR blijft live uit finance-dashboard-counts (fase 1).
@@ -772,6 +804,7 @@
               if (sigTrend) for (const t of sigTrend) if (t && t.period && t.period >= startWin && t.period <= curYm) keySet.add(t.period);
               const keys = Array.from(keySet).sort();
               let a, b, lb;
+              let yr;
               if (keys.length) {
                 const mrrByK = {}; if (mrrTrend) for (const t of mrrTrend) mrrByK[t.period] = t.mrr || 0;
                 const sigByK = {}; if (sigTrend) for (const t of sigTrend) sigByK[t.period] = t.total_incl_vat || 0;
@@ -779,23 +812,26 @@
                 // b: alleen actuals ≤ huidige maand; toekomst = null (weggelaten uit lijn).
                 b  = keys.map(k => k <= curYm ? (Number(sigByK[k]) || 0) : null);
                 lb = keys.map(k => M_ABBR[parseInt(k.slice(5,7),10)-1] || k);
+                yr = keys.map(k => k.slice(0, 4));
               } else {
                 a  = [41200, 42800, 43900, 44600, 45800, 46400, 47100, 47612];
                 b  = [62000, 78000, 95000, 88000, 120000, 104000, 86000, 26250];
                 lb = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug'];
+                yr = ['2026','2026','2026','2026','2026','2026','2026','2026'];
               }
               // Vind index waar 'nu' ligt (voor 'vandaag'-verticale marker).
               const nowIdx = keys.length ? keys.indexOf(curYm) : -1;
-              CHARTDATA['omz'] = { a, b, labels: lb, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue', nowIdx };
-              // Ronde-21 PUNT-C robuust full-width. Vorige margin:0 -17px liet
-              // stille reserved-ruimte in de container (SVG width:100% pakte
-              // card-body-inner, niet de bredere container). Nu forceren we de
-              // WIDTH expliciet met calc(100% + 34px) zodat de SVG écht de
-              // ancestor-padding overbrugt. Y-label ruimte (pl=34) blijft in de
-              // SVG-viewBox zelf gereserveerd.
-              return `<div style="margin-left:-17px;margin-right:-17px;width:calc(100% + 34px)">${omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue', nowIdx)}</div>`;
+              CHARTDATA['omz'] = { a, b, labels: lb, years: yr, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue', nowIdx };
+              // Ronde-23 definitieve full-width: omzChart rendert nu een
+              // placeholder-container. _omzEnsureMounted meet clientWidth
+              // en tekent SVG met viewBox=W×H (1 unit = 1 px, geen meet-padding).
+              // ResizeObserver houdt bij window-resize gelijke tred.
+              // GEEN margin-hacks meer — de wrapper heeft nette padding en
+              // de SVG loopt tot beide randen van de card zelf.
+              queueMicrotask(() => window._omzEnsureMounted && window._omzEnsureMounted('omz'));
+              return omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue', nowIdx, yr);
             })()}
-            <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
+            <div style="margin:16px 17px 0;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
               <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">
                 Trajecten verkocht${_live.signedCat ? liveBadgeFor(_live.signedCat, 'Live uit /api/sales-signed-deals-total group=category (aanvaarde deals in periode)') : mockBadge('signed-deals-category faalde')}
               </div>
