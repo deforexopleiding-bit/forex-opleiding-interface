@@ -157,15 +157,59 @@ export default async function handler(req, res) {
     const custName = {};
     if (custIds.length) { const { data } = await supabaseAdmin.from('customers').select('id, is_company, company_name, first_name, last_name').in('id', custIds); for (const c of data || []) custName[c.id] = customerDisplayName(c); }
 
-    // Per traject.
+    // Per traject: count + MRR + REVENUE (deal-verkoopwaarde incl BTW).
+    // Dashboard-tegels "Trajecten verkocht" tonen verkoopwaarde (bv. 6 × €7.200
+    // = €43.200 voor 6× "1-op-1 12 mnd"), NIET de MRR van die abo's.
+    // Sub zonder deal.traject_variant_id ("Geen traject") is meestal een TL-
+    // import of los-abo; die verbergen we hier — user vraagt alleen concrete
+    // trajecten (6/12/24 mnd + Membership).
+    //
+    // Voor deal-value: haal line-items voor unieke dealIds op, aggregeer per
+    // deal, dan optellen per traject-bucket. Eén batch-query.
+    const dealRevenue = new Map();
+    if (dealIds.length) {
+      const { data: dLines } = await supabaseAdmin
+        .from('deal_line_items')
+        .select('deal_id, quantity, unit_price, vat_percentage, price_includes_vat')
+        .in('deal_id', dealIds);
+      for (const li of (dLines || [])) {
+        const qty = Number(li.quantity) || 0;
+        const up  = Number(li.unit_price) || 0;
+        const vat = Number(li.vat_percentage) || 0;
+        const sub = up * qty;
+        const inclBtw = li.price_includes_vat ? sub : sub * (1 + vat / 100);
+        dealRevenue.set(li.deal_id, (dealRevenue.get(li.deal_id) || 0) + inclBtw);
+      }
+    }
     const trajAgg = {};
     for (const s of active) {
       const deal = dealById[s.deal_id] || {};
-      const label = deal.traject_variant_id ? (variantLabel[deal.traject_variant_id] || 'Onbekend traject') : 'Geen traject';
-      (trajAgg[label] ||= { traject: label, mrr: 0, count: 0 });
-      trajAgg[label].mrr += mrrOf(s); trajAgg[label].count++;
+      if (!deal.traject_variant_id) continue; // "Geen traject" verbergen (TL-imports).
+      const label = variantLabel[deal.traject_variant_id] || 'Onbekend traject';
+      (trajAgg[label] ||= { traject: label, mrr: 0, count: 0, revenue_incl_btw: 0 });
+      trajAgg[label].mrr   += mrrOf(s);
+      trajAgg[label].count += 1;
+      // Deal-revenue één keer per sub (elke sub hangt aan 1 deal; als meerdere
+      // subs aan dezelfde deal hangen zou revenue dubbel tellen — dedupe via
+      // gezien-set per traject-bucket).
+      // Simpelweg: reken deal-revenue één keer per unieke deal per bucket.
     }
-    const by_traject = Object.values(trajAgg).map(t => ({ ...t, mrr: r2(t.mrr) })).sort((a, b) => b.mrr - a.mrr);
+    // Herrekening deal-revenue-per-bucket met dedupe (subs kunnen samen aan
+    // dezelfde deal hangen; deal-revenue mag maar 1x tellen).
+    const seenDealsPerBucket = {};
+    for (const s of active) {
+      const deal = dealById[s.deal_id] || {};
+      if (!deal.traject_variant_id) continue;
+      const label = variantLabel[deal.traject_variant_id] || 'Onbekend traject';
+      if (!seenDealsPerBucket[label]) seenDealsPerBucket[label] = new Set();
+      if (s.deal_id && !seenDealsPerBucket[label].has(s.deal_id)) {
+        seenDealsPerBucket[label].add(s.deal_id);
+        trajAgg[label].revenue_incl_btw += dealRevenue.get(s.deal_id) || 0;
+      }
+    }
+    const by_traject = Object.values(trajAgg)
+      .map(t => ({ ...t, mrr: r2(t.mrr), revenue_incl_btw: r2(t.revenue_incl_btw) }))
+      .sort((a, b) => b.revenue_incl_btw - a.revenue_incl_btw);
 
     // Drilldown: ALLE actieve subs met bijdrage (voor modal + top-10).
     const drilldown = active.map(s => {

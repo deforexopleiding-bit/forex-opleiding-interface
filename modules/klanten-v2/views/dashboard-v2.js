@@ -83,6 +83,97 @@
         <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colB})"></span>${labelB}</span></div>
     </div>`;
   }
+  // Premium omzet-chart: monotone-cubic Bezier, rijke gradient-fills,
+  // subtiele draw-in animatie + glow op laatste datapunt.
+  // Signature-compatible met dualChart (dezelfde chartHover/chartOut).
+  function omzChart(id, serieA, serieB, labels, labelA, labelB, colA, colB) {
+    const w = 640, h = 200, pl = 34, pr = 12, pt = 18, pb = 30;
+    const all = [...serieA, ...serieB].filter(v => Number.isFinite(v));
+    const mx  = Math.max(1, Math.max(...all) * 1.12);
+    const X = i => pl + (i / Math.max(1, labels.length - 1)) * (w - pl - pr);
+    const Y = v => pt + (1 - v / mx) * (h - pt - pb);
+    // Monotone-cubic Bezier — bewaart lokale monotonie (voorkomt overshoot
+    // die je bij eenvoudige Catmull-Rom soms krijgt tussen twee dalen).
+    function monotonePath(pts) {
+      if (pts.length < 2) return '';
+      const n = pts.length;
+      const dx = new Array(n - 1), dy = new Array(n - 1), m = new Array(n - 1);
+      for (let i = 0; i < n - 1; i++) {
+        dx[i] = pts[i+1][0] - pts[i][0];
+        dy[i] = pts[i+1][1] - pts[i][1];
+        m[i]  = dy[i] / (dx[i] || 1);
+      }
+      const tan = new Array(n);
+      tan[0] = m[0]; tan[n-1] = m[n-2];
+      for (let i = 1; i < n - 1; i++) {
+        if (m[i-1] * m[i] <= 0) tan[i] = 0;
+        else                    tan[i] = (m[i-1] + m[i]) / 2;
+      }
+      let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+      for (let i = 0; i < n - 1; i++) {
+        const cp1x = pts[i][0]   + dx[i] / 3;
+        const cp1y = pts[i][1]   + tan[i]   * dx[i] / 3;
+        const cp2x = pts[i+1][0] - dx[i] / 3;
+        const cp2y = pts[i+1][1] - tan[i+1] * dx[i] / 3;
+        d += ` C${cp1x.toFixed(1)},${cp1y.toFixed(1)} ${cp2x.toFixed(1)},${cp2y.toFixed(1)} ${pts[i+1][0].toFixed(1)},${pts[i+1][1].toFixed(1)}`;
+      }
+      return d;
+    }
+    const ptsA = serieA.map((v, i) => [X(i), Y(v)]);
+    const ptsB = serieB.map((v, i) => [X(i), Y(v)]);
+    const pathA = monotonePath(ptsA);
+    const pathB = monotonePath(ptsB);
+    const areaA = ptsA.length ? `${pathA} L${ptsA[ptsA.length-1][0].toFixed(1)},${(h-pb).toFixed(1)} L${ptsA[0][0].toFixed(1)},${(h-pb).toFixed(1)} Z` : '';
+    const areaB = ptsB.length ? `${pathB} L${ptsB[ptsB.length-1][0].toFixed(1)},${(h-pb).toFixed(1)} L${ptsB[0][0].toFixed(1)},${(h-pb).toFixed(1)} Z` : '';
+    const lastA = ptsA[ptsA.length - 1];
+    const lastB = ptsB[ptsB.length - 1];
+    // Y-as ticks: 4 gelijke gridlines. Labels in €k voor leesbaarheid.
+    const gridY = [0, .25, .5, .75, 1].map(f => pt + f * (h - pt - pb));
+    const gridLabels = [0, .25, .5, .75, 1].map(f => {
+      const v = mx * (1 - f);
+      return v >= 1000 ? `€${Math.round(v/1000)}k` : `€${Math.round(v)}`;
+    });
+    return `<div style="position:relative" id="${id}-wrap">
+      <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:210px;display:block;overflow:visible"
+        onmousemove="chartHover(event,'${id}',${labels.length},${pl},${w - pr})" onmouseleave="chartOut('${id}')">
+        <defs>
+          <linearGradient id="${id}-gA" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--${colA})" stop-opacity=".35"/>
+            <stop offset="55%" stop-color="var(--${colA})" stop-opacity=".08"/>
+            <stop offset="100%" stop-color="var(--${colA})" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="${id}-gB" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--${colB})" stop-opacity=".28"/>
+            <stop offset="55%" stop-color="var(--${colB})" stop-opacity=".06"/>
+            <stop offset="100%" stop-color="var(--${colB})" stop-opacity="0"/>
+          </linearGradient>
+          <filter id="${id}-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        ${gridY.map((yy, i) => `<line x1="${pl}" y1="${yy.toFixed(1)}" x2="${w - pr}" y2="${yy.toFixed(1)}" stroke="var(--border)" stroke-width="0.6" stroke-dasharray="${i === gridY.length - 1 ? '' : '3 4'}"/>`).join('')}
+        ${gridLabels.map((lbl, i) => `<text x="${pl - 6}" y="${(gridY[i] + 3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--text-3)" font-family="IBM Plex Mono">${lbl}</text>`).join('')}
+        <path d="${areaB}" fill="url(#${id}-gB)"/>
+        <path d="${areaA}" fill="url(#${id}-gA)"/>
+        <path d="${pathB}" fill="none" stroke="var(--${colB})" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2000" stroke-dashoffset="2000" style="animation:omzDraw 1.15s .1s cubic-bezier(.5,.05,.35,1) forwards"/>
+        <path d="${pathA}" fill="none" stroke="var(--${colA})" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2000" stroke-dashoffset="2000" style="animation:omzDraw 1.25s cubic-bezier(.5,.05,.35,1) forwards"/>
+        <line id="${id}-vline" x1="0" y1="${pt}" x2="0" y2="${h - pb}" stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+        ${ptsA.map((p, i) => `<circle id="${id}-dA${i}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.8" fill="var(--surface)" stroke="var(--${colA})" stroke-width="2.2" opacity="0" style="transition:opacity .12s"/>`).join('')}
+        ${ptsB.map((p, i) => `<circle id="${id}-dB${i}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.8" fill="var(--surface)" stroke="var(--${colB})" stroke-width="2.2" opacity="0" style="transition:opacity .12s"/>`).join('')}
+        ${lastA ? `<circle cx="${lastA[0].toFixed(1)}" cy="${lastA[1].toFixed(1)}" r="5" fill="var(--${colA})" filter="url(#${id}-glow)" opacity=".85"/>` : ''}
+        ${lastB ? `<circle cx="${lastB[0].toFixed(1)}" cy="${lastB[1].toFixed(1)}" r="5" fill="var(--${colB})" filter="url(#${id}-glow)" opacity=".85"/>` : ''}
+        ${labels.map((l, i) => `<text x="${X(i).toFixed(1)}" y="${(h - 8).toFixed(1)}" text-anchor="middle" font-size="10.5" fill="var(--text-3)" font-family="IBM Plex Mono">${l}</text>`).join('')}
+      </svg>
+      <div id="${id}-tip" style="position:absolute;pointer-events:none;opacity:0;transition:opacity .12s;z-index:5;
+        background:var(--text);color:var(--bg);border-radius:9px;padding:9px 12px;font-size:12px;box-shadow:var(--shadow-lg);white-space:nowrap"></div>
+      <div style="display:flex;gap:18px;margin-top:8px;font-size:11.5px;color:var(--text-3)">
+        <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colA})"></span>${labelA}</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="legend-dot" style="background:var(--${colB})"></span>${labelB}</span>
+      </div>
+      <style>@keyframes omzDraw { to { stroke-dashoffset:0 } }</style>
+    </div>`;
+  }
   const CHARTDATA = {};
   window.chartHover = function (e, id, n, pl, pr) {
     const svgEl = e.currentTarget, r = svgEl.getBoundingClientRect();
@@ -140,10 +231,18 @@
     { titel: 'Sessie voorbereiden — groep 4',        van: 'LMS',          deadline: 'Morgen',  prio: 'midden' },
   ];
 
-  /* ── Live data uit /api/dashboard-stats ─────────────────────────────
-     Backend ondersteunt: today | week | month. GEEN year / custom.
-     Klik op Jaar/Custom toont melding + valt terug op laatst-geladen. */
-  const PERIOD_LABEL_TO_PARAM = { Dag: 'today', Week: 'week', Maand: 'month' };
+  /* ── Live data ────────────────────────────────────────────────────
+     Backend ondersteunt per endpoint verschillend:
+     - dashboard-stats: today|week|month (Jaar → fallback naar month)
+     - finance-dashboard-counts: today|week|month|quarter|year
+     - sales-signed-deals-total: today|week|month|year|all + from/to
+     - leads-per-traject-count: today|week|month|all
+     Custom = from/to date range picker; alle year/custom-safe endpoints
+     krijgen de datums, endpoints die het niet snappen krijgen de dichtstbij
+     fallback (month) — fail-soft. */
+  const PERIOD_LABEL_TO_PARAM = { Dag: 'today', Week: 'week', Maand: 'month', Jaar: 'year' };
+  // Custom-state: als user Custom kiest wordt from/to gezet en labelPeriod='Custom'.
+  const _custom = { from: null, to: null };
   // _live bundelt responses van meerdere endpoints. Elke tegel leest zijn
   // eigen slice; als slice null → tile toont MOCK-fallback met MOCK-badge.
   const _live = {
@@ -161,6 +260,7 @@
     tasks:    null,  // /api/tasks-list?status=PENDING (counts.byCategory + MANUAL_FOLLOWUP filter)
     leadsPer: null,  // /api/leads-per-traject-count?period=X (total + by_traject)
     signed:   null,  // /api/sales-signed-deals-total?period=X (total_incl_vat + count)
+    signedTrend:null,// /api/sales-signed-deals-total?group_by=month (b-lijn grafiek)
     lsOpen:   null,  // /api/leadsonderhoud-open-count (open_count)
     onbCounts:null,  // /api/onboarding-counts (active_count)
     lisaCnt:  null,  // /api/lisa-conversations-count?status=active (count)
@@ -185,12 +285,23 @@
   }
 
   async function fetchDashboardBundle(labelPeriod) {
-    const paramPeriod = PERIOD_LABEL_TO_PARAM[labelPeriod];
-    if (!paramPeriod) return; // Jaar/Custom — geen backend
-    if (_live.period === labelPeriod && _live.stats && !_live.error) {
+    // Custom: gebruik _custom.from/to als querystring-basis; anders period-alias.
+    const isCustom = labelPeriod === 'Custom' && _custom.from && _custom.to;
+    const paramPeriod = isCustom ? null : PERIOD_LABEL_TO_PARAM[labelPeriod];
+    if (!paramPeriod && !isCustom) return; // onbekende label
+    if (_live.period === labelPeriod && _live.stats && !_live.error && !isCustom) {
       console.debug('[dashboard-v2] skip: reeds geladen voor', labelPeriod);
       return;
     }
+    // Fallback voor endpoints die 'year'/'custom' niet snappen — gebruik 'month'.
+    const safeStatsPeriod = (paramPeriod === 'year' || isCustom) ? 'month' : paramPeriod;
+    const safeLeadsPeriod = (paramPeriod === 'year' || isCustom) ? 'all'   : paramPeriod;
+    // Custom-range querystring voor endpoints die from/to snappen.
+    const customQs = isCustom ? `&from=${_custom.from}&to=${_custom.to}` : '';
+    const signedPeriodQ = isCustom ? '' : `period=${paramPeriod}`;
+    const financePeriodQ = isCustom ? 'period=month' : `period=${paramPeriod}`; // Custom → month fallback
+    const leadsPeriodQ = `period=${safeLeadsPeriod}`;
+    const statsPeriodQ = `period=${safeStatsPeriod}`;
     const seq = ++_fetchSeq;
     _live.loading = true;
     _live.error = null;
@@ -201,17 +312,29 @@
       // Parallel fetch — elk endpoint is fail-soft (null bij error).
       // Ronde-14: + sales-mrr-report (by_traject-live), tasks-list (bel-acties
       // via MANUAL_FOLLOWUP-pending count).
-      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed, lsOpen, onbCounts, lisaCnt] = await Promise.all([
-        tryFetch('dashboard-stats',       '/api/dashboard-stats?period=' + paramPeriod),
-        tryFetch('finance-counts',        '/api/finance-dashboard-counts?period=' + paramPeriod),
+      // signedUrl = tegel-totaal; signedTrendUrl = grafiek per-maand (b-lijn live).
+      // Voor Jaar: trend = de 12 maanden van huidig jaar. Voor Custom: from/to.
+      // Voor Dag/Week/Maand: trend = alleen die maand(en) — Dag geeft 1 punt,
+      // dat is prima want de grafiek is dan minder betekenisvol op dag-niveau.
+      const signedUrl      = isCustom
+        ? `/api/sales-signed-deals-total?${customQs.slice(1)}`
+        : `/api/sales-signed-deals-total?${signedPeriodQ}`;
+      const signedTrendUrl = isCustom
+        ? `/api/sales-signed-deals-total?group_by=month&${customQs.slice(1)}`
+        : `/api/sales-signed-deals-total?group_by=month&period=year`;
+
+      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed, signedTrend, lsOpen, onbCounts, lisaCnt] = await Promise.all([
+        tryFetch('dashboard-stats',       '/api/dashboard-stats?' + statsPeriodQ),
+        tryFetch('finance-counts',        '/api/finance-dashboard-counts?' + financePeriodQ),
         tryFetch('tickets',               '/api/tickets'),
         tryFetch('events-list',           '/api/events-list?limit=6&status=draft,published'),
         tryFetch('sales-dashboard-stats', '/api/sales-dashboard-stats'),
         tryFetch('sales-retention',       '/api/sales-retention'),
         tryFetch('sales-mrr-report',      '/api/sales-mrr-report'),
         tryFetch('tasks-followup',        '/api/tasks-list?action_type=MANUAL_FOLLOWUP&status=PENDING&limit=1'),
-        tryFetch('leads-per-traject',     '/api/leads-per-traject-count?period=' + paramPeriod),
-        tryFetch('signed-deals-total',    '/api/sales-signed-deals-total?period=' + paramPeriod),
+        tryFetch('leads-per-traject',     '/api/leads-per-traject-count?' + leadsPeriodQ),
+        tryFetch('signed-deals-total',    signedUrl),
+        tryFetch('signed-deals-trend',    signedTrendUrl),
         tryFetch('ls-open-count',         '/api/leadsonderhoud-open-count'),
         tryFetch('onboarding-counts',     '/api/onboarding-counts'),
         tryFetch('lisa-conv-count',       '/api/lisa-conversations-count?status=active'),
@@ -229,9 +352,10 @@
       _live.retention = retention;
       _live.mrr       = mrr;
       _live.tasks     = tasks;
-      _live.leadsPer  = leadsPer;
-      _live.signed    = signed;
-      _live.lsOpen    = lsOpen;
+      _live.leadsPer   = leadsPer;
+      _live.signed     = signed;
+      _live.signedTrend= signedTrend;
+      _live.lsOpen     = lsOpen;
       _live.onbCounts = onbCounts;
       _live.lisaCnt   = lisaCnt;
       _live.error     = stats ? null : 'dashboard-stats faalde';
@@ -276,16 +400,49 @@
   // Public hook: klik op periode-chip
   window.DFO_dashPeriodClick = function (labelPeriod) {
     console.debug('[dashboard-v2] chip clicked:', labelPeriod);
-    if (labelPeriod === 'Jaar' || labelPeriod === 'Custom') {
-      alert('De endpoint /api/dashboard-stats ondersteunt momenteel alleen Dag/Week/Maand. '
-        + 'Jaar en Custom komen zodra we het backend uitbreiden — dan gaat deze knop live.');
+    if (labelPeriod === 'Custom') {
+      // Simpele native date-picker via 2 inputs in modal.
+      _openCustomPicker();
       return;
     }
-    // Set filter (triggert render + chip-highlight)
+    _custom.from = _custom.to = null; // Reset custom-state bij switch naar preset.
     window.DFO.setF('per', labelPeriod);
-    // Force refetch — negeer loading-state, sequence-tracking regelt race
     fetchDashboardStats(labelPeriod);
   };
+
+  function _openCustomPicker() {
+    // Minimalistische modal — 2 date-inputs. Vermijdt zware datepicker-lib.
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:grid;place-items:center';
+    const now = new Date();
+    const toISO = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const defFrom = _custom.from || toISO(new Date(now.getFullYear(), now.getMonth(), 1));
+    const defTo   = _custom.to   || toISO(now);
+    wrap.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px 22px;min-width:320px;box-shadow:var(--shadow-lg)">
+      <div style="font-size:15px;font-weight:600;margin-bottom:14px">Custom periode</div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+        <label style="font-size:12px;color:var(--text-2)">Van<input type="date" id="dcpFrom" value="${defFrom}" style="display:block;margin-top:4px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font-family:inherit;font-size:13px;width:100%;box-sizing:border-box"/></label>
+        <label style="font-size:12px;color:var(--text-2)">Tot<input type="date" id="dcpTo" value="${defTo}" style="display:block;margin-top:4px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font-family:inherit;font-size:13px;width:100%;box-sizing:border-box"/></label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button id="dcpCancel" style="padding:7px 14px;border:1px solid var(--border);background:var(--surface);border-radius:var(--r-sm);cursor:pointer;font-size:12.5px">Annuleer</button>
+        <button id="dcpApply"  style="padding:7px 14px;border:0;background:var(--m);color:#fff;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px;font-weight:500">Toepassen</button>
+      </div>
+    </div>`;
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+    wrap.querySelector('#dcpCancel').onclick = close;
+    wrap.querySelector('#dcpApply').onclick = () => {
+      const f = wrap.querySelector('#dcpFrom').value;
+      const t = wrap.querySelector('#dcpTo').value;
+      if (!f || !t || f > t) { alert('Vul geldig van/tot in (van ≤ tot).'); return; }
+      _custom.from = f; _custom.to = t;
+      close();
+      window.DFO.setF('per', 'Custom');
+      fetchDashboardStats('Custom');
+    };
+  }
 
   // Format helpers voor live-values
   const fmtNum = (v) => (v == null || Number.isNaN(v)) ? '—' : String(v);
@@ -330,9 +487,14 @@
     // render() aan met loading=true VOORDAT de bundle resolvet — dashManager loopt
     // daardoor opnieuw. Zonder loading-check triggerde die render een 2e fetch die
     // opnieuw render(), enz. → UI-thread bevroor (microtask-storm).
-    if (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod && !_live.loading) {
-      queueMicrotask(() => fetchDashboardBundle(curPeriod));
-    }
+    // Loop-safe: alleen fetch als (a) preset-periode NIET geladen, of
+    // (b) Custom en er van/tot is + van/tot verschilt van laatst-geladen.
+    // Custom-detect: cur='Custom' + _custom.from/to gezet.
+    const wantsFetch = !_live.loading && (
+      (PERIOD_LABEL_TO_PARAM[curPeriod] && _live.period !== curPeriod) ||
+      (curPeriod === 'Custom' && _custom.from && _custom.to && _live.period !== 'Custom')
+    );
+    if (wantsFetch) queueMicrotask(() => fetchDashboardBundle(curPeriod));
     const d = _live.stats;   // /api/dashboard-stats
     const f = _live.finance; // /api/finance-dashboard-counts
     const g = d && d.greeting || {};
@@ -350,7 +512,7 @@
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <div style="display:flex;background:var(--surface-2);border-radius:var(--r-sm);padding:3px;gap:2px">
             ${['Dag', 'Week', 'Maand', 'Jaar'].map(p => `<button class="chip ${curPeriod === p ? 'on' : ''}" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO_dashPeriodClick('${p}')">${p}</button>`).join('')}
-            <button class="chip" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO_dashPeriodClick('Custom')">Custom ▾</button>
+            <button class="chip ${curPeriod === 'Custom' ? 'on' : ''}" style="font-size:12.5px;padding:5px 13px;border-radius:5px" onclick="DFO_dashPeriodClick('Custom')">${curPeriod === 'Custom' && _custom.from ? `${_custom.from} · ${_custom.to} ▾` : 'Custom ▾'}</button>
           </div>
           <button class="btn btn-primary" onclick="DFO.KV && DFO.KV.newAction && DFO.KV.newAction('nieuw')">${svg(I.plus)}Nieuw</button>
         </div>
@@ -365,58 +527,54 @@
           <div class="card-body" style="padding:10px 17px 14px">
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
               ${(() => {
-                // Ronde-16: tegels ALTIJD tonen voor labels die überhaupt in
-                // de DB bestaan (uit lp.all_traject_labels — periode-onafhankelijk).
-                // Enkel labels die HELEMAAL niet in de DB voorkomen (zoals
-                // 'webinar' zonder rijen) worden verborgen. Periode-count kan
-                // 0 zijn — tegel blijft staan (op Dag zag je anders alleen
-                // 'Alle bronnen'-tegel omdat de period-by_traject leeg was).
-                //
-                // NIEUWE tegel: Calls geboekt uit _live.sales
-                // (sales-dashboard-stats appointments per periode). Op Jaar
-                // geen data → verberg.
+                // Ronde-17: "Alle bronnen"-tegel VERVANGEN door "7-daagse".
+                // Rest van de logica ongewijzigd: tegels alleen tonen als het
+                // label ergens in de DB bestaat (via all_traject_labels).
+                // Calls-tegel gebruikt nu de NIEUW-GEBOEKT metric (sales.
+                // {today|week|month|year}.booked = created_at in periode),
+                // NIET meer scheduled_at.
                 const lp = _live.leadsPer;
                 const totLive = lp && typeof lp.total === 'number' ? lp.total : null;
                 const totFallback = d && d.kpis_groot && d.kpis_groot.nieuwe_leads && d.kpis_groot.nieuwe_leads.value;
                 const totLeads = totLive != null ? totLive : totFallback;
                 const isLive  = !!lp;
-                // Determineer welke labels überhaupt in DB bestaan.
                 const allLabels = (lp && Array.isArray(lp.all_traject_labels)) ? lp.all_traject_labels.map(x => String(x).toLowerCase()) : null;
                 function anyLabelMatches(matchers) {
-                  if (!allLabels) return true; // Endpoint geen all-list geleverd → toon default (backward-compat).
+                  if (!allLabels) return true;
                   return allLabels.some(l => matchers.some(m => l.includes(m)));
                 }
                 function findCount(matchers) {
                   if (!lp || !lp.by_traject) return 0;
-                  const keys = Object.keys(lp.by_traject);
                   let sum = 0;
-                  for (const k of keys) {
+                  for (const k of Object.keys(lp.by_traject)) {
                     const lk = String(k).toLowerCase();
                     if (matchers.some(m => lk.includes(m))) sum += lp.by_traject[k] || 0;
                   }
                   return sum;
                 }
-                // Calls geboekt: kies veld o.b.v. huidige periode.
+                // Calls GEBOEKT (nieuw): sales.<periode>.booked = created_at.
                 const s = _live.sales;
                 let callsCnt = null;
                 if (s) {
-                  if (curPeriod === 'Dag')       callsCnt = typeof s.appointments_today_count === 'number' ? s.appointments_today_count : null;
-                  else if (curPeriod === 'Week') callsCnt = (s.week   && typeof s.week.appointments   === 'number') ? s.week.appointments   : null;
-                  else if (curPeriod === 'Maand')callsCnt = (s.month  && typeof s.month.appointments  === 'number') ? s.month.appointments  : null;
-                  // Jaar: geen data → callsCnt blijft null → tegel verborgen.
+                  if (curPeriod === 'Dag')       callsCnt = (s.today && typeof s.today.booked  === 'number') ? s.today.booked  : null;
+                  else if (curPeriod === 'Week') callsCnt = (s.week  && typeof s.week.booked   === 'number') ? s.week.booked   : null;
+                  else if (curPeriod === 'Maand')callsCnt = (s.month && typeof s.month.booked  === 'number') ? s.month.booked  : null;
+                  else if (curPeriod === 'Jaar') callsCnt = (s.year  && typeof s.year.booked   === 'number') ? s.year.booked   : null;
+                  // Custom: kies month als proxy (endpoint heeft geen range-support).
+                  else if (curPeriod === 'Custom') callsCnt = (s.month && typeof s.month.booked === 'number') ? s.month.booked : null;
                 }
                 const tiles = [];
-                tiles.push(['Alle bronnen', totLeads != null ? totLeads : 0, 100, 'emerald', 'leads', totLive != null || totFallback != null]);
-                if (isLive && anyLabelMatches(['event']))   tiles.push(['Event-aanmeldingen', findCount(['event']),  totLeads ? Math.round(findCount(['event'])/totLeads*100)  : 0, 'teal',   'events', true]);
-                if (isLive && anyLabelMatches(['webinar'])) tiles.push(['Webinar',            findCount(['webinar']),totLeads ? Math.round(findCount(['webinar'])/totLeads*100): 0, 'blue',   'leads',  true]);
-                if (isLive && anyLabelMatches(['mini']))    tiles.push(['Mini cursus',        findCount(['mini']),   totLeads ? Math.round(findCount(['mini'])/totLeads*100)   : 0, 'violet', 'leads',  true]);
+                if (isLive && anyLabelMatches(['7-daagse','7 daagse','7daagse'])) tiles.push(['7-daagse',      findCount(['7-daagse','7 daagse','7daagse']), totLeads ? Math.round(findCount(['7-daagse','7 daagse','7daagse'])/Math.max(totLeads,1)*100) : 0, 'emerald', 'leads',  true]);
+                if (isLive && anyLabelMatches(['event']))   tiles.push(['Event-aanmeldingen', findCount(['event']),  totLeads ? Math.round(findCount(['event'])/Math.max(totLeads,1)*100)  : 0, 'teal',   'events', true]);
+                if (isLive && anyLabelMatches(['webinar'])) tiles.push(['Webinar',            findCount(['webinar']),totLeads ? Math.round(findCount(['webinar'])/Math.max(totLeads,1)*100): 0, 'blue',   'leads',  true]);
+                if (isLive && anyLabelMatches(['mini']))    tiles.push(['Mini cursus',        findCount(['mini']),   totLeads ? Math.round(findCount(['mini'])/Math.max(totLeads,1)*100)   : 0, 'violet', 'leads',  true]);
                 if (callsCnt != null) tiles.push(['Calls geboekt', callsCnt, 100, 'accent', 'sales', true]);
                 return tiles.map(([n, c, p, col, mod, tileLive]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
                   onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
                   <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}${tileLive ? '' : mockBadge()}</div>
                   <div style="font-size:26px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${c}</div>
                   <div class="progress" style="margin-top:9px;height:3px"><i style="width:${p}%;background:var(--${col})"></i></div>
-                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${tileLive ? (n === 'Alle bronnen' ? 'live totaal' : (n === 'Calls geboekt' ? 'in periode' : `${p}% van totaal`)) : `${p}% van totaal`}</div></div>`).join('');
+                  <div style="font-size:11px;color:var(--text-3);margin-top:5px">${tileLive ? (n === 'Calls geboekt' ? 'nieuw geboekt' : `${p}% van totaal`) : `${p}% van totaal`}</div></div>`).join('');
               })()}
             </div>
           </div>
@@ -473,28 +631,35 @@
               // maanden ≤ huidige maand. Fallback op mock als geen trend.
               // Totaal-incl-btw-lijn (b): geen per-maand-endpoint, blijft mock
               // (out-of-scope voor deze MRR-brok — user vroeg alleen MRR-fix).
+              // Ronde-17: premium chart met monotone-cubic + gradient + glow.
+              // MRR-lijn (a) uit sales-mrr-report.trend, Totaal-incl-btw (b) uit
+              // sales-signed-deals-total?group_by=month — beide LIVE.
               const M_ABBR = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
-              const trend = _live.mrr && Array.isArray(_live.mrr.trend) ? _live.mrr.trend : null;
+              const mrrTrend = _live.mrr && Array.isArray(_live.mrr.trend) ? _live.mrr.trend : null;
+              const sigTrend = _live.signedTrend && Array.isArray(_live.signedTrend.trend) ? _live.signedTrend.trend : null;
+              // Kies bucket-set: alle YM keys tussen mrrTrend[i].period en
+              // sigTrend[i].period samen (union). Beide zijn 'YYYY-MM'-strings.
+              const keySet = new Set();
+              if (mrrTrend) for (const t of mrrTrend) if (t && t.period) keySet.add(t.period);
+              if (sigTrend) for (const t of sigTrend) if (t && t.period) keySet.add(t.period);
+              const now = new Date();
+              const curYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+              // Filter op ≤ huidige maand + laatste 12.
+              const keys = Array.from(keySet).filter(k => k <= curYm).sort().slice(-12);
               let a, b, lb;
-              if (trend && trend.length) {
-                const now = new Date();
-                const curYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-                const past = trend.filter(t => t && t.period && t.period <= curYm).slice(-8);
-                if (past.length) {
-                  a  = past.map(t => Number(t.mrr) || 0);
-                  lb = past.map(t => { const m = parseInt(String(t.period).slice(5,7),10); return M_ABBR[m-1] || String(m); });
-                  // b vult voor now naar 0-array met zelfde lengte (mock-mid — laten we b uitzetten
-                  // met alle-nullen zodat lijn plat onder x-as ligt; visueel niet-ingevuld).
-                  b  = past.map(() => 0);
-                }
-              }
-              if (!a) {
+              if (keys.length) {
+                const mrrByK = {}; if (mrrTrend) for (const t of mrrTrend) mrrByK[t.period] = t.mrr || 0;
+                const sigByK = {}; if (sigTrend) for (const t of sigTrend) sigByK[t.period] = t.total_incl_vat || 0;
+                a  = keys.map(k => Number(mrrByK[k]) || 0);
+                b  = keys.map(k => Number(sigByK[k]) || 0);
+                lb = keys.map(k => M_ABBR[parseInt(k.slice(5,7),10)-1] || k);
+              } else {
                 a  = [41200, 42800, 43900, 44600, 45800, 46400, 47100, 47612];
                 b  = [62000, 78000, 95000, 88000, 120000, 104000, 86000, 26250];
                 lb = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug'];
               }
               CHARTDATA['omz'] = { a, b, labels: lb, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue' };
-              return dualChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue');
+              return omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue');
             })()}
             <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
               <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">
@@ -502,20 +667,36 @@
               </div>
               <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px">
                 ${(() => {
-                  // Ronde-14: LIVE uit /api/sales-mrr-report by_traject[].
-                  // Elk item = { traject, mrr, count }. Toon top-4 op count DESC,
-                  // val terug op MOCK-rij als endpoint faalde.
-                  const byT = _live.mrr && Array.isArray(_live.mrr.by_traject) ? _live.mrr.by_traject : null;
-                  const cols = ['violet','violet','violet','blue'];
-                  const rows = byT
-                    ? byT.slice().sort((a,b)=>(b.count||0)-(a.count||0)).slice(0,4).map((t,i)=>[t.traject || 'Onbekend', t.count || 0, t.mrr || 0, cols[i] || 'violet'])
-                    : [['6 maand 1-op-1', 3, 11850, 'violet'], ['12 maand 1-op-1', 2, 14400, 'violet'], ['24 maand 1-op-1', 0, 0, 'violet'], ['Membership', 0, 0, 'blue']];
-                  return rows;
-                })()
-                  .map(([n, c, b, col]) => `<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
-                    <div style="font-size:11px;color:var(--${col});font-weight:500;margin-bottom:4px">${n}</div>
-                    <div style="font-size:20px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.035em;line-height:1;${c > 0 ? '' : 'color:var(--text-3)'}">${c}</div>
-                    <div style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:4px">${eur0(b)}</div></div>`).join('')}
+                  // Ronde-17: VASTE 4 categorieën (6/12/24 mnd 1-op-1 + Membership).
+                  // Bedrag = REVENUE_INCL_BTW (verkoopwaarde, was: MRR — dat
+                  // toonde ~€3k ipv €43k voor 6× €7.200 1-op-1 12 mnd).
+                  // "Geen traject" verborgen (server-side gefilterd in by_traject).
+                  const byT = _live.mrr && Array.isArray(_live.mrr.by_traject) ? _live.mrr.by_traject : [];
+                  // Fuzzy find per label — dashboard-mapping onafhankelijk van
+                  // exacte variant-name variaties.
+                  function findBucket(matchers) {
+                    for (const b of byT) {
+                      const lk = String(b.traject || '').toLowerCase();
+                      if (matchers.some(m => lk.includes(m))) return b;
+                    }
+                    return null;
+                  }
+                  const cats = [
+                    { label: '6 mnd 1-op-1',  matchers: ['6 maand','6 mnd','6-op-1','6 op 1'], col: 'violet' },
+                    { label: '12 mnd 1-op-1', matchers: ['12 maand','12 mnd'],                col: 'violet' },
+                    { label: '24 mnd 1-op-1', matchers: ['24 maand','24 mnd'],                col: 'violet' },
+                    { label: 'Membership',    matchers: ['membership','36 maand','36 mnd'],   col: 'blue'   },
+                  ];
+                  return cats.map(cat => {
+                    const b = findBucket(cat.matchers);
+                    const c = (b && b.count) || 0;
+                    const r = (b && b.revenue_incl_btw) || 0;
+                    return `<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
+                      <div style="font-size:11px;color:var(--${cat.col});font-weight:500;margin-bottom:4px">${cat.label}</div>
+                      <div style="font-size:20px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.035em;line-height:1;${c > 0 ? '' : 'color:var(--text-3)'}">${c}</div>
+                      <div style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;margin-top:4px">${eur0(r)}</div></div>`;
+                  }).join('');
+                })()}
               </div>
             </div>
           </div>

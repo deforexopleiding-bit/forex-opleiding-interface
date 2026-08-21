@@ -79,6 +79,7 @@ export default async function handler(req, res) {
       nextAppt,
       leadsCounts,
       eventsCounts,
+      bookedCounts,
     ] = await Promise.all([
       computeMetrics(supabaseAdmin, { period: 'today', ownerScope, overdueMode: 'broad' }),
       computeMetrics(supabaseAdmin, { period: 'week',  ownerScope, overdueMode: 'broad' }),
@@ -88,6 +89,7 @@ export default async function handler(req, res) {
       fetchNextAppointment(ownerScope),
       fetchLeadsCounts(),    // global, geen ownerScope
       fetchEventsCounts(),   // global
+      fetchBookedInPeriodCounts(ownerScope),
     ]);
 
     return res.status(200).json({
@@ -101,15 +103,21 @@ export default async function handler(req, res) {
         leads:        leadsCounts.today,
         events:       eventsCounts.today,
         appointments: todayMetrics.appointments_total,
+        booked:       bookedCounts.today, // NIEUW GEBOEKT (created_at) — voedt v2-dashboard 'Calls geboekt'.
       },
       week: {
         leads:        leadsCounts.week,
         events:       eventsCounts.week,
         appointments: weekMetrics.appointments_total,
+        booked:       bookedCounts.week,
       },
       month: {
         // Rolling 30 dagen (follow-up-metrics 'month' = today-30d..tomorrow).
         appointments: monthMetrics.appointments_total,
+        booked:       bookedCounts.month,
+      },
+      year: {
+        booked:       bookedCounts.year,
       },
       open_follow_ups:             openFollowUpsCount,
       appointments_today_count:    todayMetrics.appointments_total,
@@ -131,6 +139,49 @@ export default async function handler(req, res) {
 }
 
 // ── Eigen queries (computeMetrics dekt today/week appts + voicememos) ────────
+
+/**
+ * Telt appointments waarvan de BOEKING is aangemaakt in de periode
+ * (created_at binnen [start, end)). Voor dashboard-metric "Calls geboekt"
+ * — wat Jeffrey vraagt is "nieuw geboekt in periode", NIET "gepland in
+ * periode" (die zit al in .appointments via scheduled_at).
+ * Sluit cancelled/verplaatst/verwijderd uit.
+ *
+ * Week = maandag t/m zondag (NL). Maand = 1e t/m 1e volgende. Year = 1 jan.
+ */
+async function fetchBookedInPeriodCounts(ownerScope) {
+  const now = new Date();
+  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
+  const startOfTomorrow = new Date(startOfToday); startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+  // Maandag deze week (NL: dag 1..7; 0=zondag).
+  const dow = startOfToday.getDay();
+  const daysFromMon = dow === 0 ? 6 : dow - 1;
+  const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfToday.getDate() - daysFromMon);
+  const startOfNextWeek = new Date(startOfWeek); startOfNextWeek.setDate(startOfWeek.getDate() + 7);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const startOfNextYear = new Date(now.getFullYear() + 1, 0, 1);
+
+  async function count(startD, endD) {
+    let q = supabaseAdmin.from('follow_up_appointments')
+      .select('id, status', { count: 'exact', head: false })
+      .gte('created_at', startD.toISOString())
+      .lt('created_at', endD.toISOString())
+      .limit(10000);
+    if (ownerScope) q = q.eq('owner_id', ownerScope);
+    const { data, error } = await q;
+    if (error) throw new Error('booked-count: ' + error.message);
+    return (data || []).filter(a => !INACTIVE_STATUSES.includes(a.status)).length;
+  }
+  const [today, week, month, year] = await Promise.all([
+    count(startOfToday, startOfTomorrow),
+    count(startOfWeek,  startOfNextWeek),
+    count(startOfMonth, startOfNextMonth),
+    count(startOfYear,  startOfNextYear),
+  ]);
+  return { today, week, month, year };
+}
 
 /**
  * Telt afspraken voor MORGEN (calendar-day, exclude cancelled/verplaatst/verwijderd).
