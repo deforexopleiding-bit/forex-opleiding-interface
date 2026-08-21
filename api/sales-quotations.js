@@ -5,6 +5,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
+import { fetchTestCustomerIds } from './_lib/test-data-filter.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -43,6 +44,10 @@ export default async function handler(req, res) {
       }
     }
 
+    // Test-customers uitsluiten (is_test=true) — deals van test-klanten
+    // horen niet in Sales-dashboards / offertes-lijsten. Filter via customer_id
+    // (deals-tabel heeft zelf geen is_test-vlag).
+    const testCustomers = await fetchTestCustomerIds(supabaseAdmin);
     let q = supabaseAdmin.from('deals')
       .select('id, customer_id, total_amount, created_at, sales_user_id, traject_variant_id, tl_department_id, quote_reference, tl_quotation_id, tl_quotation_status, tl_quotation_sent_at, tl_quotation_email_sent_at, tl_quotation_accepted_at, tl_quotation_declined_at, subscription_marked_done', { count: 'exact' })
       .is('archived_at', null)  // verwijderde offertes (soft-delete) niet tonen
@@ -53,6 +58,7 @@ export default async function handler(req, res) {
     if (customer_id) q = q.eq('customer_id', customer_id);
     if (status) q = q.eq('tl_quotation_status', status);
     if (searchCustomerIds) q = q.in('customer_id', searchCustomerIds);
+    if (testCustomers.size > 0) q = q.not('customer_id', 'in', `(${Array.from(testCustomers).join(',')})`);
     const { data: deals, count: total, error } = await q;
     if (error) throw error;
 

@@ -3,6 +3,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { fetchTestCustomerIds } from './_lib/test-data-filter.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -15,11 +16,15 @@ export default async function handler(req, res) {
   if (!(await requirePermission(req, 'sales.deal.view'))) return res.status(403).json({ error: 'Geen rechten' });
 
   try {
+    // Test-customers set voor filtering in alle deal-queries hieronder.
+    const testCustomerIds = await fetchTestCustomerIds(supabaseAdmin);
+    const isTestDeal = (customerId) => customerId && testCustomerIds.has(customerId);
+
     // Mijn open offertes (draft/sent).
     const { data: myQuotes } = await supabaseAdmin.from('deals')
-      .select('id, tl_quotation_status').eq('sales_user_id', user.id).is('archived_at', null)
+      .select('id, customer_id, tl_quotation_status').eq('sales_user_id', user.id).is('archived_at', null)
       .in('tl_quotation_status', ['draft', 'sent']);
-    const myOpenQuotations = (myQuotes || []).length;
+    const myOpenQuotations = (myQuotes || []).filter(q => !isTestDeal(q.customer_id)).length;
 
     // Mijn bonus deze maand (pending + paid).
     const monthStart = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString(); })();
@@ -34,10 +39,12 @@ export default async function handler(req, res) {
     let mySalesCountMonth = 0;
     let myHighestDeal    = null;   // { amount, customer_name, quote_reference }
     try {
-      const { data: signedDeals } = await supabaseAdmin.from('deals')
+      const { data: signedDealsRaw } = await supabaseAdmin.from('deals')
         .select('id, total_amount, quote_reference, customer_id, tl_quotation_status, tl_quotation_signed_at, tl_quotation_accepted_at')
         .eq('sales_user_id', user.id)
         .in('tl_quotation_status', ['accepted', 'signed']);
+      // Test-deals eruit.
+      const signedDeals = (signedDealsRaw || []).filter(d => !isTestDeal(d.customer_id));
       let highest = null;
       for (const d of signedDeals || []) {
         const ts = d.tl_quotation_signed_at || d.tl_quotation_accepted_at;
@@ -70,10 +77,13 @@ export default async function handler(req, res) {
     // Laatste 5 EIGEN offertes (nieuwste eerst).
     let myRecentQuotations = [];
     try {
-      const { data: recent } = await supabaseAdmin.from('deals')
+      // Vraag méér op (25) omdat test-deals eruit gefilterd worden en we
+      // uiteindelijk 5 non-test-deals willen tonen.
+      const { data: recentRaw } = await supabaseAdmin.from('deals')
         .select('id, customer_id, total_amount, tl_quotation_status, created_at')
         .eq('sales_user_id', user.id).is('archived_at', null)
-        .order('created_at', { ascending: false }).limit(5);
+        .order('created_at', { ascending: false }).limit(25);
+      const recent = (recentRaw || []).filter(r => !isTestDeal(r.customer_id)).slice(0, 5);
       const custIds = [...new Set((recent || []).map(r => r.customer_id).filter(Boolean))];
       const custMap = {};
       if (custIds.length) {

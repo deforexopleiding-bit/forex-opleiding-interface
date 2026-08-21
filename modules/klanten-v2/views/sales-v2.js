@@ -201,21 +201,16 @@
     // maand. Voor Sales-rol: my_revenue_month (excl-BTW, uit metrics-endpoint).
     let totalRev, totalCount, highestDeal, revLabel, revSub, hiLabel, hiSub;
     if (admin) {
-      // BROK B (2026-08-19): omzet-KPI EXCL BTW (was: incl). Consistent
-      // met Sales-rol (my_revenue_month is ook excl) én met de rest van
-      // het rapport (excl. BTW-taal). Highest deal ook excl. Data:
-      // agg.totalExcl / agg.highestIncl blijven berekend maar we tonen
-      // agg.totalExcl.
+      // Ronde-19: omzet-KPI = INCL BTW. Jeffrey vraagt bedrijfsbreed incl,
+      // consistent met TL-officieel (aug € 72.549,95 incl / 11 deals).
       const agg = acceptedAgg(_dash.companyAccepted?.quotations, monthStart(), todayIso());
-      totalRev = agg.count ? agg.totalExcl : null;
+      totalRev = agg.count ? agg.totalIncl : null;
       totalCount = agg.count;
-      // BROK B: highestDeal blijft incl (dat is per-deal, niet aggregaat) —
-      // maar we tonen 'em pas als per-user-context, hier gewoon max.
       highestDeal = agg.highestIncl;
       revLabel = 'Totale omzet deze maand';
-      revSub   = agg.count ? `${num(agg.count)} getekende offertes · excl. BTW` : 'excl. BTW · bedrijfsbreed';
+      revSub   = agg.count ? `${num(agg.count)} getekende offertes · incl. BTW` : 'incl. BTW · bedrijfsbreed';
       hiLabel  = 'Hoogste deal deze maand';
-      hiSub    = 'bedrijfsbreed · incl. BTW (per-deal)';
+      hiSub    = 'bedrijfsbreed · incl. BTW';
     } else {
       totalRev = m.my_revenue_month;
       totalCount = m.my_sales_count_month;

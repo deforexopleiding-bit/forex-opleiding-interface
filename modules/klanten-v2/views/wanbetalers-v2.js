@@ -2950,6 +2950,13 @@
     delete _live.inbox.thread.byConv[convId];
     _fetchInboxThread(convId);
     _live.inbox.convs.fetched = false; _fetchInboxConvs();
+    // Compose-veld leegmaken (state + DOM). Fix Ronde-18 regressie: c.text=''
+    // gebeurde al hierboven per branch, maar zonder render() bleef het
+    // <textarea id="wbxComposeTxt"> in de DOM z'n oude value tonen. Reset
+    // beide en trigger een render.
+    const composeTa = document.getElementById('wbxComposeTxt');
+    if (composeTa) composeTa.value = '';
+    try { window.DFO?.render?.(); } catch (_) {}
     _toast('Bericht verstuurd.', 'success');
   };
   window.__wbxRetryInbox = () => { _live.inbox.convs.fetched = false; _fetchInboxConvs(); };
