@@ -689,7 +689,11 @@
               // Vind index waar 'nu' ligt (voor 'vandaag'-verticale marker).
               const nowIdx = keys.length ? keys.indexOf(curYm) : -1;
               CHARTDATA['omz'] = { a, b, labels: lb, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue', nowIdx };
-              return omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue', nowIdx);
+              // Ronde-20 full-width: negatieve horizontale margin neutraliseert
+              // card-body-padding (17px l/r). SVG blijft 100% van de wider
+              // wrapper → plot-area vult van links naar rechts van de kaart.
+              // Y-label ruimte (pl=34) blijft in de SVG zelf gereserveerd.
+              return `<div style="margin:0 -17px">${omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue', nowIdx)}</div>`;
             })()}
             <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
               <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">
