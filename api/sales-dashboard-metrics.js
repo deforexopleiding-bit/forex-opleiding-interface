@@ -77,12 +77,20 @@ export default async function handler(req, res) {
     // Laatste 5 EIGEN offertes (nieuwste eerst).
     let myRecentQuotations = [];
     try {
-      // Vraag méér op (25) omdat test-deals eruit gefilterd worden en we
-      // uiteindelijk 5 non-test-deals willen tonen.
+      // Ronde-21 PUNT-E: "Mijn recente offertes" = alleen GETEKEND
+      // (accepted + not declined + not archived), meest recent op
+      // tl_quotation_accepted_at. Voorheen: alle deals-created_at incl.
+      // concepten/drafts + test-deals → rommel-lijst. Test-customers al
+      // uitgesloten via isTestDeal(). Vraag méér op (25) omdat test-deals
+      // gefilterd worden en we uiteindelijk 5 non-test tonen.
       const { data: recentRaw } = await supabaseAdmin.from('deals')
-        .select('id, customer_id, total_amount, tl_quotation_status, created_at')
-        .eq('sales_user_id', user.id).is('archived_at', null)
-        .order('created_at', { ascending: false }).limit(25);
+        .select('id, customer_id, total_amount, tl_quotation_status, tl_quotation_accepted_at, created_at')
+        .eq('sales_user_id', user.id)
+        .eq('tl_quotation_status', 'accepted')
+        .is('tl_quotation_declined_at', null)
+        .is('archived_at', null)
+        .not('tl_quotation_accepted_at', 'is', null)
+        .order('tl_quotation_accepted_at', { ascending: false }).limit(25);
       const recent = (recentRaw || []).filter(r => !isTestDeal(r.customer_id)).slice(0, 5);
       const custIds = [...new Set((recent || []).map(r => r.customer_id).filter(Boolean))];
       const custMap = {};
@@ -98,7 +106,10 @@ export default async function handler(req, res) {
         customer_name: custMap[r.customer_id] || '—',
         total_amount:  Math.round(Number(r.total_amount || 0) * 100) / 100,
         status:        r.tl_quotation_status || null,
-        created_at:    r.created_at,
+        // Datum-veld nu accepted_at (sorteer + weergave); created_at behouden
+        // voor backward-compat als de UI daarop rendert.
+        accepted_at:   r.tl_quotation_accepted_at,
+        created_at:    r.tl_quotation_accepted_at || r.created_at,
       }));
     } catch (e) {
       console.warn('[sales-dashboard-metrics] my_recent_quotations fail-soft:', e?.message || e);
