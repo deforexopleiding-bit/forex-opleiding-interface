@@ -906,11 +906,116 @@
     </div>`;
   }
 
+  /* ═════════════════════════════════════════════════════════════════════
+     Wave-1 · team-gebruikers — migratie van modules/admin.html Gebruikers-tab.
+     Endpoints (bestaand): GET /api/admin-users, PATCH /api/admin-users?id=X,
+     POST /api/admin-impersonate. Custom confirms via openConfirm(). Lazy-load
+     (1 call bij eerste sectie-open); geen fetch-on-render.
+     ═════════════════════════════════════════════════════════════════════ */
+  const VALID_ROLES = ['super_admin','admin','manager','sales','mentor','marketing','administratie','viewer'];
+  const _users = { loading: false, error: null, fetched: false, items: [], busy: {} };
+  async function fetchUsers(force) {
+    if (_users.loading) return;
+    if (_users.fetched && !force) return;
+    _users.loading = true; _users.error = null; if (render) render();
+    const j = await tryFetch('admin-users', '/api/admin-users');
+    _users.loading = false; _users.fetched = true;
+    if (j?.__error) _users.error = j.__error;
+    else if (j?.error) _users.error = j.error;
+    else _users.items = Array.isArray(j?.users) ? j.users : [];
+    if (render) render();
+  }
+  async function patchUser(userId, body, actionLabel) {
+    _users.busy[userId] = true; if (render) render();
+    const j = await tryFetch('admin-users-patch', '/api/admin-users?id=' + encodeURIComponent(userId), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+    });
+    _users.busy[userId] = false;
+    if (j?.__error || j?.error) {
+      showToast((actionLabel || 'Actie') + ' mislukt: ' + (j.__error || j.error), 'warn');
+    } else {
+      showToast((actionLabel || 'Actie') + ' gelukt', 'ok');
+      _users.fetched = false; await fetchUsers(true);
+    }
+  }
+  window.__setUsersChangeRole = (userId, newRole) => {
+    if (!userId || !newRole) return;
+    const u = _users.items.find(x => x.id === userId);
+    if (!u || u.role === newRole) return;
+    openConfirm(`Rol wijzigen voor ${u.email}: ${u.role} → ${newRole}?`, () => patchUser(userId, { role: newRole }, 'Rol wijzigen'), 'warn');
+  };
+  window.__setUsersToggleActive = (userId) => {
+    const u = _users.items.find(x => x.id === userId);
+    if (!u) return;
+    const next = !u.is_active;
+    openConfirm(`${next ? 'Activeer' : 'DEACTIVEER'} ${u.email}?${next ? '' : ' Gebruiker verliest toegang.'}`, () => patchUser(userId, { is_active: next }, next ? 'Activeren' : 'Deactiveren'), 'warn');
+  };
+  window.__setUsersImpersonate = (userId) => {
+    const u = _users.items.find(x => x.id === userId);
+    if (!u) return;
+    openConfirm(`Impersonate ${u.email}? Je zult INGELOGD zijn als deze gebruiker tot je uitlogt. Alleen voor super_admin. Audit-log wordt geschreven.`, async () => {
+      const j = await tryFetch('admin-impersonate', '/api/admin-impersonate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_user_id: userId }),
+      });
+      if (j?.__error || j?.error) { showToast('Impersonate mislukt: ' + (j.__error || j.error), 'warn'); return; }
+      showToast('Impersonate actief — herlaad pagina', 'ok');
+      // Redirect naar / zodat de nieuwe sessie effect heeft (identiek gedrag admin.html).
+      setTimeout(() => { try { window.location.href = '/'; } catch (_) {} }, 800);
+    }, 'warn');
+  };
+  function bodyGebruikers() {
+    if (!_users.fetched && !_users.loading) queueMicrotask(() => fetchUsers());
+    if (_users.loading && !_users.items.length) return `<div style="padding:24px;color:var(--text-3);font-size:13px">Laden…</div>`;
+    if (_users.error) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${esc(_users.error)}</div>`;
+    const isSA = isSuperAdmin();
+    const rowsHtml = _users.items.map((u) => {
+      const busy = !!_users.busy[u.id];
+      const rolOpts = VALID_ROLES.map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('');
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;font-size:12.5px">${esc(u.full_name || '—')}</td>
+        <td style="padding:8px 10px;font-size:12px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(u.email)}</td>
+        <td style="padding:8px 10px">
+          <select ${busy ? 'disabled' : ''} onchange="window.__setUsersChangeRole('${u.id}', this.value)" style="padding:4px 6px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)">
+            ${rolOpts}
+          </select>
+        </td>
+        <td style="padding:8px 10px;font-size:12px">
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersToggleActive('${u.id}')" style="font-size:11.5px">
+            ${u.is_active ? '✓ actief' : '⨯ inactief'}
+          </button>
+        </td>
+        <td style="padding:8px 10px;text-align:right">
+          ${isSA && u.id ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersImpersonate('${u.id}')" style="font-size:11px" title="Ingelogd worden als deze user (super_admin only)">Impersonate</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1000px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:12.5px;color:var(--text-3)">${_users.items.length} gebruiker(s)</div>
+        <button class="btn btn-ghost btn-sm" onclick="(function(){window.__setUsersRefresh && window.__setUsersRefresh()})()">↻ Ververs</button>
+      </div>
+      <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid var(--border);background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 10px;font-size:11px;font-weight:600;color:var(--text-3);letter-spacing:.04em">Naam</th>
+            <th style="text-align:left;padding:8px 10px;font-size:11px;font-weight:600;color:var(--text-3);letter-spacing:.04em">E-mail</th>
+            <th style="text-align:left;padding:8px 10px;font-size:11px;font-weight:600;color:var(--text-3);letter-spacing:.04em">Rol</th>
+            <th style="text-align:left;padding:8px 10px;font-size:11px;font-weight:600;color:var(--text-3);letter-spacing:.04em">Status</th>
+            <th style="text-align:right;padding:8px 10px;font-size:11px;font-weight:600;color:var(--text-3);letter-spacing:.04em">Acties</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+  window.__setUsersRefresh = () => { _users.fetched = false; fetchUsers(true); };
+
   function setBody(cur) {
     if (cur.id === 'com-wa')             return bodyWhatsApp();
     if (cur.id === 'com-handtekening')   return bodyEmailHandtekeningen();
     if (cur.id === 'com-sjabloon')       return bodyEmailSjablonen();
     if (cur.id === 'team-rechten')       return bodyRechten();
+    if (cur.id === 'team-gebruikers')    return bodyGebruikers();
     if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
