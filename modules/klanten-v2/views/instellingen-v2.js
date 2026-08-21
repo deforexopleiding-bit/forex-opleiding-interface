@@ -261,6 +261,192 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
+  /* Ronde-31 STAP 3 · wb-incasso — bureaus CRUD via incasso-bureaus-list/upsert/
+     delete + auto-settings via incasso-auto-settings-get/set. Alles achter de
+     bestaande finance.incasso.manage-gate. Motor onaangeraakt. */
+  const _inc = { loading: false, fetched: false, error: null, bureaus: [], settings: null, ed: null, busy: false };
+  async function fetchIncasso() {
+    if (_inc.loading || _inc.fetched) return;
+    _inc.loading = true; _inc.error = null; if (render) render();
+    try {
+      const [bRes, sRes] = await Promise.all([
+        tryFetch('inc-bureaus-list', '/api/incasso-bureaus-list'),
+        tryFetch('inc-auto-get',      '/api/incasso-auto-settings-get'),
+      ]);
+      if (bRes?.__error || bRes?.error) throw new Error(bRes?.__error || bRes?.error);
+      if (sRes?.__error || sRes?.error) throw new Error(sRes?.__error || sRes?.error);
+      _inc.bureaus  = bRes?.items || [];
+      _inc.settings = sRes?.settings || null;
+    } catch (e) { _inc.error = e?.message || 'onbekend'; }
+    _inc.loading = false; _inc.fetched = true; if (render) render();
+  }
+  window.__setIncNew    = () => { _inc.ed = { id: null, name: '', email: '', country: 'NL', address: '', notes: '' }; if (render) render(); };
+  window.__setIncEdit   = (id) => { const b = _inc.bureaus.find(x => x.id === id); if (!b) return; _inc.ed = { ...b }; if (render) render(); };
+  window.__setIncCancel = () => { _inc.ed = null; if (render) render(); };
+  window.__setIncField  = (k, v) => { if (_inc.ed) _inc.ed[k] = String(v || ''); };  // FIX 1 pattern
+  window.__setIncCountry= (v) => { if (_inc.ed) { _inc.ed.country = (v === 'BE') ? 'BE' : 'NL'; if (render) render(); } };
+  window.__setIncSave = () => {
+    if (_inc.ed) {
+      const g = (n) => document.querySelector(`[data-inc-field="${n}"]`);
+      for (const k of ['name','email','address','notes']) { const el = g(k); if (el && typeof el.value === 'string') _inc.ed[k] = el.value; }
+    }
+    const e = _inc.ed; if (!e) return;
+    const name = String(e.name || '').trim();
+    if (!name) { showToast('Naam is verplicht', 'warn'); return; }
+    openConfirm(`${e.id ? 'Wijzigingen opslaan voor incassobureau' : 'Nieuw incassobureau aanmaken:'} "${name}"?`, async () => {
+      _inc.busy = true; if (render) render();
+      try {
+        const payload = { id: e.id || undefined, name,
+          email: String(e.email || '').trim() || null,
+          country: e.country === 'BE' ? 'BE' : 'NL',
+          address: String(e.address || '').trim() || null,
+          notes: String(e.notes || '').trim() || null,
+          is_active: true };
+        const j = await tryFetch('inc-bureaus-upsert', '/api/incasso-bureaus-upsert', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(e.id ? 'Bureau bijgewerkt' : 'Bureau aangemaakt', 'ok');
+        _inc.ed = null; _inc.fetched = false; fetchIncasso();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _inc.busy = false; if (render) render(); }
+    });
+  };
+  window.__setIncDelete = (id) => {
+    const b = _inc.bureaus.find(x => x.id === id); if (!b) return;
+    openConfirm(`Incassobureau "${b.name}" DEACTIVEREN? Kan alleen als er geen open dossiers meer op dit bureau lopen (server-guard).`, async () => {
+      try {
+        const j = await tryFetch('inc-bureaus-delete', '/api/incasso-bureaus-delete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Bureau gedeactiveerd', 'ok');
+        _inc.fetched = false; fetchIncasso();
+      } catch (err) { showToast('Deactiveren mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+    });
+  };
+  window.__setIncAutoToggle = (k) => {
+    if (!_inc.settings) return;
+    const cur = !!_inc.settings[k];
+    const label = ({ enabled: 'Auto-handoff', require_broken_arrangement: 'Vereis verbroken arrangement', require_no_response_after_aanmaning: 'Vereis geen respons na aanmaning', require_refusal_signal: 'Vereis weigering-signaal' })[k] || k;
+    openConfirm(`${cur ? 'Uitzetten' : 'Aanzetten'}: "${label}"? Wijzigingen geldig vanaf de volgende cron-run (cron-incasso-auto).`, async () => {
+      const next = { ..._inc.settings, [k]: !cur };
+      const j = await tryFetch('inc-auto-set', '/api/incasso-auto-settings-set', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+      });
+      if (j?.__error || j?.error) { showToast('Opslaan mislukt: ' + (j?.__error || j?.error), 'warn'); return; }
+      _inc.settings = j?.settings || next;
+      showToast('Auto-settings bijgewerkt', 'ok'); if (render) render();
+    });
+  };
+  window.__setIncAutoNumber = (k, v) => {
+    if (!_inc.settings) return;
+    const num = Number(v);
+    if (!Number.isFinite(num) || num < 0) { showToast('Ongeldige waarde', 'warn'); return; }
+    const label = ({ min_days_overdue: 'Min. dagen overschreden', min_amount_open_eur: 'Min. openstaand bedrag (€)' })[k] || k;
+    openConfirm(`Zet "${label}" op ${num}? Effect vanaf volgende cron-run.`, async () => {
+      const next = { ..._inc.settings, [k]: num };
+      const j = await tryFetch('inc-auto-set', '/api/incasso-auto-settings-set', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next),
+      });
+      if (j?.__error || j?.error) { showToast('Opslaan mislukt: ' + (j?.__error || j?.error), 'warn'); return; }
+      _inc.settings = j?.settings || next;
+      showToast('Auto-settings bijgewerkt', 'ok'); if (render) render();
+    });
+  };
+  function _renderIncEditor() {
+    const e = _inc.ed; if (!e) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setIncCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:600px;width:100%;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">${e.id ? 'Bureau bewerken' : 'Nieuw incassobureau'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setIncCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">
+          <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Naam <span style="color:var(--rose)">*</span>
+            <input type="text" data-inc-field="name" value="${esc(e.name || '')}" oninput="window.__setIncField('name',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">E-mail
+            <input type="email" data-inc-field="email" value="${esc(e.email || '')}" oninput="window.__setIncField('email',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Land
+            <select onchange="window.__setIncCountry(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+              <option value="NL" ${e.country === 'NL' ? 'selected' : ''}>NL</option>
+              <option value="BE" ${e.country === 'BE' ? 'selected' : ''}>BE</option>
+            </select>
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Adres
+            <input type="text" data-inc-field="address" value="${esc(e.address || '')}" oninput="window.__setIncField('address',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Notities
+            <textarea data-inc-field="notes" rows="2" oninput="window.__setIncField('notes',this.value)" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.notes || '')}</textarea>
+          </label>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setIncCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_inc.busy ? 'disabled' : ''} onclick="window.__setIncSave()">${_inc.busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bodyWbIncasso() {
+    if (!_inc.fetched && !_inc.loading) queueMicrotask(() => fetchIncasso());
+    const s = _inc.settings || {};
+    const bRows = _inc.bureaus.map(b => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(b.name || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(b.email || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px">${esc(b.country || 'NL')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.address || '—')}</td>
+      <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="window.__setIncEdit('${esc(b.id)}')" style="font-size:11px">Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setIncDelete('${esc(b.id)}')" style="font-size:11px;color:var(--rose)">Deactiveer</button>
+      </td>
+    </tr>`).join('');
+    const bool = (v) => `<span style="padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;background:${v?'var(--emerald-soft)':'var(--rose-soft)'};color:${v?'var(--emerald)':'var(--rose)'}">${v?'✓ aan':'⨯ uit'}</span>`;
+    return `<div style="max-width:1100px">
+      ${_renderIncEditor()}
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Deze sectie schrijft LIVE.</b> Bureaus + auto-handoff-instellingen worden ingelezen door <code>cron-incasso-auto</code> (dagelijks). Wijzigingen zijn direct actief voor de volgende cron-run. Motor onaangeraakt.
+      </div>
+      ${_inc.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_inc.error)}</div>` : ''}
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:12.5px;font-weight:600">Bureaus (${_inc.bureaus.length})</div>
+        <button class="btn btn-primary btn-sm" onclick="window.__setIncNew()">➕ Nieuw bureau</button>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:20px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">E-mail</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Land</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Adres</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${bRows || `<tr><td colspan="5" style="padding:16px;color:var(--text-3);font-size:12.5px">${_inc.loading?'Laden…':'Geen bureaus'}</td></tr>`}</tbody>
+        </table>
+      </div>
+
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Auto-handoff · instellingen</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:12px 20px">
+        <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid var(--border)">
+          <div><b>Auto-handoff aan</b> <span style="color:var(--text-3);font-size:11px">— cron-incasso-auto draait dagelijks</span></div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setIncAutoToggle('enabled')">${bool(!!s.enabled)}</button>
+        </div>
+        <label style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">Min. dagen overschreden
+          <input type="number" min="0" value="${esc(String(s.min_days_overdue ?? 30))}" onchange="window.__setIncAutoNumber('min_days_overdue',this.value)" style="width:80px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+        </label>
+        <label style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:8px">Min. openstaand (€)
+          <input type="number" min="0" step="0.01" value="${esc(String(s.min_amount_open_eur ?? 50))}" onchange="window.__setIncAutoNumber('min_amount_open_eur',this.value)" style="width:100px;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+        </label>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">Vereis verbroken arrangement <button class="btn btn-ghost btn-sm" onclick="window.__setIncAutoToggle('require_broken_arrangement')">${bool(!!s.require_broken_arrangement)}</button></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">Vereis geen respons na aanmaning <button class="btn btn-ghost btn-sm" onclick="window.__setIncAutoToggle('require_no_response_after_aanmaning')">${bool(!!s.require_no_response_after_aanmaning)}</button></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">Vereis weigering-signaal <button class="btn btn-ghost btn-sm" onclick="window.__setIncAutoToggle('require_refusal_signal')">${bool(!!s.require_refusal_signal)}</button></div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:11px;color:var(--text-3);line-height:1.55">Preview van kandidaten voor de volgende cron-run: <code>/api/incasso-auto-preview</code>. Deze pagina schrijft alleen de settings; de daadwerkelijke run is <code>cron-incasso-auto</code> (server-side).</div>
+    </div>`;
+  }
+
   /* Ronde-31 STAP 2 · wb-joost — persona (name + tone) WIRE via joost-config-
      get/upsert; arrangement_mandate READ-ONLY tonen (bewerken raakt autonome-
      send-grenzen direct; Finance-signoff-brok apart). Motor onaangeraakt. */
@@ -2712,6 +2898,8 @@
     if (cur.id === 'wb-venster')         return bodyVenster();
     // Ronde-31 STAP 2: wb-joost — persona WIRE + mandaat READ-ONLY.
     if (cur.id === 'wb-joost')           return bodyWbJoost();
+    // Ronde-31 STAP 3: wb-incasso — bureaus CRUD + auto-settings.
+    if (cur.id === 'wb-incasso')         return bodyWbIncasso();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
   }
@@ -2743,6 +2931,8 @@
       'com-wa','mk-webflow','fin-entiteiten',
       // Ronde-31 STAP 2: wb-joost persona schrijfbaar (mandaat blijft read-only in body).
       'wb-joost',
+      // Ronde-31 STAP 3: wb-incasso bureaus + auto-settings live.
+      'wb-incasso',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
