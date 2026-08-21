@@ -20,6 +20,14 @@ export default async function handler(req, res) {
     const testCustomerIds = await fetchTestCustomerIds(supabaseAdmin);
     const isTestDeal = (customerId) => customerId && testCustomerIds.has(customerId);
 
+    // Ronde-22 PUNT-1: super_admin ziet "Mijn recente offertes" GLOBAAL
+    // (5 nieuwste getekende dashboard-breed). Andere rollen: alleen eigen.
+    // Aug-deals staan op meerdere sales_user_ids; Jeffrey (super_admin) mag
+    // die alle zien i.p.v. alleen z'n eigen (die dan lege of oude lijst gaven).
+    const { data: profile } = await supabaseAdmin
+      .from('profiles').select('role').eq('id', user.id).maybeSingle();
+    const isSuperAdmin = profile?.role === 'super_admin';
+
     // Mijn open offertes (draft/sent).
     const { data: myQuotes } = await supabaseAdmin.from('deals')
       .select('id, customer_id, tl_quotation_status').eq('sales_user_id', user.id).is('archived_at', null)
@@ -77,20 +85,19 @@ export default async function handler(req, res) {
     // Laatste 5 EIGEN offertes (nieuwste eerst).
     let myRecentQuotations = [];
     try {
-      // Ronde-21 PUNT-E: "Mijn recente offertes" = alleen GETEKEND
-      // (accepted + not declined + not archived), meest recent op
-      // tl_quotation_accepted_at. Voorheen: alle deals-created_at incl.
-      // concepten/drafts + test-deals → rommel-lijst. Test-customers al
-      // uitgesloten via isTestDeal(). Vraag méér op (25) omdat test-deals
-      // gefilterd worden en we uiteindelijk 5 non-test tonen.
-      const { data: recentRaw } = await supabaseAdmin.from('deals')
-        .select('id, customer_id, total_amount, tl_quotation_status, tl_quotation_accepted_at, created_at')
-        .eq('sales_user_id', user.id)
+      // Ronde-22 PUNT-1: super_admin = globaal, andere rollen = eigen.
+      // Definitie: accepted + not declined + not archived + not test-customer,
+      // sorteer tl_quotation_accepted_at DESC. Vraag méér op (25) omdat
+      // test-deals gefilterd worden en we uiteindelijk 5 non-test tonen.
+      let recentQ = supabaseAdmin.from('deals')
+        .select('id, customer_id, total_amount, tl_quotation_status, tl_quotation_accepted_at, created_at, quote_reference, sales_user_id')
         .eq('tl_quotation_status', 'accepted')
         .is('tl_quotation_declined_at', null)
         .is('archived_at', null)
         .not('tl_quotation_accepted_at', 'is', null)
         .order('tl_quotation_accepted_at', { ascending: false }).limit(25);
+      if (!isSuperAdmin) recentQ = recentQ.eq('sales_user_id', user.id);
+      const { data: recentRaw } = await recentQ;
       const recent = (recentRaw || []).filter(r => !isTestDeal(r.customer_id)).slice(0, 5);
       const custIds = [...new Set((recent || []).map(r => r.customer_id).filter(Boolean))];
       const custMap = {};
@@ -102,14 +109,15 @@ export default async function handler(req, res) {
         }
       }
       myRecentQuotations = (recent || []).map(r => ({
-        id:            r.id,
-        customer_name: custMap[r.customer_id] || '—',
-        total_amount:  Math.round(Number(r.total_amount || 0) * 100) / 100,
-        status:        r.tl_quotation_status || null,
+        id:              r.id,
+        customer_name:   custMap[r.customer_id] || '—',
+        total_amount:    Math.round(Number(r.total_amount || 0) * 100) / 100,
+        status:          r.tl_quotation_status || null,
+        quote_reference: r.quote_reference || null,
         // Datum-veld nu accepted_at (sorteer + weergave); created_at behouden
         // voor backward-compat als de UI daarop rendert.
-        accepted_at:   r.tl_quotation_accepted_at,
-        created_at:    r.tl_quotation_accepted_at || r.created_at,
+        accepted_at:     r.tl_quotation_accepted_at,
+        created_at:      r.tl_quotation_accepted_at || r.created_at,
       }));
     } catch (e) {
       console.warn('[sales-dashboard-metrics] my_recent_quotations fail-soft:', e?.message || e);
