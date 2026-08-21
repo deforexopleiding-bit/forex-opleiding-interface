@@ -2059,14 +2059,19 @@
     // BLOCKER-4 fix: banner alleen op placeholder-secties. Wired secties (Wave-1)
     // hebben echte data en verdienen géén "voorbeeld"-badge; wél een subtiel
     // live-label. Systeem-tools (super_admin-only) ook echt-live.
-    const WIRED = new Set([
+    // Ronde-26: 3 badge-varianten (was: LIVE + DEEPLINK). READ-ONLY is nieuw
+    // voor secties die data tonen maar niet schrijven (schrijven gebeurt in
+    // env-vars / andere modules / aparte brokken).
+    const LIVE = new Set([
       'team-gebruikers','team-rechten','alg-weergave','fin-teamleader','sales-offerte','team-mentoren',
       'com-handtekening','com-sjabloon','sys-followup-admin',
-      // Wave-2 A1-A4
-      'com-wa','mk-webflow','sys-bubble-schema','fin-entiteiten',
-      // Wave-3 (display-only + fin-facturatie write)
-      'team-api','com-mail','com-tel','alg-bedrijf','fin-bank','fin-facturatie',
+      'com-wa','mk-webflow','fin-entiteiten',
     ]);
+    const READONLY = new Set([
+      'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
+    ]);
+    // Backward-compat: WIRED bevat beide zodat andere logic werkt.
+    const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
       'agents-lisa','agents-manager','agents-kennis',
       'sales-trajecten','sales-producten','sales-bonus',
@@ -2074,8 +2079,10 @@
       'mk-meta','mk-bronnen','mk-sequenties',
       'alg-meldingen',
     ]);
-    const bannerHtml = WIRED.has(cur.id)
+    const bannerHtml = LIVE.has(cur.id)
       ? `<div style="padding:6px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">● LIVE DATA — instellingen op deze pagina zijn echt en worden direct opgeslagen</div>`
+      : READONLY.has(cur.id)
+        ? `<div style="padding:6px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">● READ-ONLY — toont data, schrijven gebeurt elders</div>`
       : DEEPLINK.has(cur.id)
         ? `<div style="padding:6px 12px;background:var(--blue-soft, var(--surface-2));color:var(--blue, var(--text-2));border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">◇ DEEP-LINK — instelling leeft in een andere module (uitleg hieronder)</div>`
         : H.voorbeeldBanner();
