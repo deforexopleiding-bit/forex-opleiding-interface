@@ -608,23 +608,36 @@
      verdeling via direct-supabase op leads_overzicht. Editor blijft aparte brok
      (bron-config bewerken raakt intake-flow); toont wel de actuele verdeling
      zodat je ziet welke bronnen actief zijn. */
-  const _lb = { loading: false, fetched: false, error: null, byBron: [], byTraject: [], total: 0 };
+  // Ronde-31: canonieke definitie ná opschoning — identiek aan
+  // api/leads-per-traject-count.js (grep TEST_EMAIL_MARKERS bij uitbreiden).
+  const _lb = { loading: false, fetched: false, error: null, byBron: [], byTraject: [], total: 0, excluded: 0, raw: 0 };
   async function fetchLeadBronnen() {
     if (_lb.loading || _lb.fetched) return;
     _lb.loading = true; _lb.error = null; if (render) render();
     try {
       if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-      const { data, error } = await window.supabase.from('leads_overzicht').select('bron, traject').is('verwijderd_op', null).limit(50000);
+      // Bron gewisseld van leads_overzicht → leads (raw): afwijzer + email zit niet in de view.
+      const { data, error } = await window.supabase.from('leads').select('bron, traject, email, afwijzer').is('verwijderd_op', null).limit(50000);
       if (error) throw error;
       const rows = data || [];
-      _lb.total = rows.length;
+      const isTestEmail = (e) => {
+        if (!e) return false;
+        const s = String(e).toLowerCase();
+        return s.includes('test') || s.includes('deforexopleiding');
+      };
+      _lb.raw = rows.length;
       const bMap = {}, tMap = {};
+      let excluded = 0;
       for (const r of rows) {
+        if (r?.afwijzer === true) { excluded += 1; continue; }
+        if (isTestEmail(r?.email)) { excluded += 1; continue; }
         const b = String(r.bron || '(leeg)');
         const t = String(r.traject || '(leeg)');
         bMap[b] = (bMap[b] || 0) + 1;
         tMap[t] = (tMap[t] || 0) + 1;
       }
+      _lb.total = _lb.raw - excluded;
+      _lb.excluded = excluded;
       _lb.byBron    = Object.entries(bMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
       _lb.byTraject = Object.entries(tMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
     } catch (e) { _lb.error = e?.message || 'onbekend'; }
@@ -637,7 +650,7 @@
     const rowsT = _lb.byTraject.map(x => `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 12px;font-size:12.5px">${esc(x.name)}</td><td style="padding:6px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${x.count}</td><td style="padding:6px 12px;font-size:11px;color:var(--text-3);text-align:right">${_lb.total ? Math.round(x.count/_lb.total*100) : 0}%</td></tr>`).join('');
     return `<div style="max-width:1000px">
       <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Read-only overzicht.</b> Toont de actuele verdeling van <code>leads.bron</code> + <code>leads.traject</code> uit <code>leads_overzicht</code> (${_lb.total} leads). Bron-mapping bewerken (welke intake-bron mapt naar welk traject) raakt de intake-flow → vraagt eigen brok.
+        <b>Read-only overzicht.</b> Toont de actuele verdeling van <code>leads.bron</code> + <code>leads.traject</code> uit tabel <code>leads</code> ná opschoning: <b>${_lb.total} schone leads</b>${_lb.excluded ? ` <span style="color:var(--text-3);font-weight:normal">(${_lb.excluded} test/afgewezen uitgesloten uit ${_lb.raw} totaal)</span>` : ''}. Zelfde filter als dashboard-tegels "Leads per traject". Bron-mapping bewerken (welke intake-bron mapt naar welk traject) raakt de intake-flow → vraagt eigen brok.
       </div>
       ${_lb.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_lb.error)}</div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
