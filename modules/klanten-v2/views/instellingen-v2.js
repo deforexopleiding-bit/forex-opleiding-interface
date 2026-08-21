@@ -2353,6 +2353,8 @@
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
     ]);
+    // Ronde-28: fin-entiteiten upgraded READ-ONLY → LIVE (CRUD wired).
+    if (READONLY.has('fin-entiteiten')) READONLY.delete('fin-entiteiten');
     // Backward-compat: WIRED bevat beide zodat andere logic werkt.
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
