@@ -714,6 +714,170 @@
     if (render) render();
   }
   window.__setWaToggleCat = (key) => { _wa.collapsed[key] = !_wa.collapsed[key]; if (render) render(); };
+
+  /* Ronde-27 · WhatsApp template-editor NATIVE port. Faithful subset uit
+     admin.html: name (lowercase+_, max50), language (nl/en/en_US/de/fr),
+     category (MARKETING/UTILITY/AUTHENTICATION), header_type (NONE/TEXT +
+     optional content.text), body_text (max 1024), footer_text (max 60).
+     Complex bits (IMAGE/VIDEO/DOCUMENT header + body_examples + buttons
+     jsonb) → v27-aparte-brok; MVP UX voor draft-lifecycle. */
+  const _metaEd = { open: false, mode: 'create', id: null, busy: false, error: null,
+    fields: { name:'', language:'nl', category:'UTILITY', header_type:'NONE', header_text:'', body_text:'', footer_text:'' },
+  };
+  const _METAED_LANGS = ['nl','en_US','en','de','fr'];
+  const _METAED_CATS  = ['MARKETING','UTILITY','AUTHENTICATION'];
+  function _metaEdReset() {
+    _metaEd.mode = 'create'; _metaEd.id = null; _metaEd.error = null;
+    _metaEd.fields = { name:'', language:'nl', category:'UTILITY', header_type:'NONE', header_text:'', body_text:'', footer_text:'' };
+  }
+  window.__setMetaEdOpen = () => {
+    if (!_wa.moduleId) { showToast('Kies eerst een WABA-module', 'warn'); return; }
+    _metaEdReset(); _metaEd.open = true; if (render) render();
+  };
+  window.__setMetaEdClose = () => { _metaEd.open = false; _metaEd.error = null; if (render) render(); };
+  window.__setMetaEdField = (k, v) => { _metaEd.fields[k] = String(v || ''); if (render) render(); };
+  async function _metaEdOpenEditor(id, template) {
+    if (!id) return;
+    _metaEdReset();
+    _metaEd.mode = 'edit'; _metaEd.id = id; _metaEd.open = true;
+    _metaEd.busy = true; if (render) render();
+    // Lazy detail-fetch: bewust 1× per editor-open, geen refetch bij render.
+    const j = await tryFetch('meta-detail', '/api/admin-meta-templates-detail?id=' + encodeURIComponent(id));
+    _metaEd.busy = false;
+    if (j?.__error || j?.error) { _metaEd.error = j?.__error || j?.error; if (render) render(); return; }
+    const t = j?.template || j;
+    if (t) {
+      _metaEd.fields.name         = String(t.name || '');
+      _metaEd.fields.language     = String(t.language || 'nl');
+      _metaEd.fields.category     = String(t.category || 'UTILITY').toUpperCase();
+      _metaEd.fields.header_type  = String(t.header_type || 'NONE').toUpperCase();
+      _metaEd.fields.header_text  = (t.header_content && typeof t.header_content === 'object' && t.header_content.text) ? String(t.header_content.text) : '';
+      _metaEd.fields.body_text    = String(t.body_text || '');
+      _metaEd.fields.footer_text  = String(t.footer_text || '');
+    }
+    if (render) render();
+  }
+  window.__setMetaEdEdit = (id, name, status) => {
+    if (status === 'approved') {
+      // Zoals admin: approved templates → nieuwe versie (kopie), niet inline edit.
+      openConfirm(`"${name}" is APPROVED en kan niet worden gewijzigd. Wil je een NIEUWE VERSIE (draft) maken op basis van deze template? Kies daarna een nieuwe naam (bv. ${name}_v2).`, () => {
+        _metaEdOpenEditor(id).then(() => {
+          if (_metaEd.fields.name) _metaEd.fields.name = _metaEd.fields.name + '_v2';
+          _metaEd.mode = 'create'; _metaEd.id = null; if (render) render();
+        });
+      });
+    } else {
+      _metaEdOpenEditor(id);
+    }
+  };
+  function _metaEdValidate() {
+    const f = _metaEd.fields;
+    if (!/^[a-z0-9_]+$/.test(f.name) || f.name.length === 0 || f.name.length > 50) return 'name: alleen lowercase a-z, 0-9 en _, max 50 chars';
+    if (!_METAED_LANGS.includes(f.language)) return 'language: ongeldige waarde';
+    if (!_METAED_CATS.includes(f.category)) return 'category: ongeldige waarde';
+    if (!['NONE','TEXT'].includes(f.header_type)) return 'header_type: alleen NONE/TEXT in deze editor (IMAGE/VIDEO/DOCUMENT → aparte brok)';
+    if (f.header_type === 'TEXT' && (!f.header_text.trim() || f.header_text.length > 60)) return 'header_text: verplicht bij TEXT, max 60 chars';
+    if (!f.body_text.trim() || f.body_text.length > 1024) return 'body_text: verplicht, max 1024 chars';
+    if (f.footer_text && f.footer_text.length > 60) return 'footer_text: max 60 chars';
+    return null;
+  }
+  async function _metaEdSave(alsoSubmit) {
+    const err = _metaEdValidate();
+    if (err) { _metaEd.error = err; if (render) render(); return; }
+    _metaEd.busy = true; _metaEd.error = null; if (render) render();
+    const f = _metaEd.fields;
+    const payload = {
+      business_account_id: _wa.moduleId,
+      name: f.name, language: f.language, category: f.category,
+      header_type: f.header_type,
+      header_content: f.header_type === 'TEXT' ? { text: f.header_text } : null,
+      body_text: f.body_text,
+      footer_text: f.footer_text || null,
+    };
+    const method = _metaEd.mode === 'edit' ? 'PATCH' : 'POST';
+    const url = _metaEd.mode === 'edit'
+      ? '/api/admin-meta-templates-upsert?id=' + encodeURIComponent(_metaEd.id)
+      : '/api/admin-meta-templates-upsert';
+    const j = await tryFetch('meta-upsert', url, {
+      method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (j?.__error || j?.error) { _metaEd.busy = false; _metaEd.error = j?.__error || j?.error; if (render) render(); return; }
+    const savedId = j?.template?.id || j?.id || _metaEd.id;
+    showToast(_metaEd.mode === 'edit' ? 'Template bijgewerkt' : 'Template aangemaakt', 'ok');
+    if (alsoSubmit && savedId) {
+      const ok = await new Promise((res) => openConfirm(`Template "${f.name}" direct indienen bij Meta ter goedkeuring? Kan niet worden teruggedraaid.`, () => res(true), 'warn') || res(false));
+      if (ok) {
+        const sj = await tryFetch('meta-submit', '/api/admin-meta-templates-submit?template_id=' + encodeURIComponent(savedId), { method: 'POST' });
+        if (sj?.__error || sj?.error) showToast('Submit mislukt: ' + (sj?.__error || sj?.error), 'warn');
+        else showToast('Ingediend bij Meta', 'ok');
+      }
+    }
+    _metaEd.busy = false; _metaEd.open = false;
+    _wa.fetched = false; fetchWaTemplates(); // 1x refetch — binnen fetched-guard
+    if (render) render();
+  }
+  window.__setMetaEdSave       = () => { _metaEdSave(false); };
+  window.__setMetaEdSaveSubmit = () => {
+    openConfirm(`Concept opslaan én DIRECT indienen bij Meta? Meta beoordeelt de template; kan uren duren en niet ongedaan gemaakt worden.`, () => _metaEdSave(true), 'warn');
+  };
+  function _renderMetaEdModal() {
+    if (!_metaEd.open) return '';
+    const f = _metaEd.fields;
+    const bodyVars = (f.body_text.match(/\{\{\d+\}\}/g) || []).length;
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setMetaEdClose()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:14px;font-weight:600">${_metaEd.mode === 'edit' ? 'Template bewerken' : 'Nieuwe WhatsApp-template'}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px">WABA: <code>${esc(_wa.moduleId || '?')}</code></div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setMetaEdClose()">✕</button>
+        </div>
+        <div style="padding:16px 20px;overflow-y:auto;flex:1">
+          ${_metaEd.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">⚠ ${esc(_metaEd.error)}</div>` : ''}
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-bottom:14px">
+            <label style="font-size:11.5px;color:var(--text-2)">Naam (lowercase, _, max 50)
+              <input type="text" value="${esc(f.name)}" oninput="window.__setMetaEdField('name',this.value.toLowerCase().replace(/[^a-z0-9_]/g,''))" ${_metaEd.mode === 'edit' ? 'readonly' : ''} maxlength="50" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" placeholder="bv. eerste_herinnering" />
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Taal
+              <select onchange="window.__setMetaEdField('language',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+                ${_METAED_LANGS.map(l => `<option value="${l}" ${f.language === l ? 'selected' : ''}>${l}</option>`).join('')}
+              </select>
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Categorie
+              <select onchange="window.__setMetaEdField('category',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+                ${_METAED_CATS.map(c => `<option value="${c}" ${f.category === c ? 'selected' : ''}>${c}</option>`).join('')}
+              </select>
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Header
+              <select onchange="window.__setMetaEdField('header_type',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+                <option value="NONE"  ${f.header_type === 'NONE' ? 'selected' : ''}>Geen</option>
+                <option value="TEXT"  ${f.header_type === 'TEXT' ? 'selected' : ''}>Tekst</option>
+              </select>
+            </label>
+          </div>
+          ${f.header_type === 'TEXT' ? `<label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Header-tekst (max 60)
+            <input type="text" value="${esc(f.header_text)}" oninput="window.__setMetaEdField('header_text',this.value)" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>` : ''}
+          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Body (max 1024) — gebruik <code>{{1}}</code>, <code>{{2}}</code>… voor variabelen
+            <textarea oninput="window.__setMetaEdField('body_text',this.value)" maxlength="1024" rows="6" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(f.body_text)}</textarea>
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${f.body_text.length}/1024 chars · ${bodyVars} variabele${bodyVars===1?'':'n'} gevonden</div>
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:6px">Footer (optioneel, max 60)
+            <input type="text" value="${esc(f.footer_text)}" oninput="window.__setMetaEdField('footer_text',this.value)" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <div style="padding:8px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);margin-top:12px;line-height:1.5">
+            <b>Beperkingen in deze editor:</b> IMAGE/VIDEO/DOCUMENT-header, body-voorbeeldwaarden en interactieve buttons (URL/PHONE/QUICK_REPLY) zijn nog niet geport — voor die opties: <a href="/modules/admin.html#tab-integraties" style="color:inherit;text-decoration:underline">admin.html</a>.
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setMetaEdClose()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_metaEd.busy ? 'disabled' : ''} onclick="window.__setMetaEdSave()">${_metaEd.busy ? 'Bezig…' : 'Opslaan als concept'}</button>
+          <button class="btn btn-primary btn-sm" ${_metaEd.busy ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__setMetaEdSaveSubmit()">Opslaan + Submit → Meta</button>
+        </div>
+      </div>
+    </div>`;
+  }
   window.__setWaModule = (id) => {
     // Picker-guard: lege waarde (module zonder gekoppelde WABA) → nette
     // waarschuwing i.p.v. stille no-op die de vorige tabel laat staan.
@@ -802,6 +966,7 @@
         </div>
         <div style="display:flex;gap:6px;align-items:center">
           ${pill}
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMetaEdEdit('${esc(t.id)}','${esc(t.name || '')}','${esc(status)}')" style="font-size:11px">${status === 'approved' ? 'Nieuwe versie' : 'Edit'}</button>
           ${canSubmit ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaSubmit('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px">Submit</button>` : ''}
           <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaDelete('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px;color:var(--rose)">Delete</button>
         </div>
@@ -838,8 +1003,9 @@
         </select>`
       : (_wa.modules.length === 1 ? `<span style="font-size:11.5px;color:var(--text-3)">${esc(_wa.modules[0].display_label || _wa.modules[0].module || '')}</span>` : '');
     return `<div style="max-width:900px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
-        <b>Template-editor:</b> voor nieuwe/complexe wijzigingen: <a href="/modules/admin.html#tab-integraties" style="color:inherit;text-decoration:underline">admin.html</a>. Deze pagina toont live-status + Submit/Delete/Sync + WA-nummer-registratie.
+      ${_renderMetaEdModal()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
+        <b>Native editor.</b> Nieuwe templates aanmaken, bewerken (draft/pending/rejected) of nieuwe versies maken (approved) kan hier direct. IMAGE/VIDEO/DOCUMENT-header + body-voorbeelden + interactieve buttons zitten nog in <a href="/modules/admin.html#tab-integraties" style="color:inherit;text-decoration:underline">admin.html</a>.
       </div>
       <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
         <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
@@ -849,7 +1015,7 @@
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             ${moduleSel}
-            <a class="btn btn-primary btn-sm" href="/modules/admin.html#tab-integraties${_wa.moduleId ? '&waba=' + encodeURIComponent(_wa.moduleId) : ''}" style="text-decoration:none">➕ Nieuwe template</a>
+            <button class="btn btn-primary btn-sm" onclick="window.__setMetaEdOpen()">➕ Nieuwe template</button>
             <button class="btn btn-primary btn-sm" ${busySync ? 'disabled' : ''} onclick="window.__setWaSync()">${busySync ? 'Sync…' : '↻ Sync vanaf Meta'}</button>
           </div>
         </div>
