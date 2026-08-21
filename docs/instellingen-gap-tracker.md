@@ -17,12 +17,12 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**2 quick-adds open · 11 grote-brokken open · 13 deferred · 12 done** (totaal 38)
+**1 quick-add open · 11 grote-brokken open · 13 deferred · 13 done** (totaal 38)
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 12 | — |
-| open (quick-add)   | 2  | sys-bubble-schema, alg-weergave |
+| done         | 13 | — |
+| open (quick-add)   | 1  | alg-weergave (menu-items add/remove) |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -114,7 +114,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
 | `sys-followup-admin` | done | — | ja | ≤v=30 (4 admin-tools met 3-staps-guard native) |
-| `sys-bubble-schema`  | open | quick-add | ja (`/api/bubble-schema-probe?objtype=<option>`) | **Top-5 quick-add: option-waarden probe-knop** |
+| `sys-bubble-schema`  | done | — | ja | v=42 (User + Session + User-option-waarden probes; endpoint-param fix ?objtype→?type + options=1) |
 
 ---
 

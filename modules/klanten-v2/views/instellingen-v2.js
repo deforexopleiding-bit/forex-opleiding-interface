@@ -806,12 +806,15 @@
   }
 
   /* Wave-2 · sys-bubble-schema — lazy op knop-klik (niet bij render).
-     Read-only super_admin diagnostiek. */
-  const _bs = { busy: false, result: null, error: null, type: null };
-  window.__setBsProbe = async (objtype) => {
+     Read-only super_admin diagnostiek.
+     Ronde-31 BLOK C: endpoint-param FIX (was `?objtype=` — endpoint eist `?type=`)
+     + nieuwe option-waarden probe (?type=user&options=1). */
+  const _bs = { busy: false, result: null, error: null, type: null, mode: null };
+  window.__setBsProbe = async (type, options) => {
     if (_bs.busy) return;
-    _bs.busy = true; _bs.result = null; _bs.error = null; _bs.type = objtype; if (render) render();
-    const j = await tryFetch('bubble-probe', '/api/bubble-schema-probe?objtype=' + encodeURIComponent(objtype));
+    _bs.busy = true; _bs.result = null; _bs.error = null; _bs.type = type; _bs.mode = options ? 'options' : 'schema'; if (render) render();
+    const suffix = options ? '&options=1' : '';
+    const j = await tryFetch('bubble-probe', '/api/bubble-schema-probe?type=' + encodeURIComponent(type) + suffix);
     _bs.busy = false;
     if (j?.__error || j?.error) _bs.error = j.__error || j.error;
     else _bs.result = j;
@@ -825,8 +828,9 @@
     return `<div style="max-width:900px">
       <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">Sampled een set records van een Bubble-objecttype (default 200) en toont uitsluitend property-keys + JS-typen. Geen waarden/PII. Alleen super_admin.</div>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user')">${_bs.busy && _bs.type === 'user' ? 'Bezig…' : '👤 User-velden'}</button>
+        <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user')">${_bs.busy && _bs.type === 'user' && _bs.mode === 'schema' ? 'Bezig…' : '👤 User-velden'}</button>
         <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('session')">${_bs.busy && _bs.type === 'session' ? 'Bezig…' : '⏱ Session-velden'}</button>
+        <button class="btn btn-ghost btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user', true)" title="Distinct waarden van option-set-velden op User (whitelist)">${_bs.busy && _bs.type === 'user' && _bs.mode === 'options' ? 'Bezig…' : '🏷 User-option-waarden'}</button>
       </div>
       ${out}
     </div>`;
