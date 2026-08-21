@@ -261,6 +261,128 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
+  /* Ronde-31 STAP 2 · wb-joost — persona (name + tone) WIRE via joost-config-
+     get/upsert; arrangement_mandate READ-ONLY tonen (bewerken raakt autonome-
+     send-grenzen direct; Finance-signoff-brok apart). Motor onaangeraakt. */
+  const _jc = { loading: false, fetched: false, error: null, config: null, ed: null, busy: false };
+  async function fetchJoostConfig() {
+    if (_jc.loading || _jc.fetched) return;
+    _jc.loading = true; _jc.error = null; if (render) render();
+    try {
+      const j = await tryFetch('joost-config-get', '/api/joost-config-get?module=finance');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      _jc.config = j?.config || null;
+    } catch (e) { _jc.error = e?.message || 'onbekend'; }
+    _jc.loading = false; _jc.fetched = true; if (render) render();
+  }
+  window.__setJcEdit   = () => { if (!_jc.config) return; _jc.ed = { persona_name: String(_jc.config.persona_name || ''), persona_tone: String(_jc.config.persona_tone || '') }; if (render) render(); };
+  window.__setJcCancel = () => { _jc.ed = null; if (render) render(); };
+  // FIX 1 pattern: setter geen render() (focus behouden).
+  window.__setJcField  = (k, v) => { if (_jc.ed) _jc.ed[k] = String(v || ''); };
+  window.__setJcSave = () => {
+    if (_jc.ed) {
+      const g = (n) => document.querySelector(`[data-jc-field="${n}"]`);
+      for (const k of ['persona_name','persona_tone']) { const el = g(k); if (el && typeof el.value === 'string') _jc.ed[k] = el.value; }
+    }
+    const e = _jc.ed; if (!e) return;
+    const name = String(e.persona_name || '').trim();
+    const tone = String(e.persona_tone || '').trim();
+    if (!name) { showToast('Persona-naam is verplicht', 'warn'); return; }
+    if (name.length > 100) { showToast('Persona-naam max 100 tekens', 'warn'); return; }
+    if (tone.length > 500) { showToast('Persona-tone max 500 tekens', 'warn'); return; }
+    openConfirm(`Joost-persona bijwerken naar "${name}"? Geldt direct voor alle nieuwe suggesties (finance-module).`, async () => {
+      _jc.busy = true; if (render) render();
+      try {
+        const j = await tryFetch('joost-config-upsert', '/api/joost-config-upsert', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ module: 'finance', persona_name: name, persona_tone: tone }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Joost-persona bijgewerkt', 'ok');
+        _jc.ed = null; _jc.fetched = false; fetchJoostConfig();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _jc.busy = false; if (render) render(); }
+    });
+  };
+  function _renderJcEditor() {
+    const e = _jc.ed; if (!e) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setJcCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:640px;width:100%;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">Joost-persona bewerken (finance)</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setJcCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+          <label style="font-size:11.5px;color:var(--text-2)">Persona-naam <span style="color:var(--rose)">*</span>
+            <input type="text" data-jc-field="persona_name" value="${esc(e.persona_name)}" oninput="window.__setJcField('persona_name',this.value)" maxlength="100" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Persona-toon (kort — hoe presenteert Joost zich)
+            <textarea data-jc-field="persona_tone" rows="3" oninput="window.__setJcField('persona_tone',this.value)" maxlength="500" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.persona_tone)}</textarea>
+          </label>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setJcCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_jc.busy ? 'disabled' : ''} onclick="window.__setJcSave()">${_jc.busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function _renderMandaatReadOnly(am) {
+    // arrangement_mandate is jsonb — mogelijk leeg. Tonen wat er is, min/max/enabled.
+    if (!am || typeof am !== 'object' || !Object.keys(am).length) {
+      return `<div style="padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text-3)">Geen mandaat-config gezet — Joost handhaaft server-side defaults uit <code>joost-autonomy-evaluate</code>. Editor volgt in aparte Finance-brok.</div>`;
+    }
+    const types = Object.keys(am);
+    return `<div style="display:grid;grid-template-columns:1fr;gap:8px">
+      ${types.map(t => {
+        const row = am[t] || {};
+        const en  = row.enabled ? '<span style="color:var(--emerald);font-weight:600">✓ enabled</span>' : '<span style="color:var(--rose);font-weight:600">⨯ disabled</span>';
+        const details = Object.entries(row).filter(([k]) => k !== 'enabled').map(([k,v]) => `<span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3)">${esc(k)}=${esc(String(v))}</span>`).join(' · ');
+        return `<div style="padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12.5px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${esc(t)}</b> ${en}</div>
+          ${details ? `<div style="margin-top:4px">${details}</div>` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  function bodyWbJoost() {
+    if (!_jc.fetched && !_jc.loading) queueMicrotask(() => fetchJoostConfig());
+    const c = _jc.config;
+    const am = c?.autonomy_config?.arrangement_mandate;
+    return `<div style="max-width:1000px">
+      ${_renderJcEditor()}
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Deze sectie schrijft LIVE.</b> Wijzigingen aan <b>persona-naam</b> en <b>persona-toon</b> gelden direct voor alle nieuwe Joost-suggesties (module=finance). System-prompt en autonomy-mandaat blijven alleen-lezen; die wijzigen raakt directe klant-communicatie en vergt Finance-review-brok.
+      </div>
+      ${_jc.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_jc.error)}</div>` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Persona · schrijfbaar</div>
+          ${!c ? `<div style="color:var(--text-3);font-size:12px">${_jc.loading?'Laden…':'—'}</div>` : `
+            <div style="font-size:12.5px;margin-bottom:4px"><span style="color:var(--text-3)">Naam: </span><b>${esc(c.persona_name || '—')}</b></div>
+            <div style="font-size:11.5px;color:var(--text-3);line-height:1.5;margin-bottom:10px">${esc(c.persona_tone || '—')}</div>
+            <button class="btn btn-primary btn-sm" ${_jc.busy ? 'disabled' : ''} onclick="window.__setJcEdit()">✏ Bewerken</button>
+          `}
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Model + status · alleen-lezen</div>
+          <div style="font-size:12px;line-height:1.7">
+            <div><span style="color:var(--text-3)">Model: </span><code>${esc(c?.model || '—')}</code></div>
+            <div><span style="color:var(--text-3)">Temperature: </span><code>${esc(String(c?.temperature ?? '—'))}</code></div>
+            <div><span style="color:var(--text-3)">Enabled: </span>${c?.is_enabled ? '<b style="color:var(--emerald)">✓ ja</b>' : '<b style="color:var(--rose)">⨯ nee</b>'}</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
+        <div style="font-size:12.5px;font-weight:600">Autonomie · arrangement_mandate</div>
+        <span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:10.5px;font-weight:600">ALLEEN-LEZEN</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Bepaalt welke arrangement-types Joost autonoom mag voorstellen + de caps (bedragen, dagen uitstel, termijnen). Wijzigen raakt autonome-send-grenzen direct — Finance-signoff vereist in aparte brok.</div>
+      ${_renderMandaatReadOnly(am)}
+      <div style="margin-top:14px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:11px;color:var(--text-3);line-height:1.55">System-prompt-template + kennisbank leven ook in <code>joost_config</code>; volledige editor voor system-prompt vraagt legal-review vóór schrijfbaar (misinterpretatie kan Joost tegen bedrijfsbeleid laten spreken).</div>
+    </div>`;
+  }
+
   /* Ronde-28 C1 · mk-bronnen — read-native. leads.bron + leads.traject count-
      verdeling via direct-supabase op leads_overzicht. Editor blijft aparte brok
      (bron-config bewerken raakt intake-flow); toont wel de actuele verdeling
@@ -2588,6 +2710,8 @@
     if (cur.id === 'alg-meldingen')      return bodyDeepLink(null, 'Notification-preferences (dagelijkse/wekelijkse admin-mails) zijn server-side geconfigureerd via cron + rol-lookup. Voor per-user meldingen: aparte brok om notification_preferences-tabel + UI toe te voegen.', null);
     // (alg-bedrijf verplaatst naar Wave-3 bovenaan setBody; bodyBedrijf placeholder blijft ongebruikt)
     if (cur.id === 'wb-venster')         return bodyVenster();
+    // Ronde-31 STAP 2: wb-joost — persona WIRE + mandaat READ-ONLY.
+    if (cur.id === 'wb-joost')           return bodyWbJoost();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
   }
@@ -2617,6 +2741,8 @@
       'team-gebruikers','team-rechten','alg-weergave','fin-teamleader','sales-offerte','team-mentoren',
       'com-handtekening','com-sjabloon','sys-followup-admin',
       'com-wa','mk-webflow','fin-entiteiten',
+      // Ronde-31 STAP 2: wb-joost persona schrijfbaar (mandaat blijft read-only in body).
+      'wb-joost',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
