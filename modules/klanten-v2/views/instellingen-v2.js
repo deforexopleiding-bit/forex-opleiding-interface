@@ -1091,6 +1091,98 @@
     </div>`;
   }
 
+  /* Wave-1 · sales-offerte — TL email-template + sales-uitzonderingen
+     (min term / max start-dagen). Reads via /api/app-settings + /api/teamleader-
+     email-templates. Writes via /api/app-settings PUT. Custom confirm bij save. */
+  const _sof = {
+    loading: false, fetched: false, error: null,
+    tplList: [], tplDefault: null, tplChanged: false,
+    minTerm: '', maxDays: '', settingsChanged: false,
+    busy: false,
+  };
+  async function fetchSalesOfferte() {
+    if (_sof.loading || _sof.fetched) return;
+    _sof.loading = true; _sof.error = null; if (render) render();
+    const [tpls, def, minT, maxD] = await Promise.all([
+      tryFetch('tl-email-tpls',  '/api/teamleader-email-templates'),
+      tryFetch('sof-default',    '/api/app-settings?key=default_offerte_template'),
+      tryFetch('sof-min',        '/api/app-settings?key=sales_min_term_amount'),
+      tryFetch('sof-maxdays',    '/api/app-settings?key=sales_max_start_days'),
+    ]);
+    _sof.loading = false; _sof.fetched = true;
+    _sof.tplList     = Array.isArray(tpls?.items || tpls?.templates) ? (tpls.items || tpls.templates) : [];
+    _sof.tplDefault  = def?.value ?? def?.data?.value ?? null;
+    _sof.minTerm     = String((minT?.value ?? minT?.data?.value ?? 400) || 400);
+    _sof.maxDays     = String((maxD?.value ?? maxD?.data?.value ?? 40)  || 40);
+    _sof.tplChanged      = false;
+    _sof.settingsChanged = false;
+    if (render) render();
+  }
+  window.__setSofTplChange = (v) => { _sof.tplDefault = v || null; _sof.tplChanged = true; if (render) render(); };
+  window.__setSofMinChange = (v) => { _sof.minTerm = String(v || ''); _sof.settingsChanged = true; if (render) render(); };
+  window.__setSofMaxChange = (v) => { _sof.maxDays = String(v || ''); _sof.settingsChanged = true; if (render) render(); };
+  window.__setSofSaveTpl = () => {
+    if (!_sof.tplChanged || _sof.busy) return;
+    openConfirm('Standaard offerte-mail-template opslaan? Nieuwe offertes gebruiken deze template.', async () => {
+      _sof.busy = true; if (render) render();
+      const j = await tryFetch('sof-put-tpl', '/api/app-settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'default_offerte_template', value: _sof.tplDefault || null }),
+      });
+      _sof.busy = false;
+      if (j?.__error || j?.error) showToast('Opslaan mislukt: ' + (j.__error || j.error), 'warn');
+      else { _sof.tplChanged = false; showToast('Standaard-template opgeslagen', 'ok'); }
+      if (render) render();
+    });
+  };
+  window.__setSofSaveExceptions = () => {
+    if (!_sof.settingsChanged || _sof.busy) return;
+    openConfirm(`Sales-uitzonderingen opslaan? Onder min-termijnbedrag € ${_sof.minTerm} of boven ${_sof.maxDays} dagen start vraagt de wizard om manager-goedkeuring.`, async () => {
+      _sof.busy = true; if (render) render();
+      const [a, b] = await Promise.all([
+        tryFetch('sof-put-min', '/api/app-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'sales_min_term_amount', value: Number(_sof.minTerm) || 0 }) }),
+        tryFetch('sof-put-max', '/api/app-settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'sales_max_start_days', value: Number(_sof.maxDays) || 0 }) }),
+      ]);
+      _sof.busy = false;
+      if (a?.__error || a?.error || b?.__error || b?.error) showToast('Opslaan mislukt: ' + (a?.__error || a?.error || b?.__error || b?.error), 'warn');
+      else { _sof.settingsChanged = false; showToast('Uitzonderingen opgeslagen', 'ok'); }
+      if (render) render();
+    });
+  };
+  function bodySalesOfferte() {
+    if (!_sof.fetched && !_sof.loading) queueMicrotask(() => fetchSalesOfferte());
+    const tplOpts = ['<option value="">— Geen standaard —</option>']
+      .concat(_sof.tplList.map(t => `<option value="${esc(t.id || t.template_id || '')}" ${_sof.tplDefault === (t.id || t.template_id) ? 'selected' : ''}>${esc(t.name || t.title || t.id)}</option>`))
+      .join('');
+    return `<div style="max-width:900px">
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
+        <div style="padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Standaard offerte-mail-template</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Nieuwe offertes gebruiken deze TL-template.</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select ${_sof.loading ? 'disabled' : ''} onchange="window.__setSofTplChange(this.value)" style="min-width:280px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">${tplOpts}</select>
+            <button class="btn btn-primary btn-sm" ${!_sof.tplChanged || _sof.busy ? 'disabled' : ''} onclick="window.__setSofSaveTpl()">Opslaan</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Offerte-uitzonderingen (manager-goedkeuring)</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:12px">Grenzen waarboven de wizard om goedkeuring vraagt. Onder de drempel: geen popup, offerte gaat door.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;max-width:640px">
+            <label style="font-size:11.5px;color:var(--text-2)">Min termijnbedrag (€/mnd)
+              <input type="number" min="0" step="1" value="${esc(_sof.minTerm)}" oninput="window.__setSofMinChange(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Max dagen tot startdatum
+              <input type="number" min="1" step="1" value="${esc(_sof.maxDays)}" oninput="window.__setSofMaxChange(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <button class="btn btn-primary btn-sm" ${!_sof.settingsChanged || _sof.busy ? 'disabled' : ''} onclick="window.__setSofSaveExceptions()">Opslaan</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }
+
   /* Wave-1 · fin-teamleader — TL-integratie: status + oauth + disconnect +
      webhook + deep-link naar TL-import. Custom confirm bij disconnect. */
   const _tl = { loading: false, error: null, fetched: false, connection: null, webhooks: null, busy: false };
@@ -1222,6 +1314,7 @@
     if (cur.id === 'team-gebruikers')    return bodyGebruikers();
     if (cur.id === 'alg-weergave')       return bodyWeergave();
     if (cur.id === 'fin-teamleader')     return bodyTeamleader();
+    if (cur.id === 'sales-offerte')      return bodySalesOfferte();
     if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
