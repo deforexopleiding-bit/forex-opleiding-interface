@@ -27,6 +27,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { fetchTestDealIds } from './_lib/test-data-filter.js';
+import { classifyDeal, CATEGORY_ORDER, CATEGORY_LABELS } from './_lib/deal-classify.js';
 
 function isoDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -85,7 +86,9 @@ export default async function handler(req, res) {
     const to   = q.to   ? String(q.to).slice(0, 10)   : null;
     const periodRaw = String(q.period || 'month').toLowerCase();
     const period = ['today', 'week', 'month', 'year', 'all'].includes(periodRaw) ? periodRaw : 'month';
-    const groupByMonth = String(q.group_by || '').toLowerCase() === 'month';
+    const groupByRaw = String(q.group_by || '').toLowerCase();
+    const groupByMonth    = groupByRaw === 'month';
+    const groupByCategory = groupByRaw === 'category';
 
     // Custom range OF period-preset. Custom = inclusive to → daarom +1 dag
     // om als half-open [since, until) te matchen.
@@ -103,9 +106,13 @@ export default async function handler(req, res) {
     // Datum-filter: eerst proberen accepted_at, val terug op signed_at/created_at
     // want TL-sync gap kan accepted_at leeg laten voor recent aanvaarde deals.
     // Filter in JS zodat COALESCE-logic zuiver werkt zonder PostgREST-quirks.
+    // groupByCategory heeft ook traject_variant_id + discount + total_amount nodig.
+    const selectCols = groupByCategory
+      ? 'id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, created_at, traject_variant_id, discount_percentage, total_amount'
+      : 'id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, created_at';
     let qy = supabaseAdmin
       .from('deals')
-      .select('id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, created_at')
+      .select(selectCols)
       .eq('tl_quotation_status', 'accepted')
       .limit(20000);
     const { data: dealsRaw, error: dErr } = await qy;
@@ -159,6 +166,54 @@ export default async function handler(req, res) {
     for (const v of perDeal.values()) total += v;
     total = Math.round(total * 100) / 100;
 
+    // Ronde-20 PUNT-4: by_category — aanvaarde deals per traject-classify.
+    // Bron-van-waarheid voor "Trajecten verkocht" (was: snapshot van actieve
+    // subs → miste 24-mnd deals waarvan de sub nog niet 'active' was in
+    // periode-eind). classifyDeal gebruikt variant.default_duration_months +
+    // line-item scan + regex → robuust voor TL-imports zonder variant_id.
+    let by_category;
+    if (groupByCategory) {
+      // Fetch variants + line-items voor classify.
+      const variantIds = [...new Set(clean.map(d => d.traject_variant_id).filter(Boolean))];
+      const variantById = new Map();
+      if (variantIds.length) {
+        const { data: vs } = await supabaseAdmin
+          .from('traject_variants')
+          .select('id, name, default_duration_months, traject_id')
+          .in('id', variantIds);
+        for (const v of (vs || [])) variantById.set(v.id, v);
+      }
+      const linesByDealId = new Map();
+      if (ids.length) {
+        const { data: dLines } = await supabaseAdmin
+          .from('deal_line_items')
+          .select('deal_id, product_name, product_id, quantity, unit_price, vat_percentage, price_includes_vat')
+          .in('deal_id', ids);
+        for (const li of (dLines || [])) {
+          if (!linesByDealId.has(li.deal_id)) linesByDealId.set(li.deal_id, []);
+          linesByDealId.get(li.deal_id).push(li);
+        }
+      }
+      const catAgg = Object.fromEntries(CATEGORY_ORDER.map(k => [k, { category: k, label: CATEGORY_LABELS[k], count: 0, total_incl_vat: 0 }]));
+      const distribution = { by_source: { variant: 0, lineitems: 0, fallback: 0 } };
+      for (const d of clean) {
+        const lineItems = linesByDealId.get(d.id) || [];
+        const { category, source } = classifyDeal(d, { lineItems, variantById });
+        catAgg[category].count += 1;
+        catAgg[category].total_incl_vat += perDeal.get(d.id) || 0;
+        distribution.by_source[source] = (distribution.by_source[source] || 0) + 1;
+      }
+      by_category = CATEGORY_ORDER.map(k => ({
+        ...catAgg[k],
+        total_incl_vat: Math.round(catAgg[k].total_incl_vat * 100) / 100,
+      }));
+      console.log('[sales-signed-deals-total group=category]', {
+        period, since, until, total_deals: clean.length,
+        distribution: Object.fromEntries(CATEGORY_ORDER.map(k => [k, catAgg[k].count])),
+        source_split: distribution.by_source,
+      });
+    }
+
     let trend;
     if (groupByMonth) {
       // Trend: één bucket per YYYY-MM binnen [since, until).
@@ -190,6 +245,7 @@ export default async function handler(req, res) {
       period, since, until,
       test_excluded: testExcluded,
       ...(trend ? { trend } : {}),
+      ...(by_category ? { by_category } : {}),
     });
   } catch (e) {
     console.error('[sales-signed-deals-total]', e.message);

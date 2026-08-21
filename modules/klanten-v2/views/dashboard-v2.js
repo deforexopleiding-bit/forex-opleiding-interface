@@ -285,6 +285,7 @@
     leadsPer: null,  // /api/leads-per-traject-count?period=X (total + by_traject)
     signed:   null,  // /api/sales-signed-deals-total?period=X (total_incl_vat + count)
     signedTrend:null,// /api/sales-signed-deals-total?group_by=month (b-lijn grafiek)
+    signedCat: null, // /api/sales-signed-deals-total?group_by=category&period=X (Trajecten-tegels)
     lsOpen:   null,  // /api/leadsonderhoud-open-count (open_count)
     onbCounts:null,  // /api/onboarding-counts (active_count)
     lisaCnt:  null,  // /api/lisa-conversations-count?status=active (count)
@@ -346,8 +347,14 @@
       const signedTrendUrl = isCustom
         ? `/api/sales-signed-deals-total?group_by=month&${customQs.slice(1)}`
         : `/api/sales-signed-deals-total?group_by=month&period=year`;
+      // by_category = aanvaarde deals per traject-classify, in de GEKOZEN periode.
+      // "Trajecten verkocht" is een periode-metric (was: snapshot van actieve
+      // subs → miste 24-mnd deals). Volgt dus periode-chip Dag/Week/Maand/Jaar/Custom.
+      const signedCatUrl = isCustom
+        ? `/api/sales-signed-deals-total?group_by=category&${customQs.slice(1)}`
+        : `/api/sales-signed-deals-total?group_by=category&${signedPeriodQ}`;
 
-      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed, signedTrend, lsOpen, onbCounts, lisaCnt] = await Promise.all([
+      const [stats, finance, tickets, events, sales, retention, mrr, tasks, leadsPer, signed, signedTrend, signedCat, lsOpen, onbCounts, lisaCnt] = await Promise.all([
         tryFetch('dashboard-stats',       '/api/dashboard-stats?' + statsPeriodQ),
         tryFetch('finance-counts',        '/api/finance-dashboard-counts?' + financePeriodQ),
         tryFetch('tickets',               '/api/tickets'),
@@ -359,6 +366,7 @@
         tryFetch('leads-per-traject',     '/api/leads-per-traject-count?' + leadsPeriodQ),
         tryFetch('signed-deals-total',    signedUrl),
         tryFetch('signed-deals-trend',    signedTrendUrl),
+        tryFetch('signed-deals-category', signedCatUrl),
         tryFetch('ls-open-count',         '/api/leadsonderhoud-open-count'),
         tryFetch('onboarding-counts',     '/api/onboarding-counts'),
         tryFetch('lisa-conv-count',       '/api/lisa-conversations-count?status=active'),
@@ -379,6 +387,7 @@
       _live.leadsPer   = leadsPer;
       _live.signed     = signed;
       _live.signedTrend= signedTrend;
+      _live.signedCat  = signedCat;
       _live.lsOpen     = lsOpen;
       _live.onbCounts = onbCounts;
       _live.lisaCnt   = lisaCnt;
@@ -697,26 +706,31 @@
             })()}
             <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
               <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">
-                Trajecten verkocht${_live.mrr ? liveBadgeFor(_live.mrr, 'Live uit /api/sales-mrr-report by_traject') : mockBadge('sales-mrr-report faalde')}
+                Trajecten verkocht${_live.signedCat ? liveBadgeFor(_live.signedCat, 'Live uit /api/sales-signed-deals-total group=category (aanvaarde deals in periode)') : mockBadge('signed-deals-category faalde')}
               </div>
               <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px">
                 ${(() => {
-                  // Ronde-19: LIVE uit sales-mrr-report.by_category — gebruikt
-                  // classifyDeal (variant + line-items + regex) i.p.v. fragiele
-                  // string-match op traject-naam. 24-mnd landt nu correct.
-                  const byCat = _live.mrr && Array.isArray(_live.mrr.by_category) ? _live.mrr.by_category : [];
+                  // Ronde-20 PUNT-4: LIVE uit sales-signed-deals-total?group_by=category&period=X.
+                  // Bron = aanvaarde deals in de gekozen periode (Dag/Week/Maand/
+                  // Jaar/Custom), NIET meer snapshot van actieve subs. Zo landen
+                  // 24-mnd deals correct én consistent met "Totaal incl. btw"-tegel.
+                  const byCat = _live.signedCat && Array.isArray(_live.signedCat.by_category) ? _live.signedCat.by_category : [];
                   const catMap = {};
                   for (const c of byCat) catMap[c.category] = c;
+                  // "Overig" bundelt m_other + other_product + unknown zodat we niet
+                  // stille deals verliezen als classify ze niet in m6/m12/m24/mem duwt.
+                  const otherCount = (catMap.m_other?.count || 0) + (catMap.other_product?.count || 0) + (catMap.unknown?.count || 0);
+                  const otherRev   = (catMap.m_other?.total_incl_vat || 0) + (catMap.other_product?.total_incl_vat || 0) + (catMap.unknown?.total_incl_vat || 0);
                   const cats = [
-                    { key: 'm6',  label: '6 mnd 1-op-1',  col: 'violet' },
-                    { key: 'm12', label: '12 mnd 1-op-1', col: 'violet' },
-                    { key: 'm24', label: '24 mnd 1-op-1', col: 'violet' },
-                    { key: 'mem', label: 'Membership',    col: 'blue'   },
+                    { key: 'm6',    label: '6 mnd 1-op-1',  col: 'violet',   b: catMap.m6 },
+                    { key: 'm12',   label: '12 mnd 1-op-1', col: 'violet',   b: catMap.m12 },
+                    { key: 'm24',   label: '24 mnd 1-op-1', col: 'violet',   b: catMap.m24 },
+                    { key: 'mem',   label: 'Membership',    col: 'blue',     b: catMap.mem },
+                    ...(otherCount > 0 ? [{ key: 'overig', label: 'Overig',   col: 'accent-2', b: { count: otherCount, total_incl_vat: otherRev } }] : []),
                   ];
                   return cats.map(cat => {
-                    const b = catMap[cat.key];
-                    const c = (b && b.count) || 0;
-                    const r = (b && b.revenue_incl_btw) || 0;
+                    const c = (cat.b && cat.b.count) || 0;
+                    const r = (cat.b && cat.b.total_incl_vat) || 0;
                     return `<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
                       <div style="font-size:11px;color:var(--${cat.col});font-weight:500;margin-bottom:4px">${cat.label}</div>
                       <div style="font-size:20px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.035em;line-height:1;${c > 0 ? '' : 'color:var(--text-3)'}">${c}</div>
