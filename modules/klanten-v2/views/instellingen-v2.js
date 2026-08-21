@@ -408,6 +408,302 @@
     </div>`;
   }
 
+  /* ═════════════════════════════════════════════════════════════════════
+     Wave-3 · gevoelige secties (secrets / finance-nabij / factuur-impact).
+     Alle secrets NOOIT volledig tonen — maskeren (••••1234). Elke write
+     achter custom confirm. Write pas na bevestigde impact-analyse; anders
+     display-only met notice die aanpak uitlegt.
+     ═════════════════════════════════════════════════════════════════════ */
+
+  /* Wave-3 · team-api — API-sleutels. Er bestaat GEEN api-keys-tabel/-endpoint
+     op dit moment; alle integraties gebruiken env-vars (Vercel + 1Password).
+     CRUD hier bouwen vereist eerst een secrets-management-brok:
+       1. Kies opslag (Supabase Vault / dedicated tabel met encryption-at-rest)
+       2. Endpoint /api/admin-api-keys met rotate/revoke + audit-log
+       3. Env-vars migreren zonder downtime.
+     Voor nu: display-only lijst van bekende integraties + hun status. */
+  const _apiKeys = { loading: false, fetched: false, error: null, integrations: [] };
+  async function fetchApiKeys() {
+    if (_apiKeys.loading || _apiKeys.fetched) return;
+    _apiKeys.loading = true; if (render) render();
+    // Statische inventaris — welke integraties gebruiken keys (informatief).
+    _apiKeys.integrations = [
+      { name: 'Anthropic',    env: 'ANTHROPIC_API_KEY',        status: 'env-var', usedBy: 'Joost + agents + AI Manager' },
+      { name: 'Internal',     env: 'INTERNAL_API_TOKEN',       status: 'env-var', usedBy: 'server-to-server (Joost auto-suggest)' },
+      { name: 'TeamLeader',   env: 'OAuth (via UI)',           status: 'OAuth',   usedBy: 'CRM sync (klanten/deals/facturen)' },
+      { name: 'Meta Cloud',   env: 'META_WHATSAPP_ACCESS_TOKEN', status: 'env-var', usedBy: 'WhatsApp Business API' },
+      { name: 'Webflow',      env: 'WEBFLOW_API_TOKEN',        status: 'env-var', usedBy: 'CMS auto-publish' },
+      { name: 'GoHighLevel',  env: 'GHL_* (meerdere)',         status: 'env-var', usedBy: 'Lisa + follow-up' },
+      { name: 'Voys',         env: 'VOYS_API_TOKEN + VOYS_CLIENT_UUID', status: 'env-var', usedBy: 'Telefonie/call-outs' },
+      { name: 'Bubble',       env: 'BUBBLE_API_TOKEN',         status: 'env-var', usedBy: 'LMS-data' },
+      { name: 'Supabase',     env: 'SUPABASE_SERVICE_ROLE_KEY', status: 'env-var', usedBy: 'Server-side DB-writes' },
+      { name: 'Strato IMAP',  env: 'STRATO_*_USER/_PASS × 4',  status: 'env-var', usedBy: 'Mail-sync (4 postvakken)' },
+    ];
+    _apiKeys.loading = false; _apiKeys.fetched = true; if (render) render();
+  }
+  function bodyApiKeys() {
+    if (!_apiKeys.fetched && !_apiKeys.loading) queueMicrotask(() => fetchApiKeys());
+    const rows = _apiKeys.integrations.map(k => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(k.name)}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(k.env)} <span style="opacity:.5">••••••</span></td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(k.status)}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(k.usedBy)}</td>
+    </tr>`).join('');
+    return `<div style="max-width:1000px">
+      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Display-only.</b> API-sleutels leven in Vercel env-vars + 1Password. Roteren = handmatig in Vercel dashboard.
+        CRUD hier vereist een secrets-management-brok: opslag-keuze (Supabase Vault / eigen encrypted-tabel), endpoint met rotate/revoke/audit-log, en env-var-migratie zonder downtime. Aanpak eerst afstemmen voordat dit gebouwd wordt.
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Integratie</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Env-var</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Type</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Gebruikt door</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  /* Wave-3 · com-mail — E-mailaccounts. IMAP-credentials leven in env-vars
+     (STRATO_LEADS_USER/_PASS × 4). Geen DB-tabel voor mailbox-config; sync-code
+     leest env direct. Zelfde reden als team-api: CRUD vereist secrets-management-
+     brok + refactor sync-code. Display-only. */
+  function bodyMailboxen() {
+    const rows = [
+      { name: 'leads@',         env: 'STRATO_LEADS_USER/_PASS',         cat: 'Lead-intake' },
+      { name: 'info@',          env: 'STRATO_INFO_USER/_PASS',          cat: 'Algemeen' },
+      { name: 'partners@',      env: 'STRATO_PARTNERS_USER/_PASS',      cat: 'Partner-verkeer' },
+      { name: 'administratie@', env: 'STRATO_ADMINISTRATIE_USER/_PASS', cat: 'Facturen + boekhouder' },
+      { name: 'welkom@',        env: 'STRATO_WELKOM_USER/_PASS',        cat: 'Wanbetalers-motor' },
+      { name: 'onboarding@',    env: 'STRATO_ONBOARDING_USER/_PASS',    cat: 'Onboarding-flow' },
+      { name: 'events@',        env: 'STRATO_EVENTS_USER/_PASS',        cat: 'Event-comms' },
+    ].map(m => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(m.name)}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(m.env)} <span style="opacity:.5">••••••</span></td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(m.cat)}</td>
+    </tr>`).join('');
+    return `<div style="max-width:900px">
+      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Display-only.</b> IMAP-credentials per postvak leven in Vercel env-vars.
+        Toevoegen/wijzigen/verwijderen vereist zelfde secrets-brok als team-api + refactor van <code>api/sync-emails.js</code> zodat het mailbox-config uit DB leest i.p.v. env.
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Postvak</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Env-var</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Gebruik</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  /* Wave-3 · com-tel — Telefonie/Voys. /api/voys-config bestaat + returnt
+     'configured' + caller_ids (geen tokens). Lazy read + deep-link naar de
+     bestaande cockpit-integratie voor daadwerkelijk bellen. */
+  const _tel = { loading: false, fetched: false, error: null, data: null };
+  async function fetchTel() {
+    if (_tel.loading || _tel.fetched) return;
+    _tel.loading = true; _tel.error = null; if (render) render();
+    const j = await tryFetch('voys-config', '/api/voys-config');
+    _tel.loading = false; _tel.fetched = true;
+    if (j?.__error) _tel.error = j.__error;
+    else _tel.data = j;
+    if (render) render();
+  }
+  function bodyTelefonie() {
+    if (!_tel.fetched && !_tel.loading) queueMicrotask(() => fetchTel());
+    const d = _tel.data || {};
+    const configured = !!d.configured;
+    const cids = Array.isArray(d.caller_ids) ? d.caller_ids : [];
+    return `<div style="max-width:800px">
+      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Display-only.</b> Voys-tokens (VOYS_API_TOKEN + VOYS_CLIENT_UUID + VOYS_A_NUMBER) leven in Vercel env-vars.
+        Caller-ID lijst = <code>VOYS_CALLER_IDS</code>. Roteren = handmatig in Vercel.
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Voys-koppeling</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">${_tel.error ? '⚠ ' + esc(_tel.error) : (configured ? '✓ Geconfigureerd' : '⨯ Nog niet geconfigureerd')}</div>
+          ${cids.length ? `<div style="font-size:12px;color:var(--text-2)"><b>Caller-IDs:</b> ${cids.map(x => `<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;margin:0 2px">${esc(x)}</code>`).join(' ')}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /* Wave-3 · alg-bedrijf — Bedrijfsgegevens. ⚠ COMPANY_* env-vars worden
+     gelezen door:
+       - api/_lib/incasso-pdf.js         (WIK-brief PDF)         [INCASSO-ZONE]
+       - api/_lib/incasso-pre-brief-core.js (pre-briefkaart)     [INCASSO-ZONE]
+       - api/_lib/joost-suggest-core.js  (Joost-context)         [WANBETALERS-adjacent]
+       - api/_lib/aisha-generate.js      (lead-emails/AI-content)
+     Write hier zou factuur/PDF-content veranderen zonder dat de templates de
+     nieuwe bron kennen. En INCASSO-ZONE mag niet worden aangepast in deze brok.
+     → DISPLAY-ONLY. Toon huidige waardes; write vraagt eigen refactor-brok
+     (templates: env-var → app-settings lookup + fallback naar env). */
+  const _biz = { fetched: false, data: null, error: null, loading: false };
+  async function fetchBiz() {
+    if (_biz.loading || _biz.fetched) return;
+    _biz.loading = true; if (render) render();
+    // Simpel — probeer /api/config voor COMPANY_NAME (dat endpoint returnt
+    // publieke config voor de browser). Overige velden staan als 'env-only'
+    // gemarkeerd. Als /api/config geen company-velden geeft: fallback hardcoded.
+    const j = await tryFetch('public-config', '/api/config');
+    _biz.loading = false; _biz.fetched = true;
+    if (j?.__error) _biz.error = j.__error;
+    _biz.data = (j && !j.__error) ? j : {};
+    if (render) render();
+  }
+  function bodyBedrijf() {
+    if (!_biz.fetched && !_biz.loading) queueMicrotask(() => fetchBiz());
+    const d = _biz.data || {};
+    const fields = [
+      { l: 'Naam',    v: d.COMPANY_NAME    || 'De Forex Opleiding NL B.V.', src: 'env-var / fallback' },
+      { l: 'Adres',   v: d.COMPANY_ADDRESS || '(niet publiek)',              src: 'env-var COMPANY_ADDRESS' },
+      { l: 'KvK',     v: d.COMPANY_KVK     || '(niet publiek)',              src: 'env-var COMPANY_KVK' },
+      { l: 'BTW',     v: d.COMPANY_BTW     || '(niet publiek)',              src: 'env-var COMPANY_BTW' },
+      { l: 'E-mail',  v: d.COMPANY_EMAIL   || 'info@deforexopleiding.nl',    src: 'env-var / fallback' },
+      { l: 'Telefoon',v: d.COMPANY_PHONE   || '(niet publiek)',              src: 'env-var COMPANY_PHONE' },
+    ];
+    const rows = fields.map(f => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:10px 14px;font-size:12.5px;font-weight:600;width:120px">${esc(f.l)}</td>
+      <td style="padding:10px 14px;font-size:12.5px;font-family:'IBM Plex Mono',monospace">${esc(f.v)}</td>
+      <td style="padding:10px 14px;font-size:11px;color:var(--text-3)">${esc(f.src)}</td>
+    </tr>`).join('');
+    return `<div style="max-width:900px">
+      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Display-only ronde.</b> COMPANY_*-env-vars worden gelezen door <code>api/_lib/incasso-pdf.js</code>, <code>incasso-pre-brief-core.js</code>, <code>joost-suggest-core.js</code> en <code>aisha-generate.js</code>.
+        <b>Write NIET veilig hier:</b> de eerste twee zitten in de <b>incasso-zone</b> — die mag niet worden aangepast in deze brok. Write-support vereist eerst een refactor-brok waarin de templates <code>app-settings</code> lezen met env-var-fallback, gecoördineerd met de incasso-review.
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 14px;font-size:11px;color:var(--text-3);font-weight:600">Veld</th>
+            <th style="text-align:left;padding:8px 14px;font-size:11px;color:var(--text-3);font-weight:600">Waarde</th>
+            <th style="text-align:left;padding:8px 14px;font-size:11px;color:var(--text-3);font-weight:600">Bron</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  /* Wave-3 · fin-bank — bank_accounts read via direct-supabase (zoals fin-
+     entiteiten). CRUD + CAMT-upload vragen eigen brok: verkeerde IBAN hier
+     beïnvloedt dashboard-saldo direct (zie eerdere post-mortem: F2 fix). */
+  const _bnk = { loading: false, fetched: false, error: null, items: [] };
+  async function fetchBank() {
+    if (_bnk.loading || _bnk.fetched) return;
+    _bnk.loading = true; _bnk.error = null; if (render) render();
+    try {
+      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+      const { data, error } = await window.supabase.from('bank_accounts').select('iban, label, is_active, currency, created_at').order('created_at');
+      if (error) throw error;
+      _bnk.items = data || [];
+    } catch (e) { _bnk.error = e?.message || 'onbekend'; }
+    _bnk.loading = false; _bnk.fetched = true;
+    if (render) render();
+  }
+  function bodyFinBank() {
+    if (!_bnk.fetched && !_bnk.loading) queueMicrotask(() => fetchBank());
+    const rows = _bnk.items.map(a => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;font-size:12.5px;font-family:'IBM Plex Mono',monospace">${esc(a.iban || '—')}</td>
+      <td style="padding:8px 12px;font-size:12.5px">${esc(a.label || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(a.currency || 'EUR')}</td>
+      <td style="padding:8px 12px;font-size:11.5px">${a.is_active ? '✓ actief' : '⨯ inactief'}</td>
+    </tr>`).join('');
+    return `<div style="max-width:1000px">
+      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Read-only.</b> Bank-CRUD + CAMT-upload vragen eigen brok: een verkeerde/inactive IBAN hier beïnvloedt het dashboard-saldo direct (zie F2-postmortem: het endpoint <code>finance-bank-camt-balance.js</code> sommeert nu alle valid-IBAN accounts, ongeacht bank_accounts-registratie — maar de per-account labels blijven hieruit komen).
+        CAMT-upload gebeurt via de bestaande Finance-Bank-module.
+      </div>
+      ${_bnk.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_bnk.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">IBAN</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Label</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Valuta</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="4" style="padding:16px;color:var(--text-3);font-size:12.5px">${_bnk.loading ? 'Laden…' : 'Geen bank-accounts geregistreerd'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  /* Wave-3 · fin-facturatie — app-settings met object-shape (invoice-config).
+     3 velden: standaard-betaaltermijn, standaard-BTW%, factuurnummer-schema.
+     PUT-shape zoals andere app-settings; custom confirm bij save. */
+  const _facCfg = {
+    loading: false, fetched: false, error: null,
+    paymentTermDays: '', vatPercentage: '', invoiceNumberFormat: '',
+    changed: false, busy: false,
+  };
+  async function fetchFacCfg() {
+    if (_facCfg.loading || _facCfg.fetched) return;
+    _facCfg.loading = true; _facCfg.error = null; if (render) render();
+    const [pt, vat, fmt] = await Promise.all([
+      tryFetch('fc-pt',  '/api/app-settings?key=default_payment_term_days'),
+      tryFetch('fc-vat', '/api/app-settings?key=default_vat_percentage'),
+      tryFetch('fc-fmt', '/api/app-settings?key=invoice_number_format'),
+    ]);
+    _facCfg.loading = false; _facCfg.fetched = true;
+    _facCfg.paymentTermDays     = String((pt?.value && (pt.value.days   ?? pt.value)) ?? 14);
+    _facCfg.vatPercentage       = String((vat?.value && (vat.value.pct  ?? vat.value)) ?? 21);
+    _facCfg.invoiceNumberFormat = String((fmt?.value && (fmt.value.format ?? fmt.value)) ?? 'YYYY/NNNN');
+    _facCfg.changed = false;
+    if (render) render();
+  }
+  window.__setFcPt  = (v) => { _facCfg.paymentTermDays = String(v || ''); _facCfg.changed = true; if (render) render(); };
+  window.__setFcVat = (v) => { _facCfg.vatPercentage   = String(v || ''); _facCfg.changed = true; if (render) render(); };
+  window.__setFcFmt = (v) => { _facCfg.invoiceNumberFormat = String(v || ''); _facCfg.changed = true; if (render) render(); };
+  window.__setFcSave = () => {
+    if (!_facCfg.changed || _facCfg.busy) return;
+    openConfirm(`Facturatie-config opslaan? Standaard-betaaltermijn ${_facCfg.paymentTermDays} dagen · BTW ${_facCfg.vatPercentage}% · Factuurnr-schema ${_facCfg.invoiceNumberFormat}. Nieuwe facturen gebruiken deze waarden.`, async () => {
+      _facCfg.busy = true; if (render) render();
+      const [a, b, c] = await Promise.all([
+        tryFetch('fc-put-pt',  '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'default_payment_term_days', value: { days: Number(_facCfg.paymentTermDays) || 14 } }) }),
+        tryFetch('fc-put-vat', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'default_vat_percentage',   value: { pct:  Number(_facCfg.vatPercentage)   || 21 } }) }),
+        tryFetch('fc-put-fmt', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'invoice_number_format',    value: { format: String(_facCfg.invoiceNumberFormat) } }) }),
+      ]);
+      _facCfg.busy = false;
+      if (a?.__error || a?.error || b?.__error || b?.error || c?.__error || c?.error) showToast('Opslaan mislukt: ' + (a?.__error || a?.error || b?.__error || b?.error || c?.__error || c?.error), 'warn');
+      else { _facCfg.changed = false; showToast('Facturatie-config opgeslagen', 'ok'); }
+      if (render) render();
+    }, 'warn');
+  };
+  function bodyFinFacturatie() {
+    if (!_facCfg.fetched && !_facCfg.loading) queueMicrotask(() => fetchFacCfg());
+    return `<div style="max-width:800px">
+      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Voorzichtig.</b> Deze waarden voeden nieuwe facturen (invoice-create). Bestaande facturen blijven zoals ze zijn. QA: waarde noteren → wijzigen → factuur maken → terugzetten. Raakt <b>niet</b> de incasso-motor.
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
+          <label style="font-size:11.5px;color:var(--text-2)">Standaard betaaltermijn (dagen)
+            <input type="number" min="0" step="1" value="${esc(_facCfg.paymentTermDays)}" oninput="window.__setFcPt(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Standaard BTW-%
+            <input type="number" min="0" step="0.5" value="${esc(_facCfg.vatPercentage)}" oninput="window.__setFcVat(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <button class="btn btn-primary btn-sm" ${!_facCfg.changed || _facCfg.busy ? 'disabled' : ''} onclick="window.__setFcSave()">${_facCfg.busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+        <div style="padding:0 16px 14px">
+          <label style="font-size:11.5px;color:var(--text-2)">Factuurnummer-schema
+            <input type="text" value="${esc(_facCfg.invoiceNumberFormat)}" oninput="window.__setFcFmt(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;max-width:280px;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" placeholder="YYYY/NNNN" />
+          </label>
+        </div>
+      </div>
+    </div>`;
+  }
+
   /* Wave-2 · com-wa LIVE via /api/admin-meta-templates-list. Mock-data is weg.
      Submit/sync/delete via bestaande endpoints achter custom confirm (echte Meta-
      actie). Edit/detail = deep-link (form is complex). WA-nummer registreren:
@@ -1662,6 +1958,13 @@
     if (cur.id === 'mk-webflow')         return bodyWebflow();
     if (cur.id === 'sys-bubble-schema')  return bodyBubbleProbe();
     if (cur.id === 'fin-entiteiten')     return bodyEntiteiten();
+    // Wave-3 · gevoelige secties
+    if (cur.id === 'team-api')           return bodyApiKeys();
+    if (cur.id === 'com-mail')           return bodyMailboxen();
+    if (cur.id === 'com-tel')            return bodyTelefonie();
+    if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
+    if (cur.id === 'fin-bank')           return bodyFinBank();
+    if (cur.id === 'fin-facturatie')     return bodyFinFacturatie();
     // Wave-2 · DEEL B — deep-links (config leeft nu in bestaande modules; volledige
     // port vereist eigen brok per sectie omdat de bron-modules eigen state/UI hebben).
     if (cur.id === 'agents-lisa')        return bodyDeepLink('AI Agents', 'De Lisa-config (persona/fases/follow-ups) staat in de AI Agents-module. Verhuizen naar hier vereist port van de agents-config-UI + endpoints — aparte brok.', 'agents');
@@ -1678,7 +1981,7 @@
     if (cur.id === 'mk-bronnen')         return bodyDeepLink('Leads', 'Lead-bronnen (leads.bron / leads.traject-mapping) worden in de Leads-module gezet; dashboard-tegels lezen /api/leads-per-traject-count. Centrale editor vraagt eigen brok.', 'leads');
     if (cur.id === 'mk-sequenties')      return bodyDeepLink('Leadsonderhoud', 'Sequenties (automatische lead-opvolging) worden in de Leadsonderhoud-module beheerd. Aparte brok voor centralisatie.', 'leadsonderhoud');
     if (cur.id === 'alg-meldingen')      return bodyDeepLink(null, 'Notification-preferences (dagelijkse/wekelijkse admin-mails) zijn server-side geconfigureerd via cron + rol-lookup. Voor per-user meldingen: aparte brok om notification_preferences-tabel + UI toe te voegen.', null);
-    if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
+    // (alg-bedrijf verplaatst naar Wave-3 bovenaan setBody; bodyBedrijf placeholder blijft ongebruikt)
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
@@ -1707,6 +2010,8 @@
       'com-handtekening','com-sjabloon','sys-followup-admin',
       // Wave-2 A1-A4
       'com-wa','mk-webflow','sys-bubble-schema','fin-entiteiten',
+      // Wave-3 (display-only + fin-facturatie write)
+      'team-api','com-mail','com-tel','alg-bedrijf','fin-bank','fin-facturatie',
     ]);
     const DEEPLINK = new Set([
       'agents-lisa','agents-manager','agents-kennis',
