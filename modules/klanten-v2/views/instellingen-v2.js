@@ -371,30 +371,114 @@
      direct-supabase (zelfde pattern als team-rechten). CRUD blijft in Supabase-
      console (te complex om nu te bouwen; low-frequency actie: entiteiten worden
      nauwelijks toegevoegd). Custom confirm bij delete = deep-link only. */
-  const _ent = { loading: false, fetched: false, error: null, items: [] };
-  async function fetchEntiteiten() {
-    if (_ent.loading || _ent.fetched) return;
+  // Ronde-28 · CRUD op company_entities via direct-supabase (zoals RBAC).
+  const _ent = { loading: false, fetched: false, error: null, items: [], ed: null, busy: false };
+  async function fetchEntiteiten(force) {
+    if (_ent.loading) return;
+    if (_ent.fetched && !force) return;
     _ent.loading = true; _ent.error = null; if (render) render();
     try {
       if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-      const { data, error } = await window.supabase.from('company_entities').select('*').order('label');
+      const { data, error } = await window.supabase.from('company_entities')
+        .select('id, tl_department_id, name, label, description, display_order, is_active')
+        .order('display_order', { ascending: true }).order('label');
       if (error) throw error;
       _ent.items = data || [];
     } catch (e) { _ent.error = e?.message || 'onbekend'; }
     _ent.loading = false; _ent.fetched = true;
     if (render) render();
   }
+  window.__setEntNew  = () => { _ent.ed = { id: null, tl_department_id: '', name: '', label: '', description: '', display_order: (_ent.items.length + 1) * 10 }; if (render) render(); };
+  window.__setEntEdit = (id) => { const it = _ent.items.find(x => x.id === id); if (!it) return; _ent.ed = { ...it }; if (render) render(); };
+  window.__setEntCancel = () => { _ent.ed = null; if (render) render(); };
+  window.__setEntField = (k, v) => { if (_ent.ed) { _ent.ed[k] = (k === 'display_order') ? (Number(v) || 0) : String(v || ''); if (render) render(); } };
+  window.__setEntSave = () => {
+    const e = _ent.ed; if (!e) return;
+    if (!String(e.label || '').trim())            { showToast('Label is verplicht', 'warn'); return; }
+    if (!String(e.tl_department_id || '').trim()) { showToast('TL Department ID is verplicht', 'warn'); return; }
+    openConfirm(`${e.id ? 'Wijzigingen opslaan voor' : 'Nieuwe entiteit aanmaken:'} "${e.label}"? Raakt facturatie- en MRR-scoping.`, async () => {
+      _ent.busy = true; if (render) render();
+      try {
+        if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+        const payload = {
+          tl_department_id: String(e.tl_department_id).trim(),
+          name: String(e.name || '').trim() || null,
+          label: String(e.label).trim(),
+          description: String(e.description || '').trim() || null,
+          display_order: Number(e.display_order) || 0,
+        };
+        let error;
+        if (e.id) ({ error } = await window.supabase.from('company_entities').update(payload).eq('id', e.id));
+        else       ({ error } = await window.supabase.from('company_entities').insert({ ...payload, is_active: true }));
+        if (error) throw error;
+        showToast(e.id ? 'Entiteit bijgewerkt' : 'Entiteit aangemaakt', 'ok');
+        _ent.ed = null; _ent.fetched = false; fetchEntiteiten(true);
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _ent.busy = false; if (render) render(); }
+    });
+  };
+  window.__setEntToggleActive = (id) => {
+    const it = _ent.items.find(x => x.id === id); if (!it) return;
+    const next = !it.is_active;
+    openConfirm(`${next ? 'HERACTIVEER' : 'DEACTIVEER'} entiteit "${it.label}"?${next ? '' : ' Nieuwe deals/facturen kunnen niet meer aan deze entiteit worden gekoppeld (historie blijft intact).'}`, async () => {
+      try {
+        if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+        const { error } = await window.supabase.from('company_entities').update({ is_active: next }).eq('id', id);
+        if (error) throw error;
+        showToast(next ? 'Entiteit heractiveerd' : 'Entiteit gedeactiveerd', 'ok');
+        _ent.fetched = false; fetchEntiteiten(true);
+      } catch (err) { showToast('Actie mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+    }, 'warn');
+  };
+  function _renderEntEditor() {
+    const e = _ent.ed; if (!e) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setEntCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">${e.id ? 'Entiteit bewerken' : 'Nieuwe entiteit'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setEntCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">
+          <label style="font-size:11.5px;color:var(--text-2)">Label <span style="color:var(--rose)">*</span>
+            <input type="text" value="${esc(e.label || '')}" oninput="window.__setEntField('label',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">TL Department ID <span style="color:var(--rose)">*</span>
+            <input type="text" value="${esc(e.tl_department_id || '')}" oninput="window.__setEntField('tl_department_id',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Naam
+            <input type="text" value="${esc(e.name || '')}" oninput="window.__setEntField('name',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Volgorde
+            <input type="number" value="${esc(String(e.display_order || 0))}" oninput="window.__setEntField('display_order',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Beschrijving
+            <textarea rows="2" oninput="window.__setEntField('description',this.value)" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.description || '')}</textarea>
+          </label>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setEntCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_ent.busy ? 'disabled' : ''} onclick="window.__setEntSave()">${_ent.busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
   function bodyEntiteiten() {
     if (!_ent.fetched && !_ent.loading) queueMicrotask(() => fetchEntiteiten());
-    const rows = _ent.items.map(e => `<tr style="border-top:1px solid var(--border)">
+    const rows = _ent.items.map(e => `<tr style="border-top:1px solid var(--border);${e.is_active ? '' : 'opacity:.55'}">
       <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(e.label || '—')}</td>
       <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(e.tl_department_id || '—')}</td>
-      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(e.country || '—')}</td>
-      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${e.is_active ? '✓ actief' : '⨯ inactief'}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(e.name || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px">${e.is_active ? '✓ actief' : '⨯ inactief'}</td>
+      <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="window.__setEntEdit('${esc(e.id)}')" style="font-size:11px">Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setEntToggleActive('${esc(e.id)}')" style="font-size:11px;color:${e.is_active ? 'var(--rose)' : 'var(--emerald)'}">${e.is_active ? 'Deactiveer' : 'Heractiveer'}</button>
+      </td>
     </tr>`).join('');
-    return `<div style="max-width:1000px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">
-        <b>CRUD volgt:</b> read-only lijst nu. Aanmaken/bewerken/verwijderen van entiteiten (raakt facturatie + MRR-scoping) vraagt eigen brok. Nieuwe entiteit nodig? Vraag Amigo.
+    return `<div style="max-width:1100px">
+      ${_renderEntEditor()}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+        <div style="font-size:12.5px;color:var(--text-3)">Entiteiten sturen facturatie + MRR-scoping. Deactiveren i.p.v. hard-delete (historie blijft).</div>
+        <button class="btn btn-primary btn-sm" onclick="window.__setEntNew()">➕ Nieuwe entiteit</button>
       </div>
       ${_ent.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ent.error)}</div>` : ''}
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -402,10 +486,11 @@
           <thead><tr style="background:var(--surface-2)">
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Label</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">TL Department ID</th>
-            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Land</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
           </tr></thead>
-          <tbody>${rows || `<tr><td colspan="4" style="padding:16px;color:var(--text-3);font-size:12.5px">${_ent.loading ? 'Laden…' : 'Geen entiteiten gevonden'}</td></tr>`}</tbody>
+          <tbody>${rows || `<tr><td colspan="5" style="padding:16px;color:var(--text-3);font-size:12.5px">${_ent.loading ? 'Laden…' : 'Geen entiteiten gevonden'}</td></tr>`}</tbody>
         </table>
       </div>
     </div>`;
