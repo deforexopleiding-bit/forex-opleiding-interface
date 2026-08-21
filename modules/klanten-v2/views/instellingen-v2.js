@@ -572,7 +572,11 @@
         : rolesSum.length
           ? `<table style="width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
               <thead><tr style="background:var(--surface-2)"><th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Rol</th><th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Actieve permissions</th></tr></thead>
-              <tbody>${rolesSum.map(([r,c]) => `<tr style="border-top:1px solid var(--border)"><td style="padding:8px 12px;font-size:12.5px">${esc(r)}</td><td style="padding:8px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${c}</td></tr>`).join('')}</tbody>
+              <tbody>${rolesSum.map(([r,c]) => {
+                // Polish C: super_admin heeft altijd bypass ('*'); toon dat i.p.v. het letterlijke row-getal.
+                const display = r === 'super_admin' ? '<span style="color:var(--emerald);font-weight:600">volledige toegang (bypass)</span>' : String(c);
+                return `<tr style="border-top:1px solid var(--border)"><td style="padding:8px 12px;font-size:12.5px">${esc(r)}</td><td style="padding:8px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${display}</td></tr>`;
+              }).join('')}</tbody>
             </table>`
           : `<div style="color:var(--text-3);font-size:12.5px">Geen permissions-data ontvangen. Endpoint retourneerde geen items/matrix.</div>`;
     return `<div style="max-width:900px">
@@ -1375,8 +1379,12 @@
       </tr>`;
     }).join('');
     const picker = _mnt.pickerFor ? _renderMntPicker() : '';
+    // Polish C: mentoren-lijst komt uit /api/team-members-bubble-status die
+    // ALLE actieve mentoren (gekoppeld + niet) returnt via user_roles + is_active.
+    // Als telling afwijkt van de Mentoren-module (bv. 6 hier vs 7 daar), zit dat
+    // in test-mentor-filtering elders. Endpoint filtert alleen op is_active.
     return `<div style="max-width:1000px">
-      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_mnt.mentors.length} mentor(en)</div>
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_mnt.mentors.length} actieve mentor(en) — bron: /api/team-members-bubble-status</div>
       <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="background:var(--surface-2)">
