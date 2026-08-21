@@ -258,6 +258,23 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
+  /* Wave-2 · DEEL B — deep-link body voor niet-geporte config-secties.
+     Reden per sectie is beknopt uitgelegd zodat de gebruiker snapt WAAROM
+     de instelling nu in een andere module leeft. Bij `modKey` opgegeven:
+     directe navigatie-knop via DFO.goMod. */
+  function bodyDeepLink(modLabel, why, modKey) {
+    const btn = modKey ? `<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="DFO.goMod('${esc(modKey)}')">Open ${esc(modLabel || 'module')} →</button>` : '';
+    return `<div style="max-width:720px">
+      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55">
+        <b>Deze instellingen zijn nog niet gecentraliseerd</b> — reden hieronder. Ze werken wel, maar in hun originele module. Volledige port naar deze pagina volgt in een eigen brok.
+      </div>
+      <div style="padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text-2);line-height:1.6;margin-top:12px">
+        ${esc(why)}
+        ${btn}
+      </div>
+    </div>`;
+  }
+
   /* Wave-2 · mk-webflow — auto-publish toggle + publish-now.
      Reads/writes app-settings ({key: 'webflow_auto_publish_enabled', value: {enabled: bool}}
      — object-shape zoals admin repliceren). Publish-now = ECHTE live-publish → confirm. */
@@ -1637,6 +1654,22 @@
     if (cur.id === 'mk-webflow')         return bodyWebflow();
     if (cur.id === 'sys-bubble-schema')  return bodyBubbleProbe();
     if (cur.id === 'fin-entiteiten')     return bodyEntiteiten();
+    // Wave-2 · DEEL B — deep-links (config leeft nu in bestaande modules; volledige
+    // port vereist eigen brok per sectie omdat de bron-modules eigen state/UI hebben).
+    if (cur.id === 'agents-lisa')        return bodyDeepLink('AI Agents', 'De Lisa-config (persona/fases/follow-ups) staat in de AI Agents-module. Verhuizen naar hier vereist port van de agents-config-UI + endpoints — aparte brok.', 'agents');
+    if (cur.id === 'agents-manager')     return bodyDeepLink('AI Agents', 'AI Manager-instellingen (system-prompt, kennis, autonomie) staan in de AI Agents-module. Het werkende endpoint /api/super-admin-ai-manager voedt de widget op het dashboard.', 'agents');
+    if (cur.id === 'agents-kennis')      return bodyDeepLink('AI Agents', 'Kennisbank voor AI (Lisa/Joost) staat verspreid over de AI Agents-module + Joost-config. Aparte brok om te centraliseren.', 'agents');
+    if (cur.id === 'sales-trajecten')    return bodyDeepLink('Sales', 'Trajecten (looptijden/prijzen/termijnen) worden in de Sales-wizard beheerd. Directe editor volgt in Wave 3.', 'sales');
+    if (cur.id === 'sales-producten')    return bodyDeepLink('Sales', 'Losse producten (E-books, lascursus, consultancy) staan in de Sales-catalogus/wizard. Aparte brok voor centrale editor.', 'sales');
+    if (cur.id === 'sales-bonus')        return bodyDeepLink('Sales', 'Verkopers en bonus-config zit in de Sales-module + team_members-tabel. Bonus-berekening is server-side; UI-editor volgt in Wave 3.', 'sales');
+    if (cur.id === 'ev-auto')            return bodyDeepLink('Automatiseringen', 'Event-automatiseringen worden in de Automatiseringen-module bewerkt (per-trigger flows). Directe centralisatie vereist port van die UI.', 'automatiseringen');
+    if (cur.id === 'ev-templates')       return bodyDeepLink('Events', 'Event-berichten (e-mail + WhatsApp) worden per template beheerd in de Events-module + com-wa hier voor WA-templates.', 'events');
+    if (cur.id === 'ev-locaties')        return bodyDeepLink('Events', 'Locaties (zalen/adressen/routes) staan in de events-config; centrale editor volgt.', 'events');
+    if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in Bubble; het CRM leest via bubble-api. Zie sys-bubble-schema voor diagnostiek.', null);
+    if (cur.id === 'mk-meta')            return bodyDeepLink(null, 'Meta-koppeling (ads-account + pixel) wordt beheerd in Meta Business Manager. Alleen de WhatsApp-Cloud-API-koppeling wordt hier bewerkt (zie com-wa).', 'com-wa');
+    if (cur.id === 'mk-bronnen')         return bodyDeepLink('Leads', 'Lead-bronnen (leads.bron / leads.traject-mapping) worden in de Leads-module gezet; dashboard-tegels lezen /api/leads-per-traject-count. Centrale editor vraagt eigen brok.', 'leads');
+    if (cur.id === 'mk-sequenties')      return bodyDeepLink('Leadsonderhoud', 'Sequenties (automatische lead-opvolging) worden in de Leadsonderhoud-module beheerd. Aparte brok voor centralisatie.', 'leadsonderhoud');
+    if (cur.id === 'alg-meldingen')      return bodyDeepLink(null, 'Notification-preferences (dagelijkse/wekelijkse admin-mails) zijn server-side geconfigureerd via cron + rol-lookup. Voor per-user meldingen: aparte brok om notification_preferences-tabel + UI toe te voegen.', null);
     if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
@@ -1667,9 +1700,18 @@
       // Wave-2 A1-A4
       'com-wa','mk-webflow','sys-bubble-schema','fin-entiteiten',
     ]);
+    const DEEPLINK = new Set([
+      'agents-lisa','agents-manager','agents-kennis',
+      'sales-trajecten','sales-producten','sales-bonus',
+      'ev-auto','ev-templates','ev-locaties','lms-instel',
+      'mk-meta','mk-bronnen','mk-sequenties',
+      'alg-meldingen',
+    ]);
     const bannerHtml = WIRED.has(cur.id)
       ? `<div style="padding:6px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">● LIVE DATA — instellingen op deze pagina zijn echt en worden direct opgeslagen</div>`
-      : H.voorbeeldBanner();
+      : DEEPLINK.has(cur.id)
+        ? `<div style="padding:6px 12px;background:var(--blue-soft, var(--surface-2));color:var(--blue, var(--text-2));border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">◇ DEEP-LINK — instelling leeft in een andere module (uitleg hieronder)</div>`
+        : H.voorbeeldBanner();
     return `${bannerHtml}
       <div class="set-split">
         <div class="set-nav">
