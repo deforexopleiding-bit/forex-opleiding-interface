@@ -11,6 +11,14 @@
 import { supabaseAdmin } from '../supabase.js';
 
 const AUTO_SETTINGS_KEY = 'dunning_pipeline_auto';
+// Grace-periode: als alle facturen betaald zijn sluiten we een klant NIET meteen
+// af, maar plannen we de resolve op now()+deze minuten. Zo rukken we iemand met
+// wie je in gesprek bent niet bruusk uit het overzicht. De engine-cron voert de
+// resolve uit zodra now() >= resolve_scheduled_at én nog steeds alles betaald is
+// (anders: annuleren).
+export const PAID_GRACE_MINUTES = 60;
+// Statussen die als "open factuur" gelden (spiegelt de count-check bij betalen).
+const OPEN_INVOICE_STATUSES = ['open', 'partially_paid', 'overdue'];
 // TERMINAL = "definitief afgerond" (opgelost/afschrijven). Blijft bestaan
 // voor de setStage() auto-lock (auto-callers mogen een terminal-klant NIET
 // per ongeluk uit terminal weghalen) en voor semantische UI-labels.
@@ -170,11 +178,14 @@ export async function setStage(customerId, toSlug, reason, byUser, opts) {
     const { error: uErr } = await supabaseAdmin
       .from('dunning_pipeline_customers')
       .update({
-        stage_slug       : toSlug,
-        stage_changed_at : nowIso,
-        stage_changed_by : byUser || 'auto',
-        last_activity_at : nowIso,
-        updated_at       : nowIso,
+        stage_slug          : toSlug,
+        stage_changed_at    : nowIso,
+        stage_changed_by    : byUser || 'auto',
+        last_activity_at    : nowIso,
+        updated_at          : nowIso,
+        // Elke stage-wijziging annuleert een eventueel geplande grace-resolve
+        // (handmatige move, engine-resolve, of terugzetten naar een open fase).
+        resolve_scheduled_at: null,
       })
       .eq('id', row.id);
     if (uErr) throw new Error(uErr.message);
@@ -191,6 +202,151 @@ export async function setStage(customerId, toSlug, reason, byUser, opts) {
     console.warn('[dunning-pipeline] setStage fail-soft', customerId, toSlug, e?.message || e);
     return { ok: false, reason: e?.message || 'update_fail' };
   }
+}
+
+/**
+ * countOpenInvoices(customerId) — aantal facturen met status open/partially_paid/
+ * overdue. 0 = geen enkele openstaande factuur meer (spiegelt de check bij betalen).
+ * Fail-soft → null bij fout (caller behandelt null conservatief = "niet zeker leeg").
+ */
+export async function countOpenInvoices(customerId) {
+  if (!customerId) return null;
+  try {
+    const { count, error } = await supabaseAdmin
+      .from('invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_id', customerId)
+      .in('status', OPEN_INVOICE_STATUSES);
+    if (error) throw new Error(error.message);
+    return count || 0;
+  } catch (e) {
+    console.warn('[dunning-pipeline] countOpenInvoices fail-soft', customerId, e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * schedulePaidResolve(customerId, byUser) — plan de automatische afsluiting op
+ * now()+PAID_GRACE_MINUTES i.p.v. meteen naar 'opgelost'. Aangeroepen op de
+ * "volledig betaald"-transitie. Doet NIETS aan de stage (klant blijft zichtbaar
+ * in zijn huidige fase). Idempotent: al gepland → geen nieuwe planning/log.
+ *
+ * Skip als: geen pipeline-record (klant zat niet in dunning) of terminale fase
+ * (al opgelost/afschrijven). FAIL-SOFT — mag de betaal-registratie nooit breken.
+ */
+export async function schedulePaidResolve(customerId, byUser) {
+  if (!customerId) return { ok: false, reason: 'no_customer_id' };
+  try {
+    const { data: row } = await supabaseAdmin
+      .from('dunning_pipeline_customers')
+      .select('id, stage_slug, resolve_scheduled_at')
+      .eq('customer_id', customerId)
+      .maybeSingle();
+    if (!row) return { ok: true, skipped: 'no_pipeline_record' };
+    const stage = row.stage_slug || 'nieuw';
+    if (TERMINAL_STAGES.has(stage)) return { ok: true, skipped: 'terminal' };
+    if (row.resolve_scheduled_at) return { ok: true, skipped: 'already_scheduled', at: row.resolve_scheduled_at };
+
+    const nowIso = new Date().toISOString();
+    const at = new Date(Date.now() + PAID_GRACE_MINUTES * 60_000).toISOString();
+    const { error } = await supabaseAdmin
+      .from('dunning_pipeline_customers')
+      .update({ resolve_scheduled_at: at, last_activity_at: nowIso, updated_at: nowIso })
+      .eq('id', row.id);
+    if (error) throw new Error(error.message);
+
+    await addLogEntry(
+      customerId,
+      'auto_event',
+      `Alles betaald — sluit automatisch over ~${PAID_GRACE_MINUTES} min`,
+      { reason: 'all_paid_grace', resolve_scheduled_at: at, from_stage: stage },
+      byUser || 'auto:paid',
+    );
+    return { ok: true, scheduledAt: at, from: stage };
+  } catch (e) {
+    console.warn('[dunning-pipeline] schedulePaidResolve fail-soft', customerId, e?.message || e);
+    return { ok: false, reason: e?.message || 'update_fail' };
+  }
+}
+
+/**
+ * cancelPaidResolve(customerId, byUser, reason) — wis een geplande grace-resolve
+ * (bv. er staat weer een factuur open). Logt alleen als er echt iets gepland stond.
+ * FAIL-SOFT.
+ */
+export async function cancelPaidResolve(customerId, byUser, reason) {
+  if (!customerId) return { ok: false, reason: 'no_customer_id' };
+  try {
+    const { data: row } = await supabaseAdmin
+      .from('dunning_pipeline_customers')
+      .select('id, resolve_scheduled_at')
+      .eq('customer_id', customerId)
+      .maybeSingle();
+    if (!row || !row.resolve_scheduled_at) return { ok: true, skipped: 'nothing_scheduled' };
+
+    const nowIso = new Date().toISOString();
+    const { error } = await supabaseAdmin
+      .from('dunning_pipeline_customers')
+      .update({ resolve_scheduled_at: null, updated_at: nowIso })
+      .eq('id', row.id);
+    if (error) throw new Error(error.message);
+
+    await addLogEntry(
+      customerId,
+      'auto_event',
+      reason || 'Geplande afsluiting geannuleerd — weer een openstaande factuur',
+      { reason: 'all_paid_grace_cancelled' },
+      byUser || 'auto',
+    );
+    return { ok: true, cancelled: true };
+  } catch (e) {
+    console.warn('[dunning-pipeline] cancelPaidResolve fail-soft', customerId, e?.message || e);
+    return { ok: false, reason: e?.message || 'update_fail' };
+  }
+}
+
+/**
+ * finalizePaidResolve(customerId, byUser) — voert de daadwerkelijke afsluiting uit:
+ * stage → 'opgelost' (reason all_paid_grace; setStage wist meteen resolve_scheduled_at)
+ * + sluit de open MANUAL_FOLLOWUP-taken (zoals de directe flow voorheen deed, maar
+ * nu pas op het resolve-moment i.p.v. bruusk bij betalen). FAIL-SOFT.
+ *
+ * De caller (engine-sweep) her-checkt zelf dat er 0 open facturen zijn.
+ */
+export async function finalizePaidResolve(customerId, byUser) {
+  if (!customerId) return { ok: false, reason: 'no_customer_id' };
+  const moved = await setStage(customerId, 'opgelost', 'all_paid_grace', byUser || 'auto:paid');
+  // Cascade: open MANUAL_FOLLOWUP-taken sluiten (voorkomt bellen van een betaalde klant).
+  try {
+    const nowIso = new Date().toISOString();
+    const { data: closedRows, error: closeErr } = await supabaseAdmin
+      .from('pending_actions')
+      .update({ status: 'REJECTED', rejection_reason: 'auto - klant heeft volledig betaald', updated_at: nowIso })
+      .eq('customer_id', customerId)
+      .eq('action_type', 'MANUAL_FOLLOWUP')
+      .eq('status', 'PENDING')
+      .select('id');
+    const closedCount = Array.isArray(closedRows) ? closedRows.length : 0;
+    if (closeErr) {
+      console.warn('[dunning-pipeline] finalizePaidResolve auto-close soft-fail', customerId, closeErr.message);
+    } else if (closedCount > 0) {
+      try {
+        await supabaseAdmin.from('dunning_log').insert({
+          run_id: null, step_id: null, event_type: 'pending_actions_auto_closed_paid',
+          payload: {
+            customer_id: customerId,
+            closed_action_ids: (closedRows || []).map((r) => r.id),
+            closed_count: closedCount,
+            reason: 'auto - klant heeft volledig betaald',
+            triggered_by: 'dunning-engine:all_paid_grace',
+          },
+        });
+      } catch { /* fail-soft */ }
+    }
+  } catch (e) {
+    console.warn('[dunning-pipeline] finalizePaidResolve cascade exception', customerId, e?.message || e);
+  }
+  return { ok: true, moved };
 }
 
 export const PIPELINE_TERMINAL_STAGES = TERMINAL_STAGES;

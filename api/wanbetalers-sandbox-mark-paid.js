@@ -72,23 +72,24 @@ export default async function handler(req, res) {
     }
 
     // Pipeline-trigger 'on_paid_to_opgelost' — alleen als er 0 open facturen
-    // over zijn (zelfde check als register-payment-internal).
+    // over zijn (zelfde check als register-payment-internal). Sluit NIET meteen
+    // af: plant de grace-afsluiting (now()+60min), consistent met de echte flow.
     let pipelineFired = false;
     try {
-      const { isAutoEnabled, setStage } = await import('./_lib/dunning-pipeline.js');
+      const { isAutoEnabled, schedulePaidResolve } = await import('./_lib/dunning-pipeline.js');
       const { count: openLeft } = await supabaseAdmin.from('invoices')
         .select('id', { count: 'exact', head: true })
         .eq('customer_id', customer.id)
         .in('status', ['open', 'partially_paid', 'overdue']);
       if ((openLeft || 0) === 0 && (await isAutoEnabled('on_paid_to_opgelost'))) {
-        await setStage(customer.id, 'opgelost', 'all_paid', 'sandbox:paid');
+        await schedulePaidResolve(customer.id, 'sandbox:paid');
         pipelineFired = true;
       }
     } catch (e) {
       console.warn('[sandbox-mark-paid] pipeline hook soft-fail', e?.message);
     }
 
-    return res.status(200).json({ ok: true, invoices_marked_paid: updated, pipeline_opgelost_fired: pipelineFired });
+    return res.status(200).json({ ok: true, invoices_marked_paid: updated, pipeline_resolve_scheduled: pipelineFired });
   } catch (e) {
     console.error('[sandbox-mark-paid]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

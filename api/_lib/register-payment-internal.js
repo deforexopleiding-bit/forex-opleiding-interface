@@ -230,18 +230,16 @@ export async function registerPaymentInternal(opts) {
     }).catch(() => {});
 
     // 5d. Pipeline-hook: als de klant geen andere open facturen meer heeft,
-    // fase → 'opgelost'. Terminal-guard in setStage voorkomt dat een
-    // reeds afgeschreven pipeline-record ongedaan wordt gemaakt.
-    // Fail-soft; mag betaal-registratie nooit doen falen.
-    //
-    // FASE 7: bij dezelfde "volledig betaald"-transitie ook automatisch de
-    // open MANUAL_FOLLOWUP-taken (bel-taken/brief-taken) sluiten. Voorkomt
-    // dat je iemand belt die 's ochtends al betaald heeft. Alleen dit type,
-    // alleen PENDING, alleen deze klant. Idempotent (2e call = 0 updates
-    // want PENDING is dan al REJECTED). MANUAL_VERIFY_PAYMENT / MANUAL_
-    // ESCALATION / TL_* blijven staan — die zijn expliciet andere flows.
+    // NIET meer meteen naar 'opgelost' — dat rukt iemand met wie je in gesprek
+    // bent bruusk uit het overzicht. In plaats daarvan plannen we de afsluiting
+    // op now()+60min (grace). De klant blijft die tijd in zijn huidige fase
+    // zichtbaar met een "Betaald ✓ — sluit automatisch over ~X min"-badge. De
+    // dunning-engine (cron) voert de daadwerkelijke afsluiting én de FASE 7
+    // MANUAL_FOLLOWUP-cascade uit zodra de grace verstreken is en er nog steeds
+    // 0 open facturen zijn. Reopent er binnen die tijd een factuur, dan wist de
+    // engine de planning weer. Fail-soft; mag betaal-registratie nooit breken.
     try {
-      const { isAutoEnabled, setStage } = await import('./dunning-pipeline.js');
+      const { isAutoEnabled, schedulePaidResolve } = await import('./dunning-pipeline.js');
       if (inv.customer_id && (await isAutoEnabled('on_paid_to_opgelost'))) {
         const { count: openLeft } = await supabaseAdmin
           .from('invoices')
@@ -249,45 +247,7 @@ export async function registerPaymentInternal(opts) {
           .eq('customer_id', inv.customer_id)
           .in('status', ['open', 'partially_paid', 'overdue']);
         if ((openLeft || 0) === 0) {
-          await setStage(inv.customer_id, 'opgelost', 'all_paid', 'auto:paid');
-          // FASE 7 cascade — puur pending_actions cleanup, geen andere effecten.
-          try {
-            const nowIso = new Date().toISOString();
-            const { data: closedRows, error: closeErr } = await supabaseAdmin
-              .from('pending_actions')
-              .update({
-                status:           'REJECTED',
-                rejection_reason: 'auto - klant heeft volledig betaald',
-                updated_at:       nowIso,
-              })
-              .eq('customer_id', inv.customer_id)
-              .eq('action_type', 'MANUAL_FOLLOWUP')
-              .eq('status',      'PENDING')
-              .select('id');
-            const closedCount = Array.isArray(closedRows) ? closedRows.length : 0;
-            if (closeErr) {
-              console.warn('[register-payment-internal] auto-close MANUAL_FOLLOWUP soft-fail', inv.id, closeErr.message);
-            } else if (closedCount > 0) {
-              // Log naar dunning_log zodat de timeline/audit dit toont.
-              try {
-                await supabaseAdmin.from('dunning_log').insert({
-                  run_id     : null,
-                  step_id    : null,
-                  event_type : 'pending_actions_auto_closed_paid',
-                  payload    : {
-                    customer_id       : inv.customer_id,
-                    invoice_id        : inv.id,
-                    closed_action_ids : (closedRows || []).map((r) => r.id),
-                    closed_count      : closedCount,
-                    reason            : 'auto - klant heeft volledig betaald',
-                    triggered_by      : source || 'register-payment-internal',
-                  },
-                });
-              } catch (_) { /* fail-soft */ }
-            }
-          } catch (e) {
-            console.warn('[register-payment-internal] auto-close MANUAL_FOLLOWUP exception', inv.id, e?.message || e);
-          }
+          await schedulePaidResolve(inv.customer_id, 'auto:paid');
         }
       }
     } catch (e) {

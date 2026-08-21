@@ -549,6 +549,72 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     console.warn('[dunning-engine] pipeline-hook overdue soft-fail:', e?.message || e);
   }
 
+  // ── Grace-resolve sweep: geplande "alles betaald"-afsluitingen afronden ──
+  // Bij het volledig betalen zetten we resolve_scheduled_at = now()+60min i.p.v.
+  // meteen naar 'opgelost' (de klant blijft die tijd zichtbaar). Deze sweep:
+  //   • factuur weer open  → planning annuleren (cancelPaidResolve)
+  //   • grace verstreken + nog 0 open → afronden (finalizePaidResolve: stage
+  //     'opgelost' + FASE 7 MANUAL_FOLLOWUP-cascade)
+  //   • grace nog niet om + nog 0 open → laten staan (badge telt af)
+  // is_test-scope wordt HERBEVESTIGD via een count op invoices; de count zelf
+  // is statusgebaseerd (open/partially_paid/overdue) zoals bij het betalen.
+  // FAIL-SOFT + time-budget-guard, net als de instroom-loop.
+  try {
+    const { cancelPaidResolve, finalizePaidResolve } = await import('./dunning-pipeline.js');
+    const nowMs = Date.now();
+    const pendingRows = await fetchAllRows(() =>
+      supabaseAdmin
+        .from('dunning_pipeline_customers')
+        .select('customer_id, stage_slug, resolve_scheduled_at')
+        .not('resolve_scheduled_at', 'is', null)
+    );
+    let resolvedCount = 0, cancelledCount = 0, waitingCount = 0;
+    for (const row of pendingRows || []) {
+      if (elapsed(startedAt) > abortMs) break;
+      const cid = row?.customer_id;
+      if (!cid) continue;
+      // Terminale fase (bv. handmatig al afgeschreven) → planning is zinloos,
+      // wis 'm stil. setStage bij een handmatige move wist resolve_scheduled_at
+      // normaal al; dit is de vangnet-tak.
+      if (row.stage_slug === 'opgelost' || row.stage_slug === 'afschrijven') {
+        await cancelPaidResolve(cid, 'auto', 'Planning gewist — klant staat al in een eindfase');
+        cancelledCount++;
+        continue;
+      }
+      // Her-check: nog open facturen? Scope-consistent met de rest van de engine.
+      let openLeft = 0;
+      try {
+        let q = supabaseAdmin
+          .from('invoices')
+          .select('id', { count: 'exact', head: true })
+          .eq('customer_id', cid)
+          .in('status', OPEN_STATUSES);
+        if      (scope === 'production') q = q.eq('is_test', false);
+        else if (scope === 'test')       q = q.eq('is_test', true);
+        const { count } = await q;
+        openLeft = count || 0;
+      } catch (e) {
+        console.warn('[dunning-engine] grace-sweep count soft-fail', cid, e?.message || e);
+        continue; // onzeker → niets doen, volgende run opnieuw
+      }
+      if (openLeft > 0) {
+        await cancelPaidResolve(cid, 'auto');
+        cancelledCount++;
+        continue;
+      }
+      const dueMs = Date.parse(row.resolve_scheduled_at);
+      if (Number.isFinite(dueMs) && dueMs <= nowMs) {
+        await finalizePaidResolve(cid, 'auto:paid');
+        resolvedCount++;
+      } else {
+        waitingCount++;
+      }
+    }
+    console.log(`[dunning-engine] grace-resolve: ${resolvedCount} afgesloten, ${cancelledCount} geannuleerd, ${waitingCount} nog in grace`);
+  } catch (e) {
+    console.warn('[dunning-engine] grace-resolve sweep soft-fail:', e?.message || e);
+  }
+
   outer: for (const workflow of workflows || []) {
     if (elapsed(startedAt) > abortMs) break;
 

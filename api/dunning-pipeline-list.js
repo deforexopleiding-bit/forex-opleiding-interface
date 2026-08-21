@@ -35,7 +35,7 @@ export default async function handler(req, res) {
   try {
     let q = supabaseAdmin
       .from('dunning_pipeline_customers')
-      .select('id, customer_id, stage_slug, stage_changed_at, stage_changed_by, last_activity_at, created_at')
+      .select('id, customer_id, stage_slug, stage_changed_at, stage_changed_by, last_activity_at, created_at, resolve_scheduled_at')
       .order('last_activity_at', { ascending: false })
       .limit(500);
     if (stageFilter) q = q.eq('stage_slug', stageFilter);
@@ -144,6 +144,7 @@ export default async function handler(req, res) {
         stage_slug        : r.stage_slug,
         stage_changed_at  : r.stage_changed_at,
         last_activity_at  : r.last_activity_at,
+        resolve_scheduled_at: r.resolve_scheduled_at || null,
         open_invoice_count: agg.count,
         total_open_cents  : agg.cents,
         last_log          : lastLogByCust.get(r.customer_id) || null,
