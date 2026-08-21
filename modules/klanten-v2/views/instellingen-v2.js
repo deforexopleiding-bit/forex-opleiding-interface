@@ -49,7 +49,10 @@
         const cls = tone === 'warn' || tone === 'error' ? 'ds-toast-error' : (tone === 'ok' || tone === 'success' ? 'ds-toast-ok' : '');
         el.className = 'ds-toast show ' + cls;
         el.textContent = String(msg || '');
-        setTimeout(() => { try { el.className = 'ds-toast'; } catch (_) {} }, 3500);
+        // Nit-fix (verify Wave-2): bij dismiss ook textContent leegmaken zodat
+        // er geen ghost-tekst in de DOM blijft plakken (visueel onzichtbaar
+        // maar detecteerbaar via document.body.innerText).
+        setTimeout(() => { try { el.className = 'ds-toast'; el.textContent = ''; } catch (_) {} }, 3500);
         return;
       }
     } catch (_) { /* fall through */ }
@@ -155,7 +158,7 @@
     ]},
     { g: 'Financieel', items: [
       { id: 'fin-facturatie',   n: 'Facturatie',           d: 'Nummering, betaaltermijn en standaard-btw',                 ic: I.doc },
-      { id: 'fin-entiteiten',   n: 'Entiteiten',           d: 'DFO en DFO BE · gegevens en rekeningnummers',               ic: I.building || I.file },
+      { id: 'fin-entiteiten',   n: 'Entiteiten',           d: 'Bedrijfs-entiteiten voor facturatie + MRR-scoping',         ic: I.building || I.file },
       { id: 'fin-teamleader',   n: 'Teamleader-koppeling', d: 'Synchronisatie van klanten, offertes en facturen',          ic: I.link || I.file },
       { id: 'fin-bank',         n: 'Bankkoppeling',        d: 'CAMT-import en matchingregels',                             ic: I.bank || I.file },
     ]},
@@ -355,7 +358,7 @@
              : _bs.result ? `<pre style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11.5px;max-height:400px;overflow:auto;font-family:'IBM Plex Mono',monospace;margin:0">${esc(JSON.stringify(_bs.result, null, 2))}</pre>`
              : `<div style="color:var(--text-3);font-size:12px">Klik een knop om het schema van dat objecttype op te halen.</div>`;
     return `<div style="max-width:900px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">Vraagt 1 record op van een Bubble-objecttype en toont uitsluitend property-keys + JS-typen. Geen PII. Alleen super_admin.</div>
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">Sampled een set records van een Bubble-objecttype (default 200) en toont uitsluitend property-keys + JS-typen. Geen waarden/PII. Alleen super_admin.</div>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user')">${_bs.busy && _bs.type === 'user' ? 'Bezig…' : '👤 User-velden'}</button>
         <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('session')">${_bs.busy && _bs.type === 'session' ? 'Bezig…' : '⏱ Session-velden'}</button>
@@ -708,26 +711,55 @@
      Submit/sync/delete via bestaande endpoints achter custom confirm (echte Meta-
      actie). Edit/detail = deep-link (form is complex). WA-nummer registreren:
      custom confirm + POST /api/whatsapp-register-number. */
-  const _wa = { loading: false, fetched: false, error: null, items: [], busy: {} };
+  const _wa = { loading: false, fetched: false, error: null, items: [], busy: {}, modules: [], moduleId: null };
   async function fetchWaTemplates() {
     if (_wa.loading || _wa.fetched) return;
     _wa.loading = true; _wa.error = null; if (render) render();
-    const j = await tryFetch('meta-tpls', '/api/admin-meta-templates-list');
+    // BLOCKER-fix B4: /api/admin-meta-templates-list eist ?business_account_id=X.
+    // We fetchen eerst de WABA-modules-lijst (multi-tenant: Finance/Events kunnen
+    // aparte WABA's hebben) en pakken de eerste actieve module. Bij meerdere:
+    // picker in UI (module-dropdown boven de tabel).
+    const modsJ = await tryFetch('waba-mods', '/api/admin-whatsapp-modules-list');
+    const mods = Array.isArray(modsJ?.items) ? modsJ.items.filter(m => m && m.is_active !== false) : [];
+    _wa.modules = mods;
+    // Selecteer huidige moduleId (behoud user-keuze; anders eerste actieve).
+    if (!_wa.moduleId || !mods.some(m => m.business_account_id === _wa.moduleId)) {
+      _wa.moduleId = mods[0]?.business_account_id || null;
+    }
+    if (!_wa.moduleId) {
+      _wa.loading = false; _wa.fetched = true;
+      _wa.error = 'Geen actieve WABA-module gevonden. Beheer eerst een module in admin.html.';
+      if (render) render();
+      return;
+    }
+    const j = await tryFetch('meta-tpls', '/api/admin-meta-templates-list?business_account_id=' + encodeURIComponent(_wa.moduleId));
     _wa.loading = false; _wa.fetched = true;
     if (j?.__error) _wa.error = j.__error;
     else _wa.items = Array.isArray(j?.items) ? j.items : [];
     if (render) render();
   }
-  async function waCall(id, url, method, label) {
+  window.__setWaModule = (id) => {
+    if (!id || id === _wa.moduleId) return;
+    _wa.moduleId = id; _wa.fetched = false; _wa.items = []; _wa.error = null;
+    fetchWaTemplates();
+  };
+  async function waCall(id, url, method, label, body) {
     _wa.busy[id] = true; if (render) render();
-    const j = await tryFetch('meta-' + label, url, { method });
+    const init = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body != null) init.body = JSON.stringify(body);
+    const j = await tryFetch('meta-' + label, url, init);
     _wa.busy[id] = false;
     if (j?.__error || j?.error) showToast(label + ' mislukt: ' + (j?.__error || j?.error), 'warn');
     else { showToast(label + ' gelukt', 'ok'); _wa.fetched = false; fetchWaTemplates(); }
   }
-  window.__setWaSubmit = (id, name) => openConfirm(`Template "${name}" indienen bij Meta voor review? Kan enige uren duren. Kan niet ongedaan gemaakt worden.`, () => waCall(id, '/api/admin-meta-templates-submit?id=' + encodeURIComponent(id), 'POST', 'Submit'), 'warn');
+  // Submit: endpoint verwacht ?template_id=X (niet ?id=). Delete verwacht ?id=X.
+  window.__setWaSubmit = (id, name) => openConfirm(`Template "${name}" indienen bij Meta voor review? Kan enige uren duren. Kan niet ongedaan gemaakt worden.`, () => waCall(id, '/api/admin-meta-templates-submit?template_id=' + encodeURIComponent(id), 'POST', 'Submit'), 'warn');
   window.__setWaDelete = (id, name) => openConfirm(`Template "${name}" definitief verwijderen bij Meta? Kan NIET ongedaan gemaakt worden.`, () => waCall(id, '/api/admin-meta-templates-delete?id=' + encodeURIComponent(id), 'DELETE', 'Delete'), 'warn');
-  window.__setWaSync = () => openConfirm('Sync alle templates vanaf Meta? Haalt actuele status/versies binnen.', () => waCall('__sync', '/api/admin-meta-templates-sync', 'POST', 'Sync'), 'warn');
+  // Sync: endpoint verwacht body.business_account_id.
+  window.__setWaSync = () => {
+    if (!_wa.moduleId) { showToast('Geen module gekozen', 'warn'); return; }
+    openConfirm('Sync alle templates vanaf Meta? Haalt actuele status/versies binnen.', () => waCall('__sync', '/api/admin-meta-templates-sync', 'POST', 'Sync', { business_account_id: _wa.moduleId }), 'warn');
+  };
   const _waReg = { pnid: '', pin: '', busy: false, msg: '' };
   window.__setWaRegPnid = (v) => { _waReg.pnid = String(v || ''); if (render) render(); };
   window.__setWaRegPin  = (v) => { _waReg.pin  = String(v || ''); if (render) render(); };
@@ -772,17 +804,25 @@
           </div>`;
         }).join('')
       : (_wa.loading ? '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Laden…</div>' : '<div style="padding:16px;color:var(--text-3);font-size:12.5px">Geen templates (of admin-permission ontbreekt).</div>');
+    const moduleSel = _wa.modules.length > 1
+      ? `<select onchange="window.__setWaModule(this.value)" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+          ${_wa.modules.map(m => `<option value="${esc(m.business_account_id)}" ${_wa.moduleId === m.business_account_id ? 'selected' : ''}>${esc(m.display_label || m.module || m.business_account_id)}</option>`).join('')}
+        </select>`
+      : (_wa.modules.length === 1 ? `<span style="font-size:11.5px;color:var(--text-3)">${esc(_wa.modules[0].display_label || _wa.modules[0].module || '')}</span>` : '');
     return `<div style="max-width:900px">
       <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
         <b>Template-editor:</b> voor nieuwe/complexe wijzigingen: <a href="/modules/admin.html#tab-integraties" style="color:inherit;text-decoration:underline">admin.html</a>. Deze pagina toont live-status + Submit/Delete/Sync + WA-nummer-registratie.
       </div>
       <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
-        <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
           <div>
             <div style="font-size:13px;font-weight:600">Meta-templates</div>
             <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${rows.length} template(s) ${_wa.error ? '· ⚠ ' + esc(_wa.error) : ''}</div>
           </div>
-          <button class="btn btn-primary btn-sm" ${busySync ? 'disabled' : ''} onclick="window.__setWaSync()">${busySync ? 'Sync…' : '↻ Sync vanaf Meta'}</button>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${moduleSel}
+            <button class="btn btn-primary btn-sm" ${busySync ? 'disabled' : ''} onclick="window.__setWaSync()">${busySync ? 'Sync…' : '↻ Sync vanaf Meta'}</button>
+          </div>
         </div>
         <div>${rowsHtml}</div>
       </div>
