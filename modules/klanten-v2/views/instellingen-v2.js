@@ -1091,6 +1091,82 @@
     </div>`;
   }
 
+  /* Wave-1 · fin-teamleader — TL-integratie: status + oauth + disconnect +
+     webhook + deep-link naar TL-import. Custom confirm bij disconnect. */
+  const _tl = { loading: false, error: null, fetched: false, connection: null, webhooks: null, busy: false };
+  async function fetchTeamleader() {
+    if (_tl.loading || _tl.fetched) return;
+    _tl.loading = true; _tl.error = null; if (render) render();
+    const [conn, wh] = await Promise.all([
+      tryFetch('tl-conn',   '/api/teamleader-test-connection'),
+      tryFetch('tl-hook',   '/api/teamleader-webhook-register'),
+    ]);
+    _tl.loading = false; _tl.fetched = true;
+    _tl.connection = conn && !conn.__error ? conn : { error: conn?.__error || 'onbekend' };
+    _tl.webhooks   = wh && !wh.__error ? wh : { error: wh?.__error || 'onbekend' };
+    if (render) render();
+  }
+  window.__setTlConnect = async () => {
+    const j = await tryFetch('tl-oauth', '/api/teamleader-oauth-init');
+    if (j?.__error || j?.error) { showToast('Init faalde: ' + (j.__error || j.error), 'warn'); return; }
+    // OAuth-flow: redirect naar TL-authorize URL.
+    if (j?.authorize_url) { try { window.location.href = j.authorize_url; } catch (_) {} }
+    else showToast('Geen authorize_url ontvangen', 'warn');
+  };
+  window.__setTlDisconnect = () => {
+    openConfirm('Teamleader-koppeling verbreken? OAuth-tokens worden verwijderd. Bestaande sync-jobs stoppen. Je moet opnieuw connecten om TL-syncs te hervatten.', async () => {
+      _tl.busy = true; if (render) render();
+      const j = await tryFetch('tl-disconnect', '/api/teamleader-disconnect', { method: 'DELETE' });
+      _tl.busy = false;
+      if (j?.__error || j?.error) { showToast('Disconnect mislukt: ' + (j.__error || j.error), 'warn'); }
+      else { showToast('TL-koppeling verbroken', 'ok'); _tl.fetched = false; fetchTeamleader(); }
+    }, 'warn');
+  };
+  window.__setTlWebhookRegister = () => {
+    openConfirm('Webhooks (her)registreren bij TL? Endpoint publiceert onze webhook-URL voor deal.won + deal.moved events.', async () => {
+      _tl.busy = true; if (render) render();
+      const j = await tryFetch('tl-webhook-reg', '/api/teamleader-webhook-register', { method: 'POST' });
+      _tl.busy = false;
+      if (j?.__error || j?.error) { showToast('Webhook-register mislukt: ' + (j.__error || j.error), 'warn'); }
+      else { showToast('Webhooks geregistreerd', 'ok'); _tl.fetched = false; fetchTeamleader(); }
+    }, 'warn');
+  };
+  function bodyTeamleader() {
+    if (!_tl.fetched && !_tl.loading) queueMicrotask(() => fetchTeamleader());
+    const c = _tl.connection || {};
+    const connected = !!(c && (c.ok || c.connected || c.user));
+    const w = _tl.webhooks || {};
+    return `<div style="max-width:900px">
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
+        <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:13px;font-weight:600">Teamleader Focus — verbinding</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${_tl.loading ? 'Laden…' : (connected ? '✓ Verbonden' + (c.user?.email ? ' als ' + esc(c.user.email) : '') : (c.error ? '⚠ ' + esc(c.error) : '⨯ Niet verbonden'))}</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            ${connected
+              ? `<button class="btn btn-ghost btn-sm" ${_tl.busy ? 'disabled' : ''} onclick="window.__setTlDisconnect()" style="color:var(--rose)">Disconnect</button>`
+              : `<button class="btn btn-primary btn-sm" ${_tl.busy ? 'disabled' : ''} onclick="window.__setTlConnect()">Verbind met Teamleader</button>`}
+          </div>
+        </div>
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
+        <div style="padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Webhooks — deal.won + deal.moved</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">${w.error ? '⚠ ' + esc(w.error) : (w.registered ? '✓ Geregistreerd' : 'Nog niet geregistreerd')}</div>
+          <button class="btn btn-primary btn-sm" ${_tl.busy || !connected ? 'disabled' : ''} onclick="window.__setTlWebhookRegister()">(Her)registreer webhooks</button>
+        </div>
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Teamleader Import</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Importeer actieve abonnementen + klanten uit TL naar dit systeem (alleen super_admin · met dry-run).</div>
+          <a class="btn btn-primary btn-sm" href="/modules/admin-tl-import.html">Open import-tool</a>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function bodyGebruikers() {
     if (!_users.fetched && !_users.loading) queueMicrotask(() => fetchUsers());
     if (_users.loading && !_users.items.length) return `<div style="padding:24px;color:var(--text-3);font-size:13px">Laden…</div>`;
@@ -1145,6 +1221,7 @@
     if (cur.id === 'team-rechten')       return bodyRechten();
     if (cur.id === 'team-gebruikers')    return bodyGebruikers();
     if (cur.id === 'alg-weergave')       return bodyWeergave();
+    if (cur.id === 'fin-teamleader')     return bodyTeamleader();
     if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
