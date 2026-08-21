@@ -99,24 +99,31 @@ export default async function handler(req, res) {
       [since, until] = rangeForPeriod(period);
     }
 
-    // Stap 1: aanvaarde deals — status='accepted' + tl_quotation_accepted_at
-    // in [since, until). NIET signed_at (die verandert op ander moment).
+    // Stap 1: aanvaarde deals — status='accepted' (TL-fase "07. Aanvaard").
+    // Datum-filter: eerst proberen accepted_at, val terug op signed_at/created_at
+    // want TL-sync gap kan accepted_at leeg laten voor recent aanvaarde deals.
+    // Filter in JS zodat COALESCE-logic zuiver werkt zonder PostgREST-quirks.
     let qy = supabaseAdmin
       .from('deals')
-      .select('id, tl_quotation_status, tl_quotation_accepted_at')
+      .select('id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, created_at')
       .eq('tl_quotation_status', 'accepted')
-      .not('tl_quotation_accepted_at', 'is', null)
       .limit(20000);
-    if (since) qy = qy.gte('tl_quotation_accepted_at', since + 'T00:00:00');
-    if (until) qy = qy.lt ('tl_quotation_accepted_at', until + 'T00:00:00');
-    const { data: deals, error: dErr } = await qy;
+    const { data: dealsRaw, error: dErr } = await qy;
     if (dErr) throw new Error('deals: ' + dErr.message);
+    const effectiveAcceptedAt = (d) => d.tl_quotation_accepted_at || d.tl_quotation_signed_at || d.created_at || null;
+    const inRange = (iso) => {
+      if (!iso) return false;
+      const d = String(iso).slice(0, 10);
+      if (since && d < since) return false;
+      if (until && d >= until) return false;
+      return true;
+    };
+    const deals = (dealsRaw || []).filter(d => inRange(effectiveAcceptedAt(d)));
 
     // Test-deals uitsluiten (customer.is_test=true → deal-ids).
     const testDealIds = await fetchTestDealIds(supabaseAdmin);
-    const allDeals = deals || [];
-    const clean = allDeals.filter(d => !testDealIds.has(d.id));
-    const testExcluded = allDeals.length - clean.length;
+    const clean = deals.filter(d => !testDealIds.has(d.id));
+    const testExcluded = deals.length - clean.length;
     if (testExcluded > 0) console.log('[sales-signed-deals-total] test-deals excluded:', testExcluded, 'of', allDeals.length);
 
     const ids = clean.map(d => d.id);
@@ -157,7 +164,7 @@ export default async function handler(req, res) {
         }
       }
       for (const d of clean) {
-        const key = ymKey(d.tl_quotation_accepted_at);
+        const key = ymKey(effectiveAcceptedAt(d));
         if (!buckets.has(key)) buckets.set(key, { period: key, total_incl_vat: 0, count: 0 });
         const b = buckets.get(key);
         b.total_incl_vat += perDeal.get(d.id) || 0;

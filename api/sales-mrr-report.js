@@ -12,6 +12,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
 import { computeCurrentMrr } from './_lib/mrr-compute.js';
 import { fetchTestDealIds } from './_lib/test-data-filter.js';
+import { classifyDeal, CATEGORY_ORDER, CATEGORY_LABELS } from './_lib/deal-classify.js';
 
 const CYCLE_M = { per_month: 1, per_2_months: 2, per_quarter: 3, per_6_months: 6, per_year: 12 };
 function cycleMonths(label) {
@@ -211,6 +212,49 @@ export default async function handler(req, res) {
       .map(t => ({ ...t, mrr: r2(t.mrr), revenue_incl_btw: r2(t.revenue_incl_btw) }))
       .sort((a, b) => b.revenue_incl_btw - a.revenue_incl_btw);
 
+    // Ronde-19: by_category via classifyDeal (m6/m12/m24/m_other/mem/etc.).
+    // Robuuster dan by_traject-string-match: TL-imports zonder variant_id en
+    // 24-mnd deals landen nu in de juiste bucket via line-item + variant + regex.
+    // fetch line_items voor active-subs deal-ids + variantById (al beschikbaar).
+    const linesByDealId = new Map();
+    if (dealIds.length) {
+      const { data: dLines2 } = await supabaseAdmin
+        .from('deal_line_items')
+        .select('deal_id, product_name, product_id, quantity, unit_price, vat_percentage, price_includes_vat')
+        .in('deal_id', dealIds);
+      for (const li of (dLines2 || [])) {
+        if (!linesByDealId.has(li.deal_id)) linesByDealId.set(li.deal_id, []);
+        linesByDealId.get(li.deal_id).push(li);
+      }
+    }
+    // Variant-lookup (naam + default_duration_months voor classify).
+    const variantByIdFull = new Map();
+    if (variantIds.length) {
+      const { data: vs2 } = await supabaseAdmin
+        .from('traject_variants')
+        .select('id, name, default_duration_months, traject_id')
+        .in('id', variantIds);
+      for (const v of (vs2 || [])) variantByIdFull.set(v.id, v);
+    }
+    const catAgg = Object.fromEntries(CATEGORY_ORDER.map(k => [k, { category: k, label: CATEGORY_LABELS[k], count: 0, revenue_incl_btw: 0 }]));
+    const seenDealsPerCat = {};
+    for (const s of active) {
+      const deal = dealById[s.deal_id];
+      if (!deal) continue;
+      const lineItems = linesByDealId.get(deal.id) || [];
+      const { category } = classifyDeal(deal, { lineItems, variantById: variantByIdFull });
+      if (!seenDealsPerCat[category]) seenDealsPerCat[category] = new Set();
+      if (deal.id && !seenDealsPerCat[category].has(deal.id)) {
+        seenDealsPerCat[category].add(deal.id);
+        catAgg[category].count += 1;
+        catAgg[category].revenue_incl_btw += dealRevenue.get(deal.id) || 0;
+      }
+    }
+    const by_category = CATEGORY_ORDER.map(k => ({
+      ...catAgg[k],
+      revenue_incl_btw: r2(catAgg[k].revenue_incl_btw),
+    }));
+
     // Drilldown: ALLE actieve subs met bijdrage (voor modal + top-10).
     const drilldown = active.map(s => {
       const deal = dealById[s.deal_id] || {};
@@ -225,7 +269,7 @@ export default async function handler(req, res) {
       entity_id: entityId,
       period: { start: periodStart, end: periodEnd },
       kpis: { current_mrr: r2(currentMrr), active_count: activeInPeriod.length, avg_mrr: r2(avgMrr), cancellation_rate: r2(cancellationRate), total_inflow: totalInflow },
-      trend, by_traject, top_subs: drilldown.slice(0, 10), drilldown,
+      trend, by_traject, by_category, top_subs: drilldown.slice(0, 10), drilldown,
     });
   } catch (e) {
     console.error('[sales-mrr-report]', e.message);

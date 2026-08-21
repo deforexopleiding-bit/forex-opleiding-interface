@@ -86,10 +86,12 @@
   // Premium omzet-chart: monotone-cubic Bezier, rijke gradient-fills,
   // subtiele draw-in animatie + glow op laatste datapunt.
   // Signature-compatible met dualChart (dezelfde chartHover/chartOut).
-  function omzChart(id, serieA, serieB, labels, labelA, labelB, colA, colB) {
+  // Ronde-19: serieB mag null-waarden bevatten (toekomst-punten worden niet
+  // getekend voor de b-lijn). nowIdx tekent een verticale "nu"-markering.
+  function omzChart(id, serieA, serieB, labels, labelA, labelB, colA, colB, nowIdx) {
     const w = 640, h = 200, pl = 34, pr = 12, pt = 18, pb = 30;
-    const all = [...serieA, ...serieB].filter(v => Number.isFinite(v));
-    const mx  = Math.max(1, Math.max(...all) * 1.12);
+    const all = [...(serieA || []), ...(serieB || [])].filter(v => Number.isFinite(v));
+    const mx  = Math.max(1, Math.max(...(all.length ? all : [1])) * 1.12);
     const X = i => pl + (i / Math.max(1, labels.length - 1)) * (w - pl - pr);
     const Y = v => pt + (1 - v / mx) * (h - pt - pb);
     // Monotone-cubic Bezier — bewaart lokale monotonie (voorkomt overshoot
@@ -119,13 +121,28 @@
       }
       return d;
     }
-    const ptsA = serieA.map((v, i) => [X(i), Y(v)]);
-    const ptsB = serieB.map((v, i) => [X(i), Y(v)]);
+    const ptsA = serieA.map((v, i) => [X(i), Y(Number.isFinite(v) ? v : 0)]);
+    // B: skip null-punten (toekomst). Alleen contigue actuals tot laatste non-null.
+    const ptsB = [];
+    for (let i = 0; i < serieB.length; i++) {
+      const v = serieB[i];
+      if (v == null) break; // Stop bij eerste null (toekomst).
+      ptsB.push([X(i), Y(v)]);
+    }
     const pathA = monotonePath(ptsA);
     const pathB = monotonePath(ptsB);
     const areaA = ptsA.length ? `${pathA} L${ptsA[ptsA.length-1][0].toFixed(1)},${(h-pb).toFixed(1)} L${ptsA[0][0].toFixed(1)},${(h-pb).toFixed(1)} Z` : '';
     const areaB = ptsB.length ? `${pathB} L${ptsB[ptsB.length-1][0].toFixed(1)},${(h-pb).toFixed(1)} L${ptsB[0][0].toFixed(1)},${(h-pb).toFixed(1)} Z` : '';
-    const lastA = ptsA[ptsA.length - 1];
+    // "Nu"-marker: verticale stippellijn op nowIdx (huidige maand). Punt vóór
+    // die lijn = actuals, punt erna = MRR-projectie. Alleen als nowIdx geldig.
+    const nowLine = (typeof nowIdx === 'number' && nowIdx >= 0 && nowIdx < labels.length)
+      ? `<line x1="${X(nowIdx).toFixed(1)}" y1="${pt}" x2="${X(nowIdx).toFixed(1)}" y2="${(h-pb).toFixed(1)}" stroke="var(--text-3)" stroke-width="1" stroke-dasharray="2 4" opacity=".4"/>
+         <text x="${X(nowIdx).toFixed(1)}" y="${(pt - 4).toFixed(1)}" text-anchor="middle" font-size="9" fill="var(--text-3)" font-family="IBM Plex Mono">nu</text>`
+      : '';
+    // MRR glow: op de LAATSTE actual (nowIdx of eind reeks als nowIdx=-1).
+    // Signed glow: op de laatste b-actual.
+    const glowAIdx = (typeof nowIdx === 'number' && nowIdx >= 0) ? nowIdx : ptsA.length - 1;
+    const lastA = ptsA[glowAIdx];
     const lastB = ptsB[ptsB.length - 1];
     // Y-as ticks: 4 gelijke gridlines. Labels in €k voor leesbaarheid.
     const gridY = [0, .25, .5, .75, 1].map(f => pt + f * (h - pt - pb));
@@ -154,6 +171,7 @@
         </defs>
         ${gridY.map((yy, i) => `<line x1="${pl}" y1="${yy.toFixed(1)}" x2="${w - pr}" y2="${yy.toFixed(1)}" stroke="var(--border)" stroke-width="0.6" stroke-dasharray="${i === gridY.length - 1 ? '' : '3 4'}"/>`).join('')}
         ${gridLabels.map((lbl, i) => `<text x="${pl - 6}" y="${(gridY[i] + 3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--text-3)" font-family="IBM Plex Mono">${lbl}</text>`).join('')}
+        ${nowLine}
         <path d="${areaB}" fill="url(#${id}-gB)"/>
         <path d="${areaA}" fill="url(#${id}-gA)"/>
         <path d="${pathB}" fill="none" stroke="var(--${colB})" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="2000" stroke-dashoffset="2000" style="animation:omzDraw 1.15s .1s cubic-bezier(.5,.05,.35,1) forwards"/>
@@ -177,7 +195,11 @@
   const CHARTDATA = {};
   window.chartHover = function (e, id, n, pl, pr) {
     const svgEl = e.currentTarget, r = svgEl.getBoundingClientRect();
-    const vb = 560, x = (e.clientX - r.left) / r.width * vb;
+    // Ronde-19: lees viewBox width dynamisch (omzChart heeft w=640, dualChart
+    // heeft w=560). Vroeger hardgecodeerd vb=560 → hover-index viel op de
+    // laatste maand naast het glow-punt → tooltip toonde 'mei' bij een aug-punt.
+    const vb = (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) || 560;
+    const x = (e.clientX - r.left) / r.width * vb;
     let i = Math.round((x - pl) / ((pr - pl) / (n - 1))); i = Math.max(0, Math.min(n - 1, i));
     const d = CHARTDATA[id]; if (!d) return;
     const line = document.getElementById(id + '-vline');
@@ -188,7 +210,9 @@
       if (a) a.style.opacity = k === i ? '1' : '0'; if (b) b.style.opacity = k === i ? '1' : '0';
     }
     const tip = document.getElementById(id + '-tip');
-    tip.innerHTML = `<div style="font-weight:600;margin-bottom:5px;opacity:.7;font-size:11px">${d.labels[i]}</div>
+    const bVal = d.b[i];
+    const isProjection = typeof d.nowIdx === 'number' && d.nowIdx >= 0 && i > d.nowIdx;
+    tip.innerHTML = `<div style="font-weight:600;margin-bottom:5px;opacity:.7;font-size:11px">${d.labels[i]}${isProjection ? ' · <span style="opacity:.6">projectie</span>' : ''}</div>
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:3px">
         <span style="width:7px;height:7px;border-radius:2px;background:var(--${d.colA})"></span>
         <span style="opacity:.75">${d.labelA}</span>
@@ -196,7 +220,7 @@
       <div style="display:flex;align-items:center;gap:7px">
         <span style="width:7px;height:7px;border-radius:2px;background:var(--${d.colB})"></span>
         <span style="opacity:.75">${d.labelB}</span>
-        <b style="margin-left:auto;font-family:'IBM Plex Mono',monospace">${eur0(d.b[i])}</b></div>`;
+        <b style="margin-left:auto;font-family:'IBM Plex Mono',monospace">${bVal == null ? '—' : eur0(bVal)}</b></div>`;
     tip.style.opacity = '1';
     const px = cx / vb * r.width;
     // Flip-positionering: meet actuele tooltip-breedte NA render (offsetWidth)
@@ -631,35 +655,41 @@
               // maanden ≤ huidige maand. Fallback op mock als geen trend.
               // Totaal-incl-btw-lijn (b): geen per-maand-endpoint, blijft mock
               // (out-of-scope voor deze MRR-brok — user vroeg alleen MRR-fix).
-              // Ronde-17: premium chart met monotone-cubic + gradient + glow.
-              // MRR-lijn (a) uit sales-mrr-report.trend, Totaal-incl-btw (b) uit
-              // sales-signed-deals-total?group_by=month — beide LIVE.
+              // Ronde-19: grafiek vooruitkijken.
+              // MRR-lijn (a) uit sales-mrr-report.trend — pak 12 mnd terug t/m 12 mnd vooruit
+              // (sales-mrr-report levert -12..+12 range; toekomstige punten zijn de
+              // projectie via computeCurrentMrr op sub-snapshots per maand-eind).
+              // Signed-lijn (b) STOPT bij huidige maand (geen toekomst-actuals).
               const M_ABBR = ['jan','feb','mrt','apr','mei','jun','jul','aug','sep','okt','nov','dec'];
               const mrrTrend = _live.mrr && Array.isArray(_live.mrr.trend) ? _live.mrr.trend : null;
               const sigTrend = _live.signedTrend && Array.isArray(_live.signedTrend.trend) ? _live.signedTrend.trend : null;
-              // Kies bucket-set: alle YM keys tussen mrrTrend[i].period en
-              // sigTrend[i].period samen (union). Beide zijn 'YYYY-MM'-strings.
-              const keySet = new Set();
-              if (mrrTrend) for (const t of mrrTrend) if (t && t.period) keySet.add(t.period);
-              if (sigTrend) for (const t of sigTrend) if (t && t.period) keySet.add(t.period);
               const now = new Date();
               const curYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-              // Filter op ≤ huidige maand + laatste 12.
-              const keys = Array.from(keySet).filter(k => k <= curYm).sort().slice(-12);
+              // Bereken maand-window: 12 mnd terug t/m 12 mnd vooruit als mrrTrend
+              // die dekt; anders wat er is.
+              const startWin = (() => { const d = new Date(now.getFullYear(), now.getMonth() - 12, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+              const endWin   = (() => { const d = new Date(now.getFullYear(), now.getMonth() + 12, 1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+              const keySet = new Set();
+              if (mrrTrend) for (const t of mrrTrend) if (t && t.period && t.period >= startWin && t.period <= endWin) keySet.add(t.period);
+              if (sigTrend) for (const t of sigTrend) if (t && t.period && t.period >= startWin && t.period <= curYm) keySet.add(t.period);
+              const keys = Array.from(keySet).sort();
               let a, b, lb;
               if (keys.length) {
                 const mrrByK = {}; if (mrrTrend) for (const t of mrrTrend) mrrByK[t.period] = t.mrr || 0;
                 const sigByK = {}; if (sigTrend) for (const t of sigTrend) sigByK[t.period] = t.total_incl_vat || 0;
                 a  = keys.map(k => Number(mrrByK[k]) || 0);
-                b  = keys.map(k => Number(sigByK[k]) || 0);
+                // b: alleen actuals ≤ huidige maand; toekomst = null (weggelaten uit lijn).
+                b  = keys.map(k => k <= curYm ? (Number(sigByK[k]) || 0) : null);
                 lb = keys.map(k => M_ABBR[parseInt(k.slice(5,7),10)-1] || k);
               } else {
                 a  = [41200, 42800, 43900, 44600, 45800, 46400, 47100, 47612];
                 b  = [62000, 78000, 95000, 88000, 120000, 104000, 86000, 26250];
                 lb = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug'];
               }
-              CHARTDATA['omz'] = { a, b, labels: lb, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue' };
-              return omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue');
+              // Vind index waar 'nu' ligt (voor 'vandaag'-verticale marker).
+              const nowIdx = keys.length ? keys.indexOf(curYm) : -1;
+              CHARTDATA['omz'] = { a, b, labels: lb, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue', nowIdx };
+              return omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue', nowIdx);
             })()}
             <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
               <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">
@@ -667,28 +697,20 @@
               </div>
               <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px">
                 ${(() => {
-                  // Ronde-17: VASTE 4 categorieën (6/12/24 mnd 1-op-1 + Membership).
-                  // Bedrag = REVENUE_INCL_BTW (verkoopwaarde, was: MRR — dat
-                  // toonde ~€3k ipv €43k voor 6× €7.200 1-op-1 12 mnd).
-                  // "Geen traject" verborgen (server-side gefilterd in by_traject).
-                  const byT = _live.mrr && Array.isArray(_live.mrr.by_traject) ? _live.mrr.by_traject : [];
-                  // Fuzzy find per label — dashboard-mapping onafhankelijk van
-                  // exacte variant-name variaties.
-                  function findBucket(matchers) {
-                    for (const b of byT) {
-                      const lk = String(b.traject || '').toLowerCase();
-                      if (matchers.some(m => lk.includes(m))) return b;
-                    }
-                    return null;
-                  }
+                  // Ronde-19: LIVE uit sales-mrr-report.by_category — gebruikt
+                  // classifyDeal (variant + line-items + regex) i.p.v. fragiele
+                  // string-match op traject-naam. 24-mnd landt nu correct.
+                  const byCat = _live.mrr && Array.isArray(_live.mrr.by_category) ? _live.mrr.by_category : [];
+                  const catMap = {};
+                  for (const c of byCat) catMap[c.category] = c;
                   const cats = [
-                    { label: '6 mnd 1-op-1',  matchers: ['6 maand','6 mnd','6-op-1','6 op 1'], col: 'violet' },
-                    { label: '12 mnd 1-op-1', matchers: ['12 maand','12 mnd'],                col: 'violet' },
-                    { label: '24 mnd 1-op-1', matchers: ['24 maand','24 mnd'],                col: 'violet' },
-                    { label: 'Membership',    matchers: ['membership','36 maand','36 mnd'],   col: 'blue'   },
+                    { key: 'm6',  label: '6 mnd 1-op-1',  col: 'violet' },
+                    { key: 'm12', label: '12 mnd 1-op-1', col: 'violet' },
+                    { key: 'm24', label: '24 mnd 1-op-1', col: 'violet' },
+                    { key: 'mem', label: 'Membership',    col: 'blue'   },
                   ];
                   return cats.map(cat => {
-                    const b = findBucket(cat.matchers);
+                    const b = catMap[cat.key];
                     const c = (b && b.count) || 0;
                     const r = (b && b.revenue_incl_btw) || 0;
                     return `<div style="border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px">
