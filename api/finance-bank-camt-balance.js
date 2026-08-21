@@ -153,16 +153,13 @@ export default async function handler(req, res) {
         status,
       };
     });
-    // Grand-total telt alleen registered accounts (voorheen: alle passeerden
-    // sowieso al de filter). Behoud num_accounts_ignored voor UI-samenvatting.
-    const registeredAccounts = perAccount.filter(a => a.status === 'registered');
-    // num_accounts_ignored = accounts die NIET actief in bank_accounts staan
-    // (dus inactive + unregistered) plus pseudo-accounts/lege IBAN's.
-    ignoredCount += perAccount.filter(a => a.status !== 'registered').length;
-
-    // 4. Sommering + peildatum + dominant-IBAN voor backwards-compat.
-    //    Alleen registered accounts tellen mee in grand-total.
-    const totalCents = registeredAccounts.reduce((a, x) => a + x.balance_cents, 0);
+    // Grand-total telt ALLE accounts met geldige IBAN (pseudo-accounts zoals
+    // PAYPAL zijn al eerder op regel ~119 via isValidIban gefilterd). We
+    // gebruiken bank_accounts alleen om te LABELEN (registered/inactive/
+    // unregistered), NIET om uit de som te weren. Anders klapt het totaal
+    // naar €0 zodra de bank_accounts-tabel leeg is of een IBAN mist —
+    // terwijl de CAMT-data wel gewoon een saldo heeft (F2-post-mortem).
+    const totalCents = perAccount.reduce((a, x) => a + x.balance_cents, 0);
     const asOfDate = perAccount.reduce(
       (max, x) => (!max || (x.as_of_date && x.as_of_date > max)) ? x.as_of_date : max,
       null
