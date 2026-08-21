@@ -188,6 +188,7 @@
       { id: 'mk-meta',          n: 'Meta-koppeling',       d: 'Advertentieaccount en pixel',                               ic: I.target },
       { id: 'mk-bronnen',       n: 'Lead-bronnen',         d: 'Welke bronnen er zijn en hoe ze binnenkomen',               ic: I.target },
       { id: 'mk-sequenties',    n: 'Sequenties',           d: 'Automatische opvolging van leads',                          ic: I.repeat },
+      { id: 'mk-webflow',       n: 'Webflow auto-publish', d: 'Na elke CMS-mutatie wordt deforexopleiding.nl gepublisht',  ic: I.link || I.settings },
     ]},
     { g: 'Team & toegang', items: [
       { id: 'team-gebruikers',  n: 'Gebruikers',           d: 'Wie heeft toegang tot het systeem',                         ic: I.users },
@@ -206,6 +207,7 @@
     // en server-side gate op de endpoints blijft de laatste laag.
     { g: 'Systeem', items: [
       { id: 'sys-followup-admin', n: 'Follow-up admin-tools', d: 'Backfill GHL-contacts + GHL-status-backfill', ic: I.settings, roles: ['super_admin'] },
+      { id: 'sys-bubble-schema',  n: 'Bubble-schema probe',   d: 'Lees keys+types van een Bubble-objecttype (read-only)', ic: I.settings, roles: ['super_admin'] },
     ]},
   ];
 
@@ -256,6 +258,139 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
+  /* Wave-2 · mk-webflow — auto-publish toggle + publish-now.
+     Reads/writes app-settings ({key: 'webflow_auto_publish_enabled', value: {enabled: bool}}
+     — object-shape zoals admin repliceren). Publish-now = ECHTE live-publish → confirm. */
+  const _wf = { loading: false, fetched: false, error: null, enabled: false, publishing: false };
+  async function fetchWebflow() {
+    if (_wf.loading || _wf.fetched) return;
+    _wf.loading = true; _wf.error = null; if (render) render();
+    const j = await tryFetch('wf-flag', '/api/app-settings?key=webflow_auto_publish_enabled');
+    _wf.loading = false; _wf.fetched = true;
+    if (j?.__error) _wf.error = j.__error;
+    else {
+      // admin.html gebruikt shape {enabled:bool}; fallback naar scalar boolean voor tolerantie.
+      const v = j?.value;
+      _wf.enabled = !!(v && typeof v === 'object' ? v.enabled : v);
+    }
+    if (render) render();
+  }
+  window.__setWfToggle = () => {
+    const next = !_wf.enabled;
+    openConfirm(`Auto-publish ${next ? 'AAN' : 'UIT'}? ${next ? 'Elke CMS-mutatie triggert een deforexopleiding.nl publish (kan traag zijn).' : 'CMS-mutaties triggeren geen automatische publish meer.'}`, async () => {
+      const j = await tryFetch('wf-put', '/api/app-settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'webflow_auto_publish_enabled', value: { enabled: next } }),
+      });
+      if (j?.__error || j?.error) showToast('Opslaan mislukt: ' + (j.__error || j.error), 'warn');
+      else { _wf.enabled = next; showToast('Instelling opgeslagen', 'ok'); }
+      if (render) render();
+    }, 'warn');
+  };
+  window.__setWfPublishNow = () => {
+    openConfirm('Publish deforexopleiding.nl NU? Live-actie richting Webflow — kan enkele seconden duren en de site kort onderbreken.', async () => {
+      _wf.publishing = true; if (render) render();
+      const j = await tryFetch('wf-publish', '/api/admin-webflow-publish-now', { method: 'POST' });
+      _wf.publishing = false;
+      if (j?.__error || j?.error) showToast('Publish mislukt: ' + (j.__error || j.error), 'warn');
+      else showToast('Publish gestart', 'ok');
+      if (render) render();
+    }, 'warn');
+  };
+  function bodyWebflow() {
+    if (!_wf.fetched && !_wf.loading) queueMicrotask(() => fetchWebflow());
+    return `<div style="max-width:700px">
+      ${_wf.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_wf.error)}</div>` : ''}
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
+        <div style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px">
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">Auto-publish deforexopleiding.nl</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Na elke CMS-mutatie (event aanmaken/wijzigen/sluiten/inschrijving) publisht Webflow automatisch. Zet uit als het team zelf op de site werkt.</div>
+          </div>
+          <button class="btn ${_wf.enabled ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__setWfToggle()">${_wf.loading ? '…' : (_wf.enabled ? '✓ AAN' : '⨯ UIT')}</button>
+        </div>
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Publish nu</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Trigger onmiddellijk een Webflow-publish. Gebruik dit als de site achterloopt.</div>
+          <button class="btn btn-primary btn-sm" ${_wf.publishing ? 'disabled' : ''} onclick="window.__setWfPublishNow()" style="background:var(--rose);border-color:var(--rose)">${_wf.publishing ? 'Bezig…' : '🚀 Publish now'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /* Wave-2 · sys-bubble-schema — lazy op knop-klik (niet bij render).
+     Read-only super_admin diagnostiek. */
+  const _bs = { busy: false, result: null, error: null, type: null };
+  window.__setBsProbe = async (objtype) => {
+    if (_bs.busy) return;
+    _bs.busy = true; _bs.result = null; _bs.error = null; _bs.type = objtype; if (render) render();
+    const j = await tryFetch('bubble-probe', '/api/bubble-schema-probe?objtype=' + encodeURIComponent(objtype));
+    _bs.busy = false;
+    if (j?.__error || j?.error) _bs.error = j.__error || j.error;
+    else _bs.result = j;
+    if (render) render();
+  };
+  function bodyBubbleProbe() {
+    if (!isSuperAdmin()) return bodyAccessDenied();
+    const out = _bs.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px">${esc(_bs.error)}</div>`
+             : _bs.result ? `<pre style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:11.5px;max-height:400px;overflow:auto;font-family:'IBM Plex Mono',monospace;margin:0">${esc(JSON.stringify(_bs.result, null, 2))}</pre>`
+             : `<div style="color:var(--text-3);font-size:12px">Klik een knop om het schema van dat objecttype op te halen.</div>`;
+    return `<div style="max-width:900px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">Vraagt 1 record op van een Bubble-objecttype en toont uitsluitend property-keys + JS-typen. Geen PII. Alleen super_admin.</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user')">${_bs.busy && _bs.type === 'user' ? 'Bezig…' : '👤 User-velden'}</button>
+        <button class="btn btn-primary btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('session')">${_bs.busy && _bs.type === 'session' ? 'Bezig…' : '⏱ Session-velden'}</button>
+      </div>
+      ${out}
+    </div>`;
+  }
+
+  /* Wave-2 · fin-entiteiten — read-only lijst van company_entities via
+     direct-supabase (zelfde pattern als team-rechten). CRUD blijft in Supabase-
+     console (te complex om nu te bouwen; low-frequency actie: entiteiten worden
+     nauwelijks toegevoegd). Custom confirm bij delete = deep-link only. */
+  const _ent = { loading: false, fetched: false, error: null, items: [] };
+  async function fetchEntiteiten() {
+    if (_ent.loading || _ent.fetched) return;
+    _ent.loading = true; _ent.error = null; if (render) render();
+    try {
+      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+      const { data, error } = await window.supabase.from('company_entities').select('*').order('label');
+      if (error) throw error;
+      _ent.items = data || [];
+    } catch (e) { _ent.error = e?.message || 'onbekend'; }
+    _ent.loading = false; _ent.fetched = true;
+    if (render) render();
+  }
+  function bodyEntiteiten() {
+    if (!_ent.fetched && !_ent.loading) queueMicrotask(() => fetchEntiteiten());
+    const rows = _ent.items.map(e => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(e.label || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(e.tl_department_id || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(e.country || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${e.is_active ? '✓ actief' : '⨯ inactief'}</td>
+    </tr>`).join('');
+    return `<div style="max-width:1000px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">
+        <b>CRUD volgt:</b> read-only lijst nu. Aanmaken/bewerken/verwijderen van entiteiten (raakt facturatie + MRR-scoping) vraagt eigen brok. Nieuwe entiteit nodig? Vraag Amigo.
+      </div>
+      ${_ent.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ent.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Label</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">TL Department ID</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Land</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="4" style="padding:16px;color:var(--text-3);font-size:12.5px">${_ent.loading ? 'Laden…' : 'Geen entiteiten gevonden'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   /* Wave-2 · com-wa LIVE via /api/admin-meta-templates-list. Mock-data is weg.
      Submit/sync/delete via bestaande endpoints achter custom confirm (echte Meta-
      actie). Edit/detail = deep-link (form is complex). WA-nummer registreren:
@@ -1499,6 +1634,9 @@
     if (cur.id === 'fin-teamleader')     return bodyTeamleader();
     if (cur.id === 'sales-offerte')      return bodySalesOfferte();
     if (cur.id === 'team-mentoren')      return bodyMentoren();
+    if (cur.id === 'mk-webflow')         return bodyWebflow();
+    if (cur.id === 'sys-bubble-schema')  return bodyBubbleProbe();
+    if (cur.id === 'fin-entiteiten')     return bodyEntiteiten();
     if (cur.id === 'alg-bedrijf')        return bodyBedrijf();
     if (cur.id === 'wb-venster')         return bodyVenster();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
@@ -1526,6 +1664,8 @@
     const WIRED = new Set([
       'team-gebruikers','team-rechten','alg-weergave','fin-teamleader','sales-offerte','team-mentoren',
       'com-handtekening','com-sjabloon','sys-followup-admin',
+      // Wave-2 A1-A4
+      'com-wa','mk-webflow','sys-bubble-schema','fin-entiteiten',
     ]);
     const bannerHtml = WIRED.has(cur.id)
       ? `<div style="padding:6px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:14px;display:inline-flex;align-items:center;gap:6px">● LIVE DATA — instellingen op deze pagina zijn echt en worden direct opgeslagen</div>`
