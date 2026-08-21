@@ -481,6 +481,9 @@
      console (te complex om nu te bouwen; low-frequency actie: entiteiten worden
      nauwelijks toegevoegd). Custom confirm bij delete = deep-link only. */
   // Ronde-28 · CRUD op company_entities via direct-supabase (zoals RBAC).
+  // Ronde-31 FIX 2: writes via /api/company-entities (POST/PATCH/DELETE) i.p.v.
+  // direct-supabase (dat gaf 403 door RLS). Endpoint doet super_admin-gate +
+  // schrijft server-side met supabaseAdmin.
   const _ent = { loading: false, fetched: false, error: null, items: [], ed: null, busy: false };
   async function fetchEntiteiten(force) {
     if (_ent.loading) return;
@@ -505,13 +508,24 @@
   // Voorkomt dat input-node bij elke keystroke wordt vervangen (focus + cursor weg).
   window.__setEntField = (k, v) => { if (_ent.ed) { _ent.ed[k] = (k === 'display_order') ? (Number(v) || 0) : String(v || ''); } };
   window.__setEntSave = () => {
+    // Lees actuele input-values uit de DOM (uncontrolled inputs sinds FIX 1 —
+     // window.__setEntField vult _ent.ed maar dat kan achterlopen op de laatste
+     // keystroke als de browser 'change' nog niet vuurde). Fallback naar _ent.ed.
+    if (_ent.ed) {
+      const g = (n) => document.querySelector(`[data-ent-field="${n}"]`);
+      for (const k of ['label','tl_department_id','name','description']) {
+        const el = g(k); if (el && typeof el.value === 'string') _ent.ed[k] = el.value;
+      }
+      const doEl = g('display_order');
+      if (doEl && doEl.value !== '') _ent.ed.display_order = Number(doEl.value) || 0;
+    }
     const e = _ent.ed; if (!e) return;
     if (!String(e.label || '').trim())            { showToast('Label is verplicht', 'warn'); return; }
     if (!String(e.tl_department_id || '').trim()) { showToast('TL Department ID is verplicht', 'warn'); return; }
     openConfirm(`${e.id ? 'Wijzigingen opslaan voor' : 'Nieuwe entiteit aanmaken:'} "${e.label}"? Raakt facturatie- en MRR-scoping.`, async () => {
       _ent.busy = true; if (render) render();
+      // ronde-31 marker: server-side write via /api/company-entities.
       try {
-        if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
         const payload = {
           tl_department_id: String(e.tl_department_id).trim(),
           name: String(e.name || '').trim() || null,
@@ -519,10 +533,12 @@
           description: String(e.description || '').trim() || null,
           display_order: Number(e.display_order) || 0,
         };
-        let error;
-        if (e.id) ({ error } = await window.supabase.from('company_entities').update(payload).eq('id', e.id));
-        else       ({ error } = await window.supabase.from('company_entities').insert({ ...payload, is_active: true }));
-        if (error) throw error;
+        const url    = e.id ? `/api/company-entities?id=${encodeURIComponent(e.id)}` : '/api/company-entities';
+        const method = e.id ? 'PATCH' : 'POST';
+        const j = await tryFetch('company-entities-save', url, {
+          method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
         showToast(e.id ? 'Entiteit bijgewerkt' : 'Entiteit aangemaakt', 'ok');
         _ent.ed = null; _ent.fetched = false; fetchEntiteiten(true);
       } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
@@ -534,9 +550,13 @@
     const next = !it.is_active;
     openConfirm(`${next ? 'HERACTIVEER' : 'DEACTIVEER'} entiteit "${it.label}"?${next ? '' : ' Nieuwe deals/facturen kunnen niet meer aan deze entiteit worden gekoppeld (historie blijft intact).'}`, async () => {
       try {
-        if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-        const { error } = await window.supabase.from('company_entities').update({ is_active: next }).eq('id', id);
-        if (error) throw error;
+        // Deactiveer = DELETE (server doet soft-delete: is_active=false).
+        // Heractiveer = PATCH met is_active=true.
+        const url = `/api/company-entities?id=${encodeURIComponent(id)}`;
+        const j = await tryFetch('company-entities-toggle', url, next
+          ? { method: 'PATCH',  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: true }) }
+          : { method: 'DELETE', headers: { 'Content-Type': 'application/json' } });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
         showToast(next ? 'Entiteit heractiveerd' : 'Entiteit gedeactiveerd', 'ok');
         _ent.fetched = false; fetchEntiteiten(true);
       } catch (err) { showToast('Actie mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
@@ -552,19 +572,19 @@
         </div>
         <div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">
           <label style="font-size:11.5px;color:var(--text-2)">Label <span style="color:var(--rose)">*</span>
-            <input type="text" value="${esc(e.label || '')}" oninput="window.__setEntField('label',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            <input type="text" data-ent-field="label" value="${esc(e.label || '')}" oninput="window.__setEntField('label',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>
           <label style="font-size:11.5px;color:var(--text-2)">TL Department ID <span style="color:var(--rose)">*</span>
-            <input type="text" value="${esc(e.tl_department_id || '')}" oninput="window.__setEntField('tl_department_id',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+            <input type="text" data-ent-field="tl_department_id" value="${esc(e.tl_department_id || '')}" oninput="window.__setEntField('tl_department_id',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
           </label>
           <label style="font-size:11.5px;color:var(--text-2)">Naam
-            <input type="text" value="${esc(e.name || '')}" oninput="window.__setEntField('name',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            <input type="text" data-ent-field="name" value="${esc(e.name || '')}" oninput="window.__setEntField('name',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>
           <label style="font-size:11.5px;color:var(--text-2)">Volgorde
-            <input type="number" value="${esc(String(e.display_order || 0))}" oninput="window.__setEntField('display_order',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            <input type="number" data-ent-field="display_order" value="${esc(String(e.display_order || 0))}" oninput="window.__setEntField('display_order',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>
           <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Beschrijving
-            <textarea rows="2" oninput="window.__setEntField('description',this.value)" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.description || '')}</textarea>
+            <textarea data-ent-field="description" rows="2" oninput="window.__setEntField('description',this.value)" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.description || '')}</textarea>
           </label>
         </div>
         <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
