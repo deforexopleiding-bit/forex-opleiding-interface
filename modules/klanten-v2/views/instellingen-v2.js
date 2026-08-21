@@ -500,7 +500,10 @@
   window.__setEntNew  = () => { _ent.ed = { id: null, tl_department_id: '', name: '', label: '', description: '', display_order: (_ent.items.length + 1) * 10 }; if (render) render(); };
   window.__setEntEdit = (id) => { const it = _ent.items.find(x => x.id === id); if (!it) return; _ent.ed = { ...it }; if (render) render(); };
   window.__setEntCancel = () => { _ent.ed = null; if (render) render(); };
-  window.__setEntField = (k, v) => { if (_ent.ed) { _ent.ed[k] = (k === 'display_order') ? (Number(v) || 0) : String(v || ''); if (render) render(); } };
+  // Ronde-31 FIX 1 (focus-verlies): setter NIET meer render()en tijdens typen.
+  // State-update blijft; render() wordt pas bij open/close/save aangeroepen.
+  // Voorkomt dat input-node bij elke keystroke wordt vervangen (focus + cursor weg).
+  window.__setEntField = (k, v) => { if (_ent.ed) { _ent.ed[k] = (k === 'display_order') ? (Number(v) || 0) : String(v || ''); } };
   window.__setEntSave = () => {
     const e = _ent.ed; if (!e) return;
     if (!String(e.label || '').trim())            { showToast('Label is verplicht', 'warn'); return; }
@@ -968,7 +971,18 @@
     _metaEdReset(); _metaEd.open = true; if (render) render();
   };
   window.__setMetaEdClose = () => { _metaEd.open = false; _metaEd.error = null; if (render) render(); };
-  window.__setMetaEdField = (k, v) => { _metaEd.fields[k] = String(v || ''); if (render) render(); };
+  // Ronde-31 FIX 1 (focus-verlies): setter NIET meer render()en tijdens typen.
+  // Alleen state bijwerken. Voor conditional-UI wijzigers (header_type-select
+  // met branch in _renderMetaEdModal) → aparte __setMetaEdSelect met render.
+  window.__setMetaEdField  = (k, v) => { _metaEd.fields[k] = String(v || ''); };
+  window.__setMetaEdSelect = (k, v) => { _metaEd.fields[k] = String(v || ''); if (render) render(); };
+  // Body-teller live updaten zonder heel-modal re-render.
+  window.__updMetaBodyMeta = (val) => {
+    _metaEd.fields.body_text = String(val || '');
+    const el = document.getElementById('kv-metaed-body-meta'); if (!el) return;
+    const vars = (String(val || '').match(/\{\{\d+\}\}/g) || []).length;
+    el.textContent = `${String(val || '').length}/1024 chars · ${vars} variabele${vars===1?'':'n'} gevonden`;
+  };
   async function _metaEdOpenEditor(id, template) {
     if (!id) return;
     _metaEdReset();
@@ -1083,7 +1097,7 @@
               </select>
             </label>
             <label style="font-size:11.5px;color:var(--text-2)">Header
-              <select onchange="window.__setMetaEdField('header_type',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+              <select onchange="window.__setMetaEdSelect('header_type',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
                 <option value="NONE"  ${f.header_type === 'NONE' ? 'selected' : ''}>Geen</option>
                 <option value="TEXT"  ${f.header_type === 'TEXT' ? 'selected' : ''}>Tekst</option>
               </select>
@@ -1093,8 +1107,8 @@
             <input type="text" value="${esc(f.header_text)}" oninput="window.__setMetaEdField('header_text',this.value)" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>` : ''}
           <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Body (max 1024) — gebruik <code>{{1}}</code>, <code>{{2}}</code>… voor variabelen
-            <textarea oninput="window.__setMetaEdField('body_text',this.value)" maxlength="1024" rows="6" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(f.body_text)}</textarea>
-            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">${f.body_text.length}/1024 chars · ${bodyVars} variabele${bodyVars===1?'':'n'} gevonden</div>
+            <textarea oninput="window.__updMetaBodyMeta(this.value)" maxlength="1024" rows="6" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(f.body_text)}</textarea>
+            <div id="kv-metaed-body-meta" style="font-size:10.5px;color:var(--text-3);margin-top:4px">${f.body_text.length}/1024 chars · ${bodyVars} variabele${bodyVars===1?'':'n'} gevonden</div>
           </label>
           <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:6px">Footer (optioneel, max 60)
             <input type="text" value="${esc(f.footer_text)}" oninput="window.__setMetaEdField('footer_text',this.value)" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
@@ -1137,8 +1151,9 @@
     openConfirm('Sync alle templates vanaf Meta? Haalt actuele status/versies binnen.', () => waCall('__sync', '/api/admin-meta-templates-sync', 'POST', 'Sync', { business_account_id: _wa.moduleId }), 'warn');
   };
   const _waReg = { pnid: '', pin: '', busy: false, msg: '' };
-  window.__setWaRegPnid = (v) => { _waReg.pnid = String(v || ''); if (render) render(); };
-  window.__setWaRegPin  = (v) => { _waReg.pin  = String(v || ''); if (render) render(); };
+  // Ronde-31 FIX 1: geen render() bij typen (focus behouden).
+  window.__setWaRegPnid = (v) => { _waReg.pnid = String(v || ''); };
+  window.__setWaRegPin  = (v) => { _waReg.pin  = String(v || ''); };
   window.__setWaRegSubmit = () => {
     const pnid = _waReg.pnid.trim(); const pin = _waReg.pin.trim();
     if (!/^\d{5,20}$/.test(pnid)) { showToast('Ongeldig phone_number_id', 'warn'); return; }
