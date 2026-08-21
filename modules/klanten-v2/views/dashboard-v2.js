@@ -430,6 +430,76 @@
   // Backward-compat alias (dashManager guard verwijst naar oude naam)
   const fetchDashboardStats = fetchDashboardBundle;
 
+  // ── AI Manager (V1-port) ─────────────────────────────────────────────
+  // 1-op-1 port van de super-admin-dashboard V1-implementatie:
+  //   POST /api/super-admin-ai-manager  { question }
+  //   → { antwoord, uitleg?, gebruikte_query?, ruwe_data?, row_count?, truncated? }
+  // Alleen op user-actie (chip-klik / Enter / verzend-knop) — geen fetch-on-render.
+  function _dfoAiEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function _dfoAiRenderTable(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return '';
+    const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r || {}))));
+    const th = cols.map(c => `<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border);font-size:11px;font-weight:600;color:var(--text-3)">${_dfoAiEsc(c)}</th>`).join('');
+    const body = rows.map(row => {
+      const tds = cols.map(c => {
+        const v = row?.[c];
+        const s = v == null ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+        return `<td style="padding:4px 8px;border-bottom:1px solid var(--border);font-size:11.5px;font-family:'IBM Plex Mono',monospace">${_dfoAiEsc(s)}</td>`;
+      }).join('');
+      return `<tr>${tds}</tr>`;
+    }).join('');
+    return `<div style="margin-top:8px;overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+  async function _dfoAiSubmit(question) {
+    const box   = document.getElementById('dfoAiAnswer');
+    const input = document.getElementById('dfoAiInput');
+    const btn   = document.getElementById('dfoAiSend');
+    if (!box) return;
+    const q = String(question || '').trim();
+    if (!q) return;
+    if (q.length > 2000) { box.style.display = ''; box.innerHTML = `<span style="color:var(--rose)">Vraag is te lang (max 2000 tekens).</span>`; return; }
+    box.style.display = '';
+    box.innerHTML = `<span style="color:var(--text-3);font-style:italic">AI denkt na…</span>`;
+    if (input) input.disabled = true;
+    if (btn)   btn.disabled = true;
+    try {
+      const resp = await window.KV.authedFetch('/api/super-admin-ai-manager', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q }),
+      });
+      const d = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const err = d?.error || ('HTTP ' + resp.status);
+        const detail = d?.detail ? ` — ${_dfoAiEsc(d.detail)}` : '';
+        box.innerHTML = `<span style="color:var(--rose)">Fout: ${_dfoAiEsc(err)}${detail}</span>`;
+        return;
+      }
+      const antwoord = d.antwoord || '(geen samenvatting)';
+      const uitleg   = d.uitleg ? `<div style="margin-top:6px;font-size:11.5px;color:var(--text-3);font-style:italic">${_dfoAiEsc(d.uitleg)}</div>` : '';
+      const rowInfo  = (d.row_count != null)
+        ? `<div style="margin-top:8px;font-size:10.5px;color:var(--text-3);letter-spacing:.06em">${d.row_count} rij(en)${d.truncated ? ' · top ' + ((d.ruwe_data || []).length) + ' getoond' : ''}</div>`
+        : '';
+      const table = _dfoAiRenderTable(d.ruwe_data || []);
+      box.innerHTML = `<div>${_dfoAiEsc(antwoord)}</div>${uitleg}${rowInfo}${table}`;
+    } catch (e) {
+      box.innerHTML = `<span style="color:var(--rose)">Netwerkfout: ${_dfoAiEsc(e?.message || 'onbekend')}</span>`;
+    } finally {
+      if (input) input.disabled = false;
+      if (btn)   btn.disabled   = false;
+      if (input) input.focus();
+    }
+  }
+  window.DFO_aiAsk  = function (question) {
+    const input = document.getElementById('dfoAiInput');
+    if (input) input.value = question;
+    _dfoAiSubmit(question);
+  };
+  window.DFO_aiSend = function () {
+    const input = document.getElementById('dfoAiInput');
+    _dfoAiSubmit(input ? input.value : '');
+  };
+
   // Public hook: klik op periode-chip
   window.DFO_dashPeriodClick = function (labelPeriod) {
     console.debug('[dashboard-v2] chip clicked:', labelPeriod);
@@ -622,13 +692,14 @@
               <div style="font-size:12px;color:var(--text-3)">Vraag alles over je bedrijf</div></div></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
               ${['Hoeveel wanbetalers open?', 'Omzet deze week?', 'Wie heeft geen mentor?']
-                .map(q => `<button class="chip" style="font-size:11.5px;padding:4px 10px;background:var(--surface)" onclick="alert('AI Manager: ${q}')">${q}</button>`).join('')}</div>
+                .map(q => `<button class="chip" style="font-size:11.5px;padding:4px 10px;background:var(--surface)" onclick="DFO_aiAsk(${JSON.stringify(q)})">${q}</button>`).join('')}</div>
             <div style="position:relative">
-              <input placeholder="Stel je vraag in gewone taal…" style="width:100%;box-sizing:border-box;padding:10px 48px 10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:22px;font-family:inherit;font-size:13px;color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s"
+              <input id="dfoAiInput" placeholder="Stel je vraag in gewone taal…" onkeydown="if(event.key==='Enter'){event.preventDefault();DFO_aiSend()}" style="width:100%;box-sizing:border-box;padding:10px 48px 10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:22px;font-family:inherit;font-size:13px;color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s"
                 onfocus="this.style.borderColor='var(--teal)';this.style.boxShadow='0 0 0 3px var(--teal-soft)'"
                 onblur="this.style.borderColor='var(--border)';this.style.boxShadow='none'"/>
-              <button style="position:absolute;right:5px;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:50%;
+              <button id="dfoAiSend" onclick="DFO_aiSend()" style="position:absolute;right:5px;top:50%;transform:translateY(-50%);width:32px;height:32px;border-radius:50%;
                 background:var(--teal);color:#fff;border:0;cursor:pointer;display:grid;place-items:center;padding:0">${svg(I.up, 'width:15px;height:15px')}</button></div>
+            <div id="dfoAiAnswer" style="display:none;margin-top:12px;padding:11px 13px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12.5px;line-height:1.55;color:var(--text-1);max-height:280px;overflow-y:auto"></div>
           </div>
         </div>
 
