@@ -1666,7 +1666,7 @@
      Drag-drop volgorde-editor blijft in admin.html (complexe UI); hier alleen
      zichtbaarheid + rol-selectie. 'admin' item wordt server-side geforceerd
      visible (anti-lockout) — we tonen dat als disabled toggle. */
-  const _menu = { loading: false, error: null, fetched: false, role: '', items: [], busy: false, dirty: false };
+  const _menu = { loading: false, error: null, fetched: false, role: '', items: [], busy: false, dirty: false, dragIdx: -1 };
   async function fetchMenu() {
     if (_menu.loading) return;
     _menu.loading = true; _menu.error = null; if (render) render();
@@ -1686,6 +1686,18 @@
     const it = _menu.items.find(x => x.key === key);
     if (!it || it.key === 'admin') return; // admin verplicht visible
     it.visible = !it.visible; _menu.dirty = true; if (render) render();
+  };
+  window.__setMenuDragStart = (idx) => { _menu.dragIdx = idx; };
+  window.__setMenuDragOver  = (evt) => { evt.preventDefault(); };
+  window.__setMenuDrop = (targetIdx, evt) => {
+    if (evt && evt.preventDefault) evt.preventDefault();
+    const from = _menu.dragIdx;
+    _menu.dragIdx = -1;
+    if (from < 0 || from === targetIdx) { if (render) render(); return; }
+    const arr = _menu.items;
+    const [moved] = arr.splice(from, 1);
+    arr.splice(targetIdx, 0, moved);
+    _menu.dirty = true; if (render) render();
   };
   window.__setMenuRoleChange = (role) => {
     if (_menu.dirty) {
@@ -1715,22 +1727,29 @@
     const rolesOpts = ['','super_admin','manager','sales','mentor','marketing','administratie']
       .map(r => `<option value="${r}" ${_menu.role === r ? 'selected' : ''}>${r ? r : 'Standaard (alle rollen)'}</option>`).join('');
     const list = _menu.items.length
-      ? _menu.items.map(it => {
+      ? _menu.items.map((it, idx) => {
           const locked = it.key === 'admin';
-          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border)">
+          return `<div draggable="true"
+            ondragstart="window.__setMenuDragStart(${idx})"
+            ondragover="window.__setMenuDragOver(event)"
+            ondrop="window.__setMenuDrop(${idx}, event)"
+            style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:grab;background:var(--surface)"
+            onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='var(--surface)'">
+            <span style="color:var(--text-3);font-size:14px;cursor:grab;user-select:none" title="Slepen om te herordenen">⋮⋮</span>
             <div style="flex:1;font-size:12.5px">${esc(it.key)}${it.group ? ` <span style="color:var(--text-3);font-size:11px">· ${esc(it.group)}</span>` : ''}${locked ? ` <span style="font-size:10px;color:var(--text-3)">(verplicht zichtbaar)</span>` : ''}</div>
             <button class="btn btn-ghost btn-sm" ${locked ? 'disabled' : ''} onclick="window.__setMenuToggle('${esc(it.key)}')" style="font-size:11.5px">${it.visible ? '✓ zichtbaar' : '⨯ verborgen'}</button>
           </div>`;
         }).join('')
-      : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Nog geen items geconfigureerd voor deze rol — sidebar toont standaard-set.</div>`;
+      : `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Nog geen items geconfigureerd voor deze rol — sidebar toont standaard-set. Sleep items uit een andere rol (via bovenstaande dropdown) om te starten.</div>`;
     return `<div style="max-width:900px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
-        <b>Volgorde slepen</b> (drag-drop) en <b>groep-toewijzing</b> zitten nog in <a href="/modules/admin.html#tab-menu-manager" style="color:inherit;text-decoration:underline">admin.html · Menu beheer</a>. Hier kun je items <b>tonen/verbergen</b> per rol.
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
+        <b>Menu-editor in-sectie.</b> Sleep items met het ⋮⋮-handvat om te herordenen; klik ✓/⨯ om te tonen/verbergen. Opslaan schrijft de layout per rol naar <code>app_settings.sidebar_layout[:role]</code>. Wijzigingen zichtbaar na herladen.
       </div>
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <label style="font-size:12px;color:var(--text-2)">Rol:
           <select onchange="window.__setMenuRoleChange(this.value)" style="margin-left:6px;padding:5px 8px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">${rolesOpts}</select>
         </label>
+        ${_menu.dirty ? '<span style="font-size:11px;color:var(--amber)">niet-opgeslagen wijzigingen</span>' : ''}
         <button class="btn btn-primary btn-sm" ${!_menu.dirty || _menu.busy ? 'disabled' : ''} onclick="window.__setMenuSave()" style="margin-left:auto">${_menu.busy ? 'Opslaan…' : 'Opslaan'}</button>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">${list}</div>
