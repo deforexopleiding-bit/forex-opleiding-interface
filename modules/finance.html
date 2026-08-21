@@ -28943,6 +28943,7 @@
         .pipe-list-row-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
         .pipe-list-row-name { font-size:13.5px; font-weight:600; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:6px; }
         .pipe-cred-badge { display:inline-block; padding:1px 7px; border-radius:999px; background:rgba(16,185,129,.14); color:#10b981; font-size:10.5px; font-weight:700; letter-spacing:.2px; border:1px solid rgba(16,185,129,.32); text-transform:lowercase; flex-shrink:0; }
+        .pipe-grace-badge { display:inline-block; padding:1px 8px; border-radius:999px; background:rgba(16,185,129,.16); color:#10b981; font-size:10.5px; font-weight:700; letter-spacing:.2px; border:1px solid rgba(16,185,129,.38); flex-shrink:0; white-space:nowrap; }
         .pipe-cred-summary { padding:10px 12px; border-radius:8px; background:rgba(16,185,129,.06); border:1px solid rgba(16,185,129,.22); font-size:12.5px; color:var(--text-dim); line-height:1.5; }
         .pipe-cred-summary strong { color:var(--text); }
         .pipe-cred-summary .pipe-cred-outstanding { display:block; margin-top:6px; color:#f87171; font-weight:600; }
@@ -29054,8 +29055,12 @@
     const idx = _pipeState.list.findIndex(x => x.customer_id === customerId);
     if (idx < 0) return;
     const prev = _pipeState.list[idx].stage_slug;
+    const prevResolveAt = _pipeState.list[idx].resolve_scheduled_at;
     _pipeState.list[idx].stage_slug       = toSlug;
     _pipeState.list[idx].stage_changed_at = new Date().toISOString();
+    // Handmatige move wist de geplande grace-afsluiting server-side (setStage);
+    // haal de badge optimistisch meteen weg.
+    _pipeState.list[idx].resolve_scheduled_at = null;
     renderPipeline();
     try {
       const r = await window.AgentShared.apiFetch('/api/dunning-pipeline-set-stage', {
@@ -29069,6 +29074,7 @@
     } catch (e) {
       // Rollback
       _pipeState.list[idx].stage_slug = prev;
+      _pipeState.list[idx].resolve_scheduled_at = prevResolveAt;
       renderPipeline();
       window.AgentShared?.showToast?.('Fase-wijziging mislukt: ' + (e?.message || 'onbekend'), 'error');
     }
@@ -29206,6 +29212,21 @@
     _pipeWireListEvents();
   }
 
+  // Grace-badge: klant heeft alles betaald en wordt over ~X min automatisch
+  // afgesloten. Toont een groene "Betaald ✓ — sluit automatisch over ~X min".
+  // Bij een verstreken/overdue tijd (engine heeft nog niet gedraaid) tonen we
+  // "binnenkort" i.p.v. een negatief getal.
+  function _pipeGraceBadge(resolveAt) {
+    if (!resolveAt) return '';
+    const ms = Date.parse(resolveAt);
+    if (!Number.isFinite(ms)) return '';
+    const minsLeft = Math.round((ms - Date.now()) / 60000);
+    const label = minsLeft > 0
+      ? `Betaald ✓ — sluit automatisch over ~${minsLeft} min`
+      : 'Betaald ✓ — sluit binnenkort automatisch';
+    return `<span class="pipe-grace-badge" title="Alle facturen betaald. De dunning-engine zet deze klant automatisch op ''opgelost''.">${esc(label)}</span>`;
+  }
+
   function _pipeListRowHtml(it) {
     const name = it.customer_name || 'Onbekende klant';
     const avColor = _pipeAvatarColor(it.customer_id || name);
@@ -29229,10 +29250,14 @@
     const credBadge = cd && cd.count > 0
       ? `<span class="pipe-cred-badge" title="${cd.count} factuur${cd.count === 1 ? '' : 'en'} gecrediteerd${cd.last_credited_on ? ` · laatst op ${esc(cd.last_credited_on)}` : ''}">gecrediteerd</span>`
       : '';
+    // Grace-badge: alles betaald, automatische afsluiting gepland over ~X min.
+    // De klant blijft zichtbaar tot de dunning-engine hem sluit; deze badge telt
+    // (bij benadering) af. Wordt gewist zodra de rij naar 'opgelost' verhuist.
+    const graceBadge = _pipeGraceBadge(it.resolve_scheduled_at);
     return `<div class="pipe-list-row" data-cid="${esc(it.customer_id)}" data-stage="${esc(it.stage_slug)}">
       <div class="pipe-list-row-avatar" style="background:${esc(avColor)}">${esc(initials)}</div>
       <div class="pipe-list-row-body">
-        <div class="pipe-list-row-name">${esc(name)}${credBadge}</div>
+        <div class="pipe-list-row-name">${esc(name)}${credBadge}${graceBadge}</div>
         ${ctxHtml}
       </div>
       <div class="pipe-list-row-right">
