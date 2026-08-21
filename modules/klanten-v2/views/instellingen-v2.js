@@ -1808,23 +1808,85 @@
   // te verwijderen — twee `function bodyBedrijf()` in dezelfde scope liet de
   // laatste (deze prototype) winnen en overschreef de nieuwe render.
 
+  /* Ronde-31 STAP 4 · wb-venster — cooldown schrijfbaar (dunning-settings-get/
+     update via bestaand endpoint) + office-hours read-only (direct-supabase op
+     app_settings.dunning_office_hours; er is geen set-endpoint, editor volgt in
+     aparte brok met audit-log). Motor onaangeraakt. */
+  const _dsv = { loading: false, fetched: false, error: null, cooldown: null, office: null, busy: false };
+  async function fetchDunningVenster() {
+    if (_dsv.loading || _dsv.fetched) return;
+    _dsv.loading = true; _dsv.error = null; if (render) render();
+    try {
+      const cRes = await tryFetch('dun-settings-get', '/api/dunning-settings-get');
+      if (cRes?.__error || cRes?.error) throw new Error(cRes?.__error || cRes?.error);
+      _dsv.cooldown = { days: cRes?.dunning_cooldown_days ?? 7, is_default: !!cRes?.is_default, updated_at: cRes?.updated_at || null };
+      // Office-hours: direct-supabase (read-only). Fail-soft: bij RLS-error tonen we defaults.
+      try {
+        if (window.supabase?.from) {
+          const { data, error } = await window.supabase.from('app_settings').select('value, updated_at').eq('key', 'dunning_office_hours').maybeSingle();
+          if (!error && data?.value) _dsv.office = { ...data.value, is_default: false, updated_at: data.updated_at };
+          else                       _dsv.office = { tz: 'Europe/Amsterdam', start: '08:00', end: '20:00', days: [1,2,3,4,5], is_default: true };
+        }
+      } catch (_) { _dsv.office = { tz: 'Europe/Amsterdam', start: '08:00', end: '20:00', days: [1,2,3,4,5], is_default: true }; }
+    } catch (e) { _dsv.error = e?.message || 'onbekend'; }
+    _dsv.loading = false; _dsv.fetched = true; if (render) render();
+  }
+  window.__setDsvCooldownSave = () => {
+    const el = document.querySelector('[data-dsv-field="cooldown"]');
+    const n = Number(el?.value);
+    if (!Number.isFinite(n) || n < 1 || n > 90 || Math.trunc(n) !== n) { showToast('Cooldown moet integer 1..90 zijn', 'warn'); return; }
+    openConfirm(`Cooldown op ${n} dag${n===1?'':'en'} zetten? Klanten krijgen daarna pas na ${n} dagen opnieuw een aanmaning. Effect vanaf volgende cron-run.`, async () => {
+      _dsv.busy = true; if (render) render();
+      try {
+        const j = await tryFetch('dun-settings-update', '/api/dunning-settings-update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dunning_cooldown_days: n }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Cooldown bijgewerkt naar ' + n + ' dagen', 'ok');
+        _dsv.fetched = false; fetchDunningVenster();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _dsv.busy = false; if (render) render(); }
+    });
+  };
   function bodyVenster() {
-    return `
-      <div class="set-field">
-        <div class="set-field-l"><div class="set-field-t">Verzendvenster</div><div class="set-field-d">Buiten deze tijden gaan er geen aanmaningen uit. De motor draait wel door.</div></div>
-        <div class="set-field-c set-field-row"><input class="ib-input" value="08:00" style="max-width:110px"><span class="set-sep">tot</span><input class="ib-input" value="20:00" style="max-width:110px"></div>
+    if (!_dsv.fetched && !_dsv.loading) queueMicrotask(() => fetchDunningVenster());
+    const c = _dsv.cooldown;
+    const o = _dsv.office;
+    const dayNames = ['zo','ma','di','wo','do','vr','za'];
+    const activeDays = Array.isArray(o?.days) ? o.days.map(d => dayNames[d] || String(d)) : [];
+    return `<div style="max-width:1000px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Cooldown schrijfbaar; verzendvenster + dagen alleen-lezen.</b> Cooldown bepaalt hoeveel dagen er tussen 2 aanmaningen voor dezelfde klant moet zitten. Het verzendvenster (uren/dagen/tijdzone) leeft in <code>app_settings.dunning_office_hours</code> zonder set-endpoint — schrijven vereist aparte brok met audit-log.
       </div>
-      <div class="set-field">
-        <div class="set-field-l"><div class="set-field-t">Dagen</div><div class="set-field-d">Op welke dagen mag er verstuurd worden</div></div>
-        <div class="set-field-c set-field-row" style="flex-wrap:wrap">
-          ${['ma','di','wo','do','vr','za','zo'].map(d => `<button class="chip is-on">${d}</button>`).join('')}
+      ${_dsv.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_dsv.error)}</div>` : ''}
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
+          <div>
+            <div style="font-size:13px;font-weight:600">Cooldown tussen aanmaningen</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Nu: <b>${c?.days ?? '—'} dag${(c?.days??0)===1?'':'en'}</b>${c?.is_default ? ' (default)' : ''}. Motor leest deze bij elke cron-run.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" min="1" max="90" step="1" data-dsv-field="cooldown" value="${esc(String(c?.days ?? 7))}" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            <span style="font-size:12px;color:var(--text-3)">dagen</span>
+            <button class="btn btn-primary btn-sm" ${_dsv.busy ? 'disabled' : ''} onclick="window.__setDsvCooldownSave()">${_dsv.busy ? 'Bezig…' : 'Opslaan'}</button>
+          </div>
         </div>
+        ${c?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(c.updated_at)}</div>` : ''}
       </div>
-      <div class="set-field">
-        <div class="set-field-l"><div class="set-field-t">Tijdzone</div><div class="set-field-d">Zomer- en wintertijd worden automatisch meegenomen</div></div>
-        <div class="set-field-c"><select class="ib-input" style="max-width:240px"><option>Europe/Amsterdam</option></select></div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600">Verzendvenster (office-hours)</div>
+        <span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:10.5px;font-weight:600">ALLEEN-LEZEN</span>
       </div>
-      <div class="set-actions"><button class="btn btn-primary" onclick="__setNotice('Verzendvenster opslaan')">Opslaan</button></div>`;
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;font-size:12.5px">
+        <div><span style="color:var(--text-3)">Tijdzone: </span><code>${esc(o?.tz || 'Europe/Amsterdam')}</code></div>
+        <div><span style="color:var(--text-3)">Uren: </span><b>${esc(o?.start || '08:00')}</b> tot <b>${esc(o?.end || '20:00')}</b></div>
+        <div style="grid-column:1/-1"><span style="color:var(--text-3)">Actieve dagen: </span>${activeDays.length ? activeDays.map(d => `<code style="margin-right:4px">${d}</code>`).join('') : '<code>ma-vr (default)</code>'}${o?.is_default ? ' <span style="color:var(--text-3);font-size:11px">(default — geen row in app_settings.dunning_office_hours)</span>' : ''}</div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:11px;color:var(--text-3);line-height:1.55">Server-parser: <code>api/_lib/dunning-office-hours.js</code>. Motor gebruikt dit als send-gate in <code>dunning-engine.js</code> — buiten venster gaan berichten in wachtrij tot binnen-venster.</div>
+    </div>`;
   }
 
   function bodyPlaceholder(cur) {
@@ -2933,6 +2995,8 @@
       'wb-joost',
       // Ronde-31 STAP 3: wb-incasso bureaus + auto-settings live.
       'wb-incasso',
+      // Ronde-31 STAP 4: wb-venster cooldown schrijfbaar (office-hours read-only in body).
+      'wb-venster',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
