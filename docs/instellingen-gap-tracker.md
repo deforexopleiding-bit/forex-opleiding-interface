@@ -17,12 +17,12 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**3 quick-adds open · 11 grote-brokken open · 13 deferred · 11 done** (totaal 38)
+**2 quick-adds open · 11 grote-brokken open · 13 deferred · 12 done** (totaal 38)
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 11 | — |
-| open (quick-add)   | 3  | team-mentoren, sys-bubble-schema, alg-weergave |
+| done         | 12 | — |
+| open (quick-add)   | 2  | sys-bubble-schema, alg-weergave |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -98,7 +98,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `team-gebruikers` | done | — | ja | ≤v=30 (user-CRUD + rol + activate + impersonate) |
 | `team-rechten`    | done | — | ja | ≤v=30 (matrix + diff-save + role-sync backfill) |
-| `team-mentoren`   | open | quick-add | **ja (`/api/mentor-cash-traject-*` bestaan)** | **Top-4 quick-add: cash-vergoedingen sectie toevoegen** |
+| `team-mentoren`   | done | — | ja | v=41 (Bubble-koppeling + cash-vergoedingen: list + pause/resume/delete + globale vrijval-motor) |
 | `team-api`        | deferred | bewust-deferred | env-vars | secrets-brok |
 
 ## Algemeen
