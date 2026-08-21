@@ -847,8 +847,9 @@
             <div style="font-size:13px;font-weight:600">Meta-templates</div>
             <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${rows.length} template(s) ${_wa.error ? '· ⚠ ' + esc(_wa.error) : ''}</div>
           </div>
-          <div style="display:flex;gap:8px;align-items:center">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             ${moduleSel}
+            <a class="btn btn-primary btn-sm" href="/modules/admin.html#tab-integraties${_wa.moduleId ? '&waba=' + encodeURIComponent(_wa.moduleId) : ''}" style="text-decoration:none">➕ Nieuwe template</a>
             <button class="btn btn-primary btn-sm" ${busySync ? 'disabled' : ''} onclick="window.__setWaSync()">${busySync ? 'Sync…' : '↻ Sync vanaf Meta'}</button>
           </div>
         </div>
