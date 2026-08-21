@@ -606,7 +606,9 @@
     _bnk.loading = true; _bnk.error = null; if (render) render();
     try {
       if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-      const { data, error } = await window.supabase.from('bank_accounts').select('iban, label, is_active, currency, created_at').order('created_at');
+      // BLOCKER-2 fix: tabel heeft `iban, is_active, gocardless_account_id`
+      // (geen label/currency-kolommen). Bevestigd via api/_lib/bank-balance.js:145.
+      const { data, error } = await window.supabase.from('bank_accounts').select('id, iban, is_active, gocardless_account_id, balance_fetched_at').order('iban');
       if (error) throw error;
       _bnk.items = data || [];
     } catch (e) { _bnk.error = e?.message || 'onbekend'; }
@@ -617,91 +619,58 @@
     if (!_bnk.fetched && !_bnk.loading) queueMicrotask(() => fetchBank());
     const rows = _bnk.items.map(a => `<tr style="border-top:1px solid var(--border)">
       <td style="padding:8px 12px;font-size:12.5px;font-family:'IBM Plex Mono',monospace">${esc(a.iban || '—')}</td>
-      <td style="padding:8px 12px;font-size:12.5px">${esc(a.label || '—')}</td>
-      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(a.currency || 'EUR')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(a.gocardless_account_id || '—')}</td>
+      <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${a.balance_fetched_at ? esc(String(a.balance_fetched_at).slice(0,10)) : '—'}</td>
       <td style="padding:8px 12px;font-size:11.5px">${a.is_active ? '✓ actief' : '⨯ inactief'}</td>
     </tr>`).join('');
     return `<div style="max-width:1000px">
       <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Read-only.</b> Bank-CRUD + CAMT-upload vragen eigen brok: een verkeerde/inactive IBAN hier beïnvloedt het dashboard-saldo direct (zie F2-postmortem: het endpoint <code>finance-bank-camt-balance.js</code> sommeert nu alle valid-IBAN accounts, ongeacht bank_accounts-registratie — maar de per-account labels blijven hieruit komen).
-        CAMT-upload gebeurt via de bestaande Finance-Bank-module.
+        <b>Read-only.</b> Deze tabel toont de <code>bank_accounts</code>-registratie. Bij lege tabel is het dashboard-saldo NOG steeds correct — <code>finance-bank-camt-balance.js</code> sommeert alle valid-IBAN accounts uit de CAMT-data (F2-postmortem-fix), niet uit deze tabel. In een latere fin-bank CRUD-brok kan deze sectie beter de CAMT-accounts tonen die daadwerkelijk saldo hebben.
       </div>
       ${_bnk.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_bnk.error)}</div>` : ''}
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="background:var(--surface-2)">
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">IBAN</th>
-            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Label</th>
-            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Valuta</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">GoCardless account-id</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Saldo-fetch</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
           </tr></thead>
-          <tbody>${rows || `<tr><td colspan="4" style="padding:16px;color:var(--text-3);font-size:12.5px">${_bnk.loading ? 'Laden…' : 'Geen bank-accounts geregistreerd'}</td></tr>`}</tbody>
+          <tbody>${rows || `<tr><td colspan="4" style="padding:16px;color:var(--text-3);font-size:12.5px">${_bnk.loading ? 'Laden…' : 'Geen bank-accounts geregistreerd (verwacht — saldo komt uit CAMT-data).'}</td></tr>`}</tbody>
         </table>
       </div>
     </div>`;
   }
 
-  /* Wave-3 · fin-facturatie — app-settings met object-shape (invoice-config).
-     3 velden: standaard-betaaltermijn, standaard-BTW%, factuurnummer-schema.
-     PUT-shape zoals andere app-settings; custom confirm bij save. */
-  const _facCfg = {
-    loading: false, fetched: false, error: null,
-    paymentTermDays: '', vatPercentage: '', invoiceNumberFormat: '',
-    changed: false, busy: false,
-  };
-  async function fetchFacCfg() {
-    if (_facCfg.loading || _facCfg.fetched) return;
-    _facCfg.loading = true; _facCfg.error = null; if (render) render();
-    const [pt, vat, fmt] = await Promise.all([
-      tryFetch('fc-pt',  '/api/app-settings?key=default_payment_term_days'),
-      tryFetch('fc-vat', '/api/app-settings?key=default_vat_percentage'),
-      tryFetch('fc-fmt', '/api/app-settings?key=invoice_number_format'),
-    ]);
-    _facCfg.loading = false; _facCfg.fetched = true;
-    _facCfg.paymentTermDays     = String((pt?.value && (pt.value.days   ?? pt.value)) ?? 14);
-    _facCfg.vatPercentage       = String((vat?.value && (vat.value.pct  ?? vat.value)) ?? 21);
-    _facCfg.invoiceNumberFormat = String((fmt?.value && (fmt.value.format ?? fmt.value)) ?? 'YYYY/NNNN');
-    _facCfg.changed = false;
-    if (render) render();
-  }
-  window.__setFcPt  = (v) => { _facCfg.paymentTermDays = String(v || ''); _facCfg.changed = true; if (render) render(); };
-  window.__setFcVat = (v) => { _facCfg.vatPercentage   = String(v || ''); _facCfg.changed = true; if (render) render(); };
-  window.__setFcFmt = (v) => { _facCfg.invoiceNumberFormat = String(v || ''); _facCfg.changed = true; if (render) render(); };
-  window.__setFcSave = () => {
-    if (!_facCfg.changed || _facCfg.busy) return;
-    openConfirm(`Facturatie-config opslaan? Standaard-betaaltermijn ${_facCfg.paymentTermDays} dagen · BTW ${_facCfg.vatPercentage}% · Factuurnr-schema ${_facCfg.invoiceNumberFormat}. Nieuwe facturen gebruiken deze waarden.`, async () => {
-      _facCfg.busy = true; if (render) render();
-      const [a, b, c] = await Promise.all([
-        tryFetch('fc-put-pt',  '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'default_payment_term_days', value: { days: Number(_facCfg.paymentTermDays) || 14 } }) }),
-        tryFetch('fc-put-vat', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'default_vat_percentage',   value: { pct:  Number(_facCfg.vatPercentage)   || 21 } }) }),
-        tryFetch('fc-put-fmt', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'invoice_number_format',    value: { format: String(_facCfg.invoiceNumberFormat) } }) }),
-      ]);
-      _facCfg.busy = false;
-      if (a?.__error || a?.error || b?.__error || b?.error || c?.__error || c?.error) showToast('Opslaan mislukt: ' + (a?.__error || a?.error || b?.__error || b?.error || c?.__error || c?.error), 'warn');
-      else { _facCfg.changed = false; showToast('Facturatie-config opgeslagen', 'ok'); }
-      if (render) render();
-    }, 'warn');
-  };
+  /* Wave-3 · fin-facturatie — DISPLAY-ONLY na verify-onderzoek.
+     Consumption-check (BLOCKER 3): de 3 keys (default_payment_term_days,
+     default_vat_percentage, invoice_number_format) worden NIET gelezen door
+     api/finance-invoice-create.js of api/_lib/invoice-create-core.js:
+       - payment_term_id komt per-call uit body/TL (TeamLeader-department default)
+       - vat_percentage komt per line-item uit body (0/6/9/21 hardcoded valid)
+       - invoice_number wordt door TeamLeader geleverd (local.invoice_number),
+         geen schema-config aan onze kant.
+     → Orphan-keys. Save = loze write. Deze sectie is DISPLAY-ONLY tot facturatie
+     ze werkelijk consumeert (aparte brok waarin invoice-create-core deze reads
+     krijgt met per-department override). */
   function bodyFinFacturatie() {
-    if (!_facCfg.fetched && !_facCfg.loading) queueMicrotask(() => fetchFacCfg());
     return `<div style="max-width:800px">
       <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Voorzichtig.</b> Deze waarden voeden nieuwe facturen (invoice-create). Bestaande facturen blijven zoals ze zijn. QA: waarde noteren → wijzigen → factuur maken → terugzetten. Raakt <b>niet</b> de incasso-motor.
+        <b>Display-only.</b> Uit onderzoek: de invoice-create-flow leest deze keys nog niet.
+        <code>payment_term_id</code> komt per-factuur uit body/TeamLeader-department; <code>vat_percentage</code> zit per line-item; <code>invoice_number</code> wordt door TeamLeader geleverd.
+        Voordat we hier écht writes toestaan: aparte brok waarin <code>invoice-create-core.js</code> deze <code>app-settings</code>-defaults leest (met per-department override) — anders is dit een loze knop.
       </div>
       <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
-        <div style="padding:14px 16px;display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
-          <label style="font-size:11.5px;color:var(--text-2)">Standaard betaaltermijn (dagen)
-            <input type="number" min="0" step="1" value="${esc(_facCfg.paymentTermDays)}" oninput="window.__setFcPt(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
-          </label>
-          <label style="font-size:11.5px;color:var(--text-2)">Standaard BTW-%
-            <input type="number" min="0" step="0.5" value="${esc(_facCfg.vatPercentage)}" oninput="window.__setFcVat(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
-          </label>
-          <button class="btn btn-primary btn-sm" ${!_facCfg.changed || _facCfg.busy ? 'disabled' : ''} onclick="window.__setFcSave()">${_facCfg.busy ? 'Bezig…' : 'Opslaan'}</button>
-        </div>
-        <div style="padding:0 16px 14px">
-          <label style="font-size:11.5px;color:var(--text-2)">Factuurnummer-schema
-            <input type="text" value="${esc(_facCfg.invoiceNumberFormat)}" oninput="window.__setFcFmt(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;max-width:280px;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" placeholder="YYYY/NNNN" />
-          </label>
+        <div style="padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Huidige effectieve defaults (bron-code)</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:12.5px">
+            <div style="color:var(--text-3)">Standaard betaaltermijn</div>
+            <div style="font-family:'IBM Plex Mono',monospace">TeamLeader per-department (typisch 14 dagen); geen central override</div>
+            <div style="color:var(--text-3)">BTW-%</div>
+            <div style="font-family:'IBM Plex Mono',monospace">Per line-item ({0, 6, 9, 21}); wizard-default 21% (domestic)</div>
+            <div style="color:var(--text-3)">Factuurnummer-schema</div>
+            <div style="font-family:'IBM Plex Mono',monospace">TeamLeader-geleverd (typisch YYYY/NNNN); geen central override</div>
+          </div>
         </div>
       </div>
     </div>`;
@@ -933,26 +902,12 @@
     </div>`;
   }
 
-  function bodyBedrijf() {
-    return `
-      <div class="set-field">
-        <div class="set-field-l"><div class="set-field-t">Bedrijfsnaam</div></div>
-        <div class="set-field-c"><input class="ib-input" value="De Forex Opleiding"></div>
-      </div>
-      <div class="set-field">
-        <div class="set-field-l"><div class="set-field-t">Adres</div></div>
-        <div class="set-field-c"><input class="ib-input" value="Deinsesteenweg 108, 9031 Drongen"></div>
-      </div>
-      <div class="set-field">
-        <div class="set-field-l"><div class="set-field-t">Btw-nummer</div><div class="set-field-d">Verschijnt op facturen en offertes</div></div>
-        <div class="set-field-c"><input class="ib-input mono" value="BE0808734629"></div>
-      </div>
-      <div class="set-field">
-        <div class="set-field-l"><div class="set-field-t">Telefoon</div></div>
-        <div class="set-field-c"><input class="ib-input mono" value="+31 85 580 36 26"></div>
-      </div>
-      <div class="set-actions"><button class="btn btn-primary" onclick="__setNotice('Bedrijfsgegevens opslaan')">Opslaan</button></div>`;
-  }
+  // Wave-1 bodyBedrijf-prototype VERWIJDERD (was: hardcoded input-velden + native
+  // alert bij Opslaan). Vervangen door Wave-3 display-only bodyBedrijf hierboven
+  // (regel ~566): leest /api/config, geen editors, geen native dialogen.
+  // Native-alert-bug (BLOCKER 1 uit verify Wave-3) opgelost door deze declaratie
+  // te verwijderen — twee `function bodyBedrijf()` in dezelfde scope liet de
+  // laatste (deze prototype) winnen en overschreef de nieuwe render.
 
   function bodyVenster() {
     return `
