@@ -3383,11 +3383,17 @@
         ? '<span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue);font-weight:600;margin-right:4px">✉ MAIL</span>'
         : '<span style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--emerald-soft);color:var(--emerald);font-weight:600;margin-right:4px">💬 WA</span>';
       const subj = m.channel === 'email' && m.meta?.subject ? `<div style="font-weight:600;margin-bottom:3px;font-size:12px">${esc(m.meta.subject)}</div>` : '';
+      // Ronde-18: media-thumbnail als m.meta.media_url gezet is; anders
+      // esc-text (met [image]-placeholder-fallback als de ingestion geen url
+      // gaf). Gedeelde helper voor consistente look tussen alle inbox-views.
+      const bodyHtml = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.renderChatBody)
+        ? window.KV_V2.helpers.renderChatBody(m, esc)
+        : esc(m.body || '');
       return `<div style="display:flex;justify-content:${align};margin-bottom:9px">
         <div style="max-width:78%;padding:8px 11px;background:${bg};border:1px solid var(--border);border-radius:var(--r-sm)">
           <div style="font-size:10.5px;color:var(--text-3);margin-bottom:3px">${chBadge}${esc(_fmtDateTime(m.at))}</div>
           ${subj}
-          <div style="font-size:12.5px;white-space:pre-wrap;word-break:break-word">${esc(m.body || '')}</div>
+          <div style="font-size:12.5px;white-space:pre-wrap;word-break:break-word">${bodyHtml}</div>
         </div>
       </div>`;
     }).join('');
@@ -3407,7 +3413,7 @@
     let composerHtml = '';
     if (c.channel === 'wa') {
       if (canSendText) {
-        composerHtml = `<textarea placeholder="Typ een WhatsApp-bericht…" oninput="__wbxInboxComposeField('text',this.value)" rows="3" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
+        composerHtml = `<textarea id="wbxComposeTxt" placeholder="Typ een WhatsApp-bericht…" oninput="__wbxInboxComposeField('text',this.value)" rows="3" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
       } else {
         composerHtml = `<div style="font-size:11.5px;color:var(--amber);margin-bottom:6px">24u-venster is verlopen — vrije tekst geblokkeerd. Kies een template:</div>
           <select onchange="__wbxInboxPickTemplate(this.value)" style="width:100%;font-size:12.5px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1)">
@@ -3417,7 +3423,7 @@
       }
     } else if (c.channel === 'mail') {
       composerHtml = `<input type="text" placeholder="Onderwerp" value="${esc(c.subject || '')}" oninput="__wbxInboxComposeField('subject',this.value)" style="width:100%;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-bottom:6px;box-sizing:border-box" />
-        <textarea placeholder="Typ een mail…" oninput="__wbxInboxComposeField('text',this.value)" rows="4" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
+        <textarea id="wbxComposeTxt" placeholder="Typ een mail…" oninput="__wbxInboxComposeField('text',this.value)" rows="4" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
     }
 
     /* SURFACE A: compose action-bar met 6 v1-knoppen. Bijlage / Template /
@@ -3432,6 +3438,9 @@
     const qrBtn = c.channel === 'wa' && canSendText
       ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 9px" onclick="__wbxInboxOpenQr()" title="Snel antwoord">Snel antw.</button>` : '';
     const joostBtn = `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 9px;color:var(--brand)" onclick="__wbxInboxAskJoost('${esc(convId)}')" title="Vraag Joost om een suggestie">🤖 Joost</button>`;
+    const emojiBtn = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.emojiPickerButtonHtml)
+      ? window.KV_V2.helpers.emojiPickerButtonHtml('wbxComposeTxt', '😊')
+      : '';
     const moreBtn = `<button class="btn btn-ghost btn-sm" style="font-size:12.5px;padding:4px 9px;font-weight:700;position:relative" onclick="event.stopPropagation();__wbxInboxComposeMenu()" title="Meer">⋮${composeMenu}</button>`;
 
     return `<div style="border-top:1px solid var(--border);background:var(--surface);padding:10px 14px">
@@ -3442,7 +3451,7 @@
       ${composerHtml}
       ${errLine}
       <div style="display:flex;justify-content:flex-end;gap:5px;margin-top:8px;align-items:center;flex-wrap:wrap">
-        ${attachBtn}${tplBtn}${qrBtn}${joostBtn}${moreBtn}
+        ${attachBtn}${tplBtn}${qrBtn}${joostBtn}${emojiBtn}${moreBtn}
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;margin-left:6px" onclick="__wbxInboxSend()" ${c.sending ? 'disabled' : ''}>${c.sending ? 'Bezig…' : 'Verstuur'}</button>
       </div>
     </div>`;

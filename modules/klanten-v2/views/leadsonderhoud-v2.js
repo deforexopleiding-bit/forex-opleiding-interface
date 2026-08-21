@@ -623,7 +623,6 @@
     // white-space (normal) → collapse van indentation-tekstnodes.
     // Multi-line berichten behouden hun \n's want die staan in body.
     const isOut = m.direction === 'outbound';
-    const body = esc(m.body || '');
     const at = m.at ? esc(fmtDatum(m.at)) : '';
     const align = isOut ? 'right' : 'left';
     const bg = isOut ? 'var(--brand-soft, #E2F1F5)' : 'var(--surface-2)';
@@ -634,11 +633,12 @@
     const subjHtml = m.channel === 'mail' && m.subject
       ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:3px">${esc(m.subject)}</div>`
       : '';
-    // Bewust GEEN indentation tussen bubble-tags — kleine restanten tekst-
-    // nodes tussen tags stuwen anders alsnog de hoogte op als iemand ooit
-    // vergeet white-space te tunen. Alle tags aan elkaar.
-    const bodyHtml = body
-      ? `<div style="white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">${body}</div>`
+    // Ronde-18: media-thumbnail via gedeelde helper (image/attachment support).
+    const mediaOrText = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.renderChatBody)
+      ? window.KV_V2.helpers.renderChatBody(m, esc)
+      : esc(m.body || '');
+    const bodyHtml = mediaOrText
+      ? `<div style="white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">${mediaOrText}</div>`
       : `<div style="opacity:.55">(leeg bericht)</div>`;
     return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${align};margin-bottom:6px"><span style="display:inline-block;text-align:left;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;vertical-align:top"><span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--${chanColor}-soft);color:var(--${chanColor});font-weight:600;letter-spacing:.04em;margin-bottom:3px;opacity:.85">${chanLabel}</span>${subjHtml}${bodyHtml}<div style="font-size:10px;opacity:.5;font-family:'IBM Plex Mono',monospace;margin-top:3px;text-align:right">${at}</div></span></div>`;
   }
@@ -1384,6 +1384,7 @@
           ${waEnabled ? '<span style="font-size:11px;color:var(--text-3)">binnen 24u-venster</span>' : '<span style="font-size:11px;color:var(--amber)">buiten 24u — alleen sjabloon</span>'}
         </div>
         <textarea
+          id="lsInbWaTxt"
           placeholder="${waEnabled ? 'Typ een WhatsApp-antwoord… (Ctrl+Enter om te verzenden)' : 'Buiten 24u-venster — gebruik "Sjabloon" hieronder of stuur mail'}"
           oninput="__lsInbDraftWa('${String(leadId).replace(/'/g, "\\'")}', this.value)"
           onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();__lsInbSendWa();}"
@@ -1393,6 +1394,7 @@
           ${waEnabled ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="__lsInbSendWa()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur WA'}</button>` : `<button class="btn btn-ghost btn-sm" disabled title="Buiten 24u-venster — kies een sjabloon">Verstuur WA</button>`}
           <button class="${tplBtnClass}" ${tplBtnStyle} onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Kies een goedgekeurde WA-template">${svg(I.doc || I.mail, 'width:13px;height:13px')} Sjabloon</button>
           <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker('wa')" ${sending ? 'disabled' : ''} title="Canned snel-antwoord invoegen">Snel</button>
+          ${(window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.emojiPickerButtonHtml) ? window.KV_V2.helpers.emojiPickerButtonHtml('lsInbWaTxt', '😊') : ''}
           <button class="btn btn-ghost btn-sm" onclick="__lsInbToggleMailForm()" ${!mailEnabled ? 'disabled' : ''} title="${mailEnabled ? 'Antwoord per mail' : 'Geen e-mailadres bekend'}">${showMail ? 'Verberg mail' : 'Ook / alleen mail…'}</button>
         </div>
       </div>

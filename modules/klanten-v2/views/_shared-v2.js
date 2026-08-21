@@ -278,6 +278,117 @@
     });
   }
 
+  // ── Chat-media renderer + emoji picker (Ronde-18: image-thumbnails +
+  // emoji-support voor alle inbox/gesprekken-renderers).
+  //
+  // renderChatBody(m, esc?)
+  //   Retourneert HTML voor de body van een chat-message. Herkent:
+  //     - m.meta.media_url + media_type='image' (of body='[image]' + url) → <img>
+  //     - m.meta.media_url + andere types                                → download-link
+  //     - Anders: escaped body-tekst (emoji UTF-8 renderen native OK)
+  //   esc = optionele escape-fn (fallback: minimale HTML-escape).
+  function renderChatBody(m, escFn) {
+    const _esc = escFn || ((s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+    const meta = m && m.meta || {};
+    const mediaUrl  = meta.media_url || null;
+    const mediaType = String(meta.media_type || '').toLowerCase();
+    const bodyRaw   = String(m && m.body || '');
+    // Placeholder-detectie: backend genereert [image]/[video]/[document] als
+    // body leeg is. Als er ook een media_url is → gebruik die ipv de tekst.
+    const isPlaceholder = /^\[(image|video|audio|voice|document|sticker|file)\]$/i.test(bodyRaw.trim());
+    if (mediaUrl && (mediaType.startsWith('image') || (isPlaceholder && /image/i.test(bodyRaw)))) {
+      const caption = isPlaceholder ? '' : bodyRaw;
+      return `<a href="${_esc(mediaUrl)}" target="_blank" rel="noopener" style="display:block;line-height:0">
+          <img src="${_esc(mediaUrl)}" alt="afbeelding" loading="lazy" style="display:block;max-width:240px;max-height:240px;border-radius:8px;cursor:zoom-in"
+               onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'[afbeelding kon niet geladen worden]',style:'font-style:italic;opacity:.7;font-size:12px'}))"/>
+        </a>${caption ? `<div style="margin-top:6px;white-space:pre-wrap">${_esc(caption)}</div>` : ''}`;
+    }
+    if (mediaUrl) {
+      const label = mediaType || 'bestand';
+      return `<a href="${_esc(mediaUrl)}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;text-decoration:none;color:var(--text-1)">
+        📎 <span>${_esc(label)}</span></a>${bodyRaw && !isPlaceholder ? `<div style="margin-top:4px;white-space:pre-wrap">${_esc(bodyRaw)}</div>` : ''}`;
+    }
+    if (isPlaceholder) {
+      // Backend placeholder ZONDER media_url = ingestion-gat. Toon nette
+      // waarschuwing, geen [image]-tekst die verwart.
+      return `<span style="font-style:italic;opacity:.7;font-size:12px">🖼 ${_esc(bodyRaw.replace(/[\[\]]/g,''))} (media niet beschikbaar)</span>`;
+    }
+    return _esc(bodyRaw || '');
+  }
+
+  // Emoji-picker — lightweight veelgebruikte set + insert-op-cursor.
+  // Gebruik: attachEmojiPickerButton(buttonEl, textareaEl [, onChange])
+  //          of via inline HTML: `${emojiPickerButtonHtml(textareaId)}`
+  // Klik = popover met grid; klik emoji = insert bij cursor + trigger input.
+  const EMOJIS_COMMON = [
+    '👍','👎','😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌',
+    '😍','🥰','😘','😗','😙','😚','😋','😛','😝','😜','🤪','🤨','🧐','🤓','😎','🥳',
+    '🤩','🥺','😢','😭','😤','😠','😡','🤬','😳','🥵','🥶','😱','😨','😰','😥','😓',
+    '🤔','🤭','🤫','🤥','😶','😐','😑','😬','🙄','😯','😦','😧','😮','😲','🥱','😴',
+    '💤','😷','🤒','🤕','🤢','🤮','🤧','🥴','😵','🤯','🤠','🥸','😈','👿','👻','💀',
+    '❤️','🧡','💛','💚','💙','💜','🤎','🖤','🤍','💔','❣️','💕','💞','💓','💗','💖',
+    '🙏','👏','🤝','🙌','👐','🤲','🤞','✌️','🤟','🤘','👌','🤌','🤏','👈','👉','👆',
+    '👇','☝️','✋','🤚','🖐️','🖖','👋','🤙','💪','🦾','🖕','✍️','🙋','🤦','🤷','💁',
+    '🎉','🎊','🎁','🎂','🎈','🎀','🥂','🍾','🍰','🍕','☕','🍺','🍻','🥤','🍫','🍪',
+    '⭐','🌟','✨','⚡','🔥','💥','💫','🌈','☀️','🌙','☁️','⛅','🌧️','⛈️','🌨️','❄️',
+    '✅','☑️','✔️','❌','⭕','❗','❓','⁉️','❕','❔','💯','🆗','🆕','🆒','🔔','🔕',
+    '📞','📱','💻','⏰','📅','📆','📌','📍','📎','🔗','💰','💳','💸','🧾','📊','📈',
+  ];
+  function emojiPickerButtonHtml(textareaId, label) {
+    const btnLabel = label || '😊';
+    return `<button type="button" class="btn btn-ghost btn-sm" data-emoji-picker-for="${textareaId}"
+      style="font-size:13px;padding:4px 9px" title="Emoji invoegen">${btnLabel}</button>`;
+  }
+  // Live delegation via document-level click. Idempotent: dubbele attach niet mogelijk.
+  if (!window.__kvEmojiDelegated) {
+    window.__kvEmojiDelegated = true;
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest && e.target.closest('[data-emoji-picker-for]');
+      if (b) {
+        e.preventDefault();
+        e.stopPropagation();
+        _openEmojiPopover(b, b.getAttribute('data-emoji-picker-for'));
+      } else {
+        // Klik buiten popover → sluit.
+        const pop = document.getElementById('kv-emoji-pop');
+        if (pop && !pop.contains(e.target)) pop.remove();
+      }
+    });
+  }
+  function _openEmojiPopover(anchorBtn, textareaId) {
+    document.getElementById('kv-emoji-pop')?.remove();
+    const rect = anchorBtn.getBoundingClientRect();
+    const pop = document.createElement('div');
+    pop.id = 'kv-emoji-pop';
+    pop.style.cssText = `position:fixed;z-index:99999;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.16);padding:8px;width:280px;max-height:240px;overflow-y:auto`;
+    // Positioneer boven de knop; als geen ruimte → eronder.
+    const top = rect.top - 250; // ~popover-height
+    pop.style.top  = (top > 8 ? top : rect.bottom + 6) + 'px';
+    pop.style.left = Math.max(6, Math.min(window.innerWidth - 290, rect.left)) + 'px';
+    pop.innerHTML = EMOJIS_COMMON.map(e => `<button type="button" data-emo="${e}" style="width:28px;height:28px;border:none;background:transparent;cursor:pointer;font-size:18px;padding:0;border-radius:4px" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">${e}</button>`).join('');
+    pop.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-emo]');
+      if (!b) return;
+      _insertAtCursor(textareaId, b.getAttribute('data-emo'));
+      // Sluit niet — user kan meerdere invoegen. Sluit bij buiten-klik.
+    });
+    document.body.appendChild(pop);
+  }
+  function _insertAtCursor(textareaId, text) {
+    const ta = document.getElementById(textareaId);
+    if (!ta) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end   = ta.selectionEnd   ?? ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after  = ta.value.slice(end);
+    ta.value = before + text + after;
+    const pos = start + text.length;
+    ta.setSelectionRange(pos, pos);
+    ta.focus();
+    // Trigger native 'input'-event zodat oninput-handlers (state-sync) vuren.
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
   window.KV_V2 = window.KV_V2 || {};
   window.KV_V2.helpers = {
     kpi, kpis, toolbar, chips, search, table, av, pill, trend, voorbeeldBanner,
@@ -290,6 +401,8 @@
     hydrateSearchMounts,
     // joost_config safe-upsert helpers (Automatiseringen v2 + Agents v2)
     joostFetchDefaults, joostBuildFullBody, joostSafeUpsert,
+    // Ronde 18: chat-media + emoji-picker.
+    renderChatBody, emojiPickerButtonHtml,
   };
   console.debug('[_shared-v2] helpers + stableSearch + joost helpers registered');
 })();

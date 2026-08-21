@@ -1031,14 +1031,18 @@
   function _renderMsgHtml(m) {
     const isOut = m.direction === 'outbound';
     const at = m.at ? _fmtTijd(m.at) : '';
-    const body = String(m.body || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const side = isOut ? 'flex-end' : 'flex-start';
     const bg = isOut ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)';
     const color = isOut ? 'var(--brand)' : 'var(--text-1)';
     const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
+    // Ronde-18: gedeelde media-renderer voor consistent image/attachment gedrag
+    // over wanbetalers-inbox / leadsonderhoud / v2-inbox.
+    const bodyHtml = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.renderChatBody)
+      ? window.KV_V2.helpers.renderChatBody(m)
+      : String(m.body || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     return `<div data-msg-id="${String(m.id)}" style="display:flex;justify-content:${side};margin-bottom:8px">
       <div style="max-width:78%;padding:10px 14px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
-        ${body || '<span style="opacity:.55">(leeg bericht)</span>'}
+        ${bodyHtml || '<span style="opacity:.55">(leeg bericht)</span>'}
         <div style="font-size:10.5px;opacity:.55;font-family:'IBM Plex Mono',monospace;margin-top:4px;text-align:right">${at}${m.meta?.template_name ? ' · template' : ''}</div>
       </div>
     </div>`;
