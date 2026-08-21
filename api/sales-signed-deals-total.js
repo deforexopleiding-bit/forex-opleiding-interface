@@ -102,18 +102,20 @@ export default async function handler(req, res) {
       [since, until] = rangeForPeriod(period);
     }
 
-    // Stap 1: aanvaarde deals — status='accepted' (TL-fase "07. Aanvaard").
-    // Datum-filter: eerst proberen accepted_at, val terug op signed_at/created_at
-    // want TL-sync gap kan accepted_at leeg laten voor recent aanvaarde deals.
-    // Filter in JS zodat COALESCE-logic zuiver werkt zonder PostgREST-quirks.
-    // groupByCategory heeft ook traject_variant_id + discount + total_amount nodig.
-    const selectCols = groupByCategory
-      ? 'id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, created_at, traject_variant_id, discount_percentage, total_amount'
-      : 'id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, created_at';
+    // Stap 1: aanvaarde deals — status='accepted' + NIET declined_at/archived_at.
+    // Ronde-21 fix PUNT-B: eerder telden deals mee die WEL geaccepteerd waren
+    // maar later declined ÉN gearchiveerd — die zijn niet meer valide. Volgens
+    // TL-officieel augustus reconstruct: exclude tl_quotation_declined_at !=
+    // null én archived_at != null. Datum: accepted_at → signed_at → created_at
+    // COALESCE in JS.
+    const debugMode = String(q.debug || '') === '1';
+    const selectCols = 'id, customer_id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, tl_quotation_declined_at, archived_at, created_at, traject_variant_id, discount_percentage, sale_type, total_amount, quote_reference';
     let qy = supabaseAdmin
       .from('deals')
       .select(selectCols)
       .eq('tl_quotation_status', 'accepted')
+      .is('tl_quotation_declined_at', null)
+      .is('archived_at', null)
       .limit(20000);
     const { data: dealsRaw, error: dErr } = await qy;
     if (dErr) throw new Error('deals: ' + dErr.message);
@@ -239,6 +241,39 @@ export default async function handler(req, res) {
         .map(b => ({ ...b, total_incl_vat: Math.round(b.total_incl_vat * 100) / 100 }));
     }
 
+    // Debug-mode: itemized lijst per deal (klantnaam + incl-bedrag + flags).
+    let debug;
+    if (debugMode) {
+      const custIds = [...new Set(clean.map(d => d.customer_id).filter(Boolean))];
+      const nameByCust = new Map();
+      const testFlagByCust = new Map();
+      if (custIds.length) {
+        const { data: custs } = await supabaseAdmin
+          .from('customers')
+          .select('id, first_name, last_name, company_name, is_company, is_test')
+          .in('id', custIds);
+        for (const c of (custs || [])) {
+          const nm = c.is_company ? (c.company_name || '') : `${c.first_name || ''} ${c.last_name || ''}`.trim();
+          nameByCust.set(c.id, nm || '—');
+          testFlagByCust.set(c.id, !!c.is_test);
+        }
+      }
+      debug = clean.map(d => ({
+        deal_id:                    d.id,
+        klantnaam:                  nameByCust.get(d.customer_id) || '—',
+        customer_id:                d.customer_id,
+        is_test:                    testFlagByCust.get(d.customer_id) || false,
+        quote_reference:            d.quote_reference,
+        tl_quotation_status:        d.tl_quotation_status,
+        tl_quotation_accepted_at:   d.tl_quotation_accepted_at,
+        tl_quotation_declined_at:   d.tl_quotation_declined_at,
+        archived_at:                d.archived_at,
+        sale_type:                  d.sale_type,
+        total_amount:               d.total_amount,
+        bedrag_incl:                Math.round((perDeal.get(d.id) || 0) * 100) / 100,
+      })).sort((a, b) => String(b.tl_quotation_accepted_at || '').localeCompare(String(a.tl_quotation_accepted_at || '')));
+    }
+
     return res.status(200).json({
       total_incl_vat: total,
       count: ids.length,
@@ -246,6 +281,7 @@ export default async function handler(req, res) {
       test_excluded: testExcluded,
       ...(trend ? { trend } : {}),
       ...(by_category ? { by_category } : {}),
+      ...(debug ? { debug } : {}),
     });
   } catch (e) {
     console.error('[sales-signed-deals-total]', e.message);
