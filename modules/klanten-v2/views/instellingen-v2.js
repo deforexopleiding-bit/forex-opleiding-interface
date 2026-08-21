@@ -261,6 +261,41 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
+  /* Ronde-31 STAP 5 · wb-workflows + wb-berichten — DEEP-LINK naar Finance-
+     module. Waarom niet native: (1) dunning-engine leest deze rijen direct in
+     detectAndStartRuns → dubbele UI = risico op afwijkende validatie; (2) WIK-
+     14-brief is juridisch dwingend → legal-review vóór schrijfbaar in aparte
+     brok; (3) template-diagnose-endpoint (dunning-template-diagnose) is een
+     aparte gate die de bestaande Finance-UI al integreert. */
+  function bodyWbWorkflowsDeepLink() {
+    return `<div style="max-width:800px">
+      <div style="padding:16px 18px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-size:14px;font-weight:600">Aanmaan-workflows</div>
+          <span style="padding:2px 8px;border-radius:6px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);font-size:10.5px;font-weight:600">DEEP-LINK</span>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;margin-bottom:10px">
+          De <code>dunning_workflows</code>-editor (wanneer starten, step-volgorde, delays, kanaal per step) leeft in de Finance-module. <b>Waarom niet hier:</b> de motor leest deze rijen direct in <code>detectAndStartRuns</code>; een tweede editor introduceert het risico van afwijkende validatie voor identieke velden. Wanbetalers Wave-3 vervangt deze deep-link door een gedeelde read/write-laag.
+        </div>
+        <a href="/modules/finance.html?tab=dunning-workflows" class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-block">Open workflows in Finance →</a>
+      </div>
+    </div>`;
+  }
+  function bodyWbBerichtenDeepLink() {
+    return `<div style="max-width:800px">
+      <div style="padding:16px 18px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-size:14px;font-weight:600">Aanmaan-templates</div>
+          <span style="padding:2px 8px;border-radius:6px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);font-size:10.5px;font-weight:600">DEEP-LINK</span>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;margin-bottom:10px">
+          De <code>dunning_templates</code>-editor (mail/whatsapp/brief-bodies per step) leeft in de Finance-module. <b>Waarom niet hier:</b> de WIK-14-brief is juridisch dwingend en <code>dunning-template-diagnose</code> is een aparte gate die de Finance-UI al integreert. Wijziging vraagt legal-review vóór schrijfbaar buiten Finance.
+        </div>
+        <a href="/modules/finance.html?tab=dunning-templates" class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-block">Open templates in Finance →</a>
+      </div>
+    </div>`;
+  }
+
   /* Ronde-31 STAP 3 · wb-incasso — bureaus CRUD via incasso-bureaus-list/upsert/
      delete + auto-settings via incasso-auto-settings-get/set. Alles achter de
      bestaande finance.incasso.manage-gate. Motor onaangeraakt. */
@@ -2962,6 +2997,11 @@
     if (cur.id === 'wb-joost')           return bodyWbJoost();
     // Ronde-31 STAP 3: wb-incasso — bureaus CRUD + auto-settings.
     if (cur.id === 'wb-incasso')         return bodyWbIncasso();
+    // Ronde-31 STAP 5: wb-workflows + wb-berichten — DEEP-LINK naar Finance.
+    // Editor blijft daar (motor leest deze rijen direct; dubbele UI = risico op
+    // afwijkende validatie; templates zijn juridisch dwingend WIK-14).
+    if (cur.id === 'wb-workflows')       return bodyWbWorkflowsDeepLink();
+    if (cur.id === 'wb-berichten')       return bodyWbBerichtenDeepLink();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
   }
@@ -3012,6 +3052,8 @@
       'sales-producten','sales-bonus',
       'ev-auto','ev-templates','ev-locaties','lms-instel',
       'mk-meta','mk-sequenties',
+      // Ronde-31 STAP 5: workflows-regels + templates blijven Finance (motor-consistentie + WIK-14 legal).
+      'wb-workflows','wb-berichten',
       // Polish v26: alg-meldingen krijgt DEEP-LINK badge (was voorbeeld-data);
       // notice-only sectie (server-side crons + rol-lookup, aparte brok voor per-user-prefs).
     ]);
