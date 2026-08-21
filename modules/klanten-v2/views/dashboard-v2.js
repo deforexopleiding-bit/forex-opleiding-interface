@@ -584,7 +584,7 @@
     }
     const persoon = (ROLES[S.role] && ROLES[S.role].persoon) || 'Jeffrey Biemold';
     const voornaam = persoon.split(' ')[0];
-    const curPeriod = F('per', 'Dag');
+    const curPeriod = F('per', 'Maand');
     // Trigger fetch als de gekozen periode nog niet geladen is (én backend-supported).
     // KRITIEK: !_live.loading-guard voorkomt render-loop. fetchDashboardBundle roept
     // render() aan met loading=true VOORDAT de bundle resolvet — dashManager loopt
@@ -692,7 +692,7 @@
               <div style="font-size:12px;color:var(--text-3)">Vraag alles over je bedrijf</div></div></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
               ${['Hoeveel wanbetalers open?', 'Omzet deze week?', 'Wie heeft geen mentor?']
-                .map(q => `<button class="chip" style="font-size:11.5px;padding:4px 10px;background:var(--surface)" onclick="DFO_aiAsk(${JSON.stringify(q)})">${q}</button>`).join('')}</div>
+                .map(q => `<button class="chip" style="font-size:11.5px;padding:4px 10px;background:var(--surface)" data-ai-q="${esc(q)}" onclick="DFO_aiAsk(this.dataset.aiQ)">${q}</button>`).join('')}</div>
             <div style="position:relative">
               <input id="dfoAiInput" placeholder="Stel je vraag in gewone taal…" onkeydown="if(event.key==='Enter'){event.preventDefault();DFO_aiSend()}" style="width:100%;box-sizing:border-box;padding:10px 48px 10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:22px;font-family:inherit;font-size:13px;color:var(--text);outline:none;transition:border-color .15s,box-shadow .15s"
                 onfocus="this.style.borderColor='var(--teal)';this.style.boxShadow='0 0 0 3px var(--teal-soft)'"
@@ -769,11 +769,13 @@
               // Vind index waar 'nu' ligt (voor 'vandaag'-verticale marker).
               const nowIdx = keys.length ? keys.indexOf(curYm) : -1;
               CHARTDATA['omz'] = { a, b, labels: lb, labelA: 'Abonnementen (MRR)', labelB: 'Totaal incl. btw', colA: 'teal', colB: 'blue', nowIdx };
-              // Ronde-20 full-width: negatieve horizontale margin neutraliseert
-              // card-body-padding (17px l/r). SVG blijft 100% van de wider
-              // wrapper → plot-area vult van links naar rechts van de kaart.
-              // Y-label ruimte (pl=34) blijft in de SVG zelf gereserveerd.
-              return `<div style="margin:0 -17px">${omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue', nowIdx)}</div>`;
+              // Ronde-21 PUNT-C robuust full-width. Vorige margin:0 -17px liet
+              // stille reserved-ruimte in de container (SVG width:100% pakte
+              // card-body-inner, niet de bredere container). Nu forceren we de
+              // WIDTH expliciet met calc(100% + 34px) zodat de SVG écht de
+              // ancestor-padding overbrugt. Y-label ruimte (pl=34) blijft in de
+              // SVG-viewBox zelf gereserveerd.
+              return `<div style="margin-left:-17px;margin-right:-17px;width:calc(100% + 34px)">${omzChart('omz', a, b, lb, 'Abonnementen (MRR)', 'Totaal incl. btw', 'teal', 'blue', nowIdx)}</div>`;
             })()}
             <div style="margin-top:16px;border:1px solid var(--border);border-radius:var(--r);padding:14px 15px">
               <div style="font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);margin-bottom:12px">
