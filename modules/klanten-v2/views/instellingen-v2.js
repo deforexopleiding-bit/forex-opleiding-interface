@@ -880,40 +880,88 @@
      brok met AI-refactor naar API-endpoint). Deze sectie toont een LIVE-
      samenvatting per rol (aantal actieve permissions) + role-sync-backfill met
      custom confirm + deep-link naar de matrix. */
-  const _rbac = { loading: false, error: null, fetched: false, byRole: {}, busy: false };
+  const _rbac = { loading: false, error: null, fetched: false, byRole: {}, busy: false, matrix: {}, snapshot: {}, activeModule: '', dirty: false, saveBusy: false, search: '' };
   async function fetchRbacSummary() {
     if (_rbac.loading || _rbac.fetched) return;
     _rbac.loading = true; _rbac.error = null; if (render) render();
-    // BLOCKER-3 fix: /api/permissions bestaat niet op deze deploy. Admin leest
-    // via direct-supabase op public.role_permissions. Zelfde pad hier via
-    // window.supabase (shared client is al geladen door supabase-client.js).
-    // Fail-soft: bij RLS-403 tonen we een nette fallback + deep-link.
+    // Ronde-26: load VOLLEDIGE matrix (rol × permission → bool) via direct-
+    // supabase op role_permissions (zelfde pad als admin). Bewaar snapshot
+    // voor diff-save. FEATURE_REGISTRY + RBAC_ROLES uit window.KV_RBAC.
     try {
       if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+      if (!window.KV_RBAC?.FEATURE_REGISTRY) throw new Error('KV_RBAC registry niet geladen (verwacht /modules/shared/rbac/registry.js)');
+      const matrix = {};
+      window.KV_RBAC.RBAC_ROLES.forEach(r => { if (!r.auto) matrix[r.key] = {}; });
       const byRole = {};
       let from = 0; const PAGE = 1000;
       while (true) {
         const { data, error } = await window.supabase
           .from('role_permissions')
-          .select('role, allowed')
+          .select('role, feature_key, allowed')
           .range(from, from + PAGE - 1);
         if (error) throw error;
         const rows = data || [];
         for (const r of rows) {
           if (!r || !r.role) continue;
+          if (matrix[r.role]) matrix[r.role][r.feature_key] = r.allowed === true;
           if (!byRole[r.role]) byRole[r.role] = 0;
           if (r.allowed === true) byRole[r.role] += 1;
         }
         if (rows.length < PAGE) break;
         from += PAGE;
       }
+      _rbac.matrix = matrix;
+      _rbac.snapshot = JSON.parse(JSON.stringify(matrix));
       _rbac.byRole = byRole;
+      _rbac.dirty = false;
+      if (!_rbac.activeModule) _rbac.activeModule = window.KV_RBAC.FEATURE_REGISTRY[0]?.moduleKey || '';
     } catch (e) {
       _rbac.error = e?.message || 'onbekende fout';
     }
     _rbac.loading = false; _rbac.fetched = true;
     if (render) render();
   }
+  window.__setRbacMod = (mk) => { _rbac.activeModule = mk; if (render) render(); };
+  window.__setRbacSearch = (q) => { _rbac.search = String(q || ''); if (render) render(); };
+  window.__setRbacToggle = (role, key, checked) => {
+    if (!_rbac.matrix[role]) _rbac.matrix[role] = {};
+    _rbac.matrix[role][key] = !!checked;
+    _rbac.dirty = true; if (render) render();
+  };
+  window.__setRbacSave = () => {
+    if (!_rbac.dirty || _rbac.saveBusy) return;
+    openConfirm('Rechten-wijzigingen opslaan? Alleen gewijzigde cellen worden weggeschreven (diff-save).', async () => {
+      _rbac.saveBusy = true; if (render) render();
+      try {
+        const now = new Date().toISOString();
+        const ups = [];
+        for (const r of window.KV_RBAC.RBAC_ROLES) {
+          if (r.auto) continue;
+          for (const m of window.KV_RBAC.FEATURE_REGISTRY) {
+            for (const f of m.features) {
+              const cur  = !!(_rbac.matrix[r.key]   && _rbac.matrix[r.key][f.key]);
+              const prev = !!(_rbac.snapshot[r.key] && _rbac.snapshot[r.key][f.key]);
+              if (cur !== prev) ups.push({ role: r.key, feature_key: f.key, allowed: cur, updated_at: now });
+            }
+          }
+        }
+        if (!ups.length) { showToast('Geen wijzigingen', 'ok'); _rbac.saveBusy = false; if (render) render(); return; }
+        const { error } = await window.supabase.from('role_permissions').upsert(ups, { onConflict: 'role,feature_key' });
+        if (error) throw error;
+        _rbac.snapshot = JSON.parse(JSON.stringify(_rbac.matrix));
+        _rbac.dirty = false;
+        // Update byRole-teller na save.
+        const byRole = {};
+        for (const rk of Object.keys(_rbac.matrix)) byRole[rk] = Object.values(_rbac.matrix[rk]).filter(Boolean).length;
+        _rbac.byRole = byRole;
+        showToast(`${ups.length} wijziging${ups.length===1?'':'en'} opgeslagen`, 'ok');
+      } catch (e) {
+        showToast('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'warn');
+      } finally {
+        _rbac.saveBusy = false; if (render) render();
+      }
+    }, 'warn');
+  };
   window.__setRbacBackfill = () => {
     openConfirm('Role-sync backfill: dit herschrijft profiles.role voor ELKE gebruiker met de hoogste rol uit user_roles. Alleen doen als je zeker weet dat user_roles de bron-van-waarheid is.', async () => {
       if (_rbac.busy) return;
@@ -929,33 +977,63 @@
   };
   function bodyRechten() {
     if (!_rbac.fetched && !_rbac.loading) queueMicrotask(() => fetchRbacSummary());
+    if (_rbac.error) return `<div style="max-width:900px"><div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px">⚠ ${esc(_rbac.error)}</div></div>`;
+    if (_rbac.loading && !_rbac.fetched) return `<div style="padding:20px;color:var(--text-3);font-size:13px">Matrix laden…</div>`;
+    const registry = window.KV_RBAC?.FEATURE_REGISTRY || [];
+    const roles = (window.KV_RBAC?.RBAC_ROLES || []).filter(r => !r.auto);
+    const activeMod = registry.find(m => m.moduleKey === _rbac.activeModule) || registry[0];
+    const q = _rbac.search.toLowerCase().trim();
+    const feats = activeMod ? activeMod.features.filter(f => !q || f.label.toLowerCase().includes(q) || f.key.toLowerCase().includes(q)) : [];
+    // Rol-samenvatting
     const rolesSum = Object.entries(_rbac.byRole).sort((a,b) => b[1] - a[1]);
-    const summary = _rbac.loading && !rolesSum.length
-      ? `<div style="color:var(--text-3);font-size:13px">Samenvatting laden…</div>`
-      : _rbac.error
-        ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px">⚠ ${esc(_rbac.error)}</div>`
-        : rolesSum.length
-          ? `<table style="width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-              <thead><tr style="background:var(--surface-2)"><th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Rol</th><th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Actieve permissions</th></tr></thead>
-              <tbody>${rolesSum.map(([r,c]) => {
-                // Polish C: super_admin heeft altijd bypass ('*'); toon dat i.p.v. het letterlijke row-getal.
-                const display = r === 'super_admin' ? '<span style="color:var(--emerald);font-weight:600">volledige toegang (bypass)</span>' : String(c);
-                return `<tr style="border-top:1px solid var(--border)"><td style="padding:8px 12px;font-size:12.5px">${esc(r)}</td><td style="padding:8px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${display}</td></tr>`;
-              }).join('')}</tbody>
-            </table>`
-          : `<div style="color:var(--text-3);font-size:12.5px">Geen permissions-data ontvangen. Endpoint retourneerde geen items/matrix.</div>`;
-    return `<div style="max-width:900px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
-        <b>Matrix-editor:</b> de vinkjes-editor (per functie per rol) staat nog in <a href="/modules/admin.html" style="color:inherit;text-decoration:underline">admin.html · tab Rechten</a>. Volledige port naar deze pagina volgt in een aparte migratie-brok (afhankelijk van FEATURE_REGISTRY + direct-Supabase → API-refactor).
-      </div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Live-samenvatting per rol</div>
-      ${summary}
-      <div class="card" style="margin-top:16px;background:var(--surface);border:1px solid var(--rose-line, #f5b4bc);border-radius:10px">
-        <div style="padding:12px 16px;background:var(--rose-soft);border-bottom:1px solid var(--rose-line, #f5b4bc)">
-          <div style="font-size:13px;font-weight:600;color:var(--rose)">⚠ Role-sync backfill</div>
-          <div style="font-size:11.5px;color:var(--rose);margin-top:2px">Zet profiles.role = hoogste rol uit user_roles voor elke gebruiker. Alleen als user_roles bron-van-waarheid is.</div>
+    // Module-picker (links)
+    const modList = registry.map(m => `<button onclick="window.__setRbacMod('${esc(m.moduleKey)}')" style="display:block;width:100%;padding:8px 12px;background:${m.moduleKey === (activeMod?.moduleKey||'') ? 'var(--surface-2)' : 'transparent'};border:none;text-align:left;cursor:pointer;font:inherit;font-size:12.5px;color:var(--text);border-radius:6px">${esc(m.moduleLabel || m.moduleKey)}</button>`).join('');
+    // Matrix
+    const headRoles = roles.map(r => `<th style="text-align:center;padding:6px 8px;font-size:10.5px;font-weight:600;color:var(--text-3);white-space:nowrap">${esc(r.label)}</th>`).join('');
+    const rowsHtml = feats.length ? feats.map(f => {
+      const cells = roles.map(r => {
+        const checked = !!(_rbac.matrix[r.key] && _rbac.matrix[r.key][f.key]);
+        return `<td style="text-align:center;padding:5px 8px"><input type="checkbox" ${checked ? 'checked' : ''} onchange="window.__setRbacToggle('${esc(r.key)}','${esc(f.key).replace(/'/g,"\\'")}',this.checked)" style="cursor:pointer" /></td>`;
+      }).join('');
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:6px 12px">
+          <div style="font-size:12.5px;font-weight:500">${esc(f.label)}</div>
+          <div style="font-size:10.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(f.key)}</div>
+        </td>
+        <td style="text-align:center;padding:5px 8px;color:var(--text-3);font-size:10.5px">auto</td>
+        ${cells}
+      </tr>`;
+    }).join('') : `<tr><td colspan="${roles.length + 2}" style="padding:16px;color:var(--text-3);font-size:12.5px">Geen functies gevonden.</td></tr>`;
+    return `<div style="max-width:1200px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <div style="font-size:12.5px;color:var(--text-3)">${rolesSum.map(([r,c]) => `${esc(r)}: ${r === 'super_admin' ? '<span style="color:var(--emerald);font-weight:600">bypass</span>' : `<b>${c}</b>`}`).join(' · ')}</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" placeholder="Zoek functie…" value="${esc(_rbac.search)}" oninput="window.__setRbacSearch(this.value)" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);max-width:220px" />
+          ${_rbac.dirty ? '<span style="font-size:11px;color:var(--amber)">niet-opgeslagen wijzigingen</span>' : ''}
+          <button class="btn btn-primary btn-sm" ${!_rbac.dirty || _rbac.saveBusy ? 'disabled' : ''} onclick="window.__setRbacSave()">${_rbac.saveBusy ? 'Opslaan…' : 'Opslaan'}</button>
         </div>
-        <div style="padding:12px 16px">
+      </div>
+      <div style="display:grid;grid-template-columns:220px 1fr;gap:14px;align-items:start">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:6px;max-height:600px;overflow-y:auto">${modList}</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:auto;max-height:600px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="position:sticky;top:0;background:var(--surface-2);z-index:1">
+              <tr>
+                <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Functie</th>
+                <th style="text-align:center;padding:6px 8px;font-size:10.5px;color:var(--text-3);font-weight:600;white-space:nowrap">super_admin</th>
+                ${headRoles}
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px;background:var(--surface);border:1px solid var(--rose-line, #f5b4bc);border-radius:10px">
+        <div style="padding:10px 14px;background:var(--rose-soft);border-bottom:1px solid var(--rose-line, #f5b4bc);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:12.5px;font-weight:600;color:var(--rose)">Role-sync backfill</div>
+            <div style="font-size:11px;color:var(--rose);margin-top:1px">Zet profiles.role = hoogste rol uit user_roles voor elke gebruiker.</div>
+          </div>
           <button class="btn btn-primary btn-sm" ${_rbac.busy ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__setRbacBackfill()">${_rbac.busy ? 'Bezig…' : '🔄 Draai backfill'}</button>
         </div>
       </div>
