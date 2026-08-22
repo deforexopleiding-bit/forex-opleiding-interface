@@ -6,7 +6,9 @@
 // sales-wizard-v2 pattern.
 //
 // Entry-points:
-//   window.__subwOpen({ dealId?, customerId?, resumeFromV1?: false })
+//   window.__subwOpen({ dealId?, customerId?, resumeFromV1?: false, onCreated? })
+//     onCreated(result): optionele callback ná succesvol aanmaken (ná close),
+//     bv. voor een tab-refresh. Finance geeft er geen mee (unchanged gedrag).
 //   URL-signaal: ?subw=1[&deal_id=X | &customer_id=X]
 //
 // Stappen:
@@ -131,6 +133,9 @@
     _sub.globalError = null;
     _sub.dealId = (opts && opts.dealId) || null;
     _sub.mode = _sub.dealId ? 'deal' : 'standalone';
+    // Optionele callback ná succesvol aanmaken (bv. de klanten-v2 Abonnementen-
+    // tab die zichzelf wil verversen). Finance geeft er geen mee → no-op.
+    _sub.onCreated = (opts && typeof opts.onCreated === 'function') ? opts.onCreated : null;
     _sub.deal = null;
     _sub.customer = null;
     _sub.lineItemsDeal = [];
@@ -669,7 +674,10 @@
       const tlPart = j?.tl_failed ? ` (${j.tl_failed} TL-sync mislukt)` : (j?.tl_pushed ? ' + TL gesynced' : '');
       window.KV.toast(`Abonnement${(j?.subscription_ids?.length || 0) > 1 ? 'en' : ''} aangemaakt${tlPart}`);
       _sub.submitting = false;
+      const cb = _sub.onCreated;
       window.__subwClose();
+      // Ná sluiten: optionele caller-callback (bv. tab-refresh). Fail-soft.
+      if (typeof cb === 'function') { try { cb(j); } catch (_) {} }
     } catch (e) {
       _sub.submitting = false;
       _sub.globalError = e?.message || 'Aanmaken mislukt';

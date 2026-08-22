@@ -57,6 +57,29 @@ function initState(customer) {
   };
 }
 
+// "Nieuw abonnement" → opent DEZELFDE in-shell modal-wizard als de Finance →
+// Abonnementen-pagina (window.__subwOpen, geladen via klanten-v2/index.html).
+// GEEN nieuw tabblad, GEEN standalone v1. Voorgevuld op deze klant (customerId
+// → wizard fetcht de klant zelf) en meteen door naar stap 2 (Abonnementen).
+// onCreated → ververst deze tab zodat het nieuwe abonnement direct verschijnt.
+function openNewSubModal(rootEl) {
+  if (typeof window.__subwOpen !== 'function') {
+    // Wizard-script nog niet geladen (bv. verouderde cache). Nette melding i.p.v.
+    // terugvallen op de v1-standalone-pagina.
+    K().toast?.('Abonnement-wizard is nog niet geladen — ververs de pagina en probeer opnieuw.');
+    return;
+  }
+  Promise.resolve(
+    window.__subwOpen({
+      customerId: state.customerId,
+      onCreated: () => actLoad(rootEl),   // sluit + ververst de lijst na aanmaken
+    }),
+  ).then(() => {
+    // Klant is voorgevuld → sla stap 1 (Kies klant) over.
+    if (typeof window.__subwGoStep === 'function') window.__subwGoStep(2);
+  });
+}
+
 // ── Formatters ──────────────────────────────────────────────────────────────
 
 const EUR = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -388,8 +411,8 @@ function renderEmpty() {
       <div class="ds-empty-t">Nog geen abonnementen voor deze klant</div>
       <div class="ds-empty-s">
         Zodra een <a href="?tab=offertes" data-kv-goto-tab="offertes" style="color:var(--m);text-decoration:underline;">bevestigde offerte</a>
-        wordt omgezet in de <a href="/modules/subscription-wizard.html?customer_id=${K().esc(encodeURIComponent(state.customerId))}" target="_blank" rel="noopener" style="color:var(--m);text-decoration:underline;">Subscription-wizard</a> (nieuw tabblad),
-        verschijnt hij hier.
+        wordt omgezet in een abonnement verschijnt hij hier — of maak er direct één aan met
+        <button type="button" class="kv-prof-linkish" data-kv-abo-new style="background:none;border:0;padding:0;font:inherit;cursor:pointer;">Nieuw abonnement</button>.
       </div>
     </div>`;
 }
@@ -436,6 +459,15 @@ function render(rootEl) {
        </button>`
     : '';
 
+  // "Nieuw abonnement" — opent de in-shell modal-wizard (zelfde als Finance),
+  // voorgevuld op deze klant. Altijd zichtbaar (ook bij 0 abo's).
+  const newBtn = state.customerId
+    ? `<button type="button" class="ds-btn ds-btn-primary ds-btn-sm" data-kv-abo-new title="Nieuw abonnement voor deze klant">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+         Nieuw abonnement
+       </button>`
+    : '';
+
   rootEl.innerHTML = `
     <div class="kv-abo">
       <div class="kv-abo-head">
@@ -444,7 +476,7 @@ function render(rootEl) {
           Abonnementen
           <span class="kv-prof-count">${state.loading ? '…' : state.subs.length}</span>
         </div>
-        <div class="kv-abo-head-actions" style="margin-left:auto; display:flex; gap:8px;">${bulkBtn}</div>
+        <div class="kv-abo-head-actions" style="margin-left:auto; display:flex; gap:8px;">${bulkBtn}${newBtn}</div>
       </div>
       ${body}
     </div>`;
@@ -453,6 +485,10 @@ function render(rootEl) {
 
 function wire(rootEl) {
   rootEl.querySelector('[data-kv-abo-retry]')?.addEventListener('click', () => actLoad(rootEl));
+  // "Nieuw abonnement" (header + empty-state) → in-shell modal-wizard.
+  rootEl.querySelectorAll('[data-kv-abo-new]').forEach((btn) => {
+    btn.addEventListener('click', () => openNewSubModal(rootEl));
+  });
   rootEl.querySelectorAll('[data-kv-abo-toggle-lines]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-kv-abo-toggle-lines');
