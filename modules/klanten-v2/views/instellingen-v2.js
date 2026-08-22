@@ -1022,51 +1022,249 @@
     </div>`;
   }
 
-  /* Ronde-28 C2 · sales-trajecten — read-native. Trajecten + varianten via
-     direct-supabase op traject_variants + trajects (parent). Volledige editor
-     blijft deep-link naar sales-wizard (complex: variant-products join, prijs-
-     berekening, TL-sync). */
-  const _tr = { loading: false, fetched: false, error: null, items: [] };
+  /* Ronde-31 grote-brok · sales-trajecten — variant CRUD native.
+     Endpoints: /api/traject-variants (GET ?variant_id / POST / PUT ?id / DELETE ?id)
+     + /api/sales-products (GET voor product-picker). Permissions:
+     sales.product.view (read) + sales.product.manage (write).
+     TL-SYNC-ONDERZOEK: endpoint /api/traject-variants doet ZUIVER DB-CRUD (geen
+     teamleader-call). Prijzen zitten NIET op variants maar op `products` (via
+     `traject_variant_products`-koppeltabel met quantity). Product-CRUD (met prijs)
+     leeft in `/api/sales-products`; variants beheren zelf geen prijzen — alleen
+     naam/duur/product-koppelingen. Nieuwe deals gebruiken automatisch de nieuwste
+     product-prijs (geen sync-actie nodig). Bestaande deals hebben snapshot.
+     → Save = veilig, geen live TL-actie. Notice-banner legt dit uit; product-prijs-
+     editor blijft in Sales (products = aparte scope). Motor onaangeraakt.
+     FREEZE-LES: uncontrolled inputs met data-tv-*-attrs; dynamische product-koppel-
+     lijst re-rendert alleen bij add/remove; typen = geen render. */
+  const _tr = {
+    loading: false, fetched: false, error: null,
+    trajects: [], variants: [], products: [],   // 3 read-lijsten
+    ed: null, busy: false,                       // modal-state (id=null → nieuw)
+  };
   async function fetchTrajecten() {
     if (_tr.loading || _tr.fetched) return;
     _tr.loading = true; _tr.error = null; if (render) render();
     try {
       if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-      const [tRes, vRes] = await Promise.all([
+      const [tRes, vRes, pRes] = await Promise.all([
         window.supabase.from('trajects').select('id, name').order('name'),
-        window.supabase.from('traject_variants').select('id, name, traject_id, default_duration_months').order('name'),
+        window.supabase.from('traject_variants').select('id, name, traject_id, default_duration_months, description, display_order, is_default, is_active').order('display_order'),
+        tryFetch('sales-products', '/api/sales-products?active=true'),
       ]);
       if (tRes.error) throw tRes.error;
       if (vRes.error) throw vRes.error;
+      if (pRes?.__error || pRes?.error) throw new Error(pRes?.__error || pRes?.error);
       const tById = {};
       for (const t of (tRes.data || [])) tById[t.id] = t.name;
-      _tr.items = (vRes.data || []).map(v => ({ ...v, traject_name: tById[v.traject_id] || '—' }))
-        .sort((a,b) => (a.traject_name||'').localeCompare(b.traject_name||'') || (a.name||'').localeCompare(b.name||''));
+      _tr.trajects = tRes.data || [];
+      _tr.variants = (vRes.data || []).map(v => ({ ...v, traject_name: tById[v.traject_id] || '—' }))
+        .sort((a,b) => (a.traject_name||'').localeCompare(b.traject_name||'') || (a.display_order||0) - (b.display_order||0) || (a.name||'').localeCompare(b.name||''));
+      _tr.products = pRes?.products || [];
     } catch (e) { _tr.error = e?.message || 'onbekend'; }
-    _tr.loading = false; _tr.fetched = true;
+    _tr.loading = false; _tr.fetched = true; if (render) render();
+  }
+  async function _tvLoadProducts(variantId) {
+    // Detail-fetch voor variant-products (koppelingen). GET ?variant_id=.
+    const j = await tryFetch('tv-detail', '/api/traject-variants?variant_id=' + encodeURIComponent(variantId));
+    if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+    return Array.isArray(j?.products) ? j.products : [];
+  }
+  window.__setTvNew  = () => {
+    if (!_tr.trajects.length) { showToast('Geen trajecten — maak eerst een traject aan via Sales', 'warn'); return; }
+    _tr.ed = { id: null, traject_id: _tr.trajects[0].id, name: '', description: '', default_duration_months: null, display_order: 100, is_default: false, is_active: true, products: [] };
     if (render) render();
+  };
+  window.__setTvEdit = async (id) => {
+    const v = _tr.variants.find(x => x.id === id); if (!v) return;
+    _tr.ed = { ...v, products: [], _loadingProducts: true }; if (render) render();
+    try { _tr.ed.products = await _tvLoadProducts(id); _tr.ed._loadingProducts = false; }
+    catch (e) { _tr.ed._loadingProducts = false; showToast('Producten laden mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    if (render) render();
+  };
+  window.__setTvCancel = () => { _tr.ed = null; if (render) render(); };
+  window.__setTvTraject = (v) => { if (_tr.ed) { _tr.ed.traject_id = String(v || ''); if (render) render(); } };
+  window.__setTvBool = (k, v) => { if (_tr.ed) { _tr.ed[k] = !!v; if (render) render(); } };
+  // Sync DOM → _tr.ed vóór structuur-actions + save.
+  function _tvSyncFromDom() {
+    const e = _tr.ed; if (!e) return;
+    const q = (sel) => document.querySelector(sel);
+    const qAll = (sel) => document.querySelectorAll(sel);
+    ['name','description'].forEach(k => { const el = q(`[data-tv-field="${k}"]`); if (el) e[k] = String(el.value || ''); });
+    const durEl = q('[data-tv-field="default_duration_months"]'); if (durEl) e.default_duration_months = durEl.value === '' ? null : (parseInt(durEl.value, 10) || null);
+    const ordEl = q('[data-tv-field="display_order"]'); if (ordEl) e.display_order = parseInt(ordEl.value, 10) || 100;
+    // products-koppelingen: per rij product_id (select) + quantity (input).
+    (e.products || []).forEach((_, i) => {
+      const pid = q(`[data-tv-prod-idx="${i}"][data-tv-prod-field="product_id"]`);
+      const qty = q(`[data-tv-prod-idx="${i}"][data-tv-prod-field="quantity"]`);
+      if (pid) e.products[i].product_id = String(pid.value || '');
+      if (qty) e.products[i].quantity = Math.max(1, parseInt(qty.value, 10) || 1);
+    });
+  }
+  window.__setTvAddProduct = () => {
+    _tvSyncFromDom();
+    if (!_tr.ed) return;
+    _tr.ed.products = _tr.ed.products || [];
+    _tr.ed.products.push({ product_id: _tr.products[0]?.id || '', quantity: 1 });
+    if (render) render();
+  };
+  window.__setTvRmProduct = (i) => {
+    _tvSyncFromDom();
+    if (!_tr.ed) return;
+    _tr.ed.products.splice(i, 1); if (render) render();
+  };
+  window.__setTvSave = () => {
+    _tvSyncFromDom();
+    const e = _tr.ed; if (!e) return;
+    if (!String(e.name || '').trim()) { showToast('Naam is verplicht', 'warn'); return; }
+    if (!e.traject_id) { showToast('Kies een parent-traject', 'warn'); return; }
+    if (e.default_duration_months != null) {
+      const d = Number(e.default_duration_months);
+      if (!Number.isFinite(d) || d < 1 || d > 120) { showToast('Looptijd moet 1..120 maanden zijn (of leeg)', 'warn'); return; }
+    }
+    const invalidProduct = (e.products || []).find(p => !p.product_id);
+    if (invalidProduct) { showToast('Kies een product voor elke koppeling (of verwijder de lege rij)', 'warn'); return; }
+    const products = (e.products || []).map(p => ({ product_id: p.product_id, quantity: Math.max(1, parseInt(p.quantity, 10) || 1) }));
+    const isEdit = !!e.id;
+    const url = isEdit
+      ? '/api/traject-variants?id=' + encodeURIComponent(e.id)
+      : '/api/traject-variants';
+    const method = isEdit ? 'PUT' : 'POST';
+    const payload = {
+      traject_id: e.traject_id,
+      name: String(e.name || '').trim(),
+      description: String(e.description || '').trim() || null,
+      default_duration_months: e.default_duration_months || null,
+      display_order: e.display_order || 100,
+      is_default: !!e.is_default,
+      is_active:  e.is_active !== false,
+      products,
+    };
+    openConfirm(`${isEdit ? 'Wijzigingen opslaan voor variant' : 'Nieuwe variant aanmaken:'} "${payload.name}"? Product-koppelingen worden volledig vervangen door de huidige lijst. Wijzigingen worden NIET naar TeamLeader gepusht — prijzen zitten op products (Sales-module).`, async () => {
+      _tr.busy = true; if (render) render();
+      try {
+        const j = await tryFetch('tv-save', url, {
+          method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(isEdit ? 'Variant bijgewerkt' : 'Variant aangemaakt', 'ok');
+        _tr.ed = null; _tr.fetched = false; fetchTrajecten();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _tr.busy = false; if (render) render(); }
+    });
+  };
+  window.__setTvDelete = (id) => {
+    const v = _tr.variants.find(x => x.id === id); if (!v) return;
+    openConfirm(`Variant "${esc(v.name)}" (traject: ${esc(v.traject_name)}) DEFINITIEF verwijderen? Cascade — product-koppelingen worden ook verwijderd. Bestaande deals met deze variant behouden hun snapshot maar de variant is niet meer selecteerbaar voor nieuwe deals. Overweeg eerst 'deactiveren' via Edit → uitzetten.`, async () => {
+      try {
+        const j = await tryFetch('tv-delete', '/api/traject-variants?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Variant verwijderd', 'ok');
+        _tr.fetched = false; fetchTrajecten();
+      } catch (err) { showToast('Verwijderen mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+    }, 'warn');
+  };
+  function _tvProductLabel(p) {
+    const prod = _tr.products.find(x => x.id === p.product_id);
+    if (!prod) return '— onbekend product —';
+    const price = prod.default_price != null ? ` · €${Number(prod.default_price).toFixed(2)}` : '';
+    return `${prod.name}${price}${prod.category ? ` · ${prod.category}` : ''}`;
+  }
+  function _renderTvEditor() {
+    const e = _tr.ed; if (!e) return '';
+    const productOptions = (_tr.products || []).map(p => `<option value="${esc(p.id)}"${p.id===e.product_id?' selected':''}>${esc(p.name)} · €${Number(p.default_price||0).toFixed(2)}${p.category?` · ${esc(p.category)}`:''}</option>`).join('');
+    const productRows = (e.products || []).map((p, i) => `<div style="display:grid;grid-template-columns:1fr 80px 30px;gap:6px;padding:6px 8px;border-top:1px solid var(--border);align-items:center">
+      <select data-tv-prod-idx="${i}" data-tv-prod-field="product_id" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+        <option value="">— kies product —</option>
+        ${(_tr.products || []).map(pr => `<option value="${esc(pr.id)}"${pr.id===p.product_id?' selected':''}>${esc(pr.name)} · €${Number(pr.default_price||0).toFixed(2)}</option>`).join('')}
+      </select>
+      <input type="number" min="1" data-tv-prod-idx="${i}" data-tv-prod-field="quantity" value="${esc(String(p.quantity||1))}" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+      <button class="btn btn-ghost btn-sm" onclick="window.__setTvRmProduct(${i})" style="font-size:12px;color:var(--rose);padding:2px 6px">✕</button>
+    </div>`).join('');
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setTvCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">${e.id ? 'Variant bewerken' : 'Nieuwe variant'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setTvCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;overflow-y:auto;flex:1">
+          <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.55;margin-bottom:14px">
+            <b>Geen TL-sync bij opslaan.</b> Variant-metadata (naam/duur/koppelingen) leeft alleen in de eigen DB. Product-prijzen wijzigen doe je in Sales &gt; Producten (raakt <code>products.default_price</code> — nieuwe deals gebruiken de nieuwe prijs, bestaande deals behouden snapshot).
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">
+            <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Parent-traject <span style="color:var(--rose)">*</span>
+              <select onchange="window.__setTvTraject(this.value)" ${e.id ? 'disabled title="Kan niet gewijzigd worden na aanmaken"' : ''} style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+                ${_tr.trajects.map(t => `<option value="${esc(t.id)}"${t.id===e.traject_id?' selected':''}>${esc(t.name)}</option>`).join('')}
+              </select>
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Naam variant <span style="color:var(--rose)">*</span>
+              <input type="text" data-tv-field="name" value="${esc(e.name || '')}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Looptijd (mnd, 1-120, leeg = geen default)
+              <input type="number" min="1" max="120" data-tv-field="default_duration_months" value="${esc(e.default_duration_months != null ? String(e.default_duration_months) : '')}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Beschrijving
+              <textarea data-tv-field="description" rows="2" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.description || '')}</textarea>
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Volgorde (display_order)
+              <input type="number" data-tv-field="display_order" value="${esc(String(e.display_order || 100))}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <div style="display:flex;flex-direction:column;gap:6px;justify-content:center">
+              <label style="font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" ${e.is_default ? 'checked' : ''} onchange="window.__setTvBool('is_default', this.checked)" /> Default variant voor dit traject</label>
+              <label style="font-size:12px;display:flex;gap:6px;align-items:center"><input type="checkbox" ${e.is_active !== false ? 'checked' : ''} onchange="window.__setTvBool('is_active', this.checked)" /> Actief (selecteerbaar in wizard)</label>
+            </div>
+          </div>
+          <div style="margin-top:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <div style="font-size:12px;font-weight:600">Product-koppelingen (${(e.products||[]).length})</div>
+              <button class="btn btn-ghost btn-sm" onclick="window.__setTvAddProduct()" style="font-size:11px" ${!(_tr.products||[]).length ? 'disabled' : ''}>➕ Product</button>
+            </div>
+            ${e._loadingProducts ? `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Laden…</div>` :
+              (productRows ? `<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;overflow:hidden">
+                <div style="padding:6px 8px;font-size:10.5px;color:var(--text-3);display:grid;grid-template-columns:1fr 80px 30px;gap:6px;background:var(--surface);border-bottom:1px solid var(--border)"><span>Product · prijs</span><span style="text-align:center">Aantal</span><span></span></div>
+                ${productRows}
+              </div>` : `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center;border:1px dashed var(--border);border-radius:6px">Geen producten gekoppeld — voeg toe via ➕</div>`)}
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setTvCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_tr.busy ? 'disabled' : ''} onclick="window.__setTvSave()">${_tr.busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
   }
   function bodyTrajecten() {
     if (!_tr.fetched && !_tr.loading) queueMicrotask(() => fetchTrajecten());
-    const rows = _tr.items.map(v => `<tr style="border-top:1px solid var(--border)">
+    const rows = _tr.variants.map(v => `<tr style="border-top:1px solid var(--border);${v.is_active ? '' : 'opacity:.55'}">
       <td style="padding:8px 12px;font-size:12.5px">${esc(v.traject_name)}</td>
-      <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(v.name || '—')}</td>
+      <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(v.name || '—')}${v.is_default ? ' <span style="font-size:10px;color:var(--emerald);font-weight:600">★ default</span>' : ''}</td>
       <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);text-align:center">${v.default_duration_months || '—'}</td>
+      <td style="padding:8px 12px;font-size:11px;text-align:center">${v.is_active ? '<span style="color:var(--emerald)">✓ actief</span>' : '<span style="color:var(--text-3)">⨯ inactief</span>'}</td>
+      <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="window.__setTvEdit('${esc(v.id)}')" style="font-size:11px">Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setTvDelete('${esc(v.id)}')" style="font-size:11px;color:var(--rose)">Verwijder</button>
+      </td>
     </tr>`).join('');
-    return `<div style="max-width:1000px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Read-only lijst.</b> Toont trajecten + hun varianten uit <code>trajects</code> + <code>traject_variants</code>. Varianten aanmaken/prijzen wijzigen/product-koppelingen bewerken vraagt eigen brok (variant-products-join + TL-sync).
-        <button class="btn btn-primary btn-sm" style="margin-left:10px" onclick="DFO.goMod('sales')">Open Sales →</button>
+    return `<div style="max-width:1100px">
+      ${_renderTvEditor()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>LIVE editor.</b> Varianten (naam/duur/product-koppelingen) via <code>/api/traject-variants</code>. <b>Geen TL-sync</b> — wijzigingen leven in eigen DB; product-prijzen zitten op <code>products</code> (Sales-module). Nieuwe offertes gebruiken automatisch de laatste prijs; bestaande deals behouden snapshot.
+        <button class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px" onclick="DFO.goMod('sales')">Sales → Producten (prijzen)</button>
       </div>
       ${_tr.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_tr.error)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:12.5px;color:var(--text-3)">${_tr.variants.length} variant(en) over ${_tr.trajects.length} traject(en) · ${(_tr.products||[]).length} products beschikbaar voor koppeling</div>
+        <button class="btn btn-primary btn-sm" onclick="window.__setTvNew()">➕ Nieuwe variant</button>
+      </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="background:var(--surface-2)">
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Traject</th>
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Variant</th>
-            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Looptijd (mnd)</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Duur (mnd)</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
           </tr></thead>
-          <tbody>${rows || `<tr><td colspan="3" style="padding:16px;color:var(--text-3);font-size:12.5px">${_tr.loading?'Laden…':'Geen trajecten gevonden'}</td></tr>`}</tbody>
+          <tbody>${rows || `<tr><td colspan="5" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_tr.loading?'Laden…':'Geen varianten gevonden'}</td></tr>`}</tbody>
         </table>
       </div>
     </div>`;
@@ -3738,11 +3936,13 @@
       'wb-venster',
       // Ronde-31 grote-brok agents-lisa native — persona/fases/KB/follow-up + draft/publish/rollback.
       'agents-lisa',
+      // Ronde-31 grote-brok sales-trajecten native — variant CRUD (naam/duur/koppelingen; geen TL-sync).
+      'sales-trajecten',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
-      // Ronde-28 C1+C2: uit deep-link naar read-native met eigen fetches.
-      'mk-bronnen','sales-trajecten',
+      // Ronde-28 C1: mk-bronnen read-native (mapping-editor blijft brok).
+      'mk-bronnen',
     ]);
     // Ronde-28: fin-entiteiten upgraded READ-ONLY → LIVE (CRUD wired).
     if (READONLY.has('fin-entiteiten')) READONLY.delete('fin-entiteiten');

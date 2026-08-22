@@ -17,13 +17,13 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 10 grote-brokken open · 13 deferred · 15 done** (totaal 38) — **agents-lisa ✓ als eerste grote brok**
+**0 quick-adds open · 9 grote-brokken open · 13 deferred · 16 done** (totaal 38) — **agents-lisa + sales-trajecten ✓**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 15 | — |
+| done         | 16 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 10 | sales-trajecten of ev-auto als volgende (advies) |
+| open (grote-brok) | 9  | ev-auto als volgende (advies) |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -33,7 +33,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
-| `sales-trajecten` | open | grote-brok | ja (`trajects` + `traject_variants` + TL-sync bestaan) | native read-native v30; volledige editor wacht op brok |
+| `sales-trajecten` | done | — | ja | v=46 (variant CRUD native via /api/traject-variants + product-koppelingen — GEEN TL-sync: endpoint doet zuiver DB; prijzen zitten op products, aparte Sales-editor) |
 | `sales-producten` | open | grote-brok | ja (product-catalogus bestaat) | deep-link |
 | `sales-offerte`   | done | — | ja | ≤v=30 (TL-mailtemplate + sales-uitzonderingen native) |
 | `sales-bonus`     | open | grote-brok | ja (`team_members`) | deep-link |
