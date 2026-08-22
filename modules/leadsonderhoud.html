@@ -565,7 +565,7 @@ async function schermTrajecten(){
         + '<button class="k k-o k-s" data-stap-edit="'+s.id+'">Aanpassen</button>'
         + '<button class="k k-ro k-s" data-stap-del="'+s.id+'">×</button></div>';
     }).join('') || '<div class="lo-leeg" style="padding:18px">Nog geen stappen.</div>';
-    return '<div class="lo-kaart lo-traj"><div class="lo-traj-k"><h3>'+esc(tr.naam)+'</h3>'
+    return '<div id="lo-traj-'+esc(tr.slug||tr.id)+'" class="lo-kaart lo-traj"><div class="lo-traj-k"><h3>'+esc(tr.naam)+'</h3>'
       + '<span class="m m-gy">'+esc(tr.slug)+'</span>'+(tr.actief?'':' <span class="m m-or">inactief</span>')
       + '<span style="margin-left:auto;font-size:12px;color:var(--text-dim)">archief na '+(tr.archief_na||30)+' dagen stilte</span>'
       + '<button class="k k-o k-s" data-traj-edit="'+tr.id+'">Bewerken</button>'
@@ -1211,6 +1211,25 @@ function kpi(label, waarde, onder, kleur){
 // ---- start ----
 (async function init(){
   try { if (window._authSharedReady) await window._authSharedReady; } catch (e) {}
+  // Ronde-31 v=52: deep-link support. ?tab=trajecten&traject=<slug> opent direct
+  // de Trajecten-tab en scrollt na render naar #lo-traj-<slug> (gebruikt door
+  // mk-sequenties in v2-instellingen). Fail-soft: onbekende tab-waarde = default.
+  try {
+    var qp = new URLSearchParams(window.location.search);
+    var wantTab = qp.get('tab');
+    var wantTraj = qp.get('traject');
+    var validTabs = ['overzicht','wachtrij','gesprekken','trajecten','berichten','vragenlijst'];
+    if (wantTab && validTabs.indexOf(wantTab) !== -1) S.scherm = wantTab;
+    if (wantTraj && S.scherm === 'trajecten') {
+      // Wacht tot schermTrajecten render klaar heeft, dan scroll naar anchor.
+      var _tryScroll = function(tries){
+        var el = document.getElementById('lo-traj-' + wantTraj);
+        if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); el.style.outline = '2px solid var(--brand,#3b82f6)'; setTimeout(function(){ el.style.outline=''; }, 2000); return; }
+        if (tries > 0) setTimeout(function(){ _tryScroll(tries - 1); }, 200);
+      };
+      setTimeout(function(){ _tryScroll(15); }, 300);
+    }
+  } catch (_) { /* fail-soft */ }
   teken();
 })();
 </script>

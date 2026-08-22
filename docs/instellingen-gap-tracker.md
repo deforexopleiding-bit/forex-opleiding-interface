@@ -91,7 +91,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `mk-meta`       | deferred | bewust-deferred | extern (Meta BM) | geen native mogelijk |
 | `mk-bronnen`    | deferred | bewust-deferred | nee (mapping-editor vraagt backend-refactor) | v=50 read-only uitgebreid met kruistabel bron×traject + lead_sources CAC-tabel + notice waarom geen editor (elke intake-endpoint zet bron+traject in 1 insert; geen data-driven mapping) |
-| `mk-sequenties` | done | — | ja | v=49 (onderhoud-trajecten CRUD native: metadata-edit + actief-toggle + delete; stap-editor + test-send blijven Leadsonderhoud) |
+| `mk-sequenties` | done | — | ja | v=52 (v=49 CRUD + fixes v=52: Stappen↗ deep-link naar v1 leadsonderhoud.html?tab=trajecten&traject=slug#anchor + disabled-verwijder-styling + cross-cutting event-delegation voor nav-race) |
 | `mk-webflow`    | done | — | ja | ≤v=30 (auto-publish + publish-now native) |
 
 ## Team & toegang

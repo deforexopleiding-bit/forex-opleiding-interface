@@ -252,6 +252,24 @@
     S.setPage = id;
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   };
+  // Ronde-31 v=52 FIX 3 — cross-cutting nav-race. Eerste-klik na fresh render
+  // pakte soms niet (per-item inline onclick handlers werden pas ná de eerste
+  // paint effectief). Event-delegation op #content vangt elke klik onmiddellijk,
+  // ook vóór de eerste re-render. Geen self-observing: puur event-dispatch,
+  // muteert geen node dat we observeren. Idempotent-guard voorkomt dubbele bind.
+  if (!window.__kvInstNavDelegationBound) {
+    window.__kvInstNavDelegationBound = true;
+    document.addEventListener('click', function (evt) {
+      const btn = evt.target && evt.target.closest && evt.target.closest('[data-set-pick]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-set-pick');
+      if (!id) return;
+      // Voorkom dat de bestaande inline onclick (backward-compat) hem ook triggert.
+      evt.preventDefault();
+      evt.stopPropagation();
+      window.__setPick(id);
+    }, true /* capture: vuurt vóór inline-handlers, elimineert race */);
+  }
 
   function highlightVars(t) {
     return String(t || '')
@@ -1363,9 +1381,10 @@
       finally { delete _ms.busy[id]; if (render) render(); }
     }, next ? 'warn' : undefined);
   };
+  window.__setMsDeleteBlocked = () => { showToast('Zet het traject eerst UIT vóór verwijderen', 'warn'); };
   window.__setMsDelete = (id) => {
     const t = _ms.trajecten.find(x => x.id === id); if (!t) return;
-    if (t.actief) { showToast('Zet traject eerst UIT vóór verwijderen', 'warn'); return; }
+    if (t.actief) { showToast('Zet het traject eerst UIT vóór verwijderen', 'warn'); return; }
     const stapN = Array.isArray(t.stappen) ? t.stappen.length : 0;
     openConfirm(`Traject "${esc(t.naam)}" DEFINITIEF verwijderen? Cascade: ${stapN} stap(pen) wordt ook verwijderd. Kan niet ongedaan gemaakt worden.`, async () => {
       _ms.busy[id] = true; if (render) render();
@@ -1439,16 +1458,18 @@
         </td>
         <td style="padding:6px 12px;text-align:right;white-space:nowrap">
           <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsEdit('${esc(t.id)}')" style="font-size:11px">Edit-meta</button>
-          <a href="/modules/klanten-v2/?v2preview=leadsonderhoud" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">Stappen ↗</a>
-          <button class="btn btn-ghost btn-sm" ${busy || t.actief?'disabled':''} onclick="window.__setMsDelete('${esc(t.id)}')" style="font-size:11px;color:var(--rose)" title="${t.actief?'Zet eerst UIT':''}">Verwijder</button>
+          <a href="/modules/leadsonderhoud.html?tab=trajecten&traject=${encodeURIComponent(t.slug || t.id)}#lo-traj-${esc(t.slug || t.id)}" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none" title="Opent v1-shell op Trajecten-tab, scrollt naar deze traject-kaart">Stappen ↗</a>
+          ${t.actief
+            ? `<button class="btn btn-ghost btn-sm" onclick="window.__setMsDeleteBlocked()" style="font-size:11px;color:var(--rose);opacity:.5;cursor:not-allowed" title="Zet het traject eerst UIT vóór verwijderen">Verwijder</button>`
+            : `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsDelete('${esc(t.id)}')" style="font-size:11px;color:var(--rose)">Verwijder</button>`}
         </td>
       </tr>`;
     }).join('');
     return `<div style="max-width:1200px">
       ${_msEditor()}
       <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>LIVE-lijst met onderhoud-trajecten.</b> Hier: metadata bewerken (naam/slug/agent/agenda/archief/volgorde) + aan/uit-toggle + delete. <b>Stappen-editor + test-send</b> leven in de Leadsonderhoud-module (18 velden per stap incl. kanaal/aanleiding/timing/filters; test-send verstuurt écht via bulk-test-send).
-        <a href="/modules/klanten-v2/?v2preview=leadsonderhoud" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Leadsonderhoud →</a>
+        <b>LIVE-lijst met onderhoud-trajecten.</b> Hier: metadata bewerken (naam/slug/agent/agenda/archief/volgorde) + aan/uit-toggle + delete. <b>Stappen-editor + test-send</b> leven in de v1 Leadsonderhoud-shell (<code>/modules/leadsonderhoud.html</code> · Trajecten-tab): 18 velden per stap incl. kanaal/aanleiding/timing/filters; test-send verstuurt écht via bulk-test-send. Klik "Stappen ↗" per rij om direct naar de juiste traject-kaart te scrollen.
+        <a href="/modules/leadsonderhoud.html?tab=trajecten" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Leadsonderhoud (v1) →</a>
       </div>
       ${_ms.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ms.error)}</div>` : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -4827,7 +4848,7 @@
         <div class="set-nav">
           ${setsVisible.map(g => `
             <div class="set-group">${g.g}</div>
-            ${g.items.map(i => `<button class="set-item ${S.setPage === i.id ? 'is-on' : ''}" onclick="__setPick('${i.id}')">
+            ${g.items.map(i => `<button class="set-item ${S.setPage === i.id ? 'is-on' : ''}" data-set-pick="${i.id}" onclick="__setPick('${i.id}')">
               ${svg(i.ic)}<span>${i.n}</span>
             </button>`).join('')}
           `).join('')}
