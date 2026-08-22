@@ -25,8 +25,6 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | open (quick-add)   | 0  | — |
 | open (grote-brok) | 1  | alg-meldingen (notification_preferences schema + endpoint nieuw) |
 | deferred     | 16 | — |
-| open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
-| deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
 ---
 
@@ -37,7 +35,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | `sales-trajecten` | done | — | ja | v=46 (variant CRUD native via /api/traject-variants + product-koppelingen — GEEN TL-sync: endpoint doet zuiver DB; prijzen zitten op products, aparte Sales-editor) |
 | `sales-producten` | done | — | ja | v=53 (CRUD op products native; BTW-select 0/9/21 bewerkbaar bevestigd in v=53 met verduidelijkt label; geen TL-sync) |
 | `sales-offerte`   | done | — | ja | ≤v=30 (TL-mailtemplate + sales-uitzonderingen native) |
-| `sales-bonus`     | done | — | ja | v=56 (nieuw endpoint /api/sales-bonus-configs GET/POST/PATCH/DELETE-soft achter super_admin-gate; native CRUD op sales_bonus_configs met percentage/threshold/active_from/active_until per verkoper; geld-impact-warn-confirm) |
+| `sales-bonus`     | done | — | ja | v=57 (v=56 CRUD + v=57 grens-fix: motor sales-subscription-create.js r476 filterde niet op active_from/active_until; nu strikte > in motor én UI/endpoint zodat deactiveren dezelfde dag werkt) |
 
 ## Financieel
 

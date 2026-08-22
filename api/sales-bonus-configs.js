@@ -74,8 +74,13 @@ export default async function handler(req, res) {
       const { data: cands } = await supabaseAdmin.from('profiles')
         .select('id, full_name, email, role')
         .in('role', CANDIDATE_ROLES).eq('is_active', true).order('full_name');
+      // Ronde-31 v=57: strikte > grens (identiek aan bonus-motor in sales-subscription-create.js r476).
       const today = new Date().toISOString().slice(0, 10);
-      const activeUserIds = new Set(configsWithProfile.filter(c => !c.active_until || c.active_until >= today).map(c => c.user_id));
+      const activeUserIds = new Set(
+        configsWithProfile
+          .filter(c => (c.active_from <= today) && (!c.active_until || c.active_until > today))
+          .map(c => c.user_id)
+      );
       const candidates = (cands || []).filter(p => !activeUserIds.has(p.id));
       return res.status(200).json({ configs: configsWithProfile, candidates });
     }

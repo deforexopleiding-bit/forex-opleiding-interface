@@ -1217,9 +1217,13 @@
   function bodySalesBonus() {
     if (!_sb.fetched && !_sb.loading) queueMicrotask(() => fetchSalesBonus());
     const today = new Date().toISOString().slice(0, 10);
+    // Ronde-31 v=57: grens gelijk aan bonus-motor (sales-subscription-create.js r476):
+    // actief = active_from <= today AND (active_until IS NULL OR active_until > today).
+    // Strikte >. Deactiveren via active_until=today werkt daardoor direct — zelfde dag.
+    const isActive = (c) => (c.active_from <= today) && (!c.active_until || c.active_until > today);
     const rows = _sb.configs.map(c => {
       const busy = _sb.busy && _sb.ed?.id === c.id;
-      const active = !c.active_until || c.active_until >= today;
+      const active = isActive(c);
       const name = c?.profile?.full_name || '—';
       const email = c?.profile?.email || '';
       const role = c?.profile?.role || '—';
@@ -1244,7 +1248,7 @@
       </div>
       ${_sb.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_sb.error)}</div>` : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-size:12.5px;color:var(--text-3)">${_sb.configs.length} config(s) · ${_sb.configs.filter(c=>!c.active_until||c.active_until>=today).length} actief · ${_sb.candidates.length} verkopers zonder actieve config</div>
+        <div style="font-size:12.5px;color:var(--text-3)">${_sb.configs.length} config(s) · ${_sb.configs.filter(isActive).length} actief · ${_sb.candidates.length} verkopers zonder actieve config</div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="window.__setSbReload()" style="font-size:11px">↻ Vernieuwen</button>
           <button class="btn btn-primary btn-sm" ${!_sb.candidates.length?'disabled':''} onclick="window.__setSbNew()" title="${!_sb.candidates.length?'Geen kandidaten':''}">➕ Nieuwe config</button>

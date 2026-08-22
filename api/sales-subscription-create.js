@@ -497,15 +497,18 @@ export default async function handler(req, res) {
           bonus = null;                 // al een bonus voor deze deal → niet nog een keer
           console.log('[sub-create] bonus skip: deal', dealId, 'heeft al bonus', existingBonus.id);
         } else {
-          // Config: nieuwste ACTIEVE regel (active_from ≤ vandaag < active_until).
-          // Voorheen werd active_until genegeerd → een verlopen config kon nog
-          // gekozen worden. NL-datum voor de dag-grens.
+          // Config: nieuwste ACTIEVE regel. Ronde-31 v=57: STRIKTE > op active_until
+          // (identiek aan UI in instellingen-v2 bodySalesBonus + candidates-check
+          // in api/sales-bonus-configs.js). Deactiveren via active_until=today werkt
+          // daardoor dezelfde dag — motor negeert 'em, UI toont 'em direct als
+          // historie, en de verkoper verschijnt in candidates zodat je meteen een
+          // nieuwe config kunt maken. NL-datum voor de dag-grens.
           const today = nlDateString(new Date());
           const { data: cfg } = await supabaseAdmin.from('sales_bonus_configs')
             .select('percentage, threshold_amount')
             .eq('user_id', deal.sales_user_id)
             .lte('active_from', today)
-            .or(`active_until.is.null,active_until.gte.${today}`)
+            .or(`active_until.is.null,active_until.gt.${today}`)
             .order('active_from', { ascending: false }).limit(1).maybeSingle();
           const pct = cfg?.percentage ?? 3;
           const threshold = cfg?.threshold_amount ?? 1000;
