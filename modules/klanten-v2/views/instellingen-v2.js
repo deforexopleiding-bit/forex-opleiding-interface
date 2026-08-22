@@ -1082,6 +1082,94 @@
     </div>`;
   }
 
+  /* Ronde-31 grote-brok · agents-manager — READ-ONLY runtime-status + audit-log.
+     DISCOVERY: /api/super-admin-ai-manager is POST-only Q&A-endpoint met hardcoded
+     constants (MODEL_SQL_GEN, STATEMENT_TIMEOUT_MS=5000, MAX_ROWS_RETURNED=20,
+     MAX_QUESTION_LEN=2000, rate-limit 10/uur/user, guard-rules in _lib/ai-query-
+     guard.js). Er is GEEN ai_manager_config-tabel, geen app_settings-key, geen
+     bewerkbare persona/kennis/autonomie. System-prompt wordt on-the-fly opgebouwd
+     uit ai_readonly.v_schema_help. Autonomie=0: endpoint kan alleen SELECT op
+     ai_readonly.* — writes zijn onmogelijk (DB-rol afdwingen). Config-editor
+     native vraagt backend-refactor (tabel + endpoint aanpassing). Buiten scope.
+     Sectie toont daarom: runtime-parameters info + laatste audit-log-entries. */
+  const _am = { loading: false, fetched: false, error: null, audit: [] };
+  async function fetchAmAudit() {
+    if (_am.loading || _am.fetched) return;
+    _am.loading = true; _am.error = null; if (render) render();
+    try {
+      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
+      const { data, error } = await window.supabase.from('agent_audit_log')
+        .select('id, action, status, payload, result, error_message, created_at')
+        .eq('agent_name', 'ai_manager')
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      _am.audit = data || [];
+    } catch (e) { _am.error = e?.message || 'onbekend'; }
+    _am.loading = false; _am.fetched = true; if (render) render();
+  }
+  window.__setAmReload = () => { _am.fetched = false; fetchAmAudit(); };
+  function bodyAgentsManager() {
+    if (!_am.fetched && !_am.loading) queueMicrotask(() => fetchAmAudit());
+    const auditRows = _am.audit.map(a => {
+      const ok = a.status === 'success';
+      const rows = a?.result?.row_count ?? '—';
+      const tokens = a?.result?.tokens ? (typeof a.result.tokens === 'object' ? (a.result.tokens.total_tokens || a.result.tokens.input_tokens + a.result.tokens.output_tokens || '—') : a.result.tokens) : '—';
+      const q = String(a?.payload?.question || '').slice(0, 100);
+      const guard = a?.payload?.guard_verdict?.verdict || '—';
+      return `<tr style="border-top:1px solid var(--border);${ok?'':'background:var(--rose-soft)'}">
+        <td style="padding:6px 12px;font-size:11px;color:var(--text-3);white-space:nowrap">${esc(String(a.created_at || '').slice(0, 19).replace('T', ' '))}</td>
+        <td style="padding:6px 12px;font-size:12px">${esc(q)}${a.payload?.question && a.payload.question.length > 100 ? '…' : ''}</td>
+        <td style="padding:6px 12px;font-size:11px;text-align:center">${ok ? '<span style="color:var(--emerald)">✓</span>' : `<span style="color:var(--rose)" title="${esc(a.error_message||'')}">✗</span>`}</td>
+        <td style="padding:6px 12px;font-size:11px;text-align:center">${esc(String(guard))}</td>
+        <td style="padding:6px 12px;font-size:11px;text-align:right;font-family:'IBM Plex Mono',monospace">${rows}</td>
+        <td style="padding:6px 12px;font-size:11px;text-align:right;font-family:'IBM Plex Mono',monospace">${tokens}</td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1100px">
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>READ-ONLY — geen config-tabel.</b> AI Manager is een Q&A-widget op het super-admin-dashboard. Alle gedrag (model, rate-limit, guard-rules, system-prompt) is <b>hardcoded in code</b>: er bestaat geen <code>ai_manager_config</code>-tabel of <code>app_settings</code>-key. <b>Autonomie=0</b>: endpoint kan alléén SELECT op <code>ai_readonly.*</code>-views (DB-rol afdwingen). Config bewerkbaar maken vraagt backend-refactor (nieuwe tabel + endpoint-aanpassing) — buiten scope zonder afstemming.
+        <a href="/index.html" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open dashboard (AI Manager-widget) →</a>
+      </div>
+
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">Runtime-parameters (hardcoded)</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;margin-bottom:16px;font-size:12.5px">
+        <div><span style="color:var(--text-3)">Model (SQL-generatie): </span><code>claude-sonnet-4-6</code></div>
+        <div><span style="color:var(--text-3)">Model (samenvatting): </span><code>claude-sonnet-4-6</code></div>
+        <div><span style="color:var(--text-3)">Statement-timeout: </span><code>5000 ms</code></div>
+        <div><span style="color:var(--text-3)">Max rijen per query: </span><code>20</code></div>
+        <div><span style="color:var(--text-3)">Max vraag-lengte: </span><code>2000 chars</code></div>
+        <div><span style="color:var(--text-3)">Rate-limit: </span><code>10 calls/uur/user</code></div>
+        <div><span style="color:var(--text-3)">DB-rol: </span><code>ai_readonly</code> (write onmogelijk)</div>
+        <div><span style="color:var(--text-3)">Toegang: </span><code>super_admin only</code></div>
+        <div style="grid-column:1/-1"><span style="color:var(--text-3)">System-prompt-bron: </span><code>ai_readonly.v_schema_help</code> (view-metadata, on-the-fly)</div>
+        <div style="grid-column:1/-1"><span style="color:var(--text-3)">Guard-rules: </span><code>api/_lib/ai-query-guard.js</code> (SELECT-only, whitelist views)</div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <div style="font-size:13px;font-weight:600">Laatste 20 queries · <code>agent_audit_log</code></div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Read-only view op <code>agent_name='ai_manager'</code>. Rode rij = failed.</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setAmReload()" style="font-size:11px">↻ Vernieuwen</button>
+      </div>
+      ${_am.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:8px">⚠ ${esc(_am.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:700px">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Wanneer</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Vraag</th>
+            <th style="text-align:center;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:center;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Guard</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Rijen</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Tokens</th>
+          </tr></thead>
+          <tbody>${auditRows || `<tr><td colspan="6" style="padding:16px;color:var(--text-3);font-size:12px;text-align:center">${_am.loading?'Laden…':'Geen audit-entries voor ai_manager'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   /* Ronde-31 grote-brok · sales-producten — products CRUD native.
      Endpoint: /api/sales-products (GET ?active=true / POST / PUT ?id / DELETE ?id soft).
      Permissions: sales.product.view (read) + sales.product.manage (write).
@@ -4754,7 +4842,7 @@
     // Wave-2 · DEEL B — deep-links (config leeft nu in bestaande modules; volledige
     // port vereist eigen brok per sectie omdat de bron-modules eigen state/UI hebben).
     if (cur.id === 'agents-lisa')        return bodyAgentsLisa();
-    if (cur.id === 'agents-manager')     return bodyDeepLink('AI Agents', 'AI Manager-instellingen (system-prompt, kennis, autonomie) staan in de AI Agents-module. Het werkende endpoint /api/super-admin-ai-manager voedt de widget op het dashboard.', 'agents');
+    if (cur.id === 'agents-manager')     return bodyAgentsManager();
     if (cur.id === 'agents-kennis')      return bodyKbArtikelen();
     if (cur.id === 'sales-trajecten')    return bodyTrajecten();
     if (cur.id === 'sales-producten')    return bodySalesProducten();
@@ -4831,13 +4919,15 @@
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
       // Ronde-28 C1: mk-bronnen read-native (mapping-editor blijft brok).
       'mk-bronnen',
+      // Ronde-31 v=54: agents-manager READ-ONLY — geen config-tabel in DB; alle
+      // gedrag is code-side (hardcoded constants + on-the-fly schema-prompt).
+      'agents-manager',
     ]);
     // Ronde-28: fin-entiteiten upgraded READ-ONLY → LIVE (CRUD wired).
     if (READONLY.has('fin-entiteiten')) READONLY.delete('fin-entiteiten');
     // Backward-compat: WIRED bevat beide zodat andere logic werkt.
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
-      'agents-manager',
       'sales-bonus',
       'ev-templates','ev-locaties','lms-instel',
       'mk-meta',

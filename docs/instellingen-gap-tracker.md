@@ -17,14 +17,14 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 4 grote-brokken open · 14 deferred · 20 done** (totaal 38) — **sales-producten ✓**
+**0 quick-adds open · 3 grote-brokken open · 15 deferred · 20 done** (totaal 38) — **agents-manager → deferred (geen config-tabel; runtime-status + audit-log native)**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
 | done         | 20 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 4  | alg-meldingen · sales-bonus · agents-manager · ev-locaties |
-| deferred     | 14 | mk-bronnen (backend-refactor: nieuwe tabel lead_source_traject_map + intake-endpoints migreren) |
+| open (grote-brok) | 3  | alg-meldingen · sales-bonus · ev-locaties |
+| deferred     | 15 | +agents-manager (backend-refactor: geen ai_manager_config-tabel bestaat) |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -63,7 +63,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
 | `agents-lisa`    | done | — | ja | v=45 (v=44 native persona/fases/KB/follow-up + draft/publish/rollback; v=45 fase-shape fix {system,transition,examples[]} + dos/donts newline-array + delay strict-reject + disabled-styling) |
-| `agents-manager` | open | grote-brok | ja (`/api/super-admin-ai-manager`) | deep-link |
+| `agents-manager` | deferred | bewust-deferred | endpoint is Q&A-POST (geen config-tabel) | v=54 READ-ONLY: runtime-parameters (model/rate-limit/timeout/max-rows/DB-rol) + laatste 20 agent_audit_log-entries + notice (autonomie=0, ai_readonly-rol dwingt read-only af) |
 | `agents-kennis`  | done | — | ja | v=53 (v=48 CRUD + v=53 FIX A: _kbSyncFromDom-first vóór checkbox-toggle zodat getypte onderwerp/content overleeft) |
 
 ## Events & Leren
