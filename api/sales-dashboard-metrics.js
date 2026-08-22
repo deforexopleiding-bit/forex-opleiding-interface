@@ -3,7 +3,8 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { fetchTestCustomerIds } from './_lib/test-data-filter.js';
+import { fetchTestCustomerIds, fetchTestDealIds } from './_lib/test-data-filter.js';
+import { periodRange } from './_lib/nl-period.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -34,12 +35,18 @@ export default async function handler(req, res) {
       .in('tl_quotation_status', ['draft', 'sent']);
     const myOpenQuotations = (myQuotes || []).filter(q => !isTestDeal(q.customer_id)).length;
 
-    // Mijn bonus deze maand (pending + paid).
-    const monthStart = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString(); })();
+    // Mijn bonus deze maand (pending + paid). NL-tijdzone-aware maandgrens
+    // (Europe/Amsterdam) i.p.v. server-lokale/UTC 1e-van-de-maand, en test-
+    // deal-bonussen eruit (is_test via customer → deal). deal_id meenemen om te
+    // kunnen filteren.
+    const monthStart = periodRange('maand', new Date()).start.toISOString();
+    const testDealIds = await fetchTestDealIds(supabaseAdmin);
     const { data: myBonuses } = await supabaseAdmin.from('bonuses')
-      .select('amount, status, created_at').eq('sales_user_id', user.id).gte('created_at', monthStart)
+      .select('amount, status, created_at, deal_id').eq('sales_user_id', user.id).gte('created_at', monthStart)
       .in('status', ['pending', 'earned', 'invoiced', 'paid']);
-    const myBonusMonth = (myBonuses || []).reduce((s, b) => s + Number(b.amount || 0), 0);
+    const myBonusMonth = (myBonuses || [])
+      .filter(b => !testDealIds.has(b.deal_id))
+      .reduce((s, b) => s + Number(b.amount || 0), 0);
 
     // Mijn omzet deze maand + aantal deze maand + hoogste all-time (accepted/signed).
     // Fail-soft → 0/null bij fout of ontbrekende timestamps.

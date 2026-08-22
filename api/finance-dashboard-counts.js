@@ -271,21 +271,32 @@ async function computeConversieWanbetalersFlow(periodStart) {
 }
 
 async function computeMentorBonusPending() {
-  // Som van bonuses.amount waar status='pending'.
+  // LET OP — naamgeving is een LEGACY-MISNOMER: dit leest de SALES-bonustabel
+  // (`bonuses`), NIET de mentor-bonus (die leeft in `mentor_ledger_entries`).
+  // De output-key blijft `mentorBonusPending` om de finance-dashboard-UI niet te
+  // breken; hernoemen (key + UI-label) is een aparte follow-up.
+  // Som van bonuses.amount waar status='pending', EXCL. test-deal-bonussen
+  // (is_test via customer → deal).
   try {
     const { data, error } = await supabaseAdmin
       .from('bonuses')
-      .select('amount')
+      .select('amount, deal_id')
       .eq('status', 'pending');
     if (error) {
-      console.error('[finance-dashboard-counts] mentorBonus fail:', error.message);
+      console.error('[finance-dashboard-counts] salesBonus fail:', error.message);
       return 0;
     }
+    let testDealIds = new Set();
+    try { testDealIds = await fetchTestDealIds(supabaseAdmin); }
+    catch (e) { console.warn('[finance-dashboard-counts] test-deal filter fail-open:', e?.message); }
     let sum = 0;
-    for (const r of (data || [])) sum += Number(r.amount) || 0;
+    for (const r of (data || [])) {
+      if (testDealIds.has(r.deal_id)) continue;
+      sum += Number(r.amount) || 0;
+    }
     return Math.round(sum * 100) / 100;
   } catch (e) {
-    console.error('[finance-dashboard-counts] mentorBonus exception:', e?.message);
+    console.error('[finance-dashboard-counts] salesBonus exception:', e?.message);
     return 0;
   }
 }
