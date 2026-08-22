@@ -213,6 +213,46 @@ function _upHead() {
       </button>
     </div>`;
 }
+// Read-only regel-breakdown: toont ALLE line_items met hun EIGEN per-regel BTW.
+// Het losse "BTW %"-veld hierboven toont enkel het top-level tarief (= dat van de
+// eerste regel) en het "Bedrag" is de som van alle regels — daardoor was een
+// multi-tarief-abo (bv. e-book 9% + 1-op-1 21%, of verlegd 0%) niet te zien.
+// Deze tabel is de échte bron van het termijnbedrag (incl. per-regel BTW).
+function _upLineItems(s) {
+  const items = Array.isArray(s.line_items) ? s.line_items : [];
+  if (!items.length) return '';
+  let totExcl = 0, totIncl = 0;
+  const rows = items.map((li) => {
+    const excl = Number(li.amount) || 0;
+    const vat  = li.vat_percentage != null ? Number(li.vat_percentage) : 0;
+    const incl = excl * (1 + vat / 100);
+    totExcl += excl; totIncl += incl;
+    return `<tr>
+      <td style="padding:3px 0">${esc(li.description || li.name || '—')}</td>
+      <td class="r mono" style="padding:3px 0">${esc(fmtEur(excl))}</td>
+      <td class="r mono" style="padding:3px 0">${vat}%</td>
+      <td class="r mono" style="padding:3px 0"><b>${esc(fmtEur(incl))}</b></td>
+    </tr>`;
+  }).join('');
+  return `
+    <div class="kv-edit-field" style="margin-top:4px">
+      <label>Regels (per-regel BTW — bron van het termijnbedrag)</label>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="color:var(--text-2);text-align:left">
+          <th style="font-weight:600">Omschrijving</th><th class="r" style="font-weight:600">Excl.</th><th class="r" style="font-weight:600">BTW</th><th class="r" style="font-weight:600">Incl.</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="font-weight:700;border-top:1px solid var(--border)">
+          <td style="padding-top:4px">Totaal / termijn</td>
+          <td class="r mono" style="padding-top:4px">${esc(fmtEur(totExcl))}</td>
+          <td></td>
+          <td class="r mono" style="padding-top:4px">${esc(fmtEur(totIncl))}</td>
+        </tr></tfoot>
+      </table>
+      <p style="font-size:11px;color:var(--text-2);margin:4px 0 0">Het termijnbedrag komt uit deze regels (incl. per-regel BTW), niet uit het losse BTW%-veld. Bij BTW verlegd (medecontractant) horen de regels 0% te zijn.</p>
+    </div>`;
+}
+
 function _upBody() {
   const s = _up.sub;
   const hasTl = !!s.teamleader_subscription_id;
@@ -246,6 +286,7 @@ function _upBody() {
           <input id="kv-up-terms" type="number" step="1" min="1" max="240" value="${esc(f.term_count)}" ${disAttr} data-kv-up-input data-key="term_count" />
         </div>
       </div>
+      ${_upLineItems(s)}
       <div class="kv-edit-grid">
         <div class="kv-edit-field">
           <label for="kv-up-start">Startdatum</label>

@@ -21,7 +21,7 @@ import {
   openSubscriptionPostponeAllModal,
   openSubscriptionUpdateModal,
   openSubscriptionDeleteModal,
-} from '../modals/subscription-actions.js';
+} from '../modals/subscription-actions.js?v=1';
 
 const K = () => window.KV;
 
@@ -222,22 +222,25 @@ function renderLineItems(sub) {
 // Bedrag incl. BTW per termijn — identiek aan expand-tfoot-berekening
 // (renderLineItems r194) én aan v1 klanten.html:2479 helper.
 // Volgorde: prefer line_items sum (per-regel BTW). Fallback: sub.amount +
-// sub.vat_percentage. Extra veiligheid: als vat_percentage null/0 is EN er
-// geen line_items zijn, gebruik 21% (default NL) — voorkomt stille
-// excl-weergave onder incl-label bij subs zonder complete BTW-metadata.
+// sub.vat_percentage.
+// BELANGRIJK: een ÉCHTE 0% (BTW verlegd / medecontractant) wordt gehonoreerd —
+// dan is incl == excl. Alleen bij ONTBREKENDE metadata (null/undefined/niet-
+// numeriek) vallen we terug op 21% (NL-default), zodat we geen excl onder een
+// incl-label tonen. (Voorheen forceerde `> 0 ? : 21` een echte 0% naar 21% →
+// verlegde abo's werden te hoog getoond.)
 function inclPerTerm(sub) {
   const lines = Array.isArray(sub.line_items) ? sub.line_items : [];
   if (lines.length) {
     return lines.reduce((s, li) => {
       const excl = Number(li.amount) || 0;
-      const vat  = li.vat_percentage != null ? Number(li.vat_percentage) : 21;
+      const raw  = li.vat_percentage;
+      const vat  = (raw != null && Number.isFinite(Number(raw))) ? Number(raw) : 21;
       return s + excl * (1 + vat / 100);
     }, 0);
   }
   const excl = Number(sub.amount) || 0;
-  const vat  = sub.vat_percentage != null && Number(sub.vat_percentage) > 0
-    ? Number(sub.vat_percentage)
-    : 21; // NL default — voorkomt incl==excl bij ontbrekende BTW-info
+  const raw  = sub.vat_percentage;
+  const vat  = (raw != null && Number.isFinite(Number(raw))) ? Number(raw) : 21;
   return excl * (1 + vat / 100);
 }
 
