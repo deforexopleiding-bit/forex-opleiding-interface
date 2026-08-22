@@ -210,10 +210,148 @@ function renderClientDataCard(customer, dossier) {
     </div>`;
 }
 
+// ── Abonnement + Onboarding preview-cards: live data ─────────────────────────
+// Bron abonnementen = /api/sales-customer-subscriptions (IDENTIEK aan de
+// Abonnementen-tab; geen nieuwe query-definitie). Bron onboarding =
+// /api/onboarding-by-customer (per-klant lees-endpoint). Beide worden async
+// gevuld ná de eerste render (wire → fill*), met een nette lege staat als er
+// geen data is.
+
+const EUR = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmtEur(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  return EUR.format(Number(n));
+}
+
+// Subscription-status → pill. Zelfde termen als tabs/abonnementen.js.
+const SUB_STATUS = {
+  active:      { label: 'Actief',      cls: 'ds-pill-ok'      },
+  running:     { label: 'Actief',      cls: 'ds-pill-ok'      },
+  paused:      { label: 'Gepauzeerd',  cls: 'ds-pill-warn'    },
+  overdue:     { label: 'Achterstand', cls: 'ds-pill-danger'  },
+  cancelled:   { label: 'Beëindigd',   cls: 'ds-pill-neutral' },
+  deactivated: { label: 'Beëindigd',   cls: 'ds-pill-neutral' },
+  stopped:     { label: 'Gestopt',     cls: 'ds-pill-neutral' },
+};
+function subStatusPill(st) {
+  const m = SUB_STATUS[String(st || '').toLowerCase()] || { label: st || '—', cls: 'ds-pill-neutral' };
+  return `<span class="ds-pill ${m.cls}">${K().esc(m.label)}</span>`;
+}
+function subIsActive(s) {
+  const k = String(s?.status || '').toLowerCase();
+  return k === 'active' || k === 'running';
+}
+// Bedrag incl. BTW per termijn — lokale kopie van tabs/abonnementen.js:inclPerTerm
+// (die helper is niet ge-exporteerd; deze kopie houdt kaart == tab-bedrag).
+function inclPerTerm(sub) {
+  const lines = Array.isArray(sub?.line_items) ? sub.line_items : [];
+  if (lines.length) {
+    return lines.reduce((s, li) => {
+      const excl = Number(li.amount) || 0;
+      const vat  = li.vat_percentage != null ? Number(li.vat_percentage) : 21;
+      return s + excl * (1 + vat / 100);
+    }, 0);
+  }
+  const excl = Number(sub?.amount) || 0;
+  const vat  = sub?.vat_percentage != null && Number(sub.vat_percentage) > 0 ? Number(sub.vat_percentage) : 21;
+  return excl * (1 + vat / 100);
+}
+
+// NB: de databron kent geen "volgende factuurdatum"-veld; net als de
+// Abonnementen-tab tonen we de einddatum als "loopt t/m" (Hernieuwingsdatum).
+function renderAboSummary(subs) {
+  const list = Array.isArray(subs) ? subs : [];
+  const link = `<span class="kv-prof-preview-link">Bekijk details →</span>`;
+  if (!list.length) {
+    return `<div class="kv-prof-empty">Geen abonnement voor deze klant.</div>${link}`;
+  }
+  const actives = list.filter(subIsActive);
+  if (!actives.length) {
+    return `<div class="kv-prof-empty">Geen actief abonnement (${list.length} historisch).</div>${link}`;
+  }
+  const sorted = [...actives].sort((a, b) => inclPerTerm(b) - inclPerTerm(a));
+  const shown = sorted.slice(0, 2);
+  const extra = sorted.length - shown.length;
+  const rows = shown.map((s) => `
+    <div class="kv-prof-abo-row">
+      <div class="kv-prof-abo-row-top">
+        <span class="kv-prof-abo-name">${K().esc(s.description || 'Abonnement')}</span>
+        ${subStatusPill(s.status)}
+      </div>
+      <div class="kv-prof-abo-row-sub">
+        <span class="mono">${K().esc(fmtEur(inclPerTerm(s)))}</span> / termijn incl. BTW${s.end_date ? ` · loopt t/m ${K().esc(fmtDate(s.end_date))}` : ''}
+      </div>
+    </div>`).join('');
+  const more = extra > 0 ? `<div class="kv-prof-abo-more">en ${extra} meer</div>` : '';
+  const totalLine = actives.length > 1
+    ? `<div class="kv-prof-abo-total">Totaal termijnbedrag: <span class="mono">${K().esc(fmtEur(actives.reduce((a, s) => a + inclPerTerm(s), 0)))}</span> / termijn</div>`
+    : '';
+  return `<div class="kv-prof-abo-list">${rows}${more}</div>${totalLine}${link}`;
+}
+
+// Onboarding-status → pill. Vocabulaire uit api/onboarding-*.
+const OB_STATUS = {
+  aangemeld:    { label: 'Aangemeld',    cls: 'ds-pill-neutral' },
+  bezig:        { label: 'Bezig',        cls: 'ds-pill-ok'      },
+  afgerond:     { label: 'Afgerond',     cls: 'ds-pill-accent'  },
+  geannuleerd:  { label: 'Geannuleerd',  cls: 'ds-pill-danger'  },
+  gearchiveerd: { label: 'Gearchiveerd', cls: 'ds-pill-neutral' },
+};
+function obStatusPill(st) {
+  const m = OB_STATUS[String(st || '').toLowerCase()] || { label: st || '—', cls: 'ds-pill-neutral' };
+  return `<span class="ds-pill ${m.cls}">${K().esc(m.label)}</span>`;
+}
+function renderOnboardingSummary(ob) {
+  if (!ob) return `<div class="kv-prof-empty">Geen onboarding voor deze klant.</div>`;
+  const mentor  = ob.mentor_name || (ob.mentor_user_id ? 'Toegewezen' : 'Nog geen mentor');
+  const started = ob.start_date || ob.started_at;
+  const trajectBits = [
+    ob.traject_label,
+    ob.duur_maanden != null ? `${ob.duur_maanden} mnd` : null,
+    ob.calls != null ? `${ob.calls} calls` : null,
+  ].filter(Boolean).join(' · ');
+  const showStep = ob.current_step != null && String(ob.status).toLowerCase() === 'bezig';
+  return `
+    <div class="kv-prof-ob">
+      <div class="kv-prof-ob-top">
+        ${obStatusPill(ob.status)}
+        ${showStep ? `<span class="kv-prof-ob-step">Stap ${K().esc(String(ob.current_step))}</span>` : ''}
+      </div>
+      ${trajectBits ? `<div class="kv-prof-ob-traject">${K().esc(trajectBits)}</div>` : ''}
+      <div class="kv-prof-ob-meta">
+        <span>Mentor: <b>${K().esc(mentor)}</b></span>
+        ${started ? `<span>Gestart: <b>${K().esc(fmtDate(started))}</b></span>` : ''}
+      </div>
+    </div>`;
+}
+
+// Async vullers — draaien ná wire(); falen fail-soft naar een lege staat.
+async function fillAbonnementCard(rootEl, customerId) {
+  const host = rootEl.querySelector('[data-kv-abo-body]');
+  if (!host || !customerId) return;
+  try {
+    const j = await K().authedJson(`/api/sales-customer-subscriptions?customer_id=${encodeURIComponent(customerId)}`);
+    host.innerHTML = renderAboSummary(Array.isArray(j?.subscriptions) ? j.subscriptions : []);
+  } catch (_) {
+    host.innerHTML = `<div class="kv-prof-empty">Kon abonnement niet laden.</div>`;
+  }
+}
+async function fillOnboardingCard(rootEl, customerId) {
+  const host = rootEl.querySelector('[data-kv-onboarding-body]');
+  if (!host || !customerId) return;
+  try {
+    const j = await K().authedJson(`/api/onboarding-by-customer?customer_id=${encodeURIComponent(customerId)}`);
+    host.innerHTML = renderOnboardingSummary(j?.onboarding || null);
+  } catch (_) {
+    host.innerHTML = `<div class="kv-prof-empty">Kon onboarding niet laden.</div>`;
+  }
+}
+
 function renderPreviewCards() {
-  // Onboarding + Abonnement preview-cards: lightweight CTA naar bijbehorende
-  // tabs. Echte data-fetches komen in PR-B5 (Abonnementen) en de mentor-
-  // onboarding-verkenning (aparte follow-up).
+  // Onboarding + Abonnement preview-cards. De bodies worden async gevuld
+  // (fillOnboardingCard / fillAbonnementCard) ná de eerste render; hier alleen
+  // een laad-placeholder. De Abonnement-card blijft klikbaar (data-kv-goto-tab)
+  // naar de Abonnementen-tab.
   return `
     <div class="kv-prof-grid-2">
       <div class="kv-prof-card kv-prof-preview">
@@ -221,8 +359,8 @@ function renderPreviewCards() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="m19 8 2 2 4-4"/></svg>
           Onboarding
         </div>
-        <div class="kv-prof-preview-body">
-          <div class="kv-prof-empty">Onboarding-status volgt zodra de mentor-onboarding-koppeling live is (aparte PR).</div>
+        <div class="kv-prof-preview-body" data-kv-onboarding-body>
+          <div class="kv-prof-empty">Onboarding laden…</div>
         </div>
       </div>
       <div class="kv-prof-card kv-prof-preview" data-kv-goto-tab="abonnementen" title="Naar abonnementen">
@@ -230,8 +368,8 @@ function renderPreviewCards() {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
           Abonnement
         </div>
-        <div class="kv-prof-preview-body">
-          <div class="kv-prof-empty">Zie <span class="kv-prof-linkish">Abonnementen-tab</span> voor plan, MRR, status en line-items.</div>
+        <div class="kv-prof-preview-body" data-kv-abo-body>
+          <div class="kv-prof-empty">Abonnement laden…</div>
         </div>
       </div>
     </div>`;
@@ -407,4 +545,9 @@ export async function renderProfielTab(rootEl, { customer, dossier, profile } = 
       ${renderMainCards(customer, dossier || { customer })}
     </div>`;
   wire(rootEl, customer, dossier);
+
+  // Preview-cards async vullen (Abonnement + Onboarding). Fire-and-forget:
+  // falen valt fail-soft terug op een lege staat, blokkeert de tab niet.
+  fillAbonnementCard(rootEl, customer.id);
+  fillOnboardingCard(rootEl, customer.id);
 }
