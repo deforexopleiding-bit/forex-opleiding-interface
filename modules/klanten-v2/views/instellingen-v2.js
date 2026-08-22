@@ -613,6 +613,22 @@
      Draft/publish/rollback allemaal met custom openConfirm. Motor: Lisa-productie-
      flow ONAANGERAAKT (bridge via bestaande endpoints). */
   const _LC_PHASE_KEYS = ['intro','doel','situatie','band','call','qualified','disqualified'];
+  // Ronde-31 v=45 BLOCKER-fix: phase_* zijn OBJECTEN {system, transition, examples[]},
+  // niet strings (bewijs: modules/lisa.html r1580-1583 + r1983-1987). dos/donts zijn
+  // arrays van strings. Helpers hieronder normaliseren beide kanten.
+  function _lcPhaseObj(raw) {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      return { system: String(raw.system || ''), transition: String(raw.transition || ''), examples: Array.isArray(raw.examples) ? raw.examples.slice() : [] };
+    }
+    // Legacy: string → als system, transition + examples leeg.
+    return { system: raw != null ? String(raw) : '', transition: '', examples: [] };
+  }
+  function _lcArrLines(raw) {
+    if (Array.isArray(raw)) return raw.map(x => String(x || '')).filter(Boolean).join('\n');
+    if (raw == null) return '';
+    return String(raw);
+  }
+  function _lcLinesArr(s) { return String(s || '').split('\n').map(x => x.trim()).filter(Boolean); }
   const _lc = {
     loading: false, fetched: false, error: null,
     config: null, active_version: null,           // uit ?which=latest
@@ -638,6 +654,10 @@
       c.kb_use_general_kb= !!c.kb_use_general_kb;
       c.followup_enabled = !!c.followup_enabled;
       c.followup_ai_threshold_chars = Number.isFinite(c.followup_ai_threshold_chars) ? c.followup_ai_threshold_chars : 200;
+      // v=45 BLOCKER-fix: normaliseer objecten (fases) + arrays (dos/donts).
+      ['phase_intro','phase_doel','phase_situatie','phase_band','phase_call'].forEach(k => { c[k] = _lcPhaseObj(c[k]); });
+      c.dos   = Array.isArray(c.dos)   ? c.dos   : (c.dos   ? [String(c.dos)]   : []);
+      c.donts = Array.isArray(c.donts) ? c.donts : (c.donts ? [String(c.donts)] : []);
       _lc.config = c;
       _lc.active_version = j?.active_version || null;
       _lc.dirty = false;
@@ -659,13 +679,28 @@
     const q = (sel) => document.querySelector(sel);
     const qAll = (sel) => document.querySelectorAll(sel);
     const readStr = (attr) => { const el = q(`[data-lc-${attr}]`); return el ? String(el.value || '') : c[attr]; };
-    // Persona-velden (strings).
-    ['persona_name','persona_age','persona_background','persona_tone','persona_writing_style','emoji_usage','dos','donts','phase_intro','phase_doel','phase_situatie','phase_band','phase_call','kb_pricing','kb_usps']
+    // Persona-velden (strings) — dos/donts + phase_* worden apart afgehandeld hieronder.
+    ['persona_name','persona_age','persona_background','persona_tone','persona_writing_style','emoji_usage','kb_pricing','kb_usps']
       .forEach(k => { const el = q(`[data-lc-field="${k}"]`); if (el) c[k] = String(el.value || ''); });
+    // v=45 BLOCKER-fix: dos/donts als newline-array (1 regel = 1 item).
+    ['dos','donts'].forEach(k => { const el = q(`[data-lc-field="${k}"]`); if (el) c[k] = _lcLinesArr(el.value); });
+    // v=45 BLOCKER-fix: phase_* als object {system, transition, examples[]}.
+    ['intro','doel','situatie','band','call'].forEach(f => {
+      const key = 'phase_' + f;
+      const sys = q(`[data-lc-phase="${f}"][data-lc-phase-field="system"]`);
+      const trn = q(`[data-lc-phase="${f}"][data-lc-phase-field="transition"]`);
+      const exp = q(`[data-lc-phase="${f}"][data-lc-phase-field="examples"]`);
+      c[key] = {
+        system:     sys ? String(sys.value || '') : (c[key]?.system || ''),
+        transition: trn ? String(trn.value || '') : (c[key]?.transition || ''),
+        examples:   exp ? _lcLinesArr(exp.value)  : (Array.isArray(c[key]?.examples) ? c[key].examples : []),
+      };
+    });
     // Bool + number.
     const kbGen = q('[data-lc-kb-use-general]'); if (kbGen) c.kb_use_general_kb = !!kbGen.checked;
     const fuEn  = q('[data-lc-followup-enabled]'); if (fuEn) c.followup_enabled = !!fuEn.checked;
     const fuTh  = q('[data-lc-followup-threshold]'); if (fuTh) c.followup_ai_threshold_chars = Math.max(0, Math.min(2000, parseInt(fuTh.value, 10) || 0));
+    // v=45 KLEIN 1: delay_hours NIET stil klemmen — behoud raw parseInt; validatie in save.
     // Tag-filter + stop-keywords: comma-separated single-input tekstveld.
     const tagEl = q('[data-lc-tag-filter]'); if (tagEl) c.kb_tag_filter = String(tagEl.value || '').split(',').map(s => s.trim()).filter(Boolean);
     const stopEl= q('[data-lc-stop-keywords]');if (stopEl) c.stop_keywords = String(stopEl.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -682,9 +717,9 @@
       const antw   = q(`[data-lc-faq-idx="${i}"][data-lc-faq-field="antwoord"]`);if (antw)   c.kb_faq[i].antwoord = String(antw.value || '');
       const kws    = q(`[data-lc-faq-idx="${i}"][data-lc-faq-field="keywords"]`);if (kws)    c.kb_faq[i].keywords = String(kws.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
     });
-    // followup_sequence (per stap).
+    // followup_sequence (per stap). KLEIN 1: geen clamping — save-validatie weigert buiten 1-720.
     (c.followup_sequence || []).forEach((_, i) => {
-      const dh = q(`[data-lc-step-idx="${i}"][data-lc-step-field="delay_hours"]`);if (dh) c.followup_sequence[i].delay_hours = Math.max(1, Math.min(720, parseInt(dh.value, 10) || 1));
+      const dh = q(`[data-lc-step-idx="${i}"][data-lc-step-field="delay_hours"]`);if (dh) c.followup_sequence[i].delay_hours = parseInt(dh.value, 10);
       const tp = q(`[data-lc-step-idx="${i}"][data-lc-step-field="template"]`);   if (tp) c.followup_sequence[i].template = String(tp.value || '');
     });
     _lc.dirty = true;
@@ -714,7 +749,7 @@
       const s = c.followup_sequence[i];
       if (!s.template || !String(s.template).trim()) { showToast(`Follow-up stap ${i+1}: template ontbreekt`, 'warn'); return; }
       const d = parseInt(s.delay_hours, 10);
-      if (!Number.isFinite(d) || d < 1 || d > 720) { showToast(`Follow-up stap ${i+1}: delay 1..720u`, 'warn'); return; }
+      if (!Number.isFinite(d) || d < 1 || d > 720) { showToast(`Follow-up stap ${i+1}: delay moet tussen 1 en 720 uur zijn (nu: ${s.delay_hours})`, 'warn'); return; }
     }
     // Payload = alleen EDIT_FIELDS (server filtert via pick+EDIT_FIELDS).
     const editKeys = ['persona_name','persona_age','persona_background','persona_tone','persona_writing_style','emoji_usage','dos','donts','phase_intro','phase_doel','phase_situatie','phase_band','phase_call','kb_products','kb_faq','kb_pricing','kb_usps','kb_tag_filter','kb_use_general_kb','followup_sequence','stop_keywords','followup_ai_threshold_chars','followup_enabled'];
@@ -833,19 +868,35 @@
             ${_lcTextField('Toon', 'persona_tone', { textarea: true, rows: 3 })}
             ${_lcTextField('Schrijfstijl', 'persona_writing_style', { textarea: true, rows: 3 })}
             ${_lcTextField('Emoji-gebruik', 'emoji_usage', { textarea: true, rows: 3 })}
-            ${_lcTextField('Do\'s', 'dos', { textarea: true, rows: 3 })}
-            ${_lcTextField('Don\'ts', 'donts', { textarea: true, rows: 3 })}
+            <label style="font-size:11.5px;color:var(--text-2);display:block">Do's <span style="color:var(--text-3)">(1 regel per item)</span>
+              <textarea data-lc-field="dos" rows="4" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(_lcArrLines(c.dos))}</textarea>
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2);display:block">Don'ts <span style="color:var(--text-3)">(1 regel per item)</span>
+              <textarea data-lc-field="donts" rows="4" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(_lcArrLines(c.donts))}</textarea>
+            </label>
           </div>
         </div>
 
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
           <div style="font-size:13px;font-weight:600;margin-bottom:10px">Fases · gespreks-prompts per fase</div>
-          <div style="display:grid;grid-template-columns:1fr;gap:10px">
-            ${_lcTextField('Intro', 'phase_intro', { textarea: true, rows: 3 })}
-            ${_lcTextField('Doel', 'phase_doel', { textarea: true, rows: 3 })}
-            ${_lcTextField('Situatie', 'phase_situatie', { textarea: true, rows: 3 })}
-            ${_lcTextField('Band', 'phase_band', { textarea: true, rows: 3 })}
-            ${_lcTextField('Call (afspraak)', 'phase_call', { textarea: true, rows: 3 })}
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:10px">Elke fase heeft <b>System</b> (instructie voor de AI), <b>Transition</b> (wanneer overgaan naar volgende fase) en <b>Voorbeelden</b> (1 regel per voorbeeld-bericht). Shape = <code>{system, transition, examples[]}</code>, matcht modules/lisa.html.</div>
+          <div style="display:grid;grid-template-columns:1fr;gap:14px">
+            ${['intro','doel','situatie','band','call'].map(f => {
+              const p = c['phase_' + f] || { system:'', transition:'', examples:[] };
+              const label = ({ intro:'Intro', doel:'Doel', situatie:'Situatie', band:'Band', call:'Call (afspraak)' })[f];
+              return `<div style="padding:10px;background:var(--surface-2);border-radius:6px">
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px">${label}</div>
+                <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:8px">System (instructie AI)
+                  <textarea data-lc-phase="${f}" data-lc-phase-field="system" rows="4" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(p.system || '')}</textarea>
+                </label>
+                <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:8px">Transition (wanneer naar volgende fase)
+                  <textarea data-lc-phase="${f}" data-lc-phase-field="transition" rows="2" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(p.transition || '')}</textarea>
+                </label>
+                <label style="font-size:11px;color:var(--text-2);display:block">Voorbeelden <span style="color:var(--text-3)">(1 regel per voorbeeld)</span>
+                  <textarea data-lc-phase="${f}" data-lc-phase-field="examples" rows="3" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(_lcArrLines(p.examples))}</textarea>
+                </label>
+              </div>`;
+            }).join('')}
           </div>
         </div>
 
@@ -885,7 +936,7 @@
           </label>
           <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 4px">
             <div style="font-size:12px;font-weight:600">Sequence-stappen (${(c.followup_sequence||[]).length}/5)</div>
-            <button class="btn btn-ghost btn-sm" ${(c.followup_sequence||[]).length >= 5 ? 'disabled' : ''} onclick="window.__setLcAddStep()" style="font-size:11px">➕ Stap</button>
+            <button class="btn btn-ghost btn-sm" ${(c.followup_sequence||[]).length >= 5 ? 'disabled style="opacity:.5;cursor:not-allowed;font-size:11px" title="Max 5 stappen bereikt"' : 'style="font-size:11px"'} onclick="window.__setLcAddStep()">➕ Stap</button>
           </div>
           <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${steps || `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Geen stappen</div>`}</div>
         </div>

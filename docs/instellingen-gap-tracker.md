@@ -61,7 +61,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
-| `agents-lisa`    | done | — | ja | v=44 (persona/fases/KB/follow-up native; draft/publish/rollback + historie-panel; dynamische lijsten met freeze-safe uncontrolled inputs) |
+| `agents-lisa`    | done | — | ja | v=45 (v=44 native persona/fases/KB/follow-up + draft/publish/rollback; v=45 fase-shape fix {system,transition,examples[]} + dos/donts newline-array + delay strict-reject + disabled-styling) |
 | `agents-manager` | open | grote-brok | ja (`/api/super-admin-ai-manager`) | deep-link |
 | `agents-kennis`  | open | grote-brok | ja (`/api/kennisbank-*`) | deep-link |
 
