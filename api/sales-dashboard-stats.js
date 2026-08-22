@@ -152,17 +152,21 @@ export default async function handler(req, res) {
  */
 async function fetchBookedInPeriodCounts(ownerScope) {
   const now = new Date();
-  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
-  const startOfTomorrow = new Date(startOfToday); startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
-  // Maandag deze week (NL: dag 1..7; 0=zondag).
-  const dow = startOfToday.getDay();
-  const daysFromMon = dow === 0 ? 6 : dow - 1;
-  const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfToday.getDate() - daysFromMon);
-  const startOfNextWeek = new Date(startOfWeek); startOfNextWeek.setDate(startOfWeek.getDate() + 7);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
-  const startOfNextYear = new Date(now.getFullYear() + 1, 0, 1);
+  // NL-tijdzone-aware grenzen (Europe/Amsterdam → UTC-instants). Voorheen
+  // bepaalden setHours/getDay/getFullYear alles in server-lokale (UTC) tijd →
+  // afspraken rond middernacht NL vielen in de verkeerde dag/week/maand/jaar.
+  const rDag   = periodRange('dag', now);
+  const rWeek  = periodRange('week', now);
+  const rMaand = periodRange('maand', now);
+  const rJaar  = periodRange('jaar', now);
+  const startOfToday     = rDag.start;
+  const startOfTomorrow  = rDag.endExclusive;
+  const startOfWeek      = rWeek.start;
+  const startOfNextWeek  = rWeek.endExclusive;
+  const startOfMonth     = rMaand.start;
+  const startOfNextMonth = rMaand.endExclusive;
+  const startOfYear      = rJaar.start;
+  const startOfNextYear  = rJaar.endExclusive;
 
   async function count(startD, endD) {
     let q = supabaseAdmin.from('follow_up_appointments')
