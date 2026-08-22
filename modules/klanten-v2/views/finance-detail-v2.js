@@ -307,7 +307,7 @@
             <div class="fnd-row"><span class="lbl">Entiteit</span><span>${esc(inv.tl_department_name || inv.tl_department_id || '—')}</span></div>
             <div class="fnd-row"><span class="lbl">E-mail</span><span>${inv.customer_email ? `<a href="mailto:${encodeURIComponent(inv.customer_email)}">${esc(inv.customer_email)}</a>` : '—'}</span></div>
             <div class="fnd-row"><span class="lbl">Telefoon</span><span>${inv.customer_phone ? `<a href="tel:${encodeURIComponent(inv.customer_phone)}">${esc(inv.customer_phone)}</a>` : '—'}</span></div>
-            ${custHref ? `<div style="margin-top:10px"><a class="btn btn-ghost btn-sm" href="${custHref}" target="_blank" rel="noopener">Klant-detail →</a></div>` : ''}
+            ${inv.customer_id ? `<div style="margin-top:10px"><a class="btn btn-ghost btn-sm" href="${custHref}" onclick="event.preventDefault(); window.KV && window.KV.openCustomer && window.KV.openCustomer('${esc(inv.customer_id)}','profiel');">Klant-detail →</a></div>` : ''}
           </div>
         </div>
         <div class="fnd-card">

@@ -240,6 +240,24 @@ window.KV.navigate = function navigate(params = {}) {
   if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
 };
 
+// In-shell navigatie naar een klant-dossier vanuit ELKE module — bv. vanuit de
+// factuur- of offerte-detail (die draaien onder ?v2preview=finance/sales met
+// invoice_id/deal_id). KV.navigate zet enkel id/tab en schakelt NIET van module;
+// vandaar deze helper die de detail-context-params wist én naar de klanten-module
+// schakelt (die id/tab leest). Voorkomt een nieuw tabblad naar de v1-pagina.
+window.KV.openCustomer = function openCustomer(customerId, tab) {
+  if (!customerId) return;
+  const u = new URL(window.location.href);
+  ['v2preview', 'v2tab', 'deal_id', 'invoice_id', 'subscription_id'].forEach((k) => u.searchParams.delete(k));
+  u.searchParams.set('id', customerId);
+  u.searchParams.set('tab', tab || 'profiel');
+  window.history.pushState({}, '', u);
+  if (window.DFO && typeof window.DFO.goMod === 'function') {
+    try { window.DFO.goMod('klanten'); return; } catch (_) { /* val terug op render */ }
+  }
+  if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+};
+
 // ── Topbar-search + ⌘K (aansluitend op shell topbar) ─────────────────────────
 
 function wireTopbarSearch() {
