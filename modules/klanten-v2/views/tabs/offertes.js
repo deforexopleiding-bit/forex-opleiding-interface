@@ -179,9 +179,9 @@ function renderRow(q) {
         ${dateLabel ? `<span>${K().esc(dateLabel)}</span><div style="opacity:.7;font-size:11px;margin-top:1px">${K().esc(dateHint)}</div>` : '—'}
       </td>
       <td class="r kv-off-actions">
-        <a class="ds-icon-btn" href="/modules/offerte-detail-v2.html?id=${K().esc(encodeURIComponent(q.deal_id))}" target="_blank" rel="noopener" title="Offerte-detail" onclick="event.stopPropagation()">
+        <button type="button" class="ds-icon-btn" data-kv-off-eye="${K().esc(q.deal_id)}" title="Offerte-detail">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-        </a>
+        </button>
         ${tlLink}
       </td>
     </tr>`;
@@ -267,18 +267,30 @@ function render(rootEl) {
   wire(rootEl);
 }
 
+// Offerte-detail IN-SHELL openen (geen nieuw tabblad, geen v1-pagina) via de
+// shell-brede __odvOpen. Fallback (zou binnen de shell niet moeten gebeuren):
+// zelfde tab naar de v2-standalone.
+function openOfferteInShell(dealId) {
+  if (!dealId) return;
+  if (typeof window.__odvOpen === 'function') { window.__odvOpen(dealId); return; }
+  window.location.href = `/modules/offerte-detail-v2.html?id=${encodeURIComponent(dealId)}`;
+}
+
 function wire(rootEl) {
   rootEl.querySelector('[data-kv-off-retry]')?.addEventListener('click', () => actLoad(rootEl));
 
-  // Rij-klik → offerte-detail in nieuw tabblad (dossier-context blijft
-  // hier bewaard). Klik op interne icon-btns/tl-links stopt propagatie
-  // (event.stopPropagation() in inline onclick).
-  rootEl.querySelectorAll('[data-kv-off-open]').forEach((row) => {
-    row.addEventListener('click', () => {
-      const dealId = row.getAttribute('data-kv-off-open');
-      if (!dealId) return;
-      window.open(`/modules/offerte-detail-v2.html?id=${encodeURIComponent(dealId)}`, '_blank', 'noopener');
+  // Oog-icoon → offerte-detail in-shell (stopt propagatie zodat de rij-klik
+  // niet dubbel vuurt).
+  rootEl.querySelectorAll('[data-kv-off-eye]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openOfferteInShell(btn.getAttribute('data-kv-off-eye'));
     });
+  });
+
+  // Rij-klik → offerte-detail in-shell (dossier-context blijft in dezelfde shell).
+  rootEl.querySelectorAll('[data-kv-off-open]').forEach((row) => {
+    row.addEventListener('click', () => openOfferteInShell(row.getAttribute('data-kv-off-open')));
   });
 }
 

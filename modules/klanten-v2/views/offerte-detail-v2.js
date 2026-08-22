@@ -559,7 +559,7 @@
             <div class="odv-row"><span class="lbl">Entiteit</span><span>${esc(entity || '—')}</span></div>
             <div class="odv-row"><span class="lbl">E-mail</span><span>${c.email ? `<a href="mailto:${encodeURIComponent(c.email)}">${esc(c.email)}</a>` : '—'}</span></div>
             <div class="odv-row"><span class="lbl">Telefoon</span><span>${c.phone ? `<a href="tel:${encodeURIComponent(c.phone)}">${esc(c.phone)}</a>` : '—'}</span></div>
-            ${c.id ? `<div style="margin-top:10px"><a class="btn btn-ghost" href="/modules/klanten.html?id=${encodeURIComponent(c.id)}" target="_blank" rel="noopener">Klant-detail →</a></div>` : ''}
+            ${c.id ? `<div style="margin-top:10px"><a class="btn btn-ghost" href="/modules/klanten.html?id=${encodeURIComponent(c.id)}" onclick="event.preventDefault(); window.KV && window.KV.openCustomer && window.KV.openCustomer('${esc(c.id)}','profiel');">Klant-detail →</a></div>` : ''}
           </div>
         </div>
         <div class="odv-card">
