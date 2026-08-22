@@ -247,6 +247,13 @@
   ];
 
   window.__setNotice = (l) => { console.info('[instellingen-v2] ' + l); try { alert(l + ' — komt in de data-ronde.'); } catch (_) {} };
+  // Ronde-31 v=53 FIX B: gedeelde helper voor "Zet eerst UIT"-disabled-knop
+  // (ev-auto + mk-sequenties gebruikten hem eerst inline, nu 1 plek voor derde-
+  // sectie-consistency). Toast-msg + tooltip. Retourneert HTML-string voor de knop.
+  window.__setBlockedToast = (msg) => { showToast(msg, 'warn'); };
+  function _disabledUitKnop(label, tooltipMsg, style) {
+    return `<button class="btn btn-ghost btn-sm" onclick="window.__setBlockedToast('${esc(tooltipMsg)}')" title="${esc(tooltipMsg)}" style="${style || ''};opacity:.5;cursor:not-allowed">${esc(label)}</button>`;
+  }
   window.__setPick = (id) => {
     if (!S) return;
     S.setPage = id;
@@ -1196,9 +1203,9 @@
           <label style="font-size:11.5px;color:var(--text-2)">Standaardprijs (€, leeg = variabel)
             <input type="number" min="0.01" step="0.01" data-sp-field="default_price" value="${esc(e.default_price != null ? String(e.default_price) : '')}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>
-          <label style="font-size:11.5px;color:var(--text-2)">BTW% <span style="color:var(--rose)">*</span>
-            <select onchange="window.__setSpVat(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
-              ${_VAT.map(v => `<option value="${v}"${Number(e.vat_percentage) === v ? ' selected' : ''}>${v}%</option>`).join('')}
+          <label style="font-size:11.5px;color:var(--text-2)">BTW-percentage <span style="color:var(--rose)">*</span> <span style="color:var(--text-3)">— bewerkbaar; server-side valid = 0/9/21</span>
+            <select data-sp-vat onchange="window.__setSpVat(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+              ${_VAT.map(v => `<option value="${v}"${Number(e.vat_percentage) === v ? ' selected' : ''}>${v}% ${v===0?'(vrijgesteld)':v===9?'(verlaagd)':'(standaard)'}</option>`).join('')}
             </select>
           </label>
           <label style="font-size:11.5px;color:var(--text-2)">Standaardduur (mnd, 1-120, leeg=geen default)
@@ -1460,7 +1467,7 @@
           <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsEdit('${esc(t.id)}')" style="font-size:11px">Edit-meta</button>
           <a href="/modules/leadsonderhoud.html?tab=trajecten&traject=${encodeURIComponent(t.slug || t.id)}#lo-traj-${esc(t.slug || t.id)}" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none" title="Opent v1-shell op Trajecten-tab, scrollt naar deze traject-kaart">Stappen ↗</a>
           ${t.actief
-            ? `<button class="btn btn-ghost btn-sm" onclick="window.__setMsDeleteBlocked()" style="font-size:11px;color:var(--rose);opacity:.5;cursor:not-allowed" title="Zet het traject eerst UIT vóór verwijderen">Verwijder</button>`
+            ? _disabledUitKnop('Verwijder', 'Zet het traject eerst UIT vóór verwijderen', 'font-size:11px;color:var(--rose)')
             : `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsDelete('${esc(t.id)}')" style="font-size:11px;color:var(--rose)">Verwijder</button>`}
         </td>
       </tr>`;
@@ -1529,8 +1536,13 @@
   window.__setKbNew  = () => { _kb.ed = { id: null, onderwerp: '', categorie: '', content: '', agents: [] }; if (render) render(); };
   window.__setKbEdit = (id) => { const it = _kb.items.find(x => x.id === id); if (!it) return; _kb.ed = { ...it, agents: Array.isArray(it.agents) ? it.agents.slice() : [] }; if (render) render(); };
   window.__setKbCancel = () => { _kb.ed = null; if (render) render(); };
+  // Ronde-31 v=53 FIX A: sync-first VOOR checkbox-toggle triggert een render.
+  // Voorheen ging het typen in onderwerp/content verloren omdat de re-render de
+  // input-nodes vervangt en state nog niet gesynct was. Zelfde patroon als
+  // _lcSyncFromDom (Lisa v=44) + _tvSyncFromDom (trajecten v=46).
   window.__setKbAgent = (a, on) => {
     if (!_kb.ed) return;
+    _kbSyncFromDom();
     _kb.ed.agents = _kb.ed.agents.filter(x => x !== a);
     if (on) _kb.ed.agents.push(a);
     if (render) render();
@@ -1857,16 +1869,18 @@
         </td>
         <td style="padding:6px 12px;text-align:right;white-space:nowrap">
           <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setEaEditMeta('${esc(a.id)}')" style="font-size:11px">Edit-meta</button>
-          <a href="/modules/klanten-v2/?v2preview=automatiseringen" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">Stappen ↗</a>
-          <button class="btn btn-ghost btn-sm" ${busy || a.enabled?'disabled':''} onclick="window.__setEaDelete('${esc(a.id)}')" style="font-size:11px;color:var(--rose)" title="${a.enabled?'Zet eerst UIT':''}">Verwijder</button>
+          <a href="/modules/events-automations.html?edit=${encodeURIComponent(a.id)}" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none" title="Opent v1-shell met deze flow direct in de editor">Stappen ↗</a>
+          ${a.enabled
+            ? _disabledUitKnop('Verwijder', 'Zet de automation eerst UIT vóór verwijderen', 'font-size:11px;color:var(--rose)')
+            : `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setEaDelete('${esc(a.id)}')" style="font-size:11px;color:var(--rose)">Verwijder</button>`}
         </td>
       </tr>`;
     }).join('');
     return `<div style="max-width:1200px">
       ${_eaRenderEditor()}
       <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>LIVE-lijst met event-automations.</b> Hier: metadata bewerken (naam/beschrijving/enroll-mode), aan/uit-toggle, verwijderen. <b>Stappen-editor + test-run</b> leven in de Automatiseringen-module (complexer sub-editor per stap-type; test-run stuurt échte berichten naar een test-attendee met is_test=true — GEEN dry-run).
-        <a href="/modules/klanten-v2/?v2preview=automatiseringen" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Automatiseringen →</a>
+        <b>LIVE-lijst met event-automations.</b> Hier: metadata bewerken (naam/beschrijving/enroll-mode), aan/uit-toggle, verwijderen. <b>Stappen-editor + test-run</b> leven in de v1-shell <code>/modules/events-automations.html</code> (complexer sub-editor per stap-type met 7 types; test-run stuurt échte berichten naar een test-attendee met is_test=true — GEEN dry-run). Klik "Stappen ↗" per rij om direct de editor voor die flow te openen.
+        <a href="/modules/events-automations.html" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open editor (v1) →</a>
       </div>
       ${_ea.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ea.error)}</div>` : ''}
       <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_ea.items.length} automation(s) — ${_ea.items.filter(a=>a.enabled).length} actief · ${_ea.items.filter(a=>!a.enabled).length} uit</div>

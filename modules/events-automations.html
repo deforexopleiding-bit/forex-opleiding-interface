@@ -493,6 +493,17 @@ function can(key) { return window.RBAC?.canSync?.(key) || false; }
     }
     await loadAutomations();
     renderList();
+    // Ronde-31 v=53 FIX B: deep-link support. ?edit=<automation-id> opent
+    // direct de editor voor die flow (gebruikt door ev-auto in v2-instellingen).
+    // Fail-soft: onbekende id = doet niks (lijst blijft zichtbaar).
+    try {
+      var qp = new URLSearchParams(window.location.search);
+      var wantEdit = qp.get('edit');
+      if (wantEdit) {
+        var a = state.automations.find(function (x) { return x.id === wantEdit; });
+        if (a && typeof startEditor === 'function') startEditor(a);
+      }
+    } catch (_) { /* fail-soft */ }
   } catch (e) {
     console.error('[events-automations] init', e);
     toastErr('Pagina laden mislukt: ' + (e?.message || e));

@@ -35,7 +35,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
 | `sales-trajecten` | done | — | ja | v=46 (variant CRUD native via /api/traject-variants + product-koppelingen — GEEN TL-sync: endpoint doet zuiver DB; prijzen zitten op products, aparte Sales-editor) |
-| `sales-producten` | done | — | ja | v=51 (CRUD op products native: naam/categorie/prijs/BTW/duur/tl_product_id/price_includes_vat/is_active + soft-delete via archived_at; geen TL-sync — tl_product_id is inbound-reference only) |
+| `sales-producten` | done | — | ja | v=53 (CRUD op products native; BTW-select 0/9/21 bewerkbaar bevestigd in v=53 met verduidelijkt label; geen TL-sync) |
 | `sales-offerte`   | done | — | ja | ≤v=30 (TL-mailtemplate + sales-uitzonderingen native) |
 | `sales-bonus`     | open | grote-brok | ja (`team_members`) | deep-link |
 
@@ -64,13 +64,13 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `agents-lisa`    | done | — | ja | v=45 (v=44 native persona/fases/KB/follow-up + draft/publish/rollback; v=45 fase-shape fix {system,transition,examples[]} + dos/donts newline-array + delay strict-reject + disabled-styling) |
 | `agents-manager` | open | grote-brok | ja (`/api/super-admin-ai-manager`) | deep-link |
-| `agents-kennis`  | done | — | ja | v=48 (KB-artikelen CRUD native + agents[]-checkboxes + promote-to-agent modal; MIGRATION_MISSING fail-soft banner) |
+| `agents-kennis`  | done | — | ja | v=53 (v=48 CRUD + v=53 FIX A: _kbSyncFromDom-first vóór checkbox-toggle zodat getypte onderwerp/content overleeft) |
 
 ## Events & Leren
 
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
-| `ev-auto`      | done | — | ja | v=47 (lijst + metadata-edit + enable/disable-toggle + delete native; stappen-editor + test-run blijven Automatiseringen-module — test IS geen dry-run) |
+| `ev-auto`      | done | — | ja | v=53 (v=47 lijst/edit/toggle/delete + v=53 FIX B: disabled-verwijder-styling via _disabledUitKnop helper + Stappen↗ deep-link naar events-automations.html?edit=id) |
 | `ev-templates` | deferred | bewust-deferred | via com-wa | volgt wanneer com-wa uitgebreid is |
 | `ev-locaties`  | open | grote-brok | nee (nieuwe editor + tabel nodig) | deep-link |
 | `lms-instel`   | deferred | bewust-deferred | extern (Bubble) | geen native mogelijk |
