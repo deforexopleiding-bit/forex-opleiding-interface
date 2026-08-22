@@ -1082,6 +1082,192 @@
     </div>`;
   }
 
+  /* Ronde-31 grote-brok · sales-bonus — CRUD op sales_bonus_configs.
+     Endpoint: /api/sales-bonus-configs (GET / POST / PATCH ?id / DELETE ?id soft).
+     Permission: super_admin (via profiles.role check in endpoint).
+     DISCOVERY: sales_bonus_configs-tabel bestaat (docs/sql-migrations/2026-05-30-
+     finance-fase-1-fundament.sql r82-91): user_id + percentage (default 3.00) +
+     threshold_amount (default 1000.00) + active_from + active_until (soft-delete).
+     Gebruikt door api/sales-subscription-create.js r476-488: bij aanmaak van een
+     down-payment-sub leest engine de MEEST RECENTE config per sales_user_id + past
+     percentage toe op down-amount als >=threshold. Bonus wordt gesnapshot in
+     bonuses-tabel (status='pending'). Historische bonusberekeningen behouden dus
+     hun snapshot; wijziging aan config raakt alleen NIEUWE deals.
+     Geen teamleader-call in het bonus-pad — DB-only. Motor onaangeraakt. */
+  const _sb = { loading: false, fetched: false, error: null, configs: [], candidates: [], ed: null, busy: false };
+  async function fetchSalesBonus() {
+    if (_sb.loading || _sb.fetched) return;
+    _sb.loading = true; _sb.error = null; if (render) render();
+    try {
+      const j = await tryFetch('sb-list', '/api/sales-bonus-configs');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      _sb.configs = j?.configs || [];
+      _sb.candidates = j?.candidates || [];
+    } catch (e) { _sb.error = e?.message || 'onbekend'; }
+    _sb.loading = false; _sb.fetched = true; if (render) render();
+  }
+  window.__setSbReload = () => { _sb.fetched = false; fetchSalesBonus(); };
+  window.__setSbNew  = () => { _sb.ed = { id: null, user_id: _sb.candidates[0]?.id || '', percentage: 3.00, threshold_amount: 1000.00, active_from: new Date().toISOString().slice(0,10) }; if (render) render(); };
+  window.__setSbEdit = (id) => { const c = _sb.configs.find(x => x.id === id); if (!c) return; _sb.ed = { id: c.id, user_id: c.user_id, percentage: c.percentage, threshold_amount: c.threshold_amount, active_from: c.active_from, active_until: c.active_until || '' }; if (render) render(); };
+  window.__setSbCancel = () => { _sb.ed = null; if (render) render(); };
+  window.__setSbUser = (v) => { if (_sb.ed) { _sb.ed.user_id = String(v || ''); if (render) render(); } };
+  function _sbSyncFromDom() {
+    const e = _sb.ed; if (!e) return;
+    const q = (sel) => document.querySelector(sel);
+    const pct = q('[data-sb-field="percentage"]'); if (pct) e.percentage = Number(pct.value);
+    const thr = q('[data-sb-field="threshold_amount"]'); if (thr) e.threshold_amount = Number(thr.value);
+    const af  = q('[data-sb-field="active_from"]'); if (af) e.active_from = String(af.value || '');
+    const au  = q('[data-sb-field="active_until"]'); if (au) e.active_until = String(au.value || '');
+  }
+  window.__setSbSave = () => {
+    _sbSyncFromDom();
+    const e = _sb.ed; if (!e) return;
+    const isEdit = !!e.id;
+    if (!isEdit && !e.user_id) { showToast('Kies een verkoper', 'warn'); return; }
+    const pct = Number(e.percentage);
+    const thr = Number(e.threshold_amount);
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) { showToast('Percentage moet 0..100 zijn', 'warn'); return; }
+    if (!Number.isFinite(thr) || thr < 0) { showToast('Threshold moet >= 0 zijn', 'warn'); return; }
+    // Compute old vs new voor confirm-tekst.
+    const orig = isEdit ? _sb.configs.find(x => x.id === e.id) : null;
+    const changes = [];
+    if (isEdit) {
+      if (Number(orig.percentage) !== pct) changes.push(`percentage ${Number(orig.percentage).toFixed(2)}% → ${pct.toFixed(2)}%`);
+      if (Number(orig.threshold_amount) !== thr) changes.push(`threshold €${Number(orig.threshold_amount).toFixed(2)} → €${thr.toFixed(2)}`);
+      if ((orig.active_until || '') !== (e.active_until || '')) changes.push(`active_until ${orig.active_until || '(geen)'} → ${e.active_until || '(geen)'}`);
+    }
+    const salesName = (isEdit ? (orig?.profile?.full_name || orig?.profile?.email) : _sb.candidates.find(c => c.id === e.user_id)?.full_name) || 'onbekend';
+    const msg = isEdit
+      ? `Bonus-config wijzigen voor ${salesName}?\n\n${changes.join(' · ') || '(geen wijzigingen)'}\n\n💰 Nieuwe berekeningen gebruiken deze regels. Bestaande bonuses in de bonuses-tabel behouden hun snapshot en worden NIET herrekend.`
+      : `Nieuwe bonus-config aanmaken voor ${salesName}?\n\nPercentage: ${pct.toFixed(2)}% · threshold: €${thr.toFixed(2)} · active_from: ${e.active_from}\n\n💰 Deze verkoper krijgt vanaf ${e.active_from} bonus over nieuwe down-payment-subs ≥ threshold.`;
+    openConfirm(msg, async () => {
+      _sb.busy = true; if (render) render();
+      try {
+        const url = isEdit ? '/api/sales-bonus-configs?id=' + encodeURIComponent(e.id) : '/api/sales-bonus-configs';
+        const method = isEdit ? 'PATCH' : 'POST';
+        const payload = isEdit
+          ? { percentage: pct, threshold_amount: thr, active_until: e.active_until || null }
+          : { user_id: e.user_id, percentage: pct, threshold_amount: thr, active_from: e.active_from };
+        const j = await tryFetch('sb-save', url, {
+          method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(isEdit ? 'Bonus-config bijgewerkt' : 'Bonus-config aangemaakt', 'ok');
+        _sb.ed = null; _sb.fetched = false; fetchSalesBonus();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _sb.busy = false; if (render) render(); }
+    }, isEdit ? 'warn' : undefined);
+  };
+  window.__setSbDeactivate = (id) => {
+    const c = _sb.configs.find(x => x.id === id); if (!c) return;
+    const name = c?.profile?.full_name || c?.profile?.email || 'onbekend';
+    openConfirm(`Bonus-config voor ${name} deactiveren (soft-delete via active_until=vandaag)?\n\nHistorische bonusberekeningen behouden hun snapshot in bonuses-tabel. Nieuwe down-payment-subs berekenen geen bonus meer voor deze verkoper tot een nieuwe config wordt aangemaakt.`, async () => {
+      _sb.busy = true; if (render) render();
+      try {
+        const j = await tryFetch('sb-del', '/api/sales-bonus-configs?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Bonus-config gedeactiveerd', 'ok');
+        _sb.fetched = false; fetchSalesBonus();
+      } catch (err) { showToast('Deactiveren mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _sb.busy = false; if (render) render(); }
+    }, 'warn');
+  };
+  function _sbEditor() {
+    const e = _sb.ed; if (!e) return '';
+    const isEdit = !!e.id;
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setSbCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:560px;width:100%;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">${isEdit ? 'Bonus-config bewerken' : 'Nieuwe bonus-config'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setSbCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+          <div style="padding:10px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:11.5px;line-height:1.55">
+            <b>💰 Geld-impact.</b> Wijzigingen gelden voor NIEUWE down-payment-subs. Bestaande bonuses in <code>bonuses</code>-tabel behouden hun snapshot (percentage was gesnapshot op moment van deal-aanmaak).
+          </div>
+          <label style="font-size:11.5px;color:var(--text-2)">Verkoper ${isEdit ? '(vast bij edit)' : '<span style="color:var(--rose)">*</span>'}
+            ${isEdit
+              ? `<div style="margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface-2);color:var(--text)">${esc((_sb.configs.find(x=>x.id===e.id)?.profile?.full_name) || '—')} <span style="color:var(--text-3);font-size:11px">(${esc((_sb.configs.find(x=>x.id===e.id)?.profile?.email) || '')})</span></div>`
+              : `<select onchange="window.__setSbUser(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+                  ${_sb.candidates.length ? _sb.candidates.map(c => `<option value="${esc(c.id)}"${c.id===e.user_id?' selected':''}>${esc(c.full_name || '—')} · ${esc(c.role)} · ${esc(c.email || '')}</option>`).join('') : `<option value="">Geen kandidaten (alle verkopers hebben al een actieve config)</option>`}
+                </select>`}
+          </label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">
+            <label style="font-size:11.5px;color:var(--text-2)">Percentage (%) <span style="color:var(--rose)">*</span>
+              <input type="number" min="0" max="100" step="0.01" data-sb-field="percentage" value="${esc(String(e.percentage ?? 3))}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Threshold (€) <span style="color:var(--rose)">*</span> <span style="color:var(--text-3)">— min. down-amount voor bonus</span>
+              <input type="number" min="0" step="0.01" data-sb-field="threshold_amount" value="${esc(String(e.threshold_amount ?? 1000))}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Active from
+              <input type="date" data-sb-field="active_from" value="${esc(e.active_from || '')}" ${isEdit?'readonly':''} style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>
+            ${isEdit ? `<label style="font-size:11.5px;color:var(--text-2)">Active until (leeg = onbepaald)
+              <input type="date" data-sb-field="active_until" value="${esc(e.active_until || '')}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            </label>` : ''}
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setSbCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_sb.busy?'disabled':''} onclick="window.__setSbSave()">${_sb.busy?'Bezig…':'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bodySalesBonus() {
+    if (!_sb.fetched && !_sb.loading) queueMicrotask(() => fetchSalesBonus());
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = _sb.configs.map(c => {
+      const busy = _sb.busy && _sb.ed?.id === c.id;
+      const active = !c.active_until || c.active_until >= today;
+      const name = c?.profile?.full_name || '—';
+      const email = c?.profile?.email || '';
+      const role = c?.profile?.role || '—';
+      return `<tr style="border-top:1px solid var(--border);${active?'':'opacity:.55'}">
+        <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(name)}${email?`<div style="font-size:11px;color:var(--text-3);font-weight:normal;margin-top:2px">${esc(email)}</div>`:''}</td>
+        <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(role)}</td>
+        <td style="padding:8px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${Number(c.percentage).toFixed(2)}%</td>
+        <td style="padding:8px 12px;font-size:12px;text-align:right;font-family:'IBM Plex Mono',monospace">€${Number(c.threshold_amount).toFixed(2)}</td>
+        <td style="padding:8px 12px;font-size:11px;color:var(--text-3);white-space:nowrap">${esc(c.active_from || '')}</td>
+        <td style="padding:8px 12px;font-size:11px;color:var(--text-3);white-space:nowrap">${esc(c.active_until || '')}</td>
+        <td style="padding:8px 12px;font-size:11px">${active?'<span style="color:var(--emerald)">✓ actief</span>':'<span style="color:var(--text-3)">historie</span>'}</td>
+        <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setSbEdit('${esc(c.id)}')" style="font-size:11px">Edit</button>
+          ${active ? `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setSbDeactivate('${esc(c.id)}')" style="font-size:11px;color:var(--rose)">Deactiveer</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1200px">
+      ${_sbEditor()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>LIVE bonus-config-editor · super_admin only.</b> Bonus wordt berekend op <code>sales-subscription-create.js</code> bij aanmaak van een down-payment-sub: leest MEEST RECENTE actieve config per <code>sales_user_id</code>, past <b>percentage</b> toe op down-amount als deze ≥ <b>threshold</b>. Bonus-record wordt <b>gesnapshot</b> in <code>bonuses</code>-tabel — bestaande bonuses veranderen NIET bij config-wijziging. Geen TL-sync. Motor onaangeraakt.
+      </div>
+      ${_sb.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_sb.error)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:12.5px;color:var(--text-3)">${_sb.configs.length} config(s) · ${_sb.configs.filter(c=>!c.active_until||c.active_until>=today).length} actief · ${_sb.candidates.length} verkopers zonder actieve config</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setSbReload()" style="font-size:11px">↻ Vernieuwen</button>
+          <button class="btn btn-primary btn-sm" ${!_sb.candidates.length?'disabled':''} onclick="window.__setSbNew()" title="${!_sb.candidates.length?'Geen kandidaten':''}">➕ Nieuwe config</button>
+        </div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:900px">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Verkoper</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Rol</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Percentage</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Threshold</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Vanaf</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Tot</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="8" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_sb.loading?'Laden…':'Geen bonus-configs'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   /* Ronde-31 grote-brok · ev-locaties — READ-ONLY de-facto locaties uit events.
      DISCOVERY: events.location is een VRIJE-TEKST-veld (bewijs: api/events-update.js
      r74 patch.location = ...trim() || null, api/admin/historical-event-save.js r50,
@@ -4924,7 +5110,7 @@
     if (cur.id === 'agents-kennis')      return bodyKbArtikelen();
     if (cur.id === 'sales-trajecten')    return bodyTrajecten();
     if (cur.id === 'sales-producten')    return bodySalesProducten();
-    if (cur.id === 'sales-bonus')        return bodyDeepLink('Sales', 'Verkopers en bonus-config zit in de Sales-module + team_members-tabel. Bonus-berekening is server-side; UI-editor volgt in Wave 3.', 'sales');
+    if (cur.id === 'sales-bonus')        return bodySalesBonus();
     if (cur.id === 'ev-auto')            return bodyEvAuto();
     if (cur.id === 'ev-templates')       return bodyDeepLink('Events', 'Event-berichten (e-mail + WhatsApp) worden per template beheerd in de Events-module + com-wa hier voor WA-templates.', 'events');
     if (cur.id === 'ev-locaties')        return bodyEvLocaties();
@@ -4992,6 +5178,8 @@
       'mk-sequenties',
       // Ronde-31 grote-brok sales-producten native — CRUD op products (naam/categorie/prijs/BTW/duur/tl_product_id/actief); geen TL-sync.
       'sales-producten',
+      // Ronde-31 v=56: sales-bonus native — bonus-config CRUD (percentage + threshold per verkoper).
+      'sales-bonus',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -5003,13 +5191,14 @@
       // Ronde-31 v=55: ev-locaties READ-ONLY — events.location is vrije-tekst;
       // geen event_locations-tabel bestaat.
       'ev-locaties',
+      // Ronde-31 v=56: sales-bonus LIVE — sales_bonus_configs CRUD via nieuwe endpoint.
+      'sales-bonus',
     ]);
     // Ronde-28: fin-entiteiten upgraded READ-ONLY → LIVE (CRUD wired).
     if (READONLY.has('fin-entiteiten')) READONLY.delete('fin-entiteiten');
     // Backward-compat: WIRED bevat beide zodat andere logic werkt.
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
-      'sales-bonus',
       'ev-templates','lms-instel',
       'mk-meta',
       // Ronde-31 STAP 5: workflows-regels + templates blijven Finance (motor-consistentie + WIK-14 legal).
