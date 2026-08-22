@@ -604,6 +604,301 @@
     </div>`;
   }
 
+  /* Ronde-31 grote-brok · agents-lisa — volledige config-editor native.
+     Endpoints: /api/lisa-config (GET ?which=latest / GET ?action=history / POST
+     ?action=save_draft|publish|rollback). Auth: verifyAdmin + lisa.config.{view,edit,publish}.
+     FREEZE-LES: dynamische lijsten (kb_products / kb_faq / followup_sequence /
+     stop_keywords / kb_tag_filter) re-renderen ALLEEN bij add/remove. Typen in
+     tekst-inputs = geen render (uncontrolled met data-lc-*-attrs; sync bij save).
+     Draft/publish/rollback allemaal met custom openConfirm. Motor: Lisa-productie-
+     flow ONAANGERAAKT (bridge via bestaande endpoints). */
+  const _LC_PHASE_KEYS = ['intro','doel','situatie','band','call','qualified','disqualified'];
+  const _lc = {
+    loading: false, fetched: false, error: null,
+    config: null, active_version: null,           // uit ?which=latest
+    history: [], historyFetched: false, historyOpen: false,
+    busy: false, savingKind: null, dirty: false,
+  };
+  function _lcEmptyProduct() { return { naam: '', beschrijving: '', prijs: '', doelgroep: '', duur: '' }; }
+  function _lcEmptyFaq()     { return { vraag: '', antwoord: '', keywords: [] }; }
+  function _lcEmptyStep()    { return { delay_hours: 24, template: '', conditions: null, use_ai: false }; }
+  async function fetchLisaConfig() {
+    if (_lc.loading || _lc.fetched) return;
+    _lc.loading = true; _lc.error = null; if (render) render();
+    try {
+      const j = await tryFetch('lisa-config', '/api/lisa-config?which=latest');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      const c = j?.config || {};
+      // Zorg dat arrays altijd bestaan (server kan null returnen).
+      c.kb_products      = Array.isArray(c.kb_products)      ? c.kb_products      : [];
+      c.kb_faq           = Array.isArray(c.kb_faq)           ? c.kb_faq           : [];
+      c.kb_tag_filter    = Array.isArray(c.kb_tag_filter)    ? c.kb_tag_filter    : [];
+      c.stop_keywords    = Array.isArray(c.stop_keywords)    ? c.stop_keywords    : [];
+      c.followup_sequence= Array.isArray(c.followup_sequence)? c.followup_sequence: [];
+      c.kb_use_general_kb= !!c.kb_use_general_kb;
+      c.followup_enabled = !!c.followup_enabled;
+      c.followup_ai_threshold_chars = Number.isFinite(c.followup_ai_threshold_chars) ? c.followup_ai_threshold_chars : 200;
+      _lc.config = c;
+      _lc.active_version = j?.active_version || null;
+      _lc.dirty = false;
+    } catch (e) { _lc.error = e?.message || 'onbekend'; }
+    _lc.loading = false; _lc.fetched = true; if (render) render();
+  }
+  async function fetchLisaHistory() {
+    if (_lc.historyFetched) return;
+    try {
+      const j = await tryFetch('lisa-history', '/api/lisa-config?action=history');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      _lc.history = j?.versions || [];
+    } catch (e) { showToast('Historie laden mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    _lc.historyFetched = true; if (render) render();
+  }
+  // Sync uncontrolled inputs → _lc.config.
+  function _lcSyncFromDom() {
+    const c = _lc.config; if (!c) return;
+    const q = (sel) => document.querySelector(sel);
+    const qAll = (sel) => document.querySelectorAll(sel);
+    const readStr = (attr) => { const el = q(`[data-lc-${attr}]`); return el ? String(el.value || '') : c[attr]; };
+    // Persona-velden (strings).
+    ['persona_name','persona_age','persona_background','persona_tone','persona_writing_style','emoji_usage','dos','donts','phase_intro','phase_doel','phase_situatie','phase_band','phase_call','kb_pricing','kb_usps']
+      .forEach(k => { const el = q(`[data-lc-field="${k}"]`); if (el) c[k] = String(el.value || ''); });
+    // Bool + number.
+    const kbGen = q('[data-lc-kb-use-general]'); if (kbGen) c.kb_use_general_kb = !!kbGen.checked;
+    const fuEn  = q('[data-lc-followup-enabled]'); if (fuEn) c.followup_enabled = !!fuEn.checked;
+    const fuTh  = q('[data-lc-followup-threshold]'); if (fuTh) c.followup_ai_threshold_chars = Math.max(0, Math.min(2000, parseInt(fuTh.value, 10) || 0));
+    // Tag-filter + stop-keywords: comma-separated single-input tekstveld.
+    const tagEl = q('[data-lc-tag-filter]'); if (tagEl) c.kb_tag_filter = String(tagEl.value || '').split(',').map(s => s.trim()).filter(Boolean);
+    const stopEl= q('[data-lc-stop-keywords]');if (stopEl) c.stop_keywords = String(stopEl.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    // kb_products (per rij).
+    (c.kb_products || []).forEach((_, i) => {
+      ['naam','beschrijving','prijs','doelgroep','duur'].forEach(k => {
+        const el = q(`[data-lc-prod-idx="${i}"][data-lc-prod-field="${k}"]`);
+        if (el) c.kb_products[i][k] = String(el.value || '');
+      });
+    });
+    // kb_faq (per rij, keywords comma-list).
+    (c.kb_faq || []).forEach((_, i) => {
+      const vraag  = q(`[data-lc-faq-idx="${i}"][data-lc-faq-field="vraag"]`);   if (vraag)  c.kb_faq[i].vraag = String(vraag.value || '');
+      const antw   = q(`[data-lc-faq-idx="${i}"][data-lc-faq-field="antwoord"]`);if (antw)   c.kb_faq[i].antwoord = String(antw.value || '');
+      const kws    = q(`[data-lc-faq-idx="${i}"][data-lc-faq-field="keywords"]`);if (kws)    c.kb_faq[i].keywords = String(kws.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    });
+    // followup_sequence (per stap).
+    (c.followup_sequence || []).forEach((_, i) => {
+      const dh = q(`[data-lc-step-idx="${i}"][data-lc-step-field="delay_hours"]`);if (dh) c.followup_sequence[i].delay_hours = Math.max(1, Math.min(720, parseInt(dh.value, 10) || 1));
+      const tp = q(`[data-lc-step-idx="${i}"][data-lc-step-field="template"]`);   if (tp) c.followup_sequence[i].template = String(tp.value || '');
+    });
+    _lc.dirty = true;
+  }
+  // Structuur-actions — deze wijzigen counts/lengths → render.
+  window.__setLcAddProduct = () => { _lcSyncFromDom(); _lc.config.kb_products.push(_lcEmptyProduct()); if (render) render(); };
+  window.__setLcRmProduct  = (i) => { _lcSyncFromDom(); _lc.config.kb_products.splice(i, 1); if (render) render(); };
+  window.__setLcAddFaq     = () => { _lcSyncFromDom(); _lc.config.kb_faq.push(_lcEmptyFaq()); if (render) render(); };
+  window.__setLcRmFaq      = (i) => { _lcSyncFromDom(); _lc.config.kb_faq.splice(i, 1); if (render) render(); };
+  window.__setLcAddStep    = () => {
+    _lcSyncFromDom();
+    if ((_lc.config.followup_sequence || []).length >= 5) { showToast('Max 5 stappen', 'warn'); return; }
+    _lc.config.followup_sequence.push(_lcEmptyStep()); if (render) render();
+  };
+  window.__setLcRmStep     = (i) => { _lcSyncFromDom(); _lc.config.followup_sequence.splice(i, 1); if (render) render(); };
+  window.__setLcToggleHistory = () => {
+    _lc.historyOpen = !_lc.historyOpen;
+    if (_lc.historyOpen && !_lc.historyFetched) fetchLisaHistory();
+    if (render) render();
+  };
+  window.__setLcSave = (kind) => {
+    _lcSyncFromDom();
+    const c = _lc.config; if (!c) return;
+    // Validatie client-side (mirror van server).
+    if (!String(c.persona_name || '').trim()) { showToast('Persona-naam is verplicht', 'warn'); return; }
+    for (let i = 0; i < (c.followup_sequence||[]).length; i++) {
+      const s = c.followup_sequence[i];
+      if (!s.template || !String(s.template).trim()) { showToast(`Follow-up stap ${i+1}: template ontbreekt`, 'warn'); return; }
+      const d = parseInt(s.delay_hours, 10);
+      if (!Number.isFinite(d) || d < 1 || d > 720) { showToast(`Follow-up stap ${i+1}: delay 1..720u`, 'warn'); return; }
+    }
+    // Payload = alleen EDIT_FIELDS (server filtert via pick+EDIT_FIELDS).
+    const editKeys = ['persona_name','persona_age','persona_background','persona_tone','persona_writing_style','emoji_usage','dos','donts','phase_intro','phase_doel','phase_situatie','phase_band','phase_call','kb_products','kb_faq','kb_pricing','kb_usps','kb_tag_filter','kb_use_general_kb','followup_sequence','stop_keywords','followup_ai_threshold_chars','followup_enabled'];
+    const payload = {}; editKeys.forEach(k => { if (c[k] !== undefined) payload[k] = c[k]; });
+    const isPublish = kind === 'publish';
+    const msg = isPublish
+      ? `Lisa-config PUBLICEREN als nieuwe versie? Geldt DIRECT voor alle nieuwe lead-gesprekken. De vorige actieve versie wordt gedeactiveerd (rollback blijft mogelijk).`
+      : `Concept-versie opslaan? Wordt niet live gezet; huidige actieve versie blijft ongewijzigd tot je publiceert.`;
+    openConfirm(msg, async () => {
+      _lc.busy = true; _lc.savingKind = kind; if (render) render();
+      try {
+        const j = await tryFetch(`lisa-${kind}`, `/api/lisa-config?action=${kind}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(j?.message || (isPublish ? 'Gepubliceerd' : 'Concept opgeslagen'), 'ok');
+        _lc.fetched = false; _lc.historyFetched = false; _lc.dirty = false;
+        fetchLisaConfig();
+      } catch (e) { showToast('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+      finally { _lc.busy = false; _lc.savingKind = null; if (render) render(); }
+    }, isPublish ? 'warn' : undefined);
+  };
+  window.__setLcRollback = (versionId, ver) => {
+    openConfirm(`Terugrollen naar Lisa-versie v${ver}? Er wordt een NIEUWE actieve versie aangemaakt met de inhoud van v${ver}. Vorige actieve versie wordt gedeactiveerd (blijft in historie).`, async () => {
+      try {
+        const j = await tryFetch('lisa-rollback', '/api/lisa-config?action=rollback', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version_id: versionId }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(j?.message || `Teruggerold naar v${ver}`, 'ok');
+        _lc.fetched = false; _lc.historyFetched = false;
+        fetchLisaConfig();
+      } catch (e) { showToast('Rollback mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    }, 'warn');
+  };
+  function _lcTextField(label, key, opts) {
+    const c = _lc.config || {};
+    const val = c[key] != null ? String(c[key]) : '';
+    const isTa = opts?.textarea;
+    const rows = opts?.rows || 2;
+    const help = opts?.help ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${opts.help}</div>` : '';
+    const input = isTa
+      ? `<textarea data-lc-field="${key}" rows="${rows}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(val)}</textarea>`
+      : `<input type="text" data-lc-field="${key}" value="${esc(val)}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />`;
+    return `<label style="font-size:11.5px;color:var(--text-2);display:block">${esc(label)}${input}${help}</label>`;
+  }
+  function _lcHistoryPanel() {
+    if (!_lc.historyOpen) return '';
+    const rows = (_lc.history || []).map(v => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:6px 12px;font-size:12px;font-family:'IBM Plex Mono',monospace">v${v.version}</td>
+      <td style="padding:6px 12px;font-size:11.5px">${v.is_active ? '<span style="color:var(--emerald);font-weight:600">✓ LIVE</span>' : '<span style="color:var(--text-3)">archief</span>'}</td>
+      <td style="padding:6px 12px;font-size:11.5px;color:var(--text-3)">${esc(v.persona_name || '—')}</td>
+      <td style="padding:6px 12px;font-size:11px;color:var(--text-3)">${esc(v.created_at || '')}</td>
+      <td style="padding:6px 12px;font-size:11px;color:var(--text-3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(v.notes || '')}</td>
+      <td style="padding:4px 12px;text-align:right">
+        ${!v.is_active ? `<button class="btn btn-ghost btn-sm" onclick="window.__setLcRollback('${esc(v.id)}', ${v.version})" style="font-size:11px;color:var(--amber)">↩ Rollback</button>` : ''}
+      </td>
+    </tr>`).join('');
+    return `<div style="margin:12px 0;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <div style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+        <div style="font-size:12.5px;font-weight:600">Versie-historie (${_lc.history.length})</div>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setLcToggleHistory()" style="font-size:11px">✕ Sluiten</button>
+      </div>
+      <div style="max-height:280px;overflow-y:auto"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--surface)"><th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Versie</th><th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Status</th><th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Persona</th><th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Aangemaakt</th><th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Notitie</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" style="padding:14px;color:var(--text-3);font-size:12px;text-align:center">${_lc.historyFetched?'Geen historie':'Laden…'}</td></tr>`}</tbody>
+      </table></div>
+    </div>`;
+  }
+  function bodyAgentsLisa() {
+    if (!_lc.fetched && !_lc.loading) queueMicrotask(() => fetchLisaConfig());
+    const c = _lc.config;
+    if (!c && _lc.loading) return `<div style="padding:24px;color:var(--text-3)">Laden…</div>`;
+    if (_lc.error && !c) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${esc(_lc.error)}</div>`;
+    if (!c) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ Geen Lisa-config gevonden</div>`;
+    const isDraft = !c.is_active && _lc.active_version && c.version > _lc.active_version;
+    const status = isDraft
+      ? `<span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:11px;font-weight:600">DRAFT v${c.version}</span> <span style="font-size:11px;color:var(--text-3)">actieve: v${_lc.active_version}</span>`
+      : `<span style="padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-size:11px;font-weight:600">LIVE v${c.version}</span>`;
+    const products = (c.kb_products || []).map((p, i) => `<div style="padding:8px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 100px 30px;gap:6px;align-items:start">
+      <div style="grid-column:1/-1;display:flex;justify-content:space-between;font-size:11px;color:var(--text-3)"><span>Product ${i+1}</span><button class="btn btn-ghost btn-sm" onclick="window.__setLcRmProduct(${i})" style="font-size:11px;color:var(--rose);padding:0 4px">✕</button></div>
+      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="naam" value="${esc(p.naam||'')}" placeholder="naam" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="doelgroep" value="${esc(p.doelgroep||'')}" placeholder="doelgroep" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="prijs" value="${esc(p.prijs||'')}" placeholder="prijs" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="duur" value="${esc(p.duur||'')}" placeholder="duur" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+      <textarea data-lc-prod-idx="${i}" data-lc-prod-field="beschrijving" rows="2" placeholder="beschrijving" style="grid-column:1/-1;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:inherit;resize:vertical">${esc(p.beschrijving||'')}</textarea>
+    </div>`).join('');
+    const faqs = (c.kb_faq || []).map((q, i) => `<div style="padding:8px;border-top:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:4px"><span>FAQ ${i+1}</span><button class="btn btn-ghost btn-sm" onclick="window.__setLcRmFaq(${i})" style="font-size:11px;color:var(--rose);padding:0 4px">✕</button></div>
+      <input type="text" data-lc-faq-idx="${i}" data-lc-faq-field="vraag" value="${esc(q.vraag||'')}" placeholder="Vraag" style="display:block;margin-bottom:4px;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+      <textarea data-lc-faq-idx="${i}" data-lc-faq-field="antwoord" rows="2" placeholder="Antwoord" style="display:block;margin-bottom:4px;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(q.antwoord||'')}</textarea>
+      <input type="text" data-lc-faq-idx="${i}" data-lc-faq-field="keywords" value="${esc((q.keywords||[]).join(', '))}" placeholder="keywords (comma-list, lowercase)" style="display:block;padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+    </div>`).join('');
+    const steps = (c.followup_sequence || []).map((s, i) => `<div style="padding:8px;border-top:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:4px"><span>Stap ${i+1}${s.use_ai?' · AI':''}</span><button class="btn btn-ghost btn-sm" onclick="window.__setLcRmStep(${i})" style="font-size:11px;color:var(--rose);padding:0 4px">✕</button></div>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><label style="font-size:11px;color:var(--text-3)">Delay (u, 1-720):</label>
+      <input type="number" min="1" max="720" data-lc-step-idx="${i}" data-lc-step-field="delay_hours" value="${esc(String(s.delay_hours||24))}" style="width:80px;padding:3px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" /></div>
+      <textarea data-lc-step-idx="${i}" data-lc-step-field="template" rows="3" placeholder="Bericht-template (>=200 chars = AI-gegenereerd)" style="display:block;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(s.template||'')}</textarea>
+    </div>`).join('');
+    return `<div style="max-width:1100px">
+      <div style="padding:12px 14px;background:${isDraft?'var(--amber-soft)':'var(--emerald-soft)'};color:${isDraft?'var(--amber)':'var(--emerald)'};border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Lisa AI Appointmentsetter · configuratie ${status}.</b> ${isDraft?'Draft is nog niet live — Publiceer om actief te zetten.':'Wijzigingen worden opgeslagen als DRAFT; klik Publiceren om live te zetten.'} Achter <code>lisa.config.{view,edit,publish}</code>-permissions. Motor onaangeraakt.
+        <button class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px" onclick="window.__setLcToggleHistory()">📜 Historie</button>
+      </div>
+      ${_lc.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">⚠ ${esc(_lc.error)}</div>` : ''}
+      ${_lcHistoryPanel()}
+
+      <div style="display:grid;grid-template-columns:1fr;gap:14px">
+
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Persona</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
+            ${_lcTextField('Naam *', 'persona_name')}
+            ${_lcTextField('Leeftijd', 'persona_age')}
+            ${_lcTextField('Achtergrond', 'persona_background', { textarea: true, rows: 3 })}
+            ${_lcTextField('Toon', 'persona_tone', { textarea: true, rows: 3 })}
+            ${_lcTextField('Schrijfstijl', 'persona_writing_style', { textarea: true, rows: 3 })}
+            ${_lcTextField('Emoji-gebruik', 'emoji_usage', { textarea: true, rows: 3 })}
+            ${_lcTextField('Do\'s', 'dos', { textarea: true, rows: 3 })}
+            ${_lcTextField('Don\'ts', 'donts', { textarea: true, rows: 3 })}
+          </div>
+        </div>
+
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Fases · gespreks-prompts per fase</div>
+          <div style="display:grid;grid-template-columns:1fr;gap:10px">
+            ${_lcTextField('Intro', 'phase_intro', { textarea: true, rows: 3 })}
+            ${_lcTextField('Doel', 'phase_doel', { textarea: true, rows: 3 })}
+            ${_lcTextField('Situatie', 'phase_situatie', { textarea: true, rows: 3 })}
+            ${_lcTextField('Band', 'phase_band', { textarea: true, rows: 3 })}
+            ${_lcTextField('Call (afspraak)', 'phase_call', { textarea: true, rows: 3 })}
+          </div>
+        </div>
+
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Kennisbank</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px">
+            ${_lcTextField('Prijzen (vrije tekst)', 'kb_pricing', { textarea: true, rows: 3 })}
+            ${_lcTextField('USPs (vrije tekst)', 'kb_usps', { textarea: true, rows: 3 })}
+          </div>
+          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:8px">Tag-filter (comma-list — beperk kennisbank-artikelen tot deze tags; leeg = alles)
+            <input type="text" data-lc-tag-filter value="${esc((c.kb_tag_filter||[]).join(', '))}" placeholder="bv. verkoop, faq" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+          </label>
+          <label style="font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:6px;margin-bottom:12px">
+            <input type="checkbox" data-lc-kb-use-general ${c.kb_use_general_kb ? 'checked' : ''} />
+            Gebruik algemene kennisbank naast product/FAQ (RAG)
+          </label>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 4px">
+            <div style="font-size:12px;font-weight:600">Producten (${(c.kb_products||[]).length})</div>
+            <button class="btn btn-ghost btn-sm" onclick="window.__setLcAddProduct()" style="font-size:11px">➕ Product</button>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${products || `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Geen producten</div>`}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 4px">
+            <div style="font-size:12px;font-weight:600">FAQ (${(c.kb_faq||[]).length})</div>
+            <button class="btn btn-ghost btn-sm" onclick="window.__setLcAddFaq()" style="font-size:11px">➕ FAQ</button>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${faqs || `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Geen FAQ</div>`}</div>
+        </div>
+
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Follow-up sequence</div>
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;margin-bottom:12px;align-items:center">
+            <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-lc-followup-enabled ${c.followup_enabled ? 'checked' : ''} /> Follow-up actief</label>
+            <label style="font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:6px">AI-threshold (chars, 0-2000): <input type="number" min="0" max="2000" data-lc-followup-threshold value="${esc(String(c.followup_ai_threshold_chars||200))}" style="width:80px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" /></label>
+          </div>
+          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Stop-keywords (comma-list, lowercase) — komt bovenop de hardcoded baseline
+            <input type="text" data-lc-stop-keywords value="${esc((c.stop_keywords||[]).join(', '))}" placeholder="bv. stop, geen interesse" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+          </label>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 4px">
+            <div style="font-size:12px;font-weight:600">Sequence-stappen (${(c.followup_sequence||[]).length}/5)</div>
+            <button class="btn btn-ghost btn-sm" ${(c.followup_sequence||[]).length >= 5 ? 'disabled' : ''} onclick="window.__setLcAddStep()" style="font-size:11px">➕ Stap</button>
+          </div>
+          <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${steps || `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Geen stappen</div>`}</div>
+        </div>
+
+      </div>
+
+      <div style="position:sticky;bottom:0;padding:12px 0;margin-top:16px;background:var(--surface);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+        <button class="btn btn-ghost btn-sm" ${_lc.busy?'disabled':''} onclick="window.__setLcSave('save_draft')" style="font-size:12px">${_lc.busy && _lc.savingKind==='save_draft'?'Opslaan…':'💾 Opslaan als concept'}</button>
+        <button class="btn btn-primary btn-sm" ${_lc.busy?'disabled':''} onclick="window.__setLcSave('publish')" style="font-size:12px;background:var(--rose);border-color:var(--rose)">${_lc.busy && _lc.savingKind==='publish'?'Publiceren…':'🚀 Publiceren (live)'}</button>
+      </div>
+    </div>`;
+  }
+
   /* Ronde-28 C1 · mk-bronnen — read-native. leads.bron + leads.traject count-
      verdeling via direct-supabase op leads_overzicht. Editor blijft aparte brok
      (bron-config bewerken raakt intake-flow); toont wel de actuele verdeling
@@ -3330,7 +3625,7 @@
     if (cur.id === 'fin-facturatie')     return bodyFinFacturatie();
     // Wave-2 · DEEL B — deep-links (config leeft nu in bestaande modules; volledige
     // port vereist eigen brok per sectie omdat de bron-modules eigen state/UI hebben).
-    if (cur.id === 'agents-lisa')        return bodyDeepLink('AI Agents', 'De Lisa-config (persona/fases/follow-ups) staat in de AI Agents-module. Verhuizen naar hier vereist port van de agents-config-UI + endpoints — aparte brok.', 'agents');
+    if (cur.id === 'agents-lisa')        return bodyAgentsLisa();
     if (cur.id === 'agents-manager')     return bodyDeepLink('AI Agents', 'AI Manager-instellingen (system-prompt, kennis, autonomie) staan in de AI Agents-module. Het werkende endpoint /api/super-admin-ai-manager voedt de widget op het dashboard.', 'agents');
     if (cur.id === 'agents-kennis')      return bodyDeepLink('AI Agents', 'Kennisbank voor AI (Lisa/Joost) staat verspreid over de AI Agents-module + Joost-config. Aparte brok om te centraliseren.', 'agents');
     if (cur.id === 'sales-trajecten')    return bodyTrajecten();
@@ -3390,6 +3685,8 @@
       'wb-incasso',
       // Ronde-31 STAP 4: wb-venster cooldown schrijfbaar (office-hours read-only in body).
       'wb-venster',
+      // Ronde-31 grote-brok agents-lisa native — persona/fases/KB/follow-up + draft/publish/rollback.
+      'agents-lisa',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -3401,7 +3698,7 @@
     // Backward-compat: WIRED bevat beide zodat andere logic werkt.
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
-      'agents-lisa','agents-manager','agents-kennis',
+      'agents-manager','agents-kennis',
       'sales-producten','sales-bonus',
       'ev-auto','ev-templates','ev-locaties','lms-instel',
       'mk-meta','mk-sequenties',

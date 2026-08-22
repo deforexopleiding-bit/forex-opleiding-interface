@@ -17,13 +17,13 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 11 grote-brokken open · 13 deferred · 14 done** (totaal 38) — **alle top-5 quick-adds klaar ✓**
+**0 quick-adds open · 10 grote-brokken open · 13 deferred · 15 done** (totaal 38) — **agents-lisa ✓ als eerste grote brok**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 14 | — |
+| done         | 15 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 11 | agents-lisa als eerste (na advies) |
+| open (grote-brok) | 10 | sales-trajecten of ev-auto als volgende (advies) |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -61,7 +61,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
-| `agents-lisa`    | open | grote-brok | ja (`/api/lisa-config` draft/publish/rollback) | **volgende grote brok — na quick-adds** |
+| `agents-lisa`    | done | — | ja | v=44 (persona/fases/KB/follow-up native; draft/publish/rollback + historie-panel; dynamische lijsten met freeze-safe uncontrolled inputs) |
 | `agents-manager` | open | grote-brok | ja (`/api/super-admin-ai-manager`) | deep-link |
 | `agents-kennis`  | open | grote-brok | ja (`/api/kennisbank-*`) | deep-link |
 
