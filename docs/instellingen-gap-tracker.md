@@ -17,14 +17,14 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 3 grote-brokken open · 15 deferred · 20 done** (totaal 38) — **agents-manager → deferred (geen config-tabel; runtime-status + audit-log native)**
+**0 quick-adds open · 2 grote-brokken open · 16 deferred · 20 done** (totaal 38) — **ev-locaties → deferred (events.location is vrije-tekst; geen registry-tabel)**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
 | done         | 20 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 3  | alg-meldingen · sales-bonus · ev-locaties |
-| deferred     | 15 | +agents-manager (backend-refactor: geen ai_manager_config-tabel bestaat) |
+| open (grote-brok) | 2  | alg-meldingen · sales-bonus |
+| deferred     | 16 | +ev-locaties (backend-refactor: nieuwe event_locations-tabel + FK + backfill) |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -72,7 +72,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `ev-auto`      | done | — | ja | v=53 (v=47 lijst/edit/toggle/delete + v=53 FIX B: disabled-verwijder-styling via _disabledUitKnop helper + Stappen↗ deep-link naar events-automations.html?edit=id) |
 | `ev-templates` | deferred | bewust-deferred | via com-wa | volgt wanneer com-wa uitgebreid is |
-| `ev-locaties`  | open | grote-brok | nee (nieuwe editor + tabel nodig) | deep-link |
+| `ev-locaties`  | deferred | bewust-deferred | events.location is vrije-tekst (geen registry-tabel) | v=55 READ-ONLY: de-facto locaties uit distinct events.location met counts + past/upcoming-splitsing + notice waarom geen editor |
 | `lms-instel`   | deferred | bewust-deferred | extern (Bubble) | geen native mogelijk |
 
 ## Communicatie
