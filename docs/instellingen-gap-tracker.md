@@ -17,14 +17,14 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 5 grote-brokken open · 14 deferred · 19 done** (totaal 38) — **mk-bronnen mapping-editor → deferred (backend-refactor vereist)**
+**0 quick-adds open · 4 grote-brokken open · 14 deferred · 20 done** (totaal 38) — **sales-producten ✓**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 19 | — |
+| done         | 20 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 5  | alg-meldingen · sales-producten · sales-bonus · agents-manager · ev-locaties |
-| deferred     | 14 | +mk-bronnen (backend-refactor: nieuwe tabel lead_source_traject_map + intake-endpoints migreren) |
+| open (grote-brok) | 4  | alg-meldingen · sales-bonus · agents-manager · ev-locaties |
+| deferred     | 14 | mk-bronnen (backend-refactor: nieuwe tabel lead_source_traject_map + intake-endpoints migreren) |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -35,7 +35,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
 | `sales-trajecten` | done | — | ja | v=46 (variant CRUD native via /api/traject-variants + product-koppelingen — GEEN TL-sync: endpoint doet zuiver DB; prijzen zitten op products, aparte Sales-editor) |
-| `sales-producten` | open | grote-brok | ja (product-catalogus bestaat) | deep-link |
+| `sales-producten` | done | — | ja | v=51 (CRUD op products native: naam/categorie/prijs/BTW/duur/tl_product_id/price_includes_vat/is_active + soft-delete via archived_at; geen TL-sync — tl_product_id is inbound-reference only) |
 | `sales-offerte`   | done | — | ja | ≤v=30 (TL-mailtemplate + sales-uitzonderingen native) |
 | `sales-bonus`     | open | grote-brok | ja (`team_members`) | deep-link |
 

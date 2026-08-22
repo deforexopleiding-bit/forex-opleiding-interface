@@ -1057,6 +1057,214 @@
     </div>`;
   }
 
+  /* Ronde-31 grote-brok · sales-producten — products CRUD native.
+     Endpoint: /api/sales-products (GET ?active=true / POST / PUT ?id / DELETE ?id soft).
+     Permissions: sales.product.view (read) + sales.product.manage (write).
+     DISCOVERY: endpoint doet ZUIVER DB-CRUD. Geen teamleader-call in POST/PUT/DELETE.
+     tl_product_id-veld is enkel een REFERENCE voor inbound TL-sync (admin/tl-import-
+     subscriptions.js matched op tl_product_id → onze product_id). Geen outbound push
+     van default_price naar TL. Nieuwe deals lezen default_price bij aanmaak;
+     bestaande deals hebben snapshot in deal_lines (analog aan traject_variants v=46).
+     → Save = veilig, geen live TL-actie. Prijs-impact-notice in confirm. Motor onaangeraakt. */
+  const _VAT = [0, 9, 21];
+  const _sp = { loading: false, fetched: false, error: null, items: [], filterActive: 'all', ed: null, busy: false };
+  async function fetchSalesProducten() {
+    if (_sp.loading || _sp.fetched) return;
+    _sp.loading = true; _sp.error = null; if (render) render();
+    try {
+      const j = await tryFetch('sp-list', '/api/sales-products');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      _sp.items = j?.products || [];
+    } catch (e) { _sp.error = e?.message || 'onbekend'; }
+    _sp.loading = false; _sp.fetched = true; if (render) render();
+  }
+  window.__setSpReload = () => { _sp.fetched = false; fetchSalesProducten(); };
+  window.__setSpFilter = (v) => { _sp.filterActive = v || 'all'; if (render) render(); };
+  window.__setSpNew = () => {
+    _sp.ed = { id: null, name: '', description: '', category: '', vat_percentage: 21, default_price: null, default_duration_months: null, tl_product_id: '', is_active: true, price_includes_vat: false };
+    if (render) render();
+  };
+  window.__setSpEdit = (id) => { const p = _sp.items.find(x => x.id === id); if (!p) return; _sp.ed = { ...p, category: p.category || '', description: p.description || '', tl_product_id: p.tl_product_id || '' }; if (render) render(); };
+  window.__setSpCancel = () => { _sp.ed = null; if (render) render(); };
+  window.__setSpBool = (k, v) => { if (_sp.ed) { _sp.ed[k] = !!v; if (render) render(); } };
+  window.__setSpVat  = (v) => { if (_sp.ed) { _sp.ed.vat_percentage = Number(v); if (render) render(); } };
+  function _spSyncFromDom() {
+    const e = _sp.ed; if (!e) return;
+    const q = (sel) => document.querySelector(sel);
+    ['name','description','category','tl_product_id'].forEach(k => { const el = q(`[data-sp-field="${k}"]`); if (el) e[k] = String(el.value || ''); });
+    const pr = q('[data-sp-field="default_price"]'); if (pr) e.default_price = pr.value === '' ? null : Number(pr.value);
+    const du = q('[data-sp-field="default_duration_months"]'); if (du) e.default_duration_months = du.value === '' ? null : (parseInt(du.value, 10) || null);
+  }
+  window.__setSpSave = () => {
+    _spSyncFromDom();
+    const e = _sp.ed; if (!e) return;
+    if (!String(e.name || '').trim()) { showToast('Naam is verplicht', 'warn'); return; }
+    if (!_VAT.includes(Number(e.vat_percentage))) { showToast('BTW% moet 0, 9 of 21 zijn', 'warn'); return; }
+    if (e.default_price != null && !(Number(e.default_price) > 0)) { showToast('Prijs moet > 0 zijn (of leeg)', 'warn'); return; }
+    if (e.default_duration_months != null) {
+      const d = Number(e.default_duration_months);
+      if (!Number.isFinite(d) || d < 1 || d > 120) { showToast('Duur moet 1..120 maanden zijn (of leeg)', 'warn'); return; }
+    }
+    const isEdit = !!e.id;
+    const oldPrice = isEdit ? Number(_sp.items.find(x => x.id === e.id)?.default_price || 0) : null;
+    const newPrice = e.default_price != null ? Number(e.default_price) : null;
+    const priceChanged = isEdit && oldPrice !== newPrice;
+    const priceNote = priceChanged
+      ? ` ⚠ Prijs wijzigt van €${oldPrice.toFixed(2)} naar €${(newPrice||0).toFixed(2)}. Nieuwe offertes/deals gebruiken de nieuwe prijs; bestaande deals houden hun snapshot in deal_lines. TL-sync gebeurt NIET automatisch (tl_product_id is alleen inbound-reference).`
+      : (isEdit ? '' : ' Nieuwe product staat direct beschikbaar voor de Sales-wizard indien actief.');
+    const payload = {
+      name: String(e.name).trim(),
+      description: String(e.description || '').trim() || null,
+      category: String(e.category || '').trim() || null,
+      vat_percentage: Number(e.vat_percentage),
+      default_price: newPrice,
+      default_duration_months: e.default_duration_months || null,
+      tl_product_id: String(e.tl_product_id || '').trim() || null,
+      is_active: e.is_active !== false,
+      price_includes_vat: !!e.price_includes_vat,
+    };
+    openConfirm(`${isEdit ? 'Wijzigingen opslaan voor product' : 'Nieuw product aanmaken:'} "${esc(payload.name)}"?${priceNote}`, async () => {
+      _sp.busy = true; if (render) render();
+      try {
+        const url = isEdit
+          ? '/api/sales-products?id=' + encodeURIComponent(e.id)
+          : '/api/sales-products';
+        const method = isEdit ? 'PUT' : 'POST';
+        const j = await tryFetch('sp-save', url, {
+          method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(isEdit ? 'Product bijgewerkt' : 'Product aangemaakt', 'ok');
+        _sp.ed = null; _sp.fetched = false; fetchSalesProducten();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _sp.busy = false; if (render) render(); }
+    }, priceChanged ? 'warn' : undefined);
+  };
+  window.__setSpDelete = (id) => {
+    const p = _sp.items.find(x => x.id === id); if (!p) return;
+    openConfirm(`Product "${esc(p.name)}" archiveren (soft-delete)? Rij blijft bewaard voor historische deals; is_active=false + archived_at=now(). Kan later via SQL geherreactiveerd worden. Bestaande deals met dit product behouden hun snapshot.`, async () => {
+      _sp.busy = true; if (render) render();
+      try {
+        const j = await tryFetch('sp-del', '/api/sales-products?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        // DELETE returnt 204 (no content) — j kan null/empty zijn maar geen error.
+        if (j && (j.__error || j.error)) throw new Error(j.__error || j.error);
+        showToast('Product gearchiveerd', 'ok');
+        _sp.fetched = false; fetchSalesProducten();
+      } catch (err) { showToast('Archiveren mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _sp.busy = false; if (render) render(); }
+    }, 'warn');
+  };
+  function _spEditor() {
+    const e = _sp.ed; if (!e) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setSpCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">${e.id ? 'Product bewerken' : 'Nieuw product'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setSpCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;overflow-y:auto;flex:1;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">
+          <div style="grid-column:1/-1;padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.55">
+            <b>Geen TL-sync bij opslaan.</b> Prijs/BTW-wijzigingen leven in eigen DB. Nieuwe offertes lezen deze prijs; bestaande deals behouden snapshot in <code>deal_lines</code>. <code>tl_product_id</code> is een reference voor inbound TL-import (matcht sub van TL naar onze product), niet outbound.
+          </div>
+          <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Naam <span style="color:var(--rose)">*</span> (max 200)
+            <input type="text" data-sp-field="name" value="${esc(e.name || '')}" maxlength="200" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Categorie
+            <input type="text" data-sp-field="category" value="${esc(e.category || '')}" placeholder="bv. e-book, cursus, consultancy" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">TL Product-ID (inbound-reference, optioneel)
+            <input type="text" data-sp-field="tl_product_id" value="${esc(e.tl_product_id || '')}" placeholder="uuid uit TeamLeader" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Standaardprijs (€, leeg = variabel)
+            <input type="number" min="0.01" step="0.01" data-sp-field="default_price" value="${esc(e.default_price != null ? String(e.default_price) : '')}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">BTW% <span style="color:var(--rose)">*</span>
+            <select onchange="window.__setSpVat(this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+              ${_VAT.map(v => `<option value="${v}"${Number(e.vat_percentage) === v ? ' selected' : ''}>${v}%</option>`).join('')}
+            </select>
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Standaardduur (mnd, 1-120, leeg=geen default)
+            <input type="number" min="1" max="120" data-sp-field="default_duration_months" value="${esc(e.default_duration_months != null ? String(e.default_duration_months) : '')}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Beschrijving
+            <textarea data-sp-field="description" rows="2" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.description || '')}</textarea>
+          </label>
+          <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" ${e.is_active !== false ? 'checked' : ''} onchange="window.__setSpBool('is_active', this.checked)" /> Actief (selecteerbaar in Sales-wizard)</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" ${e.price_includes_vat ? 'checked' : ''} onchange="window.__setSpBool('price_includes_vat', this.checked)" /> Prijs is inclusief BTW</label>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setSpCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_sp.busy ? 'disabled' : ''} onclick="window.__setSpSave()">${_sp.busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bodySalesProducten() {
+    if (!_sp.fetched && !_sp.loading) queueMicrotask(() => fetchSalesProducten());
+    const filtered = _sp.filterActive === 'active'
+      ? _sp.items.filter(p => p.is_active && !p.archived_at)
+      : _sp.filterActive === 'archived'
+        ? _sp.items.filter(p => !!p.archived_at)
+        : _sp.items;
+    const rows = filtered.map(p => {
+      const busy = _sp.busy && _sp.ed?.id === p.id;
+      const active = p.is_active && !p.archived_at;
+      const priceEur = p.default_price != null ? '€' + Number(p.default_price).toFixed(2) : '<span style="color:var(--text-3)">variabel</span>';
+      return `<tr style="border-top:1px solid var(--border);${active ? '' : 'opacity:.55'}">
+        <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(p.name || '—')}${p.description ? `<div style="font-size:11px;color:var(--text-3);font-weight:normal;margin-top:2px">${esc(String(p.description).slice(0,80))}${p.description.length>80?'…':''}</div>` : ''}</td>
+        <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(p.category || '—')}</td>
+        <td style="padding:8px 12px;font-size:12px;text-align:right;font-family:'IBM Plex Mono',monospace">${priceEur}${p.price_includes_vat ? '<span style="font-size:10px;color:var(--text-3);margin-left:4px">incl</span>' : ''}</td>
+        <td style="padding:8px 12px;font-size:11.5px;text-align:center">${Number(p.vat_percentage || 0)}%</td>
+        <td style="padding:8px 12px;font-size:11px;text-align:center">${p.default_duration_months || '—'}</td>
+        <td style="padding:8px 12px;font-size:11px">${p.tl_product_id ? `<code style="font-size:10.5px">${esc(String(p.tl_product_id).slice(0,10))}…</code>` : '<span style="color:var(--text-3)">—</span>'}</td>
+        <td style="padding:8px 12px;font-size:11px">${active ? '<span style="color:var(--emerald)">✓ actief</span>' : (p.archived_at ? '<span style="color:var(--rose)">archief</span>' : '<span style="color:var(--text-3)">inactief</span>')}</td>
+        <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setSpEdit('${esc(p.id)}')" style="font-size:11px">Edit</button>
+          <button class="btn btn-ghost btn-sm" ${busy || !!p.archived_at?'disabled':''} onclick="window.__setSpDelete('${esc(p.id)}')" style="font-size:11px;color:var(--rose)" title="${p.archived_at?'Al gearchiveerd':''}">Archiveer</button>
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1300px">
+      ${_spEditor()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>LIVE producten-editor.</b> <b>Geen TL-sync</b> — endpoint doet zuiver DB-CRUD. Prijs/BTW-wijzigingen gelden voor nieuwe offertes; bestaande deals behouden snapshot in <code>deal_lines</code>. Soft-delete via archived_at + is_active=false.
+      </div>
+      ${_sp.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_sp.error)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;flex-wrap:wrap">
+        <div style="display:flex;gap:6px;align-items:center">
+          <label style="font-size:11.5px;color:var(--text-3)">Filter:</label>
+          <select onchange="window.__setSpFilter(this.value)" style="padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+            <option value="all"${_sp.filterActive==='all'?' selected':''}>Alle (${_sp.items.length})</option>
+            <option value="active"${_sp.filterActive==='active'?' selected':''}>Actief</option>
+            <option value="archived"${_sp.filterActive==='archived'?' selected':''}>Archief</option>
+          </select>
+          <span style="font-size:11.5px;color:var(--text-3);margin-left:8px">${filtered.length} zichtbaar</span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setSpReload()" style="font-size:11px">↻ Vernieuwen</button>
+          <button class="btn btn-primary btn-sm" onclick="window.__setSpNew()">➕ Nieuw product</button>
+        </div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:900px">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Categorie</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Prijs</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">BTW</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Duur (mnd)</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">TL-ref</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="8" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_sp.loading?'Laden…':'Geen producten'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   /* Ronde-31 grote-brok · mk-sequenties — onderhoud-trajecten native lijst + metadata-edit.
      Endpoints: /api/leadsonderhoud-trajecten (GET) + /api/leadsonderhoud-traject-opslaan
      (POST) + /api/leadsonderhoud-traject-verwijderen (POST {id}) + /api/leadsonderhoud-
@@ -4514,7 +4722,7 @@
     if (cur.id === 'agents-manager')     return bodyDeepLink('AI Agents', 'AI Manager-instellingen (system-prompt, kennis, autonomie) staan in de AI Agents-module. Het werkende endpoint /api/super-admin-ai-manager voedt de widget op het dashboard.', 'agents');
     if (cur.id === 'agents-kennis')      return bodyKbArtikelen();
     if (cur.id === 'sales-trajecten')    return bodyTrajecten();
-    if (cur.id === 'sales-producten')    return bodyDeepLink('Sales', 'Losse producten (E-books, lascursus, consultancy) staan in de Sales-catalogus/wizard. Aparte brok voor centrale editor.', 'sales');
+    if (cur.id === 'sales-producten')    return bodySalesProducten();
     if (cur.id === 'sales-bonus')        return bodyDeepLink('Sales', 'Verkopers en bonus-config zit in de Sales-module + team_members-tabel. Bonus-berekening is server-side; UI-editor volgt in Wave 3.', 'sales');
     if (cur.id === 'ev-auto')            return bodyEvAuto();
     if (cur.id === 'ev-templates')       return bodyDeepLink('Events', 'Event-berichten (e-mail + WhatsApp) worden per template beheerd in de Events-module + com-wa hier voor WA-templates.', 'events');
@@ -4581,6 +4789,8 @@
       'agents-kennis',
       // Ronde-31 grote-brok mk-sequenties native — trajecten-lijst + metadata-edit + actief-toggle + delete; stap-editor + test-send blijven Leadsonderhoud.
       'mk-sequenties',
+      // Ronde-31 grote-brok sales-producten native — CRUD op products (naam/categorie/prijs/BTW/duur/tl_product_id/actief); geen TL-sync.
+      'sales-producten',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -4593,7 +4803,7 @@
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
       'agents-manager',
-      'sales-producten','sales-bonus',
+      'sales-bonus',
       'ev-templates','ev-locaties','lms-instel',
       'mk-meta',
       // Ronde-31 STAP 5: workflows-regels + templates blijven Finance (motor-consistentie + WIK-14 legal).
