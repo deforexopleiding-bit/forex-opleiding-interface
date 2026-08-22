@@ -956,23 +956,29 @@
      zodat je ziet welke bronnen actief zijn. */
   // Ronde-31: canonieke definitie ná opschoning — identiek aan
   // api/leads-per-traject-count.js (grep TEST_EMAIL_MARKERS bij uitbreiden).
-  const _lb = { loading: false, fetched: false, error: null, byBron: [], byTraject: [], total: 0, excluded: 0, raw: 0 };
+  const _lb = { loading: false, fetched: false, error: null, byBron: [], byTraject: [], byCross: [], total: 0, excluded: 0, raw: 0, sources: [] };
   async function fetchLeadBronnen() {
     if (_lb.loading || _lb.fetched) return;
     _lb.loading = true; _lb.error = null; if (render) render();
     try {
       if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
       // Bron gewisseld van leads_overzicht → leads (raw): afwijzer + email zit niet in de view.
-      const { data, error } = await window.supabase.from('leads').select('bron, traject, email, afwijzer').is('verwijderd_op', null).limit(50000);
-      if (error) throw error;
-      const rows = data || [];
+      // Ronde-31 v=50: ook lead_sources meelezen (CAC-attributie-tabel, aparte scope).
+      const [leadsRes, srcRes] = await Promise.all([
+        window.supabase.from('leads').select('bron, traject, email, afwijzer').is('verwijderd_op', null).limit(50000),
+        window.supabase.from('lead_sources').select('id, name, is_active').order('name'),
+      ]);
+      if (leadsRes.error) throw leadsRes.error;
+      // lead_sources kan RLS'd zijn — fail-soft (leeg).
+      _lb.sources = (srcRes && !srcRes.error) ? (srcRes.data || []) : [];
+      const rows = leadsRes.data || [];
       const isTestEmail = (e) => {
         if (!e) return false;
         const s = String(e).toLowerCase();
         return s.includes('test') || s.includes('deforexopleiding');
       };
       _lb.raw = rows.length;
-      const bMap = {}, tMap = {};
+      const bMap = {}, tMap = {}, xMap = {};
       let excluded = 0;
       for (const r of rows) {
         if (r?.afwijzer === true) { excluded += 1; continue; }
@@ -981,11 +987,15 @@
         const t = String(r.traject || '(leeg)');
         bMap[b] = (bMap[b] || 0) + 1;
         tMap[t] = (tMap[t] || 0) + 1;
+        // Cross-tab bron × traject (max top-40 combinaties in render).
+        const key = b + '||' + t;
+        xMap[key] = (xMap[key] || 0) + 1;
       }
       _lb.total = _lb.raw - excluded;
       _lb.excluded = excluded;
       _lb.byBron    = Object.entries(bMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
       _lb.byTraject = Object.entries(tMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
+      _lb.byCross   = Object.entries(xMap).sort((a,b) => b[1]-a[1]).map(([k,c]) => { const [bron, traject] = k.split('||'); return { bron, traject, count: c }; });
     } catch (e) { _lb.error = e?.message || 'onbekend'; }
     _lb.loading = false; _lb.fetched = true;
     if (render) render();
@@ -994,12 +1004,17 @@
     if (!_lb.fetched && !_lb.loading) queueMicrotask(() => fetchLeadBronnen());
     const rowsB = _lb.byBron.map(x => `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 12px;font-size:12.5px">${esc(x.name)}</td><td style="padding:6px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${x.count}</td><td style="padding:6px 12px;font-size:11px;color:var(--text-3);text-align:right">${_lb.total ? Math.round(x.count/_lb.total*100) : 0}%</td></tr>`).join('');
     const rowsT = _lb.byTraject.map(x => `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 12px;font-size:12.5px">${esc(x.name)}</td><td style="padding:6px 12px;font-size:12.5px;text-align:right;font-family:'IBM Plex Mono',monospace">${x.count}</td><td style="padding:6px 12px;font-size:11px;color:var(--text-3);text-align:right">${_lb.total ? Math.round(x.count/_lb.total*100) : 0}%</td></tr>`).join('');
-    return `<div style="max-width:1000px">
+    const rowsX = _lb.byCross.slice(0, 40).map(x => `<tr style="border-top:1px solid var(--border)"><td style="padding:6px 12px;font-size:12px">${esc(x.bron)}</td><td style="padding:6px 12px;font-size:12px">${esc(x.traject)}</td><td style="padding:6px 12px;font-size:12px;text-align:right;font-family:'IBM Plex Mono',monospace">${x.count}</td></tr>`).join('');
+    const rowsSrc = (_lb.sources || []).map(s => `<tr style="border-top:1px solid var(--border);${s.is_active?'':'opacity:.55'}"><td style="padding:6px 12px;font-size:12.5px">${esc(s.name)}</td><td style="padding:6px 12px;font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(String(s.id).slice(0,8))}…</td><td style="padding:6px 12px;font-size:11px;text-align:center">${s.is_active?'<span style="color:var(--emerald)">✓ actief</span>':'<span style="color:var(--text-3)">⨯ inactief</span>'}</td></tr>`).join('');
+    return `<div style="max-width:1100px">
       <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Read-only overzicht.</b> Toont de actuele verdeling van <code>leads.bron</code> + <code>leads.traject</code> uit tabel <code>leads</code> ná opschoning: <b>${_lb.total} schone leads</b>${_lb.excluded ? ` <span style="color:var(--text-3);font-weight:normal">(${_lb.excluded} test/afgewezen uitgesloten uit ${_lb.raw} totaal)</span>` : ''}. Zelfde filter als dashboard-tegels "Leads per traject". Bron-mapping bewerken (welke intake-bron mapt naar welk traject) raakt de intake-flow → vraagt eigen brok.
+        <b>Read-only.</b> ${_lb.total} schone leads${_lb.excluded ? ` <span style="color:var(--text-3);font-weight:normal">(${_lb.excluded} test/afgewezen uitgesloten uit ${_lb.raw} totaal)</span>` : ''} — filter matcht dashboard-tegels &quot;Leads per traject&quot;.
+      </div>
+      <div style="padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text-2);line-height:1.55;margin-bottom:14px">
+        <b>Discovery — waarom géén editor hier:</b> er is <b>geen data-driven bron→traject-mapping</b>. Elke intake-endpoint (bv. <code>lead-handmatig-toevoegen</code>, <code>leadsonderhoud-quiz-opslaan</code>) zet in dezelfde INSERT zowel <code>leads.bron</code> als <code>leads.traject</code> (r78: <code>bron: 'handmatig', traject: primair</code>). <code>lead_sources</code>-tabel bestaat wel maar dient CAC-attributie op <code>deals.source_lead_id</code> — geen traject-koppeling. Mapping-editor vraagt <b>backend-refactor</b>: nieuwe tabel <code>lead_source_traject_map</code>, alle intake-endpoints laten consulteren, evt. backfill van historische leads. Buiten scope zonder afstemming — sectie blijft READ-ONLY.
       </div>
       ${_lb.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_lb.error)}</div>` : ''}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
         <div>
           <div style="font-size:13px;font-weight:600;margin-bottom:8px">Per bron</div>
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
@@ -1018,6 +1033,26 @@
             </table>
           </div>
         </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">Kruistabel · bron × traject (feitelijke koppelingen, top 40)</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:360px;overflow-y:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--surface-2);position:sticky;top:0"><th style="text-align:left;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Bron</th><th style="text-align:left;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Traject</th><th style="text-align:right;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Aantal</th></tr></thead>
+            <tbody>${rowsX || `<tr><td colspan="3" style="padding:12px;color:var(--text-3);font-size:12px">${_lb.loading?'Laden…':'—'}</td></tr>`}</tbody>
+          </table>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-3)">Zo zie je de <b>de-facto mapping</b> zoals die op de rijen staat. Elke unieke (bron, traject)-combinatie = één rij hier.</div>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">CAC-attributie · <code>lead_sources</code>-tabel</div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--surface-2)"><th style="text-align:left;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam</th><th style="text-align:left;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">ID</th><th style="text-align:center;padding:6px 12px;font-size:11px;color:var(--text-3);font-weight:600">Actief</th></tr></thead>
+            <tbody>${rowsSrc || `<tr><td colspan="3" style="padding:12px;color:var(--text-3);font-size:12px">Geen lead_sources gevonden (of RLS)</td></tr>`}</tbody>
+          </table>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text-3)"><code>lead_sources</code> is een aparte tabel voor sales-CAC (<code>deals.source_lead_id</code>). Deze bepaalt NIET automatisch het traject van een lead.</div>
       </div>
     </div>`;
   }
