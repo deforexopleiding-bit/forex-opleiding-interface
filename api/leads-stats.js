@@ -10,18 +10,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-
-function isoDate(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function mondayOfWeek(d) {
-  const day = d.getDay();                          // 0=zon, 1=maa, ..., 6=zat
-  const diff = day === 0 ? -6 : (1 - day);         // schuif naar maandag
-  const m = new Date(d);
-  m.setDate(d.getDate() + diff);
-  m.setHours(0, 0, 0, 0);
-  return m;
-}
+import { periodRange, nlDateString } from './_lib/nl-period.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -37,15 +26,21 @@ export default async function handler(req, res) {
 
   try {
     const now = new Date();
-    const today = isoDate(now);
-    const weekStart = isoDate(mondayOfWeek(now));
+    // NL-tijdzone-aware grenzen (Europe/Amsterdam → UTC-instants). Voorheen
+    // bucketten `today`/`weekStart` op de server-lokale (UTC) kalenderdag, zodat
+    // een lead van net na middernacht NL een dag te vroeg/laat viel. Half-open
+    // [start, eind) op UTC houdt de index op `aangemaakt` bruikbaar.
+    const dag  = periodRange('dag', now);
+    const week = periodRange('week', now);
+    const today = nlDateString(now);               // 'YYYY-MM-DD' NL (label)
+    const weekStart = week.label;                   // maandag NL (label)
 
     const [vRes, nRes, wRes] = await Promise.all([
       supabaseAdmin.from('leads_overzicht')
         .select('id', { count: 'exact', head: true })
         .is('verwijderd_op', null)
-        .gte('aangemaakt', today + 'T00:00:00')
-        .lte('aangemaakt', today + 'T23:59:59.999'),
+        .gte('aangemaakt', dag.start.toISOString())
+        .lt('aangemaakt', dag.endExclusive.toISOString()),
       supabaseAdmin.from('leads_overzicht')
         .select('id', { count: 'exact', head: true })
         .is('verwijderd_op', null)
@@ -54,7 +49,7 @@ export default async function handler(req, res) {
         .select('id', { count: 'exact', head: true })
         .is('verwijderd_op', null)
         .eq('tag', 'gekwalificeerd')
-        .gte('aangemaakt', weekStart + 'T00:00:00'),
+        .gte('aangemaakt', week.start.toISOString()),
     ]);
     if (vRes.error) throw new Error('vandaag: ' + vRes.error.message);
     if (nRes.error) throw new Error('nieuw: '   + nRes.error.message);

@@ -1,5 +1,21 @@
 import { createUserClient } from './supabase.js';
 import { safeError } from './_lib/safe-error.js';
+import { periodRange, nlDayStart, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
+
+// Laatste `n` NL-kalenderdagen (oudste eerst) als UTC-vensters [start, end).
+// Voorheen bucketten de sparkline-/chart-loops op de server-lokale (UTC) dag via
+// setHours(0,0,0,0), waardoor de daggrens ~1-2u verschoof t.o.v. Europe/Amsterdam.
+// Anker op ~NL-noon van elke doeldag → robuust tegen DST bij het terugtellen.
+function nlDayWindowsBack(n, ref) {
+  const todayStart = nlDayStart(ref);
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const anchor = new Date(todayStart.getTime() - i * 24 * 3600 * 1000 + 12 * 3600 * 1000);
+    const start = nlDayStart(anchor);
+    out.push({ start, end: nlDayEndExclusive(anchor), label: nlDateString(start) });
+  }
+  return out;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -9,20 +25,22 @@ export default async function handler(req, res) {
   try {
     const supabase = createUserClient(req);
     const now = new Date();
-    const h   = now.getHours();
+    // NL-uur voor de begroeting (Goedemorgen/-middag/-avond) — server draait op UTC.
+    const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Amsterdam', hour: '2-digit', hourCycle: 'h23' }).format(now));
 
-    // ── Period boundaries ────────────────────────────────────────────────────
-    const startOfToday = new Date(now); startOfToday.setHours(0,0,0,0);
-    const startOfYest  = new Date(startOfToday); startOfYest.setDate(startOfYest.getDate()-1);
-    const endOfYest    = new Date(startOfToday); endOfYest.setMilliseconds(-1);
+    // ── Period boundaries (NL-tijdzone-aware) ────────────────────────────────
+    // Voorheen bepaalde setHours/getDay/getFullYear alles in server-lokale (UTC)
+    // tijd → tellingen rond middernacht NL een dag verschoven.
+    const startOfToday = periodRange('dag', now).start;                 // UTC-instant NL 00:00
+    const startOfYest  = nlDayStart(new Date(startOfToday.getTime() - 12 * 3600 * 1000)); // NL gisteren 00:00
+    const endOfYest    = new Date(startOfToday.getTime() - 1);          // -1ms: inclusief-eind gisteren
 
     let periodStart, periodEnd;
     if (period === 'week') {
-      const dow = now.getDay(); const offset = dow === 0 ? 6 : dow - 1;
-      periodStart = new Date(startOfToday); periodStart.setDate(periodStart.getDate()-offset);
+      periodStart = periodRange('week', now).start;
       periodEnd   = now;
     } else if (period === 'month') {
-      periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      periodStart = periodRange('maand', now).start;
       periodEnd   = now;
     } else {
       periodStart = startOfToday;
@@ -32,9 +50,11 @@ export default async function handler(req, res) {
     const periodStartIso = periodStart.toISOString();
     const periodEndIso   = periodEnd.toISOString();
 
-    const fourteenAgo = new Date(now); fourteenAgo.setDate(fourteenAgo.getDate()-14);
-    const sevenAgo    = new Date(now); sevenAgo.setDate(sevenAgo.getDate()-7);
-    const monthStart  = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Rolling fetch-vensters (geen kalender-bucket): laatste 14/7 dagen. Een paar
+    // uur skew is hier irrelevant — de per-dag-bucketing gebeurt in nlDayWindowsBack.
+    const fourteenAgo = new Date(now.getTime() - 14 * 24 * 3600 * 1000);
+    const sevenAgo    = new Date(now.getTime() -  7 * 24 * 3600 * 1000);
+    const monthStart  = periodRange('maand', now).start;               // NL 1e 00:00
 
     // ── All parallel queries ─────────────────────────────────────────────────
     const [
@@ -104,16 +124,11 @@ export default async function handler(req, res) {
 
     // ── Helper: day-by-day sparkline over 14 days ────────────────────────────
     function sparkline14(arr, filterFn) {
-      const result = [];
-      for (let i = 13; i >= 0; i--) {
-        const d0 = new Date(now); d0.setDate(d0.getDate()-i); d0.setHours(0,0,0,0);
-        const d1 = new Date(d0); d1.setDate(d1.getDate()+1);
-        result.push(arr.filter(e => {
-          const t = e.date_received;
-          return t >= d0.toISOString() && t < d1.toISOString() && filterFn(e);
-        }).length);
-      }
-      return result;
+      return nlDayWindowsBack(14, now).map((w) => {
+        const lo = w.start.toISOString();
+        const hi = w.end.toISOString();
+        return arr.filter(e => e.date_received >= lo && e.date_received < hi && filterFn(e)).length;
+      });
     }
 
     // ── Period emails ────────────────────────────────────────────────────────
@@ -144,12 +159,12 @@ export default async function handler(req, res) {
 
     // ── Chart data ───────────────────────────────────────────────────────────
     const chartLeadMail = [];
-    for (let i = 13; i >= 0; i--) {
-      const d0 = new Date(now); d0.setDate(d0.getDate()-i); d0.setHours(0,0,0,0);
-      const d1 = new Date(d0); d1.setDate(d1.getDate()+1);
-      const day = emails.filter(e => e.date_received >= d0.toISOString() && e.date_received < d1.toISOString());
+    for (const w of nlDayWindowsBack(14, now)) {
+      const lo = w.start.toISOString();
+      const hi = w.end.toISOString();
+      const day = emails.filter(e => e.date_received >= lo && e.date_received < hi);
       chartLeadMail.push({
-        dag:    d0.toISOString().slice(0,10),
+        dag:    w.label,
         leads:  day.filter(e => e.category === 'Nieuwe Lead').length,
         totaal: day.length,
       });

@@ -27,6 +27,7 @@
 
 import { supabase, supabaseAdmin } from './supabase.js';
 import { computeMetrics } from './follow-up-metrics.js';
+import { periodRange, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor'];
 const INACTIVE_STATUSES = ['cancelled', 'verplaatst', 'verwijderd'];
@@ -151,17 +152,21 @@ export default async function handler(req, res) {
  */
 async function fetchBookedInPeriodCounts(ownerScope) {
   const now = new Date();
-  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
-  const startOfTomorrow = new Date(startOfToday); startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
-  // Maandag deze week (NL: dag 1..7; 0=zondag).
-  const dow = startOfToday.getDay();
-  const daysFromMon = dow === 0 ? 6 : dow - 1;
-  const startOfWeek = new Date(startOfToday); startOfWeek.setDate(startOfToday.getDate() - daysFromMon);
-  const startOfNextWeek = new Date(startOfWeek); startOfNextWeek.setDate(startOfWeek.getDate() + 7);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
-  const startOfNextYear = new Date(now.getFullYear() + 1, 0, 1);
+  // NL-tijdzone-aware grenzen (Europe/Amsterdam → UTC-instants). Voorheen
+  // bepaalden setHours/getDay/getFullYear alles in server-lokale (UTC) tijd →
+  // afspraken rond middernacht NL vielen in de verkeerde dag/week/maand/jaar.
+  const rDag   = periodRange('dag', now);
+  const rWeek  = periodRange('week', now);
+  const rMaand = periodRange('maand', now);
+  const rJaar  = periodRange('jaar', now);
+  const startOfToday     = rDag.start;
+  const startOfTomorrow  = rDag.endExclusive;
+  const startOfWeek      = rWeek.start;
+  const startOfNextWeek  = rWeek.endExclusive;
+  const startOfMonth     = rMaand.start;
+  const startOfNextMonth = rMaand.endExclusive;
+  const startOfYear      = rJaar.start;
+  const startOfNextYear  = rJaar.endExclusive;
 
   async function count(startD, endD) {
     let q = supabaseAdmin.from('follow_up_appointments')
@@ -188,11 +193,12 @@ async function fetchBookedInPeriodCounts(ownerScope) {
  * computeMetrics() ondersteunt geen 'tomorrow' period, dus eigen query.
  */
 async function fetchTomorrowAppointmentsCount(ownerScope) {
-  const tomorrowStart = new Date();
-  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
-  tomorrowStart.setHours(0, 0, 0, 0);
-  const dayAfter = new Date(tomorrowStart);
-  dayAfter.setDate(dayAfter.getDate() + 1);
+  // NL-morgen [00:00, overmorgen 00:00). nlDayEndExclusive(now) = NL-morgen 00:00
+  // (UTC-instant); nog een dag verder = NL-overmorgen 00:00. Voorheen bepaalde
+  // setHours dit in server-lokale (UTC) tijd → afspraken rond middernacht NL
+  // vielen in de verkeerde kalenderdag.
+  const tomorrowStart = nlDayEndExclusive(new Date());
+  const dayAfter      = nlDayEndExclusive(tomorrowStart);
 
   // Geen .not('status', 'in', ...) want PostgREST-array-not.in vereist
   // andere syntax. Easier: fetch + filter client-side (kleine N).
@@ -211,7 +217,9 @@ async function fetchTomorrowAppointmentsCount(ownerScope) {
  * EN terugkom_datum >= today (excl. overdue — die zit in widget 8).
  */
 async function fetchOpenFollowUpsCount(ownerScope) {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  // NL-vandaag als kalenderdatum (terugkom_datum is een DATE-kolom). Voorheen
+  // gaf toISOString() de UTC-datum → rond middernacht NL een dag verschoven.
+  const todayIso = nlDateString(new Date());
 
   const apptIds = await fetchOwnerApptIds(ownerScope);
   if (apptIds && apptIds.length === 0) return 0;
@@ -302,18 +310,17 @@ async function fetchOwnerApptIds(ownerScope) {
  *   zondag = ma 00:00 tot ma 00:00 volgende week (7 dagen).
  */
 function getTodayWeekRanges() {
-  const now        = new Date();
-  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-  const todayEnd   = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
-
-  // Week = maandag deze week tot vandaag-eind (NL-conventie).
-  const weekStart = new Date(todayStart);
-  const dayOfWeek = weekStart.getDay();           // 0=zo, 1=ma, ..., 6=za
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  weekStart.setDate(weekStart.getDate() - daysFromMonday);
-
+  const now = new Date();
+  // NL-tijdzone-aware (Europe/Amsterdam → UTC-instants). Voorheen bepaalde
+  // setHours/getDay de grenzen in server-lokale tijd (= UTC op Vercel), zodat
+  // een lead/mail van net na middernacht NL een dag te vroeg werd geteld.
+  const dag  = periodRange('dag', now);
+  const week = periodRange('week', now);
   return {
-    today: { start: todayStart, end: todayEnd },
-    week:  { start: weekStart,  end: todayEnd },
+    // Today = NL-vandaag [00:00, morgen 00:00).
+    today: { start: dag.start,  end: dag.endExclusive },
+    // Week = NL-maandag deze week tot NL-eind-vandaag (zoals voorheen: t/m nu,
+    // niet de volledige ISO-week).
+    week:  { start: week.start, end: dag.endExclusive },
   };
 }

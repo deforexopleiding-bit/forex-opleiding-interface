@@ -32,26 +32,19 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { periodRange } from './_lib/nl-period.js';
 
-function isoDate(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-function mondayOfWeek(d) {
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : (1 - day);
-  const m = new Date(d);
-  m.setDate(d.getDate() + diff);
-  m.setHours(0, 0, 0, 0);
-  return m;
-}
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-function sinceForPeriod(p) {
-  const now = new Date();
-  if (p === 'today') return isoDate(now);
-  if (p === 'week')  return isoDate(mondayOfWeek(now));
-  if (p === 'month') return isoDate(startOfMonth(now));
+// Vertaal de publieke period-param (today|week|month|all) naar een NL-tijdzone-
+// aware UTC-range via nl-period.js. VOORHEEN bucketten we op de server-lokale
+// (=UTC op Vercel) kalenderdag: `since = now.getFullYear()-getMonth()-getDate()`
+// + '.gte(aangemaakt, since+"T00:00:00")' zonder offset → een lead van 00:37 NL
+// (= 22:37 UTC de dag ervoor) viel in de UTC-dag ervoor en telde niet mee in
+// "vandaag". Nu bepalen we [start, eind) in Europe/Amsterdam en zetten die om
+// naar exacte UTC-instants (DST-correct). 'all' → geen range.
+function rangeForPeriod(p) {
+  if (p === 'today') return periodRange('dag');
+  if (p === 'week')  return periodRange('week');
+  if (p === 'month') return periodRange('maand');
   return null; // 'all'
 }
 
@@ -81,16 +74,23 @@ export default async function handler(req, res) {
     const q = req.query || {};
     const periodRaw = String(q.period || 'all').toLowerCase();
     const period = ['today', 'week', 'month', 'all'].includes(periodRaw) ? periodRaw : 'all';
-    const since = sinceForPeriod(period);
+    const range = rangeForPeriod(period);          // null bij 'all'
+    const since = range ? range.label : null;      // NL-kalenderdatum van start (response-compat)
     const debug = String(q.debug || '') === '1';
 
     // Bron: leads (raw tabel) — bevat afwijzer + email; view leads_overzicht doet dat niet.
+    // Half-open interval [start, eind) op UTC-instants die NL-lokale dag/week/maand
+    // representeren — houdt de index op `aangemaakt` bruikbaar én bucket correct.
     let qy = supabaseAdmin
       .from('leads')
       .select('traject, email, afwijzer')
       .is('verwijderd_op', null)
       .limit(50000);
-    if (since) qy = qy.gte('aangemaakt', since + 'T00:00:00');
+    if (range) {
+      qy = qy
+        .gte('aangemaakt', range.start.toISOString())
+        .lt('aangemaakt', range.endExclusive.toISOString());
+    }
     const { data, error } = await qy;
     if (error) throw new Error('leads: ' + error.message);
 
