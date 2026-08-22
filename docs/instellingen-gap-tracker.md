@@ -150,6 +150,15 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 - **Extern platform:** mk-meta, lms-instel
 - **Downstream van com-wa:** ev-templates
 
+**Sales-bonus follow-ups (losgemaakt uit de Fase 1 correctness-PR):**
+- `sales-reports.js` periode-bucketing (`dayStr`/`isoWeekKey`/`periodKey`, default from/to)
+  staat nog op server-lokale/UTC datums → moet via `api/_lib/nl-period.js`
+  (Europe/Amsterdam). Bewust NIET bonus-only gefixt omdat dezelfde bucketing óók
+  omzet/funnel-metrics raakt — één gezamenlijke nl-period-pass.
+- `finance-dashboard-counts.js`: de output-key `mentorBonusPending` is een
+  legacy-misnomer (leest de SALES-`bonuses`-tabel). Key + finance-dashboard-UI-label
+  hernoemen naar `salesBonusPending` (breaking op de consumer → aparte PR met UI-fix).
+
 ## Verdwenen acties (uit admin.html, nergens meer)
 
 - Bubble option-waarden probe (admin.html r562) → deel van `sys-bubble-schema` quick-add
