@@ -1022,6 +1022,213 @@
     </div>`;
   }
 
+  /* Ronde-31 grote-brok · agents-kennis — KB-artikelen native CRUD + promote-to-agent.
+     Endpoints: /api/kennisbank-artikelen (GET ?q&categorie&agent&limit / POST /
+     PATCH ?id / DELETE ?id) + /api/kennisbank-promote-to-agent (POST). Permission:
+     admin.joost_config. Schema: onderwerp (max 200) · categorie (max 40) · content
+     (max 10000) · agents[] (subset joost/simone/mila/lisa) · usage_count. Fail-soft
+     503 MIGRATION_MISSING als tabel nog niet bestaat (nette in-page banner).
+     Motor onaangeraakt (agents lezen KB read-only via bestaande queries). */
+  const _KB_AGENTS = ['joost','simone','mila','lisa'];
+  const _kb = {
+    loading: false, fetched: false, error: null, migrationMissing: false,
+    items: [], filterQ: '', filterCat: '', filterAgent: '',
+    ed: null, busy: false, promoteFor: null,
+  };
+  async function fetchKbArtikelen() {
+    if (_kb.loading || _kb.fetched) return;
+    _kb.loading = true; _kb.error = null; _kb.migrationMissing = false; if (render) render();
+    try {
+      const params = new URLSearchParams();
+      if (_kb.filterQ)     params.set('q', _kb.filterQ);
+      if (_kb.filterCat)   params.set('categorie', _kb.filterCat);
+      if (_kb.filterAgent) params.set('agent', _kb.filterAgent);
+      params.set('limit', '500');
+      const j = await tryFetch('kb-art', '/api/kennisbank-artikelen?' + params.toString());
+      if (j?.code === 'MIGRATION_MISSING') { _kb.migrationMissing = true; }
+      else if (j?.__error || j?.error) { throw new Error(j?.__error || j?.error); }
+      else _kb.items = j?.items || [];
+    } catch (e) { _kb.error = e?.message || 'onbekend'; }
+    _kb.loading = false; _kb.fetched = true; if (render) render();
+  }
+  window.__setKbReload = () => { _kb.fetched = false; fetchKbArtikelen(); };
+  window.__setKbFilterAgent = (v) => { _kb.filterAgent = String(v || ''); _kb.fetched = false; fetchKbArtikelen(); };
+  window.__setKbNew  = () => { _kb.ed = { id: null, onderwerp: '', categorie: '', content: '', agents: [] }; if (render) render(); };
+  window.__setKbEdit = (id) => { const it = _kb.items.find(x => x.id === id); if (!it) return; _kb.ed = { ...it, agents: Array.isArray(it.agents) ? it.agents.slice() : [] }; if (render) render(); };
+  window.__setKbCancel = () => { _kb.ed = null; if (render) render(); };
+  window.__setKbAgent = (a, on) => {
+    if (!_kb.ed) return;
+    _kb.ed.agents = _kb.ed.agents.filter(x => x !== a);
+    if (on) _kb.ed.agents.push(a);
+    if (render) render();
+  };
+  function _kbSyncFromDom() {
+    if (!_kb.ed) return;
+    const q = (sel) => document.querySelector(sel);
+    ['onderwerp','categorie','content'].forEach(k => { const el = q(`[data-kb-field="${k}"]`); if (el) _kb.ed[k] = String(el.value || ''); });
+  }
+  window.__setKbSave = () => {
+    _kbSyncFromDom();
+    const e = _kb.ed; if (!e) return;
+    if (!String(e.onderwerp || '').trim()) { showToast('Onderwerp is verplicht', 'warn'); return; }
+    if (String(e.onderwerp).length > 200)  { showToast('Onderwerp max 200 tekens', 'warn'); return; }
+    if (String(e.categorie || '').length > 40) { showToast('Categorie max 40 tekens', 'warn'); return; }
+    if (String(e.content || '').length > 10000) { showToast('Content max 10000 tekens', 'warn'); return; }
+    const payload = {
+      onderwerp: String(e.onderwerp).trim(),
+      categorie: String(e.categorie || '').trim() || null,
+      content:   String(e.content || ''),
+      agents:    (e.agents || []).filter(a => _KB_AGENTS.includes(a)),
+    };
+    const isEdit = !!e.id;
+    const agentNote = payload.agents.length
+      ? ' Gekoppeld aan: ' + payload.agents.join(', ')
+      : ' (geen agents gekoppeld — artikel is inert tot koppeling of promote).';
+    openConfirm(`${isEdit ? 'Wijzigingen opslaan voor artikel' : 'Nieuw KB-artikel aanmaken:'} "${esc(payload.onderwerp)}"?${agentNote}`, async () => {
+      _kb.busy = true; if (render) render();
+      try {
+        const url = isEdit
+          ? '/api/kennisbank-artikelen?id=' + encodeURIComponent(e.id)
+          : '/api/kennisbank-artikelen';
+        const method = isEdit ? 'PATCH' : 'POST';
+        const j = await tryFetch('kb-save', url, {
+          method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(isEdit ? 'Artikel bijgewerkt' : 'Artikel aangemaakt', 'ok');
+        _kb.ed = null; _kb.fetched = false; fetchKbArtikelen();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _kb.busy = false; if (render) render(); }
+    });
+  };
+  window.__setKbDelete = (id) => {
+    const it = _kb.items.find(x => x.id === id); if (!it) return;
+    openConfirm(`Artikel "${esc(it.onderwerp)}" DEFINITIEF verwijderen?${(it.agents||[]).length ? ` Wordt uit ${it.agents.length} agent-KB('s) losgekoppeld.` : ''} Kan niet ongedaan gemaakt worden.`, async () => {
+      try {
+        const j = await tryFetch('kb-del', '/api/kennisbank-artikelen?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Artikel verwijderd', 'ok');
+        _kb.fetched = false; fetchKbArtikelen();
+      } catch (err) { showToast('Verwijderen mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+    }, 'warn');
+  };
+  window.__setKbPromoteOpen  = (id) => { _kb.promoteFor = id; if (render) render(); };
+  window.__setKbPromoteClose = () => { _kb.promoteFor = null; if (render) render(); };
+  window.__setKbPromote = (id, target) => {
+    const it = _kb.items.find(x => x.id === id); if (!it || !_KB_AGENTS.includes(target)) return;
+    openConfirm(`Artikel "${esc(it.onderwerp)}" promoten naar de kennisbank van agent "${target}"? Dit voegt het artikel toe aan het agents[]-veld én update de agent-config zodat de agent 't kan gebruiken bij het genereren van antwoorden. Bumped usage_count.`, async () => {
+      _kb.busy = true; _kb.promoteFor = null; if (render) render();
+      try {
+        const j = await tryFetch('kb-promote', '/api/kennisbank-promote-to-agent', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artikel_id: id, target_agent: target }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(`Gepromoot naar ${target}`, 'ok');
+        _kb.fetched = false; fetchKbArtikelen();
+      } catch (err) { showToast('Promoten mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _kb.busy = false; if (render) render(); }
+    });
+  };
+  function _kbEditor() {
+    const e = _kb.ed; if (!e) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setKbCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:720px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">${e.id ? 'KB-artikel bewerken' : 'Nieuw KB-artikel'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setKbCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px">
+          <label style="font-size:11.5px;color:var(--text-2)">Onderwerp <span style="color:var(--rose)">*</span> <span style="color:var(--text-3)">(max 200)</span>
+            <input type="text" data-kb-field="onderwerp" value="${esc(e.onderwerp || '')}" maxlength="200" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Categorie <span style="color:var(--text-3)">(max 40, optioneel)</span>
+            <input type="text" data-kb-field="categorie" value="${esc(e.categorie || '')}" maxlength="40" placeholder="bv. verkoop, faq, prijzen" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Content <span style="color:var(--text-3)">(max 10000 — markdown/tekst voor RAG)</span>
+            <textarea data-kb-field="content" rows="10" maxlength="10000" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.content || '')}</textarea>
+          </label>
+          <div>
+            <div style="font-size:11.5px;color:var(--text-2);margin-bottom:6px">Gekoppelde agents <span style="color:var(--text-3)">— wie mag dit artikel gebruiken</span></div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap">
+              ${_KB_AGENTS.map(a => `<label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" ${e.agents.includes(a) ? 'checked' : ''} onchange="window.__setKbAgent('${a}', this.checked)" /> ${a}</label>`).join('')}
+            </div>
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Alleen artikelen die aan een agent zijn gekoppeld worden gebruikt bij het genereren. Alternatief: promoot via de knop in de lijst (bumpt usage_count).</div>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setKbCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_kb.busy ? 'disabled' : ''} onclick="window.__setKbSave()">${_kb.busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function _kbPromoteModal() {
+    if (!_kb.promoteFor) return '';
+    const it = _kb.items.find(x => x.id === _kb.promoteFor); if (!it) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setKbPromoteClose()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:440px;width:100%;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div><div style="font-size:14px;font-weight:600">Promoot naar agent</div><div style="font-size:11px;color:var(--text-3)">Artikel: ${esc(it.onderwerp)}</div></div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setKbPromoteClose()">✕</button>
+        </div>
+        <div style="padding:16px 20px;display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:12px;color:var(--text-3);margin-bottom:4px">Kies doel-agent. Al gekoppeld: <b>${(it.agents||[]).join(', ') || '—'}</b></div>
+          ${_KB_AGENTS.map(a => `<button class="btn btn-ghost btn-sm" onclick="window.__setKbPromote('${esc(it.id)}', '${a}')" style="font-size:12.5px;text-align:left;justify-content:flex-start;padding:8px 12px">→ ${a}${(it.agents||[]).includes(a) ? ' <span style="color:var(--text-3);font-size:10.5px">(al gekoppeld — updatet config)</span>' : ''}</button>`).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+  function bodyKbArtikelen() {
+    if (!_kb.fetched && !_kb.loading) queueMicrotask(() => fetchKbArtikelen());
+    if (_kb.migrationMissing) {
+      return `<div style="max-width:900px"><div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:13px;line-height:1.55"><b>Tabel <code>kennisbank_artikelen</code> bestaat nog niet.</b><br>Draai migratie <code>docs/sql-migrations/2026-08-13-kennisbank-artikelen.sql</code> in Supabase SQL-editor om de KB-editor te activeren.</div></div>`;
+    }
+    const rows = _kb.items.map(it => {
+      const agents = (it.agents || []).length ? (it.agents||[]).map(a => `<span style="padding:1px 6px;border-radius:5px;background:var(--violet-soft);color:var(--violet);font-size:10px;font-weight:600;margin-right:3px">${esc(a)}</span>`).join('') : '<span style="font-size:10.5px;color:var(--text-3)">(geen)</span>';
+      const preview = String(it.content || '').replace(/\s+/g, ' ').slice(0, 90);
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:8px 12px;font-size:12.5px;font-weight:600;max-width:280px">${esc(it.onderwerp || '(zonder titel)')}${preview ? `<div style="font-size:11px;color:var(--text-3);font-weight:normal;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}${it.content && it.content.length > 90 ? '…' : ''}</div>` : ''}</td>
+        <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3)">${esc(it.categorie || '—')}</td>
+        <td style="padding:8px 12px">${agents}</td>
+        <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);text-align:center">${it.usage_count || 0}</td>
+        <td style="padding:8px 12px;font-size:11px;color:var(--text-3);white-space:nowrap">${esc(String(it.updated_at || '').slice(0,10))}</td>
+        <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setKbEdit('${esc(it.id)}')" style="font-size:11px">Edit</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setKbPromoteOpen('${esc(it.id)}')" style="font-size:11px;color:var(--violet)">→ Promote</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setKbDelete('${esc(it.id)}')" style="font-size:11px;color:var(--rose)">Verwijder</button>
+        </td>
+      </tr>`;
+    }).join('');
+    const agentOpts = ['', ..._KB_AGENTS].map(a => `<option value="${a}"${a === _kb.filterAgent ? ' selected' : ''}>${a ? 'agent: '+a : 'alle agents'}</option>`).join('');
+    return `<div style="max-width:1200px">
+      ${_kbEditor()}
+      ${_kbPromoteModal()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>LIVE KB-editor.</b> Artikelen worden door agents (Joost/Lisa/Simone/Mila) opgehaald via RAG. Koppel expliciet aan agent via checkbox OF gebruik <b>→ Promote</b> voor gecontroleerde toevoeging (bumpt usage_count + updatet agent-config).
+      </div>
+      ${_kb.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_kb.error)}</div>` : ''}
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+        <select onchange="window.__setKbFilterAgent(this.value)" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">${agentOpts}</select>
+        <span style="font-size:11.5px;color:var(--text-3);flex:1">${_kb.items.length} artikel(en)</span>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setKbReload()" style="font-size:11px">↻ Vernieuwen</button>
+        <button class="btn btn-primary btn-sm" onclick="window.__setKbNew()">➕ Nieuw artikel</button>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Onderwerp</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Categorie</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Agents</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Usage</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Updated</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_kb.loading?'Laden…':'Geen artikelen'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   /* Ronde-31 grote-brok · ev-auto — event-automations native lijst + metadata-edit.
      Endpoints: /api/events-automations-list (GET), /api/events-automation-save (POST
      full-replace), /api/events-automation-delete (POST {id}). Steps-editor + test-
@@ -4061,7 +4268,7 @@
     // port vereist eigen brok per sectie omdat de bron-modules eigen state/UI hebben).
     if (cur.id === 'agents-lisa')        return bodyAgentsLisa();
     if (cur.id === 'agents-manager')     return bodyDeepLink('AI Agents', 'AI Manager-instellingen (system-prompt, kennis, autonomie) staan in de AI Agents-module. Het werkende endpoint /api/super-admin-ai-manager voedt de widget op het dashboard.', 'agents');
-    if (cur.id === 'agents-kennis')      return bodyDeepLink('AI Agents', 'Kennisbank voor AI (Lisa/Joost) staat verspreid over de AI Agents-module + Joost-config. Aparte brok om te centraliseren.', 'agents');
+    if (cur.id === 'agents-kennis')      return bodyKbArtikelen();
     if (cur.id === 'sales-trajecten')    return bodyTrajecten();
     if (cur.id === 'sales-producten')    return bodyDeepLink('Sales', 'Losse producten (E-books, lascursus, consultancy) staan in de Sales-catalogus/wizard. Aparte brok voor centrale editor.', 'sales');
     if (cur.id === 'sales-bonus')        return bodyDeepLink('Sales', 'Verkopers en bonus-config zit in de Sales-module + team_members-tabel. Bonus-berekening is server-side; UI-editor volgt in Wave 3.', 'sales');
@@ -4126,6 +4333,8 @@
       // Ronde-31 grote-brok ev-auto native — flow-lijst + metadata-edit + enable-toggle + delete;
       // stappen-editor + test-run blijven deep-link (te complex/risicovol voor deze ronde).
       'ev-auto',
+      // Ronde-31 grote-brok agents-kennis native — KB-artikelen CRUD + promote-to-agent.
+      'agents-kennis',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -4137,7 +4346,7 @@
     // Backward-compat: WIRED bevat beide zodat andere logic werkt.
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
-      'agents-manager','agents-kennis',
+      'agents-manager',
       'sales-producten','sales-bonus',
       'ev-templates','ev-locaties','lms-instel',
       'mk-meta','mk-sequenties',

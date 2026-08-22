@@ -17,13 +17,13 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 8 grote-brokken open · 13 deferred · 17 done** (totaal 38) — **3 grote brokken ✓ (lisa · trajecten · ev-auto)**
+**0 quick-adds open · 7 grote-brokken open · 13 deferred · 18 done** (totaal 38) — **4 grote brokken ✓ (lisa · trajecten · ev-auto · agents-kennis)**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 17 | — |
+| done         | 18 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 8  | agents-kennis of mk-sequenties als volgende |
+| open (grote-brok) | 7  | mk-sequenties of alg-meldingen als volgende |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -63,7 +63,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `agents-lisa`    | done | — | ja | v=45 (v=44 native persona/fases/KB/follow-up + draft/publish/rollback; v=45 fase-shape fix {system,transition,examples[]} + dos/donts newline-array + delay strict-reject + disabled-styling) |
 | `agents-manager` | open | grote-brok | ja (`/api/super-admin-ai-manager`) | deep-link |
-| `agents-kennis`  | open | grote-brok | ja (`/api/kennisbank-*`) | deep-link |
+| `agents-kennis`  | done | — | ja | v=48 (KB-artikelen CRUD native + agents[]-checkboxes + promote-to-agent modal; MIGRATION_MISSING fail-soft banner) |
 
 ## Events & Leren
 
