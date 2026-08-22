@@ -1022,6 +1022,191 @@
     </div>`;
   }
 
+  /* Ronde-31 grote-brok · ev-auto — event-automations native lijst + metadata-edit.
+     Endpoints: /api/events-automations-list (GET), /api/events-automation-save (POST
+     full-replace), /api/events-automation-delete (POST {id}). Steps-editor + test-
+     run blijven DEEP-LINK naar Automatiseringen-module.
+     TEST-RUN-ONDERZOEK: /api/events-automation-test IS GEEN dry-run — het INSERT'et
+     een echte is_test=true attendee en de engine verstuurt daadwerkelijk berichten
+     (verkorte wait 15s). De bestaande Automatiseringen-module heeft een modal met
+     hardgekozen eigen-email/nummer als test-target. Compact porten van die flow
+     is te risicovol voor deze commit — deep-link naar Automatiseringen behouden.
+     Endpoint events-automation-save is FULL-REPLACE: partial update (bv. enable-toggle)
+     vraagt dat we alle bestaande velden meesturen. Op basis van de row uit list. */
+  const _EA_TRIGGERS = ['on_signup','on_switch_in','on_switch_out','on_no_show','on_attended','on_final_no_show','on_ticket_purchase','on_assessment_not_completed_after'];
+  const _EA_SCOPES   = ['all','niveau','events'];
+  const _EA_MODES    = ['prospective_only','all_current','all_current_and_new'];
+  const _ea = { loading: false, fetched: false, error: null, items: [], busy: {}, ed: null };
+  async function fetchEvAutos() {
+    if (_ea.loading || _ea.fetched) return;
+    _ea.loading = true; _ea.error = null; if (render) render();
+    try {
+      const j = await tryFetch('ev-autos-list', '/api/events-automations-list');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      _ea.items = j?.automations || [];
+    } catch (e) { _ea.error = e?.message || 'onbekend'; }
+    _ea.loading = false; _ea.fetched = true; if (render) render();
+  }
+  // Save-endpoint is full-replace. Bij een enable-toggle of metadata-edit moeten we
+  // ALLE bestaande velden meesturen (steps intact laten).
+  async function _eaFullReplaceSave(row, overrides) {
+    const payload = {
+      id: row.id,
+      name: row.name,
+      description: row.description || '',
+      trigger_type: row.trigger_type,
+      trigger_config: row.trigger_config || {},
+      scope_type: row.scope_type,
+      scope_config: row.scope_config || {},
+      enroll_mode: row.enroll_mode,
+      enabled: !!row.enabled,
+      steps: row.steps || [],
+      ...overrides,
+    };
+    const j = await tryFetch('ev-auto-save', '/api/events-automation-save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+    return j?.automation;
+  }
+  window.__setEaToggle = (id) => {
+    const a = _ea.items.find(x => x.id === id); if (!a) return;
+    const next = !a.enabled;
+    const stepCount = Array.isArray(a.steps) ? a.steps.length : 0;
+    const msg = next
+      ? `Automation "${esc(a.name || 'zonder naam')}" AANZETTEN? Zodra 'ie live is, triggert de engine bij elke passende ${esc(a.trigger_type)}-event en verstuurt de ${stepCount} stap(pen) — inclusief mails/WA-berichten. Ga hier ALLEEN mee door als de flow gereviewed en getest is.`
+      : `Automation "${esc(a.name || 'zonder naam')}" UITZETTEN? Nieuwe events triggeren geen runs meer; lopende runs draaien tot ze klaar zijn. Kan altijd weer aan.`;
+    openConfirm(msg, async () => {
+      _ea.busy[id] = true; if (render) render();
+      try {
+        const upd = await _eaFullReplaceSave(a, { enabled: next });
+        // Optimistic replace in state:
+        const i = _ea.items.findIndex(x => x.id === id); if (i >= 0) _ea.items[i] = upd || { ..._ea.items[i], enabled: next };
+        showToast(next ? 'Automation aan' : 'Automation uit', 'ok');
+      } catch (e) { showToast('Toggle mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+      finally { delete _ea.busy[id]; if (render) render(); }
+    }, next ? 'warn' : undefined);
+  };
+  window.__setEaDelete = (id) => {
+    const a = _ea.items.find(x => x.id === id); if (!a) return;
+    if (a.enabled) { showToast('Zet de automation eerst UIT vóór verwijderen', 'warn'); return; }
+    openConfirm(`Automation "${esc(a.name || 'zonder naam')}" DEFINITIEF verwijderen? Historische runs blijven in event_automation_runs; deze definitie wordt niet meer getriggerd.`, async () => {
+      _ea.busy[id] = true; if (render) render();
+      try {
+        const j = await tryFetch('ev-auto-del', '/api/events-automation-delete', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _ea.items = _ea.items.filter(x => x.id !== id);
+        showToast('Verwijderd', 'ok');
+      } catch (e) { showToast('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+      finally { delete _ea.busy[id]; if (render) render(); }
+    }, 'warn');
+  };
+  window.__setEaEditMeta = (id) => {
+    const a = _ea.items.find(x => x.id === id); if (!a) return;
+    _ea.ed = { id: a.id, name: a.name || '', description: a.description || '', enroll_mode: a.enroll_mode || 'prospective_only' };
+    if (render) render();
+  };
+  window.__setEaEditCancel = () => { _ea.ed = null; if (render) render(); };
+  window.__setEaEditMode = (v) => { if (_ea.ed) _ea.ed.enroll_mode = String(v || 'prospective_only'); };
+  window.__setEaEditSave = () => {
+    if (!_ea.ed) return;
+    const q = (sel) => document.querySelector(sel);
+    const nm = q('[data-ea-field="name"]'); if (nm) _ea.ed.name = String(nm.value || '');
+    const ds = q('[data-ea-field="description"]'); if (ds) _ea.ed.description = String(ds.value || '');
+    const em = q('[data-ea-field="enroll_mode"]'); if (em) _ea.ed.enroll_mode = String(em.value || 'prospective_only');
+    const e = _ea.ed;
+    if (!String(e.name || '').trim()) { showToast('Naam is verplicht', 'warn'); return; }
+    const a = _ea.items.find(x => x.id === e.id); if (!a) return;
+    openConfirm(`Metadata bijwerken voor "${esc(e.name)}"? Stappen/trigger/scope blijven ongewijzigd — alleen naam, beschrijving en enroll-mode worden aangepast.`, async () => {
+      _ea.busy[e.id] = true; if (render) render();
+      try {
+        const upd = await _eaFullReplaceSave(a, { name: e.name.trim(), description: e.description.trim(), enroll_mode: e.enroll_mode });
+        const i = _ea.items.findIndex(x => x.id === e.id); if (i >= 0) _ea.items[i] = upd || _ea.items[i];
+        showToast('Metadata bijgewerkt', 'ok');
+        _ea.ed = null;
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { delete _ea.busy[e.id]; if (render) render(); }
+    });
+  };
+  function _eaRenderEditor() {
+    const e = _ea.ed; if (!e) return '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setEaEditCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:640px;width:100%;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">Metadata bewerken · automation</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setEaEditCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+          <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.55">
+            <b>Alleen naam/beschrijving/enroll-mode.</b> Stappen, trigger, scope en aan/uit-staat blijven ongewijzigd — die vragen de volledige editor (Automatiseringen-module).
+          </div>
+          <label style="font-size:11.5px;color:var(--text-2)">Naam <span style="color:var(--rose)">*</span>
+            <input type="text" data-ea-field="name" value="${esc(e.name)}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Beschrijving (max 2000)
+            <textarea data-ea-field="description" rows="3" maxlength="2000" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.description)}</textarea>
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Enroll-mode <span style="color:var(--text-3)">— wie krijgt de flow bij activatie</span>
+            <select data-ea-field="enroll_mode" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
+              ${_EA_MODES.map(m => `<option value="${m}"${m===e.enroll_mode?' selected':''}>${m}</option>`).join('')}
+            </select>
+          </label>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setEaEditCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_ea.busy[e.id] ? 'disabled' : ''} onclick="window.__setEaEditSave()">${_ea.busy[e.id] ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bodyEvAuto() {
+    if (!_ea.fetched && !_ea.loading) queueMicrotask(() => fetchEvAutos());
+    const chip = (txt, tone) => `<span style="padding:2px 7px;border-radius:6px;background:var(--${tone}-soft);color:var(--${tone});font-size:10.5px;font-weight:600">${esc(txt)}</span>`;
+    const rows = _ea.items.map(a => {
+      const busy = !!_ea.busy[a.id];
+      const stepN = Array.isArray(a.steps) ? a.steps.length : 0;
+      return `<tr style="border-top:1px solid var(--border);${a.enabled ? '' : 'opacity:.65'}">
+        <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(a.name || '(zonder naam)')}${a.description ? `<div style="font-size:11px;color:var(--text-3);font-weight:normal;margin-top:2px">${esc(String(a.description).slice(0, 90))}${a.description.length>90?'…':''}</div>` : ''}</td>
+        <td style="padding:8px 12px">${chip(a.trigger_type || '—', 'violet')}</td>
+        <td style="padding:8px 12px">${chip(a.scope_type || 'all', 'teal')}</td>
+        <td style="padding:8px 12px;font-size:11.5px;text-align:center">${stepN}</td>
+        <td style="padding:8px 12px">
+          <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setEaToggle('${esc(a.id)}')" style="font-size:11px;color:${a.enabled?'var(--emerald)':'var(--text-3)'}">${a.enabled ? '✓ AAN' : '⨯ UIT'}</button>
+        </td>
+        <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setEaEditMeta('${esc(a.id)}')" style="font-size:11px">Edit-meta</button>
+          <a href="/modules/klanten-v2/?v2preview=automatiseringen" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">Stappen ↗</a>
+          <button class="btn btn-ghost btn-sm" ${busy || a.enabled?'disabled':''} onclick="window.__setEaDelete('${esc(a.id)}')" style="font-size:11px;color:var(--rose)" title="${a.enabled?'Zet eerst UIT':''}">Verwijder</button>
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1200px">
+      ${_eaRenderEditor()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>LIVE-lijst met event-automations.</b> Hier: metadata bewerken (naam/beschrijving/enroll-mode), aan/uit-toggle, verwijderen. <b>Stappen-editor + test-run</b> leven in de Automatiseringen-module (complexer sub-editor per stap-type; test-run stuurt échte berichten naar een test-attendee met is_test=true — GEEN dry-run).
+        <a href="/modules/klanten-v2/?v2preview=automatiseringen" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Automatiseringen →</a>
+      </div>
+      ${_ea.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ea.error)}</div>` : ''}
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_ea.items.length} automation(s) — ${_ea.items.filter(a=>a.enabled).length} actief · ${_ea.items.filter(a=>!a.enabled).length} uit</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Trigger</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Scope</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Stappen</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_ea.loading?'Laden…':'Geen automations gevonden'}</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:11px;color:var(--text-3);line-height:1.55"><b>Nieuw aanmaken</b> vraagt trigger+scope+stappen — dat gaat via de Automatiseringen-wizard. Hier zie je alle bestaande definities.</div>
+    </div>`;
+  }
+
   /* Ronde-31 grote-brok · sales-trajecten — variant CRUD native.
      Endpoints: /api/traject-variants (GET ?variant_id / POST / PUT ?id / DELETE ?id)
      + /api/sales-products (GET voor product-picker). Permissions:
@@ -3880,7 +4065,7 @@
     if (cur.id === 'sales-trajecten')    return bodyTrajecten();
     if (cur.id === 'sales-producten')    return bodyDeepLink('Sales', 'Losse producten (E-books, lascursus, consultancy) staan in de Sales-catalogus/wizard. Aparte brok voor centrale editor.', 'sales');
     if (cur.id === 'sales-bonus')        return bodyDeepLink('Sales', 'Verkopers en bonus-config zit in de Sales-module + team_members-tabel. Bonus-berekening is server-side; UI-editor volgt in Wave 3.', 'sales');
-    if (cur.id === 'ev-auto')            return bodyDeepLink('Automatiseringen', 'Event-automatiseringen worden in de Automatiseringen-module bewerkt (per-trigger flows). Directe centralisatie vereist port van die UI.', 'automatiseringen');
+    if (cur.id === 'ev-auto')            return bodyEvAuto();
     if (cur.id === 'ev-templates')       return bodyDeepLink('Events', 'Event-berichten (e-mail + WhatsApp) worden per template beheerd in de Events-module + com-wa hier voor WA-templates.', 'events');
     if (cur.id === 'ev-locaties')        return bodyDeepLink('Events', 'Locaties (zalen/adressen/routes) staan in de events-config; centrale editor volgt.', 'events');
     if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in Bubble; het CRM leest via bubble-api. Zie sys-bubble-schema voor diagnostiek.', null);
@@ -3938,6 +4123,9 @@
       'agents-lisa',
       // Ronde-31 grote-brok sales-trajecten native — variant CRUD (naam/duur/koppelingen; geen TL-sync).
       'sales-trajecten',
+      // Ronde-31 grote-brok ev-auto native — flow-lijst + metadata-edit + enable-toggle + delete;
+      // stappen-editor + test-run blijven deep-link (te complex/risicovol voor deze ronde).
+      'ev-auto',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -3951,7 +4139,7 @@
     const DEEPLINK = new Set([
       'agents-manager','agents-kennis',
       'sales-producten','sales-bonus',
-      'ev-auto','ev-templates','ev-locaties','lms-instel',
+      'ev-templates','ev-locaties','lms-instel',
       'mk-meta','mk-sequenties',
       // Ronde-31 STAP 5: workflows-regels + templates blijven Finance (motor-consistentie + WIK-14 legal).
       'wb-workflows','wb-berichten',

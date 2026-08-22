@@ -17,13 +17,13 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 9 grote-brokken open · 13 deferred · 16 done** (totaal 38) — **agents-lisa + sales-trajecten ✓**
+**0 quick-adds open · 8 grote-brokken open · 13 deferred · 17 done** (totaal 38) — **3 grote brokken ✓ (lisa · trajecten · ev-auto)**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 16 | — |
+| done         | 17 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 9  | ev-auto als volgende (advies) |
+| open (grote-brok) | 8  | agents-kennis of mk-sequenties als volgende |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -69,7 +69,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 | sectie | status | classificatie | endpoint? | v= / noot |
 |---|---|---|---|---|
-| `ev-auto`      | open | grote-brok | ja (`/api/events-automation-*`) | deep-link |
+| `ev-auto`      | done | — | ja | v=47 (lijst + metadata-edit + enable/disable-toggle + delete native; stappen-editor + test-run blijven Automatiseringen-module — test IS geen dry-run) |
 | `ev-templates` | deferred | bewust-deferred | via com-wa | volgt wanneer com-wa uitgebreid is |
 | `ev-locaties`  | open | grote-brok | nee (nieuwe editor + tabel nodig) | deep-link |
 | `lms-instel`   | deferred | bewust-deferred | extern (Bubble) | geen native mogelijk |
