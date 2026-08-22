@@ -89,6 +89,12 @@
     cancelled: ['neutral', 'Geannuleerd'],
   };
 
+  // Compacte gedaan/niet-gedaan indicator (groen vinkje / rood kruisje) voor de
+  // Abbo- en Onboarding-kolommen op het Offertes-overzicht.
+  const svStatusIcon = (ok, doneTitle, notTitle) => ok
+    ? `<span title="${esc(doneTitle)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:12px;font-weight:800;background:var(--emerald-soft,rgba(16,185,129,.16));color:var(--emerald,#10b981)">✓</span>`
+    : `<span title="${esc(notTitle)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;font-size:12px;font-weight:800;background:var(--rose-soft,rgba(244,63,94,.16));color:var(--rose,#f43f5e)">✗</span>`;
+
   const RET_STATUS_TO_PILL = (item) => {
     if (item.retention_not_renewing) return ['warn', 'Niet verlengen'];
     if ((item.days_left || 0) < 0)   return ['warn', 'Afgelopen'];
@@ -386,7 +392,7 @@
       ])}
       <div class="sv-total">${_off.loading ? 'Laden…' : (total != null ? `${total} offerte${total === 1 ? '' : 's'}` : '—')}</div>
       ${H.table(
-        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }],
+        [{ l: 'Offerte-nr' }, { l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Verkoper', cls: 'optional' }, { l: 'Bedrag', cls: 'r' }, { l: 'Datum', cls: 'r optional' }, { l: 'Status' }, { l: 'Abbo' }, { l: 'Onboarding' }],
         items.map(q => [
           `<span class="sv-off-nr">${q.quote_reference || ('#' + String(q.deal_id || '').slice(0, 8))}</span>`,
           `<div class="cell-main-wrap"><div class="av av-sm">${H.av(q.customer_name || '?')}</div><span class="cell-main">${q.customer_name || '—'}</span></div>`,
@@ -395,6 +401,8 @@
           `<span class="mono">${eur0(q.total_amount)}</span>`,
           `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
           H.pill((OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[0], (OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[1]),
+          svStatusIcon(q.has_subscription, 'Abbo ingevoerd', 'Nog geen abbo'),
+          svStatusIcon(q.has_onboarding, 'Onboarding aangemeld', 'Onboarding niet aangemeld'),
         ]),
         '__svOfferteRowClick'
       )}

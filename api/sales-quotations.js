@@ -123,6 +123,17 @@ export default async function handler(req, res) {
       for (const s of subs || []) hasSubByDeal[s.deal_id] = true;
     }
 
+    // Onboarding-marker per KLANT (onboardings is op customer_id gekeyd, niet op
+    // deal) — zelfde bron als de offerte-detail ("Onboarding al aangemeld"):
+    // een niet-gearchiveerde onboarding. Bulk-lookup op de al-verzamelde custIds,
+    // geen N+1. Fail-soft: bij fout blijft has_onboarding overal false.
+    const hasOnboardingByCust = {};
+    if (custIds.length) {
+      const { data: obs } = await supabaseAdmin.from('onboardings')
+        .select('customer_id').in('customer_id', custIds).neq('status', 'gearchiveerd');
+      for (const o of obs || []) if (o.customer_id) hasOnboardingByCust[o.customer_id] = true;
+    }
+
     // Search wordt server-side afgehandeld via searchCustomerIds hierboven.
     // Geen client-side .filter() meer, want dat corrupt de paginering-count.
     const quotations = (deals || []).map(d => {
@@ -150,6 +161,8 @@ export default async function handler(req, res) {
         // Nodig voor het menu-item 'Markeer afgehandeld' vs 'Weer openzetten'.
         has_linked_subscription:      !!hasSubByDeal[d.id],
         subscription_marked_done:     d.subscription_marked_done === true,
+        // Onboarding aangemeld voor deze klant? (klant-gekeyd, zelfde bron als detail)
+        has_onboarding:               !!hasOnboardingByCust[d.customer_id],
       };
     });
 
