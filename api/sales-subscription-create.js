@@ -21,6 +21,7 @@ import { createTlInvoice } from './_lib/invoice-create-core.js';
 // motivering in de comment bij de gate-plek verderop (r~118).
 import { assertDateNotInPast } from './_lib/onboarding-start-date.js';
 import { validateBypassRequest } from './_lib/reservation-fee-bypass.js';
+import { nlDateString } from './_lib/nl-period.js';
 
 // Offerte-beveiliging bouwstap 2/2 — €100 reserveringsfee bij late-start-
 // uitzondering met fee-akkoord. Fee is INCL. btw; excl. wordt afgeleid van
@@ -468,22 +469,49 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3. Bonus op de eerste 1-termijn-sub (aanbetaling): over het totaalbedrag.
+    // 3. Bonus op de eerste 1-termijn-sub (aanbetaling): over het REGELBEDRAG
+    //    van die aanbetaling, EXCL. BTW (line_items.amount = excl). NB: eerder
+    //    zei de comment "over het totaalbedrag" — dat klopte niet; base is de
+    //    aanbetalings-sub, niet de hele deal.
     let bonus = null;
     const downSub = subsNorm.find(s => (Number(s.term_count) || 1) === 1);
     const downAmount = downSub ? downSub._lines.reduce((sum, li) => sum + (Number(li.amount) || 0), 0) : 0;
     if (downAmount > 0 && deal.sales_user_id) {
-      const { data: cfg } = await supabaseAdmin.from('sales_bonus_configs')
-        .select('percentage, threshold_amount').eq('user_id', deal.sales_user_id)
-        .order('active_from', { ascending: false }).limit(1).maybeSingle();
-      const pct = cfg?.percentage ?? 3;
-      const threshold = cfg?.threshold_amount ?? 1000;
-      if (downAmount >= Number(threshold)) {
-        const bonusAmount = Math.round(downAmount * Number(pct)) / 100;
-        const { data: b } = await supabaseAdmin.from('bonuses').insert({
-          deal_id: dealId, sales_user_id: deal.sales_user_id, amount: bonusAmount, status: 'pending',
-        }).select('*').single();
-        bonus = b || { amount: bonusAmount, status: 'pending' };
+      // (a) Geen bonus voor TEST-klanten. is_test leeft op customers (niet op
+      //     deals/bonuses) — vandaar een gerichte lookup op deze klant.
+      const { data: custTest } = await supabaseAdmin.from('customers')
+        .select('is_test').eq('id', deal.customer_id).maybeSingle();
+      // (b) IDEMPOTENT: nooit een tweede bonus voor dezelfde deal. Een wizard-
+      //     retry (of dubbele submit) mocht voorheen een 2e pending-bonus
+      //     insluizen → dubbele uitbetaling. Één bonus per deal.
+      const { data: existingBonus } = await supabaseAdmin.from('bonuses')
+        .select('id').eq('deal_id', dealId).limit(1).maybeSingle();
+
+      if (custTest?.is_test) {
+        bonus = null;                 // test-klant → geen bonus
+      } else if (existingBonus) {
+        bonus = null;                 // al een bonus voor deze deal → niet nog een keer
+        console.log('[sub-create] bonus skip: deal', dealId, 'heeft al bonus', existingBonus.id);
+      } else {
+        // Config: nieuwste ACTIEVE regel (active_from ≤ vandaag < active_until).
+        // Voorheen werd active_until genegeerd → een verlopen config kon nog
+        // gekozen worden. NL-datum voor de dag-grens.
+        const today = nlDateString(new Date());
+        const { data: cfg } = await supabaseAdmin.from('sales_bonus_configs')
+          .select('percentage, threshold_amount')
+          .eq('user_id', deal.sales_user_id)
+          .lte('active_from', today)
+          .or(`active_until.is.null,active_until.gte.${today}`)
+          .order('active_from', { ascending: false }).limit(1).maybeSingle();
+        const pct = cfg?.percentage ?? 3;
+        const threshold = cfg?.threshold_amount ?? 1000;
+        if (downAmount >= Number(threshold)) {
+          const bonusAmount = Math.round(downAmount * Number(pct)) / 100;
+          const { data: b } = await supabaseAdmin.from('bonuses').insert({
+            deal_id: dealId, sales_user_id: deal.sales_user_id, amount: bonusAmount, status: 'pending',
+          }).select('*').single();
+          bonus = b || { amount: bonusAmount, status: 'pending' };
+        }
       }
     }
 

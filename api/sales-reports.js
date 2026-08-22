@@ -15,6 +15,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { fetchTestDealIds } from './_lib/test-data-filter.js';
 
 const SIGNED = ['accepted', 'signed'];
 const OPEN = ['draft', 'sent'];
@@ -73,6 +74,11 @@ export default async function handler(req, res) {
     ]);
 
     const dealList = deals || [];
+    // Test-deal-bonussen weren uit alle bonus-aggregaties (is_test via customer
+    // → deal). NB: overige metrics (omzet/funnel) filteren test-deals nog NIET —
+    // dat is bestaand gedrag en valt buiten deze bonus-fix (aparte follow-up).
+    const testDealIds = await fetchTestDealIds(supabaseAdmin);
+    const bonusList = (bonuses || []).filter(b => !testDealIds.has(b.deal_id));
     const entLabel = {}; for (const e of ents || []) entLabel[e.tl_department_id] = e.label;
     const trajName = {}; for (const t of trajs || []) trajName[t.id] = t.name;
     const variantById = {}; for (const v of variants || []) variantById[v.id] = { name: v.name, traject: trajName[v.traject_id] || null };
@@ -89,7 +95,7 @@ export default async function handler(req, res) {
     // ── KPIs ──
     const pipeline_value = dealList.filter(d => OPEN.includes(d.tl_quotation_status)).reduce((s, d) => s + revenueOf(d), 0);
     const revenue_period = signedInPeriod.reduce((s, d) => s + revenueOf(d), 0);
-    const bonus_pending = (bonuses || []).filter(b => b.status === 'pending').reduce((s, b) => s + (Number(b.amount) || 0), 0);
+    const bonus_pending = bonusList.filter(b => b.status === 'pending').reduce((s, b) => s + (Number(b.amount) || 0), 0);
 
     // ── Funnel ──
     const funnel = {
@@ -104,7 +110,7 @@ export default async function handler(req, res) {
     const ensureUser = (uid) => (userAgg[uid] ||= { user_id: uid, user_name: userName[uid] || '—', quotations_count: 0, signed_count: 0, revenue: 0, bonus_pending: 0, bonus_paid: 0 });
     for (const d of createdInPeriod) { if (!d.sales_user_id) continue; const u = ensureUser(d.sales_user_id); if (isQuoted(d)) u.quotations_count++; if (isSigned(d)) u.signed_count++; }
     for (const d of signedInPeriod) { if (!d.sales_user_id) continue; ensureUser(d.sales_user_id).revenue += revenueOf(d); }
-    for (const b of bonuses || []) {
+    for (const b of bonusList) {
       if (!b.sales_user_id || !inPeriod(b.created_at)) continue;
       const u = ensureUser(b.sales_user_id);
       if (b.status === 'pending') u.bonus_pending += Number(b.amount) || 0;
@@ -119,7 +125,7 @@ export default async function handler(req, res) {
     const trendMap = {};
     const ensureTrend = (k) => (trendMap[k] ||= { period: k, revenue: 0, deal_count: 0, bonus_total: 0 });
     for (const d of signedInPeriod) { const k = periodKey(d.tl_quotation_accepted_at || d.created_at, groupBy); if (!k) continue; const t = ensureTrend(k); t.revenue += revenueOf(d); t.deal_count++; }
-    for (const b of bonuses || []) { if (!inPeriod(b.created_at)) continue; const k = periodKey(b.created_at, groupBy); if (!k) continue; ensureTrend(k).bonus_total += Number(b.amount) || 0; }
+    for (const b of bonusList) { if (!inPeriod(b.created_at)) continue; const k = periodKey(b.created_at, groupBy); if (!k) continue; ensureTrend(k).bonus_total += Number(b.amount) || 0; }
     const trend = Object.values(trendMap).map(t => ({ ...t, revenue: Math.round(t.revenue * 100) / 100, bonus_total: Math.round(t.bonus_total * 100) / 100 })).sort((a, b) => a.period.localeCompare(b.period));
 
     // ── Per entiteit (getekend in periode) ──
