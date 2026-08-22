@@ -17,13 +17,13 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 7 grote-brokken open · 13 deferred · 18 done** (totaal 38) — **4 grote brokken ✓ (lisa · trajecten · ev-auto · agents-kennis)**
+**0 quick-adds open · 6 grote-brokken open · 13 deferred · 19 done** (totaal 38) — **5 grote brokken ✓ (lisa · trajecten · ev-auto · agents-kennis · mk-sequenties)**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
-| done         | 18 | — |
+| done         | 19 | — |
 | open (quick-add)   | 0  | — |
-| open (grote-brok) | 7  | mk-sequenties of alg-meldingen als volgende |
+| open (grote-brok) | 6  | alg-meldingen of mk-bronnen-mapping als volgende |
 | open (grote-brok) | 11 | volgorde-advies: agents-lisa → sales-trajecten → ev-auto |
 | deferred     | 13 | wacht op secrets-brok / motor-brok / legal-review |
 
@@ -90,7 +90,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 |---|---|---|---|---|
 | `mk-meta`       | deferred | bewust-deferred | extern (Meta BM) | geen native mogelijk |
 | `mk-bronnen`    | open | grote-brok | nee (mapping-editor nieuw) | read-only distributie live v=37; mapping-editor = brok |
-| `mk-sequenties` | open | grote-brok | ja (Leadsonderhoud-sequenties) | deep-link |
+| `mk-sequenties` | done | — | ja | v=49 (onderhoud-trajecten CRUD native: metadata-edit + actief-toggle + delete; stap-editor + test-send blijven Leadsonderhoud) |
 | `mk-webflow`    | done | — | ja | ≤v=30 (auto-publish + publish-now native) |
 
 ## Team & toegang

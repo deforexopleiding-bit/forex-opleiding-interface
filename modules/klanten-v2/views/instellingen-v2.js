@@ -1022,6 +1022,215 @@
     </div>`;
   }
 
+  /* Ronde-31 grote-brok · mk-sequenties — onderhoud-trajecten native lijst + metadata-edit.
+     Endpoints: /api/leadsonderhoud-trajecten (GET) + /api/leadsonderhoud-traject-opslaan
+     (POST) + /api/leadsonderhoud-traject-verwijderen (POST {id}) + /api/leadsonderhoud-
+     stap-opslaan (POST) + /api/leadsonderhoud-stap-verwijderen (POST {id}).
+     Permission: leads.view (endpoints gebruiken deze bewust als gate).
+     VERZENDING-ONDERZOEK: er is /api/leadsonderhoud-bulk-test-send (bulk-test-send.js)
+     — verstuurt echte berichten (naar test-target). Sequenties draaien via cron die
+     onderhoud_stappen matched op aanleiding + urgentie; actief=true zet een traject
+     LIVE zodat de cron 'em pakt. Zetten van actief=true = LIVE-impact.
+     NATIEVE scope: trajecten-metadata (naam/slug/omschrijving/agent/agenda_link/
+     archief_na/volgorde/actief) + traject-actief-toggle + traject-delete (server-
+     guard: cascade stappen ook weg) + stappen read-only lijst.
+     DEEP-LINK: stap-editor (18 velden per stap incl. score-window/weekdag/tijdstip/
+     alleen_ingelogd etc.) + test-send blijven Leadsonderhoud-module.
+     Motor onaangeraakt (cron-leadsonderhoud + bulk-send-flow niet gewijzigd). */
+  const _ms = { loading: false, fetched: false, error: null, trajecten: [], ed: null, busy: {} };
+  async function fetchMkSequenties() {
+    if (_ms.loading || _ms.fetched) return;
+    _ms.loading = true; _ms.error = null; if (render) render();
+    try {
+      const j = await tryFetch('ms-trajecten', '/api/leadsonderhoud-trajecten');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      _ms.trajecten = j?.trajecten || [];
+    } catch (e) { _ms.error = e?.message || 'onbekend'; }
+    _ms.loading = false; _ms.fetched = true; if (render) render();
+  }
+  window.__setMsReload = () => { _ms.fetched = false; fetchMkSequenties(); };
+  window.__setMsEdit = (id) => { const t = _ms.trajecten.find(x => x.id === id); if (!t) return;
+    _ms.ed = { id: t.id, naam: t.naam || '', slug: t.slug || '', omschrijving: t.omschrijving || '', agent: t.agent || '', agenda_link: t.agenda_link || '', archief_na: t.archief_na || 30, volgorde: t.volgorde || 1, actief: t.actief !== false };
+    if (render) render();
+  };
+  window.__setMsNew = () => {
+    _ms.ed = { id: null, naam: '', slug: '', omschrijving: '', agent: '', agenda_link: '', archief_na: 30, volgorde: 1, actief: false };
+    if (render) render();
+  };
+  window.__setMsCancel = () => { _ms.ed = null; if (render) render(); };
+  window.__setMsBool = (k, v) => { if (_ms.ed) { _ms.ed[k] = !!v; if (render) render(); } };
+  function _msSyncFromDom() {
+    const e = _ms.ed; if (!e) return;
+    const q = (sel) => document.querySelector(sel);
+    ['naam','slug','omschrijving','agent','agenda_link'].forEach(k => { const el = q(`[data-ms-field="${k}"]`); if (el) e[k] = String(el.value || ''); });
+    const arch = q('[data-ms-field="archief_na"]'); if (arch) e.archief_na = Math.max(1, parseInt(arch.value, 10) || 30);
+    const volg = q('[data-ms-field="volgorde"]');   if (volg) e.volgorde   = parseInt(volg.value, 10) || 1;
+  }
+  window.__setMsSave = () => {
+    _msSyncFromDom();
+    const e = _ms.ed; if (!e) return;
+    if (!String(e.naam || '').trim()) { showToast('Naam is verplicht', 'warn'); return; }
+    if (!String(e.slug || '').trim()) { showToast('Slug is verplicht', 'warn'); return; }
+    if (!/^[a-z0-9_-]+$/.test(String(e.slug))) { showToast('Slug: alleen lowercase a-z, 0-9, _ en -', 'warn'); return; }
+    const payload = {
+      id: e.id || undefined,
+      naam: e.naam.trim(), slug: e.slug.trim(),
+      omschrijving: e.omschrijving.trim() || null,
+      agent: e.agent.trim() || null,
+      agenda_link: e.agenda_link.trim() || null,
+      archief_na: e.archief_na, volgorde: e.volgorde, actief: !!e.actief,
+    };
+    const wasActief = e.id ? (_ms.trajecten.find(x => x.id === e.id)?.actief || false) : false;
+    const isEdit = !!e.id;
+    const activationNote = (!wasActief && payload.actief)
+      ? ' ⚠ Actief-flag gaat AAN → cron-leadsonderhoud gaat de stappen matchen en berichten uitsturen zodra de aanleiding-triggers vuren.'
+      : (wasActief && !payload.actief ? ' Actief-flag gaat UIT → geen nieuwe runs meer voor dit traject.' : '');
+    openConfirm(`${isEdit ? 'Wijzigingen opslaan voor traject' : 'Nieuw traject aanmaken:'} "${esc(payload.naam)}" (slug: ${esc(payload.slug)})?${activationNote}`, async () => {
+      _ms.busy[e.id || '_new'] = true; if (render) render();
+      try {
+        const j = await tryFetch('ms-save', '/api/leadsonderhoud-traject-opslaan', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(isEdit ? 'Traject bijgewerkt' : 'Traject aangemaakt', 'ok');
+        _ms.ed = null; _ms.fetched = false; fetchMkSequenties();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { delete _ms.busy[e.id || '_new']; if (render) render(); }
+    }, (!wasActief && payload.actief) ? 'warn' : undefined);
+  };
+  window.__setMsToggle = (id) => {
+    const t = _ms.trajecten.find(x => x.id === id); if (!t) return;
+    const next = !t.actief;
+    const stapN = Array.isArray(t.stappen) ? t.stappen.filter(s => s.actief).length : 0;
+    const msg = next
+      ? `Traject "${esc(t.naam)}" AANZETTEN? Zodra 'ie actief is, matcht de cron-leadsonderhoud de ${stapN} actieve stap(pen) en verstuurt automatisch berichten naar leads die aan de aanleiding voldoen. Ga alleen door als de stappen gereviewed zijn.`
+      : `Traject "${esc(t.naam)}" UITZETTEN? Cron negeert dit traject; lopende runs draaien tot ze klaar zijn. Kan altijd weer aan.`;
+    openConfirm(msg, async () => {
+      _ms.busy[id] = true; if (render) render();
+      try {
+        const payload = { id: t.id, naam: t.naam, slug: t.slug, omschrijving: t.omschrijving, agent: t.agent, agenda_link: t.agenda_link, archief_na: t.archief_na, volgorde: t.volgorde, actief: next };
+        const j = await tryFetch('ms-toggle', '/api/leadsonderhoud-traject-opslaan', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        // Optimistic:
+        const i = _ms.trajecten.findIndex(x => x.id === id); if (i >= 0) _ms.trajecten[i] = { ..._ms.trajecten[i], actief: next };
+        showToast(next ? 'Traject aan' : 'Traject uit', 'ok');
+      } catch (e) { showToast('Toggle mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+      finally { delete _ms.busy[id]; if (render) render(); }
+    }, next ? 'warn' : undefined);
+  };
+  window.__setMsDelete = (id) => {
+    const t = _ms.trajecten.find(x => x.id === id); if (!t) return;
+    if (t.actief) { showToast('Zet traject eerst UIT vóór verwijderen', 'warn'); return; }
+    const stapN = Array.isArray(t.stappen) ? t.stappen.length : 0;
+    openConfirm(`Traject "${esc(t.naam)}" DEFINITIEF verwijderen? Cascade: ${stapN} stap(pen) wordt ook verwijderd. Kan niet ongedaan gemaakt worden.`, async () => {
+      _ms.busy[id] = true; if (render) render();
+      try {
+        const j = await tryFetch('ms-del', '/api/leadsonderhoud-traject-verwijderen', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _ms.trajecten = _ms.trajecten.filter(x => x.id !== id);
+        showToast(`Verwijderd (${j?.stappen_verwijderd || 0} stappen ook weg)`, 'ok');
+      } catch (e) { showToast('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+      finally { delete _ms.busy[id]; if (render) render(); }
+    }, 'warn');
+  };
+  function _msEditor() {
+    const e = _ms.ed; if (!e) return '';
+    const busy = _ms.busy[e.id || '_new'];
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setMsCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:640px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div style="font-size:14px;font-weight:600">${e.id ? 'Traject bewerken' : 'Nieuw traject'}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setMsCancel()">✕</button>
+        </div>
+        <div style="padding:16px 20px;overflow-y:auto;flex:1;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">
+          <div style="grid-column:1/-1;padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.55"><b>Metadata alleen.</b> Individuele stappen (kanaal/aanleiding/timing/filters) beheer je in de Leadsonderhoud-module. Deze editor doet naam/slug/agent/agenda + actief-toggle.</div>
+          <label style="font-size:11.5px;color:var(--text-2)">Naam <span style="color:var(--rose)">*</span>
+            <input type="text" data-ms-field="naam" value="${esc(e.naam)}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Slug <span style="color:var(--rose)">*</span> <span style="color:var(--text-3)">(a-z, 0-9, _-)</span>
+            <input type="text" data-ms-field="slug" value="${esc(e.slug)}" ${e.id ? 'readonly title="Slug niet wijzigen na aanmaak (endpoints gebruiken deze als key)"' : ''} style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2);grid-column:1/-1">Omschrijving
+            <textarea data-ms-field="omschrijving" rows="2" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(e.omschrijving)}</textarea>
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Agent
+            <input type="text" data-ms-field="agent" value="${esc(e.agent)}" placeholder="bv. lisa, sanne" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Agenda-link (voor call-CTA in berichten)
+            <input type="url" data-ms-field="agenda_link" value="${esc(e.agenda_link)}" placeholder="https://..." style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Archief na (dagen sinds laatste contact)
+            <input type="number" min="1" data-ms-field="archief_na" value="${esc(String(e.archief_na))}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <label style="font-size:11.5px;color:var(--text-2)">Volgorde
+            <input type="number" data-ms-field="volgorde" value="${esc(String(e.volgorde))}" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+          </label>
+          <div style="grid-column:1/-1;padding:10px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:11.5px">
+            <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" ${e.actief ? 'checked' : ''} onchange="window.__setMsBool('actief', this.checked)" /> <b>Actief</b> — als AAN: cron matcht stappen en verstuurt berichten. Nieuwe trajecten default UIT.</label>
+          </div>
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface-2)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setMsCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMsSave()">${busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bodyMkSequenties() {
+    if (!_ms.fetched && !_ms.loading) queueMicrotask(() => fetchMkSequenties());
+    const rows = _ms.trajecten.map(t => {
+      const busy = !!_ms.busy[t.id];
+      const stappen = Array.isArray(t.stappen) ? t.stappen : [];
+      const activeStappen = stappen.filter(s => s.actief).length;
+      return `<tr style="border-top:1px solid var(--border);${t.actief ? '' : 'opacity:.65'}">
+        <td style="padding:8px 12px;font-size:12.5px;font-weight:600">${esc(t.naam || '(zonder naam)')}${t.agent ? `<div style="font-size:11px;color:var(--text-3);font-weight:normal;margin-top:2px">agent: ${esc(t.agent)}</div>` : ''}</td>
+        <td style="padding:8px 12px;font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(t.slug || '—')}</td>
+        <td style="padding:8px 12px;font-size:11.5px;text-align:center">${activeStappen}/${stappen.length}</td>
+        <td style="padding:8px 12px;font-size:11.5px;text-align:center">${t.archief_na || '—'}</td>
+        <td style="padding:8px 12px">
+          <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsToggle('${esc(t.id)}')" style="font-size:11px;color:${t.actief?'var(--emerald)':'var(--text-3)'}">${t.actief ? '✓ AAN' : '⨯ UIT'}</button>
+        </td>
+        <td style="padding:6px 12px;text-align:right;white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsEdit('${esc(t.id)}')" style="font-size:11px">Edit-meta</button>
+          <a href="/modules/klanten-v2/?v2preview=leadsonderhoud" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none">Stappen ↗</a>
+          <button class="btn btn-ghost btn-sm" ${busy || t.actief?'disabled':''} onclick="window.__setMsDelete('${esc(t.id)}')" style="font-size:11px;color:var(--rose)" title="${t.actief?'Zet eerst UIT':''}">Verwijder</button>
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1200px">
+      ${_msEditor()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>LIVE-lijst met onderhoud-trajecten.</b> Hier: metadata bewerken (naam/slug/agent/agenda/archief/volgorde) + aan/uit-toggle + delete. <b>Stappen-editor + test-send</b> leven in de Leadsonderhoud-module (18 velden per stap incl. kanaal/aanleiding/timing/filters; test-send verstuurt écht via bulk-test-send).
+        <a href="/modules/klanten-v2/?v2preview=leadsonderhoud" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Leadsonderhoud →</a>
+      </div>
+      ${_ms.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ms.error)}</div>` : ''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12.5px;color:var(--text-3)">${_ms.trajecten.length} traject(en) · ${_ms.trajecten.filter(t=>t.actief).length} actief</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setMsReload()" style="font-size:11px">↻ Vernieuwen</button>
+          <button class="btn btn-primary btn-sm" onclick="window.__setMsNew()">➕ Nieuw traject</button>
+        </div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Naam / agent</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Slug</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Stappen (act/tot)</th>
+            <th style="text-align:center;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Archief-na (d)</th>
+            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_ms.loading?'Laden…':'Geen trajecten'}</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
   /* Ronde-31 grote-brok · agents-kennis — KB-artikelen native CRUD + promote-to-agent.
      Endpoints: /api/kennisbank-artikelen (GET ?q&categorie&agent&limit / POST /
      PATCH ?id / DELETE ?id) + /api/kennisbank-promote-to-agent (POST). Permission:
@@ -4278,7 +4487,7 @@
     if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in Bubble; het CRM leest via bubble-api. Zie sys-bubble-schema voor diagnostiek.', null);
     if (cur.id === 'mk-meta')            return bodyDeepLink(null, 'Meta-koppeling (ads-account + pixel) wordt beheerd in Meta Business Manager. Alleen de WhatsApp-Cloud-API-koppeling wordt hier bewerkt (zie com-wa).', 'com-wa');
     if (cur.id === 'mk-bronnen')         return bodyLeadBronnen();
-    if (cur.id === 'mk-sequenties')      return bodyDeepLink('Leadsonderhoud', 'Sequenties (automatische lead-opvolging) worden in de Leadsonderhoud-module beheerd. Aparte brok voor centralisatie.', 'leadsonderhoud');
+    if (cur.id === 'mk-sequenties')      return bodyMkSequenties();
     if (cur.id === 'alg-meldingen')      return bodyDeepLink(null, 'Notification-preferences (dagelijkse/wekelijkse admin-mails) zijn server-side geconfigureerd via cron + rol-lookup. Voor per-user meldingen: aparte brok om notification_preferences-tabel + UI toe te voegen.', null);
     // (alg-bedrijf verplaatst naar Wave-3 bovenaan setBody; bodyBedrijf placeholder blijft ongebruikt)
     if (cur.id === 'wb-venster')         return bodyVenster();
@@ -4335,6 +4544,8 @@
       'ev-auto',
       // Ronde-31 grote-brok agents-kennis native — KB-artikelen CRUD + promote-to-agent.
       'agents-kennis',
+      // Ronde-31 grote-brok mk-sequenties native — trajecten-lijst + metadata-edit + actief-toggle + delete; stap-editor + test-send blijven Leadsonderhoud.
+      'mk-sequenties',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -4349,7 +4560,7 @@
       'agents-manager',
       'sales-producten','sales-bonus',
       'ev-templates','ev-locaties','lms-instel',
-      'mk-meta','mk-sequenties',
+      'mk-meta',
       // Ronde-31 STAP 5: workflows-regels + templates blijven Finance (motor-consistentie + WIK-14 legal).
       'wb-workflows','wb-berichten',
       // Polish v26: alg-meldingen krijgt DEEP-LINK badge (was voorbeeld-data);
