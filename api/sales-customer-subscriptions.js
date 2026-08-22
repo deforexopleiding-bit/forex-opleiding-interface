@@ -38,6 +38,32 @@ export default async function handler(req, res) {
       subscriptions = subs || [];
       for (const s of subscriptions) dealsWithSubs.add(s.deal_id);
 
+      // Display-dedup: meerdere rijen met DEZELFDE teamleader_subscription_id zijn
+      // spiegelingen van één TL-abonnement (bv. een dubbele import). Toon er één,
+      // bij voorkeur de actieve/lopende. Rijen ZONDER TL-id worden nooit
+      // samengevouwen (niet betrouwbaar als duplicaat te herkennen). NB: dit dekt
+      // niet het geval "wizard-rij (tl_id NULL) + import-ghost (tl_id gezet)" —
+      // dat is een echte dubbele DB-record en hoort via data-cleanup opgeruimd.
+      {
+        const ACTIVE = new Set(['active', 'running']);
+        const seenByTl = new Map();
+        const deduped = [];
+        for (const s of subscriptions) {
+          const tl = s.teamleader_subscription_id;
+          if (!tl) { deduped.push(s); continue; }
+          const prev = seenByTl.get(tl);
+          if (!prev) { seenByTl.set(tl, s); deduped.push(s); continue; }
+          const curActive  = ACTIVE.has(String(s.status || '').toLowerCase());
+          const prevActive = ACTIVE.has(String(prev.status || '').toLowerCase());
+          if (curActive && !prevActive) {
+            const idx = deduped.indexOf(prev);
+            if (idx >= 0) deduped[idx] = s;
+            seenByTl.set(tl, s);
+          }
+        }
+        subscriptions = deduped;
+      }
+
       // Per sub: heeft-al-facturen-vlag zodat de UI de "Aanpassen"-knop kan
       // gate-en. Waterdichte definitie: alleen als teamleader_subscription_id
       // NOT NULL EN >=1 invoice-rij bestaat met tl_subscription_id gelijk aan
