@@ -348,58 +348,114 @@ export default async function handler(req, res) {
         const keptIds = new Set(normalizedSteps.filter(s => s.id).map(s => s.id));
         const deleteIds = (existing || []).map(s => s.id).filter(sid => !keptIds.has(sid));
 
-        // 4. Shift van te-behouden bestaande steps naar step_order + 100000
-        //    om conflicten met de nieuwe step_orders te vermijden. Idempotent:
-        //    +100000 zit ver buiten normale range (typische workflow ~30 steps).
-        if (keptIds.size > 0) {
-          for (const sid of keptIds) {
-            const cur = existingById.get(sid);
+        // ─── STEP RECONCILIATIE — shift-all-first (2026-08-23 fix B1/B2) ───
+        //
+        // Vroegere volgorde (shift-kept + update + insert + delete) botste op
+        // UNIQUE(workflow_id, step_order): een update van een kept-step naar
+        // een bezet slot van een nog-niet-verwijderde kept- of delete-step
+        // gaf `duplicate key`. Voorbeeld: DB=[id1@0, id2@1, id3@2], payload
+        // wil id3→1 met id2 als delete. Update id3→1 crasht want id2 nog @1.
+        //
+        // Nieuwe volgorde: shift ALLE bestaande (kept + delete-set) naar
+        // step_order + 100000 (staging space, +100000 ligt ver buiten normale
+        // range van ≤30 steps per workflow). Daarna kan update/insert/delete
+        // vrijelijk werken zonder collision want alles zit in staging.
+        //
+        // Best-effort atomiciteit: try/catch rond de hele reconciliatie. Bij
+        // fout: probeer alle nog-in-staging-liggende rijen terug te shiften
+        // naar hun oorspronkelijke step_order. Supabase-js heeft geen echte
+        // transacties; dit is een pragmatische rollback zonder RPC-refactor.
+        // Na de reconciliatie doet een verify-check dat alle resterende
+        // steps step_order in 0..N-1 hebben; anders → 500 met melding.
+        const STAGING_OFFSET = 100000;
+        const stagedIds = new Set();  // welke rijen zijn ge-shift + moeten evt terug bij rollback
+        try {
+          // STAP A: Shift ALLE bestaande rijen naar staging (kept + delete-set).
+          //         Voorkomt UNIQUE-botsingen ongeacht update-volgorde.
+          for (const s of (existing || [])) {
             const { error: shiftErr } = await supabaseAdmin
               .from('dunning_workflow_steps')
-              .update({ step_order: (cur?.step_order || 0) + 100000 })
-              .eq('id', sid);
-            if (shiftErr) throw new Error('step-shift naar temp-order: ' + shiftErr.message);
+              .update({ step_order: (s.step_order || 0) + STAGING_OFFSET })
+              .eq('id', s.id);
+            if (shiftErr) throw new Error('step-shift naar staging: ' + shiftErr.message);
+            stagedIds.add(s.id);
           }
-        }
 
-        // 5. UPDATE per bestaand-id → definitieve step_order + type + config.
-        for (const s of normalizedSteps) {
-          if (!s.id) continue;
-          const { error: updStepErr } = await supabaseAdmin
+          // STAP B: UPDATE per bestaand-id → definitieve step_order + type + config.
+          //         Geen botsing: alle bestaande zitten in 100000+-range,
+          //         finale orders zijn 0..N-1.
+          for (const s of normalizedSteps) {
+            if (!s.id) continue;
+            const { error: updStepErr } = await supabaseAdmin
+              .from('dunning_workflow_steps')
+              .update({
+                step_order: s.step_order,
+                step_type:  s.step_type,
+                config:     s.config,
+              })
+              .eq('id', s.id);
+            if (updStepErr) throw new Error(`update step ${s.id}: ${updStepErr.message}`);
+            stagedIds.delete(s.id);  // niet meer in staging
+          }
+
+          // STAP C: INSERT nieuwe rijen.
+          //         Geen botsing want: deletes zitten nog in 100000+, kept
+          //         is al op finale 0..N-1.
+          const newRows = normalizedSteps
+            .filter(s => !s.id)
+            .map(s => ({
+              workflow_id: id,
+              step_order:  s.step_order,
+              step_type:   s.step_type,
+              config:      s.config,
+            }));
+          if (newRows.length > 0) {
+            const { error: insErr } = await supabaseAdmin
+              .from('dunning_workflow_steps').insert(newRows);
+            if (insErr) throw new Error('insert nieuwe steps: ' + insErr.message);
+          }
+
+          // STAP D: DELETE weggevallen steps (nog in staging @ 100000+).
+          //         FK SET NULL (migratie 2026-07-15) vangt log-refs op.
+          if (deleteIds.length > 0) {
+            const { error: delErr } = await supabaseAdmin
+              .from('dunning_workflow_steps')
+              .delete()
+              .in('id', deleteIds);
+            if (delErr) throw new Error('delete weggevallen steps: ' + delErr.message);
+            // deleteIds hoeven niet meer terug-geshift; ze zijn weg.
+            for (const sid of deleteIds) stagedIds.delete(sid);
+          }
+
+          // STAP E: Verify — alle resterende steps hebben step_order in
+          //         0..(N-1). Als niet: hard error zodat client herstelt en
+          //         geen vervuilde 100000+-staat achterblijft.
+          const { data: after, error: verifyErr } = await supabaseAdmin
             .from('dunning_workflow_steps')
-            .update({
-              step_order: s.step_order,
-              step_type:  s.step_type,
-              config:     s.config,
-            })
-            .eq('id', s.id);
-          if (updStepErr) throw new Error(`update step ${s.id}: ${updStepErr.message}`);
-        }
-
-        // 6. INSERT nieuwe rijen.
-        const newRows = normalizedSteps
-          .filter(s => !s.id)
-          .map(s => ({
-            workflow_id: id,
-            step_order:  s.step_order,
-            step_type:   s.step_type,
-            config:      s.config,
-          }));
-        if (newRows.length > 0) {
-          const { error: insErr } = await supabaseAdmin
-            .from('dunning_workflow_steps').insert(newRows);
-          if (insErr) throw new Error('insert nieuwe steps: ' + insErr.message);
-        }
-
-        // 7. DELETE weggevallen steps. FK SET NULL (migratie 2026-07-15-
-        //    workflow-steps-fk-set-null) zorgt dat log-referenties intact
-        //    blijven met step_id=NULL.
-        if (deleteIds.length > 0) {
-          const { error: delErr } = await supabaseAdmin
-            .from('dunning_workflow_steps')
-            .delete()
-            .in('id', deleteIds);
-          if (delErr) throw new Error('delete weggevallen steps: ' + delErr.message);
+            .select('id, step_order')
+            .eq('workflow_id', id)
+            .order('step_order', { ascending: true });
+          if (verifyErr) throw new Error('verify na reconciliatie: ' + verifyErr.message);
+          const N = (after || []).length;
+          const bad = (after || []).find((r, i) => r.step_order !== i);
+          if (bad) throw new Error(`step_order-verify faalde na reconciliatie: verwacht 0..${N-1}, gevonden ${bad.step_order} op index ${(after || []).indexOf(bad)}`);
+        } catch (reconErr) {
+          // ROLLBACK best-effort: shift ge-staged nog-bestaande rijen terug naar
+          // hun oorspronkelijke step_order zodat de DB niet in 100000+-staat blijft.
+          console.error('[finance-dunning-workflows-upsert] reconciliatie faalde, rollback probeer:', reconErr.message);
+          for (const sid of stagedIds) {
+            const orig = existingById.get(sid);
+            if (!orig) continue;
+            try {
+              await supabaseAdmin
+                .from('dunning_workflow_steps')
+                .update({ step_order: orig.step_order })
+                .eq('id', sid);
+            } catch (rbErr) {
+              console.error('[finance-dunning-workflows-upsert] rollback-shift van', sid, 'faalde:', rbErr.message);
+            }
+          }
+          throw reconErr;
         }
       }
     } else {

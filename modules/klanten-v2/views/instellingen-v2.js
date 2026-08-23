@@ -501,6 +501,12 @@
       id: s.id, step_order: Number(s.step_order || 0), step_type: s.step_type || 'wait',
       config: JSON.parse(JSON.stringify(s.config || {})),
     }));
+    // v=77 B4: defensief renumber naar 0..N-1 na load. Vangnet voor het
+    // (nu server-side gefixte) scenario waar een oude reconciliatie-fout een
+    // vervuilde 100000+-offset heeft achtergelaten. Voorkomt dat een resave
+    // die staat terugschrijft. Behoudt volgorde uit fetch (sorted by
+    // step_order asc), dus visueel identiek aan wat er in DB stond.
+    _wkf.ed.steps.forEach((s, i) => { s.step_order = i; });
     _wkf.ed._origStepIds = new Set(steps.map((s) => s.id).filter(Boolean));
     _wkf.ed._origActive = !!wf.is_active;
     _wkf.ed.trigger_conditions_json = JSON.stringify(_wkf.ed.workflow.trigger_conditions, null, 2);
@@ -516,7 +522,7 @@
     fetchWfTpls('email'); fetchWfTpls('whatsapp');
     if (render) render();
   };
-  window.__setWkfCancel = () => { _wkf.ed = null; _wkf.editorError = null; if (render) render(); };
+  window.__setWkfCancel = () => { _wkf.ed = null; _wkf.editorError = null; _wkf.saveError = null; if (render) render(); };
 
   // Step-lijst mutaties — sync-from-DOM VOOR elke mutatie zodat lopende
   // veldwaardes bewaard blijven; dan structural render.
@@ -608,7 +614,7 @@
 
     const doSave = async () => {
       const key = e.id || 'new';
-      _wkf.busy[key] = true; if (render) render();
+      _wkf.busy[key] = true; _wkf.saveError = null; if (render) render();
       try {
         const payload = {
           workflow: {
@@ -632,10 +638,16 @@
           body: JSON.stringify(payload),
         });
         if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
-        _wkf.ed = null; _wkf.fetched = false; fetchWf();
+        _wkf.ed = null; _wkf.fetched = false; _wkf.saveError = null; fetchWf();
         showToast(isUpdate ? 'Workflow bijgewerkt' : 'Workflow aangemaakt', 'ok');
       } catch (err) {
-        showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn');
+        // v=77 B3: incasso-zone mag NOOIT stil falen. Toon zowel toast (voor
+        // directheid) als persistent inline rose-banner bovenaan de editor
+        // (modal blijft open, user kan corrigeren, server-error is zichtbaar).
+        const msg = err?.message || 'onbekende fout';
+        _wkf.saveError = msg;
+        showToast('Opslaan mislukt: ' + msg, 'warn');
+        console.error('[wb-workflows-save] fail:', msg);
       } finally { _wkf.busy[key] = false; if (render) render(); }
     };
 
@@ -908,6 +920,10 @@
           <div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:11px;line-height:1.5">
             <b>⚠ INCASSO-ZONE.</b> Deze workflow stuurt de dunning-motor rechtstreeks aan. Wijzigingen raken nieuwe runs direct; lopende runs blijven op de oude versie.
           </div>
+          ${_wkf.saveError ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;line-height:1.55;border:1px solid var(--rose)">
+            <b>⚠ Opslaan mislukt</b> — ${esc(_wkf.saveError)}
+            <div style="margin-top:4px;font-size:11px;color:var(--text-3)">De editor blijft open zodat je kunt corrigeren. De workflow in de DB is NIET gewijzigd.</div>
+          </div>` : ''}
           <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
             <div>
               <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Naam</label>
