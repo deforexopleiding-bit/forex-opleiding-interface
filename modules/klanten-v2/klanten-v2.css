@@ -3469,3 +3469,34 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .kv-onb-pager-ellipsis {
   padding: 0 6px; color: var(--text-3, #8B95A5); font-size: 12.5px;
 }
+
+/* ═══ Meldingen-bel + paneel (v=1r10) ═══ */
+.kv-notif-wrap { position: relative; display: inline-flex; }
+.kv-notif-btn { position: relative; background: transparent; border: 1px solid transparent; color: var(--text-2); width: 36px; height: 36px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background .12s, color .12s; }
+.kv-notif-btn:hover { background: var(--surface-2); color: var(--text); }
+.kv-notif-btn[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
+.kv-notif-badge { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--rose); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-family: 'IBM Plex Mono', monospace; }
+.kv-notif-panel { position: absolute; right: 0; top: calc(100% + 6px); width: 380px; max-width: calc(100vw - 20px); max-height: 480px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,.14); z-index: 100; display: flex; flex-direction: column; overflow: hidden; }
+.kv-notif-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.kv-notif-title { font-size: 13px; font-weight: 600; }
+.kv-notif-filter { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: 6px; padding: 2px; }
+.kv-notif-tab { background: transparent; border: none; padding: 3px 10px; font-size: 11.5px; color: var(--text-3); border-radius: 4px; cursor: pointer; }
+.kv-notif-tab.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.kv-notif-mark-all { margin-left: auto; background: transparent; border: none; font-size: 11px; color: var(--sky, #0369a1); cursor: pointer; padding: 2px 6px; }
+.kv-notif-mark-all:hover { text-decoration: underline; }
+.kv-notif-list { overflow-y: auto; flex: 1; }
+.kv-notif-empty { padding: 24px 16px; text-align: center; color: var(--text-3); font-size: 12.5px; }
+.kv-notif-item { display: block; padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text-2); text-decoration: none; transition: background .1s; }
+.kv-notif-item:hover { background: var(--surface-2); }
+.kv-notif-item.unread { background: var(--rose-soft, rgba(244,63,94,.05)); }
+.kv-notif-item.unread:hover { background: var(--rose-soft, rgba(244,63,94,.09)); }
+.kv-notif-row { display: flex; gap: 8px; align-items: flex-start; }
+.kv-notif-dot { width: 7px; height: 7px; border-radius: 50%; background: transparent; margin-top: 6px; flex-shrink: 0; }
+.kv-notif-item.unread .kv-notif-dot { background: var(--rose); }
+.kv-notif-body-wrap { flex: 1; min-width: 0; }
+.kv-notif-item-title { font-size: 12.5px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-notif-item.unread .kv-notif-item-title { font-weight: 700; }
+.kv-notif-item-body { font-size: 11.5px; color: var(--text-3); margin-top: 2px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kv-notif-item-time { font-size: 10.5px; color: var(--text-3); margin-top: 4px; font-family: 'IBM Plex Mono', monospace; }
+.kv-notif-more { width: 100%; padding: 10px 12px; text-align: center; background: transparent; border: none; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--sky, #0369a1); cursor: pointer; }
+.kv-notif-more:hover { background: var(--surface-2); }

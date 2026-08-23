@@ -27,7 +27,7 @@
   <link rel="stylesheet" href="../shared/design-system/app-shell.css?v=1b1">
   <link rel="stylesheet" href="../shared/design-system/components.css?v=1b1">
   <link rel="stylesheet" href="../shared/klx-softphone.css?v=1d9">
-  <link rel="stylesheet" href="klanten-v2.css?v=1r9">
+  <link rel="stylesheet" href="klanten-v2.css?v=1r10">
 
   <!-- Supabase auth (bestaande shared client) -->
   <script src="../shared/supabase-client.js"></script>
@@ -96,6 +96,28 @@
           <input id="kv-topbar-search" placeholder="Zoek overal…" aria-label="Zoek overal" />
           <span class="kbd">⌘K</span>
         </div>
+        <!-- Meldingen-bel (v=1c5) — port van v1 sidebar.js:156-167. Wiring in
+             klanten-v2.js initNotifBell(). Zelfde endpoint /api/notifications-list. -->
+        <div class="kv-notif-wrap">
+          <button type="button" id="kvNotifBtn" class="kv-notif-btn" aria-label="Meldingen" aria-haspopup="true" aria-expanded="false" title="Meldingen">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span id="kvNotifBadge" class="kv-notif-badge" hidden>0</span>
+          </button>
+          <div id="kvNotifPanel" class="kv-notif-panel" hidden>
+            <div class="kv-notif-head">
+              <div class="kv-notif-title">Meldingen</div>
+              <div class="kv-notif-filter" role="tablist">
+                <button type="button" class="kv-notif-tab active" data-kv-filter="all">Alle</button>
+                <button type="button" class="kv-notif-tab" data-kv-filter="unread">Ongelezen</button>
+              </div>
+              <button type="button" id="kvNotifMarkAll" class="kv-notif-mark-all">Alles gelezen</button>
+            </div>
+            <div id="kvNotifList" class="kv-notif-list"><div class="kv-notif-empty">Laden…</div></div>
+          </div>
+        </div>
         <!-- Rol-bewuste actieknoppen (rendered door renderTopbarActions in klanten-v2.js) -->
         <div class="topbar-actions" id="topbarActions"></div>
       </header>
@@ -136,7 +158,7 @@
 
   <!-- ═══ APP-SHELL SCRIPTS (0-B2 + 0-D roles-helper) ═══ -->
   <script src="../shared/design-system/icons.js?v=1b1"></script>
-  <script src="../shared/design-system/app-shell.js?v=1c4"></script>
+  <script src="../shared/design-system/app-shell.js?v=1c5"></script>
   <script src="../shared/design-system/roles.js?v=1b1"></script>
   <script src="../shared/klx-softphone.js?v=1dc"></script>
 
@@ -172,6 +194,6 @@
   <script src="views/wanbetalers-v2.js?v=43"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
-  <script type="module" src="klanten-v2.js?v=1eq"></script>
+  <script type="module" src="klanten-v2.js?v=1er"></script>
 </body>
 </html>

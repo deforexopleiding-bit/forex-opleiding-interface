@@ -208,6 +208,7 @@
     const groups = [...new Set(mods.map(m => m.g))];
     const el = document.getElementById('nav');
     if (!el) return;
+    const badges = NS.badges || {};
     el.innerHTML = groups.map(g => `
       <div class="nav-label">${g}</div>
       ${mods.filter(m => m.g === g).map(m => {
@@ -221,7 +222,7 @@
           <span class="nav-ico">${svg(m.icon)}</span><span>${m.naam}</span>
           ${m.ext ? `<span style="margin-left:auto;color:var(--text-3);display:inline-flex">${svg(I.ext, 'width:13px;height:13px')}</span>` : ''}
           ${modLocked(m.id) ? `<span style="margin-left:auto;color:var(--text-3);display:inline-flex" title="Binnenkort beschikbaar">${svg(I.lock, 'width:13px;height:13px')}</span>`
-            : (m.badge ? `<span class="nav-badge">${m.badge}</span>` : '')}`;
+            : (badges[m.id] ? `<span class="nav-badge">${badges[m.id] > 99 ? '9+' : badges[m.id]}</span>` : '')}`;
         if (m.ext) {
           return `<a href="${m.ext}" target="_blank" rel="noopener noreferrer" class="nav-item ${activeCls}" style="${activeStyle};text-decoration:none">${inner}</a>`;
         }
@@ -423,6 +424,21 @@
       if (e.key === 'ArrowUp')   { e.preventDefault(); stepRow(-1); }
     }
   });
+
+  /* ── Dynamic sidebar-badges (v=1c5) ────────────────────────────────
+     `NS.badges` is een { moduleId: number } map. Consumers zetten via
+     `DFO.setBadge('inbox', 3)`; renderNav leest uit deze map.
+     0/null/undefined = geen badge (weggelaten in DOM). >99 = '9+'.
+     Vervangt de hardcoded `m.badge`-waardes; alleen wire is er nu, echte
+     tellingen komen van klanten-v2.js badge-poller. */
+  NS.badges = {};
+  NS.setBadge = function setBadge(id, n) {
+    const num = Number(n) || 0;
+    if (num > 0) NS.badges[id] = num;
+    else delete NS.badges[id];
+    // In-place re-render van alleen de nav (goedkoper dan volle render).
+    try { renderNav(); } catch (_) {}
+  };
 
   /* ── Public API ──────────────────────────────────────────────────── */
   Object.assign(NS, {

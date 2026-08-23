@@ -412,6 +412,194 @@ function wireLegacyFallback() {
 // inline-handler resolvet een ander DFO-object dan de gewrapte, of timing-
 // race bij render) tot een 'dode klik' leidt.
 // useCapture=true → vuurt vóór de inline-onclick handler.
+// ── Meldingen-bel + badge-poller (v=1eq) ────────────────────────────────
+// Port van v1 sidebar.js:156-167 (markup) + 1372-1667 (fetch/render/mark-read/
+// poll). Zelfde endpoint /api/notifications-list, zelfde POST-mark-read pattern,
+// zelfde UX. Verschil: markup zit in klanten-v2/index.html topbar (kvNotifBtn/
+// Panel/List/Badge), styling in klanten-v2.css.
+const _kvNotif = { items: [], unread: 0, filter: 'all', expanded: false };
+const KV_NOTIF_COLLAPSE_LIMIT = 8;
+
+function _kvNotifRelTime(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const sec = Math.round(Math.max(0, Date.now() - t) / 1000);
+  if (sec < 60) return 'zojuist';
+  const min = Math.round(sec / 60);
+  if (min < 60) return min + ' min geleden';
+  const hr = Math.round(min / 60);
+  if (hr < 24) return hr + ' u geleden';
+  try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' }); }
+  catch (_) { return iso; }
+}
+function _kvEscHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _kvSetNotifBadge(n) {
+  const badge = document.getElementById('kvNotifBadge'); if (!badge) return;
+  const v = Number(n) || 0;
+  if (v <= 0) { badge.hidden = true; return; }
+  badge.textContent = v > 99 ? '99+' : String(v);
+  badge.hidden = false;
+}
+function _kvRenderNotifList() {
+  const list = document.getElementById('kvNotifList'); if (!list) return;
+  const arr = _kvNotif.items;
+  const f = _kvNotif.filter;
+  if (!arr.length) {
+    list.innerHTML = `<div class="kv-notif-empty">${f === 'unread' ? 'Geen ongelezen meldingen.' : 'Geen meldingen.'}</div>`;
+    return;
+  }
+  const visible = _kvNotif.expanded ? arr : arr.slice(0, KV_NOTIF_COLLAPSE_LIMIT);
+  const remaining = Math.max(0, arr.length - visible.length);
+  let html = '';
+  for (const it of visible) {
+    const unread = it.read_at == null;
+    const hasLink = it.link_url && String(it.link_url).trim() !== '';
+    html += `<a class="kv-notif-item${unread ? ' unread' : ''}" href="${hasLink ? _kvEscHtml(it.link_url) : '#'}" data-kv-notif-id="${_kvEscHtml(it.id)}" data-kv-notif-link="${_kvEscHtml(hasLink ? it.link_url : '')}">
+      <div class="kv-notif-row">
+        <span class="kv-notif-dot"></span>
+        <div class="kv-notif-body-wrap">
+          <div class="kv-notif-item-title">${_kvEscHtml(it.title || '(geen titel)')}</div>
+          ${it.body ? `<div class="kv-notif-item-body">${_kvEscHtml(String(it.body).slice(0, 240))}</div>` : ''}
+          <div class="kv-notif-item-time">${_kvEscHtml(_kvNotifRelTime(it.created_at))}</div>
+        </div>
+      </div>
+    </a>`;
+  }
+  if (!_kvNotif.expanded && remaining > 0) {
+    html += `<button type="button" class="kv-notif-more" data-kv-more="expand">Meer bekijken (${remaining})</button>`;
+  } else if (_kvNotif.expanded && arr.length > KV_NOTIF_COLLAPSE_LIMIT) {
+    html += `<button type="button" class="kv-notif-more" data-kv-more="collapse">Minder</button>`;
+  }
+  list.innerHTML = html;
+
+  // Klik-handlers per item: mark-read + navigate (of in-shell-nav via link_url).
+  list.querySelectorAll('.kv-notif-item[data-kv-notif-id]').forEach((node) => {
+    node.addEventListener('click', (ev) => {
+      const id = node.getAttribute('data-kv-notif-id') || '';
+      const link = node.getAttribute('data-kv-notif-link') || '';
+      const wasUnread = node.classList.contains('unread');
+      if (!link) ev.preventDefault();
+      if (id && wasUnread) {
+        node.classList.remove('unread');
+        _kvNotif.unread = Math.max(0, _kvNotif.unread - 1);
+        _kvSetNotifBadge(_kvNotif.unread);
+        _kvMarkNotifRead({ id });
+      }
+    });
+  });
+  const moreBtn = list.querySelector('.kv-notif-more[data-kv-more]');
+  if (moreBtn) {
+    moreBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      _kvNotif.expanded = (moreBtn.getAttribute('data-kv-more') === 'expand');
+      _kvRenderNotifList();
+    });
+  }
+}
+async function _kvLoadNotifs() {
+  try {
+    const r = await window.KV.authedFetch('/api/notifications-list?filter=' + encodeURIComponent(_kvNotif.filter));
+    if (!r.ok) { _kvSetNotifBadge(0); return; }
+    const d = await r.json().catch(() => ({}));
+    _kvNotif.items = Array.isArray(d?.notifications) ? d.notifications : [];
+    _kvNotif.unread = Number(d?.unread_count) || 0;
+    _kvSetNotifBadge(_kvNotif.unread);
+    const panel = document.getElementById('kvNotifPanel');
+    if (panel && !panel.hidden) _kvRenderNotifList();
+  } catch (_) { _kvSetNotifBadge(0); }
+}
+async function _kvMarkNotifRead(payload) {
+  try {
+    const r = await window.KV.authedFetch('/api/notifications-mark-read', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    if (!r.ok) return;
+    // Bij {all:true} of {ids:[]}: refetch voor echte counts.
+    if (payload && (payload.all === true || Array.isArray(payload.ids))) _kvLoadNotifs();
+  } catch (_) { /* stil */ }
+}
+function _kvToggleNotifPanel(open) {
+  const btn = document.getElementById('kvNotifBtn');
+  const panel = document.getElementById('kvNotifPanel');
+  if (!btn || !panel) return;
+  const willOpen = (typeof open === 'boolean') ? open : panel.hidden;
+  panel.hidden = !willOpen;
+  btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  if (willOpen) { _kvNotif.expanded = false; _kvLoadNotifs(); }
+}
+function initNotifBell() {
+  const btn = document.getElementById('kvNotifBtn');
+  if (!btn) return;
+  btn.addEventListener('click', (ev) => { ev.stopPropagation(); _kvToggleNotifPanel(); });
+  document.addEventListener('click', (ev) => {
+    const panel = document.getElementById('kvNotifPanel');
+    if (!panel || panel.hidden) return;
+    const b = document.getElementById('kvNotifBtn');
+    if (b && (ev.target === b || b.contains(ev.target))) return;
+    if (panel.contains(ev.target)) return;
+    _kvToggleNotifPanel(false);
+  });
+  document.querySelectorAll('#kvNotifPanel .kv-notif-tab[data-kv-filter]').forEach((tab) => {
+    tab.addEventListener('click', (ev) => {
+      const f = ev.currentTarget.getAttribute('data-kv-filter') || 'all';
+      document.querySelectorAll('#kvNotifPanel .kv-notif-tab[data-kv-filter]').forEach((t) => t.classList.toggle('active', t === ev.currentTarget));
+      _kvNotif.filter = f; _kvNotif.expanded = false;
+      _kvLoadNotifs();
+    });
+  });
+  const mark = document.getElementById('kvNotifMarkAll');
+  if (mark) mark.addEventListener('click', () => {
+    _kvNotif.unread = 0; _kvSetNotifBadge(0);
+    _kvMarkNotifRead({ all: true });
+  });
+  // Eerste load + poller (60s). Cleanup bij unload.
+  _kvLoadNotifs();
+  if (!window._kvNotifPollTimer) {
+    window._kvNotifPollTimer = setInterval(_kvLoadNotifs, 60000);
+    window.addEventListener('beforeunload', () => {
+      if (window._kvNotifPollTimer) { clearInterval(window._kvNotifPollTimer); window._kvNotifPollTimer = null; }
+    });
+  }
+}
+
+// ── Badge-poller (v=1eq) — echte tellingen voor sidebar-modules ────────────
+// Alleen actie-gerichte counts ("voor mij te doen / ongelezen"). Bron per
+// module in BADGE_SOURCES. Poller 60s; fail-soft per bron (bij fout: badge
+// wordt 0 gezet, andere modules blijven werken). Cleanup bij beforeunload.
+const BADGE_SOURCES = [
+  // { mod: 'inbox',          url: '/api/super-admin-inbox-counts', path: 'total_unread', roles: ['super_admin','admin','manager'] },
+  { mod: 'leadsonderhoud', url: '/api/leadsonderhoud-open-count', path: 'open_count' },
+  { mod: 'onboarding',     url: '/api/onboarding-counts',         path: 'active_count' },
+  { mod: 'lisa',           url: '/api/lisa-conversations-count?status=active', path: 'count' },
+  // pending-actions-list geeft {total,items[]} — total is de teller.
+  { mod: 'wanbetalers',    url: '/api/pending-actions-list?status=pending&page_size=1', path: 'total' },
+];
+async function _kvFetchBadgeCount(src) {
+  try {
+    const r = await window.KV.authedFetch(src.url);
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => ({}));
+    return Number(d?.[src.path]) || 0;
+  } catch (_) { return null; }
+}
+async function _kvUpdateBadges() {
+  if (!window.DFO || typeof window.DFO.setBadge !== 'function') return;
+  await Promise.all(BADGE_SOURCES.map(async (src) => {
+    const n = await _kvFetchBadgeCount(src);
+    if (n !== null) window.DFO.setBadge(src.mod, n);
+  }));
+}
+function startBadgePoller() {
+  if (window._kvBadgePollTimer) return;
+  _kvUpdateBadges();
+  window._kvBadgePollTimer = setInterval(_kvUpdateBadges, 60000);
+  window.addEventListener('beforeunload', () => {
+    if (window._kvBadgePollTimer) { clearInterval(window._kvBadgePollTimer); window._kvBadgePollTimer = null; }
+  });
+}
+
 function wireLegacyNavClickCatcher() {
   if (window.__kvNavCatcherWired) return;
   window.__kvNavCatcherWired = true;
@@ -672,6 +860,12 @@ function wireTopbarActionsToShell() {
 
   // 5) Vervang shell-sidebar user-persona met échte Supabase-user.
   paintUser(profile);
+
+  // 6) v=1eq — meldingen-bel wiring + badge-poller (port v1 sidebar.js:1372-1667).
+  //    Auth-only, elke rol. Endpoint: /api/notifications-list (bestaat).
+  //    Poller ~60s; opgeschoond bij beforeunload; geen self-observing DOM.
+  try { initNotifBell(); } catch (e) { console.warn('[klanten-v2] notif-bell init failed:', e?.message); }
+  try { startBadgePoller(); } catch (e) { console.warn('[klanten-v2] badge poller init failed:', e?.message); }
 })().catch((e) => {
   console.error('[klanten-v2] boot fatal:', e);
   const view = document.getElementById('content') || document.getElementById('kv-view');
