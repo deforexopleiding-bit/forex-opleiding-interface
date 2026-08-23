@@ -66,7 +66,7 @@ export async function creditInvoiceCore(invoiceId, opts = {}) {
   // 1) Factuur ophalen (server-side, geen RBAC hier).
   const { data: inv, error: invErr } = await supabaseAdmin
     .from('invoices')
-    .select('id, customer_id, tl_invoice_id, invoice_number, amount_total, status')
+    .select('id, customer_id, deal_id, tl_subscription_id, tl_invoice_id, invoice_number, amount_total, status')
     .eq('id', invoiceId).maybeSingle();
   if (invErr) throw typedError('DB_ERROR', 'invoices lookup: ' + invErr.message);
   if (!inv) throw typedError('NOT_FOUND', 'Factuur niet gevonden');
@@ -147,6 +147,20 @@ export async function creditInvoiceCore(invoiceId, opts = {}) {
     await upsertInvoiceFromTl(inv.tl_invoice_id);
   } catch (e) {
     console.error('[invoice-credit-core] invoice resync', e.message);
+  }
+
+  // 5) Sales-bonus clawback: is de gecrediteerde factuur de aanbetaling van de
+  //    deal → void de actieve bonus (was 'ie al 'paid' → clawback_pending +
+  //    finance-notificatie, in de helper). Fail-soft: de TL-credit is al gebeurd,
+  //    dit mag de caller nooit alsnog laten falen.
+  try {
+    const { voidBonusForCreditedInvoice } = await import('./sales-bonus.js');
+    await voidBonusForCreditedInvoice(
+      { id: inv.id, deal_id: inv.deal_id, tl_subscription_id: inv.tl_subscription_id, invoice_number: inv.invoice_number },
+      { source: 'invoice-credit' },
+    );
+  } catch (e) {
+    console.error('[invoice-credit-core] sales-bonus clawback (credit):', e.message);
   }
 
   return {

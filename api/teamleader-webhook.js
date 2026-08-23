@@ -164,6 +164,15 @@ export default async function handler(req, res) {
         } catch (e) {
           console.error('[tl-webhook] mentor-hook cancelForCancelledQuote:', e.message);
         }
+        // Sales-bonus clawback: deal verloren → actieve bonus voiden. Was 'ie al
+        // 'paid', dan clawback_pending + finance-notificatie (in de helper).
+        // Fail-soft: mag de webhook-verwerking nooit breken.
+        try {
+          const { voidActiveBonusForDeal } = await import('./_lib/sales-bonus.js');
+          await voidActiveBonusForDeal(dealRow.id, { reason: 'deal geannuleerd (deal.lost)', source: 'tl-webhook' });
+        } catch (e) {
+          console.error('[tl-webhook] sales-bonus clawback (deal.lost):', e.message);
+        }
         // Fail-soft dual-write: notify sales-eigenaar dat offerte geweigerd is.
         if (dealRow.sales_user_id) {
           const bodyParts = [];
