@@ -698,7 +698,7 @@
   // gecombineerde state; bij switch naar builder: split extras opnieuw uit.
   window.__setWkfTcMode = (mode) => {
     if (!_wkf.ed || (mode !== 'builder' && mode !== 'json')) return;
-    _wkfSyncFromDom();
+    _wfSyncFromDom();  // v=71 blocker-fix: helper heet _wfSyncFromDom (bulk-rename miste 'em)
     if (mode === 'json') {
       _wkf.ed.trigger_conditions_json = JSON.stringify(_wkf.ed.workflow.trigger_conditions || {}, null, 2);
       _wkf.ed.trigger_conditions_valid = true;
@@ -714,7 +714,7 @@
   window.__setWkfTcBuilderInput = () => {
     try {
       if (!_wkf.ed || _wkf.ed.tcMode !== 'builder') return;
-      _wkfSyncFromDom();  // update workflow.trigger_conditions
+      _wfSyncFromDom();  // v=71 blocker-fix: update workflow.trigger_conditions via bestaande sync-helper
       const tc = _wkf.ed.workflow.trigger_conditions || {};
       const prev = document.querySelector('[data-wf-tc-preview="1"]');
       if (prev) prev.innerHTML = _wkfTcPreview(tc);
