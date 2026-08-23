@@ -306,17 +306,317 @@
       </div>
     </div>`;
   }
-  function bodyWbBerichtenDeepLink() {
-    return `<div style="max-width:800px">
-      <div style="padding:16px 18px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <div style="font-size:14px;font-weight:600">Aanmaan-templates</div>
-          <span style="padding:2px 8px;border-radius:6px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);font-size:10.5px;font-weight:600">DEEP-LINK</span>
+  /* Wave-4 · wb-berichten NATIVE (v=67) — dunning_templates CRUD in-shell.
+     Motor onaangeraakt: alleen bestaande config-endpoints
+       finance-dunning-templates-list / -upsert / -delete
+     onder gate finance.dunning.config. WA-picker via
+       wanbetalers-whatsapp-templates-list (approved-only fallback naar
+       free-text bij load-fail).
+     WIK-14-gate: client-side regex-detectie op body voor brief-kind.
+     Blokkeert activeren + opslaan-als-actief als brief-body geen WIK-tekst
+     bevat (patronen: "14 dagen" + "€ 40"/kosten-mention). Full server-side
+     legal-gate = aparte brok + legal-signoff — deze client-check is een
+     MVP-vangnet, niet een juridische substituut. */
+  const _wbT = { loading: false, fetched: false, error: null, items: [],
+                 kindFilter: 'all', activeFilter: 'all',
+                 metaLoaded: false, metaLoading: false, metaErr: null, metaItems: [],
+                 ed: null, busy: {} };
+
+  // WIK-detectie: vereist minimaal "14 dagen"-mention + kosten/betaling-mention.
+  // Bewust simpel — vangt evidente ontbrekende WIK-tekst; geen juridische
+  // legal-parser. Detectie is CASE-INSENSITIVE en tolereert whitespace/spelling
+  // ('14 dagen' / '14-dagen' / '14  dagen'). Kosten-detectie op '€' + cijfer
+  // OF "kosten"-woord OF "incassokosten".
+  function _wikOk(body) {
+    const s = String(body || '');
+    if (!s.trim()) return false;
+    const has14 = /\b14[\s-]+dagen\b/i.test(s) || /\bveertien\s+dagen\b/i.test(s);
+    const hasKosten = /€\s*\d/i.test(s) || /\bincassokosten\b/i.test(s) || /\bkosten\b/i.test(s);
+    return has14 && hasKosten;
+  }
+
+  async function fetchWbT() {
+    if (_wbT.loading || _wbT.fetched) return;
+    _wbT.loading = true; _wbT.error = null; if (render) render();
+    const j = await tryFetch('wbT-list', '/api/finance-dunning-templates-list');
+    _wbT.loading = false; _wbT.fetched = true;
+    if (j?.__error) _wbT.error = j.__error;
+    else _wbT.items = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
+  }
+  async function fetchWbTMeta() {
+    if (_wbT.metaLoaded || _wbT.metaLoading) return;
+    _wbT.metaLoading = true; _wbT.metaErr = null;
+    const j = await tryFetch('wbT-meta', '/api/wanbetalers-whatsapp-templates-list');
+    _wbT.metaLoading = false; _wbT.metaLoaded = true;
+    if (j?.__error) _wbT.metaErr = j.__error;
+    else _wbT.metaItems = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
+  }
+
+  // Sync-from-DOM: leest ALLE editor-input in _wbT.ed vóór save/validate.
+  // Voorkomt state-lag bij uncontrolled inputs. Geen re-render tijdens sync.
+  function _wbTSyncFromDom() {
+    const e = _wbT.ed; if (!e) return;
+    const q = (sel) => document.querySelector(sel);
+    const n = q('[data-wbt-field="name"]');       if (n)  e.name = String(n.value || '');
+    const k = q('[data-wbt-field="kind"]');       if (k)  e.kind = String(k.value || 'email');
+    const s = q('[data-wbt-field="subject"]');    if (s)  e.subject = String(s.value || '');
+    const b = q('[data-wbt-field="body"]');       if (b)  e.body = String(b.value || '');
+    const m = q('[data-wbt-field="meta_template_name"]'); if (m) e.meta_template_name = String(m.value || '');
+    const l = q('[data-wbt-field="language"]');   if (l)  e.language = String(l.value || 'nl');
+    const a = q('[data-wbt-field="is_active"]');  if (a)  e.is_active = !!a.checked;
+  }
+
+  window.__setWbTNew = () => {
+    _wbT.ed = { id: null, name: '', kind: 'email', subject: '', body: '',
+                meta_template_name: '', language: 'nl', is_active: false };
+    fetchWbTMeta();
+    if (render) render();
+  };
+  window.__setWbTEdit = (id) => {
+    const it = _wbT.items.find((x) => x.id === id); if (!it) return;
+    _wbT.ed = { id: it.id, name: it.name || '', kind: it.kind || 'email',
+                subject: it.subject || '', body: it.body || '',
+                meta_template_name: it.meta_template_name || '',
+                language: it.language || 'nl', is_active: !!it.is_active };
+    fetchWbTMeta();
+    if (render) render();
+  };
+  window.__setWbTCancel = () => { _wbT.ed = null; if (render) render(); };
+  window.__setWbTKindChange = () => {
+    // Sync eerst zodat body/subject/meta_template_name behouden blijft, dan
+    // kind toepassen + kortstondige re-render zodat kind-conditionele velden
+    // (subject email-only / meta_template_name WA-only) zichtbaar worden.
+    _wbTSyncFromDom();
+    const k = document.querySelector('[data-wbt-field="kind"]');
+    if (k && _wbT.ed) _wbT.ed.kind = String(k.value || 'email');
+    if (render) render();
+  };
+  window.__setWbTFilter = (dim, v) => {
+    if (dim === 'kind') _wbT.kindFilter = v;
+    if (dim === 'active') _wbT.activeFilter = v;
+    if (render) render();
+  };
+  window.__setWbTSave = async () => {
+    if (!_wbT.ed) return;
+    _wbTSyncFromDom();
+    const e = _wbT.ed;
+    if (!e.name.trim()) return showToast('Naam is verplicht', 'warn');
+    if (!e.body.trim()) return showToast('Body is verplicht', 'warn');
+    if (e.kind === 'email' && !e.subject.trim()) return showToast('Onderwerp is verplicht bij e-mail', 'warn');
+    if (e.kind === 'whatsapp' && !e.meta_template_name.trim()) return showToast('Meta-template-naam is verplicht bij WhatsApp', 'warn');
+
+    // WIK-gate: brief-kind + is_active → body MOET WIK-14-tekst bevatten.
+    // Blokkeert save als 'ie actief moet worden zonder WIK-tekst.
+    if (e.kind === 'brief' && e.is_active && !_wikOk(e.body)) {
+      return showToast('WIK-gate: brief-body mist "14 dagen"- of kosten-vermelding. Zet is_active uit of vul WIK-tekst aan.', 'warn');
+    }
+
+    const doSave = async () => {
+      const key = e.id || 'new';
+      _wbT.busy[key] = true; if (render) render();
+      try {
+        const isUpdate = !!e.id;
+        const url = '/api/finance-dunning-templates-upsert' + (isUpdate ? '?id=' + encodeURIComponent(e.id) : '');
+        const payload = {
+          name: e.name.trim(),
+          kind: e.kind,
+          subject: e.kind === 'email' ? e.subject.trim() : null,
+          body: e.body,
+          meta_template_name: e.kind === 'whatsapp' ? (e.meta_template_name.trim() || null) : null,
+          language: (e.language || 'nl').trim().toLowerCase().slice(0, 2),
+          is_active: !!e.is_active,
+        };
+        const j = await tryFetch('wbT-save', url, {
+          method: isUpdate ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _wbT.ed = null; _wbT.fetched = false; fetchWbT();
+        showToast(isUpdate ? 'Sjabloon bijgewerkt' : 'Sjabloon aangemaakt', 'ok');
+      } catch (err) {
+        showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn');
+      } finally { _wbT.busy[key] = false; if (render) render(); }
+    };
+
+    // Custom confirm alleen als save actief live-effect heeft.
+    if (e.is_active) {
+      openConfirm(`Sjabloon "${esc(e.name)}" opslaan als ACTIEF? Nieuwe dunning-runs gebruiken deze tekst direct — bestaande lopende runs niet.`, doSave, 'warn');
+    } else {
+      // Inactief-save = veilig, direct opslaan zonder confirm.
+      doSave();
+    }
+  };
+  window.__setWbTToggle = (id) => {
+    const it = _wbT.items.find((x) => x.id === id); if (!it) return;
+    const goingActive = !it.is_active;
+    // Bij activeren van brief-kind: WIK-gate check op current body.
+    if (goingActive && it.kind === 'brief' && !_wikOk(it.body)) {
+      return showToast('WIK-gate: kan brief-sjabloon "' + esc(it.name) + '" niet activeren — body mist "14 dagen"- of kosten-vermelding.', 'warn');
+    }
+    const msg = goingActive
+      ? `Sjabloon "${esc(it.name)}" ACTIVEREN? Nieuwe dunning-runs gebruiken deze tekst direct.`
+      : `Sjabloon "${esc(it.name)}" op INACTIEF zetten? Nieuwe dunning-runs skippen dit sjabloon.`;
+    openConfirm(msg, async () => {
+      _wbT.busy[id] = true; if (render) render();
+      try {
+        const j = await tryFetch('wbT-toggle', '/api/finance-dunning-templates-upsert?id=' + encodeURIComponent(id), {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_active: goingActive }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _wbT.fetched = false; fetchWbT();
+        showToast(goingActive ? 'Sjabloon geactiveerd' : 'Sjabloon gedeactiveerd', 'ok');
+      } catch (err) { showToast('Toggle mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _wbT.busy[id] = false; if (render) render(); }
+    }, goingActive ? 'warn' : 'info');
+  };
+  window.__setWbTDelete = (id) => {
+    const it = _wbT.items.find((x) => x.id === id); if (!it) return;
+    if (it.is_active) return showToast('Deactiveer sjabloon eerst vóór verwijderen', 'warn');
+    openConfirm(`Sjabloon "${esc(it.name)}" PERMANENT verwijderen? Server-check blokkeert als een workflow-stap er nog naar verwijst.`, async () => {
+      _wbT.busy[id] = true; if (render) render();
+      try {
+        const j = await tryFetch('wbT-del', '/api/finance-dunning-templates-delete?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _wbT.fetched = false; fetchWbT();
+        showToast('Sjabloon verwijderd', 'ok');
+      } catch (err) { showToast('Verwijderen mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _wbT.busy[id] = false; if (render) render(); }
+    }, 'warn');
+  };
+
+  function _wbTEditorHtml() {
+    const e = _wbT.ed; if (!e) return '';
+    const isNew = !e.id;
+    const key = e.id || 'new';
+    const busy = !!_wbT.busy[key];
+    const wik = e.kind === 'brief' ? _wikOk(e.body) : true;
+    const wikBlock = e.kind === 'brief' ? `
+      <div style="padding:10px 12px;background:${wik ? 'var(--emerald-soft)' : 'var(--amber-soft)'};color:${wik ? 'var(--emerald)' : 'var(--amber)'};border-radius:6px;font-size:11.5px;line-height:1.5;margin-top:8px">
+        ${wik ? '✓ WIK-tekst gedetecteerd (bevat "14 dagen" + kosten-vermelding).' : '⚠ WIK-gate: body mist "14 dagen"- of kosten-vermelding. Activeren geblokkeerd tot dit is aangevuld. <b>Let op:</b> deze check is een client-side vangnet; juridische juistheid van de WIK-tekst blijft eigen sign-off.'}
+      </div>` : '';
+    const metaOpts = _wbT.metaItems.map((t) => `<option value="${esc(t.name)}" ${e.meta_template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('');
+    const metaSelectedInList = _wbT.metaItems.some((t) => t.name === e.meta_template_name);
+    const metaFallbackOpt = (e.meta_template_name && !metaSelectedInList)
+      ? `<option value="${esc(e.meta_template_name)}" selected>${esc(e.meta_template_name)} — opgeslagen (niet in approved-lijst)</option>` : '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setWbTCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(720px,100%);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+          <div style="font-size:14px;font-weight:600">${isNew ? 'Nieuw dunning-sjabloon' : 'Sjabloon bewerken: ' + esc(e.name)}</div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__setWbTCancel()">✕</button>
         </div>
-        <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;margin-bottom:10px">
-          De <code>dunning_templates</code>-editor (mail/whatsapp/brief-bodies per step) leeft in de Finance-module. <b>Waarom niet hier:</b> de WIK-14-brief is juridisch dwingend en <code>dunning-template-diagnose</code> is een aparte gate die de Finance-UI al integreert. Wijziging vraagt legal-review vóór schrijfbaar buiten Finance.
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">
+            <div><label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Naam</label>
+              <input type="text" data-wbt-field="name" value="${esc(e.name)}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+            </div>
+            <div><label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Kind</label>
+              <select data-wbt-field="kind" onchange="window.__setWbTKindChange()" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box">
+                ${['email','whatsapp','brief'].map((k) => `<option value="${k}" ${e.kind === k ? 'selected' : ''}>${k}</option>`).join('')}
+              </select>
+            </div>
+            <div><label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Taal</label>
+              <input type="text" data-wbt-field="language" value="${esc(e.language)}" maxlength="2" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+            </div>
+          </div>
+          ${e.kind === 'email' ? `
+            <div><label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Onderwerp (email)</label>
+              <input type="text" data-wbt-field="subject" value="${esc(e.subject)}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+            </div>` : ''}
+          ${e.kind === 'whatsapp' ? `
+            <div><label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Meta-template (approved)</label>
+              ${_wbT.metaErr
+                ? `<input type="text" data-wbt-field="meta_template_name" value="${esc(e.meta_template_name)}" placeholder="approved template naam" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+                   <div style="font-size:10.5px;color:var(--rose);margin-top:3px">Meta-templates niet geladen: ${esc(_wbT.metaErr)}. Handmatig invullen — moet exact matchen met approved template of WhatsApp-send faalt.</div>`
+                : `<select data-wbt-field="meta_template_name" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box">
+                     <option value="" ${!e.meta_template_name ? 'selected' : ''}>— kies approved template —</option>
+                     ${metaFallbackOpt}
+                     ${metaOpts}
+                   </select>
+                   <div style="font-size:10.5px;color:var(--text-3);margin-top:3px">${_wbT.metaItems.length} approved templates. Placeholders worden server-side via <code>meta_param_mapping</code> geresolved.</div>`}
+            </div>` : ''}
+          <div><label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Body (max 50k chars)</label>
+            <textarea data-wbt-field="body" oninput="/* uncontrolled — geen state-write per toets */" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:200px;font-family:inherit;resize:vertical">${esc(e.body)}</textarea>
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:3px">Placeholders <code>{{klant.voornaam}}</code>, <code>{{factuur.nummer}}</code>, <code>{{factuur.bedrag_open}}</code>, <code>{{factuur.betaal_link}}</code> etc. (zie <a href="/docs/whatsapp-templates-c4-named-variables.md" target="_blank" style="color:var(--sky)">C4-doc</a>).</div>
+            ${wikBlock}
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;user-select:none">
+            <input type="checkbox" data-wbt-field="is_active" ${e.is_active ? 'checked' : ''} />
+            <span>Actief — nieuwe dunning-runs gebruiken dit sjabloon</span>
+          </label>
         </div>
-        <a href="/modules/finance.html?tab=dunning-templates" class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-block">Open templates in Finance →</a>
+        <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setWbTCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWbTSave()">${busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function bodyWbBerichten() {
+    if (!_wbT.fetched && !_wbT.loading) queueMicrotask(() => fetchWbT());
+    const kindFilter = _wbT.kindFilter;
+    const activeFilter = _wbT.activeFilter;
+    const all = _wbT.items;
+    const filtered = all.filter((it) => {
+      if (kindFilter !== 'all' && it.kind !== kindFilter) return false;
+      if (activeFilter === 'active' && !it.is_active) return false;
+      if (activeFilter === 'inactive' && it.is_active) return false;
+      return true;
+    });
+    const chip = (val, curr, dim, label) => `<button class="chip ${curr === val ? 'on' : ''}" style="font-size:11px;padding:4px 10px;border-radius:14px;border:1px solid ${curr === val ? 'var(--sky)' : 'var(--border)'};background:${curr === val ? 'var(--sky-soft,#e0f2fe)' : 'transparent'};color:${curr === val ? 'var(--sky,#0369a1)' : 'var(--text-2)'};cursor:pointer" onclick="window.__setWbTFilter('${dim}','${val}')">${esc(label)}</button>`;
+    const kindPills = ['all','email','whatsapp','brief'].map((k) => chip(k, kindFilter, 'kind', k === 'all' ? 'Alle kinds' : k)).join(' ');
+    const actPills = [['all','Alle'],['active','Actief'],['inactive','Inactief']].map(([v,l]) => chip(v, activeFilter, 'active', l)).join(' ');
+    const rows = filtered.map((it) => {
+      const busy = !!_wbT.busy[it.id];
+      const isBrief = it.kind === 'brief';
+      const wikBad = isBrief && !_wikOk(it.body);
+      const wikTag = wikBad
+        ? `<span title="WIK-tekst ontbreekt in body — activeren wordt geblokkeerd" style="padding:1px 5px;border-radius:3px;background:var(--amber-soft);color:var(--amber);font-size:10px;font-weight:600;margin-left:4px">⚠ WIK</span>`
+        : '';
+      const kindColor = { email: 'var(--sky-soft,#e0f2fe)', whatsapp: 'var(--emerald-soft)', brief: 'var(--amber-soft)' }[it.kind] || 'var(--surface-2)';
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:6px 12px;font-size:12px"><b>${esc(it.name || '—')}</b>${wikTag}</td>
+        <td style="padding:6px 12px"><span style="padding:1px 6px;border-radius:4px;background:${kindColor};font-size:10.5px;font-weight:600">${esc(it.kind)}</span></td>
+        <td style="padding:6px 12px;font-size:11px;color:var(--text-3)">${esc(it.language || 'nl')}${it.subject ? ' · <i>' + esc(String(it.subject).slice(0,40)) + '</i>' : ''}${it.meta_template_name ? ' · <code style="background:var(--surface-2);padding:1px 4px;border-radius:3px">' + esc(it.meta_template_name) + '</code>' : ''}</td>
+        <td style="padding:6px 12px;text-align:center">
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWbTToggle('${esc(it.id)}')" style="font-size:10.5px;color:${it.is_active ? 'var(--emerald)' : 'var(--text-3)'}">${it.is_active ? '✓ AAN' : '⨯ UIT'}</button>
+        </td>
+        <td style="padding:4px 12px;text-align:right;white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWbTEdit('${esc(it.id)}')" style="font-size:10.5px">Bewerk</button>
+          <button class="btn btn-ghost btn-sm" ${busy || it.is_active ? 'disabled' : ''} onclick="window.__setWbTDelete('${esc(it.id)}')" style="font-size:10.5px;color:var(--rose)" title="${it.is_active ? 'Deactiveer eerst' : 'Verwijderen'}">Verwijder</button>
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1100px">
+      ${_wbTEditorHtml()}
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:12px">
+        <b>Wanbetalers-templates LIVE.</b> Beheer <code>dunning_templates</code> (email / whatsapp / brief). Nieuwe dunning-runs gebruiken de actieve rijen; motor-logica onaangeraakt.
+        Voor <b>kind=brief</b> geldt een <b>WIK-gate</b> (client-side vangnet): body moet minimaal "14 dagen"- én kosten-vermelding bevatten om te mogen activeren. Juridische juistheid van de WIK-tekst blijft eigen sign-off.
+        Voor <b>WhatsApp</b>: kies uit approved Meta-templates (dropdown geladen uit finance-WABA); vrije-tekst is een fallback bij load-fail.
+      </div>
+      ${_wbT.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:8px">⚠ ${esc(_wbT.error)} <button class="btn btn-ghost btn-sm" onclick="_wbT.fetched=false;_wbT.error=null;fetchWbT()" style="font-size:11px;margin-left:6px">Opnieuw</button></div>` : ''}
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${kindPills}</div>
+        <div style="width:1px;height:20px;background:var(--border)"></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${actPills}</div>
+        <button class="btn btn-primary btn-sm" style="margin-left:auto;font-size:11.5px" onclick="window.__setWbTNew()">+ Nieuw sjabloon</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:6px">${filtered.length} sjabloon(en) — ${all.filter((x) => x.is_active).length} actief · ${all.filter((x) => !x.is_active).length} inactief · totaal ${all.length}</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Naam</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Kind</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Meta</th>
+            <th style="text-align:center;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" style="padding:14px;color:var(--text-3);font-size:12px;text-align:center">${_wbT.loading ? 'Laden…' : 'Geen sjablonen (met huidige filters).'}</td></tr>`}</tbody>
+        </table>
       </div>
     </div>`;
   }
@@ -5354,7 +5654,7 @@
     // Editor blijft daar (motor leest deze rijen direct; dubbele UI = risico op
     // afwijkende validatie; templates zijn juridisch dwingend WIK-14).
     if (cur.id === 'wb-workflows')       return bodyWbWorkflowsDeepLink();
-    if (cur.id === 'wb-berichten')       return bodyWbBerichtenDeepLink();
+    if (cur.id === 'wb-berichten')       return bodyWbBerichten();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
   }
@@ -5405,6 +5705,9 @@
       'sales-producten',
       // Ronde-31 v=56: sales-bonus native — bonus-config CRUD (percentage + threshold per verkoper).
       'sales-bonus',
+      // v=67: wb-berichten native — dunning_templates CRUD (email/whatsapp/brief)
+      // + client-side WIK-gate voor brief-kind. Motor-endpoints onaangeraakt.
+      'wb-berichten',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -5426,8 +5729,9 @@
     const DEEPLINK = new Set([
       'ev-templates','lms-instel',
       'mk-meta',
-      // Ronde-31 STAP 5: workflows-regels + templates blijven Finance (motor-consistentie + WIK-14 legal).
-      'wb-workflows','wb-berichten',
+      // Ronde-31 STAP 5: workflows-regels blijft Finance (motor-consistentie).
+      // v=67: wb-berichten is nu LIVE native (dunning-templates CRUD).
+      'wb-workflows',
       // Polish v26: alg-meldingen krijgt DEEP-LINK badge (was voorbeeld-data);
       // notice-only sectie (server-side crons + rol-lookup, aparte brok voor per-user-prefs).
     ]);
