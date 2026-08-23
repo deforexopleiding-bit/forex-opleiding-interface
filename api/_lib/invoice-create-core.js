@@ -274,9 +274,11 @@ export async function createTlInvoice({ customer, departmentId, lines, action, o
     } catch (e) { sendErr = { error: e.message }; }
   }
 
-  // 6. Post-write sync-back.
+  // 6. Post-write sync-back. deal_id doorgeven: de app kent de deal hier
+  //    (opts.deal_id), zodat de CRM invoices-rij meteen aan de deal hangt —
+  //    upsertInvoiceFromTl persisteert 'm non-clobber.
   let local = null, sync_err = null;
-  try { local = await upsertInvoiceFromTl(tlInvoiceId, { is_manual: true, pushed_to_tl: true, fallback_department: departmentId }); }
+  try { local = await upsertInvoiceFromTl(tlInvoiceId, { is_manual: true, pushed_to_tl: true, fallback_department: departmentId, deal_id: opts.deal_id || null }); }
   catch (e) { sync_err = e.message; console.error('[invoice-core] post-sync', e.message); }
 
   return {
