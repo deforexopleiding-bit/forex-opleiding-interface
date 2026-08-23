@@ -48,7 +48,7 @@ cand AS (   -- kandidaat-facturen per deal (via deal_id OF subs' tl_ids), excl f
     ON ( i.deal_id = p.deal_id
          OR i.tl_subscription_id = ANY (COALESCE(
               (SELECT tl_ids FROM dealsub_ids ds WHERE ds.deal_id = p.deal_id), ARRAY[]::text[])) )
-   AND (d.reservation_fee_invoice_id IS NULL OR i.id <> d.reservation_fee_invoice_id)
+   AND (d.reservation_fee_invoice_id IS NULL OR i.id::text <> d.reservation_fee_invoice_id)
 ),
 aanbetaling AS (   -- de aanbetalingsfactuur: precies, anders vroegste niet-fee
   SELECT p.bonus_id, p.deal_id,
@@ -105,7 +105,7 @@ cand AS (
     ON ( i.deal_id = p.deal_id
          OR i.tl_subscription_id = ANY (COALESCE(
               (SELECT tl_ids FROM dealsub_ids ds WHERE ds.deal_id = p.deal_id), ARRAY[]::text[])) )
-   AND (d.reservation_fee_invoice_id IS NULL OR i.id <> d.reservation_fee_invoice_id)
+   AND (d.reservation_fee_invoice_id IS NULL OR i.id::text <> d.reservation_fee_invoice_id)
 ),
 aanbetaling AS (
   SELECT p.bonus_id, p.deal_id,
