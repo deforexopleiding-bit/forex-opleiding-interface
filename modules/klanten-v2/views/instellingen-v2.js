@@ -2962,7 +2962,14 @@
   /* Wave-3 · fin-bank — bank_accounts read via direct-supabase (zoals fin-
      entiteiten). CRUD + CAMT-upload vragen eigen brok: verkeerde IBAN hier
      beïnvloedt dashboard-saldo direct (zie eerdere post-mortem: F2 fix). */
-  const _bnk = { loading: false, fetched: false, error: null, items: [], camt: null, camtError: null };
+  // v=62: CAMT-upload native in fin-bank. State-uitbreiding:
+  // - uploading: boolean guard tegen dubbel-POST bij re-render/dubbele klik.
+  // - uploadResult: laatste upload-uitkomst (statement_id + counts + range).
+  // - uploadError: fout-string.
+  // - recentTx: laatste ~15 transacties (via /api/finance-bank-camt-transactions).
+  const _bnk = { loading: false, fetched: false, error: null, items: [], camt: null, camtError: null,
+                 uploading: false, uploadResult: null, uploadError: null,
+                 recentTx: null, recentTxError: null, recentTxLoading: false };
   async function fetchBank() {
     if (_bnk.loading || _bnk.fetched) return;
     _bnk.loading = true; _bnk.error = null; if (render) render();
@@ -2983,6 +2990,60 @@
     _bnk.loading = false; _bnk.fetched = true;
     if (render) render();
   }
+  // v=62 · CAMT-upload flow. Endpoints hergebruikt: finance-bank-camt-upload
+  // (POST base64) + finance-bank-camt-transactions (GET recent 15).
+  // Guards: _bnk.uploading tegen dubbele POST bij re-render; sync-from-DOM
+  // niet nodig want de file-picker is een one-shot event zonder state-render.
+  async function _fetchRecentTx() {
+    _bnk.recentTxLoading = true; _bnk.recentTxError = null; if (render) render();
+    try {
+      const j = await tryFetch('camt-tx', '/api/finance-bank-camt-transactions?limit=15');
+      if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+      _bnk.recentTx = Array.isArray(j?.items) ? j.items : [];
+    } catch (e) { _bnk.recentTxError = e?.message || 'onbekend'; }
+    _bnk.recentTxLoading = false; if (render) render();
+  }
+  // File → base64 helper (strip 'data:*;base64,'-prefix van FileReader.readAsDataURL).
+  function _fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const rd = new FileReader();
+      rd.onload  = () => { const s = String(rd.result || ''); const i = s.indexOf(','); resolve(i >= 0 ? s.slice(i + 1) : s); };
+      rd.onerror = () => reject(new Error('FileReader-fout'));
+      rd.readAsDataURL(file);
+    });
+  }
+  window.__setBnkUploadPick = (inputEl) => {
+    const file = inputEl?.files?.[0]; if (!file) return;
+    if (_bnk.uploading) { showToast('Upload al bezig…', 'warn'); return; }
+    // Basis-check: .xml of .053-extensie. Server valideert ook.
+    const nm = String(file.name || '');
+    if (!/\.(xml|053)$/i.test(nm)) { showToast('Verwacht een .xml of .053 CAMT-bestand', 'warn'); inputEl.value = ''; return; }
+    if (file.size > 4 * 1024 * 1024) { showToast('Bestand te groot (>4MB)', 'warn'); inputEl.value = ''; return; }
+    openConfirm(`CAMT-bestand "${esc(nm)}" (${Math.round(file.size / 1024)} KB) importeren? Dit voegt bank-transacties toe aan camt_transactions + registreert betalingen matching (via payment-matcher). Bestaande transacties met dezelfde entry_reference worden geskipt (dedupe).`, async () => {
+      _bnk.uploading = true; _bnk.uploadError = null; _bnk.uploadResult = null; if (render) render();
+      try {
+        const b64 = await _fileToBase64(file);
+        const j = await tryFetch('camt-upload', '/api/finance-bank-camt-upload', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_name: nm, xml_content_base64: b64 }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _bnk.uploadResult = j;
+        showToast(`Import ok: ${j?.num_inserted || 0} nieuw · ${j?.num_skipped || 0} skip`, 'ok');
+        // Reset file-picker + refresh saldo + recent-tx-lijst.
+        try { inputEl.value = ''; } catch (_) {}
+        _bnk.fetched = false; fetchBank();     // ververst saldo-tabel
+        _fetchRecentTx();                       // toont net-geïmporteerde transacties
+      } catch (e) {
+        _bnk.uploadError = e?.message || 'Import mislukt';
+        showToast('Import mislukt: ' + _bnk.uploadError, 'warn');
+      } finally {
+        _bnk.uploading = false; if (render) render();
+      }
+    }, 'warn');
+  };
+  window.__setBnkRecentTxLoad = () => { if (!_bnk.recentTx && !_bnk.recentTxLoading) _fetchRecentTx(); };
+
   function bodyFinBank() {
     if (!_bnk.fetched && !_bnk.loading) queueMicrotask(() => fetchBank());
     const eurFmt = (cents) => {
@@ -3002,10 +3063,32 @@
       <td style="padding:6px 12px;font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(a.gocardless_account_id || '—')}</td>
       <td style="padding:6px 12px;font-size:11px">${a.is_active ? '✓ actief' : '⨯ inactief'}</td>
     </tr>`).join('');
+    // v=62: upload-blok bovenaan + result + recent-tx-blok.
+    const ur = _bnk.uploadResult;
+    const uploadBlock = `<div style="padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:600">CAMT-upload · bank-transacties importeren</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Kies een <code>.xml</code>- of <code>.053</code>-bestand van je bank. Dedupe op <code>entry_reference</code>; bestaande transacties worden geskipt. Bank-writes toegestaan — géén incasso-motor.</div>
+        </div>
+        <label class="btn btn-primary btn-sm" style="cursor:${_bnk.uploading ? 'wait' : 'pointer'};font-size:12px;opacity:${_bnk.uploading ? '.5' : '1'}" title="${_bnk.uploading ? 'Upload bezig…' : 'Kies CAMT-bestand'}">
+          ${_bnk.uploading ? '⏳ Uploaden…' : '📎 Kies CAMT-bestand'}
+          <input type="file" accept=".xml,.053,application/xml,text/xml" onchange="window.__setBnkUploadPick(this)" ${_bnk.uploading ? 'disabled' : ''} style="display:none" />
+        </label>
+      </div>
+      ${_bnk.uploadError ? `<div style="margin-top:10px;padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px">⚠ ${esc(_bnk.uploadError)}</div>` : ''}
+      ${ur ? `<div style="margin-top:10px;padding:10px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:12px;line-height:1.55">
+        ✓ Statement <code style="font-family:'IBM Plex Mono',monospace">${esc(String(ur.statement_id || '').slice(0,8))}…</code> geïmporteerd voor IBAN <code>${esc(ur.account_iban || '—')}</code>.
+        Nieuw: <b>${ur.num_inserted || 0}</b> · geskipt (dedupe): <b>${ur.num_skipped || 0}</b> · geparsed: <b>${ur.num_parsed || 0}</b>.
+        Periode: ${esc(String(ur.statement_from || '').slice(0,10))} → ${esc(String(ur.statement_to || '').slice(0,10))}.
+        Slotsaldo: <code>${ur.closing_balance_cents != null ? ((Number(ur.closing_balance_cents) / 100).toLocaleString('nl-NL', { style:'currency', currency:'EUR' })) : '—'}</code>.
+      </div>` : ''}
+    </div>`;
     return `<div style="max-width:1100px">
-      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Read-only.</b> Bank-account CRUD + CAMT-upload volgen in aparte brok — verkeerd IBAN of onbedoelde deactivate raakt dashboard-saldo direct.
-        Bovenste tabel = actuele slotsaldo's per IBAN (dezelfde bron als dashboard: <code>finance-bank-camt-balance</code>). Onderste tabel = <code>bank_accounts</code>-registratie (metadata + GoCardless-koppeling).
+      ${uploadBlock}
+      <div style="padding:14px 16px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
+        <b>Upload LIVE · registratie/beheer read-only.</b> CAMT-upload boven schrijft echte transacties (<code>camt_transactions</code>) + registreert matching betalingen (<code>payment-matcher</code>). Bank-account CRUD (IBAN toevoegen/deactiveren) blijft eigen brok — verkeerd IBAN raakt dashboard-saldo direct.
+        Bovenste saldo-tabel = <code>finance-bank-camt-balance</code>. Onderste = <code>bank_accounts</code>-registratie.
       </div>
       ${_bnk.error   ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_bnk.error)}</div>` : ''}
       ${_bnk.camtError ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ CAMT-saldo laden mislukt: ${esc(_bnk.camtError)}</div>` : ''}
@@ -3030,7 +3113,7 @@
       </div>
 
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">bank_accounts-registratie (metadata)</div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="background:var(--surface-2)">
             <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">IBAN</th>
@@ -3040,6 +3123,38 @@
           <tbody>${regRows || `<tr><td colspan="3" style="padding:16px;color:var(--text-3);font-size:12.5px">${_bnk.loading ? 'Laden…' : 'Geen registratie-rijen. Saldo is toch correct (via CAMT hierboven).'}</td></tr>`}</tbody>
         </table>
       </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <div style="font-size:13px;font-weight:600">Recente transacties (laatste 15)</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Bron: <code>camt_transactions</code>. Bekijk wat er net geïmporteerd is.</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setBnkRecentTxLoad()" style="font-size:11px">${_bnk.recentTxLoading ? 'Laden…' : (_bnk.recentTx ? '↻ Vernieuwen' : '📄 Toon transacties')}</button>
+      </div>
+      ${_bnk.recentTxError ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:8px">⚠ ${esc(_bnk.recentTxError)}</div>` : ''}
+      ${_bnk.recentTx ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:700px">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Datum</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">IBAN</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Bedrag</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Tegenpartij</th>
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Omschrijving</th>
+          </tr></thead>
+          <tbody>${(_bnk.recentTx || []).map(t => {
+            const cents = Number(t.amount_cents || 0);
+            const amt = (cents/100).toLocaleString('nl-NL', { style:'currency', currency: t.currency || 'EUR' });
+            const col = cents < 0 ? 'var(--rose)' : 'var(--emerald)';
+            return `<tr style="border-top:1px solid var(--border)">
+              <td style="padding:6px 12px;font-size:11.5px;color:var(--text-3);white-space:nowrap">${esc(String(t.booking_date || '').slice(0,10))}</td>
+              <td style="padding:6px 12px;font-size:11px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(t.account_iban || '—')}</td>
+              <td style="padding:6px 12px;font-size:12px;text-align:right;font-family:'IBM Plex Mono',monospace;color:${col};font-weight:600">${amt}</td>
+              <td style="padding:6px 12px;font-size:11.5px">${esc(t.counterparty_name || '—')}</td>
+              <td style="padding:6px 12px;font-size:11px;color:var(--text-3);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.description || '')}">${esc(String(t.description || '—').slice(0,80))}</td>
+            </tr>`;
+          }).join('') || `<tr><td colspan="5" style="padding:14px;color:var(--text-3);font-size:12px;text-align:center">Geen transacties</td></tr>`}</tbody>
+        </table>
+      </div>` : ''}
     </div>`;
   }
 
