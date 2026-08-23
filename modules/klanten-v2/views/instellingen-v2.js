@@ -1865,185 +1865,57 @@
     </div>`;
   }
   function bodyAgentsLisa() {
+    // v=73 opruim-ronde: canonieke bewerkplek is AI Agents-module (heeft de
+    // volledige editor met draft/publish/rollback + history). Instellingen
+    // toont hier alleen een read-only preview + deep-link — voorkomt tweede
+    // write-pad op lisa_config.
     if (!_lc.fetched && !_lc.loading) queueMicrotask(() => fetchLisaConfig());
     const c = _lc.config;
     if (!c && _lc.loading) return `<div style="padding:24px;color:var(--text-3)">Laden…</div>`;
     if (_lc.error && !c) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${esc(_lc.error)}</div>`;
-    if (!c) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ Geen Lisa-config gevonden</div>`;
-    const isDraft = !c.is_active && _lc.active_version && c.version > _lc.active_version;
-    const status = isDraft
-      ? `<span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:11px;font-weight:600">DRAFT v${c.version}</span> <span style="font-size:11px;color:var(--text-3)">actieve: v${_lc.active_version}</span>`
-      : `<span style="padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-size:11px;font-weight:600">LIVE v${c.version}</span>`;
-    const products = (c.kb_products || []).map((p, i) => `<div style="padding:8px;border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 100px 30px;gap:6px;align-items:start">
-      <div style="grid-column:1/-1;display:flex;justify-content:space-between;font-size:11px;color:var(--text-3)"><span>Product ${i+1}</span><button class="btn btn-ghost btn-sm" onclick="window.__setLcRmProduct(${i})" style="font-size:11px;color:var(--rose);padding:0 4px">✕</button></div>
-      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="naam" value="${esc(p.naam||'')}" placeholder="naam" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
-      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="doelgroep" value="${esc(p.doelgroep||'')}" placeholder="doelgroep" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
-      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="prijs" value="${esc(p.prijs||'')}" placeholder="prijs" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
-      <input type="text" data-lc-prod-idx="${i}" data-lc-prod-field="duur" value="${esc(p.duur||'')}" placeholder="duur" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
-      <textarea data-lc-prod-idx="${i}" data-lc-prod-field="beschrijving" rows="2" placeholder="beschrijving" style="grid-column:1/-1;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:inherit;resize:vertical">${esc(p.beschrijving||'')}</textarea>
-    </div>`).join('');
-    const faqs = (c.kb_faq || []).map((q, i) => `<div style="padding:8px;border-top:1px solid var(--border)">
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:4px"><span>FAQ ${i+1}</span><button class="btn btn-ghost btn-sm" onclick="window.__setLcRmFaq(${i})" style="font-size:11px;color:var(--rose);padding:0 4px">✕</button></div>
-      <input type="text" data-lc-faq-idx="${i}" data-lc-faq-field="vraag" value="${esc(q.vraag||'')}" placeholder="Vraag" style="display:block;margin-bottom:4px;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
-      <textarea data-lc-faq-idx="${i}" data-lc-faq-field="antwoord" rows="2" placeholder="Antwoord" style="display:block;margin-bottom:4px;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(q.antwoord||'')}</textarea>
-      <input type="text" data-lc-faq-idx="${i}" data-lc-faq-field="keywords" value="${esc((q.keywords||[]).join(', '))}" placeholder="keywords (comma-list, lowercase)" style="display:block;padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
-    </div>`).join('');
-    const steps = (c.followup_sequence || []).map((s, i) => `<div style="padding:8px;border-top:1px solid var(--border)">
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3);margin-bottom:4px"><span>Stap ${i+1}${s.use_ai?' · AI':''}</span><button class="btn btn-ghost btn-sm" onclick="window.__setLcRmStep(${i})" style="font-size:11px;color:var(--rose);padding:0 4px">✕</button></div>
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><label style="font-size:11px;color:var(--text-3)">Delay (u, 1-720):</label>
-      <input type="number" min="1" max="720" data-lc-step-idx="${i}" data-lc-step-field="delay_hours" value="${esc(String(s.delay_hours||24))}" style="width:80px;padding:3px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" /></div>
-      <textarea data-lc-step-idx="${i}" data-lc-step-field="template" rows="3" placeholder="Bericht-template (>=200 chars = AI-gegenereerd)" style="display:block;padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(s.template||'')}</textarea>
-    </div>`).join('');
-    return `<div style="max-width:1100px">
-      <div style="padding:12px 14px;background:${isDraft?'var(--amber-soft)':'var(--emerald-soft)'};color:${isDraft?'var(--amber)':'var(--emerald)'};border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Lisa AI Appointmentsetter · configuratie ${status}.</b> ${isDraft?'Draft is nog niet live — Publiceer om actief te zetten.':'Wijzigingen worden opgeslagen als DRAFT; klik Publiceren om live te zetten.'} Achter <code>lisa.config.{view,edit,publish}</code>-permissions. Motor onaangeraakt.
-        <button class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px" onclick="window.__setLcToggleHistory()">📜 Historie</button>
+    const isLive = c && c.is_active && (!_lc.active_version || c.version === _lc.active_version);
+    const hdr = c
+      ? (isLive
+          ? `<span style="padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-size:11px;font-weight:600">LIVE v${c.version}</span>`
+          : `<span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:11px;font-weight:600">v${c.version}</span>${_lc.active_version ? ' <span style="font-size:11px;color:var(--text-3)">actieve: v' + _lc.active_version + '</span>' : ''}`)
+      : '';
+    const phases = (c && Array.isArray(c.phase_config)) ? c.phase_config : [];
+    const kbProdN = (c && Array.isArray(c.kb_products)) ? c.kb_products.length : 0;
+    const kbFaqN  = (c && Array.isArray(c.kb_faq)) ? c.kb_faq.length : 0;
+    const followupN = (c && Array.isArray(c.followup_sequence)) ? c.followup_sequence.length : 0;
+    const stopN     = (c && Array.isArray(c.stop_keywords)) ? c.stop_keywords.length : 0;
+    return `<div style="max-width:1000px">
+      <div style="padding:12px 14px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px">
+          <b>READ-ONLY preview.</b> Lisa-config wordt beheerd in de <b>AI Agents-module</b> (canonieke bewerkplek, met draft / publish / rollback + history). Hier alleen ter overzicht — geen tweede write-pad op <code>lisa_config</code>.
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="DFO.goMod('agents')" style="font-size:11.5px;white-space:nowrap">🤖 Open AI Agents → Lisa</button>
       </div>
-      ${_lc.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">⚠ ${esc(_lc.error)}</div>` : ''}
-      ${_lcHistoryPanel()}
-
-      <div style="display:grid;grid-template-columns:1fr;gap:14px">
-
+      ${!c ? `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ Geen Lisa-config gevonden</div>` : `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Persona</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px">
-            ${_lcTextField('Naam *', 'persona_name')}
-            ${_lcTextField('Leeftijd', 'persona_age')}
-            ${_lcTextField('Achtergrond', 'persona_background', { textarea: true, rows: 3 })}
-            ${_lcTextField('Toon', 'persona_tone', { textarea: true, rows: 3 })}
-            ${_lcTextField('Schrijfstijl', 'persona_writing_style', { textarea: true, rows: 3 })}
-            ${_lcTextField('Emoji-gebruik', 'emoji_usage', { textarea: true, rows: 3 })}
-            <label style="font-size:11.5px;color:var(--text-2);display:block">Do's <span style="color:var(--text-3)">(1 regel per item)</span>
-              <textarea data-lc-field="dos" rows="4" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(_lcArrLines(c.dos))}</textarea>
-            </label>
-            <label style="font-size:11.5px;color:var(--text-2);display:block">Don'ts <span style="color:var(--text-3)">(1 regel per item)</span>
-              <textarea data-lc-field="donts" rows="4" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(_lcArrLines(c.donts))}</textarea>
-            </label>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div style="font-size:12.5px;font-weight:600">Status</div>${hdr}</div>
+          <div style="font-size:12px;line-height:1.7">
+            <div><span style="color:var(--text-3)">Persona: </span><b>${esc(c.persona_name || 'Lisa')}</b></div>
+            <div><span style="color:var(--text-3)">Model: </span><code>${esc(c.model || '—')}</code></div>
+            <div><span style="color:var(--text-3)">Actief: </span>${c.is_active ? '<b style="color:var(--emerald)">✓ ja</b>' : '<b style="color:var(--rose)">⨯ nee</b>'}</div>
           </div>
         </div>
-
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Fases · gespreks-prompts per fase</div>
-          <div style="font-size:11px;color:var(--text-3);margin-bottom:10px">Elke fase heeft <b>System</b> (instructie voor de AI), <b>Transition</b> (wanneer overgaan naar volgende fase) en <b>Voorbeelden</b> (1 regel per voorbeeld-bericht). Shape = <code>{system, transition, examples[]}</code>, matcht modules/lisa.html.</div>
-          <div style="display:grid;grid-template-columns:1fr;gap:14px">
-            ${['intro','doel','situatie','band','call'].map(f => {
-              const p = c['phase_' + f] || { system:'', transition:'', examples:[] };
-              const label = ({ intro:'Intro', doel:'Doel', situatie:'Situatie', band:'Band', call:'Call (afspraak)' })[f];
-              return `<div style="padding:10px;background:var(--surface-2);border-radius:6px">
-                <div style="font-size:12px;font-weight:600;margin-bottom:6px">${label}</div>
-                <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:8px">System (instructie AI)
-                  <textarea data-lc-phase="${f}" data-lc-phase-field="system" rows="4" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(p.system || '')}</textarea>
-                </label>
-                <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:8px">Transition (wanneer naar volgende fase)
-                  <textarea data-lc-phase="${f}" data-lc-phase-field="transition" rows="2" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(p.transition || '')}</textarea>
-                </label>
-                <label style="font-size:11px;color:var(--text-2);display:block">Voorbeelden <span style="color:var(--text-3)">(1 regel per voorbeeld)</span>
-                  <textarea data-lc-phase="${f}" data-lc-phase-field="examples" rows="3" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(_lcArrLines(p.examples))}</textarea>
-                </label>
-              </div>`;
-            }).join('')}
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Config-omvang</div>
+          <div style="font-size:12px;line-height:1.7">
+            <div><span style="color:var(--text-3)">Fases: </span><b>${phases.length}</b></div>
+            <div><span style="color:var(--text-3)">Kennisbank: </span><b>${kbProdN}</b> product(en) · <b>${kbFaqN}</b> FAQ</div>
+            <div><span style="color:var(--text-3)">Follow-up sequenties: </span><b>${followupN}</b></div>
+            <div><span style="color:var(--text-3)">Stop-keywords: </span><b>${stopN}</b></div>
           </div>
         </div>
-
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Kennisbank</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-bottom:12px">
-            ${_lcTextField('Prijzen (vrije tekst)', 'kb_pricing', { textarea: true, rows: 3 })}
-            ${_lcTextField('USPs (vrije tekst)', 'kb_usps', { textarea: true, rows: 3 })}
-          </div>
-          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:8px">Tag-filter (comma-list — beperk kennisbank-artikelen tot deze tags; leeg = alles)
-            <input type="text" data-lc-tag-filter value="${esc((c.kb_tag_filter||[]).join(', '))}" placeholder="bv. verkoop, faq" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
-          </label>
-          <label style="font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:6px;margin-bottom:12px">
-            <input type="checkbox" data-lc-kb-use-general ${c.kb_use_general_kb ? 'checked' : ''} />
-            Gebruik algemene kennisbank naast product/FAQ (RAG)
-          </label>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 4px">
-            <div style="font-size:12px;font-weight:600">Producten (${(c.kb_products||[]).length})</div>
-            <button class="btn btn-ghost btn-sm" onclick="window.__setLcAddProduct()" style="font-size:11px">➕ Product</button>
-          </div>
-          <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${products || `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Geen producten</div>`}</div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 4px">
-            <div style="font-size:12px;font-weight:600">FAQ (${(c.kb_faq||[]).length})</div>
-            <button class="btn btn-ghost btn-sm" onclick="window.__setLcAddFaq()" style="font-size:11px">➕ FAQ</button>
-          </div>
-          <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${faqs || `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Geen FAQ</div>`}</div>
-        </div>
-
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:10px">Follow-up sequence</div>
-          <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 14px;margin-bottom:12px;align-items:center">
-            <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-lc-followup-enabled ${c.followup_enabled ? 'checked' : ''} /> Follow-up actief</label>
-            <label style="font-size:12px;color:var(--text-2);display:flex;align-items:center;gap:6px">AI-threshold (chars, 0-2000): <input type="number" min="0" max="2000" data-lc-followup-threshold value="${esc(String(c.followup_ai_threshold_chars||200))}" style="width:80px;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" /></label>
-          </div>
-          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Stop-keywords (comma-list, lowercase) — komt bovenop de hardcoded baseline
-            <input type="text" data-lc-stop-keywords value="${esc((c.stop_keywords||[]).join(', '))}" placeholder="bv. stop, geen interesse" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
-          </label>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 4px">
-            <div style="font-size:12px;font-weight:600">Sequence-stappen (${(c.followup_sequence||[]).length}/5)</div>
-            <button class="btn btn-ghost btn-sm" ${(c.followup_sequence||[]).length >= 5 ? 'disabled style="opacity:.5;cursor:not-allowed;font-size:11px" title="Max 5 stappen bereikt"' : 'style="font-size:11px"'} onclick="window.__setLcAddStep()">➕ Stap</button>
-          </div>
-          <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">${steps || `<div style="padding:12px;color:var(--text-3);font-size:11.5px;text-align:center">Geen stappen</div>`}</div>
-        </div>
-
       </div>
-
-      <div style="position:sticky;bottom:0;padding:12px 0;margin-top:16px;background:var(--surface);border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-        <button class="btn btn-ghost btn-sm" ${_lc.busy?'disabled':''} onclick="window.__setLcSave('save_draft')" style="font-size:12px">${_lc.busy && _lc.savingKind==='save_draft'?'Opslaan…':'💾 Opslaan als concept'}</button>
-        <button class="btn btn-primary btn-sm" ${_lc.busy?'disabled':''} onclick="window.__setLcSave('publish')" style="font-size:12px;background:var(--rose);border-color:var(--rose)">${_lc.busy && _lc.savingKind==='publish'?'Publiceren…':'🚀 Publiceren (live)'}</button>
-      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+        <div style="font-size:12.5px;font-weight:600;margin-bottom:6px">Persona-toon (preview)</div>
+        <div style="font-size:11.5px;color:var(--text-3);line-height:1.5;white-space:pre-wrap">${esc(c.persona_tone || '—')}</div>
+      </div>`}
     </div>`;
-  }
-
-  /* Ronde-28 C1 · mk-bronnen — read-native. leads.bron + leads.traject count-
-     verdeling via direct-supabase op leads_overzicht. Editor blijft aparte brok
-     (bron-config bewerken raakt intake-flow); toont wel de actuele verdeling
-     zodat je ziet welke bronnen actief zijn. */
-  // Ronde-31: canonieke definitie ná opschoning — identiek aan
-  // api/leads-per-traject-count.js (grep TEST_EMAIL_MARKERS bij uitbreiden).
-  const _lb = { loading: false, fetched: false, error: null, byBron: [], byTraject: [], byCross: [], total: 0, excluded: 0, raw: 0, sources: [] };
-  async function fetchLeadBronnen() {
-    if (_lb.loading || _lb.fetched) return;
-    _lb.loading = true; _lb.error = null; if (render) render();
-    try {
-      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-      // Bron gewisseld van leads_overzicht → leads (raw): afwijzer + email zit niet in de view.
-      // Ronde-31 v=50: ook lead_sources meelezen (CAC-attributie-tabel, aparte scope).
-      const [leadsRes, srcRes] = await Promise.all([
-        window.supabase.from('leads').select('bron, traject, email, afwijzer').is('verwijderd_op', null).limit(50000),
-        window.supabase.from('lead_sources').select('id, name, is_active').order('name'),
-      ]);
-      if (leadsRes.error) throw leadsRes.error;
-      // lead_sources kan RLS'd zijn — fail-soft (leeg).
-      _lb.sources = (srcRes && !srcRes.error) ? (srcRes.data || []) : [];
-      const rows = leadsRes.data || [];
-      const isTestEmail = (e) => {
-        if (!e) return false;
-        const s = String(e).toLowerCase();
-        return s.includes('test') || s.includes('deforexopleiding');
-      };
-      _lb.raw = rows.length;
-      const bMap = {}, tMap = {}, xMap = {};
-      let excluded = 0;
-      for (const r of rows) {
-        if (r?.afwijzer === true) { excluded += 1; continue; }
-        if (isTestEmail(r?.email)) { excluded += 1; continue; }
-        const b = String(r.bron || '(leeg)');
-        const t = String(r.traject || '(leeg)');
-        bMap[b] = (bMap[b] || 0) + 1;
-        tMap[t] = (tMap[t] || 0) + 1;
-        // Cross-tab bron × traject (max top-40 combinaties in render).
-        const key = b + '||' + t;
-        xMap[key] = (xMap[key] || 0) + 1;
-      }
-      _lb.total = _lb.raw - excluded;
-      _lb.excluded = excluded;
-      _lb.byBron    = Object.entries(bMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
-      _lb.byTraject = Object.entries(tMap).sort((a,b) => b[1]-a[1]).map(([n,c]) => ({ name:n, count:c }));
-      _lb.byCross   = Object.entries(xMap).sort((a,b) => b[1]-a[1]).map(([k,c]) => { const [bron, traject] = k.split('||'); return { bron, traject, count: c }; });
-    } catch (e) { _lb.error = e?.message || 'onbekend'; }
-    _lb.loading = false; _lb.fetched = true;
-    if (render) render();
   }
   function bodyLeadBronnen() {
     if (!_lb.fetched && !_lb.loading) queueMicrotask(() => fetchLeadBronnen());
