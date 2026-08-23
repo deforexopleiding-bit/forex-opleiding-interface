@@ -177,7 +177,6 @@
     { g: 'Events & Leren', items: [
       { id: 'ev-auto',          n: 'Event-automatiseringen', d: 'Welke berichten wanneer uitgaan rond een event',           ic: I.repeat },
       { id: 'ev-templates',     n: 'Event-berichten',      d: 'E-mail en WhatsApp-templates',                              ic: I.mail },
-      { id: 'ev-locaties',      n: 'Locaties',             d: 'Zalen, adressen en routebeschrijvingen',                    ic: I.building || I.file },
       { id: 'lms-instel',       n: 'LMS-instellingen',     d: 'Modules, toegang en certificaten',                          ic: I.book || I.doc },
     ]},
     { g: 'Communicatie', items: [
@@ -2171,83 +2170,6 @@
     </div>`;
   }
 
-  /* Ronde-31 grote-brok · ev-locaties — READ-ONLY de-facto locaties uit events.
-     DISCOVERY: events.location is een VRIJE-TEKST-veld (bewijs: api/events-update.js
-     r74 patch.location = ...trim() || null, api/admin/historical-event-save.js r50,
-     api/event-choice-get.js r110). Er is GEEN event_locations-registry-tabel.
-     Elke event heeft z'n eigen location-string; er is dus geen data-driven
-     locatie-CRUD mogelijk zonder backend-refactor (tabel + FK + backfill).
-     Buiten scope zonder afstemming — zoals mk-bronnen (v=50) en agents-manager
-     (v=54). Sectie toont daarom de de-facto locaties (distinct .location uit events)
-     met counts + past/upcoming-splitsing zodat je ziet welke waarden feitelijk
-     gebruikt zijn. Motor onaangeraakt. */
-  const _evl = { loading: false, fetched: false, error: null, items: [], total: 0 };
-  async function fetchEvLocaties() {
-    if (_evl.loading || _evl.fetched) return;
-    _evl.loading = true; _evl.error = null; if (render) render();
-    try {
-      if (!window.supabase?.from) throw new Error('supabase-client nog niet klaar');
-      const { data, error } = await window.supabase.from('events')
-        .select('location, starts_at, is_test')
-        .limit(50000);
-      if (error) throw error;
-      const rows = (data || []).filter(r => !r?.is_test);
-      const now = new Date();
-      const map = {};
-      for (const r of rows) {
-        const loc = String(r.location || '').trim();
-        const key = loc || '(leeg)';
-        const bucket = map[key] || (map[key] = { name: key, total: 0, past: 0, upcoming: 0, isEmpty: !loc });
-        bucket.total += 1;
-        if (r.starts_at) {
-          const d = new Date(r.starts_at);
-          if (Number.isFinite(d.getTime()) && d >= now) bucket.upcoming += 1;
-          else bucket.past += 1;
-        } else bucket.past += 1;
-      }
-      _evl.items = Object.values(map).sort((a, b) => b.total - a.total);
-      _evl.total = rows.length;
-    } catch (e) { _evl.error = e?.message || 'onbekend'; }
-    _evl.loading = false; _evl.fetched = true; if (render) render();
-  }
-  window.__setEvlReload = () => { _evl.fetched = false; fetchEvLocaties(); };
-  function bodyEvLocaties() {
-    if (!_evl.fetched && !_evl.loading) queueMicrotask(() => fetchEvLocaties());
-    const rows = _evl.items.map(x => `<tr style="border-top:1px solid var(--border);${x.isEmpty ? 'opacity:.55' : ''}">
-      <td style="padding:8px 12px;font-size:12.5px;${x.isEmpty?'font-style:italic;color:var(--text-3)':''}">${esc(x.name)}</td>
-      <td style="padding:8px 12px;font-size:12px;text-align:right;font-family:'IBM Plex Mono',monospace">${x.total}</td>
-      <td style="padding:8px 12px;font-size:11.5px;text-align:right;color:var(--text-3)">${x.past}</td>
-      <td style="padding:8px 12px;font-size:11.5px;text-align:right;color:${x.upcoming>0?'var(--emerald)':'var(--text-3)'};font-weight:${x.upcoming>0?'600':'normal'}">${x.upcoming}</td>
-      <td style="padding:8px 12px;font-size:11px;color:var(--text-3);text-align:right">${_evl.total ? Math.round(x.total/_evl.total*100) : 0}%</td>
-    </tr>`).join('');
-    return `<div style="max-width:1000px">
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>READ-ONLY — geen locaties-registry.</b> <code>events.location</code> is een <b>vrije-tekst-veld</b> op elke event-rij; er bestaat geen <code>event_locations</code>-tabel. Locatie wordt per event bewerkt in de Events-module (event-detail-scherm). Bewerkbare centrale locaties-editor vraagt backend-refactor (nieuwe tabel + FK <code>events.location_id</code> + backfill van bestaande strings) — buiten scope zonder afstemming.
-        <a href="/modules/events.html" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Events →</a>
-      </div>
-      ${_evl.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_evl.error)}</div>` : ''}
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div>
-          <div style="font-size:13px;font-weight:600">De-facto locaties (${_evl.items.length} unieke waarden · ${_evl.total} events)</div>
-          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Distinct <code>events.location</code>-waarden op non-test events. Wijzigen = per event via Events-module.</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.__setEvlReload()" style="font-size:11px">↻ Vernieuwen</button>
-      </div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:600px">
-          <thead><tr style="background:var(--surface-2)">
-            <th style="text-align:left;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Locatie</th>
-            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Totaal events</th>
-            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Voorbij</th>
-            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">Aankomend</th>
-            <th style="text-align:right;padding:8px 12px;font-size:11px;color:var(--text-3);font-weight:600">%</th>
-          </tr></thead>
-          <tbody>${rows || `<tr><td colspan="5" style="padding:16px;color:var(--text-3);font-size:12.5px;text-align:center">${_evl.loading?'Laden…':'Geen events gevonden'}</td></tr>`}</tbody>
-        </table>
-      </div>
-      <div style="margin-top:12px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:11px;color:var(--text-3);line-height:1.55">Rijen met <i>(leeg)</i> zijn events zonder locatie-veld — meestal online/livestream. Aankomend-count is groen bij ≥1 event vanaf vandaag.</div>
-    </div>`;
-  }
 
   /* Ronde-31 grote-brok · agents-manager — READ-ONLY runtime-status + audit-log.
      DISCOVERY: /api/super-admin-ai-manager is POST-only Q&A-endpoint met hardcoded
@@ -6230,7 +6152,8 @@
     if (cur.id === 'sales-bonus')        return bodySalesBonus();
     if (cur.id === 'ev-auto')            return bodyEvAuto();
     if (cur.id === 'ev-templates')       return bodyDeepLink('Events', 'Event-berichten (e-mail + WhatsApp) worden per template beheerd in de Events-module + com-wa hier voor WA-templates.', 'events');
-    if (cur.id === 'ev-locaties')        return bodyEvLocaties();
+    // v=74 opruim-ronde: ev-locaties verwijderd (locaties zijn vrije-tekst
+    // per event, geen registry-tabel; wordt in Events beheerd).
     if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in Bubble; het CRM leest via bubble-api. Zie sys-bubble-schema voor diagnostiek.', null);
     if (cur.id === 'mk-meta')            return bodyDeepLink(null, 'Meta-koppeling (ads-account + pixel) wordt beheerd in Meta Business Manager. Alleen de WhatsApp-Cloud-API-koppeling wordt hier bewerkt (zie com-wa).', 'com-wa');
     if (cur.id === 'mk-bronnen')         return bodyLeadBronnen();
@@ -6312,9 +6235,7 @@
       // Ronde-31 v=54: agents-manager READ-ONLY — geen config-tabel in DB; alle
       // gedrag is code-side (hardcoded constants + on-the-fly schema-prompt).
       'agents-manager',
-      // Ronde-31 v=55: ev-locaties READ-ONLY — events.location is vrije-tekst;
-      // geen event_locations-tabel bestaat.
-      'ev-locaties',
+      // v=74: ev-locaties sectie VERWIJDERD — vrije-tekst per event, in Events beheerd.
       // Ronde-31 v=56: sales-bonus LIVE — sales_bonus_configs CRUD via nieuwe endpoint.
       'sales-bonus',
     ]);
