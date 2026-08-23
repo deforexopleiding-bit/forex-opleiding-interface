@@ -114,6 +114,9 @@ const DEPT_NAME = {
 // - Type verkoop intracommunautair/buiten-EU → eigen 0%/verlegd tarief:
 //     TEAMLEADER_TAX_RATE_ID_INTRA_{DEPT} / _INTRA   (fallback)
 //     TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU_{DEPT} / _OUTSIDE_EU
+// - Verlegd/medecontractant (binnenlandse B2B-verlegging, bv. BE-bouw) → eigen
+//   0%-tarief, los van het domestic-percentage:
+//     TEAMLEADER_TAX_RATE_ID_VERLEGD_{DEPT} / _VERLEGD
 // - Binnenlands → per BTW%-tarief, met per-department override:
 //     TEAMLEADER_TAX_RATE_ID_21_{DEPT} / TEAMLEADER_TAX_RATE_ID_21
 export function taxRateIdFor(vatPercentage, departmentId, saleType) {
@@ -128,6 +131,13 @@ export function taxRateIdFor(vatPercentage, departmentId, saleType) {
   if (saleType === 'outside_eu') {
     const id = pickEnv(dept ? `TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU_${dept}` : null, 'TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU');
     if (!id) throw new Error('Geen TEAMLEADER_TAX_RATE_ID_OUTSIDE_EU geconfigureerd (bv. Retentie heeft mogelijk geen buiten-EU tarief)');
+    return id;
+  }
+  if (saleType === 'verlegd') {
+    // Binnenlandse verlegging/medecontractant: 0% BTW-verlegd, percentage genegeerd
+    // (net als intra/outside_eu één tarief per type).
+    const id = pickEnv(dept ? `TEAMLEADER_TAX_RATE_ID_VERLEGD_${dept}` : null, 'TEAMLEADER_TAX_RATE_ID_VERLEGD');
+    if (!id) throw new Error('Geen TEAMLEADER_TAX_RATE_ID_VERLEGD geconfigureerd (binnenlandse verlegging/medecontractant)');
     return id;
   }
   // domestic

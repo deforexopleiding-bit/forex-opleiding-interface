@@ -311,6 +311,16 @@ export default async function handler(req, res) {
     }
     const departmentId = tl_department_id || deal.tl_department_id || null;
 
+    // sale_type='verlegd' (binnenlandse verlegging / medecontractant): de TL-tax-
+    // rate is 0% (taxRateIdFor negeert het percentage), dus forceren we óók de
+    // CRM-opgeslagen regel-BTW op 0. Zo is het CRM-bedrag (incl-berekeningen, MRR,
+    // dashboards) meteen 0%/correct en raakt het niet opgeblazen — root-cause van
+    // de handmatige ER-Schilderwerken-correctie. Moet vóór de pre-flight, de sub-
+    // insert én de TL-push staan zodat álle downstream-gebruik vat=0 ziet.
+    if (deal.sale_type === 'verlegd') {
+      for (const s of subsNorm) for (const li of s._lines) li.vat_percentage = 0;
+    }
+
     // Pre-flight: bij TL-sync de tax_rate_id's per regel vóóraf valideren, zodat
     // een ontbrekende env-var een duidelijke 422 geeft VÓÓR er lokaal subs worden
     // aangemaakt (consistent met Wizard 1, geen partial state).

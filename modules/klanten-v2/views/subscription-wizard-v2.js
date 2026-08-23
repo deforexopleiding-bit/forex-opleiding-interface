@@ -827,6 +827,7 @@
           <select class="ib-input" onchange="__subwSetField('sale_type', this.value)">
             <option value="domestic" ${_sub.sale_type === 'domestic' ? 'selected' : ''}>NL binnenlands (21% BTW)</option>
             <option value="intracommunautair" ${_sub.sale_type === 'intracommunautair' ? 'selected' : ''}>Intracommunautair (0% BTW)</option>
+            <option value="verlegd" ${_sub.sale_type === 'verlegd' ? 'selected' : ''}>Verlegd / medecontractant (0% BTW)</option>
           </select>
         </label>` : ''}
       </div>

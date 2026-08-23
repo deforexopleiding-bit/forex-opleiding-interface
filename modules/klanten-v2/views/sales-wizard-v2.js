@@ -2002,6 +2002,7 @@
         <select class="ib-input" onchange="__swSetSaleType(this.value)">
           <option value="domestic"        ${w.sale_type === 'domestic'        ? 'selected' : ''}>Normaal NL/BE</option>
           <option value="intracommunautair" ${w.sale_type === 'intracommunautair' ? 'selected' : ''}>Zakelijk België — Intracommunautair</option>
+          <option value="verlegd"         ${w.sale_type === 'verlegd'         ? 'selected' : ''}>Verlegd / medecontractant (0% BTW)</option>
         </select>
         <div class="sw-hint">${w.sale_type !== 'domestic' ? 'Alle regels 0% BTW (verlegd / vrijgesteld).' : ''}</div>
       </div>

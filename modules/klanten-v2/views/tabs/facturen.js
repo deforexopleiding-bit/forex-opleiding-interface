@@ -14,7 +14,7 @@ import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
 import { openInvoicePaymentModal } from '../modals/invoice-payment.js';
 import { openInvoiceSendModal } from '../modals/invoice-send.js?v=3';
 import { openInvoiceCreditModal } from '../modals/invoice-credit.js';
-import { openInvoiceCreateModal } from '../modals/invoice-create.js?v=9';
+import { openInvoiceCreateModal } from '../modals/invoice-create.js?v=10';
 
 const K = () => window.KV;
 
