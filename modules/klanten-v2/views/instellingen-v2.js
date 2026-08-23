@@ -1608,26 +1608,31 @@
     </div>`;
   }
   function bodyWbJoost() {
+    // v=71 opruim-ronde: canonieke bewerkplek is AI Agents-module (heeft de
+    // volledige editor met history/draft/publish/rollback). Instellingen toont
+    // hier alleen een read-only persona-preview + deep-link — voorkomt tweede
+    // write-pad op joost_config.
     if (!_jc.fetched && !_jc.loading) queueMicrotask(() => fetchJoostConfig());
     const c = _jc.config;
     const am = c?.autonomy_config?.arrangement_mandate;
     return `<div style="max-width:1000px">
-      ${_renderJcEditor()}
-      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Deze sectie schrijft LIVE.</b> Wijzigingen aan <b>persona-naam</b> en <b>persona-toon</b> gelden direct voor alle nieuwe Joost-suggesties (module=finance). System-prompt en autonomy-mandaat blijven alleen-lezen; die wijzigen raakt directe klant-communicatie en vergt Finance-review-brok.
+      <div style="padding:12px 14px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px">
+          <b>READ-ONLY preview.</b> Joost-persona wordt beheerd in de <b>AI Agents-module</b> (canonieke bewerkplek, met history / draft / publish / rollback). Hier alleen ter overzicht.
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="DFO.goMod('agents')" style="font-size:11.5px;white-space:nowrap">🤖 Open AI Agents → Joost</button>
       </div>
       ${_jc.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_jc.error)}</div>` : ''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
-          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Persona · schrijfbaar</div>
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Persona · preview</div>
           ${!c ? `<div style="color:var(--text-3);font-size:12px">${_jc.loading?'Laden…':'—'}</div>` : `
             <div style="font-size:12.5px;margin-bottom:4px"><span style="color:var(--text-3)">Naam: </span><b>${esc(c.persona_name || '—')}</b></div>
-            <div style="font-size:11.5px;color:var(--text-3);line-height:1.5;margin-bottom:10px">${esc(c.persona_tone || '—')}</div>
-            <button class="btn btn-primary btn-sm" ${_jc.busy ? 'disabled' : ''} onclick="window.__setJcEdit()">✏ Bewerken</button>
+            <div style="font-size:11.5px;color:var(--text-3);line-height:1.5">${esc(c.persona_tone || '—')}</div>
           `}
         </div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
-          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Model + status · alleen-lezen</div>
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Model + status</div>
           <div style="font-size:12px;line-height:1.7">
             <div><span style="color:var(--text-3)">Model: </span><code>${esc(c?.model || '—')}</code></div>
             <div><span style="color:var(--text-3)">Temperature: </span><code>${esc(String(c?.temperature ?? '—'))}</code></div>
@@ -1637,11 +1642,10 @@
       </div>
       <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
         <div style="font-size:12.5px;font-weight:600">Autonomie · arrangement_mandate</div>
-        <span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:10.5px;font-weight:600">ALLEEN-LEZEN</span>
+        <span style="padding:2px 8px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-size:10.5px;font-weight:600">READ-ONLY</span>
       </div>
-      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Bepaalt welke arrangement-types Joost autonoom mag voorstellen + de caps (bedragen, dagen uitstel, termijnen). Wijzigen raakt autonome-send-grenzen direct — Finance-signoff vereist in aparte brok.</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Bepaalt welke arrangement-types Joost autonoom mag voorstellen + de caps. Bewerken via AI Agents-module.</div>
       ${_renderMandaatReadOnly(am)}
-      <div style="margin-top:14px;padding:10px 14px;background:var(--surface-2);border-radius:8px;font-size:11px;color:var(--text-3);line-height:1.55">System-prompt-template + kennisbank leven ook in <code>joost_config</code>; volledige editor voor system-prompt vraagt legal-review vóór schrijfbaar (misinterpretatie kan Joost tegen bedrijfsbeleid laten spreken).</div>
     </div>`;
   }
 
