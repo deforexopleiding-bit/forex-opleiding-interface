@@ -17,7 +17,7 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 
 ## Samenvatting
 
-**0 quick-adds open · 1 grote-brok open · 16 deferred · 21 done** (totaal 38) — **sales-bonus ✓ · alleen alg-meldingen resteert**
+**0 quick-adds open · 1 grote-brok open · 16 deferred · 21 done** (totaal 38) — **v=58 admin uit menu · migratie compleet in daily flow**
 
 | Status | Aantal | Volgende actie |
 |---|---|---|
@@ -25,6 +25,18 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | open (quick-add)   | 0  | — |
 | open (grote-brok) | 1  | alg-meldingen (notification_preferences schema + endpoint nieuw) |
 | deferred     | 16 | — |
+
+## v=58 Admin-menu-item hidden (2026-08-23)
+
+Alle 21 secties bewerkbaar + 16 deferred met reden → menu-item `admin` uit sidebar-shell gehaald. `admin.html` blijft bereikbaar via directe URL als vangnet; sluit een dismissible notice bovenaan met deep-link naar Instellingen.
+
+**Waar verborgen**: `modules/shared/sidebar.js` r414-433 `applyAdminGating()` — nu `display:'none'` voor iedereen, incl. super_admin. Opt-in-vangnet via `?showadmin=1` of `localStorage.dfoShowAdmin=1` (alleen voor super_admin).
+
+**Rollback** (indien nodig): revert 1 functie (`applyAdminGating`) naar oude versie: `link.style.display = (profile && ADMIN_ROLES.indexOf(profile.role) !== -1) ? '' : 'none';`. Geen data-migratie, geen state-verlies — admin was nooit weg, alleen verborgen.
+
+**Cleanup meegenomen**:
+- `klanten-v2.js` `LEGACY_URLS.instellingen` `/modules/admin.html` → `null` (instellingen is native).
+- `instellingen-v2.js` com-wa notice-strook update: verwijzing naar admin.html#tab-integraties weg (media/buttons/examples zijn native sinds v=40).
 
 ---
 

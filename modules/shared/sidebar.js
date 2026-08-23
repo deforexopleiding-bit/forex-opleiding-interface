@@ -416,7 +416,21 @@
       if (window._authSharedReady) await window._authSharedReady;
       var profile = window.AuthShared ? await window.AuthShared.getProfile() : null;
       var link = document.getElementById('adminNavLink');
-      if (link) link.style.display = (profile && ADMIN_ROLES.indexOf(profile.role) !== -1) ? '' : 'none';
+      if (!link) return;
+      // Ronde-31 v=58: admin-menu-item HARD verborgen voor iedereen (incl. super_admin).
+      // De hele oude admin is naar Instellingen gemigreerd (21 secties native).
+      // admin.html blijft bereikbaar via directe URL als vangnet; alleen het menu-
+      // item verdwijnt. Rollback = 1-regel-revert (deze functie naar oude versie).
+      // Opt-in-vangnet: ?showadmin=1 in URL of localStorage.dfoShowAdmin=1 laat 'em
+      // alsnog zien voor super_admin (in geval super_admin wil terug voor bug-check).
+      var explicitShow = false;
+      try {
+        var qp = new URLSearchParams(window.location.search);
+        if (qp.get('showadmin') === '1') explicitShow = true;
+        if (window.localStorage && window.localStorage.getItem('dfoShowAdmin') === '1') explicitShow = true;
+      } catch (_) { /* fail-closed */ }
+      var isSuper = profile && profile.role === 'super_admin';
+      link.style.display = (isSuper && explicitShow) ? '' : 'none';
     } catch (e) { /* niet ingelogd → admin-link blijft verborgen */ }
   }
 

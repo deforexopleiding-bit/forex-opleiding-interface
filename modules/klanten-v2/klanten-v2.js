@@ -375,7 +375,7 @@ const LEGACY_URLS = {
   automatiseringen: '/modules/agent-center.html',             // dichtstbijzijnde legacy-equivalent
   agents:           null,                                     // V2 GO-LIVE — geen redirect meer
   logboek:          null,                                     // V2 GO-LIVE — geen redirect meer
-  instellingen:     '/modules/admin.html',
+  instellingen:     null,                                     // Ronde-31 v=58: instellingen is native geport; geen legacy-fallback meer.
   binnenkort:       null,                                     // placeholder
 };
 

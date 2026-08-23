@@ -3595,7 +3595,7 @@
     return `<div style="max-width:900px">
       ${_renderMetaEdModal()}
       <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;margin-bottom:14px;line-height:1.55">
-        <b>Native editor.</b> Nieuwe templates aanmaken, bewerken (draft/pending/rejected) of nieuwe versies maken (approved) kan hier direct. IMAGE/VIDEO/DOCUMENT-header + body-voorbeelden + interactieve buttons zitten nog in <a href="/modules/admin.html#tab-integraties" style="color:inherit;text-decoration:underline">admin.html</a>.
+        <b>Native editor.</b> Nieuwe templates aanmaken, bewerken (draft/pending/rejected) of nieuwe versies maken (approved) kan hier direct — inclusief IMAGE/VIDEO/DOCUMENT-header + body-voorbeelden + interactieve buttons (sinds v=40).
       </div>
       <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
         <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">

@@ -366,6 +366,18 @@
 <div class="main">
   <div class="main-inner">
 
+    <!-- Ronde-31 v=58: verhuis-notice. Beheer is naar Instellingen (klanten-v2)
+         gemigreerd (21 secties native). Deze pagina blijft bereikbaar via URL
+         als vangnet; het menu-item is verborgen. Dismissible per tab-sessie. -->
+    <div id="adminMigrationNotice" style="background:#fff8e1;border:1px solid #f0d073;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;font-size:13px;color:#7a5b00">
+      <span style="font-size:18px">🔀</span>
+      <div style="flex:1">
+        <b>Beheer is verhuisd naar Instellingen.</b> Deze admin-pagina blijft bereikbaar als vangnet, maar het menu-item is verborgen. Nieuwe workflows:
+        <a href="/modules/klanten-v2/?v2preview=instellingen" style="color:#7a5b00;text-decoration:underline;font-weight:600">open Instellingen →</a>
+      </div>
+      <button onclick="this.parentElement.style.display='none'" style="background:transparent;border:none;color:#7a5b00;cursor:pointer;font-size:18px;padding:0 6px" title="Sluit deze melding">✕</button>
+    </div>
+
     <div id="adminBanner"></div>
 
     <div class="page-header">
