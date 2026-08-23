@@ -410,6 +410,28 @@ export default async function handler(req, res) {
     // 1. Deal bijwerken (1e call).
     await supabaseAdmin.from('deals').update({ first_call_at: first_call_at || null }).eq('id', dealId);
 
+    // 1b. IDEMPOTENTIE-GUARD (dubbele-subscription-preventie). Heeft deze deal al
+    //     NIET-cancelled abonnementen, dan is dit een re-invocatie (wizard-retry /
+    //     dubbele submit / re-run). Voorheen maakte dat een tweede identieke
+    //     sub-set aan én pushte elke naar Teamleader → ECHTE dubbele TL-
+    //     subscriptions (elk met eigen tl_id) → dubbele facturatie/MRR. Spiegel
+    //     van de reservation_fee-idempotentie. Standalone-mode maakt een verse
+    //     ghost-deal → count 0 → passeert. De partiële unieke index
+    //     uq_subscriptions_dedup_active is de DB-backstop hierachter.
+    {
+      const { count: existingSubs } = await supabaseAdmin
+        .from('subscriptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('deal_id', dealId).neq('status', 'cancelled');
+      if ((existingSubs || 0) > 0) {
+        return res.status(409).json({
+          error: 'Deze deal heeft al abonnementen — dubbele aanmaak voorkomen.',
+          code:  'SUBSCRIPTIONS_ALREADY_EXIST',
+          deal_id: dealId,
+        });
+      }
+    }
+
     // 2. Subscriptions lokaal aanmaken. amount = som regels (EXCL); vat_percentage
     //    = tarief van de eerste regel (legacy-kolommen, behouden voor compat).
     const subRows = [];
