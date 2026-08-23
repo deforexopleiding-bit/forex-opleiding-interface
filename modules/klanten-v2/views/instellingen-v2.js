@@ -2888,16 +2888,51 @@
   function bodyTelefonie() {
     if (!_tel.fetched && !_tel.loading) queueMicrotask(() => fetchTel());
     const d = _tel.data || {};
-    const configured = !!d.configured;
-    const cids = Array.isArray(d.caller_ids) ? d.caller_ids : [];
-    return `<div style="max-width:800px">
-      <!-- v=61 quick-fix 4: env-notice weggehaald (interne notitie hoeft user niet te zien). -->
-      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+    // Dual-account weergave (v=65). Response voegt `accounts:{nl,be}` toe
+    // (rest_configured + sip_configured + caller_ids per account). Backward-
+    // compat: als een oud endpoint alleen top-level `caller_ids`+`configured`
+    // returnt, val terug op NL-only-render met alleen die data.
+    const acc = d.accounts && typeof d.accounts === 'object' ? d.accounts : null;
+    const legacyOnly = !acc;
+
+    const renderAcc = (label, badge, a) => {
+      const rest = !!a.rest_configured;
+      const sip = !!a.sip_configured;
+      const anyCfg = rest || sip;
+      const cids = Array.isArray(a.caller_ids) ? a.caller_ids : [];
+      const statusColor = anyCfg ? 'var(--emerald)' : 'var(--text-3)';
+      const statusText = anyCfg ? '✓ Geconfigureerd' : '⨯ Nog niet geconfigureerd';
+      const capText = anyCfg
+        ? `Softphone (SIP): ${sip ? '✓' : '⨯'} · Click-to-dial (REST): ${rest ? '✓' : '⨯'}`
+        : 'Zet de bijbehorende env-vars in Vercel om te activeren.';
+      return `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
         <div style="padding:14px 16px">
-          <div style="font-size:13px;font-weight:600;margin-bottom:4px">Voys-koppeling</div>
-          <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">${_tel.error ? '⚠ ' + esc(_tel.error) : (configured ? '✓ Geconfigureerd' : '⨯ Nog niet geconfigureerd')}</div>
-          ${cids.length ? `<div style="font-size:12px;color:var(--text-2)"><b>Caller-IDs:</b> ${cids.map(x => `<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;margin:0 2px">${esc(x)}</code>`).join(' ')}</div>` : ''}
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <div style="font-size:13px;font-weight:600">Voys-koppeling · ${esc(label)}</div>
+            <span style="font-size:10px;background:var(--surface-2);color:var(--text-3);padding:2px 6px;border-radius:4px;font-weight:600">${esc(badge)}</span>
+          </div>
+          <div style="font-size:11.5px;color:${statusColor};margin-bottom:6px">${statusText}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:10px">${capText}</div>
+          ${cids.length
+            ? `<div style="font-size:12px;color:var(--text-2)"><b>Caller-IDs:</b> ${cids.map(x => `<code style="background:var(--surface-2);padding:1px 5px;border-radius:3px;margin:0 2px">${esc(x)}</code>`).join(' ')}</div>`
+            : `<div style="font-size:11.5px;color:var(--text-3)">Geen caller-IDs geconfigureerd.</div>`}
         </div>
+      </div>`;
+    };
+
+    let body;
+    if (_tel.error) {
+      body = `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px">⚠ ${esc(_tel.error)}</div>`;
+    } else if (legacyOnly) {
+      // Fallback (oude endpoint): render enkel NL uit legacy top-level.
+      body = renderAcc('Nederland', 'NL', { rest_configured: d.configured, sip_configured: false, caller_ids: d.caller_ids || [] });
+    } else {
+      body = renderAcc('Nederland', 'NL', acc.nl || {}) + renderAcc('België', 'BE', acc.be || {});
+    }
+    return `<div style="max-width:800px">
+      ${body}
+      <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.55">
+        Twee aparte Voys-accounts (NL + BE) elk met eigen credentials. <b>Softphone</b> registreert per lijn; nummers met +32/0032 gaan automatisch via BE-account, rest via NL. <b>Click-to-dial (REST)</b> gebruikt momenteel alleen het NL-account — BE REST-support vereist <code>VOYS_BE_API_TOKEN</code> + <code>_CLIENT_UUID</code> + <code>_A_NUMBER</code> env-vars én een aparte routing-fix. Tokens/wachtwoorden zijn NOOIT zichtbaar in deze sectie (server-side alleen).
       </div>
     </div>`;
   }
