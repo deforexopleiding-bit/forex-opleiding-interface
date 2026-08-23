@@ -3291,7 +3291,13 @@
       const cid = String(c.id);
       const active = _ui.inbox.selectedConv === cid;
       const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
-      const preview = c.last_message_preview || '';
+      // Pre-flip fix 2: sommige oude conversation-rows hebben last_message_preview
+      // opgeslagen met onopgeloste {{X}}-placeholders (bv. cron-dunning-conversation-
+      // reminders vulde de RAW template i.p.v. rendered body). Thread rendert wel
+      // correct (leest whatsapp_messages.body). Cosmetische strip: onopgeloste
+      // placeholders vervangen door "…" zodat de lijst leesbaar blijft. Volledige
+      // fix vraagt endpoint-uitbreiding (laatste message-body meesturen) — later.
+      const preview = String(c.last_message_preview || '').replace(/\{\{[^}]+\}\}/g, '…');
       // BROK WB-FIDELITY-1 goedkoop: relatieve tijd i.p.v. absolute.
       const when = c.last_activity_at
         ? _wbxRelativeTime(c.last_activity_at)
