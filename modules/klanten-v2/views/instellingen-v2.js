@@ -3348,6 +3348,23 @@
     if (render) render();
   }
   function bodyMkMeta() {
+    // v=76 client-gate: sectie is super_admin-scoped (endpoint returnt anders
+    // 403; "Bekijk als" is client-illusie, dus echte user zou de data toch
+    // zien zonder deze gate). Geef 'em bewust hetzelfde amber-blok als de
+    // sectie server-side-forbidden zou zijn.
+    if (!isSuperAdmin()) {
+      return `<div style="max-width:900px">
+        <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:280px">
+            <b>Meta-WhatsApp-koppeling.</b> WABA-config leeft in <code>whatsapp_module_config</code>. Meta Business Manager blijft canonieke plek voor ads/pixel.
+          </div>
+          <a href="https://business.facebook.com" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm" style="text-decoration:none;font-size:11.5px;white-space:nowrap">🔗 Open Meta Business Manager ↗</a>
+        </div>
+        <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55">
+          ⚠ WABA-koppelingsstatus is alleen zichtbaar voor <b>super_admin</b>. Vraag Jeffrey om te loggen of de koppeling actief is.
+        </div>
+      </div>`;
+    }
     if (!_mkm.fetched && !_mkm.loading) queueMicrotask(() => fetchMkMeta());
     const items = _mkm.items;
     const anyErr = _mkm.error;
