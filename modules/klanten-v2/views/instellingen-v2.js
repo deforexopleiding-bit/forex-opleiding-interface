@@ -3332,6 +3332,67 @@
      Reden per sectie is beknopt uitgelegd zodat de gebruiker snapt WAAROM
      de instelling nu in een andere module leeft. Bij `modKey` opgegeven:
      directe navigatie-knop via DFO.goMod. */
+  /* v=75 · mk-meta NATIVE — WABA-koppelingsstatus per module via
+     admin-whatsapp-modules-list. Read-only display; koppeling zelf is in v1
+     gelegd (whatsapp_module_config-tabel gevuld via admin.html of migraties).
+     Meta Business Manager blijft externe secondaire actie. Endpoint eist
+     super_admin — non-super_admin ziet nette hint. */
+  const _mkm = { loading: false, fetched: false, error: null, items: [] };
+  async function fetchMkMeta() {
+    if (_mkm.loading || _mkm.fetched) return;
+    _mkm.loading = true; _mkm.error = null; if (render) render();
+    const j = await tryFetch('mk-meta-mods', '/api/admin-whatsapp-modules-list');
+    _mkm.loading = false; _mkm.fetched = true;
+    if (j?.__error) _mkm.error = j.__error;
+    else _mkm.items = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
+  }
+  function bodyMkMeta() {
+    if (!_mkm.fetched && !_mkm.loading) queueMicrotask(() => fetchMkMeta());
+    const items = _mkm.items;
+    const anyErr = _mkm.error;
+    const isForbidden = anyErr && /super_admin|geen rechten|forbidden|403/i.test(String(anyErr));
+    const cards = items.map((m) => {
+      const active = m.is_active !== false;
+      const badge = active
+        ? `<span style="padding:2px 8px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-size:11px;font-weight:600">✓ ACTIEF</span>`
+        : `<span style="padding:2px 8px;border-radius:6px;background:var(--text-3);color:var(--surface);font-size:11px;font-weight:600">⨯ UIT</span>`;
+      const mask = (s) => s ? '<code style="font-family:\'IBM Plex Mono\',monospace;font-size:11px;background:var(--surface-2);padding:1px 5px;border-radius:3px">' + esc(String(s).slice(0, 6)) + '…' + esc(String(s).slice(-4)) + '</code>' : '<span style="color:var(--text-3)">—</span>';
+      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:600">${esc(m.display_label || m.module || 'onbekend')}</div>
+          ${badge}
+          ${m.module ? `<code style="font-size:10.5px;background:var(--surface-2);padding:1px 5px;border-radius:3px;color:var(--text-3);margin-left:auto">${esc(m.module)}</code>` : ''}
+        </div>
+        <div style="font-size:11.5px;line-height:1.7">
+          <div><span style="color:var(--text-3)">Phone-number-id: </span>${mask(m.phone_number_id)}</div>
+          <div><span style="color:var(--text-3)">Business-account-id: </span>${mask(m.business_account_id)}</div>
+          ${m.afdeling_email     ? `<div><span style="color:var(--text-3)">Afdeling-email: </span>${esc(m.afdeling_email)}</div>` : ''}
+          ${m.afdeling_telefoon  ? `<div><span style="color:var(--text-3)">Afdeling-telefoon: </span>${esc(m.afdeling_telefoon)}</div>` : ''}
+          ${m.afdeling_whatsapp  ? `<div><span style="color:var(--text-3)">Afdeling-WhatsApp: </span>${esc(m.afdeling_whatsapp)}</div>` : ''}
+          ${m.afdeling_ondertekenaar ? `<div><span style="color:var(--text-3)">Ondertekenaar: </span>${esc(m.afdeling_ondertekenaar)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    const active = items.filter((m) => m.is_active !== false).length;
+    return `<div style="max-width:900px">
+      <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:280px">
+          <b>Meta-WhatsApp-koppeling — READ-ONLY status.</b> WABA-configuratie is in v1 gelegd (tabel <code>whatsapp_module_config</code>). WA-templates + verzenden zie <b>com-wa</b>. Meta Business Manager blijft canonieke plek voor ads/pixel.
+        </div>
+        <a href="https://business.facebook.com" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-sm" style="text-decoration:none;font-size:11.5px;white-space:nowrap">🔗 Open Meta Business Manager ↗</a>
+      </div>
+      ${isForbidden
+        ? `<div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55">⚠ WABA-koppelingsstatus is alleen zichtbaar voor <b>super_admin</b>. Vraag Jeffrey om te loggen of de koppeling actief is.</div>`
+        : anyErr
+          ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px">⚠ ${esc(anyErr)} <button class="btn btn-ghost btn-sm" onclick="_mkm.fetched=false;_mkm.error=null;fetchMkMeta()" style="font-size:11px;margin-left:6px">Opnieuw</button></div>`
+          : `<div style="font-size:12px;color:var(--text-3);margin-bottom:8px">${items.length} module(s) — ${active} actief · ${items.length - active} uit</div>
+             ${items.length === 0
+               ? `<div style="padding:14px;background:var(--surface-2);color:var(--text-3);border-radius:8px;font-size:12.5px;text-align:center">${_mkm.loading ? 'Laden…' : 'Geen WABA-modules geconfigureerd. Beheer in v1 admin.'}</div>`
+               : `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px">${cards}</div>`}`}
+    </div>`;
+  }
+
   function bodyDeepLink(modLabel, why, modKey) {
     const btn = modKey ? `<button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="DFO.goMod('${esc(modKey)}')">Open ${esc(modLabel || 'module')} →</button>` : '';
     return `<div style="max-width:720px">
@@ -6155,7 +6216,7 @@
     // v=74 opruim-ronde: ev-locaties verwijderd (locaties zijn vrije-tekst
     // per event, geen registry-tabel; wordt in Events beheerd).
     if (cur.id === 'lms-instel')         return bodyDeepLink(null, 'LMS-instellingen (modules/toegang/certificaten) staan in Bubble; het CRM leest via bubble-api. Zie sys-bubble-schema voor diagnostiek.', null);
-    if (cur.id === 'mk-meta')            return bodyDeepLink(null, 'Meta-koppeling (ads-account + pixel) wordt beheerd in Meta Business Manager. Alleen de WhatsApp-Cloud-API-koppeling wordt hier bewerkt (zie com-wa).', 'com-wa');
+    if (cur.id === 'mk-meta')            return bodyMkMeta();
     if (cur.id === 'mk-bronnen')         return bodyLeadBronnen();
     if (cur.id === 'mk-sequenties')      return bodyMkSequenties();
     if (cur.id === 'alg-meldingen')      return bodyDeepLink(null, 'Notification-preferences (dagelijkse/wekelijkse admin-mails) zijn server-side geconfigureerd via cron + rol-lookup. Voor per-user meldingen: aparte brok om notification_preferences-tabel + UI toe te voegen.', null);
@@ -6230,6 +6291,8 @@
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
+      // v=75: mk-meta native READ-ONLY (WABA-status).
+      'mk-meta',
       // Ronde-28 C1: mk-bronnen read-native (mapping-editor blijft brok).
       'mk-bronnen',
       // Ronde-31 v=54: agents-manager READ-ONLY — geen config-tabel in DB; alle
@@ -6245,7 +6308,7 @@
     const WIRED = new Set([...LIVE, ...READONLY]);
     const DEEPLINK = new Set([
       'ev-templates','lms-instel',
-      'mk-meta',
+      // v=75: mk-meta is nu NATIVE READ-ONLY (WABA-status via admin-whatsapp-modules-list).
       // v=67: wb-berichten LIVE native (dunning-templates CRUD).
       // v=69: wb-workflows LIVE native (dunning-workflows CRUD met diff-based upsert).
       // Polish v26: alg-meldingen krijgt DEEP-LINK badge (was voorbeeld-data);
