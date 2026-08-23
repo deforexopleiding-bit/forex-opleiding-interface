@@ -4,7 +4,7 @@
 
 import nodemailer from 'nodemailer';
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
-import { authRedirectUrlForRole, isCrmStaffRole } from './_lib/crm-roles.js';
+import { authRedirectUrlForRole, isCrmStaffRole, CRM_STAFF_ROLES } from './_lib/crm-roles.js';
 
 const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'viewer'];
 // SITE_URL/LMS-URL + de rollen-whitelist wonen in api/_lib/crm-roles.js,
@@ -179,9 +179,15 @@ export default async function handler(req, res) {
   // ── GET — lijst alle profiles ─────────────────────────────────────────────
 
   if (req.method === 'GET') {
+    // v=... quick-win B: filter op CRM_STAFF_ROLES (super_admin / admin /
+    // manager / sales / mentor / administratie / marketing). Voorkomt dat
+    // auto-aangemaakte viewer/student-accounts (LMS-signups via
+    // handle_new_user trigger) in de team-lijst tonen. Zelfde whitelist als
+    // RLS is_crm_staff() + crm-guard.js.
     const { data: users, error } = await supabaseAdmin
       .from('profiles')
       .select('*')
+      .in('role', CRM_STAFF_ROLES)
       .order('role')
       .order('email');
 
