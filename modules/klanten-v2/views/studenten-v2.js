@@ -841,16 +841,18 @@
     const scopeBadge = _live.students.scope === 'admin'
       ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--violet-soft,#EDE4FA);color:var(--violet,#6D3FD4);font-weight:600;margin-left:8px">ADMIN-VIEW</span>`
       : '';
-    // v=9 admin-picker (punt 1 fix): gate op ECHTE sessie-rol via _live.session,
-    // niet op effectieve "Bekijk als"-rol. Anders: admin die "Bekijk als = Mentor"
-    // doet zag zichzelf als mentor en de picker was onbereikbaar (catch-22 v=8).
-    // Eindtoestand: mentor + admin-als-mentor = geen picker (mentor-first).
-    // Admin/manager/super_admin als zichzelf = wel picker + ADMIN-VIEW-badge.
+    // v=10 admin-picker (rol-sets uitgelijnd): OVERSIGHT_ROLES is de single-source-
+    // of-truth voor "wie ziet de picker + ADMIN-VIEW". Identiek aan de oversight-
+    // rollen in app-shell.js studenten-module roles (mentor + OVERSIGHT_ROLES).
+    // Wijziging: sales eruit (was in v=9 half — wel in module-roles, niet in picker
+    // → sales opende een lege niet-gekoppeld-view). admin erbij (was in v=9 half —
+    // wel in picker-gate, niet in module-roles → admin kon Studenten niet openen).
     if (!_live.session.fetched && !_live.session.loading) queueMicrotask(_fetchSessionRole);
     const effectiveRole = (window.DFO?.S?.roles && window.DFO.S.roles[0]) || '';
     const sessionRole   = _live.session.role;   // null tot AuthShared.getProfile() klaar is
     const isSimulatingMentor = sessionRole && sessionRole !== effectiveRole && effectiveRole === 'mentor';
-    const realIsPicker = ['super_admin', 'admin', 'manager'].includes(sessionRole);
+    const OVERSIGHT_ROLES = ['super_admin', 'admin', 'manager']; // 1-op-1 met app-shell.js studenten-module oversight-roles
+    const realIsPicker = OVERSIGHT_ROLES.includes(sessionRole);
     const isPickerRole = realIsPicker && !isSimulatingMentor;
     if (isPickerRole && !_live.mentors.fetched && !_live.mentors.loading) queueMicrotask(_fetchMentorsForPicker);
     const currentOverride = String(window.__stMentorOverride || '').trim();

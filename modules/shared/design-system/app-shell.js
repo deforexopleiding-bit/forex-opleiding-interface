@@ -61,7 +61,7 @@
     { g: 'Overzicht',              id: 'taken',            naam: 'Takenbeheer',       icon: I.check2,   color: 'emerald', roles: A,         badge: 1,  tabs: ['Mijn taken', 'Toegewezen door mij', 'Afgerond'] },
 
     { g: 'Klanten & communicatie', id: 'klanten',          naam: 'Klanten',           icon: I.users,    color: 'emerald', roles: SAMS,                 tabs: ['Overzicht'] },
-    { g: 'Klanten & communicatie', id: 'studenten',        naam: 'Studenten',         icon: I.grad,     color: 'teal',    roles: ['mentor', 'super_admin', 'manager', 'sales'], tabs: [] },
+    { g: 'Klanten & communicatie', id: 'studenten',        naam: 'Studenten',         icon: I.grad,     color: 'teal',    roles: ['mentor', 'super_admin', 'admin', 'manager'], tabs: [] },
     { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,       badge: 0,  tabs: ['Vandaag', 'Gesprekken', 'Acties', 'Overzicht', 'Pipeline', 'Brieven', 'Motor'] },
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,      badge: 3,  tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
