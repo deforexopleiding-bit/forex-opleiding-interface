@@ -473,6 +473,29 @@
       finally { _wbT.busy[id] = false; if (render) render(); }
     }, goingActive ? 'warn' : 'info');
   };
+  // Live WIK-refresh (v=68) tijdens typen — freeze-veilig: geen full re-render,
+  // geen state-write per toets. Leest textarea-value uit de DOM, evalueert
+  // _wikOk (zelfde bron als save/toggle-gate) en update ALLEEN het WIK-block
+  // in-place (background/color/innerHTML). Textarea blijft uncontrolled →
+  // focus/cursor-positie ongestoord.
+  window.__setWbTBodyInput = (ta) => {
+    try {
+      if (!_wbT.ed || _wbT.ed.kind !== 'brief') return;
+      const val = String(ta?.value || '');
+      const ok = _wikOk(val);
+      const block = document.querySelector('[data-wbt-wik="1"]');
+      if (!block) return;
+      // Skip DOM-write als de staat niet gewijzigd is (spaart repaint bij typen
+      // ná "ok"-staat is bereikt).
+      if (block.getAttribute('data-wbt-wik-ok') === (ok ? '1' : '0')) return;
+      block.setAttribute('data-wbt-wik-ok', ok ? '1' : '0');
+      block.style.background = ok ? 'var(--emerald-soft)' : 'var(--amber-soft)';
+      block.style.color      = ok ? 'var(--emerald)'      : 'var(--amber)';
+      block.innerHTML = ok
+        ? '✓ WIK-tekst gedetecteerd — activeren toegestaan.'
+        : '⚠ WIK-gate: body mist "14 dagen"- of kosten-vermelding. Activeren geblokkeerd tot dit is aangevuld. <b>Let op:</b> deze check is een client-side vangnet; juridische juistheid van de WIK-tekst blijft eigen sign-off.';
+    } catch (_) { /* fail-soft; save-gate blijft de harde bron */ }
+  };
   window.__setWbTDelete = (id) => {
     const it = _wbT.items.find((x) => x.id === id); if (!it) return;
     if (it.is_active) return showToast('Deactiveer sjabloon eerst vóór verwijderen', 'warn');
@@ -493,10 +516,15 @@
     const isNew = !e.id;
     const key = e.id || 'new';
     const busy = !!_wbT.busy[key];
+    // WIK-block styling wordt live bijgewerkt door __setWbTBodyInput. Initial
+    // state = _wikOk(current e.body). Data-attribuut `data-wbt-wik` maakt het
+    // block adresseerbaar zonder id-collisie tussen meerdere edit-sessies.
     const wik = e.kind === 'brief' ? _wikOk(e.body) : true;
+    const _wikOkHtml   = '✓ WIK-tekst gedetecteerd — activeren toegestaan.';
+    const _wikBadHtml  = '⚠ WIK-gate: body mist "14 dagen"- of kosten-vermelding. Activeren geblokkeerd tot dit is aangevuld. <b>Let op:</b> deze check is een client-side vangnet; juridische juistheid van de WIK-tekst blijft eigen sign-off.';
     const wikBlock = e.kind === 'brief' ? `
-      <div style="padding:10px 12px;background:${wik ? 'var(--emerald-soft)' : 'var(--amber-soft)'};color:${wik ? 'var(--emerald)' : 'var(--amber)'};border-radius:6px;font-size:11.5px;line-height:1.5;margin-top:8px">
-        ${wik ? '✓ WIK-tekst gedetecteerd (bevat "14 dagen" + kosten-vermelding).' : '⚠ WIK-gate: body mist "14 dagen"- of kosten-vermelding. Activeren geblokkeerd tot dit is aangevuld. <b>Let op:</b> deze check is een client-side vangnet; juridische juistheid van de WIK-tekst blijft eigen sign-off.'}
+      <div data-wbt-wik="1" data-wbt-wik-ok="${wik ? '1' : '0'}" style="padding:10px 12px;background:${wik ? 'var(--emerald-soft)' : 'var(--amber-soft)'};color:${wik ? 'var(--emerald)' : 'var(--amber)'};border-radius:6px;font-size:11.5px;line-height:1.5;margin-top:8px">
+        ${wik ? _wikOkHtml : _wikBadHtml}
       </div>` : '';
     const metaOpts = _wbT.metaItems.map((t) => `<option value="${esc(t.name)}" ${e.meta_template_name === t.name ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('');
     const metaSelectedInList = _wbT.metaItems.some((t) => t.name === e.meta_template_name);
@@ -539,7 +567,7 @@
                    <div style="font-size:10.5px;color:var(--text-3);margin-top:3px">${_wbT.metaItems.length} approved templates. Placeholders worden server-side via <code>meta_param_mapping</code> geresolved.</div>`}
             </div>` : ''}
           <div><label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Body (max 50k chars)</label>
-            <textarea data-wbt-field="body" oninput="/* uncontrolled — geen state-write per toets */" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:200px;font-family:inherit;resize:vertical">${esc(e.body)}</textarea>
+            <textarea data-wbt-field="body" oninput="window.__setWbTBodyInput(this)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box;min-height:200px;font-family:inherit;resize:vertical">${esc(e.body)}</textarea>
             <div style="font-size:10.5px;color:var(--text-3);margin-top:3px">Placeholders <code>{{klant.voornaam}}</code>, <code>{{factuur.nummer}}</code>, <code>{{factuur.bedrag_open}}</code>, <code>{{factuur.betaal_link}}</code> etc. (zie <a href="/docs/whatsapp-templates-c4-named-variables.md" target="_blank" style="color:var(--sky)">C4-doc</a>).</div>
             ${wikBlock}
           </div>
