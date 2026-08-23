@@ -2234,7 +2234,7 @@
         </td>
         <td style="padding:6px 12px;text-align:right;white-space:nowrap">
           <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setEaEditMeta('${esc(a.id)}')" style="font-size:11px">Edit-meta</button>
-          <a href="/modules/events-automations.html?edit=${encodeURIComponent(a.id)}" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none" title="Opent v1-shell met deze flow direct in de editor">Stappen ↗</a>
+          <a href="/modules/klanten-v2/?v2preview=automatiseringen&v2tab=Events&edit_ev_auto=${encodeURIComponent(a.id)}" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none" title="Opent de Automatiseringen v2-editor voor deze flow">Stappen ↗</a>
           ${a.enabled
             ? _disabledUitKnop('Verwijder', 'Zet de automation eerst UIT vóór verwijderen', 'font-size:11px;color:var(--rose)')
             : `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setEaDelete('${esc(a.id)}')" style="font-size:11px;color:var(--rose)">Verwijder</button>`}
@@ -2244,8 +2244,8 @@
     return `<div style="max-width:1200px">
       ${_eaRenderEditor()}
       <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>LIVE-lijst met event-automations.</b> Hier: metadata bewerken (naam/beschrijving/enroll-mode), aan/uit-toggle, verwijderen. <b>Stappen-editor + test-run</b> leven in de v1-shell <code>/modules/events-automations.html</code> (complexer sub-editor per stap-type met 7 types; test-run stuurt échte berichten naar een test-attendee met is_test=true — GEEN dry-run). Klik "Stappen ↗" per rij om direct de editor voor die flow te openen.
-        <a href="/modules/events-automations.html" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open editor (v1) →</a>
+        <b>LIVE-lijst met event-automations.</b> Hier: metadata bewerken (naam/beschrijving/enroll-mode), aan/uit-toggle, verwijderen. <b>Stappen-editor + test-run</b> zitten in de Automatiseringen v2-module (Events-tab · zelfde shell, geen sprong naar v1). Test-run stuurt échte berichten naar een test-attendee met is_test=true — GEEN dry-run. Klik "Stappen ↗" per rij om direct de editor voor die flow te openen.
+        <a href="/modules/klanten-v2/?v2preview=automatiseringen&v2tab=Events" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Automatiseringen v2 →</a>
       </div>
       ${_ea.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ea.error)}</div>` : ''}
       <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px">${_ea.items.length} automation(s) — ${_ea.items.filter(a=>a.enabled).length} actief · ${_ea.items.filter(a=>!a.enabled).length} uit</div>

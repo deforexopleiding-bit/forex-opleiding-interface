@@ -2467,4 +2467,48 @@
   window.DFO.VIEWS['automatiseringen/Leadsonderhoud'] = leadsonderhoudView;
 
   console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud)');
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // DEEP-LINK HANDLERS · ?edit_ev_auto=<id> + ?edit_ls_traj=<id>
+  //
+  // Instellingen v2 deep-linkt vanuit ev-auto / mk-sequenties naar de v2-editors
+  // in deze module (i.p.v. v1 events-automations.html / leadsonderhoud.html).
+  // Bij load kijken we naar de URL-param; zodra de bijbehorende data binnen is
+  // triggeren we __autEvEdit(id) / __autLsTrajEdit(id) en verwijderen de
+  // param uit de URL zodat de deep-link idempotent is (refresh opent 'em niet
+  // opnieuw als je 'em intussen gesloten hebt).
+  //
+  // Werkt door queueMicrotask-fetch te triggeren zodra de bijbehorende view
+  // rendert; hier polt een korte watcher (max ~10s, elke 250ms) op de data.
+  // ═══════════════════════════════════════════════════════════════════════
+  function _deepLinkOpen(paramName, dataGetter, opener, fetcher) {
+    try {
+      const u = new URL(window.location.href);
+      const wantId = u.searchParams.get(paramName);
+      if (!wantId) return;
+      // Direct fetcher triggeren (view mount doet het ook, maar deep-link kan
+      // vóór de user op de juiste tab is; we willen niet wachten op subtab-switch).
+      if (fetcher) queueMicrotask(fetcher);
+      let tries = 0;
+      const iv = setInterval(() => {
+        tries++;
+        const arr = dataGetter();
+        if (Array.isArray(arr) && arr.length) {
+          clearInterval(iv);
+          const hit = arr.find((x) => String(x.id) === String(wantId));
+          if (hit) opener(wantId);
+          // Idempotent: URL-param wissen zodat refresh de editor niet heropent
+          // (bv. na close). goMod/goTab-history ongewijzigd.
+          try { u.searchParams.delete(paramName); window.history.replaceState({}, '', u); } catch (_) {}
+        } else if (tries > 40) {
+          clearInterval(iv);
+        }
+      }, 250);
+    } catch (_) { /* fail-soft */ }
+  }
+  // Wacht 1 tick zodat DFO.MODS + boot-goMod klaar zijn.
+  queueMicrotask(() => {
+    _deepLinkOpen('edit_ev_auto', () => _live.evAutos.data, (id) => window.__autEvEdit && window.__autEvEdit(id), fetchEvAutos);
+    _deepLinkOpen('edit_ls_traj', () => _live.lsTraj.data,  (id) => window.__autLsTrajEdit && window.__autLsTrajEdit(id), fetchLsTraj);
+  });
 })();
