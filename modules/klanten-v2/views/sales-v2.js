@@ -89,6 +89,25 @@
     cancelled: ['neutral', 'Geannuleerd'],
   };
 
+  // Client-side status-afleiding (v=... pre-flip fix 1). Bron: dezelfde
+  // signalen die het dashboard gebruikt (accepted_at/declined_at/sent_at).
+  // Vangnet voor rijen waar tl_quotation_status leeg of afwijkend is —
+  // voorheen viel de lijst dan leeg omdat de server-filter geen match had.
+  // Prioriteit: expliciete tl_quotation_status → timestamp-afgeleid.
+  function deriveOfferteStatus(q) {
+    const s = String(q?.tl_quotation_status || '').toLowerCase();
+    if (s === 'accepted' || s === 'signed')             return 'accepted';
+    if (s === 'declined' || s === 'refused')            return 'declined';
+    if (s === 'cancelled' || s === 'canceled')          return 'cancelled';
+    if (s === 'sent')                                    return 'sent';
+    if (s === 'draft')                                   return 'draft';
+    // Onbekende / lege tl_quotation_status → afleiden uit timestamps.
+    if (q?.accepted_at)  return 'accepted';
+    if (q?.declined_at)  return 'declined';
+    if (q?.sent_at)      return 'sent';
+    return 'draft';
+  }
+
   // Compacte gedaan/niet-gedaan indicator (groen vinkje / rood kruisje) voor de
   // Abbo- en Onboarding-kolommen op het Offertes-overzicht.
   const svStatusIcon = (ok, doneTitle, notTitle) => ok
@@ -300,22 +319,21 @@
   };
 
   function offertesParams() {
-    const status = F('sv-off-st', 'all');
+    // v=... pre-flip fix 1: server-side status-filter uit — sommige rijen
+    // hebben leeg/afwijkend tl_quotation_status waardoor de eq-filter niks
+    // teruggaf. Statusfilter gebeurt nu client-side via deriveOfferteStatus.
+    // owned_by_me/search blijven server-side.
     const mine   = F('sv-off-mine', '1') === '1' ? '1' : '';
-    // Bron: H.stableSearch cache (persistent, overleeft DFO.render).
-    // Fallback op F('q') behouden voor backwards-compat als iemand nog via
-    // topbar-search of legacy-pad de q-parameter zet.
     const q = String(
       (H.getSearchValue && H.getSearchValue('sv-off-q'))
       || F('q', '')
       || ''
     ).trim();
     const p = new URLSearchParams();
-    if (status && status !== 'all') p.set('status', status);
     if (mine) p.set('owned_by_me', '1');
     if (q)    p.set('search', q);
     p.set('page', '1');
-    p.set('page_size', '25');
+    p.set('page_size', '250');  // client-side filter → grotere batch nodig
     return p.toString();
   }
 
@@ -368,8 +386,13 @@
     // Trigger fetch bij eerste render OF wanneer filter-params veranderd zijn.
     const wanted = offertesParams();
     if (!_off.loading && !_off.error && (!_off.data || _off.params !== wanted)) queueMicrotask(fetchOffertes);
-    const items = _off.data?.quotations || [];
-    const total = _off.data?.total ?? null;
+    // v=... pre-flip fix 1: client-side statusfilter op afgeleide status
+    // (dezelfde bron die het dashboard gebruikt). Server returnt alle deals;
+    // hier filteren we op de chip. Totaal = filtered.length zodat de "N offertes"
+    // teller klopt met wat de user ziet.
+    const raw = _off.data?.quotations || [];
+    const items = st && st !== 'all' ? raw.filter(q => deriveOfferteStatus(q) === st) : raw;
+    const total = items.length;
     return `${previewHeader('Offertes', _off)}
       ${H.toolbar([
         H.chips('sv-off-st', [
@@ -400,7 +423,7 @@
           `<span style="font-size:12.5px;color:var(--text-3)">${q.sales_user || '—'}</span>`,
           `<span class="mono">${eur0(q.total_amount)}</span>`,
           `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(q.created_at)}</span>`,
-          H.pill((OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[0], (OST_TO_PILL[q.tl_quotation_status] || ['neutral', q.tl_quotation_status || '—'])[1]),
+          (() => { const ds = deriveOfferteStatus(q); const p = OST_TO_PILL[ds] || ['neutral', ds]; return H.pill(p[0], p[1]); })(),
           svStatusIcon(q.has_subscription, 'Abbo ingevoerd', 'Nog geen abbo'),
           svStatusIcon(q.has_onboarding, 'Onboarding aangemeld', 'Onboarding niet aangemeld'),
         ]),
