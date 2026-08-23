@@ -27,6 +27,13 @@
   const { I, svg, F, setF } = window.DFO;
   const H = window.KV_V2.helpers;
   const K = () => window.KV;
+  // v=17 BLOCKER-fix: sales-v2 gebruikt esc() in svStatusIcon + error-branches
+  // maar had geen esc-import. Klanten-v2.js exposet 'em via window.KV.esc;
+  // fallback op inline-implementatie voor het edge-case dat KV nog niet klaar is.
+  // Zonder deze bind: ReferenceError bij eerste rij-render → geen zichtbare
+  // error in DFO.render()-wrapper → lijst leeg (was root-cause van v=16 blocker).
+  const esc = (window.KV && window.KV.esc)
+    || ((v) => v == null ? '' : String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
 
   // ── State per tab (los zodat cross-tab-fetches niet elkaars data raken) ──
   // Dashboard-state: houdt ook company-scope-slices bij (report + accepted-deals)
@@ -319,10 +326,14 @@
   };
 
   function offertesParams() {
-    // v=... pre-flip fix 1: server-side status-filter uit — sommige rijen
-    // hebben leeg/afwijkend tl_quotation_status waardoor de eq-filter niks
-    // teruggaf. Statusfilter gebeurt nu client-side via deriveOfferteStatus.
-    // owned_by_me/search blijven server-side.
+    // v=17 pre-flip fix 1+2+3:
+    // - status: client-side via deriveOfferteStatus (rijen zonder tl_quotation_
+    //   status vielen anders weg bij server-eq-filter).
+    // - owned_by_me: server-side (endpoint accepteert nu '1'/'true'/true).
+    // - page_size = 500 per pagina; client-loop haalt ALLE pagina's zodat de
+    //   chip-tellingen op de volledige dataset kloppen (843 rijen ≈ 2 requests).
+    //   Server-side derived-status-filter zou net zijn; interim client-loop
+    //   dekt de tellingen zonder API-refactor.
     const mine   = F('sv-off-mine', '1') === '1' ? '1' : '';
     const q = String(
       (H.getSearchValue && H.getSearchValue('sv-off-q'))
@@ -332,8 +343,7 @@
     const p = new URLSearchParams();
     if (mine) p.set('owned_by_me', '1');
     if (q)    p.set('search', q);
-    p.set('page', '1');
-    p.set('page_size', '250');  // client-side filter → grotere batch nodig
+    p.set('page_size', '500');
     return p.toString();
   }
 
@@ -342,15 +352,36 @@
     if (_off.loading && _off.params === wanted) return;
     const seq = ++_off.seq;
     _off.loading = true; _off.error = null; _off.params = wanted;
-    // FLICKER-FIX: geen loading-render meer. DFO.render() regenereert de
-    // hele #content (sidebar, tabs, toolbar, tabel). 2× volle repaint per
-    // fetch (loading-start + data-completion) gaf 100-400ms flikker bij
-    // elke filter-klik of debounced-search. Nu tonen we stale data tot
-    // de fetch klaar is — 1 render aan het eind volstaat.
-    const data = await tryFetch('sales-quotations', '/api/sales-quotations?' + wanted);
+    // v=17 pagineer-loop: haal ALLE pagina's zodat client-side status-filter
+    // + chip-tellingen op de volledige dataset werken (was 250-cap → chips
+    // toonden subset i.p.v. totaal). Guard: max 20 pagina's = 10k rijen —
+    // meer dan genoeg voor productie (843 nu), voorkomt runaway loop bij
+    // buggy pagination.
+    const allQuotations = [];
+    let firstTotal = null;
+    let page = 1;
+    let hadError = false;
+    while (page <= 20) {
+      const p = new URLSearchParams(wanted);
+      p.set('page', String(page));
+      const data = await tryFetch('sales-quotations', '/api/sales-quotations?' + p.toString());
+      if (seq !== _off.seq) return;  // superseded — abandon
+      if (!data) { hadError = true; break; }
+      const rows = Array.isArray(data?.quotations) ? data.quotations : [];
+      allQuotations.push(...rows);
+      if (firstTotal === null) firstTotal = data?.total ?? rows.length;
+      const totalPages = data?.total_pages || 1;
+      if (page >= totalPages || rows.length === 0) break;
+      page += 1;
+    }
     if (seq !== _off.seq) return;
-    _off.loading = false; _off.data = data;
-    if (!data) _off.error = 'Kon offertes niet laden';
+    _off.loading = false;
+    if (hadError && allQuotations.length === 0) {
+      _off.error = 'Kon offertes niet laden';
+      _off.data = null;
+    } else {
+      _off.data = { quotations: allQuotations, total: firstTotal ?? allQuotations.length };
+    }
     window.DFO.render();
   }
 

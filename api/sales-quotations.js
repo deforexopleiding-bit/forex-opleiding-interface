@@ -54,7 +54,12 @@ export default async function handler(req, res) {
       .neq('tl_quotation_status', 'no_quotation')  // ghost-deals (abo zonder offerte) niet als offerte tonen
       .order('created_at', { ascending: false })
       .range(from, to);
-    if (owned_by_me === 'true') q = q.eq('sales_user_id', user.id);
+    // v=17 fix 3: accepteer '1'/'true'/true zodat client-chip 'sv-off-mine=1'
+    // ook filtert (voorheen alleen ==='true' → chip werd genegeerd → "Mijn
+    // offertes" en "Alle" gaven identieke resultaten).
+    if (owned_by_me === 'true' || owned_by_me === '1' || owned_by_me === true) {
+      q = q.eq('sales_user_id', user.id);
+    }
     if (customer_id) q = q.eq('customer_id', customer_id);
     if (status) q = q.eq('tl_quotation_status', status);
     if (searchCustomerIds) q = q.in('customer_id', searchCustomerIds);
