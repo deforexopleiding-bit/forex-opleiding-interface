@@ -485,11 +485,13 @@ export default async function handler(req, res) {
         //     deals/bonuses) — vandaar een gerichte lookup op deze klant.
         const { data: custTest } = await supabaseAdmin.from('customers')
           .select('is_test').eq('id', deal.customer_id).maybeSingle();
-        // (b) IDEMPOTENT: nooit een tweede bonus voor dezelfde deal. Een wizard-
-        //     retry (of dubbele submit) mocht voorheen een 2e pending-bonus
-        //     insluizen → dubbele uitbetaling. Één bonus per deal.
+        // (b) IDEMPOTENT: nooit een tweede ACTIEVE bonus voor dezelfde deal. Een
+        //     wizard-retry (of dubbele submit) mocht voorheen een 2e pending-bonus
+        //     insluizen → dubbele uitbetaling. `.neq('status','voided')` zodat een
+        //     legitiem ge-voide bonus (clawback) een her-uitgifte NIET blokkeert —
+        //     consistent met de partiële index uq_bonuses_deal_active.
         const { data: existingBonus } = await supabaseAdmin.from('bonuses')
-          .select('id').eq('deal_id', dealId).limit(1).maybeSingle();
+          .select('id').eq('deal_id', dealId).neq('status', 'voided').limit(1).maybeSingle();
 
         if (custTest?.is_test) {
           bonus = null;                 // test-klant → geen bonus

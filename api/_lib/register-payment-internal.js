@@ -98,7 +98,7 @@ export async function registerPaymentInternal(opts) {
 
   // 1. Lees factuur.
   const { data: inv } = await supabaseAdmin.from('invoices')
-    .select('id, customer_id, tl_invoice_id, amount_total, amount_paid, status, invoice_number')
+    .select('id, customer_id, deal_id, tl_subscription_id, tl_invoice_id, amount_total, amount_paid, status, invoice_number')
     .eq('id', invoiceId).maybeSingle();
   if (!inv) throw new RegisterPaymentError('validation', 'Factuur niet gevonden');
   if (!inv.tl_invoice_id) throw new RegisterPaymentError('validation', 'Factuur heeft geen Teamleader-id');
@@ -252,6 +252,21 @@ export async function registerPaymentInternal(opts) {
       }
     } catch (e) {
       console.warn('[register-payment-internal] pipeline hook soft-fail', inv.id, e?.message || e);
+    }
+
+    // 5e. Sales-bonus earn-hook: als deze betaalde factuur de aanbetalingsfactuur
+    //     van de deal is → de pending bonus van die deal op 'earned' (idempotent).
+    //     Fail-soft: mag de betaal-registratie nooit breken.
+    try {
+      const { earnBonusForPaidInvoice } = await import('./sales-bonus.js');
+      await earnBonusForPaidInvoice({
+        id:                 inv.id,
+        deal_id:            inv.deal_id,
+        tl_subscription_id: inv.tl_subscription_id,
+        invoice_number:     inv.invoice_number,
+      });
+    } catch (e) {
+      console.warn('[register-payment-internal] sales-bonus earn-hook soft-fail', inv.id, e?.message || e);
     }
   }
 
