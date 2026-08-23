@@ -137,13 +137,42 @@ ORDER BY suggested_action, p.amount DESC
 LIMIT 50;
 
 
--- ═══ STAP 1/2 — MUTATIES ═══════════════════════════════════════════════════
--- Volgen PAS na review van STAP 0. Ontwerp (kaal auto-committend):
---   STAP 1  UPDATE bonuses SET status='earned', earned_at=now()
---             WHERE id IN (<bonussen uit de 'earn'-groep>);
---   STAP 2  UPDATE bonuses SET status='voided', voided_at=now(),
---             void_reason='reconcile: aanbetaling gecrediteerd'
---             WHERE id IN (<bonussen uit de 'void'-groep>);
--- (elk met een verificatie-SELECT ervoor/erna; GEEN kale her-earn van alles —
---  alleen waar de aanbetaling aantoonbaar paid/credited is.)
--- Wordt ingevuld met de bonus-id's / geklemde subquery ná de STAP 0-review.
+-- ═══ STAP 1/2 — MUTATIES (KAAL auto-committend; PAS draaien na STAP 0-review) ═
+-- Vul <EARN_BONUS_IDS> en <VOID_BONUS_IDS> met EXACT de bonus_id's uit STAP 0.2:
+--   earn-groep = rijen met suggested_action = 'earn (aanbetaling betaald)'
+--   void-groep = rijen met suggested_action = 'void (aanbetaling gecrediteerd)'
+-- GEEN kale her-earn van alles. Deal-lost NIET meenemen (informatief).
+-- Formaat id-lijst: 'uuid1','uuid2','uuid3'  (comma-gescheiden, gequote).
+-- Geen BEGIN/COMMIT: kale statements (Supabase-editor rolt een open transactie terug).
+
+-- ─── STAP 1 — EARN (aanbetaling betaald → 'earned') ───────────────────────
+-- 1a) Verificatie VOOR (moeten allemaal 'pending' zijn):
+SELECT id, status, deal_id, amount FROM public.bonuses
+WHERE id IN (<EARN_BONUS_IDS>) ORDER BY id;
+
+-- 1b) Mutatie (idempotent: alleen vanuit pending):
+UPDATE public.bonuses
+SET status = 'earned', earned_at = now()
+WHERE id IN (<EARN_BONUS_IDS>) AND status = 'pending';
+
+-- 1c) Verificatie NA (alles nu 'earned' met earned_at gezet):
+SELECT id, status, earned_at FROM public.bonuses
+WHERE id IN (<EARN_BONUS_IDS>) ORDER BY id;
+
+
+-- ─── STAP 2 — VOID (aanbetaling gecrediteerd → 'voided') ──────────────────
+-- Deze bonussen zijn 'pending' → NOOIT uitbetaald → GEEN clawback_pending
+-- (die vlag is puur voor het voiden van een reeds 'paid' bonus).
+-- 2a) Verificatie VOOR (moeten allemaal 'pending' zijn):
+SELECT id, status, deal_id, amount FROM public.bonuses
+WHERE id IN (<VOID_BONUS_IDS>) ORDER BY id;
+
+-- 2b) Mutatie (idempotent: alleen niet-voided):
+UPDATE public.bonuses
+SET status = 'voided', voided_at = now(),
+    void_reason = 'reconcile: aanbetaling gecrediteerd'
+WHERE id IN (<VOID_BONUS_IDS>) AND status <> 'voided';
+
+-- 2c) Verificatie NA:
+SELECT id, status, voided_at, void_reason FROM public.bonuses
+WHERE id IN (<VOID_BONUS_IDS>) ORDER BY id;
