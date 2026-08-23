@@ -103,7 +103,12 @@
     'onboarding/Inbox':        SAMS,
     'onboarding/Archief':      SAMS,
   };
-  const MOD_LOCK = { inbox: ['sales'], email: ['sales'] };
+  // Coming-soon-lock voor specifieke (module, rol)-combos. Toont slot-icoon
+  // + comingSoonView i.p.v. de content. `email` verwijderd voor sales (v=1c3):
+  // sales-rol ziet nu de echte E-mail-module (alle 7 mailboxen, geen scoping —
+  // consistent met andere rollen). Als per-mailbox-scoping later gewenst is:
+  // aparte brok (client-side MAILBOXES-filter of server-side permission-gate).
+  const MOD_LOCK = { inbox: ['sales'] };
 
   /* Glow-kleur per accent (rgba met alpha .4). Buiten CSS omdat de
      alpha met de accent-hex gecombineerd moet worden voor box-shadows. */
