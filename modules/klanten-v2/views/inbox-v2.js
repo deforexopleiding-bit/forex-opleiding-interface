@@ -1132,7 +1132,7 @@
     const rowIdAttr  = String(i.id).replace(/"/g, '&quot;');
     const rowIdClick = String(i.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     return `<div class="ib-row ${i.nw ? 'nw' : ''} ${String(ibSel) === String(i.id) ? 'on' : ''}" data-row-id="${rowIdAttr}" onclick="__ibSel('${rowIdClick}')">
-      ${H.av(String(i.van || '?'), 34)}
+      ${H.av(String(i.van || '?'), 28)}
       <div class="ib-b">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
           <span style="font-size:13.5px;font-weight:${i.nw ? '600' : '500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(i.van)}</span>
