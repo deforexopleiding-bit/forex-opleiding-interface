@@ -26,6 +26,10 @@ Legenda classificatie: `quick-add` (endpoint + kleine UI) · `grote-brok` (subst
 | open (grote-brok) | 1  | alg-meldingen (notification_preferences schema + endpoint nieuw) |
 | deferred     | 16 | — |
 
+## v=59 GO-LIVE via V2_ACTIVE_ALLOWLIST (2026-08-23)
+
+Instellingen + Studenten allebei toegevoegd aan `V2_ACTIVE_ALLOWLIST` in `modules/klanten-v2/klanten-v2.js` r307. Studenten eerst (commit `4ea7cb90` v=13), Instellingen daarna (deze commit v=59). Rol-scoping via `app-shell.js` module-`roles` blijft gelden. Oude v1-pagina's blijven bereikbaar via directe URL als vangnet. Admin-menu-item blijft verborgen (`applyAdminGating` v=58). `ST_ASSESSMENT_WRITE_ENABLED=false` blijft in Studenten. Rollback = 1-regel per module uit de allowlist halen.
+
 ## v=58 Admin-menu-item hidden (2026-08-23)
 
 Alle 21 secties bewerkbaar + 16 deferred met reden → menu-item `admin` uit sidebar-shell gehaald. `admin.html` blijft bereikbaar via directe URL als vangnet; sluit een dismissible notice bovenaan met deep-link naar Instellingen.
