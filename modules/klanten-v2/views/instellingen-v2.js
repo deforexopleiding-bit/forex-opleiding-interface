@@ -286,23 +286,511 @@
   }
 
   // ── Set-body per id ────────────────────────────────────────────────────
-  /* Ronde-31 STAP 5 · wb-workflows + wb-berichten — DEEP-LINK naar Finance-
-     module. Waarom niet native: (1) dunning-engine leest deze rijen direct in
-     detectAndStartRuns → dubbele UI = risico op afwijkende validatie; (2) WIK-
-     14-brief is juridisch dwingend → legal-review vóór schrijfbaar in aparte
-     brok; (3) template-diagnose-endpoint (dunning-template-diagnose) is een
-     aparte gate die de bestaande Finance-UI al integreert. */
-  function bodyWbWorkflowsDeepLink() {
-    return `<div style="max-width:800px">
-      <div style="padding:16px 18px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <div style="font-size:14px;font-weight:600">Aanmaan-workflows</div>
-          <span style="padding:2px 8px;border-radius:6px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);font-size:10.5px;font-weight:600">DEEP-LINK</span>
+  /* Wave-4 · wb-workflows NATIVE (v=69) — dunning_workflows + _steps CRUD in-shell.
+     HOOG RISICO: motor leest deze rijen live (detectAndStartRuns). Alleen bestaande
+     config-endpoints: finance-dunning-workflows-list / -detail / -upsert / -delete /
+     -toggle (gate finance.dunning.config voor writes; -view voor read).
+
+     KRITIEK — step.id-behoud (FK dunning_log.step_id + dunning_workflow_runs.
+     current_step_id). Bij PATCH sturen we ALTIJD de detail-fetch ids mee; save-
+     payload weigert (client-side) als bestaande workflow zonder ids of leeg zou
+     worden verstuurd (spiegelt server-guards REFUSE_EMPTY_PAYLOAD_ON_POPULATED_
+     WORKFLOW en REFUSE_ID_LESS_STEPS_ON_POPULATED_WORKFLOW; server blijft harde
+     bron).
+
+     trigger_conditions: JSON-textarea met invalid-JSON-detectie (nul-risico
+     ipv key/value-builder; keys uit detectAndStartRuns niet bekend zonder
+     aparte discovery).
+
+     Diff-based: steps met id → UPDATE; zonder id → INSERT nieuwe; ontbrekende
+     bestaande ids → DELETE (FK SET NULL vangt log-refs). Reorder via ↑/↓;
+     step.id blijft door hele bewerking bewaard. */
+  const _wkf = {
+    loading: false, fetched: false, error: null, items: [],
+    busy: {},
+    // Editor state
+    ed: null,               // { id?, workflow, steps:[{id?, step_order, step_type, config}], _origStepIds: Set<string>, _origActive: bool, trigger_conditions_json: string, trigger_conditions_valid: bool }
+    editorLoading: false, editorError: null,
+    // Templates cache per kind — voor step template-picker.
+    tpls: {
+      email:    { loading: false, fetched: false, error: null, items: [] },
+      whatsapp: { loading: false, fetched: false, error: null, items: [] },
+    },
+  };
+
+  async function fetchWf() {
+    if (_wkf.loading || _wkf.fetched) return;
+    _wkf.loading = true; _wkf.error = null; if (render) render();
+    const j = await tryFetch('wf-list', '/api/finance-dunning-workflows-list');
+    _wkf.loading = false; _wkf.fetched = true;
+    if (j?.__error) _wkf.error = j.__error;
+    else _wkf.items = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
+  }
+  async function fetchWfTpls(kind) {
+    const st = _wkf.tpls[kind]; if (!st || st.loading || st.fetched) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('wf-tpls-' + kind, '/api/finance-dunning-templates-list?kind=' + encodeURIComponent(kind) + '&active=true');
+    st.loading = false; st.fetched = true;
+    if (j?.__error) st.error = j.__error;
+    else st.items = Array.isArray(j?.items) ? j.items : [];
+    if (render) render();
+  }
+
+  // Sync-from-DOM: leest alle editor-inputs in _wkf.ed vóór save/structural
+  // render. Bewaart step.id (uncontrolled, niet in DOM — blijft in state).
+  function _wfSyncFromDom() {
+    const e = _wkf.ed; if (!e) return;
+    const q = (sel) => document.querySelector(sel);
+    const qa = (sel) => Array.from(document.querySelectorAll(sel));
+    const n  = q('[data-wf-field="name"]');            if (n)  e.workflow.name = String(n.value || '');
+    const d  = q('[data-wf-field="description"]');     if (d)  e.workflow.description = String(d.value || '');
+    const p  = q('[data-wf-field="priority"]');        if (p)  e.workflow.priority = Number(p.value || 100);
+    const a  = q('[data-wf-field="is_active"]');       if (a)  e.workflow.is_active = !!a.checked;
+    const tc = q('[data-wf-field="trigger_conditions"]');
+    if (tc) {
+      e.trigger_conditions_json = String(tc.value || '');
+      // Live parse-check (no throw): valid if body is empty ({}) OR valid object-JSON.
+      const raw = e.trigger_conditions_json.trim();
+      if (!raw) { e.workflow.trigger_conditions = {}; e.trigger_conditions_valid = true; }
+      else {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            e.workflow.trigger_conditions = parsed; e.trigger_conditions_valid = true;
+          } else { e.trigger_conditions_valid = false; }
+        } catch (_) { e.trigger_conditions_valid = false; }
+      }
+    }
+    // Per-step velden — id blijft in state (uncontrolled), lees alleen editable velden.
+    qa('[data-wf-step-idx]').forEach((row) => {
+      const idx = Number(row.getAttribute('data-wf-step-idx'));
+      if (!Number.isInteger(idx) || !e.steps[idx]) return;
+      const st = e.steps[idx];
+      const typeEl = row.querySelector('[data-wf-step-field="step_type"]');
+      if (typeEl) st.step_type = String(typeEl.value || 'wait');
+      const cfg = st.config = st.config || {};
+      if (st.step_type === 'email' || st.step_type === 'whatsapp') {
+        const tplEl = row.querySelector('[data-wf-step-field="template_id"]');
+        if (tplEl) cfg.template_id = String(tplEl.value || '') || null;
+      } else if (st.step_type === 'wait') {
+        const dEl = row.querySelector('[data-wf-step-field="days"]');
+        if (dEl) cfg.days = Number(dEl.value || 0);
+      } else if (st.step_type === 'task') {
+        const ttl = row.querySelector('[data-wf-step-field="title"]');
+        if (ttl) cfg.title = String(ttl.value || '');
+        const desc = row.querySelector('[data-wf-step-field="description"]');
+        if (desc) cfg.description = String(desc.value || '');
+      }
+    });
+  }
+
+  window.__setWkfNew = () => {
+    _wkf.ed = {
+      id: null,
+      workflow: { name: '', description: '', is_active: false, priority: 100, trigger_conditions: {} },
+      steps: [],
+      _origStepIds: new Set(),
+      _origActive: false,
+      trigger_conditions_json: '{}',
+      trigger_conditions_valid: true,
+    };
+    fetchWfTpls('email'); fetchWfTpls('whatsapp');
+    if (render) render();
+  };
+  window.__setWkfEdit = async (id) => {
+    _wkf.editorLoading = true; _wkf.editorError = null;
+    _wkf.ed = {
+      id, workflow: { name: '', description: '', is_active: false, priority: 100, trigger_conditions: {} },
+      steps: [], _origStepIds: new Set(), _origActive: false,
+      trigger_conditions_json: '{}', trigger_conditions_valid: true,
+    };
+    if (render) render();
+    const j = await tryFetch('wf-detail', '/api/finance-dunning-workflows-detail?id=' + encodeURIComponent(id));
+    _wkf.editorLoading = false;
+    if (j?.__error || j?.error) {
+      _wkf.editorError = j?.__error || j?.error;
+      if (render) render(); return;
+    }
+    const wf = j?.workflow || {};
+    const steps = Array.isArray(j?.steps) ? j.steps : [];
+    _wkf.ed.workflow = {
+      name: wf.name || '', description: wf.description || '',
+      is_active: !!wf.is_active, priority: Number(wf.priority || 100),
+      trigger_conditions: (wf.trigger_conditions && typeof wf.trigger_conditions === 'object') ? wf.trigger_conditions : {},
+    };
+    // Behoud id per step — deep-copy zodat editor-mutaties het detail-cache niet muteren.
+    _wkf.ed.steps = steps.map((s) => ({
+      id: s.id, step_order: Number(s.step_order || 0), step_type: s.step_type || 'wait',
+      config: JSON.parse(JSON.stringify(s.config || {})),
+    }));
+    _wkf.ed._origStepIds = new Set(steps.map((s) => s.id).filter(Boolean));
+    _wkf.ed._origActive = !!wf.is_active;
+    _wkf.ed.trigger_conditions_json = JSON.stringify(_wkf.ed.workflow.trigger_conditions, null, 2);
+    _wkf.ed.trigger_conditions_valid = true;
+    fetchWfTpls('email'); fetchWfTpls('whatsapp');
+    if (render) render();
+  };
+  window.__setWkfCancel = () => { _wkf.ed = null; _wkf.editorError = null; if (render) render(); };
+
+  // Step-lijst mutaties — sync-from-DOM VOOR elke mutatie zodat lopende
+  // veldwaardes bewaard blijven; dan structural render.
+  window.__setWkfStepAdd = () => {
+    if (!_wkf.ed) return;
+    _wfSyncFromDom();
+    const nextOrder = _wkf.ed.steps.length
+      ? (Math.max(..._wkf.ed.steps.map((s) => Number(s.step_order || 0))) + 1)
+      : 0;
+    _wkf.ed.steps.push({ id: null, step_order: nextOrder, step_type: 'wait', config: { days: 1 } });
+    if (render) render();
+  };
+  window.__setWkfStepRemove = (idx) => {
+    if (!_wkf.ed || !_wkf.ed.steps[idx]) return;
+    _wfSyncFromDom();
+    const st = _wkf.ed.steps[idx];
+    // Confirm alleen als het een bestaande step is (heeft id) — nieuwe steps zonder id = veilig weg te halen.
+    if (st.id) {
+      openConfirm(`Stap ${idx + 1} (${esc(st.step_type)}) verwijderen? Bestaande log-referenties naar deze stap worden bij save losgekoppeld (FK SET NULL).`, () => {
+        _wkf.ed.steps.splice(idx, 1);
+        _wfRenumberOrders();
+        if (render) render();
+      }, 'warn');
+    } else {
+      _wkf.ed.steps.splice(idx, 1);
+      _wfRenumberOrders();
+      if (render) render();
+    }
+  };
+  window.__setWkfStepMove = (idx, dir) => {
+    if (!_wkf.ed) return;
+    _wfSyncFromDom();
+    const to = idx + dir;
+    if (to < 0 || to >= _wkf.ed.steps.length) return;
+    const arr = _wkf.ed.steps;
+    [arr[idx], arr[to]] = [arr[to], arr[idx]];
+    _wfRenumberOrders();
+    if (render) render();
+  };
+  function _wfRenumberOrders() {
+    if (!_wkf.ed) return;
+    _wkf.ed.steps.forEach((s, i) => { s.step_order = i; });
+  }
+  window.__setWkfStepTypeChange = (idx) => {
+    if (!_wkf.ed) return;
+    _wfSyncFromDom();
+    const st = _wkf.ed.steps[idx]; if (!st) return;
+    // Reset config on type-switch — voorkomt vervuilde config (bv. days-veld
+    // op een email-step blijft anders in payload staan; server valideert kind
+    // maar cleaner om het hier weg te halen).
+    if (st.step_type === 'email' || st.step_type === 'whatsapp') st.config = { template_id: null };
+    else if (st.step_type === 'wait') st.config = { days: 1 };
+    else if (st.step_type === 'task') st.config = { title: '', description: '' };
+    else st.config = {};
+    if (render) render();
+  };
+
+  window.__setWkfSave = async () => {
+    if (!_wkf.ed) return;
+    _wfSyncFromDom();
+    const e = _wkf.ed;
+    if (!e.workflow.name.trim()) return showToast('Naam is verplicht', 'warn');
+    if (!Number.isInteger(Number(e.workflow.priority))) return showToast('Priority moet integer zijn', 'warn');
+    if (!e.trigger_conditions_valid) return showToast('trigger_conditions bevat ongeldige JSON — corrigeer eerst', 'warn');
+
+    // Per-step validatie (spiegel van server-validateSteps).
+    for (let i = 0; i < e.steps.length; i++) {
+      const s = e.steps[i];
+      const lbl = 'Stap ' + (i + 1);
+      if (!['email','whatsapp','wait','task','stop'].includes(s.step_type)) return showToast(lbl + ': type ongeldig', 'warn');
+      if ((s.step_type === 'email' || s.step_type === 'whatsapp') && !s.config?.template_id) return showToast(lbl + ': kies een template', 'warn');
+      if (s.step_type === 'wait' && (!Number.isInteger(Number(s.config?.days)) || Number(s.config.days) < 0)) return showToast(lbl + ': days moet integer >= 0', 'warn');
+      if (s.step_type === 'task' && !String(s.config?.title || '').trim()) return showToast(lbl + ': title vereist', 'warn');
+    }
+
+    // CLIENT-GUARDS spiegelen server-guards (voordat POST vertrekt).
+    // Bij UPDATE met bestaande steps in DB (uit detail-fetch):
+    const isUpdate = !!e.id;
+    const hadExisting = e._origStepIds && e._origStepIds.size > 0;
+    if (isUpdate && hadExisting) {
+      if (e.steps.length === 0) {
+        return showToast('Kan niet opslaan: workflow heeft ' + e._origStepIds.size + ' bestaande stappen en payload is leeg. (server-guard REFUSE_EMPTY_PAYLOAD_ON_POPULATED_WORKFLOW)', 'warn');
+      }
+      const withIdCount = e.steps.filter((s) => s.id).length;
+      if (withIdCount === 0) {
+        return showToast('Kan niet opslaan: workflow heeft ' + e._origStepIds.size + ' bestaande stappen, maar payload bevat geen enkele step-id. Ververs de editor. (server-guard REFUSE_ID_LESS_STEPS_ON_POPULATED_WORKFLOW)', 'warn');
+      }
+    }
+
+    const doSave = async () => {
+      const key = e.id || 'new';
+      _wkf.busy[key] = true; if (render) render();
+      try {
+        const payload = {
+          workflow: {
+            name: e.workflow.name.trim(),
+            description: e.workflow.description?.trim() || null,
+            is_active: !!e.workflow.is_active,
+            priority: Number(e.workflow.priority),
+            trigger_conditions: e.workflow.trigger_conditions,
+          },
+          steps: e.steps.map((s) => ({
+            id: s.id || undefined,  // undefined → server ziet 'ontbreekt' = insert
+            step_order: Number(s.step_order),
+            step_type: s.step_type,
+            config: s.config || {},
+          })),
+        };
+        const url = '/api/finance-dunning-workflows-upsert' + (isUpdate ? '?id=' + encodeURIComponent(e.id) : '');
+        const j = await tryFetch('wf-save', url, {
+          method: isUpdate ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _wkf.ed = null; _wkf.fetched = false; fetchWf();
+        showToast(isUpdate ? 'Workflow bijgewerkt' : 'Workflow aangemaakt', 'ok');
+      } catch (err) {
+        showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn');
+      } finally { _wkf.busy[key] = false; if (render) render(); }
+    };
+
+    // Custom confirm bij actieve workflow (bestaande of nieuwe die actief opgeslagen wordt).
+    if (isUpdate && e._origActive) {
+      const activeRuns = (_wkf.items.find((x) => x.id === e.id)?.active_run_count) || 0;
+      const runsWarn = activeRuns > 0
+        ? ` <b>${activeRuns}</b> lopende run${activeRuns === 1 ? '' : 's'} blijft op de oude versie hangen — nieuwe runs pakken de nieuwe stappen.`
+        : '';
+      openConfirm(`Actieve workflow "${esc(e.workflow.name)}" opslaan? Nieuwe dunning-runs vanaf nu gebruiken deze versie direct.${runsWarn}`, doSave, 'warn');
+    } else if (e.workflow.is_active) {
+      openConfirm(`Workflow "${esc(e.workflow.name)}" opslaan ALS ACTIEF? Nieuwe dunning-runs gebruiken deze workflow vanaf nu.`, doSave, 'warn');
+    } else {
+      doSave();
+    }
+  };
+  window.__setWkfToggle = (id) => {
+    const it = _wkf.items.find((x) => x.id === id); if (!it) return;
+    const goingActive = !it.is_active;
+    const activeRuns = it.active_run_count || 0;
+    const runsWarn = (!goingActive && activeRuns > 0)
+      ? ` ${activeRuns} lopende run${activeRuns === 1 ? '' : 's'} pauzeert niet — die lopen door.`
+      : '';
+    const msg = goingActive
+      ? `Workflow "${esc(it.name)}" ACTIVEREN? Nieuwe dunning-runs vanaf nu gebruiken deze workflow.`
+      : `Workflow "${esc(it.name)}" op INACTIEF zetten? Nieuwe runs skippen deze workflow.${runsWarn}`;
+    openConfirm(msg, async () => {
+      _wkf.busy[id] = true; if (render) render();
+      try {
+        const j = await tryFetch('wf-toggle', '/api/finance-dunning-workflows-toggle?id=' + encodeURIComponent(id), {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_active: goingActive }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _wkf.fetched = false; fetchWf();
+        showToast(goingActive ? 'Workflow geactiveerd' : 'Workflow gedeactiveerd', 'ok');
+      } catch (err) { showToast('Toggle mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _wkf.busy[id] = false; if (render) render(); }
+    }, goingActive ? 'warn' : 'info');
+  };
+  window.__setWkfDelete = (id) => {
+    const it = _wkf.items.find((x) => x.id === id); if (!it) return;
+    if (it.is_active) return showToast('Deactiveer workflow eerst vóór verwijderen', 'warn');
+    if ((it.active_run_count || 0) > 0) return showToast('Workflow heeft ' + it.active_run_count + ' lopende runs — kan niet verwijderen', 'warn');
+    openConfirm(`Workflow "${esc(it.name)}" PERMANENT verwijderen? Server-check kan blokkeren als er nog historische runs of stappen aan hangen.`, async () => {
+      _wkf.busy[id] = true; if (render) render();
+      try {
+        const j = await tryFetch('wf-del', '/api/finance-dunning-workflows-delete?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        _wkf.fetched = false; fetchWf();
+        showToast('Workflow verwijderd', 'ok');
+      } catch (err) { showToast('Verwijderen mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _wkf.busy[id] = false; if (render) render(); }
+    }, 'warn');
+  };
+
+  // Live invalid-JSON hint update — freeze-veilig (in-place tekst + kleur).
+  window.__setWkfTcInput = (ta) => {
+    try {
+      if (!_wkf.ed) return;
+      const raw = String(ta?.value || '').trim();
+      let ok = true;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          ok = (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed));
+        } catch (_) { ok = false; }
+      }
+      const badge = document.querySelector('[data-wf-tc-badge="1"]');
+      if (!badge) return;
+      if (badge.getAttribute('data-ok') === (ok ? '1' : '0')) return;
+      badge.setAttribute('data-ok', ok ? '1' : '0');
+      badge.style.background = ok ? 'var(--emerald-soft)' : 'var(--rose-soft)';
+      badge.style.color      = ok ? 'var(--emerald)'      : 'var(--rose)';
+      badge.textContent = ok ? '✓ Geldige JSON (object)' : '⚠ Ongeldige JSON — save geblokkeerd';
+    } catch (_) { /* fail-soft */ }
+  };
+
+  function _wfStepRow(idx, s) {
+    const kind = s.step_type;
+    const isTpl = kind === 'email' || kind === 'whatsapp';
+    const tplState = isTpl ? _wkf.tpls[kind] : null;
+    const tpls = isTpl && tplState ? tplState.items : [];
+    const curId = s.config?.template_id || '';
+    const inList = isTpl && tpls.some((t) => t.id === curId);
+    const fallbackOpt = (isTpl && curId && !inList)
+      ? `<option value="${esc(curId)}" selected>${esc(curId)} — id bestaat niet in actieve ${esc(kind)}-lijst</option>` : '';
+    return `<div data-wf-step-idx="${idx}" style="display:grid;grid-template-columns:auto 80px 1fr auto;gap:8px;align-items:start;padding:8px;background:var(--surface-2);border-radius:6px;margin-bottom:6px">
+      <div style="display:flex;flex-direction:column;gap:2px;padding-top:4px">
+        <button class="btn btn-ghost btn-sm" onclick="window.__setWkfStepMove(${idx},-1)" title="Omhoog" style="padding:2px 6px;font-size:10px" ${idx === 0 ? 'disabled' : ''}>▲</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setWkfStepMove(${idx},1)" title="Omlaag" style="padding:2px 6px;font-size:10px" ${idx === _wkf.ed.steps.length - 1 ? 'disabled' : ''}>▼</button>
+      </div>
+      <div>
+        <div style="font-size:10px;color:var(--text-3);margin-bottom:2px">#${idx + 1}${s.id ? ' · <span style="font-family:\'IBM Plex Mono\',monospace" title="step.id (FK dunning_log.step_id)">' + esc(String(s.id).slice(0,6)) + '…</span>' : ' · <span style="color:var(--amber)" title="Nieuw — krijgt id bij save">nieuw</span>'}</div>
+        <select data-wf-step-field="step_type" onchange="window.__setWkfStepTypeChange(${idx})" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:11.5px;box-sizing:border-box">
+          ${['email','whatsapp','wait','task','stop'].map((t) => `<option value="${t}" ${kind === t ? 'selected' : ''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div style="min-width:0">
+        ${isTpl ? (
+          tplState?.error
+            ? `<input type="text" data-wf-step-field="template_id" value="${esc(curId)}" placeholder="template UUID" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:11.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+               <div style="font-size:10px;color:var(--rose);margin-top:2px">${esc(kind)}-templates niet geladen: ${esc(tplState.error)} — vul UUID handmatig</div>`
+            : `<select data-wf-step-field="template_id" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:11.5px;box-sizing:border-box">
+                 <option value="" ${!curId ? 'selected' : ''}>— kies actieve ${esc(kind)}-template —</option>
+                 ${fallbackOpt}
+                 ${tpls.map((t) => `<option value="${esc(t.id)}" ${curId === t.id ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+               </select>
+               <div style="font-size:10px;color:var(--text-3);margin-top:2px">${tpls.length} actieve ${esc(kind)}-templates${tplState?.loading ? ' · laden…' : ''}</div>`
+        ) : ''}
+        ${kind === 'wait' ? `
+          <label style="font-size:10px;color:var(--text-3);display:block;margin-bottom:2px">Wacht (dagen)</label>
+          <input type="number" data-wf-step-field="days" min="0" value="${esc(String(s.config?.days ?? 1))}" style="width:100px;padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:11.5px;box-sizing:border-box" />
+        ` : ''}
+        ${kind === 'task' ? `
+          <input type="text" data-wf-step-field="title" value="${esc(s.config?.title || '')}" placeholder="Task title" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:11.5px;box-sizing:border-box;margin-bottom:4px" />
+          <textarea data-wf-step-field="description" placeholder="Description (optioneel)" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:11px;box-sizing:border-box;min-height:40px;font-family:inherit;resize:vertical">${esc(s.config?.description || '')}</textarea>
+        ` : ''}
+        ${kind === 'stop' ? `<div style="font-size:11px;color:var(--text-3);padding:5px 0">Terminal-step (geen config)</div>` : ''}
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="window.__setWkfStepRemove(${idx})" style="color:var(--rose);font-size:11px;align-self:flex-start" title="Stap verwijderen">✕</button>
+    </div>`;
+  }
+
+  function _wfEditorHtml() {
+    const e = _wkf.ed; if (!e) return '';
+    const isNew = !e.id;
+    const key = e.id || 'new';
+    const busy = !!_wkf.busy[key];
+    if (_wkf.editorLoading) {
+      return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;font-size:13px">Editor laden…</div>
+      </div>`;
+    }
+    if (_wkf.editorError) {
+      return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setWkfCancel()">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:400px">
+          <div style="font-size:13px;color:var(--rose);margin-bottom:10px">⚠ ${esc(_wkf.editorError)}</div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__setWkfCancel()">Sluiten</button>
         </div>
-        <div style="font-size:12.5px;color:var(--text-2);line-height:1.6;margin-bottom:10px">
-          De <code>dunning_workflows</code>-editor (wanneer starten, step-volgorde, delays, kanaal per step) leeft in de Finance-module. <b>Waarom niet hier:</b> de motor leest deze rijen direct in <code>detectAndStartRuns</code>; een tweede editor introduceert het risico van afwijkende validatie voor identieke velden. Wanbetalers Wave-3 vervangt deze deep-link door een gedeelde read/write-laag.
+      </div>`;
+    }
+    const tcBadgeOk = e.trigger_conditions_valid;
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setWkfCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(880px,100%);max-height:92vh;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+          <div style="font-size:14px;font-weight:600">${isNew ? 'Nieuwe dunning-workflow' : 'Workflow bewerken: ' + esc(e.workflow.name)}</div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__setWkfCancel()">✕</button>
         </div>
-        <a href="/modules/finance.html?tab=dunning-workflows" class="btn btn-primary btn-sm" style="text-decoration:none;display:inline-block">Open workflows in Finance →</a>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1">
+          <div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:11px;line-height:1.5">
+            <b>⚠ INCASSO-ZONE.</b> Deze workflow stuurt de dunning-motor rechtstreeks aan. Wijzigingen raken nieuwe runs direct; lopende runs blijven op de oude versie.
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Naam</label>
+              <input type="text" data-wf-field="name" value="${esc(e.workflow.name)}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Priority (int, lager = eerder)</label>
+              <input type="number" data-wf-field="priority" value="${esc(String(e.workflow.priority))}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+            </div>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Description</label>
+            <input type="text" data-wf-field="description" value="${esc(e.workflow.description || '')}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Trigger conditions (JSON object)</label>
+            <textarea data-wf-field="trigger_conditions" oninput="window.__setWkfTcInput(this)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:11.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box;min-height:100px;resize:vertical">${esc(e.trigger_conditions_json)}</textarea>
+            <div data-wf-tc-badge="1" data-ok="${tcBadgeOk ? '1' : '0'}" style="margin-top:4px;padding:4px 8px;background:${tcBadgeOk ? 'var(--emerald-soft)' : 'var(--rose-soft)'};color:${tcBadgeOk ? 'var(--emerald)' : 'var(--rose)'};border-radius:4px;font-size:10.5px;display:inline-block">${tcBadgeOk ? '✓ Geldige JSON (object)' : '⚠ Ongeldige JSON — save geblokkeerd'}</div>
+            <div style="font-size:10px;color:var(--text-3);margin-top:3px">Keys worden door de dunning-engine (detectAndStartRuns) live gelezen. Bekende keys niet expliciet gedocumenteerd — laat leeg (<code>{}</code>) tenzij je weet wat je doet. Key/value-builder volgt in aparte brok na engine-key-discovery.</div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;user-select:none">
+            <input type="checkbox" data-wf-field="is_active" ${e.workflow.is_active ? 'checked' : ''} />
+            <span>Actief — nieuwe dunning-runs gebruiken deze workflow</span>
+          </label>
+
+          <div style="border-top:1px solid var(--border);padding-top:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div style="font-size:12.5px;font-weight:600">Stappen (${e.steps.length}) — id-behoud kritiek</div>
+              <button class="btn btn-primary btn-sm" onclick="window.__setWkfStepAdd()" style="font-size:11px">+ Stap toevoegen</button>
+            </div>
+            ${e.steps.length === 0
+              ? `<div style="padding:14px;color:var(--text-3);font-size:12px;text-align:center;background:var(--surface-2);border-radius:6px">Nog geen stappen.</div>`
+              : e.steps.map((s, i) => _wfStepRow(i, s)).join('')}
+            ${e._origStepIds.size > 0 ? `<div style="margin-top:6px;font-size:10.5px;color:var(--text-3)">Bestaande stap-ids in DB: <b>${e._origStepIds.size}</b> · behouden bij save: <b>${e.steps.filter((s) => s.id).length}</b> · nieuw: <b>${e.steps.filter((s) => !s.id).length}</b> · te verwijderen: <b>${Math.max(0, e._origStepIds.size - e.steps.filter((s) => s.id).length)}</b></div>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setWkfCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWkfSave()">${busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function bodyWbWorkflows() {
+    if (!_wkf.fetched && !_wkf.loading) queueMicrotask(() => fetchWf());
+    const all = _wkf.items;
+    const rows = all.map((it) => {
+      const busy = !!_wkf.busy[it.id];
+      const activeRuns = it.active_run_count || 0;
+      const runsPill = activeRuns > 0
+        ? `<span style="padding:1px 5px;border-radius:3px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);font-size:10px;font-weight:600;margin-left:4px">${activeRuns} run${activeRuns === 1 ? '' : 's'}</span>` : '';
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:6px 12px;font-size:12px"><b>${esc(it.name || '—')}</b>${runsPill}${it.description ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${esc(String(it.description).slice(0,80))}</div>` : ''}</td>
+        <td style="padding:6px 12px;font-size:11.5px;text-align:center"><code>${esc(String(it.priority ?? 100))}</code></td>
+        <td style="padding:6px 12px;font-size:11.5px;text-align:center">${it.step_count ?? 0}</td>
+        <td style="padding:6px 12px;text-align:center">
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWkfToggle('${esc(it.id)}')" style="font-size:10.5px;color:${it.is_active ? 'var(--emerald)' : 'var(--text-3)'}">${it.is_active ? '✓ AAN' : '⨯ UIT'}</button>
+        </td>
+        <td style="padding:4px 12px;text-align:right;white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWkfEdit('${esc(it.id)}')" style="font-size:10.5px">Bewerk</button>
+          <button class="btn btn-ghost btn-sm" ${busy || it.is_active || activeRuns > 0 ? 'disabled' : ''} onclick="window.__setWkfDelete('${esc(it.id)}')" style="font-size:10.5px;color:var(--rose)" title="${it.is_active ? 'Deactiveer eerst' : (activeRuns > 0 ? 'Lopende runs' : 'Verwijderen')}">Verwijder</button>
+        </td>
+      </tr>`;
+    }).join('');
+    return `<div style="max-width:1100px">
+      ${_wfEditorHtml()}
+      <div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12px;line-height:1.55;margin-bottom:12px">
+        <b>⚠ INCASSO-ZONE · LIVE.</b> Beheer <code>dunning_workflows</code> + <code>dunning_workflow_steps</code>. De dunning-motor leest deze rijen live in <code>detectAndStartRuns</code>. Nieuwe dunning-runs gebruiken de actieve workflows direct; lopende runs blijven op de oude versie hangen.
+        <br><b>Step-id-behoud kritiek</b> (FK dunning_log.step_id + dunning_workflow_runs.current_step_id). Client stuurt bij edit ALTIJD de detail-fetch ids mee; server-guards blokkeren id-loze of lege-payload-saves op gevulde workflows.
+      </div>
+      ${_wkf.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:8px">⚠ ${esc(_wkf.error)} <button class="btn btn-ghost btn-sm" onclick="_wkf.fetched=false;_wkf.error=null;fetchWf()" style="font-size:11px;margin-left:6px">Opnieuw</button></div>` : ''}
+      <div style="display:flex;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;color:var(--text-3)">${all.length} workflow(s) — ${all.filter((x) => x.is_active).length} actief · ${all.filter((x) => !x.is_active).length} uit · ${all.reduce((a, x) => a + (x.active_run_count || 0), 0)} lopende runs</div>
+        <button class="btn btn-primary btn-sm" style="margin-left:auto;font-size:11.5px" onclick="window.__setWkfNew()">+ Nieuwe workflow</button>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2)">
+            <th style="text-align:left;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Naam</th>
+            <th style="text-align:center;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Prio</th>
+            <th style="text-align:center;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">#Stappen</th>
+            <th style="text-align:center;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Status</th>
+            <th style="text-align:right;padding:6px 12px;font-size:10.5px;color:var(--text-3);font-weight:600">Acties</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" style="padding:14px;color:var(--text-3);font-size:12px;text-align:center">${_wkf.loading ? 'Laden…' : 'Geen workflows.'}</td></tr>`}</tbody>
+        </table>
       </div>
     </div>`;
   }
@@ -5681,7 +6169,7 @@
     // Ronde-31 STAP 5: wb-workflows + wb-berichten — DEEP-LINK naar Finance.
     // Editor blijft daar (motor leest deze rijen direct; dubbele UI = risico op
     // afwijkende validatie; templates zijn juridisch dwingend WIK-14).
-    if (cur.id === 'wb-workflows')       return bodyWbWorkflowsDeepLink();
+    if (cur.id === 'wb-workflows')       return bodyWbWorkflows();
     if (cur.id === 'wb-berichten')       return bodyWbBerichten();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
@@ -5736,6 +6224,10 @@
       // v=67: wb-berichten native — dunning_templates CRUD (email/whatsapp/brief)
       // + client-side WIK-gate voor brief-kind. Motor-endpoints onaangeraakt.
       'wb-berichten',
+      // v=69: wb-workflows native — dunning_workflows + _steps CRUD (diff-based
+      // upsert met step.id-behoud; client-guards spiegelen server-guards).
+      // Motor-/dispatcher-/cron-logica onaangeraakt.
+      'wb-workflows',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
@@ -5757,9 +6249,8 @@
     const DEEPLINK = new Set([
       'ev-templates','lms-instel',
       'mk-meta',
-      // Ronde-31 STAP 5: workflows-regels blijft Finance (motor-consistentie).
-      // v=67: wb-berichten is nu LIVE native (dunning-templates CRUD).
-      'wb-workflows',
+      // v=67: wb-berichten LIVE native (dunning-templates CRUD).
+      // v=69: wb-workflows LIVE native (dunning-workflows CRUD met diff-based upsert).
       // Polish v26: alg-meldingen krijgt DEEP-LINK badge (was voorbeeld-data);
       // notice-only sectie (server-side crons + rol-lookup, aparte brok voor per-user-prefs).
     ]);
