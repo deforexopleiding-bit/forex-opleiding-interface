@@ -38,6 +38,9 @@
     invoices:  { loading: false, error: null, byEmail: null, _seq: 0 },
     sessions:  { loading: false, error: null, data: null, _seq: 0 },
     notes:     { loading: false, error: null, byId: null, _seq: 0 },
+    // v=7 admin-picker (punt 2): mentors-lijst voor de kiezer. Lazy fetched
+    // alleen als current role in super_admin/admin/manager (zie studentenView).
+    mentors:   { loading: false, fetched: false, error: null, list: [] },
   };
   const _ui = {
     statusFilter: 'all',       // 'all' | 'op_schema' | 'aandacht' | 'nieuw'
@@ -137,6 +140,42 @@
     queueMicrotask(_fetchAssessments);
     if (window.DFO?.render) window.DFO.render();
   }
+  // v=7 admin-picker: fetch mentors met user_id via bestaand endpoint.
+  // Permission events.team_member.link — mentors zonder deze permission (=
+  // eigenlijk alleen mentors) krijgen 403 en de picker toont een lege lijst.
+  async function _fetchMentorsForPicker() {
+    const st = _live.mentors;
+    if (st.loading || st.fetched) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('mentors-picker', '/api/team-members-bubble-status');
+    st.loading = false; st.fetched = true;
+    if (!j || j.error) { st.error = j?.error || 'load-fail'; if (window.DFO?.render) window.DFO.render(); return; }
+    st.list = asArr(j.mentors).filter(m => m.user_id).map(m => ({ user_id: m.user_id, name: m.name, email: m.email }))
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // v=7 admin-picker: zet override + refetch students/invoices/notes.
+  window.__stSetOverride = (userId) => {
+    const v = String(userId || '').trim();
+    window.__stMentorOverride = v || null;
+    try { window.localStorage.setItem('kv:stMentorOverride', v || ''); } catch (_) {}
+    // Reset alle caches zodat volgende fetch de override oppikt.
+    _live.students.data = null; _live.students.loading = false; _live.students.error = null; _live.students.scope = null; _live.students._seq++;
+    _live.invoices.byEmail = null; _live.invoices.loading = false; _live.invoices.error = null; _live.invoices._seq++;
+    _live.notes.byId = null; _live.notes.loading = false; _live.notes.error = null; _live.notes._seq++;
+    _ui.selectedId = null;
+    if (window.DFO?.render) window.DFO.render();
+    // Refetch pipeline.
+    queueMicrotask(_fetchStudents);
+    queueMicrotask(_fetchInvoiceStatus);
+    queueMicrotask(_fetchAssessments);
+  };
+  // Restore laatste override bij page-load (session-continuity, admin-comfort).
+  try {
+    const saved = window.localStorage.getItem('kv:stMentorOverride');
+    if (saved) window.__stMentorOverride = saved;
+  } catch (_) { /* fail-soft */ }
+
   async function _fetchInvoiceStatus() {
     const st = _live.invoices;
     if (st.loading || st.byEmail) return;
@@ -146,20 +185,35 @@
     if (seq !== st._seq) return;
     st.loading = false;
     if (!j) { st.error = 'Kon betaalstatus niet laden'; if (window.DFO?.render) window.DFO.render(); return; }
-    // Server geeft doorgaans { items: [{email, open, overdue, paid, ...}] }
-    // of { statuses: {...} }. Beide vormen accepteren.
+    // v=7 BLOCKER-fix: endpoint returnt { byEmail: { "email": <NUMBER count> } }
+    // — plat getal per lowercase-email (aantal openstaande facturen ná server-
+    // filter status='open' + due_date < today = overdue). Voorheen zocht dit
+    // frontend naar j.items/j.statuses/j.students → allemaal undefined → lege
+    // map → KPI = 0 en 0 badges, terwijl endpoint 4 achterstalligen leverde.
+    // Backward-compat: items[]-vorm ook ondersteund voor als endpoint ooit muteert.
     const map = {};
-    const items = asArr(j.items || j.statuses || j.students);
-    for (const it of items) {
-      const email = String(it.email || '').toLowerCase();
-      if (!email) continue;
-      map[email] = {
-        open:    Number(it.open    || it.open_count    || 0),
-        overdue: Number(it.overdue || it.overdue_count || 0),
-        paid:    Number(it.paid    || it.paid_count    || 0),
-        open_amount:    Number(it.open_amount    || 0),
-        overdue_amount: Number(it.overdue_amount || 0),
-      };
+    if (j.byEmail && typeof j.byEmail === 'object') {
+      for (const [email, count] of Object.entries(j.byEmail)) {
+        const n = Number(count) || 0;
+        if (n <= 0) continue;
+        const k = String(email || '').toLowerCase();
+        if (!k) continue;
+        map[k] = { open: n, overdue: n, paid: 0, open_amount: 0, overdue_amount: 0 };
+      }
+    } else {
+      // Legacy shape fallback (items[]/statuses/students).
+      const items = asArr(j.items || j.statuses || j.students);
+      for (const it of items) {
+        const email = String(it.email || '').toLowerCase();
+        if (!email) continue;
+        map[email] = {
+          open:    Number(it.open    || it.open_count    || 0),
+          overdue: Number(it.overdue || it.overdue_count || 0),
+          paid:    Number(it.paid    || it.paid_count    || 0),
+          open_amount:    Number(it.open_amount    || 0),
+          overdue_amount: Number(it.overdue_amount || 0),
+        };
+      }
     }
     st.byEmail = map;
     if (window.DFO?.render) window.DFO.render();
@@ -760,6 +814,23 @@
     const scopeBadge = _live.students.scope === 'admin'
       ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--violet-soft,#EDE4FA);color:var(--violet,#6D3FD4);font-weight:600;margin-left:8px">ADMIN-VIEW</span>`
       : '';
+    // v=7 admin-picker (punt 2): alleen voor admin/manager/super_admin — mentors
+    // houden mentor-first eigen-lijst zonder picker. Alleen lazy-fetchen als de
+    // huidige user een candidate-rol heeft (voorkomt onnodige call bij mentors).
+    const currentRole = (window.DFO?.S?.roles && window.DFO.S.roles[0]) || '';
+    const isPickerRole = ['super_admin', 'admin', 'manager'].includes(currentRole);
+    if (isPickerRole && !_live.mentors.fetched && !_live.mentors.loading) queueMicrotask(_fetchMentorsForPicker);
+    const currentOverride = String(window.__stMentorOverride || '').trim();
+    const mentorPicker = isPickerRole
+      ? `<div style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11.5px">
+          <span style="color:var(--text-3)">Bekijk als mentor:</span>
+          <select id="stMentorPicker" onchange="__stSetOverride(this.value)" style="padding:3px 8px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);max-width:220px">
+            <option value="">— eigen (mentor of niks) —</option>
+            ${(_live.mentors.list || []).map(m => `<option value="${esc(m.user_id)}"${m.user_id===currentOverride?' selected':''}>${esc(m.name || m.email || m.user_id.slice(0,8))}</option>`).join('')}
+          </select>
+          ${_live.mentors.loading ? '<span style="color:var(--text-3)">…</span>' : ''}
+        </div>`
+      : '';
 
     const kpi = (label, val, sub, color) => `
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px">
@@ -792,9 +863,10 @@
     const filtered = _filteredStudents();
 
     return `<div data-studenten-view="1" class="pad" style="padding:14px 20px 0;display:flex;flex-direction:column;height:calc(100vh - 140px);min-height:520px">
-      <div style="display:flex;align-items:center;margin-bottom:14px">
+      <div style="display:flex;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap">
         <div style="font-size:12.5px;color:var(--text-3)">${kpis.total} studenten totaal ${scopeBadge}</div>
-        ${_live.students.error && _live.students.data ? `<span style="margin-left:auto;font-size:11.5px;color:var(--amber)">⚠ ${esc(_live.students.error)}</span>` : ''}
+        ${_live.students.error && _live.students.data ? `<span style="font-size:11.5px;color:var(--amber)">⚠ ${esc(_live.students.error)}</span>` : ''}
+        ${mentorPicker}
       </div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
         ${kpi('Mijn studenten', kpis.total, kpis.opSchema + ' op schema', 'text-1')}
