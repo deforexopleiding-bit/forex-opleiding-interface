@@ -39,7 +39,7 @@ export default async function handler(req, res) {
   // (per regel via lines[i].price_includes_vat) toegevoegd. Backward-compat:
   // beide defaulten naar hun huidige gedrag ('domestic' + false), zodat v1
   // finance.html en oude callers ongewijzigd blijven werken.
-  const { customer_id, department_id, lines, purchase_order_number, payment_term_id, language, action, send, book_date, sale_type } = req.body || {};
+  const { customer_id, department_id, lines, purchase_order_number, payment_term_id, language, action, send, book_date, sale_type, deal_id } = req.body || {};
   if (!customer_id) return res.status(400).json({ error: 'customer_id vereist' });
   if (!department_id) return res.status(400).json({ error: 'department_id vereist' });
   if (!Array.isArray(lines) || !lines.length) return res.status(400).json({ error: 'Minimaal 1 regel vereist' });
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
         departmentId: department_id,
         lines,
         action,
-        opts: { purchase_order_number, payment_term_id, language, book_date, send, saleType: sale_type },
+        opts: { purchase_order_number, payment_term_id, language, book_date, send, saleType: sale_type, deal_id: deal_id || null },
       });
     } catch (e) {
       // Structured errors uit de helper → nette HTTP-response.

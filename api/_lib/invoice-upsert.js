@@ -128,16 +128,39 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     updated_at: new Date().toISOString(),
   };
 
+  // Deal-koppeling resolven + PERSISTEREN op de CRM invoices-rij, zodat de
+  // earn-hook (en isDownPaymentInvoice) niet meer afhangen van een live join.
+  // Voorrang: app-context (opts.deal_id, bv. bij createTlInvoice). Anders via de
+  // sub-ref (tl_subscription_id → subscriptions.teamleader_subscription_id →
+  // deal_id) voor subscription-gefactureerde facturen. Customer-only facturen
+  // zonder sub-ref blijven null (die vangt de aparte backfill af).
+  let resolvedDealId = opts.deal_id || null;
+  if (!resolvedDealId && row.tl_subscription_id) {
+    const { data: sub } = await supabaseAdmin.from('subscriptions')
+      .select('deal_id').eq('teamleader_subscription_id', row.tl_subscription_id)
+      .limit(1).maybeSingle();
+    resolvedDealId = sub?.deal_id || null;
+  }
+
   const { data: existing } = await supabaseAdmin.from('invoices').select('id, status, deal_id').eq('tl_invoice_id', inv.id).maybeSingle();
   const oldStatus = existing?.status || null;
+
+  // NON-CLOBBER GARANTIE: een reeds gezette invoices.deal_id blijft ALTIJD staan.
+  // We COALESCEn op app-niveau met de VERS uit de DB gelezen existing.deal_id als
+  // eerste term; die wint dus altijd. Gevolg: een write kan deal_id alleen NULL→
+  // waarde vullen, nooit een gezette waarde nullen of overschrijven. Een latere
+  // cron-resync (opts.deal_id undefined, resolvedDealId evt. null) laat een
+  // bestaande deal_id daardoor onaangeroerd.
+  const finalDealId = (existing?.deal_id ?? null) || resolvedDealId || null;
+
   let invId;
   let action;
   if (existing) {
-    const { error } = await supabaseAdmin.from('invoices').update(row).eq('id', existing.id);
+    const { error } = await supabaseAdmin.from('invoices').update({ ...row, deal_id: finalDealId }).eq('id', existing.id);
     if (error) throw new Error('invoices update: ' + error.message);
     invId = existing.id; action = 'updated';
   } else {
-    const { data: ins, error } = await supabaseAdmin.from('invoices').insert(row).select('id').single();
+    const { data: ins, error } = await supabaseAdmin.from('invoices').insert({ ...row, deal_id: finalDealId }).select('id').single();
     if (error) throw new Error('invoices insert: ' + error.message);
     invId = ins.id; action = 'inserted';
   }
@@ -151,7 +174,7 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     if ((status === 'paid' && oldStatus !== 'paid') || (status === 'credited' && oldStatus !== 'credited')) {
       const invLike = {
         id: invId,
-        deal_id: existing?.deal_id || null,
+        deal_id: finalDealId,
         tl_subscription_id: row.tl_subscription_id,
         invoice_number: invoiceNumber,
       };

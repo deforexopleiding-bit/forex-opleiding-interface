@@ -377,7 +377,7 @@ export default async function handler(req, res) {
               vat_percentage:  topVat,
             }],
             action: 'book_and_send',
-            opts:   { saleType: deal.sale_type || 'domestic', language: 'nl' },
+            opts:   { saleType: deal.sale_type || 'domestic', language: 'nl', deal_id: dealId },
           });
         } catch (e) {
           // Draft/network/link-fout → hard blokkeren, geen abbo aanmaken.
