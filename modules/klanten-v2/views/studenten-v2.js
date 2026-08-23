@@ -857,6 +857,34 @@
     </div>`;
   }
 
+  /* v=12: helper voor oversight-empty-staat. Rendert header met picker +
+     "kies een mentor"-body. Hergebruikt de dezelfde picker-HTML als in
+     studentenView (single template zodat select-styling identiek blijft). */
+  function _renderOversightEmpty() {
+    const currentOverride = String(window.__stMentorOverride || '').trim();
+    const mentorPickerHtml = `<div style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11.5px">
+      <span style="color:var(--text-3)">Bekijk als mentor:</span>
+      <select id="stMentorPicker" onchange="__stSetOverride(this.value)" style="padding:3px 8px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);max-width:220px">
+        <option value="">— eigen (mentor of niks) —</option>
+        ${(_live.mentors.list || []).map(m => `<option value="${esc(m.user_id)}"${m.user_id===currentOverride?' selected':''}>${esc(m.name || m.email || m.user_id.slice(0,8))}</option>`).join('')}
+      </select>
+      ${_live.mentors.loading ? '<span style="color:var(--text-3)">…</span>' : ''}
+    </div>`;
+    return `<div class="pad" style="padding:14px 20px 0;display:flex;flex-direction:column;min-height:calc(100vh - 140px)">
+      <div style="display:flex;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap">
+        <div style="font-size:12.5px;color:var(--text-3)">Selecteer een mentor om studenten te zien</div>
+        ${mentorPickerHtml}
+      </div>
+      <div style="flex:1;display:flex;align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:40px 20px">
+        <div style="text-align:center;max-width:420px">
+          <div style="font-size:32px;margin-bottom:12px;opacity:.5">👥</div>
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px;color:var(--text-1)">Kies een mentor</div>
+          <div style="font-size:12.5px;color:var(--text-3);line-height:1.55">Als oversight-rol (${esc(_live.session.role || '—')}) heb je zelf geen studenten. Kies een mentor via de dropdown rechtsboven om diens studenten-lijst te bekijken (ADMIN-VIEW).</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
   /* ── View ─────────────────────────────────────────────────────────── */
   function studentenView() {
     // Bootstrap: fetch bij eerste mount.
@@ -881,8 +909,33 @@
       </div>`;
     }
 
+    // v=12: oversight-rol-detectie MOET vóór de linked=false-check gebeuren.
+    // Anders clobbert de "Nog niet gekoppeld aan Bubble"-lege-staat de picker
+    // waarmee een admin juist een mentor kiest (catch-22 uit final verify).
+    // OVERSIGHT_ROLES = 1-op-1 met app-shell.js studenten-module oversight-roles.
+    if (!_live.session.fetched && !_live.session.loading) queueMicrotask(_fetchSessionRole);
+    const effectiveRole = (window.DFO?.S?.roles && window.DFO.S.roles[0]) || '';
+    const sessionRole   = _live.session.role;   // null tot AuthShared.getProfile() klaar is
+    const isSimulatingMentor = sessionRole && sessionRole !== effectiveRole && effectiveRole === 'mentor';
+    const OVERSIGHT_ROLES = ['super_admin', 'admin', 'manager'];
+    const realIsPicker = OVERSIGHT_ROLES.includes(sessionRole);
+    const isPickerRole = realIsPicker && !isSimulatingMentor;
+    if (isPickerRole && !_live.mentors.fetched && !_live.mentors.loading) queueMicrotask(_fetchMentorsForPicker);
+    const currentOverride = String(window.__stMentorOverride || '').trim();
+
     // Nog niet gekoppeld aan Bubble.
+    // v=12: split lege-staat op oversight vs echte mentor.
+    // - Oversight (admin/manager/super_admin) als zichzelf zonder selectie:
+    //   render header MÉT picker, body = "kies een mentor" (semantisch juist,
+    //   admin hoort niet gekoppeld te zijn).
+    // - Echte mentor OF admin-als-mentor-simulatie zonder link: bestaande
+    //   "Nog niet gekoppeld aan Bubble"-melding.
     if (_live.students.data && _live.students.linked === false) {
+      if (isPickerRole) {
+        // Render dezelfde header als de data-staat (met picker), maar body =
+        // "kies een mentor". _renderOversightEmptyHeader hergebruikt onder.
+        return _renderOversightEmpty();
+      }
       return `<div class="pad" style="padding:32px 20px">
         <div style="padding:22px 20px;background:var(--amber-soft);border:1px solid var(--amber-line, var(--amber));color:var(--amber);border-radius:var(--r);font-size:13px;line-height:1.55">
           <div style="font-weight:600;margin-bottom:4px">Nog niet gekoppeld aan Bubble</div>
@@ -897,21 +950,6 @@
     const scopeBadge = _live.students.scope === 'admin'
       ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--violet-soft,#EDE4FA);color:var(--violet,#6D3FD4);font-weight:600;margin-left:8px">ADMIN-VIEW</span>`
       : '';
-    // v=10 admin-picker (rol-sets uitgelijnd): OVERSIGHT_ROLES is de single-source-
-    // of-truth voor "wie ziet de picker + ADMIN-VIEW". Identiek aan de oversight-
-    // rollen in app-shell.js studenten-module roles (mentor + OVERSIGHT_ROLES).
-    // Wijziging: sales eruit (was in v=9 half — wel in module-roles, niet in picker
-    // → sales opende een lege niet-gekoppeld-view). admin erbij (was in v=9 half —
-    // wel in picker-gate, niet in module-roles → admin kon Studenten niet openen).
-    if (!_live.session.fetched && !_live.session.loading) queueMicrotask(_fetchSessionRole);
-    const effectiveRole = (window.DFO?.S?.roles && window.DFO.S.roles[0]) || '';
-    const sessionRole   = _live.session.role;   // null tot AuthShared.getProfile() klaar is
-    const isSimulatingMentor = sessionRole && sessionRole !== effectiveRole && effectiveRole === 'mentor';
-    const OVERSIGHT_ROLES = ['super_admin', 'admin', 'manager']; // 1-op-1 met app-shell.js studenten-module oversight-roles
-    const realIsPicker = OVERSIGHT_ROLES.includes(sessionRole);
-    const isPickerRole = realIsPicker && !isSimulatingMentor;
-    if (isPickerRole && !_live.mentors.fetched && !_live.mentors.loading) queueMicrotask(_fetchMentorsForPicker);
-    const currentOverride = String(window.__stMentorOverride || '').trim();
     const mentorPicker = isPickerRole
       ? `<div style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11.5px">
           <span style="color:var(--text-3)">Bekijk als mentor:</span>
