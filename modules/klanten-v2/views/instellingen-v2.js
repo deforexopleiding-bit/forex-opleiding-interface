@@ -1455,7 +1455,9 @@
      bestaande deals hebben snapshot in deal_lines (analog aan traject_variants v=46).
      → Save = veilig, geen live TL-actie. Prijs-impact-notice in confirm. Motor onaangeraakt. */
   const _VAT = [0, 9, 21];
-  const _sp = { loading: false, fetched: false, error: null, items: [], filterActive: 'all', ed: null, busy: false };
+  // v=61 quick-fix 1: default filter 'active' (was 'all'). Gearchiveerde/inactieve
+  // producten pas zichtbaar als user bewust op 'Alle' of 'Archief' klikt.
+  const _sp = { loading: false, fetched: false, error: null, items: [], filterActive: 'active', ed: null, busy: false };
   async function fetchSalesProducten() {
     if (_sp.loading || _sp.fetched) return;
     _sp.loading = true; _sp.error = null; if (render) render();
@@ -2889,10 +2891,7 @@
     const configured = !!d.configured;
     const cids = Array.isArray(d.caller_ids) ? d.caller_ids : [];
     return `<div style="max-width:800px">
-      <div style="padding:14px 16px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Display-only.</b> Voys-tokens (VOYS_API_TOKEN + VOYS_CLIENT_UUID + VOYS_A_NUMBER) leven in Vercel env-vars.
-        Caller-ID lijst = <code>VOYS_CALLER_IDS</code>. Roteren = handmatig in Vercel.
-      </div>
+      <!-- v=61 quick-fix 4: env-notice weggehaald (interne notitie hoeft user niet te zien). -->
       <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
         <div style="padding:14px 16px">
           <div style="font-size:13px;font-weight:600;margin-bottom:4px">Voys-koppeling</div>
@@ -3685,7 +3684,56 @@
     if (render) render();
   }
   window.__setRbacMod = (mk) => { _rbac.activeModule = mk; if (render) render(); };
-  window.__setRbacSearch = (q) => { _rbac.search = String(q || ''); if (render) render(); };
+  // v=61 quick-fix 2: DOM-only filter, geen render bij typen (focus-behoud).
+  // Bewaart _rbac.search voor state-behoud bij een echte structuur-render
+  // (bv. module-switch), maar de search-input triggert zelf géén render — hij
+  // toggelt display:none per rij op basis van data-rbac-feat-label / -key attrs.
+  window.__setRbacSearchInput = (val) => {
+    const q = String(val || '').toLowerCase().trim();
+    _rbac.search = String(val || '');   // state-behoud, GEEN render.
+    document.querySelectorAll('[data-rbac-feat-row]').forEach((tr) => {
+      const label = String(tr.getAttribute('data-rbac-feat-label') || '').toLowerCase();
+      const key   = String(tr.getAttribute('data-rbac-feat-key')   || '').toLowerCase();
+      const match = !q || label.includes(q) || key.includes(q);
+      tr.style.display = match ? '' : 'none';
+    });
+  };
+  // v=61 quick-fix 3: rij-alles-toggle. Zet alle checkboxes van deze feature-key
+  // in álle rollen op de meerderheidsstate omgekeerd (of hard AAN/UIT). Simpel:
+  // als >=1 rol AAN staat → alles UIT; als niks AAN → alles AAN. Idempotent-guard
+  // via _rbac.matrix update + surgical checkbox-update in DOM zonder full render.
+  window.__setRbacRowToggle = (featKey) => {
+    const roles = (window.KV_RBAC?.RBAC_ROLES || []).filter(r => !r.auto);
+    // Bepaal doel-state: als tenminste 1 rol AAN heeft → alles UIT; anders alles AAN.
+    let anyOn = false;
+    for (const r of roles) {
+      if (_rbac.matrix[r.key] && _rbac.matrix[r.key][featKey]) { anyOn = true; break; }
+    }
+    const target = !anyOn;
+    let changed = 0;
+    for (const r of roles) {
+      _rbac.matrix[r.key] = _rbac.matrix[r.key] || {};
+      const cur = !!_rbac.matrix[r.key][featKey];
+      if (cur !== target) { _rbac.matrix[r.key][featKey] = target; changed++; }
+      // Surgical DOM-update op de checkbox (voorkomt full render + focus-verlies).
+      const cb = document.querySelector(`input[type="checkbox"][data-rbac-role="${r.key}"][data-rbac-feat="${featKey}"]`);
+      if (cb) cb.checked = target;
+    }
+    if (changed) {
+      _rbac.dirty = true;
+      // Dirty-badge herteken (bovenaan). Simpelste route: re-check via _rbacCountDirty
+      // en zet de tekst in-place als 'ie bestaat.
+      const badge = document.getElementById('kv-rbac-dirty-badge');
+      const n = _rbacCountDirty();
+      if (badge) {
+        badge.textContent = n + ' niet-opgeslagen wijziging' + (n === 1 ? '' : 'en');
+        badge.style.display = n > 0 ? '' : 'none';
+      }
+      // Save-knop enable/disable.
+      const saveBtn = document.getElementById('kv-rbac-save-btn');
+      if (saveBtn) saveBtn.disabled = !_rbac.dirty || _rbac.saveBusy;
+    }
+  };
   function _rbacCountDirty() {
     if (!window.KV_RBAC?.FEATURE_REGISTRY) return 0;
     let n = 0;
@@ -3775,12 +3823,20 @@
     const rowsHtml = feats.length ? feats.map(f => {
       const cells = roles.map(r => {
         const checked = !!(_rbac.matrix[r.key] && _rbac.matrix[r.key][f.key]);
-        return `<td style="text-align:center;padding:5px 8px"><input type="checkbox" ${checked ? 'checked' : ''} onchange="window.__setRbacToggle('${esc(r.key)}','${esc(f.key).replace(/'/g,"\\'")}',this.checked)" style="cursor:pointer" /></td>`;
+        // v=61: data-rbac-role + data-rbac-feat voor surgical checkbox-update in __setRbacRowToggle.
+        return `<td style="text-align:center;padding:5px 8px"><input type="checkbox" data-rbac-role="${esc(r.key)}" data-rbac-feat="${esc(f.key)}" ${checked ? 'checked' : ''} onchange="window.__setRbacToggle('${esc(r.key)}','${esc(f.key).replace(/'/g,"\\'")}',this.checked)" style="cursor:pointer" /></td>`;
       }).join('');
-      return `<tr style="border-top:1px solid var(--border)">
+      // v=61: data-rbac-feat-row + label/key attrs voor surgical filter in __setRbacSearchInput.
+      // v=61 quick-fix 3: rij-alles-toggle-knop naast de feature-label.
+      return `<tr data-rbac-feat-row data-rbac-feat-key="${esc(f.key)}" data-rbac-feat-label="${esc(f.label)}" style="border-top:1px solid var(--border)">
         <td style="padding:6px 12px">
-          <div style="font-size:12.5px;font-weight:500">${esc(f.label)}</div>
-          <div style="font-size:10.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(f.key)}</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="window.__setRbacRowToggle('${esc(f.key).replace(/'/g,"\\'")}')" title="Alles aan / alles uit voor deze functie" style="font-size:10.5px;padding:1px 6px;color:var(--text-3)">⇅</button>
+            <div>
+              <div style="font-size:12.5px;font-weight:500">${esc(f.label)}</div>
+              <div style="font-size:10.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(f.key)}</div>
+            </div>
+          </div>
         </td>
         <td style="text-align:center;padding:5px 8px;color:var(--text-3);font-size:10.5px">auto</td>
         ${cells}
@@ -3790,9 +3846,10 @@
       <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
         <div style="font-size:12.5px;color:var(--text-3)">${rolesSum.map(([r,c]) => `${esc(r)}: ${r === 'super_admin' ? '<span style="color:var(--emerald);font-weight:600">bypass</span>' : `<b>${c}</b>`}`).join(' · ')}</div>
         <div style="display:flex;gap:8px;align-items:center">
-          <input type="text" placeholder="Zoek functie…" value="${esc(_rbac.search)}" oninput="window.__setRbacSearch(this.value)" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);max-width:220px" />
-          ${_rbac.dirty ? `<span style="font-size:11px;color:var(--amber);font-weight:600">${_rbacCountDirty()} niet-opgeslagen wijziging${_rbacCountDirty() === 1 ? '' : 'en'}</span>` : ''}
-          <button class="btn btn-primary btn-sm" ${!_rbac.dirty || _rbac.saveBusy ? 'disabled' : ''} onclick="window.__setRbacSave()">${_rbac.saveBusy ? 'Opslaan…' : 'Opslaan'}</button>
+          <!-- v=61 quick-fix 2: oninput → __setRbacSearchInput (DOM-only filter, GEEN render). -->
+          <input type="text" placeholder="Zoek functie…" value="${esc(_rbac.search)}" oninput="window.__setRbacSearchInput(this.value)" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);max-width:220px" />
+          <span id="kv-rbac-dirty-badge" style="font-size:11px;color:var(--amber);font-weight:600;display:${_rbac.dirty ? '' : 'none'}">${_rbacCountDirty()} niet-opgeslagen wijziging${_rbacCountDirty() === 1 ? '' : 'en'}</span>
+          <button id="kv-rbac-save-btn" class="btn btn-primary btn-sm" ${!_rbac.dirty || _rbac.saveBusy ? 'disabled' : ''} onclick="window.__setRbacSave()">${_rbac.saveBusy ? 'Opslaan…' : 'Opslaan'}</button>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:220px 1fr;gap:14px;align-items:start">
