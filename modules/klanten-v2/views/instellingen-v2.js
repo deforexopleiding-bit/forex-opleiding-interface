@@ -1830,7 +1830,7 @@
         </td>
         <td style="padding:6px 12px;text-align:right;white-space:nowrap">
           <button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsEdit('${esc(t.id)}')" style="font-size:11px">Edit-meta</button>
-          <a href="/modules/leadsonderhoud.html?tab=trajecten&traject=${encodeURIComponent(t.slug || t.id)}#lo-traj-${esc(t.slug || t.id)}" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none" title="Opent v1-shell op Trajecten-tab, scrollt naar deze traject-kaart">Stappen ↗</a>
+          <a href="/modules/klanten-v2/?v2preview=automatiseringen&v2tab=Leadsonderhoud&edit_ls_traj=${encodeURIComponent(t.id)}" class="btn btn-ghost btn-sm" style="font-size:11px;text-decoration:none" title="Opent de Automatiseringen v2-editor voor dit traject">Stappen ↗</a>
           ${t.actief
             ? _disabledUitKnop('Verwijder', 'Zet het traject eerst UIT vóór verwijderen', 'font-size:11px;color:var(--rose)')
             : `<button class="btn btn-ghost btn-sm" ${busy?'disabled':''} onclick="window.__setMsDelete('${esc(t.id)}')" style="font-size:11px;color:var(--rose)">Verwijder</button>`}
@@ -1840,8 +1840,8 @@
     return `<div style="max-width:1200px">
       ${_msEditor()}
       <div style="padding:12px 14px;background:var(--emerald-soft);color:var(--emerald);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>LIVE-lijst met onderhoud-trajecten.</b> Hier: metadata bewerken (naam/slug/agent/agenda/archief/volgorde) + aan/uit-toggle + delete. <b>Stappen-editor + test-send</b> leven in de v1 Leadsonderhoud-shell (<code>/modules/leadsonderhoud.html</code> · Trajecten-tab): 18 velden per stap incl. kanaal/aanleiding/timing/filters; test-send verstuurt écht via bulk-test-send. Klik "Stappen ↗" per rij om direct naar de juiste traject-kaart te scrollen.
-        <a href="/modules/leadsonderhoud.html?tab=trajecten" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Leadsonderhoud (v1) →</a>
+        <b>LIVE-lijst met onderhoud-trajecten.</b> Hier: metadata bewerken (naam/slug/agent/agenda/archief/volgorde) + aan/uit-toggle + delete. <b>Stappen-editor</b> (alle 18 velden: kanaal/aanleiding/timing/filters/quiz-koppeling) zit in de Automatiseringen v2-module (Leadsonderhoud-tab · zelfde shell, geen sprong naar v1). Test-send verstuurt écht via bulk-test-send. Klik "Stappen ↗" per rij om direct de editor voor dit traject te openen.
+        <a href="/modules/klanten-v2/?v2preview=automatiseringen&v2tab=Leadsonderhoud" class="btn btn-ghost btn-sm" style="margin-left:10px;font-size:11px;text-decoration:none">Open Automatiseringen v2 →</a>
       </div>
       ${_ms.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_ms.error)}</div>` : ''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
