@@ -1,7 +1,7 @@
 // api/_lib/sales-bonus.js
 // SALES-bonus lifecycle-helpers (Fase 2). Draait NAAST primaire geld-acties
-// (betaling registreren / TL-webhook / crediteren): ALLES FAIL-SOFT — een fout
-// hier mag die acties nooit afbreken. Idempotent op bonus-status.
+// (betaling registreren / TL-sync / TL-webhook / crediteren): ALLES FAIL-SOFT —
+// een fout hier mag die acties nooit afbreken. Idempotent op bonus-status.
 //
 //   earnBonusForPaidInvoice(inv)      — betaalde AANBETALINGSfactuur → pending→earned
 //   voidActiveBonusForDeal(dealId,..) — deal geannuleerd (deal.lost) → void
@@ -16,33 +16,63 @@
 //              invoices.tl_subscription_id = subscriptions.teamleader_subscription_id
 //   fallback → vroegste (issue_date) NIET-fee factuur van de deal
 // De reserverings-/aanmeldfee (deals.reservation_fee_invoice_id) telt NOOIT mee.
+//
+// DEAL-RESOLUTIE: TL-gesyncte facturen (upsertInvoiceFromTl) hebben vaak GEEN
+// invoices.deal_id, maar WEL tl_subscription_id. Daarom resolven we de deal via
+// deal_id ÓF via de subscription (tl_subscription_id → subscriptions.deal_id).
 
 import { supabaseAdmin } from '../supabase.js';
 import { createNotification } from './notify.js';
+
+// Resolve { id, reservation_fee_invoice_id } van de deal die bij deze factuur hoort.
+async function resolveDeal(inv) {
+  if (inv?.deal_id) {
+    const { data } = await supabaseAdmin.from('deals')
+      .select('id, reservation_fee_invoice_id').eq('id', inv.deal_id).maybeSingle();
+    if (data) return data;
+  }
+  if (inv?.tl_subscription_id) {
+    const { data: sub } = await supabaseAdmin.from('subscriptions')
+      .select('deal_id').eq('teamleader_subscription_id', inv.tl_subscription_id)
+      .limit(1).maybeSingle();
+    if (sub?.deal_id) {
+      const { data } = await supabaseAdmin.from('deals')
+        .select('id, reservation_fee_invoice_id').eq('id', sub.deal_id).maybeSingle();
+      if (data) return data;
+    }
+  }
+  return null;
+}
 
 async function isDownPaymentInvoice(inv, deal) {
   if (!inv?.id || !deal?.id) return false;
   const feeInvId = deal.reservation_fee_invoice_id || null;
   if (feeInvId && inv.id === feeInvId) return false;         // fee ≠ aanbetaling
 
-  // Precies: via de aanbetalings-sub (eerste term_count=1) → tl_subscription_id.
+  // Subscriptions van de deal (voor de precieze match én de fallback-linkage).
   const { data: subs } = await supabaseAdmin.from('subscriptions')
     .select('teamleader_subscription_id, term_count, created_at')
     .eq('deal_id', deal.id).order('created_at', { ascending: true });
+
+  // Precies: aanbetalings-sub (eerste term_count=1) → tl_subscription_id.
   const downSub = (subs || []).find(s => Number(s.term_count) === 1);
   if (downSub?.teamleader_subscription_id && inv.tl_subscription_id
       && downSub.teamleader_subscription_id === inv.tl_subscription_id) {
     return true;
   }
 
-  // Fallback: vroegste NIET-fee factuur van de deal (identiteit, niet betaalstatus).
-  let q = supabaseAdmin.from('invoices')
+  // Fallback: vroegste NIET-fee factuur van de deal. Facturen hangen aan de deal
+  // via invoices.deal_id ÓF via een subscription van de deal (tl_subscription_id)
+  // — TL-gesyncte facturen hebben vaak alleen dat laatste.
+  const tlSubIds = (subs || []).map(s => s.teamleader_subscription_id).filter(Boolean);
+  const orParts = [`deal_id.eq.${deal.id}`];
+  if (tlSubIds.length) orParts.push(`tl_subscription_id.in.(${tlSubIds.join(',')})`);
+  const { data: dealInv } = await supabaseAdmin.from('invoices')
     .select('id, issue_date, created_at')
-    .eq('deal_id', deal.id)
+    .or(orParts.join(','))
     .order('issue_date', { ascending: true }).order('created_at', { ascending: true });
-  if (feeInvId) q = q.neq('id', feeInvId);
-  const { data: dealInv } = await q;
-  return Array.isArray(dealInv) && dealInv.length > 0 && dealInv[0].id === inv.id;
+  const nonFee = (dealInv || []).filter(r => !feeInvId || r.id !== feeInvId);
+  return nonFee.length > 0 && nonFee[0].id === inv.id;
 }
 
 // Void de ACTIEVE (niet-voided) bonus van een deal + clawback-signaal bij 'paid'.
@@ -83,20 +113,17 @@ async function _voidActiveBonus(dealId, reason, source) {
 
 /**
  * Earn-hook: als `inv` de aanbetalingsfactuur van zijn deal is, zet de pending
- * bonus van die deal op 'earned'. Aanroepen bij de paid-transitie van een factuur.
- * `inv` heeft minimaal: { id, deal_id, tl_subscription_id, invoice_number? }.
+ * bonus van die deal op 'earned'. Aanroepen bij de paid-transitie van een factuur
+ * (app-direct én TL-sync). `inv` = { id, deal_id?, tl_subscription_id?, invoice_number? }.
  */
 export async function earnBonusForPaidInvoice(inv) {
   try {
-    if (!inv?.deal_id) return { ok: true, skipped: 'no_deal' };
+    const deal = await resolveDeal(inv);
+    if (!deal) return { ok: true, skipped: 'no_deal' };
     const { data: bonus } = await supabaseAdmin.from('bonuses')
-      .select('id').eq('deal_id', inv.deal_id).eq('status', 'pending')
+      .select('id').eq('deal_id', deal.id).eq('status', 'pending')
       .limit(1).maybeSingle();
     if (!bonus) return { ok: true, skipped: 'no_pending_bonus' };
-
-    const { data: deal } = await supabaseAdmin.from('deals')
-      .select('id, reservation_fee_invoice_id').eq('id', inv.deal_id).maybeSingle();
-    if (!deal) return { ok: true, skipped: 'no_deal_row' };
     if (!(await isDownPaymentInvoice(inv, deal))) return { ok: true, skipped: 'not_downpayment' };
 
     const { data: upd } = await supabaseAdmin.from('bonuses')
@@ -124,14 +151,12 @@ export async function voidActiveBonusForDeal(dealId, { reason, source } = {}) {
 
 /**
  * Clawback bij creditnota: als de GECREDITEERDE factuur de aanbetaling van de
- * deal is, void de actieve bonus. `inv` = { id, deal_id, tl_subscription_id, invoice_number? }.
+ * deal is, void de actieve bonus. `inv` = { id, deal_id?, tl_subscription_id?, invoice_number? }.
  */
 export async function voidBonusForCreditedInvoice(inv, { source } = {}) {
   try {
-    if (!inv?.deal_id) return { ok: true, skipped: 'no_deal' };
-    const { data: deal } = await supabaseAdmin.from('deals')
-      .select('id, reservation_fee_invoice_id').eq('id', inv.deal_id).maybeSingle();
-    if (!deal) return { ok: true, skipped: 'no_deal_row' };
+    const deal = await resolveDeal(inv);
+    if (!deal) return { ok: true, skipped: 'no_deal' };
     if (!(await isDownPaymentInvoice(inv, deal))) return { ok: true, skipped: 'not_downpayment' };
     const label = inv.invoice_number || inv.id;
     return await _voidActiveBonus(deal.id, `creditnota op aanbetalingsfactuur ${label}`, source || 'invoice-credit');

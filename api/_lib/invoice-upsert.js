@@ -128,14 +128,44 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     updated_at: new Date().toISOString(),
   };
 
-  const { data: existing } = await supabaseAdmin.from('invoices').select('id').eq('tl_invoice_id', inv.id).maybeSingle();
+  const { data: existing } = await supabaseAdmin.from('invoices').select('id, status, deal_id').eq('tl_invoice_id', inv.id).maybeSingle();
+  const oldStatus = existing?.status || null;
+  let invId;
+  let action;
   if (existing) {
     const { error } = await supabaseAdmin.from('invoices').update(row).eq('id', existing.id);
     if (error) throw new Error('invoices update: ' + error.message);
-    return { id: existing.id, invoice_number: invoiceNumber, status, action: 'updated' };
+    invId = existing.id; action = 'updated';
   } else {
     const { data: ins, error } = await supabaseAdmin.from('invoices').insert(row).select('id').single();
     if (error) throw new Error('invoices insert: ' + error.message);
-    return { id: ins.id, invoice_number: invoiceNumber, status, action: 'inserted' };
+    invId = ins.id; action = 'inserted';
   }
+
+  // Sales-bonus lifecycle-hooks bij een status-TRANSITIE. Dit is HÉT choke-point
+  // voor betalingen/credits die IN Teamleader gebeuren (cron-finance-sync roept
+  // upsertInvoiceFromTl) — register-payment-internal loopt hier NIET langs.
+  // Fail-soft + transitie-guard + idempotent in de helpers → nooit dubbel-earn/
+  // dubbel-void, en mag de sync nooit breken.
+  try {
+    if ((status === 'paid' && oldStatus !== 'paid') || (status === 'credited' && oldStatus !== 'credited')) {
+      const invLike = {
+        id: invId,
+        deal_id: existing?.deal_id || null,
+        tl_subscription_id: row.tl_subscription_id,
+        invoice_number: invoiceNumber,
+      };
+      if (status === 'paid') {
+        const { earnBonusForPaidInvoice } = await import('./sales-bonus.js');
+        await earnBonusForPaidInvoice(invLike);
+      } else {
+        const { voidBonusForCreditedInvoice } = await import('./sales-bonus.js');
+        await voidBonusForCreditedInvoice(invLike, { source: 'tl-sync' });
+      }
+    }
+  } catch (e) {
+    console.warn('[invoice-upsert] sales-bonus hook soft-fail', invId, e?.message || e);
+  }
+
+  return { id: invId, invoice_number: invoiceNumber, status, action };
 }

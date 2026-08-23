@@ -86,6 +86,19 @@ COMMENT ON COLUMN public.bonuses.void_reason IS
   'Reden van voiden (dedup / creditnota / deal geannuleerd / …). Vrije tekst, audit.';
 
 
+-- ═══ STAP 2b — VANGNET: earned_at / paid_at bestaan (basisschema) ══════════
+-- earnBonusForPaidInvoice schrijft earned_at; de payout-flow schrijft paid_at.
+-- Beide staan al in het basisschema (2026-05-30-finance-fase-1-fundament.sql:
+-- 'earned_at timestamptz, paid_at timestamptz'), dus dit is een NO-OP vangnet.
+-- Verificatie vooraf (read-only):
+--   SELECT column_name, data_type FROM information_schema.columns
+--   WHERE table_schema='public' AND table_name='bonuses'
+--     AND column_name IN ('earned_at','paid_at');
+ALTER TABLE public.bonuses
+  ADD COLUMN IF NOT EXISTS earned_at timestamptz,
+  ADD COLUMN IF NOT EXISTS paid_at   timestamptz;
+
+
 -- ═══ STAP 3 — DE-DUP (auto-committend, GEEN transactie-wrapper) ════════════
 -- PROVISORISCH — geldig ALLEEN als POORT A (0.2b) overal heeft_progressie=false
 -- (alle dubbelen nog pending). Toont POORT A ergens true, dan wordt dit blok
