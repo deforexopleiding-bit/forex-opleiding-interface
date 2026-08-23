@@ -2473,42 +2473,85 @@
   //
   // Instellingen v2 deep-linkt vanuit ev-auto / mk-sequenties naar de v2-editors
   // in deze module (i.p.v. v1 events-automations.html / leadsonderhoud.html).
-  // Bij load kijken we naar de URL-param; zodra de bijbehorende data binnen is
-  // triggeren we __autEvEdit(id) / __autLsTrajEdit(id) en verwijderen de
-  // param uit de URL zodat de deep-link idempotent is (refresh opent 'em niet
-  // opnieuw als je 'em intussen gesloten hebt).
   //
-  // Werkt door queueMicrotask-fetch te triggeren zodra de bijbehorende view
-  // rendert; hier polt een korte watcher (max ~10s, elke 250ms) op de data.
+  // COLD-LOAD-FIX (2026-08-23): bij een verse module-load kan `window.KV.
+  // authedJson` nog niet beschikbaar zijn. De poll wacht daarop VOORDAT 'ie
+  // fetchers triggert. Als een eerdere view-mount de fetcher al gepoked heeft
+  // en KV-not-ready leidde tot _live.<block>.error = 'KV.authedJson niet
+  // beschikbaar', reset de helper die auth-error zodra KV wél ready is en
+  // triggert de fetcher opnieuw.
+  //
+  // Retry-hook: bewaart pending deep-links in _pendingDeepLinks; __autRetry
+  // (van de "Opnieuw"-knop) pumpt de betreffende pending link opnieuw zodat
+  // een handmatige retry alsnog de editor opent.
+  //
+  // Idempotent: bij succes één keer openen + history.replaceState wist de
+  // URL-param + interval wordt gecleared. Max 40 tries × 250ms = 10s per pump
+  // (geen leaks). Refresh op de gewiste URL heropent niet.
   // ═══════════════════════════════════════════════════════════════════════
-  function _deepLinkOpen(paramName, dataGetter, opener, fetcher) {
+  const _pendingDeepLinks = new Map(); // paramName -> { wantId, stateGetter, opener, fetcher }
+
+  function _pumpDeepLink(paramName) {
+    const p = _pendingDeepLinks.get(paramName); if (!p) return;
+    let tries = 0;
+    const iv = setInterval(() => {
+      tries++;
+      const kvReady = typeof window.KV?.authedJson === 'function';
+      // Wacht op auth-laag; geen premature fetcher-call.
+      if (!kvReady) {
+        if (tries > 40) clearInterval(iv);
+        return;
+      }
+      const st = p.stateGetter && p.stateGetter();
+      // Data binnen → open + cleanup + URL-param wissen.
+      if (st && Array.isArray(st.data) && st.data.length) {
+        clearInterval(iv);
+        const hit = st.data.find((x) => String(x.id) === String(p.wantId));
+        if (hit && typeof p.opener === 'function') p.opener(p.wantId);
+        _pendingDeepLinks.delete(paramName);
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.delete(paramName);
+          window.history.replaceState({}, '', u);
+        } catch (_) { /* fail-soft */ }
+        return;
+      }
+      // Reset auth-only error (kwam van eerste fetch-poging vóór KV.authedJson).
+      if (st && st.error && String(st.error).indexOf('KV.authedJson') !== -1) {
+        st.error = null;
+      }
+      // Poke fetcher als er nog niks in-flight is en geen andere error blokkeert.
+      if (st && !st.data && !st.loading && !st.error && typeof p.fetcher === 'function') {
+        try { p.fetcher(); } catch (_) { /* fail-soft */ }
+      }
+      // 10s-timeout; pending blijft staan zodat __autRetry 'em opnieuw kan pumpen.
+      if (tries > 40) clearInterval(iv);
+    }, 250);
+  }
+
+  function _deepLinkOpen(paramName, stateGetter, opener, fetcher) {
     try {
       const u = new URL(window.location.href);
       const wantId = u.searchParams.get(paramName);
       if (!wantId) return;
-      // Direct fetcher triggeren (view mount doet het ook, maar deep-link kan
-      // vóór de user op de juiste tab is; we willen niet wachten op subtab-switch).
-      if (fetcher) queueMicrotask(fetcher);
-      let tries = 0;
-      const iv = setInterval(() => {
-        tries++;
-        const arr = dataGetter();
-        if (Array.isArray(arr) && arr.length) {
-          clearInterval(iv);
-          const hit = arr.find((x) => String(x.id) === String(wantId));
-          if (hit) opener(wantId);
-          // Idempotent: URL-param wissen zodat refresh de editor niet heropent
-          // (bv. na close). goMod/goTab-history ongewijzigd.
-          try { u.searchParams.delete(paramName); window.history.replaceState({}, '', u); } catch (_) {}
-        } else if (tries > 40) {
-          clearInterval(iv);
-        }
-      }, 250);
+      _pendingDeepLinks.set(paramName, { wantId, stateGetter, opener, fetcher });
+      _pumpDeepLink(paramName);
     } catch (_) { /* fail-soft */ }
   }
+
+  // __autRetry wrap: na een handmatige "Opnieuw"-klik, herbeproef de bijbehorende
+  // pending deep-link. Block-naam → URL-param-mapping.
+  const _origAutRetry = window.__autRetry;
+  const _RETRY_BLOCK_TO_PARAM = { evAutos: 'edit_ev_auto', lsTraj: 'edit_ls_traj' };
+  window.__autRetry = function _kvAutRetryWithDeepLink(block) {
+    try { if (typeof _origAutRetry === 'function') _origAutRetry(block); } catch (_) {}
+    const param = _RETRY_BLOCK_TO_PARAM[block];
+    if (param && _pendingDeepLinks.has(param)) _pumpDeepLink(param);
+  };
+
   // Wacht 1 tick zodat DFO.MODS + boot-goMod klaar zijn.
   queueMicrotask(() => {
-    _deepLinkOpen('edit_ev_auto', () => _live.evAutos.data, (id) => window.__autEvEdit && window.__autEvEdit(id), fetchEvAutos);
-    _deepLinkOpen('edit_ls_traj', () => _live.lsTraj.data,  (id) => window.__autLsTrajEdit && window.__autLsTrajEdit(id), fetchLsTraj);
+    _deepLinkOpen('edit_ev_auto', () => _live.evAutos, (id) => window.__autEvEdit && window.__autEvEdit(id), fetchEvAutos);
+    _deepLinkOpen('edit_ls_traj', () => _live.lsTraj,  (id) => window.__autLsTrajEdit && window.__autLsTrajEdit(id), fetchLsTraj);
   });
 })();

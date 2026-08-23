@@ -2898,11 +2898,18 @@
     const renderAcc = (label, badge, a) => {
       const rest = !!a.rest_configured;
       const sip = !!a.sip_configured;
-      const anyCfg = rest || sip;
+      const allCfg = sip && rest;
+      const partialCfg = (sip || rest) && !allCfg;
+      // 3-staten: volledig ✓ | gedeeltelijk (amber) | niet (grijs).
+      // Amber signaleert dat er nog een capability ontbreekt — voorkomt dat
+      // een enkel-SIP-account leest als "helemaal klaar" terwijl click-to-dial
+      // nog stuk is (of andersom).
+      const statusColor = allCfg ? 'var(--emerald)' : (partialCfg ? 'var(--amber)' : 'var(--text-3)');
+      const statusText = allCfg
+        ? '✓ Volledig geconfigureerd'
+        : (partialCfg ? '⚠ Gedeeltelijk geconfigureerd' : '⨯ Nog niet geconfigureerd');
       const cids = Array.isArray(a.caller_ids) ? a.caller_ids : [];
-      const statusColor = anyCfg ? 'var(--emerald)' : 'var(--text-3)';
-      const statusText = anyCfg ? '✓ Geconfigureerd' : '⨯ Nog niet geconfigureerd';
-      const capText = anyCfg
+      const capText = (sip || rest)
         ? `Softphone (SIP): ${sip ? '✓' : '⨯'} · Click-to-dial (REST): ${rest ? '✓' : '⨯'}`
         : 'Zet de bijbehorende env-vars in Vercel om te activeren.';
       return `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">

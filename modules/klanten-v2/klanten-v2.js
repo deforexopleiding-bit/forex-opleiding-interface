@@ -304,7 +304,7 @@ const V2_MODULES = new Set(['klanten']);
 // nieuwe v2-view alle taken kan (dus geen half-af scherm voor het team).
 // Dashboard heeft z'n data-ronde al gehad (#1210) en staat aan; klanten is
 // de originele v2-basis.
-const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard', 'sales', 'leads', 'finance', 'tickets', 'taken', 'onboarding', 'logboek', 'agents', 'events', 'binnenkort', 'verdiensten', 'mentoren', 'email', 'followup', 'inbox', 'leadsonderhoud', 'lisa', 'wanbetalers', 'studenten', 'instellingen']);
+const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard', 'sales', 'leads', 'finance', 'tickets', 'taken', 'onboarding', 'logboek', 'agents', 'events', 'binnenkort', 'verdiensten', 'mentoren', 'email', 'followup', 'inbox', 'leadsonderhoud', 'lisa', 'wanbetalers', 'studenten', 'instellingen', 'automatiseringen']);
 
 // ── Preview-override via URL query-param ──────────────────────────────────
 // `?v2preview=sales` (of comma-list `?v2preview=sales,finance,lisa`) forceert
@@ -372,7 +372,7 @@ const LEGACY_URLS = {
   nieuwsbrief:      null,                                     // bestaat nog niet — placeholder
   leadsonderhoud:   '/modules/leadsonderhoud.html',
   lisa:             '/modules/lisa.html',
-  automatiseringen: '/modules/agent-center.html',             // dichtstbijzijnde legacy-equivalent
+  automatiseringen: null,                                     // 2026-08-23: v2 GO-LIVE (Overzicht/Events/Onboarding/Leadsonderhoud native in shell — agent-center.html was persona-hub, ongerelateerd)
   agents:           null,                                     // V2 GO-LIVE — geen redirect meer
   logboek:          null,                                     // V2 GO-LIVE — geen redirect meer
   instellingen:     null,                                     // Ronde-31 v=58: instellingen is native geport; geen legacy-fallback meer.
