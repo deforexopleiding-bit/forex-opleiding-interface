@@ -309,7 +309,7 @@
     loading: false, fetched: false, error: null, items: [],
     busy: {},
     // Editor state
-    ed: null,               // { id?, workflow, steps:[{id?, step_order, step_type, config}], _origStepIds: Set<string>, _origActive: bool, trigger_conditions_json: string, trigger_conditions_valid: bool }
+    ed: null,               // { id?, workflow, steps:[{id?, step_order, step_type, config}], _origStepIds: Set<string>, _origActive: bool, trigger_conditions_json: string, trigger_conditions_valid: bool, tcMode: 'builder'|'json', tcExtras: object }
     editorLoading: false, editorError: null,
     // Templates cache per kind — voor step template-picker.
     tpls: {
@@ -317,6 +317,66 @@
       whatsapp: { loading: false, fetched: false, error: null, items: [] },
     },
   };
+
+  // Bekende motor-keys (gelezen door dunning-engine.js). Zie discovery-rapport
+  // 2026-08-23. Alles buiten deze set = tcExtras (ongewijzigd bewaard).
+  const WKF_TC_KNOWN = new Set(['min_days_overdue','min_days_since_invoice_date','customer_type','min_total_amount','arrangement_breached','run_once_per_customer_per_workflow']);
+
+  // Splits trigger_conditions in known + extras.
+  function _wkfSplitTc(tc) {
+    const src = (tc && typeof tc === 'object' && !Array.isArray(tc)) ? tc : {};
+    const known = {}; const extras = {};
+    Object.keys(src).forEach((k) => { if (WKF_TC_KNOWN.has(k)) known[k] = src[k]; else extras[k] = src[k]; });
+    return { known, extras };
+  }
+  // Bouw finale trigger_conditions uit builder-values + extras.
+  // Alleen keys wegschrijven die door de user expliciet zijn gezet (of extras).
+  // Dat voorkomt dat de builder ongevraagd defaults schrijft die de motor
+  // anders zou hebben afgeleid (bv. min_days_overdue=14 als je min_days_since_
+  // invoice_date gebruikt — motor schuift dan naar -1; zouden we 14 wegschrijven,
+  // dan overrulen we die default-shift). Alleen numeric > default-schrijven
+  // als user 'em echt heeft ingesteld.
+  function _wkfBuildTc(b, extras) {
+    const out = { ...(extras || {}) };
+    if (b.arrangement_breached === true) out.arrangement_breached = true;
+    if (b.run_once_per_customer_per_workflow === true) out.run_once_per_customer_per_workflow = true;
+    if (b.customer_type && b.customer_type !== 'any') out.customer_type = b.customer_type;
+    // Numeric: schrijf alleen als user 'em heeft ingevuld (niet null en niet lege string).
+    if (b.min_days_overdue != null && b.min_days_overdue !== '') {
+      const n = Number(b.min_days_overdue); if (Number.isFinite(n)) out.min_days_overdue = n;
+    }
+    if (b.min_days_since_invoice_date != null && b.min_days_since_invoice_date !== '') {
+      const n = Number(b.min_days_since_invoice_date); if (Number.isFinite(n) && n >= 0) out.min_days_since_invoice_date = n;
+    }
+    if (b.min_total_amount != null && b.min_total_amount !== '') {
+      const n = Number(b.min_total_amount); if (Number.isFinite(n) && n >= 0) out.min_total_amount = n;
+    }
+    return out;
+  }
+  // Preview-tekst: beschrijft wie de workflow matcht in gewone taal.
+  function _wkfTcPreview(tc) {
+    const has = (k) => tc[k] !== undefined && tc[k] !== null && tc[k] !== '';
+    const brk = tc.arrangement_breached === true;
+    const sinceInv = has('min_days_since_invoice_date') ? Number(tc.min_days_since_invoice_date) : null;
+    const overdue  = has('min_days_overdue') ? Number(tc.min_days_overdue) : null;
+    const defaultShifted = (sinceInv !== null) || brk;
+    const effOverdue = overdue !== null ? overdue : (defaultShifted ? -1 : 14);
+    const ct = tc.customer_type || 'any';
+    const minEur = has('min_total_amount') ? Number(tc.min_total_amount) : 0;
+    const runOnce = tc.run_once_per_customer_per_workflow === true;
+    const parts = [];
+    if (brk) parts.push('waarvan de <b>betaalafspraak verbroken</b> is (en onbeheerd blijft)');
+    if (sinceInv !== null) parts.push(`waar de oudste factuur <b>≥ ${sinceInv} dagen</b> geleden is opgemaakt`);
+    if (effOverdue >= 0) parts.push(`met ≥ 1 factuur <b>≥ ${effOverdue} dagen overdue</b>`);
+    else parts.push('ongeacht overdue-status');
+    if (minEur > 0) parts.push(`met totaal openstaand <b>≥ €${minEur}</b>`);
+    if (ct === 'b2b') parts.push('van type <b>zakelijk (b2b)</b>');
+    else if (ct === 'b2c') parts.push('van type <b>particulier (b2c)</b>');
+    let s = 'Matcht klanten ' + parts.join(', ');
+    if (runOnce) s += ' — <b>éénmalig per klant</b>';
+    s += '.';
+    return s;
+  }
 
   async function fetchWf() {
     if (_wkf.loading || _wkf.fetched) return;
@@ -347,20 +407,35 @@
     const d  = q('[data-wf-field="description"]');     if (d)  e.workflow.description = String(d.value || '');
     const p  = q('[data-wf-field="priority"]');        if (p)  e.workflow.priority = Number(p.value || 100);
     const a  = q('[data-wf-field="is_active"]');       if (a)  e.workflow.is_active = !!a.checked;
-    const tc = q('[data-wf-field="trigger_conditions"]');
-    if (tc) {
-      e.trigger_conditions_json = String(tc.value || '');
-      // Live parse-check (no throw): valid if body is empty ({}) OR valid object-JSON.
-      const raw = e.trigger_conditions_json.trim();
-      if (!raw) { e.workflow.trigger_conditions = {}; e.trigger_conditions_valid = true; }
-      else {
-        try {
-          const parsed = JSON.parse(raw);
-          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            e.workflow.trigger_conditions = parsed; e.trigger_conditions_valid = true;
-          } else { e.trigger_conditions_valid = false; }
-        } catch (_) { e.trigger_conditions_valid = false; }
+    if (e.tcMode === 'json') {
+      const tc = q('[data-wf-field="trigger_conditions"]');
+      if (tc) {
+        e.trigger_conditions_json = String(tc.value || '');
+        const raw = e.trigger_conditions_json.trim();
+        if (!raw) { e.workflow.trigger_conditions = {}; e.trigger_conditions_valid = true; e.tcExtras = {}; }
+        else {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              e.workflow.trigger_conditions = parsed; e.trigger_conditions_valid = true;
+              // Re-splits extras zodat een builder-flip meteen consistent is.
+              const sp = _wkfSplitTc(parsed); e.tcExtras = sp.extras;
+            } else { e.trigger_conditions_valid = false; }
+          } catch (_) { e.trigger_conditions_valid = false; }
+        }
       }
+    } else {
+      // Builder-mode: lees 6 inputs, bouw tc met extras behouden.
+      const b = {};
+      const mdo  = q('[data-wf-tc="min_days_overdue"]');            if (mdo)  b.min_days_overdue = mdo.value;
+      const msi  = q('[data-wf-tc="min_days_since_invoice_date"]'); if (msi)  b.min_days_since_invoice_date = msi.value;
+      const ct   = q('[data-wf-tc="customer_type"]');               if (ct)   b.customer_type = String(ct.value || 'any');
+      const mta  = q('[data-wf-tc="min_total_amount"]');            if (mta)  b.min_total_amount = mta.value;
+      const brk  = q('[data-wf-tc="arrangement_breached"]');        if (brk)  b.arrangement_breached = !!brk.checked;
+      const ronc = q('[data-wf-tc="run_once_per_customer_per_workflow"]'); if (ronc) b.run_once_per_customer_per_workflow = !!ronc.checked;
+      e.workflow.trigger_conditions = _wkfBuildTc(b, e.tcExtras || {});
+      e.trigger_conditions_valid = true;
+      e.trigger_conditions_json = JSON.stringify(e.workflow.trigger_conditions, null, 2);
     }
     // Per-step velden — id blijft in state (uncontrolled), lees alleen editable velden.
     qa('[data-wf-step-idx]').forEach((row) => {
@@ -394,6 +469,8 @@
       _origActive: false,
       trigger_conditions_json: '{}',
       trigger_conditions_valid: true,
+      tcMode: 'builder',
+      tcExtras: {},
     };
     fetchWfTpls('email'); fetchWfTpls('whatsapp');
     if (render) render();
@@ -404,6 +481,7 @@
       id, workflow: { name: '', description: '', is_active: false, priority: 100, trigger_conditions: {} },
       steps: [], _origStepIds: new Set(), _origActive: false,
       trigger_conditions_json: '{}', trigger_conditions_valid: true,
+      tcMode: 'builder', tcExtras: {},
     };
     if (render) render();
     const j = await tryFetch('wf-detail', '/api/finance-dunning-workflows-detail?id=' + encodeURIComponent(id));
@@ -428,6 +506,14 @@
     _wkf.ed._origActive = !!wf.is_active;
     _wkf.ed.trigger_conditions_json = JSON.stringify(_wkf.ed.workflow.trigger_conditions, null, 2);
     _wkf.ed.trigger_conditions_valid = true;
+    // Splits bestaande trigger_conditions in bekende builder-keys + extras
+    // (bv. legacy dead-key `min_amount` uit v1-editor). Extras blijven ongewijzigd
+    // in de payload; de builder toont een pill die ze benoemt.
+    const _sp = _wkfSplitTc(_wkf.ed.workflow.trigger_conditions);
+    _wkf.ed.tcExtras = _sp.extras;
+    // Als er extras zijn: start in JSON-mode zodat user 'em direct ziet + kan
+    // beslissen. Anders default builder-mode.
+    _wkf.ed.tcMode = Object.keys(_sp.extras).length ? 'json' : 'builder';
     fetchWfTpls('email'); fetchWfTpls('whatsapp');
     if (render) render();
   };
@@ -607,6 +693,43 @@
     }, 'warn');
   };
 
+  // Mode-switch builder ⇄ json. Sync eerst (behoudt current input-waardes),
+  // dan flip de mode + re-render. Bij switch naar json: serialize huidige
+  // gecombineerde state; bij switch naar builder: split extras opnieuw uit.
+  window.__setWkfTcMode = (mode) => {
+    if (!_wkf.ed || (mode !== 'builder' && mode !== 'json')) return;
+    _wkfSyncFromDom();
+    if (mode === 'json') {
+      _wkf.ed.trigger_conditions_json = JSON.stringify(_wkf.ed.workflow.trigger_conditions || {}, null, 2);
+      _wkf.ed.trigger_conditions_valid = true;
+    } else {
+      const sp = _wkfSplitTc(_wkf.ed.workflow.trigger_conditions);
+      _wkf.ed.tcExtras = sp.extras;
+    }
+    _wkf.ed.tcMode = mode;
+    if (render) render();
+  };
+  // Live preview-refresh in builder-mode — freeze-veilig (in-place update van
+  // preview-strip + warnings; geen full re-render).
+  window.__setWkfTcBuilderInput = () => {
+    try {
+      if (!_wkf.ed || _wkf.ed.tcMode !== 'builder') return;
+      _wkfSyncFromDom();  // update workflow.trigger_conditions
+      const tc = _wkf.ed.workflow.trigger_conditions || {};
+      const prev = document.querySelector('[data-wf-tc-preview="1"]');
+      if (prev) prev.innerHTML = _wkfTcPreview(tc);
+      // Warning: run_once=true zonder breach én zonder min_days_since_invoice_date.
+      const runOnceUnsafe = tc.run_once_per_customer_per_workflow === true
+        && !tc.arrangement_breached
+        && (tc.min_days_since_invoice_date == null);
+      const warnEl = document.querySelector('[data-wf-tc-warn="run_once"]');
+      if (warnEl) warnEl.style.display = runOnceUnsafe ? '' : 'none';
+      // Default-shift note: als min_days_since_invoice_date OF arrangement_breached gezet.
+      const shifted = (tc.min_days_since_invoice_date != null) || (tc.arrangement_breached === true);
+      const shiftEl = document.querySelector('[data-wf-tc-note="default_shift"]');
+      if (shiftEl) shiftEl.style.display = shifted ? '' : 'none';
+    } catch (_) { /* fail-soft */ }
+  };
   // Live invalid-JSON hint update — freeze-veilig (in-place tekst + kleur).
   window.__setWkfTcInput = (ta) => {
     try {
@@ -675,6 +798,88 @@
     </div>`;
   }
 
+  // Trigger-conditions sectie — builder ⇄ raw JSON. Extras (onbekende keys)
+  // blijven altijd bewaard; in builder-mode toon 'em als amber pill.
+  function _wkfTcSectionHtml(e, tcBadgeOk) {
+    const mode = e.tcMode || 'builder';
+    const tc = e.workflow.trigger_conditions || {};
+    const bTab = (name, lbl) => `<button class="btn ${mode === name ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__setWkfTcMode('${name}')" style="font-size:10.5px;padding:3px 10px">${esc(lbl)}</button>`;
+    const extrasKeys = Object.keys(e.tcExtras || {});
+    const extrasPill = extrasKeys.length
+      ? `<div style="margin-top:4px;padding:6px 10px;background:var(--amber-soft);color:var(--amber);border-radius:4px;font-size:10.5px;line-height:1.5">
+           ⚠ Onbekende key(s) gedetecteerd: <code>${extrasKeys.map((k) => esc(k)).join('</code>, <code>')}</code>.
+           Deze worden door de motor <b>NIET</b> gelezen (bv. legacy <code>min_amount</code> uit de oude v1-editor).
+           Ze blijven ongewijzigd bewaard in de payload — verwijderen kan alleen via de rauwe JSON-tab.
+         </div>` : '';
+    const shiftNoteStyle = ((tc.min_days_since_invoice_date != null) || (tc.arrangement_breached === true)) ? '' : 'display:none';
+    const runOnceUnsafe = tc.run_once_per_customer_per_workflow === true && !tc.arrangement_breached && tc.min_days_since_invoice_date == null;
+    const runOnceWarnStyle = runOnceUnsafe ? '' : 'display:none';
+    const cur = {
+      min_days_overdue: tc.min_days_overdue,
+      min_days_since_invoice_date: tc.min_days_since_invoice_date,
+      customer_type: tc.customer_type || 'any',
+      min_total_amount: tc.min_total_amount,
+      arrangement_breached: tc.arrangement_breached === true,
+      run_once_per_customer_per_workflow: tc.run_once_per_customer_per_workflow === true,
+    };
+    return `<div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <label style="font-size:11px;color:var(--text-3);font-weight:600">Trigger conditions</label>
+        <div style="margin-left:auto;display:flex;gap:4px">${bTab('builder','🧱 Builder')}${bTab('json','⟨⟩ Rauwe JSON')}</div>
+      </div>
+      ${extrasPill}
+      ${mode === 'builder' ? `
+        <div style="padding:12px;background:var(--surface-2);border-radius:6px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="Minimaal aantal dagen dat een factuur overdue moet zijn om te triggeren. Default: 14 (of -1 als min_days_since_invoice_date of arrangement_breached is gezet).">Min. dagen overdue <span style="color:var(--text-3)">(int)</span></label>
+              <input type="number" data-wf-tc="min_days_overdue" oninput="window.__setWkfTcBuilderInput()" value="${cur.min_days_overdue != null ? esc(String(cur.min_days_overdue)) : ''}" placeholder="leeg = default 14" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="Optioneel — voor pre-vervaldatum-duwtjes. Als gezet, matcht op ouderdom van issue-datum (niet overdue).">Min. dagen sinds factuurdatum <span style="color:var(--text-3)">(int, opt)</span></label>
+              <input type="number" data-wf-tc="min_days_since_invoice_date" oninput="window.__setWkfTcBuilderInput()" value="${cur.min_days_since_invoice_date != null ? esc(String(cur.min_days_since_invoice_date)) : ''}" placeholder="leeg = uit" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box" />
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="Filter op klanttype: any = alle, b2b = zakelijk (is_company=true of company_name gevuld), b2c = particulier.">Klanttype</label>
+              <select data-wf-tc="customer_type" onchange="window.__setWkfTcBuilderInput()" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box">
+                <option value="any" ${cur.customer_type === 'any' ? 'selected' : ''}>any (alle klanten)</option>
+                <option value="b2b" ${cur.customer_type === 'b2b' ? 'selected' : ''}>b2b (zakelijk)</option>
+                <option value="b2c" ${cur.customer_type === 'b2c' ? 'selected' : ''}>b2c (particulier)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="Totaal openstaand bedrag (EUR) dat de klant minimaal open moet hebben. Default: 0 (uit).">Min. totaal openstaand <span style="color:var(--text-3)">(€)</span></label>
+              <input type="number" data-wf-tc="min_total_amount" oninput="window.__setWkfTcBuilderInput()" value="${cur.min_total_amount != null ? esc(String(cur.min_total_amount)) : ''}" placeholder="leeg = 0" min="0" step="0.01" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box" />
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;user-select:none" title="Workflow vuurt UITSLUITEND voor klanten met een verbroken betaalafspraak (payment_arrangement.status='VERBROKEN' + breach_handled_at IS NULL). Zet automatisch min_days_overdue-default op -1.">
+            <input type="checkbox" data-wf-tc="arrangement_breached" onchange="window.__setWkfTcBuilderInput()" ${cur.arrangement_breached ? 'checked' : ''} />
+            <span>Alleen bij <b>verbroken betaalafspraak</b> — event-gedreven (schuift min-days-overdue-default naar -1)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;user-select:none" title="Skip als er al een run voor deze klant + workflow bestaat (ongeacht status). Bedoeld voor éénmalige duwtjes zoals de dag-7-herinnering.">
+            <input type="checkbox" data-wf-tc="run_once_per_customer_per_workflow" onchange="window.__setWkfTcBuilderInput()" ${cur.run_once_per_customer_per_workflow ? 'checked' : ''} />
+            <span>Precies <b>1× per klant</b> — skip als er al ooit een run bestaat (ongeacht status)</span>
+          </label>
+
+          <div data-wf-tc-note="default_shift" style="${shiftNoteStyle};padding:6px 10px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);border-radius:4px;font-size:10.5px;line-height:1.5">
+            ℹ Default-shift actief: min_days_overdue-default is nu <b>-1</b> (motor negeert de 14-dagen-default) omdat 'sinds factuurdatum' of 'verbroken betaalafspraak' de trigger is.
+          </div>
+          <div data-wf-tc-warn="run_once" style="${runOnceWarnStyle};padding:6px 10px;background:var(--amber-soft);color:var(--amber);border-radius:4px;font-size:10.5px;line-height:1.5">
+            ⚠ <b>run_once=true</b> zonder breach-trigger of factuurdatum-filter: elke matchende klant krijgt <b>precies 1× ooit</b> deze workflow — daarna nooit meer, zelfs bij nieuwe facturen. Bewust?
+          </div>
+
+          <div data-wf-tc-preview="1" style="margin-top:4px;padding:8px 10px;background:var(--emerald-soft);color:var(--emerald);border-radius:4px;font-size:11px;line-height:1.5">${_wkfTcPreview(tc)}</div>
+        </div>
+      ` : `
+        <textarea data-wf-field="trigger_conditions" oninput="window.__setWkfTcInput(this)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:11.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box;min-height:120px;resize:vertical">${esc(e.trigger_conditions_json)}</textarea>
+        <div data-wf-tc-badge="1" data-ok="${tcBadgeOk ? '1' : '0'}" style="margin-top:4px;padding:4px 8px;background:${tcBadgeOk ? 'var(--emerald-soft)' : 'var(--rose-soft)'};color:${tcBadgeOk ? 'var(--emerald)' : 'var(--rose)'};border-radius:4px;font-size:10.5px;display:inline-block">${tcBadgeOk ? '✓ Geldige JSON (object)' : '⚠ Ongeldige JSON — save geblokkeerd'}</div>
+        <div style="font-size:10px;color:var(--text-3);margin-top:3px">Rauwe JSON — voor onbekende keys of debugging. Bekende motor-keys: <code>min_days_overdue</code>, <code>min_days_since_invoice_date</code>, <code>customer_type</code>, <code>min_total_amount</code>, <code>arrangement_breached</code>, <code>run_once_per_customer_per_workflow</code>. Zie discovery-rapport.</div>
+      `}
+    </div>`;
+  }
+
   function _wfEditorHtml() {
     const e = _wkf.ed; if (!e) return '';
     const isNew = !e.id;
@@ -718,12 +923,7 @@
             <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Description</label>
             <input type="text" data-wf-field="description" value="${esc(e.workflow.description || '')}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
           </div>
-          <div>
-            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Trigger conditions (JSON object)</label>
-            <textarea data-wf-field="trigger_conditions" oninput="window.__setWkfTcInput(this)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:11.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box;min-height:100px;resize:vertical">${esc(e.trigger_conditions_json)}</textarea>
-            <div data-wf-tc-badge="1" data-ok="${tcBadgeOk ? '1' : '0'}" style="margin-top:4px;padding:4px 8px;background:${tcBadgeOk ? 'var(--emerald-soft)' : 'var(--rose-soft)'};color:${tcBadgeOk ? 'var(--emerald)' : 'var(--rose)'};border-radius:4px;font-size:10.5px;display:inline-block">${tcBadgeOk ? '✓ Geldige JSON (object)' : '⚠ Ongeldige JSON — save geblokkeerd'}</div>
-            <div style="font-size:10px;color:var(--text-3);margin-top:3px">Keys worden door de dunning-engine (detectAndStartRuns) live gelezen. Bekende keys niet expliciet gedocumenteerd — laat leeg (<code>{}</code>) tenzij je weet wat je doet. Key/value-builder volgt in aparte brok na engine-key-discovery.</div>
-          </div>
+          ${_wkfTcSectionHtml(e, tcBadgeOk)}
           <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;user-select:none">
             <input type="checkbox" data-wf-field="is_active" ${e.workflow.is_active ? 'checked' : ''} />
             <span>Actief — nieuwe dunning-runs gebruiken deze workflow</span>
