@@ -180,6 +180,11 @@
       "source": "/modules/klanten.html",
       "destination": "/modules/klanten-v2/",
       "permanent": false
+    },
+    {
+      "source": "/admin.html",
+      "destination": "/modules/admin.html",
+      "permanent": false
     }
   ],
   "headers": [
