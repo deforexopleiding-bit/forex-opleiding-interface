@@ -41,6 +41,9 @@
     // v=7 admin-picker (punt 2): mentors-lijst voor de kiezer. Lazy fetched
     // alleen als current role in super_admin/admin/manager (zie studentenView).
     mentors:   { loading: false, fetched: false, error: null, list: [] },
+    // v=9 admin-picker (punt 1): ECHTE sessie-rol uit AuthShared.getProfile().
+    // Nodig omdat DFO.S.roles de "Bekijk als"-effectieve rol is, niet de auth-rol.
+    session:   { loading: false, fetched: false, role: null },
   };
   const _ui = {
     statusFilter: 'all',       // 'all' | 'op_schema' | 'aandacht' | 'nieuw'
@@ -140,6 +143,19 @@
     queueMicrotask(_fetchAssessments);
     if (window.DFO?.render) window.DFO.render();
   }
+  // v=9 admin-picker: fetch ECHTE sessie-rol (auth-profile) 1x. Cached in
+  // _live.session zodat de picker-gate synchroon kan beslissen bij elke render.
+  async function _fetchSessionRole() {
+    const st = _live.session;
+    if (st.loading || st.fetched) return;
+    st.loading = true;
+    try {
+      const p = window.AuthShared ? await window.AuthShared.getProfile() : null;
+      st.role = (p && p.role) ? String(p.role) : null;
+    } catch (_) { st.role = null; }
+    st.loading = false; st.fetched = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
   // v=7 admin-picker: fetch mentors met user_id via bestaand endpoint.
   // Permission events.team_member.link — mentors zonder deze permission (=
   // eigenlijk alleen mentors) krijgen 403 en de picker toont een lege lijst.
@@ -158,7 +174,12 @@
   window.__stSetOverride = (userId) => {
     const v = String(userId || '').trim();
     window.__stMentorOverride = v || null;
-    try { window.localStorage.setItem('kv:stMentorOverride', v || ''); } catch (_) {}
+    // v=9 nit-fix (punt 3): bij lege selectie removeItem i.p.v. lege string
+    // achterlaten in localStorage.
+    try {
+      if (v) window.localStorage.setItem('kv:stMentorOverride', v);
+      else   window.localStorage.removeItem('kv:stMentorOverride');
+    } catch (_) {}
     // Reset alle caches zodat volgende fetch de override oppikt.
     _live.students.data = null; _live.students.loading = false; _live.students.error = null; _live.students.scope = null; _live.students._seq++;
     _live.invoices.byEmail = null; _live.invoices.loading = false; _live.invoices.error = null; _live.invoices._seq++;
@@ -251,11 +272,17 @@
   }
 
   /* ── Handlers ──────────────────────────────────────────────────────── */
+  // v=9 nit-fix (punt 3): __stRetry honoreert nu de huidige window.__stMentorOverride
+  // door ook _live.students.key + loading + error te resetten (fetched-guard heeft
+  // een key-check zodat een nieuwe override een nieuwe fetch triggert). Zonder deze
+  // reset zag de retry na een console-flow (__stMentorOverride='uuid') alsnog de
+  // oude fetch als cache-hit. Alle 4 branches identiek: sequence++ zodat een
+  // in-flight response wordt gedropt, cache + error weg, dan fetch.
   window.__stRetry = (what) => {
-    if (what === 'students') { _live.students.data = null; _live.students.key = ''; _fetchStudents(); }
-    if (what === 'invoices') { _live.invoices.byEmail = null; _fetchInvoiceStatus(); }
-    if (what === 'sessions') { _live.sessions.data = null; _fetchSessions(); }
-    if (what === 'notes')    { _live.notes.byId = null; _fetchAssessments(); }
+    if (what === 'students') { _live.students.data = null; _live.students.error = null; _live.students.loading = false; _live.students.key = ''; _live.students._seq++; _fetchStudents(); }
+    if (what === 'invoices') { _live.invoices.byEmail = null; _live.invoices.error = null; _live.invoices.loading = false; _live.invoices._seq++; _fetchInvoiceStatus(); }
+    if (what === 'sessions') { _live.sessions.data = null; _live.sessions.error = null; _live.sessions.loading = false; _live.sessions._seq++; _fetchSessions(); }
+    if (what === 'notes')    { _live.notes.byId = null; _live.notes.error = null; _live.notes.loading = false; _live.notes._seq++; _fetchAssessments(); }
   };
   window.__stSetStatus = (val) => {
     if (!['all', 'op_schema', 'aandacht', 'nieuw'].includes(val)) return;
@@ -814,11 +841,17 @@
     const scopeBadge = _live.students.scope === 'admin'
       ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:6px;background:var(--violet-soft,#EDE4FA);color:var(--violet,#6D3FD4);font-weight:600;margin-left:8px">ADMIN-VIEW</span>`
       : '';
-    // v=7 admin-picker (punt 2): alleen voor admin/manager/super_admin — mentors
-    // houden mentor-first eigen-lijst zonder picker. Alleen lazy-fetchen als de
-    // huidige user een candidate-rol heeft (voorkomt onnodige call bij mentors).
-    const currentRole = (window.DFO?.S?.roles && window.DFO.S.roles[0]) || '';
-    const isPickerRole = ['super_admin', 'admin', 'manager'].includes(currentRole);
+    // v=9 admin-picker (punt 1 fix): gate op ECHTE sessie-rol via _live.session,
+    // niet op effectieve "Bekijk als"-rol. Anders: admin die "Bekijk als = Mentor"
+    // doet zag zichzelf als mentor en de picker was onbereikbaar (catch-22 v=8).
+    // Eindtoestand: mentor + admin-als-mentor = geen picker (mentor-first).
+    // Admin/manager/super_admin als zichzelf = wel picker + ADMIN-VIEW-badge.
+    if (!_live.session.fetched && !_live.session.loading) queueMicrotask(_fetchSessionRole);
+    const effectiveRole = (window.DFO?.S?.roles && window.DFO.S.roles[0]) || '';
+    const sessionRole   = _live.session.role;   // null tot AuthShared.getProfile() klaar is
+    const isSimulatingMentor = sessionRole && sessionRole !== effectiveRole && effectiveRole === 'mentor';
+    const realIsPicker = ['super_admin', 'admin', 'manager'].includes(sessionRole);
+    const isPickerRole = realIsPicker && !isSimulatingMentor;
     if (isPickerRole && !_live.mentors.fetched && !_live.mentors.loading) queueMicrotask(_fetchMentorsForPicker);
     const currentOverride = String(window.__stMentorOverride || '').trim();
     const mentorPicker = isPickerRole
@@ -872,7 +905,7 @@
         ${kpi('Mijn studenten', kpis.total, kpis.opSchema + ' op schema', 'text-1')}
         ${kpi('Vragen aandacht', kpis.aandacht, kpis.noShowsTotal + ' no-shows totaal', 'amber')}
         ${kpi('Nieuwe instroom', kpis.nieuw, 'in intake / aangemeld', 'blue')}
-        ${kpi('Achterstallige betalers', kpis.overdueClients, 'onbetaalde facturen', kpis.overdueClients > 0 ? 'rose' : 'text-3')}
+        ${kpi('Achterstallige betalers', kpis.overdueClients, kpis.overdueClients === 1 ? 'klant met achterstand' : 'klanten met achterstand', kpis.overdueClients > 0 ? 'rose' : 'text-3')}
       </div>
       <div style="display:flex;gap:12px;flex:1;min-height:0;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
         <div style="width:400px;min-width:320px;max-width:45%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
