@@ -154,7 +154,7 @@
       { id: 'sales-trajecten',  n: 'Trajecten',           d: '1-op-1 en membership · looptijden, prijzen en termijnen', ic: I.tag },
       { id: 'sales-producten',  n: 'Losse producten',     d: 'E-books, lascursus, consultancy',                          ic: I.box },
       { id: 'sales-offerte',    n: 'Offerte-sjablonen',    d: 'Opmaak, voorwaarden en standaardteksten',                  ic: I.doc },
-      { id: 'sales-bonus',      n: 'Verkopers en bonus',  d: 'Wie verkoopt wat, en hoe de bonus wordt berekend',          ic: I.users },
+      { id: 'sales-bonus',      n: 'Verkopers en bonus',  d: 'Wie verkoopt wat, en hoe de bonus wordt berekend',          ic: I.users, roles: ['super_admin'] },
     ]},
     { g: 'Financieel', items: [
       { id: 'fin-facturatie',   n: 'Facturatie',           d: 'Nummering, betaaltermijn en standaard-btw',                 ic: I.doc },
@@ -1215,6 +1215,13 @@
     </div>`;
   }
   function bodySalesBonus() {
+    // v=60: hard super_admin-gate. Server (api/sales-bonus-configs.js) is al
+    // super_admin-only (isSuperAdmin() r59-60 + r88 op alle methodes), maar de
+    // UI liet de sectie zichtbaar voor manager door "Bekijk als"-simulatie.
+    // Nu: (a) SETS-item krijgt roles:['super_admin'] → nav-item verborgen voor
+    // niet-super_admin; (b) body-gate als 2e laag voor als iemand alsnog via
+    // route bij deze body komt (bv. direct S.setPage='sales-bonus' via console).
+    if (!isSuperAdmin()) return bodyAccessDenied();
     if (!_sb.fetched && !_sb.loading) queueMicrotask(() => fetchSalesBonus());
     const today = new Date().toISOString().slice(0, 10);
     // Ronde-31 v=57: grens gelijk aan bonus-motor (sales-subscription-create.js r476):
