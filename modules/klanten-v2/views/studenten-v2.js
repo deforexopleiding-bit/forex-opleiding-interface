@@ -56,6 +56,14 @@
     // Shape: { status, score, active_tasks_done, note, saving, savedAt, error, _prefilled }
     noteEdit:     {},
   };
+  // v=11: beoordeling-write DEFERRED tot nieuw LMS. Bubble-koppeling is
+  // tijdelijk; nieuwe beoordelingen komen straks via het nieuwe LMS. Zolang
+  // de write niet browser-verifieerbaar is zonder wegwerp-Bubble-test parken
+  // we hem. Read-kant (assessments-self voor historie) blijft volledig live.
+  // ONE-TOGGLE re-enable: zet dit op true om de write-UI + handler weer aan
+  // te zetten (endpoint /api/mentor-assessment-save blijft ongewijzigd achter
+  // deze vlag zodat het nieuwe LMS de code kan hergebruiken).
+  const ST_ASSESSMENT_WRITE_ENABLED = false;
   const ASSESSMENT_STATUSES = ['op_schema', 'aandacht', 'risico', 'niet_actief'];
   const ASSESSMENT_STATUS_LABELS = {
     op_schema:    'Op schema',
@@ -411,6 +419,13 @@
     if (savedEl && savedEl.style.display !== 'none') savedEl.style.display = 'none';
   };
   window.__stNoteSave = async (id) => {
+    // v=11 hard-guard: write-pad is deferred tot nieuw LMS. UI-knop is weg,
+    // maar guard vangt console-flow (__stNoteSave('id') vanuit devtools) af
+    // zonder fetch. Toast maakt intentie zichtbaar; endpoint blijft ongewijzigd.
+    if (!ST_ASSESSMENT_WRITE_ENABLED) {
+      try { window.KV && window.KV.toast && window.KV.toast('Nieuwe beoordelingen komen via het nieuwe LMS. Bestaande beoordelingen zijn hier in te zien.'); } catch (_) {}
+      return;
+    }
     const ns = _noteState(id);
     if (ns.saving) return;
     const rows = asArr(_live.students.data);
@@ -697,6 +712,46 @@
         </div>
       </div>`;
     } else if (_ui.detailTab === 'Notities') {
+      // v=11 READ-ONLY BRANCH: write deferred tot nieuw LMS. Toon bestaande
+      // beoordeling (historie via mentor-assessments-self) plus notice.
+      // Onderliggende endpoint blijft ongewijzigd; alleen UI-write gated.
+      if (!ST_ASSESSMENT_WRITE_ENABLED) {
+        if (_live.notes.loading && !_live.notes.byId) {
+          body = `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Notities laden…</div>`;
+        } else {
+          const serverNote = _live.notes.byId ? _live.notes.byId[String(id)] : null;
+          const hasNote = !!(serverNote && (serverNote.status || serverNote.score != null || serverNote.note || serverNote.active_tasks_done !== undefined));
+          const statusLabel = serverNote && serverNote.status && ASSESSMENT_STATUS_LABELS[serverNote.status] ? ASSESSMENT_STATUS_LABELS[serverNote.status] : '—';
+          const statusCol   = serverNote && serverNote.status && ASSESSMENT_STATUS_COLORS[serverNote.status] ? ASSESSMENT_STATUS_COLORS[serverNote.status] : 'text-3';
+          const updated = serverNote && serverNote.updated_at
+            ? new Date(serverNote.updated_at).toLocaleString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : null;
+          body = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;display:flex;flex-direction:column;gap:14px">
+            <div style="padding:11px 14px;background:var(--amber-soft,#FEF3C7);color:var(--amber,#B45309);border-radius:var(--r-sm);font-size:12.5px;line-height:1.5">
+              <b>Beoordelingen zijn read-only.</b> Nieuwe beoordelingen komen via het nieuwe LMS. Bestaande beoordelingen zijn hier in te zien.
+            </div>
+            ${hasNote ? `
+              <div>
+                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Beoordeling</div>
+                <span style="font-size:12px;padding:3px 10px;border-radius:6px;background:var(--${statusCol}-soft,var(--surface-2));color:var(--${statusCol});font-weight:600">${esc(statusLabel)}</span>
+              </div>
+              ${serverNote.status !== 'niet_actief' ? `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:12.5px">
+                  <div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Score</div><div style="font-weight:600">${serverNote.score != null ? esc(String(serverNote.score)) + ' / 10' : '—'}</div></div>
+                  <div><div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Actieve taken gedaan</div><div style="font-weight:600">${serverNote.active_tasks_done ? '✓ ja' : '⨯ nee'}</div></div>
+                </div>
+              ` : ''}
+              <div>
+                <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Notitie</div>
+                <div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px;line-height:1.55;white-space:pre-wrap;min-height:60px;color:${serverNote.note ? 'var(--text-1)' : 'var(--text-3)'}">${esc(serverNote.note || '(geen notitie ingevuld)')}</div>
+              </div>
+              ${updated ? `<div style="font-size:11px;color:var(--text-3)">Laatst opgeslagen: ${esc(updated)}</div>` : ''}
+            ` : `
+              <div style="padding:24px 12px;color:var(--text-3);font-size:12.5px;text-align:center;font-style:italic">Nog geen beoordeling voor deze maand.</div>
+            `}
+          </div>`;
+        }
+      } else {
       // BROK 2: interactief. Wacht op notes-fetch bij eerste laden zodat we
       // met bestaande waarden kunnen prefillen. Daarna full edit-form.
       if (_live.notes.loading && !_live.notes.byId) {
@@ -767,6 +822,7 @@
           </div>
         </div>`;
       }
+      } // sluit else-branch van ST_ASSESSMENT_WRITE_ENABLED
     }
 
     // v=5 FIX B: beoordelings-badge in header (naast naam). Toon 'nog niet
