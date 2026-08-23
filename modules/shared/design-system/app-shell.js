@@ -205,14 +205,23 @@
     if (!el) return;
     el.innerHTML = groups.map(g => `
       <div class="nav-label">${g}</div>
-      ${mods.filter(m => m.g === g).map(m => `
-        <button class="nav-item ${S.mod === m.id ? 'active' : ''}" onclick="DFO.goMod('${m.id}')"
-          style="${S.mod === m.id ? `--m:var(--${m.color});--m-soft:var(--${m.color}-soft);--m-glow:${GLOW[m.color]}` : ''}">
+      ${mods.filter(m => m.g === g).map(m => {
+        // Pre-flip fix 3: ext-modules (bv. LMS) renderen als <a target=_blank>
+        // i.p.v. <button onclick=window.open>. Popup-blockers zijn strenger
+        // geworden op window.open in wrapped onclick-chains — <a>-links met
+        // target=_blank openen altijd. Werkt met + zonder cmd/ctrl-click.
+        const activeStyle = S.mod === m.id ? `--m:var(--${m.color});--m-soft:var(--${m.color}-soft);--m-glow:${GLOW[m.color]}` : '';
+        const activeCls = S.mod === m.id ? 'active' : '';
+        const inner = `
           <span class="nav-ico">${svg(m.icon)}</span><span>${m.naam}</span>
           ${m.ext ? `<span style="margin-left:auto;color:var(--text-3);display:inline-flex">${svg(I.ext, 'width:13px;height:13px')}</span>` : ''}
           ${modLocked(m.id) ? `<span style="margin-left:auto;color:var(--text-3);display:inline-flex" title="Binnenkort beschikbaar">${svg(I.lock, 'width:13px;height:13px')}</span>`
-            : (m.badge ? `<span class="nav-badge">${m.badge}</span>` : '')}
-        </button>`).join('')}`).join('');
+            : (m.badge ? `<span class="nav-badge">${m.badge}</span>` : '')}`;
+        if (m.ext) {
+          return `<a href="${m.ext}" target="_blank" rel="noopener noreferrer" class="nav-item ${activeCls}" style="${activeStyle};text-decoration:none">${inner}</a>`;
+        }
+        return `<button class="nav-item ${activeCls}" onclick="DFO.goMod('${m.id}')" style="${activeStyle}">${inner}</button>`;
+      }).join('')}`).join('');
   }
 
   function toggleNav(force) {
