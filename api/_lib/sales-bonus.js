@@ -64,9 +64,15 @@ async function isDownPaymentInvoice(inv, deal) {
   // Fallback: vroegste NIET-fee factuur van de deal. Facturen hangen aan de deal
   // via invoices.deal_id ÓF via een subscription van de deal (tl_subscription_id)
   // — TL-gesyncte facturen hebben vaak alleen dat laatste.
+  // tl_subscription_id = Teamleader-UUID (hex + koppeltekens). Defensief dubbel-
+  // quoten in de in-lijst zodat een onverwachte waarde (komma/haakje) de
+  // PostgREST-or-filter nooit stil kan breken; embedded quotes escapen.
   const tlSubIds = (subs || []).map(s => s.teamleader_subscription_id).filter(Boolean);
   const orParts = [`deal_id.eq.${deal.id}`];
-  if (tlSubIds.length) orParts.push(`tl_subscription_id.in.(${tlSubIds.join(',')})`);
+  if (tlSubIds.length) {
+    const quoted = tlSubIds.map(v => `"${String(v).replace(/"/g, '\\"')}"`).join(',');
+    orParts.push(`tl_subscription_id.in.(${quoted})`);
+  }
   const { data: dealInv } = await supabaseAdmin.from('invoices')
     .select('id, issue_date, created_at')
     .or(orParts.join(','))
