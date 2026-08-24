@@ -728,6 +728,17 @@
   function _middleList() {
     const selCount = Object.values(_ui.selectedRows).filter(Boolean).length;
     const bulkBar = selCount > 0 ? _bulkBar(selCount) : '';
+    // v=30: als "Alle postvakken" actief is (mailboxSlug=''), toon een
+    // horizontale facet-pill-strip zodat je makkelijk kunt filteren zonder
+    // naar de zijbalk te scrollen. Standaard: 'Alle' actief. Klik op pill
+    // → switch naar die mailbox (zelfde flow als __emailSetMailbox in
+    // zijbalk). Bij niet-alle-weergave: strip weg (mailbox al gekozen).
+    const facetStrip = _ui.mailboxSlug === '' ? `
+      <div style="padding:0 12px 8px;display:flex;gap:5px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border)">
+        <span style="font-size:10px;color:var(--text-3);font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-right:4px">Mailbox</span>
+        <button class="chip" style="padding:2px 9px;border:1px solid ${TOK.m};background:${TOK.mSoft};color:${TOK.m};border-radius:20px;font-size:11px;font-weight:600;cursor:pointer" onclick="window.__emailSetMailbox('')">Alle</button>
+        ${MAILBOXES.map((m) => `<button class="chip" style="padding:2px 9px;border:1px solid var(--border);background:transparent;color:var(--text-2);border-radius:20px;font-size:11px;font-weight:400;cursor:pointer;display:inline-flex;align-items:center;gap:4px" onclick="window.__emailSetMailbox('${esc(m.slug)}')" title="${esc(m.addr)}"><span style="display:inline-block;width:6px;height:6px;border-radius:2px;background:${m.dot}"></span>${esc(m.label)}</button>`).join('')}
+      </div>` : '';
     return `<section style="border-right:1px solid var(--border);overflow:hidden;display:flex;flex-direction:column;min-height:0">
       <div style="position:sticky;top:0;z-index:2;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="padding:10px 12px;display:flex;gap:8px;align-items:center">
@@ -747,6 +758,7 @@
             ${[['newest','Nieuwste'],['oldest','Oudste'],['sender','Afzender']].map(([v, l]) => `<option value="${v}" ${_ui.sort === v ? 'selected' : ''}>${l}</option>`).join('')}
           </select>
         </div>
+        ${facetStrip}
         ${bulkBar}
       </div>
       <div id="emailListScroll" style="flex:1;overflow-y:auto;min-height:0" onscroll="window.__emailListScrollSnap && window.__emailListScrollSnap(this.scrollTop)">${_listBody()}</div>
