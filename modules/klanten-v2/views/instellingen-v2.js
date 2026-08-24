@@ -3837,6 +3837,25 @@
     // v=88: live preview refresh (freeze-veilig — alleen preview-node update).
     if (typeof window.__updMetaPreview === 'function') window.__updMetaPreview();
   };
+  // v=90: inferentie helper. Match `body_examples[n]` tegen `AVAILABLE_VARIABLES.example`
+  // om {{n}} → variable_key mapping te raden voor templates waar de picker niet
+  // gebruikt is (of vóór de picker bestond). Case-insensitive exact match.
+  // Wordt gebruikt bij edit-load (mapping=null vangnet) én bij save (compleet
+  // maken van varMapping voor bekende examples).
+  function _metaInferMappingFromExamples(examples) {
+    if (!examples || typeof examples !== 'object') return {};
+    const vars = _metaEd.varsList || [];
+    const byExample = new Map();
+    for (const v of vars) {
+      if (v.example) byExample.set(String(v.example).toLowerCase().trim(), v.key);
+    }
+    const out = {};
+    for (const [n, exampleVal] of Object.entries(examples)) {
+      const key = byExample.get(String(exampleVal || '').toLowerCase().trim());
+      if (key) out[String(n)] = key;
+    }
+    return out;
+  }
   // v=88: live preview. Leest state (met DOM-sync voor uncontrolled inputs)
   // en injecteert HTML in het preview-paneel. Géén modal-re-render, géén
   // rerender van chip-groep — enkel innerHTML op de preview-node. Alle
@@ -3966,6 +3985,23 @@
       _metaEd.varMapping   = (t.meta_param_mapping && typeof t.meta_param_mapping === 'object' && t.meta_param_mapping.body && typeof t.meta_param_mapping.body === 'object') ? { ...t.meta_param_mapping.body } : {};
       _metaEd.folderId     = t.folder_id || null;
       _metaEd.origFolderId = t.folder_id || null;
+      // v=90 fail-soft: als DB-mapping null was maar body_examples bekend →
+      // infer slots. Wacht op vars-fetch als die nog niet binnen is (edge-case
+      // waarbij editor open gaat vóór _metaFetchVars() resolvet).
+      if (!Object.keys(_metaEd.varMapping).length && _metaEd.fields.examples && Object.keys(_metaEd.fields.examples).length) {
+        const applyInfer = () => {
+          const inferred = _metaInferMappingFromExamples(_metaEd.fields.examples);
+          if (Object.keys(inferred).length) {
+            _metaEd.varMapping = inferred;
+            if (render) render();
+          }
+        };
+        if (_metaEd.varsFetched) applyInfer();
+        else {
+          // Retry één keer zodra vars binnen zijn (max 2s).
+          setTimeout(() => { if (_metaEd.open) applyInfer(); }, 800);
+        }
+      }
     }
     if (render) render();
   }
@@ -4030,17 +4066,25 @@
     };
     if (btns.length) payload.buttons = btns;
     if (Object.keys(exObj).length) payload.body_examples = exObj;
-    // v=82: named-var mapping meesturen zodat send-time resolver
-    // {{n}}→variable_key kan mappen (bv. voor Joost/dunning-engine).
-    // Filter mapping alleen naar slots die nog in body_text staan.
+    // v=82 + v=90: named-var mapping meesturen zodat send-time resolver
+    // {{n}}→variable_key kan mappen. Filter naar slots die nog in body_text
+    // staan. v=90: als varMapping incompleet is (gedeeltelijk / leeg) én er
+    // zijn `body_examples`, probeer inferentie via _metaInferMappingFromExamples.
+    // Zo krijgen templates die zonder picker zijn gemaakt (of vóór de picker)
+    // alsnog een mapping.body wanneer de examples matchen met bekende vars.
     const bodyVarKeys = new Set((String(f.body_text).match(/\{\{(\d+)\}\}/g) || []).map(s => s.replace(/[^\d]/g, '')));
+    // Merge: expliciete varMapping wint, examples-inferentie vult gaps.
+    const inferred = _metaInferMappingFromExamples(exObj);
+    const merged = { ...inferred, ...(_metaEd.varMapping || {}) };
     const cleanMapping = {};
-    for (const [n, key] of Object.entries(_metaEd.varMapping || {})) {
+    for (const [n, key] of Object.entries(merged)) {
       if (bodyVarKeys.has(String(n))) cleanMapping[String(n)] = String(key);
     }
-    if (Object.keys(cleanMapping).length) {
-      payload.meta_param_mapping = { body: cleanMapping };
-    }
+    // v=90: ALTIJD meesturen (ook empty object) zodat de server-side auto-derive
+    // niet stille NULL schrijft voor positionele bodies. Bij empty payload
+    // wordt gewoon `{}` gestored — geen loss, geen crash — en send-time resolver
+    // valt terug op examples-values direct.
+    payload.meta_param_mapping = { body: cleanMapping };
     const method = _metaEd.mode === 'edit' ? 'PATCH' : 'POST';
     const url = _metaEd.mode === 'edit'
       ? '/api/admin-meta-templates-upsert?id=' + encodeURIComponent(_metaEd.id)
