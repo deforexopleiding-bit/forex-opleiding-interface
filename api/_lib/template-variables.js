@@ -252,6 +252,16 @@ export const AVAILABLE_VARIABLES = [
   // templates niet meer goedkeurt — UTILITY-policy).
   { key: 'onboarding.bubble_gebruikersnaam', label: 'Bubble gebruikersnaam (klant-email)', category: 'onboarding', example: 'klant@example.com', requires_context: 'customer' },
 
+  // ── toegang (leadsonderhoud LMS-grants) ────────────────────────────────
+  //   Vereist context.toegang met { einddatum, ... }. Wordt gebruikt door
+  //   het `toegang_verlengd_nl`-template dat de leadsonderhoud-extend-access
+  //   flow verstuurt. Die flow bypasst deze resolver (levert positioneel
+  //   direct aan Meta), dus context.toegang wordt in de praktijk niet gezet.
+  //   Andere callers die een template met deze key uit de picker gebruiken
+  //   krijgen bij ontbrekende context een lege string — géén crash, géén
+  //   regressie op bestaande templates.
+  { key: 'toegang.einddatum', label: 'Toegang tot (nieuwe einddatum)', category: 'toegang', example: '30 september 2026', requires_context: 'toegang' },
+
   // ── datum ──────────────────────────────────────────────────────────────
   { key: 'datum.vandaag',     label: 'Datum vandaag', category: 'datum', example: '09-06-2026',  requires_context: null },
   { key: 'datum.deze_maand',  label: 'Deze maand',    category: 'datum', example: 'juni 2026',   requires_context: null },
@@ -721,8 +731,21 @@ export function resolveVariableValue(key, context) {
     case 'attendee':   return getAttendeeValue(context && context.attendee, key);
     case 'onboarding': return getOnboardingValue(context && context.onboarding, key);
     case 'lead':       return getLeadValue(context && context.lead, key);
+    case 'toegang':    return getToegangValue(context && context.toegang, key);
     default: return '';
   }
+}
+
+// toegang.* — fail-soft resolver. Leadsonderhoud-extend-access bypasst deze
+// (send stuurt positioneel), dus context.toegang is meestal NULL. Callers die
+// een template met toegang.einddatum uit de picker meesturen krijgen een
+// lege string bij ontbrekende context. Nooit crashen — nooit een ander
+// template breken.
+function getToegangValue(toegang, key) {
+  if (!toegang) return '';
+  const field = String(key).slice('toegang.'.length);
+  const val = toegang[field];
+  return val == null ? '' : String(val);
 }
 
 // lead.* — leest rechtstreeks uit een onderhoud_wachtrij-rij (context.lead).

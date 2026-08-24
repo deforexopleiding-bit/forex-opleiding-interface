@@ -4228,8 +4228,8 @@
             // Groepeer per category.
             const byCat = {};
             for (const v of vars) { (byCat[v.category || 'overig'] ||= []).push(v); }
-            const catOrder = ['customer','invoice','klant','afdeling','bedrijf','onboarding','overig'];
-            const catLabels = { customer:'Klant', invoice:'Factuur', klant:'Klant-aggregaties', afdeling:'Afdeling', bedrijf:'Bedrijf', onboarding:'Onboarding' };
+            const catOrder = ['customer','invoice','klant','afdeling','bedrijf','onboarding','lead','toegang','attendee','event','datum','overig'];
+            const catLabels = { customer:'Klant', invoice:'Factuur', klant:'Klant-aggregaties', afdeling:'Afdeling', bedrijf:'Bedrijf', onboarding:'Onboarding', lead:'Lead', toegang:'Toegang', attendee:'Attendee', event:'Event', datum:'Datum' };
             const usedKeys = new Set(Object.values(_metaEd.varMapping || {}));
             const catsInOrder = catOrder.filter(c => byCat[c]).concat(Object.keys(byCat).filter(c => !catOrder.includes(c)));
             return `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px">
