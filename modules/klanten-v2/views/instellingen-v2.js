@@ -6129,29 +6129,125 @@
     return bodyPlaceholder(cur);
   }
 
+  // ─── BLOK 2 · Cockpit-schil (iteratie 1) ────────────────────────────────
+  // Design-ref: docs/dunning-test-cockpit-reference.html.
+  // Deze iteratie: header-bar + guard-status strip + verify-grendel-widget.
+  // Iteraties 2-5 in vervolg-commits (scenariobibliotheek, blok-bouwer,
+  // AI-tekstinvoer, ladder, tijdlijn, berichten, takenlijst). Zie
+  // docs/dunning-test-cockpit-blok2-scope.md.
+
+  const _cockpit = { status: null, loading: false, error: null, fetched: false, verifying: false, verifyResult: null };
+
+  async function _cockpitFetchStatus() {
+    if (_cockpit.loading) return;
+    _cockpit.loading = true; _cockpit.error = null; if (render) render();
+    const j = await tryFetch('dunning-test-status', '/api/dunning-test-status');
+    _cockpit.loading = false; _cockpit.fetched = true;
+    if (j?.__error) _cockpit.error = j.__error;
+    else if (j?.error) _cockpit.error = j.error;
+    else _cockpit.status = j;
+    if (render) render();
+  }
+  window.__cockpitRefresh = () => { _cockpit.fetched = false; _cockpitFetchStatus(); };
+  window.__cockpitVerify = async () => {
+    _cockpit.verifying = true; _cockpit.verifyResult = null; if (render) render();
+    const j = await tryFetch('dunning-test-verify', '/api/dunning-test-verify-grendel', { method: 'POST' });
+    _cockpit.verifying = false;
+    _cockpit.verifyResult = (j?.__error || j?.error) ? { ok: false, error: j.__error || j.error } : j;
+    if (render) render();
+  };
+
   function bodyWbTestCockpit() {
-    // TIJDELIJK (blok 1): korte intro + knop naar de bestaande testpagina.
-    // Wordt in blok 2 vervangen door de native cockpit-schil.
-    return `<div style="max-width:760px">
-      <div style="padding:16px 18px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:36px;height:36px;border-radius:8px;background:var(--amber-soft);color:var(--amber);display:grid;place-items:center;font-size:16px">⚗</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:600">Wanbetalers testomgeving</div>
-            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Is_test-gescoped triggers met echte handlers · super_admin only</div>
+    if (!_cockpit.fetched && !_cockpit.loading) queueMicrotask(() => _cockpitFetchStatus());
+    const s = _cockpit.status;
+    const isReady = !!s?.ready;
+    const dryRun = !!s?.dry_run_enabled;
+
+    // ── Guard-status strip ────────────────────────────────────────────────
+    const guardHtml = _cockpit.loading && !s ? `
+      <div class="kv-cockpit-strip" style="opacity:.6">Cockpit-status laden…</div>
+    ` : _cockpit.error ? `
+      <div class="kv-cockpit-strip" style="background:var(--rose-soft);color:var(--rose);border-color:var(--rose)">⚠ ${esc(_cockpit.error)}</div>
+    ` : s ? `
+      <div class="kv-cockpit-strip ${isReady ? 'kvcs-ok' : 'kvcs-block'}">
+        <div class="kvcs-l">
+          <div class="kvcs-dot" data-live></div>
+          <div>
+            <div style="font-weight:700;font-size:13px">${isReady ? 'Grendel actief · cockpit klaar' : 'Cockpit geblokkeerd'}</div>
+            <div style="font-size:11px;opacity:.75;font-family:'IBM Plex Mono',monospace;margin-top:2px">
+              sandbox: ${esc(s.sandbox_contact?.phone || '—')} · ${esc(s.sandbox_contact?.email || '—')} · dry_run=${dryRun ? 'AAN' : 'UIT'}
+            </div>
           </div>
         </div>
-        <div style="font-size:12.5px;color:var(--text-2);line-height:1.55">
-          De nieuwe cockpit-schil landt in blok 2. Zolang die er nog niet is, opent deze
-          knop de bestaande testpagina — dezelfde plek waar je nu al de sandbox seed,
-          reset en dry-run bedient. De grendel (fail-closed recipient-check, dry-run
-          default AAN, test_cockpit_audit) staat al live achter beide.
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <a class="btn btn-primary btn-sm" href="/modules/wanbetalers-test.html" target="_blank" rel="noopener" style="font-size:12px">Open testpagina →</a>
-          <a class="btn btn-ghost btn-sm" href="/docs/dunning-test-cockpit-reference.html" target="_blank" rel="noopener" style="font-size:12px" title="Design-referentie voor blok 2">Bekijk cockpit-ontwerp →</a>
+        <div class="kvcs-r">
+          <span class="kvcs-badge">${s.test_customer_count || 0} test-klanten</span>
+          <span class="kvcs-badge">${s.test_invoice_count || 0} test-facturen</span>
+          <button class="btn btn-ghost btn-sm" onclick="window.__cockpitRefresh()" style="font-size:11px">↻</button>
         </div>
       </div>
+      ${(s.blockers || []).length > 0 ? `
+        <div style="margin-top:8px;padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:11.5px;line-height:1.5">
+          <b>Blockers:</b> ${(s.blockers || []).map(b => esc(b)).join(' · ')}
+        </div>
+      ` : ''}
+    ` : '';
+
+    // ── Verify-grendel-widget ─────────────────────────────────────────────
+    const vr = _cockpit.verifyResult;
+    const verifyHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">Grendel-bewijs</div>
+            <div class="kvcc-sub">6 scenario's; verwacht 6/6 pass. Doet geen echte send (dry-run geforceerd via injection).</div>
+          </div>
+          <button class="btn btn-primary btn-sm" ${_cockpit.verifying ? 'disabled' : ''} onclick="window.__cockpitVerify()" style="font-size:12px">
+            ${_cockpit.verifying ? 'Bezig…' : 'Draai bewijs'}
+          </button>
+        </div>
+        ${vr ? `
+          <div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:${vr.ok ? 'var(--emerald-soft)' : 'var(--rose-soft)'};color:${vr.ok ? 'var(--emerald)' : 'var(--rose)'};font-size:12px">
+            ${vr.ok ? `✓ ${vr.passed}/${vr.total} pass — grendel werkt` : `✗ ${vr.error || `${vr.passed}/${vr.total} — check details`}`}
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // ── Iteratie-placeholder ──────────────────────────────────────────────
+    const placeholderHtml = `
+      <div class="kv-cockpit-card" style="border-style:dashed;opacity:.8">
+        <div style="font-size:12px;color:var(--text-3);line-height:1.6">
+          <b>Nog te bouwen in vervolg-iteraties</b> (zie <a href="/docs/dunning-test-cockpit-blok2-scope.md" target="_blank" style="color:var(--accent)">scope-doc</a>):
+          persona-hero · scenariobibliotheek · blok-bouwer · AI-tekstinvoer (Claude Sonnet) · ladder · live tijdlijn · berichten · takenlijst.
+          Ondertussen bereikbaar: <a href="/modules/wanbetalers-test.html" target="_blank" style="color:var(--accent)">oude testpagina</a>.
+        </div>
+      </div>
+    `;
+
+    return `<style>
+      .kv-cockpit-strip{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface);font-size:12.5px}
+      .kv-cockpit-strip.kvcs-ok{border-color:var(--emerald);background:var(--emerald-soft);color:var(--emerald)}
+      .kv-cockpit-strip.kvcs-block{border-color:var(--amber);background:var(--amber-soft);color:var(--amber)}
+      .kv-cockpit-strip .kvcs-l{display:flex;align-items:center;gap:10px;min-width:0}
+      .kv-cockpit-strip .kvcs-dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex-shrink:0}
+      .kv-cockpit-strip .kvcs-r{display:flex;align-items:center;gap:8px;flex-shrink:0}
+      .kv-cockpit-strip .kvcs-badge{padding:3px 9px;border-radius:20px;background:var(--surface);color:var(--text-2);font-family:'IBM Plex Mono',monospace;font-size:10.5px;border:1px solid var(--border)}
+      .kv-cockpit-card{margin-top:12px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+      .kv-cockpit-card .kvcc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+      .kv-cockpit-card .kvcc-title{font-size:13px;font-weight:600}
+      .kv-cockpit-card .kvcc-sub{font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5}
+    </style>
+    <div style="max-width:1100px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--violet,#7b5cf0));display:grid;place-items:center;color:#fff;font-size:16px">⚗</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:16px;font-weight:700;letter-spacing:-.01em">Dunning Test Cockpit</div>
+          <div style="font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);letter-spacing:.08em;text-transform:uppercase">is_test · super_admin · fail-closed grendel</div>
+        </div>
+      </div>
+      ${guardHtml}
+      ${verifyHtml}
+      ${placeholderHtml}
     </div>`;
   }
 
