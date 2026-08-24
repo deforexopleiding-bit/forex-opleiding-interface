@@ -5228,6 +5228,49 @@
     if (render) render();
   };
   window.__setUsersEditCancel = () => { _users.ed = null; if (render) render(); };
+  // v=81: password-set helpers voor Bewerk-modal (super_admin-only).
+  window.__setUsersPwToggle = () => {
+    const el = document.querySelector('[data-eu-field="password"]');
+    if (!el) return;
+    el.type = (el.type === 'password') ? 'text' : 'password';
+  };
+  window.__setUsersPwGen = () => {
+    // Sterk wachtwoord: 20 chars, base64url + garantie op letter/cijfer/symbool.
+    // Crypto-random (window.crypto.getRandomValues) i.p.v. Math.random.
+    const buf = new Uint8Array(18);
+    (window.crypto || {}).getRandomValues && window.crypto.getRandomValues(buf);
+    let raw = btoa(String.fromCharCode.apply(null, buf)).replace(/[+/=]/g, '').slice(0, 20);
+    if (!/\d/.test(raw))      raw = raw.slice(0, -1) + '7';
+    if (!/[A-Z]/.test(raw))   raw = 'K' + raw.slice(1);
+    if (!/[a-z]/.test(raw))   raw = raw.slice(0, -1) + 'x';
+    const suffix = '!Aa1'.slice(0, 1); // klein symbool tegen "geen sonder"-projectchecks
+    const pw = raw + suffix;
+    const el = document.querySelector('[data-eu-field="password"]');
+    if (el) { el.value = pw; el.type = 'text'; }
+    // Update strength-hint direct.
+    const h = document.querySelector('[data-eu-pw-hint]');
+    if (h) h.textContent = _pwStrengthLabel(pw);
+    showToast('Sterk wachtwoord ingevuld — kopieer nu, het is zichtbaar.', 'info');
+  };
+  window.__setUsersPwHint = (val) => {
+    const h = document.querySelector('[data-eu-pw-hint]');
+    if (h) h.textContent = _pwStrengthLabel(String(val || ''));
+  };
+  function _pwStrengthLabel(pw) {
+    if (!pw) return 'Leeg = wachtwoord NIET wijzigen.';
+    if (pw.length < 8) return `Te kort — nog ${8 - pw.length} teken(s) nodig.`;
+    let score = 0;
+    if (/[a-z]/.test(pw)) score++;
+    if (/[A-Z]/.test(pw)) score++;
+    if (/\d/.test(pw))    score++;
+    if (/[^A-Za-z0-9]/.test(pw)) score++;
+    if (pw.length >= 12)  score++;
+    if (score <= 2) return 'Zwak — voeg hoofdletter/cijfer/symbool toe.';
+    if (score === 3) return 'Redelijk.';
+    if (score === 4) return 'Sterk.';
+    return 'Zeer sterk.';
+  }
+
   window.__setUsersEditSave = async () => {
     const e = _users.ed; if (!e) return;
     // Sync-from-DOM: uncontrolled inputs.
@@ -5235,30 +5278,53 @@
     const n = q('[data-eu-field="full_name"]'); if (n) e.full_name = String(n.value || '');
     const em = q('[data-eu-field="email"]');    if (em) e.email = String(em.value || '');
     const rl = q('[data-eu-field="role"]');     if (rl) e.role = String(rl.value || 'viewer');
+    const pwEl = q('[data-eu-field="password"]');
+    const pw = pwEl ? String(pwEl.value || '') : '';
     const orig = _users.items.find(x => x.id === e.id);
     if (!orig) { showToast('Origineel niet gevonden', 'warn'); return; }
-    // Bouw patch: alleen gewijzigde velden.
+    // Bouw patch: alleen gewijzigde velden. Password is opt-in — leeg = niet raken.
     const patch = {};
     if (e.full_name !== (orig.full_name || '')) patch.full_name = e.full_name;
     if (e.email && e.email !== orig.email) patch.email = e.email;
     if (e.role !== orig.role) patch.set_canonical_role = e.role;
+    let willSetPassword = false;
+    if (pw.length > 0) {
+      if (pw.length < 8) { showToast('Wachtwoord moet minimaal 8 tekens hebben.', 'warn'); return; }
+      patch.password = pw;
+      willSetPassword = true;
+    }
     if (Object.keys(patch).length === 0) {
       showToast('Geen wijzigingen', 'info');
       _users.ed = null; if (render) render(); return;
     }
-    _users.busy[e.id] = true; if (render) render();
-    const j = await tryFetch('admin-users-edit', '/api/admin-users?id=' + encodeURIComponent(e.id), {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
-    });
-    _users.busy[e.id] = false;
-    if (j?.__error || j?.error) {
-      showToast('Opslaan mislukt: ' + (j.__error || j.error), 'warn');
-      if (render) render();
-      return;
+    // Beveiligingsactie → confirm vóór apply als password erin zit.
+    const doSave = async () => {
+      _users.busy[e.id] = true; if (render) render();
+      const j = await tryFetch('admin-users-edit', '/api/admin-users?id=' + encodeURIComponent(e.id), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+      });
+      _users.busy[e.id] = false;
+      if (j?.__error || j?.error) {
+        showToast('Opslaan mislukt: ' + (j.__error || j.error), 'warn');
+        if (render) render(); return;
+      }
+      // Sluit modal maar toon eenmalig het wachtwoord in een toast als het is ingesteld,
+      // zodat super_admin het kan doorgeven. Response bevat het wachtwoord niet — we
+      // gebruiken de waarde die we net hebben verzonden.
+      _users.ed = null;
+      if (willSetPassword) {
+        showToast(`Wachtwoord bijgewerkt. Nieuwe waarde: ${pw} (wordt niet meer getoond — kopieer nu).`, 'ok');
+      } else {
+        showToast('Gebruiker bijgewerkt', 'ok');
+      }
+      _users.fetched = false; fetchUsers(true);
+    };
+    if (willSetPassword) {
+      const nm = e.full_name || e.email || 'deze gebruiker';
+      openConfirm(`Wachtwoord van "${esc(nm)}" wijzigen? Deze gebruiker kan daarna alleen met het nieuwe wachtwoord inloggen. Andere velden worden in dezelfde call bijgewerkt.`, doSave, 'warn');
+    } else {
+      doSave();
     }
-    _users.ed = null;
-    showToast('Gebruiker bijgewerkt', 'ok');
-    _users.fetched = false; fetchUsers(true);
   };
   window.__setUsersSoftDelete = (userId) => {
     const u = _users.items.find(x => x.id === userId);
@@ -5910,6 +5976,7 @@
   function _usersEditModalHtml() {
     const e = _users.ed; if (!e) return '';
     const busy = !!_users.busy[e.id];
+    const isSA = isSuperAdmin();
     const roleOpts = CRM_STAFF_ROLES_PICKER.map(r => `<option value="${r}" ${e.role === r ? 'selected' : ''}>${r}</option>`).join('');
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setUsersEditCancel()">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(520px,100%);max-height:90vh;overflow-y:auto">
@@ -5935,6 +6002,15 @@
               ${roleOpts}
             </select>
           </div>
+          ${isSA ? `<div style="margin-top:4px;padding-top:12px;border-top:1px dashed var(--border);display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:0">Wachtwoord instellen <span style="color:var(--text-3);font-weight:400">(optioneel — leeg = niet wijzigen)</span></label>
+            <div style="display:flex;gap:6px">
+              <input type="password" data-eu-field="password" oninput="window.__setUsersPwHint(this.value)" placeholder="Minimaal 8 tekens" style="flex:1;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" autocomplete="new-password" />
+              <button type="button" class="btn btn-ghost btn-sm" onclick="window.__setUsersPwToggle()" title="Toon/verberg" style="font-size:11px">Toon</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="window.__setUsersPwGen()" title="Genereer sterk wachtwoord" style="font-size:11px">Genereer</button>
+            </div>
+            <div data-eu-pw-hint style="font-size:11px;color:var(--text-3)">Leeg = wachtwoord NIET wijzigen.</div>
+          </div>` : ''}
         </div>
         <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);justify-content:flex-end">
           <button class="btn btn-ghost btn-sm" onclick="window.__setUsersEditCancel()">Annuleren</button>
