@@ -158,8 +158,12 @@ export default async function handler(req, res) {
       url.searchParams.set('limit',      String(CONV_PAGE));
       url.searchParams.set('sort',       'desc');
       url.searchParams.set('sortBy',     'last_message_date');
-      // Filter op IG waar mogelijk. GHL negeert onbekende params dus dit is safe.
-      url.searchParams.set('lastMessageType', 'TYPE_INSTAGRAM_MESSAGE');
+      // NB: 2026-08-24 — GHL API-versie 2021-04-15 accepteert `TYPE_INSTAGRAM_MESSAGE`
+      // NIET als enum-waarde voor `lastMessageType` (HTTP 422 CONVERSATIONS_VALIDATION_ERROR).
+      // We zoeken daarom breed (alle conversation-types); de per-message `isInstagram(msg)`
+      // filter downstream + de conv-metadata skip garanderen dat we UITSLUITEND IG-messages
+      // opslaan. Watermark-break (oldestOnPageMs < watermarkMs) begrenst het scan-volume
+      // zodat we binnen de Vercel 25s-cap blijven.
       if (startAfterDate) url.searchParams.set('startAfterDate', String(startAfterDate));
       if (startAfterId)   url.searchParams.set('startAfterId',   String(startAfterId));
 
