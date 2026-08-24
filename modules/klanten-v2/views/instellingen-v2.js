@@ -6691,6 +6691,10 @@
       </div>
     `;
 
+    // ── Persona-hero (iter 5) ─────────────────────────────────────────────
+    // Pixel-match tegen docs/dunning-test-cockpit-reference.html.
+    // Layout: avatar + persona-meta links, situation-block (facturen +
+    // totaal) rechts. Alleen zichtbaar bij activeCustomerId + geladen ctx.
     // ── Live-context panels (iter 4) ──────────────────────────────────────
     // Start poll wanneer activeCustomerId gezet + view gemount. Fetch één-
     // shot direct om instant-feedback te geven.
@@ -6702,6 +6706,52 @@
     }
 
     const ctx = _cockpit.ctx.data;
+
+    // Persona-hero (iter 5)
+    const cust = ctx?.customer;
+    const invs = ctx?.invoices || [];
+    const persInitials = cust ? ((cust.first_name || '').replace(/[^\p{L}]/gu, '').slice(0, 1) + (cust.last_name || '').slice(0, 1)).toUpperCase() || 'T' : null;
+    const totalOpen = invs.reduce((s, i) => s + (Number(i.amount_total || 0) - Number(i.amount_paid || 0)), 0);
+    const runStatusText = ctx?.active_run?.status || (invs.length ? 'ready' : 'idle');
+    const heroHtml = _cockpit.activeCustomerId && cust ? `
+      <div class="kv-cockpit-hero">
+        <div class="kvh-persona">
+          <div class="kvh-avatar">${esc(persInitials || 'T')}</div>
+          <div style="flex:1;min-width:0">
+            <div class="kvh-name">${esc(((cust.first_name || '') + ' ' + (cust.last_name || '')).trim() || '—')}</div>
+            <div class="kvh-meta">
+              <span><b>Tel</b> ${esc(cust.phone || '—')}</span>
+              <span><b>E-mail</b> ${esc(cust.email || '—')}</span>
+              <span><b>ID</b> <code>${esc(String(cust.id || '').slice(0, 8))}…</code></span>
+            </div>
+            <div class="kvh-statusline">
+              <span class="kvh-pill kvh-p-${esc(runStatusText)}"><span class="kvh-dot"></span>${esc(runStatusText)}</span>
+              ${invs.length > 0 ? `<span class="kvh-pill kvh-p-invoices">${invs.length} factuur${invs.length === 1 ? '' : 'en'}</span>` : ''}
+              ${ctx?.pending_actions?.length ? `<span class="kvh-pill kvh-p-tasks">${ctx.pending_actions.length} taak/taken</span>` : ''}
+              ${ctx?.messages?.length ? `<span class="kvh-pill kvh-p-msgs">${ctx.messages.length} bericht(en)</span>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="kvh-situation">
+          <div class="kvh-sec-lbl">Facturen</div>
+          <div class="kvh-invoices">
+            ${invs.length === 0 ? `<div style="padding:8px;font-size:11.5px;color:var(--text-3);text-align:center">Geen facturen</div>` : invs.slice(0, 5).map(i => `
+              <div class="kvh-inv">
+                <span class="kvh-inv-nr">${esc(i.invoice_number || '')}</span>
+                <span class="kvh-inv-amt">€ ${Number(i.amount_total || 0).toFixed(2)}</span>
+                <span class="kvh-inv-st">${esc(i.status || '')}</span>
+              </div>
+            `).join('')}
+          </div>
+          ${invs.length > 0 ? `
+            <div class="kvh-totrow">
+              <span>Openstaand totaal</span>
+              <b>€ ${totalOpen.toFixed(2)}</b>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    ` : '';
 
     // Ladder — 7-staps horizontaal. Stappen afgeleid uit dunning_workflow_runs.
     const LADDER_STEPS = ['nieuw', 'r1', 'r2', 'r3', 'r4', 'escalatie', 'afgesloten'];
@@ -6812,15 +6862,8 @@
       <div style="margin-top:10px;padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:11.5px">⚠ Context-fetch: ${esc(_cockpit.ctx.error)}</div>
     ` : '';
 
-    // ── Iteratie-placeholder (iter 5) ─────────────────────────────────────
-    const placeholderHtml = `
-      <div class="kv-cockpit-card" style="border-style:dashed;opacity:.8">
-        <div style="font-size:12px;color:var(--text-3);line-height:1.6">
-          <b>Iter 5</b> (<a href="/docs/dunning-test-cockpit-blok2-scope.md" target="_blank" style="color:var(--accent)">scope-doc</a>): persona-hero polish + pixel-match design-referentie.
-          Ondertussen: <a href="/modules/wanbetalers-test.html" target="_blank" style="color:var(--accent)">oude testpagina</a>.
-        </div>
-      </div>
-    `;
+    // Iter 5 klaar — geen placeholder meer; alle panels leven nu.
+    const placeholderHtml = '';
 
     return `<style>
       .kv-cockpit-strip{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface);font-size:12.5px}
@@ -6884,6 +6927,34 @@
       .kv-cockpit-task .kvct-type{font-size:12px}
       .kv-cockpit-task .kvct-status{padding:1px 7px;border-radius:20px;font-family:'IBM Plex Mono',monospace;font-size:10px;margin-left:6px}
       .kv-cockpit-task .kvct-meta{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-3);margin-top:2px}
+      /* Persona-hero (iter 5) — pixel-match tegen design-referentie */
+      .kv-cockpit-hero{position:relative;overflow:hidden;display:grid;grid-template-columns:1.4fr 1fr;gap:22px;padding:18px 20px;border:1px solid var(--border);border-radius:16px;background:var(--surface);box-shadow:0 1px 2px rgba(16,24,40,.06),0 10px 30px -14px rgba(16,24,40,.25);margin-top:12px}
+      .kv-cockpit-hero::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 55%);pointer-events:none}
+      @media(max-width:720px){.kv-cockpit-hero{grid-template-columns:1fr}}
+      .kv-cockpit-hero .kvh-persona{display:flex;gap:14px;align-items:flex-start;position:relative;z-index:1}
+      .kv-cockpit-hero .kvh-avatar{width:52px;height:52px;border-radius:14px;flex-shrink:0;background:linear-gradient(135deg,var(--accent-2,#7b5cf0),var(--accent));display:grid;place-items:center;color:#fff;font-family:'IBM Plex Sans',sans-serif;font-weight:700;font-size:20px;letter-spacing:-.02em;box-shadow:0 4px 12px -4px color-mix(in srgb,var(--accent) 45%,transparent)}
+      .kv-cockpit-hero .kvh-name{font-size:20px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+      .kv-cockpit-hero .kvh-meta{display:flex;flex-wrap:wrap;gap:14px;margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3)}
+      .kv-cockpit-hero .kvh-meta b{color:var(--text-2);font-weight:600;font-family:inherit;text-transform:uppercase;letter-spacing:.04em;font-size:9.5px;margin-right:3px}
+      .kv-cockpit-hero .kvh-statusline{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center}
+      .kv-cockpit-hero .kvh-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+      .kv-cockpit-hero .kvh-pill .kvh-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+      .kv-cockpit-hero .kvh-p-active,.kv-cockpit-hero .kvh-p-ready{color:var(--emerald);background:var(--emerald-soft)}
+      .kv-cockpit-hero .kvh-p-paused{color:var(--amber);background:var(--amber-soft)}
+      .kv-cockpit-hero .kvh-p-resumed{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+      .kv-cockpit-hero .kvh-p-done,.kv-cockpit-hero .kvh-p-idle{color:var(--text-3);background:var(--surface-2)}
+      .kv-cockpit-hero .kvh-p-blocked{color:var(--rose);background:var(--rose-soft)}
+      .kv-cockpit-hero .kvh-p-invoices,.kv-cockpit-hero .kvh-p-tasks,.kv-cockpit-hero .kvh-p-msgs{color:var(--text-2);background:var(--surface-2);border:1px solid var(--border)}
+      .kv-cockpit-hero .kvh-situation{border-left:1px solid var(--border);padding-left:20px;position:relative;z-index:1}
+      @media(max-width:720px){.kv-cockpit-hero .kvh-situation{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:14px}}
+      .kv-cockpit-hero .kvh-sec-lbl{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px}
+      .kv-cockpit-hero .kvh-invoices{display:flex;flex-direction:column;gap:5px}
+      .kv-cockpit-hero .kvh-inv{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:6px 9px}
+      .kv-cockpit-hero .kvh-inv-nr{color:var(--text-2);font-size:11px}
+      .kv-cockpit-hero .kvh-inv-amt{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+      .kv-cockpit-hero .kvh-inv-st{color:var(--amber);font-size:10px;letter-spacing:.04em;text-transform:uppercase}
+      .kv-cockpit-hero .kvh-totrow{display:flex;justify-content:space-between;margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-2)}
+      .kv-cockpit-hero .kvh-totrow b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:700}
     </style>
     <div style="max-width:1100px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
@@ -6894,6 +6965,7 @@
         </div>
       </div>
       ${guardHtml}
+      ${heroHtml}
       ${scenariosHtml}
       ${aiHtml}
       ${builderHtml}
