@@ -61,6 +61,7 @@
 // Schedule: */15 * * * * (elke 15 min; ruim binnen 20u/24u nauwkeurigheid).
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { requireSuperAdmin } from './_lib/wanbetalers-sandbox.js';
 import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js';
 import {
   isWithinOfficeHours,
@@ -264,11 +265,29 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  const cronAuth = checkCronAuth(req);
-  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
+  // ── Scope (BLOK 1 · PR-scope) ────────────────────────────────────────────
+  // Default 'production': productie-cron gedraagt zich exact zoals vóór deze
+  // PR. Cockpit-triggers geven scope='test' mee (via query of body).
+  const rawScope = String(req.query?.scope || req.body?.scope || 'production').toLowerCase();
+  const scope = (rawScope === 'test') ? 'test' : 'production';
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  // Productie-scope: alleen CRON_SECRET (identiek aan vóór deze PR).
+  // Test-scope: CRON_SECRET OF super_admin (cockpit heeft geen cron-secret).
+  if (scope === 'test') {
+    const cronOk = checkCronAuth(req).ok;
+    if (!cronOk) {
+      const admin = await requireSuperAdmin(req, res);
+      if (!admin) return; // 401/403 al verzonden
+    }
+  } else {
+    const cronAuth = checkCronAuth(req);
+    if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
+  }
 
   const startedAt = Date.now();
   const summary = {
+    scope,
     processed_count: 0,
     r1_sent: 0,
     r2_sent: 0,
@@ -293,11 +312,27 @@ export default async function handler(req, res) {
     const { autonomyCfg, noReplyCfg } = cfgRes;
 
     // ── Pending gespreks-pauze runs ophalen ────────────────────────────────
-    const { data: runs, error: runsErr } = await supabaseAdmin
+    // Scope-filter (BLOK 1 · PR-scope): inner-join op customers om
+    // is_test-vlag te lezen.
+    //
+    // - scope='production' (default) → IS NOT TRUE (matcht false én NULL).
+    //   Schema garandeert NOT NULL + default false, dus in de huidige DB is
+    //   dit equivalent aan '= false'. IS NOT TRUE is defensiever tegen
+    //   toekomstige schema-drift (bv. DROP NOT NULL) — voorkomt dat
+    //   productie-klanten stil uitgesloten worden.
+    // - scope='test' → strict '= true'. NULL en false tellen niet als test.
+    //
+    // Fix voor onderweg gevonden gat: tot nu toe was assertRecipientMatches-
+    // Sandbox op r522 de laatste vangnet voor test-runs die in productie-
+    // scope kwamen. Nu worden ze überhaupt niet meer opgehaald.
+    let runsQ = supabaseAdmin
       .from('dunning_workflow_runs')
-      .select('id, customer_id, paused_by_conversation_id, paused_conversation_reminder_count, paused_conversation_last_reminder_at, updated_at')
+      .select('id, customer_id, paused_by_conversation_id, paused_conversation_reminder_count, paused_conversation_last_reminder_at, updated_at, customers!inner(is_test)')
       .eq('status', 'paused')
-      .not('paused_by_conversation_id', 'is', null)
+      .not('paused_by_conversation_id', 'is', null);
+    if (scope === 'test') runsQ = runsQ.eq('customers.is_test', true);
+    else                  runsQ = runsQ.not('customers.is_test', 'is', true);
+    const { data: runs, error: runsErr } = await runsQ
       .order('updated_at', { ascending: true })
       .limit(MAX_RUNS_PER_TICK);
     if (runsErr) throw new Error('runs query: ' + runsErr.message);
