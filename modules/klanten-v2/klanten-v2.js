@@ -441,6 +441,33 @@ function _kvSetNotifBadge(n) {
   badge.textContent = v > 99 ? '99+' : String(v);
   badge.hidden = false;
 }
+// v=1es: notification link_url → v2-shell route mapping. Entity_type heeft
+// voorrang (auteurs zetten die netjes bij createNotification), fallback op
+// pattern-match op de link_url zelf. Alleen mappen naar v2 waar een
+// equivalent bestaat; anders blijft de v1-URL staan zodat dedicated
+// detail-pages (events-detail, mentor-payouts-admin, meta-ads) blijven werken.
+const KV_NOTIF_V2_BY_ENTITY_TYPE = {
+  onboarding:               '/modules/klanten-v2/?v2preview=onboarding',
+  whatsapp_conversation:    '/modules/klanten-v2/?v2preview=inbox',
+  dunning_bulk_job:         '/modules/klanten-v2/?v2preview=wanbetalers',
+  payment_arrangement:      '/modules/klanten-v2/?v2preview=wanbetalers',
+  leadsonderhoud_bulk_job:  '/modules/klanten-v2/?v2preview=leadsonderhoud',
+};
+function _kvMapNotifLink(item) {
+  const url = String(item?.link_url || '');
+  if (!url) return url;
+  const et = String(item?.entity_type || '').toLowerCase();
+  if (KV_NOTIF_V2_BY_ENTITY_TYPE[et]) return KV_NOTIF_V2_BY_ENTITY_TYPE[et];
+  // Pattern-fallback voor legacy notifs zonder entity_type.
+  if (/\/mentor-students\.html/.test(url))       return '/modules/klanten-v2/?v2preview=studenten';
+  if (/\/leadsonderhoud/.test(url))              return '/modules/klanten-v2/?v2preview=leadsonderhoud';
+  if (/\/mentor-onboarding\.html|\/onboarding-hub\.html/.test(url)) return '/modules/klanten-v2/?v2preview=onboarding';
+  if (/finance\.html.*(wanbetalers|tab=wanbetalers)/i.test(url)) return '/modules/klanten-v2/?v2preview=wanbetalers';
+  // Geen v2-equivalent bekend (events-detail, mentor-payouts-admin, meta-ads,
+  // finance.html zonder wanbetalers-tab). Behoud v1-URL.
+  return url;
+}
+
 function _kvRenderNotifList() {
   const list = document.getElementById('kvNotifList'); if (!list) return;
   const arr = _kvNotif.items;
@@ -454,8 +481,9 @@ function _kvRenderNotifList() {
   let html = '';
   for (const it of visible) {
     const unread = it.read_at == null;
-    const hasLink = it.link_url && String(it.link_url).trim() !== '';
-    html += `<a class="kv-notif-item${unread ? ' unread' : ''}" href="${hasLink ? _kvEscHtml(it.link_url) : '#'}" data-kv-notif-id="${_kvEscHtml(it.id)}" data-kv-notif-link="${_kvEscHtml(hasLink ? it.link_url : '')}">
+    const mapped = _kvMapNotifLink(it);
+    const hasLink = mapped && String(mapped).trim() !== '';
+    html += `<a class="kv-notif-item${unread ? ' unread' : ''}" href="${hasLink ? _kvEscHtml(mapped) : '#'}" data-kv-notif-id="${_kvEscHtml(it.id)}" data-kv-notif-link="${_kvEscHtml(hasLink ? mapped : '')}">
       <div class="kv-notif-row">
         <span class="kv-notif-dot"></span>
         <div class="kv-notif-body-wrap">
