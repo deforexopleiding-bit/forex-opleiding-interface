@@ -144,50 +144,19 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
       const fulfilled = (openInvoices?.length || 0) === 0;
       const outcome   = fulfilled ? 'fulfilled' : (dated ? 'broken' : 'broken_no_date');
 
-      // ── ATOMIC CLAIM: sluit de belofte-taak (voorkomt dubbele afhandeling) ──
-      // maturity_outcome + rejection_reason maken 'nagekomen' vs 'gebroken'
-      // glashelder (de UI toont status REJECTED als "afgewezen"; de reden
-      // corrigeert dat — nagekomen is GEEN echte afwijzing).
-      const rejectionReason = fulfilled
-        ? 'belofte NAGEKOMEN — factuur betaald (auto-maturity, geen afwijzing)'
-        : (dated
-            ? 'belofte VERLOPEN — datum verstreken, factuur nog open (auto-maturity)'
-            : 'belofte zonder datum — vervaltermijn verstreken (auto-maturity)');
-      const closePayload = {
-        ...(task.payload || {}),
-        maturity_outcome: outcome,
-        matured_at:       new Date().toISOString(),
-        matured_hint:     hint || null,
-      };
-      const { data: claimed } = await supabaseAdmin
-        .from('pending_actions')
-        .update({ status: 'REJECTED', rejection_reason: rejectionReason, payload: closePayload, updated_at: new Date().toISOString() })
-        .eq('id', task.id)
-        .in('status', ['PENDING', 'APPROVED'])
-        .select('id');
-      if (!claimed?.length) { summary.skipped.push({ task_id: task.id, reason: 'CLAIM_LOST' }); continue; }
-
-      // ── NAGEKOMEN: run DIRECT afronden, NIET hervatten ──
-      // Kritisch (review-punt 1): een schuldenvrije klant mag nooit aangemaand
-      // worden. De engine's paid-hercheck (dunning-engine.js:1011-1041) vangt dit
-      // ook af vóór elke send, maar we maken ons daar niet afhankelijk van en
-      // completen de run(s) zelf.
+      // ── NAGEKOMEN: belofte-taak sluiten + run(s) DIRECT afronden, NIET hervatten ──
+      // Kritisch: een schuldenvrije klant mag nooit aangemaand worden. We maken
+      // ons niet afhankelijk van de engine-ordening en completen de run(s) zelf.
       if (fulfilled) {
+        if (!(await _closePromiseTask(task, { outcome, hint }))) { summary.skipped.push({ task_id: task.id, reason: 'CLAIM_LOST' }); continue; }
         await completeRunsForCustomer(cid, 'promise_fulfilled_paid');
         summary.fulfilled++; acted++; continue;
       }
 
-      // ── GEBROKEN: run hervatten (gespreks-pauze opheffen als die er is) ──
-      if (convId) {
-        try { await unpauseRunsForConversation(convId); }
-        catch (e) { console.warn('[promise-maturity] unpause fail-soft:', e?.message || e); }
-      }
-
-      // Auto-bericht ALLEEN bij een gedateerde 1e gebroken belofte.
-      let autoSent = false;
+      // GEBROKEN. Repeat-detectie (gebruikt de nog-open taak): eerdere door ons
+      // gesloten broken-taken (durabele marker) + re-promises in history[].
+      let isRepeat = false;
       if (dated) {
-        // Repeat-detectie (goedkoop): eerdere door ons gesloten broken-taken
-        // (durabele marker maturity_outcome LIKE 'broken%') + re-promises in history[].
         let priorBroken = 0;
         try {
           const { count } = await supabaseAdmin
@@ -199,23 +168,37 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
             .like('payload->>maturity_outcome', 'broken%');
           priorBroken = count || 0;
         } catch (e) { console.warn('[promise-maturity] priorBroken count fail-soft:', e?.message || e); }
-        const hist     = Array.isArray(task.payload?.history) ? task.payload.history : [];
-        const isRepeat = priorBroken > 0 || hist.length > 1;
+        const hist = Array.isArray(task.payload?.history) ? task.payload.history : [];
+        isRepeat = priorBroken > 0 || hist.length > 1;
+      }
 
-        if (config.mode === 'auto_first' && !isRepeat && config.broken_template_name) {
-          const sendRes = await _sendBrokenPromiseMessage({
-            deps, convId, customer, openInvoices, templateName: config.broken_template_name, dryRunOn,
-          });
-          if (sendRes.ok) { summary.broken_auto_sent++; autoSent = true; }
-          else summary.skipped.push({ task_id: task.id, reason: 'SEND_FAILED:' + sendRes.reason });
+      // ── GEBROKEN, AUTO (1e gedateerde belofte, auto_first + template) ──
+      // Sluit de taak, stuur het bericht, en HERVAT (unpause) ALLEEN bij een
+      // geslaagde send. Mislukt de send → NIET hervatten (run blijft veilig
+      // gepauzeerd) + mens-taak voor zichtbaarheid.
+      if (dated && config.mode === 'auto_first' && !isRepeat && config.broken_template_name) {
+        if (!(await _closePromiseTask(task, { outcome, hint }))) { summary.skipped.push({ task_id: task.id, reason: 'CLAIM_LOST' }); continue; }
+        const sendRes = await _sendBrokenPromiseMessage({
+          deps, convId, customer, openInvoices, templateName: config.broken_template_name, dryRunOn,
+        });
+        if (sendRes.ok) {
+          if (convId) { try { await unpauseRunsForConversation(convId); } catch (e) { console.warn('[promise-maturity] unpause fail-soft:', e?.message || e); } }
+          summary.broken_auto_sent++; acted++; continue;
         }
+        await _ensureHumanFollowupTask({ cid, convId, task, promisedHint: hint, dated });
+        summary.skipped.push({ task_id: task.id, reason: 'SEND_FAILED:' + sendRes.reason });
+        summary.broken_human++; acted++; continue;
       }
 
-      // 2e+ gebroken / human_only / geen template / send-fail / ZONDER datum → mens.
-      if (!autoSent) {
-        await _ensureHumanFollowupTask({ cid, convId, task, promisedHint: hint, dated });
-        if (dated) summary.broken_human++; else summary.no_date_human++;
-      }
+      // ── GEBROKEN, MENS (human_only / 2e+ / geen template / zonder datum) ──
+      // HARDE GARANTIE tegen aanmanen: (1) maak EERST de BLOKKERENDE mens-taak,
+      // (2) sluit de belofte-taak pas daarna, (3) HERVAT NOOIT. Lukt de mens-taak
+      // niet, dan blijft de belofte-taak open (die blokkeert nog) → op elk moment
+      // ≥1 blokkerende pending_action, en de run gaat nooit naar 'active'.
+      const ensured = await _ensureHumanFollowupTask({ cid, convId, task, promisedHint: hint, dated });
+      if (!ensured) { summary.skipped.push({ task_id: task.id, reason: 'HUMAN_TASK_FAILED' }); continue; }
+      if (!(await _closePromiseTask(task, { outcome, hint }))) { summary.skipped.push({ task_id: task.id, reason: 'CLAIM_LOST' }); continue; }
+      if (dated) summary.broken_human++; else summary.no_date_human++;
       acted++;
     } catch (e) {
       summary.errors.push({ task_id: task.id, error: e?.message || String(e) });
@@ -223,6 +206,30 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
   }
 
   return summary;
+}
+
+// ── Belofte-taak atomair sluiten (REJECTED) ─────────────────────────────────
+// maturity_outcome + rejection_reason maken 'nagekomen' vs 'gebroken' glashelder
+// (de UI toont status REJECTED als "afgewezen"; de reden corrigeert dat).
+// Returnt true als DEZE call de taak sloot (claim gewonnen), anders false.
+async function _closePromiseTask(task, { outcome, hint }) {
+  const rejectionReason =
+      outcome === 'fulfilled' ? 'belofte NAGEKOMEN — factuur betaald (auto-maturity, geen afwijzing)'
+    : outcome === 'broken'    ? 'belofte VERLOPEN — datum verstreken, factuur nog open (auto-maturity)'
+    :                           'belofte zonder datum — vervaltermijn verstreken (auto-maturity)';
+  const closePayload = {
+    ...(task.payload || {}),
+    maturity_outcome: outcome,
+    matured_at:       new Date().toISOString(),
+    matured_hint:     hint || null,
+  };
+  const { data: claimed } = await supabaseAdmin
+    .from('pending_actions')
+    .update({ status: 'REJECTED', rejection_reason: rejectionReason, payload: closePayload, updated_at: new Date().toISOString() })
+    .eq('id', task.id)
+    .in('status', ['PENDING', 'APPROVED'])
+    .select('id');
+  return !!(claimed && claimed.length);
 }
 
 // ── Run(s) van een schuldenvrije klant direct afronden ──────────────────────
@@ -334,6 +341,9 @@ async function _sendBrokenPromiseMessage({ deps, convId, customer, openInvoices,
 }
 
 // ── Mens-worklist-taak (blokkeert bewust → mens beslist) ────────────────────
+// Returnt true als er ná deze call een BLOKKERENDE mens-taak bestaat (nieuw óf
+// al aanwezig), false alleen als het aanmaken faalde. De caller sluit de
+// belofte-taak pas als dit true is → er is altijd ≥1 blokkerende actie.
 async function _ensureHumanFollowupTask({ cid, convId, task, promisedHint, dated }) {
   // Idempotent: geen tweede open promise-followup voor dezelfde klant(+gesprek).
   try {
@@ -343,7 +353,7 @@ async function _ensureHumanFollowupTask({ cid, convId, task, promisedHint, dated
       .filter('payload->>source', 'eq', 'promise_maturity');
     if (convId) q = q.filter('payload->>conversation_id', 'eq', convId);
     const { data: existing } = await q.limit(1);
-    if (existing?.length) return;
+    if (existing?.length) return true; // blokkerende taak bestaat al
   } catch (e) { console.warn('[promise-maturity] human-task idem-check fail-soft:', e?.message || e); }
 
   const description = dated
@@ -365,5 +375,6 @@ async function _ensureHumanFollowupTask({ cid, convId, task, promisedHint, dated
       customer_id: cid, arrangement_id: null, invoice_id: null,
       action_type: 'MANUAL_FOLLOWUP', status: 'PENDING', proposed_by_user_id: null, payload,
     });
-  } catch (e) { console.warn('[promise-maturity] human-task insert fail:', e?.message); }
+    return true;
+  } catch (e) { console.warn('[promise-maturity] human-task insert fail:', e?.message); return false; }
 }
