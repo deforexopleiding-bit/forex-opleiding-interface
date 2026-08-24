@@ -67,6 +67,10 @@
       "schedule": "15 9 * * *"
     },
     {
+      "path": "/api/cron-dunning-promise-maturity",
+      "schedule": "30 9 * * *"
+    },
+    {
       "path": "/api/cron-arrangements-breach-check",
       "schedule": "0 6 * * *"
     },
