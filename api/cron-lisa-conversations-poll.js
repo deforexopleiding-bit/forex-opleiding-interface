@@ -30,6 +30,41 @@ const MSG_PAGE     = 100;                        // /conversations/{id}/messages
 const FALLBACK_START        = '2026-08-06T00:00:00Z';  // informatief — watermark bij lege DB
 const FALLBACK_MAX_CONTACTS = 500;                // per run bij per-contact iteratie
 
+// Round-robin cursor in app_settings. Elke run behandelt contacten met
+// `id > cursor.last_contact_id` in stabiele `id asc`-volgorde. Bij einde-lijst
+// wrapt de cursor terug naar null (nieuwe passe). Zonder deze cursor zou de
+// poll steeds dezelfde eerste ~20 herkauwen, omdat de DB-trigger
+// update_lisa_conv_timestamps() `last_message_at` op de conv bijwerkt bij elke
+// message-insert → gebackfillde contacten zouden bovenaan blijven staan bij
+// een `last_message_at desc`-sort.
+const CURSOR_KEY = 'lisa_ig_poll_cursor';
+
+async function readCursor() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', CURSOR_KEY).maybeSingle();
+    if (error) { console.warn('[lisa-poll] cursor read:', error.message); return null; }
+    const v = data?.value;
+    if (v && typeof v === 'object') return v;
+    return null;
+  } catch (e) { console.warn('[lisa-poll] cursor read exception:', e?.message || e); return null; }
+}
+
+async function writeCursor(value) {
+  try {
+    const row = { key: CURSOR_KEY, value, updated_by_user_id: null };
+    const { data: existing } = await supabaseAdmin
+      .from('app_settings').select('key').eq('key', CURSOR_KEY).maybeSingle();
+    if (existing) {
+      const { error } = await supabaseAdmin.from('app_settings').update(row).eq('key', CURSOR_KEY);
+      if (error) console.warn('[lisa-poll] cursor update:', error.message);
+    } else {
+      const { error } = await supabaseAdmin.from('app_settings').insert(row);
+      if (error) console.warn('[lisa-poll] cursor insert:', error.message);
+    }
+  } catch (e) { console.warn('[lisa-poll] cursor write exception:', e?.message || e); }
+}
+
 // GHL levert bij IG Instagram-messages typisch als `messageType` = TYPE_INSTAGRAM_MESSAGE
 // (of TYPE_IG / IG in oudere payloads). We tolereren varianten omdat de exacte
 // naam per GHL API-versie kan drijven; niet-IG wordt geskipt (zie isInstagram).
@@ -115,12 +150,11 @@ export default async function handler(req, res) {
 
   const startTime = Date.now();
   const stats = {
-    strategy:            'per_contact',   // 2026-08-24: search-filter TYPE_INSTAGRAM
-                                          // wordt door GHL genegeerd (retourneert alle
-                                          // kanalen); per-contact over bekende
-                                          // lisa_conversations is het enige betrouwbare
-                                          // pad voor de bevroren-sinds-6-aug IG-set.
+    strategy:            'per_contact',
     watermark:           null,
+    cursor_start:        null,           // id waar we deze run begonnen (na skip)
+    cursor_end:          null,           // id van laatst behandelde contact
+    wrapped:             false,          // true als we in deze run terug naar null gingen
     contacts_iterated:   0,
     messages_seen:       0,
     messages_upserted:   0,
@@ -157,24 +191,56 @@ export default async function handler(req, res) {
     //    lisa_conversations staan. Voor die groep werkt de webhook (en de
     //    live_mode_off-ingest-branch die inbound tóch opslaat zodra GHL
     //    weer pusht).
+    //
+    //    Forward-progress-garantie: stabiele sort op `id asc` + round-robin-
+    //    cursor in app_settings. `last_message_at desc` zou steeds dezelfde
+    //    top-N herkauwen omdat de DB-trigger last_message_at bijwerkt bij
+    //    elke message-insert → gebackfillde contacten glijden naar de top en
+    //    verhinderen dat de onbehandelde contacten aan de beurt komen.
     {
-      const { data: knownConvs, error: kcErr } = await supabaseAdmin
+      const cursor  = await readCursor();
+      const startId = cursor?.last_contact_id || null;
+      stats.cursor_start = startId;
+
+      let q = supabaseAdmin
         .from('lisa_conversations')
-        .select('ghl_contact_id, last_message_at')
+        .select('id, ghl_contact_id')
         .eq('is_sandbox', false)
         .not('ghl_contact_id', 'is', null)
-        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: true })
         .limit(FALLBACK_MAX_CONTACTS);
+      if (startId) q = q.gt('id', startId);
+
+      let { data: knownConvs, error: kcErr } = await q;
       if (kcErr) {
-        console.error('[lisa-poll fallback] known-convs select:', kcErr.message);
+        console.error('[lisa-poll] known-convs select:', kcErr.message);
         stats.errors++;
       }
+
+      // Wrap-around: cursor was gezet en er zit niks meer na → reset naar null
+      // en herstart vanaf het begin binnen dezelfde run (blijft binnen ABORT_MS).
+      if (startId && (!knownConvs || knownConvs.length === 0)) {
+        stats.wrapped = true;
+        await writeCursor({ last_contact_id: null, wrapped_at: new Date().toISOString() });
+        const { data: fromStart, error: fsErr } = await supabaseAdmin
+          .from('lisa_conversations')
+          .select('id, ghl_contact_id')
+          .eq('is_sandbox', false)
+          .not('ghl_contact_id', 'is', null)
+          .order('id', { ascending: true })
+          .limit(FALLBACK_MAX_CONTACTS);
+        if (fsErr) { console.error('[lisa-poll] wrap select:', fsErr.message); stats.errors++; }
+        knownConvs = fromStart || [];
+      }
+
+      let lastProcessedId = startId;
 
       for (const kc of (knownConvs || [])) {
         if (Date.now() - startTime > ABORT_MS) { stats.aborted = true; break; }
         const contactId = kc.ghl_contact_id;
         if (!contactId) continue;
         stats.contacts_iterated++;
+        lastProcessedId = kc.id;
 
         // Per-contact search (zelfde patroon als follow-up-ghl-conversations-poll).
         const csUrl = new URL(`${GHL_API_BASE}/conversations/search`);
@@ -255,6 +321,19 @@ export default async function handler(req, res) {
             stats.messages_upserted++;
           }
         }
+      }
+
+      // Persist cursor voor de volgende cron-run. Update ALTIJD (ook bij abort),
+      // want lastProcessedId is de laatste contact die we daadwerkelijk in de
+      // loop hebben aangeraakt. Bij lege lijst zonder wrap: laat cursor staan.
+      if (lastProcessedId && lastProcessedId !== startId) {
+        stats.cursor_end = lastProcessedId;
+        await writeCursor({
+          last_contact_id: lastProcessedId,
+          updated_at:      new Date().toISOString(),
+        });
+      } else {
+        stats.cursor_end = startId;
       }
     }
 
