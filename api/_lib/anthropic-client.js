@@ -261,4 +261,4 @@ export async function anthropicStructuredOutput(options = {}) {
   return toolUseBlock.input;
 }
 
-export { AnthropicClientError };
+export { AnthropicClientError, DEFAULT_MODEL };
