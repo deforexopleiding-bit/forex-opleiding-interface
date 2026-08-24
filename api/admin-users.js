@@ -229,9 +229,15 @@ export default async function handler(req, res) {
   // ── POST — nieuwe user aanmaken ÓÓÓF resend invite ────────────────────────
 
   if (req.method === 'POST') {
-    const { email, full_name, role, resend_only } = req.body || {};
+    const { email, full_name, role, resend_only, reactivate } = req.body || {};
 
     if (!email) return res.status(400).json({ error: 'E-mailadres is verplicht.' });
+
+    // Aanmaken/heractiveren is super_admin-only vanaf v79 (auth-scope).
+    // Resend-invite blijft admin/manager toegankelijk.
+    if (!resend_only && admin.profile.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Alleen super_admin kan gebruikers aanmaken of heractiveren.' });
+    }
 
     // ── Resend invite ──────────────────────────────────────────────────────
     if (resend_only) {
@@ -286,15 +292,94 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
     }
 
-    // 409 als profile al bestaat
-    const { data: duplicate } = await supabaseAdmin
+    // ── Collisie-guard: actief vs soft-deleted profile ──────────────────────
+    // v79-uitbreiding: onderscheid actief (409, weiger) vs soft-deleted
+    // (409 met code 'reactivate_available' → UI biedt heractivate aan;
+    // caller kan opnieuw POSTen met reactivate=true om het bestaande account
+    // te herstellen i.p.v. dubbel aan te maken).
+    const { data: existing } = await supabaseAdmin
       .from('profiles')
-      .select('id')
+      .select('id, email, full_name, role, is_active, deleted_at')
       .eq('email', email)
-      .single();
+      .maybeSingle();
 
-    if (duplicate) {
-      return res.status(409).json({ error: 'Er bestaat al een gebruiker met dit e-mailadres.' });
+    if (existing && existing.deleted_at === null) {
+      return res.status(409).json({ error: 'Er bestaat al een actief account met dit e-mailadres.', code: 'active_duplicate' });
+    }
+
+    if (existing && existing.deleted_at !== null && !reactivate) {
+      return res.status(409).json({
+        error: 'Er bestaat een verwijderde gebruiker met dit e-mailadres. Heractiveer om te herstellen.',
+        code:  'reactivate_available',
+        deleted_user: {
+          id:        existing.id,
+          full_name: existing.full_name,
+          role:      existing.role,
+        },
+      });
+    }
+
+    // ── Heractivate-pad: bestaande soft-deleted user herstellen ─────────────
+    // Herstelt profiles.deleted_at + is_active, cleart auth-ban, en syncet
+    // profiles.role + user_roles naar de nieuwe (of behouden) rol. Verstuurt
+    // een nieuwe recovery-link zodat de user meteen weer kan inloggen.
+    if (existing && existing.deleted_at !== null && reactivate === true) {
+      const restoredRole = (role && VALID_ROLES.includes(role)) ? role : existing.role;
+      if (restoredRole === 'super_admin' && admin.profile.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
+      }
+      const restoredName = full_name || existing.full_name || '';
+
+      // 1) profiles: deleted_at=NULL + is_active=true + role/name sync.
+      const nowIso = new Date().toISOString();
+      const { error: profErr } = await supabaseAdmin
+        .from('profiles')
+        .update({ deleted_at: null, is_active: true, role: restoredRole, full_name: restoredName, updated_at: nowIso })
+        .eq('id', existing.id);
+      if (profErr) return res.status(500).json({ error: 'profiles heractivate: ' + profErr.message });
+
+      // 2) auth-unban.
+      try {
+        const { error: unbanErr } = await supabaseAdmin.auth.admin.updateUserById(existing.id, { ban_duration: 'none' });
+        if (unbanErr) console.warn('[admin-users] reactivate auth-unban (soft):', unbanErr.message);
+      } catch (e) {
+        console.warn('[admin-users] reactivate auth-unban exception (soft):', e?.message || e);
+      }
+
+      // 3) user_roles sync — leeg maken, dan single canonieke rol.
+      try {
+        await supabaseAdmin.from('user_roles').delete().eq('user_id', existing.id);
+        await supabaseAdmin.from('user_roles').upsert(
+          { user_id: existing.id, role: restoredRole, assigned_by: admin.user.id },
+          { onConflict: 'user_id,role' },
+        );
+      } catch (e) {
+        console.warn('[admin-users] reactivate user_roles sync (soft):', e?.message || e);
+      }
+
+      // 4) Nieuwe invite-mail zodat gebruiker meteen wachtwoord kan resetten.
+      let mailSent = false; let mailError = null;
+      try {
+        const actionLink = await generateRecoveryLink(email, restoredRole);
+        await sendInviteMail({ toEmail: email, fullName: restoredName || email, role: restoredRole, actionLink });
+        mailSent = true;
+      } catch (e) {
+        mailError = e.message;
+        console.error('[admin-users] reactivate mail failed:', e.message);
+      }
+
+      await logAudit({
+        action:  'reactivate_user',
+        payload: { target_email: email, target_id: existing.id, admin_email: admin.profile.email, role: restoredRole, mail_sent: mailSent, ...(mailError ? { mail_error: mailError } : {}) },
+        status:  'success',
+        triggered_by: admin.profile.email,
+      });
+
+      return res.status(200).json({
+        user: { id: existing.id, email, full_name: restoredName, role: restoredRole, is_active: true },
+        mail_sent: mailSent,
+        message:   mailSent ? 'Gebruiker heractiveerd; uitnodiging opnieuw verstuurd.' : `Gebruiker heractiveerd maar mail sturen mislukt: ${mailError}`,
+      });
     }
 
     // Tijdelijk wachtwoord — user overschrijft via recovery link
@@ -317,6 +402,25 @@ export default async function handler(req, res) {
         triggered_by:  admin.profile.email,
       });
       return res.status(400).json({ error: createError.message });
+    }
+
+    // v79-fix: user_roles sync na createUser. De handle_new_user() DB-trigger
+    // maakt de profiles-rij aan met de rol uit user_metadata, maar zet géén
+    // rij in user_roles. Voeg die hier expliciet toe zodat permission-checks
+    // ('any of user_roles') meteen kloppen.
+    try {
+      await supabaseAdmin.from('user_roles').upsert(
+        { user_id: createData.user.id, role, assigned_by: admin.user.id },
+        { onConflict: 'user_id,role' },
+      );
+    } catch (e) {
+      console.warn('[admin-users] user_roles insert (soft):', e?.message || e);
+    }
+    // profiles.role verzekeren (fallback als de trigger role='viewer' zette).
+    try {
+      await supabaseAdmin.from('profiles').update({ role }).eq('id', createData.user.id);
+    } catch (e) {
+      console.warn('[admin-users] profiles.role sync (soft):', e?.message || e);
     }
 
     // Recovery link genereren + branded mail sturen

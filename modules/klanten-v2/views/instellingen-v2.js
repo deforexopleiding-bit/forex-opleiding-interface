@@ -5179,7 +5179,8 @@
   // definieert.
   const VALID_ROLES = ['super_admin','admin','manager','sales','mentor','marketing','administratie','viewer'];
   const CRM_STAFF_ROLES_PICKER = ['super_admin','admin','manager','sales','mentor','administratie','marketing'];
-  const _users = { loading: false, error: null, fetched: false, items: [], busy: {}, ed: null };
+  // v=80 uitbreiding: `nw` = state voor "Nieuwe gebruiker"-modal (open + form).
+  const _users = { loading: false, error: null, fetched: false, items: [], busy: {}, ed: null, nw: null };
   async function fetchUsers(force) {
     if (_users.loading) return;
     if (_users.fetched && !force) return;
@@ -5274,15 +5275,56 @@
       }
     }, 'warn');
   };
+  // v=80: Nieuwe gebruiker aanmaken (super_admin-only).
+  window.__setUsersNewOpen = () => {
+    _users.nw = { full_name: '', email: '', role: 'sales', busy: false };
+    if (render) render();
+  };
+  window.__setUsersNewCancel = () => { _users.nw = null; if (render) render(); };
+  async function _submitNewUser({ reactivate = false } = {}) {
+    const n = _users.nw; if (!n) return;
+    const q = (sel) => document.querySelector(sel);
+    const nn = q('[data-nu-field="full_name"]'); if (nn) n.full_name = String(nn.value || '').trim();
+    const em = q('[data-nu-field="email"]');     if (em) n.email     = String(em.value || '').trim();
+    const rl = q('[data-nu-field="role"]');      if (rl) n.role      = String(rl.value || 'sales');
+    if (!n.email)     { showToast('E-mailadres is verplicht', 'warn'); return; }
+    if (!n.full_name) { showToast('Naam is verplicht', 'warn'); return; }
+    if (!CRM_STAFF_ROLES_PICKER.includes(n.role)) { showToast('Kies een geldige rol', 'warn'); return; }
+    n.busy = true; if (render) render();
+    const body = { email: n.email, full_name: n.full_name, role: n.role };
+    if (reactivate) body.reactivate = true;
+    const j = await tryFetch('admin-users-create', '/api/admin-users', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    n.busy = false;
+    if (j?.__error || j?.error) {
+      // reactivate-aanbod bij soft-deleted duplicate.
+      if (j?.code === 'reactivate_available') {
+        const name = (j.deleted_user && j.deleted_user.full_name) || n.email;
+        openConfirm(`Er bestaat een verwijderde gebruiker met dit e-mailadres ("${esc(name)}"). Wil je die HERACTIVEREN met de nieuwe naam + rol? De user krijgt opnieuw een uitnodigingsmail en kan meteen inloggen.`, () => _submitNewUser({ reactivate: true }));
+        if (render) render();
+        return;
+      }
+      showToast('Aanmaken mislukt: ' + (j.__error || j.error), 'warn');
+      if (render) render();
+      return;
+    }
+    _users.nw = null;
+    const mailNote = (j && j.mail_sent === false) ? ' (mail sturen mislukt — verstuur handmatig via Resend)' : '';
+    showToast('Gebruiker aangemaakt; uitnodiging verstuurd.' + mailNote, 'ok');
+    _users.fetched = false; fetchUsers(true);
+  }
+  window.__setUsersNewSave = () => { _submitNewUser({ reactivate: false }); };
+
   window.__setUsersImpersonate = (userId) => {
     const u = _users.items.find(x => x.id === userId);
     if (!u) return;
-    openConfirm(`Impersonate ${u.email}? Je zult INGELOGD zijn als deze gebruiker tot je uitlogt. Alleen voor super_admin. Audit-log wordt geschreven.`, async () => {
+    openConfirm(`Inloggen als ${u.email}? Je bent daarna INGELOGD als deze gebruiker tot je uitlogt. Alleen voor super_admin. Audit-log wordt geschreven.`, async () => {
       const j = await tryFetch('admin-impersonate', '/api/admin-impersonate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_user_id: userId }),
       });
-      if (j?.__error || j?.error) { showToast('Impersonate mislukt: ' + (j.__error || j.error), 'warn'); return; }
-      showToast('Impersonate actief — herlaad pagina', 'ok');
+      if (j?.__error || j?.error) { showToast('Inloggen als mislukt: ' + (j.__error || j.error), 'warn'); return; }
+      showToast('Ingelogd als andere gebruiker — herlaad pagina', 'ok');
       // Redirect naar / zodat de nieuwe sessie effect heeft (identiek gedrag admin.html).
       setTimeout(() => { try { window.location.href = '/'; } catch (_) {} }, 800);
     }, 'warn');
@@ -5829,6 +5871,42 @@
     </div>`;
   }
 
+  function _usersNewModalHtml() {
+    const n = _users.nw; if (!n) return '';
+    const roleOpts = CRM_STAFF_ROLES_PICKER.map(r => `<option value="${r}" ${n.role === r ? 'selected' : ''}>${r}</option>`).join('');
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setUsersNewCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(520px,100%);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+          <div style="font-size:14px;font-weight:600">Nieuwe gebruiker aanmaken</div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__setUsersNewCancel()">✕</button>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="padding:8px 12px;background:var(--info-soft,var(--surface-2));color:var(--text-2);border-radius:6px;font-size:11px;line-height:1.5">
+            <b>ℹ Flow.</b> De nieuwe user krijgt direct een uitnodigingsmail met een link om zelf een wachtwoord in te stellen (geldig 24u). Rol landt in zowel <code>profiles.role</code> als <code>user_roles</code>.
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Naam</label>
+            <input type="text" data-nu-field="full_name" value="${esc(n.full_name)}" placeholder="Voor + achternaam" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">E-mail (login-identity)</label>
+            <input type="email" data-nu-field="email" value="${esc(n.email)}" placeholder="naam@deforexopleiding.nl" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Rol</label>
+            <select data-nu-field="role" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box">
+              ${roleOpts}
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setUsersNewCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${n.busy ? 'disabled' : ''} onclick="window.__setUsersNewSave()">${n.busy ? 'Bezig…' : 'Aanmaken + uitnodigen'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function _usersEditModalHtml() {
     const e = _users.ed; if (!e) return '';
     const busy = !!_users.busy[e.id];
@@ -5872,7 +5950,7 @@
     if (_users.error) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${esc(_users.error)}</div>`;
     const isSA = isSuperAdmin();
     // v=78: rij toont naam/email/rol + inactieve-badge; klik-om-te-bewerken;
-    // Bewerken / Impersonate / Verwijderen alleen zichtbaar voor super_admin.
+    // Bewerken / Inloggen als / Verwijderen alleen zichtbaar voor super_admin.
     const rowsHtml = _users.items.map((u) => {
       const busy = !!_users.busy[u.id];
       const isSelf = false; // We tonen zelf-lockout niet visueel; server weigert het al.
@@ -5888,7 +5966,7 @@
           ${isSA
             ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersEdit('${u.id}')" style="font-size:11px">Bewerk</button>
                <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersToggleActive('${u.id}')" style="font-size:11px" title="${u.is_active ? 'Inactief zetten (auth-ban)' : 'Heractiveren'}">${u.is_active ? 'Inactief' : 'Heractiveer'}</button>
-               <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersImpersonate('${u.id}')" style="font-size:11px" title="Ingelogd worden als deze user">Impersonate</button>
+               <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersImpersonate('${u.id}')" style="font-size:11px" title="Ingelogd worden als deze user">Inloggen als</button>
                <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersSoftDelete('${u.id}')" style="font-size:11px;color:var(--rose)" title="Soft-delete (rij blijft, login geblokkeerd)">Verwijder</button>`
             : `<span style="font-size:11px;color:var(--text-3);font-style:italic">alleen super_admin kan bewerken</span>`}
         </td>
@@ -5896,9 +5974,13 @@
     }).join('');
     return `<div style="max-width:1100px">
       ${_usersEditModalHtml()}
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      ${_usersNewModalHtml()}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px">
         <div style="font-size:12.5px;color:var(--text-3)">${_users.items.length} gebruiker(s) · ${_users.items.filter(u => u.is_active).length} actief · ${_users.items.filter(u => !u.is_active).length} inactief</div>
-        <button class="btn btn-ghost btn-sm" onclick="window.__setUsersRefresh()">↻ Ververs</button>
+        <div style="display:flex;gap:6px">
+          ${isSA ? `<button class="btn btn-primary btn-sm" onclick="window.__setUsersNewOpen()" style="font-size:12px">+ Nieuwe gebruiker</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="window.__setUsersRefresh()">↻ Ververs</button>
+        </div>
       </div>
       <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse">
