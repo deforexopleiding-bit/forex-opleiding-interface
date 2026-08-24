@@ -3477,6 +3477,8 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .kv-notif-btn[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
 .kv-notif-badge { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--rose); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; font-family: 'IBM Plex Mono', monospace; }
 .kv-notif-panel { position: absolute; right: 0; top: calc(100% + 6px); width: 380px; max-width: calc(100vw - 20px); max-height: 480px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,.14); z-index: 100; display: flex; flex-direction: column; overflow: hidden; }
+/* v=1r11: display:flex overrulede [hidden]{display:none} → paneel hing open bij load. Fix: expliciete [hidden]-regel. */
+.kv-notif-panel[hidden] { display: none; }
 .kv-notif-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .kv-notif-title { font-size: 13px; font-weight: 600; }
 .kv-notif-filter { display: inline-flex; gap: 2px; background: var(--surface-2); border-radius: 6px; padding: 2px; }
