@@ -5174,8 +5174,12 @@
      POST /api/admin-impersonate. Custom confirms via openConfirm(). Lazy-load
      (1 call bij eerste sectie-open); geen fetch-on-render.
      ═════════════════════════════════════════════════════════════════════ */
+  // v=78 uitbreiding: CRM_STAFF_ROLES = whitelist voor rol-picker (viewer/
+  // student uit; die horen niet bij team). Bevat exact wat api/_lib/crm-roles.js
+  // definieert.
   const VALID_ROLES = ['super_admin','admin','manager','sales','mentor','marketing','administratie','viewer'];
-  const _users = { loading: false, error: null, fetched: false, items: [], busy: {} };
+  const CRM_STAFF_ROLES_PICKER = ['super_admin','admin','manager','sales','mentor','administratie','marketing'];
+  const _users = { loading: false, error: null, fetched: false, items: [], busy: {}, ed: null };
   async function fetchUsers(force) {
     if (_users.loading) return;
     if (_users.fetched && !force) return;
@@ -5211,6 +5215,64 @@
     if (!u) return;
     const next = !u.is_active;
     openConfirm(`${next ? 'Activeer' : 'DEACTIVEER'} ${u.email}?${next ? '' : ' Gebruiker verliest toegang.'}`, () => patchUser(userId, { is_active: next }, next ? 'Activeren' : 'Deactiveren'), 'warn');
+  };
+  // v=78: open/edit-modal + soft-delete (super_admin-only).
+  window.__setUsersEdit = (userId) => {
+    const u = _users.items.find(x => x.id === userId);
+    if (!u) return;
+    _users.ed = {
+      id: u.id, full_name: u.full_name || '', email: u.email || '',
+      role: u.role || 'viewer', is_active: !!u.is_active,
+    };
+    if (render) render();
+  };
+  window.__setUsersEditCancel = () => { _users.ed = null; if (render) render(); };
+  window.__setUsersEditSave = async () => {
+    const e = _users.ed; if (!e) return;
+    // Sync-from-DOM: uncontrolled inputs.
+    const q = (sel) => document.querySelector(sel);
+    const n = q('[data-eu-field="full_name"]'); if (n) e.full_name = String(n.value || '');
+    const em = q('[data-eu-field="email"]');    if (em) e.email = String(em.value || '');
+    const rl = q('[data-eu-field="role"]');     if (rl) e.role = String(rl.value || 'viewer');
+    const orig = _users.items.find(x => x.id === e.id);
+    if (!orig) { showToast('Origineel niet gevonden', 'warn'); return; }
+    // Bouw patch: alleen gewijzigde velden.
+    const patch = {};
+    if (e.full_name !== (orig.full_name || '')) patch.full_name = e.full_name;
+    if (e.email && e.email !== orig.email) patch.email = e.email;
+    if (e.role !== orig.role) patch.set_canonical_role = e.role;
+    if (Object.keys(patch).length === 0) {
+      showToast('Geen wijzigingen', 'info');
+      _users.ed = null; if (render) render(); return;
+    }
+    _users.busy[e.id] = true; if (render) render();
+    const j = await tryFetch('admin-users-edit', '/api/admin-users?id=' + encodeURIComponent(e.id), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+    });
+    _users.busy[e.id] = false;
+    if (j?.__error || j?.error) {
+      showToast('Opslaan mislukt: ' + (j.__error || j.error), 'warn');
+      if (render) render();
+      return;
+    }
+    _users.ed = null;
+    showToast('Gebruiker bijgewerkt', 'ok');
+    _users.fetched = false; fetchUsers(true);
+  };
+  window.__setUsersSoftDelete = (userId) => {
+    const u = _users.items.find(x => x.id === userId);
+    if (!u) return;
+    openConfirm(`Gebruiker "${esc(u.email)}" VERWIJDEREN? Soft-delete: rij blijft in de DB (audit + FK-safety), maar de user verdwijnt uit de lijst, kan niet meer inloggen (auth-ban), en verliest alle rol-toegang (user_roles gewist). Herstellen kan alleen via DB.`, async () => {
+      _users.busy[userId] = true; if (render) render();
+      const j = await tryFetch('admin-users-delete', '/api/admin-users?id=' + encodeURIComponent(userId), { method: 'DELETE' });
+      _users.busy[userId] = false;
+      if (j?.__error || j?.error) {
+        showToast('Verwijderen mislukt: ' + (j.__error || j.error), 'warn');
+      } else {
+        showToast('Gebruiker verwijderd (soft)', 'ok');
+        _users.fetched = false; fetchUsers(true);
+      }
+    }, 'warn');
   };
   window.__setUsersImpersonate = (userId) => {
     const u = _users.items.find(x => x.id === userId);
@@ -5767,36 +5829,76 @@
     </div>`;
   }
 
+  function _usersEditModalHtml() {
+    const e = _users.ed; if (!e) return '';
+    const busy = !!_users.busy[e.id];
+    const roleOpts = CRM_STAFF_ROLES_PICKER.map(r => `<option value="${r}" ${e.role === r ? 'selected' : ''}>${r}</option>`).join('');
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__setUsersEditCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(520px,100%);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+          <div style="font-size:14px;font-weight:600">Gebruiker bewerken</div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__setUsersEditCancel()">✕</button>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+          <div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:11px;line-height:1.5">
+            <b>⚠ Auth-scope.</b> E-mail wijzigen syncet auth.users én profiles (login-identity). Rol wijzigen syncet zowel profiles.role als user_roles (single canonieke rol; overige rol-rijen worden verwijderd).
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Naam</label>
+            <input type="text" data-eu-field="full_name" value="${esc(e.full_name)}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">E-mail (login-identity)</label>
+            <input type="email" data-eu-field="email" value="${esc(e.email)}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:'IBM Plex Mono',monospace;box-sizing:border-box" />
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text-3);display:block;margin-bottom:3px">Rol (canoniek)</label>
+            <select data-eu-field="role" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box">
+              ${roleOpts}
+            </select>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window.__setUsersEditCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersEditSave()">${busy ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function bodyGebruikers() {
     if (!_users.fetched && !_users.loading) queueMicrotask(() => fetchUsers());
     if (_users.loading && !_users.items.length) return `<div style="padding:24px;color:var(--text-3);font-size:13px">Laden…</div>`;
     if (_users.error) return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${esc(_users.error)}</div>`;
     const isSA = isSuperAdmin();
+    // v=78: rij toont naam/email/rol + inactieve-badge; klik-om-te-bewerken;
+    // Bewerken / Impersonate / Verwijderen alleen zichtbaar voor super_admin.
     const rowsHtml = _users.items.map((u) => {
       const busy = !!_users.busy[u.id];
-      const rolOpts = VALID_ROLES.map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('');
-      return `<tr style="border-bottom:1px solid var(--border)">
+      const isSelf = false; // We tonen zelf-lockout niet visueel; server weigert het al.
+      const statusBadge = u.is_active
+        ? `<span style="padding:1px 7px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald);font-size:10.5px;font-weight:600">✓ actief</span>`
+        : `<span style="padding:1px 7px;border-radius:10px;background:var(--rose-soft);color:var(--rose);font-size:10.5px;font-weight:600">⨯ inactief</span>`;
+      return `<tr style="border-bottom:1px solid var(--border);${u.is_active ? '' : 'opacity:.65'}">
         <td style="padding:8px 10px;font-size:12.5px">${esc(u.full_name || '—')}</td>
         <td style="padding:8px 10px;font-size:12px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">${esc(u.email)}</td>
-        <td style="padding:8px 10px">
-          <select ${busy ? 'disabled' : ''} onchange="window.__setUsersChangeRole('${u.id}', this.value)" style="padding:4px 6px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)">
-            ${rolOpts}
-          </select>
-        </td>
-        <td style="padding:8px 10px;font-size:12px">
-          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersToggleActive('${u.id}')" style="font-size:11.5px">
-            ${u.is_active ? '✓ actief' : '⨯ inactief'}
-          </button>
-        </td>
-        <td style="padding:8px 10px;text-align:right">
-          ${isSA && u.id ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersImpersonate('${u.id}')" style="font-size:11px" title="Ingelogd worden als deze user (super_admin only)">Impersonate</button>` : ''}
+        <td style="padding:8px 10px;font-size:12px;color:var(--text-2)">${esc(u.role || '—')}</td>
+        <td style="padding:8px 10px">${statusBadge}</td>
+        <td style="padding:8px 10px;text-align:right;white-space:nowrap">
+          ${isSA
+            ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersEdit('${u.id}')" style="font-size:11px">Bewerk</button>
+               <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersToggleActive('${u.id}')" style="font-size:11px" title="${u.is_active ? 'Inactief zetten (auth-ban)' : 'Heractiveren'}">${u.is_active ? 'Inactief' : 'Heractiveer'}</button>
+               <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersImpersonate('${u.id}')" style="font-size:11px" title="Ingelogd worden als deze user">Impersonate</button>
+               <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setUsersSoftDelete('${u.id}')" style="font-size:11px;color:var(--rose)" title="Soft-delete (rij blijft, login geblokkeerd)">Verwijder</button>`
+            : `<span style="font-size:11px;color:var(--text-3);font-style:italic">alleen super_admin kan bewerken</span>`}
         </td>
       </tr>`;
     }).join('');
-    return `<div style="max-width:1000px">
+    return `<div style="max-width:1100px">
+      ${_usersEditModalHtml()}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-size:12.5px;color:var(--text-3)">${_users.items.length} gebruiker(s)</div>
-        <button class="btn btn-ghost btn-sm" onclick="(function(){window.__setUsersRefresh && window.__setUsersRefresh()})()">↻ Ververs</button>
+        <div style="font-size:12.5px;color:var(--text-3)">${_users.items.length} gebruiker(s) · ${_users.items.filter(u => u.is_active).length} actief · ${_users.items.filter(u => !u.is_active).length} inactief</div>
+        <button class="btn btn-ghost btn-sm" onclick="window.__setUsersRefresh()">↻ Ververs</button>
       </div>
       <div style="overflow-x:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse">

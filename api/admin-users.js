@@ -188,6 +188,7 @@ export default async function handler(req, res) {
       .from('profiles')
       .select('*')
       .in('role', CRM_STAFF_ROLES)
+      .is('deleted_at', null)   // 2026-08-24: soft-deleted verbergen
       .order('role')
       .order('email');
 
@@ -365,7 +366,88 @@ export default async function handler(req, res) {
     const userId = req.query.id;
     if (!userId) return res.status(400).json({ error: 'Query parameter ?id is verplicht.' });
 
-    const { role, is_active, full_name, add_role, remove_role, email, password, phone } = req.body || {};
+    const { role, is_active, full_name, add_role, remove_role, email, password, phone, set_canonical_role } = req.body || {};
+
+    // ── Guardrails (super_admin-only destructive actions) ────────────────────
+    // (1) Zelf-lockout: super_admin kan zichzelf niet inactief zetten of demoten.
+    // (2) Laatste-super_admin: blokkeer is_active=false of role-verlaging als
+    //     dat de laatste ACTIEVE super_admin zou wegnemen.
+    const isSelfLockoutRisk = (userId === admin.user.id) && (
+      is_active === false ||
+      (role !== undefined && role !== 'super_admin') ||
+      (set_canonical_role !== undefined && set_canonical_role !== 'super_admin')
+    );
+    if (isSelfLockoutRisk) {
+      return res.status(400).json({ error: 'Je kunt jezelf niet inactief zetten of demoten.' });
+    }
+
+    // Last-super_admin-check: alleen bij verlaging/deactivering VAN een super_admin.
+    const willTouchSuperAdminStatus = (is_active === false) ||
+      (role !== undefined && role !== 'super_admin') ||
+      (set_canonical_role !== undefined && set_canonical_role !== 'super_admin');
+    if (willTouchSuperAdminStatus) {
+      const { data: target } = await supabaseAdmin
+        .from('profiles').select('role, is_active').eq('id', userId).maybeSingle();
+      if (target && target.role === 'super_admin' && target.is_active !== false) {
+        const { count: activeSaCount } = await supabaseAdmin
+          .from('profiles')
+          .select('id', { count: 'exact', head: true })
+          .eq('role', 'super_admin')
+          .eq('is_active', true)
+          .is('deleted_at', null);
+        if ((activeSaCount || 0) <= 1) {
+          return res.status(400).json({
+            error: 'Kan de laatste actieve super_admin niet inactief zetten of verlagen. Wijs eerst een andere super_admin aan.',
+          });
+        }
+      }
+    }
+
+    // Auth-ban bij is_active=false / auth-unban bij is_active=true.
+    // Blokkeert login echt (Supabase JWT-verify weigert banned users).
+    // Fail-soft: als de auth-call faalt (bv. netwerk), log het maar breek de PATCH niet.
+    if (is_active !== undefined && (userId !== admin.user.id)) {
+      const banValue = is_active === false ? '87600h' : 'none';  // 10 jaar effective ban / uit
+      try {
+        const { error: banErr } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: banValue });
+        if (banErr) console.warn('[admin-users] auth-ban update (soft):', banErr.message);
+      } catch (e) {
+        console.warn('[admin-users] auth-ban exception (soft):', e?.message || e);
+      }
+    }
+
+    // ── set_canonical_role — single-select rol-switch die profiles.role EN
+    // user_roles atomair syncet naar exact één rol. Vervangt de multi-role
+    // drift die de UI produceerde toen add_role/remove_role los gebruikt werden.
+    if (set_canonical_role !== undefined) {
+      if (admin.profile.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Alleen super_admin kan de canonieke rol wijzigen.' });
+      }
+      const newRole = String(set_canonical_role).trim();
+      if (!VALID_ROLES.includes(newRole)) {
+        return res.status(400).json({ error: `Ongeldige rol. Kies uit: ${VALID_ROLES.join(', ')}.` });
+      }
+      if (newRole === 'super_admin' && admin.profile.role !== 'super_admin') {
+        return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
+      }
+      // 1) Verwijder alle andere user_roles-rijen. 2) Insert (of upsert) target.
+      // Volgorde bewust: eerst delete-others, dan insert-target — atomicair
+      // t.a.v. permission-checks die "any of user_roles" testen.
+      const { error: delErr } = await supabaseAdmin.from('user_roles').delete().eq('user_id', userId).neq('role', newRole);
+      if (delErr) return res.status(500).json({ error: 'user_roles cleanup: ' + delErr.message });
+      const { error: upsertErr } = await supabaseAdmin.from('user_roles')
+        .upsert({ user_id: userId, role: newRole, assigned_by: admin.user.id }, { onConflict: 'user_id,role' });
+      if (upsertErr) return res.status(500).json({ error: 'user_roles insert: ' + upsertErr.message });
+      const { error: profErr } = await supabaseAdmin.from('profiles')
+        .update({ role: newRole, updated_at: new Date().toISOString() }).eq('id', userId);
+      if (profErr) return res.status(500).json({ error: 'profiles sync: ' + profErr.message });
+      await logAudit({
+        action: 'set_canonical_role',
+        payload: { target_id: userId, role: newRole, admin_email: admin.profile.email },
+        triggered_by: admin.profile.email,
+      });
+      return res.status(200).json({ message: 'Canonieke rol gezet.', role: newRole });
+    }
 
     // ── Multi-role beheer via user_roles (alleen super_admin) ─────────────────
     if (add_role !== undefined || remove_role !== undefined) {
@@ -592,18 +674,65 @@ export default async function handler(req, res) {
     return res.status(200).json({ message: 'Profiel bijgewerkt.' });
   }
 
-  // ── DELETE — soft delete: deactiveer (nooit jezelf) ───────────────────────
+  // ── DELETE — SOFT delete (deleted_at) + auth-ban + user_roles-clear ───────
+  // 2026-08-24: eerder was DELETE = alleen is_active=false ("deactiveer").
+  // Nu echte soft-delete:
+  //   1. profiles.deleted_at = now() + is_active=false → uit lijst, gate blijft.
+  //   2. auth.users ban_duration = 87600h (10j) → login blokkeert echt.
+  //   3. user_roles-rijen verwijderen → geen rol-toegang meer (permissions).
+  //   4. profiles-rij BLIJFT bestaan (audit + FK-safety naar leads/messages).
+  // Rails: zelf-lockout (bestaand) + last-super_admin-check (nieuw).
 
   if (req.method === 'DELETE') {
     const userId = req.query.id;
     if (!userId) return res.status(400).json({ error: 'Query parameter ?id is verplicht.' });
 
     if (userId === admin.user.id) {
-      return res.status(400).json({ error: 'Je kunt je eigen account niet deactiveren.' });
+      return res.status(400).json({ error: 'Je kunt je eigen account niet verwijderen.' });
     }
 
-    const updates = { is_active: false, updated_at: new Date().toISOString() };
+    if (admin.profile.role !== 'super_admin') {
+      return res.status(403).json({ error: 'Alleen super_admin kan gebruikers verwijderen.' });
+    }
 
+    // Last-super_admin-check.
+    const { data: target } = await supabaseAdmin
+      .from('profiles').select('role, is_active, email').eq('id', userId).maybeSingle();
+    if (!target) return res.status(404).json({ error: 'Gebruiker niet gevonden.' });
+    if (target.role === 'super_admin' && target.is_active !== false) {
+      const { count: activeSaCount } = await supabaseAdmin
+        .from('profiles')
+        .select('id', { count: 'exact', head: true })
+        .eq('role', 'super_admin')
+        .eq('is_active', true)
+        .is('deleted_at', null);
+      if ((activeSaCount || 0) <= 1) {
+        return res.status(400).json({
+          error: 'Kan de laatste actieve super_admin niet verwijderen. Wijs eerst een andere super_admin aan.',
+        });
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const updates = { deleted_at: nowIso, is_active: false, updated_at: nowIso };
+
+    // 1. Auth-ban zodat de account niet meer kan inloggen. Fail-soft.
+    try {
+      const { error: banErr } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: '87600h' });
+      if (banErr) console.warn('[admin-users] soft-delete auth-ban (soft):', banErr.message);
+    } catch (e) {
+      console.warn('[admin-users] soft-delete auth-ban exception (soft):', e?.message || e);
+    }
+
+    // 2. user_roles-rijen verwijderen (rol-permissions neutraliseren).
+    try {
+      const { error: urErr } = await supabaseAdmin.from('user_roles').delete().eq('user_id', userId);
+      if (urErr) console.warn('[admin-users] user_roles cleanup (soft):', urErr.message);
+    } catch (e) {
+      console.warn('[admin-users] user_roles cleanup exception (soft):', e?.message || e);
+    }
+
+    // 3. profiles: deleted_at + is_active=false.
     const { data, error } = await supabaseAdmin
       .from('profiles')
       .update(updates)
@@ -613,7 +742,7 @@ export default async function handler(req, res) {
 
     if (error) {
       await logAudit({
-        action:        'deactivate_user',
+        action:        'soft_delete_user',
         payload:       { target_id: userId, admin_email: admin.profile.email },
         status:        'error',
         error_message: error.message,
@@ -623,13 +752,13 @@ export default async function handler(req, res) {
     }
 
     await logAudit({
-      action:       'deactivate_user',
-      payload:      { target_email: data?.email, target_id: userId, admin_email: admin.profile.email },
+      action:       'soft_delete_user',
+      payload:      { target_email: data?.email, target_id: userId, admin_email: admin.profile.email, deleted_at: nowIso },
       status:       'success',
       triggered_by: admin.profile.email,
     });
 
-    return res.status(200).json({ message: 'Gebruiker gedeactiveerd.' });
+    return res.status(200).json({ message: 'Gebruiker verwijderd (soft-delete). Herstellen kan via DB — data blijft bewaard.' });
   }
 
   res.setHeader('Allow', 'GET, POST, PATCH, DELETE');
