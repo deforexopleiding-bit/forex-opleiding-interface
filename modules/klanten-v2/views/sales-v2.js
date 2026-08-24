@@ -693,8 +693,175 @@
       </div>`;
   }
 
+  /* ══════════════════════════════════════════════════════════════════════
+     BONUSSEN (v=18) — per-verkoper bonus-overzicht, super_admin-only.
+     Weergave-gat opgelost: bestaand dashboard filtert op sales_user_id=user.id;
+     hier zien we cross-user. Puur read-only endpoint /api/sales-bonus-overview.
+     ══════════════════════════════════════════════════════════════════════ */
+  const _bonus = { loading: false, fetched: false, error: null, data: null, expanded: {} };
+  const _bonusEsc = (window.KV && window.KV.esc) || ((s) => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;'));
+
+  function _bonusIsSuperAdmin() {
+    try { return (window.AuthShared?.profile?.role === 'super_admin'); }
+    catch (_) { return false; }
+  }
+  async function _bonusFetch(force) {
+    if (_bonus.loading) return;
+    if (_bonus.fetched && !force && !_bonus.error) return;
+    _bonus.loading = true; _bonus.error = null;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/sales-bonus-overview');
+      if (j?.error) throw new Error(j.error);
+      _bonus.data = j; _bonus.fetched = true;
+    } catch (e) {
+      _bonus.error = e?.message || String(e);
+    } finally {
+      _bonus.loading = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  }
+  window.__bonusToggle = (uid) => {
+    _bonus.expanded[uid] = !_bonus.expanded[uid];
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__bonusRefresh = () => _bonusFetch(true);
+
+  function _bonusFmtEur(n) {
+    const v = Number(n) || 0;
+    try { return v.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }); }
+    catch (_) { return '€ ' + v.toFixed(2); }
+  }
+  function _bonusFmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: '2-digit' }); }
+    catch (_) { return iso; }
+  }
+  function _bonusStatusBadge(status) {
+    const map = {
+      pending:  { c: 'amber',   l: 'pending' },
+      earned:   { c: 'emerald', l: 'earned' },
+      invoiced: { c: 'emerald', l: 'invoiced' },
+      paid:     { c: 'emerald', l: 'paid' },
+      voided:   { c: 'rose',    l: 'voided' },
+    };
+    const m = map[status] || { c: 'text-3', l: status || '—' };
+    return `<span style="padding:1px 7px;border-radius:10px;background:var(--${m.c}-soft);color:var(--${m.c});font-size:10.5px;font-weight:600">${_bonusEsc(m.l)}</span>`;
+  }
+
+  function bonussenView() {
+    if (!_bonusIsSuperAdmin()) {
+      return `<div style="padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:640px;margin:20px auto;text-align:center">
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px">Alleen super_admin</div>
+        <div style="font-size:12.5px;color:var(--text-3)">Dit cross-verkoper-overzicht is beperkt tot super_admin. Jij ziet je eigen bonussen op het Sales-dashboard.</div>
+      </div>`;
+    }
+    if (!_bonus.fetched && !_bonus.loading) queueMicrotask(() => _bonusFetch());
+    if (_bonus.loading && !_bonus.data) {
+      return `<div style="padding:24px;color:var(--text-3);font-size:13px">Laden…</div>`;
+    }
+    if (_bonus.error) {
+      return `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:13px">⚠ ${_bonusEsc(_bonus.error)} <button class="btn btn-ghost btn-sm" style="margin-left:12px" onclick="window.__bonusRefresh()">Opnieuw</button></div>`;
+    }
+    const data = _bonus.data || { per_sales_user: [], grand_totals: {} };
+    const gt = data.grand_totals || {};
+
+    const legend = `<div style="padding:10px 14px;background:var(--info-soft,var(--surface-2));color:var(--text-2);border-radius:8px;font-size:11.5px;line-height:1.5;margin-bottom:14px">
+      <b>Uitleg statussen.</b>
+      <span style="margin-left:6px">${_bonusStatusBadge('pending')} = aanbetalings-abonnement aangemaakt, factuur staat nog open — bonus wacht tot de factuur op <i>paid</i> gaat.</span>
+      <span style="margin-left:8px">${_bonusStatusBadge('earned')} = aanbetalingsfactuur betaald (⇢ invoiced/paid rekenen we bij earned mee).</span>
+      <span style="margin-left:8px">${_bonusStatusBadge('voided')} = geannuleerd of gecrediteerd (bij <i>paid</i>: clawback voor finance).</span>
+    </div>`;
+
+    const grandStrip = `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
+        <div style="font-size:11px;color:var(--text-3)">Totaal verkopers</div>
+        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${data.per_sales_user.length}</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
+        <div style="font-size:11px;color:var(--amber)">Pending — som</div>
+        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(gt.pending?.sum)}</div>
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${gt.pending?.count || 0} bonussen</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
+        <div style="font-size:11px;color:var(--emerald)">Earned — som</div>
+        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(gt.earned?.sum)}</div>
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${gt.earned?.count || 0} bonussen</div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--surface)">
+        <div style="font-size:11px;color:var(--rose)">Voided — som</div>
+        <div style="font-size:22px;font-weight:600;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(gt.voided?.sum)}</div>
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${gt.voided?.count || 0} bonussen</div>
+      </div>
+    </div>`;
+
+    const perUserRows = (data.per_sales_user || []).map((u) => {
+      const uid = String(u.user_id || '__unassigned__').replace(/'/g, "\\'");
+      const isExpanded = !!_bonus.expanded[uid];
+      const t = u.totals || {};
+      const bonusesRows = isExpanded
+        ? `<tr><td colspan="6" style="padding:0;background:var(--surface-2)">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead><tr style="color:var(--text-3);border-bottom:1px solid var(--border);text-align:left">
+                <th style="padding:6px 10px">Klant</th>
+                <th style="padding:6px 10px">Offerte</th>
+                <th style="padding:6px 10px;text-align:right">Bedrag</th>
+                <th style="padding:6px 10px">Status</th>
+                <th style="padding:6px 10px">Aangemaakt</th>
+                <th style="padding:6px 10px">Earned op</th>
+              </tr></thead>
+              <tbody>${(u.bonuses || []).map(b => `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:6px 10px">${_bonusEsc(b.customer_name)}</td>
+                <td style="padding:6px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3)">${_bonusEsc(b.quote_reference || '—')}</td>
+                <td style="padding:6px 10px;text-align:right;font-family:'IBM Plex Mono',monospace">${_bonusFmtEur(b.amount)}</td>
+                <td style="padding:6px 10px">${_bonusStatusBadge(b.status)}</td>
+                <td style="padding:6px 10px;color:var(--text-3)">${_bonusFmtDate(b.created_at)}</td>
+                <td style="padding:6px 10px;color:var(--text-3)">${_bonusFmtDate(b.earned_at)}</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </td></tr>`
+        : '';
+      return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window.__bonusToggle('${uid}')">
+        <td style="padding:10px 12px;font-size:12px">
+          <span style="display:inline-block;width:12px;color:var(--text-3)">${isExpanded ? '▾' : '▸'}</span>
+          <b>${_bonusEsc(u.user_name)}</b>
+          ${u.user_email ? `<div style="font-size:11px;color:var(--text-3);margin-left:16px">${_bonusEsc(u.user_email)}</div>` : ''}
+        </td>
+        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><span style="color:var(--amber)">${_bonusFmtEur(t.pending?.sum)}</span><div style="font-size:10.5px;color:var(--text-3)">${t.pending?.count || 0}×</div></td>
+        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><span style="color:var(--emerald)">${_bonusFmtEur(t.earned?.sum)}</span><div style="font-size:10.5px;color:var(--text-3)">${t.earned?.count || 0}×</div></td>
+        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><span style="color:var(--rose)">${_bonusFmtEur(t.voided?.sum)}</span><div style="font-size:10.5px;color:var(--text-3)">${t.voided?.count || 0}×</div></td>
+        <td style="padding:10px 12px;text-align:right;font-family:'IBM Plex Mono',monospace"><b>${_bonusFmtEur((t.pending?.sum || 0) + (t.earned?.sum || 0))}</b></td>
+      </tr>${bonusesRows}`;
+    }).join('');
+
+    return `<div style="max-width:1200px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:600">Bonussen per verkoper</div>
+        <button class="btn btn-ghost btn-sm" onclick="window.__bonusRefresh()">↻ Ververs</button>
+      </div>
+      ${legend}
+      ${grandStrip}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2);border-bottom:1px solid var(--border);color:var(--text-3);font-size:11px;letter-spacing:.04em">
+            <th style="padding:8px 12px;text-align:left">Verkoper</th>
+            <th style="padding:8px 12px;text-align:right">Pending</th>
+            <th style="padding:8px 12px;text-align:right">Earned</th>
+            <th style="padding:8px 12px;text-align:right">Voided</th>
+            <th style="padding:8px 12px;text-align:right">Actief-totaal</th>
+          </tr></thead>
+          <tbody>${perUserRows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-3)">Geen bonussen gevonden.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div style="font-size:11px;color:var(--text-3);margin-top:8px">Klik een verkoper aan om de losse bonussen te zien (nieuwste eerst). Actief-totaal = pending + earned.</div>
+    </div>`;
+  }
+
   window.DFO.VIEWS['sales/Dashboard']         = dashboardView;
   window.DFO.VIEWS['sales/Offertes']          = offertesView;
+  window.DFO.VIEWS['sales/Bonussen']          = bonussenView;
   window.DFO.VIEWS['sales/Retentie']          = retentieView;
   window.DFO.VIEWS['sales/Verkoopprestaties'] = prestatiesView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('sales');
