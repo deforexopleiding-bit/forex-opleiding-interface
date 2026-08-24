@@ -114,8 +114,44 @@ export default async function handler(req, res) {
       ghl_webhook_last_error: null,
     }).eq('id', 1);
 
-    // 4. Live mode?
-    if (!settings.live_mode_enabled) return res.status(200).json({ skipped: 'live_mode_off' });
+    // 4. Live mode? Puur-ingest-branch: als live_mode UIT staat, sla het
+    //    inbound-bericht + conversatie tóch op (zichtbaarheid), maar sla AI-
+    //    generatie / follow-up-planning / uitgaande DM over. Zo staan Instagram-
+    //    berichten real-time in het CRM zonder auto-antwoord (parity met poll-
+    //    cron, maar zonder 15-min-lag). Auto-DM blijft strikt achter de gate.
+    if (!settings.live_mode_enabled) {
+      try {
+        const computedName = payload.full_name || [payload.first_name, payload.last_name].filter(Boolean).join(' ').trim() || null;
+        let { data: conv } = await supabaseAdmin.from('lisa_conversations').select('id, contact_name')
+          .eq('ghl_contact_id', contactId).eq('is_sandbox', false).maybeSingle();
+        if (!conv) {
+          const { data: newConv, error: convErr } = await supabaseAdmin.from('lisa_conversations').insert({
+            ghl_contact_id: contactId, ghl_conversation_id: conversationId || null, ghl_location_id: locationId || null,
+            first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid,
+            source: 'instagram', is_sandbox: false, phase: 'cold', first_message_at: new Date().toISOString(),
+          }).select('id').single();
+          if (convErr) { console.warn('[lisa-webhook] live_mode_off conv insert:', convErr.message); return res.status(200).json({ skipped: 'live_mode_off', ingest_error: convErr.message }); }
+          conv = newConv;
+        }
+        // Dedupe op ghl_message_id (webhook-retry-veilig).
+        if (messageId) {
+          const { data: dupe2 } = await supabaseAdmin.from('lisa_messages')
+            .select('id').eq('ghl_message_id', messageId).limit(1).maybeSingle();
+          if (dupe2) return res.status(200).json({ skipped: 'live_mode_off', ingested: false, reason: 'already_stored' });
+        }
+        await supabaseAdmin.from('lisa_messages').insert({
+          conversation_id: conv.id,
+          direction:       'in',
+          content:         String(message),
+          ai_generated:    false,
+          ghl_message_id:  messageId || null,
+        });
+        return res.status(200).json({ skipped: 'live_mode_off', ingested: true, conv_id: conv.id });
+      } catch (e) {
+        console.warn('[lisa-webhook] live_mode_off ingest exception:', e?.message || e);
+        return res.status(200).json({ skipped: 'live_mode_off', ingest_error: e?.message || String(e) });
+      }
+    }
 
     // 5. Kantooruren (in tz, minuut-precisie)
     const tz = settings.office_hours_timezone || 'Europe/Amsterdam';

@@ -181,6 +181,10 @@
     {
       "path": "/api/cron-leadsonderhoud",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron-lisa-conversations-poll",
+      "schedule": "*/15 * * * *"
     }
   ],
   "redirects": [
