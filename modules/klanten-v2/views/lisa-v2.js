@@ -816,7 +816,7 @@
       ? errBanner(_live.settings.error, 'settings')
       : `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px;margin-bottom:14px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-            <div style="font-weight:600;font-size:14px">Lisa — Appointmentsetter</div>
+            <div style="font-weight:600;font-size:14px">Instagram setter</div>
             ${liveBadge}
             <span style="font-size:12px;color:var(--text-3);margin-left:auto">${esc(activeStatus)}</span>
           </div>
