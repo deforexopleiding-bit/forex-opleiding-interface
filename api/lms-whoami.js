@@ -10,8 +10,10 @@
 // — geen e-mail, id, permissions, avatar of andere profielvelden. Bij fout:
 // standaard error-shape { error: '...' } met passende status.
 //
-// CORS: strict op het LMS-origin (geen '*') omdat de browser er een
-// Bearer-token overheen stuurt. Preflight OPTIONS wordt netjes afgehandeld.
+// CORS: strict op de LMS-origins (geen '*') omdat de browser er een
+// Bearer-token overheen stuurt. Naast productie zijn ook de preview-origins
+// van hetzelfde LMS-project toegestaan, anders kan er op geen enkele
+// branch-preview ingelogd worden. Preflight OPTIONS wordt netjes afgehandeld.
 //
 // Rol-set die het LMS kan verwachten (autoritatief in code — zie
 // api/admin-users.js VALID_ROLES):
@@ -21,19 +23,43 @@
 
 import { supabase, supabaseAdmin } from './supabase.js';
 
-// LMS-origin. Aanpasbaar zonder aan de logica te sleutelen; NOOIT '*' want
-// er gaat een Bearer-token overheen.
+// LMS-origin (productie). Aanpasbaar zonder aan de logica te sleutelen;
+// NOOIT '*' want er gaat een Bearer-token overheen.
 const LMS_ORIGIN = 'https://dfo-lms-prototype.vercel.app';
 
-function applyCors(res) {
-  res.setHeader('Access-Control-Allow-Origin',  LMS_ORIGIN);
+// Preview-origins van HETZELFDE LMS-project. Vercel geeft elke branch-deploy
+// een eigen hostnaam (dfo-lms-prototype-git-<branch>-<team>.vercel.app), en
+// zonder deze regel blokkeert de browser de call vanaf elke preview — het LMS
+// toont dan "tijdelijk niet beschikbaar" en niemand kan er inloggen.
+//
+// Bewust géén losse wildcard: alleen https, alleen hostnamen die met de
+// projectnaam beginnen, alleen op vercel.app, en niets erachter. Reflecteren
+// doen we uitsluitend bij een treffer; al het andere krijgt het productie-origin
+// terug, wat de browser dan afwijst.
+const LMS_PREVIEW_ORIGIN = /^https:\/\/dfo-lms-prototype(?:-[a-z0-9-]+)?\.vercel\.app$/;
+
+/**
+ * Welk origin er in de Allow-Origin-header hoort voor dit verzoek.
+ * Geëxporteerd zodat de regel los te testen is — dit is een beveiligingsgrens,
+ * geen weergavedetail.
+ */
+export function resolveAllowedOrigin(origin) {
+  if (typeof origin === 'string' && LMS_PREVIEW_ORIGIN.test(origin)) return origin;
+  return LMS_ORIGIN;
+}
+
+function applyCors(req, res) {
+  // Vary: Origin is hier geen formaliteit. Het antwoord verschilt nu PER
+  // origin, dus zonder deze header kan een cache het antwoord voor de ene
+  // preview aan de andere serveren — en dan faalt de CORS-check alsnog.
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Origin',  resolveAllowedOrigin(req.headers?.origin));
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  res.setHeader('Vary', 'Origin');
 }
 
 export default async function handler(req, res) {
-  applyCors(res);
+  applyCors(req, res);
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
