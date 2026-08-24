@@ -79,37 +79,41 @@ BEGIN
     HAVING COUNT(*) > 1
   ) t;
 
-  -- Dupes op fallback-sleutel (coalesce contact/email-lower/phone-last-9)
+  -- Dupes op fallback-sleutel (coalesce contact/email-lower/phone-last-9).
+  -- Postgres accepteert een SELECT-alias niet in HAVING op hetzelfde
+  -- SELECT-level → wrap in subquery zodat person_key in outer WHERE
+  -- beschikbaar is (v2 fix na 42703 error).
   SELECT COUNT(*) INTO v_dup_groups_all FROM (
-    SELECT
-      COALESCE(
-        ghl_contact_id,
-        lower(NULLIF(trim(email), '')),
-        NULLIF(right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 9), '')
-      ) AS person_key,
-      event_date_label
-    FROM public.event_signup_inbox
-    WHERE event_date_label IS NOT NULL
-    GROUP BY person_key, event_date_label
-    HAVING COUNT(*) > 1 AND person_key IS NOT NULL
+    SELECT person_key, event_date_label, cnt FROM (
+      SELECT
+        COALESCE(
+          ghl_contact_id,
+          lower(NULLIF(trim(email), '')),
+          NULLIF(right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 9), '')
+        ) AS person_key,
+        event_date_label,
+        COUNT(*) AS cnt
+      FROM public.event_signup_inbox
+      WHERE event_date_label IS NOT NULL
+      GROUP BY 1, 2
+    ) inner_t
+    WHERE cnt > 1 AND person_key IS NOT NULL
   ) t;
   SELECT COALESCE(SUM(cnt - 1), 0) INTO v_dup_rows_all FROM (
-    SELECT
-      COALESCE(
-        ghl_contact_id,
-        lower(NULLIF(trim(email), '')),
-        NULLIF(right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 9), '')
-      ) AS person_key,
-      event_date_label,
-      COUNT(*) AS cnt
-    FROM public.event_signup_inbox
-    WHERE event_date_label IS NOT NULL
-    GROUP BY person_key, event_date_label
-    HAVING COUNT(*) > 1 AND COALESCE(
-      ghl_contact_id,
-      lower(NULLIF(trim(email), '')),
-      NULLIF(right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 9), '')
-    ) IS NOT NULL
+    SELECT person_key, event_date_label, cnt FROM (
+      SELECT
+        COALESCE(
+          ghl_contact_id,
+          lower(NULLIF(trim(email), '')),
+          NULLIF(right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 9), '')
+        ) AS person_key,
+        event_date_label,
+        COUNT(*) AS cnt
+      FROM public.event_signup_inbox
+      WHERE event_date_label IS NOT NULL
+      GROUP BY 1, 2
+    ) inner_t
+    WHERE cnt > 1 AND person_key IS NOT NULL
   ) t;
 
   RAISE NOTICE '── event_signup_inbox PRE-DEDUP (contact + event) ─────────';
