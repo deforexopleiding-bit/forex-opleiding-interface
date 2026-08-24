@@ -6277,29 +6277,853 @@
     return bodyPlaceholder(cur);
   }
 
+  // ─── BLOK 2 · Cockpit-schil (iteratie 1) ────────────────────────────────
+  // Design-ref: docs/dunning-test-cockpit-reference.html.
+  // Deze iteratie: header-bar + guard-status strip + verify-grendel-widget.
+  // Iteraties 2-5 in vervolg-commits (scenariobibliotheek, blok-bouwer,
+  // AI-tekstinvoer, ladder, tijdlijn, berichten, takenlijst). Zie
+  // docs/dunning-test-cockpit-blok2-scope.md.
+
+  const _cockpit = {
+    status: null, loading: false, error: null, fetched: false,
+    verifying: false, verifyResult: null,
+    // iter 2: blok-bouwer state.
+    builder: { steps: [], running: false, currentIdx: -1, log: [] },
+    // Actieve is_test-context (na scenario-seed of eerste customer-create).
+    activeCustomerId: null,
+    // iter 3: AI-tekstinvoer + plan state.
+    ai: { asking: false, error: null, plan: null, prompt: '' },
+    // iter 4: live-context state (ladder + tijdlijn + berichten + tasks).
+    ctx: { loading: false, error: null, data: null, pollTimer: null, expanded: true },
+  };
+
+  // ─── Live context fetch + poll (iter 4) ──────────────────────────────────
+  async function _cockpitFetchContext() {
+    const cid = _cockpit.activeCustomerId;
+    if (!cid) { _cockpit.ctx.data = null; return; }
+    _cockpit.ctx.loading = true; _cockpit.ctx.error = null;
+    const j = await tryFetch('cockpit-ctx', '/api/dunning-test-context?customer_id=' + encodeURIComponent(cid));
+    _cockpit.ctx.loading = false;
+    if (j?.__error) _cockpit.ctx.error = j.__error;
+    else if (j?.error) _cockpit.ctx.error = j.error;
+    else _cockpit.ctx.data = j;
+    if (render) render();
+  }
+  // Lesson-20: clear setInterval bij view-switch.
+  function _cockpitStartPoll() {
+    if (_cockpit.ctx.pollTimer) return;
+    _cockpit.ctx.pollTimer = setInterval(() => {
+      if (!_cockpit.activeCustomerId) return;
+      _cockpitFetchContext();
+    }, 5000);
+  }
+  function _cockpitStopPoll() {
+    if (_cockpit.ctx.pollTimer) { clearInterval(_cockpit.ctx.pollTimer); _cockpit.ctx.pollTimer = null; }
+  }
+  window.__cockpitCtxRefresh = () => _cockpitFetchContext();
+  window.__cockpitCtxToggle  = () => { _cockpit.ctx.expanded = !_cockpit.ctx.expanded; if (render) render(); };
+  // Publieke shutdown-hook zodat andere views deze view kunnen sluiten
+  // (aangeroepen door instView bij navigatie weg van wb-test-cockpit).
+  window.__cockpitDetach = () => _cockpitStopPoll();
+
+  // ─── Scenariobibliotheek (iter 2) ────────────────────────────────────────
+  // 8 presets die de blok-bouwer vullen met een startsequentie. Klik = laad
+  // stappen in de builder (nog niet uitvoeren) — user drukt daarna zelf op
+  // "Voer sequentie uit". Nieuwe customer wordt aangemaakt door de eerste
+  // step (customer-create) zodat elk scenario met een schone lei begint.
+  const COCKPIT_SCENARIOS = [
+    {
+      key: 'warm-2x-3d', icon: '🌡', title: 'Warm · 2× · 3d',
+      desc: '1 klant, 2 facturen à €150, 3 dagen te laat.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Warm Scenario' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-1' },
+          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-2' },
+        ]}, explain: '2 facturen à €150, 3 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+      ],
+    },
+    {
+      key: 'koud-3x-14d', icon: '❄', title: 'Koud · 3× · 14d',
+      desc: '1 klant, 3 facturen à €297, 14 dagen te laat.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Koud Scenario' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-1' },
+          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-2' },
+          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-3' },
+        ]}, explain: '3 facturen à €297, 14 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+      ],
+    },
+    {
+      key: 'pauze-belofte', icon: '⏸', title: 'Pauze · belofte',
+      desc: '1 factuur, klant reageert, betaalt uiteindelijk.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Pauze Belofte' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 250, days_late: 5, scenario_tag: 'pauze-belofte' },
+        ]}, explain: '1 factuur, €250, 5 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start dunning-run' },
+        { action: 'simulate-inbound', params: { __use_last_customer: true }, explain: 'Klant reageert (pauzeert de run)' },
+        { action: 'mark-paid', params: { __use_last_customer: true }, explain: 'Betaling geboekt' },
+      ],
+    },
+    {
+      key: 'escalatie-14d', icon: '🚨', title: 'Escalatie · 14d',
+      desc: '1 factuur 14d oud, fast-forward door alle stappen.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Escalatie Test' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 500, days_late: 14, scenario_tag: 'escalatie-14d' },
+        ]}, explain: '1 factuur, €500, 14 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start' },
+        { action: 'fast-forward', params: { __use_last_customer: true }, explain: 'Ladder-stap doorspoelen' },
+      ],
+    },
+    {
+      key: 'bulk-round-1', icon: '📦', title: 'Bulk · ronde 1',
+      desc: 'Bulk-send-cron triggert een goedgekeurde bulk-job.',
+      steps: [
+        { action: 'bulk-send', params: {}, explain: 'wanbetalers-sandbox-run-bulk' },
+      ],
+    },
+    {
+      key: 'credit-round', icon: '💳', title: 'Crediteerronde',
+      desc: '1 klant + factuur, simulate-credit-round-flow.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Credit Test' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 199, days_late: 7, scenario_tag: 'credit-round' },
+        ]}, explain: '1 factuur, €199, 7 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start' },
+        { action: 'breach-check', params: {}, explain: 'Arrangements breach-check' },
+      ],
+    },
+    {
+      key: 'no-show-inbound', icon: '🔕', title: 'Geen inbound',
+      desc: 'Klant reageert niet — conv-reminder-cron moet nudgen.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'No Show' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 175, days_late: 8, scenario_tag: 'no-show-inbound' },
+        ]}, explain: '1 factuur, €175, 8 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start' },
+        { action: 'conversation-reminders', params: {}, explain: 'Reminder-cron voor stille klanten' },
+      ],
+    },
+    {
+      key: 'custom', icon: '⚙', title: 'Custom',
+      desc: 'Leeg — bouw je eigen sequentie in de blok-bouwer.',
+      steps: [],
+    },
+  ];
+
+  // Losse stap-blokken voor de blok-bouwer (klik = voeg toe).
+  const COCKPIT_BUILDER_BLOCKS = [
+    { action: 'customer-create',       label: '+ klant',         params: { full_name: 'Handmatig' } },
+    { action: 'invoice-create',        label: '+ factuur',       params: { __use_last_customer: true, invoices: [{ amount: 100, days_late: 5, scenario_tag: 'manual' }] } },
+    { action: 'engine',                label: '▶ engine' },
+    { action: 'conversation-reminders',label: '▶ conv-reminders' },
+    { action: 'bulk-send',             label: '▶ bulk-send' },
+    { action: 'breach-check',          label: '▶ breach-check' },
+    { action: 'fast-forward',          label: '⏩ fast-forward' },
+    { action: 'simulate-inbound',      label: '📥 simulate-inbound', params: { __use_last_customer: true } },
+    { action: 'mark-paid',             label: '💰 mark-paid',    params: { __use_last_customer: true } },
+    { action: 'send-test-template',    label: '📨 test-template' },
+    { action: 'verify-grendel',        label: '🔒 verify-grendel' },
+    { action: 'reset',                 label: '🧹 reset (dry-run)', params: { dry_run: true } },
+  ];
+
+  // ─── Endpoints per action ────────────────────────────────────────────────
+  // Bepaalt welk cockpit-endpoint een builder-step aanroept. LEEG voor
+  // trigger-multiplex-acties; direct-endpoint anders. Alles is_test-gescoped.
+  function _cockpitEndpointFor(step) {
+    switch (step.action) {
+      case 'customer-create': return { url: '/api/dunning-test-customer-create', direct: true };
+      case 'invoice-create':  return { url: '/api/dunning-test-invoice-create',  direct: true };
+      case 'reset':           return { url: '/api/dunning-test-reset',           direct: true };
+      case 'verify-grendel':  return { url: '/api/dunning-test-verify-grendel',  direct: true };
+      default:                return { url: '/api/dunning-test-trigger',         direct: false };
+    }
+  }
+
+  // Bouwt de body voor een builder-step. Vervangt __use_last_customer door
+  // de daadwerkelijke id van de laatst-aangemaakte test-klant.
+  function _cockpitStepBody(step) {
+    const p = { ...(step.params || {}) };
+    if (p.__use_last_customer) {
+      delete p.__use_last_customer;
+      p.customer_id = _cockpit.activeCustomerId || null;
+    }
+    const ep = _cockpitEndpointFor(step);
+    if (ep.direct) {
+      // Direct-endpoint accepteert de params 1-op-1.
+      if (step.action === 'reset') {
+        // Reset heeft z'n eigen shape.
+        return { confirm: true, dry_run_count_only: !!p.dry_run };
+      }
+      return p;
+    }
+    // Trigger-multiplex verwacht {action, params}.
+    return { action: step.action, params: p };
+  }
+
+  // ─── Scenario-loader (iter 2) ────────────────────────────────────────────
+  window.__cockpitLoadScenario = (key) => {
+    const sc = COCKPIT_SCENARIOS.find(x => x.key === key);
+    if (!sc) return;
+    // Deep-copy zodat wijzigingen in de builder de preset niet muteren.
+    _cockpit.builder = {
+      steps: sc.steps.map(s => JSON.parse(JSON.stringify(s))),
+      running: false, currentIdx: -1, log: [],
+    };
+    if (render) render();
+  };
+
+  // ─── Blok-bouwer manipulatie ─────────────────────────────────────────────
+  window.__cockpitBuilderAdd = (action) => {
+    const block = COCKPIT_BUILDER_BLOCKS.find(b => b.action === action);
+    if (!block) return;
+    _cockpit.builder.steps.push(JSON.parse(JSON.stringify({ action: block.action, params: block.params || {}, explain: block.label })));
+    if (render) render();
+  };
+  window.__cockpitBuilderRemove = (idx) => {
+    _cockpit.builder.steps.splice(idx, 1);
+    if (render) render();
+  };
+  window.__cockpitBuilderMove = (idx, delta) => {
+    const arr = _cockpit.builder.steps;
+    const to = idx + delta;
+    if (to < 0 || to >= arr.length) return;
+    const [item] = arr.splice(idx, 1);
+    arr.splice(to, 0, item);
+    if (render) render();
+  };
+  window.__cockpitBuilderClear = () => {
+    _cockpit.builder = { steps: [], running: false, currentIdx: -1, log: [] };
+    if (render) render();
+  };
+
+  // ─── AI-tekstinvoer (iter 3) — vraag Claude om een plan ────────────────
+  // Server draait Claude Sonnet 5 met forced tool_choice + ALLOWED_ACTIONS
+  // whitelist. API-key blijft server-side. Ongeldig plan → server weigert
+  // met 422 en de UI toont de foutmelding — NIETS wordt uitgevoerd.
+  window.__cockpitAiAsk = async () => {
+    // Sync-from-DOM: uncontrolled textarea.
+    const el = document.querySelector('[data-cockpit-ai-prompt]');
+    const prompt = String(el?.value || '').trim();
+    if (!prompt) { showToast('Typ eerst een instructie voor Claude.', 'warn'); return; }
+    _cockpit.ai.prompt   = prompt;
+    _cockpit.ai.asking   = true;
+    _cockpit.ai.error    = null;
+    _cockpit.ai.plan     = null;
+    if (render) render();
+
+    const j = await tryFetch('cockpit-ai-plan', '/api/dunning-test-ai-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        current_state: {
+          active_customer_id: _cockpit.activeCustomerId || null,
+          test_customer_count: _cockpit.status?.test_customer_count || 0,
+          test_invoice_count:  _cockpit.status?.test_invoice_count  || 0,
+          dry_run_enabled:     _cockpit.status?.dry_run_enabled     || false,
+        },
+      }),
+    });
+    _cockpit.ai.asking = false;
+    if (j?.__error || j?.error) {
+      _cockpit.ai.error = j.__error || j.error;
+    } else if (!j?.plan) {
+      _cockpit.ai.error = 'Server retourneerde geen plan.';
+    } else {
+      _cockpit.ai.plan = j.plan;
+    }
+    if (render) render();
+  };
+
+  window.__cockpitAiClear = () => {
+    _cockpit.ai = { asking: false, error: null, plan: null, prompt: '' };
+    if (render) render();
+  };
+
+  // Plan-uitvoer: vult de blok-bouwer met de plan-steps én triggert
+  // dezelfde runner. Vóór uitvoer: custom-confirm met alle stappen
+  // expliciet zichtbaar. Alle uitvoer loopt door de exact dezelfde
+  // is_test-gescopete endpoints als de blok-bouwer (nooit een directe
+  // send, nooit iets buiten ALLOWED_ACTIONS — de server-side whitelist
+  // en validatePlan hebben dat al afgedwongen; deze client-side check
+  // is een extra vangnet).
+  const CLIENT_ALLOWED_ACTIONS = new Set([
+    'customer-create', 'invoice-create', 'reset', 'verify-grendel',
+    'engine', 'conversation-reminders', 'bulk-send', 'breach-check',
+    'fast-forward', 'simulate-inbound', 'mark-paid', 'send-test-template',
+  ]);
+  window.__cockpitAiRun = () => {
+    const plan = _cockpit.ai.plan;
+    if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+      showToast('Geen plan om uit te voeren.', 'warn'); return;
+    }
+    // Client-side vangnet: bevestig nogmaals dat elke stap in de whitelist zit.
+    const badStep = plan.steps.find(s => !CLIENT_ALLOWED_ACTIONS.has(s.action));
+    if (badStep) {
+      showToast(`Plan bevat ongeldige actie '${badStep.action}' — geweigerd.`, 'warn');
+      return;
+    }
+    // Bulk custom-confirm met alle stappen expliciet zichtbaar.
+    const stepList = plan.steps.map((s, i) => `${i + 1}. ${s.action} — ${s.explain || ''}`).join('\n');
+    openConfirm(
+      `Claude stelt ${plan.steps.length} stap(pen) voor:\n\n${stepList}\n\nAlle stappen worden achter elkaar uitgevoerd via de is_test-gescopete cockpit-endpoints (nooit een directe send). Bij een fout stopt de sequentie. Elke stap komt in test_cockpit_audit.\n\nUitvoeren?`,
+      () => {
+        // Laad plan in de builder + run direct — hergebruikt de bestaande
+        // runner + log-widget zodat de gebruiker precies dezelfde UX ziet
+        // als bij scenariobibliotheek / handmatige builder-run.
+        _cockpit.builder = {
+          steps: plan.steps.map(s => JSON.parse(JSON.stringify(s))),
+          running: false, currentIdx: -1, log: [],
+        };
+        if (render) render();
+        window.__cockpitBuilderRun();
+      },
+      'warn',
+    );
+  };
+
+  // ─── Sequentie-uitvoer ───────────────────────────────────────────────────
+  // Chained calls: één-voor-één, wacht op response, refresh audit-status na
+  // laatste stap. Fail-soft per stap — een fout stopt de sequentie en de
+  // fout landt in de log-widget onder de builder.
+  window.__cockpitBuilderRun = async () => {
+    const b = _cockpit.builder;
+    if (b.running || b.steps.length === 0) return;
+    b.running = true; b.log = []; b.currentIdx = -1; if (render) render();
+
+    for (let i = 0; i < b.steps.length; i++) {
+      b.currentIdx = i; if (render) render();
+      const step = b.steps[i];
+      const ep = _cockpitEndpointFor(step);
+      const body = _cockpitStepBody(step);
+      const j = await tryFetch('cockpit-step', ep.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const ok = !(j?.__error || j?.error);
+      const entry = { idx: i, action: step.action, ok, response: j };
+      b.log.push(entry);
+
+      // Track activeCustomerId zodra customer-create slaagt.
+      if (ok && step.action === 'customer-create' && j?.customer?.id) {
+        _cockpit.activeCustomerId = j.customer.id;
+      }
+      if (!ok) {
+        b.log.push({ idx: i, action: '__abort', ok: false, response: { error: 'Sequentie gestopt na fout op stap ' + (i + 1) } });
+        break;
+      }
+    }
+    b.running = false; b.currentIdx = -1; if (render) render();
+    // Refresh cockpit-status (tellingen kunnen zijn veranderd).
+    _cockpit.fetched = false; _cockpitFetchStatus();
+  };
+
+  async function _cockpitFetchStatus() {
+    if (_cockpit.loading) return;
+    _cockpit.loading = true; _cockpit.error = null; if (render) render();
+    const j = await tryFetch('dunning-test-status', '/api/dunning-test-status');
+    _cockpit.loading = false; _cockpit.fetched = true;
+    if (j?.__error) _cockpit.error = j.__error;
+    else if (j?.error) _cockpit.error = j.error;
+    else _cockpit.status = j;
+    if (render) render();
+  }
+  window.__cockpitRefresh = () => { _cockpit.fetched = false; _cockpitFetchStatus(); };
+  window.__cockpitVerify = async () => {
+    _cockpit.verifying = true; _cockpit.verifyResult = null; if (render) render();
+    const j = await tryFetch('dunning-test-verify', '/api/dunning-test-verify-grendel', { method: 'POST' });
+    _cockpit.verifying = false;
+    _cockpit.verifyResult = (j?.__error || j?.error) ? { ok: false, error: j.__error || j.error } : j;
+    if (render) render();
+  };
+
   function bodyWbTestCockpit() {
-    // TIJDELIJK (blok 1): korte intro + knop naar de bestaande testpagina.
-    // Wordt in blok 2 vervangen door de native cockpit-schil.
-    return `<div style="max-width:760px">
-      <div style="padding:16px 18px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="width:36px;height:36px;border-radius:8px;background:var(--amber-soft);color:var(--amber);display:grid;place-items:center;font-size:16px">⚗</div>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:600">Wanbetalers testomgeving</div>
-            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Is_test-gescoped triggers met echte handlers · super_admin only</div>
+    if (!_cockpit.fetched && !_cockpit.loading) queueMicrotask(() => _cockpitFetchStatus());
+    const s = _cockpit.status;
+    const isReady = !!s?.ready;
+    const dryRun = !!s?.dry_run_enabled;
+
+    // ── Guard-status strip ────────────────────────────────────────────────
+    const guardHtml = _cockpit.loading && !s ? `
+      <div class="kv-cockpit-strip" style="opacity:.6">Cockpit-status laden…</div>
+    ` : _cockpit.error ? `
+      <div class="kv-cockpit-strip" style="background:var(--rose-soft);color:var(--rose);border-color:var(--rose)">⚠ ${esc(_cockpit.error)}</div>
+    ` : s ? `
+      <div class="kv-cockpit-strip ${isReady ? 'kvcs-ok' : 'kvcs-block'}">
+        <div class="kvcs-l">
+          <div class="kvcs-dot" data-live></div>
+          <div>
+            <div style="font-weight:700;font-size:13px">${isReady ? 'Grendel actief · cockpit klaar' : 'Cockpit geblokkeerd'}</div>
+            <div style="font-size:11px;opacity:.75;font-family:'IBM Plex Mono',monospace;margin-top:2px">
+              sandbox: ${esc(s.sandbox_contact?.phone || '—')} · ${esc(s.sandbox_contact?.email || '—')} · dry_run=${dryRun ? 'AAN' : 'UIT'}
+            </div>
           </div>
         </div>
-        <div style="font-size:12.5px;color:var(--text-2);line-height:1.55">
-          De nieuwe cockpit-schil landt in blok 2. Zolang die er nog niet is, opent deze
-          knop de bestaande testpagina — dezelfde plek waar je nu al de sandbox seed,
-          reset en dry-run bedient. De grendel (fail-closed recipient-check, dry-run
-          default AAN, test_cockpit_audit) staat al live achter beide.
-        </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <a class="btn btn-primary btn-sm" href="/modules/wanbetalers-test.html" target="_blank" rel="noopener" style="font-size:12px">Open testpagina →</a>
-          <a class="btn btn-ghost btn-sm" href="/docs/dunning-test-cockpit-reference.html" target="_blank" rel="noopener" style="font-size:12px" title="Design-referentie voor blok 2">Bekijk cockpit-ontwerp →</a>
+        <div class="kvcs-r">
+          <span class="kvcs-badge">${s.test_customer_count || 0} test-klanten</span>
+          <span class="kvcs-badge">${s.test_invoice_count || 0} test-facturen</span>
+          <button class="btn btn-ghost btn-sm" onclick="window.__cockpitRefresh()" style="font-size:11px">↻</button>
         </div>
       </div>
+      ${(s.blockers || []).length > 0 ? `
+        <div style="margin-top:8px;padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:11.5px;line-height:1.5">
+          <b>Blockers:</b> ${(s.blockers || []).map(b => esc(b)).join(' · ')}
+        </div>
+      ` : ''}
+    ` : '';
+
+    // ── Verify-grendel-widget ─────────────────────────────────────────────
+    const vr = _cockpit.verifyResult;
+    const verifyHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">Grendel-bewijs</div>
+            <div class="kvcc-sub">6 scenario's; verwacht 6/6 pass. Doet geen echte send (dry-run geforceerd via injection).</div>
+          </div>
+          <button class="btn btn-primary btn-sm" ${_cockpit.verifying ? 'disabled' : ''} onclick="window.__cockpitVerify()" style="font-size:12px">
+            ${_cockpit.verifying ? 'Bezig…' : 'Draai bewijs'}
+          </button>
+        </div>
+        ${vr ? `
+          <div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:${vr.ok ? 'var(--emerald-soft)' : 'var(--rose-soft)'};color:${vr.ok ? 'var(--emerald)' : 'var(--rose)'};font-size:12px">
+            ${vr.ok ? `✓ ${vr.passed}/${vr.total} pass — grendel werkt` : `✗ ${vr.error || `${vr.passed}/${vr.total} — check details`}`}
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // ── Scenariobibliotheek (iter 2) ──────────────────────────────────────
+    const scenariosHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-title" style="margin-bottom:2px">Scenariobibliotheek</div>
+        <div class="kvcc-sub" style="margin-bottom:10px">Klik = laadt stappen in de blok-bouwer. Nog niet uitvoeren — je drukt zelf op "Voer sequentie uit".</div>
+        <div class="kv-cockpit-scenarios">
+          ${COCKPIT_SCENARIOS.map(sc => `
+            <button class="kv-cockpit-scard" onclick="window.__cockpitLoadScenario('${sc.key}')" title="${esc(sc.desc)}">
+              <div class="kvcs-icon">${sc.icon}</div>
+              <div class="kvcs-title">${esc(sc.title)}</div>
+              <div class="kvcs-desc">${esc(sc.desc)}</div>
+              <div class="kvcs-count">${sc.steps.length ? sc.steps.length + ' stap(pen)' : 'leeg'}</div>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    // ── Blok-bouwer (iter 2) ──────────────────────────────────────────────
+    const b = _cockpit.builder;
+    const stepsHtml = b.steps.length === 0
+      ? `<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12px;background:var(--surface-2);border-radius:8px;border:1px dashed var(--border)">Geen stappen. Kies een scenario of voeg blokken toe.</div>`
+      : b.steps.map((s, i) => {
+          const isCurrent = b.running && i === b.currentIdx;
+          const logEntry = b.log.find(l => l.idx === i);
+          const isDone = logEntry && logEntry.ok;
+          const isFail = logEntry && !logEntry.ok;
+          const usesLast = s.params?.__use_last_customer;
+          return `
+            <div class="kv-cockpit-step ${isCurrent ? 'kvcs-current' : ''} ${isDone ? 'kvcs-done' : ''} ${isFail ? 'kvcs-fail' : ''}">
+              <div class="kvcs-num">${i + 1}</div>
+              <div class="kvcs-body">
+                <div class="kvcs-action"><code>${esc(s.action)}</code>${usesLast ? ' <span class="kvcs-tag">← laatste klant</span>' : ''}</div>
+                <div class="kvcs-explain">${esc(s.explain || '')}</div>
+              </div>
+              <div class="kvcs-btns">
+                <button class="btn btn-ghost btn-sm" ${b.running || i === 0 ? 'disabled' : ''} onclick="window.__cockpitBuilderMove(${i}, -1)" title="Omhoog">↑</button>
+                <button class="btn btn-ghost btn-sm" ${b.running || i === b.steps.length - 1 ? 'disabled' : ''} onclick="window.__cockpitBuilderMove(${i}, 1)" title="Omlaag">↓</button>
+                <button class="btn btn-ghost btn-sm" ${b.running ? 'disabled' : ''} onclick="window.__cockpitBuilderRemove(${i})" title="Verwijder" style="color:var(--rose)">✕</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+    const blocksAddHtml = COCKPIT_BUILDER_BLOCKS.map(bl => `
+      <button class="kv-cockpit-block-add" ${b.running ? 'disabled' : ''} onclick="window.__cockpitBuilderAdd('${bl.action}')">${esc(bl.label)}</button>
+    `).join('');
+
+    const runLogHtml = b.log.length === 0 ? '' : `
+      <div style="margin-top:12px;padding:10px 12px;background:var(--surface-2);border-radius:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;max-height:220px;overflow-y:auto">
+        ${b.log.map(l => `
+          <div style="padding:3px 0;color:${l.ok ? 'var(--emerald)' : 'var(--rose)'}">
+            ${l.action === '__abort' ? '⨯ ' + esc(l.response?.error || 'gestopt') : `${l.ok ? '✓' : '✗'} #${l.idx + 1} ${esc(l.action)} ${l.ok ? (l.response?.message || 'ok') : (l.response?.__error || l.response?.error || 'faal')}`}
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    const builderHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">Blok-bouwer</div>
+            <div class="kvcc-sub">Sequentie draaien via bestaande is_test-gescopete cockpit-endpoints. Elke stap audit'ed. Actieve klant tussen stappen: <code>${esc(_cockpit.activeCustomerId ? _cockpit.activeCustomerId.slice(0, 8) + '…' : '—')}</code></div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-ghost btn-sm" ${b.running || b.steps.length === 0 ? 'disabled' : ''} onclick="window.__cockpitBuilderClear()" style="font-size:11px">Leegmaken</button>
+            <button class="btn btn-primary btn-sm" ${b.running || b.steps.length === 0 ? 'disabled' : ''} onclick="window.__cockpitBuilderRun()" style="font-size:12px">${b.running ? `Bezig… (${b.currentIdx + 1}/${b.steps.length})` : `▶ Voer sequentie uit (${b.steps.length})`}</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">${stepsHtml}</div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)">
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px;font-family:'IBM Plex Mono',monospace;letter-spacing:.06em;text-transform:uppercase">+ blok toevoegen</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">${blocksAddHtml}</div>
+        </div>
+        ${runLogHtml}
+      </div>
+    `;
+
+    // ── AI-tekstinvoer (iter 3) ───────────────────────────────────────────
+    // Vrije NL-prompt naar Claude Sonnet 5. Server-side forced tool_choice
+    // garandeert een JSON-plan; server-side validatePlan weigert alles
+    // buiten ALLOWED_ACTIONS. Uitvoer via custom-confirm + bestaande
+    // is_test-endpoints — nooit een directe send.
+    const ai = _cockpit.ai;
+    const planPreviewHtml = ai.plan ? `
+      <div style="margin-top:12px;padding:12px 14px;border:1px solid var(--accent,#3a5cf0);border-radius:10px;background:var(--accent-soft,var(--surface-2))">
+        <div style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Claude's plan (${ai.plan.steps.length} stap${ai.plan.steps.length === 1 ? '' : 'pen'})</div>
+        <div style="font-size:12px;font-style:italic;color:var(--text-2);margin-bottom:10px;line-height:1.5">"${esc(ai.plan.reasoning)}"</div>
+        <ol style="margin:0;padding-left:22px;font-size:12px;line-height:1.7">
+          ${ai.plan.steps.map(s => `
+            <li>
+              <code style="background:var(--surface);padding:1px 6px;border-radius:4px;font-size:11px">${esc(s.action)}</code>
+              <span style="color:var(--text-2);margin-left:6px">${esc(s.explain || '')}</span>
+            </li>
+          `).join('')}
+        </ol>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary btn-sm" onclick="window.__cockpitAiRun()" style="font-size:12px">▶ Bevestig + voer plan uit</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.__cockpitAiClear()" style="font-size:12px">Verwerpen</button>
+        </div>
+      </div>
+    ` : '';
+
+    const aiErrorHtml = ai.error ? `
+      <div style="margin-top:10px;padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:11.5px">
+        ⚠ ${esc(ai.error)}
+      </div>
+    ` : '';
+
+    const aiHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">AI-tekstinvoer <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400;letter-spacing:.06em">CLAUDE-SONNET-4-6</span></div>
+            <div class="kvcc-sub">Beschrijf je bedoeling in het Nederlands. Claude bouwt een plan; jij bevestigt. API-key blijft server-side; ongeldig plan wordt hard geweigerd (whitelist + validatePlan).</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <textarea data-cockpit-ai-prompt rows="3" placeholder="Bv: 'Maak een klant met 2 facturen van €200 die 10 dagen te laat zijn en draai de motor'" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit;line-height:1.5;box-sizing:border-box;resize:vertical" ${ai.asking ? 'disabled' : ''}></textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div style="font-size:10.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">
+              alleen actie-whitelist toegestaan · plan-uitvoer via cockpit-endpoints · elke stap ge-audit
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              ${ai.plan || ai.error ? `<button class="btn btn-ghost btn-sm" onclick="window.__cockpitAiClear()" style="font-size:11px">Leeg</button>` : ''}
+              <button class="btn btn-primary btn-sm" ${ai.asking ? 'disabled' : ''} onclick="window.__cockpitAiAsk()" style="font-size:12px">${ai.asking ? 'Claude denkt na…' : '✨ Vraag Claude'}</button>
+            </div>
+          </div>
+        </div>
+        ${aiErrorHtml}
+        ${planPreviewHtml}
+      </div>
+    `;
+
+    // ── Persona-hero (iter 5) ─────────────────────────────────────────────
+    // Pixel-match tegen docs/dunning-test-cockpit-reference.html.
+    // Layout: avatar + persona-meta links, situation-block (facturen +
+    // totaal) rechts. Alleen zichtbaar bij activeCustomerId + geladen ctx.
+    // ── Live-context panels (iter 4) ──────────────────────────────────────
+    // Start poll wanneer activeCustomerId gezet + view gemount. Fetch één-
+    // shot direct om instant-feedback te geven.
+    if (_cockpit.activeCustomerId && !_cockpit.ctx.pollTimer) {
+      queueMicrotask(() => { _cockpitFetchContext(); _cockpitStartPoll(); });
+    }
+    if (!_cockpit.activeCustomerId && _cockpit.ctx.pollTimer) {
+      _cockpitStopPoll();
+    }
+
+    const ctx = _cockpit.ctx.data;
+
+    // Persona-hero (iter 5)
+    const cust = ctx?.customer;
+    const invs = ctx?.invoices || [];
+    const persInitials = cust ? ((cust.first_name || '').replace(/[^\p{L}]/gu, '').slice(0, 1) + (cust.last_name || '').slice(0, 1)).toUpperCase() || 'T' : null;
+    const totalOpen = invs.reduce((s, i) => s + (Number(i.amount_total || 0) - Number(i.amount_paid || 0)), 0);
+    const runStatusText = ctx?.active_run?.status || (invs.length ? 'ready' : 'idle');
+    const heroHtml = _cockpit.activeCustomerId && cust ? `
+      <div class="kv-cockpit-hero">
+        <div class="kvh-persona">
+          <div class="kvh-avatar">${esc(persInitials || 'T')}</div>
+          <div style="flex:1;min-width:0">
+            <div class="kvh-name">${esc(((cust.first_name || '') + ' ' + (cust.last_name || '')).trim() || '—')}</div>
+            <div class="kvh-meta">
+              <span><b>Tel</b> ${esc(cust.phone || '—')}</span>
+              <span><b>E-mail</b> ${esc(cust.email || '—')}</span>
+              <span><b>ID</b> <code>${esc(String(cust.id || '').slice(0, 8))}…</code></span>
+            </div>
+            <div class="kvh-statusline">
+              <span class="kvh-pill kvh-p-${esc(runStatusText)}"><span class="kvh-dot"></span>${esc(runStatusText)}</span>
+              ${invs.length > 0 ? `<span class="kvh-pill kvh-p-invoices">${invs.length} factuur${invs.length === 1 ? '' : 'en'}</span>` : ''}
+              ${ctx?.pending_actions?.length ? `<span class="kvh-pill kvh-p-tasks">${ctx.pending_actions.length} taak/taken</span>` : ''}
+              ${ctx?.messages?.length ? `<span class="kvh-pill kvh-p-msgs">${ctx.messages.length} bericht(en)</span>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="kvh-situation">
+          <div class="kvh-sec-lbl">Facturen</div>
+          <div class="kvh-invoices">
+            ${invs.length === 0 ? `<div style="padding:8px;font-size:11.5px;color:var(--text-3);text-align:center">Geen facturen</div>` : invs.slice(0, 5).map(i => `
+              <div class="kvh-inv">
+                <span class="kvh-inv-nr">${esc(i.invoice_number || '')}</span>
+                <span class="kvh-inv-amt">€ ${Number(i.amount_total || 0).toFixed(2)}</span>
+                <span class="kvh-inv-st">${esc(i.status || '')}</span>
+              </div>
+            `).join('')}
+          </div>
+          ${invs.length > 0 ? `
+            <div class="kvh-totrow">
+              <span>Openstaand totaal</span>
+              <b>€ ${totalOpen.toFixed(2)}</b>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    ` : '';
+
+    // Ladder — 7-staps horizontaal. Stappen afgeleid uit dunning_workflow_runs.
+    const LADDER_STEPS = ['nieuw', 'r1', 'r2', 'r3', 'r4', 'escalatie', 'afgesloten'];
+    const currentIdx = ctx?.active_run?.step_index != null ? Math.min(ctx.active_run.step_index + 1, LADDER_STEPS.length - 1) : (ctx?.active_run ? 1 : 0);
+    const runStatus = ctx?.active_run?.status || null;
+    const runStatusPill = runStatus ? {
+      active:   { c: 'var(--emerald)',   bg: 'var(--emerald-soft)' },
+      paused:   { c: 'var(--amber)',     bg: 'var(--amber-soft)' },
+      resumed:  { c: 'var(--accent)',    bg: 'var(--accent-soft, var(--surface-2))' },
+      done:     { c: 'var(--text-3)',    bg: 'var(--surface-2)' },
+      blocked:  { c: 'var(--rose)',      bg: 'var(--rose-soft)' },
+    }[runStatus] || { c: 'var(--text-3)', bg: 'var(--surface-2)' } : null;
+
+    const ladderHtml = _cockpit.activeCustomerId ? `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">Ladder ${runStatus ? `<span class="kvcc-pill" style="background:${runStatusPill.bg};color:${runStatusPill.c}">${esc(runStatus)}</span>` : ''}</div>
+            <div class="kvcc-sub">Actieve dunning-run voor <code>${esc((ctx?.customer?.first_name || '').slice(0, 40))} ${esc((ctx?.customer?.last_name || '').slice(0, 40))}</code>. Poll elke 5s.</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__cockpitCtxRefresh()" style="font-size:11px">↻</button>
+        </div>
+        <div class="kv-cockpit-ladder">
+          <div class="kvl-fill" style="width:${(currentIdx / (LADDER_STEPS.length - 1)) * 100}%"></div>
+          ${LADDER_STEPS.map((label, i) => {
+            const done = i < currentIdx;
+            const cur  = i === currentIdx;
+            return `<div class="kvl-step ${done ? 'kvl-done' : ''} ${cur ? 'kvl-cur' : ''}"><div class="kvl-node"></div><div class="kvl-lbl">${esc(label)}</div></div>`;
+          }).join('')}
+        </div>
+      </div>
+    ` : '';
+
+    // Tijdlijn — audit + dunning_log + wa_messages merged.
+    const timelineRows = ctx?.timeline || [];
+    const tlIcons = { audit: '📋', dunning_log: '⚙', wa_message: '💬' };
+    const tlHtml = _cockpit.activeCustomerId ? `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">Live tijdlijn <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400">${timelineRows.length} events</span></div>
+            <div class="kvcc-sub">Audit + dunning_log + WA-messages, nieuwste bovenaan.</div>
+          </div>
+        </div>
+        <div class="kv-cockpit-timeline">
+          ${timelineRows.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Nog geen events. Draai een scenario om de tijdlijn te vullen.</div>` : timelineRows.slice(0, 30).map(t => `
+            <div class="kv-cockpit-tlrow ${t.source === 'audit' && t.status === 'error' ? 'kvtl-err' : ''}">
+              <div class="kvtl-ic">${tlIcons[t.source] || '·'}</div>
+              <div class="kvtl-body">
+                <div class="kvtl-line">
+                  ${t.source === 'audit' ? `<b>${esc(t.action || '')}</b> <span style="color:var(--text-3)">·</span> ${esc(t.status || '')}${t.error ? ` <span style="color:var(--rose)">${esc(String(t.error).slice(0, 80))}</span>` : ''}` : ''}
+                  ${t.source === 'dunning_log' ? `<b>${esc(t.event || '')}</b>` : ''}
+                  ${t.source === 'wa_message' ? `<span style="color:${t.direction === 'outbound' ? 'var(--accent)' : 'var(--emerald)'}">${t.direction === 'outbound' ? '→' : '←'}</span> ${esc(t.body || '')}` : ''}
+                </div>
+                <div class="kvtl-meta">${esc(t.source)} · ${esc(new Date(t.ts || 0).toLocaleTimeString('nl-NL'))}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+
+    // Berichten — WA-conv preview.
+    const msgs = ctx?.messages || [];
+    const berichtenHtml = _cockpit.activeCustomerId ? `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">WA-berichten <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400">${msgs.length} bericht(en)</span></div>
+            <div class="kvcc-sub">Nieuwste conversation van deze test-klant. In-/out-badges.</div>
+          </div>
+        </div>
+        <div class="kv-cockpit-msgs">
+          ${msgs.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Geen WA-berichten. Draai <code>simulate-inbound</code> of een template-send.</div>` : msgs.slice(0, 15).reverse().map(m => `
+            <div class="kv-cockpit-msg ${m.direction === 'outbound' ? 'kvcm-out' : 'kvcm-in'}">
+              <div class="kvcm-bubble">${esc((m.body || '').slice(0, 400))}</div>
+              <div class="kvcm-meta">${esc(m.direction || '?')} · ${esc(new Date(m.created_at || 0).toLocaleTimeString('nl-NL'))}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+
+    // Takenlijst — pending_actions.
+    const tasks = ctx?.pending_actions || [];
+    const tasksHtml = _cockpit.activeCustomerId ? `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">Takenlijst <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400">${tasks.length} openstaand</span></div>
+            <div class="kvcc-sub">pending_actions voor deze test-klant.</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${tasks.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Geen openstaande taken.</div>` : tasks.slice(0, 15).map(t => `
+            <div class="kv-cockpit-task">
+              <div class="kvct-l">
+                <div class="kvct-type"><code>${esc(t.action_type || '')}</code> <span class="kvct-status" style="background:${t.status === 'open' ? 'var(--amber-soft)' : 'var(--surface-2)'};color:${t.status === 'open' ? 'var(--amber)' : 'var(--text-3)'}">${esc(t.status || '')}</span></div>
+                <div class="kvct-meta">aangemaakt ${esc(new Date(t.created_at || 0).toLocaleString('nl-NL'))}${t.due_at ? ' · deadline ' + esc(new Date(t.due_at).toLocaleString('nl-NL')) : ''}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+
+    const ctxErrorHtml = _cockpit.ctx.error ? `
+      <div style="margin-top:10px;padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:11.5px">⚠ Context-fetch: ${esc(_cockpit.ctx.error)}</div>
+    ` : '';
+
+    // Iter 5 klaar — geen placeholder meer; alle panels leven nu.
+    const placeholderHtml = '';
+
+    return `<style>
+      .kv-cockpit-strip{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface);font-size:12.5px}
+      .kv-cockpit-strip.kvcs-ok{border-color:var(--emerald);background:var(--emerald-soft);color:var(--emerald)}
+      .kv-cockpit-strip.kvcs-block{border-color:var(--amber);background:var(--amber-soft);color:var(--amber)}
+      .kv-cockpit-strip .kvcs-l{display:flex;align-items:center;gap:10px;min-width:0}
+      .kv-cockpit-strip .kvcs-dot{width:9px;height:9px;border-radius:50%;background:currentColor;flex-shrink:0}
+      .kv-cockpit-strip .kvcs-r{display:flex;align-items:center;gap:8px;flex-shrink:0}
+      .kv-cockpit-strip .kvcs-badge{padding:3px 9px;border-radius:20px;background:var(--surface);color:var(--text-2);font-family:'IBM Plex Mono',monospace;font-size:10.5px;border:1px solid var(--border)}
+      .kv-cockpit-card{margin-top:12px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+      .kv-cockpit-card .kvcc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+      .kv-cockpit-card .kvcc-title{font-size:13px;font-weight:600}
+      .kv-cockpit-card .kvcc-sub{font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5}
+      .kv-cockpit-scenarios{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+      .kv-cockpit-scard{text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:all .15s;font-family:inherit;font-size:inherit;color:inherit;display:flex;flex-direction:column;gap:2px}
+      .kv-cockpit-scard:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 12px -4px rgba(0,0,0,.15)}
+      .kv-cockpit-scard .kvcs-icon{font-size:16px}
+      .kv-cockpit-scard .kvcs-title{font-weight:600;font-size:12.5px;margin-top:2px}
+      .kv-cockpit-scard .kvcs-desc{font-size:11px;color:var(--text-3);line-height:1.4;flex:1}
+      .kv-cockpit-scard .kvcs-count{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);margin-top:6px;letter-spacing:.04em}
+      .kv-cockpit-step{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;transition:all .2s}
+      .kv-cockpit-step.kvcs-current{border-color:var(--accent);background:var(--accent-soft,var(--surface));box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+      .kv-cockpit-step.kvcs-done{border-color:var(--emerald);background:var(--emerald-soft)}
+      .kv-cockpit-step.kvcs-fail{border-color:var(--rose);background:var(--rose-soft)}
+      .kv-cockpit-step .kvcs-num{width:24px;height:24px;border-radius:50%;background:var(--surface);border:1px solid var(--border);display:grid;place-items:center;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;flex-shrink:0}
+      .kv-cockpit-step .kvcs-body{flex:1;min-width:0}
+      .kv-cockpit-step .kvcs-action{font-size:12px;font-weight:600}
+      .kv-cockpit-step .kvcs-explain{font-size:11px;color:var(--text-3);margin-top:1px}
+      .kv-cockpit-step .kvcs-tag{font-family:'IBM Plex Mono',monospace;font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--surface);color:var(--text-3);border:1px solid var(--border);font-weight:400}
+      .kv-cockpit-step .kvcs-btns{display:flex;gap:3px;flex-shrink:0}
+      .kv-cockpit-block-add{padding:5px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-2);cursor:pointer;transition:all .15s}
+      .kv-cockpit-block-add:hover:not([disabled]){border-color:var(--accent);color:var(--accent);background:var(--surface)}
+      .kv-cockpit-block-add[disabled]{opacity:.4;cursor:not-allowed}
+      .kvcc-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:10.5px;font-family:'IBM Plex Mono',monospace;letter-spacing:.04em;text-transform:uppercase;margin-left:6px;font-weight:600}
+      .kv-cockpit-ladder{display:flex;align-items:flex-start;position:relative;margin-top:16px;padding:0 4px}
+      .kv-cockpit-ladder::before{content:"";position:absolute;top:6px;left:4%;right:4%;height:2px;background:var(--border)}
+      .kv-cockpit-ladder .kvl-fill{position:absolute;top:6px;left:4%;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent-2,var(--accent)));transition:width .6s cubic-bezier(.5,0,.2,1);z-index:1}
+      .kv-cockpit-ladder .kvl-step{flex:1;text-align:center;position:relative;z-index:2}
+      .kv-cockpit-ladder .kvl-node{width:14px;height:14px;border-radius:50%;background:var(--surface);border:2px solid var(--border);margin:0 auto;transition:all .35s}
+      .kv-cockpit-ladder .kvl-step.kvl-done .kvl-node{background:var(--accent);border-color:var(--accent)}
+      .kv-cockpit-ladder .kvl-step.kvl-cur .kvl-node{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 22%,transparent);transform:scale(1.15)}
+      .kv-cockpit-ladder .kvl-lbl{font-family:'IBM Plex Mono',monospace;font-size:10px;margin-top:6px;color:var(--text-3);letter-spacing:.04em}
+      .kv-cockpit-ladder .kvl-step.kvl-cur .kvl-lbl,.kv-cockpit-ladder .kvl-step.kvl-done .kvl-lbl{color:var(--text-2)}
+      .kv-cockpit-timeline{margin-top:10px;max-height:340px;overflow-y:auto;padding-right:4px}
+      .kv-cockpit-tlrow{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)}
+      .kv-cockpit-tlrow:last-child{border-bottom:0}
+      .kv-cockpit-tlrow.kvtl-err .kvtl-line{color:var(--rose)}
+      .kv-cockpit-tlrow .kvtl-ic{font-size:14px;flex-shrink:0;margin-top:1px}
+      .kv-cockpit-tlrow .kvtl-body{flex:1;min-width:0}
+      .kv-cockpit-tlrow .kvtl-line{font-size:12px;line-height:1.4;color:var(--text-2);word-break:break-word}
+      .kv-cockpit-tlrow .kvtl-meta{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);margin-top:2px}
+      .kv-cockpit-msgs{display:flex;flex-direction:column;gap:6px;margin-top:10px;max-height:340px;overflow-y:auto}
+      .kv-cockpit-msg{display:flex;flex-direction:column;max-width:75%}
+      .kv-cockpit-msg.kvcm-in{align-self:flex-start}
+      .kv-cockpit-msg.kvcm-out{align-self:flex-end;align-items:flex-end}
+      .kv-cockpit-msg .kvcm-bubble{padding:8px 11px;border-radius:12px;background:var(--surface-2);color:var(--text);font-size:12.5px;line-height:1.4;word-break:break-word}
+      .kv-cockpit-msg.kvcm-out .kvcm-bubble{background:var(--accent-soft,var(--surface-2));border:1px solid var(--accent)}
+      .kv-cockpit-msg.kvcm-in .kvcm-bubble{border:1px solid var(--border)}
+      .kv-cockpit-msg .kvcm-meta{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);margin-top:2px;padding:0 4px}
+      .kv-cockpit-task{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px}
+      .kv-cockpit-task .kvct-type{font-size:12px}
+      .kv-cockpit-task .kvct-status{padding:1px 7px;border-radius:20px;font-family:'IBM Plex Mono',monospace;font-size:10px;margin-left:6px}
+      .kv-cockpit-task .kvct-meta{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-3);margin-top:2px}
+      /* Persona-hero (iter 5) — pixel-match tegen design-referentie */
+      .kv-cockpit-hero{position:relative;overflow:hidden;display:grid;grid-template-columns:1.4fr 1fr;gap:22px;padding:18px 20px;border:1px solid var(--border);border-radius:16px;background:var(--surface);box-shadow:0 1px 2px rgba(16,24,40,.06),0 10px 30px -14px rgba(16,24,40,.25);margin-top:12px}
+      .kv-cockpit-hero::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 55%);pointer-events:none}
+      @media(max-width:720px){.kv-cockpit-hero{grid-template-columns:1fr}}
+      .kv-cockpit-hero .kvh-persona{display:flex;gap:14px;align-items:flex-start;position:relative;z-index:1}
+      .kv-cockpit-hero .kvh-avatar{width:52px;height:52px;border-radius:14px;flex-shrink:0;background:linear-gradient(135deg,var(--accent-2,#7b5cf0),var(--accent));display:grid;place-items:center;color:#fff;font-family:'IBM Plex Sans',sans-serif;font-weight:700;font-size:20px;letter-spacing:-.02em;box-shadow:0 4px 12px -4px color-mix(in srgb,var(--accent) 45%,transparent)}
+      .kv-cockpit-hero .kvh-name{font-size:20px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+      .kv-cockpit-hero .kvh-meta{display:flex;flex-wrap:wrap;gap:14px;margin-top:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3)}
+      .kv-cockpit-hero .kvh-meta b{color:var(--text-2);font-weight:600;font-family:inherit;text-transform:uppercase;letter-spacing:.04em;font-size:9.5px;margin-right:3px}
+      .kv-cockpit-hero .kvh-statusline{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center}
+      .kv-cockpit-hero .kvh-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+      .kv-cockpit-hero .kvh-pill .kvh-dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+      .kv-cockpit-hero .kvh-p-active,.kv-cockpit-hero .kvh-p-ready{color:var(--emerald);background:var(--emerald-soft)}
+      .kv-cockpit-hero .kvh-p-paused{color:var(--amber);background:var(--amber-soft)}
+      .kv-cockpit-hero .kvh-p-resumed{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+      .kv-cockpit-hero .kvh-p-done,.kv-cockpit-hero .kvh-p-idle{color:var(--text-3);background:var(--surface-2)}
+      .kv-cockpit-hero .kvh-p-blocked{color:var(--rose);background:var(--rose-soft)}
+      .kv-cockpit-hero .kvh-p-invoices,.kv-cockpit-hero .kvh-p-tasks,.kv-cockpit-hero .kvh-p-msgs{color:var(--text-2);background:var(--surface-2);border:1px solid var(--border)}
+      .kv-cockpit-hero .kvh-situation{border-left:1px solid var(--border);padding-left:20px;position:relative;z-index:1}
+      @media(max-width:720px){.kv-cockpit-hero .kvh-situation{border-left:0;padding-left:0;border-top:1px solid var(--border);padding-top:14px}}
+      .kv-cockpit-hero .kvh-sec-lbl{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px}
+      .kv-cockpit-hero .kvh-invoices{display:flex;flex-direction:column;gap:5px}
+      .kv-cockpit-hero .kvh-inv{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:11.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:6px 9px}
+      .kv-cockpit-hero .kvh-inv-nr{color:var(--text-2);font-size:11px}
+      .kv-cockpit-hero .kvh-inv-amt{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+      .kv-cockpit-hero .kvh-inv-st{color:var(--amber);font-size:10px;letter-spacing:.04em;text-transform:uppercase}
+      .kv-cockpit-hero .kvh-totrow{display:flex;justify-content:space-between;margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-2)}
+      .kv-cockpit-hero .kvh-totrow b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:700}
+    </style>
+    <div style="max-width:1100px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--violet,#7b5cf0));display:grid;place-items:center;color:#fff;font-size:16px">⚗</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:16px;font-weight:700;letter-spacing:-.01em">Dunning Test Cockpit</div>
+          <div style="font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);letter-spacing:.08em;text-transform:uppercase">is_test · super_admin · fail-closed grendel</div>
+        </div>
+      </div>
+      ${guardHtml}
+      ${heroHtml}
+      ${scenariosHtml}
+      ${aiHtml}
+      ${builderHtml}
+      ${ladderHtml}
+      ${tlHtml}
+      ${berichtenHtml}
+      ${tasksHtml}
+      ${ctxErrorHtml}
+      ${verifyHtml}
+      ${placeholderHtml}
     </div>`;
   }
 
