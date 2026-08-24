@@ -25,6 +25,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin } from './_lib/wanbetalers-sandbox.js';
+import { anthropicMessages, DEFAULT_MODEL } from './_lib/anthropic-client.js';
 
 // ── Whitelist van toegestane cockpit-acties ──────────────────────────────
 // Moet 1-op-1 gelijk blijven aan de client-side action-routes (blok-bouwer
@@ -130,13 +131,19 @@ Regels:
 
 async function audit({ actor, payload, result, status, error }) {
   try {
+    // Privacy-safe projection: NOOIT de volledige prompt of Claude's
+    // reasoning in audit-payload. Alleen length + model + action-lijst.
+    const safePayload = {
+      prompt_length: typeof payload?.prompt_length === 'number' ? payload.prompt_length : null,
+      model:         payload?.model || null,
+    };
     await supabaseAdmin.from('test_cockpit_audit').insert({
       triggered_by: actor?.userId || null,
       admin_email:  actor?.email || null,
       action:       'ai_plan_request',
       scope:        'test',
       target:       {},
-      payload:      { prompt_length: (payload?.prompt || '').length, model: payload?.model || null },
+      payload:      safePayload,
       result:       result || {},
       status,
       error_message: error || null,
@@ -163,12 +170,6 @@ export default async function handler(req, res) {
   if (!prompt) return res.status(400).json({ error: 'prompt is verplicht.' });
   if (prompt.length > 2000) return res.status(400).json({ error: 'prompt te lang (max 2000 chars).' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    await audit({ actor, payload: { prompt }, status: 'error', error: 'ANTHROPIC_API_KEY ontbreekt' });
-    return res.status(500).json({ error: 'AI-integratie niet geconfigureerd (ANTHROPIC_API_KEY ontbreekt).' });
-  }
-
   // Optionele current_state als context (max 2KB — voorkomt token-blowup).
   const currentState = (body.current_state && typeof body.current_state === 'object')
     ? JSON.stringify(body.current_state).slice(0, 2000)
@@ -179,12 +180,14 @@ export default async function handler(req, res) {
     `Intentie van de super_admin:\n${prompt}`,
   ].filter(Boolean).join('\n');
 
-  const MODEL = 'claude-sonnet-5';
+  // Model uit centrale constante _lib/anthropic-client.js — geen hardcoded
+  // string zodat een model-bump op één plek plaatsvindt.
+  const MODEL = DEFAULT_MODEL;
+  const promptLen = prompt.length;
+
   let claudeResp;
   try {
-    const { default: Anthropic } = await import('@anthropic-ai/sdk');
-    const client = new Anthropic({ apiKey });
-    claudeResp = await client.messages.create({
+    claudeResp = await anthropicMessages({
       model:       MODEL,
       max_tokens:  2048,
       temperature: 0.2,
@@ -195,28 +198,30 @@ export default async function handler(req, res) {
       tool_choice: { type: 'tool', name: 'emit_cockpit_plan' },
     });
   } catch (e) {
-    await audit({ actor, payload: { prompt, model: MODEL }, status: 'error', error: e?.message || String(e) });
-    return res.status(502).json({ error: 'Anthropic-call faalde: ' + (e?.message || String(e)) });
+    // AnthropicClientError met ANTHROPIC_KEY_MISSING → 500 (config).
+    const isConfig = e?.code === 'ANTHROPIC_KEY_MISSING';
+    await audit({ actor, payload: { prompt_length: promptLen, model: MODEL }, status: 'error', error: e?.message || String(e) });
+    return res.status(isConfig ? 500 : 502).json({ error: (isConfig ? 'AI-integratie niet geconfigureerd: ' : 'Anthropic-call faalde: ') + (e?.message || String(e)) });
   }
 
   // Extract tool_use blok. Bij forced tool_choice hoort Claude via deze tool
   // te antwoorden; zo niet → weigeren.
   const toolUseBlock = (claudeResp?.content || []).find(b => b?.type === 'tool_use' && b?.name === 'emit_cockpit_plan');
   if (!toolUseBlock || !toolUseBlock.input) {
-    await audit({ actor, payload: { prompt, model: MODEL }, result: { stop_reason: claudeResp?.stop_reason }, status: 'error', error: 'geen tool_use blok in Claude-response' });
+    await audit({ actor, payload: { prompt_length: promptLen, model: MODEL }, result: { stop_reason: claudeResp?.stop_reason }, status: 'error', error: 'geen tool_use blok in Claude-response' });
     return res.status(502).json({ error: 'Claude retourneerde geen tool-use antwoord (forced tool_choice werd genegeerd).' });
   }
 
   const plan = toolUseBlock.input;
   const err = validatePlan(plan);
   if (err) {
-    await audit({ actor, payload: { prompt, model: MODEL }, result: { step_count: plan?.steps?.length ?? 0 }, status: 'error', error: 'plan-validatie: ' + err });
+    await audit({ actor, payload: { prompt_length: promptLen, model: MODEL }, result: { step_count: plan?.steps?.length ?? 0 }, status: 'error', error: 'plan-validatie: ' + err });
     return res.status(422).json({ error: 'Plan geweigerd: ' + err });
   }
 
   await audit({
     actor,
-    payload: { prompt, model: MODEL },
+    payload: { prompt_length: promptLen, model: MODEL },
     result:  { step_count: plan.steps.length, actions: plan.steps.map(s => s.action) },
     status:  'ok',
   });

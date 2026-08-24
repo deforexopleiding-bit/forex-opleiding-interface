@@ -6639,7 +6639,7 @@
       <div class="kv-cockpit-card">
         <div class="kvcc-head">
           <div>
-            <div class="kvcc-title">AI-tekstinvoer <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400;letter-spacing:.06em">CLAUDE-SONNET-5</span></div>
+            <div class="kvcc-title">AI-tekstinvoer <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400;letter-spacing:.06em">CLAUDE-SONNET-4-6</span></div>
             <div class="kvcc-sub">Beschrijf je bedoeling in het Nederlands. Claude bouwt een plan; jij bevestigt. API-key blijft server-side; ongeldig plan wordt hard geweigerd (whitelist + validatePlan).</div>
           </div>
         </div>
