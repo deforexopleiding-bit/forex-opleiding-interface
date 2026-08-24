@@ -618,7 +618,10 @@ function initNotifBell() {
 const BADGE_SOURCES = [
   // { mod: 'inbox',          url: '/api/super-admin-inbox-counts', path: 'total_unread', roles: ['super_admin','admin','manager'] },
   { mod: 'leadsonderhoud', url: '/api/leadsonderhoud-open-count', path: 'open_count' },
-  { mod: 'onboarding',     url: '/api/onboarding-counts',         path: 'active_count' },
+  // 2026-08-24: action_count i.p.v. active_count — telt # onboardings met
+  // ≥1 ongelezen WA-inbound in de onboarding-inbox. Betekent "iets voor mij
+  // te doen", niet "hoeveel trajecten lopen". Parity met leadsonderhoud-badge.
+  { mod: 'onboarding',     url: '/api/onboarding-counts',         path: 'action_count' },
   { mod: 'lisa',           url: '/api/lisa-conversations-count?status=active', path: 'count' },
   // pending-actions-list geeft {total,items[]} — total is de teller.
   { mod: 'wanbetalers',    url: '/api/pending-actions-list?status=pending&page_size=1', path: 'total' },
