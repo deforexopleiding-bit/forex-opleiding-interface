@@ -173,7 +173,7 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
       // ook af vóór elke send, maar we maken ons daar niet afhankelijk van en
       // completen de run(s) zelf.
       if (fulfilled) {
-        await _completeRunsForCustomer(cid, 'promise_fulfilled_paid');
+        await completeRunsForCustomer(cid, 'promise_fulfilled_paid');
         summary.fulfilled++; acted++; continue;
       }
 
@@ -229,7 +229,7 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
 // Zet alle niet-terminale runs op 'completed' (spiegel van de engine's paid-
 // completion) + wist gespreks-pauze-velden. NIET hervatten: er is geen schuld,
 // dus de run hoeft de ladder niet te vervolgen.
-async function _completeRunsForCustomer(cid, reason) {
+export async function completeRunsForCustomer(cid, reason) {
   let runs = [];
   try {
     const { data } = await supabaseAdmin
