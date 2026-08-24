@@ -73,37 +73,99 @@ async function isIpRateLimited(ipHash) {
   return !!data;
 }
 
-async function insertInboxRow(rowFields) {
-  // 2026-08-24 dedup-fix: als er een ghl_form_submission_id is, hanteer
-  // upsert-on-conflict tegen de nieuwe UNIQUE partial index
-  // `event_signup_inbox_ghl_form_submission_id_uidx`. Als de submission
-  // eerder al binnen was → skip nieuwe rij + return de bestaande id (idempotent
-  // t.a.v. GHL webhook-retries). Zonder ghl_form_submission_id: plain INSERT
-  // (partial index vangt NULL niet af).
-  const hasGhlId = !!rowFields?.ghl_form_submission_id;
-  if (hasGhlId) {
-    // upsert met ignoreDuplicates → INSERT ... ON CONFLICT DO NOTHING.
-    // Bij conflict: data is [] (geen rij teruggekregen); dan bestaande id
-    // ophalen via SELECT.
+// Genormaliseerde e-mail: trim + lowercase. Return null als leeg.
+function _normEmail(e) {
+  const s = String(e || '').trim().toLowerCase();
+  return s || null;
+}
+// Genormaliseerd telefoonnummer: strip non-digits + last-9-fallback
+// (Lesson-18-patroon). Return null als <9 digits (te weinig entropy).
+function _normPhone(p) {
+  const digits = String(p || '').replace(/\D/g, '');
+  if (digits.length < 9) return null;
+  return digits.slice(-9);
+}
+
+// 2026-08-24 dedup-fix v2: pre-insert dedup-check op de JUISTE sleutel
+// nadat meting toonde dat ghl_form_submission_id 100% NULL is in prod
+// (GHL-webhook stuurt die key niet). Nieuwe sleutel:
+//   person_key = ghl_contact_id OR normEmail OR normPhone-last-9
+//   dedup-scope = (person_key, event_date_label)
+// Zelfde persoon + zelfde event = één inbox-rij. Zelfde persoon + ander
+// event = 2 rijen (bewust — verschillende deelnames).
+async function findExistingInboxRow({ ghlContactId, email, phone, eventDateLabel }) {
+  if (!eventDateLabel) return null;   // zonder event-scope geen dedup
+  // 1) ghl_contact_id-eerst (meest betrouwbare + snelste dankzij nieuwe index).
+  if (ghlContactId) {
     const { data, error } = await supabaseAdmin
       .from('event_signup_inbox')
-      .upsert(rowFields, { onConflict: 'ghl_form_submission_id', ignoreDuplicates: true })
-      .select('id');
-    if (error) throw new Error('inbox upsert: ' + error.message);
-    if (Array.isArray(data) && data.length > 0 && data[0]?.id) return data[0].id;
-    // Conflict → bestaande rij zoeken.
-    const { data: existing, error: exErr } = await supabaseAdmin
-      .from('event_signup_inbox')
       .select('id')
-      .eq('ghl_form_submission_id', rowFields.ghl_form_submission_id)
+      .eq('ghl_contact_id', ghlContactId)
+      .eq('event_date_label', eventDateLabel)
       .order('received_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (exErr) throw new Error('inbox lookup after conflict: ' + exErr.message);
-    if (!existing?.id) throw new Error('inbox upsert returnde geen rij + geen bestaande gevonden');
-    return existing.id;
+    if (error) {
+      console.error('[events-signup-inbound] dedup lookup (contact):', error.message);
+      return null;   // soft-fail → nieuwe INSERT proberen
+    }
+    if (data?.id) return data.id;
   }
-  // NULL ghl_form_submission_id → plain insert.
+  // 2) Email-fallback (normalized).
+  const nEmail = _normEmail(email);
+  if (nEmail) {
+    const { data, error } = await supabaseAdmin
+      .from('event_signup_inbox')
+      .select('id')
+      .ilike('email', nEmail)              // ilike voor case-tolerantie
+      .eq('event_date_label', eventDateLabel)
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error('[events-signup-inbound] dedup lookup (email):', error.message);
+      return null;
+    }
+    if (data?.id) return data.id;
+  }
+  // 3) Phone-fallback (last-9-digits). SUBSTRING op regexp_replace niet
+  // native via supabase-js; halen we recente rijen op voor deze event_date_label
+  // met non-null phone en filteren client-side. Kleine set want beperkt op label.
+  const nPhone = _normPhone(phone);
+  if (nPhone) {
+    const { data, error } = await supabaseAdmin
+      .from('event_signup_inbox')
+      .select('id, phone')
+      .eq('event_date_label', eventDateLabel)
+      .not('phone', 'is', null)
+      .order('received_at', { ascending: false })
+      .limit(50);
+    if (error) {
+      console.error('[events-signup-inbound] dedup lookup (phone):', error.message);
+      return null;
+    }
+    for (const row of (data || [])) {
+      if (_normPhone(row.phone) === nPhone) return row.id;
+    }
+  }
+  return null;
+}
+
+async function insertInboxRow(rowFields) {
+  // Pre-insert dedup: als een matching rij bestaat op (person_key +
+  // event_date_label), return die id — geen nieuwe rij. Idempotent voor
+  // GHL webhook-retries + voor iemand die 2× het formulier invult.
+  // Fail-soft: als de lookup faalt (netwerk/DB-error) valt de code
+  // terug op plain INSERT — dubbelen zijn cosmetisch (client-groepering
+  // v=47 pakt ze op), maar data-verlies is uitgesloten.
+  const existingId = await findExistingInboxRow({
+    ghlContactId:    rowFields.ghl_contact_id,
+    email:           rowFields.email,
+    phone:           rowFields.phone,
+    eventDateLabel:  rowFields.event_date_label,
+  });
+  if (existingId) return existingId;
+
   const { data, error } = await supabaseAdmin
     .from('event_signup_inbox')
     .insert(rowFields)
