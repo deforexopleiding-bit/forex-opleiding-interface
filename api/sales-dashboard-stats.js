@@ -27,7 +27,17 @@
 
 import { supabase, supabaseAdmin } from './supabase.js';
 import { computeMetrics } from './follow-up-metrics.js';
-import { periodRange, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
+import { periodRange, nlDayEndExclusive, nlDayStart, nlDateString } from './_lib/nl-period.js';
+
+// 2026-08-24 custom-range support voor 'Calls geboekt'-tegel op dashboard.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function rangeForCustom(fromStr, toStr) {
+  if (!ISO_DATE_RE.test(fromStr) || !ISO_DATE_RE.test(toStr)) return null;
+  const start = nlDayStart(new Date(fromStr + 'T12:00:00Z'));
+  const endExclusive = nlDayEndExclusive(new Date(toStr + 'T12:00:00Z'));
+  if (endExclusive <= start) return null;
+  return { start, endExclusive };
+}
 
 const ALLOWED_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor'];
 const INACTIVE_STATUSES = ['cancelled', 'verplaatst', 'verwijderd'];
@@ -65,6 +75,8 @@ export default async function handler(req, res) {
   // Sales én mentor → eigen scope; admin/manager/super_admin → globaal.
   // Mentor kan Sales-Dashboard krijgen via RBAC maar mag alleen eigen cijfers zien.
   const ownerScope = (profile.role === 'sales' || profile.role === 'mentor') ? user.id : null;
+  // v=... custom-range voor Calls geboekt: ?from=YYYY-MM-DD&to=YYYY-MM-DD.
+  const customRange = rangeForCustom(String(req.query?.from || '').trim(), String(req.query?.to || '').trim());
 
   try {
     // Parallel fetch alle widget-data (7 queries, geen volgorde-afhankelijkheid).
@@ -90,7 +102,7 @@ export default async function handler(req, res) {
       fetchNextAppointment(ownerScope),
       fetchLeadsCounts(),    // global, geen ownerScope
       fetchEventsCounts(),   // global
-      fetchBookedInPeriodCounts(ownerScope),
+      fetchBookedInPeriodCounts(ownerScope, customRange),
     ]);
 
     return res.status(200).json({
@@ -120,6 +132,8 @@ export default async function handler(req, res) {
       year: {
         booked:       bookedCounts.year,
       },
+      // Custom-range 'Calls geboekt'-teller — alleen aanwezig als from/to gegeven.
+      ...(customRange && typeof bookedCounts.custom === 'number' ? { custom: { booked: bookedCounts.custom } } : {}),
       open_follow_ups:             openFollowUpsCount,
       appointments_today_count:    todayMetrics.appointments_total,
       appointments_tomorrow_count: tomorrowApptCount,
@@ -150,7 +164,7 @@ export default async function handler(req, res) {
  *
  * Week = maandag t/m zondag (NL). Maand = 1e t/m 1e volgende. Year = 1 jan.
  */
-async function fetchBookedInPeriodCounts(ownerScope) {
+async function fetchBookedInPeriodCounts(ownerScope, customRange) {
   const now = new Date();
   // NL-tijdzone-aware grenzen (Europe/Amsterdam → UTC-instants). Voorheen
   // bepaalden setHours/getDay/getFullYear alles in server-lokale (UTC) tijd →
@@ -179,13 +193,19 @@ async function fetchBookedInPeriodCounts(ownerScope) {
     if (error) throw new Error('booked-count: ' + error.message);
     return (data || []).filter(a => !INACTIVE_STATUSES.includes(a.status)).length;
   }
-  const [today, week, month, year] = await Promise.all([
+  const promises = [
     count(startOfToday, startOfTomorrow),
     count(startOfWeek,  startOfNextWeek),
     count(startOfMonth, startOfNextMonth),
     count(startOfYear,  startOfNextYear),
-  ]);
-  return { today, week, month, year };
+  ];
+  // v=... custom-range support: als from/to gegeven, ook die window tellen.
+  if (customRange) promises.push(count(customRange.start, customRange.endExclusive));
+  const results = await Promise.all(promises);
+  const [today, week, month, year, custom] = results;
+  const out = { today, week, month, year };
+  if (customRange) out.custom = custom;
+  return out;
 }
 
 /**

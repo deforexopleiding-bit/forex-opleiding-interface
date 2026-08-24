@@ -414,7 +414,7 @@
         tryFetch('finance-counts',        '/api/finance-dashboard-counts?' + financePeriodQ),
         tryFetch('tickets',               '/api/tickets'),
         tryFetch('events-list',           '/api/events-list?limit=6&status=draft,published'),
-        tryFetch('sales-dashboard-stats', '/api/sales-dashboard-stats'),
+        tryFetch('sales-dashboard-stats', '/api/sales-dashboard-stats' + (isCustom ? '?' + customQs.slice(1) : '')),
         tryFetch('sales-retention',       '/api/sales-retention'),
         tryFetch('sales-mrr-report',      '/api/sales-mrr-report'),
         tryFetch('tasks-followup',        '/api/tasks-list?action_type=MANUAL_FOLLOWUP&status=PENDING&limit=1'),
@@ -710,18 +710,35 @@
                   if (!allLabels) return true;
                   return allLabels.some(l => matchers.some(m => l.includes(m)));
                 }
+                // v=30 (2026-08-24): naast opgetelde count (incl afwijzer) ook
+                // toegelaten/afgewezen splitsing per traject-tegel voor rood/groen
+                // display. Toegelaten = schone `by_traject`; afgewezen = totaal
+                // - toegelaten. Fallback: als _incl_afwijzer ontbreekt (oude
+                // endpoint), reduceren beide naar 0 zodat de UI dan alleen het
+                // hoofdgetal toont.
                 function findCount(matchers) {
-                  if (!lp) return 0;
-                  const src = lp.by_traject_incl_afwijzer || lp.by_traject;
-                  if (!src) return 0;
-                  let sum = 0;
-                  for (const k of Object.keys(src)) {
-                    const lk = String(k).toLowerCase();
-                    if (matchers.some(m => lk.includes(m))) sum += src[k] || 0;
+                  if (!lp) return { total: 0, toegelaten: 0, afgewezen: 0 };
+                  const srcTotal = lp.by_traject_incl_afwijzer || lp.by_traject;
+                  const srcClean = lp.by_traject;
+                  let total = 0, toe = 0;
+                  if (srcTotal) {
+                    for (const k of Object.keys(srcTotal)) {
+                      const lk = String(k).toLowerCase();
+                      if (matchers.some(m => lk.includes(m))) total += srcTotal[k] || 0;
+                    }
                   }
-                  return sum;
+                  if (srcClean) {
+                    for (const k of Object.keys(srcClean)) {
+                      const lk = String(k).toLowerCase();
+                      if (matchers.some(m => lk.includes(m))) toe += srcClean[k] || 0;
+                    }
+                  }
+                  const afg = Math.max(0, total - toe);
+                  return { total, toegelaten: toe, afgewezen: afg };
                 }
                 // Calls GEBOEKT (nieuw): sales.<periode>.booked = created_at.
+                // v=30 Custom-support: sales-dashboard-stats accepteert nu from/to
+                // → response bevat `custom.booked` als beide meegestuurd.
                 const s = _live.sales;
                 let callsCnt = null;
                 if (s) {
@@ -729,19 +746,32 @@
                   else if (curPeriod === 'Week') callsCnt = (s.week  && typeof s.week.booked   === 'number') ? s.week.booked   : null;
                   else if (curPeriod === 'Maand')callsCnt = (s.month && typeof s.month.booked  === 'number') ? s.month.booked  : null;
                   else if (curPeriod === 'Jaar') callsCnt = (s.year  && typeof s.year.booked   === 'number') ? s.year.booked   : null;
-                  // Custom: kies month als proxy (endpoint heeft geen range-support).
-                  else if (curPeriod === 'Custom') callsCnt = (s.month && typeof s.month.booked === 'number') ? s.month.booked : null;
+                  else if (curPeriod === 'Custom') callsCnt = (s.custom && typeof s.custom.booked === 'number')
+                    ? s.custom.booked
+                    // Backwards-compat: als endpoint nog geen custom-veld heeft, valt terug op month als proxy.
+                    : ((s.month && typeof s.month.booked === 'number') ? s.month.booked : null);
+                }
+                // Split-render helper voor lead-tegels: toont "toegelaten · afgewezen"
+                // subtekst. Bij afgewezen=0 → geen rood 0 (weg om ruis te vermijden).
+                function _leadSplitHtml(sp) {
+                  const g = sp.toegelaten;
+                  const r = sp.afgewezen;
+                  const parts = [];
+                  parts.push(`<span style="color:var(--emerald);font-weight:600">${g}</span>`);
+                  if (r > 0) parts.push(`<span style="color:var(--rose);font-weight:600">${r}</span>`);
+                  return `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${parts.join(' · ')}<span style="color:var(--text-3);font-weight:400"> ${r > 0 ? '(toegelaten · afgewezen)' : '(toegelaten)'}</span></div>`;
                 }
                 const tiles = [];
-                if (isLive && anyLabelMatches(['7-daagse','7 daagse','7daagse'])) tiles.push(['7-daagse',      findCount(['7-daagse','7 daagse','7daagse']), totLeads ? Math.round(findCount(['7-daagse','7 daagse','7daagse'])/Math.max(totLeads,1)*100) : 0, 'emerald', 'leads',  true]);
-                if (isLive && anyLabelMatches(['event']))   tiles.push(['Event-aanmeldingen', findCount(['event']),  totLeads ? Math.round(findCount(['event'])/Math.max(totLeads,1)*100)  : 0, 'teal',   'events', true]);
-                if (isLive && anyLabelMatches(['webinar'])) tiles.push(['Webinar',            findCount(['webinar']),totLeads ? Math.round(findCount(['webinar'])/Math.max(totLeads,1)*100): 0, 'blue',   'leads',  true]);
-                if (isLive && anyLabelMatches(['mini']))    tiles.push(['Mini cursus',        findCount(['mini']),   totLeads ? Math.round(findCount(['mini'])/Math.max(totLeads,1)*100)   : 0, 'violet', 'leads',  true]);
-                if (callsCnt != null) tiles.push(['Calls geboekt', callsCnt, 100, 'accent', 'sales', true]);
-                return tiles.map(([n, c, p, col, mod, tileLive]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
+                if (isLive && anyLabelMatches(['7-daagse','7 daagse','7daagse'])) { const sp = findCount(['7-daagse','7 daagse','7daagse']); tiles.push(['7-daagse',      sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100) : 0, 'emerald', 'leads',  true, sp]); }
+                if (isLive && anyLabelMatches(['event']))   { const sp = findCount(['event']);   tiles.push(['Event-aanmeldingen', sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100)  : 0, 'teal',   'events', true, sp]); }
+                if (isLive && anyLabelMatches(['webinar'])) { const sp = findCount(['webinar']); tiles.push(['Webinar',            sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100): 0, 'blue',   'leads',  true, sp]); }
+                if (isLive && anyLabelMatches(['mini']))    { const sp = findCount(['mini']);    tiles.push(['Mini cursus',        sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100)   : 0, 'violet', 'leads',  true, sp]); }
+                if (callsCnt != null) tiles.push(['Calls geboekt', callsCnt, 100, 'accent', 'sales', true, null]);
+                return tiles.map(([n, c, p, col, mod, tileLive, splitObj]) => `<div style="border:1px solid var(--border);border-radius:var(--r);padding:12px 13px;cursor:pointer;transition:all .15s;${c > 0 ? '' : 'opacity:.6'}"
                   onmouseover="this.style.borderColor='var(--border-strong)'" onmouseout="this.style.borderColor='var(--border)'" onclick="DFO.goMod('${mod}')">
                   <div style="font-size:11.5px;color:var(--text-2);margin-bottom:5px">${n}${tileLive ? '' : mockBadge()}</div>
                   <div style="font-size:26px;font-weight:600;font-family:'IBM Plex Mono',monospace;letter-spacing:-.04em;line-height:1">${c}</div>
+                  ${splitObj ? _leadSplitHtml(splitObj) : ''}
                   <div class="progress" style="margin-top:9px;height:3px"><i style="width:${p}%;background:var(--${col})"></i></div>
                   <div style="font-size:11px;color:var(--text-3);margin-top:5px">${tileLive ? (n === 'Calls geboekt' ? 'nieuw geboekt' : `${p}% van totaal`) : `${p}% van totaal`}</div></div>`).join('');
               })()}
