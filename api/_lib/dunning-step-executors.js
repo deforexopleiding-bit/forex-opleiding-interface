@@ -175,19 +175,6 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
           log_payload: { template_id: template.id, to, reason: guardErr.message },
         };
       }
-      // Dunning-test-cockpit L2-check: eigen, onafhankelijke fail-closed
-      // recipient-match. Faalt hard bij lege sandbox-contact of mismatch —
-      // ook als de bestaande L3-assert per ongeluk warn-then-skip zou doen.
-      try {
-        const { assertTestRecipient } = await import('./test-cockpit-send.js');
-        await assertTestRecipient({ to, channel: 'email' });
-      } catch (guardErrOwn) {
-        return {
-          status: 'skipped',
-          log_event: 'email_skipped_sandbox_guard',
-          log_payload: { template_id: template.id, to, reason: 'L2:' + guardErrOwn.message },
-        };
-      }
     }
     if (await isDryRunEnabled()) {
       return {
@@ -248,6 +235,23 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
     // administratie@. Standaard SPF/DKIM domain-alignment blijft valide
     // (envelope-sender = info@ + header-From-domein = deforexopleiding.nl).
     // Werkt zolang Strato "send-as" voor dit domein-alias toestaat.
+    // Dunning-test-cockpit L2-check: eigen, onafhankelijke fail-closed
+    // recipient-match op de EXACTE variabele die aan sendMail meegaat.
+    // Robuustheid: geen ruimte voor waardeverandering tussen check en send.
+    // Faalt hard bij lege sandbox-contact of mismatch — ook als de bestaande
+    // L3-assert per ongeluk warn-then-skip zou doen. isTest=false: geen check.
+    if (customer?.is_test) {
+      try {
+        const { assertTestRecipient } = await import('./test-cockpit-send.js');
+        await assertTestRecipient({ to, channel: 'email' });
+      } catch (guardErrOwn) {
+        return {
+          status: 'skipped',
+          log_event: 'email_skipped_sandbox_guard',
+          log_payload: { template_id: template.id, to, reason: 'L2:' + guardErrOwn.message },
+        };
+      }
+    }
     const result = await sendMail({
       to,
       subject: rendered.subject,
@@ -513,23 +517,6 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
             meta_template_name: template.meta_template_name,
             to: customerPhone,
             reason: guardErr.message,
-          },
-        };
-      }
-      // Dunning-test-cockpit L2-check: eigen, onafhankelijke fail-closed
-      // recipient-match. Zie email-tak voor de motivatie.
-      try {
-        const { assertTestRecipient } = await import('./test-cockpit-send.js');
-        await assertTestRecipient({ to: customerPhone, channel: 'whatsapp' });
-      } catch (guardErrOwn) {
-        return {
-          status: 'skipped',
-          log_event: 'whatsapp_skipped_sandbox_guard',
-          log_payload: {
-            template_id: template.id,
-            meta_template_name: template.meta_template_name,
-            to: customerPhone,
-            reason: 'L2:' + guardErrOwn.message,
           },
         };
       }
@@ -847,6 +834,28 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
 
   let metaResult;
   try {
+    // Dunning-test-cockpit L2-check: eigen, onafhankelijke fail-closed
+    // recipient-match op sendTo (de E.164-genormaliseerde string die
+    // daadwerkelijk aan Meta gaat, niet op customerPhone). Robuustheid:
+    // geen ruimte voor waardeverandering tussen check en send. isTest=false:
+    // geen check.
+    if (customerIsTest) {
+      try {
+        const { assertTestRecipient } = await import('./test-cockpit-send.js');
+        await assertTestRecipient({ to: sendTo, channel: 'whatsapp' });
+      } catch (guardErrOwn) {
+        return {
+          status: 'skipped',
+          log_event: 'whatsapp_skipped_sandbox_guard',
+          log_payload: {
+            template_id: template.id,
+            meta_template_name: template.meta_template_name,
+            to: sendTo,
+            reason: 'L2:' + guardErrOwn.message,
+          },
+        };
+      }
+    }
     metaResult = await sendTemplate({
       to:            sendTo,
       templateName:  template.meta_template_name,
