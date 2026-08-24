@@ -1,46 +1,132 @@
 // POST /api/dunning-test-ai-plan
 //
-// Cockpit AI-tekstinvoer: neemt een vrij-tekst prompt van de super_admin,
-// stuurt naar Anthropic (Claude Sonnet) via tool-use pattern, retourneert
-// een gestructureerd cockpit-plan (array van stappen). UI toont het plan
-// en vraagt bevestiging vóór executie.
-//
-// STUB-iteratie (BLOK 2 · iter 1): retourneert een vaste demo-response
-// zodat de UI-koppeling gebouwd kan worden zonder API-token te verbranden.
-// Iter 3 vervangt de stub door de echte Anthropic Messages API-call met
-// forced tool_choice (zie docs/dunning-test-cockpit-blok2-scope.md).
+// Cockpit AI-tekstinvoer: neemt een vrij-tekst prompt van de super_admin
+// en stuurt naar Anthropic (Claude Sonnet 5) via het tool-use pattern met
+// forced tool_choice, zodat Claude ALTIJD via de tool antwoordt (geen
+// prose-fallback, geen JSON.parse-hacks). Retourneert een gestructureerd
+// cockpit-plan dat de client daarna via custom-confirm laat uitvoeren.
 //
 // Body: { prompt: string, current_state?: object }
-// Response: {
-//   ok: true,
-//   plan: {
-//     reasoning: string,
-//     steps: [{ action, params, explain }, ...]
-//   }
-// }
+// Response (ok):    { ok: true, plan: { reasoning, steps: [...] } }
+// Response (fail):  { error: string }
+//
+// Beveiliging (fail-closed op alle lagen):
+//   - Super_admin-only server-side (requireSuperAdmin).
+//   - API-key server-side (process.env.ANTHROPIC_API_KEY), NOOIT naar client.
+//   - Tool-schema forceert action ∈ ALLOWED_ACTIONS (JSON-schema enum).
+//   - Post-response validatePlan() gooit ongeldige plans weg vóór ze de
+//     UI bereiken — geen half-geldig plan wordt teruggegeven.
+//   - Audit-insert op elke aanroep (alleen prompt_length, geen prompt-
+//     content, geen antwoord-content — privacy-safe).
+//
+// De client voert het plan uit door dezelfde cockpit-endpoints aan te
+// roepen als de blok-bouwer (customer-create / invoice-create / reset /
+// verify-grendel / dunning-test-trigger). NOOIT een directe send.
 
 import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin } from './_lib/wanbetalers-sandbox.js';
 
-// Ondersteunde acties — moet aansluiten op ACTION_ROUTES uit
-// dunning-test-trigger.js + de directe cockpit-endpoints
-// (customer-create, invoice-create, reset, verify-grendel).
-const ALLOWED_ACTIONS = new Set([
-  'customer-create', 'invoice-create', 'reset', 'verify-grendel',
-  'engine', 'conversation-reminders', 'bulk-send', 'breach-check',
-  'fast-forward', 'simulate-inbound', 'mark-paid', 'send-test-template',
-]);
+// ── Whitelist van toegestane cockpit-acties ──────────────────────────────
+// Moet 1-op-1 gelijk blijven aan de client-side action-routes (blok-bouwer
+// _cockpitEndpointFor). Nieuwe actie? Beide plekken updaten.
+const ALLOWED_ACTIONS = [
+  'customer-create',
+  'invoice-create',
+  'reset',
+  'verify-grendel',
+  'engine',
+  'conversation-reminders',
+  'bulk-send',
+  'breach-check',
+  'fast-forward',
+  'simulate-inbound',
+  'mark-paid',
+  'send-test-template',
+];
+const ALLOWED_ACTIONS_SET = new Set(ALLOWED_ACTIONS);
 
+// ── Plan-validatie (hard throw op mismatch — geen half-geldig plan) ──────
 function validatePlan(plan) {
-  if (!plan || typeof plan !== 'object') return 'plan ontbreekt';
-  if (!Array.isArray(plan.steps)) return 'plan.steps moet array zijn';
+  if (!plan || typeof plan !== 'object') return 'plan ontbreekt of is geen object';
+  if (typeof plan.reasoning !== 'string' || !plan.reasoning.trim()) {
+    return 'plan.reasoning ontbreekt of is leeg';
+  }
+  if (!Array.isArray(plan.steps)) return 'plan.steps moet een array zijn';
+  if (plan.steps.length === 0) return 'plan.steps mag niet leeg zijn';
+  if (plan.steps.length > 12)  return 'plan.steps mag max 12 entries hebben';
   for (const [i, s] of plan.steps.entries()) {
-    if (!ALLOWED_ACTIONS.has(s.action)) {
-      return `steps[${i}].action '${s.action}' niet toegestaan`;
+    if (!s || typeof s !== 'object')          return `steps[${i}] is geen object`;
+    if (typeof s.action !== 'string')          return `steps[${i}].action ontbreekt`;
+    if (!ALLOWED_ACTIONS_SET.has(s.action)) {
+      return `steps[${i}].action '${s.action}' niet in whitelist (${ALLOWED_ACTIONS.join(', ')})`;
+    }
+    if (s.params !== undefined && (typeof s.params !== 'object' || s.params === null || Array.isArray(s.params))) {
+      return `steps[${i}].params moet een object zijn`;
+    }
+    if (typeof s.explain !== 'string' || !s.explain.trim()) {
+      return `steps[${i}].explain ontbreekt of is leeg`;
     }
   }
   return null;
 }
+
+// ── Tool-definitie voor Anthropic (forced tool_choice) ────────────────────
+const CLAUDE_TOOL = {
+  name: 'emit_cockpit_plan',
+  description: 'Retourneer een uitvoerbaar plan voor de dunning test cockpit. Elke stap moet exact één toegestane cockpit-actie zijn. Retourneer ALLEEN via deze tool — geen prose.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      reasoning: {
+        type: 'string',
+        description: '1-2 zinnen: waarom deze stappen deze intentie oplossen. In het Nederlands.',
+      },
+      steps: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 12,
+        items: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ALLOWED_ACTIONS },
+            params: {
+              type: 'object',
+              description: 'Payload voor de cockpit-endpoint. Voor invoice-create-stappen die de laatst-aangemaakte klant willen hergebruiken: gebruik { __use_last_customer: true, invoices: [...] }.',
+            },
+            explain: {
+              type: 'string',
+              description: 'Korte NL-toelichting voor de super_admin (verschijnt in de custom-confirm-dialoog).',
+            },
+          },
+          required: ['action', 'explain'],
+        },
+      },
+    },
+    required: ['reasoning', 'steps'],
+  },
+};
+
+const SYSTEM_PROMPT = `Je bent de plan-genererende AI voor de Dunning Test Cockpit van De Forex Opleiding.
+Doel: vertaal de vrije-tekst intentie van een super_admin naar een uitvoerbaar plan van
+maximaal 12 cockpit-stappen. Retourneer ALLEEN via de tool 'emit_cockpit_plan'.
+
+Toegestane acties (whitelist):
+${ALLOWED_ACTIONS.map(a => '  - ' + a).join('\n')}
+
+Regels:
+- Elke stap MOET één van bovenstaande acties zijn — nooit iets anders.
+- Voor scenario's die eerst een test-klant nodig hebben: start met 'customer-create'
+  (met een korte NL-naam in params.full_name).
+- Voor 'invoice-create' bij dezelfde klant: gebruik { __use_last_customer: true,
+  invoices: [{ amount, days_late, scenario_tag }] }.
+- Voor 'simulate-inbound' / 'mark-paid': gebruik { __use_last_customer: true }.
+- Motor-triggers ('engine', 'conversation-reminders', 'bulk-send', 'breach-check',
+  'fast-forward'): meestal geen params nodig.
+- 'reset' met { dry_run: true } is een tellings-preview; { dry_run: false } wist echt.
+- Gebruik nooit 'reset' met dry_run:false zonder expliciete instructie van de user.
+- Geef een korte NL-explain per stap zodat de super_admin ziet wat er zou gebeuren.
+- Alles is is_test-gescoped en de grendel routeert verzending naar de sandbox-
+  ontvanger — je hoeft je geen zorgen te maken over echte klant-verzending.`;
 
 async function audit({ actor, payload, result, status, error }) {
   try {
@@ -50,7 +136,7 @@ async function audit({ actor, payload, result, status, error }) {
       action:       'ai_plan_request',
       scope:        'test',
       target:       {},
-      payload:      { prompt_length: (payload?.prompt || '').length },
+      payload:      { prompt_length: (payload?.prompt || '').length, model: payload?.model || null },
       result:       result || {},
       status,
       error_message: error || null,
@@ -75,33 +161,65 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const prompt = String(body.prompt || '').trim();
   if (!prompt) return res.status(400).json({ error: 'prompt is verplicht.' });
+  if (prompt.length > 2000) return res.status(400).json({ error: 'prompt te lang (max 2000 chars).' });
 
-  // ── STUB (iter 1): vaste demo-plan zodat UI-koppeling ontwikkeld kan
-  // worden zonder Anthropic-tokens te verbranden. Iter 3 vervangt dit
-  // door een echte Claude-call met tool-use pattern.
-  const plan = {
-    reasoning: `[STUB] Demo-plan voor prompt "${prompt.slice(0, 80)}${prompt.length > 80 ? '…' : ''}". Iter 3: Claude Sonnet 4.6 forceert dit schema via tool_choice.`,
-    steps: [
-      {
-        action:  'customer-create',
-        params:  { full_name: 'Demo Klant', email: null, phone: null },
-        explain: 'Nieuwe is_test-klant aanmaken (STUB).',
-      },
-      {
-        action:  'verify-grendel',
-        params:  {},
-        explain: 'Bewijs dat de fail-closed grendel werkt (6/6 pass verwacht).',
-      },
-    ],
-  };
-
-  const err = validatePlan(plan);
-  if (err) {
-    await audit({ actor, payload: { prompt }, status: 'error', error: err });
-    return res.status(500).json({ error: 'plan-validatie: ' + err });
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    await audit({ actor, payload: { prompt }, status: 'error', error: 'ANTHROPIC_API_KEY ontbreekt' });
+    return res.status(500).json({ error: 'AI-integratie niet geconfigureerd (ANTHROPIC_API_KEY ontbreekt).' });
   }
 
-  await audit({ actor, payload: { prompt }, result: { step_count: plan.steps.length, stub: true }, status: 'ok' });
+  // Optionele current_state als context (max 2KB — voorkomt token-blowup).
+  const currentState = (body.current_state && typeof body.current_state === 'object')
+    ? JSON.stringify(body.current_state).slice(0, 2000)
+    : null;
 
-  return res.status(200).json({ ok: true, stub: true, plan });
+  const userContent = [
+    currentState ? `Huidige cockpit-state (JSON, ter context):\n${currentState}\n` : '',
+    `Intentie van de super_admin:\n${prompt}`,
+  ].filter(Boolean).join('\n');
+
+  const MODEL = 'claude-sonnet-5';
+  let claudeResp;
+  try {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey });
+    claudeResp = await client.messages.create({
+      model:       MODEL,
+      max_tokens:  2048,
+      temperature: 0.2,
+      system:      SYSTEM_PROMPT,
+      messages:    [{ role: 'user', content: userContent }],
+      tools:       [CLAUDE_TOOL],
+      // Forceer Claude om via de tool te antwoorden — geen prose-fallback.
+      tool_choice: { type: 'tool', name: 'emit_cockpit_plan' },
+    });
+  } catch (e) {
+    await audit({ actor, payload: { prompt, model: MODEL }, status: 'error', error: e?.message || String(e) });
+    return res.status(502).json({ error: 'Anthropic-call faalde: ' + (e?.message || String(e)) });
+  }
+
+  // Extract tool_use blok. Bij forced tool_choice hoort Claude via deze tool
+  // te antwoorden; zo niet → weigeren.
+  const toolUseBlock = (claudeResp?.content || []).find(b => b?.type === 'tool_use' && b?.name === 'emit_cockpit_plan');
+  if (!toolUseBlock || !toolUseBlock.input) {
+    await audit({ actor, payload: { prompt, model: MODEL }, result: { stop_reason: claudeResp?.stop_reason }, status: 'error', error: 'geen tool_use blok in Claude-response' });
+    return res.status(502).json({ error: 'Claude retourneerde geen tool-use antwoord (forced tool_choice werd genegeerd).' });
+  }
+
+  const plan = toolUseBlock.input;
+  const err = validatePlan(plan);
+  if (err) {
+    await audit({ actor, payload: { prompt, model: MODEL }, result: { step_count: plan?.steps?.length ?? 0 }, status: 'error', error: 'plan-validatie: ' + err });
+    return res.status(422).json({ error: 'Plan geweigerd: ' + err });
+  }
+
+  await audit({
+    actor,
+    payload: { prompt, model: MODEL },
+    result:  { step_count: plan.steps.length, actions: plan.steps.map(s => s.action) },
+    status:  'ok',
+  });
+
+  return res.status(200).json({ ok: true, plan, model: MODEL });
 }

@@ -6143,6 +6143,8 @@
     builder: { steps: [], running: false, currentIdx: -1, log: [] },
     // Actieve is_test-context (na scenario-seed of eerste customer-create).
     activeCustomerId: null,
+    // iter 3: AI-tekstinvoer + plan state.
+    ai: { asking: false, error: null, plan: null, prompt: '' },
   };
 
   // ─── Scenariobibliotheek (iter 2) ────────────────────────────────────────
@@ -6323,6 +6325,92 @@
   window.__cockpitBuilderClear = () => {
     _cockpit.builder = { steps: [], running: false, currentIdx: -1, log: [] };
     if (render) render();
+  };
+
+  // ─── AI-tekstinvoer (iter 3) — vraag Claude om een plan ────────────────
+  // Server draait Claude Sonnet 5 met forced tool_choice + ALLOWED_ACTIONS
+  // whitelist. API-key blijft server-side. Ongeldig plan → server weigert
+  // met 422 en de UI toont de foutmelding — NIETS wordt uitgevoerd.
+  window.__cockpitAiAsk = async () => {
+    // Sync-from-DOM: uncontrolled textarea.
+    const el = document.querySelector('[data-cockpit-ai-prompt]');
+    const prompt = String(el?.value || '').trim();
+    if (!prompt) { showToast('Typ eerst een instructie voor Claude.', 'warn'); return; }
+    _cockpit.ai.prompt   = prompt;
+    _cockpit.ai.asking   = true;
+    _cockpit.ai.error    = null;
+    _cockpit.ai.plan     = null;
+    if (render) render();
+
+    const j = await tryFetch('cockpit-ai-plan', '/api/dunning-test-ai-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        current_state: {
+          active_customer_id: _cockpit.activeCustomerId || null,
+          test_customer_count: _cockpit.status?.test_customer_count || 0,
+          test_invoice_count:  _cockpit.status?.test_invoice_count  || 0,
+          dry_run_enabled:     _cockpit.status?.dry_run_enabled     || false,
+        },
+      }),
+    });
+    _cockpit.ai.asking = false;
+    if (j?.__error || j?.error) {
+      _cockpit.ai.error = j.__error || j.error;
+    } else if (!j?.plan) {
+      _cockpit.ai.error = 'Server retourneerde geen plan.';
+    } else {
+      _cockpit.ai.plan = j.plan;
+    }
+    if (render) render();
+  };
+
+  window.__cockpitAiClear = () => {
+    _cockpit.ai = { asking: false, error: null, plan: null, prompt: '' };
+    if (render) render();
+  };
+
+  // Plan-uitvoer: vult de blok-bouwer met de plan-steps én triggert
+  // dezelfde runner. Vóór uitvoer: custom-confirm met alle stappen
+  // expliciet zichtbaar. Alle uitvoer loopt door de exact dezelfde
+  // is_test-gescopete endpoints als de blok-bouwer (nooit een directe
+  // send, nooit iets buiten ALLOWED_ACTIONS — de server-side whitelist
+  // en validatePlan hebben dat al afgedwongen; deze client-side check
+  // is een extra vangnet).
+  const CLIENT_ALLOWED_ACTIONS = new Set([
+    'customer-create', 'invoice-create', 'reset', 'verify-grendel',
+    'engine', 'conversation-reminders', 'bulk-send', 'breach-check',
+    'fast-forward', 'simulate-inbound', 'mark-paid', 'send-test-template',
+  ]);
+  window.__cockpitAiRun = () => {
+    const plan = _cockpit.ai.plan;
+    if (!plan || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+      showToast('Geen plan om uit te voeren.', 'warn'); return;
+    }
+    // Client-side vangnet: bevestig nogmaals dat elke stap in de whitelist zit.
+    const badStep = plan.steps.find(s => !CLIENT_ALLOWED_ACTIONS.has(s.action));
+    if (badStep) {
+      showToast(`Plan bevat ongeldige actie '${badStep.action}' — geweigerd.`, 'warn');
+      return;
+    }
+    // Bulk custom-confirm met alle stappen expliciet zichtbaar.
+    const stepList = plan.steps.map((s, i) => `${i + 1}. ${s.action} — ${s.explain || ''}`).join('\n');
+    openConfirm(
+      `Claude stelt ${plan.steps.length} stap(pen) voor:\n\n${stepList}\n\nAlle stappen worden achter elkaar uitgevoerd via de is_test-gescopete cockpit-endpoints (nooit een directe send). Bij een fout stopt de sequentie. Elke stap komt in test_cockpit_audit.\n\nUitvoeren?`,
+      () => {
+        // Laad plan in de builder + run direct — hergebruikt de bestaande
+        // runner + log-widget zodat de gebruiker precies dezelfde UX ziet
+        // als bij scenariobibliotheek / handmatige builder-run.
+        _cockpit.builder = {
+          steps: plan.steps.map(s => JSON.parse(JSON.stringify(s))),
+          running: false, currentIdx: -1, log: [],
+        };
+        if (render) render();
+        window.__cockpitBuilderRun();
+      },
+      'warn',
+    );
   };
 
   // ─── Sequentie-uitvoer ───────────────────────────────────────────────────
@@ -6516,12 +6604,68 @@
       </div>
     `;
 
-    // ── Iteratie-placeholder (iter 3+) ────────────────────────────────────
+    // ── AI-tekstinvoer (iter 3) ───────────────────────────────────────────
+    // Vrije NL-prompt naar Claude Sonnet 5. Server-side forced tool_choice
+    // garandeert een JSON-plan; server-side validatePlan weigert alles
+    // buiten ALLOWED_ACTIONS. Uitvoer via custom-confirm + bestaande
+    // is_test-endpoints — nooit een directe send.
+    const ai = _cockpit.ai;
+    const planPreviewHtml = ai.plan ? `
+      <div style="margin-top:12px;padding:12px 14px;border:1px solid var(--accent,#3a5cf0);border-radius:10px;background:var(--accent-soft,var(--surface-2))">
+        <div style="font-size:11.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px">Claude's plan (${ai.plan.steps.length} stap${ai.plan.steps.length === 1 ? '' : 'pen'})</div>
+        <div style="font-size:12px;font-style:italic;color:var(--text-2);margin-bottom:10px;line-height:1.5">"${esc(ai.plan.reasoning)}"</div>
+        <ol style="margin:0;padding-left:22px;font-size:12px;line-height:1.7">
+          ${ai.plan.steps.map(s => `
+            <li>
+              <code style="background:var(--surface);padding:1px 6px;border-radius:4px;font-size:11px">${esc(s.action)}</code>
+              <span style="color:var(--text-2);margin-left:6px">${esc(s.explain || '')}</span>
+            </li>
+          `).join('')}
+        </ol>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary btn-sm" onclick="window.__cockpitAiRun()" style="font-size:12px">▶ Bevestig + voer plan uit</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.__cockpitAiClear()" style="font-size:12px">Verwerpen</button>
+        </div>
+      </div>
+    ` : '';
+
+    const aiErrorHtml = ai.error ? `
+      <div style="margin-top:10px;padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:11.5px">
+        ⚠ ${esc(ai.error)}
+      </div>
+    ` : '';
+
+    const aiHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">AI-tekstinvoer <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400;letter-spacing:.06em">CLAUDE-SONNET-5</span></div>
+            <div class="kvcc-sub">Beschrijf je bedoeling in het Nederlands. Claude bouwt een plan; jij bevestigt. API-key blijft server-side; ongeldig plan wordt hard geweigerd (whitelist + validatePlan).</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <textarea data-cockpit-ai-prompt rows="3" placeholder="Bv: 'Maak een klant met 2 facturen van €200 die 10 dagen te laat zijn en draai de motor'" style="width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12.5px;font-family:inherit;line-height:1.5;box-sizing:border-box;resize:vertical" ${ai.asking ? 'disabled' : ''}></textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div style="font-size:10.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace">
+              alleen actie-whitelist toegestaan · plan-uitvoer via cockpit-endpoints · elke stap ge-audit
+            </div>
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              ${ai.plan || ai.error ? `<button class="btn btn-ghost btn-sm" onclick="window.__cockpitAiClear()" style="font-size:11px">Leeg</button>` : ''}
+              <button class="btn btn-primary btn-sm" ${ai.asking ? 'disabled' : ''} onclick="window.__cockpitAiAsk()" style="font-size:12px">${ai.asking ? 'Claude denkt na…' : '✨ Vraag Claude'}</button>
+            </div>
+          </div>
+        </div>
+        ${aiErrorHtml}
+        ${planPreviewHtml}
+      </div>
+    `;
+
+    // ── Iteratie-placeholder (iter 4+) ────────────────────────────────────
     const placeholderHtml = `
       <div class="kv-cockpit-card" style="border-style:dashed;opacity:.8">
         <div style="font-size:12px;color:var(--text-3);line-height:1.6">
           <b>Nog te bouwen in vervolg-iteraties</b> (<a href="/docs/dunning-test-cockpit-blok2-scope.md" target="_blank" style="color:var(--accent)">scope-doc</a>):
-          AI-tekstinvoer (Claude Sonnet · iter 3) · ladder + live tijdlijn + berichten + takenlijst (iter 4) · persona-hero polish (iter 5).
+          ladder + live tijdlijn + berichten + takenlijst (iter 4) · persona-hero polish + pixel-match (iter 5).
           Ondertussen: <a href="/modules/wanbetalers-test.html" target="_blank" style="color:var(--accent)">oude testpagina</a>.
         </div>
       </div>
@@ -6570,6 +6714,7 @@
       </div>
       ${guardHtml}
       ${scenariosHtml}
+      ${aiHtml}
       ${builderHtml}
       ${verifyHtml}
       ${placeholderHtml}
