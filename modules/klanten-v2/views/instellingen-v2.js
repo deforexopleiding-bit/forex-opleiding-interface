@@ -6136,7 +6136,231 @@
   // AI-tekstinvoer, ladder, tijdlijn, berichten, takenlijst). Zie
   // docs/dunning-test-cockpit-blok2-scope.md.
 
-  const _cockpit = { status: null, loading: false, error: null, fetched: false, verifying: false, verifyResult: null };
+  const _cockpit = {
+    status: null, loading: false, error: null, fetched: false,
+    verifying: false, verifyResult: null,
+    // iter 2: blok-bouwer state.
+    builder: { steps: [], running: false, currentIdx: -1, log: [] },
+    // Actieve is_test-context (na scenario-seed of eerste customer-create).
+    activeCustomerId: null,
+  };
+
+  // ─── Scenariobibliotheek (iter 2) ────────────────────────────────────────
+  // 8 presets die de blok-bouwer vullen met een startsequentie. Klik = laad
+  // stappen in de builder (nog niet uitvoeren) — user drukt daarna zelf op
+  // "Voer sequentie uit". Nieuwe customer wordt aangemaakt door de eerste
+  // step (customer-create) zodat elk scenario met een schone lei begint.
+  const COCKPIT_SCENARIOS = [
+    {
+      key: 'warm-2x-3d', icon: '🌡', title: 'Warm · 2× · 3d',
+      desc: '1 klant, 2 facturen à €150, 3 dagen te laat.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Warm Scenario' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-1' },
+          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-2' },
+        ]}, explain: '2 facturen à €150, 3 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+      ],
+    },
+    {
+      key: 'koud-3x-14d', icon: '❄', title: 'Koud · 3× · 14d',
+      desc: '1 klant, 3 facturen à €297, 14 dagen te laat.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Koud Scenario' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-1' },
+          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-2' },
+          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-3' },
+        ]}, explain: '3 facturen à €297, 14 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+      ],
+    },
+    {
+      key: 'pauze-belofte', icon: '⏸', title: 'Pauze · belofte',
+      desc: '1 factuur, klant reageert, betaalt uiteindelijk.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Pauze Belofte' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 250, days_late: 5, scenario_tag: 'pauze-belofte' },
+        ]}, explain: '1 factuur, €250, 5 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start dunning-run' },
+        { action: 'simulate-inbound', params: { __use_last_customer: true }, explain: 'Klant reageert (pauzeert de run)' },
+        { action: 'mark-paid', params: { __use_last_customer: true }, explain: 'Betaling geboekt' },
+      ],
+    },
+    {
+      key: 'escalatie-14d', icon: '🚨', title: 'Escalatie · 14d',
+      desc: '1 factuur 14d oud, fast-forward door alle stappen.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Escalatie Test' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 500, days_late: 14, scenario_tag: 'escalatie-14d' },
+        ]}, explain: '1 factuur, €500, 14 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start' },
+        { action: 'fast-forward', params: { __use_last_customer: true }, explain: 'Ladder-stap doorspoelen' },
+      ],
+    },
+    {
+      key: 'bulk-round-1', icon: '📦', title: 'Bulk · ronde 1',
+      desc: 'Bulk-send-cron triggert een goedgekeurde bulk-job.',
+      steps: [
+        { action: 'bulk-send', params: {}, explain: 'wanbetalers-sandbox-run-bulk' },
+      ],
+    },
+    {
+      key: 'credit-round', icon: '💳', title: 'Crediteerronde',
+      desc: '1 klant + factuur, simulate-credit-round-flow.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'Credit Test' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 199, days_late: 7, scenario_tag: 'credit-round' },
+        ]}, explain: '1 factuur, €199, 7 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start' },
+        { action: 'breach-check', params: {}, explain: 'Arrangements breach-check' },
+      ],
+    },
+    {
+      key: 'no-show-inbound', icon: '🔕', title: 'Geen inbound',
+      desc: 'Klant reageert niet — conv-reminder-cron moet nudgen.',
+      steps: [
+        { action: 'customer-create', params: { full_name: 'No Show' }, explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
+          { amount: 175, days_late: 8, scenario_tag: 'no-show-inbound' },
+        ]}, explain: '1 factuur, €175, 8 dagen te laat' },
+        { action: 'engine', params: {}, explain: 'Motor start' },
+        { action: 'conversation-reminders', params: {}, explain: 'Reminder-cron voor stille klanten' },
+      ],
+    },
+    {
+      key: 'custom', icon: '⚙', title: 'Custom',
+      desc: 'Leeg — bouw je eigen sequentie in de blok-bouwer.',
+      steps: [],
+    },
+  ];
+
+  // Losse stap-blokken voor de blok-bouwer (klik = voeg toe).
+  const COCKPIT_BUILDER_BLOCKS = [
+    { action: 'customer-create',       label: '+ klant',         params: { full_name: 'Handmatig' } },
+    { action: 'invoice-create',        label: '+ factuur',       params: { __use_last_customer: true, invoices: [{ amount: 100, days_late: 5, scenario_tag: 'manual' }] } },
+    { action: 'engine',                label: '▶ engine' },
+    { action: 'conversation-reminders',label: '▶ conv-reminders' },
+    { action: 'bulk-send',             label: '▶ bulk-send' },
+    { action: 'breach-check',          label: '▶ breach-check' },
+    { action: 'fast-forward',          label: '⏩ fast-forward' },
+    { action: 'simulate-inbound',      label: '📥 simulate-inbound', params: { __use_last_customer: true } },
+    { action: 'mark-paid',             label: '💰 mark-paid',    params: { __use_last_customer: true } },
+    { action: 'send-test-template',    label: '📨 test-template' },
+    { action: 'verify-grendel',        label: '🔒 verify-grendel' },
+    { action: 'reset',                 label: '🧹 reset (dry-run)', params: { dry_run: true } },
+  ];
+
+  // ─── Endpoints per action ────────────────────────────────────────────────
+  // Bepaalt welk cockpit-endpoint een builder-step aanroept. LEEG voor
+  // trigger-multiplex-acties; direct-endpoint anders. Alles is_test-gescoped.
+  function _cockpitEndpointFor(step) {
+    switch (step.action) {
+      case 'customer-create': return { url: '/api/dunning-test-customer-create', direct: true };
+      case 'invoice-create':  return { url: '/api/dunning-test-invoice-create',  direct: true };
+      case 'reset':           return { url: '/api/dunning-test-reset',           direct: true };
+      case 'verify-grendel':  return { url: '/api/dunning-test-verify-grendel',  direct: true };
+      default:                return { url: '/api/dunning-test-trigger',         direct: false };
+    }
+  }
+
+  // Bouwt de body voor een builder-step. Vervangt __use_last_customer door
+  // de daadwerkelijke id van de laatst-aangemaakte test-klant.
+  function _cockpitStepBody(step) {
+    const p = { ...(step.params || {}) };
+    if (p.__use_last_customer) {
+      delete p.__use_last_customer;
+      p.customer_id = _cockpit.activeCustomerId || null;
+    }
+    const ep = _cockpitEndpointFor(step);
+    if (ep.direct) {
+      // Direct-endpoint accepteert de params 1-op-1.
+      if (step.action === 'reset') {
+        // Reset heeft z'n eigen shape.
+        return { confirm: true, dry_run_count_only: !!p.dry_run };
+      }
+      return p;
+    }
+    // Trigger-multiplex verwacht {action, params}.
+    return { action: step.action, params: p };
+  }
+
+  // ─── Scenario-loader (iter 2) ────────────────────────────────────────────
+  window.__cockpitLoadScenario = (key) => {
+    const sc = COCKPIT_SCENARIOS.find(x => x.key === key);
+    if (!sc) return;
+    // Deep-copy zodat wijzigingen in de builder de preset niet muteren.
+    _cockpit.builder = {
+      steps: sc.steps.map(s => JSON.parse(JSON.stringify(s))),
+      running: false, currentIdx: -1, log: [],
+    };
+    if (render) render();
+  };
+
+  // ─── Blok-bouwer manipulatie ─────────────────────────────────────────────
+  window.__cockpitBuilderAdd = (action) => {
+    const block = COCKPIT_BUILDER_BLOCKS.find(b => b.action === action);
+    if (!block) return;
+    _cockpit.builder.steps.push(JSON.parse(JSON.stringify({ action: block.action, params: block.params || {}, explain: block.label })));
+    if (render) render();
+  };
+  window.__cockpitBuilderRemove = (idx) => {
+    _cockpit.builder.steps.splice(idx, 1);
+    if (render) render();
+  };
+  window.__cockpitBuilderMove = (idx, delta) => {
+    const arr = _cockpit.builder.steps;
+    const to = idx + delta;
+    if (to < 0 || to >= arr.length) return;
+    const [item] = arr.splice(idx, 1);
+    arr.splice(to, 0, item);
+    if (render) render();
+  };
+  window.__cockpitBuilderClear = () => {
+    _cockpit.builder = { steps: [], running: false, currentIdx: -1, log: [] };
+    if (render) render();
+  };
+
+  // ─── Sequentie-uitvoer ───────────────────────────────────────────────────
+  // Chained calls: één-voor-één, wacht op response, refresh audit-status na
+  // laatste stap. Fail-soft per stap — een fout stopt de sequentie en de
+  // fout landt in de log-widget onder de builder.
+  window.__cockpitBuilderRun = async () => {
+    const b = _cockpit.builder;
+    if (b.running || b.steps.length === 0) return;
+    b.running = true; b.log = []; b.currentIdx = -1; if (render) render();
+
+    for (let i = 0; i < b.steps.length; i++) {
+      b.currentIdx = i; if (render) render();
+      const step = b.steps[i];
+      const ep = _cockpitEndpointFor(step);
+      const body = _cockpitStepBody(step);
+      const j = await tryFetch('cockpit-step', ep.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const ok = !(j?.__error || j?.error);
+      const entry = { idx: i, action: step.action, ok, response: j };
+      b.log.push(entry);
+
+      // Track activeCustomerId zodra customer-create slaagt.
+      if (ok && step.action === 'customer-create' && j?.customer?.id) {
+        _cockpit.activeCustomerId = j.customer.id;
+      }
+      if (!ok) {
+        b.log.push({ idx: i, action: '__abort', ok: false, response: { error: 'Sequentie gestopt na fout op stap ' + (i + 1) } });
+        break;
+      }
+    }
+    b.running = false; b.currentIdx = -1; if (render) render();
+    // Refresh cockpit-status (tellingen kunnen zijn veranderd).
+    _cockpit.fetched = false; _cockpitFetchStatus();
+  };
 
   async function _cockpitFetchStatus() {
     if (_cockpit.loading) return;
@@ -6213,13 +6437,92 @@
       </div>
     `;
 
-    // ── Iteratie-placeholder ──────────────────────────────────────────────
+    // ── Scenariobibliotheek (iter 2) ──────────────────────────────────────
+    const scenariosHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-title" style="margin-bottom:2px">Scenariobibliotheek</div>
+        <div class="kvcc-sub" style="margin-bottom:10px">Klik = laadt stappen in de blok-bouwer. Nog niet uitvoeren — je drukt zelf op "Voer sequentie uit".</div>
+        <div class="kv-cockpit-scenarios">
+          ${COCKPIT_SCENARIOS.map(sc => `
+            <button class="kv-cockpit-scard" onclick="window.__cockpitLoadScenario('${sc.key}')" title="${esc(sc.desc)}">
+              <div class="kvcs-icon">${sc.icon}</div>
+              <div class="kvcs-title">${esc(sc.title)}</div>
+              <div class="kvcs-desc">${esc(sc.desc)}</div>
+              <div class="kvcs-count">${sc.steps.length ? sc.steps.length + ' stap(pen)' : 'leeg'}</div>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    // ── Blok-bouwer (iter 2) ──────────────────────────────────────────────
+    const b = _cockpit.builder;
+    const stepsHtml = b.steps.length === 0
+      ? `<div style="padding:14px;text-align:center;color:var(--text-3);font-size:12px;background:var(--surface-2);border-radius:8px;border:1px dashed var(--border)">Geen stappen. Kies een scenario of voeg blokken toe.</div>`
+      : b.steps.map((s, i) => {
+          const isCurrent = b.running && i === b.currentIdx;
+          const logEntry = b.log.find(l => l.idx === i);
+          const isDone = logEntry && logEntry.ok;
+          const isFail = logEntry && !logEntry.ok;
+          const usesLast = s.params?.__use_last_customer;
+          return `
+            <div class="kv-cockpit-step ${isCurrent ? 'kvcs-current' : ''} ${isDone ? 'kvcs-done' : ''} ${isFail ? 'kvcs-fail' : ''}">
+              <div class="kvcs-num">${i + 1}</div>
+              <div class="kvcs-body">
+                <div class="kvcs-action"><code>${esc(s.action)}</code>${usesLast ? ' <span class="kvcs-tag">← laatste klant</span>' : ''}</div>
+                <div class="kvcs-explain">${esc(s.explain || '')}</div>
+              </div>
+              <div class="kvcs-btns">
+                <button class="btn btn-ghost btn-sm" ${b.running || i === 0 ? 'disabled' : ''} onclick="window.__cockpitBuilderMove(${i}, -1)" title="Omhoog">↑</button>
+                <button class="btn btn-ghost btn-sm" ${b.running || i === b.steps.length - 1 ? 'disabled' : ''} onclick="window.__cockpitBuilderMove(${i}, 1)" title="Omlaag">↓</button>
+                <button class="btn btn-ghost btn-sm" ${b.running ? 'disabled' : ''} onclick="window.__cockpitBuilderRemove(${i})" title="Verwijder" style="color:var(--rose)">✕</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+    const blocksAddHtml = COCKPIT_BUILDER_BLOCKS.map(bl => `
+      <button class="kv-cockpit-block-add" ${b.running ? 'disabled' : ''} onclick="window.__cockpitBuilderAdd('${bl.action}')">${esc(bl.label)}</button>
+    `).join('');
+
+    const runLogHtml = b.log.length === 0 ? '' : `
+      <div style="margin-top:12px;padding:10px 12px;background:var(--surface-2);border-radius:8px;font-family:'IBM Plex Mono',monospace;font-size:11px;max-height:220px;overflow-y:auto">
+        ${b.log.map(l => `
+          <div style="padding:3px 0;color:${l.ok ? 'var(--emerald)' : 'var(--rose)'}">
+            ${l.action === '__abort' ? '⨯ ' + esc(l.response?.error || 'gestopt') : `${l.ok ? '✓' : '✗'} #${l.idx + 1} ${esc(l.action)} ${l.ok ? (l.response?.message || 'ok') : (l.response?.__error || l.response?.error || 'faal')}`}
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    const builderHtml = `
+      <div class="kv-cockpit-card">
+        <div class="kvcc-head">
+          <div>
+            <div class="kvcc-title">Blok-bouwer</div>
+            <div class="kvcc-sub">Sequentie draaien via bestaande is_test-gescopete cockpit-endpoints. Elke stap audit'ed. Actieve klant tussen stappen: <code>${esc(_cockpit.activeCustomerId ? _cockpit.activeCustomerId.slice(0, 8) + '…' : '—')}</code></div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-ghost btn-sm" ${b.running || b.steps.length === 0 ? 'disabled' : ''} onclick="window.__cockpitBuilderClear()" style="font-size:11px">Leegmaken</button>
+            <button class="btn btn-primary btn-sm" ${b.running || b.steps.length === 0 ? 'disabled' : ''} onclick="window.__cockpitBuilderRun()" style="font-size:12px">${b.running ? `Bezig… (${b.currentIdx + 1}/${b.steps.length})` : `▶ Voer sequentie uit (${b.steps.length})`}</button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">${stepsHtml}</div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)">
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px;font-family:'IBM Plex Mono',monospace;letter-spacing:.06em;text-transform:uppercase">+ blok toevoegen</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">${blocksAddHtml}</div>
+        </div>
+        ${runLogHtml}
+      </div>
+    `;
+
+    // ── Iteratie-placeholder (iter 3+) ────────────────────────────────────
     const placeholderHtml = `
       <div class="kv-cockpit-card" style="border-style:dashed;opacity:.8">
         <div style="font-size:12px;color:var(--text-3);line-height:1.6">
-          <b>Nog te bouwen in vervolg-iteraties</b> (zie <a href="/docs/dunning-test-cockpit-blok2-scope.md" target="_blank" style="color:var(--accent)">scope-doc</a>):
-          persona-hero · scenariobibliotheek · blok-bouwer · AI-tekstinvoer (Claude Sonnet) · ladder · live tijdlijn · berichten · takenlijst.
-          Ondertussen bereikbaar: <a href="/modules/wanbetalers-test.html" target="_blank" style="color:var(--accent)">oude testpagina</a>.
+          <b>Nog te bouwen in vervolg-iteraties</b> (<a href="/docs/dunning-test-cockpit-blok2-scope.md" target="_blank" style="color:var(--accent)">scope-doc</a>):
+          AI-tekstinvoer (Claude Sonnet · iter 3) · ladder + live tijdlijn + berichten + takenlijst (iter 4) · persona-hero polish (iter 5).
+          Ondertussen: <a href="/modules/wanbetalers-test.html" target="_blank" style="color:var(--accent)">oude testpagina</a>.
         </div>
       </div>
     `;
@@ -6236,6 +6539,26 @@
       .kv-cockpit-card .kvcc-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
       .kv-cockpit-card .kvcc-title{font-size:13px;font-weight:600}
       .kv-cockpit-card .kvcc-sub{font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5}
+      .kv-cockpit-scenarios{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+      .kv-cockpit-scard{text-align:left;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:all .15s;font-family:inherit;font-size:inherit;color:inherit;display:flex;flex-direction:column;gap:2px}
+      .kv-cockpit-scard:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 12px -4px rgba(0,0,0,.15)}
+      .kv-cockpit-scard .kvcs-icon{font-size:16px}
+      .kv-cockpit-scard .kvcs-title{font-weight:600;font-size:12.5px;margin-top:2px}
+      .kv-cockpit-scard .kvcs-desc{font-size:11px;color:var(--text-3);line-height:1.4;flex:1}
+      .kv-cockpit-scard .kvcs-count{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);margin-top:6px;letter-spacing:.04em}
+      .kv-cockpit-step{display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;transition:all .2s}
+      .kv-cockpit-step.kvcs-current{border-color:var(--accent);background:var(--accent-soft,var(--surface));box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+      .kv-cockpit-step.kvcs-done{border-color:var(--emerald);background:var(--emerald-soft)}
+      .kv-cockpit-step.kvcs-fail{border-color:var(--rose);background:var(--rose-soft)}
+      .kv-cockpit-step .kvcs-num{width:24px;height:24px;border-radius:50%;background:var(--surface);border:1px solid var(--border);display:grid;place-items:center;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;flex-shrink:0}
+      .kv-cockpit-step .kvcs-body{flex:1;min-width:0}
+      .kv-cockpit-step .kvcs-action{font-size:12px;font-weight:600}
+      .kv-cockpit-step .kvcs-explain{font-size:11px;color:var(--text-3);margin-top:1px}
+      .kv-cockpit-step .kvcs-tag{font-family:'IBM Plex Mono',monospace;font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--surface);color:var(--text-3);border:1px solid var(--border);font-weight:400}
+      .kv-cockpit-step .kvcs-btns{display:flex;gap:3px;flex-shrink:0}
+      .kv-cockpit-block-add{padding:5px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-2);cursor:pointer;transition:all .15s}
+      .kv-cockpit-block-add:hover:not([disabled]){border-color:var(--accent);color:var(--accent);background:var(--surface)}
+      .kv-cockpit-block-add[disabled]{opacity:.4;cursor:not-allowed}
     </style>
     <div style="max-width:1100px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
@@ -6246,6 +6569,8 @@
         </div>
       </div>
       ${guardHtml}
+      ${scenariosHtml}
+      ${builderHtml}
       ${verifyHtml}
       ${placeholderHtml}
     </div>`;
