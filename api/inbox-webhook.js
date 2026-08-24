@@ -745,6 +745,53 @@ function triggerOnboardingAutoSuggest({ conversationId, triggeredByMessageId, cl
 // VASTE TEKSTEN (geen LLM-call) — voorspelbaar en goedkoop. De LLM komt pas
 // in beeld zodra de klant gekoppeld is en de normale Joost-suggest flow draait.
 
+// Dunning-test-cockpit guard-helper (BLOK 1 · PR-B). Detecteert of een
+// inbound reply toebehoort aan een is_test-conversatie of aan het
+// sandbox-test-nummer. Callers moeten deze THROW behandelen als "is_test"
+// (fail-closed) — de aanroeper wrapt in try/catch en behandelt exception
+// als isTest=true. Wordt alleen aangeroepen op paden die stille outbound
+// kunnen sturen (Joost e2-autonomous intake).
+async function _detectIsTestConversation({ convId, customerId, phoneE164Plus }) {
+  // 1. Al gemarkeerd door een eerdere webhook-invocation?
+  try {
+    const { data: cnv } = await supabaseAdmin
+      .from('whatsapp_conversations').select('is_test').eq('id', convId).maybeSingle();
+    if (cnv?.is_test === true) return true;
+  } catch (_) { /* val door naar customer-check */ }
+
+  // 2. Aan een is_test-customer gekoppeld?
+  if (customerId) {
+    const { data: cust } = await supabaseAdmin
+      .from('customers').select('is_test').eq('id', customerId).maybeSingle();
+    if (cust?.is_test === true) return true;
+  }
+
+  // 3. Nummer matcht sandbox-contact.phone?
+  try {
+    const { getSandboxContact } = await import('./_lib/wanbetalers-sandbox.js');
+    const { assertTestRecipient } = await import('./_lib/test-cockpit-send.js');
+    const contact = await getSandboxContact();
+    if (contact?.phone && phoneE164Plus) {
+      try {
+        await assertTestRecipient({
+          to: phoneE164Plus,
+          channel: 'whatsapp',
+          overrides: { contact, dryRun: true },
+        });
+        return true; // match op sandbox-nummer
+      } catch (_) {
+        // Geen match: dit is een productie-nummer.
+      }
+    }
+  } catch (e) {
+    // Modules niet beschikbaar → laat de try/catch in de caller de fail-
+    // closed keuze maken (die interpreteert exception hier als isTest=true).
+    throw e;
+  }
+
+  return false;
+}
+
 const JOOST_INTAKE_ASK_TEXT =
   'Hi, om je goed te kunnen helpen — met welk e-mailadres ben je bij ons bekend?';
 const JOOST_INTAKE_RETRY_TEXT =
@@ -1554,13 +1601,50 @@ export default async function handler(req, res) {
                         ? jcfg.feature_flags : {};
                       const intakeEnabled = flags.e2_autonomous_intake === true;
 
+                      // Dunning-test-cockpit guard (BLOK 1 · PR-B).
+                      // De autonome intake-reply is de enige webhook-stille
+                      // outbound van de app. Voor is_test-convs mag die NOOIT
+                      // vuren: al het test-verkeer hoort door de cockpit-
+                      // grendel (test-cockpit-send.js). Detectie fail-CLOSED:
+                      // bij DB-error / onbekend → behandel als is_test → skip.
+                      // Alleen berekend als intakeEnabled — geen overhead bij
+                      // productie-crons met de flag UIT.
+                      let isTestConv = false;
+                      if (intakeEnabled) {
+                        try {
+                          isTestConv = await _detectIsTestConversation({
+                            convId:         conv.id,
+                            customerId:     conv.customerId,
+                            phoneE164Plus,
+                          });
+                        } catch (e) {
+                          console.warn('[inbox-webhook] is_test detectie faalde → fail-closed skip intake:', e?.message || e);
+                          isTestConv = true;
+                        }
+                        if (isTestConv) {
+                          // Markeer whatsapp_conversations.is_test (afgeleide
+                          // vlag, fail-soft — detectie was al waarheid).
+                          try {
+                            await supabaseAdmin.from('whatsapp_conversations')
+                              .update({ is_test: true })
+                              .eq('id', conv.id)
+                              .eq('is_test', false);
+                          } catch (e) {
+                            console.warn('[inbox-webhook] wa_conv.is_test update (soft):', e?.message || e);
+                          }
+                          console.warn('[inbox-webhook] Joost intake-reply SKIP: is_test conversation (fail-closed)');
+                        }
+                      }
+
                       // Pad (i) Intake-flow: alleen als customer_id ontbreekt
-                      // én feature-flag aanstaat. Outbound phone_number_id =
-                      // conv.phone_number_id (al opgeslagen bij upsert) of
-                      // module-context fallback. Bij undefined valt sendText
-                      // terug op env-var (META_WHATSAPP_PHONE_NUMBER_ID).
+                      // én feature-flag aanstaat. Voor is_test-convs SKIP
+                      // (grendel; alleen de cockpit mag test-outbound sturen).
+                      // Outbound phone_number_id = conv.phone_number_id (al
+                      // opgeslagen bij upsert) of module-context fallback.
+                      // Bij undefined valt sendText terug op env-var
+                      // (META_WHATSAPP_PHONE_NUMBER_ID).
                       let intakeHandled = false;
-                      if (!conv.customerId && intakeEnabled) {
+                      if (!conv.customerId && intakeEnabled && !isTestConv) {
                         const outboundPnId = recvPhoneNumberId || moduleCtx?.phone_number_id || undefined;
                         // Bouw lokaal conv-object met fields die intake-flow nodig
                         // heeft (id + phone_number) — webhook-upsert returnt geen
