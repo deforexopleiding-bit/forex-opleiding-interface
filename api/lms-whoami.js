@@ -32,11 +32,15 @@ const LMS_ORIGIN = 'https://dfo-lms-prototype.vercel.app';
 // zonder deze regel blokkeert de browser de call vanaf elke preview — het LMS
 // toont dan "tijdelijk niet beschikbaar" en niemand kan er inloggen.
 //
-// Bewust géén losse wildcard: alleen https, alleen hostnamen die met de
-// projectnaam beginnen, alleen op vercel.app, en niets erachter. Reflecteren
-// doen we uitsluitend bij een treffer; al het andere krijgt het productie-origin
-// terug, wat de browser dan afwijst.
-const LMS_PREVIEW_ORIGIN = /^https:\/\/dfo-lms-prototype(?:-[a-z0-9-]+)?\.vercel\.app$/;
+// Bewust géén losse wildcard. De hostnaam moet met de projectnaam beginnen én
+// eindigen op onze eigen team-slug, alleen over https, en er mag niets achter
+// staan. Zonder die team-eis zou ook `dfo-lms-prototype-<vanalles>.vercel.app`
+// matchen, en zo'n projectnaam kan iedereen op Vercel aanmaken.
+//
+// Reflecteren doen we uitsluitend bij een treffer; al het andere krijgt het
+// productie-origin terug, wat de browser dan afwijst.
+const LMS_PREVIEW_ORIGIN =
+  /^https:\/\/dfo-lms-prototype-[a-z0-9-]+-de-forex-opleiding-bv-s-projects\.vercel\.app$/;
 
 /**
  * Welk origin er in de Allow-Origin-header hoort voor dit verzoek.
