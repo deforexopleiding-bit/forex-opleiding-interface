@@ -687,7 +687,16 @@
                 // {today|week|month|year}.booked = created_at in periode),
                 // NIET meer scheduled_at.
                 const lp = _live.leadsPer;
-                const totLive = lp && typeof lp.total === 'number' ? lp.total : null;
+                // v=28 (2026-08-24): dashboard-tegels tellen nu OOK afgewezen
+                // leads mee. Endpoint levert `total_incl_afwijzer` +
+                // `by_traject_incl_afwijzer` naast de schone versie
+                // (mk-bronnen gebruikt de schone). Fallback op de oude
+                // velden voor achterwaartse compat als endpoint nog niet
+                // gedeployed is.
+                const totLive = lp
+                  ? (typeof lp.total_incl_afwijzer === 'number' ? lp.total_incl_afwijzer
+                     : (typeof lp.total === 'number' ? lp.total : null))
+                  : null;
                 const totFallback = d && d.kpis_groot && d.kpis_groot.nieuwe_leads && d.kpis_groot.nieuwe_leads.value;
                 const totLeads = totLive != null ? totLive : totFallback;
                 const isLive  = !!lp;
@@ -697,11 +706,13 @@
                   return allLabels.some(l => matchers.some(m => l.includes(m)));
                 }
                 function findCount(matchers) {
-                  if (!lp || !lp.by_traject) return 0;
+                  if (!lp) return 0;
+                  const src = lp.by_traject_incl_afwijzer || lp.by_traject;
+                  if (!src) return 0;
                   let sum = 0;
-                  for (const k of Object.keys(lp.by_traject)) {
+                  for (const k of Object.keys(src)) {
                     const lk = String(k).toLowerCase();
-                    if (matchers.some(m => lk.includes(m))) sum += lp.by_traject[k] || 0;
+                    if (matchers.some(m => lk.includes(m))) sum += src[k] || 0;
                   }
                   return sum;
                 }

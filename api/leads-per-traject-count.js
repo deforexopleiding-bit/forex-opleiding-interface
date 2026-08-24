@@ -99,9 +99,16 @@ export default async function handler(req, res) {
     // Raw (oude definitie: alleen verwijderd_op-filter) — voor debug/oud→nieuw.
     const rawBy = Object.create(null);
     let rawTotal = 0;
-    // Schoon (nieuwe canonieke definitie).
+    // Schoon (canonieke definitie zonder afwijzers + zonder test-emails).
+    // Gebruikt door mk-bronnen — daar wil je bewust alleen "levende" leads.
     const cleanBy = Object.create(null);
     let cleanTotal = 0;
+    // 2026-08-24 nieuw: schoon MET afwijzers (test-emails blijven geëxcludeerd
+    // want spam). Gebruikt door dashboard "Leads per traject"-tegels zodat
+    // afgewezen leads OOK bij de 7-daagse/webinar/etc tellers tellen — echte
+    // volumemeting i.p.v. alleen toegelaten leads.
+    const inclAfwijzerBy = Object.create(null);
+    let inclAfwijzerTotal = 0;
     // Uniek per lowercase(email) — voor debug-diagnose (dedup-signaal).
     const uniekBy = Object.create(null);
     let uniekTotal = 0;
@@ -127,7 +134,13 @@ export default async function handler(req, res) {
       if (isTest && isRej) excBoth += 1;
       else if (isTest)     excTest += 1;
       else if (isRej)      excAfwijzer += 1;
-      if (isTest || isRej) continue; // uit schoon-set
+      // Incl-afwijzer set: alleen test-emails eruit (spam).
+      if (!isTest) {
+        inclAfwijzerTotal += 1;
+        if (t) inclAfwijzerBy[t] = (inclAfwijzerBy[t] || 0) + 1;
+      }
+      // Schone set: test-emails + afwijzers eruit.
+      if (isTest || isRej) continue;
       cleanTotal += 1;
       if (t) cleanBy[t] = (cleanBy[t] || 0) + 1;
     }
@@ -158,6 +171,12 @@ export default async function handler(req, res) {
       by_traject: cleanBy,
       traject_labels: cleanLabels,
       all_traject_labels: allLabels,
+      // Nieuw (2026-08-24): incl-afwijzer versies voor dashboard-tegels.
+      // Dashboard "Leads per traject" gebruikt deze zodat afgewezen leads
+      // óók meetellen in de 7-daagse/webinar/event/mini tegels. Test-emails
+      // blijven wel geëxcludeerd (spam-filter).
+      total_incl_afwijzer:      inclAfwijzerTotal,
+      by_traject_incl_afwijzer: inclAfwijzerBy,
       period,
       since,
       excluded: {
