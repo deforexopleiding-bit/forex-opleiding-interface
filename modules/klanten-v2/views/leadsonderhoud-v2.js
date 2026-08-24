@@ -308,6 +308,7 @@
               <th style="padding:8px 10px">Bron</th>
               <th style="padding:8px 10px">Status</th>
               <th style="padding:8px 10px">Aangemaakt</th>
+              <th style="padding:8px 10px;text-align:right">Acties</th>
             </tr>
           </thead>
           <tbody>
@@ -317,6 +318,12 @@
               const callBadge = heeftCall
                 ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)">✓ geboekt</span>`
                 : `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--amber-soft);color:var(--amber)">— nog niet</span>`;
+              // v=19: "Verlengen"-actie per lead → opent extend-modal.
+              const nameForBtn = String(l.naam || l.email || '').replace(/'/g, "\\'");
+              const idForBtn   = String(l.id || '').replace(/'/g, "\\'");
+              const extendBtn  = idForBtn
+                ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsExtOpen('${idForBtn}', '${nameForBtn}')" style="font-size:11px" title="LMS-toegang van deze lead verlengen">Verlengen</button>`
+                : '';
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:8px 10px">
                   <div style="font-weight:600">${esc(l.naam || l.email || '(zonder naam)')}</div>
@@ -328,6 +335,7 @@
                 <td style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span></td>
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
+                <td style="padding:8px 10px;text-align:right;white-space:nowrap">${extendBtn}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -358,7 +366,7 @@
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (total + ' leads')}</span>
       </div>`;
 
-    return `${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
+    return `${_lsExtModalHtml()}${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       ${toolbar}
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         ${st.loading && !items.length ? renderSkeletonRows(6) : rowHtml}
@@ -445,6 +453,110 @@
       templateCache: {}, quickCache: {},
     },
     poll: { handle: null, running: false, intervalMs: 18000 },
+    // v=19: filter voor gesprekken-lijst (client-side over item.unread).
+    filter: 'all',   // 'all' | 'unread' | 'read'
+  };
+
+  /* ── Access-verleng-modal state (v=19) ─────────────────────────────────── */
+  const _lsExt = {
+    open: false, leadId: null, leadName: '', busy: false,
+    choice: '7',                 // '7' | '14' | '30' | 'custom'
+    customDate: '',              // 'YYYY-MM-DD'
+  };
+  function _lsExtDefaultDate() {
+    const d = new Date(); d.setDate(d.getDate() + 30);
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+  window.__lsExtOpen = (leadId, leadName) => {
+    _lsExt.open = true; _lsExt.leadId = leadId; _lsExt.leadName = String(leadName || '');
+    _lsExt.choice = '7'; _lsExt.customDate = _lsExtDefaultDate(); _lsExt.busy = false;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__lsExtCancel = () => { _lsExt.open = false; if (window.DFO?.render) window.DFO.render(); };
+  window.__lsExtChoice = (v) => {
+    _lsExt.choice = String(v);
+    const cd = document.querySelector('[data-le-field="customDate"]');
+    if (cd) _lsExt.customDate = String(cd.value || _lsExt.customDate);
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__lsExtSave = async () => {
+    if (!_lsExt.open || !_lsExt.leadId) return;
+    if (_lsExt.busy) return;
+    // Sync-from-DOM: custom date input.
+    const cd = document.querySelector('[data-le-field="customDate"]');
+    if (cd) _lsExt.customDate = String(cd.value || '');
+    const body = { lead_id: _lsExt.leadId };
+    if (_lsExt.choice === 'custom') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(_lsExt.customDate)) {
+        _lsInbToast('Kies een geldige datum (YYYY-MM-DD).', 'warn'); return;
+      }
+      body.to_date = _lsExt.customDate;
+    } else {
+      body.days = Number(_lsExt.choice);
+    }
+    _lsExt.busy = true; if (window.DFO?.render) window.DFO.render();
+    try {
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-extend-access', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok || j?.error) {
+        _lsInbToast('Verlengen mislukt: ' + (j?.error || resp.status), 'warn');
+        _lsExt.busy = false; if (window.DFO?.render) window.DFO.render(); return;
+      }
+      // Success — toaster met status per kanaal.
+      const parts = [`Toegang verlengd tot ${j.einddatum_nl || j.new_toegang_tot}`];
+      parts.push(j.email_sent ? 'E-mail verstuurd' : `E-mail mislukt (${j.email_error || 'onbekend'})`);
+      parts.push(j.wa_sent ? 'WA verstuurd' : `WA niet verstuurd (${(j.wa_error || 'template nog niet approved').slice(0, 60)})`);
+      _lsInbToast(parts.join(' · '), j.email_sent ? 'ok' : 'warn');
+      _lsExt.open = false; _lsExt.busy = false;
+      if (window.DFO?.render) window.DFO.render();
+    } catch (e) {
+      _lsInbToast('Netwerkfout: ' + (e?.message || e), 'warn');
+      _lsExt.busy = false; if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  function _lsExtModalHtml() {
+    if (!_lsExt.open) return '';
+    const chip = (v, label) => `<button class="chip ${_lsExt.choice === v ? 'on' : ''}" onclick="window.__lsExtChoice('${v}')" style="padding:6px 12px;font-size:12.5px;margin-right:6px">${label}</button>`;
+    const previewDatum = _lsExt.choice === 'custom' && _lsExt.customDate
+      ? (() => { try { return new Date(_lsExt.customDate + 'T00:00:00').toLocaleDateString('nl-NL', { day:'numeric', month:'long', year:'numeric' }); } catch(_) { return _lsExt.customDate; } })()
+      : (() => { const d = new Date(); d.setDate(d.getDate() + Number(_lsExt.choice || 0)); return d.toLocaleDateString('nl-NL', { day:'numeric', month:'long', year:'numeric' }) + ' (bij verlopen toegang — anders vanaf huidige einddatum)'; })();
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__lsExtCancel()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(520px,100%);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+          <div style="font-size:14px;font-weight:600">Toegang verlengen</div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__lsExtCancel()">✕</button>
+        </div>
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:12.5px;color:var(--text-2)">Lead: <b>${esc(_lsExt.leadName || '—')}</b></div>
+          <div style="padding:8px 12px;background:var(--info-soft,var(--surface-2));color:var(--text-2);border-radius:6px;font-size:11.5px;line-height:1.5">
+            Verlengt <b>alle actieve LMS-grants</b> van deze lead met de gekozen duur. Semantiek: max(vandaag, huidige einddatum) + N dagen. Bij "specifieke datum" wordt die als absolute nieuwe einddatum gezet. De lead krijgt bij succes een e-mail én een WhatsApp-melding (WA is fail-soft — als het Meta-template nog niet goedgekeurd is, gaat alleen e-mail door).
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-3);margin-bottom:5px">Duur</div>
+            <div>${chip('7', '+7 dagen')}${chip('14', '+14 dagen')}${chip('30', '+30 dagen')}${chip('custom', 'Specifieke datum')}</div>
+          </div>
+          ${_lsExt.choice === 'custom' ? `<div>
+            <div style="font-size:11px;color:var(--text-3);margin-bottom:5px">Nieuwe einddatum</div>
+            <input type="date" data-le-field="customDate" value="${esc(_lsExt.customDate)}" style="width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12.5px;box-sizing:border-box" />
+          </div>` : ''}
+          <div style="font-size:12px;color:var(--text-2);padding:8px 10px;background:var(--surface-2);border-radius:6px">
+            Verlengen tot <b>${esc(previewDatum)}</b>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border);justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" ${_lsExt.busy ? 'disabled' : ''} onclick="window.__lsExtCancel()">Annuleren</button>
+          <button class="btn btn-primary btn-sm" ${_lsExt.busy ? 'disabled' : ''} onclick="window.__lsExtSave()">${_lsExt.busy ? 'Bezig…' : 'Verlengen + informeren (e-mail + WA)'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  // v=19: gesprekken-filter setter (client-side, geen refetch).
+  window.__lsInbSetFilter = (v) => {
+    _lsInb.filter = String(v || 'all');
+    if (window.DFO?.render) window.DFO.render();
   };
 
   /* ── Modal-helpers (custom confirm — geen native window.confirm) ────── */
@@ -1648,7 +1760,16 @@
     if (!_lsInb.convs.fetched && !_lsInb.convs.loading) {
       queueMicrotask(_lsInbFetchConvs);
     }
-    const rows = asArr(_lsInb.convs.items);
+    const rowsAll = asArr(_lsInb.convs.items);
+    // v=19: client-side gelezen/ongelezen-filter over item.unread.
+    const flt = _lsInb.filter || 'all';
+    const rows = flt === 'unread'
+      ? rowsAll.filter(r => (r.unread || 0) > 0)
+      : flt === 'read'
+        ? rowsAll.filter(r => (r.unread || 0) === 0)
+        : rowsAll;
+    const unreadCnt = rowsAll.filter(r => (r.unread || 0) > 0).length;
+    const readCnt   = rowsAll.length - unreadCnt;
     const sel  = rows.find(r => String(r.lead_id) === String(_lsInb.sel)) || rows[0] || null;
     if (sel && _lsInb.thread.leadId !== sel.lead_id && !_lsInb.thread.loading) {
       queueMicrotask(() => _lsInbLoadThread(sel.lead_id));
@@ -1662,11 +1783,18 @@
         ? rows.map(_lsInbRenderRow).join('')
         : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Nog geen lead-gesprekken.</div>`;
 
+    const filterChip = (v, label, count) => `<button class="chip ${flt === v ? 'on' : ''}" onclick="window.__lsInbSetFilter('${v}')" style="font-size:11px;padding:3px 9px">${label}${count != null ? ` <span style="opacity:.7">(${count})</span>` : ''}</button>`;
     return `<div class="ls-inb-split" style="display:flex;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+      ${_lsExtModalHtml()}
       <div id="lsInbList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto">
         <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
           <span>Lead-gesprekken (WA + mail)</span>
-          <span>${rows.length} leads</span>
+          <span>${rows.length}${rows.length !== rowsAll.length ? ' / ' + rowsAll.length : ''} leads</span>
+        </div>
+        <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;gap:5px;flex-wrap:wrap">
+          ${filterChip('all', 'Alle', rowsAll.length)}
+          ${filterChip('unread', 'Ongelezen', unreadCnt)}
+          ${filterChip('read', 'Gelezen', readCnt)}
         </div>
         ${_lsInb.convs.error ? `<div style="padding:16px;color:var(--rose);font-size:12.5px">⚠ ${esc(_lsInb.convs.error)}</div>` : ''}
         ${listHtml}
