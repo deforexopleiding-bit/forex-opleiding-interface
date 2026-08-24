@@ -703,9 +703,16 @@
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;'));
 
+  // v=19: gebruik dezelfde canonieke rol-bron als de rest van de v2-shell
+  // (instellingen-v2 isSuperAdmin r35-40). AuthShared.profile kan bij first-
+  // render nog niet gevuld zijn → 403-block ten onrechte. DFO.S.role reflecteert
+  // de shell-rol-state (echte rol of "Bekijk als"-simulatie) en is bij render
+  // altijd al gezet door klanten-v2.js init.
   function _bonusIsSuperAdmin() {
-    try { return (window.AuthShared?.profile?.role === 'super_admin'); }
-    catch (_) { return false; }
+    try {
+      const role = window.DFO?.S?.role || window.KV_V2?.role || null;
+      return role === 'super_admin';
+    } catch (_) { return false; }
   }
   async function _bonusFetch(force) {
     if (_bonus.loading) return;
