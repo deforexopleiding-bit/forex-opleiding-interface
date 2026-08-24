@@ -30,6 +30,14 @@ const CONV_PAGE     = 50;                        // /conversations/search page
 const MSG_PAGE      = 100;                       // /conversations/{id}/messages
 const MAX_CONV_PAGES = 20;                        // vangnet — 20 × 50 = 1000 conv/run
 const FALLBACK_START = '2026-08-06T00:00:00Z';   // eerste run bij lege DB
+const FALLBACK_MAX_CONTACTS = 300;                // per run bij per-contact fallback
+
+// GHL enum voor Instagram in `lastMessageType`. `TYPE_INSTAGRAM_MESSAGE` gaf
+// 422 (v2021-04-15). We proberen eerst `TYPE_INSTAGRAM`; bij 422 op page 0
+// switchen we automatisch naar de per-contact-fallback (iterateer bekende
+// lisa_conversations.ghl_contact_id). Zo hoeven we niet in een 422-loop te
+// gokken over enum-waarden.
+const IG_ENUM_CANDIDATE = 'TYPE_INSTAGRAM';
 
 // GHL levert bij IG Instagram-messages typisch als `messageType` = TYPE_INSTAGRAM_MESSAGE
 // (of TYPE_IG / IG in oudere payloads). We tolereren varianten omdat de exacte
@@ -116,6 +124,8 @@ export default async function handler(req, res) {
 
   const startTime = Date.now();
   const stats = {
+    strategy:            'search',   // 'search' → 'per_contact' bij 422 op IG-enum
+    ig_enum_used:        IG_ENUM_CANDIDATE,
     watermark:           null,
     conv_pages_fetched:  0,
     conversations_seen:  0,
@@ -124,6 +134,7 @@ export default async function handler(req, res) {
     messages_upserted:   0,
     conversations_created: 0,
     dedup_skipped:       0,
+    contacts_iterated:   0,
     errors:              0,
     aborted:             false,
   };
@@ -154,16 +165,11 @@ export default async function handler(req, res) {
       if (Date.now() - startTime > ABORT_MS) { stats.aborted = true; break; }
 
       const url = new URL(`${GHL_API_BASE}/conversations/search`);
-      url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
-      url.searchParams.set('limit',      String(CONV_PAGE));
-      url.searchParams.set('sort',       'desc');
-      url.searchParams.set('sortBy',     'last_message_date');
-      // NB: 2026-08-24 — GHL API-versie 2021-04-15 accepteert `TYPE_INSTAGRAM_MESSAGE`
-      // NIET als enum-waarde voor `lastMessageType` (HTTP 422 CONVERSATIONS_VALIDATION_ERROR).
-      // We zoeken daarom breed (alle conversation-types); de per-message `isInstagram(msg)`
-      // filter downstream + de conv-metadata skip garanderen dat we UITSLUITEND IG-messages
-      // opslaan. Watermark-break (oldestOnPageMs < watermarkMs) begrenst het scan-volume
-      // zodat we binnen de Vercel 25s-cap blijven.
+      url.searchParams.set('locationId',      process.env.GHL_LOCATION_ID);
+      url.searchParams.set('limit',           String(CONV_PAGE));
+      url.searchParams.set('sort',            'desc');
+      url.searchParams.set('sortBy',          'last_message_date');
+      url.searchParams.set('lastMessageType', IG_ENUM_CANDIDATE);   // server-side IG-filter
       if (startAfterDate) url.searchParams.set('startAfterDate', String(startAfterDate));
       if (startAfterId)   url.searchParams.set('startAfterId',   String(startAfterId));
 
@@ -174,6 +180,13 @@ export default async function handler(req, res) {
       if (!convRes.ok) {
         const errText = await convRes.text().catch(() => '');
         console.error('[lisa-poll] conv-search HTTP', convRes.status, errText.slice(0, 200));
+        // 422 op page 0 met IG-enum → GHL kent deze enum-waarde niet.
+        // Switch naar per-contact-fallback (bekende ghl_contact_ids uit
+        // lisa_conversations). Vermijdt 422-loop op onbekende enum-varianten.
+        if (page === 0 && convRes.status === 422) {
+          stats.strategy = 'per_contact';
+          break;
+        }
         stats.errors++;
         break;
       }
@@ -292,6 +305,114 @@ export default async function handler(req, res) {
 
       // Als de pagina korter is dan CONV_PAGE → geen volgende pagina.
       if (conversations.length < CONV_PAGE) break;
+    }
+
+    // 4. FALLBACK per-contact: iterateer bekende ghl_contact_ids uit
+    //    lisa_conversations. Wordt geactiveerd als de search-strategie een
+    //    422 op de IG-enum kreeg. Target precies onze bestaande IG-gesprekken
+    //    (incl. de bevroren-sinds-6-aug set) zonder afhankelijk te zijn van
+    //    het lastMessageType-enum. Nadeel: vangt geen gloednieuwe IG-contacts
+    //    op — die komen via de webhook (of via search zodra we de juiste
+    //    enum kennen).
+    if (stats.strategy === 'per_contact') {
+      const { data: knownConvs, error: kcErr } = await supabaseAdmin
+        .from('lisa_conversations')
+        .select('ghl_contact_id, last_message_at')
+        .eq('is_sandbox', false)
+        .not('ghl_contact_id', 'is', null)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(FALLBACK_MAX_CONTACTS);
+      if (kcErr) {
+        console.error('[lisa-poll fallback] known-convs select:', kcErr.message);
+        stats.errors++;
+      }
+
+      for (const kc of (knownConvs || [])) {
+        if (Date.now() - startTime > ABORT_MS) { stats.aborted = true; break; }
+        const contactId = kc.ghl_contact_id;
+        if (!contactId) continue;
+        stats.contacts_iterated++;
+
+        // Per-contact search (zelfde patroon als follow-up-ghl-conversations-poll).
+        const csUrl = new URL(`${GHL_API_BASE}/conversations/search`);
+        csUrl.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
+        csUrl.searchParams.set('contactId',  contactId);
+        csUrl.searchParams.set('limit',      '5');
+
+        let csRes;
+        try { csRes = await ghlFetch(csUrl.toString()); }
+        catch (e) { console.warn('[lisa-poll fallback] search:', contactId, e?.message || e); stats.errors++; continue; }
+        if (!csRes.ok) {
+          const errText = await csRes.text().catch(() => '');
+          console.warn('[lisa-poll fallback] search HTTP', csRes.status, contactId, errText.slice(0, 160));
+          stats.errors++;
+          continue;
+        }
+        const csData = await csRes.json().catch(() => ({}));
+        const conversations = csData.conversations || csData.data || [];
+
+        for (const convo of conversations) {
+          const convId = convo.id;
+          if (!convId) continue;
+
+          const msgUrl = `${GHL_API_BASE}/conversations/${convId}/messages?limit=${MSG_PAGE}`;
+          let msgRes;
+          try { msgRes = await ghlFetch(msgUrl); }
+          catch (e) { console.warn('[lisa-poll fallback] msgs:', convId, e?.message || e); stats.errors++; continue; }
+          if (!msgRes.ok) {
+            const errText = await msgRes.text().catch(() => '');
+            console.warn('[lisa-poll fallback] msgs HTTP', msgRes.status, convId, errText.slice(0, 160));
+            stats.errors++;
+            continue;
+          }
+          const msgData = await msgRes.json().catch(() => ({}));
+          const messages = msgData.messages?.messages || msgData.messages || msgData.data || [];
+
+          let lisaConvId = null;
+          for (const msg of messages) {
+            stats.messages_seen++;
+            if (!isInstagram(msg)) continue;
+
+            const ghlMsgId = msg.id || msg.messageId;
+            if (!ghlMsgId) continue;
+
+            const direction = detectDirection(msg);
+            if (!direction) continue;
+
+            const content = msg.body || msg.text || msg.message || '';
+            if (!content || !String(content).trim()) continue;
+
+            const sentAt = msg.dateAdded || msg.dateCreated || msg.createdAt || new Date().toISOString();
+
+            const { data: dupe } = await supabaseAdmin
+              .from('lisa_messages').select('id')
+              .eq('ghl_message_id', ghlMsgId).limit(1).maybeSingle();
+            if (dupe) { stats.dedup_skipped++; continue; }
+
+            if (!lisaConvId) {
+              const ensured = await ensureConversation({
+                contactId,
+                ghlConversationId: convId,
+                locationId:        convo.locationId || process.env.GHL_LOCATION_ID,
+                contactName:       convo.fullName || convo.contactName || null,
+              });
+              if (!ensured?.id) { stats.errors++; continue; }
+              lisaConvId = ensured.id;
+            }
+
+            const { error: insErr } = await supabaseAdmin.from('lisa_messages').insert({
+              conversation_id: lisaConvId,
+              direction,
+              content:         String(content),
+              sent_at:         sentAt,
+              ai_generated:    false,
+              ghl_message_id:  ghlMsgId,
+            });
+            if (insErr) { console.warn('[lisa-poll fallback] msg insert:', ghlMsgId, insErr.message); stats.errors++; continue; }
+            stats.messages_upserted++;
+          }
+        }
+      }
     }
 
     stats.duration_ms = Date.now() - startTime;
