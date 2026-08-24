@@ -168,6 +168,7 @@
       { id: 'wb-berichten',     n: 'Berichten',            d: 'Aanmaan- en briefteksten (incl. WIK-14-dagen)',             ic: I.mail },
       { id: 'wb-venster',       n: 'Verzendvenster',       d: 'Wanneer aanmaningen de deur uit mogen',                     ic: I.clock },
       { id: 'wb-incasso',       n: 'Incassobureaus',       d: 'Partners (NL/BE) waar dossiers naartoe gaan',               ic: I.building || I.file },
+      { id: 'wb-test-cockpit',  n: 'Wanbetalers test',     d: 'Test-omgeving: is_test-scoped triggers met echte handlers',  ic: I.play || I.warn },
     ]},
     { g: 'AI Agents', items: [
       { id: 'agents-lisa',      n: 'Lisa',                 d: 'Persona, fases, follow-ups en verzendvenster',              ic: I.bot },
@@ -6119,8 +6120,39 @@
     // afwijkende validatie; templates zijn juridisch dwingend WIK-14).
     if (cur.id === 'wb-workflows')       return bodyWbWorkflows();
     if (cur.id === 'wb-berichten')       return bodyWbBerichten();
+    // Blok-1: menu-hook naar de bestaande testpagina (modules/wanbetalers-test.html).
+    // Blok-2 vervangt deze body door de nieuwe cockpit-schil (design-ref in
+    // docs/dunning-test-cockpit-reference.html) op dezelfde route, zodat de
+    // menu-link geldig blijft.
+    if (cur.id === 'wb-test-cockpit')    return bodyWbTestCockpit();
     if (cur.id === 'sys-followup-admin') return bodySysFollowupAdmin();
     return bodyPlaceholder(cur);
+  }
+
+  function bodyWbTestCockpit() {
+    // TIJDELIJK (blok 1): korte intro + knop naar de bestaande testpagina.
+    // Wordt in blok 2 vervangen door de native cockpit-schil.
+    return `<div style="max-width:760px">
+      <div style="padding:16px 18px;border:1px solid var(--border);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:8px;background:var(--amber-soft);color:var(--amber);display:grid;place-items:center;font-size:16px">⚗</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600">Wanbetalers testomgeving</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Is_test-gescoped triggers met echte handlers · super_admin only</div>
+          </div>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-2);line-height:1.55">
+          De nieuwe cockpit-schil landt in blok 2. Zolang die er nog niet is, opent deze
+          knop de bestaande testpagina — dezelfde plek waar je nu al de sandbox seed,
+          reset en dry-run bedient. De grendel (fail-closed recipient-check, dry-run
+          default AAN, test_cockpit_audit) staat al live achter beide.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a class="btn btn-primary btn-sm" href="/modules/wanbetalers-test.html" target="_blank" rel="noopener" style="font-size:12px">Open testpagina →</a>
+          <a class="btn btn-ghost btn-sm" href="/docs/dunning-test-cockpit-reference.html" target="_blank" rel="noopener" style="font-size:12px" title="Design-referentie voor blok 2">Bekijk cockpit-ontwerp →</a>
+        </div>
+      </div>
+    </div>`;
   }
 
   function instView() {
