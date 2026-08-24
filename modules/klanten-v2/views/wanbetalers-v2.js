@@ -48,6 +48,13 @@
     settings:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     callLog:      { loading: false, error: null, byCust: {}, _seq: 0 },
     timeline:     { loading: false, error: null, byCust: {}, _seq: 0 },
+    // Build 3: stale handmatige acties (read-only).
+    staleManualActs: {
+      loading: false, fetched: false, error: null,
+      items: [], threshold_days: null,
+      counts_by_type: {}, counts_by_status: {},
+      _seq: 0,
+    },
   };
   const _ui = {
     ovStatusFilter: 'all',       // 'all' | 'ok' | 'chat' | 'stuck'
@@ -331,6 +338,28 @@
     st.loading = false; st.fetched = true;
     if (!j || j.error) st.error = (j && j.error) || 'Kon open acties niet laden';
     else st.items = asArr(j.items || j.actions);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // Build 3: stale handmatige acties fetch. Read-only endpoint dat
+  // MANUAL_* pending_actions ophaalt die langer dan de drempel open staan
+  // (met niet-terminale statussen PENDING/APPROVED/FAILED). Zie
+  // api/pending-actions-stale-list.js.
+  async function _fetchStaleManualActs() {
+    const st = _live.staleManualActs;
+    if (st.loading || (st.fetched && !st.error)) return;
+    st.loading = true; st.error = null;
+    const seq = ++st._seq;
+    const j = await tryFetch('stale-manual', '/api/pending-actions-stale-list', 8000);
+    if (seq !== st._seq) return;
+    st.loading = false; st.fetched = true;
+    if (!j || j.error) {
+      st.error = (j && j.error) || 'Kon stale-acties niet laden';
+    } else {
+      st.items            = asArr(j.rows);
+      st.threshold_days   = j.threshold_days ?? null;
+      st.counts_by_type   = j.counts_by_type || {};
+      st.counts_by_status = j.counts_by_status || {};
+    }
     if (window.DFO?.render) window.DFO.render();
   }
   // BROK 5 ACT-2: per-status cache voor Afgehandeld/Afgewezen tabs.
@@ -1668,6 +1697,7 @@
   function actiesView() {
     if (!_live.pipelineActs.fetched && !_live.pipelineActs.loading && !_live.pipelineActs.error) queueMicrotask(_fetchPipelineActs);
     if (!_live.pendingActs.fetched && !_live.pendingActs.loading && !_live.pendingActs.error) queueMicrotask(_fetchPendingActs);
+    if (!_live.staleManualActs.fetched && !_live.staleManualActs.loading && !_live.staleManualActs.error) queueMicrotask(_fetchStaleManualActs);
     if (!_live.settings.fetched && !_live.settings.loading && !_live.settings.error) queueMicrotask(_fetchSettings);
 
     const pa  = _live.pipelineActs.data || {};
@@ -1770,6 +1800,7 @@
           ${sectionBlock('Wacht op reactie',  awaiting, 'Geen wachtende gesprekken.',     'amber')}
           ${sectionBlock('Stil / vastgelopen',stale,    'Geen stille dossiers.',          'text-3')}
         </div>
+        ${_staleManualActionsHtml()}
         ${pendingBlock}
         ${arrBlock}
         ${_bulkJobsBlock()}
@@ -2219,6 +2250,93 @@
     _live.pendingActs.fetched = false;
     _fetchPendingActs();
   };
+
+  // Build 3: Read-only widget dat MANUAL_* pending_actions toont die
+  // langer dan de drempel open staan. Data komt uit
+  // /api/pending-actions-stale-list (whitelist: MANUAL_ESCALATION /
+  // MANUAL_VERIFY_PAYMENT / MANUAL_FOLLOWUP / MANUAL_CONFIRM_PROMISE;
+  // niet-terminale statussen PENDING/APPROVED/FAILED; leeftijd op
+  // created_at + snooze-exclusie via scheduled_for).
+  //
+  // Klik op een rij opent de bestaande action-drawer (window.__wbxOpenPa),
+  // dezelfde flow als bij de bestaande pending-actions-lijst.
+  function _staleManualActionsHtml() {
+    const s = _live.staleManualActs;
+    const thresholdLbl = s.threshold_days != null ? ` · > ${s.threshold_days}d open` : '';
+    const title = `Stale handmatige acties${thresholdLbl}`;
+
+    if (s.loading && !s.items.length) {
+      return `<div class="card" style="margin-top:12px;padding:14px 16px;font-size:12px;color:var(--text-3)">${esc(title)} — laden…</div>`;
+    }
+    if (s.error) {
+      return `<div class="card" style="margin-top:12px;padding:12px 16px;background:var(--rose-soft);color:var(--rose);font-size:12px">${esc(title)} — ${esc(s.error)}</div>`;
+    }
+
+    // Empty-state = success ✓
+    if (!s.items.length) {
+      return `<div class="card" style="margin-top:12px;padding:12px 16px;background:var(--emerald-soft);color:var(--emerald);font-size:12px">
+        ${esc(title)} · geen openstaande handmatige acties boven de drempel <span style="opacity:.7;margin-left:6px">✓</span>
+      </div>`;
+    }
+
+    // Counts-per-type pills (bewust ook zichtbaar bij 0 zodat drempels
+    // per type in v2 makkelijk toevoegbaar zijn).
+    const typeColors = {
+      MANUAL_ESCALATION:      'rose',
+      MANUAL_VERIFY_PAYMENT:  'rose',
+      MANUAL_CONFIRM_PROMISE: 'amber',
+      MANUAL_FOLLOWUP:        'amber',
+    };
+    const pills = Object.entries(s.counts_by_type || {}).map(([t, n]) => {
+      const c = typeColors[t] || 'text-3';
+      const dim = n === 0 ? 'opacity:.45;' : '';
+      return `<span style="${dim}display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:20px;background:var(--${c}-soft,var(--surface-2));color:var(--${c},var(--text-2));font-family:'IBM Plex Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:.03em">${esc(t.replace(/^MANUAL_/, '').toLowerCase())} · ${n}</span>`;
+    }).join('');
+
+    const rows = s.items.map(r => {
+      const cust = r.customer?.name || '—';
+      const custId = r.customer?.id || '';
+      const inv = r.invoice ? esc(r.invoice.number) : '<span style="color:var(--text-3)">—</span>';
+      const amt = r.invoice ? ('€ ' + Number(r.invoice.amount_open || 0).toFixed(2)) : '—';
+      const stColor = r.status === 'FAILED' ? 'var(--rose)' : (r.status === 'APPROVED' ? 'var(--accent)' : 'var(--amber)');
+      const shortType = r.action_type.replace(/^MANUAL_/, '').toLowerCase();
+      const openHandler = `window.__wbxOpenPa && window.__wbxOpenPa('${esc(r.id)}', ${custId ? `'${esc(custId)}'` : 'null'})`;
+      return `<tr style="cursor:pointer;border-bottom:1px solid var(--border)" onclick="${openHandler}" title="Open actie-detail">
+        <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:${r.age_days > 7 ? 'var(--rose)' : 'var(--amber)'};font-weight:600">${r.age_days}d</td>
+        <td style="padding:6px 8px;font-size:12px">${esc(cust)}</td>
+        <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px">${esc(shortType)}</td>
+        <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:${stColor};text-transform:uppercase;letter-spacing:.04em">${esc(r.status)}</td>
+        <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px">${inv}</td>
+        <td style="padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;text-align:right;font-variant-numeric:tabular-nums">${esc(amt)}</td>
+      </tr>`;
+    }).join('');
+
+    return `<div class="card" style="margin-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="font-size:13px;font-weight:600">${esc(title)}</div>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-3);letter-spacing:.04em">${s.total || s.items.length} rij(en)</span>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap">${pills}</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="background:var(--surface-2);border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:6px 8px;font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase">Leeftijd</th>
+            <th style="text-align:left;padding:6px 8px;font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase">Klant</th>
+            <th style="text-align:left;padding:6px 8px;font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase">Type</th>
+            <th style="text-align:left;padding:6px 8px;font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase">Status</th>
+            <th style="text-align:left;padding:6px 8px;font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase">Factuur</th>
+            <th style="text-align:right;padding:6px 8px;font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.05em;text-transform:uppercase">Open bedrag</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="padding:6px 14px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text-3);font-family:'IBM Plex Mono',monospace;letter-spacing:.04em">
+        read-only · niet-terminaal (PENDING/APPROVED/FAILED) · leeftijd = created_at · snooze uitgesloten
+      </div>
+    </div>`;
+  }
 
   function _bulkJobsBlock() {
     if (!_bulkJobs.fetched && !_bulkJobs.loading && !_bulkJobs.error) queueMicrotask(_fetchBulkJobs);
