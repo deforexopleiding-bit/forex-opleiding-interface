@@ -28,7 +28,7 @@ CREATE OR REPLACE FUNCTION public.dunning_test_cockpit_reset(p_dry_run boolean D
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $fn$
 DECLARE
   v_test_customer_ids uuid[];
