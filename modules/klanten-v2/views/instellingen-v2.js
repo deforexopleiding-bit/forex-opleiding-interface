@@ -3788,6 +3788,11 @@
      jsonb) → v27-aparte-brok; MVP UX voor draft-lifecycle. */
   const _metaEd = { open: false, mode: 'create', id: null, busy: false, error: null,
     fields: { name:'', language:'nl', category:'UTILITY', header_type:'NONE', header_text:'', body_text:'', footer_text:'' },
+    // v=82: variable-picker state + folder-picker state.
+    varMapping: {},   // { "1": "klant.voornaam", "2": "toegang.einddatum" } → meta_param_mapping.body
+    folderId:   null, // FK naar whatsapp_template_folders.id, null = ongegroepeerd
+    origFolderId: null,   // om te bepalen of we een folder-move moeten doen na upsert
+    varsFetched: false, varsList: [],
   };
   const _METAED_LANGS = ['nl','en_US','en','de','fr'];
   const _METAED_CATS  = ['MARKETING','UTILITY','AUTHENTICATION'];
@@ -3797,10 +3802,23 @@
     // examples ({"1":val,"2":val}), buttons (array {type,text,url?,phone_number?}).
     _metaEd.fields = { name:'', language:'nl', category:'UTILITY', header_type:'NONE', header_text:'', header_url:'', body_text:'', footer_text:'', examples:{}, buttons:[] };
     _metaEd.uploading = false;
+    // v=82: reset picker state.
+    _metaEd.varMapping = {}; _metaEd.folderId = null; _metaEd.origFolderId = null;
+  }
+  // v=82: lazy-fetch variables-registry (1× per session; cachet in _metaEd).
+  async function _metaFetchVars() {
+    if (_metaEd.varsFetched) return;
+    const j = await tryFetch('meta-vars', '/api/admin-template-variables-list');
+    _metaEd.varsFetched = true;
+    _metaEd.varsList = Array.isArray(j?.variables) ? j.variables : [];
+    if (render) render();
   }
   window.__setMetaEdOpen = () => {
     if (!_wa.moduleId) { showToast('Kies eerst een WABA-module', 'warn'); return; }
-    _metaEdReset(); _metaEd.open = true; if (render) render();
+    _metaEdReset(); _metaEd.open = true;
+    // Fire-and-forget vars-fetch; UI toont skeleton tot 't binnen is.
+    _metaFetchVars();
+    if (render) render();
   };
   window.__setMetaEdClose = () => { _metaEd.open = false; _metaEd.error = null; if (render) render(); };
   // Ronde-31 FIX 1 (focus-verlies): setter NIET meer render()en tijdens typen.
@@ -3834,7 +3852,9 @@
     if (!id) return;
     _metaEdReset();
     _metaEd.mode = 'edit'; _metaEd.id = id; _metaEd.open = true;
-    _metaEd.busy = true; if (render) render();
+    _metaEd.busy = true;
+    _metaFetchVars();  // fire-and-forget, cachet
+    if (render) render();
     // Lazy detail-fetch: bewust 1× per editor-open, geen refetch bij render.
     const j = await tryFetch('meta-detail', '/api/admin-meta-templates-detail?id=' + encodeURIComponent(id));
     _metaEd.busy = false;
@@ -3858,6 +3878,10 @@
         url: String(b?.url || ''),
         phone_number: String(b?.phone_number || ''),
       })) : [];
+      // v=82: laad var-mapping (meta_param_mapping.body) + folder_id.
+      _metaEd.varMapping   = (t.meta_param_mapping && typeof t.meta_param_mapping === 'object' && t.meta_param_mapping.body && typeof t.meta_param_mapping.body === 'object') ? { ...t.meta_param_mapping.body } : {};
+      _metaEd.folderId     = t.folder_id || null;
+      _metaEd.origFolderId = t.folder_id || null;
     }
     if (render) render();
   }
@@ -3922,6 +3946,17 @@
     };
     if (btns.length) payload.buttons = btns;
     if (Object.keys(exObj).length) payload.body_examples = exObj;
+    // v=82: named-var mapping meesturen zodat send-time resolver
+    // {{n}}→variable_key kan mappen (bv. voor Joost/dunning-engine).
+    // Filter mapping alleen naar slots die nog in body_text staan.
+    const bodyVarKeys = new Set((String(f.body_text).match(/\{\{(\d+)\}\}/g) || []).map(s => s.replace(/[^\d]/g, '')));
+    const cleanMapping = {};
+    for (const [n, key] of Object.entries(_metaEd.varMapping || {})) {
+      if (bodyVarKeys.has(String(n))) cleanMapping[String(n)] = String(key);
+    }
+    if (Object.keys(cleanMapping).length) {
+      payload.meta_param_mapping = { body: cleanMapping };
+    }
     const method = _metaEd.mode === 'edit' ? 'PATCH' : 'POST';
     const url = _metaEd.mode === 'edit'
       ? '/api/admin-meta-templates-upsert?id=' + encodeURIComponent(_metaEd.id)
@@ -3930,7 +3965,18 @@
       method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     });
     if (j?.__error || j?.error) { _metaEd.busy = false; _metaEd.error = j?.__error || j?.error; if (render) render(); return; }
-    const savedId = j?.template?.id || j?.id || _metaEd.id;
+    const savedId = j?.template?.id || j?.item?.id || j?.id || _metaEd.id;
+    // v=82: folder-move na upsert-success (bestaand endpoint, aparte call).
+    // Alleen als de folder-keuze afwijkt van origineel (edit) of niet-null bij create.
+    if (savedId && _metaEd.folderId !== _metaEd.origFolderId) {
+      try {
+        const mv = await tryFetch('meta-folder-move', '/api/admin-template-folder-move', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ template_id: savedId, folder_id: _metaEd.folderId || null }),
+        });
+        if (mv?.__error || mv?.error) showToast('Map-toewijzing mislukt: ' + (mv?.__error || mv?.error), 'warn');
+      } catch (e) { console.warn('[metaEd] folder-move soft-fail:', e?.message || e); }
+    }
     showToast(_metaEd.mode === 'edit' ? 'Template bijgewerkt' : 'Template aangemaakt', 'ok');
     if (alsoSubmit && savedId) {
       const ok = await new Promise((res) => openConfirm(`Template "${f.name}" direct indienen bij Meta ter goedkeuring? Kan niet worden teruggedraaid.`, () => res(true), 'warn') || res(false));
@@ -3989,6 +4035,71 @@
       const bp = q(`[data-btn-idx="${i}"][data-btn-field="phone"]`); if (bp) f.buttons[i].phone_number = String(bp.value || '');
     });
   }
+  // ═════ v=82 Variabelen-picker + Folder-picker handlers ══════════════════
+  // Insert een merge-variabele in de body op cursorpositie. Kent variabele
+  // aan volgend beschikbaar {{n}}-slot toe (of hergebruik als key al bestaat).
+  window.__setMetaInsertVar = (varKey) => {
+    _metaSyncFieldsFromDom();
+    const v = (_metaEd.varsList || []).find(x => x.key === varKey);
+    if (!v) { showToast('Onbekende variabele: ' + varKey, 'warn'); return; }
+    // Zoek bestaand slot voor deze key (idempotent bij herbruik).
+    let slot = null;
+    for (const [n, key] of Object.entries(_metaEd.varMapping)) {
+      if (key === varKey) { slot = Number(n); break; }
+    }
+    if (slot == null) {
+      // Nieuw slot = max(bestaande) + 1, óf 1 als leeg.
+      const used = Object.keys(_metaEd.varMapping).map(n => Number(n)).filter(n => Number.isFinite(n));
+      slot = used.length ? Math.max(...used) + 1 : 1;
+      _metaEd.varMapping[String(slot)] = varKey;
+      if (!_metaEd.fields.examples) _metaEd.fields.examples = {};
+      if (!_metaEd.fields.examples[slot]) _metaEd.fields.examples[slot] = String(v.example || '');
+    }
+    // Insert {{n}} op cursorpositie in body-textarea.
+    const ta = document.querySelector('[data-metaed-body]');
+    if (ta) {
+      const before = ta.value.slice(0, ta.selectionStart);
+      const after  = ta.value.slice(ta.selectionEnd);
+      const insert = `{{${slot}}}`;
+      ta.value = before + insert + after;
+      ta.focus();
+      const pos = before.length + insert.length;
+      ta.setSelectionRange(pos, pos);
+      // Update state + body-meta live (zonder full re-render).
+      _metaEd.fields.body_text = ta.value;
+      if (typeof window.__updMetaBodyMeta === 'function') window.__updMetaBodyMeta(ta.value);
+    }
+    if (render) render();   // rerender voor examples-block + mapping-preview
+  };
+  // Folder-picker: null = ongegroepeerd. State-only, geen re-render (dropdown).
+  window.__setMetaEdFolder = (v) => {
+    const s = String(v || '').trim();
+    _metaEd.folderId = s ? s : null;
+  };
+  // "Nieuwe map…" — custom prompt-modal, POST create, refresh folders + select.
+  window.__setMetaEdNewFolder = () => {
+    if (!_wa.moduleId) { showToast('Kies eerst een WABA-module', 'warn'); return; }
+    _metaSyncFieldsFromDom();
+    // Simple prompt via native (custom modal binnen editor-modal is te bewerkelijk).
+    // Fallback: window.prompt — kort blocking, geen freeze-risico.
+    const name = window.prompt('Naam voor de nieuwe map (max 64 chars):');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim().slice(0, 64);
+    tryFetch('meta-folder-create', '/api/admin-template-folders-create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ business_account_id: _wa.moduleId, name: trimmed }),
+    }).then((j) => {
+      if (j?.__error || j?.error) { showToast('Map aanmaken mislukt: ' + (j?.__error || j?.error), 'warn'); return; }
+      const folder = j?.folder || null;
+      if (folder?.id) {
+        _wa.folders = [...(_wa.folders || []), folder];
+        _metaEd.folderId = folder.id;
+        showToast('Map "' + folder.name + '" aangemaakt', 'ok');
+      }
+      if (render) render();
+    });
+  };
+
   // Structuur-wijzigende actions → re-render (focus was op knop, niet input).
   window.__setMetaAddBtn = () => {
     _metaSyncFieldsFromDom();
@@ -4062,10 +4173,19 @@
                 ${_METAED_LANGS.map(l => `<option value="${l}" ${f.language === l ? 'selected' : ''}>${l}</option>`).join('')}
               </select>
             </label>
-            <label style="font-size:11.5px;color:var(--text-2)">Categorie
+            <label style="font-size:11.5px;color:var(--text-2)">Categorie <span style="color:var(--text-3);font-weight:normal">(Meta)</span>
               <select onchange="window.__setMetaEdField('category',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
                 ${_METAED_CATS.map(c => `<option value="${c}" ${f.category === c ? 'selected' : ''}>${c}</option>`).join('')}
               </select>
+            </label>
+            <label style="font-size:11.5px;color:var(--text-2)">Mapje <span style="color:var(--text-3);font-weight:normal">(intern)</span>
+              <div style="display:flex;gap:5px;margin-top:4px">
+                <select onchange="window.__setMetaEdFolder(this.value)" style="flex:1;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);box-sizing:border-box">
+                  <option value="" ${!_metaEd.folderId ? 'selected' : ''}>— Ongegroepeerd —</option>
+                  ${(_wa.folders || []).map(fd => `<option value="${esc(fd.id)}" ${_metaEd.folderId === fd.id ? 'selected' : ''}>${esc(fd.name)}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="window.__setMetaEdNewFolder()" title="Nieuwe map aanmaken" style="font-size:11px;padding:4px 8px">➕</button>
+              </div>
             </label>
             <label style="font-size:11.5px;color:var(--text-2)">Header
               <select onchange="window.__setMetaEdSelect('header_type',this.value)" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box">
@@ -4093,10 +4213,38 @@
               <span style="font-size:10.5px;color:var(--text-3)">accept: ${esc(_META_UPLOAD_ACCEPT[f.header_type] || '—')}</span>
             </div>
           </div>` : ''}
-          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Body (max 1024) — gebruik <code>{{1}}</code>, <code>{{2}}</code>… voor variabelen
+          <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:8px">Body (max 1024) — gebruik <code>{{1}}</code>, <code>{{2}}</code>… voor variabelen
             <textarea data-metaed-body oninput="window.__updMetaBodyMeta(this.value)" maxlength="1024" rows="6" style="display:block;margin-top:4px;padding:8px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:inherit;resize:vertical">${esc(f.body_text)}</textarea>
             <div id="kv-metaed-body-meta" style="font-size:10.5px;color:var(--text-3);margin-top:4px">${f.body_text.length}/1024 chars · ${bodyVars} variabele${bodyVars===1?'':'n'} gevonden</div>
           </label>
+          ${(() => {
+            // v=82: Variabelen-picker — chips gegroepeerd per category.
+            // Klik = insert {{n}} op cursorpositie + tracked in _metaEd.varMapping.
+            const vars = _metaEd.varsList || [];
+            if (!_metaEd.varsFetched) {
+              return `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3)">Variabelen laden…</div>`;
+            }
+            if (!vars.length) return '';
+            // Groepeer per category.
+            const byCat = {};
+            for (const v of vars) { (byCat[v.category || 'overig'] ||= []).push(v); }
+            const catOrder = ['customer','invoice','klant','afdeling','bedrijf','onboarding','overig'];
+            const catLabels = { customer:'Klant', invoice:'Factuur', klant:'Klant-aggregaties', afdeling:'Afdeling', bedrijf:'Bedrijf', onboarding:'Onboarding' };
+            const usedKeys = new Set(Object.values(_metaEd.varMapping || {}));
+            const catsInOrder = catOrder.filter(c => byCat[c]).concat(Object.keys(byCat).filter(c => !catOrder.includes(c)));
+            return `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px">
+              <div style="font-size:11.5px;font-weight:600;color:var(--text-2);margin-bottom:6px">Variabelen invoegen <span style="color:var(--text-3);font-weight:normal">— klik = <code>{{n}}</code> op cursorpositie</span></div>
+              ${catsInOrder.map(cat => `<div style="margin-bottom:6px">
+                <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">${esc(catLabels[cat] || cat)}</div>
+                <div style="display:flex;flex-wrap:wrap;gap:4px">
+                  ${byCat[cat].map(v => `<button type="button" class="chip ${usedKeys.has(v.key) ? 'on' : ''}" onclick="window.__setMetaInsertVar('${esc(v.key)}')" title="${esc(v.example || '')}" style="font-size:11px;padding:3px 8px;font-family:'IBM Plex Mono',monospace">${esc(v.label)}</button>`).join('')}
+                </div>
+              </div>`).join('')}
+              ${Object.keys(_metaEd.varMapping || {}).length ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)">
+                Mapping: ${Object.entries(_metaEd.varMapping).sort((a,b)=>Number(a[0])-Number(b[0])).map(([n,k]) => `<code>{{${n}}}</code>=<code>${esc(k)}</code>`).join(' · ')}
+              </div>` : ''}
+            </div>`;
+          })()}
           ${bodyVars > 0 ? `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px">
             <div style="font-size:11.5px;font-weight:600;color:var(--text-2);margin-bottom:6px">Voorbeeldwaarden per variabele <span style="color:var(--text-3);font-weight:normal">— vereist door Meta voor review, max 1024/veld</span></div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">
