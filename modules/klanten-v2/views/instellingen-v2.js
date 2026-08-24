@@ -3829,10 +3829,94 @@
   // Body-teller live updaten zonder heel-modal re-render.
   window.__updMetaBodyMeta = (val) => {
     _metaEd.fields.body_text = String(val || '');
-    const el = document.getElementById('kv-metaed-body-meta'); if (!el) return;
-    const vars = (String(val || '').match(/\{\{\d+\}\}/g) || []).length;
-    el.textContent = `${String(val || '').length}/1024 chars · ${vars} variabele${vars===1?'':'n'} gevonden`;
+    const el = document.getElementById('kv-metaed-body-meta');
+    if (el) {
+      const vars = (String(val || '').match(/\{\{\d+\}\}/g) || []).length;
+      el.textContent = `${String(val || '').length}/1024 chars · ${vars} variabele${vars===1?'':'n'} gevonden`;
+    }
+    // v=88: live preview refresh (freeze-veilig — alleen preview-node update).
+    if (typeof window.__updMetaPreview === 'function') window.__updMetaPreview();
   };
+  // v=88: live preview. Leest state (met DOM-sync voor uncontrolled inputs)
+  // en injecteert HTML in het preview-paneel. Géén modal-re-render, géén
+  // rerender van chip-groep — enkel innerHTML op de preview-node. Alle
+  // gebruikersinvoer wordt HTML-ge-escaped voor safety.
+  window.__updMetaPreview = () => {
+    const el = document.getElementById('kv-metaed-preview');
+    if (!el) return;
+    _metaSyncFieldsFromDom();
+    el.innerHTML = _renderMetaPreviewHtml();
+  };
+  function _metaResolvePlaceholders(text) {
+    // Vervang {{n}} met examples[n] óf varMapping-key-example uit registry
+    // óf fallback naar de var-label / `[voorbeeld n]`. HTML-escape per token.
+    const examples = _metaEd.fields.examples || {};
+    const mapping  = _metaEd.varMapping || {};
+    const vars     = _metaEd.varsList || [];
+    const varByKey = new Map(vars.map(v => [v.key, v]));
+    return String(text || '').replace(/\{\{(\d+)\}\}/g, (_m, n) => {
+      const rawExample = examples[n];
+      if (rawExample && String(rawExample).trim()) return esc(String(rawExample));
+      const key = mapping[n];
+      if (key) {
+        const v = varByKey.get(key);
+        if (v && v.example) return esc(String(v.example));
+        if (v && v.label)   return esc('[' + v.label + ']');
+        return esc('[' + key + ']');
+      }
+      return esc('[voorbeeld ' + n + ']');
+    });
+  }
+  function _renderMetaPreviewHtml() {
+    const f = _metaEd.fields;
+    // Header-render per type.
+    let headerHtml = '';
+    if (f.header_type === 'TEXT' && f.header_text) {
+      headerHtml = `<div style="font-weight:700;font-size:13px;color:#000;margin-bottom:4px">${esc(f.header_text)}</div>`;
+    } else if (f.header_type === 'IMAGE' && f.header_url) {
+      headerHtml = `<div style="margin:-8px -8px 6px;border-radius:6px 6px 0 0;overflow:hidden;background:#e0e0e0"><img src="${esc(f.header_url)}" alt="" style="display:block;width:100%;max-height:180px;object-fit:cover" /></div>`;
+    } else if (f.header_type === 'IMAGE') {
+      headerHtml = `<div style="height:120px;margin:-8px -8px 6px;border-radius:6px 6px 0 0;background:#e0e0e0;display:grid;place-items:center;color:#999;font-size:11px">🖼️ afbeelding</div>`;
+    } else if (f.header_type === 'VIDEO') {
+      headerHtml = `<div style="height:120px;margin:-8px -8px 6px;border-radius:6px 6px 0 0;background:#e0e0e0;display:grid;place-items:center;color:#999;font-size:11px">▶️ video</div>`;
+    } else if (f.header_type === 'DOCUMENT') {
+      headerHtml = `<div style="padding:8px;margin:-8px -8px 6px;border-radius:6px 6px 0 0;background:#f0f0f0;display:flex;gap:8px;align-items:center;color:#333;font-size:12px">📄 ${esc((f.header_url || '').split('/').pop() || 'document.pdf')}</div>`;
+    }
+    // Body met resolved placeholders. Whitelist: line-breaks → <br>.
+    const bodyResolved = _metaResolvePlaceholders(f.body_text || '');
+    const bodyHtml = `<div style="font-size:13.5px;color:#111;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">${bodyResolved.replace(/\n/g, '<br>')}</div>`;
+    // Footer
+    const footerHtml = f.footer_text
+      ? `<div style="font-size:11px;color:#667781;margin-top:6px">${esc(f.footer_text)}</div>`
+      : '';
+    // Buttons — WhatsApp toont ze onder de bubbel als brede knoppen.
+    const btns = Array.isArray(f.buttons) ? f.buttons : [];
+    const buttonsHtml = btns.length
+      ? '<div style="margin-top:6px;display:flex;flex-direction:column;gap:2px">' + btns.map(b => {
+          const label = esc(b.text || '(zonder label)');
+          const icon  = b.type === 'URL' ? '🔗' : b.type === 'PHONE_NUMBER' ? '📞' : '💬';
+          return `<div style="background:#fff;border-top:1px solid #e0e0e0;padding:9px 12px;text-align:center;color:#128c7e;font-size:13px;font-weight:500">${icon} ${label}</div>`;
+        }).join('') + '</div>'
+      : '';
+    // Tijdstempel (kosmetisch, statisch — geen live clock).
+    const timeHtml = `<div style="text-align:right;font-size:10px;color:#667781;margin-top:2px">${new Date().toLocaleTimeString('nl-NL', { hour:'2-digit', minute:'2-digit' })} ✓✓</div>`;
+    // WA-achtige lichte-groene bubbel op mint-achtergrond.
+    const hasContent = (f.body_text || f.header_text || f.header_url || f.footer_text || btns.length);
+    if (!hasContent) {
+      return `<div style="padding:24px;color:var(--text-3);font-size:12px;text-align:center;font-style:italic">Preview verschijnt zodra je body/header/footer/buttons invult.</div>`;
+    }
+    return `<div style="background:#e5ddd5;padding:14px;border-radius:8px;background-image:linear-gradient(rgba(0,0,0,.02) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.02) 1px, transparent 1px);background-size:20px 20px">
+      <div style="max-width:320px">
+        <div style="background:#dcf8c6;border-radius:8px;padding:8px 10px 6px;box-shadow:0 1px 1px rgba(0,0,0,.08);position:relative">
+          ${headerHtml}
+          ${bodyHtml}
+          ${footerHtml}
+          ${timeHtml}
+        </div>
+        ${buttonsHtml ? `<div style="max-width:320px;background:#fff;border-radius:0 0 8px 8px;overflow:hidden;box-shadow:0 1px 1px rgba(0,0,0,.08);margin-top:-6px">${buttonsHtml}</div>` : ''}
+      </div>
+    </div>`;
+  }
   // Ronde-31 FIX 4: Naam live-preview + on-blur sanitize (zonder re-render, focus behouden).
   window.__updMetaNamePreview = (val) => {
     const raw = String(val || '');
@@ -4070,6 +4154,8 @@
       if (typeof window.__updMetaBodyMeta === 'function') window.__updMetaBodyMeta(ta.value);
     }
     if (render) render();   // rerender voor examples-block + mapping-preview
+    // Preview-refresh na re-render (queueMicrotask zodat de nieuwe DOM staat).
+    queueMicrotask(() => { if (typeof window.__updMetaPreview === 'function') window.__updMetaPreview(); });
   };
   // Folder-picker: null = ongegroepeerd. State-only, geen re-render (dropdown).
   window.__setMetaEdFolder = (v) => {
@@ -4198,11 +4284,11 @@
             </label>
           </div>
           ${f.header_type === 'TEXT' ? `<label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Header-tekst (max 60)
-            <input type="text" data-metaed-header-text value="${esc(f.header_text)}" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            <input type="text" data-metaed-header-text value="${esc(f.header_text)}" oninput="window.__updMetaPreview && window.__updMetaPreview()" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>` : ''}
           ${['IMAGE','VIDEO','DOCUMENT'].includes(f.header_type) ? `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px">
             <label style="font-size:11.5px;color:var(--text-2);display:block">Media-URL (example_url, max 2000) <span style="color:var(--text-3)">— publiek bereikbare URL</span>
-              <input type="url" data-metaed-header-url value="${esc(f.header_url || '')}" maxlength="2000" placeholder="https://…" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
+              <input type="url" data-metaed-header-url value="${esc(f.header_url || '')}" oninput="window.__updMetaPreview && window.__updMetaPreview()" maxlength="2000" placeholder="https://…" style="display:block;margin-top:4px;padding:6px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box;font-family:'IBM Plex Mono',monospace" />
             </label>
             <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
               <label class="btn btn-ghost btn-sm" style="cursor:pointer;font-size:11.5px">
@@ -4252,13 +4338,17 @@
                 const n = i + 1;
                 return `<label style="font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:6px">
                   <code style="font-size:10.5px">{{${n}}}</code>
-                  <input type="text" data-metaed-example="${n}" value="${esc((f.examples||{})[n]||'')}" maxlength="1024" placeholder="voorbeeld voor {{${n}}}" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+                  <input type="text" data-metaed-example="${n}" value="${esc((f.examples||{})[n]||'')}" oninput="window.__updMetaPreview && window.__updMetaPreview()" maxlength="1024" placeholder="voorbeeld voor {{${n}}}" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
                 </label>`;
               }).join('')}
             </div>
           </div>` : ''}
+          <div style="margin-bottom:12px">
+            <div style="font-size:11.5px;font-weight:600;color:var(--text-2);margin-bottom:6px">Preview <span style="color:var(--text-3);font-weight:normal">— zoals de klant het in WhatsApp ziet, met voorbeeldwaarden</span></div>
+            <div id="kv-metaed-preview" style="border:1px solid var(--border);border-radius:8px;overflow:hidden;min-height:60px">${_renderMetaPreviewHtml()}</div>
+          </div>
           <label style="font-size:11.5px;color:var(--text-2);display:block;margin-bottom:12px">Footer (optioneel, max 60)
-            <input type="text" data-metaed-footer value="${esc(f.footer_text)}" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
+            <input type="text" data-metaed-footer value="${esc(f.footer_text)}" oninput="window.__updMetaPreview && window.__updMetaPreview()" maxlength="60" style="display:block;margin-top:4px;padding:6px 10px;font-size:12.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);width:100%;box-sizing:border-box" />
           </label>
           <div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -4269,7 +4359,7 @@
               <select onchange="window.__setMetaBtnType(${i}, this.value)" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
                 ${_META_BTN_TYPES.map(t => `<option value="${t}" ${b.type===t?'selected':''}>${t}</option>`).join('')}
               </select>
-              <input type="text" data-btn-idx="${i}" data-btn-field="text" value="${esc(b.text||'')}" maxlength="25" placeholder="label (max 25)" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+              <input type="text" data-btn-idx="${i}" data-btn-field="text" value="${esc(b.text||'')}" oninput="window.__updMetaPreview && window.__updMetaPreview()" maxlength="25" placeholder="label (max 25)" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
               ${b.type==='URL' ? `<input type="url" data-btn-idx="${i}" data-btn-field="url" value="${esc(b.url||'')}" maxlength="2000" placeholder="https://…" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:'IBM Plex Mono',monospace" />` :
                 b.type==='PHONE_NUMBER' ? `<input type="tel" data-btn-idx="${i}" data-btn-field="phone" value="${esc(b.phone_number||'')}" placeholder="+31612345678 (E.164)" style="padding:4px 6px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-family:'IBM Plex Mono',monospace" />` :
                 `<div style="font-size:11px;color:var(--text-3);padding:4px 6px">— (quick reply)</div>`}
