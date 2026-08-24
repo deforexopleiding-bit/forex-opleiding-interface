@@ -1770,7 +1770,14 @@
         : rowsAll;
     const unreadCnt = rowsAll.filter(r => (r.unread || 0) > 0).length;
     const readCnt   = rowsAll.length - unreadCnt;
-    const sel  = rows.find(r => String(r.lead_id) === String(_lsInb.sel)) || rows[0] || null;
+    // v=20 KRITIEKE FIX: GEEN auto-select fallback op rows[0] bij filter-switch.
+    // Voorheen ontstond een cascade: filter=unread → _lsInb.sel valt buiten
+    // rows → sel=rows[0] → _lsInbLoadThread(sel) → mark_as_read=true → conv
+    // verwijderd uit unread-set → render → sel=nieuwe rows[0] → cascade tot
+    // alles gelezen was. De filter is PUUR CLIENT-SIDE; klikken op een chip
+    // mag NOOIT een mark-read triggeren. Alleen expliciete rij-klik door de
+    // user opent een thread (via __onbRowClick / _lsInbSelect).
+    const sel = rows.find(r => String(r.lead_id) === String(_lsInb.sel)) || null;
     if (sel && _lsInb.thread.leadId !== sel.lead_id && !_lsInb.thread.loading) {
       queueMicrotask(() => _lsInbLoadThread(sel.lead_id));
     }
