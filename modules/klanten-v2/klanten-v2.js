@@ -519,7 +519,15 @@ function _kvRenderNotifList() {
   const moreBtn = list.querySelector('.kv-notif-more[data-kv-more]');
   if (moreBtn) {
     moreBtn.addEventListener('click', (ev) => {
+      // v=1et fix: stopPropagation zodat de document-outside-click-handler
+      // (initNotifBell r564-571) niet het paneel sluit. Zonder dit:
+      //   1. click op button → handler zet expanded=true + renderList
+      //   2. renderList replace't list.innerHTML → button-node gedetacheerd
+      //   3. event bubbelt naar document; panel.contains(ev.target) = false
+      //      want ev.target is nu orphaned → outside-click-close vuurt.
+      // Met stopPropagation: bubble bereikt document nooit; paneel blijft open.
       ev.preventDefault();
+      ev.stopPropagation();
       _kvNotif.expanded = (moreBtn.getAttribute('data-kv-more') === 'expand');
       _kvRenderNotifList();
     });
@@ -530,7 +538,18 @@ async function _kvLoadNotifs() {
     const r = await window.KV.authedFetch('/api/notifications-list?filter=' + encodeURIComponent(_kvNotif.filter));
     if (!r.ok) { _kvSetNotifBadge(0); return; }
     const d = await r.json().catch(() => ({}));
-    _kvNotif.items = Array.isArray(d?.notifications) ? d.notifications : [];
+    const rawItems = Array.isArray(d?.notifications) ? d.notifications : [];
+    // v=1et fix: sorteer nieuwste-eerst op created_at DESC. Server-side sort
+    // is `read_at ASC NULLS FIRST, created_at DESC` (unread eerst, dan binnen
+    // read-groep oudste-gelezen-eerst) — dat gaf visueel "oudste eerst" bij
+    // gelezen-heavy paneel. Voor beide tabs (Alle + Ongelezen) forceren we
+    // client-side DESC op created_at zodat de user consistent nieuwste-eerst
+    // ziet, ongeacht read/unread mix.
+    _kvNotif.items = rawItems.slice().sort((a, b) => {
+      const tb = new Date(b?.created_at || 0).getTime() || 0;
+      const ta = new Date(a?.created_at || 0).getTime() || 0;
+      return tb - ta;
+    });
     _kvNotif.unread = Number(d?.unread_count) || 0;
     _kvSetNotifBadge(_kvNotif.unread);
     const panel = document.getElementById('kvNotifPanel');
