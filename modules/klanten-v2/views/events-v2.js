@@ -173,10 +173,30 @@
     const st = _live.signups;
     if (st.loading || (st.data && st.filter === status)) return;
     st.loading = true; st.error = null; st.filter = status; st.data = null;
-    const url = '/api/events-signup-inbox-list' + (status ? '?status=' + encodeURIComponent(status) : '');
-    const j = await tryFetch('signups:' + status, url);
+    // v=48: load-all-loop (zelfde patroon als sales-offertes v=17). Endpoint
+    // limit=200-max, geen native paginatie-hint (rows.length < limit = laatste
+    // pagina). Guard: max 20 pagina's = 4000 rijen (ruim boven realistische
+    // volumes, voorkomt runaway). Counts pakken uit page 1 (blijven consistent
+    // over pagina's want status-scoped).
+    const baseParams = new URLSearchParams();
+    if (status) baseParams.set('status', status);
+    baseParams.set('limit', '200');
+    const allRows = [];
+    let firstCounts = null;
+    let hadError = false;
+    for (let page = 0; page < 20; page++) {
+      const p = new URLSearchParams(baseParams);
+      p.set('offset', String(page * 200));
+      const j = await tryFetch('signups:' + status + ':p' + page, '/api/events-signup-inbox-list?' + p.toString());
+      if (j?.__error) { hadError = allRows.length === 0; break; }
+      const rows = asArr(j?.rows);
+      allRows.push(...rows);
+      if (firstCounts === null) firstCounts = j?.counts || {};
+      if (rows.length < 200) break;  // laatste pagina
+    }
     st.loading = false;
-    if (j && j.__error) st.error = j.__error; else st.data = { rows: asArr(j?.rows), counts: j?.counts || {} };
+    if (hadError) st.error = 'Kon inschrijvingen niet laden';
+    else st.data = { rows: allRows, counts: firstCounts || {} };
     if (window.DFO?.render) window.DFO.render();
   }
   async function fetchNiveaus() {
