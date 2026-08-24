@@ -759,7 +759,8 @@
                   const parts = [];
                   parts.push(`<span style="color:var(--emerald);font-weight:600">${g}</span>`);
                   if (r > 0) parts.push(`<span style="color:var(--rose);font-weight:600">${r}</span>`);
-                  return `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${parts.join(' · ')}<span style="color:var(--text-3);font-weight:400"> ${r > 0 ? '(toegelaten · afgewezen)' : '(toegelaten)'}</span></div>`;
+                  // Geen label — de kleur (groen=toegelaten, rood=afgewezen) zegt het al.
+                  return `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px;font-family:'IBM Plex Mono',monospace">${parts.join(' · ')}</div>`;
                 }
                 const tiles = [];
                 if (isLive && anyLabelMatches(['7-daagse','7 daagse','7daagse'])) { const sp = findCount(['7-daagse','7 daagse','7daagse']); tiles.push(['7-daagse',      sp.total, totLeads ? Math.round(sp.total/Math.max(totLeads,1)*100) : 0, 'emerald', 'leads',  true, sp]); }
