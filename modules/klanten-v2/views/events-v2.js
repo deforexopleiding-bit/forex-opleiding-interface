@@ -3679,7 +3679,40 @@
     if (!_live.signups.data && !_live.signups.loading && !_live.signups.error) queueMicrotask(() => fetchSignups(status));
     if (_live.signups.error && !_live.signups.data) return errBlk('signups', _live.signups.error);
     if (_live.signups.loading && !_live.signups.data) return skel();
-    const rows = asArr(_live.signups.data?.rows);
+    const rawRows = asArr(_live.signups.data?.rows);
+    // v=47 client-side groepering: dedupt cross-event dubbelen per
+    // (normalizedEmail || normalizedPhone, matched_event_id). Behoud de
+    // MEEST RECENTE rij per groep als "primaire"; N-badge toont hoeveel
+    // rijen er in de groep zitten. Server-side dedup pakt alleen dubbelen
+    // op ghl_form_submission_id; cross-event same-person is aparte case.
+    const _normEmail = (e) => String(e || '').trim().toLowerCase();
+    const _normPhone = (p) => {
+      const digits = String(p || '').replace(/\D/g, '');
+      // Lesson-18-fallback: gebruik de laatste 9 cijfers als beschikbaar,
+      // matcht verschillende landcode-formats van hetzelfde nummer.
+      return digits.length >= 9 ? digits.slice(-9) : digits;
+    };
+    const groupsByKey = new Map();
+    for (const r of rawRows) {
+      const eKey = _normEmail(r.email);
+      const pKey = _normPhone(r.phone);
+      const evId = String(r.matched_event_id || r.matched_event?.id || 'nomatch');
+      const key = (eKey || pKey || String(r.id)) + '|' + evId;
+      const arr = groupsByKey.get(key) || [];
+      arr.push(r);
+      groupsByKey.set(key, arr);
+    }
+    // Sorteer per groep op received_at DESC → head = meest recente.
+    for (const arr of groupsByKey.values()) {
+      arr.sort((a, b) => String(b.received_at || '').localeCompare(String(a.received_at || '')));
+    }
+    // rows = 1 head per groep, met group-metadata (dupe-count).
+    const rows = Array.from(groupsByKey.values()).map((arr) => {
+      const head = arr[0];
+      return arr.length > 1 ? { ...head, __groupCount: arr.length } : head;
+    });
+    // Herstel sortering (nieuwste eerst).
+    rows.sort((a, b) => String(b.received_at || '').localeCompare(String(a.received_at || '')));
     const counts = _live.signups.data?.counts || {};
     return `<div class="toolbar" style="padding:12px 20px;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
       ${[['','Alles','total'],['matched','Matched','matched'],['ambiguous','Ambigu','ambiguous'],['no_match','Geen match','no_match'],['invalid_payload','Ongeldig','invalid_payload']].map(([v, l, k]) =>
@@ -3729,9 +3762,16 @@
             // nested voor forward-compat als endpoint later join toevoegt.
             const attId   = r.matched_attendee_id || r.matched_attendee?.id || null;
             const eventId = r.matched_event_id    || r.matched_event?.id    || null;
+            // v=47: bij gegroepeerde dubbelen (__groupCount > 1) toont
+            // een amber pill '× N inschrijvingen' naast de naam. Klik op
+            // rij opent de meest recente (head van de groep); oudere rijen
+            // zijn zichtbaar via de server (GET details per id).
+            const groupBadge = r.__groupCount > 1
+              ? `<span title="${esc(r.__groupCount + ' inschrijvingen van dezelfde persoon voor dit event')}" style="display:inline-flex;align-items:center;padding:1px 7px;border-radius:10px;background:var(--amber-soft);color:var(--amber);font-size:10px;font-weight:600;margin-left:6px">× ${r.__groupCount}</span>`
+              : '';
             const nameCell = attId && eventId
-              ? `<a href="#" onclick="event.preventDefault();window.__evAttOpen('${esc(attId)}','${esc(eventId)}')" title="Bekijk deelnemer-detail" style="color:inherit;text-decoration:none;display:block"><div class="row-avatar" style="cursor:pointer">${H.av(naam, 28)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}</span></div></a>`
-              : `<div class="row-avatar" style="cursor:default" onclick="window.__evSignupNoMatch()" title="Nog geen gekoppelde deelnemer">${H.av(naam, 28)}<span class="cell-main" style="color:var(--text-2)">${esc(naam)}</span></div>`;
+              ? `<a href="#" onclick="event.preventDefault();window.__evAttOpen('${esc(attId)}','${esc(eventId)}')" title="Bekijk deelnemer-detail" style="color:inherit;text-decoration:none;display:block"><div class="row-avatar" style="cursor:pointer">${H.av(naam, 28)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}${groupBadge}</span></div></a>`
+              : `<div class="row-avatar" style="cursor:default" onclick="window.__evSignupNoMatch()" title="Nog geen gekoppelde deelnemer">${H.av(naam, 28)}<span class="cell-main" style="color:var(--text-2)">${esc(naam)}${groupBadge}</span></div>`;
             return [
               nameCell,
               `<span style="color:var(--text-3);font-size:12.5px">${esc(r.email || '—')}</span>`,

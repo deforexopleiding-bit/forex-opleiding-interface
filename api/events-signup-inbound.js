@@ -74,6 +74,36 @@ async function isIpRateLimited(ipHash) {
 }
 
 async function insertInboxRow(rowFields) {
+  // 2026-08-24 dedup-fix: als er een ghl_form_submission_id is, hanteer
+  // upsert-on-conflict tegen de nieuwe UNIQUE partial index
+  // `event_signup_inbox_ghl_form_submission_id_uidx`. Als de submission
+  // eerder al binnen was → skip nieuwe rij + return de bestaande id (idempotent
+  // t.a.v. GHL webhook-retries). Zonder ghl_form_submission_id: plain INSERT
+  // (partial index vangt NULL niet af).
+  const hasGhlId = !!rowFields?.ghl_form_submission_id;
+  if (hasGhlId) {
+    // upsert met ignoreDuplicates → INSERT ... ON CONFLICT DO NOTHING.
+    // Bij conflict: data is [] (geen rij teruggekregen); dan bestaande id
+    // ophalen via SELECT.
+    const { data, error } = await supabaseAdmin
+      .from('event_signup_inbox')
+      .upsert(rowFields, { onConflict: 'ghl_form_submission_id', ignoreDuplicates: true })
+      .select('id');
+    if (error) throw new Error('inbox upsert: ' + error.message);
+    if (Array.isArray(data) && data.length > 0 && data[0]?.id) return data[0].id;
+    // Conflict → bestaande rij zoeken.
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from('event_signup_inbox')
+      .select('id')
+      .eq('ghl_form_submission_id', rowFields.ghl_form_submission_id)
+      .order('received_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (exErr) throw new Error('inbox lookup after conflict: ' + exErr.message);
+    if (!existing?.id) throw new Error('inbox upsert returnde geen rij + geen bestaande gevonden');
+    return existing.id;
+  }
+  // NULL ghl_form_submission_id → plain insert.
   const { data, error } = await supabaseAdmin
     .from('event_signup_inbox')
     .insert(rowFields)
