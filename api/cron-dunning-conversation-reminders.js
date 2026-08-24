@@ -313,17 +313,25 @@ export default async function handler(req, res) {
 
     // ── Pending gespreks-pauze runs ophalen ────────────────────────────────
     // Scope-filter (BLOK 1 · PR-scope): inner-join op customers om
-    // is_test-vlag te lezen. Productie-cron ziet nu ALLEEN is_test=false
-    // (fix voor test-lekken; assertRecipientMatchesSandbox was tot nu toe
-    // de laatste vangnet). Cockpit-triggers met scope='test' zien alleen
-    // is_test=true.
+    // is_test-vlag te lezen.
+    //
+    // - scope='production' (default) → IS NOT TRUE (matcht false én NULL).
+    //   Schema garandeert NOT NULL + default false, dus in de huidige DB is
+    //   dit equivalent aan '= false'. IS NOT TRUE is defensiever tegen
+    //   toekomstige schema-drift (bv. DROP NOT NULL) — voorkomt dat
+    //   productie-klanten stil uitgesloten worden.
+    // - scope='test' → strict '= true'. NULL en false tellen niet als test.
+    //
+    // Fix voor onderweg gevonden gat: tot nu toe was assertRecipientMatches-
+    // Sandbox op r522 de laatste vangnet voor test-runs die in productie-
+    // scope kwamen. Nu worden ze überhaupt niet meer opgehaald.
     let runsQ = supabaseAdmin
       .from('dunning_workflow_runs')
       .select('id, customer_id, paused_by_conversation_id, paused_conversation_reminder_count, paused_conversation_last_reminder_at, updated_at, customers!inner(is_test)')
       .eq('status', 'paused')
       .not('paused_by_conversation_id', 'is', null);
     if (scope === 'test') runsQ = runsQ.eq('customers.is_test', true);
-    else                  runsQ = runsQ.eq('customers.is_test', false);
+    else                  runsQ = runsQ.not('customers.is_test', 'is', true);
     const { data: runs, error: runsErr } = await runsQ
       .order('updated_at', { ascending: true })
       .limit(MAX_RUNS_PER_TICK);
