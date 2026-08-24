@@ -1,0 +1,621 @@
+<title>Dunning Test Cockpit</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --ground:#eef1f6; --surface:#ffffff; --surface-2:#f5f7fb; --surface-3:#eef2f8;
+    --ink:#111726; --ink-soft:#39435a; --muted:#6a7688; --line:#e2e7f0; --line-2:#d3dae6;
+    --accent:#3a5cf0; --accent-2:#7b5cf0; --accent-soft:#e7ecfe;
+    --live:#0ea5a0;
+    --active:#128a5b; --active-bg:#dff3e9;
+    --paused:#a06a00; --paused-bg:#fbeed2;
+    --resumed:#2563d6; --resumed-bg:#e2ecfd;
+    --blocked:#c23b32; --blocked-bg:#f9e4e2;
+    --done:#5f6b7d; --done-bg:#e9edf3;
+    --shadow:0 1px 2px rgba(16,24,40,.06), 0 10px 30px -14px rgba(16,24,40,.25);
+    --wa:#1f9d55; --wa-bg:#e4f6ec;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --ground:#080b12; --surface:#111726; --surface-2:#161d2e; --surface-3:#1c2437;
+    --ink:#eef2fb; --ink-soft:#c3ccdd; --muted:#8592a8; --line:#232c40; --line-2:#2e3950;
+    --accent:#6d8cff; --accent-2:#a78bff; --accent-soft:#1a2138;
+    --live:#3ddcd2;
+    --active:#37d98f; --active-bg:#122a20;
+    --paused:#f2b23f; --paused-bg:#2c2413;
+    --resumed:#63b0ff; --resumed-bg:#12233c;
+    --blocked:#ff6f66; --blocked-bg:#2e1817;
+    --done:#8592a8; --done-bg:#1b2233;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 14px 38px -16px rgba(0,0,0,.7);
+    --wa:#34d77e; --wa-bg:#122a1e;
+  }}
+  :root[data-theme="dark"]{
+    --ground:#080b12; --surface:#111726; --surface-2:#161d2e; --surface-3:#1c2437;
+    --ink:#eef2fb; --ink-soft:#c3ccdd; --muted:#8592a8; --line:#232c40; --line-2:#2e3950;
+    --accent:#6d8cff; --accent-2:#a78bff; --accent-soft:#1a2138;
+    --live:#3ddcd2;
+    --active:#37d98f; --active-bg:#122a20;
+    --paused:#f2b23f; --paused-bg:#2c2413;
+    --resumed:#63b0ff; --resumed-bg:#12233c;
+    --blocked:#ff6f66; --blocked-bg:#2e1817;
+    --done:#8592a8; --done-bg:#1b2233;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 14px 38px -16px rgba(0,0,0,.7);
+    --wa:#34d77e; --wa-bg:#122a1e;
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:"Inter",system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1160px;margin:0 auto;padding:clamp(1rem,3vw,2rem) clamp(.9rem,3vw,1.8rem) 4rem}
+  h1,h2,h3{font-family:"Bricolage Grotesque","Inter",sans-serif;font-weight:600;letter-spacing:-.01em;margin:0;line-height:1.1}
+  .mono{font-family:"JetBrains Mono",monospace}
+  code{font-family:"JetBrains Mono",monospace;font-size:.85em;background:var(--surface-3);border:1px solid var(--line);padding:.05em .35em;border-radius:5px;color:var(--ink-soft)}
+
+  .bar{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.4rem}
+  .brand{display:flex;align-items:center;gap:.7rem}
+  .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:grid;place-items:center;font-size:1.15rem}
+  .brand h1{font-size:1.22rem;font-weight:700}
+  .brand .sub{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .bar-right{margin-left:auto;display:flex;align-items:center;gap:.6rem}
+  .env{font-family:"JetBrains Mono",monospace;font-size:.66rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);padding:.34rem .6rem;border-radius:20px}
+  .live{display:inline-flex;align-items:center;gap:.45rem;font-family:"JetBrains Mono",monospace;font-size:.68rem;font-weight:600;letter-spacing:.08em;color:var(--live)}
+  .live .beacon{width:8px;height:8px;border-radius:50%;background:var(--live);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--live) 65%,transparent)}70%{box-shadow:0 0 0 9px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  .toggle{font-family:"JetBrains Mono",monospace;font-size:.68rem;background:var(--surface);border:1px solid var(--line-2);color:var(--ink-soft);padding:.4rem .65rem;border-radius:8px;cursor:pointer}
+  .toggle:hover{border-color:var(--accent);color:var(--accent)}
+  .toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .hero{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:1.2rem 1.3rem;box-shadow:var(--shadow);display:grid;grid-template-columns:1.4fr 1fr;gap:1.3rem;margin-bottom:1rem;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;inset:0;background:radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 55%);pointer-events:none}
+  @media(max-width:720px){.hero{grid-template-columns:1fr}}
+  .persona{display:flex;gap:1rem;align-items:flex-start}
+  .avatar{width:52px;height:52px;border-radius:14px;flex-shrink:0;background:linear-gradient(135deg,var(--accent-2),var(--accent));display:grid;place-items:center;color:#fff;font-family:"Bricolage Grotesque";font-weight:700;font-size:1.3rem}
+  .persona h2{font-size:1.28rem;font-weight:700}
+  .persona .meta{font-family:"JetBrains Mono",monospace;font-size:.72rem;color:var(--muted);margin-top:.2rem}
+  .persona .meta b{color:var(--ink-soft);font-weight:600}
+  .statusline{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem;align-items:center}
+  .pill{font-family:"JetBrains Mono",monospace;font-size:.7rem;font-weight:600;padding:.32rem .6rem;border-radius:20px;display:inline-flex;align-items:center;gap:.4rem;transition:all .4s ease}
+  .pill .d{width:7px;height:7px;border-radius:50%;background:currentColor}
+  .pill.active{color:var(--active);background:var(--active-bg)}
+  .pill.paused{color:var(--paused);background:var(--paused-bg)}
+  .pill.resumed{color:var(--resumed);background:var(--resumed-bg)}
+  .pill.done{color:var(--done);background:var(--done-bg)}
+  .pill.blocked{color:var(--blocked);background:var(--blocked-bg)}
+  .situation{border-left:1px solid var(--line);padding-left:1.3rem}
+  @media(max-width:720px){.situation{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:1rem}}
+  .situation h3{font-size:.7rem;font-family:"JetBrains Mono",monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:.6rem}
+  .invoices{display:flex;flex-direction:column;gap:.4rem}
+  .inv{display:flex;justify-content:space-between;align-items:center;font-family:"JetBrains Mono",monospace;font-size:.8rem;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:.4rem .6rem}
+  .inv .amt{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+  .inv .st{font-size:.66rem;color:var(--paused)}
+  .totrow{display:flex;justify-content:space-between;margin-top:.5rem;font-family:"JetBrains Mono",monospace;font-size:.82rem}
+  .totrow b{color:var(--ink);font-variant-numeric:tabular-nums}
+
+  /* scenario library */
+  .section-lbl{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 .7rem}
+  .scards{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.6rem}
+  .scard{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:.75rem .85rem;cursor:pointer;transition:all .16s ease;box-shadow:var(--shadow);font-family:inherit}
+  .scard:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .scard.sel{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 32%,transparent),var(--shadow)}
+  .scard:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .scard .si{font-size:1.12rem}
+  .scard .st{font-weight:600;font-size:.86rem;margin:.3rem 0 .15rem;color:var(--ink)}
+  .scard .sd{font-size:.72rem;color:var(--muted);line-height:1.35}
+  .active-banner{display:flex;gap:.85rem;align-items:center;background:linear-gradient(120deg,var(--accent-soft),transparent);border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);border-radius:12px;padding:.8rem 1rem;margin:1rem 0}
+  .active-banner .ab-ic{font-size:1.5rem;line-height:1}
+  .active-banner .ab-t{font-weight:700;font-size:.98rem;font-family:"Bricolage Grotesque",sans-serif}
+  .active-banner .ab-x{font-size:.76rem;color:var(--ink-soft);margin-top:.1rem}
+  .active-banner .ab-x b{color:var(--ink)}
+
+  .ladder{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1.1rem 1.4rem;box-shadow:var(--shadow);margin:1rem 0}
+  .ladder .lbl{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:1rem}
+  .track{display:flex;align-items:flex-start;position:relative}
+  .track::before{content:"";position:absolute;top:7px;left:4%;right:4%;height:2px;background:var(--line-2)}
+  .track .fill{position:absolute;top:7px;left:4%;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent-2));width:0;transition:width .6s cubic-bezier(.5,0,.2,1)}
+  .step{flex:1;text-align:center;position:relative;z-index:1}
+  .step .node{width:16px;height:16px;border-radius:50%;background:var(--surface);border:2px solid var(--line-2);margin:0 auto;transition:all .4s ease}
+  .step.done .node{background:var(--accent);border-color:var(--accent)}
+  .step.cur .node{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 22%,transparent);transform:scale(1.15)}
+  .step .d{font-family:"JetBrains Mono",monospace;font-weight:600;font-size:.74rem;margin-top:.5rem;color:var(--ink)}
+  .step .w{font-size:.64rem;color:var(--muted)}
+  .step.cur .d{color:var(--accent)}
+
+  .controls{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1rem 1.1rem;box-shadow:var(--shadow);margin-bottom:1rem}
+  .controls .lbl{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem}
+  .btns{display:flex;flex-wrap:wrap;gap:.55rem}
+  button.ctl{font-family:"Inter",sans-serif;font-size:.82rem;font-weight:600;cursor:pointer;border-radius:10px;padding:.55rem .85rem;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink);display:inline-flex;align-items:center;gap:.45rem;transition:all .16s ease}
+  button.ctl:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+  button.ctl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.ctl .ic{font-size:.9rem}
+  button.play{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;border:none;box-shadow:0 8px 20px -8px color-mix(in srgb,var(--accent) 70%,transparent)}
+  button.play:hover{color:#fff;filter:brightness(1.06)}
+  button.ghost{background:transparent}
+  .sep{width:1px;align-self:stretch;background:var(--line);margin:0 .2rem}
+
+  .builder{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1rem 1.1rem;box-shadow:var(--shadow);margin-bottom:1rem}
+  .builder .lbl{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem}
+  .palette{display:flex;flex-direction:column;gap:.5rem;margin-bottom:.9rem}
+  .pgroup{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center}
+  .pgroup .gl{font-family:"JetBrains Mono",monospace;font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);width:74px;flex-shrink:0}
+  button.blk{font-size:.75rem;font-weight:600;cursor:pointer;border-radius:8px;padding:.38rem .58rem;border:1px dashed var(--line-2);background:var(--surface-2);color:var(--ink-soft);font-family:inherit;transition:all .14s}
+  button.blk:hover{border-color:var(--accent);color:var(--accent);border-style:solid}
+  .canvas{border:1px dashed var(--line-2);border-radius:10px;padding:.7rem;min-height:50px;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;background:var(--surface-2)}
+  .canvas .ph{color:var(--muted);font-size:.78rem;font-style:italic}
+  .cstep{display:inline-flex;align-items:center;gap:.45rem;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:.28rem .3rem .28rem .6rem;font-size:.73rem;font-family:"JetBrains Mono",monospace}
+  .cstep .num{color:var(--accent);font-weight:700}
+  .cstep button{border:none;background:none;color:var(--muted);cursor:pointer;font-size:.85rem;line-height:1;padding:0 .15rem}
+  .cstep button:hover{color:var(--blocked)}
+  .builder-actions{display:flex;gap:.5rem;margin-top:.85rem;flex-wrap:wrap}
+  .nl{display:flex;gap:.5rem;margin-bottom:.7rem;flex-wrap:wrap}
+  .nl input{flex:1;min-width:240px;font-family:inherit;font-size:.85rem;padding:.6rem .8rem;border-radius:10px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink)}
+  .nl input::placeholder{color:var(--muted)}
+  .nl input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  .nl-hint{font-size:.72rem;color:var(--muted);margin:0 0 .9rem;font-family:"JetBrains Mono",monospace;min-height:1em;line-height:1.4}
+  .nl-hint b{color:var(--accent)}
+
+  .setup{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1rem 1.1rem;box-shadow:var(--shadow);margin-bottom:1rem}
+  .setup .lbl{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:.9rem}
+  .setup-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem;margin-bottom:1rem}
+  .setup-grid label{display:flex;flex-direction:column;gap:.3rem;font-family:"JetBrains Mono",monospace;font-size:.62rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+  .setup-grid input,.setup-grid select{font-family:"Inter",sans-serif;font-size:.85rem;padding:.5rem .6rem;border-radius:9px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink)}
+  .setup-grid input:focus,.setup-grid select:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  .inv-head{display:flex;justify-content:space-between;align-items:center;font-family:"JetBrains Mono",monospace;font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.5rem;gap:.5rem;flex-wrap:wrap}
+  .presets{display:flex;gap:.35rem}
+  .inv-editor{display:flex;flex-direction:column;gap:.45rem}
+  .inv-row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+  .inv-row .pre{font-family:"JetBrains Mono",monospace;font-size:.78rem;color:var(--muted);width:52px}
+  .inv-row input{width:110px;font-family:"Inter",sans-serif;font-size:.82rem;padding:.42rem .55rem;border-radius:8px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink)}
+  .inv-row input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .inv-row .lbltiny{font-size:.68rem;color:var(--muted)}
+  .inv-row button{border:none;background:none;color:var(--muted);cursor:pointer;font-size:1rem;margin-left:auto;padding:0 .2rem}
+  .inv-row button:hover{color:var(--blocked)}
+  .setup-actions{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-top:1rem;flex-wrap:wrap}
+  .su-total{font-family:"JetBrains Mono",monospace;font-weight:600;font-size:.9rem;color:var(--ink)}
+
+  .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:1rem}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}
+  .panel-h{display:flex;align-items:center;gap:.55rem;padding:.85rem 1.1rem;border-bottom:1px solid var(--line)}
+  .panel-h h3{font-size:.95rem}
+  .panel-h .count{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:.7rem;color:var(--muted)}
+  .panel-b{padding:.8rem 1.1rem 1.1rem;overflow-y:auto;max-height:460px}
+
+  .tl{list-style:none;margin:0;padding:0;position:relative}
+  .tl::before{content:"";position:absolute;left:9px;top:4px;bottom:4px;width:2px;background:var(--line)}
+  .tl li{position:relative;padding:0 0 .95rem 1.9rem;animation:slidein .45s cubic-bezier(.2,.7,.3,1) both}
+  @keyframes slidein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .tl li:last-child{padding-bottom:.2rem}
+  .tl .dot{position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:var(--surface);border:2px solid var(--accent);z-index:1}
+  .tl li[data-k="in"] .dot{border-color:var(--resumed)}
+  .tl li[data-k="pause"] .dot{border-color:var(--paused)}
+  .tl li[data-k="resume"] .dot{border-color:var(--active)}
+  .tl li[data-k="sys"] .dot{border-color:var(--muted)}
+  .tl li[data-k="done"] .dot{border-color:var(--done)}
+  .tl li[data-k="doc"] .dot{border-color:var(--blocked)}
+  .tl .t{font-family:"JetBrains Mono",monospace;font-size:.66rem;color:var(--muted)}
+  .tl .h{font-size:.86rem;font-weight:600;margin:.1rem 0}
+  .tl .x{font-size:.78rem;color:var(--ink-soft)}
+  .tag{font-family:"JetBrains Mono",monospace;font-size:.6rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;padding:.14rem .4rem;border-radius:5px;margin-left:.35rem;vertical-align:middle}
+  .tag.send{color:var(--accent);background:var(--accent-soft)}
+  .tag.in{color:var(--resumed);background:var(--resumed-bg)}
+  .tag.pause{color:var(--paused);background:var(--paused-bg)}
+  .tag.resume{color:var(--active);background:var(--active-bg)}
+  .empty{color:var(--muted);font-size:.82rem;text-align:center;padding:2rem 0;font-style:italic}
+
+  .msgs{display:flex;flex-direction:column;gap:.7rem}
+  .msg{max-width:88%;animation:pop .4s cubic-bezier(.2,.7,.3,1) both}
+  @keyframes pop{from{opacity:0;transform:scale(.96) translateY(4px)}to{opacity:1;transform:none}}
+  .msg .cap{font-family:"JetBrains Mono",monospace;font-size:.6rem;color:var(--muted);margin-bottom:.2rem;display:flex;align-items:center;gap:.35rem}
+  .bubble{padding:.6rem .8rem;border-radius:12px;font-size:.82rem;line-height:1.45}
+  .msg.out{align-self:flex-start}
+  .msg.out .bubble{background:var(--surface-3);border:1px solid var(--line);border-top-left-radius:4px}
+  .msg.wa{align-self:flex-end}.msg.wa .cap{justify-content:flex-end}
+  .msg.wa .bubble{background:var(--wa-bg);border:1px solid color-mix(in srgb,var(--wa) 30%,transparent);border-top-right-radius:4px;color:var(--ink)}
+  .msg.in{align-self:flex-end}.msg.in .cap{justify-content:flex-end}
+  .msg.in .bubble{background:var(--resumed-bg);border:1px solid color-mix(in srgb,var(--resumed) 30%,transparent);border-top-right-radius:4px}
+  .msg.email{align-self:flex-start;max-width:94%}
+  .msg.email .bubble{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:0;overflow:hidden}
+  .msg.email .eh{padding:.45rem .7rem;border-bottom:1px solid var(--line);font-family:"JetBrains Mono",monospace;font-size:.62rem;color:var(--muted)}
+  .msg.email .esub{padding:.5rem .7rem .15rem;font-weight:600;font-size:.82rem;color:var(--ink)}
+  .msg.email .ebody{padding:0 .7rem .6rem;font-size:.79rem;color:var(--ink-soft)}
+  .msg.doc{align-self:flex-start;max-width:94%}
+  .msg.doc .bubble{background:linear-gradient(135deg,var(--blocked-bg),var(--surface-2));border:1px solid color-mix(in srgb,var(--blocked) 30%,transparent);display:flex;gap:.75rem;align-items:center}
+  .msg.doc .pdf{width:34px;height:42px;border-radius:5px;background:var(--surface);border:1px solid var(--line-2);display:grid;place-items:center;font-family:"JetBrains Mono",monospace;font-size:.52rem;font-weight:700;color:var(--blocked);flex-shrink:0}
+  .msg.doc .dt{font-weight:600;font-size:.84rem;color:var(--ink)}
+  .msg.doc .dm{font-family:"JetBrains Mono",monospace;font-size:.63rem;color:var(--muted);margin-top:.15rem}
+  .sent-to{font-family:"JetBrains Mono",monospace;font-size:.58rem;color:var(--live);margin-top:.2rem;display:flex;align-items:center;gap:.3rem}
+  .msg.wa .sent-to,.msg.in .sent-to{justify-content:flex-end}
+
+  .cov{margin-top:1.4rem;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1.1rem 1.3rem;box-shadow:var(--shadow)}
+  .cov h3{font-size:.82rem;font-family:"JetBrains Mono",monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:.8rem}
+  .chips{display:flex;flex-wrap:wrap;gap:.5rem}
+  .chip{font-size:.76rem;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:.4rem .7rem;color:var(--ink-soft);display:inline-flex;align-items:center;gap:.4rem}
+  .chip .k{width:7px;height:7px;border-radius:50%;background:var(--active)}
+  .note{margin-top:1.3rem;font-size:.8rem;color:var(--muted);text-align:center;font-family:"JetBrains Mono",monospace}
+  @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+</style>
+
+<div class="wrap">
+  <div class="bar">
+    <div class="brand">
+      <div class="logo">🧪</div>
+      <div><h1>Dunning Test Cockpit</h1><div class="sub">Wanbetalersmodule · prototype</div></div>
+    </div>
+    <div class="bar-right">
+      <span class="env">● Sandbox</span>
+      <span class="live"><span class="beacon"></span>LIVE</span>
+      <button class="toggle" id="themeToggle" type="button">◐ thema</button>
+    </div>
+  </div>
+
+  <div class="hero">
+    <div class="persona">
+      <div class="avatar" id="pAvatar">TK</div>
+      <div>
+        <h2 id="pName">Test Klant</h2>
+        <div class="meta" id="pMeta">📱 <b>+31 6 •• test</b> · ✉️ <b>test@deforex…</b></div>
+        <div class="statusline">
+          <span class="pill active" id="statusPill"><span class="d"></span><span id="statusText">RUN ACTIEF</span></span>
+          <span class="pill" id="dayPill" style="background:var(--surface-2);color:var(--muted)"><span id="dayText">ladderstap: dag 7</span></span>
+          <span class="pill" id="guardChip">✓ guard: vrij</span>
+        </div>
+      </div>
+    </div>
+    <div class="situation">
+      <h3>Situatie</h3>
+      <div class="invoices" id="pInvoices"></div>
+      <div class="totrow"><span id="pInvCount">3 facturen open</span><b id="pInvTotal">€2.400,00</b></div>
+    </div>
+  </div>
+
+  <div class="setup">
+    <div class="lbl">1 · Testklant &amp; facturen aanmaken</div>
+    <div class="setup-grid">
+      <label>Naam<input id="suName" type="text" value="Test Klant"></label>
+      <label>Test-telefoon<input id="suPhone" type="text" value="+31 6 •• test"></label>
+      <label>Test-e-mail<input id="suEmail" type="text" value="test@deforex…"></label>
+      <label>Start op ladderstap<select id="suDay"><option value="7">dag 7</option><option value="14">dag 14</option><option value="21">dag 21</option><option value="28">dag 28</option></select></label>
+    </div>
+    <div class="inv-head"><span>Facturen</span><span class="presets"><button class="blk" type="button" data-preset="1">1 factuur</button><button class="blk" type="button" data-preset="3">3 facturen</button><button class="blk" type="button" id="addInv">+ Factuur</button></span></div>
+    <div class="inv-editor" id="invEditor"></div>
+    <div class="setup-actions">
+      <div class="su-total" id="suTotal">Totaal: €2.400,00</div>
+      <button class="ctl play" id="makeCustomer" type="button"><span class="ic">👤</span> Maak testklant aan</button>
+    </div>
+  </div>
+
+  <p class="section-lbl">2 · Kies een scenario</p>
+  <div class="scards" id="scards"></div>
+  <div class="active-banner" id="banner" hidden></div>
+
+  <div class="ladder">
+    <div class="lbl">De ladder · dag 7 → 37</div>
+    <div class="track" id="track">
+      <div class="fill" id="fill"></div>
+      <div class="step cur" data-day="7"><div class="node"></div><div class="d">dag 7</div><div class="w">1e herinnering</div></div>
+      <div class="step" data-day="14"><div class="node"></div><div class="d">dag 14</div><div class="w">aanmaning</div></div>
+      <div class="step" data-day="21"><div class="node"></div><div class="d">dag 21</div><div class="w">2e aanmaning</div></div>
+      <div class="step" data-day="28"><div class="node"></div><div class="d">dag 28</div><div class="w">WIK-brief</div></div>
+      <div class="step" data-day="37"><div class="node"></div><div class="d">dag 37</div><div class="w">incasso</div></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="lbl">3 · Besturing</div>
+    <div class="btns">
+      <button class="ctl play" id="playBtn"><span class="ic">▶</span> Speel af</button>
+      <button class="ctl" data-act="step"><span class="ic">⏭</span> Volgende stap</button>
+      <span class="sep"></span>
+      <button class="ctl" data-act="engine"><span class="ic">⚙</span> Engine</button>
+      <button class="ctl" data-act="promise"><span class="ic">🤝</span> Promise-maturity</button>
+      <button class="ctl" data-act="convless"><span class="ic">📨</span> Conv-less-resume</button>
+      <button class="ctl" data-act="wik"><span class="ic">📄</span> WIK-brief</button>
+      <span class="sep"></span>
+      <button class="ctl ghost" data-act="reset"><span class="ic">↺</span> Reset</button>
+    </div>
+  </div>
+
+  <div class="builder">
+    <div class="lbl">4 · Bouw je eigen scenario</div>
+    <div class="nl">
+      <input id="nlInput" type="text" placeholder="Typ wat je wilt testen, bijv. “klant belooft over 3 dagen maar betaalt niet, en er ligt een beltaak”">
+      <button class="ctl play" id="nlGen"><span class="ic">✨</span> Genereer scenario</button>
+    </div>
+    <div class="nl-hint" id="nlHint">Beschrijf een situatie in je eigen woorden — de cockpit zet de stappen voor je klaar. Daarna kun je nog schaven.</div>
+    <div class="palette" id="palette"></div>
+    <div class="canvas" id="canvas"><span class="ph">Klik blokken hierboven om je eigen scenario samen te stellen…</span></div>
+    <div class="builder-actions">
+      <button class="ctl play" id="playCustom"><span class="ic">▶</span> Speel mijn scenario af</button>
+      <button class="ctl" id="stepCustom"><span class="ic">⏭</span> Volgende stap</button>
+      <button class="ctl ghost" id="clearCustom"><span class="ic">✕</span> Wis</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div class="panel-h"><span>🕓</span><h3>Live tijdlijn</h3><span class="count" id="tlCount">0 gebeurtenissen</span></div>
+      <div class="panel-b"><ul class="tl" id="tl"></ul></div>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><span>📩</span><h3>Berichten</h3><span class="count">afgevangen + verstuurd</span></div>
+      <div class="panel-b"><div class="msgs" id="msgs"></div></div>
+    </div>
+  </div>
+
+  <div class="cov">
+    <h3>Wat deze omgeving test</h3>
+    <div class="chips">
+      <span class="chip"><span class="k"></span>Persona's: 1 / 3 / N facturen</span>
+      <span class="chip"><span class="k"></span>Hele ladder dag 7→37</span>
+      <span class="chip"><span class="k"></span>WhatsApp- & e-mail-reply</span>
+      <span class="chip"><span class="k"></span>Belofte: nagekomen & gebroken</span>
+      <span class="chip"><span class="k"></span>Pauze & hervat</span>
+      <span class="chip"><span class="k"></span>Conv-less-resume</span>
+      <span class="chip"><span class="k"></span>Betalingsregeling</span>
+      <span class="chip"><span class="k"></span>WIK-brief + incasso</span>
+      <span class="chip"><span class="k"></span>Echte verzending → testnummer</span>
+    </div>
+  </div>
+
+  <div class="note">Prototype — de knoppen tonen de bedoelde interactie. De agent bouwt hierop de echte, aan de module gekoppelde versie.</div>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  document.getElementById('themeToggle').addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    if(!cur){cur=(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light';}
+    root.setAttribute('data-theme',cur==='dark'?'light':'dark');
+  });
+
+  var tl=document.getElementById('tl'), msgs=document.getElementById('msgs'),
+      tlCount=document.getElementById('tlCount'), statusPill=document.getElementById('statusPill'),
+      dayText=document.getElementById('dayText'), fill=document.getElementById('fill'),
+      steps=[].slice.call(document.querySelectorAll('.step')),
+      scards=document.getElementById('scards'), banner=document.getElementById('banner');
+  var n=0, clock=7*60+10, curDay=7, testPhone='+31 6 •• test', testEmail='test@deforex…', reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  var dayPct={7:4,14:28,21:52,28:76,37:96}, tlEmpty=null, msgEmpty=null;
+
+  function stamp(){var h=Math.floor(clock/60),m=clock%60;clock+=Math.floor(Math.random()*4)+2;return ('0'+h).slice(-2)+':'+('0'+m).slice(-2);}
+  function setStatus(cls,txt){statusPill.className='pill '+cls;statusPill.innerHTML='<span class="d"></span>'+txt;}
+  function setDay(d){curDay=d;dayText.textContent='ladderstap: dag '+d;fill.style.width=(dayPct[d]-4)+'%';
+    steps.forEach(function(s){var sd=+s.getAttribute('data-day');s.classList.remove('cur','done');if(sd<d)s.classList.add('done');if(sd===d)s.classList.add('cur');});}
+  function ev(k,h,x,tag){if(tlEmpty){tlEmpty.remove();tlEmpty=null;}
+    var li=document.createElement('li');li.setAttribute('data-k',k);
+    li.innerHTML='<span class="dot"></span><div class="t">'+stamp()+'</div><div class="h">'+h+(tag?'<span class="tag '+tag[0]+'">'+tag[1]+'</span>':'')+'</div>'+(x?'<div class="x">'+x+'</div>':'');
+    tl.appendChild(li);n++;tlCount.textContent=n+' gebeurtenis'+(n===1?'':'sen');li.scrollIntoView({block:'nearest',behavior:reduce?'auto':'smooth'});}
+  function clr(){if(msgEmpty){msgEmpty.remove();msgEmpty=null;}}
+  function msg(kind,cap,text,sent){clr();var d=document.createElement('div');d.className='msg '+kind;
+    d.innerHTML='<div class="cap">'+cap+'</div><div class="bubble">'+text+'</div>'+(sent?'<div class="sent-to">✓ echt verstuurd → '+testPhone+'</div>':'');
+    msgs.appendChild(d);d.scrollIntoView({block:'nearest',behavior:reduce?'auto':'smooth'});}
+  function email(subject,body){clr();var d=document.createElement('div');d.className='msg email';
+    d.innerHTML='<div class="cap">✉️ E-mail · uitgaand</div><div class="bubble"><div class="eh">aan: '+testEmail+'</div><div class="esub">'+subject+'</div><div class="ebody">'+body+'</div></div><div class="sent-to">✓ echt verstuurd → '+testEmail+'</div>';
+    msgs.appendChild(d);d.scrollIntoView({block:'nearest',behavior:reduce?'auto':'smooth'});}
+  function doc(title,meta){clr();var d=document.createElement('div');d.className='msg doc';
+    d.innerHTML='<div class="cap">📄 Document automatisch gegenereerd</div><div class="bubble"><div class="pdf">PDF</div><div><div class="dt">'+title+'</div><div class="dm">'+meta+'</div></div></div><div class="sent-to">✓ verstuurd per e-mail + aangetekend → '+testEmail+'</div>';
+    msgs.appendChild(d);d.scrollIntoView({block:'nearest',behavior:reduce?'auto':'smooth'});}
+
+  var scenarios={
+    'happy':{icon:'✅',title:'Betaalt na 1e herinnering',test:'klant betaalt direct na dag 7',expect:'run afgerond (paid)',steps:[
+      function(){setDay(7);setStatus('active','RUN ACTIEF');ev('send','Dag 7 · 1e herinnering (WhatsApp)',null,['send','whatsapp']);msg('wa','WhatsApp · uitgaand','Beste, 3 openstaande facturen (€2.400). Kun je die deze week voldoen?',true);},
+      function(){ev('in','Klant reageert','“Oeps, vergeten — ik betaal nu meteen!”',['in','inbound']);msg('in','WhatsApp · inkomend','Oeps, vergeten — ik betaal nu meteen!');},
+      function(){ev('resume','Betaling ontvangen','€2.400 voldaan → 0 open facturen.');},
+      function(){setStatus('done','AFGEROND');ev('done','✅ Run afgerond (paid)','Happy path: betaald na de eerste herinnering.');}
+    ]},
+    'promise-kept':{icon:'🤝',title:'Belofte — nagekomen',test:'belooft over 3 dagen, en betaalt',expect:'belofte → nagekomen → afgerond',steps:[
+      function(){setDay(7);setStatus('active','RUN ACTIEF');ev('send','Dag 7 · 1e herinnering (WhatsApp)',null,['send','whatsapp']);msg('wa','WhatsApp · uitgaand','Beste, €2.400 staat open. Kun je die deze week voldoen?',true);},
+      function(){ev('in','Klant reageert','“Ik betaal binnen 3 dagen.”',['in','inbound']);msg('in','WhatsApp · inkomend','Ik betaal binnen 3 dagen.');},
+      function(){setStatus('paused','GEPAUZEERD');ev('pause','Betalingsbelofte vastgelegd','promised_date_hint = +3 dagen · run gepauzeerd, geen aanmaning.',['pause','belofte']);},
+      function(){ev('sys','+3 dagen · promise-maturity draait','Controle: staat de factuur nog open?');},
+      function(){ev('resume','Betaald binnen de termijn','0 open facturen → belofte NAGEKOMEN.',['resume','nagekomen']);},
+      function(){setStatus('done','AFGEROND');ev('done','✅ Run afgerond','Taak gesloten, geen aanmaning gestuurd.');}
+    ]},
+    'promise-broken':{icon:'⛔',title:'Belofte — gebroken',test:'belooft over 3 dagen, betaalt NIET',expect:'belofte verlopen → mens-taak, flow loopt door',steps:[
+      function(){setDay(7);setStatus('active','RUN ACTIEF');ev('send','Dag 7 · 1e herinnering (WhatsApp)',null,['send','whatsapp']);msg('wa','WhatsApp · uitgaand','Beste, €2.400 staat open. Kun je die deze week voldoen?',true);},
+      function(){ev('in','Klant reageert','“Ik betaal binnen 3 dagen.”',['in','inbound']);msg('in','WhatsApp · inkomend','Ik betaal binnen 3 dagen.');},
+      function(){setStatus('paused','GEPAUZEERD');ev('pause','Betalingsbelofte vastgelegd','promised_date_hint = +3 dagen · run gepauzeerd.',['pause','belofte']);},
+      function(){ev('sys','+3 dagen (+1 coulance) · promise-maturity draait','Controle: factuur nog open?');},
+      function(){ev('pause','Belofte VERLOPEN — nog steeds open','Geen betaling binnen → belofte gebroken.',['pause','verlopen']);},
+      function(){setStatus('active','RUN ACTIEF');ev('resume','Mens-taak aangemaakt + run losgetrokken','human_only: géén automatisch bericht — een mens beslist de volgende stap.',['resume','mens']);},
+      function(){ev('done','✅ Getest','Gebroken belofte belandt niet in een dode hoek: taak sluit, run loopt door, mens in de lus.');}
+    ]},
+    'reply-silence':{icon:'🔇',title:'Reageert, dan stilte',test:'reageert dag 7, wij reageren, klant valt stil',expect:'nudges r1/r2 → automatisch hervat',steps:[
+      function(){setDay(7);setStatus('active','RUN ACTIEF');ev('send','Dag 7 · 1e herinnering (WhatsApp)',null,['send','whatsapp']);msg('wa','WhatsApp · uitgaand','Beste, €2.400 staat open. Kun je die deze week voldoen?',true);},
+      function(){ev('in','Klant reageert','“Sorry! ik kijk er zo naar.”',['in','inbound']);msg('in','WhatsApp · inkomend','Sorry! ik kijk er zo naar.');setStatus('paused','GEPAUZEERD');ev('pause','Run gepauzeerd',null,['pause','pauze']);},
+      function(){ev('sys','Systeem reageert terug',null,['send','verzonden']);msg('wa','WhatsApp · uitgaand','Geen probleem — zullen we een betaaldatum afspreken?',true);},
+      function(){ev('sys','Klant blijft stil… (15-min-cron bewaakt)');},
+      function(){ev('send','Nudge r1',null,['send','r1']);msg('wa','WhatsApp · uitgaand','Hoi, hoor graag nog van je over de betaling.',true);},
+      function(){ev('send','Nudge r2',null,['send','r2']);msg('wa','WhatsApp · uitgaand','Laatste herinnering — anders zetten we de aanmaning voort.',true);},
+      function(){setStatus('resumed','HERVAT');ev('resume','Stilte-drempel bereikt → run hervat','Géén dode hoek.',['resume','hervat']);},
+      function(){setDay(14);setStatus('active','RUN ACTIEF');ev('done','✅ Getest','Ladder loopt door na de stilte.');}
+    ]},
+    'email-reply':{icon:'✉️',title:'Reageert per e-mail',test:'reply via e-mail (pauze zonder conversation-id)',expect:'conv-less-resume pakt ‘m op',steps:[
+      function(){setDay(7);setStatus('active','RUN ACTIEF');ev('send','Dag 7 · herinnering per e-mail',null,['send','e-mail']);email('Openstaande facturen (€2.400)','Beste, uw facturen staan open. Graag deze week voldoen.');},
+      function(){ev('in','Klant antwoordt per e-mail','“Ik neem volgende week contact op.”',['in','inbound']);email('RE: Openstaande facturen','Ik neem volgende week contact op.');},
+      function(){setStatus('paused','GEPAUZEERD');ev('pause','Pauze zonder conversation-id','paused_manual_reason = reply_email · vroeger: dode hoek.',['pause','geen conv-id']);},
+      function(){ev('sys','Klant blijft stil…');},
+      function(){setStatus('resumed','HERVAT');ev('resume','Conv-less-resume sweep pakt ‘m op','Nu wél hervat, gestaffeld — de gedichte dode hoek.',['resume','hervat']);},
+      function(){setDay(14);setStatus('active','RUN ACTIEF');ev('done','✅ Getest','E-mail-reply loopt niet meer vast.');}
+    ]},
+    'no-response':{icon:'📄',title:'Nooit reactie → WIK → incasso',test:'klant reageert nooit, hele ladder',expect:'d7→d37, WIK-brief dag 28, incasso dag 37',steps:[
+      function(){setDay(7);setStatus('active','RUN ACTIEF');ev('send','Dag 7 · 1e herinnering (WhatsApp)',null,['send','whatsapp']);msg('wa','WhatsApp · uitgaand','Beste, €2.400 staat open.',true);},
+      function(){setDay(14);ev('send','Dag 14 · aanmaning (e-mail)',null,['send','e-mail']);email('Herinnering (€2.400)','Uw facturen staan nog open — graag binnen 7 dagen voldoen.');},
+      function(){setDay(21);ev('send','Dag 21 · 2e aanmaning (e-mail)',null,['send','e-mail']);email('Tweede aanmaning','Nog geen betaling ontvangen. Voorkom extra kosten.');},
+      function(){setDay(28);ev('doc','Dag 28 · WIK-brief automatisch aangemaakt','Wettelijke 14-dagenbrief gegenereerd + verstuurd.',['send','WIK']);doc('WIK-brief — 14-dagenbrief','€2.400,00 · incassokosten aangekondigd · 14 dagen termijn');},
+      function(){setDay(37);setStatus('blocked','INCASSO');ev('done','Dag 37 · overdracht naar incasso','Geen reactie op de hele ladder → escalatie.',['pause','incasso']);}
+    ]},
+    'arrangement':{icon:'📆',title:'Betalingsregeling',test:'klant vraagt termijnen, akkoord',expect:'run gepauzeerd op regeling, termijnen',steps:[
+      function(){setDay(7);setStatus('active','RUN ACTIEF');ev('send','Dag 7 · 1e herinnering (WhatsApp)',null,['send','whatsapp']);msg('wa','WhatsApp · uitgaand','Beste, €2.400 staat open.',true);},
+      function(){ev('in','Klant reageert','“Kan ik in termijnen betalen?”',['in','inbound']);msg('in','WhatsApp · inkomend','Kan ik in termijnen betalen?');},
+      function(){ev('sys','Regeling voorgesteld & geaccepteerd',null,['send','verzonden']);msg('wa','WhatsApp · uitgaand','Zeker — 3 termijnen van €800. Akkoord?',true);},
+      function(){setStatus('paused','GEPAUZEERD');ev('pause','Run gepauzeerd op regeling','paused_by_arrangement_id · geen aanmaningen zolang de regeling loopt.',['pause','regeling']);},
+      function(){ev('resume','Termijn 1 van 3 betaald','€800 · saldo €1.600.',['resume','termijn']);},
+      function(){ev('done','✅ Getest','Regeling houdt de aanmaan-ladder correct gepauzeerd.');}
+    ]}
+  };
+  var order=['happy','promise-kept','promise-broken','reply-silence','email-reply','no-response','arrangement'];
+  var current=null, idx=0, playing=false;
+
+  order.forEach(function(id){var s=scenarios[id];var b=document.createElement('button');b.className='scard';b.type='button';b.setAttribute('data-id',id);
+    b.innerHTML='<div class="si">'+s.icon+'</div><div class="st">'+s.title+'</div><div class="sd">'+s.test+'</div>';
+    b.addEventListener('click',function(){selectScenario(id);});scards.appendChild(b);});
+
+  function selectScenario(id){current=id;idx=0;playing=false;var s=scenarios[id];
+    [].forEach.call(scards.children,function(c){c.classList.toggle('sel',c.getAttribute('data-id')===id);});
+    banner.hidden=false;
+    banner.innerHTML='<div class="ab-ic">'+s.icon+'</div><div><div class="ab-t">Actief: '+s.title+'</div><div class="ab-x">Test: <b>'+s.test+'</b> &nbsp;·&nbsp; Verwacht: <b>'+s.expect+'</b></div></div>';
+    clearBoards(true);clearTasks();}
+
+  function clearBoards(soft){tl.innerHTML='';msgs.innerHTML='';n=0;clock=7*60+10;tlCount.textContent='0 gebeurtenissen';setStatus('active','RUN ACTIEF');setDay(7);
+    var e=document.createElement('div');e.className='empty';e.textContent=soft?'Druk op “Speel af” of stap met “Volgende stap”.':'Kies een scenario hierboven om te beginnen.';tl.appendChild(e);tlEmpty=e;
+    var m=document.createElement('div');m.className='empty';m.textContent='Verstuurde en ontvangen berichten verschijnen hier.';msgs.appendChild(m);msgEmpty=m;}
+
+  function playStep(){if(!current){selectScenario(order[0]);return;}var s=scenarios[current];if(idx>=s.steps.length)return;s.steps[idx]();idx++;}
+  function play(){if(!current)selectScenario(order[0]);clearBoards(true);idx=0;if(playing)return;playing=true;
+    (function nx(){if(!playing)return;if(idx>=scenarios[current].steps.length){playing=false;return;}scenarios[current].steps[idx]();idx++;setTimeout(nx,reduce?60:1050);})();}
+
+  document.getElementById('playBtn').addEventListener('click',play);
+  var acts={
+    engine:function(){ev('send','Engine getriggerd','advanceActiveRuns — betaal-check → volgende stap.',['send','engine']);},
+    promise:function(){ev('sys','Promise-maturity gedraaid','Vervallen beloftes gerijpt: afgerond / naar mens.');},
+    convless:function(){ev('resume','Conv-less-resume gedraaid','Conv-loze pauzes hervat (gestaffeld).',['resume','hervat']);},
+    wik:function(){setDay(28);setStatus('active','RUN ACTIEF');ev('doc','WIK-brief automatisch aangemaakt','Wettelijke 14-dagenbrief gegenereerd + verstuurd (e-mail + aangetekend).',['send','WIK']);doc('WIK-brief — 14-dagenbrief','€2.400,00 · incassokosten aangekondigd · 14 dagen termijn');},
+    step:function(){playStep();},
+    reset:function(){current=null;playing=false;idx=0;banner.hidden=true;[].forEach.call(scards.children,function(c){c.classList.remove('sel');});clearBoards(false);clearTasks();}
+  };
+  document.querySelectorAll('button.ctl[data-act]').forEach(function(b){b.addEventListener('click',function(){acts[b.getAttribute('data-act')]();});});
+
+  // ---- guard + task model ----
+  var guardChip=document.getElementById('guardChip'), tasks=[];
+  function updateGuard(){var blk=tasks.filter(function(t){return t.blocking;});
+    if(blk.length){guardChip.textContent='⛔ guard: geblokkeerd — '+blk.map(function(t){return t.label;}).join(', ');guardChip.style.background='var(--blocked-bg)';guardChip.style.color='var(--blocked)';}
+    else if(tasks.length){guardChip.textContent='🔔 open taak: '+tasks.map(function(t){return t.label;}).join(', ')+' (loopt door)';guardChip.style.background='var(--paused-bg)';guardChip.style.color='var(--paused)';}
+    else{guardChip.textContent='✓ guard: vrij';guardChip.style.background='var(--active-bg)';guardChip.style.color='var(--active)';}}
+  function addTask(label,blocking){tasks.push({label:label,blocking:blocking});updateGuard();}
+  function clearTasks(){tasks=[];updateGuard();}
+  function anyBlocking(){return tasks.filter(function(t){return t.blocking;});}
+  function sendOrBlock(kind,cap,text,evh){var b=anyBlocking();
+    if(b.length){ev('pause','Aanmaning TEGENGEHOUDEN','Open blokkerende taak ('+b.map(function(t){return t.label;}).join(', ')+') → de guard houdt de aanmaning tegen.',['pause','guard']);}
+    else{ev('send',evh,null,['send','verzonden']);msg(kind,cap,text,true);}}
+  function sendOrBlockEmail(sub,body,evh){var b=anyBlocking();
+    if(b.length){ev('pause','Aanmaning TEGENGEHOUDEN','Open blokkerende taak → de guard houdt de aanmaning tegen.',['pause','guard']);}
+    else{ev('send',evh,null,['send','e-mail']);email(sub,body);}}
+
+  // ---- scenario builder ----
+  var blocks={
+    herinnering:{g:'Verzenden',label:'Herinnering dag 7',fn:function(){setDay(7);setStatus('active','RUN ACTIEF');sendOrBlock('wa','WhatsApp · uitgaand','Beste, €2.400 staat open. Kun je die deze week voldoen?','Dag 7 · 1e herinnering (WhatsApp)');}},
+    aanmaning:{g:'Verzenden',label:'Aanmaning (e-mail)',fn:function(){sendOrBlockEmail('Aanmaning openstaande facturen','Uw facturen staan nog open — graag spoedig voldoen.','Aanmaning per e-mail');}},
+    wikblk:{g:'Verzenden',label:'WIK-brief',fn:function(){acts.wik();}},
+    klantwa:{g:'Klant',label:'Reageert (WhatsApp)',fn:function(){setStatus('paused','GEPAUZEERD');ev('in','Klant reageert (WhatsApp)','“Ik kijk ernaar.”',['in','inbound']);msg('in','WhatsApp · inkomend','Ik kijk ernaar.');ev('pause','Run gepauzeerd',null,['pause','pauze']);}},
+    klantmail:{g:'Klant',label:'Reageert (e-mail)',fn:function(){setStatus('paused','GEPAUZEERD');ev('in','Klant antwoordt per e-mail','reply_email · geen conversation-id',['in','inbound']);email('RE: openstaande facturen','Ik neem contact op.');ev('pause','Pauze zonder conversation-id',null,['pause','geen conv-id']);}},
+    belofte:{g:'Klant',label:'Belofte (+3 dagen)',fn:function(){setStatus('paused','GEPAUZEERD');ev('pause','Betalingsbelofte (+3 dagen)','promised_date_hint gezet · run gepauzeerd',['pause','belofte']);}},
+    betaling:{g:'Klant',label:'Betaling ontvangen',fn:function(){setStatus('done','AFGEROND');ev('done','Betaling ontvangen','0 open facturen → run afgerond (paid).');}},
+    stil:{g:'Klant',label:'Blijft stil',fn:function(){ev('sys','Klant blijft stil… (cron bewaakt)');}},
+    taakbel:{g:'Taken',label:'Taak: bellen open',fn:function(){addTask('Bellen',false);ev('sys','Taak aangemaakt: “Bellen”','Beltaak = suggestie → niet-blokkerend, de flow loopt gewoon door.',['pause','taak']);}},
+    taakverify:{g:'Taken',label:'Taak: betaling checken',fn:function(){addTask('Betaling checken',true);ev('pause','Taak aangemaakt: “Betaling checken”','Blokkerend → de guard houdt aanmaningen tegen tot afgehandeld.',['pause','taak']);}},
+    taakesc:{g:'Taken',label:'Taak: escalatie',fn:function(){addTask('Escalatie',true);ev('pause','Taak aangemaakt: “Escalatie”','Blokkerend → naar een mens.',['pause','taak']);}},
+    taakklaar:{g:'Taken',label:'Taak afgehandeld',fn:function(){var t=tasks.pop();ev('resume','Taak afgehandeld'+(t?': '+t.label:''),'Guard weer vrij — de flow kan door.',['resume','taak']);updateGuard();}},
+    engineblk:{g:'Systeem',label:'Engine',fn:function(){acts.engine();}},
+    promiseblk:{g:'Systeem',label:'Promise-maturity',fn:function(){acts.promise();}},
+    convlessblk:{g:'Systeem',label:'Conv-less-resume',fn:function(){acts.convless();}},
+    nudge:{g:'Systeem',label:'15-min nudge',fn:function(){ev('send','Nudge verstuurd',null,['send','nudge']);msg('wa','WhatsApp · uitgaand','Hoor graag nog van je over de betaling.',true);}},
+    hervat:{g:'Systeem',label:'Hervat run',fn:function(){setStatus('resumed','HERVAT');ev('resume','Run hervat',null,['resume','hervat']);}},
+    nextday:{g:'Ladder',label:'Volgende dag',fn:function(){var o=[7,14,21,28,37];var nx=o[Math.min(o.indexOf(curDay)+1,4)];setDay(nx);setStatus('active','RUN ACTIEF');ev('sys','Ladder → dag '+nx);}}
+  };
+  var palette=document.getElementById('palette'), canvas=document.getElementById('canvas'), customSteps=[], cidx=0, cplaying=false;
+  var groups={},gorder=[];Object.keys(blocks).forEach(function(id){var g=blocks[id].g;if(!groups[g]){groups[g]=[];gorder.push(g);}groups[g].push(id);});
+  gorder.forEach(function(g){var wrap=document.createElement('div');wrap.className='pgroup';var gl=document.createElement('span');gl.className='gl';gl.textContent=g;wrap.appendChild(gl);
+    groups[g].forEach(function(id){var b=document.createElement('button');b.className='blk';b.type='button';b.textContent=blocks[id].label;b.addEventListener('click',function(){customSteps.push(id);renderCanvas();});wrap.appendChild(b);});
+    palette.appendChild(wrap);});
+  function renderCanvas(){canvas.innerHTML='';if(!customSteps.length){canvas.innerHTML='<span class="ph">Klik blokken hierboven om je eigen scenario samen te stellen…</span>';return;}
+    customSteps.forEach(function(id,i){var c=document.createElement('span');c.className='cstep';
+      c.innerHTML='<span class="num">'+(i+1)+'</span> '+blocks[id].label+' ';var x=document.createElement('button');x.type='button';x.textContent='✕';x.setAttribute('aria-label','verwijder');
+      x.addEventListener('click',function(){customSteps.splice(i,1);renderCanvas();});c.appendChild(x);canvas.appendChild(c);});}
+  function customStart(){current=null;playing=false;[].forEach.call(scards.children,function(c){c.classList.remove('sel');});
+    banner.hidden=false;banner.innerHTML='<div class="ab-ic">🛠️</div><div><div class="ab-t">Actief: eigen scenario</div><div class="ab-x"><b>'+customSteps.length+'</b> zelfgekozen stappen</div></div>';
+    clearBoards(true);clearTasks();cidx=0;}
+  document.getElementById('playCustom').addEventListener('click',function(){if(!customSteps.length||cplaying)return;customStart();cplaying=true;
+    (function nx(){if(!cplaying)return;if(cidx>=customSteps.length){cplaying=false;return;}blocks[customSteps[cidx]].fn();cidx++;setTimeout(nx,reduce?60:1000);})();});
+  document.getElementById('stepCustom').addEventListener('click',function(){if(!customSteps.length)return;if(cidx===0)customStart();if(cidx>=customSteps.length)return;blocks[customSteps[cidx]].fn();cidx++;});
+  document.getElementById('clearCustom').addEventListener('click',function(){customSteps=[];cidx=0;cplaying=false;renderCanvas();});
+
+  // ---- natuurlijke-taal → scenario ----
+  function parseNL(text){var t=(text||'').toLowerCase();
+    var has=function(){for(var i=0;i<arguments.length;i++){if(t.indexOf(arguments[i])>-1)return true;}return false;};
+    var mail=has('mail','e-mail'),
+        promise=has('belof','beloof','toezeg')|| /\d+\s*dag/.test(t),
+        paysNot=has('betaalt niet','niet betaal','geen betaling','betaald niet','komt niet na','blijft stil','reageert niet','hoort niets',' stil'),
+        pays=!paysNot&&has('betaalt','betaald','betaling ontvangen','voldoet','maakt over'),
+        reply=promise||has('reage','reacti','antwoord'),
+        tBel=has('bel','bellen','beltaak'),
+        tVerify=has('checken','verificat','controleer','verifie'),
+        tEsc=has('escalat','escaleer'),
+        tDone=has('afgehandeld','taak klaar','opgelost','afgevinkt'),
+        wik=has('wik','14-dagen','veertiendagen','aangetekend'),
+        aanm=has('aanmaning','tweede','2e'),
+        nud=has('nudge','15 min','15-min'),
+        convless=has('conv','geen conv')|| (mail&&paysNot),
+        eng=has('engine','ladder door');
+    var seq=['herinnering'];
+    if(tBel)seq.push('taakbel');
+    if(tVerify)seq.push('taakverify');
+    if(tEsc)seq.push('taakesc');
+    if(reply)seq.push(mail?'klantmail':'klantwa');
+    if(promise)seq.push('belofte');
+    if(paysNot)seq.push('stil');
+    if(promise&&paysNot)seq.push('promiseblk');
+    if(promise&&pays){seq.push('betaling');seq.push('promiseblk');}
+    if(!promise&&pays)seq.push('betaling');
+    if(convless&&!promise)seq.push('convlessblk');
+    if(nud)seq.push('nudge');
+    if(aanm)seq.push('aanmaning');
+    if(wik)seq.push('wikblk');
+    if(tDone)seq.push('taakklaar');
+    if(eng)seq.push('engineblk');
+    var out=[];seq.forEach(function(x){if(out[out.length-1]!==x)out.push(x);});return out;}
+
+  var nlInput=document.getElementById('nlInput'), nlHint=document.getElementById('nlHint');
+  function genFromNL(){var txt=nlInput.value.trim();if(!txt){nlHint.textContent='Typ eerst even wat je wilt testen…';return;}
+    var seq=parseNL(txt);customSteps=seq.slice();cidx=0;renderCanvas();
+    nlHint.innerHTML='✨ <b>'+seq.length+' stappen</b> klaargezet: '+seq.map(function(id){return blocks[id].label;}).join(' → ')+' — pas ze gerust aan en druk op “Speel af”.';}
+  document.getElementById('nlGen').addEventListener('click',genFromNL);
+  nlInput.addEventListener('keydown',function(e){if(e.key==='Enter')genFromNL();});
+
+  // ---- testklant & facturen aanmaken ----
+  var invoices=[{amount:1200,days:21},{amount:800,days:14},{amount:400,days:10}];
+  function euro(n){try{return '€'+(+n).toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2});}catch(e){return '€'+(+n).toFixed(2);}}
+  function invTotal(){return invoices.reduce(function(s,iv){return s+(+iv.amount||0);},0);}
+  function updateSuTotal(){var el=document.getElementById('suTotal');if(el)el.textContent='Totaal: '+euro(invTotal());}
+  function renderInvEditor(){var ed=document.getElementById('invEditor');ed.innerHTML='';
+    invoices.forEach(function(iv,i){var r=document.createElement('div');r.className='inv-row';
+      var pre=document.createElement('span');pre.className='pre';pre.textContent='#'+(2041+i);
+      var a=document.createElement('input');a.type='number';a.value=iv.amount;a.setAttribute('aria-label','bedrag');a.addEventListener('input',function(){iv.amount=parseFloat(a.value)||0;updateSuTotal();});
+      var lbl=document.createElement('span');lbl.className='lbltiny';lbl.textContent='€ · dagen te laat:';
+      var d=document.createElement('input');d.type='number';d.value=iv.days;d.setAttribute('aria-label','dagen te laat');d.addEventListener('input',function(){iv.days=parseInt(d.value)||0;});
+      var x=document.createElement('button');x.type='button';x.textContent='✕';x.setAttribute('aria-label','verwijder factuur');x.addEventListener('click',function(){invoices.splice(i,1);renderInvEditor();});
+      r.appendChild(pre);r.appendChild(a);r.appendChild(lbl);r.appendChild(d);r.appendChild(x);ed.appendChild(r);});
+    updateSuTotal();}
+  function renderPersona(){
+    var name=(document.getElementById('suName').value||'Test Klant').trim();
+    testPhone=(document.getElementById('suPhone').value||testPhone).trim();
+    testEmail=(document.getElementById('suEmail').value||testEmail).trim();
+    document.getElementById('pName').textContent=name;
+    document.getElementById('pAvatar').textContent=name.split(/\s+/).map(function(w){return w?w[0]:'';}).join('').slice(0,2).toUpperCase()||'TK';
+    document.getElementById('pMeta').innerHTML='📱 <b>'+testPhone+'</b> · ✉️ <b>'+testEmail+'</b>';
+    var inv=document.getElementById('pInvoices');inv.innerHTML='';
+    invoices.forEach(function(iv,i){var d=document.createElement('div');d.className='inv';d.innerHTML='<span>Factuur #'+(2041+i)+'</span><span class="amt">'+euro(+iv.amount)+' <span class="st">open</span></span>';inv.appendChild(d);});
+    document.getElementById('pInvCount').textContent=invoices.length+' factuur'+(invoices.length===1?'':'en')+' open';
+    document.getElementById('pInvTotal').textContent=euro(invTotal());
+    var day=parseInt(document.getElementById('suDay').value)||7;setDay(day);setStatus('active','RUN ACTIEF');}
+  document.getElementById('addInv').addEventListener('click',function(){invoices.push({amount:250,days:7});renderInvEditor();});
+  document.querySelectorAll('.presets button[data-preset]').forEach(function(b){b.addEventListener('click',function(){
+    var k=+b.getAttribute('data-preset');invoices=(k===1)?[{amount:1200,days:14}]:[{amount:1200,days:21},{amount:800,days:14},{amount:400,days:10}];renderInvEditor();});});
+  document.getElementById('makeCustomer').addEventListener('click',function(){clearBoards(false);clearTasks();renderPersona();
+    ev('sys','Testklant aangemaakt','“'+(document.getElementById('suName').value||'Test Klant')+'” · '+invoices.length+' factuur/facturen · '+euro(invTotal())+' open · start dag '+(document.getElementById('suDay').value||7)+'.');});
+
+  renderInvEditor();renderPersona();
+  setDay(7);clearBoards(false);updateGuard();
+})();
+</script>
