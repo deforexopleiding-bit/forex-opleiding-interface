@@ -873,23 +873,67 @@ function wireTopbarActionsToShell() {
   // Rolebox is nu zichtbaar (inline style display:none uit index.html
   // verwijderd) — geen extra JS nodig.
 
-  // Boot-module: default 'klanten', maar bij `?v2preview=<id>` start op die
-  // module zodat de preview-URL direct de juiste view rendert (voorheen
-  // landde `?v2preview=taken` op klanten-content omdat goMod('klanten')
-  // hier hardcoded was — bug ontdekt bij taken-dataronde).
-  // Bij comma-list (`?v2preview=a,b,c`) pakt hij het eerste id dat een
-  // shell-tab heeft; anders eerste van de lijst.
-  let bootMod = 'klanten';
+  // Boot-module — routing-prioriteit (v=1ev, 2026-08-24):
+  //   1. `?v2preview=<id>` (deep-link, hoogste prioriteit) — bestaand pattern.
+  //      Bij comma-list (`?v2preview=a,b,c`) pakt hij het eerste id dat
+  //      een shell-tab heeft.
+  //   2. `location.hash` (bv. `#leadsonderhoud`) — refresh-persistentie.
+  //      Wordt bijgehouden door de goMod-URL-wrap hieronder.
+  //   3. Default = `dashboard` (voorheen `klanten` hardcoded — bug: refresh
+  //      op elke pagina gooide naar Klanten; en verse entry landde op
+  //      Klanten i.p.v. Dashboard).
+  //
+  // Onbekende/niet-toegankelijke hash valt terug op default. Legacy
+  // `?v2preview` blijft precedent zodat bookmarks blijven werken.
+  const _modsListBoot = window.DFO.MODS || [];
+  const _modIsValid = (id) => !!(id && _modsListBoot.find((m) => m.id === id));
+  let bootMod = 'dashboard';
   try {
     const raw = new URLSearchParams(window.location.search).get('v2preview');
     if (raw) {
       const ids = raw.split(',').map((s) => s.trim()).filter(Boolean);
-      const modsList = window.DFO.MODS || [];
-      const viable = ids.find((id) => modsList.find((m) => m.id === id));
+      const viable = ids.find((id) => _modIsValid(id));
       if (viable) bootMod = viable;
+    } else {
+      const hash = String(window.location.hash || '').replace(/^#/, '').trim();
+      if (hash && _modIsValid(hash)) bootMod = hash;
     }
-  } catch (_) { /* URLSearchParams-fail: houd 'klanten' als default */ }
+  } catch (_) { /* URL-parse-fail: houd 'dashboard' als default */ }
+  if (!_modIsValid(bootMod)) bootMod = _modIsValid('dashboard') ? 'dashboard' : (_modsListBoot[0]?.id || 'klanten');
   window.DFO.goMod(bootMod);
+
+  // URL-persistentie: sync `location.hash` met de actieve module bij elke
+  // goMod-call. history.replaceState → geen scroll-jump, geen extra
+  // history-entry. Zo overleeft de actieve module een refresh (F5).
+  // Deep-link `?v2preview=` behoudt precedent bij verse entry.
+  try {
+    if (window.DFO && typeof window.DFO.goMod === 'function' && !window.DFO.goMod.__kvHashSync) {
+      const origGoMod = window.DFO.goMod;
+      const wrapped = function (modId) {
+        const ret = origGoMod.apply(this, arguments);
+        try {
+          if (modId && _modIsValid(modId)) {
+            const targetHash = '#' + modId;
+            if (window.location.hash !== targetHash) {
+              window.history.replaceState(null, '', targetHash);
+            }
+          }
+        } catch (_) { /* history-write-fail: harmless */ }
+        return ret;
+      };
+      // Preserve legacy-wrap-marker als die er is.
+      Object.assign(wrapped, origGoMod);
+      wrapped.__kvHashSync = true;
+      window.DFO.goMod = wrapped;
+      // Sync huidige hash direct (bootMod is al gezet).
+      if (bootMod && _modIsValid(bootMod)) {
+        const targetHash = '#' + bootMod;
+        if (window.location.hash !== targetHash) {
+          try { window.history.replaceState(null, '', targetHash); } catch (_) {}
+        }
+      }
+    }
+  } catch (_) { /* wrap-fail: routing werkt nog steeds, alleen geen URL-sync */ }
   // Ronde-31 FIX 3: `?v2tab=<naam>` schakelt direct naar die tab. Gebruikt door
   // admin.html legacy-redirect (#approval-queue → v2preview=wanbetalers&v2tab=Acties)
   // zodat oude bookmarks in de queue zelf landen, niet in de Vandaag-default.
