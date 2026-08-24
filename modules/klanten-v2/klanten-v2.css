@@ -1284,7 +1284,13 @@ textarea.inp { max-width: 520px; min-height: 90px; resize: vertical; line-height
 .ib-b { flex: 1; min-width: 0; }
 .ib-t { font-size: 13.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-p { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
-.ib-src-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; padding: 1.5px 8px; border-radius: 20px; font-weight: 600; margin-top: 4px; }
+/* v=1r12 Gmail-compact: subject + preview op 1 regel — subject in text-2, preview in text-3. */
+.ib-tp { font-size: 12.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-tp .ib-tp-t { color: var(--text-2); font-weight: 500; }
+.ib-row.nw .ib-tp .ib-tp-t { color: var(--text); font-weight: 600; }
+/* Src-chip alleen op hover-state van de rij — spaart verticale ruimte in de default view. */
+.ib-src-tag { display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; padding: 1px 6px; border-radius: 10px; font-weight: 600; flex-shrink: 0; opacity: 0; transition: opacity .1s; pointer-events: none; }
+.ib-row:hover .ib-src-tag, .ib-row.on .ib-src-tag { opacity: 1; }
 .ib-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); overflow: hidden; }
 
 

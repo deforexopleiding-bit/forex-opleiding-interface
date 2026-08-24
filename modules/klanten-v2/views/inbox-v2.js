@@ -1131,17 +1131,19 @@
     const [, n, ic, col] = srcInfo;
     const rowIdAttr  = String(i.id).replace(/"/g, '&quot;');
     const rowIdClick = String(i.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    // v=8 Gmail-compact: rij structuur = header (naam + hover-src-chip + tijd) +
+    // combi-lijn (subject — preview) op 1 regel. Row ≈ 54px (target 52-56).
+    // Src-chip staat alleen zichtbaar bij hover (CSS .ib-row:hover .ib-src-tag),
+    // rose-dot voor unread inline naast tijd.
     return `<div class="ib-row ${i.nw ? 'nw' : ''} ${String(ibSel) === String(i.id) ? 'on' : ''}" data-row-id="${rowIdAttr}" onclick="__ibSel('${rowIdClick}')">
       ${H.av(String(i.van || '?'), 28)}
       <div class="ib-b">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
           <span style="font-size:13.5px;font-weight:${i.nw ? '600' : '500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(i.van)}</span>
+          <span class="ib-src-tag" style="background:var(--${col}-soft);color:var(--${col})">${svg(ic, 'width:10px;height:10px')}${_esc(n)}</span>
+          ${i.nw ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--rose);flex-shrink:0"></span>' : ''}
           <span style="margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);flex-shrink:0">${_esc(i.tijd)}</span></div>
-        <div class="ib-t">${_esc(i.t)}</div>
-        <div class="ib-p">${_esc(i.p)}</div>
-        <div style="margin-top:7px;display:flex;gap:6px;align-items:center">
-          <span class="ib-src-tag" style="background:var(--${col}-soft);color:var(--${col})">${svg(ic, 'width:11px;height:11px')}${_esc(n)}</span>
-          ${i.nw ? '<span style="width:7px;height:7px;border-radius:50%;background:var(--rose);margin-left:auto"></span>' : ''}</div>
+        <div class="ib-tp">${i.t ? `<span class="ib-tp-t">${_esc(i.t)}</span>` : ''}${i.t && i.p ? ' — ' : ''}${_esc(i.p)}</div>
       </div></div>`;
   }
 
