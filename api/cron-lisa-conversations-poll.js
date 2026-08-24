@@ -23,21 +23,12 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 
-const GHL_API_BASE  = 'https://services.leadconnectorhq.com';
-const GHL_VERSION   = '2021-04-15';
-const ABORT_MS      = 25_000;                    // Vercel default 30s
-const CONV_PAGE     = 50;                        // /conversations/search page
-const MSG_PAGE      = 100;                       // /conversations/{id}/messages
-const MAX_CONV_PAGES = 20;                        // vangnet — 20 × 50 = 1000 conv/run
-const FALLBACK_START = '2026-08-06T00:00:00Z';   // eerste run bij lege DB
-const FALLBACK_MAX_CONTACTS = 300;                // per run bij per-contact fallback
-
-// GHL enum voor Instagram in `lastMessageType`. `TYPE_INSTAGRAM_MESSAGE` gaf
-// 422 (v2021-04-15). We proberen eerst `TYPE_INSTAGRAM`; bij 422 op page 0
-// switchen we automatisch naar de per-contact-fallback (iterateer bekende
-// lisa_conversations.ghl_contact_id). Zo hoeven we niet in een 422-loop te
-// gokken over enum-waarden.
-const IG_ENUM_CANDIDATE = 'TYPE_INSTAGRAM';
+const GHL_API_BASE = 'https://services.leadconnectorhq.com';
+const GHL_VERSION  = '2021-04-15';
+const ABORT_MS     = 25_000;                     // Vercel default 30s
+const MSG_PAGE     = 100;                        // /conversations/{id}/messages
+const FALLBACK_START        = '2026-08-06T00:00:00Z';  // informatief — watermark bij lege DB
+const FALLBACK_MAX_CONTACTS = 500;                // per run bij per-contact iteratie
 
 // GHL levert bij IG Instagram-messages typisch als `messageType` = TYPE_INSTAGRAM_MESSAGE
 // (of TYPE_IG / IG in oudere payloads). We tolereren varianten omdat de exacte
@@ -124,17 +115,17 @@ export default async function handler(req, res) {
 
   const startTime = Date.now();
   const stats = {
-    strategy:            'search',   // 'search' → 'per_contact' bij 422 op IG-enum
-    ig_enum_used:        IG_ENUM_CANDIDATE,
+    strategy:            'per_contact',   // 2026-08-24: search-filter TYPE_INSTAGRAM
+                                          // wordt door GHL genegeerd (retourneert alle
+                                          // kanalen); per-contact over bekende
+                                          // lisa_conversations is het enige betrouwbare
+                                          // pad voor de bevroren-sinds-6-aug IG-set.
     watermark:           null,
-    conv_pages_fetched:  0,
-    conversations_seen:  0,
-    conversations_skipped_non_ig: 0,
+    contacts_iterated:   0,
     messages_seen:       0,
     messages_upserted:   0,
     conversations_created: 0,
     dedup_skipped:       0,
-    contacts_iterated:   0,
     errors:              0,
     aborted:             false,
   };
@@ -155,166 +146,18 @@ export default async function handler(req, res) {
     const watermark = new Date(watermarkMs).toISOString();
     stats.watermark = watermark;
 
-    // 2. Pagineer /conversations/search voor deze location, gesorteerd op
-    //    lastMessageDate desc. Break zodra oudste conv op de pagina ouder is
-    //    dan de watermark (dan zit alles ouder ook al in DB).
-    let startAfterDate = null;   // GHL cursor: nieuwste-eerst pagination via startAfterDate
-    let startAfterId   = null;
-
-    for (let page = 0; page < MAX_CONV_PAGES; page++) {
-      if (Date.now() - startTime > ABORT_MS) { stats.aborted = true; break; }
-
-      const url = new URL(`${GHL_API_BASE}/conversations/search`);
-      url.searchParams.set('locationId',      process.env.GHL_LOCATION_ID);
-      url.searchParams.set('limit',           String(CONV_PAGE));
-      url.searchParams.set('sort',            'desc');
-      url.searchParams.set('sortBy',          'last_message_date');
-      url.searchParams.set('lastMessageType', IG_ENUM_CANDIDATE);   // server-side IG-filter
-      if (startAfterDate) url.searchParams.set('startAfterDate', String(startAfterDate));
-      if (startAfterId)   url.searchParams.set('startAfterId',   String(startAfterId));
-
-      let convRes;
-      try { convRes = await ghlFetch(url.toString()); }
-      catch (e) { console.error('[lisa-poll] fetch conv-page:', e?.message || e); stats.errors++; break; }
-
-      if (!convRes.ok) {
-        const errText = await convRes.text().catch(() => '');
-        console.error('[lisa-poll] conv-search HTTP', convRes.status, errText.slice(0, 200));
-        // 422 op page 0 met IG-enum → GHL kent deze enum-waarde niet.
-        // Switch naar per-contact-fallback (bekende ghl_contact_ids uit
-        // lisa_conversations). Vermijdt 422-loop op onbekende enum-varianten.
-        if (page === 0 && convRes.status === 422) {
-          stats.strategy = 'per_contact';
-          break;
-        }
-        stats.errors++;
-        break;
-      }
-
-      const convData = await convRes.json().catch(() => ({}));
-      const conversations = convData.conversations || convData.data || [];
-      stats.conv_pages_fetched++;
-      if (!conversations.length) break;
-
-      let oldestOnPageMs = Infinity;
-
-      for (const convo of conversations) {
-        stats.conversations_seen++;
-        const convId = convo.id;
-        if (!convId) continue;
-
-        // Filter op Instagram wanneer we het uit conv-metadata kunnen zien.
-        // Zo niet: doorlaten en per-message filteren.
-        const convIsIg = isInstagram(convo);
-        if (!convIsIg && (convo.lastMessageType || convo.type)) {
-          stats.conversations_skipped_non_ig++;
-          continue;
-        }
-
-        const lastMsgDateMs = (() => {
-          const s = convo.lastMessageDate || convo.dateUpdated || convo.dateAdded;
-          const t = s ? Date.parse(s) : NaN;
-          return Number.isFinite(t) ? t : 0;
-        })();
-        if (lastMsgDateMs && lastMsgDateMs < oldestOnPageMs) oldestOnPageMs = lastMsgDateMs;
-
-        // 3. Fetch messages van deze conv.
-        const msgUrl = `${GHL_API_BASE}/conversations/${convId}/messages?limit=${MSG_PAGE}`;
-        let msgRes;
-        try { msgRes = await ghlFetch(msgUrl); }
-        catch (e) { console.warn('[lisa-poll] fetch msgs:', convId, e?.message || e); stats.errors++; continue; }
-
-        if (!msgRes.ok) {
-          const errText = await msgRes.text().catch(() => '');
-          console.warn('[lisa-poll] msgs HTTP', msgRes.status, convId, errText.slice(0, 200));
-          stats.errors++;
-          continue;
-        }
-
-        const msgData = await msgRes.json().catch(() => ({}));
-        const messages = msgData.messages?.messages || msgData.messages || msgData.data || [];
-
-        // Cache contact-name via conv-payload (GHL levert soms `contact` embedded).
-        const contactId  = convo.contactId || convo.contact_id || messages.find(m => m.contactId)?.contactId;
-        const locationId = convo.locationId || convo.location_id || process.env.GHL_LOCATION_ID;
-        const contactName = convo.fullName || convo.contactName || null;
-        if (!contactId) continue;
-
-        // Ensure conv-row één keer per convo.
-        let lisaConvId = null;
-
-        for (const msg of messages) {
-          stats.messages_seen++;
-
-          if (!isInstagram(msg)) continue;
-
-          const ghlMsgId = msg.id || msg.messageId;
-          if (!ghlMsgId) continue;
-
-          const direction = detectDirection(msg);
-          if (!direction) continue;
-
-          const content = msg.body || msg.text || msg.message || '';
-          if (!content || !String(content).trim()) continue; // NOT NULL constraint
-
-          const sentAt = msg.dateAdded || msg.dateCreated || msg.createdAt || new Date().toISOString();
-
-          // Dedupe-check: bestaat de ghl_message_id al?
-          const { data: dupe } = await supabaseAdmin
-            .from('lisa_messages')
-            .select('id')
-            .eq('ghl_message_id', ghlMsgId)
-            .limit(1)
-            .maybeSingle();
-          if (dupe) { stats.dedup_skipped++; continue; }
-
-          if (!lisaConvId) {
-            const ensured = await ensureConversation({
-              contactId, ghlConversationId: convId, locationId, contactName,
-            });
-            if (!ensured?.id) { stats.errors++; continue; }
-            if (!lisaConvId) stats.conversations_created += 0; // teller telt hieronder alleen echte creates via ensureConversation
-            lisaConvId = ensured.id;
-          }
-
-          const { error: insErr } = await supabaseAdmin.from('lisa_messages').insert({
-            conversation_id: lisaConvId,
-            direction,
-            content:         String(content),
-            sent_at:         sentAt,
-            ai_generated:    false,                        // poll = mens/klant, geen AI
-            ghl_message_id:  ghlMsgId,
-          });
-          if (insErr) {
-            console.warn('[lisa-poll] msg insert:', ghlMsgId, insErr.message);
-            stats.errors++;
-            continue;
-          }
-          stats.messages_upserted++;
-        }
-      }
-
-      // Cursor voor volgende pagina = laatste conv-id + last-message-date.
-      const lastConv = conversations[conversations.length - 1];
-      startAfterId   = lastConv?.id || null;
-      startAfterDate = lastConv?.lastMessageDate || lastConv?.dateUpdated || null;
-
-      // Break-conditie: oudste conv op deze pagina is ouder dan watermark →
-      // volledig backfilled, geen zin om verder te pagineren.
-      if (oldestOnPageMs && oldestOnPageMs < watermarkMs) break;
-
-      // Als de pagina korter is dan CONV_PAGE → geen volgende pagina.
-      if (conversations.length < CONV_PAGE) break;
-    }
-
-    // 4. FALLBACK per-contact: iterateer bekende ghl_contact_ids uit
-    //    lisa_conversations. Wordt geactiveerd als de search-strategie een
-    //    422 op de IG-enum kreeg. Target precies onze bestaande IG-gesprekken
-    //    (incl. de bevroren-sinds-6-aug set) zonder afhankelijk te zijn van
-    //    het lastMessageType-enum. Nadeel: vangt geen gloednieuwe IG-contacts
-    //    op — die komen via de webhook (of via search zodra we de juiste
-    //    enum kennen).
-    if (stats.strategy === 'per_contact') {
+    // 2. Per-contact PRIMAIR pad: iterateer bekende ghl_contact_ids uit
+    //    lisa_conversations. Nodig omdat GHL's /conversations/search
+    //    `lastMessageType=TYPE_INSTAGRAM`-filter negeert (retourneert de 1000
+    //    nieuwste over ALLE kanalen). Per-contact target precies onze
+    //    bestaande IG-gesprekken — inclusief de bevroren-sinds-6-aug set die
+    //    onder het scan-venster van bulk-search zou vallen.
+    //
+    //    Nadeel: vangt geen gloednieuwe IG-contacts op die nog niet in
+    //    lisa_conversations staan. Voor die groep werkt de webhook (en de
+    //    live_mode_off-ingest-branch die inbound tóch opslaat zodra GHL
+    //    weer pusht).
+    {
       const { data: knownConvs, error: kcErr } = await supabaseAdmin
         .from('lisa_conversations')
         .select('ghl_contact_id, last_message_at')
