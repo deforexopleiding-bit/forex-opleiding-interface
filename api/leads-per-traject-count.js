@@ -32,7 +32,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { periodRange } from './_lib/nl-period.js';
+import { periodRange, nlDayStart, nlDayEndExclusive } from './_lib/nl-period.js';
 
 // Vertaal de publieke period-param (today|week|month|all) naar een NL-tijdzone-
 // aware UTC-range via nl-period.js. VOORHEEN bucketten we op de server-lokale
@@ -46,6 +46,18 @@ function rangeForPeriod(p) {
   if (p === 'week')  return periodRange('week');
   if (p === 'month') return periodRange('maand');
   return null; // 'all'
+}
+
+// 2026-08-24 custom-range support: bouw een range-object uit YYYY-MM-DD-strings.
+// Return null als input ongeldig. NL-tz-aware zodat "gisteren" niet een dag
+// verschuift. Bij from==to → alleen die ene dag (00:00 t/m 24:00-exclusief).
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+function rangeForCustom(fromStr, toStr) {
+  if (!ISO_DATE_RE.test(fromStr) || !ISO_DATE_RE.test(toStr)) return null;
+  const start = nlDayStart(new Date(fromStr + 'T12:00:00Z'));
+  const endExclusive = nlDayEndExclusive(new Date(toStr + 'T12:00:00Z'));
+  if (endExclusive <= start) return null;
+  return { start, endExclusive, label: fromStr };
 }
 
 // Canonieke test/interne-domain filter — identiek toegepast in dashboard-tegel
@@ -74,7 +86,11 @@ export default async function handler(req, res) {
     const q = req.query || {};
     const periodRaw = String(q.period || 'all').toLowerCase();
     const period = ['today', 'week', 'month', 'all'].includes(periodRaw) ? periodRaw : 'all';
-    const range = rangeForPeriod(period);          // null bij 'all'
+    // 2026-08-24 custom-range: ?from=YYYY-MM-DD&to=YYYY-MM-DD overrules period.
+    const rawFrom = String(q.from || '').trim();
+    const rawTo   = String(q.to   || '').trim();
+    const customRange = rangeForCustom(rawFrom, rawTo);
+    const range = customRange || rangeForPeriod(period);
     const since = range ? range.label : null;      // NL-kalenderdatum van start (response-compat)
     const debug = String(q.debug || '') === '1';
 

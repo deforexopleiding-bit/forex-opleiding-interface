@@ -21,6 +21,13 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
   const period = req.query?.period || 'today';
+  // 2026-08-24 custom-range support: ?from=YYYY-MM-DD&to=YYYY-MM-DD override
+  // period. NL-tz-aware: from = NL 00:00, to = NL 23:59:59 (inclusief hele dag).
+  // Lege from/to → default op period-preset. from == to → alleen die dag.
+  const rawFrom = String(req.query?.from || '').trim();
+  const rawTo   = String(req.query?.to   || '').trim();
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const hasCustomRange = ISO_DATE.test(rawFrom) && ISO_DATE.test(rawTo);
 
   try {
     const supabase = createUserClient(req);
@@ -36,7 +43,11 @@ export default async function handler(req, res) {
     const endOfYest    = new Date(startOfToday.getTime() - 1);          // -1ms: inclusief-eind gisteren
 
     let periodStart, periodEnd;
-    if (period === 'week') {
+    if (hasCustomRange) {
+      // Custom: NL-dag-range. from-00:00 t/m to-24:00-exclusief (= t/m 23:59:59.999).
+      periodStart = nlDayStart(new Date(rawFrom + 'T12:00:00Z'));         // NL 00:00 op rawFrom
+      periodEnd   = nlDayEndExclusive(new Date(rawTo   + 'T12:00:00Z')); // NL 24:00 op rawTo (exclusief)
+    } else if (period === 'week') {
       periodStart = periodRange('week', now).start;
       periodEnd   = now;
     } else if (period === 'month') {

@@ -368,15 +368,20 @@
       console.debug('[dashboard-v2] skip: reeds geladen voor', labelPeriod);
       return;
     }
-    // Fallback voor endpoints die 'year'/'custom' niet snappen — gebruik 'month'.
-    const safeStatsPeriod = (paramPeriod === 'year' || isCustom) ? 'month' : paramPeriod;
-    const safeLeadsPeriod = (paramPeriod === 'year' || isCustom) ? 'all'   : paramPeriod;
+    // v=29 (2026-08-24): Custom-range wordt nu server-side toegepast op
+    // dashboard-stats + leads-per-traject-count (from/to-support toegevoegd).
+    // finance-dashboard-counts heeft nog geen from/to → blijft month-fallback
+    // (kandidaat voor aparte brok).
+    // Voor Jaar: geen from/to; fallback op 'month' (safe) tenzij endpoint 'year' snapt.
+    const safeStatsPeriod = paramPeriod === 'year' ? 'month' : paramPeriod;
+    const safeLeadsPeriod = paramPeriod === 'year' ? 'all'   : paramPeriod;
     // Custom-range querystring voor endpoints die from/to snappen.
     const customQs = isCustom ? `&from=${_custom.from}&to=${_custom.to}` : '';
     const signedPeriodQ = isCustom ? '' : `period=${paramPeriod}`;
-    const financePeriodQ = isCustom ? 'period=month' : `period=${paramPeriod}`; // Custom → month fallback
-    const leadsPeriodQ = `period=${safeLeadsPeriod}`;
-    const statsPeriodQ = `period=${safeStatsPeriod}`;
+    const financePeriodQ = isCustom ? 'period=month' : `period=${paramPeriod}`; // Custom → month fallback (endpoint mist from/to nog)
+    // Custom → gebruik from/to i.p.v. period voor leads en stats.
+    const leadsPeriodQ = isCustom ? `from=${_custom.from}&to=${_custom.to}` : `period=${safeLeadsPeriod}`;
+    const statsPeriodQ = isCustom ? `from=${_custom.from}&to=${_custom.to}` : `period=${safeStatsPeriod}`;
     const seq = ++_fetchSeq;
     _live.loading = true;
     _live.error = null;
