@@ -175,6 +175,19 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
           log_payload: { template_id: template.id, to, reason: guardErr.message },
         };
       }
+      // Dunning-test-cockpit L2-check: eigen, onafhankelijke fail-closed
+      // recipient-match. Faalt hard bij lege sandbox-contact of mismatch —
+      // ook als de bestaande L3-assert per ongeluk warn-then-skip zou doen.
+      try {
+        const { assertTestRecipient } = await import('./test-cockpit-send.js');
+        await assertTestRecipient({ to, channel: 'email' });
+      } catch (guardErrOwn) {
+        return {
+          status: 'skipped',
+          log_event: 'email_skipped_sandbox_guard',
+          log_payload: { template_id: template.id, to, reason: 'L2:' + guardErrOwn.message },
+        };
+      }
     }
     if (await isDryRunEnabled()) {
       return {
@@ -243,6 +256,26 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
       from:     'administratie@deforexopleiding.nl',
       fromName: 'De Forex Opleiding',
     });
+    // Dunning-test-cockpit audit-tak (alleen is_test) — landt de echte
+    // send in test_cockpit_audit. Fail-soft: audit-fout blokkeert de
+    // executor niet. isTest=false volgt hier onder de originele return-
+    // paden zonder aanraking.
+    if (customer?.is_test) {
+      try {
+        const { auditTestSend } = await import('./test-cockpit-send.js');
+        await auditTestSend({
+          actor:  { email: 'dunning-engine@cron' },
+          action: 'send_email',
+          target: { template_id: template.id, run_id: run?.id, customer_id: customer?.id },
+          payload: { to, subject: rendered.subject },
+          result: { ok: !!result?.success, messageId: result?.messageId || null, reason: result?.error || null },
+          status: result?.success ? 'ok' : 'error',
+          error:  result?.success ? null : (result?.error || 'unknown'),
+        });
+      } catch (auditErr) {
+        console.warn('[dunning-executor] test-cockpit audit failed (soft):', auditErr?.message || auditErr);
+      }
+    }
     if (!result || !result.success) {
       return {
         status: 'failed',
@@ -480,6 +513,23 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
             meta_template_name: template.meta_template_name,
             to: customerPhone,
             reason: guardErr.message,
+          },
+        };
+      }
+      // Dunning-test-cockpit L2-check: eigen, onafhankelijke fail-closed
+      // recipient-match. Zie email-tak voor de motivatie.
+      try {
+        const { assertTestRecipient } = await import('./test-cockpit-send.js');
+        await assertTestRecipient({ to: customerPhone, channel: 'whatsapp' });
+      } catch (guardErrOwn) {
+        return {
+          status: 'skipped',
+          log_event: 'whatsapp_skipped_sandbox_guard',
+          log_payload: {
+            template_id: template.id,
+            meta_template_name: template.meta_template_name,
+            to: customerPhone,
+            reason: 'L2:' + guardErrOwn.message,
           },
         };
       }
@@ -804,7 +854,41 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
       variables,
       phoneNumberId: outboundPnId,
     });
+    // Dunning-test-cockpit audit-tak (alleen is_test) — landt de echte
+    // outbound in test_cockpit_audit. Fail-soft. isTest=false raakt niets.
+    if (customerIsTest) {
+      try {
+        const { auditTestSend } = await import('./test-cockpit-send.js');
+        await auditTestSend({
+          actor:  { email: 'dunning-engine@cron' },
+          action: 'send_wa_template',
+          target: { template_id: template.id, run_id: run?.id, customer_id: customer?.id, conversation_id: conv?.id || null },
+          payload: { to: sendTo, templateName: template.meta_template_name, phone_number_id: outboundPnId },
+          result: { wamid: metaResult?.wamid || null },
+          status: 'ok',
+        });
+      } catch (auditErr) {
+        console.warn('[dunning-executor whatsapp] test-cockpit audit failed (soft):', auditErr?.message || auditErr);
+      }
+    }
   } catch (metaErr) {
+    // Dunning-test-cockpit audit-tak (alleen is_test) — log ook mislukte
+    // outbound. Fail-soft. isTest=false raakt niets.
+    if (customerIsTest) {
+      try {
+        const { auditTestSend } = await import('./test-cockpit-send.js');
+        await auditTestSend({
+          actor:  { email: 'dunning-engine@cron' },
+          action: 'send_wa_template',
+          target: { template_id: template.id, run_id: run?.id, customer_id: customer?.id, conversation_id: conv?.id || null },
+          payload: { to: sendTo, templateName: template.meta_template_name, phone_number_id: outboundPnId },
+          status: 'error',
+          error:  metaErr?.message || 'unknown',
+        });
+      } catch (auditErr) {
+        console.warn('[dunning-executor whatsapp] test-cockpit audit-on-error failed (soft):', auditErr?.message || auditErr);
+      }
+    }
     // MetaNotConfiguredError → skipped (config), niet failed (send-poging).
     if (metaErr instanceof MetaNotConfiguredError) {
       return {

@@ -65,6 +65,22 @@ async function audit({ actor, action, target, payload, result, status, error }) 
 }
 
 // ── Eigen recipient-check (L2), hard throw ─────────────────────────────────
+//
+// `assertTestRecipient` is de publieke variant voor callers die hun bestaande
+// send-module (bv. mailer.js / meta-whatsapp.js) willen behouden en alleen
+// de fail-closed check + audit-tak willen bijleggen. Zie dunning-step-
+// executors is_test-tak voor het gebruikspatroon.
+export async function assertTestRecipient({ to, channel, overrides }) {
+  return assertRecipientOwn({ to, channel, overrides });
+}
+
+// `auditTestSend` publiceert de audit-insert zodat externe callers hun
+// eigen send-resultaten in test_cockpit_audit kunnen loggen zonder de hele
+// wrapper te hoeven gebruiken. Same shape als de interne audit().
+export async function auditTestSend(entry) {
+  return audit(entry);
+}
+
 async function assertRecipientOwn({ to, channel, overrides }) {
   const contact = overrides?.contact
     ?? await getSandboxContact();
