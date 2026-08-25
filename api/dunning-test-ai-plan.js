@@ -43,6 +43,16 @@ const ALLOWED_ACTIONS = [
   'simulate-inbound',
   'mark-paid',
   'send-test-template',
+  // Prototype-parity noop-audit acties (backend: dunning-test-noop-audit.js).
+  // Echte behavior komt in vervolg-PRs; AI-plans mogen ze wel voorstellen
+  // omdat de UI ze via de bestaande blok-bouwer-runner uitvoert.
+  'promise-maturity',
+  'conv-less-resume',
+  'wik-brief',
+  'simulate-promise',
+  'simulate-silence',
+  'create-task',
+  'complete-task',
 ];
 const ALLOWED_ACTIONS_SET = new Set(ALLOWED_ACTIONS);
 
