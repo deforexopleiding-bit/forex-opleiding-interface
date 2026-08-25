@@ -57,8 +57,16 @@ export default async function handler(req, res) {
       } catch (e) { mailError = e.message; console.warn('[onboarding-send] mail mislukt:', e.message); }
     }
 
+    // [M-06 fix 2026-08-25] Bij (opnieuw) verzenden: expiry op sent+60 dagen.
+    // Zowel bij eerste verzending als bij re-send krijgt de token een nieuw
+    // 60-dagen-venster (klant heeft ruim tijd, maar link is niet eeuwig geldig).
+    const _sentAt = new Date();
+    const _expiresAt = new Date(_sentAt.getTime() + 60 * 24 * 60 * 60 * 1000);
     await supabaseAdmin.from('customers').update({
-      onboarding_status: 'sent', onboarding_sent_at: new Date().toISOString(), onboarding_token: token,
+      onboarding_status: 'sent',
+      onboarding_sent_at: _sentAt.toISOString(),
+      onboarding_token: token,
+      onboarding_token_expires_at: _expiresAt.toISOString(),
     }).eq('id', customer_id);
 
     return res.status(200).json({ success: true, mail_sent: mailSent, mail_error: mailError, link });
