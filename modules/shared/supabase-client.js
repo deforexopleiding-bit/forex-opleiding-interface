@@ -45,17 +45,28 @@ window._authSharedReady = (async function () {
   // zelf doorverwijst naar sales.html?tab=dashboard) en mentor op het
   // mentor-dashboard. Super_admin / admin / marketing / administratie /
   // viewer / anders → '/index.html' (default).
+  // 2026-08-25 — FLIP naar v2. Alle CRM-staff-rollen landen na login op de
+  // v2-shell. viewer blijft op /index.html (crm-guard redirect vervolgens
+  // door naar het LMS, ongewijzigd). Bestaande v1-role-homes blijven werken
+  // via directe URL, maar zijn niet meer de default-landing.
+  //
+  // ROLLBACK (oude staat, plak terug als flip terugmoet):
+  //   super_admin:    '/modules/super-admin-dashboard.html',
+  //   admin:          '/index.html',
+  //   manager:        '/index.html',
+  //   sales:          '/modules/sales-dashboard.html',
+  //   mentor:         '/modules/mentor-home.html',
+  //   marketing:      '/index.html',
+  //   administratie:  '/index.html',
+  //   viewer:         '/index.html',
   const ROLE_LANDING = {
-    // super_admin krijgt sinds PR1 (2026-08-01) een eigen dashboard-shell.
-    // Management-groep (admin/manager/marketing/administratie/viewer) blijft
-    // op /index.html — die is expliciet ongemoeid gelaten.
-    super_admin:    '/modules/super-admin-dashboard.html',
-    admin:          '/index.html',
-    manager:        '/index.html',
-    sales:          '/modules/sales-dashboard.html',
-    mentor:         '/modules/mentor-home.html',
-    marketing:      '/index.html',
-    administratie:  '/index.html',
+    super_admin:    '/modules/klanten-v2/',
+    admin:          '/modules/klanten-v2/',
+    manager:        '/modules/klanten-v2/',
+    sales:          '/modules/klanten-v2/',
+    mentor:         '/modules/klanten-v2/',
+    marketing:      '/modules/klanten-v2/',
+    administratie:  '/modules/klanten-v2/',
     viewer:         '/index.html',
   };
   function getRoleLandingUrl(role) {
