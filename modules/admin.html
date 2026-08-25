@@ -2582,7 +2582,9 @@ async function impersonateUser(targetUserId, targetLabel) {
     alert('Geen geldige eigen sessie gevonden — log opnieuw in en probeer dan nogmaals.');
     return;
   }
-  if (!window.AuthShared.saveImpersonationOrigin(originSession)) {
+  // [L-01 fix 2026-08-25] origin_user_id meegeven voor restore-integrity-check.
+  var _origUserId = (originSession && originSession.user && originSession.user.id) || null;
+  if (!window.AuthShared.saveImpersonationOrigin(originSession, _origUserId)) {
     alert('Kon eigen sessie niet veilig bewaren (localStorage). Impersonation afgebroken.');
     return;
   }

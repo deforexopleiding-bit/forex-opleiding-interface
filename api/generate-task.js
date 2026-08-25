@@ -1,4 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { requireCrmStaff } from './_lib/crm-roles.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
 
 const SYSTEM_PROMPT =
   'Je bent een taakplanning assistent voor De Forex Opleiding. ' +
@@ -11,6 +13,13 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // [M-03 fix 2026-08-25] Auth-gate + rate-limit. Wordt getriggerd per e-mail
+  // in email-module (60/min ruim voor mens; blokkeert automation).
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-staff-rol vereist.' });
+  const rl = await checkRateLimit({ req, bucket: 'generate-task', maxHits: 60, withinSeconds: 60 });
+  if (rl.limited) return res.status(429).json({ error: 'Te veel verzoeken — wacht een minuut.' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {

@@ -5683,8 +5683,13 @@
       if (!originSession?.access_token || !originSession?.refresh_token) {
         showToast('Geen geldige eigen sessie — log opnieuw in en probeer nogmaals', 'warn'); return;
       }
+      // [L-01 fix 2026-08-25] Meegeven van origin_user_id zodat restore
+      // de teruggezette sessie kan verifiëren tegen deze exact user.
+      const _origUserId = originSession.user?.id
+        || (await window.AuthShared.getUser?.())?.id
+        || null;
       if (typeof window.AuthShared.saveImpersonationOrigin === 'function'
-          && !window.AuthShared.saveImpersonationOrigin(originSession)) {
+          && !window.AuthShared.saveImpersonationOrigin(originSession, _origUserId)) {
         showToast('Kon eigen sessie niet veilig bewaren (localStorage) — impersonation afgebroken', 'warn'); return;
       }
       try {

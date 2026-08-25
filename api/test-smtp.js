@@ -1,4 +1,10 @@
 import nodemailer from 'nodemailer';
+import { verifyAdmin } from './supabase.js';
+
+// [L-03 fix 2026-08-25] Dev/diagnose-endpoint — was anon-callable, lekte
+// mailbox-roster + SMTP-host/port + IMAP_PASS-env-var-namen. Nu super_admin-
+// only. Overweeg dit endpoint volledig te verwijderen als 't niet meer nodig
+// is (het is een debug-hulpje; alle SMTP-checks kunnen via Vercel-logs).
 
 const SMTP_ACCOUNTS = [
   { user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
@@ -12,6 +18,15 @@ const SMTP_HOST = 'smtp.strato.com';
 const SMTP_PORT = 465;
 
 export default async function handler(req, res) {
+  res.setHeader('Cache-Control', 'no-store');
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+  const admin = await verifyAdmin(req);
+  if (!admin || admin.profile.role !== 'super_admin') {
+    return res.status(403).json({ error: 'Alleen super_admin.' });
+  }
+
   const results = await Promise.all(
     SMTP_ACCOUNTS.map(async ({ user, passEnv }) => {
       const password = process.env[passEnv];

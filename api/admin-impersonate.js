@@ -33,6 +33,7 @@
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,6 +64,15 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Alleen super_admin of manager mag impersoneren' });
   }
   const callerId = admin.user.id;
+
+  // [M-07 fix 2026-08-25] Rate-limit: 10 mint-acties per 60 sec per IP.
+  // Legitieme impersonatie is incidenteel (1x per uur/dag); een gecompromitteerde
+  // manager kan hiermee geen bulk-tokens minten voor elk lager account. Fail-open
+  // bij DB-storing (rate-limit-helper) — legitieme flows nooit blokkeren.
+  const rl = await checkRateLimit({ req, bucket: 'admin-impersonate', maxHits: 10, withinSeconds: 60 });
+  if (rl.limited) {
+    return res.status(429).json({ error: 'Te veel impersonatie-verzoeken. Wacht een minuut en probeer opnieuw.' });
+  }
 
   // ── Body-validatie ────────────────────────────────────────────────────
   const body = req.body || {};

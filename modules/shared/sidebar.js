@@ -1329,6 +1329,20 @@
         refresh_token: origin.refresh_token,
       });
       if (r && r.error) throw new Error(r.error.message || String(r.error));
+      // [L-01 fix 2026-08-25] Integrity-check op teruggezette user-id.
+      var originOk = true;
+      try {
+        if (typeof window.AuthShared.verifyImpersonationOriginMatch === 'function') {
+          originOk = await window.AuthShared.verifyImpersonationOriginMatch();
+        }
+      } catch (_) { originOk = true; /* fail-open bij runtime-fout */ }
+      if (!originOk) {
+        try { window.AuthShared.clearImpersonationOrigin(); } catch (_) {}
+        try { window.AuthShared.clearImpersonationState(); } catch (_) {}
+        try { await window.supabase.auth.signOut(); } catch (_) {}
+        window.location.href = '/login.html?error=impersonation_identity_mismatch';
+        return;
+      }
       window.AuthShared.clearImpersonationOrigin();
       window.AuthShared.clearImpersonationState();
       window.location.href = '/index.html';

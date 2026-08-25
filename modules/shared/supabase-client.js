@@ -178,7 +178,13 @@ window._authSharedReady = (async function () {
     // in een aparte storage-sleutel zodat we 'm later kunnen terugzetten.
     // De Supabase-storage-key (sb-<ref>-auth-token) wordt straks overschreven
     // door verifyOtp; daarom MOETEN we de tokens vooraf hier kopiëren.
-    saveImpersonationOrigin(originSession) {
+    // [L-01 fix 2026-08-25] Bewaar naast tokens ook origin_user_id (van de
+    // huidige sessie op moment van save). Bij restore verifiëren we of de
+    // teruggezette sessie WEL dezelfde user is als de opgeslagen origin_user_id
+    // — mismatch = localStorage-tampering (aanvaller heeft andermans tokens
+    // ingezet) → signOut. Volledige mitigatie (tokens uit localStorage halen)
+    // is een grotere refactor; deze check dekt de meest verontrustende variant.
+    saveImpersonationOrigin(originSession, originUserId) {
       if (!originSession || !originSession.access_token || !originSession.refresh_token) {
         return false;
       }
@@ -186,6 +192,7 @@ window._authSharedReady = (async function () {
         localStorage.setItem('impersonation_origin', JSON.stringify({
           access_token:  originSession.access_token,
           refresh_token: originSession.refresh_token,
+          origin_user_id: originUserId || originSession.user?.id || null,
         }));
         return true;
       } catch (e) { return false; }
@@ -198,6 +205,20 @@ window._authSharedReady = (async function () {
         if (!o || typeof o !== 'object' || !o.access_token || !o.refresh_token) return null;
         return o;
       } catch (e) { return null; }
+    },
+    // [L-01] Verify na setSession dat de teruggezette user echt de origin is.
+    // Retourneert true als match (of als geen origin_user_id opgeslagen was —
+    // backwards-compat met oude entries van vóór deze fix).
+    async verifyImpersonationOriginMatch() {
+      try {
+        const raw = localStorage.getItem('impersonation_origin');
+        if (!raw) return true;
+        const o = JSON.parse(raw);
+        if (!o || !o.origin_user_id) return true; // legacy record — laten passeren
+        const { data } = await window.supabase.auth.getUser();
+        const actualId = data?.user?.id || null;
+        return actualId === o.origin_user_id;
+      } catch (e) { return true; /* fail-open bij runtime-fout */ }
     },
     clearImpersonationOrigin() {
       try { localStorage.removeItem('impersonation_origin'); } catch (e) {}

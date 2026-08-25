@@ -291,6 +291,18 @@ async function stopImpersonationV2() {
       refresh_token: origin.refresh_token,
     });
     if (r && r.error) throw new Error(r.error.message || String(r.error));
+    // [L-01 fix 2026-08-25] Integrity-check: bevestig dat de teruggezette
+    // sessie ECHT dezelfde user is als de opgeslagen origin_user_id.
+    // Mismatch = localStorage-tampering (aanvaller heeft andermans tokens
+    // in impersonation_origin gezet) → signOut + login.
+    const originOk = await window.AuthShared.verifyImpersonationOriginMatch();
+    if (!originOk) {
+      try { window.AuthShared.clearImpersonationOrigin(); } catch (_) {}
+      try { window.AuthShared.clearImpersonationState(); } catch (_) {}
+      try { if (window.supabase?.auth) await window.supabase.auth.signOut(); } catch (_) {}
+      window.location.href = '/login.html?error=impersonation_identity_mismatch';
+      return;
+    }
     window.AuthShared.clearImpersonationOrigin();
     window.AuthShared.clearImpersonationState();
     // v2-landing i.p.v. v1 /index.html. CRM_STAFF_ROLES (incl. super_admin

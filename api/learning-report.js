@@ -1,5 +1,6 @@
-import { supabase } from './supabase.js';
+import { supabaseAdmin as supabase } from './supabase.js';
 import { safeError } from './_lib/safe-error.js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
 
 // Werkelijke kolomnamen (geverifieerd via Supabase diagnose):
 // learn_examples : id, email_id, email_sender, sender_domain, email_subject,
@@ -12,6 +13,11 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+  // [L-04 fix 2026-08-25] Auth-gate + supabaseAdmin. Voorheen anon-client
+  // die PII (sender-emails/domains/subjects) uitlekte als RLS lax was.
+  // Learn_examples + email_patterns bevatten leerlog van klant/lead-mails.
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-staff-rol vereist.' });
 
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 7);

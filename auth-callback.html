@@ -81,8 +81,16 @@
         const { data: { session } } = await window.supabase.auth.getSession();
 
         if (session) {
-          const returnTo = new URLSearchParams(location.search).get('returnTo') || '/index.html';
-          window.location.href = returnTo;
+          // [M-02 fix 2026-08-25] Open-redirect dicht: alleen interne URL's
+          // toestaan. Moet starten met '/' en niet met '//' (protocol-relative)
+          // en niet met 'javascript:' / 'data:' / 'http:' / etc. Fallback '/index.html'.
+          const raw = new URLSearchParams(location.search).get('returnTo') || '';
+          const safe = (typeof raw === 'string' && raw.length > 0
+                        && raw.charAt(0) === '/'
+                        && raw.charAt(1) !== '/'
+                        && raw.charAt(1) !== '\\'
+                        && !/^javascript:/i.test(raw)) ? raw : '/index.html';
+          window.location.href = safe;
         } else {
           let resolved = false;
 

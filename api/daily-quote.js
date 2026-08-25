@@ -1,6 +1,17 @@
+import { requireCrmStaff } from './_lib/crm-roles.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   res.setHeader('Cache-Control', 'no-store');
+
+  // [M-03 fix 2026-08-25] Auth-gate + rate-limit. Dashboard-widget: 1x per
+  // bezoek per user, 30/min per IP ruim genoeg. Voorheen anon-callable +
+  // Anthropic-call op elke hit.
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-staff-rol vereist.' });
+  const rl = await checkRateLimit({ req, bucket: 'daily-quote', maxHits: 30, withinSeconds: 60 });
+  if (rl.limited) return res.status(200).json({ quote: 'Elke dag een nieuwe kans om te groeien en anderen te inspireren.' });
 
   const { leads = 0, conversie = 0 } = req.query;
   const apiKey = process.env.ANTHROPIC_API_KEY;

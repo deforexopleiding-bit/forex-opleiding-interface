@@ -488,9 +488,16 @@
          - Bij profile-fetch-fout vallen we terug op /index.html (huidige
            gedrag); nooit een lege string of de huidige URL als doel. */
     async function redirectAfterLogin() {
-      const returnTo = new URLSearchParams(location.search).get('returnTo');
-      if (returnTo) {
-        window.location.href = returnTo;
+      // [M-02 fix 2026-08-25] Open-redirect dicht: alleen interne paden
+      // toestaan. Moet starten met '/' en niet met '//' of '\\' en niet
+      // met een schema. Ongeldig → val terug op role-based landing.
+      const rawReturn = new URLSearchParams(location.search).get('returnTo');
+      if (rawReturn && typeof rawReturn === 'string' && rawReturn.length > 0
+          && rawReturn.charAt(0) === '/'
+          && rawReturn.charAt(1) !== '/'
+          && rawReturn.charAt(1) !== '\\'
+          && !/^javascript:/i.test(rawReturn)) {
+        window.location.href = rawReturn;
         return;
       }
       let target = '/index.html';

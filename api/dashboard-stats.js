@@ -1,5 +1,6 @@
 import { createUserClient } from './supabase.js';
 import { safeError } from './_lib/safe-error.js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
 import { periodRange, nlDayStart, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
 
 // Laatste `n` NL-kalenderdagen (oudste eerst) als UTC-vensters [start, end).
@@ -19,6 +20,12 @@ function nlDayWindowsBack(n, ref) {
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+
+  // [L-05 fix 2026-08-25] Expliciete auth-gate — createUserClient() valt
+  // stil terug op de anon-client bij ontbrekende Bearer, waardoor de query's
+  // eerder RLS-afhankelijk waren voor visibility. Nu: geen Bearer → 401.
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-staff-rol vereist.' });
 
   const period = req.query?.period || 'today';
   // 2026-08-24 custom-range support: ?from=YYYY-MM-DD&to=YYYY-MM-DD override

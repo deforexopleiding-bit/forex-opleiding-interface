@@ -1,6 +1,8 @@
 // Lazy import zodat een ontbrekende dep tijdens module-init geen 500 oplevert
 // op andere endpoints.
 import { safeError } from './_lib/safe-error.js';
+import { requireCrmStaff } from './_lib/crm-roles.js';
+import { checkRateLimit } from './_lib/rate-limit.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -8,6 +10,14 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed — use POST' });
   }
+
+  // [M-03 fix 2026-08-25] Auth-gate + rate-limit. Voorheen anon-callable →
+  // attacker kon server-CPU/memory dichtdrukken via pdf-parse van grote
+  // PDF's. Geen Anthropic-cost, wel resource-DoS.
+  const auth = await requireCrmStaff(req);
+  if (!auth) return res.status(403).json({ error: 'Toegang geweigerd. CRM-staff-rol vereist.' });
+  const rl = await checkRateLimit({ req, bucket: 'pdf-extract', maxHits: 20, withinSeconds: 60 });
+  if (rl.limited) return res.status(429).json({ error: 'Te veel verzoeken — wacht een minuut.' });
 
   const body = typeof req.body === 'string'
     ? JSON.parse(req.body || '{}')
