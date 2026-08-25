@@ -43,6 +43,17 @@ const ALLOWED_ACTIONS = [
   'simulate-inbound',
   'mark-paid',
   'send-test-template',
+  // Real-wiring: elk van deze routeert nu naar een echte, is_test-gescopete
+  // backend (zie _cockpitEndpointFor + ACTION_ROUTES in trigger.js).
+  // simulate-silence blijft de enige noop-audit action.
+  'promise-maturity',
+  'conv-less-resume',
+  'wik-brief',
+  'simulate-promise',
+  'simulate-silence',
+  'create-task',
+  'complete-task',
+  'resume-run',
 ];
 const ALLOWED_ACTIONS_SET = new Set(ALLOWED_ACTIONS);
 

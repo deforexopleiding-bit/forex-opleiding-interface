@@ -24,9 +24,75 @@ export default async function handler(req, res) {
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const messageText = String(body.body || '').trim() || 'Ik zal deze week betalen.';
+  const channel = String(body.channel || 'whatsapp').toLowerCase();
 
     const customer = await getSandboxCustomer();
     if (!customer) return res.status(400).json({ error: 'Geen test-persoon gevonden — seed eerst.' });
+
+    // ── E-mail-tak (Build: cockpit prototype-parity) ──────────────────────
+    // Simuleert een reply-per-email: insert email_messages + zet
+    // paused_manual_reason='reply_email' op de actieve run zodat
+    // conv-less-resume 'em later hervat. Geen conversation_id-koppeling
+    // want dat is exact het "conv-loos" pad.
+    // Alle dunning-crons zijn is_test-gescoped (na PR-scope + #1361) dus
+    // deze fake email_messages-rij wordt door productie-cron niet aangeraakt
+    // (from_address ILIKE customer.email matcht alleen op is_test-customer).
+    // body_fetched_at zetten zodat backfill-bodies geen IMAP-fetch probeert.
+    if (channel === 'email') {
+      if (!customer.email) return res.status(400).json({ error: 'Test-persoon heeft geen e-mailadres.' });
+      if (customer.is_test !== true) return res.status(400).json({ error: 'Customer is geen is_test-klant. Weigering.' });
+
+      const nowIso = new Date().toISOString();
+      const uid    = 'TEST-' + Math.random().toString(36).slice(2, 12);
+      const { data: em, error: emErr } = await supabaseAdmin
+        .from('email_messages')
+        .insert({
+          mailbox:            'administratie',
+          imap_uid:           uid,
+          from_address:       String(customer.email).trim(),
+          from_name:          [customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'Test',
+          subject:            'Re: openstaande factuur (simulate)',
+          date_received:      nowIso,
+          customer_id:        customer.id,
+          snippet:            messageText.slice(0, 300),
+          category:           'klantvraag',
+          category_reason:    '[bron: cockpit-simulate]',
+          category_confidence: 1,
+          requires_action:    true,
+          body_fetched_at:    nowIso,   // ← voorkomt backfill-bodies IMAP-fetch
+          body_truncated:     false,
+          body_fetch_error:   null,
+        })
+        .select('id, mailbox, imap_uid, from_address, subject, date_received')
+        .maybeSingle();
+      if (emErr) return res.status(500).json({ error: 'email_messages insert: ' + emErr.message });
+
+      // Pauzeer actieve dunning_workflow_runs met paused_manual_reason='reply_email'
+      // (conv-less-resume verwerkt deze reden later — zonder helper voor
+      // manual-reason-pauze; conv-less-resume.js zet zelf de UPDATE).
+      const { data: pausedRuns, error: pauseErr } = await supabaseAdmin
+        .from('dunning_workflow_runs')
+        .update({
+          status:              'paused',
+          paused_manual_reason:'reply_email',
+          paused_at:           nowIso,
+          updated_at:          nowIso,
+        })
+        .eq('customer_id', customer.id)
+        .eq('status', 'active')
+        .select('id');
+      if (pauseErr) console.warn('[sandbox-simulate-inbound email] pause fail-soft:', pauseErr?.message || pauseErr);
+
+      return res.status(201).json({
+        ok:                true,
+        channel:           'email',
+        email_message:     em,
+        paused_run_ids:    (pausedRuns || []).map(r => r.id),
+        message:           'E-mail-reply gesimuleerd (email_messages + paused_manual_reason=reply_email). conv-less-resume kan \'m nu hervatten.',
+      });
+    }
+
+    // ── WhatsApp-tak (bestaand pad, ongewijzigd) ──────────────────────────
     if (!customer.phone) return res.status(400).json({ error: 'Test-persoon heeft geen telefoonnummer.' });
 
     const nowIso = new Date().toISOString();

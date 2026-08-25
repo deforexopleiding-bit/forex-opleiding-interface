@@ -34,6 +34,10 @@ const ACTION_ROUTES = {
   'simulate-inbound':       '/api/wanbetalers-sandbox-simulate-inbound',
   'mark-paid':              '/api/wanbetalers-sandbox-mark-paid',
   'send-test-template':     '/api/wanbetalers-sandbox-send-test-template',
+  // Real-wiring: promise-maturity + conv-less-resume via echte handlers
+  // (na PR #1361 scope=test hardening).
+  'promise-maturity':       '/api/wanbetalers-sandbox-run-promise-maturity',
+  'conv-less-resume':       '/api/wanbetalers-sandbox-run-conv-less-resume',
 };
 
 async function audit({ actor, payload, result, status, error }) {

@@ -6429,6 +6429,8 @@
     ai: { asking: false, error: null, plan: null, prompt: '' },
     // iter 4: live-context state (ladder + tijdlijn + berichten + tasks).
     ctx: { loading: false, error: null, data: null, pollTimer: null, expanded: true },
+    // Prototype-parity: welke scenariokaart is nu geselecteerd (voor active-banner).
+    selectedScenarioKey: null,
   };
 
   // ─── Live context fetch + poll (iter 4) ──────────────────────────────────
@@ -6465,122 +6467,173 @@
   // stappen in de builder (nog niet uitvoeren) — user drukt daarna zelf op
   // "Voer sequentie uit". Nieuwe customer wordt aangemaakt door de eerste
   // step (customer-create) zodat elk scenario met een schone lei begint.
+  // Prototype-parity + real-wiring: 7 scenariokaarten uit
+  // docs/dunning-test-cockpit-reference.html:400-458 met test:/verwacht:.
+  // Elke stap gebruikt echte, is_test-gescopete endpoints (via
+  // _cockpitEndpointFor). MANUAL_CONFIRM_PROMISE-inserts gebruiken de shape
+  // die promise-maturity leest zodat de trigger 'em echt rijpt.
+  const COCKPIT_DEFAULT_INVOICES = [
+    { amount: 1200, days_late: 21, scenario_tag: 'proto-inv-1' },
+    { amount: 800,  days_late: 14, scenario_tag: 'proto-inv-2' },
+    { amount: 400,  days_late: 10, scenario_tag: 'proto-inv-3' },
+  ];
   const COCKPIT_SCENARIOS = [
     {
-      key: 'warm-2x-3d', icon: '🌡', title: 'Warm · 2× · 3d',
-      desc: '1 klant, 2 facturen à €150, 3 dagen te laat.',
+      key: 'happy', icon: '✅', title: 'Betaalt na 1e herinnering',
+      test:    'klant betaalt direct na dag 7',
+      expect:  'run afgerond (paid)',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Warm Scenario' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-1' },
-          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-2' },
-        ]}, explain: '2 facturen à €150, 3 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+        { action: 'customer-create',  params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',   params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',           params: {},                                                                         explain: 'Dag 7 · 1e herinnering (motor)' },
+        { action: 'simulate-inbound', params: { __use_last_customer: true },                                              explain: 'Klant: "Oeps, vergeten — ik betaal nu meteen!"' },
+        { action: 'mark-paid',        params: { __use_last_customer: true },                                              explain: '€2.400 voldaan → run AFGEROND' },
       ],
     },
     {
-      key: 'koud-3x-14d', icon: '❄', title: 'Koud · 3× · 14d',
-      desc: '1 klant, 3 facturen à €297, 14 dagen te laat.',
+      key: 'promise-kept', icon: '🤝', title: 'Belofte — nagekomen',
+      test:    'belooft over 3 dagen, en betaalt',
+      expect:  'belofte → nagekomen → afgerond',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Koud Scenario' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-1' },
-          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-2' },
-          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-3' },
-        ]}, explain: '3 facturen à €297, 14 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+        { action: 'customer-create',    params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',     params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',             params: {},                                                                         explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound',   params: { __use_last_customer: true },                                              explain: 'Klant: "Ik betaal binnen 3 dagen"' },
+        { action: 'simulate-promise',   params: { __use_last_customer: true, days_ago: 4 },                                 explain: 'MANUAL_CONFIRM_PROMISE (hint −4d, direct rijp)' },
+        { action: 'mark-paid',          params: { __use_last_customer: true },                                              explain: 'Betaald binnen termijn' },
+        { action: 'promise-maturity',   params: {},                                                                         explain: 'Promise-maturity → NAGEKOMEN' },
       ],
     },
     {
-      key: 'pauze-belofte', icon: '⏸', title: 'Pauze · belofte',
-      desc: '1 factuur, klant reageert, betaalt uiteindelijk.',
+      key: 'promise-broken', icon: '⛔', title: 'Belofte — gebroken',
+      test:    'belooft over 3 dagen, betaalt NIET',
+      expect:  'belofte verlopen → mens-taak, flow loopt door',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Pauze Belofte' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 250, days_late: 5, scenario_tag: 'pauze-belofte' },
-        ]}, explain: '1 factuur, €250, 5 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start dunning-run' },
-        { action: 'simulate-inbound', params: { __use_last_customer: true }, explain: 'Klant reageert (pauzeert de run)' },
-        { action: 'mark-paid', params: { __use_last_customer: true }, explain: 'Betaling geboekt' },
+        { action: 'customer-create',    params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',     params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',             params: {},                                                                         explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound',   params: { __use_last_customer: true },                                              explain: 'Klant: "Ik betaal binnen 3 dagen"' },
+        { action: 'simulate-promise',   params: { __use_last_customer: true, days_ago: 4 },                                 explain: 'MANUAL_CONFIRM_PROMISE (hint −4d)' },
+        { action: 'promise-maturity',   params: {},                                                                         explain: 'Belofte verlopen · nog steeds open → mens-taak' },
       ],
     },
     {
-      key: 'escalatie-14d', icon: '🚨', title: 'Escalatie · 14d',
-      desc: '1 factuur 14d oud, fast-forward door alle stappen.',
+      key: 'reply-silence', icon: '🔇', title: 'Reageert, dan stilte',
+      test:    'reageert dag 7, wij reageren, klant valt stil',
+      expect:  'nudges r1/r2 → automatisch hervat',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Escalatie Test' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 500, days_late: 14, scenario_tag: 'escalatie-14d' },
-        ]}, explain: '1 factuur, €500, 14 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start' },
-        { action: 'fast-forward', params: { __use_last_customer: true }, explain: 'Ladder-stap doorspoelen' },
+        { action: 'customer-create',        params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',         params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',                 params: {},                                                                         explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound',       params: { __use_last_customer: true },                                              explain: 'Klant: "Sorry! ik kijk er zo naar" → pauze' },
+        { action: 'conversation-reminders', params: {},                                                                         explain: 'Nudge r1 + r2 · stilte-drempel' },
+        { action: 'resume-run',             params: { __use_last_customer: true },                                              explain: 'Run hervat via unpauseRunsForConversation' },
       ],
     },
     {
-      key: 'bulk-round-1', icon: '📦', title: 'Bulk · ronde 1',
-      desc: 'Bulk-send-cron triggert een goedgekeurde bulk-job.',
+      key: 'email-reply', icon: '✉️', title: 'Reageert per e-mail',
+      test:    'reply via e-mail (pauze zonder conversation-id)',
+      expect:  'conv-less-resume pakt \'m op',
       steps: [
-        { action: 'bulk-send', params: {}, explain: 'wanbetalers-sandbox-run-bulk' },
+        { action: 'customer-create',      params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',       params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',               params: {},                                                                         explain: 'Dag 7 · herinnering per e-mail' },
+        { action: 'simulate-inbound',     params: { __use_last_customer: true, channel: 'email' },                             explain: 'Klant antwoordt per e-mail · paused_manual_reason=reply_email' },
+        { action: 'conv-less-resume',     params: {},                                                                         explain: 'Conv-less-resume sweep pakt \'m op (scope=test)' },
       ],
     },
     {
-      key: 'credit-round', icon: '💳', title: 'Crediteerronde',
-      desc: '1 klant + factuur, simulate-credit-round-flow.',
+      key: 'no-response', icon: '📄', title: 'Nooit reactie → WIK → incasso',
+      test:    'klant reageert nooit, hele ladder',
+      expect:  'd7→d37, WIK-brief dag 21, incasso dag 37',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Credit Test' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 199, days_late: 7, scenario_tag: 'credit-round' },
-        ]}, explain: '1 factuur, €199, 7 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start' },
-        { action: 'breach-check', params: {}, explain: 'Arrangements breach-check' },
+        { action: 'customer-create',  params: { full_name: 'Test Klant' },                                                    explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',   params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },              explain: '3 facturen · €2.400 open' },
+        { action: 'engine',           params: {},                                                                             explain: 'Dag 7 · 1e herinnering (WhatsApp)' },
+        { action: 'fast-forward',     params: { to_day: 14 },                                                                 explain: 'Dag 14 · aanmaning (e-mail)' },
+        { action: 'fast-forward',     params: { to_day: 21 },                                                                 explain: 'Dag 21 · 2e aanmaning + WIK-brief auto-gen' },
+        { action: 'wik-brief',        params: { __use_last_customer: true },                                                  explain: 'Directe generatePreBriefForCustomer (isolated test)' },
+        { action: 'fast-forward',     params: { to_day: 37 },                                                                 explain: 'Dag 37 · overdracht naar incasso' },
       ],
     },
     {
-      key: 'no-show-inbound', icon: '🔕', title: 'Geen inbound',
-      desc: 'Klant reageert niet — conv-reminder-cron moet nudgen.',
+      key: 'arrangement', icon: '📆', title: 'Betalingsregeling',
+      test:    'klant vraagt termijnen, akkoord',
+      expect:  'run gepauzeerd op regeling, termijnen',
       steps: [
-        { action: 'customer-create', params: { full_name: 'No Show' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 175, days_late: 8, scenario_tag: 'no-show-inbound' },
-        ]}, explain: '1 factuur, €175, 8 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start' },
-        { action: 'conversation-reminders', params: {}, explain: 'Reminder-cron voor stille klanten' },
+        { action: 'customer-create',  params: { full_name: 'Test Klant' },                                                    explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',   params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },              explain: '3 facturen · €2.400 open' },
+        { action: 'engine',           params: {},                                                                             explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound', params: { __use_last_customer: true },                                                  explain: 'Klant: "Kan ik in termijnen betalen?"' },
+        { action: 'breach-check',     params: {},                                                                             explain: 'Regeling voorgesteld · pauze op arrangement' },
+        { action: 'mark-paid',        params: { __use_last_customer: true, partial: 800 },                                    explain: 'Termijn 1/3 betaald · saldo €1.600' },
       ],
-    },
-    {
-      key: 'custom', icon: '⚙', title: 'Custom',
-      desc: 'Leeg — bouw je eigen sequentie in de blok-bouwer.',
-      steps: [],
     },
   ];
 
-  // Losse stap-blokken voor de blok-bouwer (klik = voeg toe).
+  // Prototype-parity + real-wiring palette (docs/…-reference.html:507-526).
+  // 5 groepen, labels 1-op-1. Elk blok delegeert naar dezelfde cockpit-
+  // endpoints als de scenariokaarten (via _cockpitEndpointFor). `group`
+  // bepaalt de visuele groepering.
   const COCKPIT_BUILDER_BLOCKS = [
-    { action: 'customer-create',       label: '+ klant',         params: { full_name: 'Handmatig' } },
-    { action: 'invoice-create',        label: '+ factuur',       params: { __use_last_customer: true, invoices: [{ amount: 100, days_late: 5, scenario_tag: 'manual' }] } },
-    { action: 'engine',                label: '▶ engine' },
-    { action: 'conversation-reminders',label: '▶ conv-reminders' },
-    { action: 'bulk-send',             label: '▶ bulk-send' },
-    { action: 'breach-check',          label: '▶ breach-check' },
-    { action: 'fast-forward',          label: '⏩ fast-forward' },
-    { action: 'simulate-inbound',      label: '📥 simulate-inbound', params: { __use_last_customer: true } },
-    { action: 'mark-paid',             label: '💰 mark-paid',    params: { __use_last_customer: true } },
-    { action: 'send-test-template',    label: '📨 test-template' },
-    { action: 'verify-grendel',        label: '🔒 verify-grendel' },
-    { action: 'reset',                 label: '🧹 reset (dry-run)', params: { dry_run: true } },
+    // Verzenden
+    { group: 'Verzenden', action: 'engine',                 label: 'Herinnering dag 7',      params: {} },
+    { group: 'Verzenden', action: 'send-test-template',     label: 'Aanmaning (e-mail)',     params: {} },
+    { group: 'Verzenden', action: 'wik-brief',              label: 'WIK-brief',              params: { __use_last_customer: true } },
+    // Klant
+    { group: 'Klant',     action: 'simulate-inbound',       label: 'Reageert (WhatsApp)',    params: { __use_last_customer: true, channel: 'whatsapp' } },
+    { group: 'Klant',     action: 'simulate-inbound',       label: 'Reageert (e-mail)',      params: { __use_last_customer: true, channel: 'email' } },
+    { group: 'Klant',     action: 'simulate-promise',       label: 'Belofte (+3 dagen)',     params: { __use_last_customer: true, days_ago: 4 } },
+    { group: 'Klant',     action: 'mark-paid',              label: 'Betaling ontvangen',     params: { __use_last_customer: true } },
+    { group: 'Klant',     action: 'simulate-silence',       label: 'Blijft stil',            params: { __use_last_customer: true } },
+    // Taken (create-task + complete-task)
+    { group: 'Taken',     action: 'create-task',            label: 'Taak: bellen open',       params: { __use_last_customer: true, task_type: 'MANUAL_FOLLOWUP' } },
+    { group: 'Taken',     action: 'create-task',            label: 'Taak: betaling checken',  params: { __use_last_customer: true, task_type: 'MANUAL_VERIFY_PAYMENT' } },
+    { group: 'Taken',     action: 'create-task',            label: 'Taak: escalatie',         params: { __use_last_customer: true, task_type: 'MANUAL_ESCALATION' } },
+    { group: 'Taken',     action: 'complete-task',          label: 'Taak afgehandeld',        params: { __use_last_customer: true } },
+    // Systeem
+    { group: 'Systeem',   action: 'engine',                 label: 'Engine',                 params: {} },
+    { group: 'Systeem',   action: 'promise-maturity',       label: 'Promise-maturity',       params: {} },
+    { group: 'Systeem',   action: 'conv-less-resume',       label: 'Conv-less-resume',       params: {} },
+    { group: 'Systeem',   action: 'conversation-reminders', label: '15-min nudge',           params: {} },
+    { group: 'Systeem',   action: 'resume-run',             label: 'Hervat run',             params: { __use_last_customer: true } },
+    // Ladder
+    { group: 'Ladder',    action: 'fast-forward',           label: 'Volgende dag',           params: {} },
   ];
 
   // ─── Endpoints per action ────────────────────────────────────────────────
   // Bepaalt welk cockpit-endpoint een builder-step aanroept. LEEG voor
   // trigger-multiplex-acties; direct-endpoint anders. Alles is_test-gescoped.
+  // Prototype-parity: nieuwe scenario/blok-acties zonder echt endpoint gaan
+  // via dunning-test-noop-audit (audit-only, DB-side-effect optioneel later).
+  // Echte behavior voor promise-maturity / conv-less-resume / wik-brief /
+  // simulate-promise / simulate-silence / create-task / complete-task komt
+  // in vervolg-PRs — de UI toont ondertussen wat er zou gebeuren zonder
+  // dode knoppen.
+  // Real-wiring: alle prototype-actions hebben nu echte, is_test-gescopete
+  // endpoints. Alleen 'simulate-silence' blijft noop-audit (per definitie
+  // geen actie — het is tijd die verstrijkt).
+  const COCKPIT_NOOP_AUDIT_ACTIONS = new Set(['simulate-silence']);
   function _cockpitEndpointFor(step) {
     switch (step.action) {
-      case 'customer-create': return { url: '/api/dunning-test-customer-create', direct: true };
-      case 'invoice-create':  return { url: '/api/dunning-test-invoice-create',  direct: true };
-      case 'reset':           return { url: '/api/dunning-test-reset',           direct: true };
-      case 'verify-grendel':  return { url: '/api/dunning-test-verify-grendel',  direct: true };
-      default:                return { url: '/api/dunning-test-trigger',         direct: false };
+      // Directe cockpit-endpoints (bestaand + nieuw uit real-wiring PR).
+      case 'customer-create':   return { url: '/api/dunning-test-customer-create',    direct: true };
+      case 'invoice-create':    return { url: '/api/dunning-test-invoice-create',     direct: true };
+      case 'reset':             return { url: '/api/dunning-test-reset',              direct: true };
+      case 'verify-grendel':    return { url: '/api/dunning-test-verify-grendel',     direct: true };
+      case 'simulate-promise':  return { url: '/api/dunning-test-simulate-promise',   direct: true };
+      case 'create-task':       return { url: '/api/dunning-test-create-task',        direct: true };
+      case 'complete-task':     return { url: '/api/dunning-test-complete-task',      direct: true };
+      case 'resume-run':        return { url: '/api/dunning-test-resume-run',         direct: true };
+      case 'wik-brief':         return { url: '/api/dunning-test-wik-brief',          direct: true };
     }
+    if (COCKPIT_NOOP_AUDIT_ACTIONS.has(step.action)) {
+      return { url: '/api/dunning-test-noop-audit', direct: true, isNoop: true };
+    }
+    // Trigger-multiplex voor engine/conversation-reminders/bulk-send/
+    // breach-check/fast-forward/simulate-inbound/mark-paid/send-test-template/
+    // promise-maturity/conv-less-resume (via ACTION_ROUTES in trigger.js).
+    return { url: '/api/dunning-test-trigger', direct: false };
   }
 
   // Bouwt de body voor een builder-step. Vervangt __use_last_customer door
@@ -6593,14 +6646,15 @@
     }
     const ep = _cockpitEndpointFor(step);
     if (ep.direct) {
-      // Direct-endpoint accepteert de params 1-op-1.
       if (step.action === 'reset') {
-        // Reset heeft z'n eigen shape.
         return { confirm: true, dry_run_count_only: !!p.dry_run };
+      }
+      if (ep.isNoop) {
+        // Noop-audit-endpoint wil action + label + params in de body.
+        return { action: step.action, explain: step.explain || step.action, params: p };
       }
       return p;
     }
-    // Trigger-multiplex verwacht {action, params}.
     return { action: step.action, params: p };
   }
 
@@ -6608,6 +6662,7 @@
   window.__cockpitLoadScenario = (key) => {
     const sc = COCKPIT_SCENARIOS.find(x => x.key === key);
     if (!sc) return;
+    _cockpit.selectedScenarioKey = key;
     // Deep-copy zodat wijzigingen in de builder de preset niet muteren.
     _cockpit.builder = {
       steps: sc.steps.map(s => JSON.parse(JSON.stringify(s))),
@@ -6617,9 +6672,12 @@
   };
 
   // ─── Blok-bouwer manipulatie ─────────────────────────────────────────────
-  window.__cockpitBuilderAdd = (action) => {
-    const block = COCKPIT_BUILDER_BLOCKS.find(b => b.action === action);
-    if (!block) return;
+  // Blok-index-based (prototype heeft duplicate action-strings met
+  // verschillende params, bv. simulate-inbound WA + simulate-inbound email).
+  window.__cockpitBuilderAdd = (idx) => {
+    const n = Number(idx);
+    if (!Number.isInteger(n) || n < 0 || n >= COCKPIT_BUILDER_BLOCKS.length) return;
+    const block = COCKPIT_BUILDER_BLOCKS[n];
     _cockpit.builder.steps.push(JSON.parse(JSON.stringify({ action: block.action, params: block.params || {}, explain: block.label })));
     if (render) render();
   };
@@ -6638,6 +6696,83 @@
   window.__cockpitBuilderClear = () => {
     _cockpit.builder = { steps: [], running: false, currentIdx: -1, log: [] };
     if (render) render();
+  };
+
+  // Besturingsrij-handlers (prototype-parity §3): één-shot actie via de
+  // bestaande runner (delegates naar echte cockpit-endpoints of
+  // dunning-test-noop-audit voor prototype-parity acties).
+  window.__cockpitCtlOne = async (action) => {
+    if (action === 'step') {
+      // "Volgende stap" — voert de volgende ongedane stap uit als er een
+      // sequence in de builder staat; anders no-op.
+      const b = _cockpit.builder;
+      if (b.running || b.steps.length === 0) { showToast('Geen sequentie in de builder.', 'info'); return; }
+      const nextIdx = b.log.length;
+      if (nextIdx >= b.steps.length) { showToast('Sequentie klaar.', 'info'); return; }
+      // Sub-run: 1 stap.
+      b.running = true; b.currentIdx = nextIdx; if (render) render();
+      const step = b.steps[nextIdx];
+      const ep = _cockpitEndpointFor(step);
+      const body = _cockpitStepBody(step);
+      const j = await tryFetch('cockpit-step', ep.url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const ok = !(j?.__error || j?.error);
+      b.log.push({ idx: nextIdx, action: step.action, ok, response: j });
+      if (ok && step.action === 'customer-create' && j?.customer?.id) {
+        _cockpit.activeCustomerId = j.customer.id;
+      }
+      b.running = false; b.currentIdx = -1; if (render) render();
+      _cockpit.fetched = false; _cockpitFetchStatus(); _cockpitFetchContext();
+      return;
+    }
+    // Ad-hoc actie (engine / promise-maturity / conv-less-resume / wik-brief).
+    const step = { action, params: {}, explain: action };
+    const ep = _cockpitEndpointFor(step);
+    const body = _cockpitStepBody(step);
+    const j = await tryFetch('cockpit-ctl', ep.url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (j?.__error || j?.error) {
+      showToast('Actie mislukt: ' + (j.__error || j.error), 'warn');
+    } else {
+      showToast('Actie uitgevoerd: ' + action + (j?.simulated ? ' (audit-only)' : ''), 'ok');
+    }
+    _cockpitFetchContext();
+  };
+
+  window.__cockpitCtlReset = () => {
+    // Custom confirm — geen native. Reset volgt bestaande reset-flow
+    // (count-first dry-run — user krijgt tellingen te zien via de audit).
+    openConfirm(
+      'Alle is_test-data wissen? Er wordt eerst een tellings-preview gedaan (dry-run) en pas als je bevestigt worden test-klanten/facturen/runs verwijderd. Productie-data blijft ongemoeid.',
+      async () => {
+        const j = await tryFetch('cockpit-reset-dry', '/api/dunning-test-reset', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true, dry_run_count_only: true }),
+        });
+        if (j?.__error || j?.error) { showToast('Reset dry-run mislukt: ' + (j.__error || j.error), 'warn'); return; }
+        const c = j.counts || {};
+        const summary = Object.entries(c).filter(([, n]) => n > 0).map(([k, n]) => `${k}: ${n}`).join(' · ') || 'geen data';
+        openConfirm(
+          `Dry-run gevonden: ${summary}. Alles daadwerkelijk verwijderen (transactie-safe, rollback bij FK-fout)?`,
+          async () => {
+            const r = await tryFetch('cockpit-reset-apply', '/api/dunning-test-reset', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ confirm: true, dry_run_count_only: false }),
+            });
+            if (r?.__error || r?.error) { showToast('Reset mislukt: ' + (r.__error || r.error), 'warn'); return; }
+            showToast('Reset klaar: ' + (r.message || 'ok'), 'ok');
+            _cockpit.activeCustomerId = null;
+            _cockpit.selectedScenarioKey = null;
+            _cockpit.builder = { steps: [], running: false, currentIdx: -1, log: [] };
+            _cockpit.fetched = false; _cockpitFetchStatus(); _cockpitFetchContext();
+          },
+          'warn',
+        );
+      },
+      'warn',
+    );
   };
 
   // ─── AI-tekstinvoer (iter 3) — vraag Claude om een plan ────────────────
@@ -6695,6 +6830,11 @@
     'customer-create', 'invoice-create', 'reset', 'verify-grendel',
     'engine', 'conversation-reminders', 'bulk-send', 'breach-check',
     'fast-forward', 'simulate-inbound', 'mark-paid', 'send-test-template',
+    // Real-wiring (echte endpoints, is_test-gescoped):
+    'promise-maturity', 'conv-less-resume', 'wik-brief',
+    'simulate-promise', 'create-task', 'complete-task', 'resume-run',
+    // Blijft noop-audit (per definitie geen actie):
+    'simulate-silence',
   ]);
   window.__cockpitAiRun = () => {
     const plan = _cockpit.ai.plan;
@@ -6838,23 +6978,40 @@
       </div>
     `;
 
-    // ── Scenariobibliotheek (iter 2) ──────────────────────────────────────
+    // ── Scenariobibliotheek (prototype-parity §2) ─────────────────────────
+    // 7 kaarten uit het prototype (docs/…-reference.html:400-458). Elke
+    // kaart toont test:/verwacht:-regels; klik = laadt stappen + toont
+    // active-banner. Kaart met _cockpit.selectedScenarioKey krijgt .sel.
+    const selKey = _cockpit.selectedScenarioKey;
     const scenariosHtml = `
       <div class="kv-cockpit-card">
-        <div class="kvcc-title" style="margin-bottom:2px">Scenariobibliotheek</div>
-        <div class="kvcc-sub" style="margin-bottom:10px">Klik = laadt stappen in de blok-bouwer. Nog niet uitvoeren — je drukt zelf op "Voer sequentie uit".</div>
+        <div class="kvcc-title" style="margin-bottom:2px">2 · Kies een scenario</div>
+        <div class="kvcc-sub" style="margin-bottom:10px">Klik = laadt in de blok-bouwer. Zelf op "Speel af" drukken om uit te voeren via de echte cockpit-endpoints.</div>
         <div class="kv-cockpit-scenarios">
           ${COCKPIT_SCENARIOS.map(sc => `
-            <button class="kv-cockpit-scard" onclick="window.__cockpitLoadScenario('${sc.key}')" title="${esc(sc.desc)}">
+            <button class="kv-cockpit-scard ${sc.key === selKey ? 'kvcs-sel' : ''}" onclick="window.__cockpitLoadScenario('${sc.key}')">
               <div class="kvcs-icon">${sc.icon}</div>
               <div class="kvcs-title">${esc(sc.title)}</div>
-              <div class="kvcs-desc">${esc(sc.desc)}</div>
-              <div class="kvcs-count">${sc.steps.length ? sc.steps.length + ' stap(pen)' : 'leeg'}</div>
+              <div class="kvcs-desc">test: <b>${esc(sc.test || '')}</b></div>
+              <div class="kvcs-desc">verwacht: <b>${esc(sc.expect || '')}</b></div>
+              <div class="kvcs-count">${sc.steps.length} stap${sc.steps.length === 1 ? '' : 'pen'}</div>
             </button>
           `).join('')}
         </div>
       </div>
     `;
+
+    // Active-banner (prototype-parity r467-469): verschijnt na scenario-klik.
+    const selSc = selKey ? COCKPIT_SCENARIOS.find(x => x.key === selKey) : null;
+    const activeBannerHtml = selSc ? `
+      <div class="kv-cockpit-banner">
+        <div class="kvcb-ic">${selSc.icon}</div>
+        <div>
+          <div class="kvcb-t">Actief: ${esc(selSc.title)}</div>
+          <div class="kvcb-x">Test: <b>${esc(selSc.test)}</b> · Verwacht: <b>${esc(selSc.expect)}</b></div>
+        </div>
+      </div>
+    ` : '';
 
     // ── Blok-bouwer (iter 2) ──────────────────────────────────────────────
     const b = _cockpit.builder;
@@ -6882,8 +7039,24 @@
           `;
         }).join('');
 
-    const blocksAddHtml = COCKPIT_BUILDER_BLOCKS.map(bl => `
-      <button class="kv-cockpit-block-add" ${b.running ? 'disabled' : ''} onclick="window.__cockpitBuilderAdd('${bl.action}')">${esc(bl.label)}</button>
+    // Prototype-parity: palette gegroepeerd per bl.group. Groep-label
+    // links, blokken erachter. Klik = builder.add(index).
+    const _groups = {};
+    const _gOrder = [];
+    COCKPIT_BUILDER_BLOCKS.forEach((bl, i) => {
+      const g = bl.group || 'Overig';
+      if (!_groups[g]) { _groups[g] = []; _gOrder.push(g); }
+      _groups[g].push({ bl, idx: i });
+    });
+    const blocksAddHtml = _gOrder.map(g => `
+      <div class="kv-cockpit-pgroup">
+        <span class="kvpg-lbl">${esc(g)}</span>
+        <div class="kvpg-blks">
+          ${_groups[g].map(({ bl, idx }) => `
+            <button class="kv-cockpit-block-add" ${b.running ? 'disabled' : ''} onclick="window.__cockpitBuilderAdd(${idx})">${esc(bl.label)}</button>
+          `).join('')}
+        </div>
+      </div>
     `).join('');
 
     const runLogHtml = b.log.length === 0 ? '' : `
@@ -6990,87 +7163,144 @@
     const ctx = _cockpit.ctx.data;
 
     // Persona-hero (iter 5)
+    // Persona-hero (prototype-parity r252-270) — ALTIJD zichtbaar bovenaan,
+    // ook zonder actieve klant. Toont default 'Test Klant · 3 facturen ·
+    // €2.400' als geen ctx-data, echte klant zodra activeCustomerId gezet.
     const cust = ctx?.customer;
     const invs = ctx?.invoices || [];
-    const persInitials = cust ? ((cust.first_name || '').replace(/[^\p{L}]/gu, '').slice(0, 1) + (cust.last_name || '').slice(0, 1)).toUpperCase() || 'T' : null;
+    const hasCust = !!(cust && _cockpit.activeCustomerId);
+    const custName = hasCust
+      ? (((cust.first_name || '') + ' ' + (cust.last_name || '')).trim() || 'Test Klant')
+      : 'Test Klant';
+    const persInitials = ((custName || 'TK').split(/\s+/).map(w => w ? w[0] : '').join('').slice(0, 2) || 'TK').toUpperCase();
+    const custPhone = hasCust ? (cust.phone || '—') : (_cockpit.status?.sandbox_contact?.phone || '+31 6 •• test');
+    const custEmail = hasCust ? (cust.email || '—') : (_cockpit.status?.sandbox_contact?.email || 'test@deforex…');
     const totalOpen = invs.reduce((s, i) => s + (Number(i.amount_total || 0) - Number(i.amount_paid || 0)), 0);
-    const runStatusText = ctx?.active_run?.status || (invs.length ? 'ready' : 'idle');
-    const heroHtml = _cockpit.activeCustomerId && cust ? `
+    const runStatus = ctx?.active_run?.status || null;
+    const runStatusText = runStatus ? String(runStatus).toUpperCase() : (hasCust ? 'READY' : 'IDLE');
+    const runPillClass = ({
+      active:'kvh-p-active', ready:'kvh-p-ready', paused:'kvh-p-paused',
+      resumed:'kvh-p-resumed', done:'kvh-p-done', blocked:'kvh-p-blocked',
+    }[String(runStatus || (hasCust ? 'ready' : 'idle')).toLowerCase()]) || 'kvh-p-idle';
+
+    // Ladder-dag afgeleid uit active_run.step_index → 0=7 / 1=14 / 2=21 / 3=28 / 4=37.
+    const LADDER_DAYS = [7, 14, 21, 28, 37];
+    const stepIdxRaw = ctx?.active_run?.step_index;
+    const ladderIdx = (typeof stepIdxRaw === 'number' && stepIdxRaw >= 0 && stepIdxRaw < LADDER_DAYS.length) ? stepIdxRaw : 0;
+    const currentDay = LADDER_DAYS[ladderIdx];
+
+    // Guard-chip: 3 states uit pending_actions (blocking vs non-blocking).
+    // Blocking = MANUAL_VERIFY_PAYMENT / MANUAL_ESCALATION. Non-blocking = rest.
+    const openTasks = (ctx?.pending_actions || []).filter(t => t.status === 'PENDING' || t.status === 'APPROVED');
+    const blockingSet = new Set(['MANUAL_VERIFY_PAYMENT', 'MANUAL_ESCALATION']);
+    const blockingTasks = openTasks.filter(t => blockingSet.has(t.action_type));
+    const nonBlockingTasks = openTasks.filter(t => !blockingSet.has(t.action_type));
+    const guardChip = blockingTasks.length > 0
+      ? { c: 'var(--rose)', bg: 'var(--rose-soft)', txt: `⛔ guard: geblokkeerd — ${blockingTasks.map(t => t.action_type.replace(/^MANUAL_/, '').toLowerCase()).join(', ')}` }
+      : (nonBlockingTasks.length > 0
+        ? { c: 'var(--amber)', bg: 'var(--amber-soft)', txt: `🔔 open taak: ${nonBlockingTasks.map(t => t.action_type.replace(/^MANUAL_/, '').toLowerCase()).join(', ')} (loopt door)` }
+        : { c: 'var(--emerald)', bg: 'var(--emerald-soft)', txt: '✓ guard: vrij' });
+
+    // Facturen-lijst: echte invoices als er zijn, anders prototype-defaults.
+    const heroInvoiceRows = invs.length > 0
+      ? invs.slice(0, 5).map(i => ({ nr: i.invoice_number || '', amt: Number(i.amount_total || 0), st: i.status || 'open' }))
+      : COCKPIT_DEFAULT_INVOICES.map((iv, k) => ({ nr: '#' + (2041 + k), amt: iv.amount, st: 'open' }));
+    const heroTotal = invs.length > 0 ? totalOpen : COCKPIT_DEFAULT_INVOICES.reduce((s, iv) => s + iv.amount, 0);
+
+    const heroHtml = `
       <div class="kv-cockpit-hero">
         <div class="kvh-persona">
-          <div class="kvh-avatar">${esc(persInitials || 'T')}</div>
+          <div class="kvh-avatar">${esc(persInitials)}</div>
           <div style="flex:1;min-width:0">
-            <div class="kvh-name">${esc(((cust.first_name || '') + ' ' + (cust.last_name || '')).trim() || '—')}</div>
+            <div class="kvh-name">${esc(custName)}</div>
             <div class="kvh-meta">
-              <span><b>Tel</b> ${esc(cust.phone || '—')}</span>
-              <span><b>E-mail</b> ${esc(cust.email || '—')}</span>
-              <span><b>ID</b> <code>${esc(String(cust.id || '').slice(0, 8))}…</code></span>
+              <span>📱 <b>${esc(custPhone)}</b></span>
+              <span>✉️ <b>${esc(custEmail)}</b></span>
+              ${hasCust ? `<span>🆔 <code>${esc(String(cust.id || '').slice(0, 8))}…</code></span>` : ''}
             </div>
             <div class="kvh-statusline">
-              <span class="kvh-pill kvh-p-${esc(runStatusText)}"><span class="kvh-dot"></span>${esc(runStatusText)}</span>
-              ${invs.length > 0 ? `<span class="kvh-pill kvh-p-invoices">${invs.length} factuur${invs.length === 1 ? '' : 'en'}</span>` : ''}
-              ${ctx?.pending_actions?.length ? `<span class="kvh-pill kvh-p-tasks">${ctx.pending_actions.length} taak/taken</span>` : ''}
-              ${ctx?.messages?.length ? `<span class="kvh-pill kvh-p-msgs">${ctx.messages.length} bericht(en)</span>` : ''}
+              <span class="kvh-pill ${runPillClass}"><span class="kvh-dot"></span>${esc(runStatusText)}</span>
+              <span class="kvh-pill kvh-p-day">ladderstap: dag ${currentDay}</span>
+              <span class="kvh-pill" style="background:${guardChip.bg};color:${guardChip.c}">${esc(guardChip.txt)}</span>
             </div>
           </div>
         </div>
         <div class="kvh-situation">
-          <div class="kvh-sec-lbl">Facturen</div>
+          <div class="kvh-sec-lbl">Situatie</div>
           <div class="kvh-invoices">
-            ${invs.length === 0 ? `<div style="padding:8px;font-size:11.5px;color:var(--text-3);text-align:center">Geen facturen</div>` : invs.slice(0, 5).map(i => `
+            ${heroInvoiceRows.map(r => `
               <div class="kvh-inv">
-                <span class="kvh-inv-nr">${esc(i.invoice_number || '')}</span>
-                <span class="kvh-inv-amt">€ ${Number(i.amount_total || 0).toFixed(2)}</span>
-                <span class="kvh-inv-st">${esc(i.status || '')}</span>
+                <span class="kvh-inv-nr">Factuur ${esc(r.nr)}</span>
+                <span class="kvh-inv-amt">€ ${r.amt.toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</span>
+                <span class="kvh-inv-st">${esc(r.st)}</span>
               </div>
             `).join('')}
           </div>
-          ${invs.length > 0 ? `
-            <div class="kvh-totrow">
-              <span>Openstaand totaal</span>
-              <b>€ ${totalOpen.toFixed(2)}</b>
-            </div>
-          ` : ''}
+          <div class="kvh-totrow">
+            <span>${heroInvoiceRows.length} factuur${heroInvoiceRows.length === 1 ? '' : 'en'} open</span>
+            <b>€ ${heroTotal.toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</b>
+          </div>
         </div>
       </div>
-    ` : '';
+    `;
 
-    // Ladder — 7-staps horizontaal. Stappen afgeleid uit dunning_workflow_runs.
-    const LADDER_STEPS = ['nieuw', 'r1', 'r2', 'r3', 'r4', 'escalatie', 'afgesloten'];
-    const currentIdx = ctx?.active_run?.step_index != null ? Math.min(ctx.active_run.step_index + 1, LADDER_STEPS.length - 1) : (ctx?.active_run ? 1 : 0);
-    const runStatus = ctx?.active_run?.status || null;
-    const runStatusPill = runStatus ? {
-      active:   { c: 'var(--emerald)',   bg: 'var(--emerald-soft)' },
-      paused:   { c: 'var(--amber)',     bg: 'var(--amber-soft)' },
-      resumed:  { c: 'var(--accent)',    bg: 'var(--accent-soft, var(--surface-2))' },
-      done:     { c: 'var(--text-3)',    bg: 'var(--surface-2)' },
-      blocked:  { c: 'var(--rose)',      bg: 'var(--rose-soft)' },
-    }[runStatus] || { c: 'var(--text-3)', bg: 'var(--surface-2)' } : null;
-
-    const ladderHtml = _cockpit.activeCustomerId ? `
+    // Ladder — ALTIJD zichtbaar met dag 7/14/21/28/37 (prototype-parity
+    // r292-302). Fill-progress uit ladderIdx. Labels 1-op-1 uit prototype.
+    const LADDER = [
+      { day: 7,  wat: '1e herinnering' },
+      { day: 14, wat: 'aanmaning' },
+      { day: 21, wat: '2e aanmaning' },
+      { day: 28, wat: 'WIK-brief' },
+      { day: 37, wat: 'incasso' },
+    ];
+    const fillPct = ((ladderIdx) / (LADDER.length - 1)) * 100;
+    const ladderHtml = `
       <div class="kv-cockpit-card">
         <div class="kvcc-head">
           <div>
-            <div class="kvcc-title">Ladder ${runStatus ? `<span class="kvcc-pill" style="background:${runStatusPill.bg};color:${runStatusPill.c}">${esc(runStatus)}</span>` : ''}</div>
-            <div class="kvcc-sub">Actieve dunning-run voor <code>${esc((ctx?.customer?.first_name || '').slice(0, 40))} ${esc((ctx?.customer?.last_name || '').slice(0, 40))}</code>. Poll elke 5s.</div>
+            <div class="kvcc-title">De ladder <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400;letter-spacing:.06em">DAG 7 → 37</span></div>
+            <div class="kvcc-sub">${hasCust ? 'Live uit dunning_workflow_runs.step_index · poll elke 5s.' : 'Placeholder — actieveer een test-klant om live progress te zien.'}</div>
           </div>
           <button class="btn btn-ghost btn-sm" onclick="window.__cockpitCtxRefresh()" style="font-size:11px">↻</button>
         </div>
         <div class="kv-cockpit-ladder">
-          <div class="kvl-fill" style="width:${(currentIdx / (LADDER_STEPS.length - 1)) * 100}%"></div>
-          ${LADDER_STEPS.map((label, i) => {
-            const done = i < currentIdx;
-            const cur  = i === currentIdx;
-            return `<div class="kvl-step ${done ? 'kvl-done' : ''} ${cur ? 'kvl-cur' : ''}"><div class="kvl-node"></div><div class="kvl-lbl">${esc(label)}</div></div>`;
+          <div class="kvl-fill" style="width:${fillPct}%"></div>
+          ${LADDER.map((L, i) => {
+            const done = i < ladderIdx;
+            const cur  = i === ladderIdx;
+            return `<div class="kvl-step ${done ? 'kvl-done' : ''} ${cur ? 'kvl-cur' : ''}"><div class="kvl-node"></div><div class="kvl-lbl">dag ${L.day}</div><div class="kvl-wat">${esc(L.wat)}</div></div>`;
           }).join('')}
         </div>
       </div>
-    ` : '';
+    `;
+
+    // Besturingsrij (prototype-parity §3 r304-317).
+    // ▶ Speel af / ⏭ Volgende stap / ⚙ Engine / 🤝 Promise-maturity /
+    // 📨 Conv-less-resume / 📄 WIK-brief / ↺ Reset.
+    // Alle knoppen delegeren naar bestaande cockpit-endpoints via
+    // _cockpitEndpointFor (echte behavior); noop-actions gaan via
+    // dunning-test-noop-audit (zie whitelist).
+    const controlsHtml = `
+      <div class="kv-cockpit-card kv-cockpit-controls">
+        <div class="kvcc-title" style="margin-bottom:10px">3 · Besturing</div>
+        <div class="kvco-btns">
+          <button class="kvco-btn kvco-primary" onclick="window.__cockpitBuilderRun()" ${_cockpit.builder.running ? 'disabled' : ''}><span class="kvco-ic">▶</span> Speel af</button>
+          <button class="kvco-btn" onclick="window.__cockpitCtlOne('step')" ${_cockpit.builder.running ? 'disabled' : ''}><span class="kvco-ic">⏭</span> Volgende stap</button>
+          <span class="kvco-sep"></span>
+          <button class="kvco-btn" onclick="window.__cockpitCtlOne('engine')"><span class="kvco-ic">⚙</span> Engine</button>
+          <button class="kvco-btn" onclick="window.__cockpitCtlOne('promise-maturity')"><span class="kvco-ic">🤝</span> Promise-maturity</button>
+          <button class="kvco-btn" onclick="window.__cockpitCtlOne('conv-less-resume')"><span class="kvco-ic">📨</span> Conv-less-resume</button>
+          <button class="kvco-btn" onclick="window.__cockpitCtlOne('wik-brief')"><span class="kvco-ic">📄</span> WIK-brief</button>
+          <span class="kvco-sep"></span>
+          <button class="kvco-btn kvco-ghost" onclick="window.__cockpitCtlReset()"><span class="kvco-ic">↺</span> Reset</button>
+        </div>
+      </div>
+    `;
 
     // Tijdlijn — audit + dunning_log + wa_messages merged.
     const timelineRows = ctx?.timeline || [];
     const tlIcons = { audit: '📋', dunning_log: '⚙', wa_message: '💬' };
-    const tlHtml = _cockpit.activeCustomerId ? `
+    const tlHtml = `
       <div class="kv-cockpit-card">
         <div class="kvcc-head">
           <div>
@@ -7079,7 +7309,7 @@
           </div>
         </div>
         <div class="kv-cockpit-timeline">
-          ${timelineRows.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Nog geen events. Draai een scenario om de tijdlijn te vullen.</div>` : timelineRows.slice(0, 30).map(t => `
+          ${timelineRows.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Nog geen events. ${hasCust ? 'Draai een scenario om de tijdlijn te vullen.' : 'Kies een scenario en druk op ▶ Speel af.'}</div>` : timelineRows.slice(0, 30).map(t => `
             <div class="kv-cockpit-tlrow ${t.source === 'audit' && t.status === 'error' ? 'kvtl-err' : ''}">
               <div class="kvtl-ic">${tlIcons[t.source] || '·'}</div>
               <div class="kvtl-body">
@@ -7094,32 +7324,85 @@
           `).join('')}
         </div>
       </div>
-    ` : '';
+    `;
 
-    // Berichten — WA-conv preview.
+    // Berichten — 3 types (prototype-parity r206-228):
+    //   - WA outbound: groene bubbel rechts + "✓ echt verstuurd → +31…"
+    //   - WA inbound:  blauwe bubbel rechts
+    //   - E-mail:      kader-kaart links (subject + body preview) + "✓ echt verstuurd → email"
+    //   - WIK-brief:   PDF-kaart + "✓ verstuurd per e-mail + aangetekend"
+    // Feed = wa_messages + audit-events met action ∈ {send_email, noop_wik-brief}.
+    // Sandbox-contact als "sent-to"-label.
     const msgs = ctx?.messages || [];
-    const berichtenHtml = _cockpit.activeCustomerId ? `
+    const auditItems = (ctx?.timeline || []).filter(t => t.source === 'audit');
+    const emailAudits = auditItems.filter(t => (t.action || '').startsWith('send_email'));
+    const wikAudits = auditItems.filter(t => (t.action || '').indexOf('wik-brief') !== -1);
+    const sandbox = _cockpit.status?.sandbox_contact || {};
+    const sandboxPhone = sandbox.phone || custPhone;
+    const sandboxEmail = sandbox.email || custEmail;
+
+    const feed = [];
+    msgs.forEach(m => feed.push({ kind: m.direction === 'outbound' ? 'wa-out' : 'wa-in', ts: m.created_at, body: m.body || '' }));
+    emailAudits.forEach(a => feed.push({ kind: 'email', ts: a.ts || a.created_at, subject: 'Herinnering openstaande facturen', body: '(voorbeeld — echte body-render volgt bij live send)' }));
+    wikAudits.forEach(a => feed.push({ kind: 'wik', ts: a.ts || a.created_at, title: 'WIK-brief — 14-dagenbrief', meta: '€2.400,00 · incassokosten aangekondigd · 14 dagen termijn' }));
+    feed.sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
+
+    const berichtHtml = (m) => {
+      if (m.kind === 'wa-out') return `
+        <div class="kv-cockpit-msg kvcm-wa-out">
+          <div class="kvcm-cap">💬 WhatsApp · uitgaand</div>
+          <div class="kvcm-bubble">${esc(String(m.body).slice(0, 400))}</div>
+          <div class="kvcm-sent-to">✓ echt verstuurd → ${esc(sandboxPhone)}</div>
+        </div>`;
+      if (m.kind === 'wa-in') return `
+        <div class="kv-cockpit-msg kvcm-wa-in">
+          <div class="kvcm-cap">💬 WhatsApp · inkomend</div>
+          <div class="kvcm-bubble">${esc(String(m.body).slice(0, 400))}</div>
+        </div>`;
+      if (m.kind === 'email') return `
+        <div class="kv-cockpit-msg kvcm-email">
+          <div class="kvcm-cap">✉️ E-mail · uitgaand</div>
+          <div class="kvcm-bubble">
+            <div class="kvcme-hdr">aan: ${esc(sandboxEmail)}</div>
+            <div class="kvcme-sub">${esc(m.subject || '')}</div>
+            <div class="kvcme-body">${esc(m.body || '')}</div>
+          </div>
+          <div class="kvcm-sent-to">✓ echt verstuurd → ${esc(sandboxEmail)}</div>
+        </div>`;
+      if (m.kind === 'wik') return `
+        <div class="kv-cockpit-msg kvcm-doc">
+          <div class="kvcm-cap">📄 Document automatisch gegenereerd</div>
+          <div class="kvcm-bubble kvcm-doc-bubble">
+            <div class="kvcmd-pdf">PDF</div>
+            <div>
+              <div class="kvcmd-title">${esc(m.title || 'WIK-brief')}</div>
+              <div class="kvcmd-meta">${esc(m.meta || '')}</div>
+            </div>
+          </div>
+          <div class="kvcm-sent-to">✓ verstuurd per e-mail + aangetekend → ${esc(sandboxEmail)}</div>
+        </div>`;
+      return '';
+    };
+
+    const berichtenHtml = `
       <div class="kv-cockpit-card">
         <div class="kvcc-head">
           <div>
-            <div class="kvcc-title">WA-berichten <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400">${msgs.length} bericht(en)</span></div>
-            <div class="kvcc-sub">Nieuwste conversation van deze test-klant. In-/out-badges.</div>
+            <div class="kvcc-title">📩 Berichten <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);font-weight:400">${feed.length} · afgevangen + verstuurd</span></div>
+            <div class="kvcc-sub">WA in/out · e-mail · WIK-brief. Verzending routeert via de sandbox-grendel.</div>
           </div>
         </div>
         <div class="kv-cockpit-msgs">
-          ${msgs.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Geen WA-berichten. Draai <code>simulate-inbound</code> of een template-send.</div>` : msgs.slice(0, 15).reverse().map(m => `
-            <div class="kv-cockpit-msg ${m.direction === 'outbound' ? 'kvcm-out' : 'kvcm-in'}">
-              <div class="kvcm-bubble">${esc((m.body || '').slice(0, 400))}</div>
-              <div class="kvcm-meta">${esc(m.direction || '?')} · ${esc(new Date(m.created_at || 0).toLocaleTimeString('nl-NL'))}</div>
-            </div>
-          `).join('')}
+          ${feed.length === 0
+            ? `<div class="kvcm-empty">Geen berichten. Draai een scenario om berichten te zien.</div>`
+            : feed.slice(-20).map(berichtHtml).join('')}
         </div>
       </div>
-    ` : '';
+    `;
 
     // Takenlijst — pending_actions.
     const tasks = ctx?.pending_actions || [];
-    const tasksHtml = _cockpit.activeCustomerId ? `
+    const tasksHtml = `
       <div class="kv-cockpit-card">
         <div class="kvcc-head">
           <div>
@@ -7128,7 +7411,7 @@
           </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px">
-          ${tasks.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Geen openstaande taken.</div>` : tasks.slice(0, 15).map(t => `
+          ${tasks.length === 0 ? `<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">${hasCust ? 'Geen openstaande taken.' : 'Kies een scenario en start.'}</div>` : tasks.slice(0, 15).map(t => `
             <div class="kv-cockpit-task">
               <div class="kvct-l">
                 <div class="kvct-type"><code>${esc(t.action_type || '')}</code> <span class="kvct-status" style="background:${t.status === 'open' ? 'var(--amber-soft)' : 'var(--surface-2)'};color:${t.status === 'open' ? 'var(--amber)' : 'var(--text-3)'}">${esc(t.status || '')}</span></div>
@@ -7138,7 +7421,7 @@
           `).join('')}
         </div>
       </div>
-    ` : '';
+    `;
 
     const ctxErrorHtml = _cockpit.ctx.error ? `
       <div style="margin-top:10px;padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:11.5px">⚠ Context-fetch: ${esc(_cockpit.ctx.error)}</div>
@@ -7237,6 +7520,54 @@
       .kv-cockpit-hero .kvh-inv-st{color:var(--amber);font-size:10px;letter-spacing:.04em;text-transform:uppercase}
       .kv-cockpit-hero .kvh-totrow{display:flex;justify-content:space-between;margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-2)}
       .kv-cockpit-hero .kvh-totrow b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:700}
+      /* Prototype-parity extra tokens */
+      .kv-cockpit-hero .kvh-p-day{background:var(--surface-2);color:var(--text-3)}
+      .kv-cockpit-hero .kvh-p-ready{color:var(--emerald);background:var(--emerald-soft)}
+      .kv-cockpit-scard.kvcs-sel{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 32%,transparent),0 4px 12px -4px rgba(0,0,0,.15)}
+      .kv-cockpit-banner{display:flex;gap:14px;align-items:center;background:linear-gradient(120deg,color-mix(in srgb,var(--accent) 10%,transparent),transparent);border:1px solid color-mix(in srgb,var(--accent) 32%,transparent);border-radius:12px;padding:12px 14px;margin-top:10px}
+      .kv-cockpit-banner .kvcb-ic{font-size:22px;line-height:1}
+      .kv-cockpit-banner .kvcb-t{font-weight:700;font-size:14px;letter-spacing:-.01em}
+      .kv-cockpit-banner .kvcb-x{font-size:12px;color:var(--text-2);margin-top:2px}
+      .kv-cockpit-banner .kvcb-x b{color:var(--text)}
+      .kv-cockpit-ladder .kvl-wat{font-family:'IBM Plex Mono',monospace;font-size:9.5px;margin-top:2px;color:var(--text-3)}
+      .kv-cockpit-controls{}
+      .kv-cockpit-controls .kvco-btns{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+      .kv-cockpit-controls .kvco-btn{font-family:'IBM Plex Sans',sans-serif;font-size:12.5px;font-weight:600;cursor:pointer;border-radius:8px;padding:8px 12px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);display:inline-flex;align-items:center;gap:6px;transition:all .15s}
+      .kv-cockpit-controls .kvco-btn:hover:not([disabled]){border-color:var(--accent);color:var(--accent);transform:translateY(-1px)}
+      .kv-cockpit-controls .kvco-btn[disabled]{opacity:.5;cursor:not-allowed}
+      .kv-cockpit-controls .kvco-btn.kvco-primary{background:linear-gradient(135deg,var(--accent),var(--violet,#7b5cf0));color:#fff;border-color:transparent}
+      .kv-cockpit-controls .kvco-btn.kvco-primary:hover{color:#fff;filter:brightness(1.08);border-color:transparent}
+      .kv-cockpit-controls .kvco-btn.kvco-ghost{background:transparent}
+      .kv-cockpit-controls .kvco-ic{font-size:14px;line-height:1}
+      .kv-cockpit-controls .kvco-sep{width:1px;align-self:stretch;background:var(--border);margin:0 3px;height:26px}
+      .kv-cockpit-pgroup{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px}
+      .kv-cockpit-pgroup .kvpg-lbl{font-family:'IBM Plex Mono',monospace;font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3);width:78px;flex-shrink:0}
+      .kv-cockpit-pgroup .kvpg-blks{display:flex;flex-wrap:wrap;gap:5px}
+      .kv-cockpit-grid2{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;margin-top:12px}
+      @media(max-width:860px){.kv-cockpit-grid2{grid-template-columns:1fr}}
+      /* Berichten 3-types */
+      .kv-cockpit-msg{max-width:88%;display:flex;flex-direction:column;gap:3px;margin-bottom:8px}
+      .kv-cockpit-msg .kvcm-cap{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--text-3);display:flex;align-items:center;gap:4px}
+      .kv-cockpit-msg .kvcm-bubble{padding:8px 11px;border-radius:12px;font-size:12.5px;line-height:1.5;word-break:break-word}
+      .kv-cockpit-msg .kvcm-sent-to{font-family:'IBM Plex Mono',monospace;font-size:9.5px;color:var(--emerald);margin-top:2px;display:flex;align-items:center;gap:3px}
+      .kv-cockpit-msg.kvcm-wa-out{align-self:flex-end;align-items:flex-end}
+      .kv-cockpit-msg.kvcm-wa-out .kvcm-cap,.kv-cockpit-msg.kvcm-wa-out .kvcm-sent-to{justify-content:flex-end}
+      .kv-cockpit-msg.kvcm-wa-out .kvcm-bubble{background:var(--emerald-soft);border:1px solid color-mix(in srgb,var(--emerald) 30%,transparent);border-top-right-radius:4px}
+      .kv-cockpit-msg.kvcm-wa-in{align-self:flex-end;align-items:flex-end}
+      .kv-cockpit-msg.kvcm-wa-in .kvcm-cap,.kv-cockpit-msg.kvcm-wa-in .kvcm-sent-to{justify-content:flex-end}
+      .kv-cockpit-msg.kvcm-wa-in .kvcm-bubble{background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-top-right-radius:4px}
+      .kv-cockpit-msg.kvcm-email{align-self:flex-start;max-width:94%}
+      .kv-cockpit-msg.kvcm-email .kvcm-bubble{background:var(--surface-2);border:1px solid var(--border);padding:0;overflow:hidden}
+      .kv-cockpit-msg.kvcm-email .kvcme-hdr{padding:6px 10px;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3)}
+      .kv-cockpit-msg.kvcm-email .kvcme-sub{padding:8px 10px 2px;font-weight:600;font-size:12.5px}
+      .kv-cockpit-msg.kvcm-email .kvcme-body{padding:0 10px 8px;font-size:12px;color:var(--text-2)}
+      .kv-cockpit-msg.kvcm-doc{align-self:flex-start;max-width:94%}
+      .kv-cockpit-msg.kvcm-doc .kvcm-doc-bubble{background:linear-gradient(135deg,var(--rose-soft),var(--surface-2));border:1px solid color-mix(in srgb,var(--rose) 30%,transparent);display:flex;gap:12px;align-items:center;padding:10px}
+      .kv-cockpit-msg.kvcm-doc .kvcmd-pdf{width:34px;height:42px;border-radius:5px;background:var(--surface);border:1px solid var(--border);display:grid;place-items:center;font-family:'IBM Plex Mono',monospace;font-size:8.5px;font-weight:700;color:var(--rose);flex-shrink:0}
+      .kv-cockpit-msg.kvcm-doc .kvcmd-title{font-weight:600;font-size:13px;color:var(--text)}
+      .kv-cockpit-msg.kvcm-doc .kvcmd-meta{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text-3);margin-top:2px}
+      .kv-cockpit-msgs{display:flex;flex-direction:column;padding-right:4px}
+      .kv-cockpit-msgs .kvcm-empty{padding:16px;text-align:center;color:var(--text-3);font-size:12px;font-style:italic}
     </style>
     <div style="max-width:1100px">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
@@ -7249,11 +7580,15 @@
       ${guardHtml}
       ${heroHtml}
       ${scenariosHtml}
+      ${activeBannerHtml}
+      ${ladderHtml}
+      ${controlsHtml}
       ${aiHtml}
       ${builderHtml}
-      ${ladderHtml}
-      ${tlHtml}
-      ${berichtenHtml}
+      <div class="kv-cockpit-grid2">
+        ${tlHtml}
+        ${berichtenHtml}
+      </div>
       ${tasksHtml}
       ${ctxErrorHtml}
       ${verifyHtml}
