@@ -105,7 +105,8 @@ export default async function handler(req, res) {
       else if (kind === 'zoom') qq = qq.eq('lead_kind', 'zoom');
       if (statusFilter && statusFilter.length) qq = qq.in('lead_status', statusFilter);
       if (view === 'vandaag') {
-        qq = qq.gte('terugbel_datum', todayISO + 'T00:00:00Z').lte('terugbel_datum', todayISO + 'T23:59:59Z');
+        qq = qq.gte('terugbel_datum', todayISO + 'T00:00:00Z').lte('terugbel_datum', todayISO + 'T23:59:59Z')
+               .not('lead_status', 'in', '(verlengd,verloren)');   // 2026-08-25: afgeronde uitkomsten weg uit Vandaag
       } else if (view === 'te_laat') {
         qq = qq.lt('terugbel_datum', nowISO).not('lead_status', 'in', '(verlengd,verloren)');
       } else if (view === 'open') {

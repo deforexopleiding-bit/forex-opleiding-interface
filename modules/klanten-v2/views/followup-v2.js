@@ -200,9 +200,9 @@
     // BROK 5
     voicememoBusy:     {},        // per appointment_id
     voicememoAllBusy:  false,
-    voicememoPopupDismissed: false,  // per-sessie: user heeft popup weggeklikt
+    voicememoPopupDismissed: false,  // per module-enter (v=22): reset bij binnenkomen followup
     voicememoOverlayOpen:    false,  // v=18: fullscreen overlay met voicememo-view
-    voicememoAutoOpened:     false,  // v=21: 1-shot-flag per page-load voor auto-open
+    voicememoLastModEnter:   null,   // v=22: laatst-actieve mod; wisseling naar 'followup' reset dismissed
     deleteApptModal:   null,      // { appointmentId, reden, saving, error }
     // v=17: admin-UI (adminBackfillBusy/adminGhlBackfill*) verhuisd naar
     // instellingen-v2.js. Bijbehorende handlers/fetchers ook.
@@ -1333,8 +1333,54 @@
   }
   function _renderLeadsList() {
     const leads = asArr(_live.leadsList.data?.leads);
-    if (leads.length === 0) return `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen leads in deze weergave.</div>`;
-    return leads.map(_renderLeadRow).join('');
+    // v=22 (2026-08-25): merge vandaag-Zoom-appointments in de Vandaag-view.
+    // Backend levert ze al in response.appointments (worklist=1 pad, r307).
+    // Voor andere views onaangeroerd. Sorteer Zoom's chronologisch bovenaan.
+    let zoomToday = [];
+    if (_ui.view === 'vandaag') {
+      const appts = asArr(_live.leadsList.data?.appointments);
+      const now = new Date();
+      const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0'), d = String(now.getDate()).padStart(2, '0');
+      const todayIso = `${y}-${m}-${d}`;
+      zoomToday = appts
+        .filter(a => a && a.scheduled_at && String(a.scheduled_at).slice(0, 10) === todayIso)
+        .filter(a => !['cancelled', 'verplaatst', 'verwijderd'].includes(a.status))
+        .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)));
+    }
+    if (leads.length === 0 && zoomToday.length === 0) {
+      return `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen items in deze weergave.</div>`;
+    }
+    const zoomHtml = zoomToday.length
+      ? `<div style="padding:8px 14px;font-size:10.5px;color:var(--violet);text-transform:uppercase;letter-spacing:.06em;font-weight:600;background:var(--violet-soft, rgba(139,92,246,.08));border-bottom:1px solid var(--border)">📹 Zoom-afspraken vandaag (${zoomToday.length})</div>`
+        + zoomToday.map(_renderZoomApptRow).join('')
+      : '';
+    return zoomHtml + leads.map(_renderLeadRow).join('');
+  }
+  // v=22: rij-render voor Zoom-appointments van vandaag (klik → detail-pane niet beschikbaar,
+  // dus tonen we tijd + naam + telefoon + status-badges + voicememo-status). Klik-actie
+  // opent de voicememo-overlay als er nog gestuurd moet worden.
+  function _renderZoomApptRow(a) {
+    const naam = a.lead_name || a.lead_phone || '—';
+    const t = a.scheduled_at ? new Date(a.scheduled_at) : null;
+    const tijd = t ? t.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '—';
+    const memoPending = (a.voicememo_status || 'pending') === 'pending';
+    const memoBadge = memoPending
+      ? '<span style="font-size:10.5px;padding:1px 7px;background:var(--violet-soft);color:var(--violet);border-radius:20px;font-weight:600">🎙 memo</span>'
+      : '<span style="font-size:10.5px;padding:1px 7px;background:var(--emerald-soft);color:var(--emerald);border-radius:20px">✓ memo</span>';
+    return `<div style="border-bottom:1px solid var(--border);border-left:3px solid var(--violet);padding:10px 14px;display:flex;gap:10px;background:transparent;cursor:pointer" onclick="window.__fuVoicememoOpenView&&window.__fuVoicememoOpenView()">
+      ${H.av ? H.av(naam, 32) : ''}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span style="flex:1;font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</span>
+          <span style="font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--violet);flex-shrink:0">${esc(tijd)}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.lead_phone || '—')}</div>
+        <div style="display:flex;gap:5px;align-items:center;margin-top:4px;flex-wrap:wrap">
+          <span style="font-size:10.5px;padding:1px 7px;background:var(--violet-soft);color:var(--violet);border-radius:20px">Zoom</span>
+          ${memoBadge}
+        </div>
+      </div>
+    </div>`;
   }
   function _renderLeadRow(l) {
     const isActive = l.id === _ui.selectedLeadId;
@@ -2819,24 +2865,34 @@
     const items = asArr(d.items || d.rounds || d);
     return items.filter((it) => !it.voicememo_sent && !it.done).length;
   }
-  // v=21 (2026-08-25) — AUTO-OPEN overlay bij eerste Follow-up-render per
-  // page-load, mits er nog niet-verstuurde vandaag-Zooms zijn. Reset op
-  // page-refresh (nieuwe sessie) zodat de gebruiker 'em opnieuw ziet totdat
-  // álle vandaag-leads een voicememo hebben. Wegklikken = per-sessie uitstel.
-  // Send blijft ALTIJD op expliciete klik (freeze-veilig: geen bulk/auto).
+  // v=22 STRIKT: auto-open overlay op elke module-enter naar Follow-up.
+  // Detectie via mod-transitie ('other' → 'followup'). "Later"-klik zet
+  // voicememoPopupDismissed=true → onderdrukt DEZE enter. Volgende
+  // module-enter reset dismissed → overlay opent weer zolang openCount>0.
+  // Alles verstuurd → openCount=0 → geen open meer. Send blijft expliciet.
   function _maybeAutoOpenVoicememo() {
-    if (_ui.voicememoAutoOpened) return;
-    const isFollowup = window.DFO && window.DFO.S && window.DFO.S.mod === 'followup';
+    const currentMod = (window.DFO && window.DFO.S && window.DFO.S.mod) || null;
+    const wasFollowup = _ui.voicememoLastModEnter === 'followup';
+    const isFollowup  = currentMod === 'followup';
+    if (isFollowup && !wasFollowup) {
+      _ui.voicememoPopupDismissed = false;   // module-enter reset uitstel
+      _ui.voicememoOverlayOpen    = false;   // start dicht, evalueer opnieuw
+    }
+    _ui.voicememoLastModEnter = currentMod;
     if (!isFollowup) return;
-    if (!_live.voicememo.data) return;                     // wacht op fetch
+    if (_live.voicememo.loading) return;
+    if (!_live.voicememo.data && !_live.voicememo.error) {
+      queueMicrotask(fetchVoicememo);         // fetch → render → we komen terug
+      return;
+    }
+    if (!_live.voicememo.data) return;
     const openCount = _voicememoOpenCount();
-    if (openCount <= 0) return;                            // niks te doen vandaag
-    if (_ui.voicememoPopupDismissed) return;               // user zei "Later" — respecteer sessie
-    _ui.voicememoAutoOpened = true;                        // 1× per page-load
-    _ui.voicememoOverlayOpen = true;                       // fullscreen overlay open
+    if (openCount <= 0) return;               // alles vandaag verstuurd
+    if (_ui.voicememoPopupDismissed) return;  // user zei "Later" — respecteer
+    if (_ui.voicememoOverlayOpen) return;     // al open
+    _ui.voicememoOverlayOpen = true;
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   }
-
   function _ensureVoicememoHeaderBtn() {
     _maybeAutoOpenVoicememo();
     let btn = document.getElementById('fuVoicememoHeaderBtn');
