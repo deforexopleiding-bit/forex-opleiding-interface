@@ -146,9 +146,16 @@ async function initAuth() {
     return null;
   }
 
-  // requireAuth redirect naar /login.html?returnTo=… bij niet-ingelogd
-  // of niet-actief profiel. ADMIN_ROLES = super_admin/admin/manager/sales.
-  const profile = await window.AuthShared.requireAuth(['super_admin', 'admin', 'manager', 'sales']);
+  // v=1ew (2026-08-25): allowlist verruimd naar alle CRM_STAFF_ROLES.
+  // Voorheen: alleen super_admin/admin/manager/sales. mentor/marketing/
+  // administratie werden door requireAuth naar /login.html?error=no_access
+  // gestuurd → login.html redirectte naar getRoleLandingUrl(role) → v1
+  // role-homes (bv. mentor-home.html). Effect: "Inloggen als Seppe" landde
+  // via die omweg alsnog op v1. Nu accepteert de v2-shell elke CRM-rol;
+  // server-side RBAC (requirePermission) blijft de per-module scope
+  // afdwingen (mentor ziet geen sales-modules etc).
+  const CRM_STAFF_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie'];
+  const profile = await window.AuthShared.requireAuth(CRM_STAFF_ROLES);
   if (!profile) return null;
 
   return profile;
