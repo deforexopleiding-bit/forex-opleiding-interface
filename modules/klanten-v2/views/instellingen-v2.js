@@ -6431,6 +6431,71 @@
     ctx: { loading: false, error: null, data: null, pollTimer: null, expanded: true },
     // Prototype-parity: welke scenariokaart is nu geselecteerd (voor active-banner).
     selectedScenarioKey: null,
+    // UX-fix ronde: lijst is_test-customers voor auto-select + picker (fix 2).
+    customersList: { loading: false, fetched: false, error: null, items: [] },
+    // Nieuwe-klant-modal state (fix 3).
+    newCust: { open: false, saving: false, error: null, name: '' },
+  };
+
+  // ─── Customers-list fetch + auto-select (fix 2) ──────────────────────────
+  async function _cockpitFetchCustomers({ autoSelect = true } = {}) {
+    const s = _cockpit.customersList;
+    if (s.loading) return;
+    s.loading = true; s.error = null;
+    const j = await tryFetch('cockpit-customers', '/api/dunning-test-customers-list');
+    s.loading = false; s.fetched = true;
+    if (j?.__error) s.error = j.__error;
+    else if (j?.error) s.error = j.error;
+    else s.items = Array.isArray(j.customers) ? j.customers : [];
+    // Auto-select: EXACT 1 test-klant → die ene wordt active. > 1 → geen
+    // gok, laat de picker de user bewust laten kiezen (per director-review).
+    if (autoSelect && !_cockpit.activeCustomerId && s.items.length === 1) {
+      _cockpit.activeCustomerId = s.items[0].id;
+    }
+    if (render) render();
+    // Als we net een klant geactiveerd hebben, laad meteen ctx.
+    if (_cockpit.activeCustomerId) _cockpitFetchContext();
+  }
+
+  // ─── Nieuwe test-klant CTA (fix 3) ───────────────────────────────────────
+  window.__cockpitNewCustOpen = () => {
+    _cockpit.newCust = { open: true, saving: false, error: null, name: '' };
+    if (render) render();
+  };
+  window.__cockpitNewCustClose = () => {
+    if (_cockpit.newCust) { _cockpit.newCust.open = false; if (render) render(); }
+  };
+  window.__cockpitNewCustSave = async () => {
+    const n = _cockpit.newCust; if (!n) return;
+    const q = (sel) => document.querySelector(sel);
+    const name = String(q('[data-cockpit-newcust="name"]')?.value || '').trim();
+    if (!name) { showToast('Naam is verplicht.', 'warn'); return; }
+    n.saving = true; n.error = null; if (render) render();
+    const j = await tryFetch('cockpit-newcust', '/api/dunning-test-customer-create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ full_name: name }),
+    });
+    n.saving = false;
+    if (j?.__error || j?.error) {
+      n.error = j.__error || j.error;
+      if (render) render();
+      return;
+    }
+    // Nieuwe klant meteen activeren.
+    if (j?.customer?.id) _cockpit.activeCustomerId = j.customer.id;
+    _cockpit.newCust.open = false;
+    _cockpit.customersList.fetched = false;
+    _cockpitFetchCustomers({ autoSelect: false });   // refresh lijst; activeCustomerId is al gezet.
+    _cockpit.fetched = false; _cockpitFetchStatus(); _cockpitFetchContext();
+    showToast('Test-klant aangemaakt en geactiveerd.', 'ok');
+  };
+  window.__cockpitSetActive = (id) => {
+    if (!id) return;
+    _cockpit.activeCustomerId = id;
+    _cockpit.selectedScenarioKey = null;
+    _cockpit.builder = { steps: [], running: false, currentIdx: -1, log: [] };
+    _cockpitFetchContext();
+    if (render) render();
   };
 
   // ─── Live context fetch + poll (iter 4) ──────────────────────────────────
@@ -7313,19 +7378,25 @@
 
     const ctx = _cockpit.ctx.data;
 
-    // Persona-hero (iter 5)
-    // Persona-hero (prototype-parity r252-270) — ALTIJD zichtbaar bovenaan,
-    // ook zonder actieve klant. Toont default 'Test Klant · 3 facturen ·
-    // €2.400' als geen ctx-data, echte klant zodra activeCustomerId gezet.
+    // Persona-hero — geen verzonnen fallback meer.
+    // - 0 test-klanten: lege state met prominent "+ Nieuwe test-klant"-CTA.
+    // - 1 test-klant: auto-active (via _cockpitFetchCustomers), toont echte data.
+    // - >1: picker "Selecteer test-klant" (geen gok).
     const cust = ctx?.customer;
     const invs = ctx?.invoices || [];
     const hasCust = !!(cust && _cockpit.activeCustomerId);
+    const custList = _cockpit.customersList.items || [];
+    const custCount = custList.length;
+    // Bij mount fetchen (autoSelect als er precies 1 is).
+    if (!_cockpit.customersList.fetched && !_cockpit.customersList.loading) {
+      queueMicrotask(() => _cockpitFetchCustomers());
+    }
     const custName = hasCust
       ? (((cust.first_name || '') + ' ' + (cust.last_name || '')).trim() || 'Test Klant')
-      : 'Test Klant';
+      : '';
     const persInitials = ((custName || 'TK').split(/\s+/).map(w => w ? w[0] : '').join('').slice(0, 2) || 'TK').toUpperCase();
-    const custPhone = hasCust ? (cust.phone || '—') : (_cockpit.status?.sandbox_contact?.phone || '+31 6 •• test');
-    const custEmail = hasCust ? (cust.email || '—') : (_cockpit.status?.sandbox_contact?.email || 'test@deforex…');
+    const custPhone = hasCust ? (cust.phone || '—') : '';
+    const custEmail = hasCust ? (cust.email || '—') : '';
     const totalOpen = invs.reduce((s, i) => s + (Number(i.amount_total || 0) - Number(i.amount_paid || 0)), 0);
     const runStatus = ctx?.active_run?.status || null;
     const runStatusText = runStatus ? String(runStatus).toUpperCase() : (hasCust ? 'READY' : 'IDLE');
@@ -7352,13 +7423,80 @@
         ? { c: 'var(--amber)', bg: 'var(--amber-soft)', txt: `🔔 open taak: ${nonBlockingTasks.map(t => t.action_type.replace(/^MANUAL_/, '').toLowerCase()).join(', ')} (loopt door)` }
         : { c: 'var(--emerald)', bg: 'var(--emerald-soft)', txt: '✓ guard: vrij' });
 
-    // Facturen-lijst: echte invoices als er zijn, anders prototype-defaults.
-    const heroInvoiceRows = invs.length > 0
-      ? invs.slice(0, 5).map(i => ({ nr: i.invoice_number || '', amt: Number(i.amount_total || 0), st: i.status || 'open' }))
-      : COCKPIT_DEFAULT_INVOICES.map((iv, k) => ({ nr: '#' + (2041 + k), amt: iv.amount, st: 'open' }));
-    const heroTotal = invs.length > 0 ? totalOpen : COCKPIT_DEFAULT_INVOICES.reduce((s, iv) => s + iv.amount, 0);
+    // Facturen: ALLEEN echte invoices (fix 4 — geen verzonnen fallback meer).
+    const heroInvoiceRows = invs.slice(0, 5).map(i => ({
+      nr: i.invoice_number || '',
+      amt: Number(i.amount_total || 0),
+      st: i.status || 'open',
+    }));
+    const heroTotal = totalOpen;
 
-    const heroHtml = `
+    // Nieuwe-klant-CTA — pop-up prompt via custom modal (freeze-safe).
+    const newBtnCompact = `<button class="btn btn-primary btn-sm" onclick="window.__cockpitNewCustOpen()" style="font-size:10.5px;padding:2px 10px;border-radius:20px">+ Nieuwe test-klant</button>`;
+    const newBtnLarge   = `<button class="btn btn-primary" onclick="window.__cockpitNewCustOpen()" style="font-size:13.5px;padding:10px 18px;border-radius:10px">+ Nieuwe test-klant</button>`;
+
+    // Nieuwe-klant-modal — hergebruikt naam-prompt-veld (uncontrolled input).
+    const n = _cockpit.newCust;
+    const newCustModalHtml = (n && n.open) ? `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__cockpitNewCustClose()">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;width:min(440px,100%);box-shadow:0 20px 60px -20px rgba(0,0,0,.4)">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)">
+            <div>
+              <div style="font-size:14px;font-weight:700">Nieuwe test-klant</div>
+              <div style="font-size:11px;color:var(--text-3)">is_test=true · super_admin only · geen productie-writes</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="window.__cockpitNewCustClose()">✕</button>
+          </div>
+          <div style="padding:14px 18px">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-3)">Naam
+              <input type="text" data-cockpit-newcust="name" value="${esc(n.name || '')}" placeholder="Test Klant" autofocus style="padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px">
+            </label>
+            ${n.error ? `<div style="margin-top:10px;padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12px">⚠ ${esc(n.error)}</div>` : ''}
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--border)">
+            <button class="btn btn-ghost btn-sm" onclick="window.__cockpitNewCustClose()">Annuleer</button>
+            <button class="btn btn-primary btn-sm" onclick="window.__cockpitNewCustSave()" ${n.saving ? 'disabled' : ''}>${n.saving ? 'Bezig…' : 'Aanmaken'}</button>
+          </div>
+        </div>
+      </div>
+    ` : '';
+
+    // Picker — pas als er >1 test-klanten zijn en er geen active is.
+    const showPicker = custCount > 1 && !hasCust;
+    const pickerHtml = showPicker ? `
+      <div class="kv-cockpit-hero" style="grid-template-columns:1fr">
+        <div style="padding:6px 0">
+          <div style="font-size:13px;font-weight:600;margin-bottom:8px">Selecteer test-klant (${custCount} beschikbaar)</div>
+          <div style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;padding-right:6px">
+            ${custList.map(c => `
+              <button class="btn btn-ghost btn-sm" onclick="window.__cockpitSetActive('${esc(c.id)}')" style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;font-size:12.5px;text-align:left;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);gap:10px">
+                <div style="flex:1;min-width:0">
+                  <div style="font-weight:600">${esc(c.name)}</div>
+                  <div style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-3)">📱 ${esc(c.phone || '—')} · ✉ ${esc(c.email || '—')} · ${c.invoice_count} factu${c.invoice_count === 1 ? 'ur' : 'ren'}</div>
+                </div>
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--accent)">→ activeer</span>
+              </button>
+            `).join('')}
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:10px">${newBtnCompact}</div>
+        </div>
+      </div>
+    ` : '';
+
+    // Lege staat (0 test-klanten).
+    const emptyStateHtml = (custCount === 0 && !hasCust) ? `
+      <div class="kv-cockpit-hero" style="grid-template-columns:1fr">
+        <div style="text-align:center;padding:26px 12px">
+          <div style="font-size:34px;margin-bottom:8px">🧪</div>
+          <div style="font-size:15px;font-weight:700;margin-bottom:4px">Geen test-klant actief</div>
+          <div style="font-size:12.5px;color:var(--text-3);margin-bottom:16px">Maak een test-klant aan of speel een scenario af (elk scenario begint met customer-create). Alle acties zijn is_test-gescoped en achter de grendel.</div>
+          ${newBtnLarge}
+        </div>
+      </div>
+    ` : '';
+
+    // Actieve-klant-hero (echte data).
+    const heroActiveHtml = hasCust ? `
       <div class="kv-cockpit-hero">
         <div class="kvh-persona">
           <div class="kvh-avatar">${esc(persInitials)}</div>
@@ -7367,34 +7505,45 @@
             <div class="kvh-meta">
               <span>📱 <b>${esc(custPhone)}</b></span>
               <span>✉️ <b>${esc(custEmail)}</b></span>
-              ${hasCust ? `<span>🆔 <code>${esc(String(cust.id || '').slice(0, 8))}…</code></span>` : ''}
+              <span>🆔 <code>${esc(String(cust.id || '').slice(0, 8))}…</code></span>
             </div>
             <div class="kvh-statusline">
               <span class="kvh-pill ${runPillClass}"><span class="kvh-dot"></span>${esc(runStatusText)}</span>
               <span class="kvh-pill kvh-p-day">ladderstap: dag ${currentDay}</span>
               <span class="kvh-pill" style="background:${guardChip.bg};color:${guardChip.c}">${esc(guardChip.txt)}</span>
-              ${hasCust ? `<button class="btn btn-ghost btn-sm" onclick="window.__cockpitEditOpen()" style="font-size:10.5px;padding:2px 8px;border-radius:20px;margin-left:auto">✏ Wijzig</button>` : ''}
+              <div style="margin-left:auto;display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="window.__cockpitEditOpen()" style="font-size:10.5px;padding:2px 8px;border-radius:20px">✏ Wijzig</button>
+                ${newBtnCompact}
+              </div>
             </div>
           </div>
         </div>
         <div class="kvh-situation">
           <div class="kvh-sec-lbl">Situatie</div>
           <div class="kvh-invoices">
-            ${heroInvoiceRows.map(r => `
-              <div class="kvh-inv">
-                <span class="kvh-inv-nr">Factuur ${esc(r.nr)}</span>
-                <span class="kvh-inv-amt">€ ${r.amt.toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</span>
-                <span class="kvh-inv-st">${esc(r.st)}</span>
-              </div>
-            `).join('')}
+            ${heroInvoiceRows.length === 0
+              ? `<div style="padding:8px;font-size:11.5px;color:var(--text-3);text-align:center">Geen facturen · voeg toe via <code>+ factuur</code>-blok of scenario</div>`
+              : heroInvoiceRows.map(r => `
+                <div class="kvh-inv">
+                  <span class="kvh-inv-nr">Factuur ${esc(r.nr)}</span>
+                  <span class="kvh-inv-amt">€ ${r.amt.toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</span>
+                  <span class="kvh-inv-st">${esc(r.st)}</span>
+                </div>
+              `).join('')
+            }
           </div>
-          <div class="kvh-totrow">
-            <span>${heroInvoiceRows.length} factuur${heroInvoiceRows.length === 1 ? '' : 'en'} open</span>
-            <b>€ ${heroTotal.toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</b>
-          </div>
+          ${heroInvoiceRows.length > 0 ? `
+            <div class="kvh-totrow">
+              <span>${heroInvoiceRows.length} factuur${heroInvoiceRows.length === 1 ? '' : 'en'} open</span>
+              <b>€ ${heroTotal.toLocaleString('nl-NL', { minimumFractionDigits: 2 })}</b>
+            </div>
+          ` : ''}
         </div>
       </div>
-    `;
+    ` : '';
+
+    // Selecteer welke hero-variant getoond wordt.
+    const heroHtml = newCustModalHtml + (hasCust ? heroActiveHtml : (showPicker ? pickerHtml : emptyStateHtml));
 
     // Ladder — ALTIJD zichtbaar met dag 7/14/21/28/37 (prototype-parity
     // r292-302). Fill-progress uit ladderIdx. Labels 1-op-1 uit prototype.
@@ -7797,6 +7946,8 @@
       // upsert met step.id-behoud; client-guards spiegelen server-guards).
       // Motor-/dispatcher-/cron-logica onaangeraakt.
       'wb-workflows',
+      // Cockpit real-wiring: LIVE test-omgeving (voorbeeld-banner uit).
+      'wb-test-cockpit',
     ]);
     const READONLY = new Set([
       'alg-bedrijf','fin-facturatie','fin-bank','team-api','com-mail','com-tel','sys-bubble-schema',
