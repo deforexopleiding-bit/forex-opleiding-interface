@@ -1022,13 +1022,11 @@ function wireTopbarActionsToShell() {
 
   window.DFO.setRoles(shellRoles);
 
-  // Sync rolebox-select met huidige primary rol + toon 'em (voor preview).
-  const roleSel = document.getElementById('roleSel');
-  if (roleSel && window.DFO.S && window.DFO.S.roles && window.DFO.S.roles[0]) {
-    roleSel.value = window.DFO.S.roles[0];
-  }
-  // Rolebox is nu zichtbaar (inline style display:none uit index.html
-  // verwijderd) — geen extra JS nodig.
+  // v=1f1 (2026-08-25) — "Bekijk als"-rolebox verwijderd uit index.html.
+  // roleSel-lookup + waarde-sync eruit — element bestaat niet meer, dead code.
+  // Echte rol-switch loopt via Instellingen → Gebruikers → "Inloggen als"
+  // (admin-impersonate-flow), intact. DFO.setRole/DFO.setRoles blijven in
+  // shell-globals voor eventuele toekomstige gebruik.
 
   // Boot-module — routing-prioriteit (v=1ev, 2026-08-24):
   //   1. `?v2preview=<id>` (deep-link, hoogste prioriteit) — bestaand pattern.
