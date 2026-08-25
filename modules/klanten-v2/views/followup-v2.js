@@ -202,6 +202,7 @@
     voicememoAllBusy:  false,
     voicememoPopupDismissed: false,  // per-sessie: user heeft popup weggeklikt
     voicememoOverlayOpen:    false,  // v=18: fullscreen overlay met voicememo-view
+    voicememoAutoOpened:     false,  // v=21: 1-shot-flag per page-load voor auto-open
     deleteApptModal:   null,      // { appointmentId, reden, saving, error }
     // v=17: admin-UI (adminBackfillBusy/adminGhlBackfill*) verhuisd naar
     // instellingen-v2.js. Bijbehorende handlers/fetchers ook.
@@ -2818,7 +2819,26 @@
     const items = asArr(d.items || d.rounds || d);
     return items.filter((it) => !it.voicememo_sent && !it.done).length;
   }
+  // v=21 (2026-08-25) — AUTO-OPEN overlay bij eerste Follow-up-render per
+  // page-load, mits er nog niet-verstuurde vandaag-Zooms zijn. Reset op
+  // page-refresh (nieuwe sessie) zodat de gebruiker 'em opnieuw ziet totdat
+  // álle vandaag-leads een voicememo hebben. Wegklikken = per-sessie uitstel.
+  // Send blijft ALTIJD op expliciete klik (freeze-veilig: geen bulk/auto).
+  function _maybeAutoOpenVoicememo() {
+    if (_ui.voicememoAutoOpened) return;
+    const isFollowup = window.DFO && window.DFO.S && window.DFO.S.mod === 'followup';
+    if (!isFollowup) return;
+    if (!_live.voicememo.data) return;                     // wacht op fetch
+    const openCount = _voicememoOpenCount();
+    if (openCount <= 0) return;                            // niks te doen vandaag
+    if (_ui.voicememoPopupDismissed) return;               // user zei "Later" — respecteer sessie
+    _ui.voicememoAutoOpened = true;                        // 1× per page-load
+    _ui.voicememoOverlayOpen = true;                       // fullscreen overlay open
+    if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
+  }
+
   function _ensureVoicememoHeaderBtn() {
+    _maybeAutoOpenVoicememo();
     let btn = document.getElementById('fuVoicememoHeaderBtn');
     if (!btn) {
       btn = document.createElement('button');

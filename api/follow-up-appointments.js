@@ -304,15 +304,23 @@ async function handleGet(req, res, supabase) {
   // Verrijk met parent_outcome voor card-context label (child-appointments)
   enrichedAppts = await enrichWithParentOutcome(supabase, enrichedAppts);
 
-  // Optie-C filter: today-tab toont alleen calls binnen 30-min grace-window
-  // (toekomst + net begonnen); cancelled/verplaatst/verwijderd worden altijd uitgefilterd.
-  // Calls van >30min geleden zonder outcome: verschijnen in Open acties.
+  // 2026-08-25: 30-min-grace-cutoff verzacht — voorheen viel elke call van
+  // >30min geleden weg, waardoor 's avonds de hele vandaag-Zoom-lijst
+  // verdween (Lenn 13:00, Karl 14:30, Stijn 16:00 → onzichtbaar). Nu:
+  // filter alleen op cancelled/verplaatst/verwijderd; behoud alle
+  // scheduled/in_progress/completed/no_show van vandaag ongeacht tijdstip
+  // zodat de voicememo-ronde én de vandaag-lijst compleet blijven.
+  // Cliënt kan optioneel `?include_past=false` sturen om oude cutoff-gedrag
+  // te herstellen (b.v. wanneer alleen "aankomend" gewenst is).
   if (period === 'today') {
-    const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
+    const includePast = String(req.query.include_past || 'true') !== 'false';
     enrichedAppts = enrichedAppts.filter(a =>
-      new Date(a.scheduled_at) >= cutoff30
-      && !['cancelled', 'verplaatst', 'verwijderd'].includes(a.status)
+      !['cancelled', 'verplaatst', 'verwijderd'].includes(a.status)
     );
+    if (!includePast) {
+      const cutoff30 = new Date(Date.now() - 30 * 60 * 1000);
+      enrichedAppts = enrichedAppts.filter(a => new Date(a.scheduled_at) >= cutoff30);
+    }
   }
 
   return res.status(200).json({
