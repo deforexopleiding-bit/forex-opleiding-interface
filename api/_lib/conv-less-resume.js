@@ -93,7 +93,10 @@ export async function runConvLessResume({ scope = 'production' } = {}) {
 
   const config = await getConvLessResumeConfig();
   summary.config_mode = config.mode;
-  if (!config.enabled) { summary.skipped.push({ reason: 'FEATURE_DISABLED' }); return summary; }
+  // scope='test' bypasst de enabled-flag zodat cockpit-triggers werken
+  // terwijl productie op enabled=false blijft. is_test-filter (pre-fetch
+  // r113-114 + fatale tripwire hieronder) is autoritatief.
+  if (!config.enabled && scope !== 'test') { summary.skipped.push({ reason: 'FEATURE_DISABLED' }); return summary; }
   summary.enabled = true;
 
   const nowMs      = Date.now();
@@ -124,6 +127,21 @@ export async function runConvLessResume({ scope = 'production' } = {}) {
   });
   summary.scanned = runs.length;
   if (!runs.length) return summary;
+
+  // ── Fatale tripwire (derde laag) ───────────────────────────────────────
+  // Bij scope='test' MAG geen enkele niet-is_test rij in de te-verwerken
+  // set zitten. Als het TOCH gebeurt (bv. door een toekomstige filter-
+  // regressie in de pre-fetch of de isTestLike-heuristiek) → throw fataal
+  // vóór enige write. Stille skip zou een test-run productie-data laten
+  // aanraken; fataal throwen maakt de regressie meteen zichtbaar.
+  if (scope === 'test') {
+    const leak = runs.find((r) => r?.customers?.is_test !== true);
+    if (leak) {
+      throw new Error(
+        `[conv-less-resume] SCOPE=TEST TRIPWIRE — run ${leak.id} referenceert non-test customer ${leak.customer_id} (customers.is_test=${JSON.stringify(leak?.customers?.is_test)}). Run afgebroken vóór enige write.`,
+      );
+    }
+  }
 
   // ── Sorteer op openstaand bedrag (grootste eerst) via één batched fetch ──
   const custIds = [...new Set(runs.map((r) => r.customer_id).filter(Boolean))];
