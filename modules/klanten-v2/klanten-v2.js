@@ -181,6 +181,129 @@ function paintUser(profile) {
   }
 }
 
+// ── Impersonatie-banner (v=1ey) ─────────────────────────────────────────────
+// Detectie: `AuthShared.isImpersonating()` (leest localStorage-marker
+// 'impersonation_state' die admin-impersonate-flow zet). Bij true monteert
+// deze functie een rode topbanner boven de `.app` en shiftet de shell-hoogte
+// zodat sidebar+main niet onder de banner verdwijnen.
+//
+// "Stop impersonatie" herstelt de bewaarde origin-sessie
+// (`getImpersonationOrigin` → `AuthShared.setSession`), cleart beide state-keys
+// en herlaadt naar `/modules/klanten-v2/` (i.p.v. v1 `/index.html`). Fail-safe:
+// bij ontbrekende/corrupte origin of setSession-fout → `signOut` +
+// `/login.html?error=…` — nooit vasthangen in vreemde sessie.
+//
+// Zichtbaarheid: uitsluitend wanneer een admin heeft geïmpersoneerd. Bij
+// gewone login zit er geen `impersonation_state` in localStorage → no-op.
+//
+// GEEN aanpassing aan wie mag impersoneren of aan token-minting — enkel de
+// terug-flow. Zelfde helper-API als v1 sidebar.js:1263-1344.
+function initImpersonationBanner() {
+  if (!window.AuthShared || typeof window.AuthShared.isImpersonating !== 'function') return;
+  if (!window.AuthShared.isImpersonating()) return;
+
+  const state = window.AuthShared.getImpersonationState() || {};
+  const label = state.target_name || state.target_email || 'onbekend';
+  const role  = state.target_role || '';
+  const escFn = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+
+  // Voorkom dubbele mount bij eventuele re-init.
+  const existing = document.getElementById('kv-impersonation-banner');
+  if (existing) existing.remove();
+
+  const bar = document.createElement('div');
+  bar.id = 'kv-impersonation-banner';
+  bar.setAttribute('role', 'status');
+  bar.style.cssText = [
+    'position:fixed',
+    'top:0',
+    'left:0',
+    'right:0',
+    'z-index:99999',
+    'background:#dc2626',
+    'color:#fff',
+    'padding:10px 18px',
+    'display:flex',
+    'align-items:center',
+    'justify-content:space-between',
+    'gap:14px',
+    "font:600 13.5px/1.2 'IBM Plex Sans',system-ui,sans-serif",
+    'box-shadow:0 2px 8px rgba(0,0,0,.25)',
+  ].join(';');
+  bar.innerHTML =
+    '<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">' +
+      '<svg style="width:16px;height:16px;flex-shrink:0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="10"/>' +
+      '</svg>' +
+      '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' +
+        'Je bekijkt als <strong>' + escFn(label) + '</strong>' +
+        (role ? ' <span style="opacity:.85;font-weight:500">(' + escFn(role) + ')</span>' : '') +
+      '</span>' +
+    '</div>' +
+    '<button type="button" id="kv-impersonation-stop" style="background:#fff;color:#dc2626;border:0;border-radius:6px;padding:6px 14px;font:700 12.5px/1.2 inherit;cursor:pointer;white-space:nowrap">' +
+      '&larr; Stop impersonatie' +
+    '</button>';
+
+  document.body.insertBefore(bar, document.body.firstChild);
+
+  // Shift de shell zodat sidebar+main niet onder de banner verdwijnen.
+  // .app is `display:flex; height:100vh` — dus banner-height afhalen van hoogte
+  // én margin-top erbij. ResizeObserver zorgt dat re-flow (font-load, mobiel)
+  // de shift bijwerkt.
+  const shell = document.querySelector('.app');
+  const applyShift = () => {
+    const h = bar.offsetHeight || 42;
+    if (shell) {
+      shell.style.marginTop = h + 'px';
+      shell.style.height    = 'calc(100vh - ' + h + 'px)';
+    }
+  };
+  applyShift();
+  if (typeof ResizeObserver !== 'undefined') {
+    try { new ResizeObserver(applyShift).observe(bar); } catch (_) {}
+  }
+
+  const btn = document.getElementById('kv-impersonation-stop');
+  if (btn) btn.addEventListener('click', stopImpersonationV2);
+}
+
+async function stopImpersonationV2() {
+  const btn = document.getElementById('kv-impersonation-stop');
+  if (btn) { btn.disabled = true; btn.textContent = 'Bezig…'; }
+
+  if (!window.AuthShared) {
+    window.location.href = '/login.html?error=impersonation_lost';
+    return;
+  }
+  const origin = window.AuthShared.getImpersonationOrigin();
+  if (!origin || !origin.access_token || !origin.refresh_token) {
+    try { window.AuthShared.clearImpersonationState(); } catch (_) {}
+    try { window.AuthShared.clearImpersonationOrigin(); } catch (_) {}
+    try { if (window.supabase?.auth) await window.supabase.auth.signOut(); } catch (_) {}
+    window.location.href = '/login.html?error=impersonation_lost';
+    return;
+  }
+  try {
+    const r = await window.AuthShared.setSession({
+      access_token:  origin.access_token,
+      refresh_token: origin.refresh_token,
+    });
+    if (r && r.error) throw new Error(r.error.message || String(r.error));
+    window.AuthShared.clearImpersonationOrigin();
+    window.AuthShared.clearImpersonationState();
+    // v2-landing i.p.v. v1 /index.html. CRM_STAFF_ROLES (incl. super_admin
+    // van jezelf) mag hier gewoon binnen.
+    window.location.href = '/modules/klanten-v2/';
+  } catch (e) {
+    try { window.AuthShared.clearImpersonationOrigin(); } catch (_) {}
+    try { window.AuthShared.clearImpersonationState(); } catch (_) {}
+    try { if (window.supabase?.auth) await window.supabase.auth.signOut(); } catch (_) {}
+    window.location.href = '/login.html?error=impersonation_restore';
+  }
+}
+
 // ── Router ───────────────────────────────────────────────────────────────────
 
 function parseRoute() {
@@ -974,6 +1097,12 @@ function wireTopbarActionsToShell() {
   //    Poller ~60s; opgeschoond bij beforeunload; geen self-observing DOM.
   try { initNotifBell(); } catch (e) { console.warn('[klanten-v2] notif-bell init failed:', e?.message); }
   try { startBadgePoller(); } catch (e) { console.warn('[klanten-v2] badge poller init failed:', e?.message); }
+
+  // 7) v=1ey — impersonatie-banner (port v1 sidebar.js:1263-1344). Toont
+  //    "Je bekijkt als <naam> — Stop impersonatie" ALS localStorage-marker
+  //    'impersonation_state' aanwezig is; anders no-op. Herstelt bij klik
+  //    de origin-sessie via AuthShared.setSession en herlaadt naar v2.
+  try { initImpersonationBanner(); } catch (e) { console.warn('[klanten-v2] impersonation banner init failed:', e?.message); }
 })().catch((e) => {
   console.error('[klanten-v2] boot fatal:', e);
   const view = document.getElementById('content') || document.getElementById('kv-view');

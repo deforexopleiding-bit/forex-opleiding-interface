@@ -134,7 +134,19 @@
     coaching:    { loading: false, error: null, data: null, from: null, to: null, key: null },
     myEvents:    { loading: false, error: null, data: null, scope: 'all' },
     myStudents:  { loading: false, error: null, data: null },
+    // v=11 (2026-08-25) — combined "verdiensten" tegels + doughnut op Overzicht.
+    // Drie sub-buckets: all_time (2020-01-01→vandaag), this_month (1e→vandaag),
+    // ytd (1-jan→vandaag). Elk cachet zijn eigen coaching-grand_total apart
+    // van de Coaching-tab (die kan een vrije aangepast-range hebben) zodat de
+    // trage all-time Bubble-call niet elke Overzicht-open opnieuw hoeft. TTL
+    // 10 min stale-while-revalidate; hard-refresh triggert nieuwe fetch.
+    overviewCoaching: {
+      all_time:   { loading: false, error: null, data: null, fetched_at: 0 },
+      this_month: { loading: false, error: null, data: null, fetched_at: 0 },
+      ytd:        { loading: false, error: null, data: null, fetched_at: 0 },
+    },
   };
+  const OVERVIEW_COACHING_TTL_MS = 10 * 60 * 1000; // 10 min
   const _ui = {
     py: '26',                       // periode-chip jaar (26/25)
     travelForm:      null,           // { days, saving, error }
@@ -293,6 +305,38 @@
     const last  = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     return { from: fmt(first), to: fmt(last) };
   }
+  // v=11 (2026-08-25) — coaching-fetch voor de gecombineerde Overzicht-tegels.
+  // Kind ∈ 'all_time' | 'this_month' | 'ytd'. Cacht per bucket met TTL 10 min
+  // stale-while-revalidate: als er data < TTL is → geen refetch. Deelt met
+  // Coaching-tab wanneer die exact dezelfde from/to aanhoudt (zeldzaam, want
+  // Coaching-tab default = huidige maand). Timeout 45s zoals de Coaching-tab
+  // (all-time Bubble-fetch kan structureel > 10 s duren).
+  function _overviewRangeFor(kind) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const fmt = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const now = new Date();
+    if (kind === 'all_time')   return { from: '2020-01-01', to: fmt(now) };
+    if (kind === 'ytd')        return { from: now.getFullYear() + '-01-01', to: fmt(now) };
+    // 'this_month' default
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: fmt(first), to: fmt(now) };
+  }
+  async function fetchOverviewCoaching(kind) {
+    const b = _live.overviewCoaching[kind];
+    if (!b) return;
+    // Cache-check: recent data en niet in error-state → skip.
+    const fresh = b.data && (Date.now() - (b.fetched_at || 0) < OVERVIEW_COACHING_TTL_MS);
+    if (fresh || b.loading) return;
+    b.loading = true; b.error = null;
+    render();
+    const { from, to } = _overviewRangeFor(kind);
+    const url = `/api/mentor-coaching-earnings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const j = await tryFetch('overview-coaching:' + kind, url, 45000);
+    b.loading = false;
+    if (!j || j.__error) { b.error = j?.__error || 'Kon coaching-totaal niet laden'; render(); return; }
+    b.data = j; b.fetched_at = Date.now();
+    render();
+  }
   async function fetchMyEvents() {
     if (_live.myEvents.loading) return;
     _live.myEvents.loading = true; _live.myEvents.error = null;
@@ -341,6 +385,11 @@
     if (cp.customFrom > cp.customTo) { toast('Van-datum moet vóór tot-datum liggen.', 'warn'); return; }
     _live.coaching.data = null; _live.coaching.error = null; _live.coaching.key = null;
     queueMicrotask(() => fetchCoaching(cp.customFrom, cp.customTo));
+  };
+  window.__verdRetryOverviewCoaching = (kind) => {
+    const b = _live.overviewCoaching[kind]; if (!b) return;
+    b.data = null; b.error = null; b.fetched_at = 0;
+    queueMicrotask(() => fetchOverviewCoaching(kind));
   };
   window.__verdRetryMyEvents = () => { _live.myEvents.data = null; queueMicrotask(fetchMyEvents); };
   window.__verdRetryMyStudents = () => { _live.myStudents.data = null; queueMicrotask(fetchMyStudents); };
@@ -496,6 +545,51 @@
     </div>`;
   }
 
+  // v=11 — SVG doughnut voor bonus-vs-coaching source-split op Overzicht.
+  // 2 segmenten; ronde inner-hole met totaal in het midden. Kleur-tokens
+  // uit het design-system zodat theme-swap klopt. Guard: sum ≤ 0 → empty
+  // state (grijze cirkel + "Nog geen verdiensten").
+  function doughnutTwo(a, b, labelA, labelB) {
+    const va = Math.max(0, Number(a) || 0);
+    const vb = Math.max(0, Number(b) || 0);
+    const sum = va + vb;
+    if (sum <= 0) {
+      return `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 8px">
+        <svg viewBox="0 0 42 42" style="width:132px;height:132px" aria-hidden="true">
+          <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--surface-2)" stroke-width="6"/>
+        </svg>
+        <div style="font-size:12px;color:var(--text-3);text-align:center">Nog geen verdiensten — bron-verdeling verschijnt zodra er bedragen geboekt zijn.</div>
+      </div>`;
+    }
+    const pctA = (va / sum) * 100;
+    const pctB = 100 - pctA;
+    // stroke-dasharray truc op circumference (2πr, r=15.9155 → ~100).
+    const strokeA = pctA.toFixed(2) + ' ' + (100 - pctA).toFixed(2);
+    const strokeB = pctB.toFixed(2) + ' ' + (100 - pctB).toFixed(2);
+    const offsetB = (25 + (100 - pctA)).toFixed(2); // rotate by pctA
+    return `<div style="display:flex;align-items:center;gap:16px;padding:8px 4px 4px;flex-wrap:wrap;justify-content:center">
+      <svg viewBox="0 0 42 42" style="width:140px;height:140px;flex-shrink:0" role="img" aria-label="Bron-verdeling bonus vs coaching">
+        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--surface-2)" stroke-width="6"/>
+        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--violet)"  stroke-width="6" stroke-dasharray="${strokeA}" stroke-dashoffset="25" transform="rotate(-90 21 21)"/>
+        <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--emerald)" stroke-width="6" stroke-dasharray="${strokeB}" stroke-dashoffset="${offsetB}" transform="rotate(-90 21 21)"/>
+        <text x="21" y="20"  text-anchor="middle" style="font-size:5.5px;font-weight:600;fill:var(--text)" class="mono">${esc(eur(sum).replace('€ ', '€'))}</text>
+        <text x="21" y="26"  text-anchor="middle" style="font-size:3px;fill:var(--text-3)">totaal</text>
+      </svg>
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:180px">
+        <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+          <span style="width:11px;height:11px;border-radius:3px;background:var(--violet);flex-shrink:0"></span>
+          <span style="flex:1"><b>${esc(labelA)}</b> · ${eur(va)}</span>
+          <span class="mono" style="color:var(--text-3);font-size:11.5px">${Math.round(pctA)}%</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+          <span style="width:11px;height:11px;border-radius:3px;background:var(--emerald);flex-shrink:0"></span>
+          <span style="flex:1"><b>${esc(labelB)}</b> · ${eur(vb)}</span>
+          <span class="mono" style="color:var(--text-3);font-size:11.5px">${Math.round(pctB)}%</span>
+        </div>
+      </div>
+    </div>`;
+  }
+
   // Bouw voor projection_12m: max 12 punten + labels — respect payload-cap.
   // Fix v6: slice(0, 12) forceert dat de as niet meer dan 12 labels heeft,
   // ongeacht hoeveel maanden de endpoint returnt.
@@ -527,6 +621,13 @@
     if (_live.overview.error && !_live.overview.data) return errBlk(_live.overview.error, 'window.__verdRetryOverview()') + renderConfirmModal();
     if (!_live.overview.data) return skel() + renderConfirmModal();
 
+    // v=11 — trigger 3 coaching-buckets lazy zodra Overzicht opent. Elk cachet
+    // 10 min. render() wordt door de fetcher zelf getriggerd wanneer data
+    // binnenkomt, dus geen re-render-loop hier.
+    if (!_live.overviewCoaching.all_time.data   && !_live.overviewCoaching.all_time.loading   && !_live.overviewCoaching.all_time.error)   queueMicrotask(() => fetchOverviewCoaching('all_time'));
+    if (!_live.overviewCoaching.this_month.data && !_live.overviewCoaching.this_month.loading && !_live.overviewCoaching.this_month.error) queueMicrotask(() => fetchOverviewCoaching('this_month'));
+    if (!_live.overviewCoaching.ytd.data        && !_live.overviewCoaching.ytd.loading        && !_live.overviewCoaching.ytd.error)        queueMicrotask(() => fetchOverviewCoaching('ytd'));
+
     const d = _live.overview.data;
     const t = d.totals || {};
     const proj = buildProjection12(d.projection_12m);
@@ -539,11 +640,50 @@
     const earnedTotal = Number(t.earned_total)   || 0;
     const mx = Math.max(dezeMaand, volgendeMnd, openTotaal, 1);
 
+    // v=11 — gecombineerde tegels bovenaan (bonus + coaching). Formule
+    // volgt exact mentor-dashboard.html:2078-2079:
+    //   verdiendMaand = bonus.deze_maand + coachingMaand
+    //   verdiendYTD   = bonus.earned_total + coachingYTD
+    // Reden voor `earned_total` (niet `deze_maand`) in YTD-formule: bonus is
+    // al earned-basis (som van alle non-cancelled bonus-entries); coaching-
+    // YTD is enkel year-to-date. Historische-event-bonussen zitten al in
+    // bonus.earned_total via mentor_ledger_entries.
+    const cbA = _live.overviewCoaching.all_time;
+    const cbM = _live.overviewCoaching.this_month;
+    const cbY = _live.overviewCoaching.ytd;
+    const coachAll   = Number(cbA.data?.grand_total) || 0;
+    const coachMonth = Number(cbM.data?.grand_total) || 0;
+    const coachYtd   = Number(cbY.data?.grand_total) || 0;
+
+    // Klaar-check per tegel: loading/error/data. Fallback string bij loading.
+    const combinedTotaal = (cbA.data ? eur(earnedTotal + coachAll)     : '⌛');
+    const combinedMonth  = (cbM.data ? eur(dezeMaand   + coachMonth)   : '⌛');
+    const combinedYtd    = (cbY.data ? eur(earnedTotal + coachYtd)     : '⌛');
+    const combinedSubTot = cbA.error ? '⚠ ' + esc(cbA.error) : (cbA.loading || !cbA.data ? 'coaching-totaal laden…' : `bonus ${eur(earnedTotal)} + coaching ${eur(coachAll)}`);
+    const combinedSubMon = cbM.error ? '⚠ ' + esc(cbM.error) : (cbM.loading || !cbM.data ? 'coaching-maand laden…' : `bonus ${eur(dezeMaand)} + coaching ${eur(coachMonth)}`);
+    const combinedSubYtd = cbY.error ? '⚠ ' + esc(cbY.error) : (cbY.loading || !cbY.data ? 'coaching-YTD laden…' : `bonus ${eur(earnedTotal)} + coaching ${eur(coachYtd)}`);
+
+    // Doughnut: hergebruikt de all-time bedragen (zelfde bron als "Verdiend
+    // totaal"). Bij loading toont 'ie de empty-state doughnut; niet-blokkerend.
+    const doughnutBody = cbA.data
+      ? doughnutTwo(earnedTotal, coachAll, 'Bonus (event)', 'Coaching')
+      : (cbA.error
+          ? `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r);font-size:12.5px">⚠ ${esc(cbA.error)} <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="window.__verdRetryOverviewCoaching('all_time')">Opnieuw</button></div>`
+          : `<div style="padding:14px;color:var(--text-3);font-size:12.5px;text-align:center">Bron-verdeling laden…</div>`);
+
     return `${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Deze maand',       val: eur(dezeMaand),   sub: 'bonus-vrijgave' },
-      { c: 'amber',   icon: I.clock, label: 'Volgende maand',   val: eur(volgendeMnd), sub: 'geplande vrijgave' },
-      { c: 'teal',    icon: I.cal,   label: 'Openstaand totaal', val: eur(openTotaal), sub: 'niet-uitbetaalde bonus' },
-      { c: 'emerald', icon: I.chart, label: 'Totaal verdiend',  val: eur(earnedTotal), sub: 'alle bonussen sinds start' },
+      { c: 'pink',    icon: I.chart, label: 'Verdiend totaal',   val: combinedTotaal, sub: combinedSubTot, hi: true },
+      { c: 'blue',    icon: I.euro,  label: 'Verdiend deze maand', val: combinedMonth,  sub: combinedSubMon },
+      { c: 'emerald', icon: I.cal,   label: 'Verdiend YTD',       val: combinedYtd,    sub: combinedSubYtd },
+    ])}
+    <div class="pad" style="padding-top:16px">
+      ${dashCard('Bron-verdeling (all-time)', 'violet', doughnutBody)}
+    </div>
+    ${H.kpis([
+      { c: 'blue',    icon: I.euro,  label: 'Bonus deze maand',   val: eur(dezeMaand),   sub: 'bonus-vrijgave' },
+      { c: 'amber',   icon: I.clock, label: 'Bonus volgende maand', val: eur(volgendeMnd), sub: 'geplande vrijgave' },
+      { c: 'teal',    icon: I.cal,   label: 'Bonus openstaand',   val: eur(openTotaal),  sub: 'niet-uitbetaalde bonus' },
+      { c: 'emerald', icon: I.chart, label: 'Bonus totaal verdiend', val: eur(earnedTotal), sub: 'alle bonussen sinds start' },
     ])}
     <div class="pad" style="padding-top:16px">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
