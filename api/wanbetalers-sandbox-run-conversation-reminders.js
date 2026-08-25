@@ -88,7 +88,11 @@ export default async function handler(req, res) {
     }
     const { autonomyCfg, noReplyCfg } = cfgRes;
     const deps      = await loadConversationReminderDeps();
-    const dryRunOn  = deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true; // fail-safe: dry-run AAN
+    // Splitsing 2026-08-25: sandbox endpoint → test-vlag via scope='test'.
+    // Fail-safe fallback op productie-vlag als scope-helper niet beschikbaar is.
+    const dryRunOn  = deps.isDryRunEnabledFor
+      ? await deps.isDryRunEnabledFor({ scope: 'test' })
+      : (deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true);
     summary.dry_run = dryRunOn;
 
     // 3) SELECT runs SCOPED op de sandbox-klant (laag 3). We halen dezelfde

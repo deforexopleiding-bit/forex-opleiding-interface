@@ -237,14 +237,20 @@ export async function loadConversationReminderConfig() {
  */
 export async function loadConversationReminderDeps() {
   const deps = {
-    isDryRunEnabled: null, assertRecipientMatchesSandbox: null,
+    isDryRunEnabled: null, isTestDryRunEnabled: null, isDryRunEnabledFor: null,
+    assertRecipientMatchesSandbox: null,
     sendText: null, sendTemplate: null,
     MetaNotConfiguredError: null, getConfigStatus: null,
     computeVariables: null,
   };
   try {
     const dry = await import('./_lib/dunning-dry-run.js');
-    deps.isDryRunEnabled = dry.isDryRunEnabled;
+    // Alle drie exposen zodat handlers per context de juiste kunnen kiezen
+    // (splitsing 2026-08-25). Bestaande `isDryRunEnabled` blijft de
+    // productie-vlag; nieuw `isDryRunEnabledFor({scope|isTest})` kiest per call.
+    deps.isDryRunEnabled              = dry.isDryRunEnabled;
+    deps.isTestDryRunEnabled          = dry.isTestDryRunEnabled;
+    deps.isDryRunEnabledFor           = dry.isDryRunEnabledFor;
     deps.assertRecipientMatchesSandbox = dry.assertRecipientMatchesSandbox;
   } catch (e) { console.warn('[conv-reminder] dunning-dry-run module load fail:', e?.message); }
   try {
@@ -363,7 +369,12 @@ export default async function handler(req, res) {
 
     // ── Deps + dry-run laden via shared loader ────────────────────────────
     const deps = await loadConversationReminderDeps();
-    const dryRunOn = deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true; // fail-safe: dry-run AAN
+    // Splitsing 2026-08-25: kies per scope. scope='test' → test-vlag,
+    // scope='production' (default) → productie-vlag. Zonder scope in de
+    // dependency-shape valt de handler fail-safe terug op dry-run AAN.
+    const dryRunOn = deps.isDryRunEnabledFor
+      ? await deps.isDryRunEnabledFor({ scope })
+      : (deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true);
 
     // ── Per-run afwerken via shared processor ─────────────────────────────
     const nowMs = Date.now();

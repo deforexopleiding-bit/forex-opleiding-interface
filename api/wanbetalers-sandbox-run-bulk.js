@@ -21,7 +21,8 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin, getSandboxCustomer } from './_lib/wanbetalers-sandbox.js';
-import { isDryRunEnabled, assertRecipientMatchesSandbox } from './_lib/dunning-dry-run.js';
+// Splitsing 2026-08-25: sandbox-flow leest de test-vlag, niet de productie-vlag.
+import { isTestDryRunEnabled as isDryRunEnabled, assertRecipientMatchesSandbox } from './_lib/dunning-dry-run.js';
 import { isAutoEnabled, ensurePipelineCustomer, setStage } from './_lib/dunning-pipeline.js';
 import { renderTemplate }              from './_lib/dunning-template-render.js';
 import { buildMetaTemplateVariables,

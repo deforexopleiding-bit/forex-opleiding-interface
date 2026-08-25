@@ -29,17 +29,18 @@ Cockpit-init. Retourneert config + tellingen + recente audit.
 Response 200:
 ```
 {
-  ready: boolean,                     // true als sandbox_contact.phone én .email gezet
-  blockers: string[],                 // menselijk leesbaar per lege config
+  ready: boolean,                            // true als sandbox_contact.phone én .email gezet
+  blockers: string[],                        // menselijk leesbaar per lege config
   sandbox_contact: { phone: string|null, email: string|null },
-  dry_run_enabled: boolean,           // uit app_settings.dunning_dry_run.enabled (default TRUE fail-safe)
+  dry_run_enabled: boolean,                  // TEST-vlag — app_settings.dunning_test_dry_run.enabled (default TRUE)
+  dry_run_enabled_production: boolean,       // productie-vlag — app_settings.dunning_dry_run.enabled (default TRUE)
   test_customer_count: number,
   test_invoice_count:  number,
   recent_audit: Array<{
     id: uuid, action: string, status: 'ok'|'error'|'blocked',
     admin_email: string, target: object,
     error_message: string|null, created_at: iso
-  }>                                  // laatste 20
+  }>                                         // laatste 20
 }
 ```
 
@@ -458,17 +459,32 @@ Response 200:
 
 ## Dry-run toggle
 
+**Splitsing 2026-08-25**: er zijn nu twee aparte vlaggen in `app_settings`:
+
+| Key | Bereik | Wie schrijft? |
+|---|---|---|
+| `dunning_dry_run` | Productie-verzending (echte klanten) | Alleen productie-code (crediteer-ronde, cron-arrangements-breach-check, incasso-dossier-email, joost-outbound-send, ...). |
+| `dunning_test_dry_run` | Test/sandbox-verzending (is_test-klanten) | Alleen `wanbetalers-sandbox-set-dry-run` (via `setDryRun()` helper). |
+
+De cockpit / harness kan uitsluitend de test-vlag muteren; productie-verzending is beschermd.
+
+Beide defaulten fail-safe **TRUE** (send OFF) bij ontbrekende key of DB-fout.
+
 ### `POST /api/wanbetalers-sandbox-set-dry-run`
 
 Body: `{ enabled: boolean }`
 
-Response 200: `{ ok: true, dunning_dry_run: { enabled: boolean } }`.
+Response 200: `{ ok: true, dunning_dry_run: { enabled: boolean } }` (naam behouden voor back-compat; **schrijft naar `dunning_test_dry_run`**).
 
-Effect: schrijft `app_settings.dunning_dry_run = {enabled: <bool>}`.
-Default bij ontbrekende key = **TRUE** (fail-safe AAN). Wordt binnen ~10s
-door de cache in `_lib/dunning-dry-run.js` opgepakt.
+Effect: schrijft `app_settings.dunning_test_dry_run = {enabled: <bool>}`. Cache-invalidatie meteen zodat de nieuwe waarde binnen ~1s door alle test-endpoints gezien wordt.
 
-Alternatief via SQL:
+Alternatief via SQL (test-vlag):
+```sql
+INSERT INTO app_settings (key, value) VALUES ('dunning_test_dry_run', '{"enabled": false}'::jsonb)
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+```
+
+Productie-vlag apart wijzigen:
 ```sql
 INSERT INTO app_settings (key, value) VALUES ('dunning_dry_run', '{"enabled": false}'::jsonb)
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

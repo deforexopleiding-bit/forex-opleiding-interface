@@ -29,7 +29,8 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin, getSandboxCustomer } from './_lib/wanbetalers-sandbox.js';
-import { isDryRunEnabled } from './_lib/dunning-dry-run.js';
+// Splitsing 2026-08-25: sandbox-flow leest de test-vlag.
+import { isTestDryRunEnabled as isDryRunEnabled } from './_lib/dunning-dry-run.js';
 import { evaluateArrangement } from './cron-arrangements-breach-check.js';
 
 export default async function handler(req, res) {
