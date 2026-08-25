@@ -5714,11 +5714,20 @@
         if (vErr) throw new Error('verifyOtp: ' + vErr.message);
 
         showToast('Ingelogd als ' + (target.name || target.email) + ' — redirect…', 'ok');
-        // 5) Redirect naar target-landing. Voor CRM-rollen: v2-shell.
-        //    Voor viewer/student: LMS (via getRoleLandingUrl-fallback).
-        let landing = '/modules/klanten-v2/';
-        if (typeof window.AuthShared.getRoleLandingUrl === 'function') {
+        // v=97: CRM-rollen → v2-shell (was: getRoleLandingUrl → v1-role-homes
+        // zoals mentor-home.html / sales-dashboard.html). viewer/student →
+        // LMS via getRoleLandingUrl (bestaande logica). getRoleLandingUrl
+        // ZELF NIET aanpassen — die wordt ook door normale login/CrmGuard
+        // gebruikt en die willen we niet raken zolang v1-pagina's nog leven.
+        const CRM_ROLES = new Set(['super_admin','admin','manager','sales','mentor','marketing','administratie']);
+        const rawRole = String(target.role || '').toLowerCase();
+        let landing;
+        if (CRM_ROLES.has(rawRole)) {
+          landing = '/modules/klanten-v2/';
+        } else if (typeof window.AuthShared.getRoleLandingUrl === 'function') {
           landing = window.AuthShared.getRoleLandingUrl(target.role) || '/modules/klanten-v2/';
+        } else {
+          landing = '/modules/klanten-v2/';
         }
         setTimeout(() => { try { window.location.href = landing; } catch (_) {} }, 500);
       } catch (e) {
