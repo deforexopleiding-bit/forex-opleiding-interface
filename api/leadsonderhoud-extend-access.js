@@ -132,78 +132,98 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (lErr || !lead) return res.status(404).json({ error: 'Lead niet gevonden' });
 
-    // 2. lms_gebruiker koppelen via lead_id (of via email als fallback).
-    let { data: lmsUser } = await supabaseAdmin
-      .from('lms_gebruikers')
-      .select('id, email, toegang_tot')
-      .eq('lead_id', lead_id).maybeSingle();
-    if (!lmsUser && lead.email) {
-      const { data: byEmail } = await supabaseAdmin
+    // v=2 (2026-08-25) — LOOKUP via trial_warmte i.p.v. fragiele lead_id/email-
+    // chain op lms_gebruikers. trial_warmte heeft `lead_id → gebruiker_id`
+    // rechtstreeks; werkt voor 7-daagse/minicursus-trials. Fallback: bestaande
+    // lms_gebruikers.lead_id / email-match voor niet-trial LMS-accounts.
+    let lmsUserId = null;
+    let currentTotYmd = null;
+    {
+      const { data: warm } = await supabaseAdmin
+        .from('trial_warmte')
+        .select('gebruiker_id, toegang_tot')
+        .eq('lead_id', lead_id)
+        .maybeSingle();
+      if (warm && warm.gebruiker_id) {
+        lmsUserId = warm.gebruiker_id;
+        currentTotYmd = warm.toegang_tot ? String(warm.toegang_tot).slice(0, 10) : null;
+      }
+    }
+    if (!lmsUserId) {
+      let { data: lmsUser } = await supabaseAdmin
         .from('lms_gebruikers')
         .select('id, email, toegang_tot')
-        .eq('email', String(lead.email).toLowerCase()).maybeSingle();
-      lmsUser = byEmail || null;
+        .eq('lead_id', lead_id).maybeSingle();
+      if (!lmsUser && lead.email) {
+        const { data: byEmail } = await supabaseAdmin
+          .from('lms_gebruikers')
+          .select('id, email, toegang_tot')
+          .eq('email', String(lead.email).toLowerCase()).maybeSingle();
+        lmsUser = byEmail || null;
+      }
+      if (lmsUser) {
+        lmsUserId = lmsUser.id;
+        currentTotYmd = lmsUser.toegang_tot ? String(lmsUser.toegang_tot).slice(0, 10) : null;
+      }
     }
-    if (!lmsUser) {
-      return res.status(404).json({ error: 'Deze lead heeft geen LMS-account. Voeg de lead eerst toe via Leads → LMS-toegang.' });
+    if (!lmsUserId) {
+      return res.status(404).json({ error: 'Deze lead heeft geen LMS-account.' });
     }
 
-    // 3. Alle actieve grants ophalen.
-    const { data: grants, error: gErr } = await supabaseAdmin
-      .from('lms_toegang')
-      .select('product_id, toegang_van, toegang_tot')
-      .eq('gebruiker_id', lmsUser.id);
-    if (gErr) return res.status(500).json({ error: 'grants: ' + gErr.message });
-    if (!grants || !grants.length) {
-      return res.status(404).json({ error: 'Deze LMS-gebruiker heeft geen actieve grants.' });
-    }
-
-    // 4. Nieuwe toegang_tot bepalen. days = max(today, current) + N.
-    //    to_date = absolute waarde (overschrijft).
+    // Nieuwe toegang_tot bepalen. days = max(today, current) + N.
+    //   to_date = absolute waarde (overschrijft).
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const todayYmd = ymd(today);
-    let newTotYmd = null;
+    let finalYmd = null;
 
     if (to_date) {
       const dt = parseYmd(to_date);
       if (!dt) return res.status(400).json({ error: 'to_date moet YYYY-MM-DD zijn' });
-      newTotYmd = ymd(dt);
-    }
-    // else: bereken per grant via daysNum.
-
-    const updates = [];
-    for (const g of grants) {
-      let perGrantNewTot = newTotYmd;
-      if (!perGrantNewTot) {
-        // Take max(today, current toegang_tot), add daysNum.
-        const currentYmd = String(g.toegang_tot || '').slice(0, 10);   // 'YYYY-MM-DD...'
-        const base = currentYmd && currentYmd > todayYmd ? parseYmd(currentYmd) : today;
-        const next = new Date(base);
-        next.setDate(next.getDate() + daysNum);
-        perGrantNewTot = ymd(next);
-      }
-      try {
-        await zetGrant({
-          gebruikerId: lmsUser.id,
-          productId:   g.product_id,
-          van:         String(g.toegang_van || todayYmd).slice(0, 10),
-          tot:         perGrantNewTot,
-        });
-        updates.push({ product_id: g.product_id, new_tot: perGrantNewTot });
-      } catch (e) {
-        console.warn('[extend-access] zetGrant fail:', g.product_id, e?.message || e);
-      }
-    }
-    if (!updates.length) {
-      return res.status(500).json({ error: 'Kon geen enkele grant bijwerken' });
+      finalYmd = ymd(dt);
+    } else {
+      const base = (currentTotYmd && currentTotYmd > todayYmd) ? parseYmd(currentTotYmd) : today;
+      const next = new Date(base);
+      next.setDate(next.getDate() + daysNum);
+      finalYmd = ymd(next);
     }
 
-    // 5. Meest recente nieuwe einddatum → voor de melding.
-    const finalYmd = updates.map(u => u.new_tot).sort().slice(-1)[0];
+    // Primaire write: lms_gebruikers.toegang_tot (bron van trial_warmte.toegang_tot).
+    const { error: uErr } = await supabaseAdmin
+      .from('lms_gebruikers')
+      .update({ toegang_tot: totIso(finalYmd) })
+      .eq('id', lmsUserId);
+    if (uErr) return res.status(500).json({ error: 'lms_gebruikers update: ' + uErr.message });
+
+    // Secundaire write (best-effort, consistent met per-product grants):
+    // update alle bijbehorende lms_toegang-rijen naar dezelfde einddatum.
+    // Fail-soft: hoofdupdate is al binnen, dit is voor consistentie in het
+    // per-product-overzicht.
+    let grantsUpdated = 0;
+    try {
+      const { data: grants } = await supabaseAdmin
+        .from('lms_toegang')
+        .select('product_id, toegang_van')
+        .eq('gebruiker_id', lmsUserId);
+      for (const g of (grants || [])) {
+        try {
+          await zetGrant({
+            gebruikerId: lmsUserId,
+            productId:   g.product_id,
+            van:         String(g.toegang_van || todayYmd).slice(0, 10),
+            tot:         finalYmd,
+          });
+          grantsUpdated++;
+        } catch (e) {
+          console.warn('[extend-access] grant-sync soft-fail:', g.product_id, e?.message || e);
+        }
+      }
+    } catch (e) {
+      console.warn('[extend-access] grant-fetch soft-fail:', e?.message || e);
+    }
     const einddatumNl = fmtNlDate(finalYmd);
     const voornaam = String(lead.voornaam || '').trim() || (lead.email || 'daar');
 
-    // 6. Meldingen fail-soft (email + WA parallel).
+    // Meldingen fail-soft (email + WA parallel).
     const [mailRes, waRes] = await Promise.all([
       sendEmailFailSoft({ toEmail: lead.email, voornaam, einddatumNl }),
       sendWaFailSoft({ toPhone: lead.telefoon_e164, voornaam, einddatumNl }),
@@ -212,8 +232,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok:                true,
       lead_id,
-      lms_gebruiker_id:  lmsUser.id,
-      grants_updated:    updates.length,
+      lms_gebruiker_id:  lmsUserId,
+      grants_updated:    grantsUpdated,
       new_toegang_tot:   finalYmd,
       einddatum_nl:      einddatumNl,
       email_sent:        mailRes.ok,

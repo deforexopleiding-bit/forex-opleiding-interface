@@ -160,17 +160,33 @@
       if (window.DFO?.render) window.DFO.render();
     }
   }
-  function fmtToegangTot(iso) {
+  // v=23: accepteert nu een access-object uit trial_warmte (of null).
+  // Legacy string-input blijft werken (backward-compat voor caches).
+  function fmtToegangTot(entry) {
+    if (!entry) return '<span style="color:var(--text-3);font-size:11.5px">Geen toegang</span>';
+    // Legacy: string (oude endpoint-shape v=1).
+    const iso = (typeof entry === 'string') ? entry
+              : (entry && entry.toegang_tot) ? String(entry.toegang_tot).slice(0, 10) : null;
+    const verlopenFlag = (entry && typeof entry === 'object') ? !!entry.verlopen : null;
+    const dagen = (entry && typeof entry === 'object' && typeof entry.dagen_over === 'number') ? entry.dagen_over : null;
     if (!iso) return '<span style="color:var(--text-3);font-size:11.5px">Geen toegang</span>';
     try {
-      const dt = new Date(String(iso).slice(0,10) + 'T00:00:00');
+      const dt = new Date(iso + 'T00:00:00');
       const nl = dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
       const today = new Date(); today.setHours(0,0,0,0);
-      const isPast = dt < today;
+      const isPast = (verlopenFlag !== null) ? verlopenFlag : (dt < today);
       const color = isPast ? 'var(--rose)' : 'var(--text-1)';
-      const suffix = isPast ? '<span style="font-size:10px;color:var(--rose);margin-left:4px">verlopen</span>' : '';
-      return `<span style="font-size:12px;color:${color}">${nl}</span>${suffix}`;
+      const badge = isPast
+        ? '<span style="font-size:10px;color:var(--rose);margin-left:4px">verlopen</span>'
+        : (dagen != null && dagen <= 3 ? `<span style="font-size:10px;color:var(--amber);margin-left:4px">nog ${dagen}d</span>` : '');
+      return `<span style="font-size:12px;color:${color}">${nl}</span>${badge}`;
     } catch (_) { return String(iso); }
+  }
+  // v=23: welke trajecten hebben zinvol-verlengen? 7-daagse + minicursus zijn
+  // trial-grants met einddatum; event/webinar/membership niet.
+  const _EXTEND_TRAJECTS = new Set(['7-daagse', '7 daagse', '7daagse', 'minicursus', 'mini cursus', 'mini-cursus']);
+  function _isExtendableTraject(traject) {
+    return _EXTEND_TRAJECTS.has(String(traject || '').toLowerCase().trim());
   }
 
   // Contacten-fetch: filter-key voorkomt refetch bij ongewijzigde filters.
@@ -375,11 +391,14 @@
                 ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)">✓ geboekt</span>`
                 : `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--amber-soft);color:var(--amber)">— nog niet</span>`;
               // v=19: "Verlengen"-actie per lead → opent extend-modal.
+              // v=23: alleen tonen voor trajecten met een trial-grant (7-daagse /
+              // minicursus). Event/webinar/membership hebben geen einddatum-toegang.
               const nameForBtn = String(l.naam || l.email || '').replace(/'/g, "\\'");
               const idForBtn   = String(l.id || '').replace(/'/g, "\\'");
-              const extendBtn  = idForBtn
-                ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsExtOpen('${idForBtn}', '${nameForBtn}')" style="font-size:11px" title="LMS-toegang van deze lead verlengen">Verlengen</button>`
-                : '';
+              const extendable = _isExtendableTraject(l.traject);
+              const extendBtn  = (idForBtn && extendable)
+                ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsExtOpen('${idForBtn}', '${nameForBtn}')" style="font-size:11px" title="Trial-toegang van deze lead verlengen">Verlengen</button>`
+                : (idForBtn ? `<span style="font-size:11px;color:var(--text-3)" title="Verlengen is alleen zinvol voor 7-daagse en minicursus">N.v.t.</span>` : '');
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:8px 10px">
                   <div style="font-weight:600">${esc(l.naam || l.email || '(zonder naam)')}</div>

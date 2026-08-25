@@ -1,13 +1,18 @@
-// api/leadsonderhoud-access-batch.js
-// POST body: { lead_ids: uuid[] } → { access: { [lead_id]: 'YYYY-MM-DD' | null } }
+// api/leadsonderhoud-access-batch.js  (v=2 · 2026-08-25)
+// POST body: { lead_ids: uuid[] }
+// Response: { access: { [lead_id]: { toegang_tot: 'YYYY-MM-DD'|null,
+//                                     verlopen: boolean, dagen_over: number|null,
+//                                     gebruiker_id: uuid|null } | null } }
 //
-// Read-only batch-lookup: max toegang_tot per lead (over alle grants van de
-// gekoppelde lms_gebruiker). Voor de "Toegang tot"-kolom in Leadsonderhoud →
-// Contacten. Fail-soft: onbekende lead / geen lms-account / geen grants →
-// key blijft null (UI toont "Geen toegang").
+// LEEST DE TRIAL-BRON: `trial_warmte`-view heeft per lead direct de velden
+// `lead_id, gebruiker_id, toegang_tot, verlopen, dagen_over` — dat is de
+// enige betrouwbare brug voor 7-daagse/minicursus-trials. De oude flow
+// (lead_id → lms_gebruikers → lms_toegang) miste vaak omdat leads-ingest de
+// lead_id op lms_gebruikers niet altijd zette en de email-fallback normalisatie
+// dropte. Fallback: `lms_gebruikers` direct als trial_warmte geen match heeft
+// (bv. lead die geen trial (meer) heeft maar wel een LMS-account).
 //
-// RBAC: leads.view (spiegel van leadsonderhoud-gesprekken).
-// 0 writes.
+// RBAC: leads.view. 0 writes.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
@@ -36,74 +41,45 @@ export default async function handler(req, res) {
   for (const id of leadIds) access[id] = null;
 
   try {
-    // 1. Voor deze lead-ids: haal lms_gebruikers op via lead_id-koppeling.
-    const { data: usersByLead } = await supabaseAdmin
-      .from('lms_gebruikers')
-      .select('id, lead_id, email')
+    // 1. Primair: trial_warmte per lead_id.
+    const { data: warm } = await supabaseAdmin
+      .from('trial_warmte')
+      .select('lead_id, gebruiker_id, toegang_tot, verlopen, dagen_over')
       .in('lead_id', leadIds);
-
-    const uidByLead = new Map();
-    const lmsUserIds = new Set();
-    for (const u of (usersByLead || [])) {
-      if (u.id && u.lead_id) {
-        uidByLead.set(u.lead_id, u.id);
-        lmsUserIds.add(u.id);
-      }
+    for (const w of (warm || [])) {
+      if (!w || !w.lead_id) continue;
+      const iso = w.toegang_tot ? String(w.toegang_tot).slice(0, 10) : null;
+      access[w.lead_id] = {
+        toegang_tot:  iso,
+        verlopen:     !!w.verlopen,
+        dagen_over:   (typeof w.dagen_over === 'number') ? w.dagen_over : null,
+        gebruiker_id: w.gebruiker_id || null,
+        source:       'trial_warmte',
+      };
     }
 
-    // 2. Voor leads die geen directe lead_id-koppeling hebben: fallback via email.
-    const missingLeadIds = leadIds.filter(id => !uidByLead.has(id));
-    if (missingLeadIds.length) {
-      const { data: leadsRow } = await supabaseAdmin
-        .from('leads')
-        .select('id, email')
-        .in('id', missingLeadIds)
-        .not('email', 'is', null);
-      const emailByLead = new Map();
-      const emails = [];
-      for (const l of (leadsRow || [])) {
-        if (l.email) {
-          const em = String(l.email).trim().toLowerCase();
-          emailByLead.set(l.id, em);
-          emails.push(em);
-        }
+    // 2. Fallback: lms_gebruikers direct (voor leads zonder trial maar wél
+    //    een LMS-account — bv. Membership-conversies). Alleen voor lead_ids
+    //    die nog geen trial_warmte-hit hebben.
+    const missing = leadIds.filter(id => !access[id]);
+    if (missing.length) {
+      const { data: usersByLead } = await supabaseAdmin
+        .from('lms_gebruikers')
+        .select('id, lead_id, toegang_tot')
+        .in('lead_id', missing);
+      for (const u of (usersByLead || [])) {
+        if (!u || !u.lead_id) continue;
+        const iso = u.toegang_tot ? String(u.toegang_tot).slice(0, 10) : null;
+        if (!iso) continue;
+        const today = new Date().toISOString().slice(0, 10);
+        access[u.lead_id] = {
+          toegang_tot:  iso,
+          verlopen:     iso < today,
+          dagen_over:   Math.round((new Date(iso + 'T00:00:00').getTime() - new Date(today + 'T00:00:00').getTime()) / 86400000),
+          gebruiker_id: u.id,
+          source:       'lms_gebruikers',
+        };
       }
-      if (emails.length) {
-        const { data: emailMatches } = await supabaseAdmin
-          .from('lms_gebruikers')
-          .select('id, email')
-          .in('email', emails);
-        const uidByEmail = new Map();
-        for (const u of (emailMatches || [])) {
-          if (u.email) uidByEmail.set(String(u.email).toLowerCase(), u.id);
-        }
-        for (const [leadId, email] of emailByLead.entries()) {
-          const uid = uidByEmail.get(email);
-          if (uid) { uidByLead.set(leadId, uid); lmsUserIds.add(uid); }
-        }
-      }
-    }
-
-    if (!lmsUserIds.size) return res.status(200).json({ access });
-
-    // 3. Grants ophalen voor alle betrokken lms_gebruikers; max toegang_tot per user.
-    const { data: grants } = await supabaseAdmin
-      .from('lms_toegang')
-      .select('gebruiker_id, toegang_tot')
-      .in('gebruiker_id', Array.from(lmsUserIds));
-
-    const maxByUid = new Map();
-    for (const g of (grants || [])) {
-      if (!g.toegang_tot) continue;
-      const iso = String(g.toegang_tot).slice(0, 10);
-      const cur = maxByUid.get(g.gebruiker_id);
-      if (!cur || iso > cur) maxByUid.set(g.gebruiker_id, iso);
-    }
-
-    // 4. Map terug naar lead_id.
-    for (const [leadId, uid] of uidByLead.entries()) {
-      const tot = maxByUid.get(uid);
-      if (tot) access[leadId] = tot;
     }
 
     return res.status(200).json({ access });
