@@ -8,6 +8,7 @@
 // Flow: secret → parse → settings → (live? kantooruren?) → conversatie → generateLisaResponse
 //       → in kantooruren: direct sturen; daarbuiten: pre-genereren + plannen in lisa_followups.
 
+import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { computeResponseDelay, sendTypingIndicator, matchBookingByEmail } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
@@ -39,10 +40,24 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // 1. Secret
+  // 1. Secret — [H-03 fix 2026-08-25] Dual-mode: header X-Lisa-Webhook-Secret
+  // (voorkeur, geen URL-leak) + query-fallback voor backwards-compat totdat
+  // Jeffrey de GHL-webhook-URL heeft omgezet. Constant-time compare.
+  // ACTIE JEFFREY: zet GHL Custom Webhook actions om zodat het secret via
+  // header X-Lisa-Webhook-Secret gaat i.p.v. ?secret=… — daarna kan de
+  // query-fallback in een vervolg-commit weg.
   const expectedSecret = process.env.LISA_WEBHOOK_SECRET;
   if (!expectedSecret) { console.error('[lisa-ghl-webhook] LISA_WEBHOOK_SECRET niet gezet'); return res.status(500).json({ error: 'Server misconfigured' }); }
-  if (req.query.secret !== expectedSecret) { console.warn('[lisa-ghl-webhook] ongeldig secret'); return res.status(401).json({ error: 'Unauthorized' }); }
+  const headerSecret = req.headers['x-lisa-webhook-secret'] || '';
+  const querySecret  = req.query?.secret || '';
+  const provided = String(headerSecret || querySecret || '');
+  let secretOk = false;
+  try {
+    if (provided.length === expectedSecret.length) {
+      secretOk = crypto.timingSafeEqual(Buffer.from(provided, 'utf8'), Buffer.from(expectedSecret, 'utf8'));
+    }
+  } catch (_) { secretOk = false; }
+  if (!secretOk) { console.warn('[lisa-ghl-webhook] ongeldig secret'); return res.status(401).json({ error: 'Unauthorized' }); }
 
   try {
     // 2. Payload — GHL nest onze data onder customData; val terug op GHL-standaardvelden

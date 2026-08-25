@@ -507,6 +507,29 @@ export default async function handler(req, res) {
       }
     }
 
+    // [H-10 fix 2026-08-25] Rol-cascade PRE-CHECK — moet vóór auth-ban en vóór
+    // set_canonical_role/add_role/remove_role paden, anders zou een manager
+    // een admin auth-bannen (10y) en daarna 403 krijgen (halve mutatie).
+    // Alleen relevant voor is_active + full_name + role. set_canonical_role
+    // en add_role/remove_role zijn al elders super_admin-only.
+    if ((is_active !== undefined || full_name !== undefined || role !== undefined) && userId !== admin.user.id) {
+      const { data: _tp, error: _tpErr } = await supabaseAdmin
+        .from('profiles').select('role').eq('id', userId).maybeSingle();
+      if (_tpErr) return res.status(500).json({ error: 'profile pre-check: ' + _tpErr.message });
+      if (!_tp)   return res.status(404).json({ error: 'Gebruiker niet gevonden.' });
+      const _tRole = _tp.role || 'viewer';
+      const _cRole = admin.profile.role;
+      if (_cRole !== 'super_admin') {
+        const _ci = ROLE_PRIORITY.indexOf(_cRole);
+        const _ti = ROLE_PRIORITY.indexOf(_tRole);
+        if (_ci < 0 || _ti < 0 || _ci >= _ti) {
+          return res.status(403).json({
+            error: `Je hebt geen rechten om een gebruiker met rol '${_tRole}' te wijzigen. Rol-cascade vereist strikt hogere caller-rol.`,
+          });
+        }
+      }
+    }
+
     // Auth-ban bij is_active=false / auth-unban bij is_active=true.
     // Blokkeert login echt (Supabase JWT-verify weigert banned users).
     // Fail-soft: als de auth-call faalt (bv. netwerk), log het maar breek de PATCH niet.
@@ -718,21 +741,67 @@ export default async function handler(req, res) {
       return res.status(200).json({ message: 'Gebruiker bijgewerkt.', fields: auditFields });
     }
 
+    // ── [K-02 fix 2026-08-25] Rol-cascade fetch — target-rol nodig voor H-10
+    //     (is_active=false cascade), M-04 (full_name cascade) en legacy role-
+    //     path blokkade. Fail-closed als target niet bestaat.
+    let _targetProfile = null;
+    if (is_active !== undefined || full_name !== undefined || role !== undefined) {
+      const { data: tp, error: tpErr } = await supabaseAdmin
+        .from('profiles').select('id, role, is_active, full_name').eq('id', userId).maybeSingle();
+      if (tpErr) return res.status(500).json({ error: 'profile lookup: ' + tpErr.message });
+      if (!tp)   return res.status(404).json({ error: 'Gebruiker niet gevonden.' });
+      _targetProfile = tp;
+    }
+    // Cascade-helper: caller mag alleen users met rol ≤ die van jezelf raken.
+    // Super_admin bypass. index-vergelijking in ROLE_PRIORITY: lager idx = hoger.
+    function _canCascadeOver(callerRole, targetRole) {
+      if (callerRole === 'super_admin') return true;
+      const ci = ROLE_PRIORITY.indexOf(callerRole);
+      const ti = ROLE_PRIORITY.indexOf(targetRole);
+      if (ci < 0 || ti < 0) return false;
+      return ci < ti; // caller strikt hoger dan target (geen peer-cascade)
+    }
+
     const updates = {};
 
     if (role !== undefined) {
+      // [K-02 fix] Legacy directe role-PATCH is nu super_admin-only. Anti-
+      // escalation via set_canonical_role blijft de canonieke route (regel 526).
+      // Voorheen kon een manager `updates.role = 'admin'` zetten omdat de gate
+      // alleen 'super_admin' blokkeerde → account-takeover via promotie van
+      // collega. Vanaf nu:
+      //  * niet-super_admin → 403 met verwijzing naar set_canonical_role
+      //  * super_admin → mag alle rollen (incl. super_admin) toekennen
+      if (admin.profile.role !== 'super_admin') {
+        return res.status(403).json({
+          error: 'Alleen super_admin kan de canonieke rol via dit pad wijzigen. Gebruik `set_canonical_role`.',
+        });
+      }
       if (!VALID_ROLES.includes(role)) {
         return res.status(400).json({ error: `Ongeldige rol. Kies uit: ${VALID_ROLES.join(', ')}.` });
       }
-      if (role === 'super_admin' && admin.profile.role !== 'super_admin') {
-        return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
-      }
-      // LEGACY: directe primaire-rol set. Wordt overschreven zodra user_roles
-      // wijzigt (add/remove → profiles.role = hoogste rol).
       updates.role = role;
     }
-    if (is_active !== undefined) updates.is_active = is_active;
-    if (full_name !== undefined) updates.full_name = full_name;
+    if (is_active !== undefined) {
+      // [H-10 fix] Deactivate/reactivate mag alleen op strikt lagere rollen.
+      // Zelf-lockout + laatste-super_admin-guards (regel 479-508) blijven ook.
+      if (userId !== admin.user.id && _targetProfile && !_canCascadeOver(admin.profile.role, _targetProfile.role || 'viewer')) {
+        return res.status(403).json({
+          error: `Je hebt geen rechten om een gebruiker met rol '${_targetProfile.role}' te (de)activeren.`,
+        });
+      }
+      updates.is_active = is_active;
+    }
+    if (full_name !== undefined) {
+      // [M-04 fix] Same cascade als [H-10] — voorkomt spoofing van display-
+      // namen (audit-trail-vervuiling). Zelf mag altijd.
+      if (userId !== admin.user.id && _targetProfile && !_canCascadeOver(admin.profile.role, _targetProfile.role || 'viewer')) {
+        return res.status(403).json({
+          error: `Je hebt geen rechten om de naam van een gebruiker met rol '${_targetProfile.role}' te wijzigen.`,
+        });
+      }
+      updates.full_name = full_name;
+    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: 'Geen velden om bij te werken.' });

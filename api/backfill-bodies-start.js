@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, checkCronAuth } from './supabase.js';
 
 const MAILBOXES = ['leads', 'info', 'partners', 'administratie'];
 
@@ -10,14 +10,9 @@ export default async function handler(req, res) {
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader  = req.headers.authorization || '';
-    const querySecret = req.query?.secret         || '';
-    if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
-      return res.status(401).json({ error: 'Unauthorized — CRON_SECRET vereist' });
-    }
-  }
+  // [H-02 + M-01 fix 2026-08-25] Fail-closed checkCronAuth (header-only).
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const results = [];
 

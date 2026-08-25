@@ -1,17 +1,12 @@
-import { supabaseAdmin as supabase } from './supabase.js';
+import { supabaseAdmin as supabase, checkCronAuth } from './supabase.js';
 
 // Tijdelijk verificatie-endpoint — kan na verificatie worden verwijderd
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader  = req.headers.authorization || '';
-    const querySecret = req.query?.secret         || '';
-    if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-  }
+  // [H-02 + M-01 fix 2026-08-25] Fail-closed via checkCronAuth (header-only).
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   try {
     // Stap 1: taken_items met source_meeting_id

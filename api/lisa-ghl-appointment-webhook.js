@@ -6,6 +6,7 @@
 // Stuurt GEEN bericht naar de volger (die krijgt al een GHL-bevestiging); logt alleen een
 // systeem-event in de thread (is_system) en past de conversatie-status aan.
 
+import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
@@ -24,9 +25,20 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // [H-03 fix 2026-08-25] Dual-mode header/query + constant-time compare
+  // (zie lisa-ghl-webhook.js voor rationale + ACTIE JEFFREY).
   const expectedSecret = process.env.LISA_WEBHOOK_SECRET;
   if (!expectedSecret) { console.error('[appointment-webhook] LISA_WEBHOOK_SECRET niet gezet'); return res.status(500).json({ error: 'Server misconfigured' }); }
-  if (req.query.secret !== expectedSecret) { console.warn('[appointment-webhook] ongeldig secret'); return res.status(401).json({ error: 'Unauthorized' }); }
+  const headerSecret = req.headers['x-lisa-webhook-secret'] || '';
+  const querySecret  = req.query?.secret || '';
+  const provided = String(headerSecret || querySecret || '');
+  let secretOk = false;
+  try {
+    if (provided.length === expectedSecret.length) {
+      secretOk = crypto.timingSafeEqual(Buffer.from(provided, 'utf8'), Buffer.from(expectedSecret, 'utf8'));
+    }
+  } catch (_) { secretOk = false; }
+  if (!secretOk) { console.warn('[appointment-webhook] ongeldig secret'); return res.status(401).json({ error: 'Unauthorized' }); }
 
   try {
     const body = req.body || {};

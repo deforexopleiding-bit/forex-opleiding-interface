@@ -1,5 +1,5 @@
 import { ImapFlow } from 'imapflow';
-import { supabase } from './supabase.js';
+import { supabase, checkCronAuth } from './supabase.js';
 
 const ACCOUNTS = [
   { mailbox: 'leads',         user: 'leads@deforexopleiding.nl',         passEnv: 'IMAP_PASS' },
@@ -21,14 +21,11 @@ export default async function handler(req, res) {
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader  = req.headers.authorization || '';
-    const querySecret = req.query?.secret         || '';
-    if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
-      return res.status(401).json({ error: 'Unauthorized — CRON_SECRET vereist' });
-    }
-  }
+  // [H-02 + M-01 fix 2026-08-25] Migratie naar fail-closed checkCronAuth:
+  // header-only (secret in query string leakt in logs/referrers) én 500 als
+  // CRON_SECRET-env ontbreekt (voorheen: ontbrekende env = wide-open endpoint).
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const { IMAP_HOST, IMAP_PORT } = process.env;
   if (!IMAP_HOST) return res.status(500).json({ error: 'IMAP_HOST niet geconfigureerd' });

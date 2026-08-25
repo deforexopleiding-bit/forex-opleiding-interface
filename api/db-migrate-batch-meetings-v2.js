@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, checkCronAuth } from './supabase.js';
 
 // taken_assignees: genormaliseerde many-to-many koppeling tussen taken en toegewezen personen
 // task_id is TEXT om overeen te komen met taken_items.id (ook text, geen uuid)
@@ -37,14 +37,9 @@ export default async function handler(req, res) {
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader  = req.headers.authorization || '';
-    const querySecret = req.query?.secret         || '';
-    if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
-      return res.status(401).json({ error: 'Unauthorized — CRON_SECRET vereist' });
-    }
-  }
+  // [H-02 + M-01 + H-06 fix] Fail-closed via checkCronAuth. Zie -meetings.js.
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const report = {
     created_tables:  [],

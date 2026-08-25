@@ -189,8 +189,19 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Webhook token niet geconfigureerd.' });
   }
 
-  const receivedToken = req.headers['x-webhook-token'];
-  if (!receivedToken || receivedToken !== expectedToken) {
+  // [H-04 fix 2026-08-25] Constant-time compare via crypto.timingSafeEqual.
+  // Voorheen `!==` — timing side-channel op HTTPS is klein, maar defensive
+  // depth is goedkoop. Length-check eerst zodat Buffer.from equal-length is.
+  const receivedToken = req.headers['x-webhook-token'] || '';
+  let tokenOk = false;
+  try {
+    if (typeof receivedToken === 'string' && receivedToken.length === expectedToken.length) {
+      const a = Buffer.from(receivedToken, 'utf8');
+      const b = Buffer.from(expectedToken, 'utf8');
+      tokenOk = crypto.timingSafeEqual(a, b);
+    }
+  } catch (_) { tokenOk = false; }
+  if (!tokenOk) {
     console.warn('[ghl-conversation-webhook] invalid token');
     return res.status(401).json({ error: 'Ongeldige webhook token.' });
   }

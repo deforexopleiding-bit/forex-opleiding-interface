@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { supabase, checkCronAuth } from './supabase.js';
 
 // ── Nieuwe tabellen ────────────────────────────────────────────────────────────
 const TABLES_TO_CREATE = {
@@ -113,14 +113,16 @@ export default async function handler(req, res) {
   }
 
   // ── Auth ──────────────────────────────────────────────────────────────────
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader  = req.headers.authorization || '';
-    const querySecret = req.query?.secret         || '';
-    if (authHeader !== `Bearer ${secret}` && querySecret !== secret) {
-      return res.status(401).json({ error: 'Unauthorized — CRON_SECRET vereist' });
-    }
-  }
+  // [H-02 + M-01 + H-06 fix 2026-08-25] Fail-closed via checkCronAuth. Deze
+  // endpoint kan `run_schema_migration(sql)` aanroepen (SECURITY DEFINER =
+  // draait als postgres) — voorheen was 'ie wide-open bij ontbrekende
+  // CRON_SECRET-env, wat de RPC bereikbaar maakte zonder auth. Nu 500 bij
+  // ontbrekende env + 401 bij verkeerde header. Query-secret verwijderd.
+  // TODO Jeffrey: overweeg deze DB-migrate-endpoints uit prod te trekken en
+  // migraties alleen via `db-migrate.js` (super_admin-only, verifyAdmin) te
+  // doen — deze legacy paden zijn hoge blast-radius.
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const report = {
     tables_checked:  Object.keys(TABLES_TO_CREATE),

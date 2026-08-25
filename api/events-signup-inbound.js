@@ -36,6 +36,7 @@
 // Response 422: honeypot tripped (geen DB-mutatie)
 // Response 429: rate-limit hit (geen DB-mutatie)
 
+import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { extractClientIp, hashIp } from './_lib/assessment-validation.js';
 import { resolveEventByLabel } from './_lib/event-label-matcher.js';
@@ -265,7 +266,16 @@ export default async function handler(req, res) {
     console.error('[events-signup-inbound] EVENTS_INBOUND_WEBHOOK_SECRET env-var ontbreekt');
     return res.status(503).json({ error: 'inbound webhook niet geconfigureerd' });
   }
-  if (!received || String(received) !== expected) {
+  // [H-05 fix 2026-08-25] Constant-time compare (was `!==`). Honeypot +
+  // 5s IP-rate-limit blijven ook actief in de handler eronder.
+  let secretOk = false;
+  try {
+    const r = String(received || '');
+    if (r.length === expected.length) {
+      secretOk = crypto.timingSafeEqual(Buffer.from(r, 'utf8'), Buffer.from(expected, 'utf8'));
+    }
+  } catch (_) { secretOk = false; }
+  if (!secretOk) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
