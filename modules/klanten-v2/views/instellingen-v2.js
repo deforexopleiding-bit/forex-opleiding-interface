@@ -5665,20 +5665,67 @@
   }
   window.__setUsersNewSave = () => { _submitNewUser({ reactivate: false }); };
 
+  // v=96 (2026-08-25) FIX: v1 doet ECHTE session-swap via supabase.auth.verifyOtp
+  // met het token_hash uit /api/admin-impersonate. De v2-handler POSTe alleen en
+  // deed geen swap → sessie bleef die van super_admin → v2-shell hydraat op je
+  // eigen identiteit. Nu: exact v1-flow uit modules/admin.html:2568 (5 stappen).
   window.__setUsersImpersonate = (userId) => {
     const u = _users.items.find(x => x.id === userId);
     if (!u) return;
-    openConfirm(`Inloggen als ${u.email}? Je bent daarna INGELOGD als deze gebruiker tot je uitlogt. Alleen voor super_admin. Audit-log wordt geschreven.`, async () => {
-      const j = await tryFetch('admin-impersonate', '/api/admin-impersonate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_user_id: userId }),
-      });
-      if (j?.__error || j?.error) { showToast('Inloggen als mislukt: ' + (j.__error || j.error), 'warn'); return; }
-      showToast('Ingelogd als andere gebruiker — herlaad pagina', 'ok');
-      // Redirect naar / zodat de nieuwe sessie effect heeft (identiek gedrag admin.html).
-      // v=94: redirect naar de v2-shell (klanten-v2) i.p.v. `/` (= v1 index.html).
-      // Rol-context van de nagebootste user blijft intact — DFO.S.roles wordt
-      // opnieuw bepaald door de profile-fetch in klanten-v2.js requireAuth.
-      setTimeout(() => { try { window.location.href = '/modules/klanten-v2/'; } catch (_) {} }, 800);
+    openConfirm(`Inloggen als ${u.email}? Je wordt direct ingelogd; je eigen sessie wordt bewaard zodat je later terug kunt.`, async () => {
+      if (!window.AuthShared || !window.supabase) {
+        showToast('Auth-shell niet geladen — herlaad de pagina', 'warn'); return;
+      }
+      // 1) Bewaar origin-sessie (voor "stop impersonatie"-flow via v1-banner).
+      let originSession;
+      try { originSession = await window.AuthShared.getSession(); }
+      catch (e) { showToast('Eigen sessie ophalen mislukt: ' + (e?.message || e), 'warn'); return; }
+      if (!originSession?.access_token || !originSession?.refresh_token) {
+        showToast('Geen geldige eigen sessie — log opnieuw in en probeer nogmaals', 'warn'); return;
+      }
+      if (typeof window.AuthShared.saveImpersonationOrigin === 'function'
+          && !window.AuthShared.saveImpersonationOrigin(originSession)) {
+        showToast('Kon eigen sessie niet veilig bewaren (localStorage) — impersonation afgebroken', 'warn'); return;
+      }
+      try {
+        // 2) Server mintt magiclink token (geen mail, geen target-uitlog).
+        const j = await tryFetch('admin-impersonate', '/api/admin-impersonate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target_user_id: userId }),
+        });
+        if (j?.__error || j?.error) throw new Error(j.__error || j.error);
+        if (!j?.token_hash || !j?.type || !j?.target) throw new Error('Onvolledig server-antwoord');
+        const target = j.target;
+
+        // 3) Impersonation-marker BEFORE verifyOtp (v1-banner direct zichtbaar).
+        if (typeof window.AuthShared.setImpersonationState === 'function') {
+          window.AuthShared.setImpersonationState({
+            target_name:  target.name,
+            target_email: target.email,
+            target_role:  target.role,
+            started_at:   new Date().toISOString(),
+          });
+        }
+
+        // 4) Client-side Supabase-sessie wisselen via verifyOtp.
+        const { error: vErr } = await window.supabase.auth.verifyOtp({
+          token_hash: j.token_hash,
+          type:       j.type,
+        });
+        if (vErr) throw new Error('verifyOtp: ' + vErr.message);
+
+        showToast('Ingelogd als ' + (target.name || target.email) + ' — redirect…', 'ok');
+        // 5) Redirect naar target-landing. Voor CRM-rollen: v2-shell.
+        //    Voor viewer/student: LMS (via getRoleLandingUrl-fallback).
+        let landing = '/modules/klanten-v2/';
+        if (typeof window.AuthShared.getRoleLandingUrl === 'function') {
+          landing = window.AuthShared.getRoleLandingUrl(target.role) || '/modules/klanten-v2/';
+        }
+        setTimeout(() => { try { window.location.href = landing; } catch (_) {} }, 500);
+      } catch (e) {
+        try { window.AuthShared.clearImpersonationOrigin && window.AuthShared.clearImpersonationOrigin(); } catch (_) {}
+        try { window.AuthShared.clearImpersonationState && window.AuthShared.clearImpersonationState(); } catch (_) {}
+        showToast('Inloggen als mislukt: ' + (e?.message || e), 'warn');
+      }
     }, 'warn');
   };
   /* Wave-1 · alg-weergave — sidebar-layout (menu-beheer). Toon huidige items
