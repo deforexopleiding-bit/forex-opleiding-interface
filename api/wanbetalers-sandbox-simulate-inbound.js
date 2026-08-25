@@ -43,7 +43,15 @@ export default async function handler(req, res) {
       if (customer.is_test !== true) return res.status(400).json({ error: 'Customer is geen is_test-klant. Weigering.' });
 
       const nowIso = new Date().toISOString();
-      const uid    = 'TEST-' + Math.random().toString(36).slice(2, 12);
+      // imap_uid is een bigint-kolom (sync-emails.js:97-104 sorteert op MAX
+      // imap_uid als "hoogste UID we've seen"). Een tekstwaarde zoals
+      // 'TEST-abc123' geeft een insert-fout (invalid input syntax for type
+      // bigint). Kies een NEGATIEF numeriek getal:
+      //   • buiten de reële IMAP-UID-range (die is 32-bit positief),
+      //   • sync-emails' lastUid-detectie ziet 'em nooit als "hoogste UID"
+      //     (order ascending:false pakt altijd echte productie-UIDs eerst),
+      //   • uniek binnen dezelfde ms door random suffix.
+      const uid    = -1 * (Date.now() * 1000 + Math.floor(Math.random() * 1000));
       const { data: em, error: emErr } = await supabaseAdmin
         .from('email_messages')
         .insert({

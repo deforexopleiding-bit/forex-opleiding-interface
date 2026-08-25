@@ -3,6 +3,25 @@
 // (customers + invoices). Assertie: elke aangeraakte klant moet is_test=true
 // zijn; anders abort direct. Respecteert dry-run (via de bestaande guard in
 // executeEmailStep). Super_admin only.
+//
+// ENROLL-GEDRAG (voor test-harness):
+//   runEngine({scope:'test'}) doet ZELF de eerste enroll —
+//   _lib/dunning-engine.js:842 insert dunning_workflow_runs voor elke
+//   is_test-klant met een is_test-factuur die aan de workflow-triggers
+//   voldoet. Er is GEEN aparte `enroll`- of `breach-check`-endpoint nodig.
+//
+//   Voorwaarden voor enroll (per workflow):
+//     • agg.days_overdue >= workflow.trigger_conditions.min_days_overdue
+//       (default 14 als niet gezet; hoofd-ladder "Aanmaningen" = 1);
+//     • customer.is_company matcht workflow.customer_type
+//       ('any' → altijd; 'b2b' → is_company=true; 'b2c' → is_company=false);
+//     • klant heeft geen bestaande active/paused run;
+//     • klant zit niet in terminal pipeline-stage ('opgelost'/'afschrijven');
+//     • factuur zit niet in ACTIEF payment_arrangement.
+//
+//   Ladder-wachttijd komt uit dunning_workflow_steps.config.days (NIET
+//   `wait_days`). Fast-forward werkt door bestaande run.next_action_at
+//   te verschuiven — kan pas NA enroll.
 
 import { runEngine } from './_lib/dunning-engine.js';
 import { requireSuperAdmin, getSandboxCustomer } from './_lib/wanbetalers-sandbox.js';

@@ -14,8 +14,17 @@
 //     name?:  string,
 //     phone?: string,
 //     email?: string,
+//     address_street?:  string,
+//     address_number?:  string,
+//     address_postal?:  string,
+//     address_city?:    string,
+//     address_country?: 'NL' | 'BE',
 //     invoices?: [{ invoice_id?: uuid, amount: number, days_overdue: number }],
 //   }
+//
+// Adresvelden: optioneel — updaten alleen als aanwezig (undefined = laten
+// staan). Nodig voor WIK-brief-scenario's (ADDRESS_INCOMPLETE zonder).
+// Grendel-impact: nul — adres speelt geen rol in send-recipient.
 //
 // start_ladder_step is BEWUST NIET onderdeel van dit endpoint. De UI moet
 // ná de edit de bestaande fast-forward-knop/endpoint (met to_day) apart
@@ -71,6 +80,14 @@ export default async function handler(req, res) {
   const newName    = body.name  !== undefined ? String(body.name).trim() : undefined;
   const newPhone   = body.phone !== undefined ? String(body.phone).trim() : undefined;
   const newEmail   = body.email !== undefined ? String(body.email).trim() : undefined;
+  const newStreet  = body.address_street  !== undefined ? String(body.address_street  || '').trim() : undefined;
+  const newNumber  = body.address_number  !== undefined ? String(body.address_number  || '').trim() : undefined;
+  const newPostal  = body.address_postal  !== undefined ? String(body.address_postal  || '').trim() : undefined;
+  const newCity    = body.address_city    !== undefined ? String(body.address_city    || '').trim() : undefined;
+  const newCountryRaw = body.address_country !== undefined ? String(body.address_country || '').trim().toUpperCase() : undefined;
+  if (newCountryRaw !== undefined && newCountryRaw !== '' && !['NL', 'BE'].includes(newCountryRaw)) {
+    return res.status(400).json({ error: `address_country ongeldig: '${newCountryRaw}'. Alleen 'NL' of 'BE' (of leeg om te wissen).` });
+  }
   const invoicesRequested = Array.isArray(body.invoices) ? body.invoices : null;
   // start_ladder_step is bewust uit het contract — zie header-comment.
 
@@ -130,6 +147,13 @@ export default async function handler(req, res) {
   }
   if (newPhone !== undefined) contactPatch.phone = newPhone || null;
   if (newEmail !== undefined) contactPatch.email = newEmail || null;
+  // Adres: undefined = niet meegestuurd (laten staan). '' (leeg) = expliciet
+  // wissen naar NULL. Non-empty = updaten. Zelfde semantiek als phone/email.
+  if (newStreet   !== undefined) contactPatch.address_street  = newStreet  || null;
+  if (newNumber   !== undefined) contactPatch.address_number  = newNumber  || null;
+  if (newPostal   !== undefined) contactPatch.address_postal  = newPostal  || null;
+  if (newCity     !== undefined) contactPatch.address_city    = newCity    || null;
+  if (newCountryRaw !== undefined) contactPatch.address_country = newCountryRaw || null;
 
   let contactChanged = false;
   if (Object.keys(contactPatch).length > 0) {
