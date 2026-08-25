@@ -5675,7 +5675,10 @@
       if (j?.__error || j?.error) { showToast('Inloggen als mislukt: ' + (j.__error || j.error), 'warn'); return; }
       showToast('Ingelogd als andere gebruiker — herlaad pagina', 'ok');
       // Redirect naar / zodat de nieuwe sessie effect heeft (identiek gedrag admin.html).
-      setTimeout(() => { try { window.location.href = '/'; } catch (_) {} }, 800);
+      // v=94: redirect naar de v2-shell (klanten-v2) i.p.v. `/` (= v1 index.html).
+      // Rol-context van de nagebootste user blijft intact — DFO.S.roles wordt
+      // opnieuw bepaald door de profile-fetch in klanten-v2.js requireAuth.
+      setTimeout(() => { try { window.location.href = '/modules/klanten-v2/'; } catch (_) {} }, 800);
     }, 'warn');
   };
   /* Wave-1 · alg-weergave — sidebar-layout (menu-beheer). Toon huidige items

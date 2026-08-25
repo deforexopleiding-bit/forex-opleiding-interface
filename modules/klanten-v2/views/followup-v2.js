@@ -156,7 +156,7 @@
     // verhuisd naar instellingen-v2.js.
   };
   const _ui = {
-    view:            'open',            // buckets-slug (open/vandaag/te_laat/komende_7/snoozed/alle)
+    view:            'vandaag',         // buckets-slug (open/vandaag/te_laat/komende_7/snoozed/alle) — v=23: default op Vandaag (was open)
     kindFilter:      'all',             // all / call / zoom
     sourceFilter:    'all',             // all / event / retention
     search:          '',
