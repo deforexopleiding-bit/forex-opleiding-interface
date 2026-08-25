@@ -248,7 +248,14 @@
     const url = (from && to)
       ? `/api/mentor-coaching-earnings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
       : '/api/mentor-coaching-earnings';
-    const j = await tryFetch('coaching', url);
+    // v=9 (2026-08-25): 45s timeout ipv de default 8s. mentor-coaching-earnings
+    // doet live Bubble-fetch (bubbleList '1-1-session' + 'team-training' + funded)
+    // met FETCH_CAP=3000 per typename. All-time (2020→nu, 5+ jaar) duurt
+    // structureel >8s → v2 timeout-en → UI viel op €0. v1 mentor-home
+    // (AgentShared.apiFetch) heeft geen timeout → wachtte gewoon. Vandaar
+    // v1 €34.010 vs v2 €0 bij zelfde endpoint/token. 45s past binnen Vercel
+    // 30s server-cap + 15s netwerk-marge.
+    const j = await tryFetch('coaching', url, 45000);
     _live.coaching.loading = false;
     if (!j || j.__error) { _live.coaching.error = j?.__error || 'Kon coaching-verdiensten niet laden'; render(); return; }
     _live.coaching.data = j; _live.coaching.from = j.from || from; _live.coaching.to = j.to || to;
