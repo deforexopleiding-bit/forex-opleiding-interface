@@ -34,6 +34,7 @@
 // en houdt counts/pagination simpel op de hoofdquery).
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const SORT_WHITELIST = new Set(['first_name', 'last_name', 'created_at', 'last_contact_at']);
 const STATUS_WHITELIST = new Set(['active', 'archived', 'anonymized']);
@@ -47,9 +48,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: `Method ${req.method} not allowed` });
   }
 
+  // 2026-08-25: Verbreed GET-gate consistent met /api/customer (die al
+  // ADMIN_ROLES OR customer.module.access accepteert). Zonder deze verbreding
+  // krijgt een sales-user (die WEL customer.module.access heeft via migratie
+  // 014/015 en het v2-shell-menu) een harde 403 op de lijst-fetch —
+  // "Fout bij laden klanten. Toegang geweigerd. Admin-rol vereist." Writes
+  // blijven ongewijzigd elders (customer.js POST/PATCH = verifyAdmin only).
   const admin = await verifyAdmin(req);
   if (!admin) {
-    return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+    const allowed = await requirePermission(req, 'customer.module.access');
+    if (!allowed) {
+      return res.status(403).json({ error: 'Toegang geweigerd. customer.module.access vereist.' });
+    }
   }
 
   try {

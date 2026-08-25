@@ -76,8 +76,18 @@ export default async function handler(req, res) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
+  // 2026-08-25: keys `sales.view` en `dashboard.view` staan NIET in de
+  // RBAC-registry (registry.js) — ze zijn dus nooit aan iemand toegekend.
+  // Alleen super_admin (RPC-bypass) kwam er nog doorheen; Dave/sales kreeg
+  // 403 op de dashboard-tegels ("MOCK €0" i.p.v. live cijfers). Uitbreiden
+  // met de wél-geregistreerde keys `sales.dashboard.view` en
+  // `sales.reports.view` (registry.js:178,181) verruimt niks nieuws — sales
+  // heeft die keys al via de v2-shell (Sales-module + dashboard-tegels
+  // zichtbaar in de sidebar via roles: SAMS).
   const allowed = (await requirePermission(req, 'sales.view'))
-    || (await requirePermission(req, 'dashboard.view'));
+    || (await requirePermission(req, 'dashboard.view'))
+    || (await requirePermission(req, 'sales.dashboard.view'))
+    || (await requirePermission(req, 'sales.reports.view'));
   if (!allowed) return res.status(403).json({ error: 'Geen rechten' });
 
   try {
