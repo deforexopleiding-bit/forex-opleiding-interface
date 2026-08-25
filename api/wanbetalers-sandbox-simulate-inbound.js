@@ -53,6 +53,13 @@ export default async function handler(req, res) {
           from_name:          [customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'Test',
           subject:            'Re: openstaande factuur (simulate)',
           date_received:      nowIso,
+          // KRITIEK voor teardown-fidelity: customer_id EXPLICIT zetten.
+          // teardownRunStateForCustomer scopet email_messages-delete op
+          // .eq('customer_id', ...). Zonder deze setting zou een re-seed
+          // via edit-customer de oude reply zien staan en meteen weer
+          // paused_manual_reason='reply_email' triggeren — vervuild scenario.
+          // NIET wissen op from_address in teardown (onveilig — kan
+          // productie-mails van dezelfde afzender raken).
           customer_id:        customer.id,
           snippet:            messageText.slice(0, 300),
           category:           'klantvraag',

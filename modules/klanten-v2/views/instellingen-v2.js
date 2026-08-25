@@ -6467,6 +6467,157 @@
   // stappen in de builder (nog niet uitvoeren) — user drukt daarna zelf op
   // "Voer sequentie uit". Nieuwe customer wordt aangemaakt door de eerste
   // step (customer-create) zodat elk scenario met een schone lei begint.
+  // ─── In-place edit van de test-klant (nieuwe build) ──────────────────────
+  window.__cockpitEditOpen = () => {
+    const ctx = _cockpit.ctx?.data;
+    if (!_cockpit.activeCustomerId || !ctx?.customer) {
+      showToast('Nog geen actieve test-klant. Speel eerst een scenario af of maak er een aan.', 'warn');
+      return;
+    }
+    const c = ctx.customer;
+    _cockpit.edit = {
+      open: true, saving: false, error: null,
+      name:  ((c.first_name || '').replace(/^🧪 TEST — /, '') + ' ' + (c.last_name || '')).trim(),
+      phone: c.phone || '',
+      email: c.email || '',
+      invoices: (ctx.invoices || []).map(iv => ({
+        invoice_id:   iv.id,
+        amount:       Number(iv.amount_total || 0),
+        days_overdue: iv.test_metadata?.days_overdue ?? iv.test_metadata?.days_late_at_creation ?? 0,
+        invoice_number: iv.invoice_number,
+      })),
+      contactOnly: false,
+    };
+    if (render) render();
+  };
+  window.__cockpitEditClose = () => { if (_cockpit.edit) { _cockpit.edit.open = false; if (render) render(); } };
+  window.__cockpitEditAddInv = () => {
+    if (!_cockpit.edit) return;
+    _cockpit.edit.invoices.push({ amount: 250, days_overdue: 7 });
+    if (render) render();
+  };
+  window.__cockpitEditRemoveInv = (i) => {
+    if (!_cockpit.edit) return;
+    _cockpit.edit.invoices.splice(i, 1);
+    if (render) render();
+  };
+  window.__cockpitEditToggleContactOnly = () => {
+    if (!_cockpit.edit) return;
+    _cockpit.edit.contactOnly = !_cockpit.edit.contactOnly;
+    if (render) render();
+  };
+  window.__cockpitEditSave = async () => {
+    if (!_cockpit.edit) return;
+    const q = (sel) => document.querySelector(sel);
+    const name  = String(q('[data-cockpit-edit="name"]')?.value  || _cockpit.edit.name  || '').trim();
+    const phone = String(q('[data-cockpit-edit="phone"]')?.value || _cockpit.edit.phone || '').trim();
+    const email = String(q('[data-cockpit-edit="email"]')?.value || _cockpit.edit.email || '').trim();
+    _cockpit.edit.invoices = _cockpit.edit.invoices.map((iv, i) => ({
+      invoice_id:   iv.invoice_id,
+      amount:       Number(q(`[data-cockpit-edit-inv="${i}"][data-field="amount"]`)?.value || iv.amount || 0),
+      days_overdue: Number(q(`[data-cockpit-edit-inv="${i}"][data-field="days_overdue"]`)?.value || iv.days_overdue || 0),
+      invoice_number: iv.invoice_number,
+    }));
+    const body = { customer_id: _cockpit.activeCustomerId, name, phone, email };
+    if (!_cockpit.edit.contactOnly) {
+      body.invoices = _cockpit.edit.invoices.map(iv => ({
+        invoice_id: iv.invoice_id || undefined,
+        amount: iv.amount, days_overdue: iv.days_overdue,
+      }));
+    }
+    const proceed = async () => {
+      _cockpit.edit.saving = true; _cockpit.edit.error = null; if (render) render();
+      const j = await tryFetch('cockpit-edit', '/api/dunning-test-edit-customer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      _cockpit.edit.saving = false;
+      if (j?.__error || j?.error) {
+        _cockpit.edit.error = j.__error || j.error;
+        if (render) render();
+        return;
+      }
+      showToast('Test-klant bijgewerkt.', 'ok');
+      _cockpit.edit.open = false;
+      _cockpit.fetched = false;
+      _cockpitFetchStatus();
+      _cockpitFetchContext();
+    };
+    if (!_cockpit.edit.contactOnly) {
+      openConfirm(
+        'Als je facturen wijzigt, wordt de run-state voor deze test-klant afgebroken en opnieuw geseed via de engine (klant + contact blijven behouden). Doorgaan?',
+        proceed, 'warn',
+      );
+    } else {
+      proceed();
+    }
+  };
+  function _cockpitEditModalHtml() {
+    const e = _cockpit.edit;
+    if (!e || !e.open) return '';
+    const invRows = e.invoices.map((iv, i) => `
+      <div style="display:grid;grid-template-columns:auto 1fr 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--text-3);min-width:80px">${esc(iv.invoice_number || '(nieuw)')}</span>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-3)">bedrag €
+          <input type="number" step="0.01" min="0.01" value="${iv.amount}" data-cockpit-edit-inv="${i}" data-field="amount" style="padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;font-family:'IBM Plex Mono',monospace">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:2px;font-size:10px;color:var(--text-3)">dagen te laat
+          <input type="number" step="1" min="0" value="${iv.days_overdue}" data-cockpit-edit-inv="${i}" data-field="days_overdue" style="padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;font-family:'IBM Plex Mono',monospace">
+        </label>
+        <button class="btn btn-ghost btn-sm" onclick="window.__cockpitEditRemoveInv(${i})" style="font-size:11px;color:var(--rose)" title="Verwijder">✕</button>
+      </div>
+    `).join('');
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__cockpitEditClose()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;width:min(640px,100%);max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px -20px rgba(0,0,0,.4)">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border)">
+          <div>
+            <div style="font-size:14px;font-weight:700">Wijzig test-klant</div>
+            <div style="font-size:11px;color:var(--text-3)">Contact-only = runs blijven. Factuur-edit = teardown + re-seed via engine.</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__cockpitEditClose()">✕</button>
+        </div>
+        <div style="padding:14px 18px">
+          <div style="display:grid;grid-template-columns:1fr;gap:10px">
+            <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-3)">Naam
+              <input type="text" value="${esc(e.name)}" data-cockpit-edit="name" style="padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px">
+            </label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-3)">Telefoon
+                <input type="text" value="${esc(e.phone)}" data-cockpit-edit="phone" style="padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;font-family:'IBM Plex Mono',monospace">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--text-3)">E-mail
+                <input type="text" value="${esc(e.email)}" data-cockpit-edit="email" style="padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;font-family:'IBM Plex Mono',monospace">
+              </label>
+            </div>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:14px;padding:10px 12px;background:var(--surface-2);border-radius:8px;cursor:pointer;font-size:12px">
+            <input type="checkbox" ${e.contactOnly ? 'checked' : ''} onchange="window.__cockpitEditToggleContactOnly()" style="margin:0">
+            <span>Alleen contactgegevens wijzigen (facturen + runs blijven ongemoeid)</span>
+          </label>
+          ${e.contactOnly ? '' : `
+            <div style="margin-top:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <div style="font-size:12px;font-weight:600">Facturen</div>
+                <button class="btn btn-ghost btn-sm" onclick="window.__cockpitEditAddInv()" style="font-size:11px">+ factuur</button>
+              </div>
+              <div style="padding:0 4px">
+                ${e.invoices.length === 0 ? '<div style="padding:12px;text-align:center;color:var(--text-3);font-size:12px">Geen facturen — voeg er een toe</div>' : invRows}
+              </div>
+              <div style="margin-top:10px;padding:10px 12px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:11.5px;line-height:1.5">
+                <b>⚠ Let op:</b> als je facturen wijzigt, wordt de run-state voor deze test-klant volledig afgebroken (pending_actions, dunning_workflow_runs, whatsapp_conversations, email_messages voor deze klant) en opnieuw geseed via de engine. De klant en contactgegevens blijven behouden. Contact-only edit laat alles staan. Reset-alles blijft de weggooi-knop.
+              </div>
+            </div>
+          `}
+          ${e.error ? `<div style="margin-top:12px;padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12px">⚠ ${esc(e.error)}</div>` : ''}
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--border)">
+          <button class="btn btn-ghost btn-sm" onclick="window.__cockpitEditClose()">Annuleer</button>
+          <button class="btn btn-primary btn-sm" onclick="window.__cockpitEditSave()" ${e.saving ? 'disabled' : ''}>${e.saving ? 'Bezig…' : 'Opslaan'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   // Prototype-parity + real-wiring: 7 scenariokaarten uit
   // docs/dunning-test-cockpit-reference.html:400-458 met test:/verwacht:.
   // Elke stap gebruikt echte, is_test-gescopete endpoints (via
@@ -7222,6 +7373,7 @@
               <span class="kvh-pill ${runPillClass}"><span class="kvh-dot"></span>${esc(runStatusText)}</span>
               <span class="kvh-pill kvh-p-day">ladderstap: dag ${currentDay}</span>
               <span class="kvh-pill" style="background:${guardChip.bg};color:${guardChip.c}">${esc(guardChip.txt)}</span>
+              ${hasCust ? `<button class="btn btn-ghost btn-sm" onclick="window.__cockpitEditOpen()" style="font-size:10.5px;padding:2px 8px;border-radius:20px;margin-left:auto">✏ Wijzig</button>` : ''}
             </div>
           </div>
         </div>
@@ -7579,6 +7731,7 @@
       </div>
       ${guardHtml}
       ${heroHtml}
+      ${_cockpitEditModalHtml()}
       ${scenariosHtml}
       ${activeBannerHtml}
       ${ladderHtml}
