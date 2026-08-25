@@ -14,7 +14,8 @@
 --   8. invoices (RESTRICT — moet vóór customer)
 --   9. whatsapp_conversations (is_test=true — SET NULL op customer_id)
 --  10. whatsapp_messages via conversation_id (SET NULL — expliciet gecleared)
---  11. customers (is_test=true)
+--  11. email_messages (customer_id-scoped — moet vóór customer)
+--  12. customers (is_test=true)
 --
 -- Bij dry_run=true → alleen tellingen, geen deletes.
 -- Bij dry_run=false → deletes in transactie. Bij FK-fout: PostgreSQL rolt
@@ -126,6 +127,16 @@ BEGIN
   DELETE FROM whatsapp_conversations
    WHERE is_test = true
       OR customer_id = ANY(v_test_customer_ids);
+
+  -- 11b. email_messages — cockpit-simulate e-mail-tak koppelt customer_id
+  --      expliciet op elke fake reply-mail (wanbetalers-sandbox-simulate-
+  --      inbound.js channel='email'). Consistent met teardown-helper
+  --      (teardownRunStateForCustomer). Zonder deze delete: óf FK-fail op
+  --      customers-delete (als kolom NOT NULL FK is), óf wees-e-mails
+  --      die een volgende run vervuilen met paused_manual_reason='reply_email'.
+  --      NOOIT wissen op from_address — kan productie-mails van dezelfde
+  --      afzender raken.
+  DELETE FROM email_messages WHERE customer_id = ANY(v_test_customer_ids);
 
   -- 12. Ten slotte: customers (is_test=true)
   DELETE FROM customers WHERE is_test = true;

@@ -10,7 +10,23 @@
 // verzending — die routeert altijd via dunning_sandbox_contact. Deze
 // velden dienen alleen ter herkenning in overzichten.
 //
-// Body: { full_name: string, email?: string, phone?: string }
+// Adresvelden (optioneel) zijn nodig zodra WIK-brief-scenario's getest
+// worden: incasso-pre-brief-core.js:246 leest address_street/number/
+// postal/city/country en faalt met ADDRESS_INCOMPLETE als er iets mist.
+// Zonder deze velden hier moest je handmatig SQL-updaten na create.
+// Grendel-impact: nul — adres is metadata, verzending routeert nog
+// steeds via dunning_sandbox_contact.
+//
+// Body: {
+//   full_name: string,
+//   email?: string,
+//   phone?: string,
+//   address_street?: string,
+//   address_number?: string,
+//   address_postal?: string,
+//   address_city?: string,
+//   address_country?: 'NL' | 'BE'   // default 'NL' bij WIK-brief-afleiding
+// }
 
 import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin } from './_lib/wanbetalers-sandbox.js';
@@ -63,18 +79,38 @@ export default async function handler(req, res) {
   const email = body.email ? String(body.email).trim() : null;
   const phone = body.phone ? String(body.phone).trim() : null;
 
+  // Adresvelden — allemaal optioneel. Alleen non-empty strings worden
+  // meegestuurd; onbekende landen worden geweigerd (WIK-flow accepteert
+  // alleen NL/BE — zie incasso-pre-brief-core.js).
+  const addrStreet  = body.address_street  ? String(body.address_street).trim()  : null;
+  const addrNumber  = body.address_number  ? String(body.address_number).trim()  : null;
+  const addrPostal  = body.address_postal  ? String(body.address_postal).trim()  : null;
+  const addrCity    = body.address_city    ? String(body.address_city).trim()    : null;
+  const addrCountryRaw = body.address_country ? String(body.address_country).trim().toUpperCase() : null;
+  if (addrCountryRaw && !['NL', 'BE'].includes(addrCountryRaw)) {
+    return res.status(400).json({ error: `address_country ongeldig: '${addrCountryRaw}'. Alleen 'NL' of 'BE'.` });
+  }
+  const addrCountry = addrCountryRaw || null;
+
   try {
+    const insertRow = {
+      first_name: firstName,
+      last_name:  lastName,
+      email,
+      phone,
+      is_company: false,
+      is_test:    true,
+    };
+    if (addrStreet)  insertRow.address_street  = addrStreet;
+    if (addrNumber)  insertRow.address_number  = addrNumber;
+    if (addrPostal)  insertRow.address_postal  = addrPostal;
+    if (addrCity)    insertRow.address_city    = addrCity;
+    if (addrCountry) insertRow.address_country = addrCountry;
+
     const { data: created, error: insErr } = await supabaseAdmin
       .from('customers')
-      .insert({
-        first_name: firstName,
-        last_name:  lastName,
-        email,
-        phone,
-        is_company: false,
-        is_test:    true,
-      })
-      .select('id, first_name, last_name, email, phone, is_test, created_at')
+      .insert(insertRow)
+      .select('id, first_name, last_name, email, phone, address_street, address_number, address_postal, address_city, address_country, is_test, created_at')
       .single();
 
     if (insErr) {
@@ -84,7 +120,12 @@ export default async function handler(req, res) {
 
     await audit({
       actor,
-      payload: { full_name: rawName, email: !!email, phone: !!phone },
+      payload: {
+        full_name: rawName,
+        email: !!email,
+        phone: !!phone,
+        address: !!(addrStreet || addrNumber || addrPostal || addrCity || addrCountry),
+      },
       result:  { customer_id: created.id },
       status:  'ok',
     });
