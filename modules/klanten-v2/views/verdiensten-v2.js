@@ -621,19 +621,28 @@
 
     const d = _live.coaching.data;
     const bd = d.breakdown || d;
+    // v=10 (2026-08-25) — FIX Seppe €34.010-discrepantie. Server geeft
+    // `breakdown.<cat>.count` + `.total` (zie api/_lib/coaching-earnings.js
+    // regel 263-268 + mentor-coaching-earnings.js payload). V2 las eerder
+    // `.qty` en `.amount_incl` — beide bestaan NIET → tegels/tabel bleven 0.
+    // V1 (modules/mentor-home.html:503) leest `d.grand_total` direct en
+    // heeft de bug daarom niet. Legacy-fallback op oude namen blijft staan
+    // voor als een ander endpoint dezelfde caller zou hergebruiken.
     const b = {
-      one_on_one: Number(bd.one_on_one?.qty || bd.one_on_one_qty || 0),
-      team:       Number(bd.team?.qty       || bd.team_qty       || 0),
-      no_show:    Number(bd.no_show?.qty    || bd.no_show_qty    || 0),
-      funded:     Number(bd.funded?.qty     || bd.funded_qty     || 0),
+      one_on_one: Number(bd.one_on_one?.count ?? bd.one_on_one?.qty ?? bd.one_on_one_qty ?? 0),
+      team:       Number(bd.team?.count       ?? bd.team?.qty       ?? bd.team_qty       ?? 0),
+      no_show:    Number(bd.no_show?.count    ?? bd.no_show?.qty    ?? bd.no_show_qty    ?? 0),
+      funded:     Number(bd.funded?.count     ?? bd.funded?.qty     ?? bd.funded_qty     ?? 0),
     };
     const a = {
-      one_on_one: Number(bd.one_on_one?.amount_incl || bd.one_on_one_amount || (b.one_on_one * 35)),
-      team:       Number(bd.team?.amount_incl       || bd.team_amount       || (b.team * 50)),
-      no_show:    Number(bd.no_show?.amount_incl    || bd.no_show_amount    || (b.no_show * 25)),
-      funded:     Number(bd.funded?.amount_incl     || bd.funded_amount     || (b.funded * 100)),
+      one_on_one: Number(bd.one_on_one?.total ?? bd.one_on_one?.amount_incl ?? bd.one_on_one_amount ?? (b.one_on_one * 35)),
+      team:       Number(bd.team?.total       ?? bd.team?.amount_incl       ?? bd.team_amount       ?? (b.team * 50)),
+      no_show:    Number(bd.no_show?.total    ?? bd.no_show?.amount_incl    ?? bd.no_show_amount    ?? (b.no_show * 25)),
+      funded:     Number(bd.funded?.total     ?? bd.funded?.amount_incl     ?? bd.funded_amount     ?? (b.funded * 100)),
     };
-    const total = a.one_on_one + a.team + a.no_show + a.funded;
+    // Prefer server-side grand_total (autoritatief) boven client-som; valt
+    // terug op client-som als het endpoint 'm ooit weglaat.
+    const total = Number(d.grand_total ?? (a.one_on_one + a.team + a.no_show + a.funded));
     const from = d.from || _live.coaching.from || '—';
     const to   = d.to   || _live.coaching.to   || '—';
 

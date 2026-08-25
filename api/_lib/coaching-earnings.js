@@ -271,24 +271,6 @@ export async function computeCoachingEarnings({ bubbleUserId, mentorUserId, from
                     + breakdown.no_show.total
                     + breakdown.funded.total;
 
-  // v=TIJDELIJK (2026-08-25) — diagnose Seppe-discrepantie (v1 €34k, v2 €0).
-  // ALTIJD loggen zodat Jeffrey na één refresh de cijfers in Vercel-logs ziet
-  // zonder ?debug=1. VERWIJDER deze log-regel zodra root-cause vast staat.
-  try {
-    console.log('[coaching-earnings DEBUG]', JSON.stringify({
-      bubbleUserId, mentorUserId, from, to,
-      sessions_fetched: sessionRows.length,
-      afterCbFilter,
-      alphaDone: oneOnOne,
-      alphaNoshow: noShow,
-      orphanCallsSkipped,
-      cbConstraintApplied,
-      fetchPaths,
-      team_count_raw: teamRows.length,
-      funded,
-      grand_total,
-    }));
-  } catch (_) { /* noop */ }
   return {
     breakdown,
     grand_total,
