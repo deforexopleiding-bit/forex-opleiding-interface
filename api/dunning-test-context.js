@@ -69,7 +69,7 @@ export default async function handler(req, res) {
     // faalde deze select stil op "column does not exist" → activeRun bleef
     // null ondanks een echte rij. Fix: expliciete join + response-mapping.
     supabaseAdmin.from('dunning_workflow_runs')
-      .select('id, status, current_step_id, next_action_at, paused_by_conversation_id, paused_by_arrangement_id, needs_attention, updated_at, created_at, dunning_workflow_steps:current_step_id (step_order)')
+      .select('id, status, current_step_id, next_action_at, paused_by_conversation_id, paused_by_arrangement_id, needs_attention, updated_at, created_at, dunning_workflow_steps!current_step_id(step_order)')
       .eq('customer_id', customerId)
       .order('updated_at', { ascending: false })
       .limit(1).maybeSingle().then(r => r.data || null).catch((e) => {
