@@ -156,6 +156,11 @@
     // customFrom/customTo zijn strings YYYY-MM-DD (state-only tijdens typen —
     // pas na 'Toepassen' triggeren ze een refetch → focus behouden).
     coachPeriod: { preset: 'month', customFrom: '', customTo: '' },
+    // v=12 — Bonus-per-klant drill-down state (port v1 mentor-dashboard).
+    // Tab: 'actief'|'overdue'|'pauze'|'wacht_start'|'geannuleerd'|'alle';
+    // page 1-based, pageSize 25 (matcht v1). Set<rowKey> voor uitgeklapte
+    // rijen — stabiele key = sequence-index binnen fetch (perEvent-order).
+    bonus: { tab: 'actief', page: 1, pageSize: 25, open: new Set() },
   };
   const YEAR_OF = { '26': '2026', '25': '2025' };
 
@@ -509,40 +514,95 @@
       <div class="card-title">${title}</div>${extra || ''}</div>
     <div class="card-body" style="padding:8px 17px 17px">${body}</div></div>`;
 
-  // AreaChart: EXACT even veel labels als datapunten (was bug: 43 labels bij 12 punten).
-  function areaChart(data, labels) {
-    const n = data.length;
-    if (!n) return `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen data.</div>`;
-    const w = 100, h = 42, mx = Math.max(...data, 1);
-    const pts = data.map((v, i) => [n > 1 ? i / (n - 1) * w : 0, h - (v / mx) * h * .88 - 2]);
-    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-    const shown = labels.slice(0, n); // hard cap → matcht datapoint-count
-    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:64px;display:block">
-      <defs><linearGradient id="verd-grad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="var(--m)" stop-opacity=".22"/><stop offset="100%" stop-color="var(--m)" stop-opacity="0"/>
-      </linearGradient></defs>
-      <path fill="url(#verd-grad)" d="${line} L${w},${h} L0,${h} Z"/>
-      <path fill="none" stroke="var(--m)" stroke-width="1.5" vector-effect="non-scaling-stroke" d="${line}"/>
-    </svg><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:4px">${shown.map(l => `<span>${esc(l)}</span>`).join('')}</div>`;
-  }
+  // v=12 (2026-08-25) — cashflowChart port van v1 renderProjection12m
+  // (mentor-dashboard.html:500-575). Toont paid-segment (emerald, betaald)
+  // gestapeld op expected-segment (amber/blue, verwacht) per maand-bucket.
+  // Input: months[] van mentor-bonus-overview.projection_12m (43 buckets,
+  // -6..+36 met paid/expected/amount/breakdown per rij).
+  //
+  // Slice: standaard rond `now` (index 6 = huidige maand). We tonen 15
+  // buckets = 3 verleden + huidige + 11 vooruit; genoeg voor volledige
+  // cashflow-visie zonder horizontale scroll. Bij minder totale data:
+  // trim naar wat er is.
+  //
+  // Fix bug v=11: v2 barChart12 gebruikte `height:X%` op een flex-item
+  // zonder expliciete hoogte → parent-hoogte was intrinsic → 0-hoogte
+  // balken. Deze versie zet `height:100%` op de flex-column zodat de
+  // interne `height:X%` echt X% van 140px pakt.
+  function cashflowChart(months, totals, opts) {
+    const opt = opts || {};
+    const wantBefore = Number.isFinite(opt.before) ? opt.before : 3;
+    const wantAfter  = Number.isFinite(opt.after)  ? opt.after  : 11;
+    const totalHeight = 140;
+    if (!Array.isArray(months) || months.length === 0) {
+      return `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen cashflow beschikbaar.</div>`;
+    }
+    const now = new Date();
+    const nowYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    let nowIdx = months.findIndex((m) => (m.month || '') === nowYm);
+    if (nowIdx < 0) nowIdx = 0;
+    const start = Math.max(0, nowIdx - wantBefore);
+    const end   = Math.min(months.length, nowIdx + wantAfter + 1);
+    const slice = months.slice(start, end);
+    const mx    = slice.reduce((m, x) => Math.max(m, (Number(x.paid) || 0) + (Number(x.expected) || 0)), 0);
 
-  // BarChart12: idem, exact data.length bars + labels.
-  function barChart12(data, labels) {
-    const n = data.length;
-    if (!n) return `<div style="padding:12px;color:var(--text-3);font-size:12.5px">Geen data.</div>`;
-    const mx = Math.max(...data, 1);
-    const shownLabels = labels.slice(0, n);
-    return `<div style="display:flex;align-items:flex-end;gap:6px;height:120px;padding:8px 0">
-      ${data.map((v, i) => {
-        const h = mx ? Math.max(2, Math.round(v / mx * 100)) : 2;
-        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
-          <div style="width:100%;background:var(--m-soft);border-radius:3px 3px 0 0;height:${h}%;position:relative">
-            <div style="position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:9.5px;color:var(--text-3);white-space:nowrap">${v > 0 ? eur(v).replace('€ ', '€') : ''}</div>
-          </div>
-          <div style="font-size:10px;color:var(--text-3)">${esc(shownLabels[i] || '')}</div>
-        </div>`;
-      }).join('')}
+    const T = totals || {};
+    const cfReceived  = Number(T.cf_received)  || 0;
+    const cfExpected  = Number(T.cf_expected)  || 0;
+    const cfThisMonth = Number(T.cf_this_month) || 0;
+
+    const header = `
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:12px 16px 6px;flex-wrap:wrap;font-size:12.5px">
+        <div>
+          <div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Ontvangen</div>
+          <div class="mono" style="font-size:18px;font-weight:600;color:var(--emerald)">${eur(cfReceived)}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px">vrijgegeven</div>
+        </div>
+        <div style="text-align:right">
+          <div style="color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Nog verwacht</div>
+          <div class="mono" style="font-size:18px;font-weight:600;color:var(--blue)">${eur(cfExpected)}</div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:2px">deze maand: <b>${eur(cfThisMonth)}</b></div>
+        </div>
+      </div>`;
+
+    const bars = slice.map((m, idx) => {
+      const paid     = Number(m.paid)     || 0;
+      const expected = Number(m.expected) || 0;
+      const total    = paid + expected;
+      const parts    = String(m.month || '').split('-');
+      const monShort = shortMonthLabel(m.month) || parts[1] || '';
+      const yr       = parts[0] ? String(parts[0]).slice(-2) : '';
+      const isNow    = (start + idx) === nowIdx;
+
+      let stack;
+      if (total <= 0 || mx <= 0) {
+        stack = `<div style="width:100%;height:2px;background:var(--surface-2);border-radius:2px;margin-top:auto"></div>`;
+      } else {
+        const paidH     = Math.round((paid     / mx) * totalHeight);
+        const expectedH = Math.round((expected / mx) * totalHeight);
+        const paidPx     = paid     > 0 ? Math.max(3, paidH)     : 0;
+        const expectedPx = expected > 0 ? Math.max(3, expectedH) : 0;
+        const paidSeg     = paid     > 0 ? `<div title="Ontvangen: ${eur(paid)}" style="width:100%;height:${paidPx}px;background:var(--emerald);${expected > 0 ? '' : 'border-radius:3px 3px 0 0'}"></div>` : '';
+        const expectedSeg = expected > 0 ? `<div title="Verwacht: ${eur(expected)}" style="width:100%;height:${expectedPx}px;background:var(--blue);border-radius:3px 3px 0 0"></div>` : '';
+        stack = `<div style="width:100%;display:flex;flex-direction:column;justify-content:flex-end;margin-top:auto;overflow:hidden;border-radius:3px 3px 0 0">${expectedSeg}${paidSeg}</div>`;
+      }
+      const amountLabel = total > 0 ? eur(Math.round(total)).replace('€ ', '€') : '';
+      return `<div style="flex:1;min-width:22px;display:flex;flex-direction:column;align-items:center;height:100%;${isNow ? 'font-weight:600' : ''}">
+        <div style="font-size:9.5px;color:var(--text-3);white-space:nowrap;margin-bottom:3px;min-height:12px">${esc(amountLabel)}</div>
+        <div style="flex:1;width:100%;display:flex;flex-direction:column;justify-content:flex-end">${stack}</div>
+        <div style="font-size:10px;color:${isNow ? 'var(--text)' : 'var(--text-3)'};margin-top:5px">${esc(monShort)}${isNow ? '' : ''}</div>
+        <div style="font-size:9px;color:var(--text-3)">'${esc(yr)}</div>
+      </div>`;
+    }).join('');
+
+    const legend = `<div style="display:flex;gap:14px;padding:4px 16px 10px;font-size:11.5px;color:var(--text-3)">
+      <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:var(--emerald);border-radius:2px"></span>Ontvangen</span>
+      <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;background:var(--blue);border-radius:2px"></span>Verwacht</span>
     </div>`;
+
+    return `${header}
+      <div style="display:flex;align-items:stretch;gap:6px;height:${totalHeight + 44}px;padding:8px 16px 8px">${bars}</div>
+      ${legend}`;
   }
 
   // v=11 — SVG doughnut voor bonus-vs-coaching source-split op Overzicht.
@@ -590,16 +650,6 @@
     </div>`;
   }
 
-  // Bouw voor projection_12m: max 12 punten + labels — respect payload-cap.
-  // Fix v6: slice(0, 12) forceert dat de as niet meer dan 12 labels heeft,
-  // ongeacht hoeveel maanden de endpoint returnt.
-  function buildProjection12(projArr) {
-    const src = asArr(projArr).slice(0, 12);
-    const data   = src.map((r) => Number(r.amount) || 0);
-    const labels = src.map((r) => shortMonthLabel(r.month) || (typeof r.month === 'string' ? r.month.slice(5) : ''));
-    return { data, labels };
-  }
-
   const GRADICO = `<span style="width:26px;height:26px;border-radius:7px;background:var(--violet-soft);color:var(--violet);display:grid;place-items:center;flex-shrink:0">${svg(I.grad, 'width:14px;height:14px')}</span>`;
 
   const PAYOUT_STATUS_PILL = {
@@ -611,6 +661,218 @@
   function payoutPill(status) {
     const meta = PAYOUT_STATUS_PILL[String(status || '').toLowerCase()] || { c: 'neutral', l: status || '—' };
     return H.pill(meta.c, meta.l);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     BONUS DRILL-DOWN — port v1 mentor-dashboard.html:717-983 (v=12)
+     ═══════════════════════════════════════════════════════════════════════ */
+  const BONUS_TABS = [
+    { key: 'actief',      label: 'Actief' },
+    { key: 'overdue',     label: 'Betaalproblemen' },
+    { key: 'pauze',       label: 'Pauze' },
+    { key: 'wacht_start', label: 'Wachten op start' },
+    { key: 'geannuleerd', label: 'Geannuleerd' },
+    { key: 'alle',        label: 'Alle' },
+  ];
+  function _bonusFilter(rows, tab) {
+    switch (tab) {
+      case 'overdue':     return rows.filter((s) => s.has_overdue === true);
+      case 'pauze':       return rows.filter((s) => s.status === 'pauze');
+      case 'wacht_start': return rows.filter((s) => (s.status === 'geen_abonnement' || s.status === 'wacht_op_start') && s.has_overdue !== true);
+      case 'geannuleerd': return rows.filter((s) => s.status === 'geannuleerd');
+      case 'alle':        return rows;
+      case 'actief':
+      default:            return rows.filter((s) => s.status === 'actief' || s.status === 'voltooid' || s.status === 'wacht_1e_betaling' || s.has_overdue === true);
+    }
+  }
+  function _bonusFlatten(perEvent) {
+    if (!Array.isArray(perEvent)) return [];
+    const out = [];
+    let seq = 0;
+    for (const ev of perEvent) {
+      for (const s of asArr(ev.sales)) {
+        seq += 1;
+        out.push({
+          event_id     : ev.event_id     || null,
+          event_title  : ev.event_title  || '—',
+          event_starts : ev.starts_at    || null,
+          ...s,
+          _key         : 'r' + seq,
+        });
+      }
+    }
+    return out;
+  }
+  function _bonusStatusPill(status, startDate) {
+    switch (status) {
+      case 'actief':            return H.pill('ok',      'Actief');
+      case 'wacht_op_start':    return H.pill('info',    startDate ? 'Start op ' + fmtDate(startDate) : 'Wacht op start');
+      case 'wacht_1e_betaling': return H.pill('warn',    'Wacht op 1e betaling');
+      case 'voltooid':          return H.pill('info',    'Voltooid');
+      case 'pauze':             return H.pill('neutral', 'Pauze');
+      case 'geen_abonnement':   return H.pill('neutral', 'Geen abonnement');
+      case 'geannuleerd':       return H.pill('danger',  'Geannuleerd');
+      default:                  return H.pill('neutral', status || '—');
+    }
+  }
+  function _bonusTermStatusPill(status) {
+    if (status === 'betaald')       return H.pill('ok',     'Betaald');
+    if (status === 'achterstallig') return H.pill('danger', 'Achterstallig');
+    return H.pill('warn', 'Open');
+  }
+  window.__verdBonusSetTab = (t) => {
+    if (!BONUS_TABS.find((x) => x.key === t)) return;
+    _ui.bonus.tab = t; _ui.bonus.page = 1; render();
+  };
+  window.__verdBonusSetPage = (p) => {
+    const n = parseInt(p, 10);
+    if (!Number.isFinite(n) || n < 1) return;
+    _ui.bonus.page = n; render();
+  };
+  window.__verdBonusToggle = (key) => {
+    if (_ui.bonus.open.has(key)) _ui.bonus.open.delete(key);
+    else _ui.bonus.open.add(key);
+    render();
+  };
+  function renderBonusDrillDown(perEvent) {
+    const rowsAll = _bonusFlatten(perEvent);
+    if (rowsAll.length === 0) {
+      return `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Nog geen bonus-rijen voor je events.</div>`;
+    }
+    // Tab-counts vóór filter.
+    const counts = {};
+    for (const t of BONUS_TABS) counts[t.key] = _bonusFilter(rowsAll, t.key).length;
+    const tabStrip = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">${BONUS_TABS.map((t) => `
+      <button class="btn ${_ui.bonus.tab === t.key ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdBonusSetTab('${t.key}')">
+        ${esc(t.label)} <span style="opacity:.7;font-weight:500">(${counts[t.key] || 0})</span>
+      </button>`).join('')}</div>`;
+
+    const rows = _bonusFilter(rowsAll, _ui.bonus.tab);
+    if (rows.length === 0) {
+      return `${tabStrip}<div style="padding:22px;text-align:center;color:var(--text-3);font-size:12.5px">Geen sales in deze categorie.</div>`;
+    }
+
+    // Pagination.
+    const total = rows.length;
+    const pageSize = _ui.bonus.pageSize;
+    const pageCount = Math.max(1, Math.ceil(total / pageSize));
+    if (_ui.bonus.page > pageCount) _ui.bonus.page = pageCount;
+    const page = _ui.bonus.page;
+    const start = (page - 1) * pageSize;
+    const end = Math.min(start + pageSize, total);
+    const slice = rows.slice(start, end);
+
+    // Body-rijen — summary + optionele detail.
+    const bodyHtml = slice.map((s) => {
+      const isOpen = _ui.bonus.open.has(s._key);
+      const termCount = Number(s.term_count) || 0;
+      const paidCount = Number(s.paid_term_count) || 0;
+      const pct = termCount > 0 ? Math.max(0, Math.min(100, (paidCount / termCount) * 100)) : 0;
+      const firstBadge = s.first_invoice_paid
+        ? H.pill('ok', '1e factuur betaald')
+        : H.pill('neutral', 'Nog niet');
+      const shareCell = s.is_cash_traject
+        ? `${eur(s.traject_total_incl != null ? s.traject_total_incl : s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Reeds vrijgevallen" style="margin-left:4px">vrij: ${eur(s.mentor_share_total)}</span>`
+        : (s.schema_unknown
+            ? `${eur(s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Nog niet meegeteld in KPI's tot er een abonnement is" style="margin-left:4px">nog niet in KPI</span>`
+            : `${eur(s.mentor_share_total)} <span class="pill pill-neutral nodot" title="Reeds vrijgevallen (uitbetaald of vrijgegeven)" style="margin-left:4px">vrij: ${eur(s.released_share != null ? s.released_share : 0)}</span>`);
+      const overdueBadge = s.has_overdue
+        ? ` <span class="pill pill-danger nodot" title="${Number(s.overdue_count) || 0} factu(u)r(en) te laat — ${eur(Number(s.overdue_amount) || 0)} openstaand" style="margin-left:4px">Achterstand</span>`
+        : '';
+      const summaryRow = `<tr onclick="window.__verdBonusToggle('${esc(s._key)}')" style="cursor:pointer;${isOpen ? 'background:var(--surface-2)' : ''}">
+        <td><strong>${esc(s.customer_label || '—')}</strong></td>
+        <td>
+          <div>${esc(s.event_title || '—')}</div>
+          <div style="font-size:11px;color:var(--text-3)">${fmtDate(s.event_starts)}</div>
+        </td>
+        <td>${_bonusStatusPill(s.status, s.start_date)}${overdueBadge}</td>
+        <td>
+          <div style="font-size:12px">${paidCount}/${termCount}</div>
+          <div class="progress" style="height:5px;margin-top:3px;max-width:100px"><i style="width:${pct.toFixed(1)}%;background:var(--emerald)"></i></div>
+        </td>
+        <td style="color:var(--text-3)">${s.last_payment_date ? fmtDate(s.last_payment_date) : '—'}</td>
+        <td>${firstBadge}</td>
+        <td style="text-align:right"><span class="money">${shareCell}</span></td>
+        <td style="text-align:center;color:var(--text-3);font-size:12px">${isOpen ? '▾' : '▸'}</td>
+      </tr>`;
+
+      let detailRow = '';
+      if (isOpen) {
+        const termRows = asArr(s.termijnen).map((t) => `<tr>
+          <td>${Number(t.index) || 0}</td>
+          <td>${fmtDate(t.due_date)}</td>
+          <td style="text-align:right"><span class="mono">${eur(t.amount)}</span></td>
+          <td>${_bonusTermStatusPill(t.status)}</td>
+        </tr>`).join('');
+        const schemaLine = s.schema_unknown
+          ? `<div style="font-size:12px;color:var(--amber);margin-bottom:8px;padding:8px 10px;background:var(--amber-soft);border-radius:6px">⚠ Er is nog geen abonnement bekend voor deze klant — richt eerst een abonnement in voordat deze bonus meetelt in de KPI's.</div>`
+          : '';
+        const summaryStats = s.is_cash_traject
+          ? `<div><span style="color:var(--text-3)">Totaal traject-bonus: </span><b>${eur(s.traject_total_incl != null ? s.traject_total_incl : s.sale_total_incl)}</b></div>
+             <div><span style="color:var(--text-3)">Reeds vrijgevallen: </span><b>${eur(s.mentor_share_total)}</b></div>`
+          : `<div><span style="color:var(--text-3)">Sale-totaal (incl. BTW): </span><b>${eur(s.sale_total_incl)}</b></div>
+             <div><span style="color:var(--text-3)">Jouw totaal-aandeel: </span><b>${eur(s.mentor_share_total)}</b></div>
+             <div><span style="color:var(--text-3)">Reeds vrijgevallen: </span><b>${eur(s.released_share != null ? s.released_share : 0)}</b></div>`;
+        detailRow = `<tr><td colspan="8" style="padding:14px 18px;background:var(--surface-2);border-top:1px solid var(--border)">
+          ${schemaLine}
+          <div style="display:flex;flex-wrap:wrap;gap:20px;font-size:12.5px;color:var(--text-2);margin-bottom:10px">
+            ${summaryStats}
+            <div><span style="color:var(--text-3)">Per termijn: </span><b>${eur(s.per_term_amount)}</b> (${Number(s.term_count) || 0}×)</div>
+            <div><span style="color:var(--text-3)">Betaald: </span><b>${Number(s.paid_term_count) || 0}/${Number(s.term_count) || 0}</b></div>
+          </div>
+          ${termRows ? `<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead><tr style="background:var(--surface);color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">
+                <th style="text-align:left;padding:6px 10px">#</th>
+                <th style="text-align:left;padding:6px 10px">Vervaldatum</th>
+                <th style="text-align:right;padding:6px 10px">Bedrag</th>
+                <th style="text-align:left;padding:6px 10px">Status</th>
+              </tr></thead>
+              <tbody>${termRows}</tbody>
+            </table>
+          </div>` : '<div style="color:var(--text-3);font-size:12px">Geen termijn-schema beschikbaar.</div>'}
+        </td></tr>`;
+      }
+      return summaryRow + detailRow;
+    }).join('');
+
+    const pager = pageCount > 1 ? (() => {
+      const nums = new Set([1, pageCount, page, page - 1, page + 1, page - 2, page + 2]);
+      const ordered = [...nums].filter((n) => n >= 1 && n <= pageCount).sort((a, b) => a - b);
+      let numsHtml = '';
+      let prev = 0;
+      for (const n of ordered) {
+        if (prev && n - prev > 1) numsHtml += '<span style="color:var(--text-3);padding:0 4px">…</span>';
+        numsHtml += `<button class="btn ${n === page ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdBonusSetPage(${n})">${n}</button>`;
+        prev = n;
+      }
+      return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <div style="font-size:12px;color:var(--text-3)">${start + 1}–${end} van ${total}</div>
+        <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" ${page <= 1 ? 'disabled' : ''} onclick="window.__verdBonusSetPage(${page - 1})">← Vorige</button>
+          ${numsHtml}
+          <button class="btn btn-ghost btn-sm" ${page >= pageCount ? 'disabled' : ''} onclick="window.__verdBonusSetPage(${page + 1})">Volgende →</button>
+        </div>
+      </div>`;
+    })() : `<div style="margin-top:8px;font-size:12px;color:var(--text-3)">${start + 1}–${end} van ${total}</div>`;
+
+    return `${tabStrip}
+      <div style="border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:var(--surface-2);color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">
+            <th style="text-align:left;padding:8px 10px">Klant</th>
+            <th style="text-align:left;padding:8px 10px">Event</th>
+            <th style="text-align:left;padding:8px 10px">Status</th>
+            <th style="text-align:left;padding:8px 10px">Termijnen</th>
+            <th style="text-align:left;padding:8px 10px">Laatste betaling</th>
+            <th style="text-align:left;padding:8px 10px">1e factuur</th>
+            <th style="text-align:right;padding:8px 10px">Totaal bonus</th>
+            <th style="padding:8px 10px;width:20px"></th>
+          </tr></thead>
+          <tbody>${bodyHtml}</tbody>
+        </table>
+      </div>
+      ${pager}`;
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -630,7 +892,7 @@
 
     const d = _live.overview.data;
     const t = d.totals || {};
-    const proj = buildProjection12(d.projection_12m);
+    const projMonths = asArr(d.projection_12m);
     const perEvent = asArr(d.per_event);
 
     const dezeMaand   = Number(t.deze_maand)     || 0;
@@ -696,16 +958,8 @@
           + hbar('Volgende maand', volgendeMnd, mx, 'amber', eur(volgendeMnd))
           + `<div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Cash-release-schema: bonus wordt vrijgegeven zodra de bijbehorende factuur betaald is (of via cash-traject).</div>`)}
       </div>
-      ${proj.data.length ? `<div style="margin-top:14px">${dashCard(`Projectie · ${proj.data.length} maand${proj.data.length === 1 ? '' : 'en'}`, 'blue', areaChart(proj.data, proj.labels))}</div>` : ''}
-      ${perEvent.length ? `<div style="margin-top:14px">${dashCard('Per event', 'violet',
-        perEvent.map((ev) => {
-          const sales = asArr(ev.sales);
-          const total = sales.reduce((a, s) => a + (Number(s.mentor_share_total) || 0), 0);
-          return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
-            <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600"><span>${esc(ev.event_title || '—')}</span><span class="mono">${eur(total)}</span></div>
-            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${fmtDate(ev.starts_at)} · ${sales.length} sale${sales.length === 1 ? '' : 's'}</div>
-          </div>`;
-        }).join(''))}</div>` : ''}
+      ${projMonths.length ? `<div style="margin-top:14px">${dashCard('Cashflow-projectie · 15 maanden', 'blue', cashflowChart(projMonths, t, { before: 3, after: 11 }))}</div>` : ''}
+      ${perEvent.length ? `<div style="margin-top:14px">${dashCard('Bonus per klant · uitklapbaar', 'violet', renderBonusDrillDown(perEvent))}</div>` : ''}
     </div>
     ${renderConfirmModal()}`;
   }
@@ -824,7 +1078,8 @@
 
     const events = asArr(_live.myEvents.data.events);
     const scope = _live.myEvents.scope;
-    const proj = buildProjection12(_live.overview.data?.projection_12m);
+    const projMonths = asArr(_live.overview.data?.projection_12m);
+    const projTotals = _live.overview.data?.totals || {};
 
     return `${H.toolbar([
       `<div style="display:flex;gap:6px">
@@ -834,14 +1089,13 @@
       </div>`,
     ])}
     <div class="pad" style="padding-top:16px">
-      ${proj.data.length ? `<div style="margin-bottom:14px">${dashCard(`Cashflow-projectie · ${proj.data.length} maand${proj.data.length === 1 ? '' : 'en'}`, 'blue', barChart12(proj.data, proj.labels))}</div>` : ''}
+      ${projMonths.length ? `<div style="margin-bottom:14px">${dashCard('Cashflow-projectie · 15 maanden', 'blue', cashflowChart(projMonths, projTotals, { before: 3, after: 11 }))}</div>` : ''}
       ${dashCard('Mijn events (' + scope + ')', 'violet',
         events.length ? H.table(
-          [{ l: 'Event' }, { l: 'Start', cls: 'optional' }, { l: 'Rol', cls: 'optional' }, { l: 'Aanwezig' }],
+          [{ l: 'Event' }, { l: 'Start', cls: 'optional' }, { l: 'Aanwezig' }],
           events.map((ev) => [
             `<span class="cell-main">${esc(ev.title || ev.event_title || '—')}</span>`,
             `<span style="color:var(--text-3)">${fmtDateTime(ev.starts_at)}</span>`,
-            `<span style="color:var(--text-2);font-size:12.5px">${esc(ev.role || ev.mentor_role || '—')}</span>`,
             H.pill(ev.was_present ? 'ok' : 'neutral', ev.was_present ? 'Ja' : (ev.was_present === false ? 'Nee' : '—')),
           ]),
         ) : `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">Geen events in deze selectie.</div>`)}
