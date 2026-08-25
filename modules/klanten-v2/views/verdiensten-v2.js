@@ -628,14 +628,18 @@
     const strokeB = pctB.toFixed(2) + ' ' + (100 - pctB).toFixed(2);
     const offsetB = (25 + (100 - pctA)).toFixed(2); // rotate by pctA
     return `<div style="display:flex;align-items:center;gap:16px;padding:8px 4px 4px;flex-wrap:wrap;justify-content:center">
-      <svg viewBox="0 0 42 42" style="width:140px;height:140px;flex-shrink:0" role="img" aria-label="Bron-verdeling bonus vs coaching">
+      <div style="position:relative;width:160px;height:160px;flex-shrink:0">
+        <svg viewBox="0 0 42 42" style="width:100%;height:100%;display:block" role="img" aria-label="Bron-verdeling bonus vs coaching">
         <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--surface-2)" stroke-width="6"/>
         <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--violet)"  stroke-width="6" stroke-dasharray="${strokeA}" stroke-dashoffset="25" transform="rotate(-90 21 21)"/>
         <circle cx="21" cy="21" r="15.9155" fill="none" stroke="var(--emerald)" stroke-width="6" stroke-dasharray="${strokeB}" stroke-dashoffset="${offsetB}" transform="rotate(-90 21 21)"/>
-        <text x="21" y="20"  text-anchor="middle" style="font-size:5.5px;font-weight:600;fill:var(--text)" class="mono">${esc(eur(sum).replace('€ ', '€'))}</text>
-        <text x="21" y="26"  text-anchor="middle" style="font-size:3px;fill:var(--text-3)">totaal</text>
       </svg>
-      <div style="display:flex;flex-direction:column;gap:8px;min-width:180px">
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:92px;height:92px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none">
+          <div class="mono" style="font-size:${(() => { const s = eur(sum); return s.length <= 8 ? 20 : s.length <= 11 ? 17 : s.length <= 14 ? 14 : 12; })()}px;font-weight:600;line-height:1.1;color:var(--text);letter-spacing:-.02em;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(eur(sum))}</div>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:3px;letter-spacing:.02em">totaal</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;min-width:200px">
         <div style="display:flex;align-items:center;gap:8px;font-size:12.5px">
           <span style="width:11px;height:11px;border-radius:3px;background:var(--violet);flex-shrink:0"></span>
           <span style="flex:1"><b>${esc(labelA)}</b> · ${eur(va)}</span>
@@ -892,24 +896,12 @@
 
     const d = _live.overview.data;
     const t = d.totals || {};
-    const projMonths = asArr(d.projection_12m);
-    const perEvent = asArr(d.per_event);
-
-    const dezeMaand   = Number(t.deze_maand)     || 0;
-    const volgendeMnd = Number(t.volgende_maand) || 0;
-    const openTotaal  = Number(t.open)           || 0;
-    const betaaldUit  = Number(t.betaald_uit)    || 0;
     const earnedTotal = Number(t.earned_total)   || 0;
-    const mx = Math.max(dezeMaand, volgendeMnd, openTotaal, 1);
+    const dezeMaand   = Number(t.deze_maand)     || 0;
 
     // v=11 — gecombineerde tegels bovenaan (bonus + coaching). Formule
-    // volgt exact mentor-dashboard.html:2078-2079:
-    //   verdiendMaand = bonus.deze_maand + coachingMaand
-    //   verdiendYTD   = bonus.earned_total + coachingYTD
-    // Reden voor `earned_total` (niet `deze_maand`) in YTD-formule: bonus is
-    // al earned-basis (som van alle non-cancelled bonus-entries); coaching-
-    // YTD is enkel year-to-date. Historische-event-bonussen zitten al in
-    // bonus.earned_total via mentor_ledger_entries.
+    // volgt exact mentor-dashboard.html:2078-2079. `earned_total` is
+    // all-time bonus-basis; coaching-YTD is year-to-date.
     const cbA = _live.overviewCoaching.all_time;
     const cbM = _live.overviewCoaching.this_month;
     const cbY = _live.overviewCoaching.ytd;
@@ -933,33 +925,16 @@
           ? `<div style="padding:14px 16px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r);font-size:12.5px">⚠ ${esc(cbA.error)} <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="window.__verdRetryOverviewCoaching('all_time')">Opnieuw</button></div>`
           : `<div style="padding:14px;color:var(--text-3);font-size:12.5px;text-align:center">Bron-verdeling laden…</div>`);
 
+    // v=13 — bonus-detail (KPIs, status-cards, cashflow-chart, drill-down)
+    // verhuisd naar de Events-tab (hoort thematisch bij event-bonussen).
+    // Overzicht is nu pure high-level: 3 combined-tegels + bron-donut.
     return `${H.kpis([
-      { c: 'pink',    icon: I.chart, label: 'Verdiend totaal',   val: combinedTotaal, sub: combinedSubTot, hi: true },
+      { c: 'pink',    icon: I.chart, label: 'Verdiend totaal',    val: combinedTotaal, sub: combinedSubTot, hi: true },
       { c: 'blue',    icon: I.euro,  label: 'Verdiend deze maand', val: combinedMonth,  sub: combinedSubMon },
-      { c: 'emerald', icon: I.cal,   label: 'Verdiend YTD',       val: combinedYtd,    sub: combinedSubYtd },
+      { c: 'emerald', icon: I.cal,   label: 'Verdiend YTD',        val: combinedYtd,    sub: combinedSubYtd },
     ])}
     <div class="pad" style="padding-top:16px">
       ${dashCard('Bron-verdeling (all-time)', 'violet', doughnutBody)}
-    </div>
-    ${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Bonus deze maand',   val: eur(dezeMaand),   sub: 'bonus-vrijgave' },
-      { c: 'amber',   icon: I.clock, label: 'Bonus volgende maand', val: eur(volgendeMnd), sub: 'geplande vrijgave' },
-      { c: 'teal',    icon: I.cal,   label: 'Bonus openstaand',   val: eur(openTotaal),  sub: 'niet-uitbetaalde bonus' },
-      { c: 'emerald', icon: I.chart, label: 'Bonus totaal verdiend', val: eur(earnedTotal), sub: 'alle bonussen sinds start' },
-    ])}
-    <div class="pad" style="padding-top:16px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
-        ${dashCard('Bonus-status', 'blue',
-          hbar('Betaald uit', betaaldUit, Math.max(earnedTotal, 1), 'emerald', eur(betaaldUit))
-          + hbar('Open (nog niet uitbetaald)', openTotaal, Math.max(earnedTotal, 1), 'amber', eur(openTotaal))
-          + `<div style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px"><b>Totaal verdiend</b><b class="mono">${eur(earnedTotal)}</b></div>`)}
-        ${dashCard('Deze vs volgende maand', 'emerald',
-          hbar('Deze maand',     dezeMaand,   mx, 'blue',  eur(dezeMaand))
-          + hbar('Volgende maand', volgendeMnd, mx, 'amber', eur(volgendeMnd))
-          + `<div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Cash-release-schema: bonus wordt vrijgegeven zodra de bijbehorende factuur betaald is (of via cash-traject).</div>`)}
-      </div>
-      ${projMonths.length ? `<div style="margin-top:14px">${dashCard('Cashflow-projectie · 15 maanden', 'blue', cashflowChart(projMonths, t, { before: 3, after: 11 }))}</div>` : ''}
-      ${perEvent.length ? `<div style="margin-top:14px">${dashCard('Bonus per klant · uitklapbaar', 'violet', renderBonusDrillDown(perEvent))}</div>` : ''}
     </div>
     ${renderConfirmModal()}`;
   }
@@ -1073,23 +1048,69 @@
      ═══════════════════════════════════════════════════════════════════════ */
   function eventsView() {
     if (!_live.myEvents.loading && !_live.myEvents.data && !_live.myEvents.error) queueMicrotask(fetchMyEvents);
+    // v=13 — Events-tab is nu ook home van bonus-detail; overview lazy-triggeren
+    // als user direct hierheen navigeert (overzichtView zou 'em normaal starten).
+    if (!_live.overview.loading && !_live.overview.data && !_live.overview.error) queueMicrotask(fetchOverview);
     if (_live.myEvents.error && !_live.myEvents.data) return errBlk(_live.myEvents.error, 'window.__verdRetryMyEvents()') + renderConfirmModal();
     if (!_live.myEvents.data) return skel() + renderConfirmModal();
 
     const events = asArr(_live.myEvents.data.events);
     const scope = _live.myEvents.scope;
-    const projMonths = asArr(_live.overview.data?.projection_12m);
-    const projTotals = _live.overview.data?.totals || {};
+    // v=13 — Events-tab is nu de home van alle event-bonus-detail. Hergebruikt
+    // dezelfde `overview` state (mentor-bonus-overview) — geen extra fetch,
+    // `_ui.bonus.tab/page/open` blijft intact tussen tab-wissels.
+    const ov = _live.overview.data;
+    const t = ov?.totals || {};
+    const projMonths = asArr(ov?.projection_12m);
+    const perEvent   = asArr(ov?.per_event);
+    const earnedTotal = Number(t.earned_total)   || 0;
+    const dezeMaand   = Number(t.deze_maand)     || 0;
+    const volgendeMnd = Number(t.volgende_maand) || 0;
+    const openTotaal  = Number(t.open)           || 0;
+    const betaaldUit  = Number(t.betaald_uit)    || 0;
+    const mxBar       = Math.max(dezeMaand, volgendeMnd, openTotaal, 1);
 
-    return `${H.toolbar([
-      `<div style="display:flex;gap:6px">
-        <button class="btn ${scope === 'upcoming' ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetMyEventsScope('upcoming')">Komend</button>
-        <button class="btn ${scope === 'past'     ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetMyEventsScope('past')">Voorbij</button>
-        <button class="btn ${scope === 'all'      ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetMyEventsScope('all')">Alles</button>
-      </div>`,
-    ])}
+    // Als overview-fetch nog loopt of gefaald is: toon een fallback maar houd
+    // de Mijn-events lijst zichtbaar (die heeft eigen fetch, is al klaar).
+    const overviewReady = !!ov;
+    const overviewErr   = _live.overview.error;
+
+    // Bonus-blokken (alleen renderen als overview binnen is).
+    const bonusKpis = overviewReady ? H.kpis([
+      { c: 'blue',    icon: I.euro,  label: 'Bonus deze maand',   val: eur(dezeMaand),   sub: 'bonus-vrijgave' },
+      { c: 'amber',   icon: I.clock, label: 'Bonus volgende maand', val: eur(volgendeMnd), sub: 'geplande vrijgave' },
+      { c: 'teal',    icon: I.cal,   label: 'Bonus openstaand',   val: eur(openTotaal),  sub: 'niet-uitbetaalde bonus' },
+      { c: 'emerald', icon: I.chart, label: 'Bonus totaal verdiend', val: eur(earnedTotal), sub: 'alle bonussen sinds start' },
+    ]) : '';
+
+    const bonusStatusCards = overviewReady ? `
+      <div class="pad" style="padding-top:16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
+          ${dashCard('Bonus-status', 'blue',
+            hbar('Betaald uit', betaaldUit, Math.max(earnedTotal, 1), 'emerald', eur(betaaldUit))
+            + hbar('Open (nog niet uitbetaald)', openTotaal, Math.max(earnedTotal, 1), 'amber', eur(openTotaal))
+            + `<div style="margin-top:8px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;font-size:13px"><b>Totaal verdiend</b><b class="mono">${eur(earnedTotal)}</b></div>`)}
+          ${dashCard('Deze vs volgende maand', 'emerald',
+            hbar('Deze maand',     dezeMaand,   mxBar, 'blue',  eur(dezeMaand))
+            + hbar('Volgende maand', volgendeMnd, mxBar, 'amber', eur(volgendeMnd))
+            + `<div style="font-size:11.5px;color:var(--text-3);margin-top:8px">Cash-release-schema: bonus wordt vrijgegeven zodra de bijbehorende factuur betaald is (of via cash-traject).</div>`)}
+        </div>
+        ${projMonths.length ? `<div style="margin-top:14px">${dashCard('Cashflow-projectie · 15 maanden', 'blue', cashflowChart(projMonths, t, { before: 3, after: 11 }))}</div>` : ''}
+        ${perEvent.length ? `<div style="margin-top:14px">${dashCard('Bonus per klant · uitklapbaar', 'violet', renderBonusDrillDown(perEvent))}</div>` : ''}
+      </div>` : (overviewErr
+        ? `<div class="pad" style="padding-top:16px">${errBlk('Bonus-detail: ' + overviewErr, 'window.__verdRetryOverview()')}</div>`
+        : `<div class="pad" style="padding-top:16px">${skel()}</div>`);
+
+    return `${bonusKpis}
+    ${bonusStatusCards}
     <div class="pad" style="padding-top:16px">
-      ${projMonths.length ? `<div style="margin-bottom:14px">${dashCard('Cashflow-projectie · 15 maanden', 'blue', cashflowChart(projMonths, projTotals, { before: 3, after: 11 }))}</div>` : ''}
+      ${H.toolbar([
+        `<div style="display:flex;gap:6px">
+          <button class="btn ${scope === 'upcoming' ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetMyEventsScope('upcoming')">Komend</button>
+          <button class="btn ${scope === 'past'     ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetMyEventsScope('past')">Voorbij</button>
+          <button class="btn ${scope === 'all'      ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetMyEventsScope('all')">Alles</button>
+        </div>`,
+      ])}
       ${dashCard('Mijn events (' + scope + ')', 'violet',
         events.length ? H.table(
           [{ l: 'Event' }, { l: 'Start', cls: 'optional' }, { l: 'Aanwezig' }],
