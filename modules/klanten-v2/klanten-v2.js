@@ -622,17 +622,22 @@ function initNotifBell() {
 // Alleen actie-gerichte counts ("voor mij te doen / ongelezen"). Bron per
 // module in BADGE_SOURCES. Poller 60s; fail-soft per bron (bij fout: badge
 // wordt 0 gezet, andere modules blijven werken). Cleanup bij beforeunload.
+// v=1ex (2026-08-25): per-src `roles`-whitelist zodat een mentor niet meer
+// onterechte super_admin-endpoints pollt (leadsonderhoud/onboarding/lisa/
+// wanbetalers zijn RBAC-403 voor mentor → console-ruis + kapotte badges).
+// Rol-mapping spiegelt de sidebar-nav in design-system/app-shell.js.
+const _SAMS = ['super_admin','admin','manager','sales'];
+const _SAM  = ['super_admin','admin','manager'];
 const BADGE_SOURCES = [
-  // { mod: 'inbox',          url: '/api/super-admin-inbox-counts', path: 'total_unread', roles: ['super_admin','admin','manager'] },
-  { mod: 'leadsonderhoud', url: '/api/leadsonderhoud-open-count', path: 'open_count' },
-  // 2026-08-24: action_count i.p.v. active_count — telt # onboardings met
-  // ≥1 ongelezen WA-inbound in de onboarding-inbox. Betekent "iets voor mij
-  // te doen", niet "hoeveel trajecten lopen". Parity met leadsonderhoud-badge.
-  { mod: 'onboarding',     url: '/api/onboarding-counts',         path: 'action_count' },
-  { mod: 'lisa',           url: '/api/lisa-conversations-count?status=active', path: 'count' },
-  // pending-actions-list geeft {total,items[]} — total is de teller.
-  { mod: 'wanbetalers',    url: '/api/pending-actions-list?status=pending&page_size=1', path: 'total' },
+  { mod: 'leadsonderhoud', url: '/api/leadsonderhoud-open-count',                       path: 'open_count',   roles: _SAMS },
+  { mod: 'onboarding',     url: '/api/onboarding-counts',                               path: 'action_count', roles: _SAM },
+  { mod: 'lisa',           url: '/api/lisa-conversations-count?status=active',          path: 'count',        roles: _SAM },
+  { mod: 'wanbetalers',    url: '/api/pending-actions-list?status=pending&page_size=1', path: 'total',        roles: _SAM },
 ];
+function _currentRoleForBadges() {
+  try { return String(window.DFO?.S?.role || window.KV_V2?.role || '').toLowerCase(); }
+  catch (_) { return ''; }
+}
 async function _kvFetchBadgeCount(src) {
   try {
     const r = await window.KV.authedFetch(src.url);
@@ -643,7 +648,9 @@ async function _kvFetchBadgeCount(src) {
 }
 async function _kvUpdateBadges() {
   if (!window.DFO || typeof window.DFO.setBadge !== 'function') return;
+  const role = _currentRoleForBadges();
   await Promise.all(BADGE_SOURCES.map(async (src) => {
+    if (Array.isArray(src.roles) && !src.roles.includes(role)) return; // skip: geen toegang
     const n = await _kvFetchBadgeCount(src);
     if (n !== null) window.DFO.setBadge(src.mod, n);
   }));
