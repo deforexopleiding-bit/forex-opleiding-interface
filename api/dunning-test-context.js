@@ -63,11 +63,19 @@ export default async function handler(req, res) {
       .select('id, invoice_number, amount_total, amount_paid, status, due_date, is_test, test_metadata')
       .eq('customer_id', customerId).eq('is_test', true)
       .order('due_date', { ascending: false })),
+    // HARNESS-FIX: `step_index` is GEEN kolom op dunning_workflow_runs
+    // (foundation.sql:39-53). De UI-waarde "stap X" komt uit
+    // dunning_workflow_steps.step_order via current_step_id. Zonder join
+    // faalde deze select stil op "column does not exist" → activeRun bleef
+    // null ondanks een echte rij. Fix: expliciete join + response-mapping.
     supabaseAdmin.from('dunning_workflow_runs')
-      .select('id, status, step_index, current_step_id, next_action_at, paused_by_conversation_id, paused_by_arrangement_id, needs_attention, updated_at, created_at')
+      .select('id, status, current_step_id, next_action_at, paused_by_conversation_id, paused_by_arrangement_id, needs_attention, updated_at, created_at, dunning_workflow_steps:current_step_id (step_order)')
       .eq('customer_id', customerId)
       .order('updated_at', { ascending: false })
-      .limit(1).maybeSingle().then(r => r.data || null).catch(() => null),
+      .limit(1).maybeSingle().then(r => r.data || null).catch((e) => {
+        console.warn('[dunning-test-context] active_run fetch:', e?.message || e);
+        return null;
+      }),
     safeSelect(supabaseAdmin.from('test_cockpit_audit')
       .select('id, action, status, admin_email, target, error_message, created_at')
       .contains('target', { customer_id: customerId })
@@ -85,10 +93,13 @@ export default async function handler(req, res) {
   ]);
 
   // dunning_log na active_run bekend.
+  // HARNESS-FIX: kolom heet `event_type` in de tabel (foundation.sql:79),
+  // niet `event`. Zonder deze fix faalde de select stil en miste de timeline
+  // alle log-events.
   let logs = [];
   if (activeRun?.id) {
     logs = await safeSelect(supabaseAdmin.from('dunning_log')
-      .select('id, event, payload, created_at')
+      .select('id, event_type, payload, created_at')
       .eq('run_id', activeRun.id)
       .order('created_at', { ascending: false }).limit(30));
   }
@@ -109,18 +120,28 @@ export default async function handler(req, res) {
     timeline.push({ source: 'audit', ts: normTs(a, 'created_at'), id: a.id, action: a.action, status: a.status, admin_email: a.admin_email, error: a.error_message });
   }
   for (const l of logs) {
-    timeline.push({ source: 'dunning_log', ts: normTs(l, 'created_at'), id: l.id, event: l.event, payload: l.payload });
+    timeline.push({ source: 'dunning_log', ts: normTs(l, 'created_at'), id: l.id, event: l.event_type, payload: l.payload });
   }
   for (const m of messages) {
     timeline.push({ source: 'wa_message', ts: normTs(m, 'created_at'), id: m.id, direction: m.direction, body: (m.body || '').slice(0, 140) });
   }
   timeline.sort((a, b) => new Date(b.ts || 0) - new Date(a.ts || 0));
 
+  // HARNESS-FIX: map join-resultaat naar step_index (contract-shape). Zonder
+  // deze mapping zou het join-object `dunning_workflow_steps: {step_order: N}`
+  // in de response verschijnen ipv de bekende `step_index: N` sleutel.
+  let activeRunOut = activeRun;
+  if (activeRun) {
+    const stepOrder = activeRun.dunning_workflow_steps?.step_order ?? null;
+    const { dunning_workflow_steps: _drop, ...rest } = activeRun;
+    activeRunOut = { ...rest, step_index: stepOrder };
+  }
+
   return res.status(200).json({
     ok: true,
     customer,
     invoices,
-    active_run: activeRun,
+    active_run: activeRunOut,
     timeline: timeline.slice(0, 80),
     conversations: convs,
     messages,
