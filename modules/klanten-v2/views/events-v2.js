@@ -3687,7 +3687,7 @@
         : bubbles}
     </div>
     <div style="padding:10px 20px;border-top:1px solid var(--border);background:var(--surface-2);font-size:12px;color:var(--text-3);text-align:center">
-      Sturen vanuit deze viewer nog niet ondersteund — gebruik <a href="/modules/events.html?conv=${encodeURIComponent(convId)}#inbox" target="_blank" style="color:var(--pink);text-decoration:underline">v1-inbox</a> voor reply.
+      Sturen vanuit deze viewer volgt in een latere v2-ronde.
     </div>`;
   }
 

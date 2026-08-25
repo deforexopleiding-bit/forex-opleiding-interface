@@ -216,8 +216,7 @@ function renderEmpty() {
       </div>
       <div class="ds-empty-t">Nog geen offertes voor deze klant</div>
       <div class="ds-empty-s">
-        Maak een offerte aan in de <a href="/modules/sales-wizard.html?customer_id=${K().esc(encodeURIComponent(state.customerId))}" target="_blank" rel="noopener" style="color:var(--m); text-decoration:underline;">Sales-wizard</a>
-        (opent in nieuw tabblad).
+        Maak een offerte aan met de <a href="#" data-kv-off-newempty="${K().esc(state.customerId)}" style="color:var(--m); text-decoration:underline;">Sales-wizard</a>.
       </div>
     </div>`;
 }
@@ -256,10 +255,10 @@ function render(rootEl) {
           Offertes
           <span class="kv-prof-count" data-kv-off-count>${state.loading ? '…' : state.rows.length}</span>
         </div>
-        <a class="ds-btn ds-btn-primary ds-btn-sm" href="/modules/sales-wizard.html?customer_id=${K().esc(encodeURIComponent(state.customerId))}" target="_blank" rel="noopener" title="Nieuwe offerte in Sales-wizard (nieuw tabblad)">
+        <button class="ds-btn ds-btn-primary ds-btn-sm" type="button" data-kv-off-new="${K().esc(state.customerId)}" title="Nieuwe offerte in Sales-wizard (in-shell)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
           Nieuwe offerte
-        </a>
+        </button>
       </div>
       ${body}
     </div>`;
@@ -276,8 +275,28 @@ function openOfferteInShell(dealId) {
   window.location.href = `/modules/offerte-detail-v2.html?id=${encodeURIComponent(dealId)}`;
 }
 
+// v=… (2026-08-25 · batch A) — in-shell Sales-wizard opener. Vervangt de
+// oude new-tab-links naar /modules/sales-wizard.html. Fallback laat een
+// toast zien i.p.v. te crashen als __swOpen nog niet geladen is.
+function openSalesWizardInShell(customerId) {
+  if (typeof window.__swOpen === 'function') {
+    window.__swOpen({ customer_id: customerId });
+    return;
+  }
+  try { window.KV && KV.toast && KV.toast('Sales-wizard nog niet geladen — vernieuw de pagina.'); }
+  catch (_) { console.warn('[tabs/offertes] __swOpen niet beschikbaar'); }
+}
+
 function wire(rootEl) {
   rootEl.querySelector('[data-kv-off-retry]')?.addEventListener('click', () => actLoad(rootEl));
+  rootEl.querySelector('[data-kv-off-new]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    openSalesWizardInShell(e.currentTarget.getAttribute('data-kv-off-new'));
+  });
+  rootEl.querySelector('[data-kv-off-newempty]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    openSalesWizardInShell(e.currentTarget.getAttribute('data-kv-off-newempty'));
+  });
 
   // Oog-icoon → offerte-detail in-shell (stopt propagatie zodat de rij-klik
   // niet dubbel vuurt).

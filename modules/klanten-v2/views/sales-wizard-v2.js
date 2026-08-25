@@ -2347,7 +2347,7 @@
           <div class="rv-line rv-dim">${esc([w.address_street, w.address_number, w.address_postal, w.address_city].filter(Boolean).join(' ') || (w.address_known ? '(adres bekend, niet in offerte)' : '—'))}</div>
           ${w.date_of_birth ? `<div class="rv-line rv-dim">Geboortedatum: ${esc(w.date_of_birth)}</div>` : ''}
           ${w.tags?.length ? `<div class="rv-line">Tags: ${w.tags.map(t => `<span class="sw-chip is-on">${esc(t)}</span>`).join(' ')}</div>` : ''}
-          ${_sw.matched_customer_id ? `<div class="rv-line"><a href="/modules/klanten.html?id=${encodeURIComponent(_sw.matched_customer_id)}" class="rv-link" target="_blank" rel="noopener">Bekijk volledige klant-detail →</a></div>` : ''}
+          ${_sw.matched_customer_id ? `<div class="rv-line"><a href="#" class="rv-link" onclick="event.preventDefault(); window.KV && KV.openCustomer && KV.openCustomer('${esc(_sw.matched_customer_id)}');">Bekijk volledige klant-detail →</a></div>` : ''}
           ${_sw.tl_imported_contact_id ? `<div class="rv-line rv-dim">Wordt aangemaakt in onze DB + gekoppeld aan TL contact <code>${esc(String(_sw.tl_imported_contact_id))}</code></div>` : ''}
           <div class="rv-line rv-ok">✓ ${w.avg_ok ? 'Geïnformeerd over privacyverklaring' : 'AVG-checkbox nog niet aangevinkt (blokkerend)'}</div>
         </div>

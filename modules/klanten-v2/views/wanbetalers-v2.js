@@ -524,7 +524,14 @@
   function _wbxOvOpen_legacyDeeplink(cid) {
     if (!cid) return;
     _ui.ovSelectedId = String(cid);
-    // Deep-link naar klanten.html-wanbetalers-tab (bestaande mature tijdlijn).
+    // 2026-08-25 (batch v1-cleanup): fallback ook in-shell wanneer SURFACE B
+    // drawer niet geladen is. Alleen navlink veranderd — dunning-logica
+    // ongewijzigd. Fallback naar v1 blijft achter als KV.openCustomer
+    // ontbreekt (bootstrap-race).
+    if (window.KV && typeof window.KV.openCustomer === 'function') {
+      window.KV.openCustomer(cid, 'profiel');
+      return;
+    }
     try { window.open('/modules/klanten.html?id=' + encodeURIComponent(cid) + '#wanbetalers', '_blank', 'noopener'); } catch (_) {}
   };
   window.__wbxGspSelect = (cid) => {
@@ -3743,7 +3750,17 @@
      Alle via bestaande endpoints; custom confirms + race-guards. */
   window.__wbxRightGoToKlant = (cid) => {
     if (!cid) return;
-    // v1-parity: deeplink naar klanten-detail-tab.
+    // 2026-08-25 (batch v1-cleanup): in-shell klant-openen via KV.openCustomer
+    // i.p.v. new-tab-redirect naar v1. Alleen navlink veranderd — dunning-
+    // logica, belpoging-submit (dunning-call-log-create) en incasso-zone
+    // volledig onaangeroerd. Wanbetalers-tab bestaat nog niet in de v2
+    // klant-detail; we openen 'profiel' als veilige default (v1-parity
+    // #wanbetalers-tab wordt later toegevoegd zodra die v2-view klaar is).
+    // Fallback naar v1 alleen als KV.openCustomer ontbreekt (bootstrap-race).
+    if (window.KV && typeof window.KV.openCustomer === 'function') {
+      window.KV.openCustomer(cid, 'profiel');
+      return;
+    }
     try { window.open('/modules/klanten.html?id=' + encodeURIComponent(cid) + '#wanbetalers', '_blank', 'noopener'); } catch (_) {}
   };
   window.__wbxRightNewInvoice = async (cid) => {

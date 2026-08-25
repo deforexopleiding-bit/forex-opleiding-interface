@@ -481,31 +481,39 @@ if (Array.isArray(window.KV_V2_PENDING)) {
   window.KV_V2_PENDING = null;
 }
 
+// v=1ez (2026-08-25 · batch D) — LEGACY_URLS-cleanup: alle modules die
+// nu in V2_ACTIVE_ALLOWLIST zitten hebben géén v1-fallback meer nodig
+// (die zou nooit vuren want de wrapper's `V2_MODULES.has(id)`-check
+// vangt 'em al af). Sneuvelen: studenten/mentoren/leads/lisa/tickets/
+// email/sales/followup/verdiensten/leadsonderhoud/taken (v2-native).
+// BEHOUD: dashboard (root-fallback) + inbox/wanbetalers/finance
+// (INCASSO-ZONE — vangnet blijft load-bearing zolang de dunning-UI
+// nog in v1 leeft; nooit aanraken zonder overleg).
 const LEGACY_URLS = {
   dashboard:        '/index.html',
-  inbox:            '/modules/finance.html?tab=inbox',        // finance-inbox is centrale WA-inbox
-  taken:            '/modules/taken.html',
-  klanten:          null,                                     // V2 — geen redirect
-  studenten:        '/modules/mentor-students.html',
-  wanbetalers:      '/modules/finance.html?tab=wanbetalers',
-  email:            '/modules/email.html',
-  tickets:          '/modules/tickets.html',
-  followup:         '/modules/follow-up.html',
-  sales:            '/modules/sales.html',
-  finance:          '/modules/finance.html',
-  verdiensten:      '/modules/mentor-home.html',
+  inbox:            '/modules/finance.html?tab=inbox',        // INCASSO-ZONE — finance-inbox is dunning-WA-inbox; niet aanraken
+  taken:            null,                                     // v2-native
+  klanten:          null,                                     // v2-native
+  studenten:        null,                                     // v2-native (was: /modules/mentor-students.html)
+  wanbetalers:      '/modules/finance.html?tab=wanbetalers',  // INCASSO-ZONE — vangnet, niet aanraken
+  email:            null,                                     // v2-native (was: /modules/email.html)
+  tickets:          null,                                     // v2-native (was: /modules/tickets.html)
+  followup:         null,                                     // v2-native (was: /modules/follow-up.html)
+  sales:            null,                                     // v2-native (was: /modules/sales.html)
+  finance:          '/modules/finance.html',                  // INCASSO-ADJACENT — vangnet, niet aanraken
+  verdiensten:      null,                                     // v2-native (was: /modules/mentor-home.html)
   lms:              null,                                     // ext-link — DFO opent al new-tab
-  events:           null,                                     // V2 GO-LIVE — geen redirect meer
-  onboarding:       null,                                     // V2 GO-LIVE — geen redirect meer
-  mentoren:         '/modules/mentoren-beheer.html',
-  leads:            '/modules/leads.html',
-  nieuwsbrief:      null,                                     // bestaat nog niet — placeholder
-  leadsonderhoud:   '/modules/leadsonderhoud.html',
-  lisa:             '/modules/lisa.html',
-  automatiseringen: null,                                     // 2026-08-23: v2 GO-LIVE (Overzicht/Events/Onboarding/Leadsonderhoud native in shell — agent-center.html was persona-hub, ongerelateerd)
-  agents:           null,                                     // V2 GO-LIVE — geen redirect meer
-  logboek:          null,                                     // V2 GO-LIVE — geen redirect meer
-  instellingen:     null,                                     // Ronde-31 v=58: instellingen is native geport; geen legacy-fallback meer.
+  events:           null,                                     // v2-native
+  onboarding:       null,                                     // v2-native
+  mentoren:         null,                                     // v2-native (was: /modules/mentoren-beheer.html)
+  leads:            null,                                     // v2-native (was: /modules/leads.html)
+  nieuwsbrief:      null,                                     // placeholder
+  leadsonderhoud:   null,                                     // v2-native (was: /modules/leadsonderhoud.html)
+  lisa:             null,                                     // v2-native (was: /modules/lisa.html)
+  automatiseringen: null,                                     // v2-native
+  agents:           null,                                     // v2-native
+  logboek:          null,                                     // v2-native
+  instellingen:     null,                                     // v2-native
   binnenkort:       null,                                     // placeholder
 };
 

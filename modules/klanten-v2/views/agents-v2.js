@@ -1852,7 +1852,7 @@
         <div class="card-head">
           <span class="tile-ico" style="background:var(--violet-soft);color:var(--violet)">${svg(I.bot)}</span>
           <div class="card-title">Persona en toon</div>
-          <a href="/modules/lisa.html" style="margin-left:auto;font-size:11px;color:var(--text-3);text-decoration:underline">Open volledige Lisa-editor</a>
+          <a href="#" onclick="event.preventDefault(); window.DFO && DFO.goMod && DFO.goMod('lisa');" style="margin-left:auto;font-size:11px;color:var(--text-3);text-decoration:underline">Open volledige Lisa-editor</a>
         </div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:12px;padding-top:14px;padding-bottom:14px">
           ${_field('Naam',             'persona_name',       _lisaValue('persona_name', 'Lisa'), false, {id:'lisa'})}
@@ -1909,7 +1909,7 @@
               <span style="flex:1"><b>${esc(p.naam || '—')}</b><div style="font-size:11.5px;color:var(--text-3)">${esc(p.beschrijving || '')}</div></span>
               <span class="mono" style="font-size:11px;color:var(--text-3)">${esc(p.prijs || '')}</span>
             </div>`).join('')}
-          <a href="/modules/lisa.html" class="btn btn-ghost btn-sm" style="text-decoration:none;align-self:flex-start">Bewerk in Lisa-editor →</a>
+          <a href="#" onclick="event.preventDefault(); window.DFO && DFO.goMod && DFO.goMod('lisa');" class="btn btn-ghost btn-sm" style="text-decoration:none;align-self:flex-start">Bewerk in Lisa-editor →</a>
         </div>
       </div>
 
@@ -1926,7 +1926,7 @@
               <div style="font-size:11.5px;color:var(--text-3);margin-top:3px">${esc(q.antwoord || '')}</div>
             </div>`).join('')}
           ${faq.length > 8 ? `<div style="font-size:11.5px;color:var(--text-3)">+ ${faq.length - 8} meer</div>` : ''}
-          <a href="/modules/lisa.html" class="btn btn-ghost btn-sm" style="text-decoration:none;align-self:flex-start">Bewerk in Lisa-editor →</a>
+          <a href="#" onclick="event.preventDefault(); window.DFO && DFO.goMod && DFO.goMod('lisa');" class="btn btn-ghost btn-sm" style="text-decoration:none;align-self:flex-start">Bewerk in Lisa-editor →</a>
         </div>
       </div>
 

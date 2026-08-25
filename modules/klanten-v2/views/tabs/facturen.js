@@ -178,7 +178,7 @@ function renderEmpty() {
       </div>
       <div class="ds-empty-t">Nog geen facturen voor deze klant</div>
       <div class="ds-empty-s">
-        Facturen worden aangemaakt vanuit Abonnementen of via <a href="/modules/finance.html" target="_blank" rel="noopener" style="color:var(--m);text-decoration:underline;">Finance › Facturen</a> (nieuw tabblad).
+        Facturen worden aangemaakt vanuit Abonnementen of via <a href="#" onclick="event.preventDefault(); window.DFO && DFO.goMod && DFO.goMod('finance');" style="color:var(--m);text-decoration:underline;">Finance › Facturen</a>.
       </div>
     </div>`;
 }

@@ -309,7 +309,17 @@
     _newInv.custQuery = ''; _newInv.custPickedName = ''; _newInv.customers = []; _newInv.guardTyped = '';
     if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render();
   };
-  window.__finInvOpen = (tlId) => { if (tlId) window.location.href = '/modules/finance.html?tab=facturen&invoice=' + encodeURIComponent(tlId); };
+  // v=15 (2026-08-25 · batch C) — v1-self-redirect verwijderd. Deze globale
+  // handler had 0 callers in modules/klanten-v2 (grep verified) maar deed
+  // stiekem `location.href = /modules/finance.html?…` bij een externe caller.
+  // Nu no-op met warn zodat een toekomstige caller een signal krijgt om de
+  // in-shell open-flow (finance-v2 facturen-tab + invoice-detail modal) te
+  // gebruiken i.p.v. buiten de v2-shell te springen. Raakt GEEN dunning of
+  // wanbetalers — puur factuur-openen (facturen-tab).
+  window.__finInvOpen = (tlId) => {
+    console.warn('[finance-v2] __finInvOpen deprecated (v1-redirect verwijderd). tlId=' + tlId
+      + ' — open via finance-v2 facturen-tab + invoice-detail modal in-shell.');
+  };
 
   function urlParam(k) { try { return new URLSearchParams(location.search).get(k); } catch { return null; } }
   function setUrlParam(k, v) {
