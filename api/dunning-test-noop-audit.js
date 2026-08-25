@@ -19,14 +19,19 @@
 import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin } from './_lib/wanbetalers-sandbox.js';
 
+// Real-wiring PR: whitelist krimpt naar UITSLUITEND simulate-silence.
+// Alle andere prototype-actions hebben nu echte endpoints:
+//   promise-maturity  → api/wanbetalers-sandbox-run-promise-maturity.js
+//   conv-less-resume  → api/wanbetalers-sandbox-run-conv-less-resume.js
+//   wik-brief         → api/dunning-test-wik-brief.js
+//   simulate-promise  → api/dunning-test-simulate-promise.js
+//   create-task       → api/dunning-test-create-task.js
+//   complete-task     → api/dunning-test-complete-task.js
+//   resume-run        → api/dunning-test-resume-run.js
+// simulate-silence blijft noop-audit — dat is per definitie geen actie
+// (het is tijd die verstrijkt).
 const ALLOWED_NOOP_ACTIONS = new Set([
-  'promise-maturity',
-  'conv-less-resume',
-  'wik-brief',
-  'simulate-promise',
   'simulate-silence',
-  'create-task',
-  'complete-task',
 ]);
 
 export default async function handler(req, res) {

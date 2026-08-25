@@ -43,9 +43,9 @@ const ALLOWED_ACTIONS = [
   'simulate-inbound',
   'mark-paid',
   'send-test-template',
-  // Prototype-parity noop-audit acties (backend: dunning-test-noop-audit.js).
-  // Echte behavior komt in vervolg-PRs; AI-plans mogen ze wel voorstellen
-  // omdat de UI ze via de bestaande blok-bouwer-runner uitvoert.
+  // Real-wiring: elk van deze routeert nu naar een echte, is_test-gescopete
+  // backend (zie _cockpitEndpointFor + ACTION_ROUTES in trigger.js).
+  // simulate-silence blijft de enige noop-audit action.
   'promise-maturity',
   'conv-less-resume',
   'wik-brief',
@@ -53,6 +53,7 @@ const ALLOWED_ACTIONS = [
   'simulate-silence',
   'create-task',
   'complete-task',
+  'resume-run',
 ];
 const ALLOWED_ACTIONS_SET = new Set(ALLOWED_ACTIONS);
 

@@ -6467,109 +6467,138 @@
   // stappen in de builder (nog niet uitvoeren) — user drukt daarna zelf op
   // "Voer sequentie uit". Nieuwe customer wordt aangemaakt door de eerste
   // step (customer-create) zodat elk scenario met een schone lei begint.
+  // Prototype-parity + real-wiring: 7 scenariokaarten uit
+  // docs/dunning-test-cockpit-reference.html:400-458 met test:/verwacht:.
+  // Elke stap gebruikt echte, is_test-gescopete endpoints (via
+  // _cockpitEndpointFor). MANUAL_CONFIRM_PROMISE-inserts gebruiken de shape
+  // die promise-maturity leest zodat de trigger 'em echt rijpt.
+  const COCKPIT_DEFAULT_INVOICES = [
+    { amount: 1200, days_late: 21, scenario_tag: 'proto-inv-1' },
+    { amount: 800,  days_late: 14, scenario_tag: 'proto-inv-2' },
+    { amount: 400,  days_late: 10, scenario_tag: 'proto-inv-3' },
+  ];
   const COCKPIT_SCENARIOS = [
     {
-      key: 'warm-2x-3d', icon: '🌡', title: 'Warm · 2× · 3d',
-      desc: '1 klant, 2 facturen à €150, 3 dagen te laat.',
+      key: 'happy', icon: '✅', title: 'Betaalt na 1e herinnering',
+      test:    'klant betaalt direct na dag 7',
+      expect:  'run afgerond (paid)',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Warm Scenario' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-1' },
-          { amount: 150, days_late: 3, scenario_tag: 'warm-2x-3d-2' },
-        ]}, explain: '2 facturen à €150, 3 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+        { action: 'customer-create',  params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',   params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',           params: {},                                                                         explain: 'Dag 7 · 1e herinnering (motor)' },
+        { action: 'simulate-inbound', params: { __use_last_customer: true },                                              explain: 'Klant: "Oeps, vergeten — ik betaal nu meteen!"' },
+        { action: 'mark-paid',        params: { __use_last_customer: true },                                              explain: '€2.400 voldaan → run AFGEROND' },
       ],
     },
     {
-      key: 'koud-3x-14d', icon: '❄', title: 'Koud · 3× · 14d',
-      desc: '1 klant, 3 facturen à €297, 14 dagen te laat.',
+      key: 'promise-kept', icon: '🤝', title: 'Belofte — nagekomen',
+      test:    'belooft over 3 dagen, en betaalt',
+      expect:  'belofte → nagekomen → afgerond',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Koud Scenario' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-1' },
-          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-2' },
-          { amount: 297, days_late: 14, scenario_tag: 'koud-3x-14d-3' },
-        ]}, explain: '3 facturen à €297, 14 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor: advanceActiveRuns' },
+        { action: 'customer-create',    params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',     params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',             params: {},                                                                         explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound',   params: { __use_last_customer: true },                                              explain: 'Klant: "Ik betaal binnen 3 dagen"' },
+        { action: 'simulate-promise',   params: { __use_last_customer: true, days_ago: 4 },                                 explain: 'MANUAL_CONFIRM_PROMISE (hint −4d, direct rijp)' },
+        { action: 'mark-paid',          params: { __use_last_customer: true },                                              explain: 'Betaald binnen termijn' },
+        { action: 'promise-maturity',   params: {},                                                                         explain: 'Promise-maturity → NAGEKOMEN' },
       ],
     },
     {
-      key: 'pauze-belofte', icon: '⏸', title: 'Pauze · belofte',
-      desc: '1 factuur, klant reageert, betaalt uiteindelijk.',
+      key: 'promise-broken', icon: '⛔', title: 'Belofte — gebroken',
+      test:    'belooft over 3 dagen, betaalt NIET',
+      expect:  'belofte verlopen → mens-taak, flow loopt door',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Pauze Belofte' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 250, days_late: 5, scenario_tag: 'pauze-belofte' },
-        ]}, explain: '1 factuur, €250, 5 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start dunning-run' },
-        { action: 'simulate-inbound', params: { __use_last_customer: true }, explain: 'Klant reageert (pauzeert de run)' },
-        { action: 'mark-paid', params: { __use_last_customer: true }, explain: 'Betaling geboekt' },
+        { action: 'customer-create',    params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',     params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',             params: {},                                                                         explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound',   params: { __use_last_customer: true },                                              explain: 'Klant: "Ik betaal binnen 3 dagen"' },
+        { action: 'simulate-promise',   params: { __use_last_customer: true, days_ago: 4 },                                 explain: 'MANUAL_CONFIRM_PROMISE (hint −4d)' },
+        { action: 'promise-maturity',   params: {},                                                                         explain: 'Belofte verlopen · nog steeds open → mens-taak' },
       ],
     },
     {
-      key: 'escalatie-14d', icon: '🚨', title: 'Escalatie · 14d',
-      desc: '1 factuur 14d oud, fast-forward door alle stappen.',
+      key: 'reply-silence', icon: '🔇', title: 'Reageert, dan stilte',
+      test:    'reageert dag 7, wij reageren, klant valt stil',
+      expect:  'nudges r1/r2 → automatisch hervat',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Escalatie Test' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 500, days_late: 14, scenario_tag: 'escalatie-14d' },
-        ]}, explain: '1 factuur, €500, 14 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start' },
-        { action: 'fast-forward', params: { __use_last_customer: true }, explain: 'Ladder-stap doorspoelen' },
+        { action: 'customer-create',        params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',         params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',                 params: {},                                                                         explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound',       params: { __use_last_customer: true },                                              explain: 'Klant: "Sorry! ik kijk er zo naar" → pauze' },
+        { action: 'conversation-reminders', params: {},                                                                         explain: 'Nudge r1 + r2 · stilte-drempel' },
+        { action: 'resume-run',             params: { __use_last_customer: true },                                              explain: 'Run hervat via unpauseRunsForConversation' },
       ],
     },
     {
-      key: 'bulk-round-1', icon: '📦', title: 'Bulk · ronde 1',
-      desc: 'Bulk-send-cron triggert een goedgekeurde bulk-job.',
+      key: 'email-reply', icon: '✉️', title: 'Reageert per e-mail',
+      test:    'reply via e-mail (pauze zonder conversation-id)',
+      expect:  'conv-less-resume pakt \'m op',
       steps: [
-        { action: 'bulk-send', params: {}, explain: 'wanbetalers-sandbox-run-bulk' },
+        { action: 'customer-create',      params: { full_name: 'Test Klant' },                                                explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',       params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },          explain: '3 facturen · €2.400 open' },
+        { action: 'engine',               params: {},                                                                         explain: 'Dag 7 · herinnering per e-mail' },
+        { action: 'simulate-inbound',     params: { __use_last_customer: true, channel: 'email' },                             explain: 'Klant antwoordt per e-mail · paused_manual_reason=reply_email' },
+        { action: 'conv-less-resume',     params: {},                                                                         explain: 'Conv-less-resume sweep pakt \'m op (scope=test)' },
       ],
     },
     {
-      key: 'credit-round', icon: '💳', title: 'Crediteerronde',
-      desc: '1 klant + factuur, simulate-credit-round-flow.',
+      key: 'no-response', icon: '📄', title: 'Nooit reactie → WIK → incasso',
+      test:    'klant reageert nooit, hele ladder',
+      expect:  'd7→d37, WIK-brief dag 21, incasso dag 37',
       steps: [
-        { action: 'customer-create', params: { full_name: 'Credit Test' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 199, days_late: 7, scenario_tag: 'credit-round' },
-        ]}, explain: '1 factuur, €199, 7 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start' },
-        { action: 'breach-check', params: {}, explain: 'Arrangements breach-check' },
+        { action: 'customer-create',  params: { full_name: 'Test Klant' },                                                    explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',   params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },              explain: '3 facturen · €2.400 open' },
+        { action: 'engine',           params: {},                                                                             explain: 'Dag 7 · 1e herinnering (WhatsApp)' },
+        { action: 'fast-forward',     params: { to_day: 14 },                                                                 explain: 'Dag 14 · aanmaning (e-mail)' },
+        { action: 'fast-forward',     params: { to_day: 21 },                                                                 explain: 'Dag 21 · 2e aanmaning + WIK-brief auto-gen' },
+        { action: 'wik-brief',        params: { __use_last_customer: true },                                                  explain: 'Directe generatePreBriefForCustomer (isolated test)' },
+        { action: 'fast-forward',     params: { to_day: 37 },                                                                 explain: 'Dag 37 · overdracht naar incasso' },
       ],
     },
     {
-      key: 'no-show-inbound', icon: '🔕', title: 'Geen inbound',
-      desc: 'Klant reageert niet — conv-reminder-cron moet nudgen.',
+      key: 'arrangement', icon: '📆', title: 'Betalingsregeling',
+      test:    'klant vraagt termijnen, akkoord',
+      expect:  'run gepauzeerd op regeling, termijnen',
       steps: [
-        { action: 'customer-create', params: { full_name: 'No Show' }, explain: 'Nieuwe test-klant' },
-        { action: 'invoice-create',  params: { __use_last_customer: true, invoices: [
-          { amount: 175, days_late: 8, scenario_tag: 'no-show-inbound' },
-        ]}, explain: '1 factuur, €175, 8 dagen te laat' },
-        { action: 'engine', params: {}, explain: 'Motor start' },
-        { action: 'conversation-reminders', params: {}, explain: 'Reminder-cron voor stille klanten' },
+        { action: 'customer-create',  params: { full_name: 'Test Klant' },                                                    explain: 'Nieuwe test-klant' },
+        { action: 'invoice-create',   params: { __use_last_customer: true, invoices: COCKPIT_DEFAULT_INVOICES },              explain: '3 facturen · €2.400 open' },
+        { action: 'engine',           params: {},                                                                             explain: 'Dag 7 · 1e herinnering' },
+        { action: 'simulate-inbound', params: { __use_last_customer: true },                                                  explain: 'Klant: "Kan ik in termijnen betalen?"' },
+        { action: 'breach-check',     params: {},                                                                             explain: 'Regeling voorgesteld · pauze op arrangement' },
+        { action: 'mark-paid',        params: { __use_last_customer: true, partial: 800 },                                    explain: 'Termijn 1/3 betaald · saldo €1.600' },
       ],
-    },
-    {
-      key: 'custom', icon: '⚙', title: 'Custom',
-      desc: 'Leeg — bouw je eigen sequentie in de blok-bouwer.',
-      steps: [],
     },
   ];
 
-  // Losse stap-blokken voor de blok-bouwer (klik = voeg toe).
+  // Prototype-parity + real-wiring palette (docs/…-reference.html:507-526).
+  // 5 groepen, labels 1-op-1. Elk blok delegeert naar dezelfde cockpit-
+  // endpoints als de scenariokaarten (via _cockpitEndpointFor). `group`
+  // bepaalt de visuele groepering.
   const COCKPIT_BUILDER_BLOCKS = [
-    { action: 'customer-create',       label: '+ klant',         params: { full_name: 'Handmatig' } },
-    { action: 'invoice-create',        label: '+ factuur',       params: { __use_last_customer: true, invoices: [{ amount: 100, days_late: 5, scenario_tag: 'manual' }] } },
-    { action: 'engine',                label: '▶ engine' },
-    { action: 'conversation-reminders',label: '▶ conv-reminders' },
-    { action: 'bulk-send',             label: '▶ bulk-send' },
-    { action: 'breach-check',          label: '▶ breach-check' },
-    { action: 'fast-forward',          label: '⏩ fast-forward' },
-    { action: 'simulate-inbound',      label: '📥 simulate-inbound', params: { __use_last_customer: true } },
-    { action: 'mark-paid',             label: '💰 mark-paid',    params: { __use_last_customer: true } },
-    { action: 'send-test-template',    label: '📨 test-template' },
-    { action: 'verify-grendel',        label: '🔒 verify-grendel' },
-    { action: 'reset',                 label: '🧹 reset (dry-run)', params: { dry_run: true } },
+    // Verzenden
+    { group: 'Verzenden', action: 'engine',                 label: 'Herinnering dag 7',      params: {} },
+    { group: 'Verzenden', action: 'send-test-template',     label: 'Aanmaning (e-mail)',     params: {} },
+    { group: 'Verzenden', action: 'wik-brief',              label: 'WIK-brief',              params: { __use_last_customer: true } },
+    // Klant
+    { group: 'Klant',     action: 'simulate-inbound',       label: 'Reageert (WhatsApp)',    params: { __use_last_customer: true, channel: 'whatsapp' } },
+    { group: 'Klant',     action: 'simulate-inbound',       label: 'Reageert (e-mail)',      params: { __use_last_customer: true, channel: 'email' } },
+    { group: 'Klant',     action: 'simulate-promise',       label: 'Belofte (+3 dagen)',     params: { __use_last_customer: true, days_ago: 4 } },
+    { group: 'Klant',     action: 'mark-paid',              label: 'Betaling ontvangen',     params: { __use_last_customer: true } },
+    { group: 'Klant',     action: 'simulate-silence',       label: 'Blijft stil',            params: { __use_last_customer: true } },
+    // Taken (create-task + complete-task)
+    { group: 'Taken',     action: 'create-task',            label: 'Taak: bellen open',       params: { __use_last_customer: true, task_type: 'MANUAL_FOLLOWUP' } },
+    { group: 'Taken',     action: 'create-task',            label: 'Taak: betaling checken',  params: { __use_last_customer: true, task_type: 'MANUAL_VERIFY_PAYMENT' } },
+    { group: 'Taken',     action: 'create-task',            label: 'Taak: escalatie',         params: { __use_last_customer: true, task_type: 'MANUAL_ESCALATION' } },
+    { group: 'Taken',     action: 'complete-task',          label: 'Taak afgehandeld',        params: { __use_last_customer: true } },
+    // Systeem
+    { group: 'Systeem',   action: 'engine',                 label: 'Engine',                 params: {} },
+    { group: 'Systeem',   action: 'promise-maturity',       label: 'Promise-maturity',       params: {} },
+    { group: 'Systeem',   action: 'conv-less-resume',       label: 'Conv-less-resume',       params: {} },
+    { group: 'Systeem',   action: 'conversation-reminders', label: '15-min nudge',           params: {} },
+    { group: 'Systeem',   action: 'resume-run',             label: 'Hervat run',             params: { __use_last_customer: true } },
+    // Ladder
+    { group: 'Ladder',    action: 'fast-forward',           label: 'Volgende dag',           params: {} },
   ];
 
   // ─── Endpoints per action ────────────────────────────────────────────────
@@ -6581,20 +6610,29 @@
   // simulate-promise / simulate-silence / create-task / complete-task komt
   // in vervolg-PRs — de UI toont ondertussen wat er zou gebeuren zonder
   // dode knoppen.
-  const COCKPIT_NOOP_AUDIT_ACTIONS = new Set([
-    'promise-maturity', 'conv-less-resume', 'wik-brief',
-    'simulate-promise', 'simulate-silence', 'create-task', 'complete-task',
-  ]);
+  // Real-wiring: alle prototype-actions hebben nu echte, is_test-gescopete
+  // endpoints. Alleen 'simulate-silence' blijft noop-audit (per definitie
+  // geen actie — het is tijd die verstrijkt).
+  const COCKPIT_NOOP_AUDIT_ACTIONS = new Set(['simulate-silence']);
   function _cockpitEndpointFor(step) {
     switch (step.action) {
-      case 'customer-create': return { url: '/api/dunning-test-customer-create', direct: true };
-      case 'invoice-create':  return { url: '/api/dunning-test-invoice-create',  direct: true };
-      case 'reset':           return { url: '/api/dunning-test-reset',           direct: true };
-      case 'verify-grendel':  return { url: '/api/dunning-test-verify-grendel',  direct: true };
+      // Directe cockpit-endpoints (bestaand + nieuw uit real-wiring PR).
+      case 'customer-create':   return { url: '/api/dunning-test-customer-create',    direct: true };
+      case 'invoice-create':    return { url: '/api/dunning-test-invoice-create',     direct: true };
+      case 'reset':             return { url: '/api/dunning-test-reset',              direct: true };
+      case 'verify-grendel':    return { url: '/api/dunning-test-verify-grendel',     direct: true };
+      case 'simulate-promise':  return { url: '/api/dunning-test-simulate-promise',   direct: true };
+      case 'create-task':       return { url: '/api/dunning-test-create-task',        direct: true };
+      case 'complete-task':     return { url: '/api/dunning-test-complete-task',      direct: true };
+      case 'resume-run':        return { url: '/api/dunning-test-resume-run',         direct: true };
+      case 'wik-brief':         return { url: '/api/dunning-test-wik-brief',          direct: true };
     }
     if (COCKPIT_NOOP_AUDIT_ACTIONS.has(step.action)) {
       return { url: '/api/dunning-test-noop-audit', direct: true, isNoop: true };
     }
+    // Trigger-multiplex voor engine/conversation-reminders/bulk-send/
+    // breach-check/fast-forward/simulate-inbound/mark-paid/send-test-template/
+    // promise-maturity/conv-less-resume (via ACTION_ROUTES in trigger.js).
     return { url: '/api/dunning-test-trigger', direct: false };
   }
 
@@ -6792,9 +6830,11 @@
     'customer-create', 'invoice-create', 'reset', 'verify-grendel',
     'engine', 'conversation-reminders', 'bulk-send', 'breach-check',
     'fast-forward', 'simulate-inbound', 'mark-paid', 'send-test-template',
-    // Prototype-parity noop-audit acties (backend: dunning-test-noop-audit.js):
+    // Real-wiring (echte endpoints, is_test-gescoped):
     'promise-maturity', 'conv-less-resume', 'wik-brief',
-    'simulate-promise', 'simulate-silence', 'create-task', 'complete-task',
+    'simulate-promise', 'create-task', 'complete-task', 'resume-run',
+    // Blijft noop-audit (per definitie geen actie):
+    'simulate-silence',
   ]);
   window.__cockpitAiRun = () => {
     const plan = _cockpit.ai.plan;

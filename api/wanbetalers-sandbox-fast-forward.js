@@ -42,11 +42,41 @@ export default async function handler(req, res) {
   if (!admin) return;
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
-  const days = Math.max(1, Math.min(365, Number(body.days) || 7));
+  const rawDays  = Number(body.days) || 0;
+  const toDayRaw = Number(body.to_day) || 0;
+  const VALID_LADDER_DAYS = new Set([7, 14, 21, 28, 37]);
 
   try {
     const customer = await getSandboxCustomer();
     if (!customer) return res.status(400).json({ error: 'Geen test-persoon gevonden — seed eerst.' });
+
+    // Bereken shift: absolute to_day-target (7/14/21/28/37) OF relatieve days.
+    // to_day-target: vindt elapsed = today - run.started_at (in dagen);
+    //   days = to_day - elapsed. Skip als resultaat <= 0 (al voorbij).
+    let days = Math.max(1, Math.min(365, rawDays || 7));
+    let mode = 'relative';
+    if (toDayRaw > 0) {
+      if (!VALID_LADDER_DAYS.has(toDayRaw)) {
+        return res.status(400).json({ error: `to_day '${toDayRaw}' niet toegestaan. Kies uit: ${Array.from(VALID_LADDER_DAYS).join(', ')}.` });
+      }
+      const { data: r } = await supabaseAdmin
+        .from('dunning_workflow_runs').select('started_at')
+        .eq('customer_id', customer.id)
+        .order('updated_at', { ascending: false })
+        .limit(1).maybeSingle();
+      const startedIso = r?.started_at || new Date().toISOString();
+      const elapsedDays = Math.max(0, Math.floor((Date.now() - Date.parse(startedIso)) / 86400000));
+      const needed = toDayRaw - elapsedDays;
+      if (needed <= 0) {
+        return res.status(200).json({
+          ok: true, skipped: true, mode: 'to_day', to_day: toDayRaw,
+          elapsed_days: elapsedDays,
+          message: `Ladder is al bij of voorbij dag ${toDayRaw} (elapsed=${elapsedDays}). Geen shift.`,
+        });
+      }
+      days = Math.min(365, needed);
+      mode = 'to_day';
+    }
 
     // 1) Backdate factuur-vervaldatums met N dagen extra (openstaand →
     //    ouder worden). We doen SELECT + per-rij UPDATE want PostgREST
@@ -200,7 +230,9 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
+      mode,
       days,
+      to_day: mode === 'to_day' ? toDayRaw : null,
       invoices_updated:     invUpdated,
       runs_updated:         runsUpdated,
       convs_updated:        convsUpdated,
