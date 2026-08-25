@@ -71,15 +71,33 @@
     return parts.join('&');
   }
 
+  // v=15 (2026-08-25): rol-bewuste endpoint-switch. Voor mentor: eigen
+  // toewijzingen via /api/mentor-future-students-self (die returnt {students}
+  // met dezelfde per-row shape). Voor admin/manager/super_admin: bestaande
+  // /api/admin-future-students-list. admin-endpoint 403't mentors — dat was
+  // de bron van "Kon onboardings niet laden" bij Seppe.
+  function _currentRole() {
+    try { return String(window.DFO?.S?.role || window.KV_V2?.role || '').toLowerCase(); }
+    catch (_) { return ''; }
+  }
   async function fetchScope(scope) {
     const st = _live[scope];
     const params = paramsFor(scope);
     if (st.loading && st.params === params) return;
     const seq = ++st.seq;
     st.loading = true; st.error = null; st.params = params;
-    const data = await tryFetch('onb:' + scope, '/api/admin-future-students-list?' + params);
+    const role = _currentRole();
+    const isMentorScope = (role === 'mentor');
+    const url = isMentorScope
+      ? '/api/mentor-future-students-self'                     // self-scope endpoint
+      : '/api/admin-future-students-list?' + params;
+    const data = await tryFetch('onb:' + scope, url);
     if (seq !== st.seq) return;
-    st.rows = asArr(data && data.rows);
+    // Response-shape: admin returnt {rows:[...]}, mentor returnt {students:[...]}.
+    // Normaliseer naar rijen.
+    st.rows = isMentorScope
+      ? asArr(data && data.students).map((s) => ({ ...s, id: s.onboarding_id || s.id }))
+      : asArr(data && data.rows);
     st.error = data ? null : 'Kon onboardings niet laden';
     st.loading = false;
     if (window.DFO?.render) window.DFO.render();
