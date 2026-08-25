@@ -15,8 +15,13 @@
 //     phone?: string,
 //     email?: string,
 //     invoices?: [{ invoice_id?: uuid, amount: number, days_overdue: number }],
-//     start_ladder_step?: 7|14|21|28|37,   // optioneel: na re-seed fast-forward
 //   }
+//
+// start_ladder_step is BEWUST NIET onderdeel van dit endpoint. De UI moet
+// ná de edit de bestaande fast-forward-knop/endpoint (met to_day) apart
+// aanroepen. Redenen: (1) geen stille parameter die niets doet;
+// (2) endpoint blijft focused op contact/facturen; (3) fast-forward is al
+// beschikbaar via wanbetalers-sandbox-fast-forward.
 //
 // HARDE GRENDEL (fail-closed, VOOR elke write):
 //   - customer.is_test !== true → throw + 400. Nul writes.
@@ -67,7 +72,7 @@ export default async function handler(req, res) {
   const newPhone   = body.phone !== undefined ? String(body.phone).trim() : undefined;
   const newEmail   = body.email !== undefined ? String(body.email).trim() : undefined;
   const invoicesRequested = Array.isArray(body.invoices) ? body.invoices : null;
-  const startLadderStep = Number.isFinite(Number(body.start_ladder_step)) ? Number(body.start_ladder_step) : null;
+  // start_ladder_step is bewust uit het contract — zie header-comment.
 
   if (!customerId) return res.status(400).json({ error: 'customer_id is verplicht.' });
 
@@ -214,6 +219,10 @@ export default async function handler(req, res) {
     // 2c. Re-seed = engine draaien. Cockpit-scenario's roepen zelf engine
     //     na customer/invoice-create; we volgen datzelfde patroon zodat
     //     runs deterministisch worden opgezet zonder dubbele seed-logica.
+    //     runEngine respecteert dunning_dry_run.enabled (default TRUE) —
+    //     step-executors checken isDryRunEnabled() vóór elke echte send
+    //     (dunning-step-executors.js:179 email, :524 whatsapp), dus deze
+    //     edit-flow kan nooit per ongeluk echt versturen.
     //     Fail-soft: als engine faalt komt de melding in de result;
     //     de edit-endpoint retourneert 200 want data-writes zijn al gedaan.
     try {
@@ -223,20 +232,6 @@ export default async function handler(req, res) {
     } catch (e) {
       result.engine = { ok: false, error: e?.message || String(e) };
     }
-
-    // 2d. Optionele start_ladder_step → fast-forward.
-    if (startLadderStep) {
-      try {
-        // Direct helper-import zou circulaire imports geven; we roepen
-        // wanbetalers-sandbox-fast-forward via HTTP niet aan (dubbele hop).
-        // In plaats daarvan: laat de UI dit als vervolgstap doen. We loggen
-        // hier alleen dat er om gevraagd is.
-        result.start_ladder_step_requested = startLadderStep;
-        result.note = 'start_ladder_step gerapporteerd — UI moet fast-forward triggeren via de bestaande knop of scenario.';
-      } catch (e) {
-        result.fast_forward_error = e?.message || String(e);
-      }
-    }
   }
 
   await audit({
@@ -245,7 +240,6 @@ export default async function handler(req, res) {
     payload: {
       contact_fields: Object.keys(contactPatch),
       invoices_present: !!invoicesRequested,
-      start_ladder_step: startLadderStep,
     },
     result,
     status: 'ok',
