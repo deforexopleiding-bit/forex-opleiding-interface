@@ -89,7 +89,11 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
 
   const config = await getPromiseMaturityConfig();
   summary.config_mode = config.mode;
-  if (!config.enabled) { summary.skipped.push({ reason: 'FEATURE_DISABLED' }); return summary; }
+  // scope='test' bypasst de enabled-flag zodat cockpit-triggers werken
+  // terwijl productie op enabled=false blijft. is_test-filter (pre-fetch
+  // join + post-fetch check r141-142 + fatale tripwire hieronder) is
+  // autoritatief; non-test kan onmogelijk verwerkt worden.
+  if (!config.enabled && scope !== 'test') { summary.skipped.push({ reason: 'FEATURE_DISABLED' }); return summary; }
   summary.enabled = true;
 
   const deps = await loadConversationReminderDeps();
@@ -102,14 +106,35 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
   const noDateMs   = (Number(config.no_date_grace_days) || 7) * 86400000;
   const maxActions = Number(config.max_actions_per_run) || 25;
 
-  const { data: tasks, error } = await supabaseAdmin
+  // Pre-fetch is_test-filter via inner-join customers zodat de SELECT nooit
+  // buiten scope reikt. Post-fetch is_test-check op r141-142 blijft staan
+  // (defense-in-depth — één gemiste WHERE mag de fetch niet doen lekken).
+  let taskQ = supabaseAdmin
     .from('pending_actions')
-    .select('id, customer_id, status, payload, created_at')
+    .select('id, customer_id, status, payload, created_at, customers!inner(is_test)')
     .eq('action_type', 'MANUAL_CONFIRM_PROMISE')
     .in('status', ['PENDING', 'APPROVED'])
     .order('created_at', { ascending: true });
+  if (scope === 'production') taskQ = taskQ.eq('customers.is_test', false);
+  else if (scope === 'test')  taskQ = taskQ.eq('customers.is_test', true);
+  const { data: tasks, error } = await taskQ;
   if (error) { summary.errors.push({ stage: 'fetch', error: error.message }); return summary; }
   summary.scanned = (tasks || []).length;
+
+  // ── Fatale tripwire (derde laag) ───────────────────────────────────────
+  // Bij scope='test' MAG geen enkele niet-is_test rij in de te-verwerken
+  // set zitten. Als het TOCH gebeurt (bv. door een toekomstige filter-
+  // regressie) → throw fataal vóór er ook maar één write plaatsvindt.
+  // Stille skip zou een test-run productie-data laten aanraken; fataal
+  // throwen maakt de regressie meteen zichtbaar in de cockpit-response.
+  if (scope === 'test') {
+    const leak = (tasks || []).find((t) => t?.customers?.is_test !== true);
+    if (leak) {
+      throw new Error(
+        `[promise-maturity] SCOPE=TEST TRIPWIRE — task ${leak.id} referenceert non-test customer ${leak.customer_id} (customers.is_test=${JSON.stringify(leak?.customers?.is_test)}). Run afgebroken vóór enige write.`,
+      );
+    }
+  }
 
   let acted = 0;
   for (const task of tasks || []) {
