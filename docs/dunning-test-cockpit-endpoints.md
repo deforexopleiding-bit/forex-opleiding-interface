@@ -226,6 +226,49 @@ Response 200:
 { ok: true, closed_task_id: uuid, action_type: string }
 ```
 
+### `POST /api/dunning-test-simulate-backfill-orphan`
+
+Seed een backfill-wees (D1/D2-scenario) op de is_test-klant, exact in de
+toestand die `conv-less-resume` herkent (bevestigd door DB-scan 2026-08-25):
+
+```
+status                    = 'paused'
+paused_manual_reason      = 'reply_backfilled_from_log'
+paused_by_conversation_id = NULL
+paused_by_arrangement_id  = NULL
+paused_by_manual_user_id  = NULL
+needs_attention           = false
+paused_at                 = now
+```
+
+`next_action_at` en `current_step_id` worden bewust NIET aangeraakt.
+
+Body:
+```
+{ customer_id: uuid }                 // verplicht, is_test-guard
+```
+
+Als de klant nog geen active/paused run heeft, draait het endpoint eerst
+`runEngine({mode:'manual', scope:'test'})` om er één te enrollen. Werkt
+alleen als de factuur `days_late >= workflow.min_days_overdue` haalt.
+
+Response 201:
+```
+{
+  ok: true, run_id: uuid, enrolled_fresh: boolean,
+  state: {
+    status, paused_manual_reason,
+    paused_by_conversation_id, paused_by_arrangement_id, paused_by_manual_user_id,
+    needs_attention, paused_at, current_step_id, workflow_id
+  },
+  message: string
+}
+```
+
+Errors:
+- `400` — geen customer_id, non-is_test klant, geen open is_test-factuur, of engine kon niet enrollen (waarschijnlijk days_overdue-drempel niet gehaald).
+- `500` — DB-fout of engine-crash.
+
 ### `POST /api/dunning-test-resume-run`
 
 Body: `{ customer_id: uuid }`
