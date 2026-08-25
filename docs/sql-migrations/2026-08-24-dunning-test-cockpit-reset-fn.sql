@@ -1,21 +1,31 @@
 -- 2026-08-24 · Dunning Test Cockpit — reset RPC-functie (BLOK 1 · PR-cockpit-eps).
+-- HARDENING · 2026-08-25 (revisie 3):
+--   1. invoice-delete op (customer_id ANY OR is_test=true) — vangt orphan-
+--      is_test-facturen én test-klant-facturen met is_test=false.
+--   2. dunning_incasso_dossiers + onboardings expliciet toegevoegd — twee
+--      no-action/restrict FK's naar customers die de customers-delete
+--      blokkeerden.
 --
--- dunning_test_cockpit_reset(p_dry_run boolean) → jsonb
---
--- Één transactie die alle is_test=true rijen uit de dunning-test-scope wist.
 -- FK-volgorde bewust:
---   1. pending_actions (CASCADE via customer_id — expliciet voor telling)
---   2. dunning_workflow_runs (CASCADE — expliciet voor telling)
---   3. payment_arrangements (RESTRICT)
---   4. payment_promises (RESTRICT)
---   5. dunning_briefs (RESTRICT)
---   6. dunning_pipeline_customers (RESTRICT/CASCADE — expliciet voor safety)
---   7. deals (RESTRICT — sandbox-seed maakt regeling-deal)
---   8. invoices (RESTRICT — moet vóór customer)
---   9. whatsapp_conversations (is_test=true — SET NULL op customer_id)
---  10. whatsapp_messages via conversation_id (SET NULL — expliciet gecleared)
---  11. email_messages (customer_id-scoped — moet vóór customer)
---  12. customers (is_test=true)
+--   1. pending_actions               (customer_id)
+--   2. dunning_workflow_runs         (customer_id)
+--   3. payment_arrangements          (customer_id)
+--   4. payment_promises              (customer_id)
+--   5. dunning_briefs                (customer_id)
+--   6. dunning_pipeline_customers    (customer_id)
+--   7. deals                         (customer_id)
+--   8. dunning_trajectories/letters/avg_data_requests  (customer_id)
+--   9. dunning_incasso_dossiers      (customer_id)   ← revisie 3
+--  10. onboardings                   (customer_id)   ← revisie 3
+--  11. invoices                      (customer_id ANY OR is_test=true)
+--  12. whatsapp_messages             (via test-conv_ids)
+--  13. whatsapp_conversations        (is_test=true OR customer_id ANY)
+--  14. email_messages                (customer_id-scoped)
+--  15. customers                     (is_test=true)
+--
+-- ELKE nieuwe restrict/no-action FK naar customers hier toevoegen —
+-- CASCADE-FK's hoeven niet, die worden bij customers-delete automatisch
+-- meegenomen door PostgreSQL.
 --
 -- Bij dry_run=true → alleen tellingen, geen deletes.
 -- Bij dry_run=false → deletes in transactie. Bij FK-fout: PostgreSQL rolt
@@ -42,8 +52,13 @@ BEGIN
   -- Verzamel scope-IDs (fail-safe: NULL wordt array[])
   SELECT COALESCE(array_agg(id), ARRAY[]::uuid[]) INTO v_test_customer_ids
     FROM customers WHERE is_test = true;
+
+  -- invoice-scope volgt de delete-scope (revisie 1: OR is_test=true).
   SELECT COALESCE(array_agg(id), ARRAY[]::uuid[]) INTO v_test_invoice_ids
-    FROM invoices WHERE is_test = true;
+    FROM invoices
+   WHERE is_test = true
+      OR customer_id = ANY(v_test_customer_ids);
+
   SELECT COALESCE(array_agg(id), ARRAY[]::uuid[]) INTO v_test_run_ids
     FROM dunning_workflow_runs
    WHERE customer_id = ANY(v_test_customer_ids);
@@ -117,28 +132,45 @@ BEGIN
     DELETE FROM avg_data_requests WHERE customer_id = ANY(v_test_customer_ids);
   EXCEPTION WHEN undefined_table THEN NULL; END;
 
-  -- 9. invoices (RESTRICT — moet vóór customer)
-  DELETE FROM invoices WHERE is_test = true;
+  -- 9. dunning_incasso_dossiers (NO ACTION — moet vóór customer)
+  --    Revisie 3: toegevoegd na FK-lijst-scan. env-veilige wrapper zodat
+  --    deploys naar envs zonder deze tabel niet breken.
+  --    ⚠ ELKE nieuwe restrict/no-action FK naar customers hier toevoegen.
+  BEGIN
+    DELETE FROM dunning_incasso_dossiers WHERE customer_id = ANY(v_test_customer_ids);
+  EXCEPTION WHEN undefined_table THEN NULL; END;
 
-  -- 10. whatsapp_messages via conversation_id (SET NULL, expliciet cleared)
+  -- 10. onboardings (RESTRICT — moet vóór customer)
+  --     Revisie 3: toegevoegd na FK-lijst-scan.
+  BEGIN
+    DELETE FROM onboardings WHERE customer_id = ANY(v_test_customer_ids);
+  EXCEPTION WHEN undefined_table THEN NULL; END;
+
+  -- 11. invoices (RESTRICT — moet vóór customer)
+  --     Revisie 1: eerst customer_id-scope (alle facturen van test-klanten,
+  --     ook die met is_test=false), daarna is_test=true (orphan-invoices
+  --     waarvan de klant al weg is). OR combineert beide takken in één DELETE.
+  --     Geen enkele niet-test-klant kan geraakt worden.
+  DELETE FROM invoices
+   WHERE customer_id = ANY(v_test_customer_ids)
+      OR is_test = true;
+
+  -- 12. whatsapp_messages via conversation_id (SET NULL, expliciet cleared)
   DELETE FROM whatsapp_messages WHERE conversation_id = ANY(v_test_conv_ids);
 
-  -- 11. whatsapp_conversations (is_test=true of test-customer koppeling)
+  -- 13. whatsapp_conversations (is_test=true of test-customer koppeling)
   DELETE FROM whatsapp_conversations
    WHERE is_test = true
       OR customer_id = ANY(v_test_customer_ids);
 
-  -- 11b. email_messages — cockpit-simulate e-mail-tak koppelt customer_id
-  --      expliciet op elke fake reply-mail (wanbetalers-sandbox-simulate-
-  --      inbound.js channel='email'). Consistent met teardown-helper
-  --      (teardownRunStateForCustomer). Zonder deze delete: óf FK-fail op
-  --      customers-delete (als kolom NOT NULL FK is), óf wees-e-mails
-  --      die een volgende run vervuilen met paused_manual_reason='reply_email'.
-  --      NOOIT wissen op from_address — kan productie-mails van dezelfde
-  --      afzender raken.
+  -- 14. email_messages — cockpit-simulate e-mail-tak koppelt customer_id
+  --     expliciet op elke fake reply-mail (wanbetalers-sandbox-simulate-
+  --     inbound.js channel='email'). Consistent met teardown-helper.
+  --     NOOIT wissen op from_address — kan productie-mails van dezelfde
+  --     afzender raken.
   DELETE FROM email_messages WHERE customer_id = ANY(v_test_customer_ids);
 
-  -- 12. Ten slotte: customers (is_test=true)
+  -- 15. Ten slotte: customers (is_test=true)
   DELETE FROM customers WHERE is_test = true;
 
   RETURN jsonb_build_object(
@@ -159,7 +191,7 @@ REVOKE EXECUTE ON FUNCTION public.dunning_test_cockpit_reset(boolean) FROM authe
 
 DO $$
 BEGIN
-  RAISE NOTICE '── dunning_test_cockpit_reset() aangemaakt ─────────────────';
+  RAISE NOTICE '── dunning_test_cockpit_reset() aangemaakt (revisie 3) ──────';
   RAISE NOTICE '  Aanroep: SELECT public.dunning_test_cockpit_reset(true);   -- dry-run';
   RAISE NOTICE '           SELECT public.dunning_test_cockpit_reset(false);  -- ACTUAL delete';
 END $$;
