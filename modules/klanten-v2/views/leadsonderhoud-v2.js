@@ -55,6 +55,10 @@
     leadsAll:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     leadsMet:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     contacten:    { loading: false, fetched: false, error: null, data: null, lastKey: null, _seq: 0 },
+    // v=21: access-map per lead_id → 'YYYY-MM-DD' | null. Lazy gevuld per
+    // batch zodra contactenView een lijst rendert. lastKey = leadIds-signature
+    // om dubbele fetches te voorkomen.
+    access:       { loading: false, fetched: false, map: {}, lastKey: null },
   };
 
   /* ── tryFetch (8s timeout, non-throwing) ────────────────────────────── */
@@ -128,6 +132,47 @@
       }
     }
   }
+  // v=21: batch-fetch toegang-tot voor de zichtbare contacten. Signatuur op
+  // basis van sorted lead_ids voorkomt dubbele fetches als de lijst gelijk is.
+  // Fail-soft: bij fout blijft map leeg, UI toont "—" (geen crash).
+  async function fetchAccessBatch(leadIds) {
+    if (!Array.isArray(leadIds) || !leadIds.length) return;
+    const key = leadIds.slice().sort().join(',');
+    if (_live.access.loading) return;
+    if (_live.access.lastKey === key && _live.access.fetched) return;
+    _live.access.loading = true;
+    try {
+      const resp = await window.KV.authedFetch('/api/leadsonderhoud-access-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_ids: leadIds }),
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (resp.ok && j && j.access) {
+        _live.access.map = { ..._live.access.map, ...j.access };
+        _live.access.lastKey = key;
+        _live.access.fetched = true;
+      }
+    } catch (e) {
+      console.warn('[ls-v2] access-batch fail:', e?.message);
+    } finally {
+      _live.access.loading = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  }
+  function fmtToegangTot(iso) {
+    if (!iso) return '<span style="color:var(--text-3);font-size:11.5px">Geen toegang</span>';
+    try {
+      const dt = new Date(String(iso).slice(0,10) + 'T00:00:00');
+      const nl = dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short', year: 'numeric' });
+      const today = new Date(); today.setHours(0,0,0,0);
+      const isPast = dt < today;
+      const color = isPast ? 'var(--rose)' : 'var(--text-1)';
+      const suffix = isPast ? '<span style="font-size:10px;color:var(--rose);margin-left:4px">verlopen</span>' : '';
+      return `<span style="font-size:12px;color:${color}">${nl}</span>${suffix}`;
+    } catch (_) { return String(iso); }
+  }
+
   // Contacten-fetch: filter-key voorkomt refetch bij ongewijzigde filters.
   async function fetchContacten(key, url) {
     const st = _live.contacten;
@@ -287,6 +332,13 @@
     if (_live.contacten.lastKey !== key && !_live.contacten.loading) {
       queueMicrotask(() => fetchContacten(key, url));
     }
+    // v=21: batch-fetch toegang-tot voor de zichtbare lead-ids. Signatuur-cache
+    // in fetchAccessBatch voorkomt dubbele calls bij filter-wisseling met
+    // ongewijzigde item-set.
+    if (st.data?.items?.length) {
+      const leadIds = st.data.items.map(it => it.id).filter(Boolean).slice(0, 500);
+      if (leadIds.length) queueMicrotask(() => fetchAccessBatch(leadIds));
+    }
     const st = _live.contacten;
     const items = st.data ? st.data.items : [];
     const total = st.data ? st.data.total : 0;
@@ -308,6 +360,7 @@
               <th style="padding:8px 10px">Bron</th>
               <th style="padding:8px 10px">Status</th>
               <th style="padding:8px 10px">Aangemaakt</th>
+              <th style="padding:8px 10px">Toegang tot</th>
               <th style="padding:8px 10px;text-align:right">Acties</th>
             </tr>
           </thead>
@@ -335,6 +388,7 @@
                 <td style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span></td>
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
+                <td style="padding:8px 10px">${fmtToegangTot(_live.access.map[l.id])}</td>
                 <td style="padding:8px 10px;text-align:right;white-space:nowrap">${extendBtn}</td>
               </tr>`;
             }).join('')}

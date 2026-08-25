@@ -380,10 +380,24 @@ function renderToolbar() {
   });
 
   // In-toolbar search (naast topbar-search) — teller + pager syncen ná fetch.
+  // 2026-08-25 FOCUS-FIX: renderToolbar() vervangt de zoek-input via innerHTML
+  // reset, waardoor de gebruiker focus + cursor-positie verloor tijdens typen
+  // (klachten uit finance/klanten). Nu:
+  //   1. debounce blijft (~250ms) — geen search-per-keystroke.
+  //   2. Na loadList: alleen renderTablePart + renderPager. Toolbar NIET
+  //      re-renderen tijdens typen.
+  //   3. Teller-tekst surgisch updaten (span behouden, alleen textContent).
+  //   Alleen bij status/tag/date-wisseling doen we nog wel renderToolbar
+  //   (input verliest daar geen focus want de klik zit buiten de input).
   const searchInput = el.querySelector('[data-act="search"]');
+  const totalSpan = el.querySelector('.ds-tb-right span');
   const debSearch = bounce(() => {
     state.filter.search = searchInput.value || ''; state.page = 1;
-    loadList().then(() => { renderTablePart(); renderToolbar(); renderPager(); });
+    loadList().then(() => {
+      renderTablePart();
+      renderPager();
+      if (totalSpan) totalSpan.textContent = `${state.total || 0} klanten`;
+    });
   });
   searchInput.addEventListener('input', debSearch);
 }

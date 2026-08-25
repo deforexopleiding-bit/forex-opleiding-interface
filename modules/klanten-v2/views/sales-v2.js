@@ -493,7 +493,26 @@
     const mine = F('sv-ret-mine', '0');
     const wanted = retentieParams();
     if (!_ret.loading && !_ret.error && (!_ret.data || _ret.params !== wanted)) queueMicrotask(fetchRetentie);
-    const items = _ret.data?.items || [];
+    const allItems = _ret.data?.items || [];
+    // v=20 zoekbalk: client-side filter op customer_name / traject_label / mentor_name.
+    // stableSearch + debounce (H.onSearch, 280ms) — géén per-keystroke re-fetch.
+    // State in _ret.search zodat een tab-terug de zoekterm bewaart.
+    if (H && typeof H.onSearch === 'function') {
+      H.onSearch('sv-ret-q', (val) => {
+        _ret.search = String(val || '');
+        if (window.DFO?.render) window.DFO.render();
+      }, { debounceMs: 280 });
+      if (H.getSearchValue && H.getSearchValue('sv-ret-q') !== (_ret.search || '')) {
+        H.setSearchValue('sv-ret-q', _ret.search || '');
+      }
+    }
+    const q = String(_ret.search || '').trim().toLowerCase();
+    const items = q
+      ? allItems.filter(i => {
+          const hay = [i.customer_name, i.traject_label, i.mentor_name].filter(Boolean).join(' ').toLowerCase();
+          return hay.includes(q);
+        })
+      : allItems;
     return `${previewHeader('Retentie', _ret)}
       ${H.kpis([
         { c: 'violet',  icon: I.repeat, label: 'Retentie-klanten',       val: num(items.length), hi: 1, sub: 'sub loopt binnen 30d af' },
@@ -505,7 +524,11 @@
           { l: 'Alle', v: '0' },
           { l: 'Mijn klanten', v: '1' },
         ], mine),
+        (H && typeof H.stableSearch === 'function')
+          ? H.stableSearch('sv-ret-q', 'Zoek klant, traject of mentor…')
+          : '',
       ])}
+      ${q ? `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:8px">${items.length} van ${allItems.length} klanten (zoekterm actief)</div>` : ''}
       ${H.table(
         [{ l: 'Klant' }, { l: 'Traject', cls: 'optional' }, { l: 'Mentor', cls: 'optional' }, { l: 'Einddatum', cls: 'r' }, { l: 'Nog', cls: 'r' }, { l: 'Actieve subs', cls: 'r optional' }, { l: 'Status' }],
         items.map(i => {
