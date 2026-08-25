@@ -379,6 +379,12 @@
       if (st.loading[rid]) return;
       st.loading[rid] = true; st.error[rid] = null;
     }
+    // v=32 (2026-08-25) FIX — bug uit v=31: `st.loading=true` werd gezet maar
+    // render() gebeurde pas ná `await tryFetch()` → busy-banner verscheen
+    // nooit (de user zag niks tussen klik en resultaat). Fix: render meteen
+    // ná state-mutatie, vóór het await-punt. Zowel tone-switch als eerste
+    // generate als refine tonen nu direct de loadbanner + disabled buttons.
+    if (render) render();
     const bodyData = _live.body.data[rid] || {};
     const payload = {
       original_subject: row.subject || '',
