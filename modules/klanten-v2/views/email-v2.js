@@ -1111,14 +1111,21 @@
     const refining = !!_ui.aiRefining[row.id];
     const anyBusy = busy || refining;
     const err  = st.error[row.id];
-    // Sub-status: prioriteit 'verfijnt' > 'genereert' > 'concept' > 'error' > 'idle'.
+    // v=31 — Als busy en tone-switch actief: label = "toon aanpassen".
+    // Wordt clear'd zodra busy weer false is (nieuwe render met st.loading=false).
+    const toneSwitchTarget = (_ui.aiToneSwitching && _ui.aiToneSwitching[row.id]) || null;
+    const isToneSwitch = busy && toneSwitchTarget;
+    if (!busy && toneSwitchTarget && _ui.aiToneSwitching) delete _ui.aiToneSwitching[row.id];
+    // Sub-status: prioriteit 'verfijnt' > 'tone-switch' > 'genereert' > 'concept' > 'error' > 'idle'.
     const subStatus = refining
       ? 'AI verfijnt…'
-      : (busy
-          ? 'AI schrijft je concept…'
-          : (draft
-              ? 'Concept gegenereerd — bewerk, verfijn of gebruik'
-              : (err ? 'Fout bij genereren' : 'Klik "Genereer" om een concept te maken')));
+      : (isToneSwitch
+          ? ('Toon aan het aanpassen naar ' + toneSwitchTarget + '…')
+          : (busy
+              ? 'AI schrijft je concept…'
+              : (draft
+                  ? 'Concept gegenereerd — bewerk, verfijn of gebruik'
+                  : (err ? 'Fout bij genereren' : 'Klik "Genereer" om een concept te maken'))));
     const extraVal = String(_ui.aiExtra[row.id] || '');
     const refineDisabled = anyBusy || !draft || !extraVal.trim();
     // v=27: SVG-spinner (rotating) + prominente in-card laad-banner tijdens
@@ -1126,7 +1133,9 @@
     // gedefinieerd; hier extra 'spin' guard voor als de card zonder compose
     // wordt gerenderd.
     const SPIN_ICO = '<svg viewBox="0 0 20 20" width="12" height="12" style="animation:spin 0.9s linear infinite;flex-shrink:0"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="30 20" stroke-linecap="round"/></svg>';
-    const genBtnLabel = busy ? 'Genereren…' : (draft ? 'Opnieuw' : 'Genereer');
+    const genBtnLabel = busy
+      ? (isToneSwitch ? 'Toon aanpassen…' : 'Genereren…')
+      : (draft ? 'Opnieuw' : 'Genereer');
     const genBtnIco = busy ? SPIN_ICO : ICO.sparkle;
     const refineBtnLabel = refining ? 'Verfijnen…' : 'Verfijn';
     const refineBtnIco = refining ? SPIN_ICO : ICO.sparkle;
@@ -1134,7 +1143,13 @@
     const loadBanner = anyBusy
       ? `<div style="margin-bottom:12px;padding:11px 14px;background:var(--surface);border:1px dashed ${TOK.violet};border-radius:${TOK.rSm};display:flex;align-items:center;gap:10px;animation:pulse 1.6s ease-in-out infinite">
           <span style="color:${TOK.violet};display:flex;align-items:center">${SPIN_ICO}</span>
-          <div style="flex:1;font-size:12.5px;color:${TOK.violet};font-weight:500">✦ ${refining ? 'AI verfijnt je concept…' : 'AI schrijft je concept…'} <span style="font-weight:400;color:var(--text-3)">(~10-15s)</span></div>
+          <div style="flex:1;font-size:12.5px;color:${TOK.violet};font-weight:500">✦ ${
+            refining
+              ? 'AI verfijnt je concept…'
+              : (isToneSwitch
+                  ? 'Toon aan het aanpassen naar ' + esc(toneSwitchTarget) + '…'
+                  : 'AI schrijft je concept…')
+          } <span style="font-weight:400;color:var(--text-3)">(~10-15s)</span></div>
         </div>`
       : '';
     // Style-block met keyframes voor spin (pulse zit al in compose-block, maar
@@ -2059,7 +2074,18 @@
   };
   // AI-card handlers (in reader)
   window.__emailAiGenReader   = (rid) => { const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
-  window.__emailAiSetToneAndRegen = (t, rid) => { _ui.aiTone = t; const items = asArr(_live.inbox.data?.items); const row = items.find((x) => x.id === rid); if (row) aiRegenerateInReader(row); };
+  window.__emailAiSetToneAndRegen = (t, rid) => {
+    // v=31 — markeer expliciet dat het een tone-switch is zodat de laad-banner
+    // "Toon aan het aanpassen naar <tone>…" toont i.p.v. de generieke
+    // "AI schrijft je concept…". Wordt in _aiSuggestCard weer geleegd
+    // wanneer de call klaar is (via de generieke busy-clear-flow).
+    _ui.aiTone = t;
+    _ui.aiToneSwitching = _ui.aiToneSwitching || {};
+    _ui.aiToneSwitching[rid] = t;
+    const items = asArr(_live.inbox.data?.items);
+    const row = items.find((x) => x.id === rid);
+    if (row) aiRegenerateInReader(row);
+  };
   window.__emailAiClear = (rid) => { delete _live.aiDraft.data[rid]; delete _live.aiDraft.error[rid]; delete _ui.aiExtra[rid]; if (render) render(); };
   // Textarea state-only setter — GEEN render tijdens typen (focus behouden).
   // Verfijn-knop enable-state werkt via directe DOM-lookup, geen re-render nodig.

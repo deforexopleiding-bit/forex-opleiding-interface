@@ -450,7 +450,19 @@
     .attach-preview-list { list-style: none; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
     .attach-preview-item { display: flex; align-items: center; gap: 5px; padding: 3px 8px; background: var(--bg-elev-2); border: 1px solid var(--border-strong); border-radius: 5px; font-size: 11px; color: var(--text-dim); }
     .attach-preview-remove { background: none; border: none; color: var(--red); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
-    .card-ai-loading { display: flex; align-items: center; gap: 10px; padding: 12px 0; font-size: 13px; color: var(--accent-cyan); }
+    /* 2026-08-25: prominenter maken — dashed border + pulse + duidelijker
+       zichtbaar tijdens de ~10-15s Anthropic-call. Voorheen was 't een dunne
+       cyan-text-strook die makkelijk gemist werd; nu een banner. */
+    .card-ai-loading {
+      display: flex; align-items: center; gap: 10px;
+      margin: 8px 0; padding: 11px 14px;
+      background: var(--bg-elev); border: 1px dashed var(--accent-cyan);
+      border-radius: 8px;
+      font-size: 13px; font-weight: 500; color: var(--accent-cyan);
+      animation: aiPulse 1.6s ease-in-out infinite;
+    }
+    @keyframes aiPulse { 0%, 100% { opacity: .65 } 50% { opacity: 1 } }
+    .card-ai-loading .ai-time-est { font-weight: 400; color: var(--text-dim); font-size: 12px; }
     .card-ai-error { font-size: 13px; color: var(--red); padding: 8px 0; }
     .ai-loading-spinner {
       width: 15px; height: 15px;
@@ -4647,8 +4659,16 @@
   function renderAiSection(e) {
     const p = state.aiProposals[e.uid];
     if (!p) return '';
-    if (p.loading) return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> AI schrijft antwoord…</div>';
-    if (p.sending) return '<div class="card-ai-loading"><span class="ai-loading-spinner"></span> Versturen…</div>';
+    // 2026-08-25: prominenter laad-bericht + geschatte tijd. Voorheen dunne
+    // strook die makkelijk gemist werd tijdens de ~10-15s Anthropic-call.
+    if (p.loading) return '<div class="card-ai-loading" role="status" aria-live="polite">' +
+      '<span class="ai-loading-spinner"></span> ✦ ' +
+      (p.previous ? 'AI genereert opnieuw een antwoord' : 'AI schrijft je antwoord') + '… ' +
+      '<span class="ai-time-est">(~10-15s)</span>' +
+      '</div>';
+    if (p.sending) return '<div class="card-ai-loading" role="status" aria-live="polite">' +
+      '<span class="ai-loading-spinner"></span> ✦ Antwoord aan het verzenden…' +
+      '</div>';
     if (p.error)   return '<div class="card-ai-error">AI-fout: ' + escapeHtml(p.error) + '</div>';
 
     const kbUsed = p.kennisbank_used ?? null;
