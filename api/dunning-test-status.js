@@ -7,7 +7,11 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { requireSuperAdmin, getSandboxContact } from './_lib/wanbetalers-sandbox.js';
-import { isDryRunEnabled } from './_lib/dunning-dry-run.js';
+// Splitsing 2026-08-25: cockpit toont beide vlaggen. De 'dry_run_enabled'-key
+// verwijst nu autoritatief naar de TEST-vlag (wat de cockpit-UI wil weten);
+// 'dry_run_enabled_production' is er als extra transparantie zodat de
+// gebruiker ziet of productie ook nog gate't.
+import { isDryRunEnabled, isTestDryRunEnabled } from './_lib/dunning-dry-run.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -20,8 +24,9 @@ export default async function handler(req, res) {
   const admin = await requireSuperAdmin(req, res);
   if (!admin) return;
 
-  const contact = await getSandboxContact();
-  const dryRun  = await isDryRunEnabled();
+  const contact       = await getSandboxContact();
+  const dryRunTest    = await isTestDryRunEnabled();
+  const dryRunProd    = await isDryRunEnabled();
 
   const [customersRes, invoicesRes, auditRes] = await Promise.all([
     supabaseAdmin.from('customers').select('id', { count: 'exact', head: true }).eq('is_test', true),
@@ -37,12 +42,13 @@ export default async function handler(req, res) {
   if (!contact?.email) blockers.push('sandbox_contact.email niet geconfigureerd — cockpit weigert email-verzending');
 
   return res.status(200).json({
-    ready:                blockers.length === 0,
+    ready:                        blockers.length === 0,
     blockers,
-    sandbox_contact:      contact || {},
-    dry_run_enabled:      !!dryRun,
-    test_customer_count:  customersRes.count || 0,
-    test_invoice_count:   invoicesRes.count || 0,
-    recent_audit:         auditRes.data || [],
+    sandbox_contact:              contact || {},
+    dry_run_enabled:              !!dryRunTest,      // TEST-vlag (autoritatief voor cockpit-UI)
+    dry_run_enabled_production:   !!dryRunProd,      // productie-vlag (transparantie)
+    test_customer_count:          customersRes.count || 0,
+    test_invoice_count:           invoicesRes.count || 0,
+    recent_audit:                 auditRes.data || [],
   });
 }

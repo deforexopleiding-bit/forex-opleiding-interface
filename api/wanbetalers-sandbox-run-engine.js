@@ -25,7 +25,8 @@
 
 import { runEngine } from './_lib/dunning-engine.js';
 import { requireSuperAdmin, getSandboxCustomer } from './_lib/wanbetalers-sandbox.js';
-import { isDryRunEnabled } from './_lib/dunning-dry-run.js';
+// Splitsing 2026-08-25: sandbox-flow leest de test-vlag, niet de productie-vlag.
+import { isTestDryRunEnabled as isDryRunEnabled } from './_lib/dunning-dry-run.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');

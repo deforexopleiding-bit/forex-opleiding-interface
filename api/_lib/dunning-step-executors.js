@@ -163,7 +163,7 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
   //    matcht met app_settings.dunning_sandbox_contact.email — anders
   //    abort. Zelfs zonder dry-run kan een test-mail dus nooit lekken.
   try {
-    const { isDryRunEnabled, assertRecipientMatchesSandbox, buildDryRunLogPayload } =
+    const { isDryRunEnabledFor, assertRecipientMatchesSandbox, buildDryRunLogPayload } =
       await import('./dunning-dry-run.js');
     if (customer?.is_test) {
       try {
@@ -176,7 +176,10 @@ export async function executeEmailStep({ supabaseAdmin, run, step, customer, ope
         };
       }
     }
-    if (await isDryRunEnabled()) {
+    // Splitsing 2026-08-25: kies dry-run-vlag per klant. Is_test-klanten
+    // lezen dunning_test_dry_run; productie-klanten dunning_dry_run.
+    // Zo raakt togglen vanuit de test-cockpit nooit de productie-verzending.
+    if (await isDryRunEnabledFor({ isTest: !!customer?.is_test })) {
       return {
         status: 'ok',
         log_event: 'email_sent',
@@ -503,7 +506,7 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
   // (zie volgorde-argumentatie in JSDoc). Gebruikt customerPhone als to-adres
   // voor het dry-run log — geen conv-info want die is nog niet opgezocht.
   try {
-    const { isDryRunEnabled, assertRecipientMatchesSandbox, buildDryRunLogPayload } =
+    const { isDryRunEnabledFor, assertRecipientMatchesSandbox, buildDryRunLogPayload } =
       await import('./dunning-dry-run.js');
     if (customerIsTest) {
       try {
@@ -521,7 +524,9 @@ export async function executeWhatsappStep({ supabaseAdmin, run, step, customer, 
         };
       }
     }
-    if (await isDryRunEnabled()) {
+    // Splitsing 2026-08-25: kies dry-run-vlag per klant. Zie email-executor
+    // (regel ~180) voor motivatie.
+    if (await isDryRunEnabledFor({ isTest: customerIsTest })) {
       return {
         status: 'ok',
         log_event: 'whatsapp_sent',
@@ -1097,7 +1102,9 @@ export async function executeTaskStep({ supabaseAdmin, run, step, customer, open
   let buildDryRunLogPayload = null;
   try {
     const dryMod = await import('./dunning-dry-run.js');
-    dry = await dryMod.isDryRunEnabled();
+    // Splitsing 2026-08-25: per-customer keuze. Test-klanten lezen
+    // dunning_test_dry_run zodat cockpit-triggers de productie-vlag niet raken.
+    dry = await dryMod.isDryRunEnabledFor({ isTest: !!customer?.is_test });
     buildDryRunLogPayload = dryMod.buildDryRunLogPayload;
   } catch (guardModuleErr) {
     // Guard-module niet beschikbaar → fail-safe: taak nog steeds NIET
@@ -1290,7 +1297,9 @@ export async function executeResumeDunningStep({ supabaseAdmin, run, step, custo
   let buildDryRunLogPayload = null;
   try {
     const dryMod = await import('./dunning-dry-run.js');
-    dry = await dryMod.isDryRunEnabled();
+    // Splitsing 2026-08-25: per-customer keuze — is_test-klanten volgen
+    // de test-vlag, productie de productie-vlag.
+    dry = await dryMod.isDryRunEnabledFor({ isTest: !!customer?.is_test });
     buildDryRunLogPayload = dryMod.buildDryRunLogPayload;
   } catch (guardModuleErr) {
     // Guard-module niet beschikbaar → status niet flippen. Consistent

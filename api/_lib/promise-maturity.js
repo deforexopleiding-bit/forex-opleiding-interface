@@ -97,7 +97,11 @@ export async function runPromiseMaturity({ scope = 'production' } = {}) {
   summary.enabled = true;
 
   const deps = await loadConversationReminderDeps();
-  const dryRunOn = deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true; // fail-safe: dry-run AAN
+  // Splitsing 2026-08-25: kies dry-run-vlag op scope. scope='test' → test-vlag;
+  // production → productie-vlag. Fail-safe fallback op dry-run AAN.
+  const dryRunOn = deps.isDryRunEnabledFor
+    ? await deps.isDryRunEnabledFor({ scope })
+    : (deps.isDryRunEnabled ? await deps.isDryRunEnabled() : true);
   summary.dry_run = dryRunOn;
 
   const nowMs      = Date.now();

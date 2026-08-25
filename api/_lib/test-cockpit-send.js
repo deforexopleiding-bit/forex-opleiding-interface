@@ -18,9 +18,13 @@
 import { supabaseAdmin } from '../supabase.js';
 import { sendText, sendTemplate } from './meta-whatsapp.js';
 import { sendEmailViaSmtp } from './send-email-core.js';
+// Splitsing 2026-08-25: de fail-closed test-cockpit-send-wrapper stuurt
+// per definitie ALLEEN naar het sandbox-contact voor scope=test-verzending.
+// Hij MOET de test-vlag lezen, nooit de productie-vlag. Import via alias
+// zodat de rest van de code (isDryRunEffective) letterlijk zelfde blijft.
 import {
   assertRecipientMatchesSandbox,
-  isDryRunEnabled,
+  isTestDryRunEnabled as isDryRunEnabled,
 } from './dunning-dry-run.js';
 import { getSandboxContact } from './wanbetalers-sandbox.js';
 

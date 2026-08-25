@@ -13,7 +13,10 @@ import { supabaseAdmin, verifyAdmin } from '../supabase.js';
 
 const SANDBOX_NAME_PREFIX = '🧪 TEST — ';
 const CONTACT_KEY         = 'dunning_sandbox_contact';
-const DRY_RUN_KEY         = 'dunning_dry_run';
+// Splitsing 2026-08-25: sandbox-code schrijft NOOIT naar de productie-vlag
+// 'dunning_dry_run'. Alleen naar 'dunning_test_dry_run'. Zo raakt togglen
+// vanuit de cockpit nooit meer de productie-verzending.
+const DRY_RUN_KEY_TEST    = 'dunning_test_dry_run';
 
 export async function requireSuperAdmin(req, res) {
   if (req.method !== 'POST' && req.method !== 'GET') {
@@ -71,9 +74,18 @@ export async function getDryRun() {
 
 export async function setDryRun(enabled) {
   const value = { enabled: !!enabled };
+  // KRITIEK (2026-08-25): schrijft alleen naar dunning_test_dry_run.
+  // NOOIT naar dunning_dry_run — productie-verzending mag niet vanuit
+  // sandbox-code gemuteerd worden.
   const { error: upErr } = await supabaseAdmin
-    .from('app_settings').upsert({ key: DRY_RUN_KEY, value }, { onConflict: 'key' });
-  if (upErr) throw new Error('dry_run save: ' + upErr.message);
+    .from('app_settings').upsert({ key: DRY_RUN_KEY_TEST, value }, { onConflict: 'key' });
+  if (upErr) throw new Error('test_dry_run save: ' + upErr.message);
+  // Cache van dunning-dry-run invalidaten zodat de nieuwe waarde meteen
+  // door alle guards gezien wordt (10s TTL zou anders vertragen).
+  try {
+    const { invalidateDryRunCache } = await import('./dunning-dry-run.js');
+    invalidateDryRunCache();
+  } catch (_) { /* fail-soft — cache wordt binnen 10s alsnog vernieuwd */ }
   return value;
 }
 
