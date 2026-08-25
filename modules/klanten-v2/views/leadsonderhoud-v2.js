@@ -332,14 +332,17 @@
     if (_live.contacten.lastKey !== key && !_live.contacten.loading) {
       queueMicrotask(() => fetchContacten(key, url));
     }
-    // v=21: batch-fetch toegang-tot voor de zichtbare lead-ids. Signatuur-cache
-    // in fetchAccessBatch voorkomt dubbele calls bij filter-wisseling met
-    // ongewijzigde item-set.
-    if (st.data?.items?.length) {
-      const leadIds = st.data.items.map(it => it.id).filter(Boolean).slice(0, 500);
+    const st = _live.contacten;
+    // v=22 FIX (was v=21 regressie): TDZ-error — `st.data?.items?.length`
+    // stond hier vóór `const st = ...` → contactenView throws met
+    // "Cannot access 'st' before initialization", Contacten-tab rendert leeg.
+    // Nu: eerst st declareren, dán de access-batch queuen. Fail-soft: als
+    // items nog niet geladen zijn, gebeurt er niks — na fetchContacten's
+    // render loopt contactenView opnieuw en dan wél queued.
+    if (st.data && Array.isArray(st.data.items) && st.data.items.length) {
+      const leadIds = st.data.items.map(it => it && it.id).filter(Boolean).slice(0, 500);
       if (leadIds.length) queueMicrotask(() => fetchAccessBatch(leadIds));
     }
-    const st = _live.contacten;
     const items = st.data ? st.data.items : [];
     const total = st.data ? st.data.total : 0;
     const hasMore = st.data ? st.data.has_more : false;
@@ -388,7 +391,7 @@
                 <td style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span></td>
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
-                <td style="padding:8px 10px">${fmtToegangTot(_live.access.map[l.id])}</td>
+                <td style="padding:8px 10px">${fmtToegangTot(_live.access && _live.access.map ? _live.access.map[l.id] : null)}</td>
                 <td style="padding:8px 10px;text-align:right;white-space:nowrap">${extendBtn}</td>
               </tr>`;
             }).join('')}
