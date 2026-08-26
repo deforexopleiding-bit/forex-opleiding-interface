@@ -43,13 +43,43 @@ const TABS = [
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="14"/></svg>' },
 ];
 
+// 2026-08-26 — Incasso/finance-tabs zijn niet-privileged (mentor etc) niet
+// zichtbaar. Rol-fallback: super_admin/admin/manager/sales zien alles zoals
+// voorheen (geen regressie). Overige rollen (mentor/marketing/administratie)
+// zien alleen als de permission-key gegrant is via user_permissions of via
+// een rol-grant op de key. Voor mentor betekent dit: profiel, communicatie,
+// offertes, abonnementen → zichtbaar; facturen, creditnotas, wanbetalers,
+// audit → verborgen (incasso-grens).
+const TAB_PERM_KEYS = {
+  facturen:    'customer.widget.finance.view',
+  creditnotas: 'customer.widget.finance.view',
+  wanbetalers: 'customer.widget.finance.view',
+  audit:       'customer.audit.view',
+};
+function _isPrivilegedRole() {
+  try {
+    var r = String(window.DFO?.S?.role || '').toLowerCase();
+    return r === 'super_admin' || r === 'admin' || r === 'manager' || r === 'sales';
+  } catch (_) { return false; }
+}
+function mayViewTab(tabKey) {
+  if (_isPrivilegedRole()) return true;
+  var needsKey = TAB_PERM_KEYS[tabKey];
+  if (!needsKey) return true; // geen expliciete gate = altijd
+  try { return !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(needsKey)); }
+  catch (_) { return false; }
+}
+function visibleTabs() { return TABS.filter(t => mayViewTab(t.key)); }
+
 const VALID_TAB_KEYS = TABS.map(t => t.key);
 const DEFAULT_TAB    = 'profiel';
 
 function normalizeTab(tab) {
-  return VALID_TAB_KEYS.includes(String(tab || '').toLowerCase())
-    ? String(tab).toLowerCase()
-    : DEFAULT_TAB;
+  var key = String(tab || '').toLowerCase();
+  // Als de gevraagde tab niet zichtbaar is voor deze user → val terug op profiel.
+  if (!VALID_TAB_KEYS.includes(key)) return DEFAULT_TAB;
+  if (!mayViewTab(key)) return DEFAULT_TAB;
+  return key;
 }
 
 // Dossier-cache per open-sessie. Bevat de FULL response van /api/customer
@@ -136,7 +166,7 @@ function renderShell({ customer, tab }) {
       </header>
 
       <nav class="kv-detail-tabs" role="tablist" aria-label="Klant-secties">
-        ${TABS.map(t => `
+        ${visibleTabs().map(t => `
           <button type="button" class="kv-detail-tab ${t.key === tab ? 'active' : ''}"
                   role="tab" aria-selected="${t.key === tab ? 'true' : 'false'}"
                   data-kv-tab="${t.key}">
