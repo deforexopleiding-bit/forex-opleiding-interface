@@ -61,7 +61,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     // 2026-08-26: dual-gate — verifyAdmin OF customer.create-permission.
-    // Sales heeft `customer.create` via migratie 045 (kern-werk: nieuwe
+    // Sales + mentor hebben `customer.create` via migratie 045 (kern-werk: nieuwe
     // klanten inschrijven). Insert doet ALLEEN customers-tabel + audit;
     // geen TL-sync, geen subscription, geen invoice, geen incasso.
     // Bewerken/archiveren/verwijderen/tags/notes blijven strikt verifyAdmin.
