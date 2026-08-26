@@ -163,28 +163,30 @@ export default async function handler(req, res) {
       /* 4 */ supabaseAdmin.from('activity_log').select('user_id')
                 .in('action', rankingActions)
                 .gte('created_at', dayStartIso).lt('created_at', dayEndIso),
+      // v3 (2026-08-26): feed-bronnen op HELE NL-vandaag i.p.v. 2h-window,
+      // zodat de feed altijd gevuld is en aflopend blijft stromen.
+      // Elk .limit(20) → samen max 100 kandidaten → top-15 in payload.
       /* 5 */ supabaseAdmin.from('email_messages').select('id, from_name, date_received')
-                .eq('category', 'Nieuwe Lead').gte('date_received', twoHoursAgo.toISOString())
-                .order('date_received', { ascending: false }).limit(5),
-      /* 6 */ // Feed sales: LEEG hier. We deriveren uit salesCompute.recent_ids
-              // (dezelfde clean-set die sales.count/total voedt via
-              // computeSignedDealsTotal — met test-deal-filter, declined_at IS
-              // NULL, archived_at IS NULL). Voorkomt "feed toont sale die de
-              // teller niet telt". Index blijft bewust bezet zodat pick(7-13)
-              // niet schuift.
+                .eq('category', 'Nieuwe Lead').gte('date_received', dayStartIso).lt('date_received', dayEndIso)
+                .order('date_received', { ascending: false }).limit(20),
+      /* 6 */ // Feed sales: LEEG. We deriveren uit salesCompute.recent_ids
+              // (clean-set die ook sales.count/total voedt). Index blijft
+              // bezet zodat pick(7-13) niet schuift.
               Promise.resolve({ data: [] }),
       /* 7 */ supabaseAdmin.from('follow_up_appointments').select('id, lead_name, updated_at')
-                .eq('status', 'completed').gte('updated_at', twoHoursAgo.toISOString())
-                .order('updated_at', { ascending: false }).limit(5),
-      /* 8 */ supabaseAdmin.from('follow_up_appointments').select('id, lead_name, updated_at')
-                .eq('voicememo_status', 'sent').gte('updated_at', twoHoursAgo.toISOString())
-                .order('updated_at', { ascending: false }).limit(5),
+                .eq('status', 'completed').gte('updated_at', dayStartIso).lt('updated_at', dayEndIso)
+                .order('updated_at', { ascending: false }).limit(20),
+      /* 8 */ // v3-fix: voicememo_sent_at (echte send-timestamp) i.p.v.
+              // updated_at (batch-updates clusterden alles → feed leek bevroren).
+              supabaseAdmin.from('follow_up_appointments').select('id, lead_name, voicememo_sent_at')
+                .eq('voicememo_status', 'sent').gte('voicememo_sent_at', dayStartIso).lt('voicememo_sent_at', dayEndIso)
+                .order('voicememo_sent_at', { ascending: false }).limit(20),
       /* 9 */ supabaseAdmin.from('follow_up_outcomes').select('id, created_at')
-                .gte('created_at', twoHoursAgo.toISOString())
-                .order('created_at', { ascending: false }).limit(5),
+                .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
+                .order('created_at', { ascending: false }).limit(20),
       /*10 */ supabaseAdmin.from('event_signup_inbox').select('id, first_name, event_date_label, created_at')
-                .gte('created_at', twoHoursAgo.toISOString())
-                .order('created_at', { ascending: false }).limit(5),
+                .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
+                .order('created_at', { ascending: false }).limit(20),
       /*11 */ dave.user_id
                 ? computeMetrics(supabaseAdmin, { period: 'today', ownerScope: dave.user_id })
                 : Promise.resolve(null),
@@ -354,7 +356,8 @@ export default async function handler(req, res) {
       text: `Call afgerond: ${trimName(a.lead_name || '')}`,
     });
     for (const v of (feedVoicememoRes.data || [])) feed.push({
-      ts: new Date(v.updated_at).toISOString(), type: 'voicememo',
+      // v3: voicememo_sent_at (echte send-timestamp) matcht teller/ranglijst.
+      ts: new Date(v.voicememo_sent_at).toISOString(), type: 'voicememo',
       text: `Voicememo: ${trimName(v.lead_name || '')}`,
     });
     for (const o of (feedOutcomesRes.data || [])) feed.push({

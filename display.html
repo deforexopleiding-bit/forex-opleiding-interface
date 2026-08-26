@@ -108,7 +108,13 @@
   /* ---- hero KPI row ---- */
   .hero{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
   .kpi{position:relative;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);
-    border-radius:18px;padding:20px 22px;display:flex;flex-direction:column;justify-content:space-between;min-height:172px;box-shadow:var(--shadow);overflow:hidden}
+    border-radius:18px;padding:20px 22px;display:grid;grid-template-rows:auto 1fr auto;row-gap:8px;min-height:172px;box-shadow:var(--shadow);overflow:hidden}
+  /* v3 (2026-08-26): grid met 3 rijen zodat .big altijd in de midden-track
+     zit → alle 4 hero-getallen op dezelfde baseline uitgelijnd, onafhankelijk
+     van cap/foot-lengte. Was flex + space-between → verschoof per tegel. */
+  .kpi .cap{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .big{align-self:center}
+  .kpi .foot{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .kpi .cap{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink-2);font-weight:600;letter-spacing:.01em}
   .kpi .ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
   .kpi .big{font-size:76px}
@@ -272,7 +278,7 @@
       </div>
 
       <div class="card dave">
-        <h3>🎤 Dave — vandaag <span class="tag">retentie &amp; opvolging</span></h3>
+        <h3>Vandaag <span class="tag">retentie &amp; opvolging</span></h3>
         <div class="dave-grid">
           <div class="dstat"><div class="l" style="color:var(--gold)">Retentie gebeld</div><div class="num v" id="d-ret">0</div></div>
           <div class="dstat"><div class="l" style="color:var(--gold)">Follow-ups gedraaid</div><div class="num v" id="d-fu">0</div></div>
