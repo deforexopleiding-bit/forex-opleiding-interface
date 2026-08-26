@@ -146,7 +146,6 @@ export default async function handler(req, res) {
     // nlDateString() geeft NL-tz-aware YYYY-MM-DD.
     const sinceStr = nlDateString(dayStart);
     const untilStr = nlDateString(dayEnd);
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     // Week (ma..ma+7) en maand (1e..volgende 1e), NL-tz.
     const weekStart  = nlWeekStart(dayStart);
     const weekEnd    = nlWeekEndExclusive(dayStart);
@@ -414,12 +413,14 @@ export default async function handler(req, res) {
     // Fix 1 (2026-08-26): oude losse deals-query miste test-deal- +
     // declined/archived-filters → feed toonde soms sale die sales.count NIET
     // telde ("Sale: Andrea M." bij sales.count=0). Nu gebruiken we dezelfde
-    // clean-set als sales.count/total, gefilterd op accepted_at binnen laatste
-    // 2h. Klant-labels zijn al PII-veilig getrimd door compute-helper.
-    const twoHoursAgoIso = twoHoursAgo.toISOString();
+    // clean-set als sales.count/total.
+    // 2026-08-26 v2: 2h-window verwijderd — recent_ids is al today-only, en
+    // overige feed-bronnen tonen ook de hele NL-dag. Zonder deze filter
+    // blijft een sale van bv. 21:00 later op de avond bovenaan de feed
+    // zichtbaar. De algemene feed-sort + cap 15 doet de rest.
+    // Klant-labels zijn PII-veilig getrimd door compute-helper.
     const feedSalesClean = (salesCompute.recent_ids || [])
-      .filter(s => s.accepted_at && s.accepted_at >= twoHoursAgoIso)
-      .slice(0, 5);
+      .filter(s => s.accepted_at);
 
     // ── Feed 6-way ────────────────────────────────────────────────────────
     const feed = [];

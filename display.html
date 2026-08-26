@@ -208,7 +208,7 @@
     <div class="live"><span class="dot"></span> LIVE</div>
     <div class="spacer"></div>
     <button class="iconbtn" id="themebtn" title="Licht / donker">🌙</button>
-    <button class="iconbtn" id="soundbtn" title="Geluid aan / uit">🔇 geluid uit</button>
+    <button class="iconbtn" id="soundbtn" title="Geluid aan / uit">🔇</button>
     <div style="width:4px"></div>
     <div><div class="clock" id="clock">--:--:--</div><div class="datestr" id="date">—</div></div>
     <svg class="ring" width="38" height="38" viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="16"></circle><circle class="fg" id="ring" cx="20" cy="20" r="16" stroke-dasharray="100.5" stroke-dashoffset="0"></circle></svg>
@@ -616,7 +616,7 @@
 
   var soundOn = false, actx = null;
   var sbtn = el('soundbtn');
-  function updateSoundLabel(){ sbtn.textContent = soundOn ? '🔊 geluid aan' : '🔇 geluid uit'; }
+  function updateSoundLabel(){ sbtn.textContent = soundOn ? '🔊' : '🔇'; }
   function initAudio(){
     if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
     if (actx && actx.state === 'suspended') actx.resume();
