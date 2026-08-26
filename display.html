@@ -254,12 +254,12 @@
     <div class="kpi leads" id="k-leads">
       <div class="cap"><span class="ico">✦</span> Nieuwe leads</div>
       <div class="num big" id="v-leads">0</div>
-      <div class="foot">vandaag binnengekomen <span class="delta" id="v-leads-d"></span></div>
+      <div class="foot">vandaag binnengekomen</div>
     </div>
     <div class="kpi calls" id="k-calls">
-      <div class="cap"><span class="ico">📞</span> Calls vandaag</div>
+      <div class="cap"><span class="ico">📞</span> Calls geboekt vandaag</div>
       <div class="num big" id="v-calls">0</div>
-      <div class="foot"><span id="v-calls-next">0</span> gepland komend uur</div>
+      <div class="foot"><span id="v-calls-sub">0</span> afgerond vandaag</div>
     </div>
     <div class="kpi one" id="k-one">
       <div class="cap"><span class="ico">◎</span> 1-op-1 calls</div>
@@ -483,17 +483,19 @@
   }
   function renderKPIs(prev){
     countUp(el('v-sales-rev'), prev? prev.salesRev:state.salesRev, state.salesRev, true);
-    el('v-sales-cnt').textContent=state.salesCnt;
-    el('v-sales-d').textContent='▲ '+state.salesD;
+    if (el('v-sales-cnt')) el('v-sales-cnt').textContent=state.salesCnt;
+    if (el('v-sales-d'))   el('v-sales-d').textContent='';   // delta blank (geen gister-bron)
     countUp(el('v-leads'), prev?prev.leads:state.leads, state.leads);
-    el('v-leads-d').textContent='▲ '+state.leadsD;
+    if (el('v-leads-d'))   el('v-leads-d').textContent='';   // element bestaat niet meer sinds hero-fix
     countUp(el('v-calls'), prev?prev.calls:state.calls, state.calls);
-    el('v-calls-next').textContent=state.callsNext;
+    // v-calls-next bestaat niet meer sinds hero-fix (was "gepland komend uur");
+    // v-calls-sub wordt buiten renderKPIs geschreven via d.calls.count_today.
+    if (el('v-calls-next')) el('v-calls-next').textContent=state.callsNext;
     countUp(el('v-one'), prev?prev.one:state.one, state.one);
-    el('v-one-open').textContent=state.oneOpen;
-    el('d-ret').textContent=state.daveRet;
-    el('d-fu').textContent=state.daveFu;
-    el('d-vm').textContent=state.daveVm;
+    if (el('v-one-open'))  el('v-one-open').textContent=state.oneOpen;
+    if (el('d-ret')) el('d-ret').textContent=state.daveRet;
+    if (el('d-fu'))  el('d-fu').textContent=state.daveFu;
+    if (el('d-vm'))  el('d-vm').textContent=state.daveVm;
   }
 
   /* ---------- live feed ---------- */
@@ -730,7 +732,7 @@
     state.salesD   = 0;
     state.leads    = d.leads.total;
     state.leadsD   = 0;
-    state.calls    = d.calls.count_today;
+    state.calls    = d.calls.booked_today;    // hero: geboekte calls vandaag
     state.callsNext= (d.calls.next||[]).length;
     state.one      = d.one_on_one.count_today;
     state.oneOpen  = 0;
@@ -738,9 +740,12 @@
     state.daveFu   = d.dave.follow_ups_gedraaid;
     state.daveVm   = d.dave.voicememos_sent;
     renderKPIs(prev);
-    /* Delta: geen "vs gister"-bron → blank (geen misleidend "▲ 0"). */
-    el('v-sales-d').textContent = '';
-    el('v-leads-d').textContent = '';
+    /* Delta blank + calls-foot ("afgerond vandaag"). Elementen defensief
+       want v-leads-d + v-calls-next zijn verwijderd sinds hero-fix v3.1. */
+    if (el('v-sales-d'))   el('v-sales-d').textContent = '';
+    if (el('v-leads-d'))   el('v-leads-d').textContent = '';
+    var _cs = el('v-calls-sub');
+    if (_cs) _cs.textContent = (d.calls.count_today == null ? '—' : d.calls.count_today);
     /* Null→"—" voor hero-getallen bij bron-down */
     if (state.salesRev===null || state.salesRev===undefined) el('v-sales-rev').textContent = '—';
     if (state.leads===null    || state.leads===undefined)    el('v-leads').textContent    = '—';

@@ -425,8 +425,9 @@ export default async function handler(req, res) {
         recent_ids: salesRecent,
       },
       calls: {
-        count_today: callsTodayRes.count,
-        next: callsNext,
+        count_today:  callsTodayRes.count,     // afgeronde Zoom-calls vandaag (foot v-calls-sub)
+        booked_today: callsBookedCount,        // GEBOEKTE calls vandaag (created_at) → hero v-calls
+        next:         callsNext,
       },
       dave: {
         resolved: dave,
