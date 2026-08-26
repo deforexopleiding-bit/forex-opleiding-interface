@@ -161,10 +161,13 @@ export default async function handler(req, res) {
       /* 5 */ supabaseAdmin.from('email_messages').select('id, from_name, date_received')
                 .eq('category', 'Nieuwe Lead').gte('date_received', twoHoursAgo.toISOString())
                 .order('date_received', { ascending: false }).limit(5),
-      /* 6 */ supabaseAdmin.from('deals').select('id, tl_quotation_accepted_at, customer_id')
-                .eq('tl_quotation_status', 'accepted')
-                .gte('tl_quotation_accepted_at', twoHoursAgo.toISOString())
-                .order('tl_quotation_accepted_at', { ascending: false }).limit(5),
+      /* 6 */ // Feed sales: LEEG hier. We deriveren uit salesCompute.recent_ids
+              // (dezelfde clean-set die sales.count/total voedt via
+              // computeSignedDealsTotal — met test-deal-filter, declined_at IS
+              // NULL, archived_at IS NULL). Voorkomt "feed toont sale die de
+              // teller niet telt". Index blijft bewust bezet zodat pick(7-13)
+              // niet schuift.
+              Promise.resolve({ data: [] }),
       /* 7 */ supabaseAdmin.from('follow_up_appointments').select('id, lead_name, updated_at')
                 .eq('status', 'completed').gte('updated_at', twoHoursAgo.toISOString())
                 .order('updated_at', { ascending: false }).limit(5),
@@ -315,26 +318,16 @@ export default async function handler(req, res) {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // ── Feed sales → klant-labels ─────────────────────────────────────────
-    const feedSaleDeals = feedSalesRes.data || [];
-    let feedSalesCustMap = new Map();
-    if (feedSaleDeals.length) {
-      const cids = [...new Set(feedSaleDeals.map(d => d.customer_id).filter(Boolean))];
-      if (cids.length) {
-        const custsRes = await safeAwait(
-          supabaseAdmin.from('customers')
-            .select('id, is_company, company_name, first_name, last_name').in('id', cids),
-          { data: [] },
-          'feedSalesCustomers'
-        );
-        feedSalesCustMap = new Map((custsRes.data || []).map(c => [c.id, c]));
-      }
-    }
-    function custLabel(c) {
-      if (!c) return 'nieuwe klant';
-      if (c.is_company) return c.company_name || '—';
-      return trimName([c.first_name, c.last_name].filter(Boolean).join(' '));
-    }
+    // ── Feed sales derive uit salesCompute.recent_ids ─────────────────────
+    // Fix 1 (2026-08-26): oude losse deals-query miste test-deal- +
+    // declined/archived-filters → feed toonde soms sale die sales.count NIET
+    // telde ("Sale: Andrea M." bij sales.count=0). Nu gebruiken we dezelfde
+    // clean-set als sales.count/total, gefilterd op accepted_at binnen laatste
+    // 2h. Klant-labels zijn al PII-veilig getrimd door compute-helper.
+    const twoHoursAgoIso = twoHoursAgo.toISOString();
+    const feedSalesClean = (salesCompute.recent_ids || [])
+      .filter(s => s.accepted_at && s.accepted_at >= twoHoursAgoIso)
+      .slice(0, 5);
 
     // ── Feed 6-way ────────────────────────────────────────────────────────
     const feed = [];
@@ -342,9 +335,9 @@ export default async function handler(req, res) {
       ts: new Date(e.date_received).toISOString(), type: 'lead',
       text: `Nieuwe lead: ${trimName(e.from_name || '')}`,
     });
-    for (const s of feedSaleDeals) feed.push({
-      ts: new Date(s.tl_quotation_accepted_at).toISOString(), type: 'sale',
-      text: `Sale: ${custLabel(feedSalesCustMap.get(s.customer_id))}`,
+    for (const s of feedSalesClean) feed.push({
+      ts: s.accepted_at, type: 'sale',
+      text: `Sale: ${s.customer_label}`,
     });
     for (const a of (feedCallsCompleted.data || [])) feed.push({
       ts: new Date(a.updated_at).toISOString(), type: 'call',
@@ -367,7 +360,13 @@ export default async function handler(req, res) {
     // ── Dave — distinct velden: retentie ≠ follow-ups ─────────────────────
     const daveRetentie          = daveMetrics?.appointments_completed ?? 0;
     const daveFollowups         = daveMetrics?.outcomes_total ?? 0;
-    const daveVoicememosSent    = daveMetrics?.voicememos_sent ?? 0;
+    // Fix 2 (2026-08-26): voicememos_sent uit dezelfde bron als ranking-B
+    // (rankVoicememoRes = updated_at NL-vandaag). computeMetrics gebruikte
+    // scheduled_at-in-vandaag → gaf Dave 6 terwijl ranglijst 16 telde. Beide
+    // tegels tonen nu identiek getal — 1 bron, 0 dubbeltelling.
+    const daveVoicememosSent = dave.user_id
+      ? (rankVoicememoRes.data || []).filter(r => r.owner_id === dave.user_id).length
+      : 0;
     const daveVoicememosPending = daveMetrics?.achterstallig_voicememos ?? 0;
 
     // ── Optionele diagnose-scan (achter env-flag, alleen tijdens tuning) ─
