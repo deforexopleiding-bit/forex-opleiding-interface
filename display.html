@@ -139,7 +139,12 @@
   .card h3 .tag{margin-left:auto;font-family:"JetBrains Mono";font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.06em}
 
   /* leads strip */
-  .leads{flex:none;display:grid;grid-template-columns:repeat(5,1fr);gap:11px;padding:14px 16px}
+  /* v3.3 (2026-08-26): hernoemd van .leads → .leadstrip. Class-collision met
+     de hero-tegel <div class="kpi leads" id="k-leads"> liet deze grid-repeat(5,1fr)
+     bij gelijke specificiteit (0,1,0) winnen van .kpi (flex-column, ook 0,1,0) →
+     hero-tegel kreeg display:grid en klapte horizontaal. .kpi.leads .ico blijft
+     bestaan voor het icoon-accent (specificiteit 0,2,0). */
+  .leadstrip{flex:none;display:grid;grid-template-columns:repeat(5,1fr);gap:11px;padding:14px 16px}
   .leadcell{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:13px;padding:11px 12px;border-top:3px solid var(--src)}
   .leadcell .l{font-size:12px;color:var(--ink-2);font-weight:600;display:flex;align-items:center;gap:6px}
   .leadcell .l .d{width:8px;height:8px;border-radius:50%;background:var(--src)}
@@ -273,7 +278,7 @@
     <div class="col">
       <div class="card">
         <h3>Nieuwe leads per bron <span class="tag" id="leads-total">— vandaag</span></h3>
-        <div class="leads" id="leads"></div>
+        <div class="leadstrip" id="leads"></div>
       </div>
 
       <div class="card dave">
