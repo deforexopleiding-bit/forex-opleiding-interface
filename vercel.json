@@ -189,6 +189,14 @@
   ],
   "redirects": [
     {
+      "source": "/((?!api).*)",
+      "has": [
+        { "type": "host", "value": "forex-opleiding-interface.vercel.app" }
+      ],
+      "destination": "https://crm.deforexopleiding.nl/$1",
+      "permanent": false
+    },
+    {
       "source": "/modules/klanten.html",
       "destination": "/modules/klanten-v2/",
       "permanent": false
