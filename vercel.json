@@ -208,7 +208,8 @@
     }
   ],
   "rewrites": [
-    { "source": "/display", "destination": "/display.html" }
+    { "source": "/display", "destination": "/display.html" },
+    { "source": "/tv",      "destination": "/api/tv" }
   ],
   "headers": [
     {
