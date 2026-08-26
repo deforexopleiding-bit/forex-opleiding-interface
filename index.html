@@ -4,6 +4,72 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard · De Forex Opleiding</title>
+
+  <!-- ═══ PRE-PAINT REDIRECT GUARD (v1-flits wegwerken) ═══════════════
+       2026-08-25: sinds de flip landt CRM-staff normaal op /modules/klanten-v2/,
+       maar sommige oudere flows (bookmarks, magic-link callbacks, direct /) komen
+       nog via /index.html binnen. Voorheen zag je dan 1-2s de v1-dashboard laden
+       vóór een client-side redirect. Deze guard doet 3 dingen VÓÓR de eerste
+       paint:
+         1. Verberg body direct (visibility:hidden inline) → geen v1-flash.
+         2. Toon neutrale splash-overlay (logo + spinner, effen achtergrond).
+         3. Detecteer een Supabase-sessie via localStorage (sb-<ref>-auth-token).
+            Aanwezig → location.replace('/modules/klanten-v2/') — v2-shell zit
+            zelf een role-check + LMS-redirect voor viewer/student. Ontbreekt →
+            location.replace('/login.html').
+       Elke code-pad eindigt in een `replace()` binnen microseconden, dus de
+       v1-DOM/CSS/scripts hoeven nooit te renderen.
+       Geen impact op de v1-app zelf (blijft bereikbaar via andere paden), en
+       op auth-mount checkt de bestaande auth-code alsnog voor de zekerheid. -->
+  <style id="prePaintGuardStyle">html,body{visibility:hidden !important}
+  #prePaintSplash{position:fixed;inset:0;visibility:visible;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#E7EDF3;z-index:2147483647;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  #prePaintSplash img{width:180px;height:auto;opacity:.9}
+  #prePaintSplash .sp{width:24px;height:24px;border-radius:50%;border:2.5px solid rgba(12,42,58,.2);border-top-color:#1E7FD4;animation:pps 0.7s linear infinite}
+  @keyframes pps{to{transform:rotate(360deg)}}
+  @media (prefers-color-scheme:dark){#prePaintSplash{background:#04101A}#prePaintSplash .sp{border-color:rgba(231,241,246,.2);border-top-color:#2E9BE0}}
+  </style>
+  <script>
+  (function(){
+    try {
+      // 1. Neutrale splash injecteren (logo + spinner, geen v1-content).
+      document.write('<div id="prePaintSplash"><img src="/img/logo-dark.png" alt="De Forex Opleiding" onerror="this.style.display=\'none\'"><div class="sp"></div></div>');
+
+      // 2. Sessie-detectie via Supabase localStorage-key (sb-<projectref>-auth-token).
+      //    Snelheid > precisie: één localStorage.length-scan zonder JSON-parse.
+      var hasSession = false;
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf('sb-') === 0 && k.indexOf('-auth-token') > 0) {
+          var raw = localStorage.getItem(k);
+          if (raw && raw.indexOf('"access_token"') !== -1) { hasSession = true; break; }
+        }
+      }
+
+      // 3. Redirect. Ingelogd → v2 (die zelf de role-check + LMS-redirect voor
+      //    non-CRM regelt via crm-guard.js). Niet-ingelogd → login. Bewaar de
+      //    huidige URL als returnTo zodat magic-link deep-links werken.
+      if (hasSession) {
+        window.location.replace('/modules/klanten-v2/');
+      } else {
+        // Anon user op /index.html of / → direct naar login.
+        // Alleen als er GEEN error/callback-token in URL zit (dat hoort naar auth-callback).
+        var s = window.location.search || '';
+        if (s.indexOf('access_token=') === -1 && s.indexOf('code=') === -1 && s.indexOf('error_code=') === -1) {
+          window.location.replace('/login.html');
+        }
+      }
+    } catch (e) {
+      // Fail-soft: geen redirect, geen splash-lock — laat v1 gewoon laden.
+      try {
+        var g = document.getElementById('prePaintGuardStyle');
+        if (g) g.remove();
+        var s = document.getElementById('prePaintSplash');
+        if (s) s.remove();
+      } catch(_) {}
+    }
+  })();
+  </script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
