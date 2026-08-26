@@ -207,6 +207,9 @@
       "permanent": false
     }
   ],
+  "rewrites": [
+    { "source": "/display", "destination": "/display.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)\\.html",

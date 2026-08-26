@@ -33,6 +33,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { periodRange, nlDayStart, nlDayEndExclusive } from './_lib/nl-period.js';
+import { computeLeadsByTraject } from './_lib/leads-per-traject-compute.js';
 
 // Vertaal de publieke period-param (today|week|month|all) naar een NL-tijdzone-
 // aware UTC-range via nl-period.js. VOORHEEN bucketten we op de server-lokale
@@ -94,115 +95,43 @@ export default async function handler(req, res) {
     const since = range ? range.label : null;      // NL-kalenderdatum van start (response-compat)
     const debug = String(q.debug || '') === '1';
 
-    // Bron: leads (raw tabel) — bevat afwijzer + email; view leads_overzicht doet dat niet.
-    // Half-open interval [start, eind) op UTC-instants die NL-lokale dag/week/maand
-    // representeren — houdt de index op `aangemaakt` bruikbaar én bucket correct.
-    let qy = supabaseAdmin
-      .from('leads')
-      .select('traject, email, afwijzer')
-      .is('verwijderd_op', null)
-      .limit(50000);
-    if (range) {
-      qy = qy
-        .gte('aangemaakt', range.start.toISOString())
-        .lt('aangemaakt', range.endExclusive.toISOString());
-    }
-    const { data, error } = await qy;
-    if (error) throw new Error('leads: ' + error.message);
+    // 2026-08-25: hoofd-compute verhuisd naar _lib/leads-per-traject-compute.js
+    // zodat tv-display-metrics en andere dashboards dezelfde definitie
+    // hergebruiken zonder self-HTTP-loops. Response-shape identiek.
+    const out = await computeLeadsByTraject({ supabaseAdmin, range });
+    out.period = period;
+    out.since  = since;
 
-    const rows = data || [];
-
-    // Raw (oude definitie: alleen verwijderd_op-filter) — voor debug/oud→nieuw.
-    const rawBy = Object.create(null);
-    let rawTotal = 0;
-    // Schoon (canonieke definitie zonder afwijzers + zonder test-emails).
-    // Gebruikt door mk-bronnen — daar wil je bewust alleen "levende" leads.
-    const cleanBy = Object.create(null);
-    let cleanTotal = 0;
-    // 2026-08-24 nieuw: schoon MET afwijzers (test-emails blijven geëxcludeerd
-    // want spam). Gebruikt door dashboard "Leads per traject"-tegels zodat
-    // afgewezen leads OOK bij de 7-daagse/webinar/etc tellers tellen — echte
-    // volumemeting i.p.v. alleen toegelaten leads.
-    const inclAfwijzerBy = Object.create(null);
-    let inclAfwijzerTotal = 0;
-    // Uniek per lowercase(email) — voor debug-diagnose (dedup-signaal).
-    const uniekBy = Object.create(null);
-    let uniekTotal = 0;
-    const seenEmails = new Set();
-    // Exclusie-tellers voor transparantie in mk-bronnen.
-    let excTest = 0;
-    let excAfwijzer = 0;
-    let excBoth = 0;
-
-    for (const row of rows) {
-      const t = (row && row.traject != null) ? String(row.traject) : '';
-      const em = row?.email || '';
-      const isTest = isTestEmail(em);
-      const isRej  = row?.afwijzer === true;
-      rawTotal += 1;
-      if (t) rawBy[t] = (rawBy[t] || 0) + 1;
-      const emKey = String(em || '').toLowerCase();
-      if (emKey && !seenEmails.has(emKey)) {
-        seenEmails.add(emKey);
-        uniekTotal += 1;
-        if (t) uniekBy[t] = (uniekBy[t] || 0) + 1;
-      }
-      if (isTest && isRej) excBoth += 1;
-      else if (isTest)     excTest += 1;
-      else if (isRej)      excAfwijzer += 1;
-      // Incl-afwijzer set: alleen test-emails eruit (spam).
-      if (!isTest) {
-        inclAfwijzerTotal += 1;
-        if (t) inclAfwijzerBy[t] = (inclAfwijzerBy[t] || 0) + 1;
-      }
-      // Schone set: test-emails + afwijzers eruit.
-      if (isTest || isRej) continue;
-      cleanTotal += 1;
-      if (t) cleanBy[t] = (cleanBy[t] || 0) + 1;
-    }
-    const cleanLabels = Object.keys(cleanBy).sort((a, b) => a.localeCompare(b, 'nl'));
-
-    // all_traject_labels: welke labels bestaan überhaupt (ná opschoning), ongeacht periode.
-    // Voor tegel-consistentie: als een label 0 hits in period heeft maar wel bestaat, wordt hij nog getoond.
-    let allLabels = cleanLabels;
-    if (since) {
-      const { data: allData, error: allErr } = await supabaseAdmin
+    // Debug-mode: extra raw/uniek-tellingen (blijft in endpoint want puur
+    // diagnose — helper hoeft die niet te leveren).
+    if (debug) {
+      let qy = supabaseAdmin
         .from('leads')
         .select('traject, email, afwijzer')
         .is('verwijderd_op', null)
-        .not('traject', 'is', null)
         .limit(50000);
-      if (allErr) throw new Error('leads(all): ' + allErr.message);
-      const set = new Set();
-      for (const r of (allData || [])) {
-        if (r?.afwijzer === true) continue;
-        if (isTestEmail(r?.email)) continue;
-        if (r?.traject) set.add(String(r.traject));
+      if (range) {
+        qy = qy
+          .gte('aangemaakt', range.start.toISOString())
+          .lt('aangemaakt', range.endExclusive.toISOString());
       }
-      allLabels = [...set].sort((a, b) => a.localeCompare(b, 'nl'));
-    }
-
-    const out = {
-      total: cleanTotal,
-      by_traject: cleanBy,
-      traject_labels: cleanLabels,
-      all_traject_labels: allLabels,
-      // Nieuw (2026-08-24): incl-afwijzer versies voor dashboard-tegels.
-      // Dashboard "Leads per traject" gebruikt deze zodat afgewezen leads
-      // óók meetellen in de 7-daagse/webinar/event/mini tegels. Test-emails
-      // blijven wel geëxcludeerd (spam-filter).
-      total_incl_afwijzer:      inclAfwijzerTotal,
-      by_traject_incl_afwijzer: inclAfwijzerBy,
-      period,
-      since,
-      excluded: {
-        test_email:     excTest,
-        afwijzer:       excAfwijzer,
-        both:           excBoth,
-        total_excluded: excTest + excAfwijzer + excBoth,
-      },
-    };
-    if (debug) {
+      const { data: dbgData } = await qy;
+      const rows = dbgData || [];
+      const rawBy = Object.create(null); let rawTotal = 0;
+      const uniekBy = Object.create(null); let uniekTotal = 0;
+      const seenEmails = new Set();
+      for (const row of rows) {
+        const t = (row && row.traject != null) ? String(row.traject) : '';
+        const em = row?.email || '';
+        rawTotal += 1;
+        if (t) rawBy[t] = (rawBy[t] || 0) + 1;
+        const emKey = String(em || '').toLowerCase();
+        if (emKey && !seenEmails.has(emKey)) {
+          seenEmails.add(emKey);
+          uniekTotal += 1;
+          if (t) uniekBy[t] = (uniekBy[t] || 0) + 1;
+        }
+      }
       out.debug = {
         raw:   { total: rawTotal,   by_traject: rawBy },
         uniek: { total: uniekTotal, by_traject: uniekBy },

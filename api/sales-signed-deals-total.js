@@ -28,6 +28,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { fetchTestDealIds } from './_lib/test-data-filter.js';
 import { classifyDeal, CATEGORY_ORDER, CATEGORY_LABELS } from './_lib/deal-classify.js';
+import { computeSignedDealsTotal } from './_lib/sales-signed-deals-compute.js';
 
 function isoDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -112,13 +113,24 @@ export default async function handler(req, res) {
       [since, until] = rangeForPeriod(period);
     }
 
+    const debugMode = String(q.debug || '') === '1';
+
+    // 2026-08-25: standaard totaal-pad via _lib/sales-signed-deals-compute.js
+    // (byte-parity met de logica hieronder — zelfde effectiveAcceptedAt,
+    // testDealIds, lineInclVat, filter + rounding). group_by=month|category
+    // en debug=1 blijven het bestaande pad gebruiken want die vereisen
+    // per-deal-metadata die de compact-helper niet exposeet.
+    if (!groupByMonth && !groupByCategory && !debugMode) {
+      const out = await computeSignedDealsTotal({ supabaseAdmin, since, until });
+      return res.status(200).json({ ...out, period, since, until });
+    }
+
     // Stap 1: aanvaarde deals — status='accepted' + NIET declined_at/archived_at.
     // Ronde-21 fix PUNT-B: eerder telden deals mee die WEL geaccepteerd waren
     // maar later declined ÉN gearchiveerd — die zijn niet meer valide. Volgens
     // TL-officieel augustus reconstruct: exclude tl_quotation_declined_at !=
     // null én archived_at != null. Datum: accepted_at → signed_at → created_at
     // COALESCE in JS.
-    const debugMode = String(q.debug || '') === '1';
     const selectCols = 'id, customer_id, tl_quotation_status, tl_quotation_accepted_at, tl_quotation_signed_at, tl_quotation_declined_at, archived_at, created_at, traject_variant_id, discount_percentage, sale_type, total_amount, quote_reference';
     let qy = supabaseAdmin
       .from('deals')
