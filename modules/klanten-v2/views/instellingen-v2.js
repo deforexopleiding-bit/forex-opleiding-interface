@@ -208,6 +208,7 @@
     { g: 'Systeem', items: [
       { id: 'sys-followup-admin', n: 'Follow-up admin-tools', d: 'Backfill GHL-contacts + GHL-status-backfill', ic: I.settings, roles: ['super_admin'] },
       { id: 'sys-bubble-schema',  n: 'Bubble-schema probe',   d: 'Lees keys+types van een Bubble-objecttype (read-only)', ic: I.settings, roles: ['super_admin'] },
+      { id: 'sys-tv-board',       n: 'TV-bord · omzetdoelen', d: 'Week- en maanddoelen voor de meters op /display', ic: I.settings, roles: ['super_admin'] },
     ]},
   ];
 
@@ -3128,6 +3129,84 @@
         <button class="btn btn-ghost btn-sm" ${_bs.busy ? 'disabled' : ''} onclick="window.__setBsProbe('user', true)" title="Distinct waarden van option-set-velden op User (whitelist)">${_bs.busy && _bs.type === 'user' && _bs.mode === 'options' ? 'Bezig…' : '🏷 User-option-waarden'}</button>
       </div>
       ${out}
+    </div>`;
+  }
+
+  /* Display-v2 · sys-tv-board — week/maand omzetdoelen voor /display.
+     Schrijft app_settings.display_week_target + display_month_target
+     (integer euro's, of null bij "leeg wissen"). Lege input = doel niet
+     gezet → bord toont "nog geen doel ingesteld". Super_admin-only.
+     Hergebruikt bestaande /api/app-settings GET/PUT (super_admin-gated
+     op server-side). */
+  const _tv = { loading: false, fetched: false, error: null, week: '', month: '', saving: false };
+  async function fetchTvTargets() {
+    if (_tv.loading || _tv.fetched) return;
+    _tv.loading = true; _tv.error = null; if (render) render();
+    const [w, m] = await Promise.all([
+      tryFetch('tv-w', '/api/app-settings?key=display_week_target'),
+      tryFetch('tv-m', '/api/app-settings?key=display_month_target'),
+    ]);
+    _tv.loading = false; _tv.fetched = true;
+    // 404 op ontbrekende key = key nog niet ingesteld → lege input.
+    if (w && !w.__error && !w.error && w.value != null) _tv.week = String(w.value);
+    if (m && !m.__error && !m.error && m.value != null) _tv.month = String(m.value);
+    if (render) render();
+  }
+  window.__setTvWeek  = (v) => { _tv.week  = v; };
+  window.__setTvMonth = (v) => { _tv.month = v; };
+  window.__setTvSave  = async () => {
+    if (_tv.saving) return;
+    const parse = (s) => {
+      const t = String(s ?? '').trim();
+      if (t === '') return null;
+      const n = Number(t);
+      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) return NaN;
+      return n;
+    };
+    const wV = parse(_tv.week), mV = parse(_tv.month);
+    if (Number.isNaN(wV) || Number.isNaN(mV)) {
+      showToast('Alleen hele euro-bedragen (0 of hoger), leeg = niet ingesteld', 'warn');
+      return;
+    }
+    _tv.saving = true; if (render) render();
+    const puts = [
+      tryFetch('tv-put-w', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'display_week_target',  value: wV }) }),
+      tryFetch('tv-put-m', '/api/app-settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'display_month_target', value: mV }) }),
+    ];
+    const [rw, rm] = await Promise.all(puts);
+    _tv.saving = false;
+    const err = (rw?.__error || rw?.error) || (rm?.__error || rm?.error);
+    if (err) showToast('Opslaan mislukt: ' + err, 'warn');
+    else showToast('Omzetdoelen opgeslagen', 'ok');
+    if (render) render();
+  };
+  function bodyTvBoard() {
+    if (!isSuperAdmin()) return bodyAccessDenied();
+    if (!_tv.fetched && !_tv.loading) queueMicrotask(() => fetchTvTargets());
+    return `<div style="max-width:640px">
+      ${_tv.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_tv.error)}</div>` : ''}
+      <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;margin-bottom:14px">
+        Twee omzetdoelen voor de TV-bord meters op <code>/display</code>. Hele euro's (incl. btw). Leeg laten = "nog geen doel ingesteld" op het bord.
+      </div>
+      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:14px">
+        <label style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:12.5px;font-weight:600">Weekdoel · omzet (€)</span>
+          <input type="number" min="0" step="500" placeholder="bv. 30000" value="${esc(_tv.week)}"
+                 oninput="window.__setTvWeek(this.value)"
+                 style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:14px;max-width:220px" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px">
+          <span style="font-size:12.5px;font-weight:600">Maanddoel · omzet (€)</span>
+          <input type="number" min="0" step="1000" placeholder="bv. 120000" value="${esc(_tv.month)}"
+                 oninput="window.__setTvMonth(this.value)"
+                 style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:14px;max-width:220px" />
+        </label>
+        <div>
+          <button class="btn btn-primary btn-sm" ${_tv.saving ? 'disabled' : ''} onclick="window.__setTvSave()">${_tv.saving ? 'Opslaan…' : '💾 Opslaan'}</button>
+        </div>
+      </div>
     </div>`;
   }
 
@@ -6433,6 +6512,7 @@
     if (cur.id === 'team-mentoren')      return bodyMentoren();
     if (cur.id === 'mk-webflow')         return bodyWebflow();
     if (cur.id === 'sys-bubble-schema')  return bodyBubbleProbe();
+    if (cur.id === 'sys-tv-board')       return bodyTvBoard();
     if (cur.id === 'fin-entiteiten')     return bodyEntiteiten();
     // Wave-3 · gevoelige secties
     if (cur.id === 'team-api')           return bodyApiKeys();
