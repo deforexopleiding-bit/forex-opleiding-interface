@@ -366,7 +366,12 @@
   /* ---------- scale stage to fit ---------- */
   var stage = el('stage');
   function fit(){
-    var s = Math.min(window.innerWidth/1920, window.innerHeight/1080);
+    // Safe-area tegen tv-overscan: default 92% van fit-schaal, tunebaar via
+    // ?fit=0.94 (etc). Body is flex-center + --ground achtergrond, dus de
+    // marge omringt de stage netjes zonder witte randen.
+    var m = parseFloat(new URLSearchParams(location.search).get('fit'));
+    if (!(m > 0.5 && m <= 1)) m = 0.92;
+    var s = Math.min(window.innerWidth/1920, window.innerHeight/1080) * m;
     stage.style.transform = 'scale('+s+')';
   }
   window.addEventListener('resize', fit); fit();
