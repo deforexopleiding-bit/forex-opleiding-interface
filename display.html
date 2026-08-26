@@ -373,11 +373,11 @@
   /* ---------- scale stage to fit ---------- */
   var stage = el('stage');
   function fit(){
-    // Safe-area tegen tv-overscan: default 92% van fit-schaal, tunebaar via
-    // ?fit=0.94 (etc). Body is flex-center + --ground achtergrond, dus de
+    // Safe-area tegen tv-overscan: default 86% (Jeffrey's tv), tunebaar via
+    // ?fit=0.90 (etc). Body is flex-center + --ground achtergrond, dus de
     // marge omringt de stage netjes zonder witte randen.
     var m = parseFloat(new URLSearchParams(location.search).get('fit'));
-    if (!(m > 0.5 && m <= 1)) m = 0.92;
+    if (!(m > 0.5 && m <= 1)) m = 0.86;   // was 0.92 — Jeffrey's tv-overscan
     var s = Math.min(window.innerWidth/1920, window.innerHeight/1080) * m;
     stage.style.transform = 'scale('+s+')';
   }
