@@ -36,7 +36,9 @@ export default async function handler(req, res) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
-  let allowed = await requirePermission(req, 'sales.tab.retentie');
+  // 2026-08-26: `softphone.use` toegevoegd als dedicated bel-key.
+  let allowed = await requirePermission(req, 'softphone.use');
+  if (!allowed) allowed = await requirePermission(req, 'sales.tab.retentie');
   if (!allowed) allowed = await requirePermission(req, 'sales.customer.view');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten' });
 

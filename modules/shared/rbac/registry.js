@@ -192,6 +192,9 @@ const FEATURE_REGISTRY = [
   { moduleKey:'students', moduleLabel:'Studenten', moduleIcon:'ti-school', features:[
     { key:'students.all.view', label:'Alle studenten — overzicht' },
   ]},
+  { moduleKey:'softphone', moduleLabel:'Softphone (Voys)', moduleIcon:'ti-phone', features:[
+    { key:'softphone.use', label:'Softphone/click-to-dial gebruiken (bellen via Voys — NL + BE)' },
+  ]},
   { moduleKey:'onboarding', moduleLabel:'Onboarding', moduleIcon:'ti-user-plus', features:[
     { key:'onboarding.admin',            label:'Onboarding-admin (ziet alles + student annuleren — onomkeerbaar)' },
     { key:'onboarding.assign_mentor',    label:'Student aan mentor (her)toewijzen — dropdown in overzicht' },
