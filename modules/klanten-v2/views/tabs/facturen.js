@@ -10,6 +10,17 @@
 // permission ziet 403 → error-state met duidelijke boodschap.
 
 import { openInvoiceDetailModal } from '../modals/invoice-detail.js?v=4';
+
+// v=1cc (2026-08-26) — privileged-check voor UI-gaten. Voor mentor (niet-
+// privileged) is de facturen-tab inkijk-only: geen "Nieuwe factuur"-knop,
+// geen "Finance › Facturen"-link (Chesney kan finance-module niet in).
+// Server-side gates blijven onaangeroerd (writes al verifyAdmin).
+function _isPrivilegedRole() {
+  try {
+    var r = String(window.DFO?.S?.role || '').toLowerCase();
+    return r === 'super_admin' || r === 'admin' || r === 'manager' || r === 'sales';
+  } catch (_) { return false; }
+}
 import { openInvoiceUpdateModal } from '../modals/invoice-update.js';
 import { openInvoicePaymentModal } from '../modals/invoice-payment.js';
 import { openInvoiceSendModal } from '../modals/invoice-send.js?v=3';
@@ -178,7 +189,9 @@ function renderEmpty() {
       </div>
       <div class="ds-empty-t">Nog geen facturen voor deze klant</div>
       <div class="ds-empty-s">
-        Facturen worden aangemaakt vanuit Abonnementen of via <a href="#" onclick="event.preventDefault(); window.DFO && DFO.goMod && DFO.goMod('finance');" style="color:var(--m);text-decoration:underline;">Finance › Facturen</a>.
+        ${_isPrivilegedRole()
+          ? 'Facturen worden aangemaakt vanuit Abonnementen of via <a href="#" onclick="event.preventDefault(); window.DFO && DFO.goMod && DFO.goMod(\'finance\');" style="color:var(--m);text-decoration:underline;">Finance › Facturen</a>.'
+          : 'Er zijn (nog) geen facturen voor deze klant.'}
       </div>
     </div>`;
 }
@@ -211,10 +224,11 @@ function render(rootEl) {
           Facturen
           <span class="kv-prof-count">${state.loading ? '…' : state.items.length}</span>
         </div>
+        ${_isPrivilegedRole() ? `
         <button type="button" class="ds-btn ds-btn-primary ds-btn-sm" data-kv-fac-new title="Nieuwe factuur voor deze klant">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Nieuwe factuur
-        </button>
+        </button>` : ''/* v=1cc: verborgen voor mentor — puur inkijk */}
       </div>
       ${body}
     </div>`;

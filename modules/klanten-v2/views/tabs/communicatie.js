@@ -11,6 +11,16 @@
 
 const K = () => window.KV;
 
+// v=1cc (2026-08-26) — privileged-check om "Open in Finance › Inbox"-links
+// te verbergen voor niet-privileged rollen (mentor). Mentor mag niet in de
+// finance/incasso-omgeving; toon 'em de placeholder zonder link.
+function _isPrivilegedRole() {
+  try {
+    var r = String(window.DFO?.S?.role || '').toLowerCase();
+    return r === 'super_admin' || r === 'admin' || r === 'manager' || r === 'sales';
+  } catch (_) { return false; }
+}
+
 // ── Module-state (per tab-mount vers geïnitialiseerd) ───────────────────────
 let state = null;
 
@@ -324,12 +334,13 @@ function renderWhatsAppCard() {
       </div>
       <div class="kv-comm-placeholder-body">
         Volledige WA-integratie in de dossier-view komt zodra de <strong>Finance-inbox v2</strong> live is
-        (aparte redesign-PR). Voor nu open je de gesprekken via:
+        (aparte redesign-PR).${_isPrivilegedRole() ? ' Voor nu open je de gesprekken via:' : ''}
       </div>
+      ${_isPrivilegedRole() ? `
       <a class="ds-btn ds-btn-ghost ds-btn-sm" href="/modules/finance.html#view-inbox" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
         Open in Finance › Inbox
-      </a>
+      </a>` : ''/* v=1cc: verborgen voor mentor — geen finance-toegang. */}
     </div>`;
 }
 

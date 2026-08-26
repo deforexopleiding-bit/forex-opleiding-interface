@@ -43,19 +43,20 @@ const TABS = [
     ico: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><line x1="12" y1="7" x2="12" y2="12"/><line x1="12" y1="12" x2="15" y2="14"/></svg>' },
 ];
 
-// 2026-08-26 — Incasso/finance-tabs zijn niet-privileged (mentor etc) niet
-// zichtbaar. Rol-fallback: super_admin/admin/manager/sales zien alles zoals
-// voorheen (geen regressie). Overige rollen (mentor/marketing/administratie)
-// zien alleen als de permission-key gegrant is via user_permissions of via
-// een rol-grant op de key. Voor mentor betekent dit: profiel, communicatie,
-// offertes, abonnementen → zichtbaar; facturen, creditnotas, wanbetalers,
-// audit → verborgen (incasso-grens).
-const TAB_PERM_KEYS = {
-  facturen:    'customer.widget.finance.view',
-  creditnotas: 'customer.widget.finance.view',
-  wanbetalers: 'customer.widget.finance.view',
-  audit:       'customer.audit.view',
-};
+// 2026-08-26 (v=1cc, Route A — allowlist) — definitieve tab-set voor
+// niet-privileged rollen (mentor). Privileged rollen (super_admin/admin/
+// manager/sales) blijven alles zien = geen regressie.
+//
+// Mentor-tabset (4): Profiel · Communicatie · Offertes · Facturen.
+// Verborgen voor mentor: Abonnementen, Creditnota's, Wanbetalers (incasso-
+// zone), Audit. Facturen = inkijk-only (incasso-actieknoppen ook verborgen
+// via _isPrivilegedRole()-check in de tab-render, hierbeneden).
+//
+// Route-keuze: allowlist ipv per-tab RBAC-keys omdat mentor nu de enige
+// niet-privileged rol met module-toegang is. Nieuwe RBAC-keys + migratie
+// zouden overkill zijn. Als er in de toekomst rollen bijkomen met een
+// andere gewenste subset, dan alsnog naar per-tab-keys (Route B).
+var NON_PRIV_VISIBLE_TABS = new Set(['profiel', 'communicatie', 'offertes', 'facturen']);
 function _isPrivilegedRole() {
   try {
     var r = String(window.DFO?.S?.role || '').toLowerCase();
@@ -64,10 +65,7 @@ function _isPrivilegedRole() {
 }
 function mayViewTab(tabKey) {
   if (_isPrivilegedRole()) return true;
-  var needsKey = TAB_PERM_KEYS[tabKey];
-  if (!needsKey) return true; // geen expliciete gate = altijd
-  try { return !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(needsKey)); }
-  catch (_) { return false; }
+  return NON_PRIV_VISIBLE_TABS.has(String(tabKey || '').toLowerCase());
 }
 function visibleTabs() { return TABS.filter(t => mayViewTab(t.key)); }
 
@@ -148,6 +146,7 @@ function renderShell({ customer, tab }) {
           ${meta ? `<div class="kv-detail-head-meta">${meta}</div>` : ''}
         </div>
         <div class="kv-detail-head-actions">
+          ${_isPrivilegedRole() ? `
           <button type="button" class="ds-btn ds-btn-ghost" data-kv-action="edit" title="Bewerken (PR-C)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
             Bewerken
@@ -162,6 +161,7 @@ function renderShell({ customer, tab }) {
                 Archiveren
               </button>`
           }
+          ` : ''/* v=1cc: header-acties Bewerken/Archiveren verborgen voor niet-privileged (bv. mentor). Server-side gates blijven (verifyAdmin) — cosmetische fix om 403-knoppen weg te halen. */}
         </div>
       </header>
 
