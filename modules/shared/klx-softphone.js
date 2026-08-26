@@ -369,6 +369,76 @@
   }
 
   // ── Place call ───────────────────────────────────────────────────────────
+  // v=1dd (2026-08-26): microfoon-preflight + onderscheidende error-mapping.
+  // Zonder deze twee helpers gaf klx-softphone bij zowel mic-denial (browser)
+  // als Voys-SIP-fout dezelfde vage "Fout: Permission denied" — onmogelijk
+  // voor de gebruiker (en support) om te weten of de browser-mic geblokkeerd
+  // stond of dat Voys het gesprek weigerde.
+  //
+  // ensureMicPermission(): probeert getUserMedia({audio:true}) direct vóór
+  // de INVITE. Lukt = tracks meteen stoppen (we hoeven de stream niet zelf
+  // vast te houden — sip.js pakt 'm zo dadelijk in inviter.invite()) en
+  // resolvet. Faalt = gooit een fout met .code='mic' en de originele
+  // DOMException als .cause zodat de catch weet welke tak dit was.
+  async function ensureMicPermission() {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      const err = new Error('Microfoon-API niet beschikbaar in deze browser.');
+      err.code = 'mic';
+      throw err;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    } catch (e) {
+      const err = new Error(e?.message || 'mic-denied');
+      err.code   = 'mic';
+      err.cause  = e;
+      err.micName = e?.name || null; // NotAllowedError / NotFoundError / NotReadableError / SecurityError
+      throw err;
+    }
+    // Direct opruimen — sip.js opent zelf zijn eigen stream in invite().
+    try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+  }
+
+  // describeCallError(e): mapt een placeCall-catch-error naar {kind, title,
+  // hint} zodat de toast een specifieke, actionable melding kan tonen.
+  // - 'mic'   : browser blokkeerde de microfoon (getUserMedia faalde).
+  // - 'sip'   : SIP.js gooide een fout (INVITE geweigerd door Voys, transport-
+  //             probleem, of onverwachte 4xx/5xx).
+  // - 'other' : alles anders (netwerk, config, etc.).
+  function describeCallError(e) {
+    if (e && e.code === 'mic') {
+      const name = e.micName || '';
+      // NotAllowedError = user (of policy) blokkeerde permission.
+      // NotFoundError   = geen mic-device gevonden.
+      // NotReadableError = mic in gebruik door andere app / OS-lock.
+      // SecurityError   = insecure context (geen HTTPS).
+      let hint;
+      if (name === 'NotFoundError') {
+        hint = 'Geen microfoon gevonden. Sluit een microfoon aan of kies er een in de systeem-instellingen en probeer opnieuw.';
+      } else if (name === 'NotReadableError') {
+        hint = 'Microfoon is in gebruik door een ander programma (bv. Teams, Zoom). Sluit dat programma en probeer opnieuw.';
+      } else if (name === 'SecurityError') {
+        hint = 'Bellen vereist een beveiligde verbinding (HTTPS). Herlaad via https://…';
+      } else {
+        hint = 'Geen toegang tot de microfoon. Klik op het slotje/instellingen-icoon links in de adresbalk → Microfoon → Toestaan, en probeer opnieuw.';
+      }
+      return { kind: 'mic', title: 'Microfoon geblokkeerd', hint };
+    }
+    // SIP.js-fouten hebben soms een status/reason/message met SIP-hints.
+    const msg     = String(e?.message || '');
+    const status  = e?.status || e?.statusCode || e?.response?.statusCode || null;
+    const reason  = e?.reason || e?.response?.reasonPhrase || null;
+    const looksSip = !!(status || reason || /SIP|INVITE|407|403|486|480|488|503/i.test(msg));
+    if (looksSip) {
+      const label = status
+        ? `Voys weigerde het gesprek (SIP ${status}${reason ? ' ' + reason : ''}). Controleer de belrechten of het uitbelnummer.`
+        : `Voys-fout: ${reason || msg || 'onbekend'}. Controleer de belrechten of het uitbelnummer.`;
+      return { kind: 'sip', title: 'Voys weigerde het gesprek', hint: label };
+    }
+    return { kind: 'other', title: 'Bellen mislukt', hint: msg || 'Onbekende fout.' };
+  }
+
   async function placeCall(customerPhone, opts = {}) {
     const effPhone = resolveEffectivePhone(customerPhone);
     // Line-override optie meegegeven in opts wint van state.lineOverride,
@@ -503,18 +573,26 @@
           renderSheet();
         }
       });
+      // v=1dd: microfoon preflight — throws met .code='mic' bij denial. Als
+      // dit slaagt (of user grant al gaf), gaat de INVITE direct daarna de
+      // deur uit. Faalt dit → catch onderscheidt mic vs Voys via
+      // describeCallError().
+      await ensureMicPermission();
       await inviter.invite();
       return { ok: true, line };
     } catch (e) {
       ringback.stop(); // v=1dc: nooit een oscillator achterlaten bij invite-fout
+      const info = describeCallError(e);
+      // Log altijd de ruwe error voor diagnose (developer console).
+      console.error('[klx-softphone] placeCall failed —', info.kind, ':', e);
       state.lastState = 'error';
-      state.lastError = e?.message || String(e);
+      state.lastError = `${info.title} — ${info.hint}`;
       stopCallTimer();
       showCallbar(false);
       state.session = null;
-      global.AgentShared?.showToast?.('Bellen mislukt: ' + (e?.message || 'onbekend'), 'error');
+      global.AgentShared?.showToast?.(`${info.title}: ${info.hint}`, 'error');
       renderSheet();
-      return { ok: false, line, error: e?.message || 'invite' };
+      return { ok: false, line, error: info.kind };
     }
   }
 
