@@ -155,10 +155,11 @@ export default async function handler(req, res) {
       /* 2 */ supabaseAdmin.from('follow_up_appointments').select('id', { count: 'exact', head: true })
                 .gte('scheduled_at', dayStartIso).lt('scheduled_at', dayEndIso)
                 .not('zoom_meeting_id', 'is', null).eq('status', 'completed'),
-      /* 3 */ supabaseAdmin.from('follow_up_appointments')
+      /* 3 */ // 2026-08-26: limit 5→10 nu ranglijst weg is (up-list-tegel groter).
+              supabaseAdmin.from('follow_up_appointments')
                 .select('id, scheduled_at, lead_name, zoom_meeting_id')
                 .gte('scheduled_at', new Date().toISOString()).eq('status', 'scheduled')
-                .order('scheduled_at', { ascending: true }).limit(5),
+                .order('scheduled_at', { ascending: true }).limit(10),
       /* 4 */ supabaseAdmin.from('activity_log').select('user_id')
                 .in('action', rankingActions)
                 .gte('created_at', dayStartIso).lt('created_at', dayEndIso),
@@ -193,7 +194,7 @@ export default async function handler(req, res) {
                     .eq('voicememo_status', 'sent')
                     // [Fix 4] voicememo_sent_at (echte send-timestamp) i.p.v. updated_at
                     .gte('voicememo_sent_at', dayStartIso).lt('voicememo_sent_at', dayEndIso)
-                    .order('voicememo_sent_at', { ascending: false }).limit(5)
+                    .order('voicememo_sent_at', { ascending: false }).limit(10)
                 : Promise.resolve({ data: [] }),
       /*13 */ getBubbleOneOnOneCountToday({ start: dayStart, endExclusive: dayEnd }),
       // ─── execution-score bronnen (APPENDED, geen index-shift van 5-13) ───

@@ -5,10 +5,9 @@
 // op de tv alleen "/tv" hoeft in te typen — de token blijft in Vercel-env,
 // nooit in de repo of URL-bar tijdens typen.
 //
-// Toegang tot deze URL = toegang tot het bord (zelfde als de token direct
-// intypen). Intern KPI-bord, PII al server-side getrimd in display-metrics.
-// Rotatie: draai token via /api/display-token-admin, update DISPLAY_TV_KEY
-// in Vercel, revoke oude — /tv-bezoekers volgen automatisch de nieuwe token.
+// Query-passthrough: binnenkomende params (fit, theme, ...) worden aan de
+// redirect toegevoegd, zodat /tv?fit=0.85 en /tv?theme=light werken.
+// De 'key'-param wordt server-side overschreven met DISPLAY_TV_KEY.
 
 export default function handler(req, res) {
   const key = process.env.DISPLAY_TV_KEY;
@@ -17,5 +16,7 @@ export default function handler(req, res) {
     return;
   }
   res.setHeader('Cache-Control', 'no-store');
-  res.redirect(302, '/display?key=' + encodeURIComponent(key));
+  const params = new URLSearchParams(req.query);   // fit/theme/etc behouden
+  params.set('key', key);                          // key server-side toevoegen (overschrijft eventueel meegegeven)
+  res.redirect(302, '/display?' + params.toString());
 }

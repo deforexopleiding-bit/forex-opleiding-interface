@@ -158,14 +158,14 @@
   .exec .fill.o{background:linear-gradient(90deg,#7ea0ee,var(--accent))}
   .exec .n{width:34px;text-align:right;font-family:"JetBrains Mono";font-size:13px;font-weight:600}
 
-  /* secondary row: voicememo + upcoming */
-  .subrow{flex:1;display:grid;grid-template-columns:1fr 1.35fr;gap:20px;min-height:0;max-height:280px}
-  .vm-list{padding:6px 12px 10px;overflow:hidden;display:flex;flex-direction:column;gap:6px}
+  /* secondary row: voicememo + upcoming — verhoogd nu ranglijst weg is */
+  .subrow{flex:1;display:grid;grid-template-columns:1fr 1.35fr;gap:20px;min-height:0}
+  .vm-list{padding:8px 12px 12px;overflow:hidden;display:flex;flex-direction:column;gap:7px}
   .vm{display:flex;align-items:center;gap:11px;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:11px;padding:9px 12px}
   .vm .mic{width:30px;height:30px;border-radius:8px;background:var(--gold-soft);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none}
   .vm .who{font-size:13.5px;font-weight:600}
   .vm .t{margin-left:auto;font-family:"JetBrains Mono";font-size:11px;color:var(--muted)}
-  .up-list{padding:6px 12px 10px;overflow:hidden;display:flex;flex-direction:column;gap:6px}
+  .up-list{padding:8px 12px 12px;overflow:hidden;display:flex;flex-direction:column;gap:7px}
   .up{display:flex;align-items:center;gap:12px;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:11px;padding:9px 13px}
   .up .time{font-family:"Bricolage Grotesque";font-weight:700;font-size:19px;color:var(--accent);min-width:58px}
   .up .who{font-size:14px;font-weight:600}
@@ -280,13 +280,6 @@
         </div>
       </div>
 
-      <div class="card">
-        <h3>🏆 Ranglijst <span class="tag">acties per persoon vandaag</span></h3>
-        <div class="dave-foot" style="padding:16px 18px">
-          <div class="exec" id="exec"></div>
-        </div>
-      </div>
-
       <div class="subrow">
         <div class="card">
           <h3>🎤 Voicememo's <span class="tag" id="vm-tag">Dave</span></h3>
@@ -348,17 +341,25 @@
     }
   }
 
-  /* ---------- theme (LIGHT default) ---------- */
+  /* ---------- theme (LIGHT default) ----------
+     Volgorde: ?theme=light|dark  (URL forceert; overrules opgeslagen keuze
+     én persist NIET — clickless op tv);  daarna localStorage['flb-theme'];
+     anders 'light'. Toggle-knop schrijft wel naar localStorage zoals altijd. */
   var root=document.documentElement, tbtn=el('themebtn');
-  function applyTheme(t){
+  function applyTheme(t, persist){
     root.setAttribute('data-theme', t);
     tbtn.textContent = (t==='dark') ? '☀ licht' : '🌙 donker';
     setLogo(t);
-    try{ localStorage.setItem('flb-theme', t); }catch(e){}
+    if (persist !== false) { try{ localStorage.setItem('flb-theme', t); }catch(e){} }
   }
-  var saved='light';
-  try{ saved = localStorage.getItem('flb-theme') || 'light'; }catch(e){}
-  applyTheme(saved==='dark'?'dark':'light');
+  var urlTheme = new URLSearchParams(location.search).get('theme');
+  if (urlTheme === 'light' || urlTheme === 'dark') {
+    applyTheme(urlTheme, false);   // URL wint + persist NIET (blijft override-per-load)
+  } else {
+    var saved='light';
+    try{ saved = localStorage.getItem('flb-theme') || 'light'; }catch(e){}
+    applyTheme(saved==='dark'?'dark':'light');
+  }
   tbtn.addEventListener('click', function(){
     applyTheme(root.getAttribute('data-theme')==='dark' ? 'light' : 'dark');
   });
@@ -500,12 +501,40 @@
   ];
   var feedEl = el('feed');
   function nowT(){ var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
-  function addFeed(html, cls, ico, sale){
+  function _fmtHM(d){ return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+  function _rel(then, now){
+    var secs = Math.max(0, Math.floor((now - then) / 1000));
+    if (secs < 60)     return 'zojuist';
+    var mins = Math.floor(secs / 60);
+    if (mins < 60)     return mins + ' min geleden';
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24)      return hrs + ' u geleden';
+    return Math.floor(hrs / 24) + ' d geleden';
+  }
+  /* addFeed(text, cls, ico, isSale, ts?) — ts = ISO-string uit payload; val terug
+     op nu als niet meegegeven. Ft-regel toont HH:MM van het event + relatieve
+     leeftijd (bv. "16:24 · 7 min geleden"), niet render-tijd. */
+  function addFeed(html, cls, ico, sale, ts){
+    var t     = ts ? new Date(ts) : new Date();
+    var valid = !isNaN(t.getTime());
+    var hm    = valid ? _fmtHM(t) : nowT();
+    var rel   = valid ? _rel(t.getTime(), Date.now()) : 'zojuist';
     var it=document.createElement('div'); it.className='fitem'+(sale?' sale':'');
-    it.innerHTML='<span class="fico '+cls+'">'+ico+'</span><span class="txt">'+html+'<div class="ft">'+nowT()+' · zojuist</div></span>';
+    it.setAttribute('data-ts', valid ? t.getTime() : '');
+    it.innerHTML='<span class="fico '+cls+'">'+ico+'</span><span class="txt">'+html+'<div class="ft">'+hm+' · <span class="rel">'+rel+'</span></div></span>';
     feedEl.insertBefore(it, feedEl.firstChild);
     while(feedEl.children.length>7) feedEl.removeChild(feedEl.lastChild);
   }
+  /* Elke 30s: relatieve leeftijd bijwerken op bestaande items (HH:MM blijft). */
+  setInterval(function(){
+    var now = Date.now();
+    feedEl.querySelectorAll('.fitem').forEach(function(it){
+      var ts = parseInt(it.getAttribute('data-ts'), 10);
+      if (!ts) return;
+      var rel = it.querySelector('.rel');
+      if (rel) rel.textContent = _rel(ts, now);
+    });
+  }, 30000);
   function seedFeed(){
     var seeds=[['Sale — <b>'+eur(1997)+'</b> · Forex Mastery · getekend door <b>Dave</b>','sale','€',true],
       ['Nieuwe lead — <b>Mini-cursus</b> · '+rname(),'lead','✦'],
@@ -725,13 +754,9 @@
     });
     renderLeads();
 
-    /* --- reps → renderExec (staff ranking, Dave gemarkeerd) ------------ */
-    reps.length = 0;
-    (d.staff_ranking||[]).forEach(function(r){
-      reps.push({ n: r.user_label, acties: r.count, o: (r.user_label||'').toLowerCase()!=='dave' });
-    });
-    if (!reps.length) reps.push({ n:'—', acties:0, o:false });
-    renderExec();
+    /* --- ranglijst-kaart verwijderd uit display v2 (2026-08-26). ---------
+       staff_ranking blijft in de payload voor toekomstig gebruik/API-consumers,
+       maar wordt niet meer gerenderd op de tv. */
 
     /* --- voicememos → renderVM (Dave list) ----------------------------- */
     voicememos.length = 0;
@@ -759,7 +784,8 @@
       // Alleen sale-confetti gate't nog op primed (zie sale-bling-loop hieronder).
       var m = icoMap[f.type] || {cls:'lead',ico:'•'};
       var text = String(f.text||'').replace(/[<>&]/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]; });
-      addFeed(text, m.cls, m.ico, f.type==='sale');
+      // f.ts (ISO-string uit payload) → addFeed toont echte event-tijd i.p.v. rendermoment.
+      addFeed(text, m.cls, m.ico, f.type==='sale', f.ts);
     });
 
     /* --- Sale-bling: dedup op stabiele deal-id ------------------------- */
@@ -787,7 +813,7 @@
   }
 
   /* ---------- boot ---------- */
-  renderLeads(); renderExec(); renderVM(); renderUp(); renderKPIs(null);
+  renderLeads(); renderVM(); renderUp(); renderKPIs(null);   // renderExec verwijderd
   pollOnce();
   setInterval(pollOnce, REFRESH_MS);
 })();
