@@ -318,7 +318,7 @@
     </div>
   </div>
   <button class="fab themebtn" id="themebtn">🌙 donker</button>
-  <button class="fab sound" id="soundbtn">🔊 geluid aan</button>
+  <button class="fab sound" id="soundbtn">🔇 geluid uit</button>
 </div>
 
 <script>
@@ -560,19 +560,69 @@
     if(alive>0){ requestAnimationFrame(confLoop); } else { confRun=false; cv.style.display='none'; ctx.clearRect(0,0,1920,1080); }
   }
 
-  var soundOn=false, actx=null;
-  el('soundbtn').addEventListener('click',function(){
-    soundOn=!soundOn; this.textContent=soundOn?'🔊 geluid aan':'🔇 geluid uit';
-    if(soundOn && !actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  /* Geluidsknop + persist. Init: soundOn=false + label "🔇 geluid uit". Bij
+     toggle: label + localStorage bijgewerkt. Bij load: als voorkeur='on' is
+     opgeslagen, zetten we de knop op "aan" maar wachten we op de eerste
+     user-gesture (pointerdown/keydown) om AudioContext te resumen — browsers
+     eisen dat voor autoplay. */
+  var SOUND_KEY = 'flb-sound';
+  var soundOn = false;
+  var actx = null;
+  function _readSoundPref(){ try { return localStorage.getItem(SOUND_KEY) === 'on'; } catch(_) { return false; } }
+  function _writeSoundPref(on){ try { localStorage.setItem(SOUND_KEY, on ? 'on' : 'off'); } catch(_) {} }
+  function _setSoundBtn(on){
+    var b = el('soundbtn'); if (!b) return;
+    b.textContent = on ? '🔊 geluid aan' : '🔇 geluid uit';
+  }
+  function _ensureCtx(){
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+    if (actx && actx.state === 'suspended') { try { actx.resume(); } catch(_) {} }
+  }
+  el('soundbtn').addEventListener('click', function(){
+    soundOn = !soundOn;
+    _setSoundBtn(soundOn);
+    _writeSoundPref(soundOn);
+    if (soundOn) _ensureCtx();
   });
+
+  /* Herstel voorkeur bij load — één keer luisteren op user-gesture om
+     autoplay-grendel te openen. localStorage onthoudt alleen de voorkeur;
+     de gesture-toestemming vereist altijd één interactie na een verse load. */
+  if (_readSoundPref()) {
+    soundOn = true;
+    _setSoundBtn(true);
+    var _resumeOnce = function(){
+      _ensureCtx();
+      window.removeEventListener('pointerdown', _resumeOnce, true);
+      window.removeEventListener('keydown',     _resumeOnce, true);
+    };
+    window.addEventListener('pointerdown', _resumeOnce, true);
+    window.addEventListener('keydown',     _resumeOnce, true);
+  }
+
+  /* Cha-ching kassa-geluid: twee "strikes" met stapelde harmonieken,
+     tweede iets hoger voor de klassieke kassa-bel. Self-contained
+     WebAudio; geen extern bestand. */
   function chime(){
-    if(!soundOn||!actx) return;
-    var t=actx.currentTime; [880,1174,1568].forEach(function(f,i){
-      var o=actx.createOscillator(), g=actx.createGain(); o.type='sine'; o.frequency.value=f;
-      o.connect(g); g.connect(actx.destination); var s=t+i*0.09;
-      g.gain.setValueAtTime(0,s); g.gain.linearRampToValueAtTime(.25,s+0.02); g.gain.exponentialRampToValueAtTime(.001,s+0.5);
-      o.start(s); o.stop(s+0.5);
-    });
+    if (!soundOn || !actx) return;
+    if (actx.state === 'suspended') { try { actx.resume(); } catch(_) {} }
+    var t0 = actx.currentTime;
+    function strike(start, freqs, peak){
+      freqs.forEach(function(f, i){
+        var o = actx.createOscillator();
+        var g = actx.createGain();
+        o.type = 'triangle';
+        o.frequency.value = f;
+        o.connect(g); g.connect(actx.destination);
+        g.gain.setValueAtTime(0, start);
+        g.gain.linearRampToValueAtTime(peak / (i + 1), start + 0.005);
+        g.gain.exponentialRampToValueAtTime(0.0008, start + 0.45);
+        o.start(start);
+        o.stop(start + 0.5);
+      });
+    }
+    strike(t0,        [660, 1320, 1980], 0.28);   // "cha" — lager
+    strike(t0 + 0.12, [988, 1976, 2964], 0.30);   // "ching" — hoger, kassa-tint
   }
 
   function celebrateSale(){
