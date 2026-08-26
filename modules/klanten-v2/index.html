@@ -32,6 +32,12 @@
   <!-- Supabase auth (bestaande shared client) -->
   <script src="../shared/supabase-client.js"></script>
   <script src="../shared/rbac/registry.js?v=1"></script>
+  <!-- v=1f2 (2026-08-26): permissions.js hydrateert window.RBAC met
+       role_permissions + user_permissions union. Nodig zodat de sidebar-
+       filter in app-shell.js een permKey-check kan doen (voor user_permission-
+       grants zoals Chesney × followup/onboarding). Sync-alias `canSync` na
+       ensurePermissionsLoaded(). -->
+  <script src="../shared/permissions.js?v=2"></script>
 
   <!-- SIP.js dependency voor klx-softphone (PR 0-E). Lazy-init: wordt pas
        gebruikt zodra iemand "Bel via softphone" klikt. -->
@@ -156,7 +162,7 @@
 
   <!-- ═══ APP-SHELL SCRIPTS (0-B2 + 0-D roles-helper) ═══ -->
   <script src="../shared/design-system/icons.js?v=1b1"></script>
-  <script src="../shared/design-system/app-shell.js?v=1c9"></script>
+  <script src="../shared/design-system/app-shell.js?v=1ca"></script>
   <script src="../shared/design-system/roles.js?v=1b1"></script>
   <script src="../shared/klx-softphone.js?v=1dc"></script>
 
@@ -192,6 +198,6 @@
   <script src="views/wanbetalers-v2.js?v=45"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
-  <script type="module" src="klanten-v2.js?v=1f1"></script>
+  <script type="module" src="klanten-v2.js?v=1f2"></script>
 </body>
 </html>

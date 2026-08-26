@@ -995,6 +995,20 @@ function wireTopbarActionsToShell() {
   window.__kvAuthCtx = profile;
   if (!profile) return;
 
+  // 3b) v=1f2 (2026-08-26) — RBAC-hydratatie VÓÓR de sidebar-render.
+  //     `window.RBAC.canSync(...)` wordt door app-shell.js visMods gebruikt
+  //     om modules met permKey (followup/onboarding) zichtbaar te maken voor
+  //     users met een user_permissions-grant (bv. Chesney × mentor). Zonder
+  //     deze await zou de eerste paint de modules missen (fail-open: rol-
+  //     check blijft werken, dus geen regressie voor bestaande rollen).
+  //     Fail-soft: fetch-error → RBAC returnt canSync=false → geen extra
+  //     zichtbaarheid, maar niets breekt.
+  try {
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function') {
+      await window.RBAC.ensurePermissionsLoaded();
+    }
+  } catch (e) { console.warn('[klanten-v2] RBAC hydratatie faalde (fail-soft):', e?.message || e); }
+
   // 4) Rollen zetten in DFO shell (rendert dashboard-default of eerste
   //    zichtbare module). We halen de EFFECTIEVE rollen op (union van
   //    profiles.role + user_roles) zodat iemand met bv. mentor+marketing

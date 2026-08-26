@@ -65,7 +65,7 @@
     { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,tabs: ['Vandaag', 'Gesprekken', 'Acties', 'Overzicht', 'Pipeline', 'Brieven', 'Motor'] },
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
-    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS,tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
+    { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
@@ -73,7 +73,7 @@
 
     { g: 'Leren & Events',         id: 'lms',              naam: 'LMS',               icon: I.book,     color: 'teal',    roles: ['super_admin', 'manager', 'mentor'], ext: 'https://dfo-lms-prototype.vercel.app/mentor', tabs: [] },
     { g: 'Leren & Events',         id: 'events',           naam: 'Events',            icon: I.cal,      color: 'pink',    roles: SAMSM,tabs: ['Overzicht', 'Inbox', 'Inschrijvingen', 'Statistieken'] },
-    { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM,tabs: ['Actief', 'Inbox', 'Archief'] },
+    { g: 'Leren & Events',         id: 'onboarding',       naam: 'Onboarding',        icon: I.route,    color: 'emerald', roles: SAMSM, permKey: 'onboarding.admin', tabs: ['Actief', 'Inbox', 'Archief'] },
     { g: 'Leren & Events',         id: 'mentoren',         naam: 'Mentoren',          icon: I.grad,     color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Rapporten', 'Certificaten', 'Beoordelingen', 'Trajecten', 'Sync'] },
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
@@ -145,8 +145,19 @@
   const key    = () => S.mod + '::' + S.tab;
   const F      = (k, d) => { const kk = key() + '::' + k; return S.filters[kk] !== undefined ? S.filters[kk] : d; };
   const setF   = (k, v) => { S.filters[key() + '::' + k] = v; NS.render(); };
-  // Additief: een module is zichtbaar als ANY van de user-rollen 'em ziet.
-  const visMods    = () => MODS.filter(m => m.roles.some(r => S.roles.includes(r)));
+  // Additief: een module is zichtbaar als ANY van de user-rollen 'em ziet,
+  // OF (2026-08-26, v=1c9→v=1ca) als 'em een `permKey` heeft en window.RBAC
+  // die permission granted. Zo ziet iemand met een user_permissions-grant
+  // (bv. Chesney × followup.module.access) het menu-item, zonder dat we
+  // een hele rol moeten verruimen. RBAC.canSync fail-open bij ontbreken:
+  // returnt false → geen extra zichtbaarheid, dus geen regressie voor
+  // rollen die het item al via `roles:` zien.
+  const _permGrantsVis = (m) => {
+    if (!m.permKey) return false;
+    try { return !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(m.permKey)); }
+    catch (_) { return false; }
+  };
+  const visMods    = () => MODS.filter(m => m.roles.some(r => S.roles.includes(r)) || _permGrantsVis(m));
   const curMod     = () => visMods().find(m => m.id === S.mod) || visMods()[0];
   const roleTabs   = m => m.tabs.filter(t => { const r = TAB_RESTRICT[m.id + '/' + t]; return !r || r.some(x => S.roles.includes(x)); });
   const modCanOpen = id => visMods().some(m => m.id === id);
