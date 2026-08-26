@@ -34,19 +34,25 @@ import { getBubbleOneOnOneCountToday } from './_lib/bubble-one-on-one-count.js';
 const CACHE_TTL_MS = 10_000;
 let _cache = { at: 0, payload: null };
 
-// Actie-whitelist voor uitvoer-per-persoon ranglijst. Endpoint-namen én
-// permission-keys — activity-logger.js schrijft beide varianten afhankelijk
-// van caller. Env-override zonder deploy: DISPLAY_RANKING_ACTIONS="a,b,c".
+// Actie-whitelist voor de "mutations"-tak (bron D) van de execution-score.
+// activity_log logt vooral page-views (.view/.access) — voicememo's/calls/
+// outcomes staan er NIET in (die tellen we uit follow_up_* tabellen als
+// bronnen A/B/C). Deze whitelist = puur CRM-mutaties. Env-override:
+//   DISPLAY_RANKING_ACTIONS="sales.customer.create,sales.deal.create,..."
 const RANKING_ACTIONS_DEFAULT = [
-  'outcome-save', 'follow-up-outcomes', 'outcome.save',
-  'voicememo-send', 'follow-up-voicememo', 'voicememo.send',
-  'ghl-send', 'follow-up-ghl-send',
-  'kb-item-edit', 'kennisbank-sync', 'kennisbank.item.edit',
-  'dunning-call-log-create',
-  'follow-up-verplaats', 'follow-up-verplaats-call',
-  'generate-task',
-  'agent-approval', 'agent-approval-resolve',
+  'sales.customer.create', 'sales.deal.create', 'sales.deal.edit',
+  'onboarding.create', 'onboarding.assign_mentor',
+  'finance.inbox.send', 'email.reply.send',
+  'finance.arrangements.approve', 'finance.dunning.execute',
+  'finance.incasso.manage', 'finance.invoice.payment.register',
+  'agents.approval.act', 'events.team_member.link', 'leads.delete',
 ];
+
+// Actieve staff-rollen — voorkomt dat een toevallige viewer-actie in de
+// ranglijst sluipt. profiles.role wordt gejoined via één batch-fetch.
+const STAFF_ROLES = new Set([
+  'super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie',
+]);
 
 // Bucket-matchers matchen exact v2-dashboard-v2.js:730-735 (substring-lower).
 const BUCKET_MATCHERS = [
@@ -182,6 +188,19 @@ export default async function handler(req, res) {
                     .order('updated_at', { ascending: false }).limit(5)
                 : Promise.resolve({ data: [] }),
       /*13 */ getBubbleOneOnOneCountToday({ start: dayStart, endExclusive: dayEnd }),
+      // ─── execution-score bronnen (APPENDED, geen index-shift van 5-13) ───
+      /*14 */ // A: afgeronde calls per owner (NL-vandaag)
+              supabaseAdmin.from('follow_up_appointments').select('owner_id')
+                .eq('status', 'completed')
+                .gte('scheduled_at', dayStartIso).lt('scheduled_at', dayEndIso),
+      /*15 */ // B: verstuurde voicememo's per owner (NL-vandaag)
+              supabaseAdmin.from('follow_up_appointments').select('owner_id')
+                .eq('voicememo_status', 'sent')
+                .gte('updated_at', dayStartIso).lt('updated_at', dayEndIso),
+      /*16 */ // C: outcomes per owner via PostgREST inner-join op appointment.owner_id
+              supabaseAdmin.from('follow_up_outcomes')
+                .select('id, appointment_id, created_at, follow_up_appointments!inner(owner_id)')
+                .gte('created_at', dayStartIso).lt('created_at', dayEndIso),
     ]);
 
     const pick = (i, fallback) => {
@@ -204,6 +223,10 @@ export default async function handler(req, res) {
     const daveMetrics        = pick(11, null);
     const daveVoicememoRes   = pick(12, { data: [] });
     const oneOnOne           = pick(13, { count: null, as_of: new Date().toISOString(), source: 'bubble-error' });
+    // Execution-score bronnen A/B/C (appended):
+    const rankCallsRes       = pick(14, { data: [] });
+    const rankVoicememoRes   = pick(15, { data: [] });
+    const rankOutcomesRes    = pick(16, { data: [] });
 
     // ── Secundaire queries — safeAwait ────────────────────────────────────
     const callsBookedRes = await safeAwait(
@@ -239,26 +262,58 @@ export default async function handler(req, res) {
       type: a.zoom_meeting_id ? 'Zoom' : 'Bel',
     }));
 
-    // ── Staff ranking ─────────────────────────────────────────────────────
-    const rankRows = rankingRes.data || [];
-    const rankCount = {};
-    for (const r of rankRows) {
-      const k = r.user_id || 'onbekend';
-      rankCount[k] = (rankCount[k] || 0) + 1;
+    // ── Staff execution-score (A + B + C + D per user) ────────────────────
+    // A: afgeronde calls (owner_id), B: voicememo's (owner_id),
+    // C: outcomes (via appointment.owner_id join), D: activity_log CRM-mutaties.
+    // A/B/C zijn owner_id-attributie, D is user_id — beide keys zijn een
+    // profile-uuid dus we mergen in één map. Voicememo/call/outcome staan
+    // NIET in activity_log → geen dubbeltelling.
+    const rankAgg = new Map(); // uid → { calls, voicememos, outcomes, mutations }
+    const bump = (uid, key) => {
+      if (!uid) return;
+      let row = rankAgg.get(uid);
+      if (!row) { row = { calls: 0, voicememos: 0, outcomes: 0, mutations: 0 }; rankAgg.set(uid, row); }
+      row[key] += 1;
+    };
+    for (const r of (rankCallsRes.data     || [])) bump(r.owner_id, 'calls');
+    for (const r of (rankVoicememoRes.data || [])) bump(r.owner_id, 'voicememos');
+    for (const r of (rankOutcomesRes.data  || [])) {
+      // PostgREST-join levert het gerelateerde record als object of array — beide vormen zien we.
+      const fa = r.follow_up_appointments;
+      const ownerId = Array.isArray(fa) ? fa[0]?.owner_id : fa?.owner_id;
+      bump(ownerId, 'outcomes');
     }
-    const rankIds = Object.keys(rankCount).filter(id => id !== 'onbekend');
-    let rankMap = new Map();
-    if (rankIds.length) {
+    for (const r of (rankingRes.data || [])) bump(r.user_id, 'mutations');
+
+    // Batch: profiles voor alle uids (naam + rol-filter tegelijk).
+    const uids = [...rankAgg.keys()];
+    let profMap = new Map(); // uid → { full_name, role, is_active }
+    if (uids.length) {
       const profsRes = await safeAwait(
-        supabaseAdmin.from('profiles').select('id, full_name').in('id', rankIds),
+        supabaseAdmin.from('profiles').select('id, full_name, role, is_active').in('id', uids),
         { data: [] },
         'rankProfiles'
       );
-      rankMap = new Map((profsRes.data || []).map(p => [p.id, p.full_name]));
+      profMap = new Map((profsRes.data || []).map(p => [p.id, p]));
     }
-    const staffRanking = Object.entries(rankCount)
-      .map(([uid, count]) => ({ user_label: trimName(rankMap.get(uid) || 'Onbekend'), count }))
-      .sort((a, b) => b.count - a.count).slice(0, 10);
+
+    const staffRanking = [...rankAgg.entries()]
+      .filter(([uid]) => {
+        // Alleen actieve CRM-staff — voorkomt viewer/student in de lijst.
+        const p = profMap.get(uid);
+        if (!p || p.is_active === false) return false;
+        return STAFF_ROLES.has(p.role);
+      })
+      .map(([uid, br]) => {
+        const count = br.calls + br.voicememos + br.outcomes + br.mutations;
+        // Voornaam voluit — interne collega's, geen klant-PII-trim.
+        const full = (profMap.get(uid)?.full_name || 'Onbekend').trim();
+        const firstName = full.split(/\s+/)[0] || 'Onbekend';
+        return { user_label: firstName, count, breakdown: br };
+      })
+      .filter(r => r.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
 
     // ── Feed sales → klant-labels ─────────────────────────────────────────
     const feedSaleDeals = feedSalesRes.data || [];
