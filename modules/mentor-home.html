@@ -1,6 +1,55 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
+  <!-- ═══ V1-LOCKOUT REDIRECT-GUARD (2026-08-26) ═══════════════════════
+       Deze v1-role-home is vervangen door de v2-shell (klanten-v2 flip
+       is live). Bookmarks/directe URL's landen hier nog — deze guard
+       bounce't onmiddellijk naar v2 (of naar login als geen sessie) VÓÓR
+       de eerste paint, zodat de v1-UI nooit oplicht.
+       Zelfde patroon als root /index.html:
+         1. body hidden inline → geen v1-flash.
+         2. Neutrale merk-loze splash (logo + spinner).
+         3. Detecteer Supabase-sessie via localStorage sb-*-auth-token.
+            Sessie → location.replace('/modules/klanten-v2/').
+            Geen sessie → location.replace('/login.html?returnTo=<current>').
+       Fail-soft: exception → guard verwijdert splash + hidden, v1 laadt.
+       Incasso/auth/klant-facing pagina's zijn NIET aangeraakt. -->
+  <style id="prePaintGuardStyle">html,body{visibility:hidden !important}
+  #prePaintSplash{position:fixed;inset:0;visibility:visible;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#E7EDF3;z-index:2147483647;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+  #prePaintSplash img{width:180px;height:auto;opacity:.9}
+  #prePaintSplash .sp{width:24px;height:24px;border-radius:50%;border:2.5px solid rgba(12,42,58,.2);border-top-color:#1E7FD4;animation:pps 0.7s linear infinite}
+  @keyframes pps{to{transform:rotate(360deg)}}
+  @media (prefers-color-scheme:dark){#prePaintSplash{background:#04101A}#prePaintSplash .sp{border-color:rgba(231,241,246,.2);border-top-color:#2E9BE0}}
+  </style>
+  <script>
+  (function(){
+    try {
+      document.write('<div id="prePaintSplash"><img src="/img/logo-dark.png" alt="De Forex Opleiding" onerror="this.style.display='none'"><div class="sp"></div></div>');
+      var hasSession = false;
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.indexOf('sb-') === 0 && k.indexOf('-auth-token') > 0) {
+          var raw = localStorage.getItem(k);
+          if (raw && raw.indexOf('"access_token"') !== -1) { hasSession = true; break; }
+        }
+      }
+      if (hasSession) {
+        window.location.replace('/modules/klanten-v2/');
+      } else {
+        var s = window.location.search || '';
+        if (s.indexOf('access_token=') === -1 && s.indexOf('code=') === -1 && s.indexOf('error_code=') === -1) {
+          window.location.replace('/login.html?returnTo=/modules/klanten-v2/');
+        }
+      }
+    } catch (e) {
+      try {
+        var g = document.getElementById('prePaintGuardStyle'); if (g) g.remove();
+        var s = document.getElementById('prePaintSplash'); if (s) s.remove();
+      } catch(_) {}
+    }
+  })();
+  </script>
+
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dashboard · De Forex Opleiding</title>

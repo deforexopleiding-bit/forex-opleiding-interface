@@ -86,8 +86,17 @@
     if (st.loading && st.params === params) return;
     const seq = ++st.seq;
     st.loading = true; st.error = null; st.params = params;
+    // v=16 (2026-08-26) — view-scope keuze nu permissie-gedreven i.p.v. rol.
+    // Een mentor MET user_permissions-grant `onboarding.admin` (bv. Chesney)
+    // krijgt de volledige admin-lijst; een mentor zonder die grant blijft
+    // op self-scope. Server-side gate (admin-future-students-list checkt
+    // onboarding.admin via user_has_permission) laat Chesney's grant al door.
     const role = _currentRole();
-    const isMentorScope = (role === 'mentor');
+    var hasOnboardingAdmin = false;
+    try { hasOnboardingAdmin = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('onboarding.admin')); }
+    catch (_) { hasOnboardingAdmin = false; }
+    const useSelfScope = (role === 'mentor') && !hasOnboardingAdmin;
+    const isMentorScope = useSelfScope;
     const url = isMentorScope
       ? '/api/mentor-future-students-self'                     // self-scope endpoint
       : '/api/admin-future-students-list?' + params;
