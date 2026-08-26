@@ -60,10 +60,26 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    // Create blijft admin-only — geen verbreding naar manager/sales/mentor.
-    const admin = await verifyAdmin(req);
+    // 2026-08-26: dual-gate — verifyAdmin OF customer.create-permission.
+    // Sales heeft `customer.create` via migratie 045 (kern-werk: nieuwe
+    // klanten inschrijven). Insert doet ALLEEN customers-tabel + audit;
+    // geen TL-sync, geen subscription, geen invoice, geen incasso.
+    // Bewerken/archiveren/verwijderen/tags/notes blijven strikt verifyAdmin.
+    let admin = await verifyAdmin(req);
     if (!admin) {
-      return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+      const allowed = await requirePermission(req, 'customer.create');
+      if (!allowed) {
+        return res.status(403).json({ error: 'Toegang geweigerd. `customer.create`-recht vereist.' });
+      }
+      // Non-admin path: haal user-profiel op zodat handlePost admin.user.id +
+      // admin.profile heeft (create-audit + created_by_user_id).
+      const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(
+        (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+      );
+      if (userErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+      const { data: profile } = await supabaseAdmin
+        .from('profiles').select('id, email, full_name, role').eq('id', user.id).maybeSingle();
+      admin = { user, profile: profile || { id: user.id, email: user.email, role: 'sales' } };
     }
     return handlePost(req, res, admin);
   }
