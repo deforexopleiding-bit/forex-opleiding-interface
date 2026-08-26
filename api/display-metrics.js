@@ -26,10 +26,15 @@ import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
 import { computeMetrics } from './follow-up-metrics.js';
-import { nlDayStart, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
+import {
+  nlDayStart, nlDayEndExclusive, nlDateString,
+  nlWeekStart, nlWeekEndExclusive, nlMonthStart, nlMonthEndExclusive,
+} from './_lib/nl-period.js';
 import { computeLeadsByTraject } from './_lib/leads-per-traject-compute.js';
 import { computeSignedDealsTotal } from './_lib/sales-signed-deals-compute.js';
 import { getBubbleOneOnOneCountToday } from './_lib/bubble-one-on-one-count.js';
+import { computeSalesStreak } from './_lib/sales-streak-compute.js';
+import { getConfirmedCount } from './_lib/event-registration.js';
 
 const CACHE_TTL_MS = 10_000;
 let _cache = { at: 0, payload: null };
@@ -142,6 +147,11 @@ export default async function handler(req, res) {
     const sinceStr = nlDateString(dayStart);
     const untilStr = nlDateString(dayEnd);
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    // Week (ma..ma+7) en maand (1e..volgende 1e), NL-tz.
+    const weekStart  = nlWeekStart(dayStart);
+    const weekEnd    = nlWeekEndExclusive(dayStart);
+    const monthStart = nlMonthStart(dayStart);
+    const monthEnd   = nlMonthEndExclusive(dayStart);
 
     const dave = await resolveDave();
     const rankingActions = process.env.DISPLAY_RANKING_ACTIONS
@@ -216,6 +226,32 @@ export default async function handler(req, res) {
               supabaseAdmin.from('follow_up_outcomes')
                 .select('id, appointment_id, created_at, follow_up_appointments!inner(owner_id)')
                 .gte('created_at', dayStartIso).lt('created_at', dayEndIso),
+      // ─── Display v2 bronnen (APPENDED, geen index-shift van 5-16) ───
+      /*17 */ // app_settings: display_week_target + display_month_target (int € of null)
+              supabaseAdmin.from('app_settings').select('key, value')
+                .in('key', ['display_week_target', 'display_month_target']),
+      /*18 */ // Sales week [ma..volgende ma) NL
+              computeSignedDealsTotal({
+                supabaseAdmin,
+                since: nlDateString(weekStart),
+                until: nlDateString(weekEnd),
+                includeRecentIds: false,
+              }),
+      /*19 */ // Sales maand [1e..volgende 1e) NL
+              computeSignedDealsTotal({
+                supabaseAdmin,
+                since: nlDateString(monthStart),
+                until: nlDateString(monthEnd),
+                includeRecentIds: false,
+              }),
+      /*20 */ // Upcoming events (top 2 published, starts_at >= now)
+              supabaseAdmin.from('events')
+                .select('id, title, starts_at, location, capacity')
+                .eq('status', 'published')
+                .gte('starts_at', new Date().toISOString())
+                .order('starts_at', { ascending: true }).limit(2),
+      /*21 */ // Streak (helper doet 2 queries intern)
+              computeSalesStreak({ supabaseAdmin, todayDayStart: dayStart }),
     ]);
 
     const pick = (i, fallback) => {
@@ -242,6 +278,12 @@ export default async function handler(req, res) {
     const rankCallsRes       = pick(14, { data: [] });
     const rankVoicememoRes   = pick(15, { data: [] });
     const rankOutcomesRes    = pick(16, { data: [] });
+    // Display v2 bronnen:
+    const settingsRes        = pick(17, { data: [] });
+    const weekSales          = pick(18, { total_incl_vat: null });
+    const monthSales         = pick(19, { total_incl_vat: null });
+    const eventsRes          = pick(20, { data: [] });
+    const streakVal          = pick(21, 0);
 
     // ── Secundaire queries — safeAwait ────────────────────────────────────
     const callsBookedRes = await safeAwait(
@@ -329,6 +371,44 @@ export default async function handler(req, res) {
       .filter(r => r.count > 0)
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
+
+    // ── Display v2: targets + momentum + events ──────────────────────────
+    const settingsMap = {};
+    for (const r of (settingsRes.data || [])) settingsMap[r.key] = r.value;
+    const wTarget = (settingsMap.display_week_target  != null) ? (Number(settingsMap.display_week_target)  || null) : null;
+    const mTarget = (settingsMap.display_month_target != null) ? (Number(settingsMap.display_month_target) || null) : null;
+    const nowMs2 = Date.now();
+    const weekFrac  = Math.min(1, Math.max(0, (nowMs2 - weekStart.getTime())  / (weekEnd.getTime()  - weekStart.getTime())));
+    const monthFrac = Math.min(1, Math.max(0, (nowMs2 - monthStart.getTime()) / (monthEnd.getTime() - monthStart.getTime())));
+    // Pace-pill: "op schema" als pct >= verstreken-fractie − 5pp (tolerantie
+    // voorkomt "achter" om 09:30 maandag). null pct → pace ook null.
+    const pace = (pct, frac) => (pct == null) ? null : (pct >= frac - 0.05 ? 'ok' : 'behind');
+    const wAmt = weekSales.total_incl_vat  ?? 0;
+    const mAmt = monthSales.total_incl_vat ?? 0;
+    const wPct = wTarget ? wAmt / wTarget : null;
+    const mPct = mTarget ? mAmt / mTarget : null;
+
+    // Momentum uit salesCompute.recent_ids (0 extra queries)
+    const salesTodayList = salesCompute.recent_ids || [];
+    const biggestToday = salesTodayList.length
+      ? Math.max(...salesTodayList.map(s => Number(s.amount_incl || 0)))
+      : null;
+    const lastAcc = salesTodayList.reduce((mx, s) => (s.accepted_at && s.accepted_at > mx) ? s.accepted_at : mx, '');
+    const lastSaleMin = lastAcc ? Math.round((Date.now() - new Date(lastAcc).getTime()) / 60000) : null;
+    const avgDealToday = (salesCompute.count && salesCompute.count >= 2 && salesCompute.total_incl_vat)
+      ? Math.round(salesCompute.total_incl_vat / salesCompute.count) : null;
+
+    // Events top 2 + attendee-count via getConfirmedCount + safeAwait per event
+    // (één count-fout degradeert alleen die tegel, niet het hele bord).
+    const evRaw = (eventsRes.data || []).slice(0, 2);
+    const evCounts = await Promise.all(evRaw.map((e, i) =>
+      safeAwait(getConfirmedCount(e.id), 0, 'eventCount#' + i)
+    ));
+    const eventsOut = evRaw.map((e, i) => ({
+      id: e.id, title: e.title, starts_at: e.starts_at,
+      location: e.location || '', capacity: e.capacity || null,
+      attendee_count: evCounts[i],
+    }));
 
     // ── Feed sales derive uit salesCompute.recent_ids ─────────────────────
     // Fix 1 (2026-08-26): oude losse deals-query miste test-deal- +
@@ -447,6 +527,17 @@ export default async function handler(req, res) {
         as_of: oneOnOne.as_of,
       },
       staff_ranking: staffRanking,
+      targets: {
+        week:  { amount: wAmt, target: wTarget, pct: wPct, pace: pace(wPct, weekFrac) },
+        month: { amount: mAmt, target: mTarget, pct: mPct, pace: pace(mPct, monthFrac) },
+      },
+      momentum: {
+        biggest_today:  biggestToday,
+        last_sale_min:  lastSaleMin,
+        avg_deal_today: avgDealToday,
+        streak:         streakVal,
+      },
+      events: eventsOut,
       feed: feed.slice(0, 15),
     };
 
