@@ -134,11 +134,11 @@
   .card h3 .tag{margin-left:auto;font-family:"JetBrains Mono";font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.06em}
 
   /* leads strip */
-  .leads{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:14px;padding:16px 18px}
-  .leadcell{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:13px;padding:13px 14px;border-top:3px solid var(--src)}
-  .leadcell .l{font-size:12.5px;color:var(--ink-2);font-weight:600;display:flex;align-items:center;gap:7px}
+  .leads{flex:none;display:grid;grid-template-columns:repeat(5,1fr);gap:11px;padding:14px 16px}
+  .leadcell{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:13px;padding:11px 12px;border-top:3px solid var(--src)}
+  .leadcell .l{font-size:12px;color:var(--ink-2);font-weight:600;display:flex;align-items:center;gap:6px}
   .leadcell .l .d{width:8px;height:8px;border-radius:50%;background:var(--src)}
-  .leadcell .v{font-size:40px;margin-top:8px}
+  .leadcell .v{font-size:34px;margin-top:6px}
   .leadcell .s{font-family:"JetBrains Mono";font-size:11px;color:var(--muted);margin-top:2px}
 
   /* dave spotlight */
@@ -159,13 +159,13 @@
   .exec .n{width:34px;text-align:right;font-family:"JetBrains Mono";font-size:13px;font-weight:600}
 
   /* secondary row: voicememo + upcoming */
-  .subrow{flex:1;display:grid;grid-template-columns:1fr 1.35fr;gap:20px;min-height:0}
-  .vm-list{padding:8px 12px 12px;overflow:hidden;display:flex;flex-direction:column;gap:7px}
+  .subrow{flex:1;display:grid;grid-template-columns:1fr 1.35fr;gap:20px;min-height:0;max-height:280px}
+  .vm-list{padding:6px 12px 10px;overflow:hidden;display:flex;flex-direction:column;gap:6px}
   .vm{display:flex;align-items:center;gap:11px;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:11px;padding:9px 12px}
   .vm .mic{width:30px;height:30px;border-radius:8px;background:var(--gold-soft);color:var(--gold);display:flex;align-items:center;justify-content:center;font-size:15px;flex:none}
   .vm .who{font-size:13.5px;font-weight:600}
   .vm .t{margin-left:auto;font-family:"JetBrains Mono";font-size:11px;color:var(--muted)}
-  .up-list{padding:8px 12px 12px;overflow:hidden;display:flex;flex-direction:column;gap:7px}
+  .up-list{padding:6px 12px 10px;overflow:hidden;display:flex;flex-direction:column;gap:6px}
   .up{display:flex;align-items:center;gap:12px;background:var(--panel-2);border:1px solid var(--line-soft);border-radius:11px;padding:9px 13px}
   .up .time{font-family:"Bricolage Grotesque";font-weight:700;font-size:19px;color:var(--accent);min-width:58px}
   .up .who{font-size:14px;font-weight:600}
@@ -243,12 +243,12 @@
     <div class="kpi sales" id="k-sales">
       <div class="cap"><span class="ico">€</span> Sales vandaag</div>
       <div class="num big" id="v-sales-rev">€0</div>
-      <div class="foot"><span id="v-sales-cnt">0</span> getekende offertes · <span class="delta" id="v-sales-d">▲ 0</span> vs gister</div>
+      <div class="foot"><span id="v-sales-cnt">0</span> getekende offertes <span class="delta" id="v-sales-d"></span></div>
     </div>
     <div class="kpi leads" id="k-leads">
       <div class="cap"><span class="ico">✦</span> Nieuwe leads</div>
       <div class="num big" id="v-leads">0</div>
-      <div class="foot">vandaag binnengekomen · <span class="delta" id="v-leads-d">▲ 0</span></div>
+      <div class="foot">vandaag binnengekomen <span class="delta" id="v-leads-d"></span></div>
     </div>
     <div class="kpi calls" id="k-calls">
       <div class="cap"><span class="ico">📞</span> Calls vandaag</div>
@@ -278,7 +278,11 @@
           <div class="dstat"><div class="l" style="color:var(--gold)">Follow-ups gedraaid</div><div class="num v" id="d-fu">0</div></div>
           <div class="dstat"><div class="l" style="color:var(--gold)">Voicememo's</div><div class="num v" id="d-vm">0</div></div>
         </div>
-        <div class="dave-foot">
+      </div>
+
+      <div class="card">
+        <h3>🏆 Ranglijst <span class="tag">acties per persoon vandaag</span></h3>
+        <div class="dave-foot" style="padding:16px 18px">
           <div class="exec" id="exec"></div>
         </div>
       </div>
@@ -696,7 +700,8 @@
     (d.feed||[]).slice().reverse().forEach(function(f){
       var k = f.ts+'|'+f.type+'|'+f.text;
       if (!markFeed(k)) return;
-      if (!primed) return;
+      // Fix 7: eerste poll RENDERT feed-items wel (dedup via markFeed blijft).
+      // Alleen sale-confetti gate't nog op primed (zie sale-bling-loop hieronder).
       var m = icoMap[f.type] || {cls:'lead',ico:'•'};
       var text = String(f.text||'').replace(/[<>&]/g, function(c){ return ({'<':'&lt;','>':'&gt;','&':'&amp;'})[c]; });
       addFeed(text, m.cls, m.ico, f.type==='sale');

@@ -26,7 +26,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
 import { computeMetrics } from './follow-up-metrics.js';
-import { nlDayStart, nlDayEndExclusive } from './_lib/nl-period.js';
+import { nlDayStart, nlDayEndExclusive, nlDateString } from './_lib/nl-period.js';
 import { computeLeadsByTraject } from './_lib/leads-per-traject-compute.js';
 import { computeSignedDealsTotal } from './_lib/sales-signed-deals-compute.js';
 import { getBubbleOneOnOneCountToday } from './_lib/bubble-one-on-one-count.js';
@@ -135,8 +135,12 @@ export default async function handler(req, res) {
     const dayEnd   = nlDayEndExclusive();
     const dayStartIso = dayStart.toISOString();
     const dayEndIso   = dayEnd.toISOString();
-    const sinceStr = dayStart.toISOString().slice(0, 10);
-    const untilStr = dayEnd.toISOString().slice(0, 10);
+    // [Fix 1 · 2026-08-26] Was `.slice(0,10)` op UTC-instant → gaf gister-datum
+    // (dayStart NL 00:00 = 22:00 UTC → sinceStr='2026-08-25' i.p.v. '2026-08-26'
+    // in zomertijd). Sales van vandaag vielen buiten range → count=0.
+    // nlDateString() geeft NL-tz-aware YYYY-MM-DD.
+    const sinceStr = nlDateString(dayStart);
+    const untilStr = nlDateString(dayEnd);
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
     const dave = await resolveDave();
@@ -187,8 +191,9 @@ export default async function handler(req, res) {
                 ? supabaseAdmin.from('follow_up_appointments')
                     .select('id, lead_name, scheduled_at').eq('owner_id', dave.user_id)
                     .eq('voicememo_status', 'sent')
-                    .gte('updated_at', dayStartIso).lt('updated_at', dayEndIso)
-                    .order('updated_at', { ascending: false }).limit(5)
+                    // [Fix 4] voicememo_sent_at (echte send-timestamp) i.p.v. updated_at
+                    .gte('voicememo_sent_at', dayStartIso).lt('voicememo_sent_at', dayEndIso)
+                    .order('voicememo_sent_at', { ascending: false }).limit(5)
                 : Promise.resolve({ data: [] }),
       /*13 */ getBubbleOneOnOneCountToday({ start: dayStart, endExclusive: dayEnd }),
       // ─── execution-score bronnen (APPENDED, geen index-shift van 5-13) ───
@@ -196,10 +201,14 @@ export default async function handler(req, res) {
               supabaseAdmin.from('follow_up_appointments').select('owner_id')
                 .eq('status', 'completed')
                 .gte('scheduled_at', dayStartIso).lt('scheduled_at', dayEndIso),
-      /*15 */ // B: verstuurde voicememo's per owner (NL-vandaag)
+      /*15 */ // B: verstuurde voicememo's per owner (NL-vandaag).
+              // [Fix 4 · 2026-08-26] Was updated_at → overtelde batch/RLS-updates
+              // die eergister voicememo-rijen aanraakten (2026-08-26: Dave 16 vs
+              // realiteit 6). voicememo_sent_at wordt alleen door POST-verzend-
+              // flow gezet → echte "vandaag verstuurd" count.
               supabaseAdmin.from('follow_up_appointments').select('owner_id')
                 .eq('voicememo_status', 'sent')
-                .gte('updated_at', dayStartIso).lt('updated_at', dayEndIso),
+                .gte('voicememo_sent_at', dayStartIso).lt('voicememo_sent_at', dayEndIso),
       /*16 */ // C: outcomes per owner via PostgREST inner-join op appointment.owner_id
               supabaseAdmin.from('follow_up_outcomes')
                 .select('id, appointment_id, created_at, follow_up_appointments!inner(owner_id)')
@@ -387,9 +396,12 @@ export default async function handler(req, res) {
 
     // ── Payload assembly ─────────────────────────────────────────────────
     // leads.total = null bij bron-down (bord toont "—" i.p.v. misleidend 0).
+    // [Fix 2 · 2026-08-26] Hero "Nieuwe leads" = alleen echte lead-bronnen
+    // (challenge/mini/event/webinar). Calls-bucket blijft als aparte 5e tegel
+    // in .leads.buckets[], telt NIET mee in het hero-totaal. Matcht v2-hero.
     const leadsTotal = (leadsCompute.total_incl_afwijzer === null || leadsCompute.total_incl_afwijzer === undefined)
       ? null
-      : (leadsCompute.total_incl_afwijzer + (callsBookedCount || 0));
+      : leadsCompute.total_incl_afwijzer;
 
     const payload = {
       generated_at: new Date().toISOString(),
