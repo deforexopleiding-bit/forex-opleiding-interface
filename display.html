@@ -107,18 +107,17 @@
 
   /* ---- hero KPI row ---- */
   .hero{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
-  .kpi{position:relative;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);
-    border-radius:18px;padding:20px 22px;display:grid;grid-template-rows:auto 1fr auto;row-gap:8px;min-height:172px;box-shadow:var(--shadow);overflow:hidden}
-  /* v3 (2026-08-26): grid met 3 rijen zodat .big altijd in de midden-track
-     zit → alle 4 hero-getallen op dezelfde baseline uitgelijnd, onafhankelijk
-     van cap/foot-lengte. Was flex + space-between → verschoof per tegel. */
-  .kpi .cap{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .kpi .big{align-self:center}
-  .kpi .foot{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .kpi .cap{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink-2);font-weight:600;letter-spacing:.01em}
+  /* v3.2 (2026-08-26): terug naar flex-kolom. Grid met alleen
+     grid-template-rows liet children in de eerste row-track vloeien op
+     sommige tv-browsers (auto-flow-fallback → horizontale render van de
+     leads-tegel). Flex-column stapelt onvoorwaardelijk verticaal.
+     .cap min-height + .big margin-bottom:auto = alle 4 grote cijfers op
+     dezelfde baseline, foot altijd onderaan. */
+  .kpi{position:relative;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:18px;padding:20px 22px;display:flex;flex-direction:column;min-height:172px;box-shadow:var(--shadow);overflow:hidden}
+  .kpi .cap{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink-2);font-weight:600;letter-spacing:.01em;min-height:34px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .kpi .ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
-  .kpi .big{font-size:76px}
-  .kpi .foot{display:flex;align-items:center;gap:8px;font-family:"JetBrains Mono";font-size:13px;color:var(--muted)}
+  .kpi .big{font-size:76px;line-height:.95;margin:6px 0 auto}
+  .kpi .foot{display:flex;align-items:center;gap:8px;font-family:"JetBrains Mono";font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .kpi .delta{color:var(--money);font-weight:700}
   .kpi.sales{border-color:rgba(15,165,104,.4);background:var(--kpi-sales-bg)}
   .kpi.sales .ico{background:var(--money-soft);color:var(--money)}
