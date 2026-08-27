@@ -59,10 +59,7 @@ export default async function handler(req, res) {
 
   const q = req.query || {};
   const source = ['retention', 'event', 'all'].includes(q.source) ? q.source : 'all';
-  // LET OP: 'komende_7' staat hier NIET in, terwijl de chip er in het scherm
-  // wel is. Die valt dus terug op 'open'. Dat is een bestaande fout die ik
-  // hier bewust niet meerepareer — buiten de opdracht, en apart gemeld.
-  const view   = ['alle', 'vandaag', 'te_laat', 'open', 'snoozed',
+  const view   = ['alle', 'vandaag', 'te_laat', 'open', 'snoozed', 'komende_7',
                   'laatste_kans', 'afgesloten_onbereikbaar'].includes(q.view) ? q.view : 'open';
   const kind   = ['call', 'zoom', 'all'].includes(q.kind) ? q.kind : 'all';
   const statusCsv = typeof q.status === 'string' ? q.status.trim() : '';
@@ -168,6 +165,17 @@ export default async function handler(req, res) {
         qq = qq.lt('terugbel_datum', nowISO).not('lead_status', 'in', '(verlengd,verloren)');
       } else if (view === 'open') {
         qq = qq.not('lead_status', 'in', '(verlengd,verloren)');
+      } else if (view === 'komende_7') {
+        // Deze tak ontbrak, terwijl de chip en de teller er wél waren: 'komende_7'
+        // stond niet in de lijst hierboven, viel dus terug op 'open', en toonde
+        // stilletjes een andere lijst dan het getal ernaast beloofde. Precies het
+        // soort fout waar deze hele ronde over gaat.
+        // Spiegelt de telling verderop: morgen t/m einde dag 7.
+        const zevenEindIso = sevenDaysEndIso
+          || new Date(Date.now() + 7 * 86400000).toISOString();
+        qq = qq.gte('terugbel_datum', new Date(todayEnd + 1).toISOString())
+               .lte('terugbel_datum', zevenEindIso)
+               .not('lead_status', 'in', '(verlengd,verloren)');
       } else if (view === 'laatste_kans') {
         qq = qq.gte('attempts', LAATSTE_KANS_VANAF).not('lead_status', 'in', '(verlengd,verloren)');
       } else if (view === 'afgesloten_onbereikbaar') {
