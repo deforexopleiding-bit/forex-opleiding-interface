@@ -1546,9 +1546,65 @@
     if (_ui.detailTab === 'retentie') return _detailRetentie(l);
     return _detailOverzicht(l);
   }
+  // Redenlabels ook voor de Opvolglijst — daar liggen de no-shows, dus daar
+  // heeft de opvolger er vandaag het meeste aan.
+  const OPVOLG_REDEN_LABEL = {
+    kon_niet        : 'Kon niet komen',
+    niet_gereageerd : 'Niet gereageerd',
+    afgemeld_bericht: 'Afgemeld per bericht',
+    onbekend        : 'Reden onbekend',
+  };
+
+  // ─── WAAROM BEL JE DEZE PERSOON? ──────────────────────────────────────
+  //
+  // Alles wat op de avond zelf bij het afronden van een event is ingetypt —
+  // de notitie, de reden, of het een no-show was of iemand die nog moest
+  // beslissen — werd netjes opgeslagen in source_ref, maar stond nergens op
+  // het scherm. De beller zag alleen een naam en een nummer, en belde dus
+  // zonder te weten dat er "warm om te starten, vanavond na 18u, wil eerst
+  // met zijn vrouw bespreken" bij stond.
+  //
+  // Dit blok toont dat bovenaan. Staat er niets in source_ref (een gewone
+  // retentie-lead bijvoorbeeld), dan verschijnt er ook niets.
+  const HERKOMST_LABEL = {
+    no_show     : 'Niet komen opdagen',
+    afgemeld    : 'Vooraf afgemeld',
+    opvolgen    : 'Wil nog beslissen',
+    twijfelt_nog: 'Wil nog beslissen',
+  };
+  const REDEN_LABEL = {
+    kon_niet        : 'Kon niet komen',
+    niet_gereageerd : 'Niet gereageerd',
+    afgemeld_bericht: 'Afgemeld per bericht',
+    onbekend        : 'Reden onbekend',
+  };
+  /** De context uit source_ref, of null als er niets bruikbaars in staat. */
+  function eventContext(l) {
+    const ref = (l && l.source_ref && typeof l.source_ref === 'object') ? l.source_ref : null;
+    if (!ref) return null;
+    const notitie  = String(ref.reason || '').trim();
+    const herkomst = HERKOMST_LABEL[String(ref.event_uitkomst || '')] || null;
+    const reden    = REDEN_LABEL[String(ref.reason_code || '')] || null;
+    if (!notitie && !herkomst && !reden) return null;
+    return { notitie, herkomst, reden };
+  }
+  function _eventContextBlok(l) {
+    const ctx = eventContext(l);
+    if (!ctx) return '';
+    const chips = [ctx.herkomst, ctx.reden].filter(Boolean)
+      .map((t) => `<span class="pill pill-accent nodot" style="font-size:11px">${esc(t)}</span>`).join(' ');
+    return `<div style="background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:10px;padding:12px 14px">
+      <div style="font-size:11px;color:var(--amber);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:6px">Waarom je belt</div>
+      ${ctx.notitie
+        ? `<div style="font-size:13.5px;color:var(--text);line-height:1.45">${esc(ctx.notitie)}</div>`
+        : `<div style="font-size:12.5px;color:var(--text-3)">Geen notitie meegegeven bij het afronden.</div>`}
+      ${chips ? `<div style="margin-top:8px;display:flex;gap:5px;flex-wrap:wrap">${chips}</div>` : ''}
+    </div>`;
+  }
   function _detailOverzicht(l) {
     const canUpdate = !_ui.updateBusy[l.id];
     return `<div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px;max-width:720px">
+      ${_eventContextBlok(l)}
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
         <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Snelle status-update</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -1649,7 +1705,15 @@
     const m = _ui.callModal;
     const meta = OUTCOMES.find((o) => o.v === m.outcome);
     const showNextInput = meta && meta.next;
+    // Ook hier de context uit het event: dit venster staat open tijdens het
+    // gesprek, en dan is de notitie van de avond zelf het meest waard.
+    const lead = asArr(_live.leadsList.data && _live.leadsList.data.items).find((x) => x && x.id === m.leadId);
+    const ctx = lead ? eventContext(lead) : null;
     const body = `
+      ${ctx && ctx.notitie ? `<div style="background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;padding:9px 12px;margin-bottom:14px">
+        <span style="font-size:10.5px;color:var(--amber);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Van het event</span>
+        <div style="font-size:12.5px;color:var(--text);margin-top:3px;line-height:1.4">${esc(ctx.notitie)}</div>
+      </div>` : ''}
       <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Kies uitkomst</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;margin-bottom:16px">
         ${OUTCOMES.map((o) => {
@@ -1851,6 +1915,7 @@
             <div style="font-size:13.5px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.name || '—')}</div>
             <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.email || it.phone || '—')}${it.event_title ? ` · ${esc(it.event_title)}` : ''}${it.scheduled_at ? ` · ${fmtDate(it.scheduled_at)}` : ''}</div>
             ${it.actie_hint ? `<div style="font-size:11px;color:var(--text-2);margin-top:2px;font-style:italic">${esc(it.actie_hint)}</div>` : ''}
+            ${it.event_notitie ? `<div style="font-size:12px;color:var(--text);margin-top:4px;padding:5px 9px;background:var(--amber-soft);border-left:2px solid var(--amber);border-radius:0 4px 4px 0;white-space:normal">${esc(it.event_notitie)}${OPVOLG_REDEN_LABEL[it.event_reason_code] ? ` <span style="color:var(--text-3)">· ${esc(OPVOLG_REDEN_LABEL[it.event_reason_code])}</span>` : ''}</div>` : ''}
           </div>
           ${it.lead_id
             ? `<button class="btn btn-primary btn-sm" onclick="window.__fuJumpToLead('${esc(it.lead_id)}')" title="Open lead in Werklijst (reset filters naar Alles)">📞 Openen</button>`

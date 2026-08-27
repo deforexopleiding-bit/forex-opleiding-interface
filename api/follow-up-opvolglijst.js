@@ -129,6 +129,15 @@ async function fetchEventNoShows() {
       if (lead.customer_id && !leadByCustId.has(lead.customer_id)) leadByCustId.set(lead.customer_id, lead);
     }
 
+    // Kleine uitlezers op source_ref. Fail-soft: ontbreekt de lead of het
+    // veld, dan komt er null uit en toont het scherm gewoon niets.
+    const eventVeld = (lead, sleutel) => {
+      const ref = (lead && lead.source_ref && typeof lead.source_ref === 'object') ? lead.source_ref : null;
+      const v = ref ? String(ref[sleutel] || '').trim() : '';
+      return v || null;
+    };
+    const eventNotitie = (lead) => eventVeld(lead, 'reason');
+
     return att.map((a) => {
       const ev = eventById.get(a.event_id) || {};
       const matchedLead = leadByAttId.get(a.id)
@@ -154,6 +163,13 @@ async function fetchEventNoShows() {
         lead_id                 : matchedLead?.id || null,
         lead_status             : matchedLead?.lead_status || null,
         no_show_followup_status : a.no_show_followup_status || null,
+        // Wat er op de avond zelf bij het afronden is ingetypt. Stond al in
+        // source_ref van de lead die we hierboven toch al ophalen, maar werd
+        // niet doorgegeven — dus belde de opvolger zonder te weten waarom.
+        // Geen extra query: matchedLead heeft source_ref al bij zich.
+        event_notitie           : eventNotitie(matchedLead),
+        event_uitkomst          : eventVeld(matchedLead, 'event_uitkomst'),
+        event_reason_code       : eventVeld(matchedLead, 'reason_code'),
         actie_hint              : actieHint('event_noshow'),
       };
     });

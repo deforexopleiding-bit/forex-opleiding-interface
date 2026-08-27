@@ -47,14 +47,20 @@ check('morgen ligt een dag na vandaag',
   (new Date(morgen) - new Date(M._evDatumOverDagen(0))) === 86400000);
 
 const leeg = M._completeAfwezigBlock('att-1', { reason_code: '', note: '', follow_up_date: morgen }, 'no_show');
-check('leeg blok waarschuwt dat er nog niets gebeurt', leeg.includes('Zonder allebei'));
+// Sinds 27-08 belooft het blok het omgekeerde van vroeger. Er stond "zonder
+// allebei gebeurt er niets", en dat was letterlijk waar: wie een notitie typte
+// zonder reden aan te klikken raakte die notitie kwijt. Nu wordt alles bewaard
+// en wordt een ontbrekende reden 'onbekend'.
+check('het blok belooft dat alles bewaard wordt', leeg.includes('wordt bewaard'));
+check('zonder reden staat er dat het onbekend wordt', leeg.includes('onbekend'));
+check('de oude belofte staat er niet meer', !leeg.includes('Zonder allebei'));
 check('leeg blok zegt "niet komen opdagen"', leeg.includes('niet komen opdagen'));
 check('geen enkele chip staat aan', !leeg.includes('chip on'));
 check('alle vier de redenen staan er als knop', M.AFWEZIG_REDENEN.every(r => leeg.includes(r.l)));
 check('het notitieveld overleeft een render (focus-key aanwezig)', leeg.includes('data-kv-focus-key="ev-afw-notitie-att-1"'));
 
 const vol = M._completeAfwezigBlock('att-2', { reason_code: 'kon_niet', note: 'ziek', follow_up_date: morgen }, 'afgemeld');
-check('ingevuld blok laat de waarschuwing weg', !vol.includes('Zonder allebei'));
+check('met een gekozen reden verdwijnt de onbekend-hint', !vol.includes('komt er <b>onbekend</b>'));
 check('ingevuld blok zegt "zich afgemeld"', vol.includes('zich afgemeld'));
 check('de gekozen reden staat aan', vol.includes('chip on'));
 check('de notitie staat in het veld', vol.includes('value="ziek"'));

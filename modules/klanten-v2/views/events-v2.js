@@ -1318,12 +1318,11 @@
   }
   function _completeAfwezigBlock(attId, afw, st) {
     const gekozen = String(afw.reason_code || '');
-    const compleet = !!gekozen && !!afw.follow_up_date;
     const woord = st === 'no_show' ? 'niet komen opdagen' : 'zich afgemeld';
     return `<div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;gap:8px">
       <div style="font-size:11.5px;color:var(--text-3)">
-        Deze deelnemer is <b>${woord}</b>. Kies een reden en een belmoment, dan komt hij op de bellijst.
-        ${compleet ? '' : '<span style="color:var(--text-3)">Zonder allebei gebeurt er niets extra\u2019s.</span>'}
+        Deze deelnemer is <b>${woord}</b>. Alles wat je hier invult wordt bewaard en komt op de bellijst.
+        ${gekozen ? '' : '<span style="color:var(--text-3)">Klik je geen reden aan, dan komt er <b>onbekend</b> te staan.</span>'}
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <span style="font-size:11.5px;color:var(--text-3)">Reden:</span>
@@ -1333,7 +1332,7 @@
         <span style="font-size:11.5px;color:var(--text-3)">Belmoment:</span>
         <input type="date" value="${esc(afw.follow_up_date || '')}" oninput="window.__evCompleteAfwSet('${esc(attId)}','follow_up_date',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px" />
       </div>
-      <input type="text" data-kv-focus-key="ev-afw-notitie-${esc(attId)}" placeholder="Notitie (optioneel) \u2014 wat weet je over deze avond?" value="${esc(afw.note || '')}" oninput="window.__evCompleteAfwSet('${esc(attId)}','note',this.value)" style="padding:6px 10px;border:1px solid var(--border);background:var(--surface);border-radius:6px;font-size:12.5px" />
+      <input type="text" data-kv-focus-key="ev-afw-notitie-${esc(attId)}" placeholder="Notitie \u2014 wat weet je over deze avond?" value="${esc(afw.note || '')}" oninput="window.__evCompleteAfwSet('${esc(attId)}','note',this.value)" style="padding:6px 10px;border:1px solid var(--border);background:var(--surface);border-radius:6px;font-size:12.5px" />
     </div>`;
   }
   function _completeFollowupBlock(attId, fu) {
@@ -1406,13 +1405,22 @@
           if (v.followup.owner_id)       fu.owner_id = v.followup.owner_id;
             if (Object.keys(fu).length) row.followup = fu;
         }
-        // Afwezig-blok: alleen meesturen als er een reden \u00e9n een
-        // belmoment staat. De server controleert dat nog een keer.
+        // Afwezig-blok: meesturen zodra er \u00cdETS is ingevuld \u2014 een notitie
+        // of een belmoment. Niet pas als de reden ook is aangeklikt.
+        //
+        // Waarom dat veranderd is: op 26 augustus zette iemand twee no-shows,
+        // typte er een notitie bij en klikte geen reden aan. Het blok ging
+        // toen niet mee, en die notitie is verdampt zonder \u00e9\u00e9n woord op het
+        // scherm. Het veld stond er, je kon erin typen, en het werd
+        // weggegooid. Dat is geen gebruikersfout maar een ontwerpfout.
+        // Geen reden aangeklikt betekent nu 'onbekend', niet: gooi alles weg.
         if ((v.attendance_status === 'no_show' || v.attendance_status === 'afgemeld') && v.afwezig) {
           const af = v.afwezig;
-          if (af.reason_code && af.follow_up_date) {
-            row.afwezig = { reason_code: af.reason_code, follow_up_date: af.follow_up_date };
-            if (af.note) row.afwezig.note = af.note;
+          const notitie = String(af.note || '').trim();
+          if (notitie || af.follow_up_date) {
+            row.afwezig = { reason_code: af.reason_code || 'onbekend' };
+            if (af.follow_up_date) row.afwezig.follow_up_date = af.follow_up_date;
+            if (notitie) row.afwezig.note = notitie;
           }
         }
         return row;

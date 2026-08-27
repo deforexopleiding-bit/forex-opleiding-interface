@@ -17,6 +17,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { computeDealTotals } from './deal-total.js';
 import { createNotification } from './notify.js';
 import { BEZWAREN, isBezwaar } from './bezwaren.js';
+import { schrijfLeadNotitie } from './followup-notitie.js';
 
 const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ATT_SET     = new Set(['aanwezig', 'no_show', 'afgemeld']);
@@ -53,6 +54,39 @@ const AFWEZIG_STATUSSEN = new Set(['no_show', 'afgemeld']);
 // Aanklikbare redenen bij een afwezige. Bewust een vaste lijst: vrije tekst
 // valt niet te tellen. De vrije notitie staat er los naast.
 const AFWEZIG_REDENEN = new Set(['kon_niet', 'niet_gereageerd', 'afgemeld_bericht', 'onbekend']);
+// Standaard-belmoment in dagen, als vangnet voor een blok dat alleen een
+// notitie draagt. Een lead zonder terugbel_datum staat namelijk op geen
+// enkele lijst — dan is de notitie wel bewaard maar ziet niemand hem, en dat
+// is nog steeds stil verdwijnen. Spiegelt AFWEZIG_BELMOMENT_DAGEN in
+// modules/klanten-v2/views/events-v2.js.
+const AFWEZIG_BELMOMENT_DAGEN = { no_show: 1, afgemeld: 3 };
+/** Statussen waarbij een lead als afgehandeld geldt en van de lijsten verdwijnt. */
+const GESLOTEN_LEAD_STATUSSEN = new Set(['verlengd', 'verloren']);
+const isGesloten = (status) => GESLOTEN_LEAD_STATUSSEN.has(String(status || ''));
+
+/**
+ * Eén regel in het notitielog als een dichte rij weer opengaat. Een lead die
+ * van 'verloren' naar de bellijst springt zonder spoor is magie, en daar zit
+ * niemand op te wachten — de beller moet kunnen zien waaróm hij er weer staat.
+ * Fail-soft: schrijfLeadNotitie gooit niet.
+ */
+async function meldHeropening(leadId, eventId, vorigeStatus, userId) {
+  await schrijfLeadNotitie(
+    leadId,
+    `Heropend door het afronden van een event. Stond op '${vorigeStatus}'; eerdere belpogingen blijven meetellen.`,
+    { doorUserId: userId, entryKind: 'system', outcomeCode: 'heropend_door_event' },
+  );
+}
+
+function datumOverDagen(dagen) {
+  // Number('x') is NaN, en setDate(NaN) levert een Invalid Date die als
+  // ongeldige datum de database in gaat. Alles wat geen echt getal is telt
+  // hier als nul: liever vandaag dan niets.
+  const n = Number(dagen);
+  const d = new Date();
+  d.setDate(d.getDate() + (Number.isFinite(n) ? n : 0));
+  return d.toISOString().slice(0, 10);
+}
 // Kolommen uit docs/sql-migrations/2026-08-27-event-followups-reden-en-herkomst.sql.
 // Die migratie is nog niet gedraaid, dus elke schrijfactie ermee kan falen op
 // "kolom bestaat niet". Dan proberen we het opnieuw zonder — de follow-up is
@@ -76,6 +110,9 @@ const BONUS_PCT   = 3;
 const DEFAULT_FOLLOWUP_OWNER_ID = process.env.DEFAULT_EVENT_FOLLOWUP_OWNER_ID || null;
 
 export { BONUS_PCT };
+// Klein en testbaar gehouden: deze twee dragen allebei een besluit dat stil
+// fout kan gaan. Zie tests/events-afronden-helpers.test.js.
+export { isGesloten, datumOverDagen, AFWEZIG_BELMOMENT_DAGEN, AFWEZIG_REDENEN };
 
 function round2(n) { return Math.round(Number(n) * 100) / 100; }
 function isDateString(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
@@ -169,11 +206,21 @@ export async function runEventsCompleteCore({ userId, body }) {
       if (!AFWEZIG_STATUSSEN.has(String(a.attendance_status || ''))) {
         return { statusCode: 400, response: { error: `afwezig alleen toegestaan bij attendance_status 'no_show' of 'afgemeld' (${a.attendee_id})` } };
       }
-      if (!AFWEZIG_REDENEN.has(String(a.afwezig.reason_code || ''))) {
+      // De reden MAG ontbreken — dan wordt het 'onbekend'. Een reden die niet
+      // in de lijst staat is wél een fout: dat komt niet van een mens die
+      // niets aanklikte, maar van een client die iets verzint.
+      const opgegevenReden = String(a.afwezig.reason_code || '').trim();
+      if (opgegevenReden && !AFWEZIG_REDENEN.has(opgegevenReden)) {
         return { statusCode: 400, response: { error: `afwezig.reason_code ongeldig (${a.attendee_id})` } };
       }
-      if (!isDateString(a.afwezig.follow_up_date)) {
+      if (a.afwezig.follow_up_date != null && !isDateString(a.afwezig.follow_up_date)) {
         return { statusCode: 400, response: { error: `afwezig.follow_up_date moet YYYY-MM-DD zijn (${a.attendee_id})` } };
+      }
+      // Er moet wél íets in staan, anders is het blok leeg en heeft het geen
+      // betekenis.
+      const heeftNotitie = String(a.afwezig.note || '').trim() !== '';
+      if (!heeftNotitie && !a.afwezig.follow_up_date) {
+        return { statusCode: 400, response: { error: `afwezig heeft notitie noch belmoment (${a.attendee_id})` } };
       }
       if (a.afwezig.owner_id != null && !UUID_RE.test(String(a.afwezig.owner_id))) {
         return { statusCode: 400, response: { error: `afwezig.owner_id ongeldig (${a.attendee_id})` } };
@@ -333,11 +380,16 @@ export async function runEventsCompleteCore({ userId, body }) {
       // én een belmoment heeft ingevuld. Doet hij dat niet, dan gebeurt er
       // niets extra's: de aanwezigheidsstatus wordt gewoon opgeslagen zoals
       // altijd. Een half ingevuld blok mag geen halve follow-up opleveren.
+      // Tak 2 gaat open zodra er ÍETS is ingevuld: een notitie of een
+      // belmoment. Voorheen moest de reden er ook bij, en wie alleen een
+      // notitie typte raakte alles kwijt zonder melding. Ontbreekt de reden,
+      // dan wordt het 'onbekend' — dat is een waarde, geen reden om weg te
+      // gooien wat iemand heeft opgeschreven.
       const afw = (a.afwezig && typeof a.afwezig === 'object') ? a.afwezig : null;
+      const afwNotitie = afw ? String(afw.note || '').trim() : '';
       const afwezigTrigger = AFWEZIG_STATUSSEN.has(a.attendance_status)
         && !!afw
-        && AFWEZIG_REDENEN.has(String(afw.reason_code || ''))
-        && !!afw.follow_up_date;
+        && (!!afwNotitie || !!afw.follow_up_date);
 
       if (!aanwezigTrigger && !afwezigTrigger) continue;
 
@@ -357,8 +409,11 @@ export async function runEventsCompleteCore({ userId, body }) {
         }
       }
       const bronUitkomst = aanwezigTrigger ? a.outcome : a.attendance_status;
-      const reasonCode   = aanwezigTrigger ? null : String(afw.reason_code);
-      const followDate   = (aanwezigTrigger ? a.followup.follow_up_date : afw.follow_up_date) || null;
+      const opgegeven    = aanwezigTrigger ? '' : String(afw.reason_code || '').trim();
+      const reasonCode   = aanwezigTrigger ? null : (AFWEZIG_REDENEN.has(opgegeven) ? opgegeven : 'onbekend');
+      const followDate   = aanwezigTrigger
+        ? (a.followup.follow_up_date || null)
+        : (afw.follow_up_date || datumOverDagen(AFWEZIG_BELMOMENT_DAGEN[a.attendance_status] ?? 1));
       const ownerId      = (aanwezigTrigger ? a.followup.owner_id : afw.owner_id) || DEFAULT_FOLLOWUP_OWNER_ID || null;
 
       // Eén payload voor alle drie de schrijfmomenten hieronder (update,
@@ -482,35 +537,84 @@ export async function runEventsCompleteCore({ userId, body }) {
           created_by_user_id: userId,
         };
 
+        /**
+         * Wat we in een BESTAANDE rij zetten. Stond hij dicht, dan gaat hij
+         * weer open op het gekozen belmoment.
+         *
+         * `attempts` blijft bewust ONGEMOEID. Die teller is de historiek van
+         * eerdere pogingen, en die is juist waardevol: de beller ziet dat er
+         * al drie keer gebeld is. Op nul zetten zou het lijken alsof er nooit
+         * iets gebeurd is, en zou de cadans opnieuw laten beginnen.
+         */
+        const leadPatchVoorBestaande = (vorigeStatus) => {
+          const patch = {
+            terugbel_datum: followDate,
+            source_ref    : leadRow.source_ref,
+            lead_email    : att.email || null,
+            lead_phone    : att.phone || null,
+          };
+          if (isGesloten(vorigeStatus)) {
+            patch.lead_status  = 'terugbellen';
+            // Een sluimerende rij zou anders alsnog onzichtbaar blijven.
+            patch.snoozed_until = null;
+          }
+          return patch;
+        };
+
+        /**
+         * De update uitvoeren, met één terugval. `snoozed_until` hoort bij de
+         * kolommen waarvan follow-up-lead-outcome.js zelf ook niet zeker weet
+         * of ze bestaan (er is geen migratie van deze tabel in de repo).
+         * Ontbreekt hij, dan proberen we het opnieuw zonder — het heropenen
+         * zelf is belangrijker dan het opheffen van een sluimering.
+         */
+        const schrijfLeadPatch = async (leadId, vorigeStatus) => {
+          const patch = leadPatchVoorBestaande(vorigeStatus);
+          let { error } = await supabaseAdmin.from('follow_up_leads').update(patch).eq('id', leadId);
+          if (error && isMissendeKolom(error) && 'snoozed_until' in patch) {
+            const { snoozed_until: _weg, ...zonder } = patch;
+            ({ error } = await supabaseAdmin.from('follow_up_leads').update(zonder).eq('id', leadId));
+          }
+          return error;
+        };
+
         // 1) Zoek eerst een bestaande open event-lead voor deze attendee
         //    (via source_ref.attendee_id → dekt zowel customer_id- als
         //    naam-basis-varianten). Zo voorkomen we duplicates die het
         //    unique-index-pad niet zou vangen bij customer_id=NULL.
+        //    GESLOTEN RIJEN TELLEN MEE. Dat deden ze niet, en dat kostte
+        //    mensen: wie ooit eerder gebeld en afgesloten was, had een rij met
+        //    lead_status 'verloren' en geen terugbel_datum. Die werd hier
+        //    overgeslagen, de insert liep vervolgens op de unieke index, en de
+        //    terugval sloot gesloten rijen óók uit — netto gebeurde er niets.
+        //    Geen nieuwe rij, oude rij onaangeroerd, en de deelnemer stond in
+        //    geen enkele lijst terwijl het afronden zelf goed was gegaan.
+        //    Een event is een nieuw contactmoment; dat heropent een oude rij.
         let existingLeadId = null;
+        let existingLeadStatus = null;
         try {
           const { data: byAtt } = await supabaseAdmin
             .from('follow_up_leads')
             .select('id, lead_status, source_ref')
             .eq('source', 'event')
             .filter('source_ref->>attendee_id', 'eq', att.id)
-            .not('lead_status', 'in', '(verlengd,verloren)')
+            .order('created_at', { ascending: false })
             .limit(1);
-          if (byAtt && byAtt[0]) existingLeadId = byAtt[0].id;
+          if (byAtt && byAtt[0]) {
+            existingLeadId = byAtt[0].id;
+            existingLeadStatus = byAtt[0].lead_status || null;
+          }
         } catch (_) {}
 
         if (existingLeadId) {
-          const { error: leadUpErr } = await supabaseAdmin
-            .from('follow_up_leads')
-            .update({
-              terugbel_datum: followDate,
-              source_ref    : leadRow.source_ref,
-              lead_email    : att.email || null,
-              lead_phone    : att.phone || null,
-            })
-            .eq('id', existingLeadId);
+          const leadUpErr = await schrijfLeadPatch(existingLeadId, existingLeadStatus);
           if (leadUpErr) summary.warnings.push(`event-lead update ${a.attendee_id}: ${leadUpErr.message}`);
           else {
             summary.event_leads_updated = (summary.event_leads_updated || 0) + 1;
+            if (isGesloten(existingLeadStatus)) {
+              summary.event_leads_heropend = (summary.event_leads_heropend || 0) + 1;
+              await meldHeropening(existingLeadId, eventId, existingLeadStatus, userId);
+            }
           }
         } else {
           const { error: leadInsErr } = await supabaseAdmin
@@ -523,25 +627,24 @@ export async function runEventsCompleteCore({ userId, body }) {
               // Unique-index (customer_id, source) WHERE lead_status NOT IN
               // (verlengd,verloren). Zoek de bestaande en update.
               try {
+                // Ook hier tellen gesloten rijen mee — zie de toelichting bij
+                // de zoekactie hierboven. Deze terugval sloot ze uit, en dat
+                // was precies de tweede plek waar het stilviel.
                 const { data: existLead } = await supabaseAdmin
                   .from('follow_up_leads')
-                  .select('id')
+                  .select('id, lead_status')
                   .eq('source', 'event')
                   .eq('customer_id', att.customer_id)
-                  .not('lead_status', 'in', '(verlengd,verloren)')
                   .order('created_at', { ascending: false })
                   .limit(1);
                 if (existLead && existLead[0]) {
-                  await supabaseAdmin
-                    .from('follow_up_leads')
-                    .update({
-                      terugbel_datum: followDate,
-                      source_ref    : leadRow.source_ref,
-                      lead_email    : att.email || null,
-                      lead_phone    : att.phone || null,
-                    })
-                    .eq('id', existLead[0].id);
+                  const vorigeStatus = existLead[0].lead_status || null;
+                  await schrijfLeadPatch(existLead[0].id, vorigeStatus);
                   summary.event_leads_updated = (summary.event_leads_updated || 0) + 1;
+                  if (isGesloten(vorigeStatus)) {
+                    summary.event_leads_heropend = (summary.event_leads_heropend || 0) + 1;
+                    await meldHeropening(existLead[0].id, eventId, vorigeStatus, userId);
+                  }
                 }
               } catch (_) {}
             } else {
