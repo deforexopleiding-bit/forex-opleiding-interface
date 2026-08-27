@@ -109,9 +109,12 @@ export default async function handler(req, res) {
   if (!noshowOk)                       return res.status(400).json({ error: 'no-show-akkoord (noshow_akkoord=true) vereist' });
 
   // 1) Lead upserten via bestaande RPC (dedup op lower(email)).
+  //    upsert_lead-RPC kan afhankelijk van signatuur een record of een
+  //    single-row array retourneren. Normaliseer defensief: pak eerste element
+  //    als 'ie array is, anders het object zelf. Dat voorkomt undefined-id.
   let leadId;
   try {
-    const { data: lead, error: lErr } = await supabaseAdmin.rpc('upsert_lead', {
+    const { data: leadRes, error: lErr } = await supabaseAdmin.rpc('upsert_lead', {
       p: {
         voornaam, achternaam, email, telefoon,
         telefoon_e164: telefoonE164(telefoon),
@@ -121,34 +124,37 @@ export default async function handler(req, res) {
       },
     });
     if (lErr) throw new Error('upsert_lead: ' + lErr.message);
-    leadId = lead?.id;
-    if (!leadId) throw new Error('upsert_lead gaf geen lead-id');
+    const leadRow0 = Array.isArray(leadRes) ? leadRes[0] : leadRes;
+    leadId = leadRow0?.id;
+    if (!leadId) {
+      // Diagnose-log voor toekomstig RPC-signatuur-drift.
+      console.error('[public-opstartsessie-book] upsert_lead gaf geen id — return shape:',
+        JSON.stringify(leadRes)?.slice(0, 200));
+      throw new Error('upsert_lead gaf geen lead-id');
+    }
   } catch (e) {
     console.error('[public-opstartsessie-book] lead upsert:', e?.message || e);
     return res.status(500).json({ error: 'Lead aanmaken mislukt' });
   }
 
-  // 2) Lead-row ophalen voor createAppointmentForLead (naam + email + telefoon).
-  let leadRow;
-  try {
-    const { data, error } = await supabaseAdmin
-      .from('leads')
-      .select('id, voornaam, achternaam, email, telefoon, customer_id, source_ref')
-      .eq('id', leadId)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) return res.status(500).json({ error: 'Lead niet gevonden na upsert' });
-    // createAppointmentForLead verwacht lead_name/email/phone-shape.
-    leadRow = {
-      ...data,
-      lead_name : [data.voornaam, data.achternaam].filter(Boolean).join(' ') || voornaam,
-      lead_email: data.email    || email,
-      lead_phone: data.telefoon || telefoon,
-    };
-  } catch (e) {
-    console.error('[public-opstartsessie-book] lead fetch:', e?.message || e);
-    return res.status(500).json({ error: 'Kon lead niet ophalen' });
-  }
+  // 2) Lead-row samenstellen voor createAppointmentForLead.
+  //    Skip de overbodige extra SELECT (was oorzaak van "Kon lead niet ophalen":
+  //    onnodige round-trip met potentiële failure-modes zoals stale
+  //    PostgREST-cache of type-cast). We hebben alle velden al in scope. Voor
+  //    een verse Opstartsessie-lead zijn customer_id + source_ref altijd NULL
+  //    (customer-koppeling gebeurt pas later; source_ref is voor
+  //    event-import-leads). createAppointmentForLead resolveGhlContactId()
+  //    valt bij NULL customer_id + NULL source_ref door naar GHL contact-
+  //    upsert op email/telefoon — precies wat we willen voor nieuwe leads.
+  const leadRow = {
+    id         : leadId,
+    voornaam, achternaam, email, telefoon,
+    customer_id: null,
+    source_ref : null,
+    lead_name  : [voornaam, achternaam].filter(Boolean).join(' ') || voornaam,
+    lead_email : email,
+    lead_phone : telefoon,
+  };
 
   // 3) Afspraak aanmaken (GHL contact-upsert + appointment + follow_up-row +
   //    booking_source + fail-soft GHL-tag).

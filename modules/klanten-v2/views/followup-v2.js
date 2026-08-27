@@ -229,7 +229,19 @@
   function showToast(msg, tone) {
     _ui.toast = { msg, tone: tone || 'info', ts: Date.now() };
     if (H.showToast) { try { H.showToast(msg, tone); return; } catch (_) {} }
-    setTimeout(() => { if (_ui.toast && Date.now() - _ui.toast.ts >= 3000) { _ui.toast = null; if (render) render(); } }, 3500);
+    // Focus-aware auto-hide: skip render() als user typt in input/textarea
+    // (voorkomt focus-loss midden in een zin). Herstart timer tot user klaar is.
+    const _autoHide = () => {
+      if (!_ui.toast || Date.now() - _ui.toast.ts < 3000) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT') && !ae.readOnly) {
+        setTimeout(_autoHide, 2000);
+        return;
+      }
+      _ui.toast = null;
+      if (render) render();
+    };
+    setTimeout(_autoHide, 3500);
     if (render) render();
   }
   function openConfirm(msg, onOk, tone) {
@@ -628,9 +640,11 @@
     if (render) render();
   }
   // ── BROK 5 fetchers ─────────────────────────────────────────────────
-  async function fetchVoicememo() {
+  async function fetchVoicememo(opts) {
     const st = _live.voicememo;
-    if (st.loading || st.data) return;
+    const force = !!(opts && opts.force);
+    if (st.loading) return;
+    if (!force && st.data) return;   // force-flag omzeilt de cache (post-mark refetch)
     st.loading = true; st.error = null;
     const j = await tryFetch('voicememo-round', '/api/follow-up-voicememo-round');
     st.loading = false;
@@ -664,7 +678,6 @@
   }
   // ── BROK 5 write-handlers ───────────────────────────────────────────
   async function submitVoicememoSent(apptId, all) {
-    const key = all ? '_ALL' : apptId;
     if (all) _ui.voicememoAllBusy = true; else _ui.voicememoBusy[apptId] = true;
     if (render) render();
     const body = all ? { all: true } : { appointment_id: apptId };
@@ -676,7 +689,39 @@
       showToast('Markeren mislukt: ' + (j.__error || j.error), 'warn');
       if (render) render(); return;
     }
-    _live.voicememo.data = null;
+
+    // Prio 1b-fix: EAGER lokale mutation — popup toont direct 'Verzonden'
+    // + tellers +1 zonder te wachten op re-fetch. Server-200 = DB-write
+    // bevestigd (KPI-bord telt óók +1 zodra voicememo_sent_at gezet is).
+    // Response-shape 1:1 met endpoint (regel 100-135 van follow-up-voicememo-round.js).
+    const data = _live.voicememo.data;
+    if (data && Array.isArray(data.leads)) {
+      const today = data.today || null;
+      if (all) {
+        for (const row of data.leads) {
+          if (row.voicememo_status !== 'sent') {
+            row.voicememo_status  = 'sent';
+            row.voicememo_sent_on = today;
+          }
+        }
+      } else {
+        const row = data.leads.find(r => r.id === apptId);
+        if (row) {
+          row.voicememo_status  = 'sent';
+          row.voicememo_sent_on = today;
+        }
+      }
+      if (data.counts) {
+        const sent = data.leads.filter(r => r.voicememo_status === 'sent').length;
+        data.counts.sent = sent;
+        data.counts.open = Math.max(0, (data.counts.total || data.leads.length) - sent);
+      }
+    }
+
+    // Achtergrond re-fetch met force-flag (omzeilt fetchVoicememo cache-guard).
+    // Bevestigt eager state tegen DB; fail-soft: bij netfout blijft eager state.
+    queueMicrotask(() => fetchVoicememo({ force: true }));
+
     showToast(all ? `${j.updated || 0} voicememos gemarkeerd als verzonden` : 'Voicememo gemarkeerd als verzonden', 'success');
     if (render) render();
   }
@@ -1014,7 +1059,10 @@
     }
     if (render) render();
   };
-  window.__fuCallField = (k, v) => { if (_ui.callModal) { _ui.callModal[k] = v; if (render) render(); } };
+  // Prio 0 (focus-bug): geen render() bij typen — DOM houdt de waarde vast.
+  // Save via __fuCallSave-knop (blur → OK-klik). Radio/outcome-handlers
+  // (__fuCallSetOutcome) behouden hun render() want conditionele velden.
+  window.__fuCallField = (k, v) => { if (_ui.callModal) _ui.callModal[k] = v; };
   window.__fuCallToggleBezwaar = (b) => {
     if (!_ui.callModal) return;
     if (_ui.callModal.bezwaren.has(b)) _ui.callModal.bezwaren.delete(b);
@@ -1030,7 +1078,9 @@
       submitOutcome();
     }
   };
-  window.__fuNoteDraft = (leadId, v) => { _ui.noteDraft[leadId] = v; if (render) render(); };
+  // Prio 0 (focus-bug): geen render() bij typen — textarea houdt waarde vast.
+  // Save via __fuNoteSave (knop-klik). Zonder render blijft focus behouden.
+  window.__fuNoteDraft = (leadId, v) => { _ui.noteDraft[leadId] = v; };
   window.__fuNoteSave = (leadId) => submitNote(leadId);
   window.__fuStatus = (leadId, status) => submitLeadUpdate(leadId, { lead_status: status });
   // Surgische DOM-sync voor slot-chip highlights + datetime-input value.
@@ -1067,7 +1117,9 @@
     if (render) render();
   };
   window.__fuCloseAnnuleer = () => { _ui.annuleerModal = null; if (render) render(); };
-  window.__fuAnnuleerField = (k, v) => { if (_ui.annuleerModal) { _ui.annuleerModal[k] = v; if (render) render(); } };
+  // Prio 0 (focus-bug): geen render bij typen — reden-textarea houdt waarde.
+  // Radio 'mode' rendert wél (aparte handler), want conditional velden.
+  window.__fuAnnuleerField = (k, v) => { if (_ui.annuleerModal) _ui.annuleerModal[k] = v; };
   window.__fuAnnuleerSave = () => {
     const m = _ui.annuleerModal; if (!m) return;
     openConfirm(`Weet je zeker dat je deze call ${m.mode === 'definitief' ? 'definitief wilt annuleren' : 'op "wacht op reschedule" wilt zetten'}?`, submitAnnuleer, 'warn');
@@ -1077,7 +1129,20 @@
     if (render) render();
   };
   window.__fuCloseAfschrijf = () => { _ui.afschrijfModal = null; if (render) render(); };
-  window.__fuAfschrijfField = (k, v) => { if (_ui.afschrijfModal) { _ui.afschrijfModal[k] = v; if (render) render(); } };
+  // Prio 0 (focus-bug): geen render bij typen — reason-textarea houdt waarde.
+  // Save-knop hangt af van reason.trim().length ≥ 3 → surgical DOM-update
+  // op [data-fu-afschrijf-save] zonder full re-render (focus blijft).
+  window.__fuAfschrijfField = (k, v) => {
+    if (!_ui.afschrijfModal) return;
+    _ui.afschrijfModal[k] = v;
+    if (k === 'reason') {
+      const btn = document.querySelector('[data-fu-afschrijf-save]');
+      if (btn) {
+        const ok = String(v || '').trim().length >= 3 && !_ui.afschrijfModal.saving;
+        btn.disabled = !ok;
+      }
+    }
+  };
   window.__fuAfschrijfSave = () => {
     const m = _ui.afschrijfModal; if (!m) return;
     openConfirm('Weet je zeker dat je dit item wilt afschrijven? De bijhorende lead wordt op status "verloren" gezet.', submitAfschrijf, 'warn');
@@ -1146,7 +1211,9 @@
   };
   window.__fuNoshowOutcomeClose = () => { _ui.noshowOutcomeModal = null; if (render) render(); };
   window.__fuNoshowOutcomeSet = (v) => { if (_ui.noshowOutcomeModal) { _ui.noshowOutcomeModal.outcome = v; _ui.noshowOutcomeModal.error = null; if (render) render(); } };
-  window.__fuNoshowOutcomeField = (k, v) => { if (_ui.noshowOutcomeModal) { _ui.noshowOutcomeModal[k] = v; if (render) render(); } };
+  // Prio 0 (focus-bug): geen render bij typen; Set-radio (outcome-keuze)
+  // heeft aparte handler die conditional velden renderen doet.
+  window.__fuNoshowOutcomeField = (k, v) => { if (_ui.noshowOutcomeModal) _ui.noshowOutcomeModal[k] = v; };
   window.__fuNoshowOutcomeSave = () => {
     const m = _ui.noshowOutcomeModal; if (!m || !m.outcome) return;
     const risk = {
@@ -1223,7 +1290,8 @@
     if (render) render();
   };
   window.__fuDeleteApptClose = () => { _ui.deleteApptModal = null; if (render) render(); };
-  window.__fuDeleteApptField = (k, v) => { if (_ui.deleteApptModal) { _ui.deleteApptModal[k] = v; if (render) render(); } };
+  // Prio 0 (focus-bug): geen render bij typen; textarea houdt waarde vast.
+  window.__fuDeleteApptField = (k, v) => { if (_ui.deleteApptModal) _ui.deleteApptModal[k] = v; };
   window.__fuDeleteApptSave = () => {
     const m = _ui.deleteApptModal; if (!m) return;
     openConfirm('Verwijderen: soft-delete DB + GHL-cancel (klant krijgt cancel-mail via GHL) + Zoom-meeting delete. Onomkeerbaar. Weet je zeker?', submitDeleteAppt, 'warn');
@@ -1695,7 +1763,7 @@
       ${m.error ? `<div style="padding:8px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">${esc(m.error)}</div>` : ''}
       <div style="display:flex;justify-content:flex-end;gap:8px">
         <button class="btn btn-ghost" onclick="window.__fuCloseAfschrijf()">Sluiten</button>
-        <button class="btn btn-primary" ${(m.reason.trim().length < 3 || m.saving) ? 'disabled' : ''} onclick="window.__fuAfschrijfSave()" style="background:var(--rose);border-color:var(--rose)">${m.saving ? 'Afschrijven…' : 'Afschrijven'}</button>
+        <button class="btn btn-primary" data-fu-afschrijf-save ${(m.reason.trim().length < 3 || m.saving) ? 'disabled' : ''} onclick="window.__fuAfschrijfSave()" style="background:var(--rose);border-color:var(--rose)">${m.saving ? 'Afschrijven…' : 'Afschrijven'}</button>
       </div>`;
     return _modalShell('Opvolg-item afschrijven', body, 'window.__fuCloseAfschrijf()');
   }

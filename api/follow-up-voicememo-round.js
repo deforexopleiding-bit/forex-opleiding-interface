@@ -164,12 +164,27 @@ export default async function handler(req, res) {
       if (error) {
         if (error.code === '42P01') return res.status(501).json({ error: 'Tabel follow_up_appointments ontbreekt', code: 'MIGRATION_REQUIRED' });
         if (error.code === '42703') {
-          // Val terug op alleen voicememo_status (oudere schema's).
+          // Trapsgewijze fallback zodat popup-lijst en KPI-bord nooit uiteenlopen:
+          //   L1: {voicememo_status, voicememo_sent_at} — bord telt via sent_at
+          //   L2: alleen voicememo_status — echt-oude deploys zonder sent_at
+          // In productie mag L2 niet triggeren; wel expliciete log-warn zodat
+          // een missende kolom-migratie zichtbaar wordt.
+          const nowIso = new Date().toISOString();
           const { data: d2, error: e2 } = await supabaseAdmin
             .from('follow_up_appointments')
-            .update({ voicememo_status: 'sent' })
+            .update({ voicememo_status: 'sent', voicememo_sent_at: nowIso })
             .in('id', ids)
             .select('id');
+          if (e2 && e2.code === '42703') {
+            console.warn('[follow-up-voicememo-round] fallback L2: voicememo_sent_at kolom ontbreekt — draai kolom-migratie');
+            const { data: d3, error: e3 } = await supabaseAdmin
+              .from('follow_up_appointments')
+              .update({ voicememo_status: 'sent' })
+              .in('id', ids)
+              .select('id');
+            if (e3) throw new Error(e3.message);
+            return res.status(200).json({ ok: true, updated: (d3 || []).length });
+          }
           if (e2) throw new Error(e2.message);
           return res.status(200).json({ ok: true, updated: (d2 || []).length });
         }
