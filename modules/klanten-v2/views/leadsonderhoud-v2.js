@@ -2033,10 +2033,72 @@
     catch (_) { prompt('Kopieer de link:', url); }
   };
 
-  function _lsBeheerKnop(tab){
-    const href = '/modules/leadsonderhoud.html?tab=' + encodeURIComponent(tab);
-    return `<a href="${href}" target="_blank" rel="noopener" class="btn btn-secondary" style="text-decoration:none;font-size:12px;padding:6px 12px">Beheren in editor ↗</a>`;
-  }
+  // v=16 (2026-08-27): _lsBeheerKnop verwijderd — alles is nu v2-native.
+  // Zie modal-implementaties hieronder (opstart-detail / bron-form / quiz-editor).
+
+  /* ══════════════════════════════════════════════════════════════════
+     v=16: BRONNEN — v2-native inline CRUD via booking-sources-upsert.
+     Beheren-knop verwijderd (geen v1-link meer); acties per rij in-place.
+     Nieuwe-bron form onder de tabel. Kopieerbare link + calls-per-bron
+     ongewijzigd.
+     ══════════════════════════════════════════════════════════════════ */
+
+  const _lsBronForm = { slug: '', label: '', busy: false, error: null };
+  window._lsBronSetSlug  = function(el){ _lsBronForm.slug  = String(el.value || '').trim().toLowerCase(); };
+  window._lsBronSetLabel = function(el){ _lsBronForm.label = String(el.value || '').trim(); };
+  window._lsBronToevoegen = async function(){
+    if (_lsBronForm.busy) return;
+    const slug  = _lsBronForm.slug;
+    const label = _lsBronForm.label;
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) { window.KV.toast('Slug moet lowercase alfanumeriek + hyphen zijn (max 64).', 'warn'); return; }
+    if (label.length < 1 || label.length > 120)  { window.KV.toast('Label vereist (1-120 tekens).', 'warn'); return; }
+    _lsBronForm.busy = true; _lsBronForm.error = null; if (window.DFO?.render) window.DFO.render();
+    try {
+      await window.KV.authedJson('/api/booking-sources-upsert', {
+        method: 'POST', body: JSON.stringify({ slug, label, actief: true }),
+      });
+      window.KV.toast('Bron "' + label + '" toegevoegd.', 'ok');
+      _lsBronForm.slug = ''; _lsBronForm.label = ''; _lsBronForm.busy = false;
+      fetchBronnen(true);
+    } catch (e) {
+      window.KV.toast('Toevoegen mislukt: ' + (e?.message || 'onbekend'), 'warn');
+      _lsBronForm.busy = false; if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  window._lsBronBewerken = async function(idx){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
+    const nieuwLabel = prompt('Nieuw label voor "' + b.slug + '":', b.label);
+    if (nieuwLabel == null) return;
+    const label = String(nieuwLabel).trim(); if (!label) return;
+    try {
+      await window.KV.authedJson('/api/booking-sources-upsert', {
+        method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label, actief: b.actief }),
+      });
+      window.KV.toast('Bron bijgewerkt.', 'ok'); fetchBronnen(true);
+    } catch (e) { window.KV.toast('Bewerken mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+  };
+  window._lsBronToggle = async function(idx){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
+    try {
+      await window.KV.authedJson('/api/booking-sources-upsert', {
+        method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label: b.label, actief: !b.actief }),
+      });
+      window.KV.toast(b.actief ? 'Bron gedeactiveerd.' : 'Bron geactiveerd.', 'ok'); fetchBronnen(true);
+    } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+  };
+  window._lsBronRegistreren = async function(idx){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
+    const suggest = b.slug.charAt(0).toUpperCase() + b.slug.slice(1);
+    const lbl = prompt('Label voor "' + b.slug + '" (typo of nieuwe bron):', suggest);
+    if (lbl == null) return;
+    const label = String(lbl).trim(); if (!label) return;
+    try {
+      await window.KV.authedJson('/api/booking-sources-upsert', {
+        method: 'POST', body: JSON.stringify({ slug: b.slug, label, actief: true }),
+      });
+      window.KV.toast('Bron geregistreerd.', 'ok'); fetchBronnen(true);
+    } catch (e) { window.KV.toast('Registreren mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+  };
 
   function bronnenView() {
     if (!_live.bronnen.fetched && !_live.bronnen.loading && !_live.bronnen.error) queueMicrotask(() => fetchBronnen(false));
@@ -2045,13 +2107,17 @@
     const items = data.items || [];
     const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
     const filterChips = periodes.map(([k,l]) => `<button class="chip ${st.periode===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetBronPeriode('${k}')">${esc(l)}</button>`).join('');
-    const rows = items.length ? items.map(b => {
+    const rows = items.length ? items.map((b, i) => {
       const url = 'https://deforexopleiding.nl/opstartsessie/' + b.slug;
       const statusBadge = b.is_registered
         ? (b.actief
             ? '<span style="color:var(--emerald);font-weight:600;font-size:11.5px">● Actief</span>'
             : '<span style="color:var(--text-3);font-weight:600;font-size:11.5px">○ Uit</span>')
         : '<span style="color:var(--amber);font-weight:600;font-size:11.5px" title="Slug komt op boekingen voor maar staat niet in de bronnenlijst">⚠ Onbekend</span>';
+      const acties = b.is_registered
+        ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-right:4px" onclick="window._lsBronBewerken(${i})">Bewerken</button>
+           <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronToggle(${i})">${b.actief ? 'Deactiveren' : 'Activeren'}</button>`
+        : `<button class="btn btn-primary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronRegistreren(${i})" title="Toevoegen aan bronnenlijst met deze slug">Registreren</button>`;
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px 10px">
           <div style="font-weight:600">${esc(b.label)}</div>
@@ -2065,12 +2131,13 @@
             <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsCopyLink('${esc(url)}', this)">Kopiëren</button>
           </div>
         </td>
+        <td style="padding:8px 10px;white-space:nowrap">${acties}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="4" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen bronnen — voeg er één toe via de editor.'}</td></tr>`;
+    }).join('') : `<tr><td colspan="5" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Nog geen bronnen — voeg er hieronder één toe.'}</td></tr>`;
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Attributie-bronnen voor <code>deforexopleiding.nl/opstartsessie/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen (<code>follow_up_appointments.booking_source</code>). Onbekende/typo-slugs verschijnen apart en blijven telbaar.
+        Attributie-bronnen voor <code>deforexopleiding.nl/opstartsessie/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen. Onbekende/typo-slugs verschijnen apart en blijven telbaar.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
@@ -2079,7 +2146,6 @@
           ${filterChips}
         </div>
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (`${data.total_calls || 0} geboekte Opstartsessies · ${st.periode === 'week' ? 'deze week' : st.periode === 'maand' ? 'deze maand' : 'alle tijd'}`)}</span>
-        ${_lsBeheerKnop('bronnen')}
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div style="overflow-x:auto">
@@ -2090,11 +2156,27 @@
                 <th style="padding:8px 10px">Status</th>
                 <th style="padding:8px 10px;text-align:right">Calls</th>
                 <th style="padding:8px 10px">Link</th>
+                <th style="padding:8px 10px">Acties</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
           </table>
         </div>
+      </div>
+      <div style="margin-top:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:10px">Nieuwe bron toevoegen</div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div style="flex:0 0 220px">
+            <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Slug (URL)</label>
+            <input type="text" placeholder="bv. instagram-story" value="${esc(_lsBronForm.slug)}" oninput="window._lsBronSetSlug(this)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-family:var(--mono,monospace);font-size:12.5px" ${_lsBronForm.busy ? 'disabled' : ''}>
+          </div>
+          <div style="flex:1;min-width:200px">
+            <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Label</label>
+            <input type="text" placeholder="bv. Instagram Story" value="${esc(_lsBronForm.label)}" oninput="window._lsBronSetLabel(this)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12.5px" ${_lsBronForm.busy ? 'disabled' : ''}>
+          </div>
+          <button class="btn btn-primary" style="font-size:12.5px;padding:7px 16px" onclick="window._lsBronToevoegen()" ${_lsBronForm.busy ? 'disabled' : ''}>${_lsBronForm.busy ? 'Bezig…' : '+ Toevoegen'}</button>
+        </div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">Slug = lowercase, alfanumeriek + hyphen (max 64 tekens). Wordt onderdeel van de link.</div>
       </div>`;
   }
 
@@ -2122,8 +2204,7 @@
       const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>';
       const afsp = s.heeft_afspraak ? '<span style="color:var(--emerald);font-weight:600">✓ Geboekt</span>' : '<span style="color:var(--text-3)">–</span>';
       const contact = [s.email, s.telefoon].filter(Boolean).join(' · ');
-      const detailHref = '/modules/leadsonderhoud.html?tab=opstartsessies&id=' + encodeURIComponent(s.id);
-      return `<tr style="border-bottom:1px solid var(--border)">
+      return `<tr data-op-row="${esc(s.id)}" style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window._lsOpenOpstartDetail('${esc(s.id)}')">
         <td style="padding:8px 10px;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text-3);font-size:11.5px" title="${esc(s.created_at)}">${esc(kortDt(s.created_at))}</td>
         <td style="padding:8px 10px">
           <div style="font-weight:600">${esc(s.naam || '—')}</div>
@@ -2134,13 +2215,14 @@
         <td style="padding:8px 10px;text-align:center">${akkoord}</td>
         <td style="padding:8px 10px">${esc(s.gekozen_slot || '—')}</td>
         <td style="padding:8px 10px">${afsp}</td>
-        <td style="padding:8px 10px"><a href="${detailHref}" target="_blank" rel="noopener" style="color:var(--brand);text-decoration:none;font-size:11.5px">Detail ↗</a></td>
+        <td style="padding:8px 10px"><button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="event.stopPropagation();window._lsOpenOpstartDetail('${esc(s.id)}')">Detail</button></td>
       </tr>`;
     }).join('') : `<tr><td colspan="8" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen submissions in dit venster.'}</td></tr>`;
 
     return `
+      ${_lsOpstartDetailModalHtml()}
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Alles wat leads op <code>deforexopleiding.nl/opstartsessie</code> invullen — inclusief afgewezen leads. Klik "Detail ↗" voor de vragenlijst-antwoorden.
+        Alles wat leads op <code>deforexopleiding.nl/opstartsessie</code> invullen — inclusief afgewezen leads. Klik een rij voor de vragenlijst-antwoorden.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:10px">
@@ -2157,7 +2239,6 @@
           <select onchange="window._lsSetOpBron(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;background:var(--surface)">${bronOpts}</select>
         </div>
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
-        ${_lsBeheerKnop('opstartsessies')}
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div style="overflow-x:auto">
@@ -2187,7 +2268,6 @@
     const rows = items.length ? items.map(q => {
       const live = q.live_versie ? `live v${q.live_versie}` : 'niet gepubliceerd';
       const actief = q.is_active !== false;
-      const editHref = '/modules/leadsonderhoud.html?tab=vragenlijst';
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px 10px">
           <div style="font-weight:600">${esc(q.naam)}</div>
@@ -2197,18 +2277,18 @@
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${q.drempel}</td>
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${q.vragen_actief || 0}<span style="color:var(--text-3);font-size:11px"> / ${q.vragen_totaal || 0}</span></td>
         <td style="padding:8px 10px"><span style="font-family:var(--mono,monospace);font-size:11.5px">${esc(live)}</span></td>
-        <td style="padding:8px 10px"><a href="${editHref}" target="_blank" rel="noopener" style="color:var(--brand);text-decoration:none;font-size:11.5px">Bewerken ↗</a></td>
+        <td style="padding:8px 10px"><button class="btn btn-primary" style="font-size:11.5px;padding:4px 12px" onclick="window._lsOpenQuizEditor('${esc(q.slug)}')">Bewerken</button></td>
       </tr>`;
     }).join('') : `<tr><td colspan="6" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen vragenlijsten gevonden.'}</td></tr>`;
 
     return `
+      ${_lsQuizEditorModalHtml()}
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Vragenlijsten die de publieke pagina's op <code>deforexopleiding.nl</code> lezen. De werk-versie bewerkt / publiceer je in de editor (opent in nieuw tabblad); de website ziet alleen de gepubliceerde snapshot.
+        Vragenlijsten die de publieke pagina's op <code>deforexopleiding.nl</code> lezen. De <b>werk-versie</b> bewerkt en publiceer je hier; de website ziet alleen de gepubliceerde snapshot.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
         <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : (items.length + ' vragenlijst' + (items.length === 1 ? '' : 'en'))}</span>
-        ${_lsBeheerKnop('vragenlijst')}
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div style="overflow-x:auto">
@@ -2229,6 +2309,327 @@
       </div>`;
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+     v=16 MODAL — Opstartsessie detail (read-only, endpoint:
+     /api/leadsonderhoud-opstartsessies-detail)
+     ══════════════════════════════════════════════════════════════════ */
+  const _lsOpDetail = { open: false, id: null, loading: false, error: null, data: null };
+  window._lsOpenOpstartDetail = async function(id){
+    _lsOpDetail.open = true; _lsOpDetail.id = id; _lsOpDetail.loading = true; _lsOpDetail.error = null; _lsOpDetail.data = null;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/leadsonderhoud-opstartsessies-detail?id=' + encodeURIComponent(id));
+      _lsOpDetail.loading = false; _lsOpDetail.data = j?.item || null;
+      if (!_lsOpDetail.data) _lsOpDetail.error = 'Geen data teruggekregen.';
+    } catch (e) {
+      _lsOpDetail.loading = false; _lsOpDetail.error = e?.message || 'onbekend';
+    }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsCloseOpstartDetail = function(){ _lsOpDetail.open = false; _lsOpDetail.data = null; if (window.DFO?.render) window.DFO.render(); };
+  function _lsOpstartDetailModalHtml(){
+    if (!_lsOpDetail.open) return '';
+    const kortDt = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch(_){ return String(iso); } };
+    let body = '';
+    if (_lsOpDetail.loading) {
+      body = `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Laden…</div>`;
+    } else if (_lsOpDetail.error) {
+      body = `<div style="padding:24px;color:var(--rose)">⚠ ${esc(_lsOpDetail.error)}</div>`;
+    } else if (_lsOpDetail.data) {
+      const s = _lsOpDetail.data;
+      const badge = s.resultaat === 'toegelaten'
+        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
+        : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>';
+      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>';
+      const antwoordenHtml = (s.antwoorden || []).map((a, i) => {
+        const afw = a.afwijzer ? '<span style="background:var(--rose-soft);color:var(--rose);padding:1px 6px;border-radius:8px;font-size:10.5px;margin-left:6px">afwijzer</span>' : '';
+        return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Vraag ${i + 1}</div>
+          <div style="font-weight:600;margin:3px 0">${esc(a.vraag || '')}</div>
+          <div style="font-size:12.5px">Antwoord: <b>${esc(a.gekozen_label || '—')}</b> <span style="color:var(--text-3);font-size:11.5px">(${Number(a.punten) || 0} punten)</span>${afw}</div>
+        </div>`;
+      }).join('') || `<div style="color:var(--text-3);padding:12px 0">Geen antwoorden opgeslagen.</div>`;
+      let afspraakHtml = '';
+      if (s.afspraak) {
+        afspraakHtml = `<div style="margin-top:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm)">
+          <div style="font-weight:600;margin-bottom:4px;font-size:12.5px">Gekoppelde afspraak</div>
+          <div style="font-size:12.5px">Ingepland op: <b>${esc(kortDt(s.afspraak.scheduled_at))}</b> — status: <b>${esc(s.afspraak.status || '—')}</b></div>
+          ${s.afspraak.zoom_join_url ? `<div style="font-size:12px;margin-top:4px"><a href="${esc(s.afspraak.zoom_join_url)}" target="_blank" rel="noopener" style="color:var(--brand)">Zoom-link openen ↗</a></div>` : ''}
+        </div>`;
+      } else if (s.resultaat === 'toegelaten') {
+        afspraakHtml = `<div style="margin-top:14px;padding:10px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55">Toegelaten, maar nog geen afspraak geboekt (lead heeft niet doorgeklikt na akkoord).</div>`;
+      }
+      body = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px">
+          <div>
+            <div style="font-size:18px;font-weight:600">${esc(s.naam || 'Anonieme submission')}</div>
+            <div style="color:var(--text-3);font-size:12px">${esc([s.email, s.telefoon].filter(Boolean).join(' · ') || '—')}</div>
+            <div style="color:var(--text-3);font-size:11.5px;margin-top:2px;font-family:var(--mono,monospace)">${esc(kortDt(s.created_at))}</div>
+          </div>
+          <div>${badge}</div>
+        </div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);margin-bottom:14px">
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</div><b>${esc(s.bron_label)}</b><div style="font-family:var(--mono,monospace);font-size:11px;color:var(--text-3)">${esc(s.booking_source || '—')}</div></div>
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Score</div><b>${s.score != null ? s.score : '—'}</b><span style="color:var(--text-3)"> / drempel ${s.drempel != null ? s.drempel : '—'}</span></div>
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">€50 akkoord</div><b>${akkoord}</b></div>
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || '—')}</b></div>
+        </div>
+        <div>
+          <div style="font-weight:600;margin-bottom:8px;font-size:13px">Vragenlijst-antwoorden</div>
+          ${antwoordenHtml}
+        </div>
+        ${afspraakHtml}`;
+    }
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseOpstartDetail()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(720px,100%);max-height:90vh;overflow-y:auto">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px;position:sticky;top:0;background:var(--surface);z-index:1">
+          <div style="font-size:14px;font-weight:600">Opstartsessie-submission</div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseOpstartDetail()">✕</button>
+        </div>
+        <div style="padding:16px 20px">${body}</div>
+      </div>
+    </div>`;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     v=16 MODAL — Vragenlijst-editor (v2-native, endpoints:
+     /api/leadsonderhoud-quiz (GET), /-quiz-opslaan (POST),
+     /-quiz-publiceren (POST), /-quiz-versies (GET), /-quiz-rollback (POST))
+     Werk-versie CRUD + Publiceren + Versies-lijst met rollback.
+     ══════════════════════════════════════════════════════════════════ */
+  const _lsQuizEd = {
+    open: false, slug: null, loading: false, error: null,
+    quiz: null, vragen: [], live: null,   // werk-versie state
+    busy: null,                            // 'save'|'publish'|'load' | null
+    versies: { open: false, loading: false, items: [], error: null },
+  };
+  window._lsOpenQuizEditor = async function(slug){
+    _lsQuizEd.open = true; _lsQuizEd.slug = String(slug || '');
+    _lsQuizEd.loading = true; _lsQuizEd.error = null;
+    _lsQuizEd.quiz = null; _lsQuizEd.vragen = []; _lsQuizEd.live = null;
+    _lsQuizEd.versies = { open: false, loading: false, items: [], error: null };
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/leadsonderhoud-quiz?slug=' + encodeURIComponent(slug));
+      _lsQuizEd.quiz = j?.quiz || null;
+      _lsQuizEd.vragen = Array.isArray(j?.vragen) ? j.vragen : [];
+      _lsQuizEd.live = j?.live || null;
+    } catch (e) { _lsQuizEd.error = e?.message || 'onbekend'; }
+    _lsQuizEd.loading = false;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsCloseQuizEditor = function(){ _lsQuizEd.open = false; if (window.DFO?.render) window.DFO.render(); };
+
+  // DOM-sync: lees huidige input-waardes terug in state (analoog aan v1 leesQuizDom).
+  function _lsQuizReadDom(){
+    if (!_lsQuizEd.quiz) return;
+    const naamEl = document.querySelector('[data-lq-field="naam"]');
+    const drmEl  = document.querySelector('[data-lq-field="drempel"]');
+    const actEl  = document.querySelector('[data-lq-field="is_active"]');
+    if (naamEl) _lsQuizEd.quiz.naam = String(naamEl.value || '').trim();
+    if (drmEl)  _lsQuizEd.quiz.drempel = Number(drmEl.value) || 0;
+    if (actEl)  _lsQuizEd.quiz.is_active = !!actEl.checked;
+    const vragen = [];
+    document.querySelectorAll('[data-lq-vraag]').forEach((vEl) => {
+      const vi = Number(vEl.getAttribute('data-lq-vraag'));
+      const oud = _lsQuizEd.vragen[vi] || {};
+      const labEl = vEl.querySelector('[data-lq-vlabel]');
+      const actVE = vEl.querySelector('[data-lq-vactive]');
+      const opties = [];
+      vEl.querySelectorAll('[data-lq-opt]').forEach((oEl) => {
+        const olab = oEl.querySelector('[data-lq-olabel]');
+        const opnt = oEl.querySelector('[data-lq-opunten]');
+        const oafw = oEl.querySelector('[data-lq-oafwijzer]');
+        opties.push({
+          label: olab ? String(olab.value || '').trim() : '',
+          punten: Number(opnt ? opnt.value : 0) || 0,
+          afwijzer: !!(oafw && oafw.checked),
+        });
+      });
+      vragen.push({
+        id: oud.id || null,
+        label: labEl ? String(labEl.value || '').trim() : '',
+        options: opties,
+        active: actVE ? !!actVE.checked : true,
+      });
+    });
+    _lsQuizEd.vragen = vragen;
+  }
+  window._lsQuizAction = function(act, i, oi){
+    _lsQuizReadDom();
+    const vragen = _lsQuizEd.vragen;
+    if (act === 'add-vraag') vragen.push({ id: null, label: '', options: [{ label: '', punten: 0, afwijzer: false }], active: true });
+    else if (act === 'del-vraag') vragen.splice(i, 1);
+    else if (act === 'up' && i > 0) { const t = vragen[i - 1]; vragen[i - 1] = vragen[i]; vragen[i] = t; }
+    else if (act === 'down' && i < vragen.length - 1) { const t = vragen[i + 1]; vragen[i + 1] = vragen[i]; vragen[i] = t; }
+    else if (act === 'add-opt') vragen[i].options.push({ label: '', punten: 0, afwijzer: false });
+    else if (act === 'del-opt') vragen[i].options.splice(oi, 1);
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsQuizSave = async function(){
+    if (_lsQuizEd.busy) return;
+    _lsQuizReadDom();
+    const q = _lsQuizEd.quiz; if (!q) return;
+    if (!q.naam) { window.KV.toast('Naam is leeg.', 'warn'); return; }
+    if (!Number.isFinite(q.drempel)) { window.KV.toast('Drempel is geen getal.', 'warn'); return; }
+    for (let i = 0; i < _lsQuizEd.vragen.length; i++) {
+      const v = _lsQuizEd.vragen[i];
+      if (!v.label) { window.KV.toast(`Vraag ${i+1}: label is leeg.`, 'warn'); return; }
+      if (!v.options?.length) { window.KV.toast(`Vraag ${i+1}: geen opties.`, 'warn'); return; }
+      if (v.options.some((o) => !o.label)) { window.KV.toast(`Vraag ${i+1}: optie zonder tekst.`, 'warn'); return; }
+    }
+    _lsQuizEd.busy = 'save'; if (window.DFO?.render) window.DFO.render();
+    try {
+      await window.KV.authedJson('/api/leadsonderhoud-quiz-opslaan', {
+        method: 'POST',
+        body: JSON.stringify({
+          slug: q.slug, naam: q.naam, drempel: q.drempel, is_active: q.is_active !== false,
+          vragen: _lsQuizEd.vragen,
+        }),
+      });
+      window.KV.toast('Werk-versie opgeslagen.', 'ok');
+      // Herlaad om verse ids op te halen (nieuwe vragen krijgen een id).
+      await window._lsOpenQuizEditor(q.slug);
+      // Vragenlijst-lijst refreshen zodat de status-tabel klopt.
+      _live.vragenlijst.fetched = false; fetchVragenlijst();
+    } catch (e) {
+      window.KV.toast('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'warn');
+    }
+    _lsQuizEd.busy = null; if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsQuizPublish = async function(){
+    if (_lsQuizEd.busy) return;
+    if (!confirm('Publiceer de werk-versie naar live? De website ziet dan direct de nieuwe vragen.')) return;
+    _lsQuizEd.busy = 'publish'; if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/leadsonderhoud-quiz-publiceren', {
+        method: 'POST', body: JSON.stringify({ slug: _lsQuizEd.slug }),
+      });
+      window.KV.toast('Gepubliceerd als versie ' + (j?.versie || '?'), 'ok');
+      await window._lsOpenQuizEditor(_lsQuizEd.slug);
+      _live.vragenlijst.fetched = false; fetchVragenlijst();
+    } catch (e) {
+      window.KV.toast('Publiceren mislukt: ' + (e?.message || 'onbekend'), 'warn');
+    }
+    _lsQuizEd.busy = null; if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsQuizVersies = async function(){
+    _lsQuizEd.versies.open = true; _lsQuizEd.versies.loading = true; _lsQuizEd.versies.error = null;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/leadsonderhoud-quiz-versies?slug=' + encodeURIComponent(_lsQuizEd.slug));
+      _lsQuizEd.versies.items = Array.isArray(j?.items) ? j.items : [];
+    } catch (e) { _lsQuizEd.versies.error = e?.message || 'onbekend'; }
+    _lsQuizEd.versies.loading = false;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsQuizVersiesClose = function(){ _lsQuizEd.versies.open = false; if (window.DFO?.render) window.DFO.render(); };
+  window._lsQuizRollback = async function(versie){
+    if (!confirm('Zet versie ' + versie + ' weer live? De werk-versie blijft ongewijzigd.')) return;
+    try {
+      await window.KV.authedJson('/api/leadsonderhoud-quiz-rollback', {
+        method: 'POST', body: JSON.stringify({ slug: _lsQuizEd.slug, versie }),
+      });
+      window.KV.toast('Versie ' + versie + ' is nu live.', 'ok');
+      await window._lsOpenQuizEditor(_lsQuizEd.slug);
+      _lsQuizEd.versies.open = false;
+      _live.vragenlijst.fetched = false; fetchVragenlijst();
+    } catch (e) {
+      window.KV.toast('Rollback mislukt: ' + (e?.message || 'onbekend'), 'warn');
+    }
+  };
+  function _lsQuizEditorModalHtml(){
+    if (!_lsQuizEd.open) return '';
+    let body;
+    if (_lsQuizEd.loading) {
+      body = `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Laden…</div>`;
+    } else if (_lsQuizEd.error) {
+      body = `<div style="padding:24px;color:var(--rose)">⚠ ${esc(_lsQuizEd.error)}</div>`;
+    } else if (_lsQuizEd.quiz) {
+      const q = _lsQuizEd.quiz;
+      const liveLbl = _lsQuizEd.live ? `Live: v${_lsQuizEd.live.versie} (${esc(new Date(_lsQuizEd.live.op).toLocaleString('nl-NL'))})` : 'Nog niet gepubliceerd';
+      const vragenHtml = _lsQuizEd.vragen.map((v, vi) => {
+        const optsHtml = (v.options || []).map((o, oi) => `<div data-lq-opt="${oi}" style="display:flex;gap:6px;align-items:center;padding:4px 0">
+          <input type="text" data-lq-olabel value="${esc(o.label || '')}" placeholder="Antwoordtekst" style="flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px;background:var(--surface)">
+          <input type="number" data-lq-opunten value="${Number(o.punten) || 0}" title="Punten" style="width:64px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px;background:var(--surface);text-align:right">
+          <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text-2);white-space:nowrap"><input type="checkbox" data-lq-oafwijzer ${o.afwijzer ? 'checked' : ''}> afwijzer</label>
+          <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="window._lsQuizAction('del-opt', ${vi}, ${oi})" title="Optie weg">×</button>
+        </div>`).join('');
+        return `<div data-lq-vraag="${vi}" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:10px">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+            <span style="background:var(--surface);border:1px solid var(--border);border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600">${vi + 1}</span>
+            <input type="text" data-lq-vlabel value="${esc(v.label || '')}" placeholder="Vraagtekst" style="flex:1;padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;background:var(--surface);font-weight:600">
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="window._lsQuizAction('up', ${vi})" ${vi === 0 ? 'disabled' : ''} title="Omhoog">↑</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px" onclick="window._lsQuizAction('down', ${vi})" ${vi === _lsQuizEd.vragen.length - 1 ? 'disabled' : ''} title="Omlaag">↓</button>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text-2)"><input type="checkbox" data-lq-vactive ${v.active !== false ? 'checked' : ''}> actief</label>
+            <button class="btn btn-secondary" style="font-size:11px;padding:2px 8px;color:var(--rose)" onclick="window._lsQuizAction('del-vraag', ${vi})">Weg</button>
+          </div>
+          <div>${optsHtml}</div>
+          <button class="btn btn-secondary" style="font-size:11px;padding:3px 10px;margin-top:6px" onclick="window._lsQuizAction('add-opt', ${vi})">+ Optie</button>
+        </div>`;
+      }).join('');
+
+      const versiesPanel = _lsQuizEd.versies.open ? (() => {
+        if (_lsQuizEd.versies.loading) return `<div style="padding:12px">Laden…</div>`;
+        if (_lsQuizEd.versies.error) return `<div style="padding:12px;color:var(--rose)">⚠ ${esc(_lsQuizEd.versies.error)}</div>`;
+        if (!_lsQuizEd.versies.items.length) return `<div style="padding:12px;color:var(--text-3)">Nog geen gepubliceerde versies.</div>`;
+        return `<table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)"><th style="padding:6px 8px">Versie</th><th style="padding:6px 8px">Gepubliceerd</th><th style="padding:6px 8px;text-align:right">Vragen</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px"></th></tr></thead>
+          <tbody>${_lsQuizEd.versies.items.map(v => `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:6px 8px"><b>v${v.versie}</b></td>
+            <td style="padding:6px 8px;font-family:var(--mono,monospace);font-size:11.5px">${esc(new Date(v.op).toLocaleString('nl-NL'))}</td>
+            <td style="padding:6px 8px;text-align:right">${v.vragen || 0}</td>
+            <td style="padding:6px 8px">${v.actueel ? '<span style="color:var(--emerald);font-weight:600">● Live</span>' : '<span style="color:var(--text-3)">—</span>'}</td>
+            <td style="padding:6px 8px">${!v.actueel ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsQuizRollback(${v.versie})">Zet live</button>` : ''}</td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+      })() : '';
+
+      body = `
+        <div style="background:var(--surface-2);border-radius:var(--r-sm);padding:12px 14px;margin-bottom:14px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+            <div style="flex:1;min-width:200px">
+              <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Naam</label>
+              <input type="text" data-lq-field="naam" value="${esc(q.naam || '')}" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:13px">
+            </div>
+            <div style="flex:0 0 170px">
+              <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Drempel (toegang bij ≥)</label>
+              <input type="number" data-lq-field="drempel" value="${Number(q.drempel) || 0}" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:13px">
+            </div>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;padding-bottom:6px"><input type="checkbox" data-lq-field="is_active" ${q.is_active !== false ? 'checked' : ''}> Actief</label>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:11.5px;color:var(--text-3)">${esc(liveLbl)}</span>
+            <div style="margin-left:auto;display:flex;gap:6px">
+              <button class="btn btn-secondary" style="font-size:12px;padding:6px 12px" onclick="window._lsQuizVersies()">Versies</button>
+              <button class="btn btn-secondary" style="font-size:12px;padding:6px 12px" onclick="window._lsQuizSave()" ${_lsQuizEd.busy ? 'disabled' : ''}>${_lsQuizEd.busy === 'save' ? 'Opslaan…' : 'Opslaan (werk-versie)'}</button>
+              <button class="btn btn-primary" style="font-size:12px;padding:6px 12px" onclick="window._lsQuizPublish()" ${_lsQuizEd.busy ? 'disabled' : ''}>${_lsQuizEd.busy === 'publish' ? 'Publiceren…' : 'Publiceren'}</button>
+            </div>
+          </div>
+        </div>
+        ${_lsQuizEd.versies.open ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 4px;margin-bottom:14px">
+          <div style="display:flex;align-items:center;padding:0 10px 8px 10px">
+            <div style="font-weight:600;font-size:13px">Publicatie-versies</div>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsQuizVersiesClose()">✕</button>
+          </div>
+          ${versiesPanel}
+        </div>` : ''}
+        <div>${vragenHtml}</div>
+        <button class="btn btn-secondary" style="font-size:12.5px;padding:6px 14px;margin-top:6px" onclick="window._lsQuizAction('add-vraag')">+ Vraag toevoegen</button>`;
+    } else {
+      body = `<div style="padding:24px;color:var(--text-3)">Geen vragenlijst geladen.</div>`;
+    }
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseQuizEditor()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(880px,100%);max-height:92vh;overflow-y:auto">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px;position:sticky;top:0;background:var(--surface);z-index:1">
+          <div style="font-size:14px;font-weight:600">Vragenlijst-editor · <span style="font-family:var(--mono,monospace);font-size:12px;color:var(--text-3)">${esc(_lsQuizEd.slug || '')}</span></div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseQuizEditor()">✕</button>
+        </div>
+        <div style="padding:14px 18px">${body}</div>
+      </div>
+    </div>`;
+  }
+
   /* ── Registratie ───────────────────────────────────────────────────── */
   window.DFO.VIEWS['leadsonderhoud/Overzicht']      = overzichtView;
   window.DFO.VIEWS['leadsonderhoud/Contacten']      = contactenView;
@@ -2241,5 +2642,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=15 — 3 Opstartsessie-tabs toegevoegd: Bronnen (booking-sources-list), Opstartsessies (leadsonderhoud-opstartsessies-list), Vragenlijst (leadsonderhoud-quiz-lijst). Read-only render in v2-shell; volledige CRUD blijft via /modules/leadsonderhoud.html?tab=... (v1-editor, opent in nieuw tabblad).');
+  console.debug('[ls-v2] v=16 — Bronnen/Opstartsessies/Vragenlijst zijn nu volledig v2-native. Bronnen: inline CRUD (booking-sources-upsert). Opstartsessies: native detail-modal (leadsonderhoud-opstartsessies-detail). Vragenlijst: native quiz-editor met CRUD + Opslaan + Publiceren + Versies-panel + Rollback (quiz-opslaan/publiceren/versies/rollback endpoints). GEEN links meer naar /modules/leadsonderhoud.html — de v1-editor is niet meer nodig vanuit deze shell.');
 })();
