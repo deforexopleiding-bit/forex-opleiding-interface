@@ -15,7 +15,11 @@
 // }
 //
 // Permissie + owner-gate: exact zoals api/follow-up-lead-update.js.
-// Cadans-constante: [+2u, +1d, +3d] voor poging 1→2→3. MAX_ATTEMPTS = 4.
+// Cadans: [+2u, +1d, +3d] voor poging 1→2→3. Het MAXIMUM hangt af van de
+// herkomst van de rij en staat in _lib/followup-cadans.js — event-leads
+// drie pogingen (daarna dicht met reden 'onbereikbaar'), retentie vier
+// (daarna 'niet_bereikbaar', blijft open). De belronde vóór een event
+// heeft een eigen ritme en valt daarbuiten; zie isBelrondeLead.
 // Elke succesvolle mutatie logt automatisch een follow_up_lead_notes-rij
 // met entry_kind='outcome' + Nederlands leesbare tekst. Bij 42703 op
 // entry_kind fallback zonder die kolom (schema-vriendelijk).
@@ -24,6 +28,8 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
+import { cadansVoor, BIJ_MAX } from './_lib/followup-cadans.js';
+import { maakWhatsappTaak } from './_lib/whatsapp-taak.js';
 
 // Feature-flag: cockpit-uitkomst 'zoom_ingepland' maakt een ECHTE
 // GHL-afspraak + Zoom-link i.p.v. alleen een kale lead te patchen.
@@ -74,8 +80,9 @@ const OUTCOME_TO_CALL_STATUS = Object.freeze({
   foutief_nummer: 'foutief_nummer',
 });
 
-const CADENCE_HOURS = [2, 24, 72];
-const MAX_ATTEMPTS  = 4;
+// CADENCE_HOURS en MAX_ATTEMPTS zijn verhuisd naar _lib/followup-cadans.js,
+// zodat het aantal pogingen per herkomst op één plek staat in plaats van als
+// los getal midden in dit bestand.
 // WhatsApp-opvolging: standaard 2 dagen terug in de Werklijst.
 const WHATSAPP_FOLLOWUP_DAYS = 2;
 
@@ -406,6 +413,21 @@ export default async function handler(req, res) {
   const currentKind     = String(leadRow.lead_kind || 'call');
   const isEventLead     = String(leadRow.source || '') === 'event';
   const sourceRef       = (leadRow.source_ref && typeof leadRow.source_ref === 'object') ? leadRow.source_ref : {};
+  // Hoeveel pogingen deze rij krijgt, en wat er bij de laatste gebeurt.
+  // Hangt aan de herkomst; zie _lib/followup-cadans.js.
+  const cadans          = cadansVoor(leadRow.source);
+  // BELRONDE vóór een event versus OPVOLGING ná een event. Allebei
+  // source='event', maar alleen de belronde weet wanneer het event is —
+  // cron-event-belronde.js zet `event_date` in source_ref, het afrond-
+  // scherm niet. De 18:00/volgende-dag-12:00-cadans hieronder heeft die
+  // datum nodig als deadline en slaat nergens op zonder.
+  //
+  // Dit onderscheid was er niet, en dat had een gevolg: een opvolg-lead uit
+  // het afrondscherm liep óók door die tak, vond geen event_date, en werd
+  // dus eindeloos doorgeschoven tussen vandaag-18:00 en morgen-12:00. Geen
+  // maximum, geen afsluiting, poging 9 en verder. Die rijen vallen nu terug
+  // op de gewone cadans mét maximum. De belronde zelf verandert niet.
+  const isBelrondeLead  = isEventLead && !!sourceRef.event_date;
   // Voor event-leads: strakke 12→18→volgende-dag-12-cadans (event-datum
   // is de deadline). We berekenen in Europe/Amsterdam om DST correct
   // te handelen. Fallback op UTC als sourceRef.event_date ontbreekt.
@@ -507,11 +529,24 @@ export default async function handler(req, res) {
   };
   let noteText  = '';
   let attemptsAfter = currentAttempts;
+  // Wat er als outcome_code in het notitielog belandt. Standaard de gekozen
+  // uitkomst; alleen de afsluit-tak hieronder wijkt daarvan af.
+  let noteOutcomeCode = outcome;
+  // Is dit de poging waarna er een WhatsApp-taak klaargezet moet worden?
+  // NIET voor de belronde vóór een event: die ronde bevestigt aanwezigheid,
+  // heeft een eigen ritme en een harde deadline (de eventdatum), en blijft
+  // ongemoeid.
+  // Het nummer staat in de cadans-tabel, niet hier. Bewust ook bij voicemail:
+  // ook dan heb je de persoon niet gesproken, en anders zou een lead die
+  // geen-gehoor en voicemail afwisselt de taak nooit krijgen en toch na de
+  // derde poging dichtgaan.
+  let whatsappTaakNodig = false;
 
   if (outcome === 'geen_gehoor') {
     attemptsAfter = currentAttempts + 1;
     patch.attempts = attemptsAfter;
-    if (isEventLead) {
+    if (!isBelrondeLead && cadans.taakBijPoging && attemptsAfter === cadans.taakBijPoging) whatsappTaakNodig = true;
+    if (isBelrondeLead) {
       // Event-cadans: uur < 18 → vandaag 18:00; uur ≥ 18 → morgen 12:00.
       // Mits <= event-datum, anders lead_status='niet_bereikbaar'.
       const now = new Date();
@@ -537,19 +572,33 @@ export default async function handler(req, res) {
         const when = new Date(nextIso).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam', dateStyle: 'short', timeStyle: 'short' });
         noteText = `Geen gehoor (event-lead, poging ${attemptsAfter}) — volgende poging ${when}`;
       }
-    } else if (attemptsAfter >= MAX_ATTEMPTS) {
-      patch.lead_status    = 'niet_bereikbaar';
+    } else if (attemptsAfter >= cadans.maxPogingen) {
       patch.terugbel_datum = null;
-      noteText = `Geen gehoor — poging ${attemptsAfter}/${MAX_ATTEMPTS} · onbereikbaar, actie nodig`;
+      if (cadans.bijMax === BIJ_MAX.AFSLUITEN) {
+        // Gratis leads (event) gaan hier ECHT dicht. 'niet_bereikbaar' is
+        // geen afgesloten status — zo'n rij bleef eeuwig op de Werklijst
+        // staan. De reden komt in het notitielog met outcome_code
+        // 'onbereikbaar', zodat "verloren omdat hij nee zei" en "verloren
+        // omdat we hem nooit te pakken kregen" te scheiden blijven.
+        patch.lead_status = 'verloren';
+        noteOutcomeCode   = 'onbereikbaar';
+        noteText = `Geen gehoor — poging ${attemptsAfter}/${cadans.maxPogingen} · afgesloten, onbereikbaar`;
+      } else {
+        // Betalende klanten (retentie): ongewijzigd gedrag. Blijft open.
+        patch.lead_status = 'niet_bereikbaar';
+        noteText = `Geen gehoor — poging ${attemptsAfter}/${cadans.maxPogingen} · onbereikbaar, actie nodig`;
+      }
     } else {
-      const cadIdx = Math.max(0, Math.min(CADENCE_HOURS.length - 1, attemptsAfter - 1));
+      const uren = cadans.urenTussenPogingen;
+      const cadIdx = Math.max(0, Math.min(uren.length - 1, attemptsAfter - 1));
       patch.lead_status    = 'terugbellen';
-      patch.terugbel_datum = hoursFromNow(CADENCE_HOURS[cadIdx]);
-      noteText = `Geen gehoor — poging ${attemptsAfter}/${MAX_ATTEMPTS}, terugbellen gepland`;
+      patch.terugbel_datum = hoursFromNow(uren[cadIdx]);
+      noteText = `Geen gehoor — poging ${attemptsAfter}/${cadans.maxPogingen}, terugbellen gepland`;
     }
   } else if (outcome === 'voicemail') {
     attemptsAfter = currentAttempts + 1;
     patch.attempts       = attemptsAfter;
+    if (!isBelrondeLead && cadans.taakBijPoging && attemptsAfter === cadans.taakBijPoging) whatsappTaakNodig = true;
     patch.lead_status    = 'terugbellen';
     patch.terugbel_datum = hoursFromNow(24);
     noteText = `Voicemail ingesproken — poging ${attemptsAfter}`;
@@ -736,6 +785,28 @@ export default async function handler(req, res) {
     }
     if (!updated) return res.status(500).json({ error: 'update: geen resultaat' });
 
+    // WhatsApp-taak. Draait NA de update, zodat een mislukte taak nooit de
+    // uitkomst van het gesprek tegenhoudt; maakWhatsappTaak gooit ook niet.
+    // De rem tegen dubbele taken staat in source_ref van de lead zelf en
+    // wordt hier teruggeschreven — lukt dat terugschrijven niet, dan is het
+    // ergste gevolg dat er bij een volgende ronde nog één taak bijkomt.
+    if (whatsappTaakNodig) {
+      const taak = await maakWhatsappTaak({
+        lead      : updated,
+        sourceRef : (updated.source_ref && typeof updated.source_ref === 'object') ? updated.source_ref : sourceRef,
+        prioriteit: cadans.taakPrioriteit,
+        pogingNr  : attemptsAfter,
+      });
+      if (taak.status === 'aangemaakt' && taak.source_ref) {
+        const { error: refErr } = await supabaseAdmin
+          .from('follow_up_leads')
+          .update({ source_ref: taak.source_ref })
+          .eq('id', leadId);
+        if (refErr) console.warn('[follow-up-lead-outcome] whatsapp-taak marker niet opgeslagen:', refErr.message);
+        else updated.source_ref = taak.source_ref;
+      }
+    }
+
     // Event-lead write-back: zet event_attendees.called=true als de
     // outcome een ECHT-gesproken uitkomst is. Bij 'bevestigd' / 'komt_niet'
     // óók de status normaliseren op de gastenlijst. Fail-soft — mislukking
@@ -855,7 +926,7 @@ export default async function handler(req, res) {
     // Auto-note-insert. Failure blokkeert de state-transitie niet.
     try {
       await insertOutcomeNote(leadId, user.id, noteText, {
-        entryKind: 'outcome', outcomeCode: outcome,
+        entryKind: 'outcome', outcomeCode: noteOutcomeCode,
       });
     } catch (nErr) {
       if (nErr?.code === 'MIGRATION_REQUIRED') {

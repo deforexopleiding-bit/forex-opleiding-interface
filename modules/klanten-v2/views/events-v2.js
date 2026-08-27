@@ -1016,6 +1016,29 @@
     { v: 'geen_interesse',  l: 'Geen interesse' },
     { v: 'nog_onbekend',    l: 'Nog onbekend' },
   ];
+  // STAP 1 — wie er NIET was krijgt dezelfde motor als de rest.
+  // Bij een no-show of een afmelding weet je op het moment van afronden vaak
+  // precies wat er speelde, en tot nu toe kon je dat nergens kwijt. Deze
+  // redenen zijn aanklikbaar en niet vrij, want vrije tekst valt niet te
+  // tellen. De notitie ernaast is er voor het verhaal.
+  // De codes staan 1-op-1 in api/_lib/events-complete-core.js (AFWEZIG_REDENEN).
+  const AFWEZIG_REDENEN = [
+    { v: 'kon_niet',         l: 'Kon niet komen' },
+    { v: 'niet_gereageerd',  l: 'Niet gereageerd' },
+    { v: 'afgemeld_bericht', l: 'Afgemeld per bericht' },
+    { v: 'onbekend',         l: 'Onbekend' },
+  ];
+  // Standaard-belmoment per aanwezigheidsstatus, in dagen vanaf vandaag.
+  // Een no-show bel je morgen — dan is de avond nog vers. Wie zich netjes
+  // heeft afgemeld heeft even lucht nodig, dus die staat op drie dagen.
+  const AFWEZIG_BELMOMENT_DAGEN = { no_show: 1, afgemeld: 3 };
+  function _evDatumOverDagen(dagen) {
+    const d = new Date();
+    d.setDate(d.getDate() + Number(dagen || 0));
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
   // V1-parity: snelle reden-presets voor follow-up
   const FU_REASON_PRESETS = [
     'Overweegt aankoop',
@@ -1043,6 +1066,22 @@
       if (field === 'outcome' && (val === 'opvolgen' || val === 'twijfelt_nog')) {
         _ui.completeForm.attendees[attId].followup = _ui.completeForm.attendees[attId].followup || { reason:'', follow_up_date:'' };
       }
+      // Afwezig-blok klaarzetten of opruimen bij een statuswissel. Het
+      // belmoment krijgt meteen een voorstel; de reden blijft leeg, want die
+      // moet de gebruiker echt zelf kiezen — zonder reden ontstaat er geen
+      // follow-up (zie events-complete-core.js).
+      if (field === 'attendance_status') {
+        if (val === 'no_show' || val === 'afgemeld') {
+          const bestaand = _ui.completeForm.attendees[attId].afwezig;
+          _ui.completeForm.attendees[attId].afwezig = bestaand || {
+            reason_code: '',
+            note: '',
+            follow_up_date: _evDatumOverDagen(AFWEZIG_BELMOMENT_DAGEN[val] || 1),
+          };
+        } else {
+          _ui.completeForm.attendees[attId].afwezig = null;
+        }
+      }
       if (window.DFO?.render) window.DFO.render();
     }
   };
@@ -1051,6 +1090,16 @@
     const a = _ui.completeForm.attendees[attId] = _ui.completeForm.attendees[attId] || {};
     a.followup = a.followup || {};
     a.followup[field] = val;
+  };
+  window.__evCompleteAfwSet = (attId, field, val) => {
+    if (!_ui.completeForm) return;
+    const a = _ui.completeForm.attendees[attId] = _ui.completeForm.attendees[attId] || {};
+    a.afwezig = a.afwezig || { reason_code:'', note:'', follow_up_date:'' };
+    a.afwezig[field] = val;
+    // Alleen bij de reden opnieuw tekenen: de knoppen moeten zichtbaar
+    // omschakelen. Notitie en datum niet — dat zou het invoerveld midden
+    // in het typen vervangen.
+    if (field === 'reason_code' && window.DFO?.render) window.DFO.render();
   };
   window.__evCompleteFuPreset = (attId, days) => {
     const d = new Date(); d.setDate(d.getDate() + days);
@@ -1188,6 +1237,8 @@
     const oc = cur.outcome || '';
     const fu = cur.followup || {};
     const showFu = oc === 'opvolgen' || oc === 'twijfelt_nog';
+    const afw = cur.afwezig || {};
+    const showAfw = st === 'no_show' || st === 'afgemeld';
     const hasDeal = !!a.deal_id;
     const stColor = COMPLETE_ATT_STATUS.find((x) => x.v === st)?.c || 'neutral';
     return `<div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
@@ -1206,6 +1257,32 @@
         </select>` : ''}
       </div>
       ${showFu ? _completeFollowupBlock(a.id, fu) : ''}
+      ${showAfw ? _completeAfwezigBlock(a.id, afw, st) : ''}
+    </div>`;
+  }
+  // Het tegenhanger-blok van _completeFollowupBlock, voor wie er niet was.
+  // Zelfde plek, zelfde vorm, andere velden: een aanklikbare reden, een
+  // vrije notitie en een belmoment. Pas als er een reden én een belmoment
+  // staat ontstaat er een follow-up — half invullen levert niets op, en dat
+  // staat er ook bij.
+  function _completeAfwezigBlock(attId, afw, st) {
+    const gekozen = String(afw.reason_code || '');
+    const compleet = !!gekozen && !!afw.follow_up_date;
+    const woord = st === 'no_show' ? 'niet komen opdagen' : 'zich afgemeld';
+    return `<div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:11.5px;color:var(--text-3)">
+        Deze deelnemer is <b>${woord}</b>. Kies een reden en een belmoment, dan komt hij op de bellijst.
+        ${compleet ? '' : '<span style="color:var(--text-3)">Zonder allebei gebeurt er niets extra\u2019s.</span>'}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11.5px;color:var(--text-3)">Reden:</span>
+        ${AFWEZIG_REDENEN.map((r) => `<button class="chip ${gekozen === r.v ? 'on' : ''}" style="padding:4px 9px;font-size:11.5px${gekozen === r.v ? ';background:var(--blue-soft);color:var(--blue);border-color:var(--blue-line)' : ''}" onclick="window.__evCompleteAfwSet('${esc(attId)}','reason_code','${r.v}')">${esc(r.l)}</button>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11.5px;color:var(--text-3)">Belmoment:</span>
+        <input type="date" value="${esc(afw.follow_up_date || '')}" oninput="window.__evCompleteAfwSet('${esc(attId)}','follow_up_date',this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);font-size:12px" />
+      </div>
+      <input type="text" data-kv-focus-key="ev-afw-notitie-${esc(attId)}" placeholder="Notitie (optioneel) \u2014 wat weet je over deze avond?" value="${esc(afw.note || '')}" oninput="window.__evCompleteAfwSet('${esc(attId)}','note',this.value)" style="padding:6px 10px;border:1px solid var(--border);background:var(--surface);border-radius:6px;font-size:12.5px" />
     </div>`;
   }
   function _completeFollowupBlock(attId, fu) {
@@ -1272,7 +1349,16 @@
           if (v.followup.reason)         fu.reason = v.followup.reason;
           if (v.followup.follow_up_date) fu.follow_up_date = v.followup.follow_up_date;
           if (v.followup.owner_id)       fu.owner_id = v.followup.owner_id;
-          if (Object.keys(fu).length) row.followup = fu;
+            if (Object.keys(fu).length) row.followup = fu;
+        }
+        // Afwezig-blok: alleen meesturen als er een reden \u00e9n een
+        // belmoment staat. De server controleert dat nog een keer.
+        if ((v.attendance_status === 'no_show' || v.attendance_status === 'afgemeld') && v.afwezig) {
+          const af = v.afwezig;
+          if (af.reason_code && af.follow_up_date) {
+            row.afwezig = { reason_code: af.reason_code, follow_up_date: af.follow_up_date };
+            if (af.note) row.afwezig.note = af.note;
+          }
         }
         return row;
       });

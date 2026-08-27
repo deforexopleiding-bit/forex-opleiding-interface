@@ -32,6 +32,34 @@ const OUTCOME_SET = new Set([
 const FOLLOWUP_OUTCOMES = new Set(['opvolgen', 'twijfelt_nog']);
 // Outcomes waarbij server-side notitie (followup.reason) verplicht is.
 const REASON_REQUIRED_OUTCOMES = new Set(['opvolgen', 'twijfelt_nog']);
+// STAP 1 — no-shows en afgemelden krijgen dezelfde motor als de rest.
+// Wie er niet was kon tot nu toe nergens heen: geen reden, geen notitie,
+// geen belmoment, terwijl je op het moment van afronden juist wél weet wat
+// er speelde. Nu lopen ze door exact dezelfde weg als 'opvolgen' — dezelfde
+// event_followups-rij, dezelfde follow_up_leads-rij, dezelfde belcadans.
+// Geen tweede pad.
+const AFWEZIG_STATUSSEN = new Set(['no_show', 'afgemeld']);
+// Aanklikbare redenen bij een afwezige. Bewust een vaste lijst: vrije tekst
+// valt niet te tellen. De vrije notitie staat er los naast.
+const AFWEZIG_REDENEN = new Set(['kon_niet', 'niet_gereageerd', 'afgemeld_bericht', 'onbekend']);
+// Kolommen uit docs/sql-migrations/2026-08-27-event-followups-reden-en-herkomst.sql.
+// Die migratie is nog niet gedraaid, dus elke schrijfactie ermee kan falen op
+// "kolom bestaat niet". Dan proberen we het opnieuw zonder — de follow-up is
+// belangrijker dan het etiket erop. Zelfde patroon als follow-up-lead-outcome.js.
+const NIEUWE_FOLLOWUP_KOLOMMEN = ['reason_code', 'bron_uitkomst'];
+
+function isMissendeKolom(error) {
+  if (!error) return false;
+  if (error.code === '42703' || error.code === 'PGRST204') return true;
+  const msg = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`;
+  return /could not find the/i.test(msg) || /schema cache/i.test(msg);
+}
+
+function zonderNieuweKolommen(payload) {
+  const kopie = { ...payload };
+  for (const k of NIEUWE_FOLLOWUP_KOLOMMEN) delete kopie[k];
+  return kopie;
+}
 const ACCEPTED    = new Set(['accepted', 'signed']);
 const BONUS_PCT   = 3;
 const DEFAULT_FOLLOWUP_OWNER_ID = process.env.DEFAULT_EVENT_FOLLOWUP_OWNER_ID || null;
@@ -86,6 +114,27 @@ export async function runEventsCompleteCore({ userId, body }) {
       }
       if (a.followup.owner_id != null && !UUID_RE.test(String(a.followup.owner_id))) {
         return { statusCode: 400, response: { error: `followup.owner_id ongeldig (${a.attendee_id})` } };
+      }
+    }
+    // Afwezig-blok (stap 1). Het scherm stuurt dit pas mee als reden én
+    // belmoment allebei ingevuld zijn, dus wat hier binnenkomt hoort
+    // compleet te zijn. Onvolledig of onbekend is daarom een fout en geen
+    // stilte — anders verdwijnt een ingevulde opvolging zonder melding.
+    if (a.afwezig != null) {
+      if (typeof a.afwezig !== 'object' || Array.isArray(a.afwezig)) {
+        return { statusCode: 400, response: { error: `afwezig moet object zijn voor ${a.attendee_id}` } };
+      }
+      if (!AFWEZIG_STATUSSEN.has(String(a.attendance_status || ''))) {
+        return { statusCode: 400, response: { error: `afwezig alleen toegestaan bij attendance_status 'no_show' of 'afgemeld' (${a.attendee_id})` } };
+      }
+      if (!AFWEZIG_REDENEN.has(String(a.afwezig.reason_code || ''))) {
+        return { statusCode: 400, response: { error: `afwezig.reason_code ongeldig (${a.attendee_id})` } };
+      }
+      if (!isDateString(a.afwezig.follow_up_date)) {
+        return { statusCode: 400, response: { error: `afwezig.follow_up_date moet YYYY-MM-DD zijn (${a.attendee_id})` } };
+      }
+      if (a.afwezig.owner_id != null && !UUID_RE.test(String(a.afwezig.owner_id))) {
+        return { statusCode: 400, response: { error: `afwezig.owner_id ongeldig (${a.attendee_id})` } };
       }
     }
   }
@@ -208,20 +257,45 @@ export async function runEventsCompleteCore({ userId, body }) {
     }
 
     // ── 3b) Event follow-ups upsert ─────────────────────────────────────────
-    // Blok B: outcome 'opvolgen' en 'twijfelt_nog' triggeren een follow-up.
-    // Reason (notitie) is verplicht voor beide outcomes; server-side check
-    // hier + UI-check in events-detail. No_show is een KALE status — geen
-    // follow-up meer via dit pad. De no-show-opvolging in de follow-up-
-    // cockpit werkt via event_attendees.status='no_show' (Opvolglijst-tab
-    // via api/follow-up-opvolglijst.js), niet via event_followups.
+    // Twee takken, één weg.
+    //   · Aanwezig met outcome 'opvolgen' of 'twijfelt_nog' — bestaand
+    //     gedrag, notitie verplicht (server-side check hier + UI-check).
+    //   · No-show of afgemeld met een aangeklikte reden én een belmoment —
+    //     nieuw sinds stap 1. Notitie optioneel; de reden is hier het
+    //     gestructureerde deel.
+    // Allebei leveren dezelfde event_followups-rij en dezelfde
+    // follow_up_leads-rij op, met `bron_uitkomst` als onderscheid.
+    //
+    // De bestaande no-showkolommen op event_attendees blijven met rust:
+    // no_show_followup_status betekent "we hebben contact gehad" en een
+    // belmoment plannen is geen contact. NULL betekent daar nog steeds
+    // "no-show, nog niet opgevolgd", en dat klopt. De Opvolglijst-tab
+    // (api/follow-up-opvolglijst.js) verandert daardoor niet.
     for (const a of attendeesIn) {
-      const triggers = (a.attendance_status === 'aanwezig' && FOLLOWUP_OUTCOMES.has(a.outcome));
-      if (!triggers) continue;
-      if (!a.followup || typeof a.followup !== 'object') continue;
+      // Tak 1 — was aanwezig en moet opgevolgd worden. Bestaand gedrag.
+      const aanwezigTrigger = (a.attendance_status === 'aanwezig' && FOLLOWUP_OUTCOMES.has(a.outcome))
+        && !!a.followup && typeof a.followup === 'object';
 
-      const reasonText = a.followup.reason != null ? String(a.followup.reason).slice(0, 500) : null;
+      // Tak 2 — was er niet. Alleen als de gebruiker daadwerkelijk een reden
+      // én een belmoment heeft ingevuld. Doet hij dat niet, dan gebeurt er
+      // niets extra's: de aanwezigheidsstatus wordt gewoon opgeslagen zoals
+      // altijd. Een half ingevuld blok mag geen halve follow-up opleveren.
+      const afw = (a.afwezig && typeof a.afwezig === 'object') ? a.afwezig : null;
+      const afwezigTrigger = AFWEZIG_STATUSSEN.has(a.attendance_status)
+        && !!afw
+        && AFWEZIG_REDENEN.has(String(afw.reason_code || ''))
+        && !!afw.follow_up_date;
+
+      if (!aanwezigTrigger && !afwezigTrigger) continue;
+
+      // Vanaf hier is het één weg. De twee takken verschillen alleen in
+      // waar de velden vandaan komen.
+      const bronNotitie = aanwezigTrigger ? a.followup.reason : afw.note;
+      const reasonText  = bronNotitie != null ? String(bronNotitie).slice(0, 500) : null;
       // Reason (notitie) verplicht bij 'opvolgen' en 'twijfelt_nog'.
-      if (a.attendance_status === 'aanwezig' && REASON_REQUIRED_OUTCOMES.has(a.outcome)) {
+      // Bij een afwezige is de notitie optioneel — de aangeklikte reden is
+      // daar de gestructureerde informatie, en die is al gecontroleerd.
+      if (aanwezigTrigger && REASON_REQUIRED_OUTCOMES.has(a.outcome)) {
         if (!reasonText || !reasonText.trim()) {
           const err = new Error(`attendee ${a.attendee_id}: notitie verplicht bij outcome '${a.outcome}'`);
           err.status = 400;
@@ -229,8 +303,43 @@ export async function runEventsCompleteCore({ userId, body }) {
           throw err;
         }
       }
-      const followDate = a.followup.follow_up_date || null;
-      const ownerId    = a.followup.owner_id || DEFAULT_FOLLOWUP_OWNER_ID || null;
+      const bronUitkomst = aanwezigTrigger ? a.outcome : a.attendance_status;
+      const reasonCode   = aanwezigTrigger ? null : String(afw.reason_code);
+      const followDate   = (aanwezigTrigger ? a.followup.follow_up_date : afw.follow_up_date) || null;
+      const ownerId      = (aanwezigTrigger ? a.followup.owner_id : afw.owner_id) || DEFAULT_FOLLOWUP_OWNER_ID || null;
+
+      // Eén payload voor alle drie de schrijfmomenten hieronder (update,
+      // insert, en de update na een race). reason_code en bron_uitkomst
+      // komen uit de migratie van 27-08-2026; zolang die niet gedraaid is
+      // valt de schrijfactie terug op de payload zonder die twee. De
+      // follow-up zelf is belangrijker dan het etiket erop.
+      const fuVelden = {
+        event_id      : eventId,
+        reason        : reasonText,
+        follow_up_date: followDate,
+        owner_id      : ownerId,
+        reason_code   : reasonCode,
+        bron_uitkomst : bronUitkomst,
+      };
+      const fuUpdate = async (rijId) => {
+        let { error } = await supabaseAdmin
+          .from('event_followups').update(fuVelden).eq('id', rijId);
+        if (error && isMissendeKolom(error)) {
+          ({ error } = await supabaseAdmin
+            .from('event_followups').update(zonderNieuweKolommen(fuVelden)).eq('id', rijId));
+        }
+        return error;
+      };
+      const fuInsert = async () => {
+        const rij = { ...fuVelden, attendee_id: a.attendee_id, status: 'open', created_by: userId };
+        let { data, error } = await supabaseAdmin
+          .from('event_followups').insert(rij).select('id').maybeSingle();
+        if (error && isMissendeKolom(error)) {
+          ({ data, error } = await supabaseAdmin
+            .from('event_followups').insert(zonderNieuweKolommen(rij)).select('id').maybeSingle());
+        }
+        return { data, error };
+      };
 
       let followupIdForLead = null;
       try {
@@ -242,31 +351,18 @@ export async function runEventsCompleteCore({ userId, body }) {
           .maybeSingle();
         if (selErr) { summary.warnings.push(`followup-lookup ${a.attendee_id}: ${selErr.message}`); continue; }
         if (existing) {
-          const { error: upErr } = await supabaseAdmin
-            .from('event_followups')
-            .update({ event_id: eventId, reason: reasonText, follow_up_date: followDate, owner_id: ownerId })
-            .eq('id', existing.id);
+          const upErr = await fuUpdate(existing.id);
           if (upErr) summary.warnings.push(`followup-update ${a.attendee_id}: ${upErr.message}`);
           else { summary.followups_updated += 1; followupIdForLead = existing.id; }
         } else {
-          const { data: insData, error: insErr } = await supabaseAdmin
-            .from('event_followups')
-            .insert({
-              attendee_id: a.attendee_id, event_id: eventId, reason: reasonText,
-              follow_up_date: followDate, owner_id: ownerId, status: 'open', created_by: userId,
-            })
-            .select('id')
-            .maybeSingle();
+          const { data: insData, error: insErr } = await fuInsert();
           if (insErr) {
             if (insErr.code === '23505') {
               const { data: again } = await supabaseAdmin
                 .from('event_followups').select('id')
                 .eq('attendee_id', a.attendee_id).eq('status', 'open').maybeSingle();
               if (again) {
-                const { error: upErr2 } = await supabaseAdmin
-                  .from('event_followups')
-                  .update({ event_id: eventId, reason: reasonText, follow_up_date: followDate, owner_id: ownerId })
-                  .eq('id', again.id);
+                const upErr2 = await fuUpdate(again.id);
                 if (upErr2) summary.warnings.push(`followup-race-update ${a.attendee_id}: ${upErr2.message}`);
                 else { summary.followups_updated += 1; followupIdForLead = again.id; }
               }
@@ -313,6 +409,20 @@ export async function runEventsCompleteCore({ userId, body }) {
             event_id       : eventId,
             attendee_id    : att.id,
             is_event_followup: true,
+            // De herkomst van de rij, zodat no-shows, afgemelden en
+            // twijfelaars apart te filteren en te tellen zijn:
+            //   select source_ref->>'event_uitkomst', count(*)
+            //     from follow_up_leads where source = 'event' group by 1;
+            //
+            // Bewust hier en niet als nieuwe `source`-waarde. Van
+            // follow_up_leads bestaat geen migratie in deze repo — de tabel
+            // is met de hand aangemaakt — dus of er een CHECK op `source`
+            // staat is van buitenaf niet te zien. Een geweigerde insert
+            // betekent hier een opvolging die stil verdwijnt, op een live
+            // systeem. source_ref is jsonb en kent dat risico niet, en de
+            // code filtert er al op (source_ref->>attendee_id).
+            event_uitkomst : bronUitkomst,
+            ...(reasonCode ? { reason_code: reasonCode } : {}),
             ...(followupIdForLead ? { followup_id: followupIdForLead } : {}),
             ...(reasonText ? { reason: reasonText } : {}),
           },
