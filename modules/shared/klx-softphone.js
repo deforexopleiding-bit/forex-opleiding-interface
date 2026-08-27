@@ -86,6 +86,11 @@
     // Actieve klant-context (naam + telefoon + optionele meta) voor de sheet-
     // header. Wordt gezet bij open() en gewist bij closeSheet().
     activeCustomer : null,
+    // #call-log-B: draft wordt bij placeCall gezet, gepost bij Terminated
+    // of beforeunload. Reset tussen calls via _resetCallLogDraft().
+    callLogDraft       : null,   // { to_number, from_number, line, started_at, customer_id, lead_id, meta }
+    callLogEstablished : false,  // 'answered'-marker; true zodra Established
+    callLogPosted      : false,  // idempotency-guard: één POST per call
   };
 
   // ── Lokale ringback-toon (v=1dc) ─────────────────────────────────────────
@@ -400,6 +405,55 @@
     try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
   }
 
+  // ── #call-log-B: helper voor POST naar /api/softphone-call-log ──────────
+  // Fire-and-forget met keepalive:true zodat tab-sluit tijdens gesprek
+  // de request nog laat afmaken. Idempotent via state.callLogPosted.
+  // Fail-soft: netfout gooit niet, alleen console.warn.
+  async function _postCallLog(endedAt, outcomeHint) {
+    const draft = state.callLogDraft;
+    if (!draft || state.callLogPosted) return;
+    state.callLogPosted = true;   // marker ZOALS de request start (niet wachten op response)
+    const body = {
+      to_number:    draft.to_number,
+      from_number:  draft.from_number,
+      line:         draft.line,
+      started_at:   draft.started_at,
+      ended_at:     endedAt,
+      outcome_hint: outcomeHint,
+      customer_id:  draft.customer_id,
+      lead_id:      draft.lead_id,
+      meta:         draft.meta,
+    };
+    try {
+      const token = await (global.AuthShared?.getAccessToken?.() ?? Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      await fetch('/api/softphone-call-log', {
+        method:    'POST',
+        headers,
+        body:      JSON.stringify(body),
+        keepalive: true,        // req afmaken tot 64KB na tab-close
+      });
+    } catch (e) {
+      console.warn('[klx-softphone] call-log POST fail (soft):', e?.message || e);
+    }
+  }
+
+  function _resetCallLogDraft() {
+    state.callLogDraft       = null;
+    state.callLogEstablished = false;
+    state.callLogPosted      = false;
+  }
+
+  // #call-log-B: onafgeronde call log'gen bij tab-sluit tijdens gesprek.
+  // fetch keepalive:true (in _postCallLog) laat de request nog uitgaan.
+  // Ended_at=null zodat server weet dat het geen normale hangup was.
+  global.addEventListener('beforeunload', () => {
+    if (state.callLogDraft && !state.callLogPosted) {
+      _postCallLog(null, null);
+    }
+  });
+
   // describeCallError(e): mapt een placeCall-catch-error naar {kind, title,
   // hint} zodat de toast een specifieke, actionable melding kan tonen.
   // - 'mic'   : browser blokkeerde de microfoon (getUserMedia faalde).
@@ -561,6 +615,7 @@
           updateCallbarStatus('In gesprek', displayName ? `${displayName} — ${effPhone}` : effPhone);
           startCallTimer();
           renderSheet();
+          state.callLogEstablished = true;   // #call-log-B: 'answered'-marker
         } else if (s === 'Terminated') {
           ringback.stop();
           _stopEarlyMediaPoll();
@@ -571,8 +626,43 @@
           if (audioEl) audioEl.srcObject = null;
           state.session = null;
           renderSheet();
+          // #call-log-B: log de call. outcome_hint uit Established-vlag.
+          const outcomeHint = state.callLogEstablished ? 'answered' : 'no_answer';
+          _postCallLog(new Date().toISOString(), outcomeHint);
         }
       });
+
+      // #call-log-B: draft voor call-log posts. Wordt aangevuld met ended_at
+      // en outcome_hint zodra Terminated triggert (of beforeunload).
+      // Source-whitelist: alleen bevestigde flows krijgen structured FK's
+      // (call_log.customer_id / .lead_id hebben FK-constraints; onbekende
+      // uuid's zouden 23503 FK-violation → silent no-log). Ongebonden ids
+      // bewaard in meta.raw_context_id voor latere backfill.
+      _resetCallLogDraft();
+      const _CALL_LOG_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const _srcHint = state.activeCustomer?.source || '';
+      const _rawCtx  = state.activeCustomer?.customerId || null;
+      const _ctxUuid = (_rawCtx && _CALL_LOG_UUID_RE.test(_rawCtx)) ? _rawCtx : null;
+      let _clCustomerId = null;
+      let _clLeadId     = null;
+      if (_ctxUuid && _srcHint.startsWith('followup.')) {
+        // __fuDial in followup-v2.js zet leadId in customerId-slot.
+        _clLeadId = _ctxUuid;
+      }
+      state.callLogDraft = {
+        to_number:   effPhone,
+        from_number: chosenCid || null,
+        line,
+        started_at:  new Date().toISOString(),
+        customer_id: _clCustomerId,
+        lead_id:     _clLeadId,
+        meta: {
+          source:             _srcHint || null,
+          raw_context_id:     _ctxUuid,
+          activeCustomerName: state.activeCustomer?.name || null,
+        },
+      };
+
       // v=1dd: microfoon preflight — throws met .code='mic' bij denial. Als
       // dit slaagt (of user grant al gaf), gaat de INVITE direct daarna de
       // deur uit. Faalt dit → catch onderscheidt mic vs Voys via

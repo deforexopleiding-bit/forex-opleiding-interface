@@ -59,16 +59,32 @@ export default async function handler(req, res) {
     if (e1) throw e1;
 
     // 2) Afspraak-rijen binnen venster (alleen booking_source-veld).
-    let q = supabaseAdmin
-      .from('follow_up_appointments')
-      .select('booking_source, scheduled_at')
-      .not('booking_source', 'is', null);
-    if (grens) q = q.gte('created_at', grens);
-    const { data: appts, error: e2 } = await q.limit(50000);
-    if (e2 && e2.code !== '42703') throw e2;
+    //    v=2 (2026-08-27 regressie-fix): fail-soft omhulling. Als deze query
+    //    om welke reden dan ook faalt (schema-drift, PostgREST cache stale,
+    //    RLS-mismatch), moet de bronnen-lijst ALSNOG kunnen laden — een
+    //    call-count van 0 is beter dan een hele 500 die de UI leeg maakt.
+    //    Voorheen ving alleen `code === '42703'`; andere codes (PGRST100,
+    //    PGRST200, PGRST202) glipten er doorheen en veroorzaakten de
+    //    'Kon bronnen niet laden'-regressie.
+    let appts = [];
+    try {
+      let q = supabaseAdmin
+        .from('follow_up_appointments')
+        .select('booking_source, scheduled_at, created_at')
+        .not('booking_source', 'is', null);
+      if (grens) q = q.gte('created_at', grens);
+      const { data: r, error: e2 } = await q.limit(50000);
+      if (e2) {
+        console.warn('[booking-sources-list] appt-count query fail (soft):', e2.code || '?', e2.message);
+      } else {
+        appts = r || [];
+      }
+    } catch (e) {
+      console.warn('[booking-sources-list] appt-count exception (soft):', e?.message || e);
+    }
 
     const tel = new Map();
-    for (const a of (appts || [])) {
+    for (const a of appts) {
       const s = String(a.booking_source || '').trim().toLowerCase();
       if (!s) continue;
       tel.set(s, (tel.get(s) || 0) + 1);
@@ -96,7 +112,12 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ items, periode, total_calls });
   } catch (e) {
-    console.error('[booking-sources-list]', e?.message || e);
-    return res.status(500).json({ error: 'Bronnenlijst laden mislukt' });
+    // v=2 (2026-08-27): verbose error voor client-side diagnose. Zonder de
+    // details bleef de client hangen op 'Kon bronnen niet laden' zonder
+    // richting. Nu zie je in de UI-error direct de DB-code + message.
+    const code = e?.code || 'unknown';
+    const msg  = e?.message || String(e);
+    console.error('[booking-sources-list]', code, msg);
+    return res.status(500).json({ error: 'Bronnenlijst laden mislukt', code, detail: msg });
   }
 }

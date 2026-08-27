@@ -1990,10 +1990,24 @@
     st.loading = true; st.error = null; st.lastKey = key;
     const seq = ++st._seq;
     if (window.DFO?.render) window.DFO.render();
-    const j = await tryFetch('bronnen', '/api/booking-sources-list?periode=' + encodeURIComponent(st.periode));
-    if (seq !== st._seq) return;
+    // v=17 (2026-08-27 regressie-fix): direct authedJson met echte error-
+    // details. tryFetch slikt de exception-message en toont een generiek
+    // "Kon bronnen niet laden" — onmogelijk om zonder Vercel-log de
+    // root-cause te vinden. Nu propageren we de HTTP-status + body-error
+    // + eventuele DB-code naar st.error zodat 'ie op scherm zichtbaar is.
+    try {
+      const j = await window.KV.authedJson('/api/booking-sources-list?periode=' + encodeURIComponent(st.periode));
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      const status = e?.status ? ' (HTTP ' + e.status + ')' : '';
+      const code   = e?.body?.code ? ' [' + e.body.code + ']' : '';
+      const detail = e?.body?.detail ? ' — ' + String(e.body.detail).slice(0, 200) : '';
+      st.error = 'Kon bronnen niet laden' + status + code + detail;
+      console.error('[ls-v2] bronnen fetch fail:', e?.status, e?.body || e?.message);
+    }
     st.loading = false; st.fetched = true;
-    if (!j) st.error = 'Kon bronnen niet laden'; else st.data = j;
     if (window.DFO?.render) window.DFO.render();
   }
   async function fetchOpstartsessies(force) {
@@ -2108,7 +2122,7 @@
     const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
     const filterChips = periodes.map(([k,l]) => `<button class="chip ${st.periode===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetBronPeriode('${k}')">${esc(l)}</button>`).join('');
     const rows = items.length ? items.map((b, i) => {
-      const url = 'https://deforexopleiding.nl/opstartsessie/' + b.slug;
+      const url = 'https://deforexopleiding.nl/agenda/' + b.slug;
       const statusBadge = b.is_registered
         ? (b.actief
             ? '<span style="color:var(--emerald);font-weight:600;font-size:11.5px">● Actief</span>'
@@ -2137,7 +2151,7 @@
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Attributie-bronnen voor <code>deforexopleiding.nl/opstartsessie/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen. Onbekende/typo-slugs verschijnen apart en blijven telbaar.
+        Attributie-bronnen voor <code>deforexopleiding.nl/agenda/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen. Onbekende/typo-slugs verschijnen apart en blijven telbaar.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
@@ -2222,7 +2236,7 @@
     return `
       ${_lsOpstartDetailModalHtml()}
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Alles wat leads op <code>deforexopleiding.nl/opstartsessie</code> invullen — inclusief afgewezen leads. Klik een rij voor de vragenlijst-antwoorden.
+        Alles wat leads op <code>deforexopleiding.nl/agenda</code> invullen — inclusief afgewezen leads. Klik een rij voor de vragenlijst-antwoorden.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:10px">
