@@ -1,6 +1,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createNotification } from './_lib/notify.js';
+import { whatsappTaakAfgerond } from './_lib/whatsapp-taak.js';
 
 function toUuidOrNull(id) {
   if (!id) return null;
@@ -247,6 +248,14 @@ export default async function handler(req, res) {
         };
         const { error: upErr } = await supabaseAdmin.from('taken_items').update(patch).eq('id', id);
         if (upErr) throw upErr;
+        // Is dit een WhatsApp-taak uit de belcadans en gaat hij op klaar,
+        // dan sluit dit de lus terug naar de lead: een regel in het
+        // notitielog en het belmoment een dag opgeschoven. Doet niets bij
+        // een gewone taak. Fail-soft en awaited — de statuswijziging is al
+        // opgeslagen en wordt hier nooit meer ongedaan gemaakt.
+        if (newStatus === 'done' && existing.status !== 'done') {
+          await whatsappTaakAfgerond({ taakId: id, doorUserId: userId });
+        }
         // Fail-soft: als de taak op 'done' gezet wordt door iemand anders
         // dan de maker, laat de maker het weten.
         if (newStatus === 'done' && existing.created_by && existing.created_by !== userId) {
@@ -371,7 +380,9 @@ export default async function handler(req, res) {
 
         const { data: existing } = await supabaseAdmin
           .from('taken_items')
-          .select('id, created_by, created_by_agent, aangemaakt')
+          // `status` erbij zodat de overgang naar 'done' ook via het
+          // bewerkscherm de lus naar de lead sluit (zie hieronder).
+          .select('id, created_by, created_by_agent, aangemaakt, status')
           .eq('id', row.id)
           .maybeSingle();
 
@@ -397,6 +408,11 @@ export default async function handler(req, res) {
           if (existing.created_by_agent) rowKeep.created_by_agent = existing.created_by_agent;
           const { error } = await supabaseAdmin.from('taken_items').upsert(rowKeep, { onConflict: 'id' });
           if (error) throw error;
+          // Zelfde lus als in status_change, voor wie de taak via het
+          // bewerkscherm op klaar zet in plaats van hem te slepen.
+          if (rowKeep.status === 'done' && existing.status !== 'done') {
+            await whatsappTaakAfgerond({ taakId: row.id, doorUserId: userId });
+          }
         } else {
           // NIEUW — taken.task.create vereist; created_by = userId.
           if (!(await requirePermission(req, 'taken.task.create'))) {

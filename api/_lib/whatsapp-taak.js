@@ -38,6 +38,7 @@
 // waarvan het schema niet in deze repo staat.
 
 import { supabaseAdmin } from '../supabase.js';
+import { schrijfLeadNotitie } from './followup-notitie.js';
 
 const APP_SETTING_KEY = 'whatsapp_verantwoordelijke';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -146,6 +147,137 @@ export async function maakWhatsappTaak({ lead, sourceRef, prioriteit = 'Normaal'
     };
   } catch (e) {
     console.warn('[whatsapp-taak] onverwachte fout:', e?.message || e);
+    return { status: 'fout', reden: e?.message || 'onbekend' };
+  }
+}
+
+
+// ─── DE LUS SLUITEN: TAAK KLAAR → TERUG NAAR DE LEAD ───────────────────────
+//
+// Zonder dit bestaat de taak los van de lead. Dave stuurt een WhatsApp en
+// vinkt hem af, en de volgende beller ziet in de Werklijst niets: geen spoor
+// dat er via een ander kanaal contact geprobeerd is, en een belmoment dat
+// misschien een uur later valt. Een appje sturen en meteen daarna bellen is
+// precies wat we niet willen.
+//
+// Twee dingen dus, zodra de taak op KLAAR komt:
+//   1. één regel in het notitielog van de lead, in gewone taal, met datum;
+//   2. het eerstvolgende belmoment een dag opschuiven, zodat het bericht
+//      tijd krijgt om te landen.
+// Op BEZIG gebeurt er niets — dat de taak in de kolom staat is genoeg.
+//
+// WAAR DIT VANDAAN GEROEPEN WORDT
+// api/taken.js, in de status_change-tak (dat is wat het slepen in de
+// Pipeline aanroept) en in de bewerk-tak. Geen webhook en geen trigger
+// nodig: elke statuswijziging loopt sowieso door dat endpoint.
+//
+// HOE DE TAAK BIJ DE LEAD KOMT
+// Bij het aanmaken zetten we whatsapp_taak_id in source_ref van de lead.
+// Diezelfde sleutel is hier de weg terug — er is dus geen extra kolom op
+// taken_items nodig. Is er geen lead met dit taak-id, dan is het gewoon een
+// andere taak en gebeurt er niets.
+
+/** Menselijke datum, bv. "27 augustus 2026". */
+function datumNl(d) {
+  try {
+    return new Date(d).toLocaleDateString('nl-NL', {
+      timeZone: 'Europe/Amsterdam', day: 'numeric', month: 'long', year: 'numeric',
+    });
+  } catch (_) { return new Date(d).toISOString().slice(0, 10); }
+}
+
+async function naamVan(userId) {
+  if (!userId) return null;
+  try {
+    const { data } = await supabaseAdmin
+      .from('profiles').select('full_name').eq('id', userId).maybeSingle();
+    const n = String(data?.full_name || '').trim();
+    return n || null;
+  } catch (_) { return null; }
+}
+
+const AFGESLOTEN_STATUSSEN = new Set(['verlengd', 'verloren']);
+
+/**
+ * Het belmoment een dag opschuiven. Vanaf het bestaande moment als dat nog
+ * in de toekomst ligt, anders vanaf nu — zo is er altijd minstens een dag
+ * lucht tussen het bericht en de volgende belpoging, ook als de lead al
+ * over tijd was.
+ *
+ * Apart en geëxporteerd omdat dit het enige stukje rekenwerk is waar een
+ * fout stil doorwerkt: een dag te weinig en je belt alsnog te vroeg.
+ *
+ * @param {string|null} bestaandIso  huidige terugbel_datum, mag leeg zijn
+ * @param {Date}        nu
+ * @returns {string} ISO-tijdstempel
+ */
+export function volgendBelmoment(bestaandIso, nu = new Date()) {
+  const bestaand = bestaandIso ? new Date(bestaandIso) : null;
+  const basis = (bestaand && !isNaN(bestaand.getTime()) && bestaand.getTime() > nu.getTime())
+    ? bestaand : nu;
+  return new Date(basis.getTime() + 24 * 3600 * 1000).toISOString();
+}
+
+/**
+ * Reageer op een WhatsApp-taak die zojuist op 'done' is gezet.
+ *
+ * Gooit nooit en geeft nooit een fout terug die de statuswijziging zou mogen
+ * blokkeren: de taak is al afgevinkt, en dat mag niet ongedaan gemaakt worden
+ * omdat een vervolgstap misging.
+ *
+ * @returns {Promise<{status:'bijgewerkt'|'geen_lead'|'al_gedaan'|'lead_gesloten'|'fout', reden?:string}>}
+ */
+export async function whatsappTaakAfgerond({ taakId, doorUserId = null }) {
+  try {
+    if (!taakId) return { status: 'geen_lead' };
+
+    // Welke lead hoort bij deze taak? Geen resultaat = niet onze taak.
+    const { data: leads, error } = await supabaseAdmin
+      .from('follow_up_leads')
+      .select('id, lead_status, terugbel_datum, source_ref')
+      .filter('source_ref->>whatsapp_taak_id', 'eq', String(taakId))
+      .limit(1);
+    if (error) {
+      console.warn('[whatsapp-taak] lead-lookup faalde:', error.message);
+      return { status: 'fout', reden: error.message };
+    }
+    const lead = leads && leads[0];
+    if (!lead) return { status: 'geen_lead' };
+
+    const ref = (lead.source_ref && typeof lead.source_ref === 'object') ? lead.source_ref : {};
+    // Twee keer naar klaar en terug mag geen twee notities en twee dagen
+    // uitstel opleveren.
+    if (ref.whatsapp_taak_afgerond_at) return { status: 'al_gedaan' };
+
+    const nu = new Date();
+    const nuIso = nu.toISOString();
+    const naam = (await naamVan(doorUserId)) || 'een collega';
+
+    await schrijfLeadNotitie(
+      lead.id,
+      `WhatsApp verstuurd door ${naam} op ${datumNl(nu)}.`,
+      { doorUserId, entryKind: 'system', outcomeCode: 'whatsapp_verstuurd' },
+    );
+
+    const patch = { source_ref: { ...ref, whatsapp_taak_afgerond_at: nuIso }, updated_at: nuIso };
+
+    // Belmoment een dag opschuiven — maar alleen bij een lead die nog loopt.
+    // Is hij intussen gewonnen of afgesloten, dan blijft de datum met rust;
+    // een dichte rij terugzetten op de bellijst zou verwarrend zijn.
+    const gesloten = AFGESLOTEN_STATUSSEN.has(String(lead.lead_status || ''));
+    if (!gesloten) {
+      patch.terugbel_datum = volgendBelmoment(lead.terugbel_datum, nu);
+    }
+
+    const { error: upErr } = await supabaseAdmin
+      .from('follow_up_leads').update(patch).eq('id', lead.id);
+    if (upErr) {
+      console.warn('[whatsapp-taak] lead bijwerken faalde:', upErr.message);
+      return { status: 'fout', reden: upErr.message };
+    }
+    return { status: gesloten ? 'lead_gesloten' : 'bijgewerkt' };
+  } catch (e) {
+    console.warn('[whatsapp-taak] afgerond-afhandeling faalde:', e?.message || e);
     return { status: 'fout', reden: e?.message || 'onbekend' };
   }
 }
