@@ -1736,8 +1736,21 @@
     if (!target) return;
     _post('/api/events-attendee-move', { id: attId, target_event_id: target.trim() }, 'Verplaatst', eventId);
   };
+  // v=2026-08-27 fix: v2 ⋯-menu "Offerte aanmaken" was kapot — riep
+  // /api/events-attendee-link-deal aan met { id, action:'create_deal' }
+  // terwijl het endpoint { attendee_id, deal_id } óf { attendee_id, unlink }
+  // verwacht. 400 gegarandeerd. Er is geen "create nieuwe deal vanuit
+  // attendee"-endpoint in de repo — het bedoelde v1-gedrag was "koppel een
+  // BESTAANDE deal aan deze attendee". Herbrand naar wat 'ie werkelijk doet:
+  // open de deal-search-modal (dezelfde als de afronden-flow, met attendee-
+  // context voor prefill + same-customer boost). Wie een nieuwe offerte wil
+  // aanmaken doet dat in de Sales-module en koppelt hem daarna hier.
   window.__evAttToOfferte = (attId, eventId) => {
-    _post('/api/events-attendee-link-deal', { id: attId, action:'create_deal' }, 'Offerte aangemaakt (check Sales)');
+    if (typeof window.__evCompleteOpenDealSearch === 'function') {
+      window.__evCompleteOpenDealSearch(attId, eventId);
+    } else {
+      if (window.KV?.toast) window.KV.toast('Deal-koppel-modal niet beschikbaar — herlaad de pagina.', 'warn');
+    }
   };
 
   // ═══════════════════════════════════════════════════════════════════════
