@@ -201,6 +201,56 @@
     } catch (_) { /* noop */ }
   }
 
+  // ── Focus-bewaring uitgebreid: gewone velden met data-kv-focus-key ─────
+  //
+  // De patch hierboven redt cursor én waarde van zoekvelden door de DOM-node
+  // zelf te bewaren en na de render terug te hangen. Dat kan niet voor velden
+  // die als HTML-string uit een view komen: die node bestaat na de render niet
+  // meer. Voor die velden bewaren we wat er wél te bewaren valt — welk veld
+  // focus had, waar de cursor stond, en hoe ver het venster eromheen gescrold
+  // was. De waarde hoeft hier niet bewaard te worden: die staat al in de
+  // view-state en komt via het value-attribuut vanzelf terug.
+  //
+  // Een view meldt een veld aan door het een `data-kv-focus-key` te geven met
+  // een waarde die de render overleeft (bv. het deelnemer-id erin verwerkt).
+  //
+  // Waarom dit nodig is: het venster "Event afronden" hertekent volledig bij
+  // elke statuswissel. Stond je op dat moment in het notitieveld van een
+  // follow-up, dan was je cursor weg en sprong het venster terug naar boven.
+  function scrollOuder(el) {
+    for (let p = el && el.parentElement; p; p = p.parentElement) {
+      let ov;
+      try { ov = getComputedStyle(p).overflowY; } catch (_) { return null; }
+      if ((ov === 'auto' || ov === 'scroll') && p.scrollHeight > p.clientHeight) return p;
+    }
+    return null;
+  }
+  function snapshotFocusVeld() {
+    const el = document.activeElement;
+    if (!el || typeof el.getAttribute !== 'function') return null;
+    const key = el.getAttribute('data-kv-focus-key');
+    if (!key) return null;
+    let start = null, end = null;
+    try { start = el.selectionStart; end = el.selectionEnd; } catch (_) { /* niet elk input-type kent selectie */ }
+    const sc = scrollOuder(el);
+    return { key, start, end, scrollTop: sc ? sc.scrollTop : null };
+  }
+  function restoreFocusVeld(snap) {
+    if (!snap) return;
+    const el = document.querySelector('[data-kv-focus-key="' + snap.key.replace(/"/g, '\\"') + '"]');
+    if (!el) return;
+    try {
+      el.focus({ preventScroll: true });
+      if (snap.start != null && snap.end != null && typeof el.setSelectionRange === 'function') {
+        try { el.setSelectionRange(snap.start, snap.end); } catch (_) { /* type=date e.d. gooit hierop */ }
+      }
+      if (snap.scrollTop != null) {
+        const sc = scrollOuder(el);
+        if (sc) sc.scrollTop = snap.scrollTop;
+      }
+    } catch (_) { /* noop */ }
+  }
+
   function detachSearchWrapsBeforeRender() {
     SEARCH_INPUT_CACHE.forEach((input) => {
       const wrap = input.parentElement;
@@ -220,10 +270,13 @@
     const orig = window.DFO.render;
     window.DFO.render = function () {
       const snap = snapshotFocusedSearch();
+      const veld = snapshotFocusVeld();
       detachSearchWrapsBeforeRender();
       const result = orig.apply(this, arguments);
       hydrateSearchMounts();
       restoreFocusedSearch(snap);
+      restoreFocusVeld(veld);
+      vergeetVuilAlsGeenVensterOpen();
       return result;
     };
   }
@@ -389,6 +442,125 @@
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
+  // ─── VENSTERS SLUITEN ALLEEN OP VERZOEK VAN DE GEBRUIKER ───────────────
+  //
+  // AANLEIDING. In "Event afronden" (events-v2.js) verdween het venster — met
+  // alles wat erin ingevuld stond — terwijl er getypt werd. Oorzaak: de
+  // donkere achtergrond sluit bij een klik, en een sleep-selectie in een
+  // invoerveld die nét buiten de kaart eindigt telt voor de browser als een
+  // klik op die achtergrond. Je begint in het veld, je sleept om je eigen
+  // notitie te selecteren, je laat los naast de kaart, en het venster is weg.
+  //
+  // De `event.stopPropagation()` op de kaart helpt daar niet tegen: de klik
+  // wordt op de achtergrond zélf afgeleverd en komt langs de kaart niet meer.
+  // De variant `if (event.target === this)`, die 26 van de 38 vensters in deze
+  // repo gebruiken, helpt er evenmin tegen — in dit geval ís de achtergrond
+  // het doelwit, dus de voorwaarde klopt en het venster sluit alsnog.
+  // Allebei nagemeten in een kale testpagina met exact deze opmaak.
+  //
+  // DE REGEL IS NU: een venster sluit alleen als de gebruiker dat zegt — het
+  // kruisje of Annuleren. De achtergrond sluit nooit meer. Escape sluit
+  // alleen zolang er niets is ingevuld sinds het venster openging.
+  //
+  // WAAROM HIER, EN NIET IN ELK VENSTER APART. Elk van de 38 vensters heeft
+  // zijn eigen inline onclick op de achtergrond, verspreid over ruim twintig
+  // bestanden. Eén luisteraar in de vangfase op document vangt ze allemaal
+  // tegelijk — inclusief de abonnementen-wizard (.sw-modal-back), het gedeelde
+  // venster uit app-shell (.mdl) en elk venster dat er later bij komt.
+  // Vangfase op document betekent dat de gebeurtenis stilgezet wordt vóór ze
+  // bij de achtergrond aankomt, dus de inline onclick draait niet meer.
+  //
+  // DEKKING. Dit bestand wordt alleen geladen door modules/klanten-v2/
+  // index.html. De losse oudere schermen (modules/finance.html, events.html,
+  // sales.html, admin*.html en de andere stand-alone pagina's) laden het niet
+  // en houden hun oude gedrag. Zie de PR-tekst voor die lijst.
+
+  /* Herkennen van een venster-achtergrond gebeurt in twee stappen. Eerst een
+     goedkope tekstcontrole op het style-attribuut en de klassenaam — die kost
+     geen layout en mag daarom bij elke toetsaanslag draaien. Pas als die
+     aanslaat volgt de dure controle (computed style + afmetingen). */
+  const ACHTERGROND_KLASSEN = /(^|\s)(mdl|sw-modal-back|ev-modal-backdrop|agv-portal|ld-modal-scrim|cdm-scrim|ev-portal)(\s|$)/;
+  /* De navigatie-sluier is géén venster: die hóórt te sluiten bij een klik,
+     en er staat niets in dat je kwijt kunt raken. */
+  const GEEN_VENSTER_IDS = ['scrim'];
+
+  function lijktAchtergrond(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const st = typeof el.getAttribute === 'function' ? el.getAttribute('style') : null;
+    if (st && st.indexOf('inset:0') >= 0 && st.indexOf('position:fixed') >= 0) return true;
+    const cls = typeof el.className === 'string' ? el.className : '';
+    return ACHTERGROND_KLASSEN.test(cls);
+  }
+  function isVensterAchtergrond(el) {
+    if (!lijktAchtergrond(el)) return false;
+    if (GEEN_VENSTER_IDS.indexOf(el.id) >= 0) return false;
+    // Een achtergrond draagt altijd een kaart. Een lege fixed laag is iets
+    // anders (sluier, toast-laag) en laten we met rust.
+    if (!el.firstElementChild) return false;
+    let cs;
+    try { cs = getComputedStyle(el); } catch (_) { return false; }
+    if (cs.position !== 'fixed' || cs.display === 'none' || cs.visibility === 'hidden') return false;
+    const r = el.getBoundingClientRect();
+    return r.top <= 1 && r.left <= 1
+        && r.width  >= window.innerWidth  - 2
+        && r.height >= window.innerHeight - 2;
+  }
+
+  /* 1. De achtergrond sluit niet meer. */
+  document.addEventListener('click', (ev) => {
+    if (!isVensterAchtergrond(ev.target)) return;
+    ev.stopPropagation();
+    ev.preventDefault();
+  }, true);
+
+  /* 2. Escape sluit alleen als er niets is ingevuld sinds het venster openging.
+        "Ingevuld" wordt op twee manieren vastgesteld: deze laag ziet elke
+        input/change binnen een venster, en een view mag daarnaast zijn eigen
+        test aanmelden voor invoer die niet via een invoerveld loopt (in
+        "Event afronden" bv. de statusknoppen Aanwezig / No-show / Afgemeld).
+        Bewust géén bevestigingsvenster: dat zou een tweede venster zijn om
+        een venster te sluiten. */
+  let vensterVuil = false;
+  const VUIL_CHECKS = [];
+
+  function registreerVuilCheck(fn) {
+    if (typeof fn === 'function' && VUIL_CHECKS.indexOf(fn) < 0) VUIL_CHECKS.push(fn);
+  }
+  function vensterIsVuil() {
+    if (vensterVuil) return true;
+    for (let i = 0; i < VUIL_CHECKS.length; i++) {
+      try { if (VUIL_CHECKS[i]()) return true; } catch (_) { /* een kapotte test mag Escape niet blokkeren */ }
+    }
+    return false;
+  }
+  function markeerVuil(ev) {
+    if (vensterVuil) return;
+    for (let el = ev.target; el && el !== document.body; el = el.parentElement) {
+      if (lijktAchtergrond(el)) { vensterVuil = true; return; }
+    }
+  }
+  document.addEventListener('input',  markeerVuil, true);
+  document.addEventListener('change', markeerVuil, true);
+
+  /* Staat er geen venster meer open, dan begint de volgende schoon. Dit draait
+     mee in de render-patch hierboven, want elk sluiten loopt via DFO.render(). */
+  function vergeetVuilAlsGeenVensterOpen() {
+    if (!vensterVuil) return;
+    const kandidaten = document.querySelectorAll(
+      '[style*="inset:0"],.mdl,.sw-modal-back,.ev-modal-backdrop,.agv-portal,.ld-modal-scrim,.cdm-scrim,.ev-portal');
+    for (let i = 0; i < kandidaten.length; i++) {
+      if (isVensterAchtergrond(kandidaten[i])) return;
+    }
+    vensterVuil = false;
+  }
+
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    if (!vensterIsVuil()) return;   // niets ingevuld → Escape mag gewoon sluiten
+    ev.stopPropagation();
+    ev.preventDefault();
+  }, true);
+
   window.KV_V2 = window.KV_V2 || {};
   window.KV_V2.helpers = {
     kpi, kpis, toolbar, chips, search, table, av, pill, trend, voorbeeldBanner,
@@ -403,6 +575,10 @@
     joostFetchDefaults, joostBuildFullBody, joostSafeUpsert,
     // Ronde 18: chat-media + emoji-picker.
     renderChatBody, emojiPickerButtonHtml,
+    // Vensters sluiten alleen op verzoek: een view meldt hier zijn eigen
+    // "is er iets ingevuld"-test aan voor invoer die niet via een invoerveld
+    // loopt (knoppen, chips). Zie het blok hierboven.
+    registreerVuilCheck,
   };
   console.debug('[_shared-v2] helpers + stableSearch + joost helpers registered');
 })();

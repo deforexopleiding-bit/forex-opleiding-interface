@@ -1,0 +1,39 @@
+<!doctype html><meta charset="utf-8"><title>Vensters sluiten alleen op verzoek — harness</title><body style="margin:0">
+<!--
+  Testharness bij tests/manual/vensters-sluiten.mjs. Niet in productie gebruikt.
+  Laadt het échte _shared-v2.js met een minimale DFO-stub eromheen, en bouwt
+  een venster met exact de opmaak van "Event afronden" (events-v2.js:1102) plus
+  een tweede met de klasse van de abonnementen-wizard (.sw-modal-back).
+-->
+<style>
+ .sw-modal-back{position:fixed;inset:0;background:rgba(17,23,33,.42);z-index:100;display:none;align-items:center;justify-content:center;padding:24px}
+ .sw-modal-back.is-open{display:flex}
+</style>
+<div class="scrim" id="scrim" onclick="window.__scrimGeklikt=true"></div>
+<div id="content"></div>
+<script>
+// ── minimale DFO-stub: alleen wat _shared-v2.js aanraakt ──
+window.__state = { open:'complete', notitie:'', status:'', renders:0 };
+window.DFO = {
+  I:{}, svg:()=>'', S:{}, F:{}, avc:()=>'#ccc', ini:()=>'X',
+  render(){
+    window.__state.renders++;
+    const st = window.__state;
+    document.getElementById('content').innerHTML = st.open === 'complete' ? (
+      '<div id="backdrop" style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto" onclick="window.__close()">'
+    + '<div id="card" style="background:#fff;max-width:920px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:20px" onclick="event.stopPropagation()">'
+    + '<div style="height:1200px">'
+    + '<button id="pil" onclick="window.__state.status=\'aanwezig\'">Aanwezig</button>'
+    + '<div style="height:900px"></div>'
+    + '<input id="note" data-kv-focus-key="ev-fu-notitie-abc" value="'+st.notitie.replace(/"/g,'&quot;')+'" oninput="window.__state.notitie=this.value" style="width:300px;padding:8px"/>'
+    + '</div></div></div>')
+    : st.open === 'abo' ? (
+      '<div id="swback" class="sw-modal-back is-open" onclick="if(event.target===this)window.__close()">'
+    + '<div style="background:#fff;padding:20px;width:600px"><input id="abo-in" style="padding:8px"/></div></div>')
+    : '<p id="dicht">dicht</p>';
+  },
+};
+window.__close = () => { window.__state.open=null; window.__state.notitie=''; window.__state.status=''; window.DFO.render(); };
+</script>
+<script src="../../modules/klanten-v2/views/_shared-v2.js"></script>
+<script>window.DFO.render();</script>

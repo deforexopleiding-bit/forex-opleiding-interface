@@ -1099,7 +1099,12 @@
     const menLoad = _live.mentors.loading[eventId];
     const presentMentorIds = Object.keys(form.present_mentors).filter((k) => form.present_mentors[k]);
 
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto" onclick="window.__evCompleteClose()">
+    // De donkere achtergrond sluit BEWUST niet. Een sleep-selectie in een
+    // invoerveld die net buiten de kaart eindigt levert de klik bij deze
+    // achtergrond af, en sloopte zo het hele ingevulde formulier. Sluiten
+    // gaat via het kruisje in de kop of Annuleren in de voet. De gedeelde
+    // laag (_shared-v2.js) houdt dit ook tegen als het hier ooit terugkeert.
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto">
       <div style="background:var(--surface);border-radius:var(--r-lg);max-width:920px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:0" onclick="event.stopPropagation()">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;position:sticky;top:0;background:var(--surface);z-index:2">
           <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.tick)}</span>
@@ -1219,7 +1224,7 @@
           ${FU_REASON_PRESETS.map((p) => `<option value="${esc(p)}" ${fu.reason === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}
         </select>
       </div>
-      <input type="text" placeholder="Notitie (verplicht) — bv. specifieke afspraak/situatie" value="${esc(fu.reason || '')}" oninput="window.__evCompleteFuSet('${esc(attId)}','reason',this.value)" style="padding:6px 10px;border:1px solid var(--amber-line);background:var(--surface);border-radius:6px;font-size:12.5px" />
+      <input type="text" data-kv-focus-key="ev-fu-notitie-${esc(attId)}" placeholder="Notitie (verplicht) — bv. specifieke afspraak/situatie" value="${esc(fu.reason || '')}" oninput="window.__evCompleteFuSet('${esc(attId)}','reason',this.value)" style="padding:6px 10px;border:1px solid var(--amber-line);background:var(--surface);border-radius:6px;font-size:12.5px" />
     </div>`;
   }
   function _completeExpenseRow(e, i, mentorList, presentMentorIds) {
@@ -1464,6 +1469,11 @@
     document.addEventListener('click', () => {
       if (_ui.rowMenuOpen || _ui.attKebabOpen) {
         _ui.rowMenuOpen = null; _ui.attKebabOpen = null;
+        // Staat er een venster open, dan alleen de state opruimen en NIET
+        // hertekenen: een volledige render vervangt het invoerveld waar op
+        // dat moment in getypt wordt. Het menu zit toch achter het venster;
+        // bij het sluiten volgt sowieso een render en is het weg.
+        if (_ui.completeModal || _ui.attDetail) return;
         if (window.DFO?.render) window.DFO.render();
       }
     });
@@ -1477,6 +1487,29 @@
       if (ev.key !== 'Escape') return;
       if (_ui.attDetail) { ev.preventDefault(); if (typeof window.__evAttClose === 'function') window.__evAttClose(); return; }
       if (_ui.completeModal) { ev.preventDefault(); _ui.completeModal = null; _evRemovePortal('ev-modal'); if (window.DFO?.render) window.DFO.render(); return; }
+    });
+  }
+  // Escape mag dit venster alleen sluiten zolang er niets is ingevuld. De
+  // gedeelde laag (_shared-v2.js) houdt Escape tegen zodra er in een venster
+  // getypt is, maar in "Event afronden" wordt het meeste met knoppen ingevuld
+  // — de statuspillen Aanwezig / No-show / Afgemeld schrijven rechtstreeks in
+  // completeForm zonder dat er een invoerveld aan te pas komt. Daarom meldt
+  // dit scherm zijn eigen test aan: staat er iets in completeForm, dan doet
+  // Escape niets. Bewust géén bevestigingsvenster erbij.
+  if (!window.__evVuilCheckBound && window.KV_V2?.helpers?.registreerVuilCheck) {
+    window.__evVuilCheckBound = true;
+    window.KV_V2.helpers.registreerVuilCheck(() => {
+      // Alleen meetellen zolang het venster ook echt openstaat: de Escape-tak
+      // hierboven laat completeForm staan als ze completeModal leegmaakt, en
+      // een blijvend "vuil" formulier zou Escape daarna overal blokkeren.
+      const f = _ui.completeModal ? _ui.completeForm : null;
+      if (!f) return false;
+      if (f.basis_incl_btw !== true) return true;
+      if (String(f.completion_summary || '').trim() !== '') return true;
+      if (Object.keys(f.attendees || {}).length > 0) return true;
+      if (Object.keys(f.present_mentors || {}).some((k) => f.present_mentors[k])) return true;
+      if (asArr(f.expenses).length > 0) return true;
+      return false;
     });
   }
 
