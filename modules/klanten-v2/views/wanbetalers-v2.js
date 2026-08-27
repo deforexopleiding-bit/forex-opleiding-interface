@@ -284,6 +284,61 @@
     }
   }
 
+  /* ── WA/brief-bulk shared helpers (#wa-bulk-C + #brief-B) ────────────
+     Lokale variant van apiPost die extra headers + instelbare timeout
+     toestaat. Auth-mechanisme IDENTIEK aan apiPost() hierboven — alleen
+     headers-spread + timeout uitgebreid. Timeout per call: 30s voor
+     dry-run/templates/test-send, ≥ server-maxDuration voor live-batches
+     (WA 300s, brief 300s → client 315s met 15s buffer). */
+  async function _apiPostH(url, body, extraHeaders, timeoutMs) {
+    const to_ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : 30000;
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken
+        ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = { 'Content-Type': 'application/json', ...(extraHeaders || {}) };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), to_ms);
+      let resp;
+      try {
+        resp = await fetch(url, {
+          method: 'POST', headers,
+          body: body ? JSON.stringify(body) : undefined,
+          signal: ctrl.signal,
+        });
+      } finally { clearTimeout(to); }
+      let j = null; try { j = await resp.json(); } catch (_) {}
+      return { ok: resp.ok, status: resp.status, json: j, error: resp.ok ? null : ((j && (j.error || j.message)) || ('HTTP ' + resp.status)) };
+    } catch (e) {
+      const msg = (e && e.name === 'AbortError') ? `timeout na ${Math.round(to_ms/1000)}s` : ((e && e.message) || 'netwerkfout');
+      return { ok: false, status: 0, json: null, error: msg };
+    }
+  }
+
+  const CLIENT_TIMEOUT_QUICK_MS = 30_000;   // templates-fetch, dry-run, test-send
+  const CLIENT_TIMEOUT_LIVE_MS  = 315_000;  // ~5min15s — 15s buffer boven server-maxDuration 300s
+  const WA_BULK_TEST_MIN_RECIPIENTS_TRIGGER = 50;
+  const MARKETING_WARNING_LABEL = 'MARKETING_ON_DEBTOR';
+
+  // Persistent test-send nummer voor Jeffrey (edit-baar in de modal).
+  let _wbxTestSendPhone = '+31655270212';
+  try {
+    const s = localStorage.getItem('wbxTestSendPhone');
+    if (s && /^\+[1-9]\d{7,14}$/.test(s)) _wbxTestSendPhone = s;
+  } catch (_) {}
+
+  // Filter templates op debiteuren-relevantie: minstens 1 mapping-key moet met
+  // klant.* of factuur.* beginnen. Templates zonder params (statische headers
+  // zoals 'toegang_verlengd_nl') worden verborgen — die horen niet in een
+  // debiteuren-picker en gaan onvermijdelijk fout bij live-send.
+  function _isDebtorRelevantTemplate(tpl) {
+    const mapping = tpl && tpl.meta_param_mapping;
+    if (!mapping || typeof mapping !== 'object') return false;
+    const values = Object.values(mapping).map(v => String(v || ''));
+    if (values.length === 0) return false;
+    return values.some(v => v.startsWith('klant.') || v.startsWith('factuur.'));
+  }
+
   /* ── HTTP-helper ────────────────────────────────────────────────────── */
   async function tryFetch(label, url, timeoutMs) {
     timeoutMs = timeoutMs || 8000;
@@ -1454,6 +1509,412 @@
     if (window.DFO?.render) window.DFO.render();
   };
 
+  /* ══════════════════════════════════════════════════════════════════
+     #wa-bulk-C — WhatsApp-bulk UI (imperatief, closure-based modal;
+     zelfde inject-patroon als _askTypedConfirm). Onafhankelijk van de
+     bestaande dunning-bulk-start. Hergebruikt _selOvCustIds() voor de
+     selectie. NUL dunning-state-mutatie.
+     ══════════════════════════════════════════════════════════════════ */
+
+  function _closeWaBulkModal() {
+    const el = document.getElementById('wbxWaBulkRoot');
+    if (el) el.remove();
+  }
+
+  window.__wbxBulkWaOpen = () => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const cids = _selOvCustIds();
+    if (!cids.length) { _toast('Selecteer eerst klanten', 'warn'); return; }
+    _openWaBulkModal(cids);
+  };
+
+  function _wireBulkModalEvents(root, state, cids, actions) {
+    root.querySelectorAll('[data-action]').forEach(el => {
+      const action = el.getAttribute('data-action');
+      const arg = el.getAttribute('data-arg');
+      if (el.tagName === 'INPUT' && (el.type === 'radio' || el.type === 'checkbox')) {
+        el.addEventListener('change', () => actions[action](arg || el.checked));
+      } else if (el.tagName === 'INPUT') {
+        el.addEventListener('change', () => actions[action](el.value));
+      } else {
+        el.addEventListener('click', () => actions[action](arg));
+      }
+    });
+  }
+
+  function _openWaBulkModal(cids) {
+    _closeWaBulkModal();
+    const state = {
+      step: 'templates',
+      loading: true, templates: null, templatesFilteredOut: 0,
+      error: null, chosenTpl: null, confirmMarketing: false,
+      dryRun: null, testSentAtLeastOnce: false,
+      running: false, runningLabel: null, bulkJobId: null, result: null,
+    };
+    const root = document.createElement('div');
+    root.id = 'wbxWaBulkRoot';
+    root.style.cssText = 'position:fixed;inset:0;z-index:9998;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.55);padding:20px';
+    root.addEventListener('click', (e) => { if (e.target === root) _closeWaBulkModal(); });
+    document.body.appendChild(root);
+
+    const _marketingHeaders = () => {
+      if (state.chosenTpl && state.chosenTpl.category_warning === MARKETING_WARNING_LABEL && state.confirmMarketing) {
+        return { 'X-Confirm-Marketing': 'true' };
+      }
+      return {};
+    };
+
+    const render = () => {
+      let inner = '';
+      if (state.step === 'templates')     inner = _renderWaBulkTemplates(state, cids);
+      else if (state.step === 'dry_run')  inner = _renderWaBulkDryRun(state);
+      else if (state.step === 'result')   inner = _renderWaBulkResult(state);
+      root.innerHTML = inner;
+      _wireBulkModalEvents(root, state, cids, actions);
+    };
+
+    const actions = {
+      close: _closeWaBulkModal,
+      pickTpl: (id) => {
+        const t = (state.templates || []).find(tt => tt.id === id);
+        if (!t) return;
+        state.chosenTpl = t; state.confirmMarketing = false; render();
+      },
+      toggleMarketing: (checked) => { state.confirmMarketing = !!checked; render(); },
+      setTestPhone: (v) => {
+        _wbxTestSendPhone = String(v || '').trim();
+        try { localStorage.setItem('wbxTestSendPhone', _wbxTestSendPhone); } catch (_) {}
+      },
+      runDry: async () => {
+        if (!state.chosenTpl) return;
+        state.running = true; state.error = null; render();
+        const r = await _apiPostH('/api/wanbetalers-bulk-wa-send', {
+          customer_ids: cids, template_id: state.chosenTpl.id,
+          language: state.chosenTpl.language || 'nl', dry_run: true,
+        }, _marketingHeaders(), CLIENT_TIMEOUT_QUICK_MS);
+        state.running = false;
+        if (!r.ok) { state.error = r.error || 'onbekend'; render(); return; }
+        state.dryRun = r.json; state.step = 'dry_run'; render();
+      },
+      testSend: async () => {
+        if (!state.chosenTpl) return;
+        if (!/^\+[1-9]\d{7,14}$/.test(_wbxTestSendPhone)) { _toast('Testnummer moet E.164 zijn (bv. +31655270212)', 'warn'); return; }
+        const first = (state.dryRun && state.dryRun.recipients || []).find(r => r.action === 'would_send');
+        const testCid = (first && first.customer_id) || cids[0];
+        state.running = true; render();
+        const headers = { ..._marketingHeaders() };
+        if (state.chosenTpl.category_warning === MARKETING_WARNING_LABEL) headers['X-Confirm-Marketing'] = 'true';
+        const r = await _apiPostH('/api/wanbetalers-bulk-wa-send', {
+          customer_ids: [testCid], template_id: state.chosenTpl.id,
+          language: state.chosenTpl.language || 'nl', dry_run: false,
+          test_send_to: _wbxTestSendPhone,
+        }, headers, CLIENT_TIMEOUT_QUICK_MS);
+        state.running = false;
+        if (!r.ok) { _toast('Test-send faalde: ' + (r.error || 'onbekend'), 'error'); render(); return; }
+        state.testSentAtLeastOnce = true;
+        _toast('Test verzonden naar ' + _wbxTestSendPhone + '. Check WhatsApp; bevestig vóór de bulk.', 'success');
+        render();
+      },
+      confirm: async () => {
+        const dr = state.dryRun; if (!dr) return;
+        const wouldSend = (dr.totals && dr.totals.would_send) || 0;
+        if (wouldSend === 0) { _toast('Geen te verzenden klanten (alles skipped).', 'warn'); return; }
+        const isMkt = state.chosenTpl.category_warning === MARKETING_WARNING_LABEL;
+        const needsTest = wouldSend > WA_BULK_TEST_MIN_RECIPIENTS_TRIGGER || isMkt;
+        if (needsTest && !state.testSentAtLeastOnce) {
+          _toast('Doe éérst een test-send (verplicht bij ' + (isMkt ? 'marketing-template' : '>' + WA_BULK_TEST_MIN_RECIPIENTS_TRIGGER + ' ontvangers') + ').', 'warn');
+          return;
+        }
+        const phrase = 'VERZEND WHATSAPP NAAR ' + wouldSend + ' KLANTEN';
+        const bodyHtml =
+          '<div style="margin-bottom:10px">Je gaat het template <b>' + esc(state.chosenTpl.name) +
+          '</b> naar <b>' + wouldSend + '</b> klant' + (wouldSend === 1 ? '' : 'en') + ' versturen.</div>' +
+          (isMkt ? '<div style="padding:9px 12px;background:var(--rose-soft,#FBE7EA);color:var(--rose,#C22B3E);border-radius:6px;font-size:12px;margin-bottom:10px">⚠ Marketing-template naar debiteuren — WABA-compliance-risico bevestigd.</div>' : '') +
+          '<div style="padding:9px 12px;background:var(--amber-soft,#FFF3D6);color:var(--amber,#B27A0B);border-radius:6px;font-size:12px">Deze actie verstuurt echte WhatsApp-berichten via Meta. Geen ongedaan-maken.</div>';
+        const ok = await _askTypedConfirm('Bulk-WhatsApp versturen', bodyHtml, phrase, { okLabel: 'VERZENDEN' });
+        if (!ok) return;
+        if (!state.bulkJobId) state.bulkJobId = crypto.randomUUID();
+        state.running = true;
+        state.runningLabel = 'Verzenden… (kan tot 5 min duren bij grote batches)';
+        state.error = null; render();
+        const r = await _apiPostH('/api/wanbetalers-bulk-wa-send', {
+          customer_ids: cids, template_id: state.chosenTpl.id,
+          language: state.chosenTpl.language || 'nl', dry_run: false,
+          bulk_job_id: state.bulkJobId,
+        }, _marketingHeaders(), CLIENT_TIMEOUT_LIVE_MS);
+        state.running = false; state.runningLabel = null;
+        if (!r.ok) {
+          if (r.status === 202 || r.status === 409) {
+            state.result = Object.assign({ partial: true }, r.json || {}, { _status: r.status });
+            state.step = 'result'; render(); return;
+          }
+          state.error = r.error || 'onbekend'; render(); return;
+        }
+        state.result = r.json; state.step = 'result';
+        _ui.ovSelected = {};
+        if (window.DFO?.render) window.DFO.render();
+        render();
+      },
+    };
+
+    (async () => {
+      const j = await tryFetch('wa-templates', '/api/wanbetalers-whatsapp-templates-list');
+      state.loading = false;
+      if (!j || j.__error || j.error) { state.error = (j && (j.__error || j.error)) || 'Kon templates niet laden'; render(); return; }
+      const all = asArr(j.items);
+      state.templates = all.filter(_isDebtorRelevantTemplate);
+      state.templatesFilteredOut = all.length - state.templates.length;
+      render();
+    })();
+
+    render();
+  }
+
+  function _renderWaBulkTemplates(state, cids) {
+    const modalStyle = 'background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:0;max-width:720px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:hidden;display:flex;flex-direction:column';
+    const headStyle = 'padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center';
+    const bodyStyle = 'padding:16px 18px;overflow:auto;flex:1';
+    const footStyle = 'padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end';
+    let content = '';
+    if (state.loading) content = '<div>Templates laden…</div>';
+    else if (state.error) content = '<div style="padding:9px 12px;background:var(--rose-soft,#FBE7EA);color:var(--rose,#C22B3E);border-radius:6px;font-size:12.5px">' + esc(state.error) + '</div>';
+    else if (!state.templates || !state.templates.length) content = 'Geen debiteuren-relevante templates (met klant./factuur. keys) gevonden.' + (state.templatesFilteredOut ? ' (' + state.templatesFilteredOut + ' verborgen als niet-relevant)' : '');
+    else {
+      content = '<div style="display:flex;flex-direction:column;gap:8px">' +
+        state.templates.map(t => {
+          const isMkt = t.category_warning === MARKETING_WARNING_LABEL;
+          const checked = state.chosenTpl && state.chosenTpl.id === t.id;
+          return '<label style="display:flex;gap:10px;padding:11px 12px;border:1px solid ' + (checked ? 'var(--brand,#0A7490)' : 'var(--border)') + ';border-radius:8px;cursor:pointer;background:' + (checked ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface)') + '">' +
+            '<input type="radio" name="wbxWaTpl" value="' + esc(t.id) + '"' + (checked ? ' checked' : '') + ' data-action="pickTpl" data-arg="' + esc(t.id) + '" />' +
+            '<div style="flex:1;min-width:0">' +
+              '<div style="font-weight:600;font-size:13px">' + esc(t.name) + ' <span style="font-size:11px;color:var(--text-3);font-weight:400">(' + esc(t.language || '?') + ', ' + esc(t.category || '?') + ')</span></div>' +
+              (isMkt ? '<div style="color:var(--rose,#C22B3E);font-size:11.5px;font-weight:600;margin-top:2px">⚠ MARKETING — WABA-compliance-risico</div>' : '') +
+              '<div style="font-size:11.5px;color:var(--text-3);margin-top:4px;white-space:pre-wrap">' + esc((t.body_text || '').slice(0, 220)) + ((t.body_text || '').length > 220 ? '…' : '') + '</div>' +
+            '</div>' +
+          '</label>';
+        }).join('') + '</div>' +
+        (state.templatesFilteredOut ? '<div style="font-size:11px;color:var(--text-3);margin-top:10px">' + state.templatesFilteredOut + ' template(s) verborgen (niet-debiteuren-relevant)</div>' : '') +
+        (state.chosenTpl && state.chosenTpl.category_warning === MARKETING_WARNING_LABEL
+          ? '<label style="display:flex;gap:8px;margin-top:14px;padding:10px;background:var(--rose-soft,#FBE7EA);border-radius:6px;color:var(--rose,#C22B3E);font-size:12.5px">' +
+              '<input type="checkbox"' + (state.confirmMarketing ? ' checked' : '') + ' data-action="toggleMarketing" />' +
+              ' Ik begrijp dat een marketing-template naar debiteuren een WABA-compliance-risico is.' +
+            '</label>'
+          : '');
+    }
+    const canGo = !state.running && state.chosenTpl && !(state.chosenTpl.category_warning === MARKETING_WARNING_LABEL && !state.confirmMarketing);
+    return '<div style="' + modalStyle + '">' +
+      '<div style="' + headStyle + '"><div style="font-weight:600;font-size:14.5px">📩 WhatsApp-bulk — kies template (' + cids.length + ' klant' + (cids.length === 1 ? '' : 'en') + ')</div>' +
+        '<button class="btn btn-ghost btn-sm" data-action="close">✕</button></div>' +
+      '<div style="' + bodyStyle + '">' + content + '</div>' +
+      '<div style="' + footStyle + '">' +
+        '<button class="btn btn-ghost btn-sm" data-action="close">Annuleren</button>' +
+        '<button class="btn btn-primary btn-sm"' + (canGo ? '' : ' disabled') + ' data-action="runDry">' + (state.running ? 'Bezig…' : 'Volgende → Preview') + '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _renderWaBulkDryRun(state) {
+    const dr = state.dryRun || {}; const totals = dr.totals || {};
+    const recips = asArr(dr.recipients);
+    const isMkt = state.chosenTpl && state.chosenTpl.category_warning === MARKETING_WARNING_LABEL;
+    const needsTest = ((totals.would_send || 0) > WA_BULK_TEST_MIN_RECIPIENTS_TRIGGER) || isMkt;
+    const canConfirm = !state.running && (totals.would_send || 0) > 0 && (!needsTest || state.testSentAtLeastOnce);
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);max-width:960px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:hidden;display:flex;flex-direction:column">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="font-weight:600;font-size:14.5px">📩 WhatsApp-bulk — preview & bevestig</div>' +
+        '<button class="btn btn-ghost btn-sm" data-action="close">✕</button></div>' +
+      '<div style="padding:12px 18px 8px"><div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px">' +
+        '<div><b>' + (totals.would_send || 0) + '</b> versturen</div>' +
+        '<div style="color:var(--text-3)"><b>' + (totals.would_skip || 0) + '</b> geskipt</div>' +
+        Object.entries(dr.skip_reason_summary || {}).map(([k, v]) => '<div style="color:var(--text-3)">' + esc(k) + ': ' + v + '</div>').join('') +
+      '</div></div>' +
+      '<div style="max-height:45vh;overflow:auto;padding:0 18px">' +
+        recips.map(r => {
+          if (r.action === 'skip') return '<div style="padding:8px 10px;border-bottom:1px solid var(--border);opacity:.55;font-size:12.5px">⨯ ' + esc(r.customer_name || r.customer_id) + ' — ' + esc(r.skip_reason) + (r.openstaand_bedrag_display ? ' · ' + esc(r.openstaand_bedrag_display) : '') + '</div>';
+          return '<div style="padding:10px;border-bottom:1px solid var(--border);font-size:12.5px">' +
+            '<div style="display:flex;justify-content:space-between"><div><b>' + esc(r.customer_name) + '</b> · ' + esc(r.phone_masked || '') + (r.last_wa_contact_at ? ' · <span style="color:var(--text-3)">laatste WA: ' + esc(new Date(r.last_wa_contact_at).toLocaleDateString('nl-NL')) + '</span>' : '') + '</div>' +
+              '<div style="color:var(--money,#0A9060);font-weight:600">' + esc(r.openstaand_bedrag_display || '') + '</div></div>' +
+            '<div style="font-size:11.5px;color:var(--text-3);margin-top:4px;white-space:pre-wrap">' + esc(r.rendered_body_preview || '') + '</div></div>';
+        }).join('') +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid var(--border);background:var(--surface-2)">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">' +
+          '<label style="font-size:12px;color:var(--text-3)">Test-nummer:</label>' +
+          '<input type="tel" value="' + esc(_wbxTestSendPhone) + '" data-action="setTestPhone" style="padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;width:170px" />' +
+          '<button class="btn btn-ghost btn-sm"' + (state.running ? ' disabled' : '') + ' data-action="testSend">🧪 Test naar mijn nummer</button>' +
+          (state.testSentAtLeastOnce ? '<span style="color:var(--money,#0A9060);font-size:11.5px">✓ test verzonden</span>' : '') +
+        '</div>' +
+        (needsTest && !state.testSentAtLeastOnce ? '<div style="padding:8px 10px;background:var(--amber-soft,#FFF3D6);color:var(--amber,#B27A0B);border-radius:5px;font-size:11.5px;margin-bottom:10px">' + (isMkt ? '⚠ Marketing-template' : '⚠ >' + WA_BULK_TEST_MIN_RECIPIENTS_TRIGGER + ' ontvangers') + ' — verplicht éérst een test-send.</div>' : '') +
+        (state.error ? '<div style="padding:8px 10px;background:var(--rose-soft,#FBE7EA);color:var(--rose,#C22B3E);border-radius:5px;font-size:12px;margin-bottom:10px">' + esc(state.error) + '</div>' : '') +
+        '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+          '<button class="btn btn-ghost btn-sm" data-action="close">Annuleren</button>' +
+          '<button class="btn btn-primary btn-sm"' + (canConfirm ? '' : ' disabled') + ' data-action="confirm">' + (state.running ? (state.runningLabel || 'Bezig…') : ('Verzenden → ' + (totals.would_send || 0))) + '</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _renderWaBulkResult(state) {
+    const res = state.result || {}; const partial = !!res.partial;
+    const items = asArr(res.results || res.processed_so_far);
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);max-width:840px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:hidden;display:flex;flex-direction:column">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="font-weight:600;font-size:14.5px">📩 WhatsApp-bulk — resultaat' + (partial ? ' (partial)' : '') + '</div>' +
+        '<button class="btn btn-ghost btn-sm" data-action="close">✕</button></div>' +
+      '<div style="padding:16px 18px">' +
+        (partial ? '<div style="padding:9px 12px;background:var(--amber-soft,#FFF3D6);color:var(--amber,#B27A0B);border-radius:6px;font-size:12px;margin-bottom:12px">' + esc(res.error || '') + ': job-status <b>' + esc((res.existing_job && res.existing_job.status) || '?') + '</b>. Onderstaande recipients zijn al verwerkt.</div>' : '') +
+        '<div style="display:flex;gap:14px;font-size:13px;margin-bottom:12px">' +
+          '<div><b>' + ((res.totals && res.totals.sent) || 0) + '</b> verzonden</div>' +
+          '<div style="color:var(--text-3)"><b>' + ((res.totals && res.totals.skipped) || 0) + '</b> geskipt</div>' +
+          '<div style="color:var(--rose,#C22B3E)"><b>' + ((res.totals && res.totals.errors) || 0) + '</b> fout</div>' +
+        '</div>' +
+        '<div style="max-height:50vh;overflow:auto;font-size:12px">' +
+          items.map(r => '<div style="padding:6px 8px;border-bottom:1px solid var(--border)">' +
+            (r.action === 'sent' ? '✓' : r.action === 'skipped' ? '⨯' : '❗') + ' <b>' + esc(r.customer_name || r.customer_id) + '</b>' +
+            (r.wamid ? ' · wamid ' + esc(String(r.wamid).slice(0, 24)) + '…' : '') +
+            (r.skip_reason ? ' · ' + esc(r.skip_reason) : '') +
+            (r.error || r.error_message ? ' · <span style="color:var(--rose,#C22B3E)">' + esc(r.error || r.error_message) + '</span>' : '') +
+          '</div>').join('') +
+        '</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">' +
+        '<button class="btn btn-primary btn-sm" data-action="close">Sluiten</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     #brief-B — Brief-bulk UI (imperatief, closure-based modal)
+     ══════════════════════════════════════════════════════════════════ */
+
+  function _closeBriefBulkModal() {
+    const el = document.getElementById('wbxBriefBulkRoot');
+    if (el) el.remove();
+  }
+
+  window.__wbxBulkBriefOpen = () => {
+    if (!_rbac.canExecute) { _toast('Geen rechten (finance.dunning.execute).', 'error'); return; }
+    const cids = _selOvCustIds();
+    if (!cids.length) { _toast('Selecteer eerst klanten', 'warn'); return; }
+    _openBriefBulkModal(cids);
+  };
+
+  function _openBriefBulkModal(cids) {
+    _closeBriefBulkModal();
+    const state = { step: 'dry_run', loading: true, dryRun: null, error: null,
+                    running: false, runningLabel: null, bulkJobId: null, result: null };
+    const root = document.createElement('div');
+    root.id = 'wbxBriefBulkRoot';
+    root.style.cssText = 'position:fixed;inset:0;z-index:9998;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.55);padding:20px';
+    root.addEventListener('click', (e) => { if (e.target === root) _closeBriefBulkModal(); });
+    document.body.appendChild(root);
+
+    const render = () => {
+      root.innerHTML = state.step === 'result' ? _renderBriefBulkResult(state) : _renderBriefBulkDryRun(state, cids);
+      _wireBulkModalEvents(root, state, cids, actions);
+    };
+
+    const actions = {
+      close: _closeBriefBulkModal,
+      confirm: async () => {
+        if (!state.dryRun) return;
+        const wouldCreate = (state.dryRun.totals && state.dryRun.totals.would_create) || 0;
+        if (wouldCreate === 0) { _toast('Geen te genereren brieven (alles skipped).', 'warn'); return; }
+        const phrase = 'MAAK BRIEVEN VOOR ' + wouldCreate + ' KLANTEN';
+        const bodyHtml =
+          '<div style="margin-bottom:10px">Je gaat <b>' + wouldCreate + '</b> WIK-brie' + (wouldCreate === 1 ? 'f' : 'ven') + ' genereren voor de geselecteerde debiteuren.</div>' +
+          '<div style="padding:9px 12px;background:var(--amber-soft,#FFF3D6);color:var(--amber,#B27A0B);border-radius:6px;font-size:12px">De brieven verschijnen als concept in de Brieven-tab. Download + verstuur zelf per post. Geen dunning-actie wordt ingegrepen.</div>';
+        const ok = await _askTypedConfirm('Bulk-brieven aanmaken', bodyHtml, phrase, { okLabel: 'AANMAKEN' });
+        if (!ok) return;
+        if (!state.bulkJobId) state.bulkJobId = crypto.randomUUID();
+        state.running = true; state.runningLabel = 'Brieven genereren… (kan tot 5 min duren)'; state.error = null; render();
+        const r = await _apiPostH('/api/wanbetalers-bulk-brief-create',
+          { customer_ids: cids, dry_run: false, bulk_job_id: state.bulkJobId },
+          null, CLIENT_TIMEOUT_LIVE_MS);
+        state.running = false; state.runningLabel = null;
+        if (!r.ok) {
+          if (r.status === 202 || r.status === 409) {
+            state.result = Object.assign({ partial: true }, r.json || {}, { _status: r.status });
+            state.step = 'result'; render(); return;
+          }
+          state.error = r.error || 'onbekend'; render(); return;
+        }
+        state.result = r.json; state.step = 'result';
+        _ui.ovSelected = {};
+        // Force Brieven-tab-refetch bij volgende tab-switch (auto-switch niet
+        // geïmplementeerd — geen centrale tab-API in dit bestand).
+        if (_live.briefs) _live.briefs.fetched = false;
+        _toast((r.json.totals.created || 0) + ' brie' + ((r.json.totals.created || 0) === 1 ? 'f' : 'ven') + ' aangemaakt — check de Brieven-tab.', 'success');
+        if (window.DFO?.render) window.DFO.render();
+        render();
+      },
+    };
+
+    (async () => {
+      const r = await _apiPostH('/api/wanbetalers-bulk-brief-create',
+        { customer_ids: cids, dry_run: true },
+        null, CLIENT_TIMEOUT_QUICK_MS);
+      state.loading = false;
+      if (!r.ok) { state.error = r.error || 'onbekend'; render(); return; }
+      state.dryRun = r.json; render();
+    })();
+
+    render();
+  }
+
+  function _renderBriefBulkDryRun(state, cids) {
+    if (state.loading) return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:40px;text-align:center;max-width:520px">Preview laden…</div>';
+    if (state.error) return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);max-width:520px;width:calc(100vw - 40px);overflow:hidden">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between"><div style="font-weight:600">📄 Briefjes</div><button class="btn btn-ghost btn-sm" data-action="close">✕</button></div>' +
+      '<div style="padding:16px 18px"><div style="padding:9px 12px;background:var(--rose-soft,#FBE7EA);color:var(--rose,#C22B3E);border-radius:6px;font-size:12.5px">' + esc(state.error) + '</div></div>' +
+    '</div>';
+
+    const dr = state.dryRun || {}; const totals = dr.totals || {};
+    const recips = asArr(dr.recipients);
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);max-width:960px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:hidden;display:flex;flex-direction:column">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="font-weight:600;font-size:14.5px">📄 Bulk-brieven — preview & bevestig (' + cids.length + ' geselecteerd)</div>' +
+        '<button class="btn btn-ghost btn-sm" data-action="close">✕</button></div>' +
+      '<div style="padding:12px 18px 8px"><div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px">' +
+        '<div><b>' + (totals.would_create || 0) + '</b> genereren</div>' +
+        '<div style="color:var(--text-3)"><b>' + (totals.would_skip || 0) + '</b> geskipt</div>' +
+        (totals.flag_address_incomplete ? '<div style="color:var(--amber,#B27A0B)"><b>' + totals.flag_address_incomplete + '</b> met adres-flag</div>' : '') +
+        Object.entries(dr.skip_reason_summary || {}).map(([k, v]) => '<div style="color:var(--text-3)">' + esc(k) + ': ' + v + '</div>').join('') +
+      '</div></div>' +
+      '<div style="max-height:55vh;overflow:auto;padding:0 18px">' +
+        recips.map(r => {
+          if (r.action === 'skip') return '<div style="padding:8px 10px;border-bottom:1px solid var(--border);opacity:.55;font-size:12.5px">⨯ ' + esc(r.customer_name || r.customer_id) + ' — ' + esc(r.skip_reason) + (r.openstaand_bedrag_display ? ' · ' + esc(r.openstaand_bedrag_display) : '') + '</div>';
+          const flag = r.flag === 'address_incomplete';
+          return '<div style="padding:10px;border-bottom:1px solid var(--border);font-size:12.5px">' +
+            '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+              '<div><b>' + esc(r.customer_name) + '</b> <span style="color:var(--text-3)">(' + esc(r.country || '?') + ')</span>' + (flag ? ' <span style="color:var(--amber,#B27A0B);font-weight:600;font-size:11.5px">⚠ ' + esc((r.missing || []).join(', ')) + '</span>' : '') + '</div>' +
+              '<div style="color:var(--money,#0A9060);font-weight:600">' + esc(r.openstaand_bedrag_display || '') + '</div></div>' +
+            '<div style="font-size:11.5px;color:var(--text-3);margin-top:4px">' + asArr(r.address_lines).map(esc).join(' · ') + '</div></div>';
+        }).join('') +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn btn-ghost btn-sm" data-action="close">Annuleren</button>' +
+        '<button class="btn btn-primary btn-sm"' + (state.running || (totals.would_create || 0) === 0 ? ' disabled' : '') + ' data-action="confirm">' + (state.running ? (state.runningLabel || 'Bezig…') : ('Aanmaken → ' + (totals.would_create || 0))) + '</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _renderBriefBulkResult(state) {
+    const res = state.result || {};
+    return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);max-width:720px;width:calc(100vw - 40px);overflow:hidden">' +
+      '<div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><div style="font-weight:600;font-size:14.5px">📄 Brieven aangemaakt' + (res.partial ? ' (partial)' : '') + '</div>' +
+        '<button class="btn btn-ghost btn-sm" data-action="close">✕</button></div>' +
+      '<div style="padding:16px 18px">' +
+        '<div style="display:flex;gap:14px;font-size:13px;margin-bottom:12px">' +
+          '<div><b>' + ((res.totals && res.totals.created) || 0) + '</b> aangemaakt</div>' +
+          '<div style="color:var(--text-3)"><b>' + ((res.totals && res.totals.skipped) || 0) + '</b> geskipt</div>' +
+          '<div style="color:var(--rose,#C22B3E)"><b>' + ((res.totals && res.totals.errors) || 0) + '</b> fout</div>' +
+        '</div>' +
+        '<div style="padding:9px 12px;background:var(--money-soft,#DDF5E9);color:var(--money,#0A9060);border-radius:6px;font-size:12px">Concept-brieven staan nu in de Brieven-tab. Selecteer + download (PDF bundel) en verstuur per post.</div>' +
+      '</div>' +
+      '<div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">' +
+        '<button class="btn btn-primary btn-sm" data-action="close">Sluiten</button>' +
+      '</div>' +
+    '</div>';
+  }
+
   /* ── Surgical repaint helpers ─────────────────────────────────────── */
   function _repaintOverzichtList() {
     const body = document.getElementById('wbxOvBody');
@@ -1688,6 +2149,8 @@
           <div id="wbxOvSelBar" style="display:${_selOvCustIds().length ? 'flex' : 'none'};padding:10px 14px;background:var(--brand-soft,#E2F1F5);border-bottom:1px solid var(--border);align-items:center;gap:10px;font-size:12.5px">
             <b><span id="wbxOvSelCount">${_selOvCustIds().length} klant${_selOvCustIds().length === 1 ? '' : 'en'}</span></b>
             <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" ${_ui.bulkBusy ? 'disabled' : ''} onclick="__wbxBulkStart()">${_ui.bulkBusy ? 'Starten…' : '▶ Start dunning-workflow (typ-to-confirm)'}</button>
+            <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" ${_ui.bulkBusy ? 'disabled' : ''} onclick="__wbxBulkWaOpen()" title="Stuur een WhatsApp-template naar alle geselecteerde klanten (los van de dunning-motor)">📩 WhatsApp sturen</button>
+            <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;font-size:11.5px" ${_ui.bulkBusy ? 'disabled' : ''} onclick="__wbxBulkBriefOpen()" title="Maak WIK-brieven voor de geselecteerde klanten (concept in Brieven-tab)">📄 Briefjes aanmaken</button>
             <button class="btn btn-ghost btn-sm" style="font-size:11px;margin-left:auto" onclick="__wbxOvClearSel()">Wissen</button>
           </div>
           <div id="wbxOvHdr" style="display:grid;grid-template-columns:32px 2fr 1fr 90px 100px 1.4fr 1.2fr auto;gap:8px;padding:8px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600">${_overzichtHdrHtml()}</div>
