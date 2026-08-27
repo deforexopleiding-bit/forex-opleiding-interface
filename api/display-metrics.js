@@ -182,15 +182,26 @@ export default async function handler(req, res) {
               // (clean-set die ook sales.count/total voedt). Index blijft
               // bezet zodat pick(7-13) niet schuift.
               Promise.resolve({ data: [] }),
-      /* 7 */ supabaseAdmin.from('follow_up_appointments').select('id, lead_name, updated_at')
-                .eq('status', 'completed').gte('updated_at', dayStartIso).lt('updated_at', dayEndIso)
-                .order('updated_at', { ascending: false }).limit(20),
+      /* 7 */ // 2026-08-26 v3: feed "Call afgerond" verplaatst van
+              // follow_up_appointments.updated_at → follow_up_outcomes
+              // (bron 9). Reden: appointments.updated_at werd 's nachts
+              // geflipt door batch/RLS-touches → afgeronde calls
+              // resurfaceden om 01:45 met verkeerde tijd. Bron 9 heeft
+              // de ECHTE afrond-timestamp (immutable created_at op
+              // outcomes-insert). Index leeg gelaten zodat pick(8-16)
+              // niet schuift.
+              Promise.resolve({ data: [] }),
       /* 8 */ // v3-fix: voicememo_sent_at (echte send-timestamp) i.p.v.
               // updated_at (batch-updates clusterden alles → feed leek bevroren).
               supabaseAdmin.from('follow_up_appointments').select('id, lead_name, voicememo_sent_at')
                 .eq('voicememo_status', 'sent').gte('voicememo_sent_at', dayStartIso).lt('voicememo_sent_at', dayEndIso)
                 .order('voicememo_sent_at', { ascending: false }).limit(20),
-      /* 9 */ supabaseAdmin.from('follow_up_outcomes').select('id, created_at')
+      /* 9 */ // v3: verrijkt met inner-join op follow_up_appointments.lead_name
+              // zodat de feed "Call afgerond: <naam>" kan tonen. Vervangt
+              // ook bron 7 (die op appointments.updated_at joinde en 's
+              // nachts spookitems gaf).
+              supabaseAdmin.from('follow_up_outcomes')
+                .select('id, created_at, follow_up_appointments!inner(lead_name)')
                 .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
                 .order('created_at', { ascending: false }).limit(20),
       /*10 */ supabaseAdmin.from('event_signup_inbox').select('id, first_name, event_date_label, created_at')
@@ -432,19 +443,23 @@ export default async function handler(req, res) {
       ts: s.accepted_at, type: 'sale',
       text: `Sale: ${s.customer_label}`,
     });
-    for (const a of (feedCallsCompleted.data || [])) feed.push({
-      ts: new Date(a.updated_at).toISOString(), type: 'call',
-      text: `Call afgerond: ${trimName(a.lead_name || '')}`,
-    });
+    // (Bron 7 items verwijderd — waren de 01:45-spookitems.
+    //  "Call afgerond" komt nu uit bron 9 met de echte afrond-timestamp.)
     for (const v of (feedVoicememoRes.data || [])) feed.push({
       // v3: voicememo_sent_at (echte send-timestamp) matcht teller/ranglijst.
       ts: new Date(v.voicememo_sent_at).toISOString(), type: 'voicememo',
       text: `Voicememo: ${trimName(v.lead_name || '')}`,
     });
-    for (const o of (feedOutcomesRes.data || [])) feed.push({
-      ts: new Date(o.created_at).toISOString(), type: 'followup',
-      text: `Follow-up geregistreerd`,
-    });
+    for (const o of (feedOutcomesRes.data || [])) {
+      // PostgREST-join levert appointment als object of array — beide vormen zien we.
+      const fa = o.follow_up_appointments;
+      const leadName = Array.isArray(fa) ? fa[0]?.lead_name : fa?.lead_name;
+      feed.push({
+        ts: new Date(o.created_at).toISOString(),
+        type: 'call',
+        text: `Call afgerond: ${trimName(leadName || '')}`,
+      });
+    }
     for (const s of (feedEventsRes.data || [])) feed.push({
       ts: new Date(s.created_at).toISOString(), type: 'event',
       text: `Event-signup: ${trimName(s.first_name || '')}${s.event_date_label ? ' → ' + s.event_date_label : ''}`,
