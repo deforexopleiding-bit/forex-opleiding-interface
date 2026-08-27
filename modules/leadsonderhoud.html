@@ -1225,7 +1225,7 @@ async function schermBronnen(){
   }).join('') + '</div>';
 
   var rijen = items.map(function(b, i){
-    var url = 'https://deforexopleiding.nl/opstartsessie/' + b.slug;
+    var url = 'https://deforexopleiding.nl/agenda/' + b.slug;
     var status = b.is_registered
       ? (b.actief ? '<span style="color:var(--ok,#059669);font-weight:600">Actief</span>' : '<span style="color:var(--text-faint);font-weight:600">Uit</span>')
       : '<span style="color:var(--warn,#b45309);font-weight:600" title="Slug komt voor op boekingen maar staat niet in de bronnenlijst">Onbekend</span>';
@@ -1388,7 +1388,7 @@ async function schermOpstartsessies(){
   }).join('');
   if (!items.length) rijen = '<tr><td colspan="7" class="lo-leeg" style="padding:24px">Geen submissions in dit venster.</td></tr>';
 
-  zetInhoud(kop('Opstartsessies', 'Alles wat leads op deforexopleiding.nl/opstartsessie invullen — inclusief afgewezen leads. Klik een rij voor de details.')
+  zetInhoud(kop('Opstartsessies', 'Alles wat leads op deforexopleiding.nl/agenda invullen — inclusief afgewezen leads. Klik een rij voor de details.')
     + '<div class="lo-filters" style="margin-bottom:14px;gap:14px;align-items:center;flex-wrap:wrap">'
     +   '<div><b style="font-size:12px;color:var(--text-faint);margin-right:6px">Periode:</b>' + filterPeriode + '</div>'
     +   '<div><b style="font-size:12px;color:var(--text-faint);margin-right:6px">Resultaat:</b>' + filterRes + '</div>'

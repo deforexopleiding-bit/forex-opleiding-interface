@@ -2046,7 +2046,7 @@
     const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
     const filterChips = periodes.map(([k,l]) => `<button class="chip ${st.periode===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetBronPeriode('${k}')">${esc(l)}</button>`).join('');
     const rows = items.length ? items.map(b => {
-      const url = 'https://deforexopleiding.nl/opstartsessie/' + b.slug;
+      const url = 'https://deforexopleiding.nl/agenda/' + b.slug;
       const statusBadge = b.is_registered
         ? (b.actief
             ? '<span style="color:var(--emerald);font-weight:600;font-size:11.5px">● Actief</span>'
@@ -2070,7 +2070,7 @@
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Attributie-bronnen voor <code>deforexopleiding.nl/opstartsessie/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen (<code>follow_up_appointments.booking_source</code>). Onbekende/typo-slugs verschijnen apart en blijven telbaar.
+        Attributie-bronnen voor <code>deforexopleiding.nl/agenda/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen (<code>follow_up_appointments.booking_source</code>). Onbekende/typo-slugs verschijnen apart en blijven telbaar.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
@@ -2140,7 +2140,7 @@
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Alles wat leads op <code>deforexopleiding.nl/opstartsessie</code> invullen — inclusief afgewezen leads. Klik "Detail ↗" voor de vragenlijst-antwoorden.
+        Alles wat leads op <code>deforexopleiding.nl/agenda</code> invullen — inclusief afgewezen leads. Klik "Detail ↗" voor de vragenlijst-antwoorden.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:10px">
