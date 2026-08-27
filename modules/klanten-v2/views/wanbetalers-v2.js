@@ -332,9 +332,12 @@
   // zoals 'toegang_verlengd_nl') worden verborgen — die horen niet in een
   // debiteuren-picker en gaan onvermijdelijk fout bij live-send.
   function _isDebtorRelevantTemplate(tpl) {
-    const mapping = tpl && tpl.meta_param_mapping;
-    if (!mapping || typeof mapping !== 'object') return false;
-    const values = Object.values(mapping).map(v => String(v || ''));
+    const raw = tpl && tpl.meta_param_mapping;
+    if (!raw || typeof raw !== 'object') return false;
+    // meta_param_mapping is in DB genest onder .body ({"body":{"1":"klant.voornaam",...}}).
+    // Fallback op de mapping-root voor robuustheid (oudere templates zonder .body wrapper).
+    const body = (raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body)) ? raw.body : raw;
+    const values = Object.values(body).map(v => String(v || ''));
     if (values.length === 0) return false;
     return values.some(v => v.startsWith('klant.') || v.startsWith('factuur.'));
   }

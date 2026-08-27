@@ -91,13 +91,21 @@ async function hasRecentSend(templateName, phoneE164) {
 function resolveRecipient({ customer, template, moduleContext, openInvoices, totalOpenCents }) {
   const oldest = pickOldestInvoice(openInvoices);
   const context = { customer, invoice: oldest, openInvoices, moduleContext };
-  const mapping = template.meta_param_mapping || {};
+
+  // meta_param_mapping is in DB genest onder .body ({"body":{"1":"klant.voornaam",...}}).
+  // Fallback op de mapping-root voor robuustheid (oudere/handmatige templates zonder .body wrapper).
+  // Zonder deze unwrap: buildMetaVariablesFromMapping filtert Object.keys op /^\d+$/ en krijgt
+  // enkel "body" → geen match → rendered={} → iedereen 'variable_missing'.
+  const raw = template.meta_param_mapping || {};
+  const mapping = (raw.body && typeof raw.body === 'object' && !Array.isArray(raw.body)) ? raw.body : raw;
+
   const rendered = buildMetaVariablesFromMapping(mapping, context);
   const bodyRender = resolveVariables(template.body_text || '', mapping, context);
   return {
     rendered,
     rendered_body_preview: bodyRender.text || '',
     openstaandCents: totalOpenCents,
+    _mapping: mapping,   // voor variable_missing-check downstream (undefined-safe)
   };
 }
 
@@ -235,11 +243,14 @@ export default async function handler(req, res) {
                                     openInvoices: bucket.openInvoices,
                                     totalOpenCents: bucket.totalOpenCents });
 
-      // variable_missing: push SLOT-KEY-string, niet mapping-object (voorkomt "[object Object]").
+      // variable_missing: itereer over BODY-slot-keys (van de unwrapped mapping,
+      // niet raw.meta_param_mapping — dat geeft ['body']). Alleen numerieke Meta-slots.
       const missing = [];
-      for (const slot of Object.keys(template.meta_param_mapping || {})) {
+      const bodyMapping = r._mapping || {};
+      for (const slot of Object.keys(bodyMapping)) {
+        if (!/^\d+$/.test(slot)) continue;
         if (!String(r.rendered[slot] || '').trim()) {
-          const varKey = String(template.meta_param_mapping[slot] || `slot_${slot}`);
+          const varKey = String(bodyMapping[slot] || `slot_${slot}`);
           missing.push(varKey);
         }
       }
