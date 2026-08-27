@@ -582,7 +582,11 @@ export default async function handler(req, res) {
         // omdat we hem nooit te pakken kregen" te scheiden blijven.
         patch.lead_status = 'verloren';
         noteOutcomeCode   = 'onbereikbaar';
-        noteText = `Geen gehoor — poging ${attemptsAfter}/${cadans.maxPogingen} · afgesloten, onbereikbaar`;
+        // In gewone taal, want dit is wat er straks in de statistieken en in
+        // het dossier staat. "niet_bereikbaar" zegt niets over hoe vaak er
+        // geprobeerd is; dit wel — en het maakt zichtbaar dat afsluiten een
+        // keuze was en geen lek.
+        noteText = `${attemptsAfter} keer geprobeerd, niemand bereikt — rij afgesloten.`;
       } else {
         // Betalende klanten (retentie): ongewijzigd gedrag. Blijft open.
         patch.lead_status = 'niet_bereikbaar';

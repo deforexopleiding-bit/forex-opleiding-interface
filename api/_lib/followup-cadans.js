@@ -12,10 +12,16 @@
 //
 // HET ONDERSCHEID IS DE HERKOMST, NIET DE STATUS
 //   'event'      — gratis leads uit een event: no-shows, afgemelden, en
-//                  wie na afloop nog moest beslissen. Drie pogingen. Bij
-//                  de derde vergeefse poging gaat de rij DICHT met reden
-//                  'onbereikbaar' (zie `bijMax`), zodat hij niet eeuwig
-//                  op de Werklijst blijft staan.
+//                  wie na afloop nog moest beslissen. VIJF pogingen. Bij de
+//                  vijfde vergeefse poging gaat de rij DICHT met reden
+//                  'onbereikbaar' (zie `bijMax`).
+//
+//                  Waarom vijf en waarom dicht: de regel is "nooit stil
+//                  kwijtraken, wel bewust afsluiten". Iemand die blijft
+//                  negeren hoeft niet eeuwig in beeld te blijven, en wie
+//                  zich gestalkt voelt hoeft niet gebeld te worden. Vijf is
+//                  waar die twee elkaar raken. Het afsluiten is een keuze
+//                  die zichtbaar in het uitkomstenlog staat, geen lek.
 //   'retention'  — betalende klanten die verlengd moeten worden. Vier
 //                  pogingen, precies zoals het nu werkt: de rij krijgt de
 //                  status 'niet_bereikbaar' en BLIJFT open. Aandringen is
@@ -63,11 +69,12 @@ export const CADANS_STANDAARD = Object.freeze({
 
 export const CADANS = Object.freeze({
   event: Object.freeze({
-    maxPogingen       : 3,
+    maxPogingen       : 5,
     urenTussenPogingen: UREN_STANDAARD,
     bijMax            : BIJ_MAX.AFSLUITEN,
-    // Na de tweede vergeefse poging: WhatsApp proberen. Er is dan nog één
-    // belpoging over, dus de taak moet vóór die laatste ronde af zijn.
+    // Na de tweede vergeefse poging: WhatsApp proberen. Dat is juist de
+    // ontsnapping die maakt dat je iemand niet vijf keer hóéft te bellen —
+    // vandaar vroeg in de reeks en niet vlak voor het einde.
     taakBijPoging     : 2,
     taakPrioriteit    : 'Normaal',
   }),

@@ -216,12 +216,9 @@ export async function runEventsCompleteCore({ userId, body }) {
       if (a.afwezig.follow_up_date != null && !isDateString(a.afwezig.follow_up_date)) {
         return { statusCode: 400, response: { error: `afwezig.follow_up_date moet YYYY-MM-DD zijn (${a.attendee_id})` } };
       }
-      // Er moet wél íets in staan, anders is het blok leeg en heeft het geen
-      // betekenis.
-      const heeftNotitie = String(a.afwezig.note || '').trim() !== '';
-      if (!heeftNotitie && !a.afwezig.follow_up_date) {
-        return { statusCode: 400, response: { error: `afwezig heeft notitie noch belmoment (${a.attendee_id})` } };
-      }
+      // Bewust GEEN eis dat er iets in staat. Een leeg blok is prima: de
+      // deelnemer komt hoe dan ook in de pot, met 'onbekend' en een
+      // standaard-belmoment. Wie er niet was mag nooit kwijtraken.
       if (a.afwezig.owner_id != null && !UUID_RE.test(String(a.afwezig.owner_id))) {
         return { statusCode: 400, response: { error: `afwezig.owner_id ongeldig (${a.attendee_id})` } };
       }
@@ -380,16 +377,17 @@ export async function runEventsCompleteCore({ userId, body }) {
       // én een belmoment heeft ingevuld. Doet hij dat niet, dan gebeurt er
       // niets extra's: de aanwezigheidsstatus wordt gewoon opgeslagen zoals
       // altijd. Een half ingevuld blok mag geen halve follow-up opleveren.
-      // Tak 2 gaat open zodra er ÍETS is ingevuld: een notitie of een
-      // belmoment. Voorheen moest de reden er ook bij, en wie alleen een
-      // notitie typte raakte alles kwijt zonder melding. Ontbreekt de reden,
-      // dan wordt het 'onbekend' — dat is een waarde, geen reden om weg te
-      // gooien wat iemand heeft opgeschreven.
-      const afw = (a.afwezig && typeof a.afwezig === 'object') ? a.afwezig : null;
-      const afwNotitie = afw ? String(afw.note || '').trim() : '';
-      const afwezigTrigger = AFWEZIG_STATUSSEN.has(a.attendance_status)
-        && !!afw
-        && (!!afwNotitie || !!afw.follow_up_date);
+      // Tak 2 gaat ALTIJD open bij een no-show of een afmelding. Zonder
+      // voorwaarde, ook als het blok leeg is.
+      //
+      // Dit was eerst afhankelijk van wat er was ingevuld, en dat kostte op
+      // 26 augustus twee mensen: notitie getypt, geen reden aangeklikt, alles
+      // weg. Elke voorwaarde is een pad waarlangs iemand stil verdwijnt.
+      // Reden en notitie reizen mee als ze er zijn; ze bepalen niet óf de rij
+      // ontstaat. Ontbreekt de reden, dan wordt het 'onbekend'; ontbreekt het
+      // belmoment, dan vult datumOverDagen hieronder het standaardmoment in.
+      const afw = (a.afwezig && typeof a.afwezig === 'object') ? a.afwezig : {};
+      const afwezigTrigger = AFWEZIG_STATUSSEN.has(a.attendance_status);
 
       if (!aanwezigTrigger && !afwezigTrigger) continue;
 

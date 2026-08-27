@@ -14,9 +14,9 @@ import {
   CADANS, CADANS_STANDAARD, BIJ_MAX, cadansVoor, urenTotVolgendePoging,
 } from '../api/_lib/followup-cadans.js';
 
-test('event: drie pogingen, daarna sluit de rij', () => {
+test('event: vijf pogingen, daarna sluit de rij bewust', () => {
   const c = cadansVoor('event');
-  assert.equal(c.maxPogingen, 3);
+  assert.equal(c.maxPogingen, 5);
   assert.equal(c.bijMax, BIJ_MAX.AFSLUITEN);
 });
 
@@ -50,7 +50,7 @@ test('de tussenpozen zijn +2u, +1d, +3d en lopen daarna door op de laatste', () 
 test('de tabel is bevroren — niemand past het besluit per ongeluk aan tijdens runtime', () => {
   assert.throws(() => { CADANS.event.maxPogingen = 9; }, TypeError);
   assert.throws(() => { CADANS.nieuw = { maxPogingen: 1 }; }, TypeError);
-  assert.equal(CADANS.event.maxPogingen, 3);
+  assert.equal(CADANS.event.maxPogingen, 5);
 });
 
 test('de WhatsApp-taak valt op poging 2, met nog een belpoging te gaan', () => {
@@ -66,6 +66,10 @@ test('retention maakt géén automatische taak aan — ongewijzigd gedrag', () =
   assert.equal(cadansVoor('manual').taakBijPoging, null);
 });
 
-test('event krijgt strikt minder pogingen dan retention — dat is de hele beslissing', () => {
-  assert.ok(cadansVoor('event').maxPogingen < cadansVoor('retention').maxPogingen);
+test('de WhatsApp-taak valt ruim vóór het einde, niet vlak ervoor', () => {
+  const c = cadansVoor('event');
+  // Poging 2 van 5: er blijven drie belpogingen over. Dat is met opzet — de
+  // taak is de ontsnapping die maakt dat je niet vijf keer hoeft te bellen.
+  assert.equal(c.taakBijPoging, 2);
+  assert.ok(c.maxPogingen - c.taakBijPoging >= 2);
 });

@@ -1405,23 +1405,25 @@
           if (v.followup.owner_id)       fu.owner_id = v.followup.owner_id;
             if (Object.keys(fu).length) row.followup = fu;
         }
-        // Afwezig-blok: meesturen zodra er \u00cdETS is ingevuld \u2014 een notitie
-        // of een belmoment. Niet pas als de reden ook is aangeklikt.
+        // ELKE no-show en elke afmelding gaat mee. Zonder voorwaarde.
         //
-        // Waarom dat veranderd is: op 26 augustus zette iemand twee no-shows,
-        // typte er een notitie bij en klikte geen reden aan. Het blok ging
-        // toen niet mee, en die notitie is verdampt zonder \u00e9\u00e9n woord op het
-        // scherm. Het veld stond er, je kon erin typen, en het werd
-        // weggegooid. Dat is geen gebruikersfout maar een ontwerpfout.
-        // Geen reden aangeklikt betekent nu 'onbekend', niet: gooi alles weg.
-        if ((v.attendance_status === 'no_show' || v.attendance_status === 'afgemeld') && v.afwezig) {
-          const af = v.afwezig;
+        // Op 26 augustus zette iemand twee no-shows, typte er een notitie bij
+        // en klikte geen reden aan. Het blok ging toen niet mee, en die
+        // notitie is verdampt zonder \u00e9\u00e9n woord op het scherm.
+        //
+        // De les daaruit is niet "stuur het mee zodra er iets is ingevuld",
+        // maar: wie er niet was mag nooit kwijtraken. Reden en notitie zijn
+        // extra informatie die meereist als ze er zijn \u2014 ze zijn niet de
+        // voorwaarde. Geen reden aangeklikt wordt 'onbekend', geen belmoment
+        // wordt morgen (of over drie dagen bij een afmelding, ingevuld door
+        // de server). Er is geen pad meer waarbij iemand op no-show gaat en
+        // er niets gebeurt.
+        if (v.attendance_status === 'no_show' || v.attendance_status === 'afgemeld') {
+          const af = v.afwezig || {};
           const notitie = String(af.note || '').trim();
-          if (notitie || af.follow_up_date) {
-            row.afwezig = { reason_code: af.reason_code || 'onbekend' };
-            if (af.follow_up_date) row.afwezig.follow_up_date = af.follow_up_date;
-            if (notitie) row.afwezig.note = notitie;
-          }
+          row.afwezig = { reason_code: af.reason_code || 'onbekend' };
+          if (af.follow_up_date) row.afwezig.follow_up_date = af.follow_up_date;
+          if (notitie) row.afwezig.note = notitie;
         }
         return row;
       });
