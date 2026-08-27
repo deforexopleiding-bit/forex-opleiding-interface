@@ -1,202 +1,279 @@
 -- ============================================================================
 --  REPARATIE — masterclass van 26 augustus 2026
 --  event 6a848f55-c782-4a3f-b46e-ccb11d10eabf
+--
+--  VERSIE 2 — herschreven op 27-08-2026 na het draaien van stap 0.
 -- ============================================================================
---  Dit is GEEN schema-migratie maar een eenmalige datacorrectie voor drie
---  mensen die door twee fouten uit beeld raakten. Die fouten zijn in de code
---  gerepareerd; dit haalt in wat er al misging.
+--  WAAROM ER EEN VERSIE 2 IS
+--  -------------------------
+--  Versie 1 stond op twee aannames die alle twee onjuist waren, en het
+--  vervelende is dat hij er wél uit zou hebben gezien alsof hij gelukt was:
 --
---  IDEMPOTENT. Elke stap kijkt eerst of het werk al gedaan is. Twee keer
---  draaien verandert niets extra, en er wordt niets verwijderd of overschreven.
+--   1. Ik nam aan dat Ioan en Lina GEEN belrij hadden. Ze hebben er alle
+--      drie één, gekoppeld op source_ref->>'attendee_id' — vrijwel zeker van
+--      de belronde-cron van twee dagen vóór het event. Versie 1 wilde een
+--      nieuwe rij invoegen en sloeg ze daardoor over ("bestaat al").
+--   2. Ik nam aan dat er een customer_id was. Die is bij alle drie NULL.
+--      Versie 1 koppelde Arslan op `l.customer_id = a.customer_id`, en NULL
+--      is in SQL nooit gelijk aan NULL — die stap zou stilzwijgend nul rijen
+--      hebben geraakt.
 --
---  WAT ER MIS WAS
---  --------------
---  1. Ioan Berintan en Lina Mavzer stonden op no-show. Er is een notitie bij
---     hen getypt, maar geen reden aangeklikt. Het scherm stuurde het blok toen
---     alleen mee als er ÉN een reden ÉN een belmoment stond, dus ging alles
---     mee de prullenbak in: geen opvolgrij, geen belrij, notitie weg.
---  2. Arslan Khan kreeg bij het afronden alles goed — opvolgrij, reden
---     'onbekend', notitie bewaard. Toch stond hij nergens, want hij had al een
---     follow_up_leads-rij van vóór het event met lead_status 'verloren' en
---     zonder terugbel_datum. Het afronden zocht alleen naar OPEN rijen, vond
---     niets, en liet de gesloten rij liggen.
+--  Netto had versie 1 twee opvolgrijen en wat notities opgeleverd, zou er nog
+--  steeds niemand op de bellijst hebben gestaan, en zou de controlequery
+--  waarschijnlijk toch drie rijen hebben getoond. Precies de stille mislukking
+--  waar deze hele ronde over ging.
+--
+--  WAT DE SITUATIE ECHT IS (gemeten 27-08-2026)
+--  --------------------------------------------
+--    Ioan Berintan   2dcf551a-…  no_show    · 0 opvolgrijen · 1 belrij
+--    Lina Mavzer     b2198275-…  no_show    · 0 opvolgrijen · 1 belrij
+--    Arslan Khan     aecaa26d-…  afgemeld   · 1 opvolgrij   · 1 belrij
+--    customer_id: NULL bij alle drie. outcome: NULL bij alle drie.
+--
+--  Het is dus voor alle drie hetzelfde geval: er IS een belrij, hij staat
+--  alleen niet op een manier waarop iemand hem ziet. Heropenen dus, niet
+--  aanmaken. En koppelen op attendee_id, niet op customer_id.
+--
+--  LET OP — event_date MOET UIT source_ref
+--  ---------------------------------------
+--  Komt een rij van de belronde-cron, dan staat er `event_date` in source_ref.
+--  api/follow-up-lead-outcome.js herkent dáéraan de bel-vóór-het-event-ronde
+--  en gebruikt dan een cadans met de eventdatum als deadline. Die datum ligt
+--  nu in het verleden, dus bij de eerstvolgende "geen gehoor" zou de rij
+--  meteen op 'niet_bereikbaar' worden gezet met terugbel_datum leeg — en dan
+--  is hij opnieuw onzichtbaar. Stap 2 haalt die sleutel daarom weg: het event
+--  is voorbij, dit zijn vanaf nu gewone opvolg-leads met de cadans van vijf.
 --
 --  DE NOTITIE IS GERECONSTRUEERD, NIET HERSTELD
---  -------------------------------------------
---  De originele notitie van 26 augustus is weg. Die is nooit de browser uit
---  gekomen — er is geen kolom, geen log en geen back-up waar hij in staat.
---  Wat er nu bij Ioan en Lina komt te staan is wat Maxim zich op 27 augustus
---  herinnerde: "warme lead die niet kwam opdagen, gratis lead voor volgend
---  event".
+--  --------------------------------------------
+--  De originele notitie van 26 augustus is weg; die is nooit de browser uit
+--  gekomen. Wat er bij Ioan en Lina komt te staan is wat Maxim zich op 27
+--  augustus herinnerde. Dat staat er ook zelf bij, en als los veld
+--  (notitie_herkomst='gereconstrueerd'). Arslan houdt zijn eigen notitie —
+--  bij hem is die wél netjes opgeslagen, dus daar wordt niets overschreven.
 --
---  Dat verschil blijft zichtbaar, en dat is met opzet. De tekst zegt er zelf
---  bij dat hij achteraf is gereconstrueerd, en in source_ref staat het ook
---  als los veld (notitie_herkomst = 'gereconstrueerd'). Een herinnering van
---  een dag later is iets anders dan wat er op de avond zelf is opgeschreven,
---  en wie dit over een half jaar terugleest hoort dat te kunnen zien.
---
---  WAAROM OP NAAM EN NIET OP ID
---  ----------------------------
---  Ik heb geen toegang tot de databank en ken hun attendee-id's niet. De
---  stappen zoeken daarom binnen dit ene event op naam. Stap 0 laat zien wie
---  er gevonden wordt — controleer dat vóór je verder gaat.
+--  IDEMPOTENT. Elke stap kijkt of het werk al gedaan is. Twee keer draaien
+--  verandert niets extra. Er wordt niets verwijderd.
 --
 --  ── DRAAIEN ────────────────────────────────────────────────────────────────
---  Nog NIET gedraaid. Stap voor stap in de Supabase SQL-editor, en na elke
---  stap even kijken of het aantal klopt.
+--  Stap voor stap in de Supabase SQL-editor. Draai 0a en 0b eerst en lees ze
+--  écht — de vorige versie strandde precies daarop.
 -- ============================================================================
 
 
--- ── Stap 0 — WIE gaat dit raken? (lezen, verandert niets) ───────────────────
--- Verwacht drie rijen: Ioan Berintan en Lina Mavzer met status no_show, en
--- Arslan Khan. Staan er meer of andere namen, STOP dan en pas de filters aan.
-select a.id            as attendee_id,
-       a.first_name, a.last_name,
-       a.status, a.attendance_status, a.outcome,
-       a.customer_id,
-       (select count(*) from public.event_followups f
-         where f.attendee_id = a.id and f.status = 'open')          as open_followups,
-       (select count(*) from public.follow_up_leads l
-         where l.source_ref->>'attendee_id' = a.id::text)           as leads
-from public.event_attendees a
-where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
-  and (
-    (a.first_name ilike 'Ioan'   and a.last_name ilike 'Berintan')
-    or (a.first_name ilike 'Lina'   and a.last_name ilike 'Mavzer')
-    or (a.first_name ilike 'Arslan' and a.last_name ilike 'Khan')
-  )
-order by a.last_name;
+-- ── Stap 0a — bestaan de kolommen die stap 0b en 2 gebruiken? ───────────────
+-- `attempts` en `snoozed_until` zitten in de groep waarvan de code zelf niet
+-- zeker weet of ze bestaan (van follow_up_leads is geen migratie in de repo).
+-- Verwacht: beide aanwezig. Ontbreekt er één, MELD DAT — dan haal ik hem uit
+-- stap 0b en stap 2, want anders faalt de query.
+select column_name, data_type
+from information_schema.columns
+where table_schema = 'public' and table_name = 'follow_up_leads'
+  and column_name in ('attempts', 'snoozed_until', 'lead_status', 'terugbel_datum', 'source_ref')
+order by column_name;
+
+
+-- ── Stap 0b — hoe staan die drie belrijen er NU bij? ────────────────────────
+-- Dit is wat we nog niet wisten en wat bepaalt wat "heropenen" betekent.
+-- Verwacht: drie rijen. Kijk naar lead_status, terugbel_datum en attempts,
+-- en naar of er `event_date` in source_ref staat (dan is het een belronde-rij).
+select l.id                                as lead_id,
+       l.lead_name,
+       l.lead_status,
+       l.terugbel_datum,
+       l.attempts,
+       l.snoozed_until,
+       (l.source_ref ? 'event_date')       as van_belronde,
+       l.source_ref->>'event_uitkomst'     as herkomst,
+       l.source_ref->>'reason_code'        as reden,
+       left(coalesce(l.source_ref->>'reason', '(geen)'), 70) as notitie
+from public.follow_up_leads l
+where l.source_ref->>'attendee_id' in (
+        '2dcf551a-7ee9-48f0-b241-e0a9f5f35703',   -- Ioan Berintan
+        'b2198275-9771-4557-b72f-61a2f32a905f',   -- Lina Mavzer
+        'aecaa26d-4910-421a-a08a-867ea76bd49a'    -- Arslan Khan
+      )
+order by l.lead_name;
 
 
 -- ── Stap 1 — Ioan en Lina: de opvolgrij die er nooit kwam ───────────────────
--- Maakt per persoon één open event_followups-rij met reden 'onbekend' en een
--- belmoment van morgen. Slaat over wie er al een open rij heeft.
+-- Arslan heeft er al één (open_followups = 1) en wordt overgeslagen.
+-- Raakt de bellijst niet; dit is het dossier van het event zelf.
 insert into public.event_followups
   (attendee_id, event_id, reason, reason_code, bron_uitkomst, follow_up_date, status, created_at)
 select a.id,
        a.event_id,
-       null,
+       'Warme lead die niet kwam opdagen, gratis lead voor volgend event. — Achteraf gereconstrueerd door Maxim op 27-08-2026; de originele notitie van 26-08 ging verloren bij het afronden.',
        'onbekend',
        'no_show',
        (current_date + 1),
        'open',
        now()
 from public.event_attendees a
-where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
-  and (   (a.first_name ilike 'Ioan' and a.last_name ilike 'Berintan')
-       or (a.first_name ilike 'Lina' and a.last_name ilike 'Mavzer'))
+where a.id in (
+        '2dcf551a-7ee9-48f0-b241-e0a9f5f35703',
+        'b2198275-9771-4557-b72f-61a2f32a905f'
+      )
   and not exists (
     select 1 from public.event_followups f
      where f.attendee_id = a.id and f.status = 'open'
   );
 
 
--- ── Stap 2 — Ioan en Lina: de belrij, met gereconstrueerde notitie ──────────
--- Maakt per persoon één follow_up_leads-rij die morgen op de Werklijst staat.
--- De notitie is de herinnering van Maxim van 27 augustus, en zegt dat er ook
--- zelf bij — de originele tekst van 26 augustus is niet te achterhalen.
-insert into public.follow_up_leads
-  (customer_id, source, lead_name, lead_email, lead_phone, lead_status,
-   terugbel_datum, source_ref, created_at, updated_at)
-select a.customer_id,
-       'event',
-       coalesce(nullif(trim(coalesce(a.first_name,'') || ' ' || coalesce(a.last_name,'')), ''),
-                a.email, '(onbekend)'),
-       a.email,
-       a.phone,
-       'nieuw',
-       (current_date + 1)::timestamptz,
-       jsonb_build_object(
-         'event_id',          a.event_id,
-         'attendee_id',       a.id,
-         'is_event_followup', true,
-         'event_uitkomst',    'no_show',
-         'reason_code',       'onbekend',
-         'reason',            'Warme lead die niet kwam opdagen, gratis lead voor volgend event. — Achteraf gereconstrueerd door Maxim op 27-08-2026; de originele notitie van 26-08 ging verloren bij het afronden.',
-         'notitie_herkomst',  'gereconstrueerd',
-         'gereconstrueerd_op','2026-08-27',
+-- ── Stap 2a — Ioan en Lina: hun belrij weer zichtbaar maken ─────────────────
+-- Heropenen, niet aanmaken. Wat er gebeurt:
+--   · lead_status  → 'terugbellen', maar ALLEEN als hij afgesloten of
+--                    onbereikbaar stond. Staat hij al open, dan blijft hij.
+--   · terugbel_datum → morgen, maar ALLEEN als hij leeg is of in het verleden
+--                    ligt. Een afspraak in de toekomst wordt niet overschreven.
+--   · attempts     → ONGEMOEID. Eerdere belpogingen zijn historiek.
+--   · source_ref   → samengevoegd, niet vervangen: bestaande sleutels blijven,
+--                    `event_date` gaat eruit (zie de kop), en de event-context
+--                    plus de gereconstrueerde notitie komen erbij.
+update public.follow_up_leads l
+   set lead_status = case
+         when l.lead_status in ('verlengd', 'verloren', 'niet_bereikbaar') then 'terugbellen'
+         else l.lead_status
+       end,
+       terugbel_datum = case
+         when l.terugbel_datum is null or l.terugbel_datum < now() then (current_date + 1)::timestamptz
+         else l.terugbel_datum
+       end,
+       source_ref = (coalesce(l.source_ref, '{}'::jsonb) - 'event_date') || jsonb_build_object(
+         'event_id',            '6a848f55-c782-4a3f-b46e-ccb11d10eabf',
+         'is_event_followup',   true,
+         'event_uitkomst',      'no_show',
+         'reason_code',         'onbekend',
+         'reason',              'Warme lead die niet kwam opdagen, gratis lead voor volgend event. — Achteraf gereconstrueerd door Maxim op 27-08-2026; de originele notitie van 26-08 ging verloren bij het afronden.',
+         'notitie_herkomst',    'gereconstrueerd',
+         'gereconstrueerd_op',  '2026-08-27',
          'gereconstrueerd_door','Maxim',
+         'hersteld_op',         now()
+       ),
+       updated_at = now()
+where l.source_ref->>'attendee_id' in (
+        '2dcf551a-7ee9-48f0-b241-e0a9f5f35703',
+        'b2198275-9771-4557-b72f-61a2f32a905f'
+      )
+  and coalesce(l.source_ref->>'hersteld_op', '') = '';   -- idempotent
+
+
+-- ── Stap 2b — Arslan: zelfde behandeling, maar zijn notitie blijft ──────────
+-- Bij hem is het afronden wél goed gegaan en staat er een echte notitie.
+-- Die wordt niet overschreven; alleen zichtbaarheid en herkomst worden gezet.
+-- Hij was AFGEMELD (niet no-show), dus de herkomst is 'afgemeld'.
+update public.follow_up_leads l
+   set lead_status = case
+         when l.lead_status in ('verlengd', 'verloren', 'niet_bereikbaar') then 'terugbellen'
+         else l.lead_status
+       end,
+       terugbel_datum = case
+         when l.terugbel_datum is null or l.terugbel_datum < now() then (current_date + 1)::timestamptz
+         else l.terugbel_datum
+       end,
+       source_ref = (coalesce(l.source_ref, '{}'::jsonb) - 'event_date') || jsonb_build_object(
+         'event_id',          '6a848f55-c782-4a3f-b46e-ccb11d10eabf',
+         'is_event_followup', true,
+         'event_uitkomst',    'afgemeld',
          'hersteld_op',       now()
        ),
-       now(),
-       now()
-from public.event_attendees a
-where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
-  and (   (a.first_name ilike 'Ioan' and a.last_name ilike 'Berintan')
-       or (a.first_name ilike 'Lina' and a.last_name ilike 'Mavzer'))
-  and not exists (
-    select 1 from public.follow_up_leads l
-     where l.source_ref->>'attendee_id' = a.id::text
-  );
+       updated_at = now()
+where l.source_ref->>'attendee_id' = 'aecaa26d-4910-421a-a08a-867ea76bd49a'
+  and coalesce(l.source_ref->>'hersteld_op', '') = '';   -- idempotent
 
 
--- ── Stap 3 — Arslan: zijn gesloten belrij weer openzetten ───────────────────
--- Zet de bestaande rij van 'verloren' terug op 'terugbellen' met een belmoment
--- van morgen. `attempts` blijft staan: de eerdere belpogingen zijn historiek
--- en horen zichtbaar te blijven.
+-- ── Stap 2c — sluimering opheffen (alleen als de kolom bestaat) ─────────────
+-- Sla deze over als stap 0a `snoozed_until` niet toonde. Een sluimerende rij
+-- blijft anders ondanks alles onzichtbaar.
 update public.follow_up_leads l
-   set lead_status    = 'terugbellen',
-       terugbel_datum = (current_date + 1)::timestamptz,
-       updated_at     = now()
-from public.event_attendees a
-where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
-  and a.first_name ilike 'Arslan' and a.last_name ilike 'Khan'
-  and l.customer_id = a.customer_id
-  and l.lead_status in ('verlengd', 'verloren');
+   set snoozed_until = null
+where l.source_ref->>'attendee_id' in (
+        '2dcf551a-7ee9-48f0-b241-e0a9f5f35703',
+        'b2198275-9771-4557-b72f-61a2f32a905f',
+        'aecaa26d-4910-421a-a08a-867ea76bd49a'
+      )
+  and l.snoozed_until is not null;
 
 
--- ── Stap 4 — een spoor in het notitielog ────────────────────────────────────
--- Zodat niemand zich straks afvraagt waarom deze drie rijen bestaan of waarom
--- een verloren lead ineens weer op de lijst staat.
+-- ── Stap 3 — een spoor in het notitielog ────────────────────────────────────
+-- Zodat niemand zich later afvraagt waarom deze rijen ineens weer leven.
 insert into public.follow_up_lead_notes (lead_id, note, created_at)
 select l.id,
-       'Handmatig hersteld op 27-08-2026 na het afronden van de masterclass van 26 augustus. De notitie bij deze lead is een reconstructie van Maxim, niet de originele tekst van 26-08 — die ging verloren. Zie docs/sql-migrations/2026-08-27-reparatie-masterclass-26-aug.sql.',
+       'Handmatig heropend op 27-08-2026 na het afronden van de masterclass van 26 augustus. De belrij stond niet op een lijst; eerdere belpogingen zijn behouden. Bij Ioan en Lina is de notitie een reconstructie van Maxim, niet de originele tekst van 26-08 — die ging verloren. Zie docs/sql-migrations/2026-08-27-reparatie-masterclass-26-aug.sql.',
        now()
 from public.follow_up_leads l
-join public.event_attendees a
-  on a.id::text = l.source_ref->>'attendee_id'
- or (a.customer_id = l.customer_id and a.first_name ilike 'Arslan' and a.last_name ilike 'Khan')
-where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
-  and (   (a.first_name ilike 'Ioan'   and a.last_name ilike 'Berintan')
-       or (a.first_name ilike 'Lina'   and a.last_name ilike 'Mavzer')
-       or (a.first_name ilike 'Arslan' and a.last_name ilike 'Khan'))
+where l.source_ref->>'attendee_id' in (
+        '2dcf551a-7ee9-48f0-b241-e0a9f5f35703',
+        'b2198275-9771-4557-b72f-61a2f32a905f',
+        'aecaa26d-4910-421a-a08a-867ea76bd49a'
+      )
   and not exists (
     select 1 from public.follow_up_lead_notes n
-     where n.lead_id = l.id and n.note like 'Handmatig hersteld op 27-08-2026%'
+     where n.lead_id = l.id and n.note like 'Handmatig heropend op 27-08-2026%'
   );
 
 
--- ── Stap 5 — controle ───────────────────────────────────────────────────────
--- Verwacht drie rijen, allemaal met een terugbel_datum van morgen en een
--- lead_status die NIET 'verlengd' of 'verloren' is.
-select l.lead_name, l.lead_status, l.terugbel_datum, l.attempts,
-       l.source_ref->>'event_uitkomst' as herkomst,
-       l.source_ref->>'reason_code'    as reden,
+-- ── Stap 4 — controle ───────────────────────────────────────────────────────
+-- Verwacht drie rijen, en let op ALLE DRIE deze dingen:
+--   · lead_status is NIET 'verlengd', 'verloren' of 'niet_bereikbaar'
+--   · terugbel_datum is gevuld en ligt vandaag of later
+--   · van_belronde is false  (event_date is eruit)
+-- Klopt er één niet, dan staat die persoon nog steeds niet op de bellijst.
+select l.lead_name,
+       l.lead_status,
+       l.terugbel_datum,
+       l.attempts,
+       (l.source_ref ? 'event_date')    as van_belronde,
+       l.source_ref->>'event_uitkomst'  as herkomst,
        l.source_ref->>'notitie_herkomst' as notitie_herkomst,
-       left(coalesce(l.source_ref->>'reason', ''), 60) as notitie_begin
+       left(coalesce(l.source_ref->>'reason', '(geen)'), 70) as notitie
 from public.follow_up_leads l
-join public.event_attendees a
-  on a.id::text = l.source_ref->>'attendee_id' or a.customer_id = l.customer_id
-where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
-  and (   (a.first_name ilike 'Ioan'   and a.last_name ilike 'Berintan')
-       or (a.first_name ilike 'Lina'   and a.last_name ilike 'Mavzer')
-       or (a.first_name ilike 'Arslan' and a.last_name ilike 'Khan'))
+where l.source_ref->>'attendee_id' in (
+        '2dcf551a-7ee9-48f0-b241-e0a9f5f35703',
+        'b2198275-9771-4557-b72f-61a2f32a905f',
+        'aecaa26d-4910-421a-a08a-867ea76bd49a'
+      )
+order by l.lead_name;
+
+
+-- ── Stap 5 — de echte proef ─────────────────────────────────────────────────
+-- Staan ze nu ook daadwerkelijk in de emmers van de Werklijst? Dit spiegelt
+-- de filters uit api/follow-up-leads-list.js. Verwacht drie rijen met
+-- in_werklijst = true. Dit is de enige controle die telt: stap 4 kan er goed
+-- uitzien terwijl de lijst leeg blijft.
+select l.lead_name,
+       l.lead_status,
+       l.terugbel_datum,
+       (l.lead_status not in ('verlengd', 'verloren')
+        and l.terugbel_datum is not null
+        and (l.snoozed_until is null or l.snoozed_until <= now())) as in_werklijst
+from public.follow_up_leads l
+where l.source_ref->>'attendee_id' in (
+        '2dcf551a-7ee9-48f0-b241-e0a9f5f35703',
+        'b2198275-9771-4557-b72f-61a2f32a905f',
+        'aecaa26d-4910-421a-a08a-867ea76bd49a'
+      )
 order by l.lead_name;
 
 
 -- ============================================================================
 --  TERUGDRAAIEN
 -- ============================================================================
---  Stap 1 en 2 (Ioan + Lina) zijn nieuwe rijen; die kun je weghalen:
---    delete from public.follow_up_leads
---     where source_ref->>'hersteld_op' is not null
---       and source_ref->>'event_id' = '6a848f55-c782-4a3f-b46e-ccb11d10eabf';
---    delete from public.event_followups
---     where event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
---       and reason is null and reason_code = 'onbekend';
+--  Er wordt niets verwijderd, dus terugdraaien is alleen nodig als je de
+--  heropening ongedaan wilt maken. Noteer eerst de uitvoer van stap 0b — dat
+--  is de enige plek waar de oude waarden staan.
 --
---  Stap 3 (Arslan) zet zijn rij terug op 'verloren' zonder belmoment:
---    (alleen doen als je zeker weet dat dat de oude toestand was)
---    update public.follow_up_leads set lead_status = 'verloren', terugbel_datum = null
---     where id = '<het-id-uit-stap-5>';
+--    -- de opvolgrijen van stap 1 weghalen:
+--    delete from public.event_followups
+--     where attendee_id in ('2dcf551a-7ee9-48f0-b241-e0a9f5f35703',
+--                           'b2198275-9771-4557-b72f-61a2f32a905f')
+--       and reason_code = 'onbekend' and status = 'open';
+--
+--    -- de markering weghalen zodat stap 2 opnieuw kan draaien:
+--    update public.follow_up_leads
+--       set source_ref = source_ref - 'hersteld_op'
+--     where source_ref->>'attendee_id' in (...);
+--
+--    -- lead_status en terugbel_datum terugzetten: handmatig, met de waarden
+--    -- uit stap 0b. Er is geen automatische weg terug.
 -- ============================================================================
