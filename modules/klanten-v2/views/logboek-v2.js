@@ -410,6 +410,180 @@
         )}`;
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // #logboek-v1 · Tijdlijn-subview (unified stream: activity + call + snapshot)
+  // Super_admin-only via server-side gate + client-side UI-lock.
+  // ══════════════════════════════════════════════════════════════════
+
+  const _tl = {
+    loading: false, error: null, data: null, page: 1,
+    filter: {
+      streams: ['activity', 'call', 'snapshot'],
+      user_id: null, q: '',
+      from: null, to: null,
+    },
+    totals: { activity: 0, call: 0, snapshot: 0 },
+    _qTimer: null,
+  };
+
+  function _tlIsSuperAdmin() {
+    try {
+      const role = window.DFO?.S?.role || window.KV_V2?.role || null;
+      return role === 'super_admin';
+    } catch (_) { return false; }
+  }
+
+  async function _tlFetch() {
+    if (_tl.loading) return;
+    _tl.loading = true; _tl.error = null;
+    if (window.DFO?.render) window.DFO.render();
+    const params = new URLSearchParams();
+    params.set('streams', _tl.filter.streams.join(','));
+    params.set('page', String(_tl.page));
+    params.set('page_size', '50');
+    if (_tl.filter.user_id) params.set('user_id', _tl.filter.user_id);
+    if (_tl.filter.q)       params.set('q', _tl.filter.q);
+    if (_tl.filter.from)    params.set('from', _tl.filter.from);
+    if (_tl.filter.to)      params.set('to', _tl.filter.to);
+    const j = await tryFetch('logboek-stream', '/api/logboek-stream-list?' + params.toString(), 12000);
+    _tl.loading = false;
+    if (!j || j.__error || j.error) { _tl.error = j?.__error || j?.error || 'onbekend'; }
+    else { _tl.data = j; _tl.totals = j.totals_hint || _tl.totals; }
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  window.__tlToggleStream = (s) => {
+    const cur = _tl.filter.streams;
+    if (cur.includes(s)) _tl.filter.streams = cur.filter(x => x !== s);
+    else _tl.filter.streams = cur.concat(s);
+    if (_tl.filter.streams.length === 0) _tl.filter.streams = ['activity','call','snapshot'];
+    _tl.page = 1; _tl.data = null; _tlFetch();
+  };
+  window.__tlSetQ = (v) => {
+    clearTimeout(_tl._qTimer);
+    _tl._qTimer = setTimeout(() => {
+      _tl.filter.q = String(v || '').trim();
+      _tl.page = 1; _tl.data = null; _tlFetch();
+    }, 400);
+  };
+  window.__tlPage = (delta) => {
+    _tl.page = Math.max(1, _tl.page + delta);
+    _tl.data = null; _tlFetch();
+  };
+  window.__tlOpenSnapshot = (id) => {
+    const item = asArr(_tl.data?.items).find(i => i.stream === 'snapshot' && i.id === id);
+    if (item) _openSnapshotModal(item);
+  };
+
+  function _openSnapshotModal(item) {
+    const existing = document.getElementById('tlSnapshotModal');
+    if (existing) existing.remove();
+    const root = document.createElement('div');
+    root.id = 'tlSnapshotModal';
+    root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.85);padding:20px';
+    root.addEventListener('click', (e) => { if (e.target === root) root.remove(); });
+    const escKey = (e) => { if (e.key === 'Escape') { root.remove(); document.removeEventListener('keydown', escKey); } };
+    document.addEventListener('keydown', escKey);
+    root.innerHTML = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;max-width:96vw;max-height:96vh;overflow:hidden;display:flex;flex-direction:column">'
+      + '<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px">'
+        + '<div style="font-size:13px;color:var(--text-2)">'
+          + '<b>' + esc(item.action_hint || '') + '</b> · '
+          + esc(new Date(item.ts).toLocaleString('nl-NL'))
+          + ' · ' + esc(item.user_email || item.user_id || '')
+          + ' · ' + esc(item.view_title || item.view_url || '')
+        + '</div>'
+        + '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tlSnapshotModal\').remove()">✕</button>'
+      + '</div>'
+      + '<div style="overflow:auto;padding:12px;background:#111;flex:1">'
+        + (item.signed_url
+            ? '<img src="' + esc(item.signed_url) + '" style="display:block;max-width:100%;max-height:82vh;margin:0 auto" alt="snapshot" />'
+            : '<div style="color:#eee;padding:20px;text-align:center">Signed URL niet beschikbaar</div>')
+      + '</div>'
+      + '<div style="padding:8px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--text-3)">'
+        + 'Iframes (email-body, embeds) blijven zwart in deze opname · TTL ' + (item.signed_url_ttl_seconds || 300) + 's'
+      + '</div>'
+    + '</div>';
+    document.body.appendChild(root);
+  }
+
+  function tijdlijnView() {
+    if (!_tlIsSuperAdmin()) {
+      return '<div style="padding:40px;text-align:center;color:var(--text-3)">'
+           + '<div style="font-size:14px">🔒 Tijdlijn is super_admin-only.</div>'
+           + '</div>';
+    }
+    if (!_tl.data && !_tl.loading && !_tl.error) queueMicrotask(_tlFetch);
+    if (_tl.loading) return '<div style="padding:40px;text-align:center">Laden…</div>';
+    if (_tl.error) return '<div style="padding:16px;color:var(--rose)">' + esc(_tl.error) + '</div>';
+    const items = asArr(_tl.data?.items);
+    const t = _tl.totals || {};
+    const isOn = (s) => _tl.filter.streams.includes(s);
+    const chipStyle = (on) => 'display:flex;gap:5px;align-items:center;font-size:12.5px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:' + (on ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface)');
+
+    return '<div style="padding:16px 20px">'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">'
+        + '<label style="' + chipStyle(isOn('activity')) + '">'
+          + '<input type="checkbox" ' + (isOn('activity') ? 'checked' : '') + ' onchange="window.__tlToggleStream(\'activity\')" />'
+          + 'Activity <span style="color:var(--text-3);font-family:monospace">' + (t.activity || 0) + '</span>'
+        + '</label>'
+        + '<label style="' + chipStyle(isOn('call')) + '">'
+          + '<input type="checkbox" ' + (isOn('call') ? 'checked' : '') + ' onchange="window.__tlToggleStream(\'call\')" />'
+          + '📞 Calls <span style="color:var(--text-3);font-family:monospace">' + (t.call || 0) + '</span>'
+        + '</label>'
+        + '<label style="' + chipStyle(isOn('snapshot')) + '">'
+          + '<input type="checkbox" ' + (isOn('snapshot') ? 'checked' : '') + ' onchange="window.__tlToggleStream(\'snapshot\')" />'
+          + '🖼 Snapshots <span style="color:var(--text-3);font-family:monospace">' + (t.snapshot || 0) + '</span>'
+        + '</label>'
+        + '<input type="search" placeholder="Zoek action / module / hint …" value="' + esc(_tl.filter.q) + '"'
+          + ' oninput="window.__tlSetQ(this.value)"'
+          + ' style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12.5px" />'
+      + '</div>'
+      + '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)">'
+      + (items.length === 0
+          ? '<div style="padding:20px;color:var(--text-3);text-align:center">Geen resultaten in dit filter</div>'
+          : items.map(_tlRenderRow).join(''))
+      + '</div>'
+      + '<div style="display:flex;justify-content:center;gap:10px;margin-top:14px">'
+        + '<button class="btn btn-ghost btn-sm" ' + (_tl.page <= 1 ? 'disabled' : '') + ' onclick="window.__tlPage(-1)">← Vorige</button>'
+        + '<span style="font-size:12px;color:var(--text-3);align-self:center">Pagina ' + _tl.page + '</span>'
+        + '<button class="btn btn-ghost btn-sm" ' + (_tl.data?.has_more ? '' : 'disabled') + ' onclick="window.__tlPage(1)">Volgende →</button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function _tlRenderRow(it) {
+    const ts = new Date(it.ts).toLocaleString('nl-NL');
+    const bundled = Array.isArray(it.bundled_with) && it.bundled_with.some(x => String(x).startsWith('snapshot:'));
+    const bg = it.stream === 'activity' ? 'transparent'
+             : it.stream === 'call'     ? 'var(--brand-soft,#E2F1F5)'
+             : /* snapshot */             'var(--gold-soft,#F9EFD4)';
+    const icon = it.stream === 'activity' ? '•'
+               : it.stream === 'call'     ? '📞'
+               : /* snapshot */              '🖼';
+    let core = '';
+    if (it.stream === 'activity') {
+      core = '<b>' + esc(it.action || '') + '</b>' + (bundled ? ' 🖼' : '')
+           + ' <span style="color:var(--text-3);margin-left:8px">' + esc(it.module || '—') + '</span>'
+           + ' <span style="color:var(--text-3);margin-left:8px;font-family:monospace;font-size:11px">' + esc(it.method || '') + ' ' + (it.status_code || '') + '</span>';
+    } else if (it.stream === 'call') {
+      const durMin = it.duration_sec == null ? '' : ('~' + Math.floor(it.duration_sec / 60) + 'm ' + (it.duration_sec % 60) + 's');
+      core = '<b>Belt ' + esc(it.to_number || '?') + '</b>'
+           + ' <span style="color:var(--text-3);margin-left:8px">' + esc(String(it.line || '').toUpperCase()) + ' · ' + esc(it.outcome_hint || '?') + ' · ' + esc(durMin) + '</span>'
+           + (it.meta_source ? ' <span style="color:var(--text-3);margin-left:8px;font-size:11px">' + esc(it.meta_source) + '</span>' : '');
+    } else {
+      core = '<b onclick="window.__tlOpenSnapshot(\'' + esc(it.id) + '\')" style="cursor:pointer;text-decoration:underline">Snapshot: ' + esc(it.action_hint || '?') + '</b>'
+           + ' <span style="color:var(--text-3);margin-left:8px">' + esc(it.view_title || it.view_url || '') + '</span>'
+           + ' <span style="color:var(--text-3);margin-left:8px;font-size:11px">' + (it.size_kb || '?') + 'KB</span>';
+    }
+    return '<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:150px 24px 1fr 160px;gap:8px;font-size:12.5px;background:' + bg + '">'
+         + '<div style="color:var(--text-3);font-family:monospace">' + esc(ts) + '</div>'
+         + '<div style="text-align:center">' + icon + '</div>'
+         + '<div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + core + '</div>'
+         + '<div style="color:var(--text-3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(it.user_email || it.user_id || '') + '</div>'
+       + '</div>';
+  }
+
+  window.DFO.VIEWS['logboek/Tijdlijn']       = tijdlijnView;
   window.DFO.VIEWS['logboek/Activiteit']    = activiteitView;
   window.DFO.VIEWS['logboek/Per gebruiker'] = perGebruikerView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('logboek');
