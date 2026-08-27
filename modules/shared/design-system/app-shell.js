@@ -83,7 +83,7 @@
 
     { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud'] },
     { g: 'Operatie',               id: 'agents',           naam: 'AI Agents',         icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Configuratie', 'Kennisbank', 'Prestaties'] },
-    { g: 'Operatie',               id: 'logboek',          naam: 'Toegangslog',       icon: I.shield,   color: 'slate',   roles: SAM,                  tabs: ['Activiteit', 'Per gebruiker'] },
+    { g: 'Operatie',               id: 'logboek',          naam: 'Toegangslog',       icon: I.shield,   color: 'slate',   roles: SAM,                  tabs: ['Tijdlijn', 'Activiteit', 'Per gebruiker'] },
 
     { g: 'Systeem',                id: 'instellingen',     naam: 'Instellingen',      icon: I.settings, color: 'slate',   roles: SAM,                  tabs: [] },
     { g: 'Systeem',                id: 'binnenkort',       naam: 'Binnenkort',        icon: I.rocket,   color: 'slate',   roles: SAM,                  tabs: [] },
@@ -93,6 +93,7 @@
      de module wél mogen openen; MOD_LOCK toont de module in het menu
      met een slot-icoon en render't `comingSoonView` i.p.v. de content. */
   const TAB_RESTRICT = {
+    'logboek/Tijdlijn':        ['super_admin'],    // #logboek-v1: unified stream + snapshots = super_admin-only
     'events/Statistieken': ['super_admin', 'manager'],
     'finance/Bank':            ['super_admin', 'manager'],
     'finance/Omzet & MRR':     ['super_admin', 'manager'],
