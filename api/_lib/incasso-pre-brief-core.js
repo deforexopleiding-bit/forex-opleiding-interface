@@ -73,6 +73,94 @@ function _resolveLogoBuffer() {
   return WIK_LOGO_BUFFER || null;
 }
 
+// ── Shared low-level regels voor "open bedrag per factuur" ─────────────────
+// Één plek voor kanaal-pariteit — gebruikt door de per-klant helper,
+// de batch-helper én (indirect) door de brief-generator. Als de rekenregel
+// ooit verandert, gebeurt dat hier — WA, brief en generator blijven synchroon.
+function _isPositiveOpen(iv) {
+  const t = Number(iv.amount_total) || 0;
+  const p = Number(iv.amount_paid) || 0;
+  const c = Number(iv.credited_amount) || 0;
+  return Math.max(0, t - p - c) > 0;
+}
+function _openCents(iv) {
+  const t = Number(iv.amount_total) || 0;
+  const p = Number(iv.amount_paid) || 0;
+  const c = Number(iv.credited_amount) || 0;
+  return Math.round(Math.max(0, t - p - c) * 100);
+}
+
+/**
+ * fetchOpenInvoicesForCustomer(customerId, db?)
+ *   → Promise<{ openInvoices: Array<row>, totalOpenCents: number }>
+ *
+ * SHARED helper voor "openstaand bedrag per klant". Gebruikt door:
+ *   - generatePreBriefForCustomer intern (stap 5 in de bestaande flow)
+ *   - bulk-brief-create (dry-run + live)
+ *   - bulk-wa-send (via de batch-variant hieronder)
+ *
+ * Field-set + filter IDENTIEK aan de originele inline-fetch in de generator.
+ * is_test-filter TOEGEVOEGD (kanaal-pariteit + hygiëne — test-facturen mogen
+ * nooit onderwerp van een aanmaning worden).
+ *
+ * @param {string} customerId  uuid
+ * @param {object} [db]        Supabase client (default supabaseAdmin)
+ * @returns {Promise<{ openInvoices: Array<object>, totalOpenCents: number }>}
+ * @throws Error bij DB-fout (caller beslist fail-hard vs fail-soft)
+ */
+export async function fetchOpenInvoicesForCustomer(customerId, db = supabaseAdmin) {
+  if (!customerId) return { openInvoices: [], totalOpenCents: 0 };
+  const { data: invs, error } = await db
+    .from('invoices')
+    .select('id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status')
+    .eq('customer_id', customerId).eq('is_test', false).in('status', OPEN_STATUSES);
+  if (error) throw new Error('invoices lookup: ' + error.message);
+  const openInvoices = (invs || []).filter(_isPositiveOpen);
+  const totalOpenCents = openInvoices.reduce((s, iv) => s + _openCents(iv), 0);
+  return { openInvoices, totalOpenCents };
+}
+
+/**
+ * fetchOpenInvoicesForCustomersBatch(customerIds, db?)
+ *   → Promise<Map<customerId, { openInvoices: Array<row>, totalOpenCents: number }>>
+ *
+ * BATCH-variant voor bulk-flows (WA + brief-dry-run) — ÉÉN SQL-query,
+ * client-side groepering. Zelfde filter (is_test=false), zelfde
+ * OPEN_STATUSES, zelfde _isPositiveOpen + _openCents als de per-klant
+ * variant — één rekenregel, één plek.
+ *
+ * @param {string[]} customerIds  uuids (leeg → lege Map)
+ * @param {object}   [db]         supabaseAdmin default
+ * @returns {Promise<Map<string, { openInvoices: Array<object>, totalOpenCents: number }>>}
+ * @throws Error bij DB-fout
+ */
+export async function fetchOpenInvoicesForCustomersBatch(customerIds, db = supabaseAdmin) {
+  const out = new Map();
+  const ids = Array.isArray(customerIds) ? customerIds.filter(Boolean) : [];
+  if (!ids.length) return out;
+
+  // Pre-populate zodat callers .get(cid) een non-null bucket krijgen voor
+  // klanten zonder open facturen (voorkomt "undefined.totalOpenCents").
+  for (const cid of ids) out.set(cid, { openInvoices: [], totalOpenCents: 0 });
+
+  const { data: invs, error } = await db
+    .from('invoices')
+    .select('id, customer_id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status')
+    .in('customer_id', ids)
+    .eq('is_test', false)
+    .in('status', OPEN_STATUSES);
+  if (error) throw new Error('invoices batch lookup: ' + error.message);
+
+  for (const iv of (invs || [])) {
+    if (!_isPositiveOpen(iv)) continue;
+    const bucket = out.get(iv.customer_id);
+    if (!bucket) continue;
+    bucket.openInvoices.push(iv);
+    bucket.totalOpenCents += _openCents(iv);
+  }
+  return out;
+}
+
 /**
  * Render de brief-PDF (identieke C5-envelop-layout als de handmatige knop).
  * Puur in-memory; geen storage/DB. Returnt een Buffer.
@@ -274,16 +362,13 @@ export async function generatePreBriefForCustomer({
   }
 
   // 5) Open facturen voor de variabele-context (klant.totaal_open).
-  const { data: invs } = await db
-    .from('invoices')
-    .select('id, invoice_number, amount_total, amount_paid, credited_amount, due_date, issue_date, status')
-    .eq('customer_id', customerId).in('status', OPEN_STATUSES);
-  const openInvoices = (invs || []).filter((iv) => {
-    const t = Number(iv.amount_total) || 0;
-    const p = Number(iv.amount_paid) || 0;
-    const c = Number(iv.credited_amount) || 0;
-    return Math.max(0, t - p - c) > 0;
-  });
+  //    Hergebruikt SHARED helper (fetchOpenInvoicesForCustomer) — dezelfde
+  //    bron die bulk-brief-create + bulk-wa-send gebruiken. Zelfde SELECT,
+  //    zelfde OPEN_STATUSES, zelfde _isPositiveOpen-filter. TOEGEVOEGD in
+  //    deze refactor: is_test=false (test-facturen mogen nooit onderwerp
+  //    zijn van een aanmaning). Verifieer via de is_test-SELECT of dit
+  //    brief-bedragen voor bestaande klanten verandert (verwacht 0 rijen).
+  const { openInvoices } = await fetchOpenInvoicesForCustomer(customerId, db);
 
   // 5b) Contract-context voor klant.totaal_resterend (+ indicaties): actieve
   //     subscriptions van de klant (via deals) + het reeds betaalde. Fail-soft —

@@ -24,7 +24,10 @@ const EUR_FORMATTER = new Intl.NumberFormat('nl-NL', {
   maximumFractionDigits: 2,
 });
 
-function formatEur(amount) {
+// Public export sinds #wa-bulk-C+brief-B (bug 2 fix) — beide bulk-endpoints
+// hebben een NL-euro-formatter nodig voor dry-run displays. Gedrag identiek
+// aan de vorige private variant (returnt "EUR 80,00").
+export function formatEur(amount) {
   const n = Number(amount) || 0;
   return `EUR ${EUR_FORMATTER.format(n)}`;
 }

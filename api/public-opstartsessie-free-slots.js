@@ -69,7 +69,12 @@ function amsPartsOf(ms) {
 }
 
 async function fetchGhlSlots({ calendarId, token, startMs, endMs }) {
-  const url = `${GHL_BASE}/calendars/${encodeURIComponent(calendarId)}/free-slots?startDate=${startMs}&endDate=${endMs}`;
+  // v=2 (2026-08-27): parity met api/follow-up-ghl-free-slots.js —
+  // timezone-param meesturen zodat GHL Amsterdam-lokale datum-keys
+  // retourneert i.p.v. UTC (wat een off-by-one op de datum-grens gaf).
+  const url = `${GHL_BASE}/calendars/${encodeURIComponent(calendarId)}/free-slots`
+    + `?startDate=${startMs}&endDate=${endMs}`
+    + `&timezone=${encodeURIComponent('Europe/Amsterdam')}`;
   const res = await fetch(url, {
     headers: {
       Authorization : `Bearer ${token}`,
@@ -87,23 +92,41 @@ async function fetchGhlSlots({ calendarId, token, startMs, endMs }) {
   return res.json();
 }
 
-// GHL free-slots response is per-dag: { "YYYY-MM-DD": { slots:[iso,...] } , ... }
+// Normaliseer GHL free-slots response. GHL retourneert TWEE shapes afhankelijk
+// van de kalender-config (bevestigd in productie via follow-up-ghl-free-slots.js):
+//   Vorm 1: { slots: [iso, ...] }                                  — platte lijst
+//   Vorm 2: { "YYYY-MM-DD": { slots: [iso, ...] } , ... }          — per dag
+// Elk slot-element kan string zijn OF een object met .startTime/.start.
+// Grouping op Amsterdam-lokale datum die uit de ISO volgt (respecteert DST).
+// v=2 (2026-08-27): parity met follow-up-ghl-free-slots.js normaliseer().
 function normaliseer(raw) {
+  const byDate = new Map();
+  const push = (iso) => {
+    if (!iso) return;
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return;
+    const { date, time } = amsPartsOf(t);
+    if (!byDate.has(date)) byDate.set(date, new Set());
+    byDate.get(date).add(time);
+  };
+
+  if (!raw || typeof raw !== 'object') return [];
+
+  // Vorm 1: platte lijst.
+  if (Array.isArray(raw?.slots)) {
+    for (const s of raw.slots) push(typeof s === 'string' ? s : s?.startTime || s?.start || '');
+  }
+
+  // Vorm 2: object keyed op datum.
+  for (const [k, v] of Object.entries(raw)) {
+    if (!DATE_RE.test(k)) continue;
+    const arr = Array.isArray(v?.slots) ? v.slots : (Array.isArray(v) ? v : []);
+    for (const s of arr) push(typeof s === 'string' ? s : s?.startTime || s?.start || '');
+  }
+
   const out = [];
-  if (!raw || typeof raw !== 'object') return out;
-  for (const [dateKey, val] of Object.entries(raw)) {
-    if (!DATE_RE.test(dateKey)) continue;
-    const rawSlots = Array.isArray(val?.slots) ? val.slots : [];
-    const times = [];
-    for (const iso of rawSlots) {
-      const t = Date.parse(iso);
-      if (!Number.isFinite(t)) continue;
-      times.push(amsPartsOf(t).time);
-    }
-    // Uniek + sorted; grouping op de Amsterdam-datum die uit iso volgt.
-    if (times.length) {
-      out.push({ date: dateKey, times: Array.from(new Set(times)).sort() });
-    }
+  for (const [date, timesSet] of byDate) {
+    out.push({ date, times: [...timesSet].sort() });
   }
   out.sort((a, b) => a.date.localeCompare(b.date));
   return out;
@@ -165,6 +188,19 @@ export default async function handler(req, res) {
   try {
     const raw = await fetchGhlSlots({ calendarId, token, startMs, endMs });
     const slots = normaliseer(raw);
+    // v=2 diagnose-log: bij lege response is dit hét signaal om te zien
+    // of het aan GHL ligt (raw is leeg) of aan parsing (raw heeft data,
+    // slots is leeg → shape-mismatch). NOOIT de token loggen; alleen de
+    // top-level keys en het aantal slots per key.
+    if (slots.length === 0) {
+      const rawKeys = raw && typeof raw === 'object' ? Object.keys(raw) : [];
+      const sample  = rawKeys.slice(0, 5).map((k) => {
+        const v = raw[k];
+        const arr = Array.isArray(v?.slots) ? v.slots : (Array.isArray(v) ? v : null);
+        return { k, n: Array.isArray(arr) ? arr.length : (arr === null ? 'n/a' : 0) };
+      });
+      console.warn('[public-opstartsessie-free-slots] parse yielded 0 slots — GHL keys:', rawKeys.length, 'sample:', JSON.stringify(sample));
+    }
     return res.status(200).json({
       slots, timezone: 'Europe/Amsterdam',
       window: { startDate, endDate },
