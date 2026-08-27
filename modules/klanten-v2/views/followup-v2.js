@@ -110,7 +110,11 @@
     { v: 'bevestigd',         l: '👍 Bevestigd',       c: 'emerald', next: false, note: 'alleen voor event-leads' },
     { v: 'komt_niet',         l: '👎 Komt niet',       c: 'rose',    next: false, note: 'alleen voor event-leads' },
   ];
-  const BEZWAREN = [
+  // De elf bezwaren staan sinds stap 2 in _shared-v2.js, omdat het afrondscherm
+  // van een event ze ook nodig heeft. Zelfde lijst, zelfde volgorde; de
+  // terugval hieronder is er alleen voor het geval dit bestand ooit geladen
+  // wordt zonder de gedeelde helpers.
+  const BEZWAREN = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.BEZWAREN) || [
     'Te duur', 'Geen tijd', 'Moet overleggen', 'Al bij andere partij',
     'Wil eerst resultaten zien', 'Twijfelt over online', 'Geen vertrouwen',
     'Wil eerst zelf proberen', 'Slecht moment', 'Geen budget nu', 'Anders',

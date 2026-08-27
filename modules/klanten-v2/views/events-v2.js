@@ -1008,14 +1008,32 @@
     { v: 'no_show',  l: 'No-show',  c: 'danger'   },
     { v: 'afgemeld', l: 'Afgemeld', c: 'neutral'  },
   ];
+  // STAP 2 — "Opvolgen" en "Twijfelt nog" waren twee knoppen die exact
+  // hetzelfde deden: dezelfde follow-up, dezelfde verplichte notitie,
+  // dezelfde cadans. Nergens in de code werd er onderscheid gemaakt. Ze zijn
+  // nu één knop met het label dat beschrijft wat er aan de hand is, en er
+  // komt 'opvolgen' uit. De waarde 'twijfelt_nog' blijft geldig in de
+  // databank — bestaande rijen houden wat ze hebben — maar wordt niet meer
+  // gestuurd.
   const COMPLETE_OUTCOMES = [
     { v: '',                l: '— kies uitkomst —' },
-    { v: 'opvolgen',        l: 'Opvolgen (follow-up)' },
-    { v: 'twijfelt_nog',    l: 'Twijfelt nog (follow-up)' },
+    { v: 'opvolgen',        l: 'Wil nog beslissen' },
     { v: 'klant_geworden',  l: 'Klant geworden' },
     { v: 'geen_interesse',  l: 'Geen interesse' },
     { v: 'nog_onbekend',    l: 'Nog onbekend' },
   ];
+  // Elke uitkomst dwingt een vervolgstap af, behalve 'nog onbekend' — die
+  // betekent letterlijk dat je het nog niet weet, en dan is doorvragen
+  // zinloos. 'klant_geworden' sluit af zonder belactie.
+  //
+  // De elf bezwaren komen uit de gedeelde laag; de Follow-up-module gebruikt
+  // dezelfde lijst bij het afronden van een belgesprek. Twee lijsten zouden
+  // twee rapportages opleveren die niet op te tellen zijn.
+  const BEZWAREN = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.BEZWAREN) || [];
+  // Standaard-belmoment voor wie nog moet beslissen: over twee dagen. Kort
+  // genoeg dat het gesprek nog vers is, lang genoeg om er echt over na te
+  // denken.
+  const BESLIS_BELMOMENT_DAGEN = 2;
   // STAP 1 — wie er NIET was krijgt dezelfde motor als de rest.
   // Bij een no-show of een afmelding weet je op het moment van afronden vaak
   // precies wat er speelde, en tot nu toe kon je dat nergens kwijt. Deze
@@ -1054,6 +1072,11 @@
     if (!_ui.completeForm) return;
     _ui.completeForm.attendees[attId] = _ui.completeForm.attendees[attId] || {};
     _ui.completeForm.attendees[attId][field] = val;
+    if (field === 'outcome_reason') {
+      // Geen invoerveld maar een keuzelijst, dus hertekenen kost geen cursor.
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
     if (field === 'attendance_status' || field === 'outcome') {
       // Reset gerelateerde velden bij status-wissel
       if (field === 'attendance_status' && val !== 'aanwezig') {
@@ -1064,7 +1087,18 @@
         _ui.completeForm.attendees[attId].followup = null;
       }
       if (field === 'outcome' && (val === 'opvolgen' || val === 'twijfelt_nog')) {
-        _ui.completeForm.attendees[attId].followup = _ui.completeForm.attendees[attId].followup || { reason:'', follow_up_date:'' };
+        // Belmoment meteen voorstellen; notitie blijft leeg want die moet de
+        // gebruiker echt zelf schrijven.
+        _ui.completeForm.attendees[attId].followup = _ui.completeForm.attendees[attId].followup || {
+          reason: '',
+          follow_up_date: _evDatumOverDagen(BESLIS_BELMOMENT_DAGEN),
+        };
+      }
+      // Het bezwaar hoort alleen bij "geen interesse". Wisselt de uitkomst,
+      // dan gaat het weg — anders blijft er een reden hangen bij een
+      // uitkomst waar hij niets betekent.
+      if (field === 'outcome' && val !== 'geen_interesse') {
+        _ui.completeForm.attendees[attId].outcome_reason = '';
       }
       // Afwezig-blok klaarzetten of opruimen bij een statuswissel. Het
       // belmoment krijgt meteen een voorstel; de reden blijft leeg, want die
@@ -1239,6 +1273,7 @@
     const showFu = oc === 'opvolgen' || oc === 'twijfelt_nog';
     const afw = cur.afwezig || {};
     const showAfw = st === 'no_show' || st === 'afgemeld';
+    const showBez = st === 'aanwezig' && oc === 'geen_interesse';
     const hasDeal = !!a.deal_id;
     const stColor = COMPLETE_ATT_STATUS.find((x) => x.v === st)?.c || 'neutral';
     return `<div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
@@ -1257,6 +1292,7 @@
         </select>` : ''}
       </div>
       ${showFu ? _completeFollowupBlock(a.id, fu) : ''}
+      ${showBez ? _completeBezwaarBlock(a.id, cur.outcome_reason || '') : ''}
       ${showAfw ? _completeAfwezigBlock(a.id, afw, st) : ''}
     </div>`;
   }
@@ -1265,6 +1301,21 @@
   // vrije notitie en een belmoment. Pas als er een reden én een belmoment
   // staat ontstaat er een follow-up — half invullen levert niets op, en dat
   // staat er ook bij.
+  // "Geen interesse" was een doodlopende uitkomst: je klikte hem aan en er
+  // bleef niets over om op te sturen. Nu is een reden verplicht, uit de elf
+  // bezwaren die de Follow-up-module al kent. Daarmee wordt een nee een
+  // gekwalificeerde nee — afhaken op prijs, op timing of omdat iemand eerst
+  // moet overleggen zijn drie verschillende problemen.
+  function _completeBezwaarBlock(attId, gekozen) {
+    return `<div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11.5px;color:var(--text-3)">Reden <b>(verplicht)</b>:</span>
+      <select onchange="window.__evCompleteAttSet('${esc(attId)}','outcome_reason',this.value)" style="padding:5px 8px;border:1px solid ${gekozen ? 'var(--border)' : 'var(--amber-line)'};border-radius:6px;background:var(--surface);font-size:12px;min-width:220px">
+        <option value="">— kies een reden —</option>
+        ${BEZWAREN.map((b) => `<option value="${esc(b)}" ${gekozen === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}
+      </select>
+      ${gekozen ? '' : '<span style="font-size:11.5px;color:var(--text-3)">Zonder reden kun je het event niet afronden.</span>'}
+    </div>`;
+  }
   function _completeAfwezigBlock(attId, afw, st) {
     const gekozen = String(afw.reason_code || '');
     const compleet = !!gekozen && !!afw.follow_up_date;
@@ -1287,7 +1338,7 @@
   }
   function _completeFollowupBlock(attId, fu) {
     return `<div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;display:flex;flex-direction:column;gap:8px">
-      <div style="font-size:11.5px;color:var(--amber);font-weight:500">Follow-up plannen (verplicht bij opvolgen / twijfelt nog):</div>
+      <div style="font-size:11.5px;color:var(--amber);font-weight:500">Follow-up plannen — notitie en belmoment zijn allebei verplicht:</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <span style="font-size:11.5px;color:var(--text-3)">Termijn:</span>
         <button class="chip" style="padding:4px 9px;font-size:11.5px" onclick="window.__evCompleteFuPreset('${esc(attId)}',7)">+1 week</button>
@@ -1344,6 +1395,10 @@
       .map(([attId, v]) => {
         const row = { attendee_id: attId, attendance_status: v.attendance_status };
         if (v.attendance_status === 'aanwezig' && v.outcome) row.outcome = v.outcome;
+        // Het bezwaar hoort alleen bij "geen interesse".
+        if (v.attendance_status === 'aanwezig' && v.outcome === 'geen_interesse' && v.outcome_reason) {
+          row.outcome_reason = v.outcome_reason;
+        }
         if ((v.outcome === 'opvolgen' || v.outcome === 'twijfelt_nog') && v.followup) {
           const fu = {};
           if (v.followup.reason)         fu.reason = v.followup.reason;
@@ -1362,10 +1417,22 @@
         }
         return row;
       });
-    // Validate: opvolgen/twijfelt_nog vereist reason (server valideert ook)
+    // Elke uitkomst dwingt een vervolgstap af. De server controleert dit ook,
+    // maar hier krijg je het te zien vóór je op afronden drukt in plaats van
+    // erna. 'nog_onbekend' en 'klant_geworden' vragen bewust niets.
     for (const a of attendees) {
-      if ((a.outcome === 'opvolgen' || a.outcome === 'twijfelt_nog') && !a.followup?.reason) {
-        alert('Follow-up-notitie ontbreekt voor minstens één deelnemer met outcome "' + a.outcome + '".');
+      if (a.outcome === 'opvolgen' || a.outcome === 'twijfelt_nog') {
+        if (!a.followup?.reason) {
+          alert('Er staat "Wil nog beslissen" bij een deelnemer zonder notitie.\n\nSchrijf kort op wat er speelt, anders weet de volgende beller niet waarom hij belt.');
+          return;
+        }
+        if (!a.followup?.follow_up_date) {
+          alert('Er staat "Wil nog beslissen" bij een deelnemer zonder belmoment.\n\nZonder datum komt hij op niemands lijst terecht.');
+          return;
+        }
+      }
+      if (a.outcome === 'geen_interesse' && !a.outcome_reason) {
+        alert('Er staat "Geen interesse" bij een deelnemer zonder reden.\n\nKies een reden uit de lijst — anders weet je straks wel hoevéél mensen afhaken, maar niet waarom.');
         return;
       }
     }

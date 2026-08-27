@@ -561,6 +561,26 @@
     ev.preventDefault();
   }, true);
 
+  // ─── DE ELF BEZWAREN — één lijst voor het hele CRM ─────────────────────
+  //
+  // Deze lijst zat in followup-v2.js en werd daar gebruikt bij het afronden
+  // van een belgesprek. Sinds stap 2 vraagt ook het afrondscherm van een event
+  // ernaar, zodra iemand "Geen interesse" kiest. Twee lijsten die uit elkaar
+  // lopen leveren twee rapportages op die niet op te tellen zijn, dus staat
+  // hij vanaf nu hier en leest followup-v2.js hem hiervandaan.
+  //
+  // De serverkant heeft zijn eigen kopie in api/_lib/bezwaren.js — een
+  // klassiek script en een ES-module kunnen geen bestand delen. Die twee
+  // worden gelijk gehouden door tests/bezwaren-lijst-gelijk.test.js, die dit
+  // bestand als tekst leest en rood wordt zodra ze afwijken.
+  //
+  // Volgorde is betekenisvol: zo staan ze op het scherm.
+  const BEZWAREN = [
+    'Te duur', 'Geen tijd', 'Moet overleggen', 'Al bij andere partij',
+    'Wil eerst resultaten zien', 'Twijfelt over online', 'Geen vertrouwen',
+    'Wil eerst zelf proberen', 'Slecht moment', 'Geen budget nu', 'Anders',
+  ];
+
   window.KV_V2 = window.KV_V2 || {};
   window.KV_V2.helpers = {
     kpi, kpis, toolbar, chips, search, table, av, pill, trend, voorbeeldBanner,
@@ -575,6 +595,9 @@
     joostFetchDefaults, joostBuildFullBody, joostSafeUpsert,
     // Ronde 18: chat-media + emoji-picker.
     renderChatBody, emojiPickerButtonHtml,
+    // De elf bezwaren — gedeeld door de Follow-up-module en het afrondscherm
+    // van een event. Zie het blok hierboven.
+    BEZWAREN,
     // Vensters sluiten alleen op verzoek: een view meldt hier zijn eigen
     // "is er iets ingevuld"-test aan voor invoer die niet via een invoerveld
     // loopt (knoppen, chips). Zie het blok hierboven.

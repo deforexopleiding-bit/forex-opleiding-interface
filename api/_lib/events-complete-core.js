@@ -16,6 +16,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { computeDealTotals } from './deal-total.js';
 import { createNotification } from './notify.js';
+import { BEZWAREN, isBezwaar } from './bezwaren.js';
 
 const UUID_RE     = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ATT_SET     = new Set(['aanwezig', 'no_show', 'afgemeld']);
@@ -38,6 +39,16 @@ const REASON_REQUIRED_OUTCOMES = new Set(['opvolgen', 'twijfelt_nog']);
 // er speelde. Nu lopen ze door exact dezelfde weg als 'opvolgen' — dezelfde
 // event_followups-rij, dezelfde follow_up_leads-rij, dezelfde belcadans.
 // Geen tweede pad.
+// STAP 2 — elke uitkomst dwingt een vervolgstap af.
+// 'geen_interesse' vraagt een reden uit de elf bezwaren (zie ./bezwaren.js);
+// 'opvolgen'/'twijfelt_nog' vragen notitie én belmoment; 'klant_geworden'
+// sluit af zonder belactie; 'nog_onbekend' vraagt bewust niets, want dat
+// betekent letterlijk dat je het nog niet weet.
+const REDEN_VERPLICHT_OUTCOMES = new Set(['geen_interesse']);
+// Kolom uit docs/sql-migrations/2026-08-27-event-attendees-outcome-reason.sql.
+// Nog niet gedraaid, dus de schrijfactie valt terug als hij ontbreekt.
+const NIEUWE_ATTENDEE_KOLOMMEN = ['outcome_reason'];
+
 const AFWEZIG_STATUSSEN = new Set(['no_show', 'afgemeld']);
 // Aanklikbare redenen bij een afwezige. Bewust een vaste lijst: vrije tekst
 // valt niet te tellen. De vrije notitie staat er los naast.
@@ -103,6 +114,37 @@ export async function runEventsCompleteCore({ userId, body }) {
       }
       if (a.attendance_status !== 'aanwezig') {
         return { statusCode: 400, response: { error: `outcome alleen toegestaan bij attendance_status='aanwezig' (${a.attendee_id})` } };
+      }
+    }
+    // Reden bij 'geen interesse'.
+    //
+    // WAAROM DIT HIER NIET VERPLICHT IS, EN OP HET SCHERM WEL.
+    // Deze core wordt door drie kanten aangeroepen: het afrondscherm in
+    // events-v2.js (waar de reden vanaf stap 2 verplicht is), het OUDERE
+    // afrondscherm in modules/events-detail.html, en de terugwerkende import
+    // in api/admin/historical-event-commit.js.
+    //   · De import stuurt helemaal geen outcome mee — die raakt dit nooit.
+    //   · Het oude scherm biedt 'geen_interesse' wél aan (regel 2317) maar
+    //     kent geen reden, en dat scherm mag ik niet aanpassen.
+    // Zou de reden hier verplicht zijn, dan kan niemand op dat oude scherm
+    // een event nog afronden. Daarom: wat binnenkomt wordt streng
+    // gecontroleerd, maar het mág ontbreken. De harde eis staat in het scherm
+    // dat mensen echt gebruiken.
+    //
+    // Verdwijnt dat oude scherm ooit, dan is dit één regel strenger maken —
+    // vervang de check hieronder door `if (!isBezwaar(a.outcome_reason))`.
+    if (a.outcome_reason != null && String(a.outcome_reason).trim() !== '') {
+      if (!REDEN_VERPLICHT_OUTCOMES.has(String(a.outcome || ''))) {
+        return { statusCode: 400, response: {
+          error: `outcome_reason hoort alleen bij outcome 'geen_interesse' (${a.attendee_id})`,
+        } };
+      }
+      if (!isBezwaar(a.outcome_reason)) {
+        return { statusCode: 400, response: {
+          error: `outcome_reason ongeldig (${a.attendee_id}) — kies er één uit de vaste lijst`,
+          code: 'REDEN_ONGELDIG',
+          toegestaan: BEZWAREN,
+        } };
       }
     }
     if (a.followup != null) {
@@ -223,36 +265,47 @@ export async function runEventsCompleteCore({ userId, body }) {
       const rich = { ...upd };
       if (a.attendance_status === 'aanwezig') rich.attended_at       = nowIsoAtt;
       if (a.attendance_status === 'no_show')  rich.no_show_marked_at = nowIsoAtt;
-      const { error: aErr } = await supabaseAdmin
+      // De reden bij "geen interesse". Eigen trede in de ladder hieronder:
+      // ontbreekt alleen deze kolom, dan willen we de tijdstempels NIET ook
+      // kwijtraken.
+      const metReden = { ...rich };
+      if (a.attendance_status === 'aanwezig'
+          && REDEN_VERPLICHT_OUTCOMES.has(String(a.outcome || ''))
+          && isBezwaar(a.outcome_reason)) {
+        metReden.outcome_reason = a.outcome_reason;
+      } else {
+        // Wisselt iemand van 'geen interesse' naar iets anders bij een
+        // her-afronding, dan moet de oude reden weg.
+        metReden.outcome_reason = null;
+      }
+
+      const schrijf = (payload) => supabaseAdmin
         .from('event_attendees')
-        .update(rich)
+        .update(payload)
         .eq('id', a.attendee_id)
         .eq('event_id', eventId)
         // Beveiliging: sla verplaatste attendees over (mocht die per ongeluk
         // toch in de payload zitten). Hun status='switched_to_other_event'
         // is een aparte lifecycle-toestand.
         .neq('status', 'switched_to_other_event');
-      if (aErr && (aErr.code === '42703' || aErr.code === 'PGRST204')) {
-        // Timestamp-kolom(men) ontbreken → retry zonder.
-        const { error: aErr2 } = await supabaseAdmin
-          .from('event_attendees')
-          .update(upd)
-          .eq('id', a.attendee_id)
-          .eq('event_id', eventId)
-          .neq('status', 'switched_to_other_event');
-        if (aErr2) {
-          console.error('[events-complete-core] attendee update fallback', a.attendee_id, aErr2.message);
-          summary.warnings.push(`attendee ${a.attendee_id}: ${aErr2.message}`);
-          continue;
-        }
-        summary.attendees_updated += 1;
-        continue;
+
+      // Van rijk naar kaal: eerst mét reden, dan zonder reden maar mét
+      // tijdstempels, dan alleen het strikt noodzakelijke. Elke trede lager
+      // kost informatie, dus we zakken pas als de database het afdwingt.
+      const treden = [metReden, rich, upd];
+      let aErr = null;
+      let gelukt = false;
+      for (const payload of treden) {
+        const { error } = await schrijf(payload);
+        if (!error) { gelukt = true; break; }
+        aErr = error;
+        if (error.code !== '42703' && error.code !== 'PGRST204') break;
       }
-      if (aErr) {
-        console.error('[events-complete-core] attendee update', a.attendee_id, aErr.message);
-        summary.warnings.push(`attendee ${a.attendee_id}: ${aErr.message}`);
-      } else {
+      if (gelukt) {
         summary.attendees_updated += 1;
+      } else {
+        console.error('[events-complete-core] attendee update', a.attendee_id, aErr?.message);
+        summary.warnings.push(`attendee ${a.attendee_id}: ${aErr?.message || 'onbekende fout'}`);
       }
     }
 
