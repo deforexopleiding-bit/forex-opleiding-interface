@@ -13,7 +13,8 @@
 //   ?kind=call|zoom|all                 (Sales-cockpit Fase 1)
 //   ?limit=<n>                          (default 500, max 1000)
 //
-// Response 200: { leads: [...], counts: { alle, open, vandaag, te_laat, snoozed },
+// Response 200: { leads: [...], counts: { alle, open, vandaag, te_laat, snoozed,
+//                                        laatste_kans, afgesloten_onbereikbaar },
 //                 allowed_statuses }
 // Response 501 bij ontbrekende tabel (42P01) — migratie nodig.
 
@@ -58,7 +59,11 @@ export default async function handler(req, res) {
 
   const q = req.query || {};
   const source = ['retention', 'event', 'all'].includes(q.source) ? q.source : 'all';
-  const view   = ['alle', 'vandaag', 'te_laat', 'open', 'snoozed'].includes(q.view) ? q.view : 'open';
+  // LET OP: 'komende_7' staat hier NIET in, terwijl de chip er in het scherm
+  // wel is. Die valt dus terug op 'open'. Dat is een bestaande fout die ik
+  // hier bewust niet meerepareer — buiten de opdracht, en apart gemeld.
+  const view   = ['alle', 'vandaag', 'te_laat', 'open', 'snoozed',
+                  'laatste_kans', 'afgesloten_onbereikbaar'].includes(q.view) ? q.view : 'open';
   const kind   = ['call', 'zoom', 'all'].includes(q.kind) ? q.kind : 'all';
   const statusCsv = typeof q.status === 'string' ? q.status.trim() : '';
   const statusFilter = statusCsv
@@ -99,6 +104,58 @@ export default async function handler(req, res) {
       return qq.or('snoozed_until.is.null,snoozed_until.lte.' + nowISO);
     };
 
+    // ── STILGEVALLEN EN AFGESLOTEN ────────────────────────────────────
+    //
+    // Twee emmers erbij, in hetzelfde patroon als de zes hierboven. Geen
+    // nieuwe lijst en geen nieuw scherm — alleen een filter en een telling.
+    //
+    // WAAROM ZE ER ZIJN
+    // De regel is "nooit stil kwijtraken, wel bewust afsluiten". Wie na vijf
+    // vergeefse pogingen dichtgaat verdwijnt uit Vandaag, uit Te laat en uit
+    // Open, en niemand ziet hem ooit terug. Dat is precies het kwijtraken dat
+    // niet mag. Deze twee maken het zichtbaar:
+    //   · laatste_kans  — wie tussen poging 4 en het afsluiten in hangt.
+    //                     Loopt vanzelf leeg: je belt ze en ze gaan ergens
+    //                     heen.
+    //   · afgesloten_onbereikbaar — wat er de laatste 30 dagen dichtging
+    //                     omdat niemand opnam. Ook die loopt vanzelf leeg;
+    //                     zonder venster zou het een berg worden die over een
+    //                     jaar 400 aanwijst en niets meer zegt.
+    //
+    // De tweede leunt op het notitielog, want lead_status zegt alleen
+    // 'verloren' en niet waaróm. Het alternatief — event-leads op
+    // 'niet_bereikbaar' laten staan — botst met bewust afsluiten: dat is geen
+    // afgesloten status en ze zouden in Open blijven meetellen.
+    const LAATSTE_KANS_VANAF = 4;
+    const AFGESLOTEN_VENSTER_DAGEN = 30;
+    const vensterIso = new Date(Date.now() - AFGESLOTEN_VENSTER_DAGEN * 86400000).toISOString();
+
+    // Lead-ids die in het venster zijn afgesloten met reden 'onbereikbaar'.
+    // Fail-soft: ontbreekt de tabel of de kolom, dan blijft de lijst leeg en
+    // toont de chip 0 in plaats van dat het endpoint omvalt.
+    let onbereikbaarIds = [];
+    let onbereikbaarAfgekapt = false;
+    try {
+      const { data: notes, error: notesErr } = await supabaseAdmin
+        .from('follow_up_lead_notes')
+        .select('lead_id')
+        .eq('outcome_code', 'onbereikbaar')
+        .gte('created_at', vensterIso)
+        .order('created_at', { ascending: false })
+        .limit(1001);
+      if (!notesErr && Array.isArray(notes)) {
+        onbereikbaarAfgekapt = notes.length > 1000;
+        onbereikbaarIds = [...new Set(notes.slice(0, 1000).map((n) => n && n.lead_id).filter(Boolean))];
+      } else if (notesErr) {
+        console.warn('[follow-up-leads-list] onbereikbaar-notes:', notesErr.message);
+      }
+    } catch (e) {
+      console.warn('[follow-up-leads-list] onbereikbaar-notes:', e?.message || e);
+    }
+    if (onbereikbaarAfgekapt) {
+      console.warn('[follow-up-leads-list] meer dan 1000 onbereikbaar-notities in het venster; de chip telt de 1000 recentste.');
+    }
+
     const applyFilters = (qq) => {
       if (source !== 'all') qq = qq.eq('source', source);
       if (kind === 'call') qq = qq.or('lead_kind.is.null,lead_kind.eq.call');
@@ -111,6 +168,15 @@ export default async function handler(req, res) {
         qq = qq.lt('terugbel_datum', nowISO).not('lead_status', 'in', '(verlengd,verloren)');
       } else if (view === 'open') {
         qq = qq.not('lead_status', 'in', '(verlengd,verloren)');
+      } else if (view === 'laatste_kans') {
+        qq = qq.gte('attempts', LAATSTE_KANS_VANAF).not('lead_status', 'in', '(verlengd,verloren)');
+      } else if (view === 'afgesloten_onbereikbaar') {
+        // Lege lijst → een filter dat gegarandeerd niets teruggeeft, in
+        // plaats van .in() met een lege array (dat is in PostgREST een
+        // syntaxfout).
+        qq = onbereikbaarIds.length
+          ? qq.in('id', onbereikbaarIds).eq('lead_status', 'verloren')
+          : qq.eq('id', '00000000-0000-0000-0000-000000000000');
       }
       // Worklist-cap: bij ?worklist=1 verbergen we leads die > +7d in
       // de toekomst plannen (die horen niet in de 7-daagse werklijst).
@@ -218,6 +284,8 @@ export default async function handler(req, res) {
       { count: cTeLaat },
       { count: cSnoozed },
       { count: cKomende7 },
+      { count: cLaatsteKans },
+      { count: cAfgeslotenOnbereikbaar },
     ] = await Promise.all([
       countBase(),
       countBase().not('lead_status', 'in', '(verlengd,verloren)').or(orNotSnoozed),
@@ -237,6 +305,19 @@ export default async function handler(req, res) {
             .not('lead_status', 'in', '(verlengd,verloren)')
             .or(orNotSnoozed)
         : Promise.resolve({ count: null }),
+      // Laatste kans: nog één belpoging te gaan. `attempts` hoort bij de
+      // kolommen waarvan niet zeker is dat ze bestaan (er is geen migratie
+      // van deze tabel in de repo), dus bij een fout telt de chip 0 in plaats
+      // van dat de hele lijst omvalt.
+      countBase()
+        .gte('attempts', LAATSTE_KANS_VANAF)
+        .not('lead_status', 'in', '(verlengd,verloren)')
+        .or(orNotSnoozed)
+        .then((r) => (r.error ? { count: 0 } : r), () => ({ count: 0 })),
+      onbereikbaarIds.length
+        ? countBase().in('id', onbereikbaarIds).eq('lead_status', 'verloren')
+            .then((r) => (r.error ? { count: 0 } : r), () => ({ count: 0 }))
+        : Promise.resolve({ count: 0 }),
     ]);
 
     // ── Worklist-modus (?worklist=1) ────────────────────────────────
@@ -316,6 +397,8 @@ export default async function handler(req, res) {
         te_laat       : cTeLaat || 0,
         snoozed       : cSnoozed || 0,
         komende_7     : cKomende7 || 0,
+        laatste_kans            : cLaatsteKans || 0,
+        afgesloten_onbereikbaar : cAfgeslotenOnbereikbaar || 0,
         appointments  : apptItems.length,
         reschedule    : reschedule.length,
       },

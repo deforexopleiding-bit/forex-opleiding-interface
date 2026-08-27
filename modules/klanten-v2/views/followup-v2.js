@@ -85,6 +85,12 @@
     { slug: 'open',       label: '📋 Alle open',    color: 'blue'  },
     { slug: 'komende_7',  label: '🗓 Komende 7 dagen', color: 'violet' },
     { slug: 'snoozed',    label: '💤 Snoozed',      color: 'slate' },
+    // Nooit stil kwijtraken, wel bewust afsluiten. Deze twee maken zichtbaar
+    // wat anders uit alle andere emmers valt: wie er nog één belpoging in
+    // heeft, en wat er de laatste 30 dagen dichtging omdat niemand opnam.
+    // Allebei lopen ze vanzelf leeg — geen groeiende berg.
+    { slug: 'laatste_kans',            label: '🎯 Laatste kans',   color: 'amber' },
+    { slug: 'afgesloten_onbereikbaar', label: '📪 Niet bereikt (30d)', color: 'slate' },
     { slug: 'alle',       label: 'Alles',           color: 'neutral' },
   ];
   const STATUS_META = {
