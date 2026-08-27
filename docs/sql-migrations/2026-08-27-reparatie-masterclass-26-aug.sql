@@ -2,7 +2,9 @@
 --  REPARATIE — masterclass van 26 augustus 2026
 --  event 6a848f55-c782-4a3f-b46e-ccb11d10eabf
 --
---  VERSIE 3 — herschreven na stap 0b. Alleen Ioan en Lina.
+--  VERSIE 3 — DEFINITIEF. Alleen Ioan en Lina. Alle vragen beantwoord.
+--  Stap 0c is gedraaid en hoeft niet opnieuw; stap 1 t/m 4 kunnen achter
+--  elkaar.
 -- ============================================================================
 --  WAT ER IN VERSIE 2 NOG NIET KLOPTE
 --  ----------------------------------
@@ -45,7 +47,7 @@
 --  is. Er wordt niets verwijderd.
 --
 --  WAT ELKE STAP VERANDERT — in één regel per stap:
---    0c  niets (leesvraag: waarom verschilt Ioans rij van die van Lina?)
+--    0c  niets — al gedraaid en beantwoord, overslaan
 --    1   maakt twee event_followups-rijen aan, één voor Ioan en één voor Lina
 --    2   zet die twee leads op 'terugbellen' met een belmoment van morgen,
 --        vult herkomst/reden/notitie aan en bewaart de oude status
@@ -54,18 +56,25 @@
 -- ============================================================================
 
 
--- ── Stap 0c — LEESVRAAG, verandert niets ────────────────────────────────────
--- Bij Lina staat `event_date` in source_ref, bij Ioan niet, terwijl ze op
--- hetzelfde event stonden. Ik kan dat verschil niet verklaren: geen enkele
--- codepad in follow-up-lead-outcome.js verwijdert die sleutel — alle
--- schrijfacties daar voegen samen. Er is dus iets anders met Ioans rij
--- gebeurd, en ik wil weten wát voordat we schrijven.
+-- ── Stap 0c — AL GEDRAAID EN BEANTWOORD, overslaan ──────────────────────────
+-- De vraag was: waarom staat `event_date` wel in Lina's source_ref en niet in
+-- die van Ioan, terwijl ze op hetzelfde event stonden?
 --
--- Voor de reparatie zelf maakt het niet uit: stap 2 haalt `event_date` weg met
--- de `-` operator, en die doet niets als de sleutel er al niet is. Maar als er
--- een ander verschil onder zit, wil ik dat eerst zien.
+-- HET ANTWOORD (gemeten 27-08-2026): ze zijn op een andere manier ontstaan.
+--   · Ioan  — 17-08 om 13:57, door een MENS aangemaakt (created_by_user_id
+--             gevuld), met een kale source_ref: alleen event_id, attendee_id
+--             en is_event_followup. Hij is met de hand toegevoegd, een week
+--             vóór de belronde-cron hem zou oppakken. Vandaar geen event_date.
+--   · Lina  — 24-08 om 07:01, door de cron (created_by_user_id NULL), met
+--             reason 'auto_belronde_2d', event_date en event_title erbij.
+-- Allebei voor het laatst bijgewerkt op 24-08 in de namiddag, toen ze
+-- bevestigden dat ze zouden komen.
 --
--- Stuur de uitvoer van deze query door voor je stap 1 draait.
+-- Er is dus niets vreemds met Ioans rij gebeurd; hij is simpelweg ouder en
+-- handmatig. Het verschil raakt de reparatie niet: stap 2 gebruikt de `-`
+-- operator op `event_date` en die doet niets als de sleutel er al niet is.
+--
+-- De query hieronder staat er alleen nog als naslag. Overslaan.
 select l.lead_name,
        l.source,
        l.lead_kind,
