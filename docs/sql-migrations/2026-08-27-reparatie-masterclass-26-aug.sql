@@ -21,13 +21,19 @@
 --     zonder terugbel_datum. Het afronden zocht alleen naar OPEN rijen, vond
 --     niets, en liet de gesloten rij liggen.
 --
---  WAT IK NIET KAN HERSTELLEN
---  --------------------------
---  De notitie van Ioan en Lina is echt weg. Die is nooit de browser uit
+--  DE NOTITIE IS GERECONSTRUEERD, NIET HERSTELD
+--  -------------------------------------------
+--  De originele notitie van 26 augustus is weg. Die is nooit de browser uit
 --  gekomen — er is geen kolom, geen log en geen back-up waar hij in staat.
---  Stap 2 zet daarom een regel in hun notitielog die zegt DAT er een notitie
---  was en dat die verloren ging, zodat de beller niet denkt dat er niets over
---  hen bekend was. Weet Maxim nog wat er stond, dan kan het er alsnog bij.
+--  Wat er nu bij Ioan en Lina komt te staan is wat Maxim zich op 27 augustus
+--  herinnerde: "warme lead die niet kwam opdagen, gratis lead voor volgend
+--  event".
+--
+--  Dat verschil blijft zichtbaar, en dat is met opzet. De tekst zegt er zelf
+--  bij dat hij achteraf is gereconstrueerd, en in source_ref staat het ook
+--  als los veld (notitie_herkomst = 'gereconstrueerd'). Een herinnering van
+--  een dag later is iets anders dan wat er op de avond zelf is opgeschreven,
+--  en wie dit over een half jaar terugleest hoort dat te kunnen zien.
 --
 --  WAAROM OP NAAM EN NIET OP ID
 --  ----------------------------
@@ -85,10 +91,10 @@ where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
   );
 
 
--- ── Stap 2 — Ioan en Lina: de belrij, met eerlijke notitie ──────────────────
+-- ── Stap 2 — Ioan en Lina: de belrij, met gereconstrueerde notitie ──────────
 -- Maakt per persoon één follow_up_leads-rij die morgen op de Werklijst staat.
--- De notitie zegt wat er werkelijk aan de hand is: er WAS een notitie, en die
--- is bij het afronden verloren gegaan.
+-- De notitie is de herinnering van Maxim van 27 augustus, en zegt dat er ook
+-- zelf bij — de originele tekst van 26 augustus is niet te achterhalen.
 insert into public.follow_up_leads
   (customer_id, source, lead_name, lead_email, lead_phone, lead_status,
    terugbel_datum, source_ref, created_at, updated_at)
@@ -106,7 +112,10 @@ select a.customer_id,
          'is_event_followup', true,
          'event_uitkomst',    'no_show',
          'reason_code',       'onbekend',
-         'reason',            'Er is op 26 augustus een notitie bij deze deelnemer getypt, maar die is bij het afronden verloren gegaan (zie reparatie 27-08). De inhoud is niet te achterhalen — vraag het na bij wie het event afrondde.',
+         'reason',            'Warme lead die niet kwam opdagen, gratis lead voor volgend event. — Achteraf gereconstrueerd door Maxim op 27-08-2026; de originele notitie van 26-08 ging verloren bij het afronden.',
+         'notitie_herkomst',  'gereconstrueerd',
+         'gereconstrueerd_op','2026-08-27',
+         'gereconstrueerd_door','Maxim',
          'hersteld_op',       now()
        ),
        now(),
@@ -141,7 +150,7 @@ where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
 -- een verloren lead ineens weer op de lijst staat.
 insert into public.follow_up_lead_notes (lead_id, note, created_at)
 select l.id,
-       'Handmatig hersteld op 27-08-2026 na het afronden van de masterclass van 26 augustus. Zie docs/sql-migrations/2026-08-27-reparatie-masterclass-26-aug.sql.',
+       'Handmatig hersteld op 27-08-2026 na het afronden van de masterclass van 26 augustus. De notitie bij deze lead is een reconstructie van Maxim, niet de originele tekst van 26-08 — die ging verloren. Zie docs/sql-migrations/2026-08-27-reparatie-masterclass-26-aug.sql.',
        now()
 from public.follow_up_leads l
 join public.event_attendees a
@@ -163,6 +172,7 @@ where a.event_id = '6a848f55-c782-4a3f-b46e-ccb11d10eabf'
 select l.lead_name, l.lead_status, l.terugbel_datum, l.attempts,
        l.source_ref->>'event_uitkomst' as herkomst,
        l.source_ref->>'reason_code'    as reden,
+       l.source_ref->>'notitie_herkomst' as notitie_herkomst,
        left(coalesce(l.source_ref->>'reason', ''), 60) as notitie_begin
 from public.follow_up_leads l
 join public.event_attendees a
