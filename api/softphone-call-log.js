@@ -25,10 +25,26 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const E164_RE = /^\+[1-9]\d{7,14}$/;
 const LINES = new Set(['nl','be']);
 const OUTCOMES = new Set(['answered','no_answer','busy','failed','local_cancel']);
 const MAX_META_BYTES = 2000;
+
+// Bel-log accepteert elke telefoon-notatie die de SIP-flow accepteerde.
+// Normaliseer met line-context; best-effort. Onparseerbaar → return raw
+// zodat de rij toch geschreven wordt. Geen exception, geen 400: dit is
+// een LOG, geen SEND — data-verlies is erger dan een minder-net formaat.
+function _normalizeToE164(raw, line) {
+  if (!raw) return null;
+  const s = String(raw).trim().replace(/\s+/g, '').replace(/[-()]/g, '');
+  if (!s) return null;
+  if (s.startsWith('+'))  return s;                        // al E.164
+  if (s.startsWith('00')) return '+' + s.slice(2);         // 00-prefix
+  if (s.startsWith('0')) {
+    if (line === 'nl') return '+31' + s.slice(1);
+    if (line === 'be') return '+32' + s.slice(1);
+  }
+  return s;   // short-code / extension / onbekend → raw, geen 400
+}
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
@@ -43,16 +59,26 @@ export default async function handler(req, res) {
   if (rl.limited) return res.status(429).json({ error: 'Rate limited' });
 
   const body = req.body || {};
-  const to_number = String(body.to_number || '').trim();
-  if (!E164_RE.test(to_number)) return res.status(400).json({ error: 'to_number moet E.164 zijn (+31...)' });
+
+  // Line eerst — _normalizeToE164 heeft 'em nodig voor 0-prefix mapping.
   const line = String(body.line || '').trim().toLowerCase();
   if (!LINES.has(line)) return res.status(400).json({ error: "line moet 'nl' of 'be' zijn" });
+
+  const rawTo = String(body.to_number || '').trim();
+  if (!rawTo) return res.status(400).json({ error: 'to_number vereist' });
+  const to_number = _normalizeToE164(rawTo, line);
+  if (!to_number) return res.status(400).json({ error: 'to_number kon niet worden geparsed' });
+  if (!to_number.startsWith('+')) {
+    console.warn('[softphone-call-log] to_number niet-E.164 na normalisatie, opgeslagen als raw:', to_number.slice(0, 20));
+  }
+
+  const rawFrom = body.from_number ? String(body.from_number).trim() : null;
+  const from_number = rawFrom ? _normalizeToE164(rawFrom, line) : null;
+
   const started_at = body.started_at ? new Date(body.started_at) : null;
   if (!started_at || isNaN(started_at.getTime())) return res.status(400).json({ error: 'started_at (ISO) vereist' });
   const ended_at = body.ended_at ? new Date(body.ended_at) : null;
   if (body.ended_at && (!ended_at || isNaN(ended_at.getTime()))) return res.status(400).json({ error: 'ended_at ongeldig' });
-  const from_number = body.from_number ? String(body.from_number).trim() : null;
-  if (from_number && !E164_RE.test(from_number)) return res.status(400).json({ error: 'from_number ongeldig' });
   const outcome_hint = body.outcome_hint ? String(body.outcome_hint).trim() : null;
   if (outcome_hint && !OUTCOMES.has(outcome_hint)) return res.status(400).json({ error: 'outcome_hint ongeldig' });
   const customer_id = body.customer_id ? String(body.customer_id).trim() : null;
