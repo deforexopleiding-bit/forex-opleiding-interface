@@ -1990,10 +1990,24 @@
     st.loading = true; st.error = null; st.lastKey = key;
     const seq = ++st._seq;
     if (window.DFO?.render) window.DFO.render();
-    const j = await tryFetch('bronnen', '/api/booking-sources-list?periode=' + encodeURIComponent(st.periode));
-    if (seq !== st._seq) return;
+    // v=17 (2026-08-27 regressie-fix): direct authedJson met echte error-
+    // details. tryFetch slikt de exception-message en toont een generiek
+    // "Kon bronnen niet laden" — onmogelijk om zonder Vercel-log de
+    // root-cause te vinden. Nu propageren we de HTTP-status + body-error
+    // + eventuele DB-code naar st.error zodat 'ie op scherm zichtbaar is.
+    try {
+      const j = await window.KV.authedJson('/api/booking-sources-list?periode=' + encodeURIComponent(st.periode));
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      const status = e?.status ? ' (HTTP ' + e.status + ')' : '';
+      const code   = e?.body?.code ? ' [' + e.body.code + ']' : '';
+      const detail = e?.body?.detail ? ' — ' + String(e.body.detail).slice(0, 200) : '';
+      st.error = 'Kon bronnen niet laden' + status + code + detail;
+      console.error('[ls-v2] bronnen fetch fail:', e?.status, e?.body || e?.message);
+    }
     st.loading = false; st.fetched = true;
-    if (!j) st.error = 'Kon bronnen niet laden'; else st.data = j;
     if (window.DFO?.render) window.DFO.render();
   }
   async function fetchOpstartsessies(force) {
