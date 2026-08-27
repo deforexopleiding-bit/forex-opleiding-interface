@@ -262,6 +262,15 @@ export default async function handler(req, res) {
                 .order('starts_at', { ascending: true }).limit(2),
       /*21 */ // Streak (helper doet 2 queries intern)
               computeSalesStreak({ supabaseAdmin, todayDayStart: dayStart }),
+      /*22 */ // Event-bellijst: attendees waarvoor vandaag een bel-uitkomst is
+              // geregistreerd (follow-up-lead-outcome.js schrijft call_status +
+              // call_status_at bij elke outcome-write, regel 856-867).
+              // Geen filter op event.status — draft-events krijgen geen attendees
+              // + geen "niet gebeld"-enum, dus elke non-null call_status = echte
+              // belactie. Historische data (event later gecancelled) telt terecht mee.
+              supabaseAdmin.from('event_attendees').select('id', { count: 'exact', head: true })
+                .not('call_status', 'is', null)
+                .gte('call_status_at', dayStartIso).lt('call_status_at', dayEndIso),
     ]);
 
     const pick = (i, fallback) => {
@@ -294,6 +303,7 @@ export default async function handler(req, res) {
     const monthSales         = pick(19, { total_incl_vat: null });
     const eventsRes          = pick(20, { data: [] });
     const streakVal          = pick(21, 0);
+    const eventCallsRes      = pick(22, { count: 0 });
 
     // ── Secundaire queries — safeAwait ────────────────────────────────────
     const callsBookedRes = await safeAwait(
@@ -554,6 +564,7 @@ export default async function handler(req, res) {
         streak:         streakVal,
       },
       events: eventsOut,
+      event_calls_today: eventCallsRes.count || 0,
       feed: feed.slice(0, 15),
     };
 

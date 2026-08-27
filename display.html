@@ -137,7 +137,7 @@
 
   .dave{border-color:rgba(182,130,12,.34);background:var(--dave-bg)}
   .dave > h3{color:var(--gold)}
-  .dave-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:14px 16px}
+  .dave-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:14px 16px}
   .dstat{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:12px;padding:12px 13px}
   .dstat .l{font-size:12px;color:var(--gold);font-weight:600}
   .dstat .v{font-family:"Bricolage Grotesque";font-weight:800;font-size:38px;margin-top:6px;line-height:1}
@@ -294,6 +294,7 @@
         <div class="dave-grid">
           <div class="dstat"><div class="l">Retentie gebeld</div><div class="num v" id="d-ret">0</div></div>
           <div class="dstat"><div class="l">Follow-ups gedraaid</div><div class="num v" id="d-fu">0</div></div>
+          <div class="dstat"><div class="l">Event-bellijst gebeld</div><div class="num v" id="d-events">0</div></div>
           <div class="dstat"><div class="l">Voicememo's verstuurd</div><div class="num v" id="d-vm">0</div></div>
         </div>
       </div>
@@ -381,7 +382,7 @@
   /* ---------- state ---------- */
   var state = {
     salesRev:0, salesCnt:0, leads:0, calls:0, one:0,
-    daveRet:0, daveFu:0, daveVm:0,
+    daveRet:0, daveFu:0, daveVm:0, eventCalls:0,
     weekAmt:0,  weekTarget:null,  weekPct:null,  weekPace:null,
     monthAmt:0, monthTarget:null, monthPct:null, monthPace:null,
     biggest:null, lastSaleMin:null, avgDeal:null, streak:0,
@@ -496,9 +497,10 @@
     countUp(el('v-leads'), prev ? prev.leads : state.leads, state.leads);
     countUp(el('v-calls'), prev ? prev.calls : state.calls, state.calls);
     countUp(el('v-one'),   prev ? prev.one   : state.one,   state.one);
-    if (el('d-ret')) el('d-ret').textContent = state.daveRet;
-    if (el('d-fu'))  el('d-fu').textContent  = state.daveFu;
-    if (el('d-vm'))  el('d-vm').textContent  = state.daveVm;
+    if (el('d-ret'))    el('d-ret').textContent    = state.daveRet;
+    if (el('d-fu'))     el('d-fu').textContent     = state.daveFu;
+    if (el('d-events')) el('d-events').textContent = state.eventCalls;
+    if (el('d-vm'))     el('d-vm').textContent     = state.daveVm;
   }
   function renderTargets(){
     setGauge('g-week',  'g-week-pct',  state.weekPct);
@@ -682,6 +684,7 @@
     state.leads    = d.leads.total || 0;
     state.calls    = d.calls.booked_today || 0;
     state.one      = d.one_on_one.count_today || 0;
+    state.eventCalls = d.event_calls_today ?? 0;
     state.daveRet  = d.dave.retentie_gebeld || 0;
     state.daveFu   = d.dave.follow_ups_gedraaid || 0;
     state.daveVm   = d.dave.voicememos_sent || 0;
