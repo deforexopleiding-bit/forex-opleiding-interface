@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     }
 
     // Helpers: fetch + approved-filter. rows is altijd een array.
-    const SELECT_COLS = 'name, language, category, body_text, meta_param_mapping, status, header_type, business_account_id';
+    const SELECT_COLS = 'id, meta_template_id, name, language, category, header_type, header_content, body_text, body_examples, footer_text, buttons, meta_param_mapping, status, business_account_id, approved_at, updated_at';
     async function fetchTemplates(filterBaId) {
       let qb = supabaseAdmin
         .from('whatsapp_meta_templates')
@@ -112,19 +112,33 @@ export default async function handler(req, res) {
       final_approved          : approvedRows.length,
     }));
 
+    // Marketing-template naar debiteuren = WABA-compliance-risico (Meta policy).
+    // UI toont rood-omkaderde waarschuwing; server doet SOFT-gate op de eigenlijke
+    // bulk-send-endpoint (409 zonder X-Confirm-Marketing header).
     const items = approvedRows.map((r) => ({
-      name              : r.name,
-      language          : r.language || null,
-      category          : r.category || null,
-      body_text         : r.body_text || null,
-      meta_param_mapping: r.meta_param_mapping || null,
-      status            : r.status,
-      header_type       : r.header_type || null,
+      id                 : r.id,
+      meta_template_id   : r.meta_template_id,
+      name               : r.name,
+      language           : r.language || null,
+      category           : r.category || null,
+      category_warning   : String(r.category || '').toUpperCase() === 'MARKETING'
+                            ? 'MARKETING_ON_DEBTOR'
+                            : null,
+      status             : r.status,
+      header_type        : r.header_type || null,
+      header_content     : r.header_content || null,
+      body_text          : r.body_text || null,
+      body_examples      : r.body_examples || null,
+      footer_text        : r.footer_text || null,
+      buttons            : r.buttons || null,
+      meta_param_mapping : r.meta_param_mapping || null,
+      approved_at        : r.approved_at || null,
+      updated_at         : r.updated_at || null,
     }));
 
     return res.status(200).json({ items });
   } catch (e) {
-    console.error('[wanbetalers-whatsapp-templates-list]', e.message);
-    return res.status(500).json({ error: e.message });
+    console.error('[wanbetalers-whatsapp-templates-list] exception:', e?.message || e);
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }

@@ -18,6 +18,10 @@
 //     conversation_id,                // uuid of null
 //     needs_attention,                // bool — engine-flag
 //     last_activity_at,
+//     last_wa_message_at,             // ISO — max(whatsapp_conversations.last_message_at)
+//                                     // per customer; BEIDE richtingen (inbound+outbound).
+//                                     // Test-conversations (is_test=true) uitgesloten.
+//                                     // null = nog nooit contact via WA.
 //     is_multi_invoice,               // helper voor 1/multi-tab-filter
 //   }
 //
@@ -150,6 +154,38 @@ export default async function handler(req, res) {
       if (!convByCust.has(c.customer_id)) convByCust.set(c.customer_id, c);
     }
 
+    // 5b) Laatste WhatsApp-contact per customer — BEIDE richtingen (in+out).
+    //     Bron: whatsapp_conversations.last_message_at (bij zowel inbound
+    //     (inbox-webhook) als outbound (inbox-send / inbox-webhook outbound)
+    //     bijgewerkt). Één query, geen N+1, geen top-N-truncatie: aggregeer
+    //     per customer_id over ALLE non-test conversations van deze klanten.
+    //     Test-conversations (is_test=true) uitgesloten zodat een test-thread
+    //     nooit als "laatste contact" in het dossier verschijnt (consistent
+    //     met is_test-filtering elders in de wanbetalers-flow).
+    const lastWaMap = new Map();  // customer_id → ISO string
+    if (custIds.length) {
+      const { data: waRows, error: waErr } = await supabaseAdmin
+        .from('whatsapp_conversations')
+        .select('customer_id, last_message_at')
+        .in('customer_id', custIds)
+        .eq('is_test', false)
+        .not('last_message_at', 'is', null);
+      if (waErr) {
+        console.warn('[wanbetalers-overzicht-list] last_wa lookup fail-soft:', waErr.message);
+      } else {
+        for (const c of (waRows || [])) {
+          // Numerieke vergelijking via Date.parse — robuust tegen
+          // formaat-varianten (tz-shift / microseconds) t.o.v. string-compare.
+          const cur = lastWaMap.get(c.customer_id);
+          const curMs = cur ? new Date(cur).getTime() : 0;
+          const newMs = new Date(c.last_message_at).getTime();
+          if (Number.isFinite(newMs) && newMs > curMs) {
+            lastWaMap.set(c.customer_id, c.last_message_at);
+          }
+        }
+      }
+    }
+
     // 6) Bouw response-items.
     let sumDaysOverdue = 0;
     let activeConversations = 0;
@@ -191,6 +227,7 @@ export default async function handler(req, res) {
         paused_at:                 run?.paused_at                 || null,
         has_active_conversation:  !!conv,
         conversation_id:          conv?.id || null,
+        last_wa_message_at:       lastWaMap.get(cid) || null,
         is_multi_invoice:         agg.openInvoices.length > 1,
         // "afgerond" in de sub-tab-zin = klant zit in terminal-stage
         // (opgelost/afschrijven) OF geen actieve/paused run. Wanbetalers
