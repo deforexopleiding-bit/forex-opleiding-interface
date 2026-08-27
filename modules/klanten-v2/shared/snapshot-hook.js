@@ -82,8 +82,8 @@
 
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.7));
       if (!blob) { console.warn('[snapshot-hook] toBlob returned null'); return; }
-      if (blob.size > 500 * 1024) {
-        console.warn('[snapshot-hook] blob > 500KB (' + blob.size + ') — skip');
+      if (blob.size > 900 * 1024) {
+        console.warn('[snapshot-hook] blob > 900KB (' + blob.size + ') — skip');
         return;
       }
       const ab  = await blob.arrayBuffer();

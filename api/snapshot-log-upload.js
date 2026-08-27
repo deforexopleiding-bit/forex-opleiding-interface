@@ -24,10 +24,10 @@ import { getClientIp } from './_lib/audit-customer.js';
 // Base64 blaast 1.33x op. 500KB webp → ~666KB base64 body.
 // Body-parser limiet omhoog naar 900KB (default Vercel = 1MB — net krap bij overhead).
 export const config = {
-  api: { bodyParser: { sizeLimit: '900kb' } },
+  api: { bodyParser: { sizeLimit: '1400kb' } },   // 900KB base64 × 1.33 + JSON overhead
 };
 
-const MAX_SIZE_BYTES  = 500 * 1024;
+const MAX_SIZE_BYTES  = 900 * 1024;   // client-cap in snapshot-hook.js identiek
 const MAX_ACTION_HINT = 100;
 const MAX_VIEW_URL    = 500;
 const MAX_VIEW_TITLE  = 200;

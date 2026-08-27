@@ -73,6 +73,11 @@ export default async function handler(req, res) {
     const wantAct   = streamsIn.includes('activity');
     const wantCall  = streamsIn.includes('call');
     const wantSnap  = streamsIn.includes('snapshot');
+    // Ruis-filter: default alleen echte writes op activity-stream. Toggle via
+    // include_views=true haalt page-views (GET → *.view / *.access) terug voor
+    // deep-dive. Method-filter is robuuster dan action-string-matching.
+    const includeViews = String(q.include_views || 'false').toLowerCase() === 'true';
+    const activityMethodFilter = includeViews ? null : ['POST', 'PUT', 'PATCH', 'DELETE'];
 
     if (from >= to) return res.status(400).json({ error: 'from >= to' });
 
@@ -92,6 +97,7 @@ export default async function handler(req, res) {
         .order('created_at', { ascending: false }).limit(perStreamLimit);
       if (user_id) activityQ = activityQ.eq('user_id', user_id);
       if (actOrClause) activityQ = activityQ.or(actOrClause);
+      if (activityMethodFilter) activityQ = activityQ.in('method', activityMethodFilter);
     }
 
     let callQ = null;
@@ -115,11 +121,12 @@ export default async function handler(req, res) {
     }
 
     // ── Totals (counts) — dezelfde filter-conditie als items ────────────
-    async function _countStream(table, tsCol, orClause) {
+    async function _countStream(table, tsCol, orClause, methodFilter) {
       let cq = supabaseAdmin.from(table).select('id', { count: 'exact', head: true })
         .gte(tsCol, fromIso).lt(tsCol, toIso);
       if (user_id) cq = cq.eq('user_id', user_id);
       if (orClause) cq = cq.or(orClause);
+      if (methodFilter) cq = cq.in('method', methodFilter);
       const { count } = await cq;
       return count || 0;
     }
@@ -128,9 +135,9 @@ export default async function handler(req, res) {
       activityQ ?? Promise.resolve({ data: [] }),
       callQ     ?? Promise.resolve({ data: [] }),
       snapshotQ ?? Promise.resolve({ data: [] }),
-      wantAct   ? _countStream('activity_log', 'created_at',  actOrClause) : 0,
-      wantCall  ? _countStream('call_log',     'started_at',  null)        : 0,   // MVP-limiet: geen DB-side q-filter op meta jsonb
-      wantSnap  ? _countStream('snapshot_log', 'captured_at', snapOrClause): 0,
+      wantAct   ? _countStream('activity_log', 'created_at',  actOrClause, activityMethodFilter) : 0,
+      wantCall  ? _countStream('call_log',     'started_at',  null,        null)                 : 0,
+      wantSnap  ? _countStream('snapshot_log', 'captured_at', snapOrClause, null)                : 0,
     ]);
 
     // ── Normalize items ─────────────────────────────────────────────────
@@ -177,6 +184,26 @@ export default async function handler(req, res) {
 
     // Sort desc op ts.
     items.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+
+    // ── Actor-name enrichment: batch profiles lookup ────────────────────
+    // Full_name uit profiles i.p.v. afgekapte email/uuid.
+    const uniqUserIds = [...new Set(items.map(i => i.user_id).filter(Boolean))];
+    const nameById = new Map();
+    if (uniqUserIds.length) {
+      try {
+        const { data: profs } = await supabaseAdmin
+          .from('profiles').select('id, full_name, email')
+          .in('id', uniqUserIds);
+        for (const p of (profs || [])) {
+          nameById.set(p.id, p.full_name || p.email || null);
+        }
+      } catch (e) {
+        console.warn('[logboek-stream-list] profiles lookup fail:', e?.message);
+      }
+    }
+    for (const it of items) {
+      it.actor_name = nameById.get(it.user_id) || it.user_email || null;
+    }
 
     // ── Correlation-pass: bundel snapshots ↔ activity ─────────────────
     const activityIndex = new Map();

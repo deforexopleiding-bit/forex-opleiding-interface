@@ -421,6 +421,7 @@
       streams: ['activity', 'call', 'snapshot'],
       user_id: null, q: '',
       from: null, to: null,
+      include_views: false,   // default: alleen echte writes; toggle om page-views te tonen
     },
     totals: { activity: 0, call: 0, snapshot: 0 },
     _qTimer: null,
@@ -445,6 +446,7 @@
     if (_tl.filter.q)       params.set('q', _tl.filter.q);
     if (_tl.filter.from)    params.set('from', _tl.filter.from);
     if (_tl.filter.to)      params.set('to', _tl.filter.to);
+    if (_tl.filter.include_views) params.set('include_views', 'true');
     const j = await tryFetch('logboek-stream', '/api/logboek-stream-list?' + params.toString(), 12000);
     _tl.loading = false;
     if (!j || j.__error || j.error) { _tl.error = j?.__error || j?.error || 'onbekend'; }
@@ -469,6 +471,10 @@
   window.__tlPage = (delta) => {
     _tl.page = Math.max(1, _tl.page + delta);
     _tl.data = null; _tlFetch();
+  };
+  window.__tlToggleViews = (checked) => {
+    _tl.filter.include_views = !!checked;
+    _tl.page = 1; _tl.data = null; _tlFetch();
   };
   window.__tlOpenSnapshot = (id) => {
     const item = asArr(_tl.data?.items).find(i => i.stream === 'snapshot' && i.id === id);
@@ -537,6 +543,10 @@
         + '<input type="search" placeholder="Zoek action / module / hint …" value="' + esc(_tl.filter.q) + '"'
           + ' oninput="window.__tlSetQ(this.value)"'
           + ' style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12.5px" />'
+        + '<label style="' + chipStyle(_tl.filter.include_views) + '" title="Toon ook page-views / GET-navigatie in de activity-stream">'
+          + '<input type="checkbox" ' + (_tl.filter.include_views ? 'checked' : '') + ' onchange="window.__tlToggleViews(this.checked)" />'
+          + '👁 Weergaven tonen'
+        + '</label>'
       + '</div>'
       + '<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)">'
       + (items.length === 0
@@ -579,7 +589,7 @@
          + '<div style="color:var(--text-3);font-family:monospace">' + esc(ts) + '</div>'
          + '<div style="text-align:center">' + icon + '</div>'
          + '<div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + core + '</div>'
-         + '<div style="color:var(--text-3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(it.user_email || it.user_id || '') + '</div>'
+         + '<div style="color:var(--text-3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(it.actor_name || it.user_email || it.user_id || '') + '</div>'
        + '</div>';
   }
 
