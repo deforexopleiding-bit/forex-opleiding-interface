@@ -86,7 +86,7 @@ export default async function handler(req, res) {
     const RICH_SELECT = `
       id, event_id, first_name, last_name, email, phone, status,
       attendance_status, outcome,
-      customer_id, deal_id, subscription_id,
+      customer_id, deal_id, subscription_id, bonus_excluded,
       ghl_contact_id, ghl_form_submission_id, assessment_response_id,
       switched_from_event_id, switched_to_event_id, switched_at,
       registered_at, attended_at, no_show_marked_at, sale_at,
@@ -94,6 +94,10 @@ export default async function handler(req, res) {
       source, automation_enabled,
       created_at, updated_at
     `;
+    // CORE_SELECT is de fallback zonder switched_to_event_id (én zonder
+    // bonus_excluded — laatste is toegevoegd in migratie 049; frontend
+    // behandelt undefined als false). Dit maakt de list-endpoint robuust
+    // op omgevingen waar 049 nog niet gedraaid is.
     const CORE_SELECT = `
       id, event_id, first_name, last_name, email, phone, status,
       attendance_status, outcome,

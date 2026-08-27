@@ -1,19 +1,22 @@
 // api/events-attendee-link-deal.js
 //
-// POST { attendee_id: uuid, deal_id: uuid }
+// POST { attendee_id: uuid, deal_id: uuid }    — koppelen
+// POST { attendee_id: uuid, unlink: true }      — ontkoppelen (v=2, 2026-08-27)
 //
-// Koppelt een deal aan een attendee zodat de mentor-bonus bij het
-// afronden (events-complete-core.js) via attendee.deal_id de juiste
-// deal vindt. Zet ook attendee.customer_id als die nog leeg is
-// (best-effort — kopieert deal.customer_id).
+// KOPPELEN: zet attendee.deal_id = deal_id + attendee.customer_id (als leeg)
+// = deal.customer_id + bonus_excluded=false zodat de bonus-motor 'em oppikt.
+//
+// ONTKOPPELEN: zet attendee.deal_id = NULL + attendee.bonus_excluded = TRUE.
+// customer_id blijft behouden. De bonus_excluded-vlag voorkomt dat de bonus-
+// motor via customer_id-fallback (events-complete-core.js sectie 7) alsnog
+// een bonus toekent op basis van "de meest recente accepted/signed deal van
+// deze klant". Ontkoppelen betekent: expliciete geen-bonus-intentie.
 //
 // Permission: events.attendee.edit (dezelfde als andere attendee-mutaties).
-// Idempotent: als attendee.deal_id al gelijk is aan het target, geen
-// no-op-response met success=true + already=true.
+// Idempotent: al gelijk → no-op response met success=true + already=true.
 //
-// Bonus-safety: raakt NIET mentor_ledger_entries. De bestaande afrond-
-// flow pikt attendee.deal_id op via events-complete-core regel 286-294
-// en gebruikt de idempotency-key ${event_id}:bonus:${att.id}:${m.user_id}
+// Bonus-safety: raakt NIET mentor_ledger_entries. De bestaande afrond-flow
+// respecteert de idempotency-key ${event_id}:bonus:${att.id}:${m.user_id}
 // zodat een herafronding geen dubbele bonus geeft.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
@@ -36,29 +39,56 @@ export default async function handler(req, res) {
 
   const body = (req.body && typeof req.body === 'object') ? req.body : {};
   const attendeeId = String(body.attendee_id || '').trim();
+  const isUnlink   = body.unlink === true;
   const dealId     = String(body.deal_id     || '').trim();
+
   if (!UUID_RE.test(attendeeId)) return res.status(400).json({ error: 'attendee_id (uuid) vereist' });
-  if (!UUID_RE.test(dealId))     return res.status(400).json({ error: 'deal_id (uuid) vereist' });
+  if (!isUnlink && !UUID_RE.test(dealId)) return res.status(400).json({ error: 'deal_id (uuid) vereist (of unlink=true)' });
 
   try {
-    // Verifieer bestaan van beide entiteiten.
-    const [attRes, dealRes] = await Promise.all([
-      supabaseAdmin.from('event_attendees').select('id, deal_id, customer_id, event_id').eq('id', attendeeId).maybeSingle(),
-      supabaseAdmin.from('deals').select('id, customer_id').eq('id', dealId).maybeSingle(),
-    ]);
-    if (attRes.error)  throw new Error('attendee fetch: ' + attRes.error.message);
-    if (dealRes.error) throw new Error('deal fetch: '     + dealRes.error.message);
-    const attendee = attRes.data;
-    const deal     = dealRes.data;
+    // Attendee altijd fetchen (zowel voor koppel als unlink).
+    const { data: attendee, error: attErr } = await supabaseAdmin
+      .from('event_attendees')
+      .select('id, deal_id, customer_id, event_id, bonus_excluded')
+      .eq('id', attendeeId).maybeSingle();
+    if (attErr) throw new Error('attendee fetch: ' + attErr.message);
     if (!attendee) return res.status(404).json({ error: 'Attendee niet gevonden' });
-    if (!deal)     return res.status(404).json({ error: 'Deal niet gevonden' });
 
-    // Idempotent no-op als de deal al gekoppeld is.
-    if (attendee.deal_id === dealId) {
+    // ── UNLINK-pad ──────────────────────────────────────────────────────
+    if (isUnlink) {
+      // Idempotent: al ontkoppeld + al uitgesloten → no-op.
+      if (attendee.deal_id === null && attendee.bonus_excluded === true) {
+        return res.status(200).json({ ok: true, already: true, attendee_id: attendeeId, deal_id: null, bonus_excluded: true });
+      }
+      const updates = { deal_id: null, bonus_excluded: true };
+      // customer_id BEWUST NIET aangeraakt — behoud voor rapportages.
+      const { error: upErr } = await supabaseAdmin
+        .from('event_attendees')
+        .update(updates)
+        .eq('id', attendeeId);
+      if (upErr) throw new Error('attendee unlink: ' + upErr.message);
+      return res.status(200).json({
+        ok: true, already: false, attendee_id: attendeeId,
+        deal_id: null, bonus_excluded: true,
+        customer_id: attendee.customer_id || null,
+      });
+    }
+
+    // ── LINK-pad ────────────────────────────────────────────────────────
+    // Deal alleen bij link-pad fetchen.
+    const { data: deal, error: dealErr } = await supabaseAdmin
+      .from('deals').select('id, customer_id').eq('id', dealId).maybeSingle();
+    if (dealErr) throw new Error('deal fetch: ' + dealErr.message);
+    if (!deal)   return res.status(404).json({ error: 'Deal niet gevonden' });
+
+    // Idempotent no-op als de deal al gekoppeld is EN bonus_excluded op false staat.
+    if (attendee.deal_id === dealId && attendee.bonus_excluded === false) {
       return res.status(200).json({ ok: true, already: true, attendee_id: attendeeId, deal_id: dealId });
     }
 
-    const updates = { deal_id: dealId };
+    // Bij (her)koppelen ALTIJD bonus_excluded resetten naar false — anders
+    // blijft een eerder ontkoppelde attendee uitgesloten zelfs na nieuwe koppel.
+    const updates = { deal_id: dealId, bonus_excluded: false };
     // customer_id niet overschrijven als 'ie al gezet is — de attendee's
     // eigen klant kan verschillen van de deal-eigenaar (broer-koopt-voor-zus).
     if (!attendee.customer_id && deal.customer_id) {
@@ -76,6 +106,7 @@ export default async function handler(req, res) {
       already    : false,
       attendee_id: attendeeId,
       deal_id    : dealId,
+      bonus_excluded: false,
       customer_id: updates.customer_id || attendee.customer_id || null,
     });
   } catch (e) {

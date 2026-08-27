@@ -1187,7 +1187,7 @@
     // achtergrond af, en sloopte zo het hele ingevulde formulier. Sluiten
     // gaat via het kruisje in de kop of Annuleren in de voet. De gedeelde
     // laag (_shared-v2.js) houdt dit ook tegen als het hier ooit terugkeert.
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto">
+    return `${_evCompleteDealSearchModalHtml()}<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto">
       <div style="background:var(--surface);border-radius:var(--r-lg);max-width:920px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:0" onclick="event.stopPropagation()">
         <div style="padding:16px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;position:sticky;top:0;background:var(--surface);z-index:2">
           <span class="tile-ico" style="background:var(--pink-soft);color:var(--pink)">${svg(I.tick)}</span>
@@ -1212,7 +1212,7 @@
               : `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
                   ${attList.map((a) => _completeAttendeeRow(a, form)).join('')}
                 </div>`}
-            <div style="font-size:11px;color:var(--text-3);margin-top:6px">Sales worden vóór afronding via ⋯-menu (Aanwezigen-tab → "Offerte aanmaken") aan een deelnemer gekoppeld. Bonus rekent daarna automatisch mee.</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:6px">Sale-koppeling gebeurt per deelnemer hierboven: "Koppel" bij een suggested-deal, of "Sale koppelen" om te zoeken. "Ontkoppel" sluit de bonus expliciet uit (voorkomt fallback op klant). Bonus rekent daarna automatisch mee.</div>
           </div>
 
           <!-- Sectie 2: Mentoren -->
@@ -1276,13 +1276,45 @@
     const showBez = st === 'aanwezig' && oc === 'geen_interesse';
     const hasDeal = !!a.deal_id;
     const stColor = COMPLETE_ATT_STATUS.find((x) => x.v === st)?.c || 'neutral';
+
+    // v=2026-08-27: v1-koppel-UI herbouwd. Drie states:
+    //   1) has_signed_deal → groene "Sale ✓ €{sale_total_incl}" pill (+ Ontkoppel)
+    //   2) suggested_deal.deal_id (zelfde klant match) → "💡 Mogelijke sale: €X" + Koppel-knop
+    //   3) Geen match → dashed "Sale koppelen"-knop (opent deal-search-modal)
+    // Ontkoppel-actie zet deal_id=NULL + bonus_excluded=true (migratie 049) zodat
+    // de bonus-motor NIET terugvalt op customer_id.
+    const fmtEur = (n) => (typeof n === 'number' && Number.isFinite(n)) ? '€' + n.toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '—';
+    let saleBlok = '';
+    if (a.has_signed_deal) {
+      const bedrag = fmtEur(Number(a.sale_total_incl || 0));
+      saleBlok = `<div style="display:flex;align-items:center;gap:6px">
+        <span style="background:var(--emerald-soft);color:var(--emerald);padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:600" title="Getekende deal — telt mee voor mentor-bonus">Sale ✓ ${esc(bedrag)}</span>
+        <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window.__evCompleteUnlinkDeal('${esc(a.id)}','${esc(a.event_id || '')}')" title="Ontkoppel de deal (bonus vervalt voor deze deelnemer)">Ontkoppel</button>
+      </div>`;
+    } else if (a.suggested_deal && a.suggested_deal.deal_id) {
+      const s = a.suggested_deal;
+      const bedrag = fmtEur(Number(s.total_incl || 0));
+      saleBlok = `<div style="display:flex;align-items:center;gap:6px">
+        <span style="background:var(--amber-soft);color:var(--amber);padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:600" title="Deal van dezelfde klant — 1-klik koppelen">💡 Mogelijke sale: ${esc(bedrag)}</span>
+        <button class="btn btn-primary" style="font-size:11px;padding:3px 10px" onclick="window.__evCompleteLinkDeal('${esc(a.id)}','${esc(s.deal_id)}','${esc(a.event_id || '')}')">Koppel</button>
+      </div>`;
+    } else if (a.bonus_excluded) {
+      saleBlok = `<div style="display:flex;align-items:center;gap:6px">
+        <span style="background:var(--surface-2);color:var(--text-3);padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:600" title="Bonus is expliciet uitgesloten voor deze deelnemer">Bonus uitgesloten</span>
+        <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;border-style:dashed" onclick="window.__evCompleteOpenDealSearch('${esc(a.id)}','${esc(a.event_id || '')}')">Sale koppelen</button>
+      </div>`;
+    } else {
+      saleBlok = `<button class="btn btn-secondary" style="font-size:11.5px;padding:4px 10px;border-style:dashed;color:var(--brand)" onclick="window.__evCompleteOpenDealSearch('${esc(a.id)}','${esc(a.event_id || '')}')" title="Zoek en koppel een deal aan deze deelnemer">Sale koppelen</button>`;
+    }
+
     return `<div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         ${H.av(naam, 26)}
         <div style="flex:1;min-width:150px">
           <div style="font-size:13px;font-weight:500">${esc(naam)}</div>
-          <div style="font-size:11px;color:var(--text-3)">${esc(a.email || '')}${hasDeal ? ' · ' + H.pill('accent', 'Sale gekoppeld', true) : ''}</div>
+          <div style="font-size:11px;color:var(--text-3)">${esc(a.email || '')}</div>
         </div>
+        ${saleBlok ? `<div>${saleBlok}</div>` : ''}
         <!-- Status-pills -->
         <div style="display:flex;gap:4px">
           ${COMPLETE_ATT_STATUS.map((o) => `<button class="chip ${st === o.v ? 'on' : ''}" style="padding:5px 10px;font-size:11.5px${st === o.v ? ';background:var(--' + o.c + '-soft);color:var(--' + o.c + ');border-color:var(--' + o.c + '-line)' : ''}" onclick="window.__evCompleteAttSet('${esc(a.id)}','attendance_status','${o.v}')">${esc(o.l)}</button>`).join('')}
@@ -1707,6 +1739,185 @@
   window.__evAttToOfferte = (attId, eventId) => {
     _post('/api/events-attendee-link-deal', { id: attId, action:'create_deal' }, 'Offerte aangemaakt (check Sales)');
   };
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // v=2026-08-27 — v1 deal-koppel-flow herbouwd in v2 afronden-modal.
+  // Handlers voor de 3 states in _completeAttendeeRow + deal-search-modal
+  // (analoog aan events-detail.html:2409-2571 evcLinkSaleModal).
+  // ═══════════════════════════════════════════════════════════════════════
+  const _evCompleteDealSearch = {
+    open: false, attendeeId: null, eventId: null,
+    prefill: '', q: '', busy: false, error: null,
+    results: [], sameCustomerId: null,
+    _debounceTimer: null,
+  };
+
+  // Refresh de attendee-list zodat de afrond-modal opnieuw rendert met nieuwe
+  // has_signed_deal / sale_total_incl / bonus_excluded state.
+  async function _evCompleteRefreshAttendees(eventId) {
+    if (!eventId || !_live.attendees.data) return;
+    _live.attendees.loading[eventId] = true;
+    try {
+      const r = await window.KV.authedJson('/api/events-attendees-list?event_id=' + encodeURIComponent(eventId));
+      _live.attendees.data[eventId] = r?.items || [];
+    } catch (e) {
+      console.warn('[ev-complete-refresh-attendees]', e?.message || e);
+    } finally {
+      _live.attendees.loading[eventId] = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  }
+
+  // 1-klik koppel (suggested-deal-pill).
+  window.__evCompleteLinkDeal = async (attId, dealId, eventId) => {
+    if (!attId || !dealId) return;
+    try {
+      await window.KV.authedJson('/api/events-attendee-link-deal', {
+        method: 'POST', body: JSON.stringify({ attendee_id: attId, deal_id: dealId }),
+      });
+      if (window.KV.toast) window.KV.toast('Deal gekoppeld — bonus wordt bij afronden meegerekend.', 'ok');
+      await _evCompleteRefreshAttendees(eventId);
+    } catch (e) {
+      const msg = e?.body?.error || e?.message || 'onbekend';
+      if (window.KV.toast) window.KV.toast('Koppelen mislukt: ' + msg, 'warn');
+    }
+  };
+
+  // Ontkoppel-actie (zet bonus_excluded=true zodat de fallback op customer_id
+  // NIET triggert; behoudt customer_id voor rapportages).
+  window.__evCompleteUnlinkDeal = async (attId, eventId) => {
+    if (!attId) return;
+    if (!window.confirm('Deal ontkoppelen en bonus expliciet uitsluiten voor deze deelnemer? Dit voorkomt dat de bonus-motor terugvalt op een andere deal van dezelfde klant.')) return;
+    try {
+      await window.KV.authedJson('/api/events-attendee-link-deal', {
+        method: 'POST', body: JSON.stringify({ attendee_id: attId, unlink: true }),
+      });
+      if (window.KV.toast) window.KV.toast('Deal ontkoppeld. Bonus is expliciet uitgesloten.', 'ok');
+      await _evCompleteRefreshAttendees(eventId);
+    } catch (e) {
+      const msg = e?.body?.error || e?.message || 'onbekend';
+      if (window.KV.toast) window.KV.toast('Ontkoppelen mislukt: ' + msg, 'warn');
+    }
+  };
+
+  // Open deal-search-modal.
+  window.__evCompleteOpenDealSearch = (attId, eventId) => {
+    const s = _evCompleteDealSearch;
+    s.open = true; s.attendeeId = attId; s.eventId = eventId;
+    s.q = ''; s.results = []; s.error = null; s.busy = false;
+    // Prefill uit attendee-list (naam of email).
+    const attList = eventId ? (_live.attendees.data[eventId] || []) : [];
+    const att = attList.find((x) => x.id === attId);
+    if (att) {
+      s.prefill = [att.first_name, att.last_name].filter(Boolean).join(' ') || att.email || '';
+      s.sameCustomerId = att.customer_id || null;
+    } else {
+      s.prefill = ''; s.sameCustomerId = null;
+    }
+    s.q = s.prefill;
+    if (window.DFO?.render) window.DFO.render();
+    // Auto-search bij open (als er prefill is).
+    if (s.q) _evCompleteDealSearchRun();
+  };
+  window.__evCompleteCloseDealSearch = () => {
+    const s = _evCompleteDealSearch;
+    if (s._debounceTimer) { clearTimeout(s._debounceTimer); s._debounceTimer = null; }
+    s.open = false; s.results = [];
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__evCompleteDealSearchInput = (el) => {
+    const s = _evCompleteDealSearch;
+    s.q = String(el.value || '');
+    if (s._debounceTimer) clearTimeout(s._debounceTimer);
+    s._debounceTimer = setTimeout(_evCompleteDealSearchRun, 250);
+  };
+  async function _evCompleteDealSearchRun() {
+    const s = _evCompleteDealSearch;
+    const q = String(s.q || '').trim();
+    if (!q) { s.results = []; s.busy = false; s.error = null; if (window.DFO?.render) window.DFO.render(); return; }
+    s.busy = true; s.error = null; if (window.DFO?.render) window.DFO.render();
+    try {
+      const r = await window.KV.authedJson('/api/deals-search?q=' + encodeURIComponent(q));
+      const arr = Array.isArray(r?.items) ? r.items : (Array.isArray(r) ? r : []);
+      // Same-customer boost: deals van attendee.customer_id eerst.
+      if (s.sameCustomerId) {
+        arr.sort((a, b) => {
+          const aSame = a.customer_id === s.sameCustomerId ? 0 : 1;
+          const bSame = b.customer_id === s.sameCustomerId ? 0 : 1;
+          if (aSame !== bSame) return aSame - bSame;
+          return 0;
+        });
+      }
+      s.results = arr;
+    } catch (e) {
+      s.error = e?.body?.error || e?.message || 'zoeken mislukt';
+      s.results = [];
+    }
+    s.busy = false;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // Kies-deal uit search-resultaten.
+  window.__evCompletePickDeal = async (dealId) => {
+    const s = _evCompleteDealSearch;
+    if (!s.attendeeId || !dealId) return;
+    try {
+      await window.KV.authedJson('/api/events-attendee-link-deal', {
+        method: 'POST', body: JSON.stringify({ attendee_id: s.attendeeId, deal_id: dealId }),
+      });
+      if (window.KV.toast) window.KV.toast('Deal gekoppeld.', 'ok');
+      const evId = s.eventId;
+      window.__evCompleteCloseDealSearch();
+      await _evCompleteRefreshAttendees(evId);
+    } catch (e) {
+      const msg = e?.body?.error || e?.message || 'onbekend';
+      if (window.KV.toast) window.KV.toast('Koppelen mislukt: ' + msg, 'warn');
+    }
+  };
+
+  function _evCompleteDealSearchModalHtml() {
+    const s = _evCompleteDealSearch;
+    if (!s.open) return '';
+    const fmtEur = (n) => (typeof n === 'number' && Number.isFinite(n)) ? '€' + Number(n).toLocaleString('nl-NL', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '—';
+    let bodyRows;
+    if (s.busy) {
+      bodyRows = `<div style="padding:24px;text-align:center;color:var(--text-3)">Zoeken…</div>`;
+    } else if (s.error) {
+      bodyRows = `<div style="padding:16px;color:var(--rose)">⚠ ${esc(s.error)}</div>`;
+    } else if (!s.results.length) {
+      bodyRows = `<div style="padding:24px;text-align:center;color:var(--text-3)">${s.q ? 'Geen resultaten.' : 'Typ een naam, email of referentie.'}</div>`;
+    } else {
+      bodyRows = s.results.map((d) => {
+        const isSame = s.sameCustomerId && d.customer_id === s.sameCustomerId;
+        const naam   = d.customer_name || d.company_name || '—';
+        const ref    = d.quote_reference || d.reference || '—';
+        const status = d.tl_quotation_status || d.status || '—';
+        const datum  = d.tl_quotation_accepted_at || d.created_at || null;
+        const datumFmt = datum ? new Date(datum).toLocaleDateString('nl-NL', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+        const bedrag = fmtEur(Number(d.total_incl ?? d.total_amount ?? 0));
+        return `<div style="padding:10px 12px;border-bottom:1px solid var(--border);${isSame ? 'border-left:3px solid var(--emerald);background:var(--emerald-soft)' : ''};display:flex;align-items:center;gap:10px;cursor:pointer" onclick="window.__evCompletePickDeal('${esc(d.id)}')">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13px">${esc(naam)}${isSame ? ' <span style="background:var(--emerald);color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">zelfde klant</span>' : ''}</div>
+            <div style="font-size:11.5px;color:var(--text-3)">${esc(ref)} · ${esc(status)} · ${esc(datumFmt)}</div>
+          </div>
+          <div style="font-variant-numeric:tabular-nums;font-weight:600;font-size:13px">${esc(bedrag)}</div>
+        </div>`;
+      }).join('');
+    }
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:10000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window.__evCompleteCloseDealSearch()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(680px,100%);max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+          <div style="font-size:14px;font-weight:600">Sale koppelen aan deelnemer</div>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__evCompleteCloseDealSearch()">✕</button>
+        </div>
+        <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+          <input type="text" placeholder="Zoek op naam, email of referentie…" value="${esc(s.q)}" oninput="window.__evCompleteDealSearchInput(this)" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;background:var(--surface)" autofocus>
+          ${s.sameCustomerId ? `<div style="font-size:11px;color:var(--text-3);margin-top:6px">💡 Deals van dezelfde klant worden bovenaan gesorteerd met groene rand.</div>` : ''}
+        </div>
+        <div style="flex:1;overflow-y:auto">${bodyRows}</div>
+      </div>
+    </div>`;
+  }
+
   window.__evAttTagAdd = (attId, eventId) => {
     const tag = window.prompt('Tag om toe te voegen?');
     if (!tag) return;

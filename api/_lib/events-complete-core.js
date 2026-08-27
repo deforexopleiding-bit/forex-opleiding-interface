@@ -733,15 +733,39 @@ export async function runEventsCompleteCore({ userId, body }) {
       const presentIds = presentSold.map((a) => a.attendee_id);
       let attendeeRows = [];
       if (presentIds.length > 0) {
+        // v=2026-08-27: bonus_excluded meelezen (migratie 049). Fail-soft
+        // bij ontbrekende kolom: retry zonder de kolom en behandel elke
+        // attendee als bonus_excluded=false. Dat behoudt legacy-gedrag
+        // op omgevingen waar 049 nog niet is gedraaid.
         const { data, error } = await supabaseAdmin
           .from('event_attendees')
-          .select('id, customer_id, deal_id')
+          .select('id, customer_id, deal_id, bonus_excluded')
           .in('id', presentIds);
-        if (error) summary.warnings.push('attendees fetch (bonus): ' + error.message);
-        else attendeeRows = data || [];
+        if (error) {
+          if (error.code === '42703' || /column .*bonus_excluded/i.test(error.message || '')) {
+            const retry = await supabaseAdmin
+              .from('event_attendees')
+              .select('id, customer_id, deal_id')
+              .in('id', presentIds);
+            if (retry.error) summary.warnings.push('attendees fetch (bonus, retry): ' + retry.error.message);
+            else attendeeRows = (retry.data || []).map((r) => ({ ...r, bonus_excluded: false }));
+          } else {
+            summary.warnings.push('attendees fetch (bonus): ' + error.message);
+          }
+        } else {
+          attendeeRows = data || [];
+        }
       }
 
       for (const att of attendeeRows) {
+        // v=2026-08-27: expliciete bonus-uitsluiting (v2 "Ontkoppel deal"-
+        // actie zet bonus_excluded=true). Skipt ALLE deal-lookups zodat
+        // ook de customer_id-fallback niet triggert. Behoudt customer_id
+        // intact voor rapportages.
+        if (att.bonus_excluded === true) {
+          bump('bonus_expliciet_uitgesloten');
+          continue;
+        }
         let deal = null;
         if (att.deal_id) {
           const { data: d } = await supabaseAdmin
