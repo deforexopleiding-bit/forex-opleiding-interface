@@ -43,6 +43,7 @@ import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_RE  = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Basale E.164-normalisatie voor NL/BE input (kopie van _lib/lms-provisioning.js
 // helper — hier standalone gehouden zodat dependency minimaal blijft).
@@ -90,6 +91,15 @@ export default async function handler(req, res) {
   // (typo blijft telbaar in de stats).
   let source = body.source ? String(body.source).trim().toLowerCase() : 'direct';
   if (!SLUG_RE.test(source)) source = 'direct';
+
+  // Optionele koppeling naar een pre-existent opstartsessie_submissions-rij
+  // (DEEL 3): de proxy legt de vragenlijst-antwoorden + resultaat vast via
+  // /api/public-opstartsessie-submit vóór de boek-stap, en stuurt dat id
+  // hier mee zodat we noshow_akkoord/appointment_id/lead_id op DIE rij
+  // kunnen zetten (single-source-of-truth voor de backoffice-tab).
+  // Ongeldig id (typo) → stille skip; boeking gaat door zonder linkage.
+  const submissionId = (typeof body.submission_id === 'string' && UUID_RE.test(body.submission_id.trim()))
+    ? body.submission_id.trim() : null;
 
   if (voornaam.length < 1)             return res.status(400).json({ error: 'voornaam vereist' });
   if (!EMAIL_RE.test(email))           return res.status(400).json({ error: 'geldig e-mailadres vereist' });
@@ -146,12 +156,38 @@ export default async function handler(req, res) {
     const result = await createAppointmentForLead({
       lead: leadRow, scheduledAt, durationMinutes, source,
     });
+
+    // DEEL 3: link naar de submission-rij (fail-soft). Zet noshow_akkoord=
+    // true (impliciet — de client heeft 'em al gevalideerd) + appointment_id +
+    // lead_id. Alleen op de meegegeven submission-id + defensief scoped op
+    // resultaat='toegelaten' (afgewezen submissions mogen nooit een booking
+    // krijgen, ook niet bij een spoof-caller die het id kent). Faalt de
+    // update → log, maar de boeking is al gelukt en booking_source zit in
+    // follow_up_appointments; blocking zou de user onnodig een 500 geven.
+    if (submissionId && result?.appointment_id) {
+      try {
+        const { error: linkErr } = await supabaseAdmin
+          .from('opstartsessie_submissions')
+          .update({
+            noshow_akkoord : true,
+            appointment_id : result.appointment_id,
+            lead_id        : leadId || null,
+          })
+          .eq('id', submissionId)
+          .eq('resultaat', 'toegelaten');
+        if (linkErr) console.warn('[public-opstartsessie-book] submission-link (soft):', linkErr.message);
+      } catch (e) {
+        console.warn('[public-opstartsessie-book] submission-link exception (soft):', e?.message || e);
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       appointment_id     : result.appointment_id,
       ghl_appointment_id : result.ghl_appointment_id,
       zoom_join_url      : result.zoom_join_url,
       source             : result.booking_source || source,
+      submission_id      : submissionId,
     });
   } catch (e) {
     if (e?.code === 'BAD_INPUT')          return res.status(400).json({ error: e.message || 'Ongeldige invoer' });

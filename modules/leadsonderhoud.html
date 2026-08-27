@@ -375,7 +375,7 @@ function loSoortGetypt(){ loSoortHandmatig = true; }
 function tabs(){
   var items = [['overzicht','Overzicht'],['wachtrij','Wachtrij'],['gesprekken','Gesprekken'],
                ['trajecten','Trajecten'],['berichten','Berichten'],['vragenlijst','Vragenlijst'],
-               ['bronnen','Bronnen']];
+               ['bronnen','Bronnen'],['opstartsessies','Opstartsessies']];
   return '<div class="lo-tabs">' + items.map(function(t){
     return '<button class="lo-tab'+(S.scherm===t[0]?' on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('') + '</div>';
@@ -392,6 +392,7 @@ async function teken(){
     else if (S.scherm === 'berichten') await schermBerichten();
     else if (S.scherm === 'vragenlijst') await schermVragenlijst();
     else if (S.scherm === 'bronnen')     await schermBronnen();
+    else if (S.scherm === 'opstartsessies') await schermOpstartsessies();
     else schermGesprekken();
   } catch (e) {
     var body = app.querySelector('.lo-leeg');
@@ -1328,6 +1329,174 @@ async function schermBronnen(){
   });
 }
 
+// ---- SCHERM: OPSTARTSESSIES (submissions van de publieke pagina) ----
+// Lijst + detail van public.opstartsessie_submissions — incl. afgewezen leads.
+// Filters: periode (week/maand/alles), resultaat (alle/toegelaten/afgewezen),
+// bron (dropdown uit booking_sources). Detail toont alle antwoorden, score,
+// akkoord, gekozen moment en afspraak-status. RBAC: leads.view via de endpoints.
+async function schermOpstartsessies(){
+  if (!S.opPeriode)   S.opPeriode   = 'alles';
+  if (!S.opResultaat) S.opResultaat = 'alle';
+  if (S.opBron == null) S.opBron    = '';
+
+  var qs = 'periode=' + encodeURIComponent(S.opPeriode)
+    + '&resultaat=' + encodeURIComponent(S.opResultaat)
+    + (S.opBron ? '&bron=' + encodeURIComponent(S.opBron) : '');
+  var res;
+  try {
+    res = await haal('/api/leadsonderhoud-opstartsessies-list?' + qs);
+  } catch (e) {
+    zetInhoud(kop('Opstartsessies', '') + '<div class="lo-kaart"><div class="lo-leeg">Kon de submissions niet laden. Controleer je rechten.</div></div>');
+    return;
+  }
+  var items = res.items || [];
+  var bronnen = res.bronnen || [];
+  var totaal = res.total || items.length;
+
+  var periodes  = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
+  var uitkomsten = [['alle','Alle'],['toegelaten','Toegelaten'],['afgewezen','Afgewezen']];
+
+  var filterPeriode = periodes.map(function(p){
+    return '<button class="lo-fl' + (S.opPeriode === p[0] ? ' on' : '') + '" data-op-per="' + p[0] + '">' + esc(p[1]) + '</button>';
+  }).join('');
+  var filterRes = uitkomsten.map(function(r){
+    return '<button class="lo-fl' + (S.opResultaat === r[0] ? ' on' : '') + '" data-op-res="' + r[0] + '">' + esc(r[1]) + '</button>';
+  }).join('');
+  var bronOpties = '<option value=""' + (S.opBron ? '' : ' selected') + '>Alle bronnen</option>'
+    + bronnen.map(function(b){
+        return '<option value="' + esc(b.slug) + '"' + (S.opBron === b.slug ? ' selected' : '') + '>' + esc(b.label) + '</option>';
+      }).join('');
+
+  var rijen = items.map(function(s){
+    var badge = s.resultaat === 'toegelaten'
+      ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600">Toegelaten</span>'
+      : '<span style="background:#f3f4f6;color:#4b5563;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600">Afgewezen</span>';
+    var akkoord = s.noshow_akkoord ? '<span style="color:var(--ok,#059669);font-weight:600">✓</span>' : '<span style="color:var(--text-faint)">–</span>';
+    var afspraakBadge = s.heeft_afspraak
+      ? '<span style="color:var(--ok,#059669);font-weight:600">✓ Geboekt</span>'
+      : '<span style="color:var(--text-faint)">–</span>';
+    var contact = [s.email, s.telefoon].filter(Boolean).join(' · ');
+    return '<tr data-op-row="' + s.id + '" style="cursor:pointer">'
+      + '<td style="white-space:nowrap;font-variant-numeric:tabular-nums" class="mono" title="' + esc(s.created_at) + '">' + esc(kortMoment(s.created_at)) + '</td>'
+      + '<td><b>' + esc(s.naam || '—') + '</b><div style="color:var(--text-faint);font-size:12px">' + esc(contact || '—') + '</div></td>'
+      + '<td>' + esc(s.bron_label) + '<div class="mono" style="font-size:11px;color:var(--text-faint)">' + esc(s.booking_source || '—') + '</div></td>'
+      + '<td>' + badge + '</td>'
+      + '<td style="text-align:center">' + akkoord + '</td>'
+      + '<td>' + esc(s.gekozen_slot || '—') + '</td>'
+      + '<td>' + afspraakBadge + '</td>'
+      + '</tr>';
+  }).join('');
+  if (!items.length) rijen = '<tr><td colspan="7" class="lo-leeg" style="padding:24px">Geen submissions in dit venster.</td></tr>';
+
+  zetInhoud(kop('Opstartsessies', 'Alles wat leads op deforexopleiding.nl/opstartsessie invullen — inclusief afgewezen leads. Klik een rij voor de details.')
+    + '<div class="lo-filters" style="margin-bottom:14px;gap:14px;align-items:center;flex-wrap:wrap">'
+    +   '<div><b style="font-size:12px;color:var(--text-faint);margin-right:6px">Periode:</b>' + filterPeriode + '</div>'
+    +   '<div><b style="font-size:12px;color:var(--text-faint);margin-right:6px">Resultaat:</b>' + filterRes + '</div>'
+    +   '<div><b style="font-size:12px;color:var(--text-faint);margin-right:6px">Bron:</b>'
+    +     '<select id="opBronSel" style="padding:4px 8px;border:1px solid var(--border,#e5e7eb);border-radius:6px">' + bronOpties + '</select>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="lo-kaart" style="margin-bottom:14px;padding:10px 14px">'
+    +   '<b style="font-size:20px">' + totaal + '</b> <span style="color:var(--text-faint)">submission' + (totaal === 1 ? '' : 's') + ' — ' + esc(S.opPeriode === 'week' ? 'deze week' : S.opPeriode === 'maand' ? 'deze maand' : 'alle tijd') + '</span>'
+    + '</div>'
+    + '<div class="lo-kaart" style="padding:0;overflow:auto">'
+    +   '<table style="width:100%;border-collapse:collapse">'
+    +     '<thead><tr style="background:var(--bg-soft,#f8fafc);border-bottom:1px solid var(--border,#e5e7eb)">'
+    +       '<th style="text-align:left;padding:10px 14px">Wanneer</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Lead</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Bron</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Resultaat</th>'
+    +       '<th style="text-align:center;padding:10px 14px" title="€50-no-show-akkoord">Akkoord</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Gekozen moment</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Afspraak</th>'
+    +     '</tr></thead>'
+    +     '<tbody>' + rijen + '</tbody>'
+    +   '</table>'
+    + '</div>');
+
+  // Bind filters.
+  document.querySelectorAll('[data-op-per]').forEach(function(b){
+    b.onclick = function(){ S.opPeriode = b.getAttribute('data-op-per'); schermOpstartsessies(); };
+  });
+  document.querySelectorAll('[data-op-res]').forEach(function(b){
+    b.onclick = function(){ S.opResultaat = b.getAttribute('data-op-res'); schermOpstartsessies(); };
+  });
+  var sel = $('opBronSel');
+  if (sel) sel.onchange = function(){ S.opBron = String(sel.value || ''); schermOpstartsessies(); };
+
+  // Bind row-click → detail.
+  document.querySelectorAll('[data-op-row]').forEach(function(tr){
+    tr.onclick = function(){ toonOpstartsessieDetail(tr.getAttribute('data-op-row')); };
+  });
+}
+
+async function toonOpstartsessieDetail(id){
+  openModal('<div class="lo-leeg" style="padding:32px">Laden…</div>');
+  var res;
+  try {
+    res = await haal('/api/leadsonderhoud-opstartsessies-detail?id=' + encodeURIComponent(id));
+  } catch (e) {
+    openModal('<div class="lo-leeg" style="padding:32px">Kon detail niet laden.</div>');
+    return;
+  }
+  var s = res.item; if (!s) { sluitModal(); return; }
+  var badge = s.resultaat === 'toegelaten'
+    ? '<span style="background:#dcfce7;color:#166534;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:600">Toegelaten</span>'
+    : '<span style="background:#f3f4f6;color:#4b5563;padding:4px 12px;border-radius:12px;font-size:13px;font-weight:600">Afgewezen</span>';
+  var akkoord = s.noshow_akkoord
+    ? '<span style="color:var(--ok,#059669);font-weight:600">✓ Ja</span>'
+    : '<span style="color:var(--text-faint)">Nee</span>';
+
+  var antwoordenHtml = (s.antwoorden || []).map(function(a, i){
+    var afw = a.afwijzer
+      ? '<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:11px;margin-left:6px">afwijzer</span>'
+      : '';
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border,#e5e7eb)">'
+      + '<div style="font-size:12px;color:var(--text-faint)">Vraag ' + (i + 1) + '</div>'
+      + '<div style="font-weight:600;margin:2px 0">' + esc(a.vraag || '') + '</div>'
+      + '<div>Antwoord: <b>' + esc(a.gekozen_label || '—') + '</b>'
+      +   ' <span style="color:var(--text-faint);font-size:12px">(' + (Number(a.punten) || 0) + ' punten)</span>'
+      +   afw
+      + '</div>'
+      + '</div>';
+  }).join('');
+  if (!antwoordenHtml) antwoordenHtml = '<div class="lo-leeg">Geen antwoorden opgeslagen.</div>';
+
+  var afspraakHtml = '';
+  if (s.afspraak) {
+    afspraakHtml = '<div class="lo-kaart" style="margin-top:14px">'
+      + '<div style="font-weight:600;margin-bottom:6px">Gekoppelde afspraak</div>'
+      + '<div style="font-size:13px">Ingepland op: <b>' + esc(kortMoment(s.afspraak.scheduled_at)) + '</b> — status: <b>' + esc(s.afspraak.status || '—') + '</b></div>'
+      + (s.afspraak.zoom_join_url ? '<div style="font-size:12px;margin-top:4px"><a href="' + esc(s.afspraak.zoom_join_url) + '" target="_blank" rel="noopener">Zoom-link openen ↗</a></div>' : '')
+      + '</div>';
+  } else if (s.resultaat === 'toegelaten') {
+    afspraakHtml = '<div class="lo-kaart" style="margin-top:14px"><div class="hint">Toegelaten, maar nog geen afspraak geboekt (lead heeft niet doorgeklikt na akkoord).</div></div>';
+  }
+
+  openModal('<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px">'
+    + '<div>'
+    +   '<div style="font-size:20px;font-weight:600">' + esc(s.naam || 'Anonieme submission') + '</div>'
+    +   '<div style="color:var(--text-faint);font-size:12px">' + esc([s.email, s.telefoon].filter(Boolean).join(' · ') || '—') + '</div>'
+    +   '<div style="color:var(--text-faint);font-size:12px;margin-top:2px" class="mono">' + esc(kortMoment(s.created_at)) + '</div>'
+    + '</div>'
+    + '<div>' + badge + '</div>'
+    + '</div>'
+    + '<div class="lo-kaart" style="margin-bottom:14px">'
+    +   '<div class="lo-vel-rij" style="gap:24px;flex-wrap:wrap">'
+    +     '<div><div style="font-size:11px;color:var(--text-faint);text-transform:uppercase">Bron</div><b>' + esc(s.bron_label) + '</b><div class="mono" style="font-size:11px;color:var(--text-faint)">' + esc(s.booking_source || '—') + '</div></div>'
+    +     '<div><div style="font-size:11px;color:var(--text-faint);text-transform:uppercase">Score</div><b>' + (s.score != null ? s.score : '—') + '</b><span style="color:var(--text-faint)"> / drempel ' + (s.drempel != null ? s.drempel : '—') + '</span></div>'
+    +     '<div><div style="font-size:11px;color:var(--text-faint);text-transform:uppercase">€50 akkoord</div><b>' + akkoord + '</b></div>'
+    +     '<div><div style="font-size:11px;color:var(--text-faint);text-transform:uppercase">Gekozen moment</div><b>' + esc(s.gekozen_slot || '—') + '</b></div>'
+    +   '</div>'
+    + '</div>'
+    + '<div class="lo-kaart">'
+    +   '<div style="font-weight:600;margin-bottom:8px">Vragenlijst-antwoorden</div>'
+    +   antwoordenHtml
+    + '</div>'
+    + afspraakHtml
+    + '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="k k-o" onclick="sluitModal()">Sluiten</button></div>');
+}
+
 // ---- kleine bouwstenen ----
 function kop(titel, sub){
   return '<div class="lo-kop"><div><h1>'+esc(titel)+'</h1><p>'+esc(sub)+'</p></div></div>';
@@ -1347,7 +1516,7 @@ function kpi(label, waarde, onder, kleur){
     var qp = new URLSearchParams(window.location.search);
     var wantTab = qp.get('tab');
     var wantTraj = qp.get('traject');
-    var validTabs = ['overzicht','wachtrij','gesprekken','trajecten','berichten','vragenlijst','bronnen'];
+    var validTabs = ['overzicht','wachtrij','gesprekken','trajecten','berichten','vragenlijst','bronnen','opstartsessies'];
     if (wantTab && validTabs.indexOf(wantTab) !== -1) S.scherm = wantTab;
     if (wantTraj && S.scherm === 'trajecten') {
       // Wacht tot schermTrajecten render klaar heeft, dan scroll naar anchor.
