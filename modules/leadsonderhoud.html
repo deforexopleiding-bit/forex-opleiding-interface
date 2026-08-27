@@ -374,7 +374,8 @@ function loSoortGetypt(){ loSoortHandmatig = true; }
 // ---- raamwerk ----
 function tabs(){
   var items = [['overzicht','Overzicht'],['wachtrij','Wachtrij'],['gesprekken','Gesprekken'],
-               ['trajecten','Trajecten'],['berichten','Berichten'],['vragenlijst','Vragenlijst']];
+               ['trajecten','Trajecten'],['berichten','Berichten'],['vragenlijst','Vragenlijst'],
+               ['bronnen','Bronnen']];
   return '<div class="lo-tabs">' + items.map(function(t){
     return '<button class="lo-tab'+(S.scherm===t[0]?' on':'')+'" data-tab="'+t[0]+'">'+t[1]+'</button>';
   }).join('') + '</div>';
@@ -390,6 +391,7 @@ async function teken(){
     else if (S.scherm === 'trajecten') await schermTrajecten();
     else if (S.scherm === 'berichten') await schermBerichten();
     else if (S.scherm === 'vragenlijst') await schermVragenlijst();
+    else if (S.scherm === 'bronnen')     await schermBronnen();
     else schermGesprekken();
   } catch (e) {
     var body = app.querySelector('.lo-leeg');
@@ -1199,6 +1201,133 @@ async function toonVersies(){
   });
 }
 
+// ---- SCHERM: BRONNEN (Opstartsessie-attributie) ----
+// Beheer van public.booking_sources: bewerkbare bronnenlijst + tellingen van
+// geboekte Opstartsessies per bron (met periode-filter). Elke bron heeft een
+// kant-en-klare link naar de publieke pagina op deforexopleiding.nl. Onbekende
+// slugs (typo / gedeactiveerde bron) tellen mee onder hun rauwe slug.
+async function schermBronnen(){
+  if (!S.bronPeriode) S.bronPeriode = 'alles';
+  var res;
+  try {
+    res = await haal('/api/booking-sources-list?periode=' + encodeURIComponent(S.bronPeriode));
+  } catch (e) {
+    zetInhoud(kop('Opstartsessie-bronnen', '') + '<div class="lo-kaart"><div class="lo-leeg">Kon de bronnen niet laden. Controleer je rechten.</div></div>');
+    return;
+  }
+  var items = res.items || [];
+  var totaal = res.total_calls || 0;
+
+  var periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
+  var filter = '<div class="lo-filters" style="margin-bottom:14px">' + periodes.map(function(p){
+    return '<button class="lo-fl' + (S.bronPeriode === p[0] ? ' on' : '') + '" data-per="' + p[0] + '">' + esc(p[1]) + '</button>';
+  }).join('') + '</div>';
+
+  var rijen = items.map(function(b, i){
+    var url = 'https://deforexopleiding.nl/opstartsessie/' + b.slug;
+    var status = b.is_registered
+      ? (b.actief ? '<span style="color:var(--ok,#059669);font-weight:600">Actief</span>' : '<span style="color:var(--text-faint);font-weight:600">Uit</span>')
+      : '<span style="color:var(--warn,#b45309);font-weight:600" title="Slug komt voor op boekingen maar staat niet in de bronnenlijst">Onbekend</span>';
+    var acties = b.is_registered
+      ? '<button class="k k-o k-s" data-act="edit" data-i="' + i + '">Bewerken</button>'
+        + ' <button class="k k-o k-s" data-act="toggle" data-i="' + i + '">' + (b.actief ? 'Deactiveren' : 'Activeren') + '</button>'
+      : '<button class="k k-o k-s" data-act="register" data-i="' + i + '" title="Toevoegen aan bronnenlijst met deze slug">Registreren</button>';
+    return '<tr>'
+      + '<td><b>' + esc(b.label) + '</b><div class="mono" style="color:var(--text-faint);font-size:12px">' + esc(b.slug) + '</div></td>'
+      + '<td>' + status + '</td>'
+      + '<td style="text-align:right;font-variant-numeric:tabular-nums">' + b.calls + '</td>'
+      + '<td><div style="display:flex;align-items:center;gap:6px"><code class="mono" style="font-size:12px;background:var(--bg-soft,#f3f4f6);padding:2px 6px;border-radius:4px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(url) + '</code>'
+        +   '<button class="k k-o k-s" data-act="copy" data-url="' + esc(url) + '" title="Link kopiëren">Kopiëren</button></div></td>'
+      + '<td>' + acties + '</td>'
+      + '</tr>';
+  }).join('');
+
+  if (!items.length) rijen = '<tr><td colspan="5" class="lo-leeg" style="padding:24px">Nog geen bronnen. Voeg er hieronder één toe.</td></tr>';
+
+  zetInhoud(kop('Opstartsessie-bronnen', 'Elke link heeft een eigen bron zodat je precies ziet waar de calls vandaan komen. Onbekende slugs (typo / gedeactiveerd) tellen mee.')
+    + filter
+    + '<div class="lo-kaart" style="margin-bottom:14px;padding:10px 14px;display:flex;align-items:center;gap:14px">'
+    +   '<div><b style="font-size:20px">' + totaal + '</b> <span style="color:var(--text-faint)">geboekte Opstartsessies · ' + esc(S.bronPeriode === 'week' ? 'deze week' : S.bronPeriode === 'maand' ? 'deze maand' : 'alle tijd') + '</span></div>'
+    + '</div>'
+    + '<div class="lo-kaart" style="padding:0;overflow:auto">'
+    +   '<table style="width:100%;border-collapse:collapse">'
+    +     '<thead><tr style="background:var(--bg-soft,#f8fafc);border-bottom:1px solid var(--border,#e5e7eb)">'
+    +       '<th style="text-align:left;padding:10px 14px">Bron</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Status</th>'
+    +       '<th style="text-align:right;padding:10px 14px">Calls</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Link</th>'
+    +       '<th style="text-align:left;padding:10px 14px">Acties</th>'
+    +     '</tr></thead>'
+    +     '<tbody>' + rijen + '</tbody>'
+    +   '</table>'
+    + '</div>'
+    + '<div class="lo-kaart" style="margin-top:14px">'
+    +   '<div style="font-weight:600;margin-bottom:8px">Nieuwe bron toevoegen</div>'
+    +   '<div class="lo-vel-rij" style="gap:10px">'
+    +     '<div class="lo-vel" style="max-width:220px"><label>Slug (URL)</label><input id="bronSlug" type="text" placeholder="bv. instagram-story"></div>'
+    +     '<div class="lo-vel"><label>Label (weergave)</label><input id="bronLabel" type="text" placeholder="bv. Instagram Story"></div>'
+    +     '<div style="display:flex;align-items:flex-end"><button class="k k-p" id="bronToevoegen">+ Toevoegen</button></div>'
+    +   '</div>'
+    +   '<div class="hint" style="margin-top:6px">Slug = lowercase, alfanumeriek + hyphen (max 64 tekens). Wordt onderdeel van de link.</div>'
+    + '</div>');
+
+  // Bind
+  document.querySelectorAll('[data-per]').forEach(function(b){
+    b.onclick = function(){ S.bronPeriode = b.getAttribute('data-per'); schermBronnen(); };
+  });
+  var addBtn = $('bronToevoegen');
+  if (addBtn) addBtn.onclick = async function(){
+    var slug  = String(($('bronSlug').value  || '')).trim().toLowerCase();
+    var label = String(($('bronLabel').value || '')).trim();
+    if (!slug || !label) { alert('Slug en label zijn beide verplicht.'); return; }
+    try {
+      await haalPost('/api/booking-sources-upsert', { slug, label, actief:true });
+      schermBronnen();
+    } catch (e) {
+      alert('Toevoegen mislukt: ' + (e && e.message || 'onbekend'));
+    }
+  };
+  document.querySelectorAll('[data-act]').forEach(function(el){
+    var act = el.getAttribute('data-act');
+    if (act === 'copy') {
+      el.onclick = function(){
+        var u = el.getAttribute('data-url');
+        try { navigator.clipboard.writeText(u); el.textContent = 'Gekopieerd ✓'; setTimeout(function(){ el.textContent = 'Kopiëren'; }, 1200); }
+        catch (_) { prompt('Kopieer de link:', u); }
+      };
+    } else if (act === 'edit' || act === 'toggle' || act === 'register') {
+      el.onclick = async function(){
+        var i = Number(el.getAttribute('data-i'));
+        var b = items[i]; if (!b) return;
+        if (act === 'edit') {
+          var nieuwLabel = prompt('Nieuw label voor "' + b.slug + '":', b.label);
+          if (nieuwLabel == null) return;
+          nieuwLabel = String(nieuwLabel).trim();
+          if (!nieuwLabel) return;
+          try {
+            await haalPost('/api/booking-sources-upsert', { id: b.id, slug: b.slug, label: nieuwLabel, actief: b.actief });
+            schermBronnen();
+          } catch (e) { alert('Bewerken mislukt: ' + (e && e.message || 'onbekend')); }
+        } else if (act === 'toggle') {
+          try {
+            await haalPost('/api/booking-sources-upsert', { id: b.id, slug: b.slug, label: b.label, actief: !b.actief });
+            schermBronnen();
+          } catch (e) { alert('Wijzigen mislukt: ' + (e && e.message || 'onbekend')); }
+        } else if (act === 'register') {
+          var lbl = prompt('Label voor "' + b.slug + '" (typo of nieuwe bron):', b.slug.charAt(0).toUpperCase() + b.slug.slice(1));
+          if (lbl == null) return;
+          lbl = String(lbl).trim();
+          if (!lbl) return;
+          try {
+            await haalPost('/api/booking-sources-upsert', { slug: b.slug, label: lbl, actief: true });
+            schermBronnen();
+          } catch (e) { alert('Registreren mislukt: ' + (e && e.message || 'onbekend')); }
+        }
+      };
+    }
+  });
+}
+
 // ---- kleine bouwstenen ----
 function kop(titel, sub){
   return '<div class="lo-kop"><div><h1>'+esc(titel)+'</h1><p>'+esc(sub)+'</p></div></div>';
@@ -1218,7 +1347,7 @@ function kpi(label, waarde, onder, kleur){
     var qp = new URLSearchParams(window.location.search);
     var wantTab = qp.get('tab');
     var wantTraj = qp.get('traject');
-    var validTabs = ['overzicht','wachtrij','gesprekken','trajecten','berichten','vragenlijst'];
+    var validTabs = ['overzicht','wachtrij','gesprekken','trajecten','berichten','vragenlijst','bronnen'];
     if (wantTab && validTabs.indexOf(wantTab) !== -1) S.scherm = wantTab;
     if (wantTraj && S.scherm === 'trajecten') {
       // Wacht tot schermTrajecten render klaar heeft, dan scroll naar anchor.

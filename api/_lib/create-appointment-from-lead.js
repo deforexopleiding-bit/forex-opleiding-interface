@@ -148,13 +148,50 @@ export async function resolveGhlContactId(lead) {
   return contactId;
 }
 
+// Fail-soft: voeg een GHL-tag toe aan het contact (voor attributie in
+// GHL zelf). Niet blokkerend — als GHL-tag-add faalt, log alleen; de
+// afspraak zelf is dan al aangemaakt en booking_source zit in de DB.
+// v=2026-08-27 (Opstartsessie-project DEEL 1): bron uit /opstartsessie/<slug>.
+async function ghlAddContactTag(contactId, tag) {
+  if (!contactId || !tag) return;
+  const token = process.env.GHL_PIT_TOKEN || process.env.GHL_API_KEY;
+  if (!token) return; // zonder token overslaan — booking_source zit al in DB
+  try {
+    const res = await fetch(`${GHL_BASE}/contacts/${encodeURIComponent(contactId)}/tags`, {
+      method : 'POST',
+      headers: {
+        Authorization : `Bearer ${token}`,
+        Version       : GHL_CONTACTS_VERSION,
+        'Content-Type': 'application/json',
+        Accept        : 'application/json',
+      },
+      body: JSON.stringify({ tags: [String(tag)] }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.warn('[create-appointment-from-lead] GHL contact-tag-add', res.status, body.slice(0, 200));
+    }
+  } catch (e) {
+    console.warn('[create-appointment-from-lead] GHL contact-tag-add exception:', e?.message || e);
+  }
+}
+
 // Orchestreert: contact resolven → GHL-appointment aanmaken →
 // follow_up_appointments-rij inserten. Returnt de nieuwe appointment-id
 // + zoom-velden. Gooit typed errors bij falen.
+//
+// v=2026-08-27 (Opstartsessie-project DEEL 1): optionele `source` param
+// voor Opstartsessie-bron-tracking. Schrijft naar follow_up_appointments.
+// booking_source EN plaatst fail-soft een GHL-tag "bron-<slug>" op het
+// contact. Geen 20 aparte GHL-agenda's meer — één agenda, bron in ons
+// eigen systeem. Bestaande callers (cockpit-uitkomst zoom_ingepland,
+// leadsonderhoud direct-inschieten) laten source ongezet → NULL in DB,
+// geen GHL-tag; volledig backward-compatible.
 export async function createAppointmentForLead({
   lead,
   scheduledAt,             // ISO string (verplicht)
   durationMinutes = 30,
+  source = null,           // optionele slug, bv. 'nieuwsbrief' / 'romy' / 'direct'
 }) {
   if (!lead || !lead.id) {
     const err = new Error('lead vereist');
@@ -217,6 +254,14 @@ export async function createAppointmentForLead({
   //    schrijven zodat de sales weet dat 'ie handmatig moet check'en.
   //    (Geen rollback via GHL delete: veiliger de afspraak te laten
   //    staan dan een zombie-uitnodiging naar de klant te sturen.)
+  // Normaliseer source-slug (lowercase, strip whitespace) — beide bewaakt
+  // door de check-constraint in booking_sources, maar hier accepteren we
+  // óók onbekende/typo-slugs zodat oude links telbaar blijven.
+  const sourceSlug = source
+    ? String(source).trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
+    : null;
+  const cleanSource = sourceSlug && sourceSlug.length && sourceSlug.length <= 64 ? sourceSlug : null;
+
   const insertRow = {
     parent_appointment_id: null,
     lead_name           : lead.lead_name  || null,
@@ -231,11 +276,14 @@ export async function createAppointmentForLead({
     ghl_appointment_id  : ghl?.id              ?? null,
     zoom_meeting_id     : ghl?.zoom_meeting_id ?? null,
     zoom_join_url       : ghl?.zoom_join_url   ?? null,
+    booking_source      : cleanSource,
   };
 
   // 42703 fail-soft: strip optionele kolommen die in oudere schema's
-  // kunnen ontbreken.
-  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id'];
+  // kunnen ontbreken. booking_source is toegevoegd in migratie 046 —
+  // als die nog niet gedraaid is, stript de fail-soft-lus 'em uit de
+  // insert zodat oude prod-schemas geen 500 gooien.
+  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'booking_source'];
   let attempt = { ...insertRow };
   let inserted = null;
   for (let i = 0; i < 3; i++) {
@@ -271,12 +319,19 @@ export async function createAppointmentForLead({
     throw err;
   }
 
+  // Fail-soft: GHL-contact-tag "bron-<slug>" voor attributie in GHL zelf.
+  // Non-blocking — booking_source zit al in de DB.
+  if (cleanSource) {
+    await ghlAddContactTag(ghlContactId, `bron-${cleanSource}`);
+  }
+
   return {
     appointment_id     : inserted.id,
     scheduled_at       : inserted.scheduled_at,
     ghl_appointment_id : ghl?.id              || null,
     zoom_meeting_id    : ghl?.zoom_meeting_id || null,
     zoom_join_url      : ghl?.zoom_join_url   || null,
+    booking_source     : cleanSource,
   };
 }
 

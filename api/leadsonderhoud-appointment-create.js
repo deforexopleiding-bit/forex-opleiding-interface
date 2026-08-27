@@ -54,6 +54,10 @@ export default async function handler(req, res) {
   const durationMinutes = Number.isFinite(Number(body.durationMinutes))
     ? Math.max(15, Math.min(120, Number(body.durationMinutes)))
     : 30;
+  // Optionele bron-slug — leadsonderhoud "Direct inschieten" laat 'em NULL
+  // (backward-compat). Alleen de publieke Opstartsessie-flow zet 'em.
+  const source = (typeof body.source === 'string' && body.source.trim())
+    ? body.source.trim() : null;
 
   if (!UUID_RE.test(leadId))                return res.status(400).json({ error: 'lead_id ontbreekt of ongeldig' });
   if (!scheduledAt)                          return res.status(400).json({ error: 'scheduledAt vereist' });
@@ -81,6 +85,7 @@ export default async function handler(req, res) {
       lead,
       scheduledAt,
       durationMinutes,
+      source,
     });
     // afspraak_op wordt door de poll-cron gevuld (~1 min).
     return res.status(200).json({
