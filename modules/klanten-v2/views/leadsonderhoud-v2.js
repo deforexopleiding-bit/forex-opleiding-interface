@@ -59,6 +59,13 @@
     // batch zodra contactenView een lijst rendert. lastKey = leadIds-signature
     // om dubbele fetches te voorkomen.
     access:       { loading: false, fetched: false, map: {}, lastKey: null },
+    // v=15 (2026-08-27): Opstartsessie-tabs. Read-only rendering; CRUD gebeurt
+    // in de v1-editor (/modules/leadsonderhoud.html) die via directe URL
+    // bereikbaar blijft. Filter-state per tab (periode/resultaat/bron) leeft
+    // apart zodat we bij tab-switch niet refetchen.
+    bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
+    opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', lastKey: null },
+    vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
   };
 
   /* ── tryFetch (8s timeout, non-throwing) ────────────────────────────── */
@@ -1959,14 +1966,280 @@
       </div>`).join('');
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+     TABS 6-8 — BRONNEN / OPSTARTSESSIES / VRAGENLIJST (v=15, 2026-08-27)
+     ══════════════════════════════════════════════════════════════════
+     v=15: verhuisd van modules/leadsonderhoud.html (v1) naar deze v2-view
+     zodat de zichtbare Leadsonderhoud-shell (klanten-v2 #leadsonderhoud)
+     Opstartsessies + Bronnen + Vragenlijst-tabs krijgt. De v1-editor voor
+     volledige CRUD (bewerken vragen/opties/publiceer, bronnen toevoegen,
+     detail-modal opstartsessies) blijft via directe URL beschikbaar op
+     /modules/leadsonderhoud.html?tab=... — de "Beheren →"-knop in elke tab
+     linkt daarheen (opent in nieuw tabblad). Endpoints ongewijzigd:
+     - booking-sources-list             → tab Bronnen
+     - leadsonderhoud-opstartsessies-list → tab Opstartsessies
+     - leadsonderhoud-quiz-lijst        → tab Vragenlijst
+     RBAC via de endpoints (leads.view / leads.update, zoals de rest van
+     Leadsonderhoud).
+     ══════════════════════════════════════════════════════════════════ */
+
+  async function fetchBronnen(force) {
+    const st = _live.bronnen;
+    const key = 'p=' + st.periode;
+    if (!force && st.lastKey === key && st.fetched && !st.error) return;
+    st.loading = true; st.error = null; st.lastKey = key;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    const j = await tryFetch('bronnen', '/api/booking-sources-list?periode=' + encodeURIComponent(st.periode));
+    if (seq !== st._seq) return;
+    st.loading = false; st.fetched = true;
+    if (!j) st.error = 'Kon bronnen niet laden'; else st.data = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchOpstartsessies(force) {
+    const st = _live.opstartsessies;
+    const key = 'p=' + st.periode + '&r=' + st.resultaat + '&b=' + st.bron;
+    if (!force && st.lastKey === key && st.fetched && !st.error) return;
+    st.loading = true; st.error = null; st.lastKey = key;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    const qs = 'periode=' + encodeURIComponent(st.periode)
+      + '&resultaat=' + encodeURIComponent(st.resultaat)
+      + (st.bron ? '&bron=' + encodeURIComponent(st.bron) : '');
+    const j = await tryFetch('opstartsessies', '/api/leadsonderhoud-opstartsessies-list?' + qs);
+    if (seq !== st._seq) return;
+    st.loading = false; st.fetched = true;
+    if (!j) st.error = 'Kon opstartsessies niet laden'; else st.data = j;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  async function fetchVragenlijst() {
+    const st = _live.vragenlijst; if (st.loading || (st.fetched && !st.error)) return;
+    st.loading = true; st.error = null;
+    const seq = ++st._seq;
+    const j = await tryFetch('vragenlijst', '/api/leadsonderhoud-quiz-lijst');
+    if (seq !== st._seq) return;
+    st.loading = false; st.fetched = true;
+    if (!j) st.error = 'Kon vragenlijsten niet laden'; else st.data = { items: asArr(j.items) };
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Filter-setters (module-scope, aangeroepen door DFO.setF-style inline handlers).
+  window._lsSetBronPeriode = function(p){ _live.bronnen.periode = p; fetchBronnen(true); };
+  window._lsSetOpPeriode   = function(p){ _live.opstartsessies.periode = p; fetchOpstartsessies(true); };
+  window._lsSetOpResultaat = function(r){ _live.opstartsessies.resultaat = r; fetchOpstartsessies(true); };
+  window._lsSetOpBron      = function(sel){ _live.opstartsessies.bron = String(sel.value || ''); fetchOpstartsessies(true); };
+  window._lsCopyLink = function(url, btn){
+    try { navigator.clipboard.writeText(url); if (btn){ const t = btn.textContent; btn.textContent = 'Gekopieerd ✓'; setTimeout(()=>{ btn.textContent = t; }, 1200); } }
+    catch (_) { prompt('Kopieer de link:', url); }
+  };
+
+  function _lsBeheerKnop(tab){
+    const href = '/modules/leadsonderhoud.html?tab=' + encodeURIComponent(tab);
+    return `<a href="${href}" target="_blank" rel="noopener" class="btn btn-secondary" style="text-decoration:none;font-size:12px;padding:6px 12px">Beheren in editor ↗</a>`;
+  }
+
+  function bronnenView() {
+    if (!_live.bronnen.fetched && !_live.bronnen.loading && !_live.bronnen.error) queueMicrotask(() => fetchBronnen(false));
+    const st = _live.bronnen;
+    const data = st.data || { items: [], total_calls: 0 };
+    const items = data.items || [];
+    const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
+    const filterChips = periodes.map(([k,l]) => `<button class="chip ${st.periode===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetBronPeriode('${k}')">${esc(l)}</button>`).join('');
+    const rows = items.length ? items.map(b => {
+      const url = 'https://deforexopleiding.nl/opstartsessie/' + b.slug;
+      const statusBadge = b.is_registered
+        ? (b.actief
+            ? '<span style="color:var(--emerald);font-weight:600;font-size:11.5px">● Actief</span>'
+            : '<span style="color:var(--text-3);font-weight:600;font-size:11.5px">○ Uit</span>')
+        : '<span style="color:var(--amber);font-weight:600;font-size:11.5px" title="Slug komt op boekingen voor maar staat niet in de bronnenlijst">⚠ Onbekend</span>';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px">
+          <div style="font-weight:600">${esc(b.label)}</div>
+          <div style="color:var(--text-3);font-size:11px;font-family:var(--mono,monospace)">${esc(b.slug)}</div>
+        </td>
+        <td style="padding:8px 10px">${statusBadge}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${b.calls || 0}</td>
+        <td style="padding:8px 10px">
+          <div style="display:flex;align-items:center;gap:6px">
+            <code style="background:var(--surface-2);padding:2px 6px;border-radius:4px;font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(url)}</code>
+            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsCopyLink('${esc(url)}', this)">Kopiëren</button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="4" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen bronnen — voeg er één toe via de editor.'}</td></tr>`;
+
+    return `
+      <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
+        Attributie-bronnen voor <code>deforexopleiding.nl/opstartsessie/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen (<code>follow_up_appointments.booking_source</code>). Onbekende/typo-slugs verschijnen apart en blijven telbaar.
+      </div>
+      ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
+          ${filterChips}
+        </div>
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (`${data.total_calls || 0} geboekte Opstartsessies · ${st.periode === 'week' ? 'deze week' : st.periode === 'maand' ? 'deze maand' : 'alle tijd'}`)}</span>
+        ${_lsBeheerKnop('bronnen')}
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead>
+              <tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+                <th style="padding:8px 10px">Bron</th>
+                <th style="padding:8px 10px">Status</th>
+                <th style="padding:8px 10px;text-align:right">Calls</th>
+                <th style="padding:8px 10px">Link</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function opstartsessiesView() {
+    if (!_live.opstartsessies.fetched && !_live.opstartsessies.loading && !_live.opstartsessies.error) queueMicrotask(() => fetchOpstartsessies(false));
+    const st = _live.opstartsessies;
+    const data = st.data || { items: [], total: 0, bronnen: [] };
+    const items = data.items || [];
+    const bronnen = data.bronnen || [];
+    const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
+    const uitk = [['alle','Alle'],['toegelaten','Toegelaten'],['afgewezen','Afgewezen']];
+    const perChips = periodes.map(([k,l]) => `<button class="chip ${st.periode===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpPeriode('${k}')">${esc(l)}</button>`).join('');
+    const resChips = uitk.map(([k,l]) => `<button class="chip ${st.resultaat===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpResultaat('${k}')">${esc(l)}</button>`).join('');
+    const bronOpts = `<option value="" ${st.bron ? '' : 'selected'}>Alle bronnen</option>`
+      + bronnen.map(b => `<option value="${esc(b.slug)}" ${st.bron===b.slug?'selected':''}>${esc(b.label)}</option>`).join('');
+    const kortDt = (iso) => {
+      if (!iso) return '—';
+      try { const d = new Date(iso); return d.toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); }
+      catch(_){ return String(iso); }
+    };
+    const rows = items.length ? items.map(s => {
+      const badge = s.resultaat === 'toegelaten'
+        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
+        : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>';
+      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>';
+      const afsp = s.heeft_afspraak ? '<span style="color:var(--emerald);font-weight:600">✓ Geboekt</span>' : '<span style="color:var(--text-3)">–</span>';
+      const contact = [s.email, s.telefoon].filter(Boolean).join(' · ');
+      const detailHref = '/modules/leadsonderhoud.html?tab=opstartsessies&id=' + encodeURIComponent(s.id);
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text-3);font-size:11.5px" title="${esc(s.created_at)}">${esc(kortDt(s.created_at))}</td>
+        <td style="padding:8px 10px">
+          <div style="font-weight:600">${esc(s.naam || '—')}</div>
+          <div style="color:var(--text-3);font-size:11px">${esc(contact || '—')}</div>
+        </td>
+        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || '—')}</div></td>
+        <td style="padding:8px 10px">${badge}</td>
+        <td style="padding:8px 10px;text-align:center">${akkoord}</td>
+        <td style="padding:8px 10px">${esc(s.gekozen_slot || '—')}</td>
+        <td style="padding:8px 10px">${afsp}</td>
+        <td style="padding:8px 10px"><a href="${detailHref}" target="_blank" rel="noopener" style="color:var(--brand);text-decoration:none;font-size:11.5px">Detail ↗</a></td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="8" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen submissions in dit venster.'}</td></tr>`;
+
+    return `
+      <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
+        Alles wat leads op <code>deforexopleiding.nl/opstartsessie</code> invullen — inclusief afgewezen leads. Klik "Detail ↗" voor de vragenlijst-antwoorden.
+      </div>
+      ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:10px">
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
+          ${perChips}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Resultaat</span>
+          ${resChips}
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</span>
+          <select onchange="window._lsSetOpBron(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;background:var(--surface)">${bronOpts}</select>
+        </div>
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
+        ${_lsBeheerKnop('opstartsessies')}
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead>
+              <tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+                <th style="padding:8px 10px">Wanneer</th>
+                <th style="padding:8px 10px">Lead</th>
+                <th style="padding:8px 10px">Bron</th>
+                <th style="padding:8px 10px">Resultaat</th>
+                <th style="padding:8px 10px;text-align:center" title="€50-no-show-akkoord">Akkoord</th>
+                <th style="padding:8px 10px">Gekozen moment</th>
+                <th style="padding:8px 10px">Afspraak</th>
+                <th style="padding:8px 10px"></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function vragenlijstView() {
+    if (!_live.vragenlijst.fetched && !_live.vragenlijst.loading && !_live.vragenlijst.error) queueMicrotask(fetchVragenlijst);
+    const st = _live.vragenlijst;
+    const items = (st.data && st.data.items) || [];
+    const rows = items.length ? items.map(q => {
+      const live = q.live_versie ? `live v${q.live_versie}` : 'niet gepubliceerd';
+      const actief = q.is_active !== false;
+      const editHref = '/modules/leadsonderhoud.html?tab=vragenlijst';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px">
+          <div style="font-weight:600">${esc(q.naam)}</div>
+          <div style="color:var(--text-3);font-size:11px;font-family:var(--mono,monospace)">${esc(q.slug)}</div>
+        </td>
+        <td style="padding:8px 10px">${actief ? '<span style="color:var(--emerald);font-weight:600;font-size:11.5px">● Actief</span>' : '<span style="color:var(--text-3);font-size:11.5px">○ Uit</span>'}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${q.drempel}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${q.vragen_actief || 0}<span style="color:var(--text-3);font-size:11px"> / ${q.vragen_totaal || 0}</span></td>
+        <td style="padding:8px 10px"><span style="font-family:var(--mono,monospace);font-size:11.5px">${esc(live)}</span></td>
+        <td style="padding:8px 10px"><a href="${editHref}" target="_blank" rel="noopener" style="color:var(--brand);text-decoration:none;font-size:11.5px">Bewerken ↗</a></td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="6" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen vragenlijsten gevonden.'}</td></tr>`;
+
+    return `
+      <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
+        Vragenlijsten die de publieke pagina's op <code>deforexopleiding.nl</code> lezen. De werk-versie bewerkt / publiceer je in de editor (opent in nieuw tabblad); de website ziet alleen de gepubliceerde snapshot.
+      </div>
+      ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : (items.length + ' vragenlijst' + (items.length === 1 ? '' : 'en'))}</span>
+        ${_lsBeheerKnop('vragenlijst')}
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead>
+              <tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+                <th style="padding:8px 10px">Naam</th>
+                <th style="padding:8px 10px">Status</th>
+                <th style="padding:8px 10px;text-align:right">Drempel</th>
+                <th style="padding:8px 10px;text-align:right">Actieve vragen</th>
+                <th style="padding:8px 10px">Publicatie</th>
+                <th style="padding:8px 10px"></th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
   /* ── Registratie ───────────────────────────────────────────────────── */
   window.DFO.VIEWS['leadsonderhoud/Overzicht']      = overzichtView;
   window.DFO.VIEWS['leadsonderhoud/Contacten']      = contactenView;
   window.DFO.VIEWS['leadsonderhoud/Wachtrij']       = wachtrijView;
   window.DFO.VIEWS['leadsonderhoud/Gesprekken']     = gesprekkenView;
   window.DFO.VIEWS['leadsonderhoud/Statistieken']   = statsView;
+  window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
+  window.DFO.VIEWS['leadsonderhoud/Opstartsessies'] = opstartsessiesView;
+  window.DFO.VIEWS['leadsonderhoud/Vragenlijst']    = vragenlijstView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 
-  console.debug('[ls-v2] v=14 — Bulk-tab verwijderd (feature geschrapt). Nav-tabs: Overzicht/Contacten/Wachtrij/Gesprekken/Statistieken. Backend bulk-endpoints (preview/test-send/approve/cancel/status/jobs-list) + cron blijven in de repo staan maar zijn onbereikbaar zonder UI; cron-entry uit vercel.json verwijderd zodat er geen zinloze invocatie draait.');
+  console.debug('[ls-v2] v=15 — 3 Opstartsessie-tabs toegevoegd: Bronnen (booking-sources-list), Opstartsessies (leadsonderhoud-opstartsessies-list), Vragenlijst (leadsonderhoud-quiz-lijst). Read-only render in v2-shell; volledige CRUD blijft via /modules/leadsonderhoud.html?tab=... (v1-editor, opent in nieuw tabblad).');
 })();
