@@ -22,13 +22,21 @@
 //                  zich gestalkt voelt hoeft niet gebeld te worden. Vijf is
 //                  waar die twee elkaar raken. Het afsluiten is een keuze
 //                  die zichtbaar in het uitkomstenlog staat, geen lek.
-//   'retention'  — betalende klanten die verlengd moeten worden. Vier
-//                  pogingen, precies zoals het nu werkt: de rij krijgt de
-//                  status 'niet_bereikbaar' en BLIJFT open. Aandringen is
-//                  daar te rechtvaardigen; dit gedrag verandert niet.
-//   al het rest  — valt terug op CADANS_STANDAARD, en dat is exact wat er
-//                  vóór dit bestand gebeurde. Een onbekende herkomst kan
-//                  dus nooit stiller of harder worden dan vandaag.
+//   'retention'  — betalende klanten die verlengd moeten worden. Sinds
+//                  27-08-2026 ook VIJF pogingen, gelijk aan event. Niet omdat
+//                  het inhoudelijk hetzelfde is, maar omdat één getal
+//                  uitlegbaar is aan een salesteam en twee getallen tot
+//                  "hoeveel was het ook alweer" leiden.
+//                  Al het andere aan deze cadans blijft ongewijzigd: bij de
+//                  laatste poging krijgt de rij status 'niet_bereikbaar' en
+//                  BLIJFT hij open, en er wordt geen taak aangemaakt. Een
+//                  betalende klant is een ander soort lead dan een gratis
+//                  event-inschrijving; alleen het aantal is gelijkgetrokken.
+//   al het rest  — valt terug op CADANS_STANDAARD. Die staat bewust nog op
+//                  vier: dat is exact wat er vóór dit bestand gebeurde, en
+//                  een herkomst die hier niet genoemd wordt hoort niet
+//                  stilletjes mee te veranderen met een besluit dat over
+//                  event en retentie ging.
 //
 // LET OP — de belronde vóór een event valt hier BUITEN.
 // Die leads hebben óók source='event', maar volgen een eigen ritme (vandaag
@@ -79,7 +87,7 @@ export const CADANS = Object.freeze({
     taakPrioriteit    : 'Normaal',
   }),
   retention: Object.freeze({
-    maxPogingen       : 4,
+    maxPogingen       : 5,
     urenTussenPogingen: UREN_STANDAARD,
     bijMax            : BIJ_MAX.MARKEREN,
     // Retentie houdt exact het huidige gedrag: geen automatische taak.

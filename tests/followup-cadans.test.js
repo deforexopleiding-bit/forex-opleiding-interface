@@ -20,10 +20,18 @@ test('event: vijf pogingen, daarna sluit de rij bewust', () => {
   assert.equal(c.bijMax, BIJ_MAX.AFSLUITEN);
 });
 
-test('retention: vier pogingen, rij blijft open — het huidige gedrag', () => {
+test('retention: vijf pogingen, maar de rij blijft open — dat verschil blijft', () => {
   const c = cadansVoor('retention');
-  assert.equal(c.maxPogingen, 4);
+  assert.equal(c.maxPogingen, 5);
+  // Alléén het getal is gelijkgetrokken met event. Een betalende klant gaat
+  // niet dicht na de laatste poging maar krijgt 'niet_bereikbaar' en blijft
+  // open, en er komt geen automatische taak bij.
   assert.equal(c.bijMax, BIJ_MAX.MARKEREN);
+  assert.equal(c.taakBijPoging, null);
+});
+
+test('event en retention hebben nu hetzelfde aantal pogingen', () => {
+  assert.equal(cadansVoor('event').maxPogingen, cadansVoor('retention').maxPogingen);
 });
 
 test('onbekende herkomst valt terug op de standaard, en die is het oude gedrag', () => {
@@ -31,6 +39,9 @@ test('onbekende herkomst valt terug op de standaard, en die is het oude gedrag',
     const c = cadansVoor(h);
     assert.equal(c, CADANS_STANDAARD, `herkomst ${JSON.stringify(h)} hoort standaard te zijn`);
   }
+  // De standaard blijft bewust op vier staan: dat is het gedrag van vóór dit
+  // bestand. Een herkomst die niet in de tabel staat hoort niet mee te
+  // veranderen met een besluit dat over event en retentie ging.
   assert.equal(CADANS_STANDAARD.maxPogingen, 4);
   assert.equal(CADANS_STANDAARD.bijMax, BIJ_MAX.MARKEREN);
 });
