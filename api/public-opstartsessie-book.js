@@ -187,6 +187,53 @@ export default async function handler(req, res) {
       }
     }
 
+    // DEEL A extra (2026-08-28): koppel deze boeking aan een wachtende
+    // toegang_aanvragen-rij zodat call_geboekt=true wordt. Zonder deze
+    // update krijgt de lead Flow B ("Plan je call") terwijl ze net wél
+    // een call boekten. Match op email (case-insensitive) OF last-9-digits
+    // van telefoon — beide werken bij inconsistente E.164-formaten.
+    // Fail-soft: mag de boeking NOOIT breken (booking is al gelukt).
+    // Alleen status='wachtend' — een 'gereageerd' aanvraag heeft al
+    // provisioning gehad; call_geboekt daar wijzigen zou niks veranderen.
+    try {
+      const digits = String(telefoon || '').replace(/\D/g, '');
+      const last9  = digits.slice(-9);
+      // Selecteer kandidaten defensief (max 20) en filter in JS op last-9-match.
+      // Simpelere query dan een OR met right(regexp_replace(...)) — schaalt
+      // prima bij een handvol 'wachtend'-rijen.
+      const { data: kandidaten, error: fetchErr } = await supabaseAdmin
+        .from('toegang_aanvragen')
+        .select('id, email, telefoon')
+        .eq('status', 'wachtend')
+        .limit(20);
+      if (fetchErr) {
+        console.warn('[public-opstartsessie-book] toegang-aanvraag lookup (soft):', fetchErr.message);
+      } else if (kandidaten && kandidaten.length) {
+        const emailLc = String(email || '').trim().toLowerCase();
+        const matchIds = kandidaten
+          .filter((c) => {
+            if (emailLc && String(c.email || '').toLowerCase() === emailLc) return true;
+            const cd = String(c.telefoon || '').replace(/\D/g, '');
+            return cd && (cd === digits || cd.slice(-9) === last9);
+          })
+          .map((c) => c.id);
+        if (matchIds.length > 0) {
+          const { error: upErr, count } = await supabaseAdmin
+            .from('toegang_aanvragen')
+            .update({ call_geboekt: true }, { count: 'exact' })
+            .in('id', matchIds)
+            .eq('status', 'wachtend');
+          if (upErr) {
+            console.warn('[public-opstartsessie-book] call_geboekt update (soft):', upErr.message);
+          } else if (count) {
+            console.log('[public-opstartsessie-book] call_geboekt=true op', count, 'toegang_aanvragen-rij(en)');
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[public-opstartsessie-book] call_geboekt-sync exception (soft):', e?.message || e);
+    }
+
     return res.status(200).json({
       ok: true,
       appointment_id     : result.appointment_id,
