@@ -35,6 +35,33 @@ const DAG6_UREN = 6 * 24;
 // Statische call-link (voorlopig). Per-bron dynamisch = latere optie.
 const CALL_LINK = 'https://deforexopleiding.nl/agenda';
 
+// v=4 (2026-08-28): expliciete afzendlijn = welkom-nummer, LIVE uit DB.
+// Waarom: reacties komen via GHL binnen op het welkom-nummer (waar GHL voor
+// geconfigureerd staat). Zonder override valt Meta Cloud terug op de default
+// env META_WHATSAPP_PHONE_NUMBER_ID = finance-nummer → mismatch → replies
+// belanden in finance-thread, niet in GHL-welkom → gate ziet geen reactie
+// → status blijft eeuwig 'wachtend'.
+//
+// Hergebruikt bestaande whatsapp_module_config-tabel (module='welkom' rij
+// met phone_number_id). Geen nieuwe env nodig — welkom-automatiseringen
+// draaien al via deze mapping.
+// Fallback: WELKOM_WHATSAPP_PHONE_NUMBER_ID env als noodpad wanneer de
+// DB-lookup faalt.
+async function resolveWelkomPhoneId() {
+  try {
+    const { data } = await supabaseAdmin
+      .from('whatsapp_module_config')
+      .select('phone_number_id')
+      .eq('module', 'welkom')
+      .eq('is_active', true)
+      .maybeSingle();
+    if (data?.phone_number_id) return String(data.phone_number_id).trim();
+  } catch (e) {
+    console.warn('[cron-toegang-aanvragen] welkom-lookup (soft):', e?.message || e);
+  }
+  return process.env.WELKOM_WHATSAPP_PHONE_NUMBER_ID || null;
+}
+
 // ── E-mail-templates (named constants, makkelijk aanpasbaar) ───────────
 // Body-generatoren: (voornaam, callMoment?) → { subject, text, html }
 const MAIL_BEVESTIGING_A = (voornaam, callMoment) => {
@@ -176,10 +203,17 @@ function isNacht(nowMs) {
   return u >= NACHT_START_HOUR || u < NACHT_EIND_HOUR;
 }
 
-async function stuurWa(a, cfg, live) {
+async function stuurWa(a, cfg, live, welkomPhoneId) {
   if (!live) {
-    console.log('[cron-toegang-aanvragen] DROOG:', cfg.name, '->', a.telefoon);
+    console.log('[cron-toegang-aanvragen] DROOG:', cfg.name, '->', a.telefoon, '(via welkom:', !!welkomPhoneId, ')');
     return { ok: true, dry: true };
+  }
+  if (!welkomPhoneId) {
+    // Defensieve check: zonder welkom-phone_number_id zou een send naar het
+    // finance-nummer gaan (bug-gedrag). SKIP + log — is minder erg dan de
+    // bug opnieuw reproduceren.
+    console.warn('[cron-toegang-aanvragen] welkom phone_number_id niet resolvable (whatsapp_module_config + env-fallback beide leeg) — SKIP send om nummer-mismatch te voorkomen');
+    return { ok: false, skipped: true, error: 'welkom-phone-id-ontbreekt' };
   }
   try {
     const { wamid } = await sendTemplate({
@@ -187,6 +221,7 @@ async function stuurWa(a, cfg, live) {
       templateName: cfg.name,
       languageCode: 'nl',
       variables: cfg.vars(a),
+      phoneNumberId: welkomPhoneId,     // v=4: expliciete welkom-lijn (DB-lookup)
     });
     return { ok: true, wamid };
   } catch (e) {
@@ -220,7 +255,10 @@ export default async function handler(req, res) {
   const live = aanUit(process.env.TOEGANG_AANVRAGEN_LIVE);
   const now  = new Date();
   const nowMs = now.getTime();
-  const summary = { live, dry: !live, bevestiging: 0, reminders_2u: 0, reminders_24u: 0, reminders_48u: 0, vervallen: 0, dag6: 0, provisioning_calls: 0, errors: [] };
+  // v=4 (2026-08-28): eenmaal per run resolve — hergebruikt in alle
+  // stuurWa-aanroepen. DB-lookup op whatsapp_module_config (module='welkom').
+  const welkomPhoneId = await resolveWelkomPhoneId();
+  const summary = { live, dry: !live, welkom_phone: welkomPhoneId ? 'ok' : 'ontbreekt', bevestiging: 0, reminders_2u: 0, reminders_24u: 0, reminders_48u: 0, vervallen: 0, dag6: 0, provisioning_calls: 0, errors: [] };
 
   // Nacht-guard geldt alleen voor het VERZENDEN, niet voor status-transities
   // zoals 'vervallen' (die is stille administratie).
@@ -238,7 +276,7 @@ export default async function handler(req, res) {
       .limit(50);
     for (const a of (rows || [])) {
       const cfg = a.call_geboekt ? TEMPLATES.bevestig_a : TEMPLATES.bevestig_b;
-      const wa  = await stuurWa(a, cfg, live);
+      const wa  = await stuurWa(a, cfg, live, welkomPhoneId);
       // Mail A/B via named constants. Voor A: call-moment fail-soft ophalen
       // uit follow_up_appointments (match op telefoon last-9-digits).
       // Als niet gevonden: MAIL_BEVESTIGING_A valt terug op 'het geplande moment'.
@@ -278,7 +316,7 @@ export default async function handler(req, res) {
       .lte('bevestiging_sent_at', grens)
       .limit(50);
     for (const a of (rows || [])) {
-      const wa = await stuurWa(a, TEMPLATES[cfgKey], live);
+      const wa = await stuurWa(a, TEMPLATES[cfgKey], live, welkomPhoneId);
       if (wa.ok) {
         await supabaseAdmin.from('toegang_aanvragen')
           .update({ [kolom]: new Date().toISOString() })
@@ -325,7 +363,7 @@ export default async function handler(req, res) {
       // MINSTENS ÉÉN kanaal geslaagd is — voorkomt herhaling in volgende
       // cron-run als één kanaal tijdelijk faalt.
       const cfg = a.call_geboekt ? TEMPLATES.dag6_a : TEMPLATES.dag6_b;
-      const wa  = await stuurWa(a, cfg, live);
+      const wa  = await stuurWa(a, cfg, live, welkomPhoneId);
       const mailPayload = a.call_geboekt ? MAIL_DAG6_A(a.voornaam) : MAIL_DAG6_B(a.voornaam);
       const mail = await stuurMail(a, mailPayload.subject, mailPayload.text, mailPayload.html, live);
       const okAny = wa.ok || mail.ok;

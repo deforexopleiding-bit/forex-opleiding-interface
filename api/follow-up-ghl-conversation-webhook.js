@@ -361,7 +361,32 @@ export default async function handler(req, res) {
                     `Ik heb je inloggegevens net naar je e-mail gestuurd — check even je inbox ` +
                     `(en voor de zekerheid je spam). Kom je er niet uit? Stuur gerust een ` +
                     `berichtje. Veel succes! 🚀`;
-                  await sendText({ to: match.telefoon, body: wabody });
+                  // v=4 (2026-08-28): expliciete welkom-lijn, LIVE uit
+                  // whatsapp_module_config (module='welkom' rij). Zorgt dat de
+                  // reply in dezelfde WA-thread landt als de bevestiging +
+                  // reminders (= welkom-nummer, waar GHL voor geconfigureerd is).
+                  // Zonder override valt Meta terug op default finance-lijn →
+                  // thread-mismatch → user zou 2 threads krijgen. Env-fallback
+                  // WELKOM_WHATSAPP_PHONE_NUMBER_ID als noodpad.
+                  let welkomPhoneId = null;
+                  try {
+                    const { data: wc } = await supabaseAdmin
+                      .from('whatsapp_module_config')
+                      .select('phone_number_id')
+                      .eq('module', 'welkom')
+                      .eq('is_active', true)
+                      .maybeSingle();
+                    welkomPhoneId = wc?.phone_number_id
+                      || process.env.WELKOM_WHATSAPP_PHONE_NUMBER_ID
+                      || null;
+                  } catch (_) {
+                    welkomPhoneId = process.env.WELKOM_WHATSAPP_PHONE_NUMBER_ID || null;
+                  }
+                  if (!welkomPhoneId) {
+                    console.warn('[ghl-conversation-webhook] toegang-bevestig-wa: welkom phone_number_id niet resolvable — skip');
+                  } else {
+                    await sendText({ to: match.telefoon, body: wabody, phoneNumberId: welkomPhoneId });
+                  }
                 } catch (waErr) {
                   if (waErr instanceof MetaNotConfiguredError) {
                     console.warn('[ghl-conversation-webhook] toegang-bevestig-wa: meta niet geconfigureerd — skip');
