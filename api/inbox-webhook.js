@@ -34,6 +34,7 @@ import { supabaseAdmin } from './supabase.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
+import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
 import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
 import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
@@ -1418,6 +1419,128 @@ export default async function handler(req, res) {
               const insRes = await insertInboundMessage(conv.id, msg);
               if (insRes.inserted) stats.msgs_new++;
               else                 stats.msgs_dup++;
+
+              // v=2026-08-28: Toegang-gate hook (parallel aan de GHL-webhook
+              // hook). Meta-direct inbound WA landt hier IN whatsapp_messages
+              // — NIET in follow_up_messages — dus de gate-tak in
+              // follow-up-ghl-conversation-webhook wordt voor deze berichten
+              // nooit bereikt. Zelfde logica: match op telefoon last-9-digits
+              // tegen 'wachtend' toegang_aanvragen → status='gereageerd' +
+              // provisioning + "je bent binnen"-sendText. Alleen bij eerste
+              // insert (dedup skip). Fail-soft: gate mag webhook nooit breken.
+              // Onconditionele trace-log naar follow_up_events_log zodat we
+              // óók bij no-match kunnen zien wat er is gebeurd.
+              if (insRes.inserted) {
+                const _tsIso = new Date().toISOString();
+                const traceBase = {
+                  ts: _tsIso,
+                  source_endpoint: 'meta-inbox-webhook',
+                  wamid: insRes.messageId || null,
+                  phoneE164Plus,
+                  conv_id: conv?.id || null,
+                  receiver_phone_number_id: recvPhoneNumberId || null,
+                };
+                const traceEvents = [{ ...traceBase, stage: 'inbound-inserted' }];
+                try {
+                  const digits = String(phoneE164Plus || '').replace(/\D/g, '');
+                  const last9  = digits.slice(-9);
+                  const { data: rows } = await supabaseAdmin
+                    .from('toegang_aanvragen')
+                    .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
+                    .eq('status', 'wachtend')
+                    .order('created_at', { ascending: true })
+                    .limit(50);
+                  const kandidaten = (rows || []).filter((r) => {
+                    const rd = String(r.telefoon || '').replace(/\D/g, '');
+                    return rd && (rd === digits || rd.slice(-9) === last9);
+                  });
+                  const match = kandidaten[0] || null;
+                  traceEvents.push({ ...traceBase, stage: 'gate-lookup',
+                    wachtend_rijen: rows?.length ?? 0,
+                    kandidaten: kandidaten.length,
+                    match_id: match?.id || null,
+                    inbound_last9: last9,
+                  });
+                  console.log('[inbox-webhook] toegang-gate:',
+                    'wachtend-rijen=', rows?.length ?? 0,
+                    'kandidaten=', kandidaten.length,
+                    'match=', match?.id || 'geen',
+                    'inbound-last9=', last9);
+                  if (match) {
+                    traceEvents.push({ ...traceBase, stage: 'gate-match',
+                      match_id: match.id, soort: match.soort, provisioned_al: !!match.provisioned_at,
+                    });
+                    // Status → 'gereageerd' (race-guard op status='wachtend').
+                    await supabaseAdmin
+                      .from('toegang_aanvragen')
+                      .update({ status: 'gereageerd', reacted_at: _tsIso })
+                      .eq('id', match.id)
+                      .eq('status', 'wachtend');
+                    // Provisioning-call (1× via provisioned_at guard).
+                    if (!match.provisioned_at) {
+                      const r = await belProvisioning({
+                        email: match.email, voornaam: match.voornaam, soort: match.soort,
+                      });
+                      traceEvents.push({ ...traceBase, stage: 'provisioning-call',
+                        ok: r?.ok === true, status: r?.status || null, error: r?.error || null,
+                      });
+                      if (r.ok) {
+                        const { data: updated, error: guardErr } = await supabaseAdmin
+                          .from('toegang_aanvragen')
+                          .update({ provisioned_at: new Date().toISOString(), provisioned_error: null })
+                          .eq('id', match.id)
+                          .is('provisioned_at', null)
+                          .select('id')
+                          .maybeSingle();
+                        if (!guardErr && updated?.id) {
+                          try {
+                            const naam = match.voornaam || 'daar';
+                            const wabody =
+                              `Top ${naam}! ✅ Je bent bevestigd en je gratis toegang staat open. ` +
+                              `Ik heb je inloggegevens net naar je e-mail gestuurd — check even je inbox ` +
+                              `(en voor de zekerheid je spam). Kom je er niet uit? Stuur gerust een ` +
+                              `berichtje. Veel succes! 🚀`;
+                            // Hetzelfde nummer als waar de inbound binnenkwam →
+                            // recvPhoneNumberId. Dat is de meest betrouwbare bron
+                            // (Meta zelf zegt op welke lijn 't binnenkwam) en
+                            // voorkomt thread-mismatch — geen DB-lookup nodig.
+                            if (recvPhoneNumberId) {
+                              await sendText({ to: match.telefoon, body: wabody, phoneNumberId: recvPhoneNumberId });
+                            } else {
+                              console.warn('[inbox-webhook] toegang-bevestig-wa: recvPhoneNumberId ontbreekt — skip');
+                            }
+                          } catch (waErr) {
+                            if (!(waErr instanceof MetaNotConfiguredError)) {
+                              console.warn('[inbox-webhook] toegang-bevestig-wa (soft):', waErr?.message || waErr);
+                            }
+                          }
+                        }
+                      } else {
+                        await supabaseAdmin.from('toegang_aanvragen')
+                          .update({ provisioned_error: (r.error || 'onbekend').slice(0, 500) })
+                          .eq('id', match.id);
+                        console.warn('[inbox-webhook] provisioning fail:', match.id, r.error);
+                      }
+                    }
+                  }
+                } catch (gateErr) {
+                  traceEvents.push({ ...traceBase, stage: 'gate-exception',
+                    error: (gateErr?.message || String(gateErr)).slice(0, 300),
+                  });
+                  console.warn('[inbox-webhook] toegang-gate exception (soft):', gateErr?.message || gateErr);
+                }
+                // Onconditionele trace-flush (fail-soft).
+                try {
+                  await supabaseAdmin
+                    .from('follow_up_events_log')
+                    .insert({
+                      source: 'ghl', event_type: 'toegang-gate-trace',
+                      payload: { events: traceEvents }, processed: true,
+                    });
+                } catch (flushErr) {
+                  console.warn('[inbox-webhook] toegang-gate trace-write (soft):', flushErr?.message || flushErr);
+                }
+              }
 
               // 2a-media. Bij inbound MEDIA-berichten (image/document/audio/
               // video/sticker) heeft insertInboundMessage 'meta-media-id:<id>'

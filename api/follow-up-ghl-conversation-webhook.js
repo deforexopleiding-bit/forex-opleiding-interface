@@ -487,22 +487,22 @@ export default async function handler(req, res) {
     }
   }
 
-  // v=3 flush trace naar follow_up_events_log — één rij per inbound WA
-  // (fail-soft; log-write mag de webhook NOOIT breken). Uitleesbaar via
-  // GET /api/admin-toegang-gate-trace-list (super_admin gated).
-  if (direction === 'inbound' && channel === 'whatsapp') {
-    try {
-      await supabaseAdmin
-        .from('follow_up_events_log')
-        .insert({
-          source:     'ghl',
-          event_type: 'toegang-gate-trace',
-          payload:    { events: traceEvents },
-          processed:  true,
-        });
-    } catch (traceErr) {
-      console.warn('[ghl-conversation-webhook] toegang-gate trace-write (soft):', traceErr?.message || traceErr);
-    }
+  // v=4 (2026-08-28) UNCONDITIONAL trace-flush: schrijf voor ELKE webhook-
+  // invocatie die tot een follow_up_messages-insert heeft geleid. Zo zien
+  // we óók inbound waar de toegang-gate niet triggerde (bv. door channel-
+  // of direction-mismatch) — geen blinde vlek meer precies wanneer we 'em
+  // nodig hebben. Fail-soft.
+  try {
+    await supabaseAdmin
+      .from('follow_up_events_log')
+      .insert({
+        source:     'ghl',
+        event_type: 'toegang-gate-trace',
+        payload:    { events: traceEvents },
+        processed:  true,
+      });
+  } catch (traceErr) {
+    console.warn('[ghl-conversation-webhook] toegang-gate trace-write (soft):', traceErr?.message || traceErr);
   }
 
   return res.status(200).json({
