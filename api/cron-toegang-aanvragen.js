@@ -154,7 +154,7 @@ const TEMPLATES = {
   bevestig_b:   { name: 'bevestig_toegang_b',  vars: (a) => [a.voornaam || 'daar', process.env.OPSTARTSESSIE_CALL_URL || 'https://deforexopleiding.nl/agenda'] },
   reminder_2u:  { name: 'reminder_toegang_2u', vars: (a) => [a.voornaam || 'daar'] },
   reminder_24u: { name: 'reminder_toegang_24u',vars: (a) => [a.voornaam || 'daar'] },
-  reminder_48u: { name: 'reminder_toegang_48u',vars: (a) => [a.voornaam || 'daar'] },
+  reminder_48u: { name: 'reminder_toegang_48u_v3',vars: (a) => [a.voornaam || 'daar'] },
   dag6_a:       { name: 'dag6_checkin_a',      vars: (a) => [a.voornaam || 'daar'] },
   dag6_b:       { name: 'dag6_checkin_b',      vars: (a) => [a.voornaam || 'daar', process.env.OPSTARTSESSIE_CALL_URL || 'https://deforexopleiding.nl/agenda'] },
 };
