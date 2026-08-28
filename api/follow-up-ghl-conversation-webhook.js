@@ -302,27 +302,71 @@ export default async function handler(req, res) {
   // ── DEEL D — Toegang-gate: inbound WA-reply → provisioning ────────────
   // Fail-soft: mag de webhook NOOIT breken (return 200 zelfs bij failure —
   // GHL retryt anders eindeloos en de message is al opgeslagen).
-  // Match op telefoon: haal 'em uit contact.phone → normaliseer → zoek
-  // een 'wachtend' toegang_aanvragen-rij → status='gereageerd' + reacted_at
-  // → roep dfo-website provisioning aan → provisioned_at.
+  //
+  // v=2 (2026-08-28) observability + robustness fix:
+  //  - Log altijd de gate-beslissing (skipped-reason, rawPhone, aantal
+  //    kandidaten, match ja/nee) — vorige versie was volledig stil
+  //    → root-cause onvindbaar zonder handmatig te instrumenteren.
+  //  - Fallback wanneer contact.phone leeg: fetch GHL contact via API met
+  //    contactId (GHL levert phone niet altijd inline in webhook-payload).
+  //  - Deterministisch bij meerdere wachtend-rijen met zelfde nummer: pak
+  //    OUDSTE (created_at ASC) i.p.v. onvoorspelbare volgorde.
   if (direction === 'in' && channel === 'whatsapp') {
     try {
-      const rawPhone = contact?.phone || contact?.phoneNumber || message?.from || null;
-      if (rawPhone) {
+      let rawPhone = contact?.phone || contact?.phoneNumber || message?.from || null;
+
+      // Fallback: fetch GHL-contact als payload geen phone bevatte maar wel contactId.
+      if (!rawPhone && contactId) {
+        try {
+          const token = process.env.GHL_PIT_TOKEN || process.env.GHL_API_KEY || null;
+          if (token) {
+            const cRes = await fetch(
+              `https://services.leadconnectorhq.com/contacts/${encodeURIComponent(contactId)}`,
+              { headers: { Authorization: `Bearer ${token}`, Version: '2021-07-28', Accept: 'application/json' } }
+            );
+            if (cRes.ok) {
+              const cJson = await cRes.json().catch(() => null);
+              const c = cJson?.contact || cJson?.data?.contact || cJson || null;
+              rawPhone = c?.phone || c?.phoneNumber || null;
+              console.log('[ghl-conversation-webhook] toegang-gate: rawPhone leeg, GHL-contact-fetch →', rawPhone ? 'phone gevonden' : 'geen phone');
+            } else {
+              console.warn('[ghl-conversation-webhook] toegang-gate: GHL contact-fetch fail', cRes.status);
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('[ghl-conversation-webhook] toegang-gate: GHL contact-fetch exception (soft):', fetchErr?.message || fetchErr);
+        }
+      }
+
+      if (!rawPhone) {
+        console.warn('[ghl-conversation-webhook] toegang-gate SKIP: geen rawPhone in payload NOR via GHL contact-fetch, contactId=', contactId);
+      } else {
         // Normaliseer naar digits-only voor last-N-match (dfo-website kan met of
         // zonder + doorsturen, en de toegang_aanvragen.telefoon staat als E.164).
         const digits = String(rawPhone).replace(/\D/g, '');
         const last9 = digits.slice(-9);
         // Zoek 'wachtend' aanvraag met matchend telefoonnummer (last-9-match).
+        // v=2: order by created_at ASC → bij meerdere matches (bv. jeffr +
+        // jeffrey-test met zelfde nummer) pakken we deterministisch de OUDSTE.
         const { data: rows } = await supabaseAdmin
           .from('toegang_aanvragen')
-          .select('id, voornaam, email, telefoon, soort, provisioned_at')
+          .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
           .eq('status', 'wachtend')
+          .order('created_at', { ascending: true })
           .limit(50);
-        const match = (rows || []).find((r) => {
+        const kandidaten = (rows || []).filter((r) => {
           const rd = String(r.telefoon || '').replace(/\D/g, '');
           return rd && (rd === digits || rd.slice(-9) === last9);
         });
+        const match = kandidaten[0] || null;
+        console.log('[ghl-conversation-webhook] toegang-gate:',
+          'wachtend-rijen=', rows?.length ?? 0,
+          'kandidaten=', kandidaten.length,
+          'match=', match?.id || 'geen',
+          'inbound-last9=', last9);
+        if (kandidaten.length > 1) {
+          console.warn('[ghl-conversation-webhook] toegang-gate: meerdere match-kandidaten voor zelfde nummer — kies oudste', kandidaten.map((k) => k.id));
+        }
         if (match) {
           // 1) Status → 'gereageerd' + reacted_at (idempotent — WHERE guard).
           const nowIso = new Date().toISOString();
