@@ -361,19 +361,20 @@ export default async function handler(req, res) {
                     `Ik heb je inloggegevens net naar je e-mail gestuurd — check even je inbox ` +
                     `(en voor de zekerheid je spam). Kom je er niet uit? Stuur gerust een ` +
                     `berichtje. Veel succes! 🚀`;
-                  // v=4 (2026-08-28): expliciete welkom-lijn, LIVE uit
-                  // whatsapp_module_config (module='welkom' rij). Zorgt dat de
-                  // reply in dezelfde WA-thread landt als de bevestiging +
-                  // reminders (= welkom-nummer, waar GHL voor geconfigureerd is).
-                  // Zonder override valt Meta terug op default finance-lijn →
-                  // thread-mismatch → user zou 2 threads krijgen. Env-fallback
-                  // WELKOM_WHATSAPP_PHONE_NUMBER_ID als noodpad.
+                  // v=5 (2026-08-28): expliciete welkom-lijn via bestaande
+                  // whatsapp_module_config-rij module='leadsonderhoud'
+                  // (label "Esmee" — phone_number_id = DFO Welkom
+                  // 0644642495). GEEN aparte module='welkom' rij: de
+                  // omgekeerde lookup verwacht een uniek phone_number_id
+                  // en een dubbele rij zou de Esmee-inbound routing kunnen
+                  // breken. Env-fallback WELKOM_WHATSAPP_PHONE_NUMBER_ID
+                  // als noodpad bij DB-lookup-fout.
                   let welkomPhoneId = null;
                   try {
                     const { data: wc } = await supabaseAdmin
                       .from('whatsapp_module_config')
                       .select('phone_number_id')
-                      .eq('module', 'welkom')
+                      .eq('module', 'leadsonderhoud')
                       .eq('is_active', true)
                       .maybeSingle();
                     welkomPhoneId = wc?.phone_number_id

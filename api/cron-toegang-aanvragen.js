@@ -35,29 +35,30 @@ const DAG6_UREN = 6 * 24;
 // Statische call-link (voorlopig). Per-bron dynamisch = latere optie.
 const CALL_LINK = 'https://deforexopleiding.nl/agenda';
 
-// v=4 (2026-08-28): expliciete afzendlijn = welkom-nummer, LIVE uit DB.
-// Waarom: reacties komen via GHL binnen op het welkom-nummer (waar GHL voor
-// geconfigureerd staat). Zonder override valt Meta Cloud terug op de default
-// env META_WHATSAPP_PHONE_NUMBER_ID = finance-nummer → mismatch → replies
-// belanden in finance-thread, niet in GHL-welkom → gate ziet geen reactie
-// → status blijft eeuwig 'wachtend'.
+// v=5 (2026-08-28): expliciete afzendlijn = welkom-nummer via bestaande
+// whatsapp_module_config-rij module='leadsonderhoud' (label "Esmee" —
+// phone_number_id 1232908829908396 = DFO Welkom 0644642495).
 //
-// Hergebruikt bestaande whatsapp_module_config-tabel (module='welkom' rij
-// met phone_number_id). Geen nieuwe env nodig — welkom-automatiseringen
-// draaien al via deze mapping.
-// Fallback: WELKOM_WHATSAPP_PHONE_NUMBER_ID env als noodpad wanneer de
-// DB-lookup faalt.
+// Waarom NIET module='welkom' upserten: de omgekeerde lookup
+// getModuleContextByPhoneNumberId (module-context.js) verwacht een UNIEK
+// phone_number_id. Een tweede rij met hetzelfde nummer zou de inbound-
+// routing van bestaande Esmee-flows (via inbox-webhook) ambigu maken en
+// stilletjes breken (maybeSingle zou random één rij pakken).
+//
+// Reacties komen via GHL binnen op ditzelfde welkom-nummer (Esmee/leadsonderhoud
+// is er al voor geconfigureerd) → thread-consistentie is gegarandeerd.
+// Fallback: WELKOM_WHATSAPP_PHONE_NUMBER_ID env als noodpad bij DB-lookup-fout.
 async function resolveWelkomPhoneId() {
   try {
     const { data } = await supabaseAdmin
       .from('whatsapp_module_config')
       .select('phone_number_id')
-      .eq('module', 'welkom')
+      .eq('module', 'leadsonderhoud')
       .eq('is_active', true)
       .maybeSingle();
     if (data?.phone_number_id) return String(data.phone_number_id).trim();
   } catch (e) {
-    console.warn('[cron-toegang-aanvragen] welkom-lookup (soft):', e?.message || e);
+    console.warn('[cron-toegang-aanvragen] leadsonderhoud-phone lookup (soft):', e?.message || e);
   }
   return process.env.WELKOM_WHATSAPP_PHONE_NUMBER_ID || null;
 }
