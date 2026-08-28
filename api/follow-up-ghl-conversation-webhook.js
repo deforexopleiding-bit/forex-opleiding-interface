@@ -12,6 +12,7 @@
 
 import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
+import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
 
 function normalizePayload(body) {
   if (!body || typeof body !== 'object') {
@@ -295,6 +296,64 @@ export default async function handler(req, res) {
   if (upsertErr) {
     console.error('[ghl-conversation-webhook] upsert error:', upsertErr.message);
     return res.status(500).json({ error: upsertErr.message });
+  }
+
+  // ── DEEL D — Toegang-gate: inbound WA-reply → provisioning ────────────
+  // Fail-soft: mag de webhook NOOIT breken (return 200 zelfs bij failure —
+  // GHL retryt anders eindeloos en de message is al opgeslagen).
+  // Match op telefoon: haal 'em uit contact.phone → normaliseer → zoek
+  // een 'wachtend' toegang_aanvragen-rij → status='gereageerd' + reacted_at
+  // → roep dfo-website provisioning aan → provisioned_at.
+  if (direction === 'in' && channel === 'whatsapp') {
+    try {
+      const rawPhone = contact?.phone || contact?.phoneNumber || message?.from || null;
+      if (rawPhone) {
+        // Normaliseer naar digits-only voor last-N-match (dfo-website kan met of
+        // zonder + doorsturen, en de toegang_aanvragen.telefoon staat als E.164).
+        const digits = String(rawPhone).replace(/\D/g, '');
+        const last9 = digits.slice(-9);
+        // Zoek 'wachtend' aanvraag met matchend telefoonnummer (last-9-match).
+        const { data: rows } = await supabaseAdmin
+          .from('toegang_aanvragen')
+          .select('id, voornaam, email, telefoon, soort, provisioned_at')
+          .eq('status', 'wachtend')
+          .limit(50);
+        const match = (rows || []).find((r) => {
+          const rd = String(r.telefoon || '').replace(/\D/g, '');
+          return rd && (rd === digits || rd.slice(-9) === last9);
+        });
+        if (match) {
+          // 1) Status → 'gereageerd' + reacted_at (idempotent — WHERE guard).
+          const nowIso = new Date().toISOString();
+          await supabaseAdmin
+            .from('toegang_aanvragen')
+            .update({ status: 'gereageerd', reacted_at: nowIso })
+            .eq('id', match.id)
+            .eq('status', 'wachtend'); // race-guard
+
+          // 2) Provisioning-call. Alleen 1× (provisioned_at guard).
+          if (!match.provisioned_at) {
+            const r = await belProvisioning({
+              email: match.email, voornaam: match.voornaam, soort: match.soort,
+            });
+            if (r.ok) {
+              await supabaseAdmin.from('toegang_aanvragen')
+                .update({ provisioned_at: new Date().toISOString(), provisioned_error: null })
+                .eq('id', match.id)
+                .is('provisioned_at', null); // guard tegen dubbele call
+            } else {
+              await supabaseAdmin.from('toegang_aanvragen')
+                .update({ provisioned_error: (r.error || 'onbekend').slice(0, 500) })
+                .eq('id', match.id);
+              console.warn('[ghl-conversation-webhook] provisioning fail:', match.id, r.error);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Nooit de webhook laten falen op de toegang-gate.
+      console.warn('[ghl-conversation-webhook] toegang-gate exception:', e?.message || e);
+    }
   }
 
   return res.status(200).json({

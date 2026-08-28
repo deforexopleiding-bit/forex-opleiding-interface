@@ -66,6 +66,9 @@
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
     opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', lastKey: null },
     vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
+    // v=17 (2026-08-28): Toegang-aanvragen tab (WhatsApp-gate).
+    toegangAanvragen: { loading: false, fetched: false, error: null, data: null, _seq: 0,
+                        status: 'alle', soort: 'alle', periode: 'alles', lastKey: null },
   };
 
   /* ── tryFetch (8s timeout, non-throwing) ────────────────────────────── */
@@ -2650,6 +2653,105 @@
   window.DFO.VIEWS['leadsonderhoud/Wachtrij']       = wachtrijView;
   window.DFO.VIEWS['leadsonderhoud/Gesprekken']     = gesprekkenView;
   window.DFO.VIEWS['leadsonderhoud/Statistieken']   = statsView;
+  /* ══════════════════════════════════════════════════════════════════
+     v=17 TAB — Toegang-aanvragen (WhatsApp-gate monitoring).
+     Read-only lijst uit /api/leadsonderhoud-toegang-aanvragen-list.
+     Filters: status / soort / periode. RBAC: leads.view via endpoint.
+     ══════════════════════════════════════════════════════════════════ */
+  async function fetchToegangAanvragen(force) {
+    const st = _live.toegangAanvragen;
+    const key = 's=' + st.status + '&t=' + st.soort + '&p=' + st.periode;
+    if (!force && st.lastKey === key && st.fetched && !st.error) return;
+    st.loading = true; st.error = null; st.lastKey = key;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    const qs = 'status=' + encodeURIComponent(st.status) + '&soort=' + encodeURIComponent(st.soort) + '&periode=' + encodeURIComponent(st.periode);
+    try {
+      const j = await window.KV.authedJson('/api/leadsonderhoud-toegang-aanvragen-list?' + qs);
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      st.error = 'Kon toegang-aanvragen niet laden' + (e?.status ? ' (HTTP ' + e.status + ')' : '') + (e?.body?.detail ? ' — ' + String(e.body.detail).slice(0, 150) : '');
+    }
+    st.loading = false; st.fetched = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsSetTaStatus  = (s) => { _live.toegangAanvragen.status  = s; fetchToegangAanvragen(true); };
+  window._lsSetTaSoort   = (s) => { _live.toegangAanvragen.soort   = s; fetchToegangAanvragen(true); };
+  window._lsSetTaPeriode = (p) => { _live.toegangAanvragen.periode = p; fetchToegangAanvragen(true); };
+
+  function toegangAanvragenView() {
+    if (!_live.toegangAanvragen.fetched && !_live.toegangAanvragen.loading && !_live.toegangAanvragen.error) {
+      queueMicrotask(() => fetchToegangAanvragen(false));
+    }
+    const st = _live.toegangAanvragen;
+    const data = st.data || { items: [], total: 0 };
+    const items = data.items || [];
+    const kortDt = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); } catch(_){ return String(iso); } };
+    const statusOpts  = [['alle','Alle'],['wachtend','Wachtend'],['gereageerd','Gereageerd'],['vervallen','Vervallen']];
+    const soortOpts   = [['alle','Alle'],['7-daagse','7-daagse'],['minicursus','Mini-cursus']];
+    const periodeOpts = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
+    const chip = (arr, curr, setter) => arr.map(([k,l]) => `<button class="chip ${curr===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window.${setter}('${k}')">${esc(l)}</button>`).join('');
+
+    const stapPill = (aan, label) => aan
+      ? `<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 6px;border-radius:8px;font-size:10.5px;font-weight:600;margin-right:2px">${label}✓</span>`
+      : `<span style="background:var(--surface-2);color:var(--text-3);padding:2px 6px;border-radius:8px;font-size:10.5px;margin-right:2px">${label}</span>`;
+
+    const statusBadge = (s) => {
+      const style = s === 'gereageerd' ? 'background:var(--emerald-soft);color:var(--emerald)'
+                   : s === 'vervallen' ? 'background:var(--surface-2);color:var(--text-3)'
+                   : 'background:var(--amber-soft);color:var(--amber)';
+      return `<span style="${style};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">${esc(s || '—')}</span>`;
+    };
+
+    const rows = items.length ? items.map((r) => `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 10px;font-size:11.5px;color:var(--text-3);white-space:nowrap;font-variant-numeric:tabular-nums" title="${esc(r.created_at)}">${esc(kortDt(r.created_at))}</td>
+      <td style="padding:8px 10px">
+        <div style="font-weight:600">${esc(r.voornaam || '—')}</div>
+        <div style="color:var(--text-3);font-size:11px">${esc([r.email, r.telefoon].filter(Boolean).join(' · ') || '—')}</div>
+      </td>
+      <td style="padding:8px 10px">${esc(r.soort)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(r.bron || '—')}</div></td>
+      <td style="padding:8px 10px;text-align:center">${r.call_geboekt ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>'}</td>
+      <td style="padding:8px 10px">${statusBadge(r.status)}</td>
+      <td style="padding:8px 10px;font-size:11.5px;color:var(--text-3);white-space:nowrap">${esc(kortDt(r.reacted_at))}</td>
+      <td style="padding:8px 10px;white-space:nowrap">
+        ${stapPill(r.bevestiging_sent, 'bev')}${stapPill(r.reminder_2u_sent, '2u')}${stapPill(r.reminder_24u_sent, '24u')}${stapPill(r.reminder_48u_sent, '48u')}${r.soort === '7-daagse' ? stapPill(r.dag6_sent, 'd6') : ''}
+      </td>
+      <td style="padding:8px 10px;text-align:center">${r.provisioned_at
+          ? '<span style="color:var(--emerald);font-weight:600" title="Inlog verstuurd">✓</span>'
+          : (r.provisioned_error ? `<span style="color:var(--rose);font-weight:600" title="${esc(r.provisioned_error)}">⚠</span>` : '<span style="color:var(--text-3)">–</span>')}</td>
+    </tr>`).join('') : `<tr><td colspan="8" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen aanvragen in dit venster.'}</td></tr>`;
+
+    return `
+      <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
+        WhatsApp-gate voor <b>7-daagse</b> + <b>mini-cursus</b>: gekwalificeerde leads komen hier binnen als 'wachtend'; ze krijgen bevestiging (~2 min) + reminders (2u/24u/48u) via WA/mail; zodra ze op WhatsApp reageren → 'gereageerd' + inlog wordt automatisch verstuurd; anders → 'vervallen' na 48u. Stap-pills: <b>bev</b>=bevestiging · <b>2u/24u/48u</b>=reminders · <b>d6</b>=dag-6 check-in (alleen 7-daagse). Kolom "Inlog": ✓ betekent dfo-website heeft LMS-toegang + mail verstuurd.
+      </div>
+      ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:10px">
+        <div style="display:flex;gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Status</span>${chip(statusOpts, st.status, '_lsSetTaStatus')}</div>
+        <div style="display:flex;gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Soort</span>${chip(soortOpts, st.soort, '_lsSetTaSoort')}</div>
+        <div style="display:flex;gap:6px;align-items:center"><span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>${chip(periodeOpts, st.periode, '_lsSetTaPeriode')}</div>
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : ((data.total || items.length) + ' aanvraag' + ((data.total || items.length) === 1 ? '' : 'en'))}</span>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+            <th style="padding:8px 10px">Aangemeld</th>
+            <th style="padding:8px 10px">Lead</th>
+            <th style="padding:8px 10px">Soort</th>
+            <th style="padding:8px 10px;text-align:center" title="Call al geboekt in de funnel">Call</th>
+            <th style="padding:8px 10px">Status</th>
+            <th style="padding:8px 10px">Gereageerd</th>
+            <th style="padding:8px 10px">Stappen</th>
+            <th style="padding:8px 10px;text-align:center" title="Inlog verstuurd door dfo-website">Inlog</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </div>`;
+  }
+
+  window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
   window.DFO.VIEWS['leadsonderhoud/Opstartsessies'] = opstartsessiesView;
   window.DFO.VIEWS['leadsonderhoud/Vragenlijst']    = vragenlijstView;
