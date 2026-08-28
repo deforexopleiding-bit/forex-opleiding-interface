@@ -258,6 +258,25 @@ export default async function handler(req, res) {
     return res.status(200).json({ received: true, processed: false, reason: 'missing-contact-id' });
   }
 
+  // v=3 (2026-08-28): handler-top trace-log. Schrijft naar follow_up_events_log
+  // met event_type='toegang-gate-trace' zodat we via admin-endpoint kunnen
+  // uitlezen zonder Vercel-logs. Elk inbound-WA leidt tot 1 rij hier;
+  // handig om te zien wat de handler ontvangt bij een test-reply.
+  // Fail-soft: log-write mag de webhook NOOIT breken.
+  const _traceBase = {
+    ts: new Date().toISOString(),
+    ghl_message_id: ghlMessageId,
+    direction,
+    channel,
+    contactId,
+    conversationId: conversationId || null,
+    contact_phone_present: !!(contact?.phone || contact?.phoneNumber || message?.from),
+    payload_shape: (body?.message && typeof body?.message === 'object' && body?.message?.id) ? 'nested-shape1'
+                  : (body?.contact && !body?.message?.id) ? 'flat-shape2' : 'unknown',
+  };
+  const traceEvents = [{ ...(_traceBase), stage: 'handler-received' }];
+  const pushTrace = (stage, extra) => traceEvents.push({ ..._traceBase, stage, ...extra });
+
   // conversationId is optioneel — GHL standard-data heeft het niet altijd
   if (!conversationId) {
     console.log('[ghl-conversation-webhook] geen conversationId — gebruik contactId als virtual convo');
@@ -311,7 +330,8 @@ export default async function handler(req, res) {
   //    contactId (GHL levert phone niet altijd inline in webhook-payload).
   //  - Deterministisch bij meerdere wachtend-rijen met zelfde nummer: pak
   //    OUDSTE (created_at ASC) i.p.v. onvoorspelbare volgorde.
-  if (direction === 'in' && channel === 'whatsapp') {
+  if (direction === 'inbound' && channel === 'whatsapp') {
+    pushTrace('gate-enter');
     try {
       let rawPhone = contact?.phone || contact?.phoneNumber || message?.from || null;
 
@@ -340,6 +360,7 @@ export default async function handler(req, res) {
 
       if (!rawPhone) {
         console.warn('[ghl-conversation-webhook] toegang-gate SKIP: geen rawPhone in payload NOR via GHL contact-fetch, contactId=', contactId);
+        pushTrace('gate-skip', { reason: 'geen-rawphone' });
       } else {
         // Normaliseer naar digits-only voor last-N-match (dfo-website kan met of
         // zonder + doorsturen, en de toegang_aanvragen.telefoon staat als E.164).
@@ -364,10 +385,17 @@ export default async function handler(req, res) {
           'kandidaten=', kandidaten.length,
           'match=', match?.id || 'geen',
           'inbound-last9=', last9);
+        pushTrace('gate-lookup', {
+          wachtend_rijen: rows?.length ?? 0,
+          kandidaten: kandidaten.length,
+          match_id: match?.id || null,
+          inbound_last9: last9,
+        });
         if (kandidaten.length > 1) {
           console.warn('[ghl-conversation-webhook] toegang-gate: meerdere match-kandidaten voor zelfde nummer — kies oudste', kandidaten.map((k) => k.id));
         }
         if (match) {
+          pushTrace('gate-match', { match_id: match.id, soort: match.soort, provisioned_al: !!match.provisioned_at });
           // 1) Status → 'gereageerd' + reacted_at (idempotent — WHERE guard).
           const nowIso = new Date().toISOString();
           await supabaseAdmin
@@ -381,6 +409,7 @@ export default async function handler(req, res) {
             const r = await belProvisioning({
               email: match.email, voornaam: match.voornaam, soort: match.soort,
             });
+            pushTrace('provisioning-call', { ok: r?.ok === true, status: r?.status || null, error: r?.error || null });
             if (r.ok) {
               // Race-safe: alleen als we de guard daadwerkelijk zetten (from
               // NULL → now), sturen we ook de "je bent binnen"-WA. Anders
@@ -454,6 +483,25 @@ export default async function handler(req, res) {
     } catch (e) {
       // Nooit de webhook laten falen op de toegang-gate.
       console.warn('[ghl-conversation-webhook] toegang-gate exception:', e?.message || e);
+      pushTrace('gate-exception', { error: (e?.message || String(e)).slice(0, 300) });
+    }
+  }
+
+  // v=3 flush trace naar follow_up_events_log — één rij per inbound WA
+  // (fail-soft; log-write mag de webhook NOOIT breken). Uitleesbaar via
+  // GET /api/admin-toegang-gate-trace-list (super_admin gated).
+  if (direction === 'inbound' && channel === 'whatsapp') {
+    try {
+      await supabaseAdmin
+        .from('follow_up_events_log')
+        .insert({
+          source:     'ghl',
+          event_type: 'toegang-gate-trace',
+          payload:    { events: traceEvents },
+          processed:  true,
+        });
+    } catch (traceErr) {
+      console.warn('[ghl-conversation-webhook] toegang-gate trace-write (soft):', traceErr?.message || traceErr);
     }
   }
 
