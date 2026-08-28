@@ -13,6 +13,7 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
+import { sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 
 function normalizePayload(body) {
   if (!body || typeof body !== 'object') {
@@ -337,10 +338,40 @@ export default async function handler(req, res) {
               email: match.email, voornaam: match.voornaam, soort: match.soort,
             });
             if (r.ok) {
-              await supabaseAdmin.from('toegang_aanvragen')
+              // Race-safe: alleen als we de guard daadwerkelijk zetten (from
+              // NULL → now), sturen we ook de "je bent binnen"-WA. Anders
+              // heeft een parallel-request 'em al gedaan.
+              const { data: updated, error: guardErr } = await supabaseAdmin
+                .from('toegang_aanvragen')
                 .update({ provisioned_at: new Date().toISOString(), provisioned_error: null })
                 .eq('id', match.id)
-                .is('provisioned_at', null); // guard tegen dubbele call
+                .is('provisioned_at', null) // guard tegen dubbele call
+                .select('id')
+                .maybeSingle();
+              // Gat 3: bevestigings-WA vrij bericht binnen 24u-servicevenster
+              // (lead reageerde net → venster is vers open). Fail-soft: mag
+              // provisioning NOOIT terugdraaien; de inlogmail is leidend.
+              // Alleen sturen als de guard ons de winnaar maakte (updated?.id
+              // gezet). Geen nacht-check — direct antwoord op user-actie.
+              if (!guardErr && updated?.id) {
+                try {
+                  const naam = match.voornaam || 'daar';
+                  const wabody =
+                    `Top ${naam}! ✅ Je bent bevestigd en je gratis toegang staat open. ` +
+                    `Ik heb je inloggegevens net naar je e-mail gestuurd — check even je inbox ` +
+                    `(en voor de zekerheid je spam). Kom je er niet uit? Stuur gerust een ` +
+                    `berichtje. Veel succes! 🚀`;
+                  await sendText({ to: match.telefoon, body: wabody });
+                } catch (waErr) {
+                  if (waErr instanceof MetaNotConfiguredError) {
+                    console.warn('[ghl-conversation-webhook] toegang-bevestig-wa: meta niet geconfigureerd — skip');
+                  } else {
+                    console.warn('[ghl-conversation-webhook] toegang-bevestig-wa (soft):', waErr?.message || waErr);
+                  }
+                  // Bewust GEEN provisioning-rollback of retry; inlogmail is
+                  // al onderweg via dfo-website. Bevestigings-WA is nice-to-have.
+                }
+              }
             } else {
               await supabaseAdmin.from('toegang_aanvragen')
                 .update({ provisioned_error: (r.error || 'onbekend').slice(0, 500) })

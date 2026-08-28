@@ -32,6 +32,122 @@ const NACHT_EIND_HOUR  = 8;
 const VERVALLEN_UREN_NA_48U = 24;   // na 48u-reminder + 24u zonder reactie → vervallen
 const DAG6_UREN = 6 * 24;
 
+// Statische call-link (voorlopig). Per-bron dynamisch = latere optie.
+const CALL_LINK = 'https://deforexopleiding.nl/agenda';
+
+// ── E-mail-templates (named constants, makkelijk aanpasbaar) ───────────
+// Body-generatoren: (voornaam, callMoment?) → { subject, text, html }
+const MAIL_BEVESTIGING_A = (voornaam, callMoment) => {
+  const naam = voornaam || 'daar';
+  const moment = callMoment || 'het geplande moment';
+  return {
+    subject: 'Nog één stapje — check je WhatsApp ✅',
+    text:
+      `Hoi ${naam},\n\n` +
+      `Je aanvraag is binnen, en je opstartsessie staat genoteerd voor ${moment}. ` +
+      `We hebben je zojuist een berichtje via WhatsApp gestuurd — reageer daar even op ` +
+      `(een "ja" volstaat), dan ontvang je meteen je persoonlijke inloggegevens in je mailbox.\n\n` +
+      `Tot snel! Team De Forex Opleiding`,
+    html:
+      `<p>Hoi ${naam},</p>` +
+      `<p>Je aanvraag is binnen, en je opstartsessie staat genoteerd voor <b>${moment}</b>. ` +
+      `We hebben je zojuist een berichtje via WhatsApp gestuurd — reageer daar even op ` +
+      `(een "ja" volstaat), dan ontvang je meteen je persoonlijke inloggegevens in je mailbox.</p>` +
+      `<p>Tot snel!<br>Team De Forex Opleiding</p>`,
+  };
+};
+
+const MAIL_BEVESTIGING_B = (voornaam) => {
+  const naam = voornaam || 'daar';
+  return {
+    subject: 'Nog één stapje — check je WhatsApp ✅',
+    text:
+      `Hoi ${naam},\n\n` +
+      `Je aanvraag is binnen! We hebben je zojuist een berichtje via WhatsApp gestuurd — ` +
+      `reageer daar even op (een "ja" volstaat), dan ontvang je meteen je persoonlijke ` +
+      `inloggegevens in je mailbox.\n\n` +
+      `Heb je nog geen kennismakingscall ingepland? Doe dat hier even, dan halen we samen ` +
+      `het meeste uit je start: ${CALL_LINK}\n\n` +
+      `Tot zo! Team De Forex Opleiding`,
+    html:
+      `<p>Hoi ${naam},</p>` +
+      `<p>Je aanvraag is binnen! We hebben je zojuist een berichtje via WhatsApp gestuurd — ` +
+      `reageer daar even op (een "ja" volstaat), dan ontvang je meteen je persoonlijke ` +
+      `inloggegevens in je mailbox.</p>` +
+      `<p>Heb je nog geen kennismakingscall ingepland? Doe dat <a href="${CALL_LINK}">hier</a> ` +
+      `even, dan halen we samen het meeste uit je start.</p>` +
+      `<p>Tot zo!<br>Team De Forex Opleiding</p>`,
+  };
+};
+
+const MAIL_DAG6_A = (voornaam) => {
+  const naam = voornaam || 'daar';
+  return {
+    subject: 'Morgen je laatste dag — hoe was het?',
+    text:
+      `Hoi ${naam},\n\n` +
+      `Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
+      `ervaren hebt — reageer gerust even, ik hoor het graag!\n\n` +
+      `Groet, Team De Forex Opleiding`,
+    html:
+      `<p>Hoi ${naam},</p>` +
+      `<p>Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
+      `ervaren hebt — reageer gerust even, ik hoor het graag!</p>` +
+      `<p>Groet,<br>Team De Forex Opleiding</p>`,
+  };
+};
+
+const MAIL_DAG6_B = (voornaam) => {
+  const naam = voornaam || 'daar';
+  return {
+    subject: 'Morgen je laatste dag — hoe was het?',
+    text:
+      `Hoi ${naam},\n\n` +
+      `Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
+      `ervaren hebt — reageer gerust even, ik hoor het graag!\n\n` +
+      `En wil je er echt mee verder? Plan hier een gratis opstartsessie in, dan kijken we ` +
+      `samen wat bij je past: ${CALL_LINK}\n\n` +
+      `Groet, Team De Forex Opleiding`,
+    html:
+      `<p>Hoi ${naam},</p>` +
+      `<p>Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
+      `ervaren hebt — reageer gerust even, ik hoor het graag!</p>` +
+      `<p>En wil je er echt mee verder? Plan <a href="${CALL_LINK}">hier</a> een gratis ` +
+      `opstartsessie in, dan kijken we samen wat bij je past.</p>` +
+      `<p>Groet,<br>Team De Forex Opleiding</p>`,
+  };
+};
+
+// Fail-soft lookup: haal het geplande call-moment op voor een aanvraag met
+// call_geboekt=true. Match op telefoon (last-9-digits) tegen
+// follow_up_appointments met scheduled_at in de toekomst. Retourneert een
+// leesbare NL-string of null. Zelfde last-9-pattern als de webhook-hook.
+async function haalCallMoment(a) {
+  const digits = String(a.telefoon || '').replace(/\D/g, '');
+  if (!digits) return null;
+  const last9 = digits.slice(-9);
+  try {
+    const { data } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('scheduled_at, lead_phone')
+      .gte('scheduled_at', new Date().toISOString())
+      .order('scheduled_at', { ascending: true })
+      .limit(50);
+    const match = (data || []).find((r) => {
+      const rd = String(r.lead_phone || '').replace(/\D/g, '');
+      return rd && (rd === digits || rd.slice(-9) === last9);
+    });
+    if (!match?.scheduled_at) return null;
+    return new Date(match.scheduled_at).toLocaleString('nl-NL', {
+      weekday: 'long', day: 'numeric', month: 'long',
+      hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam',
+    });
+  } catch (e) {
+    console.warn('[cron-toegang-aanvragen] callMoment lookup (soft):', e?.message || e);
+    return null;
+  }
+}
+
 // Template-config per moment/variant.
 const TEMPLATES = {
   bevestig_a:   { name: 'bevestig_toegang_a',  vars: (a) => [a.voornaam || 'daar'] },
@@ -81,10 +197,10 @@ async function stuurWa(a, cfg, live) {
   }
 }
 
-async function stuurMail(a, subject, text, live) {
+async function stuurMail(a, subject, text, html, live) {
   if (!live) { console.log('[cron-toegang-aanvragen] DROOG mail ->', a.email, subject); return { ok: true, dry: true }; }
   try {
-    const r = await sendWelkomMail({ to: a.email, subject, text, html: `<p>${text}</p>` });
+    const r = await sendWelkomMail({ to: a.email, subject, text, html: html || `<p>${text}</p>` });
     return { ok: !!r?.success, error: r?.error || null };
   } catch (e) { return { ok: false, error: e?.message || String(e) }; }
 }
@@ -117,7 +233,17 @@ export default async function handler(req, res) {
     for (const a of (rows || [])) {
       const cfg = a.call_geboekt ? TEMPLATES.bevestig_a : TEMPLATES.bevestig_b;
       const wa  = await stuurWa(a, cfg, live);
-      const mail = await stuurMail(a, `Welkom bij ${a.soort === '7-daagse' ? 'de 7-daagse challenge' : 'de mini-cursus'}!`, `Hoi ${a.voornaam || 'daar'}! Reageer op onze WhatsApp om je toegang te ontvangen.`, live);
+      // Mail A/B via named constants. Voor A: call-moment fail-soft ophalen
+      // uit follow_up_appointments (match op telefoon last-9-digits).
+      // Als niet gevonden: MAIL_BEVESTIGING_A valt terug op 'het geplande moment'.
+      let mailPayload;
+      if (a.call_geboekt) {
+        const callMoment = await haalCallMoment(a);
+        mailPayload = MAIL_BEVESTIGING_A(a.voornaam, callMoment);
+      } else {
+        mailPayload = MAIL_BEVESTIGING_B(a.voornaam);
+      }
+      const mail = await stuurMail(a, mailPayload.subject, mailPayload.text, mailPayload.html, live);
       const okAny = wa.ok || mail.ok;
       if (okAny) {
         await supabaseAdmin.from('toegang_aanvragen')
@@ -181,7 +307,7 @@ export default async function handler(req, res) {
     const grens = new Date(nowMs - DAG6_UREN * 3600 * 1000).toISOString();
     const { data: rows } = await supabaseAdmin
       .from('toegang_aanvragen')
-      .select('id, voornaam, telefoon, call_geboekt, provisioned_at')
+      .select('id, voornaam, email, telefoon, call_geboekt, provisioned_at')
       .eq('status', 'gereageerd')
       .eq('soort', '7-daagse')
       .not('provisioned_at', 'is', null)
@@ -189,15 +315,21 @@ export default async function handler(req, res) {
       .lte('provisioned_at', grens)
       .limit(50);
     for (const a of (rows || [])) {
+      // WA + mail parallel (fail-soft per kanaal). Guard zetten zodra
+      // MINSTENS ÉÉN kanaal geslaagd is — voorkomt herhaling in volgende
+      // cron-run als één kanaal tijdelijk faalt.
       const cfg = a.call_geboekt ? TEMPLATES.dag6_a : TEMPLATES.dag6_b;
       const wa  = await stuurWa(a, cfg, live);
-      if (wa.ok) {
+      const mailPayload = a.call_geboekt ? MAIL_DAG6_A(a.voornaam) : MAIL_DAG6_B(a.voornaam);
+      const mail = await stuurMail(a, mailPayload.subject, mailPayload.text, mailPayload.html, live);
+      const okAny = wa.ok || mail.ok;
+      if (okAny) {
         await supabaseAdmin.from('toegang_aanvragen')
           .update({ dag6_sent_at: new Date().toISOString() })
           .eq('id', a.id);
         summary.dag6++;
       } else {
-        summary.errors.push({ id: a.id, step: 'dag6', error: wa.error });
+        summary.errors.push({ id: a.id, step: 'dag6', wa: wa.error, mail: mail.error });
       }
     }
   } catch (e) { summary.errors.push({ step: 'dag6-loop', error: e?.message || String(e) }); }
