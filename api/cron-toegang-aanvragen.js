@@ -208,8 +208,14 @@ async function stuurMail(a, subject, text, html, live) {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
-  const authRes = checkCronAuth(req);
-  if (authRes !== true) return res.status(401).json(authRes);
+  // v=2 (2026-08-28) FIX: checkCronAuth retourneert een OBJECT {ok, status?, body?},
+  // niet een boolean. Vorige versie deed `if (authRes !== true) return 401` →
+  // ALTIJD 401 (want authRes is een object, nooit letterlijk true). Gevolg:
+  // elke Vercel-cron-invocation kreeg 401, cron draaide effectief nooit,
+  // toegang_aanvragen.status='wachtend' bleef eeuwig hangen ondanks aanwezige
+  // rij + LIVE=1 + deploy. Nu identiek aan cron-leadsonderhoud.js:66-67.
+  const cronAuth = checkCronAuth(req);
+  if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const live = aanUit(process.env.TOEGANG_AANVRAGEN_LIVE);
   const now  = new Date();
