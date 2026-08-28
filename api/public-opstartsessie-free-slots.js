@@ -33,8 +33,13 @@ import fetch from 'node-fetch';
 
 const GHL_BASE    = 'https://services.leadconnectorhq.com';
 const GHL_VERSION = '2021-04-15';
-const DEFAULT_WINDOW_DAYS = 14;
-const MAX_WINDOW_DAYS     = 21;
+// v=3 (2026-08-28): venster verruimd van 14/21 → 30/30 dagen. Reden:
+// funnels tonen ook langer-vooruit-slots als de klant iets rustiger wil
+// inplannen. Als GHL zelf minder ver vooruit aanbiedt (kalender-instelling
+// "hoe ver vooruit boekbaar"), dan wint GHL — de diagnose-log toont dan
+// welk venster GHL werkelijk teruggeeft.
+const DEFAULT_WINDOW_DAYS = 30;
+const MAX_WINDOW_DAYS     = 30;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // Amsterdam-midnight (respecteert DST). Copie van follow-up-ghl-free-slots.js
@@ -188,6 +193,19 @@ export default async function handler(req, res) {
   try {
     const raw = await fetchGhlSlots({ calendarId, token, startMs, endMs });
     const slots = normaliseer(raw);
+    // v=3 diagnose-log: ALTIJD loggen wat het effectieve venster is dat GHL
+    // teruggeeft — zowel bij lege als niet-lege response. Zo zie je in de
+    // Vercel-logs of GHL zelf minder ver vooruit aanbiedt dan wij vragen
+    // (kalender-instelling "hoe ver vooruit boekbaar"). Als de min/max date
+    // uit de response < endDate, dan is dat een GHL-cap.
+    if (slots.length > 0) {
+      console.log('[public-opstartsessie-free-slots] GHL window',
+        JSON.stringify({
+          gevraagd_start: startDate, gevraagd_end: endDate,
+          ghl_earliest: slots[0]?.date, ghl_latest: slots[slots.length - 1]?.date,
+          n_dagen_met_slots: slots.length,
+        }));
+    }
     // v=2 diagnose-log: bij lege response is dit hét signaal om te zien
     // of het aan GHL ligt (raw is leeg) of aan parsing (raw heeft data,
     // slots is leeg → shape-mismatch). NOOIT de token loggen; alleen de
