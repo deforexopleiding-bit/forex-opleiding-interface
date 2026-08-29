@@ -65,6 +65,18 @@
   }
 
   const dstr = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
+  // v=22 (2026-08-29): dtStr — datum + tijd voor "AANGEMAAKT"-kolom.
+  // Formaat dd-MM-yyyy HH:mm, tz Europe/Amsterdam. `dstr` blijft
+  // date-only voor kolommen die daar semantisch bij passen (Call gepland).
+  const dtStr = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString('nl-NL', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Amsterdam',
+      });
+    } catch { return '—'; }
+  };
   const dstrLong = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return '—'; } };
   const num  = (n) => n == null ? '—' : new Intl.NumberFormat('nl-NL').format(n);
   const esc  = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -743,7 +755,7 @@
             `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(call)}</span>`,
             H.pill(c, pl),
             `<span class="mono strong" style="color:${scColor}">${scLabel}</span>`,
-            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(l.aangemaakt)}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dtStr(l.aangemaakt)}</span>`,
             `<div style="display:inline-flex;gap:4px;justify-content:flex-end">
               <button class="icon-btn" title="Wijzig lead" onclick="event.stopPropagation();__leadRowEdit('${l.id}')">${svg(I.settings)}</button>
               <button class="icon-btn" title="Verwijder (archiveer)" onclick="event.stopPropagation();__leadRowDelete('${l.id}', '${nameEsc}')" style="color:var(--danger, var(--warn))">${svg(I.x || I.warn)}</button>
@@ -927,7 +939,7 @@
             `<span class="pill pill-neutral">${esc(herkomst) || '—'}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
-            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dstr(l.aangemaakt)}</span>`,
+            `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dtStr(l.aangemaakt)}</span>`,
           ];
         })
       )}
