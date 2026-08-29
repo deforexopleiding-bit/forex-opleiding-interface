@@ -178,7 +178,12 @@ async function haalCallMoment(a) {
 
 // Template-config per moment/variant.
 const TEMPLATES = {
-  bevestig_a:   { name: 'bevestig_toegang_a',  vars: (a) => [a.voornaam || 'daar'] },
+  // bevestig_a is approved met 2 variabelen ({{1}}=voornaam, {{2}}=call-moment).
+  // Fallback-vars hier (zonder callMoment-lookup) valt terug op 'het geplande
+  // moment' zodat Meta niet 132000 (aantal-vars-mismatch) reject. De bev-loop
+  // roept haalCallMoment(a) 1× aan en geeft dan een varsOverride mee zodat de
+  // echte call-datum gebruikt wordt.
+  bevestig_a:   { name: 'bevestig_toegang_a',  vars: (a) => [a.voornaam || 'daar', 'het geplande moment'] },
   bevestig_b:   { name: 'bevestig_toegang_b',  vars: (a) => [a.voornaam || 'daar', process.env.OPSTARTSESSIE_CALL_URL || 'https://deforexopleiding.nl/agenda'] },
   reminder_2u:  { name: 'reminder_toegang_2u', vars: (a) => [a.voornaam || 'daar'] },
   reminder_24u: { name: 'reminder_toegang_24u',vars: (a) => [a.voornaam || 'daar'] },
@@ -204,7 +209,7 @@ function isNacht(nowMs) {
   return u >= NACHT_START_HOUR || u < NACHT_EIND_HOUR;
 }
 
-async function stuurWa(a, cfg, live, welkomPhoneId) {
+async function stuurWa(a, cfg, live, welkomPhoneId, varsOverride) {
   if (!live) {
     console.log('[cron-toegang-aanvragen] DROOG:', cfg.name, '->', a.telefoon, '(via welkom:', !!welkomPhoneId, ')');
     return { ok: true, dry: true };
@@ -216,12 +221,17 @@ async function stuurWa(a, cfg, live, welkomPhoneId) {
     console.warn('[cron-toegang-aanvragen] welkom phone_number_id niet resolvable (whatsapp_module_config + env-fallback beide leeg) — SKIP send om nummer-mismatch te voorkomen');
     return { ok: false, skipped: true, error: 'welkom-phone-id-ontbreekt' };
   }
+  // v=7 (2026-08-28): varsOverride ondersteunt template-vars die een async
+  // lookup vereisen (bv. bevestig_toegang_a: {{2}}=call-moment via
+  // haalCallMoment(a) in de bev-loop). Zonder override: fallback op de
+  // synchronous cfg.vars(a) — backward-compat voor reminders/dag6/etc.
+  const variables = Array.isArray(varsOverride) ? varsOverride : cfg.vars(a);
   try {
     const { wamid } = await sendTemplate({
       to: a.telefoon,
       templateName: cfg.name,
       languageCode: 'nl',
-      variables: cfg.vars(a),
+      variables,
       phoneNumberId: welkomPhoneId,     // v=4: expliciete welkom-lijn (DB-lookup)
     });
     return { ok: true, wamid, template: cfg.name };
@@ -298,13 +308,22 @@ export default async function handler(req, res) {
       .limit(50);
     for (const a of (rows || [])) {
       const cfg = a.call_geboekt ? TEMPLATES.bevestig_a : TEMPLATES.bevestig_b;
-      const wa  = await stuurWa(a, cfg, live, welkomPhoneId);
-      // Mail A/B via named constants. Voor A: call-moment fail-soft ophalen
-      // uit follow_up_appointments (match op telefoon last-9-digits).
-      // Als niet gevonden: MAIL_BEVESTIGING_A valt terug op 'het geplande moment'.
+      // v=7 (2026-08-28): Flow A callMoment 1× ophalen — hergebruikt voor
+      // ZOWEL WA-template ({{2}}) ALS mail. bevestig_toegang_a is approved
+      // met 2 variabelen ({{1}}=voornaam, {{2}}=call-moment); vorige versie
+      // gaf er maar 1 mee → Meta 132000 rejection. Voor B geen wijziging
+      // (1 variabele, klopt met approved template).
+      let callMoment = null;
+      let waVarsOverride;
+      if (a.call_geboekt) {
+        callMoment = await haalCallMoment(a);
+        waVarsOverride = [a.voornaam || 'daar', callMoment || 'het geplande moment'];
+      }
+      const wa  = await stuurWa(a, cfg, live, welkomPhoneId, waVarsOverride);
+      // Mail A/B via named constants. A hergebruikt callMoment (fail-soft
+      // fallback in MAIL_BEVESTIGING_A: 'het geplande moment').
       let mailPayload;
       if (a.call_geboekt) {
-        const callMoment = await haalCallMoment(a);
         mailPayload = MAIL_BEVESTIGING_A(a.voornaam, callMoment);
       } else {
         mailPayload = MAIL_BEVESTIGING_B(a.voornaam);
