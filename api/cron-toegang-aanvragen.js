@@ -224,12 +224,26 @@ async function stuurWa(a, cfg, live, welkomPhoneId) {
       variables: cfg.vars(a),
       phoneNumberId: welkomPhoneId,     // v=4: expliciete welkom-lijn (DB-lookup)
     });
-    return { ok: true, wamid };
+    return { ok: true, wamid, template: cfg.name };
   } catch (e) {
     if (e instanceof MetaNotConfiguredError) {
-      return { ok: false, skipped: true, error: 'meta-niet-geconfigureerd' };
+      return { ok: false, skipped: true, error: 'meta-niet-geconfigureerd', template: cfg.name };
     }
-    return { ok: false, error: e?.message || String(e) };
+    // v=6 (2026-08-28): rijkere error-info uit Meta throwErr zodat we in
+    // de cron-summary + persisted trace exact zien wat Meta reject'te
+    // (bv. code 132001 template-niet-bestaand, 131047 24u-venster-verlopen,
+    // 132000 aantal-vars-mismatch). Bron: _lib/meta-whatsapp.js
+    // metaPostMessage hangt deze velden aan de Error.
+    return {
+      ok: false, error: e?.message || String(e),
+      template: cfg.name,
+      http_status: e?.httpStatus ?? null,
+      meta_code: e?.metaCode ?? null,
+      meta_subcode: e?.metaSubcode ?? null,
+      meta_message: e?.metaMessage ?? null,
+      meta_details: e?.metaDetails ?? null,
+      meta_fbtrace: e?.metaFbtrace ?? null,
+    };
   }
 }
 
@@ -237,7 +251,7 @@ async function stuurMail(a, subject, text, html, live) {
   if (!live) { console.log('[cron-toegang-aanvragen] DROOG mail ->', a.email, subject); return { ok: true, dry: true }; }
   try {
     const r = await sendWelkomMail({ to: a.email, subject, text, html: html || `<p>${text}</p>` });
-    return { ok: !!r?.success, error: r?.error || null };
+    return { ok: !!r?.success, messageId: r?.messageId || null, error: r?.error || null };
   } catch (e) { return { ok: false, error: e?.message || String(e) }; }
 }
 
@@ -259,7 +273,14 @@ export default async function handler(req, res) {
   // v=4 (2026-08-28): eenmaal per run resolve — hergebruikt in alle
   // stuurWa-aanroepen. DB-lookup op whatsapp_module_config (module='welkom').
   const welkomPhoneId = await resolveWelkomPhoneId();
-  const summary = { live, dry: !live, welkom_phone: welkomPhoneId ? 'ok' : 'ontbreekt', bevestiging: 0, reminders_2u: 0, reminders_24u: 0, reminders_48u: 0, vervallen: 0, dag6: 0, provisioning_calls: 0, errors: [] };
+  const summary = {
+    live, dry: !live,
+    welkom_phone: welkomPhoneId ? 'ok' : 'ontbreekt',
+    bevestiging: 0, reminders_2u: 0, reminders_24u: 0, reminders_48u: 0,
+    vervallen: 0, dag6: 0, provisioning_calls: 0,
+    errors: [],
+    items: [],   // v=6: per-lead outcome (id/wa/mail/step) voor observability
+  };
 
   // Nacht-guard geldt alleen voor het VERZENDEN, niet voor status-transities
   // zoals 'vervallen' (die is stille administratie).
@@ -290,6 +311,18 @@ export default async function handler(req, res) {
       }
       const mail = await stuurMail(a, mailPayload.subject, mailPayload.text, mailPayload.html, live);
       const okAny = wa.ok || mail.ok;
+      // v=6: onafhankelijk WA+mail. Per-item rijk resultaat naar summary.items
+      // (wamid + mail-messageId + meta-code bij fail) zodat we via admin-endpoint
+      // kunnen zien wat Meta/SMTP zei — óók bij ok:true, want dat is alleen
+      // 'API-accepted', geen bewijs van bezorging aan user.
+      summary.items.push({
+        id: a.id, step: 'bevestiging', voornaam: a.voornaam, soort: a.soort, call_geboekt: !!a.call_geboekt,
+        wa  : { ok: wa.ok, template: wa.template || null, wamid: wa.wamid || null,
+                error: wa.error || null, meta_code: wa.meta_code || null, meta_details: wa.meta_details || null,
+                meta_fbtrace: wa.meta_fbtrace || null, http_status: wa.http_status || null },
+        mail: { ok: mail.ok, messageId: mail.messageId || null, error: mail.error || null },
+        bev_flag_gezet: okAny,
+      });
       if (okAny) {
         await supabaseAdmin.from('toegang_aanvragen')
           .update({ bevestiging_sent_at: new Date().toISOString() })
@@ -378,6 +411,29 @@ export default async function handler(req, res) {
       }
     }
   } catch (e) { summary.errors.push({ step: 'dag6-loop', error: e?.message || String(e) }); }
+
+  // v=6 (2026-08-28): persist summary naar follow_up_events_log ALLEEN als
+  // er echt iets is gebeurd (items/errors > 0 of reminders/dag6/vervallen
+  // getriggerd). Vermijdt een lege trace elke minuut wanneer er niks te
+  // doen is. Fail-soft — cron-response gaat altijd door.
+  const heeftActie = (summary.items?.length || 0) > 0
+    || (summary.errors?.length || 0) > 0
+    || summary.reminders_2u > 0 || summary.reminders_24u > 0 || summary.reminders_48u > 0
+    || summary.dag6 > 0 || summary.vervallen > 0;
+  if (heeftActie) {
+    try {
+      await supabaseAdmin
+        .from('follow_up_events_log')
+        .insert({
+          source:     'cron',
+          event_type: 'toegang-cron-run',
+          payload:    summary,
+          processed:  true,
+        });
+    } catch (persistErr) {
+      console.warn('[cron-toegang-aanvragen] summary-persist (soft):', persistErr?.message || persistErr);
+    }
+  }
 
   return res.status(200).json(summary);
 }

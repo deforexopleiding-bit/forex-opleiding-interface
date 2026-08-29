@@ -37,23 +37,32 @@ export default async function handler(req, res) {
   const limit = Math.min(100, Math.max(1, Number(q.limit) || 20));
 
   try {
-    // v=2 (2026-08-28) FIX: follow_up_events_log heeft kolom 'received_at',
-    // niet 'created_at' (bron: docs/sql-migrations/2026-05-16-follow-up-module-1A1.sql:224).
-    // Vorige versie gaf 500: column follow_up_events_log.created_at does not exist.
+    // v=3 (2026-08-28): filter uitgebreid met 'toegang-cron-run' events
+    // (cron-summary + per-lead wa/mail-resultaat inclusief wamid/meta-code).
+    // Query-param ?type=trace|cron|beide (default 'beide') selecteert welke.
+    const typeArg = String((req.query || {}).type || 'beide').toLowerCase();
+    const eventTypes = typeArg === 'trace' ? ['toegang-gate-trace']
+                     : typeArg === 'cron'  ? ['toegang-cron-run']
+                     : ['toegang-gate-trace', 'toegang-cron-run'];
     const { data, error } = await supabaseAdmin
       .from('follow_up_events_log')
       .select('id, source, event_type, payload, received_at')
-      .eq('event_type', 'toegang-gate-trace')
+      .in('event_type', eventTypes)
       .order('received_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
     return res.status(200).json({
       ok: true,
+      type_filter: typeArg,
       count: (data || []).length,
       items: (data || []).map((r) => ({
         id: r.id,
         received_at: r.received_at,
-        events: r.payload?.events || [],
+        event_type: r.event_type,
+        // Trace events → r.payload.events[]
+        // Cron-run    → r.payload = summary (met .items[] per lead)
+        events : r.event_type === 'toegang-gate-trace' ? (r.payload?.events || []) : null,
+        summary: r.event_type === 'toegang-cron-run'   ? r.payload : null,
       })),
     });
   } catch (e) {
