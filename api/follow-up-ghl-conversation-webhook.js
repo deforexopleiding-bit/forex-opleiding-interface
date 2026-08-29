@@ -409,7 +409,16 @@ export default async function handler(req, res) {
             const r = await belProvisioning({
               email: match.email, voornaam: match.voornaam, soort: match.soort,
             });
-            pushTrace('provisioning-call', { ok: r?.ok === true, status: r?.status || null, error: r?.error || null });
+            pushTrace('provisioning-call', {
+              ok: r?.ok === true,
+              status: r?.status || null,
+              error: r?.error || null,
+              // v=2 (2026-08-29): dfo-website response-body meelogging voor
+              // inloglink-debug (mail_sent/messageId/reason etc. — wat
+              // dfo-website ook maar terugmeldt). Cap op 800 chars.
+              response_body: r?.body ? JSON.stringify(r.body).slice(0, 800) : null,
+              email_sent_naar: match.email,
+            });
             if (r.ok) {
               // Race-safe: alleen als we de guard daadwerkelijk zetten (from
               // NULL → now), sturen we ook de "je bent binnen"-WA. Anders

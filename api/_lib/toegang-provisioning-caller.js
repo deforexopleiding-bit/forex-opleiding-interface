@@ -12,7 +12,21 @@
 //                                dezelfde var op dfo-website)
 //
 // Body naar dfo-website:
-//   { email, voornaam, soort }   ('7-daagse' | 'minicursus')
+//   { email, voornaam, soort, force_login_mail: true }
+//     soort            '7-daagse' | 'minicursus'
+//     force_login_mail v=2 (2026-08-29): expliciete opdracht aan dfo-website
+//                      om ALTIJD een verse inloglink (maakInloglink) + de
+//                      'toelating'-mail te sturen, óók als het account al
+//                      bestaat. Reden: sommige leads komen met een
+//                      partners@/al-bekend adres door de gate, en de oude
+//                      "alleen bij nieuw account"-guard aan dfo-website-kant
+//                      skipt de mail dan → lead strandt zonder inlog.
+//                      De 1×-per-aanvraag-garantie zit al aan CRM-kant via
+//                      toegang_aanvragen.provisioned_at (guard in
+//                      follow-up-ghl-conversation-webhook + inbox-webhook).
+//                      Dfo-website moet deze flag respecteren; bij ontbreken
+//                      van implementatie negeert dfo-website 'em stil
+//                      (backward-compat) — dan blijft de oude bug.
 //
 // Verwachte response:
 //   200 { ok:true, ... }         provisioning geslaagd (of idempotent al-gedaan)
@@ -46,9 +60,10 @@ export async function belProvisioning(lead) {
         'x-internal-token': secret,
       },
       body: JSON.stringify({
-        email:    lead.email,
-        voornaam: lead.voornaam || null,
-        soort:    lead.soort,
+        email:            lead.email,
+        voornaam:         lead.voornaam || null,
+        soort:            lead.soort,
+        force_login_mail: true,   // v=2: altijd verse inloglink (zie header)
       }),
       signal: ctrl.signal,
     });

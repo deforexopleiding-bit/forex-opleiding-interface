@@ -1483,6 +1483,8 @@ export default async function handler(req, res) {
                       });
                       traceEvents.push({ ...traceBase, stage: 'provisioning-call',
                         ok: r?.ok === true, status: r?.status || null, error: r?.error || null,
+                        response_body: r?.body ? JSON.stringify(r.body).slice(0, 800) : null,
+                        email_sent_naar: match.email,
                       });
                       if (r.ok) {
                         const { data: updated, error: guardErr } = await supabaseAdmin
