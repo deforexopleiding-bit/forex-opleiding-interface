@@ -394,10 +394,11 @@
     if (_thread.convId !== convId) return;
     _thread.items.push({
       id: 'opt-' + Date.now(),
+      channel: 'whatsapp',
       direction: 'outbound',
       body,
       at: new Date().toISOString(),
-      meta: {},
+      meta: { status: 'queued' },
     });
     _paintThread();
   }
@@ -931,12 +932,15 @@
     }
 
     if (kind === 'wa') {
-      // items van inbox-messages-list: { id, direction, body, sent_at, created_at, ... }
+      // v=9 (2026-08-30): shape uitgebreid met channel + top-level
+      // template_name voor shared KV_V2.helpers.renderChatThread.
       _thread.items = (resp.items || []).map(m => ({
         id: m.id,
+        channel: 'whatsapp',
         direction: m.direction === 'outbound' ? 'outbound' : 'inbound',
         body: m.body || '',
         at: m.sent_at || m.created_at || null,
+        template_name: m.template_name || null,
         meta: { status: m.status, template_name: m.template_name, media_url: m.media_url },
       }));
       // Mark-read fire-and-forget (1 poging, geen retry).
@@ -946,6 +950,7 @@
       const msgs = resp.messages || resp.conversation?.messages || [];
       _thread.items = msgs.map(m => ({
         id: m.id,
+        channel: 'whatsapp',
         direction: (m.direction === 'outbound' || m.role === 'assistant') ? 'outbound' : 'inbound',
         body: m.content || m.body || '',
         at: m.sent_at || m.created_at || null,
@@ -1000,52 +1005,27 @@
     }
   }
 
-  /* ── Append-only thread paint ─────────────────────────────────────── */
-  // Runt na elke render via queueMicrotask. Als de thread-container voor
-  // deze conv al bestaat en items zijn nieuw → append de nieuwe onder-aan.
-  // Als de conv is gewisseld → full rebuild + scroll naar onder.
+  /* ── Thread paint (v=9 2026-08-30: shared chat-renderer) ────────────
+     Renderer uit KV_V2.helpers.renderChatThread. Full re-render bij
+     nieuwe berichten (groepering + footers zijn context-afhankelijk).
+     Scroll-anchor bewaard bij not-near-bottom. */
   function _paintThread() {
     const container = document.getElementById('ibThreadScroll');
     if (!container) return; // detail-pane niet in DOM (bv. deep-link kind)
     if (!_thread.convId) { container.innerHTML = ''; return; }
-
     const isNewConv = _thread._paintedFor !== _thread.convId;
-    if (isNewConv) {
-      container.innerHTML = _thread.items.map(_renderMsgHtml).join('');
-      _thread._paintedFor = _thread.convId;
-      // Scroll naar onder (nieuwste onderaan).
-      container.scrollTop = container.scrollHeight;
-      return;
-    }
-    // Append-only: welke IDs staan er al?
-    const seen = new Set();
-    container.querySelectorAll('[data-msg-id]').forEach(el => seen.add(el.getAttribute('data-msg-id')));
-    const additions = _thread.items.filter(m => !seen.has(String(m.id)));
-    if (!additions.length) return;
-    // Behoud scrollpositie tenzij user aan de onderkant hangt (autoscroll dan).
     const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
-    container.insertAdjacentHTML('beforeend', additions.map(_renderMsgHtml).join(''));
-    if (nearBottom) container.scrollTop = container.scrollHeight;
-  }
-
-  function _renderMsgHtml(m) {
-    const isOut = m.direction === 'outbound';
-    const at = m.at ? _fmtTijd(m.at) : '';
-    const side = isOut ? 'flex-end' : 'flex-start';
-    const bg = isOut ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)';
-    const color = isOut ? 'var(--brand)' : 'var(--text-1)';
-    const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
-    // Ronde-18: gedeelde media-renderer voor consistent image/attachment gedrag
-    // over wanbetalers-inbox / leadsonderhoud / v2-inbox.
-    const bodyHtml = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.renderChatBody)
-      ? window.KV_V2.helpers.renderChatBody(m)
-      : String(m.body || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<div data-msg-id="${String(m.id)}" style="display:flex;justify-content:${side};margin-bottom:8px">
-      <div style="max-width:78%;padding:10px 14px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
-        ${bodyHtml || '<span style="opacity:.55">(leeg bericht)</span>'}
-        <div style="font-size:10.5px;opacity:.55;font-family:'IBM Plex Mono',monospace;margin-top:4px;text-align:right">${at}${m.meta?.template_name ? ' · template' : ''}</div>
-      </div>
-    </div>`;
+    const anchor = container.scrollHeight - container.scrollTop;
+    const H = window.KV_V2 && window.KV_V2.helpers;
+    container.innerHTML = (H && H.renderChatThread)
+      ? H.renderChatThread(_thread.items)
+      : '';
+    _thread._paintedFor = _thread.convId;
+    if (isNewConv || nearBottom) {
+      container.scrollTop = container.scrollHeight;
+    } else {
+      container.scrollTop = container.scrollHeight - anchor;
+    }
   }
 
   /* ── VIEW ─────────────────────────────────────────────────────────── */

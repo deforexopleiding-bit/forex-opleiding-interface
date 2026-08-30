@@ -794,11 +794,9 @@
     if (window.DFO?.render) window.DFO.render();
   }
 
-  /* ── Thread paint (v=29 2026-08-30: modern chat-look) ─────────────────
-     Full re-render bij additions ipv append: nodig omdat groepering,
-     kanaal-labels en dag-scheiders context-afhankelijk zijn (laatste
-     bubble in groep krijgt staart + kanaal-footer; dag-wissel krijgt
-     chip). Scroll-anchor bewaard bij not-near-bottom. */
+  /* ── Thread paint (v=30 2026-08-30: shared chat-renderer) ─────────────
+     Renderer uitgeplaatst naar KV_V2.helpers.renderChatThread (shared over
+     Events / Onboarding / Inbox). Local paint-fn behoudt scroll-management. */
   function _lsInbPaintThread() {
     const container = document.getElementById('lsInbThreadScroll');
     if (!container) return;
@@ -806,118 +804,16 @@
     const isNewLead = _lsInb.thread._paintedFor !== _lsInb.thread.leadId;
     const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
     const anchor = container.scrollHeight - container.scrollTop;
-    container.innerHTML = _lsInbRenderThread(_lsInb.thread.items);
+    const H = window.KV_V2 && window.KV_V2.helpers;
+    container.innerHTML = (H && H.renderChatThread)
+      ? H.renderChatThread(_lsInb.thread.items, { escFn: esc })
+      : '';
     _lsInb.thread._paintedFor = _lsInb.thread.leadId;
     if (isNewLead || nearBottom) {
       container.scrollTop = container.scrollHeight;
     } else {
       container.scrollTop = container.scrollHeight - anchor;
     }
-  }
-
-  /* ── Chat-render helpers ──────────────────────────────────────────── */
-  function _lsInbDayKey(t) {
-    const d = new Date(t);
-    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-  }
-  function _lsInbRelDay(t) {
-    const d = new Date(t); const n = new Date();
-    const today = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
-    const dDay  = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const diff  = Math.round((today - dDay) / 86400000);
-    if (diff === 0) return 'Vandaag';
-    if (diff === 1) return 'Gisteren';
-    if (diff > 1 && diff < 7) return `${diff} dagen geleden`;
-    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
-  }
-  function _lsInbHHMM(t) {
-    const d = new Date(t);
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  }
-  function _lsInbRenderThread(items) {
-    if (!items || !items.length) return '';
-    // 1) Groepeer opeenvolgend per (direction+channel), split bij >5 min gap.
-    const enriched = items.map(m => ({ ...m, _t: m.at ? new Date(m.at).getTime() : 0 }));
-    const groups = [];
-    let cur = null;
-    for (const m of enriched) {
-      const key = `${m.direction}:${m.channel}`;
-      const gap = cur ? (m._t - cur.lastT) : Infinity;
-      if (!cur || cur.key !== key || gap > 5 * 60 * 1000) {
-        cur = { key, direction: m.direction, channel: m.channel, items: [m], lastT: m._t };
-        groups.push(cur);
-      } else {
-        cur.items.push(m);
-        cur.lastT = m._t;
-      }
-    }
-    // 2) Emit met dag-scheiders bij dag-wissel.
-    const out = [];
-    let lastDay = null;
-    for (const g of groups) {
-      const firstT = g.items[0]._t;
-      const dayKey = firstT ? _lsInbDayKey(firstT) : null;
-      if (dayKey && dayKey !== lastDay) {
-        out.push(_lsInbRenderDaySep(firstT));
-        lastDay = dayKey;
-      }
-      out.push(_lsInbRenderGroup(g));
-    }
-    return out.join('');
-  }
-  function _lsInbRenderDaySep(t) {
-    const label = _lsInbRelDay(t);
-    return `<div style="text-align:center;margin:14px 0 8px">
-      <span style="display:inline-block;padding:3px 10px;border-radius:12px;background:var(--surface-2);color:var(--text-3);font-size:10.5px;font-weight:600;letter-spacing:.02em">${esc(label)}</span>
-    </div>`;
-  }
-  function _lsInbRenderGroup(g) {
-    const isOut = g.direction === 'outbound';
-    const align = isOut ? 'right' : 'left';
-    const bg    = isOut ? 'var(--brand-soft, #E2F1F5)' : 'var(--surface-2)';
-    const color = isOut ? 'var(--brand, #0A7490)' : 'var(--text-1)';
-    const bubbles = g.items.map((m, i) => {
-      const isLast = i === g.items.length - 1;
-      // Staart: laatste bubble in groep krijgt kleinere radius aan afzender-hoek.
-      let radius = '16px';
-      if (isLast) radius = isOut ? '16px 16px 4px 16px' : '16px 16px 16px 4px';
-      const subjHtml = m.channel === 'mail' && m.subject
-        ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:3px">${esc(m.subject)}</div>`
-        : '';
-      const tplTag = (isOut && m.template_name)
-        ? `<div style="font-size:10px;font-weight:600;opacity:.65;margin-bottom:4px;letter-spacing:.02em">Sjabloon · ${esc(m.template_name)}</div>`
-        : '';
-      const mediaOrText = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.renderChatBody)
-        ? window.KV_V2.helpers.renderChatBody(m, esc)
-        : esc(m.body || '');
-      const bodyHtml = mediaOrText
-        ? `<div style="white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">${mediaOrText}</div>`
-        : `<div style="opacity:.55">(leeg bericht)</div>`;
-      // 3px gap tussen bubbels binnen groep; groep zelf krijgt margin-top 12px.
-      const mt = i === 0 ? '0' : '3px';
-      return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${align};margin-top:${mt}">
-        <span style="display:inline-block;text-align:left;max-width:72%;padding:8px 12px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.45;vertical-align:top;box-shadow:0 1px 1px rgba(0,0,0,.04)">${tplTag}${subjHtml}${bodyHtml}</span>
-      </div>`;
-    }).join('');
-    // Footer: kanaal-label + tijd (+ ✓✓ outbound) — 1× per groep onder de laatste bubble.
-    const footer = _lsInbRenderGroupFooter(g);
-    return `<div style="margin-top:12px">${bubbles}${footer}</div>`;
-  }
-  function _lsInbRenderGroupFooter(g) {
-    const last = g.items[g.items.length - 1];
-    const isOut = g.direction === 'outbound';
-    const align = isOut ? 'right' : 'left';
-    const tijd = last._t ? _lsInbHHMM(last._t) : '';
-    const chanTxt = g.channel === 'mail' ? 'E-mail' : 'WhatsApp';
-    const dot = g.channel === 'mail'
-      ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue, #3b82f6);margin-right:5px;vertical-align:middle"></span>`
-      : `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--emerald, #10b981);margin-right:5px;vertical-align:middle"></span>`;
-    const check = isOut
-      ? `<span style="margin-left:6px;opacity:.6;font-size:11px" title="Verzonden">✓✓</span>`
-      : '';
-    return `<div style="text-align:${align};margin-top:4px;font-size:10.5px;color:var(--text-3);line-height:1;padding:0 4px">
-      <span style="display:inline-flex;align-items:center;gap:0">${dot}<span style="font-weight:500">${esc(chanTxt)}</span><span style="opacity:.5;margin:0 6px">·</span><span>${esc(tijd)}</span>${check}</span>
-    </div>`;
   }
 
   /* ── Handlers op window ──────────────────────────────────────────────── */

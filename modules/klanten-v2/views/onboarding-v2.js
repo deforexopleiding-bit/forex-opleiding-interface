@@ -750,11 +750,15 @@
       if (window.DFO?.render) window.DFO.render();
       return;
     }
+    // v=17 (2026-08-30): shape uitgebreid met channel + top-level template_name
+    // voor shared KV_V2.helpers.renderChatThread. onb-inbox is WA-only.
     _onbInb.thread.items = (j.items || []).map(m => ({
       id: m.id,
+      channel: 'whatsapp',
       direction: m.direction === 'outbound' ? 'outbound' : 'inbound',
       body: m.body || '',
       at: m.sent_at || m.created_at || null,
+      template_name: m.template_name || null,
       meta: { status: m.status, template_name: m.template_name },
     }));
     _onbInb.thread.loading = false;
@@ -783,40 +787,26 @@
     } catch (e) { console.warn('[onb-inbox] mark-read setup fail:', e && e.message); }
   }
 
-  // ── Append-only thread paint ────────────────────────────────────────
+  // ── Thread paint (v=17 2026-08-30: shared chat-renderer) ────────────
+  // Full re-render bij additions (groepering + footers context-afhankelijk).
+  // Scroll-anchor bewaard bij not-near-bottom.
   function _onbInbPaintThread() {
     const container = document.getElementById('onbInbThreadScroll');
     if (!container) return;
     if (!_onbInb.thread.convId) { container.innerHTML = ''; return; }
     const isNewConv = _onbInb.thread._paintedFor !== _onbInb.thread.convId;
-    if (isNewConv) {
-      container.innerHTML = _onbInb.thread.items.map(_onbInbRenderMsg).join('');
-      _onbInb.thread._paintedFor = _onbInb.thread.convId;
-      container.scrollTop = container.scrollHeight;
-      return;
-    }
-    const seen = new Set();
-    container.querySelectorAll('[data-msg-id]').forEach(el => seen.add(el.getAttribute('data-msg-id')));
-    const additions = _onbInb.thread.items.filter(m => !seen.has(String(m.id)));
-    if (!additions.length) return;
     const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
-    container.insertAdjacentHTML('beforeend', additions.map(_onbInbRenderMsg).join(''));
-    if (nearBottom) container.scrollTop = container.scrollHeight;
-  }
-  function _onbInbRenderMsg(m) {
-    const isOut = m.direction === 'outbound';
-    const body = esc(m.body || '');
-    const at = m.at ? esc(_onbInbFmtTijd(m.at)) : '';
-    const side = isOut ? 'flex-end' : 'flex-start';
-    const bg = isOut ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)';
-    const color = isOut ? 'var(--brand)' : 'var(--text-1)';
-    const radius = isOut ? '14px 14px 4px 14px' : '14px 14px 14px 4px';
-    return `<div data-msg-id="${esc(String(m.id))}" style="display:flex;justify-content:${side};margin-bottom:8px">
-      <div style="max-width:78%;padding:10px 14px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word">
-        ${body || '<span style="opacity:.55">(leeg bericht)</span>'}
-        <div style="font-size:10.5px;opacity:.55;font-family:\\'IBM Plex Mono\\',monospace;margin-top:4px;text-align:right">${at}${m.meta?.template_name ? ' · template' : ''}</div>
-      </div>
-    </div>`;
+    const anchor = container.scrollHeight - container.scrollTop;
+    const H = window.KV_V2 && window.KV_V2.helpers;
+    container.innerHTML = (H && H.renderChatThread)
+      ? H.renderChatThread(_onbInb.thread.items, { escFn: esc })
+      : '';
+    _onbInb.thread._paintedFor = _onbInb.thread.convId;
+    if (isNewConv || nearBottom) {
+      container.scrollTop = container.scrollHeight;
+    } else {
+      container.scrollTop = container.scrollHeight - anchor;
+    }
   }
 
   // ── Handlers op window ──────────────────────────────────────────────

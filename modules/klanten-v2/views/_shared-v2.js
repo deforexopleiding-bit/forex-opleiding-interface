@@ -369,6 +369,169 @@
     return _esc(bodyRaw || '');
   }
 
+  // ── Chat-thread renderer (2026-08-30: shared moderne compacte chat-look)
+  //
+  // renderChatThread(items, opts)
+  //   Input items[] — normalized shape:
+  //     { id, direction: 'inbound'|'outbound', channel: 'whatsapp'|'mail',
+  //       body, subject, at (ISO), template_name?, meta? }
+  //   meta (optioneel):
+  //     { status: 'queued'|'sent'|'delivered'|'read'|'failed',
+  //       failed_reason, by_simone, from_name, attachments[] }
+  //
+  //   Opts (allemaal optioneel):
+  //     maxWidthPct   default 72
+  //     bubbleFontPx  default 13.5
+  //     groupGapPx    default 12
+  //     stackGapPx    default 3
+  //     escFn         custom escape (default: minimale HTML-escape)
+  //     bodyRenderer  custom body renderer(m, escFn)→html (default: renderChatBody)
+  //
+  //   Groepeert opeenvolgende berichten van dezelfde (direction+channel)
+  //   binnen 5 min. Dag-scheider chip bij dag-wissel. Kleuren via CRM-tokens
+  //   (surface-2, brand-soft, brand, text-1, text-3, emerald, blue, rose).
+  //   Dark-mode-safe: geen hardcoded hexes voor kleuren (fallbacks alleen).
+  //
+  //   Behoud van functionaliteit blijft aan de caller:
+  //     - data-msg-id blijft op elk item (voor mark-read / append-tracking)
+  //     - scroll-management gebeurt in de caller (paint-function)
+  //     - loading/error-states worden buiten deze functie gerendered
+  const _CHAT_DAY = (t) => {
+    const d = new Date(t);
+    return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  };
+  const _CHAT_REL_DAY = (t) => {
+    const d = new Date(t); const n = new Date();
+    const today = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+    const dDay  = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const diff  = Math.round((today - dDay) / 86400000);
+    if (diff === 0) return 'Vandaag';
+    if (diff === 1) return 'Gisteren';
+    if (diff > 1 && diff < 7) return `${diff} dagen geleden`;
+    return d.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
+  };
+  const _CHAT_HHMM = (t) => {
+    const d = new Date(t);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  function _chatEscDefault(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+  function _chatStatusIcon(status) {
+    switch (String(status || '').toLowerCase()) {
+      case 'read':      return '<span style="color:var(--brand)">✓✓</span>';
+      case 'delivered': return '✓✓';
+      case 'sent':      return '✓';
+      case 'queued':    return '<span title="In wachtrij" style="opacity:.55">⏳</span>';
+      case 'failed':    return '<span title="Mislukt" style="color:var(--rose)">⚠</span>';
+      default:          return '✓✓';
+    }
+  }
+  function renderChatThread(items, opts) {
+    if (!Array.isArray(items) || !items.length) return '';
+    const o = opts || {};
+    const maxW    = o.maxWidthPct   != null ? o.maxWidthPct   : 72;
+    const fontPx  = o.bubbleFontPx  != null ? o.bubbleFontPx  : 13.5;
+    const groupGap = o.groupGapPx   != null ? o.groupGapPx    : 12;
+    const stackGap = o.stackGapPx   != null ? o.stackGapPx    : 3;
+    const esc     = o.escFn || _chatEscDefault;
+    const bodyRenderer = o.bodyRenderer || renderChatBody;
+
+    // 1) Groepeer opeenvolgend per (direction+channel), split bij >5 min gap.
+    const enriched = items.map(m => ({
+      ...m,
+      channel: (m.channel === 'mail' || m.channel === 'email') ? 'mail' : 'whatsapp',
+      direction: (m.direction === 'outbound' || m.direction === 'out') ? 'outbound' : 'inbound',
+      _t: m.at ? new Date(m.at).getTime() : 0,
+    }));
+    const groups = [];
+    let cur = null;
+    for (const m of enriched) {
+      const key = `${m.direction}:${m.channel}`;
+      const gap = cur ? (m._t - cur.lastT) : Infinity;
+      if (!cur || cur.key !== key || gap > 5 * 60 * 1000) {
+        cur = { key, direction: m.direction, channel: m.channel, items: [m], lastT: m._t };
+        groups.push(cur);
+      } else {
+        cur.items.push(m);
+        cur.lastT = m._t;
+      }
+    }
+
+    // 2) Emit met dag-scheiders bij dag-wissel.
+    const out = [];
+    let lastDay = null;
+    for (const g of groups) {
+      const firstT = g.items[0]._t;
+      const dayKey = firstT ? _CHAT_DAY(firstT) : null;
+      if (dayKey && dayKey !== lastDay) {
+        out.push(`<div style="text-align:center;margin:14px 0 8px">
+          <span style="display:inline-block;padding:3px 10px;border-radius:12px;background:var(--surface-2);color:var(--text-3);font-size:10.5px;font-weight:600;letter-spacing:.02em">${esc(_CHAT_REL_DAY(firstT))}</span>
+        </div>`);
+        lastDay = dayKey;
+      }
+      out.push(_chatRenderGroup(g, { maxW, fontPx, groupGap, stackGap, esc, bodyRenderer }));
+    }
+    return out.join('');
+  }
+  function _chatRenderGroup(g, cfg) {
+    const { maxW, fontPx, groupGap, stackGap, esc, bodyRenderer } = cfg;
+    const isOut = g.direction === 'outbound';
+    const align = isOut ? 'right' : 'left';
+    const bg    = isOut ? 'var(--brand-soft, #E2F1F5)' : 'var(--surface-2)';
+    const color = isOut ? 'var(--brand, #0A7490)' : 'var(--text-1)';
+    const bubbles = g.items.map((m, i) => {
+      const isLast = i === g.items.length - 1;
+      let radius = '16px';
+      if (isLast) radius = isOut ? '16px 16px 4px 16px' : '16px 16px 16px 4px';
+      const meta = m.meta || {};
+      // Header-chips binnen bubble: Simone (AI), template-tag, mail-subject.
+      const simoneChip = meta.by_simone
+        ? `<div style="font-size:10px;font-weight:600;opacity:.7;margin-bottom:4px;color:var(--brand)">✦ Simone · AI</div>`
+        : '';
+      const tplTag = (isOut && (m.template_name || meta.template_name))
+        ? `<div style="font-size:10px;font-weight:600;opacity:.65;margin-bottom:4px;letter-spacing:.02em">Sjabloon · ${esc(m.template_name || meta.template_name)}</div>`
+        : '';
+      const subjHtml = (m.channel === 'mail' && (m.subject || meta.subject))
+        ? `<div style="font-weight:600;font-size:12.5px;margin-bottom:3px">${esc(m.subject || meta.subject)}</div>`
+        : '';
+      const fromHtml = (m.channel === 'mail' && meta.from_name)
+        ? `<div style="font-size:11px;opacity:.65;margin-bottom:4px">${isOut ? 'aan' : 'van'}: ${esc(meta.from_name)}</div>`
+        : '';
+      const mediaOrText = bodyRenderer(m, esc);
+      const bodyHtml = mediaOrText
+        ? `<div style="white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">${mediaOrText}</div>`
+        : `<div style="opacity:.55">(leeg bericht)</div>`;
+      const attCount = Array.isArray(meta.attachments) ? meta.attachments.length : 0;
+      const attHtml = attCount > 0
+        ? `<div style="margin-top:5px;font-size:11px;opacity:.65">📎 ${attCount} bijlage(n)</div>`
+        : '';
+      const failedHtml = meta.failed_reason
+        ? `<div style="margin-top:5px;font-size:10.5px;color:var(--rose);opacity:.9">⚠ ${esc(String(meta.failed_reason).slice(0, 120))}</div>`
+        : '';
+      const mt = i === 0 ? '0' : `${stackGap}px`;
+      return `<div data-msg-id="${esc(String(m.id != null ? m.id : ''))}" style="text-align:${align};margin-top:${mt}">
+        <span style="display:inline-block;text-align:left;max-width:${maxW}%;padding:8px 12px;background:${bg};color:${color};border-radius:${radius};font-size:${fontPx}px;line-height:1.45;vertical-align:top;box-shadow:0 1px 1px rgba(0,0,0,.04)">${simoneChip}${tplTag}${subjHtml}${fromHtml}${bodyHtml}${attHtml}${failedHtml}</span>
+      </div>`;
+    }).join('');
+    // Footer: kanaal-label + tijd (+ status-icoon outbound) — 1× per groep.
+    const last = g.items[g.items.length - 1];
+    const tijd = last._t ? _CHAT_HHMM(last._t) : '';
+    const chanTxt = g.channel === 'mail' ? 'E-mail' : 'WhatsApp';
+    const dot = g.channel === 'mail'
+      ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue, #3b82f6);margin-right:5px;vertical-align:middle"></span>`
+      : `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--emerald, #10b981);margin-right:5px;vertical-align:middle"></span>`;
+    const receipt = isOut
+      ? `<span style="margin-left:6px;opacity:.7;font-size:11px" title="Bezorging">${_chatStatusIcon(last.meta && last.meta.status)}</span>`
+      : '';
+    const footer = `<div style="text-align:${align};margin-top:4px;font-size:10.5px;color:var(--text-3);line-height:1;padding:0 4px">
+      <span style="display:inline-flex;align-items:center;gap:0">${dot}<span style="font-weight:500">${esc(chanTxt)}</span><span style="opacity:.5;margin:0 6px">·</span><span>${esc(tijd)}</span>${receipt}</span>
+    </div>`;
+    return `<div style="margin-top:${groupGap}px">${bubbles}${footer}</div>`;
+  }
+
   // Emoji-picker — lightweight veelgebruikte set + insert-op-cursor.
   // Gebruik: attachEmojiPickerButton(buttonEl, textareaEl [, onChange])
   //          of via inline HTML: `${emojiPickerButtonHtml(textareaId)}`
@@ -595,6 +758,10 @@
     joostFetchDefaults, joostBuildFullBody, joostSafeUpsert,
     // Ronde 18: chat-media + emoji-picker.
     renderChatBody, emojiPickerButtonHtml,
+    // 2026-08-30: shared moderne chat-thread renderer (Leadsonderhoud pattern
+    // uitgerold naar Events / Onboarding / Inbox). Caller doet paint/scroll,
+    // deze functie produceert alleen HTML.
+    renderChatThread,
     // De elf bezwaren — gedeeld door de Follow-up-module en het afrondscherm
     // van een event. Zie het blok hierboven.
     BEZWAREN,
