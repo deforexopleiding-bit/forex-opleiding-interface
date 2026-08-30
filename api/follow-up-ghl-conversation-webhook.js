@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
 import { sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { logOutboundWa } from './_lib/wa-outbound-log.js';
 
 function normalizePayload(body) {
   if (!body || typeof body !== 'object') {
@@ -468,7 +469,17 @@ export default async function handler(req, res) {
                   if (!welkomPhoneId) {
                     console.warn('[ghl-conversation-webhook] toegang-bevestig-wa: welkom phone_number_id niet resolvable — skip');
                   } else {
-                    await sendText({ to: match.telefoon, body: wabody, phoneNumberId: welkomPhoneId });
+                    const sendRes = await sendText({ to: match.telefoon, body: wabody, phoneNumberId: welkomPhoneId });
+                    // v=6 (2026-08-29): log outbound naar whatsapp_messages
+                    // zodat "je bent binnen" in Gesprekken staat naast de
+                    // inbound reply. Fail-soft in de helper.
+                    await logOutboundWa(supabaseAdmin, {
+                      toPhone: match.telefoon,
+                      phoneNumberId: welkomPhoneId,
+                      body: wabody,
+                      wamid: sendRes?.wamid || null,
+                      source: 'toegang-gate-webhook',
+                    });
                   }
                 } catch (waErr) {
                   if (waErr instanceof MetaNotConfiguredError) {

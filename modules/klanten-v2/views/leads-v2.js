@@ -65,6 +65,37 @@
   }
 
   const dstr = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
+  // v=23 (2026-08-29): kwalStatus — compute kwalificatie-uitkomst uit
+  // lead-velden (kwalificatie + afwijzer + score/drempel). Retourneert
+  // { key, label, style } voor consistente badge-rendering in list + detail.
+  // Fail-soft: ontbreken velden → 'onbekend' (neutraal grijs).
+  //   'toegang'       — score >= drempel én geen afwijzer → groen
+  //   'knock-out'     — afwijzer=true → rood (detail toont welke vraag)
+  //   'onder-drempel' — kwalificatie='geen toegang' zonder knock-out → amber
+  //   'onbekend'      — geen data → grijs
+  const kwalStatus = (l) => {
+    if (l?.afwijzer === true) {
+      return { key: 'knock-out', label: 'Afgewezen · knock-out', style: 'background:var(--rose-soft);color:var(--rose)' };
+    }
+    if (l?.kwalificatie === 'toegang') {
+      return { key: 'toegang', label: 'Gekwalificeerd', style: 'background:var(--emerald-soft);color:var(--emerald)' };
+    }
+    if (l?.kwalificatie === 'geen toegang') {
+      return { key: 'onder-drempel', label: 'Afgewezen · onder drempel', style: 'background:var(--amber-soft);color:var(--amber)' };
+    }
+    // Fallback: score/drempel-vergelijking als kwalificatie ontbreekt.
+    if (Number.isFinite(Number(l?.score)) && Number.isFinite(Number(l?.drempel))) {
+      const s = Number(l.score), d = Number(l.drempel);
+      if (s >= d) return { key: 'toegang', label: 'Gekwalificeerd', style: 'background:var(--emerald-soft);color:var(--emerald)' };
+      return { key: 'onder-drempel', label: 'Afgewezen · onder drempel', style: 'background:var(--amber-soft);color:var(--amber)' };
+    }
+    return { key: 'onbekend', label: 'Onbekend', style: 'background:var(--surface-2);color:var(--text-3)' };
+  };
+  const kwalBadge = (l) => {
+    const st = kwalStatus(l);
+    return `<span style="${st.style};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600" title="${esc(st.label)}">${esc(st.label)}</span>`;
+  };
+
   // v=22 (2026-08-29): dtStr — datum + tijd voor "AANGEMAAKT"-kolom.
   // Formaat dd-MM-yyyy HH:mm, tz Europe/Amsterdam. `dstr` blijft
   // date-only voor kolommen die daar semantisch bij passen (Call gepland).
@@ -673,9 +704,11 @@
         </select>`,
         `<select class="ld-filter-sel" onchange="DFO.setF('lead-kwal', this.value)">
           <option value="" ${fKwal === '' ? 'selected' : ''}>Kwalificatie: alle</option>
-          <option value="toegang"       ${fKwal === 'toegang'       ? 'selected' : ''}>toegang</option>
-          <option value="geen toegang"  ${fKwal === 'geen toegang'  ? 'selected' : ''}>geen toegang</option>
-          <option value="geen"          ${fKwal === 'geen'          ? 'selected' : ''}>geen vragenlijst</option>
+          <option value="toegang"        ${fKwal === 'toegang'        ? 'selected' : ''}>Gekwalificeerd</option>
+          <option value="onder-drempel"  ${fKwal === 'onder-drempel'  ? 'selected' : ''}>Afgewezen · onder drempel</option>
+          <option value="knock-out"      ${fKwal === 'knock-out'      ? 'selected' : ''}>Afgewezen · knock-out</option>
+          <option value="geen toegang"   ${fKwal === 'geen toegang'   ? 'selected' : ''}>geen toegang (legacy)</option>
+          <option value="geen"           ${fKwal === 'geen'           ? 'selected' : ''}>geen vragenlijst</option>
         </select>`,
         `<select class="ld-filter-sel" onchange="DFO.setF('lead-bron', this.value)">
           <option value="" ${fBron === '' ? 'selected' : ''}>Bron: alle</option>
@@ -732,7 +765,7 @@
         <button class="btn btn-sm" onclick="__leadRetry()">${svg(I.repeat || I.settings, 'width:14px;height:14px')} Opnieuw proberen</button>
       </div>` : ''}
       ${H.table(
-        [{ l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
+        [{ l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Kwalificatie', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           const herkomst = l.soort || l.herkomst || '';
@@ -755,6 +788,7 @@
             `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(call)}</span>`,
             H.pill(c, pl),
             `<span class="mono strong" style="color:${scColor}">${scLabel}</span>`,
+            kwalBadge(l),
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dtStr(l.aangemaakt)}</span>`,
             `<div style="display:inline-flex;gap:4px;justify-content:flex-end">
               <button class="icon-btn" title="Wijzig lead" onclick="event.stopPropagation();__leadRowEdit('${l.id}')">${svg(I.settings)}</button>
@@ -1148,6 +1182,11 @@
     const d = _det.data || {};
     const l = d.lead || {};
     const antw = Array.isArray(d.antwoorden) ? d.antwoorden : [];
+    // v=23: kwal-badge + knock-out-vraag. d.afwijzer (boolean) staat apart
+    // van d.lead, dus samenvoegen. antw kan een afwijzer-item bevatten;
+    // eerste match = knock-out vraag.
+    const leadForKwal = { ...l, afwijzer: d.afwijzer === true };
+    const koItem = antw.find((a) => a && a.afwijzer === true) || null;
     const messages = Array.isArray(d.messages) ? d.messages : [];
     const eigenaar = d.eigenaar || null;
     const [sc, sl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
@@ -1163,6 +1202,7 @@
           ${l.status ? H.pill(sc, sl) : ''}
           ${l.bron ? `<span class="pill pill-neutral">${esc(l.bron)}</span>` : ''}
           ${l.score != null ? `<span class="pill pill-neutral">Score ${l.score}${l.drempel ? ' / ' + l.drempel : ''}</span>` : ''}
+          ${kwalBadge(leadForKwal)}
         </div>
       </div>
       ${_det.error ? `<div class="sv-empty" style="border:1px solid var(--warn-line, var(--rose-line, var(--line)));background:var(--warn-soft, var(--rose-soft, var(--surface-2)));color:var(--warn, var(--rose));display:flex;align-items:center;gap:12px;padding:14px 18px;margin:12px 20px;border-radius:8px">
@@ -1179,7 +1219,7 @@
               <div class="sv-row"><span>Telefoon</span><b class="mono" style="font-size:12.5px">${esc(l.telefoon) || '—'}</b></div>
               <div class="sv-row"><span>Herkomst</span><b>${esc(l.soort) || '—'}</b></div>
               <div class="sv-row"><span>Traject</span><b>${esc(l.traject) || '—'}</b></div>
-              <div class="sv-row"><span>Kwalificatie</span><b>${esc(l.kwalificatie) || '—'}</b></div>
+              <div class="sv-row"><span>Kwalificatie</span><b>${kwalStatus(leadForKwal).label}${koItem ? ` — knock-out op: <i style="font-weight:normal">"${esc(koItem.vraag || koItem.q || '—')}"</i>` : ''}</b></div>
               <div class="sv-row"><span>Aangemaakt</span><b>${dstrLong(l.aangemaakt)}</b></div>
               ${l.afspraak_op ? `<div class="sv-row"><span>Afspraak op</span><b>${dstrLong(l.afspraak_op)}</b></div>` : ''}
             </div>

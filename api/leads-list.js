@@ -67,7 +67,7 @@ export default async function handler(req, res) {
   try {
     let qy = supabaseAdmin
       .from('leads_overzicht')
-      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
+      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, afwijzer, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
       .order('aangemaakt', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -85,8 +85,14 @@ export default async function handler(req, res) {
     if (scoreMax != null) qy = qy.lte('score', scoreMax);
     if (bron)   qy = qy.eq('bron',   bron);
     if (status) qy = qy.eq('status', status);
+    // v=2 (2026-08-29): filter uitgebreid met 'knock-out' + 'onder-drempel'
+    // zodat de v2-UI drie afwijs-varianten kan onderscheiden. 'toegang' en
+    // 'geen toegang' + 'geen' (leeg) blijven ongewijzigd voor backward-compat.
     if (kwal === 'geen') qy = qy.is('kwalificatie', null);
-    else if (kwal)       qy = qy.eq('kwalificatie', kwal);
+    else if (kwal === 'knock-out')     qy = qy.eq('afwijzer', true);
+    else if (kwal === 'onder-drempel') qy = qy.eq('kwalificatie', 'geen toegang').neq('afwijzer', true);
+    else if (kwal === 'toegang')       qy = qy.eq('kwalificatie', 'toegang').neq('afwijzer', true);
+    else if (kwal)                     qy = qy.eq('kwalificatie', kwal);
     if (afspraak === 'ja')      qy = qy.not('afspraak_op', 'is', null);
     else if (afspraak === 'nee') qy = qy.is('afspraak_op', null);
     if (search) {

@@ -26,6 +26,7 @@
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendWelkomMail } from './mailer.js';
+import { logOutboundWa } from './_lib/wa-outbound-log.js';
 
 const NACHT_START_HOUR = 21;
 const NACHT_EIND_HOUR  = 8;
@@ -233,6 +234,22 @@ async function stuurWa(a, cfg, live, welkomPhoneId, varsOverride) {
       languageCode: 'nl',
       variables,
       phoneNumberId: welkomPhoneId,     // v=4: expliciete welkom-lijn (DB-lookup)
+    });
+    // v=8 (2026-08-29) — log outbound naar whatsapp_messages zodat de send
+    // in Gesprekken verschijnt naast de inbound. Body = leesbare preview met
+    // template-naam + vars (echte Meta-template-body niet lokaal beschikbaar).
+    // Fail-soft in de helper.
+    const previewBody = `[template: ${cfg.name}] ${variables.join(' | ')}`;
+    const varsAsMap = {};
+    variables.forEach((v, i) => { varsAsMap[String(i + 1)] = String(v); });
+    await logOutboundWa(supabaseAdmin, {
+      toPhone: a.telefoon,
+      phoneNumberId: welkomPhoneId,
+      body: previewBody,
+      wamid,
+      templateName: cfg.name,
+      templateVariables: varsAsMap,
+      source: 'toegang-gate-cron',
     });
     return { ok: true, wamid, template: cfg.name };
   } catch (e) {

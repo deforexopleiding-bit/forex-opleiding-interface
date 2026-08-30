@@ -35,6 +35,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
+import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
 import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
 import { runOnboardingSuggest } from './_lib/onboarding-agent-core.js';
@@ -1507,7 +1508,17 @@ export default async function handler(req, res) {
                             // (Meta zelf zegt op welke lijn 't binnenkwam) en
                             // voorkomt thread-mismatch — geen DB-lookup nodig.
                             if (recvPhoneNumberId) {
-                              await sendText({ to: match.telefoon, body: wabody, phoneNumberId: recvPhoneNumberId });
+                              const sendRes = await sendText({ to: match.telefoon, body: wabody, phoneNumberId: recvPhoneNumberId });
+                              // v=2 (2026-08-29): log outbound naar
+                              // whatsapp_messages zodat "je bent binnen" in
+                              // Gesprekken staat naast inbound reply.
+                              await logOutboundWa(supabaseAdmin, {
+                                toPhone: match.telefoon,
+                                phoneNumberId: recvPhoneNumberId,
+                                body: wabody,
+                                wamid: sendRes?.wamid || null,
+                                source: 'toegang-gate-inbox-webhook',
+                              });
                             } else {
                               console.warn('[inbox-webhook] toegang-bevestig-wa: recvPhoneNumberId ontbreekt — skip');
                             }
