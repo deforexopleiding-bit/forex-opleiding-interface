@@ -112,17 +112,51 @@ export default async function handler(req, res) {
   //    upsert_lead-RPC kan afhankelijk van signatuur een record of een
   //    single-row array retourneren. Normaliseer defensief: pak eerste element
   //    als 'ie array is, anders het object zelf. Dat voorkomt undefined-id.
+  //
+  // v=2 (2026-08-30) BUG-FIX: bron/soort/traject overschreven bij bestaande
+  // funnel-leads (7-daagse-v2 → 'opstartsessie'). Pre-check op lower(email):
+  //   - bestaande lead → bron/soort/traject WEGLATEN uit payload (RPC laat
+  //     via COALESCE de bestaande waarden intact). Origine (funnel-slug +
+  //     herkomst-kanaal + eerder gekozen product) blijft dus behouden.
+  //   - nieuwe lead → volledige payload zoals voorheen (directe agenda-
+  //     boeker die niet via een funnel binnenkwam krijgt terecht
+  //     bron='opstartsessie' + soort='opstartsessie' + traject=<slug>).
+  // Opstartsessie-context is al apart getrackt in opstartsessie_submissions
+  // (booking_source) + follow_up_appointments (van createAppointmentForLead
+  // hieronder), dus origine hoeft niet op de lead-rij overschreven.
   let leadId;
   try {
-    const { data: leadRes, error: lErr } = await supabaseAdmin.rpc('upsert_lead', {
-      p: {
-        voornaam, achternaam, email, telefoon,
-        telefoon_e164: telefoonE164(telefoon),
-        bron   : 'opstartsessie',
-        soort  : 'opstartsessie',
-        traject: source,
-      },
-    });
+    // Pre-check: bestaat er al een lead met dit email-adres? Case-insensitive
+    // match consistent met upsert_lead-dedup (lower(email)).
+    let existingLead = null;
+    try {
+      const { data: exRow, error: exErr } = await supabaseAdmin
+        .from('leads')
+        .select('id')
+        .ilike('email', email)
+        .maybeSingle();
+      if (exErr) {
+        // Non-fataal: bij lookup-fout vallen we terug op de veilige route
+        // (payload zonder bron/soort/traject — geen overschrijving).
+        console.warn('[public-opstartsessie-book] lead pre-check (soft):', exErr.message);
+      } else if (exRow?.id) {
+        existingLead = exRow;
+      }
+    } catch (e) {
+      console.warn('[public-opstartsessie-book] lead pre-check exception (soft):', e?.message || e);
+    }
+
+    const basePayload = {
+      voornaam, achternaam, email, telefoon,
+      telefoon_e164: telefoonE164(telefoon),
+    };
+    // Alleen bij nieuwe lead de origine-velden meesturen; bij bestaande lead
+    // weglaten zodat upsert_lead ze via COALESCE intact laat.
+    const payload = existingLead
+      ? basePayload
+      : { ...basePayload, bron: 'opstartsessie', soort: 'opstartsessie', traject: source };
+
+    const { data: leadRes, error: lErr } = await supabaseAdmin.rpc('upsert_lead', { p: payload });
     if (lErr) throw new Error('upsert_lead: ' + lErr.message);
     const leadRow0 = Array.isArray(leadRes) ? leadRes[0] : leadRes;
     leadId = leadRow0?.id;
