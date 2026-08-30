@@ -3429,6 +3429,11 @@
   window.__wbxInboxStatus = (val) => {
     _ui.inbox.statusFilter = String(val || 'active');
     _live.inbox.convs.fetched = false;
+    // v=48 (2026-08-30): re-render zodat de pill-header in inboxView() de
+    // active-state (chip.on) direct verhuist naar de aangeklikte pill.
+    // Zonder deze render bleef de oranje box op de vorige waarde staan
+    // totdat een andere event (bv. fetch-return) een render triggerde.
+    try { window.DFO?.render?.(); } catch (_) {}
     _fetchInboxConvs();
   };
   window.__wbxInboxToggleChannel = (ch) => {
@@ -4308,20 +4313,19 @@
     const convId = _ui.inbox.selectedConv;
     const qVal = String(_ui.inbox.searchQ || '');
     // SURFACE A (v1-parity): filter-chips volgorde ACTIEF · AFGEHANDELD · ARCHIEF (icon-only) · ALLE.
-    // v=46 (2026-08-29): actieve pill niet meer met .chip.on-class — die
-    // shared active-styling toont een dikke oranje hover-achtige box die
-    // permanent blijft plakken op de geselecteerde pill. Vervangen door een
-    // subtielere inline active-marker (bg surface-2, tekst text-1, bold,
-    // onderlijn met brand-accent) zodat hover en active visueel duidelijk
-    // verschillen. Alleen deze view — .chip.on elders blijft ongewijzigd.
-    const _pillActiveStyle = 'background:var(--surface-2);color:var(--text-1);border-color:var(--border);font-weight:600;box-shadow:inset 0 -2px 0 var(--brand)';
+    // v=48 (2026-08-30): oranje .chip.on-active-styling HERSTELD. De echte
+    // bug was niet de styling maar dat __wbxInboxStatus geen re-render
+    // triggerde — statusFilter werd bijgewerkt in _ui, maar de pill-header
+    // in inboxView() rerenderde niet (alleen _fetchInboxConvs draaide).
+    // Daardoor bleef de vorige active-pill oranje. Fix zit in de handler
+    // (window.DFO?.render?.() na state-update, in lijn met __wbxInboxSort).
     const statusBtn = (v, l, iconOnly) => {
       const isOn = _ui.inbox.statusFilter === v;
-      return `<button class="chip" style="font-size:11px;padding:3px 9px${isOn ? ';' + _pillActiveStyle : ''}" onclick="__wbxInboxStatus('${v}')" title="${esc(l)}">${iconOnly ? '📦' : esc(l)}</button>`;
+      return `<button class="chip${isOn ? ' on' : ''}" style="font-size:11px;padding:3px 9px" onclick="__wbxInboxStatus('${v}')" title="${esc(l)}">${iconOnly ? '📦' : esc(l)}</button>`;
     };
     const sortBtn = (v, l) => {
       const isOn = _ui.inbox.sortMode === v;
-      return `<button class="chip" style="font-size:10.5px;padding:2px 7px${isOn ? ';' + _pillActiveStyle : ''}" onclick="__wbxInboxSort('${v}')" title="${esc(l)}">${esc(l)}</button>`;
+      return `<button class="chip${isOn ? ' on' : ''}" style="font-size:10.5px;padding:2px 7px" onclick="__wbxInboxSort('${v}')" title="${esc(l)}">${esc(l)}</button>`;
     };
 
     return `<div data-wbx-view="gesprekken" class="pad" style="padding:14px 20px 0">

@@ -65,29 +65,29 @@
   }
 
   const dstr = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return '—'; } };
-  // v=23 (2026-08-29): kwalStatus — compute kwalificatie-uitkomst uit
-  // lead-velden (kwalificatie + afwijzer + score/drempel). Retourneert
-  // { key, label, style } voor consistente badge-rendering in list + detail.
-  // Fail-soft: ontbreken velden → 'onbekend' (neutraal grijs).
-  //   'toegang'       — score >= drempel én geen afwijzer → groen
-  //   'knock-out'     — afwijzer=true → rood (detail toont welke vraag)
-  //   'onder-drempel' — kwalificatie='geen toegang' zonder knock-out → amber
+  // v=24 (2026-08-30): kwalStatus — knock-out afleiden uit score vs drempel.
+  // Iemand die is afgewezen ondanks genoeg punten kan alleen op een knock-out
+  // zijn afgewezen, dus dit onderscheid is correct zonder afwijzer-veld
+  // (die alleen op de raw leads-tabel leeft, niet op leads_overzicht-VIEW).
+  //   'toegang'       — kwalificatie='toegang' → groen
+  //   'knock-out'     — kwalificatie='geen toegang' én score >= drempel → rood
+  //   'onder-drempel' — kwalificatie='geen toegang' én score <  drempel → amber
   //   'onbekend'      — geen data → grijs
+  // afwijzer=true (detail-fetch levert dit expliciet) blijft als kort-circuit
+  // voor detail-view, maar de score/drempel-logica dekt de lijst zonder.
   const kwalStatus = (l) => {
-    if (l?.afwijzer === true) {
-      return { key: 'knock-out', label: 'Afgewezen · knock-out', style: 'background:var(--rose-soft);color:var(--rose)' };
-    }
     if (l?.kwalificatie === 'toegang') {
       return { key: 'toegang', label: 'Gekwalificeerd', style: 'background:var(--emerald-soft);color:var(--emerald)' };
     }
     if (l?.kwalificatie === 'geen toegang') {
+      const s = Number(l?.score), d = Number(l?.drempel);
+      if (l?.afwijzer === true || (Number.isFinite(s) && Number.isFinite(d) && s >= d)) {
+        return { key: 'knock-out', label: 'Afgewezen · knock-out', style: 'background:var(--rose-soft);color:var(--rose)' };
+      }
       return { key: 'onder-drempel', label: 'Afgewezen · onder drempel', style: 'background:var(--amber-soft);color:var(--amber)' };
     }
-    // Fallback: score/drempel-vergelijking als kwalificatie ontbreekt.
-    if (Number.isFinite(Number(l?.score)) && Number.isFinite(Number(l?.drempel))) {
-      const s = Number(l.score), d = Number(l.drempel);
-      if (s >= d) return { key: 'toegang', label: 'Gekwalificeerd', style: 'background:var(--emerald-soft);color:var(--emerald)' };
-      return { key: 'onder-drempel', label: 'Afgewezen · onder drempel', style: 'background:var(--amber-soft);color:var(--amber)' };
+    if (l?.afwijzer === true) {
+      return { key: 'knock-out', label: 'Afgewezen · knock-out', style: 'background:var(--rose-soft);color:var(--rose)' };
     }
     return { key: 'onbekend', label: 'Onbekend', style: 'background:var(--surface-2);color:var(--text-3)' };
   };
