@@ -4,6 +4,15 @@
 // weg te schrijven naar whatsapp_conversations + whatsapp_messages, zodat ze
 // in "Gesprekken" (inbox-v2 / wanbetalers inbox) verschijnen naast de inbound.
 //
+// v=2 (2026-08-30): bij template-sends de gerenderde body opslaan i.p.v. de
+// door de caller meegegeven placeholder ("[template: X] jef"). We lezen de
+// body_text uit whatsapp_meta_templates (de CRM template-opslag die de admin-
+// UI Instellingen → Communicatie → WhatsApp vult) en vervangen positional
+// placeholders {{1}}, {{2}}, … + named placeholders {{klant.naam}} vanuit de
+// meegegeven variables-map. Fail-soft: als de template niet vindbaar is of de
+// render faalt, valt hij terug op de door de caller meegegeven body (die dan
+// als leesbare fallback fungeert).
+//
 // Voor bestaande dunning-flows wordt dit patroon al gebruikt — zie
 // api/cron-dunning-conversation-reminders.js:857-882. Zelfde vorm hier:
 //   1. whatsapp_conversations opzoeken op (phone_number, phone_number_id).
@@ -43,8 +52,24 @@ export async function logOutboundWa(supabaseAdmin, {
   if (phoneE164Plus.length < 8) return { ok: false, error: 'phone te kort' };
 
   const nowIso = new Date().toISOString();
-  const preview = (body || '').trim().slice(0, 120);
-  const fullBody = (body || '').slice(0, 1000);
+
+  // v=2 (2026-08-30): bij template-sends de body renderen uit
+  // whatsapp_meta_templates.body_text. Fail-soft: bij fout → caller-body als
+  // fallback zodat de log-write nooit breekt.
+  let renderedBody = body;
+  if (templateName) {
+    try {
+      const rendered = await _renderTemplateBody(
+        supabaseAdmin, templateName, templateVariables || {}
+      );
+      if (rendered && rendered.trim()) renderedBody = rendered;
+    } catch (e) {
+      console.warn(`[wa-outbound-log:${source}] template-render (soft):`, e?.message || e);
+    }
+  }
+
+  const preview = (renderedBody || '').trim().slice(0, 120);
+  const fullBody = (renderedBody || '').slice(0, 1000);
 
   // ── 1) Conv opzoeken (lijn-specifiek) ─────────────────────────────────
   let convId = null;
@@ -155,4 +180,70 @@ export async function logOutboundWa(supabaseAdmin, {
   }
 
   return { ok: true, conv_id: convId, message_id: messageId };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Interne helper: template body ophalen uit whatsapp_meta_templates en de
+// placeholders invullen met de meegegeven vars-map.
+//
+// Ondersteunt twee placeholder-vormen:
+//   {{1}}, {{2}}, …            positional — vars['1'], vars['2'], …
+//   {{klant.naam}}, …          named     — vars['klant.naam'] (via
+//                                          meta_param_mapping.body als die
+//                                          een naam-index-mapping levert,
+//                                          anders directe key-match).
+//
+// Retourneert de gerenderde string, of null als de template niet vindbaar of
+// niet approved is. Onbekende placeholders blijven ongewijzigd staan zodat
+// een gemiste var zichtbaar is i.p.v. stil opgevreten.
+async function _renderTemplateBody(supabaseAdmin, templateName, variablesMap) {
+  if (!templateName || !supabaseAdmin) return null;
+  let rows = null;
+  try {
+    const res = await supabaseAdmin
+      .from('whatsapp_meta_templates')
+      .select('name, status, body_text, meta_param_mapping')
+      .eq('name', templateName)
+      .limit(5);
+    if (res.error) return null;
+    rows = Array.isArray(res.data) ? res.data : [];
+  } catch (_) {
+    return null;
+  }
+  // Approved wint; anders eerste beschikbare (bv. pending — nog steeds beter
+  // dan placeholder-body).
+  const tmpl = rows.find((r) => String(r.status || '').toLowerCase() === 'approved')
+            || rows[0]
+            || null;
+  const body = tmpl?.body_text ? String(tmpl.body_text) : null;
+  if (!body) return null;
+
+  const vars = variablesMap && typeof variablesMap === 'object' ? variablesMap : {};
+
+  // Named → positional index-map uit meta_param_mapping.body als beschikbaar.
+  // Shape: { '1': 'klant.naam', '2': 'factuur.betaal_link', ... } of
+  //        { 'klant.naam': '1', ... } (beide voorgekomen in de codebase).
+  const nameToIndex = {};
+  const bodyMap = tmpl?.meta_param_mapping?.body;
+  if (bodyMap && typeof bodyMap === 'object') {
+    for (const [k, v] of Object.entries(bodyMap)) {
+      const kIsIdx = /^\d+$/.test(String(k));
+      const vIsIdx = /^\d+$/.test(String(v));
+      if (kIsIdx && !vIsIdx)      nameToIndex[String(v)] = String(k);
+      else if (!kIsIdx && vIsIdx) nameToIndex[String(k)] = String(v);
+    }
+  }
+
+  return body.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_m, raw) => {
+    const key = String(raw).trim();
+    if (/^\d+$/.test(key)) {
+      const v = vars[key];
+      return v != null && v !== '' ? String(v) : `{{${key}}}`;
+    }
+    // Named — probeer directe key-match op vars, dan via mapping → positional.
+    if (vars[key] != null && vars[key] !== '') return String(vars[key]);
+    const idx = nameToIndex[key];
+    if (idx && vars[idx] != null && vars[idx] !== '') return String(vars[idx]);
+    return `{{${key}}}`;
+  });
 }

@@ -235,17 +235,17 @@ async function stuurWa(a, cfg, live, welkomPhoneId, varsOverride) {
       variables,
       phoneNumberId: welkomPhoneId,     // v=4: expliciete welkom-lijn (DB-lookup)
     });
-    // v=8 (2026-08-29) — log outbound naar whatsapp_messages zodat de send
-    // in Gesprekken verschijnt naast de inbound. Body = leesbare preview met
-    // template-naam + vars (echte Meta-template-body niet lokaal beschikbaar).
-    // Fail-soft in de helper.
-    const previewBody = `[template: ${cfg.name}] ${variables.join(' | ')}`;
+    // v=9 (2026-08-30) — log outbound naar whatsapp_messages. De helper rendert
+    // zelf de body uit whatsapp_meta_templates.body_text + vars-substitutie
+    // (via templateName + templateVariables). `body` hieronder is enkel de
+    // fallback als de template niet vindbaar/rendereerbaar is.
     const varsAsMap = {};
     variables.forEach((v, i) => { varsAsMap[String(i + 1)] = String(v); });
+    const fallbackBody = `WhatsApp-template '${cfg.name}' — ${variables.join(' · ')}`;
     await logOutboundWa(supabaseAdmin, {
       toPhone: a.telefoon,
       phoneNumberId: welkomPhoneId,
-      body: previewBody,
+      body: fallbackBody,
       wamid,
       templateName: cfg.name,
       templateVariables: varsAsMap,
