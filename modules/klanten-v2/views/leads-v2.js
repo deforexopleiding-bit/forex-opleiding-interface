@@ -96,6 +96,26 @@
     return `<span style="${st.style};padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600" title="${esc(st.label)}">${esc(st.label)}</span>`;
   };
 
+  // v=25 (2026-08-30): Bron-labels — mapt de raw funnel-source uit
+  // leads_overzicht.bron naar leesbare labels. Kale/lege bron → "Website"
+  // (default aannemer, want website-form submits kunnen zonder bron-tag
+  // binnenkomen). Onbekende waarden vallen terug op de raw string.
+  const BRON_LABELS = {
+    'website':                 'Website',
+    '7-daagse-v1':             'Funnel 7d v1',
+    '7-daagse-v2':             'Funnel 7d v2',
+    'kennismakingscursus-v1':  'Mini v1',
+    'kennismakingscursus-v2':  'Mini v2',
+    'funnel':                  'Funnel',
+    'meta':                    'Meta',
+    'handmatig':               'Handmatig',
+  };
+  const bronLabel = (raw) => {
+    const key = String(raw || '').trim().toLowerCase();
+    if (!key) return 'Website';
+    return BRON_LABELS[key] || raw;
+  };
+
   // v=22 (2026-08-29): dtStr — datum + tijd voor "AANGEMAAKT"-kolom.
   // Formaat dd-MM-yyyy HH:mm, tz Europe/Amsterdam. `dstr` blijft
   // date-only voor kolommen die daar semantisch bij passen (Call gepland).
@@ -765,10 +785,11 @@
         <button class="btn btn-sm" onclick="__leadRetry()">${svg(I.repeat || I.settings, 'width:14px;height:14px')} Opnieuw proberen</button>
       </div>` : ''}
       ${H.table(
-        [{ l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Kwalificatie', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
+        [{ l: 'Naam' }, { l: 'E-mail', cls: 'optional' }, { l: 'Telefoon', cls: 'optional' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Call gepland', cls: 'optional' }, { l: 'Status' }, { l: 'Score', cls: 'r' }, { l: 'Kwalificatie', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }, { l: '', cls: 'r' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           const herkomst = l.soort || l.herkomst || '';
+          const bLabel = bronLabel(l.bron);
           const sc = Number(l.score);
           const dr = Number(l.drempel);
           const scColor = (!isNaN(sc) && !isNaN(dr) && dr > 0)
@@ -784,6 +805,7 @@
             `<span class="mono" style="font-size:11.5px;color:var(--text-2)">${esc(l.email) || '—'}</span>`,
             `<span class="mono" style="font-size:11.5px;color:var(--text-3)">${esc(l.telefoon) || '—'}</span>`,
             `<span class="pill pill-neutral">${esc(herkomst) || '—'}</span>`,
+            `<span class="pill pill-neutral" title="${esc(l.bron || '')}">${esc(bLabel)}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             `<span class="mono" style="font-size:12px;color:var(--text-3)">${esc(call)}</span>`,
             H.pill(c, pl),
@@ -964,13 +986,15 @@
         })() : ''}
       </div>
       ${H.table(
-        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
+        [{ l: 'Naam' }, { l: 'Herkomst' }, { l: 'Bron', cls: 'optional' }, { l: 'Traject', cls: 'optional' }, { l: 'Laatste status', cls: 'optional' }, { l: 'Aangemaakt', cls: 'r optional' }],
         items.map(l => {
           const [c, pl] = STATUS_TO_PILL[l.status] || ['neutral', l.status || '—'];
           const herkomst = l.soort || l.herkomst || '';
+          const bLabel = bronLabel(l.bron);
           return [
             `<div class="cell-main-wrap"><div class="av av-sm">${H.av(l.naam || '?')}</div><a href="javascript:__leadOpen('${l.id}')" class="ld-name">${esc(l.naam) || '—'}</a></div>`,
             `<span class="pill pill-neutral">${esc(herkomst) || '—'}</span>`,
+            `<span class="pill pill-neutral" title="${esc(l.bron || '')}">${esc(bLabel)}</span>`,
             `<span style="font-size:12.5px;color:var(--text-3)">${esc(l.traject) || '—'}</span>`,
             H.pill(c, pl),
             `<span class="mono" style="font-size:12.5px;color:var(--text-3)">${dtStr(l.aangemaakt)}</span>`,
