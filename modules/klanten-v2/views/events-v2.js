@@ -2817,206 +2817,61 @@
   // Genereer HTML voor één bubbel + eventuele datum-separator. Gebruikt door
   // _inboxChatBody (initial render) én _appendNewThreadItems (append-only
   // refresh). Ontvangt de simoneIds-set + isWA vlag zodat het pure is.
-  function _renderBubbleHtml(m, ctx) {
-    const { isWA, simoneIds, prevDayKey, prevDir } = ctx;
-    const _dayKey = (mm) => {
-      const dt = new Date(mm.at || mm.sent_at || mm.created_at || NaN);
-      if (!Number.isFinite(dt.getTime())) return 'unknown';
-      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
-    };
-    const _dayLabel = (mm) => {
-      const dt = new Date(mm.at || mm.sent_at || mm.created_at || NaN);
-      if (!Number.isFinite(dt.getTime())) return '—';
-      const now = new Date();
-      if (dt.toDateString() === now.toDateString()) return 'Vandaag';
-      const y = new Date(now); y.setDate(now.getDate()-1);
-      if (dt.toDateString() === y.toDateString()) return 'Gisteren';
-      return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long', year: dt.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
-    };
-    const _timeShort = (mm) => {
-      const dt = new Date(mm.at || mm.sent_at || mm.created_at || NaN);
-      if (!Number.isFinite(dt.getTime())) return '';
-      return String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
-    };
-    const _statusIcon = (mm) => {
-      const s = String(mm.status || '').toLowerCase();
-      if (mm.read_at || s === 'read')      return '<span title="Gelezen" style="color:#53bdeb;font-weight:600;letter-spacing:-3px">✓✓</span>';
-      if (mm.delivered_at || s === 'delivered') return '<span title="Bezorgd" style="color:var(--text-3);font-weight:600;letter-spacing:-3px">✓✓</span>';
-      if (s === 'failed')                 return '<span title="Mislukt" style="color:var(--rose)">⚠</span>';
-      if (mm.sent_at || s === 'sent' || s === 'accepted') return '<span title="Verzonden" style="color:var(--text-3)">✓</span>';
-      return '';
-    };
+  // v=56 (2026-08-30): _renderBubbleHtml verwijderd — bubble-render loopt
+  // nu via KV_V2.helpers.renderChatThread. Deze helper mapt de events-item-
+  // shape (channel/direction/at/status/read_at/delivered_at/sent_at/
+  // failed_reason/template_name/media_url/media_type/meta) naar de shared
+  // shape: { id, channel, direction, body, subject, at, template_name,
+  // meta: { status, failed_reason, by_simone, from_name, attachments } }.
+  //
+  // - status wordt afgeleid uit read_at > delivered_at > status > sent_at
+  //   zodat de shared status-icoon-mapper (queued/sent/delivered/read/failed)
+  //   dezelfde vinkjes-progressie toont als de oude _statusIcon.
+  // - _pending outbound draagt status='queued' → ⏳-icoon in shared footer.
+  // - Simone-vlag komt uit simoneIds (Set van msg-ids die Simone verstuurde).
+  // - Media-body: shared renderChatBody kijkt naar meta.media_url + media_type;
+  //   we mappen top-level velden daar naartoe.
+  function _evNormalizeMsg(m, simoneIds) {
     const ch = String(m.channel || 'whatsapp').toLowerCase();
     const isEmail = ch === 'email';
     const out = m.direction === 'outbound' || m.direction === 'out';
-    const dk = _dayKey(m);
-    const sep = (dk !== prevDayKey && dk !== 'unknown')
-      ? `<div class="inbox-c-date-separator"><span>${esc(_dayLabel(m))}</span></div>`
-      : '';
-    const sameSender = (prevDir === (out ? 'out' : 'in')) && !sep;
-    const failed = m.status === 'failed' || m.failed_reason;
-    const rowClasses = [
-      'inbox-c-msg',
-      out ? 'outbound' : 'inbound',
-      sameSender ? 'same-sender' : '',
-      failed ? 'failed' : '',
-    ].filter(Boolean).join(' ');
-    const timeShort = _timeShort(m);
-    const receipt = out ? (m._pending ? '<span class="receipt" title="Bezig met versturen…">⏳</span>' : `<span class="receipt">${_statusIcon(m)}</span>`) : '';
-    const bySimone = out && m.id && simoneIds.has(String(m.id));
-    const simoneSparkle = bySimone ? '<span class="simone-sparkle" title="Verstuurd door Simone (AI)">✦</span>' : '';
-    const metaVisible = `<span class="bubble-meta">${simoneSparkle}${esc(timeShort)}${receipt}</span>`;
-    const metaPhantom = `<span class="meta-phantom" aria-hidden="true">${esc(timeShort)} ${out ? '✓✓' : ''}</span>`;
-    const msgId = m.id != null ? String(m.id) : '';
-
-    if (isEmail) {
-      const subj = m.meta?.subject || '(geen onderwerp)';
-      const fromName = m.meta?.from_name || m.meta?.from_address || '—';
-      const bodyHtml = m.meta?.has_html ? '(HTML-inhoud — bekijk in v1 voor volledige opmaak)' : '';
-      const bodyText = m.body || bodyHtml || '—';
-      return { html: `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
-        <div class="inbox-c-msg-bubble is-email">
-          <div class="inbox-c-email-chip">✉ E-mail · ${esc(timeShort)}</div>
-          <div class="inbox-c-email-subj">${esc(subj)}</div>
-          <div class="inbox-c-email-from">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
-          <div class="inbox-c-email-body">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
-          ${(asArr(m.meta?.attachments).length > 0) ? `<div class="inbox-c-email-att">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
-        </div>
-      </div>`, dk, dir: out ? 'out' : 'in' };
-    }
-    const tplName = m.template_name || m.meta?.template_name || null;
-    const mediaUrl = m.media_url || m.meta?.media_url || null;
-    const mediaType = m.media_type || m.meta?.media_type || null;
-    const body = m.body || (tplName ? '' : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
-    const opacity = m._pending ? ';opacity:.65;font-style:italic' : '';
-    return { html: `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
-      <div class="inbox-c-msg-bubble" style="${opacity}">
-        ${bySimone ? '<span class="inbox-c-simone-badge">🤖 Simone · AI</span><br>' : ''}
-        ${tplName ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName)}">📄 via template</div>` : ''}
-        <span class="bubble-text">${esc(body)}${metaPhantom}</span>
-        ${m.failed_reason ? `<div class="inbox-c-msg-failed-reason">${esc(m.failed_reason.slice(0,80))}</div>` : ''}
-        ${metaVisible}
-      </div>
-    </div>`, dk, dir: out ? 'out' : 'in' };
+    let status = String(m.status || '').toLowerCase();
+    if (m._pending) status = 'queued';
+    else if (m.read_at) status = 'read';
+    else if (m.delivered_at) status = 'delivered';
+    else if (!status && m.sent_at) status = 'sent';
+    return {
+      id: m.id,
+      channel: isEmail ? 'mail' : 'whatsapp',
+      direction: out ? 'outbound' : 'inbound',
+      body: m.body || '',
+      subject: m.meta?.subject || '',
+      at: m.at || m.sent_at || m.created_at || null,
+      template_name: m.template_name || m.meta?.template_name || null,
+      meta: {
+        status,
+        failed_reason: m.failed_reason || null,
+        by_simone: !!(out && m.id && simoneIds && simoneIds.has(String(m.id))),
+        subject: m.meta?.subject || null,
+        from_name: m.meta?.from_name || m.meta?.from_address || null,
+        attachments: asArr(m.meta?.attachments),
+        media_url: m.media_url || m.meta?.media_url || null,
+        media_type: m.media_type || m.meta?.media_type || null,
+      },
+    };
   }
 
   function _inboxChatBody(d, convId) {
-    const conv = d?.conversation || null;
     const msgs = asArr(d?.items);
-    const isWA = !!(conv?.phone_number || conv?.can_send_text);
-
-    // Datum-scheiders + status-icoon + tijdstempels (WhatsApp-stijl).
-    const _dayKey = (m) => {
-      const dt = new Date(m.at || m.sent_at || m.created_at || NaN);
-      if (!Number.isFinite(dt.getTime())) return 'unknown';
-      return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
-    };
-    const _dayLabel = (m) => {
-      const dt = new Date(m.at || m.sent_at || m.created_at || NaN);
-      if (!Number.isFinite(dt.getTime())) return '—';
-      const now = new Date();
-      if (dt.toDateString() === now.toDateString()) return 'Vandaag';
-      const y = new Date(now); y.setDate(now.getDate()-1);
-      if (dt.toDateString() === y.toDateString()) return 'Gisteren';
-      return dt.toLocaleDateString('nl-NL', { weekday:'long', day:'numeric', month:'long', year: dt.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
-    };
-    const _timeShort = (m) => {
-      const dt = new Date(m.at || m.sent_at || m.created_at || NaN);
-      if (!Number.isFinite(dt.getTime())) return '';
-      return String(dt.getHours()).padStart(2,'0') + ':' + String(dt.getMinutes()).padStart(2,'0');
-    };
-    const _statusIcon = (m) => {
-      const s = String(m.status || '').toLowerCase();
-      if (m.read_at || s === 'read')      return '<span title="Gelezen" style="color:#53bdeb;font-weight:600;letter-spacing:-3px">✓✓</span>';
-      if (m.delivered_at || s === 'delivered') return '<span title="Bezorgd" style="color:var(--text-3);font-weight:600;letter-spacing:-3px">✓✓</span>';
-      if (s === 'failed')                 return '<span title="Mislukt" style="color:var(--rose)">⚠</span>';
-      if (m.sent_at || s === 'sent' || s === 'accepted') return '<span title="Verzonden" style="color:var(--text-3)">✓</span>';
-      return '';
-    };
-
-    // Simone-verstuurde msg-ids (Set); als niet gefetched → lege set, wordt lazy geladen
+    // v=56 (2026-08-30): rendering via shared KV_V2.helpers.renderChatThread
+    // (Leadsonderhoud pattern). Events-shape → shared shape via _evNormalizeMsg.
+    // Behouden: dagchips, sameSender-groepering, template-badge (nu 'Sjabloon ·'-
+    // tag boven body), Simone-vlag (nu '✦ Simone · AI'-chip), failed_reason,
+    // email-shell (subject + from + attachments), status-vinkjes.
     const simoneIds = _live.simoneMsgs.data[convId] || new Set();
-
-    // Normaliseer: unified endpoint geeft channel/direction/at/body/meta.
-    // Legacy inbox-messages-list geeft direction/body/sent_at zonder channel;
-    // fall back op 'whatsapp' als channel ontbreekt.
-    // Rendering 1-op-1 uit Wanbetalers `_inboxRenderMessages`
-    // (modules/finance.html regels 14170-14296). DOM-skelet:
-    //   <div class="inbox-c-msg outbound|inbound[.same-sender][.failed]">
-    //     <div class="inbox-c-msg-bubble[.is-email]">
-    //       [template-badge] [simone-badge]
-    //       <span class="bubble-text">…<span class="meta-phantom">HH:MM ✓✓</span></span>
-    //       <span class="bubble-meta">✦ HH:MM <span class="receipt">✓✓</span></span>
-    //     </div>
-    //   </div>
-    // Kern-truc: .meta-phantom reserveert breedte in de laatste regel
-    // tekst zodat de absolute .bubble-meta niet overlapt.
-    let lastDay = null;
-    let lastDir = null;
-    const bubbles = msgs.map((m) => {
-      const ch = String(m.channel || 'whatsapp').toLowerCase();
-      const isEmail = ch === 'email';
-      const out = m.direction === 'outbound' || m.direction === 'out';
-      const dk = _dayKey(m);
-      // BUG B FIX — skip separator bij ongeldige datum (was: toonde "—" bar
-      // met epoch 1-1-1970 achterliggend). Nu: geen bar, geen 1970.
-      const sep = (dk !== lastDay && dk !== 'unknown')
-        ? `<div class="inbox-c-date-separator"><span>${esc(_dayLabel(m))}</span></div>`
-        : '';
-      const sameSender = (lastDir === (out ? 'out' : 'in')) && !sep;
-      lastDay = dk;
-      lastDir = out ? 'out' : 'in';
-
-      const failed = m.status === 'failed' || m.failed_reason;
-      const rowClasses = [
-        'inbox-c-msg',
-        out ? 'outbound' : 'inbound',
-        sameSender ? 'same-sender' : '',
-        failed ? 'failed' : '',
-      ].filter(Boolean).join(' ');
-
-      // Meta-content (tijd + status-vinkjes) — hetzelfde voor phantom en visible
-      const timeShort = _timeShort(m);
-      const receipt = out ? (m._pending ? '<span class="receipt" title="Bezig met versturen…">⏳</span>' : `<span class="receipt">${_statusIcon(m)}</span>`) : '';
-      const bySimone = out && m.id && simoneIds.has(String(m.id));
-      const simoneSparkle = bySimone ? '<span class="simone-sparkle" title="Verstuurd door Simone (AI)">✦</span>' : '';
-      const metaVisible = `<span class="bubble-meta">${simoneSparkle}${esc(timeShort)}${receipt}</span>`;
-      const metaPhantom = `<span class="meta-phantom" aria-hidden="true">${esc(timeShort)} ${out ? '✓✓' : ''}</span>`;
-
-      const msgId = m.id != null ? String(m.id) : '';
-      if (isEmail) {
-        // ── E-MAIL BUBBEL — .is-email overlay op zelfde bubble-shell ──
-        const subj = m.meta?.subject || '(geen onderwerp)';
-        const fromName = m.meta?.from_name || m.meta?.from_address || '—';
-        const bodyHtml = m.meta?.has_html ? '(HTML-inhoud — bekijk in v1 voor volledige opmaak)' : '';
-        const bodyText = m.body || bodyHtml || '—';
-        return `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
-          <div class="inbox-c-msg-bubble is-email">
-            <div class="inbox-c-email-chip">✉ E-mail · ${esc(timeShort)}</div>
-            <div class="inbox-c-email-subj">${esc(subj)}</div>
-            <div class="inbox-c-email-from">${out ? 'aan' : 'van'}: ${esc(fromName)}</div>
-            <div class="inbox-c-email-body">${esc(String(bodyText).slice(0, 800))}${String(bodyText).length > 800 ? '…' : ''}</div>
-            ${(asArr(m.meta?.attachments).length > 0) ? `<div class="inbox-c-email-att">📎 ${asArr(m.meta?.attachments).length} bijlage(n)</div>` : ''}
-          </div>
-        </div>`;
-      }
-
-      // ── WHATSAPP BUBBEL — Wanbetalers Pad A ──
-      const tplName = m.template_name || m.meta?.template_name || null;
-      const mediaUrl = m.media_url || m.meta?.media_url || null;
-      const mediaType = m.media_type || m.meta?.media_type || null;
-      const body = m.body || (tplName ? '' : (mediaUrl ? '📎 Bijlage (' + (mediaType || 'media') + ')' : '—'));
-      const opacity = m._pending ? ';opacity:.65;font-style:italic' : '';
-      return `${sep}<div class="${rowClasses}" data-msg-id="${esc(msgId)}">
-        <div class="inbox-c-msg-bubble" style="${opacity}">
-          ${bySimone ? '<span class="inbox-c-simone-badge">🤖 Simone · AI</span><br>' : ''}
-          ${tplName ? `<div class="inbox-c-msg-tplbadge" title="${esc(tplName)}">📄 via template</div>` : ''}
-          <span class="bubble-text">${esc(body)}${metaPhantom}</span>
-          ${m.failed_reason ? `<div class="inbox-c-msg-failed-reason">${esc(m.failed_reason.slice(0,80))}</div>` : ''}
-          ${metaVisible}
-        </div>
-      </div>`;
-    }).join('');
+    const H = window.KV_V2 && window.KV_V2.helpers;
+    const normalized = msgs.map((m) => _evNormalizeMsg(m, simoneIds));
+    const bubbles = (H && H.renderChatThread) ? H.renderChatThread(normalized, { escFn: esc }) : '';
 
     // Chat-body wrapper — id="ev-inbox-chat-scroll" voor scroll-track.
     // KRITIEK: min-height:0 op flex-child (Wanbetalers-patroon). Zonder deze
@@ -3599,73 +3454,43 @@
     } catch (_) {}
   }
 
-  // ── Append-only refresh: voeg alleen NIEUWE bubbels toe ──────────────
-  // Vergelijk data-msg-id in DOM met items in cache. Bestaande DOM-nodes
-  // NIET aanraken → browser houdt scrollTop automatisch vast. Bij _stick
-  // (near-bottom) → auto-scroll na append; anders positie blijft staan.
+  // ── Thread refresh (v=56 2026-08-30) — full re-render via shared renderer.
+  // Groepering + kanaal-footers zijn context-afhankelijk: append-only werkt
+  // niet meer (vorige laatste bubble kan zijn staart/footer verliezen als
+  // een nieuw bericht bij dezelfde groep hoort). Full re-render + scroll-
+  // anchor behoud bij not-near-bottom.
   function _appendNewThreadItems(convId) {
     const inner = document.querySelector('#ev-inbox-thread-inner');
-    const anchor = document.querySelector('#ev-inbox-bottom-anchor');
+    const scrollEl = document.querySelector('#ev-inbox-chat-scroll');
     if (!inner) return;
     const d = _live.inboxMsgs.data[convId];
     if (!d) return;
     const msgs = asArr(d.items);
     if (msgs.length === 0) return;
-
-    // Bestaande msg-ids uit DOM
-    const existingIds = new Set();
-    inner.querySelectorAll('.inbox-c-msg[data-msg-id]').forEach((el) => {
-      const id = el.getAttribute('data-msg-id');
-      if (id) existingIds.add(id);
-    });
-
-    const conv = d.conversation || null;
-    const isWA = !!(conv?.phone_number || conv?.can_send_text);
     const simoneIds = _live.simoneMsgs.data[convId] || new Set();
+    const H = window.KV_V2 && window.KV_V2.helpers;
+    if (!H || !H.renderChatThread) return;
 
-    // Continuïteit: prevDayKey + prevDir uit LAATSTE bubble in DOM
-    const rows = inner.querySelectorAll('.inbox-c-msg');
-    const lastRow = rows.length ? rows[rows.length - 1] : null;
-    let prevDayKey = null, prevDir = null;
-    if (lastRow) {
-      const lastId = lastRow.getAttribute('data-msg-id');
-      const lastMsg = msgs.find((m) => String(m.id) === lastId);
-      if (lastMsg) {
-        const dt = new Date(lastMsg.at || lastMsg.sent_at || lastMsg.created_at || NaN);
-        if (Number.isFinite(dt.getTime())) {
-          prevDayKey = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
-        }
-        prevDir = (lastMsg.direction === 'outbound' || lastMsg.direction === 'out') ? 'out' : 'in';
-      }
-    }
+    // Scroll-anchor bepalen VOOR re-render (near-bottom → scroll naar onder).
+    const nearBottom = scrollEl
+      ? (scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight) < 40
+      : false;
+    const anchorOffset = scrollEl ? (scrollEl.scrollHeight - scrollEl.scrollTop) : 0;
 
-    const htmlChunks = [];
-    let appendedCount = 0;
-    for (const m of msgs) {
-      const id = m.id != null ? String(m.id) : '';
-      if (id && existingIds.has(id)) continue;
-      const { html, dk, dir } = _renderBubbleHtml(m, { isWA, simoneIds, prevDayKey, prevDir });
-      htmlChunks.push(html);
-      prevDayKey = dk;
-      prevDir = dir;
-      appendedCount++;
-    }
-    if (appendedCount === 0) return;
-    const empty = document.querySelector('#ev-inbox-thread-empty');
-    if (empty) empty.remove();
-    const fragment = document.createElement('div');
-    fragment.innerHTML = htmlChunks.join('');
-    const children = Array.from(fragment.children);
-    for (const child of children) {
-      if (anchor) inner.insertBefore(child, anchor);
-      else inner.appendChild(child);
-    }
-    // Sticky-bottom: als _stick=true, mee-scrollen. Anders: browser houdt
-    // scrollTop vast omdat we bestaande nodes niet aanraakten (append-only).
-    if (_ui._lastScrollAtBottom) {
+    const normalized = msgs.map((m) => _evNormalizeMsg(m, simoneIds));
+    const bubblesHtml = H.renderChatThread(normalized, { escFn: esc });
+
+    // Empty-state weg + re-render + bottom-anchor terug op laatste positie.
+    inner.innerHTML = bubblesHtml
+      + `<div id="ev-inbox-bottom-anchor" style="height:1px;flex-shrink:0" aria-hidden="true"></div>`;
+
+    if (scrollEl) {
       requestAnimationFrame(() => {
-        const scrollEl = document.querySelector('#ev-inbox-chat-scroll');
-        if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+        if (nearBottom || _ui._lastScrollAtBottom) {
+          scrollEl.scrollTop = scrollEl.scrollHeight;
+        } else {
+          scrollEl.scrollTop = scrollEl.scrollHeight - anchorOffset;
+        }
       });
     }
   }
