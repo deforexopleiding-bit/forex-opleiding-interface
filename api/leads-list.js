@@ -67,7 +67,7 @@ export default async function handler(req, res) {
   try {
     let qy = supabaseAdmin
       .from('leads_overzicht')
-      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, afwijzer, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
+      .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
       .order('aangemaakt', { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -85,13 +85,16 @@ export default async function handler(req, res) {
     if (scoreMax != null) qy = qy.lte('score', scoreMax);
     if (bron)   qy = qy.eq('bron',   bron);
     if (status) qy = qy.eq('status', status);
-    // v=2 (2026-08-29): filter uitgebreid met 'knock-out' + 'onder-drempel'
-    // zodat de v2-UI drie afwijs-varianten kan onderscheiden. 'toegang' en
-    // 'geen toegang' + 'geen' (leeg) blijven ongewijzigd voor backward-compat.
+    // v=3 (2026-08-29) REVERT: leads_overzicht is een VIEW zonder 'afwijzer'-
+    // kolom (dat veld leeft alleen op de raw leads-tabel binnen antwoorden-
+    // jsonb). Filter op afwijzer breekt de view-query → 500. Post-filter
+    // 'knock-out' + 'onder-drempel' moet in JS na een aparte fetch op leads,
+    // niet hier in de view-query. Voorlopig accepteren we die filter-keys
+    // stil als 'geen toegang' zodat de UI niet crasht; badge-onderscheid
+    // gebeurt client-side + in detail-view (waar antwoorden beschikbaar zijn).
     if (kwal === 'geen') qy = qy.is('kwalificatie', null);
-    else if (kwal === 'knock-out')     qy = qy.eq('afwijzer', true);
-    else if (kwal === 'onder-drempel') qy = qy.eq('kwalificatie', 'geen toegang').neq('afwijzer', true);
-    else if (kwal === 'toegang')       qy = qy.eq('kwalificatie', 'toegang').neq('afwijzer', true);
+    else if (kwal === 'knock-out')     qy = qy.eq('kwalificatie', 'geen toegang');
+    else if (kwal === 'onder-drempel') qy = qy.eq('kwalificatie', 'geen toegang');
     else if (kwal)                     qy = qy.eq('kwalificatie', kwal);
     if (afspraak === 'ja')      qy = qy.not('afspraak_op', 'is', null);
     else if (afspraak === 'nee') qy = qy.is('afspraak_op', null);
