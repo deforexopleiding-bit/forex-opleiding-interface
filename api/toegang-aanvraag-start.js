@@ -80,24 +80,68 @@ export default async function handler(req, res) {
   if (!SOORT_OK.has(soort))               return res.status(400).json({ error: "soort moet '7-daagse' of 'minicursus' zijn" });
 
   try {
-    // Idempotency-guard: bestaat er al een 'wachtend' aanvraag voor deze
-    // email+soort? Zo ja: retourneer die id (voorkomt duplicate wachtrij bij
-    // dubbele submit vanuit de website).
-    const { data: bestaand } = await supabaseAdmin
-      .from('toegang_aanvragen')
-      .select('id, status')
-      .eq('email', email)
-      .eq('soort', soort)
-      .in('status', ['wachtend', 'gereageerd'])   // niet 'vervallen' — nieuwe aanvraag toegestaan
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (bestaand && bestaand.length > 0) {
+    // v=2 (2026-08-30) dedup uitgebreid van (email + soort) naar
+    // (email OR telefoon-last9-digits) op status='wachtend'. Root-cause:
+    // vroeger kon dezelfde persoon 2 openstaande rijen hebben (bv. 7-daagse
+    // + minicursus) → reactie-webhook matchte alleen kandidaten[0] → één
+    // rij bleef 'wachtend' → dubbele reminders + dubbele "je bent binnen".
+    //
+    // Regels:
+    //  - Alleen dedup op status='wachtend'. Een lead die al 'gereageerd' is
+    //    mag zich legitiem opnieuw aanmelden (bv. voor een ander product na
+    //    provisioning van de eerste).
+    //  - Match op email OF telefoon-last9 (dezelfde last-9-normalisatie
+    //    als de reactie-webhooks in inbox-webhook + follow-up-ghl-
+    //    conversation-webhook gebruiken — consistente notatie).
+    //  - Bestaande wachtend-rij gevonden → SKIP insert, return 409 met
+    //    bestaande id. Bewuste keuze om NIET bron/soort te updaten: dat
+    //    zou de originele funnel-attributie overschrijven (dezelfde bug-
+    //    familie als de recent gefixte opstartsessie-book overschrijving).
+    //    Origine is authoritatief bij de eerste aanmelding.
+    //
+    // Fail-open: bij een dedup-lookup-fout NIET blokkeren — insert gaat
+    // door. Beter een zeldzame duplicate dan een aanvraag verliezen (de
+    // webhook-fix + partial UNIQUE index later dekken die edge af).
+    const tel9 = String(telefoon || '').replace(/\D/g, '').slice(-9);
+    let bestaand = null;
+    try {
+      const { data: byEmail } = await supabaseAdmin
+        .from('toegang_aanvragen')
+        .select('id, status, email, telefoon, soort')
+        .eq('email', email)
+        .eq('status', 'wachtend')
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (byEmail && byEmail.length > 0) {
+        bestaand = { row: byEmail[0], match_reden: 'email' };
+      } else if (tel9 && tel9.length >= 8) {
+        // Telefoon-fallback: match op last-9-digits. PostgREST kan geen
+        // computed expressions in .eq(), dus we halen alle 'wachtend'-
+        // rijen op en filteren client-side. Bounded op 50 (defensief).
+        const { data: wachtend } = await supabaseAdmin
+          .from('toegang_aanvragen')
+          .select('id, status, email, telefoon, soort')
+          .eq('status', 'wachtend')
+          .order('created_at', { ascending: false })
+          .limit(50);
+        const telMatch = (wachtend || []).find((r) => {
+          const rd = String(r.telefoon || '').replace(/\D/g, '');
+          return rd && rd.slice(-9) === tel9;
+        });
+        if (telMatch) bestaand = { row: telMatch, match_reden: 'telefoon-last9' };
+      }
+    } catch (dedupErr) {
+      console.warn('[toegang-aanvraag-start] dedup lookup (soft):', dedupErr?.message || dedupErr);
+      // Fail-open — insert gaat door.
+    }
+    if (bestaand) {
       return res.status(409).json({
         ok: false,
         already: true,
-        aanvraag_id: bestaand[0].id,
-        status: bestaand[0].status,
-        error: 'Er bestaat al een actieve aanvraag voor deze email+soort',
+        aanvraag_id: bestaand.row.id,
+        status: bestaand.row.status,
+        match_reden: bestaand.match_reden,
+        error: `Er bestaat al een openstaande aanvraag voor deze persoon (match op ${bestaand.match_reden}).`,
       });
     }
 
