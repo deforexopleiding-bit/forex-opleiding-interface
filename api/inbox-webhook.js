@@ -1445,11 +1445,20 @@ export default async function handler(req, res) {
                 try {
                   const digits = String(phoneE164Plus || '').replace(/\D/g, '');
                   const last9  = digits.slice(-9);
+                  // v=2026-08-31 tiebreaker: bij 2 rijen met identieke
+                  // created_at (kan in dezelfde ms binnenkomen) is "oudste"
+                  // anders non-deterministisch. id ASC als 2e sortkey zorgt
+                  // dat de webhook altijd dezelfde primaire rij kiest.
+                  // Status='wachtend' filter (al aanwezig) borgt dat een
+                  // oude gereageerd/provisioned rij nooit als primair wordt
+                  // gekozen — nieuwe wachtend-aanmelding krijgt gegarandeerd
+                  // haar bevestiging.
                   const { data: rows } = await supabaseAdmin
                     .from('toegang_aanvragen')
                     .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
                     .eq('status', 'wachtend')
                     .order('created_at', { ascending: true })
+                    .order('id', { ascending: true })
                     .limit(50);
                   const kandidaten = (rows || []).filter((r) => {
                     const rd = String(r.telefoon || '').replace(/\D/g, '');

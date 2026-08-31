@@ -370,11 +370,17 @@ export default async function handler(req, res) {
         // Zoek 'wachtend' aanvraag met matchend telefoonnummer (last-9-match).
         // v=2: order by created_at ASC → bij meerdere matches (bv. jeffr +
         // jeffrey-test met zelfde nummer) pakken we deterministisch de OUDSTE.
+        // v=2026-08-31 tiebreaker: id ASC als 2e sortkey — bij 2 rijen met
+        // identieke created_at (dezelfde ms) is "oudste" anders non-deterministisch.
+        // Status='wachtend' filter (al aanwezig) borgt dat een oude gereageerd/
+        // provisioned rij nooit als primair wordt gekozen — nieuwe wachtend-
+        // aanmelding krijgt gegarandeerd haar bevestiging.
         const { data: rows } = await supabaseAdmin
           .from('toegang_aanvragen')
           .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
           .eq('status', 'wachtend')
           .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
           .limit(50);
         const kandidaten = (rows || []).filter((r) => {
           const rd = String(r.telefoon || '').replace(/\D/g, '');
