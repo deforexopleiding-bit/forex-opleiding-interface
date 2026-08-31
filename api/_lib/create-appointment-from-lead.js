@@ -262,6 +262,26 @@ export async function createAppointmentForLead({
     : null;
   const cleanSource = sourceSlug && sourceSlug.length && sourceSlug.length <= 64 ? sourceSlug : null;
 
+  // BP2 Deel A (2026-08-31): setter-attributie op de boeking. Lookup de
+  // owner_user_id op booking_sources voor deze slug — als 'ie bestaat en
+  // actief is, stampen we die als setter_user_id op de appointment. Fail-
+  // soft: onbekende slug / geen owner / DB-fout → NULL. Boeking gaat
+  // ALTIJD door. cleanSource NULL (bv. directe boeking) → skip lookup.
+  let resolvedSetter = null;
+  if (cleanSource) {
+    try {
+      const { data: bs } = await supabaseAdmin
+        .from('booking_sources')
+        .select('owner_user_id')
+        .eq('slug', cleanSource)
+        .eq('actief', true)
+        .maybeSingle();
+      if (bs?.owner_user_id) resolvedSetter = bs.owner_user_id;
+    } catch (e) {
+      console.warn('[create-appointment-from-lead] setter-lookup (soft):', e?.message || e);
+    }
+  }
+
   const insertRow = {
     parent_appointment_id: null,
     lead_name           : lead.lead_name  || null,
@@ -277,13 +297,14 @@ export async function createAppointmentForLead({
     zoom_meeting_id     : ghl?.zoom_meeting_id ?? null,
     zoom_join_url       : ghl?.zoom_join_url   ?? null,
     booking_source      : cleanSource,
+    setter_user_id      : resolvedSetter,       // BP2: NULL bij bronnen zonder owner
   };
 
   // 42703 fail-soft: strip optionele kolommen die in oudere schema's
-  // kunnen ontbreken. booking_source is toegevoegd in migratie 046 —
-  // als die nog niet gedraaid is, stript de fail-soft-lus 'em uit de
-  // insert zodat oude prod-schemas geen 500 gooien.
-  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'booking_source'];
+  // kunnen ontbreken. booking_source is toegevoegd in migratie 046,
+  // setter_user_id in de BP2-migratie — als die nog niet gedraaid is,
+  // stript de fail-soft-lus 'em uit de insert.
+  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'booking_source', 'setter_user_id'];
   let attempt = { ...insertRow };
   let inserted = null;
   for (let i = 0; i < 3; i++) {

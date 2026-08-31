@@ -41,7 +41,9 @@ export default async function handler(req, res) {
   //   marketing    — niet-team (externe agency-flow)
   //   viewer       — read-only extern (klant/lead-portalen)
   //   NULL / anders — klant/student-accounts
-  const STAFF_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'administratie'];
+  // BP2 (2026-08-31): appointmentsetter toegevoegd zodat Romy in staff-
+  // dropdowns verschijnt (Bronnen-koppeling + wizard setter-picker).
+  const STAFF_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'administratie', 'appointmentsetter'];
   const staffOnly = String(req.query?.staff_only || '') === '1';
 
   let q = supabaseAdmin

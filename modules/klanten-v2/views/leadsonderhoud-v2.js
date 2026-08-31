@@ -2288,6 +2288,34 @@
      ongewijzigd.
      ══════════════════════════════════════════════════════════════════ */
 
+  // BP2 Deel A: staff-lijst voor Setter-koppeling in Bronnen-tab.
+  // Simpele cache: 1 fetch per pagina-load, verse waardes bij herbezoek.
+  const _lsStaff = { loading: false, items: null, fetchedAt: 0 };
+  async function _lsFetchStaff(force) {
+    if (!force && _lsStaff.items && (Date.now() - _lsStaff.fetchedAt) < 5 * 60 * 1000) return _lsStaff.items;
+    if (_lsStaff.loading) return _lsStaff.items || [];
+    _lsStaff.loading = true;
+    try {
+      const j = await tryFetch('ls-staff', '/api/profiles-list?staff_only=1');
+      _lsStaff.items = (j && Array.isArray(j.members)) ? j.members : [];
+      _lsStaff.fetchedAt = Date.now();
+    } catch (_) { _lsStaff.items = _lsStaff.items || []; }
+    _lsStaff.loading = false;
+    return _lsStaff.items;
+  }
+  window._lsBronSetOwner = async function(idx, userId){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
+    const owner = (userId === '' || userId === '__none__') ? null : String(userId);
+    try {
+      await window.KV.authedJson('/api/booking-sources-upsert', {
+        method: 'POST',
+        body: JSON.stringify({ id: b.id, slug: b.slug, label: b.label, actief: b.actief, owner_user_id: owner }),
+      });
+      window.KV.toast(owner ? 'Setter gekoppeld.' : 'Setter losgekoppeld.', 'ok');
+      fetchBronnen(true);
+    } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+  };
+
   const _lsBronForm = { slug: '', label: '', busy: false, error: null };
   window._lsBronSetSlug  = function(el){ _lsBronForm.slug  = String(el.value || '').trim().toLowerCase(); };
   window._lsBronSetLabel = function(el){ _lsBronForm.label = String(el.value || '').trim(); };
@@ -2347,9 +2375,12 @@
 
   function bronnenView() {
     if (!_live.bronnen.fetched && !_live.bronnen.loading && !_live.bronnen.error) queueMicrotask(() => fetchBronnen(false));
+    // BP2 Deel A: staff-lijst lazy fetch voor de setter-dropdown.
+    if (!_lsStaff.items && !_lsStaff.loading) queueMicrotask(() => _lsFetchStaff(false).then(() => { if (window.DFO?.render) window.DFO.render(); }));
     const st = _live.bronnen;
     const data = st.data || { items: [], total_calls: 0 };
     const items = data.items || [];
+    const staff = _lsStaff.items || [];
     const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
     const filterChips = periodes.map(([k,l]) => `<button class="chip ${st.periode===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetBronPeriode('${k}')">${esc(l)}</button>`).join('');
     const rows = items.length ? items.map((b, i) => {
@@ -2363,12 +2394,20 @@
         ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-right:4px" onclick="window._lsBronBewerken(${i})">Bewerken</button>
            <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronToggle(${i})">${b.actief ? 'Deactiveren' : 'Activeren'}</button>`
         : `<button class="btn btn-primary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronRegistreren(${i})" title="Toevoegen aan bronnenlijst met deze slug">Registreren</button>`;
+      // BP2 Deel A: setter-koppeling per bron.
+      const setterCell = b.is_registered
+        ? `<select onchange="window._lsBronSetOwner(${i}, this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:11.5px;max-width:180px">
+            <option value="__none__" ${!b.owner_user_id ? 'selected' : ''}>— geen —</option>
+            ${staff.map((s) => `<option value="${esc(s.id)}" ${String(b.owner_user_id || '') === String(s.id) ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
+          </select>`
+        : '<span style="color:var(--text-3);font-size:11px">—</span>';
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px 10px">
           <div style="font-weight:600">${esc(b.label)}</div>
           <div style="color:var(--text-3);font-size:11px;font-family:var(--mono,monospace)">${esc(b.slug)}</div>
         </td>
         <td style="padding:8px 10px">${statusBadge}</td>
+        <td style="padding:8px 10px">${setterCell}</td>
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${b.calls || 0}</td>
         <td style="padding:8px 10px">
           <div style="display:flex;align-items:center;gap:6px">
@@ -2378,7 +2417,7 @@
         </td>
         <td style="padding:8px 10px;white-space:nowrap">${acties}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="5" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Nog geen bronnen — voeg er hieronder één toe.'}</td></tr>`;
+    }).join('') : `<tr><td colspan="6" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Nog geen bronnen — voeg er hieronder één toe.'}</td></tr>`;
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
@@ -2399,6 +2438,7 @@
               <tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
                 <th style="padding:8px 10px">Bron</th>
                 <th style="padding:8px 10px">Status</th>
+                <th style="padding:8px 10px">Setter</th>
                 <th style="padding:8px 10px;text-align:right">Calls</th>
                 <th style="padding:8px 10px">Link</th>
                 <th style="padding:8px 10px">Acties</th>

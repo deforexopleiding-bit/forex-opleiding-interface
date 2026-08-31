@@ -40,6 +40,21 @@ export default async function handler(req, res) {
   const slug  = String(body.slug  || '').trim().toLowerCase();
   const label = String(body.label || '').trim();
   const actief = body.actief === false ? false : true;
+  // BP2 Deel A: owner_user_id koppelt setter aan slug. Body kan de key
+  // weglaten (backward-compat) of expliciet 'null'/'' sturen om te ontkoppelen.
+  const ownerRaw = body.owner_user_id;
+  let ownerUserId = null; // default: geen setter
+  let ownerProvided = false;
+  if (ownerRaw !== undefined) {
+    ownerProvided = true;
+    if (ownerRaw === null || ownerRaw === '') {
+      ownerUserId = null;
+    } else if (typeof ownerRaw === 'string' && UUID_RE.test(ownerRaw.trim())) {
+      ownerUserId = ownerRaw.trim();
+    } else {
+      return res.status(400).json({ error: 'owner_user_id ongeldig (verwacht UUID, null of leeg)' });
+    }
+  }
 
   if (id !== null && !UUID_RE.test(id)) {
     return res.status(400).json({ error: 'id ongeldig (verwacht UUID)' });
@@ -51,17 +66,37 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'label vereist (1-120 tekens)' });
   }
 
+  // Bouw patch alleen met velden die de caller expliciet meestuurt zodat
+  // een UI die alleen owner_user_id wil bijwerken de rest niet aanraakt.
+  const buildPatch = () => {
+    const p = { slug, label, actief };
+    if (ownerProvided) p.owner_user_id = ownerUserId;
+    return p;
+  };
+
   try {
     if (id) {
       // UPDATE — id primair. Slug mag wisselen (met UNIQUE-check).
       const { data, error } = await supabaseAdmin
         .from('booking_sources')
-        .update({ slug, label, actief })
+        .update(buildPatch())
         .eq('id', id)
-        .select('id, slug, label, actief')
+        .select('id, slug, label, actief, owner_user_id')
         .maybeSingle();
       if (error) {
         if (error.code === '23505') return res.status(409).json({ error: `Slug '${slug}' bestaat al` });
+        // 42703 fail-soft: owner_user_id-kolom bestaat nog niet (pre-BP2-migratie).
+        if (error.code === '42703' && String(error.message || '').toLowerCase().includes('owner_user_id')) {
+          const { data: d2, error: e2 } = await supabaseAdmin
+            .from('booking_sources')
+            .update({ slug, label, actief })
+            .eq('id', id)
+            .select('id, slug, label, actief')
+            .maybeSingle();
+          if (e2) throw e2;
+          if (!d2) return res.status(404).json({ error: 'Bron niet gevonden' });
+          return res.status(200).json({ ok: true, item: d2 });
+        }
         throw error;
       }
       if (!data) return res.status(404).json({ error: 'Bron niet gevonden' });
@@ -71,11 +106,21 @@ export default async function handler(req, res) {
     // INSERT — slug UNIQUE-check.
     const { data, error } = await supabaseAdmin
       .from('booking_sources')
-      .insert({ slug, label, actief })
-      .select('id, slug, label, actief')
+      .insert(buildPatch())
+      .select('id, slug, label, actief, owner_user_id')
       .maybeSingle();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: `Slug '${slug}' bestaat al` });
+      // 42703 fail-soft: pre-BP2 schema zonder owner_user_id.
+      if (error.code === '42703' && String(error.message || '').toLowerCase().includes('owner_user_id')) {
+        const { data: d2, error: e2 } = await supabaseAdmin
+          .from('booking_sources')
+          .insert({ slug, label, actief })
+          .select('id, slug, label, actief')
+          .maybeSingle();
+        if (e2) throw e2;
+        return res.status(200).json({ ok: true, item: d2 });
+      }
       throw error;
     }
     return res.status(200).json({ ok: true, item: data });

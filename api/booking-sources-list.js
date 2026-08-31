@@ -52,11 +52,45 @@ export default async function handler(req, res) {
 
   try {
     // 1) Bronnenlijst (werkversie).
-    const { data: bronnen, error: e1 } = await supabaseAdmin
-      .from('booking_sources')
-      .select('id, slug, label, actief')
-      .order('slug');
-    if (e1) throw e1;
+    // BP2 Deel A: owner_user_id meenemen. 42703 fail-soft voor pre-BP2 schema.
+    let bronnen;
+    {
+      const { data, error } = await supabaseAdmin
+        .from('booking_sources')
+        .select('id, slug, label, actief, owner_user_id')
+        .order('slug');
+      if (error && error.code === '42703') {
+        const { data: d2, error: e2 } = await supabaseAdmin
+          .from('booking_sources')
+          .select('id, slug, label, actief')
+          .order('slug');
+        if (e2) throw e2;
+        bronnen = (d2 || []).map((b) => ({ ...b, owner_user_id: null }));
+      } else if (error) {
+        throw error;
+      } else {
+        bronnen = data;
+      }
+    }
+
+    // BP2 Deel A: staff-lookup voor owner_user_id → naam-mapping.
+    // Alleen voor bronnen met een owner. Fail-soft: bij fout tonen we
+    // de raw uuid als label ipv de rij te blokkeren.
+    const ownerIds = [...new Set((bronnen || []).map((b) => b.owner_user_id).filter(Boolean))];
+    let ownerMap = {};
+    if (ownerIds.length > 0) {
+      try {
+        const { data: profs } = await supabaseAdmin
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', ownerIds);
+        for (const p of (profs || [])) {
+          ownerMap[p.id] = { id: p.id, name: p.full_name || p.email || p.id, email: p.email || null };
+        }
+      } catch (e) {
+        console.warn('[booking-sources-list] staff-lookup (soft):', e?.message || e);
+      }
+    }
 
     // 2) Afspraak-rijen binnen venster (alleen booking_source-veld).
     //    v=2 (2026-08-27 regressie-fix): fail-soft omhulling. Als deze query
@@ -99,6 +133,8 @@ export default async function handler(req, res) {
       actief: !!b.actief,
       calls: tel.get(b.slug) || 0,
       is_registered: true,
+      owner_user_id: b.owner_user_id || null,
+      owner:         b.owner_user_id ? (ownerMap[b.owner_user_id] || null) : null,
     }));
     for (const [slug, calls] of tel.entries()) {
       if (bekende.has(slug)) continue;
