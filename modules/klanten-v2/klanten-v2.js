@@ -154,7 +154,9 @@ async function initAuth() {
   // via die omweg alsnog op v1. Nu accepteert de v2-shell elke CRM-rol;
   // server-side RBAC (requirePermission) blijft de per-module scope
   // afdwingen (mentor ziet geen sales-modules etc).
-  const CRM_STAFF_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie'];
+  // BP1 2026-08-31: appointmentsetter (Romy) toegevoegd — landt op
+  // leadsonderhoud-view via getRoleLandingUrl.
+  const CRM_STAFF_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'appointmentsetter'];
   const profile = await window.AuthShared.requireAuth(CRM_STAFF_ROLES);
   if (!profile) return null;
 

@@ -102,6 +102,10 @@ export default async function handler(req, res) {
   if (req.method !== 'DELETE') return res.status(405).json({ error: 'DELETE only' });
 
   try {
+    // BP1 2026-08-31: delete blijft BEWUST super_admin-only (hardcoded).
+    // Reden: destructieve actie op live gate-templates (bv. reminder_toegang_2u).
+    // Andere endpoints (list/detail/sync/submit/upsert) draaien op de RBAC-key
+    // admin.meta_templates.manage; delete niet.
     // Auth: Bearer → user → profile.role === 'super_admin'.
     const userClient = createUserClient(req);
     const { data: { user }, error: userErr } = await userClient.auth.getUser();

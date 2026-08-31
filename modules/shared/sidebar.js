@@ -954,7 +954,10 @@
   // wordt nooit verborgen (anti-lockout) en kan niet uit de DOM raken.
   // Hoogste rol wint: layout per rol staat onder 'sidebar_layout:<role>';
   // ontbrekend / leeg → val fail-open terug op de globale 'sidebar_layout'.
-  var ROLE_PRECEDENCE = ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie'];
+  // BP1 2026-08-31: appointmentsetter toegevoegd. Lage precedence — als Romy
+  // later ook een sales-rol krijgt (toekomst), wint sales. app-settings-key
+  // sidebar_layout:appointmentsetter kan de sidebar samenstellen.
+  var ROLE_PRECEDENCE = ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'appointmentsetter'];
 
   async function applySidebarLayout() {
     var nav, items, layout;

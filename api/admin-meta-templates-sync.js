@@ -31,6 +31,7 @@
 // SUPER_ADMIN ONLY.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const META_API_VERSION = 'v25.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -85,20 +86,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ---- Auth: Bearer → user → profile.role === 'super_admin' ----
+    // BP1 2026-08-31: refactored van hardcoded super_admin naar RBAC-feature-
+    // key admin.meta_templates.manage.
     const userClient = createUserClient(req);
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const { data: profile, error: profErr } = await supabaseAdmin
-      .from('profiles')
-      .select('id, role, is_active')
-      .eq('id', user.id)
-      .single();
-    if (profErr || !profile) return res.status(403).json({ error: 'Geen profiel gevonden' });
-    if (!profile.is_active) return res.status(403).json({ error: 'Account inactief' });
-    if (profile.role !== 'super_admin') {
-      return res.status(403).json({ error: 'Alleen super_admin' });
+    if (!(await requirePermission(req, 'admin.meta_templates.manage'))) {
+      return res.status(403).json({ error: 'Geen rechten (admin.meta_templates.manage)' });
     }
 
     const body = req.body || {};

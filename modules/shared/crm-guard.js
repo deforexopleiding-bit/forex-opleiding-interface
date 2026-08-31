@@ -31,8 +31,11 @@
   // Whitelist — moet 1-op-1 gelijk zijn aan public.is_crm_staff() in
   // docs/sql-migrations/2026-08-19-crm-rls-role-check-hardening.sql
   // en aan CRM_STAFF_ROLES in api/_lib/crm-roles.js.
+  // BP1 2026-08-31: appointmentsetter toegevoegd (herdefinitie van
+  // is_crm_staff() zit in docs/sql-migrations/2026-08-31-bp1-appointmentsetter-foundation.sql).
   var CRM_STAFF_ROLES = [
     'super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing',
+    'appointmentsetter',
   ];
 
   var LMS_URL = 'https://dfo-lms-prototype.vercel.app';

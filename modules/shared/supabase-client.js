@@ -60,14 +60,18 @@ window._authSharedReady = (async function () {
   //   administratie:  '/index.html',
   //   viewer:         '/index.html',
   const ROLE_LANDING = {
-    super_admin:    '/modules/klanten-v2/',
-    admin:          '/modules/klanten-v2/',
-    manager:        '/modules/klanten-v2/',
-    sales:          '/modules/klanten-v2/',
-    mentor:         '/modules/klanten-v2/',
-    marketing:      '/modules/klanten-v2/',
-    administratie:  '/modules/klanten-v2/',
-    viewer:         '/index.html',
+    super_admin:        '/modules/klanten-v2/',
+    admin:              '/modules/klanten-v2/',
+    manager:            '/modules/klanten-v2/',
+    sales:              '/modules/klanten-v2/',
+    mentor:             '/modules/klanten-v2/',
+    marketing:          '/modules/klanten-v2/',
+    administratie:      '/modules/klanten-v2/',
+    // BP1 2026-08-31: appointmentsetter (Romy) landt op leadsonderhoud-view.
+    // De hash-route wordt door klanten-v2.js opgepakt en direct in de
+    // leadsonderhoud-view geopend.
+    appointmentsetter:  '/modules/klanten-v2/#/leadsonderhoud',
+    viewer:             '/index.html',
   };
   function getRoleLandingUrl(role) {
     if (typeof role === 'string' && ROLE_LANDING[role]) return ROLE_LANDING[role];

@@ -16,6 +16,9 @@
 /** CRM-medewerkersrollen. 'viewer' en 'student' staan hier bewust NIET in. */
 export const CRM_STAFF_ROLES = [
   'super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing',
+  // BP1 2026-08-31: appointmentsetter (Romy). Landt op leadsonderhoud;
+  // finance/sales/mentor-modules zijn afgesloten via role_permissions.
+  'appointmentsetter',
 ];
 
 /** CRM-frontend (Agency Command Center). */

@@ -945,9 +945,10 @@
     const leadId = conv.lead_id;
     if (!conv.has_wa || !conv.can_send_text) {
       // Buiten 24u-venster of geen WA-lijn: template-modus.
+      // BP1 2026-08-31: vriendelijker hint i.p.v. technische foutmelding.
       _lsInb.compose.mode[leadId] = 'template';
       _lsInbRepaintCompose();
-      _lsInbToast('Buiten 24u-venster of geen WA — kies een template', 'warn');
+      _lsInbToast('Dit gesprek is ouder dan 24 uur — kies een goedgekeurde template om het te heropenen.', 'warn');
       _lsInbOpenTemplatePicker(leadId);
       return;
     }
@@ -969,9 +970,9 @@
         body: JSON.stringify({ lead_id: leadId, body }),
       });
       if (resp.status === 422) {
-        const j = await resp.json().catch(() => ({}));
+        // BP1 2026-08-31: vriendelijker hint i.p.v. rauwe 422-error.
         _lsInb.compose.mode[leadId] = 'template';
-        _lsInbToast(j.error || 'Buiten 24u-venster — kies een template', 'warn');
+        _lsInbToast('Dit gesprek is ouder dan 24 uur — kies een goedgekeurde template om het te heropenen.', 'warn');
         _lsInbOpenTemplatePicker(leadId);
         return;
       }
@@ -1130,6 +1131,257 @@
     _lsTpl.items = Array.isArray(j.items) ? j.items : [];
     _lsTpl.fetchedAt = Date.now();
     return _lsTpl.items;
+  }
+
+  // ── BP1 Onderdeel B — Snippet-picker + insert-op-cursor ──────────────
+  // Snippets zijn korte tekst-blokjes die op de cursor-positie in de
+  // composer worden ingevoegd (i.p.v. de tekst te vervangen zoals de
+  // template-picker doet). Variabelen: {voornaam} en {naam} worden
+  // client-side ingevuld vanuit de lead-context ('daar' als fallback).
+  const _lsSnip = { loading: false, items: null, error: null, fetchedAt: 0 };
+  async function _lsInbFetchSnippets() {
+    if (_lsSnip.items && (Date.now() - _lsSnip.fetchedAt) < 60 * 1000 && !_lsSnip.error) return _lsSnip.items;
+    if (_lsSnip.loading) return _lsSnip.items || [];
+    _lsSnip.loading = true; _lsSnip.error = null;
+    const j = await tryFetch('ls-snippets', '/api/wa-snippets-list');
+    _lsSnip.loading = false;
+    if (!j) { _lsSnip.error = 'Kon snippets niet laden'; return _lsSnip.items || []; }
+    _lsSnip.items = Array.isArray(j.items) ? j.items : [];
+    _lsSnip.fetchedAt = Date.now();
+    return _lsSnip.items;
+  }
+  function _lsInbResolveSnippet(body, conv) {
+    // Var-invulling: {voornaam} / {naam} → conv.voornaam of split van conv.naam.
+    // Fallback 'daar' bij ontbreken (mimicked pattern uit cron-toegang-aanvragen).
+    const rawNaam = String(conv?.naam || '').trim();
+    const voornaam = String(conv?.voornaam || rawNaam.split(/\s+/)[0] || 'daar').trim() || 'daar';
+    const naam = rawNaam || voornaam;
+    return String(body || '')
+      .replace(/\{voornaam\}/gi, voornaam)
+      .replace(/\{naam\}/gi, naam);
+  }
+  function _lsInbInsertAtCursor(taEl, text) {
+    if (!taEl) return;
+    const start = taEl.selectionStart != null ? taEl.selectionStart : (taEl.value || '').length;
+    const end   = taEl.selectionEnd   != null ? taEl.selectionEnd   : start;
+    const cur   = taEl.value || '';
+    const nieuw = cur.slice(0, start) + text + cur.slice(end);
+    taEl.value = nieuw;
+    // Cursor achter ingevoegde tekst.
+    const nieuwePos = start + text.length;
+    try { taEl.setSelectionRange(nieuwePos, nieuwePos); } catch (_) { /* fail-soft */ }
+    // Handmatig input-event triggeren zodat oninput-handler _lsInb.compose.draftsWa bijwerkt.
+    taEl.dispatchEvent(new Event('input', { bubbles: true }));
+    taEl.focus();
+  }
+  window.__lsInbSnippetPicker = () => { _lsInbOpenSnippetPicker(); };
+  async function _lsInbOpenSnippetPicker() {
+    const conv = _lsInbCurrentConv();
+    if (!conv) return;
+    const leadId = conv.lead_id;
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px">Kies een snippet om in te voegen</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">
+        Wordt <b>ingevoegd op cursor-positie</b> — je kunt 'm daarna nog bewerken.
+        Variabelen zoals <code>{voornaam}</code> worden ingevuld met de lead-naam.
+      </div>
+      <div id="lsInbSnipList" style="max-height:55vh;overflow-y:auto">
+        <div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">Snippets laden…</div>
+      </div>
+      <div style="margin-top:14px;text-align:right">
+        <button id="lsInbSnipManage" class="btn btn-ghost btn-sm" style="margin-right:6px">Beheer snippets…</button>
+        <button id="lsInbSnipClose" class="btn btn-ghost btn-sm">Sluiten</button>
+      </div>
+    `, { maxWidth: 620 });
+    document.getElementById('lsInbSnipClose').addEventListener('click', _lsInbCloseModal);
+    document.getElementById('lsInbSnipManage').addEventListener('click', () => {
+      _lsInbCloseModal();
+      _lsInbOpenSnippetManager();
+    });
+    const items = await _lsInbFetchSnippets();
+    const listEl = document.getElementById('lsInbSnipList');
+    if (!listEl) return;
+    if (_lsSnip.error) {
+      listEl.innerHTML = `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ ${esc(_lsSnip.error)}</div>`;
+      return;
+    }
+    if (!items.length) {
+      listEl.innerHTML = `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">
+        Nog geen snippets. Klik <b>Beheer snippets</b> om er een aan te maken.
+      </div>`;
+      return;
+    }
+    // Groepeer gedeeld (owner NULL) → eigen.
+    const shared = items.filter(x => x.is_shared);
+    const eigen  = items.filter(x => x.is_mine);
+    const groep = (label, arr) => arr.length ? `
+      <div style="font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.03em;text-transform:uppercase;padding:8px 4px 4px">${esc(label)}</div>
+      ${arr.map((s, i) => `
+        <button data-snip-id="${esc(s.id)}" class="ls-inb-snip-btn" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;font-family:inherit">
+          <div style="font-size:13px;font-weight:600;color:var(--text-1);margin-bottom:3px">${esc(s.titel)}</div>
+          <div style="font-size:12px;color:var(--text-3);line-height:1.4;white-space:pre-wrap">${esc(String(s.body_text || '').slice(0, 160))}${(s.body_text || '').length > 160 ? '…' : ''}</div>
+        </button>`).join('')}
+    ` : '';
+    listEl.innerHTML = groep('Gedeeld', shared) + groep('Eigen', eigen);
+    listEl.querySelectorAll('[data-snip-id]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-snip-id');
+        const snip = items.find(x => String(x.id) === String(id));
+        if (!snip) return;
+        const resolved = _lsInbResolveSnippet(snip.body_text, conv);
+        const taEl = document.getElementById('lsInbWaTxt');
+        if (taEl) {
+          _lsInbInsertAtCursor(taEl, resolved);
+        } else {
+          // Fallback: als textarea niet gemount is (buiten 24u fallback-view),
+          // gewoon in draftsWa appenden. Verzenden gaat dan alsnog via template.
+          _lsInb.compose.draftsWa[leadId] = (String(_lsInb.compose.draftsWa[leadId] || '') + resolved);
+          _lsInbRepaintCompose();
+        }
+        _lsInbCloseModal();
+      });
+    });
+  }
+
+  // BP1 Onderdeel C — Snippet-beheerscherm (modal).
+  async function _lsInbOpenSnippetManager() {
+    const perms = (window.RBAC && typeof window.RBAC.getUserPermissions === 'function')
+      ? (window.RBAC.getUserPermissions() || new Set()) : new Set();
+    const kanBeheren = perms.has('*') || perms.has('snippets.manage');
+    if (!kanBeheren) {
+      _lsInbToast('Geen beheerrechten (snippets.manage)', 'warn');
+      return;
+    }
+    // Bypass cache voor beheerscherm — altijd verse lijst.
+    _lsSnip.fetchedAt = 0;
+    const items = await _lsInbFetchSnippets();
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px">Snippets beheren</div>
+      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">
+        Gedeelde snippets zijn zichtbaar voor het hele team. Eigen snippets alleen voor jou.
+        <br>Variabelen: <code>{voornaam}</code>, <code>{naam}</code>.
+      </div>
+      <div style="max-height:50vh;overflow-y:auto;margin-bottom:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead style="text-align:left;color:var(--text-3);font-size:11.5px;text-transform:uppercase">
+            <tr><th style="padding:6px 4px">Titel</th><th style="padding:6px 4px">Type</th><th style="padding:6px 4px">Volgorde</th><th style="padding:6px 4px;text-align:right">Acties</th></tr>
+          </thead>
+          <tbody id="lsInbSnipMgrRows">
+            ${items.length ? items.map(s => `
+              <tr style="border-top:1px solid var(--border)">
+                <td style="padding:8px 4px">${esc(s.titel)}</td>
+                <td style="padding:8px 4px">${s.is_shared ? '<span style="color:var(--teal)">Gedeeld</span>' : '<span style="color:var(--text-3)">Eigen</span>'}</td>
+                <td style="padding:8px 4px">${Number(s.sort_order) || 100}</td>
+                <td style="padding:8px 4px;text-align:right">
+                  <button class="btn btn-ghost btn-sm" data-snip-edit="${esc(s.id)}">Bewerk</button>
+                  <button class="btn btn-ghost btn-sm" data-snip-del="${esc(s.id)}" style="color:var(--rose)">Verwijder</button>
+                </td>
+              </tr>
+            `).join('') : `<tr><td colspan="4" style="padding:22px;text-align:center;color:var(--text-3)">Nog geen snippets.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div style="text-align:right">
+        <button id="lsInbSnipMgrNew" class="btn btn-primary btn-sm" style="color:#fff;margin-right:6px">+ Nieuwe snippet</button>
+        <button id="lsInbSnipMgrClose" class="btn btn-ghost btn-sm">Sluiten</button>
+      </div>
+    `, { maxWidth: 720 });
+    document.getElementById('lsInbSnipMgrClose').addEventListener('click', _lsInbCloseModal);
+    document.getElementById('lsInbSnipMgrNew').addEventListener('click', () => _lsInbOpenSnippetForm(null));
+    document.querySelectorAll('[data-snip-edit]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-snip-edit');
+        const snip = items.find(x => String(x.id) === String(id));
+        if (snip) _lsInbOpenSnippetForm(snip);
+      });
+    });
+    document.querySelectorAll('[data-snip-del]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.getAttribute('data-snip-del');
+        const snip = items.find(x => String(x.id) === String(id));
+        const ok = await _lsInbAskConfirm(
+          `Snippet verwijderen?`,
+          `"${snip?.titel || id}" wordt definitief verwijderd.`,
+          { okLabel: 'Verwijder' }
+        );
+        if (!ok) return;
+        try {
+          const resp = await window.KV.authedFetch('/api/wa-snippets-delete?id=' + encodeURIComponent(id), { method: 'DELETE' });
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          _lsInbToast('Snippet verwijderd', 'ok');
+          _lsSnip.fetchedAt = 0;
+          _lsInbCloseModal();
+          _lsInbOpenSnippetManager();
+        } catch (e) {
+          _lsInbToast('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'error');
+        }
+      });
+    });
+  }
+  function _lsInbOpenSnippetForm(existing) {
+    const isEdit = !!(existing && existing.id);
+    const cur = existing || { titel: '', body_text: '', owner_user_id: null, sort_order: 100 };
+    _lsInbOpenModal(`
+      <div style="font-size:15px;font-weight:600;margin-bottom:12px">${isEdit ? 'Snippet bewerken' : 'Nieuwe snippet'}</div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Titel</label>
+        <input id="lsSnipTitel" type="text" maxlength="120" value="${esc(cur.titel)}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px" />
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Bericht (variabelen: {voornaam}, {naam})</label>
+        <textarea id="lsSnipBody" maxlength="2000" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;line-height:1.5;font-family:inherit;resize:vertical">${esc(cur.body_text)}</textarea>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:12px">
+        <div style="flex:1">
+          <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Type</label>
+          <select id="lsSnipOwner" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px">
+            <option value="shared" ${cur.owner_user_id === null ? 'selected' : ''}>Gedeeld (team)</option>
+            <option value="me" ${cur.owner_user_id !== null ? 'selected' : ''}>Eigen (alleen ik)</option>
+          </select>
+        </div>
+        <div style="width:120px">
+          <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Volgorde</label>
+          <input id="lsSnipOrder" type="number" min="0" max="9999" value="${Number(cur.sort_order) || 100}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px" />
+        </div>
+      </div>
+      <div style="text-align:right">
+        <button id="lsSnipCancel" class="btn btn-ghost btn-sm" style="margin-right:6px">Annuleer</button>
+        <button id="lsSnipSave" class="btn btn-primary btn-sm" style="color:#fff">${isEdit ? 'Opslaan' : 'Toevoegen'}</button>
+      </div>
+    `, { maxWidth: 560 });
+    document.getElementById('lsSnipCancel').addEventListener('click', () => {
+      _lsInbCloseModal();
+      _lsInbOpenSnippetManager();
+    });
+    document.getElementById('lsSnipSave').addEventListener('click', async () => {
+      const titel = String(document.getElementById('lsSnipTitel')?.value || '').trim();
+      const body  = String(document.getElementById('lsSnipBody')?.value  || '').trim();
+      const owner = String(document.getElementById('lsSnipOwner')?.value || 'shared');
+      const order = Number(document.getElementById('lsSnipOrder')?.value) || 100;
+      if (!titel) { _lsInbToast('Titel is leeg', 'warn'); return; }
+      if (!body)  { _lsInbToast('Bericht is leeg', 'warn'); return; }
+      try {
+        const url  = '/api/wa-snippets-upsert';
+        const meth = isEdit ? 'PATCH' : 'POST';
+        const payload = { titel, body_text: body, owner_user_id: owner, sort_order: order };
+        if (isEdit) payload.id = existing.id;
+        const resp = await window.KV.authedFetch(url, {
+          method: meth,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!resp.ok) {
+          const j = await resp.json().catch(() => ({}));
+          throw new Error(j.error || ('HTTP ' + resp.status));
+        }
+        _lsInbToast(isEdit ? 'Snippet opgeslagen' : 'Snippet toegevoegd', 'ok');
+        _lsSnip.fetchedAt = 0;
+        _lsInbCloseModal();
+        _lsInbOpenSnippetManager();
+      } catch (e) {
+        _lsInbToast('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'error');
+      }
+    });
   }
 
   window.__lsInbTemplatePicker = () => { _lsInbOpenTemplatePicker(); };
@@ -1567,6 +1819,7 @@
           ${waEnabled ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="__lsInbSendWa()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur WA'}</button>` : `<button class="btn btn-ghost btn-sm" disabled title="Buiten 24u-venster — kies een sjabloon">Verstuur WA</button>`}
           <button class="${tplBtnClass}" ${tplBtnStyle} onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Kies een goedgekeurde WA-template">${svg(I.doc || I.mail, 'width:13px;height:13px')} Sjabloon</button>
           <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker('wa')" ${sending ? 'disabled' : ''} title="Canned snel-antwoord invoegen">Snel</button>
+          <button class="btn btn-ghost btn-sm" onclick="__lsInbSnippetPicker()" ${sending || !waEnabled ? 'disabled' : ''} title="Snippet invoegen op cursor-positie">Snippet</button>
           ${(window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.emojiPickerButtonHtml) ? window.KV_V2.helpers.emojiPickerButtonHtml('lsInbWaTxt', '😊') : ''}
           <button class="btn btn-ghost btn-sm" onclick="__lsInbToggleMailForm()" ${!mailEnabled ? 'disabled' : ''} title="${mailEnabled ? 'Antwoord per mail' : 'Geen e-mailadres bekend'}">${showMail ? 'Verberg mail' : 'Ook / alleen mail…'}</button>
         </div>
