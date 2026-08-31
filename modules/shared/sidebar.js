@@ -333,6 +333,10 @@
             svg('finance') + 'Finance' +
             '<span class="nav-badge" id="navFinanceTasksBadge" data-target="/modules/finance.html?tab=wanbetalers&sub=open-acties&status=PENDING" title="Open acties"></span>' +
           '</a>' +
+          // BP2 setter-commissie module — appointmentsetter + manager/admin.
+          '<a class="nav-item" data-module="setter-payout" href="/modules/klanten-v2/#/setter-payout">' +
+            svg('mentor-payouts-admin') + 'Commissie' +
+          '</a>' +
           '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +
           // Admin nav-item incl. approval-badge (D1 payment-arrangements). De badge zelf
           // linkt nu naar /modules/open-acties.html?status=PENDING (cleanere UX dan de oude
@@ -835,6 +839,10 @@
     // Payout fase 1 — finance/strateeg-tool. mentor.payout.manage (manager+).
     // Page-gate blijft op de directe URL actief (defense-in-depth).
     'mentor-payouts-admin': 'mentor.payout.manage',
+    // BP2 setter-commissie module — zichtbaar voor iedereen met setter.ledger.view
+    // (appointmentsetter én manager/admin). setter zelf ziet eigen data,
+    // manager+ ziet alle setters via de dropdown-picker in de view.
+    'setter-payout': 'setter.ledger.view',
     // A1 — Alle studenten overzicht (manager via 016; super_admin via '*').
     'students-overview': 'students.all.view',
     // Funded-certificaten admin (alle €100-claims + downloads). Page-gate

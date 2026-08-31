@@ -191,6 +191,10 @@
       "schedule": "*/2 * * * *"
     },
     {
+      "path": "/api/cron-setter-cash-release",
+      "schedule": "0 6 * * *"
+    },
+    {
       "path": "/api/cron-lisa-conversations-poll",
       "schedule": "*/15 * * * *"
     }
