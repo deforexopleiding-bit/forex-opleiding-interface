@@ -313,6 +313,53 @@ export default async function handler(req, res) {
   // zoals 'vervallen' (die is stille administratie).
   const nachtNu = isNacht(nowMs);
 
+  // ── Atomic claim/unclaim helpers (v=10 2026-08-30) ─────────────────────
+  // Concurrent cron-runs kunnen dezelfde rij tegelijk SELECTen zolang de
+  // guard-kolom (bevestiging_sent_at / reminder_*_at / dag6_sent_at) nog
+  // NULL is. Vóór v=10 werd de guard PAS NA de send gezet → race-window
+  // → duplicate Meta-sends bij runs die overlappen (bv. cron elke minuut +
+  // 50 rijen × 1-3s Meta-round-trip = run > 60s → 2-3 parallelle runs
+  // pikken dezelfde rij op).
+  //
+  // Fix: atomic claim — probeer de kolom te zetten met een WHERE-guard
+  // die eist dat 'ie NULL is. Postgres UPDATE is atomair per-rij: 2
+  // concurrent UPDATEs met identieke WHERE zien allebei het pre-image,
+  // maar Postgres serialiseert → tweede krijgt 0 rows RETURNING. De
+  // race-loser retourneert null en slaat de send stil over.
+  //
+  // Bij een send-fout wordt de guard weer op NULL gezet zodat een volgende
+  // run 'em opnieuw kan proberen (voorkomt dat een transiente Meta-fout
+  // een lead z'n bevestiging/reminder kost).
+  async function claimRow(id, kolom) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('toegang_aanvragen')
+        .update({ [kolom]: new Date().toISOString() })
+        .eq('id', id)
+        .is(kolom, null)                          // ← atomic guard
+        .select('id')
+        .maybeSingle();
+      if (error) {
+        console.warn(`[cron-toegang-aanvragen] claim ${kolom} fail (soft):`, error.message);
+        return false;
+      }
+      return !!(data && data.id);
+    } catch (e) {
+      console.warn(`[cron-toegang-aanvragen] claim ${kolom} exception (soft):`, e?.message || e);
+      return false;
+    }
+  }
+  async function unclaimRow(id, kolom) {
+    try {
+      await supabaseAdmin
+        .from('toegang_aanvragen')
+        .update({ [kolom]: null })
+        .eq('id', id);
+    } catch (e) {
+      console.warn(`[cron-toegang-aanvragen] unclaim ${kolom} exception (soft):`, e?.message || e);
+    }
+  }
+
   // ── 1) BEVESTIGING (created_at + 2 min) ────────────────────────────────
   if (!nachtNu) try {
     const grens = new Date(nowMs - 2 * 60 * 1000).toISOString();
@@ -324,6 +371,11 @@ export default async function handler(req, res) {
       .lte('created_at', grens)
       .limit(50);
     for (const a of (rows || [])) {
+      // Atomic claim VÓÓR de sends. Race-loser (andere concurrent cron-run
+      // die dezelfde rij zag) krijgt hier `false` en slaat de rij over.
+      const gotClaim = await claimRow(a.id, 'bevestiging_sent_at');
+      if (!gotClaim) continue;
+
       const cfg = a.call_geboekt ? TEMPLATES.bevestig_a : TEMPLATES.bevestig_b;
       // v=7 (2026-08-28): Flow A callMoment 1× ophalen — hergebruikt voor
       // ZOWEL WA-template ({{2}}) ALS mail. bevestig_toegang_a is approved
@@ -360,11 +412,12 @@ export default async function handler(req, res) {
         bev_flag_gezet: okAny,
       });
       if (okAny) {
-        await supabaseAdmin.from('toegang_aanvragen')
-          .update({ bevestiging_sent_at: new Date().toISOString() })
-          .eq('id', a.id);
         summary.bevestiging++;
       } else {
+        // Beide kanalen faalden → rollback claim zodat een volgende run
+        // opnieuw probeert. Voorkomt dat een transiente Meta+SMTP-fout
+        // de bevestiging permanent skipt.
+        await unclaimRow(a.id, 'bevestiging_sent_at');
         summary.errors.push({ id: a.id, step: 'bevestiging', wa: wa.error, mail: mail.error });
       }
     }
@@ -386,13 +439,17 @@ export default async function handler(req, res) {
       .lte('bevestiging_sent_at', grens)
       .limit(50);
     for (const a of (rows || [])) {
+      // Atomic claim VÓÓR de send. Race-loser slaat over.
+      const gotClaim = await claimRow(a.id, kolom);
+      if (!gotClaim) continue;
+
       const wa = await stuurWa(a, TEMPLATES[cfgKey], live, welkomPhoneId);
       if (wa.ok) {
-        await supabaseAdmin.from('toegang_aanvragen')
-          .update({ [kolom]: new Date().toISOString() })
-          .eq('id', a.id);
         summary[counter]++;
       } else {
+        // Rollback: reminder faalde → guard weer op NULL zodat 'ie
+        // in de volgende run opnieuw wordt geprobeerd.
+        await unclaimRow(a.id, kolom);
         summary.errors.push({ id: a.id, step: `reminder-${uren}u`, error: wa.error });
       }
     }
@@ -429,20 +486,24 @@ export default async function handler(req, res) {
       .lte('provisioned_at', grens)
       .limit(50);
     for (const a of (rows || [])) {
-      // WA + mail parallel (fail-soft per kanaal). Guard zetten zodra
-      // MINSTENS ÉÉN kanaal geslaagd is — voorkomt herhaling in volgende
-      // cron-run als één kanaal tijdelijk faalt.
+      // Atomic claim VÓÓR WA+mail. Race-loser slaat over. Bij dubbele
+      // sends van dag-6 zou een lead 2 identieke check-in-berichten
+      // krijgen — zelfde race-familie als de bevestiging + reminders.
+      const gotClaim = await claimRow(a.id, 'dag6_sent_at');
+      if (!gotClaim) continue;
+
+      // WA + mail parallel (fail-soft per kanaal).
       const cfg = a.call_geboekt ? TEMPLATES.dag6_a : TEMPLATES.dag6_b;
       const wa  = await stuurWa(a, cfg, live, welkomPhoneId);
       const mailPayload = a.call_geboekt ? MAIL_DAG6_A(a.voornaam) : MAIL_DAG6_B(a.voornaam);
       const mail = await stuurMail(a, mailPayload.subject, mailPayload.text, mailPayload.html, live);
       const okAny = wa.ok || mail.ok;
       if (okAny) {
-        await supabaseAdmin.from('toegang_aanvragen')
-          .update({ dag6_sent_at: new Date().toISOString() })
-          .eq('id', a.id);
         summary.dag6++;
       } else {
+        // Beide kanalen faalden → rollback zodat de dag-6 in de volgende
+        // run opnieuw wordt geprobeerd.
+        await unclaimRow(a.id, 'dag6_sent_at');
         summary.errors.push({ id: a.id, step: 'dag6', wa: wa.error, mail: mail.error });
       }
     }

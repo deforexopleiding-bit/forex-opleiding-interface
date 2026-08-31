@@ -188,7 +188,7 @@
     },
     {
       "path": "/api/cron-toegang-aanvragen",
-      "schedule": "* * * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron-lisa-conversations-poll",
