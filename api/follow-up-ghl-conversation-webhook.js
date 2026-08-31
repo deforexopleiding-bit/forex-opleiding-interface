@@ -380,33 +380,68 @@ export default async function handler(req, res) {
           const rd = String(r.telefoon || '').replace(/\D/g, '');
           return rd && (rd === digits || rd.slice(-9) === last9);
         });
-        const match = kandidaten[0] || null;
+        // v=2026-08-30 (dubbele-rijen-fix): ALLE openstaande zusterrijen
+        // sluiten, niet alleen kandidaten[0]. Primaire = OUDSTE (created_at
+        // ASC) — enige die provisioning + "je bent binnen" krijgt, en alleen
+        // als de atomic claim ons in deze invocatie de winnaar maakte.
+        const primair = kandidaten[0] || null;
+        const zusterrijen = kandidaten.slice(1);
+        const nowIso = new Date().toISOString();
         console.log('[ghl-conversation-webhook] toegang-gate:',
           'wachtend-rijen=', rows?.length ?? 0,
           'kandidaten=', kandidaten.length,
-          'match=', match?.id || 'geen',
+          'primair=', primair?.id || 'geen',
+          'zusterrijen=', zusterrijen.length,
           'inbound-last9=', last9);
         pushTrace('gate-lookup', {
           wachtend_rijen: rows?.length ?? 0,
           kandidaten: kandidaten.length,
-          match_id: match?.id || null,
+          match_id: primair?.id || null,
+          zusterrijen_ids: zusterrijen.map((z) => z.id),
           inbound_last9: last9,
         });
-        if (kandidaten.length > 1) {
-          console.warn('[ghl-conversation-webhook] toegang-gate: meerdere match-kandidaten voor zelfde nummer — kies oudste', kandidaten.map((k) => k.id));
+
+        // Zusterrijen sluiten (alleen status-flip, geen provisioning + geen
+        // "je bent binnen"). Atomic per rij via race-guard op status='wachtend'.
+        // Cron-reminderfilter eist status='wachtend' → deze rijen krijgen
+        // gegarandeerd geen reminder meer.
+        for (const z of zusterrijen) {
+          try {
+            const { data: zClaim } = await supabaseAdmin
+              .from('toegang_aanvragen')
+              .update({ status: 'gereageerd', reacted_at: nowIso })
+              .eq('id', z.id)
+              .eq('status', 'wachtend')
+              .select('id')
+              .maybeSingle();
+            pushTrace('gate-zusterrij-closed', {
+              zusterrij_id: z.id, soort: z.soort, claimed: !!(zClaim && zClaim.id),
+            });
+          } catch (zErr) {
+            console.warn('[ghl-conversation-webhook] zusterrij close (soft):', z.id, zErr?.message || zErr);
+          }
         }
-        if (match) {
+
+        if (primair) {
+          const match = primair;   // alias voor bestaande code hieronder
           pushTrace('gate-match', { match_id: match.id, soort: match.soort, provisioned_al: !!match.provisioned_at });
-          // 1) Status → 'gereageerd' + reacted_at (idempotent — WHERE guard).
-          const nowIso = new Date().toISOString();
-          await supabaseAdmin
+          // 1) Atomic claim van de primaire rij. Alleen als deze invocatie
+          //    de winnaar is (primClaimed), gaan we provisioneren + "je bent
+          //    binnen" sturen. Voorkomt dubbele provisioning bij een
+          //    gelijktijdige webhook.
+          const { data: primClaim } = await supabaseAdmin
             .from('toegang_aanvragen')
             .update({ status: 'gereageerd', reacted_at: nowIso })
             .eq('id', match.id)
-            .eq('status', 'wachtend'); // race-guard
+            .eq('status', 'wachtend')
+            .select('id')
+            .maybeSingle();
+          const primClaimed = !!(primClaim && primClaim.id);
+          pushTrace('gate-primair-claim', { match_id: match.id, claimed: primClaimed });
 
-          // 2) Provisioning-call. Alleen 1× (provisioned_at guard).
-          if (!match.provisioned_at) {
+          // 2) Provisioning-call. Alleen als we de rij zelf claimen én
+          //    er nog niet eerder is geprovisioneerd.
+          if (primClaimed && !match.provisioned_at) {
             const r = await belProvisioning({
               email: match.email, voornaam: match.voornaam, soort: match.soort,
             });

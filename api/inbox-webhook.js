@@ -1455,30 +1455,72 @@ export default async function handler(req, res) {
                     const rd = String(r.telefoon || '').replace(/\D/g, '');
                     return rd && (rd === digits || rd.slice(-9) === last9);
                   });
-                  const match = kandidaten[0] || null;
+                  // v=2026-08-30 (dubbele-rijen-fix): ALLE openstaande zusterrijen
+                  // sluiten, niet alleen kandidaten[0]. Primaire = OUDSTE
+                  // (created_at ASC) — enige die provisioning + "je bent binnen"
+                  // krijgt, en alleen als de atomic claim ons in deze invocatie
+                  // de winnaar maakte (race-veilig voor gelijktijdige webhooks).
+                  const primair = kandidaten[0] || null;
+                  const zusterrijen = kandidaten.slice(1);
                   traceEvents.push({ ...traceBase, stage: 'gate-lookup',
                     wachtend_rijen: rows?.length ?? 0,
                     kandidaten: kandidaten.length,
-                    match_id: match?.id || null,
+                    match_id: primair?.id || null,
+                    zusterrijen_ids: zusterrijen.map((z) => z.id),
                     inbound_last9: last9,
                   });
                   console.log('[inbox-webhook] toegang-gate:',
                     'wachtend-rijen=', rows?.length ?? 0,
                     'kandidaten=', kandidaten.length,
-                    'match=', match?.id || 'geen',
+                    'primair=', primair?.id || 'geen',
+                    'zusterrijen=', zusterrijen.length,
                     'inbound-last9=', last9);
-                  if (match) {
+
+                  // ── Zusterrijen sluiten (alleen status-flip, geen provisioning,
+                  //    geen "je bent binnen"). Atomic per rij via race-guard.
+                  //    Cron-reminderfilter eist status='wachtend' → deze rijen
+                  //    krijgen gegarandeerd geen reminder meer.
+                  for (const z of zusterrijen) {
+                    try {
+                      const { data: zClaim } = await supabaseAdmin
+                        .from('toegang_aanvragen')
+                        .update({ status: 'gereageerd', reacted_at: _tsIso })
+                        .eq('id', z.id)
+                        .eq('status', 'wachtend')
+                        .select('id')
+                        .maybeSingle();
+                      traceEvents.push({ ...traceBase, stage: 'gate-zusterrij-closed',
+                        zusterrij_id: z.id, soort: z.soort,
+                        claimed: !!(zClaim && zClaim.id),
+                      });
+                    } catch (zErr) {
+                      console.warn('[inbox-webhook] zusterrij close (soft):', z.id, zErr?.message || zErr);
+                    }
+                  }
+
+                  if (primair) {
+                    const match = primair;    // alias voor bestaande code hieronder
                     traceEvents.push({ ...traceBase, stage: 'gate-match',
                       match_id: match.id, soort: match.soort, provisioned_al: !!match.provisioned_at,
                     });
-                    // Status → 'gereageerd' (race-guard op status='wachtend').
-                    await supabaseAdmin
+                    // Atomic claim van de primaire rij (status='wachtend' → 'gereageerd').
+                    // Alleen als deze invocatie de winnaar is (claimed?.id) gaan we
+                    // provisioneren + "je bent binnen" sturen. Voorkomt dubbele
+                    // provisioning bij een gelijktijdige webhook op dezelfde rij.
+                    const { data: primClaim } = await supabaseAdmin
                       .from('toegang_aanvragen')
                       .update({ status: 'gereageerd', reacted_at: _tsIso })
                       .eq('id', match.id)
-                      .eq('status', 'wachtend');
-                    // Provisioning-call (1× via provisioned_at guard).
-                    if (!match.provisioned_at) {
+                      .eq('status', 'wachtend')
+                      .select('id')
+                      .maybeSingle();
+                    const primClaimed = !!(primClaim && primClaim.id);
+                    traceEvents.push({ ...traceBase, stage: 'gate-primair-claim',
+                      match_id: match.id, claimed: primClaimed,
+                    });
+                    // Provisioning + welkom-WA ALLEEN als we de rij zelf
+                    // hebben geclaimd én er nog niet eerder is geprovisioneerd.
+                    if (primClaimed && !match.provisioned_at) {
                       const r = await belProvisioning({
                         email: match.email, voornaam: match.voornaam, soort: match.soort,
                       });
