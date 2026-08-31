@@ -132,6 +132,8 @@
       exception_fee_agreed:   false,     // alleen relevant bij late_start
       // Prefill / audit
       source_lead_id: '',
+      // BP2 setter-attributie (auto-gevuld uit lead-boeking, overschrijfbaar).
+      setter_user_id: '',
     },
   };
   // 1-op-1 met v1 r471. Wordt gemerged met wizard.tags[] in de chip-row.
@@ -172,6 +174,7 @@
       exception_reason_note:  '',
       exception_fee_agreed:   false,
       source_lead_id: '',
+      setter_user_id: '',
     };
   }
   // Reset ALLE cross-session state die de vorige wizard-openen kan hebben
@@ -494,6 +497,7 @@
       w.sale_type           = deal.sale_type || 'domestic';
       w.quote_reference     = deal.quote_reference || '';
       w.source_lead_id      = deal.source_lead_id || '';
+      w.setter_user_id      = deal.setter_user_id || '';
       // Producten (unit_price → price_per_unit rename)
       w.products = (d.line_items || []).map(l => ({
         product_id:         l.product_id,
@@ -801,6 +805,8 @@
       if (!_sw.trajecten     && !_sw.trajectenLoading) queueMicrotask(loadTrajecten);
       if (!_sw.productsCatalog && !_sw.productsLoading) queueMicrotask(loadProductsCatalog);
       if (_sw.leadSources === null) queueMicrotask(loadLeadSources);
+      // BP2 setter-picker: staff lazy-load bij stap 3.
+      if (!_sw.staff || _sw.staff.length === 0) queueMicrotask(loadStaff);
     }
     if (n === 4) {
       // Prefill start_date-clamp bij eerste bezoek — v1 renderPaymentStep r730-738.
@@ -963,6 +969,7 @@
         },
         deal_data: {
           source_lead_id: w.source_lead_id || null,
+          setter_user_id: w.setter_user_id || null,
           quote_reference: w.quote_reference || null,
           start_date: w.start_date,
           duration_months: Number(w.duration_months) || 12,
@@ -1133,6 +1140,33 @@
                     : Array.isArray(data) ? data : [];
     _sw.leadSourcesLoading = false;
     renderWizard();
+  }
+  // BP2 setter-picker: staff-lijst lazy fetch. Trigger op stap 3 (offerte-detail).
+  async function loadStaff() {
+    if (_sw.staffLoading) return;
+    if (_sw.staff && _sw.staff.length) return;
+    _sw.staffLoading = true;
+    try {
+      const data = await tryFetch('staff-list', '/api/profiles-list?staff_only=1');
+      _sw.staff = Array.isArray(data?.members) ? data.members : [];
+    } catch (_) { _sw.staff = _sw.staff || []; }
+    _sw.staffLoading = false;
+    renderWizard();
+    // Als source_lead_id gezet maar setter niet, doe 1x auto-lookup.
+    if (_sw.wizard.source_lead_id && !_sw.wizard.setter_user_id) {
+      _swAutoLookupSetter(_sw.wizard.source_lead_id).catch(() => {});
+    }
+  }
+  // Auto-lookup setter uit lead → oudste boeking (spiegelt de server-logic).
+  async function _swAutoLookupSetter(leadId) {
+    if (!leadId) return;
+    try {
+      const j = await tryFetch('setter-lookup', '/api/lead-setter-lookup?lead_id=' + encodeURIComponent(leadId));
+      if (j?.setter_user_id && !_sw.wizard.setter_user_id) {
+        _sw.wizard.setter_user_id = String(j.setter_user_id);
+        renderWizard();
+      }
+    } catch (_) { /* fail-soft — picker blijft leeg */ }
   }
   async function applyTrajectVariant(variantId) {
     _sw.wizard.traject_variant_id = variantId || '';
@@ -2020,6 +2054,17 @@
       </div>
 
       <div class="tk-field-row">
+        <label class="tk-field"><span class="tk-field-l">Boeking-setter
+            ${w.setter_user_id ? '' : '<span style="color:var(--amber);font-weight:600;margin-left:6px">⚠ geen setter</span>'}
+          </span>
+          <select class="ib-input" onchange="__swInput('setter_user_id', this.value)">
+            ${renderSetterOptions()}
+          </select>
+          <span class="tk-field-hint">Wie boekte de call die tot deze deal leidde? Auto-gevuld uit lead-boeking, hier corrigeerbaar. Bepaalt 3%-commissie.</span>
+        </label>
+      </div>
+
+      <div class="tk-field-row">
         <label class="tk-field"><span class="tk-field-l">Datum offerte <span class="tk-req">*</span></span>
           <input class="ib-input" type="date" value="${esc(w.start_date)}"
                  oninput="__swInput('start_date', this.value)">
@@ -2060,6 +2105,14 @@
     const sel = _sw.wizard.source_lead_id || '';
     if (!list.length) return `<option value="">Binnenkort beschikbaar</option>`;
     return `<option value="">— Kies —</option>` + list.map(s => `<option value="${esc(s.id)}" ${sel === s.id ? 'selected' : ''}>${esc(s.name || s.label || s.id)}</option>`).join('');
+  }
+  // BP2 setter-picker options. staff-lijst wordt lazy-fetched (zie _swEnsureStaff).
+  function renderSetterOptions() {
+    const list = _sw.staff || [];
+    const sel  = _sw.wizard.setter_user_id || '';
+    if (!list.length && _sw.staffLoading) return `<option value="">Setters laden…</option>`;
+    return `<option value="">— Geen setter —</option>` +
+      list.map(s => `<option value="${esc(s.id)}" ${sel === s.id ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('');
   }
   // Product-picker modal (3e overlay)
   function pickerModalHtml() {

@@ -179,6 +179,47 @@ export default async function handler(req, res) {
     // 2. Bereken total_amount uit producten.
     const totalAmount = products.reduce((sum, p) => sum + (Number(p.price_per_unit) * Number(p.quantity)), 0);
 
+    // BP2 setter-attributie: expliciete override uit wizard-picker wint;
+    // anders auto-lookup via source_lead_id → leads.email → oudste boeking
+    // met setter_user_id (email primair, telefoon-last9 fallback). Fail-
+    // soft: bij lookup-fout NULL, deal-creatie gaat door.
+    let resolvedSetter = emptyToNull(deal_data.setter_user_id);
+    if (!resolvedSetter && deal_data.source_lead_id) {
+      try {
+        const { data: lead } = await supabaseAdmin
+          .from('leads').select('email, telefoon').eq('id', deal_data.source_lead_id).maybeSingle();
+        if (lead?.email) {
+          const { data: fa } = await supabaseAdmin
+            .from('follow_up_appointments')
+            .select('setter_user_id')
+            .ilike('lead_email', lead.email)
+            .not('setter_user_id', 'is', null)
+            .order('scheduled_at', { ascending: true })
+            .limit(1).maybeSingle();
+          if (fa?.setter_user_id) resolvedSetter = fa.setter_user_id;
+        }
+        // Telefoon-last9 fallback als email-match faalde.
+        if (!resolvedSetter && lead?.telefoon) {
+          const tel9 = String(lead.telefoon).replace(/\D/g, '').slice(-9);
+          if (tel9 && tel9.length >= 8) {
+            const { data: all } = await supabaseAdmin
+              .from('follow_up_appointments')
+              .select('setter_user_id, lead_phone, scheduled_at')
+              .not('setter_user_id', 'is', null)
+              .order('scheduled_at', { ascending: true })
+              .limit(200);
+            const hit = (all || []).find((r) => {
+              const rd = String(r.lead_phone || '').replace(/\D/g, '');
+              return rd && rd.slice(-9) === tel9;
+            });
+            if (hit?.setter_user_id) resolvedSetter = hit.setter_user_id;
+          }
+        }
+      } catch (e) {
+        console.warn('[sales-deal-create] setter-lookup (soft):', e?.message || e);
+      }
+    }
+
     // 3. Deal aanmaken.
     const dealPayload = {
       customer_id:        customerId,
@@ -187,6 +228,7 @@ export default async function handler(req, res) {
       end_date:           deal_data.end_date || null,
       status:             'active',
       sales_user_id:      user.id,
+      setter_user_id:     resolvedSetter,          // BP2: NULL bij lookup-miss + geen expliciete keuze
       source:             deal_data.source || null,
       source_lead_id:     emptyToNull(deal_data.source_lead_id),
       downpayment_amount: deal_data.downpayment_amount || null,
@@ -218,7 +260,16 @@ export default async function handler(req, res) {
       dealPayload.exception_approved_by = user.id;
       dealPayload.exception_approved_at = new Date().toISOString();
     }
-    const { data: deal, error: dErr } = await supabaseAdmin.from('deals').insert(dealPayload).select('id').single();
+    // BP2 42703 fail-soft: als setter_user_id-kolom nog niet bestaat
+    // (pre-BP2 migratie), retry zonder de kolom zodat deal-creatie
+    // niet blokkeert.
+    let deal, dErr;
+    ({ data: deal, error: dErr } = await supabaseAdmin.from('deals').insert(dealPayload).select('id').single());
+    if (dErr && dErr.code === '42703' && String(dErr.message || '').toLowerCase().includes('setter_user_id')) {
+      const fallback = { ...dealPayload };
+      delete fallback.setter_user_id;
+      ({ data: deal, error: dErr } = await supabaseAdmin.from('deals').insert(fallback).select('id').single());
+    }
     if (dErr) throw dErr;
     const dealId = deal.id;
 

@@ -110,6 +110,34 @@ export default async function handler(req, res) {
                  'traject_variant_id', 'discount_percentage', 'payment_start_date', 'payment_downpayment_amount', 'payment_downpayment_date',
                  'payment_term_count', 'payment_term_start_date', 'payment_term_amount'];
     for (const k of map) if (deal_data[k] !== undefined) patch[k] = deal_data[k] || null;
+
+    // BP2 setter-attributie: setter_user_id alleen wijzigbaar door
+    // setter.ledger.admin (manager+). Anders stil negeren. Audit-log
+    // entry zodat wijzigingen traceerbaar zijn.
+    if (deal_data.setter_user_id !== undefined) {
+      const canAdmin = await requirePermission(req, 'setter.ledger.admin');
+      if (canAdmin) {
+        const newSetter = (deal_data.setter_user_id === '' || deal_data.setter_user_id === null)
+          ? null
+          : String(deal_data.setter_user_id);
+        // Fetch oude waarde voor audit-log.
+        const { data: oldRow } = await supabaseAdmin
+          .from('deals').select('setter_user_id').eq('id', deal_id).maybeSingle();
+        const oldSetter = oldRow?.setter_user_id || null;
+        if (String(oldSetter || '') !== String(newSetter || '')) {
+          patch.setter_user_id = newSetter;
+          try {
+            await supabaseAdmin.from('audit_log').insert({
+              action: 'deals.setter_user_id.update',
+              payload: { deal_id, old: oldSetter, new: newSetter },
+              triggered_by: user.id,
+              status: 'success',
+            });
+          } catch (_) { /* audit-log ontbreekt in oude schemas — fail-soft */ }
+        }
+      }
+      // else: stil overslaan (geen 403 om andere velden niet te blokkeren).
+    }
     // discount_percentage is NOT NULL → 0 i.p.v. null.
     if (deal_data.discount_percentage !== undefined) patch.discount_percentage = Number(deal_data.discount_percentage) || 0;
     // sale_type is NOT NULL → 'domestic' als fallback.

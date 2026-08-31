@@ -54,6 +54,8 @@ export default async function handler(req, res) {
       end_date:                   src.end_date || null,
       status:                     'active',
       sales_user_id:              user.id,
+      // BP2: setter meecopieren zodat commissie-attributie behouden blijft.
+      setter_user_id:             src.setter_user_id || null,
       source:                     src.source || null,
       source_lead_id:             src.source_lead_id || null,
       downpayment_amount:         src.downpayment_amount || null,
@@ -83,8 +85,15 @@ export default async function handler(req, res) {
       //   archived_at, created_at (auto).
     };
 
-    const { data: newDeal, error: dErr } = await supabaseAdmin
-      .from('deals').insert(dealPayload).select('id').single();
+    let newDeal, dErr;
+    ({ data: newDeal, error: dErr } = await supabaseAdmin
+      .from('deals').insert(dealPayload).select('id').single());
+    if (dErr && dErr.code === '42703' && String(dErr.message || '').toLowerCase().includes('setter_user_id')) {
+      const fallback = { ...dealPayload };
+      delete fallback.setter_user_id;
+      ({ data: newDeal, error: dErr } = await supabaseAdmin
+        .from('deals').insert(fallback).select('id').single());
+    }
     if (dErr) throw dErr;
     const newDealId = newDeal.id;
 
