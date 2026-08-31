@@ -104,7 +104,15 @@ export default async function handler(req, res) {
     ? await metHandtekeningAsync(text, html, { mailbox: mailboxSlug, supabaseAdmin })
     : { text, html: html || null };
 
-  const passEnv = SMTP_ACCOUNTS[String(from_mailbox).toLowerCase()];
+  // 2026-08-31: accepteer zowel korte naam ('administratie') als volledig
+  // adres ('administratie@deforexopleiding.nl'). SMTP_ACCOUNTS is gesleuteld
+  // op volledig adres; korte namen worden hier genormaliseerd zodat oudere
+  // callers (bv. wanbetalers-e-mail in wanbetalers-v2.js:3532) geen
+  // "Onbekende mailbox: <shortname>" meer krijgen. Fix één plek in de
+  // resolver i.p.v. elke caller — dekt ook toekomstige callers.
+  const rawMailbox      = String(from_mailbox || '').toLowerCase().trim();
+  const resolvedMailbox = rawMailbox.includes('@') ? rawMailbox : `${rawMailbox}@deforexopleiding.nl`;
+  const passEnv         = SMTP_ACCOUNTS[resolvedMailbox];
   if (!passEnv) return res.status(400).json({ error: `Onbekende mailbox: ${from_mailbox}` });
   const password = process.env[passEnv];
   if (!password) {
@@ -115,7 +123,11 @@ export default async function handler(req, res) {
 
   const transporter = nodemailer.createTransport({
     host: SMTP_HOST, port: SMTP_PORT, secure: true,
-    auth: { user: from_mailbox, pass: password },
+    // Gebruik het volledige adres (resolvedMailbox) — SMTP-auth vereist
+    // het complete adres, niet de korte naam. Zonder deze normalisatie
+    // zou de send falen bij Strato ook al vindt de SMTP_ACCOUNTS-lookup
+    // wel het wachtwoord.
+    auth: { user: resolvedMailbox, pass: password },
   });
 
   // ── Threading-headers voor reply-groepering (Gmail/Outlook) ─────────────
@@ -137,11 +149,14 @@ export default async function handler(req, res) {
 
   try {
     const mailOpts = {
-      from:    `"De Forex Opleiding" <${from_mailbox}>`,
+      // from/replyTo gebruiken resolvedMailbox — anders krijgt de ontvanger
+      // een header met korte naam (bv. "<administratie>") die als ongeldig
+      // adres wordt afgewezen door de meeste MTA's.
+      from:    `"De Forex Opleiding" <${resolvedMailbox}>`,
       to:      effectiveTo,
       subject: effectiveSubject,
       text:    sig.text,
-      replyTo: from_mailbox,
+      replyTo: resolvedMailbox,
     };
     if (sig.html) mailOpts.html = sig.html;
     // Bij guarded verwerpen we cc/bcc; op productie laten we ze door.
@@ -170,7 +185,7 @@ export default async function handler(req, res) {
       email_id:      email_id || null,
       email_subject: effectiveSubject,
       final_reply:   sig.text,
-      from_address:  from_mailbox,
+      from_address:  resolvedMailbox,
       to_address:    effectiveTo,
       cc_address:    (!guarded && cc)  ? cc  : null,
       bcc_address:   (!guarded && bcc) ? bcc : null,
