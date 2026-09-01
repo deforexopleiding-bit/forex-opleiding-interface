@@ -189,6 +189,10 @@
     _sw.prefillEventAttendeeId = null;
     _sw.editDealId             = null;
     _sw.tagDraft               = '';
+    // BP2 v3 setter-picker: reset touch-flag + signature bij nieuwe sessie.
+    _sw._setterUserTouched     = false;
+    _sw._setterLookupSig       = null;
+    if (_sw._setterLookupTimer) { clearTimeout(_sw._setterLookupTimer); _sw._setterLookupTimer = null; }
     _sw.picker         = { open: false, search: '', category: '' };
     _sw.discountModal  = { open: false, draft: '' };
     _sw.exceptionModal = { open: false, detect: null, note: '', feeChecked: false, resolver: null };
@@ -498,6 +502,9 @@
       w.quote_reference     = deal.quote_reference || '';
       w.source_lead_id      = deal.source_lead_id || '';
       w.setter_user_id      = deal.setter_user_id || '';
+      // BP2 v3: bij edit met bestaande setter → lock auto-fill zodat
+      // een latere email/telefoon-tweak de setter niet stilletjes wijzigt.
+      if (deal.setter_user_id) _sw._setterUserTouched = true;
       // Producten (unit_price → price_per_unit rename)
       w.products = (d.line_items || []).map(l => ({
         product_id:         l.product_id,
@@ -826,7 +833,27 @@
     renderWizard();
   };
   // __swInput doet EXPLICIET geen re-render — DOM behoudt focus/cursor.
-  window.__swInput = (field, val) => { _sw.wizard[field] = val; _swMarkDirty(); };
+  window.__swInput = (field, val) => {
+    _sw.wizard[field] = val;
+    _swMarkDirty();
+    // BP2 v3 (2026-09-01) klant-catch-all trigger: bij wijziging van
+    // email/telefoon in stap 2, laat auto-lookup opnieuw draaien zodat
+    // de picker in stap 3 al gevuld is bij binnenkomst. Debounced 400ms
+    // om per-toetsaanslag-fetches te vermijden. setter_user_id zelf
+    // triggert de guard (zie __swSetterPicked hieronder).
+    if (field === 'email' || field === 'phone') {
+      if (_sw._setterLookupTimer) clearTimeout(_sw._setterLookupTimer);
+      _sw._setterLookupTimer = setTimeout(() => {
+        _sw._setterLookupTimer = null;
+        if (typeof _swAutoLookupSetter === 'function') _swAutoLookupSetter().catch(() => {});
+      }, 400);
+    }
+    if (field === 'setter_user_id') {
+      // Verkoper koos handmatig (of leegde) → lock auto-fill af zodat
+      // een latere lookup 'em niet meer overschrijft.
+      _sw._setterUserTouched = true;
+    }
+  };
   window.__swToggleCompany = () => { _sw.wizard.is_company = !_sw.wizard.is_company; _swMarkDirty(); renderWizard(); };
   window.__swPickEntity = (id) => { _sw.wizard.tl_department_id = id; _swMarkDirty(); renderWizard(); };
   // Stap-2 handlers
@@ -1163,16 +1190,27 @@
   }
   // Auto-lookup setter: probeer meerdere sleutels tegelijk (lead_id +
   // customer_id + email + telefoon). Server pakt de eerste hit.
+  // v3 (2026-09-01): respecteer _setterUserTouched — als verkoper handmatig
+  // een keuze heeft gemaakt (of expliciet leegde), NIET overschrijven.
+  // Signature-guard voorkomt onnodige refetch als input niet is veranderd.
   async function _swAutoLookupSetter() {
+    if (_sw._setterUserTouched) return;                       // handmatige keuze respecteren
+    if (_sw.wizard.setter_user_id) return;                    // al gezet (bv. edit-prefill)
     try {
       const w = _sw.wizard || {};
       const params = new URLSearchParams();
       if (w.source_lead_id)         params.set('lead_id',     w.source_lead_id);
       if (_sw.matched_customer_id)  params.set('customer_id', _sw.matched_customer_id);
-      if (w.email)                  params.set('email',       w.email);
-      if (w.phone)                  params.set('telefoon',    w.phone);
-      if (![...params.keys()].length) return;
-      const j = await tryFetch('setter-lookup', '/api/lead-setter-lookup?' + params.toString());
+      if (w.email)                  params.set('email',       String(w.email).trim().toLowerCase());
+      if (w.phone)                  params.set('telefoon',    String(w.phone).trim());
+      const qs = params.toString();
+      if (!qs) return;
+      // Skip re-fetch als de signature identiek is aan de vorige lookup.
+      if (_sw._setterLookupSig === qs) return;
+      _sw._setterLookupSig = qs;
+      const j = await tryFetch('setter-lookup', '/api/lead-setter-lookup?' + qs);
+      // Re-check touch-guard NA de fetch (verkoper kan intussen hebben gekozen).
+      if (_sw._setterUserTouched) return;
       if (j?.setter_user_id && !_sw.wizard.setter_user_id) {
         _sw.wizard.setter_user_id = String(j.setter_user_id);
         renderWizard();
