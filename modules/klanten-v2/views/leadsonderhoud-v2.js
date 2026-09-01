@@ -409,6 +409,12 @@
               const extendBtn  = (idForBtn && extendable)
                 ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsExtOpen('${idForBtn}', '${nameForBtn}')" style="font-size:11px" title="Trial-toegang van deze lead verlengen">Verlengen</button>`
                 : (idForBtn ? `<span style="font-size:11px;color:var(--text-3)" title="Verlengen is alleen zinvol voor 7-daagse en minicursus">N.v.t.</span>` : '');
+              // BP2 (2026-09-01): "Geef toegang"-knop. Alleen zinvol bij leads
+              // met een trial-traject; roept lead-toegang-verlenen (default
+              // 7 dagen) + verstuurt de welkomstmail.
+              const geefToegangBtn = (idForBtn && extendable)
+                ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsGeefToegang('${idForBtn}', '${nameForBtn}')" style="font-size:11px;margin-right:4px" title="Verleen 7-daagse trial-toegang + stuur welkomstmail">Geef toegang</button>`
+                : '';
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:8px 10px">
                   <div style="font-weight:600">${esc(l.naam || l.email || '(zonder naam)')}</div>
@@ -421,7 +427,7 @@
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
                 <td style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
                 <td style="padding:8px 10px">${fmtToegangTot(_live.access && _live.access.map ? _live.access.map[l.id] : null)}</td>
-                <td style="padding:8px 10px;text-align:right;white-space:nowrap">${extendBtn}</td>
+                <td style="padding:8px 10px;text-align:right;white-space:nowrap">${geefToegangBtn}${extendBtn}</td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -554,6 +560,32 @@
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${dd}`;
   }
+  // BP2 (2026-09-01): "Geef toegang"-knop → simpel confirm + POST.
+  // 7-daagse trial (server-default in api/lead-toegang-verlenen.js).
+  window.__lsGeefToegang = async (leadId, leadName) => {
+    if (!leadId) return;
+    const ok = confirm('Geef 7-daagse trial-toegang aan ' + (leadName || 'deze lead') + '? De welkomstmail wordt automatisch verstuurd.');
+    if (!ok) return;
+    try {
+      const resp = await window.KV.authedFetch('/api/lead-toegang-verlenen', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lead_id: leadId }),
+      });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok || j?.error) {
+        _lsInbToast('Toegang verlenen mislukt: ' + (j?.error || 'HTTP ' + resp.status), 'warn');
+        return;
+      }
+      const mailOk = j?.mail?.ok;
+      _lsInbToast(
+        'Toegang verleend tot ' + (j.geldig_tot || '?') + (mailOk ? ' · welkomstmail verzonden' : ' · welkomstmail MISLUKT'),
+        mailOk ? 'ok' : 'warn'
+      );
+    } catch (e) {
+      _lsInbToast('Netwerkfout: ' + (e?.message || e), 'warn');
+    }
+  };
+
   window.__lsExtOpen = (leadId, leadName) => {
     _lsExt.open = true; _lsExt.leadId = leadId; _lsExt.leadName = String(leadName || '');
     _lsExt.choice = '7'; _lsExt.customDate = _lsExtDefaultDate(); _lsExt.busy = false;
