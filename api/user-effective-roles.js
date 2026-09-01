@@ -34,8 +34,13 @@ export default async function handler(req, res) {
   try {
     const roles = await getEffectiveRoles(user.id, supabaseAdmin);
     const primary_role = computeHighestRole(roles);
-    let shell_roles = pickShellRoles(roles);
-    if (shell_roles.length === 0) shell_roles = ['administratie'];
+    // BP2 (2026-09-01) fail-closed: als pickShellRoles geen match vindt
+    // (bv. onbekende rol / lege set), val NIET terug op 'administratie'
+    // die per abuis lees-toegang zou kunnen geven. Return lege array;
+    // caller ziet "geen shell-toegang" en handelt dat af (client-shell
+    // toont dan geen nav-items; RBAC-feature-keys blijven autoritatief
+    // voor endpoint-toegang).
+    const shell_roles = pickShellRoles(roles);
     return res.status(200).json({
       user_id: user.id,
       primary_role,

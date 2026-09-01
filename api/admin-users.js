@@ -6,14 +6,23 @@ import nodemailer from 'nodemailer';
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { authRedirectUrlForRole, isCrmStaffRole, CRM_STAFF_ROLES } from './_lib/crm-roles.js';
 
-const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'viewer'];
+// BP2 (2026-09-01): 'appointmentsetter' toegevoegd. Blijft synchroon met
+// api/_lib/roles.js VALID_SUPABASE_ROLES en met de DB CHECK-constraint
+// (migratie 2026-08-31-bp1-appointmentsetter-foundation.sql). Zonder deze
+// entry werd elke rol-toekenning aan Romy geblokkeerd met "Ongeldige rol"
+// en viel reactivate terug op existing.role — wat de escalatie kon
+// verergeren als profiles.role al fout stond.
+const VALID_ROLES = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'marketing', 'administratie', 'appointmentsetter', 'viewer'];
 // SITE_URL/LMS-URL + de rollen-whitelist wonen in api/_lib/crm-roles.js,
 // zodat CRM-frontend, API en RLS dezelfde definitie van 'CRM-staff' delen.
 
 // Rol-hiërarchie (hoog → laag). Gebruikt om profiles.role (primair, voor legacy
 // requireAuth) te syncen met de hoogste rol uit user_roles. Houd identiek aan
 // api/admin-rbac-backfill-roles.js.
-const ROLE_PRIORITY = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing', 'viewer'];
+// BP2 (2026-09-01): 'appointmentsetter' toegevoegd, laag in de priority
+// (net boven viewer) — 't is een beperkte operationele rol. Synchroon met
+// api/_lib/roles.js ROLE_PRIORITY.
+const ROLE_PRIORITY = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing', 'appointmentsetter', 'viewer'];
 
 function computeHighestRole(roles) {
   if (!roles || roles.length === 0) return 'viewer';

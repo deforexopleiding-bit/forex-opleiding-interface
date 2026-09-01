@@ -879,14 +879,27 @@
       </div>
       <div class="form-group">
         <label class="form-label">Rol</label>
-        <select id="inviteRole" class="form-input">
-          <option value="super_admin">Super Admin</option>
+        <!--
+          BP2 (2026-09-01) SECURITY FIX: default was 'super_admin' (eerste
+          optie werd auto-geselecteerd), waardoor een admin die snel op
+          invite drukte per ongeluk een super_admin-account kon aanmaken.
+          Nu: verplichte lege placeholder + 'appointmentsetter'-optie
+          toegevoegd. Frontend-submit blokkeert tot er bewust gekozen is;
+          server-side blijft VALID_ROLES + super_admin-gate autoritatief.
+        -->
+        <select id="inviteRole" class="form-input" required>
+          <option value="" disabled selected>Kies rol…</option>
           <option value="manager">Manager</option>
-          <option value="admin">Admin (legacy)</option>
           <option value="sales">Sales</option>
           <option value="mentor">Mentor</option>
           <option value="administratie">Administratie</option>
+          <option value="marketing">Marketing</option>
+          <option value="appointmentsetter">Appointmentsetter</option>
           <option value="viewer">Viewer</option>
+          <!-- Verhoogde rollen onderaan zodat ze niet per ongeluk boven-
+               aan worden aangeklikt. -->
+          <option value="admin">Admin (legacy — verhoogd)</option>
+          <option value="super_admin">Super Admin (verhoogd)</option>
         </select>
       </div>
       <div class="form-error hidden" id="inviteError"></div>
@@ -2759,7 +2772,10 @@ async function resendInvite(email) {
 function openInviteModal() {
   document.getElementById('inviteEmail').value = '';
   document.getElementById('inviteName').value = '';
-  document.getElementById('inviteRole').value = 'viewer';
+  // BP2 (2026-09-01) security-fix: reset naar lege placeholder ipv 'viewer'
+  // zodat de submit-guard vuurt tot admin bewust een rol kiest. Voorkomt
+  // per-ongeluk-verkeerde-rol bij snel invite-en-submit.
+  document.getElementById('inviteRole').value = '';
   document.getElementById('inviteError').classList.add('hidden');
   document.getElementById('inviteModal').classList.remove('hidden');
   document.getElementById('inviteEmail').focus();
@@ -2930,6 +2946,14 @@ async function submitInvite() {
 
   if (!email) {
     errEl.textContent = 'E-mailadres is verplicht';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  // BP2 (2026-09-01) security-guard: rol MOET bewust gekozen zijn. De
+  // dropdown-default is nu een lege placeholder — als er niks gekozen is,
+  // blokkeer submit. Voorkomt per-ongeluk-super_admin-accounts.
+  if (!role) {
+    errEl.textContent = 'Kies een rol voordat je uitnodigt';
     errEl.classList.remove('hidden');
     return;
   }

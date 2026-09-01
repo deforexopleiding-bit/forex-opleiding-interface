@@ -1026,10 +1026,24 @@ function wireTopbarActionsToShell() {
     }
   }
   if (!shellRoles) {
+    // BP2 (2026-09-01) fail-closed: bij netwerk-fout of onbekende rol
+    // pickShellRoles retourneert nu null/lege array (was 'super_admin'
+    // fallback — dat gaf de escalatie-bug). Als er geen shell-rol te
+    // bepalen valt, gebruik ALLEEN profile.role (raw) als 'ie in de
+    // shell-lijst zit. Geen automatische escalatie meer naar super_admin.
     const fallback = (window.DFORoles && window.DFORoles.pickShellRoles)
       ? window.DFORoles.pickShellRoles([profile.role])
-      : [String(profile.role || 'super_admin').toLowerCase()];
-    shellRoles = fallback.length ? fallback : ['super_admin'];
+      : [];
+    if (fallback.length) {
+      shellRoles = fallback;
+    } else {
+      // Laatste redmiddel: rauwe profile.role als 'ie een bekende Supabase-
+      // rol is (super_admin/manager/etc). Anders lege array — shell rendert
+      // geen nav-items en RBAC-endpoints blijven autoritatief.
+      const raw = String(profile.role || '').toLowerCase();
+      const KNOWN = ['super_admin','admin','manager','sales','mentor','marketing','administratie','appointmentsetter','viewer'];
+      shellRoles = KNOWN.includes(raw) ? [raw] : [];
+    }
   }
   // Wrap DFO.goMod met legacy-vangnet (redirect naar oude module-URL voor
   // nog-niet-herbouwde v2-modules) + wrap re-render van topbar-actiebalk.

@@ -61,7 +61,10 @@
       // BP2 setter-attributie (2026-09-01) — Romy heeft haar eigen shell-rol.
       appointmentsetter: 'appointmentsetter',
     };
-    return map[String(supabaseRole || '').toLowerCase()] || 'super_admin';
+    // FAIL-CLOSED (2026-09-01): onbekende input → null, NIET 'super_admin'
+    // (was default; gaf Romy stiekem super_admin toen appointmentsetter
+    // niet in de map stond). Consistent met api/_lib/roles.js.
+    return map[String(supabaseRole || '').toLowerCase()] || null;
   }
 
   function pickShellRoles(supabaseRoles) {

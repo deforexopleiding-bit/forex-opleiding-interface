@@ -16,6 +16,10 @@
  */
 
 // ── Supabase-rollen (bron: VALID_ROLES in api/admin-users.js) ───────────────
+// BP2 (2026-09-01): 'appointmentsetter' toegevoegd. Blijft synchroon met
+// api/admin-users.js VALID_ROLES en met de DB CHECK-constraint op
+// profiles.role / user_roles.role / role_permissions.role (uit migratie
+// 2026-08-31-bp1-appointmentsetter-foundation.sql).
 export const VALID_SUPABASE_ROLES = [
   'super_admin',
   'admin',
@@ -24,12 +28,15 @@ export const VALID_SUPABASE_ROLES = [
   'mentor',
   'marketing',
   'administratie',
+  'appointmentsetter',
   'viewer',
 ];
 
 // Rol-hiërarchie (hoog → laag). Gebruikt voor "primary role"-afleiding
 // (profiles.role sync + shell-persona keuze). Identiek aan
 // api/admin-users.js `ROLE_PRIORITY`.
+// appointmentsetter zit BEWUST laag (net boven viewer) — 't is een
+// beperkte operationele rol, geen management-tier.
 export const ROLE_PRIORITY = [
   'super_admin',
   'admin',
@@ -38,6 +45,7 @@ export const ROLE_PRIORITY = [
   'mentor',
   'administratie',
   'marketing',
+  'appointmentsetter',
   'viewer',
 ];
 
@@ -48,8 +56,12 @@ export function computeHighestRole(roles) {
 }
 
 // ── DFO shell-rollen (bron: MODS in modules/shared/design-system/app-shell.js) ──
-// De shell rendert 5 rollen; 'admin' en 'viewer' bestaan daar niet.
-export const SHELL_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'marketing'];
+// De shell rendert 6 rollen; 'admin' en 'viewer' bestaan daar niet.
+// BP2 (2026-09-01): 'appointmentsetter' toegevoegd zodat Romy een eigen
+// shell-rol heeft en niet stiekem via de default-fallback op 'super_admin'
+// belandt (dat was de root-cause van de escalatie-bug — zie fail-closed
+// wijziging in mapRoleForShell hieronder).
+export const SHELL_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'appointmentsetter'];
 
 // Rol-sets uit BOUWPLAN §2 (autoritatief).
 export const ROLE_SETS = Object.freeze({
@@ -66,21 +78,25 @@ export const ROLE_SETS = Object.freeze({
  * - 'admin' -> 'super_admin' (huidige RBAC-praktijk: admin heeft dezelfde
  *   management-toegang als super_admin binnen de UI-gating)
  * - 'viewer' -> 'administratie' (leest, mutatie-endpoints zijn RBAC-geleerd)
- * - onbekend / null -> 'super_admin' (fail-safe voor developers; productie-
- *   endpoints filteren op VALID_SUPABASE_ROLES voor die inputs)
+ * - 'appointmentsetter' -> 'appointmentsetter' (BP2 — eigen shell-rol)
+ * - onbekend / null -> null (BP2 FAIL-CLOSED — was 'super_admin', dat gaf
+ *   escalatie voor Romy). Callers moeten null afhandelen als "geen shell-
+ *   toegang" en NIET terugvallen op super_admin.
  */
 export function mapRoleForShell(supabaseRole) {
   const map = {
-    super_admin:   'super_admin',
-    admin:         'super_admin',
-    manager:       'manager',
-    sales:         'sales',
-    mentor:        'mentor',
-    marketing:     'marketing',
-    administratie: 'administratie',
-    viewer:        'administratie',
+    super_admin:       'super_admin',
+    admin:             'super_admin',
+    manager:           'manager',
+    sales:             'sales',
+    mentor:            'mentor',
+    marketing:         'marketing',
+    administratie:     'administratie',
+    viewer:            'administratie',
+    appointmentsetter: 'appointmentsetter',
   };
-  return map[String(supabaseRole || '').toLowerCase()] || 'super_admin';
+  // FAIL-CLOSED: onbekende input → null, NOOIT 'super_admin' als default.
+  return map[String(supabaseRole || '').toLowerCase()] || null;
 }
 
 /**

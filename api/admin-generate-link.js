@@ -22,7 +22,8 @@
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { authRedirectUrlForRole } from './_lib/crm-roles.js';
 
-const ROLE_PRIORITY = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing', 'viewer'];
+// BP2 (2026-09-01): 'appointmentsetter' toegevoegd — sync met api/_lib/roles.js.
+const ROLE_PRIORITY = ['super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie', 'marketing', 'appointmentsetter', 'viewer'];
 
 function canCascadeOver(callerRole, targetRole) {
   if (callerRole === 'super_admin') return true;
