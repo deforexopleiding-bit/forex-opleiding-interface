@@ -25,7 +25,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getSetterScope, filterBySetterScope } from './_lib/setter-scope.js';
+import { getSetterScope } from './_lib/setter-scope.js';
 
 const PERIODES  = new Set(['week', 'maand', 'alles']);
 const RESULTATEN = new Set(['alle', 'toegelaten', 'afgewezen']);
@@ -77,13 +77,23 @@ export default async function handler(req, res) {
     const { data: rows, error, count } = await qry;
     if (error) throw error;
 
-    // BP2 setter-scope: appointmentsetter ziet alleen submissions die
-    // matchen op haar boekingen (email/telefoon). Manager/admin: pass.
-    // Fail-closed: lege scope → 0 items.
+    // BP3 v4 (2026-09-01) — setter-scope EXACT op appointment_id, NIET op
+    // email/telefoon-last9. Reden: testdata (en soms echte data) deelt één
+    // nummer over meerdere bronnen (7-daagse-v1/v2, nieuwsbrief, romy…) →
+    // last9-match over-matcht. Sinds BP2 heeft follow_up_appointments een
+    // setter_user_id-kolom en opstartsessie_submissions een appointment_id-
+    // FK — de exacte, ambiguïteit-vrije koppeling. Rows zonder
+    // appointment_id kunnen niet aan een setter gekoppeld worden → droppen.
+    // Manager/admin: geen scoping (isScoped=false → pass).
     const scope = await getSetterScope(user.id, supabaseAdmin);
     let filteredRows = rows || [];
     if (scope.isScoped) {
-      filteredRows = filterBySetterScope(filteredRows, scope, { email: 'email', phone: 'telefoon' });
+      const apptSet = new Set(scope.appointmentIds || []);
+      if (apptSet.size === 0) {
+        filteredRows = []; // fail-closed
+      } else {
+        filteredRows = filteredRows.filter((r) => r.appointment_id && apptSet.has(r.appointment_id));
+      }
     }
 
     const items = (filteredRows || []).map((r) => ({

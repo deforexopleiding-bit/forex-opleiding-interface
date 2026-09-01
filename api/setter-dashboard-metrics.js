@@ -4,9 +4,15 @@
 // boekingen). Manager+ mag ?setter_user_id=X opgeven om andere setters
 // te bekijken (via setter.ledger.admin).
 //
+// Periodefilter (BP3 v4): ?period=dag|week|maand|jaar OF ?from&to (custom).
+// Default 'maand'. De KPI's boekingen/opkomst/sales/commissie herberekenen
+// voor de periode. Forecast is per-design vooruitkijkend en NIET begrensd
+// door de periode.
+//
 // Response:
-//   { setter_user_id, boekingen: { week, maand }, opkomstpct, no_show_pct,
-//     sales: { count, bruto_eur }, commissie_deze_maand, commissie_forecast }
+//   { setter_user_id, period, boekingen: { periode, alt_week, alt_maand },
+//     opkomst_pct, no_show_pct, sales: { count, bruto_eur },
+//     commissie_periode, commissie_forecast }
 //
 // Gate: setter.ledger.view (Romy heeft die uit BP2-seed).
 //
@@ -15,6 +21,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { parseSetterPeriod } from './_lib/setter-period.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,10 +31,6 @@ function windowStart(days) {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - days);
   return d.toISOString();
-}
-function monthStart() {
-  const d = new Date();
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString();
 }
 
 export default async function handler(req, res) {
@@ -53,31 +56,35 @@ export default async function handler(req, res) {
   }
 
   try {
-    const weekStart  = windowStart(7);
-    const maandStart = windowStart(30);
-    const mStart     = monthStart();
+    const period = parseSetterPeriod(req.query || {});
 
-    // ── Boekingen deze week + deze maand (30-daagse window) ─────────────
-    const [appWeekRes, appMaandRes, allApptsRes] = await Promise.all([
+    // ── Boekingen in de periode + (voor UX-continuïteit) week+maand ────
+    const [appPeriodeRes, appWeekRes, appMaandRes, allApptsRes] = await Promise.all([
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
-        .gte('scheduled_at', weekStart),
+        .gte('scheduled_at', period.from)
+        .lt('scheduled_at', period.to),
       supabaseAdmin.from('follow_up_appointments')
         .select('id', { count: 'exact', head: true })
         .eq('setter_user_id', targetSetter)
-        .gte('scheduled_at', maandStart),
-      // Statussen voor opkomst/no-show (laatste 90d — genoeg data zonder
-      // hele historie te trekken).
+        .gte('scheduled_at', windowStart(7)),
+      supabaseAdmin.from('follow_up_appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('setter_user_id', targetSetter)
+        .gte('scheduled_at', windowStart(30)),
+      // Statussen voor opkomst/no-show — begrensd door de gekozen periode.
       supabaseAdmin.from('follow_up_appointments')
         .select('status')
         .eq('setter_user_id', targetSetter)
-        .gte('scheduled_at', windowStart(90))
+        .gte('scheduled_at', period.from)
+        .lt('scheduled_at', period.to)
         .limit(2000),
     ]);
 
-    const boekingenWeek  = appWeekRes.count || 0;
-    const boekingenMaand = appMaandRes.count || 0;
+    const boekingenPeriode = appPeriodeRes.count || 0;
+    const boekingenWeek    = appWeekRes.count || 0;
+    const boekingenMaand   = appMaandRes.count || 0;
 
     // Opkomstpercentage = completed / (completed + no_show + cancelled).
     let completed = 0, noShow = 0, cancelled = 0;
@@ -91,36 +98,45 @@ export default async function handler(req, res) {
     const opkomstPct = resolvedTotal > 0 ? Math.round((completed / resolvedTotal) * 100) : null;
     const noShowPct  = resolvedTotal > 0 ? Math.round((noShow    / resolvedTotal) * 100) : null;
 
-    // ── Sales uit haar deals (aantal + bruto € via invoices.amount_total) ─
+    // ── Sales uit haar deals in de periode (created_at binnen periode) ──
     const { data: deals } = await supabaseAdmin
       .from('deals')
-      .select('id')
+      .select('id, created_at')
       .eq('setter_user_id', targetSetter);
-    const dealIds = (deals || []).map((d) => d.id);
+    const dealsInPeriode = (deals || []).filter((d) => {
+      if (!d.created_at) return false;
+      const t = new Date(d.created_at).getTime();
+      return t >= new Date(period.from).getTime() && t < new Date(period.to).getTime();
+    });
+    const dealIdsAll     = (deals || []).map((d) => d.id);
+    const dealIdsPeriode = dealsInPeriode.map((d) => d.id);
     let salesCount = 0;
     let salesBruto = 0;
-    if (dealIds.length) {
+    if (dealIdsPeriode.length) {
       const { data: invs } = await supabaseAdmin
         .from('invoices')
         .select('id, amount_total, status')
-        .in('deal_id', dealIds);
-      salesCount = dealIds.length;
+        .in('deal_id', dealIdsPeriode);
+      salesCount = dealIdsPeriode.length;
       salesBruto = round2((invs || []).reduce((s, i) => s + (Number(i.amount_total) || 0), 0));
     }
 
-    // ── Commissie deze maand (vrijgegeven) + forecast (subscription-stand) ─
+    // ── Commissie in de periode (vrijgegeven+uitbetaald) ────────────────
     const { data: entries } = await supabaseAdmin
       .from('setter_ledger_entries')
       .select('amount, status, created_at')
       .eq('setter_user_id', targetSetter)
-      .gte('created_at', mStart);
-    let commissieDezeMaand = 0;
+      .gte('created_at', period.from)
+      .lt('created_at', period.to);
+    let commissiePeriode = 0;
     for (const e of (entries || [])) {
       if (e.status === 'vrijgegeven' || e.status === 'uitbetaald') {
-        commissieDezeMaand += Number(e.amount) || 0;
+        commissiePeriode += Number(e.amount) || 0;
       }
     }
-    commissieDezeMaand = round2(commissieDezeMaand);
+    commissiePeriode = round2(commissiePeriode);
+    // Forecast leest ALLE deals (niet begrensd door periode — is vooruitkijkend).
+    const dealIds = dealIdsAll;
 
     // Forecast = (sub.amount × term_count - reeds_betaald) × pct
     // over ACTIEVE subs van haar deals. Hergebruikt setter-overview-logica.
@@ -151,11 +167,16 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       setter_user_id: targetSetter,
-      boekingen: { week: boekingenWeek, maand: boekingenMaand },
+      period: { key: period.key, from: period.from, to: period.to },
+      boekingen: { periode: boekingenPeriode, week: boekingenWeek, maand: boekingenMaand },
       opkomst_pct: opkomstPct,
       no_show_pct: noShowPct,
       sales: { count: salesCount, bruto_eur: salesBruto },
-      commissie_deze_maand: commissieDezeMaand,
+      commissie_periode:    commissiePeriode,
+      // Backward-compat: oude UI-veldnaam blijft gevuld met periode-getal
+      // wanneer periode='maand', anders met dezelfde waarde (frontend leest
+      // 'commissie_periode' zodra 'ie de period-param stuurt).
+      commissie_deze_maand: commissiePeriode,
       commissie_forecast:   commissieForecast,
     });
   } catch (e) {

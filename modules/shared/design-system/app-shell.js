@@ -119,6 +119,7 @@
     'onboarding/Inbox':        SAMS,
     // BP2 (2026-09-01): scope leadsonderhoud voor appointmentsetter — geen
     // beheer-tabs (Bronnen/Vragenlijst) of aggregate stats voor Romy.
+    'leadsonderhoud/Overzicht':        SAMS,
     'leadsonderhoud/Bronnen':          SAMS,
     'leadsonderhoud/Vragenlijst':      SAMS,
     'leadsonderhoud/Statistieken':     SAMS,

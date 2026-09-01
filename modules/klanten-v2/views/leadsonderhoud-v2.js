@@ -1777,13 +1777,13 @@
     const rowIdAttr  = String(row.lead_id).replace(/"/g, '&quot;');
     const rowIdClick = String(row.lead_id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const onCls   = String(_lsInb.sel) === String(row.lead_id) ? 'on' : '';
-    // Kanaal-indicatoren (WA/mail beschikbaar).
+    // Kanaal-indicatoren. BP3 v4 (2026-09-01): mail-badge verwijderd uit de
+    // lijst — was ruis. WA-badge blijft omdat 'ie signaleert of Romy binnen
+    // 24u-venster op WhatsApp kan reageren (relevante context voor de rij).
     const waBadge = row.has_wa
       ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--teal-soft);color:var(--teal);font-weight:600">WA</span>`
       : '';
-    const mailBadge = row.has_mail
-      ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--blue-soft);color:var(--blue);font-weight:600">mail</span>`
-      : '';
+    const mailBadge = '';
     // FEAT-2: duidelijke ongelezen-styling + toggle-knop op de rij.
     // Ongelezen: linker rose-strip (4px), primary background-tint, dikke
     // vette naam. Gelezen: gedempt (opacity), naam normaal-gewicht.

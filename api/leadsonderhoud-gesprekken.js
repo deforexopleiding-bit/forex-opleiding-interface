@@ -183,7 +183,10 @@ export default async function handler(req, res) {
       for (const b of motorMails || []) {
         const adr = adresUit(b.naar);
         if (!emailSet.has(adr)) continue;
-        bump(adr, b.verstuurd_op, false, b.soort ? ('motor: ' + b.soort) : '');
+        // BP3 v4 (2026-09-01): geen "motor: <soort>"-preview meer in de lijst.
+        // De interne campagne-naam ("uitnodiging-gesprek" etc.) is ruis voor
+        // de gesprekkenlijst — datum wordt nog wel bijgehouden voor sortering.
+        bump(adr, b.verstuurd_op, false, '');
       }
     }
 

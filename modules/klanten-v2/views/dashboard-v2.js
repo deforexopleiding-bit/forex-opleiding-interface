@@ -1215,19 +1215,37 @@
     </div>`;
   }
 
-  /* ── BP2 setter-dashboard render ──────────────────────────────────── */
-  const _spDash = { data: null, loading: false, error: null };
+  /* ── BP2 setter-dashboard render (BP3 v4: + periodefilter) ────────── */
+  const _spDash = {
+    data: null, loading: false, error: null,
+    period: 'maand', from: '', to: '',   // 'dag'|'week'|'maand'|'jaar'|'custom'
+  };
+  function _spPeriodQuery() {
+    if (_spDash.period === 'custom' && _spDash.from && _spDash.to) {
+      return '?period=custom&from=' + encodeURIComponent(_spDash.from) + '&to=' + encodeURIComponent(_spDash.to);
+    }
+    return '?period=' + encodeURIComponent(_spDash.period);
+  }
   async function loadSetterMetrics() {
-    if (_spDash.loading || _spDash.data) return;
-    _spDash.loading = true;
+    if (_spDash.loading) return;
+    _spDash.loading = true; _spDash.error = null;
     try {
-      const r = await window.KV.authedFetch('/api/setter-dashboard-metrics');
+      const r = await window.KV.authedFetch('/api/setter-dashboard-metrics' + _spPeriodQuery());
       if (r.ok) _spDash.data = await r.json();
       else _spDash.error = 'Kon KPI\'s niet laden (HTTP ' + r.status + ')';
     } catch (e) { _spDash.error = e?.message || 'Netwerkfout'; }
     _spDash.loading = false;
     if (window.DFO?.render) window.DFO.render();
   }
+  window.__spDashSetPeriod = (p) => {
+    if (p === _spDash.period) return;
+    _spDash.period = String(p || 'maand');
+    if (_spDash.period !== 'custom') { _spDash.from = ''; _spDash.to = ''; }
+    _spDash.data = null;
+    loadSetterMetrics();
+  };
+  window.__spDashSetFrom = (v) => { _spDash.from = String(v || ''); if (_spDash.from && _spDash.to) { _spDash.data = null; loadSetterMetrics(); } };
+  window.__spDashSetTo   = (v) => { _spDash.to   = String(v || ''); if (_spDash.from && _spDash.to) { _spDash.data = null; loadSetterMetrics(); } };
   function _spTile(label, val, sub, color) {
     return '<div style="flex:1;min-width:180px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">'
       + '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">' + String(label) + '</div>'
@@ -1235,13 +1253,28 @@
       + (sub ? '<div style="font-size:11px;color:var(--text-3);margin-top:3px">' + String(sub) + '</div>' : '')
       + '</div>';
   }
+  function _spDashChips() {
+    const opts = [['dag','Dag'], ['week','Week'], ['maand','Maand'], ['jaar','Jaar'], ['custom','Custom']];
+    const chips = opts.map(([k, l]) => {
+      const act = _spDash.period === k;
+      return '<button class="chip ' + (act ? 'on' : '') + '" style="font-size:11.5px;padding:4px 10px" onclick="window.__spDashSetPeriod(\'' + k + '\')">' + l + '</button>';
+    }).join(' ');
+    const custom = _spDash.period === 'custom'
+      ? '<span style="display:inline-flex;gap:6px;align-items:center;margin-left:8px">'
+        + '<input type="date" value="' + _spDash.from + '" onchange="window.__spDashSetFrom(this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:12px">'
+        + '<span style="color:var(--text-3);font-size:12px">tot</span>'
+        + '<input type="date" value="' + _spDash.to + '" onchange="window.__spDashSetTo(this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:12px">'
+        + '</span>'
+      : '';
+    return '<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:14px">' + chips + custom + '</div>';
+  }
   function dashSetter() {
     if (!_spDash.data && !_spDash.loading && !_spDash.error) queueMicrotask(loadSetterMetrics);
     if (_spDash.loading && !_spDash.data) {
-      return '<div class="pad" style="padding:24px">Laden…</div>';
+      return '<div class="pad" style="padding:20px"><div style="font-size:18px;font-weight:700;margin-bottom:14px">Jouw setter-metrics</div>' + _spDashChips() + '<div>Laden…</div></div>';
     }
     if (_spDash.error) {
-      return '<div class="pad" style="padding:24px;color:var(--rose)">⚠ ' + String(_spDash.error) + '</div>';
+      return '<div class="pad" style="padding:20px"><div style="font-size:18px;font-weight:700;margin-bottom:14px">Jouw setter-metrics</div>' + _spDashChips() + '<div style="color:var(--rose)">⚠ ' + String(_spDash.error) + '</div></div>';
     }
     const d = _spDash.data || {};
     const b = d.boekingen || {};
@@ -1249,17 +1282,24 @@
     const opk = d.opkomst_pct == null ? '—' : d.opkomst_pct + '%';
     const nos = d.no_show_pct == null ? '—' : d.no_show_pct + '%';
     const eur = (v) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
+    const pkey = d.period && d.period.key ? d.period.key : _spDash.period;
+    const periodLabel = pkey === 'dag' ? 'vandaag'
+                       : pkey === 'week' ? 'deze week'
+                       : pkey === 'jaar' ? 'dit jaar'
+                       : pkey === 'custom' ? 'in gekozen periode'
+                       : 'deze maand';
     return '<div class="pad" style="padding:20px">'
       + '<div style="font-size:18px;font-weight:700;margin-bottom:14px">Jouw setter-metrics</div>'
+      + _spDashChips()
       + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
-        + _spTile('Geboekte calls (week)',   String(b.week || 0),  null,                          'var(--brand)')
-        + _spTile('Geboekte calls (maand)',  String(b.maand || 0), null,                          'var(--brand)')
-        + _spTile('Opkomstpercentage',       opk,                  'Laatste 90 dagen',            'var(--emerald)')
-        + _spTile('No-show %',               nos,                  'Laatste 90 dagen',            'var(--rose)')
+        + _spTile('Geboekte calls (' + periodLabel + ')', String(b.periode || 0), null, 'var(--brand)')
+        + _spTile('Geboekte calls (week)',   String(b.week || 0),  null,                'var(--brand)')
+        + _spTile('Opkomstpercentage',       opk,                  periodLabel,         'var(--emerald)')
+        + _spTile('No-show %',               nos,                  periodLabel,         'var(--rose)')
       + '</div>'
       + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
-        + _spTile('Sales uit jouw calls',    String(s.count || 0),  eur(s.bruto_eur || 0) + ' bruto', 'var(--text-1)')
-        + _spTile('Commissie deze maand',    eur(d.commissie_deze_maand || 0), 'Vrijgegeven + uitbetaald', 'var(--emerald)')
+        + _spTile('Sales uit jouw calls (' + periodLabel + ')', String(s.count || 0),  eur(s.bruto_eur || 0) + ' bruto', 'var(--text-1)')
+        + _spTile('Commissie (' + periodLabel + ')', eur(d.commissie_periode ?? d.commissie_deze_maand ?? 0), 'Vrijgegeven + uitbetaald', 'var(--emerald)')
         + _spTile('Nog te verwachten',       eur(d.commissie_forecast || 0),   'Actieve subscriptions',    'var(--text-1)')
       + '</div>'
       + '<div style="font-size:12px;color:var(--text-3)">Gedetailleerd overzicht + regels → <a href="#setter-payout" style="color:var(--brand)">Commissie</a></div>'
