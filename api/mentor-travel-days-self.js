@@ -45,6 +45,20 @@ function normalizeMonthStart(s) {
   return `${y}-${String(mo).padStart(2, '0')}-01`;
 }
 
+// Range-guard: alleen de huidige NL-maand (Europe/Amsterdam) t/m 6 maanden terug.
+// Als maand-index y*12+(m-1), zodat jaargrenzen vanzelf goed gaan.
+const RANGE_BACK_MONTHS = 6;
+function nlMonthIndexNow() {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit' })
+    .formatToParts(new Date());
+  const y  = Number(p.find((x) => x.type === 'year').value);
+  const mo = Number(p.find((x) => x.type === 'month').value);
+  return y * 12 + (mo - 1);
+}
+function monthIndexOfStart(monthStart) { // 'YYYY-MM-01'
+  return Number(monthStart.slice(0, 4)) * 12 + (Number(monthStart.slice(5, 7)) - 1);
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -131,6 +145,16 @@ export default async function handler(req, res) {
     }
     if (isFinal) {
       return res.status(403).json({ error: 'rapport al goedgekeurd, niet meer aanpasbaar' });
+    }
+    // Range-guard (server authoritative, NIET op de client vertrouwen): alleen de
+    // huidige NL-maand t/m 6 maanden terug — geen toekomst, niet te oud.
+    const curIdx = nlMonthIndexNow();
+    const reqIdx = monthIndexOfStart(monthStart);
+    if (reqIdx > curIdx) {
+      return res.status(400).json({ error: 'toekomstige maand niet toegestaan' });
+    }
+    if (reqIdx < curIdx - RANGE_BACK_MONTHS) {
+      return res.status(400).json({ error: `maand te ver terug (max ${RANGE_BACK_MONTHS} maanden)` });
     }
     const body = (req.body && typeof req.body === 'object') ? req.body : null;
     const rawDays = body ? body.days : undefined;
