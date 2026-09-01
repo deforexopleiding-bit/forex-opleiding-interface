@@ -2173,7 +2173,7 @@
         : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Nog geen lead-gesprekken.</div>`;
 
     const filterChip = (v, label, count) => `<button class="chip ${flt === v ? 'on' : ''}" onclick="window.__lsInbSetFilter('${v}')" style="font-size:11px;padding:3px 9px">${label}${count != null ? ` <span style="opacity:.7">(${count})</span>` : ''}</button>`;
-    return `<div class="ls-inb-split" style="display:flex;height:calc(100vh - 200px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+    return `<div class="ls-inb-split" style="display:flex;height:calc(100dvh - 110px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
       ${_lsExtModalHtml()}
       <div id="lsInbList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto">
         <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
@@ -2570,7 +2570,12 @@
         const parts = [];
         if (s.sale_customer_name) parts.push(s.sale_customer_name);
         if (s.sale_amount != null && !isNaN(Number(s.sale_amount))) parts.push(eurFmt.format(Number(s.sale_amount)));
-        const saleTitle = 'Sale: ' + (parts.join(' · ') || 'ja');
+        let saleTitle = 'Sale: ' + (parts.join(' · ') || 'ja');
+        // Meest recente deal-bedrag; extra count kwantificeert eerdere sales
+        // van dezelfde klant zodat de tooltip niet suggereert "één sale".
+        if (s.sale_extra_count && Number(s.sale_extra_count) > 0) {
+          saleTitle += ' (+' + Number(s.sale_extra_count) + ' eerdere)';
+        }
         saleCell = `<span style="color:var(--emerald);font-weight:700;font-size:14px" title="${esc(saleTitle)}">✓</span>`;
       } else {
         saleCell = '<span style="color:var(--rose);font-weight:700;font-size:14px" title="Nog geen sale">✗</span>';

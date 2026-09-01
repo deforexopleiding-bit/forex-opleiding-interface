@@ -142,21 +142,36 @@ export default async function handler(req, res) {
           custIds.push(c.id);
         }
         if (custIds.length > 0) {
+          // BP3 v4 vervolg (2026-09-01) — tooltip toont MEEST RECENTE
+          // accepted deal-bedrag, niet de som. Som over-telde bij klanten
+          // met meerdere sales (en explodeerde op testdata). ORDER BY
+          // created_at DESC → eerste hit per customer_id = de laatste.
           const { data: dls } = await supabaseAdmin
             .from('deals')
-            .select('customer_id, tl_quotation_status, total_amount')
+            .select('customer_id, tl_quotation_status, total_amount, created_at')
             .in('customer_id', custIds)
-            .in('tl_quotation_status', ['accepted', 'signed']);
-          const bedragByCust = new Map();
+            .in('tl_quotation_status', ['accepted', 'signed'])
+            .order('created_at', { ascending: false });
+          const latestByCust = new Map(); // customer_id -> { bedrag, extra }
           for (const d of (dls || [])) {
             if (!d.customer_id) continue;
-            bedragByCust.set(d.customer_id, (bedragByCust.get(d.customer_id) || 0) + (Number(d.total_amount) || 0));
+            const cur = latestByCust.get(d.customer_id);
+            if (!cur) {
+              latestByCust.set(d.customer_id, {
+                bedrag: Number(d.total_amount) || 0,
+                extra:  0,
+              });
+            } else {
+              cur.extra += 1;
+            }
           }
           for (const [emailLower, info] of custByEmail) {
-            if (bedragByCust.has(info.id)) {
+            const hit = latestByCust.get(info.id);
+            if (hit) {
               saleByEmail.set(emailLower, {
                 customerName: info.naam,
-                saleBedrag:   Math.round(bedragByCust.get(info.id) * 100) / 100,
+                saleBedrag:   Math.round(hit.bedrag * 100) / 100,
+                extraCount:   hit.extra,   // # eerdere accepted deals (0 = enige)
               });
             }
           }
@@ -192,10 +207,13 @@ export default async function handler(req, res) {
         // 3-way sale-indicator: sale_checked=false → niet-checkbare rij (–);
         // sale_checked=true + is_sale=true → sale gevonden (✓); is_sale=false
         // met sale_checked=true → gecheckt maar geen accepted deal (✗).
-        sale_checked       : saleChecked,
-        is_sale            : !!saleInfo,
-        sale_customer_name : saleInfo ? saleInfo.customerName : null,
-        sale_amount        : saleInfo ? saleInfo.saleBedrag   : null,
+        // sale_amount = bedrag van de MEEST RECENTE accepted deal (geen som).
+        // sale_extra_count = # eerdere accepted deals (0 = enige sale).
+        sale_checked        : saleChecked,
+        is_sale             : !!saleInfo,
+        sale_customer_name  : saleInfo ? saleInfo.customerName : null,
+        sale_amount         : saleInfo ? saleInfo.saleBedrag   : null,
+        sale_extra_count    : saleInfo ? (saleInfo.extraCount || 0) : 0,
       };
     });
 

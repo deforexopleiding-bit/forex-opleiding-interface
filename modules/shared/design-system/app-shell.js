@@ -265,6 +265,13 @@
     const el = document.getElementById('nav');
     if (!el) return;
     const badges = NS.badges || {};
+    // BP3 v4 (2026-09-01) — active-highlight ondersteunt deeplink-MODs.
+    // Als een zichtbaar deeplink-item wijst op de huidige (S.mod, S.tab), wint
+    // dat item van zijn parent-MOD. Zo highlight "Gesprekken" (deeplink) i.p.v.
+    // "Leadsonderhoud" (parent) wanneer je op leadsonderhoud/Gesprekken staat,
+    // en idem voor "Instagram" (deeplink) i.p.v. "Instagram setter" (parent).
+    const _deeplinkHit = mods.find(m => m.deeplink && m.deeplink.mod === S.mod && m.deeplink.tab === S.tab);
+    const activeId = _deeplinkHit ? _deeplinkHit.id : S.mod;
     el.innerHTML = groups.map(g => `
       <div class="nav-label">${g}</div>
       ${mods.filter(m => m.g === g).map(m => {
@@ -272,8 +279,8 @@
         // i.p.v. <button onclick=window.open>. Popup-blockers zijn strenger
         // geworden op window.open in wrapped onclick-chains — <a>-links met
         // target=_blank openen altijd. Werkt met + zonder cmd/ctrl-click.
-        const activeStyle = S.mod === m.id ? `--m:var(--${m.color});--m-soft:var(--${m.color}-soft);--m-glow:${GLOW[m.color]}` : '';
-        const activeCls = S.mod === m.id ? 'active' : '';
+        const activeStyle = activeId === m.id ? `--m:var(--${m.color});--m-soft:var(--${m.color}-soft);--m-glow:${GLOW[m.color]}` : '';
+        const activeCls = activeId === m.id ? 'active' : '';
         const inner = `
           <span class="nav-ico">${svg(m.icon)}</span><span>${m.naam}</span>
           ${m.ext ? `<span style="margin-left:auto;color:var(--text-3);display:inline-flex">${svg(I.ext, 'width:13px;height:13px')}</span>` : ''}
