@@ -13,6 +13,7 @@ import { supabaseAdmin } from './supabase.js';
 import { computeResponseDelay, sendTypingIndicator, matchBookingByEmail } from './_lib/lisa-ghl-send.js';
 import { generateLisaResponse } from './lisa-respond.js';
 import { detectStopSignal, containsAgendaLink, schedulePostLinkFollowups, autoQualifyIfTriggered, pauseFollowupsForDisqualified } from './_lib/lisa-followup.js';
+import { isInstagram, resolveContent } from './_lib/lisa-message-type.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
@@ -79,8 +80,20 @@ export default async function handler(req, res) {
       ig_sid: body.contact?.attributionSource?.igSid || body.contact?.lastAttributionSource?.igSid || null,
     };
     const { contactId, conversationId, locationId, message, type, direction, messageId } = payload;
-    if (type !== 'IG' || direction !== 'inbound') return res.status(200).json({ skipped: 'not_ig_inbound' });
-    if (!contactId || !message) return res.status(200).json({ skipped: 'missing_fields' });
+    // BP3 (2026-09-01) fix #2 — tolerant type-match via isInstagram(): accepteert
+    // 'IG' / 'Instagram' / 'instagram_dm' / numeriek '8' / 'TYPE_IG', etc.
+    // Voorheen: strikte type !== 'IG' skipte legitieme varianten.
+    if (!isInstagram(payload) || direction !== 'inbound') {
+      return res.status(200).json({ skipped: 'not_ig_inbound' });
+    }
+    // BP3 (2026-09-01) fix #1 — een bericht ZONDER body is nog steeds een
+    // bericht (foto, reel, sticker, story-reply, voice). Alleen skippen als
+    // er GEEN contactId is (dan kunnen we het bericht nergens aan hangen).
+    if (!contactId) return res.status(200).json({ skipped: 'missing_contact_id' });
+    // resolveContent() geeft altijd { message_type: <whitelist>, content: <niet-leeg> }.
+    const { message_type: msgType, content: msgContent } = resolveContent({
+      type, messageType: type, body: message, attachments: body.message?.attachments || body.attachments,
+    });
 
     // Idempotency: als GHL dit bericht al eerder heeft geleverd (retry na timeout
     // tijdens onze Opus-generatie), skip vóór we een NIEUWE AI-call + response-
@@ -148,20 +161,24 @@ export default async function handler(req, res) {
           if (convErr) { console.warn('[lisa-webhook] live_mode_off conv insert:', convErr.message); return res.status(200).json({ skipped: 'live_mode_off', ingest_error: convErr.message }); }
           conv = newConv;
         }
-        // Dedupe op ghl_message_id (webhook-retry-veilig).
+        // Dedupe op ghl_message_id (webhook-retry-veilig) — vroegtijdig exit
+        // voorkomt onnodige INSERT. ON CONFLICT hieronder is race-safety.
         if (messageId) {
           const { data: dupe2 } = await supabaseAdmin.from('lisa_messages')
             .select('id').eq('ghl_message_id', messageId).limit(1).maybeSingle();
           if (dupe2) return res.status(200).json({ skipped: 'live_mode_off', ingested: false, reason: 'already_stored' });
         }
-        await supabaseAdmin.from('lisa_messages').insert({
+        // upsert + ignoreDuplicates = ON CONFLICT (ghl_message_id) DO NOTHING
+        // (partial UNIQUE-index geseed door migratie 2026-09-01).
+        await supabaseAdmin.from('lisa_messages').upsert({
           conversation_id: conv.id,
           direction:       'in',
-          content:         String(message),
+          content:         msgContent,
+          message_type:    msgType,
           ai_generated:    false,
           ghl_message_id:  messageId || null,
-        });
-        return res.status(200).json({ skipped: 'live_mode_off', ingested: true, conv_id: conv.id });
+        }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
+        return res.status(200).json({ skipped: 'live_mode_off', ingested: true, conv_id: conv.id, message_type: msgType });
       } catch (e) {
         console.warn('[lisa-webhook] live_mode_off ingest exception:', e?.message || e);
         return res.status(200).json({ skipped: 'live_mode_off', ingest_error: e?.message || String(e) });
@@ -203,9 +220,10 @@ export default async function handler(req, res) {
 
     // 7b. Mens heeft overgenomen → Lisa zwijgt; bericht wel loggen.
     if (conv.human_takeover) {
-      await supabaseAdmin.from('lisa_messages').insert({
-        conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
-      });
+      await supabaseAdmin.from('lisa_messages').upsert({
+        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
+        ai_generated: false, ghl_message_id: messageId || null,
+      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
       await supabaseAdmin.from('lisa_settings').update({
         live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
       }).eq('id', 1);
@@ -215,9 +233,10 @@ export default async function handler(req, res) {
     // 7c. Stop-signaal → afmelden: pauzeer follow-ups, geen AI-antwoord.
     const stop = detectStopSignal(message, config.stop_keywords || []);
     if (stop) {
-      await supabaseAdmin.from('lisa_messages').insert({
-        conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
-      });
+      await supabaseAdmin.from('lisa_messages').upsert({
+        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
+        ai_generated: false, ghl_message_id: messageId || null,
+      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
       await supabaseAdmin.from('lisa_conversations').update({
         stop_detected_at: new Date().toISOString(), stop_detected_keyword: stop.keyword,
         followup_paused: true, followup_paused_at: new Date().toISOString(),
@@ -232,7 +251,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, skipped: 'stop_signal_detected', keyword: stop.keyword, conv_id: conv.id });
     }
 
-    // 8. AI genereren (geen persistentie binnen helper)
+    // BP3 (2026-09-01) — media-bericht (foto/reel/story/etc) heeft geen
+    // tekst-body waar Lisa zinvol op kan reageren. Sla 'em wél op (via de
+    // insert hierna), maar SLA de AI-flow over — geen auto-DM op media.
+    // De handmatige takeover-flow blijft beschikbaar in de UI.
+    if (msgType !== 'text') {
+      await supabaseAdmin.from('lisa_messages').upsert({
+        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
+        ai_generated: false, ghl_message_id: messageId || null,
+      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
+      await supabaseAdmin.from('lisa_settings').update({
+        live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
+      }).eq('id', 1);
+      return res.status(200).json({ ok: true, ingested: true, message_type: msgType, ai_skipped: 'media_message', conv_id: conv.id });
+    }
+
+    // 8. AI genereren (geen persistentie binnen helper) — alleen voor tekst.
     const result = await generateLisaResponse({ config, conversation: conv, userMessage: message });
 
     // 8b. Refusal-guard: als het model geweigerd heeft ('Ik kan dit bericht niet
@@ -240,11 +274,13 @@ export default async function handler(req, res) {
     // met refusal_reason. Log inbound + system-note, NIET versturen naar klant.
     // De burst uit 30-31 juli 2026 bevatte precies zulke weigeringen als DM.
     if (!result.ok && result.error === 'refusal_detected') {
+      await supabaseAdmin.from('lisa_messages').upsert({
+        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
+        ai_generated: false, ghl_message_id: messageId || null,
+      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
+      // System-note (outbound intern, geen ghl_message_id → geen conflict-key nodig).
       await supabaseAdmin.from('lisa_messages').insert({
-        conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
-      });
-      await supabaseAdmin.from('lisa_messages').insert({
-        conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false,
+        conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false, message_type: 'text',
         content: `⚠ AI-weigering geblokkeerd (${result.refusal_reason}). Geen bericht verstuurd. Raw: ${(result.raw_response || '').slice(0, 200)}`,
       });
       console.warn('[lisa-ghl-webhook] refusal blocked, no send', { conv_id: conv.id, reason: result.refusal_reason });
@@ -253,10 +289,11 @@ export default async function handler(req, res) {
 
     if (!result.ok) { await logWebhookError('AI: ' + result.error); return res.status(200).json({ ok: false, ai_failed: true, error: result.error }); }
 
-    // 9. Inkomend bericht opslaan
-    await supabaseAdmin.from('lisa_messages').insert({
-      conversation_id: conv.id, direction: 'in', content: message, ai_generated: false, ghl_message_id: messageId || null,
-    });
+    // 9. Inkomend bericht opslaan (upsert-guard tegen race met poll-cron/webhook-retry).
+    await supabaseAdmin.from('lisa_messages').upsert({
+      conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
+      ai_generated: false, ghl_message_id: messageId || null,
+    }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
 
     // 9b. Door de volger opgegeven gegevens opslaan + (fire-and-forget) GHL-contact-match.
     const dd = result.detected_data || {};

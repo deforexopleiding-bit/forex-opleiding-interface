@@ -22,6 +22,7 @@
 // Auth: CRON_SECRET via Authorization header (of Vercel cron intern).
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
+import { resolveContent } from './_lib/lisa-message-type.js';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const GHL_VERSION  = '2021-04-15';
@@ -288,11 +289,15 @@ export default async function handler(req, res) {
             const direction = detectDirection(msg);
             if (!direction) continue;
 
-            const content = msg.body || msg.text || msg.message || '';
-            if (!content || !String(content).trim()) continue;
+            // BP3 (2026-09-01) fix #1 — media-berichten (geen tekst-body)
+            // niet meer skippen. resolveContent geeft altijd een geldige
+            // combinatie { message_type <whitelist>, content <niet-leeg> }.
+            const { message_type: msgType, content: msgContent } = resolveContent(msg);
 
             const sentAt = msg.dateAdded || msg.dateCreated || msg.createdAt || new Date().toISOString();
 
+            // Vroegtijdig dedupe zodat we onnodige INSERTs sparen; de
+            // ON CONFLICT hieronder is race-safety.
             const { data: dupe } = await supabaseAdmin
               .from('lisa_messages').select('id')
               .eq('ghl_message_id', ghlMsgId).limit(1).maybeSingle();
@@ -309,14 +314,17 @@ export default async function handler(req, res) {
               lisaConvId = ensured.id;
             }
 
-            const { error: insErr } = await supabaseAdmin.from('lisa_messages').insert({
+            // BP3 (2026-09-01) fix #4 — atomair dedup via ON CONFLICT
+            // (partial UNIQUE-index op ghl_message_id).
+            const { error: insErr } = await supabaseAdmin.from('lisa_messages').upsert({
               conversation_id: lisaConvId,
               direction,
-              content:         String(content),
+              content:         msgContent,
+              message_type:    msgType,
               sent_at:         sentAt,
               ai_generated:    false,
               ghl_message_id:  ghlMsgId,
-            });
+            }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
             if (insErr) { console.warn('[lisa-poll fallback] msg insert:', ghlMsgId, insErr.message); stats.errors++; continue; }
             stats.messages_upserted++;
           }
