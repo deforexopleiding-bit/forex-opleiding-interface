@@ -70,7 +70,7 @@ window._authSharedReady = (async function () {
     // BP1 2026-08-31: appointmentsetter (Romy) landt op leadsonderhoud-view.
     // De hash-route wordt door klanten-v2.js opgepakt en direct in de
     // leadsonderhoud-view geopend.
-    appointmentsetter:  '/modules/klanten-v2/#/leadsonderhoud',
+    appointmentsetter:  '/modules/klanten-v2/#leadsonderhoud',
     viewer:             '/index.html',
   };
   function getRoleLandingUrl(role) {

@@ -334,7 +334,7 @@
             '<span class="nav-badge" id="navFinanceTasksBadge" data-target="/modules/finance.html?tab=wanbetalers&sub=open-acties&status=PENDING" title="Open acties"></span>' +
           '</a>' +
           // BP2 setter-commissie module — appointmentsetter + manager/admin.
-          '<a class="nav-item" data-module="setter-payout" href="/modules/klanten-v2/#/setter-payout">' +
+          '<a class="nav-item" data-module="setter-payout" href="/modules/klanten-v2/#setter-payout">' +
             svg('mentor-payouts-admin') + 'Commissie' +
           '</a>' +
           '<a class="nav-item" data-module="tickets" href="/modules/tickets.html">' + svg('tickets') + 'Tickets<span class="nav-badge" id="navTicketsBadge"></span></a>' +

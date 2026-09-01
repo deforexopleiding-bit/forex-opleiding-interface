@@ -28,7 +28,10 @@
     'administratie', 'marketing', 'viewer',
   ];
 
-  const SHELL_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'marketing'];
+  // BP2 (2026-09-01): 'appointmentsetter' toegevoegd zodat Romy in de
+  // klanten-v2-shell zichtbaar is met haar eigen rol (i.p.v. de default-
+  // fallback op 'super_admin' die haar per ongeluk admin-toegang zou geven).
+  const SHELL_ROLES = ['super_admin', 'manager', 'sales', 'mentor', 'marketing', 'appointmentsetter'];
 
   const ROLE_SETS = Object.freeze({
     A:     ['super_admin', 'manager', 'sales', 'mentor', 'marketing'],
@@ -55,6 +58,8 @@
       marketing:     'marketing',
       administratie: 'administratie',
       viewer:        'administratie',
+      // BP2 setter-attributie (2026-09-01) — Romy heeft haar eigen shell-rol.
+      appointmentsetter: 'appointmentsetter',
     };
     return map[String(supabaseRole || '').toLowerCase()] || 'super_admin';
   }

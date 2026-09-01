@@ -144,5 +144,20 @@
   window.DFO = window.DFO || { VIEWS: {} };
   window.DFO.VIEWS = window.DFO.VIEWS || {};
   window.DFO.VIEWS['setter-payout/Overzicht'] = overzichtView;
+
+  // Registreer als v2-native module bij de klanten-v2 shell zodat de
+  // hash-router (#setter-payout) 'em oppikt i.p.v. terug te vallen op
+  // dashboard. KV_V2_ADD is allowlist-gated; als 'em nog niet bestaat
+  // (script-order race), schuif de id in KV_V2_PENDING zodat klanten-v2.js
+  // 'em consumeert zodra het definieert.
+  try {
+    if (typeof window.KV_V2_ADD === 'function') {
+      window.KV_V2_ADD('setter-payout');
+    } else {
+      window.KV_V2_PENDING = window.KV_V2_PENDING || [];
+      window.KV_V2_PENDING.push('setter-payout');
+    }
+  } catch (_) { /* fail-soft */ }
+
   console.debug('[sp-v2] setter-payout view geregistreerd');
 })();

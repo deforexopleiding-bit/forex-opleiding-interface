@@ -448,7 +448,7 @@ const V2_MODULES = new Set(['klanten']);
 // nieuwe v2-view alle taken kan (dus geen half-af scherm voor het team).
 // Dashboard heeft z'n data-ronde al gehad (#1210) en staat aan; klanten is
 // de originele v2-basis.
-const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard', 'sales', 'leads', 'finance', 'tickets', 'taken', 'onboarding', 'logboek', 'agents', 'events', 'binnenkort', 'verdiensten', 'mentoren', 'email', 'followup', 'inbox', 'leadsonderhoud', 'lisa', 'wanbetalers', 'studenten', 'instellingen', 'automatiseringen']);
+const V2_ACTIVE_ALLOWLIST = new Set(['klanten', 'dashboard', 'sales', 'leads', 'finance', 'tickets', 'taken', 'onboarding', 'logboek', 'agents', 'events', 'binnenkort', 'verdiensten', 'mentoren', 'email', 'followup', 'inbox', 'leadsonderhoud', 'lisa', 'wanbetalers', 'studenten', 'instellingen', 'automatiseringen', 'setter-payout']);
 
 // ── Preview-override via URL query-param ──────────────────────────────────
 // `?v2preview=sales` (of comma-list `?v2preview=sales,finance,lisa`) forceert
@@ -529,6 +529,7 @@ const LEGACY_URLS = {
   logboek:          null,                                     // v2-native
   instellingen:     null,                                     // v2-native
   binnenkort:       null,                                     // placeholder
+  'setter-payout':  null,                                     // BP2 v2-native (setter-commissie)
 };
 
 // Wrap DFO.goMod: als target NIET in V2_MODULES én er een legacy-URL is,
