@@ -1215,11 +1215,63 @@
     </div>`;
   }
 
+  /* ── BP2 setter-dashboard render ──────────────────────────────────── */
+  const _spDash = { data: null, loading: false, error: null };
+  async function loadSetterMetrics() {
+    if (_spDash.loading || _spDash.data) return;
+    _spDash.loading = true;
+    try {
+      const r = await window.KV.authedFetch('/api/setter-dashboard-metrics');
+      if (r.ok) _spDash.data = await r.json();
+      else _spDash.error = 'Kon KPI\'s niet laden (HTTP ' + r.status + ')';
+    } catch (e) { _spDash.error = e?.message || 'Netwerkfout'; }
+    _spDash.loading = false;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  function _spTile(label, val, sub, color) {
+    return '<div style="flex:1;min-width:180px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm)">'
+      + '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">' + String(label) + '</div>'
+      + '<div style="font-size:22px;font-weight:700;color:' + (color || 'var(--text-1)') + '">' + String(val) + '</div>'
+      + (sub ? '<div style="font-size:11px;color:var(--text-3);margin-top:3px">' + String(sub) + '</div>' : '')
+      + '</div>';
+  }
+  function dashSetter() {
+    if (!_spDash.data && !_spDash.loading && !_spDash.error) queueMicrotask(loadSetterMetrics);
+    if (_spDash.loading && !_spDash.data) {
+      return '<div class="pad" style="padding:24px">Laden…</div>';
+    }
+    if (_spDash.error) {
+      return '<div class="pad" style="padding:24px;color:var(--rose)">⚠ ' + String(_spDash.error) + '</div>';
+    }
+    const d = _spDash.data || {};
+    const b = d.boekingen || {};
+    const s = d.sales || {};
+    const opk = d.opkomst_pct == null ? '—' : d.opkomst_pct + '%';
+    const nos = d.no_show_pct == null ? '—' : d.no_show_pct + '%';
+    const eur = (v) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(Number(v) || 0);
+    return '<div class="pad" style="padding:20px">'
+      + '<div style="font-size:18px;font-weight:700;margin-bottom:14px">Jouw setter-metrics</div>'
+      + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
+        + _spTile('Geboekte calls (week)',   String(b.week || 0),  null,                          'var(--brand)')
+        + _spTile('Geboekte calls (maand)',  String(b.maand || 0), null,                          'var(--brand)')
+        + _spTile('Opkomstpercentage',       opk,                  'Laatste 90 dagen',            'var(--emerald)')
+        + _spTile('No-show %',               nos,                  'Laatste 90 dagen',            'var(--rose)')
+      + '</div>'
+      + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">'
+        + _spTile('Sales uit jouw calls',    String(s.count || 0),  eur(s.bruto_eur || 0) + ' bruto', 'var(--text-1)')
+        + _spTile('Commissie deze maand',    eur(d.commissie_deze_maand || 0), 'Vrijgegeven + uitbetaald', 'var(--emerald)')
+        + _spTile('Nog te verwachten',       eur(d.commissie_forecast || 0),   'Actieve subscriptions',    'var(--text-1)')
+      + '</div>'
+      + '<div style="font-size:12px;color:var(--text-3)">Gedetailleerd overzicht + regels → <a href="#setter-payout" style="color:var(--brand)">Commissie</a></div>'
+      + '</div>';
+  }
+
   /* ── Rol-bewuste dispatcher ───────────────────────────────────────── */
   window.DFO.VIEWS['dashboard/Vandaag'] = () => {
     const r = S.role;
-    if (r === 'mentor')    return dashMentor();
-    if (r === 'marketing') return dashMarketing();
+    if (r === 'appointmentsetter') return dashSetter();
+    if (r === 'mentor')            return dashMentor();
+    if (r === 'marketing')         return dashMarketing();
     return dashManager();
   };
   window.DFO.VIEWS['dashboard/'] = window.DFO.VIEWS['dashboard/Vandaag'];

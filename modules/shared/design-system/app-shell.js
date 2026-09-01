@@ -61,7 +61,7 @@
 
   /* ── Modules ─────────────────────────────────────────────────────── */
   const MODS = [
-    { g: 'Overzicht',              id: 'dashboard',        naam: 'Dashboard',         icon: I.grid,     color: 'blue',    roles: A,                    tabs: ['Vandaag'] },
+    { g: 'Overzicht',              id: 'dashboard',        naam: 'Dashboard',         icon: I.grid,     color: 'blue',    roles: A.concat(['appointmentsetter']), permKey: 'dashboard.module.access', tabs: ['Vandaag'] },
     { g: 'Overzicht',              id: 'inbox',            naam: 'Inbox',             icon: I.inbox,    color: 'teal',    roles: SAMS,tabs: [] },
     { g: 'Overzicht',              id: 'taken',            naam: 'Takenbeheer',       icon: I.check2,   color: 'emerald', roles: A,tabs: ['Mijn taken', 'Toegewezen door mij', 'Afgerond'] },
 
