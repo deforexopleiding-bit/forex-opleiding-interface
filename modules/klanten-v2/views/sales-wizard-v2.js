@@ -911,6 +911,8 @@
     _sw.duplicate_check_status = 'completed';
     _swMarkDirty();
     window.__swDupCheckClose();
+    // BP2 v2 klant-catch-all: klant nu gekozen → setter-lookup opnieuw.
+    if (!_sw.wizard.setter_user_id) _swAutoLookupSetter().catch(() => {});
   };
   window.__swUseTlContact = (payloadJson) => {
     let m = null;
@@ -1152,22 +1154,33 @@
     } catch (_) { _sw.staff = _sw.staff || []; }
     _sw.staffLoading = false;
     renderWizard();
-    // Als source_lead_id gezet maar setter niet, doe 1x auto-lookup.
-    if (_sw.wizard.source_lead_id && !_sw.wizard.setter_user_id) {
-      _swAutoLookupSetter(_sw.wizard.source_lead_id).catch(() => {});
+    // v2 (2026-09-01) klant-catch-all: trigger auto-lookup als setter leeg is,
+    // ook zonder source_lead_id. Server matcht op klant-email/telefoon-last9
+    // tegen boekingen met setter_user_id.
+    if (!_sw.wizard.setter_user_id) {
+      _swAutoLookupSetter().catch(() => {});
     }
   }
-  // Auto-lookup setter uit lead → oudste boeking (spiegelt de server-logic).
-  async function _swAutoLookupSetter(leadId) {
-    if (!leadId) return;
+  // Auto-lookup setter: probeer meerdere sleutels tegelijk (lead_id +
+  // customer_id + email + telefoon). Server pakt de eerste hit.
+  async function _swAutoLookupSetter() {
     try {
-      const j = await tryFetch('setter-lookup', '/api/lead-setter-lookup?lead_id=' + encodeURIComponent(leadId));
+      const w = _sw.wizard || {};
+      const params = new URLSearchParams();
+      if (w.source_lead_id)         params.set('lead_id',     w.source_lead_id);
+      if (_sw.matched_customer_id)  params.set('customer_id', _sw.matched_customer_id);
+      if (w.email)                  params.set('email',       w.email);
+      if (w.phone)                  params.set('telefoon',    w.phone);
+      if (![...params.keys()].length) return;
+      const j = await tryFetch('setter-lookup', '/api/lead-setter-lookup?' + params.toString());
       if (j?.setter_user_id && !_sw.wizard.setter_user_id) {
         _sw.wizard.setter_user_id = String(j.setter_user_id);
         renderWizard();
       }
     } catch (_) { /* fail-soft — picker blijft leeg */ }
   }
+  // Publiek — trigger vanuit customer-match handlers (klant geselecteerd).
+  window.__swSetterAutoLookup = () => { _swAutoLookupSetter().catch(() => {}); };
   async function applyTrajectVariant(variantId) {
     _sw.wizard.traject_variant_id = variantId || '';
     _swMarkDirty();

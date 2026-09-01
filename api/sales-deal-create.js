@@ -179,44 +179,65 @@ export default async function handler(req, res) {
     // 2. Bereken total_amount uit producten.
     const totalAmount = products.reduce((sum, p) => sum + (Number(p.price_per_unit) * Number(p.quantity)), 0);
 
-    // BP2 setter-attributie: expliciete override uit wizard-picker wint;
-    // anders auto-lookup via source_lead_id → leads.email → oudste boeking
-    // met setter_user_id (email primair, telefoon-last9 fallback). Fail-
-    // soft: bij lookup-fout NULL, deal-creatie gaat door.
+    // BP2 setter-attributie (v2 2026-09-01 klant-catch-all).
+    // Resolutie-volgorde:
+    //   1. Expliciet: deal_data.setter_user_id uit de wizard-picker.
+    //   2. source_lead_id → leads.email/telefoon → oudste boeking.
+    //   3. NIEUW — customerId → customers.email/phone → oudste boeking.
+    //      Dekt vers-in-de-wizard scenarios waarin verkoper niet vanuit
+    //      lead start maar de klant identiek is aan een setter-boeking.
+    //   4. NULL → wizard toont "⚠ geen setter"-badge.
+    // Match alleen tegen boekingen mét setter_user_id → geen valse attributie.
+    // Email primair, telefoon-last9 fallback. Oudste-boeking-wint.
+    async function _resolveByEmail(email) {
+      if (!email) return null;
+      const { data } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('setter_user_id, scheduled_at')
+        .ilike('lead_email', email)
+        .not('setter_user_id', 'is', null)
+        .order('scheduled_at', { ascending: true })
+        .limit(1).maybeSingle();
+      return data?.setter_user_id || null;
+    }
+    async function _resolveByPhone(telefoon) {
+      const digits = String(telefoon || '').replace(/\D/g, '');
+      if (digits.length < 8) return null;
+      const tel9 = digits.slice(-9);
+      const { data } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('setter_user_id, lead_phone, scheduled_at')
+        .not('setter_user_id', 'is', null)
+        .order('scheduled_at', { ascending: true })
+        .limit(500);
+      const hit = (data || []).find((r) => {
+        const rd = String(r.lead_phone || '').replace(/\D/g, '');
+        return rd && rd.slice(-9) === tel9;
+      });
+      return hit?.setter_user_id || null;
+    }
+
     let resolvedSetter = emptyToNull(deal_data.setter_user_id);
+    // Stap 2: via source_lead_id.
     if (!resolvedSetter && deal_data.source_lead_id) {
       try {
         const { data: lead } = await supabaseAdmin
           .from('leads').select('email, telefoon').eq('id', deal_data.source_lead_id).maybeSingle();
-        if (lead?.email) {
-          const { data: fa } = await supabaseAdmin
-            .from('follow_up_appointments')
-            .select('setter_user_id')
-            .ilike('lead_email', lead.email)
-            .not('setter_user_id', 'is', null)
-            .order('scheduled_at', { ascending: true })
-            .limit(1).maybeSingle();
-          if (fa?.setter_user_id) resolvedSetter = fa.setter_user_id;
-        }
-        // Telefoon-last9 fallback als email-match faalde.
-        if (!resolvedSetter && lead?.telefoon) {
-          const tel9 = String(lead.telefoon).replace(/\D/g, '').slice(-9);
-          if (tel9 && tel9.length >= 8) {
-            const { data: all } = await supabaseAdmin
-              .from('follow_up_appointments')
-              .select('setter_user_id, lead_phone, scheduled_at')
-              .not('setter_user_id', 'is', null)
-              .order('scheduled_at', { ascending: true })
-              .limit(200);
-            const hit = (all || []).find((r) => {
-              const rd = String(r.lead_phone || '').replace(/\D/g, '');
-              return rd && rd.slice(-9) === tel9;
-            });
-            if (hit?.setter_user_id) resolvedSetter = hit.setter_user_id;
-          }
-        }
+        if (lead?.email)    resolvedSetter = await _resolveByEmail(String(lead.email).trim().toLowerCase());
+        if (!resolvedSetter && lead?.telefoon) resolvedSetter = await _resolveByPhone(lead.telefoon);
       } catch (e) {
-        console.warn('[sales-deal-create] setter-lookup (soft):', e?.message || e);
+        console.warn('[sales-deal-create] setter-lookup lead (soft):', e?.message || e);
+      }
+    }
+    // Stap 3: klant-catch-all — customers.email/phone.
+    if (!resolvedSetter && customerId) {
+      try {
+        const { data: cust } = await supabaseAdmin
+          .from('customers').select('email, phone').eq('id', customerId).maybeSingle();
+        if (cust?.email)    resolvedSetter = await _resolveByEmail(String(cust.email).trim().toLowerCase());
+        if (!resolvedSetter && cust?.phone) resolvedSetter = await _resolveByPhone(cust.phone);
+      } catch (e) {
+        console.warn('[sales-deal-create] setter-lookup customer (soft):', e?.message || e);
       }
     }
 
