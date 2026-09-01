@@ -40,12 +40,17 @@
   const { I, svg } = NS;
 
   /* ── Rol-sets ────────────────────────────────────────────────────── */
+  // BP2 (2026-09-01): 'appointmentsetter' toegevoegd zodat setRoles-filter
+  // 'em niet meer weggooit en fail-open op super_admin valt.
+  // Persoon-veld is een mock-placeholder; echte naam-lookup uit profiles
+  // is een aparte verbetering. Voor nu: neutraal label.
   const ROLES = {
-    super_admin: { naam: 'Super admin', persoon: 'Amigo Biemold' },
-    manager:     { naam: 'Manager',     persoon: 'Jeffrey Biemold' },
-    sales:       { naam: 'Sales',       persoon: 'Joost Berg' },
-    mentor:      { naam: 'Mentor',      persoon: 'Dave Klaassen' },
-    marketing:   { naam: 'Marketing',   persoon: 'Nog niet toegewezen' },
+    super_admin:       { naam: 'Super admin',    persoon: 'Amigo Biemold' },
+    manager:           { naam: 'Manager',        persoon: 'Jeffrey Biemold' },
+    sales:             { naam: 'Sales',          persoon: 'Joost Berg' },
+    mentor:            { naam: 'Mentor',         persoon: 'Dave Klaassen' },
+    marketing:         { naam: 'Marketing',      persoon: 'Nog niet toegewezen' },
+    appointmentsetter: { naam: 'Setter',         persoon: 'Setter' },
   };
   const A     = ['super_admin', 'manager', 'sales', 'mentor', 'marketing'];
   const SA    = ['super_admin'];
@@ -83,7 +88,7 @@
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
-    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS,tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Bronnen', 'Vragenlijst', 'Statistieken'] },
+    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Bronnen', 'Vragenlijst', 'Statistieken'] },
     { g: 'Groei',                  id: 'lisa',             naam: 'Instagram setter',  icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Dashboard', 'Gesprekken', 'Statistieken'] },
 
     { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud'] },
@@ -107,6 +112,11 @@
     'events/Inbox':            SAMS,
     'events/Inschrijvingen':   SAMS,
     'onboarding/Inbox':        SAMS,
+    // BP2 (2026-09-01): scope leadsonderhoud voor appointmentsetter — geen
+    // beheer-tabs (Bronnen/Vragenlijst) of aggregate stats voor Romy.
+    'leadsonderhoud/Bronnen':         SAMS,
+    'leadsonderhoud/Vragenlijst':     SAMS,
+    'leadsonderhoud/Statistieken':    SAMS,
     'onboarding/Archief':      SAMS,
   };
   // Coming-soon-lock voor specifieke (module, rol)-combos. Toont slot-icoon
@@ -267,7 +277,12 @@
   function setRoles(roles) {
     const clean = (Array.isArray(roles) ? roles : [roles])
       .filter(r => r && ROLES[r]);
-    S.roles = clean.length ? clean : ['super_admin'];
+    // BP2 (2026-09-01) FAIL-CLOSED: was `clean.length ? clean : ['super_admin']`
+    // — dat gaf onbekende rollen automatisch super_admin-toegang. Nu: bij
+    // lege set → leeg blijven. visMods filtert dan alle MODS weg (of alleen
+    // die met permKey-match) → sidebar toont minimum. Endpoints blijven
+    // autoritatief via RBAC feature-keys.
+    S.roles = clean;
     S.dossier = null;
     closePanel(true);
     const first = visMods()[0];
