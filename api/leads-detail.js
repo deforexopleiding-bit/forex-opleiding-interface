@@ -12,6 +12,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getSetterScope } from './_lib/setter-scope.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -42,6 +43,18 @@ export default async function handler(req, res) {
     const lead = viewRes.data;
     const raw  = rawRes.data;
     if (!lead || !raw) return res.status(404).json({ error: 'Lead niet gevonden' });
+
+    // BP2 setter-scope: appointmentsetter mag alleen leads openen die
+    // via haar boekingen zijn binnengekomen. Anders 404 (geen bestaan-
+    // bevestiging naar buiten). Manager/admin: ongewijzigd.
+    const scope = await getSetterScope(user.id, supabaseAdmin);
+    if (scope.isScoped) {
+      const em = String(lead.email || '').trim().toLowerCase();
+      const ph = String(lead.telefoon || '').replace(/\D/g, '');
+      const emailHit = em && scope.emails.includes(em);
+      const phoneHit = ph.length >= 8 && scope.phoneLast9.includes(ph.slice(-9));
+      if (!emailHit && !phoneHit) return res.status(404).json({ error: 'Lead niet gevonden' });
+    }
 
     let eigenaar = null;
     if (raw.eigenaar_id) {

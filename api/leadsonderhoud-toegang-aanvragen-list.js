@@ -10,6 +10,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getSetterScope, filterBySetterScope } from './_lib/setter-scope.js';
 
 const STATUS_OK = new Set(['alle', 'wachtend', 'gereageerd', 'vervallen']);
 const SOORT_OK  = new Set(['alle', '7-daagse', 'minicursus']);
@@ -53,7 +54,15 @@ export default async function handler(req, res) {
     const { data, error, count } = await qry;
     if (error) throw error;
 
-    const items = (data || []).map((r) => ({
+    // BP2 setter-scope: appointmentsetter ziet alleen toegang-aanvragen
+    // die matchen op haar boekingen. Manager/admin: pass.
+    const scope = await getSetterScope(user.id, supabaseAdmin);
+    let filtered = data || [];
+    if (scope.isScoped) {
+      filtered = filterBySetterScope(filtered, scope, { email: 'email', phone: 'telefoon' });
+    }
+
+    const items = (filtered || []).map((r) => ({
       id: r.id,
       created_at: r.created_at,
       soort: r.soort,
