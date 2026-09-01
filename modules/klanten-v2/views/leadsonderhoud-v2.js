@@ -2550,11 +2550,12 @@
       try { const d = new Date(iso); return d.toLocaleString('nl-NL', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); }
       catch(_){ return String(iso); }
     };
-    // BP3 v4 (2026-09-01) — Sale?-kolom. Groen ✓ = klant heeft een deal met
-    // tl_quotation_status IN ('accepted','signed'). Rood ✗ anders. Match op
-    // lowercase e-mailadres (customers.email); geen telefoon-match zodat
-    // gedeelde testnummers geen valse vinkjes geven. Tooltip: klantnaam +
-    // som van deal-bedragen als beide beschikbaar zijn.
+    // BP3 v4 (2026-09-01) — Sale?-kolom, 3-way:
+    //   sale_checked=false        → grijs streepje (–), tooltip "Geen e-mail om te matchen"
+    //   sale_checked + is_sale    → groen ✓ met "Sale: <klant> · <bedrag>"
+    //   sale_checked + !is_sale   → rood ✗ met "Nog geen sale"
+    // Match op lowercase e-mailadres (customers.email); geen telefoon-match
+    // zodat gedeelde testnummers geen valse vinkjes geven.
     const eurFmt = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
     const rows = items.length ? items.map(s => {
       const badge = s.resultaat === 'toegelaten'
@@ -2562,16 +2563,18 @@
         : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>';
       const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>';
       const afsp = s.heeft_afspraak ? '<span style="color:var(--emerald);font-weight:600">✓ Geboekt</span>' : '<span style="color:var(--text-3)">–</span>';
-      let saleTitle = 'Nog geen sale';
-      if (s.is_sale) {
+      let saleCell;
+      if (!s.sale_checked) {
+        saleCell = '<span style="color:var(--text-3);font-weight:600;font-size:14px" title="Geen e-mail om te matchen">–</span>';
+      } else if (s.is_sale) {
         const parts = [];
         if (s.sale_customer_name) parts.push(s.sale_customer_name);
         if (s.sale_amount != null && !isNaN(Number(s.sale_amount))) parts.push(eurFmt.format(Number(s.sale_amount)));
-        saleTitle = 'Sale: ' + (parts.join(' · ') || 'ja');
+        const saleTitle = 'Sale: ' + (parts.join(' · ') || 'ja');
+        saleCell = `<span style="color:var(--emerald);font-weight:700;font-size:14px" title="${esc(saleTitle)}">✓</span>`;
+      } else {
+        saleCell = '<span style="color:var(--rose);font-weight:700;font-size:14px" title="Nog geen sale">✗</span>';
       }
-      const saleCell = s.is_sale
-        ? `<span style="color:var(--emerald);font-weight:700;font-size:14px" title="${esc(saleTitle)}">✓</span>`
-        : `<span style="color:var(--rose);font-weight:700;font-size:14px" title="${esc(saleTitle)}">✗</span>`;
       const contact = [s.email, s.telefoon].filter(Boolean).join(' · ');
       return `<tr data-op-row="${esc(s.id)}" style="border-bottom:1px solid var(--border);cursor:pointer" onclick="window._lsOpenOpstartDetail('${esc(s.id)}')">
         <td style="padding:8px 10px;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--text-3);font-size:11.5px" title="${esc(s.created_at)}">${esc(kortDt(s.created_at))}</td>

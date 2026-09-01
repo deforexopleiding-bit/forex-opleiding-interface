@@ -103,7 +103,13 @@ export default async function handler(req, res) {
     // tl_quotation_status IN ('accepted','signed'). Attributie-onafhankelijk
     // (setter_user_id NIET vereist) — vraag "is deze lead client geworden?".
     // Twee extra queries, geen N+1: bulk-customers + bulk-deals.
+    // BP3 v4 vervolg (2026-09-01) — 3-way sale-status:
+    //   is_sale = true  → deal met accepted/signed gevonden (groen ✓)
+    //   is_sale = false + sale_checked=true → wél gecheckt, geen sale (rood ✗)
+    //   sale_checked = false → email leeg of niet valid voor OR-clause → – (grijs)
+    // matchableEmails = de subset waarop we daadwerkelijk konden checken.
     const saleByEmail = new Map(); // emailLower -> { customerName, saleBedrag }
+    const matchableEmails = new Set();
     try {
       const emailSet = new Set();
       for (const r of (filteredRows || [])) {
@@ -115,8 +121,10 @@ export default async function handler(req, res) {
         // opgeslagen zijn (as-is uit de bron). We bouwen een OR-clause van
         // ilike-per-email zodat 'foo@bar.com' óók 'Foo@Bar.com' matcht.
         // Emails met '(', ')' of ',' worden geskipt (invalide karakters voor
-        // PostgREST .or()-syntax; extreem zeldzaam in echte data).
+        // PostgREST .or()-syntax; extreem zeldzaam in echte data) — die
+        // rows worden dan als "niet checkbaar" gemarkeerd (streepje in UI).
         const emailArr = Array.from(emailSet).filter((e) => !/[(),]/.test(e));
+        for (const e of emailArr) matchableEmails.add(e);
         const orClause = emailArr.map((e) => 'email.ilike.' + e).join(',');
         const { data: custs } = await supabaseAdmin
           .from('customers')
@@ -161,8 +169,9 @@ export default async function handler(req, res) {
     }
 
     const items = (filteredRows || []).map((r) => {
-      const emailLower = String(r.email || '').trim().toLowerCase();
-      const saleInfo   = emailLower ? saleByEmail.get(emailLower) : null;
+      const emailLower  = String(r.email || '').trim().toLowerCase();
+      const saleChecked = !!emailLower && matchableEmails.has(emailLower);
+      const saleInfo    = saleChecked ? (saleByEmail.get(emailLower) || null) : null;
       return {
         id              : r.id,
         created_at      : r.created_at,
@@ -180,7 +189,10 @@ export default async function handler(req, res) {
         heeft_afspraak  : !!r.appointment_id,
         appointment_id  : r.appointment_id,
         lead_id         : r.lead_id,
-        // Sale-indicator + tooltip-content (customer + bedrag).
+        // 3-way sale-indicator: sale_checked=false → niet-checkbare rij (–);
+        // sale_checked=true + is_sale=true → sale gevonden (✓); is_sale=false
+        // met sale_checked=true → gecheckt maar geen accepted deal (✗).
+        sale_checked       : saleChecked,
         is_sale            : !!saleInfo,
         sale_customer_name : saleInfo ? saleInfo.customerName : null,
         sale_amount        : saleInfo ? saleInfo.saleBedrag   : null,
