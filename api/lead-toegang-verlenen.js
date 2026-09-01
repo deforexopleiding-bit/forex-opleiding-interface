@@ -1,11 +1,14 @@
 // api/lead-toegang-verlenen.js
 //
-// POST { lead_id: <uuid>, product_slug?: <text>, duur_dagen?: <int> }
+// POST { lead_id: <uuid>, product?: 'mini-cursus'|'7-daagse'|<slug>, duur_dagen?: <int> }
 //
-// Simpele "Geef toegang"-knop voor Romy (+ manager/admin). Verleent
-// standaard trial-toegang tot 1 LMS-product en verstuurt de inlogmail.
-// Zonder product-selector — server-side default = eerste actieve product
-// waar we een trial voor doen (of caller-override via product_slug).
+// "Geef toegang"-knop voor Romy (+ manager/admin). Verleent trial-toegang
+// tot een van de twee setter-relevante producten en verstuurt de inlog-
+// mail. Als geen product meegegeven: eerste actieve als default fallback.
+//
+// v2 (2026-09-01): product-keuze mini-cursus vs 7-daagse (twee opties in
+// de UI-knop). Andere slugs worden alleen geaccepteerd als 'ie actief is
+// in lms_producten (voor manager-gebruik).
 //
 // Gate: leads.update.
 //
@@ -39,7 +42,10 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const leadId    = String(body.lead_id || '').trim();
-  const slugRaw   = body.product_slug ? String(body.product_slug).trim().toLowerCase() : null;
+  // v2: accepteer 'product' (nieuwe key) én 'product_slug' (backward-compat).
+  const slugRaw   = (body.product || body.product_slug)
+    ? String(body.product || body.product_slug).trim().toLowerCase()
+    : null;
   const duurDagen = Number.isFinite(Number(body.duur_dagen))
     ? Math.max(1, Math.min(365, Math.round(Number(body.duur_dagen))))
     : DEFAULT_TRIAL_DAYS;

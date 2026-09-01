@@ -456,6 +456,7 @@
           <button class="chip ${call === 'nee' ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="DFO.setF('ls-call','nee')">— nog niet</button>
         </div>
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (total + ' leads')}</span>
+        <button class="btn btn-primary btn-sm" onclick="__lsNewLead()" style="font-size:12.5px;padding:6px 12px">+ Nieuwe lead</button>
       </div>`;
 
     return `${_lsExtModalHtml()}${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
@@ -560,16 +561,30 @@
     const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${dd}`;
   }
-  // BP2 (2026-09-01): "Geef toegang"-knop → simpel confirm + POST.
-  // 7-daagse trial (server-default in api/lead-toegang-verlenen.js).
+  // BP2 v3 (2026-09-01): "Geef toegang"-knop met product-keuze (mini-cursus
+  // of 7-daagse). Prompt-choice via simpele browser-confirm-serie zodat
+  // geen extra modal-UI nodig is. Op OK → POST met gekozen product-slug.
   window.__lsGeefToegang = async (leadId, leadName) => {
     if (!leadId) return;
-    const ok = confirm('Geef 7-daagse trial-toegang aan ' + (leadName || 'deze lead') + '? De welkomstmail wordt automatisch verstuurd.');
+    // 1) Vraag om productkeuze.
+    const kies = prompt(
+      'Welk product voor ' + (leadName || 'deze lead') + '?\n\n' +
+      'Typ:\n  1  = 7-daagse cursus\n  2  = mini-cursus\n\n' +
+      '(Annuleer om te stoppen)'
+    );
+    if (!kies) return;
+    let product = null;
+    const t = String(kies).trim();
+    if (t === '1' || t === '7-daagse' || t === '7')       product = '7-daagse';
+    else if (t === '2' || t === 'mini-cursus' || t === 'mini') product = 'mini-cursus';
+    else { _lsInbToast('Onbekende keuze. Typ 1 of 2.', 'warn'); return; }
+
+    const ok = confirm('Verleen ' + product + ' trial-toegang aan ' + (leadName || 'deze lead') + '? De welkomstmail wordt automatisch verstuurd.');
     if (!ok) return;
     try {
       const resp = await window.KV.authedFetch('/api/lead-toegang-verlenen', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lead_id: leadId }),
+        body: JSON.stringify({ lead_id: leadId, product }),
       });
       const j = await resp.json().catch(() => ({}));
       if (!resp.ok || j?.error) {
@@ -578,11 +593,32 @@
       }
       const mailOk = j?.mail?.ok;
       _lsInbToast(
-        'Toegang verleend tot ' + (j.geldig_tot || '?') + (mailOk ? ' · welkomstmail verzonden' : ' · welkomstmail MISLUKT'),
+        'Toegang verleend (' + (j.product_slug || product) + ') tot ' + (j.geldig_tot || '?') +
+          (mailOk ? ' · welkomstmail verzonden' : ' · welkomstmail MISLUKT'),
         mailOk ? 'ok' : 'warn'
       );
     } catch (e) {
       _lsInbToast('Netwerkfout: ' + (e?.message || e), 'warn');
+    }
+  };
+
+  // BP2 v3: "Nieuwe lead"-actie → deep-link naar bestaande leads-v2 create-flow.
+  //   1) Switch naar #leads (klanten-v2 hash-router).
+  //   2) Zet ?lead-new=1 zodat leads-v2 de create-modal opent (bestaand pad,
+  //      dat routeert naar /modules/leads.html?new=1 — hergebruikt v1-flow).
+  // Gate op leads.update wordt server-side afgedwongen (create-endpoint zelf).
+  window.__lsNewLead = () => {
+    try {
+      const u = new URL(location.href);
+      u.searchParams.set('lead-new', '1');
+      history.pushState({}, '', u.toString());
+    } catch (_) { /* noop */ }
+    try { window.location.hash = '#leads'; } catch (_) {}
+    if (typeof window.__leadNew === 'function') {
+      // Trigger direct — leads-v2 URL-listener + render pikt 'lead-new' op.
+      window.__leadNew();
+    } else if (window.DFO && typeof window.DFO.render === 'function') {
+      window.DFO.render();
     }
   };
 

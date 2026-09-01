@@ -89,6 +89,11 @@
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
     { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Bronnen', 'Vragenlijst', 'Statistieken'] },
+    // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt
+    // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
+    // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
+    // wordt opgevangen in goMod() → S.mod=leadsonderhoud + S.tab=Gesprekken.
+    { g: 'Groei',                  id: 'gesprekken',       naam: 'Gesprekken',        icon: I.chat,     color: 'teal',    roles: ['appointmentsetter'], permKey: 'leads.view', tabs: [], deeplink: { mod: 'leadsonderhoud', tab: 'Gesprekken' } },
     { g: 'Groei',                  id: 'lisa',             naam: 'Instagram setter',  icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Dashboard', 'Gesprekken', 'Statistieken'] },
 
     { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud'] },
@@ -114,9 +119,13 @@
     'onboarding/Inbox':        SAMS,
     // BP2 (2026-09-01): scope leadsonderhoud voor appointmentsetter — geen
     // beheer-tabs (Bronnen/Vragenlijst) of aggregate stats voor Romy.
-    'leadsonderhoud/Bronnen':         SAMS,
-    'leadsonderhoud/Vragenlijst':     SAMS,
-    'leadsonderhoud/Statistieken':    SAMS,
+    'leadsonderhoud/Bronnen':          SAMS,
+    'leadsonderhoud/Vragenlijst':      SAMS,
+    'leadsonderhoud/Statistieken':     SAMS,
+    // BP2 v3 (2026-09-01): Wachtrij + Toegang-aanvragen ook alleen voor
+    // SAMS. Setter heeft geen operationele reden om deze te zien.
+    'leadsonderhoud/Wachtrij':         SAMS,
+    'leadsonderhoud/Toegang-aanvragen': SAMS,
     'onboarding/Archief':      SAMS,
   };
   // Coming-soon-lock voor specifieke (module, rol)-combos. Toont slot-icoon
@@ -314,6 +323,22 @@
     if (!m) return;
     if (window.innerWidth <= 900) toggleNav(false);
     if (m.ext) { window.open(m.ext, '_blank', 'noopener'); return; }
+    // BP2 v3 (2026-09-01) — deep-link naar (mod,tab)-combo. Gebruikt voor
+    // de "Gesprekken"-shortcut in de sidebar voor appointmentsetter.
+    if (m.deeplink && m.deeplink.mod) {
+      const targ = MODS.find(x => x.id === m.deeplink.mod);
+      if (targ) {
+        S.mod = targ.id;
+        S.dossier = null;
+        closePanel(true);
+        closeModal();
+        const wantTab = m.deeplink.tab || '';
+        const tabs = roleTabs(targ);
+        S.tab = tabs.includes(wantTab) ? wantTab : (tabs[0] || '');
+        NS.render();
+        return;
+      }
+    }
     S.mod = id;
     S.dossier = null;
     closePanel(true);

@@ -29,7 +29,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getSetterScope, filterBySetterScope } from './_lib/setter-scope.js';
+// BP2 v3 (2026-09-01): setter-scope VERWIJDERD — Romy doet alle gesprekken.
 import {
   haalLijn, leadsInTraject, normNummer, binnenVenster, postvakNaam, adresUit, mailAfzender,
 } from './_lib/leadsonderhoud-gesprekken.js';
@@ -46,16 +46,9 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (leads.view)' });
   }
 
-  // BP2 setter-scope: filter leads-set (en dus alle downstream matching)
-  // op eigen boekingen. Manager/admin: isScoped=false → pass-through.
-  const scope = await getSetterScope(user.id, supabaseAdmin);
-
   try {
     const lijn = await haalLijn();
-    let leads = await leadsInTraject();
-    if (scope.isScoped) {
-      leads = filterBySetterScope(leads, scope, { email: 'email', phone: 'telefoon_e164' });
-    }
+    const leads = await leadsInTraject();
     const postvak = postvakNaam();
 
     // Index de leads op telefoonnummer (voor WhatsApp) en verzamel de e-mailadressen.

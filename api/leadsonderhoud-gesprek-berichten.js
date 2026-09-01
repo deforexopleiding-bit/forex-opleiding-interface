@@ -15,7 +15,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getSetterScope } from './_lib/setter-scope.js';
+// BP2 v3 (2026-09-01): setter-scope VERWIJDERD — Romy doet alle threads.
 import {
   haalLijn, trajectSlugs, normNummer, binnenVenster, postvakNaam, adresUit, mailAfzender,
 } from './_lib/leadsonderhoud-gesprekken.js';
@@ -46,18 +46,6 @@ export default async function handler(req, res) {
       .eq('id', leadId).maybeSingle();
     if (leadErr) throw leadErr;
     if (!lead) return res.status(404).json({ error: 'Lead niet gevonden' });
-
-    // BP2 setter-scope: appointmentsetter mag alleen berichten zien van
-    // leads die via haar boekingen binnenkwamen. 404 (geen bestaan-
-    // bevestiging naar buiten). Manager/admin: ongewijzigd.
-    const scope = await getSetterScope(user.id, supabaseAdmin);
-    if (scope.isScoped) {
-      const em = String(lead.email || '').trim().toLowerCase();
-      const ph = String(lead.telefoon_e164 || '').replace(/\D/g, '');
-      const emailHit = em && scope.emails.includes(em);
-      const phoneHit = ph.length >= 8 && scope.phoneLast9.includes(ph.slice(-9));
-      if (!emailHit && !phoneHit) return res.status(404).json({ error: 'Lead niet gevonden' });
-    }
 
     // Traject-type staat sinds Feature 2 in leads.traject (soort = herkomst);
     // trajectSlugs() is lowercase, dus case-insensitive vergelijken.

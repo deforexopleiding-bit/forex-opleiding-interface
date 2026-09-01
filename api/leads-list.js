@@ -20,7 +20,9 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getSetterScope } from './_lib/setter-scope.js';
+// BP2 v3 (2026-09-01): setter-scope hier VERWIJDERD — Romy doet nu álle
+// gesprekken/contacten, dus ongefilterd zoals andere rollen. Scope blijft
+// alleen op opstartsessies-list.
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -65,28 +67,12 @@ export default async function handler(req, res) {
   // (de echte afdwinging zit server-side in leads-verwijder/-herstel).
   const canDelete = await requirePermission(req, 'leads.delete');
 
-  // BP2 (2026-09-01) setter-scope: appointmentsetter ziet alleen leads
-  // die matchen op emails/telefoon-last9 van haar eigen boekingen.
-  // Management-rollen: ongewijzigd (isScoped=false → geen filter).
-  const scope = await getSetterScope(user.id, supabaseAdmin);
-
   try {
     let qy = supabaseAdmin
       .from('leads_overzicht')
       .select('id, naam, email, telefoon, soort, bron, traject, kwalificatie, score, drempel, status, aangemaakt, tag, afspraak_op', { count: 'exact' })
       .order('aangemaakt', { ascending: false })
       .range(offset, offset + limit - 1);
-    // Setter-scope: filter server-side op emails. Telefoon-last9 wordt
-    // niet in de OR meegenomen (PostgREST kan geen computed expressies)
-    // — daar valt zeer weinig extra winst uit want boekingen krijgen
-    // vrijwel altijd een email. Fail-closed: lege set → 0 rijen.
-    if (scope.isScoped) {
-      if (scope.emails.length === 0) {
-        qy = qy.eq('id', '00000000-0000-0000-0000-000000000000');
-      } else {
-        qy = qy.in('email', scope.emails);
-      }
-    }
 
     // Actief vs. archief.
     qy = archief ? qy.not('verwijderd_op', 'is', null) : qy.is('verwijderd_op', null);
