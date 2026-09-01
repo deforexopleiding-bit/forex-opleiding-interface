@@ -94,7 +94,14 @@
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
     // wordt opgevangen in goMod() → S.mod=leadsonderhoud + S.tab=Gesprekken.
     { g: 'Groei',                  id: 'gesprekken',       naam: 'Gesprekken',        icon: I.chat,     color: 'teal',    roles: ['appointmentsetter'], permKey: 'leads.view', tabs: [], deeplink: { mod: 'leadsonderhoud', tab: 'Gesprekken' } },
+    // BP3 v4 (2026-09-01) — lisa-MOD blijft SAM-only in de sidebar; Romy
+    // krijgt de module NIET als los sidebar-item. Ze bereikt de Gesprekken-
+    // view uitsluitend via de instagram-deeplink-MOD hieronder (curMod
+    // whitelist deeplink-targets zodat de render toch werkt).
     { g: 'Groei',                  id: 'lisa',             naam: 'Instagram setter',  icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Dashboard', 'Gesprekken', 'Statistieken'] },
+    // BP3 v4 · Romy-only sidebar-shortcut "Instagram" → deep-link naar
+    // lisa/Gesprekken. Zelfde patroon als de leadsonderhoud/Gesprekken-shortcut.
+    { g: 'Groei',                  id: 'instagram',        naam: 'Instagram',         icon: I.chat,     color: 'violet',  roles: ['appointmentsetter'], permKey: 'lisa.conversation.view', tabs: [], deeplink: { mod: 'lisa', tab: 'Gesprekken' } },
 
     { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud'] },
     { g: 'Operatie',               id: 'agents',           naam: 'AI Agents',         icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Configuratie', 'Kennisbank', 'Prestaties'] },
@@ -128,6 +135,10 @@
     'leadsonderhoud/Wachtrij':         SAMS,
     'leadsonderhoud/Toegang-aanvragen': SAMS,
     'onboarding/Archief':      SAMS,
+    // BP3 v4 (2026-09-01): Romy krijgt in Lisa alleen Gesprekken; dashboard
+    // en statistieken blijven manager+ voorbehouden.
+    'lisa/Dashboard':          SAM,
+    'lisa/Statistieken':       SAM,
   };
   // Coming-soon-lock voor specifieke (module, rol)-combos. Toont slot-icoon
   // + comingSoonView i.p.v. de content. `email` verwijderd voor sales (v=1c3):
@@ -184,7 +195,15 @@
     catch (_) { return false; }
   };
   const visMods    = () => MODS.filter(m => m.roles.some(r => S.roles.includes(r)) || _permGrantsVis(m));
-  const curMod     = () => visMods().find(m => m.id === S.mod) || visMods()[0];
+  // BP3 v4 (2026-09-01) — deeplink-targets zijn bereikbaar zonder in visMods
+  // te staan: als een zichtbare MOD een `deeplink.mod` heeft die naar target
+  // T wijst, is T bereikbaar (maar wordt niet in de sidebar getoond). Zo kan
+  // Romy via de "Instagram"-shortcut de lisa-mod openen zonder dat lisa zelf
+  // als apart sidebar-item verschijnt.
+  const _reachableViaDeepLink = (id) => visMods().some(m => m.deeplink && m.deeplink.mod === id);
+  const curMod     = () => visMods().find(m => m.id === S.mod)
+                        || (MODS.find(m => m.id === S.mod && _reachableViaDeepLink(m.id)))
+                        || visMods()[0];
   const roleTabs   = m => m.tabs.filter(t => { const r = TAB_RESTRICT[m.id + '/' + t]; return !r || r.some(x => S.roles.includes(x)); });
   const modCanOpen = id => visMods().some(m => m.id === id);
   // Additief lock-semantiek: alleen lock als ELKE rol-toegang die de user

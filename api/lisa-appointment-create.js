@@ -71,7 +71,8 @@ export default async function handler(req, res) {
   try {
     const { data, error } = await supabaseAdmin
       .from('lisa_conversations')
-      .select('id, contact_name, instagram_handle, ghl_contact_id, is_sandbox, phase, call_booked')
+      // BP3 v4 (2026-09-01) — assigned_human meelezen voor setter-stamp (pad B).
+      .select('id, contact_name, instagram_handle, ghl_contact_id, is_sandbox, phase, call_booked, assigned_human')
       .eq('id', conversationId)
       .maybeSingle();
     if (error) throw error;
@@ -120,6 +121,13 @@ export default async function handler(req, res) {
   // 2) follow_up_appointments-rij (zodat Dave 'em in zijn Afspraken-tab
   //    ziet). Fail-soft: als die insert faalt heeft de klant wel al de
   //    Zoom-uitnodiging → we returnen success + warning ipv rollback.
+  // BP3 v4 (2026-09-01) — pad B: setter-stamp uit assigned_human. Als de
+  // conversatie is overgenomen door een human (Romy die 'ik antwoord' klikt
+  // → assigned_human = haar auth-user-id), dan wordt de appointment aan haar
+  // toegeschreven. Zonder takeover: NULL → boeking komt niet in setter-
+  // gescopte views (correcte fail-closed, want dan is er geen setter-owner).
+  const resolvedSetter = conv.assigned_human || null;
+
   const insertRow = {
     parent_appointment_id: null,
     lead_name           : conv.contact_name || conv.instagram_handle || null,
@@ -134,8 +142,11 @@ export default async function handler(req, res) {
     ghl_appointment_id  : ghl?.id              ?? null,
     zoom_meeting_id     : ghl?.zoom_meeting_id ?? null,
     zoom_join_url       : ghl?.zoom_join_url   ?? null,
+    setter_user_id      : resolvedSetter,
   };
-  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id'];
+  // BP3 v4: setter_user_id staat in de OPTIONAL_KEYS-strip zodat oudere
+  // schema's zonder de kolom niet crashen (spiegelt create-appointment-from-lead).
+  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'setter_user_id'];
   let attempt = { ...insertRow };
   let inserted = null;
   let insertWarning = null;

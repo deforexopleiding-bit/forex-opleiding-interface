@@ -9,11 +9,18 @@
 //   PATCH ?id=<uuid>                     → status bijwerken (phase/qualified/disqualified/pause/takeover)
 //   DELETE ?id=<uuid>                    → verwijder (alleen sandbox)
 //
-// Auth: verifyAdmin (hard). Reads = verifyAdmin. Schrijf-acties (intervene/PATCH) achter
-// requirePermissionFailOpen('lisa.config.publish'); DELETE achter 'lisa.sandbox.use'.
+// Auth (BP3 v4, 2026-09-01 — refactor voor Romy Instagram-inbox):
+//   Reads (GET)                → lisa.conversation.view
+//   POST ?action=intervene     → lisa.conversation.intervene
+//   PATCH (takeover)           → lisa.conversation.takeover
+//   PATCH (phase/qualified/... ) → lisa.conversation.status_update
+//   DELETE (sandbox-only)      → lisa.sandbox.use (ongewijzigd)
+// Vervangt de oude hard-verifyAdmin-gate zodat rollen met de fine-grained
+// grants (Romy krijgt view+intervene+takeover+status_update) ook binnenkomen.
+// Admin/manager hebben via seed dezelfde grants → geen regressie.
 
-import { supabaseAdmin, verifyAdmin } from './supabase.js';
-import { requirePermissionFailOpen } from './_lib/requirePermission.js';
+import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 import { sendToGhl } from './_lib/lisa-ghl-send.js';
 
 const VALID_PHASES = ['intro', 'doel', 'situatie', 'band', 'call', 'qualified', 'disqualified', 'done', 'cold'];
@@ -23,13 +30,17 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
 
-  const admin = await verifyAdmin(req);
-  if (!admin) return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+  const supabase = createUserClient(req);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
 
   const action = req.query.action || '';
 
   // ── GET ────────────────────────────────────────────────────────────────────
   if (req.method === 'GET') {
+    if (!(await requirePermission(req, 'lisa.conversation.view'))) {
+      return res.status(403).json({ error: 'Geen rechten (lisa.conversation.view)' });
+    }
     // Detail
     if (req.query.id) {
       const { data: conv, error } = await supabaseAdmin.from('lisa_conversations')
@@ -119,8 +130,8 @@ export default async function handler(req, res) {
 
   // ── POST intervene (mens neemt over) ──────────────────────────────────────────
   if (req.method === 'POST' && action === 'intervene') {
-    if (!(await requirePermissionFailOpen(req, 'lisa.config.publish'))) {
-      return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.publish' });
+    if (!(await requirePermission(req, 'lisa.conversation.intervene'))) {
+      return res.status(403).json({ error: 'Geen rechten (lisa.conversation.intervene)' });
     }
     const id = req.query.id;
     const content = (req.body?.content || '').trim();
@@ -141,16 +152,17 @@ export default async function handler(req, res) {
     if (msgErr) return res.status(500).json({ error: msgErr.message });
 
     await supabaseAdmin.from('lisa_conversations')
-      .update({ human_takeover: true, assigned_human: admin.user.id }).eq('id', conv.id);
+      .update({ human_takeover: true, assigned_human: user.id }).eq('id', conv.id);
 
     return res.status(200).json({ ok: true, message_id: outMsg.id, ghl_send_ok: sendResult.ok, ghl_error: sendResult.ok ? undefined : sendResult.error });
   }
 
   // ── PATCH status ──────────────────────────────────────────────────────────────
+  // Split gate: takeover-flip (assigned_human) valt onder lisa.conversation.takeover;
+  // alle andere velden (phase/qualified/call_booked/followup_paused/disqualified_reason)
+  // vallen onder lisa.conversation.status_update. Wie beide velden in één PATCH stuurt
+  // moet beide permissies hebben.
   if (req.method === 'PATCH') {
-    if (!(await requirePermissionFailOpen(req, 'lisa.config.publish'))) {
-      return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.config.publish' });
-    }
     const id = req.query.id;
     if (!id) return res.status(400).json({ error: 'id vereist.' });
     const body = req.body || {};
@@ -170,11 +182,24 @@ export default async function handler(req, res) {
     }
     if (body.disqualified_reason !== undefined) updates.disqualified_reason = body.disqualified_reason || null;
     if (body.followup_paused !== undefined) updates.followup_paused = !!body.followup_paused;
-    if (body.human_takeover !== undefined) {
+
+    const wantTakeover = body.human_takeover !== undefined;
+    if (wantTakeover) {
       updates.human_takeover = !!body.human_takeover;
       if (!body.human_takeover) updates.assigned_human = null;
     }
+
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken.' });
+
+    // Permission-check: takeover-flip vereist .takeover, statusvelden .status_update.
+    const wantStatus = ['phase','qualified','call_booked','disqualified_reason','followup_paused']
+      .some((k) => body[k] !== undefined);
+    if (wantTakeover && !(await requirePermission(req, 'lisa.conversation.takeover'))) {
+      return res.status(403).json({ error: 'Geen rechten (lisa.conversation.takeover)' });
+    }
+    if (wantStatus && !(await requirePermission(req, 'lisa.conversation.status_update'))) {
+      return res.status(403).json({ error: 'Geen rechten (lisa.conversation.status_update)' });
+    }
 
     const { data, error } = await supabaseAdmin.from('lisa_conversations').update(updates).eq('id', id).select().single();
     if (error) return res.status(500).json({ error: error.message });
@@ -183,8 +208,8 @@ export default async function handler(req, res) {
 
   // ── DELETE (alleen sandbox) ──────────────────────────────────────────────────
   if (req.method === 'DELETE') {
-    if (!(await requirePermissionFailOpen(req, 'lisa.sandbox.use'))) {
-      return res.status(403).json({ error: 'Insufficient permissions', feature: 'lisa.sandbox.use' });
+    if (!(await requirePermission(req, 'lisa.sandbox.use'))) {
+      return res.status(403).json({ error: 'Geen rechten (lisa.sandbox.use)' });
     }
     const id = req.query.id;
     if (!id) return res.status(400).json({ error: 'id vereist.' });

@@ -96,24 +96,96 @@ export default async function handler(req, res) {
       }
     }
 
-    const items = (filteredRows || []).map((r) => ({
-      id              : r.id,
-      created_at      : r.created_at,
-      booking_source  : r.booking_source,
-      bron_label      : labelBySlug.get(r.booking_source) || r.booking_source || '—',
-      naam            : r.naam,
-      email           : r.email,
-      telefoon        : r.telefoon,
-      gekozen_slot    : r.gekozen_slot,
-      gekozen_start_at: r.gekozen_start_at,
-      score           : r.score,
-      drempel         : r.drempel,
-      resultaat       : r.resultaat,
-      noshow_akkoord  : !!r.noshow_akkoord,
-      heeft_afspraak  : !!r.appointment_id,
-      appointment_id  : r.appointment_id,
-      lead_id         : r.lead_id,
-    }));
+    // BP3 v4 (2026-09-01) — Sale?-indicator per rij.
+    // Match-sleutel: exact lowercase email (submission.email ↔ customers.email).
+    // NIET op telefoon-last9 (gedeelde testnummers → over-match / valse vinkjes).
+    // Sale-definitie: bestaat er een deal voor de matched customer met
+    // tl_quotation_status IN ('accepted','signed'). Attributie-onafhankelijk
+    // (setter_user_id NIET vereist) — vraag "is deze lead client geworden?".
+    // Twee extra queries, geen N+1: bulk-customers + bulk-deals.
+    const saleByEmail = new Map(); // emailLower -> { customerName, saleBedrag }
+    try {
+      const emailSet = new Set();
+      for (const r of (filteredRows || [])) {
+        const e = String(r.email || '').trim().toLowerCase();
+        if (e) emailSet.add(e);
+      }
+      if (emailSet.size > 0) {
+        // Case-insensitive match: customers.email kan met verschillende casing
+        // opgeslagen zijn (as-is uit de bron). We bouwen een OR-clause van
+        // ilike-per-email zodat 'foo@bar.com' óók 'Foo@Bar.com' matcht.
+        // Emails met '(', ')' of ',' worden geskipt (invalide karakters voor
+        // PostgREST .or()-syntax; extreem zeldzaam in echte data).
+        const emailArr = Array.from(emailSet).filter((e) => !/[(),]/.test(e));
+        const orClause = emailArr.map((e) => 'email.ilike.' + e).join(',');
+        const { data: custs } = await supabaseAdmin
+          .from('customers')
+          .select('id, email, first_name, last_name, company_name, is_company')
+          .or(orClause);
+        const custByEmail = new Map();
+        const custIds = [];
+        for (const c of (custs || [])) {
+          const key = String(c.email || '').trim().toLowerCase();
+          if (!key) continue;
+          const naam = c.is_company
+            ? (c.company_name || '—')
+            : [c.first_name, c.last_name].filter(Boolean).join(' ') || '—';
+          custByEmail.set(key, { id: c.id, naam });
+          custIds.push(c.id);
+        }
+        if (custIds.length > 0) {
+          const { data: dls } = await supabaseAdmin
+            .from('deals')
+            .select('customer_id, tl_quotation_status, total_amount')
+            .in('customer_id', custIds)
+            .in('tl_quotation_status', ['accepted', 'signed']);
+          const bedragByCust = new Map();
+          for (const d of (dls || [])) {
+            if (!d.customer_id) continue;
+            bedragByCust.set(d.customer_id, (bedragByCust.get(d.customer_id) || 0) + (Number(d.total_amount) || 0));
+          }
+          for (const [emailLower, info] of custByEmail) {
+            if (bedragByCust.has(info.id)) {
+              saleByEmail.set(emailLower, {
+                customerName: info.naam,
+                saleBedrag:   Math.round(bedragByCust.get(info.id) * 100) / 100,
+              });
+            }
+          }
+        }
+      }
+    } catch (saleErr) {
+      // Fail-soft: als de sale-lookup crasht, tonen we geen indicator (is_sale
+      // blijft false op elke rij). De opstartsessie-lijst zelf blijft werken.
+      console.warn('[leadsonderhoud-opstartsessies-list] sale-lookup:', saleErr?.message || saleErr);
+    }
+
+    const items = (filteredRows || []).map((r) => {
+      const emailLower = String(r.email || '').trim().toLowerCase();
+      const saleInfo   = emailLower ? saleByEmail.get(emailLower) : null;
+      return {
+        id              : r.id,
+        created_at      : r.created_at,
+        booking_source  : r.booking_source,
+        bron_label      : labelBySlug.get(r.booking_source) || r.booking_source || '—',
+        naam            : r.naam,
+        email           : r.email,
+        telefoon        : r.telefoon,
+        gekozen_slot    : r.gekozen_slot,
+        gekozen_start_at: r.gekozen_start_at,
+        score           : r.score,
+        drempel         : r.drempel,
+        resultaat       : r.resultaat,
+        noshow_akkoord  : !!r.noshow_akkoord,
+        heeft_afspraak  : !!r.appointment_id,
+        appointment_id  : r.appointment_id,
+        lead_id         : r.lead_id,
+        // Sale-indicator + tooltip-content (customer + bedrag).
+        is_sale            : !!saleInfo,
+        sale_customer_name : saleInfo ? saleInfo.customerName : null,
+        sale_amount        : saleInfo ? saleInfo.saleBedrag   : null,
+      };
+    });
 
     return res.status(200).json({
       items,

@@ -10,11 +10,14 @@
 // Response:
 //   { count: N, status }
 //
-// Permission: verifyAdmin (Lisa is admin-tool). Dashboard-viewers zonder
-// admin-rol krijgen 403 → tegel valt terug op MOCK-badge, geen crash.
+// Permission (BP3 v4, 2026-09-01): lisa.conversation.view — spiegelt de
+// GET-gate van api/lisa-conversations.js. Voorheen verifyAdmin (hard); nu
+// via requirePermission zodat appointmentsetter (Romy) de badge-count
+// binnen krijgt.
 // Read-only. Geen writes.
 
-import { supabaseAdmin, verifyAdmin } from './supabase.js';
+import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const ACTIVE_PHASES       = ['intro', 'doel', 'situatie', 'band', 'call'];
 const DISQUALIFIED_PHASES = ['disqualified'];
@@ -26,8 +29,12 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
-  const admin = await verifyAdmin(req);
-  if (!admin) return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+  const supabase = createUserClient(req);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+  if (!(await requirePermission(req, 'lisa.conversation.view'))) {
+    return res.status(403).json({ error: 'Geen rechten (lisa.conversation.view)' });
+  }
 
   try {
     const raw = String(req.query.status || 'active').toLowerCase();

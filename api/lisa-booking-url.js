@@ -8,7 +8,10 @@
 // Response:
 //   200 { url: string|null, configured: boolean, source: 'env'|'none' }
 //
-// Auth: verifyAdmin (hard). Geen RBAC-perm — read-only en admin-only.
+// Auth (BP3 v4, 2026-09-01): lisa.conversation.view — dezelfde gate als
+// GET op api/lisa-conversations.js. De boekingslink is een read-only lookup
+// die de compose-flow gebruikt; iedereen met view-toegang tot de gesprekken
+// moet 'em kunnen ophalen.
 //
 // Setup: zet env-var LISA_BOOKING_URL in Vercel (alle environments,
 // NIET Sensitive — puur publieke agenda-URL). Voorbeeld:
@@ -16,7 +19,8 @@
 // (of welk sub-pad dan ook — endpoint valideert alleen dat het een
 // http(s)-URL is).
 
-import { verifyAdmin } from './supabase.js';
+import { createUserClient } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -26,8 +30,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'GET only' });
   }
 
-  const admin = await verifyAdmin(req);
-  if (!admin) return res.status(403).json({ error: 'Toegang geweigerd. Admin-rol vereist.' });
+  const supabase = createUserClient(req);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
+  if (!(await requirePermission(req, 'lisa.conversation.view'))) {
+    return res.status(403).json({ error: 'Geen rechten (lisa.conversation.view)' });
+  }
 
   const raw = String(process.env.LISA_BOOKING_URL || '').trim();
   const isValid = /^https?:\/\/.+/i.test(raw);
