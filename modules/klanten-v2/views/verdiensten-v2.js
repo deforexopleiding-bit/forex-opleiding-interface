@@ -130,6 +130,7 @@
     overview:    { loading: false, error: null, data: null },
     payouts:     { loading: false, error: null, data: null },
     travel:      { loading: false, error: null, data: null, key: null },
+    travelMonths:{ loading: false, error: null, data: null }, // dropdown: recente maanden + editability
     certs:       { loading: false, error: null, data: null },
     coaching:    { loading: false, error: null, data: null, from: null, to: null, key: null },
     myEvents:    { loading: false, error: null, data: null, scope: 'all' },
@@ -243,6 +244,14 @@
     _live.travel.loading = false;
     if (!j || j.__error) { _live.travel.error = j?.__error || 'Kon reisdagen niet laden'; render(); return; }
     _live.travel.data = j; render();
+  }
+  async function fetchTravelMonths() {
+    if (_live.travelMonths.loading || _live.travelMonths.data) return;
+    _live.travelMonths.loading = true; _live.travelMonths.error = null;
+    const j = await tryFetch('travelMonths', '/api/mentor-travel-days-months');
+    _live.travelMonths.loading = false;
+    if (!j || j.__error) { _live.travelMonths.error = j?.__error || 'Kon maanden niet laden'; render(); return; }
+    _live.travelMonths.data = j; render();
   }
   async function fetchCerts() {
     if (_live.certs.loading) return;
@@ -362,7 +371,7 @@
   /* ── Handlers ────────────────────────────────────────────────────────── */
   window.__verdRetryOverview = () => { _live.overview.data = null; queueMicrotask(fetchOverview); };
   window.__verdRetryPayouts  = () => { _live.payouts.data  = null; queueMicrotask(fetchPayouts);  };
-  window.__verdRetryTravel   = () => { _live.travel.data   = null; queueMicrotask(() => fetchTravel(currentMonthKey())); };
+  window.__verdRetryTravel   = () => { _live.travel.data   = null; queueMicrotask(() => fetchTravel(_live.travel.key || currentMonthKey())); };
   window.__verdRetryCerts    = () => { _live.certs.data    = null; queueMicrotask(fetchCerts);    };
   window.__verdRetryCoaching = () => {
     _live.coaching.data = null; _live.coaching.key = null;
@@ -430,10 +439,19 @@
         toast('Reisdagen niet opgeslagen', 'error'); return;
       }
       _ui.travelForm = null;
-      _live.travel.data = null; _live.travel.key = null;
+      _live.travel.data = null; // key blijft = de gekozen maand
+      _live.travelMonths.data = null; // dropdown ververst (days/status kan gewijzigd zijn)
       toast('Reisdagen opgeslagen', 'success');
       queueMicrotask(() => fetchTravel(key));
     }, 'warn');
+  };
+  // Maandwissel in de dropdown: laad de gekozen maand (reiskostenView auto-fetcht
+  // op basis van _live.travel.key). Een openstaand invoerformulier sluit mee.
+  window.__verdTravelSelectMonth = (mk) => {
+    if (!mk || mk === _live.travel.key) return;
+    _ui.travelForm = null;
+    _live.travel.data = null; _live.travel.error = null; _live.travel.key = mk;
+    render();
   };
 
   /* Cert-upload (supabase/AuthShared check pas runtime in __verdCertSubmit) */
@@ -1173,8 +1191,9 @@
      VIEW 5 — Reiskosten
      ═══════════════════════════════════════════════════════════════════════ */
   function reiskostenView() {
-    const mk = currentMonthKey();
+    const mk = _live.travel.key || currentMonthKey();
     if (!_live.travel.loading && !_live.travel.data && !_live.travel.error) queueMicrotask(() => fetchTravel(mk));
+    if (!_live.travelMonths.loading && !_live.travelMonths.data && !_live.travelMonths.error) queueMicrotask(fetchTravelMonths);
     if (_live.travel.error && !_live.travel.data) return errBlk(_live.travel.error, 'window.__verdRetryTravel()') + renderConfirmModal();
     if (!_live.travel.data) return skel() + renderConfirmModal();
 
@@ -1193,22 +1212,40 @@
     const editable = !!t.editable;
     const status = t.status || null;
     const submitted = !!t.submitted;
-    const needsReminder = editable && !submitted && todayIsOnOrAfterFirstFriday();
+    // Reminder alleen voor de HUIDIGE maand (bij een gekozen oudere maand niet).
+    const isCurrentMonth = monthKey(t.period_month) === currentMonthKey();
+    const needsReminder = isCurrentMonth && editable && !submitted && todayIsOnOrAfterFirstFriday();
 
-    return `${H.kpis([
-      { c: 'blue',    icon: I.euro,  label: 'Vergoeding per rijdag',  val: eur(dayRate), sub: 'jouw vaste bedrag' },
-      { c: 'amber',   icon: I.route, label: 'Doorgegeven deze maand', val: String(days), sub: fmtMonth(t.period_month) },
-      { c: 'emerald', icon: I.chart, label: 'Vergoeding deze maand',  val: eur(amount),  sub: days + ' × ' + eur(dayRate) },
+    // Maand-dropdown: huidige + 6 maanden terug; goedgekeurde maanden gemarkeerd.
+    const monthsList = (_live.travelMonths.data && Array.isArray(_live.travelMonths.data.months)) ? _live.travelMonths.data.months : null;
+    const monthSelect = monthsList && monthsList.length ? `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <label style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Maand</label>
+        <select onchange="window.__verdTravelSelectMonth(this.value)" ${_live.travel.loading ? 'disabled' : ''}
+          style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;min-width:210px">
+          ${monthsList.map((mo) => {
+            const v = String(mo.period_month).slice(0, 7);
+            const sel = v === (_live.travel.key || mk) ? ' selected' : '';
+            return `<option value="${v}"${sel}>${esc(fmtMonth(mo.period_month))}${mo.editable ? '' : ' — goedgekeurd'}</option>`;
+          }).join('')}
+        </select>
+        ${_live.travel.loading ? '<span style="font-size:12px;color:var(--text-3)">laden…</span>' : ''}
+      </div>` : '';
+
+    return `${monthSelect ? `<div class="pad" style="padding-bottom:0">${monthSelect}</div>` : ''}${H.kpis([
+      { c: 'blue',    icon: I.euro,  label: 'Vergoeding per rijdag', val: eur(dayRate), sub: 'jouw vaste bedrag' },
+      { c: 'amber',   icon: I.route, label: 'Doorgegeven',           val: String(days), sub: fmtMonth(t.period_month) },
+      { c: 'emerald', icon: I.chart, label: 'Vergoeding',            val: eur(amount),  sub: days + ' × ' + eur(dayRate) },
     ])}
     <div class="pad" style="padding-top:16px">
       ${needsReminder ? `<div style="padding:14px 16px;background:var(--amber-soft);border:1px solid var(--amber);color:var(--amber);border-radius:var(--r);font-size:13px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <span>⏰ Rijdagen voor ${fmtMonth(t.period_month)} nog niet doorgegeven. Doe dit vóór de uitbetaling zodat het meegenomen wordt.</span>
         <button class="btn btn-primary btn-sm" onclick="window.__verdTravelOpenForm()">Doorgeven →</button>
       </div>` : ''}
-      ${dashCard('Huidige maand · ' + fmtMonth(t.period_month), 'blue', `
+      ${dashCard(fmtMonth(t.period_month), 'blue', `
         <div style="display:flex;align-items:flex-start;gap:11px;padding-bottom:12px;font-size:12.5px;color:var(--text-2)">
           ${svg(I.clock, 'width:16px;height:16px;flex-shrink:0;margin-top:1px;color:var(--amber)')}
-          <span>Rapport-status: ${status ? payoutPill(status) : '<i>nog geen concept aangemaakt</i>'}. ${editable ? 'Nog aanpasbaar tot goedkeuring door finance.' : '<b>Vergrendeld</b> — rapport is al goedgekeurd/uitbetaald.'}</span>
+          <span>Rapport-status: ${status ? payoutPill(status) : '<i>nog geen concept aangemaakt</i>'}. ${editable ? 'Nog aanpasbaar tot goedkeuring door finance.' : '<b>Goedgekeurd — niet meer aanpasbaar.</b>'}</span>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div style="padding:12px 14px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface-2)">
@@ -1222,7 +1259,7 @@
         </div>
         <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
           ${editable ? `<button class="btn btn-primary" onclick="window.__verdTravelOpenForm()">${svg(I.tick)}${submitted ? 'Rijdagen wijzigen' : 'Rijdagen doorgeven'}</button>`
-                     : `<button class="btn btn-ghost" disabled>Vergrendeld</button>`}
+                     : `<span style="font-size:12.5px;color:var(--text-3);align-self:center">🔒 Goedgekeurd — niet meer aanpasbaar</span>`}
         </div>
       `)}
     </div>
