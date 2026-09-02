@@ -49,7 +49,10 @@ export default async function handler(req, res) {
       if (!conv) return res.status(404).json({ error: 'Conversatie niet gevonden.' });
 
       const { data: messages } = await supabaseAdmin.from('lisa_messages')
-        .select('id, direction, content, sent_at, ai_generated, human_override, is_system, detected_phase, tokens_used, model_used, ghl_message_id, is_followup')
+        // BP3 v5 (2026-09-02) — message_type + attachment_url meesturen zodat
+        // de Gesprekken-view media (foto/video/audio/file) kan renderen. Zonder
+        // deze twee kolommen zag de frontend alleen de placeholder-tekst.
+        .select('id, direction, content, sent_at, ai_generated, human_override, is_system, detected_phase, tokens_used, model_used, ghl_message_id, is_followup, message_type, attachment_url')
         // (conversation row hieronder via select('*') bevat de booking-velden uit migratie 010)
         .eq('conversation_id', conv.id).order('sent_at', { ascending: true });
       const { data: feedback } = await supabaseAdmin.from('lisa_feedback')
