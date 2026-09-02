@@ -4285,6 +4285,29 @@
     const s = String(v || '').trim();
     _metaEd.folderId = s ? s : null;
   };
+  // BP3 v9 (2026-09-02) — top-level "Nieuwe categorie" (folder) knop in de
+  // bodyWhatsApp-lijst-view. Zelfde POST als de mini-➕ binnen de edit-modal,
+  // maar zonder editor-context (raakt _metaEd niet). Refresh de folders zodat
+  // de nieuwe categorie in de grouping + in de dropdown verschijnt.
+  window.__setMetaNewFolder = () => {
+    if (!_wa.moduleId) { showToast('Kies eerst een WABA-module', 'warn'); return; }
+    const name = window.prompt('Naam voor de nieuwe categorie (max 64 chars):');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim().slice(0, 64);
+    tryFetch('meta-folder-create-toplevel', '/api/admin-template-folders-create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ business_account_id: _wa.moduleId, name: trimmed }),
+    }).then((j) => {
+      if (j?.__error || j?.error) { showToast('Categorie aanmaken mislukt: ' + (j?.__error || j?.error), 'warn'); return; }
+      const folder = j?.folder || null;
+      if (folder?.id) {
+        _wa.folders = [...(_wa.folders || []), folder];
+        showToast('Categorie "' + folder.name + '" aangemaakt', 'ok');
+      }
+      if (render) render();
+    });
+  };
+
   // "Nieuwe map…" — custom prompt-modal, POST create, refresh folders + select.
   window.__setMetaEdNewFolder = () => {
     if (!_wa.moduleId) { showToast('Kies eerst een WABA-module', 'warn'); return; }
@@ -4637,6 +4660,7 @@
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             ${moduleSel}
             <button class="btn btn-primary btn-sm" onclick="window.__setMetaEdOpen()">➕ Nieuwe template</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.__setMetaNewFolder()" title="Nieuwe categorie/map voor deze WABA">＋ Nieuwe categorie</button>
             <button class="btn btn-primary btn-sm" ${busySync ? 'disabled' : ''} onclick="window.__setWaSync()">${busySync ? 'Sync…' : '↻ Sync vanaf Meta'}</button>
           </div>
         </div>

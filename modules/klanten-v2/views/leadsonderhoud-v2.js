@@ -2896,6 +2896,25 @@
     if (window.DFO?.render) window.DFO.render();
   };
   window.__lsTplNew = () => { _lsTplTab.editing = { id: null, titel: '', body_text: '', category: '', owner_user_id: 'shared' }; if (window.DFO?.render) window.DFO.render(); };
+  // BP3 v10 (2026-09-02) — expliciete "Nieuwe categorie" voor open templates.
+  // Open-template-categorieën zijn vrije tekst op wa_snippets (geen aparte
+  // tabel), dus "bestaan" pas echt zodra er een template aan hangt. De knop
+  // pusht de naam in _lsTplTab.categories zodat 'ie als filter-chip + datalist-
+  // suggestie verschijnt; opent daarna de create-modal met dat veld voor-gevuld
+  // zodat de eerstvolgende opslag de categorie meteen bind aan een template.
+  window.__lsTplNewCategory = () => {
+    const name = window.prompt('Naam voor de nieuwe categorie (max 80 chars):');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim().slice(0, 80);
+    _lsTplTab.categories = Array.from(new Set([...(_lsTplTab.categories || []), trimmed]))
+      .sort((a, b) => a.localeCompare(b, 'nl'));
+    _lsTplTab.filterCat = trimmed;
+    // Open direct de create-modal met de categorie voor-gevuld — zo hangt er
+    // meteen een template aan zodra user 'em opslaat (persistentie-model).
+    _lsTplTab.editing = { id: null, titel: '', body_text: '', category: trimmed, owner_user_id: 'shared' };
+    if (window.DFO?.render) window.DFO.render();
+    _lsInbToast('Categorie "' + trimmed + '" toegevoegd — vul titel + body en sla op.', 'ok');
+  };
   window.__lsTplEdit = (id) => {
     const it = (_lsTplTab.items || []).find((x) => String(x.id) === String(id));
     if (!it) return;
@@ -3008,7 +3027,7 @@
               style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:13px" />
           </label>
           <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
-            <span style="font-weight:600">Categorie <span style="color:var(--text-3);font-weight:400">(optioneel)</span></span>
+            <span style="font-weight:600">Categorie <span style="color:var(--text-3);font-weight:400">— kies een bestaande categorie of typ een nieuwe (optioneel)</span></span>
             <input type="text" list="lsTplCatOpts" value="${esc(e.category)}" oninput="window.__lsTplEditInput('category', this.value)" maxlength="80"
               placeholder="Bv. Sales, Follow-up, Aftertrial"
               style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:13px" />
@@ -3080,7 +3099,10 @@
     // voor iedereen met snippets.manage. Lege staat krijgt eigen CTA-blok
     // met dezelfde knop zodat het duidelijk is hoe je begint.
     const nieuweBtn = canManage
-      ? `<button class="btn btn-primary btn-sm" style="color:#fff;padding:7px 14px;font-size:13px" onclick="window.__lsTplNew()">＋ Nieuwe template</button>`
+      ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" style="color:#fff;padding:7px 14px;font-size:13px" onclick="window.__lsTplNew()">＋ Nieuwe template</button>
+          <button class="btn btn-ghost btn-sm" style="padding:7px 12px;font-size:12.5px" onclick="window.__lsTplNewCategory()" title="Voeg een categorie toe en start een nieuwe template die daaraan hangt">＋ Nieuwe categorie</button>
+        </div>`
       : '';
     const isEmpty = grouped.size === 0;
     const emptyState = isEmpty
