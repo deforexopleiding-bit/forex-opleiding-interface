@@ -123,26 +123,130 @@ export function mediaPlaceholder(messageType) {
 }
 
 /**
- * Convenience: bepaal (message_type, content) voor een insert in lisa_messages.
+ * Parse `attachments` uit een GHL-payload naar een array van http(s)-URLs.
+ * GHL levert dit veld in verschillende vormen — deze functie accepteert
+ * ALLES en geeft ALTIJD een array van geldige URLs terug (leeg als niks).
+ *
+ * Vormen die we ondersteunen:
+ *   - Array van strings: ['https://…', 'https://…']
+ *   - Array van objecten: [{ url, mediaUrl, href, link, src }, …]
+ *   - JSON-string van bovenstaande arrays: '["https://…"]'
+ *   - Komma-gescheiden string: 'https://a, https://b'
+ *   - Losse URL-string: 'https://…'
+ *   - null/undefined/anders → []
+ *
+ * Filtert non-http(s) en whitespace-only entries eruit.
+ */
+export function parseAttachments(raw) {
+  if (raw == null) return [];
+  const _urlish = /^https?:\/\/\S+$/i;
+  const _extract = (item) => {
+    if (item == null) return null;
+    if (typeof item === 'string') return item.trim();
+    if (typeof item === 'object') {
+      return String(item.url || item.mediaUrl || item.href || item.link || item.src || '').trim();
+    }
+    return null;
+  };
+
+  let items = [];
+  if (Array.isArray(raw)) {
+    items = raw;
+  } else if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) return [];
+    // Probeer JSON-parse (array of object). Fail-soft.
+    if (s.startsWith('[') || s.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(s);
+        items = Array.isArray(parsed) ? parsed : [parsed];
+      } catch (_) {
+        items = [s]; // fallback: als 't geen valid JSON is, behandel als string
+      }
+    } else if (s.includes(',')) {
+      items = s.split(',');
+    } else {
+      items = [s];
+    }
+  } else if (typeof raw === 'object') {
+    items = [raw];
+  }
+
+  const out = [];
+  for (const it of items) {
+    const url = _extract(it);
+    if (url && _urlish.test(url)) out.push(url);
+  }
+  return out;
+}
+
+/**
+ * Bepaal message_type uit een URL — kijkt naar de bestandsextensie.
+ * Fallback: 'file' (onbekend type maar wel een attachment).
+ * jpg/jpeg/png/webp/gif/heic → photo
+ * mp4/mov/webm/m4v          → video
+ * mp3/m4a/ogg/wav/aac       → audio
+ * anders                    → file
+ */
+export function typeFromUrl(url) {
+  if (!url || typeof url !== 'string') return 'file';
+  // Strip querystring en fragment → puur path voor extensie-detectie.
+  const path = url.split('?')[0].split('#')[0].toLowerCase();
+  const m = path.match(/\.([a-z0-9]{2,5})$/);
+  const ext = m ? m[1] : '';
+  if (['jpg','jpeg','png','webp','gif','heic','heif'].includes(ext)) return 'photo';
+  if (['mp4','mov','webm','m4v','avi','mkv'].includes(ext))          return 'video';
+  if (['mp3','m4a','ogg','wav','aac','opus'].includes(ext))          return 'audio';
+  return 'file';
+}
+
+/**
+ * Convenience: bepaal (message_type, content, attachment_url) voor een insert
+ * in lisa_messages.
  * - content is NOOIT leeg (kolom is NOT NULL).
  * - message_type is ALTIJD een whitelist-waarde (fallback 'unknown').
+ * - attachment_url is de EERSTE URL uit attachments (null als geen).
+ *
+ * Detectie-volgorde:
+ *   1. parseAttachments(payload.attachments) — als er URLs zijn:
+ *      → message_type = typeFromUrl(eerste URL)
+ *      → attachment_url = eerste URL
+ *      → content = body-tekst als aanwezig, anders placeholder
+ *   2. Anders: normalizeMessageType(payload) valt terug op body/type-detectie
+ *      (bestaande logica, whitelist-gegarandeerd).
  *
  * @param {object} payload - GHL bericht-object (webhook customData of poll msg).
- *                           Verwacht optioneel .body/.text/.message + .type/
- *                           .messageType + .attachments.
- * @returns {{ message_type: string, content: string }}
+ * @returns {{ message_type: string, content: string, attachment_url: string|null }}
  */
 export function resolveContent(payload) {
-  const message_type = normalizeMessageType(payload || {});
-  const rawBody = payload?.body ?? payload?.text ?? payload?.message ?? '';
+  const p = payload || {};
+  const rawBody = p.body ?? p.text ?? p.message ?? '';
   const bodyStr = String(rawBody || '').trim();
-  if (message_type === 'text' && bodyStr.length > 0) {
-    return { message_type: 'text', content: bodyStr };
+
+  // Stap 1: attachments winnen — dat is het meest specifieke signaal.
+  const urls = parseAttachments(p.attachments);
+  if (urls.length > 0) {
+    const first = urls[0];
+    const mt = typeFromUrl(first);
+    const placeholder = mediaPlaceholder(mt) || '📎 Media-bericht';
+    return {
+      message_type:   mt,
+      content:        bodyStr.length > 0 ? bodyStr : placeholder,
+      attachment_url: first,
+    };
   }
-  // Media-bericht (of tekstbericht zonder body — dan behandelen we 'em als
-  // unknown-media). Placeholder gebruiken zodat NOT NULL-content voldaan is.
+
+  // Stap 2: geen attachments → val terug op type/body-detectie.
+  const message_type = normalizeMessageType(p);
+  if (message_type === 'text' && bodyStr.length > 0) {
+    return { message_type: 'text', content: bodyStr, attachment_url: null };
+  }
   const placeholder = mediaPlaceholder(message_type) || '📎 Media-bericht';
-  return { message_type, content: placeholder };
+  return {
+    message_type,
+    content:        bodyStr.length > 0 ? bodyStr : placeholder,
+    attachment_url: null,
+  };
 }
 
 /**

@@ -93,7 +93,10 @@
     // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
     // wordt opgevangen in goMod() → S.mod=leadsonderhoud + S.tab=Gesprekken.
-    { g: 'Groei',                  id: 'gesprekken',       naam: 'Gesprekken',        icon: I.chat,     color: 'teal',    roles: ['appointmentsetter'], permKey: 'leads.view', tabs: [], deeplink: { mod: 'leadsonderhoud', tab: 'Gesprekken' } },
+    // BP3 v4 (2026-09-02) — STRICT appointmentsetter-only. Geen permKey en
+    // geen roles-uitbreiding: SAMS/super_admin zien deze shortcut NIET. Zij
+    // hebben Leadsonderhoud met Gesprekken-tab al één klik verderop.
+    { g: 'Groei',                  id: 'gesprekken',       naam: 'Gesprekken',        icon: I.chat,     color: 'teal',    roles: ['appointmentsetter'], tabs: [], deeplink: { mod: 'leadsonderhoud', tab: 'Gesprekken' } },
     // BP3 v4 (2026-09-01) — lisa-MOD blijft SAM-only in de sidebar; Romy
     // krijgt de module NIET als los sidebar-item. Ze bereikt de Gesprekken-
     // view uitsluitend via de instagram-deeplink-MOD hieronder (curMod
@@ -101,7 +104,9 @@
     { g: 'Groei',                  id: 'lisa',             naam: 'Instagram setter',  icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Dashboard', 'Gesprekken', 'Statistieken'] },
     // BP3 v4 · Romy-only sidebar-shortcut "Instagram" → deep-link naar
     // lisa/Gesprekken. Zelfde patroon als de leadsonderhoud/Gesprekken-shortcut.
-    { g: 'Groei',                  id: 'instagram',        naam: 'Instagram',         icon: I.chat,     color: 'violet',  roles: ['appointmentsetter'], permKey: 'lisa.conversation.view', tabs: [], deeplink: { mod: 'lisa', tab: 'Gesprekken' } },
+    // BP3 v4 (2026-09-02) — STRICT appointmentsetter-only. Geen permKey.
+    // super_admin/admin/manager houden de volledige 'Instagram setter'-MOD.
+    { g: 'Groei',                  id: 'instagram',        naam: 'Instagram',         icon: I.chat,     color: 'violet',  roles: ['appointmentsetter'], tabs: [], deeplink: { mod: 'lisa', tab: 'Gesprekken' } },
 
     { g: 'Operatie',               id: 'automatiseringen', naam: 'Automatiseringen',  icon: I.repeat,   color: 'blue',    roles: SAM,                  tabs: ['Overzicht', 'Events', 'Onboarding', 'Leadsonderhoud'] },
     { g: 'Operatie',               id: 'agents',           naam: 'AI Agents',         icon: I.bot,      color: 'violet',  roles: SAM,                  tabs: ['Overzicht', 'Configuratie', 'Kennisbank', 'Prestaties'] },

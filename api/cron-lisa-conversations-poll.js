@@ -291,8 +291,10 @@ export default async function handler(req, res) {
 
             // BP3 (2026-09-01) fix #1 — media-berichten (geen tekst-body)
             // niet meer skippen. resolveContent geeft altijd een geldige
-            // combinatie { message_type <whitelist>, content <niet-leeg> }.
-            const { message_type: msgType, content: msgContent } = resolveContent(msg);
+            // combinatie { message_type <whitelist>, content <niet-leeg>,
+            // attachment_url <string|null> }. Attachments-array uit GHL-API
+            // wordt door parseAttachments in de helper geparsed.
+            const { message_type: msgType, content: msgContent, attachment_url: msgAttachmentUrl } = resolveContent(msg);
 
             const sentAt = msg.dateAdded || msg.dateCreated || msg.createdAt || new Date().toISOString();
 
@@ -321,6 +323,7 @@ export default async function handler(req, res) {
               direction,
               content:         msgContent,
               message_type:    msgType,
+              attachment_url:  msgAttachmentUrl,
               sent_at:         sentAt,
               ai_generated:    false,
               ghl_message_id:  ghlMsgId,

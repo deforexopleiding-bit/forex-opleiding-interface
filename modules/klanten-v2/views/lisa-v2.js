@@ -731,11 +731,53 @@
     container.insertAdjacentHTML('beforeend', additions.map(_renderMsg).join(''));
     if (nearBottom) container.scrollTop = container.scrollHeight;
   }
+  // BP3 v4 (2026-09-02) — reaction-parser: '[reaction] {"emoji":"👍"}' →
+  // "Reageerde met 👍". Fallback: raw content bij parse-error.
+  function _tryParseReaction(content) {
+    if (!content || typeof content !== 'string') return null;
+    if (!/^\s*\[reaction\]\s*\{/.test(content)) return null;
+    try {
+      const jsonPart = content.replace(/^\s*\[reaction\]\s*/, '');
+      const parsed = JSON.parse(jsonPart);
+      const emoji = parsed?.emoji;
+      if (emoji && typeof emoji === 'string') return String(emoji);
+    } catch (_) { /* fail-soft → raw */ }
+    return null;
+  }
+  // BP3 v4 (2026-09-02) — media-body renderer voor Lisa/IG. Photo → thumbnail
+  // (klikbaar, opent volle URL nieuw tab). Video/audio/file → link met icoon.
+  function _mediaBodyHtml(m, isOut) {
+    if (!m.attachment_url) return null;
+    const url = String(m.attachment_url);
+    const safeUrl = esc(url);
+    const linkColor = isOut ? 'var(--brand,#0A7490)' : 'var(--brand,#0A7490)';
+    if (m.message_type === 'photo') {
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="display:block;max-width:220px">
+        <img src="${safeUrl}" alt="Foto" loading="lazy"
+          style="max-width:100%;max-height:220px;border-radius:8px;display:block;border:1px solid var(--border);background:var(--surface)"
+          onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📷 Foto (kon niet laden)',style:'color:var(--text-3);font-size:12px'}))">
+      </a>`;
+    }
+    if (m.message_type === 'video') {
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:${linkColor};text-decoration:none;font-weight:600">🎥 Video bekijken</a>`;
+    }
+    if (m.message_type === 'audio') {
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:${linkColor};text-decoration:none;font-weight:600">🎤 Spraakbericht afspelen</a>`;
+    }
+    // file (of unknown-met-URL)
+    return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:${linkColor};text-decoration:none;font-weight:600">📎 Bijlage openen</a>`;
+  }
   function _renderMsg(m) {
     const isOut = m.direction === 'out';
     const isSys = !!m.is_system;
     if (isSys) {
       return `<div data-msg-id="${esc(String(m.id))}" style="text-align:center;margin:8px 0;font-size:11px;color:var(--text-3);font-style:italic">${esc(m.content || '')} <span style="opacity:.55">· ${esc(_fmtTijd(m.sent_at))}</span></div>`;
+    }
+    // Reactions renderen we compact — geen bubbel met rauwe JSON.
+    const reactionEmoji = _tryParseReaction(m.content);
+    if (reactionEmoji) {
+      const wie = isOut ? 'Verstuurd' : 'Reageerde';
+      return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${isOut ? 'right' : 'left'};margin:4px 0;font-size:11.5px;color:var(--text-3);font-style:italic">${wie} met <span style="font-style:normal;font-size:14px">${esc(reactionEmoji)}</span> <span style="opacity:.65">· ${esc(_fmtTijd(m.sent_at))}</span></div>`;
     }
     const align = isOut ? 'right' : 'left';
     const bg = isOut ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface-2)';
@@ -745,9 +787,21 @@
     if (m.ai_generated) badges.push('<span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--violet-soft,#EDE4FA);color:var(--violet,#6D3FD4);font-weight:600;letter-spacing:.04em">AI</span>');
     if (m.human_override) badges.push('<span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600;letter-spacing:.04em">mens</span>');
     if (m.is_followup) badges.push('<span style="display:inline-block;font-size:9.5px;line-height:1;padding:1px 5px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600;letter-spacing:.04em">follow-up</span>');
-    const body = esc(m.content || '');
+    // Body: media wint als attachment_url gezet is (foto/video/audio/file);
+    // anders tekst-content. Bij media met tekst (bv. caption): toon media + tekst.
+    const mediaHtml = _mediaBodyHtml(m, isOut);
+    const textHtml = m.content ? `<div style="white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">${esc(m.content)}</div>` : '';
+    let bodyHtml;
+    if (mediaHtml) {
+      // Bij media: tekst-content is meestal een placeholder ("📷 Foto") — skip als
+      // 'ie een van de emoji-placeholders is; anders (echte caption) toon 'em er onder.
+      const isPlaceholder = /^(📷|🎥|🎤|🎬|📖|📎)\s/.test(m.content || '') || m.content === 'Sticker';
+      bodyHtml = isPlaceholder ? mediaHtml : `${mediaHtml}${textHtml ? '<div style="margin-top:5px">' + textHtml + '</div>' : ''}`;
+    } else {
+      bodyHtml = textHtml || '<span style="opacity:.55">(leeg)</span>';
+    }
     const at = m.sent_at ? esc(_fmtTijd(m.sent_at)) : '';
-    return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${align};margin-bottom:6px"><span style="display:inline-block;text-align:left;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;vertical-align:top">${badges.length ? `<div style="margin-bottom:3px">${badges.join(' ')}</div>` : ''}<div style="white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere">${body || '<span style="opacity:.55">(leeg)</span>'}</div><div style="font-size:10px;opacity:.5;font-family:\\'IBM Plex Mono\\',monospace;margin-top:3px;text-align:right">${at}${m.detected_phase ? ' · ' + esc(m.detected_phase) : ''}</div></span></div>`;
+    return `<div data-msg-id="${esc(String(m.id))}" style="text-align:${align};margin-bottom:6px"><span style="display:inline-block;text-align:left;max-width:70%;padding:7px 11px;background:${bg};color:${color};border-radius:${radius};font-size:13.5px;line-height:1.4;vertical-align:top">${badges.length ? `<div style="margin-bottom:3px">${badges.join(' ')}</div>` : ''}${bodyHtml}<div style="font-size:10px;opacity:.5;font-family:\\'IBM Plex Mono\\',monospace;margin-top:3px;text-align:right">${at}${m.detected_phase ? ' · ' + esc(m.detected_phase) : ''}</div></span></div>`;
   }
   function _fmtTijd(iso) {
     if (!iso) return '—';

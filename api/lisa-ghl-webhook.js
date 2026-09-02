@@ -69,7 +69,12 @@ export default async function handler(req, res) {
       contactId: customData.contactId || body.contact_id || body.contactId,
       conversationId: customData.conversationId || body.conversation_id || body.conversationId,
       locationId: customData.locationId || body.location?.id || body.locationId,
+      // BP3 (2026-09-02) — GHL Custom Data 'Message Id' + 'Message Attachments'
+      // worden nu via customData meegestuurd. Val terug op body.message.id /
+      // body.messageId voor backward-compat.
       messageId: customData.messageId || body.message?.id || body.messageId,
+      attachments: customData.attachments != null ? customData.attachments
+        : (body.message?.attachments != null ? body.message.attachments : body.attachments),
       message: customData.message || body.message?.body || (typeof body.message === 'string' ? body.message : null),
       type: customData.type || body.type,
       direction: customData.direction || body.direction,
@@ -79,7 +84,7 @@ export default async function handler(req, res) {
       full_name: body.full_name || null,
       ig_sid: body.contact?.attributionSource?.igSid || body.contact?.lastAttributionSource?.igSid || null,
     };
-    const { contactId, conversationId, locationId, message, type, direction, messageId } = payload;
+    const { contactId, conversationId, locationId, message, type, direction, messageId, attachments: rawAttachments } = payload;
     // BP3 (2026-09-01) fix #2 — tolerant type-match via isInstagram(): accepteert
     // 'IG' / 'Instagram' / 'instagram_dm' / numeriek '8' / 'TYPE_IG', etc.
     // Voorheen: strikte type !== 'IG' skipte legitieme varianten.
@@ -90,9 +95,11 @@ export default async function handler(req, res) {
     // bericht (foto, reel, sticker, story-reply, voice). Alleen skippen als
     // er GEEN contactId is (dan kunnen we het bericht nergens aan hangen).
     if (!contactId) return res.status(200).json({ skipped: 'missing_contact_id' });
-    // resolveContent() geeft altijd { message_type: <whitelist>, content: <niet-leeg> }.
-    const { message_type: msgType, content: msgContent } = resolveContent({
-      type, messageType: type, body: message, attachments: body.message?.attachments || body.attachments,
+    // resolveContent() geeft altijd { message_type <whitelist>, content <niet-leeg>,
+    // attachment_url <string|null> }. Attachments-input komt uit customData
+    // (Message Attachments) én de standaard-body-paden als fallback.
+    const { message_type: msgType, content: msgContent, attachment_url: msgAttachmentUrl } = resolveContent({
+      type, messageType: type, body: message, attachments: rawAttachments,
     });
 
     // Idempotency: als GHL dit bericht al eerder heeft geleverd (retry na timeout
@@ -175,6 +182,7 @@ export default async function handler(req, res) {
           direction:       'in',
           content:         msgContent,
           message_type:    msgType,
+          attachment_url:  msgAttachmentUrl,
           ai_generated:    false,
           ghl_message_id:  messageId || null,
         }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
@@ -222,7 +230,7 @@ export default async function handler(req, res) {
     if (conv.human_takeover) {
       await supabaseAdmin.from('lisa_messages').upsert({
         conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        ai_generated: false, ghl_message_id: messageId || null,
+        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
       }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
       await supabaseAdmin.from('lisa_settings').update({
         live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
@@ -235,7 +243,7 @@ export default async function handler(req, res) {
     if (stop) {
       await supabaseAdmin.from('lisa_messages').upsert({
         conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        ai_generated: false, ghl_message_id: messageId || null,
+        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
       }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
       await supabaseAdmin.from('lisa_conversations').update({
         stop_detected_at: new Date().toISOString(), stop_detected_keyword: stop.keyword,
@@ -258,12 +266,20 @@ export default async function handler(req, res) {
     if (msgType !== 'text') {
       await supabaseAdmin.from('lisa_messages').upsert({
         conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        ai_generated: false, ghl_message_id: messageId || null,
+        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
       }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
       await supabaseAdmin.from('lisa_settings').update({
         live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
       }).eq('id', 1);
-      return res.status(200).json({ ok: true, ingested: true, message_type: msgType, ai_skipped: 'media_message', conv_id: conv.id });
+      return res.status(200).json({
+        ok: true, ingested: true, message_type: msgType, ai_skipped: 'media_message',
+        conv_id: conv.id, attachment_url: msgAttachmentUrl,
+        // TIJDELIJKE VERIFICATIE-ECHO (BP3 2026-09-02) — zichtbaar in GHL
+        // Event-Details zodat we kunnen aflezen wat GHL exact meestuurt.
+        // Verwijder na verificatie in een cleanup-commit.
+        received_attachments: rawAttachments ?? null,
+        received_messageId:   messageId      ?? null,
+      });
     }
 
     // 8. AI genereren (geen persistentie binnen helper) — alleen voor tekst.
@@ -276,7 +292,7 @@ export default async function handler(req, res) {
     if (!result.ok && result.error === 'refusal_detected') {
       await supabaseAdmin.from('lisa_messages').upsert({
         conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        ai_generated: false, ghl_message_id: messageId || null,
+        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
       }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
       // System-note (outbound intern, geen ghl_message_id → geen conflict-key nodig).
       await supabaseAdmin.from('lisa_messages').insert({
@@ -292,7 +308,7 @@ export default async function handler(req, res) {
     // 9. Inkomend bericht opslaan (upsert-guard tegen race met poll-cron/webhook-retry).
     await supabaseAdmin.from('lisa_messages').upsert({
       conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-      ai_generated: false, ghl_message_id: messageId || null,
+      attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
     }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
 
     // 9b. Door de volger opgegeven gegevens opslaan + (fire-and-forget) GHL-contact-match.
@@ -362,7 +378,10 @@ export default async function handler(req, res) {
       await supabaseAdmin.from('lisa_settings').update({
         live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
       }).eq('id', 1);
-      return res.status(200).json({ ok: true, queued: true, scheduled_for: scheduledFor, delay_ms: delayMs, conv_id: conv.id });
+      return res.status(200).json({
+        ok: true, queued: true, scheduled_for: scheduledFor, delay_ms: delayMs, conv_id: conv.id,
+        received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
+      });
     }
 
     // Buiten kantooruren → plannen voor eerstvolgende start
@@ -375,7 +394,10 @@ export default async function handler(req, res) {
       live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
       delayed_messages_pending: (settings.delayed_messages_pending || 0) + 1,
     }).eq('id', 1);
-    return res.status(200).json({ ok: true, delayed: true, scheduled_for: scheduledFor, conv_id: conv.id });
+    return res.status(200).json({
+      ok: true, delayed: true, scheduled_for: scheduledFor, conv_id: conv.id,
+      received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
+    });
   } catch (err) {
     console.error('[lisa-ghl-webhook] error:', err?.message || err);
     await logWebhookError(err?.message || 'onbekende fout');

@@ -346,6 +346,17 @@
     const mediaUrl  = meta.media_url || null;
     const mediaType = String(meta.media_type || '').toLowerCase();
     const bodyRaw   = String(m && m.body || '');
+    // BP3 v4 (2026-09-02) — WhatsApp/IG reactie-berichten worden ingest als
+    // '[reaction] {"message_id":"…","emoji":"👍"}'. Toon compact "Reageerde
+    // met <emoji>" i.p.v. rauwe JSON. Fallback: raw text bij parse-error.
+    if (/^\s*\[reaction\]\s*\{/.test(bodyRaw)) {
+      try {
+        const parsed = JSON.parse(bodyRaw.replace(/^\s*\[reaction\]\s*/, ''));
+        if (parsed && typeof parsed.emoji === 'string' && parsed.emoji) {
+          return `<span style="font-style:italic;opacity:.85">Reageerde met <span style="font-style:normal;font-size:1.15em">${_esc(parsed.emoji)}</span></span>`;
+        }
+      } catch (_) { /* fail-soft → raw hieronder */ }
+    }
     // Placeholder-detectie: backend genereert [image]/[video]/[document] als
     // body leeg is. Als er ook een media_url is → gebruik die ipv de tekst.
     const isPlaceholder = /^\[(image|video|audio|voice|document|sticker|file)\]$/i.test(bodyRaw.trim());
