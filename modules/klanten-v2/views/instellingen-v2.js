@@ -8153,5 +8153,19 @@
   window.DFO.VIEWS['instellingen/'] = instView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('instellingen');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('instellingen');
+
+  // BP3 v9 (2026-09-02) — expose de Meta-WA-templates-editor als publieke
+  // component zodat andere views (bv. Leadsonderhoud → Templates → sub-tab
+  // 'WhatsApp templates') 'em kunnen mounten zonder de code te dupliceren.
+  //   render()  → HTML-string van bodyWhatsApp()
+  //   init()    → trigger initial fetch (zelf idempotent via _wa.fetched)
+  // Alle handlers (window.__setMetaEd*, __setSetWaFilter, ...) blijven global
+  // en roepen render() (= window.DFO.render()) aan bij state-wijziging, dus
+  // de leadsonderhoud-tab wordt automatisch herverft.
+  window.KV_V2 = window.KV_V2 || {};
+  window.KV_V2.metaTemplates = {
+    render: () => bodyWhatsApp(),
+    init:   () => { queueMicrotask(() => fetchWaTemplates()); },
+  };
   console.debug('[instellingen-v2] v=6 — infinite fetch-loop fix (guard op _fetched i.p.v. !items.length voor zowel _sig als _tpl). Lege lijst is nu legitieme uitkomst. Rest ongewijzigd t.o.v. v=5.');
 })();

@@ -1,11 +1,14 @@
 // api/admin-template-folders-list.js
 // GET → mappen voor een WABA met aantal templates per map.
-// SUPER_ADMIN ONLY (zelfde gate als de overige admin-meta-templates-* endpoints).
+// Gate (BP3 v9, 2026-09-02): admin.meta_templates.manage — spiegelt de andere
+// admin-meta-templates-* endpoints zodat appointmentsetter (Romy) folders
+// kan zien in de template-editor. Delete-endpoint blijft super_admin-only.
 //
 // Query: ?business_account_id=<text>
 // Response: { folders: [{ id, name, sort_order, created_at, template_count }] }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -16,12 +19,9 @@ export default async function handler(req, res) {
     const userClient = createUserClient(req);
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const { data: profile, error: profErr } = await supabaseAdmin
-      .from('profiles').select('id, role, is_active').eq('id', user.id).single();
-    if (profErr || !profile) return res.status(403).json({ error: 'Geen profiel gevonden' });
-    if (!profile.is_active) return res.status(403).json({ error: 'Account inactief' });
-    if (profile.role !== 'super_admin') return res.status(403).json({ error: 'Alleen super_admin' });
+    if (!(await requirePermission(req, 'admin.meta_templates.manage'))) {
+      return res.status(403).json({ error: 'Geen rechten (admin.meta_templates.manage)' });
+    }
 
     const baid = (req.query?.business_account_id || '').toString().trim();
     if (!baid) return res.status(400).json({ error: 'business_account_id vereist' });

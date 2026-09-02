@@ -1,6 +1,7 @@
 // api/admin-template-folders-rename.js
 // PATCH → hernoem een bestaande map.
-// SUPER_ADMIN ONLY.
+// Gate (BP3 v9, 2026-09-02): admin.meta_templates.manage. Folder-delete
+// blijft super_admin-only (zie admin-template-folders-delete.js).
 //
 // Query: ?id=<uuid>
 // Body:  { name: text (1..64) }
@@ -8,6 +9,7 @@
 // 409 op unique-conflict.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -20,12 +22,9 @@ export default async function handler(req, res) {
     const userClient = createUserClient(req);
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const { data: profile, error: profErr } = await supabaseAdmin
-      .from('profiles').select('id, role, is_active').eq('id', user.id).single();
-    if (profErr || !profile) return res.status(403).json({ error: 'Geen profiel gevonden' });
-    if (!profile.is_active) return res.status(403).json({ error: 'Account inactief' });
-    if (profile.role !== 'super_admin') return res.status(403).json({ error: 'Alleen super_admin' });
+    if (!(await requirePermission(req, 'admin.meta_templates.manage'))) {
+      return res.status(403).json({ error: 'Geen rechten (admin.meta_templates.manage)' });
+    }
 
     const id = (req.query?.id || '').toString().trim();
     if (!id || !UUID_RE.test(id)) return res.status(400).json({ error: 'id (uuid) vereist' });

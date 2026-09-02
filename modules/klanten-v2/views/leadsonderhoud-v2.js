@@ -2865,7 +2865,8 @@
      upsert/delete. Groepeert per categorie; categorie is een vrij tekstveld
      met datalist-suggesties uit bestaande waarden.
      ══════════════════════════════════════════════════════════════════ */
-  const _lsTplTab = { loading: false, items: null, categories: null, error: null, filterCat: '', search: '', editing: null };
+  // BP3 v9 (2026-09-02) — subTab: 'open' (wa_snippets, default) | 'meta' (WhatsApp Meta-templates).
+  const _lsTplTab = { loading: false, items: null, categories: null, error: null, filterCat: '', search: '', editing: null, subTab: 'open' };
   async function _lsTplFetch(force) {
     if (_lsTplTab.loading) return;
     if (!force && _lsTplTab.items) return;
@@ -2887,6 +2888,13 @@
   }
   window.__lsTplSetFilter = (v) => { _lsTplTab.filterCat = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
   window.__lsTplSetSearch = (v) => { _lsTplTab.search    = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
+  window.__lsTplSetSubTab = (v) => {
+    _lsTplTab.subTab = (v === 'meta') ? 'meta' : 'open';
+    if (_lsTplTab.subTab === 'meta' && window.KV_V2?.metaTemplates?.init) {
+      try { window.KV_V2.metaTemplates.init(); } catch (_) {}
+    }
+    if (window.DFO?.render) window.DFO.render();
+  };
   window.__lsTplNew = () => { _lsTplTab.editing = { id: null, titel: '', body_text: '', category: '', owner_user_id: 'shared' }; if (window.DFO?.render) window.DFO.render(); };
   window.__lsTplEdit = (id) => {
     const it = (_lsTplTab.items || []).find((x) => String(x.id) === String(id));
@@ -2953,7 +2961,36 @@
       _lsTplTab._permsWarmed = true;
       window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
     }
-    const canManage = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('snippets.manage'));
+    const canManage    = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('snippets.manage'));
+    const canMetaTpl   = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('admin.meta_templates.manage'));
+
+    // BP3 v9 (2026-09-02) — sub-tab switcher. Alleen zichtbaar als user beide
+    // secties mag zien; anders val terug op de enige sectie waar 'ie in mag.
+    let activeSub = _lsTplTab.subTab || 'open';
+    if (activeSub === 'meta' && !canMetaTpl) activeSub = 'open';
+    const showSubTabs = canMetaTpl;
+    const subTabBar = showSubTabs
+      ? `<div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px">
+          <button onclick="window.__lsTplSetSubTab('open')"
+            style="background:transparent;border:0;border-bottom:2px solid ${activeSub === 'open' ? 'var(--brand,#0A7490)' : 'transparent'};color:${activeSub === 'open' ? 'var(--brand,#0A7490)' : 'var(--text-2)'};padding:8px 14px;font-size:13px;font-weight:${activeSub === 'open' ? '600' : '500'};cursor:pointer;margin-bottom:-1px">Open templates <span style="font-size:11px;color:var(--text-3);font-weight:400">(vrij, direct insert)</span></button>
+          <button onclick="window.__lsTplSetSubTab('meta')"
+            style="background:transparent;border:0;border-bottom:2px solid ${activeSub === 'meta' ? 'var(--brand,#0A7490)' : 'transparent'};color:${activeSub === 'meta' ? 'var(--brand,#0A7490)' : 'var(--text-2)'};padding:8px 14px;font-size:13px;font-weight:${activeSub === 'meta' ? '600' : '500'};cursor:pointer;margin-bottom:-1px">WhatsApp templates <span style="font-size:11px;color:var(--text-3);font-weight:400">(Meta approval)</span></button>
+        </div>`
+      : '';
+
+    // WhatsApp Meta-templates sub-tab: mount de gedeelde component uit
+    // instellingen-v2.js. Component draagt eigen state + handlers.
+    if (activeSub === 'meta') {
+      if (!window.KV_V2 || !window.KV_V2.metaTemplates || typeof window.KV_V2.metaTemplates.render !== 'function') {
+        return `<div class="pad" style="padding:20px">${subTabBar}
+          <div style="padding:24px;background:var(--rose-soft);color:var(--rose);border:1px solid var(--rose-line);border-radius:var(--r-sm);font-size:13px">⚠ WhatsApp-templates-component is niet geladen (instellingen-v2.js ontbreekt in de shell).</div>
+        </div>`;
+      }
+      // Component-content in eigen wrapper. Instellingen-v2 gebruikt de
+      // `.set-*` CSS-klassen — die zijn shell-shared, dus rendering werkt.
+      return `<div class="pad" style="padding:20px">${subTabBar}${window.KV_V2.metaTemplates.render()}</div>`;
+    }
+    // ── Onderstaande logica is de bestaande wa_snippets-tool (sub-tab "Open templates").
 
     // Edit-modal
     if (_lsTplTab.editing) {
@@ -3056,8 +3093,9 @@
           : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Nog geen templates.</div>`)
       : '';
     return `<div class="pad" style="padding:20px">
+      ${subTabBar}
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:14px">
-        <div style="font-size:16px;font-weight:600">Templates <span style="color:var(--text-3);font-size:12px;font-weight:400">— gedeelde teksten voor WhatsApp, Instagram en e-mail</span></div>
+        <div style="font-size:16px;font-weight:600">Open templates <span style="color:var(--text-3);font-size:12px;font-weight:400">— vrije teksten voor WhatsApp, Instagram en e-mail (direct invoegen)</span></div>
         <span style="margin-left:auto"></span>
         ${nieuweBtn}
       </div>

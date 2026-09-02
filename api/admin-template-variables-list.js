@@ -4,9 +4,13 @@
 // de editor-UI de exact-gelijke keys aanbiedt die de send-time resolver
 // snapt. Read-only.
 //
-// SUPER_ADMIN ONLY (editor is super_admin-scope).
+// Gate (BP3 v9, 2026-09-02): admin.meta_templates.manage — spiegelt de
+// admin-meta-templates-* endpoints. Was hardcoded super_admin-only, wat de
+// variabelen-picker onbereikbaar maakte voor appointmentsetter (Romy heeft
+// admin.meta_templates.manage uit BP1-seed en moet templates kunnen bouwen).
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 import { AVAILABLE_VARIABLES } from './_lib/template-variables.js';
 
 export default async function handler(req, res) {
@@ -18,11 +22,9 @@ export default async function handler(req, res) {
     const userClient = createUserClient(req);
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const { data: profile } = await supabaseAdmin
-      .from('profiles').select('id, role, is_active').eq('id', user.id).single();
-    if (!profile || !profile.is_active) return res.status(403).json({ error: 'Geen profiel' });
-    if (profile.role !== 'super_admin') return res.status(403).json({ error: 'Alleen super_admin' });
+    if (!(await requirePermission(req, 'admin.meta_templates.manage'))) {
+      return res.status(403).json({ error: 'Geen rechten (admin.meta_templates.manage)' });
+    }
 
     // Trim naar UI-shape (geen requires_context / requires_module_context — UI
     // gebruikt alleen key/label/example/category voor picker-render).
