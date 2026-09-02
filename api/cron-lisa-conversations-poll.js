@@ -316,9 +316,13 @@ export default async function handler(req, res) {
               lisaConvId = ensured.id;
             }
 
-            // BP3 (2026-09-01) fix #4 — atomair dedup via ON CONFLICT
-            // (partial UNIQUE-index op ghl_message_id).
-            const { error: insErr } = await supabaseAdmin.from('lisa_messages').upsert({
+            // BP3 v5 (2026-09-02) — .insert() met 23505-catch i.p.v. .upsert()
+            // met onConflict-hint. PostgREST accepteert partial UNIQUE-index
+            // (WHERE ghl_message_id IS NOT NULL) niet betrouwbaar als
+            // on-conflict-target (42P10) — silent-failure. Nu:
+            //   - error.code '23505' → duplicate (tel als dedup_skipped, geen fout)
+            //   - andere error → console.error met code/message/details/hint
+            const { error: insErr } = await supabaseAdmin.from('lisa_messages').insert({
               conversation_id: lisaConvId,
               direction,
               content:         msgContent,
@@ -327,8 +331,18 @@ export default async function handler(req, res) {
               sent_at:         sentAt,
               ai_generated:    false,
               ghl_message_id:  ghlMsgId,
-            }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
-            if (insErr) { console.warn('[lisa-poll fallback] msg insert:', ghlMsgId, insErr.message); stats.errors++; continue; }
+            });
+            if (insErr) {
+              if (insErr.code === '23505') {
+                stats.dedup_skipped++;
+                continue;
+              }
+              console.error('[lisa-poll] insert faalde:',
+                insErr.code, insErr.message, insErr.details || '', insErr.hint || '',
+                { ghl_message_id: ghlMsgId, conv_id: lisaConvId, message_type: msgType });
+              stats.errors++;
+              continue;
+            }
             stats.messages_upserted++;
           }
         }
