@@ -2943,8 +2943,17 @@
 
   function templatesView() {
     if (!_lsTplTab.items && !_lsTplTab.loading && !_lsTplTab.error) queueMicrotask(() => _lsTplFetch(false));
-    const perms = (window.RBAC?.getUserPermissions && window.RBAC.getUserPermissions()) || new Set();
-    const canManage = perms.has('*') || perms.has('snippets.manage');
+    // BP3 v8 (2026-09-02) BUG-FIX — window.RBAC.getUserPermissions bestaat NIET.
+    // De echte API is canSync() (super_admin heeft impliciete '*'). Zonder deze
+    // fix zag zelfs super_admin `canManage=false` en dus geen Nieuwe-knop.
+    // ensurePermissionsLoaded async triggeren + re-render zodat na eerste load
+    // de knoppen alsnog verschijnen (Romy = appointmentsetter met snippets.manage
+    // uit BP1-seed).
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_lsTplTab._permsWarmed) {
+      _lsTplTab._permsWarmed = true;
+      window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
+    }
+    const canManage = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('snippets.manage'));
 
     // Edit-modal
     if (_lsTplTab.editing) {
@@ -3027,14 +3036,30 @@
             </div>
           </div>
         `).join('')
-      : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Geen templates die matchen. ${canManage ? 'Klik <b>+ Nieuwe template</b> om er een aan te maken.' : ''}</div>`;
+      : ''; // lege-staat CTA rendert los hieronder (bevat de + Nieuwe-knop)
     const chipAlle = `<button class="chip ${!_lsTplTab.filterCat ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window.__lsTplSetFilter('')">Alle</button>`;
     const chipCats = cats.map((c) => `<button class="chip ${_lsTplTab.filterCat === c ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window.__lsTplSetFilter('${esc(c).replace(/'/g, "\\'")}')">${esc(c)}</button>`).join(' ');
+    // BP3 v8 (2026-09-02) — Nieuwe-template-knop ALTIJD zichtbaar bovenaan
+    // voor iedereen met snippets.manage. Lege staat krijgt eigen CTA-blok
+    // met dezelfde knop zodat het duidelijk is hoe je begint.
+    const nieuweBtn = canManage
+      ? `<button class="btn btn-primary btn-sm" style="color:#fff;padding:7px 14px;font-size:13px" onclick="window.__lsTplNew()">＋ Nieuwe template</button>`
+      : '';
+    const isEmpty = grouped.size === 0;
+    const emptyState = isEmpty
+      ? (canManage
+          ? `<div style="padding:44px 20px;text-align:center;color:var(--text-3);background:var(--surface);border:1px dashed var(--border);border-radius:var(--r)">
+              <div style="font-size:14px;font-weight:600;color:var(--text-2);margin-bottom:6px">${_lsTplTab.search || _lsTplTab.filterCat ? 'Geen templates die matchen' : 'Nog geen templates'}</div>
+              <div style="font-size:12.5px;margin-bottom:14px">${_lsTplTab.search || _lsTplTab.filterCat ? 'Pas de zoekterm of filter aan, of maak een nieuwe aan.' : 'Maak je eerste template aan — gedeeld voor WhatsApp, Instagram en e-mail.'}</div>
+              <button class="btn btn-primary btn-sm" style="color:#fff;padding:7px 14px;font-size:13px" onclick="window.__lsTplNew()">＋ Nieuwe template</button>
+            </div>`
+          : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Nog geen templates.</div>`)
+      : '';
     return `<div class="pad" style="padding:20px">
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:14px">
         <div style="font-size:16px;font-weight:600">Templates <span style="color:var(--text-3);font-size:12px;font-weight:400">— gedeelde teksten voor WhatsApp, Instagram en e-mail</span></div>
         <span style="margin-left:auto"></span>
-        ${canManage ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="window.__lsTplNew()">+ Nieuwe template</button>` : ''}
+        ${nieuweBtn}
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <input type="search" placeholder="Zoek in titel of tekst…" value="${esc(_lsTplTab.search)}"
@@ -3045,6 +3070,7 @@
       ${_lsTplTab.loading && !items.length ? '<div style="padding:22px;text-align:center;color:var(--text-3)">Laden…</div>' : ''}
       ${_lsTplTab.error ? `<div style="padding:12px;background:var(--rose-soft);color:var(--rose);border:1px solid var(--rose-line);border-radius:var(--r-sm);font-size:12.5px;margin-bottom:12px">⚠ ${esc(_lsTplTab.error)}</div>` : ''}
       ${groupsHtml}
+      ${emptyState}
     </div>`;
   }
 
