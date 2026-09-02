@@ -2055,15 +2055,40 @@
   }
   async function fetchOpstartsessies(force) {
     const st = _live.opstartsessies;
-    const key = 'p=' + st.periode + '&r=' + st.resultaat + '&b=' + st.bron;
+    // BP3 v11 (2026-09-02) — bij agenda-modus stuur from/to op basis van de
+    // gekozen agMonth zodat het endpoint de VOLLEDIGE maand teruggeeft (cap
+    // 1000 i.p.v. 25). Anders krijg je gaten in de kalender voor accounts
+    // met veel opstartsessies (management/admin).
+    const useAgenda = st.view === 'agenda';
+    let rangeFrom = null, rangeTo = null;
+    if (useAgenda && st.agMonth instanceof Date) {
+      const y = st.agMonth.getFullYear();
+      const m = st.agMonth.getMonth();
+      const pad = (n) => String(n).padStart(2, '0');
+      rangeFrom = `${y}-${pad(m + 1)}-01`;
+      const nextY = m === 11 ? y + 1 : y;
+      const nextM = m === 11 ? 0 : m + 1;
+      rangeTo = `${nextY}-${pad(nextM + 1)}-01`;
+    }
+    const key = useAgenda
+      ? 'ag:' + rangeFrom + '..' + rangeTo + '&r=' + st.resultaat + '&b=' + st.bron
+      : 'p=' + st.periode + '&r=' + st.resultaat + '&b=' + st.bron;
     if (!force && st.lastKey === key && st.fetched && !st.error) return;
     st.loading = true; st.error = null; st.lastKey = key;
     const seq = ++st._seq;
     if (window.DFO?.render) window.DFO.render();
-    const qs = 'periode=' + encodeURIComponent(st.periode)
-      + '&resultaat=' + encodeURIComponent(st.resultaat)
-      + (st.bron ? '&bron=' + encodeURIComponent(st.bron) : '');
-    const j = await tryFetch('opstartsessies', '/api/leadsonderhoud-opstartsessies-list?' + qs);
+    const qsParts = [
+      'resultaat=' + encodeURIComponent(st.resultaat),
+    ];
+    if (st.bron) qsParts.push('bron=' + encodeURIComponent(st.bron));
+    if (useAgenda) {
+      qsParts.push('from=' + encodeURIComponent(rangeFrom));
+      qsParts.push('to='   + encodeURIComponent(rangeTo));
+      qsParts.push('limit=1000');
+    } else {
+      qsParts.push('periode=' + encodeURIComponent(st.periode));
+    }
+    const j = await tryFetch('opstartsessies', '/api/leadsonderhoud-opstartsessies-list?' + qsParts.join('&'));
     if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
     if (!j) st.error = 'Kon opstartsessies niet laden'; else st.data = j;
@@ -2277,11 +2302,56 @@
       </div>`;
   }
 
+  // BP3 v11 (2026-09-02) — Opstartsessies weergave-state + agenda-navigatie.
+  //   view:   'list' (default) | 'agenda'
+  //   agMonth: eerste-van-de-maand die getoond wordt (Date-instance)
+  if (!_live.opstartsessies.view)    _live.opstartsessies.view = 'list';
+  if (!_live.opstartsessies.agMonth) _live.opstartsessies.agMonth = (() => {
+    const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1);
+  })();
+  window._lsSetOpView = (v) => {
+    _live.opstartsessies.view = (v === 'agenda') ? 'agenda' : 'list';
+    // BP3 v11 (2026-09-02) — refetch. Agenda-modus stuurt from/to op basis
+    // van agMonth zodat de VOLLE maand geladen wordt (cap 1000 i.p.v. 25).
+    // Lijst-modus valt terug op de bestaande periode-filter.
+    fetchOpstartsessies(true);
+  };
+  window._lsAgPrevMonth = () => {
+    const m = _live.opstartsessies.agMonth;
+    _live.opstartsessies.agMonth = new Date(m.getFullYear(), m.getMonth() - 1, 1);
+    fetchOpstartsessies(true);
+  };
+  window._lsAgNextMonth = () => {
+    const m = _live.opstartsessies.agMonth;
+    _live.opstartsessies.agMonth = new Date(m.getFullYear(), m.getMonth() + 1, 1);
+    fetchOpstartsessies(true);
+  };
+  window._lsAgToday = () => {
+    const d = new Date();
+    _live.opstartsessies.agMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+    fetchOpstartsessies(true);
+  };
+
   function opstartsessiesView() {
     if (!_live.opstartsessies.fetched && !_live.opstartsessies.loading && !_live.opstartsessies.error) queueMicrotask(() => fetchOpstartsessies(false));
     const st = _live.opstartsessies;
     const data = st.data || { items: [], total: 0, bronnen: [] };
-    const items = data.items || [];
+    const rawItems = data.items || [];
+    // BP3 v11 (2026-09-02) — sort: aankomend oplopend, verleden daarna
+    // (oplopend), zonder-datum tot slot. Client-side omdat het endpoint
+    // op created_at DESC sorteert; hier willen we op gekozen_start_at.
+    const nowMs = Date.now();
+    const sortKey = (r) => {
+      if (!r.gekozen_start_at) return [2, 0];
+      const t = new Date(r.gekozen_start_at).getTime();
+      if (isNaN(t)) return [2, 0];
+      return t >= nowMs ? [0, t] : [1, t];
+    };
+    const items = rawItems.slice().sort((a, b) => {
+      const ka = sortKey(a), kb = sortKey(b);
+      if (ka[0] !== kb[0]) return ka[0] - kb[0];
+      return ka[1] - kb[1];
+    });
     const bronnen = data.bronnen || [];
     const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
     const uitk = [['alle','Alle'],['toegelaten','Toegelaten'],['afgewezen','Afgewezen']];
@@ -2341,17 +2411,21 @@
       </tr>`;
     }).join('') : `<tr><td colspan="9" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen submissions in dit venster.'}</td></tr>`;
 
-    return `
-      ${_lsOpstartDetailModalHtml()}
-      <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Alles wat leads op <code>deforexopleiding.nl/agenda</code> invullen — inclusief afgewezen leads. Klik een rij voor de vragenlijst-antwoorden.
-      </div>
-      ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
+    const viewChips = `<div style="display:flex;gap:4px">
+      <button class="chip ${st.view === 'list' ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpView('list')">Lijst</button>
+      <button class="chip ${st.view === 'agenda' ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpView('agenda')">Agenda</button>
+    </div>`;
+
+    // Gemeenschappelijke filter-bar boven beide views.
+    const filterBar = `
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:10px">
+        ${viewChips}
+        ${st.view === 'agenda' ? '' : `
         <div style="display:flex;gap:6px;align-items:center">
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
           ${perChips}
         </div>
+        `}
         <div style="display:flex;gap:6px;align-items:center">
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Resultaat</span>
           ${resChips}
@@ -2361,8 +2435,14 @@
           <select onchange="window._lsSetOpBron(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;background:var(--surface)">${bronOpts}</select>
         </div>
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
-      </div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+      </div>`;
+
+    // ── Agenda-view ────────────────────────────────────────────────────
+    let bodyHtml;
+    if (st.view === 'agenda') {
+      bodyHtml = _lsOpstartAgendaHtml(items, st);
+    } else {
+      bodyHtml = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:12.5px">
             <thead>
@@ -2380,6 +2460,91 @@
             </thead>
             <tbody>${rows}</tbody>
           </table>
+        </div>
+      </div>`;
+    }
+
+    return `
+      ${_lsOpstartDetailModalHtml()}
+      <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
+        Alles wat leads op <code>deforexopleiding.nl/agenda</code> invullen — inclusief afgewezen leads. Klik een rij voor de vragenlijst-antwoorden.
+      </div>
+      ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
+      ${filterBar}
+      ${bodyHtml}`;
+  }
+
+  // BP3 v11 (2026-09-02) — Opstartsessies agenda-weergave (maand-grid).
+  // Rendert alleen submissions met een gekozen_start_at binnen st.agMonth.
+  // Klik-cell → bestaande detail-modal via _lsOpenOpstartDetail.
+  function _lsOpstartAgendaHtml(items, st) {
+    const first = st.agMonth || (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })();
+    const y = first.getFullYear();
+    const m = first.getMonth();
+    // Buckets per YYYY-M-D.
+    const bucketKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const byDay = new Map();
+    for (const it of items) {
+      if (!it.gekozen_start_at) continue;
+      const d = new Date(it.gekozen_start_at);
+      if (isNaN(d.getTime())) continue;
+      if (d.getFullYear() !== y || d.getMonth() !== m) continue;
+      const k = bucketKey(d);
+      if (!byDay.has(k)) byDay.set(k, []);
+      byDay.get(k).push({ time: d, item: it });
+    }
+    // Grid: 7 kolommen (ma-zo), start-offset op maandag-conventie.
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const firstDow = (new Date(y, m, 1).getDay() + 6) % 7; // 0=maandag
+    const cells = [];
+    // Voor-cellen (grijs, buiten maand).
+    for (let i = 0; i < firstDow; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    const today = new Date();
+    const isToday = (day) => today.getFullYear() === y && today.getMonth() === m && today.getDate() === day;
+    const monthLabel = first.toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
+    const dowLabels = ['ma','di','wo','do','vr','za','zo'];
+    const fmtTime = (dt) => `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    const nav = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <button class="btn btn-ghost btn-sm" style="font-size:12px;padding:4px 10px" onclick="window._lsAgPrevMonth()" title="Vorige maand">◀</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:12px;padding:4px 10px" onclick="window._lsAgToday()">Vandaag</button>
+      <button class="btn btn-ghost btn-sm" style="font-size:12px;padding:4px 10px" onclick="window._lsAgNextMonth()" title="Volgende maand">▶</button>
+      <div style="font-size:14px;font-weight:600;margin-left:8px;text-transform:capitalize">${esc(monthLabel)}</div>
+      <span style="margin-left:auto;font-size:11.5px;color:var(--text-3)">${byDay.size ? Array.from(byDay.values()).reduce((s,a)=>s+a.length,0) + ' calls' : 'Geen calls in deze maand'}</span>
+    </div>`;
+    const headerRow = dowLabels.map(d => `<div style="padding:6px 8px;text-align:center;font-size:10.5px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;background:var(--surface-2);border-right:1px solid var(--border)">${d}</div>`).join('');
+    const cellHtml = (day) => {
+      if (day == null) {
+        return `<div style="min-height:96px;background:var(--surface-2);border-right:1px solid var(--border);border-top:1px solid var(--border);opacity:.4"></div>`;
+      }
+      const k = `${y}-${m}-${day}`;
+      const entries = (byDay.get(k) || []).sort((a,b) => a.time - b.time);
+      const chips = entries.slice(0, 3).map(({ time, item }) => `
+        <div onclick="event.stopPropagation();window._lsOpenOpstartDetail('${esc(String(item.id))}')"
+          title="${esc(item.naam || '')} · ${esc(item.email || '')}"
+          style="display:block;padding:2px 6px;margin:2px 0;background:var(--brand-soft, rgba(10,116,144,.12));color:var(--brand,#0A7490);border-radius:4px;font-size:10.5px;line-height:1.35;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <span style="font-weight:600">${esc(fmtTime(time))}</span> ${esc(item.naam || '—')}
+        </div>`).join('');
+      const meer = entries.length > 3
+        ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px">+${entries.length - 3} meer</div>`
+        : '';
+      const dayColor = isToday(day) ? 'var(--brand,#0A7490)' : 'var(--text-2)';
+      const dayWeight = isToday(day) ? '700' : '500';
+      const bg = isToday(day) ? 'var(--brand-soft, rgba(10,116,144,.06))' : 'var(--surface)';
+      return `<div style="min-height:96px;padding:5px 6px;background:${bg};border-right:1px solid var(--border);border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:${dayWeight};color:${dayColor};margin-bottom:3px">${day}</div>
+        ${chips}${meer}
+      </div>`;
+    };
+    return `${nav}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="display:grid;grid-template-columns:repeat(7,1fr)">
+          ${headerRow}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr)">
+          ${cells.map(cellHtml).join('')}
         </div>
       </div>`;
   }

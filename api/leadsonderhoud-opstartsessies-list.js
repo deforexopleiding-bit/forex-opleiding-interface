@@ -56,8 +56,18 @@ export default async function handler(req, res) {
     ? String(q.resultaat).toLowerCase() : 'alle';
   const bron      = typeof q.bron === 'string' && q.bron.trim()
     ? String(q.bron).trim().toLowerCase() : null;
-  const limit     = Math.min(200, Math.max(1, Number(q.limit) || 25));
-  const grens     = periodeGrens(periode);
+  // BP3 v11 (2026-09-02) — from/to (YYYY-MM-DD) voor agenda-maand-view.
+  // Als aanwezig: filter op gekozen_start_at binnen [from, to) en de
+  // limit-cap gaat naar 1000 (volle maand dekken). from/to overrulen
+  // periode (die filtert op created_at) — beide tegelijk zou verwarrend zijn.
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const rawFrom = typeof q.from === 'string' && DATE_RE.test(q.from.trim()) ? q.from.trim() : null;
+  const rawTo   = typeof q.to   === 'string' && DATE_RE.test(q.to.trim())   ? q.to.trim()   : null;
+  const useRange = !!(rawFrom && rawTo);
+  const limit   = useRange
+    ? Math.min(1000, Math.max(1, Number(q.limit) || 1000))
+    : Math.min(200,  Math.max(1, Number(q.limit) || 25));
+  const grens   = useRange ? null : periodeGrens(periode);
 
   try {
     // 1) Bronnen (voor label-mapping + filter-dropdown).
@@ -66,12 +76,18 @@ export default async function handler(req, res) {
     const labelBySlug = new Map((bronnen || []).map((b) => [b.slug, b.label]));
 
     // 2) Submissions.
+    // BP3 v11: bij range-modus sorteren op gekozen_start_at ascending zodat
+    // de agenda niet client-side hoeft te sorteren voor de eerste render.
     let qry = supabaseAdmin
       .from('opstartsessie_submissions')
       .select('id, created_at, booking_source, naam, email, telefoon, gekozen_slot, gekozen_start_at, score, drempel, resultaat, noshow_akkoord, appointment_id, lead_id', { count: 'exact' })
-      .order('created_at', { ascending: false })
+      .order(useRange ? 'gekozen_start_at' : 'created_at', { ascending: useRange })
       .limit(limit);
-    if (grens)     qry = qry.gte('created_at', grens);
+    if (useRange) {
+      qry = qry.gte('gekozen_start_at', rawFrom).lt('gekozen_start_at', rawTo);
+    } else if (grens) {
+      qry = qry.gte('created_at', grens);
+    }
     if (resultaat !== 'alle') qry = qry.eq('resultaat', resultaat);
     if (bron)      qry = qry.eq('booking_source', bron);
     const { data: rows, error, count } = await qry;
