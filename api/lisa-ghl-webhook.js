@@ -102,22 +102,6 @@ export default async function handler(req, res) {
       type, messageType: type, body: message, attachments: rawAttachments,
     });
 
-    // Idempotency: als GHL dit bericht al eerder heeft geleverd (retry na timeout
-    // tijdens onze Opus-generatie), skip vóór we een NIEUWE AI-call + response-
-    // delay-item aanmaken. Zonder deze check verdubbelt de burst: 1 inbound →
-    // 2 outbound. Zie migratie 003 index idx_lisa_msg_ghl.
-    if (messageId) {
-      const { data: dupe } = await supabaseAdmin.from('lisa_messages')
-        .select('id, sent_at, conversation_id')
-        .eq('ghl_message_id', messageId)
-        .eq('direction', 'in')
-        .limit(1).maybeSingle();
-      if (dupe) {
-        console.log('[lisa-ghl-webhook] duplicate delivery skipped', { messageId, sent_at: dupe.sent_at });
-        return res.status(200).json({ skipped: 'duplicate_delivery', ghl_message_id: messageId });
-      }
-    }
-
     // Meta/UTM-attributie vangen — body.contact bevat de attributionSource +
     // lastAttributionSource al vanuit GHL's webhook, dus geen extra fetch.
     // Best-effort + dynamic import (helper is nog niet overal beschikbaar
@@ -149,48 +133,100 @@ export default async function handler(req, res) {
       ghl_webhook_last_error: null,
     }).eq('id', 1);
 
-    // 4. Live mode? Puur-ingest-branch: als live_mode UIT staat, sla het
-    //    inbound-bericht + conversatie tóch op (zichtbaarheid), maar sla AI-
-    //    generatie / follow-up-planning / uitgaande DM over. Zo staan Instagram-
-    //    berichten real-time in het CRM zonder auto-antwoord (parity met poll-
-    //    cron, maar zonder 15-min-lag). Auto-DM blijft strikt achter de gate.
-    if (!settings.live_mode_enabled) {
-      try {
-        const computedName = payload.full_name || [payload.first_name, payload.last_name].filter(Boolean).join(' ').trim() || null;
-        let { data: conv } = await supabaseAdmin.from('lisa_conversations').select('id, contact_name')
-          .eq('ghl_contact_id', contactId).eq('is_sandbox', false).maybeSingle();
-        if (!conv) {
-          const { data: newConv, error: convErr } = await supabaseAdmin.from('lisa_conversations').insert({
-            ghl_contact_id: contactId, ghl_conversation_id: conversationId || null, ghl_location_id: locationId || null,
-            first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid,
-            source: 'instagram', is_sandbox: false, phase: 'cold', first_message_at: new Date().toISOString(),
-          }).select('id').single();
-          if (convErr) { console.warn('[lisa-webhook] live_mode_off conv insert:', convErr.message); return res.status(200).json({ skipped: 'live_mode_off', ingest_error: convErr.message }); }
-          conv = newConv;
-        }
-        // Dedupe op ghl_message_id (webhook-retry-veilig) — vroegtijdig exit
-        // voorkomt onnodige INSERT. ON CONFLICT hieronder is race-safety.
-        if (messageId) {
-          const { data: dupe2 } = await supabaseAdmin.from('lisa_messages')
-            .select('id').eq('ghl_message_id', messageId).limit(1).maybeSingle();
-          if (dupe2) return res.status(200).json({ skipped: 'live_mode_off', ingested: false, reason: 'already_stored' });
-        }
-        // upsert + ignoreDuplicates = ON CONFLICT (ghl_message_id) DO NOTHING
-        // (partial UNIQUE-index geseed door migratie 2026-09-01).
-        await supabaseAdmin.from('lisa_messages').upsert({
-          conversation_id: conv.id,
-          direction:       'in',
-          content:         msgContent,
-          message_type:    msgType,
-          attachment_url:  msgAttachmentUrl,
-          ai_generated:    false,
-          ghl_message_id:  messageId || null,
-        }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
-        return res.status(200).json({ skipped: 'live_mode_off', ingested: true, conv_id: conv.id, message_type: msgType });
-      } catch (e) {
-        console.warn('[lisa-webhook] live_mode_off ingest exception:', e?.message || e);
-        return res.status(200).json({ skipped: 'live_mode_off', ingest_error: e?.message || String(e) });
+    // ═══════════════════════════════════════════════════════════════════
+    // BP3 v5 (2026-09-02) — INGEST ALTIJD, ONAFHANKELIJK VAN LIVE_MODE.
+    //
+    // Voorheen zat conv-lookup + insert verspreid over 5 takken (LIVE_MODE_OFF,
+    // human_takeover, stop_signal, media, refusal, main) — met silent-error
+    // op de upsert (geen { error }-destructure). Ingest kon stil falen
+    // terwijl de webhook `ingested: true` returnde.
+    //
+    // Nieuwe flow:
+    //   1. Ensure conversation (aanmaken bij eerste bericht).
+    //   2. Insert inbound message met HARDE error-check.
+    //   3. Duplicate (23505) → return 'duplicate_delivery' (voorkomt AI-retry).
+    //   4. Andere error → return ingest_error (zichtbaar in GHL Event-Details).
+    //   5. !live_mode → return 'live_mode_off, ingested: true' (skip AI).
+    //   6. live_mode → doorgaan naar takeover/stop/media/AI (geen insert meer).
+    //
+    // We gebruiken .insert() + 23505-catch i.p.v. .upsert() met onConflict-
+    // hint, omdat PostgREST partial UNIQUE-indices niet betrouwbaar als
+    // conflict-target accepteert (had silent-failure gegeven).
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Ensure conversation. Phase 'intro' als live_mode aan (Lisa gaat straks
+    // reageren), 'cold' als live_mode uit (puur-ingest, geen intake).
+    const computedName = payload.full_name || [payload.first_name, payload.last_name].filter(Boolean).join(' ').trim() || null;
+    let { data: conv, error: convSelErr } = await supabaseAdmin.from('lisa_conversations').select('*')
+      .eq('ghl_contact_id', contactId).eq('is_sandbox', false).maybeSingle();
+    if (convSelErr) {
+      console.error('[lisa-ghl-webhook] conv select faalde:', convSelErr.code, convSelErr.message);
+      await logWebhookError('conv_select: ' + convSelErr.message);
+      return res.status(200).json({ ok: false, ingest_error: convSelErr.message, phase: 'conv_select' });
+    }
+    if (!conv) {
+      const initialPhase = settings.live_mode_enabled ? 'intro' : 'cold';
+      const { data: newConv, error: convErr } = await supabaseAdmin.from('lisa_conversations').insert({
+        ghl_contact_id: contactId, ghl_conversation_id: conversationId || null, ghl_location_id: locationId || null,
+        first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid,
+        source: 'instagram', is_sandbox: false, phase: initialPhase, first_message_at: new Date().toISOString(),
+      }).select('*').single();
+      if (convErr) {
+        console.error('[lisa-ghl-webhook] conv insert faalde:', convErr.code, convErr.message);
+        await logWebhookError('conv_insert: ' + convErr.message);
+        return res.status(200).json({ ok: false, ingest_error: convErr.message, phase: 'conv_insert' });
       }
+      conv = newConv;
+    } else if (!conv.contact_name && computedName) {
+      // Naam nu pas beschikbaar → invullen (geen overschrijf van bestaande naam).
+      await supabaseAdmin.from('lisa_conversations').update({
+        first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid || conv.ig_sid,
+      }).eq('id', conv.id);
+      conv.contact_name = computedName;
+    }
+
+    // Persist inbound message met HARDE error-check.
+    const { error: msgInsErr } = await supabaseAdmin.from('lisa_messages').insert({
+      conversation_id: conv.id,
+      direction:       'in',
+      content:         msgContent,
+      message_type:    msgType,
+      attachment_url:  msgAttachmentUrl,
+      ai_generated:    false,
+      ghl_message_id:  messageId || null,
+    });
+    const wasDuplicate = !!(msgInsErr && msgInsErr.code === '23505');
+    if (msgInsErr && !wasDuplicate) {
+      console.error('[lisa-ghl-webhook] persist inbound faalde:',
+        msgInsErr.code, msgInsErr.message, msgInsErr.details || '', msgInsErr.hint || '');
+      await logWebhookError('persist_inbound[' + msgInsErr.code + ']: ' + msgInsErr.message);
+      return res.status(200).json({
+        ok: false, ingest_error: msgInsErr.message, code: msgInsErr.code,
+        conv_id: conv.id, message_type: msgType,
+        received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
+      });
+    }
+
+    // Counter tikken (ook bij duplicate — GHL heeft ons alsnog benaderd).
+    await supabaseAdmin.from('lisa_settings').update({
+      live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
+    }).eq('id', 1);
+
+    // Duplicate → skip AI (voorkomt burst bij GHL-retry).
+    if (wasDuplicate) {
+      console.log('[lisa-ghl-webhook] duplicate delivery — insert skipped', { messageId });
+      return res.status(200).json({
+        ok: true, skipped: 'duplicate_delivery', ghl_message_id: messageId, conv_id: conv.id,
+      });
+    }
+
+    // 4. Live mode UIT → geen AI, geen scheduling. Ingest is al gebeurd.
+    if (!settings.live_mode_enabled) {
+      return res.status(200).json({
+        ok: true, skipped: 'live_mode_off', ingested: true,
+        conv_id: conv.id, message_type: msgType, attachment_url: msgAttachmentUrl,
+        received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
+      });
     }
 
     // 5. Kantooruren (in tz, minuut-precisie)
@@ -201,50 +237,22 @@ export default async function handler(req, res) {
     const [eh, em] = String(settings.office_hours_end || '23:30').split(':').map((x) => parseInt(x, 10) || 0);
     const isInOfficeHours = curMins >= (sh * 60 + sm) && curMins < (eh * 60 + em);
 
-    // 6. Actieve config
+    // 6. Actieve config (voor stop_keywords + AI-generate).
     const { data: config } = await supabaseAdmin.from('lisa_config').select('*')
       .eq('is_active', true).order('version', { ascending: false }).limit(1).maybeSingle();
     if (!config) { await logWebhookError('Geen actieve Lisa-config'); return res.status(200).json({ ok: false, error: 'no_active_config' }); }
 
-    // 7. Conversatie (per ghl_contact_id, live)
-    const computedName = payload.full_name || [payload.first_name, payload.last_name].filter(Boolean).join(' ').trim() || null;
-    let { data: conv } = await supabaseAdmin.from('lisa_conversations').select('*')
-      .eq('ghl_contact_id', contactId).eq('is_sandbox', false).maybeSingle();
-    if (!conv) {
-      const { data: newConv, error: convErr } = await supabaseAdmin.from('lisa_conversations').insert({
-        ghl_contact_id: contactId, ghl_conversation_id: conversationId || null, ghl_location_id: locationId || null,
-        first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid,
-        source: 'instagram', is_sandbox: false, phase: 'intro', first_message_at: new Date().toISOString(),
-      }).select('*').single();
-      if (convErr) { await logWebhookError('Conversatie aanmaken: ' + convErr.message); return res.status(200).json({ ok: false, error: convErr.message }); }
-      conv = newConv;
-    } else if (!conv.contact_name && computedName) {
-      // Naam nu pas beschikbaar → invullen (geen overschrijf van bestaande naam).
-      await supabaseAdmin.from('lisa_conversations').update({
-        first_name: payload.first_name, last_name: payload.last_name, contact_name: computedName, ig_sid: payload.ig_sid || conv.ig_sid,
-      }).eq('id', conv.id);
-      conv.contact_name = computedName;
-    }
+    // Conversatie is al opgehaald/aangemaakt bovenaan (BP3 v5 hoisting).
+    // De onderstaande takken doen GEEN insert meer — bericht is al opgeslagen.
 
-    // 7b. Mens heeft overgenomen → Lisa zwijgt; bericht wel loggen.
+    // 7b. Mens heeft overgenomen → Lisa zwijgt.
     if (conv.human_takeover) {
-      await supabaseAdmin.from('lisa_messages').upsert({
-        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
-      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
-      await supabaseAdmin.from('lisa_settings').update({
-        live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
-      }).eq('id', 1);
       return res.status(200).json({ ok: true, skipped: 'human_takeover', conv_id: conv.id });
     }
 
     // 7c. Stop-signaal → afmelden: pauzeer follow-ups, geen AI-antwoord.
     const stop = detectStopSignal(message, config.stop_keywords || []);
     if (stop) {
-      await supabaseAdmin.from('lisa_messages').upsert({
-        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
-      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
       await supabaseAdmin.from('lisa_conversations').update({
         stop_detected_at: new Date().toISOString(), stop_detected_keyword: stop.keyword,
         followup_paused: true, followup_paused_at: new Date().toISOString(),
@@ -253,30 +261,15 @@ export default async function handler(req, res) {
       await supabaseAdmin.from('lisa_followups').update({
         status: 'cancelled', cancelled_reason: `stop_signal: ${stop.keyword}`.slice(0, 300),
       }).eq('conversation_id', conv.id).eq('status', 'scheduled');
-      await supabaseAdmin.from('lisa_settings').update({
-        live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
-      }).eq('id', 1);
       return res.status(200).json({ ok: true, skipped: 'stop_signal_detected', keyword: stop.keyword, conv_id: conv.id });
     }
 
     // BP3 (2026-09-01) — media-bericht (foto/reel/story/etc) heeft geen
-    // tekst-body waar Lisa zinvol op kan reageren. Sla 'em wél op (via de
-    // insert hierna), maar SLA de AI-flow over — geen auto-DM op media.
-    // De handmatige takeover-flow blijft beschikbaar in de UI.
+    // tekst-body waar Lisa zinvol op kan reageren. Sla AI-flow over.
     if (msgType !== 'text') {
-      await supabaseAdmin.from('lisa_messages').upsert({
-        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
-      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
-      await supabaseAdmin.from('lisa_settings').update({
-        live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
-      }).eq('id', 1);
       return res.status(200).json({
         ok: true, ingested: true, message_type: msgType, ai_skipped: 'media_message',
         conv_id: conv.id, attachment_url: msgAttachmentUrl,
-        // TIJDELIJKE VERIFICATIE-ECHO (BP3 2026-09-02) — zichtbaar in GHL
-        // Event-Details zodat we kunnen aflezen wat GHL exact meestuurt.
-        // Verwijder na verificatie in een cleanup-commit.
         received_attachments: rawAttachments ?? null,
         received_messageId:   messageId      ?? null,
       });
@@ -285,16 +278,10 @@ export default async function handler(req, res) {
     // 8. AI genereren (geen persistentie binnen helper) — alleen voor tekst.
     const result = await generateLisaResponse({ config, conversation: conv, userMessage: message });
 
-    // 8b. Refusal-guard: als het model geweigerd heeft ('Ik kan dit bericht niet
-    // genereren', 'Kijkend naar dit gesprek zie ik dat Lisa...') is result.ok=false
-    // met refusal_reason. Log inbound + system-note, NIET versturen naar klant.
-    // De burst uit 30-31 juli 2026 bevatte precies zulke weigeringen als DM.
+    // 8b. Refusal-guard: als het model geweigerd heeft, log system-note maar
+    // NIET versturen naar klant. Inbound is al opgeslagen bovenaan.
     if (!result.ok && result.error === 'refusal_detected') {
-      await supabaseAdmin.from('lisa_messages').upsert({
-        conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-        attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
-      }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
-      // System-note (outbound intern, geen ghl_message_id → geen conflict-key nodig).
+      // System-note (outbound intern, geen ghl_message_id → gewone insert).
       await supabaseAdmin.from('lisa_messages').insert({
         conversation_id: conv.id, direction: 'out', is_system: true, ai_generated: false, message_type: 'text',
         content: `⚠ AI-weigering geblokkeerd (${result.refusal_reason}). Geen bericht verstuurd. Raw: ${(result.raw_response || '').slice(0, 200)}`,
@@ -304,12 +291,6 @@ export default async function handler(req, res) {
     }
 
     if (!result.ok) { await logWebhookError('AI: ' + result.error); return res.status(200).json({ ok: false, ai_failed: true, error: result.error }); }
-
-    // 9. Inkomend bericht opslaan (upsert-guard tegen race met poll-cron/webhook-retry).
-    await supabaseAdmin.from('lisa_messages').upsert({
-      conversation_id: conv.id, direction: 'in', content: msgContent, message_type: msgType,
-      attachment_url: msgAttachmentUrl, ai_generated: false, ghl_message_id: messageId || null,
-    }, { onConflict: 'ghl_message_id', ignoreDuplicates: true });
 
     // 9b. Door de volger opgegeven gegevens opslaan + (fire-and-forget) GHL-contact-match.
     const dd = result.detected_data || {};
