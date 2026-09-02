@@ -344,6 +344,18 @@ export default async function handler(req, res) {
               continue;
             }
             stats.messages_upserted++;
+            // BP3 (2026-09-02) — unread_count verhogen bij inbound. Skip
+            // outbound (dat hebben wij zelf verstuurd, telt niet als ongelezen).
+            // Read-then-update; race met simultaneous poll is uiterst zeldzaam
+            // want deze cron is single-run per instance.
+            if (direction === 'in') {
+              const { data: convRow } = await supabaseAdmin
+                .from('lisa_conversations')
+                .select('unread_count').eq('id', lisaConvId).maybeSingle();
+              await supabaseAdmin.from('lisa_conversations').update({
+                unread_count: (convRow?.unread_count || 0) + 1,
+              }).eq('id', lisaConvId);
+            }
           }
         }
       }

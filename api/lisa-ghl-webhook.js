@@ -211,6 +211,14 @@ export default async function handler(req, res) {
       live_messages_received_total: (settings.live_messages_received_total || 0) + 1,
     }).eq('id', 1);
 
+    // BP3 (2026-09-02) — unread_count verhogen op de conv-rij (skip bij duplicate
+    // om dubbeltellen te vermijden). Frontend reset 'em naar 0 bij open thread.
+    if (!wasDuplicate) {
+      await supabaseAdmin.from('lisa_conversations').update({
+        unread_count: (conv.unread_count || 0) + 1,
+      }).eq('id', conv.id);
+    }
+
     // Duplicate → skip AI (voorkomt burst bij GHL-retry).
     if (wasDuplicate) {
       console.log('[lisa-ghl-webhook] duplicate delivery — insert skipped', { messageId });

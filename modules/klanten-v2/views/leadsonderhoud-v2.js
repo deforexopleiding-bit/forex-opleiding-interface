@@ -545,7 +545,9 @@
       showMail: {},   // toon mail-compose (true|false per lead)
       templateCache: {}, quickCache: {},
     },
-    poll: { handle: null, running: false, intervalMs: 18000 },
+    // BP3 v6 (2026-09-02) — poll versneld van 18s naar 6s. document.hidden
+    // en hash-check dempen de kost. Nieuwe berichten voelen instant.
+    poll: { handle: null, running: false, intervalMs: 6000 },
     // v=19: filter voor gesprekken-lijst (client-side over item.unread).
     filter: 'all',   // 'all' | 'unread' | 'read'
   };
@@ -1815,7 +1817,7 @@
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
           <span style="font-size:13.5px;font-weight:${nw ? '700' : '500'};color:${nw ? 'var(--text-1)' : 'var(--text-2)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(naam)}</span>
-          ${nw ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--rose);flex-shrink:0" title="Ongelezen"></span>' : ''}
+          ${nw ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--rose);color:#fff;font-size:10.5px;font-weight:700;flex-shrink:0" title="${row.unread || 1} ongelezen">${(row.unread || 1) > 99 ? '99+' : (row.unread || 1)}</span>` : ''}
           <span style="margin-left:auto;font-size:10.5px;font-family:\'IBM Plex Mono\',monospace;color:var(--text-3);flex-shrink:0">${esc(tijd)}</span>
         </div>
         <div style="font-size:12.5px;color:${nw ? 'var(--text-1)' : 'var(--text-2)'};font-weight:${nw ? '500' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(preview)}</div>

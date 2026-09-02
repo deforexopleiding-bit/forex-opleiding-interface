@@ -67,7 +67,12 @@
   };
   const _compose = { text: '', sending: false };
   const _booking = { fetched: false, loading: false, url: null, configured: false };
-  const _poll    = { handle: null, running: false, intervalMs: 18000 };
+  // BP3 v6 (2026-09-02) — snippets (wa_snippets hergebruikt) voor Lisa-composer.
+  const _snip    = { fetched: false, loading: false, items: null, error: null, open: false };
+  // BP3 v6 (2026-09-02) — poll versneld van 18s naar 6s. document.hidden-pauze
+  // en hash-check voorkomen dat we het onnodig belasten. Nieuwe berichten
+  // verschijnen daardoor gevoelsmatig instant.
+  const _poll    = { handle: null, running: false, intervalMs: 6000 };
 
   /* ── HTTP-helpers ────────────────────────────────────────────────────── */
   async function tryFetch(label, url, timeoutMs) {
@@ -405,10 +410,82 @@
       if (el) { if (oldRight) split.replaceChild(el, oldRight); else split.appendChild(el); }
     }
     queueMicrotask(() => _loadThread(id));
+    // BP3 v6 (2026-09-02) — mark-as-read op open: reset unread_count naar 0
+    // via PATCH. Optimistic UI-update op de rij + het lokale state-object.
+    if (row && Number(row.unread_count || 0) > 0) {
+      row.unread_count = 0;
+      // Optimistic strip de rose-styling van de open rij.
+      if (newRow) { newRow.classList.remove('nw'); }
+      apiCall('PATCH', '/api/lisa-conversations?id=' + encodeURIComponent(id), { unread_count: 0 })
+        .catch((e) => console.warn('[lisa] mark-as-read faalde:', e?.message || e));
+    }
   };
 
   /* ── Compose (DEEL A intervene) ─────────────────────────────────────── */
   window.__lisaComposeInput = (el) => { _compose.text = el.value; _updateSendBtn(); };
+
+  // ── Snippets (BP3 v6, 2026-09-02) — hergebruikt wa_snippets ─────────────
+  async function _fetchSnippets() {
+    if (_snip.fetched || _snip.loading) return;
+    _snip.loading = true;
+    const j = await tryFetch('lisa-snippets', '/api/wa-snippets-list');
+    _snip.loading = false; _snip.fetched = true;
+    if (!j) { _snip.error = 'Kon snippets niet laden'; return; }
+    _snip.items = Array.isArray(j.items) ? j.items : [];
+  }
+  window.__lisaSnipOpen = async () => {
+    await _fetchSnippets();
+    _snip.open = true;
+    _renderSnipModal();
+  };
+  window.__lisaSnipClose = () => {
+    _snip.open = false;
+    const el = document.getElementById('lisaSnipModal');
+    if (el) el.remove();
+  };
+  window.__lisaSnipInsert = (id) => {
+    const s = (_snip.items || []).find((x) => String(x.id) === String(id));
+    if (!s) return;
+    const conv = _thread.conversation || _live.convs.items.find((c) => String(c.id) === String(_thread.convId));
+    const name  = conv?.contact_name || conv?.instagram_handle || '';
+    const first = String(name).trim().split(/\s+/)[0] || '';
+    const text = String(s.body_text || '')
+      .replace(/\{voornaam\}/g, first)
+      .replace(/\{naam\}/g, name);
+    // Voeg toe achter huidige tekst (met dubbele newline als er al iets staat).
+    const cur = String(_compose.text || '');
+    _compose.text = (cur ? cur.replace(/\s+$/, '') + '\n\n' : '') + text;
+    const ta = document.getElementById('lisaComposeInput');
+    if (ta) { ta.value = _compose.text; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    _updateSendBtn();
+    window.__lisaSnipClose();
+  };
+  function _renderSnipModal() {
+    const existing = document.getElementById('lisaSnipModal');
+    if (existing) existing.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'lisaSnipModal';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) window.__lisaSnipClose(); });
+    const items = _snip.items || [];
+    const list = items.length
+      ? items.map((s) => `<button data-snip-id="${esc(String(s.id))}" onclick="__lisaSnipInsert('${esc(String(s.id))}')"
+          style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;font-family:inherit;color:var(--text-1)">
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:2px">${esc(s.titel || '')}${s.is_mine ? '' : ' <span style="font-size:10px;color:var(--text-3);font-weight:400">(gedeeld)</span>'}</div>
+          <div style="font-size:11.5px;color:var(--text-2);white-space:pre-wrap;line-height:1.35;overflow:hidden;text-overflow:ellipsis;max-height:60px">${esc(String(s.body_text || '').slice(0, 200))}</div>
+        </button>`).join('')
+      : `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Nog geen snippets. Beheer via Leadsonderhoud → Gesprekken → "Beheer snippets".</div>`;
+    wrap.innerHTML = `<div style="background:var(--surface);border-radius:var(--r);padding:16px 18px;max-width:520px;width:100%;max-height:75vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:15px;font-weight:600">Kies een snippet</div>
+        <button onclick="__lisaSnipClose()" style="background:transparent;border:0;font-size:20px;cursor:pointer;color:var(--text-3);padding:0 4px" title="Sluiten">×</button>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Klik om in te voegen in het bericht. Placeholders {voornaam} en {naam} worden automatisch gevuld.</div>
+      ${_snip.error ? `<div style="padding:12px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px;margin-bottom:10px">⚠ ${esc(_snip.error)}</div>` : ''}
+      ${_snip.loading ? `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">Laden…</div>` : list}
+    </div>`;
+    document.body.appendChild(wrap);
+  }
   function _updateSendBtn() {
     const btn = document.getElementById('lisaSendBtn');
     if (!btn) return;
@@ -976,15 +1053,29 @@
     const phaseColor = c.qualified ? 'emerald' : (c.phase === 'disqualified' ? 'rose' : c.phase === 'cold' ? 'text-3' : 'blue');
     const takeoverBadge = c.human_takeover ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">MENS</span>` : '';
     const bookedBadge = c.call_booked ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">CALL</span>` : '';
-    return `<div class="lisa-conv-row ${onCls}" data-row-id="${rowIdAttr}" onclick="__lisaSelConv('${rowIdClick}')"
-      style="display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;${onCls === 'on' ? 'background:var(--surface-2)' : ''}">
+    // BP3 v6 (2026-09-02) — ongelezen-styling: rose-strip links + primary-tint
+    // achtergrond + vette naam/preview + count-badge rechtsboven.
+    const unread = Number(c.unread_count || 0);
+    const nw = unread > 0;
+    const rowStyle = [
+      'display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative',
+      nw ? 'background:var(--rose-soft, rgba(220,53,90,.06));border-left:4px solid var(--rose, #DC355A);padding-left:10px' : 'padding-left:14px',
+      onCls === 'on' ? 'background:var(--surface-2)' : '',
+      !nw ? 'opacity:.9' : '',
+    ].filter(Boolean).join(';');
+    const unreadBadge = nw
+      ? `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--rose);color:#fff;font-size:10.5px;font-weight:700;flex-shrink:0" title="${unread} ongelezen">${unread > 99 ? '99+' : unread}</span>`
+      : '';
+    return `<div class="lisa-conv-row ${onCls} ${nw ? 'nw' : ''}" data-row-id="${rowIdAttr}" onclick="__lisaSelConv('${rowIdClick}')"
+      style="${rowStyle}">
       ${H.av(name || '?', 34)}
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px">
-          <span style="font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+          <span style="font-size:13.5px;font-weight:${nw ? '700' : '500'};color:${nw ? 'var(--text-1)' : 'var(--text-2)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+          ${unreadBadge}
           <span style="margin-left:auto;font-size:10.5px;font-family:'IBM Plex Mono',monospace;color:var(--text-3);flex-shrink:0">${esc(_fmtTijd(c.last_message_at))}</span>
         </div>
-        <div style="font-size:12.5px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.preview || '—')}</div>
+        <div style="font-size:12.5px;font-weight:${nw ? '500' : '400'};color:${nw ? 'var(--text-1)' : 'var(--text-2)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.preview || '—')}</div>
         <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(handle)}</div>
         <div style="margin-top:6px;display:flex;gap:5px;align-items:center;flex-wrap:wrap">
           <span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--${phaseColor}-soft,var(--surface-2));color:var(--${phaseColor});font-weight:600">${esc(c.phase || '—')}</span>
@@ -1045,7 +1136,10 @@
         <div style="display:flex;gap:8px;align-items:flex-end">
           <textarea id="lisaComposeInput" oninput="__lisaComposeInput(this)" placeholder="${composeDisabled ? 'Sandbox — reageren uitgeschakeld' : 'Typ een IG-DM…'}" ${composeDisabled ? 'disabled' : ''}
             style="flex:1;min-height:56px;max-height:200px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font:inherit;font-size:13px;background:var(--surface);color:var(--text-1);resize:vertical;line-height:1.4">${esc(_compose.text || '')}</textarea>
-          <button id="lisaSendBtn" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;padding:8px 16px;font-weight:600" ${composeDisabled ? 'disabled' : ''} onclick="__lisaSend()">Verstuur</button>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:6px 10px" ${composeDisabled ? 'disabled' : ''} onclick="__lisaSnipOpen()" title="Snippet invoegen">📋 Snippet</button>
+            <button id="lisaSendBtn" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;padding:8px 16px;font-weight:600" ${composeDisabled ? 'disabled' : ''} onclick="__lisaSend()">Verstuur</button>
+          </div>
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--text-3)">${composeHint}</div>
       </div>`;

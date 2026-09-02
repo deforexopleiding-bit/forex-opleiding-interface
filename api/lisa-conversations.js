@@ -67,7 +67,9 @@ export default async function handler(req, res) {
     if (action === 'list_live') {
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
       let q = supabaseAdmin.from('lisa_conversations')
-        .select('id, contact_name, instagram_handle, ghl_contact_id, phase, qualified, call_booked, human_takeover, followup_paused, source, created_at, last_message_at')
+        // BP3 (2026-09-02) — unread_count meesturen zodat de UI ongelezen
+        // gesprekken duidelijk kan markeren.
+        .select('id, contact_name, instagram_handle, ghl_contact_id, phase, qualified, call_booked, human_takeover, followup_paused, source, created_at, last_message_at, unread_count')
         .eq('is_sandbox', false)
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
@@ -185,6 +187,16 @@ export default async function handler(req, res) {
     }
     if (body.disqualified_reason !== undefined) updates.disqualified_reason = body.disqualified_reason || null;
     if (body.followup_paused !== undefined) updates.followup_paused = !!body.followup_paused;
+    // BP3 (2026-09-02) — unread_count reset. Alleen 0 toestaan (client-side
+    // signaal "gebruiker heeft het gesprek geopend"). Geen andere waarden;
+    // increment gebeurt uitsluitend server-side bij inbound-ingest.
+    if (body.unread_count !== undefined) {
+      const n = Number(body.unread_count);
+      if (!Number.isFinite(n) || n !== 0) {
+        return res.status(400).json({ error: 'unread_count kan alleen op 0 gezet worden (mark-as-read).' });
+      }
+      updates.unread_count = 0;
+    }
 
     const wantTakeover = body.human_takeover !== undefined;
     if (wantTakeover) {
@@ -195,13 +207,19 @@ export default async function handler(req, res) {
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Geen velden om bij te werken.' });
 
     // Permission-check: takeover-flip vereist .takeover, statusvelden .status_update.
+    // BP3 (2026-09-02) — unread_count-reset (mark-as-read) valt onder de basis
+    // .view permissie, want dat is functioneel deel van "gesprek openen".
     const wantStatus = ['phase','qualified','call_booked','disqualified_reason','followup_paused']
       .some((k) => body[k] !== undefined);
+    const wantUnreadOnly = !wantTakeover && !wantStatus && body.unread_count !== undefined;
     if (wantTakeover && !(await requirePermission(req, 'lisa.conversation.takeover'))) {
       return res.status(403).json({ error: 'Geen rechten (lisa.conversation.takeover)' });
     }
     if (wantStatus && !(await requirePermission(req, 'lisa.conversation.status_update'))) {
       return res.status(403).json({ error: 'Geen rechten (lisa.conversation.status_update)' });
+    }
+    if (wantUnreadOnly && !(await requirePermission(req, 'lisa.conversation.view'))) {
+      return res.status(403).json({ error: 'Geen rechten (lisa.conversation.view)' });
     }
 
     const { data, error } = await supabaseAdmin.from('lisa_conversations').update(updates).eq('id', id).select().single();
