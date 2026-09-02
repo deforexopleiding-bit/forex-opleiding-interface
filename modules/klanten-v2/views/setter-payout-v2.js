@@ -90,8 +90,10 @@
   window.__spSetCustomTo   = (v) => { _sp.to   = String(v || ''); if (_sp.from && _sp.to) loadOverview(_sp.selectedSetter).catch(() => {}); };
 
   window.__spRunPayout = async () => {
-    const perms = (window.RBAC?.getUserPermissions && window.RBAC.getUserPermissions()) || new Set();
-    if (!perms.has('*') && !perms.has('setter.payout.manage')) {
+    // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
+    // gebruik canSync (super_admin-wildcard zit al in de helper).
+    const canPayout = !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync('setter.payout.manage'));
+    if (!canPayout) {
       window.KV?.toast?.('Geen rechten (setter.payout.manage)', 'warn'); return;
     }
     const setterId = _sp.selectedSetter || (_sp.data && _sp.data.setter_user_id);
@@ -266,9 +268,16 @@
   function overzichtView() {
     if (!_sp.data && !_sp.loading && !_sp.error) queueMicrotask(() => loadOverview(_sp.selectedSetter));
     if (!_sp.timeline && !_sp.timelineLoading && !_sp.timelineError) queueMicrotask(() => loadTimeline(_sp.selectedSetter));
-    const perms = (window.RBAC?.getUserPermissions && window.RBAC.getUserPermissions()) || new Set();
-    const isAdmin = perms.has('*') || perms.has('setter.ledger.admin');
-    const canPayout = perms.has('*') || perms.has('setter.payout.manage');
+    // BP3 v8 (2026-09-02) BUG-FIX — RBAC.getUserPermissions bestaat NIET;
+    // gebruik canSync + ensurePermissionsLoaded. Zonder deze fix zag zelfs
+    // super_admin geen staff-picker of "Uitbetaalronde draaien"-knop.
+    if (window.RBAC && typeof window.RBAC.ensurePermissionsLoaded === 'function' && !_sp._permsWarmed) {
+      _sp._permsWarmed = true;
+      window.RBAC.ensurePermissionsLoaded().then(() => { if (window.DFO?.render) window.DFO.render(); }).catch(() => {});
+    }
+    const _canSync = (k) => !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(k));
+    const isAdmin  = _canSync('setter.ledger.admin');
+    const canPayout = _canSync('setter.payout.manage');
     if (isAdmin && !_spStaff.items && !_spStaff.loading) queueMicrotask(() => loadStaff());
 
     const d = _sp.data;
