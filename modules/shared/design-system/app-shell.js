@@ -88,7 +88,7 @@
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
-    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Bronnen', 'Vragenlijst', 'Statistieken'] },
+    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Vragenlijst', 'Statistieken'] },
     // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt
     // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
@@ -139,6 +139,9 @@
     // SAMS. Setter heeft geen operationele reden om deze te zien.
     'leadsonderhoud/Wachtrij':         SAMS,
     'leadsonderhoud/Toegang-aanvragen': SAMS,
+    // BP3 v7 (2026-09-02): Templates-tab ook zichtbaar voor appointmentsetter.
+    // Romy mag templates aanmaken/bewerken (heeft snippets.manage uit BP1-seed).
+    'leadsonderhoud/Templates':        SAMS.concat(['appointmentsetter']),
     'onboarding/Archief':      SAMS,
     // BP3 v4 (2026-09-01): Romy krijgt in Lisa alleen Gesprekken; dashboard
     // en statistieken blijven manager+ voorbehouden.

@@ -755,6 +755,164 @@
     'Wil eerst zelf proberen', 'Slecht moment', 'Geen budget nu', 'Anders',
   ];
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // BP3 v6 (2026-09-02) — GEDEELDE TEMPLATES-PICKER
+  //
+  // Één modal, gebruikt in WhatsApp-composer (leadsonderhoud), IG-composer
+  // (lisa) en mail-composer (leadsonderhoud). Filtert op categorie + zoekterm.
+  // Klik voegt de body-tekst in via callback. Placeholders {voornaam}/{naam}
+  // worden client-side resolved uit `contactName`.
+  //
+  // openTemplatePicker({
+  //   contactName?: string,        // voor {voornaam}/{naam}-resolve
+  //   onInsert: (bodyText) => void, // callback met resolved tekst
+  //   channelLabel?: string,       // klein UI-label ("WhatsApp"/"E-mail"/"Instagram")
+  // })
+  // ═══════════════════════════════════════════════════════════════════════
+  const _tplState = { items: null, categories: null, loading: false, error: null, fetchedAt: 0 };
+
+  async function _tplFetch() {
+    if (_tplState.items && (Date.now() - _tplState.fetchedAt) < 60 * 1000 && !_tplState.error) return _tplState;
+    if (_tplState.loading) return _tplState;
+    _tplState.loading = true; _tplState.error = null;
+    try {
+      const r = await window.KV.authedFetch('/api/wa-snippets-list');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      _tplState.items = Array.isArray(j.items) ? j.items : [];
+      _tplState.categories = Array.isArray(j.categories) ? j.categories : [];
+      _tplState.fetchedAt = Date.now();
+    } catch (e) {
+      _tplState.error = e?.message || 'Kon templates niet laden';
+      if (!_tplState.items) _tplState.items = [];
+      if (!_tplState.categories) _tplState.categories = [];
+    } finally {
+      _tplState.loading = false;
+    }
+    return _tplState;
+  }
+
+  function _tplResolve(body, contactName) {
+    const name  = String(contactName || '').trim();
+    const first = name.split(/\s+/)[0] || '';
+    return String(body || '')
+      .replace(/\{voornaam\}/g, first || 'daar')
+      .replace(/\{naam\}/g, name || 'daar');
+  }
+
+  function _tplEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;',
+    }[c]));
+  }
+
+  async function openTemplatePicker(opts) {
+    const options = opts || {};
+    const contactName  = options.contactName || '';
+    const onInsert     = typeof options.onInsert === 'function' ? options.onInsert : null;
+    const channelLabel = options.channelLabel || '';
+    if (!onInsert) { console.warn('[templates-picker] onInsert-callback vereist'); return; }
+
+    // State voor deze picker-instance.
+    let selectedCategory = ''; // '' = alle
+    let searchTerm       = '';
+
+    // Modal-root
+    const existing = document.getElementById('kvTemplatePicker');
+    if (existing) existing.remove();
+    const root = document.createElement('div');
+    root.id = 'kvTemplatePicker';
+    root.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
+    root.addEventListener('click', (ev) => { if (ev.target === root) closeModal(); });
+    document.body.appendChild(root);
+
+    function closeModal() { if (root.parentNode) root.parentNode.removeChild(root); }
+
+    function paint(state) {
+      const items = state.items || [];
+      const cats  = state.categories || [];
+      const filtered = items.filter((it) => {
+        if (selectedCategory && String(it.category || '') !== selectedCategory) return false;
+        if (searchTerm) {
+          const q = searchTerm.toLowerCase();
+          const hay = ((it.titel || '') + ' ' + (it.body_text || '') + ' ' + (it.category || '')).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      // Groepeer per categorie voor de weergave.
+      const grouped = new Map();
+      for (const it of filtered) {
+        const key = it.category && String(it.category).trim() ? String(it.category) : '(zonder categorie)';
+        if (!grouped.has(key)) grouped.set(key, []);
+        grouped.get(key).push(it);
+      }
+      const groupsHtml = grouped.size > 0
+        ? [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0], 'nl')).map(([cat, arr]) => `
+            <div style="margin-bottom:14px">
+              <div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px">${_tplEsc(cat)}</div>
+              ${arr.map((it) => `
+                <button data-tpl-id="${_tplEsc(String(it.id))}"
+                  style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;font-family:inherit;color:var(--text-1)">
+                  <div style="font-size:12.5px;font-weight:600;margin-bottom:2px">${_tplEsc(it.titel || '')}${it.is_mine ? '' : ' <span style="font-size:10px;color:var(--text-3);font-weight:400">(gedeeld)</span>'}</div>
+                  <div style="font-size:11.5px;color:var(--text-2);white-space:pre-wrap;line-height:1.35;overflow:hidden;text-overflow:ellipsis;max-height:60px">${_tplEsc(String(it.body_text || '').slice(0, 220))}</div>
+                </button>
+              `).join('')}
+            </div>
+          `).join('')
+        : `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Geen templates die matchen.</div>`;
+
+      const chipAlle = `<button data-tpl-cat="" class="chip ${!selectedCategory ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px">Alle</button>`;
+      const chipCats = cats.map((c) => `<button data-tpl-cat="${_tplEsc(c)}" class="chip ${selectedCategory === c ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px">${_tplEsc(c)}</button>`).join(' ');
+
+      root.innerHTML = `<div style="background:var(--surface);border-radius:var(--r);padding:16px 18px;max-width:640px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:15px;font-weight:600">Kies template${channelLabel ? ' · ' + _tplEsc(channelLabel) : ''}</div>
+          <button data-tpl-close="1" style="background:transparent;border:0;font-size:20px;cursor:pointer;color:var(--text-3);padding:0 4px" title="Sluiten">×</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Klik om in te voegen in het bericht. Placeholders {voornaam} en {naam} worden automatisch gevuld.</div>
+        <input id="kvTplSearch" type="search" placeholder="Zoek in titel of tekst…" value="${_tplEsc(searchTerm)}"
+          style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);font-size:12.5px;margin-bottom:8px" />
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">${chipAlle}${chipCats}</div>
+        ${state.loading ? `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">Laden…</div>` : ''}
+        ${state.error ? `<div style="padding:10px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px;margin-bottom:10px">⚠ ${_tplEsc(state.error)}</div>` : ''}
+        <div style="flex:1;overflow-y:auto;min-height:0">${state.loading && !items.length ? '' : groupsHtml}</div>
+      </div>`;
+
+      // Event handlers
+      root.querySelectorAll('[data-tpl-close]').forEach((el) => el.addEventListener('click', closeModal));
+      root.querySelectorAll('[data-tpl-cat]').forEach((el) => el.addEventListener('click', () => {
+        selectedCategory = el.getAttribute('data-tpl-cat');
+        paint(_tplState);
+      }));
+      const searchEl = root.querySelector('#kvTplSearch');
+      if (searchEl) {
+        searchEl.addEventListener('input', (e) => {
+          searchTerm = e.target.value || '';
+          paint(_tplState);
+          // Refocus zonder rerender-jump.
+          const s = root.querySelector('#kvTplSearch');
+          if (s) { s.focus(); s.setSelectionRange(searchTerm.length, searchTerm.length); }
+        });
+      }
+      root.querySelectorAll('[data-tpl-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.getAttribute('data-tpl-id');
+          const it = items.find((x) => String(x.id) === String(id));
+          if (!it) return;
+          const resolved = _tplResolve(it.body_text, contactName);
+          try { onInsert(resolved); } catch (e) { console.warn('[templates-picker] onInsert threw:', e?.message || e); }
+          closeModal();
+        });
+      });
+    }
+
+    // Toon eerst de placeholder-state (loading spinner) — dan fetchen.
+    paint({ items: [], categories: [], loading: true, error: null });
+    const st = await _tplFetch();
+    paint(st);
+  }
+
   window.KV_V2 = window.KV_V2 || {};
   window.KV_V2.helpers = {
     kpi, kpis, toolbar, chips, search, table, av, pill, trend, voorbeeldBanner,
@@ -780,6 +938,8 @@
     // "is er iets ingevuld"-test aan voor invoer die niet via een invoerveld
     // loopt (knoppen, chips). Zie het blok hierboven.
     registreerVuilCheck,
+    // BP3 v6 (2026-09-02): gedeelde templates-picker (WA + IG + mail).
+    openTemplatePicker,
   };
   console.debug('[_shared-v2] helpers + stableSearch + joost helpers registered');
 })();

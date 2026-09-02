@@ -187,15 +187,16 @@ export default async function handler(req, res) {
     }
     if (body.disqualified_reason !== undefined) updates.disqualified_reason = body.disqualified_reason || null;
     if (body.followup_paused !== undefined) updates.followup_paused = !!body.followup_paused;
-    // BP3 (2026-09-02) — unread_count reset. Alleen 0 toestaan (client-side
-    // signaal "gebruiker heeft het gesprek geopend"). Geen andere waarden;
-    // increment gebeurt uitsluitend server-side bij inbound-ingest.
+    // BP3 v7 (2026-09-02) — unread_count whitelist: 0 (mark-as-read) OF 1
+    // (handmatig markeer-als-ongelezen). Andere waarden worden geweigerd
+    // zodat er niet vanuit de UI arbitrair opgehoogd kan worden. Server-
+    // side increment gebeurt uitsluitend in de webhook + poll-cron.
     if (body.unread_count !== undefined) {
       const n = Number(body.unread_count);
-      if (!Number.isFinite(n) || n !== 0) {
-        return res.status(400).json({ error: 'unread_count kan alleen op 0 gezet worden (mark-as-read).' });
+      if (!Number.isFinite(n) || (n !== 0 && n !== 1)) {
+        return res.status(400).json({ error: 'unread_count kan alleen 0 (gelezen) of 1 (ongelezen) zijn.' });
       }
-      updates.unread_count = 0;
+      updates.unread_count = n;
     }
 
     const wantTakeover = body.human_takeover !== undefined;

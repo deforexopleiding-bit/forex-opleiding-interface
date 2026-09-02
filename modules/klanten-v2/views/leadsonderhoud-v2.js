@@ -1129,63 +1129,52 @@
   // Canned quick-replies — bewust een korte vaste leadsonderhoud-set (niet
   // afhankelijk van whatsapp_quick_replies-tabel die conversation_id vereist).
   // Uitbreidbaar in code; later evt. server-side per module.
-  const _LS_QUICK_REPLIES = [
-    { title: 'Vraag om check-in',   body: 'Hey! Hoe gaat het met de proefperiode? Zijn er nog vragen die ik kan beantwoorden?' },
-    { title: 'Herinnering call',    body: 'Zullen we een korte kennismakingscall inplannen? Kies gerust een moment dat jou uitkomt.' },
-    { title: 'Vraag om feedback',   body: 'Wat vind je tot nu toe van de lessen? Ik ben benieuwd naar je eerste indruk.' },
-    { title: 'Extra hulp aanbieden',body: 'Als je ergens tegenaan loopt: laat het weten, ik help je graag verder.' },
-    { title: 'Bedankt voor reactie',body: 'Dank voor je bericht! Ik pak het zsm op en laat het je weten.' },
-  ];
+  // BP3 v6 (2026-09-02): _LS_QUICK_REPLIES + __lsInbQuickPicker + de vrije
+  // wa_snippets picker/manager zijn vervangen door de gedeelde vrije-templates-
+  // picker (KV_V2.helpers.openTemplatePicker) + de Templates-tab. Zie
+  // __lsInbFreeTplPicker hierboven en templatesView() onderaan.
 
   // v=9 FIX-SNEL-DOEL: target ('wa' of 'mail') expliciet meegeven vanuit
   // de knop-context. Voorkomt dat een Snel-klik vanuit de mail-toolbar
   // tekst in het WA-veld plakt. Zonder target: heuristiek (mail-form
   // open → mail; anders WA) — legacy fallback voor eventuele callers.
-  window.__lsInbQuickPicker = (target) => {
+  // BP3 v6 (2026-09-02) — vrije templates-picker (WA + mail). Vervangt de oude
+  // hardcoded __lsInbQuickPicker + wa_snippets __lsInbSnippetPicker. Gebruikt
+  // de shared KV_V2.helpers.openTemplatePicker die klikt = body inserten.
+  // Meta-"Sjabloon" (leadsonderhoud-gesprek-templates) is een aparte flow.
+  window.__lsInbFreeTplPicker = (target) => {
     const conv = _lsInbCurrentConv();
     if (!conv) return;
     const leadId = conv.lead_id;
-    const mailOpen = !!_lsInb.compose.showMail[leadId];
-    const explicit = (target === 'wa' || target === 'mail') ? target : null;
-    const useMail = explicit ? (explicit === 'mail') : mailOpen; // default = WA
-    const label = useMail ? 'e-mail' : 'WhatsApp';
-    _lsInbOpenModal(`
-      <div style="font-size:15px;font-weight:600;margin-bottom:6px">Snel-antwoord invoegen</div>
-      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">Kies er één. De tekst wordt in het <b>${esc(label)}</b>-veld gezet (achter een eventuele bestaande draft, gescheiden door een lege regel). Je kan 'em nog aanpassen vóór verzenden.</div>
-      <div id="lsInbQrList" style="display:flex;flex-direction:column;gap:6px;max-height:60vh;overflow-y:auto">
-        ${_LS_QUICK_REPLIES.map((it, i) => `
-          <button class="btn btn-ghost btn-sm" data-qr-idx="${i}" style="text-align:left;justify-content:flex-start;padding:10px 12px;height:auto;white-space:normal">
-            <div style="font-weight:600;margin-bottom:2px">${esc(it.title)}</div>
-            <div style="font-size:12px;color:var(--text-3);white-space:pre-wrap;line-height:1.45">${esc(it.body)}</div>
-          </button>`).join('')}
-      </div>
-      <div style="margin-top:14px;text-align:right"><button id="lsInbQrCancel" class="btn btn-ghost btn-sm">Sluiten</button></div>
-    `, { maxWidth: 560 });
-    document.getElementById('lsInbQrCancel').addEventListener('click', _lsInbCloseModal);
-    // Helper: append met scheidingsteken.
-    const appendWithSep = (existing, addition) => {
-      const ex = String(existing || '');
-      if (!ex.trim()) return addition;
-      // Als bestaande draft niet op newline eindigt: dubbele newline ertussen.
-      return ex.replace(/\s+$/, '') + '\n\n' + addition;
-    };
-    document.querySelectorAll('#lsInbQrList [data-qr-idx]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = Number(btn.getAttribute('data-qr-idx'));
-        const it = _LS_QUICK_REPLIES[idx];
-        if (!it) return;
+    const naam   = conv.contact_name || conv.voornaam || _lsInbRowVan(conv) || '';
+    const useMail = target === 'mail';
+    const label  = useMail ? 'E-mail' : 'WhatsApp';
+    if (!window.KV_V2 || !window.KV_V2.helpers || !window.KV_V2.helpers.openTemplatePicker) {
+      _lsInbToast('Templates-picker niet beschikbaar (helper niet geladen)', 'warn');
+      return;
+    }
+    window.KV_V2.helpers.openTemplatePicker({
+      contactName:  naam,
+      channelLabel: label,
+      onInsert: (body) => {
+        const appendWithSep = (existing, addition) => {
+          const ex = String(existing || '');
+          if (!ex.trim()) return addition;
+          return ex.replace(/\s+$/, '') + '\n\n' + addition;
+        };
         if (useMail) {
-          _lsInb.compose.draftsMailText[leadId] = appendWithSep(_lsInb.compose.draftsMailText[leadId], it.body);
-          // Zorg dat het mail-form open staat na invoegen.
+          _lsInb.compose.draftsMailText[leadId] = appendWithSep(_lsInb.compose.draftsMailText[leadId], body);
           _lsInb.compose.showMail[leadId] = true;
         } else {
-          _lsInb.compose.draftsWa[leadId] = appendWithSep(_lsInb.compose.draftsWa[leadId], it.body);
+          _lsInb.compose.draftsWa[leadId] = appendWithSep(_lsInb.compose.draftsWa[leadId], body);
         }
         _lsInbRepaintCompose();
-        _lsInbCloseModal();
-      });
+      },
     });
   };
+
+  // BP3 v6 (2026-09-02): __lsInbQuickPicker verwijderd. Vervangen door
+  // __lsInbFreeTplPicker (hierboven) die de gedeelde templates-picker gebruikt.
 
   // Template-cache — één per open sessie (server-refetch na 5 min zou beter zijn,
   // maar approved templates wijzigen zelden; TTL later toevoegen als 't nodig blijkt).
@@ -1203,256 +1192,10 @@
     return _lsTpl.items;
   }
 
-  // ── BP1 Onderdeel B — Snippet-picker + insert-op-cursor ──────────────
-  // Snippets zijn korte tekst-blokjes die op de cursor-positie in de
-  // composer worden ingevoegd (i.p.v. de tekst te vervangen zoals de
-  // template-picker doet). Variabelen: {voornaam} en {naam} worden
-  // client-side ingevuld vanuit de lead-context ('daar' als fallback).
-  const _lsSnip = { loading: false, items: null, error: null, fetchedAt: 0 };
-  async function _lsInbFetchSnippets() {
-    if (_lsSnip.items && (Date.now() - _lsSnip.fetchedAt) < 60 * 1000 && !_lsSnip.error) return _lsSnip.items;
-    if (_lsSnip.loading) return _lsSnip.items || [];
-    _lsSnip.loading = true; _lsSnip.error = null;
-    const j = await tryFetch('ls-snippets', '/api/wa-snippets-list');
-    _lsSnip.loading = false;
-    if (!j) { _lsSnip.error = 'Kon snippets niet laden'; return _lsSnip.items || []; }
-    _lsSnip.items = Array.isArray(j.items) ? j.items : [];
-    _lsSnip.fetchedAt = Date.now();
-    return _lsSnip.items;
-  }
-  function _lsInbResolveSnippet(body, conv) {
-    // Var-invulling: {voornaam} / {naam} → conv.voornaam of split van conv.naam.
-    // Fallback 'daar' bij ontbreken (mimicked pattern uit cron-toegang-aanvragen).
-    const rawNaam = String(conv?.naam || '').trim();
-    const voornaam = String(conv?.voornaam || rawNaam.split(/\s+/)[0] || 'daar').trim() || 'daar';
-    const naam = rawNaam || voornaam;
-    return String(body || '')
-      .replace(/\{voornaam\}/gi, voornaam)
-      .replace(/\{naam\}/gi, naam);
-  }
-  function _lsInbInsertAtCursor(taEl, text) {
-    if (!taEl) return;
-    const start = taEl.selectionStart != null ? taEl.selectionStart : (taEl.value || '').length;
-    const end   = taEl.selectionEnd   != null ? taEl.selectionEnd   : start;
-    const cur   = taEl.value || '';
-    const nieuw = cur.slice(0, start) + text + cur.slice(end);
-    taEl.value = nieuw;
-    // Cursor achter ingevoegde tekst.
-    const nieuwePos = start + text.length;
-    try { taEl.setSelectionRange(nieuwePos, nieuwePos); } catch (_) { /* fail-soft */ }
-    // Handmatig input-event triggeren zodat oninput-handler _lsInb.compose.draftsWa bijwerkt.
-    taEl.dispatchEvent(new Event('input', { bubbles: true }));
-    taEl.focus();
-  }
-  window.__lsInbSnippetPicker = () => { _lsInbOpenSnippetPicker(); };
-  async function _lsInbOpenSnippetPicker() {
-    const conv = _lsInbCurrentConv();
-    if (!conv) return;
-    const leadId = conv.lead_id;
-    _lsInbOpenModal(`
-      <div style="font-size:15px;font-weight:600;margin-bottom:4px">Kies een snippet om in te voegen</div>
-      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">
-        Wordt <b>ingevoegd op cursor-positie</b> — je kunt 'm daarna nog bewerken.
-        Variabelen zoals <code>{voornaam}</code> worden ingevuld met de lead-naam.
-      </div>
-      <div id="lsInbSnipList" style="max-height:55vh;overflow-y:auto">
-        <div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">Snippets laden…</div>
-      </div>
-      <div style="margin-top:14px;text-align:right">
-        <button id="lsInbSnipManage" class="btn btn-ghost btn-sm" style="margin-right:6px">Beheer snippets…</button>
-        <button id="lsInbSnipClose" class="btn btn-ghost btn-sm">Sluiten</button>
-      </div>
-    `, { maxWidth: 620 });
-    document.getElementById('lsInbSnipClose').addEventListener('click', _lsInbCloseModal);
-    document.getElementById('lsInbSnipManage').addEventListener('click', () => {
-      _lsInbCloseModal();
-      _lsInbOpenSnippetManager();
-    });
-    const items = await _lsInbFetchSnippets();
-    const listEl = document.getElementById('lsInbSnipList');
-    if (!listEl) return;
-    if (_lsSnip.error) {
-      listEl.innerHTML = `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ ${esc(_lsSnip.error)}</div>`;
-      return;
-    }
-    if (!items.length) {
-      listEl.innerHTML = `<div style="padding:22px;text-align:center;color:var(--text-3);font-size:13px">
-        Nog geen snippets. Klik <b>Beheer snippets</b> om er een aan te maken.
-      </div>`;
-      return;
-    }
-    // Groepeer gedeeld (owner NULL) → eigen.
-    const shared = items.filter(x => x.is_shared);
-    const eigen  = items.filter(x => x.is_mine);
-    const groep = (label, arr) => arr.length ? `
-      <div style="font-size:10.5px;font-weight:600;color:var(--text-3);letter-spacing:.03em;text-transform:uppercase;padding:8px 4px 4px">${esc(label)}</div>
-      ${arr.map((s, i) => `
-        <button data-snip-id="${esc(s.id)}" class="ls-inb-snip-btn" style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;font-family:inherit">
-          <div style="font-size:13px;font-weight:600;color:var(--text-1);margin-bottom:3px">${esc(s.titel)}</div>
-          <div style="font-size:12px;color:var(--text-3);line-height:1.4;white-space:pre-wrap">${esc(String(s.body_text || '').slice(0, 160))}${(s.body_text || '').length > 160 ? '…' : ''}</div>
-        </button>`).join('')}
-    ` : '';
-    listEl.innerHTML = groep('Gedeeld', shared) + groep('Eigen', eigen);
-    listEl.querySelectorAll('[data-snip-id]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-snip-id');
-        const snip = items.find(x => String(x.id) === String(id));
-        if (!snip) return;
-        const resolved = _lsInbResolveSnippet(snip.body_text, conv);
-        const taEl = document.getElementById('lsInbWaTxt');
-        if (taEl) {
-          _lsInbInsertAtCursor(taEl, resolved);
-        } else {
-          // Fallback: als textarea niet gemount is (buiten 24u fallback-view),
-          // gewoon in draftsWa appenden. Verzenden gaat dan alsnog via template.
-          _lsInb.compose.draftsWa[leadId] = (String(_lsInb.compose.draftsWa[leadId] || '') + resolved);
-          _lsInbRepaintCompose();
-        }
-        _lsInbCloseModal();
-      });
-    });
-  }
+  // BP3 v6 (2026-09-02): oude wa_snippets picker + manager + form verwijderd.
+  // Vervangen door de gedeelde templates-picker (KV_V2.helpers.openTemplatePicker)
+  // en de Templates-tab in Leadsonderhoud. Zie __lsInbFreeTplPicker + templatesView().
 
-  // BP1 Onderdeel C — Snippet-beheerscherm (modal).
-  async function _lsInbOpenSnippetManager() {
-    const perms = (window.RBAC && typeof window.RBAC.getUserPermissions === 'function')
-      ? (window.RBAC.getUserPermissions() || new Set()) : new Set();
-    const kanBeheren = perms.has('*') || perms.has('snippets.manage');
-    if (!kanBeheren) {
-      _lsInbToast('Geen beheerrechten (snippets.manage)', 'warn');
-      return;
-    }
-    // Bypass cache voor beheerscherm — altijd verse lijst.
-    _lsSnip.fetchedAt = 0;
-    const items = await _lsInbFetchSnippets();
-    _lsInbOpenModal(`
-      <div style="font-size:15px;font-weight:600;margin-bottom:4px">Snippets beheren</div>
-      <div style="font-size:12px;color:var(--text-3);margin-bottom:12px">
-        Gedeelde snippets zijn zichtbaar voor het hele team. Eigen snippets alleen voor jou.
-        <br>Variabelen: <code>{voornaam}</code>, <code>{naam}</code>.
-      </div>
-      <div style="max-height:50vh;overflow-y:auto;margin-bottom:12px">
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead style="text-align:left;color:var(--text-3);font-size:11.5px;text-transform:uppercase">
-            <tr><th style="padding:6px 4px">Titel</th><th style="padding:6px 4px">Type</th><th style="padding:6px 4px">Volgorde</th><th style="padding:6px 4px;text-align:right">Acties</th></tr>
-          </thead>
-          <tbody id="lsInbSnipMgrRows">
-            ${items.length ? items.map(s => `
-              <tr style="border-top:1px solid var(--border)">
-                <td style="padding:8px 4px">${esc(s.titel)}</td>
-                <td style="padding:8px 4px">${s.is_shared ? '<span style="color:var(--teal)">Gedeeld</span>' : '<span style="color:var(--text-3)">Eigen</span>'}</td>
-                <td style="padding:8px 4px">${Number(s.sort_order) || 100}</td>
-                <td style="padding:8px 4px;text-align:right">
-                  <button class="btn btn-ghost btn-sm" data-snip-edit="${esc(s.id)}">Bewerk</button>
-                  <button class="btn btn-ghost btn-sm" data-snip-del="${esc(s.id)}" style="color:var(--rose)">Verwijder</button>
-                </td>
-              </tr>
-            `).join('') : `<tr><td colspan="4" style="padding:22px;text-align:center;color:var(--text-3)">Nog geen snippets.</td></tr>`}
-          </tbody>
-        </table>
-      </div>
-      <div style="text-align:right">
-        <button id="lsInbSnipMgrNew" class="btn btn-primary btn-sm" style="color:#fff;margin-right:6px">+ Nieuwe snippet</button>
-        <button id="lsInbSnipMgrClose" class="btn btn-ghost btn-sm">Sluiten</button>
-      </div>
-    `, { maxWidth: 720 });
-    document.getElementById('lsInbSnipMgrClose').addEventListener('click', _lsInbCloseModal);
-    document.getElementById('lsInbSnipMgrNew').addEventListener('click', () => _lsInbOpenSnippetForm(null));
-    document.querySelectorAll('[data-snip-edit]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-snip-edit');
-        const snip = items.find(x => String(x.id) === String(id));
-        if (snip) _lsInbOpenSnippetForm(snip);
-      });
-    });
-    document.querySelectorAll('[data-snip-del]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.getAttribute('data-snip-del');
-        const snip = items.find(x => String(x.id) === String(id));
-        const ok = await _lsInbAskConfirm(
-          `Snippet verwijderen?`,
-          `"${snip?.titel || id}" wordt definitief verwijderd.`,
-          { okLabel: 'Verwijder' }
-        );
-        if (!ok) return;
-        try {
-          const resp = await window.KV.authedFetch('/api/wa-snippets-delete?id=' + encodeURIComponent(id), { method: 'DELETE' });
-          if (!resp.ok) throw new Error('HTTP ' + resp.status);
-          _lsInbToast('Snippet verwijderd', 'ok');
-          _lsSnip.fetchedAt = 0;
-          _lsInbCloseModal();
-          _lsInbOpenSnippetManager();
-        } catch (e) {
-          _lsInbToast('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'error');
-        }
-      });
-    });
-  }
-  function _lsInbOpenSnippetForm(existing) {
-    const isEdit = !!(existing && existing.id);
-    const cur = existing || { titel: '', body_text: '', owner_user_id: null, sort_order: 100 };
-    _lsInbOpenModal(`
-      <div style="font-size:15px;font-weight:600;margin-bottom:12px">${isEdit ? 'Snippet bewerken' : 'Nieuwe snippet'}</div>
-      <div style="margin-bottom:10px">
-        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Titel</label>
-        <input id="lsSnipTitel" type="text" maxlength="120" value="${esc(cur.titel)}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px" />
-      </div>
-      <div style="margin-bottom:10px">
-        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Bericht (variabelen: {voornaam}, {naam})</label>
-        <textarea id="lsSnipBody" maxlength="2000" style="width:100%;min-height:120px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;line-height:1.5;font-family:inherit;resize:vertical">${esc(cur.body_text)}</textarea>
-      </div>
-      <div style="display:flex;gap:12px;margin-bottom:12px">
-        <div style="flex:1">
-          <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Type</label>
-          <select id="lsSnipOwner" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px">
-            <option value="shared" ${cur.owner_user_id === null ? 'selected' : ''}>Gedeeld (team)</option>
-            <option value="me" ${cur.owner_user_id !== null ? 'selected' : ''}>Eigen (alleen ik)</option>
-          </select>
-        </div>
-        <div style="width:120px">
-          <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Volgorde</label>
-          <input id="lsSnipOrder" type="number" min="0" max="9999" value="${Number(cur.sort_order) || 100}" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px" />
-        </div>
-      </div>
-      <div style="text-align:right">
-        <button id="lsSnipCancel" class="btn btn-ghost btn-sm" style="margin-right:6px">Annuleer</button>
-        <button id="lsSnipSave" class="btn btn-primary btn-sm" style="color:#fff">${isEdit ? 'Opslaan' : 'Toevoegen'}</button>
-      </div>
-    `, { maxWidth: 560 });
-    document.getElementById('lsSnipCancel').addEventListener('click', () => {
-      _lsInbCloseModal();
-      _lsInbOpenSnippetManager();
-    });
-    document.getElementById('lsSnipSave').addEventListener('click', async () => {
-      const titel = String(document.getElementById('lsSnipTitel')?.value || '').trim();
-      const body  = String(document.getElementById('lsSnipBody')?.value  || '').trim();
-      const owner = String(document.getElementById('lsSnipOwner')?.value || 'shared');
-      const order = Number(document.getElementById('lsSnipOrder')?.value) || 100;
-      if (!titel) { _lsInbToast('Titel is leeg', 'warn'); return; }
-      if (!body)  { _lsInbToast('Bericht is leeg', 'warn'); return; }
-      try {
-        const url  = '/api/wa-snippets-upsert';
-        const meth = isEdit ? 'PATCH' : 'POST';
-        const payload = { titel, body_text: body, owner_user_id: owner, sort_order: order };
-        if (isEdit) payload.id = existing.id;
-        const resp = await window.KV.authedFetch(url, {
-          method: meth,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        if (!resp.ok) {
-          const j = await resp.json().catch(() => ({}));
-          throw new Error(j.error || ('HTTP ' + resp.status));
-        }
-        _lsInbToast(isEdit ? 'Snippet opgeslagen' : 'Snippet toegevoegd', 'ok');
-        _lsSnip.fetchedAt = 0;
-        _lsInbCloseModal();
-        _lsInbOpenSnippetManager();
-      } catch (e) {
-        _lsInbToast('Opslaan mislukt: ' + (e?.message || 'onbekend'), 'error');
-      }
-    });
-  }
 
   window.__lsInbTemplatePicker = () => { _lsInbOpenTemplatePicker(); };
   async function _lsInbOpenTemplatePicker() {
@@ -1887,9 +1630,8 @@
           style="width:100%;min-height:64px;max-height:180px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;line-height:1.5;font-family:inherit;resize:vertical;${!waEnabled ? 'opacity:.5' : ''}">${waDraft}</textarea>
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
           ${waEnabled ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="__lsInbSendWa()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur WA'}</button>` : `<button class="btn btn-ghost btn-sm" disabled title="Buiten 24u-venster — kies een sjabloon">Verstuur WA</button>`}
-          <button class="${tplBtnClass}" ${tplBtnStyle} onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Kies een goedgekeurde WA-template">${svg(I.doc || I.mail, 'width:13px;height:13px')} Sjabloon</button>
-          <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker('wa')" ${sending ? 'disabled' : ''} title="Canned snel-antwoord invoegen">Snel</button>
-          <button class="btn btn-ghost btn-sm" onclick="__lsInbSnippetPicker()" ${sending || !waEnabled ? 'disabled' : ''} title="Snippet invoegen op cursor-positie">Snippet</button>
+          <button class="${tplBtnClass}" ${tplBtnStyle} onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Kies een goedgekeurde WA-template (Meta)">${svg(I.doc || I.mail, 'width:13px;height:13px')} Sjabloon</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.__lsInbFreeTplPicker('wa')" ${sending || !waEnabled ? 'disabled' : ''} title="Kies een vrije template (categorie + zoeken)">📋 Template</button>
           ${(window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.emojiPickerButtonHtml) ? window.KV_V2.helpers.emojiPickerButtonHtml('lsInbWaTxt', '😊') : ''}
           <button class="btn btn-ghost btn-sm" onclick="__lsInbToggleMailForm()" ${!mailEnabled ? 'disabled' : ''} title="${mailEnabled ? 'Antwoord per mail' : 'Geen e-mailadres bekend'}">${showMail ? 'Verberg mail' : 'Ook / alleen mail…'}</button>
         </div>
@@ -1919,7 +1661,7 @@
         style="width:100%;min-height:100px;max-height:260px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;line-height:1.5;font-family:inherit;resize:vertical;box-sizing:border-box">${txt}</textarea>
       <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
         <button class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lsInbSendMail()" ${sending || !mailEnabled ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur mail'}</button>
-        <button class="btn btn-ghost btn-sm" onclick="__lsInbQuickPicker('mail')" ${sending || !mailEnabled ? 'disabled' : ''} title="Canned snel-antwoord invoegen in dit mail-veld">Snel</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.__lsInbFreeTplPicker('mail')" ${sending || !mailEnabled ? 'disabled' : ''} title="Kies een vrije template (categorie + zoeken)">📋 Template</button>
         <span style="font-size:11px;color:var(--text-3);margin-left:auto">verzonden vanaf welkom@deforexopleiding.nl</span>
       </div>
     </div>`;
@@ -3117,10 +2859,200 @@
       </div>`;
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+     TAB — TEMPLATES (BP3 v6, 2026-09-02)
+     Gedeelde vrije-templates (WA + IG + mail). CRUD via wa-snippets-list/
+     upsert/delete. Groepeert per categorie; categorie is een vrij tekstveld
+     met datalist-suggesties uit bestaande waarden.
+     ══════════════════════════════════════════════════════════════════ */
+  const _lsTplTab = { loading: false, items: null, categories: null, error: null, filterCat: '', search: '', editing: null };
+  async function _lsTplFetch(force) {
+    if (_lsTplTab.loading) return;
+    if (!force && _lsTplTab.items) return;
+    _lsTplTab.loading = true; _lsTplTab.error = null;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const r = await window.KV.authedFetch('/api/wa-snippets-list');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      _lsTplTab.items = Array.isArray(j.items) ? j.items : [];
+      _lsTplTab.categories = Array.isArray(j.categories) ? j.categories : [];
+    } catch (e) {
+      _lsTplTab.error = e?.message || 'Kon templates niet laden';
+      if (!_lsTplTab.items) _lsTplTab.items = [];
+    } finally {
+      _lsTplTab.loading = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  }
+  window.__lsTplSetFilter = (v) => { _lsTplTab.filterCat = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
+  window.__lsTplSetSearch = (v) => { _lsTplTab.search    = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
+  window.__lsTplNew = () => { _lsTplTab.editing = { id: null, titel: '', body_text: '', category: '', owner_user_id: 'shared' }; if (window.DFO?.render) window.DFO.render(); };
+  window.__lsTplEdit = (id) => {
+    const it = (_lsTplTab.items || []).find((x) => String(x.id) === String(id));
+    if (!it) return;
+    _lsTplTab.editing = { id: it.id, titel: it.titel || '', body_text: it.body_text || '', category: it.category || '', owner_user_id: it.owner_user_id ? 'me' : 'shared' };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window.__lsTplEditInput = (field, val) => {
+    if (!_lsTplTab.editing) return;
+    _lsTplTab.editing[field] = val;
+  };
+  window.__lsTplEditCancel = () => { _lsTplTab.editing = null; if (window.DFO?.render) window.DFO.render(); };
+  window.__lsTplEditSave = async () => {
+    const e = _lsTplTab.editing;
+    if (!e) return;
+    if (!e.titel.trim() || !e.body_text.trim()) { _lsInbToast('Titel en body verplicht', 'warn'); return; }
+    try {
+      const method = e.id ? 'PATCH' : 'POST';
+      const payload = {
+        titel: e.titel.trim(),
+        body_text: e.body_text.trim(),
+        category: e.category.trim() || null,
+        owner_user_id: e.owner_user_id === 'me' ? 'me' : 'shared',
+      };
+      if (e.id) payload.id = e.id;
+      const r = await window.KV.authedFetch('/api/wa-snippets-upsert', {
+        method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      _lsInbToast(e.id ? 'Template opgeslagen' : 'Template toegevoegd', 'ok');
+      _lsTplTab.editing = null;
+      await _lsTplFetch(true);
+    } catch (err) {
+      _lsInbToast('Opslaan faalde: ' + (err?.message || err), 'warn');
+    }
+  };
+  window.__lsTplDelete = async (id, titel) => {
+    if (!id) return;
+    _lsInbAskConfirm('Template verwijderen?', 'Weet je zeker dat je "' + (titel || 'deze template') + '" wilt verwijderen? Dit kan niet ongedaan gemaakt worden.', {
+      confirmLabel: 'Verwijder', danger: true,
+    }).then(async (ok) => {
+      if (!ok) return;
+      try {
+        const r = await window.KV.authedFetch('/api/wa-snippets-delete?id=' + encodeURIComponent(id), { method: 'DELETE' });
+        if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
+        _lsInbToast('Template verwijderd', 'ok');
+        await _lsTplFetch(true);
+      } catch (err) {
+        _lsInbToast('Verwijderen faalde: ' + (err?.message || err), 'warn');
+      }
+    });
+  };
+
+  function templatesView() {
+    if (!_lsTplTab.items && !_lsTplTab.loading && !_lsTplTab.error) queueMicrotask(() => _lsTplFetch(false));
+    const perms = (window.RBAC?.getUserPermissions && window.RBAC.getUserPermissions()) || new Set();
+    const canManage = perms.has('*') || perms.has('snippets.manage');
+
+    // Edit-modal
+    if (_lsTplTab.editing) {
+      const e = _lsTplTab.editing;
+      const isEdit = !!e.id;
+      const cats = _lsTplTab.categories || [];
+      const catDatalist = cats.length ? `<datalist id="lsTplCatOpts">${cats.map((c) => `<option value="${esc(c)}"></option>`).join('')}</datalist>` : '';
+      return `<div class="pad" style="padding:20px;max-width:640px">
+        <div style="font-size:16px;font-weight:600;margin-bottom:14px">${isEdit ? 'Template bewerken' : 'Nieuwe template'}</div>
+        <div style="display:flex;flex-direction:column;gap:11px">
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
+            <span style="font-weight:600">Titel</span>
+            <input type="text" value="${esc(e.titel)}" oninput="window.__lsTplEditInput('titel', this.value)" maxlength="120"
+              placeholder="Bv. Bedankje na sale"
+              style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:13px" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
+            <span style="font-weight:600">Categorie <span style="color:var(--text-3);font-weight:400">(optioneel)</span></span>
+            <input type="text" list="lsTplCatOpts" value="${esc(e.category)}" oninput="window.__lsTplEditInput('category', this.value)" maxlength="80"
+              placeholder="Bv. Sales, Follow-up, Aftertrial"
+              style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:13px" />
+            ${catDatalist}
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">
+            <span style="font-weight:600">Body <span style="color:var(--text-3);font-weight:400">(placeholders {voornaam} / {naam} worden client-side gevuld)</span></span>
+            <textarea rows="8" maxlength="2000" oninput="window.__lsTplEditInput('body_text', this.value)"
+              style="padding:9px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:13px;font-family:inherit;line-height:1.4;resize:vertical">${esc(e.body_text)}</textarea>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <input type="radio" name="lsTplOwner" ${e.owner_user_id === 'shared' ? 'checked' : ''} onchange="window.__lsTplEditInput('owner_user_id', 'shared')" />
+            <span><b>Gedeeld</b> — zichtbaar voor het hele team</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px">
+            <input type="radio" name="lsTplOwner" ${e.owner_user_id === 'me' ? 'checked' : ''} onchange="window.__lsTplEditInput('owner_user_id', 'me')" />
+            <span><b>Persoonlijk</b> — alleen jij</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px">
+          <button class="btn btn-ghost" onclick="window.__lsTplEditCancel()">Annuleren</button>
+          <button class="btn btn-primary" onclick="window.__lsTplEditSave()" style="color:#fff">${isEdit ? 'Opslaan' : 'Toevoegen'}</button>
+        </div>
+      </div>`;
+    }
+
+    // Overview
+    const items = _lsTplTab.items || [];
+    const cats  = _lsTplTab.categories || [];
+    const filtered = items.filter((it) => {
+      if (_lsTplTab.filterCat && String(it.category || '') !== _lsTplTab.filterCat) return false;
+      if (_lsTplTab.search) {
+        const q = _lsTplTab.search.toLowerCase();
+        const hay = ((it.titel || '') + ' ' + (it.body_text || '') + ' ' + (it.category || '')).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const grouped = new Map();
+    for (const it of filtered) {
+      const key = it.category && String(it.category).trim() ? String(it.category) : '(zonder categorie)';
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(it);
+    }
+    const groupsHtml = grouped.size > 0
+      ? [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0], 'nl')).map(([cat, arr]) => `
+          <div style="margin-bottom:18px">
+            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px">${esc(cat)}</div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+              ${arr.map((it) => `
+                <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start">
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:600;margin-bottom:3px">${esc(it.titel)}${it.is_mine ? ' <span style="font-size:10px;color:var(--text-3);font-weight:400">(persoonlijk)</span>' : ''}</div>
+                    <div style="font-size:12px;color:var(--text-2);white-space:pre-wrap;line-height:1.45;overflow:hidden;max-height:80px">${esc(String(it.body_text || '').slice(0, 300))}</div>
+                  </div>
+                  ${canManage ? `<div style="display:flex;gap:4px;flex-shrink:0">
+                    <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="window.__lsTplEdit('${esc(String(it.id))}')">Bewerk</button>
+                    <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose)" onclick="window.__lsTplDelete('${esc(String(it.id))}', '${esc(String(it.titel || '').replace(/'/g, "\\'"))}')">Verwijder</button>
+                  </div>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')
+      : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Geen templates die matchen. ${canManage ? 'Klik <b>+ Nieuwe template</b> om er een aan te maken.' : ''}</div>`;
+    const chipAlle = `<button class="chip ${!_lsTplTab.filterCat ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window.__lsTplSetFilter('')">Alle</button>`;
+    const chipCats = cats.map((c) => `<button class="chip ${_lsTplTab.filterCat === c ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window.__lsTplSetFilter('${esc(c).replace(/'/g, "\\'")}')">${esc(c)}</button>`).join(' ');
+    return `<div class="pad" style="padding:20px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-bottom:14px">
+        <div style="font-size:16px;font-weight:600">Templates <span style="color:var(--text-3);font-size:12px;font-weight:400">— gedeelde teksten voor WhatsApp, Instagram en e-mail</span></div>
+        <span style="margin-left:auto"></span>
+        ${canManage ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="window.__lsTplNew()">+ Nieuwe template</button>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <input type="search" placeholder="Zoek in titel of tekst…" value="${esc(_lsTplTab.search)}"
+          oninput="window.__lsTplSetSearch(this.value)"
+          style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font-size:12.5px">
+        <div style="display:flex;gap:4px;flex-wrap:wrap">${chipAlle}${chipCats}</div>
+      </div>
+      ${_lsTplTab.loading && !items.length ? '<div style="padding:22px;text-align:center;color:var(--text-3)">Laden…</div>' : ''}
+      ${_lsTplTab.error ? `<div style="padding:12px;background:var(--rose-soft);color:var(--rose);border:1px solid var(--rose-line);border-radius:var(--r-sm);font-size:12.5px;margin-bottom:12px">⚠ ${esc(_lsTplTab.error)}</div>` : ''}
+      ${groupsHtml}
+    </div>`;
+  }
+
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
   window.DFO.VIEWS['leadsonderhoud/Opstartsessies'] = opstartsessiesView;
   window.DFO.VIEWS['leadsonderhoud/Vragenlijst']    = vragenlijstView;
+  window.DFO.VIEWS['leadsonderhoud/Templates']      = templatesView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('leadsonderhoud');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('leadsonderhoud');
 

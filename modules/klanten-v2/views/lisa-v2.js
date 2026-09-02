@@ -67,8 +67,15 @@
   };
   const _compose = { text: '', sending: false };
   const _booking = { fetched: false, loading: false, url: null, configured: false };
-  // BP3 v6 (2026-09-02) — snippets (wa_snippets hergebruikt) voor Lisa-composer.
-  const _snip    = { fetched: false, loading: false, items: null, error: null, open: false };
+  // BP3 v6 (2026-09-02): templates-picker gebruikt de gedeelde helper in
+  // _shared-v2 — geen lokale state meer nodig (fetch/cache zit in de helper).
+  // BP3 v7 (2026-09-02) — _readAt houdt bij wanneer een conv als gelezen is
+  // gemarkeerd, zodat de auto-poll de badge NIET terugzet als 'ie na de
+  // mark-as-read nog geen nieuw bericht heeft ontvangen.
+  //   key   = conv.id
+  //   value = ISO-timestamp van de mark-as-read PATCH
+  // Bij poll: als item.last_message_at <= _readAt[item.id], forceer unread=0.
+  const _readAt = Object.create(null);
   // BP3 v6 (2026-09-02) — poll versneld van 18s naar 6s. document.hidden-pauze
   // en hash-check voorkomen dat we het onnodig belasten. Nieuwe berichten
   // verschijnen daardoor gevoelsmatig instant.
@@ -393,7 +400,39 @@
     _fetchConvs({ surgical: true });
   };
   window.__lisaSetStatsPeriod = (p) => { _fetchStats(p); };
-  window.__lisaSelConv = (id) => {
+  // BP3 v7 (2026-09-02) — mark-read/unread toggle. Optimistic UI + PATCH.
+  window.__lisaToggleRead = async () => {
+    const id = _thread.convId;
+    if (!id) return;
+    const conv = _thread.conversation || _live.convs.items.find((c) => String(c.id) === String(id));
+    if (!conv) return;
+    const currentlyUnread = Number(conv.unread_count || 0) > 0 &&
+      !(_readAt[id] && (!conv.last_message_at || new Date(_readAt[id]) >= new Date(conv.last_message_at)));
+    const targetVal = currentlyUnread ? 0 : 1;
+    // Optimistic state.
+    conv.unread_count = targetVal;
+    if (targetVal === 0) {
+      _readAt[id] = new Date().toISOString();
+    } else {
+      delete _readAt[id];
+    }
+    if (_thread.conversation) _thread.conversation.unread_count = targetVal;
+    try {
+      const r = await apiCall('PATCH', '/api/lisa-conversations?id=' + encodeURIComponent(id), { unread_count: targetVal });
+      if (!r.ok) throw new Error(r?.json?.error || 'HTTP ' + r.status);
+      _toast(targetVal === 0 ? 'Gemarkeerd als gelezen.' : 'Gemarkeerd als ongelezen.', 'success');
+      _replaceRightPane();
+      _repaintListRow(id);
+    } catch (e) {
+      // Rollback bij fout.
+      conv.unread_count = currentlyUnread ? 1 : 0;
+      if (_thread.conversation) _thread.conversation.unread_count = conv.unread_count;
+      _toast('Kon status niet wijzigen: ' + (e?.message || e), 'error');
+      _replaceRightPane();
+    }
+  };
+
+  window.__lisaSelConv = async (id) => {
     if (String(_thread.convId) === String(id)) return;
     document.querySelectorAll('#lisaConvList .lisa-conv-row.on').forEach(el => el.classList.remove('on'));
     const newRow = document.querySelector('#lisaConvList .lisa-conv-row[data-row-id="' + String(id).replace(/"/g, '\\"') + '"]');
@@ -410,82 +449,46 @@
       if (el) { if (oldRight) split.replaceChild(el, oldRight); else split.appendChild(el); }
     }
     queueMicrotask(() => _loadThread(id));
-    // BP3 v6 (2026-09-02) — mark-as-read op open: reset unread_count naar 0
-    // via PATCH. Optimistic UI-update op de rij + het lokale state-object.
-    if (row && Number(row.unread_count || 0) > 0) {
+    // BP3 v7 (2026-09-02) — mark-as-read op open. Optimistic UI-update
+    // + _readAt-registratie zodat de poll de badge niet terugzet als er
+    // ondertussen geen nieuw bericht binnen komt. AWAITen PATCH om de race
+    // met de 6s-poll te winnen (niet meer fire-and-forget).
+    if (row) {
       row.unread_count = 0;
-      // Optimistic strip de rose-styling van de open rij.
-      if (newRow) { newRow.classList.remove('nw'); }
-      apiCall('PATCH', '/api/lisa-conversations?id=' + encodeURIComponent(id), { unread_count: 0 })
-        .catch((e) => console.warn('[lisa] mark-as-read faalde:', e?.message || e));
+      _readAt[id] = new Date().toISOString();
+      if (newRow) newRow.classList.remove('nw');
+      try {
+        await apiCall('PATCH', '/api/lisa-conversations?id=' + encodeURIComponent(id), { unread_count: 0 });
+      } catch (e) {
+        console.warn('[lisa] mark-as-read faalde:', e?.message || e);
+      }
     }
   };
 
   /* ── Compose (DEEL A intervene) ─────────────────────────────────────── */
   window.__lisaComposeInput = (el) => { _compose.text = el.value; _updateSendBtn(); };
 
-  // ── Snippets (BP3 v6, 2026-09-02) — hergebruikt wa_snippets ─────────────
-  async function _fetchSnippets() {
-    if (_snip.fetched || _snip.loading) return;
-    _snip.loading = true;
-    const j = await tryFetch('lisa-snippets', '/api/wa-snippets-list');
-    _snip.loading = false; _snip.fetched = true;
-    if (!j) { _snip.error = 'Kon snippets niet laden'; return; }
-    _snip.items = Array.isArray(j.items) ? j.items : [];
-  }
-  window.__lisaSnipOpen = async () => {
-    await _fetchSnippets();
-    _snip.open = true;
-    _renderSnipModal();
-  };
-  window.__lisaSnipClose = () => {
-    _snip.open = false;
-    const el = document.getElementById('lisaSnipModal');
-    if (el) el.remove();
-  };
-  window.__lisaSnipInsert = (id) => {
-    const s = (_snip.items || []).find((x) => String(x.id) === String(id));
-    if (!s) return;
+  // ── Templates-picker (BP3 v6, 2026-09-02) — gedeelde helper uit _shared-v2
+  // Vervangt de oude 📋 Snippet-flow met een categorie+zoeken-modal.
+  window.__lisaTplOpen = () => {
     const conv = _thread.conversation || _live.convs.items.find((c) => String(c.id) === String(_thread.convId));
-    const name  = conv?.contact_name || conv?.instagram_handle || '';
-    const first = String(name).trim().split(/\s+/)[0] || '';
-    const text = String(s.body_text || '')
-      .replace(/\{voornaam\}/g, first)
-      .replace(/\{naam\}/g, name);
-    // Voeg toe achter huidige tekst (met dubbele newline als er al iets staat).
-    const cur = String(_compose.text || '');
-    _compose.text = (cur ? cur.replace(/\s+$/, '') + '\n\n' : '') + text;
-    const ta = document.getElementById('lisaComposeInput');
-    if (ta) { ta.value = _compose.text; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
-    _updateSendBtn();
-    window.__lisaSnipClose();
+    const name = conv?.contact_name || conv?.instagram_handle || '';
+    if (!window.KV_V2 || !window.KV_V2.helpers || !window.KV_V2.helpers.openTemplatePicker) {
+      console.warn('[lisa-v2] openTemplatePicker helper niet beschikbaar');
+      return;
+    }
+    window.KV_V2.helpers.openTemplatePicker({
+      contactName:  name,
+      channelLabel: 'Instagram',
+      onInsert: (body) => {
+        const cur = String(_compose.text || '');
+        _compose.text = (cur ? cur.replace(/\s+$/, '') + '\n\n' : '') + body;
+        const ta = document.getElementById('lisaComposeInput');
+        if (ta) { ta.value = _compose.text; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+        _updateSendBtn();
+      },
+    });
   };
-  function _renderSnipModal() {
-    const existing = document.getElementById('lisaSnipModal');
-    if (existing) existing.remove();
-    const wrap = document.createElement('div');
-    wrap.id = 'lisaSnipModal';
-    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
-    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) window.__lisaSnipClose(); });
-    const items = _snip.items || [];
-    const list = items.length
-      ? items.map((s) => `<button data-snip-id="${esc(String(s.id))}" onclick="__lisaSnipInsert('${esc(String(s.id))}')"
-          style="display:block;width:100%;text-align:left;padding:10px 12px;margin:4px 0;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;font-family:inherit;color:var(--text-1)">
-          <div style="font-size:12.5px;font-weight:600;margin-bottom:2px">${esc(s.titel || '')}${s.is_mine ? '' : ' <span style="font-size:10px;color:var(--text-3);font-weight:400">(gedeeld)</span>'}</div>
-          <div style="font-size:11.5px;color:var(--text-2);white-space:pre-wrap;line-height:1.35;overflow:hidden;text-overflow:ellipsis;max-height:60px">${esc(String(s.body_text || '').slice(0, 200))}</div>
-        </button>`).join('')
-      : `<div style="padding:22px;color:var(--text-3);font-size:13px;text-align:center">Nog geen snippets. Beheer via Leadsonderhoud → Gesprekken → "Beheer snippets".</div>`;
-    wrap.innerHTML = `<div style="background:var(--surface);border-radius:var(--r);padding:16px 18px;max-width:520px;width:100%;max-height:75vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:15px;font-weight:600">Kies een snippet</div>
-        <button onclick="__lisaSnipClose()" style="background:transparent;border:0;font-size:20px;cursor:pointer;color:var(--text-3);padding:0 4px" title="Sluiten">×</button>
-      </div>
-      <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Klik om in te voegen in het bericht. Placeholders {voornaam} en {naam} worden automatisch gevuld.</div>
-      ${_snip.error ? `<div style="padding:12px;background:var(--rose-soft);color:var(--rose);border-radius:var(--r-sm);font-size:12px;margin-bottom:10px">⚠ ${esc(_snip.error)}</div>` : ''}
-      ${_snip.loading ? `<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">Laden…</div>` : list}
-    </div>`;
-    document.body.appendChild(wrap);
-  }
   function _updateSendBtn() {
     const btn = document.getElementById('lisaSendBtn');
     if (!btn) return;
@@ -789,15 +792,42 @@
   }
 
   /* ── Thread paint ──────────────────────────────────────────────────── */
+  // BP3 v7 (2026-09-02) — scroll robust naar bottom, ook na image-load.
+  // Images renderen asynchroon; op initial paint is scrollHeight kleiner
+  // dan na image-decode. We hangen een load-listener op elke <img> in de
+  // container, én doen enkele RAF-retries als safety-net voor cached images.
+  function _stickBottom(container, expectedConvId) {
+    if (!container) return;
+    const stick = () => {
+      if (_thread.convId !== expectedConvId) return; // user is verder geklikt
+      container.scrollTop = container.scrollHeight;
+    };
+    stick();
+    // Extra tick na browser-paint (fonts/mediaqueries).
+    requestAnimationFrame(() => { stick(); requestAnimationFrame(stick); });
+    // Bij nog-niet-geladen images: scroll opnieuw na elke load. Complete-check
+    // dekt reeds gecachte images (die geen load-event meer afvuren in sommige
+    // browsers).
+    const imgs = container.querySelectorAll('img');
+    imgs.forEach((img) => {
+      if (img.complete) return;
+      img.addEventListener('load', stick, { once: true });
+      img.addEventListener('error', stick, { once: true });
+    });
+    // Ultieme safety-net: 250ms + 750ms na render, voor trage netwerken.
+    setTimeout(stick, 250);
+    setTimeout(stick, 750);
+  }
   function _paintThread() {
     const container = document.getElementById('lisaThreadScroll');
     if (!container) return;
     if (!_thread.convId) { container.innerHTML = ''; return; }
     const isNewConv = _thread._paintedFor !== _thread.convId;
+    const targetConvId = _thread.convId;
     if (isNewConv) {
       container.innerHTML = _thread.messages.map(_renderMsg).join('');
       _thread._paintedFor = _thread.convId;
-      container.scrollTop = container.scrollHeight;
+      _stickBottom(container, targetConvId);
       return;
     }
     const seenIds = new Set();
@@ -806,7 +836,7 @@
     if (!additions.length) return;
     const nearBottom = (container.scrollHeight - container.scrollTop - container.clientHeight) < 40;
     container.insertAdjacentHTML('beforeend', additions.map(_renderMsg).join(''));
-    if (nearBottom) container.scrollTop = container.scrollHeight;
+    if (nearBottom) _stickBottom(container, targetConvId);
   }
   // BP3 v4 (2026-09-02) — reaction-parser: '[reaction] {"emoji":"👍"}' →
   // "Reageerde met 👍". Fallback: raw content bij parse-error.
@@ -1049,13 +1079,21 @@
     const handle = c.instagram_handle ? '@' + String(c.instagram_handle).replace(/^@/, '') : '';
     const rowIdAttr  = String(c.id).replace(/"/g, '&quot;');
     const rowIdClick = String(c.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const onCls = String(_thread.convId) === String(c.id) ? 'on' : '';
+    const isOpen = String(_thread.convId) === String(c.id);
+    const onCls = isOpen ? 'on' : '';
     const phaseColor = c.qualified ? 'emerald' : (c.phase === 'disqualified' ? 'rose' : c.phase === 'cold' ? 'text-3' : 'blue');
     const takeoverBadge = c.human_takeover ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">MENS</span>` : '';
     const bookedBadge = c.call_booked ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">CALL</span>` : '';
-    // BP3 v6 (2026-09-02) — ongelezen-styling: rose-strip links + primary-tint
-    // achtergrond + vette naam/preview + count-badge rechtsboven.
-    const unread = Number(c.unread_count || 0);
+    // BP3 v7 (2026-09-02) — ongelezen-styling met optimistic overrides:
+    //   1. Currently open conv → altijd gelezen (unread=0) — je kijkt ernaar.
+    //   2. _readAt[c.id] >= c.last_message_at → gelezen (poll-race guard).
+    // Anders volg c.unread_count zoals server 'em geeft.
+    let unread = Number(c.unread_count || 0);
+    if (isOpen) {
+      unread = 0;
+    } else if (_readAt[c.id] && (!c.last_message_at || new Date(_readAt[c.id]) >= new Date(c.last_message_at))) {
+      unread = 0;
+    }
     const nw = unread > 0;
     const rowStyle = [
       'display:flex;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;position:relative',
@@ -1107,7 +1145,13 @@
     const PHASES = ['intro', 'doel', 'situatie', 'band', 'call', 'qualified', 'disqualified', 'done', 'cold'];
     const phaseOpts = PHASES.map(p => `<option value="${p}" ${conv.phase === p ? 'selected' : ''}>${p}</option>`).join('');
 
-    // Actie-knoppen in de header
+    // Actie-knoppen in de header. BP3 v7 (2026-09-02) — read/unread-toggle
+    // rechtsboven zodat het gesprek handmatig als on/gelezen kan worden
+    // gemarkeerd. State volgt de conv-rij; optimistic guard via _readAt.
+    const isCurrentlyUnread = Number(conv.unread_count || 0) > 0 &&
+      !(_readAt[conv.id] && (!conv.last_message_at || new Date(_readAt[conv.id]) >= new Date(conv.last_message_at)));
+    const readBtnLabel = isCurrentlyUnread ? '✓ Markeer gelezen' : '● Markeer ongelezen';
+    const readBtnTitle = isCurrentlyUnread ? 'Zet unread_count op 0' : 'Zet unread_count op 1 (blijft ongelezen tot je hem opent)';
     const actionButtons = !isSandbox ? `
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         <select id="lisaPhaseSelect" onchange="__lisaSetPhase(this.value)" style="font-size:11.5px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text-1);cursor:pointer" title="Fase wijzigen">${phaseOpts}</select>
@@ -1115,6 +1159,7 @@
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaMarkDisqualified()" title="Markeer als disqualified">Disq.</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaTogglePause()" title="Pauzeer/hervat follow-ups">${conv.followup_paused ? '▶ Hervat FU' : '⏸ Pauzeer FU'}</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleTakeover()" title="Mens-overname aan/uit">${conv.human_takeover ? 'Lisa terug' : 'Mens over'}</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleRead()" title="${esc(readBtnTitle)}">${readBtnLabel}</button>
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lisaSendBookingLink()" title="Prefill compose met agenda-link zodat de volger zelf boekt">🔗 Stuur boekingslink</button>
       </div>` : '';
 
@@ -1137,7 +1182,7 @@
           <textarea id="lisaComposeInput" oninput="__lisaComposeInput(this)" placeholder="${composeDisabled ? 'Sandbox — reageren uitgeschakeld' : 'Typ een IG-DM…'}" ${composeDisabled ? 'disabled' : ''}
             style="flex:1;min-height:56px;max-height:200px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);font:inherit;font-size:13px;background:var(--surface);color:var(--text-1);resize:vertical;line-height:1.4">${esc(_compose.text || '')}</textarea>
           <div style="display:flex;flex-direction:column;gap:6px">
-            <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:6px 10px" ${composeDisabled ? 'disabled' : ''} onclick="__lisaSnipOpen()" title="Snippet invoegen">📋 Snippet</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:6px 10px" ${composeDisabled ? 'disabled' : ''} onclick="__lisaTplOpen()" title="Template invoegen">📋 Template</button>
             <button id="lisaSendBtn" class="btn btn-primary btn-sm" style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;padding:8px 16px;font-weight:600" ${composeDisabled ? 'disabled' : ''} onclick="__lisaSend()">Verstuur</button>
           </div>
         </div>

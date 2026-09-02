@@ -41,10 +41,14 @@ export default async function handler(req, res) {
   const ownerFlag = String(body.owner_user_id || 'shared').toLowerCase();
   const sortRaw   = Number(body.sort_order);
   const sortOrder = Number.isFinite(sortRaw) ? Math.max(0, Math.min(9999, Math.round(sortRaw))) : 100;
+  // BP3 (2026-09-02) — category (optioneel). Lege string → NULL (geen categorie).
+  const catRaw    = typeof body.category === 'string' ? body.category.trim() : '';
+  const category  = catRaw ? catRaw.slice(0, 80) : null;
 
   if (!titel || titel.length > 120)             return res.status(400).json({ error: 'titel vereist (1..120 chars)' });
   if (!bodyText || bodyText.length > 2000)      return res.status(400).json({ error: 'body_text vereist (1..2000 chars)' });
   if (!['shared', 'me'].includes(ownerFlag))    return res.status(400).json({ error: "owner_user_id moet 'shared' of 'me' zijn" });
+  if (category && category.length < 1)          return res.status(400).json({ error: 'category mag niet leeg zijn (of laat weg)' });
   const ownerUserId = ownerFlag === 'me' ? user.id : null;
 
   try {
@@ -55,12 +59,13 @@ export default async function handler(req, res) {
         .insert({
           titel,
           body_text:     bodyText,
+          category,
           owner_user_id: ownerUserId,
           sort_order:    sortOrder,
           created_by:    user.id,
           updated_by:    user.id,
         })
-        .select('id, titel, body_text, owner_user_id, sort_order, updated_at')
+        .select('id, titel, body_text, category, owner_user_id, sort_order, updated_at')
         .maybeSingle();
       if (error) throw error;
       return res.status(200).json({ item: data });
@@ -87,6 +92,7 @@ export default async function handler(req, res) {
       .update({
         titel,
         body_text:     bodyText,
+        category,
         owner_user_id: ownerUserId,
         sort_order:    sortOrder,
         updated_by:    user.id,
