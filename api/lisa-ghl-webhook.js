@@ -203,7 +203,6 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: false, ingest_error: msgInsErr.message, code: msgInsErr.code,
         conv_id: conv.id, message_type: msgType,
-        received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
       });
     }
 
@@ -225,7 +224,6 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true, skipped: 'live_mode_off', ingested: true,
         conv_id: conv.id, message_type: msgType, attachment_url: msgAttachmentUrl,
-        received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
       });
     }
 
@@ -270,8 +268,6 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true, ingested: true, message_type: msgType, ai_skipped: 'media_message',
         conv_id: conv.id, attachment_url: msgAttachmentUrl,
-        received_attachments: rawAttachments ?? null,
-        received_messageId:   messageId      ?? null,
       });
     }
 
@@ -361,7 +357,6 @@ export default async function handler(req, res) {
       }).eq('id', 1);
       return res.status(200).json({
         ok: true, queued: true, scheduled_for: scheduledFor, delay_ms: delayMs, conv_id: conv.id,
-        received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
       });
     }
 
@@ -377,7 +372,6 @@ export default async function handler(req, res) {
     }).eq('id', 1);
     return res.status(200).json({
       ok: true, delayed: true, scheduled_for: scheduledFor, conv_id: conv.id,
-      received_attachments: rawAttachments ?? null, received_messageId: messageId ?? null,
     });
   } catch (err) {
     console.error('[lisa-ghl-webhook] error:', err?.message || err);
