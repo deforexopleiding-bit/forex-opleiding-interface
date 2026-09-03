@@ -4285,6 +4285,21 @@
     const s = String(v || '').trim();
     _metaEd.folderId = s ? s : null;
   };
+  // BP3 v13 (2026-09-03) — variabelen-picker search + collapse-per-categorie.
+  window.__setMetaVarsSearch = (v) => {
+    _metaEd.varsQuery = String(v || '');
+    if (render) render();
+    // Focus + caret behouden na render.
+    queueMicrotask(() => {
+      const el = document.getElementById('kv-metaed-vars-search');
+      if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (_) {} }
+    });
+  };
+  window.__setMetaVarsToggleCat = (cat) => {
+    if (!_metaEd.varsCatCollapsed) _metaEd.varsCatCollapsed = {};
+    _metaEd.varsCatCollapsed[cat] = !_metaEd.varsCatCollapsed[cat];
+    if (render) render();
+  };
   // BP3 v9 (2026-09-02) — top-level "Nieuwe categorie" (folder) knop in de
   // bodyWhatsApp-lijst-view. Zelfde POST als de mini-➕ binnen de edit-modal,
   // maar zonder editor-context (raakt _metaEd niet). Refresh de folders zodat
@@ -4450,28 +4465,55 @@
             <div id="kv-metaed-body-meta" style="font-size:10.5px;color:var(--text-3);margin-top:4px">${f.body_text.length}/1024 chars · ${bodyVars} variabele${bodyVars===1?'':'n'} gevonden</div>
           </label>
           ${(() => {
-            // v=82: Variabelen-picker — chips gegroepeerd per category.
-            // Klik = insert {{n}} op cursorpositie + tracked in _metaEd.varMapping.
+            // BP3 v13 (2026-09-03) — variabelen-picker: zoekbalk + inklapbare
+            // categorie-secties (accordion). Was: lange platte lijst met chips
+            // → chaotisch. Nu: zoek bovenaan filtert alle chips over álle
+            // categorieën; klik op categorie-header togglet open/dicht.
+            // Klik-op-chip gedrag ongewijzigd (insert {{n}} + tracked mapping).
             const vars = _metaEd.varsList || [];
             if (!_metaEd.varsFetched) {
               return `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:11px;color:var(--text-3)">Variabelen laden…</div>`;
             }
             if (!vars.length) return '';
-            // Groepeer per category.
+            const query = String(_metaEd.varsQuery || '').toLowerCase().trim();
+            if (!_metaEd.varsCatCollapsed) _metaEd.varsCatCollapsed = {};
             const byCat = {};
-            for (const v of vars) { (byCat[v.category || 'overig'] ||= []).push(v); }
+            for (const v of vars) {
+              if (query) {
+                const hay = ((v.label || '') + ' ' + (v.key || '') + ' ' + (v.example || '') + ' ' + (v.category || '')).toLowerCase();
+                if (!hay.includes(query)) continue;
+              }
+              (byCat[v.category || 'overig'] ||= []).push(v);
+            }
             const catOrder = ['customer','invoice','klant','afdeling','bedrijf','onboarding','lead','toegang','attendee','event','datum','overig'];
             const catLabels = { customer:'Klant', invoice:'Factuur', klant:'Klant-aggregaties', afdeling:'Afdeling', bedrijf:'Bedrijf', onboarding:'Onboarding', lead:'Lead', toegang:'Toegang', attendee:'Attendee', event:'Event', datum:'Datum' };
             const usedKeys = new Set(Object.values(_metaEd.varMapping || {}));
             const catsInOrder = catOrder.filter(c => byCat[c]).concat(Object.keys(byCat).filter(c => !catOrder.includes(c)));
+            const totalHits = catsInOrder.reduce((s, c) => s + byCat[c].length, 0);
+            // Bij een actieve zoekterm: forceer alle categorieën open (matched-only).
+            const isSearching = !!query;
             return `<div style="margin-bottom:12px;padding:10px 12px;background:var(--surface-2);border-radius:6px">
-              <div style="font-size:11.5px;font-weight:600;color:var(--text-2);margin-bottom:6px">Variabelen invoegen <span style="color:var(--text-3);font-weight:normal">— klik = <code>{{n}}</code> op cursorpositie</span></div>
-              ${catsInOrder.map(cat => `<div style="margin-bottom:6px">
-                <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px">${esc(catLabels[cat] || cat)}</div>
-                <div style="display:flex;flex-wrap:wrap;gap:4px">
-                  ${byCat[cat].map(v => `<button type="button" class="chip ${usedKeys.has(v.key) ? 'on' : ''}" onclick="window.__setMetaInsertVar('${esc(v.key)}')" title="${esc(v.example || '')}" style="font-size:11px;padding:3px 8px;font-family:'IBM Plex Mono',monospace">${esc(v.label)}</button>`).join('')}
-                </div>
-              </div>`).join('')}
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <div style="font-size:11.5px;font-weight:600;color:var(--text-2);flex:1">Variabelen invoegen <span style="color:var(--text-3);font-weight:normal">— klik = <code>{{n}}</code> op cursorpositie</span></div>
+                <input id="kv-metaed-vars-search" type="search" value="${esc(query)}" placeholder="Zoek variabele…"
+                  oninput="window.__setMetaVarsSearch(this.value)"
+                  style="padding:4px 8px;font-size:11.5px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);min-width:160px" />
+              </div>
+              ${totalHits === 0
+                ? `<div style="padding:12px;font-size:11.5px;color:var(--text-3);text-align:center">Geen variabelen gevonden voor "${esc(query)}".</div>`
+                : catsInOrder.map(cat => {
+                    const collapsed = !isSearching && !!_metaEd.varsCatCollapsed[cat];
+                    const label = catLabels[cat] || cat;
+                    const chips = byCat[cat].map(v => `<button type="button" class="chip ${usedKeys.has(v.key) ? 'on' : ''}" onclick="window.__setMetaInsertVar('${esc(v.key)}')" title="${esc(v.example || '')}" style="font-size:11px;padding:3px 8px;font-family:'IBM Plex Mono',monospace">${esc(v.label)}</button>`).join('');
+                    return `<div style="margin-bottom:4px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden">
+                      <button type="button" onclick="window.__setMetaVarsToggleCat('${esc(cat).replace(/'/g,"\\'")}')" style="width:100%;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface-2);border:none;text-align:left;cursor:pointer;font:inherit;color:var(--text-1)">
+                        <span style="font-size:10px;color:var(--text-3);width:10px">${collapsed ? '▶' : '▼'}</span>
+                        <span style="font-size:10.5px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em;flex:1">${esc(label)}</span>
+                        <span style="font-size:10.5px;color:var(--text-3)">${byCat[cat].length}</span>
+                      </button>
+                      ${collapsed ? '' : `<div style="display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px">${chips}</div>`}
+                    </div>`;
+                  }).join('')}
               ${Object.keys(_metaEd.varMapping || {}).length ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)">
                 Mapping: ${Object.entries(_metaEd.varMapping).sort((a,b)=>Number(a[0])-Number(b[0])).map(([n,k]) => `<code>{{${n}}}</code>=<code>${esc(k)}</code>`).join(' · ')}
               </div>` : ''}
@@ -4588,10 +4630,19 @@
     }
     // Sortering: bekende folders eerst (in folder-sort_order), dan Meta-cats
     // alfabetisch, dan 'Ongesorteerd' onderaan.
+    // BP3 v13 (2026-09-03) — ook lege folders tonen als aparte header met
+    // "0 templates" zodat een net-aangemaakte categorie meteen zichtbaar is
+    // (opgeloste bug: Nieuwe-categorie werd wél in DB gemaakt maar was
+    // onzichtbaar in de UI omdat de grouping alleen categorieën met tenminste
+    // 1 template rendert).
     const folderNamesInOrder = (_wa.folders || []).slice().sort((a,b) => (a.sort_order||0) - (b.sort_order||0)).map(f => f.name);
     const seenCats = new Set();
     const orderedCats = [];
-    for (const n of folderNamesInOrder) if (grouped.has(n) && !seenCats.has(n)) { orderedCats.push(n); seenCats.add(n); }
+    for (const n of folderNamesInOrder) {
+      if (seenCats.has(n)) continue;
+      if (!grouped.has(n)) grouped.set(n, []); // lege folder → placeholder-groep
+      orderedCats.push(n); seenCats.add(n);
+    }
     for (const c of Array.from(grouped.keys()).sort()) if (c !== 'Ongesorteerd' && !seenCats.has(c)) { orderedCats.push(c); seenCats.add(c); }
     if (grouped.has('Ongesorteerd')) orderedCats.push('Ongesorteerd');
 
@@ -8188,7 +8239,12 @@
   // de leadsonderhoud-tab wordt automatisch herverft.
   window.KV_V2 = window.KV_V2 || {};
   window.KV_V2.metaTemplates = {
-    render: () => bodyWhatsApp(),
+    // BP3 v13 (2026-09-03) — óók _renderConfirmModal() en _renderMetaEdModal()
+    // meesturen in de mount-output. Zonder deze wrappers zag de leadsonderhoud-
+    // mount géén confirmatie-dialoog bij Submit/Delete/Nieuwe-folder → knoppen
+    // "deden niks" (state werd wél gezet, maar de modal werd nergens gerendered).
+    // In de originele instellingen-view zit die render aan het eind van instView().
+    render: () => bodyWhatsApp() + _renderConfirmModal(),
     init:   () => { queueMicrotask(() => fetchWaTemplates()); },
   };
   console.debug('[instellingen-v2] v=6 — infinite fetch-loop fix (guard op _fetched i.p.v. !items.length voor zowel _sig als _tpl). Lege lijst is nu legitieme uitkomst. Rest ongewijzigd t.o.v. v=5.');

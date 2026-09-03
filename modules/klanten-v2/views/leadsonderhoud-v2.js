@@ -3127,6 +3127,11 @@
   }
   window.__lsTplSetFilter = (v) => { _lsTplTab.filterCat = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
   window.__lsTplSetSearch = (v) => { _lsTplTab.search    = String(v || ''); if (window.DFO?.render) window.DFO.render(); };
+  window.__lsTplToggleCat = (cat) => {
+    if (!_lsTplTab.collapsedCats) _lsTplTab.collapsedCats = {};
+    _lsTplTab.collapsedCats[cat] = !_lsTplTab.collapsedCats[cat];
+    if (window.DFO?.render) window.DFO.render();
+  };
   window.__lsTplSetSubTab = (v) => {
     _lsTplTab.subTab = (v === 'meta') ? 'meta' : 'open';
     if (_lsTplTab.subTab === 'meta' && window.KV_V2?.metaTemplates?.init) {
@@ -3192,19 +3197,24 @@
   };
   window.__lsTplDelete = async (id, titel) => {
     if (!id) return;
-    _lsInbAskConfirm('Template verwijderen?', 'Weet je zeker dat je "' + (titel || 'deze template') + '" wilt verwijderen? Dit kan niet ongedaan gemaakt worden.', {
-      confirmLabel: 'Verwijder', danger: true,
-    }).then(async (ok) => {
-      if (!ok) return;
-      try {
-        const r = await window.KV.authedFetch('/api/wa-snippets-delete?id=' + encodeURIComponent(id), { method: 'DELETE' });
-        if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
-        _lsInbToast('Template verwijderd', 'ok');
-        await _lsTplFetch(true);
-      } catch (err) {
-        _lsInbToast('Verwijderen faalde: ' + (err?.message || err), 'warn');
-      }
-    });
+    // BP3 v13 (2026-09-03) — option-keys gecorrigeerd: _lsInbAskConfirm
+    // verwacht okLabel + tone (was confirmLabel + danger → default 'Bevestig'
+    // en brand-kleur, misleidende UI). Toont nu rood "Verwijder" wat click
+    // beter uitnodigt.
+    const ok = await _lsInbAskConfirm(
+      'Template verwijderen?',
+      'Weet je zeker dat je "' + (titel || 'deze template') + '" wilt verwijderen? Dit kan niet ongedaan gemaakt worden.',
+      { okLabel: 'Verwijder', tone: 'danger' }
+    );
+    if (!ok) return;
+    try {
+      const r = await window.KV.authedFetch('/api/wa-snippets-delete?id=' + encodeURIComponent(id), { method: 'DELETE' });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
+      _lsInbToast('Template verwijderd', 'ok');
+      await _lsTplFetch(true);
+    } catch (err) {
+      _lsInbToast('Verwijderen faalde: ' + (err?.message || err), 'warn');
+    }
   };
 
   function templatesView() {
@@ -3311,26 +3321,35 @@
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key).push(it);
     }
+    // BP3 v13 (2026-09-03) — INKLAPBARE categorie-secties: klik header →
+    // collapse/expand + counter. Compactere row-styling zodat de pagina niet
+    // eentonig lang wordt bij veel templates.
+    if (!_lsTplTab.collapsedCats) _lsTplTab.collapsedCats = {};
     const groupsHtml = grouped.size > 0
-      ? [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0], 'nl')).map(([cat, arr]) => `
-          <div style="margin-bottom:18px">
-            <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px">${esc(cat)}</div>
-            <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-              ${arr.map((it) => `
-                <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start">
-                  <div style="flex:1;min-width:0">
-                    <div style="font-size:13px;font-weight:600;margin-bottom:3px">${esc(it.titel)}${it.is_mine ? ' <span style="font-size:10px;color:var(--text-3);font-weight:400">(persoonlijk)</span>' : ''}</div>
-                    <div style="font-size:12px;color:var(--text-2);white-space:pre-wrap;line-height:1.45;overflow:hidden;max-height:80px">${esc(String(it.body_text || '').slice(0, 300))}</div>
-                  </div>
-                  ${canManage ? `<div style="display:flex;gap:4px;flex-shrink:0">
-                    <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="window.__lsTplEdit('${esc(String(it.id))}')">Bewerk</button>
-                    <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose)" onclick="window.__lsTplDelete('${esc(String(it.id))}', '${esc(String(it.titel || '').replace(/'/g, "\\'"))}')">Verwijder</button>
-                  </div>` : ''}
-                </div>
-              `).join('')}
+      ? [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0], 'nl')).map(([cat, arr]) => {
+          const collapsed = !!_lsTplTab.collapsedCats[cat];
+          const catKeySafe = String(cat).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          const rowsHtml = collapsed ? '' : arr.map((it) => `
+            <div style="padding:9px 14px;border-top:1px solid var(--border);display:flex;gap:12px;align-items:flex-start">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12.5px;font-weight:600;margin-bottom:2px">${esc(it.titel)}${it.is_mine ? ' <span style="font-size:10px;color:var(--text-3);font-weight:400">(persoonlijk)</span>' : ''}</div>
+                <div style="font-size:11.5px;color:var(--text-2);white-space:pre-wrap;line-height:1.4;overflow:hidden;max-height:44px">${esc(String(it.body_text || '').slice(0, 180))}</div>
+              </div>
+              ${canManage ? `<div style="display:flex;gap:4px;flex-shrink:0">
+                <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="window.__lsTplEdit('${esc(String(it.id))}')">Bewerk</button>
+                <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose)" onclick="window.__lsTplDelete('${esc(String(it.id))}', '${esc(String(it.titel || '').replace(/'/g, "\\'"))}')">Verwijder</button>
+              </div>` : ''}
             </div>
-          </div>
-        `).join('')
+          `).join('');
+          return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:8px">
+            <button onclick="window.__lsTplToggleCat('${catKeySafe}')" style="width:100%;display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--surface-2);border:none;text-align:left;cursor:pointer;font:inherit;color:var(--text-1)">
+              <span style="font-size:11px;color:var(--text-3);width:12px">${collapsed ? '▶' : '▼'}</span>
+              <span style="font-size:12.5px;font-weight:700;flex:1">${esc(cat)}</span>
+              <span style="font-size:11px;color:var(--text-3);background:var(--surface);padding:1px 8px;border-radius:10px;border:1px solid var(--border)">${arr.length}</span>
+            </button>
+            ${rowsHtml}
+          </div>`;
+        }).join('')
       : ''; // lege-staat CTA rendert los hieronder (bevat de + Nieuwe-knop)
     const chipAlle = `<button class="chip ${!_lsTplTab.filterCat ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window.__lsTplSetFilter('')">Alle</button>`;
     const chipCats = cats.map((c) => `<button class="chip ${_lsTplTab.filterCat === c ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window.__lsTplSetFilter('${esc(c).replace(/'/g, "\\'")}')">${esc(c)}</button>`).join(' ');
