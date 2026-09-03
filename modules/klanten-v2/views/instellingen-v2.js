@@ -4801,7 +4801,7 @@
         </div>
         <div>${rowsHtml}</div>
       </div>
-      <div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      ${_wa.hideNumberRegister ? '' : `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
         <div style="padding:12px 14px">
           <div style="font-size:13px;font-weight:600;margin-bottom:4px">WhatsApp-nummer registreren (éénmalig)</div>
           <div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px">Cloud API phone_number_id + 6-cijferige PIN. Alleen bij setup van een nieuwe lijn.</div>
@@ -4815,7 +4815,7 @@
             <button class="btn btn-primary btn-sm" ${_waReg.busy ? 'disabled' : ''} onclick="window.__setWaRegSubmit()">${_waReg.busy ? 'Bezig…' : 'Registreer'}</button>
           </div>
         </div>
-      </div>
+      </div>`}
     </div>`;
   }
   window.__waPick = (id) => { setF('waf', id); }; // legacy filter — Wave-2 nieuwe bodyWhatsApp gebruikt geen folder-tabs meer
@@ -8328,7 +8328,15 @@
     // mount géén confirmatie-dialoog bij Submit/Delete/Nieuwe-folder → knoppen
     // "deden niks" (state werd wél gezet, maar de modal werd nergens gerendered).
     // In de originele instellingen-view zit die render aan het eind van instView().
-    render: () => bodyWhatsApp() + _renderConfirmModal(),
+    //
+    // BP3 v16 (2026-09-03) — opts.hideNumberRegister (bool) verbergt het
+    // "WhatsApp-nummer registreren (éénmalig)"-blok voor de leadsonderhoud-
+    // mount. Instellingen → WhatsApp roept render() zonder opts aan → blok
+    // blijft daar zichtbaar.
+    render: (opts) => {
+      _wa.hideNumberRegister = !!(opts && opts.hideNumberRegister);
+      return bodyWhatsApp() + _renderConfirmModal();
+    },
     init:   () => { queueMicrotask(() => fetchWaTemplates()); },
   };
   console.debug('[instellingen-v2] v=6 — infinite fetch-loop fix (guard op _fetched i.p.v. !items.length voor zowel _sig als _tpl). Lege lijst is nu legitieme uitkomst. Rest ongewijzigd t.o.v. v=5.');

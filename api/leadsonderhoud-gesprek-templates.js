@@ -50,7 +50,10 @@ export default async function handler(req, res) {
       businessAccountId = cfg?.business_account_id || null;
     }
 
-    const SELECT_COLS = 'id, name, language, category, body_text, body_examples, header_type, header_content, footer_text, buttons, status, meta_param_mapping';
+    // BP3 v16 (2026-09-03) — folder_id meesturen zodat de Sjabloon-picker
+    // categorieën kan uitlijnen op het folder-systeem (whatsapp_template_folders)
+    // i.p.v. naam-prefix. Frontend valt terug op prefix als folder_id NULL is.
+    const SELECT_COLS = 'id, name, language, category, body_text, body_examples, header_type, header_content, footer_text, buttons, status, meta_param_mapping, folder_id';
     async function fetchApproved(baId) {
       let q = supabaseAdmin
         .from('whatsapp_meta_templates')
@@ -71,8 +74,24 @@ export default async function handler(req, res) {
       items = await fetchApproved(null);
     }
 
+    // BP3 v16 — bulk-fetch folder-namen voor de folder_ids in de result-set.
+    // Alleen folders met ≥1 approved template komen daarmee in de picker.
+    const folderIds = [...new Set(items.map((t) => t.folder_id).filter(Boolean))];
+    const folderNameById = {};
+    if (folderIds.length) {
+      const { data: folders } = await supabaseAdmin
+        .from('whatsapp_template_folders')
+        .select('id, name')
+        .in('id', folderIds);
+      for (const f of (folders || [])) folderNameById[f.id] = f.name;
+    }
+    const enriched = items.map((t) => ({
+      ...t,
+      folder_name: t.folder_id ? (folderNameById[t.folder_id] || null) : null,
+    }));
+
     return res.status(200).json({
-      items,
+      items: enriched,
       configured: !!businessAccountId,
       business_account_id: businessAccountId,
     });

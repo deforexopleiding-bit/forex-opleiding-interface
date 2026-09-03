@@ -1143,16 +1143,24 @@
   // de shared KV_V2.helpers.openTemplatePicker die klikt = body inserten.
   // Meta-"Sjabloon" (leadsonderhoud-gesprek-templates) is een aparte flow.
   window.__lsInbFreeTplPicker = (target) => {
+    // BP3 v16 (2026-09-03) — root-cause bug: als er GEEN gesprek geselecteerd
+    // is (_lsInb.thread.leadId=null) returnde de handler eerder stilletjes
+    // → knop leek dood. Nu een expliciete toast + eerder-return.
+    // Ook: mode='template' verbergt de tekst-textarea (>24u-venster); we
+    // schakelen daar naar mode='text' zodat de user de ingevoegde tekst ziet.
+    if (!window.KV_V2 || !window.KV_V2.helpers || !window.KV_V2.helpers.openTemplatePicker) {
+      _lsInbToast('Templates-picker niet beschikbaar (helper niet geladen).', 'warn');
+      return;
+    }
     const conv = _lsInbCurrentConv();
-    if (!conv) return;
+    if (!conv) {
+      _lsInbToast('Selecteer eerst een gesprek links om een template in te voegen.', 'warn');
+      return;
+    }
     const leadId = conv.lead_id;
     const naam   = conv.contact_name || conv.voornaam || _lsInbRowVan(conv) || '';
     const useMail = target === 'mail';
     const label  = useMail ? 'E-mail' : 'WhatsApp';
-    if (!window.KV_V2 || !window.KV_V2.helpers || !window.KV_V2.helpers.openTemplatePicker) {
-      _lsInbToast('Templates-picker niet beschikbaar (helper niet geladen)', 'warn');
-      return;
-    }
     window.KV_V2.helpers.openTemplatePicker({
       contactName:  naam,
       channelLabel: label,
@@ -1167,8 +1175,15 @@
           _lsInb.compose.showMail[leadId] = true;
         } else {
           _lsInb.compose.draftsWa[leadId] = appendWithSep(_lsInb.compose.draftsWa[leadId], body);
+          // Als user in mode='template' zit (buiten 24u-venster): schakel terug
+          // naar mode='text' zodat de ingevoegde vrije tekst in de textarea
+          // zichtbaar wordt. Meta-Sjabloon-flow blijft bereikbaar via de knop.
+          if (_lsInb.compose.mode && _lsInb.compose.mode[leadId] === 'template') {
+            _lsInb.compose.mode[leadId] = 'text';
+          }
         }
         _lsInbRepaintCompose();
+        _lsInbToast('Template ingevoegd.', 'ok');
       },
     });
   };
@@ -1225,25 +1240,39 @@
     }
     // v=9 FIX-GROEP-RUIS: alleen echte categorie-groepen (≥2 templates
     // delen de prefix). Alle prefix-eenlingen → één 'overig'-bucket.
-    // Dedup impliciet want groepen worden op key gemaakt (Set semantics).
+    // BP3 v16 (2026-09-03) — categorie-bepaling nu op basis van
+    // folder_name (whatsapp_template_folders) i.p.v. naam-prefix. Templates
+    // die aan een folder hangen krijgen die folder-naam als categorie. Voor
+    // templates ZONDER folder valt 't systeem terug op de oude naam-prefix-
+    // logica (backward-compat). Lege folders komen niet in de picker want
+    // we fetchen alleen approved templates.
     const prefixOf = (name) => {
       const s = String(name || '').trim();
       const i = s.indexOf('_');
       return (i > 0 ? s.slice(0, i) : (s || 'overig')).toLowerCase();
     };
-    // Preliminary count: welke prefix komt ≥2x voor?
+    // Preliminary count: welke prefix komt ≥2x voor? (voor items zonder folder)
     const prefixCountAll = new Map();
     for (const it of items) {
+      if (it.folder_name) continue; // folder-templates tellen niet in prefix-buckets
       const p = prefixOf(it.name);
       prefixCountAll.set(p, (prefixCountAll.get(p) || 0) + 1);
     }
-    // effectivePrefix() = prefix als deze ≥2 heeft, anders 'overig'.
-    const effectivePrefix = (name) => {
-      const p = prefixOf(name);
+    // categoryOf() = folder_name als 'ie er is, anders effective-prefix.
+    const categoryOf = (it) => {
+      if (it.folder_name) return String(it.folder_name);
+      const p = prefixOf(it.name);
+      return (prefixCountAll.get(p) || 0) >= 2 ? p : 'overig';
+    };
+    // Alias voor bestaande code (effectivePrefix → categoryOf op item).
+    const effectivePrefix = (nameOrItem) => {
+      if (nameOrItem && typeof nameOrItem === 'object' && 'name' in nameOrItem) return categoryOf(nameOrItem);
+      // Legacy string-signature: alleen prefix (voor callers die geen it hebben).
+      const p = prefixOf(nameOrItem);
       return (prefixCountAll.get(p) || 0) >= 2 ? p : 'overig';
     };
     // Chips: unieke effective-prefixes, gesorteerd, met de count.
-    const uniquePrefixes = Array.from(new Set(items.map(it => effectivePrefix(it.name))));
+    const uniquePrefixes = Array.from(new Set(items.map(it => effectivePrefix(it))));
     // 'overig' altijd onderaan de chip-rij en groups-lijst.
     uniquePrefixes.sort((a, b) => {
       if (a === 'overig') return 1;
@@ -1252,17 +1281,17 @@
     });
     let activePrefix = 'ALL';
     const renderList = () => {
-      const filtered = activePrefix === 'ALL' ? items : items.filter(it => effectivePrefix(it.name) === activePrefix);
+      const filtered = activePrefix === 'ALL' ? items : items.filter(it => effectivePrefix(it) === activePrefix);
       const byPrefix = new Map();
       for (const it of filtered) {
-        const key = effectivePrefix(it.name);
+        const key = effectivePrefix(it);
         if (!byPrefix.has(key)) byPrefix.set(key, []);
         byPrefix.get(key).push(it);
       }
       const chipsHtml = `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
         <button class="chip ${activePrefix === 'ALL' ? 'on' : ''}" data-prefix="ALL" style="font-size:11.5px;padding:3px 10px">Alle (${items.length})</button>
         ${uniquePrefixes.map(p => {
-          const n = items.filter(it => effectivePrefix(it.name) === p).length;
+          const n = items.filter(it => effectivePrefix(it) === p).length;
           const label = p === 'overig' ? 'overig' : p;
           return `<button class="chip ${activePrefix === p ? 'on' : ''}" data-prefix="${esc(p)}" style="font-size:11.5px;padding:3px 10px">${esc(label)} (${n})</button>`;
         }).join('')}
@@ -3316,7 +3345,10 @@
       }
       // Component-content in eigen wrapper. Instellingen-v2 gebruikt de
       // `.set-*` CSS-klassen — die zijn shell-shared, dus rendering werkt.
-      return `<div class="pad" style="padding:20px">${subTabBar}${window.KV_V2.metaTemplates.render()}</div>`;
+      // BP3 v16 (2026-09-03) — hideNumberRegister: verberg het WhatsApp-nummer-
+      // registreren-blok. Alleen relevant in Instellingen → WhatsApp; hier in
+      // Leadsonderhoud is 't ongewenste ruis (setup-actie, geen dagelijks werk).
+      return `<div class="pad" style="padding:20px">${subTabBar}${window.KV_V2.metaTemplates.render({ hideNumberRegister: true })}</div>`;
     }
     // ── Onderstaande logica is de bestaande wa_snippets-tool (sub-tab "Open templates").
 
