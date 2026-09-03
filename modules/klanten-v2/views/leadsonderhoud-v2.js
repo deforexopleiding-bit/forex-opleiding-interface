@@ -64,7 +64,7 @@
     // bereikbaar blijft. Filter-state per tab (periode/resultaat/bron) leeft
     // apart zodat we bij tab-switch niet refetchen.
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
-    opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', lastKey: null },
+    opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', tijd: 'aankomend', lastKey: null },
     vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     // v=17 (2026-08-28): Toegang-aanvragen tab (WhatsApp-gate).
     toegangAanvragen: { loading: false, fetched: false, error: null, data: null, _seq: 0,
@@ -2092,7 +2092,7 @@
     const showCancelled = !!st.showCancelled;
     const key = useAgenda
       ? 'ag:' + rangeFrom + '..' + rangeTo + '&r=' + st.resultaat + '&b=' + st.bron + '&c=' + (showCancelled ? '1' : '0')
-      : 'p=' + st.periode + '&r=' + st.resultaat + '&b=' + st.bron + '&c=' + (showCancelled ? '1' : '0');
+      : 'p=' + st.periode + '&r=' + st.resultaat + '&b=' + st.bron + '&c=' + (showCancelled ? '1' : '0') + '&t=' + (st.tijd || 'aankomend');
     if (!force && st.lastKey === key && st.fetched && !st.error) return;
     st.loading = true; st.error = null; st.lastKey = key;
     const seq = ++st._seq;
@@ -2107,6 +2107,9 @@
       qsParts.push('limit=1000');
     } else {
       qsParts.push('periode=' + encodeURIComponent(st.periode));
+      // BP3 v24 — tijd-filter (aankomend/verleden/alles) alleen buiten
+      // agenda-modus. Agenda gebruikt from/to en heeft eigen ordering.
+      qsParts.push('tijd=' + encodeURIComponent(st.tijd || 'aankomend'));
     }
     if (showCancelled) qsParts.push('include_cancelled=true');
     const j = await tryFetch('opstartsessies', '/api/leadsonderhoud-opstartsessies-list?' + qsParts.join('&'));
@@ -2131,6 +2134,11 @@
   window._lsSetOpPeriode   = function(p){ _live.opstartsessies.periode = p; fetchOpstartsessies(true); };
   window._lsSetOpResultaat = function(r){ _live.opstartsessies.resultaat = r; fetchOpstartsessies(true); };
   window._lsSetOpBron      = function(sel){ _live.opstartsessies.bron = String(sel.value || ''); fetchOpstartsessies(true); };
+  window._lsSetOpTijd      = function(t){
+    const v = (t === 'verleden' || t === 'alles') ? t : 'aankomend';
+    _live.opstartsessies.tijd = v;
+    fetchOpstartsessies(true);
+  };
   window._lsCopyLink = function(url, btn){
     try { navigator.clipboard.writeText(url); if (btn){ const t = btn.textContent; btn.textContent = 'Gekopieerd ✓'; setTimeout(()=>{ btn.textContent = t; }, 1200); } }
     catch (_) { prompt('Kopieer de link:', url); }
@@ -2866,10 +2874,23 @@
     // BP3 v11 (2026-09-02) — sort: aankomend oplopend, verleden daarna
     // (oplopend), zonder-datum tot slot. Client-side omdat het endpoint
     // op created_at DESC sorteert; hier willen we op gekozen_start_at.
+    // BP3 v24 (2026-09-03) — tijd-aware sort:
+    //   aankomend: gekozen>=nu asc, dan zonder-datum
+    //   verleden : gekozen<nu desc (meest recent bovenaan)
+    //   alles    : bestaande 3-way sort
     const nowMs = Date.now();
+    const activeTijd = st.tijd || 'aankomend';
     const sortKey = (r) => {
-      if (!r.gekozen_start_at) return [2, 0];
-      const t = new Date(r.gekozen_start_at).getTime();
+      const t = r.gekozen_start_at ? new Date(r.gekozen_start_at).getTime() : NaN;
+      if (activeTijd === 'verleden') {
+        if (isNaN(t)) return [1, 0];        // zonder-datum onderaan
+        return [0, -t];                     // negatieve tijd = recent bovenaan
+      }
+      if (activeTijd === 'aankomend') {
+        if (isNaN(t)) return [1, 0];        // ongeboekt onderaan
+        return [0, t];                      // oplopend
+      }
+      // alles → 3-way: aankomend, verleden, zonder-datum.
       if (isNaN(t)) return [2, 0];
       return t >= nowMs ? [0, t] : [1, t];
     };
@@ -2881,6 +2902,9 @@
     const bronnen = data.bronnen || [];
     const periodes = [['week','Deze week'],['maand','Deze maand'],['alles','Alles']];
     const uitk = [['alle','Alle'],['toegelaten','Toegelaten'],['afgewezen','Afgewezen']];
+    // BP3 v24 — Aankomend/Verleden/Alles chips (default Aankomend).
+    const tijden = [['aankomend','Aankomend'],['verleden','Verleden'],['alles','Alles']];
+    const tijdChips = tijden.map(([k,l]) => `<button class="chip ${activeTijd===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpTijd('${k}')">${esc(l)}</button>`).join('');
     const perChips = periodes.map(([k,l]) => `<button class="chip ${st.periode===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpPeriode('${k}')">${esc(l)}</button>`).join('');
     const resChips = uitk.map(([k,l]) => `<button class="chip ${st.resultaat===k?'on':''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpResultaat('${k}')">${esc(l)}</button>`).join('');
     const bronOpts = `<option value="" ${st.bron ? '' : 'selected'}>Alle bronnen</option>`
@@ -2960,6 +2984,10 @@
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:10px">
         ${viewChips}
         ${st.view === 'agenda' ? '' : `
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Tijd</span>
+          ${tijdChips}
+        </div>
         <div style="display:flex;gap:6px;align-items:center">
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
           ${perChips}

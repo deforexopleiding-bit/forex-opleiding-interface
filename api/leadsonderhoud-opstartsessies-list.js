@@ -29,6 +29,9 @@ import { getSetterScope } from './_lib/setter-scope.js';
 
 const PERIODES  = new Set(['week', 'maand', 'alles']);
 const RESULTATEN = new Set(['alle', 'toegelaten', 'afgewezen']);
+// BP3 v24 (2026-09-03) — tijd-filter voor Aankomend/Verleden/Alles.
+// Default 'aankomend' zodat het huidige gedrag (upcoming eerst) behouden blijft.
+const TIJDEN = new Set(['aankomend', 'verleden', 'alles']);
 
 function periodeGrens(periode) {
   const now = Date.now();
@@ -61,6 +64,10 @@ export default async function handler(req, res) {
   // (toggle-chip "Toon geannuleerd"). Rijen zonder appointment_id (nog geen
   // boeking) blijven altijd zichtbaar.
   const includeCancelled = String(q.include_cancelled || '') === 'true';
+  // BP3 v24 (2026-09-03) — tijd-filter. Bepaalt server-side WHERE + ORDER
+  // + LIMIT-default zodat de limit op de juiste set slaat.
+  const tijd = TIJDEN.has(String(q.tijd || 'aankomend').toLowerCase())
+    ? String(q.tijd).toLowerCase() : 'aankomend';
   // BP3 v11 (2026-09-02) — from/to (YYYY-MM-DD) voor agenda-maand-view.
   // Als aanwezig: filter op gekozen_start_at binnen [from, to) en de
   // limit-cap gaat naar 1000 (volle maand dekken). from/to overrulen
@@ -69,9 +76,12 @@ export default async function handler(req, res) {
   const rawFrom = typeof q.from === 'string' && DATE_RE.test(q.from.trim()) ? q.from.trim() : null;
   const rawTo   = typeof q.to   === 'string' && DATE_RE.test(q.to.trim())   ? q.to.trim()   : null;
   const useRange = !!(rawFrom && rawTo);
+  // BP3 v24 (2026-09-03) — limit-default per tijd-filter zodat de 25-limit
+  // niet oude/afgeronde calls wegdrukt. Range-modus (agenda) blijft 1000.
+  const defaultLimitByTijd = { aankomend: 100, verleden: 200, alles: 300 };
   const limit   = useRange
     ? Math.min(1000, Math.max(1, Number(q.limit) || 1000))
-    : Math.min(200,  Math.max(1, Number(q.limit) || 25));
+    : Math.min(500,  Math.max(1, Number(q.limit) || defaultLimitByTijd[tijd] || 100));
   const grens   = useRange ? null : periodeGrens(periode);
 
   try {
@@ -83,16 +93,35 @@ export default async function handler(req, res) {
     // 2) Submissions.
     // BP3 v11: bij range-modus sorteren op gekozen_start_at ascending zodat
     // de agenda niet client-side hoeft te sorteren voor de eerste render.
+    // BP3 v24 (2026-09-03) — tijd-filter (aankomend/verleden/alles) heeft
+    // eigen WHERE + ORDER. Range-modus (agenda) overrulet tijd zoals 'ie
+    // periode al overruled. Nowtimestamp per request → OK bij korte
+    // response-tijden (~ms schaal).
+    const nowIso = new Date().toISOString();
     let qry = supabaseAdmin
       .from('opstartsessie_submissions')
       .select('id, created_at, booking_source, naam, email, telefoon, gekozen_slot, gekozen_start_at, score, drempel, resultaat, noshow_akkoord, appointment_id, lead_id', { count: 'exact' })
-      .order(useRange ? 'gekozen_start_at' : 'created_at', { ascending: useRange })
       .limit(limit);
+
     if (useRange) {
-      qry = qry.gte('gekozen_start_at', rawFrom).lt('gekozen_start_at', rawTo);
-    } else if (grens) {
-      qry = qry.gte('created_at', grens);
+      qry = qry.order('gekozen_start_at', { ascending: true })
+              .gte('gekozen_start_at', rawFrom).lt('gekozen_start_at', rawTo);
+    } else if (tijd === 'aankomend') {
+      // Aankomend: gekozen_start_at >= nu, oplopend. Rijen zonder
+      // gekozen_start_at (nog geen moment gekozen / afgewezen) blijven
+      // ook zichtbaar zodat Romy niet-geplande submissions kan opvolgen.
+      qry = qry.or(`gekozen_start_at.gte.${nowIso},gekozen_start_at.is.null`)
+              .order('gekozen_start_at', { ascending: true, nullsFirst: false });
+    } else if (tijd === 'verleden') {
+      // Verleden: gekozen_start_at < nu, meest recent bovenaan.
+      qry = qry.lt('gekozen_start_at', nowIso)
+              .order('gekozen_start_at', { ascending: false });
+    } else {
+      // Alles: geen tijd-filter; nieuwste created_at eerst — client-side
+      // 3-way sort brengt aankomend/verleden/ongeboekt in de juiste volgorde.
+      qry = qry.order('created_at', { ascending: false });
     }
+    if (!useRange && grens) qry = qry.gte('created_at', grens);
     if (resultaat !== 'alle') qry = qry.eq('resultaat', resultaat);
     if (bron)      qry = qry.eq('booking_source', bron);
     const { data: rows, error, count } = await qry;
@@ -266,7 +295,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       items,
-      periode, resultaat, bron,
+      periode, resultaat, bron, tijd,
       total  : count || items.length,
       bronnen: (bronnen || []).map((b) => ({ slug: b.slug, label: b.label })),
     });
