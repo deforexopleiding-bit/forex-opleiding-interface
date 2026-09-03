@@ -2401,10 +2401,18 @@
       const now = new Date();
       const pad = (n) => String(n).padStart(2, '0');
       const startStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-      const end = new Date(now.getTime() + state.window * 86400000);
+      const windowDays = Number.isFinite(state.window) && state.window > 0 ? state.window : 14;
+      const end = new Date(now.getTime() + windowDays * 86400000);
       const endStr = `${end.getFullYear()}-${pad(end.getMonth()+1)}-${pad(end.getDate())}`;
       const url = `/api/follow-up-ghl-free-slots?startDate=${startStr}&endDate=${endStr}&duration=30`;
       const j = await window.KV.authedJson(url);
+      // BP3 v23 (2026-09-03) — debug-log zodat we in DevTools direct zien
+      // hoeveel slots + eventuele endpoint-error voorbijkomen. Endpoint is
+      // fail-soft (200 met error:'onbeschikbaar' bij GHL/env-issues), dus
+      // een lege payload met error ≠ code-bug maar echte GHL-storing.
+      const rawSlotCount = Array.isArray(j?.slots)
+        ? j.slots.reduce((n, d) => n + (Array.isArray(d?.times) ? d.times.length : 0), 0) : 0;
+      try { console.log('[ls-slot-picker] url=' + url + ' status=ok raw_slot_count=' + rawSlotCount + ' endpoint_error=' + (j?.error || 'none')); } catch (_) {}
       const nowMs = Date.now();
       const slots = Array.isArray(j?.slots) ? j.slots.map((d) => {
         const times = (d.times || []).filter((t) => {
@@ -2414,9 +2422,17 @@
         return { date: d.date, times };
       }).filter((d) => d.times && d.times.length) : [];
       state.slots = slots;
-      if (j?.error) state.error = 'GHL-agenda onbereikbaar — typ hieronder handmatig.';
+      // Alleen banner tonen bij: endpoint-error EN 0 bruikbare slots.
+      // Als er slots binnenkomen ondanks een error-veld → toon slots +
+      // stille inline warning; endpoint mag partial-data returnen.
+      if (j?.error && !slots.length) {
+        state.error = 'GHL-agenda momenteel onbereikbaar — typ hieronder handmatig, of probeer over een paar minuten opnieuw.';
+      } else if (j?.error && slots.length) {
+        console.warn('[ls-slot-picker] partial response — endpoint reported error but slots present:', j?.error);
+      }
     } catch (e) {
-      state.error = e?.message || 'Slots ophalen mislukt';
+      console.warn('[ls-slot-picker] fetch faalde:', e?.message || e);
+      state.error = 'Slots-fetch mislukt: ' + (e?.message || 'onbekende fout') + ' — typ handmatig hieronder.';
       state.slots = [];
     } finally {
       state.loading = false;

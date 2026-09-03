@@ -52,10 +52,13 @@ export default async function handler(req, res) {
 
   try {
     // 1) Leads
+    // BP3 v23 (2026-09-03) FIX — raw `leads`-tabel heeft GEEN `naam`-kolom
+    // (die zit alleen op de VIEW `leads_overzicht`). Zoek op voornaam/
+    // achternaam/email/telefoon en compose 'name' bij het serialiseren.
     const { data: leads, error: lErr } = await supabaseAdmin
       .from('leads')
-      .select('id, naam, voornaam, achternaam, email, telefoon, customer_id, source_ref')
-      .or(`naam.ilike.${like},email.ilike.${like},telefoon.ilike.${like}`)
+      .select('id, voornaam, achternaam, email, telefoon, customer_id, source_ref')
+      .or(`voornaam.ilike.${like},achternaam.ilike.${like},email.ilike.${like},telefoon.ilike.${like}`)
       .order('created_at', { ascending: false })
       .limit(limit);
     if (lErr) throw new Error('leads-search: ' + lErr.message);
@@ -75,8 +78,7 @@ export default async function handler(req, res) {
     for (const l of (leads || [])) {
       const email = String(l.email || '').trim().toLowerCase();
       if (email) seenEmail.add(email);
-      const name = l.naam
-        || [l.voornaam, l.achternaam].filter(Boolean).join(' ').trim()
+      const name = [l.voornaam, l.achternaam].filter(Boolean).join(' ').trim()
         || l.email
         || 'Onbekende lead';
       const hasContact = !!(l?.source_ref?.ghl_contact_id || l.customer_id);

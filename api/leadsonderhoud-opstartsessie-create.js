@@ -82,7 +82,7 @@ export default async function handler(req, res) {
       if (!UUID_RE.test(leadId)) return res.status(400).json({ error: 'lead_id (uuid) vereist' });
       const { data, error } = await supabaseAdmin
         .from('leads')
-        .select('id, naam, voornaam, achternaam, email, telefoon, customer_id, source_ref, owner_id')
+        .select('id, voornaam, achternaam, email, telefoon, customer_id, source_ref, eigenaar_id')
         .eq('id', leadId).maybeSingle();
       if (error) throw new Error('leads-lookup: ' + error.message);
       if (!data)  return res.status(404).json({ error: 'Lead niet gevonden' });
@@ -106,7 +106,7 @@ export default async function handler(req, res) {
       // Bestaande lead op deze klant?
       let { data: existingLead } = await supabaseAdmin
         .from('leads')
-        .select('id, naam, voornaam, achternaam, email, telefoon, customer_id, source_ref, owner_id')
+        .select('id, voornaam, achternaam, email, telefoon, customer_id, source_ref, eigenaar_id')
         .eq('customer_id', customerId).order('created_at', { ascending: false }).limit(1).maybeSingle();
 
       if (!existingLead) {
@@ -133,7 +133,7 @@ export default async function handler(req, res) {
         await supabaseAdmin.from('leads').update(patch).eq('id', newLeadId);
         const { data: reload } = await supabaseAdmin
           .from('leads')
-          .select('id, naam, voornaam, achternaam, email, telefoon, customer_id, source_ref, owner_id')
+          .select('id, voornaam, achternaam, email, telefoon, customer_id, source_ref, eigenaar_id')
           .eq('id', newLeadId).maybeSingle();
         leadRow = reload;
       } else {
@@ -190,18 +190,30 @@ export default async function handler(req, res) {
 
       const { data: reload } = await supabaseAdmin
         .from('leads')
-        .select('id, naam, voornaam, achternaam, email, telefoon, customer_id, source_ref, owner_id')
+        .select('id, voornaam, achternaam, email, telefoon, customer_id, source_ref, eigenaar_id')
         .eq('id', newLeadId).maybeSingle();
       leadRow = reload;
     }
 
     if (!leadRow) return res.status(500).json({ error: 'Interne fout: geen lead-row geproduceerd' });
 
+    // BP3 v23 (2026-09-03) FIX — raw `leads`-tabel gebruikt voornaam/
+    // achternaam/telefoon/eigenaar_id; de lib verwacht lead_name/lead_email/
+    // lead_phone/owner_id shape. Map hier expliciet zodat we consistent
+    // blijven met de VIEW leads_overzicht + bestaande libs.
+    const leadForLib = {
+      ...leadRow,
+      lead_name : [leadRow.voornaam, leadRow.achternaam].filter(Boolean).join(' ').trim() || leadRow.email || null,
+      lead_email: leadRow.email    || null,
+      lead_phone: leadRow.telefoon || null,
+      owner_id  : leadRow.eigenaar_id || null,
+    };
+
     // ─── Aanmaak via bestaande lib ─────────────────────────────────────
     let result;
     try {
       result = await createAppointmentForLead({
-        lead: leadRow,
+        lead: leadForLib,
         scheduledAt,
         durationMinutes,
         source: source_slug,
