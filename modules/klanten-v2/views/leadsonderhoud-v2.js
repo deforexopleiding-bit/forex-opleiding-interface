@@ -3195,6 +3195,66 @@
       _lsInbToast('Opslaan faalde: ' + (err?.message || err), 'warn');
     }
   };
+  // BP3 v15 (2026-09-03) — verplaats een open-template naar een andere
+  // categorie. Hergebruikt /api/wa-snippets-upsert (PATCH) omdat er geen
+  // aparte move-endpoint voor snippets is. Alle bestaande velden worden
+  // meegestuurd zodat titel/body/owner ongewijzigd blijven — alleen category
+  // muteert. Gate: snippets.manage (bestaande).
+  window.__lsTplMove = async (id) => {
+    if (!id) return;
+    const it = (_lsTplTab.items || []).find((x) => String(x.id) === String(id));
+    if (!it) return;
+    const cats = _lsTplTab.categories || [];
+    const opts = ['(zonder categorie)', ...cats, '＋ Nieuwe categorie…'];
+    const promptText =
+      'Verplaats "' + (it.titel || 'template') + '" naar:\n\n' +
+      opts.map((c, i) => `  ${i + 1}. ${c}`).join('\n') +
+      '\n\nTyp een nummer, of een categorienaam:';
+    const raw = window.prompt(promptText, '');
+    if (raw == null) return;
+    const val = String(raw || '').trim();
+    if (!val) return;
+    let newCat = null;
+    const asNum = Number(val);
+    if (Number.isFinite(asNum) && asNum >= 1 && asNum <= opts.length) {
+      const chosen = opts[asNum - 1];
+      if (asNum === 1) newCat = null;                        // Zonder categorie
+      else if (asNum === opts.length) {                       // Nieuwe categorie…
+        const nieuwe = window.prompt('Nieuwe categorie-naam (max 80 chars):', '');
+        if (!nieuwe || !nieuwe.trim()) return;
+        newCat = nieuwe.trim().slice(0, 80);
+      } else {
+        newCat = chosen;
+      }
+    } else {
+      // Vrije tekst → nieuwe of bestaande categorie
+      newCat = val.slice(0, 80);
+    }
+    // Huidige = nieuwe → geen call.
+    if ((it.category || null) === (newCat || null)) {
+      _lsInbToast('Al in die categorie', 'info');
+      return;
+    }
+    try {
+      const r = await window.KV.authedFetch('/api/wa-snippets-upsert', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: it.id,
+          titel: it.titel,
+          body_text: it.body_text,
+          category: newCat,
+          owner_user_id: it.is_mine ? 'me' : 'shared',
+          sort_order: it.sort_order || 100,
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      _lsInbToast('Verplaatst naar ' + (newCat || 'zonder categorie'), 'ok');
+      await _lsTplFetch(true);
+    } catch (e) {
+      _lsInbToast('Verplaatsen mislukt: ' + (e?.message || e), 'warn');
+    }
+  };
   window.__lsTplDelete = async (id, titel) => {
     if (!id) return;
     // BP3 v13 (2026-09-03) — option-keys gecorrigeerd: _lsInbAskConfirm
@@ -3324,10 +3384,18 @@
     // BP3 v13 (2026-09-03) — INKLAPBARE categorie-secties: klik header →
     // collapse/expand + counter. Compactere row-styling zodat de pagina niet
     // eentonig lang wordt bij veel templates.
+    // BP3 v15 (2026-09-03) — default INGEKLAPT: bij eerste render zetten we
+    // elke nog-onbekende categorie op collapsed=true. Handmatig toggelen
+    // overschrijft (explicit false = open). Actieve zoekterm forceert alles
+    // open zodat matches zichtbaar zijn.
     if (!_lsTplTab.collapsedCats) _lsTplTab.collapsedCats = {};
+    for (const cat of grouped.keys()) {
+      if (_lsTplTab.collapsedCats[cat] === undefined) _lsTplTab.collapsedCats[cat] = true;
+    }
+    const _searchActive = !!(_lsTplTab.search && _lsTplTab.search.trim());
     const groupsHtml = grouped.size > 0
       ? [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0], 'nl')).map(([cat, arr]) => {
-          const collapsed = !!_lsTplTab.collapsedCats[cat];
+          const collapsed = _searchActive ? false : !!_lsTplTab.collapsedCats[cat];
           const catKeySafe = String(cat).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
           const rowsHtml = collapsed ? '' : arr.map((it) => `
             <div style="padding:9px 14px;border-top:1px solid var(--border);display:flex;gap:12px;align-items:flex-start">
@@ -3337,6 +3405,7 @@
               </div>
               ${canManage ? `<div style="display:flex;gap:4px;flex-shrink:0">
                 <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="window.__lsTplEdit('${esc(String(it.id))}')">Bewerk</button>
+                <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="window.__lsTplMove('${esc(String(it.id))}')" title="Verplaats naar andere categorie">↔ Verplaats</button>
                 <button class="btn btn-ghost btn-sm" style="font-size:11px;color:var(--rose)" onclick="window.__lsTplDelete('${esc(String(it.id))}', '${esc(String(it.titel || '').replace(/'/g, "\\'"))}')">Verwijder</button>
               </div>` : ''}
             </div>

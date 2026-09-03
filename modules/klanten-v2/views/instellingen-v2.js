@@ -4583,6 +4583,69 @@
   // Submit: endpoint verwacht ?template_id=X (niet ?id=). Delete verwacht ?id=X.
   window.__setWaSubmit = (id, name) => openConfirm(`Template "${name}" indienen bij Meta voor review? Kan enige uren duren. Kan niet ongedaan gemaakt worden.`, () => waCall(id, '/api/admin-meta-templates-submit?template_id=' + encodeURIComponent(id), 'POST', 'Submit'), 'warn');
   window.__setWaDelete = (id, name) => openConfirm(`Template "${name}" definitief verwijderen bij Meta? Kan NIET ongedaan gemaakt worden.`, () => waCall(id, '/api/admin-meta-templates-delete?id=' + encodeURIComponent(id), 'DELETE', 'Delete'), 'warn');
+  // BP3 v15 (2026-09-03) — verplaats een WA-template naar een andere folder
+  // (interne groepering). POST /api/admin-template-folder-move — puur DB, GEEN
+  // Meta-resubmit. Cross-WABA-verplaatsing wordt server-side geblokkeerd (409).
+  window.__setWaMove = (id, name) => {
+    if (!id) return;
+    const folders = _wa.folders || [];
+    const tpl = (_wa.items || []).find((x) => String(x.id) === String(id));
+    const opts = ['(geen categorie)', ...folders.map(f => f.name), '＋ Nieuwe categorie…'];
+    const promptText =
+      'Verplaats "' + (name || 'template') + '" naar:\n\n' +
+      opts.map((c, i) => `  ${i + 1}. ${c}`).join('\n') +
+      '\n\nTyp een nummer:';
+    const raw = window.prompt(promptText, '');
+    if (raw == null) return;
+    const val = String(raw || '').trim();
+    if (!val) return;
+    const asNum = Number(val);
+    if (!Number.isFinite(asNum) || asNum < 1 || asNum > opts.length) {
+      showToast('Ongeldig nummer', 'warn');
+      return;
+    }
+    const doMove = (folderId) => {
+      // Al in target-folder?
+      if ((tpl?.folder_id || null) === (folderId || null)) {
+        showToast('Al in die categorie', 'info');
+        return;
+      }
+      waCall(
+        id,
+        '/api/admin-template-folder-move',
+        'POST',
+        'Verplaatsen',
+        { template_id: id, folder_id: folderId }
+      );
+    };
+    if (asNum === 1) {
+      doMove(null); // Geen categorie
+      return;
+    }
+    if (asNum === opts.length) {
+      // Nieuwe categorie: create + gebruik result.folder.id
+      if (!_wa.moduleId) { showToast('Kies eerst een WABA', 'warn'); return; }
+      const nieuwe = window.prompt('Nieuwe categorie-naam (max 64 chars):', '');
+      if (!nieuwe || !nieuwe.trim()) return;
+      const trimmed = nieuwe.trim().slice(0, 64);
+      tryFetch('meta-folder-create-move', '/api/admin-template-folders-create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business_account_id: _wa.moduleId, name: trimmed }),
+      }).then((j) => {
+        if (j?.__error || j?.error) { showToast('Categorie aanmaken mislukt: ' + (j?.__error || j?.error), 'warn'); return; }
+        const folder = j?.folder || null;
+        if (folder?.id) {
+          _wa.folders = [...(_wa.folders || []), folder];
+          doMove(folder.id);
+        }
+      });
+      return;
+    }
+    // Bestaande folder (asNum - 2, want optie 1 = geen categorie).
+    const chosenFolder = folders[asNum - 2];
+    if (!chosenFolder) return;
+    doMove(chosenFolder.id);
+  };
   // Sync: endpoint verwacht body.business_account_id.
   window.__setWaSync = () => {
     if (!_wa.moduleId) { showToast('Geen module gekozen', 'warn'); return; }
@@ -4668,14 +4731,30 @@
           ${pill}
           <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMetaEdEdit('${esc(t.id)}','${esc(t.name || '')}','${esc(status)}')" style="font-size:11px">${status === 'approved' ? 'Nieuwe versie' : 'Edit'}</button>
           ${canSubmit ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaSubmit('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px">Submit</button>` : ''}
+          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaMove('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px" title="Verplaats naar andere categorie (geen Meta-resubmit)">↔ Verplaats</button>
           ${_isSuperAdmin ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaDelete('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px;color:var(--rose)">Delete</button>` : ''}
         </div>
       </div>`;
     }
+    // BP3 v15 (2026-09-03) — default INGEKLAPT: bij eerste render zetten we
+    // elke nog-onbekende categorie op collapsed=true. Handmatig toggelen
+    // overschrijft dit (explicit false = open). Als state al bestaat, laat
+    // 'em zoals user 'em heeft achtergelaten (geen reset per re-render).
+    if (!_wa.collapsedInit) {
+      _wa.collapsedInit = true;
+      for (const cat of orderedCats) {
+        if (_wa.collapsed[cat] === undefined) _wa.collapsed[cat] = true;
+      }
+    } else {
+      // Later toegevoegde categorieën (bv. nieuwe folder na init) → default dicht.
+      for (const cat of orderedCats) {
+        if (_wa.collapsed[cat] === undefined) _wa.collapsed[cat] = true;
+      }
+    }
     const rowsHtml = rows.length
       ? orderedCats.map(cat => {
           const items = grouped.get(cat).slice().sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
-          const isOpen = !_wa.collapsed[cat]; // default open
+          const isOpen = !_wa.collapsed[cat]; // default dicht (init hierboven)
           return `<div style="border-bottom:1px solid var(--border)">
             <button onclick="window.__setWaToggleCat('${esc(cat).replace(/'/g,"\\'")}')" style="width:100%;display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface-2);border:none;text-align:left;cursor:pointer;font:inherit;color:var(--text-1)">
               <span style="font-size:11px;color:var(--text-3);width:12px">${isOpen ? '▼' : '▶'}</span>

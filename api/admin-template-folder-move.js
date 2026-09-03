@@ -1,6 +1,8 @@
 // api/admin-template-folder-move.js
 // POST → verplaats een template naar een map (of naar 'ongegroepeerd').
-// SUPER_ADMIN ONLY.
+// Gate (BP3 v15, 2026-09-03): admin.meta_templates.manage — puur interne
+// folder_id-update op whatsapp_meta_templates. Triggert GEEN Meta-resubmit;
+// de Meta-template zelf (name/body/status/versie) blijft ongewijzigd.
 //
 // Body:
 //   { template_id: uuid, folder_id: uuid|null }
@@ -12,6 +14,7 @@
 // Response 200: { ok: true, template_id, folder_id }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,12 +27,9 @@ export default async function handler(req, res) {
     const userClient = createUserClient(req);
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return res.status(401).json({ error: 'Unauthorized' });
-
-    const { data: profile, error: profErr } = await supabaseAdmin
-      .from('profiles').select('id, role, is_active').eq('id', user.id).single();
-    if (profErr || !profile) return res.status(403).json({ error: 'Geen profiel gevonden' });
-    if (!profile.is_active) return res.status(403).json({ error: 'Account inactief' });
-    if (profile.role !== 'super_admin') return res.status(403).json({ error: 'Alleen super_admin' });
+    if (!(await requirePermission(req, 'admin.meta_templates.manage'))) {
+      return res.status(403).json({ error: 'Geen rechten (admin.meta_templates.manage)' });
+    }
 
     const body = (req.body && typeof req.body === 'object') ? req.body : null;
     if (!body) return res.status(400).json({ error: 'Body ontbreekt' });
