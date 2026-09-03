@@ -2387,6 +2387,95 @@
       _lsInbToast('Actie mislukt: ' + (e?.message || e), 'warn');
     }
   };
+  // BP3 v19 (2026-09-03) — Wijzig (reschedule) een opstartsessie-call.
+  // Toont sub-overlay met datetime-local input, pre-filled op huidige tijd.
+  // POST /api/leadsonderhoud-opstartsessie-wijzig — GHL-first (endpoint faalt
+  // met 502 bij GHL-fout zodat DB niet uit sync loopt).
+  const _lsOpReschedule = { open: false, appointmentId: null, currentIso: null, naam: null, saving: false };
+  window._lsOpstartWijzigOpen = (appointmentId, currentIso, naam) => {
+    if (!appointmentId) return;
+    _lsOpReschedule.open = true;
+    _lsOpReschedule.appointmentId = appointmentId;
+    _lsOpReschedule.currentIso = currentIso || null;
+    _lsOpReschedule.naam = naam || '';
+    _lsOpReschedule.saving = false;
+    if (window.DFO?.render) window.DFO.render();
+    setTimeout(() => {
+      const inp = document.getElementById('lsOpResIn');
+      if (inp) inp.focus();
+    }, 30);
+  };
+  window._lsOpstartWijzigClose = () => {
+    _lsOpReschedule.open = false;
+    _lsOpReschedule.appointmentId = null;
+    _lsOpReschedule.currentIso = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpstartWijzigSubmit = async () => {
+    if (_lsOpReschedule.saving) return;
+    const inp = document.getElementById('lsOpResIn');
+    const raw = inp ? String(inp.value || '').trim() : '';
+    if (!raw) { _lsInbToast('Kies een datum + tijd', 'warn'); return; }
+    // datetime-local retourneert 'YYYY-MM-DDTHH:mm' in lokale tijd zonder TZ.
+    // new Date(...) interpreteert dat als lokale tijd → ISO wordt UTC.
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) { _lsInbToast('Ongeldige datum-tijd', 'warn'); return; }
+    if (d.getTime() < Date.now() - 60 * 1000) { _lsInbToast('Kies een tijd in de toekomst', 'warn'); return; }
+    _lsOpReschedule.saving = true;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const r = await window.KV.authedFetch('/api/leadsonderhoud-opstartsessie-wijzig', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointment_id: _lsOpReschedule.appointmentId, new_start_at: d.toISOString() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      _lsInbToast('Call verplaatst.', 'ok');
+      window._lsOpstartWijzigClose();
+      window._lsCloseOpstartDetail?.();
+      fetchOpstartsessies(true);
+    } catch (e) {
+      _lsInbToast('Verplaatsen mislukt: ' + (e?.message || e), 'warn');
+      _lsOpReschedule.saving = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  function _lsOpReschedModalHtml() {
+    if (!_lsOpReschedule.open) return '';
+    // Pre-fill: huidige scheduled_at → lokale datetime-local waarde.
+    let preVal = '';
+    if (_lsOpReschedule.currentIso) {
+      try {
+        const d = new Date(_lsOpReschedule.currentIso);
+        if (!Number.isNaN(d.getTime())) {
+          const pad = (n) => String(n).padStart(2, '0');
+          preVal = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+      } catch (_) { /* leeg laten */ }
+    }
+    const naamHtml = _lsOpReschedule.naam
+      ? `<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Call van <b>${esc(_lsOpReschedule.naam)}</b></div>`
+      : '';
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2100;display:grid;place-items:center;padding:20px"
+      onclick="if(event.target===this)window._lsOpstartWijzigClose()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(420px,100%);padding:18px 20px">
+        <div style="font-size:15px;font-weight:600;margin-bottom:6px">Call verplaatsen</div>
+        ${naamHtml}
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Nieuwe datum + tijd</label>
+        <input id="lsOpResIn" type="datetime-local" value="${esc(preVal)}"
+          style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;font-family:inherit"
+          ${_lsOpReschedule.saving ? 'disabled' : ''}
+          onkeydown="if(event.key==='Enter'){event.preventDefault();window._lsOpstartWijzigSubmit();}else if(event.key==='Escape'){window._lsOpstartWijzigClose();}"/>
+        <div style="font-size:11px;color:var(--text-3);margin-top:6px">Eindtijd wordt automatisch berekend uit de huidige duur (server-side) en doorgezet naar GHL.</div>
+        <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window._lsOpstartWijzigClose()" ${_lsOpReschedule.saving ? 'disabled' : ''}>Annuleren</button>
+          <button class="btn btn-primary btn-sm" style="color:#fff" onclick="window._lsOpstartWijzigSubmit()" ${_lsOpReschedule.saving ? 'disabled' : ''}>
+            ${_lsOpReschedule.saving ? 'Verplaatsen…' : 'Verplaats call'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
 
   function opstartsessiesView() {
     if (!_live.opstartsessies.fetched && !_live.opstartsessies.loading && !_live.opstartsessies.error) queueMicrotask(() => fetchOpstartsessies(false));
@@ -2536,6 +2625,7 @@
 
     return `
       ${_lsOpstartDetailModalHtml()}
+      ${_lsOpReschedModalHtml()}
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
         Alles wat leads op <code>deforexopleiding.nl/agenda</code> invullen — inclusief afgewezen leads. Klik een rij voor de vragenlijst-antwoorden.
       </div>
@@ -2718,6 +2808,10 @@
         // zichtbaar als er een appointment is en status is niet al cancelled.
         const acties = canCancel
           ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" style="font-size:11.5px;color:var(--brand)"
+                onclick="window._lsOpstartWijzigOpen('${esc(String(s.appointment_id))}','${esc(String(s.afspraak.scheduled_at || ''))}','${esc(String(s.naam || '')).replace(/'/g, "\\'")}')">
+                ✎ Wijzig call
+              </button>
               <button class="btn btn-ghost btn-sm" style="font-size:11.5px;color:var(--amber)"
                 onclick="window._lsOpstartAnnuleer('${esc(String(s.appointment_id))}','cancel','${esc(String(s.naam || '')).replace(/'/g, "\\'")}')">
                 ⊘ Annuleer call
