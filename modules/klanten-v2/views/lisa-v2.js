@@ -1099,17 +1099,13 @@
     const rowIdClick = String(c.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const isOpen = String(_thread.convId) === String(c.id);
     const onCls = isOpen ? 'on' : '';
-    // BP3 v12 (2026-09-03) — verfijnde phase-color-mapping zodat niet-actieve
-    // fasen (cold/disq/done/qualified) meteen visueel opvallen — vooral als
-    // ze via de nieuwe "active OR unread"-verruiming in de lijst komen.
-    const _phaseRaw = String(c.phase || '').toLowerCase();
-    const phaseColor = c.qualified ? 'emerald'
-      : _phaseRaw === 'disqualified' ? 'rose'
-      : _phaseRaw === 'cold' ? 'text-3'
-      : _phaseRaw === 'done' ? 'text-3'
-      : 'blue';
-    const takeoverBadge = c.human_takeover ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">MENS</span>` : '';
-    const bookedBadge = c.call_booked ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">CALL</span>` : '';
+    // BP3 v18 (2026-09-03) — lijst-rij opgeschoond: fase-chip weg, legacy
+    // MENS/CALL-badges weg. Alleen "✓ Call ingepland"-pill blijft (conditioneel
+    // op call_booked_at). Header-toggle + header-badge blijven ongewijzigd zodat
+    // takeover/fase daar nog altijd zichtbaar en bedienbaar zijn.
+    const callBookedBadge = c.call_booked_at
+      ? `<span title="Call ingepland op ${esc(new Date(c.call_booked_at).toLocaleString('nl-NL'))}" style="font-size:9.5px;padding:1px 6px;border-radius:8px;background:var(--emerald-soft, rgba(16,185,129,.12));color:var(--emerald, #10B981);font-weight:600;letter-spacing:.02em;white-space:nowrap">✓ Call ingepland</span>`
+      : '';
     // BP3 v7 (2026-09-02) — ongelezen-styling met optimistic overrides:
     //   1. Currently open conv → altijd gelezen (unread=0) — je kijkt ernaar.
     //   2. _readAt[c.id] >= c.last_message_at → gelezen (poll-race guard).
@@ -1141,11 +1137,7 @@
         </div>
         <div style="font-size:12.5px;font-weight:${nw ? '500' : '400'};color:${nw ? 'var(--text-1)' : 'var(--text-2)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.preview || '—')}</div>
         <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(handle)}</div>
-        <div style="margin-top:6px;display:flex;gap:5px;align-items:center;flex-wrap:wrap">
-          <span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--${phaseColor}-soft,var(--surface-2));color:var(--${phaseColor});font-weight:600">${esc(c.phase || '—')}</span>
-          ${takeoverBadge}
-          ${bookedBadge}
-        </div>
+        ${callBookedBadge ? `<div style="margin-top:6px;display:flex;gap:5px;align-items:center;flex-wrap:wrap">${callBookedBadge}</div>` : ''}
       </div>
     </div>`;
   }
