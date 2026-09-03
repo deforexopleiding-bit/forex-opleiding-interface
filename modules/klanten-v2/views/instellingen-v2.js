@@ -4646,6 +4646,11 @@
     for (const c of Array.from(grouped.keys()).sort()) if (c !== 'Ongesorteerd' && !seenCats.has(c)) { orderedCats.push(c); seenCats.add(c); }
     if (grouped.has('Ongesorteerd')) orderedCats.push('Ongesorteerd');
 
+    // BP3 v14 (2026-09-03) — Delete-knop alleen voor super_admin (backend
+    // handhaaft dat al hardcoded via admin-meta-templates-delete.js; UI-guard
+    // voorkomt dat niet-super_admins de knop zien en 403 krijgen).
+    // Bron: window.DFO.S.roles → array van shell-rollen; super_admin ⇒ wildcard.
+    const _isSuperAdmin = !!(S && Array.isArray(S.roles) && S.roles.includes('super_admin'));
     function renderRow(t) {
       const status = (t.status || 'unknown').toLowerCase();
       const pill = status === 'approved' ? '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">approved</span>'
@@ -4663,7 +4668,7 @@
           ${pill}
           <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setMetaEdEdit('${esc(t.id)}','${esc(t.name || '')}','${esc(status)}')" style="font-size:11px">${status === 'approved' ? 'Nieuwe versie' : 'Edit'}</button>
           ${canSubmit ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaSubmit('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px">Submit</button>` : ''}
-          <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaDelete('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px;color:var(--rose)">Delete</button>
+          ${_isSuperAdmin ? `<button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setWaDelete('${esc(t.id)}','${esc(t.name || '')}')" style="font-size:11px;color:var(--rose)">Delete</button>` : ''}
         </div>
       </div>`;
     }
