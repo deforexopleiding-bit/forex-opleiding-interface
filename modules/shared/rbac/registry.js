@@ -121,6 +121,16 @@ const FEATURE_REGISTRY = [
     { key:'followup.audit.approve', label:'Audit goedkeuren' },
     { key:'followup.audit.reject', label:'Audit afkeuren' },
   ]},
+  { moduleKey:'opvolging', moduleLabel:'Opvolging', moduleIcon:'ti-phone', features:[
+    { key:'opvolging.module.access', label:'Module zichtbaar' },
+    { key:'opvolging.dag.view', label:'Tab: Vandaag' },
+    { key:'opvolging.dashboard.view', label:'Tab: Dashboard' },
+    { key:'opvolging.archief.view', label:'Tab: Afgerond' },
+    { key:'opvolging.taak.afronden', label:'Taak afronden' },
+    { key:'opvolging.taak.archiveren', label:'Taak archiveren' },
+    { key:'opvolging.agenda.boeken', label:'Agenda-afspraak boeken' },
+    { key:'opvolging.whatsapp.sturen', label:'WhatsApp sturen' },
+  ]},
   { moduleKey:'klanten', moduleLabel:'Klanten', moduleIcon:'ti-users-group', features:[
     { key:'customer.module.access', label:'Module zichtbaar' },
     { key:'customer.view', label:'Klant bekijken' },
