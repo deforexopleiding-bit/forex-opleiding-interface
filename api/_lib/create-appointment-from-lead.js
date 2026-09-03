@@ -29,7 +29,12 @@ const GHL_CONTACTS_VERSION = '2021-07-28';
 // e-mail/telefoon dedup) of een nieuw contact te maken. Returnt het
 // contact-id als string. Throws { code:'GHL_API', ghlStatus, ghlBody }
 // bij API-fout — caller vertaalt naar 422 via mapGhlError.
-async function ghlUpsertContact({ email, phone, firstName, lastName }) {
+// BP3 v22 (2026-09-03) — export toegevoegd zodat het nieuwe endpoint
+// "leadsonderhoud-opstartsessie-create" (handmatig-contact-pad) deze
+// helper kan hergebruiken. Semantiek ongewijzigd t.o.v. de bestaande
+// interne callers. Callers moeten zelf { code:'GHL_API', ghlStatus,
+// ghlBody } errors afvangen.
+export async function ghlUpsertContact({ email, phone, firstName, lastName }) {
   const token      = process.env.GHL_PIT_TOKEN || process.env.GHL_API_KEY;
   const locationId = process.env.GHL_LOCATION_ID;
   if (!token || !locationId) {

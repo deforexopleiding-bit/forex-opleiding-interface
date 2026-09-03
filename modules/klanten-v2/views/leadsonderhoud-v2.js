@@ -2387,32 +2387,24 @@
       _lsInbToast('Actie mislukt: ' + (e?.message || e), 'warn');
     }
   };
-  // BP3 v19 (2026-09-03) — Wijzig (reschedule) een opstartsessie-call.
-  // Toont sub-overlay met datetime-local input, pre-filled op huidige tijd.
-  // POST /api/leadsonderhoud-opstartsessie-wijzig — GHL-first (endpoint faalt
-  // met 502 bij GHL-fout zodat DB niet uit sync loopt).
-  //
-  // BP3 v21 (2026-09-03) — vrije GHL-slots (Dave's Zoom-kalender, 14 dagen)
-  // getoond als suggestie via /api/follow-up-ghl-free-slots. Klik op een slot
-  // vult het datetime-local input. Handmatig invoeren blijft als fallback.
-  const _lsOpReschedule = {
-    open: false, appointmentId: null, currentIso: null, naam: null, saving: false,
-    slotsLoading: false, slotsError: null, slots: [], slotsWindow: 14,
-    selectedSlot: null, // "YYYY-MM-DDTHH:MM" wanneer via chip gekozen
-  };
-  async function _lsOpstartWijzigFetchSlots() {
-    _lsOpReschedule.slotsLoading = true;
-    _lsOpReschedule.slotsError = null;
+  // BP3 v22 (2026-09-03) — Gedeelde slot-picker helpers voor "Wijzig call"
+  // (reschedule) en "+ Nieuwe call" (create). State-factory + pure fetch +
+  // pure render zodat de UI-code niet dupliceert. State wordt door de caller
+  // beheerd (elk modal heeft eigen state-object).
+  function _lsCreateSlotPickerState() {
+    return { loading: false, error: null, slots: [], window: 14, selectedSlot: null };
+  }
+  async function _lsFetchSlotsInto(state) {
+    state.loading = true; state.error = null;
     if (window.DFO?.render) window.DFO.render();
     try {
       const now = new Date();
       const pad = (n) => String(n).padStart(2, '0');
       const startStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
-      const end = new Date(now.getTime() + _lsOpReschedule.slotsWindow * 86400000);
+      const end = new Date(now.getTime() + state.window * 86400000);
       const endStr = `${end.getFullYear()}-${pad(end.getMonth()+1)}-${pad(end.getDate())}`;
       const url = `/api/follow-up-ghl-free-slots?startDate=${startStr}&endDate=${endStr}&duration=30`;
       const j = await window.KV.authedJson(url);
-      // Filter: alleen slots die niet in het verleden liggen.
       const nowMs = Date.now();
       const slots = Array.isArray(j?.slots) ? j.slots.map((d) => {
         const times = (d.times || []).filter((t) => {
@@ -2421,15 +2413,63 @@
         });
         return { date: d.date, times };
       }).filter((d) => d.times && d.times.length) : [];
-      _lsOpReschedule.slots = slots;
-      if (j?.error) _lsOpReschedule.slotsError = 'GHL-agenda onbereikbaar — typ hieronder handmatig.';
+      state.slots = slots;
+      if (j?.error) state.error = 'GHL-agenda onbereikbaar — typ hieronder handmatig.';
     } catch (e) {
-      _lsOpReschedule.slotsError = e?.message || 'Slots ophalen mislukt';
-      _lsOpReschedule.slots = [];
+      state.error = e?.message || 'Slots ophalen mislukt';
+      state.slots = [];
     } finally {
-      _lsOpReschedule.slotsLoading = false;
+      state.loading = false;
       if (window.DFO?.render) window.DFO.render();
     }
+  }
+  function _lsRenderSlotPickerHtml(state, opts) {
+    const pickCb    = opts?.pickCb    || 'window._lsSlotNoop';
+    const loadMore  = opts?.loadMoreCb|| 'window._lsSlotNoop';
+    if (state.loading) return `<div style="font-size:11.5px;color:var(--text-3);padding:8px 0">Vrije slots laden…</div>`;
+    if (state.error)   return `<div style="font-size:11.5px;color:var(--amber);padding:6px 8px;background:var(--amber-soft, rgba(245,158,11,.1));border-radius:6px;margin-bottom:6px">${esc(state.error)}</div>`;
+    if (!state.slots.length) return `<div style="font-size:11.5px;color:var(--text-3);padding:6px 0">Geen vrije slots in venster — typ handmatig hieronder.</div>`;
+    const dayFmt = (dateStr) => {
+      try { const d = new Date(dateStr + 'T12:00'); return d.toLocaleDateString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short' }); }
+      catch (_) { return dateStr; }
+    };
+    const groups = state.slots.map((d) => {
+      const chips = d.times.map((t) => {
+        const key = `${d.date}T${t}`;
+        const isSel = state.selectedSlot === key;
+        const bg = isSel ? 'var(--brand, #0A7490)' : 'var(--surface-2)';
+        const fg = isSel ? '#fff' : 'var(--text-1)';
+        const bd = isSel ? 'var(--brand, #0A7490)' : 'var(--border)';
+        return `<button type="button" onclick="${pickCb}('${esc(d.date)}','${esc(t)}')" style="font-size:11.5px;padding:3px 9px;border-radius:14px;background:${bg};color:${fg};border:1px solid ${bd};cursor:pointer;font-family:inherit">${esc(t)}</button>`;
+      }).join('');
+      return `<div style="margin-bottom:8px">
+        <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:4px">${esc(dayFmt(d.date))}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px">${chips}</div>
+      </div>`;
+    }).join('');
+    const loadMoreBtn = state.window < 30
+      ? `<button type="button" class="btn btn-ghost btn-sm" onclick="${loadMore}()" style="font-size:11px;margin-top:6px">Verder kijken (+14 dagen)</button>`
+      : '';
+    return `<div style="max-height:230px;overflow-y:auto;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:10px">${groups}${loadMoreBtn}</div>`;
+  }
+  window._lsSlotNoop = () => {};
+
+  // BP3 v19 (2026-09-03) — Wijzig (reschedule) een opstartsessie-call.
+  // Toont sub-overlay met datetime-local input, pre-filled op huidige tijd.
+  // POST /api/leadsonderhoud-opstartsessie-wijzig — GHL-first (endpoint faalt
+  // met 502 bij GHL-fout zodat DB niet uit sync loopt).
+  //
+  // BP3 v21 (2026-09-03) — vrije GHL-slots (Dave's Zoom-kalender, 14 dagen)
+  // getoond als suggestie via /api/follow-up-ghl-free-slots. Klik op een slot
+  // vult het datetime-local input. Handmatig invoeren blijft als fallback.
+  // BP3 v22 refactor — slot-picker state is nu factory-based (gedeeld met
+  // + Nieuwe call). De reschedule-modal wrap't 'em in _lsOpReschedule.picker.
+  const _lsOpReschedule = {
+    open: false, appointmentId: null, currentIso: null, naam: null, saving: false,
+    picker: _lsCreateSlotPickerState(),
+  };
+  async function _lsOpstartWijzigFetchSlots() {
+    await _lsFetchSlotsInto(_lsOpReschedule.picker);
   }
   window._lsOpstartWijzigOpen = (appointmentId, currentIso, naam) => {
     if (!appointmentId) return;
@@ -2438,10 +2478,7 @@
     _lsOpReschedule.currentIso = currentIso || null;
     _lsOpReschedule.naam = naam || '';
     _lsOpReschedule.saving = false;
-    _lsOpReschedule.slots = [];
-    _lsOpReschedule.slotsError = null;
-    _lsOpReschedule.slotsWindow = 14;
-    _lsOpReschedule.selectedSlot = null;
+    _lsOpReschedule.picker = _lsCreateSlotPickerState();
     if (window.DFO?.render) window.DFO.render();
     setTimeout(() => {
       const inp = document.getElementById('lsOpResIn');
@@ -2453,26 +2490,23 @@
     _lsOpReschedule.open = false;
     _lsOpReschedule.appointmentId = null;
     _lsOpReschedule.currentIso = null;
-    _lsOpReschedule.slots = [];
-    _lsOpReschedule.selectedSlot = null;
+    _lsOpReschedule.picker = _lsCreateSlotPickerState();
     if (window.DFO?.render) window.DFO.render();
   };
   window._lsOpstartWijzigPickSlot = (dateStr, timeStr) => {
     if (!dateStr || !timeStr) return;
-    _lsOpReschedule.selectedSlot = `${dateStr}T${timeStr}`;
+    _lsOpReschedule.picker.selectedSlot = `${dateStr}T${timeStr}`;
     const inp = document.getElementById('lsOpResIn');
     if (inp) { inp.value = `${dateStr}T${timeStr}`; }
     if (window.DFO?.render) window.DFO.render();
   };
   window._lsOpstartWijzigLoadMore = () => {
-    _lsOpReschedule.slotsWindow = Math.min(_lsOpReschedule.slotsWindow + 14, 30);
+    _lsOpReschedule.picker.window = Math.min(_lsOpReschedule.picker.window + 14, 30);
     _lsOpstartWijzigFetchSlots();
   };
   window._lsOpstartWijzigManualInput = () => {
-    // Bij handmatig typen ontkoppelen we de selected-chip zodat er geen
-    // misleidende highlight blijft staan.
-    if (_lsOpReschedule.selectedSlot) {
-      _lsOpReschedule.selectedSlot = null;
+    if (_lsOpReschedule.picker.selectedSlot) {
+      _lsOpReschedule.picker.selectedSlot = null;
       if (window.DFO?.render) window.DFO.render();
     }
   };
@@ -2505,6 +2539,263 @@
       if (window.DFO?.render) window.DFO.render();
     }
   };
+  // ═══════════════════════════════════════════════════════════════════
+  // BP3 v22 (2026-09-03) — "+ Nieuwe call handmatig inplannen" modal.
+  // 3 secties: bron / contact / slot. Contact-picker met debounced search
+  // (leads+customers) + toggle "Nieuw contact" (voornaam/achternaam/email/tel).
+  // POST /api/leadsonderhoud-opstartsessie-create met mode='lead'|'customer'|'contact'.
+  // ═══════════════════════════════════════════════════════════════════
+  const _lsOpCreate = {
+    open: false, saving: false,
+    source_slug: null,
+    // Contact-tabblad: 'search' of 'manual'
+    contactMode: 'search',
+    searchQ: '', searchLoading: false, searchError: null, searchResults: [],
+    searchDebounceTimer: null,
+    picked: null,   // { source:'lead'|'customer', lead_id?, customer_id?, name, email, phone }
+    manual: { voornaam: '', achternaam: '', email: '', telefoon: '' },
+    picker: _lsCreateSlotPickerState(),
+  };
+  window._lsOpCreateOpen = () => {
+    _lsOpCreate.open = true;
+    _lsOpCreate.saving = false;
+    _lsOpCreate.source_slug = null;
+    _lsOpCreate.contactMode = 'search';
+    _lsOpCreate.searchQ = ''; _lsOpCreate.searchLoading = false;
+    _lsOpCreate.searchError = null; _lsOpCreate.searchResults = [];
+    _lsOpCreate.picked = null;
+    _lsOpCreate.manual = { voornaam: '', achternaam: '', email: '', telefoon: '' };
+    _lsOpCreate.picker = _lsCreateSlotPickerState();
+    if (window.DFO?.render) window.DFO.render();
+    _lsFetchSlotsInto(_lsOpCreate.picker);
+    setTimeout(() => {
+      const q = document.getElementById('lsNwSearchQ');
+      if (q) q.focus();
+    }, 30);
+  };
+  window._lsOpCreateClose = () => {
+    _lsOpCreate.open = false;
+    if (_lsOpCreate.searchDebounceTimer) { clearTimeout(_lsOpCreate.searchDebounceTimer); _lsOpCreate.searchDebounceTimer = null; }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpCreateSetSource = (slug) => {
+    _lsOpCreate.source_slug = slug || null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpCreateSetContactMode = (mode) => {
+    _lsOpCreate.contactMode = mode === 'manual' ? 'manual' : 'search';
+    _lsOpCreate.picked = null;
+    if (window.DFO?.render) window.DFO.render();
+    if (_lsOpCreate.contactMode === 'search') {
+      setTimeout(() => { const q = document.getElementById('lsNwSearchQ'); if (q) q.focus(); }, 30);
+    } else {
+      setTimeout(() => { const q = document.getElementById('lsNwManEmail'); if (q) q.focus(); }, 30);
+    }
+  };
+  window._lsOpCreateOnSearch = (val) => {
+    _lsOpCreate.searchQ = String(val || '');
+    if (_lsOpCreate.searchDebounceTimer) clearTimeout(_lsOpCreate.searchDebounceTimer);
+    if (_lsOpCreate.searchQ.trim().length < 2) {
+      _lsOpCreate.searchResults = []; _lsOpCreate.searchError = null;
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
+    _lsOpCreate.searchDebounceTimer = setTimeout(async () => {
+      _lsOpCreate.searchLoading = true;
+      _lsOpCreate.searchError = null;
+      if (window.DFO?.render) window.DFO.render();
+      try {
+        const j = await window.KV.authedJson('/api/leadsonderhoud-contact-search?q=' + encodeURIComponent(_lsOpCreate.searchQ.trim()));
+        _lsOpCreate.searchResults = Array.isArray(j?.items) ? j.items : [];
+      } catch (e) {
+        _lsOpCreate.searchError = e?.message || 'Zoekfout';
+        _lsOpCreate.searchResults = [];
+      } finally {
+        _lsOpCreate.searchLoading = false;
+        if (window.DFO?.render) window.DFO.render();
+      }
+    }, 250);
+  };
+  window._lsOpCreatePick = (idx) => {
+    const it = _lsOpCreate.searchResults[Number(idx)];
+    if (!it) return;
+    _lsOpCreate.picked = it;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpCreateClearPick = () => {
+    _lsOpCreate.picked = null;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpCreateSetManual = (field, val) => {
+    if (!_lsOpCreate.manual.hasOwnProperty(field)) return;
+    _lsOpCreate.manual[field] = String(val || '');
+    // Geen render — pure input state (uncontrolled).
+  };
+  window._lsOpCreatePickSlot = (dateStr, timeStr) => {
+    if (!dateStr || !timeStr) return;
+    _lsOpCreate.picker.selectedSlot = `${dateStr}T${timeStr}`;
+    const inp = document.getElementById('lsNwStartIn');
+    if (inp) inp.value = `${dateStr}T${timeStr}`;
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpCreateLoadMore = () => {
+    _lsOpCreate.picker.window = Math.min(_lsOpCreate.picker.window + 14, 30);
+    _lsFetchSlotsInto(_lsOpCreate.picker);
+  };
+  window._lsOpCreateManualStart = () => {
+    if (_lsOpCreate.picker.selectedSlot) {
+      _lsOpCreate.picker.selectedSlot = null;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+  window._lsOpCreateSubmit = async () => {
+    if (_lsOpCreate.saving) return;
+    // Bron optioneel maar aanbevolen: als bronnen bestaan en gebruiker koos NULL → wél toestaan.
+    // Contact-input verzamelen.
+    let body = { scheduledAt: null, durationMinutes: 30, source_slug: _lsOpCreate.source_slug };
+    const inp = document.getElementById('lsNwStartIn');
+    const raw = inp ? String(inp.value || '').trim() : '';
+    if (!raw) { _lsInbToast('Kies een moment', 'warn'); return; }
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) { _lsInbToast('Ongeldige datum-tijd', 'warn'); return; }
+    if (d.getTime() < Date.now() - 60 * 1000) { _lsInbToast('Kies een tijd in de toekomst', 'warn'); return; }
+    body.scheduledAt = d.toISOString();
+
+    if (_lsOpCreate.contactMode === 'search') {
+      if (!_lsOpCreate.picked) { _lsInbToast('Kies een contact of vul handmatig in', 'warn'); return; }
+      if (_lsOpCreate.picked.source === 'lead' && _lsOpCreate.picked.lead_id) {
+        body.mode = 'lead'; body.lead_id = _lsOpCreate.picked.lead_id;
+      } else if (_lsOpCreate.picked.source === 'customer' && _lsOpCreate.picked.customer_id) {
+        body.mode = 'customer'; body.customer_id = _lsOpCreate.picked.customer_id;
+      } else {
+        _lsInbToast('Ongeldige contact-selectie', 'warn'); return;
+      }
+    } else {
+      // manual
+      const m = _lsOpCreate.manual;
+      const emailEl = document.getElementById('lsNwManEmail');
+      const email = emailEl ? String(emailEl.value || '').trim() : (m.email || '');
+      const vn = document.getElementById('lsNwManVoornaam')?.value || m.voornaam;
+      const an = document.getElementById('lsNwManAchternaam')?.value || m.achternaam;
+      const tel = document.getElementById('lsNwManTelefoon')?.value || m.telefoon;
+      if (!/.+@.+\..+/.test(email)) { _lsInbToast('Geldig e-mailadres vereist', 'warn'); return; }
+      body.mode = 'contact';
+      body.contact = { voornaam: vn || null, achternaam: an || null, email, telefoon: tel || null };
+    }
+
+    _lsOpCreate.saving = true;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const r = await window.KV.authedFetch('/api/leadsonderhoud-opstartsessie-create', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      _lsInbToast('Call ingepland.', 'ok');
+      window._lsOpCreateClose();
+      fetchOpstartsessies(true);
+    } catch (e) {
+      _lsInbToast('Aanmaken mislukt: ' + (e?.message || e), 'warn');
+      _lsOpCreate.saving = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  };
+
+  function _lsOpCreateModalHtml() {
+    if (!_lsOpCreate.open) return '';
+    const st = _lsOpCreate;
+    const data = _live.opstartsessies?.data || {};
+    const bronnen = Array.isArray(data.bronnen) ? data.bronnen : [];
+    const bronOpts = `<option value="">— Geen bron —</option>`
+      + bronnen.map((b) => `<option value="${esc(b.slug)}" ${st.source_slug === b.slug ? 'selected' : ''}>${esc(b.label || b.slug)}</option>`).join('');
+
+    const contactPickedHtml = st.picked
+      ? `<div style="padding:8px 10px;background:var(--emerald-soft, rgba(16,185,129,.1));border:1px solid var(--emerald, #10B981);border-radius:var(--r-sm);margin-bottom:8px;display:flex;align-items:center;gap:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:600;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(st.picked.name || '')}</div>
+            <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([st.picked.email, st.picked.phone].filter(Boolean).join(' · ') || '—')} · ${esc(st.picked.hint || st.picked.source)}</div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px" onclick="window._lsOpCreateClearPick()">Wijzig</button>
+        </div>`
+      : '';
+
+    const searchResultsHtml = (st.contactMode === 'search' && !st.picked)
+      ? (st.searchLoading
+          ? `<div style="font-size:11.5px;color:var(--text-3);padding:6px 0">Zoeken…</div>`
+          : (st.searchError
+              ? `<div style="font-size:11.5px;color:var(--rose);padding:6px 0">⚠ ${esc(st.searchError)}</div>`
+              : (st.searchQ.trim().length < 2
+                  ? `<div style="font-size:11px;color:var(--text-3);padding:6px 0">Typ minstens 2 tekens…</div>`
+                  : (st.searchResults.length === 0
+                      ? `<div style="font-size:11px;color:var(--text-3);padding:6px 0">Geen resultaten. Kies "Nieuw contact" hieronder.</div>`
+                      : `<div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);margin-top:4px">
+                          ${st.searchResults.map((it, i) => `<button type="button" onclick="window._lsOpCreatePick(${i})" style="display:block;width:100%;text-align:left;background:transparent;border:none;border-bottom:1px solid var(--border);padding:8px 10px;cursor:pointer;font:inherit;color:var(--text-1)" onmouseover="this.style.background='var(--surface)'" onmouseout="this.style.background='transparent'">
+                            <div style="font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.name || '')}</div>
+                            <div style="font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([it.email, it.phone].filter(Boolean).join(' · ') || '—')} · ${esc(it.hint || it.source)}</div>
+                          </button>`).join('')}
+                        </div>`))))
+      : '';
+
+    const manualFormHtml = (st.contactMode === 'manual' && !st.picked)
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+          <input id="lsNwManVoornaam"   type="text"  placeholder="Voornaam"   value="${esc(st.manual.voornaam)}"   oninput="window._lsOpCreateSetManual('voornaam',this.value)"   style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;font-family:inherit"/>
+          <input id="lsNwManAchternaam" type="text"  placeholder="Achternaam" value="${esc(st.manual.achternaam)}" oninput="window._lsOpCreateSetManual('achternaam',this.value)" style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;font-family:inherit"/>
+          <input id="lsNwManEmail"      type="email" placeholder="E-mail *"   value="${esc(st.manual.email)}"      oninput="window._lsOpCreateSetManual('email',this.value)"      style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;font-family:inherit;grid-column:1/3"/>
+          <input id="lsNwManTelefoon"   type="tel"   placeholder="Telefoon"   value="${esc(st.manual.telefoon)}"   oninput="window._lsOpCreateSetManual('telefoon',this.value)"   style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;font-family:inherit;grid-column:1/3"/>
+        </div>
+        <div style="font-size:11px;color:var(--text-3);margin-top:5px">Nieuw contact wordt in GHL aangemaakt (dedupe op e-mail) en aan een lead gekoppeld.</div>`
+      : '';
+
+    const contactTabsHtml = st.picked ? '' : `
+      <div style="display:flex;gap:5px;margin-bottom:6px">
+        <button type="button" class="chip ${st.contactMode === 'search' ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window._lsOpCreateSetContactMode('search')">Zoek bestaand</button>
+        <button type="button" class="chip ${st.contactMode === 'manual' ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="window._lsOpCreateSetContactMode('manual')">Nieuw contact</button>
+      </div>
+      ${st.contactMode === 'search'
+        ? `<input id="lsNwSearchQ" type="text" placeholder="Naam / e-mail / telefoon…" value="${esc(st.searchQ)}" oninput="window._lsOpCreateOnSearch(this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;font-family:inherit"/>`
+        : ''}
+      ${searchResultsHtml}
+      ${manualFormHtml}
+    `;
+
+    const slotsHtml = _lsRenderSlotPickerHtml(st.picker, {
+      pickCb: 'window._lsOpCreatePickSlot',
+      loadMoreCb: 'window._lsOpCreateLoadMore',
+    });
+
+    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2100;display:grid;place-items:center;padding:20px"
+      onclick="if(event.target===this)window._lsOpCreateClose()">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(520px,100%);padding:18px 20px;max-height:92vh;overflow-y:auto">
+        <div style="font-size:15px;font-weight:600;margin-bottom:10px">Nieuwe call inplannen</div>
+
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Bron / attributie</label>
+        <select onchange="window._lsOpCreateSetSource(this.value)" ${st.saving ? 'disabled' : ''}
+          style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13px;font-family:inherit;margin-bottom:12px">
+          ${bronOpts}
+        </select>
+
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Contact</label>
+        ${contactPickedHtml}
+        ${contactTabsHtml}
+
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin:12px 0 4px">Vrije momenten in Dave's agenda</label>
+        ${slotsHtml}
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Of typ handmatig een datum + tijd</label>
+        <input id="lsNwStartIn" type="datetime-local" value="" ${st.saving ? 'disabled' : ''}
+          oninput="window._lsOpCreateManualStart()"
+          style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;font-family:inherit"/>
+
+        <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="window._lsOpCreateClose()" ${st.saving ? 'disabled' : ''}>Annuleren</button>
+          <button class="btn btn-primary btn-sm" style="color:#fff" onclick="window._lsOpCreateSubmit()" ${st.saving ? 'disabled' : ''}>
+            ${st.saving ? 'Aanmaken…' : 'Plan call in'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }
+
   function _lsOpReschedModalHtml() {
     if (!_lsOpReschedule.open) return '';
     // Pre-fill: huidige scheduled_at → lokale datetime-local waarde.
@@ -2522,40 +2813,10 @@
       ? `<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Call van <b>${esc(_lsOpReschedule.naam)}</b></div>`
       : '';
 
-    // BP3 v21 — slot-picker bovenaan. Gegroepeerd per dag; chip highlighted
-    // wanneer geselecteerd. Fail-soft: bij error/leeg blijft handmatig invoer
-    // beschikbaar (fallback).
-    let slotsHtml = '';
-    if (_lsOpReschedule.slotsLoading) {
-      slotsHtml = `<div style="font-size:11.5px;color:var(--text-3);padding:8px 0">Vrije slots laden…</div>`;
-    } else if (_lsOpReschedule.slotsError) {
-      slotsHtml = `<div style="font-size:11.5px;color:var(--amber);padding:6px 8px;background:var(--amber-soft, rgba(245,158,11,.1));border-radius:6px;margin-bottom:6px">${esc(_lsOpReschedule.slotsError)}</div>`;
-    } else if (!_lsOpReschedule.slots.length) {
-      slotsHtml = `<div style="font-size:11.5px;color:var(--text-3);padding:6px 0">Geen vrije slots in venster — typ handmatig hieronder.</div>`;
-    } else {
-      const dayFmt = (dateStr) => {
-        try { const d = new Date(dateStr + 'T12:00'); return d.toLocaleDateString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short' }); }
-        catch (_) { return dateStr; }
-      };
-      const groups = _lsOpReschedule.slots.map((d) => {
-        const chips = d.times.map((t) => {
-          const key = `${d.date}T${t}`;
-          const isSel = _lsOpReschedule.selectedSlot === key;
-          const bg = isSel ? 'var(--brand, #0A7490)' : 'var(--surface-2)';
-          const fg = isSel ? '#fff' : 'var(--text-1)';
-          const bd = isSel ? 'var(--brand, #0A7490)' : 'var(--border)';
-          return `<button type="button" onclick="window._lsOpstartWijzigPickSlot('${esc(d.date)}','${esc(t)}')" style="font-size:11.5px;padding:3px 9px;border-radius:14px;background:${bg};color:${fg};border:1px solid ${bd};cursor:pointer;font-family:inherit">${esc(t)}</button>`;
-        }).join('');
-        return `<div style="margin-bottom:8px">
-          <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:4px">${esc(dayFmt(d.date))}</div>
-          <div style="display:flex;flex-wrap:wrap;gap:5px">${chips}</div>
-        </div>`;
-      }).join('');
-      const loadMoreBtn = _lsOpReschedule.slotsWindow < 30
-        ? `<button type="button" class="btn btn-ghost btn-sm" onclick="window._lsOpstartWijzigLoadMore()" style="font-size:11px;margin-top:6px">Verder kijken (+14 dagen)</button>`
-        : '';
-      slotsHtml = `<div style="max-height:230px;overflow-y:auto;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:10px">${groups}${loadMoreBtn}</div>`;
-    }
+    const slotsHtml = _lsRenderSlotPickerHtml(_lsOpReschedule.picker, {
+      pickCb: 'window._lsOpstartWijzigPickSlot',
+      loadMoreCb: 'window._lsOpstartWijzigLoadMore',
+    });
 
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2100;display:grid;place-items:center;padding:20px"
       onclick="if(event.target===this)window._lsOpstartWijzigClose()">
@@ -2697,7 +2958,8 @@
           <select onchange="window._lsSetOpBron(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;background:var(--surface)">${bronOpts}</select>
         </div>
         <button class="chip ${st.showCancelled ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpShowCancelled(${st.showCancelled ? 'false' : 'true'})" title="Toggle: standaard worden geannuleerde/no-show/verwijderde calls verborgen">${st.showCancelled ? '✓ Toon geannuleerd' : 'Toon geannuleerd'}</button>
-        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:4px 10px;color:#fff;margin-left:auto" onclick="window._lsOpCreateOpen()" title="Plan handmatig een nieuwe call in Dave's agenda">+ Nieuwe call</button>
+        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
       </div>`;
 
     // ── Agenda-view ────────────────────────────────────────────────────
@@ -2730,6 +2992,7 @@
     return `
       ${_lsOpstartDetailModalHtml()}
       ${_lsOpReschedModalHtml()}
+      ${_lsOpCreateModalHtml()}
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
         Alles wat leads op <code>deforexopleiding.nl/agenda</code> invullen — inclusief afgewezen leads. Klik een rij voor de vragenlijst-antwoorden.
       </div>
