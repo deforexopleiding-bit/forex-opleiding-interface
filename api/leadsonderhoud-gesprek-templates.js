@@ -76,14 +76,31 @@ export default async function handler(req, res) {
 
     // BP3 v16 — bulk-fetch folder-namen voor de folder_ids in de result-set.
     // Alleen folders met ≥1 approved template komen daarmee in de picker.
+    // BP3 v18 (2026-09-03) — extra logging + defensive fallback. Bug-report
+    // "folder Romy verschijnt niet als chip" trackable in Vercel-logs.
     const folderIds = [...new Set(items.map((t) => t.folder_id).filter(Boolean))];
     const folderNameById = {};
+    let folderFetchErr = null;
     if (folderIds.length) {
-      const { data: folders } = await supabaseAdmin
+      const { data: folders, error: fErr } = await supabaseAdmin
         .from('whatsapp_template_folders')
         .select('id, name')
         .in('id', folderIds);
+      if (fErr) {
+        folderFetchErr = fErr.message || String(fErr);
+        console.error('[ls-gesprek-templates] folder-fetch error:', folderFetchErr);
+      }
       for (const f of (folders || [])) folderNameById[f.id] = f.name;
+      const missing = folderIds.filter((id) => !folderNameById[id]);
+      if (missing.length) {
+        console.warn(
+          '[ls-gesprek-templates] folder_ids zonder match in whatsapp_template_folders:',
+          missing.join(', ')
+        );
+      }
+      console.log(
+        `[ls-gesprek-templates] items=${items.length} folder_ids=${folderIds.length} matched=${Object.keys(folderNameById).length}`
+      );
     }
     const enriched = items.map((t) => ({
       ...t,
@@ -94,6 +111,12 @@ export default async function handler(req, res) {
       items: enriched,
       configured: !!businessAccountId,
       business_account_id: businessAccountId,
+      _debug: {
+        item_count: items.length,
+        folder_id_count: folderIds.length,
+        folder_name_matched: Object.keys(folderNameById).length,
+        folder_fetch_error: folderFetchErr,
+      },
     });
   } catch (e) {
     console.error('[ls-gesprek-templates] fout:', e?.message || e);

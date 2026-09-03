@@ -69,7 +69,9 @@ export default async function handler(req, res) {
       let q = supabaseAdmin.from('lisa_conversations')
         // BP3 (2026-09-02) — unread_count meesturen zodat de UI ongelezen
         // gesprekken duidelijk kan markeren.
-        .select('id, contact_name, instagram_handle, ghl_contact_id, phase, qualified, call_booked, human_takeover, followup_paused, source, created_at, last_message_at, unread_count')
+        // BP3 v17 (2026-09-03) — call_booked_at meesturen zodat "Call ingepland"-
+        // pill in de header en de list-badge kunnen renderen zonder extra detail-fetch.
+        .select('id, contact_name, instagram_handle, ghl_contact_id, phase, qualified, call_booked, call_booked_at, human_takeover, followup_paused, source, created_at, last_message_at, unread_count')
         .eq('is_sandbox', false)
         .order('last_message_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
@@ -195,6 +197,19 @@ export default async function handler(req, res) {
       updates.call_booked = !!body.call_booked;
       updates.call_booked_at = body.call_booked ? new Date().toISOString() : null;
     }
+    // BP3 v17 (2026-09-03) — expliciete call_booked_at-toggle voor de
+    // "Call ingepland"-knop. Accepteert null (uit) of true/'now' (aan → now()).
+    // Gate valt onder lisa.conversation.status_update, gelijk aan andere
+    // gesprek-status-flips zodat Romy dit ook mag (heeft die grant).
+    if (body.call_booked_at !== undefined) {
+      if (body.call_booked_at === null || body.call_booked_at === false) {
+        updates.call_booked_at = null;
+      } else if (body.call_booked_at === true || body.call_booked_at === 'now') {
+        updates.call_booked_at = new Date().toISOString();
+      } else {
+        return res.status(400).json({ error: 'call_booked_at: alleen null (uit) of true/"now" (aan) toegestaan.' });
+      }
+    }
     if (body.disqualified_reason !== undefined) updates.disqualified_reason = body.disqualified_reason || null;
     if (body.followup_paused !== undefined) updates.followup_paused = !!body.followup_paused;
     // BP3 v7 (2026-09-02) — unread_count whitelist: 0 (mark-as-read) OF 1
@@ -220,7 +235,7 @@ export default async function handler(req, res) {
     // Permission-check: takeover-flip vereist .takeover, statusvelden .status_update.
     // BP3 (2026-09-02) — unread_count-reset (mark-as-read) valt onder de basis
     // .view permissie, want dat is functioneel deel van "gesprek openen".
-    const wantStatus = ['phase','qualified','call_booked','disqualified_reason','followup_paused']
+    const wantStatus = ['phase','qualified','call_booked','call_booked_at','disqualified_reason','followup_paused']
       .some((k) => body[k] !== undefined);
     const wantUnreadOnly = !wantTakeover && !wantStatus && body.unread_count !== undefined;
     if (wantTakeover && !(await requirePermission(req, 'lisa.conversation.takeover'))) {

@@ -505,16 +505,9 @@
     if (conv.is_sandbox) { _toast('Sandbox-conversatie — intervene is niet toegestaan.', 'error'); return; }
     const text = String(_compose.text || '').trim();
     if (text.length < 2) return;
-    const handle = conv.instagram_handle ? '@' + String(conv.instagram_handle).replace(/^@/, '') : (conv.contact_name || 'contact');
-    const previewHtml = `
-      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:6px">Naar: <strong style="color:var(--text-1)">${esc(handle)}</strong></div>
-      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:11px 13px;font-size:13px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere;max-height:200px;overflow:auto">${esc(text)}</div>
-      <div style="margin-top:12px;padding:9px 12px;background:var(--amber-soft);border-radius:var(--r-sm);font-size:12px;color:var(--amber);line-height:1.5">
-        ⚠ Bij verzenden neemt jij (mens) dit gesprek over. Lisa antwoordt niet meer autonoom totdat je 'mens-overname' weer uitzet.
-      </div>`;
-    const ok = await _askConfirm(`Verstuur echt Instagram-DM naar ${handle}?`, previewHtml, { okLabel: 'Ja, verstuur', tone: 'primary' });
-    if (!ok) return;
-
+    // BP3 v17 (2026-09-03) — verzend-confirm verwijderd. Lege-tekst-check
+    // (length < 2) blijft als guard tegen accidentele lege verzendingen.
+    // Human-takeover blijft server-side geregeld door de intervene-endpoint.
     _compose.sending = true; _updateSendBtn();
     const r = await apiCall('POST', '/api/lisa-conversations?action=intervene&id=' + encodeURIComponent(conv.id), { content: text });
     _compose.sending = false;
@@ -674,6 +667,31 @@
     if (listRow) listRow.human_takeover = next;
     _toast(next ? 'Mens neemt over.' : 'Lisa is weer actief.', 'success');
     _replaceRightPane();
+    _repaintListRow(conv.id);
+  };
+
+  // BP3 v17 (2026-09-03) — "Call ingepland"-toggle. Zet call_booked_at op
+  // now() (aan) of NULL (uit). Optimistic update + await PATCH; rollback bij
+  // fout. Bewust GEEN confirm-modal — Verstuur-flow-lijn (v17): geen extra
+  // klik als 't gaat om reversible metadata.
+  window.__lisaToggleCallBooked = async () => {
+    const conv = _thread.conversation;
+    if (!conv) return;
+    const currentlyBooked = !!conv.call_booked_at;
+    const nextValue = currentlyBooked ? null : 'now';
+    const prev = conv.call_booked_at;
+    conv.call_booked_at = currentlyBooked ? null : new Date().toISOString();
+    _replaceRightPane();
+    const r = await _patchConv(conv.id, { call_booked_at: nextValue });
+    if (!r.ok) {
+      conv.call_booked_at = prev; _replaceRightPane();
+      _toast(r.error || 'Kon call-status niet bijwerken', 'error');
+      return;
+    }
+    // Sync met list-row zodat de badge in de lijst ook meteen klopt.
+    const listRow = _live.convs.items.find(c => String(c.id) === String(conv.id));
+    if (listRow) listRow.call_booked_at = conv.call_booked_at;
+    _toast(currentlyBooked ? 'Call-markering weggehaald.' : 'Call gemarkeerd als ingepland.', 'success');
     _repaintListRow(conv.id);
   };
 
@@ -1167,6 +1185,7 @@
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaMarkDisqualified()" title="Markeer als disqualified">Disq.</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaTogglePause()" title="Pauzeer/hervat follow-ups">${conv.followup_paused ? '▶ Hervat FU' : '⏸ Pauzeer FU'}</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleTakeover()" title="Mens-overname aan/uit">${conv.human_takeover ? 'Lisa terug' : 'Mens over'}</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px${conv.call_booked_at ? ';color:var(--emerald, #10B981);border-color:var(--emerald, #10B981)' : ''}" onclick="__lisaToggleCallBooked()" title="${conv.call_booked_at ? 'Haal call-ingepland-markering weg' : 'Markeer dat een call is ingepland'}">${conv.call_booked_at ? '✓ Call ingepland' : '📅 Call ingepland'}</button>
         <button class="btn btn-ghost btn-sm" style="font-size:11.5px" onclick="__lisaToggleRead()" title="${esc(readBtnTitle)}">${readBtnLabel}</button>
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff" onclick="__lisaSendBookingLink()" title="Prefill compose met agenda-link zodat de volger zelf boekt">🔗 Stuur boekingslink</button>
       </div>` : '';
@@ -1203,7 +1222,10 @@
           ${H.av(name || '?', 42)}
           <div style="flex:1;min-width:0">
             <div style="font-size:16px;font-weight:600;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
-            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(handle)}${conv.source ? ' · via ' + esc(conv.source) : ''}${conv.phase ? ' · fase: ' + esc(conv.phase) : ''}</div>
+            <div style="font-size:12.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(handle)}${conv.source ? ' · via ' + esc(conv.source) : ''}${conv.phase ? ' · fase: ' + esc(conv.phase) : ''}</span>
+              ${conv.call_booked_at ? `<span title="Call ingepland op ${esc(new Date(conv.call_booked_at).toLocaleString('nl-NL'))}" style="font-size:10.5px;padding:2px 8px;border-radius:9px;background:var(--emerald-soft, rgba(16,185,129,.12));color:var(--emerald, #10B981);font-weight:600;letter-spacing:.02em;white-space:nowrap">✓ Call ingepland</span>` : ''}
+            </div>
           </div>
         </div>
         ${actionButtons}

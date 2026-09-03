@@ -1025,13 +1025,7 @@
     if (_lsInb.compose.sending === leadId) return;
     const body = String(_lsInb.compose.draftsWa[leadId] || '').trim();
     if (!body) { _lsInbToast('Bericht is leeg', 'warn'); return; }
-    const preview = body.length > 140 ? body.slice(0, 140) + '…' : body;
-    const ok = await _lsInbAskConfirm(
-      `Verstuur WhatsApp naar ${conv.naam || 'de lead'}?`,
-      preview + (conv.phone_number ? `\n\nNaar: ${conv.phone_number}` : ''),
-      { okLabel: 'Verstuur WhatsApp' }
-    );
-    if (!ok) return;
+    // BP3 v17 (2026-09-03) — verzend-confirm verwijderd; lege-check blijft.
     _lsInb.compose.sending = leadId;
     _lsInbRepaintCompose();
     try {
@@ -1080,13 +1074,7 @@
     // Zoek origineel_email_id: laatste inbound mail met numerieke/uuid id.
     const lastInboundMail = [..._lsInb.thread.items].reverse().find(m => m.channel === 'mail' && m.direction === 'inbound' && m.id);
     const origineel = lastInboundMail ? lastInboundMail.id : null;
-    const preview = text.length > 140 ? text.slice(0, 140) + '…' : text;
-    const ok = await _lsInbAskConfirm(
-      `Verstuur e-mail naar ${conv.naam || conv.email}?`,
-      `Aan: ${conv.email}\nOnderwerp: ${subject}\n\n${preview}`,
-      { okLabel: 'Verstuur e-mail' }
-    );
-    if (!ok) return;
+    // BP3 v17 (2026-09-03) — verzend-confirm verwijderd; lege-checks blijven.
     _lsInb.compose.sending = leadId;
     _lsInbRepaintCompose();
     try {
@@ -1660,7 +1648,9 @@
         <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
           ${waEnabled ? `<button class="btn btn-primary btn-sm" style="color:#fff" onclick="__lsInbSendWa()" ${sending ? 'disabled' : ''}>${sending ? 'Verzenden…' : 'Verstuur WA'}</button>` : `<button class="btn btn-ghost btn-sm" disabled title="Buiten 24u-venster — kies een sjabloon">Verstuur WA</button>`}
           <button class="${tplBtnClass}" ${tplBtnStyle} onclick="__lsInbTemplatePicker()" ${sending ? 'disabled' : ''} title="Kies een goedgekeurde WA-template (Meta)">${svg(I.doc || I.mail, 'width:13px;height:13px')} Sjabloon</button>
-          <button class="btn btn-ghost btn-sm" onclick="window.__lsInbFreeTplPicker('wa')" ${sending || !waEnabled ? 'disabled' : ''} title="Kies een vrije template (categorie + zoeken)">📋 Template</button>
+          ${waEnabled
+            ? `<button class="btn btn-ghost btn-sm" onclick="window.__lsInbFreeTplPicker('wa')" ${sending ? 'disabled' : ''} title="Kies een vrije template (categorie + zoeken)">📋 Template</button>`
+            : `<button class="btn btn-ghost btn-sm" disabled title="Buiten 24u-venster: gebruik een goedgekeurde Sjabloon (vrije templates kunnen niet buiten venster)" style="opacity:.55;cursor:not-allowed">📋 Template</button>`}
           ${(window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.emojiPickerButtonHtml) ? window.KV_V2.helpers.emojiPickerButtonHtml('lsInbWaTxt', '😊') : ''}
           <button class="btn btn-ghost btn-sm" onclick="__lsInbToggleMailForm()" ${!mailEnabled ? 'disabled' : ''} title="${mailEnabled ? 'Antwoord per mail' : 'Geen e-mailadres bekend'}">${showMail ? 'Verberg mail' : 'Ook / alleen mail…'}</button>
         </div>
