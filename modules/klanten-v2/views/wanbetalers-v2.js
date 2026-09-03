@@ -4443,8 +4443,10 @@
     if (totalUnread === 0) items.push(item('Markeer ongelezen', '●', `__wbxInboxMarkUnread('${esc(convId)}')`));
     // 6. Dossier openen (opent SURFACE B drawer)
     if (custId) items.push(item('Dossier openen', '👤', `__wbxOpenCase('${esc(custId)}')`));
-    // 7. Stuur een brief (WIK-brief NL, opent generatie-flow)
-    if (custId) items.push(item('Stuur een brief', '✉', `__wbxWikGen('${esc(custId)}','NL')`));
+    // 7. Stuur een brief (WIK-brief) — BP3 v20: land per klant afgeleid
+    //    (address_country → postcode → onbekend). Bij onbekend: NL/BE-keuze-dialog.
+    //    NIET meer hardcoded 'NL'.
+    if (custId) items.push(item('Stuur een brief', '✉', `__wbxWikGenAutoLand('${esc(custId)}')`));
     // 8. Pauzeer aanmaan-flow
     if (custId) items.push(item('Pauzeer aanmaan-flow', '⏸', `__wbxInboxPauseFlow('${esc(custId)}')`));
     return `<div id="wbxInboxKebab" style="position:absolute;top:100%;right:8px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.14);min-width:230px;overflow:hidden">
@@ -5261,6 +5263,55 @@
     } else {
       // Fallback: bestaande __wbxCallDial-flow (confirm + tel:).
       window.__wbxCallDial(cid, phone, name);
+    }
+  };
+
+  // BP3 v20 (2026-09-03) — helper voor inbox-kebab "Stuur een brief": land
+  // per-klant afleiden via /api/wanbetalers-customer-country-detect, dan
+  // doorspelen naar __wbxWikGen. Bij 'unknown' toon NL/BE-keuze-dialog
+  // (i.p.v. stil NL te pakken). Wijzigt geen dunning-state — alleen de
+  // land/template-selectie in de UI-flow.
+  window.__wbxWikGenAutoLand = async (cid) => {
+    if (!_rbac.canBrief) { _toast('Geen rechten (finance.incasso.manage).', 'error'); return; }
+    if (!cid) return;
+    if (_ui.caseActBusy['landdet:' + cid]) return;
+    _ui.caseActBusy['landdet:' + cid] = true;
+    try {
+      const token = await (window.AuthShared && window.AuthShared.getAccessToken ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+      const headers = {}; if (token) headers['Authorization'] = 'Bearer ' + token;
+      const resp = await fetch('/api/wanbetalers-customer-country-detect?customer_id=' + encodeURIComponent(cid), { headers });
+      const j = await resp.json().catch(() => ({}));
+      if (!resp.ok) { _toast('Land-detectie mislukt: ' + (j?.error || ('HTTP ' + resp.status)), 'error'); return; }
+      const detected = String(j?.country || 'unknown').toUpperCase();
+      if (detected === 'NL' || detected === 'BE') {
+        await window.__wbxWikGen(cid, detected);
+        return;
+      }
+      // Onbekend land → NL/BE-keuze-dialog (spiegelt bestaande adres-gate patroon).
+      const chosen = await new Promise((resolve) => {
+        const scrim = document.createElement('div');
+        scrim.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2200;display:grid;place-items:center;padding:20px';
+        scrim.innerHTML = `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(400px,100%);padding:18px 20px">
+            <div style="font-size:15px;font-weight:600;margin-bottom:6px">Land onbekend</div>
+            <div style="font-size:12.5px;color:var(--text-3);line-height:1.5;margin-bottom:14px">Kies handmatig voor welke jurisdictie de brief opgemaakt moet worden. NL = 14-dagenbrief (WIK); BE = eerste kosteloze herinnering (Boek XIX WER).</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end">
+              <button id="wbxLandCancel" class="btn btn-ghost btn-sm">Annuleren</button>
+              <button id="wbxLandBe" class="btn btn-ghost btn-sm">Kies BE</button>
+              <button id="wbxLandNl" class="btn btn-primary btn-sm" style="color:#fff">Kies NL</button>
+            </div>
+          </div>`;
+        scrim.addEventListener('click', (e) => { if (e.target === scrim) { document.body.removeChild(scrim); resolve(null); } });
+        document.body.appendChild(scrim);
+        scrim.querySelector('#wbxLandCancel').addEventListener('click', () => { document.body.removeChild(scrim); resolve(null); });
+        scrim.querySelector('#wbxLandNl').addEventListener('click',     () => { document.body.removeChild(scrim); resolve('NL'); });
+        scrim.querySelector('#wbxLandBe').addEventListener('click',     () => { document.body.removeChild(scrim); resolve('BE'); });
+      });
+      if (chosen === 'NL' || chosen === 'BE') await window.__wbxWikGen(cid, chosen);
+    } catch (e) {
+      _toast('Netwerkfout: ' + (e?.message || 'onbekend'), 'error');
+    } finally {
+      _ui.caseActBusy['landdet:' + cid] = false;
     }
   };
 
