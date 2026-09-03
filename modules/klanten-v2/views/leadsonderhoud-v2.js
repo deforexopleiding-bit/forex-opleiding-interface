@@ -2391,7 +2391,46 @@
   // Toont sub-overlay met datetime-local input, pre-filled op huidige tijd.
   // POST /api/leadsonderhoud-opstartsessie-wijzig — GHL-first (endpoint faalt
   // met 502 bij GHL-fout zodat DB niet uit sync loopt).
-  const _lsOpReschedule = { open: false, appointmentId: null, currentIso: null, naam: null, saving: false };
+  //
+  // BP3 v21 (2026-09-03) — vrije GHL-slots (Dave's Zoom-kalender, 14 dagen)
+  // getoond als suggestie via /api/follow-up-ghl-free-slots. Klik op een slot
+  // vult het datetime-local input. Handmatig invoeren blijft als fallback.
+  const _lsOpReschedule = {
+    open: false, appointmentId: null, currentIso: null, naam: null, saving: false,
+    slotsLoading: false, slotsError: null, slots: [], slotsWindow: 14,
+    selectedSlot: null, // "YYYY-MM-DDTHH:MM" wanneer via chip gekozen
+  };
+  async function _lsOpstartWijzigFetchSlots() {
+    _lsOpReschedule.slotsLoading = true;
+    _lsOpReschedule.slotsError = null;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const startStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+      const end = new Date(now.getTime() + _lsOpReschedule.slotsWindow * 86400000);
+      const endStr = `${end.getFullYear()}-${pad(end.getMonth()+1)}-${pad(end.getDate())}`;
+      const url = `/api/follow-up-ghl-free-slots?startDate=${startStr}&endDate=${endStr}&duration=30`;
+      const j = await window.KV.authedJson(url);
+      // Filter: alleen slots die niet in het verleden liggen.
+      const nowMs = Date.now();
+      const slots = Array.isArray(j?.slots) ? j.slots.map((d) => {
+        const times = (d.times || []).filter((t) => {
+          const dt = new Date(`${d.date}T${t}:00`);
+          return !Number.isNaN(dt.getTime()) && dt.getTime() > nowMs;
+        });
+        return { date: d.date, times };
+      }).filter((d) => d.times && d.times.length) : [];
+      _lsOpReschedule.slots = slots;
+      if (j?.error) _lsOpReschedule.slotsError = 'GHL-agenda onbereikbaar — typ hieronder handmatig.';
+    } catch (e) {
+      _lsOpReschedule.slotsError = e?.message || 'Slots ophalen mislukt';
+      _lsOpReschedule.slots = [];
+    } finally {
+      _lsOpReschedule.slotsLoading = false;
+      if (window.DFO?.render) window.DFO.render();
+    }
+  }
   window._lsOpstartWijzigOpen = (appointmentId, currentIso, naam) => {
     if (!appointmentId) return;
     _lsOpReschedule.open = true;
@@ -2399,17 +2438,43 @@
     _lsOpReschedule.currentIso = currentIso || null;
     _lsOpReschedule.naam = naam || '';
     _lsOpReschedule.saving = false;
+    _lsOpReschedule.slots = [];
+    _lsOpReschedule.slotsError = null;
+    _lsOpReschedule.slotsWindow = 14;
+    _lsOpReschedule.selectedSlot = null;
     if (window.DFO?.render) window.DFO.render();
     setTimeout(() => {
       const inp = document.getElementById('lsOpResIn');
       if (inp) inp.focus();
     }, 30);
+    _lsOpstartWijzigFetchSlots();
   };
   window._lsOpstartWijzigClose = () => {
     _lsOpReschedule.open = false;
     _lsOpReschedule.appointmentId = null;
     _lsOpReschedule.currentIso = null;
+    _lsOpReschedule.slots = [];
+    _lsOpReschedule.selectedSlot = null;
     if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpstartWijzigPickSlot = (dateStr, timeStr) => {
+    if (!dateStr || !timeStr) return;
+    _lsOpReschedule.selectedSlot = `${dateStr}T${timeStr}`;
+    const inp = document.getElementById('lsOpResIn');
+    if (inp) { inp.value = `${dateStr}T${timeStr}`; }
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsOpstartWijzigLoadMore = () => {
+    _lsOpReschedule.slotsWindow = Math.min(_lsOpReschedule.slotsWindow + 14, 30);
+    _lsOpstartWijzigFetchSlots();
+  };
+  window._lsOpstartWijzigManualInput = () => {
+    // Bij handmatig typen ontkoppelen we de selected-chip zodat er geen
+    // misleidende highlight blijft staan.
+    if (_lsOpReschedule.selectedSlot) {
+      _lsOpReschedule.selectedSlot = null;
+      if (window.DFO?.render) window.DFO.render();
+    }
   };
   window._lsOpstartWijzigSubmit = async () => {
     if (_lsOpReschedule.saving) return;
@@ -2456,15 +2521,54 @@
     const naamHtml = _lsOpReschedule.naam
       ? `<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Call van <b>${esc(_lsOpReschedule.naam)}</b></div>`
       : '';
+
+    // BP3 v21 — slot-picker bovenaan. Gegroepeerd per dag; chip highlighted
+    // wanneer geselecteerd. Fail-soft: bij error/leeg blijft handmatig invoer
+    // beschikbaar (fallback).
+    let slotsHtml = '';
+    if (_lsOpReschedule.slotsLoading) {
+      slotsHtml = `<div style="font-size:11.5px;color:var(--text-3);padding:8px 0">Vrije slots laden…</div>`;
+    } else if (_lsOpReschedule.slotsError) {
+      slotsHtml = `<div style="font-size:11.5px;color:var(--amber);padding:6px 8px;background:var(--amber-soft, rgba(245,158,11,.1));border-radius:6px;margin-bottom:6px">${esc(_lsOpReschedule.slotsError)}</div>`;
+    } else if (!_lsOpReschedule.slots.length) {
+      slotsHtml = `<div style="font-size:11.5px;color:var(--text-3);padding:6px 0">Geen vrije slots in venster — typ handmatig hieronder.</div>`;
+    } else {
+      const dayFmt = (dateStr) => {
+        try { const d = new Date(dateStr + 'T12:00'); return d.toLocaleDateString('nl-NL', { weekday: 'short', day: '2-digit', month: 'short' }); }
+        catch (_) { return dateStr; }
+      };
+      const groups = _lsOpReschedule.slots.map((d) => {
+        const chips = d.times.map((t) => {
+          const key = `${d.date}T${t}`;
+          const isSel = _lsOpReschedule.selectedSlot === key;
+          const bg = isSel ? 'var(--brand, #0A7490)' : 'var(--surface-2)';
+          const fg = isSel ? '#fff' : 'var(--text-1)';
+          const bd = isSel ? 'var(--brand, #0A7490)' : 'var(--border)';
+          return `<button type="button" onclick="window._lsOpstartWijzigPickSlot('${esc(d.date)}','${esc(t)}')" style="font-size:11.5px;padding:3px 9px;border-radius:14px;background:${bg};color:${fg};border:1px solid ${bd};cursor:pointer;font-family:inherit">${esc(t)}</button>`;
+        }).join('');
+        return `<div style="margin-bottom:8px">
+          <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:4px">${esc(dayFmt(d.date))}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:5px">${chips}</div>
+        </div>`;
+      }).join('');
+      const loadMoreBtn = _lsOpReschedule.slotsWindow < 30
+        ? `<button type="button" class="btn btn-ghost btn-sm" onclick="window._lsOpstartWijzigLoadMore()" style="font-size:11px;margin-top:6px">Verder kijken (+14 dagen)</button>`
+        : '';
+      slotsHtml = `<div style="max-height:230px;overflow-y:auto;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:10px">${groups}${loadMoreBtn}</div>`;
+    }
+
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2100;display:grid;place-items:center;padding:20px"
       onclick="if(event.target===this)window._lsOpstartWijzigClose()">
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(420px,100%);padding:18px 20px">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(460px,100%);padding:18px 20px;max-height:92vh;overflow-y:auto">
         <div style="font-size:15px;font-weight:600;margin-bottom:6px">Call verplaatsen</div>
         ${naamHtml}
-        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Nieuwe datum + tijd</label>
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Vrije momenten in Dave's agenda</label>
+        ${slotsHtml}
+        <label style="display:block;font-size:11.5px;color:var(--text-3);margin-bottom:4px">Of typ handmatig een datum + tijd</label>
         <input id="lsOpResIn" type="datetime-local" value="${esc(preVal)}"
           style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);font-size:13.5px;font-family:inherit"
           ${_lsOpReschedule.saving ? 'disabled' : ''}
+          oninput="window._lsOpstartWijzigManualInput()"
           onkeydown="if(event.key==='Enter'){event.preventDefault();window._lsOpstartWijzigSubmit();}else if(event.key==='Escape'){window._lsOpstartWijzigClose();}"/>
         <div style="font-size:11px;color:var(--text-3);margin-top:6px">Eindtijd wordt automatisch berekend uit de huidige duur (server-side) en doorgezet naar GHL.</div>
         <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
