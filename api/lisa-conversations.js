@@ -79,7 +79,17 @@ export default async function handler(req, res) {
       if (status === 'qualified') q = q.eq('qualified', true);
       else if (status === 'disqualified') q = q.eq('phase', 'disqualified');
       else if (status === 'cold') q = q.eq('phase', 'cold');
-      else if (status === 'active') q = q.in('phase', ACTIVE_PHASES);
+      else if (status === 'active') {
+        // BP3 v12 (2026-09-03) — 'active' verruimd: naast ACTIVE_PHASES ook
+        // convs met unread_count > 0 OF last_message_at binnen laatste 24u.
+        // Zo verschijnen cold/disqualified/done-convs met een NIEUW inbound
+        // bericht automatisch in de lijst — spiegelt "Recente activiteit".
+        const activePhaseList = ACTIVE_PHASES.map((p) => `"${p}"`).join(',');
+        const iso24hAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        q = q.or(
+          `phase.in.(${activePhaseList}),unread_count.gt.0,last_message_at.gte.${iso24hAgo}`
+        );
+      }
 
       const search = (req.query.q || '').trim();
       if (search) {

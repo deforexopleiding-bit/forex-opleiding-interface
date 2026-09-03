@@ -56,6 +56,11 @@ export default async function handler(req, res) {
     ? String(q.resultaat).toLowerCase() : 'alle';
   const bron      = typeof q.bron === 'string' && q.bron.trim()
     ? String(q.bron).trim().toLowerCase() : null;
+  // BP3 v12 (2026-09-03) — default verberg cancelled/no_show/verwijderd/
+  // wacht_op_reschedule. Frontend kan dat via ?include_cancelled=true forceren
+  // (toggle-chip "Toon geannuleerd"). Rijen zonder appointment_id (nog geen
+  // boeking) blijven altijd zichtbaar.
+  const includeCancelled = String(q.include_cancelled || '') === 'true';
   // BP3 v11 (2026-09-02) — from/to (YYYY-MM-DD) voor agenda-maand-view.
   // Als aanwezig: filter op gekozen_start_at binnen [from, to) en de
   // limit-cap gaat naar 1000 (volle maand dekken). from/to overrulen
@@ -110,6 +115,29 @@ export default async function handler(req, res) {
       } else {
         filteredRows = filteredRows.filter((r) => r.appointment_id && apptSet.has(r.appointment_id));
       }
+    }
+
+    // BP3 v12 (2026-09-03) — bulk-fetch appointment-status voor de submissions
+    // die een appointment_id hebben. Default: verberg cancelled/no_show/
+    // verwijderd/wacht_op_reschedule uit lijst + agenda. Toggle via
+    // ?include_cancelled=true. Rijen zonder appointment_id (nog geen boeking)
+    // blijven altijd zichtbaar.
+    const HIDDEN_STATUSES = new Set(['cancelled', 'canceled', 'no_show', 'noshow', 'verwijderd', 'wacht_op_reschedule']);
+    const apptIds = [...new Set((filteredRows || []).map((r) => r.appointment_id).filter(Boolean))];
+    const apptStatusById = new Map();
+    if (apptIds.length > 0) {
+      const { data: appts } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id, status')
+        .in('id', apptIds);
+      for (const a of (appts || [])) apptStatusById.set(a.id, a.status);
+    }
+    if (!includeCancelled) {
+      filteredRows = filteredRows.filter((r) => {
+        if (!r.appointment_id) return true; // nog geen boeking → tonen
+        const st = apptStatusById.get(r.appointment_id);
+        return !st || !HIDDEN_STATUSES.has(String(st).toLowerCase());
+      });
     }
 
     // BP3 v4 (2026-09-01) — Sale?-indicator per rij.
@@ -219,6 +247,9 @@ export default async function handler(req, res) {
         noshow_akkoord  : !!r.noshow_akkoord,
         heeft_afspraak  : !!r.appointment_id,
         appointment_id  : r.appointment_id,
+        // BP3 v12 (2026-09-03) — appointment_status voor UI-badges + acties.
+        // Null als submission nog geen boeking heeft.
+        appointment_status: r.appointment_id ? (apptStatusById.get(r.appointment_id) || null) : null,
         lead_id         : r.lead_id,
         // 3-way sale-indicator: sale_checked=false → niet-checkbare rij (–);
         // sale_checked=true + is_sale=true → sale gevonden (✓); is_sale=false

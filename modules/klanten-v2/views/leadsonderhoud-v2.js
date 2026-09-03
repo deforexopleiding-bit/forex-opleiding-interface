@@ -2070,9 +2070,10 @@
       const nextM = m === 11 ? 0 : m + 1;
       rangeTo = `${nextY}-${pad(nextM + 1)}-01`;
     }
+    const showCancelled = !!st.showCancelled;
     const key = useAgenda
-      ? 'ag:' + rangeFrom + '..' + rangeTo + '&r=' + st.resultaat + '&b=' + st.bron
-      : 'p=' + st.periode + '&r=' + st.resultaat + '&b=' + st.bron;
+      ? 'ag:' + rangeFrom + '..' + rangeTo + '&r=' + st.resultaat + '&b=' + st.bron + '&c=' + (showCancelled ? '1' : '0')
+      : 'p=' + st.periode + '&r=' + st.resultaat + '&b=' + st.bron + '&c=' + (showCancelled ? '1' : '0');
     if (!force && st.lastKey === key && st.fetched && !st.error) return;
     st.loading = true; st.error = null; st.lastKey = key;
     const seq = ++st._seq;
@@ -2088,6 +2089,7 @@
     } else {
       qsParts.push('periode=' + encodeURIComponent(st.periode));
     }
+    if (showCancelled) qsParts.push('include_cancelled=true');
     const j = await tryFetch('opstartsessies', '/api/leadsonderhoud-opstartsessies-list?' + qsParts.join('&'));
     if (seq !== st._seq) return;
     st.loading = false; st.fetched = true;
@@ -2331,6 +2333,41 @@
     _live.opstartsessies.agMonth = new Date(d.getFullYear(), d.getMonth(), 1);
     fetchOpstartsessies(true);
   };
+  // BP3 v12 (2026-09-03) — toggle "Toon geannuleerd" — stuurt include_cancelled
+  // naar het endpoint. Default OFF; UI-chip toont current-state.
+  window._lsSetOpShowCancelled = (on) => {
+    _live.opstartsessies.showCancelled = !!on;
+    fetchOpstartsessies(true);
+  };
+  // BP3 v12 (2026-09-03) — annuleer / verwijder een opstartsessie-appointment.
+  // POST /api/leadsonderhoud-opstartsessie-annuleer met mode='cancel'|'delete'.
+  // Sluit modal + refetch. Reschedule staat op de roadmap als aparte follow-up
+  // (endpoint updateGhlAppointmentTime bestaat in _lib/ghl-appointment.js
+  // maar UI-form voor datum/tijd + rebroadcast is niet in deze bouwbeurt).
+  window._lsOpstartAnnuleer = async (appointmentId, mode, naam) => {
+    if (!appointmentId) return;
+    const label = mode === 'delete' ? 'verwijderen' : 'annuleren';
+    const bevestig = window.confirm(
+      `Weet je zeker dat je de call van "${naam || 'deze lead'}" wilt ${label}?\n\n` +
+      (mode === 'delete'
+        ? '• GHL-afspraak wordt geannuleerd\n• De boeking wordt hard-verwijderd uit het CRM (submission blijft bestaan zonder gekoppelde afspraak).'
+        : '• GHL-afspraak wordt geannuleerd\n• Status wordt "cancelled" — de call verdwijnt uit de standaardlijst.')
+    );
+    if (!bevestig) return;
+    try {
+      const r = await window.KV.authedFetch('/api/leadsonderhoud-opstartsessie-annuleer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointment_id: appointmentId, mode }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+      _lsInbToast(mode === 'delete' ? 'Call verwijderd.' : 'Call geannuleerd.', 'ok');
+      window._lsCloseOpstartDetail?.();
+      fetchOpstartsessies(true);
+    } catch (e) {
+      _lsInbToast('Actie mislukt: ' + (e?.message || e), 'warn');
+    }
+  };
 
   function opstartsessiesView() {
     if (!_live.opstartsessies.fetched && !_live.opstartsessies.loading && !_live.opstartsessies.error) queueMicrotask(() => fetchOpstartsessies(false));
@@ -2376,7 +2413,20 @@
         ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
         : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>';
       const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>';
-      const afsp = s.heeft_afspraak ? '<span style="color:var(--emerald);font-weight:600">✓ Geboekt</span>' : '<span style="color:var(--text-3)">–</span>';
+      // BP3 v12 — appointment_status-badge: cancelled/no_show → grijze/rose
+      // pill zodat je in "Toon geannuleerd"-modus meteen ziet welke rijen dat
+      // zijn. Anders standaard "✓ Geboekt" / "–".
+      const apptStat = String(s.appointment_status || '').toLowerCase();
+      let afsp;
+      if (['cancelled','canceled'].includes(apptStat)) {
+        afsp = '<span style="background:var(--rose-soft);color:var(--rose);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">⊘ Geannuleerd</span>';
+      } else if (['no_show','noshow'].includes(apptStat)) {
+        afsp = '<span style="background:var(--amber-soft);color:var(--amber);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">No-show</span>';
+      } else if (['verwijderd','wacht_op_reschedule'].includes(apptStat)) {
+        afsp = `<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">${esc(apptStat)}</span>`;
+      } else {
+        afsp = s.heeft_afspraak ? '<span style="color:var(--emerald);font-weight:600">✓ Geboekt</span>' : '<span style="color:var(--text-3)">–</span>';
+      }
       let saleCell;
       if (!s.sale_checked) {
         saleCell = '<span style="color:var(--text-3);font-weight:600;font-size:14px" title="Geen e-mail om te matchen">–</span>';
@@ -2434,6 +2484,7 @@
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</span>
           <select onchange="window._lsSetOpBron(this)" style="padding:4px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:12px;background:var(--surface)">${bronOpts}</select>
         </div>
+        <button class="chip ${st.showCancelled ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpShowCancelled(${st.showCancelled ? 'false' : 'true'})" title="Toggle: standaard worden geannuleerde/no-show/verwijderde calls verborgen">${st.showCancelled ? '✓ Toon geannuleerd' : 'Toon geannuleerd'}</button>
         <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
       </div>`;
 
@@ -2639,10 +2690,33 @@
       }).join('') || `<div style="color:var(--text-3);padding:12px 0">Geen antwoorden opgeslagen.</div>`;
       let afspraakHtml = '';
       if (s.afspraak) {
+        const apptStatus = String(s.afspraak.status || '').toLowerCase();
+        const canCancel  = s.appointment_id && !['cancelled','canceled','verwijderd'].includes(apptStatus);
+        // BP3 v12 (2026-09-03) — annuleer / verwijder-acties (POST naar
+        // /api/leadsonderhoud-opstartsessie-annuleer). Cancel behoudt de rij
+        // met status=cancelled; verwijder hard-delete de rij (submission
+        // blijft, appointment_id wordt SET NULL via FK-cascade). Alleen
+        // zichtbaar als er een appointment is en status is niet al cancelled.
+        const acties = canCancel
+          ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" style="font-size:11.5px;color:var(--amber)"
+                onclick="window._lsOpstartAnnuleer('${esc(String(s.appointment_id))}','cancel','${esc(String(s.naam || '')).replace(/'/g, "\\'")}')">
+                ⊘ Annuleer call
+              </button>
+              <button class="btn btn-ghost btn-sm" style="font-size:11.5px;color:var(--rose)"
+                onclick="window._lsOpstartAnnuleer('${esc(String(s.appointment_id))}','delete','${esc(String(s.naam || '')).replace(/'/g, "\\'")}')">
+                🗑 Verwijder call
+              </button>
+              <span style="font-size:11px;color:var(--text-3);align-self:center">GHL wordt eerst gesynchroniseerd</span>
+            </div>`
+          : (['cancelled','canceled'].includes(apptStatus)
+              ? `<div style="margin-top:8px;font-size:11.5px;color:var(--text-3)">Deze call is geannuleerd — niet meer zichtbaar in de standaardlijst (toggle "Toon geannuleerd" om weer te zien).</div>`
+              : '');
         afspraakHtml = `<div style="margin-top:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm)">
           <div style="font-weight:600;margin-bottom:4px;font-size:12.5px">Gekoppelde afspraak</div>
           <div style="font-size:12.5px">Ingepland op: <b>${esc(kortDt(s.afspraak.scheduled_at))}</b> — status: <b>${esc(s.afspraak.status || '—')}</b></div>
           ${s.afspraak.zoom_join_url ? `<div style="font-size:12px;margin-top:4px"><a href="${esc(s.afspraak.zoom_join_url)}" target="_blank" rel="noopener" style="color:var(--brand)">Zoom-link openen ↗</a></div>` : ''}
+          ${acties}
         </div>`;
       } else if (s.resultaat === 'toegelaten') {
         afspraakHtml = `<div style="margin-top:14px;padding:10px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55">Toegelaten, maar nog geen afspraak geboekt (lead heeft niet doorgeklikt na akkoord).</div>`;

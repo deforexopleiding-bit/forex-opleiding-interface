@@ -1081,7 +1081,15 @@
     const rowIdClick = String(c.id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const isOpen = String(_thread.convId) === String(c.id);
     const onCls = isOpen ? 'on' : '';
-    const phaseColor = c.qualified ? 'emerald' : (c.phase === 'disqualified' ? 'rose' : c.phase === 'cold' ? 'text-3' : 'blue');
+    // BP3 v12 (2026-09-03) — verfijnde phase-color-mapping zodat niet-actieve
+    // fasen (cold/disq/done/qualified) meteen visueel opvallen — vooral als
+    // ze via de nieuwe "active OR unread"-verruiming in de lijst komen.
+    const _phaseRaw = String(c.phase || '').toLowerCase();
+    const phaseColor = c.qualified ? 'emerald'
+      : _phaseRaw === 'disqualified' ? 'rose'
+      : _phaseRaw === 'cold' ? 'text-3'
+      : _phaseRaw === 'done' ? 'text-3'
+      : 'blue';
     const takeoverBadge = c.human_takeover ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--amber-soft);color:var(--amber);font-weight:600">MENS</span>` : '';
     const bookedBadge = c.call_booked ? `<span style="font-size:9.5px;padding:1px 5px;border-radius:6px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">CALL</span>` : '';
     // BP3 v7 (2026-09-02) — ongelezen-styling met optimistic overrides:
