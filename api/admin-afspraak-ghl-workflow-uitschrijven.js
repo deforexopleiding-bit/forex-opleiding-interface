@@ -4,11 +4,11 @@
 // opstartsessie-contacten uit de GHL bevestiging/reminder-workflow, zodat GHL
 // hun openstaande reminders stopt en onze in-house flow het overneemt.
 //
-// Doelgroep (exact = wat de reminder-cron oppakt):
+// Doelgroep (exact = wat de reminder-cron oppakt, verbreed naar alle agenda's):
 //   DISTINCT lead_ghl_contact_id uit follow_up_appointments
 //   WHERE status='scheduled' AND scheduled_at > now()
 //     AND lead_ghl_contact_id IS NOT NULL
-//     AND EXISTS(opstartsessie_submissions.appointment_id = a.id)
+//     AND ghl_calendar_id IS NOT NULL
 //
 // Modi:
 //   ?calendars=1      → READ-ONLY GET /calendars/?locationId=… (id/name/isActive;
@@ -118,6 +118,8 @@ export default async function handler(req, res) {
   }
 
   // ── Doelgroep bepalen (read-only) ──
+  // Verbreed: alle scheduled+future afspraken uit een GHL-agenda-import
+  // (ghl_calendar_id NOT NULL), niet meer alleen opstartsessie-gekoppeld.
   const nowIso = new Date().toISOString();
   const { data: appts, error: aerr } = await supabaseAdmin
     .from('follow_up_appointments')
@@ -125,19 +127,11 @@ export default async function handler(req, res) {
     .eq('status', 'scheduled')
     .gt('scheduled_at', nowIso)
     .not('lead_ghl_contact_id', 'is', null)
-    .limit(1000);
+    .not('ghl_calendar_id', 'is', null)
+    .limit(2000);
   if (aerr) return res.status(500).json({ error: 'doelgroep-query: ' + aerr.message });
 
-  const rows = appts || [];
-  let doel = [];
-  if (rows.length) {
-    const ids = rows.map((r) => r.id);
-    const { data: subs, error: serr } = await supabaseAdmin
-      .from('opstartsessie_submissions').select('appointment_id').in('appointment_id', ids);
-    if (serr) return res.status(500).json({ error: 'scope-query: ' + serr.message });
-    const linked = new Set((subs || []).map((s) => s.appointment_id));
-    doel = rows.filter((r) => linked.has(r.id));
-  }
+  const doel = appts || [];
 
   // Dedupe op contact (bewaar de vroegste afspraak per contact voor weergave).
   const perContact = new Map();
