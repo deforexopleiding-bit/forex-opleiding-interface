@@ -2588,49 +2588,73 @@
   // krijgt 'ie 403 en de banner toont die.
   // ═══════════════════════════════════════════════════════════════════════
   const _opv = {
-    loading: false, error: null,
+    loading: false, error: null, partialWarning: null, renderError: null,
     dag: null, taken: [], wacht: [], ingepland: [], archief: [],
     counts: { open: 0, wacht_inplanning: 0, ingepland: 0, gearchiveerd: 0 },
     kpi: null, archiefLoaded: false, archiefLoading: false,
   };
+  // BP3 v37 (2026-09-04) — silent-safe render wrapper. Als DFO.render / een
+  // andere view-render throw't, wordt het geswallowd (met console.warn) zodat
+  // MIJN state-flow niet blokkeert en _opv.loading altijd op false kan komen.
+  function _opvSafeRender() {
+    try {
+      if (window.DFO?.render) window.DFO.render();
+    } catch (e) {
+      console.warn('[opv] safeRender: DFO.render throw:', e?.message || e, e);
+    }
+  }
 
-  // BP3 v36 (2026-09-04) — fail-safe: parallel-fetch, één trage/mislukte call
-  // blokkeert NIET de andere. Toont partial data + banner met retry i.p.v.
-  // oneindige spinner. tryFetch heeft al 8s-timeout die __error retourneert.
+  // BP3 v37 (2026-09-04) — fail-safe fetch. ALLES in outer try/finally zodat
+  // _opv.loading altijd op false komt (ook als render() throw't). Elke fetch
+  // partial-graceful; total error krijgt óók dag-fallback zodat de spinner-
+  // guard nooit meer blijft plakken. Tijdelijke console.debug voor
+  // productie-diagnose (zoekt naar niet-triviale render-exceptions).
   async function fetchOpvolging() {
     if (_opv.loading) return;
-    _opv.loading = true; _opv.error = null; _opv.partialWarning = null; render();
-    let dagErr = null; let takenErr = null;
+    _opv.loading = true; _opv.error = null; _opv.partialWarning = null; _opv.renderError = null;
+    console.debug('[opv] fetch start');
     try {
-      const [jDag, jTaken] = await Promise.all([
-        tryFetch('opv-dag',   '/api/opvolging-dag'),
-        tryFetch('opv-taken', '/api/opvolging-taken?include_ingepland=1'),
-      ]);
-      if (!jDag || jDag.__error) {
-        dagErr = jDag?.__error || 'Kon opvolging-dag niet laden';
-      } else {
-        _opv.kpi = jDag;
-        _opv.counts = jDag.by_status || _opv.counts;
-        _opv.dag    = jDag.dag;
-      }
-      if (!jTaken || jTaken.__error) {
-        takenErr = jTaken?.__error || 'Kon opvolging-taken niet laden';
-      } else {
-        _opv.taken     = Array.isArray(jTaken.taken)     ? jTaken.taken     : [];
-        _opv.wacht     = Array.isArray(jTaken.wacht)     ? jTaken.wacht     : [];
-        _opv.ingepland = Array.isArray(jTaken.ingepland) ? jTaken.ingepland : [];
-      }
-      if (dagErr && takenErr) {
-        _opv.error = 'Kon Opvolging niet laden: ' + [dagErr, takenErr].join(' · ');
-      } else if (dagErr || takenErr) {
-        _opv.partialWarning = 'Deel niet geladen: ' + (dagErr || takenErr);
+      _opvSafeRender(); // eerste render (spinner) — mag NOOIT crashen mijn flow
+      let dagErr = null; let takenErr = null;
+      try {
+        const [jDag, jTaken] = await Promise.all([
+          tryFetch('opv-dag',   '/api/opvolging-dag'),
+          tryFetch('opv-taken', '/api/opvolging-taken?include_ingepland=1'),
+        ]);
+        if (!jDag || jDag.__error) {
+          dagErr = jDag?.__error || 'Kon opvolging-dag niet laden';
+        } else {
+          _opv.kpi    = jDag;
+          _opv.counts = jDag.by_status || _opv.counts;
+          _opv.dag    = jDag.dag;
+        }
+        if (!jTaken || jTaken.__error) {
+          takenErr = jTaken?.__error || 'Kon opvolging-taken niet laden';
+        } else {
+          _opv.taken     = Array.isArray(jTaken.taken)     ? jTaken.taken     : [];
+          _opv.wacht     = Array.isArray(jTaken.wacht)     ? jTaken.wacht     : [];
+          _opv.ingepland = Array.isArray(jTaken.ingepland) ? jTaken.ingepland : [];
+        }
+        if (dagErr && takenErr) {
+          _opv.error = 'Kon Opvolging niet laden: ' + [dagErr, takenErr].join(' · ');
+          if (!_opv.dag) _opv.dag = new Date().toISOString().slice(0, 10); // fallback zodat spinner-guard nooit blijft
+        } else if (dagErr || takenErr) {
+          _opv.partialWarning = 'Deel niet geladen: ' + (dagErr || takenErr);
+          if (!_opv.dag) _opv.dag = new Date().toISOString().slice(0, 10);
+        }
+      } catch (innerE) {
+        _opv.error = innerE?.message || String(innerE);
         if (!_opv.dag) _opv.dag = new Date().toISOString().slice(0, 10);
       }
-    } catch (e) {
-      _opv.error = e?.message || String(e);
+    } catch (outerE) {
+      // Zeer defensief — vangt zelfs safeRender+state-setter-crashes.
+      console.warn('[opv] outer catch:', outerE?.message || outerE, outerE);
+      _opv.error = outerE?.message || String(outerE);
+      if (!_opv.dag) _opv.dag = new Date().toISOString().slice(0, 10);
     } finally {
       _opv.loading = false;
-      render();
+      console.debug('[opv] fetch done', { dag: _opv.dag, error: _opv.error, partialWarning: _opv.partialWarning, counts: _opv.counts });
+      _opvSafeRender();
     }
   }
   async function fetchOpvolgingArchief() {
@@ -2771,6 +2795,23 @@
     </span>`;
   }
   function opvolgingView() {
+    try {
+      return _opvolgingViewInner();
+    } catch (e) {
+      // BP3 v37 — vang render-exception EN toon 'em zichtbaar zodat we niet
+      // een half/leeg scherm krijgen met verborgen error. Log de stacktrace
+      // in console voor productie-diagnose.
+      _opv.renderError = e?.message || String(e);
+      console.error('[opv] renderError:', e?.message || e, e);
+      return `<div style="padding:22px;background:var(--rose-soft, rgba(220,53,90,.08));border:1px solid var(--rose-line, rgba(220,53,90,.4));color:var(--rose, #DC355A);border-radius:8px;margin:16px;font-family:'IBM Plex Mono',monospace;font-size:12px">
+        ⚠ Opvolging-render-exception: ${esc(_opv.renderError)}
+        <div style="margin-top:8px;font-family:inherit;font-size:11px;color:var(--text-3)">Stacktrace zichtbaar in DevTools console (zoek "[opv] renderError").</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="window.__opvRetry()">Opnieuw</button>
+      </div>`;
+    }
+  }
+  function _opvolgingViewInner() {
+    console.debug('[opv] render', { loading: _opv.loading, dag: _opv.dag, error: _opv.error, counts: _opv.counts });
     // Trigger fetches op eerste render.
     if (!_opv.loading && !_opv.error && !_opv.dag) queueMicrotask(fetchOpvolging);
     if (_live.status && !_live.status.loading && !_live.status.data && !_live.status.error) {
