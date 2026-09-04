@@ -2594,22 +2594,38 @@
     kpi: null, archiefLoaded: false, archiefLoading: false,
   };
 
+  // BP3 v36 (2026-09-04) — fail-safe: parallel-fetch, één trage/mislukte call
+  // blokkeert NIET de andere. Toont partial data + banner met retry i.p.v.
+  // oneindige spinner. tryFetch heeft al 8s-timeout die __error retourneert.
   async function fetchOpvolging() {
     if (_opv.loading) return;
-    _opv.loading = true; _opv.error = null; render();
+    _opv.loading = true; _opv.error = null; _opv.partialWarning = null; render();
+    let dagErr = null; let takenErr = null;
     try {
       const [jDag, jTaken] = await Promise.all([
         tryFetch('opv-dag',   '/api/opvolging-dag'),
         tryFetch('opv-taken', '/api/opvolging-taken?include_ingepland=1'),
       ]);
-      if (!jDag || jDag.__error)     throw new Error(jDag?.__error   || 'Kon opvolging-dag niet laden');
-      if (!jTaken || jTaken.__error) throw new Error(jTaken?.__error || 'Kon opvolging-taken niet laden');
-      _opv.kpi       = jDag;
-      _opv.counts    = jDag.by_status || _opv.counts;
-      _opv.dag       = jDag.dag;
-      _opv.taken     = Array.isArray(jTaken.taken)     ? jTaken.taken     : [];
-      _opv.wacht     = Array.isArray(jTaken.wacht)     ? jTaken.wacht     : [];
-      _opv.ingepland = Array.isArray(jTaken.ingepland) ? jTaken.ingepland : [];
+      if (!jDag || jDag.__error) {
+        dagErr = jDag?.__error || 'Kon opvolging-dag niet laden';
+      } else {
+        _opv.kpi = jDag;
+        _opv.counts = jDag.by_status || _opv.counts;
+        _opv.dag    = jDag.dag;
+      }
+      if (!jTaken || jTaken.__error) {
+        takenErr = jTaken?.__error || 'Kon opvolging-taken niet laden';
+      } else {
+        _opv.taken     = Array.isArray(jTaken.taken)     ? jTaken.taken     : [];
+        _opv.wacht     = Array.isArray(jTaken.wacht)     ? jTaken.wacht     : [];
+        _opv.ingepland = Array.isArray(jTaken.ingepland) ? jTaken.ingepland : [];
+      }
+      if (dagErr && takenErr) {
+        _opv.error = 'Kon Opvolging niet laden: ' + [dagErr, takenErr].join(' · ');
+      } else if (dagErr || takenErr) {
+        _opv.partialWarning = 'Deel niet geladen: ' + (dagErr || takenErr);
+        if (!_opv.dag) _opv.dag = new Date().toISOString().slice(0, 10);
+      }
     } catch (e) {
       _opv.error = e?.message || String(e);
     } finally {
@@ -2631,7 +2647,11 @@
       _opv.archiefLoading = false; render();
     }
   }
-  window.__opvRetry           = () => { _opv.error = null; fetchOpvolging(); };
+  window.__opvRetry           = () => {
+    _opv.error = null; _opv.partialWarning = null;
+    _opv.dag = null; // dwing fresh fetch (bypass early-return in fetchOpvolging)
+    fetchOpvolging();
+  };
   window.__opvLoadArchief     = () => { fetchOpvolgingArchief(); };
 
   function _opvFmtDate(iso) {
@@ -2793,6 +2813,13 @@
           extraHtml: _opv.archiefLoading ? '' : `<div style="display:flex;justify-content:center"><button class="btn btn-ghost btn-sm" onclick="window.__opvLoadArchief()">Laad archief</button></div>`,
         });
 
+    // BP3 v36 (2026-09-04) — partial-warning banner (één deel geladen, ander
+    // mislukt/timeout). Voorkomt eeuwige spinner én geeft user zichtbaarheid.
+    const partialWarn = _opv.partialWarning
+      ? `<div style="padding:10px 12px;margin-bottom:12px;background:var(--amber-soft);border:1px solid var(--amber-line);color:var(--amber);border-radius:var(--r-sm);font-size:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>⚠ ${esc(_opv.partialWarning)}</span>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__opvRetry()">Opnieuw</button>
+        </div>` : '';
     return `<div style="padding:18px 20px">
       <header style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <div>
@@ -2804,6 +2831,7 @@
           <button class="btn btn-ghost btn-sm" onclick="window.__opvRetry()" title="Ververs" aria-label="Ververs">↻</button>
         </div>
       </header>
+      ${partialWarn}
       ${kpiStrip}
       <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:12px;overflow-x:auto;padding-bottom:4px">
         ${_opvKolomHtml('Open',               'open',              _opv.taken)}

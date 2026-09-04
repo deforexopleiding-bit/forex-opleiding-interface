@@ -115,17 +115,25 @@ export default async function handler(req, res) {
 
     // BP3 v32 (2026-09-04) — by_status count-map voor Kanban-badges in
     // #automatiseringen/Opvolging. Zelfde count:'exact',head:true patroon als
-    // leads-stats.js (regel 39-52). Vier lichte queries, elk indexed op status.
-    // Read-only, geen mutaties.
+    // leads-stats.js (regel 39-52).
+    // BP3 v36 (2026-09-04) — PARALLEL via Promise.all (was sequentieel → 4×
+    // roundtrip = ~2-8s op cold-start). Elk faalt fail-soft (count:null bij
+    // fout) zodat de KPI-payload nooit meer op één trage count blijft
+    // hangen. Read-only, geen mutaties.
     const statuses = ['open', 'wacht_inplanning', 'ingepland', 'gearchiveerd'];
-    const by_status = {};
-    for (const st of statuses) {
-      const { count } = await supabaseAdmin
-        .from('opvolging_taken')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', st);
-      by_status[st] = Number(count) || 0;
-    }
+    const by_status_pairs = await Promise.all(statuses.map(async (st) => {
+      try {
+        const { count, error } = await supabaseAdmin
+          .from('opvolging_taken')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', st);
+        if (error) return [st, null];
+        return [st, Number(count) || 0];
+      } catch (_) {
+        return [st, null];
+      }
+    }));
+    const by_status = Object.fromEntries(by_status_pairs);
 
     return res.status(200).json({ dag, vandaag, dekking, discipline, inplanning, gearchiveerd, week, by_status });
   } catch (e) {
