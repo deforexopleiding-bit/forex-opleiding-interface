@@ -63,7 +63,7 @@ export default async function handler(req, res) {
     if (row.appointment_id) {
       const { data: a } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('scheduled_at, status, zoom_join_url')
+        .select('scheduled_at, status, zoom_join_url, annulering_reden, annulering_reden_code')
         .eq('id', row.appointment_id)
         .maybeSingle();
       if (a) afspraak = a;
