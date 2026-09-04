@@ -658,6 +658,133 @@ export async function runEventsCompleteCore({ userId, body }) {
       }
     }
 
+    // ── Punt B: dezelfde deelnemers, maar dan in de nieuwe takenpot ─────────
+    // Naast de follow_up_leads-rij van Punt A krijgt elke deelnemer nu ook een
+    // rij in public.opvolging_taken — het dagsysteem uit
+    // docs/sql-migrations/2026-09-03-opvolging-fase1.sql. Dat is een tweede,
+    // losse pot; Punt A, event_followups en follow_up_leads blijven exact
+    // zoals ze waren en worden hier niet aangeraakt.
+    //
+    // WAAROM EEN EIGEN LUS EN NIET ONDERIN DE VORIGE
+    // De lus hierboven begint met `if (!aanwezigTrigger && !afwezigTrigger)
+    // continue;`, en die voorwaarde hangt aan wat event_followups nodig heeft.
+    // Wat er in de takenpot hoort te komen is een eigen vraag; die twee aan
+    // elkaar knopen betekent dat een wijziging aan de ene weg de andere stil
+    // meeneemt. Een eigen lus over dezelfde attendeesIn beslist zelf, laat de
+    // bestaande weg volledig met rust, en houdt de vertaaltabel op één plek
+    // (bouwOpvolgingTaak, onderaan dit bestand).
+    //
+    // FAIL-SOFT, NET ALS PUNT A
+    // Eén try/catch per deelnemer. Wat hier misgaat mag het afronden van het
+    // event nooit laten mislukken: het event is dan al afgerond, de bonussen
+    // zijn berekend en de leads staan er. Een kapotte takenpot is een
+    // waarschuwing in de summary, geen 500.
+    // Het etiket op de kaart: 'Masterclass Gent · 27 aug'. Eén keer ophalen voor
+    // alle deelnemers — het is per definitie hetzelfde event. Eigen query, want
+    // de events-select bovenin haalt alleen de afrond-kolommen op en die regel
+    // blijft ongemoeid. Mislukt hij, dan blijft het label leeg: een badge is
+    // versiering, geen reden om de taken niet aan te maken.
+    let opvolgingBadge = null;
+    try {
+      const { data: evMeta } = await supabaseAdmin
+        .from('events')
+        .select('title, starts_at')
+        .eq('id', eventId)
+        .maybeSingle();
+      opvolgingBadge = opvolgingBadgeLabel(evMeta?.title, evMeta?.starts_at);
+    } catch (_) { /* badge is optioneel */ }
+
+    for (const a of attendeesIn) {
+      try {
+        // Naam/mail/telefoon uit dezelfde kolommen die Punt A ophaalt.
+        const { data: att, error: attErr } = await supabaseAdmin
+          .from('event_attendees')
+          .select('id, customer_id, first_name, last_name, email, phone')
+          .eq('id', a.attendee_id)
+          .maybeSingle();
+        if (attErr) throw new Error('att fetch: ' + attErr.message);
+        if (!att) throw new Error('attendee not found');
+
+        // De event_followups-rij van hierboven, als die er is. Bestaat hij
+        // niet, dan blijft followup_id null; de kaart kan er prima zonder.
+        let followupId = null;
+        try {
+          const { data: fu } = await supabaseAdmin
+            .from('event_followups')
+            .select('id')
+            .eq('attendee_id', att.id)
+            .eq('status', 'open')
+            .maybeSingle();
+          followupId = fu?.id || null;
+        } catch (_) { /* referentie is optioneel */ }
+
+        const taak = bouwOpvolgingTaak({
+          attendanceStatus: a.attendance_status,
+          outcome         : a.outcome,
+          followup        : a.followup,
+          afwezig         : a.afwezig,
+          eventId,
+          att,
+          followupId,
+          badgeLabel: opvolgingBadge,
+        });
+        // Klant geworden of nog onbekend: er valt niets op te volgen.
+        if (!taak) continue;
+
+        // Idempotent: één open kaart per deelnemer. Match op
+        // bron_ref->>'attendee_id' en alleen op een rij die niet gearchiveerd
+        // is — een afgesloten kaart is geschiedenis en blijft staan.
+        let bestaandeId = null;
+        const { data: bestaand, error: zoekErr } = await supabaseAdmin
+          .from('opvolging_taken')
+          .select('id')
+          .neq('status', 'gearchiveerd')
+          .filter('bron_ref->>attendee_id', 'eq', att.id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (zoekErr) {
+          // Zolang de migratie niet gedraaid is bestaat de tabel niet. Dat is
+          // een setup-melding, geen fout in het afronden — zelfde signaal als
+          // Punt A geeft bij een ontbrekende follow_up_leads.
+          if (zoekErr.code === '42P01') {
+            summary.warnings.push(`opvolging-taak ${a.attendee_id}: opvolging_taken ontbreekt (MIGRATION_REQUIRED)`);
+            continue;
+          }
+          throw new Error('zoek: ' + zoekErr.message);
+        }
+        if (bestaand && bestaand[0]) bestaandeId = bestaand[0].id;
+
+        if (bestaandeId) {
+          // Staat er al een kaart, dan wordt die niet overschreven. Alleen een
+          // nieuw belmoment en een nieuwe notitie gaan mee; status, reden,
+          // pogingen en eigenaar blijven van de kaart zelf.
+          const patch = {};
+          if (taak.due != null)     patch.due     = taak.due;
+          if (taak.notitie != null) patch.notitie = taak.notitie;
+          if (Object.keys(patch).length === 0) continue;
+          const { error: upErr } = await supabaseAdmin
+            .from('opvolging_taken').update(patch).eq('id', bestaandeId);
+          if (upErr) throw new Error('update: ' + upErr.message);
+          summary.opvolging_taken_updated = (summary.opvolging_taken_updated || 0) + 1;
+        } else {
+          const { error: insErr } = await supabaseAdmin
+            .from('opvolging_taken').insert(taak);
+          if (insErr) {
+            if (insErr.code === '42P01') {
+              summary.warnings.push(`opvolging-taak ${a.attendee_id}: opvolging_taken ontbreekt (MIGRATION_REQUIRED)`);
+            } else {
+              throw new Error('insert: ' + insErr.message);
+            }
+          } else {
+            summary.opvolging_taken_created = (summary.opvolging_taken_created || 0) + 1;
+          }
+        }
+      } catch (e) {
+        console.error('[events-complete-core opvolging-taak]', a.attendee_id, e?.message || e);
+        summary.warnings.push(`opvolging-taak ${a.attendee_id}: ${e?.message || 'unknown'}`);
+      }
+    }
+
     // ── 4) event_mentors.was_present ────────────────────────────────────────
     // Bug: de oude UPDATE .in('team_member_id', presentMentorIds) raakte
     // alleen mentoren die AL een event_mentors-rij hadden. Aangevinkte
@@ -908,3 +1035,142 @@ export async function runEventsCompleteCore({ userId, body }) {
     return { statusCode: 500, response: { error: e?.message || 'Interne fout', summary } };
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Punt B — de vertaling van een afgerond event naar een kaart in
+ * public.opvolging_taken. Apart en puur gehouden, want dit is precies het
+ * soort besluit dat stil fout gaat: een verkeerde reden of een gemiste rij
+ * merk je pas als er iemand niet gebeld is. Zie
+ * tests/events-opvolging-taak.test.js voor de zes gevallen.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const NL_MAAND_KORT = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+
+/**
+ * 'Masterclass Gent · 27 aug' — de eventnaam plus de dag waarop het was.
+ *
+ * starts_at is een timestamptz. Een event van 20:00 in Amsterdam staat in de
+ * database op 18:00Z, en in de winter op 19:00Z; wie de UTC-dag pakt zit er bij
+ * een avondevent regelmatig een dag naast. Daarom expliciet in Europe/Amsterdam.
+ * Zonder titel of zonder datum levert dit gewoon het halve label, en zonder
+ * allebei null — een badge is versiering.
+ */
+function opvolgingBadgeLabel(titel, startsAt) {
+  const naam = titel != null ? String(titel).trim() : '';
+  let datum = '';
+  if (startsAt) {
+    const d = new Date(startsAt);
+    if (!Number.isNaN(d.getTime())) {
+      try {
+        datum = new Intl.DateTimeFormat('nl-NL', {
+          timeZone: 'Europe/Amsterdam', day: 'numeric', month: 'short',
+        }).format(d);
+      } catch (_) {
+        // Zonder volledige ICU valt Intl terug op Engels; dan zelf maar.
+        datum = `${d.getUTCDate()} ${NL_MAAND_KORT[d.getUTCMonth()]}`;
+      }
+    }
+  }
+  const label = [naam, datum].filter(Boolean).join(' · ');
+  return label ? label.slice(0, 200) : null;
+}
+
+/**
+ * De vertaaltabel van 'wat is er op het event gebeurd' naar 'welke kaart komt
+ * er in de pot'. Geeft null terug als er niets op te volgen valt.
+ *
+ *   aanwezig + opvolgen        → reden 'wil_nog_beslissen', due = het gekozen
+ *                                belmoment, notitie = de ingevulde notitie
+ *   aanwezig + twijfelt_nog    → exact hetzelfde als 'opvolgen'
+ *   aanwezig + klant_geworden  → GEEN kaart (die is binnen)
+ *   aanwezig + geen_interesse  → GEEN kaart (zie hieronder)
+ *   aanwezig + nog_onbekend    → GEEN kaart (je weet het nog niet)
+ *   no_show                    → reden 'no_show_event', reden_code = de
+ *                                aangeklikte AFWEZIG_REDENEN-code
+ *   afgemeld                   → reden 'afgemeld', idem
+ *
+ * Drie dingen die opvallen als je de tabel naast de kolommen legt:
+ *
+ *  · 'twijfelt_nog' loopt mee met 'opvolgen'. Die outcome wordt sinds het
+ *    samenvoegen van de twee niet meer verstuurd, maar een oude of handmatige
+ *    payload kan 'm nog dragen. Zou hij hier null opleveren, dan krijgt die
+ *    deelnemer wel een follow_up_leads-rij via Punt A maar geen kaart — precies
+ *    het stille verdwijnen dat deze pot moet voorkomen.
+ *  · 'geen_interesse' levert bewust GEEN kaart op. Zo'n kaart zou met nul
+ *    belpogingen en nul WhatsApps in Afgerond belanden en daar het rode oordeel
+ *    'te weinig moeite' krijgen, terwijl er nooit iets mee gedaan hoefde te
+ *    worden. Dat maakt juist de steekproef kapot waarvoor dat scherm bestaat.
+ *    De nee is niet weg: die staat op event_attendees.outcome_reason en in
+ *    event_followups.
+ *  · Bij een afwezige valt de reden terug op 'onbekend' en het belmoment op
+ *    datumOverDagen(AFWEZIG_BELMOMENT_DAGEN[...]), precies zoals de bestaande
+ *    weg hierboven dat doet. Wie er niet was mag nooit kwijtraken, ook niet als
+ *    de invuller niets aanklikte.
+ *
+ * `eigenaar_id` blijft bewust null. De RLS op opvolging_taken is
+ * is_crm_staff() — een rolcheck, geen eigenaarscheck — dus een kaart zonder
+ * eigenaar is voor het hele CRM-team zichtbaar en niet voor niemand.
+ */
+function bouwOpvolgingTaak({
+  attendanceStatus, outcome, followup, afwezig,
+  eventId, att, followupId = null, badgeLabel = null,
+}) {
+  const status = String(attendanceStatus || '');
+  const uitkomst = String(outcome || '');
+
+  const delen = [att?.first_name, att?.last_name]
+    .filter(Boolean).map((s) => String(s).trim()).filter(Boolean);
+  const naam = delen.join(' ').trim() || att?.email || '(onbekend)';
+
+  const basis = {
+    naam,
+    email      : att?.email || null,
+    telefoon   : att?.phone || null,
+    bron       : 'event',
+    bron_ref   : {
+      event_id   : eventId,
+      attendee_id: att?.id || null,
+      followup_id: followupId || null,
+    },
+    badge_label: badgeLabel || null,
+    eigenaar_id: null,
+  };
+
+  if (status === 'aanwezig') {
+    // Dezelfde twee die hierboven FOLLOWUP_OUTCOMES vormen, en om dezelfde
+    // reden: allebei betekenen ze 'was er, wil nog beslissen'.
+    if (FOLLOWUP_OUTCOMES.has(uitkomst)) {
+      const fu = (followup && typeof followup === 'object') ? followup : {};
+      const notitie = fu.reason != null ? String(fu.reason).slice(0, 500) : null;
+      return {
+        ...basis,
+        reden  : 'wil_nog_beslissen',
+        status : 'open',
+        ...(fu.follow_up_date ? { due: fu.follow_up_date } : {}),
+        ...(notitie ? { notitie } : {}),
+      };
+    }
+    // klant_geworden, geen_interesse, nog_onbekend en alles wat de tabel niet
+    // noemt. Voor 'geen_interesse' is dat een bewuste keuze — zie de toelichting
+    // boven deze functie.
+    return null;
+  }
+
+  if (AFWEZIG_STATUSSEN.has(status)) {
+    const afw = (afwezig && typeof afwezig === 'object') ? afwezig : {};
+    const opgegeven = String(afw.reason_code || '').trim();
+    const notitie = afw.note != null ? String(afw.note).slice(0, 500) : null;
+    return {
+      ...basis,
+      reden     : status === 'no_show' ? 'no_show_event' : 'afgemeld',
+      reden_code: AFWEZIG_REDENEN.has(opgegeven) ? opgegeven : 'onbekend',
+      status    : 'open',
+      due       : afw.follow_up_date || datumOverDagen(AFWEZIG_BELMOMENT_DAGEN[status] ?? 1),
+      ...(notitie ? { notitie } : {}),
+    };
+  }
+
+  return null;
+}
+
+export { opvolgingBadgeLabel, bouwOpvolgingTaak };
