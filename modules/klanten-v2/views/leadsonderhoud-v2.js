@@ -3212,6 +3212,51 @@
     if (window.DFO?.render) window.DFO.render();
   };
   window._lsCloseOpstartDetail = function(){ _lsOpDetail.open = false; _lsOpDetail.data = null; if (window.DFO?.render) window.DFO.render(); };
+  // Afspraak-reminders — admin test-send (stuurt de berichten met de data van
+  // déze afspraak UITSLUITEND naar de opgegeven telefoon/e-mail; lead krijgt niks).
+  function _lsAfspraakTestSendHtml(appointmentId){
+    const opts = [['all','Alle 5'],['bevestiging','Bevestiging'],['r24','Reminder 24u'],['r2','Reminder 2u'],['r30','Reminder 30m'],['zoom5','Zoom 5min']]
+      .map(([v,l])=>`<option value="${v}">${l}</option>`).join('');
+    return `<div style="margin-top:12px;padding:10px 12px;border:1px dashed var(--border);border-radius:var(--r-sm)">
+      <div style="font-weight:600;font-size:12px;margin-bottom:6px">Test-berichten naar mij</div>
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">Stuurt de gekozen berichten (mail + WhatsApp) met de data van déze afspraak, maar UITSLUITEND naar jouw telefoon/e-mail. De lead ontvangt niets. WhatsApp gaat alleen als de template al goedgekeurd is bij Meta.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="ls-ts-phone" type="tel" placeholder="+316…" style="padding:6px 9px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12px;flex:0 0 150px">
+        <input id="ls-ts-email" type="email" placeholder="jij@voorbeeld.nl" style="padding:6px 9px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12px;flex:1;min-width:170px">
+        <select id="ls-ts-moment" style="padding:6px 9px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12px">${opts}</select>
+        <button id="ls-ts-btn" class="btn btn-primary btn-sm" style="font-size:11.5px" onclick="window._lsAfspraakTestSend('${esc(String(appointmentId))}')">Verstuur test naar mij</button>
+      </div>
+      <div id="ls-ts-result" style="font-size:11.5px;color:var(--text-3);margin-top:8px"></div>
+    </div>`;
+  }
+  window._lsAfspraakTestSend = async (appointmentId) => {
+    const phone  = (document.getElementById('ls-ts-phone')  || {}).value;
+    const email  = (document.getElementById('ls-ts-email')  || {}).value;
+    const moment = (document.getElementById('ls-ts-moment') || {}).value || 'all';
+    const resEl  = document.getElementById('ls-ts-result');
+    const btn    = document.getElementById('ls-ts-btn');
+    const p = (phone || '').trim(), e = (email || '').trim();
+    if (!p || !e) { if (resEl) resEl.textContent = 'Vul zowel telefoon als e-mail in.'; return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Versturen…'; }
+    try {
+      const j = await window.KV.authedJson('/api/admin-afspraak-testsend', {
+        method: 'POST',
+        body: JSON.stringify({ appointment_id: appointmentId, override_phone: p, override_email: e, moment }),
+      });
+      const lines = (j.resultaten || []).map((r) => {
+        const mail = r.mail?.ok ? 'mail ✓' : 'mail ✗';
+        const wa   = r.wa?.ok ? 'wa ✓' : ('wa ' + (r.wa?.skipped || '✗'));
+        return `${r.moment}: ${mail} · ${wa}`;
+      }).join('  |  ');
+      if (resEl) resEl.textContent = `Verstuurd naar ${j.verstuurd_naar?.email || e} / ${j.verstuurd_naar?.telefoon || p} — ${lines}`;
+      window.KV.toast('Test-berichten verwerkt', 'ok');
+    } catch (err) {
+      if (resEl) resEl.textContent = 'Fout: ' + (err?.body?.error || err?.message || 'onbekend');
+      window.KV.toast('Test-send mislukt', 'warn');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Verstuur test naar mij'; }
+  };
+
   function _lsOpstartDetailModalHtml(){
     if (!_lsOpDetail.open) return '';
     const kortDt = (iso) => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('nl-NL', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }); } catch(_){ return String(iso); } };
@@ -3267,6 +3312,7 @@
           <div style="font-size:12.5px">Ingepland op: <b>${esc(kortDt(s.afspraak.scheduled_at))}</b> — status: <b>${esc(s.afspraak.status || '—')}</b></div>
           ${s.afspraak.zoom_join_url ? `<div style="font-size:12px;margin-top:4px"><a href="${esc(s.afspraak.zoom_join_url)}" target="_blank" rel="noopener" style="color:var(--brand)">Zoom-link openen ↗</a></div>` : ''}
           ${acties}
+          ${s.appointment_id ? _lsAfspraakTestSendHtml(s.appointment_id) : ''}
         </div>`;
       } else if (s.resultaat === 'toegelaten') {
         afspraakHtml = `<div style="margin-top:14px;padding:10px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55">Toegelaten, maar nog geen afspraak geboekt (lead heeft niet doorgeklikt na akkoord).</div>`;
