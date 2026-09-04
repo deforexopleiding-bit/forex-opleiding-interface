@@ -705,25 +705,29 @@
       if (window.DFO?.goTab) window.DFO.goTab(label);
     } catch (e) { console.warn('[aut] goTab fail:', e?.message); }
   };
-  // BP3 v38 (2026-09-04) — variant met querystring voor Toegang-deeplinks
-  // (bv. 'Toegang?soort=7-daagse' → subtab 'Toegang' + hash-param soort=7-daagse).
-  // Subtab-view leest de param uit location.hash bij eerste render.
+  // BP3 v39 (2026-09-04) — deep-link met query FIX. Vorige versie zette query
+  // eerst op de OUDE hash (#automatiseringen/Overzicht?soort=…) en riep dan
+  // DFO.goTab aan, dat vervolgens de hash weer overschreef naar
+  // #automatiseringen/Toegang — waardoor de query weg was. Nu construeren we
+  // direct de juiste hash (#automatiseringen/<Tab>?<query>) en zetten die in
+  // één keer; hashchange-event triggert de tab-swap + view-render.
   window.__autGoTabWithQuery = (drilldown) => {
     try {
       const raw = String(drilldown || '').trim();
       if (!raw) return;
       const [tabPart, queryPart] = raw.split('?');
       const tabLabel = tabPart; // reeds Kapitalized zoals in API-response
-      if (queryPart) {
-        // Zet querystring in de hash zonder de rest te breken. Hash-formaat
-        // is bv. "#automatiseringen/Overzicht"; we plakken '?<query>' erachter.
-        try {
-          const [hashBase] = String(location.hash || '#').split('?');
-          const newHash = hashBase + '?' + queryPart;
-          history.replaceState(null, '', newHash);
-        } catch (_) { /* history niet beschikbaar → skip */ }
+      // Module-slug uit huidige hash: '#automatiseringen/Overzicht' → 'automatiseringen'.
+      const cur = String(location.hash || '#').replace(/^#/, '').split('?')[0];
+      const module = cur.split('/')[0] || 'automatiseringen';
+      const newHash = '#' + module + '/' + tabLabel + (queryPart ? '?' + queryPart : '');
+      // Één set van location.hash → hashchange fires → app-shell doet tab-swap.
+      if (String(location.hash) !== newHash) {
+        location.hash = newHash;
+      } else if (window.DFO?.goTab) {
+        // Zelfde hash: forceer render (bv. bij hercache).
+        window.DFO.goTab(tabLabel);
       }
-      if (window.DFO?.goTab) window.DFO.goTab(tabLabel);
     } catch (e) { console.warn('[aut] goTabWithQuery fail:', e?.message); }
   };
 
@@ -2984,7 +2988,19 @@
     '9_vervallen':             { l: 'Vervallen',                 accent: 'muted',   ts: 'vervallen_at' },
     '10_provisioning_fout':    { l: 'Provisioning-fout',         accent: 'rose',    ts: 'reacted_at' },
   };
-  const _TG_ACCENT = _OPV_ACCENT; // hergebruik map uit opvolgingView-restyle
+  // BP3 v39 (2026-09-04) — FIX render-exception "Cannot read properties of
+  // undefined (reading 'c')". _OPV_ACCENT heeft opvolging-status-keys
+  // (open/wacht_inplanning/…), NIET tone-keys. _TG_BUCKETS.accent waardes
+  // zijn generieke tones (emerald/blue/…), dus hergebruik faalde met
+  // undefined. Eigen tone-map + expliciete DEFAULT_ACCENT als safety-net.
+  const _TG_ACCENT = {
+    emerald: { c: 'var(--emerald)', soft: 'var(--emerald-soft)', line: 'var(--emerald-line)' },
+    blue:    { c: 'var(--blue)',    soft: 'var(--blue-soft)',    line: 'var(--blue-line)' },
+    amber:   { c: 'var(--amber)',   soft: 'var(--amber-soft)',   line: 'var(--amber-line)' },
+    rose:    { c: 'var(--rose)',    soft: 'var(--rose-soft)',    line: 'var(--rose-line)' },
+    muted:   { c: 'var(--text-3)',  soft: 'var(--surface-2)',    line: 'var(--border)' },
+  };
+  const _TG_DEFAULT_ACCENT = _TG_ACCENT.muted;
 
   function _tgWachttijd(iso) {
     if (!iso) return null;
@@ -3020,7 +3036,7 @@
   }
   function _tgKolomHtml(bucketKey, byBucket, buckets, opts) {
     const meta = _TG_BUCKETS[bucketKey] || { l: bucketKey, accent: 'muted' };
-    const accent = _TG_ACCENT[meta.accent] || _TG_ACCENT.muted;
+    const accent = _TG_ACCENT[meta.accent] || _TG_DEFAULT_ACCENT;
     const count = byBucket[bucketKey];
     const rows = Array.isArray(buckets[bucketKey]) ? buckets[bucketKey] : [];
     const countTxt = (count == null) ? '—' : String(count);
