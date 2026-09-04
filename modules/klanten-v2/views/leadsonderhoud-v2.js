@@ -3310,6 +3310,7 @@
         afspraakHtml = `<div style="margin-top:14px;padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm)">
           <div style="font-weight:600;margin-bottom:4px;font-size:12.5px">Gekoppelde afspraak</div>
           <div style="font-size:12.5px">Ingepland op: <b>${esc(kortDt(s.afspraak.scheduled_at))}</b> — status: <b>${esc(s.afspraak.status || '—')}</b></div>
+          ${s.afspraak.annulering_reden ? `<div style="font-size:12px;margin-top:4px;color:var(--rose)">Reden annulering: <b>${esc(s.afspraak.annulering_reden)}</b>${s.afspraak.annulering_reden_code ? ` <span style="color:var(--text-3)">(${esc(s.afspraak.annulering_reden_code)})</span>` : ''}</div>` : ''}
           ${s.afspraak.zoom_join_url ? `<div style="font-size:12px;margin-top:4px"><a href="${esc(s.afspraak.zoom_join_url)}" target="_blank" rel="noopener" style="color:var(--brand)">Zoom-link openen ↗</a></div>` : ''}
           ${acties}
           ${s.appointment_id ? _lsAfspraakTestSendHtml(s.appointment_id) : ''}

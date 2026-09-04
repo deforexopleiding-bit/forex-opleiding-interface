@@ -21,7 +21,10 @@ export default async function handler(req, res) {
   const auth = checkSelfserviceSecret(req);
   if (!auth.ok) return res.status(auth.status).json(auth.body);
 
-  const token = ((req.body || {}).token || '').toString();
+  const body = req.body || {};
+  const token = (body.token || '').toString();
+  const reden     = typeof body.reden === 'string' ? body.reden.slice(0, 500).trim() || null : null;
+  const redenCode = typeof body.reden_code === 'string' ? body.reden_code.slice(0, 40).trim() || null : null;
   const r = await haalAfspraakViaToken(token);
   if (r.error) return res.status(r.status).json({ error: r.error });
   const appt = r.appt;
@@ -53,6 +56,15 @@ export default async function handler(req, res) {
   if (updErr) return res.status(500).json({ error: 'db-update: ' + updErr.message });
   if (!updated) return res.status(409).json({ error: 'niet-meer-annuleerbaar' });
 
+  // 2b) Reden opslaan (fail-soft; kolommen uit Fase 1).
+  if (reden || redenCode) {
+    try {
+      await supabaseAdmin.from('follow_up_appointments')
+        .update({ annulering_reden: reden, annulering_reden_code: redenCode })
+        .eq('id', appt.id);
+    } catch (_) { /* soft */ }
+  }
+
   // 3) Audit (fail-soft).
   try {
     await supabaseAdmin.from('follow_up_events_log').insert({
@@ -64,11 +76,7 @@ export default async function handler(req, res) {
   } catch (_) { /* niet blokkerend */ }
 
   // 4) Bevestiging (annulering) — fail-soft, achter AFSPRAAK_REMINDERS_LIVE.
-  //    reden wordt in Fase 3 door de self-service-pagina meegestuurd.
-  try {
-    const reden = typeof (req.body || {}).reden === 'string' ? req.body.reden : undefined;
-    await stuurAnnuleringBericht(appt.id, { reden });
-  } catch (_) { /* nooit blokkerend */ }
+  try { await stuurAnnuleringBericht(appt.id, { reden: reden || undefined }); } catch (_) { /* nooit blokkerend */ }
 
   return res.status(200).json({ ok: true });
 }
