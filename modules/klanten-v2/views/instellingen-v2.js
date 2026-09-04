@@ -5205,6 +5205,41 @@
       </div>
     </div>`;
   }
+  // ── Go-live import — dry-run (read-only) — per agenda de aankomende afspraken ──
+  const _golive = { busy: false, data: null, error: null };
+  window.__setGoliveImportDry = async () => {
+    _golive.busy = true; _golive.error = null; if (render) render();
+    const j = await tryFetch('golive-import-dry', '/api/admin-afspraak-golive-import?days=60');
+    _golive.busy = false;
+    if (j?.__error || j?.error) _golive.error = (j.__error || j.error);
+    else _golive.data = j;
+    if (render) render();
+  };
+  function _sysGoliveImportCard() {
+    const busy = _golive.busy, d = _golive.data, err = _golive.error;
+    const agendas = (d?.per_agenda || []).map((a) => {
+      const items = (a.afspraken || []).map((x) => `<div style="padding:2px 0;color:var(--text-2)">${esc(x.gepland_amsterdam || x.scheduled_at || '')} — ${esc(x.lead_name || '—')}</div>`).join('');
+      return `<div style="border-top:1px solid var(--border);padding:8px 0">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
+          <b style="font-size:12.5px">${esc(a.naam || a.calendar_id || '—')}</b>
+          <span style="font-size:12px;color:var(--text-3)">${a.aantal ?? 0} afspraken${a.events_error ? ` · <span style="color:var(--rose)">${esc(a.events_error)}</span>` : ''}</span>
+        </div>
+        ${items ? `<div style="margin-top:4px;font-size:11.5px">${items}</div>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">🚀 Go-live import — dry-run</div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.55;margin-bottom:10px">Toont read-only per GHL-agenda de aankomende afspraken (venster 60 dagen) die de verbrede reminder-flow zou importeren. Handig om vóór go-live te checken of er geen niet-kennismakings-afspraken tussen zitten. Importeert niets.</div>
+        <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setGoliveImportDry()">${busy ? "Ophalen…" : "🚀 Dry-run (60 dagen)"}</button>
+        ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-top:10px">${esc(err)}</div>` : ''}
+        ${d ? `<div style="margin-top:10px;font-size:12px">
+          <div style="color:var(--text-3);margin-bottom:2px">Agenda's: <b>${d.totaal_agenda ?? (d.per_agenda ? d.per_agenda.length : 0)}</b> · totaal aankomende afspraken: <b>${d.totaal_afspraken ?? 0}</b></div>
+          ${agendas || '<div style="padding:8px 0;color:var(--text-3)">Geen aankomende afspraken gevonden.</div>'}
+        </div>` : ''}
+      </div>
+    </div>`;
+  }
   function _sysBackfillContactsCard() {
     const busy = _ui.adminBackfillBusy;
     const d = _live.adminBackfillContacts.data;
@@ -5284,6 +5319,7 @@
       ${_sysBackfillContactsCard()}
       ${_sysGhlBackfillCard()}
       ${_sysAgendaCard()}
+      ${_sysGoliveImportCard()}
       ${_sysReportenCard()}
       ${_sysCronsCard()}
     </div>`;
