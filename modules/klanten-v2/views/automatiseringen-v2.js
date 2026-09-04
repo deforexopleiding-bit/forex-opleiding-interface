@@ -2537,59 +2537,88 @@
     const dagen = Math.floor(uren / 24);
     return dagen + 'd geleden';
   }
+  // BP3 v33 (2026-09-04) — RESTYLE PRESENTATIE (geen data/logica-wijziging).
+  // Kolom-accent per status. Alle kleuren via bestaande tokens; theme-aware
+  // (light+dark automatisch via tokens.css). Structuur blijft dezelfde velden
+  // aanraken — endpoints en fetch onaangeroerd.
+  const _OPV_ACCENT = {
+    open:              { c: 'var(--amber)',   soft: 'var(--amber-soft)',   line: 'var(--amber-line)' },
+    wacht_inplanning:  { c: 'var(--blue)',    soft: 'var(--blue-soft)',    line: 'var(--blue-line)' },
+    ingepland:         { c: 'var(--emerald)', soft: 'var(--emerald-soft)', line: 'var(--emerald-line)' },
+    gearchiveerd:      { c: 'var(--text-3)',  soft: 'var(--surface-2)',    line: 'var(--border)' },
+  };
+  function _opvInitialen(naam) {
+    const parts = String(naam || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
   function _opvTaskCard(t) {
-    const contact = [t.email, t.telefoon].filter(Boolean).join(' · ') || '—';
-    const badge = t.badge_label
-      ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.badge_label)}</div>`
-      : '';
+    const contact = [t.email, t.telefoon].filter(Boolean).join(' · ') || '';
     const wachttijd = t.status === 'wacht_inplanning'
       ? _opvWachttijd(t.agenda_doorgestuurd_at)
       : (t.status === 'open' ? _opvFmtDate(t.due) : (t.status === 'ingepland' ? _opvFmtDateTime(t.updated_at) : _opvFmtDateTime(t.gearchiveerd_at)));
     const bel = Number(t.bel_totaal || 0);
     const wa  = Number(t.wa_totaal || 0);
     const dagen = Number(t.bel_dagen || 0);
-    const pogingBadge = (bel + wa) > 0
-      ? `<span style="font-size:10.5px;padding:1px 6px;border-radius:8px;background:var(--surface);color:var(--text-3);border:1px solid var(--border);white-space:nowrap">${bel}× bel${dagen > 1 ? ` · ${dagen}d` : ''} · ${wa}× WA</span>`
-      : `<span style="font-size:10.5px;padding:1px 6px;border-radius:8px;background:var(--surface);color:var(--text-3);border:1px solid var(--border);white-space:nowrap">geen pogingen</span>`;
-    const laatste = t.laatste_poging
-      ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px">laatste: ${esc(_opvFmtDateTime(t.laatste_poging))}</div>`
-      : '';
     const redenLbl = t.reden ? String(t.reden).replaceAll('_', ' ') : '';
-    return `<div style="padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
-      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:3px">
-        <span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(t.naam || '—')}</span>
-        <span style="margin-left:auto;font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(wachttijd || '')}</span>
+    const accent = _OPV_ACCENT[t.status] || _OPV_ACCENT.open;
+    const initialen = _opvInitialen(t.naam);
+    const pogingBadge = (bel + wa) > 0
+      ? `<span title="Belpogingen × dagen · WhatsApp" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-2);border:1px solid var(--border);white-space:nowrap;font-variant-numeric:tabular-nums">📞 ${bel}${dagen > 1 ? ` · ${dagen}d` : ''} · 💬 ${wa}</span>`
+      : `<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);white-space:nowrap">geen pogingen</span>`;
+    const laatste = t.laatste_poging
+      ? `<span style="font-size:10.5px;color:var(--text-3);white-space:nowrap" title="Laatste poging op ${esc(_opvFmtDateTime(t.laatste_poging))}">· laatst ${esc(_opvFmtDateTime(t.laatste_poging))}</span>`
+      : '';
+    const badgeChip = t.badge_label
+      ? `<span title="${esc(t.badge_label)}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(t.badge_label)}</span>`
+      : '';
+    const redenChip = redenLbl
+      ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-2);border:1px solid var(--border);white-space:nowrap">${esc(redenLbl)}</span>`
+      : '';
+    return `<div class="opv-card" style="padding:11px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:8px;box-shadow:var(--shadow-xs);transition:box-shadow .12s, transform .12s"
+      onmouseover="this.style.boxShadow='var(--shadow)';this.style.transform='translateY(-1px)'"
+      onmouseout="this.style.boxShadow='var(--shadow-xs)';this.style.transform=''">
+      <div style="display:flex;align-items:flex-start;gap:9px">
+        <span aria-hidden="true" style="width:32px;height:32px;flex-shrink:0;border-radius:50%;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};display:inline-flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:600;letter-spacing:.02em">${esc(initialen)}</span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span style="font-size:13px;font-weight:600;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1">${esc(t.naam || '—')}</span>
+            <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap;font-variant-numeric:tabular-nums">${esc(wachttijd || '')}</span>
+          </div>
+          ${contact ? `<div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">${esc(contact)}</div>` : ''}
+        </div>
       </div>
-      <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px">${esc(contact)}</div>
-      ${badge}
+      ${(redenChip || badgeChip) ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px">${redenChip}${badgeChip}</div>` : ''}
       <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">
-        ${redenLbl ? `<span style="font-size:10.5px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-2);white-space:nowrap">${esc(redenLbl)}</span>` : ''}
-        ${pogingBadge}
+        ${pogingBadge}${laatste}
       </div>
-      ${laatste}
     </div>`;
   }
   function _opvKolomHtml(titel, statusKey, items, opts) {
     const o = opts || {};
     const count = Number(_opv.counts[statusKey] || 0);
+    const accent = _OPV_ACCENT[statusKey] || _OPV_ACCENT.open;
     const bodyHtml = (items && items.length)
       ? items.map(_opvTaskCard).join('')
       : (o.loadingHint
-        ? `<div style="font-size:12px;color:var(--text-3);padding:12px 4px;text-align:center">${esc(o.loadingHint)}</div>`
-        : `<div style="font-size:12px;color:var(--text-3);padding:16px 4px;text-align:center;font-style:italic">— leeg —</div>`);
+          ? `<div style="font-size:12px;color:var(--text-3);padding:20px 6px;text-align:center">${esc(o.loadingHint)}</div>`
+          : `<div style="font-size:12px;color:var(--text-3);padding:24px 6px;text-align:center;font-style:italic">Geen taken</div>`);
     const shownNote = (items && items.length && count > items.length)
-      ? `<div style="font-size:10.5px;color:var(--text-3);text-align:center;padding:6px 0">${items.length} van ${count} getoond</div>`
+      ? `<div style="font-size:10.5px;color:var(--text-3);text-align:center;padding:6px 0 2px">${items.length} van ${count} getoond</div>`
       : '';
     const extra = o.extraHtml || '';
-    return `<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;min-height:200px">
-      <div style="display:flex;align-items:center;gap:6px;padding:2px 4px 8px">
-        <span style="font-size:12px;font-weight:600;color:var(--text-1)">${esc(titel)}</span>
-        <span style="font-size:11px;padding:1px 8px;border-radius:10px;background:var(--surface);color:var(--text-2);border:1px solid var(--border);font-variant-numeric:tabular-nums">${count}</span>
-      </div>
-      <div style="flex:1;overflow-y:auto;max-height:60vh">${bodyHtml}</div>
-      ${shownNote}
-      ${extra}
-    </div>`;
+    // Kolom = kaart met dun gekleurd bovenrandje (accent per status). Interne
+    // scroll blijft binnen de kolom; hele Kanban past horizontaal in de wrapper.
+    return `<section aria-label="${esc(titel)}" style="display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-top:3px solid ${accent.c};border-radius:var(--r);box-shadow:var(--shadow-xs);min-width:260px;min-height:220px">
+      <header style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface-2);border-radius:var(--r) var(--r) 0 0">
+        <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:${accent.c};box-shadow:0 0 0 3px ${accent.soft};flex-shrink:0"></span>
+        <span style="font-size:12px;font-weight:600;color:var(--text-1);text-transform:uppercase;letter-spacing:.04em">${esc(titel)}</span>
+        <span style="margin-left:auto;font-size:11px;padding:2px 9px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};font-variant-numeric:tabular-nums;font-weight:600">${count}</span>
+      </header>
+      <div style="flex:1;overflow-y:auto;padding:10px;max-height:65vh">${bodyHtml}</div>
+      ${(shownNote || extra) ? `<footer style="padding:8px 12px;border-top:1px solid var(--border);background:var(--surface-2);border-radius:0 0 var(--r) var(--r)">${shownNote}${extra}</footer>` : ''}
+    </section>`;
   }
   function _opvStatusChip() {
     // Aan/uit-status uit /api/automations-status (state.data van Overzicht-tab
@@ -2623,42 +2652,51 @@
     const dek = kpi.dekking || {};
     const dis = kpi.discipline || {};
     const inpl = kpi.inplanning || {};
-    const kpiCard = (label, val, sub) => `<div style="flex:1;min-width:140px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
-      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">${esc(label)}</div>
-      <div style="font-size:20px;font-weight:600;color:var(--text-1);font-variant-numeric:tabular-nums">${esc(val)}</div>
-      <div style="font-size:11px;color:var(--text-3)">${esc(sub || '')}</div>
+    // BP3 v33 (2026-09-04) — KPI-tegels in kaart-stijl van de rest van de
+    // module. Accent-kleur per tegel wijst subtiel op de aard (rood = actie
+    // achter, groen = op koers, blauw = neutraal). Hover-lift.
+    const kpiTile = (label, val, sub, accentCss) => `<div class="opv-kpi" style="flex:1;min-width:150px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-xs);position:relative;overflow:hidden">
+      <div aria-hidden="true" style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${accentCss}"></div>
+      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">${esc(label)}</div>
+      <div style="font-size:22px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums;line-height:1.15;margin-top:2px">${esc(val)}</div>
+      <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${esc(sub || '')}</div>
     </div>`;
-    const kpiStrip = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-      ${kpiCard('Vandaag te bellen', dek.totaal ?? 0, `doel ${dek.doel ?? '—'} × per lead`)}
-      ${kpiCard('Volledig gebeld',   dek.volledig ?? 0, `${dek.aangeraakt ?? 0} aangeraakt`)}
-      ${kpiCard('Wacht op boeking',  inpl.wacht ?? 0, 'agenda doorgestuurd')}
-      ${kpiCard('Ingepland vandaag', inpl.ingepland ?? 0, 'via wacht-check')}
-      ${kpiCard('Bleef liggen',      dis.bleef_liggen ?? 0, 'due < vandaag')}
+    const kpiStrip = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      ${kpiTile('Vandaag te bellen', dek.totaal ?? 0,     `doel ${dek.doel ?? '—'} × per lead`, 'var(--amber)')}
+      ${kpiTile('Volledig gebeld',   dek.volledig ?? 0,   `${dek.aangeraakt ?? 0} aangeraakt`,  'var(--emerald)')}
+      ${kpiTile('Wacht op boeking',  inpl.wacht ?? 0,     'agenda doorgestuurd',                'var(--blue)')}
+      ${kpiTile('Ingepland vandaag', inpl.ingepland ?? 0, 'via wacht-check',                    'var(--emerald)')}
+      ${kpiTile('Bleef liggen',      dis.bleef_liggen ?? 0,'due < vandaag',                     'var(--rose)')}
     </div>`;
 
     const archiefKolomInner = _opv.archiefLoaded
       ? _opvKolomHtml('Gearchiveerd', 'gearchiveerd', _opv.archief.slice(0, 50))
       : _opvKolomHtml('Gearchiveerd', 'gearchiveerd', [], {
-          loadingHint: _opv.archiefLoading ? '⏳ Archief laden…' : 'Klik "Laad archief" om de laatste 50 te tonen',
-          extraHtml: _opv.archiefLoading ? '' : `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="window.__opvLoadArchief()">Laad archief</button>`,
+          loadingHint: _opv.archiefLoading ? '⏳ Archief laden…' : 'Nog niet geladen',
+          extraHtml: _opv.archiefLoading ? '' : `<div style="display:flex;justify-content:center"><button class="btn btn-ghost btn-sm" onclick="window.__opvLoadArchief()">Laad archief</button></div>`,
         });
 
-    return `<div style="padding:16px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
-        <div style="font-size:14px;font-weight:600">Opvolging · Dave-lijst</div>
-        ${_opvStatusChip()}
-        <div style="margin-left:auto;font-size:11.5px;color:var(--text-3)">Dag: ${esc(_opv.dag || '—')} · read-only</div>
-        <button class="btn btn-ghost btn-sm" onclick="window.__opvRetry()" title="Ververs">↻</button>
-      </div>
+    return `<div style="padding:18px 20px">
+      <header style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text-1);letter-spacing:-.01em">Opvolging · Dave-lijst</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Dag: ${esc(_opv.dag || '—')} · read-only</div>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          ${_opvStatusChip()}
+          <button class="btn btn-ghost btn-sm" onclick="window.__opvRetry()" title="Ververs" aria-label="Ververs">↻</button>
+        </div>
+      </header>
       ${kpiStrip}
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:10px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:12px;overflow-x:auto;padding-bottom:4px">
         ${_opvKolomHtml('Open',               'open',              _opv.taken)}
         ${_opvKolomHtml('Wacht op inplanning','wacht_inplanning',  _opv.wacht)}
         ${_opvKolomHtml('Ingepland',          'ingepland',         _opv.ingepland)}
         ${archiefKolomInner}
       </div>
-      <div style="margin-top:14px;padding:10px 12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;font-size:11.5px;color:var(--text-3)">
-        ℹ Fase 1 · alleen zien. Acties (markeer ingepland, archiveren, opnieuw plannen, taak toevoegen) komen in een latere fase — nu bewust niet.
+      <div style="margin-top:16px;padding:10px 14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:8px">
+        <span aria-hidden="true">ℹ</span>
+        <span>Fase 1 · alleen zien. Acties (markeer ingepland, archiveren, opnieuw plannen, taak toevoegen) komen in een latere fase.</span>
       </div>
     </div>`;
   }
