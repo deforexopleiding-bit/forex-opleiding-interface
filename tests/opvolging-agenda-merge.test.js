@@ -72,7 +72,11 @@ test('een bezet moment verdwijnt uit vrij en komt met naam terug', () => {
   });
   const dag = dagVan(dagen, '2026-09-08');
   assert.deepEqual(tijden(dag.vrij), ['09:00', '11:00'], '10:00 hoort niet meer vrij te zijn');
-  assert.deepEqual(dag.bezet, [{ tijd: '10:00', naam: 'Karel Jansen', status: 'scheduled' }]);
+  assert.equal(dag.bezet.length, 1);
+  assert.deepEqual(
+    { tijd: dag.bezet[0].tijd, naam: dag.bezet[0].naam, status: dag.bezet[0].status },
+    { tijd: '10:00', naam: 'Karel Jansen', status: 'scheduled' },
+  );
 });
 
 test('een afspraak die GHL niet kent houdt het moment alsnog bezet', () => {
@@ -114,6 +118,35 @@ test('twee afspraken op hetzelfde tijdstip worden één bezet blokje', () => {
   assert.equal(bezet[0].naam, 'Eerste');
 });
 
+test('een bezet moment draagt wat het callblok nodig heeft', () => {
+  // 'Calls van vandaag' hangt aan dezelfde bezette momenten: zonder Zoom-link
+  // en telefoonnummer zijn de knoppen daar niet te bouwen.
+  const dagen = voegAgendaSamen({
+    slots: [], ...WEEK,
+    afspraken: [{
+      id: 'ap-1', scheduled_at: '2026-09-08T08:00:00Z', status: 'scheduled',
+      lead_name: 'Karel Jansen', lead_email: 'karel@example.com', lead_phone: '+32470111222',
+      zoom_join_url: 'https://zoom.us/j/123',
+    }],
+  });
+  const b = dagVan(dagen, '2026-09-08').bezet[0];
+  assert.equal(b.appointment_id, 'ap-1');
+  assert.equal(b.telefoon, '+32470111222');
+  assert.equal(b.email, 'karel@example.com');
+  assert.equal(b.zoom_url, 'https://zoom.us/j/123');
+  assert.equal(b.start, '2026-09-08T08:00:00Z');
+});
+
+test('ontbrekende extra velden worden null, niet undefined of leeg', () => {
+  // De UI verbergt de Zoom- en belknop op null; undefined zou daar per ongeluk
+  // doorheen glippen bij een JSON-rondgang.
+  const dagen = voegAgendaSamen({
+    slots: [], afspraken: [appt('2026-09-08T08:00:00Z', 'Kaal')], ...WEEK,
+  });
+  const b = dagVan(dagen, '2026-09-08').bezet[0];
+  for (const k of ['telefoon', 'email', 'zoom_url']) assert.equal(b[k], null, k);
+});
+
 test('een afspraak zonder naam krijgt een leesbaar label', () => {
   const dagen = voegAgendaSamen({
     slots: [], afspraken: [appt('2026-09-08T08:00:00Z', '   ')], ...WEEK,
@@ -147,7 +180,10 @@ test('een afspraak laat op de avond blijft op de juiste dag staan', () => {
     slots: [], afspraken: [appt('2026-09-08T22:30:00Z', 'Laat')], ...WEEK,
   });
   assert.deepEqual(dagVan(dagen, '2026-09-08').bezet, []);
-  assert.deepEqual(dagVan(dagen, '2026-09-09').bezet, [{ tijd: '00:30', naam: 'Laat', status: 'scheduled' }]);
+  const laat = dagVan(dagen, '2026-09-09').bezet;
+  assert.equal(laat.length, 1);
+  assert.equal(laat[0].tijd, '00:30');
+  assert.equal(laat[0].naam, 'Laat');
 });
 
 test('delenInZone geeft de Amsterdamse dag en tijd, niet de UTC-versie', () => {

@@ -177,7 +177,10 @@ async function lees(req, res, supabase) {
     const totMs = zoneMiddernachtMs(tot) + 24 * 3600 * 1000;
     const { data, error } = await supabase
       .from('follow_up_appointments')
-      .select('id, lead_name, scheduled_at, status')
+      // lead_phone / lead_email / zoom_join_url zijn fase 3a: het blok
+      // 'Calls van vandaag' hangt aan dezelfde bezette momenten en heeft de
+      // Zoom-link en het nummer nodig. Extra kolommen, geen ander filter.
+      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url')
       .gte('scheduled_at', new Date(vanMs).toISOString())
       .lt('scheduled_at', new Date(totMs).toISOString())
       .order('scheduled_at', { ascending: true });

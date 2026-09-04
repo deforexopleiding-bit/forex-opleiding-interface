@@ -124,6 +124,16 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
         tijd,
         naam  : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
         status: status || 'scheduled',
+        // Fase 3a — het blok 'Calls van vandaag' leest dezelfde bezette
+        // momenten als Daves callrij, en heeft daarvoor meer nodig dan een
+        // naam: de Zoom-link om de call te openen, en telefoon/e-mail om te
+        // bellen, te appen en de bijbehorende taak te vinden. Ontbreken ze,
+        // dan blijven ze null en verbergt de UI die knoppen.
+        appointment_id: a.id || null,
+        telefoon      : a.lead_phone || null,
+        email         : a.lead_email || null,
+        zoom_url      : a.zoom_join_url || null,
+        start         : a.scheduled_at || null,
       });
     }
   }

@@ -197,6 +197,14 @@
     {
       "path": "/api/cron-lisa-conversations-poll",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron-opvolging-doorrol",
+      "schedule": "59 23 * * *"
+    },
+    {
+      "path": "/api/cron-opvolging-wacht-check",
+      "schedule": "0 * * * *"
     }
   ],
   "redirects": [

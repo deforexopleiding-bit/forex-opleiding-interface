@@ -17,9 +17,14 @@
 // stuurt de taak-id mee in zijn call-log), en 'Opnieuw inplannen' opent een
 // echte weekweergave uit de agenda in plaats van alleen een datumveld.
 //
+// Fase 3a voegt toe: het blok 'Calls van vandaag' boven de takenlijst, gevoed
+// uit dezelfde agenda als de weekweergave. Afronden van een call maakt hooguit
+// een taak aan; de afspraakrecords zelf blijven ongemoeid.
+//
 // Endpoints: /api/opvolging-taken, /api/opvolging-dag,
 //            /api/opvolging-taak-update, /api/opvolging-poging,
-//            /api/opvolging-agenda (fase 2)
+//            /api/opvolging-agenda (fase 2),
+//            /api/opvolging-taak-create (fase 3a)
 
 (function () {
   if (!window.DFO) { console.error('[opvolging-v2] DFO shell niet geladen.'); return; }
@@ -56,6 +61,11 @@
   // de pijlen op zes weken kunnen stoppen.
   const AGENDA_MAX_WEKEN = 6;
   const _agenda = { loading: false, error: null, data: null, key: null, offset: 0 };
+
+  // Fase 3a — de calls van de getoonde dag. Zelfde bron als de weekweergave
+  // (/api/opvolging-agenda), maar dan één dag: de bezette momenten daarin
+  // zijn Daves calls.
+  const _calls = { loading: false, error: null, data: null, key: null };
 
   async function haal(url) {
     try {
@@ -118,7 +128,27 @@
     render();
   }
 
-  const leegTakenCache = () => { _live.taken.data = null; _live.taken.key = null; _live.dash.data = null; _live.dash.key = null; _live.archief.data = null; };
+  async function fetchCalls(dag) {
+    const st = _calls;
+    // Zelfde regel als callsBlok hanteert: een mislukte poging voor deze dag
+    // telt óók als 'geladen', anders draait de melding in een lus rond.
+    if (st.loading || (st.key === dag && (st.data || st.error))) return;
+    st.loading = true; st.error = null; st.key = dag;
+    const j = await haal('/api/opvolging-agenda?van=' + dag + '&tot=' + dag);
+    st.loading = false;
+    if (j.__error) { st.error = j.__error; st.data = null; }
+    else { st.data = ((j.dagen || [])[0] || { bezet: [] }).bezet || []; }
+    render();
+  }
+
+  const leegTakenCache = () => {
+    _live.taken.data = null; _live.taken.key = null;
+    _live.dash.data = null; _live.dash.key = null;
+    _live.archief.data = null;
+    // De calls hangen aan dezelfde dag; een nieuwe taak verandert welke
+    // belknop een taak-koppeling krijgt.
+    _calls.data = null; _calls.key = null; _calls.error = null;
+  };
 
   async function post(url, body) {
     _ui.bezig = true;
@@ -224,6 +254,16 @@
 .opv .slot.bezet .w{display:block;font-size:10.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .opv .agleeg{font-size:11.5px;color:#a2a9b4;text-align:center;padding:10px 0}
 .opv .warn2{background:var(--o-ambs);border:1px solid #f0d9ac;color:#8a5300;border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:12px}
+/* Fase 3a — 'Calls van vandaag'. Zelfde rij-vorm als een taakkaart, maar met
+   het tijdstip vooraan: bij een callrij is het uur het eerste dat je zoekt. */
+.opv .call{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
+.opv .call .tijd{font-size:16px;font-weight:750;font-variant-numeric:tabular-nums;flex:0 0 52px;color:var(--o-acc)}
+.opv .call.geweest .tijd{color:#a2a9b4}
+.opv .call .who{flex:1;min-width:0}
+.opv .call .nm{font-weight:650;font-size:14.5px}
+.opv .call .sub{font-size:12.5px;color:var(--o-muted);margin-top:3px}
+.opv .call .act{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+.opv .obtn.zoom{background:var(--o-purs);border-color:#d9ccff;color:#5a2fd6}
 .opv .mb{padding:18px 22px 22px}
 .opv .opt{display:flex;align-items:center;gap:13px;width:100%;text-align:left;padding:14px 15px;border:1px solid var(--o-line);border-radius:13px;background:#fff;cursor:pointer;margin-bottom:9px;font-family:inherit}
 .opv .opt:hover{border-color:var(--o-acc);background:var(--o-accs)}
@@ -291,6 +331,72 @@
       '</div></div>';
   }
 
+  /** Cijfers van een nummer, 00-prefix weg — zelfde regel als de server. */
+  function telCijfers(s) {
+    const c = String(s == null ? '' : s).replace(/\D/g, '');
+    if (!c) return null;
+    return c.startsWith('00') ? (c.slice(2) || null) : c;
+  }
+
+  /**
+   * Bestaat er al een taak voor dit nummer? Dan krijgt de belknop de koppeling
+   * mee, zodat het gesprek meteen als poging bij die taak landt in plaats van
+   * pas via de match-op-nummer op de server.
+   */
+  function taakVoorNummer(tel) {
+    const doel = telCijfers(tel);
+    if (!doel || !_live.taken.data) return null;
+    const alles = (_live.taken.data.taken || []).concat(_live.taken.data.wacht || []);
+    const staart = doel.length >= 9 ? doel.slice(-9) : null;
+    return alles.find((t) => telCijfers(t.telefoon) === doel)
+      || (staart ? alles.find((t) => { const c = telCijfers(t.telefoon); return c && c.length >= 9 && c.slice(-9) === staart; }) : null)
+      || null;
+  }
+
+  /**
+   * Calls van vandaag — de bezette momenten uit de agenda, als werkrij.
+   *
+   * Bewust géén eigen administratie: dit blok leest de agenda en schrijft
+   * hooguit een taak. De afspraakrecords zelf en /api/follow-up-appointment-outcome
+   * blijven waar ze zijn; wat daar met de afspraak gebeurt is een andere
+   * administratie en die verandert hier niet.
+   */
+  function callsBlok(dag) {
+    // Let op de sleutel, niet op de aanwezigheid van data: bij het wisselen van
+    // dag staat de vorige rij er nog, en die onder de kop van vandaag tonen is
+    // erger dan even 'laden'.
+    const versGeladen = _calls.key === dag && (_calls.data || _calls.error);
+    if (!_calls.loading && !versGeladen) queueMicrotask(() => fetchCalls(dag));
+
+    const kop = '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#127909;</div>' +
+      '<h3>Calls van ' + (dag === vandaag() ? 'vandaag' : nl(dag)) + '</h3>' +
+      (_calls.key === dag && _calls.data ? '<span class="n">' + _calls.data.length + '</span>' : '') + '</div>';
+
+    if (!versGeladen) return kop + '<div class="empty">Agenda laden&hellip;</div>';
+    if (_calls.error) {
+      return kop + '<div class="warn2"><b>De agenda is nu niet bereikbaar.</b> ' + esc(_calls.error) +
+        ' De takenlijst hieronder werkt gewoon.</div>';
+    }
+    if (_calls.data.length === 0) return kop + '<div class="empty">Geen calls ingepland op deze dag.</div>';
+
+    const nuMs = Date.now();
+    return kop + _calls.data.map((c, i) => {
+      const geweest = c.start && new Date(c.start).getTime() < nuMs;
+      const taak = taakVoorNummer(c.telefoon);
+      const knoppen =
+        (c.zoom_url ? '<a class="obtn zoom" href="' + esc(c.zoom_url) + '" target="_blank" rel="noopener">&#127909; Zoom</a>' : '') +
+        (c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(' + i + ')">&#9742; Bellen</button>' : '') +
+        (c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(' + i + ')">&#128172; WhatsApp</button>' : '') +
+        '<button class="obtn" onclick="window.__opvCallAfrond(' + i + ')">Afronden &rarr;</button>';
+      return '<div class="call' + (geweest ? ' geweest' : '') + '">' +
+        '<div class="tijd">' + esc(c.tijd) + '</div>' +
+        '<div class="who"><div class="nm">' + esc(c.naam) + '</div>' +
+        '<div class="sub">' + esc(c.telefoon || 'geen nummer bekend') +
+          (taak ? ' &middot; staat al in je lijst' : '') + '</div></div>' +
+        '<div class="act">' + knoppen + '</div></div>';
+    }).join('');
+  }
+
   function weekbalk(dag) {
     const nu = vandaag();
     const d0 = new Date(nu + 'T12:00:00Z');
@@ -317,10 +423,13 @@
     if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
 
     let h = '<div class="opv">';
-    h += '<div class="info"><b>Fase 1.</b> De takenlijst is live. De spraakberichten, het nabelvenster en de calls van vandaag ' +
-      'volgen in fase 2 en 3, samen met de agendakoppeling en de WhatsApp-brug — die blokken staan hier bewust leeg ' +
-      'in plaats van met cijfers die nog niet gemeten worden.</div>';
+    h += '<div class="info">De spraakberichten en het nabelvenster hangen aan de WhatsApp-brug en volgen later; ' +
+      'die blokken staan hier bewust leeg in plaats van met cijfers die nog niet gemeten worden.</div>';
     h += weekbalk(dag);
+    // Boven de takenlijst: eerst wat er vaststaat vandaag, dan wat je zelf
+    // moet oppakken. De agenda hangt niet aan de takenlijst — valt hij weg,
+    // dan toont dit blok een melding en gaat de rest gewoon door.
+    h += callsBlok(dag);
 
     if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml();
     if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml();
@@ -507,6 +616,47 @@
         agendaBlok() + handmatig);
     }
 
+    // ── Fase 3a · een call afronden ────────────────────────────────────────
+    if (m.soort === 'call-afrond' || m.soort === 'call-uitkomst') {
+      const c = (_calls.data || [])[m.callIndex];
+      if (!c) return '';
+      if (m.soort === 'call-afrond') {
+        const b =
+          opt('&#127881;', 'var(--o-grns)', 'Klant geworden', 'Klaar. Er komt geen taak bij.', "window.__opvCallUitkomst('klant_geworden')") +
+          opt('&#129300;', 'var(--o-ambs)', 'Wil nog beslissen', 'Kies een dag en schrijf op waar hij over twijfelt.', "window.__opvCallUitkomst('wil_nog_beslissen')") +
+          opt('&#128683;', 'var(--o-reds)', 'No-show', 'Kwam niet opdagen. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('no_show')") +
+          opt('&#128533;', '#f0f1f4', 'Geen interesse', 'Schrijf op waarom. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_interesse')");
+        return scrim('Call met ' + esc(c.naam) + ' afronden', 'Wat is er uit dit gesprek gekomen?', b);
+      }
+
+      const u = m.uitkomst;
+      if (u === 'klant_geworden') {
+        return scrim('Klant geworden', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+          '<div class="info">Mooi. Er komt <b>geen taak</b> bij — deze is klaar.<br><br>' +
+          'De afspraak zelf blijft staan zoals hij staat; die administratie loopt via het afspraakscherm en verandert hier niet.</div>' +
+          '<button class="obtn" style="width:100%;margin-top:12px" onclick="window.__opvSluit()">Sluiten</button>');
+      }
+      if (u === 'geen_interesse') {
+        return scrim('Geen interesse', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+          '<div class="info">Er komt <b>geen taak</b> bij. Schrijf wel op waarom, dan weet de volgende het.</div>' +
+          '<textarea id="opv-cn" rows="3" placeholder="Waarom haakt hij af?"></textarea>' +
+          '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'geen_interesse\')">Vastleggen</button>');
+      }
+      if (u === 'no_show') {
+        return scrim('No-show', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+          '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call.</div>' +
+          '<textarea id="opv-cn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
+          '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'no_show\')">Zet terug in de lijst</button>');
+      }
+      // wil_nog_beslissen
+      return scrim('Wil nog beslissen', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="ronde">Op welke dag bel je hem terug?</div>' +
+        '<input type="date" id="opv-cd" value="' + dagPlus(vandaag(), 2) + '">' +
+        '<div class="ronde" style="margin-top:12px">Waar twijfelt hij over? Zonder die zin begint het volgende gesprek weer bij nul.</div>' +
+        '<textarea id="opv-cn" rows="3" placeholder="Bijvoorbeeld: wil het eerst met zijn vrouw bespreken"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'wil_nog_beslissen\')">Zet in de lijst</button>');
+    }
+
     if (m.soort === 'historiek') {
       body = '<ul class="tl">' + ((t.pogingen || []).map((p) =>
         '<li><span class="d">' + nl(iso(p.tijdstip)) + ' ' + uur(p.tijdstip) + '</span><span>' +
@@ -585,7 +735,12 @@
   // ═════════════════════════════════════════════════════════════════════════
   // HANDLERS
   // ═════════════════════════════════════════════════════════════════════════
-  window.__opvDag = (d) => { _ui.dagView = d; _live.taken.data = null; _live.taken.key = null; render(); };
+  window.__opvDag = (d) => {
+    _ui.dagView = d;
+    _live.taken.data = null; _live.taken.key = null;
+    _calls.data = null; _calls.key = null; _calls.error = null;
+    render();
+  };
   window.__opvHerlaad = () => { _live.taken.error = null; _live.dash.error = null; _live.archief.error = null; leegTakenCache(); render(); };
   window.__opvSluit = () => { _ui.modal = null; render(); };
   window.__opvWatNu = (id) => { _ui.modal = { soort: 'watnu', taakId: id }; render(); };
@@ -660,6 +815,88 @@
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
   };
 
+  // ── Fase 3a · de calls van vandaag ────────────────────────────────────────
+  const callOp = (i) => (_calls.data || [])[i] || null;
+
+  window.__opvCallBel = async (i) => {
+    const c = callOp(i); if (!c || !c.telefoon) return;
+    const sp = window.KlxSoftphone;
+    if (!sp || typeof sp.call !== 'function') { alert('De softphone is niet beschikbaar op deze pagina.'); return; }
+    // Bestaat er al een taak voor dit nummer, dan gaat de koppeling mee zodat
+    // het gesprek daar direct als poging landt. Zo niet, dan doet de server
+    // alsnog zijn match-op-nummer — hier hoeft niets bedacht te worden.
+    const taak = taakVoorNummer(c.telefoon);
+    try {
+      await sp.call(c.telefoon, {
+        displayName: c.naam || '',
+        ...(taak ? { opvolgingTaakId: taak.id } : {}),
+      });
+    } catch (e) {
+      console.warn('[opvolging-v2] bellen mislukt:', (e && e.message) || e);
+    }
+  };
+
+  window.__opvCallWa = (i) => {
+    const c = callOp(i); if (!c || !c.telefoon) { alert('Geen telefoonnummer bekend.'); return; }
+    window.open('https://wa.me/' + String(c.telefoon).replace(/[^0-9]/g, ''), '_blank', 'noopener');
+  };
+
+  window.__opvCallAfrond = (i) => { _ui.modal = { soort: 'call-afrond', callIndex: i }; render(); };
+  window.__opvCallUitkomst = (u) => {
+    const m = _ui.modal; if (!m) return;
+    _ui.modal = { soort: 'call-uitkomst', callIndex: m.callIndex, uitkomst: u };
+    render();
+  };
+
+  window.__opvCallBevestig = async (uitkomst) => {
+    const m = _ui.modal; if (!m) return;
+    const c = callOp(m.callIndex); if (!c) return;
+    if (_ui.bezig) return;
+
+    const nEl = document.getElementById('opv-cn');
+    const notitie = (nEl && nEl.value || '').trim();
+    if (uitkomst === 'geen_interesse' && !notitie) { alert('Schrijf eerst op waarom hij afhaakt.'); return; }
+    if (uitkomst === 'wil_nog_beslissen' && !notitie) { alert('Schrijf eerst op waar hij over twijfelt.'); return; }
+
+    let due = null;
+    if (uitkomst === 'wil_nog_beslissen') {
+      const dEl = document.getElementById('opv-cd');
+      due = dEl && dEl.value;
+      if (!due) { alert('Kies eerst een dag.'); return; }
+    }
+
+    // Geen interesse levert bewust GEEN taak op — net als bij een event dat
+    // zo eindigt. Een kaart die meteen dicht is komt met nul belpogingen in
+    // Afgerond terecht en krijgt daar het oordeel 'te weinig moeite', terwijl
+    // er nooit iets mee hoefde te gebeuren.
+    if (uitkomst === 'geen_interesse') {
+      _ui.modal = null; render();
+      return;
+    }
+
+    try {
+      await post('/api/opvolging-taak-create', {
+        naam       : c.naam,
+        email      : c.email || null,
+        telefoon   : c.telefoon || null,
+        reden      : uitkomst === 'no_show' ? 'no_show_call' : 'wil_nog_beslissen',
+        due        : uitkomst === 'no_show' ? vandaag() : due,
+        notitie    : notitie || null,
+        badge_label: 'Call ' + nl(_ui.dagView || vandaag()),
+        bron_ref   : { appointment_id: c.appointment_id || null, start: c.start || null },
+        // Alleen bij 'wil nog beslissen' een poging: dat gesprek is echt
+        // gevoerd. Een no-show is géén belpoging — er is niet gebeld, er kwam
+        // alleen niemand opdagen. Zou hij hier toch meetellen, dan staat de
+        // verse kaart vandaag op 1 van 2 terwijl Dave die persoon nog nooit aan
+        // de lijn heeft gehad, en klopt de dekking op het dashboard niet meer.
+        ...(uitkomst === 'no_show' ? {} : { poging_resultaat: 'gesproken, wil nog beslissen' }),
+      });
+      _ui.modal = null; leegTakenCache(); render();
+    } catch (e) {
+      alert('Niet gelukt: ' + (e.message || 'onbekende fout'));
+    }
+  };
+
   window.__opvWeek = (stap) => {
     const n = _agenda.offset + stap;
     if (n < 0 || n >= AGENDA_MAX_WEKEN) return;
@@ -702,5 +939,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');
 
-  console.debug('[opvolging-v2] fase 2 — takenlijst, dekking, archief en agenda');
+  console.debug('[opvolging-v2] fase 3a — takenlijst, calls van vandaag, dekking, archief en agenda');
 })();
