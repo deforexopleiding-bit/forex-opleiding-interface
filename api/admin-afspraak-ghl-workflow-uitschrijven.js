@@ -11,6 +11,8 @@
 //     AND EXISTS(opstartsessie_submissions.appointment_id = a.id)
 //
 // Modi:
+//   ?calendars=1      → READ-ONLY GET /calendars/?locationId=… (id/name/isActive;
+//                       hulp bij samenstellen AFSPRAAK_CALENDAR_IDS)
 //   ?list=1           → GET /workflows/?locationId=… (hulp bij vinden workflow-id)
 //   dry_run:true      → (DEFAULT) toon de lijst (contact-id, naam, tijd), verwijder niets
 //   dry_run:false     → per uniek contact DELETE /contacts/{id}/workflow/{workflowId}
@@ -78,6 +80,28 @@ export default async function handler(req, res) {
       return res.status(r.ok ? 200 : r.status).json({ ok: r.ok, workflows });
     } catch (e) {
       return res.status(502).json({ error: 'GHL workflows-list fout: ' + (e?.message || e) });
+    }
+  }
+
+  // ── ?calendars=1 — READ-ONLY agenda-lijst (hulp bij het samenstellen van
+  //    AFSPRAAK_CALENDAR_IDS voor de verbrede reminder-flow). Verandert niets. ──
+  if (String(q.calendars || '') === '1') {
+    if (!token) return res.status(503).json({ error: 'GHL-token ontbreekt (GHL_PIT_TOKEN/GHL_API_KEY)' });
+    const loc = process.env.GHL_LOCATION_ID;
+    if (!loc) return res.status(503).json({ error: 'GHL_LOCATION_ID ontbreekt' });
+    try {
+      const r = await fetch(`${GHL_BASE}/calendars/?locationId=${encodeURIComponent(loc)}`, {
+        headers: { Authorization: `Bearer ${token}`, Version: GHL_VERSION, Accept: 'application/json' },
+      });
+      const j = await r.json().catch(() => ({}));
+      const calendars = (j.calendars || j.data || []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        isActive: (c.isActive !== undefined ? c.isActive : c.is_active) ?? null,
+      }));
+      return res.status(r.ok ? 200 : r.status).json({ ok: r.ok, totaal: calendars.length, calendars });
+    } catch (e) {
+      return res.status(502).json({ error: 'GHL calendars-list fout: ' + (e?.message || e) });
     }
   }
 
