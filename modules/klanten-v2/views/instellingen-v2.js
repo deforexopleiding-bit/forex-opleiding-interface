@@ -5288,6 +5288,65 @@
       </div>
     </div>`;
   }
+  // ── Go-live import — ECHT uitvoeren (met bevestigingsdialoog) ──
+  const _goliveRun = { busy: false, data: null, error: null };
+  window.__setGoliveImportRun = () => {
+    openConfirm('ECHT UITVOEREN — importeert alle aankomende GHL-afspraken (alle agenda\'s, venster 60 dagen) in follow_up_appointments. Idempotent (op ghl_appointment_id), maar dit is een echte schrijf-actie. Draai eerst de dry-run hierboven ter controle. Doorgaan?', async () => {
+      _goliveRun.busy = true; _goliveRun.error = null; _goliveRun.data = null; if (render) render();
+      const j = await tryFetch('golive-import-run', '/api/admin-afspraak-golive-import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dry_run: false, days: 60 }),
+      });
+      _goliveRun.busy = false;
+      if (j?.__error || j?.error) _goliveRun.error = (j.__error || j.error); else _goliveRun.data = j;
+      if (render) render();
+    }, 'warn');
+  };
+  function _sysGoliveImportRunCard() {
+    const busy = _goliveRun.busy, d = _goliveRun.data, err = _goliveRun.error;
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--rose-line, #f5b4bc);border-radius:10px">
+      <div style="padding:12px 16px;background:var(--rose-soft);border-bottom:1px solid var(--rose-line, #f5b4bc)">
+        <div style="font-size:13px;font-weight:600;color:var(--rose)">🚀 Go-live import — ECHT uitvoeren</div>
+        <div style="font-size:11.5px;color:var(--rose);margin-top:2px">⚠ Echte actie: schrijft aankomende GHL-afspraken (alle agenda's, 60 dagen) in <code>follow_up_appointments</code>. Idempotent. Draai eerst de dry-run hierboven ter controle.</div>
+      </div>
+      <div style="padding:12px 16px">
+        <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__setGoliveImportRun()">${busy ? 'Bezig…' : '🚀 Import nu uitvoeren'}</button>
+        ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-top:10px">${esc(err)}</div>` : ''}
+        ${d ? `<div style="padding:10px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:12px;margin-top:10px">
+          <b>Klaar.</b> Geïmporteerd: ${d.geimporteerd ?? 0} · bestond al: ${d.bestond_al ?? 0} · calendar_id gevuld: ${d.calendar_id_gevuld ?? 0} · overgeslagen: ${d.overgeslagen ?? 0} · fouten: ${d.fouten ?? 0} (over ${d.totaal_agenda ?? 0} agenda's).
+        </div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  // ── Uitschrijven uit GHL-workflow — ECHT uitvoeren (met bevestigingsdialoog) ──
+  const _uitschrijfRun = { busy: false, data: null, error: null };
+  window.__setUitschrijfRun = () => {
+    openConfirm('ECHT UITVOEREN — verwijdert alle ingeschreven afspraak-contacten (alle agenda\'s) uit de GHL bevestiging/reminder-workflow (e2ca7a28-…). GHL stopt dan hun openstaande reminders. Doorgaan?', async () => {
+      _uitschrijfRun.busy = true; _uitschrijfRun.error = null; _uitschrijfRun.data = null; if (render) render();
+      const j = await tryFetch('uitschrijf-run', '/api/admin-afspraak-ghl-workflow-uitschrijven', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dry_run: false }),
+      });
+      _uitschrijfRun.busy = false;
+      if (j?.__error || j?.error) _uitschrijfRun.error = (j.__error || j.error); else _uitschrijfRun.data = j;
+      if (render) render();
+    }, 'warn');
+  };
+  function _sysUitschrijfRunCard() {
+    const busy = _uitschrijfRun.busy, d = _uitschrijfRun.data, err = _uitschrijfRun.error;
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--rose-line, #f5b4bc);border-radius:10px">
+      <div style="padding:12px 16px;background:var(--rose-soft);border-bottom:1px solid var(--rose-line, #f5b4bc)">
+        <div style="font-size:13px;font-weight:600;color:var(--rose)">🧹 Uitschrijven uit GHL-workflow — ECHT uitvoeren</div>
+        <div style="font-size:11.5px;color:var(--rose);margin-top:2px">⚠ Echte actie: verwijdert alle ingeschreven afspraak-contacten uit de GHL bevestiging/reminder-workflow, zodat GHL geen dubbele reminders meer stuurt. Doe dit vóór je onze flow live zet.</div>
+      </div>
+      <div style="padding:12px 16px">
+        <button class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''} style="background:var(--rose);border-color:var(--rose)" onclick="window.__setUitschrijfRun()">${busy ? 'Bezig…' : '🧹 Uitschrijven nu uitvoeren'}</button>
+        ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-top:10px">${esc(err)}</div>` : ''}
+        ${d ? `<div style="padding:10px 12px;background:var(--emerald-soft);color:var(--emerald);border-radius:6px;font-size:12px;margin-top:10px">
+          <b>Klaar.</b> Verwijderd: ${d.verwijderd ?? 0} · al weg: ${d.al_weg ?? 0} · fouten: ${d.fout ?? 0} (van ${d.totaal ?? 0} contacten).
+        </div>` : ''}
+      </div>
+    </div>`;
+  }
   function _sysReportenCard() {
     return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
       <div style="padding:12px 16px">
@@ -5320,6 +5379,8 @@
       ${_sysGhlBackfillCard()}
       ${_sysAgendaCard()}
       ${_sysGoliveImportCard()}
+      ${_sysGoliveImportRunCard()}
+      ${_sysUitschrijfRunCard()}
       ${_sysReportenCard()}
       ${_sysCronsCard()}
     </div>`;
