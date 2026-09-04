@@ -303,13 +303,14 @@ export async function createAppointmentForLead({
     zoom_join_url       : ghl?.zoom_join_url   ?? null,
     booking_source      : cleanSource,
     setter_user_id      : resolvedSetter,       // BP2: NULL bij bronnen zonder owner
+    ghl_calendar_id     : process.env.GHL_CALENDAR_ID || null, // afspraak-reminders: agenda-herkomst
   };
 
   // 42703 fail-soft: strip optionele kolommen die in oudere schema's
   // kunnen ontbreken. booking_source is toegevoegd in migratie 046,
   // setter_user_id in de BP2-migratie — als die nog niet gedraaid is,
   // stript de fail-soft-lus 'em uit de insert.
-  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'booking_source', 'setter_user_id'];
+  const OPTIONAL_KEYS = ['duration_minutes', 'voicememo_status', 'parent_appointment_id', 'booking_source', 'setter_user_id', 'ghl_calendar_id'];
   let attempt = { ...insertRow };
   let inserted = null;
   for (let i = 0; i < 3; i++) {
