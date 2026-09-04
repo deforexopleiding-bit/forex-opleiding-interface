@@ -201,6 +201,10 @@ export default async function handler(req, res) {
       timezone : 'Europe/Amsterdam',
       window   : { startDate, endDate },
       error    : 'onbeschikbaar',
+      // BP3 v25 (2026-09-03) — diagnostisch veld zodat de UI (en Vercel-logs
+      // via de frontend) direct zien WAT er mis is. NOOIT de waarde van
+      // env-vars zelf, alleen boolean "ontbreekt/geen".
+      reason   : { env_missing: { calendarId: !calendarId, token: !token } },
     });
   }
 
@@ -248,11 +252,19 @@ export default async function handler(req, res) {
       status: e?.ghlStatus || 'unknown',
       body  : e?.ghlBody   || String(e?.message || '').slice(0, 200),
     });
+    // BP3 v25 (2026-09-03) — diagnostisch veld voor de catch-branch. Kies
+    // ghl_status bij een non-2xx uit fetchGhlFreeSlots; anders ghl_exception
+    // met de exception-message (zonder secrets — throw's zetten geen token
+    // in de message).
+    const reason = {};
+    if (Number.isFinite(e?.ghlStatus)) reason.ghl_status = e.ghlStatus;
+    else if (e?.message) reason.ghl_exception = String(e.message).slice(0, 300);
     const payload = {
       slots    : [],
       timezone : 'Europe/Amsterdam',
       window   : { startDate, endDate },
       error    : 'onbeschikbaar',
+      reason,
     };
     if (debugAllowed) {
       payload.debug = {
