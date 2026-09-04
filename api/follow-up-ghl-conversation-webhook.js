@@ -13,6 +13,7 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
+import { markeerAfspraakBevestigd } from './_lib/afspraak-bevestig.js';
 import { sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
 
@@ -317,6 +318,17 @@ export default async function handler(req, res) {
   if (upsertErr) {
     console.error('[ghl-conversation-webhook] upsert error:', upsertErr.message);
     return res.status(500).json({ error: upsertErr.message });
+  }
+
+  // ── Additief (afspraak-flow): quick-reply "Ik ben erbij" → bevestigd_at op
+  //    de matchende geplande afspraak. Losstaand van de toegang-gate hieronder.
+  //    Fail-soft: mag de webhook nooit breken.
+  if (direction === 'inbound' && channel === 'whatsapp') {
+    try {
+      const _bevTelefoon = contact?.phone || contact?.phoneNumber || message?.from || null;
+      const _bevTekst = message?.body || message?.text || '';
+      await markeerAfspraakBevestigd(supabaseAdmin, { telefoon: _bevTelefoon, tekst: _bevTekst });
+    } catch (_) { /* mag de webhook nooit breken */ }
   }
 
   // ── DEEL D — Toegang-gate: inbound WA-reply → provisioning ────────────

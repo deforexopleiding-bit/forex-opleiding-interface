@@ -35,6 +35,7 @@ import { getClientIp } from './_lib/audit-customer.js';
 import { getModuleContextByPhoneNumberId } from './_lib/module-context.js';
 import { extractEmail, findCustomerByEmail } from './_lib/email-extractor.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
+import { markeerAfspraakBevestigd } from './_lib/afspraak-bevestig.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { runJoostSuggest } from './_lib/joost-suggest-core.js';
 import { runSimoneSuggest } from './_lib/simone-suggest-core.js';
@@ -1433,6 +1434,17 @@ export default async function handler(req, res) {
               // óók bij no-match kunnen zien wat er is gebeurd.
               if (insRes.inserted) {
                 const _tsIso = new Date().toISOString();
+
+                // Additief (afspraak-flow): quick-reply "Ik ben erbij" → zet
+                // bevestigd_at op de matchende geplande afspraak. Volledig
+                // losstaand van de toegang-gate hieronder. Fail-soft.
+                try {
+                  const _bevTekst = msg.text?.body || msg.button?.text
+                    || msg.interactive?.button_reply?.title
+                    || msg.interactive?.list_reply?.title || '';
+                  await markeerAfspraakBevestigd(supabaseAdmin, { telefoon: phoneE164Plus, tekst: _bevTekst });
+                } catch (_) { /* mag de webhook nooit breken */ }
+
                 const traceBase = {
                   ts: _tsIso,
                   source_endpoint: 'meta-inbox-webhook',

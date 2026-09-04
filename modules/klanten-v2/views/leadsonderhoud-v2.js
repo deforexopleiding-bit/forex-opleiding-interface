@@ -2954,6 +2954,16 @@
       } else {
         afsp = s.heeft_afspraak ? '<span style="color:var(--emerald);font-weight:600">✓ Geboekt</span>' : '<span style="color:var(--text-3)">–</span>';
       }
+      // Afspraak-reminders (Fase B) — bevestig-/reminder-status.
+      let bevCel;
+      if (s.bevestigd) {
+        bevCel = '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600" title="Lead bevestigde met &quot;Ik ben erbij&quot;">✓ Bevestigd</span>';
+      } else if (s.bevestiging_sent) {
+        const extra = s.reminders_verstuurd ? ` · ${s.reminders_verstuurd}×↻` : '';
+        bevCel = `<span style="color:var(--text-3);font-size:11px" title="Bevestiging verstuurd, nog geen reactie">✓ verstuurd${extra}</span>`;
+      } else {
+        bevCel = '<span style="color:var(--text-3)">–</span>';
+      }
       let saleCell;
       if (!s.sale_checked) {
         saleCell = '<span style="color:var(--text-3);font-weight:600;font-size:14px" title="Geen e-mail om te matchen">–</span>';
@@ -2983,6 +2993,7 @@
         <td style="padding:8px 10px;text-align:center">${akkoord}</td>
         <td style="padding:8px 10px">${esc(s.gekozen_slot || '—')}</td>
         <td style="padding:8px 10px">${afsp}</td>
+        <td style="padding:8px 10px">${bevCel}</td>
         <td style="padding:8px 10px;text-align:center">${saleCell}</td>
         <td style="padding:8px 10px"><button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="event.stopPropagation();window._lsOpenOpstartDetail('${esc(s.id)}')">Detail</button></td>
       </tr>`;
@@ -3037,6 +3048,7 @@
                 <th style="padding:8px 10px;text-align:center" title="€50-no-show-akkoord">Akkoord</th>
                 <th style="padding:8px 10px">Gekozen moment</th>
                 <th style="padding:8px 10px">Afspraak</th>
+                <th style="padding:8px 10px" title="Bevestiging/reminders van de afspraak-flow">Bevestiging</th>
                 <th style="padding:8px 10px;text-align:center" title="Sale = deal met status accepted/signed op klant-e-mail">Sale?</th>
                 <th style="padding:8px 10px"></th>
               </tr>

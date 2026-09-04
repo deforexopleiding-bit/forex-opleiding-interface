@@ -154,12 +154,13 @@ export default async function handler(req, res) {
     const HIDDEN_STATUSES = new Set(['cancelled', 'canceled', 'no_show', 'noshow', 'verwijderd', 'wacht_op_reschedule']);
     const apptIds = [...new Set((filteredRows || []).map((r) => r.appointment_id).filter(Boolean))];
     const apptStatusById = new Map();
+    const apptById = new Map();
     if (apptIds.length > 0) {
       const { data: appts } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, status')
+        .select('id, status, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
         .in('id', apptIds);
-      for (const a of (appts || [])) apptStatusById.set(a.id, a.status);
+      for (const a of (appts || [])) { apptStatusById.set(a.id, a.status); apptById.set(a.id, a); }
     }
     if (!includeCancelled) {
       filteredRows = filteredRows.filter((r) => {
@@ -279,6 +280,14 @@ export default async function handler(req, res) {
         // BP3 v12 (2026-09-03) — appointment_status voor UI-badges + acties.
         // Null als submission nog geen boeking heeft.
         appointment_status: r.appointment_id ? (apptStatusById.get(r.appointment_id) || null) : null,
+        // Afspraak-reminders (Fase B): bevestig-/reminder-status voor de UI-badge.
+        ...(function () {
+          const a = r.appointment_id ? apptById.get(r.appointment_id) : null;
+          if (!a) return { bevestigd: false, bevestiging_sent: false, reminders_verstuurd: 0 };
+          const remind = ['reminder_24u_at', 'reminder_2u_at', 'reminder_30m_at', 'zoom_5min_at']
+            .reduce((n, k) => n + (a[k] ? 1 : 0), 0);
+          return { bevestigd: !!a.bevestigd_at, bevestiging_sent: !!a.bevestiging_sent_at, reminders_verstuurd: remind };
+        })(),
         lead_id         : r.lead_id,
         // 3-way sale-indicator: sale_checked=false → niet-checkbare rij (–);
         // sale_checked=true + is_sale=true → sale gevonden (✓); is_sale=false
