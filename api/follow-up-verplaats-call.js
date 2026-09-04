@@ -5,6 +5,7 @@ import { updateGhlAppointmentTime } from './_lib/ghl-appointment.js';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc.js';
 import timezone from 'dayjs/plugin/timezone.js';
+import { stuurVerzetBericht } from './_lib/afspraak-status-notify.js';
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
@@ -129,6 +130,7 @@ export default async function handler(req, res) {
       voicememo_status: 'pending',
       owner_id: oldAppt.owner_id,
       parent_appointment_id: oldAppt.id,
+      ghl_calendar_id: oldAppt.ghl_calendar_id || null, // agenda-herkomst overnemen (reminders + verzet-bevestiging)
     })
     .select()
     .single();
@@ -174,6 +176,10 @@ export default async function handler(req, res) {
         changed_by: user.id,
       },
     });
+
+  // Bevestiging (verzet) op de nieuwe child-rij — fail-soft, achter live-flag,
+  // gescoped op ghl_calendar_id NOT NULL (overgenomen van de parent).
+  try { await stuurVerzetBericht(newAppt.id); } catch (_) { /* nooit blokkerend */ }
 
   return res.status(200).json({
     success: true,

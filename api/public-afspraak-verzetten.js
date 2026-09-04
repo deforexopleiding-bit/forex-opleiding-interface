@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { checkSelfserviceSecret, haalAfspraakViaToken } from './_lib/afspraak-selfservice.js';
 import { updateGhlAppointmentTime } from './_lib/ghl-appointment.js';
+import { stuurVerzetBericht } from './_lib/afspraak-status-notify.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -76,6 +77,11 @@ export default async function handler(req, res) {
       processed: true,
     });
   } catch (_) { /* niet blokkerend */ }
+
+  // 4) verzet_sent_at resetten (fail-soft; kolom uit Fase 1) zodat de notifier
+  //    voor deze nieuwe verzetting opnieuw kan bevestigen. Daarna bevestiging.
+  try { await supabaseAdmin.from('follow_up_appointments').update({ verzet_sent_at: null }).eq('id', appt.id); } catch (_) { /* soft */ }
+  try { await stuurVerzetBericht(appt.id); } catch (_) { /* nooit blokkerend */ }
 
   return res.status(200).json({ ok: true, new_token: newToken, scheduled_at: startIso });
 }
