@@ -121,11 +121,37 @@ export default async function handler(req, res) {
       };
     };
 
+    // BP3 v32 (2026-09-04) — optionele ingepland-lijst voor Kanban 4e kolom.
+    // Read-only, geen mutaties. Alleen 50 meest recent bijgewerkt.
+    const includeIngepland = String(q.include_ingepland || '') === '1';
+    let ingepland = [];
+    if (includeIngepland) {
+      const { data: ing, error: ingErr } = await supabaseAdmin
+        .from('opvolging_taken').select('*')
+        .eq('status', 'ingepland')
+        .order('updated_at', { ascending: false })
+        .limit(50);
+      if (ingErr) throw ingErr;
+      const ingIds = (ing || []).map((t) => t.id);
+      if (ingIds.length) {
+        const { data: ipg, error: ipgErr } = await supabaseAdmin
+          .from('opvolging_pogingen').select('*')
+          .in('taak_id', ingIds).order('tijdstip', { ascending: true });
+        if (ipgErr) throw ipgErr;
+        for (const p of ipg || []) {
+          if (!perTaak.has(p.taak_id)) perTaak.set(p.taak_id, []);
+          perTaak.get(p.taak_id).push(p);
+        }
+      }
+      ingepland = (ing || []).map(verrijk);
+    }
+
     return res.status(200).json({
       dag,
       vandaag,
       taken: (taken || []).map(verrijk),
       wacht: (wacht || []).map(verrijk),
+      ingepland,
     });
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Onbekende fout' });

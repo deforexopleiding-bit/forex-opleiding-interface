@@ -113,7 +113,21 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({ dag, vandaag, dekking, discipline, inplanning, gearchiveerd, week });
+    // BP3 v32 (2026-09-04) — by_status count-map voor Kanban-badges in
+    // #automatiseringen/Opvolging. Zelfde count:'exact',head:true patroon als
+    // leads-stats.js (regel 39-52). Vier lichte queries, elk indexed op status.
+    // Read-only, geen mutaties.
+    const statuses = ['open', 'wacht_inplanning', 'ingepland', 'gearchiveerd'];
+    const by_status = {};
+    for (const st of statuses) {
+      const { count } = await supabaseAdmin
+        .from('opvolging_taken')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', st);
+      by_status[st] = Number(count) || 0;
+    }
+
+    return res.status(200).json({ dag, vandaag, dekking, discipline, inplanning, gearchiveerd, week, by_status });
   } catch (e) {
     return res.status(500).json({ error: e.message || 'Onbekende fout' });
   }

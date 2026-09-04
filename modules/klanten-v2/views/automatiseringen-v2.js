@@ -2458,6 +2458,212 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // BP3 v32 (2026-09-04) — TAB: OPVOLGING · read-only Kanban
+  //
+  // Fase 1: alleen zien (geen writes). Hergebruikt bestaande endpoints:
+  //   - /api/opvolging-dag                            → KPI-strook + by_status counts
+  //   - /api/opvolging-taken?include_ingepland=1      → kaartjes per kolom (open/wacht/ingepland)
+  //   - /api/opvolging-taken?view=archief             → kaartjes gearchiveerd (lazy)
+  //   - /api/automations-status                       → hergebruikt state.data (aan/uit chip)
+  //
+  // Server-side gate blijft opvolging.module.access — deze endpoints hebben
+  // die al. Client-side geen extra RBAC-check: als de user de tab niet mag,
+  // krijgt 'ie 403 en de banner toont die.
+  // ═══════════════════════════════════════════════════════════════════════
+  const _opv = {
+    loading: false, error: null,
+    dag: null, taken: [], wacht: [], ingepland: [], archief: [],
+    counts: { open: 0, wacht_inplanning: 0, ingepland: 0, gearchiveerd: 0 },
+    kpi: null, archiefLoaded: false, archiefLoading: false,
+  };
+
+  async function fetchOpvolging() {
+    if (_opv.loading) return;
+    _opv.loading = true; _opv.error = null; render();
+    try {
+      const [jDag, jTaken] = await Promise.all([
+        tryFetch('opv-dag',   '/api/opvolging-dag'),
+        tryFetch('opv-taken', '/api/opvolging-taken?include_ingepland=1'),
+      ]);
+      if (!jDag || jDag.__error)     throw new Error(jDag?.__error   || 'Kon opvolging-dag niet laden');
+      if (!jTaken || jTaken.__error) throw new Error(jTaken?.__error || 'Kon opvolging-taken niet laden');
+      _opv.kpi       = jDag;
+      _opv.counts    = jDag.by_status || _opv.counts;
+      _opv.dag       = jDag.dag;
+      _opv.taken     = Array.isArray(jTaken.taken)     ? jTaken.taken     : [];
+      _opv.wacht     = Array.isArray(jTaken.wacht)     ? jTaken.wacht     : [];
+      _opv.ingepland = Array.isArray(jTaken.ingepland) ? jTaken.ingepland : [];
+    } catch (e) {
+      _opv.error = e?.message || String(e);
+    } finally {
+      _opv.loading = false;
+      render();
+    }
+  }
+  async function fetchOpvolgingArchief() {
+    if (_opv.archiefLoaded || _opv.archiefLoading) return;
+    _opv.archiefLoading = true; render();
+    try {
+      const j = await tryFetch('opv-archief', '/api/opvolging-taken?view=archief');
+      if (!j || j.__error) throw new Error(j?.__error || 'Kon archief niet laden');
+      _opv.archief = Array.isArray(j.archief) ? j.archief : [];
+      _opv.archiefLoaded = true;
+    } catch (e) {
+      _opv.error = e?.message || String(e);
+    } finally {
+      _opv.archiefLoading = false; render();
+    }
+  }
+  window.__opvRetry           = () => { _opv.error = null; fetchOpvolging(); };
+  window.__opvLoadArchief     = () => { fetchOpvolgingArchief(); };
+
+  function _opvFmtDate(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('nl-NL', { day: '2-digit', month: 'short' }); }
+    catch (_) { return String(iso); }
+  }
+  function _opvFmtDateTime(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+    catch (_) { return String(iso); }
+  }
+  function _opvWachttijd(iso) {
+    if (!iso) return null;
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    const uren = Math.floor(ms / 3600000);
+    if (uren < 1) return 'net';
+    if (uren < 48) return uren + 'u geleden';
+    const dagen = Math.floor(uren / 24);
+    return dagen + 'd geleden';
+  }
+  function _opvTaskCard(t) {
+    const contact = [t.email, t.telefoon].filter(Boolean).join(' · ') || '—';
+    const badge = t.badge_label
+      ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.badge_label)}</div>`
+      : '';
+    const wachttijd = t.status === 'wacht_inplanning'
+      ? _opvWachttijd(t.agenda_doorgestuurd_at)
+      : (t.status === 'open' ? _opvFmtDate(t.due) : (t.status === 'ingepland' ? _opvFmtDateTime(t.updated_at) : _opvFmtDateTime(t.gearchiveerd_at)));
+    const bel = Number(t.bel_totaal || 0);
+    const wa  = Number(t.wa_totaal || 0);
+    const dagen = Number(t.bel_dagen || 0);
+    const pogingBadge = (bel + wa) > 0
+      ? `<span style="font-size:10.5px;padding:1px 6px;border-radius:8px;background:var(--surface);color:var(--text-3);border:1px solid var(--border);white-space:nowrap">${bel}× bel${dagen > 1 ? ` · ${dagen}d` : ''} · ${wa}× WA</span>`
+      : `<span style="font-size:10.5px;padding:1px 6px;border-radius:8px;background:var(--surface);color:var(--text-3);border:1px solid var(--border);white-space:nowrap">geen pogingen</span>`;
+    const laatste = t.laatste_poging
+      ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:3px">laatste: ${esc(_opvFmtDateTime(t.laatste_poging))}</div>`
+      : '';
+    const redenLbl = t.reden ? String(t.reden).replaceAll('_', ' ') : '';
+    return `<div style="padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:3px">
+        <span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(t.naam || '—')}</span>
+        <span style="margin-left:auto;font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(wachttijd || '')}</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px">${esc(contact)}</div>
+      ${badge}
+      <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px">
+        ${redenLbl ? `<span style="font-size:10.5px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-2);white-space:nowrap">${esc(redenLbl)}</span>` : ''}
+        ${pogingBadge}
+      </div>
+      ${laatste}
+    </div>`;
+  }
+  function _opvKolomHtml(titel, statusKey, items, opts) {
+    const o = opts || {};
+    const count = Number(_opv.counts[statusKey] || 0);
+    const bodyHtml = (items && items.length)
+      ? items.map(_opvTaskCard).join('')
+      : (o.loadingHint
+        ? `<div style="font-size:12px;color:var(--text-3);padding:12px 4px;text-align:center">${esc(o.loadingHint)}</div>`
+        : `<div style="font-size:12px;color:var(--text-3);padding:16px 4px;text-align:center;font-style:italic">— leeg —</div>`);
+    const shownNote = (items && items.length && count > items.length)
+      ? `<div style="font-size:10.5px;color:var(--text-3);text-align:center;padding:6px 0">${items.length} van ${count} getoond</div>`
+      : '';
+    const extra = o.extraHtml || '';
+    return `<div style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;min-height:200px">
+      <div style="display:flex;align-items:center;gap:6px;padding:2px 4px 8px">
+        <span style="font-size:12px;font-weight:600;color:var(--text-1)">${esc(titel)}</span>
+        <span style="font-size:11px;padding:1px 8px;border-radius:10px;background:var(--surface);color:var(--text-2);border:1px solid var(--border);font-variant-numeric:tabular-nums">${count}</span>
+      </div>
+      <div style="flex:1;overflow-y:auto;max-height:60vh">${bodyHtml}</div>
+      ${shownNote}
+      ${extra}
+    </div>`;
+  }
+  function _opvStatusChip() {
+    // Aan/uit-status uit /api/automations-status (state.data van Overzicht-tab
+    // wordt gedeeld). Toont "actief" als beide crons in vercel.json staan.
+    const st = _live.status && _live.status.data;
+    if (!st) return '';
+    const crons = Array.isArray(st.crons) ? st.crons : [];
+    const doorrol = crons.find((c) => (c.endpoint || '').includes('cron-opvolging-doorrol'));
+    const wacht   = crons.find((c) => (c.endpoint || '').includes('cron-opvolging-wacht-check'));
+    const both = !!(doorrol && wacht);
+    return `<span title="Cron-scheduling in vercel.json" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${both ? 'var(--emerald-soft, rgba(16,185,129,.12))' : 'var(--surface-2)'};color:${both ? 'var(--emerald, #10B981)' : 'var(--text-3)'};font-weight:600;letter-spacing:.02em;white-space:nowrap">
+      ${both ? '● crons actief' : '○ cron-status onbekend'}
+    </span>`;
+  }
+  function opvolgingView() {
+    // Trigger fetches op eerste render.
+    if (!_opv.loading && !_opv.error && !_opv.dag) queueMicrotask(fetchOpvolging);
+    if (_live.status && !_live.status.loading && !_live.status.data && !_live.status.error) {
+      queueMicrotask(fetchStatus);
+    }
+    if (_opv.error && !_opv.dag) {
+      return `<div style="padding:22px;background:var(--rose-soft, rgba(220,53,90,.08));border:1px solid var(--rose-line, rgba(220,53,90,.4));color:var(--rose, #DC355A);border-radius:8px;margin:16px">
+        ⚠ ${esc(_opv.error)}
+        <button class="btn btn-ghost btn-sm" style="margin-left:10px" onclick="window.__opvRetry()">Opnieuw</button>
+      </div>`;
+    }
+    if (!_opv.dag && _opv.loading) {
+      return `<div style="padding:44px 16px;text-align:center;color:var(--text-3);font-size:13px">⏳ Opvolging laden…</div>`;
+    }
+    const kpi = _opv.kpi || {};
+    const dek = kpi.dekking || {};
+    const dis = kpi.discipline || {};
+    const inpl = kpi.inplanning || {};
+    const kpiCard = (label, val, sub) => `<div style="flex:1;min-width:140px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">${esc(label)}</div>
+      <div style="font-size:20px;font-weight:600;color:var(--text-1);font-variant-numeric:tabular-nums">${esc(val)}</div>
+      <div style="font-size:11px;color:var(--text-3)">${esc(sub || '')}</div>
+    </div>`;
+    const kpiStrip = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${kpiCard('Vandaag te bellen', dek.totaal ?? 0, `doel ${dek.doel ?? '—'} × per lead`)}
+      ${kpiCard('Volledig gebeld',   dek.volledig ?? 0, `${dek.aangeraakt ?? 0} aangeraakt`)}
+      ${kpiCard('Wacht op boeking',  inpl.wacht ?? 0, 'agenda doorgestuurd')}
+      ${kpiCard('Ingepland vandaag', inpl.ingepland ?? 0, 'via wacht-check')}
+      ${kpiCard('Bleef liggen',      dis.bleef_liggen ?? 0, 'due < vandaag')}
+    </div>`;
+
+    const archiefKolomInner = _opv.archiefLoaded
+      ? _opvKolomHtml('Gearchiveerd', 'gearchiveerd', _opv.archief.slice(0, 50))
+      : _opvKolomHtml('Gearchiveerd', 'gearchiveerd', [], {
+          loadingHint: _opv.archiefLoading ? '⏳ Archief laden…' : 'Klik "Laad archief" om de laatste 50 te tonen',
+          extraHtml: _opv.archiefLoading ? '' : `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="window.__opvLoadArchief()">Laad archief</button>`,
+        });
+
+    return `<div style="padding:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <div style="font-size:14px;font-weight:600">Opvolging · Dave-lijst</div>
+        ${_opvStatusChip()}
+        <div style="margin-left:auto;font-size:11.5px;color:var(--text-3)">Dag: ${esc(_opv.dag || '—')} · read-only</div>
+        <button class="btn btn-ghost btn-sm" onclick="window.__opvRetry()" title="Ververs">↻</button>
+      </div>
+      ${kpiStrip}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:10px">
+        ${_opvKolomHtml('Open',               'open',              _opv.taken)}
+        ${_opvKolomHtml('Wacht op inplanning','wacht_inplanning',  _opv.wacht)}
+        ${_opvKolomHtml('Ingepland',          'ingepland',         _opv.ingepland)}
+        ${archiefKolomInner}
+      </div>
+      <div style="margin-top:14px;padding:10px 12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:6px;font-size:11.5px;color:var(--text-3)">
+        ℹ Fase 1 · alleen zien. Acties (markeer ingepland, archiveren, opnieuw plannen, taak toevoegen) komen in een latere fase — nu bewust niet.
+      </div>
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // VIEW REGISTRATIE
   // ═══════════════════════════════════════════════════════════════════════
   window.DFO.VIEWS = window.DFO.VIEWS || {};
@@ -2465,8 +2671,9 @@
   window.DFO.VIEWS['automatiseringen/Events']         = eventsView;
   window.DFO.VIEWS['automatiseringen/Onboarding']     = onboardingView;
   window.DFO.VIEWS['automatiseringen/Leadsonderhoud'] = leadsonderhoudView;
+  window.DFO.VIEWS['automatiseringen/Opvolging']      = opvolgingView;
 
-  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud)');
+  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud/Opvolging)');
 
   // ═══════════════════════════════════════════════════════════════════════
   // DEEP-LINK HANDLERS · ?edit_ev_auto=<id> + ?edit_ls_traj=<id>
