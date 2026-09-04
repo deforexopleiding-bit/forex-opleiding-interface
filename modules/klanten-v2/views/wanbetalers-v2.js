@@ -3519,21 +3519,56 @@
       }
     } else if (c.channel === 'mail') {
       const body = (c.text || '').trim();
-      const subject = (c.subject || '').trim();
-      if (!subject) { c.error = 'Onderwerp is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+      const rawSubject = (c.subject || '').trim();
       if (!body)    { c.error = 'Bericht is leeg.';   try { window.DFO?.render?.(); } catch (_) {} return; }
       const ctx = _live.inbox.ctx.byConv[convId];
-      const toEmail = ctx?.customer?.email;
-      if (!toEmail) { c.error = 'Geen e-mailadres bij deze klant.'; try { window.DFO?.render?.(); } catch (_) {} return; }
-      const ok = await _askConfirm(`Mail versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> E-mail</div><div><b>Aan:</b> ${esc(toEmail)}</div><div><b>Onderwerp:</b> ${esc(subject)}</div><div style="margin-top:6px;padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px;white-space:pre-wrap">${esc(body)}</div>`, { okLabel: 'Ja, verstuur' });
+      // BP3 v28 (2026-09-03) — THREADING FIX. Als er een laatst-ontvangen mail
+      // in de thread is: reply erop (email_id → server zet In-Reply-To +
+      // References op de opgeslagen message_id), gebruik afzender als
+      // to-adres, en normaliseer 'Re: ' zodat er geen 'Re: Re: ...' ontstaat.
+      // Endpoint (email-send-v2) heeft de threading-logica al ingebouwd
+      // via `email_id` param (regel 133-165); we hoeven alleen de composite
+      // door te geven.
+      const items = asArr(_live.inbox.thread.byConv[convId]?.items);
+      const lastInboundMail = [...items].reverse().find((m) =>
+        (m.channel === 'mail' || m.kind === 'email')
+        && (m.direction === 'inbound' || m.direction === 'in')
+        && (m.email_id_composite || (m.mailbox && m.imap_uid))
+      );
+      const replyEmailId = lastInboundMail
+        ? (lastInboundMail.email_id_composite || `${lastInboundMail.mailbox}:${lastInboundMail.imap_uid}`)
+        : null;
+      const replyTo = lastInboundMail?.from_address || ctx?.customer?.email || null;
+      if (!replyTo) { c.error = 'Geen e-mailadres bij deze klant.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+      // Onderwerp: als origineel al 'Re: '/'RE: '/'re:' start, niet dubbel prefixen.
+      const reRe = /^\s*re\s*:\s*/i;
+      let subject;
+      if (rawSubject) {
+        subject = rawSubject;
+      } else if (lastInboundMail?.subject) {
+        subject = reRe.test(lastInboundMail.subject) ? lastInboundMail.subject : ('Re: ' + lastInboundMail.subject);
+      } else {
+        c.error = 'Onderwerp is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return;
+      }
+      const isReply = !!replyEmailId;
+      const ok = await _askConfirm(
+        `Mail versturen naar ${esc(custName)}?`,
+        `<div><b>Kanaal:</b> E-mail${isReply ? ' <span style="font-size:10.5px;padding:1px 6px;border-radius:8px;background:var(--emerald-soft, rgba(16,185,129,.12));color:var(--emerald, #10B981);font-weight:600">Reply</span>' : ''}</div>
+         <div><b>Aan:</b> ${esc(replyTo)}</div>
+         <div><b>Onderwerp:</b> ${esc(subject)}</div>
+         <div style="margin-top:6px;padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px;white-space:pre-wrap">${esc(body)}</div>`,
+        { okLabel: 'Ja, verstuur' }
+      );
       if (!ok) return;
       c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
-      const r = await apiPost('/api/email-send-v2', {
+      const payload = {
         from_mailbox: 'administratie',
-        to: toEmail,
+        to: replyTo,
         subject,
         text: body,
-      });
+      };
+      if (replyEmailId) payload.email_id = replyEmailId;
+      const r = await apiPost('/api/email-send-v2', payload);
       c.sending = false;
       if (!r.ok) { c.error = r.error || 'Mail-send faalde.'; try { window.DFO?.render?.(); } catch (_) {} return; }
       c.text = ''; c.subject = '';
