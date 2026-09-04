@@ -66,6 +66,33 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const token = ghlToken();
 
+  // ── ?calendars=1 — GHL-agenda's ophalen (read-only, additief). ──
+  //    UI-knop "Agenda's (kalenders) ophalen" gebruikt dit om per agenda
+  //    id / name / isActive + totaal te tonen. Zelfde RBAC + token-flow
+  //    als de bestaande ?list=1-tak. Raakt DB/incasso NIET.
+  if (String(q.calendars || '') === '1') {
+    if (!token) return res.status(503).json({ error: 'GHL-token ontbreekt (GHL_PIT_TOKEN/GHL_API_KEY)' });
+    const loc = process.env.GHL_LOCATION_ID;
+    if (!loc) return res.status(503).json({ error: 'GHL_LOCATION_ID ontbreekt' });
+    try {
+      const r = await fetch(`${GHL_BASE}/calendars/?locationId=${encodeURIComponent(loc)}`, {
+        headers: { Authorization: `Bearer ${token}`, Version: '2021-04-15', Accept: 'application/json' },
+      });
+      const j = await r.json().catch(() => ({}));
+      const raw = Array.isArray(j.calendars) ? j.calendars : (Array.isArray(j.data) ? j.data : []);
+      const calendars = raw.map((c) => ({
+        id: c.id || c.calendarId || null,
+        name: c.name || c.title || '—',
+        isActive: (c.isActive === true) || (c.status === 'active') || (c.enabled === true),
+      })).filter((c) => c.id);
+      return res.status(r.ok ? 200 : r.status).json({
+        ok: r.ok, calendars, total: calendars.length,
+      });
+    } catch (e) {
+      return res.status(502).json({ error: 'GHL calendars-list fout: ' + (e?.message || e) });
+    }
+  }
+
   // ── ?list=1 — workflow-lijst als hulp bij het vinden van het id ──
   if (String(q.list || '') === '1') {
     if (!token) return res.status(503).json({ error: 'GHL-token ontbreekt (GHL_PIT_TOKEN/GHL_API_KEY)' });

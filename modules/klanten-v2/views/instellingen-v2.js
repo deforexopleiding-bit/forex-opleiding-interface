@@ -4652,6 +4652,27 @@
     openConfirm('Sync alle templates vanaf Meta? Haalt actuele status/versies binnen.', () => waCall('__sync', '/api/admin-meta-templates-sync', 'POST', 'Sync', { business_account_id: _wa.moduleId }), 'warn');
   };
   const _waReg = { pnid: '', pin: '', busy: false, msg: '' };
+  // BP3 v34 (2026-09-04) — GHL-agenda's (kalenders) ophalen. Additieve
+  // read-only helper: haalt via /api/admin-afspraak-ghl-workflow-uitschrijven
+  // ?calendars=1 de agenda-lijst uit GHL en toont id/name/isActive + totaal.
+  // Zelfde RBAC als de bestaande workflows-list (admin.meta_templates.manage
+  // of super_admin). Wijzigt niks; alleen weergave.
+  const _ghlCals = { loading: false, error: null, data: null };
+  window.__setGhlCalsFetch = async () => {
+    if (_ghlCals.loading) return;
+    _ghlCals.loading = true; _ghlCals.error = null; _ghlCals.data = null;
+    render();
+    try {
+      const j = await window.KV.authedJson('/api/admin-afspraak-ghl-workflow-uitschrijven?calendars=1');
+      if (!j || j.error) throw new Error(j?.error || 'Ophalen mislukt');
+      _ghlCals.data = j;
+    } catch (e) {
+      _ghlCals.error = e?.message || String(e);
+    } finally {
+      _ghlCals.loading = false;
+      render();
+    }
+  };
   // Ronde-31 FIX 1: geen render() bij typen (focus behouden).
   window.__setWaRegPnid = (v) => { _waReg.pnid = String(v || ''); };
   window.__setWaRegPin  = (v) => { _waReg.pin  = String(v || ''); };
@@ -4670,6 +4691,56 @@
       if (render) render();
     }, 'warn');
   };
+  // BP3 v34 (2026-09-04) — GHL-agenda's kaart. Aparte helper zodat de
+  // bodyWhatsApp-render leesbaar blijft. Read-only: één knop → één GET →
+  // lijst tonen. Geen writes, geen state-mutaties buiten _ghlCals.
+  function _renderGhlCalsCard() {
+    let inner = '';
+    if (_ghlCals.loading) {
+      inner = `<div style="font-size:12.5px;color:var(--text-3);padding:6px 0">⏳ Agenda's ophalen…</div>`;
+    } else if (_ghlCals.error) {
+      inner = `<div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;color:var(--rose);font-size:12.5px">⚠ ${esc(_ghlCals.error)}</div>`;
+    } else if (_ghlCals.data && Array.isArray(_ghlCals.data.calendars)) {
+      const cals = _ghlCals.data.calendars;
+      if (!cals.length) {
+        inner = `<div style="font-size:12.5px;color:var(--text-3);padding:6px 0">Geen agenda's gevonden voor deze GHL-locatie.</div>`;
+      } else {
+        const rows = cals.map((c) => `<tr>
+          <td style="padding:6px 10px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-3)">${esc(c.id)}</td>
+          <td style="padding:6px 10px;font-size:12.5px;color:var(--text-1)">${esc(c.name || '—')}</td>
+          <td style="padding:6px 10px;text-align:center">${c.isActive
+            ? '<span style="font-size:10.5px;padding:1px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">actief</span>'
+            : '<span style="font-size:10.5px;padding:1px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-3);font-weight:600">inactief</span>'}</td>
+        </tr>`).join('');
+        inner = `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:6px">Totaal: <b>${cals.length}</b> agenda${cals.length === 1 ? '' : "'s"}</div>
+          <div style="overflow-x:auto;border:1px solid var(--border);border-radius:6px">
+            <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead style="background:var(--surface-2)">
+                <tr>
+                  <th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">ID</th>
+                  <th style="text-align:left;padding:8px 10px;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Naam</th>
+                  <th style="text-align:center;padding:8px 10px;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Status</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+      }
+    } else {
+      inner = `<div style="font-size:11.5px;color:var(--text-3)">Nog niet opgehaald. Klik hierboven om de lijst te tonen.</div>`;
+    }
+    return `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:600">Agenda's (GHL-kalenders)</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Read-only lookup — helpt bij het vinden van de juiste calendar-ID voor koppelingen.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" ${_ghlCals.loading ? 'disabled' : ''} onclick="window.__setGhlCalsFetch()">${_ghlCals.loading ? 'Bezig…' : '↻ Agenda\'s ophalen'}</button>
+      </div>
+      <div style="padding:12px 14px">${inner}</div>
+    </div>`;
+  }
+
   function bodyWhatsApp() {
     if (!_wa.fetched && !_wa.loading) queueMicrotask(() => fetchWaTemplates());
     const rows = _wa.items;
@@ -4801,6 +4872,7 @@
         </div>
         <div>${rowsHtml}</div>
       </div>
+      ${_renderGhlCalsCard()}
       ${_wa.hideNumberRegister ? '' : `<div class="card" style="background:var(--surface);border:1px solid var(--border);border-radius:10px">
         <div style="padding:12px 14px">
           <div style="font-size:13px;font-weight:600;margin-bottom:4px">WhatsApp-nummer registreren (éénmalig)</div>
