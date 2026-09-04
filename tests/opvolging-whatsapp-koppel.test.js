@@ -222,11 +222,35 @@ test('het lampje is het levensteken waar de timers op afgaan', () => {
 
 test('elke timer wordt opgeruimd bij sluiten, wisselen en unload', () => {
   const src = readFileSync(VIEW, 'utf8');
-  assert.match(src, /window\.__opvWaSluit[\s\S]{0,400}herstelWaTimers\(\)/, 'sluiten hoort de timers bij te stellen');
-  assert.match(src, /beforeunload['"], stopWaTimers/, 'bij het sluiten van het tabblad hoort alles uit');
-  // herstelWaTimers ruimt altijd eerst op voor het opnieuw start: twee
-  // intervallen op dezelfde taak is dubbel verkeer dat niemand terugziet.
-  assert.match(src, /stopWaTimers\(\);\s*\n\s*if \(wens\.statusMs\)/);
+  assert.match(src, /window\.__opvWaSluit[\s\S]{0,400}herstelWaTimers\(\)/,
+    'sluiten hoort de timers bij te stellen');
+  assert.match(src, /beforeunload['"], stopWaTimers/,
+    'bij het sluiten van het tabblad hoort alles uit');
+  // De shell kent geen afscheidshaak, dus wegnavigeren bereikt de intervallen
+  // alleen doordat elke tik zelf kijkt of het lampje er nog staat.
+  assert.match(src, /if \(!waGemount\(\)\) \{ stopWaTimers\(\); return; \}/,
+    'elke tik hoort zichzelf te stoppen als het lampje weg is');
+});
+
+test('herstelWaTimers stopt niet blind alles voor hij opnieuw start', () => {
+  // Dat deed hij wél, en daardoor werd de QR-timer van 20 s elke 5 s vernietigd
+  // door de statusronde en ging hij nooit af. Zie
+  // tests/opvolging-whatsapp-qr-verversing.test.js voor de meting; deze
+  // controle houdt de vorm tegen waarmee het terugkomt.
+  const src = readFileSync(VIEW, 'utf8');
+  const m = src.match(/function herstelWaTimers\(\) \{[\s\S]*?\n  \}/);
+  assert.ok(m, 'herstelWaTimers niet gevonden');
+
+  // De aanroep binnen de tik-guard mág — die stopt de boel als het lampje weg
+  // is. Wat niet mag is een kale `stopWaTimers();` als losse statement in de
+  // body: dat is de blanco reset die de QR-timer om zeep hielp.
+  const kaleReset = m[0].split('\n')
+    .map((r) => r.trim())
+    .some((r) => r === 'stopWaTimers();');
+  assert.equal(kaleReset, false,
+    'herstelWaTimers hoort per timer te beslissen (zie bepaalTimerActie), ' +
+    'niet alles te stoppen en opnieuw op te zetten');
+  assert.match(m[0], /zetTimer\(/, 'de herstelronde hoort per timer te gaan');
 });
 
 test('de koppelinstructie staat er voluit', () => {
