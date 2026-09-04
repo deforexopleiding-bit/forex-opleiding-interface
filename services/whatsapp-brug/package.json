@@ -1,0 +1,17 @@
+{
+  "name": "dfo-whatsapp-brug",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "WhatsApp-brug voor de opvolgmodule — draait op een eigen VPS, niet op Vercel.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
