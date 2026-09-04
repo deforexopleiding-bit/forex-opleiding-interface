@@ -21,7 +21,7 @@
 // VERFIJNING: nachtvenster 21:00–08:00 Amsterdam geldt ALLEEN voor bevestiging
 // + 24u. De 2u/30m/5-min reminders gaan altijd door (tijdkritisch t.o.v. call).
 //
-// SCOPE: alleen afspraken gekoppeld via opstartsessie_submissions.appointment_id.
+// SCOPE: alle afspraken uit een GHL-agenda-import (ghl_calendar_id NOT NULL).
 // De toegang_aanvragen-flow (cron-toegang-aanvragen) blijft ongemoeid.
 // 0 incasso-writes.
 
@@ -55,7 +55,10 @@ function isoMinuut(d) {
 
 const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, zoom_meeting_id, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at, bevestigd_at, afspraak_token';
 
-// Near-term geplande afspraken die aan een opstartsessie-submission hangen.
+// Near-term geplande afspraken uit een GHL-agenda-import (ghl_calendar_id NOT
+// NULL). Verbreed van alleen-opstartsessie naar ALLE afspraak-agenda's; rijen
+// van andere flows (Lisa/leadsonderhoud) hebben geen ghl_calendar_id en vallen
+// er dus buiten.
 async function haalKandidaten(nowMs) {
   const onder = new Date(nowMs - 15 * MIN).toISOString();
   const boven = new Date(nowMs + 25 * UUR).toISOString();
@@ -63,20 +66,12 @@ async function haalKandidaten(nowMs) {
     .from('follow_up_appointments')
     .select(APPT_COLS)
     .eq('status', 'scheduled')
+    .not('ghl_calendar_id', 'is', null)
     .gt('scheduled_at', onder)
     .lte('scheduled_at', boven)
     .limit(500);
   if (error) throw new Error('kandidaten-query: ' + error.message);
-  const rows = appts || [];
-  if (rows.length === 0) return [];
-  const ids = rows.map((r) => r.id);
-  const { data: subs, error: subErr } = await supabaseAdmin
-    .from('opstartsessie_submissions')
-    .select('appointment_id')
-    .in('appointment_id', ids);
-  if (subErr) throw new Error('submissions-scope-query: ' + subErr.message);
-  const gekoppeld = new Set((subs || []).map((s) => s.appointment_id));
-  return rows.filter((r) => gekoppeld.has(r.id));
+  return appts || [];
 }
 
 // Gerichte Zoom-backfill: vul zoom_join_url voor near-term rijen die 'm missen.
