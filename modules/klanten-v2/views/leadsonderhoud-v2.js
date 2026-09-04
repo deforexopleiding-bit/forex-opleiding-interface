@@ -547,7 +547,10 @@
     },
     // BP3 v6 (2026-09-02) — poll versneld van 18s naar 6s. document.hidden
     // en hash-check dempen de kost. Nieuwe berichten voelen instant.
-    poll: { handle: null, running: false, intervalMs: 6000 },
+    // BP3 v27 (2026-09-03) — poll van 6s → 20s. Bij 98+ leads deed elke tick
+    // een volledige fetch + hash + render — merkbaar laggy scroll/klik. 20s
+    // is snel genoeg voor "live gevoel" bij inbound WA/mail en 3.3x lichter.
+    poll: { handle: null, running: false, intervalMs: 20000 },
     // v=19: filter voor gesprekken-lijst (client-side over item.unread).
     filter: 'all',   // 'all' | 'unread' | 'read'
   };
@@ -759,6 +762,22 @@
   }
   function _lsInbToast(msg, tone) { try { window.KV && window.KV.toast && window.KV.toast(msg, { tone }); } catch (_) {} }
 
+  // BP3 v27 (2026-09-03) — helper die de scroll van #lsInbList bewaart
+  // tijdens DFO.render(). Elke render vervangt de hele view (inclusief de
+  // conv-lijst), dus zonder deze wrapper springt scrollTop naar 0 bij elke
+  // klik/load-thread/refetch. RAF omdat het nieuwe #lsInbList pas na
+  // render in de DOM staat.
+  function _lsInbSafeRender() {
+    const listEl = document.getElementById('lsInbList');
+    const savedTop = listEl ? listEl.scrollTop : 0;
+    if (window.DFO?.render) window.DFO.render();
+    if (savedTop <= 0) return;
+    requestAnimationFrame(() => {
+      const el = document.getElementById('lsInbList');
+      if (el) el.scrollTop = savedTop;
+    });
+  }
+
   /* ── Fetchers ────────────────────────────────────────────────────────── */
   async function _lsInbFetchConvs() {
     const st = _lsInb.convs;
@@ -766,13 +785,13 @@
     if (st.loading) return;
     st.loading = true; st.error = null;
     const seq = ++st._seq;
-    if (window.DFO?.render) window.DFO.render();
+    _lsInbSafeRender();
     const j = await tryFetch('ls-convs', '/api/leadsonderhoud-gesprekken');
     if (seq !== st._seq) return;
     st.loading = false;
     if (!j) { st.error = 'Kon gesprekken niet laden'; }
     else { st.items = asArr(j.items); st.fetched = true; }
-    if (window.DFO?.render) window.DFO.render();
+    _lsInbSafeRender();
   }
   function _lsInbResetThread() {
     _lsInb.thread.leadId = null;
@@ -792,7 +811,7 @@
     _lsInb.thread.items = [];
     _lsInb.thread.conversation = null;
     _lsInb.thread._paintedFor = null;
-    if (window.DFO?.render) window.DFO.render();
+    _lsInbSafeRender();
     const seq = ++_lsInb.thread._seq;
     // mark_as_read=true reset alleen de WA-teller (server: mail-gelezen laat de gedeelde
     // e-mailmodule met rust). Idempotent: 1 poging per open-actie.
@@ -804,7 +823,7 @@
     if (!j) {
       _lsInb.thread.loading = false;
       _lsInb.thread.error = 'Kon berichten niet laden';
-      if (window.DFO?.render) window.DFO.render();
+      _lsInbSafeRender();
       return;
     }
     // Item-shape normalisatie: 'in'/'out' -> 'inbound'/'outbound' + at-veld.
@@ -861,7 +880,7 @@
         rowEl.querySelectorAll('span[style*="background:var(--rose)"]').forEach(d => d.remove());
       }
     }
-    if (window.DFO?.render) window.DFO.render();
+    _lsInbSafeRender();
   }
 
   /* ── Thread paint (v=30 2026-08-30: shared chat-renderer) ─────────────
@@ -1487,14 +1506,9 @@
         _lsInb.convs.error = null;
         const postHash = _lsInbConvsHash();
         if (postHash !== preHash) {
-          const listEl = document.getElementById('lsInbList');
-          const savedScroll = listEl ? listEl.scrollTop : 0;
-          if (window.DFO?.render) window.DFO.render();
-          // RAF zodat de nieuwe #lsInbList in de DOM staat.
-          requestAnimationFrame(() => {
-            const el = document.getElementById('lsInbList');
-            if (el) el.scrollTop = savedScroll;
-          });
+          // BP3 v27 — gebruik gedeelde safe-render helper (zelfde gedrag,
+          // 1 plek onderhoud). Voorkomt scroll-reset bij poll-refresh.
+          _lsInbSafeRender();
         }
       }
       if (_lsInb.thread.leadId) {
