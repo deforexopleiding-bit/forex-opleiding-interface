@@ -129,6 +129,9 @@
   const _live = {
     overview:    { loading: false, error: null, data: null },
     payouts:     { loading: false, error: null, data: null },
+    // BP3 v31 (2026-09-04) — per payout_id: {loading, error, data} voor
+    // Uitbetalingen-accordion. Lazy fetch bij eerste open, cache per rij.
+    payoutDetail: { byId: {} },
     travel:      { loading: false, error: null, data: null, key: null },
     travelMonths:{ loading: false, error: null, data: null }, // dropdown: recente maanden + editability
     certs:       { loading: false, error: null, data: null },
@@ -1145,6 +1148,122 @@
   /* ═══════════════════════════════════════════════════════════════════════
      VIEW 4 — Uitbetalingen
      ═══════════════════════════════════════════════════════════════════════ */
+
+  // BP3 v31 (2026-09-04) — accordion voor Uitbetalingen-rijen. Vervangt de
+  // vorige H.table (leverde alleen strings zonder per-row-hooks). Elke rij
+  // is klikbaar (muis + toetsenbord) en toggle't een verborgen detail-rij
+  // die lazy /api/mentor-payout-detail fetcht en via de gedeelde helper
+  // window.MentorPayoutRender.renderLinesTableHtml (mode='mentor') rendert.
+  // Server-side dual-gate in mentor-payout-detail.js (mentor mag alleen
+  // eigen goedgekeurd/uitbetaald) blijft de scope handhaven.
+
+  function _uitbetalingenTableHtml(rows) {
+    const trs = rows.map((p) => {
+      const pid  = String(p.id || '');
+      const pidJs = pid.replace(/'/g, "\\'");
+      const bag  = _live.payoutDetail.byId[pid] || { loading: false, error: null, data: null, open: false };
+      _live.payoutDetail.byId[pid] = bag; // materialiseer voor renders daarna
+      const isOpen = !!bag.open;
+      const caret  = isOpen ? '▾' : '▸';
+      // Detail-body per state.
+      let detailInner;
+      if (bag.loading) {
+        detailInner = `<div style="color:var(--text-3);font-size:12.5px;padding:8px 0">⏳ Opbouw laden…</div>`;
+      } else if (bag.error) {
+        detailInner = `<div style="padding:10px 12px;background:var(--rose-soft, rgba(220,53,90,.08));border:1px solid var(--rose-line, rgba(220,53,90,.4));border-radius:6px;color:var(--rose, #DC355A);font-size:12.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span>⚠ Opbouw ophalen mislukt: ${esc(bag.error)}</span>
+          <button type="button" onclick="window.__verdPayoutRetry('${pidJs}')" style="padding:3px 10px;font-size:11.5px;border:1px solid var(--rose-line, rgba(220,53,90,.4));background:var(--surface);color:var(--rose, #DC355A);border-radius:5px;cursor:pointer;font-family:inherit">Opnieuw</button>
+        </div>`;
+      } else if (bag.data) {
+        const R = window.MentorPayoutRender;
+        if (!R || typeof R.renderLinesTableHtml !== 'function') {
+          detailInner = `<div style="color:var(--rose, #DC355A);font-size:12.5px">MentorPayoutRender helper niet geladen.</div>`;
+        } else {
+          const metaLine = [];
+          if (bag.data.approved_at) metaLine.push(`Goedgekeurd op <strong>${esc(fmtDate(bag.data.approved_at))}</strong>`);
+          if (bag.data.paid_at)     metaLine.push(`Uitbetaald op <strong>${esc(fmtDate(bag.data.paid_at))}</strong>`);
+          if (bag.data.generated_at) metaLine.push(`Gegenereerd op <strong>${esc(fmtDate(bag.data.generated_at))}</strong>`);
+          const metaHtml = metaLine.length
+            ? `<div style="font-size:11.5px;color:var(--text-3);margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap">${metaLine.join(' · ')}</div>`
+            : '';
+          detailInner = metaHtml + R.renderLinesTableHtml(bag.data, { mode: 'mentor', esc, fmtEUR: eur });
+        }
+      } else {
+        detailInner = `<div style="color:var(--text-3);font-size:12.5px;padding:8px 0">⏳ Opbouw laden…</div>`;
+      }
+      const detailStyle = 'padding:12px 16px;background:var(--surface-2);border-top:1px solid var(--border)';
+      return `
+        <tr data-payout-id="${esc(pid)}" tabindex="0" role="button" aria-expanded="${isOpen ? 'true' : 'false'}"
+            onclick="window.__verdPayoutToggle('${pidJs}')"
+            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.__verdPayoutToggle('${pidJs}');}"
+            style="cursor:pointer">
+          <td><span style="display:inline-block;width:12px;color:var(--text-3);margin-right:6px">${caret}</span><span class="cell-main">${fmtMonth(p.period_month)}</span></td>
+          <td class="r optional"><span class="money">${eur(Number(p.total_excl) || 0)}</span></td>
+          <td class="r optional"><span class="money">${eur(Number(p.btw_amount) || 0)}</span></td>
+          <td class="r"><span class="money"><b>${eur(Number(p.total) || 0)}</b></span></td>
+          <td class="optional"><span style="color:var(--text-3)">${fmtDate(p.paid_at)}</span></td>
+          <td>${payoutPill(p.status)}</td>
+        </tr>
+        <tr class="verd-po-detail" data-detail-for="${esc(pid)}" ${isOpen ? '' : 'hidden'}>
+          <td colspan="6" style="${detailStyle}">${detailInner}</td>
+        </tr>`;
+    }).join('');
+    return `<div class="tbl-wrap"><table><thead><tr>
+      <th>Periode</th>
+      <th class="r optional">Totaal excl.</th>
+      <th class="r optional">BTW</th>
+      <th class="r">Totaal incl.</th>
+      <th class="optional">Uitbetaald op</th>
+      <th>Status</th>
+    </tr></thead><tbody>${trs}</tbody></table></div>`;
+  }
+
+  async function _verdFetchPayoutDetail(payoutId) {
+    const bag = _live.payoutDetail.byId[payoutId] = _live.payoutDetail.byId[payoutId] || { loading: false, error: null, data: null, open: false };
+    if (bag.loading) return;
+    bag.loading = true; bag.error = null;
+    render();
+    try {
+      const j = await tryFetch('mentor-payout-detail:' + payoutId, '/api/mentor-payout-detail?payout_id=' + encodeURIComponent(payoutId));
+      if (!j || j.__error) throw new Error(j?.__error || 'Kon opbouw niet laden');
+      if (!j.payout)       throw new Error('Lege response van server');
+      bag.data = j.payout;
+      bag.loading = false;
+    } catch (e) {
+      bag.error = e?.message || String(e);
+      bag.loading = false;
+      bag.data = null;
+    }
+    render();
+  }
+
+  window.__verdPayoutToggle = (payoutId) => {
+    if (!payoutId) return;
+    const map = _live.payoutDetail.byId;
+    const bag = map[payoutId] = map[payoutId] || { loading: false, error: null, data: null, open: false };
+    const willOpen = !bag.open;
+    // Accordion: sluit alle andere.
+    if (willOpen) {
+      for (const other of Object.keys(map)) {
+        if (other !== payoutId && map[other] && map[other].open) map[other].open = false;
+      }
+    }
+    bag.open = willOpen;
+    render();
+    if (willOpen && !bag.data && !bag.loading && !bag.error) {
+      queueMicrotask(() => _verdFetchPayoutDetail(payoutId));
+    }
+  };
+
+  window.__verdPayoutRetry = (payoutId) => {
+    if (!payoutId) return;
+    const map = _live.payoutDetail.byId;
+    const bag = map[payoutId];
+    if (!bag) return;
+    bag.error = null; bag.data = null; bag.loading = false;
+    queueMicrotask(() => _verdFetchPayoutDetail(payoutId));
+  };
+
   function uitbetalingenView() {
     if (!_live.payouts.loading && !_live.payouts.data && !_live.payouts.error) queueMicrotask(fetchPayouts);
     if (_live.payouts.error && !_live.payouts.data) return errBlk(_live.payouts.error, 'window.__verdRetryPayouts()') + renderConfirmModal();
@@ -1170,20 +1289,7 @@
         <button class="btn ${py === '25' ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="window.__verdSetPy('25')">2025</button>
       </div>`,
     ])}
-    ${rows.length ? H.table(
-      [
-        { l: 'Periode' }, { l: 'Totaal excl.', cls: 'r optional' }, { l: 'BTW', cls: 'r optional' },
-        { l: 'Totaal incl.', cls: 'r' }, { l: 'Uitbetaald op', cls: 'optional' }, { l: 'Status' },
-      ],
-      rows.map((p) => [
-        `<span class="cell-main">${fmtMonth(p.period_month)}</span>`,
-        `<span class="money">${eur(Number(p.total_excl) || 0)}</span>`,
-        `<span class="money">${eur(Number(p.btw_amount) || 0)}</span>`,
-        `<span class="money"><b>${eur(Number(p.total) || 0)}</b></span>`,
-        `<span style="color:var(--text-3)">${fmtDate(p.paid_at)}</span>`,
-        payoutPill(p.status),
-      ]),
-    ) : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen uitbetalingen in ${yr}. Concept + open zijn finance-only.</div>`}
+    ${rows.length ? _uitbetalingenTableHtml(rows) : `<div style="padding:40px 20px;text-align:center;color:var(--text-3);font-size:13px">Geen uitbetalingen in ${yr}. Concept + open zijn finance-only.</div>`}
     ${renderConfirmModal()}`;
   }
 

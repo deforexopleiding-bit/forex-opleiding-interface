@@ -1033,16 +1033,11 @@
     </div>`;
   }
 
-  // Per payout_id gecachet detail; voorkomt re-fetch bij heen-en-weer klappen.
-  const _payoutDetailCache = new Map();
-  // BP3 v29 (2026-09-03) — window-exposed retry voor de foutstate-knop
-  // (IIFE-scope maakt de inline-onclick niet-direct-callable).
-  window.__mentorPayoutRetry = function (payoutId, idx) {
-    _payoutDetailCache.delete(payoutId);
-    // Close-then-open: eerste call sluit, tweede heropent + fetcht opnieuw.
-    togglePayoutDetail(payoutId, idx);
-    togglePayoutDetail(payoutId, idx);
-  };
+  // BP3 v31 (2026-09-04) — Payouts-accordion opgeruimd. Deze view is niet
+  // meer de canonieke plek voor "Mijn uitbetalingen → opbouw" — dat is nu
+  // /modules/klanten-v2/#verdiensten → tab Uitbetalingen (verdiensten-v2.js
+  // v14, hergebruikt window.MentorPayoutRender). Hier tonen we nog wel de
+  // vlakke tabel voor legacy-navigatie, maar zonder klikbare toggle.
 
   function renderPayouts(payouts) {
     const wrap = document.getElementById('payoutsWrap');
@@ -1050,154 +1045,34 @@
       wrap.innerHTML = `<div class="empty-state"><i class="ti ti-receipt-off"></i>Nog geen uitbetalings-batches.</div>`;
       return;
     }
-    // Status-badges: concept/open zien mentors niet (gefilterd in self-list);
-    // hier ontvangen we alleen goedgekeurd + uitbetaald.
     const statusBadge = (st) => {
       if (st === 'uitbetaald')  return '<span class="badge badge-blue">Uitbetaald</span>';
       if (st === 'goedgekeurd') return '<span class="badge badge-green">Goedgekeurd</span>';
       return '<span class="badge badge-grey">' + esc(st || '—') + '</span>';
     };
-    const rows = payouts.map((p, idx) => {
-      // Bij goedgekeurde rapporten een CTA: factuur insturen voor het bedrag incl. btw.
-      // Bij uitbetaalde rapporten verdwijnt deze CTA (status !== 'goedgekeurd').
+    const rows = payouts.map((p) => {
       const cta = (p.status === 'goedgekeurd')
         ? `<div style="margin-top:4px;font-size:11.5px;color:var(--text-dim)">
              📨 Stuur je factuur voor dit bedrag (<strong>${fmtEUR(p.total)}</strong> incl. btw).
            </div>`
         : '';
-      const hasId = !!p.id;
-      const toggle = hasId
-        ? `<button type="button" class="payout-toggle" data-payout-id="${esc(p.id)}" data-idx="${idx}"
-                   style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;font-size:11.5px;font-weight:600;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit;margin-top:6px">
-             <span class="payout-toggle-caret" id="po-caret-${idx}">▸</span> Bekijk opbouw
-           </button>` : '';
       return `
         <tr>
-          <td>${esc(p.period_month || '—')}${cta}${toggle}</td>
+          <td>${esc(p.period_month || '—')}${cta}</td>
           <td class="num">${fmtEUR(p.total)}</td>
           <td>${statusBadge(p.status)}</td>
           <td>${fmtDateNL(p.created_at)}</td>
           <td>${p.paid_at ? fmtDateNL(p.paid_at) : '—'}</td>
-        </tr>
-        <tr class="payout-detail-row" id="po-detail-${idx}" hidden>
-          <td colspan="5" style="background:rgba(10,47,99,0.025);padding:14px 18px">
-            <div id="po-detail-body-${idx}" style="font-size:12.5px;color:var(--text-faint)">Laden…</div>
-          </td>
         </tr>`;
     }).join('');
     wrap.innerHTML = `
+      <div style="padding:8px 12px;background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;font-size:11.5px;color:var(--text-dim);margin-bottom:10px">
+        ℹ Uitbetalingen met klikbare opbouw staan nu in het klantenpaneel — <a href="/modules/klanten-v2/#verdiensten" style="color:var(--text)">/verdiensten → Uitbetalingen</a>.
+      </div>
       <table class="data-table">
         <thead><tr><th>Periode</th><th class="num">Totaal</th><th>Status</th><th>Aangemaakt</th><th>Uitbetaald</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
-    wrap.querySelectorAll('.payout-toggle').forEach((btn) => {
-      btn.addEventListener('click', () => togglePayoutDetail(btn.dataset.payoutId, btn.dataset.idx));
-    });
-  }
-
-  // BP3 v29 (2026-09-03) — ACCORDION-mode: max 1 rij tegelijk open. Bij
-  // openen sluit eerst alle andere payout-detail-rows (+ caret reset).
-  // Lazy GET /api/mentor-payout-detail bij eerste open; cache verzilvert
-  // tweede open. Auth-header gaat automatisch mee via apiFetch.
-  // Loading + fout-state expliciet zodat opening nooit een stille no-op is.
-  async function togglePayoutDetail(payoutId, idx) {
-    const row    = document.getElementById('po-detail-' + idx);
-    const caret  = document.getElementById('po-caret-' + idx);
-    if (!row) return;
-    const wasHidden = row.hidden;
-
-    // Accordion: sluit alle andere payout-detail-rijen bij het OPENEN.
-    if (wasHidden) {
-      const allDetail = document.querySelectorAll('tr.payout-detail-row');
-      allDetail.forEach((tr) => {
-        if (tr.id !== 'po-detail-' + idx && !tr.hidden) {
-          tr.hidden = true;
-          const otherIdx = tr.id.replace(/^po-detail-/, '');
-          const otherCaret = document.getElementById('po-caret-' + otherIdx);
-          if (otherCaret) otherCaret.textContent = '▸';
-        }
-      });
-    }
-
-    row.hidden = !wasHidden;
-    if (caret) caret.textContent = wasHidden ? '▾' : '▸';
-    if (!wasHidden) return; // zojuist gesloten
-
-    if (_payoutDetailCache.has(payoutId)) {
-      renderPayoutDetail(idx, _payoutDetailCache.get(payoutId));
-      return;
-    }
-    const body = document.getElementById('po-detail-body-' + idx);
-    if (body) body.innerHTML = `<div style="color:var(--text-faint);font-size:12.5px;padding:6px 0">⏳ Opbouw laden…</div>`;
-    const apiFetch = window.AgentShared?.apiFetch;
-    if (typeof apiFetch !== 'function') {
-      if (body) body.innerHTML = `<em style="color:#b91c1c">apiFetch niet beschikbaar.</em>`;
-      return;
-    }
-    try {
-      if (window._authSharedReady) await window._authSharedReady;
-    } catch {}
-    try {
-      const r = await apiFetch('/api/mentor-payout-detail?payout_id=' + encodeURIComponent(payoutId));
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || ('HTTP ' + r.status));
-      if (!d?.payout) throw new Error('Lege response');
-      _payoutDetailCache.set(payoutId, d.payout);
-      renderPayoutDetail(idx, d.payout);
-    } catch (e) {
-      console.error('[mentor-dashboard] payout-detail:', e?.message || e);
-      const body2 = document.getElementById('po-detail-body-' + idx);
-      if (body2) {
-        // Retry-knop: clear cache + laadt opnieuw. Voorkomt dat een fout-
-        // response in de cache blijft en bij re-open stil hergebruikt wordt.
-        body2.innerHTML = `<div style="padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#b91c1c;font-size:12.5px">
-          ⚠ Opbouw ophalen mislukt: ${esc(e?.message || e)}
-          <button type="button" onclick="window.__mentorPayoutRetry('${esc(payoutId)}','${esc(idx)}')"
-            style="margin-left:10px;padding:3px 9px;font-size:11.5px;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:5px;cursor:pointer;font-family:inherit">
-            Opnieuw
-          </button>
-        </div>`;
-      }
-    }
-  }
-
-  // Map line.kind → leesbare label (NL).
-  function _payoutKindLabel(kind) {
-    switch (kind) {
-      case 'bonus':            return 'Event-bonus';
-      case 'coaching_1on1':    return 'Coaching · 1-op-1';
-      case 'coaching_team':    return 'Coaching · teamtraining';
-      case 'coaching_noshow':  return 'Coaching · no-show';
-      case 'coaching_funded':  return 'Coaching · funded';
-      case 'reiskosten':       return 'Reiskosten';
-      case 'vast':             return 'Vaste maandpost';
-      case 'handmatig':        return 'Handmatige correctie';
-      default:                 return kind || '—';
-    }
-  }
-
-  // BP3 v29 (2026-09-03) — table-render nu via gedeelde helper
-  // (modules/shared/mentor-payout-render.js), mode='mentor' (read-only).
-  // HTML-output identiek aan vorige inline-implementatie.
-  function renderPayoutDetail(idx, payout) {
-    const body = document.getElementById('po-detail-body-' + idx);
-    if (!body || !payout) return;
-
-    const meta = [];
-    if (payout.approved_at) meta.push(`Goedgekeurd op <strong>${esc(fmtDateNL(payout.approved_at))}</strong>`);
-    if (payout.paid_at)     meta.push(`Uitbetaald op <strong>${esc(fmtDateNL(payout.paid_at))}</strong>`);
-    if (payout.generated_at) meta.push(`Gegenereerd op <strong>${esc(fmtDateNL(payout.generated_at))}</strong>`);
-
-    const R = window.MentorPayoutRender;
-    if (!R || typeof R.renderLinesTableHtml !== 'function') {
-      body.innerHTML = `<em style="color:#b91c1c">MentorPayoutRender niet geladen.</em>`;
-      return;
-    }
-    const tableHtml = R.renderLinesTableHtml(payout, { mode: 'mentor', esc, fmtEUR });
-
-    body.innerHTML = `
-      ${meta.length ? `<div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;display:flex;gap:14px;flex-wrap:wrap">${meta.join(' · ')}</div>` : ''}
-      ${tableHtml}`;
   }
 
   async function loadVerdiensten() {
