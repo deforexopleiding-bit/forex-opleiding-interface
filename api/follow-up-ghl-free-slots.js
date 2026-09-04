@@ -101,12 +101,13 @@ async function fetchGhlFreeSlots({ calendarId, token, startMs, endMs, slotDurati
   url.searchParams.set('startDate', String(startMs));
   url.searchParams.set('endDate',   String(endMs));
   url.searchParams.set('timezone',  'Europe/Amsterdam');
-  // Optioneel: langere slot-duur (bv. 60 min) bepaalt welke tijdstippen
-  // door GHL als 'vrij' worden teruggegeven — een 60-min-slot vereist een
-  // langere gap dan een 15-min-slot. GHL-param is in MINUTEN.
-  if (Number.isFinite(slotDurationMin) && slotDurationMin > 0) {
-    url.searchParams.set('slotDuration', String(slotDurationMin));
-  }
+  // BP3 v26 (2026-09-03) — `slotDuration`-param VERWIJDERD. GHL retourneert
+  // een 422 wanneer we die meesturen op deze kalender-config; de publieke
+  // opstartsessie-boekingsagenda (dfo-website) werkt WEL en stuurt 'em NIET.
+  // GHL gebruikt dan de default slot-duur uit de kalender-instellingen zelf.
+  // De frontend `?duration=30` blijft geaccepteerd voor future-use maar wordt
+  // niet meer doorgezet naar GHL.
+  void slotDurationMin;
 
   const res = await fetch(url.toString(), {
     method : 'GET',
@@ -256,9 +257,16 @@ export default async function handler(req, res) {
     // ghl_status bij een non-2xx uit fetchGhlFreeSlots; anders ghl_exception
     // met de exception-message (zonder secrets — throw's zetten geen token
     // in de message).
+    // BP3 v26 (2026-09-03) — óók ghl_body meesturen zodat de exacte GHL-
+    // klacht (bv. "startDate must be a number") direct zichtbaar is. Body
+    // is bij `fetchGhlFreeSlots` al gekapt op 200 chars; hier extra guard
+    // tegen zeer lange stack-traces.
     const reason = {};
     if (Number.isFinite(e?.ghlStatus)) reason.ghl_status = e.ghlStatus;
     else if (e?.message) reason.ghl_exception = String(e.message).slice(0, 300);
+    if (typeof e?.ghlBody === 'string' && e.ghlBody.length) {
+      reason.ghl_body = e.ghlBody.slice(0, 400);
+    }
     const payload = {
       slots    : [],
       timezone : 'Europe/Amsterdam',
