@@ -11,6 +11,7 @@ import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { fetchGhlContact } from './_lib/ghl-contact.js';
 import { upsertLeadAttribution } from './_lib/lead-attribution.js';
 import { listUpcomingZoomMeetings } from './_lib/zoom-meeting.js';
+import { listActiveCalendarIds } from './_lib/ghl-calendars.js';
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com';
 const ABORT_MS = 55_000;
@@ -22,7 +23,9 @@ export default async function handler(req, res) {
   const cronAuth = checkCronAuth(req);
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
-  const requiredEnvVars = ['GHL_API_KEY', 'GHL_LOCATION_ID', 'GHL_DAVE_USER_ID', 'DAVE_PROFILE_ID'];
+  // GHL_DAVE_USER_ID is niet meer vereist: we pollen per-calendar over ALLE
+  // actieve agenda's i.p.v. per-user. DAVE_PROFILE_ID blijft de sync-owner (RLS).
+  const requiredEnvVars = ['GHL_API_KEY', 'GHL_LOCATION_ID', 'DAVE_PROFILE_ID'];
   for (const name of requiredEnvVars) {
     if (!process.env[name]) {
       console.error('[follow-up-ghl-poll] missing env var:', name);
@@ -39,27 +42,36 @@ export default async function handler(req, res) {
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 30);
 
-    const url = new URL(`${GHL_API_BASE}/calendars/events`);
-    url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
-    url.searchParams.set('userId',     process.env.GHL_DAVE_USER_ID);
-    url.searchParams.set('startTime',  String(startDate.getTime()));
-    url.searchParams.set('endTime',    String(endDate.getTime()));
-
-    const ghlRes = await fetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${process.env.GHL_API_KEY}`,
-        Version: '2021-04-15',
-      },
-    });
-
-    if (!ghlRes.ok) {
-      const errText = await ghlRes.text();
-      console.error('[follow-up-ghl-poll] GHL API fout:', ghlRes.status, errText);
-      return res.status(500).json({ error: `GHL API fout ${ghlRes.status}: ${errText}` });
+    // Per-calendar over ALLE actieve GHL-agenda's (was: alleen userId=Dave).
+    // Elk event krijgt zijn calendarId mee zodat we ghl_calendar_id kunnen zetten.
+    const calendarIds = await listActiveCalendarIds({ token: process.env.GHL_API_KEY, locationId: process.env.GHL_LOCATION_ID });
+    if (calendarIds.length === 0) {
+      console.warn('[follow-up-ghl-poll] geen actieve calendars gevonden (of calendars-list faalde)');
     }
-
-    const json = await ghlRes.json();
-    const events = json.events || json.data || [];
+    let events = [];
+    for (const calId of calendarIds) {
+      const url = new URL(`${GHL_API_BASE}/calendars/events`);
+      url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
+      url.searchParams.set('calendarId', calId);
+      url.searchParams.set('startTime',  String(startDate.getTime()));
+      url.searchParams.set('endTime',    String(endDate.getTime()));
+      try {
+        const ghlRes = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${process.env.GHL_API_KEY}`, Version: '2021-04-15' },
+        });
+        if (!ghlRes.ok) {
+          const errText = await ghlRes.text().catch(() => '');
+          console.error('[follow-up-ghl-poll] GHL events fout voor calendar', calId, ghlRes.status, (errText || '').slice(0, 200));
+          continue; // fail-soft per agenda — één stukke agenda mag de rest niet blokkeren
+        }
+        const json = await ghlRes.json();
+        const evs = json.events || json.data || [];
+        for (const e of evs) { if (!e.calendarId) e.calendarId = calId; }
+        events = events.concat(evs);
+      } catch (e) {
+        console.warn('[follow-up-ghl-poll] events-fetch exception voor calendar', calId, e?.message || e);
+      }
+    }
 
     // Haal Dave's upcoming Zoom-meetings op (graceful: lege array bij fout)
     const zoomUserId = process.env.ZOOM_USER_ID;
@@ -82,15 +94,12 @@ export default async function handler(req, res) {
         break;
       }
 
-      if (event.assignedUserId && event.assignedUserId !== process.env.GHL_DAVE_USER_ID) {
-        results.push({ id: event.id, skipped: true, reason: 'not-dave' });
-        continue;
-      }
+      // (Geen user-filter meer — we pollen alle agenda's.)
 
       // Check of dit appointment al bestaat met een handmatig gemuteerde status
       const { data: existing } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, status, zoom_meeting_id, zoom_join_url')
+        .select('id, status, zoom_meeting_id, zoom_join_url, ghl_calendar_id')
         .eq('ghl_appointment_id', event.id)
         .maybeSingle();
 
@@ -159,23 +168,22 @@ export default async function handler(req, res) {
         updated_at:          new Date().toISOString(),
         zoom_meeting_id:     zoomMatch?.id       || existing?.zoom_meeting_id || null,
         zoom_join_url:       zoomMatch?.join_url || existing?.zoom_join_url   || null,
+        ghl_calendar_id:     event.calendarId   || existing?.ghl_calendar_id || null,
       };
 
       // 2-step pattern: SELECT existing → UPDATE of INSERT
       // Reden: partial-unique constraints zijn geen geldige ON CONFLICT-arbiter
       // in PostgREST. existing.id is al beschikbaar van de select boven.
-      let error;
-      if (existing?.id) {
-        const { error: upErr } = await supabaseAdmin
-          .from('follow_up_appointments')
-          .update(row)
-          .eq('id', existing.id);
-        error = upErr;
-      } else {
-        const { error: insErr } = await supabaseAdmin
-          .from('follow_up_appointments')
-          .insert(row);
-        error = insErr;
+      // Fail-soft voor de nieuwe ghl_calendar_id-kolom: draait migratie A nog
+      // niet, dan strip 'em uit de write en probeer opnieuw (42703 = undefined column).
+      async function schrijf(r) {
+        if (existing?.id) return (await supabaseAdmin.from('follow_up_appointments').update(r).eq('id', existing.id)).error;
+        return (await supabaseAdmin.from('follow_up_appointments').insert(r)).error;
+      }
+      let error = await schrijf(row);
+      if (error && (error.code === '42703' || /ghl_calendar_id/.test(error.message || '')) && 'ghl_calendar_id' in row) {
+        const { ghl_calendar_id: _weg, ...zonder } = row;
+        error = await schrijf(zonder);
       }
 
       if (error) {
