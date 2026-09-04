@@ -640,7 +640,15 @@
 
     // Eigen scrim in plaats van de gedeelde: die sluit via __opvSluit, en dat
     // laat de timers hier doorlopen.
-    return '<div class="opv"><div class="scrim" onmousedown="if(event.target===this)window.__opvWaSluit()">' +
+    //
+    // De klasse `on` is niet decoratief maar noodzakelijk. Het design system
+    // zet in app-shell.css `.scrim{opacity:0;pointer-events:none}` en maakt hem
+    // pas zichtbaar met `.scrim.on`. De module-eigen `.opv .scrim` hierboven is
+    // wel specifieker, maar noemt opacity en pointer-events niet — dus voor die
+    // twee eigenschappen wint de globale regel alsnog. Zonder `on` wordt het
+    // paneel dus keurig opgebouwd en is het onzichtbaar. Zie
+    // tests/opvolging-scrim-zichtbaar.test.js.
+    return '<div class="opv"><div class="scrim on" onmousedown="if(event.target===this)window.__opvWaSluit()">' +
       '<div class="modal"><div class="mh"><div><h3>WhatsApp-brug</h3>' +
       '<p>' + esc(s.uitleg) + '</p></div>' +
       '<button class="x" onclick="window.__opvWaSluit()">&times;</button></div>' +
@@ -972,8 +980,11 @@
   const opt = (em, bg, titel, sub, actie) =>
     '<button class="opt" onclick="' + actie + '"><div class="em" style="background:' + bg + '">' + em + '</div>' +
     '<div><b>' + titel + '</b><span>' + sub + '</span></div></button>';
+  // `scrim on`, om exact dezelfde reden als bij waPaneelHtml hierboven: zonder
+  // `on` houdt de globale .scrim-regel uit het design system opacity op 0 en
+  // pointer-events op none, en blijft elk venster van deze module onzichtbaar.
   const scrim = (titel, sub, body) =>
-    '<div class="opv"><div class="scrim" onmousedown="if(event.target===this)window.__opvSluit()"><div class="modal">' +
+    '<div class="opv"><div class="scrim on" onmousedown="if(event.target===this)window.__opvSluit()"><div class="modal">' +
     '<div class="mh"><div><h3>' + titel + '</h3><p>' + sub + '</p></div><button class="x" onclick="window.__opvSluit()">&times;</button></div>' +
     '<div class="mb">' + body + '</div></div></div></div>';
 
