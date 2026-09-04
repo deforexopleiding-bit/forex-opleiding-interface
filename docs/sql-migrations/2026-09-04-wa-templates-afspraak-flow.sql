@@ -23,7 +23,7 @@
 --            alleen nodig voor named-placeholder-resolutie bij het VERSTUREN
 --            (latere fase; deze migratie bouwt geen verzendlogica).
 -- Knoppen:   afspraak_reminder_2u_v1 en afspraak_reminder_30m_v1 krijgen één
---            QUICK_REPLY-knop "Ik ben erbij ✅".
+--            QUICK_REPLY-knop "Ik ben erbij".
 --
 -- NOT NULL-check (kolommen zonder default die de INSERT moet vullen):
 --   business_account_id, name, category, body_text → allemaal expliciet gezet.
@@ -76,7 +76,7 @@ We kijken ernaar uit je te spreken. Tot dan! 🚀',
 
 We kijken ernaar uit om met je te sparren over je doelen en samen een plan te maken dat bij je past. Zorg dat je er een paar minuten van tevoren klaar voor zit.
 
-Komt het net niet uit? Je kunt je afspraak nog verzetten naar een ander moment: {{4}}',
+Komt het net niet uit? Via {{4}} kun je je afspraak nog verzetten naar een moment dat jou beter uitkomt. Tot dan!',
  jsonb_build_object(
    '1', 'Paco',
    '2', 'dinsdag 9 september om 11:30',
@@ -97,7 +97,7 @@ Kun je bevestigen dat het je lukt? Tik hieronder om te bevestigen. 👇',
    '1', 'Paco',
    '2', '11:30'
  ),
- jsonb_build_array(jsonb_build_object('type', 'QUICK_REPLY', 'text', 'Ik ben erbij ✅')),
+ jsonb_build_array(jsonb_build_object('type', 'QUICK_REPLY', 'text', 'Ik ben erbij')),
  'LOCAL'),
 
 -- 4) afspraak_reminder_30m_v1 — reminder 30m vooraf (3 vars, QUICK_REPLY-knop)
@@ -106,13 +106,14 @@ Kun je bevestigen dat het je lukt? Tik hieronder om te bevestigen. 👇',
 
 Laat je ons even weten of het je lukt? Zo weten we zeker dat we op je kunnen rekenen. 🙌
 
-💻 Zoom-link: {{3}}',
+Je Zoom-link: {{3}}
+Tot zo!',
  jsonb_build_object(
    '1', 'Paco',
    '2', '11:30',
    '3', 'https://zoom.us/j/12345678'
  ),
- jsonb_build_array(jsonb_build_object('type', 'QUICK_REPLY', 'text', 'Ik ben erbij ✅')),
+ jsonb_build_array(jsonb_build_object('type', 'QUICK_REPLY', 'text', 'Ik ben erbij')),
  'LOCAL'),
 
 -- 5) afspraak_zoom_5min_v1 — join-link ~5 min vooraf (2 vars, geen knop)
