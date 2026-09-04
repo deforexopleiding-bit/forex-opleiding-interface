@@ -2929,6 +2929,7 @@
     loading: false, error: null, partialWarning: null, renderError: null,
     data: null, dag: null, // dag = generated_at, gebruikt als spinner-fallback-marker
     soortFilter: 'alle',   // 'alle' | '7-daagse' | 'minicursus'
+    drawer: null,          // { soort, bucketKey } — geopend contact-paneel, null = dicht
   };
   function _tgSafeRender() {
     try { if (window.DFO?.render) window.DFO.render(); }
@@ -2973,6 +2974,16 @@
     _tg.soortFilter = val;
     _tg.data = null; _tg.dag = null;
     fetchToegang();
+  };
+  // BP3 v40 (2026-09-04) — drawer open/close voor "wie staat hier nu"-lijst.
+  // Klik op een stap-rij → contact-paneel; toets Esc / klik buiten → dicht.
+  window.__tgOpenDrawer = (soort, bucketKey) => {
+    _tg.drawer = { soort: String(soort || ''), bucketKey: String(bucketKey || '') };
+    _tgSafeRender();
+  };
+  window.__tgCloseDrawer = () => {
+    _tg.drawer = null;
+    _tgSafeRender();
   };
 
   // Bucket-metadata (labels + accent-kleur). Volgorde matcht endpoint.
@@ -3034,42 +3045,113 @@
       <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${callPill}${bronPill}${errPill}</div>
     </div>`;
   }
-  function _tgKolomHtml(bucketKey, byBucket, buckets, opts) {
-    const meta = _TG_BUCKETS[bucketKey] || { l: bucketKey, accent: 'muted' };
-    const accent = _TG_ACCENT[meta.accent] || _TG_DEFAULT_ACCENT;
-    const count = byBucket[bucketKey];
-    const rows = Array.isArray(buckets[bucketKey]) ? buckets[bucketKey] : [];
-    const countTxt = (count == null) ? '—' : String(count);
-    const bodyHtml = rows.length
-      ? rows.map((r) => _tgCardHtml(r, meta)).join('')
-      : `<div style="font-size:12px;color:var(--text-3);padding:20px 6px;text-align:center;font-style:italic">Geen</div>`;
-    const na = opts && opts.na
+  // BP3 v40 (2026-09-04) — COMPACTE branch-layout (prototype-vorm).
+  //
+  // Rijen zijn horizontaal-full-width: links titel+kanaal+timing, rechts groot
+  // aantal. Klik → drawer met top-N contacten. Herbruikbaar via _flowStepRowHtml
+  // (voor Lisa/events later dezelfde vorm).
+
+  function _flowStepRowHtml(opts) {
+    // opts: { soort, bucketKey, title, count, countLabel, accentKey, subLine, na, onclick }
+    const accent = _TG_ACCENT[opts.accentKey] || _TG_DEFAULT_ACCENT;
+    const cnt = (opts.count == null) ? '—' : String(opts.count);
+    const na = opts.na
       ? `<span style="font-size:9.5px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);margin-left:6px">n.v.t.</span>` : '';
-    return `<section aria-label="${esc(meta.l)}" style="display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-top:3px solid ${accent.c};border-radius:var(--r);box-shadow:var(--shadow-xs);min-width:220px">
-      <header style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid var(--border);background:var(--surface-2);border-radius:var(--r) var(--r) 0 0">
-        <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:${accent.c};box-shadow:0 0 0 3px ${accent.soft};flex-shrink:0"></span>
-        <span style="font-size:11.5px;font-weight:600;color:var(--text-1);text-transform:uppercase;letter-spacing:.04em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta.l)}</span>
-        <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};font-variant-numeric:tabular-nums;font-weight:600">${esc(countTxt)}</span>
-        ${na}
+    const clickable = !opts.na && typeof opts.onclick === 'string';
+    const clickAttrs = clickable
+      ? `role="button" tabindex="0" onclick="${opts.onclick}" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${opts.onclick};}"`
+      : 'aria-disabled="true"';
+    const cursor = clickable ? 'cursor:pointer' : 'cursor:default;opacity:.75';
+    return `<div ${clickAttrs} style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);${cursor};transition:box-shadow .12s,transform .12s"
+      onmouseover="if(${clickable ? 'true' : 'false'}){this.style.boxShadow='var(--shadow-xs)';this.style.transform='translateY(-1px)';}"
+      onmouseout="this.style.boxShadow='';this.style.transform=''">
+      <span aria-hidden="true" style="width:12px;height:12px;border-radius:50%;background:${accent.c};box-shadow:0 0 0 3px ${accent.soft};flex-shrink:0"></span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:600;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(opts.title)}${na}</div>
+        ${opts.subLine ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(opts.subLine)}</div>` : ''}
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div style="font-size:20px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums;line-height:1.1">${esc(cnt)}</div>
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:1px">${esc(opts.countLabel || '')}</div>
+      </div>
+    </div>`;
+  }
+
+  function _tgRowFor(soort, bucketKey, bb, opts) {
+    const meta = _TG_BUCKETS[bucketKey] || { l: bucketKey, accent: 'muted' };
+    return _flowStepRowHtml({
+      soort, bucketKey,
+      title: meta.l,
+      count: bb[bucketKey],
+      countLabel: (opts && opts.countLabel) || '',
+      accentKey: meta.accent,
+      subLine: (opts && opts.subLine) || '',
+      na: !!(opts && opts.na),
+      onclick: opts && opts.na ? null : `window.__tgOpenDrawer('${esc(soort)}','${esc(bucketKey)}')`,
+    });
+  }
+
+  function _tgSpineHtml(rows) {
+    // Verticale stapel; verbindingslijn via border-left op de container-padding.
+    return `<div style="position:relative;padding-left:16px;border-left:2px dashed var(--border);display:flex;flex-direction:column;gap:8px">
+      ${rows}
+    </div>`;
+  }
+
+  function _tgLaneHtml(title, tone, rowsHtml, subCount) {
+    const accent = _TG_ACCENT[tone] || _TG_DEFAULT_ACCENT;
+    return `<section style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-xs);padding:10px 12px">
+      <header style="display:flex;align-items:center;gap:8px;padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--border)">
+        <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 10px;border-radius:12px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};font-weight:700;letter-spacing:.04em;text-transform:uppercase">
+          <span aria-hidden="true" style="width:6px;height:6px;border-radius:50%;background:${accent.c}"></span>${esc(title)}
+        </span>
+        ${subCount != null ? `<span style="margin-left:auto;font-size:11px;color:var(--text-3)"><b style="color:var(--text-1);font-variant-numeric:tabular-nums">${esc(String(subCount))}</b> wachtend</span>` : ''}
       </header>
-      <div style="flex:1;overflow-y:auto;padding:8px;max-height:60vh">${bodyHtml}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${rowsHtml}</div>
     </section>`;
   }
+
   function _tgBranchHtml(soort, flow) {
     const bb = (flow && flow.by_bucket) || {};
-    const bk = (flow && flow.buckets)   || {};
     const errsCount = flow && flow.errors ? Object.keys(flow.errors).length : 0;
     const errBanner = errsCount
       ? `<div style="padding:8px 10px;margin-bottom:10px;background:var(--amber-soft);border:1px solid var(--amber-line);color:var(--amber);border-radius:var(--r-sm);font-size:11.5px">⚠ ${errsCount} bucket-query(s) faalden — telling deels null.</div>`
       : '';
     const provFout = Number(bb['10_provisioning_fout'] || 0);
     const provAlert = provFout > 0
-      ? `<div style="padding:10px 12px;margin-bottom:10px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r-sm);font-size:12px;display:flex;align-items:center;gap:10px">
-          <span aria-hidden="true">⚠</span><span><b>${provFout}</b> aanvraag(en) met provisioning-fout — dfo-website faalde na WA-reactie. Zichtbaar in kolom "Provisioning-fout".</span>
+      ? `<div style="padding:9px 12px;margin-bottom:10px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r-sm);font-size:12px;display:flex;align-items:center;gap:10px">
+          <span aria-hidden="true">⚠</span>
+          <span><b>${provFout}</b> aanvraag(en) met provisioning-fout — dfo-website faalde na WA-reactie.</span>
+          <button class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:11px" onclick="window.__tgOpenDrawer('${esc(soort)}','10_provisioning_fout')">Bekijk →</button>
         </div>` : '';
-    const dag6Opts = soort === '7-daagse' ? {} : { na: true };
     const soortLabel = soort === '7-daagse' ? '7-daagse challenge' : 'Mini-cursus';
-    return `<div style="margin-bottom:24px">
+
+    // Sum-counts voor lane-headers.
+    const jaSum = ['6_gereageerd_wacht_prov'].reduce((n, k) => n + (Number(bb[k]) || 0), 0);
+    const neeSum = ['3_na_2u', '4_na_24u', '5_na_48u'].reduce((n, k) => n + (Number(bb[k]) || 0), 0);
+
+    // Pre-spine.
+    const preRows = [
+      _tgRowFor(soort, '1_nieuw',         bb, { countLabel: 'nieuw · nog geen bevestiging', subLine: 'net binnen, cron gaat de bevestiging sturen' }),
+      _tgRowFor(soort, '2_wacht_reactie', bb, { countLabel: 'bevestiging verstuurd', subLine: '↳ wacht op reactie · splitst op WA-reply' }),
+    ].join('');
+
+    // JA-lane (gereageerd).
+    const jaRows = [
+      _tgRowFor(soort, '6_gereageerd_wacht_prov', bb, { countLabel: 'wacht op provisioning' }),
+      _tgRowFor(soort, '7_in_cursus',             bb, { countLabel: 'in cursus (provisioned)' }),
+      _tgRowFor(soort, '8_dag6_verzonden',        bb, { countLabel: 'dag-6 check-in', na: soort !== '7-daagse' }),
+    ].join('');
+
+    // NEE-lane (geen reactie).
+    const neeRows = [
+      _tgRowFor(soort, '3_na_2u',    bb, { countLabel: '2u-reminder verstuurd' }),
+      _tgRowFor(soort, '4_na_24u',   bb, { countLabel: '24u-reminder verstuurd' }),
+      _tgRowFor(soort, '5_na_48u',   bb, { countLabel: '48u-reminder verstuurd' }),
+      _tgRowFor(soort, '9_vervallen',bb, { countLabel: 'vervallen (24u na 48u)' }),
+    ].join('');
+
+    return `<div style="margin-bottom:28px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
         <span style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Flow</span>
         <span style="font-size:14px;font-weight:700;color:var(--text-1)">${esc(soortLabel)}</span>
@@ -3077,41 +3159,59 @@
       ${errBanner}
       ${provAlert}
 
-      <!-- Pre: Nieuw → Wacht op reactie (splitpunt) -->
-      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:600">Pre — bevestiging</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:10px;margin-bottom:16px">
-        ${_tgKolomHtml('1_nieuw',         bb, bk)}
-        ${_tgKolomHtml('2_wacht_reactie', bb, bk)}
-      </div>
+      <!-- Pre: verticale spine (Nieuw → Wacht op reactie) -->
+      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:600">Pre · bevestiging</div>
+      ${_tgSpineHtml(preRows)}
 
-      <!-- Split: JA-lane + NEE-lane -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <div style="border:1px dashed var(--emerald-line);border-radius:var(--r);padding:10px;background:linear-gradient(180deg, var(--emerald-soft) 0, transparent 40px)">
-          <div style="font-size:10.5px;color:var(--emerald);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">JA · gereageerd</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:8px">
-            ${_tgKolomHtml('6_gereageerd_wacht_prov', bb, bk)}
-            ${_tgKolomHtml('7_in_cursus',             bb, bk)}
-            ${_tgKolomHtml('8_dag6_verzonden',        bb, bk, dag6Opts)}
-          </div>
-        </div>
-        <div style="border:1px dashed var(--amber-line);border-radius:var(--r);padding:10px;background:linear-gradient(180deg, var(--amber-soft) 0, transparent 40px)">
-          <div style="font-size:10.5px;color:var(--amber);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">NEE · geen reactie</div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:8px">
-            ${_tgKolomHtml('3_na_2u',    bb, bk)}
-            ${_tgKolomHtml('4_na_24u',   bb, bk)}
-            ${_tgKolomHtml('5_na_48u',   bb, bk)}
-            ${_tgKolomHtml('9_vervallen',bb, bk)}
-          </div>
-        </div>
-      </div>
+      <div style="font-size:10.5px;color:var(--text-3);margin:12px 0 8px;font-style:italic;text-align:center">↳ splitst op basis van de reactie</div>
 
-      ${provFout > 0 ? `<div style="margin-top:14px">
-        <div style="font-size:10.5px;color:var(--rose);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">Operator-alert · provisioning-fout</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:10px">
-          ${_tgKolomHtml('10_provisioning_fout', bb, bk)}
-        </div>
-      </div>` : ''}
+      <!-- Split: JA-lane + NEE-lane, smal naast elkaar -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        ${_tgLaneHtml('JA · gereageerd',  'emerald', jaRows,  jaSum)}
+        ${_tgLaneHtml('NEE · geen reactie','amber',  neeRows, neeSum)}
+      </div>
     </div>`;
+  }
+
+  // Drawer overlay: klik-buiten en Esc dichten.
+  function _tgDrawerHtml() {
+    if (!_tg.drawer) return '';
+    const { soort, bucketKey } = _tg.drawer;
+    const flow = _tg.data && _tg.data.flows && _tg.data.flows[soort];
+    const meta = _TG_BUCKETS[bucketKey] || { l: bucketKey, accent: 'muted' };
+    const accent = _TG_ACCENT[meta.accent] || _TG_DEFAULT_ACCENT;
+    const rows = (flow && flow.buckets && Array.isArray(flow.buckets[bucketKey])) ? flow.buckets[bucketKey] : [];
+    const count = flow && flow.by_bucket ? flow.by_bucket[bucketKey] : null;
+    const cntTxt = (count == null) ? '—' : String(count);
+    const body = rows.length
+      ? rows.map((r) => _tgCardHtml(r, meta)).join('')
+      : `<div style="font-size:12px;color:var(--text-3);padding:20px 6px;text-align:center;font-style:italic">Geen</div>`;
+    const soortLabel = soort === '7-daagse' ? '7-daagse challenge' : 'Mini-cursus';
+    return `<div role="dialog" aria-modal="true" onclick="if(event.target===this)window.__tgCloseDrawer()"
+      style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:900;display:flex;justify-content:flex-end">
+      <aside style="width:min(440px, 100%);height:100%;background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column">
+        <header style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);background:var(--surface-2)">
+          <span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:${accent.c};box-shadow:0 0 0 3px ${accent.soft};flex-shrink:0"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">${esc(soortLabel)}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta.l)}</div>
+          </div>
+          <span style="font-size:11.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};font-variant-numeric:tabular-nums;font-weight:600">${esc(cntTxt)}</span>
+          <button class="btn btn-ghost btn-sm" onclick="window.__tgCloseDrawer()" title="Sluiten (Esc)" aria-label="Sluiten">✕</button>
+        </header>
+        <div style="flex:1;overflow-y:auto;padding:12px 14px">
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px">Wie staat hier nu · top ${rows.length}${count != null && count > rows.length ? ' van ' + count : ''}</div>
+          ${body}
+        </div>
+      </aside>
+    </div>`;
+  }
+  // Esc-toets binding (idempotent).
+  if (!window.__tgEscBound) {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _tg.drawer) { _tg.drawer = null; _tgSafeRender(); }
+    });
+    window.__tgEscBound = true;
   }
 
   function toegangView() {
@@ -3176,6 +3276,7 @@
       <div style="margin-top:16px;padding:10px 14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:8px">
         <span aria-hidden="true">ℹ</span><span>Read-only · cron + actie-endpoints (toegang-aanvraag-start, cron-toegang-aanvragen) onaangeroerd.</span>
       </div>
+      ${_tgDrawerHtml()}
     </div>`;
   }
 
