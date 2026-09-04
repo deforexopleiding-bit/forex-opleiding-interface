@@ -32,7 +32,11 @@
     },
     {
       "path": "/api/follow-up-ghl-appointment-poll",
-      "schedule": "*/15 * * * *"
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron-afspraak-reminders",
+      "schedule": "*/3 * * * *"
     },
     {
       "path": "/api/follow-up-ghl-conversations-poll",
