@@ -498,8 +498,12 @@
       ? `<span style="font-size:10.5px;color:var(--text-3)">laatste run: ${esc(_fmtRel(f.laatste_run))}</span>`
       : `<span style="font-size:10.5px;color:var(--text-3)">${clickable ? 'klik voor detail →' : 'binnenkort'}</span>`;
     const statusPill = `<span title="${esc(f.count_error || '')}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};font-weight:600;white-space:nowrap">${esc((f.status && f.status.label) || '—')}</span>`;
+    // BP3 v38 (2026-09-04) — drilldown mag ?query bevatten (bv. 'Toegang?soort=7-daagse');
+    // split in tab-naam + querystring en zet params in location.hash zodat de
+    // subtab z'n filter kan lezen. __autGoTabWithQuery afgehandeld hieronder.
+    const drilldownRaw = String(f.drilldown || '');
     const clickAttrs = clickable
-      ? `role="button" tabindex="0" onclick="window.__autGoTab('${esc(String(f.drilldown).toLowerCase())}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.__autGoTab('${esc(String(f.drilldown).toLowerCase())}');}"`
+      ? `role="button" tabindex="0" onclick="window.__autGoTabWithQuery('${esc(drilldownRaw)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.__autGoTabWithQuery('${esc(drilldownRaw)}');}"`
       : 'aria-disabled="true"';
     const cursor = clickable ? 'cursor:pointer' : 'cursor:default;opacity:.85';
     return `<article ${clickAttrs} style="display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-left:4px solid ${accent.c};border-radius:var(--r);box-shadow:var(--shadow-xs);padding:14px 16px;gap:10px;${cursor};transition:box-shadow .12s,transform .12s"
@@ -700,6 +704,27 @@
       const label = String(subtab || '').charAt(0).toUpperCase() + String(subtab || '').slice(1);
       if (window.DFO?.goTab) window.DFO.goTab(label);
     } catch (e) { console.warn('[aut] goTab fail:', e?.message); }
+  };
+  // BP3 v38 (2026-09-04) — variant met querystring voor Toegang-deeplinks
+  // (bv. 'Toegang?soort=7-daagse' → subtab 'Toegang' + hash-param soort=7-daagse).
+  // Subtab-view leest de param uit location.hash bij eerste render.
+  window.__autGoTabWithQuery = (drilldown) => {
+    try {
+      const raw = String(drilldown || '').trim();
+      if (!raw) return;
+      const [tabPart, queryPart] = raw.split('?');
+      const tabLabel = tabPart; // reeds Kapitalized zoals in API-response
+      if (queryPart) {
+        // Zet querystring in de hash zonder de rest te breken. Hash-formaat
+        // is bv. "#automatiseringen/Overzicht"; we plakken '?<query>' erachter.
+        try {
+          const [hashBase] = String(location.hash || '#').split('?');
+          const newHash = hashBase + '?' + queryPart;
+          history.replaceState(null, '', newHash);
+        } catch (_) { /* history niet beschikbaar → skip */ }
+      }
+      if (window.DFO?.goTab) window.DFO.goTab(tabLabel);
+    } catch (e) { console.warn('[aut] goTabWithQuery fail:', e?.message); }
   };
 
   // Leadsonderhoud toggle (met confirm)
@@ -2888,6 +2913,257 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // BP3 v38 (2026-09-04) — TAB: TOEGANG · branch-drilldown (7-daagse + mini)
+  //
+  // Fase 1 read-only: leest /api/toegang-flow-overview (SELECT + counts). Cron
+  // (cron-toegang-aanvragen) en actie-endpoint (toegang-aanvraag-start) blijven
+  // onaangeroerd. Fail-safe pattern hergebruikt van opvolgingView: _safeRender
+  // + outer try/finally + view-in-try/catch + fallback-dag zodat spinner nooit
+  // vastblijft.
+  // ═══════════════════════════════════════════════════════════════════════
+  const _tg = {
+    loading: false, error: null, partialWarning: null, renderError: null,
+    data: null, dag: null, // dag = generated_at, gebruikt als spinner-fallback-marker
+    soortFilter: 'alle',   // 'alle' | '7-daagse' | 'minicursus'
+  };
+  function _tgSafeRender() {
+    try { if (window.DFO?.render) window.DFO.render(); }
+    catch (e) { console.warn('[tg] safeRender: DFO.render throw:', e?.message || e, e); }
+  }
+  async function fetchToegang() {
+    if (_tg.loading) return;
+    _tg.loading = true; _tg.error = null; _tg.partialWarning = null; _tg.renderError = null;
+    console.debug('[tg] fetch start');
+    try {
+      _tgSafeRender();
+      try {
+        const url = _tg.soortFilter && _tg.soortFilter !== 'alle'
+          ? '/api/toegang-flow-overview?soort=' + encodeURIComponent(_tg.soortFilter)
+          : '/api/toegang-flow-overview';
+        const j = await tryFetch('toegang', url);
+        if (!j || j.__error) throw new Error(j?.__error || 'Kon toegang-flow niet laden');
+        _tg.data = j;
+        _tg.dag  = j.generated_at || new Date().toISOString();
+      } catch (innerE) {
+        _tg.error = innerE?.message || String(innerE);
+        if (!_tg.dag) _tg.dag = new Date().toISOString();
+      }
+    } catch (outerE) {
+      console.warn('[tg] outer catch:', outerE?.message || outerE, outerE);
+      _tg.error = outerE?.message || String(outerE);
+      if (!_tg.dag) _tg.dag = new Date().toISOString();
+    } finally {
+      _tg.loading = false;
+      console.debug('[tg] fetch done', { error: _tg.error, hasData: !!_tg.data });
+      _tgSafeRender();
+    }
+  }
+  window.__tgRetry = () => {
+    _tg.error = null; _tg.partialWarning = null;
+    _tg.data = null; _tg.dag = null;
+    fetchToegang();
+  };
+  window.__tgSetSoort = (v) => {
+    const val = (v === '7-daagse' || v === 'minicursus') ? v : 'alle';
+    if (val === _tg.soortFilter) return;
+    _tg.soortFilter = val;
+    _tg.data = null; _tg.dag = null;
+    fetchToegang();
+  };
+
+  // Bucket-metadata (labels + accent-kleur). Volgorde matcht endpoint.
+  const _TG_BUCKETS = {
+    '1_nieuw':                 { l: 'Nieuw',                     accent: 'muted',   ts: 'created_at' },
+    '2_wacht_reactie':         { l: 'Wacht op reactie',          accent: 'blue',    ts: 'bevestiging_sent_at' },
+    '3_na_2u':                 { l: 'Na 2u-reminder',            accent: 'amber',   ts: 'reminder_2u_at' },
+    '4_na_24u':                { l: 'Na 24u-reminder',           accent: 'amber',   ts: 'reminder_24u_at' },
+    '5_na_48u':                { l: 'Na 48u-reminder',           accent: 'rose',    ts: 'reminder_48u_at' },
+    '6_gereageerd_wacht_prov': { l: 'Wacht op provisioning',     accent: 'blue',    ts: 'reacted_at' },
+    '7_in_cursus':             { l: 'In cursus (provisioned)',   accent: 'emerald', ts: 'provisioned_at' },
+    '8_dag6_verzonden':        { l: 'Dag-6 check-in',            accent: 'emerald', ts: 'dag6_sent_at' },
+    '9_vervallen':             { l: 'Vervallen',                 accent: 'muted',   ts: 'vervallen_at' },
+    '10_provisioning_fout':    { l: 'Provisioning-fout',         accent: 'rose',    ts: 'reacted_at' },
+  };
+  const _TG_ACCENT = _OPV_ACCENT; // hergebruik map uit opvolgingView-restyle
+
+  function _tgWachttijd(iso) {
+    if (!iso) return null;
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    const uren = Math.floor(ms / 3600000);
+    if (uren < 1) return 'net';
+    if (uren < 48) return uren + 'u geleden';
+    const d = Math.floor(uren / 24);
+    return d + 'd geleden';
+  }
+  function _tgCardHtml(row, bucketMeta) {
+    const contact = [row.email, row.telefoon].filter(Boolean).join(' · ') || '';
+    const ts = row[bucketMeta.ts] || row.created_at;
+    const wacht = _tgWachttijd(ts);
+    const bronPill = row.bron
+      ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-2);border:1px solid var(--border);white-space:nowrap">${esc(row.bron)}</span>`
+      : '';
+    const callPill = row.call_geboekt
+      ? `<span title="Call al geboekt in de funnel" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald);border:1px solid var(--emerald-line);font-weight:600;white-space:nowrap">call ✓</span>`
+      : `<span title="Nog geen call geboekt" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);white-space:nowrap">geen call</span>`;
+    const errPill = row.provisioned_error
+      ? `<span title="${esc(row.provisioned_error)}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--rose-soft);color:var(--rose);border:1px solid var(--rose-line);font-weight:600;white-space:nowrap">prov-fout</span>`
+      : '';
+    return `<div style="padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:6px;box-shadow:var(--shadow-xs)">
+      <div style="display:flex;align-items:baseline;gap:6px;margin-bottom:3px">
+        <span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1">${esc(row.voornaam || '—')}</span>
+        <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${esc(wacht || '')}</span>
+      </div>
+      ${contact ? `<div style="font-size:11.5px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:5px">${esc(contact)}</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center">${callPill}${bronPill}${errPill}</div>
+    </div>`;
+  }
+  function _tgKolomHtml(bucketKey, byBucket, buckets, opts) {
+    const meta = _TG_BUCKETS[bucketKey] || { l: bucketKey, accent: 'muted' };
+    const accent = _TG_ACCENT[meta.accent] || _TG_ACCENT.muted;
+    const count = byBucket[bucketKey];
+    const rows = Array.isArray(buckets[bucketKey]) ? buckets[bucketKey] : [];
+    const countTxt = (count == null) ? '—' : String(count);
+    const bodyHtml = rows.length
+      ? rows.map((r) => _tgCardHtml(r, meta)).join('')
+      : `<div style="font-size:12px;color:var(--text-3);padding:20px 6px;text-align:center;font-style:italic">Geen</div>`;
+    const na = opts && opts.na
+      ? `<span style="font-size:9.5px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);margin-left:6px">n.v.t.</span>` : '';
+    return `<section aria-label="${esc(meta.l)}" style="display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-top:3px solid ${accent.c};border-radius:var(--r);box-shadow:var(--shadow-xs);min-width:220px">
+      <header style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-bottom:1px solid var(--border);background:var(--surface-2);border-radius:var(--r) var(--r) 0 0">
+        <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:${accent.c};box-shadow:0 0 0 3px ${accent.soft};flex-shrink:0"></span>
+        <span style="font-size:11.5px;font-weight:600;color:var(--text-1);text-transform:uppercase;letter-spacing:.04em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta.l)}</span>
+        <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};font-variant-numeric:tabular-nums;font-weight:600">${esc(countTxt)}</span>
+        ${na}
+      </header>
+      <div style="flex:1;overflow-y:auto;padding:8px;max-height:60vh">${bodyHtml}</div>
+    </section>`;
+  }
+  function _tgBranchHtml(soort, flow) {
+    const bb = (flow && flow.by_bucket) || {};
+    const bk = (flow && flow.buckets)   || {};
+    const errsCount = flow && flow.errors ? Object.keys(flow.errors).length : 0;
+    const errBanner = errsCount
+      ? `<div style="padding:8px 10px;margin-bottom:10px;background:var(--amber-soft);border:1px solid var(--amber-line);color:var(--amber);border-radius:var(--r-sm);font-size:11.5px">⚠ ${errsCount} bucket-query(s) faalden — telling deels null.</div>`
+      : '';
+    const provFout = Number(bb['10_provisioning_fout'] || 0);
+    const provAlert = provFout > 0
+      ? `<div style="padding:10px 12px;margin-bottom:10px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r-sm);font-size:12px;display:flex;align-items:center;gap:10px">
+          <span aria-hidden="true">⚠</span><span><b>${provFout}</b> aanvraag(en) met provisioning-fout — dfo-website faalde na WA-reactie. Zichtbaar in kolom "Provisioning-fout".</span>
+        </div>` : '';
+    const dag6Opts = soort === '7-daagse' ? {} : { na: true };
+    const soortLabel = soort === '7-daagse' ? '7-daagse challenge' : 'Mini-cursus';
+    return `<div style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+        <span style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Flow</span>
+        <span style="font-size:14px;font-weight:700;color:var(--text-1)">${esc(soortLabel)}</span>
+      </div>
+      ${errBanner}
+      ${provAlert}
+
+      <!-- Pre: Nieuw → Wacht op reactie (splitpunt) -->
+      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:600">Pre — bevestiging</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:10px;margin-bottom:16px">
+        ${_tgKolomHtml('1_nieuw',         bb, bk)}
+        ${_tgKolomHtml('2_wacht_reactie', bb, bk)}
+      </div>
+
+      <!-- Split: JA-lane + NEE-lane -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div style="border:1px dashed var(--emerald-line);border-radius:var(--r);padding:10px;background:linear-gradient(180deg, var(--emerald-soft) 0, transparent 40px)">
+          <div style="font-size:10.5px;color:var(--emerald);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">JA · gereageerd</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:8px">
+            ${_tgKolomHtml('6_gereageerd_wacht_prov', bb, bk)}
+            ${_tgKolomHtml('7_in_cursus',             bb, bk)}
+            ${_tgKolomHtml('8_dag6_verzonden',        bb, bk, dag6Opts)}
+          </div>
+        </div>
+        <div style="border:1px dashed var(--amber-line);border-radius:var(--r);padding:10px;background:linear-gradient(180deg, var(--amber-soft) 0, transparent 40px)">
+          <div style="font-size:10.5px;color:var(--amber);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">NEE · geen reactie</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:8px">
+            ${_tgKolomHtml('3_na_2u',    bb, bk)}
+            ${_tgKolomHtml('4_na_24u',   bb, bk)}
+            ${_tgKolomHtml('5_na_48u',   bb, bk)}
+            ${_tgKolomHtml('9_vervallen',bb, bk)}
+          </div>
+        </div>
+      </div>
+
+      ${provFout > 0 ? `<div style="margin-top:14px">
+        <div style="font-size:10.5px;color:var(--rose);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">Operator-alert · provisioning-fout</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:10px">
+          ${_tgKolomHtml('10_provisioning_fout', bb, bk)}
+        </div>
+      </div>` : ''}
+    </div>`;
+  }
+
+  function toegangView() {
+    try {
+      return _toegangViewInner();
+    } catch (e) {
+      _tg.renderError = e?.message || String(e);
+      console.error('[tg] renderError:', e?.message || e, e);
+      return `<div style="padding:22px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r);margin:16px;font-family:'IBM Plex Mono',monospace;font-size:12px">
+        ⚠ Toegang-render-exception: ${esc(_tg.renderError)}
+        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">Stacktrace in DevTools console ("[tg] renderError").</div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="window.__tgRetry()">Opnieuw</button>
+      </div>`;
+    }
+  }
+  function _toegangViewInner() {
+    console.debug('[tg] render', { loading: _tg.loading, hasData: !!_tg.data, error: _tg.error, soortFilter: _tg.soortFilter });
+    // Deep-link ?soort=… → zet filter voor bij eerste render.
+    try {
+      const params = new URLSearchParams(location.hash.split('?')[1] || '');
+      const q = String(params.get('soort') || '').toLowerCase();
+      if ((q === '7-daagse' || q === 'minicursus') && q !== _tg.soortFilter && !_tg.data) {
+        _tg.soortFilter = q;
+      }
+    } catch (_) { /* geen URL-access = geen deep-link */ }
+
+    if (!_tg.loading && !_tg.error && !_tg.data) queueMicrotask(fetchToegang);
+    if (_tg.error && !_tg.data) {
+      return `<div style="padding:22px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r);margin:16px">
+        ⚠ ${esc(_tg.error)}
+        <button class="btn btn-ghost btn-sm" style="margin-left:10px" onclick="window.__tgRetry()">Opnieuw</button>
+      </div>`;
+    }
+    if (!_tg.data && _tg.loading) {
+      return `<div style="padding:44px 16px;text-align:center;color:var(--text-3);font-size:13px">⏳ Toegang-flow laden…</div>`;
+    }
+
+    const flows = (_tg.data && _tg.data.flows) || {};
+    const soortenOrder = _tg.soortFilter === '7-daagse'   ? ['7-daagse']
+                      : _tg.soortFilter === 'minicursus' ? ['minicursus']
+                      : ['7-daagse', 'minicursus'];
+
+    const chip = (val, label) => {
+      const on = _tg.soortFilter === val;
+      return `<button class="chip ${on ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window.__tgSetSoort('${esc(val)}')">${esc(label)}</button>`;
+    };
+
+    return `<div style="padding:18px 20px">
+      <header style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text-1);letter-spacing:-.01em">Toegang · WhatsApp-gate</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Read-only branch-view · ${esc(String(_tg.dag || '').slice(0, 19).replace('T', ' '))}</div>
+        </div>
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+          ${chip('alle', 'Alle')}
+          ${chip('7-daagse', '7-daagse')}
+          ${chip('minicursus', 'Mini-cursus')}
+          <button class="btn btn-ghost btn-sm" onclick="window.__tgRetry()" title="Ververs" aria-label="Ververs">↻</button>
+        </div>
+      </header>
+      ${soortenOrder.map((s) => flows[s] ? _tgBranchHtml(s, flows[s]) : `<div style="padding:14px;color:var(--text-3);font-size:12.5px">Geen data voor <b>${esc(s)}</b></div>`).join('')}
+      <div style="margin-top:16px;padding:10px 14px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:8px">
+        <span aria-hidden="true">ℹ</span><span>Read-only · cron + actie-endpoints (toegang-aanvraag-start, cron-toegang-aanvragen) onaangeroerd.</span>
+      </div>
+    </div>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // VIEW REGISTRATIE
   // ═══════════════════════════════════════════════════════════════════════
   window.DFO.VIEWS = window.DFO.VIEWS || {};
@@ -2896,8 +3172,9 @@
   window.DFO.VIEWS['automatiseringen/Onboarding']     = onboardingView;
   window.DFO.VIEWS['automatiseringen/Leadsonderhoud'] = leadsonderhoudView;
   window.DFO.VIEWS['automatiseringen/Opvolging']      = opvolgingView;
+  window.DFO.VIEWS['automatiseringen/Toegang']        = toegangView;
 
-  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud/Opvolging)');
+  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud/Opvolging/Toegang)');
 
   // ═══════════════════════════════════════════════════════════════════════
   // DEEP-LINK HANDLERS · ?edit_ev_auto=<id> + ?edit_ls_traj=<id>

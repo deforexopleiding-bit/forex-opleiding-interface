@@ -147,7 +147,8 @@ export default async function handler(req, res) {
       count_error: toegang7daagse.error,
       kanalen: ['mail', 'whatsapp'],
       granulariteit: 'stap-voor-stap',
-      drilldown: null,
+      // BP3 v38 (2026-09-04) — deep-link naar Toegang-subtab met soort-param.
+      drilldown: 'Toegang?soort=7-daagse',
       laatste_run: null,
     },
     {
@@ -160,7 +161,7 @@ export default async function handler(req, res) {
       count_error: toegangMini.error,
       kanalen: ['mail', 'whatsapp'],
       granulariteit: 'stap-voor-stap',
-      drilldown: null,
+      drilldown: 'Toegang?soort=minicursus',
       laatste_run: null,
     },
     {
