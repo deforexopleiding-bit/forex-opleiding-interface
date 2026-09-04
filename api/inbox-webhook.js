@@ -1550,10 +1550,8 @@ export default async function handler(req, res) {
                           try {
                             const naam = match.voornaam || 'daar';
                             const wabody =
-                              `Top ${naam}! ✅ Je bent bevestigd en je gratis toegang staat open. ` +
-                              `Ik heb je inloggegevens net naar je e-mail gestuurd — check even je inbox ` +
-                              `(en voor de zekerheid je spam). Kom je er niet uit? Stuur gerust een ` +
-                              `berichtje. Veel succes! 🚀`;
+                              `Top ${naam}! ✅ Je inloggegevens zijn direct per mail naar je toegestuurd.\n\n` +
+                              `Nog een vraagje, ben je ook al bekend met traden of is dit volledig nieuw?`;
                             // Hetzelfde nummer als waar de inbound binnenkwam →
                             // recvPhoneNumberId. Dat is de meest betrouwbare bron
                             // (Meta zelf zegt op welke lijn 't binnenkwam) en
