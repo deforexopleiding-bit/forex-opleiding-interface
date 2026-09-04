@@ -884,7 +884,12 @@
         notitie    : notitie || null,
         badge_label: 'Call ' + nl(_ui.dagView || vandaag()),
         bron_ref   : { appointment_id: c.appointment_id || null, start: c.start || null },
-        poging_resultaat: uitkomst === 'no_show' ? 'niet komen opdagen' : 'gesproken, wil nog beslissen',
+        // Alleen bij 'wil nog beslissen' een poging: dat gesprek is echt
+        // gevoerd. Een no-show is géén belpoging — er is niet gebeld, er kwam
+        // alleen niemand opdagen. Zou hij hier toch meetellen, dan staat de
+        // verse kaart vandaag op 1 van 2 terwijl Dave die persoon nog nooit aan
+        // de lijn heeft gehad, en klopt de dekking op het dashboard niet meer.
+        ...(uitkomst === 'no_show' ? {} : { poging_resultaat: 'gesproken, wil nog beslissen' }),
       });
       _ui.modal = null; leegTakenCache(); render();
     } catch (e) {

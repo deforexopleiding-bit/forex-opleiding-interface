@@ -21,6 +21,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { bepaalStartPoging } from './_lib/opvolging-taak-poging.js';
 
 const REDENEN  = new Set(['wil_nog_beslissen', 'no_show_call', 'afgemeld', 'no_show_event', 'niet_ingepland']);
 const DATUM_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -113,18 +114,15 @@ export default async function handler(req, res) {
       taakId = data.id;
     }
 
-    // De call zelf vastleggen. Zonder deze rij staat de verse kaart op nul
-    // belpogingen terwijl er net gebeld is — en dan krijgt hij in Afgerond het
-    // rode oordeel 'te weinig moeite' voor een gesprek dat wél gevoerd is.
+    // Krijgt deze taak meteen een belpoging mee? De regel staat in
+    // _lib/opvolging-taak-poging.js — hier, en niet alleen in het scherm, zodat
+    // een oud tabblad hem niet kan omzeilen. Kort: 'wil nog beslissen' wel (dat
+    // gesprek is gevoerd), een no-show niet (er is niet gebeld).
     // Fail-soft: de taak is de actie, de poging is de historiek.
-    if (b.poging_resultaat) {
+    const startPoging = bepaalStartPoging({ taakId, reden, resultaat: b.poging_resultaat });
+    if (startPoging) {
       try {
-        const { error } = await supabaseAdmin.from('opvolging_pogingen').insert({
-          taak_id    : taakId,
-          soort      : 'call',
-          resultaat  : String(b.poging_resultaat).slice(0, 200),
-          automatisch: false,
-        });
+        const { error } = await supabaseAdmin.from('opvolging_pogingen').insert(startPoging);
         if (error) throw new Error(error.message);
       } catch (e) {
         console.warn('[opvolging-taak-create] poging (soft):', e?.message || e);
