@@ -27,6 +27,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { updateGhlAppointmentStatus } from './_lib/ghl-appointment.js';
+import { stuurAnnuleringBericht } from './_lib/afspraak-status-notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MGMT_ROLES = new Set(['super_admin', 'admin', 'manager', 'sales']);
@@ -100,6 +101,8 @@ export default async function handler(req, res) {
 
     // 2) DB-actie op basis van mode.
     if (mode === 'delete') {
+      // Bevestiging VÓÓR de hard-delete (daarna is de rij weg). Fail-soft, achter live-flag.
+      try { await stuurAnnuleringBericht(appointmentId, { reden: reden || undefined }); } catch (_) { /* nooit blokkerend */ }
       const { error: delErr } = await supabaseAdmin
         .from('follow_up_appointments').delete().eq('id', appointmentId);
       if (delErr) {
@@ -121,6 +124,9 @@ export default async function handler(req, res) {
       console.error('[opstartsessie-annuleer] status update faalde:', updErr.code, updErr.message);
       return res.status(500).json({ error: updErr.message, code: updErr.code });
     }
+    // Reden wegschrijven (fail-soft; kolom uit Fase 1) + bevestiging sturen.
+    if (reden) { try { await supabaseAdmin.from('follow_up_appointments').update({ annulering_reden: reden }).eq('id', appointmentId); } catch (_) { /* soft */ } }
+    try { await stuurAnnuleringBericht(appointmentId, { reden: reden || undefined }); } catch (_) { /* nooit blokkerend */ }
     return res.status(200).json({
       ok: true, mode: 'cancel', appointment_id: appointmentId,
       new_status: 'cancelled', ghl_cancelled: ghlOk, reden,

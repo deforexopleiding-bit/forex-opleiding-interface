@@ -11,6 +11,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { checkSelfserviceSecret, haalAfspraakViaToken } from './_lib/afspraak-selfservice.js';
 import { updateGhlAppointmentStatus } from './_lib/ghl-appointment.js';
+import { stuurAnnuleringBericht } from './_lib/afspraak-status-notify.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -61,6 +62,13 @@ export default async function handler(req, res) {
       processed: true,
     });
   } catch (_) { /* niet blokkerend */ }
+
+  // 4) Bevestiging (annulering) — fail-soft, achter AFSPRAAK_REMINDERS_LIVE.
+  //    reden wordt in Fase 3 door de self-service-pagina meegestuurd.
+  try {
+    const reden = typeof (req.body || {}).reden === 'string' ? req.body.reden : undefined;
+    await stuurAnnuleringBericht(appt.id, { reden });
+  } catch (_) { /* nooit blokkerend */ }
 
   return res.status(200).json({ ok: true });
 }

@@ -24,6 +24,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { updateGhlAppointmentTime } from './_lib/ghl-appointment.js';
+import { stuurVerzetBericht } from './_lib/afspraak-status-notify.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MGMT_ROLES = new Set(['super_admin', 'admin', 'manager', 'sales']);
@@ -126,6 +127,10 @@ export default async function handler(req, res) {
         code: updErr.code, ghl_updated: true,
       });
     }
+
+    // verzet_sent_at resetten (fail-soft; kolom uit Fase 1) + bevestiging sturen.
+    try { await supabaseAdmin.from('follow_up_appointments').update({ verzet_sent_at: null }).eq('id', appointmentId); } catch (_) { /* soft */ }
+    try { await stuurVerzetBericht(appointmentId); } catch (_) { /* nooit blokkerend */ }
 
     return res.status(200).json({
       ok: true, appointment_id: appointmentId,

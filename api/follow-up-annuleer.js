@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { stuurAnnuleringBericht } from './_lib/afspraak-status-notify.js';
 
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
@@ -153,6 +154,15 @@ export default async function handler(req, res) {
         changed_by: user.id,
       },
     });
+
+  // ── Bevestiging: alleen bij een echte annulering (niet wacht_op_reschedule).
+  //    Notifier is zelf gescoped op ghl_calendar_id NOT NULL → no-op voor
+  //    niet-kennismakings-afspraken. Reden fail-soft wegschrijven. Fail-soft.
+  if (newStatus === 'cancelled') {
+    const r = reden?.trim() || undefined;
+    if (r) { try { await supabaseAdmin.from('follow_up_appointments').update({ annulering_reden: r }).eq('id', appointment_id); } catch (_) { /* soft */ } }
+    try { await stuurAnnuleringBericht(appointment_id, { reden: r }); } catch (_) { /* nooit blokkerend */ }
+  }
 
   return res.status(200).json({
     success: true,
