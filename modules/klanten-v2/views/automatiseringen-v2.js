@@ -150,6 +150,7 @@
   // ═══════════════════════════════════════════════════════════════════════
   const _live = {
     status:      { loading: false, error: null, data: null },   // /api/automations-status
+    overview:    { loading: false, error: null, data: null },   // BP3 v35 (2026-09-04) — /api/automations-overview (flow-kaartjes)
     evAutos:     { loading: false, error: null, data: null },   // events-automations-list
     evRuns:      { loading: {}, error: {}, data: {} },          // per automation_id
     obAutos:     { loading: false, error: null, data: null },   // onboarding-automations-list
@@ -210,6 +211,16 @@
     const st = _live.status; if (st.loading || st.data) return;
     st.loading = true; st.error = null;
     const j = await tryFetch('status', '/api/automations-status');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = j || null;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  // BP3 v35 (2026-09-04) — flow-kaartjes overzicht. Read-only aggregate via
+  // /api/automations-overview (SELECT + count:'exact',head:true per flow).
+  async function fetchOverview() {
+    const st = _live.overview; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('overview', '/api/automations-overview');
     st.loading = false;
     if (j && j.__error) st.error = j.__error; else st.data = j || null;
     if (window.DFO?.render) window.DFO.render();
@@ -445,10 +456,77 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // BP3 v35 (2026-09-04) — TAB: OVERZICHT · flow-kaartjes-landing
+  //
+  // Vervangt de bovenkant van Overzicht met kaartjes per flow (counts, status,
+  // klik → drilldown). Motoren/Schakelaars/Crons blijven onderaan onder een
+  // "Systeem"-kopje — ongewijzigd. Read-only: fetchOverview haalt de aggregate
+  // uit /api/automations-overview (puur SELECT/count, geen writes).
+  // ═══════════════════════════════════════════════════════════════════════
+  const _OV_ACCENT = {
+    emerald: { c: 'var(--emerald)', soft: 'var(--emerald-soft)', line: 'var(--emerald-line)' },
+    blue:    { c: 'var(--blue)',    soft: 'var(--blue-soft)',    line: 'var(--blue-line)' },
+    amber:   { c: 'var(--amber)',   soft: 'var(--amber-soft)',   line: 'var(--amber-line)' },
+    rose:    { c: 'var(--rose)',    soft: 'var(--rose-soft)',    line: 'var(--rose-line)' },
+    muted:   { c: 'var(--text-3)',  soft: 'var(--surface-2)',    line: 'var(--border)' },
+  };
+  function _ovKanaalIcon(k) {
+    if (k === 'mail')      return '✉';
+    if (k === 'whatsapp')  return '💬';
+    if (k === 'call')      return '📞';
+    if (k === 'instagram') return '📷';
+    return '•';
+  }
+  function _ovFlowCard(f) {
+    const tone = (f.status && f.status.tone) || 'muted';
+    const accent = _OV_ACCENT[tone] || _OV_ACCENT.muted;
+    const clickable = !!f.drilldown;
+    const countCell = (f.count == null)
+      ? `<div style="font-size:20px;font-weight:600;color:var(--text-3);font-variant-numeric:tabular-nums;line-height:1.1">—</div>
+         <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">nog niet gekoppeld</div>`
+      : `<div style="font-size:26px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums;line-height:1.1">${esc(String(f.count))}</div>
+         <div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(f.count_label || '')}</div>`;
+    const kanalen = Array.isArray(f.kanalen) ? f.kanalen : [];
+    const kanaalStrip = kanalen.length
+      ? `<div style="display:flex;gap:4px;align-items:center;font-size:12px;color:var(--text-3)" title="Kanalen: ${esc(kanalen.join(', '))}">
+          ${kanalen.map((k) => `<span aria-hidden="true">${_ovKanaalIcon(k)}</span>`).join('')}
+        </div>` : '';
+    const granTag = f.granulariteit
+      ? `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);letter-spacing:.02em;white-space:nowrap">${esc(f.granulariteit)}</span>`
+      : '';
+    const laatsteRun = f.laatste_run
+      ? `<span style="font-size:10.5px;color:var(--text-3)">laatste run: ${esc(_fmtRel(f.laatste_run))}</span>`
+      : `<span style="font-size:10.5px;color:var(--text-3)">${clickable ? 'klik voor detail →' : 'binnenkort'}</span>`;
+    const statusPill = `<span title="${esc(f.count_error || '')}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};font-weight:600;white-space:nowrap">${esc((f.status && f.status.label) || '—')}</span>`;
+    const clickAttrs = clickable
+      ? `role="button" tabindex="0" onclick="window.__autGoTab('${esc(String(f.drilldown).toLowerCase())}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.__autGoTab('${esc(String(f.drilldown).toLowerCase())}');}"`
+      : 'aria-disabled="true"';
+    const cursor = clickable ? 'cursor:pointer' : 'cursor:default;opacity:.85';
+    return `<article ${clickAttrs} style="display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-left:4px solid ${accent.c};border-radius:var(--r);box-shadow:var(--shadow-xs);padding:14px 16px;gap:10px;${cursor};transition:box-shadow .12s,transform .12s"
+      onmouseover="if(${clickable ? 'true' : 'false'}){this.style.boxShadow='var(--shadow)';this.style.transform='translateY(-1px)';}"
+      onmouseout="this.style.boxShadow='var(--shadow-xs)';this.style.transform=''">
+      <header style="display:flex;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">${esc(f.categorie || '')}</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.naam || '')}</div>
+        </div>
+        ${statusPill}
+      </header>
+      <div>${countCell}</div>
+      <footer style="display:flex;align-items:center;gap:8px;padding-top:8px;border-top:1px solid var(--border);flex-wrap:wrap">
+        ${kanaalStrip}
+        ${granTag}
+        <span style="margin-left:auto">${laatsteRun}</span>
+      </footer>
+    </article>`;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // TAB: OVERZICHT (live status)
   // ═══════════════════════════════════════════════════════════════════════
   function overzichtView() {
     if (!_live.status.data && !_live.status.loading && !_live.status.error) queueMicrotask(fetchStatus);
+    if (!_live.overview.data && !_live.overview.loading && !_live.overview.error) queueMicrotask(fetchOverview);
     if (_live.status.error && !_live.status.data) return errBlk('status', _live.status.error, "window.__autRetry('status')") + _confirmModalHtml();
     if (_live.status.loading && !_live.status.data) return skel() + _confirmModalHtml();
 
@@ -457,11 +535,46 @@
     const crons = asArr(d.crons);
     const schakelaars = asArr(d.schakelaars);
 
+    // ── Flow-kaartjes-strook (nieuw) ──
+    const ovD = _live.overview.data;
+    const ovLoading = _live.overview.loading;
+    const ovError = _live.overview.error;
+    const flows = ovD && Array.isArray(ovD.flows) ? ovD.flows : [];
+    let flowGridHtml;
+    if (ovError && !ovD) {
+      flowGridHtml = `<div style="padding:14px 16px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:14px">
+        ⚠ Kon flows-overzicht niet laden: ${esc(ovError)}
+        <button class="btn btn-ghost btn-sm" style="margin-left:10px" onclick="window.__autRetry('overview')">Opnieuw</button>
+      </div>`;
+    } else if (ovLoading && !ovD) {
+      flowGridHtml = `<div style="padding:20px;color:var(--text-3);font-size:12.5px;text-align:center">⏳ Flows laden…</div>`;
+    } else {
+      flowGridHtml = `<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:12px;margin-bottom:16px">
+        ${flows.map(_ovFlowCard).join('')}
+      </div>`;
+    }
+
+    // ── KPI-strook (bestaand, ongewijzigd) ──
     const activeCnt = motoren.filter((m) => m.status === 'active').length;
     const unknownCnt = motoren.filter((m) => m.status === 'unknown').length;
     const failedCnt = motoren.reduce((a, m) => a + Number(m.last_24h_failed || 0), 0);
 
-    return `${H.kpis([
+    return `<div class="pad" style="padding:16px">
+      <header style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <div style="font-size:15px;font-weight:700;color:var(--text-1);letter-spacing:-.01em">Automatiseringen · flows</div>
+        <span style="font-size:11.5px;color:var(--text-3)">Klik op een kaart voor de drilldown</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__autRetry('overview')" title="Ververs">↻</button>
+      </header>
+      ${flowGridHtml}
+
+      <details style="margin-top:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)">
+        <summary style="cursor:pointer;padding:10px 14px;font-size:12.5px;font-weight:600;color:var(--text-2);border-radius:var(--r);list-style:none;display:flex;align-items:center;gap:8px">
+          <span aria-hidden="true">⚙</span>
+          <span>Systeem · motoren, schakelaars, crons</span>
+          <span style="margin-left:auto;font-size:11px;color:var(--text-3)">env: ${esc(d.env || '—')} · ${activeCnt} actief · ${failedCnt} fout · ${unknownCnt} onbekend · ${crons.length} crons</span>
+        </summary>
+        <div style="padding:12px 14px;border-top:1px solid var(--border)">
+    ${H.kpis([
       { c:'pink',    icon:I.zap    || I.tick, label:'Motoren actief (24u)', val:String(activeCnt), sub:motoren.length + ' totaal' },
       { c:'amber',   icon:I.alert, label:'Fouten (24u)',              val:String(failedCnt), hi: failedCnt > 0 ? 1 : 0 },
       { c:'slate',   icon:I.clock, label:'Status onbekend',           val:String(unknownCnt), sub:'Beheer via Vercel-dashboard' },
@@ -509,6 +622,9 @@
           )}
         </div>
       </div>
+    </div>
+        </div>
+      </details>
     </div>
     ${_confirmModalHtml()}`;
   }
@@ -564,6 +680,7 @@
 
   window.__autRetry = (block) => {
     if (block === 'status')   { _live.status.data = null; _live.status.error = null; fetchStatus(); }
+    if (block === 'overview') { _live.overview.data = null; _live.overview.error = null; fetchOverview(); }
     if (block === 'evAutos')  { _live.evAutos.data = null; _live.evAutos.error = null; fetchEvAutos(); }
     if (block === 'obAutos')  { _live.obAutos.data = null; _live.obAutos.error = null; fetchObAutos(); }
     if (block === 'lsInst')   { _live.lsInst.data = null; _live.lsInst.error = null; fetchLsInst(); }
