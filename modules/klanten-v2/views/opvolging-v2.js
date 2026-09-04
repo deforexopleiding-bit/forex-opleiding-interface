@@ -21,10 +21,15 @@
 // uit dezelfde agenda als de weekweergave. Afronden van een call maakt hooguit
 // een taak aan; de afspraakrecords zelf blijven ongemoeid.
 //
+// Het lampje rechtsboven in Vandaag toont of de WhatsApp-brug gekoppeld is, en
+// het paneel erachter laat Maxim of Dave zelf opnieuw koppelen als de sessie
+// eruit ligt. Alleen lezen, via het bestaande /api/opvolging-whatsapp-status.
+//
 // Endpoints: /api/opvolging-taken, /api/opvolging-dag,
 //            /api/opvolging-taak-update, /api/opvolging-poging,
 //            /api/opvolging-agenda (fase 2),
-//            /api/opvolging-taak-create (fase 3a)
+//            /api/opvolging-taak-create (fase 3a),
+//            /api/opvolging-whatsapp-status (alleen lezen)
 
 (function () {
   if (!window.DFO) { console.error('[opvolging-v2] DFO shell niet geladen.'); return; }
@@ -66,6 +71,22 @@
   // (/api/opvolging-agenda), maar dan één dag: de bezette momenten daarin
   // zijn Daves calls.
   const _calls = { loading: false, error: null, data: null, key: null };
+
+  // ── De WhatsApp-brug ──────────────────────────────────────────────────────
+  // Een lampje rechtsboven en een paneel om opnieuw te koppelen als de sessie
+  // eruit ligt. Leest alleen /api/opvolging-whatsapp-status; er wordt hier
+  // niets geschreven en er komt geen endpoint bij.
+  const WA_POLL_RUSTIG_MS  = 60000;   // lampje op de achtergrond
+  const WA_POLL_PANEEL_MS  = 5000;    // paneel open en nog niet gekoppeld
+  const WA_POLL_QR_MS      = 20000;   // de QR verloopt, dus die halen we opnieuw
+  const _wa = {
+    laden: false, data: null, error: null,
+    paneelOpen: false,
+    qr: null, qrError: null, qrLaden: false,
+  };
+  // Handles apart van de staat: een timer is geen gegeven maar een ding dat
+  // opgeruimd moet worden. Zie stopWaTimers().
+  const _waTimers = { status: null, qr: null };
 
   async function haal(url) {
     try {
@@ -139,6 +160,153 @@
     if (j.__error) { st.error = j.__error; st.data = null; }
     else { st.data = ((j.dagen || [])[0] || { bezet: [] }).bezet || []; }
     render();
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // WHATSAPP-BRUG — twee besluiten, apart en zonder DOM
+  // ═════════════════════════════════════════════════════════════════════════
+  // Deze twee functies bepalen wat je ziet en welke timers er lopen. Ze raken
+  // niets aan en zijn daarom los te controleren; zie
+  // tests/opvolging-whatsapp-koppel.test.js. Ze hangen onderaan dit bestand ook
+  // aan window.__opvWaHelpers, zodat je ze vanuit de console kunt naslaan.
+
+  /**
+   * De brug-status in gewone taal.
+   *
+   * Drie uitkomsten, en 'onbekend' is er bewust één van: als de status niet op
+   * te halen is weten we niet of de koppeling leeft. Dat dan als 'niet
+   * gekoppeld' tonen zou mensen naar de QR sturen terwijl er misschien niets
+   * aan de hand is — grijs met een korte uitleg is eerlijker.
+   */
+  function beschrijfWaStatus({ data, error } = {}) {
+    if (error) {
+      return {
+        kleur: 'grijs', label: 'WhatsApp', nummer: null, verbonden: false,
+        uitleg: 'De status is niet op te halen. ' + String(error),
+      };
+    }
+    if (!data) {
+      return { kleur: 'grijs', label: 'WhatsApp', nummer: null, verbonden: false, uitleg: 'Status wordt opgehaald…' };
+    }
+    if (data.verbonden === true) {
+      const nummer = toonNummer(data.nummer);
+      return {
+        kleur: 'groen', label: nummer || 'gekoppeld', nummer, verbonden: true,
+        uitleg: 'De brug is gekoppeld' + (nummer ? ' met ' + nummer : '') + '.',
+      };
+    }
+    return {
+      kleur: 'grijs', label: 'niet gekoppeld', nummer: null, verbonden: false,
+      uitleg: data.wacht_op_qr
+        ? 'Niet gekoppeld. Er staat een QR klaar om te scannen.'
+        : 'Niet gekoppeld. De brug draait wel; open dit paneel om te koppelen.',
+    };
+  }
+
+  /**
+   * Welke timers horen er te lopen?
+   *
+   *   gemount    — staat het lampje nog in beeld? Zo niet, dan is de gebruiker
+   *                weggenavigeerd en moet ALLES stoppen. Zonder deze uitgang
+   *                blijven de intervallen doorlopen op elke andere pagina.
+   *   paneelOpen — het koppelpaneel staat open.
+   *   verbonden  — de brug is gekoppeld.
+   *
+   * Zodra er gekoppeld is stopt het pollen helemaal: er valt niets meer te
+   * zien, en doorgaan zou de brug elke vijf seconden blijven bevragen voor een
+   * antwoord dat niet meer verandert.
+   */
+  function bepaalWaTimers({ gemount, paneelOpen, verbonden } = {}) {
+    if (!gemount) return { statusMs: null, qrMs: null };
+    if (!paneelOpen) return { statusMs: WA_POLL_RUSTIG_MS, qrMs: null };
+    if (verbonden)  return { statusMs: null, qrMs: null };
+    return { statusMs: WA_POLL_PANEEL_MS, qrMs: WA_POLL_QR_MS };
+  }
+
+  /** '32470111222' → '+32 470 111 222'. Onleesbaar? Dan onveranderd terug. */
+  function toonNummer(raw) {
+    const c = String(raw == null ? '' : raw).replace(/\D/g, '');
+    if (!c) return null;
+    return '+' + c.replace(/(\d{2})(\d{3})(\d{3})(\d+)/, '$1 $2 $3 $4');
+  }
+
+  /** Hoe lang geleden, in gewone taal. */
+  function geledenTekst(iso) {
+    if (!iso) return 'nog niets gezien';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return 'zojuist';
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return 'zojuist';
+    if (min < 60) return min + ' min geleden';
+    const uur = Math.floor(min / 60);
+    if (uur < 24) return uur + ' uur geleden';
+    return Math.floor(uur / 24) + ' dag' + (Math.floor(uur / 24) === 1 ? '' : 'en') + ' geleden';
+  }
+
+  // ── Ophalen ──────────────────────────────────────────────────────────────
+  // Fail-soft: een fout wordt onthouden en getoond, niet gegooid. De rest van
+  // het dagscherm mag hier nooit op stuklopen.
+  async function fetchWaStatus() {
+    if (_wa.laden) return;
+    _wa.laden = true;
+    const j = await haal('/api/opvolging-whatsapp-status?wat=status');
+    _wa.laden = false;
+    if (j.__error) { _wa.error = j.__error; _wa.data = null; }
+    else { _wa.data = j; _wa.error = null; }
+    herstelWaTimers();
+    render();
+  }
+
+  async function fetchWaQr() {
+    if (_wa.qrLaden) return;
+    _wa.qrLaden = true;
+    const j = await haal('/api/opvolging-whatsapp-status?wat=qr');
+    _wa.qrLaden = false;
+    if (j.__error) { _wa.qrError = j.__error; _wa.qr = null; }
+    else { _wa.qr = j.qr || null; _wa.qrError = j.qr ? null : (j.melding || null); }
+    render();
+  }
+
+  // ── Timers ───────────────────────────────────────────────────────────────
+  /** Alles stil. Wordt aangeroepen bij sluiten, bij wegnavigeren en bij unload. */
+  function stopWaTimers() {
+    if (_waTimers.status) { clearInterval(_waTimers.status); _waTimers.status = null; }
+    if (_waTimers.qr)     { clearInterval(_waTimers.qr);     _waTimers.qr = null; }
+  }
+
+  /** Staat het lampje nog in beeld? Zo niet, dan is de view weg. */
+  function waGemount() {
+    return typeof document !== 'undefined' && !!document.getElementById('opv-wa-lamp');
+  }
+
+  /**
+   * Zet de timers gelijk aan wat bepaalWaTimers() voorschrijft.
+   *
+   * Altijd eerst opruimen en dan opnieuw starten — bij elke render kan de
+   * gewenste cadans veranderd zijn, en twee intervallen op dezelfde taak is
+   * dubbel verkeer dat niemand terugziet.
+   */
+  function herstelWaTimers() {
+    const wens = bepaalWaTimers({
+      gemount   : waGemount(),
+      paneelOpen: _wa.paneelOpen,
+      verbonden : !!(_wa.data && _wa.data.verbonden),
+    });
+    stopWaTimers();
+    if (wens.statusMs) {
+      _waTimers.status = setInterval(() => {
+        // De view kan intussen vervangen zijn zonder dat iemand het ons vertelt;
+        // de shell kent geen afscheidshaak. Het lampje is de levensteken.
+        if (!waGemount()) { stopWaTimers(); return; }
+        fetchWaStatus();
+      }, wens.statusMs);
+    }
+    if (wens.qrMs) {
+      _waTimers.qr = setInterval(() => {
+        if (!waGemount()) { stopWaTimers(); return; }
+        fetchWaQr();
+      }, wens.qrMs);
+    }
   }
 
   const leegTakenCache = () => {
@@ -264,6 +432,22 @@
 .opv .call .sub{font-size:12.5px;color:var(--o-muted);margin-top:3px}
 .opv .call .act{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
 .opv .obtn.zoom{background:var(--o-purs);border-color:#d9ccff;color:#5a2fd6}
+/* WhatsApp-brug — lampje rechtsboven plus het koppelpaneel. Alles onder .opv,
+   zoals de rest van deze module; er staat niets globaals in. */
+.opv .kop{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px}
+.opv .kop .info{flex:1;margin:0}
+.opv .walamp{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--o-line);background:#fff;border-radius:20px;padding:6px 12px 6px 10px;font-size:12.5px;font-weight:650;font-family:inherit;cursor:pointer;color:var(--o-ink);box-shadow:var(--o-sh);white-space:nowrap}
+.opv .walamp:hover{border-color:#c9cfd8}
+.opv .walamp i{width:9px;height:9px;border-radius:50%;background:#c7ccd4;display:block;flex:0 0 auto}
+.opv .walamp.aan i{background:var(--o-grn);box-shadow:0 0 0 3px rgba(14,169,104,.18)}
+.opv .walamp .wt{color:var(--o-muted);font-weight:600}
+.opv .walamp.aan .wt{color:var(--o-ink);font-weight:650}
+.opv .waregel{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #f1f2f5;font-size:13.5px}
+.opv .waregel:last-child{border-bottom:0}
+.opv .waregel span:first-child{color:var(--o-muted)}
+.opv .waqr{display:block;width:320px;max-width:100%;height:auto;margin:14px auto 0;border:1px solid var(--o-line);border-radius:14px;background:#fff}
+.opv .wastap{margin:12px 0 0;padding-left:20px;font-size:13px;color:#414954;line-height:1.7}
+.opv .waklaar{background:var(--o-grns);border:1px solid #bfe9d6;color:#08794a;border-radius:12px;padding:14px 16px;text-align:center;font-size:14px;font-weight:650}
 .opv .mb{padding:18px 22px 22px}
 .opv .opt{display:flex;align-items:center;gap:13px;width:100%;text-align:left;padding:14px 15px;border:1px solid var(--o-line);border-radius:13px;background:#fff;cursor:pointer;margin-bottom:9px;font-family:inherit}
 .opv .opt:hover{border-color:var(--o-acc);background:var(--o-accs)}
@@ -397,6 +581,72 @@
     }).join('');
   }
 
+  /**
+   * Het lampje rechtsboven. Groen met het nummer als er gekoppeld is, anders
+   * grijs. Bij het eerste bezoek staat er nog niets: dan halen we de status op
+   * en start meteen de rustige cadans van één keer per minuut.
+   */
+  function waLamp() {
+    if (!_wa.data && !_wa.error && !_wa.laden) {
+      queueMicrotask(() => { fetchWaStatus(); });
+    } else if (!_waTimers.status && !_wa.paneelOpen) {
+      // Terug op deze tab na een uitstapje: de timers zijn dan opgeruimd.
+      queueMicrotask(() => herstelWaTimers());
+    }
+    const s = beschrijfWaStatus(_wa);
+    return '<button id="opv-wa-lamp" class="walamp' + (s.kleur === 'groen' ? ' aan' : '') + '"' +
+      ' title="' + esc(s.uitleg) + '" onclick="window.__opvWaOpen()">' +
+      '<i></i>&#128172;<span class="wt">' + esc(s.label) + '</span></button>';
+  }
+
+  /**
+   * Het koppelpaneel. Toont de status in gewone taal, en als er niet gekoppeld
+   * is de QR met de vier stappen eronder. Zodra de brug verbonden meldt komt
+   * daar een groene bevestiging voor in de plaats en stopt het pollen.
+   */
+  function waPaneelHtml() {
+    if (!_wa.paneelOpen) return '';
+    const s = beschrijfWaStatus(_wa);
+    const d = _wa.data || {};
+
+    let body = '<div class="waregel"><span>Status</span><span>' +
+      (s.verbonden ? '<b style="color:var(--o-grn)">gekoppeld</b>' : esc(s.label)) + '</span></div>' +
+      '<div class="waregel"><span>Nummer</span><span>' + esc(s.nummer || '—') + '</span></div>' +
+      '<div class="waregel"><span>Laatst iets gezien</span><span>' + esc(geledenTekst(d.laatste_actie)) + '</span></div>';
+
+    if (s.verbonden) {
+      body += '<div class="waklaar" style="margin-top:14px">&#10003; Gekoppeld' +
+        (s.nummer ? ' met ' + esc(s.nummer) : '') + '.<br>' +
+        '<span style="font-weight:600;font-size:12.5px">Je kunt dit venster sluiten.</span></div>';
+    } else if (_wa.error) {
+      // Geen QR tonen als we de brug niet eens kunnen bereiken: dan is een
+      // scherm vol instructies misleidend, want er valt niets te scannen.
+      body += '<div class="warn2" style="margin-top:14px"><b>De brug is nu niet bereikbaar.</b> ' +
+        esc(_wa.error) + '<br>Staat de service op de VPS aan?</div>';
+    } else {
+      body += _wa.qr
+        ? '<img class="waqr" width="320" height="320" alt="QR-code om WhatsApp te koppelen" src="' + esc(_wa.qr) + '">'
+        : '<div class="empty" style="margin-top:14px">' +
+            (_wa.qrError ? esc(_wa.qrError) : 'QR wordt opgehaald&hellip;') + '</div>';
+      body += '<ol class="wastap">' +
+        '<li>Open <b>WhatsApp</b> op de telefoon</li>' +
+        '<li>Ga naar <b>Instellingen</b></li>' +
+        '<li>Kies <b>Gekoppelde apparaten</b></li>' +
+        '<li>Tik op <b>Apparaat koppelen</b> en scan deze code</li></ol>' +
+        '<div class="ronde" style="margin-top:10px">De code ververst zichzelf; laat dit venster open tot het lampje groen wordt.</div>';
+    }
+
+    body += '<button class="obtn" style="width:100%;margin-top:16px" onclick="window.__opvWaSluit()">Sluiten</button>';
+
+    // Eigen scrim in plaats van de gedeelde: die sluit via __opvSluit, en dat
+    // laat de timers hier doorlopen.
+    return '<div class="opv"><div class="scrim" onmousedown="if(event.target===this)window.__opvWaSluit()">' +
+      '<div class="modal"><div class="mh"><div><h3>WhatsApp-brug</h3>' +
+      '<p>' + esc(s.uitleg) + '</p></div>' +
+      '<button class="x" onclick="window.__opvWaSluit()">&times;</button></div>' +
+      '<div class="mb">' + body + '</div></div></div></div>';
+  }
+
   function weekbalk(dag) {
     const nu = vandaag();
     const d0 = new Date(nu + 'T12:00:00Z');
@@ -423,16 +673,21 @@
     if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
 
     let h = '<div class="opv">';
-    h += '<div class="info">De spraakberichten en het nabelvenster hangen aan de WhatsApp-brug en volgen later; ' +
-      'die blokken staan hier bewust leeg in plaats van met cijfers die nog niet gemeten worden.</div>';
+    // Kop: de bestaande uitleg links, het brug-lampje rechts. Het lampje is
+    // tegelijk het levensteken waaraan de timers zien of deze view nog in beeld
+    // is — zie herstelWaTimers().
+    h += '<div class="kop">' +
+      '<div class="info">De spraakberichten en het nabelvenster hangen aan de WhatsApp-brug en volgen later; ' +
+      'die blokken staan hier bewust leeg in plaats van met cijfers die nog niet gemeten worden.</div>' +
+      waLamp() + '</div>';
     h += weekbalk(dag);
     // Boven de takenlijst: eerst wat er vaststaat vandaag, dan wat je zelf
     // moet oppakken. De agenda hangt niet aan de takenlijst — valt hij weg,
     // dan toont dit blok een melding en gaat de rest gewoon door.
     h += callsBlok(dag);
 
-    if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml();
-    if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml();
+    if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml() + waPaneelHtml();
+    if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml() + waPaneelHtml();
 
     const alles = st.data.taken || [];
     const r1 = alles.filter((t) => !t.later && !t.bel_vandaag && !t.wa_vandaag);
@@ -464,7 +719,7 @@
       }).join('');
     }
 
-    return h + '</div>' + modalHtml();
+    return h + '</div>' + modalHtml() + waPaneelHtml();
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -929,6 +1184,36 @@
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
   };
 
+  // ── WhatsApp-brug ─────────────────────────────────────────────────────────
+  window.__opvWaOpen = () => {
+    _wa.paneelOpen = true;
+    _wa.qr = null; _wa.qrError = null;
+    render();
+    // Meteen verversen in plaats van een tel wachten: wie dit paneel opent wil
+    // nú weten waar hij aan toe is.
+    fetchWaStatus();
+    if (!(_wa.data && _wa.data.verbonden)) fetchWaQr();
+    herstelWaTimers();
+  };
+
+  window.__opvWaSluit = () => {
+    _wa.paneelOpen = false;
+    _wa.qr = null; _wa.qrError = null;
+    // Eerst de timers terug naar de rustige cadans, dan pas tekenen — anders
+    // blijft de snelle poll van vijf seconden nog een ronde doorlopen.
+    herstelWaTimers();
+    render();
+  };
+
+  // Het tabblad gaat dicht of de pagina wordt vervangen. Zonder dit blijven de
+  // intervallen tot het laatst doorlopen; dezelfde les als bij de badge-poll in
+  // de hoofdnavigatie (zie CLAUDE.md, lesson learned 20).
+  window.addEventListener('beforeunload', stopWaTimers);
+
+  // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
+  // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
+  window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, toonNummer, geledenTekst };
+
   // ═════════════════════════════════════════════════════════════════════════
   // REGISTREREN
   // ═════════════════════════════════════════════════════════════════════════
@@ -939,5 +1224,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');
 
-  console.debug('[opvolging-v2] fase 3a — takenlijst, calls van vandaag, dekking, archief en agenda');
+  console.debug('[opvolging-v2] takenlijst, calls van vandaag, dekking, archief, agenda en WhatsApp-koppeling');
 })();
