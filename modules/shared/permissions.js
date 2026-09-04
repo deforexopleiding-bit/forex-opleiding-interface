@@ -6,10 +6,19 @@
    - super_admin → impliciet alles ('*').
    - andere rollen → union van role_permissions.allowed over alle user_roles.
 
-   NB (Fase 2, voorbereidend): role_permissions is nog LEEG en er wordt nog
-   NERGENS afgedwongen. Niet-super_admins krijgen dus voorlopig een lege set —
-   wire can()-checks pas in zodra de matrix gevuld is, anders sluit je iedereen
-   buiten. Deze helper voegt alleen de infrastructuur toe.
+   NB — deze notitie stond hier vanaf Fase 2 en klopt niet meer. Toen was
+   role_permissions nog leeg en werd er nergens afgedwongen; inmiddels staan er
+   ruim 1400 rijen in en dwingen meerdere endpoints de keys server-side af via
+   requirePermission(). can()-checks inbouwen is dus gewoon de bedoeling.
+
+   Waar je wel op moet letten: een feature-key zonder rij in role_permissions
+   geeft false, niet true. user_has_permission() beslist met een EXISTS op
+   `allowed = true`, dus een ontbrekende rij en een rij met false zijn voor de
+   functie hetzelfde — en de strikte requirePermission() maakt daar een 403 van.
+   Nieuwe keys hebben dus altijd een migratie nodig die de rollen toekent,
+   anders zit de module dicht voor iedereen behalve super_admin. Zie
+   docs/sql-migrations/2026-09-04-opvolging-role-permissions.sql voor het
+   patroon.
    ============================================================ */
 (function () {
   'use strict';
