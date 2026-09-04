@@ -3201,6 +3201,41 @@
     });
     return out;
   }
+  // BP3 v30 (2026-09-04) — GEDEELDE reply-detectie. Server (inbox-thread-
+  // unified) levert mail-items als channel='email' met subject/mailbox/
+  // imap_uid/email_id_composite/from_address ONDER m.meta. Retourneert het
+  // laatste inbound-mail-item met composite-id, of null.
+  // Wordt gebruikt door zowel _inboxComposeHtml (indicator + prefill-trigger)
+  // als __wbxInboxSend (email_id in payload) — één bron van waarheid.
+  function _wbxFindLastInboundMail(items) {
+    const arr = Array.isArray(items) ? items : [];
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const m = arr[i] || {};
+      const meta = m.meta || {};
+      const composite = meta.email_id_composite
+        || (meta.mailbox && meta.imap_uid ? `${meta.mailbox}:${meta.imap_uid}` : null);
+      const channelOk   = (m.channel === 'email' || m.channel === 'mail');
+      const directionOk = (m.direction === 'inbound' || m.direction === 'in');
+      if (channelOk && directionOk && composite) return m;
+    }
+    return null;
+  }
+
+  // BP3 v30 (2026-09-04) — scroll-preserve helper. Elk DFO.render() vervangt
+  // de shell en dus #wbxInboxList → scrollTop=0 bij aanklikken van een gesprek.
+  // Wrap: capture scrollTop → render → restore in RAF (nieuwe DOM staat pas
+  // dan). Zelfde patroon als _lsInbSafeRender in leadsonderhoud-v2.
+  function _wbxSafeRender() {
+    const el = document.getElementById('wbxInboxList');
+    const savedTop = el ? el.scrollTop : 0;
+    try { window.DFO?.render?.(); } catch (_) {}
+    if (savedTop <= 0) return;
+    requestAnimationFrame(() => {
+      const el2 = document.getElementById('wbxInboxList');
+      if (el2) el2.scrollTop = savedTop;
+    });
+  }
+
   // BROK 5-fix (v=11): stale-guard via _seq per __wbxInboxSelect.
   // Snel klikken A → B → A → fetches van eerder-verlaten convs die later
   // returnen mogen state niet meer overschrijven. Elke fetch capturet
@@ -3220,6 +3255,19 @@
       // Als 24u-venster nog niet expired volgens conv, reset de UI-toggle.
       if (bag.conversation && bag.conversation.can_send_text) _ui.inbox.compose.waWindowExpired = false;
       else if (bag.conversation && bag.conversation.can_send_text === false) _ui.inbox.compose.waWindowExpired = true;
+      // BP3 v30 (2026-09-04) — Reply-prefill: als deze thread bij het actieve
+      // gesprek hoort en de mail-onderwerp-input nog leeg is, prefill 'em met
+      // 'Re: <origineel>' zodra we het inbound-item hebben. Gebruikers-input
+      // wint (leeg-check garandeert dat we niet iets overschrijven wat de
+      // gebruiker net typte). Regex voorkomt dubbel 'Re: Re: '.
+      if (convId === _ui.inbox.selectedConv) {
+        const lastMail = _wbxFindLastInboundMail(bag.items);
+        const meta = (lastMail && lastMail.meta) || {};
+        if (lastMail && meta.subject && !(_ui.inbox.compose.subject || '').trim()) {
+          const reRe = /^\s*re\s*:\s*/i;
+          _ui.inbox.compose.subject = reRe.test(meta.subject) ? meta.subject : ('Re: ' + meta.subject);
+        }
+      }
     }
     _live.inbox.thread.loading[convId] = false;
     // SURFACE A polish (v=24-fix): surgical repaint van alleen de thread-scroll
@@ -3230,7 +3278,8 @@
       _repaintInboxThread(convId);
       _repaintInboxThreadHeader();
     } else {
-      try { window.DFO?.render?.(); } catch (_) {}
+      // BP3 v30 — scroll-preserve tijdens fallback-render.
+      _wbxSafeRender();
     }
   }
   async function _fetchInboxCtx(convId, mySeq) {
@@ -3308,7 +3357,9 @@
         apiPost('/api/email-actions', { email_id: emailId, action: 'mark-read' }).catch(() => {});
       }
     }, 1500); // 1.5s = ruim voldoende voor thread-fetch (typisch 200-500ms).
-    try { window.DFO?.render?.(); } catch (_) {}
+    // BP3 v30 — scroll-preserve op #wbxInboxList (voorheen: DFO.render zette
+    // scrollTop=0 bij aanklikken van een gesprek).
+    _wbxSafeRender();
   };
   // BROK 8 fix 5 (v=13): state-only oninput + surgical repaint van alleen de
   // conv-lijst. Voorheen: elke keystroke triggerde _fetchInboxConvs (server-side
@@ -3522,22 +3573,14 @@
       const rawSubject = (c.subject || '').trim();
       if (!body)    { c.error = 'Bericht is leeg.';   try { window.DFO?.render?.(); } catch (_) {} return; }
       const ctx = _live.inbox.ctx.byConv[convId];
-      // BP3 v28 (2026-09-03) — THREADING FIX (v29 velden-correctie 2026-09-04).
-      // Server (inbox-thread-unified) levert mail-items als channel='email' met
-      // subject/mailbox/imap_uid/email_id_composite/from_address ONDER m.meta.
-      // Lees dus meta-genest; fallback op top-level voor andere item-types.
-      // Endpoint (email-send-v2) heeft de threading-logica al ingebouwd via
-      // `email_id` (regel 133-165) — server zet In-Reply-To + References op de
-      // opgeslagen message_id. We hoeven alleen de composite door te geven.
+      // BP3 v28→v30 THREADING — gedeelde helper _wbxFindLastInboundMail
+      // (module-scope, ook gebruikt door _fetchInboxThread subject-prefill
+      // en _inboxComposeHtml reply-indicator). Server-payload: mail-items
+      // hebben channel='email' + subject/mailbox/imap_uid/email_id_composite/
+      // from_address in m.meta. Endpoint (email-send-v2) zet In-Reply-To +
+      // References als we email_id meesturen.
       const items = asArr(_live.inbox.thread.byConv[convId]?.items);
-      const lastInboundMail = [...items].reverse().find((m) => {
-        const meta = m.meta || {};
-        const composite = meta.email_id_composite
-          || (meta.mailbox && meta.imap_uid ? `${meta.mailbox}:${meta.imap_uid}` : null);
-        return (m.channel === 'email' || m.channel === 'mail')
-          && (m.direction === 'inbound' || m.direction === 'in')
-          && !!composite;
-      });
+      const lastInboundMail = _wbxFindLastInboundMail(items);
       const _lim = lastInboundMail || {};
       const _lmeta = _lim.meta || {};
       const replyEmailId = lastInboundMail
@@ -4075,7 +4118,19 @@
           </select>`;
       }
     } else if (c.channel === 'mail') {
-      composerHtml = `<input type="text" placeholder="Onderwerp" value="${esc(c.subject || '')}" oninput="__wbxInboxComposeField('subject',this.value)" style="width:100%;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-bottom:6px;box-sizing:border-box" />
+      // BP3 v30 (2026-09-04) — Reply-indicator: subtiele hint boven het
+      // onderwerp-veld als er een inbound mail is (dezelfde detectie als
+      // __wbxInboxSend + _fetchInboxThread prefill; gedeeld via helper).
+      const lastMail = _wbxFindLastInboundMail(bag?.items);
+      const lmeta = (lastMail && lastMail.meta) || {};
+      const replyToLabel = lmeta.from_name || lmeta.from_address || null;
+      const replyIndicator = (lastMail && replyToLabel)
+        ? `<div style="font-size:11px;color:var(--text-3);margin-bottom:6px;display:flex;align-items:center;gap:6px" title="Wordt verstuurd als antwoord in dezelfde e-mailthread (In-Reply-To + References).">
+            <span style="padding:1px 6px;border-radius:8px;background:var(--emerald-soft, rgba(16,185,129,.12));color:var(--emerald, #10B981);font-weight:600;font-size:10.5px">↩ Antwoord op</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${esc(replyToLabel)}</span>
+          </div>`
+        : '';
+      composerHtml = `${replyIndicator}<input type="text" placeholder="Onderwerp" value="${esc(c.subject || '')}" oninput="__wbxInboxComposeField('subject',this.value)" style="width:100%;font-size:12.5px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);margin-bottom:6px;box-sizing:border-box" />
         <textarea id="wbxComposeTxt" placeholder="Typ een mail…" oninput="__wbxInboxComposeField('text',this.value)" rows="4" style="width:100%;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(c.text || '')}</textarea>`;
     }
 
