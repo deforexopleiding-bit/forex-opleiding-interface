@@ -1,0 +1,6 @@
+node_modules/
+.env
+# LocalAuth-sessie: hier staat de ingelogde WhatsApp-sessie in. Nooit committen.
+.wwebjs_auth/
+.wwebjs_cache/
+*.log
