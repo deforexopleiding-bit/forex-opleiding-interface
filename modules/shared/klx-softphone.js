@@ -16,8 +16,10 @@
      - Server-side — /api/voys-sip-config (per-user SIP-account, RBAC-geleerd)
 
    Publieke API (window.KlxSoftphone):
-     open({ phone, name?, customerId?, source? })  — opent het rich belvenster
-     call(phone, { displayName?, line? })          — direct bellen (Promise)
+     open({ phone, name?, customerId?, source?, opvolgingTaakId? })
+                                                   — opent het rich belvenster
+     call(phone, { displayName?, line?, opvolgingTaakId? })
+                                                   — direct bellen (Promise)
      hangup()                                       — beëindig lopend gesprek
      ensureReady()                                  — fire-and-forget SIP-init
      isConfigured()                                 — sync: ≥1 lijn geregistreerd
@@ -88,7 +90,7 @@
     activeCustomer : null,
     // #call-log-B: draft wordt bij placeCall gezet, gepost bij Terminated
     // of beforeunload. Reset tussen calls via _resetCallLogDraft().
-    callLogDraft       : null,   // { to_number, from_number, line, started_at, customer_id, lead_id, meta }
+    callLogDraft       : null,   // { to_number, from_number, line, started_at, customer_id, lead_id, opvolging_taak_id, meta }
     callLogEstablished : false,  // 'answered'-marker; true zodra Established
     callLogPosted      : false,  // idempotency-guard: één POST per call
   };
@@ -424,6 +426,10 @@
       lead_id:      draft.lead_id,
       meta:         draft.meta,
     };
+    // Fase 2 — de opvolgmodule laat een gesprek automatisch als belpoging
+    // meetellen. De sleutel gaat alleen mee als er echt een taak is; zonder
+    // taak is deze body letterlijk gelijk aan die van voorheen.
+    if (draft.opvolging_taak_id) body.opvolging_taak_id = draft.opvolging_taak_id;
     try {
       const token = await (global.AuthShared?.getAccessToken?.() ?? Promise.resolve(null));
       const headers = { 'Content-Type': 'application/json' };
@@ -649,6 +655,12 @@
         // __fuDial in followup-v2.js zet leadId in customerId-slot.
         _clLeadId = _ctxUuid;
       }
+      // Fase 2 — optionele koppeling met een taak in de opvolgmodule. Twee
+      // bronnen zodat beide belwegen werken: KlxSoftphone.call(nr, { opvolgingTaakId })
+      // voor de rij-actie, en open({ ..., opvolgingTaakId }) voor het belvenster.
+      // Geen van beide gezet → null → het gedrag van voor fase 2.
+      const _opvTaakRaw = opts?.opvolgingTaakId || state.activeCustomer?.opvolgingTaakId || null;
+      const _opvTaakId  = (_opvTaakRaw && _CALL_LOG_UUID_RE.test(_opvTaakRaw)) ? _opvTaakRaw : null;
       state.callLogDraft = {
         to_number:   effPhone,
         from_number: chosenCid || null,
@@ -656,6 +668,7 @@
         started_at:  new Date().toISOString(),
         customer_id: _clCustomerId,
         lead_id:     _clLeadId,
+        opvolging_taak_id: _opvTaakId,
         meta: {
           source:             _srcHint || null,
           raw_context_id:     _ctxUuid,
@@ -894,7 +907,7 @@
   // ── Publieke API ─────────────────────────────────────────────────────────
   global.KlxSoftphone = {
     /**
-     * open({ phone, name?, customerId?, source? }) — opent het rich belvenster
+     * open({ phone, name?, customerId?, source?, opvolgingTaakId? }) — opent het rich belvenster
      * met lijn-select + bewerkbaar nummer + connect-status. customerId/source
      * zijn optionele meta-velden (voor toekomstige call-log-koppeling).
      */
@@ -902,7 +915,7 @@
       openSheet(customer || {});
     },
     /**
-     * call(phone, { displayName?, line? }) — direct bellen zonder sheet
+     * call(phone, { displayName?, line?, opvolgingTaakId? }) — direct bellen zonder sheet
      * (voor bulk-flows / rij-actie in lijsten). Retourneert Promise met
      * { ok, line, error? }. NIET aanroepen als een gesprek al actief is —
      * bel eerst hangup().

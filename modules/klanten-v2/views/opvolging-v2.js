@@ -13,8 +13,13 @@
 // verzonnen cijfers): de spraakberichten- en nabelblokken en de calls van
 // vandaag. Die hangen aan de WhatsApp-brug en de agendakoppeling — fase 2 en 3.
 //
+// Fase 2 voegt toe: belpogingen worden automatisch geteld (de softphone
+// stuurt de taak-id mee in zijn call-log), en 'Opnieuw inplannen' opent een
+// echte weekweergave uit de agenda in plaats van alleen een datumveld.
+//
 // Endpoints: /api/opvolging-taken, /api/opvolging-dag,
-//            /api/opvolging-taak-update, /api/opvolging-poging
+//            /api/opvolging-taak-update, /api/opvolging-poging,
+//            /api/opvolging-agenda (fase 2)
 
 (function () {
   if (!window.DFO) { console.error('[opvolging-v2] DFO shell niet geladen.'); return; }
@@ -45,6 +50,12 @@
     modal: null,            // { soort, taakId, ... }
     bezig: false,
   };
+
+  // Fase 2 — de agenda achter 'Opnieuw inplannen'. weekStart is de maandag
+  // die getoond wordt; weekOffset telt hoeveel weken we vooruit staan zodat
+  // de pijlen op zes weken kunnen stoppen.
+  const AGENDA_MAX_WEKEN = 6;
+  const _agenda = { loading: false, error: null, data: null, key: null, offset: 0 };
 
   async function haal(url) {
     try {
@@ -83,6 +94,30 @@
     if (j.__error) st.error = j.__error; else st.data = j.archief || [];
     render();
   }
+  /** De maandag van de week waarin `d` valt. */
+  function maandagVan(d) {
+    const dt = new Date(d + 'T12:00:00Z');
+    const dow = dt.getUTCDay();               // 0 = zondag
+    dt.setUTCDate(dt.getUTCDate() - ((dow + 6) % 7));
+    return dt.toISOString().slice(0, 10);
+  }
+  const agendaVan = () => dagPlus(maandagVan(vandaag()), _agenda.offset * 7);
+  const agendaTot = () => dagPlus(agendaVan(), 4);   // maandag t/m vrijdag
+
+  async function fetchAgenda() {
+    const van = agendaVan(), tot = agendaTot();
+    const key = van + '|' + tot;
+    const st = _agenda;
+    if (st.loading || (st.data && st.key === key)) return;
+    st.loading = true; st.error = null; st.key = key;
+    const j = await haal('/api/opvolging-agenda?van=' + van + '&tot=' + tot);
+    st.loading = false;
+    // Een fout is hier geen dood scherm: de handmatige datumkeuze staat
+    // eronder en blijft werken. Zie de melding in de modal.
+    if (j.__error) { st.error = j.__error; st.data = null; } else { st.data = j; }
+    render();
+  }
+
   const leegTakenCache = () => { _live.taken.data = null; _live.taken.key = null; _live.dash.data = null; _live.dash.key = null; _live.archief.data = null; };
 
   async function post(url, body) {
@@ -173,6 +208,22 @@
 .opv .mh{padding:20px 22px 14px;border-bottom:1px solid var(--o-line);display:flex;align-items:flex-start;gap:12px}
 .opv .mh h3{font-size:17px;margin:0}.opv .mh p{color:var(--o-muted);font-size:13px;margin:3px 0 0}
 .opv .mh .x{margin-left:auto;background:none;border:0;font-size:22px;color:#9aa2ad;cursor:pointer}
+/* Fase 2 — de agenda achter 'Opnieuw inplannen'. Vijf dagkolommen naast
+   elkaar; op een smal scherm wordt het één kolom per dag onder elkaar. */
+.opv .agh{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.opv .agh .rng{font-weight:650;font-size:13.5px;flex:1;text-align:center}
+.opv .agw{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+@media(max-width:640px){.opv .agw{grid-template-columns:1fr}}
+.opv .agd{border:1px solid var(--o-line);border-radius:12px;background:#fcfcfd;padding:8px;min-height:96px}
+.opv .agd>.dh{font-size:11.5px;font-weight:700;color:var(--o-muted);text-align:center;margin-bottom:7px}
+.opv .agd>.dh b{display:block;font-size:14px;color:var(--o-ink);font-weight:750}
+.opv .slot{display:block;width:100%;border-radius:8px;padding:5px 6px;font-size:12px;font-weight:650;font-family:inherit;margin-bottom:5px;text-align:center;border:1px solid transparent}
+.opv .slot.vrij{background:var(--o-accs);border-color:#c8d8ff;color:#1a49c4;cursor:pointer}
+.opv .slot.vrij:hover{background:var(--o-acc);border-color:var(--o-acc);color:#fff}
+.opv .slot.bezet{background:#f1f2f5;color:#8b93a0;cursor:default}
+.opv .slot.bezet .w{display:block;font-size:10.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opv .agleeg{font-size:11.5px;color:#a2a9b4;text-align:center;padding:10px 0}
+.opv .warn2{background:var(--o-ambs);border:1px solid #f0d9ac;color:#8a5300;border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:12px}
 .opv .mb{padding:18px 22px 22px}
 .opv .opt{display:flex;align-items:center;gap:13px;width:100%;text-align:left;padding:14px 15px;border:1px solid var(--o-line);border-radius:13px;background:#fff;cursor:pointer;margin-bottom:9px;font-family:inherit}
 .opv .opt:hover{border-color:var(--o-acc);background:var(--o-accs)}
@@ -443,10 +494,17 @@
     }
 
     if (m.soort === 'inplannen') {
-      body = '<div class="info">De agendakoppeling komt in fase 2. Tot dan boek je de call zoals je nu doet, en zet je de lead hier op de dag van de afspraak.</div>' +
+      // De handmatige datumkeuze staat er ALTIJD onder, ook als de agenda
+      // gewoon werkt. Valt de agenda weg, dan is dit geen noodoplossing maar
+      // de weg die er toch al was — en dan is er nooit een leeg scherm.
+      const handmatig =
+        '<div style="border-top:1px solid var(--o-line);margin-top:16px;padding-top:14px">' +
+        '<div class="ronde">Of zet hem zelf op een dag, zonder de agenda.</div>' +
         '<input type="date" id="opv-dt" value="' + dagPlus(vandaag(), 1) + '">' +
-        '<button class="obtn p" style="width:100%;margin-top:14px" onclick="window.__opvVerplaats()">Zet op deze dag</button>';
-      return scrim('Call inplannen met ' + esc(t.naam), 'Fase 1 — nog zonder live agenda', body);
+        '<button class="obtn" style="width:100%;margin-top:10px" onclick="window.__opvVerplaats()">Zet op deze dag</button></div>';
+      return scrim('Call inplannen met ' + esc(t.naam),
+        'Kies een moment in de agenda, of zet hem zelf op een dag.',
+        agendaBlok() + handmatig);
     }
 
     if (m.soort === 'historiek') {
@@ -459,6 +517,53 @@
     }
     return '';
   }
+  /**
+   * De week: vijf dagkolommen, pijlen vorige/volgende, tot zes weken vooruit.
+   * Bezet is grijs met de naam erbij zodat zichtbaar is waaróm een moment weg
+   * is; vrij is blauw en klikbaar.
+   */
+  function agendaBlok() {
+    const van = agendaVan(), tot = agendaTot();
+    if (!_agenda.data && !_agenda.loading && !_agenda.error) fetchAgenda();
+
+    const terug = _agenda.offset > 0;
+    const heen  = _agenda.offset < AGENDA_MAX_WEKEN - 1;
+    const kop =
+      '<div class="agh">' +
+      '<button class="obtn" ' + (terug ? '' : 'disabled style="opacity:.4;cursor:default" ') +
+        'onclick="window.__opvWeek(-1)">&#8592;</button>' +
+      '<span class="rng">' + nl(van) + ' &ndash; ' + nl(tot) +
+        (_agenda.offset === 0 ? ' &middot; deze week' : '') + '</span>' +
+      '<button class="obtn" ' + (heen ? '' : 'disabled style="opacity:.4;cursor:default" ') +
+        'onclick="window.__opvWeek(1)">&#8594;</button></div>';
+
+    if (_agenda.loading && !_agenda.data) return kop + '<div class="agleeg">Agenda laden&hellip;</div>';
+    if (_agenda.error) {
+      return kop + '<div class="warn2"><b>De agenda is nu niet bereikbaar.</b> ' + esc(_agenda.error) +
+        '<br>Je kunt hem hieronder gewoon zelf op een dag zetten.</div>';
+    }
+
+    const d = _agenda.data;
+    const dagen = (d && d.dagen) || [];
+    const melding = d && d.melding
+      ? '<div class="warn2">' + esc(d.melding) + '</div>' : '';
+
+    const kolommen = dagen.map((dag) => {
+      const vrij = (dag.vrij || []).map((s) =>
+        '<button class="slot vrij" onclick="window.__opvBoek(\'' + esc(s.iso) + '\')">' + esc(s.tijd) + '</button>').join('');
+      const bezet = (dag.bezet || []).map((b) =>
+        '<span class="slot bezet">' + esc(b.tijd) + '<span class="w">' + esc(b.naam) + '</span></span>').join('');
+      const leeg = (!vrij && !bezet) ? '<div class="agleeg">&mdash;</div>' : '';
+      return '<div class="agd"><div class="dh">' + esc(dagNaam(dag.dag)) + '<b>' + esc(nl(dag.dag)) + '</b></div>' +
+        vrij + bezet + leeg + '</div>';
+    }).join('');
+
+    return kop + melding + '<div class="agw">' + kolommen + '</div>';
+  }
+
+  const DAGNAMEN = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
+  const dagNaam = (d) => DAGNAMEN[new Date(d + 'T12:00:00Z').getUTCDay()] || '';
+
   const opt = (em, bg, titel, sub, actie) =>
     '<button class="opt" onclick="' + actie + '"><div class="em" style="background:' + bg + '">' + em + '</div>' +
     '<div><b>' + titel + '</b><span>' + sub + '</span></div></button>';
@@ -522,13 +627,28 @@
 
   window.__opvBel = async (id) => {
     const t = zoekTaak(id); if (!t) return;
-    // De softphone opent het gesprek; de poging wordt hier vastgelegd zodat ze
-    // meetelt. In fase 2 komt de koppeling met /api/softphone-call-log erbij.
+    if (!t.telefoon) { alert('Geen telefoonnummer bekend.'); return; }
+    // Fase 2 — de poging wordt NIET meer hier geschreven. De softphone stuurt
+    // de taak-id mee in zijn call-log, en /api/softphone-call-log maakt daar
+    // de poging van: met de echte duur, en met 'gesproken' of 'niet opgenomen'
+    // in plaats van 'gebeld via de softphone'. Hier óók loggen zou elk gesprek
+    // dubbel laten tellen, en juist die telling bepaalt het oordeel in Afgerond.
+    //
+    // De naam van de global was hier fout (window.KLX); de softphone heet
+    // window.KlxSoftphone, zoals overal elders. Daardoor belde deze knop in
+    // fase 1 helemaal niet.
+    const sp = window.KlxSoftphone;
+    if (!sp || typeof sp.call !== 'function') {
+      alert('De softphone is niet beschikbaar op deze pagina.');
+      return;
+    }
     try {
-      if (window.KLX && typeof window.KLX.call === 'function' && t.telefoon) window.KLX.call(t.telefoon);
-      await post('/api/opvolging-poging', { taak_id: id, soort: 'call', resultaat: 'gebeld via de softphone', automatisch: false });
-      leegTakenCache(); render();
-    } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
+      await sp.call(t.telefoon, { displayName: t.naam || '', opvolgingTaakId: id });
+    } catch (e) {
+      // KlxSoftphone toont zelf al een toast met de reden; hier niet nog een
+      // tweede melding overheen.
+      console.warn('[opvolging-v2] bellen mislukt:', (e && e.message) || e);
+    }
   };
 
   window.__opvWa = async (id) => {
@@ -538,6 +658,31 @@
       await post('/api/opvolging-poging', { taak_id: id, soort: 'whatsapp', resultaat: 'WhatsApp geopend', automatisch: false });
       leegTakenCache(); render();
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
+  };
+
+  window.__opvWeek = (stap) => {
+    const n = _agenda.offset + stap;
+    if (n < 0 || n >= AGENDA_MAX_WEKEN) return;
+    _agenda.offset = n;
+    _agenda.data = null; _agenda.key = null; _agenda.error = null;
+    render();
+  };
+
+  window.__opvBoek = async (startIso) => {
+    const m = _ui.modal; if (!m || !startIso) return;
+    if (_ui.bezig) return;
+    try {
+      await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso });
+      // De taak staat nu op 'ingepland' en de poging is server-side gezet;
+      // hier alleen de caches legen zodat het scherm de nieuwe stand toont.
+      _ui.modal = null;
+      _agenda.data = null; _agenda.key = null;
+      leegTakenCache(); render();
+    } catch (e) {
+      alert('Inplannen niet gelukt: ' + (e.message || 'onbekende fout'));
+      // Het slot kan intussen bezet zijn — opnieuw ophalen zodat de week klopt.
+      _agenda.data = null; _agenda.key = null; render();
+    }
   };
 
   window.__opvTerug = async (id) => {
@@ -557,5 +702,5 @@
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');
 
-  console.debug('[opvolging-v2] fase 1 — takenlijst, dekking en archief');
+  console.debug('[opvolging-v2] fase 2 — takenlijst, dekking, archief en agenda');
 })();
