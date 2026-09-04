@@ -5172,6 +5172,39 @@
       <div class="set-empty-s">Deze systeem-tools zijn zichtbaar voor super_admin. Vraag Amigo of Jeffrey om toegang, of gebruik "Bekijk als → Super admin" (dev/preview).</div>
     </div>`;
   }
+  // ── GHL-agenda's ophalen (read-only) — hulp bij AFSPRAAK_CALENDAR_IDS ──
+  const _agenda = { busy: false, data: null, error: null };
+  window.__setAdminAgendaFetch = async () => {
+    _agenda.busy = true; _agenda.error = null; if (render) render();
+    const j = await tryFetch('agenda-list', '/api/admin-afspraak-ghl-workflow-uitschrijven?calendars=1');
+    _agenda.busy = false;
+    if (j?.__error || j?.error) _agenda.error = (j.__error || j.error);
+    else _agenda.data = j;
+    if (render) render();
+  };
+  function _sysAgendaCard() {
+    const busy = _agenda.busy, d = _agenda.data, err = _agenda.error;
+    const rows = (d?.calendars || []).map((c) => `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:5px 8px;font-family:var(--mono,monospace);font-size:11px">${esc(c.id || '')}</td>
+      <td style="padding:5px 8px">${esc(c.name || '—')}</td>
+      <td style="padding:5px 8px">${c.isActive === true ? '<span style="color:var(--emerald);font-weight:600">actief</span>' : c.isActive === false ? '<span style="color:var(--text-3)">inactief</span>' : '—'}</td>
+    </tr>`).join('');
+    return `<div class="card" style="margin-bottom:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+      <div style="padding:12px 16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">📅 GHL-agenda's (kalenders)</div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.55;margin-bottom:10px">Read-only overzicht van de GHL-calendars (id · naam · status) — hulp bij het samenstellen van <code>AFSPRAAK_CALENDAR_IDS</code> voor de verbrede afspraak-reminders. Verandert niets.</div>
+        <button class="btn btn-ghost btn-sm" ${busy ? 'disabled' : ''} onclick="window.__setAdminAgendaFetch()">${busy ? "Ophalen…" : "📅 Agenda's ophalen"}</button>
+        ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-top:10px">${esc(err)}</div>` : ''}
+        ${d ? `<div style="margin-top:10px;font-size:12px">
+          <div style="color:var(--text-3);margin-bottom:6px">Totaal: <b>${d.totaal ?? (d.calendars ? d.calendars.length : 0)}</b></div>
+          <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="text-align:left;color:var(--text-3)"><th style="padding:5px 8px">id</th><th style="padding:5px 8px">naam</th><th style="padding:5px 8px">status</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="3" style="padding:8px;color:var(--text-3)">Geen agenda&#39;s gevonden.</td></tr>'}</tbody>
+          </table></div>
+        </div>` : ''}
+      </div>
+    </div>`;
+  }
   function _sysBackfillContactsCard() {
     const busy = _ui.adminBackfillBusy;
     const d = _live.adminBackfillContacts.data;
@@ -5250,6 +5283,7 @@
     return `<div style="max-width:900px">
       ${_sysBackfillContactsCard()}
       ${_sysGhlBackfillCard()}
+      ${_sysAgendaCard()}
       ${_sysReportenCard()}
       ${_sysCronsCard()}
     </div>`;
