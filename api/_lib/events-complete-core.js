@@ -667,13 +667,12 @@ export async function runEventsCompleteCore({ userId, body }) {
     //
     // WAAROM EEN EIGEN LUS EN NIET ONDERIN DE VORIGE
     // De lus hierboven begint met `if (!aanwezigTrigger && !afwezigTrigger)
-    // continue;`. Daar komt 'geen_interesse' nooit voorbij: die outcome zit
-    // niet in FOLLOWUP_OUTCOMES en de deelnemer was aanwezig, dus beide
-    // triggers zijn vals. Een blok dat achter Punt A hangt zou dat geval dus
-    // stil overslaan, terwijl het juist een rij hoort op te leveren (meteen
-    // gearchiveerd, met het bezwaar erbij). Die `continue` aanpassen mag niet
-    // en hoeft ook niet — een eigen lus over dezelfde attendeesIn ziet ze
-    // allemaal en laat de bestaande weg volledig met rust.
+    // continue;`, en die voorwaarde hangt aan wat event_followups nodig heeft.
+    // Wat er in de takenpot hoort te komen is een eigen vraag; die twee aan
+    // elkaar knopen betekent dat een wijziging aan de ene weg de andere stil
+    // meeneemt. Een eigen lus over dezelfde attendeesIn beslist zelf, laat de
+    // bestaande weg volledig met rust, en houdt de vertaaltabel op één plek
+    // (bouwOpvolgingTaak, onderaan dit bestand).
     //
     // FAIL-SOFT, NET ALS PUNT A
     // Eén try/catch per deelnemer. Wat hier misgaat mag het afronden van het
@@ -706,8 +705,8 @@ export async function runEventsCompleteCore({ userId, body }) {
         if (attErr) throw new Error('att fetch: ' + attErr.message);
         if (!att) throw new Error('attendee not found');
 
-        // De event_followups-rij van hierboven, als die er is. Bij
-        // 'geen_interesse' bestaat hij niet — dan blijft followup_id null.
+        // De event_followups-rij van hierboven, als die er is. Bestaat hij
+        // niet, dan blijft followup_id null; de kaart kan er prima zonder.
         let followupId = null;
         try {
           const { data: fu } = await supabaseAdmin
@@ -722,7 +721,6 @@ export async function runEventsCompleteCore({ userId, body }) {
         const taak = bouwOpvolgingTaak({
           attendanceStatus: a.attendance_status,
           outcome         : a.outcome,
-          outcomeReason   : a.outcome_reason,
           followup        : a.followup,
           afwezig         : a.afwezig,
           eventId,
@@ -1083,20 +1081,27 @@ function opvolgingBadgeLabel(titel, startsAt) {
  *
  *   aanwezig + opvolgen        → reden 'wil_nog_beslissen', due = het gekozen
  *                                belmoment, notitie = de ingevulde notitie
+ *   aanwezig + twijfelt_nog    → exact hetzelfde als 'opvolgen'
  *   aanwezig + klant_geworden  → GEEN kaart (die is binnen)
- *   aanwezig + geen_interesse  → kaart, meteen 'gearchiveerd', met het bezwaar
- *                                in archief_reden en gearchiveerd_at op nu
+ *   aanwezig + geen_interesse  → GEEN kaart (zie hieronder)
  *   aanwezig + nog_onbekend    → GEEN kaart (je weet het nog niet)
  *   no_show                    → reden 'no_show_event', reden_code = de
  *                                aangeklikte AFWEZIG_REDENEN-code
  *   afgemeld                   → reden 'afgemeld', idem
  *
- * Twee dingen die opvallen als je de tabel naast de kolommen legt:
+ * Drie dingen die opvallen als je de tabel naast de kolommen legt:
  *
- *  · `reden` is NOT NULL met een CHECK op vijf waarden, dus ook de kaart die
- *    meteen dichtgaat moet er één dragen. Bij 'geen_interesse' is dat
- *    'wil_nog_beslissen': het is de waarde voor 'was aanwezig, nog geen klant'.
- *    De echte informatie zit in archief_reden — dat is het bezwaar.
+ *  · 'twijfelt_nog' loopt mee met 'opvolgen'. Die outcome wordt sinds het
+ *    samenvoegen van de twee niet meer verstuurd, maar een oude of handmatige
+ *    payload kan 'm nog dragen. Zou hij hier null opleveren, dan krijgt die
+ *    deelnemer wel een follow_up_leads-rij via Punt A maar geen kaart — precies
+ *    het stille verdwijnen dat deze pot moet voorkomen.
+ *  · 'geen_interesse' levert bewust GEEN kaart op. Zo'n kaart zou met nul
+ *    belpogingen en nul WhatsApps in Afgerond belanden en daar het rode oordeel
+ *    'te weinig moeite' krijgen, terwijl er nooit iets mee gedaan hoefde te
+ *    worden. Dat maakt juist de steekproef kapot waarvoor dat scherm bestaat.
+ *    De nee is niet weg: die staat op event_attendees.outcome_reason en in
+ *    event_followups.
  *  · Bij een afwezige valt de reden terug op 'onbekend' en het belmoment op
  *    datumOverDagen(AFWEZIG_BELMOMENT_DAGEN[...]), precies zoals de bestaande
  *    weg hierboven dat doet. Wie er niet was mag nooit kwijtraken, ook niet als
@@ -1107,7 +1112,7 @@ function opvolgingBadgeLabel(titel, startsAt) {
  * eigenaar is voor het hele CRM-team zichtbaar en niet voor niemand.
  */
 function bouwOpvolgingTaak({
-  attendanceStatus, outcome, outcomeReason, followup, afwezig,
+  attendanceStatus, outcome, followup, afwezig,
   eventId, att, followupId = null, badgeLabel = null,
 }) {
   const status = String(attendanceStatus || '');
@@ -1132,7 +1137,9 @@ function bouwOpvolgingTaak({
   };
 
   if (status === 'aanwezig') {
-    if (uitkomst === 'opvolgen') {
+    // Dezelfde twee die hierboven FOLLOWUP_OUTCOMES vormen, en om dezelfde
+    // reden: allebei betekenen ze 'was er, wil nog beslissen'.
+    if (FOLLOWUP_OUTCOMES.has(uitkomst)) {
       const fu = (followup && typeof followup === 'object') ? followup : {};
       const notitie = fu.reason != null ? String(fu.reason).slice(0, 500) : null;
       return {
@@ -1143,17 +1150,9 @@ function bouwOpvolgingTaak({
         ...(notitie ? { notitie } : {}),
       };
     }
-    if (uitkomst === 'geen_interesse') {
-      const bezwaar = outcomeReason != null ? String(outcomeReason).trim() : '';
-      return {
-        ...basis,
-        reden          : 'wil_nog_beslissen',
-        status         : 'gearchiveerd',
-        archief_reden  : bezwaar || null,
-        gearchiveerd_at: new Date().toISOString(),
-      };
-    }
-    // klant_geworden, nog_onbekend en alles wat de tabel niet noemt.
+    // klant_geworden, geen_interesse, nog_onbekend en alles wat de tabel niet
+    // noemt. Voor 'geen_interesse' is dat een bewuste keuze — zie de toelichting
+    // boven deze functie.
     return null;
   }
 

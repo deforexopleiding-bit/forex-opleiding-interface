@@ -8,13 +8,14 @@
 // kaart te veel betekent dat een klant die net getekend heeft alsnog op de
 // bellijst staat. Allebei merk je pas dagen later, en dan is het al gebeurd.
 //
-// De zes gevallen uit de vertaaltabel:
+// De gevallen uit de vertaaltabel:
 //   1. aanwezig + opvolgen       → kaart, reden 'wil_nog_beslissen'
-//   2. aanwezig + klant_geworden → GEEN kaart
-//   3. aanwezig + geen_interesse → kaart, meteen gearchiveerd, met bezwaar
-//   4. aanwezig + nog_onbekend   → GEEN kaart
-//   5. no_show                   → kaart, reden 'no_show_event'
-//   6. afgemeld                  → kaart, reden 'afgemeld'
+//   2. aanwezig + twijfelt_nog   → exact dezelfde kaart als 'opvolgen'
+//   3. aanwezig + klant_geworden → GEEN kaart
+//   4. aanwezig + geen_interesse → GEEN kaart
+//   5. aanwezig + nog_onbekend   → GEEN kaart
+//   6. no_show                   → kaart, reden 'no_show_event'
+//   7. afgemeld                  → kaart, reden 'afgemeld'
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,30 +62,44 @@ test('1 · aanwezig + opvolgen wordt een open kaart met het gekozen belmoment', 
   assert.equal(t.archief_reden, undefined);
 });
 
-test('2 · aanwezig + klant_geworden levert GEEN kaart op', () => {
+test('2 · aanwezig + twijfelt_nog levert exact dezelfde kaart als opvolgen', () => {
+  // 'twijfelt_nog' wordt sinds het samenvoegen van de twee niet meer verstuurd,
+  // maar een oude of handmatige payload kan 'm nog dragen. Levert hij niets op,
+  // dan krijgt die deelnemer wel een follow_up_leads-rij via Punt A maar geen
+  // kaart, en verdwijnt hij precies zo stil als deze pot moet voorkomen.
+  const followup = { follow_up_date: '2026-09-10', reason: 'Wil het thuis bespreken' };
+  const twijfel  = bouw({ attendanceStatus: 'aanwezig', outcome: 'twijfelt_nog', followup });
+  const opvolgen = bouw({ attendanceStatus: 'aanwezig', outcome: 'opvolgen',     followup });
+  assert.ok(twijfel, 'een twijfelaar hoort een kaart te krijgen');
+  assert.deepEqual(twijfel, opvolgen);
+  assert.equal(twijfel.reden, 'wil_nog_beslissen');
+  assert.equal(twijfel.due, '2026-09-10');
+  assert.equal(twijfel.notitie, 'Wil het thuis bespreken');
+});
+
+test('3 · aanwezig + klant_geworden levert GEEN kaart op', () => {
   assert.equal(bouw({ attendanceStatus: 'aanwezig', outcome: 'klant_geworden' }), null);
 });
 
-test('3 · aanwezig + geen_interesse wordt meteen gearchiveerd, met het bezwaar', () => {
-  const t = bouw({
-    attendanceStatus: 'aanwezig',
-    outcome         : 'geen_interesse',
-    outcomeReason   : 'Te duur',
-  });
-  assert.ok(t, 'ook een afwijzing hoort vastgelegd te worden');
-  assert.equal(t.status, 'gearchiveerd');
-  assert.equal(t.archief_reden, 'Te duur');
-  assert.match(t.gearchiveerd_at, /^\d{4}-\d{2}-\d{2}T/);
-  // `reden` is NOT NULL met een CHECK op vijf waarden; ook de dichte kaart
-  // draagt er één. De echte informatie zit in archief_reden.
-  assert.equal(t.reden, 'wil_nog_beslissen');
+test('4 · aanwezig + geen_interesse levert GEEN kaart op', () => {
+  // Bewust geen kaart. Een rij die meteen dicht is komt met nul belpogingen en
+  // nul WhatsApps in Afgerond terecht en krijgt daar het rode oordeel 'te weinig
+  // moeite', terwijl er nooit iets mee gedaan hoefde te worden — dat maakt de
+  // steekproef kapot waarvoor dat scherm bestaat. De nee blijft staan op
+  // event_attendees.outcome_reason en in event_followups.
+  assert.equal(bouw({ attendanceStatus: 'aanwezig', outcome: 'geen_interesse' }), null);
+  // Ook mét een ingevuld bezwaar blijft het bij niets.
+  assert.equal(
+    bouw({ attendanceStatus: 'aanwezig', outcome: 'geen_interesse', outcomeReason: 'Te duur' }),
+    null,
+  );
 });
 
-test('4 · aanwezig + nog_onbekend levert GEEN kaart op', () => {
+test('5 · aanwezig + nog_onbekend levert GEEN kaart op', () => {
   assert.equal(bouw({ attendanceStatus: 'aanwezig', outcome: 'nog_onbekend' }), null);
 });
 
-test('5 · no_show wordt een kaart met de aangeklikte reden', () => {
+test('6 · no_show wordt een kaart met de aangeklikte reden', () => {
   const t = bouw({
     attendanceStatus: 'no_show',
     afwezig         : { reason_code: 'kon_niet', follow_up_date: '2026-09-04', note: 'Ziek' },
@@ -97,7 +112,7 @@ test('5 · no_show wordt een kaart met de aangeklikte reden', () => {
   assert.equal(t.notitie, 'Ziek');
 });
 
-test('6 · afgemeld wordt een kaart met dezelfde vorm, andere reden', () => {
+test('7 · afgemeld wordt een kaart met dezelfde vorm, andere reden', () => {
   const t = bouw({
     attendanceStatus: 'afgemeld',
     afwezig         : { reason_code: 'afgemeld_bericht', follow_up_date: '2026-09-06' },
@@ -140,18 +155,12 @@ test('opvolgen zonder belmoment laat due weg zodat de database vandaag invult', 
   assert.equal(t.notitie, 'Belt zelf terug');
 });
 
-test('geen_interesse zonder bezwaar levert nog steeds een gearchiveerde kaart', () => {
-  const t = bouw({ attendanceStatus: 'aanwezig', outcome: 'geen_interesse' });
-  assert.equal(t.status, 'gearchiveerd');
-  assert.equal(t.archief_reden, null);
-});
-
 // ── De vaste velden die elke kaart draagt ──────────────────────────────────
 
 test('elke kaart draagt bron, bron_ref, badge en contactgegevens', () => {
   const gevallen = [
-    { attendanceStatus: 'aanwezig', outcome: 'opvolgen', followup: { follow_up_date: '2026-09-10', reason: 'x' } },
-    { attendanceStatus: 'aanwezig', outcome: 'geen_interesse', outcomeReason: 'Te duur' },
+    { attendanceStatus: 'aanwezig', outcome: 'opvolgen',     followup: { follow_up_date: '2026-09-10', reason: 'x' } },
+    { attendanceStatus: 'aanwezig', outcome: 'twijfelt_nog', followup: { follow_up_date: '2026-09-10', reason: 'x' } },
     { attendanceStatus: 'no_show',  afwezig: { reason_code: 'kon_niet' } },
     { attendanceStatus: 'afgemeld', afwezig: { reason_code: 'kon_niet' } },
   ];
@@ -183,6 +192,19 @@ test('naam valt terug op het mailadres en dan op (onbekend)', () => {
   // `naam` is NOT NULL — een lege string zou de insert laten klappen.
   assert.equal(kaal.naam, '(onbekend)');
   assert.equal(kaal.bron_ref.followup_id, null);
+});
+
+test('een aanwezige levert nooit een kaart op die meteen dicht staat', () => {
+  // De takenpot is een werklijst. Een rij die bij aanmaken al gearchiveerd is
+  // heeft daar niets te zoeken; Afgerond zou 'm meetellen in het oordeel over
+  // hoeveel moeite er gedaan is.
+  for (const outcome of ['opvolgen', 'twijfelt_nog', 'klant_geworden', 'geen_interesse', 'nog_onbekend']) {
+    const t = bouw({ attendanceStatus: 'aanwezig', outcome, followup: { reason: 'x' } });
+    if (!t) continue;
+    assert.equal(t.status, 'open', `${outcome} hoort een open kaart of niets te zijn`);
+    assert.equal(t.gearchiveerd_at, undefined);
+    assert.equal(t.archief_reden, undefined);
+  }
 });
 
 test('een onbekende aanwezigheidsstatus levert niets op', () => {
