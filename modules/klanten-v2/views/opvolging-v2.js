@@ -86,7 +86,12 @@
   };
   // Handles apart van de staat: een timer is geen gegeven maar een ding dat
   // opgeruimd moet worden. Zie stopWaTimers().
-  const _waTimers = { status: null, qr: null };
+  //
+  // Naast de handle bewaren we op wélke cadans hij loopt. Zonder dat kun je een
+  // lopende timer niet met rust laten, en dan moet je hem bij elke herstelronde
+  // vervangen — waarmee een trage timer nooit afgaat als er een snellere naast
+  // loopt. Zie herstelWaTimers().
+  const _waTimers = { status: null, statusMs: null, qr: null, qrMs: null };
 
   async function haal(url) {
     try {
@@ -270,8 +275,33 @@
   // ── Timers ───────────────────────────────────────────────────────────────
   /** Alles stil. Wordt aangeroepen bij sluiten, bij wegnavigeren en bij unload. */
   function stopWaTimers() {
-    if (_waTimers.status) { clearInterval(_waTimers.status); _waTimers.status = null; }
-    if (_waTimers.qr)     { clearInterval(_waTimers.qr);     _waTimers.qr = null; }
+    if (_waTimers.status) clearInterval(_waTimers.status);
+    if (_waTimers.qr)     clearInterval(_waTimers.qr);
+    _waTimers.status = null; _waTimers.statusMs = null;
+    _waTimers.qr     = null; _waTimers.qrMs     = null;
+  }
+
+  /**
+   * Wat moet er met één timer gebeuren?
+   *
+   *   lopendMs  — de cadans waarop hij nu draait, of null als hij stilstaat.
+   *   gewenstMs — de cadans die hij zou moeten hebben, of null voor uit.
+   *
+   * Dit is de kern van de bug die dit bestand hiervoor had. herstelWaTimers()
+   * stopte altijd álles en zette daarna alles opnieuw. Met het paneel open
+   * kwam de status elke 5 seconden binnen en riep die herstel aan, dus werd de
+   * QR-timer van 20 seconden elke 5 seconden vernietigd en opnieuw begonnen.
+   * Hij haalde zijn deadline nooit: de code op het scherm ververste niet, en
+   * Dave stond een verlopen code te scannen zonder dat er iets in de logs
+   * misging.
+   *
+   * 'behouden' is daarom geen optimalisatie maar het punt: een timer die al op
+   * de goede cadans loopt moet je met rust laten, niet vervangen.
+   */
+  function bepaalTimerActie(lopendMs, gewenstMs) {
+    if (!gewenstMs) return lopendMs ? 'stoppen' : 'niets';
+    if (!lopendMs)  return 'starten';
+    return lopendMs === gewenstMs ? 'behouden' : 'herstarten';
   }
 
   /** Staat het lampje nog in beeld? Zo niet, dan is de view weg. */
@@ -280,11 +310,13 @@
   }
 
   /**
-   * Zet de timers gelijk aan wat bepaalWaTimers() voorschrijft.
+   * Zet de timers gelijk aan wat bepaalWaTimers() voorschrijft — maar raakt
+   * alleen aan wat écht verandert.
    *
-   * Altijd eerst opruimen en dan opnieuw starten — bij elke render kan de
-   * gewenste cadans veranderd zijn, en twee intervallen op dezelfde taak is
-   * dubbel verkeer dat niemand terugziet.
+   * Deze functie wordt bij elke statusronde aangeroepen, dus met het paneel
+   * open om de vijf seconden. Alles blind stoppen en opnieuw starten laat de
+   * QR-timer van twintig seconden dan nooit afgaan. Per timer geldt daarom:
+   * loopt hij al op de goede cadans, dan blijft hij lopen.
    */
   function herstelWaTimers() {
     const wens = bepaalWaTimers({
@@ -292,21 +324,28 @@
       paneelOpen: _wa.paneelOpen,
       verbonden : !!(_wa.data && _wa.data.verbonden),
     });
-    stopWaTimers();
-    if (wens.statusMs) {
-      _waTimers.status = setInterval(() => {
-        // De view kan intussen vervangen zijn zonder dat iemand het ons vertelt;
-        // de shell kent geen afscheidshaak. Het lampje is de levensteken.
-        if (!waGemount()) { stopWaTimers(); return; }
-        fetchWaStatus();
-      }, wens.statusMs);
+
+    // De view kan vervangen zijn zonder dat iemand het ons vertelt; de shell
+    // kent geen afscheidshaak. Het lampje is het levensteken — vandaar deze
+    // check in elke tik, niet alleen bij het opzetten.
+    const tik = (fn) => () => { if (!waGemount()) { stopWaTimers(); return; } fn(); };
+
+    zetTimer('status', 'statusMs', wens.statusMs, tik(fetchWaStatus));
+    zetTimer('qr',     'qrMs',     wens.qrMs,     tik(fetchWaQr));
+  }
+
+  /** Past één timer aan volgens bepaalTimerActie(). */
+  function zetTimer(handleSleutel, msSleutel, gewenstMs, fn) {
+    const actie = bepaalTimerActie(_waTimers[msSleutel], gewenstMs);
+    if (actie === 'niets' || actie === 'behouden') return;
+    if (_waTimers[handleSleutel]) clearInterval(_waTimers[handleSleutel]);
+    if (actie === 'stoppen') {
+      _waTimers[handleSleutel] = null;
+      _waTimers[msSleutel] = null;
+      return;
     }
-    if (wens.qrMs) {
-      _waTimers.qr = setInterval(() => {
-        if (!waGemount()) { stopWaTimers(); return; }
-        fetchWaQr();
-      }, wens.qrMs);
-    }
+    _waTimers[handleSleutel] = setInterval(fn, gewenstMs);
+    _waTimers[msSleutel] = gewenstMs;
   }
 
   const leegTakenCache = () => {
@@ -1223,7 +1262,7 @@
 
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
-  window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, toonNummer, geledenTekst };
+  window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst };
 
   // ═════════════════════════════════════════════════════════════════════════
   // REGISTREREN
