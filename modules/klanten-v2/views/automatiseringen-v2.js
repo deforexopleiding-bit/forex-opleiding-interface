@@ -630,6 +630,7 @@
         </div>
       </details>
     </div>
+    ${_renderFlowDrawer()}
     ${_confirmModalHtml()}`;
   }
 
@@ -715,17 +716,22 @@
     try {
       const raw = String(drilldown || '').trim();
       if (!raw) return;
+      // BP3 v41 (2026-09-04) — 'drawer:<flow>' shape opent flow-drilldown-
+      // drawer i.p.v. een subtab-navigatie. Voor flows zonder eigen subtab
+      // (drip, belronde) blijft user op Overzicht en ziet de drawer glijden.
+      if (raw.startsWith('drawer:')) {
+        const flow = raw.slice(7);
+        if (typeof window.__flowOpenDrawer === 'function') window.__flowOpenDrawer(flow);
+        return;
+      }
       const [tabPart, queryPart] = raw.split('?');
       const tabLabel = tabPart; // reeds Kapitalized zoals in API-response
-      // Module-slug uit huidige hash: '#automatiseringen/Overzicht' → 'automatiseringen'.
       const cur = String(location.hash || '#').replace(/^#/, '').split('?')[0];
       const module = cur.split('/')[0] || 'automatiseringen';
       const newHash = '#' + module + '/' + tabLabel + (queryPart ? '?' + queryPart : '');
-      // Één set van location.hash → hashchange fires → app-shell doet tab-swap.
       if (String(location.hash) !== newHash) {
         location.hash = newHash;
       } else if (window.DFO?.goTab) {
-        // Zelfde hash: forceer render (bv. bij hercache).
         window.DFO.goTab(tabLabel);
       }
     } catch (e) { console.warn('[aut] goTabWithQuery fail:', e?.message); }
@@ -3281,6 +3287,275 @@
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // BP3 v41 (2026-09-04) — RESTERENDE FLOW-DRILLDOWNS
+  //   Lisa & Bulk        → eigen subtabs (spine + drawer, huisstijl van Toegang)
+  //   Drip & Belronde    → universele drilldown-drawer vanaf Overzicht-kaart
+  //   Events/Onboarding-runs → per-automation count-lijst als sectie boven de
+  //     bestaande Events/Onboarding-tab (step-index labels: aparte pass;
+  //     vereist steps-jsonb-parse per automation — expliciet later, niet gokken)
+  // ═══════════════════════════════════════════════════════════════════════
+  const _flow = {
+    // per flow-key: { loading, error, data }
+    byFlow: {},
+    // drawer voor drip/belronde/events/onboarding vanaf Overzicht-kaart
+    drawer: null, // { flow, title } | null
+  };
+  function _flowState(key) {
+    _flow.byFlow[key] = _flow.byFlow[key] || { loading: false, error: null, data: null };
+    return _flow.byFlow[key];
+  }
+  async function fetchFlow(key) {
+    const st = _flowState(key);
+    if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    _opvSafeRender();
+    try {
+      const j = await tryFetch('flow-' + key, '/api/flow-drilldown-overview?flow=' + encodeURIComponent(key));
+      if (!j || j.__error) { st.error = j?.__error || 'Kon flow niet laden'; }
+      else st.data = j;
+    } catch (e) {
+      st.error = e?.message || String(e);
+    } finally {
+      st.loading = false;
+      _opvSafeRender();
+    }
+  }
+  window.__flowRetry = (key) => { const s = _flowState(key); s.error = null; s.data = null; fetchFlow(key); };
+
+  // ── LISA-subtab ────────────────────────────────────────────────────────
+  function lisaView() {
+    try { return _lisaViewInner(); }
+    catch (e) { console.error('[lisa-drill] renderError:', e?.message || e, e);
+      return `<div style="padding:22px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r);margin:16px;font-family:'IBM Plex Mono',monospace;font-size:12px">⚠ Lisa-render-exception: ${esc(e?.message || String(e))}<div style="margin-top:8px;font-size:11px;color:var(--text-3)">Stacktrace in DevTools console.</div></div>`;
+    }
+  }
+  function _lisaViewInner() {
+    const st = _flowState('lisa');
+    if (!st.loading && !st.data && !st.error) queueMicrotask(() => fetchFlow('lisa'));
+    if (st.error && !st.data) return `<div style="padding:22px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r);margin:16px">⚠ ${esc(st.error)}<button class="btn btn-ghost btn-sm" style="margin-left:10px" onclick="window.__flowRetry('lisa')">Opnieuw</button></div>`;
+    if (!st.data && st.loading) return `<div style="padding:44px;text-align:center;color:var(--text-3);font-size:13px">⏳ Lisa-flow laden…</div>`;
+
+    const d = st.data || {};
+    const buckets = d.buckets || {};
+    const steps = Array.isArray(d.steps) ? d.steps : [];
+    const totaalCount = (buckets.total_actief && buckets.total_actief.count) ?? 0;
+    const pausedCount = (buckets.ctx_paused && buckets.ctx_paused.count) ?? 0;
+    const takeoverCount = (buckets.ctx_takeover && buckets.ctx_takeover.count) ?? 0;
+
+    // Rows per stap
+    const rows = steps.length
+      ? steps.map((s) => _flowStepRowHtml({
+          title: 'Stap ' + s,
+          count: buckets['step_' + s] && buckets['step_' + s].count,
+          countLabel: 'ingeplande follow-ups',
+          accentKey: 'blue',
+          onclick: `window.__flowOpenDrawer('lisa','Stap ${esc(s)}','step_${esc(s)}')`,
+        })).join('')
+      : `<div style="font-size:12px;color:var(--text-3);padding:20px;text-align:center;font-style:italic">Geen actieve stappen</div>`;
+
+    return `<div style="padding:18px 20px">
+      <header style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text-1)">Lisa · Instagram-DM sequences</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Actief: <b>${esc(String(totaalCount))}</b> · gepauzeerd: <b>${esc(String(pausedCount))}</b> · mens-overname: <b>${esc(String(takeoverCount))}</b></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__flowRetry('lisa')" title="Ververs">↻</button>
+      </header>
+      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:600">Per stap · reply-aware (stopt op inbound + human-takeover)</div>
+      ${_tgSpineHtml(rows)}
+      <div style="margin-top:14px;padding:10px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3)">ℹ Reply/stop-signalen (agenda_link_sent_at, stop_detected_at, followup_paused, human_takeover) worden cronside afgehandeld. Deze view is read-only.</div>
+      ${_flowDrawerHtml('lisa')}
+    </div>`;
+  }
+
+  // ── BULK-subtab ────────────────────────────────────────────────────────
+  function bulkView() {
+    try { return _bulkViewInner(); }
+    catch (e) { console.error('[bulk-drill] renderError:', e?.message || e, e);
+      return `<div style="padding:22px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r);margin:16px;font-family:'IBM Plex Mono',monospace;font-size:12px">⚠ Bulk-render-exception: ${esc(e?.message || String(e))}<div style="margin-top:8px;font-size:11px;color:var(--text-3)">Stacktrace in DevTools console.</div></div>`;
+    }
+  }
+  function _bulkViewInner() {
+    const st = _flowState('bulk');
+    if (!st.loading && !st.data && !st.error) queueMicrotask(() => fetchFlow('bulk'));
+    if (st.error && !st.data) return `<div style="padding:22px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r);margin:16px">⚠ ${esc(st.error)}<button class="btn btn-ghost btn-sm" style="margin-left:10px" onclick="window.__flowRetry('bulk')">Opnieuw</button></div>`;
+    if (!st.data && st.loading) return `<div style="padding:44px;text-align:center;color:var(--text-3);font-size:13px">⏳ Bulk-jobs laden…</div>`;
+
+    const d = st.data || {};
+    const buckets = d.buckets || {};
+    const jobs = Array.isArray(d.jobs) ? d.jobs : [];
+    const totalPending = (buckets.status_pending && buckets.status_pending.count) || 0;
+    const totalSending = (buckets.status_sending && buckets.status_sending.count) || 0;
+    const totalSent    = (buckets.status_sent    && buckets.status_sent.count)    || 0;
+    const totalFailed  = (buckets.status_failed  && buckets.status_failed.count)  || 0;
+    const totalSkipped = (buckets.status_skipped && buckets.status_skipped.count) || 0;
+
+    const statusChip = (label, count, tone) => {
+      const a = _TG_ACCENT[tone] || _TG_DEFAULT_ACCENT;
+      return `<div style="flex:1;min-width:120px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);box-shadow:var(--shadow-xs);position:relative;overflow:hidden">
+        <div aria-hidden="true" style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${a.c}"></div>
+        <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">${esc(label)}</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums">${esc(String(count))}</div>
+      </div>`;
+    };
+
+    const jobRows = jobs.length
+      ? jobs.map((j) => {
+          const dateTxt = j.created_at ? new Date(j.created_at).toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+          const stAcc = j.status === 'completed' ? 'emerald' : j.status === 'running' ? 'blue' : j.status === 'cancelled' ? 'rose' : 'amber';
+          const a = _TG_ACCENT[stAcc] || _TG_DEFAULT_ACCENT;
+          return `<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);margin-bottom:6px">
+            <span aria-hidden="true" style="width:10px;height:10px;border-radius:50%;background:${a.c};box-shadow:0 0 0 3px ${a.soft};flex-shrink:0"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.template_name || '(geen template)')}</div>
+              <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${esc(dateTxt)} · kanaal ${esc(j.channel || '—')}${j.is_test ? ' · TEST' : ''}</div>
+            </div>
+            <span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${a.soft};color:${a.c};border:1px solid ${a.line};font-weight:600">${esc(j.status || '—')}</span>
+          </div>`;
+        }).join('')
+      : `<div style="font-size:12px;color:var(--text-3);padding:18px;text-align:center;font-style:italic">Geen recente jobs</div>`;
+
+    return `<div style="padding:18px 20px">
+      <header style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--text-1)">Leadsonderhoud · Bulk</div>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Handmatig goedkeuren · cron-batch 3 min · fail-safe idempotent</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window.__flowRetry('bulk')" title="Ververs">↻</button>
+      </header>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        ${statusChip('Pending', totalPending, 'amber')}
+        ${statusChip('Sending', totalSending, 'blue')}
+        ${statusChip('Sent',    totalSent,    'emerald')}
+        ${statusChip('Failed',  totalFailed,  'rose')}
+        ${statusChip('Skipped', totalSkipped, 'muted')}
+      </div>
+      <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:600">Recente jobs (top 10)</div>
+      ${jobRows}
+    </div>`;
+  }
+
+  // ── Universele drilldown-drawer voor drip/belronde/events/onboarding ──
+  const _FLOW_TITLES = {
+    drip:       'Leadsonderhoud · Drip',
+    belronde:   'Event-belronde · terugbellen',
+    events:     'Events-automatiseringen · runs',
+    onboarding: 'Onboarding-automatiseringen · runs',
+    lisa:       'Lisa · contacten in stap',
+  };
+  window.__flowOpenDrawer = (flow, subTitle, bucketKey) => {
+    // Als data nog niet geladen: trigger fetch, drawer opent daarna.
+    const st = _flowState(flow);
+    _flow.drawer = { flow, subTitle: subTitle || null, bucketKey: bucketKey || null };
+    _opvSafeRender();
+    if (!st.data && !st.loading && !st.error) queueMicrotask(() => fetchFlow(flow));
+  };
+  window.__flowCloseDrawer = () => { _flow.drawer = null; _opvSafeRender(); };
+
+  function _flowDrawerHtml(fromView) {
+    if (!_flow.drawer) return '';
+    // Alleen tonen als de drawer bij deze view hoort (of altijd, hier laten we lisa/toegang zich eigen drawer beheren; anders shared).
+    if (fromView && _flow.drawer.flow !== fromView) return '';
+    return _renderFlowDrawer();
+  }
+  function _renderFlowDrawer() {
+    if (!_flow.drawer) return '';
+    const { flow, subTitle, bucketKey } = _flow.drawer;
+    const st = _flowState(flow);
+    const title = _FLOW_TITLES[flow] || flow;
+    let bodyHtml;
+    if (st.loading && !st.data) {
+      bodyHtml = `<div style="padding:24px;text-align:center;color:var(--text-3);font-size:12.5px">⏳ Laden…</div>`;
+    } else if (st.error) {
+      bodyHtml = `<div style="padding:14px;background:var(--rose-soft);border:1px solid var(--rose-line);color:var(--rose);border-radius:var(--r-sm);font-size:12px">⚠ ${esc(st.error)}<button class="btn btn-ghost btn-sm" style="margin-left:10px" onclick="window.__flowRetry('${esc(flow)}')">Opnieuw</button></div>`;
+    } else if (!st.data) {
+      bodyHtml = `<div style="padding:16px;color:var(--text-3);font-size:12.5px">Nog geen data.</div>`;
+    } else {
+      bodyHtml = _renderFlowDrawerBody(flow, st.data, bucketKey);
+    }
+    return `<div role="dialog" aria-modal="true" onclick="if(event.target===this)window.__flowCloseDrawer()"
+      style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:900;display:flex;justify-content:flex-end">
+      <aside style="width:min(460px, 100%);height:100%;background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--shadow);display:flex;flex-direction:column">
+        <header style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--border);background:var(--surface-2)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">Drilldown</div>
+            <div style="font-size:13px;font-weight:700;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(title)}${subTitle ? ' · ' + esc(subTitle) : ''}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__flowCloseDrawer()" title="Sluiten (Esc)" aria-label="Sluiten">✕</button>
+        </header>
+        <div style="flex:1;overflow-y:auto;padding:12px 14px">${bodyHtml}</div>
+      </aside>
+    </div>`;
+  }
+  function _renderFlowDrawerBody(flow, data, bucketKey) {
+    if (flow === 'drip') {
+      const per = data.perSoort || {};
+      const totaal = (data.totaal && data.totaal.count) ?? 0;
+      const chips = Object.keys(per).sort().map((s) => `<div style="display:flex;justify-content:space-between;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:6px;background:var(--surface)">
+        <span style="font-size:12.5px">${esc(s)}</span>
+        <b style="font-variant-numeric:tabular-nums">${esc(String(per[s] == null ? '—' : per[s]))}</b>
+      </div>`).join('') || `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen soorten in wachtrij</div>`;
+      return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">Totaal wachtend: <b style="color:var(--text-1)">${esc(String(totaal))}</b> · one-way drip, reageert niet op replies.</div>${chips}`;
+    }
+    if (flow === 'belronde') {
+      const t = data.totaal || {};
+      const rows = Array.isArray(t.rows) ? t.rows : [];
+      const cnt = t.count == null ? '—' : String(t.count);
+      const list = rows.map((r) => {
+        const dt = r.terugbel_datum ? new Date(r.terugbel_datum).toLocaleString('nl-NL', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+        return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:6px;background:var(--surface)">
+          <div style="font-size:13px;font-weight:600">${esc(r.lead_name || '—')}</div>
+          <div style="font-size:11px;color:var(--text-3)">${esc([r.lead_email, r.lead_phone].filter(Boolean).join(' · ') || '—')}</div>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">Terugbellen: ${esc(dt)} · bron ${esc(r.source || '—')}</div>
+        </div>`;
+      }).join('') || `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen leads op de bellijst</div>`;
+      return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">Totaal: <b style="color:var(--text-1)">${esc(cnt)}</b></div>${list}`;
+    }
+    if (flow === 'events' || flow === 'onboarding') {
+      const per = data.perAuto || {};
+      const autos = data.autos || [];
+      const rows = autos.map((a) => {
+        const c = per[a.id] || {};
+        const pill = a.enabled
+          ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--emerald-soft);color:var(--emerald);border:1px solid var(--emerald-line);font-weight:600">enabled</span>`
+          : `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);font-weight:600">disabled</span>`;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:6px;background:var(--surface)">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12.5px;font-weight:600;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name || '—')}</div>
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">${esc(a.trigger_type || '—')} · ${pill}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:18px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums">${esc(c.count == null ? '—' : String(c.count))}</div>
+            <div style="font-size:10px;color:var(--text-3)">actieve runs</div>
+          </div>
+        </div>`;
+      }).join('') || `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen automations gevonden</div>`;
+      return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">Step-index-labels (per stap-naam) volgen in een aparte fase — vereist steps-jsonb-parse per automation.</div>${rows}`;
+    }
+    if (flow === 'lisa') {
+      // Bucket-specifieke contacten
+      const bag = (data.buckets && bucketKey && data.buckets[bucketKey]) || {};
+      const rows = Array.isArray(bag.rows) ? bag.rows : [];
+      const list = rows.map((r) => {
+        const conv = r.lisa_conversations || {};
+        return `<div style="padding:9px 11px;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:6px;background:var(--surface)">
+          <div style="font-size:12.5px;font-weight:600;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(conv.contact_name || conv.instagram_handle || '—')}</div>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:2px">fase: ${esc(conv.phase || '—')}${conv.followup_paused ? ' · gepauzeerd' : ''}${conv.human_takeover ? ' · mens' : ''}</div>
+        </div>`;
+      }).join('') || `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen contacten</div>`;
+      return list;
+    }
+    return `<div style="color:var(--text-3);font-size:12px">Onbekende flow.</div>`;
+  }
+  // Esc-toets binding voor flow-drawer (idempotent, deelt met tg-drawer).
+  if (!window.__flowEscBound) {
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _flow.drawer) { _flow.drawer = null; _opvSafeRender(); }
+    });
+    window.__flowEscBound = true;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // VIEW REGISTRATIE
   // ═══════════════════════════════════════════════════════════════════════
   window.DFO.VIEWS = window.DFO.VIEWS || {};
@@ -3290,8 +3565,10 @@
   window.DFO.VIEWS['automatiseringen/Leadsonderhoud'] = leadsonderhoudView;
   window.DFO.VIEWS['automatiseringen/Opvolging']      = opvolgingView;
   window.DFO.VIEWS['automatiseringen/Toegang']        = toegangView;
+  window.DFO.VIEWS['automatiseringen/Lisa']           = lisaView;
+  window.DFO.VIEWS['automatiseringen/Bulk']           = bulkView;
 
-  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud/Opvolging/Toegang)');
+  console.debug('[automatiseringen-v2] views geregistreerd (Overzicht/Events/Onboarding/Leadsonderhoud/Opvolging/Toegang/Lisa/Bulk)');
 
   // ═══════════════════════════════════════════════════════════════════════
   // DEEP-LINK HANDLERS · ?edit_ev_auto=<id> + ?edit_ls_traj=<id>

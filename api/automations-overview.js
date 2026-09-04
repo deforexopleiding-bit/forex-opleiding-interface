@@ -121,7 +121,8 @@ export default async function handler(req, res) {
       count_error: lisaFollowups.error,
       kanalen: ['instagram'],
       granulariteit: 'stap-voor-stap',
-      drilldown: null,
+      // BP3 v41 (2026-09-04) — Lisa krijgt eigen subtab (spine + drawer).
+      drilldown: 'Lisa',
       laatste_run: null,
     },
     {
@@ -134,7 +135,8 @@ export default async function handler(req, res) {
       count_error: bulkRecipients.error,
       kanalen: ['mail', 'whatsapp'],
       granulariteit: 'stap-voor-stap',
-      drilldown: 'Leadsonderhoud',
+      // BP3 v41 (2026-09-04) — Bulk krijgt eigen subtab (jobs + status-tegels).
+      drilldown: 'Bulk',
       laatste_run: null,
     },
     {
@@ -174,7 +176,8 @@ export default async function handler(req, res) {
       count_error: belronde.error,
       kanalen: ['call'],
       granulariteit: 'alleen totaal',
-      drilldown: null,
+      // BP3 v41 — geen aparte subtab; opent compacte drilldown-drawer.
+      drilldown: 'drawer:belronde',
       laatste_run: null,
     },
     {
@@ -187,7 +190,8 @@ export default async function handler(req, res) {
       count_error: onderhoud.error,
       kanalen: ['mail', 'whatsapp'],
       granulariteit: 'alleen totaal',
-      drilldown: 'Leadsonderhoud',
+      // BP3 v41 — geen aparte subtab; opent compacte drilldown-drawer.
+      drilldown: 'drawer:drip',
       laatste_run: null,
     },
     {
