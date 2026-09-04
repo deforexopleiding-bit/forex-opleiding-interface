@@ -3522,31 +3522,37 @@
       const rawSubject = (c.subject || '').trim();
       if (!body)    { c.error = 'Bericht is leeg.';   try { window.DFO?.render?.(); } catch (_) {} return; }
       const ctx = _live.inbox.ctx.byConv[convId];
-      // BP3 v28 (2026-09-03) — THREADING FIX. Als er een laatst-ontvangen mail
-      // in de thread is: reply erop (email_id → server zet In-Reply-To +
-      // References op de opgeslagen message_id), gebruik afzender als
-      // to-adres, en normaliseer 'Re: ' zodat er geen 'Re: Re: ...' ontstaat.
-      // Endpoint (email-send-v2) heeft de threading-logica al ingebouwd
-      // via `email_id` param (regel 133-165); we hoeven alleen de composite
-      // door te geven.
+      // BP3 v28 (2026-09-03) — THREADING FIX (v29 velden-correctie 2026-09-04).
+      // Server (inbox-thread-unified) levert mail-items als channel='email' met
+      // subject/mailbox/imap_uid/email_id_composite/from_address ONDER m.meta.
+      // Lees dus meta-genest; fallback op top-level voor andere item-types.
+      // Endpoint (email-send-v2) heeft de threading-logica al ingebouwd via
+      // `email_id` (regel 133-165) — server zet In-Reply-To + References op de
+      // opgeslagen message_id. We hoeven alleen de composite door te geven.
       const items = asArr(_live.inbox.thread.byConv[convId]?.items);
-      const lastInboundMail = [...items].reverse().find((m) =>
-        (m.channel === 'mail' || m.kind === 'email')
-        && (m.direction === 'inbound' || m.direction === 'in')
-        && (m.email_id_composite || (m.mailbox && m.imap_uid))
-      );
+      const lastInboundMail = [...items].reverse().find((m) => {
+        const meta = m.meta || {};
+        const composite = meta.email_id_composite
+          || (meta.mailbox && meta.imap_uid ? `${meta.mailbox}:${meta.imap_uid}` : null);
+        return (m.channel === 'email' || m.channel === 'mail')
+          && (m.direction === 'inbound' || m.direction === 'in')
+          && !!composite;
+      });
+      const _lim = lastInboundMail || {};
+      const _lmeta = _lim.meta || {};
       const replyEmailId = lastInboundMail
-        ? (lastInboundMail.email_id_composite || `${lastInboundMail.mailbox}:${lastInboundMail.imap_uid}`)
+        ? (_lmeta.email_id_composite
+           || (_lmeta.mailbox && _lmeta.imap_uid ? `${_lmeta.mailbox}:${_lmeta.imap_uid}` : null))
         : null;
-      const replyTo = lastInboundMail?.from_address || ctx?.customer?.email || null;
+      const replyTo = _lmeta.from_address || ctx?.customer?.email || null;
       if (!replyTo) { c.error = 'Geen e-mailadres bij deze klant.'; try { window.DFO?.render?.(); } catch (_) {} return; }
       // Onderwerp: als origineel al 'Re: '/'RE: '/'re:' start, niet dubbel prefixen.
       const reRe = /^\s*re\s*:\s*/i;
       let subject;
       if (rawSubject) {
         subject = rawSubject;
-      } else if (lastInboundMail?.subject) {
-        subject = reRe.test(lastInboundMail.subject) ? lastInboundMail.subject : ('Re: ' + lastInboundMail.subject);
+      } else if (_lmeta.subject) {
+        subject = reRe.test(_lmeta.subject) ? _lmeta.subject : ('Re: ' + _lmeta.subject);
       } else {
         c.error = 'Onderwerp is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return;
       }
