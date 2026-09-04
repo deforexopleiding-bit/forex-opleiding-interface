@@ -20,7 +20,12 @@ import { supabaseAdmin } from './supabase.js';
 import { brugGeheimKlopt } from './_lib/whatsapp-brug-client.js';
 import { normaliseerNummer } from './_lib/whatsapp-brug-nummers.js';
 
-const SOORTEN = new Set(['verzonden', 'afgeleverd', 'gelezen', 'antwoord_ontvangen']);
+// 'uitgaand' is erbij gekomen toen bleek dat een spraakbericht dat Dave zelf
+// stuurt nergens meetbaar was: het 'message'-event van whatsapp-web.js slaat
+// eigen berichten over, en de ack-events droegen geen media_type. De brug
+// stuurt nu message_create mee. Puur additief — de vier bestaande soorten
+// gedragen zich exact als voorheen.
+const SOORTEN = new Set(['verzonden', 'afgeleverd', 'gelezen', 'antwoord_ontvangen', 'uitgaand']);
 const LOPEND  = ['open', 'wacht_inplanning', 'ingepland'];
 
 // Wat er in de historiek komt te staan. Kort en in gewone taal — dit leest
@@ -30,6 +35,13 @@ const RESULTAAT = {
   afgeleverd       : 'WhatsApp afgeleverd',
   gelezen          : 'WhatsApp gelezen',
   antwoord_ontvangen: 'antwoord ontvangen',
+  uitgaand         : 'WhatsApp verstuurd',
+};
+// Voor een spraakbericht leest het anders — en dat onderscheid is precies wat
+// het dagsysteem meet.
+const RESULTAAT_SPRAAK = {
+  antwoord_ontvangen: 'spraakbericht ontvangen',
+  uitgaand          : 'spraakbericht verstuurd',
 };
 
 // Een ingesproken bericht is een ander soort moeite dan een tekstje, en telt in
@@ -62,7 +74,11 @@ export default async function handler(req, res) {
     // Stil. Geen 404, geen melding, geen log met de tekst erin.
     if (!taak) return res.status(200).json({ ok: true, gekoppeld: false });
 
-    const isSpraak = soort === 'antwoord_ontvangen' && SPRAAK_TYPES.has(String(b.media_type || '').toLowerCase());
+    // Zowel een ontvangen als een verstuurd spraakbericht telt als spraakbericht.
+    // De richting is af te lezen aan `resultaat`; de tabel heeft geen kolom
+    // voor richting en die voegen we hier niet toe.
+    const isSpraak = (soort === 'antwoord_ontvangen' || soort === 'uitgaand')
+      && SPRAAK_TYPES.has(String(b.media_type || '').toLowerCase());
 
     // Idempotent op bericht_id + soort: de brug herkanst bij een mislukte
     // levering, en dezelfde aflever-melding twee keer tellen zou de dekking in
@@ -86,7 +102,7 @@ export default async function handler(req, res) {
       soort      : isSpraak ? 'spraakbericht' : 'whatsapp',
       tijdstip   : tijdstipIso,
       automatisch: true,
-      resultaat  : tekst ? `${RESULTAAT[soort]}: ${tekst}` : RESULTAAT[soort],
+      resultaat  : bouwResultaat(soort, isSpraak, tekst),
       // call_log_id is de enige vrije tekstkolom voor een externe verwijzing.
       // Met de soort erachter, want één bericht levert meerdere gebeurtenissen
       // op (verzonden, afgeleverd, gelezen) en die moeten los idempotent zijn.
@@ -133,4 +149,16 @@ async function zoekTaak(nummer) {
   // Precies één, anders is het gokken — en een poging bij de verkeerde persoon
   // maakt het oordeel over twee mensen onwaar.
   return bijnaam.length === 1 ? bijnaam[0] : null;
+}
+
+/**
+ * De regel die in de historiek komt te staan.
+ *
+ * De richting staat hierin en nergens anders: opvolging_pogingen heeft geen
+ * kolom voor inkomend of uitgaand, en die voegen we hier niet toe. 'verstuurd'
+ * tegenover 'ontvangen' is dus het onderscheid waar het dagscherm op leest.
+ */
+function bouwResultaat(soort, isSpraak, tekst) {
+  const basis = (isSpraak && RESULTAAT_SPRAAK[soort]) || RESULTAAT[soort];
+  return tekst ? `${basis}: ${tekst}` : basis;
 }
