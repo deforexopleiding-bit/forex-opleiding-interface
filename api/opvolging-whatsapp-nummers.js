@@ -19,9 +19,19 @@ import { supabaseAdmin } from './supabase.js';
 import { brugGeheimKlopt } from './_lib/whatsapp-brug-client.js';
 import { normaliseerNummer } from './_lib/whatsapp-brug-nummers.js';
 
-// De twee toestanden waarin we contact verwachten: hij staat op de bellijst, of
-// hij heeft de agenda gekregen en mag daar op reageren. Een ingeplande of
-// gearchiveerde taak hoort er niet bij — dan is het gesprek klaar.
+// De twee toestanden waarin we contact verwachten.
+//
+// WAAROM OOK 'wacht_inplanning' EN NIET ALLEEN 'open'
+// Een taak op wacht_inplanning is iemand die net de agenda doorgestuurd kreeg.
+// Dat is precies degene van wie een WhatsApp-antwoord te verwachten valt — en
+// dat antwoord is het hele signaal waarop de 48-uurcontrole en de opvolging
+// draaien. Zou de lijst alleen 'open' bevatten, dan filtert de brug juist die
+// antwoorden weg, en dan is de belangrijkste inkomende gebeurtenis onzichtbaar
+// terwijl alles verder lijkt te werken.
+//
+// 'ingepland' en 'gearchiveerd' horen er niet bij: daar is het gesprek klaar,
+// en dan hoeft WhatsApp-verkeer met dat nummer het CRM niet meer in. Het filter
+// is een privacygrens, dus die houden we zo klein als het werk toelaat.
 const LOPEND = ['open', 'wacht_inplanning'];
 const MAX = 5000;
 

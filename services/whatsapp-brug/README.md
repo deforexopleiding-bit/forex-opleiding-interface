@@ -33,9 +33,43 @@ die niet op de lijst staan.
 
 ---
 
-## Installeren op een verse Ubuntu-VPS
+## Installeren — één commando
 
-Getest op Ubuntu 22.04 en 24.04. Reken op een kwartier.
+Op een verse Ubuntu 24.04, als root:
+
+```bash
+git clone https://github.com/deforexopleiding-bit/forex-opleiding-interface.git /tmp/crm
+cd /tmp/crm/services/whatsapp-brug
+sudo bash install.sh
+```
+
+Dat is alles. Het script installeert Node, de Chromium-bibliotheken, zet de
+service in `/opt/whatsapp-brug` onder een eigen gebruiker, schrijft de
+systemd-unit met geheugengrens, sluit de firewall op alles behalve SSH en de
+brugpoort, en genereert alvast een `BRUG_SECRET`. Aan het eind toont het precies
+wat er nog in Vercel moet en hoe je koppelt.
+
+**Twee keer draaien mag.** Elke stap kijkt eerst of hij al gedaan is. Een
+bestaande `.env` wordt nooit overschreven en de map met de ingelogde
+WhatsApp-sessie wordt niet aangeraakt — een tweede run kost je dus geen nieuwe
+QR. Draait het script niet als root, of is het geen Ubuntu 24.04, dan stopt het
+met een leesbare regel vóórdat er iets gewijzigd is.
+
+Daarna nog drie dingen, die het script ook zelf op het scherm zet:
+
+1. `WHATSAPP_BRUG_SECRET` en `WHATSAPP_BRUG_URL` in Vercel.
+2. `BIND` in `/opt/whatsapp-brug/.env` — standaard `127.0.0.1`, zie
+   [Firewall en bereikbaarheid](#6-firewall-en-bereikbaarheid).
+3. De QR scannen, via `/api/opvolging-whatsapp-status?wat=qr` in het CRM.
+
+Meekijken: `journalctl -u whatsapp-brug -f`
+
+---
+
+## Achtergrond: dezelfde stappen met de hand
+
+Alleen nodig als je het script niet wilt gebruiken, of als er iets misgaat en je
+wilt weten wáár. Getest op Ubuntu 22.04 en 24.04.
 
 ### 1. Node 20 en de basis
 
@@ -152,7 +186,11 @@ sudo env PATH=$PATH pm2 startup systemd -u brug --hp /opt/whatsapp-brug
 bewegende delen, en de sessie overleeft een herstart van de machine net zo goed.
 </details>
 
-### 6. Firewall
+### 6. Firewall en bereikbaarheid
+
+Het installatiescript zet de firewall al dicht op alles behalve SSH en, als
+`BIND` niet op localhost staat, de brugpoort. Wat hieronder staat is de keuze
+die je daarna nog zelf maakt.
 
 De brug luistert standaard op `127.0.0.1` en is dan van buiten niet bereikbaar.
 Dat is veilig, maar Vercel kan er dan ook niet bij. Twee wegen:
@@ -257,6 +295,9 @@ sudo systemctl stop whatsapp-brug
 sudo -u brug rm -rf /opt/whatsapp-brug/.wwebjs_auth
 sudo systemctl start whatsapp-brug
 ```
+
+**Code bijwerken.** `install.sh` opnieuw draaien vanuit een verse clone is de
+kortste weg: de code wordt vervangen, `.env` en de sessie blijven staan.
 
 **Bijwerken.** `whatsapp-web.js` volgt WhatsApp Web, en dat verandert zonder
 aankondiging. Werkt de brug ineens niet meer, kijk dan eerst of er een nieuwe

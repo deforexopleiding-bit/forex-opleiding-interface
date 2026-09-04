@@ -26,3 +26,8 @@ tests/
 migrations/
 supabase-migrations/
 docs/sql-migrations/
+
+# WhatsApp-brug (draait op een eigen VPS, nooit op Vercel — zie
+# services/whatsapp-brug/README.md). Zonder deze regel gaat de hele service
+# bij elke deploy mee omhoog terwijl er niets van gebruikt wordt.
+services/
