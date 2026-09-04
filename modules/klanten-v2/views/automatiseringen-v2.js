@@ -2934,7 +2934,11 @@
   const _tg = {
     loading: false, error: null, partialWarning: null, renderError: null,
     data: null, dag: null, // dag = generated_at, gebruikt als spinner-fallback-marker
-    soortFilter: 'alle',   // 'alle' | '7-daagse' | 'minicursus'
+    soortFilter: 'alle',   // 'alle' | '7-daagse' | 'minicursus' — BRON VAN WAARHEID
+    urlSeeded: false,      // BP3 v42 (2026-09-04) — permanent flag; URL-hash mag soortFilter
+                            //   alleen ÉÉN keer seeden bij eerste render. Zonder deze flag
+                            //   overschreef URL-parse elke chip-klik (data=null triggert
+                            //   opnieuw de seed-check).
     drawer: null,          // { soort, bucketKey } — geopend contact-paneel, null = dicht
   };
   function _tgSafeRender() {
@@ -2979,6 +2983,14 @@
     if (val === _tg.soortFilter) return;
     _tg.soortFilter = val;
     _tg.data = null; _tg.dag = null;
+    // BP3 v42 — sync URL-hash zodat refresh/bookmark de user-keuze behoudt.
+    // Gebruik history.replaceState (geen navigatie) → geen hashchange-loop,
+    // en urlSeeded is al true dus _toegangViewInner leest 'em niet meer opnieuw.
+    try {
+      const [hashBase] = String(location.hash || '#automatiseringen/Toegang').split('?');
+      const newHash = hashBase + (val === 'alle' ? '' : '?soort=' + encodeURIComponent(val));
+      if (String(location.hash) !== newHash) history.replaceState(null, '', newHash);
+    } catch (_) { /* history niet beschikbaar → skip */ }
     fetchToegang();
   };
   // BP3 v40 (2026-09-04) — drawer open/close voor "wie staat hier nu"-lijst.
@@ -3234,15 +3246,22 @@
     }
   }
   function _toegangViewInner() {
-    console.debug('[tg] render', { loading: _tg.loading, hasData: !!_tg.data, error: _tg.error, soortFilter: _tg.soortFilter });
-    // Deep-link ?soort=… → zet filter voor bij eerste render.
-    try {
-      const params = new URLSearchParams(location.hash.split('?')[1] || '');
-      const q = String(params.get('soort') || '').toLowerCase();
-      if ((q === '7-daagse' || q === 'minicursus') && q !== _tg.soortFilter && !_tg.data) {
-        _tg.soortFilter = q;
-      }
-    } catch (_) { /* geen URL-access = geen deep-link */ }
+    console.debug('[tg] render', { loading: _tg.loading, hasData: !!_tg.data, error: _tg.error, soortFilter: _tg.soortFilter, urlSeeded: _tg.urlSeeded });
+    // BP3 v42 (2026-09-04) — Deep-link ?soort=… → zet filter voor bij EERSTE
+    // render ooit (urlSeeded=false). Daarna is _tg.soortFilter de enige bron
+    // van waarheid; user-actie (__tgSetSoort) mag de URL niet meer verliezen
+    // aan een re-parse-loop. Vorige guard (`!_tg.data`) triggerde opnieuw bij
+    // elke chip-klik omdat __tgSetSoort de data cleared.
+    if (!_tg.urlSeeded) {
+      try {
+        const params = new URLSearchParams(location.hash.split('?')[1] || '');
+        const q = String(params.get('soort') || '').toLowerCase();
+        if (q === '7-daagse' || q === 'minicursus' || q === 'alle') {
+          _tg.soortFilter = q;
+        }
+      } catch (_) { /* geen URL-access = geen deep-link */ }
+      _tg.urlSeeded = true;
+    }
 
     if (!_tg.loading && !_tg.error && !_tg.data) queueMicrotask(fetchToegang);
     if (_tg.error && !_tg.data) {
