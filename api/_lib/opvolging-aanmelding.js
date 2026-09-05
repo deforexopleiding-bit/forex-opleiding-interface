@@ -22,6 +22,26 @@
 
 const ZONE = 'Europe/Amsterdam';
 
+/**
+ * Het niveau dat een masterclass afbakent, zoals de eventmodule het gebruikt.
+ *
+ * `events.niveau` is een text-kolom met een foreign key naar
+ * `event_niveau_options(slug)`; de keuzelijst boven de eventlijst wordt uit
+ * diezelfde tabel gevuld (api/events-niveau-options.js, alleen is_active).
+ * Op productie staat daar één actieve rij in: slug 'masterclass', label
+ * "Masterclass event in Gent".
+ *
+ * Let op bij het lezen van de migratie: 2026-06-11-events-f1-foundation.sql
+ * seedt 'basis' en 'gevorderd'. Dat is de begintoestand, niet de huidige — de
+ * tabel is sindsdien via de UI aangepast. Wie de seed leest en denkt de
+ * werkelijkheid te kennen, zit ernaast; meten in de module is de bron.
+ *
+ * Komt er ooit een tweede soort event bij, dan is dit de plek: één slug erbij
+ * betekent hier één regel erbij, niet een filter dat door de code heen verspreid
+ * staat.
+ */
+export const MASTERCLASS_NIVEAU = 'masterclass';
+
 /** Vast, niet instelbaar. Vier dagen voor het event wordt de kaart wakker. */
 export const WAKKER_DAGEN_VOOR_EVENT = 4;
 
