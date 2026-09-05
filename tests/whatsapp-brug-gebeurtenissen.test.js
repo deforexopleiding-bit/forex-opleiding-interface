@@ -67,14 +67,41 @@ test('zonder bruikbare timestamp valt het terug op nu, niet op 1970', () => {
   }
 });
 
-test('er gaat GEEN berichttekst mee', () => {
-  // Voor deze meting hoeven we alleen te weten dát er iets uitging en of het
-  // ingesproken was. De tekst van wat Dave naar een lead stuurt is gevoeliger
-  // dan nodig en verlaat de telefoon niet.
+test('de berichttekst gaat mee, zodat het gesprek in het CRM te lezen is', () => {
+  // GEWIJZIGD GEDRAG. Eerder ging de tekst niet mee: voor de meting is alleen
+  // nodig dát er iets uitging en of het ingesproken was, dus was de tekst
+  // gevoeliger dan nodig. Dat klopte zolang het CRM het gesprek niet toonde.
+  // Nu wel — en een gesprek met alleen de antwoorden van de lead erin is geen
+  // gesprek.
+  //
+  // Waar de grens ligt verandert NIET: de aanroeper in whatsapp.js doet eerst
+  // leadlijst.mag(msg.to). Zie de tests hieronder over die volgorde.
   const g = bouwUitgaandeGebeurtenis(uit({ body: 'Hoi Karel, alles goed verlopen?' }), NU);
+  assert.equal(g.tekst, 'Hoi Karel, alles goed verlopen?');
+  assert.deepEqual(Object.keys(g).sort(),
+    ['bericht_id', 'jid', 'media_type', 'soort', 'tekst', 'tijdstip']);
+});
+
+test('een bericht zonder tekst levert een lege string op, geen undefined', () => {
+  // Een spraakbericht of een foto heeft geen body. Een lege string leest
+  // hetzelfde als 'niets gezegd'; undefined zou verderop als ontbrekend veld
+  // door de webhook heen glippen.
+  for (const raar of [null, undefined, 0, {}]) {
+    assert.equal(bouwUitgaandeGebeurtenis(uit({ body: raar }), NU).tekst, '', String(raar));
+  }
+});
+
+test('een heel lang bericht wordt afgekapt op 4000 tekens', () => {
+  const g = bouwUitgaandeGebeurtenis(uit({ body: 'x'.repeat(9000) }), NU);
+  assert.equal(g.tekst.length, 4000);
+});
+
+test('een ack draagt nog steeds geen tekst', () => {
+  // Een ack is een status op een bericht dat al doorgegeven is, geen tweede
+  // exemplaar. Zou hij de tekst ook dragen, dan hing dezelfde inhoud aan drie
+  // gebeurtenissen en moest de ontvanger uitzoeken welke de echte was.
+  const g = bouwAckGebeurtenis({ to: '32470111222@c.us', type: 'chat', body: 'Hoi', id: { _serialized: 'x' } }, 1, NU);
   assert.equal('tekst' in g, false);
-  assert.equal('body' in g, false);
-  assert.deepEqual(Object.keys(g).sort(), ['bericht_id', 'jid', 'media_type', 'soort', 'tijdstip']);
 });
 
 test('een inkomend bericht levert hier niets op', () => {

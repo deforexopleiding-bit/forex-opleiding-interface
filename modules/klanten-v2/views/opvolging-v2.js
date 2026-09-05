@@ -100,6 +100,7 @@
   const WA_POLL_RUSTIG_MS  = 60000;   // lampje op de achtergrond
   const WA_POLL_PANEEL_MS  = 5000;    // paneel open en nog niet gekoppeld
   const WA_POLL_QR_MS      = 20000;   // de QR verloopt, dus die halen we opnieuw
+  const WA_POLL_GESPREK_MS = 5000;    // gesprekspaneel open: antwoorden willen we zien
   const _wa = {
     laden: false, data: null, error: null,
     paneelOpen: false,
@@ -112,15 +113,33 @@
   // lopende timer niet met rust laten, en dan moet je hem bij elke herstelronde
   // vervangen — waarmee een trage timer nooit afgaat als er een snellere naast
   // loopt. Zie herstelWaTimers().
-  const _waTimers = { status: null, statusMs: null, qr: null, qrMs: null };
+  const _waTimers = { status: null, statusMs: null, qr: null, qrMs: null, gesprek: null, gesprekMs: null };
+
+  // ── Het gesprek ───────────────────────────────────────────────────────────
+  // Het WhatsApp-gesprek met één lead, in het CRM zelf. Hiervoor opende de
+  // knop wa.me in een nieuw tabblad; dan zie je het gesprek wel maar staat het
+  // niet in het systeem, en kan niemand anders het teruglezen.
+  //
+  // `optimistisch` houdt wat net verstuurd is vast tot de brug het bevestigt.
+  // Zonder dat staat een verstuurd bericht tot vijf seconden lang nergens, en
+  // dan typt iemand het nog een keer.
+  const _gesprek = {
+    open: false, nummer: null, taakId: null, naam: null,
+    laden: false, error: null, code: null, berichten: null,
+    verzendt: false, optimistisch: [],
+  };
 
   async function haal(url) {
     try {
       const j = await window.KV.authedJson(url);
-      if (j && j.error) return { __error: j.error };
+      if (j && j.error) return { __error: j.error, code: j.code || null };
       return j;
     } catch (e) {
-      return { __error: (e && e.message) || 'Netwerkfout' };
+      // De code gaat mee zodat een aanroeper onderscheid kan maken tussen
+      // 'kapot' en 'nog niet ingericht'. authedJson gooit bij een foutstatus en
+      // hangt het geparseerde antwoord aan err.body. Bestaande aanroepers lezen
+      // alleen __error en merken hier niets van.
+      return { __error: (e && e.message) || 'Netwerkfout', code: (e && e.body && e.body.code) || null };
     }
   }
 
@@ -242,11 +261,15 @@
    * zien, en doorgaan zou de brug elke vijf seconden blijven bevragen voor een
    * antwoord dat niet meer verandert.
    */
-  function bepaalWaTimers({ gemount, paneelOpen, verbonden } = {}) {
-    if (!gemount) return { statusMs: null, qrMs: null };
-    if (!paneelOpen) return { statusMs: WA_POLL_RUSTIG_MS, qrMs: null };
-    if (verbonden)  return { statusMs: null, qrMs: null };
-    return { statusMs: WA_POLL_PANEEL_MS, qrMs: WA_POLL_QR_MS };
+  function bepaalWaTimers({ gemount, paneelOpen, verbonden, gesprekOpen } = {}) {
+    // Weg van het scherm is alles uit, ook het gesprek. Dat is dezelfde regel
+    // als voor de andere twee en om dezelfde reden: de shell kent geen
+    // afscheidshaak, dus het levensteken is het enige dat ons dat vertelt.
+    if (!gemount) return { statusMs: null, qrMs: null, gesprekMs: null };
+    const gesprekMs = gesprekOpen ? WA_POLL_GESPREK_MS : null;
+    if (!paneelOpen) return { statusMs: WA_POLL_RUSTIG_MS, qrMs: null, gesprekMs };
+    if (verbonden)  return { statusMs: null, qrMs: null, gesprekMs };
+    return { statusMs: WA_POLL_PANEEL_MS, qrMs: WA_POLL_QR_MS, gesprekMs };
   }
 
   /** '32470111222' → '+32 470 111 222'. Onleesbaar? Dan onveranderd terug. */
@@ -296,10 +319,12 @@
   // ── Timers ───────────────────────────────────────────────────────────────
   /** Alles stil. Wordt aangeroepen bij sluiten, bij wegnavigeren en bij unload. */
   function stopWaTimers() {
-    if (_waTimers.status) clearInterval(_waTimers.status);
-    if (_waTimers.qr)     clearInterval(_waTimers.qr);
-    _waTimers.status = null; _waTimers.statusMs = null;
-    _waTimers.qr     = null; _waTimers.qrMs     = null;
+    if (_waTimers.status)  clearInterval(_waTimers.status);
+    if (_waTimers.qr)      clearInterval(_waTimers.qr);
+    if (_waTimers.gesprek) clearInterval(_waTimers.gesprek);
+    _waTimers.status  = null; _waTimers.statusMs  = null;
+    _waTimers.qr      = null; _waTimers.qrMs      = null;
+    _waTimers.gesprek = null; _waTimers.gesprekMs = null;
   }
 
   /**
@@ -341,9 +366,10 @@
    */
   function herstelWaTimers() {
     const wens = bepaalWaTimers({
-      gemount   : waGemount(),
-      paneelOpen: _wa.paneelOpen,
-      verbonden : !!(_wa.data && _wa.data.verbonden),
+      gemount    : waGemount(),
+      paneelOpen : _wa.paneelOpen,
+      verbonden  : !!(_wa.data && _wa.data.verbonden),
+      gesprekOpen: _gesprek.open,
     });
 
     // De view kan vervangen zijn zonder dat iemand het ons vertelt; de shell
@@ -351,8 +377,12 @@
     // check in elke tik, niet alleen bij het opzetten.
     const tik = (fn) => () => { if (!waGemount()) { stopWaTimers(); return; } fn(); };
 
-    zetTimer('status', 'statusMs', wens.statusMs, tik(fetchWaStatus));
-    zetTimer('qr',     'qrMs',     wens.qrMs,     tik(fetchWaQr));
+    zetTimer('status',  'statusMs',  wens.statusMs,  tik(fetchWaStatus));
+    zetTimer('qr',      'qrMs',      wens.qrMs,      tik(fetchWaQr));
+    // Dezelfde regel als bij de QR: loopt hij al op vijf seconden, dan blijft
+    // hij lopen. Elke statusronde blind herstarten zou dit gesprek nooit laten
+    // verversen — precies de bug die de QR-timer had.
+    zetTimer('gesprek', 'gesprekMs', wens.gesprekMs, tik(fetchGesprek));
   }
 
   /** Past één timer aan volgens bepaalTimerActie(). */
@@ -772,6 +802,30 @@
 .opv .waregel{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #f1f2f5;font-size:13.5px}
 .opv .waregel:last-child{border-bottom:0}
 .opv .waregel span:first-child{color:var(--o-muted)}
+/* ── Het gesprekspaneel ────────────────────────────────────────────────────
+   Zelfde scrim en dezelfde kop als het koppelpaneel, maar als vel dat van
+   rechts inschuift: een gesprek lees je naast je lijst, niet er middenin. */
+.opv .scrim.rechts{place-items:stretch;justify-content:flex-end;padding:0}
+.opv .wpaneel{background:#fff;width:100%;max-width:460px;height:100%;display:flex;flex-direction:column;box-shadow:-24px 0 70px rgba(0,0,0,.3);animation:opvSchuif .18s ease-out}
+@keyframes opvSchuif{from{transform:translateX(100%)}to{transform:translateX(0)}}
+@media (prefers-reduced-motion:reduce){.opv .wpaneel{animation:none}}
+.opv .wpaneel .mh{flex:0 0 auto}
+.opv .wbody{flex:1;overflow-y:auto;padding:16px 18px;background:#f7f8fa;min-height:0}
+.opv .wchat{display:flex;flex-direction:column;gap:8px}
+.opv .wbrij{display:flex}
+.opv .wbrij.uit{justify-content:flex-end}
+.opv .wbub{max-width:78%;background:#fff;border:1px solid var(--o-line);border-radius:14px 14px 14px 4px;padding:8px 11px 6px;font-size:13.5px;line-height:1.45;color:var(--o-ink);white-space:pre-wrap;word-break:break-word;box-shadow:var(--o-sh)}
+.opv .wbrij.uit .wbub{background:var(--o-grns);border-color:#bfe9d6;border-radius:14px 14px 4px 14px}
+.opv .wbub.bezig{opacity:.6}
+.opv .wbub .wtijd{display:block;margin-top:3px;font-size:10.5px;color:var(--o-muted);text-align:right;font-variant-numeric:tabular-nums}
+.opv .wbub .wsp{opacity:.7}
+.opv .winvoer{flex:0 0 auto;border-top:1px solid var(--o-line);padding:12px 14px;display:flex;gap:8px;align-items:flex-end;background:#fff}
+.opv .winvoer textarea{flex:1;margin:0;resize:none}
+.opv .winvoer.uit{flex-direction:column;align-items:stretch;gap:6px}
+.opv .winvoer .wreden{font-size:12px;color:var(--o-muted)}
+.opv .wvoet{flex:0 0 auto;padding:0 14px 12px;font-size:12px}
+.opv .wvoet a{color:var(--o-acc);text-decoration:none;font-weight:600}
+.opv .wvoet a:hover{text-decoration:underline}
 .opv .waqr{display:block;width:320px;max-width:100%;height:auto;margin:14px auto 0;border:1px solid var(--o-line);border-radius:14px;background:#fff}
 .opv .wastap{margin:12px 0 0;padding-left:20px;font-size:13px;color:#414954;line-height:1.7}
 .opv .waklaar{background:var(--o-grns);border:1px solid #bfe9d6;color:#08794a;border-radius:12px;padding:14px 16px;text-align:center;font-size:14px;font-weight:650}
@@ -1292,6 +1346,130 @@
       '</div></div>' + zonderTaakRegel(bron.zonderTaak);
   }
 
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // HET GESPREK
+  // ═════════════════════════════════════════════════════════════════════════
+  /** Ophalen. Fail-soft: een fout vult _gesprek.error en het paneel zegt wat er is. */
+  async function fetchGesprek() {
+    if (!_gesprek.open) return;
+    const vraag = _gesprek.taakId
+      ? 'taak_id=' + encodeURIComponent(_gesprek.taakId)
+      : 'nummer=' + encodeURIComponent(_gesprek.nummer || '');
+    _gesprek.laden = true;
+    const j = await haal('/api/opvolging-whatsapp-gesprek?' + vraag);
+    _gesprek.laden = false;
+    if (j.__error) { _gesprek.error = j.__error; _gesprek.code = j.code || null; }
+    else {
+      _gesprek.error = null; _gesprek.code = null;
+      _gesprek.berichten = j.berichten || [];
+      if (j.nummer) _gesprek.nummer = j.nummer;
+      if (j.naam && !_gesprek.naam) _gesprek.naam = j.naam;
+      // Wat de server nu ook kent, hoeft hier niet meer los te staan. Matchen
+      // op tekst én richting: het bericht-id kennen we hier nog niet.
+      if (_gesprek.optimistisch.length) {
+        _gesprek.optimistisch = _gesprek.optimistisch.filter((o) =>
+          !(_gesprek.berichten || []).some((b) => b.richting === 'uit' && b.tekst === o.tekst));
+      }
+    }
+    render();
+  }
+
+  /**
+   * Kan er verstuurd worden?
+   *
+   * Een knop die stil niets doet is erger dan geen knop. Staat de brug eruit of
+   * is hij niet gekoppeld, dan gaat het tekstveld op slot met de reden erbij.
+   */
+  function gesprekKanVersturen() {
+    if (!_gesprek.nummer) return { mag: false, reden: 'Bij deze lead staat geen telefoonnummer.' };
+    if (_wa.error) return { mag: false, reden: 'De WhatsApp-brug is nu niet bereikbaar, dus er kan niets verstuurd worden.' };
+    if (!_wa.data) return { mag: false, reden: 'De status van de WhatsApp-brug is nog niet bekend.' };
+    if (!_wa.data.verbonden) return { mag: false, reden: 'De WhatsApp-brug is niet gekoppeld. Koppel hem via het lampje rechtsboven.' };
+    return { mag: true, reden: null };
+  }
+
+  /** Eén bubbel. Inkomend links, uitgaand rechts, met het tijdstip erbij. */
+  function gesprekBubbel(b, bezig) {
+    const uit = b.richting === 'uit';
+    const media = b.media_type && String(b.media_type).toLowerCase();
+    const isSpraak = media === 'ptt' || media === 'audio' || media === 'voice';
+    const isAnders = media && media !== 'chat' && !isSpraak;
+    const inhoud = b.tekst
+      ? esc(b.tekst)
+      : isSpraak ? '<i>&#127908; spraakbericht</i>'
+      : isAnders ? '<i>&#128206; ' + esc(media) + '</i>'
+      : '<i>(leeg bericht)</i>';
+    return '<div class="wbrij ' + (uit ? 'uit' : 'in') + '">' +
+      '<div class="wbub' + (bezig ? ' bezig' : '') + '">' +
+      (isSpraak && b.tekst ? '<span class="wsp">&#127908;</span> ' : '') + inhoud +
+      '<span class="wtijd">' + (bezig ? 'versturen&hellip;' : esc(uur(b.tijdstip))) + '</span>' +
+      '</div></div>';
+  }
+
+  /**
+   * Het gesprekspaneel. Zelfde vorm als het koppelpaneel: scrim met `on`,
+   * van rechts inschuivend, alles onder .opv.
+   */
+  function gesprekPaneelHtml() {
+    if (!_gesprek.open) return '';
+    const kan = gesprekKanVersturen();
+    const waNummer = String(_gesprek.nummer || '').replace(/\D/g, '');
+
+    let body;
+    if (_gesprek.error) {
+      const uitleg = _gesprek.code === 'TABEL_ONTBREEKT'
+        ? 'De berichtentabel bestaat nog niet — de migratie moet nog draaien.'
+        : _gesprek.error;
+      body = '<div class="warn2"><b>Het gesprek is nu niet op te halen.</b><br>' + esc(uitleg) + '</div>';
+    } else if (!_gesprek.berichten) {
+      body = '<div class="empty">Gesprek laden&hellip;</div>';
+    } else {
+      const rijen = _gesprek.berichten.map((b) => gesprekBubbel(b, false)).join('') +
+        _gesprek.optimistisch.map((b) => gesprekBubbel(b, true)).join('');
+      // Een leeg gesprek is hier niet hetzelfde als 'er is niets gezegd'. Van
+      // vóór dit paneel bestaat er geen historiek: uitgaande tekst verliet de
+      // telefoon toen niet, en van inkomende staat alleen een afgekapte kopie
+      // in de pogingen. Dat hoort er te staan, anders leest een leeg scherm als
+      // een stilte die er nooit was.
+      body = rijen
+        ? '<div class="wchat">' + rijen + '</div>'
+        : '<div class="nietgemeten"><b>Nog geen berichten in het systeem.</b><br>' +
+          'Van vóór vandaag is er geen historiek: wat Dave verstuurde werd niet bewaard, ' +
+          'en van binnengekomen berichten stond alleen een korte samenvatting bij de pogingen. ' +
+          '<br><span style="color:#6b7280">Dit is dus geen leeg gesprek — het is een gesprek dat hier begint.</span></div>';
+    }
+
+    const invoer = kan.mag
+      ? '<div class="winvoer">' +
+        '<textarea id="opv-wa-tekst" rows="2" placeholder="Typ een bericht&hellip;"' +
+        (_gesprek.verzendt ? ' disabled' : '') + '></textarea>' +
+        '<button class="obtn p" onclick="window.__opvGesprekStuur()"' +
+        (_gesprek.verzendt ? ' disabled' : '') + '>' +
+        (_gesprek.verzendt ? 'Bezig&hellip;' : 'Versturen') + '</button></div>'
+      : '<div class="winvoer uit">' +
+        '<textarea rows="2" disabled placeholder="Versturen kan nu niet"></textarea>' +
+        '<div class="wreden">' + esc(kan.reden) + '</div></div>';
+
+    // 'on' is verplicht: de globale .scrim staat op opacity:0 met
+    // pointer-events:none, en alleen .scrim.on is zichtbaar. Die les kostte
+    // eerder een testronde. 'rechts' maakt er een vel van dat inschuift.
+    return '<div class="opv"><div class="scrim on rechts" onmousedown="if(event.target===this)window.__opvGesprekSluit()">' +
+      '<div class="wpaneel">' +
+      '<div class="mh"><div>' +   // zelfde kop-opmaak als het koppelpaneel
+        '<h3>' + esc(_gesprek.naam || 'WhatsApp') + '</h3>' +
+        '<p>' + esc(toonNummer(_gesprek.nummer) || 'geen nummer') + '</p>' +
+      '</div><button class="x" onclick="window.__opvGesprekSluit()">&times;</button></div>' +
+      '<div class="wbody">' + body + '</div>' +
+      invoer +
+      // Blijft staan, ook als alles werkt: ligt de brug eruit, dan is dit de
+      // weg die er altijd al was. Geen noodoplossing maar een uitgang.
+      (waNummer
+        ? '<div class="wvoet"><a href="https://wa.me/' + esc(waNummer) + '" target="_blank" rel="noopener">Open in WhatsApp &rarr;</a></div>'
+        : '') +
+      '</div></div></div>';
+  }
+
   // ═════════════════════════════════════════════════════════════════════════
   // AANMELDINGEN VOOR EEN EVENT
   // ═════════════════════════════════════════════════════════════════════════
@@ -1558,8 +1736,8 @@
     // dan toont dit blok een melding en gaat de rest gewoon door.
     h += callsBlok(dag);
 
-    if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml() + waPaneelHtml();
-    if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml() + waPaneelHtml();
+    if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml();
+    if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml();
 
     const alles = st.data.taken || [];
     // Aanmeldingen krijgen hun eigen blok, gegroepeerd per event. Wat vandaag
@@ -1617,7 +1795,7 @@
         ).join('') + '</div>';
     }
 
-    return h + '</div>' + modalHtml() + waPaneelHtml();
+    return h + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml();
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -2085,13 +2263,71 @@
     }
   };
 
-  window.__opvWa = async (id) => {
-    const t = zoekTaak(id); if (!t || !t.telefoon) { alert('Geen telefoonnummer bekend.'); return; }
+  // ── Het gesprek openen ────────────────────────────────────────────────────
+  // Hiervoor openden deze twee wa.me in een nieuw tabblad. Dan zie je het
+  // gesprek wel, maar staat het niet in het systeem en kan niemand het
+  // teruglezen. Nu gaat het paneel open; het wa.me-linkje staat onderin voor
+  // als de brug eruit ligt.
+  //
+  // Er wordt hier GEEN poging weggeschreven. Dat deed __opvWa wel ('WhatsApp
+  // geopend') en __opvCallWa niet, en dat verschil klopte al niet. Bovendien
+  // telde die rij een bericht dat misschien nooit verstuurd is: het tabblad
+  // opengaan is geen contact. De poging ontstaat nu op één plek — de webhook,
+  // zodra de brug meldt dat het bericht echt vertrokken is.
+  function opengesprek({ nummer, taakId, naam }) {
+    _gesprek.open = true;
+    _gesprek.nummer = nummer ? String(nummer).replace(/\D/g, '') : null;
+    _gesprek.taakId = taakId || null;
+    _gesprek.naam = naam || null;
+    _gesprek.berichten = null; _gesprek.error = null; _gesprek.code = null;
+    _gesprek.optimistisch = [];
+    render();
+    queueMicrotask(() => { fetchGesprek(); herstelWaTimers(); });
+  }
+
+  window.__opvWa = (id) => {
+    const t = zoekTaak(id); if (!t) return;
+    if (!t.telefoon) { alert('Geen telefoonnummer bekend.'); return; }
+    opengesprek({ nummer: t.telefoon, taakId: id, naam: t.naam });
+  };
+
+  window.__opvGesprekSluit = () => {
+    _gesprek.open = false;
+    _gesprek.optimistisch = [];
+    render();
+    // Timer meteen opruimen, niet pas bij de volgende statusronde. Dezelfde
+    // afspraak als bij het koppelpaneel.
+    herstelWaTimers();
+  };
+
+  window.__opvGesprekStuur = async () => {
+    if (_gesprek.verzendt) return;
+    const el = document.getElementById('opv-wa-tekst');
+    const tekst = (el && el.value || '').trim();
+    if (!tekst) return;
+    if (!gesprekKanVersturen().mag) return;
+
+    // Optimistisch tonen: anders staat een verstuurd bericht tot vijf seconden
+    // lang nergens en typt iemand het nog een keer.
+    _gesprek.verzendt = true;
+    _gesprek.optimistisch.push({ richting: 'uit', tekst, media_type: 'chat', tijdstip: new Date().toISOString() });
+    render();
     try {
-      window.open('https://wa.me/' + String(t.telefoon).replace(/[^0-9]/g, ''), '_blank', 'noopener');
-      await post('/api/opvolging-poging', { taak_id: id, soort: 'whatsapp', resultaat: 'WhatsApp geopend', automatisch: false });
-      leegTakenCache(); render();
-    } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
+      await post('/api/opvolging-whatsapp-send', {
+        nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
+      });
+      _gesprek.verzendt = false;
+      await fetchGesprek();
+    } catch (e) {
+      // Weg met de bubbel: hij is níet verstuurd, en hem laten staan zou dat
+      // suggereren. De tekst gaat terug in het veld zodat er niets verloren gaat.
+      _gesprek.verzendt = false;
+      _gesprek.optimistisch = _gesprek.optimistisch.filter((o) => o.tekst !== tekst);
+      render();
+      const veld = document.getElementById('opv-wa-tekst');
+      if (veld) veld.value = tekst;
+      alert('Versturen is niet gelukt: ' + (e.message || 'onbekende fout'));
+    }
   };
 
   // ── Fase 3a · de calls van vandaag ────────────────────────────────────────
@@ -2117,7 +2353,12 @@
 
   window.__opvCallWa = (i) => {
     const c = callOp(i); if (!c || !c.telefoon) { alert('Geen telefoonnummer bekend.'); return; }
-    window.open('https://wa.me/' + String(c.telefoon).replace(/[^0-9]/g, ''), '_blank', 'noopener');
+    // Precies hetzelfde als vanaf een kaart. Bestaat er al een taak voor dit
+    // nummer, dan gaat die mee zodat het gesprek daaraan hangt; zo niet, dan
+    // volstaat het nummer — een call uit de agenda hoeft nog geen taak te
+    // hebben, en juist bij een eerste gesprek is dat het normale geval.
+    const taak = taakVoorNummer(c.telefoon);
+    opengesprek({ nummer: c.telefoon, taakId: taak ? taak.id : null, naam: c.naam });
   };
 
   window.__opvCallAfrond = (i) => { _ui.modal = { soort: 'call-afrond', callIndex: i }; render(); };
@@ -2294,6 +2535,14 @@
   };
 
   window.__opvAanmeldHelpers = { WAKKER_DAGEN, bevestigdBadge, taakKaart, evGroepKop, kortePlaats, eventKopTekst };
+
+  // Het gesprekspaneel, getest in tests/opvolging-whatsapp-gesprek.test.js.
+  window.__opvGesprekHelpers = {
+    gesprekPaneelHtml, gesprekKanVersturen, gesprekBubbel, bepaalWaTimers,
+    zetGesprek: (v) => Object.assign(_gesprek, v),
+    zetWa: (v) => Object.assign(_wa, v),
+    WA_POLL_GESPREK_MS,
+  };
 
   window.__opvWeekHelpers = {
     bepaalWeek, basisMaandag, weekOffsetVoorDag, maandagVan, kortDatum,

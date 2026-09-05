@@ -14,7 +14,10 @@
 // 404 op een onbekend nummer zou dat alsnog verklappen. Er wordt in dat geval
 // ook niets van de tekst gelogd.
 //
-// Schrijft uitsluitend in opvolging_pogingen (plus updated_at op de taak).
+// Schrijft in opvolging_pogingen (de TELLING) en in opvolging_wa_berichten
+// (het GESPREK), plus updated_at op de taak. Die twee zijn bewust gescheiden:
+// een verstuurd bericht levert drie pogingen op (verzonden, afgeleverd,
+// gelezen) maar hoort één regel in het gesprek te zijn.
 
 import { supabaseAdmin } from './supabase.js';
 import { brugGeheimKlopt } from './_lib/whatsapp-brug-client.js';
@@ -109,8 +112,16 @@ export default async function handler(req, res) {
       }
     }
 
-    const tekst = (soort === 'antwoord_ontvangen' && typeof b.tekst === 'string')
-      ? b.tekst.trim().slice(0, 500) : '';
+    // De volledige tekst voor het gesprek, en een korte voor de historiek-regel.
+    // Die twee zijn niet hetzelfde: `resultaat` is een samenvatting van 500
+    // tekens die iemand terugleest, het gesprek is de tekst zelf.
+    //
+    // Uitgaande tekst komt sinds het gesprekspaneel ook mee. De brug stuurt die
+    // pas ná zijn privacyfilter — alles buiten de leadlijst bereikt dit
+    // endpoint niet.
+    const volledigeTekst = typeof b.tekst === 'string' ? b.tekst.slice(0, 4000) : '';
+    const tekst = (soort === 'antwoord_ontvangen' && volledigeTekst)
+      ? volledigeTekst.trim().slice(0, 500) : '';
 
     const rij = {
       taak_id    : taak.id,
@@ -142,10 +153,52 @@ export default async function handler(req, res) {
     await supabaseAdmin.from('opvolging_taken')
       .update({ updated_at: new Date().toISOString() }).eq('id', taak.id);
 
+    await bewaarGesprekRegel({
+      soort, nummer, taakId: taak.id, tijdstipIso, berichtId,
+      tekst: volledigeTekst, mediaType: b.media_type,
+    });
+
     return res.status(200).json({ ok: true, gekoppeld: true, poging_id: poging.id });
   } catch (e) {
     console.error('[opvolging-whatsapp-webhook]', e?.message || e);
     return res.status(500).json({ error: 'Interne fout' });
+  }
+}
+
+/**
+ * De gespreksregel naast de poging.
+ *
+ * Alleen de twee soorten die een echt bericht beschrijven: een antwoord van de
+ * lead en iets dat wij verstuurden. 'afgeleverd' en 'gelezen' zijn statussen op
+ * een bericht dat er al staat — die als gespreksregel opnemen zou hetzelfde
+ * bericht drie keer in de chat zetten.
+ *
+ * FAIL-SOFT, en dat is een bewuste keuze. De poging is de bestaande functie en
+ * bepaalt het oordeel in Afgerond; het gesprek is er sinds vandaag bij. Draait
+ * de migratie nog niet, of gaat er iets anders mis met deze tabel, dan mag dat
+ * de telling niet meesleuren. De webhook antwoordt dus gewoon ok en er staat
+ * een waarschuwing in het log — nooit de tekst zelf, alleen dát het misging.
+ *
+ * Idempotent op bericht_id via een partiële unique index. Een herkans van de
+ * brug levert dus geen tweede regel op; 23505 is hier geen fout maar het bewijs
+ * dat de regel er al stond.
+ */
+async function bewaarGesprekRegel({ soort, nummer, taakId, tijdstipIso, berichtId, tekst, mediaType }) {
+  const richting = soort === 'antwoord_ontvangen' ? 'in' : soort === 'uitgaand' ? 'uit' : null;
+  if (!richting) return;
+  try {
+    const { error } = await supabaseAdmin.from('opvolging_wa_berichten').insert({
+      nummer,
+      taak_id   : taakId,
+      richting,
+      tekst     : tekst || null,
+      media_type: mediaType ? String(mediaType).slice(0, 40) : null,
+      bericht_id: berichtId,
+      tijdstip  : tijdstipIso,
+    });
+    if (error && error.code !== '23505') throw new Error(error.message);
+  } catch (e) {
+    console.warn('[opvolging-whatsapp-webhook] gespreksregel (soft):', e?.message || e);
   }
 }
 
