@@ -168,6 +168,117 @@ async function buildOnboarding() {
   return { autos, perAuto };
 }
 
+// BP3 v43 (2026-09-04) — per-stap counts. Labels uit steps-jsonb (aggregate,
+// niet per-run steps_snapshot want stap-INDEX is stabiel over runs met dezelfde
+// automation; als steps live wijzigen loopt de label mogelijk uit — dat is een
+// bekende trade-off en gedocumenteerd in de discovery).
+function _stepLabel(step, idx) {
+  const t = String(step?.type || 'onbekend');
+  const cfg = step?.config || {};
+  const tpl = cfg.template_name ? ' · ' + String(cfg.template_name) : '';
+  const wait = t === 'wait' && cfg.amount != null && cfg.unit ? ` (${cfg.amount} ${cfg.unit})` : '';
+  const chk = t === 'condition' && cfg.check ? ' · ' + String(cfg.check) : '';
+  return step?.name || `${t}${wait}${tpl}${chk}` || 'Stap ' + (idx + 1);
+}
+function _stepAccent(step) {
+  const t = String(step?.type || '');
+  if (t === 'wait')                       return 'muted';
+  if (t === 'condition')                  return 'amber';
+  if (t === 'send_email' || t === 'send_whatsapp') return 'blue';
+  if (t === 'set_tag')                    return 'blue';
+  if (t === 'update_attendee_status' || t === 'update_onboarding_status') return 'emerald';
+  if (t === 'send_internal_notification') return 'blue';
+  return 'muted';
+}
+
+async function buildEventsSteps() {
+  let autos = [];
+  try {
+    const { data } = await supabaseAdmin
+      .from('event_automations')
+      .select('id, name, enabled, trigger_type, steps')
+      .order('name');
+    autos = Array.isArray(data) ? data : [];
+  } catch (_) { autos = []; }
+  const perAuto = {};
+  for (const a of autos) {
+    const steps = Array.isArray(a.steps) ? a.steps : [];
+    const stepInfos = [];
+    for (let i = 0; i < steps.length; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await safeCount('event_automation_runs',
+        (q) => q.eq('automation_id', a.id).eq('status', 'active').eq('current_step_index', i));
+      stepInfos.push({
+        index: i, label: _stepLabel(steps[i], i), type: String(steps[i]?.type || ''),
+        accent: _stepAccent(steps[i]), count: r.count, error: r.error,
+      });
+    }
+    perAuto[a.id] = {
+      name: a.name, enabled: a.enabled, trigger_type: a.trigger_type,
+      steps: stepInfos,
+    };
+  }
+  return { autos: autos.map((a) => ({ id: a.id, name: a.name, enabled: a.enabled, trigger_type: a.trigger_type })), perAuto };
+}
+
+async function buildOnboardingSteps() {
+  let autos = [];
+  try {
+    const { data } = await supabaseAdmin
+      .from('onboarding_automations')
+      .select('id, name, enabled, trigger_type, steps')
+      .order('name');
+    autos = Array.isArray(data) ? data : [];
+  } catch (_) { autos = []; }
+  const perAuto = {};
+  for (const a of autos) {
+    const steps = Array.isArray(a.steps) ? a.steps : [];
+    const stepInfos = [];
+    for (let i = 0; i < steps.length; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await safeCount('onboarding_automation_runs',
+        (q) => q.eq('automation_id', a.id).eq('status', 'active').eq('current_step_index', i));
+      stepInfos.push({
+        index: i, label: _stepLabel(steps[i], i), type: String(steps[i]?.type || ''),
+        accent: _stepAccent(steps[i]), count: r.count, error: r.error,
+      });
+    }
+    perAuto[a.id] = { name: a.name, enabled: a.enabled, trigger_type: a.trigger_type, steps: stepInfos };
+  }
+  return { autos: autos.map((a) => ({ id: a.id, name: a.name, enabled: a.enabled, trigger_type: a.trigger_type })), perAuto };
+}
+
+async function buildCall() {
+  // follow_up_appointments waar scheduled + toekomst.
+  const base = (q) => q.eq('status', 'scheduled').gt('scheduled_at', new Date().toISOString());
+  const buckets = {};
+  buckets['bevestigd']       = await safeCountAndRows('follow_up_appointments', (q) => base(q).not('bevestigd_at', 'is', null).order('bevestigd_at', { ascending: false }), '*');
+  buckets['bev_verstuurd']   = await safeCountAndRows('follow_up_appointments', (q) => base(q).not('bevestiging_sent_at', 'is', null).is('bevestigd_at', null).order('bevestiging_sent_at', { ascending: true }), '*');
+  buckets['reminder_24u']    = await safeCountAndRows('follow_up_appointments', (q) => base(q).not('reminder_24u_at', 'is', null).is('reminder_2u_at', null).order('reminder_24u_at', { ascending: true }), '*');
+  buckets['reminder_2u']     = await safeCountAndRows('follow_up_appointments', (q) => base(q).not('reminder_2u_at', 'is', null).is('reminder_30m_at', null).order('reminder_2u_at', { ascending: true }), '*');
+  buckets['reminder_30m']    = await safeCountAndRows('follow_up_appointments', (q) => base(q).not('reminder_30m_at', 'is', null).order('reminder_30m_at', { ascending: true }), '*');
+  return { buckets };
+}
+
+async function buildNoshow() {
+  // No-show signals + 14d future-call-reminder.
+  const signals = {};
+  signals['open']              = await safeCountAndRows('student_signals', (q) => q.eq('type', 'no_show').eq('status', 'open').order('created_at', { ascending: false }), '*');
+  signals['opnieuw_opvolgen']  = await safeCountAndRows('student_signals', (q) => q.eq('type', 'no_show').eq('status', 'opnieuw_opvolgen').order('created_at', { ascending: false }), '*');
+  signals['afgehandeld']       = await safeCountAndRows('student_signals', (q) => q.eq('type', 'no_show').eq('status', 'afgehandeld').order('created_at', { ascending: false }), '*');
+  signals['reden_ontbreekt']   = await safeCountAndRows('student_signals', (q) => q.eq('type', 'no_show').is('reason_given_at', null).order('created_at', { ascending: false }), '*');
+
+  // 14d-window onboardings.
+  const today = new Date().toISOString().slice(0, 10);
+  const in14d = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  const window14 = {};
+  const baseWin = (q) => q.gte('start_date', today).lte('start_date', in14d).not('mentor_user_id', 'is', null).neq('status', 'gearchiveerd');
+  window14['openstaand']    = await safeCountAndRows('onboardings', (q) => baseWin(q).is('first_call_reminder_task_at', null).order('start_date', { ascending: true }), '*');
+  window14['taak_aangemaakt'] = await safeCountAndRows('onboardings', (q) => baseWin(q).not('first_call_reminder_task_at', 'is', null).order('first_call_reminder_task_at', { ascending: false }), '*');
+
+  return { signals, window14, today, in14d };
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -193,6 +304,10 @@ export default async function handler(req, res) {
     belronde: buildBelronde,
     events: buildEvents,
     onboarding: buildOnboarding,
+    events_steps:      buildEventsSteps,
+    onboarding_steps:  buildOnboardingSteps,
+    call:              buildCall,
+    noshow:            buildNoshow,
   };
   const fn = builders[flow];
   if (!fn) return res.status(400).json({ error: 'flow moet één van zijn: ' + Object.keys(builders).join(', ') });

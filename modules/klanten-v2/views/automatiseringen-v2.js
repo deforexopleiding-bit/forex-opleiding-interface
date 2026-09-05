@@ -801,7 +801,7 @@
       else if (_live.evAutos.loading && !_live.evAutos.data) content = skel();
       else content = _evList();
     }
-    return _subtabToolbar('ev', sub) + content + _confirmModalHtml();
+    return _subtabToolbar('ev', sub) + content + _renderFlowDrawer() + _confirmModalHtml();
   }
   function _evList() {
     const all = asArr(_live.evAutos.data);
@@ -811,7 +811,8 @@
               : all;
     return `<div class="toolbar" style="padding:12px 20px;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
       ${[['all','Alles'],['enabled','Actief'],['disabled','Uit']].map(([v, l]) => `<button class="chip ${filter === v ? 'on' : ''}" onclick="window.__autEvFilter('${v}')">${esc(l)}<span class="cnt">${v === 'all' ? all.length : (v === 'enabled' ? all.filter((a) => a.enabled).length : all.filter((a) => !a.enabled).length)}</span></button>`).join('')}
-      <div class="tb-right" style="margin-left:auto">
+      <div class="tb-right" style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="window.__flowOpenDrawer('events_steps')" title="Live actieve runs per stap">🔍 Per stap</button>
         <button class="btn btn-primary btn-sm" onclick="window.__autEvNew()">${svg(I.plus)}Nieuwe automation</button>
       </div>
     </div>
@@ -1286,7 +1287,7 @@
       else if (_live.obAutos.loading && !_live.obAutos.data) content = skel();
       else content = _obList();
     }
-    return _subtabToolbar('ob', sub) + content + _confirmModalHtml();
+    return _subtabToolbar('ob', sub) + content + _renderFlowDrawer() + _confirmModalHtml();
   }
   function _obList() {
     const all = asArr(_live.obAutos.data);
@@ -1296,7 +1297,8 @@
               : all;
     return `<div class="toolbar" style="padding:12px 20px;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
       ${[['all','Alles'],['enabled','Actief'],['disabled','Uit']].map(([v, l]) => `<button class="chip ${filter === v ? 'on' : ''}" onclick="window.__autObFilter('${v}')">${esc(l)}<span class="cnt">${v === 'all' ? all.length : (v === 'enabled' ? all.filter((a) => a.enabled).length : all.filter((a) => !a.enabled).length)}</span></button>`).join('')}
-      <div class="tb-right" style="margin-left:auto">
+      <div class="tb-right" style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="window.__flowOpenDrawer('onboarding_steps')" title="Live actieve runs per stap">🔍 Per stap</button>
         <button class="btn btn-primary btn-sm" onclick="window.__autObNew()">${svg(I.plus)}Nieuwe automation</button>
       </div>
     </div>
@@ -3461,6 +3463,10 @@
     events:     'Events-automatiseringen · runs',
     onboarding: 'Onboarding-automatiseringen · runs',
     lisa:       'Lisa · contacten in stap',
+    call:       'Call-bevestiging · reminder-flow',
+    noshow:     'No-show + 14d-vervolg',
+    events_steps:     'Events · per stap',
+    onboarding_steps: 'Onboarding · per stap',
   };
   window.__flowOpenDrawer = (flow, subTitle, bucketKey) => {
     // Als data nog niet geladen: trigger fetch, drawer opent daarna.
@@ -3550,6 +3556,85 @@
         </div>`;
       }).join('') || `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen automations gevonden</div>`;
       return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">Step-index-labels (per stap-naam) volgen in een aparte fase — vereist steps-jsonb-parse per automation.</div>${rows}`;
+    }
+    if (flow === 'call') {
+      const b = data.buckets || {};
+      const rows = [
+        { key: 'bevestigd',     label: 'Lead bevestigd (👍)',     accent: 'emerald' },
+        { key: 'bev_verstuurd', label: 'Bevestiging verstuurd',    accent: 'blue' },
+        { key: 'reminder_24u',  label: '24u-reminder verstuurd',   accent: 'amber' },
+        { key: 'reminder_2u',   label: '2u-reminder verstuurd',    accent: 'amber' },
+        { key: 'reminder_30m',  label: '30m-reminder verstuurd',   accent: 'rose' },
+      ];
+      const stepRows = rows.map((r) => _flowStepRowHtml({
+        title: r.label,
+        count: b[r.key] && b[r.key].count,
+        countLabel: '',
+        accentKey: r.accent,
+      })).join('');
+      const totaal = rows.reduce((n, r) => n + (Number((b[r.key] && b[r.key].count) || 0)), 0);
+      return `<div style="font-size:12.5px;color:var(--text-3);margin-bottom:10px">Toekomstige geboekte calls · Totaal in flow: <b style="color:var(--text-1)">${esc(String(totaal))}</b></div>
+        ${_tgSpineHtml(stepRows)}
+        <div style="margin-top:14px;padding:10px 12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3);line-height:1.55">
+          ⓘ Verschenen / no-show is niet direct telbaar op deze tabel — dat loopt via <code>follow-up-appointment-outcome</code>. Flow is gated op <code>AFSPRAAK_REMINDERS_LIVE</code>; counts kunnen 0 zijn als de cron uit staat.
+        </div>`;
+    }
+    if (flow === 'noshow') {
+      const s = data.signals || {};
+      const w = data.window14 || {};
+      const signalRows = [
+        { key: 'open',              label: 'Signalen · open',              accent: 'rose' },
+        { key: 'opnieuw_opvolgen',  label: 'Signalen · opnieuw opvolgen',  accent: 'amber' },
+        { key: 'afgehandeld',       label: 'Signalen · afgehandeld',       accent: 'emerald' },
+        { key: 'reden_ontbreekt',   label: 'Signalen · reden ontbreekt',   accent: 'muted' },
+      ].map((r) => _flowStepRowHtml({
+        title: r.label, count: s[r.key] && s[r.key].count, countLabel: 'no-show signals', accentKey: r.accent,
+      })).join('');
+      const tegel = (label, val, tone) => {
+        const a = _TG_ACCENT[tone] || _TG_DEFAULT_ACCENT;
+        return `<div style="flex:1;min-width:150px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);box-shadow:var(--shadow-xs);position:relative;overflow:hidden">
+          <div aria-hidden="true" style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${a.c}"></div>
+          <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;font-weight:600">${esc(label)}</div>
+          <div style="font-size:22px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums">${esc(String(val))}</div>
+        </div>`;
+      };
+      const openW  = (w.openstaand      && w.openstaand.count)      ?? 0;
+      const taakW  = (w.taak_aangemaakt && w.taak_aangemaakt.count) ?? 0;
+      return `<div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">No-show signalen · student_signals</div>
+        ${_tgSpineHtml(signalRows)}
+        <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;font-weight:700">14-daagse vervolg-reminder · onboardings.first_call_reminder_task_at</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          ${tegel('Openstaand (mentor moet taak krijgen)', openW, 'amber')}
+          ${tegel('Taak aangemaakt (marker gezet)', taakW, 'emerald')}
+        </div>
+        <div style="margin-top:14px;padding:10px 12px;background:var(--surface-2);border:1px dashed var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3);line-height:1.55">
+          ⓘ Window: onboardings met start_date in [<b>${esc(w.today || '—')}</b>, <b>${esc(w.in14d || '—')}</b>], mentor gezet, status ≠ gearchiveerd.
+        </div>`;
+    }
+    if (flow === 'events_steps' || flow === 'onboarding_steps') {
+      const autos = Array.isArray(data.autos) ? data.autos : [];
+      const perAuto = data.perAuto || {};
+      if (!autos.length) return `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen automations</div>`;
+      return autos.map((a) => {
+        const info = perAuto[a.id] || { steps: [] };
+        const stepsRows = (info.steps || []).map((s) => _flowStepRowHtml({
+          title: s.label,
+          count: s.count,
+          countLabel: 'runs actief',
+          accentKey: s.accent,
+        })).join('') || `<div style="font-size:11.5px;color:var(--text-3);padding:12px;text-align:center;font-style:italic">Geen stappen gedefinieerd</div>`;
+        const pill = a.enabled
+          ? '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--emerald-soft);color:var(--emerald);border:1px solid var(--emerald-line);font-weight:600">enabled</span>'
+          : '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);font-weight:600">disabled</span>';
+        return `<div style="margin-bottom:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-size:13px;font-weight:700;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name || '—')}</span>
+            ${pill}
+            <span style="font-size:10.5px;color:var(--text-3);margin-left:auto">${esc(a.trigger_type || '')}</span>
+          </div>
+          ${_tgSpineHtml(stepsRows)}
+        </div>`;
+      }).join('');
     }
     if (flow === 'lisa') {
       // Bucket-specifieke contacten

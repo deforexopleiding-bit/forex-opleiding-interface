@@ -198,24 +198,29 @@ export default async function handler(req, res) {
       key: 'call_bevestiging',
       naam: 'Call-bevestiging',
       categorie: 'Sales · afspraken',
-      status: st('nog niet gekoppeld', 'muted'),
-      count: null, count_label: '',
-      count_error: 'bron nog niet bevestigd — expliciet niet gegokt',
-      kanalen: ['mail', 'whatsapp'],
-      granulariteit: 'alleen totaal',
-      drilldown: null,
+      // BP3 v43 (2026-09-04) — bron bevestigd: follow_up_appointments +
+      // reminder-kolommen (cron-afspraak-reminders). Live-flag afhankelijk
+      // van AFSPRAAK_REMINDERS_LIVE; counts mogen 0 zijn als uit.
+      status: st('gated (AFSPRAAK_REMINDERS_LIVE)', 'blue'),
+      count: null, count_label: 'zie drilldown',
+      count_error: null,
+      kanalen: ['whatsapp'],
+      granulariteit: 'stap-voor-stap',
+      drilldown: 'drawer:call',
       laatste_run: null,
     },
     {
       key: 'no_show_14d',
       naam: 'No-show / 14d-vervolg',
       categorie: 'Sales · afspraken',
-      status: st('nog niet gekoppeld', 'muted'),
-      count: null, count_label: '',
-      count_error: 'bron nog niet bevestigd — expliciet niet gegokt',
-      kanalen: ['mail', 'whatsapp'],
-      granulariteit: 'alleen totaal',
-      drilldown: null,
+      // BP3 v43 — bron bevestigd: student_signals (no_show) + onboardings
+      // (first_call_reminder_task_at) 14d-window.
+      status: st('cron 06:00 + 07:00', 'blue'),
+      count: null, count_label: 'zie drilldown',
+      count_error: null,
+      kanalen: ['mentor'],
+      granulariteit: 'stap-voor-stap',
+      drilldown: 'drawer:noshow',
       laatste_run: null,
     },
   ];
