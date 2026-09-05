@@ -29,7 +29,12 @@
 //            /api/opvolging-taak-update, /api/opvolging-poging,
 //            /api/opvolging-agenda (fase 2),
 //            /api/opvolging-taak-create (fase 3a),
-//            /api/opvolging-whatsapp-status (alleen lezen)
+//            /api/opvolging-whatsapp-status (alleen lezen),
+//            /api/opvolging-aanmelding-actie
+//
+// Aanmeldingen voor een event stromen binnen via cron-opvolging-aanmeldingen en
+// staan hier gegroepeerd per event. Ze hebben eigen uitgangen: er is nog niets
+// gebeurd, dus 'opnieuw inplannen' slaat er niet op.
 
 (function () {
   if (!window.DFO) { console.error('[opvolging-v2] DFO shell niet geladen.'); return; }
@@ -628,6 +633,18 @@
 .opv .balklegenda{font-size:12px;color:var(--o-muted);margin-top:6px;display:flex;gap:12px;flex-wrap:wrap}
 .opv .nietgemeten{border:1px dashed var(--o-line);border-radius:14px;background:#fcfcfd;padding:18px 20px;font-size:13.5px;color:#414954}
 .opv .nietgemeten b{color:var(--o-ink)}
+/* Aanmeldingen: gegroepeerd per event. De groepskop draagt de context, de
+   kaarten eronder houden exact de vorm die ze overal in deze module hebben —
+   geen gekleurde randjes per kaart. */
+.opv .evgroep{margin:18px 0 4px}
+.opv .evkop{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;background:#fbfcfd;border:1px solid var(--o-line);border-radius:12px;padding:10px 14px;margin-bottom:9px}
+.opv .evkop b{font-size:14px;font-weight:700}
+.opv .evkop .wan{font-size:12.5px;color:var(--o-muted)}
+.opv .evkop .tel{margin-left:auto;font-size:11.5px;font-weight:700;background:var(--o-line);color:#4b5563;border-radius:20px;padding:2px 9px}
+.opv .evkop .straks{font-size:11.5px;font-weight:700;border-radius:20px;padding:2px 9px;background:var(--o-ambs);color:#8a5300}
+.opv .evkop .straks.dichtbij{background:var(--o-reds);color:#b32b2f}
+.opv .klaarblok{opacity:.72}
+.opv .klaarblok .row{background:#fcfcfd}
 .opv .mb{padding:18px 22px 22px}
 .opv .opt{display:flex;align-items:center;gap:13px;width:100%;text-align:left;padding:14px 15px;border:1px solid var(--o-line);border-radius:13px;background:#fff;cursor:pointer;margin-bottom:9px;font-family:inherit}
 .opv .opt:hover{border-color:var(--o-acc);background:var(--o-accs)}
@@ -955,6 +972,95 @@
       '</div></div>';
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // AANMELDINGEN VOOR EEN EVENT
+  // ═════════════════════════════════════════════════════════════════════════
+  const AANMELD_REDEN = 'aanmelding';
+  const isAanmelding = (t) => t && t.reden === AANMELD_REDEN;
+
+  /** Is er echt contact geweest? Zelfde regel als api/_lib/opvolging-aanmelding.js. */
+  function echtContact(p) {
+    if (!p) return false;
+    const r = String(p.resultaat || '').toLowerCase();
+    if (p.soort === 'call') return /gesproken/.test(r);
+    if (p.soort === 'whatsapp' || p.soort === 'spraakbericht') return /ontvangen/.test(r);
+    return false;
+  }
+  const heeftContact = (t) => ((t && t.pogingen) || []).some(echtContact);
+
+  /**
+   * Is deze aanmeldkaart klaar voor vandaag?
+   *
+   * Zonder echt contact blijft hij terugkomen met het gewone ritme: na de
+   * eerste poging naar de tweede ronde, na de tweede is hij vandaag klaar en
+   * staat hij morgen terug. Dat laatste blok staat onderaan Vandaag, NIET in
+   * Afgerond — dat tabblad is archief en bewijsscherm, en een kaart die morgen
+   * gewoon terugkomt hoort daar niet tussen.
+   */
+  function klaarVoorVandaag(t) {
+    if (heeftContact(t)) return false;                 // dan is hij écht klaar
+    return (t.bel_vandaag || 0) + (t.wa_vandaag || 0) >= DOEL_BELLEN;
+  }
+
+  /** De eventgegevens die de cron in bron_ref heeft gezet. */
+  const evVan = (t) => (t && t.bron_ref) || {};
+
+  /**
+   * Kaarten groeperen per event, op eventdatum. De groepskop draagt de context
+   * — naam, plaats, dag, uur, over hoeveel dagen, hoeveel aanmeldingen — zodat
+   * de kaarten eronder er precies zo uitzien als overal elders.
+   */
+  function groepeerPerEvent(taken) {
+    const groepen = new Map();
+    for (const t of taken) {
+      const e = evVan(t);
+      const sleutel = e.event_id || 'onbekend';
+      if (!groepen.has(sleutel)) {
+        groepen.set(sleutel, {
+          titel : e.event_titel || 'Onbekend event',
+          plaats: e.event_plaats || '',
+          start : e.event_start || null,
+          dag   : e.event_dag || null,
+          taken : [],
+        });
+      }
+      groepen.get(sleutel).taken.push(t);
+    }
+    return [...groepen.values()].sort((a, b) => String(a.dag || '9999').localeCompare(String(b.dag || '9999')));
+  }
+
+  function evGroepKop(g) {
+    const nu = vandaag();
+    const over = g.dag ? Math.round((Date.parse(g.dag + 'T12:00:00Z') - Date.parse(nu + 'T12:00:00Z')) / 86400000) : null;
+    const wanneer = over === null ? ''
+      : over < 0 ? 'geweest'
+      : over === 0 ? 'vandaag'
+      : over === 1 ? 'morgen'
+      : 'over ' + over + ' dagen';
+    const uur = g.start ? new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'short',
+      hour: '2-digit', minute: '2-digit',
+    }).format(new Date(g.start)).replace(',', '') : '';
+    return '<div class="evkop">' +
+      '<b>' + esc([g.titel, g.plaats].filter(Boolean).join(' &middot; ')) + '</b>' +
+      (uur ? '<span class="wan">' + esc(uur) + '</span>' : '') +
+      (wanneer ? '<span class="straks' + (over !== null && over <= 1 ? ' dichtbij' : '') + '">' + esc(wanneer) + '</span>' : '') +
+      '<span class="tel">' + g.taken.length + ' aanmelding' + (g.taken.length === 1 ? '' : 'en') + '</span>' +
+      '</div>';
+  }
+
+  /** Het blok met aanmeldingen, gegroepeerd per event. */
+  function aanmeldBlok(taken, dag) {
+    if (taken.length === 0) return '';
+    return '<div class="sh"><div class="ic" style="background:var(--o-grns)">&#127903;</div>' +
+      '<h3>Aanmeldingen</h3><span class="n">' + taken.length + '</span></div>' +
+      '<div class="ronde">Deze mensen hebben zich aangemeld. Bel binnen een dag om te vragen of alles goed verlopen is; ' +
+      'vier dagen voor het event komt dezelfde naam vanzelf terug.</div>' +
+      groepeerPerEvent(taken).map((g) =>
+        '<div class="evgroep">' + evGroepKop(g) + g.taken.map((t) => taakKaart(t, dag)).join('') + '</div>'
+      ).join('');
+  }
+
   function weekbalk(dag) {
     const nu = vandaag();
     const d0 = new Date(nu + 'T12:00:00Z');
@@ -999,14 +1105,22 @@
     if (st.loading || !st.data) return h + skel() + '</div>' + modalHtml() + waPaneelHtml();
 
     const alles = st.data.taken || [];
-    const r1 = alles.filter((t) => !t.later && !t.bel_vandaag && !t.wa_vandaag);
-    const r2 = alles.filter((t) => t.later || t.bel_vandaag || t.wa_vandaag);
+    // Aanmeldingen krijgen hun eigen blok, gegroepeerd per event. Wat vandaag
+    // al genoeg aandacht heeft gehad zakt naar 'Klaar voor vandaag' onderaan;
+    // dat is geen archief, want morgen staat hij gewoon terug.
+    const aanmeldingen = alles.filter((t) => isAanmelding(t) && !klaarVoorVandaag(t));
+    const klaar        = alles.filter((t) => isAanmelding(t) && klaarVoorVandaag(t));
+    const rest         = alles.filter((t) => !isAanmelding(t));
+    const r1 = rest.filter((t) => !t.later && !t.bel_vandaag && !t.wa_vandaag);
+    const r2 = rest.filter((t) => t.later || t.bel_vandaag || t.wa_vandaag);
     const wacht = st.data.wacht || [];
 
     // De twee vensters van de dag, boven de werklijst: eerst wat er van de
     // ochtend en de middag terechtgekomen is, dan het werk zelf.
     h += spraakBlok(alles, dag);
     h += nabelBlok(alles, dag);
+
+    h += aanmeldBlok(aanmeldingen, dag);
 
     h += '<div class="sh"><div class="ic" style="background:#eef0f3">&#9776;</div><h3>Werklijst</h3><span class="n">' + r1.length + '</span></div>';
     h += '<div class="ronde">Elke naam die je aanraakt verlaat deze lijst. Wil je er later vandaag nog eens achter, dan zakt hij naar de tweede ronde — zo wordt deze lijst alleen maar korter. <b>Wat je vandaag niet afwerkt, staat morgen vanzelf terug</b> met de melding "bleef liggen"; doorschuiven naar morgen hoef je niet te doen.</div>';
@@ -1032,6 +1146,17 @@
           '<div class="act"><button class="obtn wa" onclick="window.__opvWa(\'' + w.id + '\')">&#128172; Herinneren</button>' +
           '<button class="obtn" onclick="window.__opvTerug(\'' + w.id + '\')">Terug in de lijst</button></div></div>';
       }).join('');
+    }
+
+    if (klaar.length) {
+      h += '<div class="sh"><div class="ic" style="background:var(--o-grns)">&#10003;</div>' +
+        '<h3>Klaar voor vandaag</h3><span class="n">' + klaar.length + '</span></div>' +
+        '<div class="ronde">Deze heb je vandaag genoeg geprobeerd, maar er is nog geen echt contact geweest. ' +
+        'Ze staan morgen gewoon terug &mdash; dit is geen archief.</div>' +
+        '<div class="klaarblok">' +
+        groepeerPerEvent(klaar).map((g) =>
+          '<div class="evgroep">' + evGroepKop(g) + g.taken.map((t) => taakKaart(t, dag)).join('') + '</div>'
+        ).join('') + '</div>';
     }
 
     return h + '</div>' + modalHtml() + waPaneelHtml();
@@ -1146,6 +1271,43 @@
     if (!t) return '';
     let body = '';
 
+    // Een aanmelding heeft andere uitgangen dan een gewone opvolgtaak: er is
+    // nog niets gebeurd, dus 'opnieuw inplannen' of 'agenda doorgestuurd' slaan
+    // hier nergens op.
+    if (m.soort === 'watnu' && isAanmelding(t)) {
+      const e = evVan(t);
+      const body =
+        opt('&#128172;', 'var(--o-grns)', 'Gesprek gehad', 'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.', "window.__opvAanmeldActie('gesprek_gehad')") +
+        opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Archiveren. Hij moet dan ook in de eventmodule op geannuleerd.', "window.__opvAanmeldActie('geen_interesse')") +
+        opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Wacht op bevestiging; na 48 uur zonder nieuwe aanmelding komt hij terug.', "window.__opvAanmeldActie('verplaatst')");
+      return scrim('Wat nu met ' + esc(t.naam) + '?',
+        esc([e.event_titel, e.event_plaats].filter(Boolean).join(' &middot; ')) || 'Aanmelding', body);
+    }
+
+    if (m.soort === 'aanmeld-actie') {
+      const u = m.uitkomst;
+      if (u === 'gesprek_gehad') {
+        return scrim('Gesprek gehad met ' + esc(t.naam), 'Wat is er gezegd?',
+          '<div class="ronde">Zonder deze zin is het een vinkje zonder inhoud, en weet de volgende die hem oppakt nog niets.</div>' +
+          '<textarea id="opv-an" rows="3" placeholder="Bijvoorbeeld: alles goed verlopen, komt zeker"></textarea>' +
+          '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'gesprek_gehad\')">Vastleggen en afronden</button>');
+      }
+      const watHeet = u === 'geen_interesse' ? 'Geen interesse' : 'Verplaatst naar een ander event';
+      const uitleg = u === 'geen_interesse'
+        ? 'De kaart gaat dicht.'
+        : 'De kaart wacht op bevestiging. Staat deze persoon binnen 48 uur nergens als aanmelding op een ander event, dan komt hij terug in je lijst.';
+      return scrim(watHeet, esc(t.naam),
+        '<div class="warn"><b>Zet hem ook in de eventmodule op geannuleerd.</b> ' +
+        'Anders blijft hij daar meetellen als aanmelding. De knop hieronder doet dat meteen ' +
+        'voor je &mdash; en gebeurt het niet, dan valt het later alsnog op.</div>' +
+        '<div class="ronde">' + uitleg + '</div>' +
+        '<textarea id="opv-an" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'' + esc(u) + '\', true)">' +
+        'Archiveren &eacute;n in de eventmodule annuleren</button>' +
+        '<button class="obtn" style="width:100%;margin-top:8px" onclick="window.__opvAanmeldBevestig(\'' + esc(u) + '\', false)">' +
+        'Alleen archiveren</button>');
+    }
+
     if (m.soort === 'watnu') {
       const gp = (t.bel_vandaag || 0) + (t.wa_vandaag || 0) > 0;
       body =
@@ -1167,7 +1329,13 @@
     }
 
     if (m.soort === 'archiveer') {
-      const zwak = (t.bel_dagen || 0) < ARCHIEF_MIN_DAGEN || (t.wa_totaal || 0) < ARCHIEF_MIN_WA;
+      // Zolang het event nog moet komen geldt de drempel niet: die mensen komen
+      // misschien gewoon opdagen, en dan is 'genoeg moeite gedaan' de verkeerde
+      // vraag. Na het event neemt Event afronden het over en telt hij weer.
+      const evDag = evVan(t).event_dag || null;
+      const voorEvent = isAanmelding(t) && evDag && evDag >= vandaag();
+      const zwak = !voorEvent &&
+        ((t.bel_dagen || 0) < ARCHIEF_MIN_DAGEN || (t.wa_totaal || 0) < ARCHIEF_MIN_WA);
       body = (zwak ? '<div class="warn"><b>Even checken.</b> Je belde ' + (t.bel_totaal || 0) + ' keer op <b>' + (t.bel_dagen || 0) +
         ' verschillende dag' + (t.bel_dagen === 1 ? '' : 'en') + '</b> en stuurde ' + (t.wa_totaal || 0) + ' WhatsApp' + (t.wa_totaal === 1 ? '' : 's') +
         '. De afspraak is minstens <b>3 belpogingen op 3 verschillende dagen</b> én 1 WhatsApp. Twee keer bellen op dezelfde dag telt als één dag. Maxim ziet deze historiek.</div>' : '') +
@@ -1474,6 +1642,35 @@
     } catch (e) {
       alert('Niet gelukt: ' + (e.message || 'onbekende fout'));
     }
+  };
+
+  // ── Aanmeldingen: de drie uitgangen ───────────────────────────────────────
+  window.__opvAanmeldActie = (u) => {
+    const m = _ui.modal; if (!m) return;
+    _ui.modal = { soort: 'aanmeld-actie', taakId: m.taakId, uitkomst: u };
+    render();
+  };
+
+  window.__opvAanmeldBevestig = async (uitkomst, ookAnnuleren) => {
+    const m = _ui.modal; if (!m || _ui.bezig) return;
+    const el = document.getElementById('opv-an');
+    const notitie = (el && el.value || '').trim();
+    if (uitkomst === 'gesprek_gehad' && !notitie) { alert('Schrijf eerst op wat er gezegd is.'); return; }
+    try {
+      await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: uitkomst, notitie: notitie || null });
+      // De knop die het meteen in de eventmodule doet. Mislukt dat, dan is de
+      // kaart wél weg — daarom een duidelijke melding en geen stilte; de
+      // 48-uurcontrole en de signaleringslijst vangen de rest op.
+      if (ookAnnuleren) {
+        try {
+          await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: 'annuleer_in_event' });
+        } catch (e) {
+          alert('De kaart is gearchiveerd, maar in de eventmodule op geannuleerd zetten lukte niet: ' +
+            (e.message || 'onbekende fout') + '\nDoe dat daar even met de hand.');
+        }
+      }
+      _ui.modal = null; leegTakenCache(); render();
+    } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
   };
 
   window.__opvWeek = (stap) => {
