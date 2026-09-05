@@ -1264,6 +1264,23 @@
         ' koppeling' + (d.lidkaart.koppelingen === 1 ? '' : 'en') +
         (d.lidkaart.laatste_opbouw ? ', laatst opgebouwd om ' + esc(uur(d.lidkaart.laatste_opbouw)) : ', nog niet opgebouwd') +
         (d.lidkaart.laatste_fout ? ' &middot; ' + esc(d.lidkaart.laatste_fout) : '') + '.</div>';
+      // Langs welke weg het ophalen de chat vond. 'geen_kandidaten' betekent iets
+      // heel anders dan 'niets_gevonden', en dat onderscheid maakte de vorige
+      // meting onleesbaar.
+      const hv = d.lidkaart.historiek_vormen || {};
+      const hk = Object.keys(hv).sort();
+      if (hk.length) {
+        h += '<div class="ronde zacht">Historiek gevonden via: ' +
+          esc(hk.map((x) => x + '×' + hv[x]).join(', ')) +
+          ' &middot; <b>geen_kandidaten</b> = van dat nummer kennen we geen enkele vorm, ' +
+          '<b>niets_gevonden</b> = wél gezocht, chat stond er niet.</div>';
+      }
+      if (typeof d.lidkaart.chats_in_cache === 'number') {
+        h += '<div class="ronde zacht">Gesprekkenlijst: ' + d.lidkaart.chats_in_cache +
+          ' gesprekken in het geheugen' +
+          (d.lidkaart.chats_opgehaald ? ', opgehaald om ' + esc(uur(d.lidkaart.chats_opgehaald)) : '') +
+          '.</div>';
+      }
     }
     // Welke bibliotheek draait daar eigenlijk, en wat biedt die aan? Dit is het
     // gegeven dat drie ronden lang ontbrak: alle metingen waren gedaan tegen de
@@ -2493,7 +2510,10 @@
       });
       _gesprek.haalt = false;
       _gesprek.melding = beschrijfHistoriek(j);
-      _gesprek.meldingSoort = (j && j.opgehaald > 0) ? 'ok' : 'leeg';
+      // GEEN_KOPPELING vraagt om een handeling (stuur eerst een bericht); de
+      // andere twee zijn geen fout maar ook geen resultaat.
+      _gesprek.meldingSoort = j && j.opgehaald > 0 ? 'ok'
+        : (j && j.code === 'GEEN_KOPPELING') ? 'fout' : 'leeg';
       await fetchGesprek();
     } catch (e) {
       _gesprek.haalt = false;
@@ -2513,6 +2533,8 @@
    */
   function beschrijfHistoriek(j) {
     if (!j) return 'Er kwam geen antwoord terug.';
+    // Drie uitkomsten die iets heel anders betekenen. Alleen de eerste vraagt om
+    // een handeling; de andere twee zijn 'er is niets, en dat klopt'.
     if (!j.opgehaald) {
       return j.melding || 'WhatsApp gaf voor dit nummer geen berichten terug.';
     }

@@ -110,14 +110,30 @@ app.get('/historiek', auth, async (req, res) => {
   const nummer = req.query?.nummer;
   if (!nummer) return res.status(400).json({ error: 'nummer ontbreekt' });
   try {
-    const uit = await wa.historiek(nummer, req.query?.limiet);
+    // bericht_id is optioneel: het CRM kent van dit nummer al een bericht en
+    // geeft dat mee, zodat de brug de chat ook langs die weg kan vinden.
+    const uit = await wa.historiek(nummer, req.query?.limiet, req.query?.bericht_id || null);
     res.json({ ok: true, ...uit });
   } catch (e) {
     if (e?.code === 'NIET_TOEGESTAAN') return res.status(403).json({ error: 'Niet toegestaan' });
     if (e?.code === 'NIET_VERBONDEN')  return res.status(503).json({ error: 'De brug is niet verbonden met WhatsApp' });
     if (e?.code === 'NUMMER_ONGELDIG') return res.status(400).json({ error: 'Nummer mist een landcode' });
+    // Drie uitkomsten die iets heel anders betekenen; alleen de laatste is een
+    // echte fout. Ze delen daarom niet langer één code.
+    if (e?.code === 'GEEN_KOPPELING') {
+      return res.status(404).json({
+        error: 'Dit nummer heeft geen LID-koppeling, en onder het nummer zelf bestaat er geen gesprek op dit apparaat',
+        code : 'GEEN_KOPPELING',
+        kandidaten: e.kandidaten ?? null,
+      });
+    }
     if (e?.code === 'GEEN_GESPREK') {
-      return res.status(404).json({ error: 'Geen gesprek met dit nummer gevonden op dit apparaat', code: 'GEEN_GESPREK' });
+      return res.status(404).json({
+        error: 'Het gesprek bestaat niet op dit apparaat',
+        code : 'GEEN_GESPREK',
+        kandidaten   : e.kandidaten ?? null,
+        chats_bekeken: e.chats_bekeken ?? null,
+      });
     }
     console.error('[brug] historiek ophalen faalde:', e?.message || e);
     res.status(500).json({ error: 'Ophalen mislukt' });

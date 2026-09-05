@@ -101,17 +101,25 @@ test('wa.historiek filtert vóór hij de chatstore aanraakt', () => {
   const bron = readFileSync(join(ROOT, 'services/whatsapp-brug/lib/whatsapp.js'), 'utf8');
   const i = bron.indexOf('async historiek(');
   assert.ok(i > 0, 'de methode hoort te bestaan');
-  const blok = bron.slice(i, i + 2000);
+  // getChatById is eruit: gemeten dood in 1.34.7. Het opzoeken loopt nu via de
+  // gesprekkenlijst, en dáár moet het filter vóór staan — de grens is dezelfde,
+  // alleen de deur is anders.
+  const blok = bron.slice(i, i + 3400);
   const filter = blok.indexOf('leadlijst.mag(');
-  const chat = blok.indexOf('getChatById(');
-  assert.ok(filter > 0 && chat > 0);
-  assert.ok(filter < chat, 'het filter hoort vóór het openen van de chat te staan');
+  const chats = blok.indexOf('haalChats(');
+  assert.ok(filter > 0 && chats > 0);
+  assert.ok(filter < chats, 'het filter hoort vóór het opvragen van de gesprekken te staan');
 });
 
 test('groepen worden ook hier geweigerd', () => {
   const bron = readFileSync(join(ROOT, 'services/whatsapp-brug/lib/whatsapp.js'), 'utf8');
   const i = bron.indexOf('async historiek(');
-  assert.match(bron.slice(i, i + 2000), /chat\.isGroup/);
+  // Ruimer venster: het opzoeken van de chat is gegroeid met de LID-vormen.
+  // De guard staat er nog, ná het vinden van de chat en vóór het ophalen.
+  const blok = bron.slice(i, i + 3200);
+  assert.match(blok, /chat\.isGroup/);
+  assert.ok(blok.indexOf('chat.isGroup') < blok.indexOf('fetchMessages'),
+    'weigeren vóór er berichten opgehaald worden');
 });
 
 test('een geweigerd nummer krijgt 403 zonder uitleg', () => {
