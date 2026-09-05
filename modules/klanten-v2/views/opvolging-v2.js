@@ -1265,13 +1265,29 @@
         (d.lidkaart.laatste_opbouw ? ', laatst opgebouwd om ' + esc(uur(d.lidkaart.laatste_opbouw)) : ', nog niet opgebouwd') +
         (d.lidkaart.laatste_fout ? ' &middot; ' + esc(d.lidkaart.laatste_fout) : '') + '.</div>';
     }
-    if (d.lid_kunde && d.lid_kunde.onderzocht) {
+    // Wat deze whatsapp-web.js écht aanbiedt: de functienamen zelf, niet onze
+    // aanname erover. Dit is het gegeven dat twee ronden lang ontbrak.
+    if (d.lid_kunde) {
       const k = d.lid_kunde;
-      h += '<div class="ronde zacht">Wat deze whatsapp-web.js kan: ' +
-        'getCurrentLid ' + (k.get_current_lid ? 'ja' : 'nee') +
-        ' &middot; widToUserJid ' + (k.wid_to_jid ? 'ja' : 'nee') +
-        ' &middot; QueryExist ' + (k.query_exist ? 'ja' : 'nee') +
-        (k.fout ? ' &middot; ' + esc(k.fout) : '') + '.</div>';
+      if (!k.onderzocht) {
+        h += '<div class="ronde zacht">De brug heeft nog niet afgetast wat deze WhatsApp-versie aanbiedt.</div>';
+      } else if (k.fout) {
+        h += '<div class="ronde zacht">Aftasten mislukte: ' + esc(k.fout) + '</div>';
+      } else {
+        const aan = Object.keys(k.modules || {}).filter((m) => k.modules[m]);
+        h += '<div class="ronde zacht">Store-onderdelen aanwezig: ' + esc(aan.join(', ') || 'geen') + '.</div>';
+        h += '<div class="ronde zacht">LidUtils biedt: <b>' +
+          esc((k.lidutils_keys || []).join(', ') || 'geen enkele functie') + '</b>. ' +
+          'Staat <i>getCurrentLid</i> daar niet bij, dan bestaat de vertaling in deze versie simpelweg niet.</div>';
+      }
+    }
+    if (d.lid_bron) {
+      const b = d.lid_bron;
+      h += '<div class="ronde zacht">Koppelingen gevonden via: <b>' +
+        esc(b.bron || 'geen enkele weg') + '</b>' +
+        (b.scan ? ' &middot; contactenlijst: ' + b.scan.bekeken + ' bekeken, ' +
+          b.scan.met_lid + ' met een lid-identiteit, ' + b.scan.op_leadlijst + ' op de leadlijst' : '') +
+        '.</div>';
     }
     if (typeof d.nummerkaart === 'number') {
       h += '<div class="ronde zacht">Gesprekken waarvan we de identiteit onthouden hebben: ' + d.nummerkaart + '.</div>';
