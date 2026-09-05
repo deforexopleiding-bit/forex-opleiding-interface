@@ -281,8 +281,10 @@ test('zonder jid blijft de vorm-teller leeg', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('de oploswegen zijn een vaste lijst', () => {
+  // 'lidkaart' is erbij gekomen: de weg via de leadlijst, die als enige een LID
+  // écht naar een telefoonnummer vertaalt.
   assert.deepEqual([...OPLOS_WEGEN].sort(),
-    ['contact', 'contact_zonder_nummer', 'geen_jid', 'jid', 'mislukt']);
+    ['contact', 'contact_zonder_nummer', 'geen_jid', 'jid', 'lidkaart', 'mislukt']);
 });
 
 test('elke weg wordt apart geteld', () => {
@@ -334,7 +336,8 @@ test('een mislukte oplossing valt terug op de jid, zoals het was', () => {
   // msg.to. Een mislukking maakt het dus nooit slechter dan het was.
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async function bepaalNummer');
-  const blok = bron.slice(i, i + 1200);
+  // Ruimer venster: er staat nu een lidkaart-tak vóór de terugval.
+  const blok = bron.slice(i, i + 2600);
   assert.match(blok, /catch \(e\)[\s\S]*oplossing\('mislukt'\)/);
   assert.match(blok, /return normaliseerNummer\(jid\);/);
 });
@@ -365,8 +368,13 @@ test('historiek probeert de geleerde jid en daarna de gewone vorm', () => {
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async historiek(');
   const blok = bron.slice(i, i + 1600);
-  assert.match(blok, /chatIdVoor\(nummer\), naarChatId\(nummer\)/,
-    'de geleerde jid eerst, de gewone vorm als terugval');
+  // Drie kandidaten sinds de LID-kaart erbij kwam, in volgorde van
+  // betrouwbaarheid: wat we bij een echt bericht zagen, de LID uit de kaart, en
+  // de gewone @c.us-vorm.
+  const volgorde = ['chatIdVoor(nummer)', "lid + '@lid'", 'naarChatId(nummer)']
+    .map((k) => blok.indexOf(k));
+  assert.ok(volgorde.every((n) => n > 0), 'alle drie de kandidaten horen erin te staan');
+  assert.deepEqual(volgorde, [...volgorde].sort((a, b) => a - b), 'en in die volgorde');
   assert.match(blok, /for \(const kandidaat of kandidaten\)/);
 });
 

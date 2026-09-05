@@ -1246,7 +1246,32 @@
     if (opgKeys.length) {
       h += '<div class="ronde zacht">Identiteit opgelost via: ' +
         esc(opgKeys.map((k) => k + '×' + opg[k]).join(', ')) +
-        ' &middot; <b>jid</b> = stond er al als nummer, <b>contact</b> = door WhatsApp opgezocht.</div>';
+        ' &middot; <b>jid</b> = stond er al als nummer, <b>lidkaart</b> = via de leadlijst vertaald, ' +
+        '<b>contact</b> = door WhatsApp opgezocht.</div>';
+    }
+    // De lengte van wat eruit kwam. Elf cijfers is een telefoonnummer; vijftien
+    // is opnieuw een LID, en dan meldde de teller succes terwijl er niets
+    // vertaald was.
+    const ovm = Object.keys(g.opgelost_vorm || {}).sort();
+    if (ovm.length) {
+      h += '<div class="ronde zacht">Lengte van het opgeloste nummer: ' +
+        esc(ovm.map((k) => k + '×' + g.opgelost_vorm[k]).join(', ')) +
+        ' &middot; weg/aantal cijfers. Staat er <b>/15</b>, dan kwam er opnieuw een LID uit ' +
+        'in plaats van een telefoonnummer.</div>';
+    }
+    if (d.lidkaart) {
+      h += '<div class="ronde zacht">LID-kaart uit de leadlijst: ' + (d.lidkaart.koppelingen || 0) +
+        ' koppeling' + (d.lidkaart.koppelingen === 1 ? '' : 'en') +
+        (d.lidkaart.laatste_opbouw ? ', laatst opgebouwd om ' + esc(uur(d.lidkaart.laatste_opbouw)) : ', nog niet opgebouwd') +
+        (d.lidkaart.laatste_fout ? ' &middot; ' + esc(d.lidkaart.laatste_fout) : '') + '.</div>';
+    }
+    if (d.lid_kunde && d.lid_kunde.onderzocht) {
+      const k = d.lid_kunde;
+      h += '<div class="ronde zacht">Wat deze whatsapp-web.js kan: ' +
+        'getCurrentLid ' + (k.get_current_lid ? 'ja' : 'nee') +
+        ' &middot; widToUserJid ' + (k.wid_to_jid ? 'ja' : 'nee') +
+        ' &middot; QueryExist ' + (k.query_exist ? 'ja' : 'nee') +
+        (k.fout ? ' &middot; ' + esc(k.fout) : '') + '.</div>';
     }
     if (typeof d.nummerkaart === 'number') {
       h += '<div class="ronde zacht">Gesprekken waarvan we de identiteit onthouden hebben: ' + d.nummerkaart + '.</div>';
