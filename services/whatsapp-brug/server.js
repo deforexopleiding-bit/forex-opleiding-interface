@@ -88,6 +88,31 @@ app.post('/send', auth, async (req, res) => {
   }
 });
 
+// De geschiedenis van één gesprek, zoals WhatsApp die naar dit apparaat heeft
+// gesynct. LEZEN, niet schrijven: de brug geeft terug en het CRM beslist wat
+// het bewaart. Zo blijft er één plek waar rijen ontstaan.
+//
+// Het filter zit in wa.historiek() en staat daar vóór de chatstore aangeraakt
+// wordt. Een nummer buiten de leadlijst krijgt 403 zonder verdere uitleg — net
+// als bij /send, want of een nummer bekend is, is zelf ook informatie.
+app.get('/historiek', auth, async (req, res) => {
+  const nummer = req.query?.nummer;
+  if (!nummer) return res.status(400).json({ error: 'nummer ontbreekt' });
+  try {
+    const uit = await wa.historiek(nummer, req.query?.limiet);
+    res.json({ ok: true, ...uit });
+  } catch (e) {
+    if (e?.code === 'NIET_TOEGESTAAN') return res.status(403).json({ error: 'Niet toegestaan' });
+    if (e?.code === 'NIET_VERBONDEN')  return res.status(503).json({ error: 'De brug is niet verbonden met WhatsApp' });
+    if (e?.code === 'NUMMER_ONGELDIG') return res.status(400).json({ error: 'Nummer mist een landcode' });
+    if (e?.code === 'GEEN_GESPREK') {
+      return res.status(404).json({ error: 'Geen gesprek met dit nummer gevonden op dit apparaat', code: 'GEEN_GESPREK' });
+    }
+    console.error('[brug] historiek ophalen faalde:', e?.message || e);
+    res.status(500).json({ error: 'Ophalen mislukt' });
+  }
+});
+
 app.use((_req, res) => res.status(404).json({ error: 'Onbekende route' }));
 
 leadlijst.start();

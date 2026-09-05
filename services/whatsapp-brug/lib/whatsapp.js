@@ -15,7 +15,7 @@ import qrcode from 'qrcode';
 import { normaliseerNummer, naarChatId } from './nummers.js';
 // De vorm van elke gebeurtenis staat apart en dependency-vrij, zodat hij te
 // testen is zonder puppeteer of een gekoppelde telefoon.
-import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis } from './gebeurtenis.js';
+import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht } from './gebeurtenis.js';
 
 const { Client, LocalAuth } = pkg;
 
@@ -191,6 +191,64 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       const res = await client.sendMessage(chatId, String(tekst));
       raakAan();
       return { bericht_id: res?.id?._serialized || null };
+    },
+
+    /**
+     * De geschiedenis van één gesprek, zoals WhatsApp die naar dit apparaat
+     * gesynct heeft.
+     *
+     * DE BRUG SCHRIJFT NIETS. Ze geeft terug; het CRM beslist wat het bewaart.
+     * Zo blijft er één plek waar rijen ontstaan, en die is idempotent op
+     * bericht_id.
+     *
+     * Het filter blijft ook hier de eerste regel: staat het nummer niet op de
+     * leadlijst, dan gaat er niets naar de chatstore en komt er niets terug.
+     * Er wordt in dat geval ook niets gelogd — of een nummer wel of niet bekend
+     * is, is zelf ook informatie.
+     *
+     * WAT ER TERUGKOMT IS NIET NOODZAKELIJK ALLES. Een gekoppeld apparaat
+     * krijgt een beperkt venster van de telefoon gesynct, en fetchMessages
+     * haalt alleen ouder werk op zolang de store het aanlevert. Wat Dave op
+     * zijn toestel ziet kan dus méér zijn. Daarom geven we `oudste` mee: het
+     * CRM kan dan zeggen tot wanneer het gekeken heeft in plaats van te doen
+     * alsof dit het volledige gesprek is.
+     */
+    async historiek(nummer, limiet = 50) {
+      if (!staat.verbonden) { const e = new Error('niet verbonden met WhatsApp'); e.code = 'NIET_VERBONDEN'; throw e; }
+      if (!leadlijst.mag(nummer)) { const e = new Error('nummer staat niet op de leadlijst'); e.code = 'NIET_TOEGESTAAN'; throw e; }
+      const chatId = naarChatId(nummer);
+      if (!chatId) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
+
+      const n = Math.max(1, Math.min(200, Number(limiet) || 50));
+      let chat;
+      try {
+        chat = await client.getChatById(chatId);
+      } catch (e) {
+        // Onbekende chat: ChatFactory struikelt over undefined. Dat is geen
+        // storing maar 'dit gesprek staat niet op dit apparaat'.
+        const err = new Error('geen gesprek gevonden op dit apparaat');
+        err.code = 'GEEN_GESPREK';
+        throw err;
+      }
+      if (!chat) { const e = new Error('geen gesprek gevonden op dit apparaat'); e.code = 'GEEN_GESPREK'; throw e; }
+      if (chat.isGroup) { const e = new Error('groepen niet'); e.code = 'NIET_TOEGESTAAN'; throw e; }
+
+      const msgs = await chat.fetchMessages({ limit: n });
+      raakAan();
+      const berichten = (msgs || [])
+        .map((m) => bouwHistoriekBericht(m))
+        .filter(Boolean)
+        .sort((a, b) => (a.tijdstip < b.tijdstip ? -1 : 1));
+
+      return {
+        berichten,
+        aantal : berichten.length,
+        oudste : berichten.length ? berichten[0].tijdstip : null,
+        nieuwste: berichten.length ? berichten[berichten.length - 1].tijdstip : null,
+        // Kwam de lijst tot aan de grens, dan is er waarschijnlijk méér. Dat is
+        // iets anders dan 'dit is alles'.
+        mogelijk_meer: berichten.length >= n,
+      };
     },
   };
 }

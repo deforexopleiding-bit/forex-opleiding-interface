@@ -127,6 +127,12 @@
     open: false, nummer: null, taakId: null, naam: null,
     laden: false, error: null, code: null, berichten: null,
     verzendt: false, optimistisch: [],
+    // Het ophalen van de geschiedenis van het toestel. `melding` is wat er
+    // daarna boven de draad komt te staan: wát er opgehaald is en vanaf
+    // wanneer. Zonder die zin lijkt het opgehaalde het volledige gesprek, en
+    // dat is het niet — WhatsApp synct maar een beperkt venster naar een
+    // gekoppeld apparaat.
+    haalt: false, melding: null, meldingSoort: null,
   };
 
   async function haal(url) {
@@ -826,6 +832,8 @@
 .opv .wvoet{flex:0 0 auto;padding:0 14px 12px;font-size:12px}
 .opv .wvoet a{color:var(--o-acc);text-decoration:none;font-weight:600}
 .opv .wvoet a:hover{text-decoration:underline}
+.opv .wouder{display:flex;justify-content:center;margin-bottom:10px}
+.opv .wouder .obtn{font-size:12px;padding:5px 12px}
 .opv .waqr{display:block;width:320px;max-width:100%;height:auto;margin:14px auto 0;border:1px solid var(--o-line);border-radius:14px;background:#fff}
 .opv .wastap{margin:12px 0 0;padding-left:20px;font-size:13px;color:#414954;line-height:1.7}
 .opv .waklaar{background:var(--o-grns);border:1px solid #bfe9d6;color:#08794a;border-radius:12px;padding:14px 16px;text-align:center;font-size:14px;font-weight:650}
@@ -1408,6 +1416,20 @@
   }
 
   /**
+   * Wat de laatste ophaalronde opleverde, boven de draad.
+   *
+   * Blijft staan tot het paneel dicht gaat. Dat is de bedoeling: het is de zin
+   * die vertelt tot wanneer er gekeken is, en die hoort niet weg te vallen
+   * zodra je één keer scrollt.
+   */
+  function historiekMelding() {
+    if (!_gesprek.melding) return '';
+    const k = _gesprek.meldingSoort === 'fout' ? 'warn2'
+      : _gesprek.meldingSoort === 'leeg' ? 'nietgemeten' : 'ronde zacht';
+    return '<div class="' + k + '" style="margin-bottom:10px">' + esc(_gesprek.melding) + '</div>';
+  }
+
+  /**
    * Het gesprekspaneel. Zelfde vorm als het koppelpaneel: scrim met `on`,
    * van rechts inschuivend, alles onder .opv.
    */
@@ -1427,17 +1449,29 @@
     } else {
       const rijen = _gesprek.berichten.map((b) => gesprekBubbel(b, false)).join('') +
         _gesprek.optimistisch.map((b) => gesprekBubbel(b, true)).join('');
+      // Staat er al iets, dan hoort de knop bovenaan de draad — dat is waar je
+      // hem zoekt als je verder terug wilt. Is het gesprek leeg, dan staat hij
+      // in het lege blok hieronder, want daar kijk je dan naar.
+      const ouderKnop = rijen
+        ? '<div class="wouder"><button class="obtn" onclick="window.__opvGesprekHistoriek()"' +
+          (_gesprek.haalt ? ' disabled' : '') + '>' +
+          (_gesprek.haalt ? 'Bezig&hellip;' : '&#8593; Ouder ophalen') + '</button></div>'
+        : '';
       // Een leeg gesprek is hier niet hetzelfde als 'er is niets gezegd'. Van
       // vóór dit paneel bestaat er geen historiek: uitgaande tekst verliet de
       // telefoon toen niet, en van inkomende staat alleen een afgekapte kopie
       // in de pogingen. Dat hoort er te staan, anders leest een leeg scherm als
       // een stilte die er nooit was.
-      body = rijen
-        ? '<div class="wchat">' + rijen + '</div>'
+      body = historiekMelding() + (rijen
+        ? ouderKnop + '<div class="wchat">' + rijen + '</div>'
         : '<div class="nietgemeten"><b>Nog geen berichten in het systeem.</b><br>' +
-          'Van vóór vandaag is er geen historiek: wat Dave verstuurde werd niet bewaard, ' +
-          'en van binnengekomen berichten stond alleen een korte samenvatting bij de pogingen. ' +
-          '<br><span style="color:#6b7280">Dit is dus geen leeg gesprek — het is een gesprek dat hier begint.</span></div>';
+          'De brug bewaarde tot nu toe niets, dus wat er eerder gezegd is staat hier nog niet. ' +
+          'Op het gekoppelde toestel staat het misschien wél &mdash; dat kun je hieronder ophalen.' +
+          '<div style="margin-top:12px"><button class="obtn p" onclick="window.__opvGesprekHistoriek()"' +
+          (_gesprek.haalt ? ' disabled' : '') + '>' +
+          (_gesprek.haalt ? 'Bezig&hellip;' : '&#8615; Historiek ophalen') + '</button></div>' +
+          '<div style="margin-top:8px;color:#6b7280">WhatsApp synct maar een beperkt venster naar een gekoppeld apparaat, ' +
+          'dus wat terugkomt kan minder zijn dan wat op Daves telefoon staat.</div></div>');
     }
 
     const invoer = kan.mag
@@ -2281,6 +2315,7 @@
     _gesprek.naam = naam || null;
     _gesprek.berichten = null; _gesprek.error = null; _gesprek.code = null;
     _gesprek.optimistisch = [];
+    _gesprek.melding = null; _gesprek.meldingSoort = null; _gesprek.haalt = false;
     render();
     queueMicrotask(() => { fetchGesprek(); herstelWaTimers(); });
   }
@@ -2299,6 +2334,63 @@
     // afspraak als bij het koppelpaneel.
     herstelWaTimers();
   };
+
+  /**
+   * De geschiedenis van het toestel erbij halen.
+   *
+   * De brug leest, het CRM schrijft. Twee keer klikken levert geen dubbele
+   * regels op: de unieke index op bericht_id vangt dat af.
+   *
+   * Wat hier terugkomt is niet noodzakelijk het volledige gesprek. Een
+   * gekoppeld apparaat krijgt een beperkt venster van de telefoon gesynct, en
+   * deze brug hangt er pas kort aan. Vandaar dat de melding erna zegt WAT er
+   * binnenkwam en VANAF WANNEER, in plaats van stilletjes een halve draad te
+   * tonen alsof dat alles is.
+   */
+  window.__opvGesprekHistoriek = async () => {
+    if (_gesprek.haalt || !_gesprek.nummer) return;
+    _gesprek.haalt = true; _gesprek.melding = null; _gesprek.meldingSoort = null;
+    render();
+    try {
+      const j = await post('/api/opvolging-whatsapp-historiek', {
+        nummer: _gesprek.nummer, taak_id: _gesprek.taakId || null, limiet: 50,
+      });
+      _gesprek.haalt = false;
+      _gesprek.melding = beschrijfHistoriek(j);
+      _gesprek.meldingSoort = (j && j.opgehaald > 0) ? 'ok' : 'leeg';
+      await fetchGesprek();
+    } catch (e) {
+      _gesprek.haalt = false;
+      _gesprek.meldingSoort = 'fout';
+      _gesprek.melding = 'Ophalen is niet gelukt: ' + (e.message || 'onbekende fout');
+      render();
+    }
+  };
+
+  /**
+   * Wat er opgehaald is, in gewone taal.
+   *
+   * Drie dingen horen erin: hoeveel, hoeveel daarvan nieuw was, en vanaf
+   * wanneer. Dat laatste is het belangrijkste — het is het verschil tussen
+   * 'dit is het gesprek' en 'dit is wat WhatsApp naar dit apparaat gestuurd
+   * heeft'.
+   */
+  function beschrijfHistoriek(j) {
+    if (!j) return 'Er kwam geen antwoord terug.';
+    if (!j.opgehaald) {
+      return j.melding || 'WhatsApp gaf voor dit nummer geen berichten terug.';
+    }
+    const nieuw = j.nieuw === 0
+      ? 'Die stonden er allemaal al'
+      : j.nieuw === j.opgehaald ? 'Allemaal nieuw' : j.nieuw + ' daarvan waren nieuw';
+    const vanaf = j.oudste
+      ? ' Het oudste bericht dat WhatsApp doorgaf is van ' + nl(iso(j.oudste)) + '.'
+      : '';
+    const meer = j.mogelijk_meer
+      ? ' Er is er mogelijk meer: de lijst liep tot aan de grens van wat we in één keer ophalen.'
+      : ' Verder terug gaf WhatsApp niets — een gekoppeld apparaat krijgt maar een beperkt venster van de telefoon gesynct, dus op Daves toestel kan meer staan.';
+    return j.opgehaald + ' bericht' + (j.opgehaald === 1 ? '' : 'en') + ' opgehaald. ' + nieuw + '.' + vanaf + meer;
+  }
 
   window.__opvGesprekStuur = async () => {
     if (_gesprek.verzendt) return;
@@ -2539,6 +2631,7 @@
   // Het gesprekspaneel, getest in tests/opvolging-whatsapp-gesprek.test.js.
   window.__opvGesprekHelpers = {
     gesprekPaneelHtml, gesprekKanVersturen, gesprekBubbel, bepaalWaTimers,
+    beschrijfHistoriek, historiekMelding,
     zetGesprek: (v) => Object.assign(_gesprek, v),
     zetWa: (v) => Object.assign(_wa, v),
     WA_POLL_GESPREK_MS,
