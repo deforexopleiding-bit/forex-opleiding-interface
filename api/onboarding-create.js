@@ -26,6 +26,7 @@ import crypto from 'node:crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
+import { provisionDfoLmsStudent } from './_lib/dfo-lms-student.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
@@ -199,6 +200,21 @@ export default async function handler(req, res) {
       provision = { ok: false, error: e?.message || 'provision-threw' };
     }
 
+    // Fase 1 dfo-lms — studentrij in het NIEUWE LMS (hlms_student). Staat
+    // LOS van de Bubble-provisioning hierboven en van het lms_provision-blok
+    // (trial-site); zie api/_lib/dfo-lms-db.js voor het waarom van de naam.
+    // Fail-soft en awaited: een LMS-fout mag de aanmelding niet 500'en, maar
+    // we willen 'm wel afgerond hebben voor we de respons sturen zodat de
+    // admin-UI direct de juiste status toont. De helper schrijft een
+    // mislukking zelf naar dfo_lms_provision_error.
+    let dfoLms = { ok: false, error: 'unknown' };
+    try {
+      dfoLms = await provisionDfoLmsStudent(inserted.id);
+    } catch (e) {
+      console.error('[onboarding-create] dfo-lms threw:', e?.message || e);
+      dfoLms = { ok: false, error: e?.message || 'dfo-lms-threw' };
+    }
+
     // Fase C1 — Onboarding-invite (WhatsApp-template). Fail-soft: helper
     // gooit NOOIT door (alle fouten als {sent:false, reason}). Geen send
     // wanneer module of template niet geconfigureerd is — dat is verwacht
@@ -235,6 +251,7 @@ export default async function handler(req, res) {
       onboarding : inserted,
       link       : '/modules/onboarding.html?t=' + encodeURIComponent(inserted.token),
       provision  : provision,
+      dfo_lms    : dfoLms,
       invite     : invite,
     });
   } catch (e) {
