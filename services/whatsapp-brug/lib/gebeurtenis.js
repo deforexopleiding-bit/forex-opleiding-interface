@@ -20,14 +20,27 @@ export function isGroep(jid) {
   return typeof jid === 'string' && jid.includes('@g.us');
 }
 
+/** Zelfde grens als bij inkomend: een gesprek, geen boek. */
+export const MAX_TEKST = 4000;
+
 /**
  * Een bericht dat Dave zelf verstuurt.
  *
  * Alleen fromMe: inkomend loopt via het 'message'-event. Groepen vallen af.
  *
- * GEEN BERICHTTEKST. Voor deze meting hoeven we alleen te weten dát er iets
- * uitging en of het ingesproken was. De tekst van wat Dave naar een lead
- * stuurt is gevoeliger dan nodig, dus die verlaat de telefoon niet.
+ * DE TEKST GAAT NU WEL MEE, en dat is een bewuste wijziging. Eerder ging hij
+ * niet mee met de redenering: voor de meting is alleen nodig dát er iets uitging
+ * en of het ingesproken was, dus is de tekst gevoeliger dan nodig. Die
+ * redenering klopte zolang het CRM het gesprek niet toonde. Nu wel: Dave leest
+ * en beantwoordt het gesprek in het systeem, en een gesprek met alleen de
+ * antwoorden van de lead erin is geen gesprek.
+ *
+ * Wat NIET verandert is waar de grens ligt. De aanroeper in whatsapp.js doet
+ * eerst leadlijst.mag(msg.to) en pas daarna deze functie. Alles buiten de
+ * leadlijst wordt volledig genegeerd en nergens gelogd; groepen vallen hier
+ * bovendien nog een tweede keer af. Daves privégesprekken verlaten de telefoon
+ * dus niet — niet omdat we ze verderop wegfilteren, maar omdat ze hier nooit
+ * aankomen. Verplaats die volgorde nooit.
  *
  * Het tijdstip komt uit msg.timestamp — het moment van versturen. De
  * ack-gebeurtenissen weten dat niet; die kennen alleen het moment waarop de
@@ -43,6 +56,7 @@ export function bouwUitgaandeGebeurtenis(msg, nu = Date.now()) {
     soort     : 'uitgaand',
     jid       : naar,
     tijdstip  : new Date(Number.isFinite(seconden) && seconden > 0 ? seconden * 1000 : nu).toISOString(),
+    tekst     : typeof msg.body === 'string' ? msg.body.slice(0, MAX_TEKST) : '',
     media_type: msg.type || null,
     bericht_id: msg.id?._serialized || null,
   };
@@ -50,6 +64,12 @@ export function bouwUitgaandeGebeurtenis(msg, nu = Date.now()) {
 
 /**
  * Een statusverandering op iets dat wij verstuurden.
+ *
+ * Hier gaat GEEN tekst mee, ook niet nu het uitgaande pad die wel draagt: een
+ * ack is een statusmelding over een bericht dat al doorgegeven is, geen tweede
+ * exemplaar ervan. Zou hij de tekst ook meesturen, dan hing dezelfde inhoud aan
+ * drie gebeurtenissen (verzonden, afgeleverd, gelezen) en moest de ontvanger
+ * uitzoeken welke de echte was.
  *
  * Het Message-object bij een ack draagt gewoon .type — dat stond er alleen niet
  * in. Zonder media_type is een verstuurd spraakbericht niet te onderscheiden

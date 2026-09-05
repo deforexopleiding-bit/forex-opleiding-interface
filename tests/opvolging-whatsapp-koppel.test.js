@@ -265,6 +265,29 @@ test('er wordt alleen gelezen, en alleen bij het bestaande endpoint', () => {
   const src = readFileSync(VIEW, 'utf8');
   assert.match(src, /opvolging-whatsapp-status\?wat=status/);
   assert.match(src, /opvolging-whatsapp-status\?wat=qr/);
-  // Geen POST naar de brug vanuit dit scherm: koppelen is kijken, niet sturen.
-  assert.ok(!/opvolging-whatsapp-send/.test(src), 'dit scherm hoort niets te versturen');
+
+  // Geen POST naar de brug vanuit HET KOPPELPANEEL: koppelen is kijken, niet
+  // sturen. Deze test keek eerst het hele viewbestand na, en dat kon zolang het
+  // koppelpaneel het enige WhatsApp-onderdeel was. Sinds het gesprekspaneel is
+  // er wél een plek die verstuurt, en dat hoort er precies één te zijn — dus is
+  // de vraag verschoven van 'staat het nergens' naar 'staat het alleen daar'.
+  const koppelDeel = (naam) => {
+    const i = src.indexOf('function ' + naam);
+    assert.ok(i > 0, naam + ' hoort te bestaan');
+    return src.slice(i, i + 2500);
+  };
+  for (const naam of ['waPaneelHtml', 'fetchWaStatus', 'fetchWaQr', 'waLamp']) {
+    assert.ok(!/opvolging-whatsapp-send/.test(koppelDeel(naam)),
+      naam + ' hoort niets te versturen');
+  }
+
+  // En in het hele bestand precies één plek die verstuurt: de verzendknop van
+  // het gesprek. Meer dan één zou betekenen dat er ergens een tweede weg naar
+  // buiten is ontstaan zonder dat iemand het gemerkt heeft.
+  const treffers = src.match(/opvolging-whatsapp-send/g) || [];
+  assert.equal(treffers.length, 1, 'precies één verzendplek verwacht');
+  const i = src.indexOf('opvolging-whatsapp-send');
+  const stuur = src.indexOf('window.__opvGesprekStuur = ');
+  assert.ok(stuur > 0 && i > stuur && i - stuur < 1200,
+    'de enige verzendplek hoort in __opvGesprekStuur te zitten');
 });

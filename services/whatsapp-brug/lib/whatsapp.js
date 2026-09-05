@@ -136,6 +136,10 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
         soort     : g.soort,
         nummer    : normaliseerNummer(g.jid),
         tijdstip  : g.tijdstip,
+        // De tekst gaat mee zodat het gesprek in het CRM van twee kanten te
+        // lezen is. Dit staat NA leadlijst.mag() hierboven — dat is de grens,
+        // en die blijft de eerste regel.
+        tekst     : g.tekst,
         media_type: g.media_type,            // 'ptt' of 'audio' = spraakbericht
         bericht_id: g.bericht_id,
       });
