@@ -1,15 +1,26 @@
 // api/opvolging-aanmelding-actie.js
 //
-// De drie uitgangen van een aanmeldkaart, plus de knop die de deelnemer meteen
-// in de eventmodule op geannuleerd zet.
+// De uitgangen van een aanmeldkaart, plus de knop die de deelnemer meteen in de
+// eventmodule op geannuleerd zet.
 //
 // POST { taak_id, actie, notitie? }
+//   'bevestigd'           — de lead komt. Notitie mag leeg. Slaapt tot vier
+//                           dagen voor het event, of gaat dicht als die dag al
+//                           geweest is — zie hieronder.
 //   'gesprek_gehad'       — notitie verplicht. Er is echt contact geweest, dus
 //                           de kaart is klaar.
 //   'geen_interesse'      — archiveren. Antwoord bevat vraag_annuleren=true.
 //   'verplaatst'          — naar 'wacht_verplaatsing'; de 48-uurcontrole zoekt
 //                           daarna het bewijs op. Ook hier vraag_annuleren.
 //   'annuleer_in_event'   — zet event_attendees.status op 'geannuleerd'.
+//
+// 'bevestigd' is de meest voorkomende uitkomst en tegelijk de enige die geen
+// eindpunt is. Wie ruim voor het event bevestigt moet vandaag uit de lijst maar
+// vier dagen voor het event terugkomen voor de reminder-call: niet meer met de
+// vraag óf hij komt, maar of het nog klopt. Daarom zet die actie de kaart niet
+// dicht maar vooruit — precies op de dag waarop cron-opvolging-aanmeldingen hem
+// anders zelf wakker zou maken. Bevestigt iemand binnen die vier dagen, dan is
+// er geen ronde meer en gaat de kaart wél dicht.
 //
 // Waarom dat laatste hier zit en niet in de eventmodule: Dave moet er niet
 // voor naar een ander scherm. Het bevestigingsvenster in de opvolgmodule zegt
@@ -22,8 +33,9 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { dagPlus, WAKKER_DAGEN_VOOR_EVENT } from './_lib/opvolging-aanmelding.js';
 
-const ACTIES = new Set(['gesprek_gehad', 'geen_interesse', 'verplaatst', 'annuleer_in_event']);
+const ACTIES = new Set(['bevestigd', 'gesprek_gehad', 'geen_interesse', 'verplaatst', 'annuleer_in_event']);
 const ZONE = 'Europe/Amsterdam';
 const dagInZone = (ms) => new Intl.DateTimeFormat('en-CA', {
   timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -73,6 +85,54 @@ export default async function handler(req, res) {
       if (error) throw new Error('annuleren: ' + error.message);
       await schrijfNotitie(taak, `${vandaag} · In de eventmodule op geannuleerd gezet vanuit de opvolgmodule.`);
       return res.status(200).json({ success: true, geannuleerd: true });
+    }
+
+    // ── Bevestigd: de lead komt ──────────────────────────────────────────────
+    // Twee uitkomsten, en welke het wordt hangt aan één ding: is er na vandaag
+    // nog een ronde? De wakker-dag is dezelfde die de cron gebruikt, zodat de
+    // kaart precies op dat moment terugkomt en de cron hem daarna met rust
+    // laat (bepaalTaakActie maakt alleen wakker wat verder wég staat).
+    if (actie === 'bevestigd') {
+      const eventDag = (taak.bron_ref && taak.bron_ref.event_dag) || null;
+      const wakker = eventDag ? dagPlus(eventDag, -WAKKER_DAGEN_VOOR_EVENT) : null;
+      const nogEenRonde = !!wakker && wakker > vandaag;
+
+      // De poging eerst: dit ís contact geweest, en daar hangt 'klaar voor
+      // vandaag' aan. Resultaat begint met 'gesproken' zodat isEchtContact()
+      // 'm herkent — zelfde afspraak als bij 'gesprek gehad'.
+      await schrijfPoging(taak.id, 'call',
+        `gesproken: bevestigd${notitie ? ' — ' + notitie : ''}`.slice(0, 200));
+
+      const regel = `${vandaag} · Bevestigd dat hij komt.` +
+        (notitie ? ` ${notitie}` : '') +
+        (nogEenRonde ? ` Komt op ${wakker} terug voor de reminder.` : '');
+
+      const patch = {
+        bevestigd_op     : nu,
+        bevestigd_notitie: notitie || null,
+        notitie          : voegRegelToe(taak.notitie, regel),
+        updated_at       : nu,
+      };
+      if (nogEenRonde) {
+        // Blijft open, maar verdwijnt uit de lijst van vandaag doordat `due`
+        // vooruit staat. `later` terug op false: die vlag hoort bij de tweede
+        // ronde van vandaag en zegt over een dag in de toekomst niets.
+        patch.status = 'open';
+        patch.due    = wakker;
+        patch.later  = false;
+      } else {
+        patch.status          = 'gearchiveerd';
+        patch.archief_reden   = 'bevestigd';
+        patch.gearchiveerd_at = nu;
+      }
+
+      const { error } = await supabaseAdmin.from('opvolging_taken').update(patch).eq('id', taak.id);
+      if (error) throw new Error(error.message);
+      return res.status(200).json({
+        success: true,
+        slaapt_tot: nogEenRonde ? wakker : null,
+        gearchiveerd: !nogEenRonde,
+      });
     }
 
     // ── Gesprek gehad ────────────────────────────────────────────────────────
