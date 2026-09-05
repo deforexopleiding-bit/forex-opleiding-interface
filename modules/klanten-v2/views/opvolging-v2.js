@@ -477,6 +477,116 @@
     return { spraak: beoordeelSpraak(pg, dag), nabel: beoordeelNabel(pg, dag) };
   }
 
+  /**
+   * WIE HOORT ER IN DE VENSTERS?
+   *
+   * Alleen de leads met een zoomcall op die dag — niet iedereen op de lijst.
+   * Een masterclass-aanmelding hoort geen ochtendspraakbericht te krijgen en
+   * hoeft tussen 12 en 13 uur niet nagebeld te worden; die twee vensters gaan
+   * over de call-afspraken.
+   *
+   * Dat stond fout: spraakBlok en nabelBlok kregen álle taken van de dag mee.
+   * Met tien masterclass-aanmeldingen erbij las het scherm '0 op tijd, 0 na
+   * 09:00, 10 geen, van 10' — tien keer rood voor mensen voor wie er geen
+   * spraakbericht bestaat. Dat is precies het soort nul waar deze module
+   * nergens anders in trapt.
+   *
+   * De juiste verzameling staat al op het scherm: de calls uit
+   * /api/opvolging-agenda, hetzelfde lijstje dat 'Calls van vandaag' toont.
+   */
+
+  /**
+   * Koppelt de calls van een dag aan de taken erachter.
+   *
+   * Pure functie: `zoekTaak` is de opzoeker (in het scherm taakVoorNummer, in
+   * de test een stub). Een call zonder taak is niet te beoordelen — daar is
+   * geen pogingen-historiek voor — en komt apart terug in plaats van als
+   * 'geen spraakbericht' mee te tellen.
+   *
+   * Twee calls voor dezelfde persoon leveren één taak op; anders telt die lead
+   * dubbel in de dekking.
+   */
+  function koppelCalls({ calls, zoekTaak }) {
+    const taken = [];
+    const gezien = new Set();
+    const zonderTaak = [];
+    for (const c of (Array.isArray(calls) ? calls : [])) {
+      const t = typeof zoekTaak === 'function' ? zoekTaak(c) : null;
+      if (!t) { zonderTaak.push(c); continue; }
+      if (gezien.has(t.id)) continue;
+      gezien.add(t.id);
+      taken.push(t);
+    }
+    return { taken, zonderTaak };
+  }
+
+  /**
+   * Heeft deze taak een zoomcall op deze dag?
+   *
+   * Bepaalt of de venster-etiketten op de kaart zelf iets te zeggen hebben.
+   * Op een aanmeldkaart hoort er niets over spraakberichten te staan — dat was
+   * de rode 'geen spraakbericht' die op tien aanmeldingen verscheen.
+   */
+  function callVoorTaak(taak, calls) {
+    const doel = telCijfers(taak && taak.telefoon);
+    if (!doel) return null;
+    const staart = doel.length >= 9 ? doel.slice(-9) : null;
+    for (const c of (Array.isArray(calls) ? calls : [])) {
+      const cc = telCijfers(c && c.telefoon);
+      if (!cc) continue;
+      if (cc === doel) return c;
+      if (staart && cc.length >= 9 && cc.slice(-9) === staart) return c;
+    }
+    return null;
+  }
+
+  /**
+   * De stand van de venster-blokken op een dag, in één beslissing.
+   *
+   * Geeft terug wat er te tonen is, niet hoe. Vijf uitkomsten, en vier daarvan
+   * zijn 'hier valt niets te meten' — dat is bewust: liever vier keer uitleg
+   * dan één keer een nul die eruitziet alsof er gemeten is.
+   */
+  function vensterBron(dag) {
+    if (!brugZietUitgaand()) return { staat: 'geen_brug' };
+    const versGeladen = _calls.key === dag && (_calls.data || _calls.error);
+    if (!versGeladen) {
+      // Zelf ophalen, niet leunen op callsBlok: het dashboard tekent dat blok
+      // niet, en dan bleef dit op 'laden' hangen zonder dat er ooit iemand de
+      // agenda opvroeg. fetchCalls bewaakt zelf op dubbele aanvragen.
+      if (!_calls.loading) queueMicrotask(() => fetchCalls(dag));
+      return { staat: 'laden' };
+    }
+    if (_calls.error) return { staat: 'agenda_fout', error: _calls.error };
+    const calls = _calls.data || [];
+    if (calls.length === 0) return { staat: 'geen_calls' };
+    const { taken, zonderTaak } = koppelCalls({ calls, zoekTaak: (c) => taakVoorNummer(c.telefoon) });
+    if (taken.length === 0) return { staat: 'geen_taken', calls: calls.length, zonderTaak };
+    return { staat: 'ok', taken, zonderTaak, calls: calls.length };
+  }
+
+  /**
+   * Staat er voor deze taak een zoomcall op deze dag?
+   *
+   * Alleen dan zeggen de venster-etiketten iets. Is de agenda nog niet geladen
+   * of niet bereikbaar, dan is het antwoord nee: niets tonen is hier beter dan
+   * iets tonen dat op niets gebaseerd is.
+   */
+  function heeftCallOpDag(taak, dag) {
+    if (_calls.key !== dag || !_calls.data) return false;
+    return !!callVoorTaak(taak, _calls.data);
+  }
+
+  /** Eén zin onder de balk over de calls die niet te beoordelen waren. */
+  function zonderTaakRegel(zonderTaak) {
+    const n = (zonderTaak || []).length;
+    if (!n) return '';
+    return '<div class="ronde zacht">' + n + ' ingeplande call' + (n === 1 ? '' : 's') +
+      ' staan niet in de takenlijst, dus daar valt niets over te zeggen. ' +
+      'Ze tellen hierboven niet mee &mdash; als \'geen spraakbericht\' zou dat een oordeel zijn ' +
+      'over iets wat we niet gemeten hebben.</div>';
+  }
+
   /** Tellingen over een hele lijst taken, voor het dashboard. */
   function telVensters(taken, dag) {
     const leeg = { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 };
@@ -543,6 +653,7 @@
 .opv .wkd.nu .l{color:var(--o-acc)}
 .opv .wkd.oud{background:#fbfcfd}
 .opv .ronde{font-size:12.5px;color:var(--o-muted);margin:0 0 10px 2px}
+.opv .ronde.zacht{margin:8px 0 0 2px;font-size:11.5px;font-style:italic}
 .opv .row{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:13px 16px;display:flex;align-items:flex-start;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
 .opv .row .who{flex:1;min-width:0}
 .opv .row .nm{font-weight:650;font-size:14.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -833,6 +944,7 @@
    */
   function vensterAfwijking(t, dag) {
     if (!brugZietUitgaand()) return '';
+    if (!heeftCallOpDag(t, dag)) return '';
     const o = beoordeelDag(t, dag);
     let h = '';
     if (o.spraak.staat === 'te_laat') h += '<span class="tag t-red">&#127908; spraak ' + esc(o.spraak.tijd || '') + ' &middot; na 09:00</span>';
@@ -989,6 +1101,11 @@
    */
   function vensterBadges(t, dag) {
     if (!brugZietUitgaand()) return '';
+    // Alleen op een kaart van iemand met een zoomcall vandaag. De twee vensters
+    // gaan over die calls; op een aanmeldkaart hoort er niets over
+    // spraakberichten te staan, en juist daar verscheen de rode 'geen
+    // spraakbericht' op tien mensen tegelijk.
+    if (!heeftCallOpDag(t, dag)) return '';
     const o = beoordeelDag(t, dag);
     const spraak = {
       op_tijd    : ['ok',   '&#127908; spraak ' + esc(o.spraak.tijd || '')],
@@ -1018,46 +1135,87 @@
     return !!(_wa.data && _wa.data.ziet_uitgaand === true);
   }
 
-  /** De uitleg die in de plaats komt van cijfers die er niet zijn. */
-  function nogNietGemeten(wat) {
-    const reden = _wa.error
+  /**
+   * De uitleg die in de plaats komt van cijfers die er niet zijn.
+   *
+   * `eigenReden` is er voor de gevallen waarin de brug wél werkt maar de bron
+   * ontbreekt — de agenda die niet laadt, bijvoorbeeld. Zonder argument blijft
+   * het gedrag zoals het was.
+   */
+  function nogNietGemeten(wat, eigenReden) {
+    const reden = eigenReden || (_wa.error
       ? 'De WhatsApp-brug is nu niet bereikbaar, dus er valt niets te meten.'
       : (_wa.data && !_wa.data.verbonden)
         ? 'De WhatsApp-brug is nog niet gekoppeld. Zolang dat niet gebeurd is, ziet dit systeem geen enkel bericht.'
-        : 'De brug die nu draait ziet nog geen uitgaande berichten. Na het bijwerken van de VPS vult dit blok zichzelf.';
+        : 'De brug die nu draait ziet nog geen uitgaande berichten. Na het bijwerken van de VPS vult dit blok zichzelf.');
     return '<div class="nietgemeten"><b>' + esc(wat) + ' wordt nog niet gemeten.</b><br>' + esc(reden) +
       '<br><span style="color:#6b7280">Er staat hier bewust geen nul: dat zou eruitzien alsof het gemeten is en op nul uitkwam.</span></div>';
   }
 
+  /**
+   * Wat de twee venster-blokken tonen als er niets te meten valt.
+   *
+   * Vier van de vijf uitkomsten van vensterBron() eindigen hier. Dat is geen
+   * defensieve overdaad: elk van die vier is een reden waarom een nul zou
+   * liegen, en ze liegen elk op een andere manier.
+   */
+  function vensterLeegBlok(bron, kop, wat) {
+    if (bron.staat === 'geen_brug') return kop + nogNietGemeten(wat);
+    if (bron.staat === 'laden') return kop + '<div class="empty">Agenda laden&hellip;</div>';
+    if (bron.staat === 'agenda_fout') {
+      return kop + nogNietGemeten(wat,
+        'De agenda is nu niet bereikbaar (' + bron.error + '), en daarin staat welke leads vandaag een call hebben. ' +
+        'Zonder die lijst is er geen verzameling om over te tellen.');
+    }
+    if (bron.staat === 'geen_calls') {
+      return kop + '<div class="empty">Geen zoomcalls ingepland op deze dag, dus hier valt niets te halen.</div>';
+    }
+    // geen_taken: er zijn wél calls, maar geen enkele staat in de takenlijst.
+    return kop + '<div class="empty">' + bron.calls + ' ingeplande call' + (bron.calls === 1 ? '' : 's') +
+      ', maar geen ervan staat in de takenlijst &mdash; er is dus geen historiek om aan af te lezen ' +
+      'of het spraakbericht en het nabellen gebeurd zijn.</div>';
+  }
+
   /** Het blok op het dagscherm: wie kreeg vanmorgen een spraakbericht? */
   function spraakBlok(taken, dag) {
+    // `taken` staat er nog voor de aanroep in de dagweergave, maar is niet meer
+    // de bron: die is de agenda. Filter dus niet hierin in de hoop dat het
+    // doorwerkt — pas vensterBron aan.
+    const bron = vensterBron(dag);
     const kop = '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#127908;</div>' +
       '<h3>Spraakberichten voor 09:00</h3>' +
-      (brugZietUitgaand() ? '<span class="n">' + taken.length + '</span>' : '') + '</div>';
-    if (!brugZietUitgaand()) return kop + nogNietGemeten('Het spraakbericht per lead');
+      (bron.staat === 'ok' ? '<span class="n">' + bron.taken.length + '</span>' : '') + '</div>';
+    if (bron.staat !== 'ok') return vensterLeegBlok(bron, kop, 'Het spraakbericht per call');
 
-    const t = telVensters(taken, dag).spraak;
-    if (t.totaal === 0) return kop + '<div class="empty">Geen taken op deze dag.</div>';
+    const t = telVensters(bron.taken, dag).spraak;
     return kop +
-      '<div class="ronde">Elke lead die vandaag op de lijst staat hoort v&oacute;&oacute;r 09:00 een ingesproken bericht te krijgen.</div>' +
-      dekkingsBalk(t, ['op tijd', 'na 09:00', 'geen']);
+      '<div class="ronde">Elke lead die vandaag een <b>zoomcall</b> heeft staan hoort v&oacute;&oacute;r 09:00 ' +
+      'een ingesproken bericht te krijgen. Wie geen call heeft staat hier niet bij.</div>' +
+      dekkingsBalk(t, ['op tijd', 'na 09:00', 'geen']) +
+      zonderTaakRegel(bron.zonderTaak);
   }
 
   /** Het blok op het dagscherm: wie is er tussen 12 en 13 uur nagebeld? */
   function nabelBlok(taken, dag) {
+    // `taken` staat er nog voor de aanroep in de dagweergave, maar is niet meer
+    // de bron: die is de agenda. Filter dus niet hierin in de hoop dat het
+    // doorwerkt — pas vensterBron aan.
+    const bron = vensterBron(dag);
     const kop = '<div class="sh"><div class="ic" style="background:var(--o-accs)">&#9742;</div>' +
       '<h3>Nabellen tussen 12:00 en 13:00</h3></div>';
-    if (!brugZietUitgaand()) return kop + nogNietGemeten('Het nabelvenster');
+    if (bron.staat !== 'ok') return vensterLeegBlok(bron, kop, 'Het nabelvenster');
 
-    const t = telVensters(taken, dag).nabel;
+    const t = telVensters(bron.taken, dag).nabel;
     if (t.totaal === 0) {
-      return kop + '<div class="empty">Niemand hoeft vandaag nagebeld te worden' +
-        (t.niet_nodig ? ' — ' + t.niet_nodig + ' lead' + (t.niet_nodig === 1 ? '' : 's') + ' had geen spraakbericht of heeft al geantwoord.' : '.') + '</div>';
+      return kop + '<div class="empty">Niemand met een call vandaag hoeft nagebeld te worden' +
+        (t.niet_nodig ? ' — ' + t.niet_nodig + ' lead' + (t.niet_nodig === 1 ? '' : 's') + ' had geen spraakbericht of heeft al geantwoord.' : '.') + '</div>' +
+        zonderTaakRegel(bron.zonderTaak);
     }
     return kop +
-      '<div class="ronde">Wie een spraakbericht kreeg en niet antwoordde, hoort tussen <b>12:00 en 13:00</b> gebeld te worden. ' +
-      'Later op de dag bellen telt als te laat, niet als gedaan.</div>' +
-      dekkingsBalk(t, ['in het venster', 'buiten het venster', 'niet gebeld']);
+      '<div class="ronde">Van de leads met een <b>zoomcall</b> vandaag: wie een spraakbericht kreeg en niet antwoordde, ' +
+      'hoort tussen <b>12:00 en 13:00</b> gebeld te worden. Later op de dag bellen telt als te laat, niet als gedaan.</div>' +
+      dekkingsBalk(t, ['in het venster', 'buiten het venster', 'niet gebeld']) +
+      zonderTaakRegel(bron.zonderTaak);
   }
 
   /** Eén balk met de drie uitkomsten, plus de aantallen eronder. */
@@ -1082,14 +1240,21 @@
   function vensterDashboardBlok(dag) {
     const kop = '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#9200;</div>' +
       '<h3>Op tijd vandaag</h3></div>';
-    if (!brugZietUitgaand()) return kop + nogNietGemeten('Het spraakbericht en het nabelvenster');
 
+    // Dezelfde verzameling als op het dagscherm: de leads met een zoomcall,
+    // niet iedereen die vandaag open staat. Hier stond telVensters over
+    // st.data.taken, en dat rekende dus over dezelfde verkeerde groep — met
+    // tien aanmeldingen erbij zakte de dekking naar beneden om een reden die
+    // niets met Daves werk te maken had.
     const st = _live.taken;
     if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
-    if (!st.data || st.key !== dag) return kop + '<div class="empty">Bezig met laden&hellip;</div>';
 
-    const t = telVensters(st.data.taken || [], dag);
-    if (t.spraak.totaal === 0) return kop + '<div class="empty">Geen open taken vandaag.</div>';
+    const bron = vensterBron(dag);
+    if (bron.staat !== 'ok') {
+      return vensterLeegBlok(bron, kop, 'Het spraakbericht en het nabelvenster');
+    }
+
+    const t = telVensters(bron.taken, dag);
 
     return kop + '<div class="vstrij">' +
       '<div><div class="vstkop">Spraakbericht v&oacute;&oacute;r 09:00</div>' +
@@ -1098,7 +1263,7 @@
       (t.nabel.totaal
         ? dekkingsBalk(t.nabel, ['in het venster', 'buiten het venster', 'niet gebeld'])
         : '<div class="empty" style="padding:12px">Niemand hoefde nagebeld te worden.</div>') +
-      '</div></div>';
+      '</div></div>' + zonderTaakRegel(bron.zonderTaak);
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -2026,7 +2191,7 @@
   // tests/opvolging-vensters.test.js tegen dit bestand zelf.
   window.__opvVensterHelpers = {
     inZone, beoordeelSpraak, beoordeelNabel, beoordeelDag, telVensters,
-    isSpraakVerstuurd, isAntwoord,
+    isSpraakVerstuurd, isAntwoord, koppelCalls, callVoorTaak,
     SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
   };
 
