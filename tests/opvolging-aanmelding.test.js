@@ -222,7 +222,32 @@ test('zolang het event nog moet komen geldt de drempel niet', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('het badge-label draagt naam, plaats en moment', () => {
-  assert.equal(badgeVoorEvent(ev()), 'Masterclass Gent · 20 sep 19:00');
+  assert.equal(badgeVoorEvent(ev()), 'Masterclass · Gent · 20 sep 19:00');
+});
+
+test('een volledig postadres blijft van de badge af', () => {
+  // events.location is één vrij tekstveld; er staat soms een stad in en soms
+  // een heel adres. Dit stond op productie in de database:
+  //   'Forex Masterclass Gent Belgie - Deinsesteenweg 108 | 9031 Drongen (Gent) - 9 sep 18:00'
+  // Zo'n label duwt de eventnaam weg en zegt niets extra's.
+  assert.equal(
+    badgeVoorEvent(ev({
+      title: 'Forex Masterclass Gent',
+      location: 'Belgie - Deinsesteenweg 108 | 9031 Drongen (Gent)',
+    })),
+    'Forex Masterclass Gent · 20 sep 19:00');
+});
+
+test('alleen een korte plaatsnaam zonder adres-kenmerken mag mee', () => {
+  const met = (location) => badgeVoorEvent(ev({ title: 'Masterclass', location }));
+  assert.equal(met('Gent'), 'Masterclass · Gent · 20 sep 19:00');
+  assert.equal(met('Den Haag'), 'Masterclass · Den Haag · 20 sep 19:00');
+  // Alles met een cijfer, een scheidingsteken of een haakje is een adres.
+  assert.equal(met('Deinsesteenweg 108'), 'Masterclass · 20 sep 19:00');
+  assert.equal(met('Drongen (Gent)'), 'Masterclass · 20 sep 19:00');
+  assert.equal(met('Belgie - Drongen'), 'Masterclass · 20 sep 19:00');
+  assert.equal(met('Gent, Belgie'), 'Masterclass · 20 sep 19:00');
+  assert.equal(met('Een hele lange locatieomschrijving zonder cijfers'), 'Masterclass · 20 sep 19:00');
 });
 
 test('ontbrekende delen vallen weg zonder rare tekens', () => {

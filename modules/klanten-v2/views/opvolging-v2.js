@@ -41,6 +41,14 @@
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[opvolging-v2] KV_V2.helpers niet geladen.'); return; }
 
   const DOEL_BELLEN = 2;
+  // Zoveel dagen voor het event komt een aanmeldkaart terug voor de
+  // reminder-call. Dit is een kopie van WAKKER_DAGEN_VOOR_EVENT uit
+  // api/_lib/opvolging-aanmelding.js — een browser-view kan daar niet uit
+  // importeren. Het venster hier vertelt Dave op welke dag de kaart terugkomt,
+  // en de server bepaalt die dag echt; lopen ze uiteen, dan belooft het scherm
+  // iets anders dan er gebeurt. Daarom bewaakt tests/opvolging-bevestigd.test.js
+  // dat deze twee gelijk blijven.
+  const WAKKER_DAGEN = 4;
   const ARCHIEF_MIN_DAGEN = 3;   // belpogingen op zoveel verschillende dagen
   const ARCHIEF_MIN_WA = 1;
 
@@ -64,7 +72,15 @@
     dagView: null,          // null = vandaag
     modal: null,            // { soort, taakId, ... }
     bezig: false,
+    weekOffset: 0,          // 0 = de week die de balk bij openen toont
   };
+
+  // Hoe ver de weekbalk vooruit en achteruit mag. Niet omdat er een grens
+  // nodig is in de data — taken staan er gewoon — maar zodat een blijven
+  // klikken op de pijl niet in een jaar ver weg eindigt zonder dat iemand
+  // doorheeft waar hij is.
+  const WEEK_MIN_OFFSET = -8;
+  const WEEK_MAX_OFFSET = 8;
 
   // Fase 2 — de agenda achter 'Opnieuw inplannen'. weekStart is de maandag
   // die getoond wordt; weekOffset telt hoeveel weken we vooruit staan zodat
@@ -513,6 +529,12 @@
  --o-pur:#7c4dff;--o-purs:#f1ecff;--o-sh:0 1px 2px rgba(16,20,30,.06),0 8px 24px rgba(16,20,30,.05);
  color:var(--o-ink);padding:18px 22px 60px;max-width:1000px}
 .opv .wk{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap}
+.opv .wkbar{display:flex;align-items:stretch;gap:8px;margin:0 0 14px}
+.opv .wkbar .wkmid{flex:1;min-width:0}
+.opv .wkbar .wk{margin:0}
+.opv .obtn.wkp{display:flex;align-items:center;justify-content:center;min-width:34px;font-size:15px;line-height:1;padding:0 10px}
+.opv .wklbl{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:650;color:var(--o-muted);margin:0 0 6px 2px}
+.opv .wknu{border:0;background:none;padding:0;font:inherit;font-size:11.5px;font-weight:600;color:var(--o-acc);cursor:pointer;text-decoration:underline}
 .opv .wkd{flex:1;min-width:104px;background:#fff;border:1px solid var(--o-line);border-radius:12px;padding:9px 11px;cursor:pointer;font-family:inherit;text-align:left;box-shadow:var(--o-sh);display:flex;flex-direction:column;gap:2px}
 .opv .wkd .l{font-size:11.5px;color:var(--o-muted);font-weight:600}
 .opv .wkd .c{font-size:17px;font-weight:750}
@@ -643,6 +665,20 @@
 .opv .evkop .tel{margin-left:auto;font-size:11.5px;font-weight:700;background:var(--o-line);color:#4b5563;border-radius:20px;padding:2px 9px}
 .opv .evkop .straks{font-size:11.5px;font-weight:700;border-radius:20px;padding:2px 9px;background:var(--o-ambs);color:#8a5300}
 .opv .evkop .straks.dichtbij{background:var(--o-reds);color:#b32b2f}
+.opv .evkop{display:block}
+.opv .evkop .evkr{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.opv .evkop .evadr{font-size:11.5px;color:var(--o-muted);margin-top:3px}
+/* De rustige kaart: naam als duidelijkste element, meer wit, alleen de
+   voortgang van vandaag. Wat er nog niet is blijft stil — de teller zegt dat. */
+.opv .row.rst{padding:13px 15px}
+.opv .row.rst .nm2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px;font-weight:700;color:var(--o-ink);line-height:1.25}
+.opv .row.rst .mt2{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:5px}
+.opv .row.rst .tel2{font-size:13px;color:#4b5563;font-variant-numeric:tabular-nums}
+.opv .row.rst .vdg{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--o-muted)}
+.opv .row.rst .hist{font-size:12px;color:var(--o-muted)}
+.opv .row.rst .afw{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.opv .row.rst .note{margin-top:8px}
+.opv .row.rst .note.zacht{background:var(--o-grns);border-left-color:#bfe9d6;color:#0a6b45}
 .opv .klaarblok{opacity:.72}
 .opv .klaarblok .row{background:#fcfcfd}
 .opv .mb{padding:18px 22px 22px}
@@ -682,9 +718,40 @@
     niet_ingepland: ['Niet ingepland', 't-red'],
   };
 
-  function taakKaart(t, dag) {
+  /**
+   * De badge 'Bevestigd op 01/09' met de notitie eronder.
+   *
+   * In ronde B moet in één oogopslag te zien zijn dat deze persoon in ronde A
+   * al bevestigd heeft. Dan belt Dave niet meer met de vraag óf hij komt, maar
+   * als herinnering. Zonder dit is een kaart in ronde B niet te onderscheiden
+   * van een verse aanmelding.
+   */
+  function bevestigdBadge(t) {
+    if (!t || !t.bevestigd_op) return '';
+    return '<span class="tag t-green" title="in de eerste ronde bevestigd">&#10003; Bevestigd op ' +
+      esc(nl(iso(t.bevestigd_op))) + '</span>';
+  }
+
+  /**
+   * Wat Dave op een kaart moet zien, en niet meer dan dat.
+   *
+   * `opties.inGroep` is waar de aanmeldkaarten mee getekend worden: die staan
+   * onder een groepskop die de eventnaam, het moment en het aantal al noemt.
+   * Alles wat die kop herhaalt gaat er dan af — het reden-etiket ('aanmelding',
+   * terwijl het blok Aanmeldingen heet) en het badge-label met dezelfde
+   * eventnaam, hetzelfde adres en hetzelfde uur.
+   *
+   * Verder geldt daar: niets negatiefs zolang er nog niets misgegaan is. 'nog
+   * niet gebeld' en 'geen WhatsApp' zeggen precies hetzelfde als de nul in de
+   * voortgang van vandaag, maar klinken als een verwijt bij iemand die zich
+   * vanmorgen heeft aangemeld. De teller blijft, de verwijten gaan eraf, en
+   * rood blijft over voor wat écht te laat is.
+   */
+  function taakKaart(t, dag, opties) {
+    const inGroep = !!(opties && opties.inGroep);
     const r = REDEN_LABEL[t.reden] || [t.reden, 't-grey'];
     const nuDag = vandaag();
+    if (inGroep) return taakKaartRustig(t, dag, nuDag);
     return '<div class="row"><div class="who">' +
       '<div class="nm">' + esc(t.naam) +
         ' <span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
@@ -693,6 +760,7 @@
         (t.due < nuDag ? ' <span class="tag t-red">bleef liggen</span>' : '') +
         (t.due > nuDag ? ' <span class="tag t-blue">staat op ' + nl(t.due) + '</span>' : '') +
         ((t.uitgesteld_zonder_poging || 0) >= 2 ? ' <span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
+        (t.bevestigd_op ? ' ' + bevestigdBadge(t) : '') +
       '</div>' +
       '<div class="mt">' +
         (t.telefoon ? '<span style="color:#6b7280;font-size:12.5px">' + esc(t.telefoon) + '</span>' : '') +
@@ -711,6 +779,67 @@
         '<button class="obtn wa" onclick="window.__opvWa(\'' + t.id + '\')">&#128172; WhatsApp</button>' +
         '<button class="obtn" onclick="window.__opvWatNu(\'' + t.id + '\')">Wat nu? &rarr;</button>' +
       '</div></div>';
+  }
+
+
+  /**
+   * De rustige kaart, voor aanmeldingen onder een groepskop.
+   *
+   * Drie dingen staan er altijd: de naam, het telefoonnummer en de voortgang
+   * van vandaag. De rest verschijnt alleen als het een afwijking is — een kaart
+   * die bleef liggen, twee keer uitstellen zonder poging, of een venster dat te
+   * laat is gehaald. Wat er nog niet is, blijft stil: de teller zegt dat al.
+   */
+  function taakKaartRustig(t, dag, nuDag) {
+    const pogingen = (t.bel_vandaag || 0) + (t.wa_vandaag || 0);
+    const afwijkingen =
+      (t.due < nuDag ? '<span class="tag t-red">bleef liggen sinds ' + esc(nl(t.due)) + '</span>' : '') +
+      ((t.uitgesteld_zonder_poging || 0) >= 2
+        ? '<span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
+      vensterAfwijking(t, dag);
+
+    return '<div class="row rst"><div class="who">' +
+      '<div class="nm2">' + esc(t.naam) +
+        (t.bevestigd_op ? ' ' + bevestigdBadge(t) : '') + '</div>' +
+      '<div class="mt2">' +
+        (t.telefoon ? '<span class="tel2">' + esc(t.telefoon) + '</span>' : '') +
+        '<span class="vdg" title="doel is ' + DOEL_BELLEN + ' pogingen per dag">vandaag ' +
+          dots(pogingen, DOEL_BELLEN) + ' ' + pogingen + '/' + DOEL_BELLEN + '</span>' +
+        ((t.bel_totaal || 0) > 0
+          ? '<span class="hist">' + t.bel_totaal + '&times; gebeld op ' + t.bel_dagen +
+            ' dag' + (t.bel_dagen === 1 ? '' : 'en') + '</span>' : '') +
+        ((t.wa_totaal || 0) > 0 ? '<span class="hist">' + t.wa_totaal + '&times; WhatsApp</span>' : '') +
+      '</div>' +
+      (afwijkingen ? '<div class="afw">' + afwijkingen + '</div>' : '') +
+      (t.bevestigd_notitie ? '<div class="note zacht">' + esc(t.bevestigd_notitie) + '</div>' : '') +
+      (t.notitie ? '<div class="note">' + esc(t.notitie) + '</div>' : '') +
+      '</div>' +
+      '<div class="act">' +
+        '<button class="obtn p" onclick="window.__opvBel(\'' + t.id + '\')">&#9742; Bellen</button>' +
+        '<button class="obtn wa" onclick="window.__opvWa(\'' + t.id + '\')">&#128172; WhatsApp</button>' +
+        '<button class="obtn" onclick="window.__opvWatNu(\'' + t.id + '\')">Wat nu? &rarr;</button>' +
+      '</div></div>';
+  }
+
+  /**
+   * Alleen wat er over de vensters te zeggen valt als er iets gebeurd is.
+   *
+   * De volledige vensterbadges (vensterBadges) tonen ook 'geen spraakbericht'
+   * en 'niet nagebeld'. Op een kaart onder de groepskop leverde dat twee keer
+   * dezelfde melding op — één rood uit de spraak-beoordeling en één grijs als
+   * reden waarom nabellen niet nodig was — bij iemand die zich vanmorgen heeft
+   * aangemeld en waar dus nog niets fout is. Hier blijft over wat gemeten is:
+   * op tijd (groen) of te laat (rood).
+   */
+  function vensterAfwijking(t, dag) {
+    if (!brugZietUitgaand()) return '';
+    const o = beoordeelDag(t, dag);
+    let h = '';
+    if (o.spraak.staat === 'te_laat') h += '<span class="tag t-red">&#127908; spraak ' + esc(o.spraak.tijd || '') + ' &middot; na 09:00</span>';
+    else if (o.spraak.staat === 'op_tijd') h += '<span class="tag t-green">&#127908; spraak ' + esc(o.spraak.tijd || '') + '</span>';
+    if (o.nabel.staat === 'te_laat') h += '<span class="tag t-red">&#9742; nagebeld ' + esc(o.nabel.tijd || '') + ' &middot; buiten 12&ndash;13u</span>';
+    else if (o.nabel.staat === 'op_tijd') h += '<span class="tag t-green">&#9742; nagebeld ' + esc(o.nabel.tijd || '') + '</span>';
+    return h;
   }
 
   /** Cijfers van een nummer, 00-prefix weg — zelfde regel als de server. */
@@ -1041,11 +1170,29 @@
       timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'short',
       hour: '2-digit', minute: '2-digit',
     }).format(new Date(g.start)).replace(',', '') : '';
+    // De kop moet in één oogopslag zeggen: welk event, wanneer, over hoeveel
+    // dagen, hoeveel mensen. Daarom staat alleen de naam vet.
+    //
+    // Het adres staat eronder, klein en grijs. `event_plaats` is een volledig
+    // postadres ('Belgie - Deinsesteenweg 108 | 9031 Drongen (Gent)') en dat
+    // vetgedrukt naast de titel duwde de eventnaam weg. Alleen de stad zou
+    // mooier zijn, maar events.location is één vrij tekstveld — er is geen
+    // stad-kolom, en 'Gent' daaruit vissen is een parser op één voorbeeld.
+    // Dat is gokken; dan liever het hele adres, klein en grijs.
+    //
+    // Let ook op waar esc() ophoudt: het scheidingsteken hoorde erbuiten.
+    // Stond het erbinnen, dan las Dave letterlijk '&middot;' op zijn scherm —
+    // en dat stond er tot vandaag ook.
+    const titel = String(g.titel || '').trim();
+    const adres = String(g.plaats || '').trim();
     return '<div class="evkop">' +
-      '<b>' + esc([g.titel, g.plaats].filter(Boolean).join(' &middot; ')) + '</b>' +
-      (uur ? '<span class="wan">' + esc(uur) + '</span>' : '') +
-      (wanneer ? '<span class="straks' + (over !== null && over <= 1 ? ' dichtbij' : '') + '">' + esc(wanneer) + '</span>' : '') +
-      '<span class="tel">' + g.taken.length + ' aanmelding' + (g.taken.length === 1 ? '' : 'en') + '</span>' +
+      '<div class="evkr">' +
+        '<b>' + esc(titel || 'Event') + '</b>' +
+        (uur ? '<span class="wan">' + esc(uur) + '</span>' : '') +
+        (wanneer ? '<span class="straks' + (over !== null && over <= 1 ? ' dichtbij' : '') + '">' + esc(wanneer) + '</span>' : '') +
+        '<span class="tel">' + g.taken.length + ' aanmelding' + (g.taken.length === 1 ? '' : 'en') + '</span>' +
+      '</div>' +
+      (adres ? '<div class="evadr">' + esc(adres) + '</div>' : '') +
       '</div>';
   }
 
@@ -1057,24 +1204,106 @@
       '<div class="ronde">Deze mensen hebben zich aangemeld. Bel binnen een dag om te vragen of alles goed verlopen is; ' +
       'vier dagen voor het event komt dezelfde naam vanzelf terug.</div>' +
       groepeerPerEvent(taken).map((g) =>
-        '<div class="evgroep">' + evGroepKop(g) + g.taken.map((t) => taakKaart(t, dag)).join('') + '</div>'
+        '<div class="evgroep">' + evGroepKop(g) +
+        g.taken.map((t) => taakKaart(t, dag, { inGroep: true })).join('') + '</div>'
       ).join('');
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // DE WEEKBALK
+  // ═════════════════════════════════════════════════════════════════════════
+  // Zes dagen, want Dave werkt ook op zaterdag. Zondag niet: dan zou de balk
+  // een kolom tonen waarop er niets gebeurt.
+  //
+  // Zondag is daarom ook het enige moment waarop de balk niet de week van
+  // vandaag opent maar de komende: die werkweek is voorbij, en wat Dave dan
+  // wil zien is wat er morgen ligt.
+  const WEEKDAG_LABELS = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+
+  /**
+   * De maandag waar de balk op staat bij offset 0. Ma t/m za is dat de maandag
+   * van deze week; op zondag de maandag erna.
+   */
+  /**
+   * '7 sep' — voor het kopje boven de balk. De dagknoppen dragen de datum al
+   * als 07/09; een maandnaam erboven leest sneller en verwart niet met een
+   * weeknummer.
+   */
+  function kortDatum(d) {
+    if (!d) return '';
+    return new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam', day: 'numeric', month: 'short',
+    }).format(new Date(d + 'T12:00:00Z'));
+  }
+
+  function basisMaandag(nu) {
+    const dow = new Date(nu + 'T12:00:00Z').getUTCDay();   // 0 = zondag
+    return dow === 0 ? dagPlus(nu, 1) : maandagVan(nu);
+  }
+
+  /**
+   * Welke week toont de balk? Pure functie — na te slaan via
+   * window.__opvWeekHelpers, getest in tests/opvolging-weekbalk.test.js.
+   *
+   *   { maandag, dagen: [zes datums, ma t/m za], label, bevatVandaag }
+   */
+  function bepaalWeek({ nu, offset = 0 }) {
+    const maandag = dagPlus(basisMaandag(nu), (Number(offset) || 0) * 7);
+    const dagen = WEEKDAG_LABELS.map((_, i) => dagPlus(maandag, i));
+    // 'Deze week' hangt aan wat er in de balk staat, niet aan de offset. Op
+    // zondag toont offset 0 de komende week, en die 'deze week' noemen zou
+    // Dave op het verkeerde been zetten.
+    const bevatVandaag = dagen.indexOf(nu) !== -1;
+    return {
+      maandag,
+      dagen,
+      bevatVandaag,
+      label: bevatVandaag ? 'Deze week' : 'Week van ' + kortDatum(maandag),
+    };
+  }
+
+  /**
+   * Welke offset zet dag `d` in beeld? Gebruikt door __opvDag: valt de gekozen
+   * dag buiten de getoonde week, dan schuift de balk mee. De offset blijft zo
+   * de enige bron voor wat de balk toont, en de pijlen blijven werken — zou de
+   * balk in plaats daarvan bij het tekenen naar dagView toe springen, dan kon
+   * je met de pijl geen andere week meer bekijken.
+   */
+  function weekOffsetVoorDag({ nu, d }) {
+    if (!d) return 0;
+    const van  = Date.parse(basisMaandag(nu) + 'T12:00:00Z');
+    const naar = Date.parse(basisMaandag(d) + 'T12:00:00Z');
+    if (!Number.isFinite(van) || !Number.isFinite(naar)) return 0;
+    return Math.round((naar - van) / (7 * 86400000));
   }
 
   function weekbalk(dag) {
     const nu = vandaag();
-    const d0 = new Date(nu + 'T12:00:00Z');
-    const maandag = dagPlus(nu, -(((d0.getUTCDay() + 6) % 7)));
-    let h = '<div class="wk">';
-    ['Ma', 'Di', 'Wo', 'Do', 'Vr'].forEach((lbl, i) => {
-      const d = dagPlus(maandag, i);
+    const wk = bepaalWeek({ nu, offset: _ui.weekOffset });
+    const terug = _ui.weekOffset > WEEK_MIN_OFFSET;
+    const heen  = _ui.weekOffset < WEEK_MAX_OFFSET;
+
+    let knoppen = '<div class="wk">';
+    wk.dagen.forEach((d, i) => {
       const aan = d === dag;
-      h += '<button class="wkd ' + (aan ? 'on' : '') + ' ' + (d === nu ? 'nu' : '') + ' ' + (d < nu ? 'oud' : '') + '"' +
+      knoppen += '<button class="wkd ' + (aan ? 'on' : '') + ' ' + (d === nu ? 'nu' : '') + ' ' + (d < nu ? 'oud' : '') + '"' +
         ' onclick="window.__opvDag(\'' + d + '\')">' +
-        '<span class="l">' + lbl + ' ' + nl(d) + (d === nu ? ' · vandaag' : '') + '</span>' +
+        '<span class="l">' + WEEKDAG_LABELS[i] + ' ' + nl(d) + (d === nu ? ' · vandaag' : '') + '</span>' +
         '<span class="c">' + (aan && _live.taken.data ? _live.taken.data.taken.length : '·') + '<small> open</small></span></button>';
     });
-    return h + '</div>';
+    knoppen += '</div>';
+
+    return '<div class="wkbar">' +
+      '<button class="obtn wkp" ' + (terug ? '' : 'disabled style="opacity:.4;cursor:default" ') +
+        'title="Vorige week" onclick="window.__opvWeekbalk(-1)">&#8592;</button>' +
+      '<div class="wkmid">' +
+        '<div class="wklbl"><span>' + esc(wk.label) + '</span>' +
+          (wk.bevatVandaag ? '' : '<button class="wknu" onclick="window.__opvWeekbalkNu()">terug naar vandaag</button>') +
+        '</div>' + knoppen +
+      '</div>' +
+      '<button class="obtn wkp" ' + (heen ? '' : 'disabled style="opacity:.4;cursor:default" ') +
+        'title="Volgende week" onclick="window.__opvWeekbalk(1)">&#8594;</button>' +
+      '</div>';
   }
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -1155,7 +1384,8 @@
         'Ze staan morgen gewoon terug &mdash; dit is geen archief.</div>' +
         '<div class="klaarblok">' +
         groepeerPerEvent(klaar).map((g) =>
-          '<div class="evgroep">' + evGroepKop(g) + g.taken.map((t) => taakKaart(t, dag)).join('') + '</div>'
+          '<div class="evgroep">' + evGroepKop(g) +
+          g.taken.map((t) => taakKaart(t, dag, { inGroep: true })).join('') + '</div>'
         ).join('') + '</div>';
     }
 
@@ -1276,7 +1506,17 @@
     // hier nergens op.
     if (m.soort === 'watnu' && isAanmelding(t)) {
       const e = evVan(t);
+      // 'Bevestigd' staat bovenaan: dat is verreweg de meest voorkomende
+      // uitkomst, en de knop die het vaakst gedrukt wordt hoort niet onderaan.
+      const evDagB = e.event_dag || null;
+      const wakkerB = evDagB ? dagPlus(evDagB, -WAKKER_DAGEN) : null;
+      const nogRonde = !!wakkerB && wakkerB > vandaag();
       const body =
+        opt('&#10003;', 'var(--o-grns)', 'Bevestigd &mdash; hij komt',
+          nogRonde
+            ? 'Vandaag klaar. Op ' + nl(wakkerB) + ' staat hij vanzelf terug voor de reminder-call.'
+            : 'Het event is dichtbij, dus dit is de laatste ronde. De kaart gaat dicht.',
+          "window.__opvAanmeldActie('bevestigd')") +
         opt('&#128172;', 'var(--o-grns)', 'Gesprek gehad', 'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.', "window.__opvAanmeldActie('gesprek_gehad')") +
         opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Archiveren. Hij moet dan ook in de eventmodule op geannuleerd.', "window.__opvAanmeldActie('geen_interesse')") +
         opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Wacht op bevestiging; na 48 uur zonder nieuwe aanmelding komt hij terug.', "window.__opvAanmeldActie('verplaatst')");
@@ -1286,6 +1526,24 @@
 
     if (m.soort === 'aanmeld-actie') {
       const u = m.uitkomst;
+      if (u === 'bevestigd') {
+        const evDag = evVan(t).event_dag || null;
+        const wakker = evDag ? dagPlus(evDag, -WAKKER_DAGEN) : null;
+        const nogRonde = !!wakker && wakker > vandaag();
+        // Geen verplichte notitie. Dit is de knop die het vaakst gedrukt wordt;
+        // een verplicht veld maakt de gewoonste uitkomst de traagste handeling,
+        // en dan wordt hij ontweken.
+        return scrim(esc(t.naam) + ' komt', nogRonde ? 'Ronde 1 van 2' : 'Laatste ronde',
+          '<div class="ronde">' + (nogRonde
+            ? 'Hij verdwijnt vandaag uit je lijst en staat op <b>' + esc(nl(wakker)) +
+              '</b> vanzelf terug voor de reminder-call &mdash; dan bel je niet meer met de vraag ' +
+              '<i>of</i> hij komt, maar of het nog klopt.'
+            : 'Het event is binnen vier dagen, dus er komt geen ronde meer. De kaart gaat dicht.') +
+          '</div>' +
+          '<textarea id="opv-an" rows="2" placeholder="Notitie (mag leeg) — bv. komt met zijn broer"></textarea>' +
+          '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'bevestigd\')">' +
+          'Bevestigd vastleggen</button>');
+      }
       if (u === 'gesprek_gehad') {
         return scrim('Gesprek gehad met ' + esc(t.naam), 'Wat is er gezegd?',
           '<div class="ronde">Zonder deze zin is het een vinkje zonder inhoud, en weet de volgende die hem oppakt nog niets.</div>' +
@@ -1484,10 +1742,28 @@
   // ═════════════════════════════════════════════════════════════════════════
   window.__opvDag = (d) => {
     _ui.dagView = d;
+    // Valt de gekozen dag buiten de week die de balk toont, dan schuift de balk
+    // mee. Zonder dit zou de keuze wél gelden maar nergens oplichten, en dat
+    // leest als 'er is niets gebeurd'.
+    const wens = weekOffsetVoorDag({ nu: vandaag(), d });
+    _ui.weekOffset = Math.max(WEEK_MIN_OFFSET, Math.min(WEEK_MAX_OFFSET, wens));
     _live.taken.data = null; _live.taken.key = null;
     _calls.data = null; _calls.key = null; _calls.error = null;
     render();
   };
+
+  // ── De weekbalk: een week terug of vooruit ────────────────────────────────
+  // Verandert alleen wat je ziet, niet welke dag geselecteerd staat. De
+  // takenlijst hangt aan _ui.dagView en blijft dus staan waar hij stond.
+  window.__opvWeekbalk = (stap) => {
+    const n = _ui.weekOffset + (Number(stap) || 0);
+    if (n < WEEK_MIN_OFFSET || n > WEEK_MAX_OFFSET) return;
+    _ui.weekOffset = n;
+    render();
+  };
+
+  /** Terug naar de week van vandaag, én naar vandaag als dag. */
+  window.__opvWeekbalkNu = () => { window.__opvDag(vandaag()); };
   window.__opvHerlaad = () => { _live.taken.error = null; _live.dash.error = null; _live.archief.error = null; leegTakenCache(); render(); };
   window.__opvSluit = () => { _ui.modal = null; render(); };
   window.__opvWatNu = (id) => { _ui.modal = { soort: 'watnu', taakId: id }; render(); };
@@ -1734,6 +2010,17 @@
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
   window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst };
+
+  // De weekbalk los na te slaan, en getest in tests/opvolging-weekbalk.test.js
+  // tegen dit bestand zelf — zelfde afspraak als bij de wa-timers hierboven.
+  // De aanmeldkaart: de wakker-dag moet gelijk blijven aan die van de server,
+  // en de badge moet in ronde B laten zien dat er in ronde A bevestigd is.
+  window.__opvAanmeldHelpers = { WAKKER_DAGEN, bevestigdBadge, taakKaart, evGroepKop };
+
+  window.__opvWeekHelpers = {
+    bepaalWeek, basisMaandag, weekOffsetVoorDag, maandagVan, kortDatum,
+    WEEKDAG_LABELS, WEEK_MIN_OFFSET, WEEK_MAX_OFFSET,
+  };
 
   // De vensterlogica los na te slaan vanuit de console, en getest in
   // tests/opvolging-vensters.test.js tegen dit bestand zelf.

@@ -157,7 +157,8 @@ export function bepaalTaakActie({ attendee, event, taak = null, nu = Date.now() 
  */
 export function badgeVoorEvent(event) {
   if (!event) return null;
-  const naam = [event.title, event.location].filter((s) => s && String(s).trim()).map((s) => String(s).trim()).join(' ');
+  const titel = event.title ? String(event.title).trim() : '';
+  const naam = [titel, kortePlaats(event.location)].filter(Boolean).join(' · ');
   let moment = '';
   const ms = event.starts_at ? Date.parse(event.starts_at) : NaN;
   if (Number.isFinite(ms)) {
@@ -171,6 +172,30 @@ export function badgeVoorEvent(event) {
   }
   const label = [naam, moment].filter(Boolean).join(' · ');
   return label ? label.slice(0, 200) : null;
+}
+
+/**
+ * De plaats, maar alleen als het er één is.
+ *
+ * `events.location` is één vrij tekstveld — er is geen stad-kolom. In de
+ * praktijk staat er soms een stad ('Gent') en soms een volledig postadres
+ * ('Belgie - Deinsesteenweg 108 | 9031 Drongen (Gent)'). Dat tweede hoort niet
+ * op een badge: het duwde de eventnaam weg en leverde labels op als
+ * 'Forex Masterclass Gent Belgie - Deinsesteenweg 108 | 9031 Drongen (Gent) ·
+ * 9 sep 18:00'.
+ *
+ * De stad uit zo'n adres vissen is een parser bouwen op één voorbeeld, en dat
+ * gaat een keer mis op een adres dat we nog niet gezien hebben. Dus andersom:
+ * een korte waarde zonder adres-kenmerken (cijfers, komma, pijp, streepje) is
+ * een plaatsnaam en mag mee; al het andere valt weg. Weglaten is veilig — de
+ * badge zegt dan titel plus moment, en dat klopt altijd.
+ */
+function kortePlaats(location) {
+  const s = String(location == null ? '' : location).trim();
+  if (!s || s.length > 24) return '';
+  if (/[0-9|,;]/.test(s)) return '';
+  if (s.includes(' - ') || s.includes('(')) return '';
+  return s;
 }
 
 /**
