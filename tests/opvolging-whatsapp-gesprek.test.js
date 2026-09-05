@@ -358,3 +358,76 @@ test('de send-endpoint schrijft de poging ook niet', () => {
   assert.doesNotMatch(bron, /from\('opvolging_pogingen'\)/,
     'die rij hoort pas te ontstaan als de brug meldt dat het bericht vertrokken is');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HISTORIEK OPHALEN KAN NIET — EN DAT MAG HET PANEEL GEWOON ZEGGEN
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Gemeten op de VPS: client.getChats() wierp twee van de twee keer een fout.
+// De gebeurtenissen komen wél binnen — versturen en ontvangen werken — maar
+// alles wat de interne opslag moet lézen faalt. whatsapp-web.js 1.34.7 tegen
+// WhatsApp Web-build 2.3000.1046904178.
+//
+// Het paneel mag dat zeggen, maar alleen als het gemeten IS. Een 'kan niet'
+// zonder meting is dezelfde stilte als het probleem dat we net hebben opgelost.
+
+const stukkeChats = (fout = 'Evaluation failed: TypeError') => ({
+  verbonden: true, ziet_uitgaand: true,
+  lidkaart: { chats_status: 'fout', chats_fout: fout },
+});
+
+test('zonder meting blijft de uitnodiging om historiek op te halen staan', () => {
+  const H = opstelling({ gesprek: { berichten: [] } });
+  const h = H.gesprekPaneelHtml();
+  assert.match(h, /Historiek ophalen/);
+  assert.doesNotMatch(h, /ophalen kan niet/i);
+  assert.equal(H.historiekOnbereikbaar(), null, 'niet gemeten is geen conclusie');
+});
+
+test('een lege gesprekkenlijst is geen fout en verandert de knop niet', () => {
+  const H = opstelling({
+    gesprek: { berichten: [] },
+    wa: { data: { verbonden: true, ziet_uitgaand: true, lidkaart: { chats_status: 'gelukt', chats_in_cache: 0 } } },
+  });
+  assert.equal(H.historiekOnbereikbaar(), null);
+  assert.match(H.gesprekPaneelHtml(), /Historiek ophalen/);
+});
+
+test('is de fout gemeten, dan meldt het lege gesprek dat ophalen niet kan', () => {
+  const H = opstelling({ gesprek: { berichten: [] }, wa: { data: stukkeChats() } });
+  const h = H.gesprekPaneelHtml();
+  assert.match(h, /ophalen kan niet/i);
+  assert.match(h, /Vanaf de koppeling is dit gesprek volledig/);
+  assert.doesNotMatch(h, /&#8615; Historiek ophalen/, 'geen knop die stil niets doet');
+});
+
+test('de foutmelding van de bibliotheek staat er letterlijk bij', () => {
+  const H = opstelling({
+    gesprek: { berichten: [] },
+    wa: { data: stukkeChats('Evaluation failed: TypeError: r.getChats is not a function') },
+  });
+  assert.match(H.gesprekPaneelHtml(), /r\.getChats is not a function/);
+});
+
+test('de foutmelding wordt ontsnapt, want het is vreemde tekst', () => {
+  const H = opstelling({
+    gesprek: { berichten: [] },
+    wa: { data: stukkeChats('<img src=x onerror=alert(1)>') },
+  });
+  const h = H.gesprekPaneelHtml();
+  assert.doesNotMatch(h, /<img src=x/);
+  assert.match(h, /&lt;img src=x/);
+});
+
+test('staan er al berichten, dan vervalt "Ouder ophalen" met uitleg', () => {
+  const H = opstelling({ gesprek: { berichten: [bericht()] }, wa: { data: stukkeChats() } });
+  const h = H.gesprekPaneelHtml();
+  assert.doesNotMatch(h, /Ouder ophalen<\/button>/, 'geen knop meer');
+  assert.match(h, /Ouder ophalen kan niet met deze brug/);
+  assert.match(h, /Hoi, ik kom donderdag/, 'en de draad zelf blijft gewoon staan');
+});
+
+test('versturen blijft mogelijk — alleen het uitlezen van oude opslag faalt', () => {
+  const H = opstelling({ gesprek: { berichten: [] }, wa: { data: stukkeChats() } });
+  assert.equal(H.gesprekKanVersturen().mag, true);
+});

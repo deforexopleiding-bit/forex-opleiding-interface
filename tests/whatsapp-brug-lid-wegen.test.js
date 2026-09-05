@@ -25,7 +25,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  probeer, BESTAAT_NIET, GEEN_RESULTAAT, ONBRUIKBAAR, GELUKT, FOUT, STATUSSEN,
+  probeer, BESTAAT_NIET, GEEN_RESULTAAT, ONBRUIKBAAR, GELUKT, FOUT, ONBRUIKBARE_INVOER, STATUSSEN,
 } from '../services/whatsapp-brug/lib/uitkomst.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -76,7 +76,7 @@ test('gelukt geeft de waarde én de lengte', async () => {
 
 test('de statussen zijn een vaste lijst', () => {
   assert.deepEqual([...STATUSSEN].sort(),
-    ['bestaat_niet', 'fout', 'geen_resultaat', 'gelukt', 'onbruikbaar']);
+    ['bestaat_niet', 'fout', 'geen_resultaat', 'gelukt', 'onbruikbaar', 'onbruikbare_invoer']);
 });
 
 test('probeer werkt ook met een async haal', async () => {
@@ -189,9 +189,10 @@ test('er wordt per weg bijgehouden: geprobeerd, gelukt, beschikbaar', () => {
 test('BESTAAT_NIET zet beschikbaar op nee, en niets anders doet dat', () => {
   const b = bron();
   const i = b.indexOf('const noteer =');
-  // Ruimer venster: er is een commentaarblok bij gekomen over waarom de status
-  // zelf bewaard wordt.
-  const blok = b.slice(i, i + 900);
+  // Ruimer venster: er zijn twee commentaarblokken bij gekomen — over waarom de
+  // status zelf bewaard wordt, en over de foutmelding. Gemeten, niet geraden:
+  // het blok tot en met de beschikbaar-regels is ~1100 tekens.
+  const blok = b.slice(i, i + 1400);
   assert.match(blok, /res\.status === BESTAAT_NIET\) t\.beschikbaar = false/);
   assert.match(blok, /t\.beschikbaar === null\) t\.beschikbaar = true/);
 });
@@ -467,4 +468,133 @@ test('het paneel zegt bij een lege lijst dat er niets op te halen valt', () => {
     'en dat dat betekent dat er geen historiek is');
   assert.match(view, /Dat is geen lege lijst maar een mislukte aanvraag/,
     'en een mislukte aanvraag is iets anders dan een lege lijst');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ONZE EIGEN ONBRUIKBARE INVOER IS GEEN ONTBREKENDE FUNCTIE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// getNumberId en getChatById stonden allebei op 'bestaat_niet ×6', terwijl het
+// aftasten meldde dat die functies er wél waren. Dat wrong, en terecht: de
+// oorzaak zat in de meting zelf. `bestaat: !!chatId && kunde.api.…` gooide twee
+// vragen op één hoop, en naarChatId() geeft null bij minder dan tien cijfers of
+// een leidende nul — zes leadlijst-nummers missen een landcode.
+//
+// Dezelfde fout als hierboven, één laag dieper, en dit keer door mijzelf
+// gemaakt in de laag die de stiltes juist moest wegnemen.
+
+test('onbruikbare invoer krijgt een eigen status', async () => {
+  const r = await probeer({ bestaat: true, invoerOk: false, haal: () => 'x' });
+  assert.equal(r.status, ONBRUIKBARE_INVOER);
+  assert.notEqual(r.status, BESTAAT_NIET, 'anders leest het als een ontbrekende functie');
+});
+
+test('de functie wordt bij onbruikbare invoer niet eens aangeroepen', async () => {
+  let aangeroepen = 0;
+  await probeer({ bestaat: true, invoerOk: false, haal: () => { aangeroepen += 1; return 'x'; } });
+  assert.equal(aangeroepen, 0);
+});
+
+test('een ontbrekende functie gaat nog steeds vóór de invoercontrole', async () => {
+  // Bestaat het ding niet, dan is de invoer niet meer de vraag.
+  const r = await probeer({ bestaat: false, invoerOk: false, haal: () => 'x' });
+  assert.equal(r.status, BESTAAT_NIET);
+});
+
+test('invoerOk staat standaard aan, zodat bestaande aanroepen niet omslaan', async () => {
+  const r = await probeer({ bestaat: true, haal: () => '32456816410@c.us' });
+  assert.equal(r.status, GELUKT);
+});
+
+test('de twee LID-wegen scheiden "kan de bibliotheek dit" van "hebben wij een nummer"', () => {
+  const b = bron();
+  for (const fn of ['async function lidViaNumberId', 'async function lidViaChat']) {
+    const i = b.indexOf(fn);
+    assert.ok(i > 0, fn);
+    const blok = b.slice(i, i + 700);
+    assert.match(blok, /invoerOk\s*:\s*!!chatId/, fn + ': de invoer apart');
+    assert.doesNotMatch(blok, /bestaat\s*:\s*!!chatId/, fn + ': en niet meer op één hoop');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE FOUTMELDING VAN getChats IS DE CONCLUSIE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('probeer geeft de foutmelding van de bibliotheek door', async () => {
+  const r = await probeer({ bestaat: true, haal: () => { throw new Error('Evaluation failed'); } });
+  assert.equal(r.status, FOUT);
+  assert.equal(r.melding, 'Evaluation failed');
+});
+
+test('bij de andere statussen blijft melding leeg', async () => {
+  for (const opts of [{ bestaat: false }, { bestaat: true, invoerOk: false },
+                      { bestaat: true, haal: () => null }]) {
+    const r = await probeer({ haal: () => 'x', ...opts });
+    assert.equal(r.melding, null, r.status);
+  }
+});
+
+test('de teller bewaart de laatste foutmelding per weg', () => {
+  // 'fout ×2' zonder tekst is opnieuw een stilte. Bibliotheektekst is geen
+  // gegeven van iemand en mag dus gewoon bewaard en getoond worden.
+  const b = bron();
+  const i = b.indexOf('const noteer =');
+  const blok = b.slice(i, i + 1100);
+  assert.match(blok, /res\.status === FOUT && res\.melding\) t\.laatste_fout/);
+  assert.match(blok, /slice\(0, 300\)/, 'begrensd, zodat een stacktrace /status niet vult');
+  assert.match(b, /laatste_fout: null/, 'en het veld bestaat vanaf het begin');
+});
+
+test('haalChats legt de foutmelding vast en logt hem', () => {
+  const b = bron();
+  const i = b.indexOf('async function haalChats');
+  const blok = b.slice(i, i + 1200);
+  assert.match(blok, /chatsFout = res\.melding \|\| null/);
+  assert.match(blok, /console\.log\('\[brug\] getChats:', res\.status, '—', chatsFout/);
+});
+
+test('chats_fout komt mee in /status', () => {
+  const b = bron();
+  const i = b.indexOf('lidkaartStatus: () =>');
+  assert.ok(b.slice(i, i + 800).includes('chats_fout'));
+});
+
+test('het paneel toont de foutmelding én de conclusie', () => {
+  const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
+  assert.match(view, /lk\.chats_status === 'fout'/);
+  assert.match(view, /esc\(lk\.chats_fout\)/, 'de tekst zelf, ontsnapt');
+  assert.match(view, /alles wat de interne opslag moet lézen faalt/);
+});
+
+test('de conclusie in het paneel is gemeten, niet aangenomen', () => {
+  // Zonder meting blijft de uitnodiging om het te proberen gewoon staan. Een
+  // 'kan niet' zonder meting zou dezelfde stilte zijn als het probleem zelf.
+  const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
+  const i = view.indexOf('function historiekOnbereikbaar');
+  assert.ok(i > 0, 'de helper hoort te bestaan');
+  const blok = view.slice(i, i + 500);
+  assert.match(blok, /lk\.chats_status !== 'fout'\) return null/);
+});
+
+test('het lege gesprek meldt eerlijk dat ophalen niet kan', () => {
+  const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
+  const i = view.indexOf('function gesprekPaneelHtml');
+  const blok = view.slice(i, i + 4000);
+  assert.match(blok, /const onbereikbaar = historiekOnbereikbaar\(\)/);
+  assert.match(blok, /Vanaf de koppeling is dit gesprek volledig/);
+  assert.match(blok, /gemeten, niet aangenomen/);
+  // En de uitnodiging blijft bestaan voor het geval er niets gemeten is.
+  assert.match(blok, /Historiek ophalen/);
+});
+
+test('de README noemt de versienummers bij de conclusie', () => {
+  // Zodat we dit over drie maanden niet opnieuw uitzoeken.
+  const rd = readFileSync(join(ROOT, 'services/whatsapp-brug/README.md'), 'utf8');
+  const i = rd.indexOf('Historiek ophalen kan niet met deze combinatie');
+  assert.ok(i > 0, 'de sectie hoort te bestaan');
+  const blok = rd.slice(i, i + 2000);
+  assert.match(blok, /1\.34\.7/);
+  assert.match(blok, /2\.3000\.1046904178/);
+  assert.match(blok, /vanaf de koppeling volledig/i);
 });
