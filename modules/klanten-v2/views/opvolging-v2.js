@@ -1722,9 +1722,77 @@
   // ═════════════════════════════════════════════════════════════════════════
   // MODALS
   // ═════════════════════════════════════════════════════════════════════════
+  /**
+   * Welke vensters hangen NIET aan een taak?
+   *
+   * De uitkomst van een zoomcall wordt vastgelegd vanuit 'Calls van vandaag',
+   * en zo'n call komt uit de agenda — er hoeft nog helemaal geen taak voor te
+   * bestaan. Die twee vensters hangen dus aan _calls.data[m.callIndex].
+   *
+   * Deze verzameling staat hier expliciet omdat de fout die hij voorkomt niet
+   * te zien is: modalHtml() begon met zoekTaak(m.taakId), en bij een call is
+   * dat undefined. zoekTaak gaf null, de functie stopte met een lege string, en
+   * de Afronden-knop deed niets. Geen console-fout, geen venster, geen spoor —
+   * dezelfde stille vorm als de scrim-bug. tests/opvolging-call-modal.test.js
+   * controleert dat elk venster dat zonder taakId geopend wordt, hier staat.
+   */
+  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst']);
+
+  /**
+   * De vier uitkomsten van een zoomcall. Hangt aan de agenda, niet aan een taak.
+   *
+   * De call kan best iemand zijn die nog nergens in de takenlijst staat — dat
+   * is juist het normale geval bij een eerste gesprek. Vandaar dat dit venster
+   * vóór de taak-guard in modalHtml() wordt afgehandeld.
+   */
+  function callModalHtml(m) {
+    const c = (_calls.data || [])[m.callIndex];
+    if (!c) return '';
+    if (m.soort === 'call-afrond') {
+      const b =
+        opt('&#127881;', 'var(--o-grns)', 'Klant geworden', 'Klaar. Er komt geen taak bij.', "window.__opvCallUitkomst('klant_geworden')") +
+        opt('&#129300;', 'var(--o-ambs)', 'Wil nog beslissen', 'Kies een dag en schrijf op waar hij over twijfelt.', "window.__opvCallUitkomst('wil_nog_beslissen')") +
+        opt('&#128683;', 'var(--o-reds)', 'No-show', 'Kwam niet opdagen. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('no_show')") +
+        opt('&#128533;', '#f0f1f4', 'Geen interesse', 'Schrijf op waarom. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_interesse')");
+      return scrim('Call met ' + esc(c.naam) + ' afronden', 'Wat is er uit dit gesprek gekomen?', b);
+    }
+
+    const u = m.uitkomst;
+    if (u === 'klant_geworden') {
+      return scrim('Klant geworden', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="info">Mooi. Er komt <b>geen taak</b> bij — deze is klaar.<br><br>' +
+        'De afspraak zelf blijft staan zoals hij staat; die administratie loopt via het afspraakscherm en verandert hier niet.</div>' +
+        '<button class="obtn" style="width:100%;margin-top:12px" onclick="window.__opvSluit()">Sluiten</button>');
+    }
+    if (u === 'geen_interesse') {
+      return scrim('Geen interesse', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="info">Er komt <b>geen taak</b> bij. Schrijf wel op waarom, dan weet de volgende het.</div>' +
+        '<textarea id="opv-cn" rows="3" placeholder="Waarom haakt hij af?"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'geen_interesse\')">Vastleggen</button>');
+    }
+    if (u === 'no_show') {
+      return scrim('No-show', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+        '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call.</div>' +
+        '<textarea id="opv-cn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'no_show\')">Zet terug in de lijst</button>');
+    }
+    // wil_nog_beslissen
+    return scrim('Wil nog beslissen', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+      '<div class="ronde">Op welke dag bel je hem terug?</div>' +
+      '<input type="date" id="opv-cd" value="' + dagPlus(vandaag(), 2) + '">' +
+      '<div class="ronde" style="margin-top:12px">Waar twijfelt hij over? Zonder die zin begint het volgende gesprek weer bij nul.</div>' +
+      '<textarea id="opv-cn" rows="3" placeholder="Bijvoorbeeld: wil het eerst met zijn vrouw bespreken"></textarea>' +
+      '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'wil_nog_beslissen\')">Zet in de lijst</button>');
+  }
+
   function modalHtml() {
     const m = _ui.modal;
     if (!m) return '';
+
+    // Eerst wat geen taak nodig heeft, en pas daarna de taak-guard. Andersom
+    // sneuvelen deze twee stil op een taak die er nooit had moeten zijn.
+    if (MODAL_ZONDER_TAAK.has(m.soort)) return callModalHtml(m);
+
     const t = zoekTaak(m.taakId);
     if (!t) return '';
     let body = '';
@@ -1847,46 +1915,6 @@
     }
 
     // ── Fase 3a · een call afronden ────────────────────────────────────────
-    if (m.soort === 'call-afrond' || m.soort === 'call-uitkomst') {
-      const c = (_calls.data || [])[m.callIndex];
-      if (!c) return '';
-      if (m.soort === 'call-afrond') {
-        const b =
-          opt('&#127881;', 'var(--o-grns)', 'Klant geworden', 'Klaar. Er komt geen taak bij.', "window.__opvCallUitkomst('klant_geworden')") +
-          opt('&#129300;', 'var(--o-ambs)', 'Wil nog beslissen', 'Kies een dag en schrijf op waar hij over twijfelt.', "window.__opvCallUitkomst('wil_nog_beslissen')") +
-          opt('&#128683;', 'var(--o-reds)', 'No-show', 'Kwam niet opdagen. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('no_show')") +
-          opt('&#128533;', '#f0f1f4', 'Geen interesse', 'Schrijf op waarom. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_interesse')");
-        return scrim('Call met ' + esc(c.naam) + ' afronden', 'Wat is er uit dit gesprek gekomen?', b);
-      }
-
-      const u = m.uitkomst;
-      if (u === 'klant_geworden') {
-        return scrim('Klant geworden', esc(c.naam) + ' &middot; ' + esc(c.tijd),
-          '<div class="info">Mooi. Er komt <b>geen taak</b> bij — deze is klaar.<br><br>' +
-          'De afspraak zelf blijft staan zoals hij staat; die administratie loopt via het afspraakscherm en verandert hier niet.</div>' +
-          '<button class="obtn" style="width:100%;margin-top:12px" onclick="window.__opvSluit()">Sluiten</button>');
-      }
-      if (u === 'geen_interesse') {
-        return scrim('Geen interesse', esc(c.naam) + ' &middot; ' + esc(c.tijd),
-          '<div class="info">Er komt <b>geen taak</b> bij. Schrijf wel op waarom, dan weet de volgende het.</div>' +
-          '<textarea id="opv-cn" rows="3" placeholder="Waarom haakt hij af?"></textarea>' +
-          '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'geen_interesse\')">Vastleggen</button>');
-      }
-      if (u === 'no_show') {
-        return scrim('No-show', esc(c.naam) + ' &middot; ' + esc(c.tijd),
-          '<div class="info">Hij komt <b>vandaag meteen terug</b> in je takenlijst, met reden no-show call.</div>' +
-          '<textarea id="opv-cn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
-          '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'no_show\')">Zet terug in de lijst</button>');
-      }
-      // wil_nog_beslissen
-      return scrim('Wil nog beslissen', esc(c.naam) + ' &middot; ' + esc(c.tijd),
-        '<div class="ronde">Op welke dag bel je hem terug?</div>' +
-        '<input type="date" id="opv-cd" value="' + dagPlus(vandaag(), 2) + '">' +
-        '<div class="ronde" style="margin-top:12px">Waar twijfelt hij over? Zonder die zin begint het volgende gesprek weer bij nul.</div>' +
-        '<textarea id="opv-cn" rows="3" placeholder="Bijvoorbeeld: wil het eerst met zijn vrouw bespreken"></textarea>' +
-        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'wil_nog_beslissen\')">Zet in de lijst</button>');
-    }
-
     if (m.soort === 'historiek') {
       body = '<ul class="tl">' + ((t.pogingen || []).map((p) =>
         '<li><span class="d">' + nl(iso(p.tijdstip)) + ' ' + uur(p.tijdstip) + '</span><span>' +
@@ -2243,6 +2271,28 @@
   // tegen dit bestand zelf — zelfde afspraak als bij de wa-timers hierboven.
   // De aanmeldkaart: de wakker-dag moet gelijk blijven aan die van de server,
   // en de badge moet in ronde B laten zien dat er in ronde A bevestigd is.
+  /**
+   * Voor tests/opvolging-call-modal.test.js: de vensters van buitenaf openen en
+   * de opbrengst nakijken, zonder een browser.
+   *
+   * Dit is er omdat de fout die het moet vangen onzichtbaar was. De vier
+   * uitkomsten van een zoomcall hebben nooit gewerkt: modalHtml() begon met een
+   * taak-guard, een call heeft geen taak, en dus kwam er een lege string uit.
+   * Geen console-fout, geen venster, niets. Alleen door de echte functie te
+   * draaien met een echte _ui.modal is dat te zien.
+   *
+   * Bewust smal: de twee zetters vullen de caches die de vensters lezen, en de
+   * rest gaat via de gewone handlers op window, zodat de test dezelfde weg
+   * aflegt als een klik.
+   */
+  window.__opvModalHaak = {
+    modalHtml,
+    zetCalls: (lijst) => { _calls.key = vandaag(); _calls.data = lijst || []; _calls.error = null; },
+    zetTaken: (lijst) => { _live.taken.key = vandaag(); _live.taken.data = { taken: lijst || [], wacht: [] }; },
+    huidigeModal: () => _ui.modal,
+    MODAL_ZONDER_TAAK,
+  };
+
   window.__opvAanmeldHelpers = { WAKKER_DAGEN, bevestigdBadge, taakKaart, evGroepKop, kortePlaats, eventKopTekst };
 
   window.__opvWeekHelpers = {
