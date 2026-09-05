@@ -64,6 +64,10 @@ app.get('/status', auth, (_req, res) => {
     // Hoeveel gesprekken we onder een andere identiteit dan een telefoonnummer
     // kennen. Alleen een aantal — de kaart zelf blijft binnen.
     nummerkaart    : wa.nummerkaartAantal(),
+    // De LID-kaart uit de leadlijst, en wat de geïnstalleerde whatsapp-web.js
+    // blijkt te kunnen. Aantallen en booleans; nooit een nummer of een LID.
+    lidkaart       : wa.lidkaartStatus(),
+    lid_kunde      : wa.lidKunde(),
   });
 });
 
@@ -116,6 +120,19 @@ app.get('/historiek', auth, async (req, res) => {
     }
     console.error('[brug] historiek ophalen faalde:', e?.message || e);
     res.status(500).json({ error: 'Ophalen mislukt' });
+  }
+});
+
+// De LID-kaart nu opnieuw opbouwen, zonder te wachten op de volgende ronde.
+// Handig direct na een herstart of nadat er leads bijgekomen zijn. Geeft alleen
+// aantallen terug.
+app.post('/lidkaart/herbouw', auth, async (_req, res) => {
+  try {
+    await wa.herbouwLidkaart();
+    res.json({ ok: true, lidkaart: wa.lidkaartStatus(), lid_kunde: wa.lidKunde() });
+  } catch (e) {
+    console.error('[brug] lidkaart herbouwen faalde:', e?.message || e);
+    res.status(500).json({ error: 'Herbouwen mislukt' });
   }
 });
 

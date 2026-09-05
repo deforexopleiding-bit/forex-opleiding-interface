@@ -17,6 +17,7 @@ import { normaliseerNummer, naarChatId } from './nummers.js';
 // testen is zonder puppeteer of een gekoppelde telefoon.
 import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep } from './gebeurtenis.js';
 import { maakTellers, jidVorm } from './tellers.js';
+import { maakLidkaart } from './lidkaart.js';
 
 const { Client, LocalAuth } = pkg;
 
@@ -100,6 +101,72 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // is hij leeg en vult hij zich vanzelf weer bij het eerste bericht.
   const nummerkaart = new Map();
 
+  // ── De LID-kaart, opgebouwd uit de leadlijst ──────────────────────────────
+  // Zie lib/lidkaart.js. Kort: we vragen per BEKEND nummer welke identiteit
+  // WhatsApp eraan hangt, in plaats van per binnenkomend bericht te vragen wie
+  // de afzender is. Dat laatste vroeg ook iets op over mensen die géén lead
+  // zijn; deze kant op wordt er niets gevraagd over wie niet op de lijst staat.
+  const lidkaart = maakLidkaart();
+  let lidTimer = null;
+
+  // Wat kan de whatsapp-web.js die hier daadwerkelijk geïnstalleerd staat?
+  // Niet aannemen: package.json zegt ^1.26.0, en een minor erbij kan andere
+  // Store-modules meebrengen. Dit wordt na 'ready' één keer afgetast en in
+  // /status gezet, zodat zichtbaar is waaróm een weg wel of niet werkt.
+  const kunde = { onderzocht: false, get_current_lid: null, wid_to_jid: null, query_exist: null, fout: null };
+
+  async function tastKundeAf() {
+    if (kunde.onderzocht) return kunde;
+    try {
+      const uit = await client.pupPage.evaluate(() => ({
+        get_current_lid: typeof window.Store?.LidUtils?.getCurrentLid === 'function',
+        wid_to_jid     : typeof window.Store?.WidToJid?.widToUserJid === 'function',
+        query_exist    : typeof window.Store?.QueryExist === 'function',
+      }));
+      Object.assign(kunde, uit, { onderzocht: true, fout: null });
+    } catch (e) {
+      kunde.onderzocht = true;
+      kunde.fout = 'aftasten faalde';
+    }
+    return kunde;
+  }
+
+  /**
+   * De LID die WhatsApp aan dit telefoonnummer hangt.
+   *
+   * Store.LidUtils.getCurrentLid(wid) is de enige richting die deze library
+   * biedt: nummer → LID. Een omgekeerde vertaling (LID → nummer) bestaat er
+   * niet, en dat is precies waarom de eerste poging via getContactById het LID
+   * opnieuw teruggaf in plaats van een telefoonnummer.
+   */
+  async function zoekLidVoor(nummer) {
+    const chatId = naarChatId(nummer);
+    if (!chatId) return null;
+    await tastKundeAf();
+    if (!kunde.get_current_lid) return null;
+    return client.pupPage.evaluate((id) => {
+      try {
+        const wid = window.Store.WidFactory.createWid(id);
+        const lid = window.Store.LidUtils.getCurrentLid(wid);
+        if (!lid) return null;
+        return typeof lid === 'string' ? lid : (lid._serialized || lid.user || null);
+      } catch (_) { return null; }
+    }, chatId);
+  }
+
+  /** De kaart opnieuw opbouwen. Fail-soft: een fout laat de vorige kaart staan. */
+  async function bouwLidkaart() {
+    if (!staat.verbonden) return;
+    try {
+      const nummers = typeof leadlijst.nummers === 'function' ? leadlijst.nummers() : [];
+      const uit = await lidkaart.bouw(nummers, zoekLidVoor);
+      // Alleen aantallen. Nooit een nummer of een LID.
+      console.log('[brug] lidkaart:', uit.gevonden, 'van', uit.bekeken, 'nummers gekoppeld');
+    } catch (e) {
+      console.warn('[brug] lidkaart opbouwen faalde:', e?.message || e);
+    }
+  }
+
   const isTelefoonJid = (jid) => typeof jid === 'string' && /@(c\.us|s\.whatsapp\.net)$/i.test(jid);
 
   function onthoud(nummer, jid) {
@@ -120,14 +187,31 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     if (isTelefoonJid(jid)) {
       const n = normaliseerNummer(jid);
       onthoud(n, jid);
-      tellers.oplossing('jid');
+      tellers.oplossing('jid', n);
       return n;
     }
+
+    // Eerst de kaart uit de leadlijst. Die is opgebouwd uit nummers die we al
+    // mogen kennen, kost geen oproep per bericht, en is de enige weg die een
+    // LID écht naar een telefoonnummer vertaalt — WhatsApp biedt alleen de
+    // richting nummer → LID, niet omgekeerd.
+    const cijfers = String(jid).split('@')[0].replace(/\D/g, '');
+    const viaKaart = lidkaart.nummerVoorLid(cijfers);
+    if (viaKaart) {
+      onthoud(viaKaart, jid);
+      tellers.oplossing('lidkaart', viaKaart);
+      return viaKaart;
+    }
+
+    // Terugval: vragen wie dit is. Die weg gaf bij een LID het LID terug in
+    // plaats van een nummer — de teller opgelost_vorm laat dat zien — maar hij
+    // blijft staan voor identiteiten die géén LID zijn en die we hier nog niet
+    // kennen.
     try {
       const contact = await client.getContactById(jid);
       const kandidaat = contact?.number || contact?.id?.user || null;
       const n = normaliseerNummer(kandidaat);
-      if (n) { onthoud(n, jid); tellers.oplossing('contact'); return n; }
+      if (n) { onthoud(n, jid); tellers.oplossing('contact', n); return n; }
       tellers.oplossing('contact_zonder_nummer');
     } catch (e) {
       // Geen tekst, geen jid in het log — alleen dát het niet lukte.
@@ -140,7 +224,14 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   /** De chat waar dit nummer onder bekend staat, of de gewone @c.us-vorm. */
   function chatIdVoor(nummer) {
     const n = normaliseerNummer(nummer);
-    return (n && nummerkaart.get(n)) || naarChatId(nummer);
+    if (!n) return naarChatId(nummer);
+    // Wat we bij een echt bericht gezien hebben is het meest betrouwbaar; daarna
+    // de LID uit de kaart; en anders de gewone @c.us-vorm.
+    const gezien = nummerkaart.get(n);
+    if (gezien) return gezien;
+    const lid = lidkaart.lidVoorNummer(n);
+    if (lid) return lid + '@lid';
+    return naarChatId(nummer);
   }
 
   client.on('qr', async (qr) => {
@@ -162,6 +253,15 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     staat.nummer = normaliseerNummer(client.info?.wid?.user || client.info?.me?.user || '');
     raakAan();
     console.log('[brug] verbonden als', staat.nummer || '(nummer onbekend)');
+    // De LID-kaart hoort er te staan vóór het eerste bericht binnenkomt, en
+    // daarna mee te lopen met de leadlijst: een nieuwe lead heeft ook een
+    // koppeling nodig. Fail-soft — mislukt het, dan blijft de terugval per
+    // bericht gewoon werken.
+    bouwLidkaart();
+    if (!lidTimer) {
+      lidTimer = setInterval(bouwLidkaart, cfg.nummersIntervalMs);
+      if (typeof lidTimer.unref === 'function') lidTimer.unref();
+    }
   });
 
   client.on('authenticated', () => { staat.laatsteFout = null; raakAan(); });
@@ -291,6 +391,12 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     tellers: () => tellers.status(),
     /** Hoeveel nummer↔jid-koppelingen we geleerd hebben. Alleen het aantal. */
     nummerkaartAantal: () => nummerkaart.size,
+    /** De LID-kaart: aantallen en een tijdstip, nooit de koppelingen zelf. */
+    lidkaartStatus: () => lidkaart.status(),
+    /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. */
+    lidKunde: () => ({ ...kunde }),
+    /** Handmatig opnieuw opbouwen, voor de /lidkaart-route. */
+    herbouwLidkaart: bouwLidkaart,
     start() {
       console.log('[brug] WhatsApp-client starten…');
       client.initialize().catch((e) => {
@@ -298,7 +404,10 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
         console.error('[brug]', staat.laatsteFout);
       });
     },
-    async stop() { try { await client.destroy(); } catch (_) {} },
+    async stop() {
+      if (lidTimer) { clearInterval(lidTimer); lidTimer = null; }
+      try { await client.destroy(); } catch (_) {}
+    },
 
     /**
      * Versturen. Ook hier geldt het filter: een nummer dat niet op de leadlijst
@@ -343,7 +452,15 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // Eerst de chat waar we dit nummer echt gezien hebben (kan een LID zijn),
       // daarna pas de gewone @c.us-vorm. Andersom zou een LID-gesprek altijd
       // 'geen gesprek gevonden' opleveren terwijl het er gewoon is.
-      const kandidaten = [...new Set([chatIdVoor(nummer), naarChatId(nummer)].filter(Boolean))];
+      // Alle vormen waaronder dit gesprek kan staan, in volgorde van
+      // betrouwbaarheid: wat we bij een echt bericht zagen, de LID uit de
+      // kaart, en de gewone @c.us-vorm.
+      const lid = lidkaart.lidVoorNummer(normaliseerNummer(nummer));
+      const kandidaten = [...new Set([
+        chatIdVoor(nummer),
+        lid ? lid + '@lid' : null,
+        naarChatId(nummer),
+      ].filter(Boolean))];
       if (kandidaten.length === 0) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
 
       const n = Math.max(1, Math.min(200, Number(limiet) || 50));

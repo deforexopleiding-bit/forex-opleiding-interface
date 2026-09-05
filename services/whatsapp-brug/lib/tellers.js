@@ -36,7 +36,7 @@ export const EVENT_TYPES = ['message', 'message_create', 'message_ack'];
 export const REDENEN = ['niet_van_ons', 'niet_op_leadlijst', 'groep', 'geen_ack_soort', 'onbruikbaar'];
 
 /** Hoe de identiteit van de tegenpartij eruitzag toen we hem lieten vallen. */
-export const OPLOS_WEGEN = ['jid', 'contact', 'contact_zonder_nummer', 'mislukt', 'geen_jid'];
+export const OPLOS_WEGEN = ['jid', 'lidkaart', 'contact', 'contact_zonder_nummer', 'mislukt', 'geen_jid'];
 
 /**
  * De VORM van een jid, zonder de jid zelf.
@@ -74,6 +74,10 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
   const vormen = {};
   // Hoe we aan het nummer kwamen dat we uiteindelijk gefilterd hebben.
   const opgelost = Object.fromEntries(OPLOS_WEGEN.map((w) => [w, 0]));
+  // En hoe LANG dat nummer was. Elf cijfers is een Belgisch telefoonnummer;
+  // vijftien is opnieuw een LID. Dat onderscheid is het verschil tussen 'de
+  // oplossing werkte' en 'de teller zei succes terwijl er niets vertaald is'.
+  const opgelostVorm = {};
   let laatsteGenegeerd = null;   // { type, reden, vorm, tijd } — geen inhoud
 
   const geldigType  = (t) => EVENT_TYPES.includes(t);
@@ -96,8 +100,21 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
       laatsteGenegeerd = { type, reden, vorm, tijd: nu() };
     },
 
-    /** Langs welke weg we aan het nummer kwamen. */
-    oplossing(weg) { if (OPLOS_WEGEN.includes(weg)) opgelost[weg] += 1; },
+    /**
+     * Langs welke weg we aan het nummer kwamen, en hoe lang dat nummer was.
+     *
+     * `nummer` wordt NIET bewaard — alleen zijn cijferlengte, dezelfde truc als
+     * bij jidVorm(). Zonder die lengte kan een teller 'contact: 3' melden
+     * terwijl er drie keer een LID uit kwam, en dan meet je je eigen aanname.
+     */
+    oplossing(weg, nummer) {
+      if (!OPLOS_WEGEN.includes(weg)) return;
+      opgelost[weg] += 1;
+      if (nummer === undefined) return;
+      const lengte = String(nummer == null ? '' : nummer).replace(/\D/g, '').length;
+      const sleutel = weg + '/' + lengte;
+      opgelostVorm[sleutel] = (opgelostVorm[sleutel] || 0) + 1;
+    },
 
     /** Hij ging door naar het CRM. */
     liet(type) { if (geldigType(type)) doorgelaten[type] += 1; },
@@ -125,6 +142,7 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
         ack_codes  : { ...ackCodes },
         vormen     : { ...vormen },
         opgelost   : { ...opgelost },
+        opgelost_vorm: { ...opgelostVorm },
         laatste_genegeerd: laatsteGenegeerd ? { ...laatsteGenegeerd } : null,
       };
     },
