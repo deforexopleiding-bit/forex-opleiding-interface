@@ -2,6 +2,10 @@
 //
 // Masterclass-aanmeldingen in Daves takenlijst. Draait elk kwartier.
 //
+// WELKE EVENTS: die met niveau 'masterclass' (events.niveau, dezelfde slug als
+// in de keuzelijst boven de eventlijst). Het venster van -3 tot +120 dagen is
+// een begrenzing eromheen, geen selectie.
+//
 // De instroom hangt aan de DEELNEMERRIJ met status 'aangemeld', niet aan een
 // inschrijf-endpoint. Er zijn drie manieren waarop zo'n rij ontstaat — het
 // GHL-formulier, de Webflow-vragenlijst, en een verplaatsing via
@@ -25,7 +29,9 @@
 // Schrijft uitsluitend in opvolging_taken. event_attendees wordt alleen gelezen.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { bepaalTaakActie, WAKKER_DAGEN_VOOR_EVENT, dagInZone, dagPlus } from './_lib/opvolging-aanmelding.js';
+import {
+  bepaalTaakActie, WAKKER_DAGEN_VOOR_EVENT, dagInZone, dagPlus, MASTERCLASS_NIVEAU,
+} from './_lib/opvolging-aanmelding.js';
 
 const ABORT_MS = 25_000;
 // Ruim genomen: alles wat nog moet komen plus wat net geweest is, zodat een
@@ -49,7 +55,9 @@ export default async function handler(req, res) {
 
   const summary = {
     vandaag,
+    niveau           : MASTERCLASS_NIVEAU,
     events_bekeken   : 0,
+    events_ander_niveau: 0,
     deelnemers        : 0,
     aangemaakt        : 0,
     wakker_gemaakt    : 0,
@@ -61,24 +69,59 @@ export default async function handler(req, res) {
 
   try {
     // ── Welke events tellen mee? ─────────────────────────────────────────────
-    // Bewust GEEN filter op niveau of titel. `event_niveau_options` kent alleen
-    // 'basis' en 'gevorderd'; er is geen slug die masterclasses afbakent. Op de
-    // titel filteren zou op een gok neerkomen, en een gok die te streng is laat
-    // mensen stil buiten de lijst vallen. Liever iedereen erin dan iemand eruit.
+    // Het NIVEAU is de selectie, niet de titel en niet het venster. `niveau` is
+    // een kolom op events met een foreign key naar event_niveau_options(slug),
+    // en dat is precies waar de keuzelijst boven de eventlijst uit gevuld wordt.
+    // Op productie staat daar 'masterclass' in.
+    //
+    // Vandaag verandert dit niets — er is maar één niveau, dus dezelfde events
+    // komen eruit. Het gaat om de dag dat er een tweede soort event bijkomt:
+    // dan hoort dat niet vanzelf in Daves masterclass-lijst te vallen.
+    //
+    // Het venster blijft eromheen staan als begrenzing, niet als selectie: ver
+    // in de toekomst is nog niets te bellen, en drie dagen terug is genoeg om
+    // een annulering vlak na het event de kaart nog te laten sluiten.
     const van = dagPlus(vandaag, -VENSTER_TERUG_DAGEN);
     const tot = dagPlus(vandaag, VENSTER_VOORUIT_DAGEN);
     const { data: events, error: evErr } = await supabaseAdmin
       .from('events')
-      .select('id, title, location, starts_at, status')
+      .select('id, title, location, starts_at, status, niveau')
+      .eq('niveau', MASTERCLASS_NIVEAU)
       .gte('starts_at', `${van}T00:00:00Z`)
       .lte('starts_at', `${tot}T23:59:59Z`)
       .neq('status', 'archived')
       .order('starts_at', { ascending: true })
       .limit(300);
     if (evErr) throw new Error('events lezen: ' + evErr.message);
+
+    // Wat het filter buiten de deur houdt, tellen we — anders is een event
+    // zonder niveau niet van een event zonder aanmeldingen te onderscheiden.
+    // `events.niveau` mag NULL zijn (api/events-create.js maakt het veld
+    // optioneel), en zo'n event levert stilzwijgend nul kaarten op. Deze regel
+    // in het log is het verschil tussen "niemand aangemeld" en "iemand is het
+    // niveau vergeten". Fail-soft: mislukt de telling, dan draait de rest door.
+    try {
+      const { count, error: telErr } = await supabaseAdmin
+        .from('events')
+        .select('id', { count: 'exact', head: true })
+        .or(`niveau.is.null,niveau.neq.${MASTERCLASS_NIVEAU}`)
+        .gte('starts_at', `${van}T00:00:00Z`)
+        .lte('starts_at', `${tot}T23:59:59Z`)
+        .neq('status', 'archived');
+      if (telErr) throw new Error(telErr.message);
+      summary.events_ander_niveau = count || 0;
+      if (summary.events_ander_niveau > 0) {
+        console.log('[cron-opvolging-aanmeldingen] ' + summary.events_ander_niveau
+          + ' event(s) in het venster hebben niet het niveau ' + MASTERCLASS_NIVEAU
+          + ' en blijven buiten de opvolging');
+      }
+    } catch (e) {
+      console.warn('[cron-opvolging-aanmeldingen] niveau-telling faalde:', e?.message || e);
+    }
     if (!events || events.length === 0) {
       summary.duration_ms = Date.now() - startedAt;
-      console.log('[cron-opvolging-aanmeldingen] geen events in het venster');
+      console.log('[cron-opvolging-aanmeldingen] geen events met niveau '
+        + MASTERCLASS_NIVEAU + ' in het venster');
       return res.status(200).json({ ok: true, summary });
     }
     summary.events_bekeken = events.length;

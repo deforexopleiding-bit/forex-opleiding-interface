@@ -17,10 +17,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   bepaalTaakActie, dueVoorAanmelding, dagPlus, dagenTussen, dagInZone,
   badgeVoorEvent, isEchtContact, heeftEchtContact, drempelGeldt,
-  WAKKER_DAGEN_VOOR_EVENT,
+  WAKKER_DAGEN_VOOR_EVENT, MASTERCLASS_NIVEAU,
 } from '../api/_lib/opvolging-aanmelding.js';
 
 // 5 september 2026, 10:00 Amsterdamse tijd (zomertijd, UTC+2).
@@ -229,4 +230,27 @@ test('ontbrekende delen vallen weg zonder rare tekens', () => {
   assert.equal(badgeVoorEvent(ev({ title: null, location: null })), '20 sep 19:00');
   assert.equal(badgeVoorEvent({ starts_at: 'ooit' }), null);
   assert.equal(badgeVoorEvent(null), null);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WELKE EVENTS TELLEN MEE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('het niveau is de slug die de eventmodule gebruikt', () => {
+  // De keuzelijst boven de eventlijst wordt gevuld uit event_niveau_options
+  // (is_active) en events.niveau verwijst naar diezelfde slug. Op productie is
+  // dat 'masterclass'. De seed in 2026-06-11-events-f1-foundation.sql noemt
+  // 'basis' en 'gevorderd' — dat is de begintoestand, niet de huidige.
+  assert.equal(MASTERCLASS_NIVEAU, 'masterclass');
+});
+
+test('de cron selecteert events op dat niveau', () => {
+  // Zonder deze test kan het filter er ongemerkt uit vallen bij een refactor,
+  // en dan stromen alle events weer binnen zodra er een tweede soort bestaat —
+  // zichtbaar pas als Dave mensen belt die niet in zijn lijst horen.
+  const bron = readFileSync(new URL('../api/cron-opvolging-aanmeldingen.js', import.meta.url), 'utf8');
+  assert.match(bron, /\.eq\('niveau',\s*MASTERCLASS_NIVEAU\)/,
+    'de events-query hoort op MASTERCLASS_NIVEAU te filteren');
+  assert.match(bron, /events_ander_niveau/,
+    'wat het filter buiten de deur houdt hoort geteld te worden, anders is een vergeten niveau onzichtbaar');
 });
