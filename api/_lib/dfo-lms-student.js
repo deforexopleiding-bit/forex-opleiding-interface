@@ -32,20 +32,38 @@ const CRM_KOLOMMEN =
   'id, customer_id, traject_id, status, start_date, mentor_user_id, ' +
   'dfo_lms_student_id, dfo_lms_provisioned, dfo_lms_provisioned_at, dfo_lms_provision_error';
 
-// hlms_student.product_soort — vocabulaire aan LMS-kant is niet vastgelegd in
-// dit repo. We sturen het traject-type door (bv. 'membership' / '1op1') met
-// terugval op de traject-key. Blijkt er aan LMS-kant een vaste woordenlijst
-// of CHECK te staan, dan is dit de enige plek die aangepast hoeft te worden.
-function bepaalProductSoort(traject) {
-  const t = traject || {};
-  const v = (t.type || t.key || '').toString().trim();
-  return v || null;
+// hlms_student.product_soort — STRIKTE woordenlijst. De kolom is aan LMS-kant
+// gewoon `text` zonder CHECK, dus de databank houdt ons NIET tegen. De
+// studentkant (trajectstand.ts) kent maar drie uitkomsten: 'mentorship',
+// 'membership' en 'onbekend'. Alles wat niet letterlijk een van de eerste
+// twee is, valt daar stil in 'onbekend' — en dan ziet een betalende klant
+// een scherm dat zegt dat zijn traject niet bekend is.
+//
+// Daarom: geen terugval op traject.key, geen doorgeven van het ruwe type.
+// Alleen deze tabel. Staat een traject er niet in, dan faalt de aanmaak
+// luidruchtig (zie provisionDfoLmsStudent) in plaats van stil een derde
+// waarde weg te schrijven. Een zichtbare fout op één onboarding is
+// goedkoper dan een student die niet weet wat hij gekocht heeft.
+//
+// Bron van de CRM-kant: WIZARD_FLOW_TYPES in api/_lib/onboarding-wizard-
+// default.js — onboarding_trajecten.type is canoniek '1op1' of 'membership'.
+const PRODUCT_SOORT_MAP = Object.freeze({
+  '1op1':       'mentorship',
+  '1-op-1':     'mentorship',
+  'mentorship': 'mentorship',
+  'membership': 'membership',
+});
+
+/** @returns {string|null} 'mentorship' | 'membership', of null bij onbekend. */
+export function bepaalProductSoort(traject) {
+  const ruw = String(traject?.type || '').trim().toLowerCase();
+  return PRODUCT_SOORT_MAP[ruw] || null;
 }
 
 // Aantal sessies → hlms_student.calls_totaal. `calls` is het veld dat de rest
 // van het CRM toont (zie api/onboarding-detail.js); alpha_calls_total is de
 // Alpha-specifieke variant en dient als terugval.
-function bepaalCallsTotaal(traject) {
+export function bepaalCallsTotaal(traject) {
   const t = traject || {};
   for (const v of [t.calls, t.alpha_calls_total]) {
     const n = Number(v);
@@ -259,6 +277,18 @@ export async function provisionDfoLmsStudent(onboardingId) {
     return { ok: false, error: msg };
   }
 
+  // product_soort MOET kloppen — zie PRODUCT_SOORT_MAP. Liever hier stoppen
+  // dan een waarde wegschrijven die de studentkant als 'onbekend' toont.
+  const productSoort = bepaalProductSoort(traject);
+  if (!productSoort) {
+    const msg = 'Onbekend traject-type ' + JSON.stringify(traject.type || null)
+      + ' (traject ' + (traject.key || traject.id) + ') — kan product_soort niet bepalen. '
+      + 'Toegestaan: ' + Object.keys(PRODUCT_SOORT_MAP).join(' / ')
+      + '. Vul PRODUCT_SOORT_MAP aan in api/_lib/dfo-lms-student.js.';
+    await schrijfFout(onboardingId, msg);
+    return { ok: false, error: msg };
+  }
+
   // 4) Mentor opzoeken. Nooit blokkerend: geen match → leeg laten + melden.
   let mentorId = null;
   let mentorWarning = null;
@@ -315,9 +345,11 @@ export async function provisionDfoLmsStudent(onboardingId) {
       achternaam       : String(customer.last_name  || '').trim() || null,
       email,
       telefoon         : String(customer.phone || '').trim() || null,
-      product_soort    : bepaalProductSoort(traject),
-      traject_maanden  : Number.isFinite(Number(traject.duur_maanden))
-        ? Number(traject.duur_maanden) : null,
+      product_soort    : productSoort,
+      // Number(null) is 0, dus expliciet op "positief getal" toetsen —
+      // anders belandt een lege duur als 0 in het LMS.
+      traject_maanden  : (Number(traject.duur_maanden) > 0)
+        ? Math.floor(Number(traject.duur_maanden)) : null,
       start_datum      : startIso,
       eind_datum       : eindIso,
       calls_totaal     : bepaalCallsTotaal(traject),
@@ -338,6 +370,15 @@ export async function provisionDfoLmsStudent(onboardingId) {
         console.warn('[dfo-lms-student] unieke index sloeg aan — bestaande rij overnemen');
         const opnieuw = await zoekBestaandeStudent(lms, { onboardingId, email });
         if (opnieuw.rij) {
+          // Zelfde bescherming als hierboven: een rij die aan een ANDERE
+          // onboarding hangt nemen we niet over, ook niet via deze tak.
+          if (opnieuw.rij.crm_onboarding_id
+              && opnieuw.rij.crm_onboarding_id !== onboardingId) {
+            const msg = 'Student met dit e-mailadres hangt al aan onboarding '
+              + opnieuw.rij.crm_onboarding_id + ' — handmatig nakijken';
+            await schrijfFout(onboardingId, msg);
+            return { ok: false, error: msg };
+          }
           if (!opnieuw.rij.crm_onboarding_id) {
             await lms.from('hlms_student')
               .update({ crm_onboarding_id: onboardingId })
