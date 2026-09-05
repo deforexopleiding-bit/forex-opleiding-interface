@@ -190,7 +190,7 @@ export function badgeVoorEvent(event) {
  * een plaatsnaam en mag mee; al het andere valt weg. Weglaten is veilig — de
  * badge zegt dan titel plus moment, en dat klopt altijd.
  */
-function kortePlaats(location) {
+export function kortePlaats(location) {
   const s = String(location == null ? '' : location).trim();
   if (!s || s.length > 24) return '';
   if (/[0-9|,;]/.test(s)) return '';
