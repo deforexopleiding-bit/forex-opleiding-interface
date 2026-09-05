@@ -641,11 +641,37 @@
 .opv .wk{display:flex;gap:8px;margin:0 0 14px;flex-wrap:wrap}
 .opv .wkbar{display:flex;align-items:stretch;gap:8px;margin:0 0 14px}
 .opv .wkbar .wkmid{flex:1;min-width:0}
-.opv .wkbar .wk{margin:0}
+/* Zes tegels naast elkaar, ook op een smal scherm.
+   Het was een flexrij met min-width:104px per tegel en flex-wrap; bij zes
+   tegels paste dat niet meer, en dan viel zaterdag op een eigen regel over de
+   volle breedte terwijl de andere vijf boven elkaar kwamen te staan. Een grid
+   met zes gelijke kolommen kan niet afbreken: minmax(0,1fr) laat elke kolom
+   krimpen in plaats van te wrappen. De min-width moet daarvoor expliciet terug
+   naar 0, anders houdt de tegel zichzelf breed en loopt het grid over. */
+.opv .wkbar .wk{margin:0;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.opv .wkbar .wkd{flex:none;min-width:0;overflow:hidden}
+/* De vandaag-markering is een los element, zodat hij op een smal scherm kan
+   verdwijnen zonder de datum mee te nemen. De tegel zelf verandert nergens van
+   vorm: 'nu' kleurt alleen, 'on' legt een ring om de rand die geen ruimte
+   inneemt, en het grid geeft alle zes dezelfde breedte en hoogte. */
+.opv .wkd .l .vd{color:var(--o-acc);font-weight:700}
+.opv .wkd .l .d{white-space:nowrap}
+@media (max-width:1000px){
+  .opv .wkbar{gap:6px}
+  .opv .wkbar .wk{gap:6px}
+  .opv .wkbar .wkd{padding:8px 9px}
+  .opv .wkd .l{font-size:10.5px}
+  .opv .wkd .c{font-size:15px}
+}
+@media (max-width:820px){
+  .opv .wkd .l .vd{display:none}
+  .opv .wkd .c small{display:none}
+  .opv .wkbar .wkd{padding:7px 7px}
+}
 .opv .obtn.wkp{display:flex;align-items:center;justify-content:center;min-width:34px;font-size:15px;line-height:1;padding:0 10px}
 .opv .wklbl{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:650;color:var(--o-muted);margin:0 0 6px 2px}
 .opv .wknu{border:0;background:none;padding:0;font:inherit;font-size:11.5px;font-weight:600;color:var(--o-acc);cursor:pointer;text-decoration:underline}
-.opv .wkd{flex:1;min-width:104px;background:#fff;border:1px solid var(--o-line);border-radius:12px;padding:9px 11px;cursor:pointer;font-family:inherit;text-align:left;box-shadow:var(--o-sh);display:flex;flex-direction:column;gap:2px}
+.opv .wkd{flex:1;min-width:0;background:#fff;border:1px solid var(--o-line);border-radius:12px;padding:9px 11px;cursor:pointer;font-family:inherit;text-align:left;box-shadow:var(--o-sh);display:flex;flex-direction:column;gap:2px}
 .opv .wkd .l{font-size:11.5px;color:var(--o-muted);font-weight:600}
 .opv .wkd .c{font-size:17px;font-weight:750}
 .opv .wkd .c small{font-size:11.5px;font-weight:600;color:var(--o-muted)}
@@ -1272,6 +1298,42 @@
   const AANMELD_REDEN = 'aanmelding';
   const isAanmelding = (t) => t && t.reden === AANMELD_REDEN;
 
+  /**
+   * De plaats, maar alleen als het er één is.
+   *
+   * `events.location` is één vrij tekstveld: er staat soms een stad in ('Gent')
+   * en soms een volledig postadres ('Belgie - Deinsesteenweg 108 | 9031 Drongen
+   * (Gent)'). Dat tweede hoort niet in een kop — dan leest de titel als
+   * 'Forex Masterclass Gent · Belgie - Deinsesteenweg 108 | 9031 Drongen (Gent)'
+   * en is de eventnaam weg.
+   *
+   * De stad uit zo'n adres vissen is een parser bouwen op één voorbeeld. Dus
+   * andersom: kort en zonder adres-kenmerken (cijfers, komma, pijp, ' - ',
+   * haakje) is een plaatsnaam en mag mee; al het andere valt weg. Weglaten is
+   * veilig — dan staat er alleen de titel, en die klopt altijd.
+   *
+   * Zelfde regel als kortePlaats() in api/_lib/opvolging-aanmelding.js. Een
+   * browser-view kan daar niet uit importeren; tests/opvolging-korte-plaats.test.js
+   * bewaakt dat de twee hetzelfde blijven doen.
+   */
+  function kortePlaats(location) {
+    const v = String(location == null ? '' : location).trim();
+    if (!v || v.length > 24) return '';
+    if (/[0-9|,;]/.test(v)) return '';
+    if (v.includes(' - ') || v.includes('(')) return '';
+    return v;
+  }
+
+  /** Titel plus plaats, maar alleen als die plaats een plaatsnaam is. */
+  function eventKopTekst(e) {
+    const titel = e && e.event_titel ? String(e.event_titel).trim() : '';
+    const plaats = kortePlaats(e && e.event_plaats);
+    // Let op waar esc() ophoudt: het scheidingsteken hoort ERBUITEN. Stond het
+    // erbinnen, dan las Dave letterlijk '&middot;' op zijn scherm — dezelfde
+    // fout als eerder in de groepskop.
+    return [titel, plaats].filter(Boolean).map(esc).join(' &middot; ');
+  }
+
   /** Is er echt contact geweest? Zelfde regel als api/_lib/opvolging-aanmelding.js. */
   function echtContact(p) {
     if (!p) return false;
@@ -1453,7 +1515,8 @@
       const aan = d === dag;
       knoppen += '<button class="wkd ' + (aan ? 'on' : '') + ' ' + (d === nu ? 'nu' : '') + ' ' + (d < nu ? 'oud' : '') + '"' +
         ' onclick="window.__opvDag(\'' + d + '\')">' +
-        '<span class="l">' + WEEKDAG_LABELS[i] + ' ' + nl(d) + (d === nu ? ' · vandaag' : '') + '</span>' +
+        '<span class="l"><span class="d">' + WEEKDAG_LABELS[i] + ' ' + nl(d) + '</span>' +
+          (d === nu ? ' <span class="vd">vandaag</span>' : '') + '</span>' +
         '<span class="c">' + (aan && _live.taken.data ? _live.taken.data.taken.length : '·') + '<small> open</small></span></button>';
     });
     knoppen += '</div>';
@@ -1686,7 +1749,7 @@
         opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Archiveren. Hij moet dan ook in de eventmodule op geannuleerd.', "window.__opvAanmeldActie('geen_interesse')") +
         opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Wacht op bevestiging; na 48 uur zonder nieuwe aanmelding komt hij terug.', "window.__opvAanmeldActie('verplaatst')");
       return scrim('Wat nu met ' + esc(t.naam) + '?',
-        esc([e.event_titel, e.event_plaats].filter(Boolean).join(' &middot; ')) || 'Aanmelding', body);
+        eventKopTekst(e) || 'Aanmelding', body);
     }
 
     if (m.soort === 'aanmeld-actie') {
@@ -2180,7 +2243,7 @@
   // tegen dit bestand zelf — zelfde afspraak als bij de wa-timers hierboven.
   // De aanmeldkaart: de wakker-dag moet gelijk blijven aan die van de server,
   // en de badge moet in ronde B laten zien dat er in ronde A bevestigd is.
-  window.__opvAanmeldHelpers = { WAKKER_DAGEN, bevestigdBadge, taakKaart, evGroepKop };
+  window.__opvAanmeldHelpers = { WAKKER_DAGEN, bevestigdBadge, taakKaart, evGroepKop, kortePlaats, eventKopTekst };
 
   window.__opvWeekHelpers = {
     bepaalWeek, basisMaandag, weekOffsetVoorDag, maandagVan, kortDatum,
