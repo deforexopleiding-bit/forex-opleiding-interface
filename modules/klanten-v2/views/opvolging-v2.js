@@ -348,6 +348,130 @@
     _waTimers[msSleutel] = gewenstMs;
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // DE TWEE VENSTERS VAN DE DAG
+  // ═════════════════════════════════════════════════════════════════════════
+  // Twee afspraken met een klok eraan:
+  //   1. Elke ingeplande lead krijgt vóór 09:00 een spraakbericht.
+  //   2. Wie dat kreeg en niet antwoordde, wordt tussen 12:00 en 13:00 gebeld.
+  //
+  // Een moment telt alleen mee als het in zijn venster viel. Om 16:20 bellen is
+  // niet 'gedaan' maar 'te laat' — anders meet de dekking of het werk gebeurd
+  // is, niet of het op tijd gebeurd is, en dan is het cijfer stuurloos.
+  //
+  // Alles in Amsterdamse tijd, net als cron-opvolging-doorrol. NOOIT via
+  // toISOString(): dat is UTC, en dan valt een gesprek van 00:30 op de vorige
+  // dag en zit een spraakbericht van 08:30 's winters ineens vóór de deadline
+  // die het net miste.
+  const ZONE = 'Europe/Amsterdam';
+  const SPRAAK_DEADLINE_UUR = 9;      // vóór 09:00; precies 09:00 is te laat
+  const NABEL_VAN_UUR       = 12;     // vanaf 12:00, inclusief
+  const NABEL_TOT_UUR       = 13;     // tot 13:00, exclusief
+
+  /** Dag en minuut-van-de-dag van een tijdstip, in Amsterdamse tijd. */
+  function inZone(ts) {
+    const ms = ts == null ? NaN : new Date(ts).getTime();
+    if (!Number.isFinite(ms)) return null;
+    const dtf = new Intl.DateTimeFormat('en-CA', {
+      timeZone: ZONE, hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    });
+    const m = {};
+    for (const deel of dtf.formatToParts(new Date(ms))) m[deel.type] = deel.value;
+    return {
+      dag   : `${m.year}-${m.month}-${m.day}`,
+      minuut: (+m.hour) * 60 + (+m.minute),
+      tijd  : `${m.hour}:${m.minute}`,
+    };
+  }
+
+  /** Is dit een spraakbericht dat wij verstuurd hebben? */
+  function isSpraakVerstuurd(p) {
+    return p && p.soort === 'spraakbericht' && /verstuurd/i.test(String(p.resultaat || ''));
+  }
+  /** Is dit iets dat de lead ons stuurde? */
+  function isAntwoord(p) {
+    return p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht')
+      && /ontvangen/i.test(String(p.resultaat || ''));
+  }
+
+  /**
+   * Het spraakbericht van vandaag: op tijd, te laat, of niet gebeurd.
+   *
+   * Alleen het EERSTE spraakbericht van die dag telt. Nog een keer inspreken om
+   * 11:00 maakt de gemiste deadline niet ongedaan, en zou anders een gemiste
+   * ochtend als gehaald laten tellen.
+   */
+  function beoordeelSpraak(pogingen, dag) {
+    const vanDieDag = (Array.isArray(pogingen) ? pogingen : [])
+      .filter(isSpraakVerstuurd)
+      .map((p) => ({ p, z: inZone(p.tijdstip) }))
+      .filter((x) => x.z && x.z.dag === dag)
+      .sort((a, b) => a.z.minuut - b.z.minuut);
+    if (vanDieDag.length === 0) return { staat: 'niet_gedaan', tijd: null };
+    const eerste = vanDieDag[0];
+    return {
+      staat: eerste.z.minuut < SPRAAK_DEADLINE_UUR * 60 ? 'op_tijd' : 'te_laat',
+      tijd : eerste.z.tijd,
+    };
+  }
+
+  /**
+   * Het nabellen van vandaag.
+   *
+   * Nodig is het alleen als er een spraakbericht uitging én de lead niet
+   * antwoordde. Wie wél antwoordde hoeft niet nagebeld; die staat op
+   * 'niet_nodig' en telt niet mee als gemist.
+   *
+   * Een gesprek telt als op tijd binnen [12:00, 13:00). Daarbuiten is het te
+   * laat — ook als het vroeger was: om 10:00 bellen is niet het afgesproken
+   * moment. Het eerste gesprek van de dag bepaalt het oordeel.
+   */
+  function beoordeelNabel(pogingen, dag) {
+    const lijst = Array.isArray(pogingen) ? pogingen : [];
+    const spraak = beoordeelSpraak(lijst, dag);
+    if (spraak.staat === 'niet_gedaan') return { staat: 'niet_nodig', reden: 'geen spraakbericht', tijd: null };
+
+    const heeftGeantwoord = lijst
+      .filter(isAntwoord)
+      .map((p) => inZone(p.tijdstip))
+      .some((z) => z && z.dag === dag);
+    if (heeftGeantwoord) return { staat: 'niet_nodig', reden: 'heeft geantwoord', tijd: null };
+
+    const calls = lijst
+      .filter((p) => p && p.soort === 'call')
+      .map((p) => inZone(p.tijdstip))
+      .filter((z) => z && z.dag === dag)
+      .sort((a, b) => a.minuut - b.minuut);
+    if (calls.length === 0) return { staat: 'niet_gedaan', reden: null, tijd: null };
+
+    const eerste = calls[0];
+    const inVenster = eerste.minuut >= NABEL_VAN_UUR * 60 && eerste.minuut < NABEL_TOT_UUR * 60;
+    return { staat: inVenster ? 'op_tijd' : 'te_laat', reden: null, tijd: eerste.tijd };
+  }
+
+  /** De twee oordelen samen, per taak. */
+  function beoordeelDag(taak, dag) {
+    const pg = (taak && taak.pogingen) || [];
+    return { spraak: beoordeelSpraak(pg, dag), nabel: beoordeelNabel(pg, dag) };
+  }
+
+  /** Tellingen over een hele lijst taken, voor het dashboard. */
+  function telVensters(taken, dag) {
+    const leeg = { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 };
+    const uit = { spraak: { ...leeg }, nabel: { ...leeg } };
+    for (const t of (Array.isArray(taken) ? taken : [])) {
+      const o = beoordeelDag(t, dag);
+      uit.spraak.totaal += 1;
+      uit.spraak[o.spraak.staat] += 1;
+      // Het nabellen telt alleen mee voor wie het nodig had; anders zakt de
+      // dekking door mensen die gewoon geantwoord hebben.
+      if (o.nabel.staat !== 'niet_nodig') { uit.nabel.totaal += 1; uit.nabel[o.nabel.staat] += 1; }
+      else uit.nabel.niet_nodig += 1;
+    }
+    return uit;
+  }
+
   const leegTakenCache = () => {
     _live.taken.data = null; _live.taken.key = null;
     _live.dash.data = null; _live.dash.key = null;
@@ -487,6 +611,23 @@
 .opv .waqr{display:block;width:320px;max-width:100%;height:auto;margin:14px auto 0;border:1px solid var(--o-line);border-radius:14px;background:#fff}
 .opv .wastap{margin:12px 0 0;padding-left:20px;font-size:13px;color:#414954;line-height:1.7}
 .opv .waklaar{background:var(--o-grns);border:1px solid #bfe9d6;color:#08794a;border-radius:12px;padding:14px 16px;text-align:center;font-size:14px;font-weight:650}
+/* De twee vensters van de dag: spraakbericht voor 09:00 en nabellen 12–13u. */
+.opv .vst{display:inline-flex;align-items:center;gap:5px;border-radius:20px;padding:3px 9px;font-size:11.5px;font-weight:650;border:1px solid transparent}
+.opv .vst.ok{background:var(--o-grns);border-color:#bfe9d6;color:#08794a}
+.opv .vst.laat{background:var(--o-ambs);border-color:#f0d9ac;color:#8a5300}
+.opv .vst.mist{background:var(--o-reds);border-color:#f3c9cb;color:#b32b2f}
+.opv .vst.nvt{background:#f4f5f7;border-color:#eaecf0;color:#8b93a0}
+.opv .vstrij{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
+.opv .vstrij>div{flex:1;min-width:200px}
+.opv .vstkop{font-size:11.5px;color:var(--o-muted);font-weight:650;margin-bottom:5px}
+.opv .balk{display:flex;height:9px;border-radius:6px;overflow:hidden;background:#eef0f3}
+.opv .balk i{display:block;height:100%}
+.opv .balk i.ok{background:var(--o-grn)}
+.opv .balk i.laat{background:var(--o-amb)}
+.opv .balk i.mist{background:var(--o-red)}
+.opv .balklegenda{font-size:12px;color:var(--o-muted);margin-top:6px;display:flex;gap:12px;flex-wrap:wrap}
+.opv .nietgemeten{border:1px dashed var(--o-line);border-radius:14px;background:#fcfcfd;padding:18px 20px;font-size:13.5px;color:#414954}
+.opv .nietgemeten b{color:var(--o-ink)}
 .opv .mb{padding:18px 22px 22px}
 .opv .opt{display:flex;align-items:center;gap:13px;width:100%;text-align:left;padding:14px 15px;border:1px solid var(--o-line);border-radius:13px;background:#fff;cursor:pointer;margin-bottom:9px;font-family:inherit}
 .opv .opt:hover{border-color:var(--o-acc);background:var(--o-accs)}
@@ -545,6 +686,7 @@
         '<span class="pil ' + (t.bel_vandaag ? 'aan' : 'uit') + '" title="doel is ' + DOEL_BELLEN + ' belpogingen per dag">vandaag ' + dots(t.bel_vandaag, DOEL_BELLEN) + '</span>' +
         (t.laatste_poging ? '<span style="color:#6b7280;font-size:12px">laatst ' + esc(nl(iso(t.laatste_poging))) + ' ' + uur(t.laatste_poging) + '</span>' : '') +
       '</div>' +
+      vensterBadges(t, dag) +
       (t.notitie ? '<div class="note">' + esc(t.notitie) + '</div>' : '') +
       '</div>' +
       '<div class="act">' +
@@ -694,6 +836,125 @@
       '<div class="mb">' + body + '</div></div></div></div>';
   }
 
+  /**
+   * De twee vensters op de taakkaart. Toont niets zolang de brug uitgaande
+   * berichten niet kan zien: dan is 'geen spraakbericht' een bewering die we
+   * niet kunnen doen.
+   */
+  function vensterBadges(t, dag) {
+    if (!brugZietUitgaand()) return '';
+    const o = beoordeelDag(t, dag);
+    const spraak = {
+      op_tijd    : ['ok',   '&#127908; spraak ' + esc(o.spraak.tijd || '')],
+      te_laat    : ['laat', '&#127908; spraak ' + esc(o.spraak.tijd || '') + ' &middot; na 09:00'],
+      niet_gedaan: ['mist', '&#127908; geen spraakbericht'],
+    }[o.spraak.staat];
+    const nabel = {
+      op_tijd    : ['ok',   '&#9742; nagebeld ' + esc(o.nabel.tijd || '')],
+      te_laat    : ['laat', '&#9742; nagebeld ' + esc(o.nabel.tijd || '') + ' &middot; buiten 12&ndash;13u'],
+      niet_gedaan: ['mist', '&#9742; niet nagebeld'],
+      niet_nodig : ['nvt',  '&#9742; ' + esc(o.nabel.reden || 'niet nodig')],
+    }[o.nabel.staat];
+    return '<div class="mt">' +
+      '<span class="vst ' + spraak[0] + '">' + spraak[1] + '</span>' +
+      '<span class="vst ' + nabel[0] + '">' + nabel[1] + '</span></div>';
+  }
+
+  /**
+   * Ziet de brug uitgaande berichten? Alleen dan valt er iets te zeggen over
+   * spraakberichten die Dave zelf stuurt.
+   *
+   * De vlag komt uit /status van de brug. Een oudere brug op de VPS stuurt hem
+   * niet mee, en dan blijft het antwoord nee — liever een leeg blok met uitleg
+   * dan een nul die eruitziet alsof er gemeten is.
+   */
+  function brugZietUitgaand() {
+    return !!(_wa.data && _wa.data.ziet_uitgaand === true);
+  }
+
+  /** De uitleg die in de plaats komt van cijfers die er niet zijn. */
+  function nogNietGemeten(wat) {
+    const reden = _wa.error
+      ? 'De WhatsApp-brug is nu niet bereikbaar, dus er valt niets te meten.'
+      : (_wa.data && !_wa.data.verbonden)
+        ? 'De WhatsApp-brug is nog niet gekoppeld. Zolang dat niet gebeurd is, ziet dit systeem geen enkel bericht.'
+        : 'De brug die nu draait ziet nog geen uitgaande berichten. Na het bijwerken van de VPS vult dit blok zichzelf.';
+    return '<div class="nietgemeten"><b>' + esc(wat) + ' wordt nog niet gemeten.</b><br>' + esc(reden) +
+      '<br><span style="color:#6b7280">Er staat hier bewust geen nul: dat zou eruitzien alsof het gemeten is en op nul uitkwam.</span></div>';
+  }
+
+  /** Het blok op het dagscherm: wie kreeg vanmorgen een spraakbericht? */
+  function spraakBlok(taken, dag) {
+    const kop = '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#127908;</div>' +
+      '<h3>Spraakberichten voor 09:00</h3>' +
+      (brugZietUitgaand() ? '<span class="n">' + taken.length + '</span>' : '') + '</div>';
+    if (!brugZietUitgaand()) return kop + nogNietGemeten('Het spraakbericht per lead');
+
+    const t = telVensters(taken, dag).spraak;
+    if (t.totaal === 0) return kop + '<div class="empty">Geen taken op deze dag.</div>';
+    return kop +
+      '<div class="ronde">Elke lead die vandaag op de lijst staat hoort v&oacute;&oacute;r 09:00 een ingesproken bericht te krijgen.</div>' +
+      dekkingsBalk(t, ['op tijd', 'na 09:00', 'geen']);
+  }
+
+  /** Het blok op het dagscherm: wie is er tussen 12 en 13 uur nagebeld? */
+  function nabelBlok(taken, dag) {
+    const kop = '<div class="sh"><div class="ic" style="background:var(--o-accs)">&#9742;</div>' +
+      '<h3>Nabellen tussen 12:00 en 13:00</h3></div>';
+    if (!brugZietUitgaand()) return kop + nogNietGemeten('Het nabelvenster');
+
+    const t = telVensters(taken, dag).nabel;
+    if (t.totaal === 0) {
+      return kop + '<div class="empty">Niemand hoeft vandaag nagebeld te worden' +
+        (t.niet_nodig ? ' — ' + t.niet_nodig + ' lead' + (t.niet_nodig === 1 ? '' : 's') + ' had geen spraakbericht of heeft al geantwoord.' : '.') + '</div>';
+    }
+    return kop +
+      '<div class="ronde">Wie een spraakbericht kreeg en niet antwoordde, hoort tussen <b>12:00 en 13:00</b> gebeld te worden. ' +
+      'Later op de dag bellen telt als te laat, niet als gedaan.</div>' +
+      dekkingsBalk(t, ['in het venster', 'buiten het venster', 'niet gebeld']);
+  }
+
+  /** Eén balk met de drie uitkomsten, plus de aantallen eronder. */
+  function dekkingsBalk(t, labels) {
+    const pct = (n) => (t.totaal ? (n / t.totaal) * 100 : 0);
+    return '<div class="balk">' +
+      '<i class="ok" style="width:' + pct(t.op_tijd) + '%"></i>' +
+      '<i class="laat" style="width:' + pct(t.te_laat) + '%"></i>' +
+      '<i class="mist" style="width:' + pct(t.niet_gedaan) + '%"></i></div>' +
+      '<div class="balklegenda">' +
+      '<span class="ok">' + t.op_tijd + ' ' + esc(labels[0]) + '</span>' +
+      '<span class="laatc">' + t.te_laat + ' ' + esc(labels[1]) + '</span>' +
+      '<span class="bad">' + t.niet_gedaan + ' ' + esc(labels[2]) + '</span>' +
+      '<span style="color:#6b7280">van ' + t.totaal + '</span></div>';
+  }
+
+  /**
+   * Het dashboard-deel: hoeveel van de ingeplande mensen kregen hun
+   * spraakbericht voor 09:00, en hoeveel zijn er binnen het nabelvenster
+   * gebeld. Dezelfde beoordeling als op het dagscherm, alleen opgeteld.
+   */
+  function vensterDashboardBlok(dag) {
+    const kop = '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#9200;</div>' +
+      '<h3>Op tijd vandaag</h3></div>';
+    if (!brugZietUitgaand()) return kop + nogNietGemeten('Het spraakbericht en het nabelvenster');
+
+    const st = _live.taken;
+    if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
+    if (!st.data || st.key !== dag) return kop + '<div class="empty">Bezig met laden&hellip;</div>';
+
+    const t = telVensters(st.data.taken || [], dag);
+    if (t.spraak.totaal === 0) return kop + '<div class="empty">Geen open taken vandaag.</div>';
+
+    return kop + '<div class="vstrij">' +
+      '<div><div class="vstkop">Spraakbericht v&oacute;&oacute;r 09:00</div>' +
+      dekkingsBalk(t.spraak, ['op tijd', 'na 09:00', 'geen']) + '</div>' +
+      '<div><div class="vstkop">Nagebeld tussen 12:00 en 13:00</div>' +
+      (t.nabel.totaal
+        ? dekkingsBalk(t.nabel, ['in het venster', 'buiten het venster', 'niet gebeld'])
+        : '<div class="empty" style="padding:12px">Niemand hoefde nagebeld te worden.</div>') +
+      '</div></div>';
+  }
+
   function weekbalk(dag) {
     const nu = vandaag();
     const d0 = new Date(nu + 'T12:00:00Z');
@@ -724,8 +985,9 @@
     // tegelijk het levensteken waaraan de timers zien of deze view nog in beeld
     // is — zie herstelWaTimers().
     h += '<div class="kop">' +
-      '<div class="info">De spraakberichten en het nabelvenster hangen aan de WhatsApp-brug en volgen later; ' +
-      'die blokken staan hier bewust leeg in plaats van met cijfers die nog niet gemeten worden.</div>' +
+      '<div class="info">De spraakberichten en het nabelvenster hangen aan de WhatsApp-brug. ' +
+      'Ziet die brug nog geen uitgaande berichten, dan blijven die blokken leeg met uitleg &mdash; ' +
+      'nooit met een nul die eruitziet alsof er gemeten is.</div>' +
       waLamp() + '</div>';
     h += weekbalk(dag);
     // Boven de takenlijst: eerst wat er vaststaat vandaag, dan wat je zelf
@@ -741,6 +1003,12 @@
     const r2 = alles.filter((t) => t.later || t.bel_vandaag || t.wa_vandaag);
     const wacht = st.data.wacht || [];
 
+    // De twee vensters van de dag, boven de werklijst: eerst wat er van de
+    // ochtend en de middag terechtgekomen is, dan het werk zelf.
+    h += spraakBlok(alles, dag);
+    h += nabelBlok(alles, dag);
+
+    h += '<div class="sh"><div class="ic" style="background:#eef0f3">&#9776;</div><h3>Werklijst</h3><span class="n">' + r1.length + '</span></div>';
     h += '<div class="ronde">Elke naam die je aanraakt verlaat deze lijst. Wil je er later vandaag nog eens achter, dan zakt hij naar de tweede ronde — zo wordt deze lijst alleen maar korter. <b>Wat je vandaag niet afwerkt, staat morgen vanzelf terug</b> met de melding "bleef liggen"; doorschuiven naar morgen hoef je niet te doen.</div>';
     h += r1.length ? r1.map((t) => taakKaart(t, dag)).join('')
       : '<div class="empty">Eerste ronde afgewerkt.' + (r2.length ? ' Wat overblijft staat in de tweede ronde.' : '') + '</div>';
@@ -801,6 +1069,12 @@
         '<span class="pil ' + (p.wa_totaal ? 'wa' : 'uit') + '">&#128172; ' + (p.wa_totaal ? p.wa_totaal + '&times;' : 'geen') + '</span>' +
         '<span class="st ' + (ok ? 'ok' : p.bel_vandaag ? 'laatc' : 'bad') + '">' + (ok ? 'volledig' : p.bel_vandaag ? 'niet af' : 'niets gedaan') + '</span></div>';
     }).join('') : '<div class="empty">Geen open taken vandaag.</div>') + '</div>';
+
+    // ── De twee vensters, in dezelfde vorm als op het dagscherm ──────────────
+    // Leest de takenlijst van vandaag (die het dagscherm toch al ophaalt) en
+    // beoordeelt elk moment tegen zijn venster. Zonder brug die uitgaande
+    // berichten ziet: uitleg in plaats van een nul.
+    h += vensterDashboardBlok(dag);
 
     h += '<div class="sh"><div class="ic" style="background:var(--o-ambs)">&#9878;</div><h3>Discipline</h3></div><div class="grid">' +
       kpi('Aangeraakt', d.aangeraakt + '/' + d.totaal, 'taken met een poging vandaag', d.aangeraakt === d.totaal ? 'g' : 'a') +
@@ -1263,6 +1537,14 @@
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
   window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst };
+
+  // De vensterlogica los na te slaan vanuit de console, en getest in
+  // tests/opvolging-vensters.test.js tegen dit bestand zelf.
+  window.__opvVensterHelpers = {
+    inZone, beoordeelSpraak, beoordeelNabel, beoordeelDag, telVensters,
+    isSpraakVerstuurd, isAntwoord,
+    SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
+  };
 
   // ═════════════════════════════════════════════════════════════════════════
   // REGISTREREN

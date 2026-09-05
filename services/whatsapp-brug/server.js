@@ -48,6 +48,10 @@ app.get('/healthz', (_req, res) => res.status(200).json({ ok: true }));
 app.get('/status', auth, (_req, res) => {
   res.json({
     verbonden      : wa.staat.verbonden,
+    // Ziet deze brug uitgaande berichten en hun type? Het CRM gebruikt dit om
+    // te bepalen of het spraakberichten-blok echte cijfers heeft. Ontbreekt de
+    // vlag, dan draait er een oudere brug en toont het CRM 'nog niet gemeten'.
+    ziet_uitgaand  : wa.staat.ziet_uitgaand === true,
     nummer         : wa.staat.nummer,
     laatste_actie  : wa.staat.laatsteActie,
     wacht_op_qr    : !wa.staat.verbonden && !!wa.staat.qrDataUrl,

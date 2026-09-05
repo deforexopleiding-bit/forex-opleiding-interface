@@ -22,6 +22,12 @@ const ACK_SOORT = { 1: 'verzonden', 2: 'afgeleverd', 3: 'gelezen', 4: 'gelezen' 
 
 export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   const staat = {
+    // Deze brug ziet uitgaande berichten (message_create) én hun type. Het CRM
+    // leest dit uit /status om te weten of het spraakberichten-blok echte
+    // cijfers kan tonen of moet zeggen dat er nog niets gemeten wordt. Een
+    // oudere brug op de VPS stuurt deze vlag niet mee, en dan blijft dat blok
+    // leeg in plaats van nul te tonen alsof het gemeten is.
+    ziet_uitgaand: true,
     verbonden   : false,
     nummer      : null,
     laatsteActie: null,      // wanneer zag ze voor het laatst iets
@@ -104,6 +110,40 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     }
   });
 
+  // ── Uitgaand: wat Dave zélf stuurt ───────────────────────────────────────
+  // Het 'message'-event hierboven ziet dit NIET. whatsapp-web.js doet in
+  // Client.js `if (msg.id.fromMe) return;` vlak voor het emit — eigen berichten
+  // worden daar bewust overgeslagen. Alleen 'message_create' krijgt ze, en dat
+  // geldt ook voor berichten die Dave vanaf zijn eigen telefoon stuurt: de hook
+  // hangt aan de berichtenstore van het gekoppelde apparaat, en die synct mee.
+  //
+  // Dit is het enige pad waarlangs een spraakbericht dat hij zelf inspreekt
+  // meetbaar wordt. Zonder deze handler is 'heeft deze lead vanmorgen een
+  // spraakbericht gehad?' een vraag die het systeem niet kan beantwoorden.
+  //
+  // Let op het tijdstip: we nemen msg.timestamp, het moment van versturen. De
+  // ack-events hieronder weten dat niet — die stempelen het moment waarop de
+  // ontvangstbevestiging binnenkomt, en dat kan uren later zijn. Voor een
+  // deadline van 09:00 is dat verschil het hele verhaal.
+  client.on('message_create', async (msg) => {
+    raakAan();
+    try {
+      if (!msg.fromMe) return;               // inkomend loopt via 'message'
+      const naar = msg.to;
+      // FILTER EERST, net als bij inkomend.
+      if (!leadlijst.mag(naar)) return;
+      await webhook.duw({
+        soort     : 'uitgaand',
+        nummer    : normaliseerNummer(naar),
+        tijdstip  : new Date((msg.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+        media_type: msg.type || null,        // 'ptt' of 'audio' = spraakbericht
+        bericht_id: msg.id?._serialized || null,
+      });
+    } catch (e) {
+      console.warn('[brug] uitgaand bericht verwerken faalde:', e?.message || e);
+    }
+  });
+
   // ── Statusveranderingen op wat wij verstuurden ───────────────────────────
   client.on('message_ack', async (msg, ack) => {
     raakAan();
@@ -115,7 +155,12 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       await webhook.duw({
         soort,
         nummer    : normaliseerNummer(naar),
+        // Het moment van de bevestiging, niet van het bericht. whatsapp-web.js
+        // geeft bij een ack geen verzendtijd mee die we kunnen vertrouwen.
         tijdstip  : new Date().toISOString(),
+        // De ack draagt wél het volledige Message-object, dus het type is hier
+        // gewoon beschikbaar. Het stond er alleen niet in.
+        media_type: msg.type || null,
         bericht_id: msg.id?._serialized || null,
       });
     } catch (e) {
