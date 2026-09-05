@@ -110,7 +110,9 @@ app.get('/historiek', auth, async (req, res) => {
   const nummer = req.query?.nummer;
   if (!nummer) return res.status(400).json({ error: 'nummer ontbreekt' });
   try {
-    const uit = await wa.historiek(nummer, req.query?.limiet);
+    // bericht_id is optioneel: het CRM kent van dit nummer al een bericht en
+    // geeft dat mee, zodat de brug de chat ook langs die weg kan vinden.
+    const uit = await wa.historiek(nummer, req.query?.limiet, req.query?.bericht_id || null);
     res.json({ ok: true, ...uit });
   } catch (e) {
     if (e?.code === 'NIET_TOEGESTAAN') return res.status(403).json({ error: 'Niet toegestaan' });
@@ -122,14 +124,15 @@ app.get('/historiek', auth, async (req, res) => {
       return res.status(404).json({
         error: 'Dit nummer heeft geen LID-koppeling, en onder het nummer zelf bestaat er geen gesprek op dit apparaat',
         code : 'GEEN_KOPPELING',
-        geprobeerd: e.geprobeerd || null,
+        kandidaten: e.kandidaten ?? null,
       });
     }
     if (e?.code === 'GEEN_GESPREK') {
       return res.status(404).json({
         error: 'Het gesprek bestaat niet op dit apparaat',
         code : 'GEEN_GESPREK',
-        geprobeerd: e.geprobeerd || null,
+        kandidaten   : e.kandidaten ?? null,
+        chats_bekeken: e.chats_bekeken ?? null,
       });
     }
     console.error('[brug] historiek ophalen faalde:', e?.message || e);

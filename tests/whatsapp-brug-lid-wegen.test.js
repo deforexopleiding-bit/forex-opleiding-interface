@@ -178,7 +178,11 @@ test('het filter blijft ook op die weg de grens', () => {
 
 test('er wordt per weg bijgehouden: geprobeerd, gelukt, beschikbaar', () => {
   const b = bron();
-  assert.match(b, /const WEGEN = \['getNumberId', 'getChatById', 'chat_contact', 'contact_data', 'msg_data'\]/);
+  // De lijst is gegroeid met de wegen die getChatById vervangen.
+  for (const w of ['getNumberId', 'getChats', 'getMessageById', 'msg_getchat',
+                   'chat_contact', 'contact_data', 'msg_data']) {
+    assert.ok(b.includes("'" + w + "'"), 'weg ontbreekt in WEGEN: ' + w);
+  }
   assert.match(b, /geprobeerd: 0, gelukt: 0, beschikbaar: null/);
 });
 
@@ -234,10 +238,11 @@ test('de chat wordt opgezocht via de lidkaart, niet rechtstreeks op nummer@c.us'
   const i = b.indexOf('async historiek(');
   const blok = b.slice(i, i + 2600);
   assert.match(blok, /lidkaart\.jidVoorNummer\(n0\)/);
-  const kaart = blok.indexOf("voegToe(viaKaart, 'lidkaart')");
-  const nummer = blok.indexOf("voegToe(gewoon, 'nummer')");
+  const kaart = blok.indexOf('viaKaart');
+  const nummer = blok.indexOf('const gewoon = naarChatId(nummer)');
   assert.ok(kaart > 0 && nummer > 0);
   assert.ok(kaart < nummer, 'de LID-vorm eerst, het kale nummer als terugval');
+  assert.match(blok, /const vormen = \[viaKaart, viaBericht, gewoon\]\.filter\(Boolean\)/);
 });
 
 test('de @c.us-vorm blijft staan voor de leads zonder LID', () => {
@@ -253,7 +258,7 @@ test('er wordt geteld welke vorm het gesprek opleverde', () => {
   const b = bron();
   const i = b.indexOf('async historiek(');
   const blok = b.slice(i, i + 2600);
-  assert.match(blok, /historiekVormen\[gebruikteVorm \|\| 'geen'\]/);
+  assert.match(blok, /historiekVormen\[gebruikteVorm \|\| 'niets_gevonden'\]/);
   assert.match(b, /historiek_vormen: \{ \.\.\.historiekVormen \}/);
 });
 
@@ -277,7 +282,10 @@ test('geen LID-koppeling is iets anders dan geen gesprek', () => {
   const b = bron();
   const i = b.indexOf('async historiek(');
   const blok = b.slice(i, i + 2600);
-  assert.match(blok, /e\.code = viaKaart \? 'GEEN_GESPREK' : 'GEEN_KOPPELING'/);
+  // Geen enkele vorm bekend → GEEN_KOPPELING (er is iets te doen).
+  // Wel vormen, geen chat → GEEN_GESPREK (klopt gewoon).
+  assert.match(blok, /if \(vormen\.length === 0\)[\s\S]*?e\.code = 'GEEN_KOPPELING'/);
+  assert.match(blok, /if \(!chat\)[\s\S]*?e\.code = 'GEEN_GESPREK'/);
 });
 
 test('een gevonden maar leeg gesprek is geen fout', () => {
@@ -309,4 +317,95 @@ test('het CRM vertaalt de drie naar drie verschillende zinnen', () => {
 test('alleen de ontbrekende koppeling leest als iets dat aandacht vraagt', () => {
   const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
   assert.match(view, /j\.code === 'GEEN_KOPPELING'\) \? 'fout' : 'leeg'/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// getChatById IS DOOD — DE CHAT KOMT UIT DE GESPREKKENLIJST
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('historiek gebruikt getChatById niet meer', () => {
+  // Gemeten op de VPS: 8 pogingen, 0 gelukt, ongeacht welke vorm we hem voerden.
+  // getChats() loopt via window.WWebJS — dezelfde laag als het versturen, en die
+  // werkt aantoonbaar.
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 3400);
+  // Alleen de code; het commentaar legt juist uit waaróm die weg eruit is.
+  const code = blok.split('\n').filter((r) => !/^\s*(\/\/|\*|\/\*)/.test(r)).join('\n');
+  assert.doesNotMatch(code, /getChatById/, 'die weg is er helemaal uit');
+  assert.match(blok, /zoekChatIn\(await haalChats\(false\), vormen\)/);
+});
+
+test('de gesprekkenlijst wordt onthouden en pas bij een miss ververst', () => {
+  // Het is een zware aanroep. Een miss is precies het geval waarin de lijst
+  // verouderd kán zijn — een gesprek dat pas net bestaat.
+  const b = bron();
+  const i = b.indexOf('async function haalChats');
+  assert.ok(i > 0);
+  assert.match(b.slice(i, i + 600), /if \(chatsCache && !ververs\) return chatsCache/);
+  const h = b.indexOf('async historiek(');
+  const blok = b.slice(h, h + 3400);
+  assert.ok(blok.indexOf('haalChats(false)') < blok.indexOf('haalChats(true)'),
+    'eerst het geheugen, dan pas opnieuw ophalen');
+});
+
+test('de chat wordt op serialisatie én op cijfers gezocht', () => {
+  // Dan maakt het niet uit of WhatsApp het gesprek onder een LID of onder het
+  // nummer bewaart.
+  const b = bron();
+  const i = b.indexOf('function zoekChatIn');
+  const blok = b.slice(i, i + 900);
+  assert.match(blok, /gezocht\.add\(String\(v\)\)/, 'de volledige serialisatie');
+  assert.ok(blok.includes("split('@')[0]"), 'en de cijfers los');
+  assert.match(blok, /gezocht\.has\(ser\)/, 'vergelijkt op serialisatie');
+  assert.match(blok, /gezocht\.has\(user\)/, 'en op cijfers');
+});
+
+test('de weg via een bericht staat er mét een teller, niet als aanname', () => {
+  // In de bron die ik kan lezen is Message.getChat() letterlijk
+  // client.getChatById(...) — dus dezelfde dode deur. Op 1.34.7 kan dat anders
+  // liggen; daarom meten we het in plaats van erop te bouwen.
+  const b = bron();
+  const i = b.indexOf('async function chatViaBericht');
+  assert.ok(i > 0);
+  const blok = b.slice(i, i + 1200);
+  assert.match(blok, /noteer\('getMessageById', msg\)/);
+  assert.match(blok, /noteer\('msg_getchat', chat\)/);
+});
+
+test('het CRM geeft een bekend bericht_id mee', () => {
+  const api = readFileSync(join(ROOT, 'api/opvolging-whatsapp-historiek.js'), 'utf8');
+  assert.match(api, /from\('opvolging_wa_berichten'\)[\s\S]*select\('bericht_id'\)/);
+  assert.match(api, /bericht_id=' \+ encodeURIComponent\(berichtId\)/);
+  assert.match(api, /console\.warn\('\[opvolging-whatsapp-historiek\] bericht_id opzoeken \(soft\)/,
+    'fail-soft: zonder id gaat het verzoek gewoon door');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 'GEEN KANDIDATEN' IS IETS ANDERS DAN 'NIETS GEVONDEN'
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('een lege kandidatenlijst wordt apart geteld', () => {
+  // Allebei zagen ze er uit als {geen: 1}, en daardoor was de vorige meting niet
+  // te lezen. Dit is dezelfde les als bij uitkomst.js: geef twee verschillende
+  // antwoorden niet dezelfde vorm.
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 3400);
+  assert.match(blok, /historiekVormen\.geen_kandidaten/);
+  assert.match(blok, /historiekVormen\[gebruikteVorm \|\| 'niets_gevonden'\]/);
+});
+
+test('bij niets gevonden komen het aantal vormen en het aantal gesprekken mee', () => {
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 3400);
+  assert.match(blok, /e\.kandidaten = vormen\.length/);
+  assert.match(blok, /e\.chats_bekeken = \(chatsCache \|\| \[\]\)\.length/);
+});
+
+test('het CRM geeft die twee door zodat het geen stilte wordt', () => {
+  const api = readFileSync(join(ROOT, 'api/opvolging-whatsapp-historiek.js'), 'utf8');
+  assert.match(api, /kandidaten   : e\?\.data\?\.kandidaten/);
+  assert.match(api, /chats_bekeken: e\?\.data\?\.chats_bekeken/);
 });

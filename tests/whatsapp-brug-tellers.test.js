@@ -367,16 +367,14 @@ test('versturen gebruikt de chat waar het gesprek echt onder staat', () => {
 test('historiek probeert de LID-vorm en daarna de gewone vorm', () => {
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async historiek(');
-  const blok = bron.slice(i, i + 3200);
-  // Drie kandidaten, in volgorde van betrouwbaarheid: de jid die WhatsApp zelf
-  // gaf, wat we bij een echt bericht zagen, en de gewone @c.us-vorm. Die
-  // laatste blijft nodig voor de leads zonder LID.
-  const volgorde = ["voegToe(viaKaart, 'lidkaart')",
-                    "voegToe(viaBericht, 'uit_bericht')",
-                    "voegToe(gewoon, 'nummer')"].map((k) => blok.indexOf(k));
-  assert.ok(volgorde.every((n) => n > 0), 'alle drie de kandidaten horen erin te staan');
+  const blok = bron.slice(i, i + 3400);
+  // Drie vormen, in volgorde van betrouwbaarheid: de jid die WhatsApp zelf gaf,
+  // wat we bij een echt bericht zagen, en de gewone @c.us-vorm. Die laatste
+  // blijft nodig voor de leads zonder LID.
+  assert.match(blok, /const vormen = \[viaKaart, viaBericht, gewoon\]\.filter\(Boolean\)/);
+  const volgorde = ['const viaKaart', 'const viaBericht', 'const gewoon'].map((k) => blok.indexOf(k));
+  assert.ok(volgorde.every((n) => n > 0), 'alle drie horen erin te staan');
   assert.deepEqual(volgorde, [...volgorde].sort((a, b) => a - b), 'en in die volgorde');
-  assert.match(blok, /for \(const k of kandidaten\)/);
 });
 
 test('de nummerkaart geeft alleen zijn omvang prijs', () => {
