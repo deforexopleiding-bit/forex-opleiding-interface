@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { maakTellers, EVENT_TYPES, REDENEN } from '../services/whatsapp-brug/lib/tellers.js';
+import { maakTellers, EVENT_TYPES, REDENEN, OPLOS_WEGEN, jidVorm } from '../services/whatsapp-brug/lib/tellers.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WA = join(ROOT, 'services/whatsapp-brug/lib/whatsapp.js');
@@ -85,12 +85,15 @@ test('alleen nullen bij de acks is zelf een antwoord', () => {
   assert.deepEqual(Object.keys(plat(t.status().ack_codes)).sort(), ['-1', '0']);
 });
 
-test('de laatste genegeerde draagt type, reden en tijd — verder niets', () => {
+test('de laatste genegeerde draagt type, reden, vorm en tijd — verder niets', () => {
+  // `vorm` is erbij gekomen toen bleek dat het filter op de verkeerde soort
+  // identiteit stond te kijken. Het is een domein en een lengte, geen jid.
   const t = maakTellers({ nu: () => '2026-09-06T17:38:57.000Z' });
-  t.negeer('message_create', 'niet_op_leadlijst');
+  t.negeer('message_create', 'niet_op_leadlijst', '123456789012345@lid');
   const l = t.status().laatste_genegeerd;
   assert.deepEqual(plat(l), {
-    type: 'message_create', reden: 'niet_op_leadlijst', tijd: '2026-09-06T17:38:57.000Z',
+    type: 'message_create', reden: 'niet_op_leadlijst',
+    vorm: 'lid/15', tijd: '2026-09-06T17:38:57.000Z',
   });
 });
 
@@ -138,7 +141,10 @@ test('de status bevat uitsluitend getallen en woorden uit de vaste lijsten', () 
     if (waarde === null) return;
     if (typeof waarde === 'number') return;
     if (typeof waarde === 'string') {
-      assert.ok(EVENT_TYPES.includes(waarde) || REDENEN.includes(waarde) || /^\d{4}-\d{2}-\d{2}T/.test(waarde),
+      const vormPatroon = /^(c\.us|lid|g\.us|s\.whatsapp\.net|broadcast|anders|geen_domein)\/\d+$|^geen$/;
+      assert.ok(EVENT_TYPES.includes(waarde) || REDENEN.includes(waarde) ||
+        OPLOS_WEGEN.includes(waarde) || vormPatroon.test(waarde) ||
+        /^\d{4}-\d{2}-\d{2}T/.test(waarde),
         'onverwachte tekst op ' + pad + ': ' + waarde);
       return;
     }
@@ -148,14 +154,20 @@ test('de status bevat uitsluitend getallen en woorden uit de vaste lijsten', () 
   loop(s, 'status');
 });
 
-test('de brug logt bij een genegeerde gebeurtenis alleen type en reden', () => {
+test('de brug logt bij een genegeerde gebeurtenis alleen type, reden en vorm', () => {
+  // De vorm mag mee omdat hij niets identificeert — 'lid/15' is een domein en
+  // een lengte. De jid zelf mag NIET, en dat is hier het verschil dat telt.
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('function negeer(');
   assert.ok(i > 0, 'de helper hoort te bestaan');
-  const blok = bron.slice(i, i + 500);
-  assert.match(blok, /console\.debug\('\[brug\] genegeerd:', type, reden\)/);
-  assert.doesNotMatch(blok, /msg|nummer|tekst|jid|bericht_id/,
-    'de logregel hoort niets van het bericht te dragen');
+  const blok = bron.slice(i, i + 700);
+  assert.match(blok, /console\.debug\('\[brug\] genegeerd:', type, reden, jidVorm\(jid\)\)/,
+    'precies deze drie; de jid gaat er door jidVorm() heen en niet rauw in');
+  const logs = blok.match(/console\.\w+\([^)]*\)/g) || [];
+  for (const l of logs) {
+    assert.doesNotMatch(l, /, *jid *[,)]/, 'de rauwe jid hoort nooit in een log: ' + l);
+    assert.doesNotMatch(l, /msg|tekst|bericht_id/, 'niets van het bericht: ' + l);
+  }
 });
 
 test('de debug-regel staat standaard uit', () => {
@@ -185,12 +197,15 @@ test('elke afvalregel heeft een eigen reden', () => {
     const i = bron.indexOf("client.on('" + type + "'");
     return bron.slice(i, i + 2000);
   };
-  assert.match(blok('message_create'), /negeer\('message_create', 'niet_van_ons'\)/);
-  assert.match(blok('message_create'), /negeer\('message_create', 'niet_op_leadlijst'\)/);
-  assert.match(blok('message_create'), /negeer\('message_create', 'groep'\)/);
-  assert.match(blok('message_create'), /negeer\('message_create', 'onbruikbaar'\)/);
-  assert.match(blok('message_ack'), /negeer\('message_ack', 'geen_ack_soort'\)/);
-  assert.match(blok('message'), /negeer\('message', 'niet_op_leadlijst'\)/);
+  // De derde parameter is de jid, die alleen als vorm bewaard wordt.
+  const negeerMet = (type, reden) =>
+    new RegExp("negeer\\('" + type + "', '" + reden + "'(, [^)]+)?\\)");
+  assert.match(blok('message_create'), negeerMet('message_create', 'niet_van_ons'));
+  assert.match(blok('message_create'), negeerMet('message_create', 'niet_op_leadlijst'));
+  assert.match(blok('message_create'), negeerMet('message_create', 'groep'));
+  assert.match(blok('message_create'), negeerMet('message_create', 'onbruikbaar'));
+  assert.match(blok('message_ack'), negeerMet('message_ack', 'geen_ack_soort'));
+  assert.match(blok('message'), negeerMet('message', 'niet_op_leadlijst'));
 });
 
 test('de fromMe-check staat vóór het filter, en het filter vóór elk gebruik', () => {
@@ -213,4 +228,153 @@ test('de fromMe-check staat vóór het filter, en het filter vóór elk gebruik'
 test('de tellers komen mee in /status', () => {
   const bron = readFileSync(join(ROOT, 'services/whatsapp-brug/server.js'), 'utf8');
   assert.match(bron, /gebeurtenissen\s*:\s*wa\.tellers\(\)/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE VORM VAN DE IDENTITEIT — DIT BESLIST DE DIAGNOSE
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('jidVorm geeft domein en lengte, nooit de cijfers', () => {
+  assert.equal(jidVorm('32456816410@c.us'), 'c.us/11');
+  assert.equal(jidVorm('123456789012345@lid'), 'lid/15');
+  assert.equal(jidVorm('120363000000@g.us'), 'g.us/12');
+  assert.equal(jidVorm('32470111222@s.whatsapp.net'), 's.whatsapp.net/11');
+});
+
+test('de cijfers zelf komen er nooit in voor', () => {
+  // Dit is het hele punt: een lengte is een lengte. Zodra hier een nummer in
+  // zou staan is dit een logbestand met leadgegevens geworden.
+  const v = jidVorm('32456816410@c.us');
+  assert.doesNotMatch(v, /32456816410/);
+  assert.equal(v.split('/')[1], '11', 'alleen de lengte');
+});
+
+test('onbekende en rare vormen krijgen een vast woord', () => {
+  assert.equal(jidVorm('iets@raarding'), 'anders/0');
+  assert.equal(jidVorm('geenapenstaart'), 'geen_domein/0');
+  assert.equal(jidVorm(''), 'geen');
+  assert.equal(jidVorm(null), 'geen');
+  assert.equal(jidVorm(undefined), 'geen');
+  assert.equal(jidVorm(42), 'geen');
+});
+
+test('negeer bewaart de vorm, niet de jid', () => {
+  const t = maakTellers();
+  t.negeer('message_create', 'niet_op_leadlijst', '123456789012345@lid');
+  const s = t.status();
+  assert.deepEqual(plat(s.vormen), { 'lid/15': 1 });
+  assert.equal(s.laatste_genegeerd.vorm, 'lid/15');
+  assert.equal(JSON.stringify(s).includes('123456789012345'), false, 'de jid hoort nergens te staan');
+});
+
+test('zonder jid blijft de vorm-teller leeg', () => {
+  // Oudere aanroepen geven geen jid mee; die horen geen lege sleutel aan te
+  // maken die als meting leest.
+  const t = maakTellers();
+  t.negeer('message', 'niet_op_leadlijst');
+  assert.deepEqual(plat(t.status().vormen), {});
+  assert.equal(t.status().laatste_genegeerd.vorm, null);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HOE DE IDENTITEIT IS OPGELOST
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('de oploswegen zijn een vaste lijst', () => {
+  assert.deepEqual([...OPLOS_WEGEN].sort(),
+    ['contact', 'contact_zonder_nummer', 'geen_jid', 'jid', 'mislukt']);
+});
+
+test('elke weg wordt apart geteld', () => {
+  const t = maakTellers();
+  t.oplossing('jid'); t.oplossing('jid'); t.oplossing('contact'); t.oplossing('mislukt');
+  const o = t.status().opgelost;
+  assert.equal(o.jid, 2);
+  assert.equal(o.contact, 1);
+  assert.equal(o.mislukt, 1);
+  assert.equal(o.geen_jid, 0);
+});
+
+test('een verzonnen weg maakt geen sleutel aan', () => {
+  const t = maakTellers();
+  t.oplossing('via het nummer 32470111222');
+  assert.deepEqual(Object.keys(plat(t.status().opgelost)).sort(), [...OPLOS_WEGEN].sort());
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE BRUG LOST OP VÓÓR HET FILTERT
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('elke handler bepaalt het nummer vóór hij filtert', () => {
+  // Je kunt niet filteren op een nummer dat je niet kent. Stond het filter
+  // ervóór, dan filtert het op de cijfers van een LID en valt alles weg — dat
+  // was precies de bug.
+  const bron = readFileSync(WA, 'utf8');
+  for (const type of EVENT_TYPES) {
+    const i = bron.indexOf("client.on('" + type + "'");
+    const blok = bron.slice(i, i + 2000);
+    const bepaal = blok.indexOf('bepaalNummer(');
+    const filter = blok.indexOf('leadlijst.mag(');
+    assert.ok(bepaal > 0, type + ' hoort de identiteit op te lossen');
+    assert.ok(filter > 0, type + ' hoort te filteren');
+    assert.ok(bepaal < filter, type + ': oplossen hoort vóór filteren');
+  }
+});
+
+test('het filter staat nog altijd vóór elk gebruik van tekst', () => {
+  const bron = readFileSync(WA, 'utf8');
+  const i = bron.indexOf("client.on('message'");
+  const blok = bron.slice(i, i + 1400);
+  assert.ok(blok.indexOf('leadlijst.mag(') < blok.indexOf('msg.body'),
+    'de tekst hoort pas aangeraakt te worden nadat het filter door is');
+});
+
+test('een mislukte oplossing valt terug op de jid, zoals het was', () => {
+  // Dan is het gedrag precies dat van vóór deze wijziging: normaliseerNummer op
+  // msg.to. Een mislukking maakt het dus nooit slechter dan het was.
+  const bron = readFileSync(WA, 'utf8');
+  const i = bron.indexOf('async function bepaalNummer');
+  const blok = bron.slice(i, i + 1200);
+  assert.match(blok, /catch \(e\)[\s\S]*oplossing\('mislukt'\)/);
+  assert.match(blok, /return normaliseerNummer\(jid\);/);
+});
+
+test('het oplossen logt geen jid en geen tekst', () => {
+  const bron = readFileSync(WA, 'utf8');
+  const i = bron.indexOf('async function bepaalNummer');
+  const blok = bron.slice(i, i + 1200);
+  const logs = blok.match(/console\.\w+\([^)]*\)/g) || [];
+  for (const l of logs) {
+    assert.doesNotMatch(l, /jid|nummer|contact\?|msg/, 'log zonder identiteit: ' + l);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EEN LID-CHAT WERKT OOK BIJ VERSTUREN EN OPHALEN
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('versturen gebruikt de chat waar het gesprek echt onder staat', () => {
+  const bron = readFileSync(WA, 'utf8');
+  const i = bron.indexOf('async stuur(');
+  const blok = bron.slice(i, i + 900);
+  assert.match(blok, /chatIdVoor\(nummer\)/,
+    'anders gaat een LID-gesprek naar <nummer>@c.us en komt het in de verkeerde draad');
+});
+
+test('historiek probeert de geleerde jid en daarna de gewone vorm', () => {
+  const bron = readFileSync(WA, 'utf8');
+  const i = bron.indexOf('async historiek(');
+  const blok = bron.slice(i, i + 1600);
+  assert.match(blok, /chatIdVoor\(nummer\), naarChatId\(nummer\)/,
+    'de geleerde jid eerst, de gewone vorm als terugval');
+  assert.match(blok, /for \(const kandidaat of kandidaten\)/);
+});
+
+test('de nummerkaart geeft alleen zijn omvang prijs', () => {
+  const wa = readFileSync(WA, 'utf8');
+  assert.match(wa, /nummerkaartAantal: \(\) => nummerkaart\.size/);
+  const server = readFileSync(join(ROOT, 'services/whatsapp-brug/server.js'), 'utf8');
+  assert.match(server, /nummerkaart\s*:\s*wa\.nummerkaartAantal\(\)/);
+  assert.doesNotMatch(server, /nummerkaart\.entries|\[\.\.\.nummerkaart\]/,
+    'de kaart zelf blijft binnen');
 });

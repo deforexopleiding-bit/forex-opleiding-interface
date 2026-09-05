@@ -1231,9 +1231,30 @@
         esc(acks.map((k) => k + '×' + g.ack_codes[k]).join(', ')) +
         ' &middot; 1 = verzonden, 2 = afgeleverd, 3/4 = gelezen. Alleen 0 of -1 betekent dat WhatsApp nog niets bevestigd heeft.</div>';
     }
+    // De vorm van de identiteit bij wat afviel. 'c.us/11' is een gewoon
+    // telefoonnummer; 'lid/15' betekent dat WhatsApp de tegenpartij als LID
+    // aanlevert en niet als nummer — precies waar het filter dan op struikelt.
+    const vormen = Object.keys(g.vormen || {}).sort();
+    if (vormen.length) {
+      h += '<div class="ronde zacht">Vorm van de identiteit bij het negeren: ' +
+        esc(vormen.map((k) => k + '×' + g.vormen[k]).join(', ')) +
+        ' &middot; domein/aantal cijfers. Staat er <b>lid</b> bij, dan levert WhatsApp de tegenpartij ' +
+        'niet als telefoonnummer aan.</div>';
+    }
+    const opg = g.opgelost || {};
+    const opgKeys = Object.keys(opg).filter((k) => opg[k] > 0);
+    if (opgKeys.length) {
+      h += '<div class="ronde zacht">Identiteit opgelost via: ' +
+        esc(opgKeys.map((k) => k + '×' + opg[k]).join(', ')) +
+        ' &middot; <b>jid</b> = stond er al als nummer, <b>contact</b> = door WhatsApp opgezocht.</div>';
+    }
+    if (typeof d.nummerkaart === 'number') {
+      h += '<div class="ronde zacht">Gesprekken waarvan we de identiteit onthouden hebben: ' + d.nummerkaart + '.</div>';
+    }
     if (g.laatste_genegeerd) {
       h += '<div class="ronde zacht">Laatst genegeerd: ' + esc(g.laatste_genegeerd.type) +
         ' wegens ' + esc(g.laatste_genegeerd.reden) +
+        (g.laatste_genegeerd.vorm ? ' (' + esc(g.laatste_genegeerd.vorm) + ')' : '') +
         ' om ' + esc(uur(g.laatste_genegeerd.tijd)) + '.</div>';
     }
     return '<div class="tellerblok">' + h + '</div>';
