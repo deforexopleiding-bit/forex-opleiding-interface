@@ -1,5 +1,33 @@
 # WhatsApp-brug
 
+## ⚠ Lees eerst welke versie er écht draait
+
+`package.json` zegt `^1.26.0`. Op de VPS stond **1.34.7**, en dat verschil heeft
+vier ronden gekost.
+
+In 1.26.0 wordt de interne opslag van whatsapp-web.js blootgesteld als
+`window.Store`. In 1.34.7 bestaat die global niet meer — alles hangt onder
+`window.WWebJS`, met daar zelfs een functie `enforceLidAndPnRetrieval` die
+precies doet wat wij zaten te zoeken. Elke poging die op `window.Store` bouwde
+was dus kansloos, en gaf `null` terug op een manier die niet te onderscheiden was
+van 'gevraagd, niets gevonden'.
+
+**Twee regels die daaruit volgen:**
+
+1. **Bouw nooit op een interne API zonder eerst te lezen wat er geïnstalleerd
+   is.** Niet wat `package.json` toestaat — wat er staat. De brug rapporteert
+   haar eigen versie in `/status` (`lid_kunde.bibliotheek`) en logt hem bij het
+   verbinden; begin daar.
+2. **Gebruik de publieke API zolang die het kan.** `client.getNumberId()`,
+   `client.getChatById()`, `client.getChats()` werken ongeacht waar de
+   bibliotheek haar opslag bewaart. De LID-koppeling die we uiteindelijk nodig
+   hadden kwam van `getNumberId` — één publieke aanroep.
+
+En de les die daar onder ligt, want die geldt breder dan deze brug: een controle
+die `null` teruggeeft terwijl de functie niet eens bestaat, is geen meting maar
+een stilte. `lib/uitkomst.js` maakt daarom onderscheid tussen `bestaat_niet`,
+`geen_resultaat`, `onbruikbaar`, `gelukt` en `fout`.
+
 De schakel tussen Daves WhatsApp en de opvolgmodule in het CRM. Ze meldt wanneer
 een bericht verzonden, afgeleverd of gelezen is en wanneer er een antwoord
 binnenkomt, en ze kan namens het CRM een bericht versturen.

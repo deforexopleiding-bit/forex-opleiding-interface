@@ -111,7 +111,12 @@ test('wa.historiek filtert vóór hij de chatstore aanraakt', () => {
 test('groepen worden ook hier geweigerd', () => {
   const bron = readFileSync(join(ROOT, 'services/whatsapp-brug/lib/whatsapp.js'), 'utf8');
   const i = bron.indexOf('async historiek(');
-  assert.match(bron.slice(i, i + 2000), /chat\.isGroup/);
+  // Ruimer venster: het opzoeken van de chat is gegroeid met de LID-vormen.
+  // De guard staat er nog, ná het vinden van de chat en vóór het ophalen.
+  const blok = bron.slice(i, i + 3200);
+  assert.match(blok, /chat\.isGroup/);
+  assert.ok(blok.indexOf('chat.isGroup') < blok.indexOf('fetchMessages'),
+    'weigeren vóór er berichten opgehaald worden');
 });
 
 test('een geweigerd nummer krijgt 403 zonder uitleg', () => {

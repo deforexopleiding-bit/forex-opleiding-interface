@@ -2493,7 +2493,10 @@
       });
       _gesprek.haalt = false;
       _gesprek.melding = beschrijfHistoriek(j);
-      _gesprek.meldingSoort = (j && j.opgehaald > 0) ? 'ok' : 'leeg';
+      // GEEN_KOPPELING vraagt om een handeling (stuur eerst een bericht); de
+      // andere twee zijn geen fout maar ook geen resultaat.
+      _gesprek.meldingSoort = j && j.opgehaald > 0 ? 'ok'
+        : (j && j.code === 'GEEN_KOPPELING') ? 'fout' : 'leeg';
       await fetchGesprek();
     } catch (e) {
       _gesprek.haalt = false;
@@ -2513,6 +2516,8 @@
    */
   function beschrijfHistoriek(j) {
     if (!j) return 'Er kwam geen antwoord terug.';
+    // Drie uitkomsten die iets heel anders betekenen. Alleen de eerste vraagt om
+    // een handeling; de andere twee zijn 'er is niets, en dat klopt'.
     if (!j.opgehaald) {
       return j.melding || 'WhatsApp gaf voor dit nummer geen berichten terug.';
     }

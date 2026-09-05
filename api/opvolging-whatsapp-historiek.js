@@ -58,13 +58,16 @@ export default async function handler(req, res) {
       });
     }
     if (e?.code === 'BRUG_FOUT' && e.status === 404) {
-      // Geen storing: dit gesprek staat niet op het gekoppelde apparaat. Kan
-      // kloppen — het kan buiten het gesynchroniseerde venster vallen, of er is
-      // nooit met dit nummer gechat vanaf dit toestel.
+      // Twee verschillende dingen, en geen van beide is een storing. Ze op één
+      // hoop gooien was precies waarom hier 'geen gesprek' stond terwijl het
+      // gesprek gewoon onder een LID bestond.
+      const geenKoppeling = e?.data?.code === 'GEEN_KOPPELING';
       return res.status(200).json({
         ok: true, opgehaald: 0, nieuw: 0, oudste: null, nieuwste: null,
-        code: 'GEEN_GESPREK',
-        melding: 'WhatsApp kent op dit apparaat geen gesprek met dit nummer. Dat kan betekenen dat het buiten het gesynchroniseerde venster valt.',
+        code: geenKoppeling ? 'GEEN_KOPPELING' : 'GEEN_GESPREK',
+        melding: geenKoppeling
+          ? 'WhatsApp heeft voor dit nummer geen tweede identiteit doorgegeven, en onder het nummer zelf bestaat er geen gesprek op het toestel. Stuur eerst een bericht — daarna is de koppeling er en werkt het ophalen wel.'
+          : 'Het gesprek bestaat niet op dit gekoppelde apparaat. Dat kan kloppen: WhatsApp synct maar een beperkt venster naar een gekoppeld apparaat.',
       });
     }
     const { status, body } = brugFoutNaarHttp(e);
@@ -74,10 +77,13 @@ export default async function handler(req, res) {
 
   const berichten = Array.isArray(uit?.berichten) ? uit.berichten : [];
   if (berichten.length === 0) {
+    // Derde uitkomst, en de meest verwarrende: het gesprek is er wél, maar leeg.
+    // Dat is geen fout — er is alleen niets van doorgestuurd naar dit apparaat.
     return res.status(200).json({
       ok: true, opgehaald: 0, nieuw: 0, oudste: null, nieuwste: null,
-      code: 'LEEG',
-      melding: 'WhatsApp gaf voor dit nummer geen berichten terug. Een gekoppeld apparaat krijgt maar een beperkt venster van de telefoon gesynct.',
+      code: 'LEEG_GESPREK',
+      vorm: uit?.vorm || null,
+      melding: 'Het gesprek is gevonden, maar WhatsApp gaf er geen berichten uit terug. Een gekoppeld apparaat krijgt maar een beperkt venster van de telefoon gesynct; op Daves toestel staat het waarschijnlijk wel.',
     });
   }
 
@@ -128,6 +134,8 @@ export default async function handler(req, res) {
     // De brug meldt of de lijst tot aan de grens liep. Zo ja, dan is er
     // waarschijnlijk méér — dat is iets anders dan 'dit is alles'.
     mogelijk_meer: uit.mogelijk_meer === true,
+    // Langs welke vorm de chat gevonden is: lidkaart, uit_bericht of nummer.
+    vorm         : uit.vorm || null,
     overgeslagen : fouten.length,
   });
 }

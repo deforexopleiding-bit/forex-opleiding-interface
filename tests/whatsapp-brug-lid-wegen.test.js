@@ -222,3 +222,91 @@ test('de probe blijft achter de leadlijst', () => {
   assert.ok(blok.indexOf('leadlijst.mag(n)') < blok.indexOf('tastKundeAf'),
     'weigeren vóór er iets opgevraagd wordt');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HET OPHALEN VAN HISTORIEK VOLGT DEZELFDE WEG ALS HET VERSTUREN
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('de chat wordt opgezocht via de lidkaart, niet rechtstreeks op nummer@c.us', () => {
+  // Het gesprek bestaat onder het LID. Wie alleen naar nummer@c.us zoekt krijgt
+  // 'geen gesprek gevonden' terwijl het er gewoon is.
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 2600);
+  assert.match(blok, /lidkaart\.jidVoorNummer\(n0\)/);
+  const kaart = blok.indexOf("voegToe(viaKaart, 'lidkaart')");
+  const nummer = blok.indexOf("voegToe(gewoon, 'nummer')");
+  assert.ok(kaart > 0 && nummer > 0);
+  assert.ok(kaart < nummer, 'de LID-vorm eerst, het kale nummer als terugval');
+});
+
+test('de @c.us-vorm blijft staan voor de leads zonder LID', () => {
+  // Eenentwintig van de achtentwintig kregen een koppeling. Voor de zeven
+  // andere is dit de enige weg, dus die mag niet wegvallen.
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 2600);
+  assert.match(blok, /const gewoon = naarChatId\(nummer\)/);
+});
+
+test('er wordt geteld welke vorm het gesprek opleverde', () => {
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 2600);
+  assert.match(blok, /historiekVormen\[gebruikteVorm \|\| 'geen'\]/);
+  assert.match(b, /historiek_vormen: \{ \.\.\.historiekVormen \}/);
+});
+
+test('de volledige jid wordt bewaard, niet uit cijfers heropgebouwd', () => {
+  // Dit was de fout: we bewaarden alleen de cijfers en plakten er zelf '@lid'
+  // achter. Wat je gekregen hebt, bewaar je zoals je het gekregen hebt.
+  const kaart = readFileSync(join(ROOT, 'services/whatsapp-brug/lib/lidkaart.js'), 'utf8');
+  assert.match(kaart, /nummerNaarJid/);
+  assert.match(kaart, /if \(volledig\.includes\('@'\)\) nieuwNaarJid\.set/);
+  const b = bron();
+  const i = b.indexOf('async function lidViaNumberId');
+  assert.match(b.slice(i, i + 900), /w\?\._serialized/,
+    'weg A hoort de serialisatie terug te geven, niet alleen de cijfers');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DRIE UITKOMSTEN, EN MAAR ÉÉN ERVAN IS EEN FOUT
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('geen LID-koppeling is iets anders dan geen gesprek', () => {
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 2600);
+  assert.match(blok, /e\.code = viaKaart \? 'GEEN_GESPREK' : 'GEEN_KOPPELING'/);
+});
+
+test('een gevonden maar leeg gesprek is geen fout', () => {
+  const b = bron();
+  const i = b.indexOf('async historiek(');
+  const blok = b.slice(i, i + 3200);
+  assert.match(blok, /leeg   : berichten\.length === 0/);
+  assert.match(blok, /vorm   : gebruikteVorm/);
+});
+
+test('de brug-route geeft de twee 404-gevallen een eigen code', () => {
+  const s = readFileSync(SERVER, 'utf8');
+  const i = s.indexOf("app.get('/historiek'");
+  const blok = s.slice(i, i + 1800);
+  assert.match(blok, /code : 'GEEN_KOPPELING'/);
+  assert.match(blok, /code : 'GEEN_GESPREK'/);
+});
+
+test('het CRM vertaalt de drie naar drie verschillende zinnen', () => {
+  const api = readFileSync(join(ROOT, 'api/opvolging-whatsapp-historiek.js'), 'utf8');
+  assert.match(api, /GEEN_KOPPELING/);
+  assert.match(api, /LEEG_GESPREK/);
+  assert.match(api, /Stuur eerst een bericht/,
+    'bij een ontbrekende koppeling is er wél iets te doen');
+  assert.match(api, /Het gesprek is gevonden, maar/,
+    'en een leeg gesprek is geen fout');
+});
+
+test('alleen de ontbrekende koppeling leest als iets dat aandacht vraagt', () => {
+  const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
+  assert.match(view, /j\.code === 'GEEN_KOPPELING'\) \? 'fout' : 'leeg'/);
+});

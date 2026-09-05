@@ -117,6 +117,10 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // De sleutelnamen en domeinen die we op het laatste ruwe bericht zagen. Namen
   // en achtervoegsels — protocolnamen, geen persoonsgegevens.
   let laatsteBerichtvormen = null;
+  // Welke vorm het gesprek opleverde bij het ophalen van historiek. Alleen
+  // aantallen per vorm, zodat zichtbaar blijft dat de @c.us-weg nog werkt voor
+  // de leads zonder LID.
+  const historiekVormen = {};
 
   // ── Welke bibliotheek draait hier eigenlijk? ─────────────────────────────
   // Dit had er vanaf het begin moeten staan. package.json zegt ^1.26.0, dus npm
@@ -240,7 +244,12 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       bruikbaar: (v) => deelWid(v).server === 'lid',
     });
     noteer('getNumberId', res);
-    return res.status === GELUKT ? deelWid(res.waarde).user : null;
+    if (res.status !== GELUKT) return null;
+    // De volledige serialisatie teruggeven, niet alleen de cijfers: die id
+    // gebruiken we straks om de chat op te zoeken, en zelf iets heropbouwen is
+    // precies waar het ophalen op stukliep.
+    const w = res.waarde;
+    return w?._serialized || (deelWid(w).user ? deelWid(w).user + '@' + deelWid(w).server : null);
   }
 
   /**
@@ -705,7 +714,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     /** Hoeveel nummer↔jid-koppelingen we geleerd hebben. Alleen het aantal. */
     nummerkaartAantal: () => nummerkaart.size,
     /** De LID-kaart: aantallen en een tijdstip, nooit de koppelingen zelf. */
-    lidkaartStatus: () => lidkaart.status(),
+    lidkaartStatus: () => ({ ...lidkaart.status(), historiek_vormen: { ...historiekVormen } }),
     /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),
     /** Langs welke weg de kaart gevuld is, en wat de contactscan zag. */
@@ -771,29 +780,50 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     async historiek(nummer, limiet = 50) {
       if (!staat.verbonden) { const e = new Error('niet verbonden met WhatsApp'); e.code = 'NIET_VERBONDEN'; throw e; }
       if (!leadlijst.mag(nummer)) { const e = new Error('nummer staat niet op de leadlijst'); e.code = 'NIET_TOEGESTAAN'; throw e; }
-      // Eerst de chat waar we dit nummer echt gezien hebben (kan een LID zijn),
-      // daarna pas de gewone @c.us-vorm. Andersom zou een LID-gesprek altijd
-      // 'geen gesprek gevonden' opleveren terwijl het er gewoon is.
-      // Alle vormen waaronder dit gesprek kan staan, in volgorde van
-      // betrouwbaarheid: wat we bij een echt bericht zagen, de LID uit de
-      // kaart, en de gewone @c.us-vorm.
-      const lid = lidkaart.lidVoorNummer(normaliseerNummer(nummer));
-      const kandidaten = [...new Set([
-        chatIdVoor(nummer),
-        lid ? lid + '@lid' : null,
-        naarChatId(nummer),
-      ].filter(Boolean))];
+      // Het gesprek opzoeken langs dezelfde weg als het versturen: eerst de jid
+      // die WhatsApp ons zélf gaf, dan wat we bij een echt bericht zagen, en
+      // pas daarna de gewone @c.us-vorm. Die laatste blijft nodig voor de leads
+      // waarvoor er geen LID is — zeven van de achtentwintig, dus geen randgeval.
+      const n0 = normaliseerNummer(nummer);
+      const viaKaart = lidkaart.jidVoorNummer(n0);
+      const viaBericht = n0 ? nummerkaart.get(n0) : null;
+      const gewoon = naarChatId(nummer);
+      const kandidaten = [];
+      const voegToe = (jid, vorm) => {
+        if (jid && !kandidaten.some((k) => k.jid === jid)) kandidaten.push({ jid, vorm });
+      };
+      voegToe(viaKaart, 'lidkaart');
+      voegToe(viaBericht, 'uit_bericht');
+      voegToe(gewoon, 'nummer');
       if (kandidaten.length === 0) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
 
       const n = Math.max(1, Math.min(200, Number(limiet) || 50));
       let chat = null;
-      for (const kandidaat of kandidaten) {
-        try { chat = await client.getChatById(kandidaat); if (chat) break; } catch (_) { /* volgende */ }
+      let gebruikteVorm = null;
+      const geprobeerd = [];
+      for (const k of kandidaten) {
+        try {
+          const c = await client.getChatById(k.jid);
+          geprobeerd.push({ vorm: k.vorm, gevonden: !!c });
+          if (c) { chat = c; gebruikteVorm = k.vorm; break; }
+        } catch (_) {
+          // Een onbekende chat gooit; dat is geen storing maar 'bestaat hier niet'.
+          geprobeerd.push({ vorm: k.vorm, gevonden: false });
+        }
       }
-      // Geen van de kandidaten leverde een chat op. Dat is geen storing maar
-      // 'dit gesprek staat niet op dit apparaat' — ChatFactory struikelt bij een
-      // onbekende chat over undefined, en dat vangt de lus hierboven al af.
-      if (!chat) { const e = new Error('geen gesprek gevonden op dit apparaat'); e.code = 'GEEN_GESPREK'; throw e; }
+      historiekVormen[gebruikteVorm || 'geen'] = (historiekVormen[gebruikteVorm || 'geen'] || 0) + 1;
+
+      // DRIE UITKOMSTEN DIE IETS HEEL ANDERS BETEKENEN, en maar één ervan is een
+      // fout. Ze op één hoop gooien is precies waarom hier 'geen gesprek
+      // gevonden' stond terwijl het gesprek gewoon onder een LID bestond.
+      if (!chat) {
+        const e = new Error(viaKaart
+          ? 'de chat bestaat niet op dit apparaat'
+          : 'dit nummer heeft geen LID-koppeling, en onder het nummer zelf bestaat er geen chat');
+        e.code = viaKaart ? 'GEEN_GESPREK' : 'GEEN_KOPPELING';
+        e.geprobeerd = geprobeerd;
+        throw e;
+      }
       if (chat.isGroup) { const e = new Error('groepen niet'); e.code = 'NIET_TOEGESTAAN'; throw e; }
 
       const msgs = await chat.fetchMessages({ limit: n });
@@ -805,6 +835,11 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
 
       return {
         berichten,
+        // De chat bestaat en is gevonden, maar draagt niets. Dat is iets anders
+        // dan 'niet gevonden': hier is niets misgegaan, er is alleen niets
+        // gesynchroniseerd naar dit apparaat.
+        leeg   : berichten.length === 0,
+        vorm   : gebruikteVorm,
         aantal : berichten.length,
         oudste : berichten.length ? berichten[0].tijdstip : null,
         nieuwste: berichten.length ? berichten[berichten.length - 1].tijdstip : null,
