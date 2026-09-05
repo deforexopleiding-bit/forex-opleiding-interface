@@ -206,11 +206,17 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // testbericht staat er welke weg werkte, en welke niet bestond.
   const WEGEN = ['getNumberId', 'getChatById', 'getChats', 'getMessageById', 'msg_getchat',
                  'chat_contact', 'contact_data', 'msg_data'];
-  const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null }]));
+  const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null, statussen: {} }]));
   const noteer = (weg, res) => {
     const t = wegen[weg];
     if (!t) return;
     t.geprobeerd += 1;
+    // DE STATUS ZELF BEWAREN, niet alleen 'gelukt ja of nee'. Dit was een eigen
+    // fout die een hele ronde kostte: probeer() rekent al uit óf iets niet
+    // bestond, niets teruggaf, iets onbruikbaars gaf of wierp — en deze teller
+    // gooide dat weg. Dan staat er 'geprobeerd 2, gelukt 0' en weet je nog
+    // steeds niets. Precies de stilte die uitkomst.js moest wegnemen.
+    if (res.status) t.statussen[res.status] = (t.statussen[res.status] || 0) + 1;
     if (res.status === GELUKT) t.gelukt += 1;
     if (res.status === BESTAAT_NIET) t.beschikbaar = false;
     else if (t.beschikbaar === null) t.beschikbaar = true;
@@ -390,6 +396,8 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // waarin een miss betekent 'de lijst is verouderd'.
   let chatsCache = null;
   let chatsCacheAt = null;
+  let chatsGeprobeerdAt = null;
+  let chatsStatus = null;
 
   async function haalChats(ververs = false) {
     if (chatsCache && !ververs) return chatsCache;
@@ -399,9 +407,21 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       bruikbaar: (v) => Array.isArray(v),
     });
     noteer('getChats', res);
-    if (res.status !== GELUKT) return chatsCache || [];
+    // Het moment van de póging, niet van het succes. Stond dit alleen op de
+    // gelukte tak, dan zag een mislukte ronde eruit als 'nooit geprobeerd'.
+    chatsGeprobeerdAt = new Date().toISOString();
+    chatsStatus = res.status;
+
+    if (res.status !== GELUKT) {
+      console.log('[brug] getChats:', res.status, '— geen gesprekkenlijst gekregen');
+      return chatsCache || [];
+    }
     chatsCache = res.waarde;
-    chatsCacheAt = new Date().toISOString();
+    chatsCacheAt = chatsGeprobeerdAt;
+    // Een AANTAL. Dat is de vraag die openstond: kwam de lijst leeg terug, of
+    // ging het zoeken erin mis? Nul betekent dat dit gekoppelde apparaat geen
+    // gesprekkenlijst heeft en er niets op te halen valt.
+    console.log('[brug] getChats: gelukt —', chatsCache.length, 'gesprekken');
     return chatsCache;
   }
 
@@ -794,8 +814,12 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     lidkaartStatus: () => ({
       ...lidkaart.status(),
       historiek_vormen: { ...historiekVormen },
-      chats_in_cache  : chatsCache ? chatsCache.length : null,
-      chats_opgehaald : chatsCacheAt,
+      // Drie velden in plaats van één, want 'null' betekende hier drie dingen
+      // tegelijk: nooit geprobeerd, mislukt, of leeg teruggekregen.
+      chats_in_cache    : chatsCache ? chatsCache.length : null,
+      chats_opgehaald   : chatsCacheAt,
+      chats_geprobeerd  : chatsGeprobeerdAt,
+      chats_status      : chatsStatus,
     }),
     /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),

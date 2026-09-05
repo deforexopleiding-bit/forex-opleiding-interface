@@ -1275,10 +1275,24 @@
           ' &middot; <b>geen_kandidaten</b> = van dat nummer kennen we geen enkele vorm, ' +
           '<b>niets_gevonden</b> = wél gezocht, chat stond er niet.</div>';
       }
-      if (typeof d.lidkaart.chats_in_cache === 'number') {
-        h += '<div class="ronde zacht">Gesprekkenlijst: ' + d.lidkaart.chats_in_cache +
-          ' gesprekken in het geheugen' +
-          (d.lidkaart.chats_opgehaald ? ', opgehaald om ' + esc(uur(d.lidkaart.chats_opgehaald)) : '') +
+      // Drie verschillende antwoorden, en ze zagen er allemaal uit als 'null'.
+      const lk = d.lidkaart;
+      if (lk.chats_geprobeerd || typeof lk.chats_in_cache === 'number') {
+        let zin;
+        if (lk.chats_status && lk.chats_status !== 'gelukt') {
+          zin = 'Gesprekkenlijst: opvragen gaf <b>' + esc(lk.chats_status) + '</b>. ' +
+            'Dat is geen lege lijst maar een mislukte aanvraag.';
+        } else if (lk.chats_in_cache === 0) {
+          zin = 'Gesprekkenlijst: <b>leeg</b>. Dit gekoppelde apparaat heeft geen gesprekken ' +
+            'gesynchroniseerd gekregen, dus er valt geen historiek op te halen.';
+        } else if (typeof lk.chats_in_cache === 'number') {
+          zin = 'Gesprekkenlijst: ' + lk.chats_in_cache + ' gesprekken in het geheugen';
+        } else {
+          zin = 'Gesprekkenlijst: nog niet opgevraagd.';
+        }
+        h += '<div class="ronde zacht">' + zin +
+          (lk.chats_opgehaald ? ', opgehaald om ' + esc(uur(lk.chats_opgehaald))
+            : lk.chats_geprobeerd ? ', laatst geprobeerd om ' + esc(uur(lk.chats_geprobeerd)) : '') +
           '.</div>';
       }
     }
@@ -1313,10 +1327,17 @@
       const rijen = Object.keys(w);
       if (rijen.length) {
         h += '<table class="tellers"><tr><th>weg</th><th>geprobeerd</th><th>gelukt</th><th>beschikbaar</th></tr>' +
-          rijen.map((k) => '<tr><td>' + esc(k) + '</td><td>' + (w[k].geprobeerd || 0) + '</td><td>' +
-            (w[k].gelukt || 0) + '</td><td>' +
-            (w[k].beschikbaar === null ? 'onbekend' : (w[k].beschikbaar ? 'ja' : 'nee')) +
-            '</td></tr>').join('') + '</table>';
+          rijen.map((k) => {
+            // De statussen erbij: 'geprobeerd 2, gelukt 0' zei niets over
+            // waaróm het niet lukte, en dat was precies de vraag.
+            const st = w[k].statussen || {};
+            const uitleg = Object.keys(st).filter((x) => x !== 'gelukt' && st[x] > 0)
+              .map((x) => x + '×' + st[x]).join(', ');
+            return '<tr><td>' + esc(k) + '</td><td>' + (w[k].geprobeerd || 0) + '</td><td>' +
+              (w[k].gelukt || 0) + '</td><td>' +
+              (w[k].beschikbaar === null ? 'onbekend' : (w[k].beschikbaar ? 'ja' : 'nee')) +
+              (uitleg ? ' &middot; ' + esc(uitleg) : '') + '</td></tr>';
+          }).join('') + '</table>';
       }
       const bv = b.laatste_berichtvormen;
       if (bv && Object.keys(bv).length) {

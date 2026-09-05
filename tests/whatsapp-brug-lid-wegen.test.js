@@ -189,7 +189,9 @@ test('er wordt per weg bijgehouden: geprobeerd, gelukt, beschikbaar', () => {
 test('BESTAAT_NIET zet beschikbaar op nee, en niets anders doet dat', () => {
   const b = bron();
   const i = b.indexOf('const noteer =');
-  const blok = b.slice(i, i + 500);
+  // Ruimer venster: er is een commentaarblok bij gekomen over waarom de status
+  // zelf bewaard wordt.
+  const blok = b.slice(i, i + 900);
   assert.match(blok, /res\.status === BESTAAT_NIET\) t\.beschikbaar = false/);
   assert.match(blok, /t\.beschikbaar === null\) t\.beschikbaar = true/);
 });
@@ -408,4 +410,61 @@ test('het CRM geeft die twee door zodat het geen stilte wordt', () => {
   const api = readFileSync(join(ROOT, 'api/opvolging-whatsapp-historiek.js'), 'utf8');
   assert.match(api, /kandidaten   : e\?\.data\?\.kandidaten/);
   assert.match(api, /chats_bekeken: e\?\.data\?\.chats_bekeken/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE STATUS WEGGOOIEN BIJ DE TELLER WAS EEN EIGEN FOUT
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('de teller bewaart de status, niet alleen gelukt-ja-of-nee', () => {
+  // probeer() rekent al uit óf iets niet bestond, niets teruggaf, iets
+  // onbruikbaars gaf of wierp. noteer() gooide dat weg, en dan staat er
+  // 'geprobeerd 2, gelukt 0' terwijl je nog steeds niets weet. Precies de
+  // stilte die uitkomst.js moest wegnemen — en ik had hem zelf teruggebouwd.
+  const b = bron();
+  const i = b.indexOf('const noteer =');
+  const blok = b.slice(i, i + 800);
+  assert.match(blok, /t\.statussen\[res\.status\] = \(t\.statussen\[res\.status\] \|\| 0\) \+ 1/);
+  assert.match(b, /geprobeerd: 0, gelukt: 0, beschikbaar: null, statussen: \{\}/);
+});
+
+test('getChats logt het AANTAL gesprekken', () => {
+  // Dit is de vraag die openstond: kwam de lijst leeg terug, of ging het zoeken
+  // erin mis? Een aantal is een getal, geen gegeven van iemand.
+  const b = bron();
+  const i = b.indexOf('async function haalChats');
+  const blok = b.slice(i, i + 1200);
+  assert.match(blok, /chatsCache\.length, 'gesprekken'/);
+  assert.match(blok, /console\.log\('\[brug\] getChats:', res\.status/,
+    'en bij een mislukking de status');
+});
+
+test('het moment van de póging wordt vastgelegd, niet alleen dat van het succes', () => {
+  // Stond dit alleen op de gelukte tak, dan zag een mislukte ronde eruit als
+  // 'nooit geprobeerd' — en dat is iets heel anders.
+  const b = bron();
+  const i = b.indexOf('async function haalChats');
+  const blok = b.slice(i, i + 1200);
+  const geprobeerd = blok.indexOf('chatsGeprobeerdAt = new Date()');
+  const mislukt = blok.indexOf("if (res.status !== GELUKT)");
+  assert.ok(geprobeerd > 0 && mislukt > 0);
+  assert.ok(geprobeerd < mislukt, 'eerst vastleggen dát het geprobeerd is');
+});
+
+test('de status onderscheidt nooit-geprobeerd, mislukt en leeg', () => {
+  const b = bron();
+  const i = b.indexOf('lidkaartStatus: () =>');
+  const blok = b.slice(i, i + 700);
+  for (const veld of ['chats_in_cache', 'chats_opgehaald', 'chats_geprobeerd', 'chats_status']) {
+    assert.ok(blok.includes(veld), 'veld ontbreekt: ' + veld);
+  }
+});
+
+test('het paneel zegt bij een lege lijst dat er niets op te halen valt', () => {
+  const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
+  assert.match(view, /chats_in_cache === 0/);
+  assert.match(view, /geen gesprekken\s*\+?\s*'?\s*gesynchroniseerd|gesynchroniseerd gekregen/,
+    'en dat dat betekent dat er geen historiek is');
+  assert.match(view, /Dat is geen lege lijst maar een mislukte aanvraag/,
+    'en een mislukte aanvraag is iets anders dan een lege lijst');
 });
