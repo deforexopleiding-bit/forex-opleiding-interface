@@ -30,20 +30,7 @@ import {
 } from './bubble.js';
 import { sendCredentialsEmail } from './onboarding-credentials.js';
 import { vindOfMaakAccount, zetGrant, zetWachtwoord } from './lms-provisioning.js';
-
-// Maand-arithmetiek met clamp op laatste dag van de maand (15 → +1 = 15;
-// 31 jan + 1 maand = 28/29 feb). Bubble-side wordt dit als datum opgeslagen
-// — voor 1-op-1 / Alpha is dit slechts een placeholder die later bij echte
-// activatie wordt bijgewerkt.
-function addMonths(date, months) {
-  const n = Math.max(0, Math.floor(Number(months) || 0));
-  const d = new Date(date.getTime());
-  const day = d.getUTCDate();
-  d.setUTCMonth(d.getUTCMonth() + n);
-  // Clamp: als de doelmaand minder dagen heeft kan setUTCMonth doorrollen.
-  if (d.getUTCDate() < day) d.setUTCDate(0);
-  return d;
-}
+import { addMonths } from './onboarding-window.js';
 
 // Bubble workflow-response kan op meerdere plaatsen het user-id zetten:
 // soms { user_id: '...' } direct, soms genest in { response: { user_id }}.
