@@ -137,12 +137,22 @@ test('nergens in de view staat nog een entity binnen esc()', () => {
 // DE WEEKBALK PAST OP ÉÉN REGEL
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('de zes tegels staan in een grid van zes gelijke kolommen', () => {
+test('de tegels staan in een grid met evenveel gelijke kolommen als tegels', () => {
   // Het was een flexrij met min-width per tegel. Bij zes tegels paste dat niet
   // meer en viel zaterdag op een eigen regel over de volle breedte. Een grid
   // met minmax(0,1fr) kan niet afbreken: de kolommen krimpen mee.
+  //
+  // Het aantal staat hier niet als vast getal maar wordt uit de bron gelezen:
+  // G1 heeft er een zevende tegel bij gezet ('Later'), en een grid dat één
+  // kolom te weinig heeft breekt precies zoals hierboven weer af.
   const bron = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
-  assert.match(bron, /\.opv \.wkbar \.wk\{[^}]*grid-template-columns:repeat\(6,minmax\(0,1fr\)\)/);
+  const dagen = (bron.match(/const WEEKDAG_LABELS = \[([^\]]*)\]/) || [])[1] || '';
+  const aantalDagen = (dagen.match(/'/g) || []).length / 2;
+  assert.ok(aantalDagen >= 5, 'de dagnamen horen gevonden te worden, gevonden: ' + aantalDagen);
+  const kolommen = Number((bron.match(/\.opv \.wkbar \.wk\{[^}]*grid-template-columns:repeat\((\d+),minmax\(0,1fr\)\)/) || [])[1]);
+  const laterTegel = /class="wkd later"/.test(bron) ? 1 : 0;
+  assert.equal(kolommen, aantalDagen + laterTegel,
+    'evenveel kolommen als tegels: ' + aantalDagen + ' dagen + ' + laterTegel + ' extra');
   assert.match(bron, /\.opv \.wkbar \.wkd\{[^}]*min-width:0/,
     'zonder min-width:0 houdt de tegel zichzelf breed en loopt het grid over');
   assert.doesNotMatch(bron, /\.opv \.wkd\{[^}]*min-width:104px/,

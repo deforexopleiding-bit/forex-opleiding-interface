@@ -67,6 +67,12 @@
     taken: { loading: false, error: null, data: null, key: null },
     dash: { loading: false, error: null, data: null, key: null },
     archief: { loading: false, error: null, data: null },
+    // G1 · de getallen onder de weekbalk, en wat erachter zit. Aparte staat en
+    // een apart endpoint: de takenlijst gaat over één dag, de balk over zeven,
+    // en die twee mogen elkaar niet ophouden als er één van faalt.
+    balk: { loading: false, error: null, data: null, key: null },
+    later: { loading: false, error: null, data: null, key: null },
+    tijdlijn: { loading: false, error: null, data: null, key: null },
   };
   const _ui = {
     dagView: null,          // null = vandaag
@@ -176,6 +182,44 @@
     if (j.__error) st.error = j.__error; else st.data = j.archief || [];
     render();
   }
+  /**
+   * De getallen onder de weekbalk. Faalt dit, dan blijft er een punt staan in
+   * plaats van een nul — een nul leest als een meting, en dit is er dan geen.
+   */
+  async function fetchBalk(van, tot) {
+    const st = _live.balk;
+    const key = van + '|' + tot;
+    if (st.loading || (st.data && st.key === key)) return;
+    st.loading = true; st.error = null; st.key = key;
+    const j = await haal('/api/opvolging-weekbalk?van=' + encodeURIComponent(van) +
+      '&tot=' + encodeURIComponent(tot));
+    st.loading = false;
+    if (j.__error) { st.error = j.__error; st.data = null; } else { st.data = j; }
+    render();
+  }
+
+  /** Alles wat verder ligt dan de balk toont. Zie de knop 'Later'. */
+  async function fetchLater(na) {
+    const st = _live.later;
+    if (st.loading || (st.data && st.key === na)) return;
+    st.loading = true; st.error = null; st.key = na;
+    const j = await haal('/api/opvolging-weekbalk?view=later&na=' + encodeURIComponent(na));
+    st.loading = false;
+    if (j.__error) { st.error = j.__error; st.data = null; } else { st.data = j; }
+    render();
+  }
+
+  /** Wat er op één dag daadwerkelijk gebeurd is. */
+  async function fetchTijdlijn(dag) {
+    const st = _live.tijdlijn;
+    if (st.loading || (st.data && st.key === dag)) return;
+    st.loading = true; st.error = null; st.key = dag;
+    const j = await haal('/api/opvolging-weekbalk?view=tijdlijn&dag=' + encodeURIComponent(dag));
+    st.loading = false;
+    if (j.__error) { st.error = j.__error; st.data = null; } else { st.data = j; }
+    render();
+  }
+
   /** De maandag van de week waarin `d` valt. */
   function maandagVan(d) {
     const dt = new Date(d + 'T12:00:00Z');
@@ -643,6 +687,12 @@
     _live.taken.data = null; _live.taken.key = null;
     _live.dash.data = null; _live.dash.key = null;
     _live.archief.data = null;
+    // De weekbalk telt dezelfde taken. Bleef die staan, dan toonde een tegel
+    // nog het getal van vóór de actie — precies het soort getal dat eruitziet
+    // alsof het klopt.
+    _live.balk.data = null; _live.balk.key = null;
+    _live.later.data = null; _live.later.key = null;
+    _live.tijdlijn.data = null; _live.tijdlijn.key = null;
     // De calls hangen aan dezelfde dag; een nieuwe taak verandert welke
     // belknop een taak-koppeling krijgt.
     _calls.data = null; _calls.key = null; _calls.error = null;
@@ -684,7 +734,11 @@
    met zes gelijke kolommen kan niet afbreken: minmax(0,1fr) laat elke kolom
    krimpen in plaats van te wrappen. De min-width moet daarvoor expliciet terug
    naar 0, anders houdt de tegel zichzelf breed en loopt het grid over. */
-.opv .wkbar .wk{margin:0;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+/* G1: er is een zevende tegel bij gekomen — 'Later'. Zelfde grid-redenering:
+   zeven gelijke kolommen die kunnen krimpen in plaats van af te breken. */
+.opv .wkbar .wk{margin:0;display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.opv .wkd.later{background:#fbfaff;border-style:dashed}
+.opv .wkd.later .l .d{color:var(--o-pur)}
 .opv .wkbar .wkd{flex:none;min-width:0;overflow:hidden}
 /* De vandaag-markering is een los element, zodat hij op een smal scherm kan
    verdwijnen zonder de datum mee te nemen. De tegel zelf verandert nergens van
@@ -714,6 +768,22 @@
 .opv .wkd.on{border-color:var(--o-acc);box-shadow:0 0 0 3px var(--o-accs)}
 .opv .wkd.nu .l{color:var(--o-acc)}
 .opv .wkd.oud{background:#fbfcfd}
+/* G1 · de tijdlijn van een voorbije dag */
+.opv .tl{display:flex;flex-direction:column;gap:2px}
+.opv .tlrij{display:grid;grid-template-columns:46px 26px 1fr;align-items:flex-start;gap:8px;padding:8px 4px;border-bottom:1px solid var(--o-line)}
+.opv .tlrij:last-child{border-bottom:0}
+.opv .tltijd{font-variant-numeric:tabular-nums;font-weight:650;color:var(--o-muted);font-size:12.5px;padding-top:1px}
+.opv .tlem{font-size:14px;line-height:1.2}
+.opv .tlwat{min-width:0;font-size:13px}
+.opv .tlres{color:var(--o-muted);font-size:12px;margin-top:2px}
+.opv .tlvoet{margin-top:14px}
+/* G1 · alles wat later staat, gegroepeerd per dag */
+.opv .lt{display:flex;flex-direction:column;gap:14px}
+.opv .ltkop{font-size:12.5px;font-weight:700;color:var(--o-muted);margin:0 0 6px 2px}
+.opv .ltkop small{font-weight:600;color:var(--o-muted);opacity:.75}
+.opv .ltrij{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;cursor:pointer;background:#fff;border:1px solid var(--o-line);border-radius:10px;padding:8px 11px;margin-bottom:5px}
+.opv .ltrij:hover{border-color:var(--o-acc)}
+.opv .ltnm{font-weight:650;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .opv .ronde{font-size:12.5px;color:var(--o-muted);margin:0 0 10px 2px}
 .opv .ronde.zacht{margin:8px 0 0 2px;font-size:11.5px;font-style:italic}
 .opv .row{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:13px 16px;display:flex;align-items:flex-start;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
@@ -1930,21 +2000,65 @@
     return Math.round((naar - van) / (7 * 86400000));
   }
 
+  /**
+   * Wat er op één dagtegel komt te staan. Twee verschillende getallen, en dat
+   * is met opzet.
+   *
+   * Een taak die blijft liggen houdt zijn oude `due`, en de dagweergave van
+   * vandaag haalt daarom alles op met due <= vandaag. 'Open op dinsdag' is voor
+   * een dinsdag in het verleden dus geen zinnig getal: die taak staat inmiddels
+   * onder vandaag. Wat wél vaststaat over een voorbije dag is wat er die dag
+   * geregistreerd is.
+   *
+   *   verleden → aantal acties  ('gedaan')
+   *   vandaag / toekomst → aantal open taken ('open')
+   *
+   * Nog niets binnen → een punt, geen nul. Een nul leest als een meting.
+   */
+  function tegelGetal(d, nu) {
+    const st = _live.balk;
+    const rij = st.data && (st.data.dagen || []).find((x) => x.dag === d);
+    const verleden = d < nu;
+    if (!rij) return { getal: '·', label: verleden ? ' gedaan' : ' open', gemeten: false };
+    const waarde = verleden ? rij.acties : rij.open;
+    if (waarde === null || waarde === undefined) {
+      return { getal: '·', label: verleden ? ' gedaan' : ' open', gemeten: false };
+    }
+    return { getal: String(waarde), label: verleden ? ' gedaan' : ' open', gemeten: true };
+  }
+
   function weekbalk(dag) {
     const nu = vandaag();
     const wk = bepaalWeek({ nu, offset: _ui.weekOffset });
     const terug = _ui.weekOffset > WEEK_MIN_OFFSET;
     const heen  = _ui.weekOffset < WEEK_MAX_OFFSET;
+    const laatste = wk.dagen[wk.dagen.length - 1];
+    queueMicrotask(() => fetchBalk(wk.dagen[0], laatste));
 
     let knoppen = '<div class="wk">';
     wk.dagen.forEach((d, i) => {
       const aan = d === dag;
-      knoppen += '<button class="wkd ' + (aan ? 'on' : '') + ' ' + (d === nu ? 'nu' : '') + ' ' + (d < nu ? 'oud' : '') + '"' +
-        ' onclick="window.__opvDag(\'' + d + '\')">' +
+      const verleden = d < nu;
+      const g = tegelGetal(d, nu);
+      // Een voorbije dag opent de tijdlijn: daar staat wat er gebeurd is, en
+      // dat is het enige wat over die dag vaststaat. De takenlijst van die dag
+      // blijft bereikbaar vanuit dat venster.
+      const klik = verleden ? "window.__opvTijdlijn('" + d + "')" : "window.__opvDag('" + d + "')";
+      knoppen += '<button class="wkd ' + (aan ? 'on' : '') + ' ' + (d === nu ? 'nu' : '') + ' ' + (verleden ? 'oud' : '') + '"' +
+        ' onclick="' + klik + '">' +
         '<span class="l"><span class="d">' + WEEKDAG_LABELS[i] + ' ' + nl(d) + '</span>' +
           (d === nu ? ' <span class="vd">vandaag</span>' : '') + '</span>' +
-        '<span class="c">' + (aan && _live.taken.data ? _live.taken.data.taken.length : '·') + '<small> open</small></span></button>';
+        '<span class="c">' + g.getal + '<small>' + g.label + '</small></span></button>';
     });
+    // De zevende tegel. Hij bestaat omdat de balk zes dagen laat zien terwijl
+    // er dertig aanmeldtaken stonden: de andere twintig waren niet weg, alleen
+    // onbereikbaar. Dit is de enige plek waar je ze ziet zonder te weten dat je
+    // moet doorklikken.
+    const later = _live.balk.data && _live.balk.data.later;
+    knoppen += '<button class="wkd later" onclick="window.__opvLater()" ' +
+      'title="Alles met een datum na ' + esc(nl(laatste)) + '">' +
+      '<span class="l"><span class="d">Later</span></span>' +
+      '<span class="c">' + (later ? String(later.aantal) : '·') + '<small> wacht</small></span></button>';
     knoppen += '</div>';
 
     return '<div class="wkbar">' +
@@ -2162,7 +2276,11 @@
    * dezelfde stille vorm als de scrim-bug. tests/opvolging-call-modal.test.js
    * controleert dat elk venster dat zonder taakId geopend wordt, hier staat.
    */
-  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst']);
+  // G1 heeft er twee bij: de tijdlijn van een voorbije dag en de lijst met wat
+  // later staat. Allebei gaan ze over een dag of over een verzameling, niet
+  // over één taak — dus horen ze hier, vóór de taak-guard in modalHtml().
+  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst', 'tijdlijn', 'later']);
+  const MODAL_BALK = new Set(['tijdlijn', 'later']);
 
   /**
    * De vier uitkomsten van een zoomcall. Hangt aan de agenda, niet aan een taak.
@@ -2171,6 +2289,111 @@
    * is juist het normale geval bij een eerste gesprek. Vandaar dat dit venster
    * vóór de taak-guard in modalHtml() wordt afgehandeld.
    */
+  // ═════════════════════════════════════════════════════════════════════════
+  // G1 · DE TWEE VENSTERS ONDER DE WEEKBALK
+  // ═════════════════════════════════════════════════════════════════════════
+
+  const POGING_LABEL = {
+    call               : ['&#9742;', 'Gebeld'],
+    whatsapp           : ['&#128172;', 'WhatsApp'],
+    spraakbericht      : ['&#127908;', 'Spraakbericht'],
+    agenda_doorgestuurd: ['&#128197;', 'Agenda doorgestuurd'],
+    ingepland          : ['&#10003;', 'Ingepland'],
+  };
+
+  /** 'ma 1 september' — voor de kop van een venster, waar ruimte genoeg is. */
+  function langeDatum(d) {
+    if (!d) return '';
+    return new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam', weekday: 'short', day: 'numeric', month: 'long',
+    }).format(new Date(d + 'T12:00:00Z'));
+  }
+
+  /**
+   * De tijdlijn van een voorbije dag: wat er die dag daadwerkelijk gebeurd is.
+   *
+   * Waarom dit niet gewoon de takenlijst van die dag is: een taak die bleef
+   * liggen houdt zijn oude datum en staat inmiddels onder vandaag. De lijst van
+   * een voorbije dag zou dus half leeg zijn en de andere helft op de verkeerde
+   * plek tonen. Wat er wél vaststaat, is wat er geregistreerd is.
+   */
+  function tijdlijnBody(dag) {
+    const st = _live.tijdlijn;
+    if (st.error) return fout(st.error, "window.__opvTijdlijn('" + dag + "')");
+    if (st.loading || !st.data || st.key !== dag) return skel();
+    const items = st.data.items || [];
+    const naar = '<div class="tlvoet"><button class="obtn" onclick="window.__opvDagVanuitTijdlijn(\'' + dag +
+      '\')">Toon de takenlijst van deze dag</button></div>';
+    if (!items.length) {
+      return '<div class="nietgemeten"><b>Op deze dag is niets geregistreerd.</b><br>' +
+        'Geen belpoging, geen WhatsApp, geen doorgestuurde agenda. Dat betekent niet per se dat ' +
+        'er niets gebeurd is &mdash; alleen dat er niets is vastgelegd.</div>' + naar;
+    }
+    const rijen = items.map((it) => {
+      const l = POGING_LABEL[it.soort] || ['&#8226;', it.soort];
+      const naam = it.taak ? esc(it.taak.naam) : '<i>taak niet meer gevonden</i>';
+      return '<div class="tlrij">' +
+        '<div class="tltijd">' + esc(uur(it.tijdstip)) + '</div>' +
+        '<div class="tlem">' + l[0] + '</div>' +
+        '<div class="tlwat"><b>' + l[1] + '</b> &middot; ' + naam +
+          (it.taak && it.taak.badge_label ? ' <span class="tag t-grey">' + esc(it.taak.badge_label) + '</span>' : '') +
+          (it.resultaat ? '<div class="tlres">' + esc(it.resultaat) + '</div>' : '') +
+          (it.automatisch ? '<div class="tlres">automatisch geregistreerd</div>' : '') +
+        '</div></div>';
+    }).join('');
+    return '<div class="tl">' + rijen + '</div>' + naar;
+  }
+
+  /**
+   * Alles wat verder ligt dan de balk toont.
+   *
+   * De aanleiding: er stonden dertig aanmeldtaken en er waren er tien te zien.
+   * De andere twintig waren niet weg, alleen onbereikbaar zonder te weten dat
+   * je moest doorklikken.
+   */
+  function laterBody(na) {
+    const st = _live.later;
+    if (st.error) return fout(st.error, 'window.__opvLater()');
+    if (st.loading || !st.data || st.key !== na) return skel();
+    const dagen = st.data.dagen || [];
+    if (!dagen.length) {
+      return '<div class="empty">Er staat niets ingepland na ' + esc(nl(na)) + '.</div>';
+    }
+    const afgekapt = st.data.afgekapt
+      ? '<div class="warn2">Er zijn er meer dan hier passen; dit zijn de eerste ' +
+        st.data.aantal + '. Zoek de rest via de weekbalk.</div>'
+      : '';
+    const blokken = dagen.map((g) => {
+      const rijen = (g.taken || []).map((t) => {
+        const r = REDEN_LABEL[t.reden] || [t.reden, 't-grey'];
+        return '<button class="ltrij" onclick="window.__opvDagVanuitLater(\'' + g.dag + '\')">' +
+          '<span class="ltnm">' + esc(t.naam) + '</span>' +
+          '<span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
+          (t.badge_label ? '<span class="tag t-grey">' + esc(t.badge_label) + '</span>' : '') +
+          '</button>';
+      }).join('');
+      return '<div class="ltgroep"><div class="ltkop">' + esc(langeDatum(g.dag)) +
+        ' <small>' + (g.taken || []).length + '</small></div>' + rijen + '</div>';
+    }).join('');
+    return afgekapt + '<div class="lt">' + blokken + '</div>';
+  }
+
+  function balkModalHtml(m) {
+    if (m.soort === 'tijdlijn') {
+      return scrim('Wat er gebeurd is op ' + esc(langeDatum(m.dag)),
+        'Alleen wat er die dag is vastgelegd. Taken die zijn blijven liggen staan onder vandaag.',
+        tijdlijnBody(m.dag));
+    }
+    // 'later'
+    const st = _live.later;
+    const aantal = st.data && st.key === m.na ? st.data.aantal : null;
+    return scrim('Later dan deze week',
+      aantal === null
+        ? 'Alles met een datum na ' + esc(nl(m.na)) + '.'
+        : aantal + ' ta' + (aantal === 1 ? 'ak' : 'ken') + ' met een datum na ' + esc(nl(m.na)) + '.',
+      laterBody(m.na));
+  }
+
   function callModalHtml(m) {
     const c = (_calls.data || [])[m.callIndex];
     if (!c) return '';
@@ -2217,6 +2440,7 @@
 
     // Eerst wat geen taak nodig heeft, en pas daarna de taak-guard. Andersom
     // sneuvelen deze twee stil op een taak die er nooit had moeten zijn.
+    if (MODAL_BALK.has(m.soort)) return balkModalHtml(m);
     if (MODAL_ZONDER_TAAK.has(m.soort)) return callModalHtml(m);
 
     const t = zoekTaak(m.taakId);
@@ -2433,6 +2657,27 @@
     _calls.data = null; _calls.key = null; _calls.error = null;
     render();
   };
+
+  // ── G1 · de twee vensters onder de balk ───────────────────────────────────
+  window.__opvTijdlijn = (d) => {
+    _ui.modal = { soort: 'tijdlijn', dag: d };
+    queueMicrotask(() => fetchTijdlijn(d));
+    render();
+  };
+
+  window.__opvLater = () => {
+    const wk = bepaalWeek({ nu: vandaag(), offset: _ui.weekOffset });
+    const na = wk.dagen[wk.dagen.length - 1];
+    _ui.modal = { soort: 'later', na };
+    queueMicrotask(() => fetchLater(na));
+    render();
+  };
+
+  // Vanuit de tijdlijn alsnog de takenlijst van die dag. Zonder deze knop was
+  // de dagweergave van een voorbije dag niet meer te bereiken, en dat zou iets
+  // weghalen dat er al was.
+  window.__opvDagVanuitTijdlijn = (d) => { _ui.modal = null; window.__opvDag(d); };
+  window.__opvDagVanuitLater    = (d) => { _ui.modal = null; window.__opvDag(d); };
 
   // ── De weekbalk: een week terug of vooruit ────────────────────────────────
   // Verandert alleen wat je ziet, niet welke dag geselecteerd staat. De
@@ -2859,6 +3104,15 @@
   window.__opvWeekHelpers = {
     bepaalWeek, basisMaandag, weekOffsetVoorDag, maandagVan, kortDatum,
     WEEKDAG_LABELS, WEEK_MIN_OFFSET, WEEK_MAX_OFFSET,
+    // G1, getest in tests/opvolging-weekbalk-later.test.js: de tegelgetallen,
+    // de balk zelf en de twee vensters, met een gezette staat in plaats van
+    // een echte fetch.
+    weekbalk, tegelGetal, balkModalHtml, tijdlijnBody, laterBody, langeDatum,
+    zetBalk: (v) => Object.assign(_live.balk, v),
+    zetLater: (v) => Object.assign(_live.later, v),
+    zetTijdlijn: (v) => Object.assign(_live.tijdlijn, v),
+    zetOffset: (n) => { _ui.weekOffset = n; },
+    MODAL_BALK,
   };
 
   // De vensterlogica los na te slaan vanuit de console, en getest in
