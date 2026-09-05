@@ -61,6 +61,9 @@ app.get('/status', auth, (_req, res) => {
     // Meten zonder te kijken: aantallen per gebeurtenis en per reden waarom er
     // iets afvalt. Nooit een nummer, nooit tekst. Zie lib/tellers.js.
     gebeurtenissen : wa.tellers(),
+    // Hoeveel gesprekken we onder een andere identiteit dan een telefoonnummer
+    // kennen. Alleen een aantal — de kaart zelf blijft binnen.
+    nummerkaart    : wa.nummerkaartAantal(),
   });
 });
 

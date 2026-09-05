@@ -16,7 +16,7 @@ import { normaliseerNummer, naarChatId } from './nummers.js';
 // De vorm van elke gebeurtenis staat apart en dependency-vrij, zodat hij te
 // testen is zonder puppeteer of een gekoppelde telefoon.
 import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep } from './gebeurtenis.js';
-import { maakTellers } from './tellers.js';
+import { maakTellers, jidVorm } from './tellers.js';
 
 const { Client, LocalAuth } = pkg;
 
@@ -69,9 +69,78 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
    * dat hij mag bestaan: hij vertelt dát er iets afviel en waarom, en verder
    * niets. Standaard uit, want op een drukke dag is dit ruis.
    */
-  function negeer(type, reden) {
-    tellers.negeer(type, reden);
-    if (process.env.BRUG_DEBUG === '1') console.debug('[brug] genegeerd:', type, reden);
+  function negeer(type, reden, jid) {
+    tellers.negeer(type, reden, jid);
+    if (process.env.BRUG_DEBUG === '1') {
+      // Alleen het type, de reden en de VORM van de identiteit — een domein en
+      // een lengte. Nooit de jid zelf.
+      console.debug('[brug] genegeerd:', type, reden, jidVorm(jid));
+    }
+  }
+
+  // ── Wie is de tegenpartij? ────────────────────────────────────────────────
+  // WhatsApp levert de tegenpartij niet altijd als telefoonnummer aan. In
+  // sommige chats staat er een LID: 'iets@lid' met een getal dat niets met een
+  // telefoonnummer te maken heeft. normaliseerNummer strijkt daar de cijfers
+  // van af, en die staan uiteraard nergens op de leadlijst — dus viel alles
+  // stil weg onder 'niet_op_leadlijst' terwijl het event, fromMe en de
+  // aflevering alle drie klopten.
+  //
+  // Je kunt niet filteren op een nummer dat je niet kent. Vandaar dat de
+  // identiteit hier wordt opgelost VOORDAT het filter draait.
+  //
+  // WAAROM DAT DE GRENS NIET VERPLAATST: dit leest de envelop, niet de inhoud —
+  // dezelfde categorie als de fromMe-boolean. Er wordt niets gelogd, niets
+  // onthouden en niets doorgestuurd voor wie niet op de lijst staat; het filter
+  // staat nog altijd vóór elk gebruik van nummer of tekst. Het enige verschil
+  // is dat het filter nu de juiste vraag krijgt.
+  //
+  // De nummerkaart onthoudt welke jid bij welk nummer hoort, zodat versturen en
+  // historiek-ophalen dezelfde chat vinden. Alleen in geheugen: na een herstart
+  // is hij leeg en vult hij zich vanzelf weer bij het eerste bericht.
+  const nummerkaart = new Map();
+
+  const isTelefoonJid = (jid) => typeof jid === 'string' && /@(c\.us|s\.whatsapp\.net)$/i.test(jid);
+
+  function onthoud(nummer, jid) {
+    if (nummer && jid) nummerkaart.set(nummer, jid);
+  }
+
+  /**
+   * Het echte telefoonnummer achter een jid.
+   *
+   * Is de jid al een telefoonnummer, dan is er niets op te lossen. Anders vragen
+   * we WhatsApp wie dit is. Mislukt dat — en dat is een netwerk-achtige oproep
+   * naar de browser, dus het kán mislukken — dan vallen we terug op de cijfers
+   * van de jid zelf. Dat is precies het gedrag van vóór deze wijziging, dus een
+   * mislukte oplossing maakt het nooit slechter dan het was.
+   */
+  async function bepaalNummer(jid) {
+    if (!jid) { tellers.oplossing('geen_jid'); return null; }
+    if (isTelefoonJid(jid)) {
+      const n = normaliseerNummer(jid);
+      onthoud(n, jid);
+      tellers.oplossing('jid');
+      return n;
+    }
+    try {
+      const contact = await client.getContactById(jid);
+      const kandidaat = contact?.number || contact?.id?.user || null;
+      const n = normaliseerNummer(kandidaat);
+      if (n) { onthoud(n, jid); tellers.oplossing('contact'); return n; }
+      tellers.oplossing('contact_zonder_nummer');
+    } catch (e) {
+      // Geen tekst, geen jid in het log — alleen dát het niet lukte.
+      tellers.oplossing('mislukt');
+      if (process.env.BRUG_DEBUG === '1') console.debug('[brug] contact oplossen faalde');
+    }
+    return normaliseerNummer(jid);   // terugval op msg.to, zoals het was
+  }
+
+  /** De chat waar dit nummer onder bekend staat, of de gewone @c.us-vorm. */
+  function chatIdVoor(nummer) {
+    const n = normaliseerNummer(nummer);
+    return (n && nummerkaart.get(n)) || naarChatId(nummer);
   }
 
   client.on('qr', async (qr) => {
@@ -113,13 +182,17 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     tellers.zag('message');
     try {
       const van = msg.from;
-      // FILTER EERST. Alles hieronder raakt de tekst aan.
-      if (!leadlijst.mag(van)) { negeer('message', 'niet_op_leadlijst'); return; }
-      if (isGroep(van)) { negeer('message', 'groep'); return; }
+      if (isGroep(van)) { negeer('message', 'groep', van); return; }
+      // Eerst weten WIE dit is — een jid is niet altijd een telefoonnummer —
+      // en dan pas filteren. Zie bepaalNummer(): dit leest de envelop, en het
+      // filter staat nog altijd vóór elk gebruik van nummer of tekst.
+      const nummer = await bepaalNummer(van);
+      // FILTER. Alles hieronder raakt de tekst aan.
+      if (!leadlijst.mag(nummer)) { negeer('message', 'niet_op_leadlijst', van); return; }
       tellers.liet('message');
       await webhook.duw({
         soort    : 'antwoord_ontvangen',
-        nummer   : normaliseerNummer(van),
+        nummer,
         tijdstip : new Date((msg.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
         tekst    : typeof msg.body === 'string' ? msg.body.slice(0, 4000) : '',
         // Een ingesproken bericht telt in de opvolging als spraakbericht, niet
@@ -157,16 +230,19 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // voor binnengekomen berichten, en daar is `to` óns eigen nummer: die
       // zouden anders allemaal als 'niet_op_leadlijst' geteld worden en het
       // beeld vertroebelen precies waar we naar kijken.
-      if (msg?.fromMe !== true) { negeer('message_create', 'niet_van_ons'); return; }
+      if (msg?.fromMe !== true) { negeer('message_create', 'niet_van_ons', msg?.to); return; }
+      if (isGroep(msg?.to)) { negeer('message_create', 'groep', msg?.to); return; }
+      // Eerst de identiteit oplossen, dan filteren. Zonder deze stap filteren we
+      // op de cijfers van een LID, en die staan nergens op de leadlijst.
+      const nummer = await bepaalNummer(msg?.to);
       // FILTER, en pas hierna wordt het nummer of de tekst ergens voor gebruikt.
-      if (!leadlijst.mag(msg?.to)) { negeer('message_create', 'niet_op_leadlijst'); return; }
-      if (isGroep(msg?.to)) { negeer('message_create', 'groep'); return; }
+      if (!leadlijst.mag(nummer)) { negeer('message_create', 'niet_op_leadlijst', msg?.to); return; }
       const g = bouwUitgaandeGebeurtenis(msg);
-      if (!g) { negeer('message_create', 'onbruikbaar'); return; }
+      if (!g) { negeer('message_create', 'onbruikbaar', msg?.to); return; }
       tellers.liet('message_create');
       await webhook.duw({
         soort     : g.soort,
-        nummer    : normaliseerNummer(g.jid),
+        nummer,
         tijdstip  : g.tijdstip,
         // De tekst gaat mee zodat het gesprek in het CRM van twee kanten te
         // lezen is. Dit staat NA leadlijst.mag() hierboven — dat is de grens,
@@ -189,15 +265,16 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     tellers.ack(ack);
     try {
       const jid = msg?.to || msg?.from;
-      if (!leadlijst.mag(jid)) { negeer('message_ack', 'niet_op_leadlijst'); return; }
-      if (isGroep(jid)) { negeer('message_ack', 'groep'); return; }
+      if (isGroep(jid)) { negeer('message_ack', 'groep', jid); return; }
+      const nummer = await bepaalNummer(jid);
+      if (!leadlijst.mag(nummer)) { negeer('message_ack', 'niet_op_leadlijst', jid); return; }
       const g = bouwAckGebeurtenis(msg, ack);
       // ACK_SOORT kent -1 en 0 niet: dat zijn statussen die nog niets zeggen.
-      if (!g) { negeer('message_ack', 'geen_ack_soort'); return; }
+      if (!g) { negeer('message_ack', 'geen_ack_soort', jid); return; }
       tellers.liet('message_ack');
       await webhook.duw({
         soort     : g.soort,
-        nummer    : normaliseerNummer(g.jid),
+        nummer,
         // Het moment van de bevestiging, niet van het bericht.
         tijdstip  : g.tijdstip,
         media_type: g.media_type,
@@ -212,6 +289,8 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     staat,
     /** De tellers voor /status. Alleen aantallen; zie lib/tellers.js. */
     tellers: () => tellers.status(),
+    /** Hoeveel nummer↔jid-koppelingen we geleerd hebben. Alleen het aantal. */
+    nummerkaartAantal: () => nummerkaart.size,
     start() {
       console.log('[brug] WhatsApp-client starten…');
       client.initialize().catch((e) => {
@@ -228,7 +307,10 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     async stuur(nummer, tekst) {
       if (!staat.verbonden) { const e = new Error('niet verbonden met WhatsApp'); e.code = 'NIET_VERBONDEN'; throw e; }
       if (!leadlijst.mag(nummer)) { const e = new Error('nummer staat niet op de leadlijst'); e.code = 'NIET_TOEGESTAAN'; throw e; }
-      const chatId = naarChatId(nummer);
+      // Staat dit gesprek onder een LID, dan is '<nummer>@c.us' niet de chat
+      // waar de draad in zit. chatIdVoor() pakt de jid die we bij dit nummer
+      // gezien hebben, en valt anders terug op de gewone vorm.
+      const chatId = chatIdVoor(nummer);
       if (!chatId) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
       const res = await client.sendMessage(chatId, String(tekst));
       raakAan();
@@ -258,20 +340,20 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     async historiek(nummer, limiet = 50) {
       if (!staat.verbonden) { const e = new Error('niet verbonden met WhatsApp'); e.code = 'NIET_VERBONDEN'; throw e; }
       if (!leadlijst.mag(nummer)) { const e = new Error('nummer staat niet op de leadlijst'); e.code = 'NIET_TOEGESTAAN'; throw e; }
-      const chatId = naarChatId(nummer);
-      if (!chatId) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
+      // Eerst de chat waar we dit nummer echt gezien hebben (kan een LID zijn),
+      // daarna pas de gewone @c.us-vorm. Andersom zou een LID-gesprek altijd
+      // 'geen gesprek gevonden' opleveren terwijl het er gewoon is.
+      const kandidaten = [...new Set([chatIdVoor(nummer), naarChatId(nummer)].filter(Boolean))];
+      if (kandidaten.length === 0) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
 
       const n = Math.max(1, Math.min(200, Number(limiet) || 50));
-      let chat;
-      try {
-        chat = await client.getChatById(chatId);
-      } catch (e) {
-        // Onbekende chat: ChatFactory struikelt over undefined. Dat is geen
-        // storing maar 'dit gesprek staat niet op dit apparaat'.
-        const err = new Error('geen gesprek gevonden op dit apparaat');
-        err.code = 'GEEN_GESPREK';
-        throw err;
+      let chat = null;
+      for (const kandidaat of kandidaten) {
+        try { chat = await client.getChatById(kandidaat); if (chat) break; } catch (_) { /* volgende */ }
       }
+      // Geen van de kandidaten leverde een chat op. Dat is geen storing maar
+      // 'dit gesprek staat niet op dit apparaat' — ChatFactory struikelt bij een
+      // onbekende chat over undefined, en dat vangt de lus hierboven al af.
       if (!chat) { const e = new Error('geen gesprek gevonden op dit apparaat'); e.code = 'GEEN_GESPREK'; throw e; }
       if (chat.isGroup) { const e = new Error('groepen niet'); e.code = 'NIET_TOEGESTAAN'; throw e; }
 
