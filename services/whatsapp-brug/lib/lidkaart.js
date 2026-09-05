@@ -27,6 +27,13 @@
 export function maakLidkaart() {
   let nummerNaarLid = new Map();
   let lidNaarNummer = new Map();
+  // De VOLLEDIGE jid zoals WhatsApp hem gaf, niet uit cijfers heropgebouwd.
+  // Dat onderscheid kostte een ronde: we bewaarden alleen de cijfers en plakten
+  // er later zelf '@lid' achter. Werkt dat serialisatie-formaat ooit anders,
+  // dan zoek je een gesprek op een id dat niet bestaat — en dan krijg je
+  // 'geen gesprek gevonden' terwijl het er gewoon is. Wat je gekregen hebt,
+  // bewaar je zoals je het gekregen hebt.
+  let nummerNaarJid = new Map();
   let laatsteOpbouw = null;
   let laatsteFout = null;
 
@@ -37,10 +44,16 @@ export function maakLidkaart() {
       return lidNaarNummer.get(String(lid)) || null;
     },
 
-    /** De LID bij een nummer, of null. */
+    /** De LID-cijfers bij een nummer, of null. */
     lidVoorNummer(nummer) {
       if (!nummer) return null;
       return nummerNaarLid.get(String(nummer)) || null;
+    },
+
+    /** De volledige jid bij een nummer, precies zoals WhatsApp hem gaf. */
+    jidVoorNummer(nummer) {
+      if (!nummer) return null;
+      return nummerNaarJid.get(String(nummer)) || null;
     },
 
     /**
@@ -60,16 +73,22 @@ export function maakLidkaart() {
 
       const nieuwNaarLid = new Map();
       const nieuwNaarNummer = new Map();
+      const nieuwNaarJid = new Map();
       let fouten = 0;
 
       for (const nummer of lijst) {
         if (!nummer) continue;
         try {
           const lid = await zoekLid(nummer);
-          const cijfers = lid ? String(lid).split('@')[0].replace(/\D/g, '') : '';
+          if (!lid) continue;
+          const volledig = String(lid);
+          const cijfers = volledig.split('@')[0].replace(/\D/g, '');
           if (!cijfers) continue;
           nieuwNaarLid.set(String(nummer), cijfers);
           nieuwNaarNummer.set(cijfers, String(nummer));
+          // Alleen bewaren als er echt een domein bij zat; anders zouden we
+          // straks alsnog zelf iets moeten verzinnen.
+          if (volledig.includes('@')) nieuwNaarJid.set(String(nummer), volledig);
         } catch (_) {
           fouten += 1;
         }
@@ -84,6 +103,7 @@ export function maakLidkaart() {
 
       nummerNaarLid = nieuwNaarLid;
       lidNaarNummer = nieuwNaarNummer;
+      nummerNaarJid = nieuwNaarJid;
       laatsteOpbouw = new Date().toISOString();
       laatsteFout = fouten > 0 ? fouten + ' nummer(s) leverden een fout op' : null;
       return { gevonden: nieuwNaarLid.size, bekeken: lijst.length, fouten };
@@ -93,6 +113,7 @@ export function maakLidkaart() {
     status() {
       return {
         koppelingen   : nummerNaarLid.size,
+        met_volledige_jid: nummerNaarJid.size,
         laatste_opbouw: laatsteOpbouw,
         laatste_fout  : laatsteFout,
       };

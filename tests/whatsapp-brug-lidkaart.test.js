@@ -110,7 +110,10 @@ test('de status geeft alleen aantallen prijs', async () => {
   const k = maakLidkaart();
   await k.bouw([NUMMER], async () => LID + '@lid');
   const s = plat(k.status());
-  assert.deepEqual(Object.keys(s).sort(), ['koppelingen', 'laatste_fout', 'laatste_opbouw']);
+  // 'met_volledige_jid' is erbij gekomen: hoeveel koppelingen de jid dragen
+  // zoals WhatsApp hem gaf, in plaats van uit cijfers heropgebouwd.
+  assert.deepEqual(Object.keys(s).sort(),
+    ['koppelingen', 'laatste_fout', 'laatste_opbouw', 'met_volledige_jid']);
   assert.equal(s.koppelingen, 1);
   assert.equal(JSON.stringify(s).includes(NUMMER), false, 'geen nummer in de status');
   assert.equal(JSON.stringify(s).includes(LID), false, 'en geen LID');
@@ -188,7 +191,9 @@ test('versturen en historiek kennen de LID-vorm', () => {
   assert.match(bron.slice(i, i + 700), /lidkaart\.lidVoorNummer\(n\)/,
     'anders gaat een antwoord op een LID-gesprek naar de verkeerde draad');
   const h = bron.indexOf('async historiek(');
-  assert.match(bron.slice(h, h + 1400), /lidkaart\.lidVoorNummer\(/,
+  // Het ophalen gebruikt de VOLLEDIGE jid; die is betrouwbaarder dan een uit
+  // cijfers heropgebouwde @lid-vorm.
+  assert.match(bron.slice(h, h + 3200), /lidkaart\.jidVoorNummer\(/,
     'en dan vindt het ophalen het gesprek niet');
 });
 
