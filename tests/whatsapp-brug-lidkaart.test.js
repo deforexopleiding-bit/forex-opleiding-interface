@@ -179,7 +179,8 @@ test('de opbouw logt alleen aantallen', () => {
   // echte lek later door omdat iemand hem versoepeld heeft.
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async function bouwLidkaart');
-  const blok = bron.slice(i, i + 700);
+  // Ruimer venster: er is een tweede weg bijgekomen (de contactenlijst).
+  const blok = bron.slice(i, i + 2200);
   const logs = blok.match(/console\.\w+\([^)]*\)/g) || [];
   assert.ok(logs.length > 0, 'er hoort iets gelogd te worden');
   for (const l of logs) {
@@ -190,8 +191,9 @@ test('de opbouw logt alleen aantallen', () => {
   // De geslaagde ronde meldt tellingen; de foutmelding meldt alleen dát het
   // misging. Die twee horen niet aan dezelfde eis te voldoen.
   const gelukt = logs.filter((l) => /console\.log/.test(l));
-  assert.equal(gelukt.length, 1, 'één regel voor de geslaagde ronde');
-  assert.match(gelukt[0], /uit\.(gevonden|bekeken|fouten)/, 'en dat zijn tellingen');
+  assert.ok(gelukt.length >= 1, 'minstens één regel over de geslaagde ronde');
+  assert.ok(gelukt.some((l) => /koppelingen|scan\.bekeken|nummers\.length/.test(l)),
+    'en die meldt aantallen');
 });
 
 test('versturen en historiek kennen de LID-vorm', () => {
@@ -210,7 +212,11 @@ test('de brug tast af wat de geïnstalleerde versie kan, in plaats van het aan t
   // probleem twee rondes geduurd heeft.
   const bron = readFileSync(WA, 'utf8');
   assert.match(bron, /async function tastKundeAf/);
-  assert.match(bron, /getCurrentLid === 'function'/);
+  // De probe checkte eerst één functie op naam. Dat vertelde alleen of ONZE
+  // aanname klopte; nu somt hij op wát er is, zodat een ontbrekende functie
+  // zichzelf meldt in plaats van als 'false' langs te komen.
+  assert.match(bron, /lidutils_keys/);
+  assert.match(bron, /typeof o\[k\] === 'function'/);
   const server = readFileSync(join(ROOT, 'services/whatsapp-brug/server.js'), 'utf8');
   assert.match(server, /lid_kunde\s*:\s*wa\.lidKunde\(\)/);
 });

@@ -68,6 +68,7 @@ app.get('/status', auth, (_req, res) => {
     // blijkt te kunnen. Aantallen en booleans; nooit een nummer of een LID.
     lidkaart       : wa.lidkaartStatus(),
     lid_kunde      : wa.lidKunde(),
+    lid_bron       : wa.lidBron(),
   });
 });
 
@@ -133,6 +134,25 @@ app.post('/lidkaart/herbouw', auth, async (_req, res) => {
   } catch (e) {
     console.error('[brug] lidkaart herbouwen faalde:', e?.message || e);
     res.status(500).json({ error: 'Herbouwen mislukt' });
+  }
+});
+
+// De probe: draai alle varianten voor één nummer en zeg per stuk wat eruit
+// kwam. Alleen vormen — een domein en een lengte — nooit een waarde.
+//
+// Het nummer moet op de leadlijst staan; anders zou deze route een manier
+// worden om over een willekeurig nummer iets te weten te komen.
+app.get('/lid/probe', auth, async (req, res) => {
+  const nummer = req.query?.nummer;
+  if (!nummer) return res.status(400).json({ error: 'nummer ontbreekt' });
+  try {
+    res.json({ ok: true, ...(await wa.lidProbe(nummer)) });
+  } catch (e) {
+    if (e?.code === 'NIET_TOEGESTAAN') return res.status(403).json({ error: 'Niet toegestaan' });
+    if (e?.code === 'NIET_VERBONDEN')  return res.status(503).json({ error: 'De brug is niet verbonden met WhatsApp' });
+    if (e?.code === 'NUMMER_ONGELDIG') return res.status(400).json({ error: 'Nummer onleesbaar' });
+    console.error('[brug] lid-probe faalde:', e?.message || e);
+    res.status(500).json({ error: 'Probe mislukt' });
   }
 });
 

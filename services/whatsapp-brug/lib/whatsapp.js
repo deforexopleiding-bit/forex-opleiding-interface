@@ -108,60 +108,263 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // zijn; deze kant op wordt er niets gevraagd over wie niet op de lijst staat.
   const lidkaart = maakLidkaart();
   let lidTimer = null;
+  // Welke van de twee wegen de koppelingen opleverde, en wat de scan zag.
+  // Alleen een woord en aantallen.
+  let kaartBron = null;
+  let laatsteScan = null;
 
-  // Wat kan de whatsapp-web.js die hier daadwerkelijk geïnstalleerd staat?
-  // Niet aannemen: package.json zegt ^1.26.0, en een minor erbij kan andere
-  // Store-modules meebrengen. Dit wordt na 'ready' één keer afgetast en in
-  // /status gezet, zodat zichtbaar is waaróm een weg wel of niet werkt.
-  const kunde = { onderzocht: false, get_current_lid: null, wid_to_jid: null, query_exist: null, fout: null };
+  // ── Wat kan de whatsapp-web.js die hier daadwerkelijk draait? ────────────
+  // Niet aannemen. De vorige ronde bouwde op getCurrentLid(wid) en die leverde
+  // 0 van 28 op, zónder fout — dan weet je nog steeds niets: bestond de functie
+  // niet, of gaf ze niets terug? Vandaar dat hier nu de FUNCTIENAMEN worden
+  // opgesomd. Dat zijn namen uit een library, geen gegevens van iemand, dus die
+  // mogen gewoon in het log en in /status.
+  const kunde = {
+    onderzocht: false,
+    fout: null,
+    modules: {},          // welke Store-onderdelen bestaan
+    lidutils_keys: [],    // de functienamen die LidUtils aanbiedt
+    contact_keys: [],     // idem voor ContactMethods
+  };
 
   async function tastKundeAf() {
     if (kunde.onderzocht) return kunde;
     try {
-      const uit = await client.pupPage.evaluate(() => ({
-        get_current_lid: typeof window.Store?.LidUtils?.getCurrentLid === 'function',
-        wid_to_jid     : typeof window.Store?.WidToJid?.widToUserJid === 'function',
-        query_exist    : typeof window.Store?.QueryExist === 'function',
-      }));
+      const uit = await client.pupPage.evaluate(() => {
+        const namen = (o) => {
+          try {
+            const uit = [];
+            for (const k in o) { try { if (typeof o[k] === 'function') uit.push(k); } catch (_) {} }
+            return uit.sort();
+          } catch (_) { return []; }
+        };
+        const S = window.Store || {};
+        return {
+          modules: {
+            LidUtils      : !!S.LidUtils,
+            ContactMethods: !!S.ContactMethods,
+            WidFactory    : typeof S.WidFactory?.createWid === 'function',
+            WidToJid      : typeof S.WidToJid?.widToUserJid === 'function',
+            QueryExist    : typeof S.QueryExist === 'function',
+            Contact       : typeof S.Contact?.getModelsArray === 'function',
+            Chat          : typeof S.Chat?.getModelsArray === 'function',
+            NumberInfo    : !!S.NumberInfo,
+          },
+          lidutils_keys: namen(S.LidUtils),
+          contact_keys : namen(S.ContactMethods),
+        };
+      });
       Object.assign(kunde, uit, { onderzocht: true, fout: null });
+      // Functienamen van een library — dit mag in het log, en het is precies
+      // wat we de vorige ronde hadden willen zien.
+      console.log('[brug] LidUtils biedt:', kunde.lidutils_keys.join(', ') || '(niets)');
+      console.log('[brug] Store-onderdelen:',
+        Object.entries(kunde.modules).filter(([, v]) => v).map(([k]) => k).join(', ') || '(niets)');
     } catch (e) {
       kunde.onderzocht = true;
-      kunde.fout = 'aftasten faalde';
+      kunde.fout = 'aftasten faalde: ' + (e?.message || 'onbekend');
+      console.warn('[brug]', kunde.fout);
     }
     return kunde;
   }
 
   /**
-   * De LID die WhatsApp aan dit telefoonnummer hangt.
+   * De LID die WhatsApp aan dit telefoonnummer hangt — via getCurrentLid.
    *
-   * Store.LidUtils.getCurrentLid(wid) is de enige richting die deze library
-   * biedt: nummer → LID. Een omgekeerde vertaling (LID → nummer) bestaat er
-   * niet, en dat is precies waarom de eerste poging via getContactById het LID
-   * opnieuw teruggaf in plaats van een telefoonnummer.
+   * Deze weg leverde 0 van 28 op. Hij blijft staan omdat hij op een andere
+   * versie wél kan werken, maar hij is niet langer de enige: bouwLidkaart()
+   * valt terug op de contactenlijst als hier niets uit komt.
+   *
+   * De wid-variant die voor de hand ligt is wat hier al draait: createWid()
+   * en dan het wid-object doorgeven, niet de string. Voor de zekerheid
+   * probeert dit nu allebei, en de teller zegt welke iets opleverde.
    */
   async function zoekLidVoor(nummer) {
     const chatId = naarChatId(nummer);
     if (!chatId) return null;
     await tastKundeAf();
-    if (!kunde.get_current_lid) return null;
+    if (!kunde.modules.LidUtils || typeof kunde.lidutils_keys?.includes !== 'function') return null;
+    if (!kunde.lidutils_keys.includes('getCurrentLid')) return null;
     return client.pupPage.evaluate((id) => {
+      const uitpakken = (v) => {
+        if (!v) return null;
+        if (typeof v === 'string') return v;
+        return v._serialized || v.user || null;
+      };
       try {
-        const wid = window.Store.WidFactory.createWid(id);
-        const lid = window.Store.LidUtils.getCurrentLid(wid);
-        if (!lid) return null;
-        return typeof lid === 'string' ? lid : (lid._serialized || lid.user || null);
+        const S = window.Store;
+        // Eerst het wid-object, dan de kale string. Welke van de twee werkt is
+        // niet uit de bron af te leiden, dus proberen we ze allebei.
+        try {
+          const wid = S.WidFactory.createWid(id);
+          const uit = uitpakken(S.LidUtils.getCurrentLid(wid));
+          if (uit) return uit;
+        } catch (_) { /* volgende vorm */ }
+        try {
+          const uit = uitpakken(S.LidUtils.getCurrentLid(id));
+          if (uit) return uit;
+        } catch (_) { /* op */ }
+        return null;
       } catch (_) { return null; }
     }, chatId);
   }
 
+  /**
+   * TWEEDE WEG: de koppelingen uit de contactenlijst halen.
+   *
+   * Als WhatsApp geen functie aanbiedt die nummer naar LID vertaalt, dan staat
+   * die koppeling misschien gewoon op de contact-modellen zelf — een contact
+   * dat onder een LID bekend is draagt vaak ook zijn telefoonnummer, of
+   * omgekeerd.
+   *
+   * DE LEADLIJST BLIJFT DE GRENS, en dat is hier geen formaliteit: de
+   * contactenlijst bevat álle contacten van dat toestel, dus ook Daves
+   * privécontacten. Daarom gebeurt het filteren BINNEN de pagina: de lijst met
+   * toegestane nummers gaat erin, en er komen alleen paren uit waarvan het
+   * telefoonnummer daarop staat. Over wie er niet op staat komt niets terug —
+   * niet als paar, niet als naam, niet als aantal per persoon. Alleen een
+   * totaaltelling van hoeveel contacten er bekeken zijn.
+   */
+  async function zoekLidsUitContacten(nummers) {
+    await tastKundeAf();
+    if (!kunde.modules.Contact) return { paren: [], bekeken: 0, met_lid: 0 };
+    return client.pupPage.evaluate((toegestaan) => {
+      const toestaan = new Set(toegestaan);
+      const cijfers = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+      const deel = (v) => {
+        if (!v) return { user: '', server: '' };
+        if (typeof v === 'string') {
+          const st = v.split('@');
+          return { user: cijfers(st[0]), server: (st[1] || '').toLowerCase() };
+        }
+        return { user: cijfers(v.user), server: String(v.server || '').toLowerCase() };
+      };
+      const paren = [];
+      let bekeken = 0, metLid = 0;
+      try {
+        for (const c of window.Store.Contact.getModelsArray()) {
+          bekeken += 1;
+          const eigen = deel(c?.id);
+          // Wat er nog meer aan identiteit op het model hangt. Verschillende
+          // versies noemen dat anders, dus we kijken naar alle drie.
+          const ander = deel(c?.lid || c?.phoneNumber || c?.altId || null);
+          let telefoon = eigen.server === 'c.us' ? eigen.user : (ander.server === 'c.us' ? ander.user : '');
+          let lid      = eigen.server === 'lid'  ? eigen.user : (ander.server === 'lid'  ? ander.user : '');
+          if (lid) metLid += 1;
+          if (!telefoon || !lid) continue;
+          // HIER is de grens: alleen wat op de leadlijst staat verlaat de pagina.
+          if (!toestaan.has(telefoon)) continue;
+          paren.push([telefoon, lid]);
+        }
+      } catch (_) { /* wat we hebben, hebben we */ }
+      return { paren, bekeken, met_lid: metLid };
+    }, nummers);
+  }
+
+  /**
+   * De probe: wat levert élke variant op voor één bekend nummer?
+   *
+   * Dit is het gereedschap dat we de vorige twee rondes misten. In plaats van
+   * één weg te kiezen en te hopen, draait dit ze allemaal en zegt per stuk of
+   * er iets uit kwam en hoe lang dat was. Geen waarden, alleen vormen — precies
+   * dezelfde afspraak als bij de tellers.
+   *
+   * Het nummer MOET op de leadlijst staan. Anders zou deze route een manier
+   * worden om over een willekeurig nummer iets te weten te komen, en dat is
+   * exact wat het filter moet voorkomen.
+   */
+  async function probeerLid(nummer) {
+    const n = normaliseerNummer(nummer);
+    if (!n) { const e = new Error('nummer onleesbaar'); e.code = 'NUMMER_ONGELDIG'; throw e; }
+    if (!leadlijst.mag(n)) { const e = new Error('niet op de leadlijst'); e.code = 'NIET_TOEGESTAAN'; throw e; }
+    if (!staat.verbonden) { const e = new Error('niet verbonden'); e.code = 'NIET_VERBONDEN'; throw e; }
+    await tastKundeAf();
+
+    const chatId = naarChatId(n);
+    const paginaUit = await client.pupPage.evaluate((id) => {
+      const S = window.Store || {};
+      const vorm = (v) => {
+        if (v === null || v === undefined) return 'niets';
+        if (typeof v === 'string') {
+          const st = v.split('@');
+          return (st[1] || 'geen_domein') + '/' + String(st[0]).replace(/\D/g, '').length;
+        }
+        if (typeof v === 'object') {
+          const server = String(v.server || v._serialized?.split('@')[1] || 'onbekend');
+          const user = String(v.user || v._serialized?.split('@')[0] || '').replace(/\D/g, '');
+          return server + '/' + user.length;
+        }
+        return typeof v;
+      };
+      const poging = (naam, fn) => {
+        try { return { naam, uit: vorm(fn()) }; }
+        catch (e) { return { naam, uit: 'fout' }; }
+      };
+
+      const pogingen = [];
+      let wid = null;
+      try { wid = S.WidFactory.createWid(id); } catch (_) { /* dan zonder */ }
+
+      pogingen.push(poging('getCurrentLid(wid)', () => S.LidUtils.getCurrentLid(wid)));
+      pogingen.push(poging('getCurrentLid(string)', () => S.LidUtils.getCurrentLid(id)));
+      pogingen.push(poging('Contact.get(wid).id', () => S.Contact.get(wid)?.id));
+      pogingen.push(poging('Contact.get(wid).lid', () => S.Contact.get(wid)?.lid));
+      pogingen.push(poging('Contact.get(wid).phoneNumber', () => S.Contact.get(wid)?.phoneNumber));
+      pogingen.push(poging('Chat.get(wid).id', () => S.Chat.get(wid)?.id));
+      pogingen.push(poging('ContactMethods.getUserid', () => S.ContactMethods.getUserid(S.Contact.get(wid))));
+
+      // Alle sleutels op het contact-model waar 'lid' in voorkomt. Namen van
+      // velden, geen waarden.
+      let veldnamen = [];
+      try {
+        const c = S.Contact.get(wid);
+        if (c) {
+          for (const k in c) { try { if (/lid|phone|number/i.test(k)) veldnamen.push(k); } catch (_) {} }
+          veldnamen = [...new Set(veldnamen)].sort();
+        }
+      } catch (_) { /* laat maar */ }
+
+      return { pogingen, contact_veldnamen: veldnamen, contact_gevonden: (() => {
+        try { return !!S.Contact.get(wid); } catch (_) { return false; }
+      })() };
+    }, chatId);
+
+    return { kunde: { ...kunde }, ...paginaUit };
+  }
+
   /** De kaart opnieuw opbouwen. Fail-soft: een fout laat de vorige kaart staan. */
+
   async function bouwLidkaart() {
     if (!staat.verbonden) return;
     try {
       const nummers = typeof leadlijst.nummers === 'function' ? leadlijst.nummers() : [];
+      await tastKundeAf();
+
+      // Weg 1: de functie die WhatsApp ervoor heeft. Leverde op deze versie
+      // 0 van 28 op, maar hij blijft eerst omdat hij het meest direct is.
       const uit = await lidkaart.bouw(nummers, zoekLidVoor);
+      kaartBron = uit.gevonden > 0 ? 'getCurrentLid' : null;
+
+      // Weg 2: de contactenlijst. Alleen als weg 1 niets opleverde — anders
+      // lopen we elke ronde onnodig door alle contacten.
+      let scan = null;
+      if (uit.gevonden === 0) {
+        scan = await zoekLidsUitContacten(nummers);
+        if (scan.paren.length > 0) {
+          const kaart = new Map(scan.paren);
+          const tweede = await lidkaart.bouw(nummers, async (n) => kaart.get(n) || null);
+          if (tweede.gevonden > 0) kaartBron = 'contactenlijst';
+        }
+      }
+
       // Alleen aantallen. Nooit een nummer of een LID.
-      console.log('[brug] lidkaart:', uit.gevonden, 'van', uit.bekeken, 'nummers gekoppeld');
+      console.log('[brug] lidkaart:', lidkaart.status().koppelingen, 'van', nummers.length,
+        'nummers gekoppeld via', kaartBron || 'geen enkele weg');
+      if (scan) {
+        console.log('[brug] contactenlijst bekeken:', scan.bekeken, 'contacten,',
+          scan.met_lid, 'met een lid-identiteit,', scan.paren.length, 'op de leadlijst');
+        laatsteScan = { bekeken: scan.bekeken, met_lid: scan.met_lid, op_leadlijst: scan.paren.length };
+      }
     } catch (e) {
       console.warn('[brug] lidkaart opbouwen faalde:', e?.message || e);
     }
@@ -253,6 +456,11 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     staat.nummer = normaliseerNummer(client.info?.wid?.user || client.info?.me?.user || '');
     raakAan();
     console.log('[brug] verbonden als', staat.nummer || '(nummer onbekend)');
+    // Eerst aftasten wát deze versie aanbiedt, en dat meteen loggen. Dit stond
+    // eerder verstopt in de kaartopbouw, dus het was pas gevuld nádat er een
+    // poging gedaan was — precies het gegeven dat had moeten vertellen of de
+    // functie überhaupt bestond vóór we hem gingen gebruiken.
+    tastKundeAf();
     // De LID-kaart hoort er te staan vóór het eerste bericht binnenkomt, en
     // daarna mee te lopen met de leadlijst: een nieuwe lead heeft ook een
     // koppeling nodig. Fail-soft — mislukt het, dan blijft de terugval per
@@ -393,8 +601,12 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     nummerkaartAantal: () => nummerkaart.size,
     /** De LID-kaart: aantallen en een tijdstip, nooit de koppelingen zelf. */
     lidkaartStatus: () => lidkaart.status(),
-    /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. */
+    /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),
+    /** Langs welke weg de kaart gevuld is, en wat de contactscan zag. */
+    lidBron: () => ({ bron: kaartBron, scan: laatsteScan }),
+    /** De probe: wat levert elke variant op voor één bekend nummer? */
+    lidProbe: probeerLid,
     /** Handmatig opnieuw opbouwen, voor de /lidkaart-route. */
     herbouwLidkaart: bouwLidkaart,
     start() {
