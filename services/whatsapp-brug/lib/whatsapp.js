@@ -204,7 +204,8 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // Elke weg houdt bij: hoe vaak geprobeerd, hoe vaak gelukt, en of hij
   // überhaupt beschikbaar is. Daarmee is 'stilte' onmogelijk geworden: na één
   // testbericht staat er welke weg werkte, en welke niet bestond.
-  const WEGEN = ['getNumberId', 'getChatById', 'chat_contact', 'contact_data', 'msg_data'];
+  const WEGEN = ['getNumberId', 'getChatById', 'getChats', 'getMessageById', 'msg_getchat',
+                 'chat_contact', 'contact_data', 'msg_data'];
   const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null }]));
   const noteer = (weg, res) => {
     const t = wegen[weg];
@@ -377,6 +378,82 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       } catch (_) { /* volgende nummer; één lead mag de rest niet ophouden */ }
     }
     return { paren, bekeken };
+  }
+
+  // ── De gesprekkenlijst, één keer opgehaald ────────────────────────────────
+  // getChatById is dood in 1.34.7: 8 pogingen, 0 gelukt, ongeacht welke vorm we
+  // hem voerden. getChats() loopt via window.WWebJS — dezelfde laag waar het
+  // versturen langs gaat en die dus aantoonbaar werkt.
+  //
+  // Het is een zwaardere aanroep, dus we onthouden het resultaat en verversen
+  // pas als er niets gevonden wordt. Een nieuw gesprek is precies het geval
+  // waarin een miss betekent 'de lijst is verouderd'.
+  let chatsCache = null;
+  let chatsCacheAt = null;
+
+  async function haalChats(ververs = false) {
+    if (chatsCache && !ververs) return chatsCache;
+    const res = await probeer({
+      bestaat: kunde.api.getChats,
+      haal   : () => client.getChats(),
+      bruikbaar: (v) => Array.isArray(v),
+    });
+    noteer('getChats', res);
+    if (res.status !== GELUKT) return chatsCache || [];
+    chatsCache = res.waarde;
+    chatsCacheAt = new Date().toISOString();
+    return chatsCache;
+  }
+
+  /**
+   * Het gesprek zoeken in de lijst, op elke vorm die we van dit nummer kennen.
+   *
+   * Vergelijkt op de volledige serialisatie én op de cijfers, zodat het niet
+   * uitmaakt of WhatsApp het gesprek onder een LID of onder het nummer bewaart.
+   */
+  function zoekChatIn(chats, vormen) {
+    const gezocht = new Set();
+    for (const v of vormen) {
+      if (!v) continue;
+      gezocht.add(String(v));
+      gezocht.add(String(v).split('@')[0].replace(/\D/g, ''));
+    }
+    for (const chat of (chats || [])) {
+      const id = chat?.id;
+      const ser = String(id?._serialized || '');
+      const user = String(id?.user || ser.split('@')[0] || '').replace(/\D/g, '');
+      if (ser && gezocht.has(ser)) return chat;
+      if (user && gezocht.has(user)) return chat;
+    }
+    return null;
+  }
+
+  /**
+   * De chat via een bericht dat we al kennen.
+   *
+   * LET OP — dit is niet de zekerheid die het lijkt. In de bron die ik kan lezen
+   * (1.26.0) is Message.getChat() letterlijk
+   * `this.client.getChatById(this._getChatId())`, dus dan loopt hij door
+   * dezelfde dode deur. Op 1.34.7 kan dat anders liggen; daarom staat hij hier
+   * mét een eigen teller in plaats van als aanname. Levert hij niets op, dan
+   * zegt de teller dat en weten we het.
+   */
+  async function chatViaBericht(berichtId) {
+    if (!berichtId) return null;
+    const msg = await probeer({
+      bestaat: typeof client.getMessageById === 'function',
+      haal   : () => client.getMessageById(String(berichtId)),
+      bruikbaar: (m) => !!m,
+    });
+    noteer('getMessageById', msg);
+    if (msg.status !== GELUKT) return null;
+    const chat = await probeer({
+      bestaat: typeof msg.waarde.getChat === 'function',
+      haal   : () => msg.waarde.getChat(),
+      bruikbaar: (c) => !!c,
+    });
+    noteer('msg_getchat', chat);
+    return chat.status === GELUKT ? chat.waarde : null;
   }
 
   /**
@@ -714,7 +791,12 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     /** Hoeveel nummer↔jid-koppelingen we geleerd hebben. Alleen het aantal. */
     nummerkaartAantal: () => nummerkaart.size,
     /** De LID-kaart: aantallen en een tijdstip, nooit de koppelingen zelf. */
-    lidkaartStatus: () => ({ ...lidkaart.status(), historiek_vormen: { ...historiekVormen } }),
+    lidkaartStatus: () => ({
+      ...lidkaart.status(),
+      historiek_vormen: { ...historiekVormen },
+      chats_in_cache  : chatsCache ? chatsCache.length : null,
+      chats_opgehaald : chatsCacheAt,
+    }),
     /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),
     /** Langs welke weg de kaart gevuld is, en wat de contactscan zag. */
@@ -777,51 +859,57 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
      * CRM kan dan zeggen tot wanneer het gekeken heeft in plaats van te doen
      * alsof dit het volledige gesprek is.
      */
-    async historiek(nummer, limiet = 50) {
+    async historiek(nummer, limiet = 50, berichtId = null) {
       if (!staat.verbonden) { const e = new Error('niet verbonden met WhatsApp'); e.code = 'NIET_VERBONDEN'; throw e; }
       if (!leadlijst.mag(nummer)) { const e = new Error('nummer staat niet op de leadlijst'); e.code = 'NIET_TOEGESTAAN'; throw e; }
-      // Het gesprek opzoeken langs dezelfde weg als het versturen: eerst de jid
-      // die WhatsApp ons zélf gaf, dan wat we bij een echt bericht zagen, en
-      // pas daarna de gewone @c.us-vorm. Die laatste blijft nodig voor de leads
-      // waarvoor er geen LID is — zeven van de achtentwintig, dus geen randgeval.
+      // ── De vormen waaronder dit gesprek kan staan ────────────────────────
       const n0 = normaliseerNummer(nummer);
       const viaKaart = lidkaart.jidVoorNummer(n0);
       const viaBericht = n0 ? nummerkaart.get(n0) : null;
       const gewoon = naarChatId(nummer);
-      const kandidaten = [];
-      const voegToe = (jid, vorm) => {
-        if (jid && !kandidaten.some((k) => k.jid === jid)) kandidaten.push({ jid, vorm });
-      };
-      voegToe(viaKaart, 'lidkaart');
-      voegToe(viaBericht, 'uit_bericht');
-      voegToe(gewoon, 'nummer');
-      if (kandidaten.length === 0) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
+      const vormen = [viaKaart, viaBericht, gewoon].filter(Boolean);
+
+      // 'Geen kandidaten' en 'kandidaten geprobeerd, niets gevonden' zijn twee
+      // verschillende dingen. Ze zagen er allebei uit als {geen: 1}, en dat
+      // maakte de vorige meting onleesbaar. Nu staat het er apart.
+      if (vormen.length === 0) {
+        historiekVormen.geen_kandidaten = (historiekVormen.geen_kandidaten || 0) + 1;
+        const e = new Error('geen enkele vorm bekend voor dit nummer');
+        e.code = 'GEEN_KOPPELING';
+        e.kandidaten = 0;
+        throw e;
+      }
 
       const n = Math.max(1, Math.min(200, Number(limiet) || 50));
-      let chat = null;
-      let gebruikteVorm = null;
-      const geprobeerd = [];
-      for (const k of kandidaten) {
-        try {
-          const c = await client.getChatById(k.jid);
-          geprobeerd.push({ vorm: k.vorm, gevonden: !!c });
-          if (c) { chat = c; gebruikteVorm = k.vorm; break; }
-        } catch (_) {
-          // Een onbekende chat gooit; dat is geen storing maar 'bestaat hier niet'.
-          geprobeerd.push({ vorm: k.vorm, gevonden: false });
-        }
-      }
-      historiekVormen[gebruikteVorm || 'geen'] = (historiekVormen[gebruikteVorm || 'geen'] || 0) + 1;
 
-      // DRIE UITKOMSTEN DIE IETS HEEL ANDERS BETEKENEN, en maar één ervan is een
-      // fout. Ze op één hoop gooien is precies waarom hier 'geen gesprek
-      // gevonden' stond terwijl het gesprek gewoon onder een LID bestond.
+      // ── Weg 1: de gesprekkenlijst ────────────────────────────────────────
+      // getChatById is dood in deze versie (8 pogingen, 0 gelukt), dus die weg
+      // is er helemaal uit. getChats() loopt via window.WWebJS, de laag waar
+      // ook het versturen langs gaat.
+      let chat = zoekChatIn(await haalChats(false), vormen);
+      let gebruikteVorm = chat ? 'getchats_cache' : null;
+
+      // Niets gevonden? Dan is de lijst mogelijk verouderd — precies het geval
+      // van een gesprek dat pas net bestaat. Eén keer opnieuw ophalen.
       if (!chat) {
-        const e = new Error(viaKaart
-          ? 'de chat bestaat niet op dit apparaat'
-          : 'dit nummer heeft geen LID-koppeling, en onder het nummer zelf bestaat er geen chat');
-        e.code = viaKaart ? 'GEEN_GESPREK' : 'GEEN_KOPPELING';
-        e.geprobeerd = geprobeerd;
+        chat = zoekChatIn(await haalChats(true), vormen);
+        if (chat) gebruikteVorm = 'getchats_vers';
+      }
+
+      // ── Weg 2: via een bericht dat we al kennen ──────────────────────────
+      if (!chat && berichtId) {
+        chat = await chatViaBericht(berichtId);
+        if (chat) gebruikteVorm = 'via_bericht';
+      }
+
+      historiekVormen[gebruikteVorm || 'niets_gevonden'] =
+        (historiekVormen[gebruikteVorm || 'niets_gevonden'] || 0) + 1;
+
+      if (!chat) {
+        const e = new Error('de chat bestaat niet op dit apparaat');
+        e.code = 'GEEN_GESPREK';
+        e.kandidaten = vormen.length;
+        e.chats_bekeken = (chatsCache || []).length;
         throw e;
       }
       if (chat.isGroup) { const e = new Error('groepen niet'); e.code = 'NIET_TOEGESTAAN'; throw e; }

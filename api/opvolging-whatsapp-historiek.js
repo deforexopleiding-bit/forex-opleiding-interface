@@ -47,9 +47,28 @@ export default async function handler(req, res) {
   const taakId = b.taak_id ? String(b.taak_id) : null;
   const limiet = Math.max(1, Math.min(MAX_LIMIET, Number(b.limiet) || STANDAARD_LIMIET));
 
+  // Van dit nummer kennen we mogelijk al een bericht. Dat id gaat mee, zodat de
+  // brug de chat ook via dat bericht kan opzoeken — een object dat van WhatsApp
+  // zelf kwam is de meest directe ingang die we hebben. Fail-soft: lukt het
+  // opzoeken niet, dan gaat het verzoek gewoon zonder.
+  let berichtId = null;
+  try {
+    const { data } = await supabaseAdmin
+      .from('opvolging_wa_berichten')
+      .select('bericht_id')
+      .eq('nummer', nummer)
+      .not('bericht_id', 'is', null)
+      .order('tijdstip', { ascending: false })
+      .limit(1);
+    berichtId = (data && data[0] && data[0].bericht_id) || null;
+  } catch (e) {
+    console.warn('[opvolging-whatsapp-historiek] bericht_id opzoeken (soft):', e?.message || e);
+  }
+
   let uit;
   try {
-    uit = await brugFetch('/historiek?nummer=' + encodeURIComponent(nummer) + '&limiet=' + limiet);
+    uit = await brugFetch('/historiek?nummer=' + encodeURIComponent(nummer) + '&limiet=' + limiet +
+      (berichtId ? '&bericht_id=' + encodeURIComponent(berichtId) : ''));
   } catch (e) {
     if (e?.code === 'BRUG_FOUT' && e.status === 403) {
       return res.status(403).json({
@@ -65,9 +84,13 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true, opgehaald: 0, nieuw: 0, oudste: null, nieuwste: null,
         code: geenKoppeling ? 'GEEN_KOPPELING' : 'GEEN_GESPREK',
+        // Hoeveel vormen er geprobeerd zijn en hoeveel gesprekken er bekeken
+        // zijn. Zonder die twee is 'niet gevonden' weer een stilte.
+        kandidaten   : e?.data?.kandidaten ?? null,
+        chats_bekeken: e?.data?.chats_bekeken ?? null,
         melding: geenKoppeling
           ? 'WhatsApp heeft voor dit nummer geen tweede identiteit doorgegeven, en onder het nummer zelf bestaat er geen gesprek op het toestel. Stuur eerst een bericht — daarna is de koppeling er en werkt het ophalen wel.'
-          : 'Het gesprek bestaat niet op dit gekoppelde apparaat. Dat kan kloppen: WhatsApp synct maar een beperkt venster naar een gekoppeld apparaat.',
+          : 'Het gesprek staat niet in de gesprekkenlijst van dit apparaat. Dat kan kloppen: WhatsApp synct maar een beperkt venster naar een gekoppeld apparaat.',
       });
     }
     const { status, body } = brugFoutNaarHttp(e);
