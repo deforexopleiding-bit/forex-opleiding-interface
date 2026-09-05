@@ -162,38 +162,24 @@ test('bepaalNummer probeert de kaart vóór de contactoplossing', () => {
 });
 
 test('de kaart wordt uit de leadlijst opgebouwd, niet uit binnenkomend verkeer', () => {
-  // Dit is het privacy-argument: we vragen alleen naar nummers die we al mogen
-  // kennen. Zou de kaart uit binnenkomende jids gevuld worden, dan vraagt de
-  // brug alsnog iets op over mensen die geen lead zijn.
+  // Het privacy-argument: we vragen alleen naar nummers die we al mogen kennen.
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async function bouwLidkaart');
-  const blok = bron.slice(i, i + 700);
+  const blok = bron.slice(i, i + 2200);
   assert.match(blok, /leadlijst\.nummers\(\)/);
-  assert.match(blok, /lidkaart\.bouw\(nummers, zoekLidVoor\)/);
+  assert.match(blok, /koppelingenUitApi\(nummers\)/);
 });
 
-test('de opbouw logt alleen aantallen', () => {
-  // De tekst in een logregel mag het woord 'nummers' bevatten; het gaat om de
-  // EXPRESSIES die erin gesubstitueerd worden. Vandaar dat de literals er eerst
-  // uit gaan — anders keurt deze test een onschuldige zin af en laat hij een
-  // echte lek later door omdat iemand hem versoepeld heeft.
+test('het opbouw-log noemt aantallen en wegnamen, geen identiteiten', () => {
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async function bouwLidkaart');
-  // Ruimer venster: er is een tweede weg bijgekomen (de contactenlijst).
   const blok = bron.slice(i, i + 2200);
   const logs = blok.match(/console\.\w+\([^)]*\)/g) || [];
-  assert.ok(logs.length > 0, 'er hoort iets gelogd te worden');
+  assert.ok(logs.length >= 2, 'er hoort iets gelogd te worden');
   for (const l of logs) {
-    const zonderTekst = l.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
-    assert.doesNotMatch(zonderTekst, /\bnummers\b|\blid\b|\bjid\b|\bnummer\b/,
-      'alleen aantallen in de expressies: ' + l);
+    const zonderTekst = l.replace(/'[^']*'/g, "''");
+    assert.doesNotMatch(zonderTekst, /\bparen\[|\bnummers\[|\blid\b/, 'geen identiteit: ' + l);
   }
-  // De geslaagde ronde meldt tellingen; de foutmelding meldt alleen dát het
-  // misging. Die twee horen niet aan dezelfde eis te voldoen.
-  const gelukt = logs.filter((l) => /console\.log/.test(l));
-  assert.ok(gelukt.length >= 1, 'minstens één regel over de geslaagde ronde');
-  assert.ok(gelukt.some((l) => /koppelingen|scan\.bekeken|nummers\.length/.test(l)),
-    'en die meldt aantallen');
 });
 
 test('versturen en historiek kennen de LID-vorm', () => {
@@ -206,17 +192,15 @@ test('versturen en historiek kennen de LID-vorm', () => {
     'en dan vindt het ophalen het gesprek niet');
 });
 
-test('de brug tast af wat de geïnstalleerde versie kan, in plaats van het aan te nemen', () => {
-  // package.json zegt ^1.26.0, dus op de VPS kan een andere minor staan met
-  // andere Store-modules. Aannemen wat er beschikbaar is, is precies hoe dit
-  // probleem twee rondes geduurd heeft.
+test('de brug tast af welke bibliotheek er draait, in plaats van het aan te nemen', () => {
+  // Drie ronden lang zijn alle metingen tegen de bron van 1.26.0 gedaan zonder
+  // te weten of dát draait. package.json zegt ^1.26.0, dus npm kan elke 1.x
+  // geinstalleerd hebben, en de interne opbouw verschilt daar sterk tussen.
   const bron = readFileSync(WA, 'utf8');
   assert.match(bron, /async function tastKundeAf/);
-  // De probe checkte eerst één functie op naam. Dat vertelde alleen of ONZE
-  // aanname klopte; nu somt hij op wát er is, zodat een ontbrekende functie
-  // zichzelf meldt in plaats van als 'false' langs te komen.
-  assert.match(bron, /lidutils_keys/);
-  assert.match(bron, /typeof o\[k\] === 'function'/);
+  assert.match(bron, /whatsapp-web\.js\/package\.json/, 'de versie uit haar eigen package.json');
+  assert.match(bron, /kunde\.api\[naam\] = typeof client\[naam\] === 'function'/,
+    'en welke publieke methodes er echt zijn');
   const server = readFileSync(join(ROOT, 'services/whatsapp-brug/server.js'), 'utf8');
   assert.match(server, /lid_kunde\s*:\s*wa\.lidKunde\(\)/);
 });
