@@ -58,6 +58,9 @@ app.get('/status', auth, (_req, res) => {
     laatste_fout   : wa.staat.laatsteFout,
     leadlijst      : leadlijst.status(),
     webhook        : webhook.status(),
+    // Meten zonder te kijken: aantallen per gebeurtenis en per reden waarom er
+    // iets afvalt. Nooit een nummer, nooit tekst. Zie lib/tellers.js.
+    gebeurtenissen : wa.tellers(),
   });
 });
 

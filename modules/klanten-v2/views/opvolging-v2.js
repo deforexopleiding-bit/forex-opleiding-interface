@@ -808,6 +808,12 @@
 .opv .waregel{display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid #f1f2f5;font-size:13.5px}
 .opv .waregel:last-child{border-bottom:0}
 .opv .waregel span:first-child{color:var(--o-muted)}
+.opv .tellerblok{margin-top:16px;border-top:1px solid var(--o-line);padding-top:12px}
+.opv .tellerkop{font-size:12px;font-weight:700;color:var(--o-muted);margin-bottom:6px}
+.opv table.tellers{width:100%;border-collapse:collapse;font-size:12px}
+.opv table.tellers th{text-align:left;font-weight:600;color:var(--o-muted);padding:2px 6px 4px 0;font-size:11px}
+.opv table.tellers td{padding:3px 6px 3px 0;border-top:1px solid #f1f2f5;font-variant-numeric:tabular-nums}
+.opv table.tellers td:first-child{color:var(--o-muted)}
 /* ── Het gesprekspaneel ────────────────────────────────────────────────────
    Zelfde scrim en dezelfde kop als het koppelpaneel, maar als vel dat van
    rechts inschuift: een gesprek lees je naast je lijst, niet er middenin. */
@@ -1141,6 +1147,8 @@
       '<div class="waregel"><span>Nummer</span><span>' + esc(s.nummer || '—') + '</span></div>' +
       '<div class="waregel"><span>Laatst iets gezien</span><span>' + esc(geledenTekst(d.laatste_actie)) + '</span></div>';
 
+    body += brugTellersBlok(d);
+
     if (s.verbonden) {
       body += '<div class="waklaar" style="margin-top:14px">&#10003; Gekoppeld' +
         (s.nummer ? ' met ' + esc(s.nummer) : '') + '.<br>' +
@@ -1180,6 +1188,55 @@
       '<p>' + esc(s.uitleg) + '</p></div>' +
       '<button class="x" onclick="window.__opvWaSluit()">&times;</button></div>' +
       '<div class="mb">' + body + '</div></div></div></div>';
+  }
+
+  /**
+   * De gebeurtenissen-tellers van de brug, in het koppelpaneel.
+   *
+   * Dit bestaat omdat een bericht stil gedropt kan raken tussen 'de brug zag
+   * iets' en 'het CRM kreeg iets', en het privacyfilter maakt dat gat per
+   * definitie: wat we niet mogen loggen, kunnen we ook niet terugvinden. De
+   * tellers dragen alleen aantallen — geen nummer, geen tekst — en die mogen
+   * dus gewoon op het scherm.
+   *
+   * Een oudere brug stuurt ze niet mee; dan staat er niets in plaats van nullen
+   * die eruitzien alsof er gemeten is.
+   */
+  function brugTellersBlok(d) {
+    const g = d && d.gebeurtenissen;
+    if (!g || !g.gezien) {
+      return '<div class="ronde zacht" style="margin-top:14px">De brug die nu draait stuurt nog geen ' +
+        'gebeurtenissen-tellers mee. Werk hem bij om te zien waar een bericht sneuvelt.</div>';
+    }
+    const types = ['message', 'message_create', 'message_ack'];
+    const naam = {
+      message       : 'binnengekomen',
+      message_create: 'zelf verstuurd',
+      message_ack   : 'statusupdates',
+    };
+    let h = '<div class="tellerkop">Gebeurtenissen sinds de brug startte</div><table class="tellers">' +
+      '<tr><th></th><th>gezien</th><th>door</th><th>genegeerd</th></tr>';
+    for (const t of types) {
+      const gen = (g.genegeerd && g.genegeerd[t]) || {};
+      const redenen = Object.keys(gen).filter((r) => gen[r] > 0).map((r) => r + ': ' + gen[r]);
+      h += '<tr><td>' + esc(naam[t]) + '</td>' +
+        '<td>' + (g.gezien[t] || 0) + '</td>' +
+        '<td>' + ((g.doorgelaten && g.doorgelaten[t]) || 0) + '</td>' +
+        '<td>' + (redenen.length ? esc(redenen.join(', ')) : '—') + '</td></tr>';
+    }
+    h += '</table>';
+    const acks = Object.keys(g.ack_codes || {}).sort();
+    if (acks.length) {
+      h += '<div class="ronde zacht">Ack-codes: ' +
+        esc(acks.map((k) => k + '×' + g.ack_codes[k]).join(', ')) +
+        ' &middot; 1 = verzonden, 2 = afgeleverd, 3/4 = gelezen. Alleen 0 of -1 betekent dat WhatsApp nog niets bevestigd heeft.</div>';
+    }
+    if (g.laatste_genegeerd) {
+      h += '<div class="ronde zacht">Laatst genegeerd: ' + esc(g.laatste_genegeerd.type) +
+        ' wegens ' + esc(g.laatste_genegeerd.reden) +
+        ' om ' + esc(uur(g.laatste_genegeerd.tijd)) + '.</div>';
+    }
+    return '<div class="tellerblok">' + h + '</div>';
   }
 
   /**
@@ -2598,7 +2655,7 @@
 
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
-  window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst };
+  window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst, brugTellersBlok };
 
   // De weekbalk los na te slaan, en getest in tests/opvolging-weekbalk.test.js
   // tegen dit bestand zelf — zelfde afspraak als bij de wa-timers hierboven.

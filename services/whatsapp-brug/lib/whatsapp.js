@@ -15,7 +15,8 @@ import qrcode from 'qrcode';
 import { normaliseerNummer, naarChatId } from './nummers.js';
 // De vorm van elke gebeurtenis staat apart en dependency-vrij, zodat hij te
 // testen is zonder puppeteer of een gekoppelde telefoon.
-import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht } from './gebeurtenis.js';
+import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep } from './gebeurtenis.js';
+import { maakTellers } from './tellers.js';
 
 const { Client, LocalAuth } = pkg;
 
@@ -52,7 +53,26 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     },
   });
 
+  // Meten zonder te kijken. Zie lib/tellers.js: alleen aantallen, nooit een
+  // nummer en nooit tekst. Dit bestaat omdat een bericht stil gedropt is tussen
+  // raakAan() en webhook.duw(), en het privacyfilter maakt dat gat per
+  // definitie — wat we niet mogen loggen, kunnen we ook niet terugvinden.
+  const tellers = maakTellers();
+
   const raakAan = () => { staat.laatsteActie = new Date().toISOString(); };
+
+  /**
+   * Tellen én, als BRUG_DEBUG aanstaat, één regel loggen.
+   *
+   * De logregel draagt alleen het event-type en de reden — twee woorden uit een
+   * vaste lijst. Geen nummer, geen tekst, geen bericht-id. Dat is de hele reden
+   * dat hij mag bestaan: hij vertelt dát er iets afviel en waarom, en verder
+   * niets. Standaard uit, want op een drukke dag is dit ruis.
+   */
+  function negeer(type, reden) {
+    tellers.negeer(type, reden);
+    if (process.env.BRUG_DEBUG === '1') console.debug('[brug] genegeerd:', type, reden);
+  }
 
   client.on('qr', async (qr) => {
     try {
@@ -90,10 +110,13 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // ── Binnenkomend antwoord ────────────────────────────────────────────────
   client.on('message', async (msg) => {
     raakAan();
+    tellers.zag('message');
     try {
       const van = msg.from;
       // FILTER EERST. Alles hieronder raakt de tekst aan.
-      if (!leadlijst.mag(van)) return;
+      if (!leadlijst.mag(van)) { negeer('message', 'niet_op_leadlijst'); return; }
+      if (isGroep(van)) { negeer('message', 'groep'); return; }
+      tellers.liet('message');
       await webhook.duw({
         soort    : 'antwoord_ontvangen',
         nummer   : normaliseerNummer(van),
@@ -126,12 +149,21 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // deadline van 09:00 is dat verschil het hele verhaal.
   client.on('message_create', async (msg) => {
     raakAan();
+    tellers.zag('message_create');
     try {
-      // FILTER EERST, net als bij inkomend: het nummer waar dit heen gaat moet
-      // op de leadlijst staan. Groepen vallen daar ook al op af.
-      if (!leadlijst.mag(msg?.to)) return;
+      // Eerst 'is dit van ons'. Dat leest één boolean van de envelop — geen
+      // nummer, geen tekst, en er wordt niets van gekopieerd, gelogd of
+      // verstuurd. Het moet vóór het filter, want message_create vuurt óók
+      // voor binnengekomen berichten, en daar is `to` óns eigen nummer: die
+      // zouden anders allemaal als 'niet_op_leadlijst' geteld worden en het
+      // beeld vertroebelen precies waar we naar kijken.
+      if (msg?.fromMe !== true) { negeer('message_create', 'niet_van_ons'); return; }
+      // FILTER, en pas hierna wordt het nummer of de tekst ergens voor gebruikt.
+      if (!leadlijst.mag(msg?.to)) { negeer('message_create', 'niet_op_leadlijst'); return; }
+      if (isGroep(msg?.to)) { negeer('message_create', 'groep'); return; }
       const g = bouwUitgaandeGebeurtenis(msg);
-      if (!g) return;                        // niet van ons, groep, of onbruikbaar
+      if (!g) { negeer('message_create', 'onbruikbaar'); return; }
+      tellers.liet('message_create');
       await webhook.duw({
         soort     : g.soort,
         nummer    : normaliseerNummer(g.jid),
@@ -151,10 +183,18 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // ── Statusveranderingen op wat wij verstuurden ───────────────────────────
   client.on('message_ack', async (msg, ack) => {
     raakAan();
+    tellers.zag('message_ack');
+    // Alleen het getal. Zien we uitsluitend 0'en, dan weten we meteen waarom er
+    // niets doorkomt zonder ook maar één bericht te hoeven bekijken.
+    tellers.ack(ack);
     try {
-      if (!leadlijst.mag(msg?.to || msg?.from)) return;
+      const jid = msg?.to || msg?.from;
+      if (!leadlijst.mag(jid)) { negeer('message_ack', 'niet_op_leadlijst'); return; }
+      if (isGroep(jid)) { negeer('message_ack', 'groep'); return; }
       const g = bouwAckGebeurtenis(msg, ack);
-      if (!g) return;
+      // ACK_SOORT kent -1 en 0 niet: dat zijn statussen die nog niets zeggen.
+      if (!g) { negeer('message_ack', 'geen_ack_soort'); return; }
+      tellers.liet('message_ack');
       await webhook.duw({
         soort     : g.soort,
         nummer    : normaliseerNummer(g.jid),
@@ -170,6 +210,8 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
 
   return {
     staat,
+    /** De tellers voor /status. Alleen aantallen; zie lib/tellers.js. */
+    tellers: () => tellers.status(),
     start() {
       console.log('[brug] WhatsApp-client starten…');
       client.initialize().catch((e) => {
