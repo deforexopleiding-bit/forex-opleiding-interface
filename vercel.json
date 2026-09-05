@@ -209,6 +209,10 @@
     {
       "path": "/api/cron-opvolging-wacht-check",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron-opvolging-aanmeldingen",
+      "schedule": "*/15 * * * *"
     }
   ],
   "redirects": [
