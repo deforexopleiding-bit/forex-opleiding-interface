@@ -1265,32 +1265,49 @@
         (d.lidkaart.laatste_opbouw ? ', laatst opgebouwd om ' + esc(uur(d.lidkaart.laatste_opbouw)) : ', nog niet opgebouwd') +
         (d.lidkaart.laatste_fout ? ' &middot; ' + esc(d.lidkaart.laatste_fout) : '') + '.</div>';
     }
-    // Wat deze whatsapp-web.js écht aanbiedt: de functienamen zelf, niet onze
-    // aanname erover. Dit is het gegeven dat twee ronden lang ontbrak.
+    // Welke bibliotheek draait daar eigenlijk, en wat biedt die aan? Dit is het
+    // gegeven dat drie ronden lang ontbrak: alle metingen waren gedaan tegen de
+    // bron van 1.26.0, zonder te weten of dát draait.
     if (d.lid_kunde) {
       const k = d.lid_kunde;
       if (!k.onderzocht) {
         h += '<div class="ronde zacht">De brug heeft nog niet afgetast wat deze WhatsApp-versie aanbiedt.</div>';
-      } else if (k.fout) {
-        h += '<div class="ronde zacht">Aftasten mislukte: ' + esc(k.fout) + '</div>';
       } else {
-        const aan = Object.keys(k.modules || {}).filter((m) => k.modules[m]);
-        h += '<div class="ronde zacht">Store-onderdelen aanwezig: ' + esc(aan.join(', ') || 'geen') + '.</div>';
-        h += '<div class="ronde zacht">LidUtils biedt: <b>' +
-          esc((k.lidutils_keys || []).join(', ') || 'geen enkele functie') + '</b>. ' +
-          'Staat <i>getCurrentLid</i> daar niet bij, dan bestaat de vertaling in deze versie simpelweg niet.</div>';
+        h += '<div class="ronde zacht">Bibliotheek: <b>whatsapp-web.js ' + esc(k.bibliotheek || 'onbekend') +
+          '</b> &middot; WhatsApp Web ' + esc(k.wweb || 'onbekend') + '.</div>';
+        const gl = Object.keys(k.globals || {}).filter((x) => k.globals[x]);
+        h += '<div class="ronde zacht">Globals in de pagina: ' + esc(gl.join(', ') || 'geen') +
+          '. Ontbreekt <i>Store</i>, dan bewaart deze versie haar opslag ergens anders ' +
+          'en werkt alleen de publieke API.</div>';
+        const api = Object.keys(k.api || {}).filter((x) => k.api[x]);
+        h += '<div class="ronde zacht">Publieke API: ' + esc(api.join(', ') || 'geen') + '.</div>';
+        if (k.fout) h += '<div class="ronde zacht">Aftasten: ' + esc(k.fout) + '</div>';
       }
     }
     if (d.lid_bron) {
       const b = d.lid_bron;
       h += '<div class="ronde zacht">Koppelingen gevonden via: <b>' +
         esc(b.bron || 'geen enkele weg') + '</b>' +
-        (b.scan ? ' &middot; contactenlijst: ' + b.scan.bekeken + ' bekeken, ' +
-          b.scan.met_lid + ' met een lid-identiteit, ' + b.scan.op_leadlijst + ' op de leadlijst' : '') +
+        (b.scan ? ' &middot; ' + b.scan.koppelingen + ' van ' + b.scan.bekeken + ' nummers' : '') +
         '.</div>';
-    }
-    if (typeof d.nummerkaart === 'number') {
-      h += '<div class="ronde zacht">Gesprekken waarvan we de identiteit onthouden hebben: ' + d.nummerkaart + '.</div>';
+      // Per weg: geprobeerd, gelukt, beschikbaar. Dit is wat een stilte
+      // onmogelijk maakt — 'bestaat niet' ziet er nu anders uit dan 'gaf niets'.
+      const w = b.wegen || {};
+      const rijen = Object.keys(w);
+      if (rijen.length) {
+        h += '<table class="tellers"><tr><th>weg</th><th>geprobeerd</th><th>gelukt</th><th>beschikbaar</th></tr>' +
+          rijen.map((k) => '<tr><td>' + esc(k) + '</td><td>' + (w[k].geprobeerd || 0) + '</td><td>' +
+            (w[k].gelukt || 0) + '</td><td>' +
+            (w[k].beschikbaar === null ? 'onbekend' : (w[k].beschikbaar ? 'ja' : 'nee')) +
+            '</td></tr>').join('') + '</table>';
+      }
+      const bv = b.laatste_berichtvormen;
+      if (bv && Object.keys(bv).length) {
+        h += '<div class="ronde zacht">Velden op het laatste ruwe bericht: ' +
+          esc(Object.keys(bv).sort().map((k) => k + '=' + bv[k]).join(', ')) +
+          ' &middot; sleutelnaam en domein/lengte. Staat hier een veld met <b>c.us</b>, ' +
+          'dan draagt WhatsApp het echte nummer gewoon mee.</div>';
+      }
     }
     if (g.laatste_genegeerd) {
       h += '<div class="ronde zacht">Laatst genegeerd: ' + esc(g.laatste_genegeerd.type) +

@@ -18,6 +18,8 @@ import { normaliseerNummer, naarChatId } from './nummers.js';
 import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep } from './gebeurtenis.js';
 import { maakTellers, jidVorm } from './tellers.js';
 import { maakLidkaart } from './lidkaart.js';
+import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET } from './uitkomst.js';
+import { createRequire } from 'node:module';
 
 const { Client, LocalAuth } = pkg;
 
@@ -112,23 +114,57 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // Alleen een woord en aantallen.
   let kaartBron = null;
   let laatsteScan = null;
+  // De sleutelnamen en domeinen die we op het laatste ruwe bericht zagen. Namen
+  // en achtervoegsels — protocolnamen, geen persoonsgegevens.
+  let laatsteBerichtvormen = null;
 
-  // ── Wat kan de whatsapp-web.js die hier daadwerkelijk draait? ────────────
-  // Niet aannemen. De vorige ronde bouwde op getCurrentLid(wid) en die leverde
-  // 0 van 28 op, zónder fout — dan weet je nog steeds niets: bestond de functie
-  // niet, of gaf ze niets terug? Vandaar dat hier nu de FUNCTIENAMEN worden
-  // opgesomd. Dat zijn namen uit een library, geen gegevens van iemand, dus die
-  // mogen gewoon in het log en in /status.
+  // ── Welke bibliotheek draait hier eigenlijk? ─────────────────────────────
+  // Dit had er vanaf het begin moeten staan. package.json zegt ^1.26.0, dus npm
+  // kan elke 1.x geïnstalleerd hebben, en de interne opbouw verschilt daar sterk
+  // tussen. Alle metingen tot nu toe zijn gedaan tegen de bron van 1.26.0 —
+  // zonder te weten of dát is wat er draait.
+  //
+  // De probe wees uit dat window.Store vanuit onze evaluate niet bestaat, terwijl
+  // versturen (dat óók via pupPage.evaluate loopt, maar dan naar window.WWebJS)
+  // gewoon werkt. Dat past bij een nieuwere versie die Store niet meer als
+  // globale variabele achterlaat. Vandaar dat we vanaf nu uitsluitend de
+  // publieke API gebruiken: die werkt aantoonbaar, ongeacht waar de bibliotheek
+  // haar interne opslag bewaart.
   const kunde = {
     onderzocht: false,
     fout: null,
-    modules: {},          // welke Store-onderdelen bestaan
-    lidutils_keys: [],    // de functienamen die LidUtils aanbiedt
-    contact_keys: [],     // idem voor ContactMethods
+    bibliotheek: null,     // versie uit node_modules
+    wweb: null,            // versie van WhatsApp Web zelf
+    globals: {},           // welke globals de pagina heeft
+    wwebjs_keys: [],       // functienamen op window.WWebJS
+    api: {},               // welke publieke methodes de client aanbiedt
   };
 
   async function tastKundeAf() {
     if (kunde.onderzocht) return kunde;
+    kunde.onderzocht = true;
+
+    // 1. De versie van de bibliotheek zelf, uit haar eigen package.json. Zonder
+    //    dit blijven we bron lezen die misschien niet draait.
+    try {
+      const eis = createRequire(import.meta.url);
+      kunde.bibliotheek = eis('whatsapp-web.js/package.json')?.version || null;
+    } catch (_) { kunde.bibliotheek = 'onbekend'; }
+
+    // 2. Welke publieke methodes bestaan er op de client? Dit is wat we vanaf nu
+    //    gebruiken, dus dit is wat we moeten weten.
+    for (const naam of ['getContacts', 'getChats', 'getNumberId', 'getContactById',
+                        'getChatById', 'sendMessage', 'getWWebVersion']) {
+      kunde.api[naam] = typeof client[naam] === 'function';
+    }
+
+    try {
+      kunde.wweb = kunde.api.getWWebVersion ? await client.getWWebVersion() : null;
+    } catch (_) { kunde.wweb = null; }
+
+    // 3. En wat er in de pagina staat. Alleen namen — dit is de meting die
+    //    vorige ronde 'alles false' opleverde, en die nu ook laat zien wát er
+    //    dán wél is.
     try {
       const uit = await client.pupPage.evaluate(() => {
         const namen = (o) => {
@@ -138,140 +174,213 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
             return uit.sort();
           } catch (_) { return []; }
         };
-        const S = window.Store || {};
         return {
-          modules: {
-            LidUtils      : !!S.LidUtils,
-            ContactMethods: !!S.ContactMethods,
-            WidFactory    : typeof S.WidFactory?.createWid === 'function',
-            WidToJid      : typeof S.WidToJid?.widToUserJid === 'function',
-            QueryExist    : typeof S.QueryExist === 'function',
-            Contact       : typeof S.Contact?.getModelsArray === 'function',
-            Chat          : typeof S.Chat?.getModelsArray === 'function',
-            NumberInfo    : !!S.NumberInfo,
+          globals: {
+            Store  : typeof window.Store !== 'undefined',
+            WWebJS : typeof window.WWebJS !== 'undefined',
+            require: typeof window.require === 'function',
           },
-          lidutils_keys: namen(S.LidUtils),
-          contact_keys : namen(S.ContactMethods),
+          wwebjs_keys: namen(window.WWebJS),
         };
       });
-      Object.assign(kunde, uit, { onderzocht: true, fout: null });
-      // Functienamen van een library — dit mag in het log, en het is precies
-      // wat we de vorige ronde hadden willen zien.
-      console.log('[brug] LidUtils biedt:', kunde.lidutils_keys.join(', ') || '(niets)');
-      console.log('[brug] Store-onderdelen:',
-        Object.entries(kunde.modules).filter(([, v]) => v).map(([k]) => k).join(', ') || '(niets)');
+      Object.assign(kunde, uit);
     } catch (e) {
-      kunde.onderzocht = true;
-      kunde.fout = 'aftasten faalde: ' + (e?.message || 'onbekend');
-      console.warn('[brug]', kunde.fout);
+      kunde.fout = 'pagina aftasten faalde: ' + (e?.message || 'onbekend');
     }
+
+    console.log('[brug] bibliotheek:', kunde.bibliotheek, '· WhatsApp Web:', kunde.wweb || 'onbekend');
+    console.log('[brug] globals in de pagina:',
+      Object.entries(kunde.globals).filter(([, v]) => v).map(([k]) => k).join(', ') || '(geen)');
+    console.log('[brug] publieke API:',
+      Object.entries(kunde.api).filter(([, v]) => v).map(([k]) => k).join(', ') || '(geen)');
     return kunde;
   }
 
+  // ── De wegen naar de koppeling, elk met een eigen teller ─────────────────
+  // Elke weg houdt bij: hoe vaak geprobeerd, hoe vaak gelukt, en of hij
+  // überhaupt beschikbaar is. Daarmee is 'stilte' onmogelijk geworden: na één
+  // testbericht staat er welke weg werkte, en welke niet bestond.
+  const WEGEN = ['getNumberId', 'getChatById', 'chat_contact', 'contact_data', 'msg_data'];
+  const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null }]));
+  const noteer = (weg, res) => {
+    const t = wegen[weg];
+    if (!t) return;
+    t.geprobeerd += 1;
+    if (res.status === GELUKT) t.gelukt += 1;
+    if (res.status === BESTAAT_NIET) t.beschikbaar = false;
+    else if (t.beschikbaar === null) t.beschikbaar = true;
+  };
+
+  /** De cijfers en het domein uit een wid, string of object. */
+  function deelWid(v) {
+    if (!v) return { user: '', server: '' };
+    if (typeof v === 'string') {
+      const st = v.split('@');
+      return { user: String(st[0]).replace(/\D/g, ''), server: (st[1] || '').toLowerCase() };
+    }
+    const ser = v._serialized ? String(v._serialized).split('@') : null;
+    return {
+      user  : String(v.user || (ser ? ser[0] : '')).replace(/\D/g, ''),
+      server: String(v.server || (ser ? ser[1] : '') || '').toLowerCase(),
+    };
+  }
+
   /**
-   * De LID die WhatsApp aan dit telefoonnummer hangt — via getCurrentLid.
+   * WEG A — client.getNumberId(nummer).
    *
-   * Deze weg leverde 0 van 28 op. Hij blijft staan omdat hij op een andere
-   * versie wél kan werken, maar hij is niet langer de enige: bouwLidkaart()
-   * valt terug op de contactenlijst als hier niets uit komt.
-   *
-   * De wid-variant die voor de hand ligt is wat hier al draait: createWid()
-   * en dan het wid-object doorgeven, niet de string. Voor de zekerheid
-   * probeert dit nu allebei, en de teller zegt welke iets opleverde.
+   * Letterlijk 'welke WhatsApp-identiteit hoort bij dit telefoonnummer'. Draait
+   * de LID-migratie, dan is dit precies wat we zoeken. De kortste weg, en hij
+   * staat gewoon in de publieke API.
    */
-  async function zoekLidVoor(nummer) {
+  async function lidViaNumberId(nummer) {
     const chatId = naarChatId(nummer);
-    if (!chatId) return null;
-    await tastKundeAf();
-    if (!kunde.modules.LidUtils || typeof kunde.lidutils_keys?.includes !== 'function') return null;
-    if (!kunde.lidutils_keys.includes('getCurrentLid')) return null;
-    return client.pupPage.evaluate((id) => {
-      const uitpakken = (v) => {
-        if (!v) return null;
-        if (typeof v === 'string') return v;
-        return v._serialized || v.user || null;
-      };
-      try {
-        const S = window.Store;
-        // Eerst het wid-object, dan de kale string. Welke van de twee werkt is
-        // niet uit de bron af te leiden, dus proberen we ze allebei.
-        try {
-          const wid = S.WidFactory.createWid(id);
-          const uit = uitpakken(S.LidUtils.getCurrentLid(wid));
-          if (uit) return uit;
-        } catch (_) { /* volgende vorm */ }
-        try {
-          const uit = uitpakken(S.LidUtils.getCurrentLid(id));
-          if (uit) return uit;
-        } catch (_) { /* op */ }
-        return null;
-      } catch (_) { return null; }
-    }, chatId);
+    const res = await probeer({
+      bestaat: !!chatId && kunde.api.getNumberId,
+      haal   : () => client.getNumberId(chatId),
+      bruikbaar: (v) => deelWid(v).server === 'lid',
+    });
+    noteer('getNumberId', res);
+    return res.status === GELUKT ? deelWid(res.waarde).user : null;
   }
 
   /**
-   * TWEEDE WEG: de koppelingen uit de contactenlijst halen.
+   * WEG B — client.getChatById(nummer + '@c.us') en dan chat.id uitlezen.
    *
-   * Als WhatsApp geen functie aanbiedt die nummer naar LID vertaalt, dan staat
-   * die koppeling misschien gewoon op de contact-modellen zelf — een contact
-   * dat onder een LID bekend is draagt vaak ook zijn telefoonnummer, of
-   * omgekeerd.
+   * Bewaart WhatsApp het gesprek onder een LID, dan geeft deze aanroep het
+   * gesprek terug mét zijn echte id — en dan hebben we het paar zonder ook maar
+   * iets van de interne store aan te raken.
    *
-   * DE LEADLIJST BLIJFT DE GRENS, en dat is hier geen formaliteit: de
-   * contactenlijst bevat álle contacten van dat toestel, dus ook Daves
-   * privécontacten. Daarom gebeurt het filteren BINNEN de pagina: de lijst met
-   * toegestane nummers gaat erin, en er komen alleen paren uit waarvan het
-   * telefoonnummer daarop staat. Over wie er niet op staat komt niets terug —
-   * niet als paar, niet als naam, niet als aantal per persoon. Alleen een
-   * totaaltelling van hoeveel contacten er bekeken zijn.
+   * Een ontbrekend gesprek is hier geen storing maar 'nooit mee gechat'. Dat
+   * onderscheid staat in de status: GEEN_RESULTAAT, niet FOUT.
    */
-  async function zoekLidsUitContacten(nummers) {
-    await tastKundeAf();
-    if (!kunde.modules.Contact) return { paren: [], bekeken: 0, met_lid: 0 };
-    return client.pupPage.evaluate((toegestaan) => {
-      const toestaan = new Set(toegestaan);
-      const cijfers = (v) => String(v == null ? '' : v).replace(/\D/g, '');
-      const deel = (v) => {
-        if (!v) return { user: '', server: '' };
-        if (typeof v === 'string') {
-          const st = v.split('@');
-          return { user: cijfers(st[0]), server: (st[1] || '').toLowerCase() };
-        }
-        return { user: cijfers(v.user), server: String(v.server || '').toLowerCase() };
-      };
-      const paren = [];
-      let bekeken = 0, metLid = 0;
-      try {
-        for (const c of window.Store.Contact.getModelsArray()) {
-          bekeken += 1;
-          const eigen = deel(c?.id);
-          // Wat er nog meer aan identiteit op het model hangt. Verschillende
-          // versies noemen dat anders, dus we kijken naar alle drie.
-          const ander = deel(c?.lid || c?.phoneNumber || c?.altId || null);
-          let telefoon = eigen.server === 'c.us' ? eigen.user : (ander.server === 'c.us' ? ander.user : '');
-          let lid      = eigen.server === 'lid'  ? eigen.user : (ander.server === 'lid'  ? ander.user : '');
-          if (lid) metLid += 1;
-          if (!telefoon || !lid) continue;
-          // HIER is de grens: alleen wat op de leadlijst staat verlaat de pagina.
-          if (!toestaan.has(telefoon)) continue;
-          paren.push([telefoon, lid]);
-        }
-      } catch (_) { /* wat we hebben, hebben we */ }
-      return { paren, bekeken, met_lid: metLid };
-    }, nummers);
+  async function lidViaChat(nummer) {
+    const chatId = naarChatId(nummer);
+    const res = await probeer({
+      bestaat: !!chatId && kunde.api.getChatById,
+      haal   : async () => {
+        try { return await client.getChatById(chatId); } catch (_) { return null; }
+      },
+      bruikbaar: (c) => !!c,
+    });
+    noteer('getChatById', res);
+    if (res.status !== GELUKT) return null;
+    const chat = res.waarde;
+
+    const eigen = deelWid(chat?.id);
+    if (eigen.server === 'lid' && eigen.user) return eigen.user;
+
+    // Het contact VAN HET GESPREK is altijd de tegenpartij — in beide
+    // richtingen. Dat is het verschil met de contact-getter op het BERICHT: die
+    // doet getContactById(author || from) en levert bij een uitgaand bericht
+    // ons eigen nummer op. Die val zat er al in.
+    const cres = await probeer({
+      bestaat: typeof chat?.getContact === 'function',
+      haal   : () => chat.getContact(),
+      bruikbaar: (c) => !!c,
+    });
+    noteer('chat_contact', cres);
+    if (cres.status !== GELUKT) return null;
+    return lidUitContact(cres.waarde);
   }
 
   /**
-   * De probe: wat levert élke variant op voor één bekend nummer?
+   * Het LID op een contact — óók uit de ruwe laag.
    *
-   * Dit is het gereedschap dat we de vorige twee rondes misten. In plaats van
-   * één weg te kiezen en te hopen, draait dit ze allemaal en zegt per stuk of
-   * er iets uit kwam en hoe lang dat was. Geen waarden, alleen vormen — precies
-   * dezelfde afspraak als bij de tellers.
+   * De Contact-klasse geeft maar een handvol velden door; `_data` draagt de
+   * volledige serialisatie van het model. Bij een LID-contact staat het
+   * telefoonnummer daar vaak gewoon in.
+   */
+  function lidUitContact(contact) {
+    const kandidaten = [contact?.id, contact?.lid, contact?.phoneNumber, contact?.altId];
+    const rauw = contact?._data;
+    if (rauw && typeof rauw === 'object') {
+      for (const k of Object.keys(rauw)) {
+        if (/lid|phone|pn$|number/i.test(k)) kandidaten.push(rauw[k]);
+      }
+      kandidaten.push(rauw.id);
+    }
+    const res = { status: kandidaten.some(Boolean) ? GELUKT : ONBRUIKBAAR, waarde: null, lengte: null };
+    noteer('contact_data', res);
+    for (const k of kandidaten) {
+      const d = deelWid(k);
+      if (d.server === 'lid' && d.user) return d.user;
+    }
+    return null;
+  }
+
+  /**
+   * WEG C — de RUWE gegevens op een binnenkomend bericht.
    *
-   * Het nummer MOET op de leadlijst staan. Anders zou deze route een manier
-   * worden om over een willekeurig nummer iets te weten te komen, en dat is
-   * exact wat het filter moet voorkomen.
+   * De LID-migratie voegt daar velden aan toe zodat clients kunnen koppelen
+   * (senderPn, recipientPn, participantPn en dergelijke). Zit daar het echte
+   * nummer in, dan is het in één regel opgelost.
+   *
+   * Wat hiervan naar buiten gaat is uitsluitend de SLEUTELNAAM en, voor waarden
+   * met een apenstaart, het achtervoegsel. Sleutelnamen zijn protocolnamen, geen
+   * persoonsgegevens.
+   */
+  function bekijkRuweBericht(msg) {
+    const rauw = msg && msg._data;
+    if (!rauw || typeof rauw !== 'object') {
+      noteer('msg_data', { status: BESTAAT_NIET });
+      return null;
+    }
+    const vorm = {};
+    let gevonden = null;
+    for (const k of Object.keys(rauw)) {
+      const v = rauw[k];
+      const d = deelWid(v && (typeof v === 'string' || typeof v === 'object') ? v : null);
+      if (d.server) vorm[k] = d.server + '/' + d.user.length;
+      if (!gevonden && d.server === 'c.us' && d.user && /pn$|phone|number/i.test(k)) {
+        gevonden = d.user;
+      }
+    }
+    // BEWAREN GEBEURT NIET HIER. De vormen worden pas onthouden als het bericht
+    // door het filter is — anders zou /status de opbouw van een bericht van een
+    // privécontact tonen. Sleutelnamen zijn protocolnamen, maar dát er een
+    // bericht was is dat niet.
+    noteer('msg_data', { status: gevonden ? GELUKT : ONBRUIKBAAR });
+    return { nummer: gevonden, vorm };
+  }
+
+  /** De vormen onthouden. Alleen aanroepen ná leadlijst.mag(). */
+  function bewaarBerichtvormen(vorm) {
+    if (vorm && Object.keys(vorm).length) laatsteBerichtvormen = vorm;
+  }
+
+  /**
+   * De koppelingen voor de hele leadlijst, langs de wegen hierboven.
+   *
+   * De leadlijst blijft de grens: we lopen alleen de nummers af die er al op
+   * staan, en vragen niets op over wie er niet op staat.
+   */
+  async function koppelingenUitApi(nummers) {
+    await tastKundeAf();
+    const paren = [];
+    let bekeken = 0;
+    for (const nummer of (Array.isArray(nummers) ? nummers : [])) {
+      bekeken += 1;
+      try {
+        const viaA = await lidViaNumberId(nummer);
+        if (viaA) { paren.push([nummer, viaA]); continue; }
+        const viaB = await lidViaChat(nummer);
+        if (viaB) { paren.push([nummer, viaB]); continue; }
+      } catch (_) { /* volgende nummer; één lead mag de rest niet ophouden */ }
+    }
+    return { paren, bekeken };
+  }
+
+  /**
+   * De probe, nu uitsluitend op de publieke API.
+   *
+   * Elke bron krijgt een eigen status. Dat is de hele les van de vorige twee
+   * rondes: 'bestaat niet', 'gaf niets terug' en 'gaf iets onbruikbaars' zagen
+   * er allemaal uit als null, en dus zaten we te raden. Nu staat er wat het is.
+   *
+   * Waarden komen er niet uit — alleen een status en een cijferlengte.
+   *
+   * Het nummer moet op de leadlijst staan, anders wordt dit een manier om over
+   * een willekeurig nummer iets te weten te komen.
    */
   async function probeerLid(nummer) {
     const n = normaliseerNummer(nummer);
@@ -280,56 +389,48 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     if (!staat.verbonden) { const e = new Error('niet verbonden'); e.code = 'NIET_VERBONDEN'; throw e; }
     await tastKundeAf();
 
-    const chatId = naarChatId(n);
-    const paginaUit = await client.pupPage.evaluate((id) => {
-      const S = window.Store || {};
-      const vorm = (v) => {
-        if (v === null || v === undefined) return 'niets';
-        if (typeof v === 'string') {
-          const st = v.split('@');
-          return (st[1] || 'geen_domein') + '/' + String(st[0]).replace(/\D/g, '').length;
+    const kort = (r) => ({ status: r.status, lengte: r.lengte });
+    const pogingen = {};
+
+    // getContactById op het nummer: welke id-vorm krijgen we terug, en welke
+    // VELDNAMEN hangen er aan — inclusief die op de ruwe laag `_data`, want de
+    // Contact-klasse geeft maar een handvol velden door.
+    const contact = await probeer({
+      bestaat: kunde.api.getContactById,
+      haal   : () => client.getContactById(naarChatId(n)),
+      bruikbaar: (c) => !!c,
+    });
+    pogingen['getContactById'] = { status: contact.status };
+    if (contact.status === GELUKT) {
+      const c = contact.waarde;
+      pogingen['getContactById'].id_server = deelWid(c?.id).server || null;
+      const namen = [];
+      for (const k in c) { try { if (/lid|phone|number/i.test(k)) namen.push(k); } catch (_) {} }
+      pogingen['getContactById'].veldnamen = [...new Set(namen)].sort();
+      const rauw = c?._data;
+      pogingen['getContactById'].heeft_data = !!rauw;
+      if (rauw && typeof rauw === 'object') {
+        // Sleutelnamen, en per waarde met een apenstaart alleen het domein.
+        const vormen = {};
+        for (const k of Object.keys(rauw)) {
+          const d = deelWid(rauw[k] && typeof rauw[k] !== 'number' ? rauw[k] : null);
+          if (d.server) vormen[k] = d.server + '/' + d.user.length;
         }
-        if (typeof v === 'object') {
-          const server = String(v.server || v._serialized?.split('@')[1] || 'onbekend');
-          const user = String(v.user || v._serialized?.split('@')[0] || '').replace(/\D/g, '');
-          return server + '/' + user.length;
-        }
-        return typeof v;
-      };
-      const poging = (naam, fn) => {
-        try { return { naam, uit: vorm(fn()) }; }
-        catch (e) { return { naam, uit: 'fout' }; }
-      };
+        pogingen['getContactById'].data_veldnamen = Object.keys(rauw).sort();
+        pogingen['getContactById'].data_vormen = vormen;
+      }
+    }
 
-      const pogingen = [];
-      let wid = null;
-      try { wid = S.WidFactory.createWid(id); } catch (_) { /* dan zonder */ }
+    // De twee wegen los, voor dit ene nummer.
+    pogingen['weg_A_getNumberId'] = { gevonden: !!(await lidViaNumberId(n)) };
+    pogingen['weg_B_getChatById'] = { gevonden: !!(await lidViaChat(n)) };
 
-      pogingen.push(poging('getCurrentLid(wid)', () => S.LidUtils.getCurrentLid(wid)));
-      pogingen.push(poging('getCurrentLid(string)', () => S.LidUtils.getCurrentLid(id)));
-      pogingen.push(poging('Contact.get(wid).id', () => S.Contact.get(wid)?.id));
-      pogingen.push(poging('Contact.get(wid).lid', () => S.Contact.get(wid)?.lid));
-      pogingen.push(poging('Contact.get(wid).phoneNumber', () => S.Contact.get(wid)?.phoneNumber));
-      pogingen.push(poging('Chat.get(wid).id', () => S.Chat.get(wid)?.id));
-      pogingen.push(poging('ContactMethods.getUserid', () => S.ContactMethods.getUserid(S.Contact.get(wid))));
-
-      // Alle sleutels op het contact-model waar 'lid' in voorkomt. Namen van
-      // velden, geen waarden.
-      let veldnamen = [];
-      try {
-        const c = S.Contact.get(wid);
-        if (c) {
-          for (const k in c) { try { if (/lid|phone|number/i.test(k)) veldnamen.push(k); } catch (_) {} }
-          veldnamen = [...new Set(veldnamen)].sort();
-        }
-      } catch (_) { /* laat maar */ }
-
-      return { pogingen, contact_veldnamen: veldnamen, contact_gevonden: (() => {
-        try { return !!S.Contact.get(wid); } catch (_) { return false; }
-      })() };
-    }, chatId);
-
-    return { kunde: { ...kunde }, ...paginaUit };
+    return {
+      kunde: { ...kunde },
+      pogingen,
+      wegen: JSON.parse(JSON.stringify(wegen)),
+      laatste_berichtvormen: laatsteBerichtvormen,
+    };
   }
 
   /** De kaart opnieuw opbouwen. Fail-soft: een fout laat de vorige kaart staan. */
@@ -338,37 +439,32 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     if (!staat.verbonden) return;
     try {
       const nummers = typeof leadlijst.nummers === 'function' ? leadlijst.nummers() : [];
-      await tastKundeAf();
+      const uit = await koppelingenUitApi(nummers);
 
-      // Weg 1: de functie die WhatsApp ervoor heeft. Leverde op deze versie
-      // 0 van 28 op, maar hij blijft eerst omdat hij het meest direct is.
-      const uit = await lidkaart.bouw(nummers, zoekLidVoor);
-      kaartBron = uit.gevonden > 0 ? 'getCurrentLid' : null;
-
-      // Weg 2: de contactenlijst. Alleen als weg 1 niets opleverde — anders
-      // lopen we elke ronde onnodig door alle contacten.
-      let scan = null;
-      if (uit.gevonden === 0) {
-        scan = await zoekLidsUitContacten(nummers);
-        if (scan.paren.length > 0) {
-          const kaart = new Map(scan.paren);
-          const tweede = await lidkaart.bouw(nummers, async (n) => kaart.get(n) || null);
-          if (tweede.gevonden > 0) kaartBron = 'contactenlijst';
-        }
+      if (uit.paren.length > 0) {
+        const kaart = new Map(uit.paren);
+        await lidkaart.bouw(nummers, async (n) => kaart.get(n) || null);
+        // Welke weg het deed staat in de tellers; hier alleen dát er een was.
+        kaartBron = Object.keys(wegen).filter((w) => wegen[w].gelukt > 0).join(' + ') || 'onbekend';
+      } else {
+        kaartBron = null;
       }
+      laatsteScan = { bekeken: uit.bekeken, koppelingen: lidkaart.status().koppelingen };
 
-      // Alleen aantallen. Nooit een nummer of een LID.
-      console.log('[brug] lidkaart:', lidkaart.status().koppelingen, 'van', nummers.length,
+      // Alleen aantallen en wegnamen. Nooit een nummer, nooit een LID.
+      console.log('[brug] lidkaart:', lidkaart.status().koppelingen, 'van', uit.bekeken,
         'nummers gekoppeld via', kaartBron || 'geen enkele weg');
-      if (scan) {
-        console.log('[brug] contactenlijst bekeken:', scan.bekeken, 'contacten,',
-          scan.met_lid, 'met een lid-identiteit,', scan.paren.length, 'op de leadlijst');
-        laatsteScan = { bekeken: scan.bekeken, met_lid: scan.met_lid, op_leadlijst: scan.paren.length };
+      for (const w of WEGEN) {
+        const t = wegen[w];
+        console.log('[brug] weg', w + ':', 'geprobeerd', t.geprobeerd, '· gelukt', t.gelukt,
+          '· beschikbaar', t.beschikbaar === null ? 'onbekend' : (t.beschikbaar ? 'ja' : 'nee'));
       }
     } catch (e) {
       console.warn('[brug] lidkaart opbouwen faalde:', e?.message || e);
     }
   }
+
+
 
   const isTelefoonJid = (jid) => typeof jid === 'string' && /@(c\.us|s\.whatsapp\.net)$/i.test(jid);
 
@@ -491,12 +587,19 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     try {
       const van = msg.from;
       if (isGroep(van)) { negeer('message', 'groep', van); return; }
-      // Eerst weten WIE dit is — een jid is niet altijd een telefoonnummer —
-      // en dan pas filteren. Zie bepaalNummer(): dit leest de envelop, en het
-      // filter staat nog altijd vóór elk gebruik van nummer of tekst.
-      const nummer = await bepaalNummer(van);
-      // FILTER. Alles hieronder raakt de tekst aan.
+      // Eerst weten WIE dit is — een jid is niet altijd een telefoonnummer — en
+      // dan pas filteren. Weg C kijkt op de ruwe laag van het bericht: draagt
+      // WhatsApp daar het echte nummer mee, dan is er niets op te zoeken.
+      // Levert dat niets op, dan de omweg via de kaart en het contact.
+      //
+      // Allebei lezen ze de envelop, niet de inhoud; het filter staat nog altijd
+      // vóór elk gebruik van nummer of tekst.
+      const ruw = bekijkRuweBericht(msg);
+      const nummer = ruw.nummer || await bepaalNummer(van);
+      // FILTER. Alles hieronder raakt de tekst aan, en pas hierna wordt er iets
+      // van dit bericht onthouden.
       if (!leadlijst.mag(nummer)) { negeer('message', 'niet_op_leadlijst', van); return; }
+      bewaarBerichtvormen(ruw.vorm);
       tellers.liet('message');
       await webhook.duw({
         soort    : 'antwoord_ontvangen',
@@ -542,9 +645,11 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       if (isGroep(msg?.to)) { negeer('message_create', 'groep', msg?.to); return; }
       // Eerst de identiteit oplossen, dan filteren. Zonder deze stap filteren we
       // op de cijfers van een LID, en die staan nergens op de leadlijst.
-      const nummer = await bepaalNummer(msg?.to);
+      const ruw = bekijkRuweBericht(msg);
+      const nummer = ruw.nummer || await bepaalNummer(msg?.to);
       // FILTER, en pas hierna wordt het nummer of de tekst ergens voor gebruikt.
       if (!leadlijst.mag(nummer)) { negeer('message_create', 'niet_op_leadlijst', msg?.to); return; }
+      bewaarBerichtvormen(ruw.vorm);
       const g = bouwUitgaandeGebeurtenis(msg);
       if (!g) { negeer('message_create', 'onbruikbaar', msg?.to); return; }
       tellers.liet('message_create');
@@ -604,7 +709,12 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),
     /** Langs welke weg de kaart gevuld is, en wat de contactscan zag. */
-    lidBron: () => ({ bron: kaartBron, scan: laatsteScan }),
+    lidBron: () => ({
+      bron: kaartBron,
+      scan: laatsteScan,
+      wegen: JSON.parse(JSON.stringify(wegen)),
+      laatste_berichtvormen: laatsteBerichtvormen,
+    }),
     /** De probe: wat levert elke variant op voor één bekend nummer? */
     lidProbe: probeerLid,
     /** Handmatig opnieuw opbouwen, voor de /lidkaart-route. */

@@ -74,19 +74,30 @@ test('de brug filtert op het ontvangende nummer vóór hij iets bouwt', () => {
   const bron = readFileSync(join(ROOT, 'services/whatsapp-brug/lib/whatsapp.js'), 'utf8');
   const i = bron.indexOf("client.on('message_create'");
   assert.ok(i > 0, 'de message_create-handler hoort te bestaan');
-  const blok = bron.slice(i, i + 1200);
+  // Ruimer venster: de handler is gegroeid met weg C (de ruwe laag van het
+  // bericht). Die leest de envelop en staat vóór het filter — dat mag, en moet
+  // ook, want je kunt niet filteren op een nummer dat je nog niet kent. Wat er
+  // ná het filter hoort te staan is alles wat iets BEWAART of DOORSTUURT.
+  const blok = bron.slice(i, i + 2600);
   const filter = blok.indexOf('leadlijst.mag(');
   const bouw = blok.indexOf('bouwUitgaandeGebeurtenis(');
-  assert.ok(filter > 0 && bouw > 0);
+  const bewaar = blok.indexOf('bewaarBerichtvormen(');
+  const duw = blok.indexOf('webhook.duw(');
+  assert.ok(filter > 0 && bouw > 0 && bewaar > 0 && duw > 0);
   assert.ok(filter < bouw, 'het filter hoort vóór het bouwen te staan');
+  assert.ok(filter < bewaar, 'en vóór er iets van dit bericht onthouden wordt');
+  assert.ok(filter < duw, 'en vóór er iets naar het CRM gaat');
 });
 
 test('ook bij inkomend blijft het filter de eerste regel', () => {
   const bron = readFileSync(join(ROOT, 'services/whatsapp-brug/lib/whatsapp.js'), 'utf8');
   const i = bron.indexOf("client.on('message'");
-  const blok = bron.slice(i, i + 900);
+  const blok = bron.slice(i, i + 2600);
+  assert.ok(blok.indexOf('msg.body') > 0, 'de tekst hoort in het venster te vallen');
   assert.ok(blok.indexOf('leadlijst.mag(') < blok.indexOf('msg.body'),
     'de tekst hoort pas aangeraakt te worden nadat het filter door is');
+  assert.ok(blok.indexOf('leadlijst.mag(') < blok.indexOf('bewaarBerichtvormen('),
+    'en er wordt pas ná het filter iets van dit bericht onthouden');
 });
 
 test('groepen vallen af, ook los van de leadlijst', () => {
