@@ -224,9 +224,15 @@ test('zonder telefoonnummer valt er niets te versturen', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('zonder berichten zegt het paneel dat er geen historiek is', () => {
+  // De tekst zelf is bijgesteld toen 'Historiek ophalen' erbij kwam: het lege
+  // blok legt nu uit dat de brug niets bewaarde én biedt aan het van het
+  // toestel te halen. De bedoeling is dezelfde gebleven — uitleg in plaats van
+  // een lege chat die als stilte leest — dus daar toetst dit op, niet op de
+  // exacte woorden.
   const H = opstelling({ gesprek: { berichten: [] } });
   const h = H.gesprekPaneelHtml();
-  assert.match(h, /geen historiek/i);
+  assert.match(h, /Nog geen berichten in het systeem/);
+  assert.match(h, /bewaarde tot nu toe niets/);
   assert.doesNotMatch(h, /class="wchat"/, 'geen lege chat die als stilte leest');
 });
 

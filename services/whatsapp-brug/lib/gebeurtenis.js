@@ -93,3 +93,31 @@ export function bouwAckGebeurtenis(msg, ack, nu = Date.now()) {
 export function isSpraak(mediaType) {
   return SPRAAK_TYPES.has(String(mediaType || '').toLowerCase());
 }
+
+/**
+ * Een bericht uit de opgehaalde geschiedenis, klaar om terug te geven.
+ *
+ * Pure functie zonder client, zodat de vorm te testen is zonder puppeteer,
+ * Chromium of een gekoppelde telefoon — net als de twee hierboven.
+ *
+ * Let op het verschil met de live-gebeurtenissen: hier gaat geen `soort` mee.
+ * Een historisch bericht is geen gebeurtenis die nu plaatsvindt; het CRM
+ * schrijft het weg als gespreksregel en raakt de poging-telling niet aan. Zou
+ * dit als 'uitgaand' of 'antwoord_ontvangen' binnenkomen, dan telde een gesprek
+ * van vorige week vandaag mee als moeite.
+ *
+ * `timestamp` is in seconden; de rest van het systeem rekent in ISO.
+ */
+export function bouwHistoriekBericht(msg, nu = Date.now()) {
+  if (!msg || !msg.id) return null;
+  const jid = msg.fromMe === true ? msg.to : msg.from;
+  if (isGroep(jid)) return null;
+  const seconden = Number(msg.timestamp);
+  return {
+    bericht_id: msg.id?._serialized || null,
+    richting  : msg.fromMe === true ? 'uit' : 'in',
+    tekst     : typeof msg.body === 'string' ? msg.body.slice(0, MAX_TEKST) : '',
+    media_type: msg.type || null,
+    tijdstip  : new Date(Number.isFinite(seconden) && seconden > 0 ? seconden * 1000 : nu).toISOString(),
+  };
+}
