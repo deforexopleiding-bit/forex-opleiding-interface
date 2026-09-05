@@ -13,12 +13,11 @@
 import pkg from 'whatsapp-web.js';
 import qrcode from 'qrcode';
 import { normaliseerNummer, naarChatId } from './nummers.js';
+// De vorm van elke gebeurtenis staat apart en dependency-vrij, zodat hij te
+// testen is zonder puppeteer of een gekoppelde telefoon.
+import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis } from './gebeurtenis.js';
 
 const { Client, LocalAuth } = pkg;
-
-// De ack-codes van whatsapp-web.js naar iets leesbaars. -1 (fout) en 0 (nog
-// bezig) leveren geen gebeurtenis op: daar valt in de opvolging niets mee.
-const ACK_SOORT = { 1: 'verzonden', 2: 'afgeleverd', 3: 'gelezen', 4: 'gelezen' };
 
 export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   const staat = {
@@ -128,16 +127,17 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   client.on('message_create', async (msg) => {
     raakAan();
     try {
-      if (!msg.fromMe) return;               // inkomend loopt via 'message'
-      const naar = msg.to;
-      // FILTER EERST, net als bij inkomend.
-      if (!leadlijst.mag(naar)) return;
+      // FILTER EERST, net als bij inkomend: het nummer waar dit heen gaat moet
+      // op de leadlijst staan. Groepen vallen daar ook al op af.
+      if (!leadlijst.mag(msg?.to)) return;
+      const g = bouwUitgaandeGebeurtenis(msg);
+      if (!g) return;                        // niet van ons, groep, of onbruikbaar
       await webhook.duw({
-        soort     : 'uitgaand',
-        nummer    : normaliseerNummer(naar),
-        tijdstip  : new Date((msg.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString(),
-        media_type: msg.type || null,        // 'ptt' of 'audio' = spraakbericht
-        bericht_id: msg.id?._serialized || null,
+        soort     : g.soort,
+        nummer    : normaliseerNummer(g.jid),
+        tijdstip  : g.tijdstip,
+        media_type: g.media_type,            // 'ptt' of 'audio' = spraakbericht
+        bericht_id: g.bericht_id,
       });
     } catch (e) {
       console.warn('[brug] uitgaand bericht verwerken faalde:', e?.message || e);
@@ -148,20 +148,16 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   client.on('message_ack', async (msg, ack) => {
     raakAan();
     try {
-      const soort = ACK_SOORT[ack];
-      if (!soort) return;
-      const naar = msg.to || msg.from;
-      if (!leadlijst.mag(naar)) return;
+      if (!leadlijst.mag(msg?.to || msg?.from)) return;
+      const g = bouwAckGebeurtenis(msg, ack);
+      if (!g) return;
       await webhook.duw({
-        soort,
-        nummer    : normaliseerNummer(naar),
-        // Het moment van de bevestiging, niet van het bericht. whatsapp-web.js
-        // geeft bij een ack geen verzendtijd mee die we kunnen vertrouwen.
-        tijdstip  : new Date().toISOString(),
-        // De ack draagt wél het volledige Message-object, dus het type is hier
-        // gewoon beschikbaar. Het stond er alleen niet in.
-        media_type: msg.type || null,
-        bericht_id: msg.id?._serialized || null,
+        soort     : g.soort,
+        nummer    : normaliseerNummer(g.jid),
+        // Het moment van de bevestiging, niet van het bericht.
+        tijdstip  : g.tijdstip,
+        media_type: g.media_type,
+        bericht_id: g.bericht_id,
       });
     } catch (e) {
       console.warn('[brug] ack verwerken faalde:', e?.message || e);

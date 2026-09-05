@@ -29,7 +29,10 @@ Drie dingen die daarbij vastliggen:
   Ook niet bij een fout.
 
 Groepsgesprekken vallen er altijd buiten — daar zitten per definitie mensen in
-die niet op de lijst staan.
+die niet op de lijst staan. Dat geldt voor alle drie de wegen: inkomend,
+uitgaand en de statusbevestigingen. Bij uitgaand wordt het nummer van de
+**ontvanger** tegen de lijst gehouden, vóór er ook maar iets van het bericht
+wordt aangeraakt.
 
 ---
 
@@ -188,9 +191,23 @@ bewegende delen, en de sessie overleeft een herstart van de machine net zo goed.
 
 ### 6. Firewall en bereikbaarheid
 
-Het installatiescript zet de firewall al dicht op alles behalve SSH en, als
-`BIND` niet op localhost staat, de brugpoort. Wat hieronder staat is de keuze
-die je daarna nog zelf maakt.
+Het installatiescript zet de firewall dicht op alles behalve SSH en, als `BIND`
+niet op localhost staat, de brugpoort. Staat er een reverse proxy voor (Caddy of
+nginx), dan houdt het **80 en 443 open**.
+
+> **Waarom die twee open moeten blijven.** Met een reverse proxy ervoor komt het
+> verkeer van het CRM binnen op 443, niet op de brugpoort. Gaan 80 en 443 dicht,
+> dan meldt het CRM *brug niet bereikbaar* terwijl de service gewoon draait — en
+> daar zoek je een uur naar, want alles lijkt in orde. Dat is op 5 september
+> precies zo gebeurd: het script deed toen `ufw --force reset` en gooide de
+> Caddy-regels weg.
+>
+> Het script reset de firewall daarom **niet meer**. `ufw allow` is uit zichzelf
+> idempotent, dus regels toevoegen zonder te resetten geeft hetzelfde eindbeeld
+> zonder dat er iets verdwijnt wat iemand anders heeft neergezet. Wordt er geen
+> proxy gevonden maar staan 80/443 al open, dan blijven ze open.
+
+Wat hieronder staat is de keuze die je daarna nog zelf maakt.
 
 De brug luistert standaard op `127.0.0.1` en is dan van buiten niet bereikbaar.
 Dat is veilig, maar Vercel kan er dan ook niet bij. Twee wegen:
@@ -272,13 +289,36 @@ Alles behalve `/healthz` vereist de header `X-Brug-Secret`, en het IP moet op
 En de brug duwt zelf naar `CRM_WEBHOOK_PATH`:
 
 ```json
-{ "soort": "afgeleverd", "nummer": "32470111222",
-  "tijdstip": "2026-09-04T12:00:00.000Z", "bericht_id": "true_...@c.us" }
+{ "soort": "uitgaand", "nummer": "32470111222", "media_type": "ptt",
+  "tijdstip": "2026-09-05T06:30:00.000Z", "bericht_id": "true_...@c.us" }
 ```
 
-`soort` is `verzonden`, `afgeleverd`, `gelezen` of `antwoord_ontvangen`. Bij dat
-laatste zit `tekst` erbij, en `media_type` zodat een ingesproken bericht in de
-opvolging als spraakbericht telt in plaats van als tekstje.
+| `soort` | Wanneer | Tijdstip | `tekst` | `media_type` |
+|---|---|---|---|---|
+| `uitgaand` | Dave stuurt iets — ook vanaf zijn eigen telefoon | moment van **versturen** | nee | ja |
+| `verzonden` / `afgeleverd` / `gelezen` | statusverandering op wat wij stuurden | moment van de **bevestiging** | nee | ja |
+| `antwoord_ontvangen` | de lead stuurt iets | moment van het bericht | ja | ja |
+
+`media_type` `ptt` of `audio` betekent een ingesproken bericht; dat telt in de
+opvolging als spraakbericht in plaats van als tekstje.
+
+**Waarom `uitgaand` een eigen weg heeft.** `whatsapp-web.js` doet in `Client.js`
+`if (msg.id.fromMe) return;` vlak vóór het `message`-event, dus eigen berichten
+komen daar nooit langs. Alleen `message_create` ziet ze — en dat geldt ook voor
+wat Dave op zijn telefoon inspreekt, want de hook hangt aan de berichtenstore
+die het gekoppelde apparaat meesynct. Zonder die handler is *"heeft deze lead
+vanmorgen een spraakbericht gehad?"* een vraag die het systeem niet kan
+beantwoorden.
+
+**Bij uitgaand gaat er geen berichttekst mee.** Voor de meting is alleen nodig
+dát er iets uitging en of het ingesproken was; de inhoud van wat Dave naar een
+lead stuurt is gevoeliger dan nodig en blijft op de telefoon.
+
+**Eén bericht, één regel.** Een bericht dat het CRM zelf verstuurt levert zowel
+een `uitgaand` als een `verzonden` op. Die twee beschrijven hetzelfde moment en
+delen daarom in het CRM één idempotency-sleutel, zodat er één rij overblijft in
+plaats van twee. `uitgaand` wint, want die draagt het echte verzendmoment en het
+`media_type`; de ack draagt geen van beide betrouwbaar.
 
 ---
 

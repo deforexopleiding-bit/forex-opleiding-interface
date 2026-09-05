@@ -80,35 +80,64 @@ export default async function handler(req, res) {
     const isSpraak = (soort === 'antwoord_ontvangen' || soort === 'uitgaand')
       && SPRAAK_TYPES.has(String(b.media_type || '').toLowerCase());
 
-    // Idempotent op bericht_id + soort: de brug herkanst bij een mislukte
-    // levering, en dezelfde aflever-melding twee keer tellen zou de dekking in
-    // Afgerond laten oplopen zonder dat er iets gebeurd is.
+    // Idempotent: de brug herkanst bij een mislukte levering, en dezelfde
+    // melding twee keer tellen zou de dekking laten oplopen zonder dat er iets
+    // gebeurd is.
+    //
+    // 'uitgaand' en 'verzonden' beschrijven HETZELFDE moment — het bericht ging
+    // de deur uit — maar komen langs twee wegen binnen: message_create en de
+    // ack. Een bericht dat het CRM zelf stuurt levert allebei op. Ze delen
+    // daarom één sleutel, zodat er één rij overblijft in plaats van twee.
+    //
+    // 'uitgaand' wint als hij later komt: die draagt het echte verzendmoment en
+    // het media_type, en de ack draagt geen van beide betrouwbaar.
     const berichtId = b.bericht_id ? String(b.bericht_id).slice(0, 200) : null;
-    if (berichtId) {
+    const sleutel = berichtId ? berichtId + '#' + idemSoort(soort) : null;
+    let bestaandeId = null;
+    if (sleutel) {
       const { data: bestaand } = await supabaseAdmin
         .from('opvolging_pogingen')
-        .select('id')
+        .select('id, soort')
         .eq('taak_id', taak.id)
-        .eq('call_log_id', berichtId + '#' + soort)
+        .eq('call_log_id', sleutel)
         .limit(1);
-      if (bestaand && bestaand[0]) return res.status(200).json({ ok: true, gekoppeld: true, hergebruikt: true });
+      if (bestaand && bestaand[0]) {
+        if (soort !== 'uitgaand') {
+          return res.status(200).json({ ok: true, gekoppeld: true, hergebruikt: true });
+        }
+        bestaandeId = bestaand[0].id;   // de ack was er eerder; bijwerken
+      }
     }
 
     const tekst = (soort === 'antwoord_ontvangen' && typeof b.tekst === 'string')
       ? b.tekst.trim().slice(0, 500) : '';
 
-    const { data: poging, error } = await supabaseAdmin.from('opvolging_pogingen').insert({
+    const rij = {
       taak_id    : taak.id,
       soort      : isSpraak ? 'spraakbericht' : 'whatsapp',
       tijdstip   : tijdstipIso,
       automatisch: true,
       resultaat  : bouwResultaat(soort, isSpraak, tekst),
       // call_log_id is de enige vrije tekstkolom voor een externe verwijzing.
-      // Met de soort erachter, want één bericht levert meerdere gebeurtenissen
-      // op (verzonden, afgeleverd, gelezen) en die moeten los idempotent zijn.
-      call_log_id: berichtId ? berichtId + '#' + soort : null,
-    }).select('id').single();
-    if (error) throw new Error(error.message);
+      // De soort staat erachter zodat afleveren en lezen los idempotent zijn;
+      // versturen deelt zijn sleutel met 'uitgaand' — zie idemSoort().
+      call_log_id: sleutel,
+    };
+    let poging;
+    if (bestaandeId) {
+      // De ack stond er al. Bijwerken met het echte verzendmoment en het type,
+      // in plaats van er een tweede rij naast te zetten.
+      const { data, error } = await supabaseAdmin.from('opvolging_pogingen')
+        .update({ soort: rij.soort, tijdstip: rij.tijdstip, resultaat: rij.resultaat })
+        .eq('id', bestaandeId).select('id').single();
+      if (error) throw new Error(error.message);
+      poging = data;
+    } else {
+      const { data, error } = await supabaseAdmin.from('opvolging_pogingen')
+        .insert(rij).select('id').single();
+      if (error) throw new Error(error.message);
+      poging = data;
+    }
 
     await supabaseAdmin.from('opvolging_taken')
       .update({ updated_at: new Date().toISOString() }).eq('id', taak.id);
@@ -161,4 +190,18 @@ async function zoekTaak(nummer) {
 function bouwResultaat(soort, isSpraak, tekst) {
   const basis = (isSpraak && RESULTAAT_SPRAAK[soort]) || RESULTAAT[soort];
   return tekst ? `${basis}: ${tekst}` : basis;
+}
+
+/**
+ * De soort zoals hij in de idempotency-sleutel terechtkomt.
+ *
+ * 'uitgaand' en 'verzonden' zijn hetzelfde moment langs twee wegen
+ * (message_create en de ack). Ze delen een sleutel, zodat een bericht dat het
+ * CRM zelf verstuurt niet twee rijen oplevert en dus niet dubbel meetelt in de
+ * WhatsApp-teller op de kaart.
+ *
+ * Afleveren en lezen zijn wél eigen momenten en houden hun eigen sleutel.
+ */
+function idemSoort(soort) {
+  return (soort === 'uitgaand' || soort === 'verzonden') ? 'uit' : soort;
 }

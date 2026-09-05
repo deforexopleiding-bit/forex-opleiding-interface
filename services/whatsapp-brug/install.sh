@@ -189,11 +189,52 @@ BRUG_POORT="${BRUG_POORT:-8088}"
 BIND_ADRES="$(grep -E '^BIND=' "$DOEL_MAP/.env" | cut -d= -f2 | tr -d '[:space:]')"
 BIND_ADRES="${BIND_ADRES:-127.0.0.1}"
 
-ufw --force reset >/dev/null 2>&1 || true
+# GEEN `ufw --force reset`. Dat stond hier wel, en het heeft op 5 september de
+# brug onbereikbaar gemaakt: de reset gooide 80 en 443 dicht, waar Caddy als
+# reverse proxy voor de brug op luistert. De service draaide gewoon door, maar
+# het CRM meldde 'brug niet bereikbaar' — en dat is precies het soort storing
+# waar je een uur naar zoekt, want alles lijkt te werken.
+#
+# `ufw allow` is uit zichzelf idempotent: dezelfde regel twee keer toevoegen is
+# een no-op. Regels toevoegen zonder te resetten geeft dus hetzelfde eindbeeld
+# zonder dat er iets verdwijnt wat iemand anders heeft neergezet.
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 ufw allow 22/tcp >/dev/null
 ok "poort 22 (SSH) open"
+
+# ── Staat er een reverse proxy voor? ────────────────────────────────────────
+# Zo ja, dan komt het verkeer van het CRM binnen op 80/443 en niet op de
+# brugpoort. Die twee moeten dan open blijven, anders is de brug onbereikbaar
+# terwijl hij draait. Meerdere signalen, want een van de drie kan ontbreken:
+# de unit kan actief zijn zonder configbestand, of andersom vlak na installatie.
+PROXY=""
+for dienst in caddy nginx; do
+  if systemctl is-active --quiet "$dienst" 2>/dev/null || systemctl is-enabled --quiet "$dienst" 2>/dev/null; then
+    PROXY="$dienst"; break
+  fi
+done
+if [ -z "$PROXY" ] && [ -f /etc/caddy/Caddyfile ]; then PROXY="caddy"; fi
+if [ -z "$PROXY" ] && [ -d /etc/nginx/sites-enabled ] && [ -n "$(ls -A /etc/nginx/sites-enabled 2>/dev/null)" ]; then PROXY="nginx"; fi
+# Laatste vangnet: luistert er iets op 80 of 443, wat het ook is?
+if [ -z "$PROXY" ] && command -v ss >/dev/null 2>&1; then
+  if ss -ltn 2>/dev/null | grep -qE ':(80|443)\s'; then PROXY="onbekende webserver"; fi
+fi
+
+if [ -n "$PROXY" ]; then
+  ufw allow 80/tcp  >/dev/null
+  ufw allow 443/tcp >/dev/null
+  ok "poort 80 en 443 open — ${PROXY} staat als reverse proxy voor de brug"
+else
+  # Niets gevonden. We halen 80/443 hier NIET weg: als ze al openstonden is dat
+  # een keuze van iemand anders, en die overrulen we niet ongevraagd.
+  if ufw status 2>/dev/null | grep -qE '^(80|443)/tcp'; then
+    overg "poort 80/443 stonden al open — met rust gelaten"
+  else
+    overg "geen reverse proxy gevonden; 80 en 443 blijven dicht"
+  fi
+fi
+
 if [ "$BIND_ADRES" = "127.0.0.1" ]; then
   # De brug luistert alleen op localhost, dus de poort openzetten heeft geen
   # zin. Zet BIND=0.0.0.0 in .env en draai dit script opnieuw als Vercel er
@@ -204,7 +245,7 @@ else
   ok "poort ${BRUG_POORT} (brug) open"
 fi
 ufw --force enable >/dev/null
-ok "firewall aan, verder alles dicht"
+ok "firewall aan; bestaande regels zijn niet weggegooid"
 
 # ── Starten ────────────────────────────────────────────────────────────────
 stap "Service starten"
