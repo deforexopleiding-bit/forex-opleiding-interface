@@ -17,6 +17,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { telPogingen } from './_lib/opvolging-poging-telling.js';
 
 const isoDag = (d) => new Date(d).toISOString().slice(0, 10);
 
@@ -61,15 +62,10 @@ export default async function handler(req, res) {
       return res.status(200).json({
         vandaag,
         archief: (arch || []).map((t) => {
-          const hist = perArch.get(t.id) || [];
-          const bel = hist.filter((p) => p.soort === 'call');
-          const wa = hist.filter((p) => p.soort === 'whatsapp' || p.soort === 'spraakbericht');
-          return {
-            ...t, pogingen: hist,
-            bel_totaal: bel.length,
-            bel_dagen: new Set(bel.map((p) => isoDag(p.tijdstip))).size,
-            wa_totaal: wa.length,
-          };
+          // Eén plek waar 'wat telt als moeite' staat — zie
+          // _lib/opvolging-poging-telling.js. Een antwoord van de lead telt
+          // niet mee: dat is het resultaat van de moeite, niet de moeite zelf.
+          return { ...t, ...telPogingen(perArch.get(t.id) || [], vandaag, isoDag) };
         }),
       });
     }
@@ -103,23 +99,7 @@ export default async function handler(req, res) {
       perTaak.get(p.taak_id).push(p);
     }
 
-    const verrijk = (t) => {
-      const hist = perTaak.get(t.id) || [];
-      const bel = hist.filter((p) => p.soort === 'call');
-      const wa = hist.filter((p) => p.soort === 'whatsapp' || p.soort === 'spraakbericht');
-      const dagen = new Set(bel.map((p) => isoDag(p.tijdstip)));
-      return {
-        ...t,
-        pogingen: hist,
-        pogingen_totaal: hist.length,
-        bel_totaal: bel.length,
-        bel_dagen: dagen.size,
-        wa_totaal: wa.length,
-        bel_vandaag: bel.filter((p) => isoDag(p.tijdstip) === vandaag).length,
-        wa_vandaag: wa.filter((p) => isoDag(p.tijdstip) === vandaag).length,
-        laatste_poging: hist.length ? hist[hist.length - 1].tijdstip : null,
-      };
-    };
+    const verrijk = (t) => ({ ...t, ...telPogingen(perTaak.get(t.id) || [], vandaag, isoDag) });
 
     // BP3 v32 (2026-09-04) — optionele ingepland-lijst voor Kanban 4e kolom.
     // Read-only, geen mutaties. Alleen 50 meest recent bijgewerkt.

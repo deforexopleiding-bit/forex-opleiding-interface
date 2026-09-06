@@ -19,6 +19,7 @@ import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isG
 import { maakTellers, jidVorm } from './tellers.js';
 import { maakLidkaart } from './lidkaart.js';
 import { maakLandcodeZoeker, isLokaalGenoteerd, NIET_MEETBAAR } from './landcode.js';
+import { berichtIdVan, berichtIdVorm } from './berichtid.js';
 import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET, FOUT } from './uitkomst.js';
 import { createRequire } from 'node:module';
 
@@ -205,6 +206,22 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // Elke weg houdt bij: hoe vaak geprobeerd, hoe vaak gelukt, en of hij
   // überhaupt beschikbaar is. Daarmee is 'stilte' onmogelijk geworden: na één
   // testbericht staat er welke weg werkte, en welke niet bestond.
+  // ── Het bericht-id, en langs welk pad het gevonden werd ──────────────────
+  // De vorm gaat naar /status: padnaam en lengte, nooit de waarde. In zo'n id
+  // zit het nummer van de tegenpartij verwerkt.
+  const berichtIdVormen = {};
+  function bidVanEnTel(msg) {
+    const uit = berichtIdVan(msg);
+    telBerichtIdVorm(uit.pad, uit.id);
+    return uit.id;
+  }
+
+  /** Padnaam plus lengte. Nooit de waarde. */
+  function telBerichtIdVorm(pad, id) {
+    const vorm = berichtIdVorm({ pad: pad || 'geen', id });
+    berichtIdVormen[vorm] = (berichtIdVormen[vorm] || 0) + 1;
+  }
+
   /**
    * Weiger wat geen gesprek is, en tel WELK type dat was.
    *
@@ -788,7 +805,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
         // Een ingesproken bericht telt in de opvolging als spraakbericht, niet
         // als WhatsApp-tekst — dat is een ander soort moeite.
         media_type: msg.type || null,
-        bericht_id: msg.id?._serialized || null,
+        bericht_id: bidVanEnTel(msg),
       });
     } catch (e) {
       console.warn('[brug] inkomend bericht verwerken faalde:', e?.message || e);
@@ -832,6 +849,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       bewaarBerichtvormen(ruw.vorm);
       const g = bouwUitgaandeGebeurtenis(msg);
       if (!g) { negeer('message_create', 'onbruikbaar', msg?.to); return; }
+      telBerichtIdVorm(g.bericht_id_pad, g.bericht_id);
       tellers.liet('message_create');
       await webhook.duw({
         soort     : g.soort,
@@ -867,6 +885,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       const g = bouwAckGebeurtenis(msg, ack);
       // ACK_SOORT kent -1 en 0 niet: dat zijn statussen die nog niets zeggen.
       if (!g) { negeer('message_ack', 'geen_ack_soort', jid); return; }
+      telBerichtIdVorm(g.bericht_id_pad, g.bericht_id);
       tellers.liet('message_ack');
       await webhook.duw({
         soort     : g.soort,
@@ -901,6 +920,11 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // Lokaal genoteerde nummers: hoeveel er opgelost zijn, en hoeveel er niet
       // te bepalen waren. Alleen aantallen.
       landcode          : { ...landcodeTellers, onthouden: landcode.aantalOnthouden() },
+      // Langs welk pad het bericht-id gevonden werd, en hoe lang hij was.
+      // 'geen/0' betekent dat er geen id was — en dan kan er niet ontdubbeld
+      // worden, wat precies de oorzaak was van twaalf rijen voor zes
+      // gebeurtenissen.
+      bericht_id_vormen : { ...berichtIdVormen },
     }),
     /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),
