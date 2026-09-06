@@ -56,6 +56,20 @@ export default async function handler(req, res) {
     }
   }
 
+  // Vragenlijst-toggle: per bron quiz aan/uit. Body kan de key weglaten
+  // (backward-compat — dan blijft de bestaande waarde intact) of een boolean
+  // sturen. Alleen een echte boolean wordt geaccepteerd.
+  const vragenlijstRaw = body.vragenlijst;
+  let vragenlijstVal = true;
+  let vragenlijstProvided = false;
+  if (vragenlijstRaw !== undefined) {
+    if (typeof vragenlijstRaw !== 'boolean') {
+      return res.status(400).json({ error: 'vragenlijst ongeldig (verwacht true/false)' });
+    }
+    vragenlijstProvided = true;
+    vragenlijstVal = vragenlijstRaw;
+  }
+
   if (id !== null && !UUID_RE.test(id)) {
     return res.status(400).json({ error: 'id ongeldig (verwacht UUID)' });
   }
@@ -71,6 +85,7 @@ export default async function handler(req, res) {
   const buildPatch = () => {
     const p = { slug, label, actief };
     if (ownerProvided) p.owner_user_id = ownerUserId;
+    if (vragenlijstProvided) p.vragenlijst = vragenlijstVal;
     return p;
   };
 
@@ -81,12 +96,14 @@ export default async function handler(req, res) {
         .from('booking_sources')
         .update(buildPatch())
         .eq('id', id)
-        .select('id, slug, label, actief, owner_user_id')
+        .select('id, slug, label, actief, owner_user_id, vragenlijst')
         .maybeSingle();
       if (error) {
         if (error.code === '23505') return res.status(409).json({ error: `Slug '${slug}' bestaat al` });
-        // 42703 fail-soft: owner_user_id-kolom bestaat nog niet (pre-BP2-migratie).
-        if (error.code === '42703' && String(error.message || '').toLowerCase().includes('owner_user_id')) {
+        // 42703 fail-soft: een optionele kolom (owner_user_id of vragenlijst)
+        // bestaat nog niet in het schema (pre-migratie). Retry met alleen de
+        // basisvelden zodat de write niet stukloopt op een ontbrekende kolom.
+        if (error.code === '42703') {
           const { data: d2, error: e2 } = await supabaseAdmin
             .from('booking_sources')
             .update({ slug, label, actief })
@@ -107,12 +124,12 @@ export default async function handler(req, res) {
     const { data, error } = await supabaseAdmin
       .from('booking_sources')
       .insert(buildPatch())
-      .select('id, slug, label, actief, owner_user_id')
+      .select('id, slug, label, actief, owner_user_id, vragenlijst')
       .maybeSingle();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: `Slug '${slug}' bestaat al` });
-      // 42703 fail-soft: pre-BP2 schema zonder owner_user_id.
-      if (error.code === '42703' && String(error.message || '').toLowerCase().includes('owner_user_id')) {
+      // 42703 fail-soft: pre-migratie schema zonder owner_user_id of vragenlijst.
+      if (error.code === '42703') {
         const { data: d2, error: e2 } = await supabaseAdmin
           .from('booking_sources')
           .insert({ slug, label, actief })
