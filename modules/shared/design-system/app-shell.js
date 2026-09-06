@@ -117,6 +117,14 @@
     { g: 'Systeem',                id: 'binnenkort',       naam: 'Binnenkort',        icon: I.rocket,   color: 'slate',   roles: SAM,                  tabs: [] },
   ];
 
+  /* Zichtbare tab-LABELS los van de route-KEY. De tab-string in `tabs` blijft
+     de sleutel voor VIEWS[mod+'/'+tab], goTab() en TAB_RESTRICT; alleen de
+     getoonde tekst loopt via tabLabel(). Zo kunnen we een tab hernoemen in de
+     UI zonder de view-registratie (bv. VIEWS['leadsonderhoud/Opstartsessies'])
+     te breken. */
+  const TAB_LABELS = { Opstartsessies: 'Kennismakingsgesprekken' };
+  const tabLabel = t => TAB_LABELS[t] || t;
+
   /* Rol-gates. TAB_RESTRICT verbergt specifieke tabs voor rollen die
      de module wél mogen openen; MOD_LOCK toont de module in het menu
      met een slot-icoon en render't `comingSoonView` i.p.v. de content. */
@@ -292,7 +300,7 @@
     if (!m) return '';
     return `<div class="empty" style="padding:82px 20px">
       <div class="empty-ico" style="width:54px;height:54px;border-radius:16px;background:var(--${m.color}-soft);color:var(--${m.color})">${svg(I.rocket, 'width:25px;height:25px')}</div>
-      <div class="empty-t" style="font-size:16px">${m.naam}${S.tab ? ' · ' + S.tab : ''}</div>
+      <div class="empty-t" style="font-size:16px">${m.naam}${S.tab ? ' · ' + tabLabel(S.tab) : ''}</div>
       <div class="empty-s">Deze view is nog niet gebouwd. In productie wordt hier de module-content gerenderd.</div>
     </div>`;
   };
@@ -452,13 +460,13 @@
     if (crumb) {
       crumb.innerHTML = S.dossier
         ? `<span class="title-dot"></span><span style="cursor:pointer;color:var(--text-3);font-weight:500" onclick="DFO.S.dossier=null;DFO.render()">${m.naam}</span><span class="crumb-sep">/</span><span>${S.dossier}</span>`
-        : `<span class="title-dot"></span>${m.naam}${tabs.length > 1 ? `<span class="crumb-sep">/</span><span class="crumb-cur">${S.tab}</span>` : ''}`;
+        : `<span class="title-dot"></span>${m.naam}${tabs.length > 1 ? `<span class="crumb-sep">/</span><span class="crumb-cur">${tabLabel(S.tab)}</span>` : ''}`;
     }
     const locked = modLocked(m.id);
     const tb = document.getElementById('tabs');
     if (tb) {
       tb.style.display = (tabs.length > 1 && !S.dossier && !locked) ? 'flex' : 'none';
-      tb.innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'active' : ''}" onclick="DFO.goTab('${t.replace(/'/g, "\\'")}')">${t}</button>`).join('');
+      tb.innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'active' : ''}" onclick="DFO.goTab('${t.replace(/'/g, "\\'")}')">${tabLabel(t)}</button>`).join('');
     }
     const c = document.getElementById('content');
     if (c) {

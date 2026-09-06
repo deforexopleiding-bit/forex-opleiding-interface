@@ -2304,7 +2304,7 @@
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Attributie-bronnen voor <code>deforexopleiding.nl/agenda/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen. Onbekende/typo-slugs verschijnen apart en blijven telbaar.
+        Attributie-bronnen voor <code>deforexopleiding.nl/agenda/&lt;slug&gt;</code>. Elke link telt binnenkomende Kennismakingsgesprek-boekingen. Onbekende/typo-slugs verschijnen apart en blijven telbaar.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
@@ -2312,7 +2312,7 @@
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
           ${filterChips}
         </div>
-        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (`${data.total_calls || 0} geboekte Opstartsessies · ${st.periode === 'week' ? 'deze week' : st.periode === 'maand' ? 'deze maand' : 'alle tijd'}`)}</span>
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (`${data.total_calls || 0} geboekte Kennismakingsgesprekken · ${st.periode === 'week' ? 'deze week' : st.periode === 'maand' ? 'deze maand' : 'alle tijd'}`)}</span>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div style="overflow-x:auto">
@@ -3362,7 +3362,7 @@
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseOpstartDetail()">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(720px,100%);max-height:90vh;overflow-y:auto">
         <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px;position:sticky;top:0;background:var(--surface);z-index:1">
-          <div style="font-size:14px;font-weight:600">${_lsOpDetail.data?.is_ghl_call ? 'Directe call' : 'Opstartsessie-submission'}</div>
+          <div style="font-size:14px;font-weight:600">${_lsOpDetail.data?.is_ghl_call ? 'Directe call' : 'Kennismakingsgesprek-submission'}</div>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseOpstartDetail()">✕</button>
         </div>
         <div style="padding:16px 20px">${body}</div>
