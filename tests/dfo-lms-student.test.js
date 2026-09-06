@@ -128,3 +128,118 @@ test('isUniqueViolation herkent 23505 en niets anders', () => {
   assert.equal(isUniqueViolation({ message: 'duplicate key' }), false);
   assert.equal(isUniqueViolation(null), false);
 });
+
+// ── 5) VORM-CONTRACT van provisionDfoLmsStudent ─────────────────────────────
+//
+// Deze tests repareren niet één fout maar sluiten een SOORT fout uit.
+//
+// Aanleiding (6 september 2026): het 'al gekoppeld'-uitstappad gaf wél
+// ok:true maar geen `email`. De aanroeper heeft dat adres nodig om de
+// LMS-uitnodiging te versturen, dus die sloeg de aanroep over — met de
+// melding 'geen studentrij', terwijl het bestaan van die rij juist de oorzaak
+// was. De knop had daardoor nooit gewerkt.
+//
+// Een test die alleen controleert dat het NU werkt, vangt de volgende keer
+// niet. Daarom dwingen we hieronder af dat élk geslaagd pad door
+// succesResultaat() gaat: wie later een vijfde pad toevoegt met een eigen
+// object-literal, laat deze test falen.
+
+import { readFileSync } from 'node:fs';
+import { succesResultaat } from '../api/_lib/dfo-lms-student.js';
+import { verklaarNietGebeld } from '../api/onboarding-dfo-lms-provision.js';
+
+const BRON = readFileSync(
+  new URL('../api/_lib/dfo-lms-student.js', import.meta.url), 'utf8');
+
+/** Alleen de body van provisionDfoLmsStudent — andere functies hebben een
+ *  eigen contract (syncDfoLmsMentor geeft bv. geen student terug). */
+function bodyVanProvision() {
+  const start = BRON.indexOf('export async function provisionDfoLmsStudent(');
+  assert.ok(start > -1, 'provisionDfoLmsStudent niet gevonden in de bron');
+  const na = BRON.indexOf('\nexport ', start + 10);
+  return na > -1 ? BRON.slice(start, na) : BRON.slice(start);
+}
+
+test('CONTRACT: geen enkel geslaagd pad bouwt zijn eigen object-literal', () => {
+  const body = bodyVanProvision();
+  const rauw = body.match(/return\s*\{[\s\S]{0,220}?ok:\s*true/g) || [];
+  assert.deepEqual(
+    rauw, [],
+    'Gevonden: een `return { ok: true, ... }` in provisionDfoLmsStudent.\n'
+    + 'Gebruik succesResultaat({ studentId, email, ... }) — anders kan een pad\n'
+    + 'opnieuw stilzwijgend `email` vergeten en werkt de uitnodigingsknop niet.\n'
+    + 'Gevonden fragment(en):\n' + rauw.join('\n---\n'),
+  );
+});
+
+test('CONTRACT: er zijn meerdere geslaagde paden en die gaan allemaal via de bouwer', () => {
+  const body = bodyVanProvision();
+  const viaBouwer = (body.match(/return\s+succesResultaat\(/g) || []).length;
+  assert.ok(viaBouwer >= 4,
+    'Verwacht minstens 4 succes-paden via succesResultaat(), gevonden: ' + viaBouwer
+    + '. Is er een pad verdwenen, of gaat er eentje buitenom?');
+});
+
+test('CONTRACT: het al-gekoppeld-pad geeft email mee', () => {
+  const body = bodyVanProvision();
+  const i = body.indexOf('dfo_lms_provisioned === true');
+  assert.ok(i > -1, 'de al-gekoppeld-controle is niet meer te vinden');
+  const tak = body.slice(i, i + 400);
+  assert.match(tak, /succesResultaat\(/,
+    'het al-gekoppeld-pad bouwt zijn resultaat niet via succesResultaat()');
+  assert.match(tak, /email/,
+    'het al-gekoppeld-pad geeft geen email mee — precies de fout van 6 september');
+});
+
+// ── 6) succesResultaat zelf ─────────────────────────────────────────────────
+
+test('succesResultaat levert altijd ok + student_id + email', () => {
+  const r = succesResultaat({ studentId: 'stud-1', email: 'a@b.nl', created: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.student_id, 'stud-1');
+  assert.equal(r.email, 'a@b.nl');
+  assert.equal(r.created, true);
+});
+
+test('succesResultaat weigert een "succes" zonder email', () => {
+  const r = succesResultaat({ studentId: 'stud-1', email: '' });
+  assert.equal(r.ok, false, 'zonder email is het geen geldig succes');
+  assert.match(r.error, /email/);
+});
+
+test('succesResultaat weigert een "succes" zonder student_id', () => {
+  const r = succesResultaat({ studentId: null, email: 'a@b.nl' });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /student_id/);
+});
+
+// ── 7) Meldingen mogen niets beweren wat niet gemeten is ────────────────────
+
+test('verklaarNietGebeld: bij een geldig resultaat is er GEEN reden', () => {
+  assert.equal(
+    verklaarNietGebeld({ ok: true, student_id: 's', email: 'a@b.nl' }),
+    null, 'hier had de uitnodiging wél verstuurd moeten worden');
+});
+
+test('verklaarNietGebeld: zegt NOOIT "geen studentrij" als die rij er is', () => {
+  const uitleg = verklaarNietGebeld({ ok: true, student_id: 'stud-9', email: null });
+  assert.doesNotMatch(uitleg, /geen studentrij/i,
+    'de rij bestaat — dit was precies de misleidende melding van 6 september');
+  assert.match(uitleg, /stud-9/, 'noem het student-id dat wél gemeten is');
+  assert.match(uitleg, /e-mailadres/);
+});
+
+test('verklaarNietGebeld: benoemt een mislukte koppeling met de echte reden', () => {
+  const uitleg = verklaarNietGebeld({ ok: false, error: 'onbekend traject-type' });
+  assert.match(uitleg, /niet geslaagd/);
+  assert.match(uitleg, /onbekend traject-type/);
+});
+
+test('verklaarNietGebeld: ontbrekend student-id wordt als zodanig benoemd', () => {
+  const uitleg = verklaarNietGebeld({ ok: true, student_id: null, email: 'a@b.nl' });
+  assert.match(uitleg, /geen student-id/);
+});
+
+test('verklaarNietGebeld: geen resultaat is ook een eerlijke melding', () => {
+  assert.match(verklaarNietGebeld(null), /geen resultaat/);
+});

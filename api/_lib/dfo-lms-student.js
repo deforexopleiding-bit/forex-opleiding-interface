@@ -200,6 +200,42 @@ async function markeerGekoppeld(onboardingId, studentId) {
 }
 
 /**
+ * DE VASTE VORM van elk geslaagd resultaat van provisionDfoLmsStudent.
+ *
+ * ── WAAROM DIT BESTAAT — lees dit voor je hier een veld uit haalt ──────────
+ * De aanroeper (api/onboarding-dfo-lms-provision.js) heeft `email` nodig om
+ * daarna de LMS-uitnodiging te kunnen versturen; die kent het adres niet zelf
+ * en zoekt het niet op.
+ *
+ * Op 6 september 2026 gaf het 'al gekoppeld'-pad wél `ok:true` maar géén
+ * `email`. Daardoor heeft de uitnodigingsknop NOOIT gewerkt: de aanroeper zag
+ * geen adres, sloeg de aanroep over, en meldde 'geen studentrij' terwijl het
+ * bestáán van die rij juist de oorzaak was. Een halfuur zoeken in de verkeerde
+ * richting.
+ *
+ * Daarom bouwt ELK geslaagd pad zijn resultaat via deze functie, nooit met een
+ * eigen object-literal. tests/dfo-lms-student.test.js dwingt dat af op
+ * broncode-niveau: een nieuw pad dat hier omheen gaat, laat die test falen.
+ *
+ * Een 'succes' zonder e-mailadres bestaat niet in dit contract — dat zou de
+ * aanroeper stilzwijgend laten struikelen. Ontbreekt het adres, dan is dat
+ * geen succes maar een fout, en zegt hij dat ook.
+ *
+ * @param {{studentId: string, email: string}} kern  verplicht
+ * @param {object} [extra]  vrije velden (created / adopted / skipped / ...)
+ */
+export function succesResultaat({ studentId, email, ...extra }) {
+  if (!studentId || !email) {
+    const ontbreekt = [!studentId ? 'student_id' : null, !email ? 'email' : null]
+      .filter(Boolean).join(' + ');
+    console.error('[dfo-lms-student] succesResultaat zonder ' + ontbreekt
+      + ' — dit is een programmeerfout, geen gegevensprobleem');
+    return { ok: false, error: 'intern: geslaagd resultaat zonder ' + ontbreekt };
+  }
+  return { ok: true, student_id: studentId, email, ...extra };
+}
+
+/**
  * Maak (of hergebruik) de studentrij in dfo-lms voor deze onboarding.
  *
  * Fail-soft: gooit nooit door naar de aanroeper. Bij een fout blijft
@@ -247,13 +283,10 @@ export async function provisionDfoLmsStudent(onboardingId) {
     return { ok: false, error: msg };
   }
 
-  // 2) Al gekoppeld → niets doen. Goedkoopste idempotentie-laag.
-  if (onboarding.dfo_lms_provisioned === true && onboarding.dfo_lms_student_id) {
-    return { ok: true, skipped: true, student_id: onboarding.dfo_lms_student_id };
-  }
-
-  // 3) Klant + traject.
-  let customer, traject;
+  // 2) Klant laden. Dit gebeurt BEWUST vóór de 'al gekoppeld'-uitstap
+  // hieronder: ook dat pad moet een e-mailadres kunnen teruggeven, want de
+  // aanroeper stuurt daarna de uitnodiging. Zie succesResultaat().
+  let customer;
   try {
     const { data, error } = await supabaseAdmin
       .from('customers')
@@ -262,7 +295,35 @@ export async function provisionDfoLmsStudent(onboardingId) {
       .maybeSingle();
     if (error) throw new Error('customers: ' + error.message);
     customer = data;
+  } catch (e) {
+    const msg = (e?.message || String(e));
+    console.error('[dfo-lms-student]', msg);
+    await schrijfFout(onboardingId, msg);
+    return { ok: false, error: msg };
+  }
 
+  const email = String(customer?.email || '').trim().toLowerCase();
+  if (!email) {
+    const msg = 'Klant zonder e-mail — kan geen studentrij in dfo-lms aanmaken';
+    await schrijfFout(onboardingId, msg);
+    return { ok: false, error: msg };
+  }
+
+  // 3) Al gekoppeld → niets meer te doen. Goedkoopste idempotentie-laag.
+  // Het traject wordt hier bewust NIET opgehaald: een al gekoppelde student
+  // hoeft niet opnieuw door de product_soort-controle, en die zou een
+  // werkende overslaan-situatie in een fout kunnen veranderen.
+  if (onboarding.dfo_lms_provisioned === true && onboarding.dfo_lms_student_id) {
+    return succesResultaat({
+      studentId: onboarding.dfo_lms_student_id,
+      email,
+      skipped: true,
+    });
+  }
+
+  // 4) Traject.
+  let traject;
+  try {
     const t = await supabaseAdmin
       .from('onboarding_trajecten')
       .select('id, key, type, label, duur_maanden, calls, alpha_calls_total')
@@ -277,12 +338,6 @@ export async function provisionDfoLmsStudent(onboardingId) {
     return { ok: false, error: msg };
   }
 
-  const email = String(customer?.email || '').trim().toLowerCase();
-  if (!email) {
-    const msg = 'Klant zonder e-mail — kan geen studentrij in dfo-lms aanmaken';
-    await schrijfFout(onboardingId, msg);
-    return { ok: false, error: msg };
-  }
   if (!traject) {
     const msg = 'Traject niet gevonden voor onboarding';
     await schrijfFout(onboardingId, msg);
@@ -344,11 +399,12 @@ export async function provisionDfoLmsStudent(onboardingId) {
       }
 
       await markeerGekoppeld(onboardingId, rij.id);
-      return {
-        ok: true, adopted: true, student_id: rij.id, email,
+      return succesResultaat({
+        studentId: rij.id, email,
+        adopted: true,
         mentor_id: mentorId, mentor_warning: mentorWarning,
         reason: 'bestond-al-via-' + via,
-      };
+      });
     }
 
     // 6) Aanmaken.
@@ -398,21 +454,23 @@ export async function provisionDfoLmsStudent(onboardingId) {
               .eq('id', opnieuw.rij.id);
           }
           await markeerGekoppeld(onboardingId, opnieuw.rij.id);
-          return {
-            ok: true, adopted: true, student_id: opnieuw.rij.id, email,
+          return succesResultaat({
+            studentId: opnieuw.rij.id, email,
+            adopted: true,
             mentor_id: mentorId, mentor_warning: mentorWarning,
             reason: 'race-opgevangen',
-          };
+          });
         }
       }
       throw new Error('hlms_student aanmaken: ' + insErr.message);
     }
 
     await markeerGekoppeld(onboardingId, gemaakt.id);
-    return {
-      ok: true, created: true, student_id: gemaakt.id, email,
+    return succesResultaat({
+      studentId: gemaakt.id, email,
+      created: true,
       mentor_id: mentorId, mentor_warning: mentorWarning,
-    };
+    });
   } catch (e) {
     const msg = e?.message || String(e);
     console.error('[dfo-lms-student]', msg);
