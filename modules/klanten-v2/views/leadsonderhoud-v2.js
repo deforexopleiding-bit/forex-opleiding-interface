@@ -4204,13 +4204,17 @@
     const st = _live.emails;
     if (!st.fetched && !st.loading && !st.error) queueMicrotask(() => fetchEmails(false));
     let rows = _lsAlleEmailRijen();
-    // Categorie-filter
-    if (st.filter !== 'alle') rows = rows.filter((r) => r.bron === st.filter);
+    // Functionele categorie-filter
+    if (st.filter !== 'alle') rows = rows.filter((r) => r.categorie === st.filter);
     // Mailbox-filter
     const mailboxen = [...new Set(_lsAlleEmailRijen().map((r) => r.mailbox).filter(Boolean))].sort();
     if (st.mailbox !== 'alle') rows = rows.filter((r) => r.mailbox === st.mailbox);
 
-    const catChip = (v, l) => `<button class="chip ${st.filter === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetEmailFilter('${v}')">${l}</button>`;
+    // Categorie-chips uit de response (functionele categorieën) + tellingen.
+    const catLabels = (_live.emails.data && _live.emails.data.categorie_labels) || {};
+    const alleRijen = _lsAlleEmailRijen();
+    const catCount = (v) => v === 'alle' ? alleRijen.length : alleRijen.filter((r) => r.categorie === v).length;
+    const catChip = (v, l) => `<button class="chip ${st.filter === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetEmailFilter('${v}')">${esc(l)} <span style="opacity:.7">(${catCount(v)})</span></button>`;
     const mailboxOpts = ['<option value="alle">Alle mailboxen</option>']
       .concat(mailboxen.map((mb) => `<option value="${esc(mb)}" ${st.mailbox === mb ? 'selected' : ''}>${esc(mb)}</option>`)).join('');
 
@@ -4240,7 +4244,6 @@
       ? rows.map(rowHtml).join('')
       : `<tr><td colspan="6" style="padding:34px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen e-mails in dit filter.'}</td></tr>`;
 
-    const tot = (_live.emails.data && _live.emails.data.totalen) || {};
     const previewModal = _live.emailPreview.open ? `
       <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseEmailPreview()">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(760px,100%);max-height:90vh;overflow:hidden;display:flex;flex-direction:column">
@@ -4255,7 +4258,7 @@
     return `<div style="max-width:960px">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Categorie</span>
-        ${catChip('alle', 'Alles')}${catChip('email_templates', `DB · templates (${tot.email_templates || 0})`)}${catChip('onderhoud_sjablonen', `DB · sjablonen (${tot.onderhoud_sjablonen || 0})`)}${catChip('code', `Code (${tot.code || 0})`)}
+        ${catChip('alle', 'Alles')}${Object.keys(catLabels).map((k) => catChip(k, catLabels[k])).join('')}
         <select onchange="window._lsSetEmailMailbox(this)" style="padding:5px 9px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12px;margin-left:auto">${mailboxOpts}</select>
       </div>
       ${st.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
