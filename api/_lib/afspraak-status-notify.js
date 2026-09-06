@@ -48,7 +48,7 @@ async function haalAppt(id) {
 }
 
 // Mail-builders (zelfde branded shell als de 5 reminder-mails).
-function annuleringMail(c, reden) {
+export function annuleringMail(c, reden) {
   const args = {
     subject: 'Je afspraak is geannuleerd',
     titel: 'Je afspraak is geannuleerd',
@@ -58,7 +58,7 @@ function annuleringMail(c, reden) {
   };
   return { subject: args.subject, html: renderAfspraakMail(args), text: platteTekstAfspraak(args) };
 }
-function verzetMail(c) {
+export function verzetMail(c) {
   const args = {
     subject: 'Je afspraak is verzet',
     titel: 'Je afspraak is verzet ✅',
