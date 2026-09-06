@@ -139,12 +139,34 @@
   // vingerafdruk niet, en hertekent het scherm niet bij elke aanslag.
   let _laatsteHtml = null;
 
+  // ── Tekenen mag geen werk aftrappen ──────────────────────────────────────
+  //
+  // De view-functies zijn GEEN pure functies: ze starten fetches via
+  // queueMicrotask. En render() roept de view twee keer aan — één keer om de
+  // vingerafdruk te maken, en daarna nog eens via DFO.render().
+  //
+  // Die fetches zitten vandaag allemaal achter een 'wacht-of-al-geladen'-slot,
+  // dus de tweede aanroep doet niets. Maar dat is een aanname die niemand ziet
+  // sneuvelen: de dag dat iemand een view uitbreidt met een fetch zonder slot,
+  // draait die stil dubbel en zoek je een week naar de extra verzoeken.
+  //
+  // Daarom staat de aanname niet in een comment maar in code. Alles in dit
+  // bestand plant werk via straks(), en tijdens de meet-pas doet die niets.
+  // Er staat een test op dat er nergens meer een kale queueMicrotask staat, dus
+  // een nieuwe fetch kan er niet stilletjes langs.
+  let _meetAlleen = false;
+
+  /** Werk voor zo meteen. Doet niets als we alleen de vingerafdruk maken. */
+  const straks = (fn) => { if (_meetAlleen) return; queueMicrotask(fn); };
+
   /** De HTML van de view die nu in beeld staat, of null als dat er geen is. */
   function huidigeViewHtml() {
     const S = window.DFO && window.DFO.S;
     const tab = (S && S.tab) || '';
     const fn = window.DFO && window.DFO.VIEWS && window.DFO.VIEWS['opvolging/' + tab];
-    return typeof fn === 'function' ? fn() : null;
+    if (typeof fn !== 'function') return null;
+    _meetAlleen = true;
+    try { return fn(); } finally { _meetAlleen = false; }
   }
 
   const render = () => {
@@ -239,8 +261,20 @@
     else if (Number.isFinite(voor.draadTop)) draad.scrollTop = voor.draadTop;
   }
 
-  /** Hertekent hoe dan ook — voor als de DOM buiten ons om vervangen is. */
-  const rendarForceer = () => { _laatsteHtml = null; render(); };
+  // GEEN FORCEER-FUNCTIE. Er stond er een, met de uitleg dat hij hoe dan ook
+  // hertekende 'voor als de DOM buiten ons om vervangen is' — en hij werd
+  // nergens aangeroepen. Dat is dezelfde vorm als de 404 die er stond en nooit
+  // draaide: een vangnet dat er goed uitziet en niet gespannen is.
+  //
+  // Hij is weg omdat er geen vangnet nódig is, en dat is na te lopen. De shell
+  // vervangt de DOM alleen in DFO.render(), en die roept altijd de view-functie
+  // aan — dus na een hertekening buiten ons om (tabwissel, navigatie, goTab)
+  // staat de HUIDIGE HTML in de DOM terwijl onze vingerafdruk nog een oudere
+  // draagt. De eerstvolgende ronde ziet dan een verschil en tekent één keer
+  // overbodig, en daarna klopt het weer. De gevaarlijke kant — DOM veranderd
+  // terwijl de vingerafdruk 'gelijk' zegt — kan niet ontstaan, want binnen deze
+  // module raakt niets de DOM buiten render() om behalve het terugzetten van
+  // het concept en de scrollpositie, en dat is precies wat er hoort te staan.
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const iso = (d) => new Date(d).toISOString().slice(0, 10);
   const vandaag = () => iso(Date.now());
@@ -826,7 +860,7 @@
       // Zelf ophalen, niet leunen op callsBlok: het dashboard tekent dat blok
       // niet, en dan bleef dit op 'laden' hangen zonder dat er ooit iemand de
       // agenda opvroeg. fetchCalls bewaakt zelf op dubbele aanvragen.
-      if (!_calls.loading) queueMicrotask(() => fetchCalls(dag));
+      if (!_calls.loading) straks(() => fetchCalls(dag));
       return { staat: 'laden' };
     }
     if (_calls.error) return { staat: 'agenda_fout', error: _calls.error };
@@ -1515,7 +1549,7 @@
     // dag staat de vorige rij er nog, en die onder de kop van vandaag tonen is
     // erger dan even 'laden'.
     const versGeladen = _calls.key === dag && (_calls.data || _calls.error);
-    if (!_calls.loading && !versGeladen) queueMicrotask(() => fetchCalls(dag));
+    if (!_calls.loading && !versGeladen) straks(() => fetchCalls(dag));
 
     const kop = '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#127909;</div>' +
       '<h3>Calls van ' + (dag === vandaag() ? 'vandaag' : nl(dag)) + '</h3>' +
@@ -1553,10 +1587,10 @@
    */
   function waLamp() {
     if (!_wa.data && !_wa.error && !_wa.laden) {
-      queueMicrotask(() => { fetchWaStatus(); });
+      straks(() => { fetchWaStatus(); });
     } else if (!_waTimers.status && !_wa.paneelOpen) {
       // Terug op deze tab na een uitstapje: de timers zijn dan opgeruimd.
-      queueMicrotask(() => herstelWaTimers());
+      straks(() => herstelWaTimers());
     }
     const s = beschrijfWaStatus(_wa);
     return '<button id="opv-wa-lamp" class="walamp' + (s.kleur === 'groen' ? ' aan' : '') + '"' +
@@ -1969,7 +2003,7 @@
     // tien aanmeldingen erbij zakte de dekking naar beneden om een reden die
     // niets met Daves werk te maken had.
     const st = _live.taken;
-    if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
+    if (!st.loading && !st.error && (!st.data || st.key !== dag)) straks(() => fetchTaken(dag));
 
     const bron = vensterBron(dag);
     if (bron.staat !== 'ok') {
@@ -2435,7 +2469,7 @@
     const terug = _ui.weekOffset > WEEK_MIN_OFFSET;
     const heen  = _ui.weekOffset < WEEK_MAX_OFFSET;
     const laatste = wk.dagen[wk.dagen.length - 1];
-    queueMicrotask(() => fetchBalk(wk.dagen[0], laatste));
+    straks(() => fetchBalk(wk.dagen[0], laatste));
 
     let knoppen = '<div class="wk">';
     wk.dagen.forEach((d, i) => {
@@ -2483,7 +2517,7 @@
     stijl();
     const dag = _ui.dagView || vandaag();
     const st = _live.taken;
-    if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
+    if (!st.loading && !st.error && (!st.data || st.key !== dag)) straks(() => fetchTaken(dag));
 
     let h = '<div class="opv">';
     // Kop: de bestaande uitleg links, het brug-lampje rechts. Het lampje is
@@ -2573,7 +2607,7 @@
     stijl();
     const dag = vandaag();
     const st = _live.dash;
-    if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchDash(dag));
+    if (!st.loading && !st.error && (!st.data || st.key !== dag)) straks(() => fetchDash(dag));
 
     let h = '<div class="opv">';
     if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>';
@@ -2644,7 +2678,7 @@
   function afgerondView() {
     stijl();
     const st = _live.archief;
-    if (!st.loading && !st.error && !st.data) queueMicrotask(fetchArchief);
+    if (!st.loading && !st.error && !st.data) straks(fetchArchief);
 
     let h = '<div class="opv">';
     if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>';
@@ -3142,7 +3176,7 @@
   // ── G1 · de twee vensters onder de balk ───────────────────────────────────
   window.__opvTijdlijn = (d) => {
     _ui.modal = { soort: 'tijdlijn', dag: d };
-    queueMicrotask(() => fetchTijdlijn(d));
+    straks(() => fetchTijdlijn(d));
     render();
   };
 
@@ -3150,7 +3184,7 @@
     const wk = bepaalWeek({ nu: vandaag(), offset: _ui.weekOffset });
     const na = wk.dagen[wk.dagen.length - 1];
     _ui.modal = { soort: 'later', na };
-    queueMicrotask(() => fetchLater(na));
+    straks(() => fetchLater(na));
     render();
   };
 
@@ -3331,7 +3365,7 @@
     _gesprek.optimistisch = [];
     _gesprek.melding = null; _gesprek.meldingSoort = null; _gesprek.haalt = false;
     render();
-    queueMicrotask(() => { fetchGesprek(); herstelWaTimers(); });
+    straks(() => { fetchGesprek(); herstelWaTimers(); });
   }
 
   window.__opvWa = (id) => {
@@ -3721,7 +3755,7 @@
   // tests/opvolging-gesprek-hertekenen.test.js met een echte DOM-dubbelganger.
   window.__opvHertekenHelpers = {
     huidigeViewHtml, isOnderaan, magSluiten, magEscapeSluiten,
-    bewaarPaneelStaat, herstelPaneelStaat, herstelConcept, render, rendarForceer,
+    bewaarPaneelStaat, herstelPaneelStaat, herstelConcept, render, straks,
     DRAAD_ONDERAAN_MARGE,
     vingerafdruk: () => _laatsteHtml,
     zetVingerafdruk: (v) => { _laatsteHtml = v; },

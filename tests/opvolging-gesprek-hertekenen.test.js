@@ -44,6 +44,7 @@ function nepDraad({ scrollTop = 0, scrollHeight = 1000, clientHeight = 300 } = {
 }
 
 function laadView({ textarea = null, draad = null } = {}) {
+  const gepland = [];
   const doc = {
     activeElement: null,
     getElementById: (id) => (id === 'opv-wa-tekst' ? textarea : null),
@@ -61,13 +62,13 @@ function laadView({ textarea = null, draad = null } = {}) {
   window.window = window;
   const ctx = createContext({
     window, console: { debug() {}, log() {}, warn() {}, error() {} },
-    document: doc, queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
+    document: doc, queueMicrotask: (fn) => { gepland.push(fn); }, setInterval: () => 0, clearInterval: () => {},
     Date, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set, Map,
   });
   runInContext(readFileSync(BADGE, 'utf8'), ctx, { filename: '_opvolging-badge.js' });
   runInContext(readFileSync(VIEW, 'utf8'), ctx, { filename: 'opvolging-v2.js' });
-  return { window, doc, tellingen: () => hertekend, H: window.__opvHertekenHelpers,
-           G: window.__opvGesprekHelpers };
+  return { window, doc, tellingen: () => hertekend, gepland,
+           H: window.__opvHertekenHelpers, G: window.__opvGesprekHelpers };
 }
 
 const bericht = (over) => ({ id: 'b1', richting: 'in', tekst: 'Hoi', media_type: 'chat',
@@ -370,4 +371,79 @@ test('alle drie de overlays gebruiken de twee-delige sluitregel', () => {
   const bron = readFileSync(VIEW, 'utf8');
   assert.equal((bron.match(/onmousedown="window\.__opvScrimNeer\(event\)"/g) || []).length, 3);
   assert.ok(!/onmousedown="if\(event\.target===this\)/.test(bron), 'nergens meer de oude regel');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TEKENEN MAG GEEN WERK AFTRAPPEN
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// render() roept de view twee keer aan: één keer voor de vingerafdruk, daarna
+// nog eens via DFO.render(). De view-functies zijn geen pure functies — ze
+// starten fetches. Die zitten vandaag allemaal achter een slot, maar dat is een
+// aanname die niemand ziet sneuvelen zodra iemand een fetch zonder slot
+// toevoegt. Deze twee tests meten het aan de fetch-laag, niet aan een naam.
+
+test('twee keer tekenen levert niet meer gepland werk op dan één keer', () => {
+  const w = laadView();
+  metGesprek(w);
+  w.H.render();
+  const na1 = w.gepland.length;
+  w.G.zetGesprek({ berichten: [bericht(), bericht({ id: 'b2' })] });
+  w.H.render();
+  const na2 = w.gepland.length;
+  w.G.zetGesprek({ berichten: [bericht(), bericht({ id: 'b2' }), bericht({ id: 'b3' })] });
+  w.H.render();
+  const na3 = w.gepland.length;
+  // Elke hertekening mag werk plannen — maar niet dubbel. Het aantal per ronde
+  // hoort niet te verdubbelen ten opzichte van de eerste ronde.
+  assert.ok(na2 - na1 <= na1, 'ronde 2 plande ' + (na2 - na1) + ' tegen ' + na1 + ' in ronde 1');
+  assert.ok(na3 - na2 <= na1, 'ronde 3 plande ' + (na3 - na2) + ' tegen ' + na1 + ' in ronde 1');
+});
+
+test('de meet-pas plant helemaal niets', () => {
+  // Dit is de kern: de vingerafdruk maken mag geen enkele fetch aftrappen.
+  const w = laadView();
+  metGesprek(w);
+  const voor = w.gepland.length;
+  w.H.huidigeViewHtml();
+  w.H.huidigeViewHtml();
+  w.H.huidigeViewHtml();
+  assert.equal(w.gepland.length, voor, 'drie meet-passen horen niets te plannen');
+});
+
+test('en een overgeslagen hertekening plant ook niets', () => {
+  const w = laadView();
+  metGesprek(w);
+  w.H.render();
+  const na1 = w.gepland.length;
+  w.H.render(); w.H.render();
+  assert.equal(w.gepland.length, na1);
+});
+
+test('buiten de meet-pas wordt er wél gepland', () => {
+  // Een slot dat alles tegenhoudt is geen slot. straks() hoort gewoon te werken
+  // zodra we niet aan het meten zijn.
+  const w = laadView();
+  metGesprek(w);
+  const voor = w.gepland.length;
+  w.H.straks(() => {});
+  assert.equal(w.gepland.length, voor + 1);
+});
+
+test('er staat nergens meer een kale queueMicrotask', () => {
+  // Dit is de bewaking waar het om gaat: een nieuwe fetch die rechtstreeks
+  // queueMicrotask gebruikt zou tijdens de meet-pas stil dubbel draaien.
+  const bron = readFileSync(VIEW, 'utf8');
+  const regels = bron.split('\n')
+    .filter((r) => r.includes('queueMicrotask(') && !/^\s*(\/\/|\*|\/\*)/.test(r));
+  assert.equal(regels.length, 1, 'gevonden:\n' + regels.join('\n'));
+  assert.match(regels[0], /const straks = /, 'en dat is de definitie van straks() zelf');
+});
+
+test('de dode forceer-functie is weg', () => {
+  // Hij stond er met een uitleg over een vangnet en werd nergens aangeroepen —
+  // dezelfde vorm als de 404 die er stond en nooit draaide.
+  const bron = readFileSync(VIEW, 'utf8');
+  assert.ok(!/rendarForceer|renderForceer/.test(bron));
+  assert.match(bron, /GEEN FORCEER-FUNCTIE/, 'met de reden erbij, zodat niemand hem terugzet');
 });
