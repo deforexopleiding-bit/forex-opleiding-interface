@@ -15,21 +15,31 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 // Statische catalogus van code-mails (geen DB-registratie — handmatig bijhouden).
+// Functionele categorieën (weergave-volgorde).
+const CATEGORIE_LABELS = {
+  kennismaking:     'Kennismakingsgesprekken (Zoom-calls)',
+  'funnels-toegang':'Funnels & toegang',
+  wanbetalers:      'Wanbetalers & incasso',
+  events:           'Events',
+  overig:           'Overig / systeem',
+};
+
 const CODE_CATALOG = [
-  { key: 'afspraak_bevestiging',   naam: 'Afspraak — bevestiging',        doel: 'Bevestiging kennismakingsgesprek', trigger: 'cron-afspraak-reminders (zodra Zoom-link binnen)', mailbox: 'onboarding@', bestand: 'api/_lib/afspraak-berichten.js' },
-  { key: 'afspraak_24u',           naam: 'Afspraak — reminder 24u',       doel: 'Herinnering 24u vooraf',           trigger: 'cron-afspraak-reminders',                          mailbox: 'onboarding@', bestand: 'api/_lib/afspraak-berichten.js' },
-  { key: 'afspraak_2u',            naam: 'Afspraak — reminder 2u',        doel: 'Herinnering 2u vooraf',            trigger: 'cron-afspraak-reminders',                          mailbox: 'onboarding@', bestand: 'api/_lib/afspraak-berichten.js' },
-  { key: 'afspraak_30m',           naam: 'Afspraak — reminder 30m',       doel: 'Herinnering 30m vooraf',           trigger: 'cron-afspraak-reminders',                          mailbox: 'onboarding@', bestand: 'api/_lib/afspraak-berichten.js' },
-  { key: 'afspraak_5min',          naam: 'Afspraak — join (5 min)',       doel: 'Join-link vlak vooraf',            trigger: 'cron-afspraak-reminders',                          mailbox: 'onboarding@', bestand: 'api/_lib/afspraak-berichten.js' },
-  { key: 'afspraak_annulering',    naam: 'Afspraak — annulering',         doel: 'Bevestiging annulering',           trigger: 'public-afspraak-annuleren / setter-annuleer',      mailbox: 'onboarding@', bestand: 'api/_lib/afspraak-status-notify.js' },
-  { key: 'afspraak_verzet',        naam: 'Afspraak — verzet',             doel: 'Bevestiging verzetting',           trigger: 'public-afspraak-verzetten / setter-wijzig',        mailbox: 'onboarding@', bestand: 'api/_lib/afspraak-status-notify.js' },
-  { key: 'dunning_brief',          naam: 'Dunning — WIK-brief',           doel: '14-dagenbrief (PDF)',              trigger: 'UI/actie',                                         mailbox: 'administratie@', bestand: 'api/dunning-brief-email-send.js' },
-  { key: 'dunning_bulk',           naam: 'Dunning — bulk',                doel: 'Bulk wanbetalers (tekst uit dunning-templates)', trigger: 'cron-dunning-bulk-send',              mailbox: 'administratie@', bestand: 'api/cron-dunning-bulk-send.js' },
-  { key: 'incasso_dossier',        naam: 'Incassodossier',                doel: 'Dossier naar incassobureau (PDF)', trigger: 'UI',                                               mailbox: 'info@',       bestand: 'api/incasso-dossier-email.js' },
-  { key: 'welkom_onboarding_cron', naam: 'Welkom / onboarding-cron',      doel: 'Welkom + laatste-dag',             trigger: 'cron-toegang-aanvragen',                           mailbox: 'welkom@',     bestand: 'api/cron-toegang-aanvragen.js' },
-  { key: 'onboarding_credentials', naam: 'Onboarding — inloggegevens',    doel: 'Credentials-mail',                 trigger: 'onboarding-flow',                                  mailbox: 'onboarding@', bestand: 'api/_lib/onboarding-credentials.js' },
-  { key: 'first_call_payment',     naam: 'Eerste-call betaalreminder',    doel: 'Betaalreminder 24u vóór 1e call',  trigger: 'cron/first-call-payment-reminder',                 mailbox: 'onboarding@', bestand: 'api/cron/first-call-payment-reminder.js' },
-  { key: 'events_mails',           naam: 'Events — invites/vragenlijst/automations', doel: 'Event-mails',           trigger: 'UI + cron-events-automations',                     mailbox: 'events@',     bestand: 'api/_lib/events-send.js' },
+  { key: 'afspraak_bevestiging',   categorie: 'kennismaking',     naam: 'Afspraak — bevestiging',        doel: 'Bevestiging kennismakingsgesprek', trigger: 'cron-afspraak-reminders (zodra Zoom-link binnen)', mailbox: 'welkom@',     bestand: 'api/_lib/afspraak-berichten.js' },
+  { key: 'afspraak_24u',           categorie: 'kennismaking',     naam: 'Afspraak — reminder 24u',       doel: 'Herinnering 24u vooraf',           trigger: 'cron-afspraak-reminders',                          mailbox: 'welkom@',     bestand: 'api/_lib/afspraak-berichten.js' },
+  { key: 'afspraak_2u',            categorie: 'kennismaking',     naam: 'Afspraak — reminder 2u',        doel: 'Herinnering 2u vooraf',            trigger: 'cron-afspraak-reminders',                          mailbox: 'welkom@',     bestand: 'api/_lib/afspraak-berichten.js' },
+  { key: 'afspraak_30m',           categorie: 'kennismaking',     naam: 'Afspraak — reminder 30m',       doel: 'Herinnering 30m vooraf',           trigger: 'cron-afspraak-reminders',                          mailbox: 'welkom@',     bestand: 'api/_lib/afspraak-berichten.js' },
+  { key: 'afspraak_5min',          categorie: 'kennismaking',     naam: 'Afspraak — join (5 min)',       doel: 'Join-link vlak vooraf',            trigger: 'cron-afspraak-reminders',                          mailbox: 'welkom@',     bestand: 'api/_lib/afspraak-berichten.js' },
+  { key: 'afspraak_annulering',    categorie: 'kennismaking',     naam: 'Afspraak — annulering',         doel: 'Bevestiging annulering',           trigger: 'public-afspraak-annuleren / setter-annuleer',      mailbox: 'welkom@',     bestand: 'api/_lib/afspraak-status-notify.js' },
+  { key: 'afspraak_verzet',        categorie: 'kennismaking',     naam: 'Afspraak — verzet',             doel: 'Bevestiging verzetting',           trigger: 'public-afspraak-verzetten / setter-wijzig',        mailbox: 'welkom@',     bestand: 'api/_lib/afspraak-status-notify.js' },
+  { key: 'dunning_brief',          categorie: 'wanbetalers',      naam: 'Dunning — WIK-brief',           doel: '14-dagenbrief (PDF)',              trigger: 'UI/actie',                                         mailbox: 'administratie@', bestand: 'api/dunning-brief-email-send.js' },
+  { key: 'dunning_bulk',           categorie: 'wanbetalers',      naam: 'Dunning — bulk',                doel: 'Bulk wanbetalers (tekst uit dunning-templates)', trigger: 'cron-dunning-bulk-send',              mailbox: 'administratie@', bestand: 'api/cron-dunning-bulk-send.js' },
+  { key: 'incasso_dossier',        categorie: 'wanbetalers',      naam: 'Incassodossier',                doel: 'Dossier naar incassobureau (PDF)', trigger: 'UI',                                               mailbox: 'info@',       bestand: 'api/incasso-dossier-email.js' },
+  { key: 'welkom_onboarding_cron', categorie: 'funnels-toegang',  naam: 'Welkom / onboarding-cron',      doel: 'Welkom + laatste-dag',             trigger: 'cron-toegang-aanvragen',                           mailbox: 'welkom@',     bestand: 'api/cron-toegang-aanvragen.js' },
+  { key: 'onboarding_credentials', categorie: 'funnels-toegang',  naam: 'Onboarding — inloggegevens',    doel: 'Credentials-mail',                 trigger: 'onboarding-flow',                                  mailbox: 'onboarding@', bestand: 'api/_lib/onboarding-credentials.js' },
+  { key: 'first_call_payment',     categorie: 'funnels-toegang',  naam: 'Eerste-call betaalreminder',    doel: 'Betaalreminder 24u vóór 1e call',  trigger: 'cron/first-call-payment-reminder',                 mailbox: 'onboarding@', bestand: 'api/cron/first-call-payment-reminder.js' },
+  { key: 'events_mails',           categorie: 'events',           naam: 'Events — invites/vragenlijst/automations', doel: 'Event-mails',           trigger: 'UI + cron-events-automations',                     mailbox: 'events@',     bestand: 'api/_lib/events-send.js' },
+  { key: 'lead_melding',           categorie: 'overig',           naam: 'Interne nieuwe-lead-melding',   doel: 'Interne melding bij nieuwe lead',  trigger: 'api/lead-melding.js (na lead)',                    mailbox: 'welkom@',     bestand: 'api/lead-melding.js' },
 ];
 
 export default async function handler(req, res) {
@@ -55,6 +65,7 @@ export default async function handler(req, res) {
       dbTemplates = (et || []).map((t) => ({
         id: t.id,
         naam: t.name,
+        categorie: 'overig',
         doel: t.category || 'algemeen',
         subject: t.subject || null,
         mailbox: 'compose (per verzending)',
@@ -80,6 +91,7 @@ export default async function handler(req, res) {
       sjablonen = (os || []).map((s) => ({
         id: s.id,
         naam: `${s.soort} · ${s.traject_slug}`,
+        categorie: (s.soort === 'toelating' || s.soort === 'afwijzing' || s.soort === 'verlopen') ? 'funnels-toegang' : 'overig',
         doel: s.soort,
         subject: s.onderwerp || null,
         mailbox: 'Strato (dfo-website)',
@@ -93,7 +105,7 @@ export default async function handler(req, res) {
 
     // 3) code-catalogus (statisch, read-only).
     const code = CODE_CATALOG.map((c) => ({
-      id: c.key, naam: c.naam, doel: c.doel, subject: null,
+      id: c.key, naam: c.naam, categorie: c.categorie, doel: c.doel, subject: null,
       mailbox: c.mailbox, bron: 'code', bewerkbaar: false, actief: true,
       trigger: c.trigger, bestand: c.bestand, preview_html: null,
     }));
@@ -101,6 +113,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       generated_at: new Date().toISOString(),
+      categorie_labels: CATEGORIE_LABELS,
       categories: { email_templates: dbTemplates, onderhoud_sjablonen: sjablonen, code },
       totalen: { email_templates: dbTemplates.length, onderhoud_sjablonen: sjablonen.length, code: code.length },
     });
