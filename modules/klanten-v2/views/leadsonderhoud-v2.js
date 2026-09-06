@@ -3087,6 +3087,10 @@
     const byDay = new Map();
     for (const it of items) {
       if (!it.gekozen_start_at) continue;
+      // Alleen ECHT geboekte afspraken in de agenda: submissions mét
+      // appointment_id + de directe calls. Toegelaten-maar-niet-geboekte
+      // aanmeldingen bezetten geen slot → niet in de agenda (wél in de lijst).
+      if (!it.appointment_id) continue;
       const d = new Date(it.gekozen_start_at);
       if (isNaN(d.getTime())) continue;
       if (d.getFullYear() !== y || d.getMonth() !== m) continue;
