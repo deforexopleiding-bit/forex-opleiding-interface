@@ -223,6 +223,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, taak_id: taakId, hergebruikt: !!bestaandeId, duplicaat });
   } catch (e) {
     console.error('[opvolging-taak-create]', e?.message || e);
-    return res.status(500).json({ error: e?.message || 'Onbekende fout' });
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }

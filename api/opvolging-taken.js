@@ -154,6 +154,7 @@ export default async function handler(req, res) {
       ingepland,
     });
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Onbekende fout' });
+    console.error('[opvolging-taken]', e?.message || e);
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }

@@ -260,7 +260,7 @@ async function boek(req, res) {
       });
     }
     console.error('[opvolging-agenda] onbekend:', e?.message || e);
-    return res.status(500).json({ error: e?.message || 'Inplannen mislukt' });
+    return res.status(500).json({ error: 'Interne fout' });
   }
 
   // Pas nu de taak bijwerken. Faalt dit, dan staat de afspraak er wel — dat

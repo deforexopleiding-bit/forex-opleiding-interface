@@ -210,6 +210,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[opvolging-weekbalk]', view, e?.message || e);
-    return res.status(500).json({ error: e.message || 'Onbekende fout' });
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }
