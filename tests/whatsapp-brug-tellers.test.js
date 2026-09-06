@@ -111,8 +111,11 @@ test('onbekende types en redenen worden genegeerd in plaats van aangemaakt', () 
 });
 
 test('de redenen zijn een vaste lijst zonder vrije tekst', () => {
+  // 'systeemtype' is er in september bijgekomen: WhatsApp stuurt over dezelfde
+  // stroom ook dingen die geen bericht zijn (e2e_notification en verwanten).
+  // Zie tests/whatsapp-systeemtypes.test.js.
   assert.deepEqual([...REDENEN].sort(),
-    ['geen_ack_soort', 'groep', 'niet_op_leadlijst', 'niet_van_ons', 'onbruikbaar']);
+    ['geen_ack_soort', 'groep', 'niet_op_leadlijst', 'niet_van_ons', 'onbruikbaar', 'systeemtype']);
 });
 
 test('rommel in ack() maakt geen sleutel aan', () => {
@@ -326,7 +329,11 @@ test('elke handler bepaalt het nummer vóór hij filtert', () => {
 test('het filter staat nog altijd vóór elk gebruik van tekst', () => {
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf("client.on('message'");
-  const blok = bron.slice(i, i + 1400);
+  // Gemeten, niet geraden: msg.body staat op +1556 sinds de systeemtype-controle
+  // ertussen kwam. Een te klein venster laat deze test slagen op een leeg
+  // resultaat, en dat is geen bewaking.
+  const blok = bron.slice(i, i + 2200);
+  assert.ok(blok.indexOf('msg.body') > 0, 'het venster hoort de tekst te bereiken');
   assert.ok(blok.indexOf('leadlijst.mag(') < blok.indexOf('msg.body'),
     'de tekst hoort pas aangeraakt te worden nadat het filter door is');
 });
