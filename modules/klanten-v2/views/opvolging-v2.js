@@ -2950,10 +2950,14 @@
 
     const u = m.uitkomst;
     if (u === 'klant_geworden') {
+      // De knop SCHRIJFT. Hij riep __opvSluit aan en deed dus letterlijk niets,
+      // terwijl de tekst beloofde dat de administratie elders liep — precies de
+      // sale die in het rapport zou ontbreken.
       return scrim('Klant geworden', esc(c.naam) + ' &middot; ' + esc(c.tijd),
         '<div class="info">Mooi. Er komt <b>geen taak</b> bij — deze is klaar.<br><br>' +
-        'De afspraak zelf blijft staan zoals hij staat; die administratie loopt via het afspraakscherm en verandert hier niet.</div>' +
-        '<button class="obtn" style="width:100%;margin-top:12px" onclick="window.__opvSluit()">Sluiten</button>');
+        'De afspraak wordt vastgelegd als <b>sale</b>, zodat deze deal in de rapportage terechtkomt. ' +
+        'Lukt dat niet, dan zie je dat meteen.</div>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvCallBevestig(\'klant_geworden\')">Vastleggen als sale</button>');
     }
     if (u === 'geen_interesse') {
       return scrim('Geen interesse', esc(c.naam) + ' &middot; ' + esc(c.tijd),
@@ -3669,6 +3673,14 @@
       const dEl = document.getElementById('opv-cd');
       due = dEl && dEl.value;
       if (!due) { alert('Kies eerst een dag.'); return; }
+    }
+
+    // Klant geworden: alleen de uitkomst, geen taak. De kaart is klaar.
+    if (uitkomst === 'klant_geworden') {
+      const res = await schrijfCallUitkomst(uitkomst, c, notitie);
+      _ui.modal = null; leegTakenCache(); render();
+      meldUitkomst(res, { bewaardHier: false, notitie: '' });
+      return;
     }
 
     // Geen interesse levert bewust GEEN OPEN taak op — net als bij een event dat

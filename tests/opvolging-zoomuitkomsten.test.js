@@ -35,6 +35,7 @@ const MOTOR  = join(ROOT, 'api/follow-up-appointment-outcome.js');
 function laadView() {
   const verzoeken = [];
   const meldingen = [];
+  const velden = {};
   let faal = null;
   const window = {
     DFO: { VIEWS: {}, S: { tab: 'Vandaag' }, render() {} }, KV_V2: { helpers: {} },
@@ -51,17 +52,53 @@ function laadView() {
   window.window = window;
   const ctx = createContext({
     window, console: { debug() {}, log() {}, warn() {}, error() {} },
-    document: { getElementById: () => null, querySelector: () => null,
-                head: { appendChild() {} }, createElement: () => ({ style: {} }) },
+    document: {
+      getElementById: (id) => (Object.prototype.hasOwnProperty.call(velden, id)
+        ? { value: velden[id] } : null),
+      querySelector: () => null,
+      head: { appendChild() {} }, createElement: () => ({ style: {} }),
+    },
     queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
     alert: window.alert,
     Date, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set, Map, Error, Promise,
   });
   runInContext(readFileSync(BADGE, 'utf8'), ctx, { filename: '_opvolging-badge.js' });
   runInContext(readFileSync(VIEW, 'utf8'), ctx, { filename: 'opvolging-v2.js' });
-  return { window, verzoeken, meldingen,
+  return { window, verzoeken, meldingen, velden,
            H: window.__opvUitkomstHelpers,
+           M: window.__opvModalHaak,
            zetFaal: (fn) => { faal = fn; } };
+}
+
+/**
+ * De weg die DAVE loopt, van de knop af.
+ *
+ * Dit bestaat omdat een groene test op schrijfCallUitkomst niets bewijst over
+ * de knop ernaast: 'klant geworden' had een mapping-regel, een hulpfunctie én
+ * een groene test, en riep in het scherm gewoon __opvSluit aan. Er gebeurde
+ * dus niets. Een test die de hulpfunctie aanroept meet zichzelf.
+ *
+ * Deze functie doet wat een klik doet: het bevestigingsscherm tekenen, de
+ * onclick eruit halen die daar echt in staat, en die aanroepen.
+ */
+async function klikDoorDeKnop(w, uitkomst, { call: c, invoer = {} } = {}) {
+  w.M.zetCalls([c]);
+  // 1 · Afronden opent het keuzescherm; daar staat de knop voor deze uitkomst.
+  w.window.__opvCallAfrond(0);
+  const keuze = w.M.modalHtml();
+  assert.match(keuze, new RegExp("__opvCallUitkomst\\('" + uitkomst + "'\\)"),
+    'de knop voor ' + uitkomst + ' hoort in het afrondscherm te staan');
+  // 2 · Die knop opent het bevestigingsscherm.
+  w.window.__opvCallUitkomst(uitkomst);
+  const bevestig = w.M.modalHtml();
+  // 3 · Wat staat er ECHT op de bevestigingsknop van dit scherm?
+  const onclicks = [...bevestig.matchAll(/onclick="window\.(__opv[A-Za-z]+)\(([^)]*)\)"/g)]
+    .map((mm) => ({ fn: mm[1], arg: mm[2].replace(/'/g, '') }));
+  Object.assign(w.velden, invoer);
+  const knop = onclicks.find((o) => o.fn === '__opvCallBevestig');
+  if (!knop) return { bevestig, onclicks, geklikt: false };
+  await w.window.__opvCallBevestig(knop.arg);
+  return { bevestig, onclicks, geklikt: true, arg: knop.arg };
 }
 
 const call = (over) => ({ naam: 'Jan Peeters', telefoon: '+32470123456',
@@ -313,4 +350,100 @@ test('een gewone gearchiveerde kaart houdt het oordeel', () => {
   const blok = b.slice(i, i + 500);
   assert.match(blok, /te weinig/, 'het oordeel blijft bestaan voor de rest');
   assert.match(blok, /ARCHIEF_MIN_DAGEN/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6 · DE KNOP VOLGEN, NIET DE HULPFUNCTIE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// DIT IS DE TEST DIE ONTBRAK, EN DAT KOSTTE EEN RONDE.
+//
+// 'Klant geworden' had een regel in de mapping, een werkende hulpfunctie en een
+// groene test — en het bevestigingsscherm riep gewoon __opvSluit aan. Er
+// gebeurde dus precies niets, en de tekst beloofde nog dat de administratie
+// elders liep. Groen betekende alleen dat de hulpfunctie werkte.
+//
+// De tests hieronder tekenen het echte scherm, halen de onclick eruit die daar
+// daadwerkelijk in staat, en roepen díé aan. Slaagt zo'n test, dan doet de knop
+// echt iets.
+
+test('KNOP: klant geworden stuurt een sale de deur uit', async () => {
+  const w = laadView();
+  const r = await klikDoorDeKnop(w, 'klant_geworden', { call: call() });
+  assert.equal(r.geklikt, true, 'de bevestigingsknop hoort __opvCallBevestig aan te roepen');
+  const v = uitkomstVerzoek(w.verzoeken);
+  assert.ok(v, 'er hoort een uitkomst te vertrekken');
+  assert.equal(v.body.outcome, 'sale');
+  assert.equal(v.body.appointment_id, call().appointment_id);
+});
+
+test('KNOP: geen interesse stuurt wilt_niet_meer met de reden', async () => {
+  const w = laadView();
+  const r = await klikDoorDeKnop(w, 'geen_interesse', {
+    call: call(), invoer: { 'opv-cn': 'vindt het te duur' },
+  });
+  assert.equal(r.geklikt, true);
+  const v = uitkomstVerzoek(w.verzoeken);
+  assert.equal(v.body.outcome, 'wilt_niet_meer');
+  assert.equal(v.body.note, 'vindt het te duur');
+});
+
+test('KNOP: wil nog beslissen stuurt gesprek_gehad', async () => {
+  const w = laadView();
+  const r = await klikDoorDeKnop(w, 'wil_nog_beslissen', {
+    call: call(), invoer: { 'opv-cn': 'twijfelt over de tijd', 'opv-cd': '2026-09-10' },
+  });
+  assert.equal(r.geklikt, true);
+  const v = uitkomstVerzoek(w.verzoeken);
+  assert.equal(v.body.outcome, 'gesprek_gehad');
+});
+
+test('KNOP: no-show stuurt nog steeds geen uitkomst', async () => {
+  const w = laadView();
+  await klikDoorDeKnop(w, 'no_show', { call: call() });
+  assert.equal(uitkomstVerzoek(w.verzoeken), undefined, 'no-show blijft met rust');
+});
+
+test('geen enkel bevestigingsscherm sluit nog zonder te schrijven', () => {
+  // De vorm van de fout: een knop die __opvSluit aanroept terwijl het scherm
+  // een uitkomst hoort vast te leggen. Deze test leest de drie schermen en
+  // eist dat hun bevestigingsknop naar __opvCallBevestig gaat.
+  const w = laadView();
+  w.M.zetCalls([call()]);
+  for (const uitkomst of Object.keys(w.H.CALL_UITKOMST)) {
+    w.window.__opvCallAfrond(0);
+    w.window.__opvCallUitkomst(uitkomst);
+    const html = w.M.modalHtml();
+    assert.match(html, /onclick="window\.__opvCallBevestig\(/, uitkomst + ': de knop schrijft niet');
+    assert.ok(!/onclick="window\.__opvSluit\(\)">\s*Sluiten/.test(html),
+      uitkomst + ': er staat nog een knop die alleen sluit');
+  }
+});
+
+test('de tekst belooft niet meer dat er hier niets verandert', () => {
+  // De oude zin zei letterlijk dat de administratie via het afspraakscherm
+  // loopt en hier niet verandert. Dat is straks onwaar, en een scherm dat het
+  // tegenovergestelde belooft van wat het doet is erger dan geen scherm.
+  const w = laadView();
+  w.M.zetCalls([call()]);
+  w.window.__opvCallAfrond(0);
+  w.window.__opvCallUitkomst('klant_geworden');
+  const html = w.M.modalHtml();
+  assert.ok(!/verandert hier niet/.test(html));
+  assert.match(html, /sale/i, 'het scherm hoort te zeggen wat het vastlegt');
+});
+
+test('KNOP: een mislukte sale wordt zichtbaar gemeld', async () => {
+  const w = laadView();
+  w.zetFaal((url) => url.includes('follow-up-appointment-outcome') ? 'De motor antwoordde met 503.' : null);
+  await klikDoorDeKnop(w, 'klant_geworden', { call: call() });
+  assert.equal(w.meldingen.length, 1, 'zwijgen zou hier het ergste zijn');
+  assert.match(w.meldingen[0], /NIET/);
+  assert.match(w.meldingen[0], /503/);
+});
+
+test('KNOP: een geslaagde sale meldt niets', async () => {
+  const w = laadView();
+  await klikDoorDeKnop(w, 'klant_geworden', { call: call() });
+  assert.equal(w.meldingen.length, 0, 'geen ruis als alles goed ging');
 });
