@@ -50,6 +50,10 @@ export default async function handler(req, res) {
       automatisch: b.automatisch === true,
       call_log_id: b.call_log_id || null,
       duur_sec: Number.isFinite(b.duur_sec) ? b.duur_sec : null,
+      // Alles wat langs dit endpoint komt is iets dat Dave zelf deed: een
+      // belpoging uit de softphone, of een handmatige registratie. Inkomend
+      // loopt uitsluitend via de WhatsApp-webhook.
+      richting: 'uit',
     }).select().single();
     if (error) throw error;
 

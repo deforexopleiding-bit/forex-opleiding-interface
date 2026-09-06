@@ -302,6 +302,8 @@ async function boek(req, res) {
       soort      : 'ingepland',
       automatisch: true,
       resultaat  : 'afspraak geboekt',
+      // Het boeken is iets dat aan onze kant gebeurt.
+      richting   : 'uit',
     });
     if (error) throw error;
   } catch (e) {
