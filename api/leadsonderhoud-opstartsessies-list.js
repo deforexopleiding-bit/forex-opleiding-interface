@@ -26,6 +26,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getSetterScope } from './_lib/setter-scope.js';
+import { getCalendarNameMap } from './_lib/ghl-calendars.js';
 
 const PERIODES  = new Set(['week', 'maand', 'alles']);
 const RESULTATEN = new Set(['alle', 'toegelaten', 'afgewezen']);
@@ -263,6 +264,7 @@ export default async function handler(req, res) {
       const saleInfo    = saleChecked ? (saleByEmail.get(emailLower) || null) : null;
       return {
         id              : r.id,
+        bron_type       : 'submission',
         created_at      : r.created_at,
         booking_source  : r.booking_source,
         bron_label      : labelBySlug.get(r.booking_source) || r.booking_source || '—',
@@ -302,10 +304,113 @@ export default async function handler(req, res) {
       };
     });
 
+    // ── Directe GHL-calls (ghl_calendar_id NOT NULL, GEEN submission) ──
+    // Additief: calls die niet via de funnel/submission zijn geboekt maar wel
+    // op een GHL-agenda staan. Alleen als er geen submission-only filter actief
+    // is (resultaat/bron gelden niet voor calls). Tijd/range/scope/cancelled
+    // worden identiek toegepast als bij de submissions.
+    let callItems = [];
+    let totalCalls = 0;
+    if (resultaat === 'alle' && !bron) {
+      let cq = supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, ghl_calendar_id, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
+        .not('ghl_calendar_id', 'is', null)
+        .limit(limit);
+      if (useRange) {
+        cq = cq.gte('scheduled_at', rawFrom).lt('scheduled_at', rawTo).order('scheduled_at', { ascending: true });
+      } else if (tijd === 'aankomend') {
+        cq = cq.gte('scheduled_at', nowIso).order('scheduled_at', { ascending: true });
+      } else if (tijd === 'verleden') {
+        cq = cq.lt('scheduled_at', nowIso).order('scheduled_at', { ascending: false });
+        if (grens) cq = cq.gte('scheduled_at', grens);
+      } else {
+        cq = cq.order('scheduled_at', { ascending: false });
+        if (grens) cq = cq.gte('scheduled_at', grens);
+      }
+      const { data: candidates } = await cq;
+      let calls = candidates || [];
+
+      // Dedup: sluit appointments uit die al een opstartsessie-submission hebben.
+      if (calls.length > 0) {
+        const candIds = calls.map((c) => c.id);
+        const { data: covered } = await supabaseAdmin
+          .from('opstartsessie_submissions').select('appointment_id').in('appointment_id', candIds);
+        const coveredSet = new Set((covered || []).map((s) => s.appointment_id).filter(Boolean));
+        calls = calls.filter((c) => !coveredSet.has(c.id));
+      }
+      // Setter-scope op appointment-id (zelfde als submissions).
+      if (scope.isScoped) {
+        const apptSet = new Set(scope.appointmentIds || []);
+        calls = apptSet.size === 0 ? [] : calls.filter((c) => apptSet.has(c.id));
+      }
+      // Verberg cancelled/no_show/… tenzij include_cancelled.
+      if (!includeCancelled) {
+        calls = calls.filter((c) => !HIDDEN_STATUSES.has(String(c.status || '').toLowerCase()));
+      }
+      totalCalls = calls.length;
+
+      // Agenda-namen (in-memory gecachet, fail-soft) — géén GHL-call per load.
+      let calNameMap = new Map();
+      try { calNameMap = await getCalendarNameMap(); } catch (_) { /* leeg */ }
+
+      callItems = calls.map((c) => {
+        const remind = ['reminder_24u_at', 'reminder_2u_at', 'reminder_30m_at', 'zoom_5min_at']
+          .reduce((n, k) => n + (c[k] ? 1 : 0), 0);
+        return {
+          id              : 'appt:' + c.id,          // prefix → detailmodal herkent de call
+          bron_type       : 'ghl_call',
+          created_at      : c.scheduled_at,
+          booking_source  : null,
+          bron_label      : (calNameMap.get(c.ghl_calendar_id) || 'GHL-agenda'),
+          naam            : c.lead_name,
+          email           : c.lead_email,
+          telefoon        : c.lead_phone,
+          gekozen_slot    : null,
+          gekozen_start_at: c.scheduled_at,
+          score           : null,
+          drempel         : null,
+          resultaat       : null,                    // geen vragenlijst → n.v.t.
+          noshow_akkoord  : null,
+          heeft_afspraak  : true,
+          appointment_id  : c.id,
+          appointment_status: c.status || null,
+          bevestigd         : !!c.bevestigd_at,
+          bevestiging_sent  : !!c.bevestiging_sent_at,
+          reminders_verstuurd: remind,
+          lead_id         : null,
+          sale_checked    : false,
+          is_sale         : false,
+          sale_customer_name: null,
+          sale_amount     : null,
+          sale_extra_count: 0,
+        };
+      });
+    }
+
+    // Merge submissions + calls, sorteer op het effectieve moment.
+    const merged = items.concat(callItems);
+    const effMs = (it) => it.gekozen_start_at ? new Date(it.gekozen_start_at).getTime() : null;
+    if (useRange || tijd === 'aankomend') {
+      merged.sort((a, b) => {
+        const av = effMs(a), bv = effMs(b);
+        if (av == null && bv == null) return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return av - bv;
+      });
+    } else if (tijd === 'verleden') {
+      merged.sort((a, b) => (effMs(b) || 0) - (effMs(a) || 0));
+    } else {
+      merged.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    }
+
     return res.status(200).json({
-      items,
+      items: merged,
       periode, resultaat, bron, tijd,
-      total  : count || items.length,
+      total  : (count || items.length) + totalCalls,
+      total_submissions: count || items.length,
+      total_calls: totalCalls,
       bronnen: (bronnen || []).map((b) => ({ slug: b.slug, label: b.label })),
     });
   } catch (e) {

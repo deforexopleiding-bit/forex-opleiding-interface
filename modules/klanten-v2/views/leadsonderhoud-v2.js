@@ -2936,10 +2936,14 @@
     // zodat gedeelde testnummers geen valse vinkjes geven.
     const eurFmt = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
     const rows = items.length ? items.map(s => {
-      const badge = s.resultaat === 'toegelaten'
-        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
-        : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>';
-      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>';
+      const isCall = s.bron_type === 'ghl_call';
+      const badge = isCall
+        ? '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600" title="Direct via agendalink geboekt (geen vragenlijst)">Directe call</span>'
+        : (s.resultaat === 'toegelaten'
+          ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
+          : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>');
+      const akkoord = isCall ? '<span style="color:var(--text-3)" title="n.v.t. voor directe calls">n.v.t.</span>'
+        : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>');
       // BP3 v12 — appointment_status-badge: cancelled/no_show → grijze/rose
       // pill zodat je in "Toon geannuleerd"-modus meteen ziet welke rijen dat
       // zijn. Anders standaard "✓ Geboekt" / "–".
@@ -2988,10 +2992,10 @@
           <div style="font-weight:600">${esc(s.naam || '—')}</div>
           <div style="color:var(--text-3);font-size:11px">${esc(contact || '—')}</div>
         </td>
-        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || '—')}</div></td>
+        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || (isCall ? 'GHL-agenda' : '—'))}</div></td>
         <td style="padding:8px 10px">${badge}</td>
         <td style="padding:8px 10px;text-align:center">${akkoord}</td>
-        <td style="padding:8px 10px">${esc(s.gekozen_slot || '—')}</td>
+        <td style="padding:8px 10px">${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</td>
         <td style="padding:8px 10px">${afsp}</td>
         <td style="padding:8px 10px">${bevCel}</td>
         <td style="padding:8px 10px;text-align:center">${saleCell}</td>
@@ -3028,7 +3032,7 @@
         </div>
         <button class="chip ${st.showCancelled ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpShowCancelled(${st.showCancelled ? 'false' : 'true'})" title="Toggle: standaard worden geannuleerde/no-show/verwijderde calls verborgen">${st.showCancelled ? '✓ Toon geannuleerd' : 'Toon geannuleerd'}</button>
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:4px 10px;color:#fff;margin-left:auto" onclick="window._lsOpCreateOpen()" title="Plan handmatig een nieuwe call in Dave's agenda">+ Nieuwe call</button>
-        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
+        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : ((data.total_submissions ?? data.total ?? items.length) + ' submissions' + (data.total_calls ? ' · ' + data.total_calls + ' directe calls' : ''))}</span>
       </div>`;
 
     // ── Agenda-view ────────────────────────────────────────────────────
@@ -3203,7 +3207,11 @@
     _lsOpDetail.open = true; _lsOpDetail.id = id; _lsOpDetail.loading = true; _lsOpDetail.error = null; _lsOpDetail.data = null;
     if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/leadsonderhoud-opstartsessies-detail?id=' + encodeURIComponent(id));
+      // Directe GHL-call → id-prefix 'appt:' ⇒ detail op appointment_id.
+      const qs = String(id).startsWith('appt:')
+        ? 'appointment_id=' + encodeURIComponent(String(id).slice(5))
+        : 'id=' + encodeURIComponent(id);
+      const j = await window.KV.authedJson('/api/leadsonderhoud-opstartsessies-detail?' + qs);
       _lsOpDetail.loading = false; _lsOpDetail.data = j?.item || null;
       if (!_lsOpDetail.data) _lsOpDetail.error = 'Geen data teruggekregen.';
     } catch (e) {
@@ -3267,11 +3275,17 @@
       body = `<div style="padding:24px;color:var(--rose)">⚠ ${esc(_lsOpDetail.error)}</div>`;
     } else if (_lsOpDetail.data) {
       const s = _lsOpDetail.data;
-      const badge = s.resultaat === 'toegelaten'
-        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
-        : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>';
-      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>';
-      const antwoordenHtml = (s.antwoorden || []).map((a, i) => {
+      const isCall = !!s.is_ghl_call;
+      const badge = isCall
+        ? '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Directe agenda-boeking</span>'
+        : (s.resultaat === 'toegelaten'
+          ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
+          : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>');
+      const akkoord = isCall ? '<span style="color:var(--text-3)">n.v.t.</span>'
+        : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>');
+      const antwoordenHtml = isCall
+        ? '<div style="color:var(--text-3);padding:12px 0;font-size:12.5px">Geen vragenlijst — dit is een directe agenda-boeking.</div>'
+        : (s.antwoorden || []).map((a, i) => {
         const afw = a.afwijzer ? '<span style="background:var(--rose-soft);color:var(--rose);padding:1px 6px;border-radius:8px;font-size:10.5px;margin-left:6px">afwijzer</span>' : '';
         return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
           <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Vraag ${i + 1}</div>
@@ -3331,7 +3345,7 @@
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</div><b>${esc(s.bron_label)}</b><div style="font-family:var(--mono,monospace);font-size:11px;color:var(--text-3)">${esc(s.booking_source || '—')}</div></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Score</div><b>${s.score != null ? s.score : '—'}</b><span style="color:var(--text-3)"> / drempel ${s.drempel != null ? s.drempel : '—'}</span></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">€50 akkoord</div><b>${akkoord}</b></div>
-          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || '—')}</b></div>
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</b></div>
         </div>
         <div>
           <div style="font-weight:600;margin-bottom:8px;font-size:13px">Vragenlijst-antwoorden</div>
@@ -3342,7 +3356,7 @@
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseOpstartDetail()">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(720px,100%);max-height:90vh;overflow-y:auto">
         <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px;position:sticky;top:0;background:var(--surface);z-index:1">
-          <div style="font-size:14px;font-weight:600">Opstartsessie-submission</div>
+          <div style="font-size:14px;font-weight:600">${_lsOpDetail.data?.is_ghl_call ? 'Directe call' : 'Opstartsessie-submission'}</div>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseOpstartDetail()">✕</button>
         </div>
         <div style="padding:16px 20px">${body}</div>
