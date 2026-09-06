@@ -110,8 +110,6 @@ export function bouwUitgaandeGebeurtenis(msg, nu = Date.now()) {
     tekst     : typeof msg.body === 'string' ? msg.body.slice(0, MAX_TEKST) : '',
     media_type: msg.type || null,
     bericht_id: bid.id,
-    // Voor de teller in whatsapp.js: alleen de padnaam, nooit de waarde.
-    bericht_id_pad: bid.pad,
   };
 }
 
@@ -140,8 +138,6 @@ export function bouwAckGebeurtenis(msg, ack, nu = Date.now()) {
     tijdstip  : new Date(nu).toISOString(),
     media_type: msg.type || null,
     bericht_id: bid.id,
-    // Voor de teller in whatsapp.js: alleen de padnaam, nooit de waarde.
-    bericht_id_pad: bid.pad,
   };
 }
 

@@ -849,7 +849,10 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       bewaarBerichtvormen(ruw.vorm);
       const g = bouwUitgaandeGebeurtenis(msg);
       if (!g) { negeer('message_create', 'onbruikbaar', msg?.to); return; }
-      telBerichtIdVorm(g.bericht_id_pad, g.bericht_id);
+      // De vorm blijft BINNEN de brug: het pad gaat niet mee de draad op. Een
+      // bestaande test bewaakt precies welke velden een gebeurtenis draagt, en
+      // terecht — wat er niet in hoeft, hoort er niet in.
+      bidVanEnTel(msg);
       tellers.liet('message_create');
       await webhook.duw({
         soort     : g.soort,
@@ -885,7 +888,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       const g = bouwAckGebeurtenis(msg, ack);
       // ACK_SOORT kent -1 en 0 niet: dat zijn statussen die nog niets zeggen.
       if (!g) { negeer('message_ack', 'geen_ack_soort', jid); return; }
-      telBerichtIdVorm(g.bericht_id_pad, g.bericht_id);
+      bidVanEnTel(msg);
       tellers.liet('message_ack');
       await webhook.duw({
         soort     : g.soort,

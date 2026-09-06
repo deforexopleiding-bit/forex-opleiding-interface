@@ -713,13 +713,23 @@
   }
 
   /** Is dit een spraakbericht dat wij verstuurd hebben? */
+  // DE RICHTING KOMT UIT DE KOLOM, NIET UIT DE TEKST.
+  //
+  // Deze twee lazen /verstuurd/ en /ontvangen/ uit `resultaat`. Dat is een
+  // parser op een zin die iemand ooit anders formuleert, en dan gaan de twee
+  // vensters iets anders meten dan wat er gebeurd is. Sinds de migratie
+  // 2026-09-06-opvolging-pogingen-richting.sql staat de richting in de data.
+  //
+  // Een rij zonder richting telt als uitgaand — dat is de historische aanname,
+  // en de opruim-query zet de inkomende rijen die er nog staan eenmalig op 'in'.
+  const uitgaand = (p) => !p || p.richting !== 'in';
+
   function isSpraakVerstuurd(p) {
-    return p && p.soort === 'spraakbericht' && /verstuurd/i.test(String(p.resultaat || ''));
+    return !!p && p.soort === 'spraakbericht' && uitgaand(p);
   }
   /** Is dit iets dat de lead ons stuurde? */
   function isAntwoord(p) {
-    return p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht')
-      && /ontvangen/i.test(String(p.resultaat || ''));
+    return !!p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht') && !uitgaand(p);
   }
 
   /**
