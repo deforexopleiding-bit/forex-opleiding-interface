@@ -60,6 +60,35 @@ Wanneer opnieuw kijken: alleen als whatsapp-web.js naar een versie gaat die
 expliciet deze WhatsApp Web-build ondersteunt. Kijk dán eerst opnieuw naar
 `lidkaart.chats_status` in `/status` voor je iets bouwt.
 
+### Lokaal genoteerde nummers
+
+Zes van de 33 leads staan met een lokaal nummer in het CRM (`0472223752`,
+`06 57340618`, …). Die passeren het leadlijst-filter — dat heeft een
+staart-ingang op de laatste negen cijfers — maar `naarChatId()` geeft `null`
+zodra een nummer met een `0` begint. Dat brak twee dingen tegelijk: de lidkaart
+(`getNumberId` kreeg niets bruikbaars, vandaar 21 van de 28) en het versturen
+(`NUMMER_ONGELDIG` bij bijna één op de vijf openstaande taken).
+
+**De landcode wordt niet geraden.** Vijf van die zes zijn Belgisch en één is
+Nederlands; een vaste `32` zou dat ene nummer naar een wildvreemde sturen.
+`lib/landcode.js` stelt de kandidaten op (`32` + rest, `31` + rest), legt ze aan
+`client.getNumberId()` voor, en accepteert **alleen bij precies één
+bevestiging**. Twee treffers is gokken, en dat doen we niet bij een
+privacyfilter.
+
+Eén zoeker met één cache, gebruikt door zowel het opbouwen van de lidkaart als
+`wa.stuur()`. De uitkomst wordt per lokaal nummer onthouden zolang het proces
+draait — anders vraagt een gesprek van vijf berichten vijf keer aan WhatsApp of
+dat nummer bestaat.
+
+Levert geen enkele kandidaat iets op, dan is de foutcode `LANDCODE_ONBEKEND` en
+niet `NUMMER_ONGELDIG`: het nummer is wél geprobeerd, en de melding zegt dat het
+aangevuld moet worden in plaats van dat de brug stuk is. `/status` telt per
+uitkomst (`gevonden` / `geen` / `meerdere` / `niet_lokaal`) — alleen aantallen.
+
+`naarChatId()` blijft ongewijzigd weigeren. Dat is de juiste regel: die functie
+mag niet raden. De oplossing zit ervóór, niet erin.
+
 ### Wat 'bestaat_niet' óók kan betekenen
 
 `getNumberId` en `getChatById` stonden allebei op `bestaat_niet ×6`, terwijl het

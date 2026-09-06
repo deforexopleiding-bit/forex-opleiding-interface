@@ -94,6 +94,16 @@ app.post('/send', auth, async (req, res) => {
     if (e?.code === 'NIET_TOEGESTAAN')  return res.status(403).json({ error: 'Niet toegestaan' });
     if (e?.code === 'NIET_VERBONDEN')   return res.status(503).json({ error: 'De brug is niet verbonden met WhatsApp' });
     if (e?.code === 'NUMMER_ONGELDIG')  return res.status(400).json({ error: 'Nummer mist een landcode' });
+    // Anders dan NUMMER_ONGELDIG: dit nummer IS geprobeerd. De kandidaten zijn
+    // aan WhatsApp voorgelegd en geen ervan bestaat daar. Dat is iets wat Dave
+    // kan oplossen door het nummer aan te vullen, en dat moet de melding zeggen
+    // — 'ongeldig nummer' laat hem denken dat de brug stuk is.
+    if (e?.code === 'LANDCODE_ONBEKEND') return res.status(400).json({
+      error: 'Dit nummer staat lokaal genoteerd (zonder landcode) en WhatsApp herkent ' +
+             'geen van de landcodes die we geprobeerd hebben. Vul het nummer aan met de ' +
+             'juiste landcode, dan kan er weer verstuurd worden.',
+      code : 'LANDCODE_ONBEKEND',
+    });
     console.error('[brug] versturen faalde:', e?.message || e);
     res.status(500).json({ error: 'Versturen mislukt' });
   }
