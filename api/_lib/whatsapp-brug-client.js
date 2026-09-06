@@ -87,6 +87,13 @@ export async function brugFetch(pad, { method = 'GET', body = null } = {}) {
 export function brugFoutNaarHttp(e) {
   if (e?.code === 'GEEN_CONFIG')   return { status: 503, body: { error: e.message, code: 'GEEN_CONFIG' } };
   if (e?.code === 'ONBEREIKBAAR')  return { status: 503, body: { error: e.message, code: 'ONBEREIKBAAR' } };
+  // Een 400 van de brug is een oordeel over het VERZOEK, niet een storing. Die
+  // gaat als 400 door mét de code van de brug, zodat het scherm 'vul het nummer
+  // aan' kan tonen in plaats van 'de brug is stuk'. Zonder deze regel werd
+  // LANDCODE_ONBEKEND een 502, en dat leest als kapot.
+  if (e?.code === 'BRUG_FOUT' && e.status === 400) {
+    return { status: 400, body: { error: e.message, code: e.data?.code || 'BRUG_FOUT' } };
+  }
   if (e?.code === 'BRUG_FOUT')     return { status: e.status === 503 ? 503 : 502, body: { error: e.message, code: 'BRUG_FOUT' } };
   return { status: 500, body: { error: 'Onbekende fout bij de WhatsApp-brug.' } };
 }
