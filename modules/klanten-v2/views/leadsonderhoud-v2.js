@@ -2199,9 +2199,11 @@
     } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
   };
 
-  const _lsBronForm = { slug: '', label: '', busy: false, error: null };
+  const _lsBronForm = { slug: '', label: '', vragenlijst: true, busy: false, error: null };
   window._lsBronSetSlug  = function(el){ _lsBronForm.slug  = String(el.value || '').trim().toLowerCase(); };
   window._lsBronSetLabel = function(el){ _lsBronForm.label = String(el.value || '').trim(); };
+  // Vragenlijst aan/uit-keuze in het toevoeg-formulier (default AAN = DB-default).
+  window._lsBronFormVragenlijst = function(){ _lsBronForm.vragenlijst = !_lsBronForm.vragenlijst; if (window.DFO?.render) window.DFO.render(); };
   window._lsBronToevoegen = async function(){
     if (_lsBronForm.busy) return;
     const slug  = _lsBronForm.slug;
@@ -2211,30 +2213,68 @@
     _lsBronForm.busy = true; _lsBronForm.error = null; if (window.DFO?.render) window.DFO.render();
     try {
       await window.KV.authedJson('/api/booking-sources-upsert', {
-        method: 'POST', body: JSON.stringify({ slug, label, actief: true }),
+        method: 'POST', body: JSON.stringify({ slug, label, actief: true, vragenlijst: _lsBronForm.vragenlijst }),
       });
       window.KV.toast('Bron "' + label + '" toegevoegd.', 'ok');
-      _lsBronForm.slug = ''; _lsBronForm.label = ''; _lsBronForm.busy = false;
+      _lsBronForm.slug = ''; _lsBronForm.label = ''; _lsBronForm.vragenlijst = true; _lsBronForm.busy = false;
       fetchBronnen(true);
     } catch (e) {
       window.KV.toast('Toevoegen mislukt: ' + (e?.message || 'onbekend'), 'warn');
       _lsBronForm.busy = false; if (window.DFO?.render) window.DFO.render();
     }
   };
-  window._lsBronBewerken = async function(idx){
+  // Bewerken-modal: label-veld + vragenlijst aan/uit-switch, samen opslaan.
+  // Eigen kleine modal in de CRM-modalstijl (.dfo-dlg/.vl-switch) omdat dfoPrompt
+  // maar één tekstveld ondersteunt.
+  window._lsBronBewerken = function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
-    const nieuwLabel = await window.dfoPrompt({
-      title: 'Label bewerken', message: 'Nieuw label voor "' + b.slug + '"',
-      value: b.label, placeholder: 'Label',
-    });
-    if (nieuwLabel == null) return;
-    const label = String(nieuwLabel).trim(); if (!label) return;
-    try {
-      await window.KV.authedJson('/api/booking-sources-upsert', {
-        method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label, actief: b.actief }),
-      });
-      window.KV.toast('Bron bijgewerkt.', 'ok'); fetchBronnen(true);
-    } catch (e) { window.KV.toast('Bewerken mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    let vl = b.vragenlijst !== false;
+    const escq = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const ov = document.createElement('div');
+    ov.className = 'dfo-dlg';
+    ov.innerHTML = `<div class="dfo-dlg-box" role="dialog" aria-modal="true">
+      <div class="dfo-dlg-title">Bron bewerken</div>
+      <div class="dfo-dlg-msg">Bron "${escq(b.slug)}"</div>
+      <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Label</label>
+      <input class="dfo-dlg-input" type="text" value="${escq(b.label)}" placeholder="Label">
+      <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:2px 0 6px">Vragenlijst</label>
+      <button type="button" class="vl-switch${vl ? ' on' : ''}" data-vl role="switch" aria-checked="${vl}" style="margin-bottom:16px">
+        <span class="vl-track"><span class="vl-knob"></span></span><span class="vl-label">${vl ? 'Aan' : 'Uit'}</span>
+      </button>
+      <div class="dfo-dlg-foot">
+        <button type="button" class="dfo-dlg-btn dfo-dlg-cancel" data-cancel>Annuleren</button>
+        <button type="button" class="dfo-dlg-btn dfo-dlg-ok" data-ok>Opslaan</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    const input = ov.querySelector('.dfo-dlg-input');
+    const sw = ov.querySelector('[data-vl]');
+    const close = () => { document.removeEventListener('keydown', onKey, true); ov.remove(); };
+    sw.onclick = () => {
+      vl = !vl;
+      sw.classList.toggle('on', vl);
+      sw.setAttribute('aria-checked', String(vl));
+      sw.querySelector('.vl-label').textContent = vl ? 'Aan' : 'Uit';
+    };
+    const save = async () => {
+      const label = String(input.value || '').trim();
+      if (!label) { window.KV.toast('Label vereist.', 'warn'); return; }
+      close();
+      try {
+        await window.KV.authedJson('/api/booking-sources-upsert', {
+          method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label, actief: b.actief, vragenlijst: vl }),
+        });
+        window.KV.toast('Bron bijgewerkt.', 'ok'); fetchBronnen(true);
+      } catch (e) { window.KV.toast('Bewerken mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    };
+    ov.querySelector('[data-cancel]').onclick = close;
+    ov.querySelector('[data-ok]').onclick = save;
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'Enter' && document.activeElement === input) { e.preventDefault(); save(); }
+    }
+    document.addEventListener('keydown', onKey, true);
+    requestAnimationFrame(() => { input.focus(); input.select(); });
   };
   window._lsBronToggle = async function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
@@ -2311,14 +2351,12 @@
             ${staff.map((s) => `<option value="${esc(s.id)}" ${String(b.owner_user_id || '') === String(s.id) ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
           </select>`
         : '<span style="color:var(--text-3);font-size:11px">—</span>';
-      // Vragenlijst-toggle per bron (alleen geregistreerde bronnen). AAN =
-      // quiz vóór boeken; UIT = simpel boekingsformulier. Default AAN. Echte
-      // klikbare switch (groen = Aan, grijs = Uit) i.p.v. een statusbadge.
+      // Vragenlijst per bron (alleen geregistreerde bronnen). AAN = quiz vóór
+      // boeken; UIT = simpel boekingsformulier. Default AAN. In de lijst
+      // ALLEEN-LEZEN status; wijzigen gebeurt via Bewerken of bij toevoegen.
       const vlAan = b.vragenlijst !== false;
       const vragenlijstCell = b.is_registered
-        ? `<button type="button" class="vl-switch${vlAan ? ' on' : ''}" role="switch" aria-checked="${vlAan}" onclick="window._lsBronVragenlijst(${i})" title="${vlAan ? 'Vragenlijst staat AAN — klik om uit te zetten (simpel boekingsformulier)' : 'Vragenlijst staat UIT — klik om aan te zetten (quiz + toelating)'}">
-            <span class="vl-track"><span class="vl-knob"></span></span><span class="vl-label">${vlAan ? 'Aan' : 'Uit'}</span>
-          </button>`
+        ? `<span style="font-size:11.5px;font-weight:600;color:${vlAan ? 'var(--emerald)' : 'var(--text-3)'}" title="Wijzigen via Bewerken of bij het toevoegen van een bron">${vlAan ? 'Aan' : 'Uit'}</span>`
         : '<span style="color:var(--text-3);font-size:11px">—</span>';
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px 10px">
@@ -2380,9 +2418,15 @@
             <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Label</label>
             <input type="text" placeholder="bv. Instagram Story" value="${esc(_lsBronForm.label)}" oninput="window._lsBronSetLabel(this)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12.5px" ${_lsBronForm.busy ? 'disabled' : ''}>
           </div>
+          <div style="flex:0 0 auto">
+            <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Vragenlijst</label>
+            <button type="button" class="vl-switch${_lsBronForm.vragenlijst ? ' on' : ''}" role="switch" aria-checked="${_lsBronForm.vragenlijst}" onclick="window._lsBronFormVragenlijst()" title="${_lsBronForm.vragenlijst ? 'Aan — quiz + toelating vóór boeken' : 'Uit — simpel boekingsformulier (geen quiz)'}" ${_lsBronForm.busy ? 'disabled' : ''}>
+              <span class="vl-track"><span class="vl-knob"></span></span><span class="vl-label">${_lsBronForm.vragenlijst ? 'Aan' : 'Uit'}</span>
+            </button>
+          </div>
           <button class="btn btn-primary" style="font-size:12.5px;padding:7px 16px" onclick="window._lsBronToevoegen()" ${_lsBronForm.busy ? 'disabled' : ''}>${_lsBronForm.busy ? 'Bezig…' : '+ Toevoegen'}</button>
         </div>
-        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">Slug = lowercase, alfanumeriek + hyphen (max 64 tekens). Wordt onderdeel van de link.</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">Slug = lowercase, alfanumeriek + hyphen (max 64 tekens). Wordt onderdeel van de link. Vragenlijst uit = bezoekers krijgen het simpele boekingsformulier.</div>
       </div>`;
   }
 
