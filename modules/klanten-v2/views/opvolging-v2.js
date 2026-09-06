@@ -77,6 +77,7 @@
     window.DFO.VIEWS['opvolging/Vandaag'] = scherm;
     window.DFO.VIEWS['opvolging/Dashboard'] = scherm;
     window.DFO.VIEWS['opvolging/Afgerond'] = scherm;
+    window.DFO.VIEWS['opvolging/Rapport'] = scherm;
     if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
     else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');
   }
@@ -295,12 +296,17 @@
     balk: { loading: false, error: null, data: null, key: null },
     later: { loading: false, error: null, data: null, key: null },
     tijdlijn: { loading: false, error: null, data: null, key: null },
+    // R · het dagrapport. Eigen staat en een eigen endpoint: dit gaat over een
+    // periode, de rest over één dag.
+    rapport: { loading: false, error: null, data: null, key: null },
   };
   const _ui = {
     dagView: null,          // null = vandaag
     modal: null,            // { soort, taakId, ... }
     bezig: false,
     weekOffset: 0,          // 0 = de week die de balk bij openen toont
+    rapportPeriode: 'vandaag',   // vandaag | gisteren | deze_week | vorige_week | eigen
+    rapportEigen: null,          // { van, tot } zodra 'eigen' gekozen is
   };
 
   // Hoe ver de weekbalk vooruit en achteruit mag. Niet omdat er een grens
@@ -1374,6 +1380,23 @@
 .opv .tl li{display:flex;gap:12px;padding:9px 0;font-size:13.5px;border-bottom:1px solid #f3f4f6}
 .opv .tl li:last-child{border:0}
 .opv .tl .d{flex:0 0 120px;color:var(--o-muted);font-size:12.5px}
+/* R · het dagrapport. Alles onder .opv, zoals de rest van deze module. */
+.opv .rap-kop{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.opv .rap-knoppen{display:flex;gap:6px;flex-wrap:wrap}
+.opv .rap-eigen{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--o-muted)}
+.opv .rap-eigen input{font:inherit;padding:5px 8px;border:1px solid var(--o-line);border-radius:8px;color:var(--o-ink)}
+.opv .rap-sectie{margin:0 0 16px;padding:16px 18px}
+.opv .rap-sectie h3{margin:0 0 12px;font-size:15px;font-weight:700}
+.opv .rap-lijst{display:flex;flex-direction:column;gap:2px}
+.opv .rap-regel{padding:8px 10px;border-left:3px solid var(--o-line);background:#fafbfc;border-radius:0 8px 8px 0}
+.opv .rap-regel.rood{border-left-color:var(--o-red);background:var(--o-reds)}
+.opv .rap-regel.grijs{border-left-color:#d1d5db;background:#f7f8f9}
+.opv .rap-regel .t{font-size:13.5px;font-weight:600}
+.opv .rap-regel .u{font-size:12px;color:var(--o-muted);font-weight:400}
+.opv .rap-regel .notitie{white-space:pre-wrap;margin-top:4px}
+.opv details.rap-rijen{margin-top:10px}
+.opv details.rap-rijen>summary{cursor:pointer;font-size:12.5px;color:var(--o-acc);padding:4px 0;user-select:none}
+.opv details.rap-rijen[open]>summary{margin-bottom:6px}
 `;
     document.head.appendChild(el);
     return '';
@@ -3967,6 +3990,324 @@
 
   // De vensterlogica los na te slaan vanuit de console, en getest in
   // tests/opvolging-vensters.test.js tegen dit bestand zelf.
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // R · HET DAGRAPPORT
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Dit rapport gaat over een persoon. Elk getal wordt een gesprek tussen
+  // Maxim en Dave, en een cijfer dat niet klopt kost niet alleen zichzelf maar
+  // de geloofwaardigheid van het hele rapport. Vandaar drie regels die dit
+  // scherm overal aanhoudt:
+  //
+  //   · Geen rapportcijfers en geen procentscores op iemands werk. Alleen
+  //     aantallen en gemeten seconden.
+  //   · Elk getal is uit te klappen naar de rijen eronder. Vier van de zes
+  //     betekent dat je die twee kunt aanwijzen.
+  //   · Een sectie die iets niet weet zegt dat, en dat staat óók bovenaan bij
+  //     'Wat vraagt aandacht'. Stilte mag hier niet als goedkeuring lezen.
+  //
+  // Het rekenwerk staat in api/opvolging-rapport.js. Dit scherm telt niets
+  // zelf; het toont wat het endpoint teruggeeft, inclusief de blinde vlekken.
+
+  // De dag in Amsterdam, niet in UTC. De rest van dit bestand gebruikt
+  // vandaag() (toISOString), en dat wijkt rond middernacht een dag af. Voor een
+  // periodekeuze die 'gisteren' en 'vorige week' moet uitrekenen is dat het
+  // verschil tussen het goede en het verkeerde rapport, dus hier een eigen.
+  const vandaagNL = () => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+
+  /** Maandag van de week waar deze dag in valt. */
+  function maandagVan(dag) {
+    const d = new Date(dag + 'T12:00:00Z');
+    const dow = d.getUTCDay();              // 0 = zondag
+    return dagPlus(dag, dow === 0 ? -6 : 1 - dow);
+  }
+
+  /**
+   * De vijf periodekeuzes naar een echte reeks dagen.
+   *
+   * 'eigen' krijgt geen eigen rekenregel: dan staan van en tot al in de staat.
+   */
+  function periodeReeks(keuze, eigen) {
+    const nu = vandaagNL();
+    if (keuze === 'gisteren')    { const g = dagPlus(nu, -1); return { van: g, tot: g }; }
+    if (keuze === 'deze_week')   { return { van: maandagVan(nu), tot: nu }; }
+    if (keuze === 'vorige_week') { const m = dagPlus(maandagVan(nu), -7); return { van: m, tot: dagPlus(m, 6) }; }
+    if (keuze === 'eigen' && eigen && eigen.van && eigen.tot) return { van: eigen.van, tot: eigen.tot };
+    return { van: nu, tot: nu };   // vandaag
+  }
+
+  async function fetchRapport() {
+    const { van, tot } = periodeReeks(_ui.rapportPeriode, _ui.rapportEigen);
+    const sleutel = van + '..' + tot;
+    const st = _live.rapport;
+    if (st.loading || (st.key === sleutel && (st.data || st.error))) return;
+    st.loading = true; st.error = null; st.key = sleutel;
+    const j = await haal('/api/opvolging-rapport?van=' + encodeURIComponent(van) + '&tot=' + encodeURIComponent(tot));
+    st.loading = false;
+    if (j.__error) { st.error = j.__error; st.data = null; }
+    else { st.data = j; st.error = null; }
+    render();
+  }
+
+  window.__opvRapportPeriode = (keuze) => {
+    _ui.rapportPeriode = keuze;
+    _live.rapport.key = null; _live.rapport.data = null; _live.rapport.error = null;
+    render();
+  };
+  window.__opvRapportEigen = () => {
+    const van = (document.getElementById('opv-rap-van') || {}).value || '';
+    const tot = (document.getElementById('opv-rap-tot') || {}).value || '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(van) || !/^\d{4}-\d{2}-\d{2}$/.test(tot) || tot < van) {
+      showToast('Kies een begindatum en een einddatum, met het einde niet vóór het begin.', 'error');
+      return;
+    }
+    _ui.rapportEigen = { van, tot };
+    _ui.rapportPeriode = 'eigen';
+    _live.rapport.key = null; _live.rapport.data = null; _live.rapport.error = null;
+    render();
+  };
+
+  const PERIODE_LABEL = {
+    vandaag: 'Vandaag', gisteren: 'Gisteren', deze_week: 'Deze week',
+    vorige_week: 'Vorige week', eigen: 'Eigen reeks',
+  };
+
+  /** Uitklapbaar blok met de rijen onder een getal. */
+  function rijenBlok(titel, rijen, maakRij) {
+    if (!rijen || !rijen.length) return '';
+    // <details> is hier bewust: geen bibliotheek, geen eigen staat, en dit
+    // scherm hertekent niet uit zichzelf — er lopen geen timers op deze tab.
+    return '<details class="rap-rijen"><summary>' + esc(titel) + ' (' + rijen.length + ')</summary>' +
+      '<div class="rap-lijst">' + rijen.map(maakRij).join('') + '</div></details>';
+  }
+
+  const rapCel = (getal, label) =>
+    '<div class="cell"><div class="n">' + getal + '</div><div class="l">' + esc(label) + '</div></div>';
+
+  function rapportView() {
+    stijl();
+    const st = _live.rapport;
+    if (!st.loading && !st.error && !st.data) straks(fetchRapport);
+
+    const { van, tot } = periodeReeks(_ui.rapportPeriode, _ui.rapportEigen);
+    let h = '<div class="opv">' + periodeKiezer(van, tot);
+    if (st.error) return h + fout(st.error, 'window.__opvRapportHerlaad()') + '</div>';
+    if (st.loading || !st.data) return h + skel() + '</div>';
+
+    const d = st.data;
+    h += '<div class="ronde zacht">Periode <b>' + esc(nl(d.periode.van)) + '</b> tot en met <b>' +
+      esc(nl(d.periode.tot)) + '</b> &middot; ' + d.periode.dagen + ' dag' + (d.periode.dagen === 1 ? '' : 'en') +
+      '. Alle cijfers hieronder komen uit tijdstempels in onze eigen tabellen. ' +
+      'Er staat geen rapportcijfer en geen geschatte werktijd in.</div>';
+
+    h += sectieAandacht(d);
+    h += sectieDekking(d);
+    h += sectieVensters(d);
+    h += sectieZoomcalls(d);
+    h += sectieArchief(d);
+    h += sectieVolume(d);
+    return h + '</div>';
+  }
+
+  window.__opvRapportHerlaad = () => {
+    _live.rapport.key = null; _live.rapport.data = null; _live.rapport.error = null;
+    render();
+  };
+
+  function periodeKiezer(van, tot) {
+    const knop = (k) => '<button class="obtn' + (_ui.rapportPeriode === k ? ' p' : '') +
+      '" onclick="window.__opvRapportPeriode(\'' + k + '\')">' + esc(PERIODE_LABEL[k]) + '</button>';
+    return '<div class="rap-kop">' +
+      '<div class="rap-knoppen">' + ['vandaag', 'gisteren', 'deze_week', 'vorige_week'].map(knop).join('') + '</div>' +
+      '<div class="rap-eigen">' +
+        '<input type="date" id="opv-rap-van" value="' + esc(van) + '">' +
+        '<span>tot en met</span>' +
+        '<input type="date" id="opv-rap-tot" value="' + esc(tot) + '">' +
+        '<button class="obtn' + (_ui.rapportPeriode === 'eigen' ? ' p' : '') +
+          '" onclick="window.__opvRapportEigen()">Toon</button>' +
+      '</div></div>';
+  }
+
+  // ── 1 · Wat vraagt aandacht ──────────────────────────────────────────────
+  function sectieAandacht(d) {
+    const lijst = d.aandacht || [];
+    let h = '<div class="card rap-sectie"><h3>1 &middot; Wat vraagt aandacht</h3>';
+    if (!lijst.length) {
+      // Deze zin mag alleen staan als er ook echt niets is. Blinde vlekken
+      // komen als aandachtspunt binnen, dus een lege lijst betekent hier: alle
+      // zes de secties konden kijken, en er is niets afwijkends gevonden.
+      return h + '<div class="empty">Niets bijzonders in deze periode. Alle onderdelen konden gemeten worden.</div></div>';
+    }
+    h += '<div class="rap-lijst">' + lijst.map((a) => {
+      const merk = a.soort === 'blinde_vlek' ? 'grijs' : 'rood';
+      return '<div class="rap-regel ' + merk + '"><div class="t">' + esc(a.tekst) + '</div>' +
+        (a.uitleg ? '<div class="u">' + esc(a.uitleg) + '</div>' : '') + '</div>';
+    }).join('') + '</div>';
+    return h + '</div>';
+  }
+
+  // ── 2 · Dekking ──────────────────────────────────────────────────────────
+  function sectieDekking(d) {
+    const k = d.dekking;
+    let h = '<div class="card rap-sectie"><h3>2 &middot; Dekking</h3>';
+    if (k.openstaand_bekend) {
+      const open = k.openstaand || [];
+      const gedaan = open.filter((r) => r.behandeld);
+      h += '<div class="kpi">' +
+        rapCel(open.length, 'leads op de lijst') +
+        rapCel(gedaan.length, 'kregen actie') +
+        rapCel(open.length - gedaan.length, 'kregen niets') +
+        rapCel(k.behandeld.length, 'leads aangeraakt') + '</div>';
+      h += rijenBlok('Kregen niets', k.onbehandeld || [], (r) =>
+        '<div class="rap-regel rood"><div class="t">' + esc(r.naam || 'Naamloos') + '</div></div>');
+      h += rijenBlok('Kregen wel actie', gedaan, (r) =>
+        '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Naamloos') +
+        '</div><div class="u">' + r.bel + '&times; gebeld &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+    } else {
+      // Geen nul en geen schatting: de vraag is voor deze periode niet te
+      // stellen. Een nul zou lezen als een meting.
+      h += '<div class="warn"><b>De lijst van een voorbije dag is niet bewaard.</b> ' +
+        'Hoeveel leads er die dag actie nodig hadden, is dus niet te zeggen — dat cijfer staat hier bewust niet. ' +
+        'Wat er wél uit tijdstempels volgt, staat hieronder: wie er in deze periode moeite kreeg.</div>';
+      h += '<div class="kpi">' + rapCel(k.behandeld.length, 'leads aangeraakt') + '</div>';
+    }
+    h += rijenBlok('Alle aangeraakte leads', k.behandeld, (r) =>
+      '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Naamloos') +
+      '</div><div class="u">' + r.bel + '&times; gebeld op ' + r.bel_dagen + ' dag' + (r.bel_dagen === 1 ? '' : 'en') +
+      ' &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+    return h + '</div>';
+  }
+
+  // ── 3 · De twee vensters ─────────────────────────────────────────────────
+  function sectieVensters(d) {
+    const v = d.vensters;
+    const uu = (n) => String(n).padStart(2, '0') + ':00';
+    let h = '<div class="card rap-sectie"><h3>3 &middot; De twee vensters per zoomcall</h3>' +
+      '<div class="ronde zacht">Spraakbericht vóór ' + uu(d.drempels.spraak_voor_uur) + ', nabellen tussen ' +
+      uu(d.drempels.nabel_van_uur) + ' en ' + uu(d.drempels.nabel_tot_uur) + '. ' +
+      'Alleen leads met een zoomcall op die dag tellen mee.</div>';
+    if (!v.rijen.length && !v.zonder_taak.length) {
+      return h + '<div class="empty">Geen zoomcalls in deze periode.</div></div>';
+    }
+    h += '<div class="kpi">' +
+      rapCel(v.spraak.op_tijd, 'spraak op tijd') +
+      rapCel(v.spraak.te_laat, 'spraak te laat') +
+      rapCel(v.spraak.niet_gedaan, 'geen spraakbericht') +
+      rapCel(v.nabel.niet_gedaan, 'niet nagebeld') + '</div>';
+    h += rijenBlok('Per zoomcall', v.rijen, (r) =>
+      '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Naamloos') +
+      ' <span class="u">' + esc(nl(r.dag)) + ' &middot; call ' + esc(r.call_tijd || '') + '</span></div>' +
+      '<div class="u">Spraak: ' + vensterWoord(r.spraak) + ' &middot; Nabellen: ' + vensterWoord(r.nabel) + '</div></div>');
+    if (v.zonder_taak.length) {
+      h += '<div class="ronde zacht">' + v.zonder_taak.length + ' ingeplande call' +
+        (v.zonder_taak.length === 1 ? '' : 's') + ' staan niet in de takenlijst, dus daar valt niets over te zeggen. ' +
+        'Ze tellen hierboven niet mee &mdash; als \'geen spraakbericht\' zou dat een oordeel zijn over iets wat we niet gemeten hebben.</div>';
+    }
+    return h + '</div>';
+  }
+
+  function vensterWoord(o) {
+    if (!o) return '—';
+    if (o.staat === 'op_tijd')    return '<span class="tag t-green">op tijd' + (o.tijd ? ' ' + esc(o.tijd) : '') + '</span>';
+    if (o.staat === 'te_laat')    return '<span class="tag t-red">te laat' + (o.tijd ? ' ' + esc(o.tijd) : '') + '</span>';
+    if (o.staat === 'niet_gedaan') return '<span class="tag t-red">niet gebeurd</span>';
+    return '<span class="tag t-grey">n.v.t.' + (o.reden ? ' &middot; ' + esc(o.reden) : '') + '</span>';
+  }
+
+  // ── 4 · De zoomcalls zelf ────────────────────────────────────────────────
+  function sectieZoomcalls(d) {
+    const lijst = d.zoomcalls || [];
+    let h = '<div class="card rap-sectie"><h3>4 &middot; De zoomcalls en hun uitkomst</h3>';
+    if (!lijst.length) return h + '<div class="empty">Geen zoomcalls in deze periode.</div></div>';
+    const metUitkomst = lijst.filter((c) => c.vastgelegd);
+    h += '<div class="kpi">' +
+      rapCel(lijst.length, 'zoomcalls') +
+      rapCel(metUitkomst.length, 'met uitkomst') +
+      rapCel(lijst.length - metUitkomst.length, 'zonder uitkomst') + '</div>';
+    h += '<div class="rap-lijst">' + lijst.map((c) =>
+      '<div class="rap-regel' + (c.vastgelegd ? '' : ' grijs') + '">' +
+      '<div class="t">' + esc(c.naam || 'Naamloos') + ' <span class="u">' + esc(nl(c.dag)) +
+      ' &middot; ' + esc(c.tijd || '') + '</span></div>' +
+      '<div class="u">' + (c.vastgelegd
+        ? 'Uitkomst: <b>' + esc(String(c.uitkomst).replaceAll('_', ' ')) + '</b>'
+        // NIET 'Dave vulde niets in'. Dat het ontbreekt kan ook aan het systeem
+        // liggen, en dat verschil is precies wat op 6 september gerepareerd is.
+        : '<i>' + esc(c.reden_leeg || 'Geen uitkomst vastgelegd.') + '</i>') + '</div>' +
+      (c.notitie ? '<div class="u notitie">' + esc(c.notitie) + '</div>' : '') +
+      '</div>').join('') + '</div>';
+    return h + '</div>';
+  }
+
+  // ── 5 · Uit de lijst gehaald ─────────────────────────────────────────────
+  function sectieArchief(d) {
+    const lijst = d.archief || [];
+    let h = '<div class="card rap-sectie"><h3>5 &middot; Uit de lijst gehaald</h3>';
+    if (!lijst.length) return h + '<div class="empty">Er is in deze periode niemand uit de lijst gehaald.</div></div>';
+    const teWeinig = lijst.filter((a) => a.moeite.staat === 'te_weinig');
+    h += '<div class="ronde zacht">De moeite hiernaast telt over de <b>hele levensloop</b> van de kaart, niet over deze periode: ' +
+      'de vraag is of er genoeg gedaan was vóórdat hij dicht ging. De afspraak is ' +
+      d.drempels.archief_min_dagen + ' belpogingen op ' + d.drempels.archief_min_dagen +
+      ' verschillende dagen plus ' + d.drempels.archief_min_wa + ' WhatsApp.</div>';
+    h += '<div class="kpi">' + rapCel(lijst.length, 'uit de lijst') + rapCel(teWeinig.length, 'met te weinig moeite') + '</div>';
+    h += '<div class="card"><table><thead><tr><th>Naam</th><th>Reden</th><th>Moeite</th><th>Dag</th></tr></thead><tbody>' +
+      lijst.map((a) =>
+        '<tr><td><b>' + esc(a.naam || 'Naamloos') + '</b></td>' +
+        '<td style="color:#6b7280">' + esc(a.archief_reden || '') + '</td>' +
+        '<td>' + a.bel_totaal + '&times; &#9742; op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') +
+        ' &middot; ' + a.wa_totaal + '&times; &#128172; ' + moeiteWoord(a.moeite) + '</td>' +
+        '<td style="color:#6b7280">' + esc(nl(a.dag)) + '</td></tr>').join('') +
+      '</tbody></table></div>';
+    return h + '</div>';
+  }
+
+  function moeiteWoord(m) {
+    if (!m) return '';
+    // 'n.v.t.' is geen vrijstelling maar een ander soort kaart: de lead zei
+    // tijdens de call zelf nee. Rood zou een verwijt zijn voor iets waar niets
+    // aan te doen viel.
+    if (m.staat === 'nvt') return '<span class="tag t-grey" title="' + esc(m.reden || '') + '">n.v.t.</span>';
+    if (m.staat === 'genoeg') return '<span class="tag t-green">ok</span>';
+    return '<span class="tag t-red">te weinig</span>';
+  }
+
+  // ── 6 · Volume ───────────────────────────────────────────────────────────
+  function sectieVolume(d) {
+    const v = d.volume;
+    let h = '<div class="card rap-sectie"><h3>6 &middot; Volume</h3>';
+    h += '<div class="kpi">' +
+      rapCel(v.bel.uit, 'belpogingen') +
+      rapCel(v.bel.gesproken, 'daarvan gesproken') +
+      rapCel(v.wa.uit + v.spraak.uit, 'WhatsApp uit') +
+      rapCel(v.wa.in + v.spraak.in, 'WhatsApp in') + '</div>';
+    h += '<div class="ronde zacht">Gemeten gesprekstijd: <b>' + minuten(v.bel.seconden) + '</b>' +
+      (v.bel.zonder_duur
+        // Geen gemiddelde over de rest schatten. Dat zou een som van aannames
+        // zijn, en dat is precies wat dit rapport niet doet.
+        ? ' over ' + (v.bel.uit - v.bel.zonder_duur) + ' van de ' + v.bel.uit + ' gesprekken. ' +
+          'Van de andere ' + v.bel.zonder_duur + ' is geen duur vastgelegd; die worden niet geschat.'
+        : ' over alle ' + v.bel.uit + ' gesprekken.') + '</div>';
+    h += '<div class="kpi">' +
+      rapCel(v.wa.uit, 'tekst uit') + rapCel(v.wa.in, 'tekst in') +
+      rapCel(v.spraak.uit, 'spraak uit') + rapCel(v.spraak.in, 'spraak in') + '</div>';
+    h += rijenBlok('Alle gebeurtenissen', v.rijen, (r) =>
+      '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Onbekende lead') +
+      ' <span class="u">' + esc(nl(r.dag)) + ' ' + esc(r.tijd || '') + '</span></div>' +
+      '<div class="u">' + esc(r.soort) + ' &middot; ' + (r.richting === 'in' ? 'binnengekomen' : 'verstuurd') +
+      (r.duur_sec != null ? ' &middot; ' + r.duur_sec + ' sec' : '') + '</div></div>');
+    return h + '</div>';
+  }
+
+  function minuten(sec) {
+    const s = Number(sec || 0);
+    if (!s) return '0 minuten';
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return (m ? m + ' min ' : '') + r + ' sec';
+  }
+
   window.__opvVensterHelpers = {
     inZone, beoordeelSpraak, beoordeelNabel, beoordeelDag, telVensters,
     isSpraakVerstuurd, isAntwoord, koppelCalls, callVoorTaak,
@@ -3979,6 +4320,7 @@
   window.DFO.VIEWS['opvolging/Vandaag'] = vandaagView;
   window.DFO.VIEWS['opvolging/Dashboard'] = dashboardView;
   window.DFO.VIEWS['opvolging/Afgerond'] = afgerondView;
+  window.DFO.VIEWS['opvolging/Rapport'] = rapportView;
 
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');

@@ -71,7 +71,7 @@
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
-    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond'] },
+    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
@@ -148,6 +148,13 @@
     'opvolging/Vandaag' : 'opvolging.dag.view',
     'opvolging/Dashboard': 'opvolging.dashboard.view',
     'opvolging/Afgerond': 'opvolging.archief.view',
+    // Eigen sleutel, niet meeliftend op opvolging.dashboard.view: Maxim wil
+    // later kunnen omzetten of Dave zijn eigen rapport ziet zonder dat daar
+    // een coderegel voor nodig is. Vandaag staat hij voor dezelfde rollen op
+    // true. LET OP: dit is de navigatie-gate en die is fail-open (zie de kop
+    // hierboven); /api/opvolging-rapport doet zijn eigen strikte check en valt
+    // daar NIET terug op een andere sleutel.
+    'opvolging/Rapport' : 'opvolging.rapport.view',
   };
 
   const TAB_RESTRICT = {
