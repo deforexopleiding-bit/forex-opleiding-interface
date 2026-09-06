@@ -2768,8 +2768,12 @@
     const laatste = t.laatste_poging
       ? `<span style="font-size:10.5px;color:var(--text-3);white-space:nowrap" title="Laatste poging op ${esc(_opvFmtDateTime(t.laatste_poging))}">· laatst ${esc(_opvFmtDateTime(t.laatste_poging))}</span>`
       : '';
-    const badgeChip = t.badge_label
-      ? `<span title="${esc(t.badge_label)}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(t.badge_label)}</span>`
+    // Etiket via de gedeelde helper, niet rauw uit badge_label: die is
+    // platgeslagen en droeg bij oude rijen het volledige postadres mee, wat de
+    // naam ernaast wegduwde. Zie _shared-v2.js.
+    const badgeTxt = (H.opvBadgeTekst ? H.opvBadgeTekst(t) : (t.badge_label || ''));
+    const badgeChip = badgeTxt
+      ? `<span title="${esc(badgeTxt)}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(badgeTxt)}</span>`
       : '';
     const redenChip = redenLbl
       ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-2);border:1px solid var(--border);white-space:nowrap">${esc(redenLbl)}</span>`

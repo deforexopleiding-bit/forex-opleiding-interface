@@ -25,6 +25,9 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VIEW = join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js');
+// Het etiket-helperbestand: opvolging-v2 weigert te starten zonder
+// KV_V2.helpers.opvBadgeTekst, net als op de pagina.
+const BADGE_HELPER = join(ROOT, 'modules/klanten-v2/views/_opvolging-badge.js');
 
 // Maandag 7 september 2026, 08:00 Amsterdamse tijd (= 06:00 UTC, zomertijd).
 const DAG = '2026-09-07';
@@ -47,6 +50,7 @@ function laadView(iso = DAG + 'T06:00:00Z') {
     queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
     Date: VasteDate, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set, Map,
   });
+  runInContext(readFileSync(BADGE_HELPER, 'utf8'), ctx, { filename: '_opvolging-badge.js' });
   runInContext(readFileSync(VIEW, 'utf8'), ctx, { filename: 'opvolging-v2.js' });
   assert.ok(window.__opvNuHelpers, 'de view hoort __opvNuHelpers te zetten');
   return window;

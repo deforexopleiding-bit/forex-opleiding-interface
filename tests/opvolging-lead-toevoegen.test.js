@@ -32,6 +32,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VIEW = join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js');
 const API  = join(ROOT, 'api/opvolging-taak-create.js');
 const MIGRATIE = join(ROOT, 'docs/sql-migrations/2026-09-05-opvolging-aanmelding-en-wacht-verplaatsing.sql');
+// Het etiket-helperbestand: opvolging-v2 weigert te starten zonder
+// KV_V2.helpers.opvBadgeTekst, net als op de pagina.
+const BADGE_HELPER = join(ROOT, 'modules/klanten-v2/views/_opvolging-badge.js');
 
 const NU = '2026-09-06';
 
@@ -53,6 +56,7 @@ function laadView(nu = NU) {
     queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
     Date: VasteDate, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set, Map,
   });
+  runInContext(readFileSync(BADGE_HELPER, 'utf8'), ctx, { filename: '_opvolging-badge.js' });
   runInContext(readFileSync(VIEW, 'utf8'), ctx, { filename: 'opvolging-v2.js' });
   assert.ok(window.__opvLeadHelpers, 'de view hoort __opvLeadHelpers te zetten');
   return window;

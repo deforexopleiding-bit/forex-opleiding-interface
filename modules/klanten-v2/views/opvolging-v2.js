@@ -39,6 +39,17 @@
 (function () {
   if (!window.DFO) { console.error('[opvolging-v2] DFO shell niet geladen.'); return; }
   if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[opvolging-v2] KV_V2.helpers niet geladen.'); return; }
+  const H = window.KV_V2.helpers;
+  // Het etiket op een taak komt uit één plek — zie _shared-v2.js. Het stond op
+  // vier plekken in dit bestand rauw op het scherm, en drie keer dezelfde lange
+  // string is geen toeval maar een ontbrekende gedeelde helper. Hard falen als
+  // hij ontbreekt: stil terugvallen op badge_label zou de fout terugbrengen
+  // zonder dat iemand het merkt.
+  if (typeof H.opvBadgeTekst !== 'function') {
+    console.error('[opvolging-v2] H.opvBadgeTekst ontbreekt — is _shared-v2.js bijgewerkt?');
+    return;
+  }
+  const badgeTekst = (t) => H.opvBadgeTekst(t);
 
   const DOEL_BELLEN = 2;
   // Zoveel dagen voor het event komt een aanmeldkaart terug voor de
@@ -929,7 +940,11 @@
 .opv .ltkop small{font-weight:600;color:var(--o-muted);opacity:.75}
 .opv .ltrij{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;cursor:pointer;background:#fff;border:1px solid var(--o-line);border-radius:10px;padding:8px 11px;margin-bottom:5px}
 .opv .ltrij:hover{border-color:var(--o-acc)}
-.opv .ltnm{font-weight:650;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opv .ltnm{flex:1 1 auto;font-weight:650;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Het etiket krimpt en kapt zichzelf af; de naam niet. Zonder deze twee regels
+   eist een lang eventlabel alle breedte op en blijft er 'Bryan Van ...' over. */
+.opv .ltrij .tag{flex:0 0 auto}
+.opv .ltrij .ltev{flex:0 1 auto;min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* G3 · de nu-doen-balk. Oranje zodra een venster verstreken is; verder rustig,
    want hij staat er de hele dag. */
 .opv .nudoen{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--o-line);border-left:4px solid var(--o-acc);border-radius:12px;padding:11px 14px;margin:0 0 14px;box-shadow:var(--o-sh)}
@@ -1197,7 +1212,7 @@
       '<div class="nm">' + esc(t.naam) +
         ' <span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
         (t.reden_code ? ' <span class="tag t-grey">' + esc(t.reden_code) + '</span>' : '') +
-        (t.badge_label ? ' <span class="tag t-grey">' + esc(t.badge_label) + '</span>' : '') +
+        (badgeTekst(t) ? ' <span class="tag t-grey">' + esc(badgeTekst(t)) + '</span>' : '') +
         (t.due < nuDag ? ' <span class="tag t-red">bleef liggen</span>' : '') +
         (t.due > nuDag ? ' <span class="tag t-blue">staat op ' + nl(t.due) + '</span>' : '') +
         ((t.uitgesteld_zonder_poging || 0) >= 2 ? ' <span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
@@ -1978,12 +1993,11 @@
    * browser-view kan daar niet uit importeren; tests/opvolging-korte-plaats.test.js
    * bewaakt dat de twee hetzelfde blijven doen.
    */
+  // Eén implementatie, in _shared-v2.js. De naam blijft hier staan zodat elke
+  // bestaande aanroeper en test blijft werken, maar de regel zelf staat nog maar
+  // op één plek — dat was de hele klacht.
   function kortePlaats(location) {
-    const v = String(location == null ? '' : location).trim();
-    if (!v || v.length > 24) return '';
-    if (/[0-9|,;]/.test(v)) return '';
-    if (v.includes(' - ') || v.includes('(')) return '';
-    return v;
+    return H.opvKortePlaats(location);
   }
 
   /** Titel plus plaats, maar alleen als die plaats een plaatsnaam is. */
@@ -2334,7 +2348,7 @@
         const rest = Math.max(0, 48 - uren);
         return '<div class="row"><div class="who"><div class="nm">' + esc(w.naam) +
           ' <span class="tag ' + (rest ? 't-blue' : 't-red') + '">' + (rest ? 'nog ' + rest + 'u' : 'termijn voorbij') + '</span>' +
-          (w.badge_label ? ' <span class="tag t-grey">' + esc(w.badge_label) + '</span>' : '') + '</div>' +
+          (badgeTekst(w) ? ' <span class="tag t-grey">' + esc(badgeTekst(w)) + '</span>' : '') + '</div>' +
           '<div class="mt"><span style="color:#6b7280;font-size:12.5px">' + esc(w.telefoon || '') + ' &middot; agenda ' + uren + 'u geleden doorgestuurd</span></div></div>' +
           '<div class="act"><button class="obtn wa" onclick="window.__opvWa(\'' + w.id + '\')">&#128172; Herinneren</button>' +
           '<button class="obtn" onclick="window.__opvTerug(\'' + w.id + '\')">Terug in de lijst</button></div></div>';
@@ -2536,7 +2550,7 @@
         '<div class="tltijd">' + esc(uur(it.tijdstip)) + '</div>' +
         '<div class="tlem">' + l[0] + '</div>' +
         '<div class="tlwat"><b>' + l[1] + '</b> &middot; ' + naam +
-          (it.taak && it.taak.badge_label ? ' <span class="tag t-grey">' + esc(it.taak.badge_label) + '</span>' : '') +
+          (it.taak && badgeTekst(it.taak) ? ' <span class="tag t-grey">' + esc(badgeTekst(it.taak)) + '</span>' : '') +
           (it.resultaat ? '<div class="tlres">' + esc(it.resultaat) + '</div>' : '') +
           (it.automatisch ? '<div class="tlres">automatisch geregistreerd</div>' : '') +
         '</div></div>';
@@ -2566,10 +2580,14 @@
     const blokken = dagen.map((g) => {
       const rijen = (g.taken || []).map((t) => {
         const r = REDEN_LABEL[t.reden] || [t.reden, 't-grey'];
+        // De naam eerst en met de ruimte die overblijft: die is het
+        // belangrijkste op de regel en mag nooit als eerste wegvallen. Het
+        // etiket krijgt een eigen maximum en kapt zichzelf af.
+        const badge = badgeTekst(t);
         return '<button class="ltrij" onclick="window.__opvDagVanuitLater(\'' + g.dag + '\')">' +
           '<span class="ltnm">' + esc(t.naam) + '</span>' +
           '<span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
-          (t.badge_label ? '<span class="tag t-grey">' + esc(t.badge_label) + '</span>' : '') +
+          (badge ? '<span class="tag t-grey ltev" title="' + esc(badge) + '">' + esc(badge) + '</span>' : '') +
           '</button>';
       }).join('');
       return '<div class="ltgroep"><div class="ltkop">' + esc(langeDatum(g.dag)) +

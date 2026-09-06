@@ -28,6 +28,10 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const VIEW = join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js');
 const BRON = readFileSync(VIEW, 'utf8');
+// Het etiket-helperbestand: opvolging-v2 weigert te starten zonder
+// KV_V2.helpers.opvBadgeTekst, net als op de pagina.
+const BADGE_HELPER = join(ROOT, 'modules/klanten-v2/views/_opvolging-badge.js');
+const BRON_BADGE = readFileSync(BADGE_HELPER, 'utf8');
 
 /**
  * Het echte viewbestand in een sandbox, met een klok die wij vooruitdraaien.
@@ -80,6 +84,7 @@ function bouwSandbox({ verbonden = false } = {}) {
     clearInterval: clearIntervalNep,
     setTimeout, setImmediate,
   });
+  runInContext(BRON_BADGE, ctx, { filename: '_opvolging-badge.js' });
   runInContext(BRON, ctx, { filename: 'opvolging-v2.js' });
 
   /** Draai de klok vooruit en laat alle beloftes tussendoor afwikkelen. */
