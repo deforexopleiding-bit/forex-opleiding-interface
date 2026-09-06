@@ -24,6 +24,12 @@
   'use strict';
 
   var _permsCache = null;     // Set<string> | null
+  // Is de laatste laadpoging GELUKT? Zonder deze vlag zijn 'de rechten konden
+  // niet geladen worden' en 'deze user mag niets' niet te onderscheiden: bij een
+  // fout komt er een lege Set terug en zegt canSync() overal false. Dat is
+  // dezelfde vorm voor twee verschillende antwoorden, en wie daarop iets
+  // verbergt, verbergt het ook als er alleen een netwerkfout was.
+  var _permsOk = false;
   var _rolesCache = null;     // string[] | null
   var _loadPromise = null;    // Promise<Set<string>> | null
 
@@ -57,12 +63,13 @@
         // ongewijzigd.
         if (profile.role === 'super_admin') {
           _rolesCache = ['super_admin'];
+          _permsOk = true;
           return new Set(['*']);
         }
 
         // 1) Alle rollen van de user (RLS: eigen rijen leesbaar).
         var rolesRes = await supa.from('user_roles').select('role').eq('user_id', userId);
-        if (rolesRes.error) { console.warn('[RBAC] user_roles:', rolesRes.error.message); return new Set(); }
+        if (rolesRes.error) { console.warn('[RBAC] user_roles:', rolesRes.error.message); _permsOk = false; return new Set(); }
         var roles = (rolesRes.data || []).map(function (r) { return r.role; });
         // Fallback op profiles.role als user_roles (nog) leeg is — backward compatible.
         if (roles.length === 0 && profile.role) roles = [profile.role];
@@ -71,14 +78,14 @@
         // Defense-in-depth: user_roles kan na fix-1 (profile.role-bypass)
         // alsnog 'super_admin' bevatten zonder dat profile.role gezet was —
         // we honoreren dat ook (bestaand gedrag).
-        if (roles.indexOf('super_admin') !== -1) return new Set(['*']);
+        if (roles.indexOf('super_admin') !== -1) { _permsOk = true; return new Set(['*']); }
 
         // 2) Toegestane feature_keys voor deze rollen (RLS: role_permissions leesbaar voor iedereen).
         var permSet = new Set();
         if (roles.length > 0) {
           var permsRes = await supa.from('role_permissions')
             .select('feature_key').in('role', roles).eq('allowed', true);
-          if (permsRes.error) { console.warn('[RBAC] role_permissions:', permsRes.error.message); return new Set(); }
+          if (permsRes.error) { console.warn('[RBAC] role_permissions:', permsRes.error.message); _permsOk = false; return new Set(); }
           (permsRes.data || []).forEach(function (p) { permSet.add(p.feature_key); });
         }
 
@@ -94,9 +101,11 @@
         if (upRes.error) { console.warn('[RBAC] user_permissions:', upRes.error.message); }
         else (upRes.data || []).forEach(function (p) { permSet.add(p.feature_key); });
 
+        _permsOk = true;
         return permSet;
       } catch (err) {
         console.warn('[RBAC] load mislukt:', err && err.message);
+        _permsOk = false;
         return new Set();
       }
     })();
@@ -123,11 +132,22 @@
 
   function getUserRoles() { return _rolesCache || []; }
 
-  function resetPermissionsCache() { _permsCache = null; _rolesCache = null; _loadPromise = null; }
+  function resetPermissionsCache() { _permsCache = null; _rolesCache = null; _loadPromise = null; _permsOk = false; }
+
+  /**
+   * Zijn de rechten daadwerkelijk geladen, of weten we het gewoon niet?
+   *
+   * canSync() geeft bij een mislukte load overal false — hetzelfde antwoord als
+   * 'niet toegestaan'. Wie op grond daarvan iets verbergt, verbergt het ook bij
+   * een netwerkfout. Deze vlag maakt dat onderscheid zichtbaar, zodat een
+   * aanroeper fail-open kan blijven.
+   */
+  function permissiesGeladen() { return _permsOk === true; }
 
   window.RBAC = {
     can: can,
     canSync: canSync,
+    permissiesGeladen: permissiesGeladen,
     ensurePermissionsLoaded: ensurePermissionsLoaded,
     getUserRoles: getUserRoles,
     resetPermissionsCache: resetPermissionsCache

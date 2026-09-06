@@ -30,6 +30,13 @@ export default async function handler(req, res) {
   const allowed = await requirePermission(req, 'opvolging.module.access');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten (opvolging.module.access)' });
 
+  // De fijne sleutel bovenop de grove poort. Deze stond in het rechtenscherm en
+  // in de database, maar werd nergens gecontroleerd: 'WhatsApp sturen' uitzetten
+  // veranderde niets. Een rechtenscherm dat rapporteert dat het iets tegenhoudt
+  // terwijl het niets doet is erger dan geen scherm.
+  const magSturen = await requirePermission(req, 'opvolging.whatsapp.sturen');
+  if (!magSturen) return res.status(403).json({ error: 'Geen rechten (opvolging.whatsapp.sturen)' });
+
   const b = req.body || {};
   const nummer = normaliseerNummer(b.nummer);
   if (!nummer) return res.status(400).json({ error: 'nummer ontbreekt of is onleesbaar' });
