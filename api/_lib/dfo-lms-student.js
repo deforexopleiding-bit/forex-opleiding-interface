@@ -54,6 +54,18 @@ const PRODUCT_SOORT_MAP = Object.freeze({
   'membership': 'membership',
 });
 
+// hlms_student.herkomst — waar de rij vandaan komt. 'crm' is een BESTAANDE
+// waarde in de HERKOMSTEN-lijst aan LMS-kant; we voegen er bewust geen
+// nieuwe variant aan toe (een 'crm_onboarding' zou er wél een zijn, en
+// onbekende waarden vallen aan de leeskant stil om — zelfde risico als bij
+// product_soort, want ook deze kolom heeft geen CHECK).
+//
+// Wordt ALLEEN bij het aanmaken gezet, nooit bij het overnemen van een
+// bestaande rij: die is ergens anders ontstaan en dat hoort zo te blijven
+// staan. Anders zou een student die ooit uit Bubble geïmporteerd is na een
+// koppeling ineens als CRM-aanmaak te boek staan.
+const HERKOMST_CRM = 'crm';
+
 /** @returns {string|null} 'mentorship' | 'membership', of null bij onbekend. */
 export function bepaalProductSoort(traject) {
   const ruw = String(traject?.type || '').trim().toLowerCase();
@@ -333,7 +345,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
 
       await markeerGekoppeld(onboardingId, rij.id);
       return {
-        ok: true, adopted: true, student_id: rij.id,
+        ok: true, adopted: true, student_id: rij.id, email,
         mentor_id: mentorId, mentor_warning: mentorWarning,
         reason: 'bestond-al-via-' + via,
       };
@@ -355,6 +367,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
       calls_totaal     : bepaalCallsTotaal(traject),
       mentor_id        : mentorId,
       crm_onboarding_id: onboardingId,
+      herkomst         : HERKOMST_CRM,
     };
 
     const { data: gemaakt, error: insErr } = await lms
@@ -386,7 +399,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
           }
           await markeerGekoppeld(onboardingId, opnieuw.rij.id);
           return {
-            ok: true, adopted: true, student_id: opnieuw.rij.id,
+            ok: true, adopted: true, student_id: opnieuw.rij.id, email,
             mentor_id: mentorId, mentor_warning: mentorWarning,
             reason: 'race-opgevangen',
           };
@@ -397,7 +410,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
 
     await markeerGekoppeld(onboardingId, gemaakt.id);
     return {
-      ok: true, created: true, student_id: gemaakt.id,
+      ok: true, created: true, student_id: gemaakt.id, email,
       mentor_id: mentorId, mentor_warning: mentorWarning,
     };
   } catch (e) {
@@ -405,6 +418,33 @@ export async function provisionDfoLmsStudent(onboardingId) {
     console.error('[dfo-lms-student]', msg);
     await schrijfFout(onboardingId, msg);
     return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Uitkomst van de LMS-uitnodiging vastleggen op de onboarding.
+ *
+ * Schrijft ALLEEN dfo_lms_provision_error. `dfo_lms_provisioned` blijft
+ * staan zoals het staat: de studentrij is wél gekoppeld, en die vlag op
+ * false zetten zou een nieuwe koppelpoging uitlokken voor iets dat al klaar
+ * is. Bij succes wordt de fouttekst gewist.
+ *
+ * Best-effort: een mislukte schrijfactie mag het hoofdpad niet raken.
+ *
+ * @param {string} onboardingId
+ * @param {{ok:boolean, fout?:string|null}} resultaat  uit stuurLmsUitnodiging
+ */
+export async function noteerUitnodiging(onboardingId, resultaat) {
+  try {
+    const fout = (resultaat && resultaat.ok !== true && resultaat.fout)
+      ? String(resultaat.fout).slice(0, 1000)
+      : null;
+    await supabaseAdmin
+      .from('onboardings')
+      .update({ dfo_lms_provision_error: fout })
+      .eq('id', onboardingId);
+  } catch (e) {
+    console.error('[dfo-lms-student] uitnodiging-notitie mislukt:', e?.message || e);
   }
 }
 

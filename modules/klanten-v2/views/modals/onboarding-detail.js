@@ -271,6 +271,40 @@ function renderAccountTab() {
 // Let op de naamgeving: dit is hlms_student in het dfo-lms-project. Het heeft
 // NIETS te maken met onboardings.lms_provision — dat is de trial-site voor
 // leads (7-daagse / mini-cursus). Zie api/_lib/dfo-lms-db.js.
+// Stabiele voorvoegsels uit api/_lib/dfo-lms-uitnodiging.js. Ze staan hier
+// letterlijk omdat een browserbestand geen server-lib kan importeren; wijzig
+// je ze daar, wijzig ze dan hier mee.
+const UITNODIGING_HERSTELBAAR   = 'UITNODIGING_MAIL_MISLUKT:';
+const UITNODIGING_ACTIE_VEREIST = 'UITNODIGING_WACHTWOORD_NIET_GEZET:';
+
+// De twee uitkomsten van de LMS-uitnodiging die WEZENLIJK verschillen, en
+// die daarom nooit als één "er ging iets mis" mogen worden getoond:
+//
+//   mail_mislukt  → er is niets veranderd, het bestaande wachtwoord van de
+//                   student werkt door. Vervelend, veilig opnieuw te proberen.
+//   wachtwoord_niet_gezet
+//                 → de mail is de deur uit MET een wachtwoord dat niet werkt.
+//                   De student kan er NU NIET IN. Opnieuw versturen is geen
+//                   keuze maar een noodzaak, en hoe eerder hoe beter.
+function uitnodigingWaarschuwing(fout) {
+  if (!fout) return '';
+  if (String(fout).startsWith(UITNODIGING_ACTIE_VEREIST)) {
+    return `<div class="kv-edit-banner" style="background:#FEE2E2;border-color:#FCA5A5;color:#991B1B">
+      <b>Actie vereist — de student kan niet inloggen.</b><br>
+      De welkomstmail is verstuurd, maar het wachtwoord is niet gezet. Verstuur
+      de uitnodiging opnieuw; wachten lost dit niet op.
+    </div>`;
+  }
+  if (String(fout).startsWith(UITNODIGING_HERSTELBAAR)) {
+    return `<div class="kv-edit-banner" style="background:#FEF3C7;border-color:#FCD34D;color:#92400E">
+      <b>Mail niet verstuurd.</b><br>
+      Er is niets veranderd en een bestaand wachtwoord blijft werken. Veilig om
+      opnieuw te proberen.
+    </div>`;
+  }
+  return '';
+}
+
 function renderDfoLmsSection(o) {
   const gekoppeld = !!o.dfo_lms_provisioned && !!o.dfo_lms_student_id;
   const fout      = o.dfo_lms_provision_error || null;
@@ -289,11 +323,15 @@ function renderDfoLmsSection(o) {
         <div class="kv-onb-meta-row"><span>Gekoppeld op</span><span>${fmtDT(o.dfo_lms_provisioned_at)}</span></div>
         ${fout ? `<div class="kv-onb-meta-row"><span>Fout</span><span style="color:var(--rose)">${esc(fout)}</span></div>` : ''}
       </div>
+      ${uitnodigingWaarschuwing(fout)}
       <div class="kv-onb-action-row">
         <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-dfolms ${state.savingAction ? 'disabled' : ''}>
           ${state.savingAction === 'dfolms'
             ? 'Bezig…'
             : (gekoppeld ? 'Koppeling opnieuw controleren' : 'Student aanmaken in LMS')}
+        </button>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-lmsinvite ${state.savingAction || !gekoppeld ? 'disabled' : ''} title="Verstuurt de welkomstmail van het LMS. Is er al eerder uitgenodigd, dan gebeurt er niets.">
+          ${state.savingAction === 'lmsinvite' ? 'Versturen…' : 'LMS-uitnodiging versturen'}
         </button>
       </div>
       <div class="kv-onb-hint">${gekoppeld
@@ -528,6 +566,48 @@ async function actProvision() {
   await callAction('provision', '/api/onboarding-provision-retry', { onboarding_id: state.id });
 }
 
+// De uitnodiging is een APARTE knop en geen bijwerking van 'student aanmaken'.
+// Deze knop wordt op bestaande klanten gebruikt, en die horen niet onverwacht
+// een mail te krijgen omdat iemand de koppeling wilde controleren. Daarom
+// stuurt de server pas iets bij een uitdrukkelijke send_invite.
+async function actLmsInvite() {
+  state.savingAction = 'lmsinvite'; state.globalError = null; state.saveOk = null;
+  rerender();
+  let j = null;
+  try {
+    j = await K().authedJson('/api/onboarding-dfo-lms-provision', {
+      method: 'POST',
+      body: JSON.stringify({ onboarding_id: state.id, send_invite: true }),
+    });
+  } catch (e) {
+    state.savingAction = null;
+    state.globalError = e?.message || 'Uitnodiging mislukt';
+    rerender();
+    return;
+  }
+
+  state.savingAction = null;
+  try { state.data = await loadDetail(state.id); } catch (_) { /* bijzaak */ }
+
+  const u = j && j.uitnodiging;
+  if (!u) {
+    state.globalError = 'Geen uitnodiging-resultaat ontvangen.';
+  } else if (u.ok === true && u.overgeslagen) {
+    // De grendel sloeg aan: er was al eerder gemaild. Dit is GOED nieuws,
+    // geen fout — hier is een tweede mail juist voorkomen.
+    state.saveOk = 'Er was al eerder een uitnodiging verstuurd'
+      + (u.uitnodiging_verstuurd_op ? ' op ' + fmtDT(u.uitnodiging_verstuurd_op) : '')
+      + ' — er is niets opnieuw gestuurd.';
+  } else if (u.ok === true) {
+    state.saveOk = 'LMS-uitnodiging verstuurd.';
+  } else {
+    state.globalError = 'Uitnodiging mislukt: ' + (u.fout || 'onbekende fout');
+  }
+
+  if (typeof state.onSuccess === 'function') state.onSuccess();
+  rerender();
+}
+
 // Eigen handler in plaats van callAction: dit endpoint is fail-soft en geeft
 // een mislukking terug als 200 met { ok:false, error }. callAction zou dat als
 // 'Opgeslagen' tonen, en juist bij het aanmaken van een echt studentaccount
@@ -689,6 +769,7 @@ function wire() {
   box.querySelector('[data-kv-onb-provision]')?.addEventListener('click', actProvision);
   box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);
   box.querySelector('[data-kv-onb-dfolms]')?.addEventListener('click', actDfoLms);
+  box.querySelector('[data-kv-onb-lmsinvite]')?.addEventListener('click', actLmsInvite);
 }
 function rerender() {
   D().openModal({ head: renderHead(), body: renderBody(), foot: renderFoot() });
