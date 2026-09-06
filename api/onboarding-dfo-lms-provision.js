@@ -13,7 +13,13 @@
 // provision-retry).
 //
 // Body:
-//   { onboarding_id (uuid) }
+//   { onboarding_id (uuid), send_invite?: boolean }
+//
+// send_invite is STANDAARD FALSE en dat is met opzet. Deze knop wordt op
+// BESTAANDE klanten gebruikt, en die horen niet onverwacht een mail te
+// krijgen omdat iemand de studentrij wilde aanmaken. Alleen wanneer de
+// operator er uitdrukkelijk om vraagt gaat de uitnodiging eruit. De grendel
+// op uitnodiging_verstuurd_op beschermt daarnaast tegen een tweede mail.
 //
 // Response 200 (de provisioner is fail-soft en geeft zijn eigen vorm terug):
 //   { ok, created?, adopted?, skipped?, student_id?, mentor_id?,
@@ -26,7 +32,8 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { provisionDfoLmsStudent } from './_lib/dfo-lms-student.js';
+import { provisionDfoLmsStudent, noteerUitnodiging } from './_lib/dfo-lms-student.js';
+import { stuurLmsUitnodiging } from './_lib/dfo-lms-uitnodiging.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -71,5 +78,24 @@ export default async function handler(req, res) {
   }
 
   const result = await provisionDfoLmsStudent(onboardingId);
+
+  // Uitnodiging alleen op uitdrukkelijk verzoek, en alleen als de studentrij
+  // er staat. Faalzacht: een mislukte mail maakt de koppeling niet ongedaan.
+  const wilUitnodigen = body.send_invite === true;
+  if (wilUitnodigen && result && result.ok === true && result.email) {
+    let uitnodiging;
+    try {
+      uitnodiging = await stuurLmsUitnodiging({ email: result.email });
+    } catch (e) {
+      console.error('[onboarding-dfo-lms-provision] uitnodiging threw:', e?.message || e);
+      uitnodiging = { ok: false, fout: e?.message || 'uitnodiging-threw' };
+    }
+    await noteerUitnodiging(onboardingId, uitnodiging);
+    result.uitnodiging = uitnodiging;
+  } else if (wilUitnodigen) {
+    result.uitnodiging = { ok: false, overgeslagen: true,
+      fout: 'geen studentrij — uitnodiging niet geprobeerd' };
+  }
+
   return res.status(200).json(result);
 }

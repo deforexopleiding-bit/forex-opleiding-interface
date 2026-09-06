@@ -26,7 +26,8 @@ import crypto from 'node:crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
-import { provisionDfoLmsStudent } from './_lib/dfo-lms-student.js';
+import { provisionDfoLmsStudent, noteerUitnodiging } from './_lib/dfo-lms-student.js';
+import { stuurLmsUitnodiging } from './_lib/dfo-lms-uitnodiging.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
@@ -215,6 +216,22 @@ export default async function handler(req, res) {
       dfoLms = { ok: false, error: e?.message || 'dfo-lms-threw' };
     }
 
+    // Spoor A stap 1 — LMS-uitnodiging. Draait ALLEEN als de studentrij
+    // hierboven gelukt is; zonder rij is er niets om uit te nodigen.
+    // Faalzacht: een mislukte uitnodiging mag de aanmelding niet raken —
+    // een klant zonder mail is herstelbaar, een mislukte aanmelding niet.
+    // De grendel op uitnodiging_verstuurd_op zit in de helper zelf.
+    let dfoLmsUitnodiging = null;
+    if (dfoLms && dfoLms.ok === true && dfoLms.email) {
+      try {
+        dfoLmsUitnodiging = await stuurLmsUitnodiging({ email: dfoLms.email });
+      } catch (e) {
+        console.error('[onboarding-create] lms-uitnodiging threw:', e?.message || e);
+        dfoLmsUitnodiging = { ok: false, fout: e?.message || 'uitnodiging-threw' };
+      }
+      await noteerUitnodiging(inserted.id, dfoLmsUitnodiging);
+    }
+
     // Fase C1 — Onboarding-invite (WhatsApp-template). Fail-soft: helper
     // gooit NOOIT door (alle fouten als {sent:false, reason}). Geen send
     // wanneer module of template niet geconfigureerd is — dat is verwacht
@@ -252,6 +269,7 @@ export default async function handler(req, res) {
       link       : '/modules/onboarding.html?t=' + encodeURIComponent(inserted.token),
       provision  : provision,
       dfo_lms    : dfoLms,
+      dfo_lms_uitnodiging: dfoLmsUitnodiging,
       invite     : invite,
     });
   } catch (e) {

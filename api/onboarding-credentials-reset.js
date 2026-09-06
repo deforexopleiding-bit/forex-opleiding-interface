@@ -70,7 +70,7 @@ export default async function handler(req, res) {
   try {
     const { data: ob, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, mentor_user_id, bubble_user_id, bubble_provisioned')
+      .select('id, customer_id, mentor_user_id, bubble_user_id, bubble_provisioned, dfo_lms_student_id')
       .eq('id', onboardingId)
       .maybeSingle();
     if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
@@ -137,6 +137,23 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok: false,
       error: 'geen wachtwoord ontvangen van Bubble',
+    });
+  }
+
+  // GRENDEL — deze klant hoort in het LMS, niet meer in Bubble.
+  // Sinds spoor A stap 1 krijgt een nieuwe klant zijn inloggegevens van het
+  // LMS en is de Bubble-inloggegevensmail gedoofd. Deze knop zou dat langs
+  // een tweede weg alsnog doen: een medewerker die denkt te helpen stuurt de
+  // klant dan naar een systeem dat we aan het afbouwen zijn.
+  //
+  // Bestaande, Bubble-only studenten (dfo_lms_student_id leeg) houden deze
+  // knop gewoon — voor hen is Bubble nog steeds de plek waar ze inloggen.
+  if (onboarding.dfo_lms_student_id) {
+    return res.status(409).json({
+      ok: false,
+      error: 'Deze klant hoort in het LMS. Gebruik de LMS-uitnodiging in het '
+        + 'tabblad Account & LMS; een Bubble-wachtwoord helpt hem niet.',
+      dfo_lms_student_id: onboarding.dfo_lms_student_id,
     });
   }
 

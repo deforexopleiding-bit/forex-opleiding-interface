@@ -167,6 +167,86 @@ De bron van die velden is overigens Bubble, niet het LMS. Zodra dfo-lms de
 sessies overneemt, is `api/onboarding-intake-status.js` de plek om dat om te
 zetten.
 
+## De LMS-uitnodiging (spoor A, stap 1)
+
+Sinds deze stap krijgt een nieuwe klant zijn inloggegevens van het **LMS** in
+plaats van van Bubble. Het Bubble-account wordt nog wél aangemaakt — alleen de
+Bubble-inloggegevensmail is gedoofd.
+
+**Waarom het account blijft.** Dertig bestanden lezen `bubble_user_id`. Zonder
+dat id verdwijnt de klant stil uit de studentenlijst van zijn mentor
+(`api/_lib/mentorStudents.js:76`), uit de Studenten-module
+(`api/students-overview.js:58`), en uit de kandidatenlijst van de
+archiveercron (`api/cron/archive-completed-onboardings.js:93`). Vier
+scope-checks zouden hem bovendien een **403** geven op zijn eigen student. Het
+account weghalen is een aparte stap die pas kan als die lijsten uit het LMS
+gevoed worden.
+
+### De aanroep — twee stappen
+
+| | |
+|---|---|
+| **Stap 1** | `POST <basis>/api/admin/studenten/` · headers `x-dfo-secret` + `content-type: application/json` · body `{ email, herkomst: 'crm' }` |
+| **Stap 2** | `POST <basis>/api/admin/studenten/<student-id>/uitnodiging/` · alleen `x-dfo-secret`, géén body en géén content-type |
+
+`<student-id>` komt uit `data.student.id` van stap 1. Env:
+`DFO_LMS_PUSH_SECRET` (gedeelde variabele op teamniveau) en optioneel
+`DFO_LMS_BASE_URL`.
+
+### Drie dingen die hier fout kunnen gaan
+
+**1. De afsluitende schuine streep is verplicht.** Op het LMS staat
+`trailingSlash` aan. Een pad zonder streep krijgt een 308, en bij die
+omleiding valt de `x-dfo-secret`-header weg — je krijgt dan een **403 die
+niets met het geheim te maken heeft** en zoekt uren de verkeerde kant op.
+`bouwUrl()` dwingt de streep af, en de client staat op `redirect: 'manual'`
+zodat een omleiding als zodanig gemeld wordt in plaats van stil gevolgd.
+
+**2. Programmeer op `code`, nooit op de HTTP-status of op `message`.** Een 200
+met een foutcode is mogelijk. Stap 1 slaagt bij `aangemaakt`,
+`gekoppeld_aan_bestaande_rij` (ons normale geval), `gekoppeld_aan_bestaand_account`
+en `bestaat_al`. Bij `half_aangemaakt` staat het account er maar mislukte een
+vervolgstap; `data.auth_id` zegt om welk account het gaat en opnieuw proberen
+koppelt daaraan — er gaat dan géén uitnodiging uit.
+
+**3. De grendel.** Staat er in `data.student.uitnodiging_verstuurd_op` een
+tijdstip, dan is er al gemaild en wordt stap 2 **overgeslagen**. Zonder die
+grendel krijgt de student een tweede mail én werkt zijn eerste wachtwoord
+niet meer — schade die je pas hoort als hij belt.
+
+### Twee foutcodes die je nooit als één ding mag tonen
+
+- `mail_mislukt` — er is **niets** veranderd. Het bestaande wachtwoord werkt
+  door. Veilig om opnieuw te proberen.
+- `mail_verstuurd_wachtwoord_niet_gezet` — de mail is de deur uit **met een
+  wachtwoord dat niet werkt**. De student kan er nu niet in. Opnieuw sturen is
+  geen keuze maar een noodzaak.
+
+Beide belanden in `dfo_lms_provision_error`, met een stabiel voorvoegsel
+(`UITNODIGING_MAIL_MISLUKT:` / `UITNODIGING_WACHTWOORD_NIET_GEZET:`) zodat het
+detailscherm ze exact kan onderscheiden zonder op Nederlandse tekst te matchen.
+Het eerste geeft een gele melding, het tweede een rode met "actie vereist".
+
+### Wanneer hij afgaat
+
+- **Nieuwe aanmelding** — automatisch, direct na de studentrij
+  (`api/onboarding-create.js`).
+- **Bestaande klant** — alleen op uitdrukkelijk verzoek, via de knop
+  *LMS-uitnodiging versturen*. De server stuurt niets zonder
+  `send_invite: true`. Reden: die knop wordt op bestaande klanten gebruikt en
+  die horen geen mail te krijgen omdat iemand de koppeling wilde controleren.
+
+Alles faalzacht: mislukt de uitnodiging, dan blijft de aanmelding staan en komt
+de reden in `dfo_lms_provision_error`. `dfo_lms_provisioned` wordt daarbij
+**niet** teruggezet — de studentrij is immers wél gekoppeld.
+
+### De Bubble-resetknop
+
+`api/onboarding-credentials-reset.js` weigert nu met een 409 zodra de
+onboarding een `dfo_lms_student_id` heeft. Die klant hoort in het LMS, en een
+Bubble-wachtwoord helpt hem niet. Bestaande, Bubble-only studenten houden de
+knop gewoon.
+
 ## Bekende beperking: tellers die alleen tellen wat ze zagen
 
 Dit is geen fout in één cron maar een patroon dat op meerdere plaatsen in het
