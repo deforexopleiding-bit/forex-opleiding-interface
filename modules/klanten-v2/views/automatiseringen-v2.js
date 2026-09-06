@@ -3617,7 +3617,8 @@
       if (!autos.length) return `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen automations</div>`;
       return autos.map((a) => {
         const info = perAuto[a.id] || { steps: [] };
-        const stepsRows = (info.steps || []).map((s) => _flowStepRowHtml({
+        const steps = Array.isArray(info.steps) ? info.steps : [];
+        const stepsRows = steps.map((s) => _flowStepRowHtml({
           title: s.label,
           count: s.count,
           countLabel: 'runs actief',
@@ -3626,12 +3627,21 @@
         const pill = a.enabled
           ? '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--emerald-soft);color:var(--emerald);border:1px solid var(--emerald-line);font-weight:600">enabled</span>'
           : '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);font-weight:600">disabled</span>';
+        // BP3 v44 (2026-09-06) — Context-regel "afgerond afgelopen 7 dagen".
+        // Als fetch faalde (recent_completed_7d = null): laat 't context-deel
+        // weg. Actieve-tel is som van step-counts (defensief tegen count:null).
+        const actiefTotaal = steps.reduce((n, s) => n + (Number(s.count) || 0), 0);
+        const recent = info.recent_completed_7d;
+        const contextTxt = (recent == null)
+          ? `${actiefTotaal} nu actief`
+          : `${actiefTotaal} nu actief · ${recent} afgerond (7 dagen)`;
         return `<div style="margin-bottom:16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
             <span style="font-size:13px;font-weight:700;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name || '—')}</span>
             ${pill}
             <span style="font-size:10.5px;color:var(--text-3);margin-left:auto">${esc(a.trigger_type || '')}</span>
           </div>
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px;font-variant-numeric:tabular-nums">${esc(contextTxt)}</div>
           ${_tgSpineHtml(stepsRows)}
         </div>`;
       }).join('');

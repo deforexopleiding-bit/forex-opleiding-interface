@@ -191,6 +191,24 @@ function _stepAccent(step) {
   return 'muted';
 }
 
+// BP3 v44 (2026-09-06) — Per automation ook een "afgerond afgelopen 7 dagen"-
+// teller. Bij snelle flows is 'nu actief' vrijwel altijd 0; recent_completed_7d
+// geeft context dat de flow wél draait. status IN ('completed','exited') is
+// bewust: 'cancelled' en 'failed' zijn geen goede signalen (attendee gone,
+// error). Fail-soft: bij fout blijft 't null → UI laat 't context-deel weg.
+async function _stepsForAutomation(table, automationId, steps) {
+  return Promise.all((Array.isArray(steps) ? steps : []).map(async (step, i) => {
+    const r = await safeCount(table, (q) => q.eq('automation_id', automationId).eq('status', 'active').eq('current_step_index', i));
+    return {
+      index: i, label: _stepLabel(step, i), type: String(step?.type || ''),
+      accent: _stepAccent(step), count: r.count, error: r.error,
+    };
+  }));
+}
+async function _recentCompleted7d(table, automationId) {
+  const since = new Date(Date.now() - 7 * 86400000).toISOString();
+  return safeCount(table, (q) => q.eq('automation_id', automationId).in('status', ['completed', 'exited']).gte('updated_at', since));
+}
 async function buildEventsSteps() {
   let autos = [];
   try {
@@ -201,23 +219,18 @@ async function buildEventsSteps() {
     autos = Array.isArray(data) ? data : [];
   } catch (_) { autos = []; }
   const perAuto = {};
-  for (const a of autos) {
-    const steps = Array.isArray(a.steps) ? a.steps : [];
-    const stepInfos = [];
-    for (let i = 0; i < steps.length; i++) {
-      // eslint-disable-next-line no-await-in-loop
-      const r = await safeCount('event_automation_runs',
-        (q) => q.eq('automation_id', a.id).eq('status', 'active').eq('current_step_index', i));
-      stepInfos.push({
-        index: i, label: _stepLabel(steps[i], i), type: String(steps[i]?.type || ''),
-        accent: _stepAccent(steps[i]), count: r.count, error: r.error,
-      });
-    }
+  await Promise.all(autos.map(async (a) => {
+    const [stepInfos, recent] = await Promise.all([
+      _stepsForAutomation('event_automation_runs', a.id, a.steps),
+      _recentCompleted7d('event_automation_runs', a.id),
+    ]);
     perAuto[a.id] = {
       name: a.name, enabled: a.enabled, trigger_type: a.trigger_type,
       steps: stepInfos,
+      recent_completed_7d: recent.count, // null bij fout
+      recent_completed_7d_error: recent.error,
     };
-  }
+  }));
   return { autos: autos.map((a) => ({ id: a.id, name: a.name, enabled: a.enabled, trigger_type: a.trigger_type })), perAuto };
 }
 
@@ -231,20 +244,18 @@ async function buildOnboardingSteps() {
     autos = Array.isArray(data) ? data : [];
   } catch (_) { autos = []; }
   const perAuto = {};
-  for (const a of autos) {
-    const steps = Array.isArray(a.steps) ? a.steps : [];
-    const stepInfos = [];
-    for (let i = 0; i < steps.length; i++) {
-      // eslint-disable-next-line no-await-in-loop
-      const r = await safeCount('onboarding_automation_runs',
-        (q) => q.eq('automation_id', a.id).eq('status', 'active').eq('current_step_index', i));
-      stepInfos.push({
-        index: i, label: _stepLabel(steps[i], i), type: String(steps[i]?.type || ''),
-        accent: _stepAccent(steps[i]), count: r.count, error: r.error,
-      });
-    }
-    perAuto[a.id] = { name: a.name, enabled: a.enabled, trigger_type: a.trigger_type, steps: stepInfos };
-  }
+  await Promise.all(autos.map(async (a) => {
+    const [stepInfos, recent] = await Promise.all([
+      _stepsForAutomation('onboarding_automation_runs', a.id, a.steps),
+      _recentCompleted7d('onboarding_automation_runs', a.id),
+    ]);
+    perAuto[a.id] = {
+      name: a.name, enabled: a.enabled, trigger_type: a.trigger_type,
+      steps: stepInfos,
+      recent_completed_7d: recent.count,
+      recent_completed_7d_error: recent.error,
+    };
+  }));
   return { autos: autos.map((a) => ({ id: a.id, name: a.name, enabled: a.enabled, trigger_type: a.trigger_type })), perAuto };
 }
 
