@@ -1121,6 +1121,15 @@
 .opv .warn{background:var(--o-ambs);border:1px solid #f3ddb4;border-radius:11px;padding:12px 14px;font-size:13px;color:#7a4d00;margin-bottom:12px}
 .opv .info{background:var(--o-accs);border:1px solid #cfdcff;border-radius:11px;padding:12px 14px;font-size:13px;color:#1a3d9e;margin-bottom:12px}
 .opv textarea,.opv input[type=date]{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit}
+/* G2 · het formulier van '+ Lead toevoegen'. Zelfde vorm als de bestaande
+   velden hierboven; text en select deden nog niet mee omdat ze nergens
+   voorkwamen. */
+.opv .lf input[type=text],.opv .lf select{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit;background:#fff;color:inherit}
+.opv .lf label{display:block;font-size:12.5px;font-weight:650;margin:12px 0 5px}
+.opv .lf label:first-child{margin-top:0}
+.opv .lf label small{font-weight:600;color:var(--o-muted)}
+.opv .lfhint{font-size:11.5px;color:var(--o-muted);margin:5px 0 0 2px}
+.opv .leadknop{white-space:nowrap;flex:none;align-self:flex-start}
 .opv .tl{list-style:none;margin:0;padding:0}
 .opv .tl li{display:flex;gap:12px;padding:9px 0;font-size:13.5px;border-bottom:1px solid #f3f4f6}
 .opv .tl li:last-child{border:0}
@@ -2274,6 +2283,7 @@
       '<div class="info">De spraakberichten en het nabelvenster hangen aan de WhatsApp-brug. ' +
       'Ziet die brug nog geen uitgaande berichten, dan blijven die blokken leeg met uitleg &mdash; ' +
       'nooit met een nul die eruitziet alsof er gemeten is.</div>' +
+      '<button class="obtn p leadknop" onclick="window.__opvLeadNieuw()">+ Lead toevoegen</button>' +
       waLamp() + '</div>';
     // De balk staat boven de weekbalk: wat er nú aan de beurt is hoort het
     // eerste te zijn wat je ziet, niet iets waar je langs moet scrollen.
@@ -2465,7 +2475,11 @@
   // G1 heeft er twee bij: de tijdlijn van een voorbije dag en de lijst met wat
   // later staat. Allebei gaan ze over een dag of over een verzameling, niet
   // over één taak — dus horen ze hier, vóór de taak-guard in modalHtml().
-  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst', 'tijdlijn', 'later']);
+  //
+  // G2 heeft er nog een: '+ Lead toevoegen' máákt de taak en heeft er dus nog
+  // geen. Zonder die regel sneuvelt dat venster stil op de taak-guard, precies
+  // zoals de vier call-uitkomsten dat deden.
+  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst', 'tijdlijn', 'later', 'lead-nieuw']);
   const MODAL_BALK = new Set(['tijdlijn', 'later']);
 
   /**
@@ -2580,6 +2594,71 @@
       laterBody(m.na));
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // G2 · EEN LEAD MET DE HAND TOEVOEGEN
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Tot nu toe kwamen kaarten alleen uit een event of uit het afronden van een
+  // call. Iemand die Dave op een andere manier tegenkomt — via via, een bericht
+  // buiten de trechter om — had geen weg naar binnen.
+  //
+  // De reden komt uit de CHECK-constraint op opvolging_taken.reden, met één
+  // uitzondering: 'aanmelding' staat er wél in maar hoort hier niet. Die reden
+  // is instroom uit de eventmodule; met de hand gezet zou de kaart in het
+  // aanmeldblok belanden zonder event erachter, en dan klopt de groepskop niet.
+
+  const LEAD_REDENEN = [
+    ['wil_nog_beslissen', 'Wil nog beslissen', 'Gesproken, twijfelt nog. Schrijf op waarover.'],
+    ['no_show_call',      'No-show call',      'Stond ingepland voor een call en kwam niet opdagen.'],
+    ['no_show_event',     'No-show event',     'Had zich aangemeld voor een event en kwam niet.'],
+    ['afgemeld',          'Afgemeld',          'Heeft zelf afgezegd, maar is het bellen waard.'],
+    ['niet_ingepland',    'Niet ingepland',    'Wil wel, maar er staat nog geen moment.'],
+  ];
+  const LEAD_REDEN_KEYS = LEAD_REDENEN.map((r) => r[0]);
+
+  /**
+   * Het formulier. Bewust vier velden en niet meer: naam, nummer, reden, dag —
+   * plus de notitie, die verplicht is.
+   *
+   * Waarom de notitie verplicht is: bij een handmatige lead is dit het enige
+   * wat er staat. Er ging geen call aan vooraf en er hangt geen event achter.
+   * Zonder die zin is de kaart een naam en een nummer, en weet Dave over drie
+   * weken niet meer waar dit vandaan kwam.
+   *
+   * De controles staan óók op de server (api/opvolging-taak-create.js), zodat
+   * een oud tabblad ze niet kan omzeilen. Wat hier staat is er om het meteen te
+   * kunnen zien, niet om het af te dwingen.
+   */
+  function leadModalHtml(m) {
+    const f = m.velden || {};
+    const melding = m.fout
+      ? '<div class="warn"><b>Nog niet opgeslagen.</b> ' + esc(m.fout) + '</div>'
+      : '';
+    const opties = LEAD_REDENEN.map(([key, label]) =>
+      '<option value="' + key + '"' + (f.reden === key ? ' selected' : '') + '>' + label + '</option>').join('');
+    const gekozen = LEAD_REDENEN.find((r) => r[0] === (f.reden || LEAD_REDEN_KEYS[0]));
+    const body = melding +
+      '<div class="lf">' +
+        '<label>Naam</label>' +
+        '<input type="text" id="opv-lead-naam" value="' + esc(f.naam || '') + '" placeholder="Voor- en achternaam">' +
+        '<label>Telefoon</label>' +
+        '<input type="text" id="opv-lead-tel" value="' + esc(f.telefoon || '') + '" placeholder="+32470123456">' +
+        '<div class="lfhint">Zonder nummer kan deze kaart niets: bellen en WhatsApp hangen er allebei aan.</div>' +
+        '<label>Reden</label>' +
+        '<select id="opv-lead-reden" onchange="window.__opvLeadVeld()">' + opties + '</select>' +
+        '<div class="lfhint">' + esc(gekozen ? gekozen[2] : '') + '</div>' +
+        '<label>Op welke dag terugzetten</label>' +
+        '<input type="date" id="opv-lead-due" value="' + esc(f.due || vandaag()) + '" min="' + vandaag() + '">' +
+        '<label>Notitie <small>(verplicht)</small></label>' +
+        '<textarea id="opv-lead-notitie" rows="3" placeholder="Waar komt deze lead vandaan, en wat is er al gezegd?">' +
+          esc(f.notitie || '') + '</textarea>' +
+      '</div>' +
+      '<button class="obtn p" style="width:100%;margin-top:14px" ' +
+        (m.bezig ? 'disabled' : '') + ' onclick="window.__opvLeadOpslaan()">' +
+        (m.bezig ? 'Bezig&hellip;' : 'Lead toevoegen') + '</button>';
+    return scrim('Lead toevoegen', 'Hij staat daarna gewoon in je lijst, net als de rest.', body);
+  }
+
   function callModalHtml(m) {
     const c = (_calls.data || [])[m.callIndex];
     if (!c) return '';
@@ -2627,6 +2706,7 @@
     // Eerst wat geen taak nodig heeft, en pas daarna de taak-guard. Andersom
     // sneuvelen deze twee stil op een taak die er nooit had moeten zijn.
     if (MODAL_BALK.has(m.soort)) return balkModalHtml(m);
+    if (m.soort === 'lead-nieuw') return leadModalHtml(m);
     if (MODAL_ZONDER_TAAK.has(m.soort)) return callModalHtml(m);
 
     const t = zoekTaak(m.taakId);
@@ -2903,6 +2983,80 @@
       await post('/api/opvolging-taak-update', { taak_id: m.taakId, actie: 'verplaats', due });
       _ui.modal = null; leegTakenCache(); render();
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
+  };
+
+  // ── G2 · een lead met de hand toevoegen ───────────────────────────────────
+
+  /** Wat er nú in het formulier staat. */
+  function leesLeadVelden() {
+    const v = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+    return {
+      naam    : v('opv-lead-naam'),
+      telefoon: v('opv-lead-tel'),
+      reden   : v('opv-lead-reden') || LEAD_REDEN_KEYS[0],
+      due     : v('opv-lead-due'),
+      notitie : v('opv-lead-notitie'),
+    };
+  }
+
+  window.__opvLeadNieuw = () => {
+    _ui.modal = { soort: 'lead-nieuw', velden: { reden: LEAD_REDEN_KEYS[0], due: vandaag() }, fout: null, bezig: false };
+    render();
+  };
+
+  // Bij het wisselen van reden verandert de uitleg eronder. Wat er al getypt is
+  // gaat mee terug het formulier in; zonder dat wist één klik op de keuzelijst
+  // de naam en de notitie.
+  window.__opvLeadVeld = () => {
+    const m = _ui.modal; if (!m || m.soort !== 'lead-nieuw') return;
+    m.velden = leesLeadVelden();
+    render();
+  };
+
+  window.__opvLeadOpslaan = async () => {
+    const m = _ui.modal; if (!m || m.soort !== 'lead-nieuw' || m.bezig) return;
+    const f = leesLeadVelden();
+    m.velden = f;
+
+    // Dezelfde controles staan op de server. Hier staan ze zodat je meteen ziet
+    // wát er ontbreekt, in plaats van een kale 400 terug te krijgen.
+    const ontbreekt =
+      !f.naam     ? 'Vul een naam in.'
+      : !f.telefoon ? 'Vul een telefoonnummer in — zonder nummer kan deze kaart niets.'
+      : !f.due      ? 'Kies een dag om hem terug te zetten.'
+      : !f.notitie  ? 'De notitie is verplicht: zonder die zin weet niemand later waar deze lead vandaan kwam.'
+      : null;
+    if (ontbreekt) { m.fout = ontbreekt; render(); return; }
+
+    m.bezig = true; m.fout = null; render();
+    try {
+      const j = await post('/api/opvolging-taak-create', {
+        naam    : f.naam,
+        telefoon: f.telefoon,
+        reden   : f.reden,
+        due     : f.due,
+        notitie : f.notitie,
+        bron    : 'handmatig',
+        bron_ref: { source: 'opvolging-handmatig' },
+      });
+      _ui.modal = null;
+      leegTakenCache();
+      // Stond er al een kaart met dit nummer? Dat is geen fout — de lead is
+      // aangemaakt — maar wel iets dat je wilt weten vóór je gaat bellen.
+      const d = j && j.duplicaat;
+      if (d && d.aantal) {
+        alert('Toegevoegd. Let op: er staat al ' + (d.aantal === 1 ? 'een open kaart' : d.aantal + ' open kaarten') +
+          ' met dit nummer' + (d.namen && d.namen.length ? ' (' + d.namen.join(', ') + ')' : '') + '.');
+      }
+      // Staat de nieuwe kaart op een andere dag dan je nu bekijkt, dan spring je
+      // mee. Anders lijkt er niets gebeurd te zijn.
+      if (f.due !== (_ui.dagView || vandaag())) window.__opvDag(f.due);
+      else render();
+    } catch (e) {
+      m.bezig = false;
+      m.fout = (e && e.message) || 'onbekende fout';
+      render();
+    }
   };
 
   window.__opvArchiveer = async () => {
@@ -3277,6 +3431,14 @@
   };
 
   window.__opvAanmeldHelpers = { WAKKER_DAGEN, bevestigdBadge, taakKaart, evGroepKop, kortePlaats, eventKopTekst };
+
+  // G2, getest in tests/opvolging-lead-toevoegen.test.js: het formulier zonder
+  // browser tekenen en de reden-lijst naast de CHECK-constraint leggen.
+  window.__opvLeadHelpers = {
+    leadModalHtml, LEAD_REDENEN, LEAD_REDEN_KEYS,
+    zetModal: (m) => { _ui.modal = m; },
+    huidigeModal: () => _ui.modal,
+  };
 
   // Het gesprekspaneel, getest in tests/opvolging-whatsapp-gesprek.test.js.
   window.__opvGesprekHelpers = {
