@@ -29,7 +29,20 @@ import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-function laadView() {
+// De datum staat vast, en dat is geen detail. De kaarten hierin dragen
+// due: '2026-09-05' en de kaart vergelijkt die met vandaag(); zonder een vaste
+// datum kreeg elke kaart vanaf 6 september het etiket 'bleef liggen' en viel
+// deze test om — niet door een wijziging in de code, maar doordat de dag
+// verstreek. Een test die morgen rood wordt zonder dat er iets veranderde meet
+// de kalender, niet de kaart.
+const NU = '2026-09-05';
+
+function laadView(nu = NU) {
+  const vast = Date.parse(nu + 'T10:00:00Z');
+  class VasteDate extends Date {
+    constructor(...a) { if (a.length === 0) super(vast); else super(...a); }
+    static now() { return vast; }
+  }
   const window = {
     DFO: { VIEWS: {}, render() {} }, KV_V2: { helpers: {} },
     KV: { authedJson: async () => ({}) },
@@ -40,7 +53,7 @@ function laadView() {
     window, console: { debug() {}, log() {}, warn() {}, error() {} },
     document: { getElementById: () => null, head: { appendChild() {} }, createElement: () => ({ style: {} }) },
     queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
-    Date, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set,
+    Date: VasteDate, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set,
   });
   runInContext(readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8'),
     ctx, { filename: 'opvolging-v2.js' });
