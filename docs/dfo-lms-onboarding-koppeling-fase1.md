@@ -214,6 +214,12 @@ tijdstip, dan is er al gemaild en wordt stap 2 **overgeslagen**. Zonder die
 grendel krijgt de student een tweede mail én werkt zijn eerste wachtwoord
 niet meer — schade die je pas hoort als hij belt.
 
+Stap 2 slaagt **alleen** bij `uitnodiging_verstuurd` (HTTP 200, met
+`data.student` en `data.verstuurd_naar`). Elke andere code telt bewust **niet**
+als succes: een contractwijziging aan LMS-kant mag niet stil als "gemaild"
+passeren, want dan denken wij dat de student een mail heeft die hij misschien
+nooit kreeg.
+
 ### Twee foutcodes die je nooit als één ding mag tonen
 
 - `mail_mislukt` — er is **niets** veranderd. Het bestaande wachtwoord werkt

@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import {
   stuurLmsUitnodiging,
   bouwUrl,
+  MAIL_VERSTUURD,
   MAIL_MISLUKT,
   MAIL_VERSTUURD_WACHTWOORD_NIET_GEZET,
   FOUT_PREFIX_HERSTELBAAR,
@@ -68,7 +69,7 @@ test('beide aangeroepen paden eindigen op een schuine streep', async () => {
   globalThis.fetch = nepFetch({
     '/api/admin/studenten/': { body: { code: 'gekoppeld_aan_bestaande_rij',
       data: { student: { id: 'stud-1', uitnodiging_verstuurd_op: null } } } },
-    '/uitnodiging/': { body: { code: 'verstuurd' } },
+    '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd' } },
   });
   await stuurLmsUitnodiging({ email: 'a@b.nl' });
   assert.equal(gedaan.length, 2);
@@ -91,7 +92,7 @@ test('GRENDEL: al eerder gemaild → stap 2 wordt NIET aangeroepen', async () =>
   globalThis.fetch = nepFetch({
     '/api/admin/studenten/': { body: { code: 'gekoppeld_aan_bestaande_rij',
       data: { student: { id: 'stud-1', uitnodiging_verstuurd_op: '2026-09-01T10:00:00Z' } } } },
-    '/uitnodiging/': { body: { code: 'verstuurd' } },
+    '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd' } },
   });
   const r = await stuurLmsUitnodiging({ email: 'a@b.nl' });
 
@@ -107,7 +108,7 @@ test('GRENDEL: nog nooit gemaild (null) → stap 2 draait wel', async () => {
   globalThis.fetch = nepFetch({
     '/api/admin/studenten/': { body: { code: 'aangemaakt',
       data: { student: { id: 'stud-2', uitnodiging_verstuurd_op: null } } } },
-    '/uitnodiging/': { body: { code: 'verstuurd' } },
+    '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd' } },
   });
   const r = await stuurLmsUitnodiging({ email: 'a@b.nl' });
   assert.equal(r.ok, true);
@@ -123,7 +124,7 @@ for (const code of ['aangemaakt', 'gekoppeld_aan_bestaande_rij',
     globalThis.fetch = nepFetch({
       '/api/admin/studenten/': { body: { code,
         data: { student: { id: 's', uitnodiging_verstuurd_op: null } } } },
-      '/uitnodiging/': { body: { code: 'verstuurd' } },
+      '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd' } },
     });
     const r = await stuurLmsUitnodiging({ email: 'a@b.nl' });
     assert.equal(r.ok, true, 'code ' + code);
@@ -190,7 +191,7 @@ test('stap 1 stuurt x-dfo-secret + content-type; stap 2 alleen het geheim', asyn
   globalThis.fetch = nepFetch({
     '/api/admin/studenten/': { body: { code: 'aangemaakt',
       data: { student: { id: 's', uitnodiging_verstuurd_op: null } } } },
-    '/uitnodiging/': { body: { code: 'verstuurd' } },
+    '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd' } },
   });
   await stuurLmsUitnodiging({ email: 'a@b.nl' });
 
@@ -219,9 +220,40 @@ test('e-mail wordt genormaliseerd naar kleine letters', async () => {
   globalThis.fetch = nepFetch({
     '/api/admin/studenten/': { body: { code: 'aangemaakt',
       data: { student: { id: 's', uitnodiging_verstuurd_op: null } } } },
-    '/uitnodiging/': { body: { code: 'verstuurd' } },
+    '/uitnodiging/': { body: { code: 'uitnodiging_verstuurd' } },
   });
   await stuurLmsUitnodiging({ email: '  Wim@Example.NL ' });
   const stap1 = gedaan.find((g) => !g.url.includes('/uitnodiging/'));
   assert.equal(JSON.parse(stap1.opts.body).email, 'wim@example.nl');
+});
+
+
+// ── 6) De succescode van stap 2 is STRAK vastgepind ─────────────────────────
+
+test('uitnodiging_verstuurd telt als geslaagd en geeft verstuurd_naar terug', async () => {
+  globalThis.fetch = nepFetch({
+    '/api/admin/studenten/': { body: { code: 'aangemaakt',
+      data: { student: { id: 's', uitnodiging_verstuurd_op: null } } } },
+    '/uitnodiging/': { body: { code: MAIL_VERSTUURD,
+      data: { student: { id: 's' }, verstuurd_naar: 'a@b.nl' } } },
+  });
+  const r = await stuurLmsUitnodiging({ email: 'a@b.nl' });
+  assert.equal(r.ok, true);
+  assert.equal(r.verstuurd, true);
+  assert.equal(r.verstuurd_naar, 'a@b.nl');
+});
+
+test('een ONBEKENDE code van stap 2 telt NIET als succes', async () => {
+  // Een contractwijziging aan LMS-kant mag niet stil als 'gemaild' passeren:
+  // dan denken wij dat de student een mail heeft die hij misschien nooit kreeg.
+  globalThis.fetch = nepFetch({
+    '/api/admin/studenten/': { body: { code: 'aangemaakt',
+      data: { student: { id: 's', uitnodiging_verstuurd_op: null } } } },
+    '/uitnodiging/': { body: { code: 'iets_nieuws' } },
+  });
+  const r = await stuurLmsUitnodiging({ email: 'a@b.nl' });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'iets_nieuws');
+  assert.match(r.fout, /onbekende code/);
+  assert.match(r.fout, /uitnodiging_verstuurd/);
 });

@@ -66,6 +66,12 @@ const STAP1_HALF = 'half_aangemaakt';
 //                 → de mail is de deur uit MET een wachtwoord dat niet werkt.
 //                   De student kan er nu NIET in. Opnieuw versturen is geen
 //                   optie maar een noodzaak.
+// Stap 2 — de succescode. HTTP 200, met data die `student` en
+// `verstuurd_naar` bevat. Bewust STRAK: alleen deze code telt als geslaagd.
+// Een onbekende code is geen succes maar een signaal dat het contract aan de
+// andere kant veranderd is, en dat willen we zien in plaats van wegmoffelen.
+export const MAIL_VERSTUURD = 'uitnodiging_verstuurd';
+
 export const MAIL_MISLUKT = 'mail_mislukt';
 export const MAIL_VERSTUURD_WACHTWOORD_NIET_GEZET = 'mail_verstuurd_wachtwoord_niet_gezet';
 
@@ -237,7 +243,17 @@ export async function stuurLmsUitnodiging({ email }) {
     };
   }
 
-  // Elke andere code beschouwen we als geslaagd, maar we geven 'm wél terug
-  // zodat een onbekende uitkomst zichtbaar is in plaats van weggemoffeld.
-  return { ok: true, verstuurd: true, student_id: studentId, code: code2 };
+  if (code2 === MAIL_VERSTUURD) {
+    const naar = r2.json?.data?.verstuurd_naar || null;
+    return { ok: true, verstuurd: true, student_id: studentId, code: code2, verstuurd_naar: naar };
+  }
+
+  // Onbekende code. NIET als succes behandelen: dat zou een contractwijziging
+  // aan LMS-kant stil laten passeren, en dan denken wij dat er gemaild is
+  // terwijl dat misschien niet zo is. Melden en de mens laten kijken.
+  return {
+    ok: false, student_id: studentId, code: code2,
+    fout: 'stap 2: onbekende code ' + JSON.stringify(code2)
+      + ' — verwacht was ' + MAIL_VERSTUURD + '. Controleer in het LMS of er gemaild is.',
+  };
 }
