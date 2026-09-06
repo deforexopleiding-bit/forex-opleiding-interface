@@ -38,7 +38,61 @@
 
 (function () {
   if (!window.DFO) { console.error('[opvolging-v2] DFO shell niet geladen.'); return; }
-  if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[opvolging-v2] KV_V2.helpers niet geladen.'); return; }
+
+  /**
+   * WAT ER GEBEURT ALS ER EEN BESTAND ONTBREEKT — EN WAAROM DIT ER STAAT.
+   *
+   * Deze view stopte bij een ontbrekend onderdeel met een console.error en een
+   * `return`. Daardoor werden de drie regels window.DFO.VIEWS onderaan dit
+   * bestand nooit gedraaid, en viel app-shell.js terug op genericView(). Die
+   * tekent letterlijk: "Deze view is nog niet gebouwd. In productie wordt hier
+   * de module-content gerenderd."
+   *
+   * Laadt _opvolging-badge.js dus één keer niet — cache, een 404 na een deploy,
+   * een adblocker — dan opent Dave de module en leest hij dat hij niet bestaat.
+   * Dat is geen harde fout maar een schermvullende leugen, en het enige spoor
+   * staat in een console die hij nooit opent.
+   *
+   * Dus: de views worden ALTIJD geregistreerd. Ontbreekt er iets, dan tonen ze
+   * wat er aan de hand is en wat je eraan kunt doen. Liever een lelijk scherm
+   * dat waar is dan een net scherm dat liegt.
+   */
+  function ontbrekendOnderdeel(wat) {
+    const veilig = String(wat).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return '<div class="opv"><div class="warn" style="max-width:640px">' +
+      '<b>Er ontbreekt een onderdeel van deze module.</b><br>' +
+      'De module is niet volledig geladen, dus wat je hier zou zien is er nu niet. ' +
+      '<b>Herlaad de pagina.</b> Blijft dit staan, dan is er een bestand niet meegekomen ' +
+      'met de laatste deploy — meld dat, want dit lost zichzelf niet op.' +
+      '<div style="margin-top:10px;font-size:12px;color:#6b7280">Ontbrekend onderdeel: <code>' +
+      veilig + '</code></div>' +
+      '<div style="margin-top:12px"><button class="obtn p" onclick="window.location.reload()">Pagina herladen</button></div>' +
+      '</div></div>';
+  }
+
+  function registreerOntbrekend(wat) {
+    console.error('[opvolging-v2] ' + wat + ' ontbreekt — module niet volledig geladen.');
+    const scherm = () => ontbrekendOnderdeel(wat);
+    window.DFO.VIEWS = window.DFO.VIEWS || {};
+    window.DFO.VIEWS['opvolging/Vandaag'] = scherm;
+    window.DFO.VIEWS['opvolging/Dashboard'] = scherm;
+    window.DFO.VIEWS['opvolging/Afgerond'] = scherm;
+    if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
+    else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');
+  }
+
+  if (!window.KV_V2 || !window.KV_V2.helpers) { registreerOntbrekend('KV_V2.helpers (_shared-v2.js)'); return; }
+  const H = window.KV_V2.helpers;
+  // Het etiket op een taak komt uit één plek — zie _opvolging-badge.js. Het
+  // stond op vier plekken in dit bestand rauw op het scherm, en drie keer
+  // dezelfde lange string is geen toeval maar een ontbrekende gedeelde helper.
+  // Stil terugvallen op badge_label zou de fout terugbrengen zonder dat iemand
+  // het merkt; daarom stopt de module hier — maar wél zichtbaar, zie hierboven.
+  if (typeof H.opvBadgeTekst !== 'function') {
+    registreerOntbrekend('KV_V2.helpers.opvBadgeTekst (_opvolging-badge.js)');
+    return;
+  }
+  const badgeTekst = (t) => H.opvBadgeTekst(t);
 
   const DOEL_BELLEN = 2;
   // Zoveel dagen voor het event komt een aanmeldkaart terug voor de
@@ -52,7 +106,175 @@
   const ARCHIEF_MIN_DAGEN = 3;   // belpogingen op zoveel verschillende dagen
   const ARCHIEF_MIN_WA = 1;
 
-  const render = () => { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); };
+  // ═════════════════════════════════════════════════════════════════════════
+  // HERTEKENEN — ALLEEN ALS ER ECHT IETS VERANDERD IS
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Met het gesprekspaneel open lopen er twee timers van vijf seconden
+  // (fetchWaStatus en fetchGesprek). Allebei eindigden ze onvoorwaardelijk op
+  // render(), en render() zet via DFO.render() `c.innerHTML` van het hele
+  // contentblok opnieuw. De complete pagina onder het paneel werd dus om de
+  // paar seconden weggegooid en opnieuw opgebouwd — ook als er niets veranderd
+  // was, en dat is bij verreweg de meeste rondes zo.
+  //
+  // Daar kwamen drie klachten uit voort: het springen (de shell zet na het
+  // vervangen van de DOM de paginascroll terug), het vanzelf dichtvallen (een
+  // klik die tussen mousedown en het einde van de hertekening zijn element
+  // kwijtraakt en op de scrim landt) en het wissen van een half getypt bericht.
+  //
+  // EÉN MECHANISME, GEEN TWEE. Er is bewust niet gekozen voor 'alleen het
+  // paneel bijwerken': dan staat er een gedeeltelijke bijwerking naast een
+  // volledige hertekening die er soms toch overheen gaat, en dat is erger dan
+  // wat er stond. Alles loopt nog steeds via render(); die deur is alleen op
+  // slot gegaan als er niets te tonen valt.
+  //
+  // DE VINGERAFDRUK IS DE GETEKENDE HTML ZELF, en niet een lijstje velden uit
+  // het antwoord. Dat is met opzet: een lijstje kan verouderen zodra iemand een
+  // veld toevoegt, en een tijdstempel die elke ronde opschuift zou als
+  // verandering tellen terwijl hij nergens op het scherm staat. De HTML ís wat
+  // het scherm toont — verandert die niet, dan is er niets te zien.
+  //
+  // Het concept (wat iemand aan het typen is) staat met opzet NIET in die HTML;
+  // die wordt na afloop in de textarea gezet. Zo verandert typen de
+  // vingerafdruk niet, en hertekent het scherm niet bij elke aanslag.
+  let _laatsteHtml = null;
+
+  // ── Tekenen mag geen werk aftrappen ──────────────────────────────────────
+  //
+  // De view-functies zijn GEEN pure functies: ze starten fetches via
+  // queueMicrotask. En render() roept de view twee keer aan — één keer om de
+  // vingerafdruk te maken, en daarna nog eens via DFO.render().
+  //
+  // Die fetches zitten vandaag allemaal achter een 'wacht-of-al-geladen'-slot,
+  // dus de tweede aanroep doet niets. Maar dat is een aanname die niemand ziet
+  // sneuvelen: de dag dat iemand een view uitbreidt met een fetch zonder slot,
+  // draait die stil dubbel en zoek je een week naar de extra verzoeken.
+  //
+  // Daarom staat de aanname niet in een comment maar in code. Alles in dit
+  // bestand plant werk via straks(), en tijdens de meet-pas doet die niets.
+  // Er staat een test op dat er nergens meer een kale queueMicrotask staat, dus
+  // een nieuwe fetch kan er niet stilletjes langs.
+  let _meetAlleen = false;
+
+  /** Werk voor zo meteen. Doet niets als we alleen de vingerafdruk maken. */
+  const straks = (fn) => { if (_meetAlleen) return; queueMicrotask(fn); };
+
+  /** De HTML van de view die nu in beeld staat, of null als dat er geen is. */
+  function huidigeViewHtml() {
+    const S = window.DFO && window.DFO.S;
+    const tab = (S && S.tab) || '';
+    const fn = window.DFO && window.DFO.VIEWS && window.DFO.VIEWS['opvolging/' + tab];
+    if (typeof fn !== 'function') return null;
+    _meetAlleen = true;
+    try { return fn(); } finally { _meetAlleen = false; }
+  }
+
+  const render = () => {
+    if (!window.DFO || typeof window.DFO.render !== 'function') return;
+    const html = huidigeViewHtml();
+    // Staat er een andere module in beeld, dan valt er hier niets te beslissen:
+    // gewoon doorgeven aan de shell.
+    if (html === null) { _laatsteHtml = null; window.DFO.render(); return; }
+    if (html === _laatsteHtml) {
+      // Niets veranderd. Wél het concept terugzetten voor het geval een andere
+      // weg de DOM heeft vervangen zonder ons.
+      herstelConcept();
+      return;
+    }
+    _laatsteHtml = html;
+    const voor = bewaarPaneelStaat();
+    window.DFO.render();
+    herstelPaneelStaat(voor);
+  };
+
+  // ── Wat een hertekening moet overleven ────────────────────────────────────
+  //
+  // Drie dingen, en alle drie zijn ze onzichtbaar in de HTML: wat er getypt is,
+  // waar de cursor stond, en waar de gesprekdraad gescrold stond.
+
+  /** Hoeveel pixels van de onderkant nog als 'onderaan' telt. */
+  const DRAAD_ONDERAAN_MARGE = 40;
+
+  /**
+   * Stond de lezer onderaan de draad?
+   *
+   * Pure functie, want dit is de beslissing die fout kan gaan: scrolde Dave
+   * omhoog om iets terug te lezen, dan mag een binnenkomend bericht hem daar
+   * niet wegtrekken. Stond hij onderaan, dan hoort het nieuwste bericht juist
+   * in beeld te komen.
+   *
+   * De marge zit erin omdat een draad zelden op de pixel onderaan staat: een
+   * halve regel speling telt nog als 'onderaan'.
+   */
+  function isOnderaan({ scrollTop, scrollHeight, clientHeight } = {}) {
+    if (![scrollTop, scrollHeight, clientHeight].every((v) => Number.isFinite(v))) return true;
+    return (scrollHeight - scrollTop - clientHeight) <= DRAAD_ONDERAAN_MARGE;
+  }
+
+  const draadEl = () => document.querySelector('.opv .wchat');
+  const tekstEl = () => document.getElementById('opv-wa-tekst');
+
+  /** Wat er vóór een hertekening bewaard moet worden. */
+  function bewaarPaneelStaat() {
+    const ta = tekstEl();
+    const draad = draadEl();
+    return {
+      focus   : !!(ta && typeof document !== 'undefined' && document.activeElement === ta),
+      selStart: ta ? ta.selectionStart : null,
+      selEnd  : ta ? ta.selectionEnd : null,
+      draadTop: draad ? draad.scrollTop : null,
+      onderaan: draad ? isOnderaan(draad) : true,
+    };
+  }
+
+  /** Het concept terug in de textarea. Zie de uitleg bij render(). */
+  function herstelConcept() {
+    const ta = tekstEl();
+    if (!ta) return;
+    const wens = _gesprek.concept || '';
+    if (ta.value !== wens) ta.value = wens;
+  }
+
+  /**
+   * Alles terugzetten wat de hertekening weggegooid heeft.
+   *
+   * De draad krijgt zijn scrollpositie terug, tenzij de lezer onderaan stond —
+   * dan gaat hij mee naar het nieuwste bericht. Dat laatste gebeurde tot nu toe
+   * helemaal niet: er stond nergens een scroll naar beneden, dus een nieuw
+   * bericht kon onzichtbaar onderaan blijven hangen.
+   */
+  function herstelPaneelStaat(voor) {
+    herstelConcept();
+    const ta = tekstEl();
+    if (ta && voor && voor.focus) {
+      try {
+        ta.focus();
+        if (Number.isFinite(voor.selStart)) {
+          const eind = Math.min(voor.selEnd == null ? voor.selStart : voor.selEnd, ta.value.length);
+          ta.setSelectionRange(Math.min(voor.selStart, ta.value.length), eind);
+        }
+      } catch (_) { /* focus kan geweigerd worden; geen reden om iets te breken */ }
+    }
+    const draad = draadEl();
+    if (!draad) return;
+    if (!voor || voor.onderaan) draad.scrollTop = draad.scrollHeight;
+    else if (Number.isFinite(voor.draadTop)) draad.scrollTop = voor.draadTop;
+  }
+
+  // GEEN FORCEER-FUNCTIE. Er stond er een, met de uitleg dat hij hoe dan ook
+  // hertekende 'voor als de DOM buiten ons om vervangen is' — en hij werd
+  // nergens aangeroepen. Dat is dezelfde vorm als de 404 die er stond en nooit
+  // draaide: een vangnet dat er goed uitziet en niet gespannen is.
+  //
+  // Hij is weg omdat er geen vangnet nódig is, en dat is na te lopen. De shell
+  // vervangt de DOM alleen in DFO.render(), en die roept altijd de view-functie
+  // aan — dus na een hertekening buiten ons om (tabwissel, navigatie, goTab)
+  // staat de HUIDIGE HTML in de DOM terwijl onze vingerafdruk nog een oudere
+  // draagt. De eerstvolgende ronde ziet dan een verschil en tekent één keer
+  // overbodig, en daarna klopt het weer. De gevaarlijke kant — DOM veranderd
+  // terwijl de vingerafdruk 'gelijk' zegt — kan niet ontstaan, want binnen deze
+  // module raakt niets de DOM buiten render() om behalve het terugzetten van
+  // het concept en de scrollpositie, en dat is precies wat er hoort te staan.
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const iso = (d) => new Date(d).toISOString().slice(0, 10);
   const vandaag = () => iso(Date.now());
@@ -133,6 +355,10 @@
     open: false, nummer: null, taakId: null, naam: null,
     laden: false, error: null, code: null, berichten: null,
     verzendt: false, optimistisch: [],
+    // Wat er getypt is maar nog niet verstuurd. HOORT IN DE STAAT, niet alleen
+    // in de DOM: stond hij alleen in de textarea, dan wiste elke hertekening
+    // een half getypte zin — en die kwamen om de vijf seconden langs.
+    concept: '',
     // Het ophalen van de geschiedenis van het toestel. `melding` is wat er
     // daarna boven de draad komt te staan: wát er opgehaald is en vanaf
     // wanneer. Zonder die zin lijkt het opgehaalde het volledige gesprek, en
@@ -634,7 +860,7 @@
       // Zelf ophalen, niet leunen op callsBlok: het dashboard tekent dat blok
       // niet, en dan bleef dit op 'laden' hangen zonder dat er ooit iemand de
       // agenda opvroeg. fetchCalls bewaakt zelf op dubbele aanvragen.
-      if (!_calls.loading) queueMicrotask(() => fetchCalls(dag));
+      if (!_calls.loading) straks(() => fetchCalls(dag));
       return { staat: 'laden' };
     }
     if (_calls.error) return { staat: 'agenda_fout', error: _calls.error };
@@ -681,6 +907,152 @@
       else uit.nabel.niet_nodig += 1;
     }
     return uit;
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // G3 · DE NU-DOEN-BALK
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Bovenaan de dag: wat is nú aan de beurt. Oranje met 'Te laat' zodra een
+  // venster voorbij is.
+  //
+  // WAT HIER NIET MAG GEBEUREN — en dat is de hele reden dat deze functie een
+  // eigen kop heeft: er staat maar één ding in deze module met een echte klok
+  // eraan, en dat zijn de twee vensters plus de zoomcalls. Een open taak heeft
+  // een `due`, en dat is een DAG, geen tijdstip. Er is dus geen deadline om te
+  // tonen, en er mag er ook geen verzonnen worden. 'Voor 17:00 afbellen' zou
+  // een getal zijn dat nergens vandaan komt, en zoiets is over twee weken niet
+  // meer van een echte afspraak te onderscheiden.
+  //
+  // Wat de balk dus toont, op volgorde van hoe hard de klok tikt:
+  //
+  //   1. Een zoomcall die nu bezig is of zo komt   — echte starttijd uit de agenda
+  //   2. Het spraakbericht-venster (tot 09:00)     — echte deadline
+  //   3. Het nabelvenster (12:00-13:00)            — echt venster
+  //   4. De open taken                             — ALLEEN een aantal, zonder tijd
+  //
+  // En vier gevallen waarin er niets te zeggen valt, die dat dan ook zeggen:
+  // een andere dag dan vandaag ('nu' bestaat alleen vandaag), een brug die geen
+  // uitgaande berichten ziet (dan is 'geen spraakbericht' een bewering die we
+  // niet kunnen doen), een agenda die nog laadt, en een agenda die eruit ligt.
+
+  // Hoe lang een zoomcall duurt, en hoe ver vooruit de balk er een aankondigt.
+  // Geen gegeven uit de agenda: die levert een starttijd en geen eind. Dit zijn
+  // dus schattingen, en ze staan hier apart zodat dat zichtbaar blijft — en
+  // zodat de balk nergens doet alsof dit gemeten tijden zijn.
+  const CALL_DUUR_MIN    = 45;
+  const CALL_VOORUIT_MIN = 60;
+
+  /** Minuut-van-de-dag nu, in Amsterdamse tijd. */
+  function nuMinuut() {
+    const z = inZone(Date.now());
+    return z ? z.minuut : null;
+  }
+
+  const uu = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+  /**
+   * Wat er nu aan de beurt is. Pure functie — na te slaan via
+   * window.__opvNuHelpers en getest in tests/opvolging-nu-doen.test.js.
+   *
+   * Geeft terug WAT er te tonen is, niet hoe:
+   *   { soort, titel, uitleg, telaat, deadline? , actie? }
+   *
+   * `telaat` stuurt de oranje kleur. Hij staat alleen op true als er een echt
+   * venster verstreken is én er in dat venster nog werk open staat — een
+   * gemiste deadline waar niets meer voor te doen valt is geen alarm maar
+   * geschiedenis, en die hoort in de tijdlijn, niet bovenaan de dag.
+   */
+  function bepaalNuDoen({ dag, nu, minuut, brugZiet, calls, callsStaat, vensterTaken, openTaken }) {
+    if (dag !== nu) {
+      return { soort: 'andere_dag', titel: 'Je kijkt naar een andere dag.',
+        uitleg: '"Nu" bestaat alleen vandaag. Wat hier staat is geschiedenis of nog niet aan de beurt.',
+        telaat: false };
+    }
+    if (minuut === null || minuut === undefined) {
+      return { soort: 'geen_klok', titel: 'De tijd is hier niet te bepalen.',
+        uitleg: 'Zonder klok valt er niet te zeggen wat er nu aan de beurt is.', telaat: false };
+    }
+
+    // 1 · Een zoomcall met een echte starttijd. Die gaat voor: hij staat vast
+    //     op de minuut en iemand zit erop te wachten.
+    const komende = (Array.isArray(calls) ? calls : [])
+      .map((c) => ({ c, z: inZone(c && c.start) }))
+      .filter((x) => x.z && x.z.dag === dag)
+      .sort((a, b) => a.z.minuut - b.z.minuut);
+    const bezig = komende.find((x) => minuut >= x.z.minuut && minuut < x.z.minuut + CALL_DUUR_MIN);
+    if (bezig) {
+      return { soort: 'call_bezig', titel: 'Call met ' + (bezig.c.naam || 'onbekend') + ' — nu bezig',
+        uitleg: 'Begonnen om ' + bezig.z.tijd + '.', telaat: false, deadline: bezig.z.tijd };
+    }
+    const straks = komende.find((x) => x.z.minuut > minuut);
+    if (straks && straks.z.minuut - minuut <= CALL_VOORUIT_MIN) {
+      return { soort: 'call_straks', titel: 'Call met ' + (straks.c.naam || 'onbekend') + ' om ' + straks.z.tijd,
+        uitleg: 'Over ' + (straks.z.minuut - minuut) + ' minuten.', telaat: false, deadline: straks.z.tijd };
+    }
+
+    // 2 en 3 · De twee vensters. Alleen als de brug uitgaande berichten ziet:
+    //     anders is 'nog geen spraakbericht' niet gemeten maar geraden.
+    if (brugZiet && Array.isArray(vensterTaken) && vensterTaken.length) {
+      const t = telVensters(vensterTaken, dag);
+      const spraakOpen = t.spraak.niet_gedaan;
+      const spraakGrens = SPRAAK_DEADLINE_UUR * 60;
+      if (spraakOpen > 0) {
+        if (minuut < spraakGrens) {
+          return { soort: 'spraak', telaat: false, deadline: uu(spraakGrens),
+            titel: spraakOpen + ' spraakbericht' + (spraakOpen === 1 ? '' : 'en') + ' insturen',
+            uitleg: 'Nog ' + (spraakGrens - minuut) + ' minuten tot ' + uu(spraakGrens) + '.' };
+        }
+        return { soort: 'spraak', telaat: true, deadline: uu(spraakGrens),
+          titel: spraakOpen + ' spraakbericht' + (spraakOpen === 1 ? '' : 'en') + ' insturen',
+          uitleg: 'Te laat — deadline was ' + uu(spraakGrens) + '.' };
+      }
+      const nabelOpen = t.nabel.niet_gedaan;
+      const van = NABEL_VAN_UUR * 60, tot = NABEL_TOT_UUR * 60;
+      if (nabelOpen > 0) {
+        if (minuut < van) {
+          return { soort: 'nabel', telaat: false, deadline: uu(van) + '\u2013' + uu(tot),
+            titel: nabelOpen + ' keer nabellen',
+            uitleg: 'Het venster gaat om ' + uu(van) + ' open.' };
+        }
+        if (minuut < tot) {
+          return { soort: 'nabel', telaat: false, deadline: uu(van) + '\u2013' + uu(tot),
+            titel: nabelOpen + ' keer nabellen',
+            uitleg: 'Nog ' + (tot - minuut) + ' minuten tot ' + uu(tot) + '.' };
+        }
+        return { soort: 'nabel', telaat: true, deadline: uu(van) + '\u2013' + uu(tot),
+          titel: nabelOpen + ' keer nabellen',
+          uitleg: 'Te laat — het venster was ' + uu(van) + ' tot ' + uu(tot) + '.' };
+      }
+    }
+
+    // 4 · De open taken. Een aantal, geen deadline — die is er niet.
+    const open = Number(openTaken) || 0;
+    if (open > 0) {
+      return { soort: 'taken', telaat: false,
+        titel: open + ' open ta' + (open === 1 ? 'ak' : 'ken') + ' vandaag',
+        // Bewust zonder tijd. Een taak draagt een `due` en dat is een dag; er
+        // is geen uur om te tonen en er wordt er ook geen verzonnen.
+        uitleg: 'Geen vast tijdstip: aan een taak hangt een dag, geen klok.' };
+    }
+
+    // Niets open. Of er valt niets te meten — dan zegt de balk dat, in plaats
+    // van 'klaar' te melden op grond van iets dat niet gekeken is.
+    if (!brugZiet) {
+      return { soort: 'niet_meetbaar', telaat: false, titel: 'Niets open in de takenlijst.',
+        uitleg: 'Over de spraakberichten en het nabellen valt niets te zeggen: de brug ziet ' +
+          'geen uitgaande berichten. Dat is geen nul, dat is een blinde vlek.' };
+    }
+    if (callsStaat === 'laden') {
+      return { soort: 'laden', telaat: false, titel: 'Even kijken wat er nu aan de beurt is\u2026',
+        uitleg: 'De agenda wordt opgehaald.' };
+    }
+    if (callsStaat === 'agenda_fout') {
+      return { soort: 'agenda_fout', telaat: false, titel: 'Niets open in de takenlijst.',
+        uitleg: 'De agenda is niet bereikbaar, dus over de calls van vandaag valt hier niets te zeggen.' };
+    }
+    return { soort: 'klaar', telaat: false, titel: 'Niets meer aan de beurt.',
+      uitleg: 'De takenlijst is leeg en de vensters van vandaag zijn rond.' };
   }
 
   const leegTakenCache = () => {
@@ -783,7 +1155,22 @@
 .opv .ltkop small{font-weight:600;color:var(--o-muted);opacity:.75}
 .opv .ltrij{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;cursor:pointer;background:#fff;border:1px solid var(--o-line);border-radius:10px;padding:8px 11px;margin-bottom:5px}
 .opv .ltrij:hover{border-color:var(--o-acc)}
-.opv .ltnm{font-weight:650;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.opv .ltnm{flex:1 1 auto;font-weight:650;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Het etiket krimpt en kapt zichzelf af; de naam niet. Zonder deze twee regels
+   eist een lang eventlabel alle breedte op en blijft er 'Bryan Van ...' over. */
+.opv .ltrij .tag{flex:0 0 auto}
+.opv .ltrij .ltev{flex:0 1 auto;min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* G3 · de nu-doen-balk. Oranje zodra een venster verstreken is; verder rustig,
+   want hij staat er de hele dag. */
+.opv .nudoen{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--o-line);border-left:4px solid var(--o-acc);border-radius:12px;padding:11px 14px;margin:0 0 14px;box-shadow:var(--o-sh)}
+.opv .nudoen.laat{border-left-color:var(--o-amb);background:var(--o-ambs)}
+.opv .nudoen .nuic{font-size:18px;line-height:1}
+.opv .nudoen .nutxt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.opv .nudoen .nutxt b{font-size:14px}
+.opv .nudoen .nutxt span{font-size:12.5px;color:var(--o-muted)}
+.opv .nudoen.laat .nutxt span{color:#8a5a00}
+.opv .nudoen .nudl{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;color:var(--o-muted);white-space:nowrap}
+.opv .nudoen.laat .nudl{color:var(--o-amb)}
 .opv .ronde{font-size:12.5px;color:var(--o-muted);margin:0 0 10px 2px}
 .opv .ronde.zacht{margin:8px 0 0 2px;font-size:11.5px;font-style:italic}
 .opv .row{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:13px 16px;display:flex;align-items:flex-start;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
@@ -964,6 +1351,15 @@
 .opv .warn{background:var(--o-ambs);border:1px solid #f3ddb4;border-radius:11px;padding:12px 14px;font-size:13px;color:#7a4d00;margin-bottom:12px}
 .opv .info{background:var(--o-accs);border:1px solid #cfdcff;border-radius:11px;padding:12px 14px;font-size:13px;color:#1a3d9e;margin-bottom:12px}
 .opv textarea,.opv input[type=date]{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit}
+/* G2 · het formulier van '+ Lead toevoegen'. Zelfde vorm als de bestaande
+   velden hierboven; text en select deden nog niet mee omdat ze nergens
+   voorkwamen. */
+.opv .lf input[type=text],.opv .lf select{width:100%;border:1px solid var(--o-line);border-radius:11px;padding:11px 12px;font-size:13.5px;font-family:inherit;background:#fff;color:inherit}
+.opv .lf label{display:block;font-size:12.5px;font-weight:650;margin:12px 0 5px}
+.opv .lf label:first-child{margin-top:0}
+.opv .lf label small{font-weight:600;color:var(--o-muted)}
+.opv .lfhint{font-size:11.5px;color:var(--o-muted);margin:5px 0 0 2px}
+.opv .leadknop{white-space:nowrap;flex:none;align-self:flex-start}
 .opv .tl{list-style:none;margin:0;padding:0}
 .opv .tl li{display:flex;gap:12px;padding:9px 0;font-size:13.5px;border-bottom:1px solid #f3f4f6}
 .opv .tl li:last-child{border:0}
@@ -1031,7 +1427,7 @@
       '<div class="nm">' + esc(t.naam) +
         ' <span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
         (t.reden_code ? ' <span class="tag t-grey">' + esc(t.reden_code) + '</span>' : '') +
-        (t.badge_label ? ' <span class="tag t-grey">' + esc(t.badge_label) + '</span>' : '') +
+        (badgeTekst(t) ? ' <span class="tag t-grey">' + esc(badgeTekst(t)) + '</span>' : '') +
         (t.due < nuDag ? ' <span class="tag t-red">bleef liggen</span>' : '') +
         (t.due > nuDag ? ' <span class="tag t-blue">staat op ' + nl(t.due) + '</span>' : '') +
         ((t.uitgesteld_zonder_poging || 0) >= 2 ? ' <span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
@@ -1153,7 +1549,7 @@
     // dag staat de vorige rij er nog, en die onder de kop van vandaag tonen is
     // erger dan even 'laden'.
     const versGeladen = _calls.key === dag && (_calls.data || _calls.error);
-    if (!_calls.loading && !versGeladen) queueMicrotask(() => fetchCalls(dag));
+    if (!_calls.loading && !versGeladen) straks(() => fetchCalls(dag));
 
     const kop = '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#127909;</div>' +
       '<h3>Calls van ' + (dag === vandaag() ? 'vandaag' : nl(dag)) + '</h3>' +
@@ -1191,10 +1587,10 @@
    */
   function waLamp() {
     if (!_wa.data && !_wa.error && !_wa.laden) {
-      queueMicrotask(() => { fetchWaStatus(); });
+      straks(() => { fetchWaStatus(); });
     } else if (!_waTimers.status && !_wa.paneelOpen) {
       // Terug op deze tab na een uitstapje: de timers zijn dan opgeruimd.
-      queueMicrotask(() => herstelWaTimers());
+      straks(() => herstelWaTimers());
     }
     const s = beschrijfWaStatus(_wa);
     return '<button id="opv-wa-lamp" class="walamp' + (s.kleur === 'groen' ? ' aan' : '') + '"' +
@@ -1253,7 +1649,8 @@
     // twee eigenschappen wint de globale regel alsnog. Zonder `on` wordt het
     // paneel dus keurig opgebouwd en is het onzichtbaar. Zie
     // tests/opvolging-scrim-zichtbaar.test.js.
-    return '<div class="opv"><div class="scrim on" onmousedown="if(event.target===this)window.__opvWaSluit()">' +
+    return '<div class="opv"><div class="scrim on"' +
+      ' onmousedown="window.__opvScrimNeer(event)" onmouseup="window.__opvScrimOp(event, \'wa\')">' +
       '<div class="modal"><div class="mh"><div><h3>WhatsApp-brug</h3>' +
       '<p>' + esc(s.uitleg) + '</p></div>' +
       '<button class="x" onclick="window.__opvWaSluit()">&times;</button></div>' +
@@ -1606,7 +2003,7 @@
     // tien aanmeldingen erbij zakte de dekking naar beneden om een reden die
     // niets met Daves werk te maken had.
     const st = _live.taken;
-    if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
+    if (!st.loading && !st.error && (!st.data || st.key !== dag)) straks(() => fetchTaken(dag));
 
     const bron = vensterBron(dag);
     if (bron.staat !== 'ok') {
@@ -1760,7 +2157,12 @@
 
     const invoer = kan.mag
       ? '<div class="winvoer">' +
+        // Geen waarde in de HTML: het concept wordt na het tekenen in de
+        // textarea gezet (zie herstelConcept). Zo verandert typen de
+        // vingerafdruk niet — en hoeft de tekst nergens ontsnapt te worden,
+        // wat bij een </textarea> in een bericht anders misgaat.
         '<textarea id="opv-wa-tekst" rows="2" placeholder="Typ een bericht&hellip;"' +
+        ' oninput="window.__opvGesprekTyp(this.value)"' +
         (_gesprek.verzendt ? ' disabled' : '') + '></textarea>' +
         '<button class="obtn p" onclick="window.__opvGesprekStuur()"' +
         (_gesprek.verzendt ? ' disabled' : '') + '>' +
@@ -1772,7 +2174,16 @@
     // 'on' is verplicht: de globale .scrim staat op opacity:0 met
     // pointer-events:none, en alleen .scrim.on is zichtbaar. Die les kostte
     // eerder een testronde. 'rechts' maakt er een vel van dat inschuift.
-    return '<div class="opv"><div class="scrim on rechts" onmousedown="if(event.target===this)window.__opvGesprekSluit()">' +
+    // SLUITEN OP DE ACHTERGROND VRAAGT TWEE DINGEN. Eerst stond hier alleen
+    // een mousedown-check, en dat is precies de bug die Dave voelde: raakte een
+    // klik tussen mousedown en mouseup zijn element kwijt door een hertekening,
+    // dan landde de mouseup op de scrim en ging het paneel dicht midden in wat
+    // hij aan het doen was. Nu moeten mousedown én mouseup allebei op de scrim
+    // zelf gebeuren; een klik die binnen het paneel begint of eindigt sluit
+    // nooit meer.
+    return '<div class="opv"><div class="scrim on rechts"' +
+      ' onmousedown="window.__opvScrimNeer(event)"' +
+      ' onmouseup="window.__opvScrimOp(event, \'gesprek\')">' +
       '<div class="wpaneel">' +
       '<div class="mh"><div>' +   // zelfde kop-opmaak als het koppelpaneel
         '<h3>' + esc(_gesprek.naam || 'WhatsApp') + '</h3>' +
@@ -1812,12 +2223,11 @@
    * browser-view kan daar niet uit importeren; tests/opvolging-korte-plaats.test.js
    * bewaakt dat de twee hetzelfde blijven doen.
    */
+  // Eén implementatie, in _opvolging-badge.js. De naam blijft hier staan zodat elke
+  // bestaande aanroeper en test blijft werken, maar de regel zelf staat nog maar
+  // op één plek — dat was de hele klacht.
   function kortePlaats(location) {
-    const v = String(location == null ? '' : location).trim();
-    if (!v || v.length > 24) return '';
-    if (/[0-9|,;]/.test(v)) return '';
-    if (v.includes(' - ') || v.includes('(')) return '';
-    return v;
+    return H.opvKortePlaats(location);
   }
 
   /** Titel plus plaats, maar alleen als die plaats een plaatsnaam is. */
@@ -2027,13 +2437,39 @@
     return { getal: String(waarde), label: verleden ? ' gedaan' : ' open', gemeten: true };
   }
 
+  /**
+   * De balk zelf. Haalt de losse eindjes op en laat bepaalNuDoen beslissen;
+   * hier staat alleen hoe het eruitziet.
+   */
+  function nuDoenBalk(dag) {
+    const bron = vensterBron(dag);
+    const st = _live.taken;
+    const advies = bepaalNuDoen({
+      dag,
+      nu      : vandaag(),
+      minuut  : nuMinuut(),
+      brugZiet: brugZietUitgaand(),
+      calls   : (_calls.key === dag && _calls.data) ? _calls.data : [],
+      callsStaat  : bron.staat,
+      vensterTaken: bron.staat === 'ok' ? bron.taken : [],
+      // Precies het getal dat eronder in de lijst staat, niet een eigen telling.
+      openTaken: (st.data && st.key === dag) ? (st.data.taken || []).length : 0,
+    });
+    return '<div class="nudoen' + (advies.telaat ? ' laat' : '') + '">' +
+      '<div class="nuic">' + (advies.telaat ? '&#9888;' : '&#9202;') + '</div>' +
+      '<div class="nutxt"><b>' + esc(advies.titel) + '</b>' +
+      '<span>' + esc(advies.uitleg) + '</span></div>' +
+      (advies.deadline ? '<div class="nudl">' + esc(advies.deadline) + '</div>' : '') +
+      '</div>';
+  }
+
   function weekbalk(dag) {
     const nu = vandaag();
     const wk = bepaalWeek({ nu, offset: _ui.weekOffset });
     const terug = _ui.weekOffset > WEEK_MIN_OFFSET;
     const heen  = _ui.weekOffset < WEEK_MAX_OFFSET;
     const laatste = wk.dagen[wk.dagen.length - 1];
-    queueMicrotask(() => fetchBalk(wk.dagen[0], laatste));
+    straks(() => fetchBalk(wk.dagen[0], laatste));
 
     let knoppen = '<div class="wk">';
     wk.dagen.forEach((d, i) => {
@@ -2081,7 +2517,7 @@
     stijl();
     const dag = _ui.dagView || vandaag();
     const st = _live.taken;
-    if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchTaken(dag));
+    if (!st.loading && !st.error && (!st.data || st.key !== dag)) straks(() => fetchTaken(dag));
 
     let h = '<div class="opv">';
     // Kop: de bestaande uitleg links, het brug-lampje rechts. Het lampje is
@@ -2091,7 +2527,11 @@
       '<div class="info">De spraakberichten en het nabelvenster hangen aan de WhatsApp-brug. ' +
       'Ziet die brug nog geen uitgaande berichten, dan blijven die blokken leeg met uitleg &mdash; ' +
       'nooit met een nul die eruitziet alsof er gemeten is.</div>' +
+      '<button class="obtn p leadknop" onclick="window.__opvLeadNieuw()">+ Lead toevoegen</button>' +
       waLamp() + '</div>';
+    // De balk staat boven de weekbalk: wat er nú aan de beurt is hoort het
+    // eerste te zijn wat je ziet, niet iets waar je langs moet scrollen.
+    h += nuDoenBalk(dag);
     h += weekbalk(dag);
     // Boven de takenlijst: eerst wat er vaststaat vandaag, dan wat je zelf
     // moet oppakken. De agenda hangt niet aan de takenlijst — valt hij weg,
@@ -2138,7 +2578,7 @@
         const rest = Math.max(0, 48 - uren);
         return '<div class="row"><div class="who"><div class="nm">' + esc(w.naam) +
           ' <span class="tag ' + (rest ? 't-blue' : 't-red') + '">' + (rest ? 'nog ' + rest + 'u' : 'termijn voorbij') + '</span>' +
-          (w.badge_label ? ' <span class="tag t-grey">' + esc(w.badge_label) + '</span>' : '') + '</div>' +
+          (badgeTekst(w) ? ' <span class="tag t-grey">' + esc(badgeTekst(w)) + '</span>' : '') + '</div>' +
           '<div class="mt"><span style="color:#6b7280;font-size:12.5px">' + esc(w.telefoon || '') + ' &middot; agenda ' + uren + 'u geleden doorgestuurd</span></div></div>' +
           '<div class="act"><button class="obtn wa" onclick="window.__opvWa(\'' + w.id + '\')">&#128172; Herinneren</button>' +
           '<button class="obtn" onclick="window.__opvTerug(\'' + w.id + '\')">Terug in de lijst</button></div></div>';
@@ -2167,7 +2607,7 @@
     stijl();
     const dag = vandaag();
     const st = _live.dash;
-    if (!st.loading && !st.error && (!st.data || st.key !== dag)) queueMicrotask(() => fetchDash(dag));
+    if (!st.loading && !st.error && (!st.data || st.key !== dag)) straks(() => fetchDash(dag));
 
     let h = '<div class="opv">';
     if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>';
@@ -2238,7 +2678,7 @@
   function afgerondView() {
     stijl();
     const st = _live.archief;
-    if (!st.loading && !st.error && !st.data) queueMicrotask(fetchArchief);
+    if (!st.loading && !st.error && !st.data) straks(fetchArchief);
 
     let h = '<div class="opv">';
     if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>';
@@ -2279,7 +2719,11 @@
   // G1 heeft er twee bij: de tijdlijn van een voorbije dag en de lijst met wat
   // later staat. Allebei gaan ze over een dag of over een verzameling, niet
   // over één taak — dus horen ze hier, vóór de taak-guard in modalHtml().
-  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst', 'tijdlijn', 'later']);
+  //
+  // G2 heeft er nog een: '+ Lead toevoegen' máákt de taak en heeft er dus nog
+  // geen. Zonder die regel sneuvelt dat venster stil op de taak-guard, precies
+  // zoals de vier call-uitkomsten dat deden.
+  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst', 'tijdlijn', 'later', 'lead-nieuw']);
   const MODAL_BALK = new Set(['tijdlijn', 'later']);
 
   /**
@@ -2336,7 +2780,7 @@
         '<div class="tltijd">' + esc(uur(it.tijdstip)) + '</div>' +
         '<div class="tlem">' + l[0] + '</div>' +
         '<div class="tlwat"><b>' + l[1] + '</b> &middot; ' + naam +
-          (it.taak && it.taak.badge_label ? ' <span class="tag t-grey">' + esc(it.taak.badge_label) + '</span>' : '') +
+          (it.taak && badgeTekst(it.taak) ? ' <span class="tag t-grey">' + esc(badgeTekst(it.taak)) + '</span>' : '') +
           (it.resultaat ? '<div class="tlres">' + esc(it.resultaat) + '</div>' : '') +
           (it.automatisch ? '<div class="tlres">automatisch geregistreerd</div>' : '') +
         '</div></div>';
@@ -2366,10 +2810,14 @@
     const blokken = dagen.map((g) => {
       const rijen = (g.taken || []).map((t) => {
         const r = REDEN_LABEL[t.reden] || [t.reden, 't-grey'];
+        // De naam eerst en met de ruimte die overblijft: die is het
+        // belangrijkste op de regel en mag nooit als eerste wegvallen. Het
+        // etiket krijgt een eigen maximum en kapt zichzelf af.
+        const badge = badgeTekst(t);
         return '<button class="ltrij" onclick="window.__opvDagVanuitLater(\'' + g.dag + '\')">' +
           '<span class="ltnm">' + esc(t.naam) + '</span>' +
           '<span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
-          (t.badge_label ? '<span class="tag t-grey">' + esc(t.badge_label) + '</span>' : '') +
+          (badge ? '<span class="tag t-grey ltev" title="' + esc(badge) + '">' + esc(badge) + '</span>' : '') +
           '</button>';
       }).join('');
       return '<div class="ltgroep"><div class="ltkop">' + esc(langeDatum(g.dag)) +
@@ -2392,6 +2840,71 @@
         ? 'Alles met een datum na ' + esc(nl(m.na)) + '.'
         : aantal + ' ta' + (aantal === 1 ? 'ak' : 'ken') + ' met een datum na ' + esc(nl(m.na)) + '.',
       laterBody(m.na));
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // G2 · EEN LEAD MET DE HAND TOEVOEGEN
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Tot nu toe kwamen kaarten alleen uit een event of uit het afronden van een
+  // call. Iemand die Dave op een andere manier tegenkomt — via via, een bericht
+  // buiten de trechter om — had geen weg naar binnen.
+  //
+  // De reden komt uit de CHECK-constraint op opvolging_taken.reden, met één
+  // uitzondering: 'aanmelding' staat er wél in maar hoort hier niet. Die reden
+  // is instroom uit de eventmodule; met de hand gezet zou de kaart in het
+  // aanmeldblok belanden zonder event erachter, en dan klopt de groepskop niet.
+
+  const LEAD_REDENEN = [
+    ['wil_nog_beslissen', 'Wil nog beslissen', 'Gesproken, twijfelt nog. Schrijf op waarover.'],
+    ['no_show_call',      'No-show call',      'Stond ingepland voor een call en kwam niet opdagen.'],
+    ['no_show_event',     'No-show event',     'Had zich aangemeld voor een event en kwam niet.'],
+    ['afgemeld',          'Afgemeld',          'Heeft zelf afgezegd, maar is het bellen waard.'],
+    ['niet_ingepland',    'Niet ingepland',    'Wil wel, maar er staat nog geen moment.'],
+  ];
+  const LEAD_REDEN_KEYS = LEAD_REDENEN.map((r) => r[0]);
+
+  /**
+   * Het formulier. Bewust vier velden en niet meer: naam, nummer, reden, dag —
+   * plus de notitie, die verplicht is.
+   *
+   * Waarom de notitie verplicht is: bij een handmatige lead is dit het enige
+   * wat er staat. Er ging geen call aan vooraf en er hangt geen event achter.
+   * Zonder die zin is de kaart een naam en een nummer, en weet Dave over drie
+   * weken niet meer waar dit vandaan kwam.
+   *
+   * De controles staan óók op de server (api/opvolging-taak-create.js), zodat
+   * een oud tabblad ze niet kan omzeilen. Wat hier staat is er om het meteen te
+   * kunnen zien, niet om het af te dwingen.
+   */
+  function leadModalHtml(m) {
+    const f = m.velden || {};
+    const melding = m.fout
+      ? '<div class="warn"><b>Nog niet opgeslagen.</b> ' + esc(m.fout) + '</div>'
+      : '';
+    const opties = LEAD_REDENEN.map(([key, label]) =>
+      '<option value="' + key + '"' + (f.reden === key ? ' selected' : '') + '>' + label + '</option>').join('');
+    const gekozen = LEAD_REDENEN.find((r) => r[0] === (f.reden || LEAD_REDEN_KEYS[0]));
+    const body = melding +
+      '<div class="lf">' +
+        '<label>Naam</label>' +
+        '<input type="text" id="opv-lead-naam" value="' + esc(f.naam || '') + '" placeholder="Voor- en achternaam">' +
+        '<label>Telefoon</label>' +
+        '<input type="text" id="opv-lead-tel" value="' + esc(f.telefoon || '') + '" placeholder="+32470123456">' +
+        '<div class="lfhint">Zonder nummer kan deze kaart niets: bellen en WhatsApp hangen er allebei aan.</div>' +
+        '<label>Reden</label>' +
+        '<select id="opv-lead-reden" onchange="window.__opvLeadVeld()">' + opties + '</select>' +
+        '<div class="lfhint">' + esc(gekozen ? gekozen[2] : '') + '</div>' +
+        '<label>Op welke dag terugzetten</label>' +
+        '<input type="date" id="opv-lead-due" value="' + esc(f.due || vandaag()) + '" min="' + vandaag() + '">' +
+        '<label>Notitie <small>(verplicht)</small></label>' +
+        '<textarea id="opv-lead-notitie" rows="3" placeholder="Waar komt deze lead vandaan, en wat is er al gezegd?">' +
+          esc(f.notitie || '') + '</textarea>' +
+      '</div>' +
+      '<button class="obtn p" style="width:100%;margin-top:14px" ' +
+        (m.bezig ? 'disabled' : '') + ' onclick="window.__opvLeadOpslaan()">' +
+        (m.bezig ? 'Bezig&hellip;' : 'Lead toevoegen') + '</button>';
+    return scrim('Lead toevoegen', 'Hij staat daarna gewoon in je lijst, net als de rest.', body);
   }
 
   function callModalHtml(m) {
@@ -2441,6 +2954,7 @@
     // Eerst wat geen taak nodig heeft, en pas daarna de taak-guard. Andersom
     // sneuvelen deze twee stil op een taak die er nooit had moeten zijn.
     if (MODAL_BALK.has(m.soort)) return balkModalHtml(m);
+    if (m.soort === 'lead-nieuw') return leadModalHtml(m);
     if (MODAL_ZONDER_TAAK.has(m.soort)) return callModalHtml(m);
 
     const t = zoekTaak(m.taakId);
@@ -2629,7 +3143,8 @@
   // `on` houdt de globale .scrim-regel uit het design system opacity op 0 en
   // pointer-events op none, en blijft elk venster van deze module onzichtbaar.
   const scrim = (titel, sub, body) =>
-    '<div class="opv"><div class="scrim on" onmousedown="if(event.target===this)window.__opvSluit()"><div class="modal">' +
+    '<div class="opv"><div class="scrim on"' +
+    ' onmousedown="window.__opvScrimNeer(event)" onmouseup="window.__opvScrimOp(event, \'modal\')"><div class="modal">' +
     '<div class="mh"><div><h3>' + titel + '</h3><p>' + sub + '</p></div><button class="x" onclick="window.__opvSluit()">&times;</button></div>' +
     '<div class="mb">' + body + '</div></div></div></div>';
 
@@ -2661,7 +3176,7 @@
   // ── G1 · de twee vensters onder de balk ───────────────────────────────────
   window.__opvTijdlijn = (d) => {
     _ui.modal = { soort: 'tijdlijn', dag: d };
-    queueMicrotask(() => fetchTijdlijn(d));
+    straks(() => fetchTijdlijn(d));
     render();
   };
 
@@ -2669,7 +3184,7 @@
     const wk = bepaalWeek({ nu: vandaag(), offset: _ui.weekOffset });
     const na = wk.dagen[wk.dagen.length - 1];
     _ui.modal = { soort: 'later', na };
-    queueMicrotask(() => fetchLater(na));
+    straks(() => fetchLater(na));
     render();
   };
 
@@ -2717,6 +3232,80 @@
       await post('/api/opvolging-taak-update', { taak_id: m.taakId, actie: 'verplaats', due });
       _ui.modal = null; leegTakenCache(); render();
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
+  };
+
+  // ── G2 · een lead met de hand toevoegen ───────────────────────────────────
+
+  /** Wat er nú in het formulier staat. */
+  function leesLeadVelden() {
+    const v = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+    return {
+      naam    : v('opv-lead-naam'),
+      telefoon: v('opv-lead-tel'),
+      reden   : v('opv-lead-reden') || LEAD_REDEN_KEYS[0],
+      due     : v('opv-lead-due'),
+      notitie : v('opv-lead-notitie'),
+    };
+  }
+
+  window.__opvLeadNieuw = () => {
+    _ui.modal = { soort: 'lead-nieuw', velden: { reden: LEAD_REDEN_KEYS[0], due: vandaag() }, fout: null, bezig: false };
+    render();
+  };
+
+  // Bij het wisselen van reden verandert de uitleg eronder. Wat er al getypt is
+  // gaat mee terug het formulier in; zonder dat wist één klik op de keuzelijst
+  // de naam en de notitie.
+  window.__opvLeadVeld = () => {
+    const m = _ui.modal; if (!m || m.soort !== 'lead-nieuw') return;
+    m.velden = leesLeadVelden();
+    render();
+  };
+
+  window.__opvLeadOpslaan = async () => {
+    const m = _ui.modal; if (!m || m.soort !== 'lead-nieuw' || m.bezig) return;
+    const f = leesLeadVelden();
+    m.velden = f;
+
+    // Dezelfde controles staan op de server. Hier staan ze zodat je meteen ziet
+    // wát er ontbreekt, in plaats van een kale 400 terug te krijgen.
+    const ontbreekt =
+      !f.naam     ? 'Vul een naam in.'
+      : !f.telefoon ? 'Vul een telefoonnummer in — zonder nummer kan deze kaart niets.'
+      : !f.due      ? 'Kies een dag om hem terug te zetten.'
+      : !f.notitie  ? 'De notitie is verplicht: zonder die zin weet niemand later waar deze lead vandaan kwam.'
+      : null;
+    if (ontbreekt) { m.fout = ontbreekt; render(); return; }
+
+    m.bezig = true; m.fout = null; render();
+    try {
+      const j = await post('/api/opvolging-taak-create', {
+        naam    : f.naam,
+        telefoon: f.telefoon,
+        reden   : f.reden,
+        due     : f.due,
+        notitie : f.notitie,
+        bron    : 'handmatig',
+        bron_ref: { source: 'opvolging-handmatig' },
+      });
+      _ui.modal = null;
+      leegTakenCache();
+      // Stond er al een kaart met dit nummer? Dat is geen fout — de lead is
+      // aangemaakt — maar wel iets dat je wilt weten vóór je gaat bellen.
+      const d = j && j.duplicaat;
+      if (d && d.aantal) {
+        alert('Toegevoegd. Let op: er staat al ' + (d.aantal === 1 ? 'een open kaart' : d.aantal + ' open kaarten') +
+          ' met dit nummer' + (d.namen && d.namen.length ? ' (' + d.namen.join(', ') + ')' : '') + '.');
+      }
+      // Staat de nieuwe kaart op een andere dag dan je nu bekijkt, dan spring je
+      // mee. Anders lijkt er niets gebeurd te zijn.
+      if (f.due !== (_ui.dagView || vandaag())) window.__opvDag(f.due);
+      else render();
+    } catch (e) {
+      m.bezig = false;
+      m.fout = (e && e.message) || 'onbekende fout';
+      render();
+    }
   };
 
   window.__opvArchiveer = async () => {
@@ -2776,7 +3365,7 @@
     _gesprek.optimistisch = [];
     _gesprek.melding = null; _gesprek.meldingSoort = null; _gesprek.haalt = false;
     render();
-    queueMicrotask(() => { fetchGesprek(); herstelWaTimers(); });
+    straks(() => { fetchGesprek(); herstelWaTimers(); });
   }
 
   window.__opvWa = (id) => {
@@ -2785,9 +3374,38 @@
     opengesprek({ nummer: t.telefoon, taakId: id, naam: t.naam });
   };
 
+  // ── De sluitregel van een scrim ───────────────────────────────────────────
+  //
+  // Pure beslissing, apart getest: sluit alleen als de muis op de scrim ZELF
+  // neerging én er ook weer op losgelaten werd. Alles daarbuiten — begonnen in
+  // het paneel, geëindigd in het paneel, of een neergang die we niet gezien
+  // hebben — is geen sluitklik.
+  function magSluiten(neerOpScrim, opOpScrim) {
+    return neerOpScrim === true && opOpScrim === true;
+  }
+
+  // Waar de laatste muisknop neerging. Alleen een booleaan; hij wordt bij elke
+  // mouseup weer leeggemaakt zodat een oude neergang niet blijft hangen.
+  let _scrimNeer = false;
+
+  window.__opvScrimNeer = (ev) => { _scrimNeer = !!(ev && ev.target === ev.currentTarget); };
+  window.__opvScrimOp = (ev, welke) => {
+    const opScrim = !!(ev && ev.target === ev.currentTarget);
+    const sluiten = magSluiten(_scrimNeer, opScrim);
+    _scrimNeer = false;
+    if (!sluiten) return;
+    if (welke === 'gesprek') window.__opvGesprekSluit();
+    else if (welke === 'wa') window.__opvWaSluit();
+    else window.__opvSluit();
+  };
+
+  /** Wat er getypt wordt hoort in de staat, niet alleen in de DOM. */
+  window.__opvGesprekTyp = (waarde) => { _gesprek.concept = String(waarde == null ? '' : waarde); };
+
   window.__opvGesprekSluit = () => {
     _gesprek.open = false;
     _gesprek.optimistisch = [];
+    _gesprek.concept = '';
     render();
     // Timer meteen opruimen, niet pas bij de volgende statusronde. Dezelfde
     // afspraak als bij het koppelpaneel.
@@ -2858,8 +3476,12 @@
 
   window.__opvGesprekStuur = async () => {
     if (_gesprek.verzendt) return;
+    // Uit de staat, met de DOM als terugval. De staat is de waarheid sinds het
+    // concept daar bijgehouden wordt; het veld lezen blijft staan voor het
+    // geval er getypt is zonder dat oninput gevuurd heeft (plakken via een
+    // ouder pad, autofill).
     const el = document.getElementById('opv-wa-tekst');
-    const tekst = (el && el.value || '').trim();
+    const tekst = String(_gesprek.concept || (el && el.value) || '').trim();
     if (!tekst) return;
     if (!gesprekKanVersturen().mag) return;
 
@@ -2873,15 +3495,20 @@
         nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
       });
       _gesprek.verzendt = false;
+      // Weg met het concept: dit bericht is verstuurd. Pas hierna, zodat een
+      // mislukte verzending hem laat staan.
+      _gesprek.concept = '';
       await fetchGesprek();
     } catch (e) {
       // Weg met de bubbel: hij is níet verstuurd, en hem laten staan zou dat
       // suggereren. De tekst gaat terug in het veld zodat er niets verloren gaat.
       _gesprek.verzendt = false;
       _gesprek.optimistisch = _gesprek.optimistisch.filter((o) => o.tekst !== tekst);
+      // De tekst blijft in de staat staan, dus hij komt vanzelf terug in het
+      // veld — ook als er tussendoor hertekend wordt.
+      _gesprek.concept = tekst;
       render();
-      const veld = document.getElementById('opv-wa-tekst');
-      if (veld) veld.value = tekst;
+      herstelConcept();
       alert('Versturen is niet gelukt: ' + (e.message || 'onbekende fout'));
     }
   };
@@ -3060,6 +3687,29 @@
   // de hoofdnavigatie (zie CLAUDE.md, lesson learned 20).
   window.addEventListener('beforeunload', stopWaTimers);
 
+  // ── Escape als expliciete uitgang ─────────────────────────────────────────
+  //
+  // Het kruisje blijft staan en de scrim ook; dit is er een derde naast. Eén
+  // venster tegelijk, in de volgorde waarin ze boven elkaar liggen: eerst het
+  // gesprek, dan het koppelpaneel, dan een modal. Anders sluit Escape het
+  // onderste weg terwijl je naar het bovenste kijkt.
+  //
+  // Bewust GEEN sluiting terwijl er getypt wordt met tekst in het veld: dan is
+  // Escape 'ik wil dit venster weg' voor de een en 'oeps' voor de ander, en
+  // een half getypt bericht kwijtraken is precies wat we net gerepareerd hebben.
+  function magEscapeSluiten() {
+    const ta = tekstEl();
+    const bezigMetTypen = !!(ta && document.activeElement === ta && String(ta.value || '').trim());
+    return !bezigMetTypen;
+  }
+
+  window.addEventListener('keydown', (ev) => {
+    if (!ev || ev.key !== 'Escape') return;
+    if (_gesprek.open) { if (magEscapeSluiten()) window.__opvGesprekSluit(); return; }
+    if (_wa.paneelOpen) { window.__opvWaSluit(); return; }
+    if (_ui.modal) window.__opvSluit();
+  });
+
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
   window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst, brugTellersBlok };
@@ -3092,13 +3742,41 @@
 
   window.__opvAanmeldHelpers = { WAKKER_DAGEN, bevestigdBadge, taakKaart, evGroepKop, kortePlaats, eventKopTekst };
 
+  // G2, getest in tests/opvolging-lead-toevoegen.test.js: het formulier zonder
+  // browser tekenen en de reden-lijst naast de CHECK-constraint leggen.
+  window.__opvLeadHelpers = {
+    leadModalHtml, LEAD_REDENEN, LEAD_REDEN_KEYS,
+    zetModal: (m) => { _ui.modal = m; },
+    huidigeModal: () => _ui.modal,
+  };
+
   // Het gesprekspaneel, getest in tests/opvolging-whatsapp-gesprek.test.js.
+  // O: het hertekenen, het concept, de draadscroll en de sluitregel. Getest in
+  // tests/opvolging-gesprek-hertekenen.test.js met een echte DOM-dubbelganger.
+  window.__opvHertekenHelpers = {
+    huidigeViewHtml, isOnderaan, magSluiten, magEscapeSluiten,
+    bewaarPaneelStaat, herstelPaneelStaat, herstelConcept, render, straks,
+    DRAAD_ONDERAAN_MARGE,
+    vingerafdruk: () => _laatsteHtml,
+    zetVingerafdruk: (v) => { _laatsteHtml = v; },
+  };
+
   window.__opvGesprekHelpers = {
     gesprekPaneelHtml, gesprekKanVersturen, gesprekBubbel, bepaalWaTimers,
     beschrijfHistoriek, historiekMelding, historiekOnbereikbaar,
     zetGesprek: (v) => Object.assign(_gesprek, v),
     zetWa: (v) => Object.assign(_wa, v),
     WA_POLL_GESPREK_MS,
+  };
+
+  // G3, getest in tests/opvolging-nu-doen.test.js. bepaalNuDoen is een pure
+  // functie: de test voert er een klok in, geen browser.
+  window.__opvNuHelpers = {
+    bepaalNuDoen, nuDoenBalk, nuMinuut,
+    SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR, CALL_DUUR_MIN, CALL_VOORUIT_MIN,
+    zetTaken: (dag, lijst) => { _live.taken.key = dag; _live.taken.data = { taken: lijst || [], wacht: [] }; },
+    zetCalls: (dag, lijst) => { _calls.key = dag; _calls.data = lijst || []; _calls.error = null; },
+    zetWa: (v) => Object.assign(_wa, v),
   };
 
   window.__opvWeekHelpers = {

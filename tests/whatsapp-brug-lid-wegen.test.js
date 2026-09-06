@@ -165,7 +165,10 @@ test('weg C draait vóór de dure oplossing per bericht', () => {
 test('het filter blijft ook op die weg de grens', () => {
   const b = bron();
   const i = b.indexOf("client.on('message'");
-  const blok = b.slice(i, i + 1400);
+  // Ruimer venster: de systeemtype-controle staat tussen het filter en de tekst,
+  // en msg.body zit daardoor op +1556. Gemeten, niet geraden.
+  const blok = b.slice(i, i + 2200);
+  assert.ok(blok.indexOf('msg.body') > 0, 'het venster hoort de tekst te bereiken');
   assert.ok(blok.indexOf('bekijkRuweBericht(msg)') < blok.indexOf('leadlijst.mag('),
     'eerst het nummer bepalen');
   assert.ok(blok.indexOf('leadlijst.mag(') < blok.indexOf('msg.body'),

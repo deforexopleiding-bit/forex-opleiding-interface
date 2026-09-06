@@ -15,9 +15,10 @@ import qrcode from 'qrcode';
 import { normaliseerNummer, naarChatId } from './nummers.js';
 // De vorm van elke gebeurtenis staat apart en dependency-vrij, zodat hij te
 // testen is zonder puppeteer of een gekoppelde telefoon.
-import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep } from './gebeurtenis.js';
+import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep, isEchtGesprek } from './gebeurtenis.js';
 import { maakTellers, jidVorm } from './tellers.js';
 import { maakLidkaart } from './lidkaart.js';
+import { maakLandcodeZoeker, isLokaalGenoteerd, NIET_MEETBAAR } from './landcode.js';
 import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET, FOUT } from './uitkomst.js';
 import { createRequire } from 'node:module';
 
@@ -204,6 +205,19 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // Elke weg houdt bij: hoe vaak geprobeerd, hoe vaak gelukt, en of hij
   // überhaupt beschikbaar is. Daarmee is 'stilte' onmogelijk geworden: na één
   // testbericht staat er welke weg werkte, en welke niet bestond.
+  /**
+   * Weiger wat geen gesprek is, en tel WELK type dat was.
+   *
+   * Staat op elk van de drie paden NA leadlijst.mag(): de privacyvolgorde
+   * verschuift niet. Het filter blijft de eerste regel; dit is de tweede.
+   */
+  function isSysteemBericht(eventType, msg, jid) {
+    if (isEchtGesprek(msg?.type)) return false;
+    tellers.systeemtype(msg?.type);
+    negeer(eventType, 'systeemtype', jid);
+    return true;
+  }
+
   const WEGEN = ['getNumberId', 'getChatById', 'getChats', 'getMessageById', 'msg_getchat',
                  'chat_contact', 'contact_data', 'msg_data'];
   const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null, statussen: {}, laatste_fout: null }]));
@@ -246,6 +260,45 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
    * de LID-migratie, dan is dit precies wat we zoeken. De kortste weg, en hij
    * staat gewoon in de publieke API.
    */
+  // ── Lokaal genoteerde nummers ────────────────────────────────────────────
+  // Zes van de 33 leads staan als 0472223752 of 06 57340618 in het CRM. Die
+  // passeren het leadlijst-filter (staart-ingang op negen cijfers) maar
+  // naarChatId() geeft er null op, en dan faalt zowel de lidkaart als het
+  // versturen. We raden de landcode niet: we stellen de kandidaten op en laten
+  // getNumberId beslissen, en accepteren alleen bij precies één treffer.
+  //
+  // Eén zoeker voor allebei de plekken, met één cache — zie lib/landcode.js.
+  const landcodeTellers = { gevonden: 0, geen: 0, meerdere: 0, niet_lokaal: 0, mislukt: 0, niet_meetbaar: 0 };
+  const landcode = maakLandcodeZoeker({
+    bevestig: async (kandidaat) => {
+      // 'deze bibliotheek kan het niet' is iets anders dan 'WhatsApp kent dit
+      // nummer niet'. Zou dit false teruggeven, dan waren die twee niet uit
+      // elkaar te houden — precies het onderscheid waar de hele LID-zoektocht
+      // op is stukgelopen, en waar lib/uitkomst.js voor bestaat.
+      if (!kunde.api.getNumberId) { const e = new Error('getNumberId bestaat niet'); e.code = NIET_MEETBAAR; throw e; }
+      const w = await client.getNumberId(kandidaat + '@c.us');
+      return !!(w && (w._serialized || w.user));
+    },
+    onMeting: (status, kandidaten, treffers) => {
+      if (landcodeTellers[status] !== undefined) landcodeTellers[status] += 1;
+      // Alleen woorden en aantallen; nooit het nummer of de kandidaat.
+      console.log('[brug] landcode:', status, '·', treffers, 'van', kandidaten, 'kandidaten bevestigd');
+    },
+  });
+
+  /**
+   * Het nummer in internationale vorm, of null.
+   *
+   * Al internationaal → ongewijzigd terug. Lokaal → via de zoeker hierboven.
+   * Niets bevestigd → null, en de aanroeper hoort dat als 'dit nummer kunnen we
+   * niet gebruiken' te behandelen, niet als 'de brug is stuk'.
+   */
+  async function internationaal(nummer) {
+    const r = await landcode.zoek(nummer);
+    if (r.status === 'niet_lokaal') return r.nummer;
+    return r.status === 'gevonden' ? r.nummer : null;
+  }
+
   async function lidViaNumberId(nummer) {
     const chatId = naarChatId(nummer);
     const res = await probeer({
@@ -382,9 +435,17 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     for (const nummer of (Array.isArray(nummers) ? nummers : [])) {
       bekeken += 1;
       try {
-        const viaA = await lidViaNumberId(nummer);
+        // Staat dit nummer lokaal genoteerd, dan eerst uitzoeken welk
+        // internationaal nummer WhatsApp kent. Zonder deze stap krijgt
+        // getNumberId een chatId van null en faalt hij — precies de zes leads
+        // die bij 21 van de 28 buiten de boot vielen.
+        const bruikbaar = (await internationaal(nummer)) || nummer;
+        const viaA = await lidViaNumberId(bruikbaar);
+        // De kaart wordt bevraagd met het nummer zoals het in het CRM staat,
+        // dus die kant blijft het ORIGINEEL. Alleen de vraag aan WhatsApp gaat
+        // met het internationale nummer.
         if (viaA) { paren.push([nummer, viaA]); continue; }
-        const viaB = await lidViaChat(nummer);
+        const viaB = await lidViaChat(bruikbaar);
         if (viaB) { paren.push([nummer, viaB]); continue; }
       } catch (_) { /* volgende nummer; één lead mag de rest niet ophouden */ }
     }
@@ -712,6 +773,11 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // FILTER. Alles hieronder raakt de tekst aan, en pas hierna wordt er iets
       // van dit bericht onthouden.
       if (!leadlijst.mag(nummer)) { negeer('message', 'niet_op_leadlijst', van); return; }
+      // WhatsApp stuurt over deze stroom ook dingen die geen bericht zijn. Een
+      // e2e_notification is een ververste sleutel, geen antwoord van de lead —
+      // en het CRM maakte er een poging 'antwoord ontvangen' van. Zie
+      // isEchtGesprek() in lib/gebeurtenis.js.
+      if (isSysteemBericht('message', msg, van)) return;
       bewaarBerichtvormen(ruw.vorm);
       tellers.liet('message');
       await webhook.duw({
@@ -762,6 +828,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       const nummer = ruw.nummer || await bepaalNummer(msg?.to);
       // FILTER, en pas hierna wordt het nummer of de tekst ergens voor gebruikt.
       if (!leadlijst.mag(nummer)) { negeer('message_create', 'niet_op_leadlijst', msg?.to); return; }
+      if (isSysteemBericht('message_create', msg, msg?.to)) return;
       bewaarBerichtvormen(ruw.vorm);
       const g = bouwUitgaandeGebeurtenis(msg);
       if (!g) { negeer('message_create', 'onbruikbaar', msg?.to); return; }
@@ -794,6 +861,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       if (isGroep(jid)) { negeer('message_ack', 'groep', jid); return; }
       const nummer = await bepaalNummer(jid);
       if (!leadlijst.mag(nummer)) { negeer('message_ack', 'niet_op_leadlijst', jid); return; }
+      // Een ack op een e2e_notification is net zo min een verstuurd bericht als
+      // die notification zelf er een was.
+      if (isSysteemBericht('message_ack', msg, jid)) return;
       const g = bouwAckGebeurtenis(msg, ack);
       // ACK_SOORT kent -1 en 0 niet: dat zijn statussen die nog niets zeggen.
       if (!g) { negeer('message_ack', 'geen_ack_soort', jid); return; }
@@ -828,6 +898,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       chats_geprobeerd  : chatsGeprobeerdAt,
       chats_status      : chatsStatus,
       chats_fout        : chatsFout,
+      // Lokaal genoteerde nummers: hoeveel er opgelost zijn, en hoeveel er niet
+      // te bepalen waren. Alleen aantallen.
+      landcode          : { ...landcodeTellers, onthouden: landcode.aantalOnthouden() },
     }),
     /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),
@@ -864,8 +937,26 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // Staat dit gesprek onder een LID, dan is '<nummer>@c.us' niet de chat
       // waar de draad in zit. chatIdVoor() pakt de jid die we bij dit nummer
       // gezien hebben, en valt anders terug op de gewone vorm.
-      const chatId = chatIdVoor(nummer);
-      if (!chatId) { const e = new Error('nummer mist een landcode'); e.code = 'NUMMER_ONGELDIG'; throw e; }
+      let chatId = chatIdVoor(nummer);
+      if (!chatId) {
+        // Zelfde regel als bij de lidkaart: kandidaten proberen, WhatsApp laten
+        // beslissen, alleen bij precies één treffer accepteren. Zonder dit gooit
+        // versturen NUMMER_ONGELDIG op zes van de 33 leads — de knop staat er,
+        // het venster opent, en pas bij verzenden blijkt het niet te kunnen.
+        const intl = await internationaal(nummer);
+        if (intl) chatId = naarChatId(intl);
+      }
+      if (!chatId) {
+        // De melding moet zeggen wát er aan de hand is. 'Ongeldig nummer' laat
+        // Dave denken dat de brug stuk is, terwijl hij het nummer moet
+        // aanvullen.
+        const lokaal = isLokaalGenoteerd(nummer);
+        const e = new Error(lokaal
+          ? 'het nummer staat lokaal genoteerd en WhatsApp herkent geen van de landcodes die we geprobeerd hebben'
+          : 'nummer mist een landcode');
+        e.code = lokaal ? 'LANDCODE_ONBEKEND' : 'NUMMER_ONGELDIG';
+        throw e;
+      }
       const res = await client.sendMessage(chatId, String(tekst));
       raakAan();
       return { bericht_id: res?.id?._serialized || null };

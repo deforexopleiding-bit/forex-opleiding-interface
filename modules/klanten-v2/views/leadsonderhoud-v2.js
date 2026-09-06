@@ -64,6 +64,7 @@
     // bereikbaar blijft. Filter-state per tab (periode/resultaat/bron) leeft
     // apart zodat we bij tab-switch niet refetchen.
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
+    funnels:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'all', lastKey: null },
     opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', tijd: 'aankomend', lastKey: null },
     vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     // v=17 (2026-08-28): Toegang-aanvragen tab (WhatsApp-gate).
@@ -2936,10 +2937,14 @@
     // zodat gedeelde testnummers geen valse vinkjes geven.
     const eurFmt = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
     const rows = items.length ? items.map(s => {
-      const badge = s.resultaat === 'toegelaten'
-        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
-        : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>';
-      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>';
+      const isCall = s.bron_type === 'ghl_call';
+      const badge = isCall
+        ? '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600" title="Direct via agendalink geboekt (geen vragenlijst)">Directe call</span>'
+        : (s.resultaat === 'toegelaten'
+          ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
+          : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>');
+      const akkoord = isCall ? '<span style="color:var(--text-3)" title="n.v.t. voor directe calls">n.v.t.</span>'
+        : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>');
       // BP3 v12 — appointment_status-badge: cancelled/no_show → grijze/rose
       // pill zodat je in "Toon geannuleerd"-modus meteen ziet welke rijen dat
       // zijn. Anders standaard "✓ Geboekt" / "–".
@@ -2988,10 +2993,10 @@
           <div style="font-weight:600">${esc(s.naam || '—')}</div>
           <div style="color:var(--text-3);font-size:11px">${esc(contact || '—')}</div>
         </td>
-        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || '—')}</div></td>
+        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || (isCall ? 'GHL-agenda' : '—'))}</div></td>
         <td style="padding:8px 10px">${badge}</td>
         <td style="padding:8px 10px;text-align:center">${akkoord}</td>
-        <td style="padding:8px 10px">${esc(s.gekozen_slot || '—')}</td>
+        <td style="padding:8px 10px">${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</td>
         <td style="padding:8px 10px">${afsp}</td>
         <td style="padding:8px 10px">${bevCel}</td>
         <td style="padding:8px 10px;text-align:center">${saleCell}</td>
@@ -3028,7 +3033,7 @@
         </div>
         <button class="chip ${st.showCancelled ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpShowCancelled(${st.showCancelled ? 'false' : 'true'})" title="Toggle: standaard worden geannuleerde/no-show/verwijderde calls verborgen">${st.showCancelled ? '✓ Toon geannuleerd' : 'Toon geannuleerd'}</button>
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:4px 10px;color:#fff;margin-left:auto" onclick="window._lsOpCreateOpen()" title="Plan handmatig een nieuwe call in Dave's agenda">+ Nieuwe call</button>
-        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
+        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : ((data.total_submissions ?? data.total ?? items.length) + ' submissions' + (data.total_calls ? ' · ' + data.total_calls + ' directe calls' : ''))}</span>
       </div>`;
 
     // ── Agenda-view ────────────────────────────────────────────────────
@@ -3083,6 +3088,10 @@
     const byDay = new Map();
     for (const it of items) {
       if (!it.gekozen_start_at) continue;
+      // Alleen ECHT geboekte afspraken in de agenda: submissions mét
+      // appointment_id + de directe calls. Toegelaten-maar-niet-geboekte
+      // aanmeldingen bezetten geen slot → niet in de agenda (wél in de lijst).
+      if (!it.appointment_id) continue;
       const d = new Date(it.gekozen_start_at);
       if (isNaN(d.getTime())) continue;
       if (d.getFullYear() !== y || d.getMonth() !== m) continue;
@@ -3118,15 +3127,14 @@
       }
       const k = `${y}-${m}-${day}`;
       const entries = (byDay.get(k) || []).sort((a,b) => a.time - b.time);
-      const chips = entries.slice(0, 3).map(({ time, item }) => `
+      // Toon ALLE items van de dag (geen cap) — cel groeit mee in hoogte.
+      const chips = entries.map(({ time, item }) => `
         <div onclick="event.stopPropagation();window._lsOpenOpstartDetail('${esc(String(item.id))}')"
           title="${esc(item.naam || '')} · ${esc(item.email || '')}"
           style="display:block;padding:2px 6px;margin:2px 0;background:var(--brand-soft, rgba(10,116,144,.12));color:var(--brand,#0A7490);border-radius:4px;font-size:10.5px;line-height:1.35;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
           <span style="font-weight:600">${esc(fmtTime(time))}</span> ${esc(item.naam || '—')}
         </div>`).join('');
-      const meer = entries.length > 3
-        ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px">+${entries.length - 3} meer</div>`
-        : '';
+      const meer = '';
       const dayColor = isToday(day) ? 'var(--brand,#0A7490)' : 'var(--text-2)';
       const dayWeight = isToday(day) ? '700' : '500';
       const bg = isToday(day) ? 'var(--brand-soft, rgba(10,116,144,.06))' : 'var(--surface)';
@@ -3203,7 +3211,11 @@
     _lsOpDetail.open = true; _lsOpDetail.id = id; _lsOpDetail.loading = true; _lsOpDetail.error = null; _lsOpDetail.data = null;
     if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/leadsonderhoud-opstartsessies-detail?id=' + encodeURIComponent(id));
+      // Directe GHL-call → id-prefix 'appt:' ⇒ detail op appointment_id.
+      const qs = String(id).startsWith('appt:')
+        ? 'appointment_id=' + encodeURIComponent(String(id).slice(5))
+        : 'id=' + encodeURIComponent(id);
+      const j = await window.KV.authedJson('/api/leadsonderhoud-opstartsessies-detail?' + qs);
       _lsOpDetail.loading = false; _lsOpDetail.data = j?.item || null;
       if (!_lsOpDetail.data) _lsOpDetail.error = 'Geen data teruggekregen.';
     } catch (e) {
@@ -3267,11 +3279,17 @@
       body = `<div style="padding:24px;color:var(--rose)">⚠ ${esc(_lsOpDetail.error)}</div>`;
     } else if (_lsOpDetail.data) {
       const s = _lsOpDetail.data;
-      const badge = s.resultaat === 'toegelaten'
-        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
-        : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>';
-      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>';
-      const antwoordenHtml = (s.antwoorden || []).map((a, i) => {
+      const isCall = !!s.is_ghl_call;
+      const badge = isCall
+        ? '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Directe agenda-boeking</span>'
+        : (s.resultaat === 'toegelaten'
+          ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
+          : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>');
+      const akkoord = isCall ? '<span style="color:var(--text-3)">n.v.t.</span>'
+        : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>');
+      const antwoordenHtml = isCall
+        ? '<div style="color:var(--text-3);padding:12px 0;font-size:12.5px">Geen vragenlijst — dit is een directe agenda-boeking.</div>'
+        : (s.antwoorden || []).map((a, i) => {
         const afw = a.afwijzer ? '<span style="background:var(--rose-soft);color:var(--rose);padding:1px 6px;border-radius:8px;font-size:10.5px;margin-left:6px">afwijzer</span>' : '';
         return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
           <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Vraag ${i + 1}</div>
@@ -3331,7 +3349,7 @@
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</div><b>${esc(s.bron_label)}</b><div style="font-family:var(--mono,monospace);font-size:11px;color:var(--text-3)">${esc(s.booking_source || '—')}</div></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Score</div><b>${s.score != null ? s.score : '—'}</b><span style="color:var(--text-3)"> / drempel ${s.drempel != null ? s.drempel : '—'}</span></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">€50 akkoord</div><b>${akkoord}</b></div>
-          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || '—')}</b></div>
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</b></div>
         </div>
         <div>
           <div style="font-weight:600;margin-bottom:8px;font-size:13px">Vragenlijst-antwoorden</div>
@@ -3342,7 +3360,7 @@
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseOpstartDetail()">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(720px,100%);max-height:90vh;overflow-y:auto">
         <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px;position:sticky;top:0;background:var(--surface);z-index:1">
-          <div style="font-size:14px;font-weight:600">Opstartsessie-submission</div>
+          <div style="font-size:14px;font-weight:600">${_lsOpDetail.data?.is_ghl_call ? 'Directe call' : 'Opstartsessie-submission'}</div>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseOpstartDetail()">✕</button>
         </div>
         <div style="padding:16px 20px">${body}</div>
@@ -4061,8 +4079,89 @@
     </div>`;
   }
 
+  // ── Funnels-tab ────────────────────────────────────────────────────────────
+  // Hardcoded registry (bron van waarheid = dfo-website BRON_TOEGESTAAN + routes).
+  // Uitbreiden = hier een regel toevoegen. status: 'actief' | 'geparkeerd'.
+  const FUNNEL_REGISTRY = [
+    { bron: '7-daagse-v1',            naam: '7-daagse (v1)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v1',            status: 'actief' },
+    { bron: '7-daagse-v2',            naam: '7-daagse (v2)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v2',            status: 'actief' },
+    { bron: 'kennismakingscursus-v1', naam: 'Mini-cursus (v1)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v1', status: 'actief' },
+    { bron: 'kennismakingscursus-v2', naam: 'Mini-cursus (v2)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v2', status: 'actief' },
+    { bron: 'website',                naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
+  ];
+  async function fetchFunnels(force) {
+    const st = _live.funnels;
+    const key = 'p=' + st.periode;
+    if (!force && st.lastKey === key && st.fetched && !st.error) return;
+    st.loading = true; st.error = null; st.lastKey = key;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/leads-per-bron-count?period=' + encodeURIComponent(st.periode));
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      const status = e?.status ? ' (HTTP ' + e.status + ')' : '';
+      st.error = 'Kon funnels niet laden' + status;
+      console.error('[ls-v2] funnels fetch fail:', e?.status, e?.body || e?.message);
+    }
+    st.loading = false; st.fetched = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsSetFunnelsPeriode = function (p) { _live.funnels.periode = p; fetchFunnels(true); };
+  function _lsFunnelStatusBadge(status) {
+    return status === 'geparkeerd'
+      ? '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Geparkeerd</span>'
+      : '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Actief</span>';
+  }
+  function _lsFunnelRowHtml(naam, product, route, statusBadge, aantal, mono) {
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 10px;font-weight:600">${esc(naam)}${mono ? `<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(mono)}</div>` : ''}</td>
+      <td style="padding:8px 10px">${esc(product || '—')}</td>
+      <td style="padding:8px 10px">${statusBadge}</td>
+      <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">${aantal == null ? '—' : esc(String(aantal))}</td>
+      <td style="padding:8px 10px">${route ? `<a href="${esc(route)}" target="_blank" rel="noopener" style="color:var(--brand)">Open ↗</a>` : '—'}</td>
+    </tr>`;
+  }
+  function funnelsView() {
+    const st = _live.funnels;
+    if (!st.fetched && !st.loading && !st.error) queueMicrotask(() => fetchFunnels(false));
+    const data = st.data || {};
+    const by = data.by_bron || {};
+    const chips = [['today', 'Vandaag'], ['week', 'Deze week'], ['month', 'Deze maand'], ['all', 'Alles']]
+      .map(([v, l]) => `<button class="chip ${st.periode === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetFunnelsPeriode('${v}')">${l}</button>`).join('');
+    const regBrons = new Set(FUNNEL_REGISTRY.map((f) => f.bron));
+    const funnelRows = FUNNEL_REGISTRY
+      .map((f) => _lsFunnelRowHtml(f.naam, f.product, f.route, _lsFunnelStatusBadge(f.status), by[f.bron] || 0, f.bron)).join('');
+    // Bron-waarden zonder registry-entry (bv. handmatig/meta): "overig".
+    const overigKeys = Object.keys(by).filter((b) => !regBrons.has(b)).sort((a, b) => a.localeCompare(b, 'nl'));
+    const overigRows = overigKeys
+      .map((b) => _lsFunnelRowHtml(b || '(leeg)', '—', null, '<span style="color:var(--text-3);font-size:11px">niet-funnel</span>', by[b], null)).join('');
+    const periodeLabel = { today: 'vandaag', week: 'deze week', month: 'deze maand', all: 'alle tijd' }[st.periode] || st.periode;
+    return `<div style="max-width:900px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
+        ${chips}
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : `${data.total || 0} leads · ${periodeLabel}`}</span>
+      </div>
+      ${st.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+            <th style="padding:8px 10px">Funnel</th><th style="padding:8px 10px">Product</th><th style="padding:8px 10px">Status</th>
+            <th style="padding:8px 10px;text-align:right">Leads (${esc(periodeLabel)})</th><th style="padding:8px 10px">Pagina</th>
+          </tr></thead>
+          <tbody>${funnelRows}${overigRows ? `<tr><td colspan="5" style="padding:6px 10px;background:var(--surface-2);color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Overig / niet-funnel</td></tr>${overigRows}` : ''}</tbody>
+        </table></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">Tellingen op basis van <code>leads.bron</code> (test-emails + afwijzers eruit). De funnellijst wordt beheerd in de code-registry; bron van waarheid voor de routes is dfo-website (BRON_TOEGESTAAN).</div>
+    </div>`;
+  }
+
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
+  window.DFO.VIEWS['leadsonderhoud/Funnels']        = funnelsView;
   window.DFO.VIEWS['leadsonderhoud/Opstartsessies'] = opstartsessiesView;
   window.DFO.VIEWS['leadsonderhoud/Vragenlijst']    = vragenlijstView;
   window.DFO.VIEWS['leadsonderhoud/Templates']      = templatesView;

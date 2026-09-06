@@ -59,6 +59,10 @@ const dagPlus = (d, n) => {
 const kaal = (t) => ({
   id: t.id, naam: t.naam, telefoon: t.telefoon, reden: t.reden,
   badge_label: t.badge_label, due: t.due, bron: t.bron, notitie: t.notitie,
+  // bron_ref draagt event_titel / event_plaats / event_start. Het scherm bouwt
+  // het etiket daaruit op in plaats van badge_label rauw te tonen: die is
+  // platgeslagen en droeg bij oude rijen het volledige postadres mee.
+  bron_ref: t.bron_ref || null,
 });
 
 export default async function handler(req, res) {
@@ -85,7 +89,7 @@ export default async function handler(req, res) {
       const na = DAG.test(q.na || '') ? q.na : dagPlus(vandaag, 6);
       const { data, error } = await supabaseAdmin
         .from('opvolging_taken')
-        .select('id,naam,telefoon,reden,badge_label,due,bron,notitie')
+        .select('id,naam,telefoon,reden,badge_label,due,bron,notitie,bron_ref')
         .eq('status', 'open')
         .gt('due', na)
         .order('due', { ascending: true })
@@ -129,7 +133,7 @@ export default async function handler(req, res) {
       if (ids.length) {
         const { data: tk, error: tkErr } = await supabaseAdmin
           .from('opvolging_taken')
-          .select('id,naam,telefoon,reden,badge_label,due,bron,notitie,status')
+          .select('id,naam,telefoon,reden,badge_label,due,bron,notitie,bron_ref,status')
           .in('id', ids);
         if (tkErr) throw tkErr;
         taken = tk || [];
@@ -210,6 +214,6 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('[opvolging-weekbalk]', view, e?.message || e);
-    return res.status(500).json({ error: e.message || 'Onbekende fout' });
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }

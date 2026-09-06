@@ -22,6 +22,7 @@
 import { supabaseAdmin } from './supabase.js';
 import { brugGeheimKlopt } from './_lib/whatsapp-brug-client.js';
 import { normaliseerNummer } from './_lib/whatsapp-brug-nummers.js';
+import { isEchtGesprek } from './_lib/whatsapp-systeemtypes.js';
 
 // 'uitgaand' is erbij gekomen toen bleek dat een spraakbericht dat Dave zelf
 // stuurt nergens meetbaar was: het 'message'-event van whatsapp-web.js slaat
@@ -68,6 +69,24 @@ export default async function handler(req, res) {
 
   const nummer = normaliseerNummer(b.nummer);
   if (!nummer) return res.status(400).json({ error: 'nummer ontbreekt' });
+
+  // WhatsApp stuurt over dezelfde stroom ook dingen die geen bericht zijn. Een
+  // e2e_notification is een ververste sleutel; die stond in productie als
+  // 'antwoord ontvangen' in de pogingen en liet de dekking oplopen voor een
+  // lead die nooit gereageerd heeft.
+  //
+  // De brug weigert dit ook al, maar die draait op een VPS en loopt altijd
+  // achter op een deploy. De juistheid van de cijfers mag niet afhangen van
+  // wanneer daar voor het laatst een pull is gedaan.
+  //
+  // 200 en niet 400: de brug heeft niets fout gedaan. Hij heeft doorgegeven wat
+  // WhatsApp hem gaf, en het antwoord vertelt hem waarom er niets mee gebeurt.
+  if (!isEchtGesprek(b.media_type)) {
+    return res.status(200).json({
+      ok: true, gekoppeld: false, reden: 'systeemtype',
+      media_type: String(b.media_type).slice(0, 40),
+    });
+  }
 
   const tijdstip = b.tijdstip ? new Date(b.tijdstip) : new Date();
   const tijdstipIso = isNaN(tijdstip.getTime()) ? new Date().toISOString() : tijdstip.toISOString();

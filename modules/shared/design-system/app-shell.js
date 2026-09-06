@@ -89,7 +89,7 @@
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
-    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Vragenlijst', 'Statistieken'] },
+    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'Vragenlijst', 'Statistieken'] },
     // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt
     // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
@@ -120,6 +120,28 @@
   /* Rol-gates. TAB_RESTRICT verbergt specifieke tabs voor rollen die
      de module wél mogen openen; MOD_LOCK toont de module in het menu
      met een slot-icoon en render't `comingSoonView` i.p.v. de content. */
+  /* TAB_PERM verbergt een tab op basis van een RBAC-sleutel in plaats van een
+     rol. TAB_RESTRICT hierboven kijkt naar rollen; dat kan niet uit de voeten
+     met een schakelaar die een beheerder per rol aanzet.
+
+     Puur additief: een tab zonder regel hier gedraagt zich precies zoals
+     voorheen. En bewust fail-open — staat RBAC nog niet geladen of gaat de
+     lookup mis, dan blijft de tab staan. Een tab verbergen omdat de rechten
+     nog niet binnen waren zou erger zijn dan hem tonen, want de endpoints
+     erachter doen hun eigen controle.
+
+     LET OP WAT DIT WEL EN NIET IS. Dit is navigatie, geen datapoort. De drie
+     opvolging-tabs hangen aan endpoints die ook door de Kanban in
+     Automatiseringen gebruikt worden; server-side dichtzetten zou die module
+     breken. Wie de module mag openen kan de gegevens dus nog steeds langs een
+     andere weg zien. Deze drie sleutels bepalen wat er in beeld komt, niet wat
+     er op te halen valt — en zo staan ze ook in het register. */
+  const TAB_PERM = {
+    'opvolging/Vandaag' : 'opvolging.dag.view',
+    'opvolging/Dashboard': 'opvolging.dashboard.view',
+    'opvolging/Afgerond': 'opvolging.archief.view',
+  };
+
   const TAB_RESTRICT = {
     'logboek/Tijdlijn':        ['super_admin'],    // #logboek-v1: unified stream + snapshots = super_admin-only
     'events/Statistieken': ['super_admin', 'manager'],
@@ -134,6 +156,7 @@
     // beheer-tabs (Bronnen/Vragenlijst) of aggregate stats voor Romy.
     'leadsonderhoud/Overzicht':        SAMS,
     'leadsonderhoud/Bronnen':          SAMS,
+    'leadsonderhoud/Funnels':          SAMS,
     'leadsonderhoud/Vragenlijst':      SAMS,
     'leadsonderhoud/Statistieken':     SAMS,
     // BP2 v3 (2026-09-01): Wachtrij + Toegang-aanvragen ook alleen voor
@@ -213,7 +236,24 @@
   const curMod     = () => visMods().find(m => m.id === S.mod)
                         || (MODS.find(m => m.id === S.mod && _reachableViaDeepLink(m.id)))
                         || visMods()[0];
-  const roleTabs   = m => m.tabs.filter(t => { const r = TAB_RESTRICT[m.id + '/' + t]; return !r || r.some(x => S.roles.includes(x)); });
+  /* Fail-open: alleen een bewezen 'nee' verbergt de tab. */
+  const tabPermOk = (sleutel) => {
+    if (!sleutel) return true;
+    try {
+      const R = window.RBAC;
+      if (!R || typeof R.canSync !== 'function') return true;
+      // canSync() zegt bij een mislukte load overal false — hetzelfde antwoord
+      // als 'niet toegestaan'. Alleen als de rechten aantoonbaar geladen zijn,
+      // telt een 'nee' als een echt nee.
+      if (typeof R.permissiesGeladen === 'function' && !R.permissiesGeladen()) return true;
+      return R.canSync(sleutel) === true;
+    } catch (_) { return true; }
+  };
+  const roleTabs   = m => m.tabs.filter(t => {
+    const r = TAB_RESTRICT[m.id + '/' + t];
+    if (r && !r.some(x => S.roles.includes(x))) return false;
+    return tabPermOk(TAB_PERM[m.id + '/' + t]);
+  });
   const modCanOpen = id => visMods().some(m => m.id === id);
   // Additief lock-semantiek: alleen lock als ELKE rol-toegang die de user
   // heeft in MOD_LOCK[id] zit. Voorbeeld: sales heeft inbox in MOD_LOCK

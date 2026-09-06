@@ -60,6 +60,61 @@ Wanneer opnieuw kijken: alleen als whatsapp-web.js naar een versie gaat die
 expliciet deze WhatsApp Web-build ondersteunt. Kijk dán eerst opnieuw naar
 `lidkaart.chats_status` in `/status` voor je iets bouwt.
 
+### Lokaal genoteerde nummers
+
+Zes van de 33 leads staan met een lokaal nummer in het CRM (`0472223752`,
+`06 57340618`, …). Die passeren het leadlijst-filter — dat heeft een
+staart-ingang op de laatste negen cijfers — maar `naarChatId()` geeft `null`
+zodra een nummer met een `0` begint. Dat brak twee dingen tegelijk: de lidkaart
+(`getNumberId` kreeg niets bruikbaars, vandaar 21 van de 28) en het versturen
+(`NUMMER_ONGELDIG` bij bijna één op de vijf openstaande taken).
+
+**De landcode wordt niet geraden.** Vijf van die zes zijn Belgisch en één is
+Nederlands; een vaste `32` zou dat ene nummer naar een wildvreemde sturen.
+`lib/landcode.js` stelt de kandidaten op (`32` + rest, `31` + rest), legt ze aan
+`client.getNumberId()` voor, en accepteert **alleen bij precies één
+bevestiging**. Twee treffers is gokken, en dat doen we niet bij een
+privacyfilter.
+
+Eén zoeker met één cache, gebruikt door zowel het opbouwen van de lidkaart als
+`wa.stuur()`. De uitkomst wordt per lokaal nummer onthouden zolang het proces
+draait — anders vraagt een gesprek van vijf berichten vijf keer aan WhatsApp of
+dat nummer bestaat.
+
+Levert geen enkele kandidaat iets op, dan is de foutcode `LANDCODE_ONBEKEND` en
+niet `NUMMER_ONGELDIG`: het nummer is wél geprobeerd, en de melding zegt dat het
+aangevuld moet worden in plaats van dat de brug stuk is.
+
+`/status` telt per uitkomst — alleen aantallen. Er zijn er zes, en dat is met
+opzet:
+
+| uitkomst | betekenis |
+| --- | --- |
+| `gevonden` | precies één kandidaat bevestigd |
+| `meerdere` | twee bevestigd — een gok, dus nee |
+| `geen` | alle kandidaten geprobeerd, geen enkele bevestigd |
+| `mislukt` | er ging bij minstens één kandidaat iets mis; we **weten** het niet |
+| `niet_meetbaar` | deze whatsapp-web.js kan de vraag niet stellen |
+| `niet_lokaal` | het nummer was al internationaal |
+
+**Alleen de eerste drie gaan de cache in.** `bevestig` gooit als WhatsApp nog
+niet klaar is of de verbinding net wegviel, en de lidkaart wordt bij het
+opstarten gebouwd — juist het moment waarop dat het vaakst gebeurt. Zou een
+mislukking als `geen` blijven hangen, dan stonden die zes nummers voorgoed op
+'niet te bepalen' tot iemand herstart, en niets zou zeggen dat het aan de meting
+lag in plaats van aan het nummer.
+
+Gaat er bij ook maar één kandidaat iets mis, dan is de hele uitkomst `mislukt` —
+ook als de andere wél bevestigde. We weten niet of de kandidaat die gooide óók
+bevestigd zou hebben, en dan waren het er twee geweest.
+
+`niet_meetbaar` staat er apart omdat 'deze bibliotheek kan het niet' iets anders
+is dan 'WhatsApp kent dit nummer niet' — precies het onderscheid waar de hele
+LID-zoektocht op is stukgelopen.
+
+`naarChatId()` blijft ongewijzigd weigeren. Dat is de juiste regel: die functie
+mag niet raden. De oplossing zit ervóór, niet erin.
+
 ### Wat 'bestaat_niet' óók kan betekenen
 
 `getNumberId` en `getChatById` stonden allebei op `bestaat_niet ×6`, terwijl het

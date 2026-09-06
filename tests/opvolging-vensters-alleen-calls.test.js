@@ -30,6 +30,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// Het etiket-helperbestand: opvolging-v2 weigert te starten zonder
+// KV_V2.helpers.opvBadgeTekst, net als op de pagina.
+const BADGE_HELPER = join(ROOT, 'modules/klanten-v2/views/_opvolging-badge.js');
 
 function laadView() {
   const window = {
@@ -44,6 +47,7 @@ function laadView() {
     queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
     Date, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set,
   });
+  runInContext(readFileSync(BADGE_HELPER, 'utf8'), ctx, { filename: '_opvolging-badge.js' });
   runInContext(readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8'),
     ctx, { filename: 'opvolging-v2.js' });
   assert.ok(window.__opvVensterHelpers, 'de view hoort __opvVensterHelpers te zetten');

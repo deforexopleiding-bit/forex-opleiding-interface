@@ -210,6 +210,12 @@ function isoPlusDagen(datum, n) {
 
 // ── POST: boeken via het bestaande zoom_ingepland-pad ──────────────────────
 async function boek(req, res) {
+  // Alleen op het boeken, niet op het lezen: de vrije momenten bekijken is
+  // onschuldig, er een vastleggen is dat niet. Zonder deze regel deed de
+  // schakelaar 'Agenda-afspraak boeken' in het beheerscherm helemaal niets.
+  if (!(await requirePermission(req, 'opvolging.agenda.boeken'))) {
+    return res.status(403).json({ error: 'Geen rechten (opvolging.agenda.boeken)' });
+  }
   const b = req.body || {};
   if (!b.taak_id) return res.status(400).json({ error: 'taak_id ontbreekt' });
   const start = b.start ? new Date(b.start) : null;
@@ -260,7 +266,7 @@ async function boek(req, res) {
       });
     }
     console.error('[opvolging-agenda] onbekend:', e?.message || e);
-    return res.status(500).json({ error: e?.message || 'Inplannen mislukt' });
+    return res.status(500).json({ error: 'Interne fout' });
   }
 
   // Pas nu de taak bijwerken. Faalt dit, dan staat de afspraak er wel — dat
