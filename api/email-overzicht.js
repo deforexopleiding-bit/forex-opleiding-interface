@@ -17,6 +17,7 @@ import { MOMENTEN, bouwContext } from './_lib/afspraak-berichten.js';
 import { annuleringMail, verzetMail } from './_lib/afspraak-status-notify.js';
 import { mailBevestigingB } from './_lib/toegang-cron-mails.js';
 import { renderCredentialsEmail } from './_lib/onboarding-credentials.js';
+import { renderExtendAccessEmail } from './leadsonderhoud-extend-access.js';
 
 // Echte HTML-previews voor code-mails, gerenderd via de bestaande builders met
 // voorbeelddata. Puur (geen send/DB/env-afhankelijkheid). Fail-soft per builder:
@@ -59,6 +60,11 @@ function codePreviews() {
       customer: { first_name: 'Paco', email: 'paco@voorbeeld.nl' },
       tempPassword: 'Tijdelijk-AB12',
       loginUrl: 'https://dashboard.deforexopleiding.nl',
+    })),
+    // Toegang verlengd: exact zoals leadsonderhoud-extend-access.js 'm verstuurt.
+    leadsonderhoud_extend: html(() => renderExtendAccessEmail({
+      voornaam: 'Paco',
+      einddatumNl: '31 december 2026',
     })),
   };
 }
