@@ -13,6 +13,35 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { MOMENTEN, bouwContext } from './_lib/afspraak-berichten.js';
+import { annuleringMail, verzetMail } from './_lib/afspraak-status-notify.js';
+
+// Echte HTML-previews voor de afspraak-code-mails, gerenderd via de bestaande
+// builders (mail-shell-afspraak) met voorbeelddata. Puur (geen send/DB). Fail-soft.
+function afspraakPreviews() {
+  try {
+    const appt = {
+      lead_name: 'Paco Voorbeeld',
+      scheduled_at: new Date(Date.now() + 2 * 86400000).toISOString(),
+      zoom_join_url: 'https://zoom.us/j/12345678',
+      afspraak_token: 'voorbeeld-token',
+      duration_minutes: 20,
+    };
+    const c = bouwContext(appt);
+    const byKey = {};
+    for (const m of MOMENTEN) byKey[m.key] = m;
+    const html = (fn) => { try { return fn()?.html || null; } catch { return null; } };
+    return {
+      afspraak_bevestiging: html(() => byKey.bevestiging?.mail(appt, c)),
+      afspraak_24u:         html(() => byKey.r24?.mail(appt, c)),
+      afspraak_2u:          html(() => byKey.r2?.mail(appt, c)),
+      afspraak_30m:         html(() => byKey.r30?.mail(appt, c)),
+      afspraak_5min:        html(() => byKey.zoom5?.mail(appt, c)),
+      afspraak_annulering:  html(() => annuleringMail(c)),
+      afspraak_verzet:      html(() => verzetMail(c)),
+    };
+  } catch { return {}; }
+}
 
 // Statische catalogus van code-mails (geen DB-registratie — handmatig bijhouden).
 // Functionele categorieën (weergave-volgorde).
@@ -103,11 +132,14 @@ export default async function handler(req, res) {
       }));
     } catch (e) { console.warn('[email-overzicht] onderhoud_sjablonen:', e?.message || e); }
 
-    // 3) code-catalogus (statisch, read-only).
+    // 3) code-catalogus (statisch, read-only). Afspraak-mails krijgen een echte
+    // HTML-preview via de gedeelde builders (voorbeelddata); overige code-mails
+    // hebben geen veilige statische preview (inline/data-afhankelijk) → null.
+    const previews = afspraakPreviews();
     const code = CODE_CATALOG.map((c) => ({
       id: c.key, naam: c.naam, categorie: c.categorie, doel: c.doel, subject: null,
       mailbox: c.mailbox, bron: 'code', bewerkbaar: false, actief: true,
-      trigger: c.trigger, bestand: c.bestand, preview_html: null,
+      trigger: c.trigger, bestand: c.bestand, preview_html: previews[c.key] || null,
     }));
 
     return res.status(200).json({
