@@ -243,7 +243,11 @@ test('de bestaande aanroeper stuurt nog steeds geen bron mee', () => {
   // G2 zijn er twee, en de nieuwe staat eerder in het bestand.
   const i = b.indexOf('window.__opvCallBevestig = async');
   assert.ok(i > 0, 'de call-afronding hoort te bestaan');
-  const blok = b.slice(i, b.indexOf('leegTakenCache(); render();', i));
+  // Tot het EINDE van de handler, niet tot de eerste leegTakenCache(): sinds
+  // item Q eindigt de klant_geworden-tak daar al, ruim vóór de taak-create die
+  // deze test wil bekijken. Een venster op gevoel meet dan de verkeerde helft.
+  const eind = b.indexOf('window.__opv', i + 30);
+  const blok = b.slice(i, eind > 0 ? eind : i + 6000);
   assert.ok(blok.includes("post('/api/opvolging-taak-create'"), 'dit is de call-afronding');
   assert.ok(!/\bbron\s*:/.test(blok), 'die weg hoort ongewijzigd te blijven');
 });
