@@ -2242,6 +2242,20 @@
       window.KV.toast(b.actief ? 'Bron gedeactiveerd.' : 'Bron geactiveerd.', 'ok'); fetchBronnen(true);
     } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
   };
+  // Vragenlijst aan/uit per bron. Kopie van _lsBronToggle: stuurt de volle
+  // rij mee + de omgekeerde vragenlijst-waarde. AAN = quiz/intake→scoring→
+  // toelating vóór boeken; UIT = simpel boekingsformulier (geen quiz).
+  window._lsBronVragenlijst = async function(idx){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
+    const nieuw = !(b.vragenlijst !== false); // huidige (default true) omdraaien
+    try {
+      await window.KV.authedJson('/api/booking-sources-upsert', {
+        method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label: b.label, actief: b.actief, vragenlijst: nieuw }),
+      });
+      window.KV.toast(nieuw ? 'Vragenlijst aangezet voor deze bron.' : 'Vragenlijst uitgezet — bezoekers krijgen het simpele boekingsformulier.', 'ok');
+      fetchBronnen(true);
+    } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+  };
   window._lsBronRegistreren = async function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
     const suggest = b.slug.charAt(0).toUpperCase() + b.slug.slice(1);
@@ -2284,6 +2298,14 @@
             ${staff.map((s) => `<option value="${esc(s.id)}" ${String(b.owner_user_id || '') === String(s.id) ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
           </select>`
         : '<span style="color:var(--text-3);font-size:11px">—</span>';
+      // Vragenlijst-toggle per bron (alleen geregistreerde bronnen). AAN =
+      // quiz vóór boeken; UIT = simpel boekingsformulier. Default AAN.
+      const vlAan = b.vragenlijst !== false;
+      const vragenlijstCell = b.is_registered
+        ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronVragenlijst(${i})" title="${vlAan ? 'Vragenlijst staat AAN — klik om uit te zetten (simpel boekingsformulier)' : 'Vragenlijst staat UIT — klik om aan te zetten (quiz + toelating)'}">
+            <span style="color:${vlAan ? 'var(--emerald)' : 'var(--text-3)'};font-weight:600">${vlAan ? '● Aan' : '○ Uit'}</span>
+          </button>`
+        : '<span style="color:var(--text-3);font-size:11px">—</span>';
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px 10px">
           <div style="font-weight:600">${esc(b.label)}</div>
@@ -2291,6 +2313,7 @@
         </td>
         <td style="padding:8px 10px">${statusBadge}</td>
         <td style="padding:8px 10px">${setterCell}</td>
+        <td style="padding:8px 10px">${vragenlijstCell}</td>
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${b.calls || 0}</td>
         <td style="padding:8px 10px">
           <div style="display:flex;align-items:center;gap:6px">
@@ -2300,7 +2323,7 @@
         </td>
         <td style="padding:8px 10px;white-space:nowrap">${acties}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="6" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Nog geen bronnen — voeg er hieronder één toe.'}</td></tr>`;
+    }).join('') : `<tr><td colspan="7" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Nog geen bronnen — voeg er hieronder één toe.'}</td></tr>`;
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
@@ -2322,6 +2345,7 @@
                 <th style="padding:8px 10px">Bron</th>
                 <th style="padding:8px 10px">Status</th>
                 <th style="padding:8px 10px">Setter</th>
+                <th style="padding:8px 10px">Vragenlijst</th>
                 <th style="padding:8px 10px;text-align:right">Calls</th>
                 <th style="padding:8px 10px">Link</th>
                 <th style="padding:8px 10px">Acties</th>

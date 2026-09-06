@@ -53,11 +53,14 @@ export default async function handler(req, res) {
   try {
     // 1) Bronnenlijst (werkversie).
     // BP2 Deel A: owner_user_id meenemen. 42703 fail-soft voor pre-BP2 schema.
+    // Vragenlijst-toggle: `vragenlijst`-kolom meenemen; bij pre-migratie-schema
+    // (kolom ontbreekt nog) valt de fail-soft terug op de basis-select en
+    // defaulten we vragenlijst op true (= huidig gedrag, quiz aan).
     let bronnen;
     {
       const { data, error } = await supabaseAdmin
         .from('booking_sources')
-        .select('id, slug, label, actief, owner_user_id')
+        .select('id, slug, label, actief, owner_user_id, vragenlijst')
         .order('slug');
       if (error && error.code === '42703') {
         const { data: d2, error: e2 } = await supabaseAdmin
@@ -65,7 +68,7 @@ export default async function handler(req, res) {
           .select('id, slug, label, actief')
           .order('slug');
         if (e2) throw e2;
-        bronnen = (d2 || []).map((b) => ({ ...b, owner_user_id: null }));
+        bronnen = (d2 || []).map((b) => ({ ...b, owner_user_id: null, vragenlijst: true }));
       } else if (error) {
         throw error;
       } else {
@@ -131,6 +134,8 @@ export default async function handler(req, res) {
       slug: b.slug,
       label: b.label,
       actief: !!b.actief,
+      // Vragenlijst-toggle: default true (quiz aan) als de waarde ontbreekt.
+      vragenlijst: b.vragenlijst !== false,
       calls: tel.get(b.slug) || 0,
       is_registered: true,
       owner_user_id: b.owner_user_id || null,
@@ -140,7 +145,7 @@ export default async function handler(req, res) {
       if (bekende.has(slug)) continue;
       items.push({
         id: null, slug, label: `(onbekend) ${slug}`, actief: false,
-        calls, is_registered: false,
+        vragenlijst: true, calls, is_registered: false,
       });
     }
 
