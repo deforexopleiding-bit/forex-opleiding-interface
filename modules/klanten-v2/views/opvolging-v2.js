@@ -2681,10 +2681,19 @@
       h += '<div class="sh"><div class="ic" style="background:var(--o-reds)">&#128269;</div><h3>Gearchiveerd vandaag — steekproef</h3></div><div class="card"><table>' +
         '<thead><tr><th>Naam</th><th>Reden</th><th>Moeite</th></tr></thead><tbody>' +
         st.data.gearchiveerd.map((a) => {
+          // Heeft de lead tijdens de call zelf nee gezegd, dan is 'is er
+          // genoeg moeite gedaan' geen zinnige vraag. Zonder deze uitzondering
+          // krijgt zo'n kaart een rood 'te weinig' — een verwijt voor iets
+          // waar niets aan te doen viel, en precies het soort onterechte
+          // beschuldiging dat we met deze wijziging willen voorkomen.
+          const nvt = a.reden_code === 'zoom_geen_interesse';
           const ok = a.bel_dagen >= ARCHIEF_MIN_DAGEN && a.wa_totaal >= ARCHIEF_MIN_WA;
+          const oordeel = nvt
+            ? '<span class="tag t-grey" title="de lead zei tijdens de call zelf nee">n.v.t.</span>'
+            : (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>');
           return '<tr><td><b>' + esc(a.naam) + '</b></td><td style="color:#6b7280">' + esc(a.archief_reden || '') + '</td>' +
             '<td>' + a.bel_totaal + '&times; gebeld op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') + ' &middot; ' + a.wa_totaal + '&times; WhatsApp ' +
-            (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>') + '</td></tr>';
+            oordeel + '</td></tr>';
         }).join('') + '</tbody></table></div>';
     }
 
@@ -3571,6 +3580,80 @@
     render();
   };
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // Q · DE UITKOMST VAN EEN ZOOMCALL WORDT ECHT WEGGESCHREVEN
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Twee van de vier knoppen lieten geen spoor na: 'klant geworden' toonde
+  // alleen een sluitknop en schreef niets, en 'geen interesse' vroeg Dave om een
+  // reden en gooide die tekst weg bij het sluiten. Er komt een rapportagemodule
+  // over Daves werk, en die zou nul sales tonen en bij elke gewonnen deal 'geen
+  // uitkomst geregistreerd' — het rapport zou hem beschuldigen van werk dat hij
+  // wél gedaan heeft.
+  //
+  // ÉÉN ADMINISTRATIE. De knoppen schrijven door naar de bestaande
+  // uitkomstmotor (api/follow-up-appointment-outcome.js). We voegen geen derde
+  // waarheid toe en raken de twee bestaande woordenlijsten niet aan — lees het
+  // waarschuwingsblok in dat bestand, met het productie-incident van 20 mei.
+  //
+  // WAAROM JUIST DEZE DRIE WOORDEN. 'terugbel' en 'later_opnieuw' liggen voor de
+  // hand bij 'wil nog beslissen', maar die maken een NIEUWE follow_up_lead aan
+  // in het oude systeem — en Opvolging maakt voor diezelfde persoon al een
+  // kaart. Dan staat dezelfde lead in twee modules op Dave te wachten, en dat is
+  // erger dan wat we repareren. 'gesprek_gehad' zet alleen de status en schrijft
+  // een notitie, en dat is precies wat we willen.
+  //
+  // NO-SHOW STAAT ER MET OPZET NIET IN. Het outcome 'no_show' maakt óók een
+  // follow_up_lead (terugbel over twee uur), en Opvolging zet die persoon
+  // vandaag al terug in de lijst. Diezelfde dubbeling. Die vraag ligt bij Maxim;
+  // tot hij beslist doet no-show wat hij deed.
+  const CALL_UITKOMST = {
+    klant_geworden   : 'sale',
+    geen_interesse   : 'wilt_niet_meer',
+    wil_nog_beslissen: 'gesprek_gehad',
+  };
+
+  /** Welk outcome hoort bij deze knop? null = niet doorschrijven. */
+  function outcomeVoorUitkomst(uitkomst) {
+    return Object.prototype.hasOwnProperty.call(CALL_UITKOMST, uitkomst)
+      ? CALL_UITKOMST[uitkomst] : null;
+  }
+
+  /**
+   * De uitkomst doorschrijven naar de motor. FAIL-SOFT, maar nooit stil.
+   *
+   * Geeft terug wat er gebeurd is, zodat de aanroeper het kan tonen:
+   *   { ok: true }                          — vastgelegd
+   *   { ok: false, reden, uitleg }          — niet vastgelegd, en waarom
+   *   null                                  — deze knop schrijft niets door
+   *
+   * Waarom zichtbaar en niet stil: mislukt dit ongemerkt, dan denkt Dave dat
+   * het genoteerd is en staat er straks in het rapport dat hij niets heeft
+   * ingevuld. Dat is precies de fout die we hier repareren.
+   */
+  async function schrijfCallUitkomst(uitkomst, call, notitie) {
+    const outcome = outcomeVoorUitkomst(uitkomst);
+    if (!outcome) return null;
+    const apptId = call && call.appointment_id;
+    if (!apptId) {
+      return { ok: false, reden: 'geen_afspraak',
+        uitleg: 'deze call heeft geen afspraak-id, dus er is niets om de uitkomst aan te hangen' };
+    }
+    try {
+      await post('/api/follow-up-appointment-outcome', {
+        appointment_id: apptId,
+        outcome,
+        // Daves eigen woorden gaan mee ACHTER de vaste zin van de motor. Zonder
+        // deze regel ziet wie de afspraakkaart opent 'geen interesse' zonder
+        // waarom.
+        ...(notitie ? { note: notitie } : {}),
+      });
+      return { ok: true, outcome };
+    } catch (e) {
+      return { ok: false, reden: 'motor', uitleg: (e && e.message) || 'onbekende fout' };
+    }
+  }
+
   window.__opvCallBevestig = async (uitkomst) => {
     const m = _ui.modal; if (!m) return;
     const c = callOp(m.callIndex); if (!c) return;
@@ -3588,14 +3671,44 @@
       if (!due) { alert('Kies eerst een dag.'); return; }
     }
 
-    // Geen interesse levert bewust GEEN taak op — net als bij een event dat
+    // Geen interesse levert bewust GEEN OPEN taak op — net als bij een event dat
     // zo eindigt. Een kaart die meteen dicht is komt met nul belpogingen in
     // Afgerond terecht en krijgt daar het oordeel 'te weinig moeite', terwijl
     // er nooit iets mee hoefde te gebeuren.
+    //
+    // Maar Daves reden mag niet meer verdwijnen: die tekst was tot nu toe het
+    // enige wat verloren ging, en het is precies wat het rapport straks moet
+    // lezen. Hij gaat naar de motor én blijft aan onze kant staan, ook als de
+    // motor onbereikbaar is.
     if (uitkomst === 'geen_interesse') {
-      _ui.modal = null; render();
+      const res = await schrijfCallUitkomst(uitkomst, c, notitie);
+      let bewaardHier = false;
+      try {
+        await post('/api/opvolging-taak-create', {
+          naam       : c.naam,
+          email      : c.email || null,
+          telefoon   : c.telefoon || null,
+          reden      : 'afgemeld',
+          reden_code : 'zoom_geen_interesse',
+          due        : vandaag(),
+          notitie,
+          badge_label: 'Call ' + nl(_ui.dagView || vandaag()),
+          bron_ref   : { appointment_id: c.appointment_id || null, start: c.start || null },
+          // Meteen dicht: er hoeft niets meer mee te gebeuren. De kaart bestaat
+          // alleen zodat de reden bewaard blijft en terugvindbaar is.
+          direct_archiveren: true,
+          archief_reden    : notitie,
+        });
+        bewaardHier = true;
+      } catch (e) {
+        console.warn('[opvolging-v2] reden bewaren mislukt:', (e && e.message) || e);
+      }
+      _ui.modal = null; leegTakenCache(); render();
+      meldUitkomst(res, { bewaardHier, notitie });
       return;
     }
+
+    const uitkomstRes = await schrijfCallUitkomst(uitkomst, c, notitie);
 
     try {
       await post('/api/opvolging-taak-create', {
@@ -3615,10 +3728,32 @@
         ...(uitkomst === 'no_show' ? {} : { poging_resultaat: 'gesproken, wil nog beslissen' }),
       });
       _ui.modal = null; leegTakenCache(); render();
+      meldUitkomst(uitkomstRes, { bewaardHier: true, notitie });
     } catch (e) {
       alert('Niet gelukt: ' + (e.message || 'onbekende fout'));
     }
   };
+
+  /**
+   * Zeggen dat de uitkomst NIET is vastgelegd. Alleen bij een mislukking.
+   *
+   * Zwijgen zou hier het ergste zijn: dan denkt Dave dat het genoteerd is, en
+   * staat er straks in het rapport dat hij niets heeft ingevuld.
+   */
+  function meldUitkomst(res, { bewaardHier, notitie } = {}) {
+    if (!res || res.ok) return;
+    const kern = 'De kaart is bijgewerkt, maar de uitkomst van deze call is NIET '
+      + 'vastgelegd in de afsprakenadministratie.';
+    const waarom = res.reden === 'geen_afspraak'
+      ? 'Reden: ' + res.uitleg + '.'
+      : 'Reden: ' + res.uitleg + '.';
+    const staat = notitie
+      ? (bewaardHier
+        ? '\n\nWat je hebt opgeschreven is wél bewaard in Opvolging.'
+        : '\n\nLet op: ook hier is het niet bewaard. Schrijf het ergens anders op.')
+      : '';
+    alert(kern + '\n' + waarom + staat + '\n\nGeef dit door, dan zetten we het handmatig recht.');
+  }
 
   // ── Aanmeldingen: de drie uitgangen ───────────────────────────────────────
   window.__opvAanmeldActie = (u) => {
@@ -3752,6 +3887,11 @@
    * rest gaat via de gewone handlers op window, zodat de test dezelfde weg
    * aflegt als een klik.
    */
+  // Q, getest in tests/opvolging-zoomuitkomsten.test.js.
+  window.__opvUitkomstHelpers = {
+    CALL_UITKOMST, outcomeVoorUitkomst, schrijfCallUitkomst, meldUitkomst,
+  };
+
   window.__opvModalHaak = {
     modalHtml,
     zetCalls: (lijst) => { _calls.key = vandaag(); _calls.data = lijst || []; _calls.error = null; },

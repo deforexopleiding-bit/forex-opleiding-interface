@@ -95,6 +95,12 @@ export default async function handler(req, res) {
         const bel = hist.filter((p) => p.soort === 'call');
         return {
           id: t.id, naam: t.naam, archief_reden: t.archief_reden,
+          // Waarom de kaart dicht is. Bij 'zoom_geen_interesse' is de vraag
+          // 'is er genoeg moeite gedaan' niet van toepassing: de lead heeft
+          // tijdens de call zelf nee gezegd. Zonder dit veld zou zo'n kaart
+          // een rood 'te weinig' krijgen — een verwijt voor iets waar niets
+          // aan te doen viel.
+          reden_code: t.reden_code || null,
           bel_totaal: bel.length,
           bel_dagen: new Set(bel.map((p) => isoDag(p.tijdstip))).size,
           wa_totaal: waTotaal(t.id),

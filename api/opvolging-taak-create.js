@@ -6,7 +6,8 @@
 // api/_lib/events-complete-core.js). Een call die vraagt om een vervolg had
 // nergens heen; dit endpoint sluit dat gat.
 //
-// POST { bron_ref, naam, email?, telefoon?, reden, due?, notitie?, badge_label?, bron? }
+// POST { bron_ref, naam, email?, telefoon?, reden, due?, notitie?, badge_label?, bron?,
+//        reden_code?, direct_archiveren?, archief_reden? }
 //   reden 'wil_nog_beslissen' → due verplicht, notitie verplicht
 //   reden 'no_show_call'      → due = vandaag als hij niet meegegeven is
 //
@@ -131,6 +132,19 @@ export default async function handler(req, res) {
       if (data && data[0]) bestaandeId = data[0].id;
     }
 
+    // Q (6 sep 2026) — een kaart die meteen dicht mag.
+    //
+    // Bij 'geen interesse' na een Zoomcall hoeft er niets meer te gebeuren,
+    // maar Daves reden moet wél bewaard blijven: die tekst is nu het enige wat
+    // verloren gaat, en het rapport over zijn werk moet 'm straks kunnen lezen.
+    // Zonder deze weg zou er een OPEN kaart ontstaan die morgen weer om
+    // aandacht vraagt voor iemand die net nee gezegd heeft.
+    const directArchiveren = b.direct_archiveren === true;
+    const archiefReden = b.archief_reden != null ? String(b.archief_reden).trim().slice(0, 2000) : '';
+    if (directArchiveren && !archiefReden) {
+      return res.status(400).json({ error: 'archief_reden is verplicht bij direct_archiveren' });
+    }
+
     const velden = {
       naam,
       email      : b.email ? String(b.email).trim() : null,
@@ -139,9 +153,14 @@ export default async function handler(req, res) {
       bron,
       bron_ref   : { ...bronRef, source: BRON_SOURCE[bron] },
       badge_label: b.badge_label ? String(b.badge_label).slice(0, 200) : null,
+      reden_code : b.reden_code ? String(b.reden_code).slice(0, 60) : null,
       due,
       later      : false,
-      status     : 'open',
+      status     : directArchiveren ? 'gearchiveerd' : 'open',
+      ...(directArchiveren ? {
+        archief_reden  : archiefReden,
+        gearchiveerd_at: new Date().toISOString(),
+      } : {}),
       notitie    : notitie || null,
       eigenaar_id: null,   // RLS is is_crm_staff(); zonder eigenaar is de kaart van het team
     };

@@ -12,7 +12,21 @@
 //   new_datetime?  : ISO,        // vereist bij verzetten
 //   duration_minutes?: number,   // bij verzetten (default 30)
 //   reden?         : string,     // bij annuleren
+//   note?          : string,     // vrije toevoeging ACHTER de vaste notitie
 // }
+//
+// OVER `note` (6 sep 2026, item Q)
+// De notitieteksten hieronder zijn vast per outcome, en dat blijft zo. `note`
+// wordt er ACHTER geplakt, gescheiden door ' — ', en verandert niets aan de
+// status, de GHL-sync of welke rij dan ook. Laat een aanroeper hem weg, dan is
+// het gedrag byte voor byte hetzelfde als voorheen; elke bestaande aanroeper
+// valt in dat pad en er staat een test op.
+//
+// Waarom achter en niet in plaats van: de cockpit herkent 'Geen interesse' aan
+// het begin van die regel. Die zin vervangen zou dat stilletjes breken.
+//
+// Dit raakt de twee uiteenlopende outcome-woordenlijsten NIET — zie het
+// waarschuwingsblok hieronder. Er komt geen naam bij en er verandert er geen.
 //
 // Effecten (per outcome):
 //   gesprek_gehad  → appointment.status='completed' + note
@@ -117,6 +131,18 @@ function monthsFromNow(months) {
   const d = new Date();
   d.setMonth(d.getMonth() + months);
   return d.toISOString();
+}
+
+/**
+ * De vaste zin, met een vrije toevoeging erachter.
+ *
+ * Geen toevoeging → de vaste zin, ongewijzigd. Dat is het pad waar elke
+ * bestaande aanroeper in valt, en het moet byte voor byte hetzelfde blijven.
+ */
+function metExtraNote(vast, extra) {
+  const toevoeging = typeof extra === 'string' ? extra.trim() : '';
+  if (!toevoeging) return vast;
+  return vast + ' — ' + toevoeging.slice(0, 500);
 }
 
 async function appendApptNote(appointmentId, text) {
@@ -541,7 +567,7 @@ export default async function handler(req, res) {
       await writePrevState(appointmentId, snapshot);
 
       await updateApptStatus(appointmentId, newStatus);
-      await appendApptNote(appointmentId, noteText);
+      await appendApptNote(appointmentId, metExtraNote(noteText, body.note));
 
       // GHL-status meesturen (cancelled/showed/noshow). Fail-soft —
       // outcome blijft succesvol, waarschuwing komt in warnings[].
