@@ -51,9 +51,16 @@ export function isMoeite(p) {
  */
 export function isContact(p) {
   if (!p) return false;
-  if (!isUitgaand(p)) return true;                      // de lead reageerde
-  const r = String(p.resultaat || '').toLowerCase();
-  if (p.soort === 'call') return /gesproken/.test(r);
+  // Inkomend telt alleen voor berichtsoorten. Een 'agenda_doorgestuurd' of
+  // 'ingepland' met richting 'in' zou anders stil als contact gaan tellen, en
+  // dan verdwijnt iemand uit de lijst zonder dat er iemand gereageerd heeft.
+  if (WA_SOORTEN.has(p.soort)) return !isUitgaand(p);
+  // Of een gesprek tot stand kwam staat nog wél in `resultaat`. Daar is geen
+  // kolom voor, en de twee waarden ('gesproken' / 'niet opgenomen') worden op
+  // één plek geschreven: bouwCallPoging in _lib/opvolging-call-link.js. Dat is
+  // iets anders dan de richting uit een zin afleiden — maar als deze ooit ook
+  // een kolom verdient, is dit de plek.
+  if (p.soort === 'call') return /gesproken/.test(String(p.resultaat || '').toLowerCase());
   return false;
 }
 

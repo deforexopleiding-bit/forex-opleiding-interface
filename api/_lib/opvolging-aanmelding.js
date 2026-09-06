@@ -40,6 +40,8 @@ const ZONE = 'Europe/Amsterdam';
  * betekent hier één regel erbij, niet een filter dat door de code heen verspreid
  * staat.
  */
+import { isContact } from './opvolging-poging-telling.js';
+
 export const MASTERCLASS_NIVEAU = 'masterclass';
 
 /** Vast, niet instelbaar. Vier dagen voor het event wordt de kaart wakker. */
@@ -208,15 +210,17 @@ export function kortePlaats(location) {
  *
  * Telt wel: een gesprek dat tot stand kwam, of een bericht dat de lead ons
  * stuurde.
+ *
+ * ÉÉN DEFINITIE, EN DIE STAAT IN _lib/opvolging-poging-telling.js.
+ *
+ * Hier stond een tweede: `/ontvangen/` op de tekst van `resultaat` — precies de
+ * parser waarvoor de kolom `richting` is aangelegd. Twee definities van
+ * hetzelfde begrip gaan een keer uit elkaar lopen zonder dat een test rood
+ * wordt, en dan bepaalt de oudste of iemand uit de lijst verdwijnt. De naam
+ * blijft staan zodat elke aanroeper werkt; de regel staat nog maar op één plek.
  */
 export function isEchtContact(poging) {
-  if (!poging) return false;
-  const resultaat = String(poging.resultaat || '').toLowerCase();
-  if (poging.soort === 'call') return /gesproken/.test(resultaat);
-  if (poging.soort === 'whatsapp' || poging.soort === 'spraakbericht') {
-    return /ontvangen/.test(resultaat);
-  }
-  return false;
+  return isContact(poging);
 }
 
 /** Heeft deze taak al echt contact gehad? Dan is hij klaar. */

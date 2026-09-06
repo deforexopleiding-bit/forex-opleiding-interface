@@ -2250,12 +2250,22 @@
     return [titel, plaats].filter(Boolean).map(esc).join(' &middot; ');
   }
 
-  /** Is er echt contact geweest? Zelfde regel als api/_lib/opvolging-aanmelding.js. */
+  /**
+   * Is er echt contact geweest?
+   *
+   * Zelfde regel als isContact() in api/_lib/opvolging-poging-telling.js. Een
+   * browser-view kan daar niet uit importeren, dus dit is een kopie — en
+   * tests/opvolging-pogingen-tellen.test.js legt de twee naast elkaar op een
+   * tabel gevallen, zodat ze niet uit elkaar kunnen lopen.
+   *
+   * De richting komt uit de kolom, niet uit de tekst van `resultaat`. Alleen of
+   * een gesprek tot stand kwam staat nog in die tekst: daar is geen kolom voor,
+   * en de waarde wordt op één plek geschreven (bouwCallPoging).
+   */
   function echtContact(p) {
     if (!p) return false;
-    const r = String(p.resultaat || '').toLowerCase();
-    if (p.soort === 'call') return /gesproken/.test(r);
-    if (p.soort === 'whatsapp' || p.soort === 'spraakbericht') return /ontvangen/.test(r);
+    if (p.soort === 'whatsapp' || p.soort === 'spraakbericht') return !uitgaand(p);
+    if (p.soort === 'call') return /gesproken/.test(String(p.resultaat || '').toLowerCase());
     return false;
   }
   const heeftContact = (t) => ((t && t.pogingen) || []).some(echtContact);

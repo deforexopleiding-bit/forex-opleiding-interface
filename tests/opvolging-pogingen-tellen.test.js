@@ -311,3 +311,76 @@ test('de migratie bestaat en is idempotent', () => {
   assert.match(sql, /CHECK \(richting IN \('uit', 'in'\)\)/);
   assert.match(sql, /DROP CONSTRAINT IF EXISTS/, 'anders faalt een tweede ronde');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ÉÉN DEFINITIE VAN 'ECHT CONTACT', OP DRIE PLEKKEN GEBRUIKT
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Er stonden er drie: isContact (nieuw, en werd nergens aangeroepen),
+// isEchtContact in opvolging-aanmelding.js (die de archiveerregel bepaalt) en
+// echtContact in de view. De twee die dráaiden lazen /ontvangen/ uit de tekst
+// van resultaat — precies de parser waarvoor de kolom `richting` is aangelegd.
+//
+// Dat is dezelfde vorm als de dode forceer-functie en als de 404 die er stond
+// en nooit draaide: iets dat er goed uitziet, getest is en niets doet, terwijl
+// de oude weg gewoon blijft lopen. En hier gevaarlijker, want twee definities
+// van hetzelfde begrip gaan een keer uit elkaar lopen zonder dat een test rood
+// wordt — en dan bepaalt de oudste of iemand uit Daves lijst verdwijnt.
+
+test('de archiveerregel gebruikt de gedeelde definitie', () => {
+  const b = readFileSync(join(ROOT, 'api/_lib/opvolging-aanmelding.js'), 'utf8');
+  assert.match(b, /import \{ isContact \} from '\.\/opvolging-poging-telling\.js'/);
+  assert.match(b, /export function isEchtContact\(poging\) \{\s*\n\s*return isContact\(poging\);/);
+});
+
+test('en er staat daar geen tekstparser meer op de richting', () => {
+  const code = readFileSync(join(ROOT, 'api/_lib/opvolging-aanmelding.js'), 'utf8')
+    .split('\n').filter((r) => !/^\s*(\/\/|\*|\/\*)/.test(r)).join('\n');
+  assert.ok(!/\/ontvangen\//.test(code), 'de richting hoort uit de kolom te komen');
+});
+
+test('isContact wordt daadwerkelijk aangeroepen, niet alleen getest', () => {
+  // De bewaking op precies het probleem: een gedeelde functie die nergens in
+  // productiecode voorkomt is geen gedeelde functie.
+  const gebruik = ['api/_lib/opvolging-aanmelding.js']
+    .map((p) => readFileSync(join(ROOT, p), 'utf8'))
+    .filter((b) => /isContact\(/.test(b));
+  assert.ok(gebruik.length >= 1, 'isContact hoort in productiecode gebruikt te worden');
+});
+
+test('de browser-kopie geeft exact dezelfde antwoorden', () => {
+  // Een view kan niet uit api/_lib importeren, dus daar staat een kopie. Deze
+  // tabel legt de twee naast elkaar zodat ze niet uit elkaar kunnen lopen —
+  // hetzelfde recept als bij de nummers-tweeling van de brug.
+  const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
+  const i = view.indexOf('function echtContact(p)');
+  assert.ok(i > 0, 'de kopie hoort te bestaan');
+  const blok = view.slice(i, view.indexOf('\n  }', i));
+  // De kopie draait echt, in een vm, tegen dezelfde gevallen.
+  const kopie = new Function('p', 'uitgaand', blok
+    .replace('function echtContact(p) {', '')
+    .replace(/uitgaand\(/g, 'uitgaand(') + '\n');
+  const uitgaandStub = (p) => !p || p.richting !== 'in';
+  const gevallen = [
+    { soort: 'whatsapp', richting: 'in', resultaat: 'antwoord ontvangen' },
+    { soort: 'whatsapp', richting: 'uit', resultaat: 'WhatsApp verstuurd' },
+    { soort: 'whatsapp', richting: 'uit', resultaat: 'antwoord ontvangen' },
+    { soort: 'spraakbericht', richting: 'in', resultaat: 'spraakbericht ontvangen' },
+    { soort: 'spraakbericht', richting: 'uit', resultaat: 'spraakbericht verstuurd' },
+    { soort: 'call', richting: 'uit', resultaat: 'gesproken' },
+    { soort: 'call', richting: 'uit', resultaat: 'niet opgenomen' },
+    { soort: 'agenda_doorgestuurd', richting: 'in', resultaat: 'gesproken' },
+    { soort: 'ingepland', richting: 'uit', resultaat: 'afspraak geboekt' },
+  ];
+  for (const g of gevallen) {
+    assert.equal(kopie(g, uitgaandStub), isContact(g), JSON.stringify(g));
+  }
+});
+
+test('een inkomende rij van een andere soort telt niet als contact', () => {
+  // Anders zou een 'agenda_doorgestuurd' met richting 'in' stil meetellen en
+  // verdwijnt iemand uit de lijst zonder dat er iemand gereageerd heeft.
+  for (const soort of ['agenda_doorgestuurd', 'ingepland', '', null]) {
+    assert.equal(isContact({ soort, richting: 'in', resultaat: 'gesproken' }), false, String(soort));
+  }
+});
