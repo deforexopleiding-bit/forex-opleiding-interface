@@ -3122,15 +3122,14 @@
       }
       const k = `${y}-${m}-${day}`;
       const entries = (byDay.get(k) || []).sort((a,b) => a.time - b.time);
-      const chips = entries.slice(0, 3).map(({ time, item }) => `
+      // Toon ALLE items van de dag (geen cap) — cel groeit mee in hoogte.
+      const chips = entries.map(({ time, item }) => `
         <div onclick="event.stopPropagation();window._lsOpenOpstartDetail('${esc(String(item.id))}')"
           title="${esc(item.naam || '')} · ${esc(item.email || '')}"
           style="display:block;padding:2px 6px;margin:2px 0;background:var(--brand-soft, rgba(10,116,144,.12));color:var(--brand,#0A7490);border-radius:4px;font-size:10.5px;line-height:1.35;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
           <span style="font-weight:600">${esc(fmtTime(time))}</span> ${esc(item.naam || '—')}
         </div>`).join('');
-      const meer = entries.length > 3
-        ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px">+${entries.length - 3} meer</div>`
-        : '';
+      const meer = '';
       const dayColor = isToday(day) ? 'var(--brand,#0A7490)' : 'var(--text-2)';
       const dayWeight = isToday(day) ? '700' : '500';
       const bg = isToday(day) ? 'var(--brand-soft, rgba(10,116,144,.06))' : 'var(--surface)';
