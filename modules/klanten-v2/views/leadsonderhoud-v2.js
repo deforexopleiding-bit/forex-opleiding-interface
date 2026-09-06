@@ -64,6 +64,7 @@
     // bereikbaar blijft. Filter-state per tab (periode/resultaat/bron) leeft
     // apart zodat we bij tab-switch niet refetchen.
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
+    funnels:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'all', lastKey: null },
     opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', tijd: 'aankomend', lastKey: null },
     vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     // v=17 (2026-08-28): Toegang-aanvragen tab (WhatsApp-gate).
@@ -4078,8 +4079,89 @@
     </div>`;
   }
 
+  // ── Funnels-tab ────────────────────────────────────────────────────────────
+  // Hardcoded registry (bron van waarheid = dfo-website BRON_TOEGESTAAN + routes).
+  // Uitbreiden = hier een regel toevoegen. status: 'actief' | 'geparkeerd'.
+  const FUNNEL_REGISTRY = [
+    { bron: '7-daagse-v1',            naam: '7-daagse (v1)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v1',            status: 'actief' },
+    { bron: '7-daagse-v2',            naam: '7-daagse (v2)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v2',            status: 'actief' },
+    { bron: 'kennismakingscursus-v1', naam: 'Mini-cursus (v1)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v1', status: 'actief' },
+    { bron: 'kennismakingscursus-v2', naam: 'Mini-cursus (v2)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v2', status: 'actief' },
+    { bron: 'website',                naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
+  ];
+  async function fetchFunnels(force) {
+    const st = _live.funnels;
+    const key = 'p=' + st.periode;
+    if (!force && st.lastKey === key && st.fetched && !st.error) return;
+    st.loading = true; st.error = null; st.lastKey = key;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/leads-per-bron-count?period=' + encodeURIComponent(st.periode));
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      const status = e?.status ? ' (HTTP ' + e.status + ')' : '';
+      st.error = 'Kon funnels niet laden' + status;
+      console.error('[ls-v2] funnels fetch fail:', e?.status, e?.body || e?.message);
+    }
+    st.loading = false; st.fetched = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsSetFunnelsPeriode = function (p) { _live.funnels.periode = p; fetchFunnels(true); };
+  function _lsFunnelStatusBadge(status) {
+    return status === 'geparkeerd'
+      ? '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Geparkeerd</span>'
+      : '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Actief</span>';
+  }
+  function _lsFunnelRowHtml(naam, product, route, statusBadge, aantal, mono) {
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 10px;font-weight:600">${esc(naam)}${mono ? `<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(mono)}</div>` : ''}</td>
+      <td style="padding:8px 10px">${esc(product || '—')}</td>
+      <td style="padding:8px 10px">${statusBadge}</td>
+      <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">${aantal == null ? '—' : esc(String(aantal))}</td>
+      <td style="padding:8px 10px">${route ? `<a href="${esc(route)}" target="_blank" rel="noopener" style="color:var(--brand)">Open ↗</a>` : '—'}</td>
+    </tr>`;
+  }
+  function funnelsView() {
+    const st = _live.funnels;
+    if (!st.fetched && !st.loading && !st.error) queueMicrotask(() => fetchFunnels(false));
+    const data = st.data || {};
+    const by = data.by_bron || {};
+    const chips = [['today', 'Vandaag'], ['week', 'Deze week'], ['month', 'Deze maand'], ['all', 'Alles']]
+      .map(([v, l]) => `<button class="chip ${st.periode === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetFunnelsPeriode('${v}')">${l}</button>`).join('');
+    const regBrons = new Set(FUNNEL_REGISTRY.map((f) => f.bron));
+    const funnelRows = FUNNEL_REGISTRY
+      .map((f) => _lsFunnelRowHtml(f.naam, f.product, f.route, _lsFunnelStatusBadge(f.status), by[f.bron] || 0, f.bron)).join('');
+    // Bron-waarden zonder registry-entry (bv. handmatig/meta): "overig".
+    const overigKeys = Object.keys(by).filter((b) => !regBrons.has(b)).sort((a, b) => a.localeCompare(b, 'nl'));
+    const overigRows = overigKeys
+      .map((b) => _lsFunnelRowHtml(b || '(leeg)', '—', null, '<span style="color:var(--text-3);font-size:11px">niet-funnel</span>', by[b], null)).join('');
+    const periodeLabel = { today: 'vandaag', week: 'deze week', month: 'deze maand', all: 'alle tijd' }[st.periode] || st.periode;
+    return `<div style="max-width:900px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
+        ${chips}
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : `${data.total || 0} leads · ${periodeLabel}`}</span>
+      </div>
+      ${st.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+            <th style="padding:8px 10px">Funnel</th><th style="padding:8px 10px">Product</th><th style="padding:8px 10px">Status</th>
+            <th style="padding:8px 10px;text-align:right">Leads (${esc(periodeLabel)})</th><th style="padding:8px 10px">Pagina</th>
+          </tr></thead>
+          <tbody>${funnelRows}${overigRows ? `<tr><td colspan="5" style="padding:6px 10px;background:var(--surface-2);color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Overig / niet-funnel</td></tr>${overigRows}` : ''}</tbody>
+        </table></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">Tellingen op basis van <code>leads.bron</code> (test-emails + afwijzers eruit). De funnellijst wordt beheerd in de code-registry; bron van waarheid voor de routes is dfo-website (BRON_TOEGESTAAN).</div>
+    </div>`;
+  }
+
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
+  window.DFO.VIEWS['leadsonderhoud/Funnels']        = funnelsView;
   window.DFO.VIEWS['leadsonderhoud/Opstartsessies'] = opstartsessiesView;
   window.DFO.VIEWS['leadsonderhoud/Vragenlijst']    = vragenlijstView;
   window.DFO.VIEWS['leadsonderhoud/Templates']      = templatesView;
