@@ -65,6 +65,8 @@
     // apart zodat we bij tab-switch niet refetchen.
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
     funnels:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'all', lastKey: null },
+    emails:         { loading: false, fetched: false, error: null, data: null, _seq: 0, filter: 'alle', mailbox: 'alle' },
+    emailPreview:   { open: false, naam: '', html: '' },
     opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', tijd: 'aankomend', lastKey: null },
     vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     // v=17 (2026-08-28): Toegang-aanvragen tab (WhatsApp-gate).
@@ -4159,9 +4161,122 @@
     </div>`;
   }
 
+  // ── E-mails-tab (overzicht van alle mail-templates/verzenders) ──────────────
+  async function fetchEmails(force) {
+    const st = _live.emails;
+    if (!force && st.fetched && !st.error) return;
+    st.loading = true; st.error = null;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/email-overzicht');
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      const status = e?.status ? ' (HTTP ' + e.status + ')' : '';
+      st.error = 'Kon e-mailoverzicht niet laden' + status;
+      console.error('[ls-v2] emails fetch fail:', e?.status, e?.body || e?.message);
+    }
+    st.loading = false; st.fetched = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsSetEmailFilter  = function (f) { _live.emails.filter = f; if (window.DFO?.render) window.DFO.render(); };
+  window._lsSetEmailMailbox = function (sel) { _live.emails.mailbox = String(sel.value || 'alle'); if (window.DFO?.render) window.DFO.render(); };
+  function _lsAlleEmailRijen() {
+    const c = (_live.emails.data && _live.emails.data.categories) || {};
+    return [].concat(c.email_templates || [], c.onderhoud_sjablonen || [], c.code || []);
+  }
+  window._lsEmailPreview = function (bron, id) {
+    const row = _lsAlleEmailRijen().find((r) => r.bron === bron && String(r.id) === String(id));
+    if (!row) return;
+    _live.emailPreview = { open: true, naam: row.naam || '', html: row.preview_html || '' };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsCloseEmailPreview = function () { _live.emailPreview = { open: false, naam: '', html: '' }; if (window.DFO?.render) window.DFO.render(); };
+  window._lsEmailBewerk = function () { if (window.DFO?.goMod) window.DFO.goMod('instellingen'); };
+  function _lsEmailBronBadge(bron) {
+    if (bron === 'email_templates') return '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">DB · email_templates</span>';
+    if (bron === 'onderhoud_sjablonen') return '<span style="background:var(--brand-soft, rgba(10,116,144,.12));color:var(--brand,#0A7490);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">DB · sjablonen</span>';
+    return '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Code</span>';
+  }
+  function emailsView() {
+    const st = _live.emails;
+    if (!st.fetched && !st.loading && !st.error) queueMicrotask(() => fetchEmails(false));
+    let rows = _lsAlleEmailRijen();
+    // Categorie-filter
+    if (st.filter !== 'alle') rows = rows.filter((r) => r.bron === st.filter);
+    // Mailbox-filter
+    const mailboxen = [...new Set(_lsAlleEmailRijen().map((r) => r.mailbox).filter(Boolean))].sort();
+    if (st.mailbox !== 'alle') rows = rows.filter((r) => r.mailbox === st.mailbox);
+
+    const catChip = (v, l) => `<button class="chip ${st.filter === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetEmailFilter('${v}')">${l}</button>`;
+    const mailboxOpts = ['<option value="alle">Alle mailboxen</option>']
+      .concat(mailboxen.map((mb) => `<option value="${esc(mb)}" ${st.mailbox === mb ? 'selected' : ''}>${esc(mb)}</option>`)).join('');
+
+    const rowHtml = (r) => {
+      const bew = r.bewerkbaar
+        ? '<span style="color:var(--emerald);font-weight:600">✓ ja</span>'
+        : '<span style="color:var(--text-3)">nee (read-only)</span>';
+      const previewBtn = r.preview_html
+        ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsEmailPreview('${esc(r.bron)}','${esc(String(r.id))}')">Preview</button>`
+        : '';
+      const bewerkBtn = r.bron === 'email_templates'
+        ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:var(--brand)" title="Bewerk in Instellingen → E-mailtemplates" onclick="window._lsEmailBewerk()">Bewerk ↗</button>`
+        : '';
+      const codeBestand = r.bestand ? `<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(r.bestand)}</div>` : '';
+      const inact = r.actief === false ? ' <span style="color:var(--rose);font-size:10.5px">(inactief)</span>' : '';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;font-weight:600">${esc(r.naam || '—')}${inact}${r.subject ? `<div style="color:var(--text-3);font-size:10.5px">${esc(r.subject)}</div>` : ''}</td>
+        <td style="padding:8px 10px">${esc(r.trigger || r.doel || '—')}${codeBestand}</td>
+        <td style="padding:8px 10px;white-space:nowrap">${esc(r.mailbox || '—')}</td>
+        <td style="padding:8px 10px">${_lsEmailBronBadge(r.bron)}</td>
+        <td style="padding:8px 10px">${bew}</td>
+        <td style="padding:8px 10px;white-space:nowrap">${previewBtn} ${bewerkBtn}</td>
+      </tr>`;
+    };
+
+    const body = rows.length
+      ? rows.map(rowHtml).join('')
+      : `<tr><td colspan="6" style="padding:34px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen e-mails in dit filter.'}</td></tr>`;
+
+    const tot = (_live.emails.data && _live.emails.data.totalen) || {};
+    const previewModal = _live.emailPreview.open ? `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseEmailPreview()">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(760px,100%);max-height:90vh;overflow:hidden;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+            <div style="font-size:14px;font-weight:600">Preview — ${esc(_live.emailPreview.naam)}</div>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseEmailPreview()">✕</button>
+          </div>
+          <iframe sandbox style="width:100%;height:62vh;border:0;background:#fff" srcdoc="${String(_live.emailPreview.html || '<p>(geen HTML-inhoud)</p>').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe>
+        </div>
+      </div>` : '';
+
+    return `<div style="max-width:960px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Categorie</span>
+        ${catChip('alle', 'Alles')}${catChip('email_templates', `DB · templates (${tot.email_templates || 0})`)}${catChip('onderhoud_sjablonen', `DB · sjablonen (${tot.onderhoud_sjablonen || 0})`)}${catChip('code', `Code (${tot.code || 0})`)}
+        <select onchange="window._lsSetEmailMailbox(this)" style="padding:5px 9px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12px;margin-left:auto">${mailboxOpts}</select>
+      </div>
+      ${st.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+            <th style="padding:8px 10px">Naam</th><th style="padding:8px 10px">Doel / trigger</th><th style="padding:8px 10px">Mailbox</th>
+            <th style="padding:8px 10px">Bron</th><th style="padding:8px 10px">Bewerkbaar</th><th style="padding:8px 10px"></th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">DB-templates (email_templates) zijn bewerkbaar via Instellingen → E-mailtemplates. onderhoud_sjablonen (toelating/afwijzing) worden op dfo-website beheerd — hier alleen preview. Code-mails zijn hardcoded (bestand vermeld).</div>
+      ${previewModal}
+    </div>`;
+  }
+
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
   window.DFO.VIEWS['leadsonderhoud/Funnels']        = funnelsView;
+  window.DFO.VIEWS['leadsonderhoud/E-mails']        = emailsView;
   window.DFO.VIEWS['leadsonderhoud/Opstartsessies'] = opstartsessiesView;
   window.DFO.VIEWS['leadsonderhoud/Vragenlijst']    = vragenlijstView;
   window.DFO.VIEWS['leadsonderhoud/Templates']      = templatesView;
