@@ -141,7 +141,15 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
       // Begrensd: het is een vast woord uit het protocol, maar een eindeloze
       // sleutelruimte in /status is nooit de bedoeling.
       if (t.length > 40) return;
-      if (!/^[a-z0-9_]+$/.test(t)) return;
+      // MOET MET EEN LETTER BEGINNEN. De eerste versie stond [a-z0-9_]+ toe, en
+      // daar voldoet '32470123456' aan — een telefoonnummer als sleutel in
+      // /status, in de teller die naar privacy vernoemd is.
+      //
+      // Er lekte niets, want systeemtype() wordt alleen met msg.type
+      // aangeroepen. Dat is precies wat het gevaarlijk maakte: de wacht stond
+      // er, hij was groen, en hij liet het ene ding door waarvoor hij bedoeld
+      // is. Een protocolwoord begint met een letter; een nummer niet.
+      if (!/^[a-z][a-z0-9_]*$/.test(t)) return;
       systeemTypes[t] = (systeemTypes[t] || 0) + 1;
     },
 

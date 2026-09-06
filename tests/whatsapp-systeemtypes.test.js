@@ -224,24 +224,49 @@ test("'systeemtype' is een geldige reden en telt per event-type", () => {
 });
 
 test('de teller draagt ALLEEN het type, nooit een nummer of tekst', () => {
+  // De eerste versie van deze test gaf systeemtype() een keurig type mee en zette
+  // het nummer alleen in negeer() — dus hij toetste juist de weg waar het nummer
+  // nooit langskomt. Nu gaat het nummer er langs de voordeur in, en wordt de
+  // hele status-JSON nagekeken.
   const t = maakTellers();
+  t.systeemtype('32470123456');
+  t.systeemtype('+32 470 12 34 56');
   t.systeemtype('e2e_notification');
   t.negeer('message', 'systeemtype', '32470123456@c.us');
   const s = JSON.stringify(t.status());
-  assert.ok(!s.includes('32470123456'), 'geen nummer');
+  assert.ok(!s.includes('32470123456'), 'geen nummer, ook niet als sleutel');
+  assert.ok(!/\d{7,}/.test(s), 'niets dat op een telefoonnummer lijkt');
   assert.ok(!/[A-Za-z]{2,}\s[A-Za-z]{2,}\s[A-Za-z]{2,}/.test(s), 'geen zinnen');
+});
+
+test('een sleutel moet met een letter beginnen, dus een nummer valt af', () => {
+  // '32470123456' voldeed aan de eerste regel ([a-z0-9_]+) en kwam dus in
+  // /status terecht: een telefoonnummer als sleutel, in de teller die naar
+  // privacy vernoemd is. Er lekte niets omdat systeemtype() alleen met msg.type
+  // wordt aangeroepen — en dat is precies wat het gevaarlijk maakte.
+  const t = maakTellers();
+  for (const rommel of ['32470123456', '0472223752', '1', '_intern', '9lives']) {
+    t.systeemtype(rommel);
+  }
+  assert.deepEqual(t.status().systeem_types, {}, 'geen enkele hiervan is een protocolwoord');
 });
 
 test('een verzonnen type kan de tellers niet volschrijven', () => {
   const t = maakTellers();
   t.systeemtype('x'.repeat(200));
   t.systeemtype('met spaties en <html>');
-  t.systeemtype('32470123456');
-  const k = Object.keys(t.status().systeem_types);
-  assert.ok(!k.some((x) => x.length > 40), 'niets langer dan 40');
-  assert.ok(!k.includes('met spaties en <html>'));
-  assert.deepEqual(k, ['32470123456'].filter((x) => /^[a-z0-9_]+$/.test(x)),
-    'alleen wat op een protocolwoord lijkt');
+  t.systeemtype('tekst met een <script>');
+  assert.deepEqual(t.status().systeem_types, {});
+});
+
+test('en een echt protocolwoord komt er nog steeds gewoon in', () => {
+  // Een filter dat alles tegenhoudt is geen filter maar een muur.
+  const t = maakTellers();
+  for (const echt of ['e2e_notification', 'gp2', 'protocol', 'call_log', 'unknown', 'geen_type']) {
+    t.systeemtype(echt);
+  }
+  assert.deepEqual(Object.keys(t.status().systeem_types).sort(),
+    ['call_log', 'e2e_notification', 'geen_type', 'gp2', 'protocol', 'unknown']);
 });
 
 test('een ontbrekend type krijgt een eigen bak, geen lege sleutel', () => {
