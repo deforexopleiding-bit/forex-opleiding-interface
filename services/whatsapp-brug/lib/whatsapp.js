@@ -15,7 +15,7 @@ import qrcode from 'qrcode';
 import { normaliseerNummer, naarChatId } from './nummers.js';
 // De vorm van elke gebeurtenis staat apart en dependency-vrij, zodat hij te
 // testen is zonder puppeteer of een gekoppelde telefoon.
-import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep } from './gebeurtenis.js';
+import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep, isEchtGesprek } from './gebeurtenis.js';
 import { maakTellers, jidVorm } from './tellers.js';
 import { maakLidkaart } from './lidkaart.js';
 import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET, FOUT } from './uitkomst.js';
@@ -204,6 +204,19 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // Elke weg houdt bij: hoe vaak geprobeerd, hoe vaak gelukt, en of hij
   // überhaupt beschikbaar is. Daarmee is 'stilte' onmogelijk geworden: na één
   // testbericht staat er welke weg werkte, en welke niet bestond.
+  /**
+   * Weiger wat geen gesprek is, en tel WELK type dat was.
+   *
+   * Staat op elk van de drie paden NA leadlijst.mag(): de privacyvolgorde
+   * verschuift niet. Het filter blijft de eerste regel; dit is de tweede.
+   */
+  function isSysteemBericht(eventType, msg, jid) {
+    if (isEchtGesprek(msg?.type)) return false;
+    tellers.systeemtype(msg?.type);
+    negeer(eventType, 'systeemtype', jid);
+    return true;
+  }
+
   const WEGEN = ['getNumberId', 'getChatById', 'getChats', 'getMessageById', 'msg_getchat',
                  'chat_contact', 'contact_data', 'msg_data'];
   const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null, statussen: {}, laatste_fout: null }]));
@@ -712,6 +725,11 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // FILTER. Alles hieronder raakt de tekst aan, en pas hierna wordt er iets
       // van dit bericht onthouden.
       if (!leadlijst.mag(nummer)) { negeer('message', 'niet_op_leadlijst', van); return; }
+      // WhatsApp stuurt over deze stroom ook dingen die geen bericht zijn. Een
+      // e2e_notification is een ververste sleutel, geen antwoord van de lead —
+      // en het CRM maakte er een poging 'antwoord ontvangen' van. Zie
+      // isEchtGesprek() in lib/gebeurtenis.js.
+      if (isSysteemBericht('message', msg, van)) return;
       bewaarBerichtvormen(ruw.vorm);
       tellers.liet('message');
       await webhook.duw({
@@ -762,6 +780,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       const nummer = ruw.nummer || await bepaalNummer(msg?.to);
       // FILTER, en pas hierna wordt het nummer of de tekst ergens voor gebruikt.
       if (!leadlijst.mag(nummer)) { negeer('message_create', 'niet_op_leadlijst', msg?.to); return; }
+      if (isSysteemBericht('message_create', msg, msg?.to)) return;
       bewaarBerichtvormen(ruw.vorm);
       const g = bouwUitgaandeGebeurtenis(msg);
       if (!g) { negeer('message_create', 'onbruikbaar', msg?.to); return; }
@@ -794,6 +813,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       if (isGroep(jid)) { negeer('message_ack', 'groep', jid); return; }
       const nummer = await bepaalNummer(jid);
       if (!leadlijst.mag(nummer)) { negeer('message_ack', 'niet_op_leadlijst', jid); return; }
+      // Een ack op een e2e_notification is net zo min een verstuurd bericht als
+      // die notification zelf er een was.
+      if (isSysteemBericht('message_ack', msg, jid)) return;
       const g = bouwAckGebeurtenis(msg, ack);
       // ACK_SOORT kent -1 en 0 niet: dat zijn statussen die nog niets zeggen.
       if (!g) { negeer('message_ack', 'geen_ack_soort', jid); return; }

@@ -12,6 +12,54 @@
 /** Ack-codes van whatsapp-web.js naar iets leesbaars. -1 en 0 leveren niets op. */
 export const ACK_SOORT = { 1: 'verzonden', 2: 'afgeleverd', 3: 'gelezen', 4: 'gelezen' };
 
+/**
+ * BESCHRIJFT DIT TYPE EEN ECHT GESPREK?
+ *
+ * WhatsApp stuurt over dezelfde stroom ook dingen die geen bericht zijn. In
+ * productie stond een rij in opvolging_wa_berichten met richting 'in',
+ * media_type 'e2e_notification' en geen tekst — en daarnaast een poging met
+ * resultaat 'antwoord ontvangen'. Er was NIETS geantwoord: WhatsApp had een
+ * sleutel ververst, en het systeem noteerde dat als contact met de lead.
+ *
+ * Dat is de fout die we steeds opnieuw maken — een gebeurtenis die iets anders
+ * betekent dan waar hij voor doorgaat — en hij zat in de cijfers waar Dave op
+ * stuurt: de dekking liep op en een lead die nooit reageerde zag er beantwoord
+ * uit.
+ *
+ * EEN WEIGERLIJST, GEEN TOELATINGSLIJST. Dat is met opzet en het is de
+ * belangrijkste keuze in dit bestand. Een toelatingslijst laat een type dat
+ * WhatsApp volgend jaar toevoegt stil vallen, en dan mist Dave een echt bericht
+ * zonder dat iemand het merkt. Stil laten vallen van iets echts is erger dan
+ * een systeemmelding te veel: die zie je, en dan vul je de lijst aan.
+ *
+ * Vandaar ook dat elke weigering per type geteld wordt (zie lib/tellers.js).
+ * Duikt er een onbekend type op dat massaal binnenkomt, dan staat dat in
+ * /status — alleen het type, nooit een nummer of tekst.
+ */
+export const SYSTEEM_TYPES = new Set([
+  'e2e_notification',        // sleutel ververst — dit was de rij in productie
+  'notification_template',   // WhatsApp's eigen systeemmelding
+  'gp2',                     // groepsmutatie (iemand toegevoegd/verwijderd)
+  'protocol',                // protocolbericht, bv. een verlopen bericht
+  'ciphertext',              // nog niet ontsleuteld; er is geen inhoud
+  'revoked',                 // bericht ingetrokken
+  'call_log',                // gemiste of gevoerde oproep, geen bericht
+  'broadcast_notification',  // meldingen rond een broadcastlijst
+  'unknown',                 // whatsapp-web.js kon het type niet plaatsen
+]);
+
+/**
+ * Is dit type een echt gesprek? Onbekend = ja, met opzet — zie hierboven.
+ *
+ * Een ontbrekend type telt óók als gesprek: whatsapp-web.js levert `type` niet
+ * altijd, en een bericht wegdoen omdat een veld ontbrak is precies het stille
+ * verlies dat we niet willen.
+ */
+export function isEchtGesprek(mediaType) {
+  if (mediaType === null || mediaType === undefined || mediaType === '') return true;
+  return !SYSTEEM_TYPES.has(String(mediaType).toLowerCase());
+}
+
 /** Types die WhatsApp gebruikt voor een ingesproken bericht. */
 export const SPRAAK_TYPES = new Set(['ptt', 'audio']);
 
@@ -112,6 +160,10 @@ export function bouwHistoriekBericht(msg, nu = Date.now()) {
   if (!msg || !msg.id) return null;
   const jid = msg.fromMe === true ? msg.to : msg.from;
   if (isGroep(jid)) return null;
+  // Ook hier: een e2e_notification is geen gespreksregel. Hij raakt de
+  // poging-telling niet aan, maar zou wel als lege bubbel in het gesprek
+  // verschijnen — en dan staat er iets in de draad wat niemand gezegd heeft.
+  if (!isEchtGesprek(msg.type)) return null;
   const seconden = Number(msg.timestamp);
   return {
     bericht_id: msg.id?._serialized || null,

@@ -33,7 +33,11 @@ export const EVENT_TYPES = ['message', 'message_create', 'message_ack'];
  *   geen_ack_soort    — ack-code die geen betekenis heeft (-1 of 0).
  *   onbruikbaar       — de bouwfunctie kon er niets van maken.
  */
-export const REDENEN = ['niet_van_ons', 'niet_op_leadlijst', 'groep', 'geen_ack_soort', 'onbruikbaar'];
+export const REDENEN = ['niet_van_ons', 'niet_op_leadlijst', 'groep', 'geen_ack_soort', 'onbruikbaar',
+  //   systeemtype       — WhatsApp stuurde geen bericht maar een systeemmelding
+  //                       (e2e_notification en verwanten). Zie isEchtGesprek()
+  //                       in lib/gebeurtenis.js.
+  'systeemtype'];
 
 /** Hoe de identiteit van de tegenpartij eruitzag toen we hem lieten vallen. */
 export const OPLOS_WEGEN = ['jid', 'lidkaart', 'contact', 'contact_zonder_nummer', 'mislukt', 'geen_jid'];
@@ -78,6 +82,11 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
   // vijftien is opnieuw een LID. Dat onderscheid is het verschil tussen 'de
   // oplossing werkte' en 'de teller zei succes terwijl er niets vertaald is'.
   const opgelostVorm = {};
+  // Welk systeemtype er geweigerd is, en hoe vaak. Alleen het type — dat is een
+  // vast woord uit het WhatsApp-protocol, geen gegeven van iemand. Dit is de
+  // meting waarmee we zien of de weigerlijst aangevuld moet worden: staat er een
+  // onbekend type met een hoog aantal, dan hoort dat erbij.
+  const systeemTypes = {};
   let laatsteGenegeerd = null;   // { type, reden, vorm, tijd } — geen inhoud
 
   const geldigType  = (t) => EVENT_TYPES.includes(t);
@@ -119,6 +128,23 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
     /** Hij ging door naar het CRM. */
     liet(type) { if (geldigType(type)) doorgelaten[type] += 1; },
 
+    /**
+     * Welk systeemtype we geweigerd hebben. ALLEEN het type.
+     *
+     * Losse teller naast negeer(), want de reden zegt alleen DAT het een
+     * systeemtype was; hier staat WELK. Zonder dat tweede is niet te zien of de
+     * weigerlijst compleet is, en dat is precies de vraag die deze lijst
+     * openhoudt.
+     */
+    systeemtype(type) {
+      const t = String(type == null || type === '' ? 'geen_type' : type).toLowerCase();
+      // Begrensd: het is een vast woord uit het protocol, maar een eindeloze
+      // sleutelruimte in /status is nooit de bedoeling.
+      if (t.length > 40) return;
+      if (!/^[a-z0-9_]+$/.test(t)) return;
+      systeemTypes[t] = (systeemTypes[t] || 0) + 1;
+    },
+
     /** Welke ack-code kwam voorbij. Alleen het getal. */
     ack(code) {
       // Let op: Number(null) is 0 en Number('') ook. Zonder deze regel telt een
@@ -143,6 +169,7 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
         vormen     : { ...vormen },
         opgelost   : { ...opgelost },
         opgelost_vorm: { ...opgelostVorm },
+        systeem_types: { ...systeemTypes },
         laatste_genegeerd: laatsteGenegeerd ? { ...laatsteGenegeerd } : null,
       };
     },
