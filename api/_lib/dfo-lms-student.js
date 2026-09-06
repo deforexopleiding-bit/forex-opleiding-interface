@@ -54,6 +54,18 @@ const PRODUCT_SOORT_MAP = Object.freeze({
   'membership': 'membership',
 });
 
+// hlms_student.herkomst — waar de rij vandaan komt. 'crm' is een BESTAANDE
+// waarde in de HERKOMSTEN-lijst aan LMS-kant; we voegen er bewust geen
+// nieuwe variant aan toe (een 'crm_onboarding' zou er wél een zijn, en
+// onbekende waarden vallen aan de leeskant stil om — zelfde risico als bij
+// product_soort, want ook deze kolom heeft geen CHECK).
+//
+// Wordt ALLEEN bij het aanmaken gezet, nooit bij het overnemen van een
+// bestaande rij: die is ergens anders ontstaan en dat hoort zo te blijven
+// staan. Anders zou een student die ooit uit Bubble geïmporteerd is na een
+// koppeling ineens als CRM-aanmaak te boek staan.
+const HERKOMST_CRM = 'crm';
+
 /** @returns {string|null} 'mentorship' | 'membership', of null bij onbekend. */
 export function bepaalProductSoort(traject) {
   const ruw = String(traject?.type || '').trim().toLowerCase();
@@ -355,6 +367,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
       calls_totaal     : bepaalCallsTotaal(traject),
       mentor_id        : mentorId,
       crm_onboarding_id: onboardingId,
+      herkomst         : HERKOMST_CRM,
     };
 
     const { data: gemaakt, error: insErr } = await lms

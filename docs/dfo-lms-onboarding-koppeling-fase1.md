@@ -124,8 +124,20 @@ overschreven — die kan daar met opzet gezet zijn.
 `uitnodiging_*` en `aangemaakt_door` blijven ongemoeid. Fase 1 legt alleen het
 studentfeit vast; inloggen en uitnodigen is een latere fase.
 
-`herkomst` wordt bewust ook niet gezet: onbekend of daar een vaste
-woordenlijst op staat, en `crm_onboarding_id` identificeert onze rijen al.
+## herkomst
+
+`herkomst` wordt bij het **aanmaken** op `'crm'` gezet (`HERKOMST_CRM` in
+`api/_lib/dfo-lms-student.js`). Dat is een bestaande waarde in de
+HERKOMSTEN-lijst aan LMS-kant; er wordt bewust géén nieuwe variant
+geïntroduceerd. De kolom heeft — net als `product_soort` — geen CHECK, dus
+een onbekende waarde zou niet tegengehouden worden maar aan de leeskant stil
+omvallen. Zonder deze waarde staan door het CRM aangemaakte studenten
+gelabeld alsof ze uit Bubble geïmporteerd zijn.
+
+Bij het **overnemen** van een bestaande rij wordt `herkomst` niet aangeraakt.
+Die student is ergens anders ontstaan en dat hoort te blijven staan; anders
+zou een uit Bubble geïmporteerde student na een koppeling ineens als
+CRM-aanmaak te boek staan.
 
 ## Uitrol — geen inhaalslag
 
