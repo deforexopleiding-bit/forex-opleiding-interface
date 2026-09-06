@@ -27,14 +27,14 @@ import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendWelkomMail } from './mailer.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
+// E-mail-builders (welkom/bevestiging + dag-6) staan als pure render-functies in
+// een gedeelde module, zodat de E-mails-tab er ook een echte preview van rendert.
+import { mailBevestigingA, mailBevestigingB, mailDag6A, mailDag6B } from './_lib/toegang-cron-mails.js';
 
 const NACHT_START_HOUR = 21;
 const NACHT_EIND_HOUR  = 8;
 const VERVALLEN_UREN_NA_48U = 24;   // na 48u-reminder + 24u zonder reactie → vervallen
 const DAG6_UREN = 6 * 24;
-
-// Statische call-link (voorlopig). Per-bron dynamisch = latere optie.
-const CALL_LINK = 'https://deforexopleiding.nl/agenda';
 
 // v=5 (2026-08-28): expliciete afzendlijn = welkom-nummer via bestaande
 // whatsapp_module_config-rij module='leadsonderhoud' (label "Esmee" —
@@ -63,89 +63,6 @@ async function resolveWelkomPhoneId() {
   }
   return process.env.WELKOM_WHATSAPP_PHONE_NUMBER_ID || null;
 }
-
-// ── E-mail-templates (named constants, makkelijk aanpasbaar) ───────────
-// Body-generatoren: (voornaam, callMoment?) → { subject, text, html }
-const MAIL_BEVESTIGING_A = (voornaam, callMoment) => {
-  const naam = voornaam || 'daar';
-  const moment = callMoment || 'het geplande moment';
-  return {
-    subject: 'Nog één stapje — check je WhatsApp ✅',
-    text:
-      `Hoi ${naam},\n\n` +
-      `Je aanvraag is binnen, en je opstartsessie staat genoteerd voor ${moment}. ` +
-      `We hebben je zojuist een berichtje via WhatsApp gestuurd — reageer daar even op ` +
-      `(een "ja" volstaat), dan ontvang je meteen je persoonlijke inloggegevens in je mailbox.\n\n` +
-      `Tot snel! Team De Forex Opleiding`,
-    html:
-      `<p>Hoi ${naam},</p>` +
-      `<p>Je aanvraag is binnen, en je opstartsessie staat genoteerd voor <b>${moment}</b>. ` +
-      `We hebben je zojuist een berichtje via WhatsApp gestuurd — reageer daar even op ` +
-      `(een "ja" volstaat), dan ontvang je meteen je persoonlijke inloggegevens in je mailbox.</p>` +
-      `<p>Tot snel!<br>Team De Forex Opleiding</p>`,
-  };
-};
-
-const MAIL_BEVESTIGING_B = (voornaam) => {
-  const naam = voornaam || 'daar';
-  return {
-    subject: 'Nog één stapje — check je WhatsApp ✅',
-    text:
-      `Hoi ${naam},\n\n` +
-      `Je aanvraag is binnen! We hebben je zojuist een berichtje via WhatsApp gestuurd — ` +
-      `reageer daar even op (een "ja" volstaat), dan ontvang je meteen je persoonlijke ` +
-      `inloggegevens in je mailbox.\n\n` +
-      `Heb je nog geen kennismakingscall ingepland? Doe dat hier even, dan halen we samen ` +
-      `het meeste uit je start: ${CALL_LINK}\n\n` +
-      `Tot zo! Team De Forex Opleiding`,
-    html:
-      `<p>Hoi ${naam},</p>` +
-      `<p>Je aanvraag is binnen! We hebben je zojuist een berichtje via WhatsApp gestuurd — ` +
-      `reageer daar even op (een "ja" volstaat), dan ontvang je meteen je persoonlijke ` +
-      `inloggegevens in je mailbox.</p>` +
-      `<p>Heb je nog geen kennismakingscall ingepland? Doe dat <a href="${CALL_LINK}">hier</a> ` +
-      `even, dan halen we samen het meeste uit je start.</p>` +
-      `<p>Tot zo!<br>Team De Forex Opleiding</p>`,
-  };
-};
-
-const MAIL_DAG6_A = (voornaam) => {
-  const naam = voornaam || 'daar';
-  return {
-    subject: 'Morgen je laatste dag — hoe was het?',
-    text:
-      `Hoi ${naam},\n\n` +
-      `Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
-      `ervaren hebt — reageer gerust even, ik hoor het graag!\n\n` +
-      `Groet, Team De Forex Opleiding`,
-    html:
-      `<p>Hoi ${naam},</p>` +
-      `<p>Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
-      `ervaren hebt — reageer gerust even, ik hoor het graag!</p>` +
-      `<p>Groet,<br>Team De Forex Opleiding</p>`,
-  };
-};
-
-const MAIL_DAG6_B = (voornaam) => {
-  const naam = voornaam || 'daar';
-  return {
-    subject: 'Morgen je laatste dag — hoe was het?',
-    text:
-      `Hoi ${naam},\n\n` +
-      `Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
-      `ervaren hebt — reageer gerust even, ik hoor het graag!\n\n` +
-      `En wil je er echt mee verder? Plan hier een gratis opstartsessie in, dan kijken we ` +
-      `samen wat bij je past: ${CALL_LINK}\n\n` +
-      `Groet, Team De Forex Opleiding`,
-    html:
-      `<p>Hoi ${naam},</p>` +
-      `<p>Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
-      `ervaren hebt — reageer gerust even, ik hoor het graag!</p>` +
-      `<p>En wil je er echt mee verder? Plan <a href="${CALL_LINK}">hier</a> een gratis ` +
-      `opstartsessie in, dan kijken we samen wat bij je past.</p>` +
-      `<p>Groet,<br>Team De Forex Opleiding</p>`,
-  };
-};
 
 // Fail-soft lookup: haal het geplande call-moment op voor een aanvraag met
 // call_geboekt=true. Match op telefoon (last-9-digits) tegen
@@ -389,13 +306,13 @@ export default async function handler(req, res) {
         waVarsOverride = [a.voornaam || 'daar', callMoment || 'het geplande moment'];
       }
       const wa  = await stuurWa(a, cfg, live, welkomPhoneId, waVarsOverride);
-      // Mail A/B via named constants. A hergebruikt callMoment (fail-soft
-      // fallback in MAIL_BEVESTIGING_A: 'het geplande moment').
+      // Mail A/B via de pure builders. A hergebruikt callMoment (fail-soft
+      // fallback in mailBevestigingA: 'het geplande moment').
       let mailPayload;
       if (a.call_geboekt) {
-        mailPayload = MAIL_BEVESTIGING_A(a.voornaam, callMoment);
+        mailPayload = mailBevestigingA(a.voornaam, callMoment);
       } else {
-        mailPayload = MAIL_BEVESTIGING_B(a.voornaam);
+        mailPayload = mailBevestigingB(a.voornaam);
       }
       const mail = await stuurMail(a, mailPayload.subject, mailPayload.text, mailPayload.html, live);
       const okAny = wa.ok || mail.ok;
@@ -495,7 +412,7 @@ export default async function handler(req, res) {
       // WA + mail parallel (fail-soft per kanaal).
       const cfg = a.call_geboekt ? TEMPLATES.dag6_a : TEMPLATES.dag6_b;
       const wa  = await stuurWa(a, cfg, live, welkomPhoneId);
-      const mailPayload = a.call_geboekt ? MAIL_DAG6_A(a.voornaam) : MAIL_DAG6_B(a.voornaam);
+      const mailPayload = a.call_geboekt ? mailDag6A(a.voornaam) : mailDag6B(a.voornaam);
       const mail = await stuurMail(a, mailPayload.subject, mailPayload.text, mailPayload.html, live);
       const okAny = wa.ok || mail.ok;
       if (okAny) {

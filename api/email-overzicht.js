@@ -15,32 +15,52 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { MOMENTEN, bouwContext } from './_lib/afspraak-berichten.js';
 import { annuleringMail, verzetMail } from './_lib/afspraak-status-notify.js';
+import { mailBevestigingB } from './_lib/toegang-cron-mails.js';
+import { renderCredentialsEmail } from './_lib/onboarding-credentials.js';
 
-// Echte HTML-previews voor de afspraak-code-mails, gerenderd via de bestaande
-// builders (mail-shell-afspraak) met voorbeelddata. Puur (geen send/DB). Fail-soft.
-function afspraakPreviews() {
-  try {
-    const appt = {
-      lead_name: 'Paco Voorbeeld',
-      scheduled_at: new Date(Date.now() + 2 * 86400000).toISOString(),
-      zoom_join_url: 'https://zoom.us/j/12345678',
-      afspraak_token: 'voorbeeld-token',
-      duration_minutes: 20,
-    };
-    const c = bouwContext(appt);
-    const byKey = {};
-    for (const m of MOMENTEN) byKey[m.key] = m;
-    const html = (fn) => { try { return fn()?.html || null; } catch { return null; } };
-    return {
-      afspraak_bevestiging: html(() => byKey.bevestiging?.mail(appt, c)),
-      afspraak_24u:         html(() => byKey.r24?.mail(appt, c)),
-      afspraak_2u:          html(() => byKey.r2?.mail(appt, c)),
-      afspraak_30m:         html(() => byKey.r30?.mail(appt, c)),
-      afspraak_5min:        html(() => byKey.zoom5?.mail(appt, c)),
-      afspraak_annulering:  html(() => annuleringMail(c)),
-      afspraak_verzet:      html(() => verzetMail(c)),
-    };
-  } catch { return {}; }
+// Echte HTML-previews voor code-mails, gerenderd via de bestaande builders met
+// voorbeelddata. Puur (geen send/DB/env-afhankelijkheid). Fail-soft per builder:
+// een throw → null, zodat één kapotte builder de rest (en de endpoint) niet raakt.
+function codePreviews() {
+  const html = (fn) => { try { return fn()?.html || null; } catch { return null; } };
+
+  // Afspraak-mails (mail-shell-afspraak) met een voorbeeld-afspraak.
+  const afspraak = (() => {
+    try {
+      const appt = {
+        lead_name: 'Paco Voorbeeld',
+        scheduled_at: new Date(Date.now() + 2 * 86400000).toISOString(),
+        zoom_join_url: 'https://zoom.us/j/12345678',
+        afspraak_token: 'voorbeeld-token',
+        duration_minutes: 20,
+      };
+      const c = bouwContext(appt);
+      const byKey = {};
+      for (const m of MOMENTEN) byKey[m.key] = m;
+      return {
+        afspraak_bevestiging: html(() => byKey.bevestiging?.mail(appt, c)),
+        afspraak_24u:         html(() => byKey.r24?.mail(appt, c)),
+        afspraak_2u:          html(() => byKey.r2?.mail(appt, c)),
+        afspraak_30m:         html(() => byKey.r30?.mail(appt, c)),
+        afspraak_5min:        html(() => byKey.zoom5?.mail(appt, c)),
+        afspraak_annulering:  html(() => annuleringMail(c)),
+        afspraak_verzet:      html(() => verzetMail(c)),
+      };
+    } catch { return {}; }
+  })();
+
+  return {
+    ...afspraak,
+    // Welkom/onboarding-cron: representatieve welkom/bevestigings-mail (variant B,
+    // zonder geboekte call). De cron rendert 'm via dezelfde pure builder.
+    welkom_onboarding_cron: html(() => mailBevestigingB('Paco Voorbeeld')),
+    // Onboarding-inloggegevens: exact zoals sendCredentialsEmail 'm verstuurt.
+    onboarding_credentials: html(() => renderCredentialsEmail({
+      customer: { first_name: 'Paco', email: 'paco@voorbeeld.nl' },
+      tempPassword: 'Tijdelijk-AB12',
+      loginUrl: 'https://dashboard.deforexopleiding.nl',
+    })),
+  };
 }
 
 // Statische catalogus van code-mails (geen DB-registratie — handmatig bijhouden).
@@ -69,6 +89,12 @@ const CODE_CATALOG = [
   { key: 'first_call_payment',     categorie: 'funnels-toegang',  naam: 'Eerste-call betaalreminder',    doel: 'Betaalreminder 24u vóór 1e call',  trigger: 'cron/first-call-payment-reminder',                 mailbox: 'onboarding@', bestand: 'api/cron/first-call-payment-reminder.js' },
   { key: 'events_mails',           categorie: 'events',           naam: 'Events — invites/vragenlijst/automations', doel: 'Event-mails',           trigger: 'UI + cron-events-automations',                     mailbox: 'events@',     bestand: 'api/_lib/events-send.js' },
   { key: 'lead_melding',           categorie: 'overig',           naam: 'Interne nieuwe-lead-melding',   doel: 'Interne melding bij nieuwe lead',  trigger: 'api/lead-melding.js (na lead)',                    mailbox: 'welkom@',     bestand: 'api/lead-melding.js' },
+  // Volledigheid-ronde: lead/klant-gerichte verzenders die eerder ontbraken.
+  { key: 'gesprek_mailantwoord',   categorie: 'kennismaking',     naam: 'Gesprek — handmatig mailantwoord', doel: 'Persoonlijk antwoord in de gesprekken-draad (vrije tekst)', trigger: 'UI (leadsonderhoud-gesprek → beantwoorden)',   mailbox: 'welkom@',     bestand: 'api/leadsonderhoud-gesprek-mailantwoord.js' },
+  { key: 'leadsonderhoud_drip',    categorie: 'funnels-toegang',  naam: 'Leadsonderhoud — drip-motor',   doel: 'Opvolgmails per traject/warmte (sjablonen)', trigger: 'cron-leadsonderhoud (elk kwartier)',               mailbox: 'welkom@',     bestand: 'api/cron-leadsonderhoud.js' },
+  { key: 'leadsonderhoud_bulk',    categorie: 'funnels-toegang',  naam: 'Leadsonderhoud — bulk-broadcast', doel: 'Bulk-mail/WA naar leadselectie', trigger: 'cron-leadsonderhoud-bulk-send (3-min tick, LIVE=1)', mailbox: 'welkom@',     bestand: 'api/cron-leadsonderhoud-bulk-send.js' },
+  { key: 'leadsonderhoud_extend',  categorie: 'funnels-toegang',  naam: 'Toegang verlengd',              doel: 'Bevestiging verlengde cursustoegang', trigger: 'UI (leadsonderhoud → toegang verlengen)',      mailbox: 'info@',       bestand: 'api/leadsonderhoud-extend-access.js' },
+  { key: 'onboarding_automations', categorie: 'overig',           naam: 'Onboarding — automation-mails', doel: 'Geconfigureerde automation-stappen (mail + interne melding)', trigger: 'cron onboarding-automations (enroll + stepper)', mailbox: 'onboarding@ / info@', bestand: 'api/_lib/onboarding-automation-engine.js' },
 ];
 
 export default async function handler(req, res) {
@@ -135,7 +161,7 @@ export default async function handler(req, res) {
     // 3) code-catalogus (statisch, read-only). Afspraak-mails krijgen een echte
     // HTML-preview via de gedeelde builders (voorbeelddata); overige code-mails
     // hebben geen veilige statische preview (inline/data-afhankelijk) → null.
-    const previews = afspraakPreviews();
+    const previews = codePreviews();
     const code = CODE_CATALOG.map((c) => ({
       id: c.key, naam: c.naam, categorie: c.categorie, doel: c.doel, subject: null,
       mailbox: c.mailbox, bron: 'code', bewerkbaar: false, actief: true,
