@@ -180,12 +180,22 @@ test('een telefoon die overgaat is geen contact', () => {
 });
 
 test('een bericht van de lead telt, een bericht van ons niet', () => {
-  assert.equal(isEchtContact({ soort: 'whatsapp', resultaat: 'antwoord ontvangen: ja' }), true);
-  assert.equal(isEchtContact({ soort: 'spraakbericht', resultaat: 'spraakbericht ontvangen' }), true);
-  assert.equal(isEchtContact({ soort: 'whatsapp', resultaat: 'WhatsApp verstuurd' }), false);
-  assert.equal(isEchtContact({ soort: 'spraakbericht', resultaat: 'spraakbericht verstuurd' }), false);
-  assert.equal(isEchtContact({ soort: 'whatsapp', resultaat: 'WhatsApp gelezen' }), false,
+  // De richting komt sinds september uit de KOLOM, niet uit de tekst. De
+  // teksten staan er nog bij zoals ze in productie geschreven worden, juist om
+  // te laten zien dat ze niets meer bepalen.
+  assert.equal(isEchtContact({ soort: 'whatsapp', richting: 'in', resultaat: 'antwoord ontvangen: ja' }), true);
+  assert.equal(isEchtContact({ soort: 'spraakbericht', richting: 'in', resultaat: 'spraakbericht ontvangen' }), true);
+  assert.equal(isEchtContact({ soort: 'whatsapp', richting: 'uit', resultaat: 'WhatsApp verstuurd' }), false);
+  assert.equal(isEchtContact({ soort: 'spraakbericht', richting: 'uit', resultaat: 'spraakbericht verstuurd' }), false);
+  assert.equal(isEchtContact({ soort: 'whatsapp', richting: 'uit', resultaat: 'WhatsApp gelezen' }), false,
     'gelezen is geen reactie');
+});
+
+test('de kolom wint van de tekst, ook als die elkaar tegenspreken', () => {
+  // Dit is waarvoor de kolom is aangelegd. Zou de tekst nog meetellen, dan
+  // bepaalde een zinsnede of iemand uit Daves lijst verdwijnt.
+  assert.equal(isEchtContact({ soort: 'whatsapp', richting: 'uit', resultaat: 'antwoord ontvangen' }), false);
+  assert.equal(isEchtContact({ soort: 'whatsapp', richting: 'in', resultaat: 'WhatsApp verstuurd' }), true);
 });
 
 test('andere soorten tellen nooit als contact', () => {

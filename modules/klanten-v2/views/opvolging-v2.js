@@ -713,13 +713,23 @@
   }
 
   /** Is dit een spraakbericht dat wij verstuurd hebben? */
+  // DE RICHTING KOMT UIT DE KOLOM, NIET UIT DE TEKST.
+  //
+  // Deze twee lazen /verstuurd/ en /ontvangen/ uit `resultaat`. Dat is een
+  // parser op een zin die iemand ooit anders formuleert, en dan gaan de twee
+  // vensters iets anders meten dan wat er gebeurd is. Sinds de migratie
+  // 2026-09-06-opvolging-pogingen-richting.sql staat de richting in de data.
+  //
+  // Een rij zonder richting telt als uitgaand — dat is de historische aanname,
+  // en de opruim-query zet de inkomende rijen die er nog staan eenmalig op 'in'.
+  const uitgaand = (p) => !p || p.richting !== 'in';
+
   function isSpraakVerstuurd(p) {
-    return p && p.soort === 'spraakbericht' && /verstuurd/i.test(String(p.resultaat || ''));
+    return !!p && p.soort === 'spraakbericht' && uitgaand(p);
   }
   /** Is dit iets dat de lead ons stuurde? */
   function isAntwoord(p) {
-    return p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht')
-      && /ontvangen/i.test(String(p.resultaat || ''));
+    return !!p && (p.soort === 'whatsapp' || p.soort === 'spraakbericht') && !uitgaand(p);
   }
 
   /**
@@ -2240,12 +2250,22 @@
     return [titel, plaats].filter(Boolean).map(esc).join(' &middot; ');
   }
 
-  /** Is er echt contact geweest? Zelfde regel als api/_lib/opvolging-aanmelding.js. */
+  /**
+   * Is er echt contact geweest?
+   *
+   * Zelfde regel als isContact() in api/_lib/opvolging-poging-telling.js. Een
+   * browser-view kan daar niet uit importeren, dus dit is een kopie — en
+   * tests/opvolging-pogingen-tellen.test.js legt de twee naast elkaar op een
+   * tabel gevallen, zodat ze niet uit elkaar kunnen lopen.
+   *
+   * De richting komt uit de kolom, niet uit de tekst van `resultaat`. Alleen of
+   * een gesprek tot stand kwam staat nog in die tekst: daar is geen kolom voor,
+   * en de waarde wordt op één plek geschreven (bouwCallPoging).
+   */
   function echtContact(p) {
     if (!p) return false;
-    const r = String(p.resultaat || '').toLowerCase();
-    if (p.soort === 'call') return /gesproken/.test(r);
-    if (p.soort === 'whatsapp' || p.soort === 'spraakbericht') return /ontvangen/.test(r);
+    if (p.soort === 'whatsapp' || p.soort === 'spraakbericht') return !uitgaand(p);
+    if (p.soort === 'call') return /gesproken/.test(String(p.resultaat || '').toLowerCase());
     return false;
   }
   const heeftContact = (t) => ((t && t.pogingen) || []).some(echtContact);

@@ -53,6 +53,15 @@ const RESULTAAT_SPRAAK = {
 // 'audio'.
 const SPRAAK_TYPES = new Set(['ptt', 'audio', 'voice']);
 
+/**
+ * Statussen van een bericht dat al verstuurd is — geen poging van Dave.
+ *
+ * 'verzonden' hoort hier NIET bij: dat is het moment dat het bericht de deur
+ * uitging, en dat ís de poging. Hij deelt zijn sleutel met 'uitgaand' (zie
+ * idemSoort) zodat die twee wegen samen één rij opleveren.
+ */
+const STATUS_SOORTEN = new Set(['afgeleverd', 'gelezen']);
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -97,8 +106,11 @@ export default async function handler(req, res) {
     if (!taak) return res.status(200).json({ ok: true, gekoppeld: false });
 
     // Zowel een ontvangen als een verstuurd spraakbericht telt als spraakbericht.
-    // De richting is af te lezen aan `resultaat`; de tabel heeft geen kolom
-    // voor richting en die voegen we hier niet toe.
+    // De richting staat nu in een KOLOM, niet in een woord. Hij was af te lezen
+    // aan `resultaat`, en dat is een parser op een zin die iemand ooit anders
+    // formuleert — dan telt de kaart weer iets anders dan wat er gebeurd is.
+    // Zie de migratie 2026-09-06-opvolging-pogingen-richting.sql.
+    const richting = soort === 'antwoord_ontvangen' ? 'in' : 'uit';
     const isSpraak = (soort === 'antwoord_ontvangen' || soort === 'uitgaand')
       && SPRAAK_TYPES.has(String(b.media_type || '').toLowerCase());
 
@@ -131,6 +143,31 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── EEN VERSTUURD BERICHT IS EEN POGING. AFGELEVERD EN GELEZEN NIET. ──
+    //
+    // Dat zijn geen pogingen van Dave maar statussen van een bericht dat hij al
+    // gestuurd heeft. Ze maakten hier hun eigen rij, en drie leesbevestigingen
+    // op dezelfde seconde werden dus drie pogingen. Ze werken vanaf nu hooguit
+    // een bestaande rij bij.
+    //
+    // Vinden ze die rij niet — omdat er geen bericht-id was, of omdat het
+    // versturen langs een andere weg liep — dan doen ze NIETS. Liever geen
+    // status dan een verzonnen poging. De gespreksregel gaat wel gewoon door;
+    // die vertelt het verhaal en telt niet mee in de dekking.
+    if (STATUS_SOORTEN.has(soort)) {
+      const bijgewerkt = await werkStatusBij({ taakId: taak.id, sleutel, soort, isSpraak });
+      await bewaarGesprekRegel({
+        soort, nummer, taakId: taak.id, tijdstipIso, berichtId,
+        tekst: volledigeTekstVan(b), mediaType: b.media_type,
+      });
+      return res.status(200).json({
+        ok: true, gekoppeld: true, status_bijgewerkt: bijgewerkt,
+        // Geen sleutel betekent: niets te vinden, dus niets bijgewerkt. Dat is
+        // geen fout, maar het hoort wel zichtbaar te zijn.
+        reden: bijgewerkt ? null : (sleutel ? 'geen_bijbehorende_poging' : 'geen_bericht_id'),
+      });
+    }
+
     // De volledige tekst voor het gesprek, en een korte voor de historiek-regel.
     // Die twee zijn niet hetzelfde: `resultaat` is een samenvatting van 500
     // tekens die iemand terugleest, het gesprek is de tekst zelf.
@@ -138,7 +175,7 @@ export default async function handler(req, res) {
     // Uitgaande tekst komt sinds het gesprekspaneel ook mee. De brug stuurt die
     // pas ná zijn privacyfilter — alles buiten de leadlijst bereikt dit
     // endpoint niet.
-    const volledigeTekst = typeof b.tekst === 'string' ? b.tekst.slice(0, 4000) : '';
+    const volledigeTekst = volledigeTekstVan(b);
     const tekst = (soort === 'antwoord_ontvangen' && volledigeTekst)
       ? volledigeTekst.trim().slice(0, 500) : '';
 
@@ -148,6 +185,7 @@ export default async function handler(req, res) {
       tijdstip   : tijdstipIso,
       automatisch: true,
       resultaat  : bouwResultaat(soort, isSpraak, tekst),
+      richting,
       // call_log_id is de enige vrije tekstkolom voor een externe verwijzing.
       // De soort staat erachter zodat afleveren en lezen los idempotent zijn;
       // versturen deelt zijn sleutel met 'uitgaand' — zie idemSoort().
@@ -182,6 +220,37 @@ export default async function handler(req, res) {
     console.error('[opvolging-whatsapp-webhook]', e?.message || e);
     return res.status(500).json({ error: 'Interne fout' });
   }
+}
+
+/** De volledige tekst uit de body, begrensd. */
+function volledigeTekstVan(b) {
+  return typeof b?.tekst === 'string' ? b.tekst.slice(0, 4000) : '';
+}
+
+/**
+ * Een status op een bestaande poging zetten. Maakt NOOIT een rij.
+ *
+ * Geeft terug of er iets bijgewerkt is. Nee is geen fout: zonder bericht-id valt
+ * er niets te vinden, en dan is 'geen status' het eerlijke antwoord.
+ */
+async function werkStatusBij({ taakId, sleutel, soort, isSpraak }) {
+  if (!sleutel) return false;
+  // De poging staat onder de sleutel van het VERSTUREN, niet die van de status.
+  const verzendSleutel = sleutel.replace(/#[^#]*$/, '') + '#' + idemSoort('verzonden');
+  const { data, error } = await supabaseAdmin
+    .from('opvolging_pogingen')
+    .select('id')
+    .eq('taak_id', taakId)
+    .eq('call_log_id', verzendSleutel)
+    .limit(1);
+  if (error) { console.error('[opvolging-whatsapp-webhook] status zoeken:', error.message); return false; }
+  if (!data || !data[0]) return false;
+  const { error: updErr } = await supabaseAdmin
+    .from('opvolging_pogingen')
+    .update({ resultaat: bouwResultaat(soort, isSpraak, '') })
+    .eq('id', data[0].id);
+  if (updErr) { console.error('[opvolging-whatsapp-webhook] status bijwerken:', updErr.message); return false; }
+  return true;
 }
 
 /**

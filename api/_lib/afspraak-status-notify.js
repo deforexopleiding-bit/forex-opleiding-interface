@@ -22,7 +22,7 @@ import { logOutboundWa } from './wa-outbound-log.js';
 import { resolveWelkomPhoneId, bouwContext } from './afspraak-berichten.js';
 import { renderAfspraakMail, platteTekstAfspraak } from './mail-shell-afspraak.js';
 
-const MAIL_FROM = 'onboarding@deforexopleiding.nl';
+const MAIL_FROM = 'welkom@deforexopleiding.nl'; // afspraak-mails naar leads vanaf welkom@ (zelfde lijn als de toegang-gate)
 const PLAN_URL = process.env.AFSPRAAK_ANNULERING_PLAN_URL || 'https://deforexopleiding.nl/agenda/kantoor';
 const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, zoom_join_url, afspraak_token, ghl_calendar_id, annulering_reden';
 
@@ -48,7 +48,7 @@ async function haalAppt(id) {
 }
 
 // Mail-builders (zelfde branded shell als de 5 reminder-mails).
-function annuleringMail(c, reden) {
+export function annuleringMail(c, reden) {
   const args = {
     subject: 'Je afspraak is geannuleerd',
     titel: 'Je afspraak is geannuleerd',
@@ -58,7 +58,7 @@ function annuleringMail(c, reden) {
   };
   return { subject: args.subject, html: renderAfspraakMail(args), text: platteTekstAfspraak(args) };
 }
-function verzetMail(c) {
+export function verzetMail(c) {
   const args = {
     subject: 'Je afspraak is verzet',
     titel: 'Je afspraak is verzet ✅',

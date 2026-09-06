@@ -122,5 +122,7 @@ export function bouwCallPoging({ taakId, outcomeHint, durationSec = null, callLo
     resultaat  : gesproken ? 'gesproken' : 'niet opgenomen',
     duur_sec   : duur,
     call_log_id: callLogId ? String(callLogId) : null,
+    // Een gebelde call is moeite van Dave, gesproken of niet.
+    richting   : 'uit',
   };
 }

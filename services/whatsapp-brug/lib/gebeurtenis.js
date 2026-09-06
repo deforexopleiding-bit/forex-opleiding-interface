@@ -9,6 +9,8 @@
 // is er geen pad waarlangs een bericht van een privécontact ook maar in een
 // object terechtkomt.
 
+import { berichtIdVan } from './berichtid.js';
+
 /** Ack-codes van whatsapp-web.js naar iets leesbaars. -1 en 0 leveren niets op. */
 export const ACK_SOORT = { 1: 'verzonden', 2: 'afgeleverd', 3: 'gelezen', 4: 'gelezen' };
 
@@ -100,13 +102,14 @@ export function bouwUitgaandeGebeurtenis(msg, nu = Date.now()) {
   const naar = msg.to;
   if (!naar || isGroep(naar)) return null;
   const seconden = Number(msg.timestamp);
+  const bid = berichtIdVan(msg);
   return {
     soort     : 'uitgaand',
     jid       : naar,
     tijdstip  : new Date(Number.isFinite(seconden) && seconden > 0 ? seconden * 1000 : nu).toISOString(),
     tekst     : typeof msg.body === 'string' ? msg.body.slice(0, MAX_TEKST) : '',
     media_type: msg.type || null,
-    bericht_id: msg.id?._serialized || null,
+    bericht_id: bid.id,
   };
 }
 
@@ -128,12 +131,13 @@ export function bouwAckGebeurtenis(msg, ack, nu = Date.now()) {
   if (!soort || !msg) return null;
   const jid = msg.to || msg.from;
   if (!jid || isGroep(jid)) return null;
+  const bid = berichtIdVan(msg);
   return {
     soort,
     jid,
     tijdstip  : new Date(nu).toISOString(),
     media_type: msg.type || null,
-    bericht_id: msg.id?._serialized || null,
+    bericht_id: bid.id,
   };
 }
 
@@ -166,7 +170,7 @@ export function bouwHistoriekBericht(msg, nu = Date.now()) {
   if (!isEchtGesprek(msg.type)) return null;
   const seconden = Number(msg.timestamp);
   return {
-    bericht_id: msg.id?._serialized || null,
+    bericht_id: berichtIdVan(msg).id,
     richting  : msg.fromMe === true ? 'uit' : 'in',
     tekst     : typeof msg.body === 'string' ? msg.body.slice(0, MAX_TEKST) : '',
     media_type: msg.type || null,

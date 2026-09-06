@@ -69,7 +69,7 @@ const plat = (a) => Array.from(a || []);
 const netjes = (over) => ({
   id: 'net', naam: 'Net Op Tijd', telefoon: '+32470111111',
   pogingen: [
-    { soort: 'spraakbericht', resultaat: 'spraakbericht verstuurd', tijdstip: DAG + 'T06:30:00Z' },
+    { soort: 'spraakbericht', resultaat: 'spraakbericht verstuurd', tijdstip: DAG + 'T06:30:00Z' , richting: 'uit' },
     { soort: 'call', resultaat: 'geen gehoor', tijdstip: DAG + 'T10:30:00Z' },
   ],
   ...over,
@@ -179,7 +179,7 @@ test('over de juiste verzameling telt de dekking gewoon door', () => {
   const opTijd = netjes();
   const teLaat = netjes({
     id: 'laat', telefoon: '+32470333333',
-    pogingen: [{ soort: 'spraakbericht', resultaat: 'spraakbericht verstuurd', tijdstip: DAG + 'T08:00:00Z' }],
+    pogingen: [{ soort: 'spraakbericht', resultaat: 'spraakbericht verstuurd', tijdstip: DAG + 'T08:00:00Z' , richting: 'uit' }],
   });
   const t = telVensters([opTijd, teLaat], DAG).spraak;
   assert.equal(t.totaal, 2);

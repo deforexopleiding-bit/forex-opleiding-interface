@@ -227,7 +227,9 @@ test('een insert houdt .single(), want die gééft altijd een rij', async () => 
   const b = readFileSync(join(ROOT, 'api/opvolging-poging.js'), 'utf8');
   const i = b.indexOf("from('opvolging_pogingen').insert(");
   assert.ok(i > 0);
-  assert.match(b.slice(i, i + 500), /\.select\(\)\.single\(\)/);
+  // Tot het einde van de aanroep, niet een venster op gevoel: de insert is
+  // gegroeid met de richting-kolom.
+  assert.match(b.slice(i, b.indexOf(';', i)), /\.select\(\)\.single\(\)/);
 });
 
 test('de twee buren spreken elkaar niet meer tegen', () => {

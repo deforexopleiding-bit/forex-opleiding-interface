@@ -41,6 +41,8 @@ export function bepaalStartPoging({ taakId, reden, resultaat }) {
     // Handmatig: een mens rondde deze call af. Het bliksem-icoon in de
     // historiek is voor wat de telefooncentrale zelf meet.
     automatisch: false,
+    // Dit gesprek is door Dave gevoerd; het is moeite van hem.
+    richting   : 'uit',
   };
 }
 

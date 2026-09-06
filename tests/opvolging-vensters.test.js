@@ -64,8 +64,8 @@ const { inZone, beoordeelSpraak, beoordeelNabel, beoordeelDag, telVensters,
         isSpraakVerstuurd, isAntwoord } = H;
 
 // Zomertijd: Amsterdam is dan UTC+2. 07:00Z = 09:00 lokaal.
-const spraak = (iso) => ({ soort: 'spraakbericht', resultaat: 'spraakbericht verstuurd', tijdstip: iso });
-const antw   = (iso) => ({ soort: 'whatsapp', resultaat: 'antwoord ontvangen: ja', tijdstip: iso });
+const spraak = (iso) => ({ soort: 'spraakbericht', resultaat: 'spraakbericht verstuurd', tijdstip: iso , richting: 'uit' });
+const antw   = (iso) => ({ soort: 'whatsapp', resultaat: 'antwoord ontvangen: ja', tijdstip: iso , richting: 'in' });
 const call   = (iso) => ({ soort: 'call', resultaat: 'gesproken', tijdstip: iso });
 const DAG = '2026-09-07';                       // maandag, zomertijd (UTC+2)
 const lokaal = (hhmm) => {
@@ -133,7 +133,7 @@ test('een spraakbericht van een andere dag telt niet mee', () => {
 
 test('een ontvangen spraakbericht is geen verstuurd spraakbericht', () => {
   // De lead die zelf inspreekt is geen bewijs dat Dave iets gestuurd heeft.
-  const ontvangen = { soort: 'spraakbericht', resultaat: 'spraakbericht ontvangen', tijdstip: lokaal('08:00') };
+  const ontvangen = { soort: 'spraakbericht', resultaat: 'spraakbericht ontvangen', tijdstip: lokaal('08:00') , richting: 'in' };
   assert.equal(isSpraakVerstuurd(ontvangen), false);
   assert.equal(beoordeelSpraak([ontvangen], DAG).staat, 'niet_gedaan');
 });
@@ -266,7 +266,7 @@ test('lege of rommelige invoer levert nullen, geen uitzondering', () => {
 
 test('isAntwoord onderscheidt inkomend van uitgaand', () => {
   assert.equal(isAntwoord(antw(lokaal('09:00'))), true);
-  assert.equal(isAntwoord({ soort: 'spraakbericht', resultaat: 'spraakbericht ontvangen', tijdstip: lokaal('09:00') }), true);
+  assert.equal(isAntwoord({ soort: 'spraakbericht', resultaat: 'spraakbericht ontvangen', tijdstip: lokaal('09:00') , richting: 'in' }), true);
   assert.equal(isAntwoord({ soort: 'whatsapp', resultaat: 'WhatsApp verstuurd', tijdstip: lokaal('09:00') }), false);
   assert.equal(isAntwoord(call(lokaal('09:00'))), false);
 });
