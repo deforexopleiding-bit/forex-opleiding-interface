@@ -100,10 +100,13 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (error) {
         if (error.code === '23505') return res.status(409).json({ error: `Slug '${slug}' bestaat al` });
-        // 42703 fail-soft: een optionele kolom (owner_user_id of vragenlijst)
-        // bestaat nog niet in het schema (pre-migratie). Retry met alleen de
-        // basisvelden zodat de write niet stukloopt op een ontbrekende kolom.
-        if (error.code === '42703') {
+        // Fail-soft bij een optionele kolom (owner_user_id of vragenlijst) die
+        // nog niet in het schema zit (pre-migratie). Postgres meldt dit als
+        // 42703 bij een SELECT/filter, maar PostgREST meldt een onbekende kolom
+        // in de UPDATE-body als PGRST204 ("… column … in the schema cache") —
+        // vang beide. Retry met alleen de basisvelden zodat de write niet
+        // stukloopt op een ontbrekende kolom.
+        if (error.code === '42703' || error.code === 'PGRST204') {
           const { data: d2, error: e2 } = await supabaseAdmin
             .from('booking_sources')
             .update({ slug, label, actief })
@@ -128,8 +131,10 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: `Slug '${slug}' bestaat al` });
-      // 42703 fail-soft: pre-migratie schema zonder owner_user_id of vragenlijst.
-      if (error.code === '42703') {
+      // Fail-soft bij pre-migratie schema zonder owner_user_id of vragenlijst.
+      // 42703 (Postgres, SELECT/filter) én PGRST204 (PostgREST, onbekende kolom
+      // in de INSERT-body: "… column … in the schema cache") beide afvangen.
+      if (error.code === '42703' || error.code === 'PGRST204') {
         const { data: d2, error: e2 } = await supabaseAdmin
           .from('booking_sources')
           .insert({ slug, label, actief })

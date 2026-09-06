@@ -2322,6 +2322,24 @@
       window.KV.toast('Bron geregistreerd.', 'ok'); fetchBronnen(true);
     } catch (e) { window.KV.toast('Registreren mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
   };
+  // Verwijderen: haalt alleen de config-rij weg (link + vragenlijst-instelling).
+  // Reeds geboekte calls behouden hun booking_source-slug op de afspraken/leads
+  // (losse tekst, geen FK) — die boekingen blijven dus bestaan.
+  window._lsBronVerwijderen = async function(idx){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b || !b.id) return;
+    const ok = await window.dfoConfirm({
+      title: 'Agenda verwijderen',
+      message: 'Weet je zeker dat je deze agenda wilt verwijderen? Dit kan niet ongedaan worden gemaakt.',
+      okLabel: 'Verwijderen', cancelLabel: 'Annuleren', danger: true,
+    });
+    if (!ok) return;
+    try {
+      await window.KV.authedJson('/api/booking-sources-delete', {
+        method: 'POST', body: JSON.stringify({ id: b.id }),
+      });
+      window.KV.toast('Bron verwijderd.', 'ok'); fetchBronnen(true);
+    } catch (e) { window.KV.toast('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+  };
 
   function bronnenView() {
     if (!_live.bronnen.fetched && !_live.bronnen.loading && !_live.bronnen.error) queueMicrotask(() => fetchBronnen(false));
@@ -2342,7 +2360,8 @@
         : '<span style="color:var(--amber);font-weight:600;font-size:11.5px" title="Slug komt op boekingen voor maar staat niet in de bronnenlijst">⚠ Onbekend</span>';
       const acties = b.is_registered
         ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-right:4px" onclick="window._lsBronBewerken(${i})">Bewerken</button>
-           <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronToggle(${i})">${b.actief ? 'Deactiveren' : 'Activeren'}</button>`
+           <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-right:4px" onclick="window._lsBronToggle(${i})">${b.actief ? 'Deactiveren' : 'Activeren'}</button>
+           <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--rose)" onclick="window._lsBronVerwijderen(${i})" title="Verwijder deze agenda-bron (boekingen blijven bestaan)">Verwijderen</button>`
         : `<button class="btn btn-primary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronRegistreren(${i})" title="Toevoegen aan bronnenlijst met deze slug">Registreren</button>`;
       // BP2 Deel A: setter-koppeling per bron.
       const setterCell = b.is_registered
