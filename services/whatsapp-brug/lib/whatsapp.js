@@ -18,7 +18,7 @@ import { normaliseerNummer, naarChatId } from './nummers.js';
 import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep } from './gebeurtenis.js';
 import { maakTellers, jidVorm } from './tellers.js';
 import { maakLidkaart } from './lidkaart.js';
-import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET } from './uitkomst.js';
+import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET, FOUT } from './uitkomst.js';
 import { createRequire } from 'node:module';
 
 const { Client, LocalAuth } = pkg;
@@ -206,7 +206,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // testbericht staat er welke weg werkte, en welke niet bestond.
   const WEGEN = ['getNumberId', 'getChatById', 'getChats', 'getMessageById', 'msg_getchat',
                  'chat_contact', 'contact_data', 'msg_data'];
-  const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null, statussen: {} }]));
+  const wegen = Object.fromEntries(WEGEN.map((w) => [w, { geprobeerd: 0, gelukt: 0, beschikbaar: null, statussen: {}, laatste_fout: null }]));
   const noteer = (weg, res) => {
     const t = wegen[weg];
     if (!t) return;
@@ -217,6 +217,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     // gooide dat weg. Dan staat er 'geprobeerd 2, gelukt 0' en weet je nog
     // steeds niets. Precies de stilte die uitkomst.js moest wegnemen.
     if (res.status) t.statussen[res.status] = (t.statussen[res.status] || 0) + 1;
+    // De foutmelding van de bibliotheek bewaren. Zonder die tekst is 'fout×2'
+    // opnieuw een stilte — en dat is precies waar deze hele avond aan opging.
+    if (res.status === FOUT && res.melding) t.laatste_fout = String(res.melding).slice(0, 300);
     if (res.status === GELUKT) t.gelukt += 1;
     if (res.status === BESTAAT_NIET) t.beschikbaar = false;
     else if (t.beschikbaar === null) t.beschikbaar = true;
@@ -246,8 +249,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   async function lidViaNumberId(nummer) {
     const chatId = naarChatId(nummer);
     const res = await probeer({
-      bestaat: !!chatId && kunde.api.getNumberId,
-      haal   : () => client.getNumberId(chatId),
+      bestaat : kunde.api.getNumberId,
+      invoerOk: !!chatId,
+      haal    : () => client.getNumberId(chatId),
       bruikbaar: (v) => deelWid(v).server === 'lid',
     });
     noteer('getNumberId', res);
@@ -272,7 +276,8 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   async function lidViaChat(nummer) {
     const chatId = naarChatId(nummer);
     const res = await probeer({
-      bestaat: !!chatId && kunde.api.getChatById,
+      bestaat : kunde.api.getChatById,
+      invoerOk: !!chatId,
       haal   : async () => {
         try { return await client.getChatById(chatId); } catch (_) { return null; }
       },
@@ -398,6 +403,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   let chatsCacheAt = null;
   let chatsGeprobeerdAt = null;
   let chatsStatus = null;
+  let chatsFout = null;
 
   async function haalChats(ververs = false) {
     if (chatsCache && !ververs) return chatsCache;
@@ -412,8 +418,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     chatsGeprobeerdAt = new Date().toISOString();
     chatsStatus = res.status;
 
+    chatsFout = res.melding || null;
     if (res.status !== GELUKT) {
-      console.log('[brug] getChats:', res.status, '— geen gesprekkenlijst gekregen');
+      console.log('[brug] getChats:', res.status, '—', chatsFout || 'geen gesprekkenlijst gekregen');
       return chatsCache || [];
     }
     chatsCache = res.waarde;
@@ -820,6 +827,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       chats_opgehaald   : chatsCacheAt,
       chats_geprobeerd  : chatsGeprobeerdAt,
       chats_status      : chatsStatus,
+      chats_fout        : chatsFout,
     }),
     /** Wat de geïnstalleerde whatsapp-web.js blijkt te kunnen. Functienamen. */
     lidKunde: () => ({ ...kunde }),

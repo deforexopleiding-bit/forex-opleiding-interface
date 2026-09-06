@@ -28,6 +28,54 @@ die `null` teruggeeft terwijl de functie niet eens bestaat, is geen meting maar
 een stilte. `lib/uitkomst.js` maakt daarom onderscheid tussen `bestaat_niet`,
 `geen_resultaat`, `onbruikbaar`, `gelukt` en `fout`.
 
+### Historiek ophalen kan niet met deze combinatie
+
+**Gemeten, niet aangenomen.** Oude berichten van Daves toestel in het CRM
+krijgen loopt via `client.getChats()`. Op de VPS gaf die aanroep twee van de twee
+keer een **uitzondering** — niet een lege lijst, niet `null`, maar een fout. De
+foutmelding staat sindsdien in `/status` onder `lidkaart.chats_fout` en in het
+paneel in de opvolgmodule.
+
+De versies waarop dit gemeten is:
+
+| onderdeel | versie |
+| --- | --- |
+| whatsapp-web.js (VPS) | **1.34.7** |
+| whatsapp-web.js (package.json) | `^1.26.0` |
+| WhatsApp Web-build die de brug bestuurt | **2.3000.1046904178** |
+
+Het beeld dat daaruit volgt: de **gebeurtenissen** komen gewoon binnen — via de
+socket, en versturen en ontvangen werken dan ook allebei. Wat faalt, is elke weg
+die de **interne opslag van de pagina moet lezen**: `getChats` gooit,
+`getChatById` levert niets, `window.Store` bestaat niet. Dat past bij een
+bibliotheek die tegen een nieuwere WhatsApp Web-build praat dan waarvoor haar
+selectors geschreven zijn.
+
+**Conclusie, en die mag zo blijven staan:** met deze combinatie is historiek niet
+op te halen, en er is geen omweg die de moeite waard is. Het gesprek is
+**vanaf de koppeling volledig** — alles wat sindsdien heen en weer gaat komt in
+het CRM. Wat daarvóór gezegd is, staat op Daves telefoon en blijft daar.
+
+Wanneer opnieuw kijken: alleen als whatsapp-web.js naar een versie gaat die
+expliciet deze WhatsApp Web-build ondersteunt. Kijk dán eerst opnieuw naar
+`lidkaart.chats_status` in `/status` voor je iets bouwt.
+
+### Wat 'bestaat_niet' óók kan betekenen
+
+`getNumberId` en `getChatById` stonden allebei op `bestaat_niet ×6`, terwijl het
+aftasten meldde dat die functies er wél waren. Dat wrong, en terecht: de oorzaak
+zat in onze eigen meting. De code schreef `bestaat: !!chatId && kunde.api.…`, en
+`naarChatId()` geeft `null` bij minder dan tien cijfers of een leidende nul —
+zes leadlijst-nummers missen een landcode. Onbruikbare **invoer** kreeg zo de
+vorm van een ontbrekende **functie**: dezelfde verwarring als hierboven, één laag
+dieper.
+
+Vandaar de status `onbruikbare_invoer` en de losse parameter `invoerOk` in
+`lib/uitkomst.js`. Wie een nieuwe meting toevoegt: houd 'kan de bibliotheek dit'
+en 'hebben wij bruikbare invoer' altijd uit elkaar.
+
+## Wat de brug doet
+
 De schakel tussen Daves WhatsApp en de opvolgmodule in het CRM. Ze meldt wanneer
 een bericht verzonden, afgeleverd of gelezen is en wanneer er een antwoord
 binnenkomt, en ze kan namens het CRM een bericht versturen.

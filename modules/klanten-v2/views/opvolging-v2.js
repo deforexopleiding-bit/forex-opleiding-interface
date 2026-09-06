@@ -1279,7 +1279,14 @@
       const lk = d.lidkaart;
       if (lk.chats_geprobeerd || typeof lk.chats_in_cache === 'number') {
         let zin;
-        if (lk.chats_status && lk.chats_status !== 'gelukt') {
+        if (lk.chats_status === 'fout') {
+          // De foutmelding zelf erbij. Dat is bibliotheektekst, geen gegeven
+          // van iemand, en zonder die tekst is 'fout' opnieuw een stilte.
+          zin = 'Gesprekkenlijst: opvragen <b>wierp een fout</b>' +
+            (lk.chats_fout ? ' &mdash; <code>' + esc(lk.chats_fout) + '</code>' : ' zonder melding') +
+            '. Dit is de meting waarop we het ophalen van historiek hebben opgegeven: ' +
+            'de gebeurtenissen komen wél binnen, maar alles wat de interne opslag moet lézen faalt.';
+        } else if (lk.chats_status && lk.chats_status !== 'gelukt') {
           zin = 'Gesprekkenlijst: opvragen gaf <b>' + esc(lk.chats_status) + '</b>. ' +
             'Dat is geen lege lijst maar een mislukte aanvraag.';
         } else if (lk.chats_in_cache === 0) {
@@ -1395,6 +1402,26 @@
    */
   function brugZietUitgaand() {
     return !!(_wa.data && _wa.data.ziet_uitgaand === true);
+  }
+
+  /**
+   * Kan de brug oude berichten van het toestel ophalen, ja of nee?
+   *
+   * Geen aanname maar een meting. Ophalen loopt via de gesprekkenlijst van
+   * whatsapp-web.js; die lijst kwam er op de VPS twee van de twee keer met een
+   * uitzondering uit. De gebeurtenissen komen wél binnen — versturen en
+   * ontvangen werken — maar alles wat de interne opslag moet lézen faalt. Dat
+   * wijst op een versieverschil tussen de bibliotheek en de WhatsApp Web-build
+   * die zij bestuurt; zie services/whatsapp-brug/README.md met de nummers erbij.
+   *
+   * Antwoordt alleen als het gemeten is. Geen meting → null, en dan blijft de
+   * uitnodiging om het te proberen gewoon staan. Een 'kan niet' zonder meting
+   * zou dezelfde stilte zijn als het probleem dat we net hebben opgelost.
+   */
+  function historiekOnbereikbaar() {
+    const lk = _wa.data && _wa.data.lidkaart;
+    if (!lk || lk.chats_status !== 'fout') return null;
+    return { fout: lk.chats_fout || null };
   }
 
   /**
@@ -1626,11 +1653,14 @@
       // Staat er al iets, dan hoort de knop bovenaan de draad — dat is waar je
       // hem zoekt als je verder terug wilt. Is het gesprek leeg, dan staat hij
       // in het lege blok hieronder, want daar kijk je dan naar.
-      const ouderKnop = rijen
-        ? '<div class="wouder"><button class="obtn" onclick="window.__opvGesprekHistoriek()"' +
-          (_gesprek.haalt ? ' disabled' : '') + '>' +
-          (_gesprek.haalt ? 'Bezig&hellip;' : '&#8593; Ouder ophalen') + '</button></div>'
-        : '';
+      const onbereikbaar = historiekOnbereikbaar();
+      const ouderKnop = !rijen ? ''
+        : onbereikbaar
+          ? '<div class="wouder"><span class="wreden">Ouder ophalen kan niet met deze brug &mdash; ' +
+            'zie de uitleg onderaan.</span></div>'
+          : '<div class="wouder"><button class="obtn" onclick="window.__opvGesprekHistoriek()"' +
+            (_gesprek.haalt ? ' disabled' : '') + '>' +
+            (_gesprek.haalt ? 'Bezig&hellip;' : '&#8593; Ouder ophalen') + '</button></div>';
       // Een leeg gesprek is hier niet hetzelfde als 'er is niets gezegd'. Van
       // vóór dit paneel bestaat er geen historiek: uitgaande tekst verliet de
       // telefoon toen niet, en van inkomende staat alleen een afgekapte kopie
@@ -1638,14 +1668,24 @@
       // een stilte die er nooit was.
       body = historiekMelding() + (rijen
         ? ouderKnop + '<div class="wchat">' + rijen + '</div>'
-        : '<div class="nietgemeten"><b>Nog geen berichten in het systeem.</b><br>' +
-          'De brug bewaarde tot nu toe niets, dus wat er eerder gezegd is staat hier nog niet. ' +
-          'Op het gekoppelde toestel staat het misschien wél &mdash; dat kun je hieronder ophalen.' +
-          '<div style="margin-top:12px"><button class="obtn p" onclick="window.__opvGesprekHistoriek()"' +
-          (_gesprek.haalt ? ' disabled' : '') + '>' +
-          (_gesprek.haalt ? 'Bezig&hellip;' : '&#8615; Historiek ophalen') + '</button></div>' +
-          '<div style="margin-top:8px;color:#6b7280">WhatsApp synct maar een beperkt venster naar een gekoppeld apparaat, ' +
-          'dus wat terugkomt kan minder zijn dan wat op Daves telefoon staat.</div></div>');
+        : (onbereikbaar
+          ? '<div class="nietgemeten"><b>Nog geen berichten in het systeem, en ophalen kan niet.</b><br>' +
+            'Vanaf de koppeling is dit gesprek volledig: alles wat sindsdien heen en weer gaat komt hier ' +
+            'binnen. Wat er d&aacute;&aacute;rvoor gezegd is, staat alleen op Daves telefoon en blijft daar. ' +
+            'De brug kan de gesprekkenlijst van het toestel niet lezen &mdash; gemeten, niet aangenomen: ' +
+            'de aanvraag wierp een fout' +
+            (onbereikbaar.fout ? ' (<code>' + esc(onbereikbaar.fout) + '</code>)' : '') + '. ' +
+            'Versturen en ontvangen werken w&eacute;l; alleen het uitlezen van de oude opslag niet.' +
+            '<div style="margin-top:8px;color:#6b7280">Achtergrond en versienummers staan in ' +
+            'services/whatsapp-brug/README.md.</div></div>'
+          : '<div class="nietgemeten"><b>Nog geen berichten in het systeem.</b><br>' +
+            'De brug bewaarde tot nu toe niets, dus wat er eerder gezegd is staat hier nog niet. ' +
+            'Op het gekoppelde toestel staat het misschien w&eacute;l &mdash; dat kun je hieronder ophalen.' +
+            '<div style="margin-top:12px"><button class="obtn p" onclick="window.__opvGesprekHistoriek()"' +
+            (_gesprek.haalt ? ' disabled' : '') + '>' +
+            (_gesprek.haalt ? 'Bezig&hellip;' : '&#8615; Historiek ophalen') + '</button></div>' +
+            '<div style="margin-top:8px;color:#6b7280">WhatsApp synct maar een beperkt venster naar een gekoppeld apparaat, ' +
+            'dus wat terugkomt kan minder zijn dan wat op Daves telefoon staat.</div></div>'));
     }
 
     const invoer = kan.mag
@@ -2810,7 +2850,7 @@
   // Het gesprekspaneel, getest in tests/opvolging-whatsapp-gesprek.test.js.
   window.__opvGesprekHelpers = {
     gesprekPaneelHtml, gesprekKanVersturen, gesprekBubbel, bepaalWaTimers,
-    beschrijfHistoriek, historiekMelding,
+    beschrijfHistoriek, historiekMelding, historiekOnbereikbaar,
     zetGesprek: (v) => Object.assign(_gesprek, v),
     zetWa: (v) => Object.assign(_wa, v),
     WA_POLL_GESPREK_MS,
