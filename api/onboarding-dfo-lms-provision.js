@@ -37,6 +37,41 @@ import { stuurLmsUitnodiging } from './_lib/dfo-lms-uitnodiging.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Waarom is de uitnodiging NIET geprobeerd? Retourneert een uitleg, of null
+ * wanneer er geen reden is (dan had er wél gebeld moeten worden).
+ *
+ * ── DE REGEL DIE HIER GELDT ───────────────────────────────────────────────
+ * Elke tak hieronder beschrijft ALLEEN wat daadwerkelijk in `result` staat.
+ * Geen enkele melding mag iets over de databank beweren dat niet gemeten is.
+ * 'Geen studentrij' mag er dus alleen staan als er echt gezocht is en er
+ * geen student_id uit kwam.
+ *
+ * Aanleiding: de eerste versie zei bij élke mislukking 'geen studentrij —
+ * uitnodiging niet geprobeerd', ook wanneer die rij er wél was. Dat kostte
+ * een halfuur zoeken in de verkeerde richting, want de melding beschreef het
+ * omgekeerde van de werkelijkheid.
+ *
+ * Pure functie: geen DB, geen netwerk. Testbaar in isolatie.
+ */
+export function verklaarNietGebeld(result) {
+  if (!result || typeof result !== 'object') {
+    return 'de studentkoppeling gaf geen resultaat terug';
+  }
+  if (result.ok !== true) {
+    const reden = result.error || result.reason || 'reden onbekend';
+    return 'de studentkoppeling is niet geslaagd: ' + reden;
+  }
+  if (!result.student_id) {
+    return 'de koppeling meldde succes maar gaf geen student-id terug — er is niets om uit te nodigen';
+  }
+  if (!result.email) {
+    return 'student ' + result.student_id + ' is gekoppeld, maar er is geen e-mailadres '
+      + 'bekend om de uitnodiging naartoe te sturen';
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -82,7 +117,8 @@ export default async function handler(req, res) {
   // Uitnodiging alleen op uitdrukkelijk verzoek, en alleen als de studentrij
   // er staat. Faalzacht: een mislukte mail maakt de koppeling niet ongedaan.
   const wilUitnodigen = body.send_invite === true;
-  if (wilUitnodigen && result && result.ok === true && result.email) {
+  const nietGebeldOmdat = verklaarNietGebeld(result);
+  if (wilUitnodigen && nietGebeldOmdat === null) {
     let uitnodiging;
     try {
       uitnodiging = await stuurLmsUitnodiging({ email: result.email });
@@ -93,8 +129,10 @@ export default async function handler(req, res) {
     await noteerUitnodiging(onboardingId, uitnodiging);
     result.uitnodiging = uitnodiging;
   } else if (wilUitnodigen) {
+    // Geen aanroep gedaan. De reden beschrijft wat er ECHT in het resultaat
+    // stond — nooit een aanname over de databank.
     result.uitnodiging = { ok: false, overgeslagen: true,
-      fout: 'geen studentrij — uitnodiging niet geprobeerd' };
+      fout: 'uitnodiging niet geprobeerd: ' + nietGebeldOmdat };
   }
 
   return res.status(200).json(result);

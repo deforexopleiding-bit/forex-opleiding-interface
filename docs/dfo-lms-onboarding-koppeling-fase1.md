@@ -246,6 +246,37 @@ Alles faalzacht: mislukt de uitnodiging, dan blijft de aanmelding staan en komt
 de reden in `dfo_lms_provision_error`. `dfo_lms_provisioned` wordt daarbij
 **niet** teruggezet — de studentrij is immers wél gekoppeld.
 
+### Het vormcontract van provisionDfoLmsStudent
+
+Elk geslaagd pad bouwt zijn resultaat via `succesResultaat({ studentId, email, … })`
+en nooit met een eigen object-literal. Reden: de aanroeper heeft `email` nodig
+om daarna de uitnodiging te versturen — hij kent het adres niet zelf.
+
+Op 6 september 2026 gaf het 'al gekoppeld'-uitstappad wél `ok:true` maar géén
+`email`. Daardoor heeft de uitnodigingsknop **nooit** gewerkt: de aanroeper
+zag geen adres en sloeg de aanroep over, met de melding *"geen studentrij"* —
+terwijl het bestáán van die rij juist de oorzaak was. De melding beschreef het
+omgekeerde van de werkelijkheid.
+
+Twee dingen zijn daarom veranderd:
+
+- De klant wordt nu opgehaald **vóór** de al-gekoppeld-uitstap, zodat `email`
+  op élk pad in bereik is. Het traject wordt bewust ná die uitstap opgehaald:
+  een al gekoppelde student hoeft niet opnieuw door de `product_soort`-controle.
+- `tests/dfo-lms-student.test.js` dwingt het contract af **op broncode-niveau**.
+  Wie later een pad toevoegt met een eigen `return { ok: true, … }` laat drie
+  tests falen. Dat is gecontroleerd door de fout opzettelijk opnieuw in te
+  bouwen: de tests sloegen aan, en werden weer groen na herstel.
+
+### Meldingen mogen niets beweren dat niet gemeten is
+
+`verklaarNietGebeld()` in `api/onboarding-dfo-lms-provision.js` is een pure
+functie die uitlegt waarom de uitnodiging niet geprobeerd is. Elke tak
+beschrijft uitsluitend wat er daadwerkelijk in het resultaat stond.
+"Geen studentrij" mag er alleen staan als er echt gezocht is en er geen
+student-id uit kwam; is de rij er wél maar ontbreekt het adres, dan zegt de
+melding dát, mét het student-id erbij.
+
 ### De Bubble-resetknop
 
 `api/onboarding-credentials-reset.js` weigert nu met een 409 zodra de
