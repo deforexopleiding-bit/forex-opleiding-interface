@@ -42,24 +42,34 @@ function fmtNlDate(ymdStr) {
   return dt.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function buildEmailOpts({ toEmail, voornaam, einddatumNl }) {
+// PURE render-functie: bouwt de "toegang verlengd"-mail. Geen send, geen DB,
+// geen env; geen throw op ontbrekende velden (best-effort met lege waarden).
+// Zo kan de E-mails-tab (api/email-overzicht.js) er een echte HTML-preview van
+// renderen met voorbeelddata, exact zoals buildEmailOpts hem verstuurt.
+export function renderExtendAccessEmail({ voornaam, einddatumNl } = {}) {
+  const naam = String(voornaam || '').trim() || 'daar';
+  const datum = String(einddatumNl || '').trim();
   const html = `<!DOCTYPE html><html lang="nl"><body style="margin:0;padding:0;background:#f4f6f8;font-family:'Inter',Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:40px 0;"><tr><td align="center">
 <table width="520" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
 <tr><td style="background:#093d54;padding:24px 40px;text-align:center;color:#fff;font-weight:600">De Forex Opleiding</td></tr>
 <tr><td style="padding:32px 40px;color:#1a2333;font-size:14px;line-height:1.6">
-<p style="margin:0 0 14px;font-weight:600">Hoi ${voornaam},</p>
-<p style="margin:0 0 14px">Goed nieuws — je toegang tot de cursus is verlengd tot <strong>${einddatumNl}</strong>. Je kunt gewoon verder waar je gebleven was.</p>
+<p style="margin:0 0 14px;font-weight:600">Hoi ${naam},</p>
+<p style="margin:0 0 14px">Goed nieuws — je toegang tot de cursus is verlengd tot <strong>${datum}</strong>. Je kunt gewoon verder waar je gebleven was.</p>
 <p style="margin:0">Vragen? Reageer gerust op deze mail.</p>
 </td></tr>
 <tr><td style="padding:16px 40px;border-top:1px solid #edf2f7;text-align:center;color:#9ca3af;font-size:11px">De Forex Opleiding</td></tr>
 </table></td></tr></table></body></html>`;
-  const text = `Hoi ${voornaam},\n\nGoed nieuws — je toegang tot de cursus is verlengd tot ${einddatumNl}. Je kunt gewoon verder waar je gebleven was.\n\nVragen? Reageer gerust op deze mail.\n\nDe Forex Opleiding`;
+  const text = `Hoi ${naam},\n\nGoed nieuws — je toegang tot de cursus is verlengd tot ${datum}. Je kunt gewoon verder waar je gebleven was.\n\nVragen? Reageer gerust op deze mail.\n\nDe Forex Opleiding`;
+  return { subject: 'Je toegang is verlengd', html, text };
+}
+
+function buildEmailOpts({ toEmail, voornaam, einddatumNl }) {
+  const { subject, html, text } = renderExtendAccessEmail({ voornaam, einddatumNl });
   return {
     from:    `"De Forex Opleiding" <${FROM_ADDRESS}>`,
     to:      toEmail,
-    subject: 'Je toegang is verlengd',
-    text, html,
+    subject, text, html,
   };
 }
 
