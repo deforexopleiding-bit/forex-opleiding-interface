@@ -28,6 +28,7 @@ import { dirname, join } from 'node:path';
 
 import {
   kandidatenVoor, isLokaalGenoteerd, maakLandcodeZoeker, LANDCODES,
+  ONTHOUDBAAR, NIET_MEETBAAR,
 } from '../services/whatsapp-brug/lib/landcode.js';
 import { naarChatId } from '../services/whatsapp-brug/lib/nummers.js';
 
@@ -116,13 +117,98 @@ test('nul treffers levert ook niets op', async () => {
   assert.equal(r.nummer, null);
 });
 
-test('een kandidaat die gooit telt niet mee en houdt de andere niet op', async () => {
+test('gaat er bij één kandidaat iets mis, dan is de hele uitkomst mislukt', async () => {
+  // Ook als de andere kandidaat wél bevestigt. We weten namelijk niet of de
+  // kandidaat die gooide óók bevestigd zou hebben — en dan waren het er twee
+  // geweest, en dat is een gok. 'Precies één treffer' kan alleen als alle
+  // kandidaten een antwoord gaven.
   const z = maakLandcodeZoeker({
     bevestig: async (k) => { if (k.startsWith('32')) throw new Error('stuk'); return k === '31472223752'; },
   });
   const r = await z.zoek('0472223752');
-  assert.equal(r.status, 'gevonden');
-  assert.equal(r.nummer, '31472223752');
+  assert.equal(r.status, 'mislukt');
+  assert.equal(r.nummer, null, 'er gaat niets uit op een halve meting');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EEN MISLUKTE METING IS GEEN ANTWOORD, EN WORDT NIET ONTHOUDEN
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// bevestig() gooit als WhatsApp nog niet klaar is of de verbinding net wegviel,
+// en de lidkaart wordt bij het opstarten gebouwd — juist het moment waarop dat
+// het vaakst gebeurt. Ging zo'n mislukking als 'geen' de cache in, dan stonden
+// die zes nummers voorgoed op 'niet te bepalen' tot iemand herstart, en niets
+// zou zeggen dat het aan de meting lag in plaats van aan het nummer.
+
+test('een mislukte poging gaat NIET de cache in', async () => {
+  let ronde = 0;
+  const z = maakLandcodeZoeker({
+    bevestig: async (k) => {
+      ronde += 1;
+      // Eerste ronde: WhatsApp is nog niet klaar. Daarna werkt het gewoon.
+      if (ronde <= 2) throw new Error('nog niet klaar');
+      return k === '32472223752';
+    },
+  });
+  const eerst = await z.zoek('0472223752');
+  assert.equal(eerst.status, 'mislukt');
+  assert.equal(z.aantalOnthouden(), 0, 'er valt niets te onthouden');
+
+  const daarna = await z.zoek('0472223752');
+  assert.equal(daarna.status, 'gevonden', 'de volgende poging krijgt een eerlijke kans');
+  assert.equal(daarna.nummer, '32472223752');
+});
+
+test('een echt antwoord wordt wél onthouden — ook een negatief', async () => {
+  for (const [bevestig, verwacht] of [
+    [async (k) => k === '32472223752', 'gevonden'],
+    [async () => true, 'meerdere'],
+    [async () => false, 'geen'],
+  ]) {
+    const z = maakLandcodeZoeker({ bevestig });
+    const r = await z.zoek('0472223752');
+    assert.equal(r.status, verwacht);
+    assert.equal(z.aantalOnthouden(), 1, verwacht + ' is kennis en hoort onthouden te worden');
+  }
+});
+
+test('ONTHOUDBAAR noemt precies de drie echte antwoorden', () => {
+  assert.deepEqual([...ONTHOUDBAAR].sort(), ['geen', 'gevonden', 'meerdere']);
+  assert.ok(!ONTHOUDBAAR.has('mislukt'));
+  assert.ok(!ONTHOUDBAAR.has('niet_meetbaar'));
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 'DEZE BIBLIOTHEEK KAN HET NIET' IS IETS ANDERS DAN 'HET NUMMER BESTAAT NIET'
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('een ontbrekende getNumberId levert niet_meetbaar op, geen geen', async () => {
+  // Precies het onderscheid waar de hele LID-zoektocht op is stukgelopen: een
+  // controle die 'niets gevonden' teruggeeft terwijl de functie niet eens
+  // bestaat, is geen meting maar een stilte.
+  const z = maakLandcodeZoeker({
+    bevestig: async () => { const e = new Error('bestaat niet'); e.code = NIET_MEETBAAR; throw e; },
+  });
+  const r = await z.zoek('0472223752');
+  assert.equal(r.status, 'niet_meetbaar');
+  assert.notEqual(r.status, 'geen');
+  assert.equal(z.aantalOnthouden(), 0, 'ook dit is geen kennis');
+});
+
+test('de brug gooit die code als de functie er niet is', () => {
+  const b = readFileSync(WA, 'utf8');
+  const i = b.indexOf('bevestig: async (kandidaat)');
+  const blok = b.slice(i, i + 800);
+  assert.match(blok, /!kunde\.api\.getNumberId/);
+  assert.match(blok, /e\.code = NIET_MEETBAAR; throw e/);
+  assert.ok(!/getNumberId\) return false/.test(blok), 'false zou het onderscheid wegpoetsen');
+});
+
+test('mislukt en niet_meetbaar staan apart in /status', () => {
+  const b = readFileSync(WA, 'utf8');
+  for (const k of ['mislukt', 'niet_meetbaar']) {
+    assert.match(b, new RegExp('landcodeTellers = \\{[^}]*' + k), k);
+  }
 });
 
 test('een internationaal nummer gaat ongewijzigd door zonder te vragen', async () => {

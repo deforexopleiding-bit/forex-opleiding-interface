@@ -18,7 +18,7 @@ import { normaliseerNummer, naarChatId } from './nummers.js';
 import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep, isEchtGesprek } from './gebeurtenis.js';
 import { maakTellers, jidVorm } from './tellers.js';
 import { maakLidkaart } from './lidkaart.js';
-import { maakLandcodeZoeker, isLokaalGenoteerd } from './landcode.js';
+import { maakLandcodeZoeker, isLokaalGenoteerd, NIET_MEETBAAR } from './landcode.js';
 import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET, FOUT } from './uitkomst.js';
 import { createRequire } from 'node:module';
 
@@ -268,10 +268,14 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
   // getNumberId beslissen, en accepteren alleen bij precies één treffer.
   //
   // Eén zoeker voor allebei de plekken, met één cache — zie lib/landcode.js.
-  const landcodeTellers = { gevonden: 0, geen: 0, meerdere: 0, niet_lokaal: 0 };
+  const landcodeTellers = { gevonden: 0, geen: 0, meerdere: 0, niet_lokaal: 0, mislukt: 0, niet_meetbaar: 0 };
   const landcode = maakLandcodeZoeker({
     bevestig: async (kandidaat) => {
-      if (!kunde.api.getNumberId) return false;
+      // 'deze bibliotheek kan het niet' is iets anders dan 'WhatsApp kent dit
+      // nummer niet'. Zou dit false teruggeven, dan waren die twee niet uit
+      // elkaar te houden — precies het onderscheid waar de hele LID-zoektocht
+      // op is stukgelopen, en waar lib/uitkomst.js voor bestaat.
+      if (!kunde.api.getNumberId) { const e = new Error('getNumberId bestaat niet'); e.code = NIET_MEETBAAR; throw e; }
       const w = await client.getNumberId(kandidaat + '@c.us');
       return !!(w && (w._serialized || w.user));
     },
