@@ -683,6 +683,152 @@
     return uit;
   }
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // G3 · DE NU-DOEN-BALK
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Bovenaan de dag: wat is nú aan de beurt. Oranje met 'Te laat' zodra een
+  // venster voorbij is.
+  //
+  // WAT HIER NIET MAG GEBEUREN — en dat is de hele reden dat deze functie een
+  // eigen kop heeft: er staat maar één ding in deze module met een echte klok
+  // eraan, en dat zijn de twee vensters plus de zoomcalls. Een open taak heeft
+  // een `due`, en dat is een DAG, geen tijdstip. Er is dus geen deadline om te
+  // tonen, en er mag er ook geen verzonnen worden. 'Voor 17:00 afbellen' zou
+  // een getal zijn dat nergens vandaan komt, en zoiets is over twee weken niet
+  // meer van een echte afspraak te onderscheiden.
+  //
+  // Wat de balk dus toont, op volgorde van hoe hard de klok tikt:
+  //
+  //   1. Een zoomcall die nu bezig is of zo komt   — echte starttijd uit de agenda
+  //   2. Het spraakbericht-venster (tot 09:00)     — echte deadline
+  //   3. Het nabelvenster (12:00-13:00)            — echt venster
+  //   4. De open taken                             — ALLEEN een aantal, zonder tijd
+  //
+  // En vier gevallen waarin er niets te zeggen valt, die dat dan ook zeggen:
+  // een andere dag dan vandaag ('nu' bestaat alleen vandaag), een brug die geen
+  // uitgaande berichten ziet (dan is 'geen spraakbericht' een bewering die we
+  // niet kunnen doen), een agenda die nog laadt, en een agenda die eruit ligt.
+
+  // Hoe lang een zoomcall duurt, en hoe ver vooruit de balk er een aankondigt.
+  // Geen gegeven uit de agenda: die levert een starttijd en geen eind. Dit zijn
+  // dus schattingen, en ze staan hier apart zodat dat zichtbaar blijft — en
+  // zodat de balk nergens doet alsof dit gemeten tijden zijn.
+  const CALL_DUUR_MIN    = 45;
+  const CALL_VOORUIT_MIN = 60;
+
+  /** Minuut-van-de-dag nu, in Amsterdamse tijd. */
+  function nuMinuut() {
+    const z = inZone(Date.now());
+    return z ? z.minuut : null;
+  }
+
+  const uu = (m) => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+  /**
+   * Wat er nu aan de beurt is. Pure functie — na te slaan via
+   * window.__opvNuHelpers en getest in tests/opvolging-nu-doen.test.js.
+   *
+   * Geeft terug WAT er te tonen is, niet hoe:
+   *   { soort, titel, uitleg, telaat, deadline? , actie? }
+   *
+   * `telaat` stuurt de oranje kleur. Hij staat alleen op true als er een echt
+   * venster verstreken is én er in dat venster nog werk open staat — een
+   * gemiste deadline waar niets meer voor te doen valt is geen alarm maar
+   * geschiedenis, en die hoort in de tijdlijn, niet bovenaan de dag.
+   */
+  function bepaalNuDoen({ dag, nu, minuut, brugZiet, calls, callsStaat, vensterTaken, openTaken }) {
+    if (dag !== nu) {
+      return { soort: 'andere_dag', titel: 'Je kijkt naar een andere dag.',
+        uitleg: '"Nu" bestaat alleen vandaag. Wat hier staat is geschiedenis of nog niet aan de beurt.',
+        telaat: false };
+    }
+    if (minuut === null || minuut === undefined) {
+      return { soort: 'geen_klok', titel: 'De tijd is hier niet te bepalen.',
+        uitleg: 'Zonder klok valt er niet te zeggen wat er nu aan de beurt is.', telaat: false };
+    }
+
+    // 1 · Een zoomcall met een echte starttijd. Die gaat voor: hij staat vast
+    //     op de minuut en iemand zit erop te wachten.
+    const komende = (Array.isArray(calls) ? calls : [])
+      .map((c) => ({ c, z: inZone(c && c.start) }))
+      .filter((x) => x.z && x.z.dag === dag)
+      .sort((a, b) => a.z.minuut - b.z.minuut);
+    const bezig = komende.find((x) => minuut >= x.z.minuut && minuut < x.z.minuut + CALL_DUUR_MIN);
+    if (bezig) {
+      return { soort: 'call_bezig', titel: 'Call met ' + (bezig.c.naam || 'onbekend') + ' — nu bezig',
+        uitleg: 'Begonnen om ' + bezig.z.tijd + '.', telaat: false, deadline: bezig.z.tijd };
+    }
+    const straks = komende.find((x) => x.z.minuut > minuut);
+    if (straks && straks.z.minuut - minuut <= CALL_VOORUIT_MIN) {
+      return { soort: 'call_straks', titel: 'Call met ' + (straks.c.naam || 'onbekend') + ' om ' + straks.z.tijd,
+        uitleg: 'Over ' + (straks.z.minuut - minuut) + ' minuten.', telaat: false, deadline: straks.z.tijd };
+    }
+
+    // 2 en 3 · De twee vensters. Alleen als de brug uitgaande berichten ziet:
+    //     anders is 'nog geen spraakbericht' niet gemeten maar geraden.
+    if (brugZiet && Array.isArray(vensterTaken) && vensterTaken.length) {
+      const t = telVensters(vensterTaken, dag);
+      const spraakOpen = t.spraak.niet_gedaan;
+      const spraakGrens = SPRAAK_DEADLINE_UUR * 60;
+      if (spraakOpen > 0) {
+        if (minuut < spraakGrens) {
+          return { soort: 'spraak', telaat: false, deadline: uu(spraakGrens),
+            titel: spraakOpen + ' spraakbericht' + (spraakOpen === 1 ? '' : 'en') + ' insturen',
+            uitleg: 'Nog ' + (spraakGrens - minuut) + ' minuten tot ' + uu(spraakGrens) + '.' };
+        }
+        return { soort: 'spraak', telaat: true, deadline: uu(spraakGrens),
+          titel: spraakOpen + ' spraakbericht' + (spraakOpen === 1 ? '' : 'en') + ' insturen',
+          uitleg: 'Te laat — deadline was ' + uu(spraakGrens) + '.' };
+      }
+      const nabelOpen = t.nabel.niet_gedaan;
+      const van = NABEL_VAN_UUR * 60, tot = NABEL_TOT_UUR * 60;
+      if (nabelOpen > 0) {
+        if (minuut < van) {
+          return { soort: 'nabel', telaat: false, deadline: uu(van) + '\u2013' + uu(tot),
+            titel: nabelOpen + ' keer nabellen',
+            uitleg: 'Het venster gaat om ' + uu(van) + ' open.' };
+        }
+        if (minuut < tot) {
+          return { soort: 'nabel', telaat: false, deadline: uu(van) + '\u2013' + uu(tot),
+            titel: nabelOpen + ' keer nabellen',
+            uitleg: 'Nog ' + (tot - minuut) + ' minuten tot ' + uu(tot) + '.' };
+        }
+        return { soort: 'nabel', telaat: true, deadline: uu(van) + '\u2013' + uu(tot),
+          titel: nabelOpen + ' keer nabellen',
+          uitleg: 'Te laat — het venster was ' + uu(van) + ' tot ' + uu(tot) + '.' };
+      }
+    }
+
+    // 4 · De open taken. Een aantal, geen deadline — die is er niet.
+    const open = Number(openTaken) || 0;
+    if (open > 0) {
+      return { soort: 'taken', telaat: false,
+        titel: open + ' open ta' + (open === 1 ? 'ak' : 'ken') + ' vandaag',
+        // Bewust zonder tijd. Een taak draagt een `due` en dat is een dag; er
+        // is geen uur om te tonen en er wordt er ook geen verzonnen.
+        uitleg: 'Geen vast tijdstip: aan een taak hangt een dag, geen klok.' };
+    }
+
+    // Niets open. Of er valt niets te meten — dan zegt de balk dat, in plaats
+    // van 'klaar' te melden op grond van iets dat niet gekeken is.
+    if (!brugZiet) {
+      return { soort: 'niet_meetbaar', telaat: false, titel: 'Niets open in de takenlijst.',
+        uitleg: 'Over de spraakberichten en het nabellen valt niets te zeggen: de brug ziet ' +
+          'geen uitgaande berichten. Dat is geen nul, dat is een blinde vlek.' };
+    }
+    if (callsStaat === 'laden') {
+      return { soort: 'laden', telaat: false, titel: 'Even kijken wat er nu aan de beurt is\u2026',
+        uitleg: 'De agenda wordt opgehaald.' };
+    }
+    if (callsStaat === 'agenda_fout') {
+      return { soort: 'agenda_fout', telaat: false, titel: 'Niets open in de takenlijst.',
+        uitleg: 'De agenda is niet bereikbaar, dus over de calls van vandaag valt hier niets te zeggen.' };
+    }
+    return { soort: 'klaar', telaat: false, titel: 'Niets meer aan de beurt.',
+      uitleg: 'De takenlijst is leeg en de vensters van vandaag zijn rond.' };
+  }
+
   const leegTakenCache = () => {
     _live.taken.data = null; _live.taken.key = null;
     _live.dash.data = null; _live.dash.key = null;
@@ -784,6 +930,17 @@
 .opv .ltrij{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;cursor:pointer;background:#fff;border:1px solid var(--o-line);border-radius:10px;padding:8px 11px;margin-bottom:5px}
 .opv .ltrij:hover{border-color:var(--o-acc)}
 .opv .ltnm{font-weight:650;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* G3 · de nu-doen-balk. Oranje zodra een venster verstreken is; verder rustig,
+   want hij staat er de hele dag. */
+.opv .nudoen{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--o-line);border-left:4px solid var(--o-acc);border-radius:12px;padding:11px 14px;margin:0 0 14px;box-shadow:var(--o-sh)}
+.opv .nudoen.laat{border-left-color:var(--o-amb);background:var(--o-ambs)}
+.opv .nudoen .nuic{font-size:18px;line-height:1}
+.opv .nudoen .nutxt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.opv .nudoen .nutxt b{font-size:14px}
+.opv .nudoen .nutxt span{font-size:12.5px;color:var(--o-muted)}
+.opv .nudoen.laat .nutxt span{color:#8a5a00}
+.opv .nudoen .nudl{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;color:var(--o-muted);white-space:nowrap}
+.opv .nudoen.laat .nudl{color:var(--o-amb)}
 .opv .ronde{font-size:12.5px;color:var(--o-muted);margin:0 0 10px 2px}
 .opv .ronde.zacht{margin:8px 0 0 2px;font-size:11.5px;font-style:italic}
 .opv .row{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:13px 16px;display:flex;align-items:flex-start;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
@@ -2036,6 +2193,32 @@
     return { getal: String(waarde), label: verleden ? ' gedaan' : ' open', gemeten: true };
   }
 
+  /**
+   * De balk zelf. Haalt de losse eindjes op en laat bepaalNuDoen beslissen;
+   * hier staat alleen hoe het eruitziet.
+   */
+  function nuDoenBalk(dag) {
+    const bron = vensterBron(dag);
+    const st = _live.taken;
+    const advies = bepaalNuDoen({
+      dag,
+      nu      : vandaag(),
+      minuut  : nuMinuut(),
+      brugZiet: brugZietUitgaand(),
+      calls   : (_calls.key === dag && _calls.data) ? _calls.data : [],
+      callsStaat  : bron.staat,
+      vensterTaken: bron.staat === 'ok' ? bron.taken : [],
+      // Precies het getal dat eronder in de lijst staat, niet een eigen telling.
+      openTaken: (st.data && st.key === dag) ? (st.data.taken || []).length : 0,
+    });
+    return '<div class="nudoen' + (advies.telaat ? ' laat' : '') + '">' +
+      '<div class="nuic">' + (advies.telaat ? '&#9888;' : '&#9202;') + '</div>' +
+      '<div class="nutxt"><b>' + esc(advies.titel) + '</b>' +
+      '<span>' + esc(advies.uitleg) + '</span></div>' +
+      (advies.deadline ? '<div class="nudl">' + esc(advies.deadline) + '</div>' : '') +
+      '</div>';
+  }
+
   function weekbalk(dag) {
     const nu = vandaag();
     const wk = bepaalWeek({ nu, offset: _ui.weekOffset });
@@ -2102,6 +2285,9 @@
       'nooit met een nul die eruitziet alsof er gemeten is.</div>' +
       '<button class="obtn p leadknop" onclick="window.__opvLeadNieuw()">+ Lead toevoegen</button>' +
       waLamp() + '</div>';
+    // De balk staat boven de weekbalk: wat er nú aan de beurt is hoort het
+    // eerste te zijn wat je ziet, niet iets waar je langs moet scrollen.
+    h += nuDoenBalk(dag);
     h += weekbalk(dag);
     // Boven de takenlijst: eerst wat er vaststaat vandaag, dan wat je zelf
     // moet oppakken. De agenda hangt niet aan de takenlijst — valt hij weg,
@@ -3261,6 +3447,16 @@
     zetGesprek: (v) => Object.assign(_gesprek, v),
     zetWa: (v) => Object.assign(_wa, v),
     WA_POLL_GESPREK_MS,
+  };
+
+  // G3, getest in tests/opvolging-nu-doen.test.js. bepaalNuDoen is een pure
+  // functie: de test voert er een klok in, geen browser.
+  window.__opvNuHelpers = {
+    bepaalNuDoen, nuDoenBalk, nuMinuut,
+    SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR, CALL_DUUR_MIN, CALL_VOORUIT_MIN,
+    zetTaken: (dag, lijst) => { _live.taken.key = dag; _live.taken.data = { taken: lijst || [], wacht: [] }; },
+    zetCalls: (dag, lijst) => { _calls.key = dag; _calls.data = lijst || []; _calls.error = null; },
+    zetWa: (v) => Object.assign(_wa, v),
   };
 
   window.__opvWeekHelpers = {
