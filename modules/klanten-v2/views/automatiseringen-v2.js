@@ -2770,8 +2770,18 @@
       : '';
     // Etiket via de gedeelde helper, niet rauw uit badge_label: die is
     // platgeslagen en droeg bij oude rijen het volledige postadres mee, wat de
-    // naam ernaast wegduwde. Zie _shared-v2.js.
-    const badgeTxt = (H.opvBadgeTekst ? H.opvBadgeTekst(t) : (t.badge_label || ''));
+    // naam ernaast wegduwde. Zie _opvolging-badge.js.
+    //
+    // ANDERE AFWEG DAN IN opvolging-v2.js, en dat is met opzet. Daar stopt de
+    // module als de helper ontbreekt, want daar IS het etiket onderdeel van het
+    // scherm. Hier is het één chip op een kanban-kaart in een andere module;
+    // die kaart onbruikbaar maken zou zwaarder zijn dan het probleem.
+    //
+    // Maar niet stil terugvallen op badge_label — dan staat het volledige
+    // postadres er weer, precies de fout die we net weggehaald hebben. De chip
+    // valt dan gewoon weg, en de opvolgmodule zelf meldt luid dat er een
+    // bestand ontbreekt.
+    const badgeTxt = (typeof H.opvBadgeTekst === 'function') ? H.opvBadgeTekst(t) : '';
     const badgeChip = badgeTxt
       ? `<span title="${esc(badgeTxt)}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(badgeTxt)}</span>`
       : '';

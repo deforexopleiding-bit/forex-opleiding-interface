@@ -164,6 +164,116 @@ test('de view weigert te starten zonder de helper', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// MAAR HIJ STOPT ZICHTBAAR, NIET STIL
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// De harde stop was erger dan de fout die hij voorkwam. Bij een ontbrekend
+// onderdeel deed de view console.error + return, en dan draaiden de drie regels
+// window.DFO.VIEWS onderaan het bestand nooit. app-shell.js viel terug op
+// genericView(), en die tekent letterlijk "Deze view is nog niet gebouwd. In
+// productie wordt hier de module-content gerenderd."
+//
+// Laadt _opvolging-badge.js één keer niet — cache, 404 na een deploy, een
+// adblocker — dan opent Dave de module en leest hij dat hij niet bestaat. Geen
+// harde fout maar een schermvullende leugen, met het enige spoor in een console
+// die hij nooit opent.
+
+/** De view laden zónder het helperbestand, zoals bij een gemiste deploy. */
+function laadViewZonderHelper() {
+  const window = {
+    DFO: { VIEWS: {}, render() {} }, KV_V2: { helpers: {} },
+    KV: { authedJson: async () => ({}) },
+    addEventListener() {}, setInterval: () => 0, clearInterval() {},
+  };
+  window.window = window;
+  const ctx = createContext({
+    window, console: { debug() {}, log() {}, warn() {}, error() {} },
+    document: { getElementById: () => null, head: { appendChild() {} }, createElement: () => ({ style: {} }) },
+    queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
+    Date, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set, Map,
+  });
+  runInContext(readFileSync(VIEW, 'utf8'), ctx, { filename: 'opvolging-v2.js' });
+  return window;
+}
+
+test('de drie views worden OOK geregistreerd als het onderdeel ontbreekt', () => {
+  // Dit is de kern: zonder registratie valt de shell terug op genericView.
+  const w = laadViewZonderHelper();
+  for (const k of ['opvolging/Vandaag', 'opvolging/Dashboard', 'opvolging/Afgerond']) {
+    assert.equal(typeof w.DFO.VIEWS[k], 'function', 'niet geregistreerd: ' + k);
+  }
+});
+
+test('die views tonen wat er aan de hand is en wat je eraan kunt doen', () => {
+  const w = laadViewZonderHelper();
+  const h = w.DFO.VIEWS['opvolging/Vandaag']();
+  assert.match(h, /ontbreekt een onderdeel/i);
+  assert.match(h, /Herlaad de pagina/);
+  assert.match(h, /niet meegekomen met de laatste deploy/);
+  assert.match(h, /opvBadgeTekst/, 'en welk onderdeel het is');
+});
+
+test('en niet het zinnetje dat de module niet bestaat', () => {
+  // genericView() in app-shell.js zegt 'Deze view is nog niet gebouwd'. Dat is
+  // precies de leugen die we hier voorkomen.
+  const w = laadViewZonderHelper();
+  const h = w.DFO.VIEWS['opvolging/Vandaag']();
+  assert.doesNotMatch(h, /nog niet gebouwd/);
+  const shell = readFileSync(join(ROOT, 'modules/shared/design-system/app-shell.js'), 'utf8');
+  assert.match(shell, /Deze view is nog niet gebouwd/,
+    'die tekst bestaat echt in de shell — daarom is de registratie nodig');
+});
+
+test('de module meldt zich ook aan bij de shell', () => {
+  // Zonder KV_V2_ADD staat de module niet in de nav, en dan is het scherm met
+  // de uitleg niet eens te bereiken.
+  const w = laadViewZonderHelper();
+  assert.ok(Array.isArray(w.KV_V2_PENDING) && w.KV_V2_PENDING.includes('opvolging'));
+});
+
+test('ontbreekt _shared-v2.js zelf, dan gebeurt hetzelfde', () => {
+  const window = { DFO: { VIEWS: {}, render() {} }, addEventListener() {}, setInterval: () => 0, clearInterval() {} };
+  window.window = window;
+  const ctx = createContext({
+    window, console: { debug() {}, log() {}, warn() {}, error() {} },
+    document: { getElementById: () => null, head: { appendChild() {} }, createElement: () => ({ style: {} }) },
+    queueMicrotask: () => {}, setInterval: () => 0, clearInterval: () => {},
+    Date, Math, Number, String, JSON, Boolean, Array, Object, RegExp, Intl, Set, Map,
+  });
+  runInContext(readFileSync(VIEW, 'utf8'), ctx, { filename: 'opvolging-v2.js' });
+  assert.equal(typeof window.DFO.VIEWS['opvolging/Vandaag'], 'function');
+  assert.match(window.DFO.VIEWS['opvolging/Vandaag'](), /_shared-v2\.js/);
+});
+
+test('de melding is ontsnapt', () => {
+  const b = readFileSync(VIEW, 'utf8');
+  const i = b.indexOf('function ontbrekendOnderdeel');
+  const blok = b.slice(i, i + 400);
+  assert.match(blok, /replace\(\/\[&<>"\]\/g/, 'de naam van het onderdeel gaat er ontsnapt in');
+});
+
+test('automatiseringen laat de chip weg in plaats van badge_label te tonen', () => {
+  // Andere afweging dan in opvolging-v2, en met opzet: daar is het etiket
+  // onderdeel van het scherm, hier is het één chip op een kanban-kaart in een
+  // andere module. Die kaart onbruikbaar maken is zwaarder dan het probleem.
+  // Maar stil terugvallen op badge_label zou het postadres terugbrengen.
+  const b = readFileSync(AUTO, 'utf8');
+  assert.match(b, /typeof H\.opvBadgeTekst === 'function'\) \? H\.opvBadgeTekst\(t\) : ''/);
+  assert.ok(!/H\.opvBadgeTekst\(t\) : \(t\.badge_label/.test(b), 'geen stille terugval');
+});
+
+test('het commentaar wijst naar het bestand waar de functie echt staat', () => {
+  // Het verwees naar _shared-v2.js — juist het bestand waarvan de kop uitlegt
+  // waarom hij daar NIET staat.
+  for (const p of [VIEW, AUTO]) {
+    const b = readFileSync(p, 'utf8');
+    const i = b.indexOf('opvBadgeTekst');
+    const rond = b.slice(Math.max(0, i - 900), i + 400);
+    assert.match(rond, /_opvolging-badge\.js/, p + ': hoort naar het juiste bestand te wijzen');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // DE LAADVOLGORDE IS EEN ECHTE VALKUIL
 // ═══════════════════════════════════════════════════════════════════════════
 

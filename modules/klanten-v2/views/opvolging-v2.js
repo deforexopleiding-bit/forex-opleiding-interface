@@ -38,15 +38,58 @@
 
 (function () {
   if (!window.DFO) { console.error('[opvolging-v2] DFO shell niet geladen.'); return; }
-  if (!window.KV_V2 || !window.KV_V2.helpers) { console.error('[opvolging-v2] KV_V2.helpers niet geladen.'); return; }
+
+  /**
+   * WAT ER GEBEURT ALS ER EEN BESTAND ONTBREEKT — EN WAAROM DIT ER STAAT.
+   *
+   * Deze view stopte bij een ontbrekend onderdeel met een console.error en een
+   * `return`. Daardoor werden de drie regels window.DFO.VIEWS onderaan dit
+   * bestand nooit gedraaid, en viel app-shell.js terug op genericView(). Die
+   * tekent letterlijk: "Deze view is nog niet gebouwd. In productie wordt hier
+   * de module-content gerenderd."
+   *
+   * Laadt _opvolging-badge.js dus één keer niet — cache, een 404 na een deploy,
+   * een adblocker — dan opent Dave de module en leest hij dat hij niet bestaat.
+   * Dat is geen harde fout maar een schermvullende leugen, en het enige spoor
+   * staat in een console die hij nooit opent.
+   *
+   * Dus: de views worden ALTIJD geregistreerd. Ontbreekt er iets, dan tonen ze
+   * wat er aan de hand is en wat je eraan kunt doen. Liever een lelijk scherm
+   * dat waar is dan een net scherm dat liegt.
+   */
+  function ontbrekendOnderdeel(wat) {
+    const veilig = String(wat).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return '<div class="opv"><div class="warn" style="max-width:640px">' +
+      '<b>Er ontbreekt een onderdeel van deze module.</b><br>' +
+      'De module is niet volledig geladen, dus wat je hier zou zien is er nu niet. ' +
+      '<b>Herlaad de pagina.</b> Blijft dit staan, dan is er een bestand niet meegekomen ' +
+      'met de laatste deploy — meld dat, want dit lost zichzelf niet op.' +
+      '<div style="margin-top:10px;font-size:12px;color:#6b7280">Ontbrekend onderdeel: <code>' +
+      veilig + '</code></div>' +
+      '<div style="margin-top:12px"><button class="obtn p" onclick="window.location.reload()">Pagina herladen</button></div>' +
+      '</div></div>';
+  }
+
+  function registreerOntbrekend(wat) {
+    console.error('[opvolging-v2] ' + wat + ' ontbreekt — module niet volledig geladen.');
+    const scherm = () => ontbrekendOnderdeel(wat);
+    window.DFO.VIEWS = window.DFO.VIEWS || {};
+    window.DFO.VIEWS['opvolging/Vandaag'] = scherm;
+    window.DFO.VIEWS['opvolging/Dashboard'] = scherm;
+    window.DFO.VIEWS['opvolging/Afgerond'] = scherm;
+    if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('opvolging');
+    else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('opvolging');
+  }
+
+  if (!window.KV_V2 || !window.KV_V2.helpers) { registreerOntbrekend('KV_V2.helpers (_shared-v2.js)'); return; }
   const H = window.KV_V2.helpers;
-  // Het etiket op een taak komt uit één plek — zie _shared-v2.js. Het stond op
-  // vier plekken in dit bestand rauw op het scherm, en drie keer dezelfde lange
-  // string is geen toeval maar een ontbrekende gedeelde helper. Hard falen als
-  // hij ontbreekt: stil terugvallen op badge_label zou de fout terugbrengen
-  // zonder dat iemand het merkt.
+  // Het etiket op een taak komt uit één plek — zie _opvolging-badge.js. Het
+  // stond op vier plekken in dit bestand rauw op het scherm, en drie keer
+  // dezelfde lange string is geen toeval maar een ontbrekende gedeelde helper.
+  // Stil terugvallen op badge_label zou de fout terugbrengen zonder dat iemand
+  // het merkt; daarom stopt de module hier — maar wél zichtbaar, zie hierboven.
   if (typeof H.opvBadgeTekst !== 'function') {
-    console.error('[opvolging-v2] H.opvBadgeTekst ontbreekt — is _shared-v2.js bijgewerkt?');
+    registreerOntbrekend('KV_V2.helpers.opvBadgeTekst (_opvolging-badge.js)');
     return;
   }
   const badgeTekst = (t) => H.opvBadgeTekst(t);
@@ -1993,7 +2036,7 @@
    * browser-view kan daar niet uit importeren; tests/opvolging-korte-plaats.test.js
    * bewaakt dat de twee hetzelfde blijven doen.
    */
-  // Eén implementatie, in _shared-v2.js. De naam blijft hier staan zodat elke
+  // Eén implementatie, in _opvolging-badge.js. De naam blijft hier staan zodat elke
   // bestaande aanroeper en test blijft werken, maar de regel zelf staat nog maar
   // op één plek — dat was de hele klacht.
   function kortePlaats(location) {
