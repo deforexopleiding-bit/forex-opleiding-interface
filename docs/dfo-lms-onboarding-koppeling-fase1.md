@@ -53,6 +53,40 @@ Bij het zoeken op e-mail wordt bewust géén kale `.ilike()` vertrouwd: `_` en
 e-mailadres. Er wordt daarom achteraf op exacte `lower()`-gelijkheid
 gefilterd.
 
+### Bekende beperking: de klant met twee e-mailadressen
+
+**Alle drie de lagen matchen op gegevens, niet op een persoon.** Ze vangen de
+klant die in het CRM en in het LMS onder *verschillende* e-mailadressen staat
+dus niet — privé versus zakelijk, een oud adres, een typefout. Voor zo iemand
+vindt de zoekslag niets, slaat de unieke index op `lower(email)` niet aan
+(twee verschillende adressen zijn nu eenmaal niet gelijk), en wordt er een
+**tweede studentrij aangemaakt voor iemand die er al staat**.
+
+Dit is geen theorie. Bij de controle vóór de allereerste handmatige klik
+(5 september 2026) kwam precies zo'n geval boven: één klant met een
+`.2@icloud.com`-adres in het CRM en een `@gmail.com`-adres in het LMS. Was er
+zonder die controle geklikt, dan was hij netjes gedupliceerd — met alle drie
+de vangnetten actief.
+
+Wat dit betekent voor de praktijk:
+
+- **Vóór een handmatige klik op een bestaande klant: controleer op persoon,
+  niet alleen op e-mailadres.** Zoek in `hlms_student` ook op achternaam of
+  telefoonnummer, niet uitsluitend op `lower(email)`.
+- De automatische weg voor **nieuwe** onboardings loopt dit risico veel minder:
+  een net aangemelde klant staat doorgaans nog niet in het LMS. Uitgesloten is
+  het niet — iemand die eerder een ander traject deed kan er al staan onder een
+  ander adres.
+- De koppeling **verandert nooit het e-mailadres** van een bestaande studentrij.
+  Wordt een dubbele rij ontdekt, dan is opruimen aan LMS-kant handwerk.
+
+Structureel oplossen vraagt een tweede matchas (telefoonnummer genormaliseerd,
+of naam plus geboortedatum) met een expliciete keuze over wat er moet gebeuren
+bij twijfel. Dat is bewust **niet** in fase 1 gebouwd: een tweede as die te
+soepel matcht koppelt twee verschillende mensen aan elkaar, en dat is erger dan
+een dubbele rij. Zolang die keuze niet gemaakt is, is de controle vooraf de
+enige afdekking.
+
 ## product_soort — de scherpe rand
 
 `hlms_student.product_soort` is `text` **zonder CHECK**: de databank houdt een
