@@ -583,6 +583,75 @@
   };
 
   /* ── Public API ──────────────────────────────────────────────────── */
+  /* ── Herbruikbare prompt/confirm-modals (CRM-breed) ──────────────────
+     dfoPrompt({title, message?, value?, placeholder?, okLabel?, cancelLabel?})
+       → Promise<string|null>   (null = geannuleerd)
+     dfoConfirm({title, message?, okLabel?, cancelLabel?, danger?})
+       → Promise<boolean>
+     Zelfstandige, gestylede dialoog (navy #10284A / geel #FFC21A-focus,
+     afgeronde hoeken, overlay). Onafhankelijk van de grote detail-modal
+     (openModal) zodat 'ie overal — ook buiten de shell — bruikbaar is. */
+  function ensureDlgCss() {
+    if (document.getElementById('dfo-dlg-css')) return;
+    const s = document.createElement('style');
+    s.id = 'dfo-dlg-css';
+    s.textContent = `
+.dfo-dlg{position:fixed;inset:0;background:rgba(16,40,74,.45);backdrop-filter:blur(3px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;animation:dfoDlgFade .12s ease}
+.dfo-dlg-box{width:420px;max-width:100%;background:var(--surface,#fff);border-radius:16px;box-shadow:0 18px 50px rgba(16,40,74,.28);padding:22px 22px 16px;border:1px solid var(--border,#e6e8ee);animation:dfoDlgPop .14s cubic-bezier(.2,.9,.3,1.2)}
+.dfo-dlg-title{font-size:16px;font-weight:700;color:var(--text-1,#10284A);margin:0 0 8px}
+.dfo-dlg-msg{font-size:13.5px;color:var(--text-2,#4a5568);line-height:1.55;margin:0 0 14px}
+.dfo-dlg-input{width:100%;padding:10px 12px;border:1.5px solid var(--border,#d6dae4);border-radius:10px;font-size:14px;background:var(--surface,#fff);color:var(--text-1,#10284A);outline:none;margin:0 0 16px;box-sizing:border-box}
+.dfo-dlg-input:focus{border-color:#10284A;box-shadow:0 0 0 3px rgba(255,194,26,.4)}
+.dfo-dlg-foot{display:flex;justify-content:flex-end;gap:10px}
+.dfo-dlg-btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:filter .12s,background .12s}
+.dfo-dlg-cancel{background:transparent;border-color:var(--border,#d6dae4);color:var(--text-2,#4a5568)}
+.dfo-dlg-cancel:hover{background:var(--surface-2,#f3f5f9)}
+.dfo-dlg-ok{background:#10284A;color:#fff}
+.dfo-dlg-ok:hover{filter:brightness(1.14)}
+.dfo-dlg-ok.danger{background:#c0392b}
+@keyframes dfoDlgFade{from{opacity:0}to{opacity:1}}
+@keyframes dfoDlgPop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}`;
+    document.head.appendChild(s);
+  }
+  function dfoDialog(opts) {
+    const o = opts || {};
+    const kind = o.kind === 'prompt' ? 'prompt' : 'confirm';
+    const escq = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return new Promise((resolve) => {
+      ensureDlgCss();
+      const ov = document.createElement('div');
+      ov.className = 'dfo-dlg';
+      const okText = o.okLabel || (kind === 'prompt' ? 'Opslaan' : 'OK');
+      ov.innerHTML = `<div class="dfo-dlg-box" role="dialog" aria-modal="true">
+        <div class="dfo-dlg-title">${escq(o.title || '')}</div>
+        ${o.message ? `<div class="dfo-dlg-msg">${escq(o.message)}</div>` : ''}
+        ${kind === 'prompt' ? `<input class="dfo-dlg-input" type="text" value="${escq(o.value)}" placeholder="${escq(o.placeholder || '')}">` : ''}
+        <div class="dfo-dlg-foot">
+          <button type="button" class="dfo-dlg-btn dfo-dlg-cancel">${escq(o.cancelLabel || 'Annuleren')}</button>
+          <button type="button" class="dfo-dlg-btn dfo-dlg-ok${o.danger ? ' danger' : ''}">${escq(okText)}</button>
+        </div></div>`;
+      document.body.appendChild(ov);
+      const input = ov.querySelector('.dfo-dlg-input');
+      const done = (result) => { document.removeEventListener('keydown', onKey, true); ov.remove(); resolve(result); };
+      const cancel = () => done(kind === 'prompt' ? null : false);
+      const ok = () => done(kind === 'prompt' ? (input ? input.value : '') : true);
+      ov.querySelector('.dfo-dlg-cancel').onclick = cancel;
+      ov.querySelector('.dfo-dlg-ok').onclick = ok;
+      ov.addEventListener('mousedown', (e) => { if (e.target === ov) cancel(); });
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+        else if (e.key === 'Enter' && (kind === 'confirm' || (input && document.activeElement === input))) { e.preventDefault(); ok(); }
+      }
+      document.addEventListener('keydown', onKey, true);
+      requestAnimationFrame(() => { if (input) { input.focus(); input.select(); } else ov.querySelector('.dfo-dlg-ok').focus(); });
+    });
+  }
+  function dfoPrompt(o) { return dfoDialog(Object.assign({}, o, { kind: 'prompt' })); }
+  function dfoConfirm(o) { return dfoDialog(Object.assign({}, o, { kind: 'confirm' })); }
+  // Ook als losse globals zodat modules zonder DFO-referentie ze kunnen gebruiken.
+  window.dfoPrompt = dfoPrompt;
+  window.dfoConfirm = dfoConfirm;
+
   Object.assign(NS, {
     ROLES, A, SA, SAM, SAMS, SAMSM, SAMMK,
     MODS, TAB_RESTRICT, MOD_LOCK, GLOW,
@@ -592,6 +661,7 @@
     setRole, setRoles, goMod, goTab, render, renderNav, applyColor, toggleNav,
     openPanel, closePanel, stepRow, showHint,
     openModal, closeModal,
+    dfoPrompt, dfoConfirm,
     toggleTheme, applyStoredTheme,
     avc, ini, eur, eur0,
   });
