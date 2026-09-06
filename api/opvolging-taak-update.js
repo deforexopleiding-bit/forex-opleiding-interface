@@ -33,6 +33,13 @@ export default async function handler(req, res) {
   const b = req.body || {};
   if (!b.taak_id) return res.status(400).json({ error: 'taak_id ontbreekt' });
 
+  // Elke mutatie op een kaart is 'afronden' in de zin van dit scherm: de kaart
+  // krijgt een uitkomst en verdwijnt, verschuift of wacht. Archiveren zit
+  // hieronder nog een keer apart — zie de archiveer-tak.
+  if (!(await requirePermission(req, 'opvolging.taak.afronden'))) {
+    return res.status(403).json({ error: 'Geen rechten (opvolging.taak.afronden)' });
+  }
+
   const vandaag = isoDag(Date.now());
   const patch = { updated_at: new Date().toISOString() };
 
@@ -75,6 +82,11 @@ export default async function handler(req, res) {
       patch.agenda_doorgestuurd_at = new Date().toISOString();
 
     } else if (b.actie === 'archiveer') {
+      // Archiveren heeft een eigen sleutel: het haalt een lead definitief uit
+      // de lijst, en dat is een zwaardere beslissing dan hem verzetten.
+      if (!(await requirePermission(req, 'opvolging.taak.archiveren'))) {
+        return res.status(403).json({ error: 'Geen rechten (opvolging.taak.archiveren)' });
+      }
       const reden = (b.archief_reden || '').trim();
       if (!reden) return res.status(400).json({ error: 'archief_reden is verplicht' });
       patch.status = 'gearchiveerd';

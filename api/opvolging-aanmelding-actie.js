@@ -52,6 +52,13 @@ export default async function handler(req, res) {
   const allowed = await requirePermission(req, 'opvolging.module.access');
   if (!allowed) return res.status(403).json({ error: 'Geen rechten (opvolging.module.access)' });
 
+  // Dit endpoint IS het afronden van een aanmeldkaart: bevestigd, gesprek
+  // gehad, geen interesse, verplaatst. Vandaar dezelfde sleutel als bij de
+  // gewone taak-mutaties.
+  if (!(await requirePermission(req, 'opvolging.taak.afronden'))) {
+    return res.status(403).json({ error: 'Geen rechten (opvolging.taak.afronden)' });
+  }
+
   const b = req.body || {};
   if (!b.taak_id) return res.status(400).json({ error: 'taak_id ontbreekt' });
   const actie = String(b.actie || '');
