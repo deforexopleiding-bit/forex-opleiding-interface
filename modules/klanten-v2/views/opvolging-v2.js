@@ -106,7 +106,141 @@
   const ARCHIEF_MIN_DAGEN = 3;   // belpogingen op zoveel verschillende dagen
   const ARCHIEF_MIN_WA = 1;
 
-  const render = () => { if (window.DFO && typeof window.DFO.render === 'function') window.DFO.render(); };
+  // ═════════════════════════════════════════════════════════════════════════
+  // HERTEKENEN — ALLEEN ALS ER ECHT IETS VERANDERD IS
+  // ═════════════════════════════════════════════════════════════════════════
+  //
+  // Met het gesprekspaneel open lopen er twee timers van vijf seconden
+  // (fetchWaStatus en fetchGesprek). Allebei eindigden ze onvoorwaardelijk op
+  // render(), en render() zet via DFO.render() `c.innerHTML` van het hele
+  // contentblok opnieuw. De complete pagina onder het paneel werd dus om de
+  // paar seconden weggegooid en opnieuw opgebouwd — ook als er niets veranderd
+  // was, en dat is bij verreweg de meeste rondes zo.
+  //
+  // Daar kwamen drie klachten uit voort: het springen (de shell zet na het
+  // vervangen van de DOM de paginascroll terug), het vanzelf dichtvallen (een
+  // klik die tussen mousedown en het einde van de hertekening zijn element
+  // kwijtraakt en op de scrim landt) en het wissen van een half getypt bericht.
+  //
+  // EÉN MECHANISME, GEEN TWEE. Er is bewust niet gekozen voor 'alleen het
+  // paneel bijwerken': dan staat er een gedeeltelijke bijwerking naast een
+  // volledige hertekening die er soms toch overheen gaat, en dat is erger dan
+  // wat er stond. Alles loopt nog steeds via render(); die deur is alleen op
+  // slot gegaan als er niets te tonen valt.
+  //
+  // DE VINGERAFDRUK IS DE GETEKENDE HTML ZELF, en niet een lijstje velden uit
+  // het antwoord. Dat is met opzet: een lijstje kan verouderen zodra iemand een
+  // veld toevoegt, en een tijdstempel die elke ronde opschuift zou als
+  // verandering tellen terwijl hij nergens op het scherm staat. De HTML ís wat
+  // het scherm toont — verandert die niet, dan is er niets te zien.
+  //
+  // Het concept (wat iemand aan het typen is) staat met opzet NIET in die HTML;
+  // die wordt na afloop in de textarea gezet. Zo verandert typen de
+  // vingerafdruk niet, en hertekent het scherm niet bij elke aanslag.
+  let _laatsteHtml = null;
+
+  /** De HTML van de view die nu in beeld staat, of null als dat er geen is. */
+  function huidigeViewHtml() {
+    const S = window.DFO && window.DFO.S;
+    const tab = (S && S.tab) || '';
+    const fn = window.DFO && window.DFO.VIEWS && window.DFO.VIEWS['opvolging/' + tab];
+    return typeof fn === 'function' ? fn() : null;
+  }
+
+  const render = () => {
+    if (!window.DFO || typeof window.DFO.render !== 'function') return;
+    const html = huidigeViewHtml();
+    // Staat er een andere module in beeld, dan valt er hier niets te beslissen:
+    // gewoon doorgeven aan de shell.
+    if (html === null) { _laatsteHtml = null; window.DFO.render(); return; }
+    if (html === _laatsteHtml) {
+      // Niets veranderd. Wél het concept terugzetten voor het geval een andere
+      // weg de DOM heeft vervangen zonder ons.
+      herstelConcept();
+      return;
+    }
+    _laatsteHtml = html;
+    const voor = bewaarPaneelStaat();
+    window.DFO.render();
+    herstelPaneelStaat(voor);
+  };
+
+  // ── Wat een hertekening moet overleven ────────────────────────────────────
+  //
+  // Drie dingen, en alle drie zijn ze onzichtbaar in de HTML: wat er getypt is,
+  // waar de cursor stond, en waar de gesprekdraad gescrold stond.
+
+  /** Hoeveel pixels van de onderkant nog als 'onderaan' telt. */
+  const DRAAD_ONDERAAN_MARGE = 40;
+
+  /**
+   * Stond de lezer onderaan de draad?
+   *
+   * Pure functie, want dit is de beslissing die fout kan gaan: scrolde Dave
+   * omhoog om iets terug te lezen, dan mag een binnenkomend bericht hem daar
+   * niet wegtrekken. Stond hij onderaan, dan hoort het nieuwste bericht juist
+   * in beeld te komen.
+   *
+   * De marge zit erin omdat een draad zelden op de pixel onderaan staat: een
+   * halve regel speling telt nog als 'onderaan'.
+   */
+  function isOnderaan({ scrollTop, scrollHeight, clientHeight } = {}) {
+    if (![scrollTop, scrollHeight, clientHeight].every((v) => Number.isFinite(v))) return true;
+    return (scrollHeight - scrollTop - clientHeight) <= DRAAD_ONDERAAN_MARGE;
+  }
+
+  const draadEl = () => document.querySelector('.opv .wchat');
+  const tekstEl = () => document.getElementById('opv-wa-tekst');
+
+  /** Wat er vóór een hertekening bewaard moet worden. */
+  function bewaarPaneelStaat() {
+    const ta = tekstEl();
+    const draad = draadEl();
+    return {
+      focus   : !!(ta && typeof document !== 'undefined' && document.activeElement === ta),
+      selStart: ta ? ta.selectionStart : null,
+      selEnd  : ta ? ta.selectionEnd : null,
+      draadTop: draad ? draad.scrollTop : null,
+      onderaan: draad ? isOnderaan(draad) : true,
+    };
+  }
+
+  /** Het concept terug in de textarea. Zie de uitleg bij render(). */
+  function herstelConcept() {
+    const ta = tekstEl();
+    if (!ta) return;
+    const wens = _gesprek.concept || '';
+    if (ta.value !== wens) ta.value = wens;
+  }
+
+  /**
+   * Alles terugzetten wat de hertekening weggegooid heeft.
+   *
+   * De draad krijgt zijn scrollpositie terug, tenzij de lezer onderaan stond —
+   * dan gaat hij mee naar het nieuwste bericht. Dat laatste gebeurde tot nu toe
+   * helemaal niet: er stond nergens een scroll naar beneden, dus een nieuw
+   * bericht kon onzichtbaar onderaan blijven hangen.
+   */
+  function herstelPaneelStaat(voor) {
+    herstelConcept();
+    const ta = tekstEl();
+    if (ta && voor && voor.focus) {
+      try {
+        ta.focus();
+        if (Number.isFinite(voor.selStart)) {
+          const eind = Math.min(voor.selEnd == null ? voor.selStart : voor.selEnd, ta.value.length);
+          ta.setSelectionRange(Math.min(voor.selStart, ta.value.length), eind);
+        }
+      } catch (_) { /* focus kan geweigerd worden; geen reden om iets te breken */ }
+    }
+    const draad = draadEl();
+    if (!draad) return;
+    if (!voor || voor.onderaan) draad.scrollTop = draad.scrollHeight;
+    else if (Number.isFinite(voor.draadTop)) draad.scrollTop = voor.draadTop;
+  }
+
+  /** Hertekent hoe dan ook — voor als de DOM buiten ons om vervangen is. */
+  const rendarForceer = () => { _laatsteHtml = null; render(); };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const iso = (d) => new Date(d).toISOString().slice(0, 10);
   const vandaag = () => iso(Date.now());
@@ -187,6 +321,10 @@
     open: false, nummer: null, taakId: null, naam: null,
     laden: false, error: null, code: null, berichten: null,
     verzendt: false, optimistisch: [],
+    // Wat er getypt is maar nog niet verstuurd. HOORT IN DE STAAT, niet alleen
+    // in de DOM: stond hij alleen in de textarea, dan wiste elke hertekening
+    // een half getypte zin — en die kwamen om de vijf seconden langs.
+    concept: '',
     // Het ophalen van de geschiedenis van het toestel. `melding` is wat er
     // daarna boven de draad komt te staan: wát er opgehaald is en vanaf
     // wanneer. Zonder die zin lijkt het opgehaalde het volledige gesprek, en
@@ -1477,7 +1615,8 @@
     // twee eigenschappen wint de globale regel alsnog. Zonder `on` wordt het
     // paneel dus keurig opgebouwd en is het onzichtbaar. Zie
     // tests/opvolging-scrim-zichtbaar.test.js.
-    return '<div class="opv"><div class="scrim on" onmousedown="if(event.target===this)window.__opvWaSluit()">' +
+    return '<div class="opv"><div class="scrim on"' +
+      ' onmousedown="window.__opvScrimNeer(event)" onmouseup="window.__opvScrimOp(event, \'wa\')">' +
       '<div class="modal"><div class="mh"><div><h3>WhatsApp-brug</h3>' +
       '<p>' + esc(s.uitleg) + '</p></div>' +
       '<button class="x" onclick="window.__opvWaSluit()">&times;</button></div>' +
@@ -1984,7 +2123,12 @@
 
     const invoer = kan.mag
       ? '<div class="winvoer">' +
+        // Geen waarde in de HTML: het concept wordt na het tekenen in de
+        // textarea gezet (zie herstelConcept). Zo verandert typen de
+        // vingerafdruk niet — en hoeft de tekst nergens ontsnapt te worden,
+        // wat bij een </textarea> in een bericht anders misgaat.
         '<textarea id="opv-wa-tekst" rows="2" placeholder="Typ een bericht&hellip;"' +
+        ' oninput="window.__opvGesprekTyp(this.value)"' +
         (_gesprek.verzendt ? ' disabled' : '') + '></textarea>' +
         '<button class="obtn p" onclick="window.__opvGesprekStuur()"' +
         (_gesprek.verzendt ? ' disabled' : '') + '>' +
@@ -1996,7 +2140,16 @@
     // 'on' is verplicht: de globale .scrim staat op opacity:0 met
     // pointer-events:none, en alleen .scrim.on is zichtbaar. Die les kostte
     // eerder een testronde. 'rechts' maakt er een vel van dat inschuift.
-    return '<div class="opv"><div class="scrim on rechts" onmousedown="if(event.target===this)window.__opvGesprekSluit()">' +
+    // SLUITEN OP DE ACHTERGROND VRAAGT TWEE DINGEN. Eerst stond hier alleen
+    // een mousedown-check, en dat is precies de bug die Dave voelde: raakte een
+    // klik tussen mousedown en mouseup zijn element kwijt door een hertekening,
+    // dan landde de mouseup op de scrim en ging het paneel dicht midden in wat
+    // hij aan het doen was. Nu moeten mousedown én mouseup allebei op de scrim
+    // zelf gebeuren; een klik die binnen het paneel begint of eindigt sluit
+    // nooit meer.
+    return '<div class="opv"><div class="scrim on rechts"' +
+      ' onmousedown="window.__opvScrimNeer(event)"' +
+      ' onmouseup="window.__opvScrimOp(event, \'gesprek\')">' +
       '<div class="wpaneel">' +
       '<div class="mh"><div>' +   // zelfde kop-opmaak als het koppelpaneel
         '<h3>' + esc(_gesprek.naam || 'WhatsApp') + '</h3>' +
@@ -2956,7 +3109,8 @@
   // `on` houdt de globale .scrim-regel uit het design system opacity op 0 en
   // pointer-events op none, en blijft elk venster van deze module onzichtbaar.
   const scrim = (titel, sub, body) =>
-    '<div class="opv"><div class="scrim on" onmousedown="if(event.target===this)window.__opvSluit()"><div class="modal">' +
+    '<div class="opv"><div class="scrim on"' +
+    ' onmousedown="window.__opvScrimNeer(event)" onmouseup="window.__opvScrimOp(event, \'modal\')"><div class="modal">' +
     '<div class="mh"><div><h3>' + titel + '</h3><p>' + sub + '</p></div><button class="x" onclick="window.__opvSluit()">&times;</button></div>' +
     '<div class="mb">' + body + '</div></div></div></div>';
 
@@ -3186,9 +3340,38 @@
     opengesprek({ nummer: t.telefoon, taakId: id, naam: t.naam });
   };
 
+  // ── De sluitregel van een scrim ───────────────────────────────────────────
+  //
+  // Pure beslissing, apart getest: sluit alleen als de muis op de scrim ZELF
+  // neerging én er ook weer op losgelaten werd. Alles daarbuiten — begonnen in
+  // het paneel, geëindigd in het paneel, of een neergang die we niet gezien
+  // hebben — is geen sluitklik.
+  function magSluiten(neerOpScrim, opOpScrim) {
+    return neerOpScrim === true && opOpScrim === true;
+  }
+
+  // Waar de laatste muisknop neerging. Alleen een booleaan; hij wordt bij elke
+  // mouseup weer leeggemaakt zodat een oude neergang niet blijft hangen.
+  let _scrimNeer = false;
+
+  window.__opvScrimNeer = (ev) => { _scrimNeer = !!(ev && ev.target === ev.currentTarget); };
+  window.__opvScrimOp = (ev, welke) => {
+    const opScrim = !!(ev && ev.target === ev.currentTarget);
+    const sluiten = magSluiten(_scrimNeer, opScrim);
+    _scrimNeer = false;
+    if (!sluiten) return;
+    if (welke === 'gesprek') window.__opvGesprekSluit();
+    else if (welke === 'wa') window.__opvWaSluit();
+    else window.__opvSluit();
+  };
+
+  /** Wat er getypt wordt hoort in de staat, niet alleen in de DOM. */
+  window.__opvGesprekTyp = (waarde) => { _gesprek.concept = String(waarde == null ? '' : waarde); };
+
   window.__opvGesprekSluit = () => {
     _gesprek.open = false;
     _gesprek.optimistisch = [];
+    _gesprek.concept = '';
     render();
     // Timer meteen opruimen, niet pas bij de volgende statusronde. Dezelfde
     // afspraak als bij het koppelpaneel.
@@ -3259,8 +3442,12 @@
 
   window.__opvGesprekStuur = async () => {
     if (_gesprek.verzendt) return;
+    // Uit de staat, met de DOM als terugval. De staat is de waarheid sinds het
+    // concept daar bijgehouden wordt; het veld lezen blijft staan voor het
+    // geval er getypt is zonder dat oninput gevuurd heeft (plakken via een
+    // ouder pad, autofill).
     const el = document.getElementById('opv-wa-tekst');
-    const tekst = (el && el.value || '').trim();
+    const tekst = String(_gesprek.concept || (el && el.value) || '').trim();
     if (!tekst) return;
     if (!gesprekKanVersturen().mag) return;
 
@@ -3274,15 +3461,20 @@
         nummer: _gesprek.nummer, tekst, taak_id: _gesprek.taakId || null,
       });
       _gesprek.verzendt = false;
+      // Weg met het concept: dit bericht is verstuurd. Pas hierna, zodat een
+      // mislukte verzending hem laat staan.
+      _gesprek.concept = '';
       await fetchGesprek();
     } catch (e) {
       // Weg met de bubbel: hij is níet verstuurd, en hem laten staan zou dat
       // suggereren. De tekst gaat terug in het veld zodat er niets verloren gaat.
       _gesprek.verzendt = false;
       _gesprek.optimistisch = _gesprek.optimistisch.filter((o) => o.tekst !== tekst);
+      // De tekst blijft in de staat staan, dus hij komt vanzelf terug in het
+      // veld — ook als er tussendoor hertekend wordt.
+      _gesprek.concept = tekst;
       render();
-      const veld = document.getElementById('opv-wa-tekst');
-      if (veld) veld.value = tekst;
+      herstelConcept();
       alert('Versturen is niet gelukt: ' + (e.message || 'onbekende fout'));
     }
   };
@@ -3461,6 +3653,29 @@
   // de hoofdnavigatie (zie CLAUDE.md, lesson learned 20).
   window.addEventListener('beforeunload', stopWaTimers);
 
+  // ── Escape als expliciete uitgang ─────────────────────────────────────────
+  //
+  // Het kruisje blijft staan en de scrim ook; dit is er een derde naast. Eén
+  // venster tegelijk, in de volgorde waarin ze boven elkaar liggen: eerst het
+  // gesprek, dan het koppelpaneel, dan een modal. Anders sluit Escape het
+  // onderste weg terwijl je naar het bovenste kijkt.
+  //
+  // Bewust GEEN sluiting terwijl er getypt wordt met tekst in het veld: dan is
+  // Escape 'ik wil dit venster weg' voor de een en 'oeps' voor de ander, en
+  // een half getypt bericht kwijtraken is precies wat we net gerepareerd hebben.
+  function magEscapeSluiten() {
+    const ta = tekstEl();
+    const bezigMetTypen = !!(ta && document.activeElement === ta && String(ta.value || '').trim());
+    return !bezigMetTypen;
+  }
+
+  window.addEventListener('keydown', (ev) => {
+    if (!ev || ev.key !== 'Escape') return;
+    if (_gesprek.open) { if (magEscapeSluiten()) window.__opvGesprekSluit(); return; }
+    if (_wa.paneelOpen) { window.__opvWaSluit(); return; }
+    if (_ui.modal) window.__opvSluit();
+  });
+
   // Voor de console én voor tests/opvolging-whatsapp-koppel.test.js: de twee
   // besluiten zijn zo na te slaan zonder het scherm te hoeven bedienen.
   window.__opvWaHelpers = { beschrijfWaStatus, bepaalWaTimers, bepaalTimerActie, toonNummer, geledenTekst, brugTellersBlok };
@@ -3502,6 +3717,16 @@
   };
 
   // Het gesprekspaneel, getest in tests/opvolging-whatsapp-gesprek.test.js.
+  // O: het hertekenen, het concept, de draadscroll en de sluitregel. Getest in
+  // tests/opvolging-gesprek-hertekenen.test.js met een echte DOM-dubbelganger.
+  window.__opvHertekenHelpers = {
+    huidigeViewHtml, isOnderaan, magSluiten, magEscapeSluiten,
+    bewaarPaneelStaat, herstelPaneelStaat, herstelConcept, render, rendarForceer,
+    DRAAD_ONDERAAN_MARGE,
+    vingerafdruk: () => _laatsteHtml,
+    zetVingerafdruk: (v) => { _laatsteHtml = v; },
+  };
+
   window.__opvGesprekHelpers = {
     gesprekPaneelHtml, gesprekKanVersturen, gesprekBubbel, bepaalWaTimers,
     beschrijfHistoriek, historiekMelding, historiekOnbereikbaar,
