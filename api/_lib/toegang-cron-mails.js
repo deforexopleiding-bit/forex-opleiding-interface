@@ -22,13 +22,13 @@ export const mailBevestigingA = (voornaam, callMoment) => {
     subject: 'Nog één stapje — check je WhatsApp ✅',
     text:
       `Hoi ${naam},\n\n` +
-      `Je aanvraag is binnen, en je opstartsessie staat genoteerd voor ${moment}. ` +
+      `Je aanvraag is binnen, en je kennismakingsgesprek staat genoteerd voor ${moment}. ` +
       `We hebben je zojuist een berichtje via WhatsApp gestuurd — reageer daar even op ` +
       `(een "ja" volstaat), dan ontvang je meteen je persoonlijke inloggegevens in je mailbox.\n\n` +
       `Tot snel! Team De Forex Opleiding`,
     html:
       `<p>Hoi ${naam},</p>` +
-      `<p>Je aanvraag is binnen, en je opstartsessie staat genoteerd voor <b>${moment}</b>. ` +
+      `<p>Je aanvraag is binnen, en je kennismakingsgesprek staat genoteerd voor <b>${moment}</b>. ` +
       `We hebben je zojuist een berichtje via WhatsApp gestuurd — reageer daar even op ` +
       `(een "ja" volstaat), dan ontvang je meteen je persoonlijke inloggegevens in je mailbox.</p>` +
       `<p>Tot snel!<br>Team De Forex Opleiding</p>`,
@@ -45,7 +45,7 @@ export const mailBevestigingB = (voornaam) => {
       `Je aanvraag is binnen! We hebben je zojuist een berichtje via WhatsApp gestuurd — ` +
       `reageer daar even op (een "ja" volstaat), dan ontvang je meteen je persoonlijke ` +
       `inloggegevens in je mailbox.\n\n` +
-      `Heb je nog geen kennismakingscall ingepland? Doe dat hier even, dan halen we samen ` +
+      `Heb je nog geen kennismakingsgesprek ingepland? Doe dat hier even, dan halen we samen ` +
       `het meeste uit je start: ${CALL_LINK}\n\n` +
       `Tot zo! Team De Forex Opleiding`,
     html:
@@ -53,7 +53,7 @@ export const mailBevestigingB = (voornaam) => {
       `<p>Je aanvraag is binnen! We hebben je zojuist een berichtje via WhatsApp gestuurd — ` +
       `reageer daar even op (een "ja" volstaat), dan ontvang je meteen je persoonlijke ` +
       `inloggegevens in je mailbox.</p>` +
-      `<p>Heb je nog geen kennismakingscall ingepland? Doe dat <a href="${CALL_LINK}">hier</a> ` +
+      `<p>Heb je nog geen kennismakingsgesprek ingepland? Doe dat <a href="${CALL_LINK}">hier</a> ` +
       `even, dan halen we samen het meeste uit je start.</p>` +
       `<p>Tot zo!<br>Team De Forex Opleiding</p>`,
   };
@@ -86,7 +86,7 @@ export const mailDag6B = (voornaam) => {
       `Hoi ${naam},\n\n` +
       `Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
       `ervaren hebt — reageer gerust even, ik hoor het graag!\n\n` +
-      `En wil je er echt mee verder? Plan hier een gratis opstartsessie in, dan kijken we ` +
+      `En wil je er echt mee verder? Plan hier een gratis kennismakingsgesprek in, dan kijken we ` +
       `samen wat bij je past: ${CALL_LINK}\n\n` +
       `Groet, Team De Forex Opleiding`,
     html:
@@ -94,7 +94,7 @@ export const mailDag6B = (voornaam) => {
       `<p>Morgen is alweer je laatste dag van de gratis 7-daagse. Ik ben benieuwd hoe je het ` +
       `ervaren hebt — reageer gerust even, ik hoor het graag!</p>` +
       `<p>En wil je er echt mee verder? Plan <a href="${CALL_LINK}">hier</a> een gratis ` +
-      `opstartsessie in, dan kijken we samen wat bij je past.</p>` +
+      `kennismakingsgesprek in, dan kijken we samen wat bij je past.</p>` +
       `<p>Groet,<br>Team De Forex Opleiding</p>`,
   };
 };
