@@ -3552,6 +3552,7 @@
           <div style="text-align:right">
             <div style="font-size:18px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums">${esc(c.count == null ? '—' : String(c.count))}</div>
             <div style="font-size:10px;color:var(--text-3)">actieve runs</div>
+            ${c.completed_7d != null ? `<div style="font-size:10px;color:var(--emerald);margin-top:3px" title="Completed + exited in de laatste 7 dagen">✓ ${esc(String(c.completed_7d))} afgerond (7d)</div>` : ''}
           </div>
         </div>`;
       }).join('') || `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen automations gevonden</div>`;

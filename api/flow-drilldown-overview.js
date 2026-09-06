@@ -143,11 +143,16 @@ async function buildEvents() {
       .from('event_automations').select('id, name, enabled, trigger_type').order('name');
     autos = Array.isArray(data) ? data : [];
   } catch (_) { autos = []; }
+  const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
   const perAuto = {};
   for (const a of autos) {
     // eslint-disable-next-line no-await-in-loop
     const r = await safeCount('event_automation_runs', (q) => q.eq('automation_id', a.id).eq('status', 'active'));
-    perAuto[a.id] = { name: a.name, enabled: a.enabled, trigger_type: a.trigger_type, count: r.count, error: r.error };
+    // Afgerond in de laatste 7 dagen: completed + exited. updated_at dekt beide
+    // (completed_at wordt niet gezet bij 'exited') en is stabiel voor terminale runs.
+    // eslint-disable-next-line no-await-in-loop
+    const d7 = await safeCount('event_automation_runs', (q) => q.eq('automation_id', a.id).in('status', ['completed', 'exited']).gte('updated_at', since7));
+    perAuto[a.id] = { name: a.name, enabled: a.enabled, trigger_type: a.trigger_type, count: r.count, completed_7d: d7.count, error: r.error };
   }
   return { autos, perAuto };
 }
@@ -159,11 +164,14 @@ async function buildOnboarding() {
       .from('onboarding_automations').select('id, name, enabled, trigger_type').order('name');
     autos = Array.isArray(data) ? data : [];
   } catch (_) { autos = []; }
+  const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
   const perAuto = {};
   for (const a of autos) {
     // eslint-disable-next-line no-await-in-loop
     const r = await safeCount('onboarding_automation_runs', (q) => q.eq('automation_id', a.id).eq('status', 'active'));
-    perAuto[a.id] = { name: a.name, enabled: a.enabled, trigger_type: a.trigger_type, count: r.count, error: r.error };
+    // eslint-disable-next-line no-await-in-loop
+    const d7 = await safeCount('onboarding_automation_runs', (q) => q.eq('automation_id', a.id).in('status', ['completed', 'exited']).gte('updated_at', since7));
+    perAuto[a.id] = { name: a.name, enabled: a.enabled, trigger_type: a.trigger_type, count: r.count, completed_7d: d7.count, error: r.error };
   }
   return { autos, perAuto };
 }
