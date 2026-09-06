@@ -126,6 +126,7 @@ const FEATURE_REGISTRY = [
     { key:'opvolging.dag.view', label:'Tab: Vandaag' },
     { key:'opvolging.dashboard.view', label:'Tab: Dashboard' },
     { key:'opvolging.archief.view', label:'Tab: Afgerond' },
+    { key:'opvolging.rapport.view', label:'Tab: Rapport' },
     { key:'opvolging.taak.afronden', label:'Taak afronden' },
     { key:'opvolging.taak.archiveren', label:'Taak archiveren' },
     { key:'opvolging.agenda.boeken', label:'Agenda-afspraak boeken' },

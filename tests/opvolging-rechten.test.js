@@ -217,9 +217,22 @@ test('de kanban blijft dezelfde drie endpoints gebruiken', () => {
 // DE BESTANDEN WORDEN OOK ECHT OPNIEUW GELADEN
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('app-shell en permissions zijn gebumpt', () => {
-  // Zonder bump draait de browser de oude versie en doet de hele PR niets.
+test('app-shell en permissions dragen een v-nummer', () => {
+  // Zonder v-nummer draait de browser de oude versie en doet de hele PR niets.
+  //
+  // DEZE TEST PINDE EERST DE EXACTE NUMMERS VAST (permissions v=4, app-shell
+  // v=1d7). Dat was fout van vorm: hij eiste dat die twee bestanden NOOIT meer
+  // opgehoogd zouden worden, terwijl de regel juist is dat elke branch die ze
+  // aanraakt ze WEL ophoogt. De eerstvolgende terechte bump maakte hem rood —
+  // dat gebeurde bij het dagrapport (item R), dat app-shell.js aanraakt voor
+  // het vierde tabblad. Twee controles die elkaar tegenspreken leren mensen om
+  // er één te negeren, en dat is de gevaarlijkste van de twee uitkomsten.
+  //
+  // Of er ook echt opgehoogd IS, controleert tests/script-versies.test.js — en
+  // die doet het goed: hij vergelijkt origin/main..HEAD en weet dus welke
+  // bestanden deze branch heeft aangeraakt. Hier blijft staan wat hier hoort:
+  // dat de twee scripts überhaupt met een v-nummer geladen worden en niet kaal.
   const html = lees('modules/klanten-v2/index.html');
-  assert.match(html, /permissions\.js\?v=4/);
-  assert.match(html, /app-shell\.js\?v=1d7/);
+  assert.match(html, /permissions\.js\?v=[^"']+/);
+  assert.match(html, /app-shell\.js\?v=[^"']+/);
 });

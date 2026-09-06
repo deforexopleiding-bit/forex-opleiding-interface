@@ -297,6 +297,60 @@ async function writePrevState(appointmentId, snapshot) {
   }
 }
 
+/**
+ * De uitkomst als GEBEURTENIS wegschrijven — niet als huidige stand.
+ *
+ * WAAROM DIT NAAST status BESTAAT
+ * `status` beantwoordt 'hoe staat deze afspraak er nu voor'. Het dagrapport
+ * (item R) stelt een andere vraag: 'wat is er op dinsdag besloten'. Drie
+ * redenen waarom status dat niet kan beantwoorden:
+ *   1. Wordt de afspraak later verzet of geannuleerd, dan verandert het
+ *      rapport over vorige week met terugwerkende kracht.
+ *   2. `updated_at` is de laatste aanraking, niet het moment van de uitkomst.
+ *   3. sale en gesprek_gehad worden allebei 'completed'; wilt_niet_meer en
+ *      niet_geschikt allebei 'cancelled'. Uit status is dus niet af te lezen
+ *      of er verkocht is.
+ *
+ * EEN APARTE UPDATE, NIET MEEGELIFT OP updateApptStatus. Zou `uitkomst` in
+ * hetzelfde column-list staan, dan faalt de HELE update met
+ * `column "uitkomst" does not exist` zolang de migratie niet gedraaid is — en
+ * dan werkt de uitkomst-motor niet meer. Zie CLAUDE.md over kolom-migraties.
+ * Nu is de migratie niet blokkerend: zonder kolommen logt dit één waarschuwing
+ * en gaat de rest gewoon door.
+ *
+ * WISSEN BIJ UNDO. `outcome` op null zet beide kolommen leeg. Zonder dat zou
+ * een teruggedraaide sale in het dagrapport blijven staan: de status wordt bij
+ * undo hersteld, maar deze kolommen zouden de oude uitkomst houden en het
+ * rapport telt daarop. Een gecorrigeerde uitkomst hoort te verdwijnen, niet te
+ * blijven staan als 'geen uitkomst' — daar is de leegte precies het juiste
+ * antwoord, want er is er geen meer.
+ *
+ * Fail-soft, exact zoals writePrevState hierboven.
+ */
+async function writeUitkomst(appointmentId, outcome) {
+  try {
+    const leeg = outcome === null || outcome === undefined;
+    const { error } = await supabaseAdmin
+      .from('follow_up_appointments')
+      // Het moment wordt HIER gezet, op het moment dat de uitkomst valt.
+      // Niet now() in SQL en niet updated_at: dit moet het echte moment zijn.
+      .update(leeg
+        ? { uitkomst: null, uitkomst_op: null }
+        : { uitkomst: outcome, uitkomst_op: new Date().toISOString() })
+      .eq('id', appointmentId);
+    if (!error) return { ok: true };
+    if (isMissingColumnError(error, 'uitkomst')) {
+      console.warn('[appt-outcome] uitkomst-kolommen niet beschikbaar (migratie 2026-09-06-opvolging-rapport nog niet gedraaid) — het dagrapport toont voor deze call "geen uitkomst vastgelegd"');
+      return { ok: false, missing: true };
+    }
+    console.warn('[appt-outcome] uitkomst write:', error.message);
+    return { ok: false, error: error.message };
+  } catch (e) {
+    console.warn('[appt-outcome] uitkomst write exception:', e?.message || e);
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
 // GHL-status sync — fail-soft. Alleen aanroepen als er echt een
 // ghl_appointment_id is. Return-shape { ok, warning? } zodat de caller
 // desgewenst een warning kan doorreiken naar de response.
@@ -398,6 +452,7 @@ export default async function handler(req, res) {
         const restoreStatus = String(prev.status || appt.status || 'scheduled');
         try {
           await updateApptStatus(appointmentId, restoreStatus);
+          await writeUitkomst(appointmentId, null);
           await writePrevState(appointmentId, null);
           await appendApptNote(appointmentId, `Uitkomst gecorrigeerd — DB-status hersteld naar ${restoreStatus}. GHL-actie (${prevOutcome}) NIET automatisch teruggedraaid.`);
         } catch (_) { /* best-effort */ }
@@ -444,7 +499,9 @@ export default async function handler(req, res) {
         }
       }
 
-      // 4) prev_state clearen.
+      // 4) prev_state clearen, en de uitkomst met hem mee — anders blijft een
+      //    teruggedraaide sale in het dagrapport staan.
+      await writeUitkomst(appointmentId, null);
       await writePrevState(appointmentId, null);
 
       // 5) Audit-note.
@@ -567,6 +624,8 @@ export default async function handler(req, res) {
       await writePrevState(appointmentId, snapshot);
 
       await updateApptStatus(appointmentId, newStatus);
+      // Direct na de status, zodat uitkomst_op het moment van de uitkomst is.
+      await writeUitkomst(appointmentId, outcome);
       await appendApptNote(appointmentId, metExtraNote(noteText, body.note));
 
       // GHL-status meesturen (cancelled/showed/noshow). Fail-soft —
