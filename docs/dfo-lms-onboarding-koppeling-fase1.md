@@ -155,6 +155,65 @@ De bron van die velden is overigens Bubble, niet het LMS. Zodra dfo-lms de
 sessies overneemt, is `api/onboarding-intake-status.js` de plek om dat om te
 zetten.
 
+## Bekende beperking: tellers die alleen tellen wat ze zagen
+
+Dit is geen fout in één cron maar een patroon dat op meerdere plaatsen in het
+CRM terugkomt, en het is de reden dat de Bubble-naar-LMS-verschuiving zo lang
+onopgemerkt kon blijven. **Een proces filtert zijn kandidaten op een bron,
+rapporteert daarna een keurig getal over precies díe verzameling, en wat er
+buiten de filter viel bestaat in dat rapport niet.** Het getal klopt, en juist
+daarom stelt het gerust.
+
+### Het scherpste geval: de archiveercron
+
+`api/cron/archive-completed-onboardings.js:93` selecteert zijn kandidaten met:
+
+    .not('bubble_user_id', 'is', null)
+
+Een onboarding zonder Bubble-koppeling komt dus niet in de kandidatenlijst.
+Gevolg: die wordt **nooit automatisch gearchiveerd** en blijft eeuwig in het
+actieve overzicht staan. De cron telt intussen netjes `checked` op over de
+rijen die hij wél ophaalde (regel 129) en eindigt gezond.
+
+Vandaag raakt dit vrijwel niemand, want bijna elke onboarding heeft een
+Bubble-id. Het wordt scherp zodra nieuwe klanten geen Bubble-account meer
+krijgen: dan valt honderd procent van de instroom buiten deze cron.
+
+Er is bovendien geen vervanging klaar. De cron bepaalt "klaar" via
+`readCallsCompleted(user)` op het Bubble-user-object (regel 149). Het LMS heeft
+dat gegeven wel — `hlms_student.calls_gedaan` — maar niets in het CRM leest
+dat.
+
+### Dezelfde vorm, elders
+
+- `api/cron/first-call-payment-reminder.js:112` zoekt zijn sessies in Bubble.
+  Staan de geplande sessies alleen in het LMS, dan rapporteert de cron
+  `{ ok: true, checked: 0 }` — niet te onderscheiden van "er stond niets
+  gepland".
+- `api/_lib/bubble-one-on-one-count.js:72` begint zijn teller op `0` en telt
+  op; alleen bij een **fout** wordt het `null` (regel 89). Een leeg antwoord
+  geeft dus een keurige `0` op het wandbord, als feit gepresenteerd.
+- `api/student-detail.js:190` en `api/_lib/bubble-1on1.js` vangen fouten af
+  naar een lege lijst. Een storing en "er is niets" zien er in de UI identiek
+  uit.
+- `api/_lib/mentorStudents.js:76` en `api/students-overview.js:58` bouwen hun
+  studentenlijst uit Bubble. Wie daar niet in staat, ontbreekt zonder melding.
+
+### De regel die hieruit volgt
+
+Bij elk proces dat een getal rapporteert over een gefilterde verzameling:
+**tel ook wat er buiten de filter viel, en toon dat.** Een cron die meldt
+"47 gecontroleerd" naast "12 overgeslagen wegens ontbrekende koppeling" is
+eerlijk; een cron die alleen het eerste getal meldt, is dat niet.
+
+Dezelfde regel geldt voor schermen: onderscheid "niets gevonden" van "niet
+opgehaald". Dat is precies wat de drie callvelden hierboven wél doen sinds
+ze *laden…* en *niet opgehaald* uit elkaar houden — en wat de rest van het
+CRM nog niet doet.
+
+Dit is bewust **niet** opgelost in fase 1; het staat hier zodat het bij de
+Bubble-uitfasering op tafel ligt in plaats van halverwege ontdekt te worden.
+
 ## Bestanden
 
 | Bestand | |
