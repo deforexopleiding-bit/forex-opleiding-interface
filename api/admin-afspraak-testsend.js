@@ -25,7 +25,7 @@ import { MOMENTEN, bouwContext, resolveWelkomPhoneId } from './_lib/afspraak-ber
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 
-const MAIL_FROM = 'onboarding@deforexopleiding.nl';
+const MAIL_FROM = 'welkom@deforexopleiding.nl'; // afspraak-mails naar leads vanaf welkom@ (zelfde lijn als de toegang-gate)
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^\+?[1-9]\d{7,14}$/;
 const UUID_RE  = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;

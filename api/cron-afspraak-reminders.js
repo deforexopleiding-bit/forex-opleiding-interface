@@ -34,7 +34,7 @@ import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR } from './_lib/af
 
 const NACHT_START_HOUR = 21;
 const NACHT_EIND_HOUR  = 8;
-const MAIL_FROM = 'onboarding@deforexopleiding.nl';
+const MAIL_FROM = 'welkom@deforexopleiding.nl'; // afspraak-mails naar leads vanaf welkom@ (zelfde lijn als de toegang-gate)
 
 function aanUit(v) {
   return ['1', 'true', 'aan', 'on', 'ja'].includes(String(v || '').trim().toLowerCase());
