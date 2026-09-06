@@ -2158,7 +2158,7 @@
   };
   window._lsCopyLink = function(url, btn){
     try { navigator.clipboard.writeText(url); if (btn){ const t = btn.textContent; btn.textContent = 'Gekopieerd ✓'; setTimeout(()=>{ btn.textContent = t; }, 1200); } }
-    catch (_) { prompt('Kopieer de link:', url); }
+    catch (_) { window.dfoPrompt({ title: 'Kopieer de link', message: 'Selecteer en kopieer de link hieronder.', value: url }); }
   };
 
   // v=16 (2026-08-27): _lsBeheerKnop verwijderd — alles is nu v2-native.
@@ -2223,7 +2223,10 @@
   };
   window._lsBronBewerken = async function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
-    const nieuwLabel = prompt('Nieuw label voor "' + b.slug + '":', b.label);
+    const nieuwLabel = await window.dfoPrompt({
+      title: 'Label bewerken', message: 'Nieuw label voor "' + b.slug + '"',
+      value: b.label, placeholder: 'Label',
+    });
     if (nieuwLabel == null) return;
     const label = String(nieuwLabel).trim(); if (!label) return;
     try {
@@ -2248,18 +2251,28 @@
   window._lsBronVragenlijst = async function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
     const nieuw = !(b.vragenlijst !== false); // huidige (default true) omdraaien
+    // Optimistisch: de switch klapt direct om; bij fout draaien we terug via
+    // refetch. Zo voelt de klik responsief en is de interactie onmiskenbaar.
+    b.vragenlijst = nieuw;
+    if (window.DFO?.render) window.DFO.render();
     try {
       await window.KV.authedJson('/api/booking-sources-upsert', {
         method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label: b.label, actief: b.actief, vragenlijst: nieuw }),
       });
       window.KV.toast(nieuw ? 'Vragenlijst aangezet voor deze bron.' : 'Vragenlijst uitgezet — bezoekers krijgen het simpele boekingsformulier.', 'ok');
       fetchBronnen(true);
-    } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    } catch (e) {
+      window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn');
+      fetchBronnen(true); // authoritatieve herlaad → draait de optimistische flip terug
+    }
   };
   window._lsBronRegistreren = async function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
     const suggest = b.slug.charAt(0).toUpperCase() + b.slug.slice(1);
-    const lbl = prompt('Label voor "' + b.slug + '" (typo of nieuwe bron):', suggest);
+    const lbl = await window.dfoPrompt({
+      title: 'Bron registreren', message: 'Label voor "' + b.slug + '" (typo of nieuwe bron)',
+      value: suggest, placeholder: 'Label',
+    });
     if (lbl == null) return;
     const label = String(lbl).trim(); if (!label) return;
     try {
@@ -2299,11 +2312,12 @@
           </select>`
         : '<span style="color:var(--text-3);font-size:11px">—</span>';
       // Vragenlijst-toggle per bron (alleen geregistreerde bronnen). AAN =
-      // quiz vóór boeken; UIT = simpel boekingsformulier. Default AAN.
+      // quiz vóór boeken; UIT = simpel boekingsformulier. Default AAN. Echte
+      // klikbare switch (groen = Aan, grijs = Uit) i.p.v. een statusbadge.
       const vlAan = b.vragenlijst !== false;
       const vragenlijstCell = b.is_registered
-        ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronVragenlijst(${i})" title="${vlAan ? 'Vragenlijst staat AAN — klik om uit te zetten (simpel boekingsformulier)' : 'Vragenlijst staat UIT — klik om aan te zetten (quiz + toelating)'}">
-            <span style="color:${vlAan ? 'var(--emerald)' : 'var(--text-3)'};font-weight:600">${vlAan ? '● Aan' : '○ Uit'}</span>
+        ? `<button type="button" class="vl-switch${vlAan ? ' on' : ''}" role="switch" aria-checked="${vlAan}" onclick="window._lsBronVragenlijst(${i})" title="${vlAan ? 'Vragenlijst staat AAN — klik om uit te zetten (simpel boekingsformulier)' : 'Vragenlijst staat UIT — klik om aan te zetten (quiz + toelating)'}">
+            <span class="vl-track"><span class="vl-knob"></span></span><span class="vl-label">${vlAan ? 'Aan' : 'Uit'}</span>
           </button>`
         : '<span style="color:var(--text-3);font-size:11px">—</span>';
       return `<tr style="border-bottom:1px solid var(--border)">
