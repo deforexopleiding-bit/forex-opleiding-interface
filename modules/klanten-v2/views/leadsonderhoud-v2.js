@@ -2979,11 +2979,11 @@
     const rows = items.length ? items.map(s => {
       const isCall = s.bron_type === 'ghl_call';
       const badge = isCall
-        ? '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600" title="Direct via agendalink geboekt (geen vragenlijst)">Directe call</span>'
+        ? '<span style="color:var(--text-3)">–</span>'
         : (s.resultaat === 'toegelaten'
           ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
           : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>');
-      const akkoord = isCall ? '<span style="color:var(--text-3)" title="n.v.t. voor directe calls">n.v.t.</span>'
+      const akkoord = isCall ? '<span style="color:var(--text-3)">–</span>'
         : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>');
       // BP3 v12 — appointment_status-badge: cancelled/no_show → grijze/rose
       // pill zodat je in "Toon geannuleerd"-modus meteen ziet welke rijen dat
@@ -3321,14 +3321,14 @@
       const s = _lsOpDetail.data;
       const isCall = !!s.is_ghl_call;
       const badge = isCall
-        ? '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Directe agenda-boeking</span>'
+        ? '<span style="color:var(--text-3)">–</span>'
         : (s.resultaat === 'toegelaten'
           ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
           : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>');
-      const akkoord = isCall ? '<span style="color:var(--text-3)">n.v.t.</span>'
+      const akkoord = isCall ? '<span style="color:var(--text-3)">–</span>'
         : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>');
       const antwoordenHtml = isCall
-        ? '<div style="color:var(--text-3);padding:12px 0;font-size:12.5px">Geen vragenlijst — dit is een directe agenda-boeking.</div>'
+        ? '<div style="color:var(--text-3);padding:12px 0;font-size:12.5px">Geen gekoppelde vragenlijst-antwoorden bij deze boeking.</div>'
         : (s.antwoorden || []).map((a, i) => {
         const afw = a.afwijzer ? '<span style="background:var(--rose-soft);color:var(--rose);padding:1px 6px;border-radius:8px;font-size:10.5px;margin-left:6px">afwijzer</span>' : '';
         return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
@@ -3400,7 +3400,7 @@
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseOpstartDetail()">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(720px,100%);max-height:90vh;overflow-y:auto">
         <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px;position:sticky;top:0;background:var(--surface);z-index:1">
-          <div style="font-size:14px;font-weight:600">${_lsOpDetail.data?.is_ghl_call ? 'Directe call' : 'Kennismakingsgesprek-submission'}</div>
+          <div style="font-size:14px;font-weight:600">${_lsOpDetail.data?.is_ghl_call ? 'Boeking' : 'Kennismakingsgesprek-submission'}</div>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseOpstartDetail()">✕</button>
         </div>
         <div style="padding:16px 20px">${body}</div>
