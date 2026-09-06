@@ -37,10 +37,17 @@ export default async function handler(req, res) {
   const patch = { updated_at: new Date().toISOString() };
 
   try {
+    // maybeSingle, niet single. .single() geeft bij NUL rijen een FOUT
+    // ('Cannot coerce the result to a single JSON object'), die naar de catch
+    // ging — waardoor de 404 hieronder er wel stond maar nog nooit gedraaid
+    // had. Dave kreeg dan een 500 met een databasezin erin, en dat leest als
+    // 'het systeem is stuk' in plaats van 'die kaart bestaat niet meer'.
+    // api/opvolging-aanmelding-actie.js deed dit al goed; die twee buren
+    // spraken elkaar tegen, en dat is geen keuze maar een fout.
     const { data: taak, error: leesErr } = await supabaseAdmin
-      .from('opvolging_taken').select('*').eq('id', b.taak_id).single();
+      .from('opvolging_taken').select('*').eq('id', b.taak_id).maybeSingle();
     if (leesErr) throw leesErr;
-    if (!taak) return res.status(404).json({ error: 'Taak niet gevonden' });
+    if (!taak) return res.status(404).json({ error: 'Deze taak bestaat niet (meer).' });
 
     if (b.actie === 'later_vandaag') {
       patch.later = true;
@@ -81,11 +88,18 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'onbekende actie' });
     }
 
+    // Ook hier maybeSingle: raakt de update nul rijen — de kaart is tussen het
+    // lezen en het schrijven weggehaald, bijvoorbeeld in een tweede tabblad —
+    // dan is dat een 404 en geen 500.
     const { data, error } = await supabaseAdmin
-      .from('opvolging_taken').update(patch).eq('id', b.taak_id).select().single();
+      .from('opvolging_taken').update(patch).eq('id', b.taak_id).select().maybeSingle();
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Deze taak bestaat niet (meer).' });
     return res.status(200).json({ success: true, taak: data });
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Onbekende fout' });
+    // De echte tekst in het log, een generieke zin naar buiten. e.message
+    // rechtstreeks doorsturen zette databasetaal op Daves scherm.
+    console.error('[opvolging-taak-update]', b.actie, e?.message || e);
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }

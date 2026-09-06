@@ -31,6 +31,18 @@ export default async function handler(req, res) {
   if (!SOORTEN.includes(b.soort)) return res.status(400).json({ error: 'onbekende soort' });
 
   try {
+    // Eerst kijken of de taak er nog is. Zonder deze stap loopt een poging op
+    // een verwijderde taak tegen de foreign key aan, en dan gaat er een
+    // Postgres-zin naar het scherm terwijl het antwoord 'die kaart bestaat niet
+    // meer' is.
+    const { data: taak, error: leesErr } = await supabaseAdmin
+      .from('opvolging_taken').select('id').eq('id', b.taak_id).maybeSingle();
+    if (leesErr) throw leesErr;
+    if (!taak) return res.status(404).json({ error: 'Deze taak bestaat niet (meer).' });
+
+    // .single() blijft hier staan, en dat is met opzet: een insert van één rij
+    // gééft één rij terug. maybeSingle zou hier een ontbrekend resultaat stil
+    // goedkeuren, en dat is precies de omgekeerde fout.
     const { data, error } = await supabaseAdmin.from('opvolging_pogingen').insert({
       taak_id: b.taak_id,
       soort: b.soort,
@@ -47,6 +59,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ success: true, poging: data });
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Onbekende fout' });
+    console.error('[opvolging-poging]', b.soort, e?.message || e);
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }

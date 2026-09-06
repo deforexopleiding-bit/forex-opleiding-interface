@@ -137,6 +137,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ dag, vandaag, dekking, discipline, inplanning, gearchiveerd, week, by_status });
   } catch (e) {
-    return res.status(500).json({ error: e.message || 'Onbekende fout' });
+    console.error('[opvolging-dag]', e?.message || e);
+    return res.status(500).json({ error: 'Interne fout' });
   }
 }
