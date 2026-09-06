@@ -83,8 +83,34 @@ dat nummer bestaat.
 
 Levert geen enkele kandidaat iets op, dan is de foutcode `LANDCODE_ONBEKEND` en
 niet `NUMMER_ONGELDIG`: het nummer is wél geprobeerd, en de melding zegt dat het
-aangevuld moet worden in plaats van dat de brug stuk is. `/status` telt per
-uitkomst (`gevonden` / `geen` / `meerdere` / `niet_lokaal`) — alleen aantallen.
+aangevuld moet worden in plaats van dat de brug stuk is.
+
+`/status` telt per uitkomst — alleen aantallen. Er zijn er zes, en dat is met
+opzet:
+
+| uitkomst | betekenis |
+| --- | --- |
+| `gevonden` | precies één kandidaat bevestigd |
+| `meerdere` | twee bevestigd — een gok, dus nee |
+| `geen` | alle kandidaten geprobeerd, geen enkele bevestigd |
+| `mislukt` | er ging bij minstens één kandidaat iets mis; we **weten** het niet |
+| `niet_meetbaar` | deze whatsapp-web.js kan de vraag niet stellen |
+| `niet_lokaal` | het nummer was al internationaal |
+
+**Alleen de eerste drie gaan de cache in.** `bevestig` gooit als WhatsApp nog
+niet klaar is of de verbinding net wegviel, en de lidkaart wordt bij het
+opstarten gebouwd — juist het moment waarop dat het vaakst gebeurt. Zou een
+mislukking als `geen` blijven hangen, dan stonden die zes nummers voorgoed op
+'niet te bepalen' tot iemand herstart, en niets zou zeggen dat het aan de meting
+lag in plaats van aan het nummer.
+
+Gaat er bij ook maar één kandidaat iets mis, dan is de hele uitkomst `mislukt` —
+ook als de andere wél bevestigde. We weten niet of de kandidaat die gooide óók
+bevestigd zou hebben, en dan waren het er twee geweest.
+
+`niet_meetbaar` staat er apart omdat 'deze bibliotheek kan het niet' iets anders
+is dan 'WhatsApp kent dit nummer niet' — precies het onderscheid waar de hele
+LID-zoektocht op is stukgelopen.
 
 `naarChatId()` blijft ongewijzigd weigeren. Dat is de juiste regel: die functie
 mag niet raden. De oplossing zit ervóór, niet erin.
