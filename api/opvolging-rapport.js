@@ -1004,9 +1004,17 @@ export function bouwArchief({ gearchiveerd, histPerTaak }) {
  * plek waar de bevindingen ontstaan.
  *
  * Drie graden, en het onderscheid is met opzet:
- *   nalatigheid  — er is werk blijven liggen dat gedaan had moeten worden.
+ * SCHRIJF OVER HET WERK, NIET OVER DE PERSOON. Dit rapport heet Salesrapport
+ * en draagt geen naam van een verkoper meer. Dat is niet alleen de titel: de
+ * bevindingen nemen de LEAD als onderwerp ('deze lead kreeg geen poging'),
+ * nooit de verkoper ('hij liet deze lead liggen'). Het woord 'nalatigheid' was
+ * daar de laatste uitzondering op — dat is een oordeel over een mens, niet een
+ * meting aan een lijst.
+ *
+ *   blijft_liggen — er is werk blijven liggen dat gedaan had moeten worden.
  *   twijfelgeval — er is iets aan de hand, maar het kan net zo goed aan het
- *                  systeem liggen als aan Dave. 'Geen uitkomst vastgelegd' is
+ *                  systeem liggen als aan de uitvoering. 'Geen uitkomst
+ *                  vastgelegd' is
  *                  daar het schoolvoorbeeld van: dat verschil hebben we op 6
  *                  september juist gerepareerd en het hoort zichtbaar te
  *                  blijven, ook in de kleur.
@@ -1014,9 +1022,12 @@ export function bouwArchief({ gearchiveerd, histPerTaak }) {
  *                  weten; stilte zou hier als goedkeuring lezen.
  */
 const BEVINDING_SOORTEN = {
-  niet_behandeld  : { ernst: 'nalatigheid',  label: 'NIET BEHANDELD' },
-  te_weinig_moeite: { ernst: 'nalatigheid',  label: 'TE WEINIG MOEITE' },
-  venster_gemist  : { ernst: 'nalatigheid',  label: 'VENSTER GEMIST' },
+  // 'TE WEINIG MOEITE' is vervangen door 'TE WEINIG POGINGEN'. Moeite is een
+  // eigenschap van een mens; pogingen zijn rijen met een tijdstempel. Alleen
+  // het tweede is gemeten.
+  niet_behandeld  : { ernst: 'blijft_liggen', label: 'NIET BEHANDELD' },
+  te_weinig_moeite: { ernst: 'blijft_liggen', label: 'TE WEINIG POGINGEN' },
+  venster_gemist  : { ernst: 'blijft_liggen', label: 'VENSTER GEMIST' },
   venster_te_laat : { ernst: 'twijfelgeval', label: 'TE LAAT' },
   geen_uitkomst   : { ernst: 'twijfelgeval', label: 'GEEN UITKOMST' },
   dubbele_afspraak: { ernst: 'twijfelgeval', label: 'DUBBELE AFSPRAAK' },

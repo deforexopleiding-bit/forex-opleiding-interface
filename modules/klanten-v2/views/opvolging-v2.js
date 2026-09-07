@@ -2912,7 +2912,7 @@
           const ok = a.bel_dagen >= ARCHIEF_MIN_DAGEN && a.wa_totaal >= ARCHIEF_MIN_WA;
           const oordeel = nvt
             ? '<span class="tag t-grey" title="de lead zei tijdens de call zelf nee">n.v.t.</span>'
-            : (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>');
+            : (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig pogingen</span>');
           return '<tr><td><b>' + esc(a.naam) + '</b></td><td style="color:#6b7280">' + esc(a.archief_reden || '') + '</td>' +
             '<td>' + a.bel_totaal + '&times; gebeld op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') + ' &middot; ' + a.wa_totaal + '&times; WhatsApp ' +
             oordeel + '</td></tr>';
@@ -2944,7 +2944,7 @@
         '<div style="font-size:12.5px;color:#6b7280">' + esc(a.archief_reden || '') + '</div></td>' +
         '<td><span class="tag t-grey">' + esc((REDEN_LABEL[a.reden] || [a.reden])[0]) + '</span></td>' +
         '<td>' + a.bel_totaal + '&times; &#9742; op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') + ' &middot; ' + a.wa_totaal + '&times; &#128172; ' +
-        (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>') + '</td>' +
+        (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig pogingen</span>') + '</td>' +
         '<td style="color:#6b7280">' + esc(a.gearchiveerd_at ? nl(iso(a.gearchiveerd_at)) : '') + '</td></tr>';
     }).join('');
     return h + '</tbody></table></div></div>' + modalHtml();
@@ -4532,11 +4532,11 @@
     let h = '<div class="card opvr-sectie"><h3>5 &middot; Uit de lijst gehaald</h3>';
     if (!lijst.length) return h + '<div class="empty">Er is in deze periode niemand uit de lijst gehaald.</div></div>';
     const teWeinig = lijst.filter((a) => a.moeite.staat === 'te_weinig');
-    h += '<div class="ronde zacht">De moeite hiernaast telt over de <b>hele levensloop</b> van de kaart, niet over deze periode: ' +
-      'de vraag is of er genoeg gedaan was vóórdat hij dicht ging. De afspraak is ' +
+    h += '<div class="ronde zacht">De pogingen hiernaast tellen over de <b>hele levensloop</b> van de kaart, niet over deze periode: ' +
+      'de vraag is of er genoeg gedaan was vóórdat de kaart dicht ging. De afspraak is ' +
       d.drempels.archief_min_dagen + ' belpogingen op ' + d.drempels.archief_min_dagen +
       ' verschillende dagen plus ' + d.drempels.archief_min_wa + ' WhatsApp.</div>';
-    h += '<div class="opvr-kpi">' + rapCel(lijst.length, 'uit de lijst') + rapCel(teWeinig.length, 'met te weinig moeite') + '</div>';
+    h += '<div class="opvr-kpi">' + rapCel(lijst.length, 'uit de lijst') + rapCel(teWeinig.length, 'met te weinig pogingen') + '</div>';
     h += '<div class="card"><table><thead><tr><th>Naam</th><th>Reden</th><th>Moeite</th><th>Dag</th></tr></thead><tbody>' +
       lijst.map((a) =>
         '<tr><td><b>' + esc(a.naam || 'Naamloos') + '</b></td>' +
@@ -4555,7 +4555,7 @@
     // aan te doen viel.
     if (m.staat === 'nvt') return '<span class="tag t-grey" title="' + esc(m.reden || '') + '">n.v.t.</span>';
     if (m.staat === 'genoeg') return '<span class="tag t-green">ok</span>';
-    return '<span class="tag t-red">te weinig</span>';
+    return '<span class="tag t-red">te weinig pogingen</span>';
   }
 
   // ── 6 · Volume ───────────────────────────────────────────────────────────
