@@ -21,6 +21,7 @@
 // Response: { ok, scanned, archived, errors: [...] }.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const BATCH_LIMIT = 100;
 const ABORT_MS = 50_000;
@@ -103,6 +104,8 @@ export default async function handler(req, res) {
           .eq('id', ob.id)
           .eq('status', 'geannuleerd');
         if (upErr) throw new Error(upErr.message);
+        // Weg uit het LMS — deze cron draait om 02:30, ruim voor de hersync.
+        await spiegelNaActie(ob.id, 'cron-cancellation-cleanup');
         summary.archived++;
         processed++;
       } catch (e) {

@@ -76,7 +76,7 @@ test('CONTRACT: alleen onboarding-spiegel.js SCHRIJFT naar hlms_crm_onboarding',
     + ' — de spiegel heeft precies één schrijver, zie de kop van die lib');
 });
 
-test('CONTRACT: de aanroepers spiegelen via de helper, niet met eigen queries', () => {
+test('CONTRACT: alle elf schrijfpunten spiegelen via de helper', () => {
   // Elk endpoint dat de spiegel bijwerkt hoort dat via spiegelNaActie() te
   // doen. Zo staat de faalzachte afhandeling ook op één plek.
   const AANROEPERS = [
@@ -87,6 +87,15 @@ test('CONTRACT: de aanroepers spiegelen via de helper, niet met eigen queries', 
     'api/onboarding-step-save.js',
     'api/onboarding-complete.js',
     'api/onboarding-cancel.js',
+    // Het eerste moment waarop dfo_lms_student_id bestaat — zonder deze twee
+    // verschijnt een net aangemaakte student pas de volgende ochtend.
+    'api/onboarding-create.js',
+    'api/onboarding-dfo-lms-provision.js',
+    // De twee archiveer-crons draaien om 02:30 en 03:30; de hersync pas om
+    // 07:20. Zonder deze aanroepen staat een gearchiveerde of geannuleerde
+    // student uren in het oppak-blok van zijn mentor.
+    'api/cron/archive-completed-onboardings.js',
+    'api/cron-cancellation-cleanup.js',
   ];
   for (const kort of AANROEPERS) {
     const bron = readFileSync(join(ROOT, kort), 'utf8');

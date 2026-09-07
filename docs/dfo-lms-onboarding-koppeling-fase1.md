@@ -657,8 +657,21 @@ terughoudendheid, niet vrij spel.
 
 `api/cron/onboarding-spiegel-sync.js` draait dagelijks (07:20 UTC, na de
 afsluitcron) en **verzoent**: toevoegen wat mist, bijwerken wat er staat, en
-verwijderen wat er niet meer hoort. De aanroepen vanuit de zeven endpoints zijn
-er alleen zodat het scherm meteen klopt.
+verwijderen wat er niet meer hoort. De aanroepen vanuit de elf schrijfpunten
+zijn er alleen zodat het scherm meteen klopt.
+
+Twee groepen daarvan verdienen aparte vermelding, want zonder hen zou de
+hersync het pas uren later rechtzetten:
+
+- **De provisioning** (`onboarding-create.js`, `onboarding-dfo-lms-provision.js`).
+  Dat is het eerste moment waarop `dfo_lms_student_id` bestaat en dus het
+  eerste moment waarop de spiegel kán bestaan. Zonder die aanroep verschijnt
+  een net aangemaakte student pas de volgende ochtend in het oppak-blok — juist
+  de student die je snel wil zien.
+- **De twee archiveer-crons** (`cron/archive-completed-onboardings.js` om 03:30,
+  `cron-cancellation-cleanup.js` om 02:30). De hersync draait om 07:20, dus
+  zonder aanroep staat een gearchiveerde of geannuleerde student vier tot vijf
+  uur in het blok van zijn mentor.
 
 Die volgorde is met opzet zo. Er zijn twintig schrijfpunten op `onboardings`;
 bij twintig is het geen kwestie óf er ooit eentje de spiegel vergeet, maar
