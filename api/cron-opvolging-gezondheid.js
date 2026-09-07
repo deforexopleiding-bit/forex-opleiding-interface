@@ -206,16 +206,33 @@ async function meetPrintweergave(vandaag) {
 /** Een minimaal maar volledig geldig rapport-antwoord voor controle 4. */
 const LEEG_RAPPORT = (dag) => ({
   periode: { van: dag, tot: dag, dagen: 1, vandaag: dag, bevat_verleden: false, bevat_vandaag: true },
+  // DEZE VORM MOET MEEBEWEGEN MET HET ECHTE RAPPORT. Hij is wat de controle
+  // gebruikt als ze niets kan lezen; klopt hij niet, dan liegt de bewaking
+  // juist op het moment dat er iets stuk is. Hij stond nog op gesprek_min_sec
+  // 10 en een te_kort-emmer, allebei vervallen op 8 september.
   drempels: { spraak_voor_uur: 9, nabel_van_uur: 12, nabel_tot_uur: 13,
-              archief_min_dagen: 3, archief_min_wa: 1, gesprek_min_sec: 10 },
+              archief_min_dagen: 3, archief_min_wa: 1,
+              gesprek_bron: 'resultaat', gesprek_min_sec: null,
+              werkuur_van: 9, werkuur_tot: 21,
+              gat_drempel_min: 120, bezetting_drempel: 0.6 },
   aandacht: [], blinde_vlekken: [],
   dekking: { openstaand_bekend: true, openstaand: [], onbehandeld: [], behandeld: [] },
   vensters: { spraak: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 },
               nabel: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 },
               rijen: [], zonder_taak: [] },
   zoomcalls: [], archief: [],
-  volume: { bel: { uit: 0, seconden: 0, niet_opgenomen: 0, zonder_duur: 0, gesproken: 0, te_kort: 0 },
+  volume: { bel: { uit: 0, seconden: 0, gesproken: 0, niet_opgenomen: 0,
+                   onbekend_resultaat: 0, zonder_duur: 0, via_ander: 0 },
             wa: { uit: 0, in: 0 }, spraak: { uit: 0, in: 0 }, rijen: [] },
+  // De blokken die er op 7 en 8 september bij zijn gekomen. Ontbreken ze hier,
+  // dan tekent de printweergave in deze proef iets anders dan in het echt.
+  werkritme: [{ dag, per_uur: [], totaal: 0, binnen_werkuren: 0, buiten_werkuren: 0,
+                actieve_uren: 0, werkuren: 12, langste_gat: null, bevindingen: [] }],
+  afgehandeld: [{ dag, afgesloten: [], doorgeschoven: [], aangeraakt: [],
+                  aantallen: { afgesloten: 0, doorgeschoven: 0, aangeraakt: 0 } }],
+  tijdlijn: [{ dag, svg: '<svg viewBox="0 0 1000 300" width="100%"></svg>',
+               verruimd: null, gat: null, venster: { van: '09:00', tot: '21:00' },
+               aantallen: { bel: 0, whatsapp: 0, zoomcalls: 0 }, drukste_kwartier: 1 }],
 });
 
 /**
