@@ -44,6 +44,7 @@
 // archiveerdrempel: api/_lib/opvolging-vensters.js.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { bouwTijdlijn } from './_lib/opvolging-tijdlijn.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import {
   isMoeite, isContact, isGesprek, gesprekDuur, classificeerResultaat, WA_SOORTEN,
@@ -359,6 +360,16 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     });
   }
 
+  // ── De tijdlijn per dag ──────────────────────────────────────────────────
+  // Statische SVG uit hetzelfde endpoint, zodat scherm en print exact dezelfde
+  // grafiek krijgen. Zou de browser hem na het laden tekenen, dan is de
+  // printweergave leeg of half — en dat valt pas op als iemand een PDF opslaat.
+  const tijdlijn = dagen.map((d) => bouwTijdlijn({
+    pogingen : pogingen.filter((p) => dagVan(p.tijdstip) === d),
+    afspraken: afspraken.filter((a) => dagVan(a.scheduled_at) === d),
+    dag      : d,
+  }));
+
   vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief });
   // Ernst en label erbij, ná het vullen: zo hoeft geen enkele push-plek eraan
   // te denken en kan er ook geen bevinding zonder ernst ontstaan.
@@ -394,6 +405,7 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     zoomcalls,
     archief,
     volume,
+    tijdlijn,
   };
 }
 

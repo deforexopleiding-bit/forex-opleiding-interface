@@ -1438,6 +1438,11 @@
 .opv .opvr-regel{padding:8px 10px;border-left:3px solid var(--o-line);background:#fafbfc;border-radius:0 8px 8px 0}
 .opv .opvr-regel.opvr-rood{border-left-color:var(--o-red);background:var(--o-reds)}
 .opv .opvr-regel.opvr-groen{border-left-color:#16a34a;background:#f0fdf4}
+.opv .opvr-tl{margin:10px 0 6px}
+.opv .opvr-tl-kop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:12.5px;margin-bottom:4px}
+.opv .opvr-tl-kop span{color:var(--o-muted);font-size:11.5px}
+.opv .opvr-tl-legenda{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11px;color:var(--o-muted)}
+.opv .opvr-tl-legenda i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .opv .opvr-regel.opvr-grijs{border-left-color:#d1d5db;background:#f7f8f9}
 .opv .opvr-t{font-size:13.5px;font-weight:600}
 .opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
@@ -4304,6 +4309,7 @@
 
     h += sectieAandacht(d);
     h += sectieDekking(d);
+    h += sectieTijdlijn(d);
     h += sectieVensters(d);
     h += sectieZoomcalls(d);
     h += sectieArchief(d);
@@ -4414,6 +4420,44 @@
       '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
       '</div><div class="opvr-u">' + r.bel + '&times; gebeld op ' + r.bel_dagen + ' dag' + (r.bel_dagen === 1 ? '' : 'en') +
       ' &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+    return h + '</div>';
+  }
+
+  // ── 2b · De tijdlijn ─────────────────────────────────────────────────────
+  // De SVG komt kant-en-klaar van de server, precies zoals de printweergave
+  // hem krijgt. Hier niets narekenen en niets tekenen: één grafiek, één bron.
+  function sectieTijdlijn(d) {
+    const dagen = d.tijdlijn || [];
+    let h = '<div class="card opvr-sectie"><h3>2b &middot; De dag als tijdlijn</h3>';
+    if (!dagen.length) return h + '<div class="empty">Geen tijdlijn berekend voor deze periode.</div></div>';
+
+    // DE TOON. Een gat is een BLINDE VLEK, geen verwijt: deze module ziet
+    // alleen wat er in Opvolging gebeurt, niet de zoomcalls zelf en niet het
+    // andere werk van de dag. Zonder die zin leest stilte als een aanklacht.
+    h += '<div class="ronde">Elke belpoging, WhatsApp en ingeplande zoomcall op hun eigen tijdstip. ' +
+      'De <b>hoogte</b> van een staaf is de gespreksduur — op een as van twaalf uur is een gesprek ' +
+      'van anderhalve minuut te smal om te zien. <b>Een leeg stuk is een blinde vlek, geen verwijt:</b> ' +
+      'deze module ziet alleen wat er in Opvolging gebeurt, niet het gesprek in een zoomcall en niet ' +
+      'het werk dat elders is vastgelegd.</div>';
+
+    for (const t of dagen) {
+      h += '<div class="opvr-tl"><div class="opvr-tl-kop"><b>' + esc(nl(t.dag)) + '</b>' +
+        '<span>' + t.aantallen.bel + ' belpoging' + (t.aantallen.bel === 1 ? '' : 'en') +
+        ' &middot; ' + t.aantallen.whatsapp + '&times; WhatsApp &middot; ' +
+        t.aantallen.zoomcalls + ' zoomcall' + (t.aantallen.zoomcalls === 1 ? '' : 's') +
+        ' &middot; ' + esc(t.venster.van) + '&ndash;' + esc(t.venster.tot) + '</span></div>' +
+        t.svg +
+        (t.verruimd ? '<div class="ronde zacht">' + esc(t.verruimd.reden) + '</div>' : '') +
+        '</div>';
+    }
+    h += '<div class="opvr-tl-legenda">' +
+      '<span><i style="background:#07835A"></i>gesprek (hoogte = duur)</span>' +
+      '<span><i style="background:#E4F5EE;border:1px dashed #07835A"></i>gesproken, lengte onbekend</span>' +
+      '<span><i style="background:#fff;border:1px solid #C22B3E"></i>niet opgenomen</span>' +
+      '<span><i style="background:#E7EEFA;border:1px solid #1B5FBF"></i>WhatsApp uit</span>' +
+      '<span><i style="background:#FBF0DE;border:1px solid #C2700A"></i>antwoord</span>' +
+      '<span><i style="background:#EDE7FB;border:1px solid #6D3FD4"></i>zoomcall</span>' +
+      '</div>';
     return h + '</div>';
   }
 
