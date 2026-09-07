@@ -49,6 +49,8 @@ import {
   isMoeite, isContact, isGesprek, gesprekDuur, classificeerResultaat, WA_SOORTEN,
   GESPROKEN, NIET_OPGENOMEN, VIA_ANDER,
 } from './_lib/opvolging-poging-telling.js';
+import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
+import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
 import {
   beoordeelDag, telVensters, beoordeelMoeite, dagVan,
   SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
@@ -306,6 +308,28 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 6 · VOLUME
   // ═══════════════════════════════════════════════════════════════════════
+  // DE DOORGESCHOVEN KAARTEN. Bryan en Peter kregen op 7 september om 18:12 en
+  // 18:35 een beslissing en bleven open met een due vooruit — precies goed,
+  // maar ze stonden nergens. Ze zitten niet per se in taakVan (die hangt aan
+  // pogingen), dus ze worden apart opgehaald; een kaart die je mist is exact
+  // de bug die dit blok moet oplossen.
+  let bevestigdTaken = [];
+  {
+    const { data, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, naam, status, due, bevestigd_op, bevestigd_notitie, archief_reden, gearchiveerd_at')
+      .gte('bevestigd_op', vanIso).lt('bevestigd_op', totIso);
+    if (error) {
+      blindeVlekken.push({
+        sectie: 'afgehandeld',
+        wat   : 'De doorgeschoven kaarten konden niet gelezen worden.',
+        waarom: error.message,
+      });
+    } else {
+      bevestigdTaken = data || [];
+    }
+  }
+
   const volume = telVolume(pogingen, taakVan);
   if (volume.bel.zonder_duur > 0) {
     blindeVlekken.push({
@@ -359,7 +383,36 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     });
   }
 
+  // ── Werkritme ────────────────────────────────────────────────────────────
+  // Per dag, want een balk per uur over een hele week zou de klontering juist
+  // uitsmeren — en dat is precies wat dit blok moet laten zien.
+  const werkritme = dagen.map((d) => bouwWerkritme({
+    pogingen: pogingen.filter((p) => dagVan(p.tijdstip) === d), dag: d,
+  }));
+
+  // ── Afgehandeld ──────────────────────────────────────────────────────────
+  // Dezelfde berekening als het scherm Vandaag gedaan. Één helper, geen tweede
+  // telling: anders zegt het scherm zeven en de PDF acht, en weet niemand welke
+  // van de twee liegt.
+  const takenVoorGedaan = [...new Map(
+    [...alleTaken, ...gearchiveerd, ...bevestigdTaken].map((t) => [t.id, t]),
+  ).values()];
+  const afgehandeld = dagen.map((d) => verdeelVandaagGedaan({
+    taken: takenVoorGedaan, pogingen, dag: d, dagVan,
+  }));
+
   vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief });
+
+  // De werkritme-bevindingen horen in de aandachtlijst: het zijn rekensommen
+  // met een zichtbare drempel, precies zoals de andere bevindingen.
+  for (const r of werkritme) {
+    for (const b of r.bevindingen) {
+      aandacht.push({
+        soort: b.soort, sectie: 'werkritme', naam: null, dag: r.dag,
+        tekst: b.tekst, uitleg: null, getallen: b.getallen,
+      });
+    }
+  }
   // Ernst en label erbij, ná het vullen: zo hoeft geen enkele push-plek eraan
   // te denken en kan er ook geen bevinding zonder ernst ontstaan.
   const aandachtMetErnst = aandacht.map(metErnst);
@@ -386,6 +439,16 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
       // alleen waar er gesproken is.
       gesprek_bron: 'resultaat',
       gesprek_min_sec: null,
+      // WAT ALS WERKUUR TELT BEPAALT DE HELE BEOORDELING van het werkritme, en
+      // dat mag geen verborgen aanname zijn. 09:00 tot 21:00, twaalf uren: de
+      // module eist zelf een spraakbericht vóór 09:00 en de zoomcalls lopen
+      // tot half negen 's avonds.
+      werkuur_van: WERKUUR_VAN,
+      werkuur_tot: WERKUUR_TOT,
+      // Een stilte binnen werkuren is pas een bevinding vanaf twee uur, en een
+      // dag heet geklonterd onder 60% bezetting van de werkuren.
+      gat_drempel_min: GAT_DREMPEL_MIN,
+      bezetting_drempel: BEZETTING_DREMPEL,
     },
     aandacht: aandachtMetErnst,
     blinde_vlekken: blindeVlekken,
@@ -394,6 +457,10 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     zoomcalls,
     archief,
     volume,
+    // Nieuw: de verdeling over de dag, en wat er afgehandeld is. Per dag, zodat
+    // een weekrapport de klontering niet uitsmeert.
+    werkritme,
+    afgehandeld,
   };
 }
 
