@@ -208,6 +208,48 @@ factuurdatum-veld.
   `dunning_ladder` zijn gewone `app_settings`-rijen die niet vooraf hoeven te
   bestaan (afwezig = default 0 resp. de standaard-ladder).
 
+## 5b. Dry-run simulatie vóór merge
+
+`scripts/dunning-dry-run-simulatie.js` rekent op de **live dataset** uit wat de
+motor met deze branch zou doen op dag 1 na deploy en de dagen daarna. Het
+script doet uitsluitend SELECT-queries: het verstuurt niets en schrijft niets
+naar de database.
+
+```
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node scripts/dunning-dry-run-simulatie.js --days=8 --not-yet-due=14 \
+    --md=/tmp/dryrun.md --json=/tmp/dryrun.json
+```
+
+De rekenkern zit apart in `api/_lib/dunning-simulate.js` (pure functie, geen
+DB) en deelt de guard-functies met de motor, zodat ladder- en
+vervaldatum-logica per definitie identiek zijn. `tests/dunning-simulate.test.js`
+verifieert de simulator op synthetische snapshots.
+
+Aannames (maken de uitkomst een **bovengrens**): niemand betaalt, niemand
+antwoordt, geen nieuwe facturen, elke send slaagt, niemand grijpt handmatig in.
+
+### Inhaalgolf — bevestigd risico
+
+Een klant die al lang te laat is terwijl zijn run-pointer nog op stap 1 staat,
+heeft **alle** ladder-sporten al gepasseerd. De motor doet maximaal één
+send-stap per uurlijkse tick, dus die klant krijgt de hele ladder binnen één
+ochtend: vijf berichten tussen 08:00 en 12:00. De cooldown van 7 dagen vangt
+dat **niet** af — die geldt alleen bij het STARTEN van een nieuwe run, niet
+tussen de stappen van een lopende run.
+
+Twee maatregelen, beide als what-if-knop in de simulator (`--max-per-dag=1`,
+`--backfill`) zodat het effect vooraf te meten is:
+
+* **Max één ladder-sport per klant per dag** — smeert de reeks uit, maar de
+  klant krijgt nog steeds alle vijf de berichten (dag 1 t/m 5).
+* **Eenmalige pointer-backfill** — zet de pointer van elke lopende run op de
+  sport die bij de huidige `days_overdue` hoort, zonder te versturen. De klant
+  krijgt dan één passend bericht in plaats van de hele reeks.
+
+De twee zijn te combineren: de backfill haalt de golf weg, de dagcap is het
+vangnet voor gevallen die de backfill mist.
+
 ## 6. Nog te doen buiten deze PR (DB-config)
 
 * De `wait`-stappen in de bestaande workflows mogen opgeruimd worden nu de
