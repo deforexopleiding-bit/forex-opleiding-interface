@@ -45,7 +45,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { isMoeite, isContact, WA_SOORTEN } from './_lib/opvolging-poging-telling.js';
+import { isMoeite, isContact, isGesprek, WA_SOORTEN } from './_lib/opvolging-poging-telling.js';
 import {
   beoordeelDag, telVensters, beoordeelMoeite, dagVan,
   SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
@@ -191,7 +191,7 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
   // terugwerkende kracht, in tegenstelling tot `status`.
   const { data: apptRuw, error: e3 } = await supabaseAdmin
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, snelle_notitie, uitkomst, uitkomst_op')
+    .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, parent_appointment_id, annulering_reden, snelle_notitie, uitkomst, uitkomst_op')
     .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
     .order('scheduled_at', { ascending: true });
 
@@ -204,7 +204,7 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
     uitkomstKolommen = false;
     const { data: fallback, error: e3b } = await supabaseAdmin
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, snelle_notitie')
+      .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, parent_appointment_id, annulering_reden, snelle_notitie')
       .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
       .order('scheduled_at', { ascending: true });
     if (e3b) throw e3b;
@@ -354,6 +354,9 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
       nabel_tot_uur  : NABEL_TOT_UUR,
       archief_min_dagen: ARCHIEF_MIN_DAGEN,
       archief_min_wa   : ARCHIEF_MIN_WA,
+      // Zichtbaar, niet verstopt: een grens die niemand kan zien is een grens
+      // waar niemand het over kan hebben.
+      gesprek_min_sec  : GESPREK_MIN_SEC,
     },
     aandacht,
     blinde_vlekken: blindeVlekken,
@@ -373,7 +376,7 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
 
 // ── Sectie 6 ───────────────────────────────────────────────────────────────
 export function telVolume(pogingen, taakVan) {
-  const bel   = { uit: 0, seconden: 0, zonder_duur: 0, gesproken: 0 };
+  const bel   = { uit: 0, seconden: 0, zonder_duur: 0, gesproken: 0, te_kort: 0 };
   const wa    = { uit: 0, in: 0 };
   const spraak = { uit: 0, in: 0 };
   const rijen = [];
@@ -387,7 +390,13 @@ export function telVolume(pogingen, taakVan) {
       bel.uit += 1;
       if (Number.isFinite(p.duur_sec) && p.duur_sec !== null) bel.seconden += Number(p.duur_sec);
       else bel.zonder_duur += 1;
-      if (isContact(p)) bel.gesproken += 1;
+      // DRIE UITKOMSTEN, GEEN TWEE. isGesprek geeft null terug als de duur
+      // ontbreekt: dan weten we het niet, en dat is iets anders dan nee. Een
+      // call onder de drempel blijft een poging — Dave heeft gebeld — maar
+      // telt niet als gesprek.
+      const gesprek = isGesprek(p, GESPREK_MIN_SEC);
+      if (gesprek === true) bel.gesproken += 1;
+      else if (gesprek === false && isContact(p)) bel.te_kort += 1;
     } else if (p.soort === 'whatsapp') {
       if (uitgaand) wa.uit += 1; else wa.in += 1;
     } else if (p.soort === 'spraakbericht') {
@@ -578,6 +587,29 @@ const leegTel = () => ({ totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet
 // er iets van vindt. Een call van 20:30 mag om 20:35 niet al rood staan: hij is
 // dan nog bezig, en daarna moet er ook nog even tijd zijn om iets vast te
 // leggen. Duur plus dit getal.
+// Hoelang een call minstens moet duren om een GESPREK te heten.
+//
+// WAAROM DIT GETAL ER STAAT, EN WAAROM HET ZICHTBAAR IS.
+// Het rapport meldde op 7 september 'gesproken: 6' over negen calls die 26, 24,
+// 4, 29, 1, 1, 22, 24 en 2 seconden duurden. Drie van die zes duurden één, één
+// en twee seconden. Zo meet het rapport iets anders dan het zegt, en wel in
+// Daves voordeel — precies wat een rapport over een persoon niet mag doen.
+//
+// De grens staat op tien seconden, en dat is een KEUZE op één dag gegevens, niet
+// op een verdeling. In die ene dag ligt er een gat tussen 4 en 22 seconden: de
+// korte calls zijn 1, 1, 2 en 4, de rest 22 en langer. Tien valt midden in dat
+// gat en scheidt de twee groepen zonder een van beide te raken.
+//
+// WAT HIER NOG ONTBREEKT: de verdeling over meerdere weken. Die is van hieruit
+// niet op te vragen. De query staat in de PR-beschrijving; blijkt daaruit een
+// andere natuurlijke grens, dan is dit één regel. Daarom staat het getal ook in
+// `drempels` in het antwoord: een grens die niemand kan zien is een grens waar
+// niemand het over kan hebben.
+export const GESPREK_MIN_SEC = 10;
+
+// De statussen waarbij de call daadwerkelijk plaatsvond of had moeten
+// plaatsvinden. Alleen díe kun je op een uitkomst afrekenen.
+const BEOORDEELBARE_STATUSSEN = new Set(['scheduled', 'in_progress', 'completed', 'no_show']);
 const UITKOMST_SPELING_MIN = 15;
 const STANDAARD_DUUR_MIN   = 30;
 
@@ -591,10 +623,24 @@ const STANDAARD_DUUR_MIN   = 30;
  * mee verspeelt.
  */
 export function callStaat(a, nuMs) {
-  // Een verzette afspraak is geen gemiste uitkomst. follow-up-verplaats-call
-  // zet de oude rij op 'verplaatst' en maakt een nieuwe; die oude rij hoort
-  // helemaal niet beoordeeld te worden.
-  if (String(a.status || '') === 'verplaatst') return 'verplaatst';
+  // EEN TOELATINGSLIJST, GEEN WEIGERLIJST — en dat is hier andersom dan bij de
+  // WhatsApp-systeemtypes, met reden.
+  //
+  // follow_up_appointments.status draagt méér waarden dan de CHECK-constraint
+  // noemt: `wacht_op_reschedule` (de GHL-poll) en `verwijderd`
+  // (follow-up-verwijder) worden ook geschreven. Een lijst met 'alles behalve
+  // deze paar' laat elke toekomstige waarde stilzwijgend beoordelen, en dan
+  // krijgt Dave een verwijt over een call die nooit had moeten plaatsvinden.
+  // Bij de systeemtypes was stil verlies de grotere schade; hier is een vals
+  // verwijt dat, want dit rapport gaat over een persoon.
+  //
+  // Wat er niet in staat verdwijnt daarom ook niet: onbekende statussen komen
+  // terug als 'onbeoordeelbaar' en worden als blinde vlek gemeld.
+  const status = String(a.status || 'scheduled');   // NOT NULL met default 'scheduled'
+  if (status === 'cancelled')  return 'geannuleerd';
+  if (status === 'verplaatst') return 'verplaatst';
+  if (!BEOORDEELBARE_STATUSSEN.has(status)) return 'onbeoordeelbaar';
+
   const start = Date.parse(a.scheduled_at);
   if (!Number.isFinite(start)) return 'te_beoordelen';
   const duur = Number.isFinite(a.duration_minutes) && a.duration_minutes > 0
@@ -602,6 +648,7 @@ export function callStaat(a, nuMs) {
   const klaar = start + (duur + UITKOMST_SPELING_MIN) * 60000;
   return nuMs < klaar ? 'gepland' : 'te_beoordelen';
 }
+
 
 /**
  * Wie is dit, voor het samenvoegen van dubbele afspraken?
@@ -621,7 +668,26 @@ function persoonSleutel(a) {
 
 // ── Sectie 4 ───────────────────────────────────────────────────────────────
 export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }) {
-  return afspraken.map((a) => {
+  // DE LIJST ZELF MOET KLOPPEN, NIET ALLEEN DE BEVINDING.
+  //
+  // Op 7 september stonden er zes rijen voor drie calls: een verplaatste
+  // Yasmine naast haar opvolger, en twee geannuleerde alsof ze doorgingen. Bij
+  // de vorige ronde is alleen de dubbele BEVINDING ontdubbeld — de lijst bleef
+  // zes tonen. Een lijst die niet klopt maakt elke telling eronder verdacht.
+  //
+  // follow-up-verplaats-call zet de oude rij op 'verplaatst' en maakt een
+  // nieuwe met parent_appointment_id = het oude id. Zit die opvolger in
+  // dezelfde periode, dan is de voorganger dubbel beeld en valt hij weg. Zit
+  // hij er NIET in (verplaatst naar volgende week), dan blijft de voorganger
+  // staan — anders verdwijnt stil dat er iets verzet is.
+  const heeftOpvolgerHier = new Set(
+    afspraken.map((a) => a.parent_appointment_id).filter(Boolean).map(String),
+  );
+
+  return afspraken.filter((a) => {
+    if (String(a.status || '') !== 'verplaatst') return true;
+    return !heeftOpvolgerHier.has(String(a.id));
+  }).map((a) => {
     // GEEN TERUGVAL OP status. 'completed' dekt zowel sale als gesprek_gehad,
     // en 'cancelled' zowel wilt_niet_meer als niet_geschikt. Uit de status
     // raden welke van de twee het was, is dezelfde verleiding als de
@@ -634,7 +700,13 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }
       naam    : a.lead_name,
       dag     : dagVan(a.scheduled_at),
       tijd    : tijdVan(a.scheduled_at),
-      staat,                       // gepland | verplaatst | te_beoordelen
+      // gepland | verplaatst | geannuleerd | onbeoordeelbaar | te_beoordelen
+      staat,
+      // De ruwe status erbij, zodat een onbekende waarde te herkennen is
+      // zonder in de databank te hoeven kijken.
+      status_ruw: String(a.status || 'scheduled'),
+      // Een annulering is informatie voor Maxim, alleen geen verwijt aan Dave.
+      annulering_reden: a.annulering_reden || null,
       persoon : persoonSleutel(a),
       uitkomst: heeft ? a.uitkomst : null,
       uitkomst_op: heeft ? a.uitkomst_op : null,
@@ -645,7 +717,9 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }
       // 'gepland' is een derde geval: er is nog niets te melden.
       reden_leeg: heeft ? null
         : (staat === 'gepland' ? 'Deze call moet nog plaatsvinden.'
-          : staat === 'verplaatst' ? 'Deze afspraak is verzet; de nieuwe staat er apart bij.'
+          : staat === 'verplaatst' ? 'Deze afspraak is verzet; de opvolger valt buiten deze periode.'
+          : staat === 'geannuleerd' ? 'Deze afspraak is geannuleerd; een uitkomst hoort hier niet.'
+          : staat === 'onbeoordeelbaar' ? 'De status van deze afspraak (' + String(a.status || '') + ') zegt niet of de call heeft plaatsgevonden.'
           : uitkomstKolommen
             ? 'Er is voor deze call geen uitkomst vastgelegd.'
             : 'Uitkomsten worden voor deze periode nog niet bewaard.'),
@@ -747,6 +821,20 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
     }
   }
 
+  // Een status die we niet kennen mag niet beoordeeld worden, maar ook niet
+  // verzwegen. follow_up_appointments.status draagt meer waarden dan de
+  // CHECK-constraint noemt; komt er een nieuwe bij, dan hoort dat op te vallen
+  // in plaats van stil werk te laten verdwijnen.
+  const onbeoordeelbaar = zoomcalls.filter((c) => c.staat === 'onbeoordeelbaar');
+  if (onbeoordeelbaar.length) {
+    const statussen = [...new Set(onbeoordeelbaar.map((c) => c.status_ruw))].join(', ');
+    aandacht.push({
+      soort: 'blinde_vlek', sectie: 'zoomcalls', naam: null,
+      tekst: `${onbeoordeelbaar.length} afspraak${onbeoordeelbaar.length === 1 ? '' : 'en'} heeft een status waarvan niet vaststaat of de call heeft plaatsgevonden.`,
+      uitleg: `Status: ${statussen}. Die worden niet beoordeeld — een oordeel zou een gok zijn — maar ze staan wel in de lijst hieronder.`,
+    });
+  }
+
   if (vensters.zonder_taak.length) {
     aandacht.push({
       soort: 'blinde_vlek', sectie: 'vensters', naam: null,
@@ -777,12 +865,14 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
     // Een call die nog moet plaatsvinden is geen gemiste uitkomst, en een
     // verzette rij evenmin. Zonder deze regel staat er om acht uur 's ochtends
     // al een verwijt over de call van vanavond half negen.
-    // Alleen een EXPLICIETE 'gepland' of 'verplaatst' onderdrukt de melding.
-    // Andersom — alleen 'te_beoordelen' toelaten — zou een call met een
-    // ontbrekende staat stilletjes laten wegvallen, en dat is precies de
-    // stille vorm die dit rapport nergens mag hebben. Onbekend hoort beoordeeld
-    // te worden, niet verstopt.
-    if (c.staat === 'gepland' || c.staat === 'verplaatst') continue;
+    // Alleen wat écht te beoordelen is krijgt een oordeel. Een ontbrekende
+    // staat telt als te_beoordelen: dan valt een call nooit stilletjes weg, en
+    // dat is de stille vorm die dit rapport nergens mag hebben.
+    //
+    // De andere vier verdwijnen niet uit beeld — geannuleerd en verplaatst
+    // staan in de zoomcall-lijst, gepland valt onder 'de dag loopt nog', en
+    // onbeoordeelbaar krijgt hieronder zijn eigen blinde vlek.
+    if (c.staat && c.staat !== 'te_beoordelen') continue;
     if (alGemeld.has(c.appointment_id)) continue;
     if (!c.vastgelegd) {
       aandacht.push({

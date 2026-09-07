@@ -103,6 +103,7 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
   const sleutelZoek   = {};   // vorm -> aantal, bij het BEVRAGEN van de kaart
   const sleutelRaak   = {};   // vorm -> aantal, alleen de treffers
   const onbruikbaarReden = {};
+  const sleutelZoekPerType = {};
   // Welk systeemtype er geweigerd is, en hoe vaak. Alleen het type — dat is een
   // vast woord uit het WhatsApp-protocol, geen gegeven van iemand. Dit is de
   // meting waarmee we zien of de weigerlijst aangevuld moet worden: staat er een
@@ -153,6 +154,18 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
      * kan aanwijzen: een domein, een lengte en of er een apparaat-achtervoegsel
      * aan zat.
      */
+    /**
+     * Begin van een nieuwe kaartopbouw: de vorige telling gaat weg.
+     *
+     * Zonder dit telt sleutel_opslag door over alle herbouwrondes heen. Op 7
+     * september stond hij op 116 voor 29 leads — vier rondes opgeteld — en dan
+     * is het getal als momentopname van de kaart onbruikbaar. Alleen de
+     * verhouding tussen de vormen klopte nog.
+     */
+    sleutelOpslagReset() {
+      for (const k of Object.keys(sleutelOpslag)) delete sleutelOpslag[k];
+    },
+
     sleutelOpslag(vorm) {
       if (!vorm) return;
       sleutelOpslag[vorm] = (sleutelOpslag[vorm] || 0) + 1;
@@ -165,10 +178,23 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
      * de kaart dezelfde soort sleutel gebruiken. Staat er bij opslag 'lid/13'
      * en bij zoeken 'lid/13+apparaat', dan is dat het hele verhaal.
      */
-    sleutelZoek(vorm, raak) {
+    sleutelZoek(vorm, raak, type) {
       if (!vorm) return;
       sleutelZoek[vorm] = (sleutelZoek[vorm] || 0) + 1;
       if (raak) sleutelRaak[vorm] = (sleutelRaak[vorm] || 0) + 1;
+      // PER EVENT-TYPE, want anders zijn de getallen niet te duiden. Eén
+      // verstuurd bericht levert één message_create plus meerdere message_ack
+      // op, en die lossen allemaal dezelfde persoon opnieuw op. `opgelost` ligt
+      // daardoor structureel hoger dan `gezien.message_create`, en die twee
+      // naast elkaar leggen levert een verkeerd verhaal op.
+      //
+      // Een misser op een message_create is bovendien het interessantst: dat is
+      // iemand die Dave zélf heeft aangeschreven, en dat is bijna altijd een
+      // lead. Loopt dat getal op, dan mist de kaart echte leads.
+      if (!geldigType(type)) return;
+      if (!sleutelZoekPerType[type]) sleutelZoekPerType[type] = { zoek: 0, raak: 0 };
+      sleutelZoekPerType[type].zoek += 1;
+      if (raak) sleutelZoekPerType[type].raak += 1;
     },
 
     /** Waarom een antwoord onbruikbaar was. Vaste woorden uit beoordeelKandidaat. */
@@ -235,6 +261,8 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
         sleutel_opslag: { ...sleutelOpslag },
         sleutel_zoek  : { ...sleutelZoek },
         sleutel_raak  : { ...sleutelRaak },
+        sleutel_zoek_per_type: Object.fromEntries(
+          Object.entries(sleutelZoekPerType).map(([t, v]) => [t, { ...v }])),
         onbruikbaar_reden: { ...onbruikbaarReden },
         systeem_types: { ...systeemTypes },
         laatste_genegeerd: laatsteGenegeerd ? { ...laatsteGenegeerd } : null,
