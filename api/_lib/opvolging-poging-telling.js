@@ -65,6 +65,39 @@ export function isContact(p) {
 }
 
 /**
+ * Kwam er een GESPREK tot stand, en niet alleen een verbinding?
+ *
+ * DIT IS EEN ANDERE VRAAG DAN isContact, EN MET OPZET APART.
+ *
+ * isContact beantwoordt 'is de verbinding tot stand gekomen' — de vraag achter
+ * de archiveerregel: heeft deze lead ooit gereageerd, of geven we hem te snel
+ * op. Een opgenomen-en-weggedrukte call telt daar mee, want er is iemand
+ * geweest.
+ *
+ * Het dagrapport stelt een andere vraag: hoeveel gesprekken heeft Dave gevoerd.
+ * Op 7 september duurden negen uitgaande calls 26, 24, 4, 29, 1, 1, 22, 24 en 2
+ * seconden, en het rapport meldde er zes als 'gesproken'. Drie daarvan duurden
+ * één, één en twee seconden. Dat is opnemen en wegdrukken, of een beltoon —
+ * geen gesprek. Zo meet het rapport iets anders dan het zegt, en wel in Daves
+ * voordeel, en dat is precies wat een rapport over een persoon niet mag doen.
+ *
+ * Waarom hier en niet in het rapport: 'wat telt als contact' stond op 6
+ * september op drie plekken tegelijk en de slechtste van de drie draaide. Deze
+ * vraag hoort naast zijn buurvraag te staan, in één bestand, zodat het verschil
+ * tussen de twee zichtbaar is in plaats van verspreid.
+ *
+ * Een call zonder duur levert `null` op, niet `false`: we weten het niet, en
+ * dat is een derde geval. De aanroeper telt die apart.
+ */
+export function isGesprek(p, minSec) {
+  if (!isContact(p)) return false;
+  if (!p || p.soort !== 'call') return true;   // een WhatsApp-antwoord heeft geen duur
+  const d = p.duur_sec;
+  if (d === null || d === undefined || !Number.isFinite(Number(d))) return null;
+  return Number(d) >= Number(minSec);
+}
+
+/**
  * De afgeleide tellers voor één taak.
  *
  * Stond op twee plekken in api/opvolging-taken.js met dezelfde filterregel; nu

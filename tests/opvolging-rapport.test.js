@@ -466,7 +466,7 @@ test('een afgekapte takenlijst wordt gemeld en niet stil geslikt', () => {
 // nog niet gedaan hoefde te zijn, verspeelt zijn geloofwaardigheid bij het
 // eerste gesprek.
 
-import { callStaat, groepeerDubbele } from '../api/opvolging-rapport.js';
+import { callStaat, groepeerDubbele, GESPREK_MIN_SEC } from '../api/opvolging-rapport.js';
 
 const OCHTEND = Date.parse('2026-09-07T06:00:00Z');   // 08:00 in Amsterdam
 
@@ -613,4 +613,183 @@ test('twee afspraken op VERSCHILLENDE dagen zijn geen dubbeling', () => {
     uitkomstKolommen: true, nuMs: OCHTEND,
   });
   assert.equal(groepeerDubbele(zoomcalls).length, 0);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE ECHTE DAG VAN 7 SEPTEMBER — ZES RIJEN, DRIE CALLS
+// ═══════════════════════════════════════════════════════════════════════════
+// Uit follow_up_appointments voor 2026-09-07. Dit zijn de werkelijke rijen,
+// niet een verzonnen geval: het rapport meldde er zes en beschuldigde Dave van
+// een ontbrekende uitkomst op een call die geannuleerd was.
+const DAG_7_SEP = [
+  { id: 'jb',   lead_name: 'jb aanbied',      lead_email: 'jb@x.nl',  scheduled_at: '2026-09-07T07:30:00Z', status: 'cancelled', annulering_reden: 'geen interesse meer' },
+  { id: 'y-oud', lead_name: 'Yasmine Aouada', lead_email: 'y@x.nl',   scheduled_at: '2026-09-07T14:00:00Z', status: 'verplaatst' },
+  { id: 'y-nw',  lead_name: 'Yasmine Aouada', lead_email: 'y@x.nl',   scheduled_at: '2026-09-07T14:00:00Z', status: 'scheduled', parent_appointment_id: 'y-oud' },
+  { id: 'shu',  lead_name: 'Shudino Andrade', lead_email: 's@x.nl',   scheduled_at: '2026-09-07T17:00:00Z', status: 'scheduled' },
+  { id: 'sak',  lead_name: 'Sakvan Mohammed', lead_email: 'sak@x.nl', scheduled_at: '2026-09-07T18:30:00Z', status: 'cancelled' },
+  { id: 'san',  lead_name: 'sander De groot', lead_email: 'san@x.nl', scheduled_at: '2026-09-07T18:30:00Z', status: 'scheduled' },
+];
+// 09:43 UTC, het moment waarop Maxim het rapport opvroeg.
+const OM_09_43 = Date.parse('2026-09-07T09:43:00Z');
+
+test('een geannuleerde call krijgt GEEN verwijt over een ontbrekende uitkomst', () => {
+  // De call van 07:30 was geannuleerd. Een geannuleerde call hoort geen
+  // uitkomst te hebben; hem daarop afrekenen is een verwijt voor iets wat niet
+  // had moeten gebeuren.
+  const zoomcalls = bouwZoomcalls({ afspraken: DAG_7_SEP, uitkomstKolommen: true, nuMs: OM_09_43 });
+  const aandacht = [];
+  vulAandacht({
+    aandacht, blindeVlekken: [],
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] },
+    zoomcalls, archief: [],
+  });
+  const overJb = aandacht.filter((a) => a.soort === 'geen_uitkomst' && /jb aanbied/.test(a.naam || ''));
+  assert.equal(overJb.length, 0, 'een geannuleerde call hoort niet beoordeeld te worden');
+});
+
+test('geannuleerd is een eigen staat, geen te_beoordelen', () => {
+  assert.equal(callStaat({ scheduled_at: '2026-09-07T07:30:00Z', status: 'cancelled' }, OM_09_43), 'geannuleerd');
+});
+
+test('de zoomcall-lijst toont precies één rij per echte call', () => {
+  // Zes rijen in de tabel, drie echte calls: Yasmine (de opvolger), Shudino en
+  // sander. De twee geannuleerde staan er apart bij, de verplaatste voorganger
+  // valt weg ten voordele van zijn opvolger.
+  const lijst = bouwZoomcalls({ afspraken: DAG_7_SEP, uitkomstKolommen: true, nuMs: OM_09_43 });
+  const echt = lijst.filter((c) => c.staat !== 'geannuleerd' && c.staat !== 'verplaatst');
+  assert.equal(echt.length, 3, 'drie echte calls, niet zes');
+  assert.deepEqual(echt.map((c) => c.appointment_id).sort(), ['san', 'shu', 'y-nw']);
+});
+
+test('de verplaatste voorganger valt weg als zijn opvolger in dezelfde periode valt', () => {
+  const lijst = bouwZoomcalls({ afspraken: DAG_7_SEP, uitkomstKolommen: true, nuMs: OM_09_43 });
+  assert.equal(lijst.find((c) => c.appointment_id === 'y-oud'), undefined,
+    'de voorganger hoort helemaal uit de lijst te verdwijnen, niet alleen uit de bevinding');
+  assert.ok(lijst.find((c) => c.appointment_id === 'y-nw'), 'de opvolger blijft staan');
+});
+
+test('een verplaatste afspraak zonder opvolger in de periode blijft zichtbaar', () => {
+  // Anders verdwijnt een verzette call stil uit het beeld, en dan weet Maxim
+  // niet dat er iets verplaatst is.
+  const lijst = bouwZoomcalls({
+    afspraken: [DAG_7_SEP[1]], uitkomstKolommen: true, nuMs: OM_09_43,
+  });
+  assert.equal(lijst.length, 1);
+  assert.equal(lijst[0].staat, 'verplaatst');
+});
+
+test('geannuleerde calls verdwijnen niet, maar staan apart met hun reden', () => {
+  const lijst = bouwZoomcalls({ afspraken: DAG_7_SEP, uitkomstKolommen: true, nuMs: OM_09_43 });
+  const jb = lijst.find((c) => c.appointment_id === 'jb');
+  assert.ok(jb, 'een annulering is informatie voor Maxim en hoort zichtbaar te blijven');
+  assert.equal(jb.staat, 'geannuleerd');
+  assert.equal(jb.annulering_reden, 'geen interesse meer');
+});
+
+test('Yasmine levert nu ook geen dubbele bevinding meer op, want de lijst klopt', () => {
+  const zoomcalls = bouwZoomcalls({ afspraken: DAG_7_SEP, uitkomstKolommen: true, nuMs: OM_09_43 });
+  assert.equal(groepeerDubbele(zoomcalls).length, 0,
+    'na het wegvallen van de voorganger is er geen dubbeling meer om te melden');
+});
+
+test('een status die we niet kennen wordt niet beoordeeld, maar ook niet verzwegen', () => {
+  // follow_up_appointments.status draagt meer waarden dan de CHECK-constraint
+  // noemt: wacht_op_reschedule en verwijderd worden ook geschreven. Een
+  // onbekende waarde stilzwijgend beoordelen levert een vals verwijt op; hem
+  // stilzwijgend overslaan laat werk verdwijnen. Dus geen van beide.
+  const lijst = bouwZoomcalls({
+    afspraken: [{ id: 'x', lead_name: 'Onbekend', scheduled_at: '2026-09-07T07:00:00Z', status: 'wacht_op_reschedule' }],
+    uitkomstKolommen: true, nuMs: OM_09_43,
+  });
+  assert.equal(lijst.length, 1);
+  assert.equal(lijst[0].staat, 'onbeoordeelbaar');
+  assert.equal(lijst[0].status_ruw, 'wacht_op_reschedule');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EEN CALL VAN VIER SECONDEN IS GEEN GESPREK
+// ═══════════════════════════════════════════════════════════════════════════
+// De negen uitgaande calls van 7 september duurden 26, 24, 4, 29, 1, 1, 22, 24
+// en 2 seconden. Het rapport meldde 'gesproken: 6'. Drie daarvan duurden 1, 1
+// en 2 seconden — dat is opnemen en wegdrukken, of een beltoon. Zo meet het
+// rapport iets anders dan het zegt, en wel in Daves voordeel.
+
+const CALLS_7_SEP = [26, 24, 4, 29, 1, 1, 22, 24, 2].map((sec, i) => ({
+  taak_id: 't1', soort: 'call', richting: 'uit',
+  tijdstip: '2026-09-07T08:0' + (i % 10) + ':00Z',
+  duur_sec: sec, resultaat: 'gesproken',
+}));
+
+test('de korte calls van 7 september tellen niet als gesprek', () => {
+  const v = telVolume(CALLS_7_SEP, new Map());
+  assert.equal(v.bel.uit, 9, 'alle negen blijven een poging');
+  assert.equal(v.bel.gesproken, 5, '26, 24, 29, 22 en 24 seconden — niet de 4, 1, 1 en 2');
+  assert.equal(v.bel.seconden, 133);
+});
+
+test('een call korter dan de drempel telt wel als poging', () => {
+  // De moeite blijft staan: Dave heeft gebeld. Alleen het gesprek niet.
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit', tijdstip: '2026-09-07T08:00:00Z', duur_sec: 2, resultaat: 'gesproken' }], new Map());
+  assert.equal(v.bel.uit, 1);
+  assert.equal(v.bel.gesproken, 0);
+  assert.equal(v.bel.te_kort, 1);
+});
+
+test('een call zonder duur telt niet als gesprek en niet als te kort', () => {
+  // We weten het niet. Dat is een derde geval, geen nul en geen ja.
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit', tijdstip: '2026-09-07T08:00:00Z', duur_sec: null, resultaat: 'gesproken' }], new Map());
+  assert.equal(v.bel.uit, 1);
+  assert.equal(v.bel.gesproken, 0);
+  assert.equal(v.bel.zonder_duur, 1);
+  assert.equal(v.bel.te_kort, 0);
+});
+
+test('de gespreksdrempel staat zichtbaar in de drempels, niet verstopt in de code', () => {
+  // Een grens die niemand kan zien is een grens waar niemand het over kan
+  // hebben. Hij hoort in het antwoord te staan, naast de andere drempels.
+  assert.equal(typeof GESPREK_MIN_SEC, 'number');
+  assert.ok(GESPREK_MIN_SEC > 0);
+  assert.match(BRON, /gesprek_min_sec\s*:\s*GESPREK_MIN_SEC/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE FIX MOET OP HET PAD LIGGEN DAT ECHT GELOPEN WORDT
+// ═══════════════════════════════════════════════════════════════════════════
+// Dit is nu vier keer misgegaan: een groene test op een pad dat niemand loopt.
+// De vorige twee keer riep de test een hulpfunctie rechtstreeks aan; deze keer
+// bouwde hij de afspraak-objecten zelf op, met velden die de echte SELECT niet
+// ophaalt. bouwZoomcalls kreeg dan undefined en de fix deed niets.
+//
+// Deze test leest de SELECT uit de bron en controleert dat elk veld dat
+// bouwZoomcalls gebruikt er ook in staat.
+
+test('elke kolom die bouwZoomcalls leest, wordt ook echt opgehaald', () => {
+  const selects = BRON.match(/\.select\('id, lead_name[^']*'\)/g) || [];
+  assert.ok(selects.length >= 2, 'beide afspraken-selects horen te bestaan (met en zonder uitkomst-kolommen)');
+
+  // Wat de bouwer daadwerkelijk van een afspraak-rij leest.
+  const nodig = [
+    'id', 'lead_name', 'lead_email', 'lead_phone', 'scheduled_at',
+    'duration_minutes',        // callStaat: hoelang de call duurt
+    'status',                  // callStaat: geannuleerd / verplaatst / onbekend
+    'parent_appointment_id',   // de verplaatste voorganger laten wegvallen
+    'annulering_reden',        // de annulering tonen zonder oordeel
+    'snelle_notitie',
+  ];
+  for (const s of selects) {
+    for (const kolom of nodig) {
+      assert.ok(new RegExp('\\b' + kolom + '\\b').test(s),
+        `de select mist ${kolom} — dan krijgt bouwZoomcalls undefined en doet de fix niets:\n  ${s}`);
+    }
+  }
+});
+
+test('de uitkomst-kolommen zitten alleen in de eerste select', () => {
+  // De tweede is de terugval voor als de migratie nog niet gedraaid is; die
+  // mag uitkomst/uitkomst_op juist NIET noemen, anders faalt hij op precies
+  // dezelfde ontbrekende kolom.
+  const selects = BRON.match(/\.select\('id, lead_name[^']*'\)/g) || [];
+  assert.match(selects[0], /uitkomst, uitkomst_op/);
+  assert.doesNotMatch(selects[1], /uitkomst/);
 });

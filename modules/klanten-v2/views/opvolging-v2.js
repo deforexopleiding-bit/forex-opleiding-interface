@@ -4228,15 +4228,34 @@
     const teBeoordelen = lijst.filter((c) => c.staat === 'te_beoordelen');
     const gepland      = lijst.filter((c) => c.staat === 'gepland');
     const verzet       = lijst.filter((c) => c.staat === 'verplaatst');
+    const afgezegd     = lijst.filter((c) => c.staat === 'geannuleerd');
+    const onbekend     = lijst.filter((c) => c.staat === 'onbeoordeelbaar');
     const metUitkomst  = teBeoordelen.filter((c) => c.vastgelegd);
+    // 'zoomcalls' telt alleen wat er echt staat: geannuleerd en verzet zijn
+    // geen calls die doorgaan. Op 7 september meldde dit getal er zes terwijl
+    // er drie waren, en dan is elke telling eronder verdacht.
+    const echt = teBeoordelen.length + gepland.length;
     h += '<div class="kpi">' +
-      rapCel(lijst.length, 'zoomcalls') +
+      rapCel(echt, 'zoomcalls') +
       rapCel(metUitkomst.length, 'met uitkomst') +
       rapCel(teBeoordelen.length - metUitkomst.length, 'zonder uitkomst') +
       rapCel(gepland.length, 'nog gepland') + '</div>';
+    if (afgezegd.length) {
+      // Een annulering is informatie voor Maxim, alleen geen verwijt aan Dave.
+      h += '<div class="ronde zacht"><b>' + afgezegd.length + ' geannuleerd.</b> ' +
+        afgezegd.map((c) => esc(c.naam || 'Naamloos') +
+          (c.annulering_reden ? ' (' + esc(c.annulering_reden) + ')' : '')).join(' &middot; ') +
+        ' &mdash; deze tellen niet mee en krijgen geen oordeel.</div>';
+    }
     if (verzet.length) {
       h += '<div class="ronde zacht">' + verzet.length + ' afspraak' + (verzet.length === 1 ? '' : 'en') +
-        ' hieronder is verzet; de nieuwe staat er apart bij. Die worden niet beoordeeld.</div>';
+        ' hieronder is verzet naar buiten deze periode. Die worden niet beoordeeld.</div>';
+    }
+    if (onbekend.length) {
+      h += '<div class="warn">' + onbekend.length + ' afspraak' + (onbekend.length === 1 ? '' : 'en') +
+        ' met een status waarvan niet vaststaat of de call heeft plaatsgevonden (' +
+        esc([...new Set(onbekend.map((c) => c.status_ruw))].join(', ')) +
+        '). Die krijgen geen oordeel &mdash; dat zou een gok zijn.</div>';
     }
     h += '<div class="rap-lijst">' + lijst.map((c) =>
       '<div class="rap-regel' + (c.vastgelegd ? '' : ' grijs') + '">' +
@@ -4244,6 +4263,8 @@
       ' &middot; ' + esc(c.tijd || '') +
       (c.staat === 'gepland' ? ' &middot; <span class="tag t-grey">gepland</span>' : '') +
       (c.staat === 'verplaatst' ? ' &middot; <span class="tag t-grey">verzet</span>' : '') +
+      (c.staat === 'geannuleerd' ? ' &middot; <span class="tag t-grey">geannuleerd</span>' : '') +
+      (c.staat === 'onbeoordeelbaar' ? ' &middot; <span class="tag t-grey">' + esc(c.status_ruw || '') + '</span>' : '') +
       '</span></div>' +
       '<div class="u">' + (c.vastgelegd
         ? 'Uitkomst: <b>' + esc(String(c.uitkomst).replaceAll('_', ' ')) + '</b>'
@@ -4297,6 +4318,13 @@
       rapCel(v.bel.gesproken, 'daarvan gesproken') +
       rapCel(v.wa.uit + v.spraak.uit, 'WhatsApp uit') +
       rapCel(v.wa.in + v.spraak.in, 'WhatsApp in') + '</div>';
+    if (v.bel.te_kort) {
+      // Een call van vier seconden is geen gesprek. Meetellen zou het rapport
+      // iets anders laten meten dan het zegt, en wel in Daves voordeel.
+      h += '<div class="ronde zacht">' + v.bel.te_kort + ' van de ' + v.bel.uit +
+        ' calls kwam wel tot stand maar duurde korter dan ' + d.drempels.gesprek_min_sec +
+        ' seconden. Die tellen als poging, niet als gesprek.</div>';
+    }
     h += '<div class="ronde zacht">Gemeten gesprekstijd: <b>' + minuten(v.bel.seconden) + '</b>' +
       (v.bel.zonder_duur
         // Geen gemiddelde over de rest schatten. Dat zou een som van aannames
