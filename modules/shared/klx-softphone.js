@@ -95,6 +95,22 @@
     callLogPosted      : false,  // idempotency-guard: één POST per call
   };
 
+  // ── De pure beslissingen ─────────────────────────────────────────────────
+  // Welke lijn, mag de invite weg, en wat is er gebeurd: dat staat in
+  // modules/shared/belvenster-kern.js, zodat het te testen is zonder browser,
+  // zonder SIP en zonder microfoon — en zodat het belvenster in de views
+  // dezelfde antwoorden geeft als de softphone zelf.
+  const KERN = global.BelvensterKern;
+  if (!KERN) {
+    // Luid, niet stil: zonder de kern zou de armeerperiode wegvallen en zouden
+    // afgebroken calls weer als 'niet opgenomen' geboekt worden.
+    console.error('[klx-softphone] belvenster-kern.js is niet geladen — laad hem VÓÓR dit bestand.');
+  }
+  const ARMEER_MS = KERN ? KERN.ARMEER_MS : 700;
+  const bepaalUitkomst = KERN ? KERN.bepaalUitkomst
+    : ({ inviteVerstuurd, opgenomen }) => ({
+        outcome: opgenomen ? 'answered' : 'no_answer', logboek: !!inviteVerstuurd, telt_als_poging: true });
+
   // ── Lokale ringback-toon (v=1dc) ─────────────────────────────────────────
   // WebAudio-gegenereerde European ringback (ETSI EN 300 001): 425 Hz sine,
   // cadence 1s aan / 4s uit. Speelt tijdens 'Establishing' zodat de user
@@ -127,6 +143,31 @@
         gain.gain.linearRampToValueAtTime(on ? 0.12 : 0.0, now + 0.01);
       } catch (_) { /* AudioContext kan closed zijn */ }
       cadenceTimer = setTimeout(() => schedulePhase(!on), on ? 1000 : 4000);
+    }
+    /**
+     * De AudioContext KLAARZETTEN OP DE KLIK, niet pas bij Establishing.
+     *
+     * Hier zat de stilte die Maxim hoorde, en NIET in ensureMicPermission()
+     * zoals ik eerst dacht — die staat er wel vóór, maar getUserMedia is bij
+     * een al verleende toestemming een kwestie van tienden.
+     *
+     * Het echte mechanisme: ringback.start() liep in de stateChange-callback,
+     * dus als async vervolg van inviter.invite() en niet in de taak van de
+     * klik. Een AudioContext die buiten een gebruikersgebaar wordt aangemaakt
+     * start 'suspended', en resume() daarbuiten mag door de browser worden
+     * uitgesteld. Gevolg: geen toon, tot er iets anders geluid maakte — de
+     * voicemail of iemand die opnam. Precies wat hij beschreef.
+     *
+     * ensureCtx() awaitte bovendien de resume-promise niet; osc.start() liep
+     * dan tegen een context waarvan currentTime nog stilstond.
+     */
+    function primen() {
+      const c = ensureCtx();
+      if (c && c.state === 'suspended') {
+        // Wél afwachten. Dit draait in de klik, dus hier mág het.
+        try { return c.resume(); } catch (_) { /* autoplay policy */ }
+      }
+      return Promise.resolve();
     }
     function start() {
       if (playing) return;
@@ -167,7 +208,7 @@
         gain = null;
       }
     }
-    return { start, stop };
+    return { primen, start, stop };
   })();
 
   // NL/BE line-detectie op basis van nummer (E.164). +32 = BE, alles anders = NL.
@@ -633,7 +674,25 @@
           state.session = null;
           renderSheet();
           // #call-log-B: log de call. outcome_hint uit Established-vlag.
-          const outcomeHint = state.callLogEstablished ? 'answered' : 'no_answer';
+          // WAT ER FEITELIJK GEBEURDE, uit de staat van het moment.
+        //
+        // 'no_answer' is een uitspraak over de LEAD — hij nam niet op. Braken
+        // wíj af voordat er werd opgenomen, dan is dat een uitspraak over ons,
+        // en die hoort niet als 'niet opgenomen' in de cijfers te belanden:
+        // zulke rijen telden mee in de pogingenteller, in het dagdoel en in de
+        // archiveerregel.
+        //
+        // GEEN DREMPEL OP DUUR. Bij drie van de negen korte calls in de
+        // historie volgt binnen minuten een echt gesprek; een grens op
+        // seconden zou dat herbelgedrag afpakken. Het onderscheid komt uit de
+        // SIP-staat, niet uit een getal achteraf.
+        const uitkomst = bepaalUitkomst({
+          inviteVerstuurd: state.inviteVerstuurd === true,
+          opgenomen      : state.callLogEstablished === true,
+          doorOns        : state.opgehangenDoorOns === true,
+        });
+        if (!uitkomst.logboek) return;     // niets gebeurd, niets te loggen
+        const outcomeHint = uitkomst.outcome;
           _postCallLog(new Date().toISOString(), outcomeHint);
         }
       });
@@ -680,7 +739,38 @@
       // dit slaagt (of user grant al gaf), gaat de INVITE direct daarna de
       // deur uit. Faalt dit → catch onderscheidt mic vs Voys via
       // describeCallError().
+      // ── DE ARMEERPERIODE ─────────────────────────────────────────────
+      // Maxim: 'als ik op bel druk en meteen neerleg, krijgt de persoon toch
+      // de telefoon te horen'. Binnen dit venster gaat er GEEN invite de deur
+      // uit, dus rinkelt er niets aan de andere kant.
+      //
+      // WEES EERLIJK OVER DE GRENS: zodra de INVITE weg is helpt een CANCEL
+      // daar niet meer tegen — het toestel rinkelt en de tegenpartij ziet een
+      // gemiste oproep. Dat is SIP, geen keuze van ons. Daarom is dit venster
+      // de echte oplossing en niet een hulpmiddel.
+      //
+      // De beltoon wordt hier al geprimed: een AudioContext die in de klik
+      // wordt aangemaakt mag geluid maken, eentje die later in een callback
+      // ontstaat niet. Zie de kop van ringback.
+      try { await ringback.primen(); } catch (_) { /* geluid is nooit blokkerend */ }
+      state.armeren = { bezig: true, afgebroken: false, sinds: Date.now() };
+      updateCallbarStatus('Verbinden…', displayName ? `${displayName} — ${effPhone}` : effPhone);
+      renderSheet();
+      await new Promise((r) => setTimeout(r, ARMEER_MS));
+      if (state.armeren?.afgebroken) {
+        // Nooit verstuurd. Geen call_log-rij, geen belpoging, en zeker geen
+        // uitspraak over de lead.
+        state.armeren = null;
+        state.callLogDraft = null;
+        state.session = null;
+        updateCallbarStatus('Afgebroken', 'er is niet gebeld');
+        renderSheet();
+        return { ok: false, afgebroken_voor_invite: true };
+      }
+      state.armeren = null;
+
       await ensureMicPermission();
+      state.inviteVerstuurd = true;
       await inviter.invite();
       return { ok: true, line };
     } catch (e) {
