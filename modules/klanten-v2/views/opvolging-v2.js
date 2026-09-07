@@ -4222,19 +4222,34 @@
     const lijst = d.zoomcalls || [];
     let h = '<div class="card rap-sectie"><h3>4 &middot; De zoomcalls en hun uitkomst</h3>';
     if (!lijst.length) return h + '<div class="empty">Geen zoomcalls in deze periode.</div></div>';
-    const metUitkomst = lijst.filter((c) => c.vastgelegd);
+    // Een call die nog moet plaatsvinden telt niet als 'zonder uitkomst'. Zo
+    // stond er om acht uur 's ochtends zeven keer een verwijt over werk dat nog
+    // niet gedaan hoefde te zijn.
+    const teBeoordelen = lijst.filter((c) => c.staat === 'te_beoordelen');
+    const gepland      = lijst.filter((c) => c.staat === 'gepland');
+    const verzet       = lijst.filter((c) => c.staat === 'verplaatst');
+    const metUitkomst  = teBeoordelen.filter((c) => c.vastgelegd);
     h += '<div class="kpi">' +
       rapCel(lijst.length, 'zoomcalls') +
       rapCel(metUitkomst.length, 'met uitkomst') +
-      rapCel(lijst.length - metUitkomst.length, 'zonder uitkomst') + '</div>';
+      rapCel(teBeoordelen.length - metUitkomst.length, 'zonder uitkomst') +
+      rapCel(gepland.length, 'nog gepland') + '</div>';
+    if (verzet.length) {
+      h += '<div class="ronde zacht">' + verzet.length + ' afspraak' + (verzet.length === 1 ? '' : 'en') +
+        ' hieronder is verzet; de nieuwe staat er apart bij. Die worden niet beoordeeld.</div>';
+    }
     h += '<div class="rap-lijst">' + lijst.map((c) =>
       '<div class="rap-regel' + (c.vastgelegd ? '' : ' grijs') + '">' +
       '<div class="t">' + esc(c.naam || 'Naamloos') + ' <span class="u">' + esc(nl(c.dag)) +
-      ' &middot; ' + esc(c.tijd || '') + '</span></div>' +
+      ' &middot; ' + esc(c.tijd || '') +
+      (c.staat === 'gepland' ? ' &middot; <span class="tag t-grey">gepland</span>' : '') +
+      (c.staat === 'verplaatst' ? ' &middot; <span class="tag t-grey">verzet</span>' : '') +
+      '</span></div>' +
       '<div class="u">' + (c.vastgelegd
         ? 'Uitkomst: <b>' + esc(String(c.uitkomst).replaceAll('_', ' ')) + '</b>'
         // NIET 'Dave vulde niets in'. Dat het ontbreekt kan ook aan het systeem
         // liggen, en dat verschil is precies wat op 6 september gerepareerd is.
+        // En een call die nog moet komen krijgt hier zijn eigen zin, geen klacht.
         : '<i>' + esc(c.reden_leeg || 'Geen uitkomst vastgelegd.') + '</i>') + '</div>' +
       (c.notitie ? '<div class="u notitie">' + esc(c.notitie) + '</div>' : '') +
       '</div>').join('') + '</div>';

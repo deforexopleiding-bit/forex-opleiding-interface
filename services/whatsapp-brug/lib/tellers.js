@@ -40,7 +40,19 @@ export const REDENEN = ['niet_van_ons', 'niet_op_leadlijst', 'groep', 'geen_ack_
   'systeemtype'];
 
 /** Hoe de identiteit van de tegenpartij eruitzag toen we hem lieten vallen. */
-export const OPLOS_WEGEN = ['jid', 'lidkaart', 'contact', 'contact_zonder_nummer', 'mislukt', 'geen_jid'];
+export const OPLOS_WEGEN = ['jid', 'lidkaart', 'lidkaart_basis', 'contact',
+  'contact_zonder_nummer', 'mislukt', 'geen_jid',
+  //   onbruikbaar — er KWAM een antwoord, maar het was geen telefoonnummer.
+  //                 Meestal het LID zelf, teruggegeven op de vraag wie dat LID
+  //                 is. Dat stond eerder als opgelost.contact geboekt: de teller
+  //                 zei succes terwijl er niets vertaald was, en daar zijn we
+  //                 twee ronden op stukgelopen. Een fout antwoord hoort een
+  //                 eigen naam te hebben.
+  'onbruikbaar',
+  //   lidkaart_basis — de kaart raakte pas na het afsnijden van het
+  //                 apparaat-achtervoegsel. Apart geteld, want dit getal IS de
+  //                 meting: blijft hij nul, dan was dat vermoeden onjuist.
+];
 
 /**
  * De VORM van een jid, zonder de jid zelf.
@@ -82,6 +94,15 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
   // vijftien is opnieuw een LID. Dat onderscheid is het verschil tussen 'de
   // oplossing werkte' en 'de teller zei succes terwijl er niets vertaald is'.
   const opgelostVorm = {};
+  // WAAROM DEZE VIER ERBIJ ZIJN. De kaart had 29 koppelingen en miste toch 67
+  // van de 71 opzoekingen. Dat kan maar één ding betekenen: we schrijven weg
+  // onder een sleutel waarmee niemand zoekt. Deze tellers leggen de twee kanten
+  // van dezelfde kaart naast elkaar — alleen domein, lengte en een ja/nee over
+  // het apparaat-achtervoegsel. Nooit een LID, nooit een nummer.
+  const sleutelOpslag = {};   // vorm -> aantal, bij het VULLEN van de kaart
+  const sleutelZoek   = {};   // vorm -> aantal, bij het BEVRAGEN van de kaart
+  const sleutelRaak   = {};   // vorm -> aantal, alleen de treffers
+  const onbruikbaarReden = {};
   // Welk systeemtype er geweigerd is, en hoe vaak. Alleen het type — dat is een
   // vast woord uit het WhatsApp-protocol, geen gegeven van iemand. Dit is de
   // meting waarmee we zien of de weigerlijst aangevuld moet worden: staat er een
@@ -123,6 +144,37 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
       const lengte = String(nummer == null ? '' : nummer).replace(/\D/g, '').length;
       const sleutel = weg + '/' + lengte;
       opgelostVorm[sleutel] = (opgelostVorm[sleutel] || 0) + 1;
+    },
+
+    /**
+     * De vorm waaronder we een koppeling WEGSCHRIJVEN.
+     *
+     * `vorm` komt uit sleutelVorm() en is dus al ontdaan van alles wat iemand
+     * kan aanwijzen: een domein, een lengte en of er een apparaat-achtervoegsel
+     * aan zat.
+     */
+    sleutelOpslag(vorm) {
+      if (!vorm) return;
+      sleutelOpslag[vorm] = (sleutelOpslag[vorm] || 0) + 1;
+    },
+
+    /**
+     * De vorm waarmee we de kaart BEVRAGEN, en of het raak was.
+     *
+     * Naast elkaar gezet vertellen deze twee in één blik of de twee kanten van
+     * de kaart dezelfde soort sleutel gebruiken. Staat er bij opslag 'lid/13'
+     * en bij zoeken 'lid/13+apparaat', dan is dat het hele verhaal.
+     */
+    sleutelZoek(vorm, raak) {
+      if (!vorm) return;
+      sleutelZoek[vorm] = (sleutelZoek[vorm] || 0) + 1;
+      if (raak) sleutelRaak[vorm] = (sleutelRaak[vorm] || 0) + 1;
+    },
+
+    /** Waarom een antwoord onbruikbaar was. Vaste woorden uit beoordeelKandidaat. */
+    onbruikbaar(reden) {
+      const r = String(reden || 'onbekend');
+      onbruikbaarReden[r] = (onbruikbaarReden[r] || 0) + 1;
     },
 
     /** Hij ging door naar het CRM. */
@@ -177,6 +229,13 @@ export function maakTellers({ nu = () => new Date().toISOString() } = {}) {
         vormen     : { ...vormen },
         opgelost   : { ...opgelost },
         opgelost_vorm: { ...opgelostVorm },
+        // De twee kanten van de lidkaart naast elkaar. Lopen sleutel_opslag en
+        // sleutel_zoek qua vorm uiteen, dan schrijven we weg onder een sleutel
+        // waar niemand naar vraagt — en dan mist de kaart zonder foutmelding.
+        sleutel_opslag: { ...sleutelOpslag },
+        sleutel_zoek  : { ...sleutelZoek },
+        sleutel_raak  : { ...sleutelRaak },
+        onbruikbaar_reden: { ...onbruikbaarReden },
         systeem_types: { ...systeemTypes },
         laatste_genegeerd: laatsteGenegeerd ? { ...laatsteGenegeerd } : null,
       };

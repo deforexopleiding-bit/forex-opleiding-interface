@@ -18,6 +18,8 @@
 // De kaart leeft alleen in geheugen. Na een herstart is hij leeg en bouwt hij
 // zich opnieuw op bij de eerstvolgende leadlijst-ronde.
 
+import { deelSleutel, sleutelVorm } from './sleutel.js';
+
 /**
  * Twee richtingen van dezelfde koppeling.
  *
@@ -38,7 +40,39 @@ export function maakLidkaart() {
   let laatsteFout = null;
 
   return {
-    /** Het nummer achter een LID, of null als we die koppeling niet kennen. */
+    /**
+     * Het nummer achter een LID, of null als we die koppeling niet kennen.
+     *
+     * TWEE INGANGEN, EN DAT IS DE HELE REPARATIE.
+     *
+     * Een binnenkomende jid kan een apparaat-achtervoegsel dragen
+     * (`<lid>:<apparaat>@lid`). De brug plukte daar de cijfers uit met
+     * replace(/\D/g,''), en dat LAST dat achtervoegsel vast aan het LID:
+     * dertien cijfers worden er veertien. De kaart staat op de kale LID, dus
+     * die opzoeking mist — zonder foutmelding, want een Map die niets vindt
+     * klaagt niet.
+     *
+     * We proberen daarom eerst de volledige cijferreeks (zoals het altijd
+     * ging), en pas daarna de kale basis. Welke van de twee raak was, komt
+     * apart terug: `via` is 'vol' of 'basis'. Die twee blijven gescheiden in de
+     * tellers, want het aantal basis-treffers IS de meting die het vermoeden
+     * bevestigt of onderuithaalt.
+     */
+    zoekNummer(jidOfLid) {
+      const deel = deelSleutel(jidOfLid);
+      const vorm = sleutelVorm(jidOfLid);
+      if (deel.vol) {
+        const raak = lidNaarNummer.get(deel.vol);
+        if (raak) return { nummer: raak, via: 'vol', vorm };
+      }
+      if (deel.basis && deel.basis !== deel.vol) {
+        const raak = lidNaarNummer.get(deel.basis);
+        if (raak) return { nummer: raak, via: 'basis', vorm };
+      }
+      return { nummer: null, via: null, vorm };
+    },
+
+    /** De oude ingang, ongewijzigd van gedrag. */
     nummerVoorLid(lid) {
       if (!lid) return null;
       return lidNaarNummer.get(String(lid)) || null;
@@ -67,7 +101,7 @@ export function maakLidkaart() {
      * staan — een storing hoort geen leads te laten wegvallen, dezelfde regel
      * als bij de leadlijst zelf.
      */
-    async bouw(nummers, zoekLid) {
+    async bouw(nummers, zoekLid, meldVorm) {
       const lijst = Array.isArray(nummers) ? nummers : [];
       if (typeof zoekLid !== 'function') return { gevonden: 0, bekeken: 0, fouten: 0 };
 
@@ -82,10 +116,18 @@ export function maakLidkaart() {
           const lid = await zoekLid(nummer);
           if (!lid) continue;
           const volledig = String(lid);
-          const cijfers = volledig.split('@')[0].replace(/\D/g, '');
+          const deel = deelSleutel(volledig);
+          const cijfers = deel.vol;
           if (!cijfers) continue;
           nieuwNaarLid.set(String(nummer), cijfers);
+          // ONDER BEIDE VORMEN WEGSCHRIJVEN. Draagt wat WhatsApp hier teruggaf
+          // een apparaat-achtervoegsel en de binnenkomende jid niet, of
+          // andersom, dan vindt de opzoeking hem nu hoe dan ook. Twee sleutels
+          // die naar dezelfde lead wijzen kost niets; een gemiste lead kost een
+          // dag WhatsApp.
           nieuwNaarNummer.set(cijfers, String(nummer));
+          if (deel.basis && deel.basis !== cijfers) nieuwNaarNummer.set(deel.basis, String(nummer));
+          if (typeof meldVorm === 'function') meldVorm(sleutelVorm(volledig));
           // Alleen bewaren als er echt een domein bij zat; anders zouden we
           // straks alsnog zelf iets moeten verzinnen.
           if (volledig.includes('@')) nieuwNaarJid.set(String(nummer), volledig);
@@ -113,6 +155,9 @@ export function maakLidkaart() {
     status() {
       return {
         koppelingen   : nummerNaarLid.size,
+        // Meer ingangen dan koppelingen betekent dat er LID's met een
+        // apparaat-achtervoegsel bij zitten; dan staan beide vormen erin.
+        ingangen      : lidNaarNummer.size,
         met_volledige_jid: nummerNaarJid.size,
         laatste_opbouw: laatsteOpbouw,
         laatste_fout  : laatsteFout,

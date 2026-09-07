@@ -129,6 +129,58 @@ Vandaar de status `onbruikbare_invoer` en de losse parameter `invoerOk` in
 `lib/uitkomst.js`. Wie een nieuwe meting toevoegt: houd 'kan de bibliotheek dit'
 en 'hebben wij bruikbare invoer' altijd uit elkaar.
 
+## 7 september — het LID-achtervoegsel, en waar je naar kijkt na deze update
+
+Op maandagochtend kwam er geen enkel WhatsApp-bericht meer binnen. De brug zag
+92 gebeurtenissen en liet er één door; de reden stond overal op
+`niet_op_leadlijst`. Die reden klopte, en dat was juist het verraderlijke: het
+nummer dat gefilterd werd wás geen nummer maar het LID.
+
+Twee dingen versterkten elkaar:
+
+1. `getContactById` geeft bij een LID het LID terug. Dat werd geteld als
+   `opgelost.contact` — succes — terwijl er niets vertaald was.
+2. De lidkaart had 29 koppelingen en miste toch 67 van de 71 opzoekingen.
+
+Wat er veranderd is:
+
+- **Een fout antwoord heet nu `onbruikbaar`.** `beoordeelKandidaat()` in
+  `lib/sleutel.js` weigert een antwoord dat gelijk is aan de vraag (dat is geen
+  vertaling maar dezelfde identiteit opnieuw) en alles wat geen
+  telefoonnummervorm kan hebben. De reden staat in `onbruikbaar_reden`.
+- **De kaart bewaart een LID onder twee vormen**, met en zonder
+  apparaat-achtervoegsel (`<lid>:<apparaat>@lid`). Vermoeden: `replace(/\D/g,'')`
+  laste dat achtervoegsel vast aan het LID, waardoor dertien cijfers er veertien
+  werden — precies de vormen `lid/14` en `lid/15` die binnenkwamen.
+- **`getNumberId` heeft een cache.** Er stonden 6919 aanroepen voor 32
+  leadnummers op één dag, omdat de kaart elke vijf minuten alles opnieuw vroeg.
+  Alleen een écht antwoord gaat de cache in; een mislukking niet.
+
+### Waar je na deze update naar kijkt in `/status`
+
+| veld | wat het betekent |
+| --- | --- |
+| `opgelost.lidkaart_basis` | **Dit is de meting.** Hoe vaak de kaart pas raakte ná het afsnijden van het achtervoegsel. Loopt dit op, dan was het vermoeden juist. Blijft het op nul terwijl `lidkaart` ook laag blijft, dan is er iets anders aan de hand en is er niets stilletjes 'gerepareerd'. |
+| `sleutel_opslag` vs `sleutel_zoek` | De twee kanten van de kaart naast elkaar. Staat er bij opslag `lid/13` en bij zoeken `lid/13+apparaat`, dan is dat het hele verhaal. |
+| `sleutel_raak` | Per zoekvorm hoeveel er raak waren. `sleutel_zoek` min `sleutel_raak` is wat de kaart nog steeds mist. |
+| `opgelost.onbruikbaar` + `onbruikbaar_reden` | Hoe vaak WhatsApp iets teruggaf dat geen nummer was, en waarom we dat vonden. Dit stond eerder als `contact`-succes geboekt. |
+| `lidkaart.ingangen` vs `.koppelingen` | Meer ingangen dan koppelingen betekent dat er LID's met een achtervoegsel bij zitten. |
+| `wegen.getNumberId.geprobeerd` | Hoort nu veel lager te liggen dan de 6919 van 7 september: de cache vraagt hetzelfde nummer niet elke ronde opnieuw. |
+
+Deze velden dragen geen enkel gegeven: een domein, een lengte en een ja/nee.
+Nooit een LID en nooit een nummer — `tests/whatsapp-lid-sleutel.test.js`
+controleert dat op de volledige momentopname.
+
+### Bijwerken op de VPS
+
+Geen `npm install` nodig; er is geen afhankelijkheid bij gekomen.
+
+```bash
+cd ~/whatsapp-brug && git pull && sudo systemctl restart whatsapp-brug
+```
+
+Daarna `/status` opvragen en de tabel hierboven aflopen.
+
 ## Wat de brug doet
 
 De schakel tussen Daves WhatsApp en de opvolgmodule in het CRM. Ze meldt wanneer

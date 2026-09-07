@@ -457,3 +457,160 @@ test('een afgekapte takenlijst wordt gemeld en niet stil geslikt', () => {
   const blok = BRON.slice(i, i + 700);
   assert.match(blok, /blindeVlekken\.push/);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EEN CALL DIE NOG MOET PLAATSVINDEN IS GEEN GEMISTE UITKOMST
+// ═══════════════════════════════════════════════════════════════════════════
+// Op 7 september stonden er om acht uur 's ochtends zeven verwijten in de
+// aandachtlijst over calls van later die dag. Een rapport dat werk afkeurt dat
+// nog niet gedaan hoefde te zijn, verspeelt zijn geloofwaardigheid bij het
+// eerste gesprek.
+
+import { callStaat, groepeerDubbele } from '../api/opvolging-rapport.js';
+
+const OCHTEND = Date.parse('2026-09-07T06:00:00Z');   // 08:00 in Amsterdam
+
+test('een call van vanavond staat als gepland, niet als gemist', () => {
+  const a = { scheduled_at: '2026-09-07T18:30:00Z', duration_minutes: 30 };
+  assert.equal(callStaat(a, OCHTEND), 'gepland');
+});
+
+test('een call van 20:30 is om 20:35 nog niet te beoordelen', () => {
+  const a = { scheduled_at: '2026-09-07T18:30:00Z', duration_minutes: 30 };
+  assert.equal(callStaat(a, Date.parse('2026-09-07T18:35:00Z')), 'gepland');
+});
+
+test('na de duur plus speling mag hij wel beoordeeld worden', () => {
+  const a = { scheduled_at: '2026-09-07T18:30:00Z', duration_minutes: 30 };
+  // 30 minuten duur + 15 speling = 19:15 UTC.
+  assert.equal(callStaat(a, Date.parse('2026-09-07T19:14:00Z')), 'gepland');
+  assert.equal(callStaat(a, Date.parse('2026-09-07T19:16:00Z')), 'te_beoordelen');
+});
+
+test('een langere call krijgt ook langer de tijd', () => {
+  const a = { scheduled_at: '2026-09-07T18:30:00Z', duration_minutes: 60 };
+  assert.equal(callStaat(a, Date.parse('2026-09-07T19:16:00Z')), 'gepland');
+});
+
+test('een verzette rij wordt nooit beoordeeld', () => {
+  // follow-up-verplaats-call zet de oude rij op 'verplaatst' en maakt een
+  // nieuwe. Die oude hoort geen uitkomst te krijgen.
+  const a = { scheduled_at: '2026-09-01T08:00:00Z', status: 'verplaatst' };
+  assert.equal(callStaat(a, OCHTEND), 'verplaatst');
+});
+
+test('een call van gisteren is gewoon te beoordelen', () => {
+  const a = { scheduled_at: '2026-09-06T10:00:00Z', duration_minutes: 30 };
+  assert.equal(callStaat(a, OCHTEND), 'te_beoordelen');
+});
+
+test('geplande calls komen niet in de aandachtlijst', () => {
+  const zoomcalls = bouwZoomcalls({
+    afspraken: [
+      { id: 'a1', lead_name: 'Mehmet', scheduled_at: '2026-09-07T18:30:00Z', duration_minutes: 30 },
+      { id: 'a2', lead_name: 'Sander', scheduled_at: '2026-09-07T19:00:00Z', duration_minutes: 30 },
+    ],
+    uitkomstKolommen: true, nuMs: OCHTEND,
+  });
+  assert.deepEqual(zoomcalls.map((c) => c.staat), ['gepland', 'gepland']);
+  const aandacht = [];
+  vulAandacht({
+    aandacht, blindeVlekken: [],
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] },
+    zoomcalls, archief: [],
+  });
+  assert.equal(aandacht.length, 0, 'werk dat nog niet gedaan hoefde te zijn is geen afwijking');
+});
+
+test('een call die wél voorbij is en geen uitkomst heeft, staat er nog steeds', () => {
+  // Zonder deze test zou 'alles gepland noemen' er groen doorheen komen.
+  const zoomcalls = bouwZoomcalls({
+    afspraken: [{ id: 'a1', lead_name: 'Gisteren', scheduled_at: '2026-09-06T10:00:00Z' }],
+    uitkomstKolommen: true, nuMs: OCHTEND,
+  });
+  const aandacht = [];
+  vulAandacht({
+    aandacht, blindeVlekken: [],
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] },
+    zoomcalls, archief: [],
+  });
+  assert.equal(aandacht.length, 1);
+  assert.equal(aandacht[0].soort, 'geen_uitkomst');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TWEE IDENTIEKE VERWIJTEN IS GEEN BEVINDING MAAR EEN TELFOUT
+// ═══════════════════════════════════════════════════════════════════════════
+
+const dubbelAfspraken = [
+  { id: 'a1', lead_name: 'Yasmine Aouada', lead_email: 'y@x.nl', scheduled_at: '2026-09-06T09:00:00Z' },
+  { id: 'a2', lead_name: 'Yasmine Aouada', lead_email: 'y@x.nl', scheduled_at: '2026-09-06T14:00:00Z' },
+];
+
+test('twee afspraken voor dezelfde persoon op dezelfde dag worden één regel', () => {
+  const zoomcalls = bouwZoomcalls({ afspraken: dubbelAfspraken, uitkomstKolommen: true, nuMs: OCHTEND });
+  const aandacht = [];
+  vulAandacht({
+    aandacht, blindeVlekken: [],
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] },
+    zoomcalls, archief: [],
+  });
+  assert.equal(aandacht.length, 1, 'niet twee identieke verwijten naast elkaar');
+  assert.equal(aandacht[0].soort, 'dubbele_afspraak');
+  assert.match(aandacht[0].tekst, /2 afspraken voor Yasmine Aouada/);
+});
+
+test('de dubbeling is zelf het aandachtspunt, met beide tijden erbij', () => {
+  const zoomcalls = bouwZoomcalls({ afspraken: dubbelAfspraken, uitkomstKolommen: true, nuMs: OCHTEND });
+  const [d] = groepeerDubbele(zoomcalls);
+  assert.equal(d.tijden.length, 2);
+  assert.deepEqual(d.appointment_ids, ['a1', 'a2']);
+  assert.equal(d.verzet_ernaast, 0);
+});
+
+test('een verzetting is geen dubbele boeking', () => {
+  const zoomcalls = bouwZoomcalls({
+    afspraken: [
+      { ...dubbelAfspraken[0], status: 'verplaatst' },
+      dubbelAfspraken[1],
+    ],
+    uitkomstKolommen: true, nuMs: OCHTEND,
+  });
+  assert.equal(groepeerDubbele(zoomcalls).length, 0);
+});
+
+test('koppelen gaat op e-mail, niet alleen op naam', () => {
+  const zoomcalls = bouwZoomcalls({
+    afspraken: [
+      { id: 'a1', lead_name: 'Jan Jansen', lead_email: 'jan1@x.nl', scheduled_at: '2026-09-06T09:00:00Z' },
+      { id: 'a2', lead_name: 'Jan Jansen', lead_email: 'jan2@x.nl', scheduled_at: '2026-09-06T14:00:00Z' },
+    ],
+    uitkomstKolommen: true, nuMs: OCHTEND,
+  });
+  assert.equal(groepeerDubbele(zoomcalls).length, 0, 'twee verschillende mensen met dezelfde naam');
+});
+
+test('zonder e-mail koppelt hij op de laatste negen cijfers van het nummer', () => {
+  const zoomcalls = bouwZoomcalls({
+    afspraken: [
+      { id: 'a1', lead_name: 'Jan', lead_phone: '+32470111222', scheduled_at: '2026-09-06T09:00:00Z' },
+      { id: 'a2', lead_name: 'Jan', lead_phone: '0470 11 12 22', scheduled_at: '2026-09-06T14:00:00Z' },
+    ],
+    uitkomstKolommen: true, nuMs: OCHTEND,
+  });
+  assert.equal(groepeerDubbele(zoomcalls).length, 1);
+});
+
+test('twee afspraken op VERSCHILLENDE dagen zijn geen dubbeling', () => {
+  const zoomcalls = bouwZoomcalls({
+    afspraken: [
+      { id: 'a1', lead_name: 'Jan', lead_email: 'j@x.nl', scheduled_at: '2026-09-05T09:00:00Z' },
+      { id: 'a2', lead_name: 'Jan', lead_email: 'j@x.nl', scheduled_at: '2026-09-06T09:00:00Z' },
+    ],
+    uitkomstKolommen: true, nuMs: OCHTEND,
+  });
+  assert.equal(groepeerDubbele(zoomcalls).length, 0);
+});

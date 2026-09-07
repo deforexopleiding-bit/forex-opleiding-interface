@@ -18,6 +18,7 @@ import { normaliseerNummer, naarChatId } from './nummers.js';
 import { bouwUitgaandeGebeurtenis, bouwAckGebeurtenis, bouwHistoriekBericht, isGroep, isEchtGesprek } from './gebeurtenis.js';
 import { maakTellers, jidVorm } from './tellers.js';
 import { maakLidkaart } from './lidkaart.js';
+import { deelSleutel, sleutelVorm, beoordeelKandidaat } from './sleutel.js';
 import { maakLandcodeZoeker, isLokaalGenoteerd, NIET_MEETBAAR } from './landcode.js';
 import { berichtIdVan, berichtIdVorm } from './berichtid.js';
 import { probeer, leegPerStatus, GELUKT, ONBRUIKBAAR, BESTAAT_NIET, FOUT } from './uitkomst.js';
@@ -316,8 +317,28 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     return r.status === 'gevonden' ? r.nummer : null;
   }
 
+  // ── Wat we al weten, vragen we niet opnieuw ──────────────────────────────
+  //
+  // De kaart wordt elke vijf minuten opnieuw opgebouwd en vroeg dan alle 32
+  // leadnummers opnieuw op: 6919 aanroepen van getNumberId op één dag voor 32
+  // nummers. Dat is geen oorzaak van het LID-probleem, maar het is wel duizenden
+  // vragen per dag aan WhatsApp over dezelfde nummers — en dat is precies het
+  // gedrag waar een gekoppeld apparaat op een dag voor afgeknepen wordt.
+  //
+  // Dezelfde regel als bij de landcode-zoeker: ALLEEN EEN ECHT ANTWOORD
+  // ONTHOUDEN. Een mislukking of een leeg resultaat gaat de cache NIET in — dan
+  // zou één slecht moment een lead voorgoed onvindbaar maken, en dat is de fout
+  // die we bij de landcode al eens gemaakt hebben.
+  //
+  // De cache leeft in geheugen en is dus leeg na een herstart. Een LID verandert
+  // niet, dus er is geen vervaltijd nodig; wél een bovengrens, zodat een
+  // groeiende leadlijst dit niet ongemerkt laat oplopen.
+  const LID_CACHE_MAX = 2000;
+  const lidCache = new Map();
+
   async function lidViaNumberId(nummer) {
     const chatId = naarChatId(nummer);
+    if (chatId && lidCache.has(chatId)) return lidCache.get(chatId);
     const res = await probeer({
       bestaat : kunde.api.getNumberId,
       invoerOk: !!chatId,
@@ -325,12 +346,16 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       bruikbaar: (v) => deelWid(v).server === 'lid',
     });
     noteer('getNumberId', res);
+    // Niet onthouden: geen resultaat en een fout zijn allebei tijdelijk-mogelijk.
     if (res.status !== GELUKT) return null;
     // De volledige serialisatie teruggeven, niet alleen de cijfers: die id
     // gebruiken we straks om de chat op te zoeken, en zelf iets heropbouwen is
     // precies waar het ophalen op stukliep.
     const w = res.waarde;
-    return w?._serialized || (deelWid(w).user ? deelWid(w).user + '@' + deelWid(w).server : null);
+    const uit = w?._serialized || (deelWid(w).user ? deelWid(w).user + '@' + deelWid(w).server : null);
+    // Alleen een echt antwoord de cache in.
+    if (uit && chatId && lidCache.size < LID_CACHE_MAX) lidCache.set(chatId, uit);
+    return uit;
   }
 
   /**
@@ -634,7 +659,8 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
 
       if (uit.paren.length > 0) {
         const kaart = new Map(uit.paren);
-        await lidkaart.bouw(nummers, async (n) => kaart.get(n) || null);
+        await lidkaart.bouw(nummers, async (n) => kaart.get(n) || null,
+          (vorm) => tellers.sleutelOpslag(vorm));
         // Welke weg het deed staat in de tellers; hier alleen dát er een was.
         kaartBron = Object.keys(wegen).filter((w) => wegen[w].gelukt > 0).join(' + ') || 'onbekend';
       } else {
@@ -685,30 +711,58 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     // mogen kennen, kost geen oproep per bericht, en is de enige weg die een
     // LID écht naar een telefoonnummer vertaalt — WhatsApp biedt alleen de
     // richting nummer → LID, niet omgekeerd.
-    const cijfers = String(jid).split('@')[0].replace(/\D/g, '');
-    const viaKaart = lidkaart.nummerVoorLid(cijfers);
-    if (viaKaart) {
-      onthoud(viaKaart, jid);
-      tellers.oplossing('lidkaart', viaKaart);
-      return viaKaart;
+    //
+    // zoekNummer probeert twee ingangen: de volledige cijferreeks, en daarna de
+    // kale LID zonder apparaat-achtervoegsel. Welke van de twee raak was, wordt
+    // apart geteld — dat aantal is de meting waarmee we zien of dat
+    // achtervoegsel inderdaad de oorzaak was.
+    const uitKaart = lidkaart.zoekNummer(jid);
+    tellers.sleutelZoek(uitKaart.vorm, !!uitKaart.nummer);
+    if (uitKaart.nummer) {
+      onthoud(uitKaart.nummer, jid);
+      tellers.oplossing(uitKaart.via === 'basis' ? 'lidkaart_basis' : 'lidkaart', uitKaart.nummer);
+      return uitKaart.nummer;
     }
 
-    // Terugval: vragen wie dit is. Die weg gaf bij een LID het LID terug in
-    // plaats van een nummer — de teller opgelost_vorm laat dat zien — maar hij
-    // blijft staan voor identiteiten die géén LID zijn en die we hier nog niet
-    // kennen.
+    // Terugval: vragen wie dit is.
+    //
+    // DEZE WEG GEEFT BIJ EEN LID HET LID TERUG. Dat werd geboekt als
+    // opgelost.contact — succes dus — waarna leadlijst.mag() het terecht
+    // weigerde met 'niet_op_leadlijst'. Zo viel op 7 september al het
+    // WhatsApp-verkeer weg met een reden die klopte terwijl de oorzaak ergens
+    // anders zat. Een fout antwoord telt vanaf nu als 'onbruikbaar', en wordt
+    // ook niet meer teruggegeven.
     try {
       const contact = await client.getContactById(jid);
       const kandidaat = contact?.number || contact?.id?.user || null;
-      const n = normaliseerNummer(kandidaat);
-      if (n) { onthoud(n, jid); tellers.oplossing('contact', n); return n; }
-      tellers.oplossing('contact_zonder_nummer');
+      const oordeel = beoordeelKandidaat(kandidaat, jid);
+      if (oordeel.ok) {
+        const n = normaliseerNummer(oordeel.nummer);
+        if (n) { onthoud(n, jid); tellers.oplossing('contact', n); return n; }
+        tellers.oplossing('contact_zonder_nummer');
+      } else if (kandidaat) {
+        tellers.oplossing('onbruikbaar');
+        tellers.onbruikbaar(oordeel.reden);
+      } else {
+        tellers.oplossing('contact_zonder_nummer');
+      }
     } catch (e) {
       // Geen tekst, geen jid in het log — alleen dát het niet lukte.
       tellers.oplossing('mislukt');
       if (process.env.BRUG_DEBUG === '1') console.debug('[brug] contact oplossen faalde');
     }
-    return normaliseerNummer(jid);   // terugval op msg.to, zoals het was
+
+    // TERUGVAL, MAAR NIET MET EEN LID. Hier stond `return normaliseerNummer(jid)`,
+    // en dat gaf bij een LID-jid de LID-cijfers door aan het filter — hetzelfde
+    // foute antwoord, alleen langs een andere deur. Is de jid geen
+    // telefoonnummer, dan is het eerlijke antwoord null: we weten niet wie dit
+    // is. De aanroeper filtert dat weg als niet_op_leadlijst, en dat is dan ook
+    // waar: we kunnen deze persoon niet thuisbrengen.
+    const kaal = normaliseerNummer(jid);
+    const oordeelKaal = beoordeelKandidaat(kaal, jid);
+    if (oordeelKaal.ok) return kaal;
+    tellers.onbruikbaar('jid_zelf_' + oordeelKaal.reden);
+    return null;
   }
 
   /** De chat waar dit nummer onder bekend staat, of de gewone @c.us-vorm. */

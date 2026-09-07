@@ -112,8 +112,11 @@ test('de status geeft alleen aantallen prijs', async () => {
   const s = plat(k.status());
   // 'met_volledige_jid' is erbij gekomen: hoeveel koppelingen de jid dragen
   // zoals WhatsApp hem gaf, in plaats van uit cijfers heropgebouwd.
+  // 'ingangen' is er op 7 september bij gekomen: de kaart bewaart een LID nu
+  // onder twee vormen — met en zonder apparaat-achtervoegsel — dus er zijn meer
+  // ingangen dan koppelingen zodra zo'n achtervoegsel voorkomt.
   assert.deepEqual(Object.keys(s).sort(),
-    ['koppelingen', 'laatste_fout', 'laatste_opbouw', 'met_volledige_jid']);
+    ['ingangen', 'koppelingen', 'laatste_fout', 'laatste_opbouw', 'met_volledige_jid']);
   assert.equal(s.koppelingen, 1);
   assert.equal(JSON.stringify(s).includes(NUMMER), false, 'geen nummer in de status');
   assert.equal(JSON.stringify(s).includes(LID), false, 'en geen LID');
@@ -158,7 +161,9 @@ test('bepaalNummer probeert de kaart vóór de contactoplossing', () => {
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async function bepaalNummer');
   const blok = bron.slice(i, i + 2200);
-  const kaart = blok.indexOf('lidkaart.nummerVoorLid(');
+  // zoekNummer sinds 7 september; nummerVoorLid bestaat nog als oude ingang.
+  // Allebei goed — waar het om gaat is dat de kaart vóór het opvragen komt.
+  const kaart = Math.max(blok.indexOf('lidkaart.zoekNummer('), blok.indexOf('lidkaart.nummerVoorLid('));
   const contact = blok.indexOf('client.getContactById(');
   assert.ok(kaart > 0 && contact > 0);
   assert.ok(kaart < contact, 'de kaart eerst, het opvragen als terugval');
