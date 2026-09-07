@@ -48,6 +48,9 @@ import {
   isOverdue,
   readGraceDaysSetting,
   resolveStepTierDays,
+  resolveWorkflowStartDays,
+  readLadderSetting,
+  ladderLabel,
   earliestSendIso,
 } from './dunning-overdue-guard.js';
 
@@ -442,6 +445,32 @@ function aggregatePerCustomer(rows) {
   return per;
 }
 
+/**
+ * Haal de templates op die bij een set workflow-stappen horen.
+ * Returnt Map<template_id, { id, name, meta_template_name }>.
+ *
+ * Nodig om de ladder-sport van een send-stap op te zoeken (de ladder is
+ * gesleuteld op templatenaam). Eén query per workflow/run, fail-soft: zonder
+ * templates vervalt alleen de ladder-check — de harde vervaldatum-poort blijft.
+ */
+async function fetchStepTemplates(steps) {
+  const out = new Map();
+  try {
+    const ids = Array.from(new Set(
+      (steps || []).map((st) => st?.config?.template_id).filter(Boolean)
+    ));
+    if (!ids.length) return out;
+    const { data } = await supabaseAdmin
+      .from('dunning_templates')
+      .select('id, name, meta_template_name')
+      .in('id', ids);
+    for (const t of data || []) out.set(t.id, t);
+  } catch (e) {
+    console.warn('[dunning-engine] ladder-template lookup fail-soft:', e?.message || e);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 1: detect + start
 // ---------------------------------------------------------------------------
@@ -482,6 +511,12 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   // vóór de vervaldag, en met grace N pas vanaf N dagen daarna.
   const graceDays = await readGraceDaysSetting(supabaseAdmin);
   const todayIso  = todayIsoInTz();
+
+  // ── Ladder één keer per engine-run laden ───────────────────────────────
+  // app_settings key 'dunning_ladder': templatenaam → dagen NA de vervaldatum.
+  // Bepaalt zowel vanaf welke dag een workflow mag starten (laagste sport)
+  // als, in de advance-fase, wanneer elke send-stap mag vertrekken.
+  const ladder = await readLadderSetting(supabaseAdmin);
 
   // ── Pipeline-hook: nieuwe wanbetalers → 'nieuw'-fase (batch, geen N+1) ─
   // Eén ronde per engine-run: verzamel alle unieke customer_ids met een
@@ -662,28 +697,27 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     if (elapsed(startedAt) > abortMs) break;
 
     const tc = workflow.trigger_conditions || {};
-    // Backwards-compat: als NIETS gezet is (nieuwe workflows zonder velden) →
-    // fallback default 14 dagen overdue (huidige gedrag). Als er WEL een
-    // min_days_since_invoice_date is gezet zonder min_days_overdue, moet de
-    // overdue-check GEEN default 14 gebruiken (anders zou een dag-7 duwtje
-    // pas dag-21 vuren). We zetten minDays op -1 zodat de overdue-check
-    // effectief altijd slaagt (days_overdue >= 0).
-    const hasOverdueTrigger      = Number.isFinite(tc.min_days_overdue);
-    const hasIssueDateTrigger    = Number.isFinite(tc.min_days_since_invoice_date);
+    // ANKERDATUM = de vervaldatum uit TeamLeader, en niets anders.
+    // `min_days_since_invoice_date` (de oude "N dagen na factuurdatum"-
+    // trigger) wordt NIET meer gelezen: een betaaltermijn zit al in de
+    // vervaldatum verwerkt en is niet bij elke klant 7 dagen (regelingen,
+    // splitsingen, afwijkende termijnen). Zelf dagen bij de factuurdatum
+    // optellen leverde precies de bug op waarbij niet-vervallen facturen
+    // een aanmaning kregen. De key blijft ongemoeid in de DB staan; we
+    // negeren 'm alleen, met een waarschuwing zodat het opvalt.
+    if (Number.isFinite(tc.min_days_since_invoice_date)) {
+      console.warn(
+        `[dunning-engine] workflow ${workflow.id} (${workflow.name}) heeft ` +
+        `min_days_since_invoice_date=${tc.min_days_since_invoice_date} — GENEGEERD: ` +
+        'de vervaldatum is de enige ankerdatum.'
+      );
+    }
     // Fase 2b: arrangement_breached-trigger. Wanneer true → workflow vuurt
     // alleen voor klanten met een payment_arrangement in status VERBROKEN
     // dat nog niet is afgehandeld (breach_handled_at IS NULL). Combineerbaar
     // met andere condities (customer_type / min_total_amount). GEEN default:
     // workflows zonder deze key gedragen zich EXACT als vroeger.
     const arrangementBreached    = tc.arrangement_breached === true;
-    // Bij een arrangement_breached-workflow is de overdue-guard niet
-    // relevant — een breach kán ook op een factuur zijn die net verstreken
-    // is. Zet minDays op -1 tenzij de workflow expliciet een min_days_overdue
-    // heeft geconfigureerd.
-    const minDays                = hasOverdueTrigger
-      ? tc.min_days_overdue
-      : ((hasIssueDateTrigger || arrangementBreached) ? -1 : 14);
-    const minDaysSinceInvoice    = hasIssueDateTrigger ? tc.min_days_since_invoice_date : null;
     const customerType           = tc.customer_type || 'any';
     const minTotal               = Number.isFinite(tc.min_total_amount) ? tc.min_total_amount : 0;
     // Extra guard voor workflows die maar 1x per customer mogen vuren
@@ -749,6 +783,31 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
       continue;
     }
 
+    // ── Startdrempel uit de LADDER afleiden ────────────────────────────────
+    // Zonder expliciete trigger_conditions.min_days_overdue bepaalt de
+    // LAAGSTE ladder-sport onder de eigen send-stappen vanaf welke dag deze
+    // workflow mag starten. Zo vertrekt het eerste bericht op zijn eigen dag
+    // (dag 1 voor `aanmaning_dag7`) in plaats van pas bij de oude default van
+    // 14 — en start de run nooit zó laat dat meerdere sporten tegelijk
+    // openstaan. Staat geen enkele stap op de ladder, dan blijft de
+    // historische default van 14 gelden (1 bij een arrangement_breached-
+    // workflow, want daar is de breach de trigger). Nooit lager dan 1: op en
+    // vóór de vervaldag gaat er niets uit.
+    const stepTemplates = await fetchStepTemplates(steps);
+    const stepTierDays = (steps || [])
+      .filter((st) => isSendStep(st.step_type))
+      .map((st) => resolveStepTierDays(st, stepTemplates.get(st?.config?.template_id) || null, ladder))
+      .filter((n) => Number.isFinite(n));
+    const minDays = resolveWorkflowStartDays({
+      triggerConditions: tc,
+      stepTierDays,
+      fallbackDays: arrangementBreached ? 1 : 14,
+    });
+    console.log(
+      `[dunning-engine] workflow ${workflow.name}: start vanaf dag ${minDays} na vervaldatum ` +
+      `(ladder-sporten: ${stepTierDays.length ? stepTierDays.join(', ') : 'geen'})`
+    );
+
     for (const [customerId, agg] of perCustomer) {
       if (elapsed(startedAt) > abortMs) break outer;
 
@@ -764,24 +823,22 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
       // ── HARDE POORT: de factuur moet ECHT vervallen zijn ───────────────
       // Dit is de fix voor de bug waarbij niet-vervallen facturen automatisch
       // een aanmaning kregen. De poort staat BEWUST vóór alle workflow-
-      // condities: geen enkele trigger (min_days_since_invoice_date,
-      // arrangement_breached, min_total_amount) mag 'm omzeilen. `minDays`
-      // valt bij die triggers namelijk terug op -1, en omdat de oude teller
-      // op 0 geclampt was, slaagde `days_overdue < -1` altijd — óók bij een
-      // vervaldatum in de toekomst.
+      // condities: geen enkele trigger (arrangement_breached, min_total_amount)
+      // mag 'm omzeilen. Vóór deze fix viel `minDays` bij zulke triggers terug
+      // op -1, en omdat de oude teller op 0 geclampt was slaagde
+      // `days_overdue < -1` altijd — óók bij een vervaldatum in de toekomst.
       //
       // Regel: due_date + graceDays < vandaag (Europe/Amsterdam). Op en vóór
-      // de vervaldag gaat er dus niets uit.
+      // de vervaldag gaat er dus niets uit. Met de default grace 0 betekent
+      // dat: pas vanaf days_overdue >= 1.
       if (!isOverdue(agg.oldest_due_iso, todayIso, graceDays)) {
         skippedNotOverdue++;
         continue;
       }
 
-      if (agg.days_overdue < minDays) continue;
-      // Issue-date-trigger: alleen relevant als workflow expliciet
-      // min_days_since_invoice_date heeft (bv. het vriendelijke dag-7-duwtje
-      // dat vóór de vervaldatum vuurt). NULL = geen filter.
-      if (minDaysSinceInvoice != null && agg.days_since_oldest_invoice < minDaysSinceInvoice) continue;
+      // Startdrempel van de workflow, gemeten in ECHTE dagen na de
+      // vervaldatum (ongeclampt; door de poort hierboven altijd >= 1).
+      if ((agg.days_overdue_signed ?? 0) < minDays) continue;
 
       // F5.1 mentor-hook: zodra vaststaat dat de klant te laat is, openstaande
       // bonus-entries (pending) van die klant op 'wachten_op_betaling' zetten.
@@ -1042,6 +1099,9 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
   // send-stap terwijl er niets te manen valt.
   const graceDays = await readGraceDaysSetting(supabaseAdmin);
   const todayIso  = todayIsoInTz();
+  // De ladder bepaalt per send-stap vanaf welke dag NA de vervaldatum hij mag
+  // vertrekken — niet de stap-pointer en niet het getal in de templatenaam.
+  const ladder    = await readLadderSetting(supabaseAdmin);
 
   for (const run of runs || []) {
     if (elapsed(startedAt) > abortMs) break;
@@ -1057,24 +1117,9 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         .order('step_order', { ascending: true });
       if (stepsErr) throw stepsErr;
 
-      // Templatenamen bij de steps zoeken — nodig om de tier (dagNN) van een
-      // send-stap af te leiden. Eén query per run; fail-soft (zonder namen
-      // vervalt alleen de tier-check, de harde vervaldatum-poort blijft).
-      const tplById = new Map();
-      try {
-        const tplIds = Array.from(new Set(
-          (steps || []).map((s) => s?.config?.template_id).filter(Boolean)
-        ));
-        if (tplIds.length) {
-          const { data: tplRows } = await supabaseAdmin
-            .from('dunning_templates')
-            .select('id, name, meta_template_name')
-            .in('id', tplIds);
-          for (const t of tplRows || []) tplById.set(t.id, t);
-        }
-      } catch (e) {
-        console.warn('[dunning-engine] tier-template lookup fail-soft:', run.id, e?.message || e);
-      }
+      // Templatenamen bij de steps zoeken — nodig om de ladder-sport van een
+      // send-stap op te zoeken. Eén query per run.
+      const tplById = await fetchStepTemplates(steps);
 
       // ── BINNENLUS: verwerk opeenvolgende NIET-wait stappen in één keer.
       //    Effect: email + whatsapp van dezelfde ronde gaan samen de deur uit.
@@ -1230,11 +1275,12 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         // ── Vervaldatum- + tier-guard voor SEND-stappen ───────────────────
         // (a) HARDE POORT: oudste openstaande factuur moet echt te laat zijn
         //     (due_date + grace < vandaag, Europe/Amsterdam).
-        // (b) TIER: een 'aanmaning_dagNN'-template hoort pas te vuren bij
-        //     ECHTE days_overdue >= NN. Vóór deze fix bepaalde alleen de
-        //     wait-stap sinds runstart welke tier vuurde — daardoor kon
-        //     'dag14' bij 0 dagen te laat de deur uit ("staat inmiddels 0
-        //     dagen open").
+        // (b) LADDER: elke send-stap heeft een drempel in ECHTE dagen na de
+        //     vervaldatum (app_settings.dunning_ladder). Vóór deze fix
+        //     bepaalde alleen de stap-pointer + wait-stappen wanneer een
+        //     template vertrok — daardoor kon 'aanmaning_dag14' bij 0 dagen
+        //     te laat de deur uit ("staat inmiddels 0 dagen open"). Let op:
+        //     het getal IN de templatenaam is NIET de drempel; de ladder is.
         // In beide gevallen: geen pointer-mutatie, alleen next_action_at
         // vooruit naar de dag waarop het WEL mag. De run blijft dus intact
         // en pakt vanzelf door zodra de datum bereikt is.
@@ -1269,10 +1315,8 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
             break;
           }
 
-          const tierDays = resolveStepTierDays(
-            currentStep,
-            tplById.get(currentStep?.config?.template_id) || null
-          );
+          const stepTpl  = tplById.get(currentStep?.config?.template_id) || null;
+          const tierDays = resolveStepTierDays(currentStep, stepTpl, ladder);
           if (tierDays != null && signed != null && signed < tierDays) {
             const resumeAt = earliestSendIso(dueIso, tierDays)
               || new Date(Date.now() + 86400000).toISOString();
@@ -1286,12 +1330,14 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
               event_type: 'send_postponed_tier_not_reached',
               payload: {
                 step_type:       currentStep.step_type,
+                template_name:   stepTpl?.meta_template_name || stepTpl?.name || null,
+                ladder_label:    ladderLabel(stepTpl?.meta_template_name || stepTpl?.name, ladder),
                 tier_min_days:   tierDays,
                 days_overdue:    signed,
                 oldest_due_date: dueIso,
                 today_amsterdam: todayIso,
                 next_action_at:  resumeAt,
-                reason:          'tier hoort bij een hogere days_overdue',
+                reason:          'ladder-sport nog niet bereikt',
               },
             });
             runAdvanced = true;
@@ -1524,7 +1570,25 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         if (currentStep.step_type === 'wait') {
           const days = Number(currentStep?.config?.days) || 0;
           const nextMs = Date.now() + days * 86400000;
-          update.next_action_at = new Date(nextMs).toISOString();
+          // De LADDER is leidend voor het moment van de volgende send-stap,
+          // niet het aantal wachtdagen: die telt vanaf het vorige bericht en
+          // schuift daardoor mee met elke vertraging (kantooruren, retry,
+          // pauze). Staat de volgende send-stap op de ladder, dan mikken we
+          // op ZIJN dag na de vervaldatum. Ligt die dag al in het verleden →
+          // nu (de ladder-guard hierboven laat 'm dan door). Zonder
+          // ladder-sport blijft het oude wachtdagen-gedrag intact.
+          const nextSendStep = (steps || []).find(
+            (st) => st.step_order > currentStep.step_order && isSendStep(st.step_type)
+          ) || null;
+          const nextTier = nextSendStep
+            ? resolveStepTierDays(nextSendStep, tplById.get(nextSendStep?.config?.template_id) || null, ladder)
+            : null;
+          const ladderIso = (nextTier != null)
+            ? earliestSendIso(agg?.oldest_due_iso || null, nextTier)
+            : null;
+          update.next_action_at = ladderIso
+            ? new Date(Math.max(Date.now(), Date.parse(ladderIso))).toISOString()
+            : new Date(nextMs).toISOString();
           update.current_step_id = nextStep ? nextStep.id : null;
           if (!nextStep) {
             update.status = 'completed';

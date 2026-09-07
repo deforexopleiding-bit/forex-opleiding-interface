@@ -18,13 +18,17 @@ import {
   AMSTERDAM_TZ,
   DEFAULT_GRACE_DAYS,
   MAX_GRACE_DAYS,
+  DEFAULT_LADDER,
+  MAX_LADDER_DAYS,
   todayIsoInTz,
   daysOverdueSigned,
   daysOverdueClamped,
   parseGraceDays,
   isOverdue,
-  tierFromName,
+  parseLadder,
   resolveStepTierDays,
+  resolveWorkflowStartDays,
+  ladderLabel,
   earliestSendIso,
 } from '../api/_lib/dunning-overdue-guard.js';
 
@@ -116,43 +120,240 @@ test('parseGraceDays: default 0 bij onzin, clamp op 0..90', () => {
   assert.equal(parseGraceDays(999), MAX_GRACE_DAYS);
 });
 
-// ── tier-afleiding ────────────────────────────────────────────────────────
-test('tierFromName: leest het dag-nummer uit de templatenaam', () => {
-  assert.equal(tierFromName('aanmaning_dag7'), 7);
-  assert.equal(tierFromName('aanmaning_dag14'), 14);
-  assert.equal(tierFromName('aanmaning_dag37'), 37);
-  assert.equal(tierFromName('Aanmaning dag 21'), 21);
-  assert.equal(tierFromName('aanmaning-dag-17'), 17);
+// ── ladder-parsing ────────────────────────────────────────────────────────
+test('parseLadder: default-ladder als er niets is ingesteld', () => {
+  assert.deepEqual(parseLadder(null), { ...DEFAULT_LADDER });
+  assert.deepEqual(parseLadder({}), { ...DEFAULT_LADDER });
+  assert.deepEqual(parseLadder('onzin'), { ...DEFAULT_LADDER });
 });
 
-test('tierFromName: geen dag-nummer → null', () => {
-  assert.equal(tierFromName('welkomstbericht'), null);
-  assert.equal(tierFromName(null), null);
-  assert.equal(tierFromName(42), null);
+test('parseLadder: de vijf drempels zijn instelbaar, niet hardcoded', () => {
+  const lad = parseLadder({ rungs: {
+    aanmaning_dag7: 2, aanmaning_dag14: 9, aanmaning_dag17: 16,
+    aanmaning_dag21: 23, aanmaning_dag37: 40,
+  } });
+  assert.deepEqual(lad, {
+    aanmaning_dag7: 2, aanmaning_dag14: 9, aanmaning_dag17: 16,
+    aanmaning_dag21: 23, aanmaning_dag37: 40,
+  });
 });
 
-test('resolveStepTierDays: expliciete config.min_days_overdue wint', () => {
-  const step = { config: { min_days_overdue: 30, title: 'Aanmaning dag 7' } };
-  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag14' }), 30);
+test('parseLadder: plat object (zonder rungs-wrapper) werkt ook', () => {
+  assert.equal(parseLadder({ aanmaning_dag7: 3 }).aanmaning_dag7, 3);
 });
 
-test('resolveStepTierDays: expliciete 0 betekent bewust geen tier-eis', () => {
-  const step = { config: { min_days_overdue: 0 } };
-  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag14' }), 0);
+test('parseLadder: ontbrekende sporten vallen terug op de default', () => {
+  const lad = parseLadder({ rungs: { aanmaning_dag14: 9 } });
+  assert.equal(lad.aanmaning_dag14, 9);
+  assert.equal(lad.aanmaning_dag7,  DEFAULT_LADDER.aanmaning_dag7);
+  assert.equal(lad.aanmaning_dag37, DEFAULT_LADDER.aanmaning_dag37);
 });
 
-test('resolveStepTierDays: valt terug op meta-template, dan naam, dan titel', () => {
-  assert.equal(
-    resolveStepTierDays({ config: {} }, { meta_template_name: 'aanmaning_dag14', name: 'iets' }),
-    14,
-  );
-  assert.equal(resolveStepTierDays({ config: {} }, { name: 'Aanmaning dag 17' }), 17);
-  assert.equal(resolveStepTierDays({ config: { title: 'Aanmaning dag 21' } }, null), 21);
+test('parseLadder: ongeldige waarden worden genegeerd, eigen templates mogen erbij', () => {
+  const lad = parseLadder({ rungs: {
+    aanmaning_dag7: -1,             // negatief → default
+    aanmaning_dag14: 'x',           // niet-numeriek → default
+    aanmaning_dag17: MAX_LADDER_DAYS + 1, // te groot → default
+    eigen_template: 45,             // eigen naam mag
+  } });
+  assert.equal(lad.aanmaning_dag7,  DEFAULT_LADDER.aanmaning_dag7);
+  assert.equal(lad.aanmaning_dag14, DEFAULT_LADDER.aanmaning_dag14);
+  assert.equal(lad.aanmaning_dag17, DEFAULT_LADDER.aanmaning_dag17);
+  assert.equal(lad.eigen_template, 45);
 });
 
-test('resolveStepTierDays: niets af te leiden → null (geen tier-eis)', () => {
-  assert.equal(resolveStepTierDays({ config: { title: 'Belmoment' } }, { name: 'Belscript' }), null);
-  assert.equal(resolveStepTierDays(null, null), null);
+test('DEFAULT_LADDER: de afgesproken mapping (naam ≠ moment)', () => {
+  assert.deepEqual({ ...DEFAULT_LADDER }, {
+    aanmaning_dag7 : 1,
+    aanmaning_dag14: 7,
+    aanmaning_dag17: 14,
+    aanmaning_dag21: 21,
+    aanmaning_dag37: 30,
+  });
+});
+
+// ── resolveStepTierDays ───────────────────────────────────────────────────
+test('resolveStepTierDays: de LADDER bepaalt de drempel, niet het getal in de naam', () => {
+  const step = { step_type: 'whatsapp', config: {} };
+  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag7' },  DEFAULT_LADDER), 1);
+  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag14' }, DEFAULT_LADDER), 7);
+  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag17' }, DEFAULT_LADDER), 14);
+  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag21' }, DEFAULT_LADDER), 21);
+  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag37' }, DEFAULT_LADDER), 30);
+});
+
+test('resolveStepTierDays: expliciete config.min_days_overdue wint van de ladder', () => {
+  const step = { step_type: 'whatsapp', config: { min_days_overdue: 30 } };
+  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag7' }, DEFAULT_LADDER), 30);
+});
+
+test('resolveStepTierDays: expliciete 0 betekent bewust geen ladder-eis', () => {
+  const step = { step_type: 'whatsapp', config: { min_days_overdue: 0 } };
+  assert.equal(resolveStepTierDays(step, { meta_template_name: 'aanmaning_dag14' }, DEFAULT_LADDER), 0);
+});
+
+test('resolveStepTierDays: valt terug op template.name als meta-naam ontbreekt', () => {
+  assert.equal(resolveStepTierDays({ config: {} }, { name: 'aanmaning_dag21' }, DEFAULT_LADDER), 21);
+});
+
+test('resolveStepTierDays: template buiten de ladder → null (geen ladder-eis)', () => {
+  assert.equal(resolveStepTierDays({ config: {} }, { meta_template_name: 'welkomstbericht' }, DEFAULT_LADDER), null);
+  assert.equal(resolveStepTierDays({ config: {} }, null, DEFAULT_LADDER), null);
+  assert.equal(resolveStepTierDays(null, null, DEFAULT_LADDER), null);
+});
+
+test('resolveStepTierDays: een aangepaste ladder wordt gevolgd', () => {
+  const lad = parseLadder({ rungs: { aanmaning_dag7: 3 } });
+  assert.equal(resolveStepTierDays({ config: {} }, { meta_template_name: 'aanmaning_dag7' }, lad), 3);
+});
+
+// ── resolveWorkflowStartDays ──────────────────────────────────────────────
+test('resolveWorkflowStartDays: expliciete min_days_overdue wint', () => {
+  assert.equal(resolveWorkflowStartDays({
+    triggerConditions: { min_days_overdue: 10 }, stepTierDays: [1, 7, 14],
+  }), 10);
+});
+
+test('resolveWorkflowStartDays: anders de LAAGSTE ladder-sport van de eigen stappen', () => {
+  assert.equal(resolveWorkflowStartDays({ triggerConditions: {}, stepTierDays: [7, 1, 30] }), 1);
+});
+
+test('resolveWorkflowStartDays: zonder ladder-sporten de fallback (oude default 14)', () => {
+  assert.equal(resolveWorkflowStartDays({ triggerConditions: {}, stepTierDays: [] }), 14);
+  assert.equal(resolveWorkflowStartDays({ triggerConditions: {}, stepTierDays: [], fallbackDays: 1 }), 1);
+});
+
+test('resolveWorkflowStartDays: nooit lager dan 1 — niets op of vóór de vervaldag', () => {
+  assert.equal(resolveWorkflowStartDays({ triggerConditions: { min_days_overdue: 0 } }), 1);
+  assert.equal(resolveWorkflowStartDays({ triggerConditions: { min_days_overdue: -1 } }), 1);
+  assert.equal(resolveWorkflowStartDays({ triggerConditions: {}, stepTierDays: [0] }), 1);
+  assert.equal(resolveWorkflowStartDays({ triggerConditions: {}, stepTierDays: [], fallbackDays: 0 }), 1);
+});
+
+test('resolveWorkflowStartDays: min_days_since_invoice_date is GEEN selectiecriterium meer', () => {
+  // Factuurdatum-trigger aanwezig, geen min_days_overdue → de ladder beslist,
+  // niet de factuurdatum. Vroeger werd dit -1 ("altijd raak").
+  assert.equal(resolveWorkflowStartDays({
+    triggerConditions: { min_days_since_invoice_date: 7 },
+    stepTierDays: [1, 7, 14, 21, 30],
+  }), 1);
+  assert.equal(resolveWorkflowStartDays({
+    triggerConditions: { min_days_since_invoice_date: 7 },
+    stepTierDays: [],
+  }), 14);
+});
+
+// ── ladderLabel (UI + logs) ───────────────────────────────────────────────
+test('ladderLabel: toont de echte drempel bij de goedgekeurde Meta-naam', () => {
+  assert.equal(ladderLabel('aanmaning_dag7',  DEFAULT_LADDER), 'verstuurd op dag 1 na vervaldatum');
+  assert.equal(ladderLabel('aanmaning_dag14', DEFAULT_LADDER), 'verstuurd op dag 7 na vervaldatum');
+  assert.equal(ladderLabel('aanmaning_dag37', DEFAULT_LADDER), 'verstuurd op dag 30 na vervaldatum');
+});
+
+test('ladderLabel: template buiten de ladder → null', () => {
+  assert.equal(ladderLabel('welkomstbericht', DEFAULT_LADDER), null);
+  assert.equal(ladderLabel(null, DEFAULT_LADDER), null);
+});
+
+// ── REGRESSIE: de ladder in bedrijf ───────────────────────────────────────
+//
+// Spiegelt exact de twee guard-regels uit dunning-engine.js#advanceActiveRuns:
+//   1. isOverdue(oldest_due_iso, todayIso, graceDays)          → harde poort
+//   2. resolveStepTierDays(step, template, ladder) <= signed   → ladder-sport
+// Zo tonen deze tests het gedrag van de motor, niet alleen dat van losse
+// helpers.
+const LADDER_STEPS = [
+  { step_type: 'whatsapp', config: {}, template: { meta_template_name: 'aanmaning_dag7'  } },
+  { step_type: 'whatsapp', config: {}, template: { meta_template_name: 'aanmaning_dag14' } },
+  { step_type: 'whatsapp', config: {}, template: { meta_template_name: 'aanmaning_dag17' } },
+  { step_type: 'whatsapp', config: {}, template: { meta_template_name: 'aanmaning_dag21' } },
+  { step_type: 'whatsapp', config: {}, template: { meta_template_name: 'aanmaning_dag37' } },
+];
+
+/** Welke templates mag de motor versturen op `todayIso`? (grace default 0) */
+function maySendOn(dueIso, todayIso, graceDays = DEFAULT_GRACE_DAYS, ladder = DEFAULT_LADDER) {
+  if (!isOverdue(dueIso, todayIso, graceDays)) return [];
+  const signed = daysOverdueSigned(dueIso, todayIso);
+  return LADDER_STEPS
+    .filter((st) => {
+      const tier = resolveStepTierDays(st, st.template, ladder);
+      return tier == null || (signed != null && signed >= tier);
+    })
+    .map((st) => st.template.meta_template_name);
+}
+
+test('REGRESSIE: op de vervaldag zelf vertrekt er NIETS', () => {
+  assert.deepEqual(maySendOn('2026-09-08', '2026-09-08'), []);
+  // ook niet als de klant al maanden een openstaande factuur heeft die
+  // vandaag pas vervalt
+  assert.equal(isOverdue('2026-09-08', '2026-09-08'), false);
+  assert.equal(daysOverdueSigned('2026-09-08', '2026-09-08'), 0);
+});
+
+test('REGRESSIE: vóór de vervaldag vertrekt er niets (het bug-geval van 06-09)', () => {
+  // Factuur 2026/1780: factuurdatum 01-09, vervaldatum 08-09, TeamLeader-status
+  // "Niet betaald". Op 06-09 ging destijds aanmaning_dag14 uit.
+  assert.deepEqual(maySendOn('2026-09-08', '2026-09-06'), []);
+  assert.deepEqual(maySendOn('2026-09-08', '2026-09-07'), []);
+});
+
+test('REGRESSIE: het EERSTE bericht valt op dag 1 na de vervaldatum en is aanmaning_dag7', () => {
+  const dag1 = maySendOn('2026-09-08', '2026-09-09');
+  assert.deepEqual(dag1, ['aanmaning_dag7']);
+  assert.equal(daysOverdueSigned('2026-09-08', '2026-09-09'), 1);
+});
+
+test('REGRESSIE: de hele ladder opent op de afgesproken dagen', () => {
+  const due = '2026-09-08';
+  // dag 6 — nog steeds alleen het duwtje
+  assert.deepEqual(maySendOn(due, '2026-09-14'), ['aanmaning_dag7']);
+  // dag 7 — aanmaning_dag14 komt erbij
+  assert.deepEqual(maySendOn(due, '2026-09-15'), ['aanmaning_dag7', 'aanmaning_dag14']);
+  // dag 14 — aanmaning_dag17
+  assert.equal(maySendOn(due, '2026-09-22').includes('aanmaning_dag17'), true);
+  assert.equal(maySendOn(due, '2026-09-21').includes('aanmaning_dag17'), false);
+  // dag 21 — aanmaning_dag21
+  assert.equal(maySendOn(due, '2026-09-29').includes('aanmaning_dag21'), true);
+  assert.equal(maySendOn(due, '2026-09-28').includes('aanmaning_dag21'), false);
+  // dag 30 — aanmaning_dag37
+  assert.equal(maySendOn(due, '2026-10-08').includes('aanmaning_dag37'), true);
+  assert.equal(maySendOn(due, '2026-10-07').includes('aanmaning_dag37'), false);
+});
+
+test('REGRESSIE: afwijkende betaaltermijn wordt op de EIGEN vervaldatum beoordeeld', () => {
+  // Zelfde factuurdatum (01-09), drie verschillende termijnen. Nergens wordt
+  // "factuurdatum + 7" gebruikt; alleen de vervaldatum telt.
+  const factuurdatum = '2026-09-01';
+
+  // 30-dagen-termijn → vervaldatum 01-10. Op 08-09 (dag 7 ná factuurdatum,
+  // maar 23 dagen VÓÓR de vervaldatum) mag er niets uit.
+  assert.deepEqual(maySendOn('2026-10-01', '2026-09-08'), []);
+  assert.equal(daysOverdueSigned('2026-10-01', '2026-09-08'), -23);
+  // Pas op 02-10 (dag 1 na de eigen vervaldatum) start het duwtje.
+  assert.deepEqual(maySendOn('2026-10-01', '2026-10-02'), ['aanmaning_dag7']);
+
+  // 60-dagen-termijn (bv. na een betalingsregeling) → vervaldatum 31-10.
+  assert.deepEqual(maySendOn('2026-10-31', '2026-10-02'), []);
+  assert.deepEqual(maySendOn('2026-10-31', '2026-11-01'), ['aanmaning_dag7']);
+
+  // 0-dagen-termijn (direct betaalbaar) → vervaldatum = factuurdatum.
+  assert.deepEqual(maySendOn(factuurdatum, factuurdatum), []);
+  assert.deepEqual(maySendOn(factuurdatum, '2026-09-02'), ['aanmaning_dag7']);
+});
+
+test('REGRESSIE: de factuurdatum is nergens een anker — twee termijnen, één datum', () => {
+  // Twee facturen met dezelfde factuurdatum maar een andere termijn krijgen
+  // hun eerste bericht op verschillende dagen.
+  const kortTermijn = maySendOn('2026-09-08', '2026-09-09');  // 7-daagse termijn
+  const langTermijn = maySendOn('2026-10-01', '2026-09-09');  // 30-daagse termijn
+  assert.deepEqual(kortTermijn, ['aanmaning_dag7']);
+  assert.deepEqual(langTermijn, []);
+});
+
+test('REGRESSIE: een gratieperiode > 0 schuift de hele ladder op, 0 blijft de default', () => {
+  assert.equal(DEFAULT_GRACE_DAYS, 0);
+  assert.deepEqual(maySendOn('2026-09-08', '2026-09-09', 2), []);   // grace 2 → dag 1 en 2 stil
+  assert.deepEqual(maySendOn('2026-09-08', '2026-09-11', 2), ['aanmaning_dag7']);
 });
 
 // ── earliestSendIso ───────────────────────────────────────────────────────

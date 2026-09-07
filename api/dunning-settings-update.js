@@ -1,8 +1,9 @@
 // api/dunning-settings-update.js
-// POST { dunning_cooldown_days?: int, dunning_grace_days?: int }
-//   → upsert in app_settings. Minstens één van beide keys is verplicht;
-//     ontbrekende keys blijven ongewijzigd (back-compat: de bestaande UI
-//     stuurt alleen dunning_cooldown_days).
+// POST { dunning_cooldown_days?: int, dunning_grace_days?: int,
+//        dunning_ladder?: { <templatenaam>: <dagen na vervaldatum> } }
+//   → upsert in app_settings. Minstens één key is verplicht; ontbrekende
+//     keys blijven ongewijzigd (back-compat: de bestaande UI stuurt alleen
+//     dunning_cooldown_days).
 //
 // Waarom een aparte wrapper i.p.v. hergebruik van api/app-settings.js:
 // dat endpoint eist super_admin voor PUT. Deze wrapper accepteert
@@ -10,13 +11,21 @@
 // engine beheert — en beperkt de scope tot precies één key.
 //
 // Waarde-validatie: cooldown integer 1..90, grace integer 0..90 (0 = geen
-// extra respijt; de vervaldag zelf blijft sowieso beschermd). Onvalid → 400.
+// extra respijt; de vervaldag zelf blijft sowieso beschermd), ladder-sporten
+// integer 1..365 per templatenaam (1 = de dag ná de vervaldatum; 0 zou de
+// vervaldag zelf toestaan en wordt daarom geweigerd). Onvalid → 400.
 // Audit-log fail-soft.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
-import { GRACE_SETTING_KEY, MAX_GRACE_DAYS } from './_lib/dunning-overdue-guard.js';
+import {
+  GRACE_SETTING_KEY,
+  MAX_GRACE_DAYS,
+  LADDER_SETTING_KEY,
+  MAX_LADDER_DAYS,
+  parseLadder,
+} from './_lib/dunning-overdue-guard.js';
 
 const KEY = 'dunning_cooldown_days';
 
@@ -51,8 +60,11 @@ export default async function handler(req, res) {
   const body = (req.body && typeof req.body === 'object') ? req.body : null;
   const hasCooldown = body?.dunning_cooldown_days !== undefined && body?.dunning_cooldown_days !== null;
   const hasGrace    = body?.dunning_grace_days    !== undefined && body?.dunning_grace_days    !== null;
-  if (!hasCooldown && !hasGrace) {
-    return res.status(400).json({ error: 'dunning_cooldown_days en/of dunning_grace_days is verplicht' });
+  const hasLadder   = body?.dunning_ladder        !== undefined && body?.dunning_ladder        !== null;
+  if (!hasCooldown && !hasGrace && !hasLadder) {
+    return res.status(400).json({
+      error: 'dunning_cooldown_days, dunning_grace_days en/of dunning_ladder is verplicht',
+    });
   }
 
   let n = null;
@@ -71,11 +83,35 @@ export default async function handler(req, res) {
     }
   }
 
+  let rungs = null;
+  if (hasLadder) {
+    const raw = body.dunning_ladder;
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      return res.status(400).json({ error: 'dunning_ladder moet een object zijn { templatenaam: dagen }' });
+    }
+    // Elke opgegeven sport hard valideren; parseLadder vult daarna de
+    // ontbrekende sporten aan met de defaults zodat de opgeslagen rij
+    // compleet is (geen half-ingevulde ladder in de DB).
+    for (const [name, val] of Object.entries(raw)) {
+      if (!String(name || '').trim()) {
+        return res.status(400).json({ error: 'dunning_ladder: lege templatenaam is niet toegestaan' });
+      }
+      const d = Number(val);
+      if (!Number.isFinite(d) || Math.trunc(d) !== d || d < 1 || d > MAX_LADDER_DAYS) {
+        return res.status(400).json({
+          error: `dunning_ladder.${name} moet integer 1..${MAX_LADDER_DAYS} zijn (1 = de dag ná de vervaldatum)`,
+        });
+      }
+    }
+    rungs = parseLadder(raw);
+  }
+
   const value = hasCooldown ? { days: n } : null;
 
   try {
     if (hasCooldown) await upsertSetting(KEY, value);
     if (hasGrace)    await upsertSetting(GRACE_SETTING_KEY, { days: g });
+    if (hasLadder)   await upsertSetting(LADDER_SETTING_KEY, { rungs });
 
     // Audit-log (fail-soft).
     try {
@@ -87,10 +123,12 @@ export default async function handler(req, res) {
         after_json : {
           ...(hasCooldown ? { [KEY]: value } : {}),
           ...(hasGrace    ? { [GRACE_SETTING_KEY]: { days: g } } : {}),
+          ...(hasLadder   ? { [LADDER_SETTING_KEY]: { rungs } } : {}),
         },
         reason_text: [
           hasCooldown ? `Cooldown gezet op ${n} dagen` : null,
           hasGrace    ? `Gratieperiode gezet op ${g} dagen` : null,
+          hasLadder   ? `Ladder gezet op ${Object.entries(rungs).map(([k, v]) => `${k}=dag ${v}`).join(', ')}` : null,
         ].filter(Boolean).join(' · '),
         ip_address : getClientIp(req),
       });
@@ -100,6 +138,7 @@ export default async function handler(req, res) {
       ok: true,
       ...(hasCooldown ? { dunning_cooldown_days: n } : {}),
       ...(hasGrace    ? { dunning_grace_days: g } : {}),
+      ...(hasLadder   ? { dunning_ladder: rungs } : {}),
     });
   } catch (e) {
     console.error('[dunning-settings-update]', e?.message || e);

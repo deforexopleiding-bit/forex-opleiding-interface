@@ -20,7 +20,14 @@
 //     02:00 zomertijd wijkt de UTC-datum een dag af);
 //   * de ONGECLAMPTE dagen-teller (negatief = nog niet vervallen);
 //   * de harde poort `isOverdue()` inclusief instelbare gratieperiode;
-//   * de tier-koppeling (aanmaning_dagNN hoort bij ECHTE days_overdue >= NN).
+//   * de LADDER: welke template bij welk aantal dagen NA de vervaldatum hoort.
+//
+// ANKERDATUM-BESLISSING (vervolg op #1466): de vervaldatum die het CRM uit
+// TeamLeader synchroniseert is de ENIGE waarheid. Nergens zelf een betaal-
+// termijn bij de factuurdatum optellen — die termijn zit al in `due_date`
+// verwerkt en is niet bij elke klant gelijk (betalingsregelingen,
+// splitsingen, afwijkende termijnen). `min_days_since_invoice_date` is
+// daarom geen selectiecriterium meer; zie dunning-engine.js.
 //
 // Alles PURE behalve `readGraceDaysSetting()` (één app_settings-lookup).
 // Fail-soft-conventie van de dunning-modules: bij een config-glitch valt de
@@ -135,47 +142,161 @@ export async function readGraceDaysSetting(db) {
 }
 
 // ---------------------------------------------------------------------------
-// Tier-koppeling: aanmaning_dagNN hoort bij ECHTE days_overdue >= NN
+// De ladder: templatenaam → aantal dagen NA de vervaldatum
 // ---------------------------------------------------------------------------
+//
+// De Meta-templatenamen (`aanmaning_dagNN`) blijven ongewijzigd — die zijn bij
+// Meta goedgekeurd en kunnen niet zomaar hernoemd worden. Het getal in de naam
+// zegt daarom NIETS over het moment van verzenden; de ladder hieronder doet
+// dat. `aanmaning_dag7` is het vriendelijke duwtje dat op dag 1 na de
+// vervaldatum vertrekt.
+//
+// Instelbaar via app_settings-key `dunning_ladder`:
+//   { "rungs": { "aanmaning_dag7": 1, "aanmaning_dag14": 7, ... } }
+// Ontbrekende sporten vallen terug op DEFAULT_LADDER; onbekende templates
+// (niet in de ladder) hebben geen drempel en worden dus niet door de ladder
+// tegengehouden — alleen door de harde vervaldatum-poort.
 
-// Vangt 'aanmaning_dag14', 'aanmaning-dag 14', 'Aanmaning dag 21', 'dag7'.
-const TIER_RE = /dag[\s_-]*(\d{1,3})/i;
+export const LADDER_SETTING_KEY = 'dunning_ladder';
 
-/** 'aanmaning_dag14' → 14. Geen match → null. PURE. */
-export function tierFromName(name) {
-  if (typeof name !== 'string') return null;
-  const m = name.match(TIER_RE);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isInteger(n) && n >= 0 && n <= 365 ? n : null;
-}
+export const DEFAULT_LADDER = Object.freeze({
+  aanmaning_dag7 : 1,   // vriendelijk duwtje: "misschien had je het gemist"
+  aanmaning_dag14: 7,
+  aanmaning_dag17: 14,
+  aanmaning_dag21: 21,
+  aanmaning_dag37: 30,
+});
+
+export const MAX_LADDER_DAYS = 365;
 
 /**
- * Hoeveel ECHTE dagen te laat moet de klant zijn voordat deze stap mag
- * versturen? Volgorde van waarheid:
- *
- *   1. `step.config.min_days_overdue` — expliciet gezet door een beheerder,
- *      wint altijd (ook als die 0 is: dan is er bewust geen tier-eis).
- *   2. de Meta-templatenaam (`aanmaning_dag14` → 14) — dat is het label dat
- *      de klant in het bericht ziet; die moet kloppen met de werkelijkheid.
- *   3. de interne templatenaam, daarna `step.config.title`
- *      ("Aanmaning dag 21").
- *
- * null = geen tier af te leiden → geen tier-eis (oud gedrag; de harde
- * vervaldatum-poort blijft uiteraard wel gelden).
+ * Normaliseer een ruwe ladder-config naar `{ <templatenaam>: <dagen> }`.
+ * Ontbrekende default-sporten worden aangevuld; eigen templatenamen mogen
+ * erbij. Ongeldige waarden (niet-integer, negatief, > MAX_LADDER_DAYS) vallen
+ * terug op de default voor die sport, of worden genegeerd als er geen default
+ * is. Nooit throw — fail-soft, net als de office-hours-parser.
  *
  * PURE.
  */
-export function resolveStepTierDays(step, template = null) {
+export function parseLadder(raw) {
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  // Zowel `{ rungs: {...} }` als een plat object wordt geaccepteerd.
+  const rungs = (src.rungs && typeof src.rungs === 'object' && !Array.isArray(src.rungs))
+    ? src.rungs
+    : src;
+
+  const out = { ...DEFAULT_LADDER };
+  for (const [key, val] of Object.entries(rungs)) {
+    const name = String(key || '').trim();
+    if (!name) continue;
+    const n = Number(val);
+    if (!Number.isFinite(n)) continue;
+    const t = Math.trunc(n);
+    if (t < 0 || t > MAX_LADDER_DAYS) continue;
+    out[name] = t;
+  }
+  return out;
+}
+
+/**
+ * Leest app_settings.dunning_ladder. Fail-soft → DEFAULT_LADDER.
+ */
+export async function readLadderSetting(db) {
+  try {
+    const { data } = await db
+      .from('app_settings')
+      .select('value')
+      .eq('key', LADDER_SETTING_KEY)
+      .maybeSingle();
+    if (!data) return { ...DEFAULT_LADDER };
+    return parseLadder(data?.value);
+  } catch (e) {
+    console.warn('[dunning-overdue-guard] ladder-setting fail-soft, default:', e?.message || e);
+    return { ...DEFAULT_LADDER };
+  }
+}
+
+/**
+ * Hoeveel dagen NA de vervaldatum moet de klant zijn voordat deze stap mag
+ * versturen? Volgorde van waarheid:
+ *
+ *   1. `step.config.min_days_overdue` — expliciet gezet door een beheerder,
+ *      wint altijd (ook 0: dan is er bewust geen ladder-eis voor deze stap).
+ *   2. de ladder, opgezocht op `template.meta_template_name` en daarna op
+ *      `template.name`.
+ *
+ * null = deze stap zit niet op de ladder → geen ladder-eis. De harde
+ * vervaldatum-poort blijft uiteraard wel gelden.
+ *
+ * BEWUST GEEN afleiding uit het getal IN de templatenaam: `aanmaning_dag14`
+ * vertrekt op dag 7, en die verwarring is precies wat de ladder oplost.
+ *
+ * PURE.
+ */
+export function resolveStepTierDays(step, template = null, ladder = DEFAULT_LADDER) {
   const explicit = step?.config?.min_days_overdue;
   if (Number.isFinite(Number(explicit))) {
     const n = Math.trunc(Number(explicit));
     if (n >= 0) return n;
   }
-  return tierFromName(template?.meta_template_name)
-      ?? tierFromName(template?.name)
-      ?? tierFromName(step?.config?.title)
-      ?? null;
+  const lad = (ladder && typeof ladder === 'object') ? ladder : DEFAULT_LADDER;
+  for (const key of [template?.meta_template_name, template?.name]) {
+    const name = typeof key === 'string' ? key.trim() : '';
+    if (!name) continue;
+    const n = Number(lad[name]);
+    if (Number.isFinite(n)) return Math.trunc(n);
+  }
+  return null;
+}
+
+/**
+ * Vanaf hoeveel dagen te laat mag een workflow überhaupt STARTEN?
+ *
+ *   1. `trigger_conditions.min_days_overdue` als die expliciet gezet is.
+ *   2. anders de LAAGSTE ladder-sport onder de eigen send-stappen — zo gaat
+ *      het eerste bericht op zijn eigen dag de deur uit in plaats van pas bij
+ *      een willekeurige default.
+ *   3. anders `fallbackDays` (de historische default van 14).
+ *
+ * Nooit lager dan 1: op en vóór de vervaldag gaat er niets uit. De harde
+ * poort in `isOverdue()` bewaakt dat sowieso; dit houdt de twee consistent.
+ *
+ * `min_days_since_invoice_date` komt hier BEWUST niet in voor: de factuurdatum
+ * is geen ankerdatum meer.
+ *
+ * PURE.
+ */
+export function resolveWorkflowStartDays({
+  triggerConditions = null,
+  stepTierDays = [],
+  fallbackDays = 14,
+} = {}) {
+  const tc = triggerConditions || {};
+  const explicit = Number(tc.min_days_overdue);
+  if (Number.isFinite(explicit)) return Math.max(1, Math.trunc(explicit));
+
+  const rungs = (Array.isArray(stepTierDays) ? stepTierDays : [])
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n));
+  if (rungs.length) return Math.max(1, Math.trunc(Math.min(...rungs)));
+
+  const fb = Number(fallbackDays);
+  return Math.max(1, Number.isFinite(fb) ? Math.trunc(fb) : 14);
+}
+
+/**
+ * Label voor UI en logs: "verstuurd op dag 1 na vervaldatum". null als de
+ * template niet op de ladder staat. PURE.
+ */
+export function ladderLabel(templateName, ladder = DEFAULT_LADDER) {
+  const lad = (ladder && typeof ladder === 'object') ? ladder : DEFAULT_LADDER;
+  const name = typeof templateName === 'string' ? templateName.trim() : '';
+  if (!name) return null;
+  const n = Number(lad[name]);
+  if (!Number.isFinite(n)) return null;
+  const d = Math.trunc(n);
+  if (d <= 0) return 'verstuurd vanaf de vervaldatum';
+  return `verstuurd op dag ${d} na vervaldatum`;
 }
 
 /**

@@ -1,4 +1,4 @@
-# Aanmaan-motor: harde vervaldatum-poort + echte tier-keuze
+# Aanmaan-motor: harde vervaldatum-poort + ladder op days_overdue
 
 **Aanleiding:** facturen die nog NIET vervallen waren kregen automatisch een
 aanmaning.
@@ -72,6 +72,38 @@ De teller achter de tier-keuze was dus **"dagen sinds de run startte"**, niet
 "dagen te laat". Omdat de run al vóór de vervaldag kon starten (zie §2),
 schoof de hele reeks naar voren: `dag7` vuurde op dag 1, `dag14` op dag 0.
 
+## 3b. Ankerdatum-beslissing (vervolg)
+
+Vastgelegd na de eerste ronde, en in deze PR geïmplementeerd:
+
+1. **De vervaldatum die het CRM uit TeamLeader synchroniseert is de enige
+   waarheid.** Nergens zelf een betaaltermijn bij de factuurdatum optellen:
+   die termijn zit al in `due_date` verwerkt en is niet bij elke klant 7 dagen
+   (betalingsregelingen, splitsingen, afwijkende termijnen).
+   `min_days_since_invoice_date` is daarom **geen selectiecriterium meer**.
+2. **Gratieperiode blijft 0.** Het eerste bericht mag pas bij
+   `days_overdue >= 1`, dus de dag ná de vervaldatum. Op de vervaldag zelf
+   gaat er niets uit: TeamLeader zet de factuur pas daarna op "Te laat", en er
+   mag nooit iets vertrekken zolang TeamLeader hem nog als "Niet betaald"
+   toont.
+3. **De ladder loopt op `days_overdue`, niet op de stap-pointer:**
+
+   | Template (Meta, ongewijzigd) | Vertrekt op |
+   |---|---|
+   | `aanmaning_dag7` | dag 1 na vervaldatum — het vriendelijke duwtje |
+   | `aanmaning_dag14` | dag 7 |
+   | `aanmaning_dag17` | dag 14 |
+   | `aanmaning_dag21` | dag 21 |
+   | `aanmaning_dag37` | dag 30 |
+
+   De vijf drempels zijn instelbaar via `app_settings.dunning_ladder`, niet
+   hardcoded.
+4. **De Meta-templatenamen blijven ongewijzigd** — die zijn bij Meta
+   goedgekeurd. In de instellingen-UI en bij de stap-labels staat daarom het
+   echte moment erbij ("aanmaning_dag7 — verstuurd op dag 1 na vervaldatum"),
+   zodat niemand de naam verwart met het verzendmoment.
+5. **De bulk-flows blijven exact zoals ze zijn.**
+
 ## 4. Wat er is gewijzigd
 
 ### Nieuw: `api/_lib/dunning-overdue-guard.js`
@@ -85,8 +117,18 @@ Eén bron van waarheid, grotendeels pure functies (unit-tests in
   `due_date + grace < vandaag`. Geen `due_date` → `false` (fail-closed).
 * `readGraceDaysSetting(db)` — `app_settings.dunning_grace_days`
   (`{ days: int 0..90 }`), default **0**, fail-soft naar 0.
-* `resolveStepTierDays(step, template)` / `tierFromName(name)` —
-  `aanmaning_dag14` → 14; expliciete `step.config.min_days_overdue` wint.
+* `parseLadder(raw)` / `readLadderSetting(db)` — `app_settings.dunning_ladder`
+  (`{ rungs: { <templatenaam>: <dagen na vervaldatum> } }`). Ontbrekende
+  sporten vallen terug op `DEFAULT_LADDER`; eigen templatenamen mogen erbij.
+* `resolveStepTierDays(step, template, ladder)` — de ladder bepaalt de
+  drempel; `step.config.min_days_overdue` overrulet 'm. **Bewust géén
+  afleiding uit het getal in de templatenaam** — `aanmaning_dag14` vertrekt op
+  dag 7, en precies die verwarring lost de ladder op.
+* `resolveWorkflowStartDays({ triggerConditions, stepTierDays, fallbackDays })`
+  — expliciete `min_days_overdue`, anders de laagste ladder-sport van de eigen
+  send-stappen, anders de fallback (14). Nooit lager dan 1.
+* `ladderLabel(naam, ladder)` — "verstuurd op dag 1 na vervaldatum", voor UI
+  en logs.
 * `earliestSendIso(dueIso, minDays)` — de datum waarop het wél mag.
 
 ### `api/_lib/dunning-engine.js`
@@ -95,15 +137,28 @@ Eén bron van waarheid, grotendeels pure functies (unit-tests in
 2. **Detect-fase:** harde poort vóór álle workflow-condities. Geen enkele
    trigger kan 'm omzeilen. Geweigerde matches worden geteld en gelogd
    (`overdue-poort: N klant-match(es) geweigerd`).
-3. **Advance-fase (defense in depth):** vóór elke `email`/`whatsapp`-stap
-   opnieuw de poort + een tier-check. Bij blokkade wordt de pointer **niet**
+3. **Startdrempel per workflow uit de ladder.** `min_days_since_invoice_date`
+   wordt niet meer gelezen (wel gelogd als waarschuwing, de key blijft in de
+   DB staan). Zonder expliciete `min_days_overdue` bepaalt de laagste
+   ladder-sport van de eigen send-stappen vanaf welke dag de workflow start —
+   zo vertrekt het eerste bericht op dag 1 in plaats van pas bij de oude
+   default van 14, en start een run nooit zó laat dat meerdere sporten
+   tegelijk openstaan.
+4. **Advance-fase (defense in depth):** vóór elke `email`/`whatsapp`-stap
+   opnieuw de poort + de ladder-check. Bij blokkade wordt de pointer **niet**
    verschoven en alleen `next_action_at` vooruitgezet naar de dag waarop het
    wél mag, met een `dunning_log`-regel:
    * `send_skipped_not_overdue` — factuur nog niet vervallen.
-   * `send_postponed_tier_not_reached` — `aanmaning_dagNN` bij te lage echte
-     `days_overdue`; payload bevat `tier_min_days` + ongeclampte
-     `days_overdue`.
-4. **Pipeline-automatisering `on_overdue_to_nieuw`:** de query gebruikte de
+   * `send_postponed_tier_not_reached` — ladder-sport nog niet bereikt;
+     payload bevat `template_name`, `ladder_label`, `tier_min_days` en de
+     ongeclampte `days_overdue`.
+5. **Wait-stappen volgen de ladder.** Na een `wait` mikt `next_action_at` op de
+   ladder-dag van de eerstvolgende send-stap in plaats van op "nu + N dagen".
+   Wachtdagen tellen vanaf het vorige bericht en schuiven daardoor mee met elke
+   vertraging (kantooruren, retry, pauze); de ladder is verankerd aan de
+   vervaldatum. Staat de volgende send-stap niet op de ladder, dan blijft het
+   wachtdagen-gedrag ongewijzigd.
+6. **Pipeline-automatisering `on_overdue_to_nieuw`:** de query gebruikte de
    UTC-datum; nu de Amsterdamse kalenderdag minus de gratieperiode. `lt`
    sluit de dag zelf uit, dus instroom pas vanaf de dag ná de vervaldag.
 
@@ -118,11 +173,21 @@ met alleen nog-niet-vervallen facturen nooit incasso-kandidaat wordt — ook nie
 als `min_days_overdue` op `null` (uit) staat.
 
 ### `api/dunning-settings-get.js` / `api/dunning-settings-update.js`
-`dunning_grace_days` (0..90, default 0) erbij. Beide keys zijn optioneel bij
-POST; de bestaande UI die alleen `dunning_cooldown_days` stuurt blijft werken.
+`dunning_grace_days` (0..90, default 0) en `dunning_ladder` erbij. Alle keys
+zijn optioneel bij POST; de bestaande UI die alleen `dunning_cooldown_days`
+stuurt blijft werken. Ladder-sporten valideren op integer 1..365 — **0 wordt
+geweigerd**, want dat zou de vervaldag zelf toestaan.
 
 ### `modules/klanten-v2/views/instellingen-v2.js`
-Kaart "Gratieperiode na de vervaldag" naast de bestaande cooldown-kaart.
+Kaarten "Gratieperiode na de vervaldag" en "Aanmaan-ladder — dagen ná de
+vervaldatum" (vijf bewerkbare drempels) naast de bestaande cooldown-kaart. In
+de workflow-editor staat het ladder-moment bij elke template in de picker, en
+is "Min. dagen sinds factuurdatum" gemarkeerd als **genegeerd**.
+
+### `modules/finance.html`
+Zelfde ladder-labels in de oudere workflow-editor (template-picker +
+run-detail stappenlijst) en dezelfde "genegeerd"-markering op het
+factuurdatum-veld.
 
 ## 5. Bewust NIET aangeraakt
 
@@ -134,13 +199,21 @@ Kaart "Gratieperiode na de vervaldag" naast de bestaande cooldown-kaart.
 * De clamp in `dunning-template-render.js` / `template-variables.js` blijft
   staan: een negatief getal in een klantbericht is erger dan 0, en met de
   poort erboven kan `DAGEN_OVERDUE` bij een automatische send niet meer 0 zijn.
-* Rechten, datamodel en migraties: ongewijzigd. `dunning_grace_days` is een
-  gewone `app_settings`-rij en hoeft niet vooraf te bestaan (afwezig = 0).
+* De **Meta-templatenamen** (`aanmaning_dagNN`): goedgekeurd bij Meta, dus
+  ongewijzigd. Alleen de labels eromheen vertellen het echte moment.
+* De `min_days_since_invoice_date`-waarden in `dunning_workflows.
+  trigger_conditions`: blijven staan, worden alleen genegeerd. Geen
+  data-migratie, geen stille verwijdering.
+* Rechten, datamodel en migraties: ongewijzigd. `dunning_grace_days` en
+  `dunning_ladder` zijn gewone `app_settings`-rijen die niet vooraf hoeven te
+  bestaan (afwezig = default 0 resp. de standaard-ladder).
 
 ## 6. Nog te doen buiten deze PR (DB-config)
 
-De workflow-configuratie in `dunning_workflows.trigger_conditions` leunt nog
-op `min_days_since_invoice_date`. De code blokkeert nu het verkeerde gedrag,
-maar de nettere inrichting is een expliciete `min_days_overdue` per workflow
-en, waar gewenst, `config.min_days_overdue` per stap (die wint boven de uit de
-templatenaam afgeleide tier).
+* De `wait`-stappen in de bestaande workflows mogen opgeruimd worden nu de
+  ladder het moment bepaalt. Ze zijn niet schadelijk (de ladder overrulet ze
+  voor send-stappen die erop staan), maar ze suggereren een timing die niet
+  meer klopt.
+* Een template die je aan de ladder wilt toevoegen, voeg je toe in
+  Instellingen → wanbetalers-venster → Aanmaan-ladder. Een stap kan de ladder
+  overrulen met `config.min_days_overdue`.
