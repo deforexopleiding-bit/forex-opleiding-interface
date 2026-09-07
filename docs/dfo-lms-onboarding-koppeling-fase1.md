@@ -401,10 +401,33 @@ Bewust **geen tweede signaal** naast het gewone. Er staat een unique index op
 niet — en het zou de mentor twee keer laten rinkelen voor één gebeurtenis. Eén
 signaal met een type dat het onderscheid draagt is juister én routeerbaar.
 
-**De ontvanger is voorlopig de mentor van de sessie.** De rol *hoofdmentor*
-bestaat nog niet in het LMS. Er is bewust geen ontvanger verzonnen: het signaal
-landt waar de andere signalen landen, met dat aparte type, zodat de routering
-erop gezet kan worden zodra die rol er is.
+**De ontvanger is de hoofdmentor, niet de mentor van de sessie.** Er moet
+iemand kort op zitten om te voorkomen dat het een wanbetaler wordt, en dat is
+een andere verantwoordelijkheid dan het opvolgen van een gewone no-show.
+
+De rol *hoofdmentor* bestaat nog niet, en `profiles.role` is **enkelvoudig**:
+iemand die rol geven zou zijn huidige rol (manager, mentor, …) wegnemen, met
+gevolgen tot in `is_crm_staff()` en de RLS-policies. Twee namen in de code
+zetten is de andere kant van hetzelfde probleem — dan verhuist de beslissing
+naar een deploy.
+
+Daarom loopt de adressering via een **recht**: `signals.hoofdmentor.receive`.
+`resolveOntvangersVoorRecht()` in `api/_lib/notify.js` leest twee bronnen:
+
+- `role_permissions` — het recht aan een hele rol. Zodra 'hoofdmentor' bestaat
+  is één rij daar genoeg en verandert er niets aan de code.
+- `user_permissions` — het recht aan één persoon. De weg voor nu; zie
+  migratie 016 en het precedent in 044.
+
+**Geen terugval.** Heeft niemand het recht, dan gaat er geen bericht uit —
+niet naar de sessie-mentor, want daar mag het uitdrukkelijk niet heen. Het
+signaal zelf staat er wél en is zichtbaar voor iedereen met
+`students.all.view`. De cron telt dat als `eerste_call_zonder_ontvanger` en
+logt het als fout, zodat het niet stil blijft.
+
+De signaalrij zelf verandert niet: één rij per sessie, unieke index op
+`session_id`, `mentor_user_id` blijft de mentor van die sessie. Alleen wie er
+bericht van krijgt is anders.
 
 ### Bewust niet omgezet: de betaalherinnering
 

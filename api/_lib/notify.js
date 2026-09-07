@@ -56,6 +56,96 @@ function _now() { return new Date().toISOString(); }
  *   een rij bestaat met zelfde (type, entity_id) binnen window
  * @returns {Promise<{ok: boolean, count: number, error?: string}>}
  */
+/**
+ * Wie moet er bericht krijgen op grond van een RECHT (feature_key)?
+ *
+ * ── WAAROM DIT BESTAAT ────────────────────────────────────────────────────
+ * Sommige meldingen horen bij een ROL, niet bij een persoon. Het signaal voor
+ * een gemiste eerste call gaat bijvoorbeeld naar de hoofdmentor — niet naar
+ * de mentor van die sessie.
+ *
+ * Die rol bestaat nog niet, en `profiles.role` is enkelvoudig: iemand
+ * 'hoofdmentor' maken zou zijn huidige rol (manager, mentor, …) WEGNEMEN,
+ * met gevolgen tot in de RLS-policies. Twee namen in de code zetten is de
+ * andere kant van hetzelfde probleem: dan verhuist de beslissing naar een
+ * deploy.
+ *
+ * Daarom adresseren we op een recht. Dat recht kan op twee manieren gegeven
+ * worden, en deze functie leest ze allebei:
+ *   - `role_permissions`  — aan een hele rol (zodra 'hoofdmentor' bestaat,
+ *                            is één rij daar genoeg en verandert er niets
+ *                            aan de code);
+ *   - `user_permissions`  — aan één persoon (de weg voor nu; zie migratie
+ *                            016 en het precedent in 044).
+ *
+ * Levert bewust GEEN terugval op een andere ontvanger. Heeft niemand het
+ * recht, dan is de lege lijst het antwoord — de aanroeper hoort dat
+ * zichtbaar te melden in plaats van het bericht stilletjes ergens anders
+ * heen te sturen.
+ *
+ * @param {string} featureKey
+ * @param {object} [client] alleen voor tests; standaard de service-role client
+ * @returns {Promise<{ok: boolean, userIds: string[], viaRol: number, viaGebruiker: number, error?: string}>}
+ */
+export async function resolveOntvangersVoorRecht(featureKey, client = null) {
+  const db = client || supabaseAdmin;
+  const key = String(featureKey || '').trim();
+  if (!key) return { ok: false, userIds: [], viaRol: 0, viaGebruiker: 0, error: 'featureKey ontbreekt' };
+
+  const ids = new Set();
+  let viaRol = 0;
+  let viaGebruiker = 0;
+
+  try {
+    // 1) Rollen die dit recht hebben → de actieve profielen met die rol.
+    const { data: rp, error: rpErr } = await db
+      .from('role_permissions')
+      .select('role, allowed')
+      .eq('feature_key', key);
+    if (rpErr) throw new Error('role_permissions: ' + rpErr.message);
+
+    const rollen = (rp || []).filter((r) => r?.allowed !== false)
+      .map((r) => r.role).filter(Boolean);
+    if (rollen.length > 0) {
+      const { data: profs, error: pErr } = await db
+        .from('profiles')
+        .select('id, is_active')
+        .in('role', rollen)
+        .eq('is_active', true);
+      if (pErr) throw new Error('profiles: ' + pErr.message);
+      for (const p of (profs || [])) if (p?.id) { ids.add(String(p.id)); viaRol++; }
+    }
+
+    // 2) Personen die dit recht persoonlijk hebben.
+    const { data: up, error: upErr } = await db
+      .from('user_permissions')
+      .select('user_id, allowed')
+      .eq('feature_key', key)
+      .eq('allowed', true);
+    if (upErr) throw new Error('user_permissions: ' + upErr.message);
+
+    const persoonlijk = (up || []).map((r) => r?.user_id).filter(Boolean).map(String);
+    if (persoonlijk.length > 0) {
+      // Ook hier alleen actieve profielen.
+      const { data: profs2, error: p2Err } = await db
+        .from('profiles')
+        .select('id')
+        .in('id', persoonlijk)
+        .eq('is_active', true);
+      if (p2Err) throw new Error('profiles (persoonlijk): ' + p2Err.message);
+      for (const p of (profs2 || [])) if (p?.id && !ids.has(String(p.id))) {
+        ids.add(String(p.id)); viaGebruiker++;
+      }
+    }
+
+    return { ok: true, userIds: Array.from(ids), viaRol, viaGebruiker };
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.error('[notify] ontvangers voor recht ' + key + ' bepalen mislukt:', msg);
+    return { ok: false, userIds: [], viaRol: 0, viaGebruiker: 0, error: msg };
+  }
+}
+
 export async function createNotification(opts) {
   try {
     if (!opts || typeof opts !== 'object') {

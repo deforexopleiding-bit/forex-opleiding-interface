@@ -41,7 +41,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { haalNoShowsSinds, haalEersteSessiePerStudent, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
-import { createNotification } from '../_lib/notify.js';
+import { createNotification, resolveOntvangersVoorRecht } from '../_lib/notify.js';
 
 const SETTING_KEY     = 'noshow_detect_since';
 const FETCH_CAP       = 1000;
@@ -105,6 +105,9 @@ export default async function handler(req, res) {
     fetched: 0, inserted: 0, skipped: 0,
     // Hoeveel van de signalen gingen over de EERSTE sessie van een student.
     eerste_call: 0, eerste_bepaling_mislukt: 0,
+    // Hoofdmentoren die bericht kregen over een gemiste eerste call, en
+    // hoe vaak er NIEMAND te vinden was. Dat laatste mag nooit stil zijn.
+    hoofdmentor_ontvangers: 0, eerste_call_zonder_ontvanger: 0,
     zonder_bubble_koppeling: 0, zonder_mentor_koppeling: 0,
     errors: [],
   };
@@ -196,6 +199,22 @@ export default async function handler(req, res) {
         + eerste.bron_status + '): ' + (eerste.fout || 'reden onbekend'));
     }
 
+    // ── ONTVANGERS VAN HET EERSTE-CALL-SIGNAAL ────────────────────────────
+    // Een gemiste EERSTE call gaat NIET naar de mentor van die sessie maar
+    // naar de hoofdmentor. Die rol bestaat nog niet in het LMS, en
+    // `profiles.role` is enkelvoudig — iemand 'hoofdmentor' maken zou zijn
+    // huidige rol wegnemen. Daarom adresseren we op een RECHT: geef het aan
+    // een rol zodra die er is, of nu aan de betrokken personen. Zie
+    // resolveOntvangersVoorRecht() in api/_lib/notify.js.
+    const HOOFDMENTOR_RECHT = 'signals.hoofdmentor.receive';
+    const hoofdmentoren = await resolveOntvangersVoorRecht(HOOFDMENTOR_RECHT);
+    result.hoofdmentor_ontvangers = hoofdmentoren.userIds.length;
+    if (!hoofdmentoren.ok || hoofdmentoren.userIds.length === 0) {
+      console.warn('[noshow-detect] NIEMAND heeft het recht ' + HOOFDMENTOR_RECHT
+        + (hoofdmentoren.error ? (' (' + hoofdmentoren.error + ')') : '')
+        + ' — een gemiste eerste call levert dan wel een signaal op, maar geen bericht.');
+    }
+
     // Verwerken — hoogste verwerkte start_tijd bijhouden voor de advance.
     let highestMs = isoToMs(watermark) || 0;
 
@@ -260,21 +279,46 @@ export default async function handler(req, res) {
           // is niet zinvol (deze insertie IS het triggerpoint); we dedupen op
           // (type, entity_id) binnen 24u zodat een handmatige her-run
           // dezelfde bel niet nog eens laat rinkelen.
-          if (mentorUserId && insRow?.id) {
-            try {
-              await createNotification({
-                toUserId:      mentorUserId,
-                type:          'student.noshow_review',
-                title:         isEersteCall ? 'EERSTE call gemist — kort opvolgen' : 'No-show — geef reden',
-                body:          (studentName || 'Student') + ' — geef de reden voor de no-show op',
-                linkUrl:       '/modules/mentor-students.html?tab=noshows',
-                entityType:    'student_signal',
-                entityId:      insRow.id,
-                priority:      'high',
-                dedupWithinMs: 24 * 60 * 60 * 1000,
-              });
-            } catch (nErr) {
-              console.warn('[noshow-detect] notify fail-soft:', nErr?.message || nErr);
+          if (insRow?.id) {
+            // WIE er bericht krijgt hangt af van WELKE no-show dit is.
+            //
+            // Gemiste EERSTE call → de hoofdmentor, niet de mentor van de
+            // sessie. Er moet iemand kort op zitten om te voorkomen dat dit
+            // een wanbetaler wordt, en dat is een andere verantwoordelijkheid
+            // dan het opvolgen van een gewone no-show.
+            //
+            // Geen terugval op de sessie-mentor als er geen hoofdmentor
+            // gevonden wordt: dan zou het bericht alsnog belanden waar het
+            // uitdrukkelijk NIET heen mag. Het signaal zelf staat er wel, en
+            // is zichtbaar voor iedereen met students.all.view.
+            const ontvangers = isEersteCall
+              ? hoofdmentoren.userIds
+              : (mentorUserId ? [mentorUserId] : []);
+
+            if (isEersteCall && ontvangers.length === 0) {
+              result.eerste_call_zonder_ontvanger++;
+              console.error('[noshow-detect] gemiste eerste call zonder ontvanger — '
+                + 'signaal ' + insRow.id + ' staat er wel, maar er ging geen bericht uit');
+            }
+
+            for (const ontvanger of ontvangers) {
+              try {
+                await createNotification({
+                  toUserId:      ontvanger,
+                  type:          isEersteCall ? 'student.eerste_call_no_show' : 'student.noshow_review',
+                  title:         isEersteCall ? 'EERSTE call gemist — kort opvolgen' : 'No-show — geef reden',
+                  body:          isEersteCall
+                    ? ((studentName || 'Student') + ' miste de eerste call. Kort opvolgen om te voorkomen dat dit een wanbetaler wordt.')
+                    : ((studentName || 'Student') + ' — geef de reden voor de no-show op'),
+                  linkUrl:       '/modules/mentor-students.html?tab=noshows',
+                  entityType:    'student_signal',
+                  entityId:      insRow.id,
+                  priority:      'high',
+                  dedupWithinMs: 24 * 60 * 60 * 1000,
+                });
+              } catch (nErr) {
+                console.warn('[noshow-detect] notify fail-soft:', nErr?.message || nErr);
+              }
             }
           }
         }

@@ -46,6 +46,35 @@ ALTER TABLE public.student_signals
 
 COMMIT;
 
+-- ── 3) ONTVANGERS van het eerste-call-signaal ────────────────────────────────
+-- Dit is GEEN schema-wijziging maar een rechten-toekenning, en hij hoort bij
+-- deze wijziging: zonder deze rijen levert een gemiste eerste call wel een
+-- signaal op, maar gaat er GEEN bericht uit.
+--
+-- Waarom een recht en geen rol: 'hoofdmentor' bestaat niet als rol, en
+-- profiles.role is enkelvoudig — die rol geven zou de huidige rol (manager,
+-- mentor, ...) wegnemen, met gevolgen tot in de RLS. Waarom geen namen in de
+-- code: dan verhuist de beslissing naar een deploy.
+--
+-- Zodra de rol 'hoofdmentor' wél bestaat, volstaat één rij in
+-- role_permissions en kunnen deze persoonlijke rechten weg. De code hoeft
+-- daarvoor niet te wijzigen.
+--
+-- ⚠ CONTROLEER DE TWEE ADRESSEN voor je dit draait. maxim@deforexopleiding.nl
+-- staat in de mentorlijst; gerber.forex@gmail.com is daar het adres van
+-- Chesney Gerber, maar dat is afgeleid en niet bevestigd.
+
+INSERT INTO public.user_permissions (user_id, feature_key, allowed)
+SELECT p.id, 'signals.hoofdmentor.receive', true
+  FROM public.profiles p
+ WHERE lower(p.email) IN ('maxim@deforexopleiding.nl', 'gerber.forex@gmail.com')
+ON CONFLICT (user_id, feature_key) DO UPDATE SET allowed = true;
+
+-- Controleren wie het recht nu heeft:
+--   SELECT p.email, up.allowed FROM public.user_permissions up
+--     JOIN public.profiles p ON p.id = up.user_id
+--    WHERE up.feature_key = 'signals.hoofdmentor.receive';
+
 -- Controle:
 --   SELECT column_name FROM information_schema.columns
 --    WHERE table_name = 'onboardings' AND column_name LIKE 'auto_afgerond%';
