@@ -25,6 +25,9 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
+// DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
+// deze functie, en die waren NIET identiek — zie de toelichting daar.
+import { computeBedenktijd, findWaiverConsentKey } from './_lib/onboarding-bedenktijd.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -36,42 +39,7 @@ function escapeIlike(s) {
   return String(s || '').replace(/([%_,])/g, '\\$1');
 }
 
-// Loop door alle blokken van de gepubliceerde structuur en pak de
-// consent_key van het EERSTE file_download/consent-blok met is_waiver=true.
-// Geeft null wanneer geen waiver-blok bestaat.
-function findWaiverConsentKey(structure) {
-  if (!structure || typeof structure !== 'object') return null;
-  const pages = Array.isArray(structure.pages) ? structure.pages : [];
-  for (const p of pages) {
-    for (const b of (p?.blocks || [])) {
-      if (!b || !b.is_waiver) continue;
-      if (b.type === 'file_download' && b.consent_key) return b.consent_key;
-      if (b.type === 'consent'       && b.key)         return b.key;
-    }
-  }
-  return null;
-}
 
-// Berekent bedenktijd-status. waiver={agreed,at}|null, offerteOp=iso|null.
-// Vervallen bij: (a) afstand-waiver, of (b) offerte+14d verstreken.
-// Gedupliceerd naast api/onboarding-detail.js' computeBedenktijd zodat
-// beide endpoints dezelfde shape leveren (zelfde pattern als
-// findWaiverConsentKey hierboven).
-function computeBedenktijd(waiver, offerteOp) {
-  let vervaltOp = null;
-  if (offerteOp) {
-    const d = new Date(offerteOp);
-    if (!isNaN(d)) { d.setDate(d.getDate() + 14); vervaltOp = d.toISOString(); }
-  }
-  const waived = waiver && waiver.agreed === true;
-  if (waived)
-    return { status:'vervallen', reason:'afstand',    waived_at:(waiver.at||null), offerte_op:offerteOp, vervalt_op:vervaltOp };
-  if (vervaltOp && Date.now() > new Date(vervaltOp).getTime())
-    return { status:'vervallen', reason:'verstreken', waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
-  if (vervaltOp)
-    return { status:'lopend',    reason:null,         waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
-  return   { status:'onbekend',  reason:null,         waived_at:(waived?waiver.at:null), offerte_op:null,  vervalt_op:null };
-}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');

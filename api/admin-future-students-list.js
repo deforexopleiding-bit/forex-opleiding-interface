@@ -32,6 +32,9 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 // fetchOneOnOneForMentor verwijderd — lazy via /api/onboarding-intake-status.
 import { deriveIntakeStatus, intakeStatusRank } from './_lib/intake-status.js';
+// DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
+// deze functie, en die waren NIET identiek — zie de toelichting daar.
+import { computeBedenktijd, findWaiverConsentKey } from './_lib/onboarding-bedenktijd.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
@@ -43,21 +46,6 @@ function escapeIlike(s) {
   return String(s).replace(/[\\%_]/g, (m) => '\\' + m);
 }
 
-// Spiegel van findWaiverConsentKey in api/onboardings-admin-list.js en
-// api/onboarding-detail.js — niet geëxporteerd uit _lib, hier inline om
-// dezelfde shape te leveren zonder die endpoints te wijzigen.
-function findWaiverConsentKey(structure) {
-  if (!structure || typeof structure !== 'object') return null;
-  const pages = Array.isArray(structure.pages) ? structure.pages : [];
-  for (const p of pages) {
-    for (const b of (p?.blocks || [])) {
-      if (!b || !b.is_waiver) continue;
-      if (b.type === 'file_download' && b.consent_key) return b.consent_key;
-      if (b.type === 'consent'       && b.key)         return b.key;
-    }
-  }
-  return null;
-}
 
 function daysBetween(fromIso, toMs) {
   if (!fromIso) return null;
@@ -66,23 +54,6 @@ function daysBetween(fromIso, toMs) {
   return Math.floor((toMs - t) / (24 * 60 * 60 * 1000));
 }
 
-// Identiek aan computeBedenktijd in onboardings-admin-list.js — kleine
-// helper, niet de moeite om naar _lib te extraheren tot er een derde
-// gebruiker komt.
-function computeBedenktijd(waiver, offerteOp) {
-  const vervaltOp = offerteOp ? new Date(new Date(offerteOp).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString() : null;
-  const waived = !!(waiver && waiver.agreed);
-  if (waived && offerteOp) {
-    return { status:'vervallen', reason:'afstand',    waived_at:(waiver.at||null), offerte_op:offerteOp, vervalt_op:vervaltOp };
-  }
-  if (offerteOp && new Date().toISOString() > vervaltOp) {
-    return { status:'vervallen', reason:'verstreken', waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
-  }
-  if (offerteOp) {
-    return { status:'lopend',    reason:null,         waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
-  }
-  return   { status:'onbekend',  reason:null,         waived_at:(waived?waiver.at:null), offerte_op:null,  vervalt_op:null };
-}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');

@@ -607,6 +607,108 @@ met `titels_gelezen: true`; een mislukte opzoeking geeft `null` met
 `titels_gelezen: false`. In de kolom staat in beide gevallen niets — het
 onderscheid hoort in de cron-uitkomst en de log, niet in een sierveld.
 
+## De onboarding-spiegel (CRM → LMS)
+
+De mentor moet in het LMS zien welke studenten opgepakt moeten worden. Die
+gegevens staan in het CRM en het LMS kan er niet bij; alleen het CRM schrijft
+over de grens.
+
+### Waar het landt
+
+Een **eigen tabel** `hlms_crm_onboarding` in dfo-lms, één rij per onboarding,
+niet kolommen op `hlms_student`. Drie redenen, in volgorde van gewicht:
+eigenaarschap (die tabel is volledig van het CRM, `hlms_student` blijft van het
+LMS), annuleren wordt een `DELETE` in plaats van acht kolommen op `NULL`, en de
+verse-heid past er per rij op in plaats van per veld.
+
+De sleutel is de **onboarding**, niet de student: wisselt de mentor, dan
+verhuist dezelfde rij.
+
+### Eén schrijver
+
+`api/_lib/onboarding-spiegel.js` is de enige plek die naar die tabel schrijft.
+Twee contracttests in `tests/onboarding-spiegel.test.js` bewaken dat: één die
+de hele `api/`-map afzoekt op een tweede schrijfpad, en één die eist dat de
+aanroepers via `spiegelNaActie()` gaan in plaats van met eigen queries.
+
+### Eén berekening
+
+De vier feiten komen uit dezelfde berekening als `admin-future-students-list.js`.
+Dat was niet vanzelfsprekend: `computeBedenktijd` stond **in viervoud** in
+`admin-future-students-list.js`, `onboardings-admin-list.js`,
+`onboarding-detail.js` en `mentor-future-students-self.js`, elk met een comment
+dat ze identiek waren. Ze waren het niet — twee verschillen, allebei tweeëntwee
+gesplitst:
+
+| verschil | de twee varianten | beslecht op |
+|---|---|---|
+| vervaldatum | `setDate(+14)` (kalenderdagen) vs `+14×24u` (336 uur) | **kalenderdagen** — de wet spreekt over veertien dagen, niet over 336 uur; over een zomertijdgrens schelen die een uur en precies op de grens klapt de uitkomst om |
+| waiver zonder offertedatum | `vervallen/afstand` vs `onbekend` | **vervallen** — een klant die uitdrukkelijk afstand deed `onbekend` noemen omdat wij de offertedatum niet vonden, is een bekend feit weggooien |
+
+Beide keuzes staan gepind in tests. Ze **veranderen het gedrag** van
+`admin-future-students-list.js` en `mentor-future-students-self.js` in die
+randgevallen; dat is bewust.
+
+`onbekend` mag nooit als `vervallen` gelezen worden. De regel is dat de mentor
+niet doorbelt zolang de bedenktijd loopt, dus bij onbekend geldt
+terughoudendheid, niet vrij spel.
+
+### De hersync is de waarheid, de aanroep is snelheid
+
+`api/cron/onboarding-spiegel-sync.js` draait dagelijks (07:20 UTC, na de
+afsluitcron) en **verzoent**: toevoegen wat mist, bijwerken wat er staat, en
+verwijderen wat er niet meer hoort. De aanroepen vanuit de zeven endpoints zijn
+er alleen zodat het scherm meteen klopt.
+
+Die volgorde is met opzet zo. Er zijn twintig schrijfpunten op `onboardings`;
+bij twintig is het geen kwestie óf er ooit eentje de spiegel vergeet, maar
+wanneer. Zou het gebeurtenis-schrijven de hoofdweg zijn, dan is een vergeten
+aanroep een blijvende afwijking die niemand ziet. Nu is het hooguit een dag.
+
+### Verdwijnen is een gevolg van de definitie
+
+De verwachte verzameling wordt afgeleid uit het CRM: `status != 'geannuleerd'
+AND archived_at IS NULL AND dfo_lms_student_id IS NOT NULL`. Een geannuleerde
+onboarding kan daar per definitie niet in zitten, dus "verdwijnt overal in het
+LMS" is een gevolg van die definitie en niet van een opruimactie die iemand kan
+vergeten. `onboarding-cancel.js` roept de spiegel ook zelf aan, zodat het
+meteen weg is in plaats van morgen.
+
+### Als de spiegel niet geschreven kan worden
+
+- **De hoofdactie gaat altijd door.** Een mentortoewijzing die faalt omdat het
+  LMS onbereikbaar is, is erger dan een spiegel die een dag achterloopt.
+- **Nooit een halve rij.** Alles wat kan mislukken gebeurt vóór er iets
+  geschreven wordt; de rij gaat in één `upsert`.
+- **De oude rij blijft staan** met zijn oude `bijgewerkt_op`. Er wordt
+  uitdrukkelijk niet "gemarkeerd als stuk" — dat zou een schrijfactie zijn op
+  grond van een mislukte lezing.
+- **Het mentorscherm toont `null` als "niet opgehaald"**, niet als leeg vakje,
+  en zegt het zelf als `bijgewerkt_op` te oud is. Zonder die regel ziet een
+  stilstaande spiegel er identiek uit als een kloppende.
+- **De cron verwijdert niets** als hij de spiegeltabel niet kon lezen: dan weet
+  hij ook niet wat overtollig is. 502, en niets aangeraakt.
+
+### De dode Bubble-kolom
+
+`hlms_student.onboarding_status` is een bevroren Bubble-import (7 vrije-
+tekstwaarden over 307 rijen, half NL half EN). Er schrijft niets meer aan, maar
+er **wordt wel uit gelezen**: `hlms-student-detail-page.tsx:873` toont 'm en
+`own-hlms-student-store.tsx:212` laadt 'm in het eigen studentprofiel. Daarom
+niet hernoemd — alleen een `COMMENT` dat zegt waar de echte stand staat.
+Hernoemen gebeurt in de LMS-PR die die twee leesplekken omzet.
+
+Bijvangst voor die PR: `src/features/mentor/studenten/studenten-format.ts:59-90`
+bevat al een `studentSectie()` die studenten in `oppikken` / `onboarding` /
+`actief` verdeelt — in opzet precies het blok dat gevraagd is, maar gevoed door
+die dode kolom. Die functie wordt nergens aangeroepen; er staat dus een leeg
+raamwerk klaar dat op de verkeerde bron was aangesloten.
+
+### Nog niet gebouwd: on-hold
+
+On-hold bestaat **nergens** in het CRM — geen kolom, geen endpoint, geen knop.
+Dat is een eigen fase vóór de spiegel-uitbreiding, en die ligt apart bij Maxim.
+
 ### Bewust niet omgezet: de betaalherinnering
 
 `api/cron/first-call-payment-reminder.js` blijft op Bubble staan en is
