@@ -5136,8 +5136,13 @@
         is_default: !!cRes?.dunning_ladder_is_default,
         updated_at: cRes?.dunning_ladder_updated_at || null,
       };
+      // Dagcap is per kanaal: { whatsapp, email }. Back-compat met een kaal
+      // getal uit een oudere API-versie.
+      const capRaw = cRes?.dunning_max_sends_per_day;
+      const capObj = (capRaw && typeof capRaw === 'object') ? capRaw : { whatsapp: capRaw, email: capRaw };
       _dsv.cap = {
-        count: Number.isFinite(Number(cRes?.dunning_max_sends_per_day)) ? Number(cRes.dunning_max_sends_per_day) : 1,
+        whatsapp: Number.isFinite(Number(capObj.whatsapp)) ? Number(capObj.whatsapp) : 1,
+        email:    Number.isFinite(Number(capObj.email))    ? Number(capObj.email)    : 1,
         is_default: !!cRes?.dunning_max_sends_per_day_is_default,
         updated_at: cRes?.dunning_max_sends_per_day_updated_at || null,
       };
@@ -5193,18 +5198,23 @@
     });
   };
   window.__setDsvCapSave = () => {
-    const el = document.querySelector('[data-dsv-field="cap"]');
-    const n = Number(el?.value);
-    if (!Number.isFinite(n) || n < 1 || n > 10 || Math.trunc(n) !== n) { showToast('Dagcap moet integer 1..10 zijn', 'warn'); return; }
-    openConfirm(`Dagcap op ${n} bericht(en) per klant per dag zetten? Dit is het vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan krijgt er hoogstens ${n} per dag.`, async () => {
+    const lees = (kanaal) => Number(document.querySelector(`[data-dsv-field="cap-${kanaal}"]`)?.value);
+    const wa = lees('whatsapp');
+    const em = lees('email');
+    for (const [label, n] of [['WhatsApp', wa], ['E-mail', em]]) {
+      if (!Number.isFinite(n) || n < 1 || n > 10 || Math.trunc(n) !== n) {
+        showToast(`Dagcap ${label} moet integer 1..10 zijn`, 'warn'); return;
+      }
+    }
+    openConfirm(`Dagcap zetten op ${wa} WhatsApp en ${em} e-mail per klant per dag? Vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan krijgt er hoogstens dit aantal per dag per kanaal. Het WhatsApp+e-mail-koppel van dezelfde ronde blijft samen vertrekken.`, async () => {
       _dsv.capBusy = true; if (render) render();
       try {
         const j = await tryFetch('dun-settings-update-cap', '/api/dunning-settings-update', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dunning_max_sends_per_day: n }),
+          body: JSON.stringify({ dunning_max_sends_per_day: { whatsapp: wa, email: em } }),
         });
         if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
-        showToast('Dagcap bijgewerkt naar ' + n, 'ok');
+        showToast(`Dagcap bijgewerkt: ${wa} WhatsApp / ${em} e-mail per dag`, 'ok');
         _dsv.fetched = false; fetchDunningVenster();
       } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
       finally { _dsv.capBusy = false; if (render) render(); }
@@ -5292,15 +5302,21 @@
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
           <div>
-            <div style="font-size:13px;font-weight:600">Dagcap — berichten per klant per dag</div>
+            <div style="font-size:13px;font-weight:600">Dagcap — berichten per klant per dag, per kanaal</div>
             <div style="font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5">
-              Nu: <b>${cap?.count ?? 1}</b>${cap?.is_default ? ' (default)' : ''}. Vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan — omdat hij al lang te laat is — krijgt er hoogstens ${cap?.count ?? 1} per kalenderdag (Europe/Amsterdam).
+              Nu: <b>${cap?.whatsapp ?? 1} WhatsApp</b> en <b>${cap?.email ?? 1} e-mail</b> per kalenderdag (Europe/Amsterdam)${cap?.is_default ? ' — default' : ''}.
+              Vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan — omdat hij al lang te laat is — krijgt er hoogstens dit aantal per dag.
+              <b>Per kanaal</b>, zodat de WhatsApp en de e-mail van dezelfde aanmaanronde samen vertrekken; alleen een tweede bericht op hetzelfde kanaal wordt tegengehouden.
               De cooldown geldt alleen bij het <i>starten</i> van een run; deze cap geldt óók binnen een lopende run.
             </div>
           </div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input type="number" min="1" max="10" step="1" data-dsv-field="cap" value="${esc(String(cap?.count ?? 1))}" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
-            <span style="font-size:12px;color:var(--text-3)">per dag</span>
+          <div style="display:flex;gap:10px;align-items:flex-end">
+            <label style="font-size:10.5px;color:var(--text-3);display:flex;flex-direction:column;gap:3px">WhatsApp
+              <input type="number" min="1" max="10" step="1" data-dsv-field="cap-whatsapp" value="${esc(String(cap?.whatsapp ?? 1))}" style="width:70px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            </label>
+            <label style="font-size:10.5px;color:var(--text-3);display:flex;flex-direction:column;gap:3px">E-mail
+              <input type="number" min="1" max="10" step="1" data-dsv-field="cap-email" value="${esc(String(cap?.email ?? 1))}" style="width:70px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            </label>
             <button class="btn btn-primary btn-sm" ${_dsv.capBusy ? 'disabled' : ''} onclick="window.__setDsvCapSave()">${_dsv.capBusy ? 'Bezig…' : 'Opslaan'}</button>
           </div>
         </div>

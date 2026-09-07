@@ -154,7 +154,8 @@ test('DAGCAP (default 1): dempt diezelfde golf tot één bericht per dag', () =>
   // Geen opties: de simulator neemt de dagcap uit de settings (default 1),
   // net als de motor.
   const r = simulateEngine(snap, { horizonDays: 8 });
-  assert.equal(r.meta.options.maxSendsPerCustomerPerDay, 1, 'cap komt uit de settings');
+  assert.deepEqual(r.meta.options.maxSendsPerCustomerPerDay, { whatsapp: 1, email: 1 },
+    'cap komt uit de settings, per kanaal');
   assert.equal(r.same_day_bursts.length, 0, 'geen enkele dag met 2 berichten');
   assert.deepEqual(r.days.slice(0, 5).map((d) => d.total), [1, 1, 1, 1, 1]);
   assert.equal(r.totals.messages, 5, 'zelfde vijf berichten, uitgesmeerd over vijf dagen');
@@ -439,4 +440,141 @@ test('SCENARIO: dag 1 na deploy op de gemeten live verdeling', () => {
   // gevallen zijn de landmijn die de backfill moet ontmantelen.
   const paused = new Set(snap.runs.filter((r) => r.status === 'paused').map((r) => r.customer_id));
   assert.equal(zonder.messages.filter((m) => paused.has(m.customer_id)).length, 0);
+});
+
+// ── PER-KANAAL DAGCAP: het WhatsApp+e-mail-koppel ─────────────────────────
+//
+// De productie-workflow "Aanmaningen" (9805c900-1c74-4326-9d15-a1e49f754eb0)
+// stuurt per ronde een WhatsApp ÉN een e-mail vlak na elkaar. De
+// WhatsApp-templates staan op de ladder; de e-mailtemplates niet — hun naam
+// is "Aanmaning dag N (E-mail)" en dat is geen ladder-sleutel, dus
+// resolveStepTierDays geeft null en de e-mail volgt direct op de WhatsApp in
+// dezelfde ronde. Met één gedeelde cap zou die e-mail elke ronde een dag
+// vooruitgeschoven worden.
+const EMAIL_TEMPLATES = {
+  e7:  { id: 'e7',  name: 'Aanmaning dag 7 (E-mail)',  meta_template_name: null },
+  e14: { id: 'e14', name: 'Aanmaning dag 14 (E-mail)', meta_template_name: null },
+};
+
+// Ronde 1: whatsapp + email, dan wait, dan ronde 2: whatsapp + email.
+const KOPPEL_STEPS = [
+  { id: 'k0', step_order: 0, step_type: 'whatsapp', config: { template_id: 't7'  } },
+  { id: 'k1', step_order: 1, step_type: 'email',    config: { template_id: 'e7'  } },
+  { id: 'k2', step_order: 2, step_type: 'wait',     config: { days: 6 } },
+  { id: 'k3', step_order: 3, step_type: 'whatsapp', config: { template_id: 't14' } },
+  { id: 'k4', step_order: 4, step_type: 'email',    config: { template_id: 'e14' } },
+];
+
+function koppelSnapshot({ today = '2026-09-07', dueDate = '2026-09-06', settings = {} } = {}) {
+  return {
+    today,
+    settings: {
+      graceDays: 0, cooldownDays: 7, ladder: DEFAULT_LADDER,
+      officeHours: { tz: 'Europe/Amsterdam', start: '08:00', end: '20:00', days: [0,1,2,3,4,5,6] },
+      ...settings,
+    },
+    templates: { ...TEMPLATES, ...EMAIL_TEMPLATES },
+    workflows: [{ id: 'wf1', name: 'Aanmaningen', priority: 10, trigger_conditions: {}, steps: KOPPEL_STEPS }],
+    customers: [{
+      id: 'K', name: 'Klant K', is_company: false, stage_slug: 'nieuw',
+      invoices: [{ id: 'inv-K', invoice_number: '2026/K', due_date: dueDate, open_amount: 500 }],
+    }],
+    runs: [],
+    everRan: [], lastSendByCustomer: {}, blockedCustomers: [], breachedByCustomer: {},
+  };
+}
+
+test('KOPPEL: whatsapp en e-mail van dezelfde ronde vertrekken op DEZELFDE dag', () => {
+  // Vervaldatum gisteren → vandaag is dag 1, de sport van aanmaning_dag7.
+  const r = simulateEngine(koppelSnapshot(), { horizonDays: 2 });
+  const dag1 = r.messages.filter((m) => m.date === '2026-09-07');
+  assert.equal(dag1.length, 2, 'twee berichten op dag 1: de WhatsApp en de e-mail');
+  assert.deepEqual(dag1.map((m) => m.channel).sort(), ['email', 'whatsapp']);
+  assert.deepEqual(dag1.map((m) => m.template).sort(),
+    ['Aanmaning dag 7 (E-mail)', 'aanmaning_dag7']);
+  // Zelfde tick, dus hetzelfde uur — geen dag ertussen.
+  assert.equal(dag1[0].hour, dag1[1].hour, 'beide in dezelfde tick');
+  // En het telt niet als inhaalgolf: per kanaal is het er één.
+  assert.equal(r.same_day_bursts.length, 0);
+});
+
+test('KOPPEL: de e-mail loopt NIET permanent een dag achter de WhatsApp aan', () => {
+  // Twee volledige rondes over 10 dagen: elke ronde moet WA+mail op één dag.
+  const r = simulateEngine(koppelSnapshot(), { horizonDays: 10 });
+  const perDag = {};
+  for (const m of r.messages) (perDag[m.date] ||= []).push(m.channel);
+  const dagenMetPost = Object.keys(perDag).sort();
+  assert.equal(dagenMetPost.length, 2, 'twee verzenddagen: ronde 1 en ronde 2');
+  for (const d of dagenMetPost) {
+    assert.deepEqual(perDag[d].sort(), ['email', 'whatsapp'], `${d}: koppel compleet`);
+  }
+  assert.equal(dagenMetPost[0], '2026-09-07', 'ronde 1 op dag 1');
+  assert.equal(dagenMetPost[1], '2026-09-13', 'ronde 2 op dag 7 (ladder-sport aanmaning_dag14)');
+});
+
+test('KOPPEL: een TWEEDE WhatsApp op dezelfde dag wordt wél tegengehouden', () => {
+  // Klant is 60 dagen te laat: beide WhatsApp-sporten zijn gepasseerd, dus
+  // zonder cap zou ronde 2 dezelfde dag volgen. De e-mail van ronde 1 mag mee,
+  // de WhatsApp van ronde 2 niet.
+  const snap = koppelSnapshot({ dueDate: '2026-07-09' });
+  snap.runs = [{
+    id: 'run-K', workflow_id: 'wf1', customer_id: 'K', status: 'active',
+    current_step_id: 'k0', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
+  }];
+  const r = simulateEngine(snap, { horizonDays: 3 });
+
+  const dag1 = r.messages.filter((m) => m.date === '2026-09-07');
+  assert.equal(dag1.length, 2, 'ronde 1 compleet: 1 WhatsApp + 1 e-mail');
+  assert.deepEqual(dag1.map((m) => m.channel).sort(), ['email', 'whatsapp']);
+  assert.equal(dag1.filter((m) => m.channel === 'whatsapp').length, 1,
+    'precies één WhatsApp op dag 1 — de tweede is door de dagcap tegengehouden');
+
+  // Ronde 2 landt op de volgende dag, weer als compleet koppel.
+  const dag2 = r.messages.filter((m) => m.date === '2026-09-08');
+  assert.equal(dag2.length, 2);
+  assert.deepEqual(dag2.map((m) => m.channel).sort(), ['email', 'whatsapp']);
+  assert.equal(r.same_day_bursts.length, 0, 'nooit twee van hetzelfde kanaal op één dag');
+});
+
+test('KOPPEL: de e-mail heeft een eigen budget naast de WhatsApp', () => {
+  // De cap is per kanaal gesleuteld. Beide kanalen hebben op dezelfde dag hun
+  // eigen teller, dus de e-mail van ronde 1 verbruikt de WhatsApp-cap niet en
+  // omgekeerd.
+  const r = simulateEngine(koppelSnapshot(), { horizonDays: 1 });
+  assert.equal(r.messages.filter((m) => m.channel === 'whatsapp').length, 1);
+  assert.equal(r.messages.filter((m) => m.channel === 'email').length, 1);
+  assert.deepEqual(r.meta.options.maxSendsPerCustomerPerDay, { whatsapp: 1, email: 1 });
+});
+
+test('KOPPEL: cap per kanaal is los instelbaar', () => {
+  const snap = koppelSnapshot({ dueDate: '2026-07-09' });   // 60 dagen te laat
+  snap.runs = [{
+    id: 'run-K', workflow_id: 'wf1', customer_id: 'K', status: 'active',
+    current_step_id: 'k0', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
+  }];
+  // De wait-klem is hier uitgezet, anders is die de beperkende factor en zie
+  // je het effect van de cap niet. WhatsApp 2 per dag, e-mail 1 per dag:
+  // beide rondes op dag 1, maar de tweede e-mail wordt tegengehouden.
+  const r = simulateEngine(snap, {
+    horizonDays: 2, disableWaitClamp: true,
+    maxSendsPerCustomerPerDay: { whatsapp: 2, email: 1 },
+  });
+  const dag1 = r.messages.filter((m) => m.date === '2026-09-07');
+  assert.equal(dag1.filter((m) => m.channel === 'whatsapp').length, 2, 'WhatsApp-cap 2 → twee sporten');
+  assert.equal(dag1.filter((m) => m.channel === 'email').length, 1, 'e-mail-cap 1 → één mail');
+});
+
+test('KOPPEL: de wait-klem is de eerste rem, de dagcap het vangnet', () => {
+  // Zelfde klant van 60 dagen te laat, nu met de klem AAN (de geleverde
+  // branch): de klem alleen houdt ronde 2 al tegen tot de volgende dag, ook
+  // als de WhatsApp-cap ruimte zou geven.
+  const snap = koppelSnapshot({ dueDate: '2026-07-09' });
+  snap.runs = [{
+    id: 'run-K', workflow_id: 'wf1', customer_id: 'K', status: 'active',
+    current_step_id: 'k0', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
+  }];
+  const r = simulateEngine(snap, { horizonDays: 2, maxSendsPerCustomerPerDay: { whatsapp: 5, email: 5 } });
+  const dag1 = r.messages.filter((m) => m.date === '2026-09-07');
+  assert.equal(dag1.length, 2, 'alleen ronde 1 op dag 1, ondanks een ruime cap');
+  assert.deepEqual(dag1.map((m) => m.channel).sort(), ['email', 'whatsapp']);
 });

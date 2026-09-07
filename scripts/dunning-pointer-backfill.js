@@ -27,6 +27,13 @@
 // golf alleen maar uitstellen. Hun status blijft ongemoeid — alleen de
 // pointer verschuift.
 //
+// TOON-BESLISSING (Maxim): runs die gepauzeerd zijn door een LOPEND GESPREK
+// (`paused_by_conversation_id` gezet) landen op ÉÉN SPORT LAGER dan de
+// hoogste bereikte sport. Die klanten zaten net nog met Dave in gesprek; met
+// de deur in huis vallen met een laatste waarschuwing past niet. Is er maar
+// één sport bereikt, dan blijft die staan. Alle andere runs — actief, of
+// gepauzeerd om een andere reden — gaan wel naar de hoogste bereikte sport.
+//
 // IDEMPOTENT: staat de pointer al goed, dan gebeurt er niets. Een tweede run
 // rapporteert nul verzettingen.
 //
@@ -153,20 +160,51 @@ export function planBackfill(snap) {
     const signed = daysOverdueSigned(cust.oldest_due, snap.today);
     if (signed == null || signed < 1) { skipped.push({ run_id: run.id, customer_name: naam, reason: `nog niet vervallen (${signed} dagen)` }); continue; }
 
-    // Hoogste send-stap waarvan de ladder-sport al gepasseerd is.
-    let target = null, targetTier = null;
+    // Alle send-stappen waarvan de ladder-sport al gepasseerd is, op volgorde.
+    // Alleen stappen MÉT een sport tellen: de e-mails ("Aanmaning dag N
+    // (E-mail)") staan niet op de ladder en zijn dus geen sport op zich.
+    const bereikt = [];
     for (const st of steps) {
       if (!isSendStep(st.step_type)) continue;
       const tier = resolveStepTierDays(st, (snap.templates || {})[st?.config?.template_id] || null, ladder);
-      if (tier != null && signed >= tier) { target = st; targetTier = tier; }
+      if (tier != null && signed >= tier) bereikt.push({ step: st, tier });
     }
-    if (!target) { skipped.push({ run_id: run.id, customer_name: naam, reason: 'geen ladder-sport bereikt' }); continue; }
+    if (!bereikt.length) { skipped.push({ run_id: run.id, customer_name: naam, reason: 'geen ladder-sport bereikt' }); continue; }
+
+    // TOON-BESLISSING (Maxim): een run die gepauzeerd is door een LOPEND
+    // GESPREK mag niet in één keer op het slotbericht landen. Die klanten
+    // zaten net nog met Dave aan de lijn; met de deur in huis vallen met een
+    // laatste waarschuwing past niet. Zij gaan één sport LAGER dan de hoogste
+    // bereikte sport — is de hoogste `aanmaning_dag37`, dan wordt het
+    // `aanmaning_dag21`. Is er maar één sport bereikt, dan blijft die staan:
+    // nooit lager dan de laagste bereikte sport.
+    //
+    // Alle andere runs (actief, of gepauzeerd om een andere reden dan een
+    // gesprek) gaan wel naar de hoogste bereikte sport.
+    const gespreksPauze = run.status === 'paused' && !!run.paused_by_conversation_id;
+    const hoogste = bereikt[bereikt.length - 1];
+    const gekozen = (gespreksPauze && bereikt.length >= 2)
+      ? bereikt[bereikt.length - 2]
+      : hoogste;
+    const toonVerlaagd = gekozen !== hoogste;
+    let target = gekozen.step;
+    let targetTier = gekozen.tier;
     if (cur && Number(cur.step_order) >= Number(target.step_order)) {
-      skipped.push({ run_id: run.id, customer_name: naam, reason: 'pointer staat al goed of verder' });
-      continue;   // ← idempotentie
+      // Idempotentie. Bij een toon-verlaging is dit het normale geval voor
+      // klanten die pas één of twee sporten ver zijn: de verlaagde sport is
+      // de sport waar ze al op staan. Aparte reden zodat je in de uitvoer
+      // ziet dat het door de toon-beslissing komt en niet door een eerdere run.
+      skipped.push({
+        run_id: run.id, customer_name: naam,
+        reason: toonVerlaagd
+          ? 'na de toon-verlaging staat de pointer al goed (gesprekspauze)'
+          : 'pointer staat al goed of verder',
+      });
+      continue;
     }
 
-    const tpl = (snap.templates || {})[target?.config?.template_id] || null;
+    const tpl      = (snap.templates || {})[target?.config?.template_id] || null;
+    const hoogsteTpl = (snap.templates || {})[hoogste.step?.config?.template_id] || null;
     moves.push({
       run_id: run.id,
       run_status: run.status,
@@ -183,6 +221,14 @@ export function planBackfill(snap) {
       paused_reason: run.status === 'paused'
         ? (run.paused_by_conversation_id ? 'gesprek' : run.paused_by_arrangement_id ? 'arrangement' : (run.paused_manual_reason || 'overig'))
         : null,
+      // Toon-beslissing: gespreksgepauzeerde runs één sport lager.
+      conversation_paused: gespreksPauze,
+      tone_downgrade: toonVerlaagd,
+      downgrade_reason: toonVerlaagd ? 'gepauzeerd door lopend gesprek — niet met de deur in huis' : null,
+      highest_reached_step_order: hoogste.step.step_order,
+      highest_reached_template: hoogsteTpl?.meta_template_name || hoogsteTpl?.name || null,
+      highest_reached_rung: hoogste.tier,
+      reached_rungs: bereikt.length,
     });
   }
   moves.sort((a, b) => b.days_overdue - a.days_overdue);
@@ -220,6 +266,11 @@ async function apply(moves, todayIso) {
           to_step_order: m.to_step_order,
           to_template: m.to_template,
           ladder_rung: m.ladder_rung,
+          conversation_paused: m.conversation_paused,
+          tone_downgrade: m.tone_downgrade,
+          downgrade_reason: m.downgrade_reason,
+          highest_reached_step_order: m.highest_reached_step_order,
+          highest_reached_template: m.highest_reached_template,
           today_amsterdam: todayIso,
           sent_anything: false,
         },
@@ -249,16 +300,39 @@ export function renderPlan(snap, plan, applied) {
   const perStatus = {};
   for (const m of plan.moves) perStatus[m.run_status] = (perStatus[m.run_status] || 0) + 1;
   for (const [k, v] of Object.entries(perStatus)) p(`  ${k}: ${v}`);
-  const perTpl = {};
-  for (const m of plan.moves) perTpl[m.to_template || '(geen template)'] = (perTpl[m.to_template || '(geen template)'] || 0) + 1;
+
+  // Doel-sport apart voor gespreksgepauzeerde en overige runs. De eerste groep
+  // krijgt bewust één sport lager (toon-beslissing), dus die twee verdelingen
+  // door elkaar tonen zou het beeld vertroebelen.
+  const gespreks = plan.moves.filter((m) => m.conversation_paused);
+  const overige  = plan.moves.filter((m) => !m.conversation_paused);
+  const verdeling = (lijst) => {
+    const per = {};
+    for (const m of lijst) per[m.to_template || '(geen template)'] = (per[m.to_template || '(geen template)'] || 0) + 1;
+    return Object.entries(per).sort((a, b) => b[1] - a[1]);
+  };
   p('');
-  p('  doel-sport:');
-  for (const [k, v] of Object.entries(perTpl).sort((a, b) => b[1] - a[1])) p(`    ${String(k).padEnd(20)} ${v}`);
+  p(`  doel-sport — gepauzeerd door een lopend gesprek (${gespreks.length}):`);
+  p('    (bewust één sport lager dan de hoogste bereikte sport — toon-beslissing)');
+  const vg = verdeling(gespreks);
+  if (vg.length) for (const [k, v] of vg) p(`      ${String(k).padEnd(20)} ${v}`);
+  else p('      (geen)');
+  p('');
+  p(`  doel-sport — overige runs, actief of anders gepauzeerd (${overige.length}):`);
+  const vo = verdeling(overige);
+  if (vo.length) for (const [k, v] of vo) p(`      ${String(k).padEnd(20)} ${v}`);
+  else p('      (geen)');
+  const verlaagd = plan.moves.filter((m) => m.tone_downgrade);
+  p('');
+  p(`  waarvan één sport lager gezet: ${verlaagd.length}`);
   p('');
   for (const m of plan.moves.slice(0, 200)) {
+    const toon = m.tone_downgrade
+      ? ` ⟵ één sport lager (${m.highest_reached_template} → ${m.to_template}); ${m.downgrade_reason}`
+      : '';
     p(`  ${String(m.customer_name).padEnd(30).slice(0, 30)} ${String(m.days_overdue).padStart(4)}d te laat · ` +
       `${m.run_status.padEnd(6)}${m.paused_reason ? `(${m.paused_reason})`.padEnd(14) : ''.padEnd(14)} · ` +
-      `stap ${m.from_step_order ?? '?'} → ${m.to_step_order} · ${m.to_template} (sport dag ${m.ladder_rung})`);
+      `stap ${m.from_step_order ?? '?'} → ${m.to_step_order} · ${m.to_template} (sport dag ${m.ladder_rung})${toon}`);
   }
   if (plan.moves.length > 200) p(`  … en nog ${plan.moves.length - 200}.`);
   p('');

@@ -89,7 +89,81 @@ test('gepauzeerde runs doen mee — anders cascaderen ze zodra de pauze wegvalt'
   assert.ok(moves.every((m) => m.run_status === 'paused'));
   assert.deepEqual(moves.map((m) => m.paused_reason).sort(), ['arrangement', 'gesprek', 'reply_email']);
   // De status zelf verandert niet: de planner levert alleen een pointer-doel.
-  assert.ok(moves.every((m) => m.to_step_id === 's9'));
+  // Alleen de gesprekspauze krijgt een sport lager (toon-beslissing).
+  const perReden = Object.fromEntries(moves.map((m) => [m.paused_reason, m.to_step_id]));
+  assert.equal(perReden.arrangement, 's9');
+  assert.equal(perReden.reply_email, 's9');
+  assert.equal(perReden.gesprek,     's7', 'gesprekspauze: één sport lager');
+});
+
+// ── TOON-BESLISSING: gesprekspauze één sport lager ────────────────────────
+test('TOON: gespreksgepauzeerde run met 60 dagen te laat landt op aanmaning_dag21', () => {
+  const { moves } = planBackfill(snap(
+    [run('g', { status: 'paused', paused_by_conversation_id: 'conv-1' })],
+    cust('g', 60),
+  ));
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].to_template, 'aanmaning_dag21');
+  assert.equal(moves[0].to_step_id, 's7');
+  assert.equal(moves[0].tone_downgrade, true);
+  assert.equal(moves[0].conversation_paused, true);
+  assert.equal(moves[0].highest_reached_template, 'aanmaning_dag37');
+  assert.match(moves[0].downgrade_reason, /lopend gesprek/);
+});
+
+test('TOON: actieve run met dezelfde 60 dagen achterstand landt op aanmaning_dag37', () => {
+  const { moves } = planBackfill(snap([run('a')], cust('a', 60)));
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].to_template, 'aanmaning_dag37');
+  assert.equal(moves[0].to_step_id, 's9');
+  assert.equal(moves[0].tone_downgrade, false);
+  assert.equal(moves[0].conversation_paused, false);
+});
+
+test('TOON: één bereikte sport blijft staan — nooit lager dan de laagste', () => {
+  // 3 dagen te laat → alleen aanmaning_dag7 (sport dag 1) bereikt. Er is geen
+  // lagere sport, dus de pointer blijft op s1 en de move valt weg tegen de
+  // idempotentiecheck.
+  const { moves, skipped } = planBackfill(snap(
+    [run('g', { status: 'paused', paused_by_conversation_id: 'conv-1' })],
+    cust('g', 3),
+  ));
+  assert.equal(moves.length, 0);
+  assert.match(skipped[0].reason, /pointer staat al goed/);
+});
+
+test('TOON: verlaging gaat nooit terug naar een stap die de pointer al voorbij is', () => {
+  // Pointer staat al op s9 (aanmaning_dag37); de verlaging zou s7 opleveren,
+  // maar terugzetten mag niet — de idempotentiecheck houdt 'm tegen.
+  const { moves, skipped } = planBackfill(snap(
+    [run('g', { status: 'paused', paused_by_conversation_id: 'conv-1', step: 's9' })],
+    cust('g', 60),
+  ));
+  assert.equal(moves.length, 0);
+  assert.match(skipped[0].reason, /toon-verlaging|al goed/);
+});
+
+test('TOON: verlaging slaat de e-mailstap over — alleen ladder-sporten tellen', () => {
+  // Een workflow met whatsapp + e-mail per ronde. De e-mails staan niet op de
+  // ladder, dus "één sport lager" dan aanmaning_dag37 is aanmaning_dag21 en
+  // niet de e-mail van dag 21.
+  const stepsMetMail = [
+    { id: 'm0', workflow_id: 'wf1', step_order: 0, step_type: 'whatsapp', config: { template_id: 't7'  } },
+    { id: 'm1', workflow_id: 'wf1', step_order: 1, step_type: 'whatsapp', config: { template_id: 't21' } },
+    { id: 'm2', workflow_id: 'wf1', step_order: 2, step_type: 'email',    config: { template_id: 'e21' } },
+    { id: 'm3', workflow_id: 'wf1', step_order: 3, step_type: 'whatsapp', config: { template_id: 't37' } },
+    { id: 'm4', workflow_id: 'wf1', step_order: 4, step_type: 'email',    config: { template_id: 'e37' } },
+  ];
+  const s = {
+    today: TODAY, ladder: LADDER, steps: stepsMetMail,
+    templates: { ...TEMPLATES, e21: { id: 'e21', name: 'Aanmaning dag 21 (E-mail)' }, e37: { id: 'e37', name: 'Aanmaning dag 37 (E-mail)' } },
+    runs: [{ id: 'run-g', workflow_id: 'wf1', customer_id: 'g', status: 'paused', current_step_id: 'm0', needs_attention: false, paused_by_conversation_id: 'c1' }],
+    customers: cust('g', 60),
+  };
+  const { moves } = planBackfill(s);
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].to_template, 'aanmaning_dag21');
+  assert.equal(moves[0].to_step_id, 'm1', 'de whatsapp van ronde 21, niet de e-mail');
 });
 
 // ── Idempotentie ──────────────────────────────────────────────────────────
@@ -145,11 +219,16 @@ test('voorbeeld-fixture: dekt de gemeten verdeling en levert een stabiel plan', 
   assert.equal(fixture.runs.filter((r) => r.status === 'paused').length, 68);
 
   const { moves, skipped } = planBackfill(fixture);
-  assert.equal(moves.length, 88);
-  assert.equal(moves.filter((m) => m.run_status === 'paused').length, 68, 'alle 68 pauzes worden ontmanteld');
+  assert.equal(moves.length, 69);
   assert.equal(moves.filter((m) => m.run_status === 'active').length, 20);
-  assert.equal(moves.filter((m) => m.to_template === 'aanmaning_dag37').length, 65);
-  assert.equal(skipped.length, 3);
+  // 44 gespreksgepauzeerde zware gevallen gaan één sport lager naar dag21;
+  // de 19 lichte gespreksgepauzeerde runs vallen tegen de idempotentiecheck.
+  assert.equal(moves.filter((m) => m.conversation_paused).length, 44);
+  assert.equal(moves.filter((m) => m.tone_downgrade).length, 44);
+  assert.ok(moves.filter((m) => m.conversation_paused).every((m) => m.to_template === 'aanmaning_dag21'));
+  assert.equal(moves.filter((m) => !m.conversation_paused && m.to_template === 'aanmaning_dag37').length, 21);
+  assert.equal(skipped.length, 22);
+  assert.equal(skipped.filter((s) => /toon-verlaging/.test(s.reason)).length, 19);
 
   // Tweede ronde op het resultaat: niets meer te doen.
   const na = {

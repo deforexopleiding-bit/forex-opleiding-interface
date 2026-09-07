@@ -26,6 +26,10 @@ import {
   parseGraceDays,
   isOverdue,
   parseLadder,
+  parseMaxSendsPerDay,
+  channelOfStepType,
+  DEFAULT_MAX_SENDS_PER_DAY,
+  MAX_MAX_SENDS_PER_DAY,
   resolveStepTierDays,
   resolveWorkflowStartDays,
   ladderLabel,
@@ -118,6 +122,46 @@ test('parseGraceDays: default 0 bij onzin, clamp op 0..90', () => {
   assert.equal(parseGraceDays('7'), 7);
   assert.equal(parseGraceDays(2.9), 2);
   assert.equal(parseGraceDays(999), MAX_GRACE_DAYS);
+});
+
+// ── dagcap per kanaal ─────────────────────────────────────────────────────
+test('parseMaxSendsPerDay: default 1 per kanaal', () => {
+  assert.deepEqual(parseMaxSendsPerDay(undefined), { whatsapp: 1, email: 1 });
+  assert.deepEqual(parseMaxSendsPerDay(null),      { whatsapp: 1, email: 1 });
+  assert.deepEqual(parseMaxSendsPerDay({}),        { whatsapp: 1, email: 1 });
+});
+
+test('parseMaxSendsPerDay: kaal getal en legacy { count } gelden voor beide kanalen', () => {
+  assert.deepEqual(parseMaxSendsPerDay(2),           { whatsapp: 2, email: 2 });
+  assert.deepEqual(parseMaxSendsPerDay('3'),         { whatsapp: 3, email: 3 });
+  assert.deepEqual(parseMaxSendsPerDay({ count: 2 }), { whatsapp: 2, email: 2 });
+});
+
+test('parseMaxSendsPerDay: per kanaal instelbaar, ontbrekend kanaal → 1', () => {
+  assert.deepEqual(parseMaxSendsPerDay({ whatsapp: 1, email: 3 }), { whatsapp: 1, email: 3 });
+  assert.deepEqual(parseMaxSendsPerDay({ email: 4 }),              { whatsapp: 1, email: 4 });
+});
+
+test('parseMaxSendsPerDay: 0 en onzin worden geklemd — een kanaal gaat nooit dicht', () => {
+  assert.deepEqual(parseMaxSendsPerDay({ whatsapp: 0, email: -5 }), { whatsapp: 1, email: 1 });
+  assert.deepEqual(parseMaxSendsPerDay({ whatsapp: 'x' }),          { whatsapp: 1, email: 1 });
+  assert.equal(parseMaxSendsPerDay({ email: 999 }).email, MAX_MAX_SENDS_PER_DAY);
+});
+
+test('parseMaxSendsPerDay: per-kanaal-keys winnen van een meegestuurde count', () => {
+  assert.deepEqual(parseMaxSendsPerDay({ count: 5, whatsapp: 2 }), { whatsapp: 2, email: 1 });
+});
+
+test('channelOfStepType: alleen send-types hebben een kanaal', () => {
+  assert.equal(channelOfStepType('whatsapp'), 'whatsapp');
+  assert.equal(channelOfStepType('EMAIL'),    'email');
+  assert.equal(channelOfStepType('wait'),     null);
+  assert.equal(channelOfStepType('task'),     null);
+  assert.equal(channelOfStepType(null),       null);
+});
+
+test('DEFAULT_MAX_SENDS_PER_DAY: 1 WhatsApp en 1 e-mail', () => {
+  assert.deepEqual({ ...DEFAULT_MAX_SENDS_PER_DAY }, { whatsapp: 1, email: 1 });
 });
 
 // ── ladder-parsing ────────────────────────────────────────────────────────

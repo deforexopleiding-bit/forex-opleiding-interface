@@ -174,7 +174,9 @@ als `min_days_overdue` op `null` (uit) staat.
 
 ### `api/dunning-settings-get.js` / `api/dunning-settings-update.js`
 `dunning_grace_days` (0..90, default 0), `dunning_ladder` en
-`dunning_max_sends_per_day` (1..10, default 1) erbij. Alle keys
+`dunning_max_sends_per_day` (`{ whatsapp, email }`, elk 1..10, default 1/1)
+erbij. De cap accepteert ook een kaal getal of het legacy `{ count: n }` —
+dan geldt die waarde voor beide kanalen. Alle keys
 zijn optioneel bij POST; de bestaande UI die alleen `dunning_cooldown_days`
 stuurt blijft werken. Ladder-sporten valideren op integer 1..365 — **0 wordt
 geweigerd**, want dat zou de vervaldag zelf toestaan.
@@ -248,18 +250,42 @@ Drie maatregelen, alle drie geleverd:
    (`nextSendSlotIso()` in `dunning-office-hours.js`). Dit repareert de
    regressie bij de bron: zonder klem zette de wait `next_action_at = nu` en
    pikte de eerstvolgende uurtick de run meteen weer op.
-2. **Dagcap (permanent vangnet).** Hoogstens N berichten per klant per
-   kalenderdag (Europe/Amsterdam), `app_settings.dunning_max_sends_per_day`,
-   **default 1**. De teller loopt per KLANT over al zijn runs, start bij lokale
-   middernacht en telt sends binnen dezelfde invocatie mee. Bij een bereikte
-   cap: pointer blijft staan, `next_action_at` naar het volgende verzendslot,
-   log-regel `send_skipped_daily_cap`.
+2. **Dagcap (permanent vangnet), PER KANAAL.** Hoogstens N berichten per klant
+   per kalenderdag (Europe/Amsterdam) **per kanaal**,
+   `app_settings.dunning_max_sends_per_day` (`{ whatsapp, email }`),
+   **default 1/1**. De teller loopt per KLANT over al zijn runs, start bij
+   lokale middernacht en telt sends binnen dezelfde invocatie mee. Bij een
+   bereikte cap: pointer blijft staan, `next_action_at` naar het volgende
+   verzendslot, log-regel `send_skipped_daily_cap` met het kanaal erbij.
+
+   Per kanaal is geen verfijning maar een noodzaak. De productie-workflow
+   "Aanmaningen" stuurt per ronde een WhatsApp **én** een e-mail vlak na
+   elkaar (stap 0 + 1, stap 3 + 4, …). De WhatsApp-templates staan op de
+   ladder, de e-mailtemplates niet — "Aanmaning dag N (E-mail)" is geen
+   ladder-sleutel, dus `resolveStepTierDays` geeft `null` en de e-mail volgt
+   direct op de WhatsApp in dezelfde ronde. Met één gedeelde cap van 1 zou die
+   e-mail **elke ronde** geblokkeerd en een dag vooruitgeschoven worden: de
+   e-mail zou permanent een dag achter de WhatsApp aan lopen. Per kanaal
+   tellen houdt het koppel intact; een tweede WhatsApp op dezelfde dag blijft
+   geblokkeerd.
 3. **Eenmalige pointer-backfill** (`scripts/dunning-pointer-backfill.js`).
    Zet de pointer van elke lopende run op de sport die bij de werkelijke
    `days_overdue` hoort. Verstuurt niets, dry-run is de default, elke
    verzetting komt als `pointer_backfill` in `dunning_log`. **Gepauzeerde runs
    doen mee** — die sturen nu niets, maar cascaderen alsnog zodra hun pauze
    wegvalt.
+
+   **Toon-beslissing (Maxim):** runs die gepauzeerd zijn door een **lopend
+   gesprek** (`paused_by_conversation_id` gezet) landen op **één sport lager**
+   dan de hoogste bereikte sport — is de hoogste `aanmaning_dag37`, dan wordt
+   het `aanmaning_dag21`. Die klanten zaten net nog met Dave in gesprek; met
+   de deur in huis vallen met een laatste waarschuwing past niet. Is er maar
+   één sport bereikt, dan blijft die staan (nooit lager dan de laagste
+   bereikte sport), en de idempotentiecheck blijft gelden: nooit terug naar
+   een stap die de pointer al voorbij is. Alle andere runs — actief, of
+   gepauzeerd om een andere reden — gaan wel naar de hoogste bereikte sport.
+   De dry-run toont per move waarom een run verlaagd is, en de verdeling per
+   doel-template staat apart voor gespreksgepauzeerde en overige runs.
 
 ### Wat dat doet op dag 1 (gemeten live verdeling, 2026-09-07)
 
@@ -280,6 +306,24 @@ gevallen meteen `aanmaning_dag37` en is hun ladder daarna klaar.
 De cijfers staan als assertions in `tests/dunning-simulate.test.js`
 (*"SCENARIO: dag 1 na deploy op de gemeten live verdeling"*), dus ze zijn
 narekenbaar en bewegen mee als de logica verandert.
+
+## 5c. Tijdlijn per stap — `scripts/dunning-workflow-tijdlijn.js`
+
+Omdat `next_action_at` na een wait nu op de **ladderdag van de eerstvolgende
+send-stap** mikt, verschuiven ook de stappen die tussen die wait en de volgende
+send staan — de bel-taken voor Dave. Dit read-only script rekent per stap uit
+op welke dag na de vervaldatum hij landt, vóór en na deze branch:
+
+```
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node scripts/dunning-workflow-tijdlijn.js \
+    --workflow=9805c900-1c74-4326-9d15-a1e49f754eb0 --md=/tmp/tijdlijn.md
+```
+
+De rekenkern (`loopStappen` / `bouwTijdlijn`) is puur en getest in
+`tests/dunning-workflow-tijdlijn.test.js`. De verschuiving is **niet altijd
+naar achteren**: een taak na een korte wait schuift naar de ladderdag toe
+(later), een taak na een lange wait juist naar voren.
 
 ## 6. Nog te doen buiten deze PR (DB-config)
 

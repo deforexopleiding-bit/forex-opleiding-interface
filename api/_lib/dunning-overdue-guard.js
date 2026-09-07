@@ -197,22 +197,70 @@ export async function readGraceDaysSetting(db) {
 // één send-stap. Zonder cap loopt zo'n run de hele ladder in één ochtend af.
 // De cooldown (`dunning_cooldown_days`) vangt dat niet af — die geldt alleen
 // bij het STARTEN van een nieuwe run, niet tussen de stappen van een lopende.
+//
+// DE CAP TELT PER KANAAL. Dat is geen verfijning maar een noodzaak: de
+// productie-workflow "Aanmaningen" stuurt per ronde een WhatsApp ÉN een
+// e-mail vlak na elkaar (stap 0 + 1, stap 3 + 4, …). De WhatsApp-templates
+// staan op de ladder, de e-mailtemplates niet ("Aanmaning dag N (E-mail)" is
+// geen ladder-sleutel), dus de e-mail volgt direct op de WhatsApp in dezelfde
+// ronde. Met één gedeelde cap van 1 zou die e-mail ELKE ronde geblokkeerd en
+// een dag vooruitgeschoven worden — de e-mail zou permanent een dag achter de
+// WhatsApp aan lopen. Per kanaal tellen houdt het koppel intact en stopt de
+// inhaalgolf nog steeds: een TWEEDE WhatsApp op dezelfde dag blijft geblokkeerd.
+//
+// Waarde-shapes die `parseMaxSendsPerDay` accepteert:
+//   { whatsapp: 1, email: 1 }   canoniek
+//   { count: 1 }                legacy (één getal voor beide kanalen)
+//   1                           idem, als kaal getal
 
-export const MAX_SENDS_SETTING_KEY   = 'dunning_max_sends_per_day';
-export const DEFAULT_MAX_SENDS_PER_DAY = 1;
+export const MAX_SENDS_SETTING_KEY = 'dunning_max_sends_per_day';
+export const SEND_CHANNELS         = Object.freeze(['whatsapp', 'email']);
+export const DEFAULT_MAX_SENDS_PER_DAY = Object.freeze({ whatsapp: 1, email: 1 });
 export const MAX_MAX_SENDS_PER_DAY     = 10;
 
-/** Normaliseer naar integer 1..10 (default 1). Nooit 0: dat zou de motor stilzetten. */
-export function parseMaxSendsPerDay(raw) {
+/** Eén kanaalwaarde normaliseren naar integer 1..10 (default 1). */
+function parseChannelCap(raw) {
   const n = Number(raw);
-  if (!Number.isFinite(n)) return DEFAULT_MAX_SENDS_PER_DAY;
+  if (!Number.isFinite(n)) return 1;
   const t = Math.trunc(n);
-  if (t < 1) return DEFAULT_MAX_SENDS_PER_DAY;
+  if (t < 1) return 1;                       // nooit 0: dat zou de motor stilzetten
   if (t > MAX_MAX_SENDS_PER_DAY) return MAX_MAX_SENDS_PER_DAY;
   return t;
 }
 
-/** Leest app_settings.dunning_max_sends_per_day. Fail-soft → 1. */
+/**
+ * Normaliseer naar `{ whatsapp, email }` met integers 1..10.
+ * Nooit throw — fail-soft, net als de andere settings-parsers.
+ *
+ * PURE.
+ */
+export function parseMaxSendsPerDay(raw) {
+  // Kaal getal → beide kanalen dezelfde cap.
+  if (typeof raw === 'number' || typeof raw === 'string') {
+    const n = parseChannelCap(raw);
+    return { whatsapp: n, email: n };
+  }
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {};
+  // Legacy `{ count: n }` → beide kanalen, tenzij er ook per-kanaal-keys staan.
+  const heeftPerKanaal = SEND_CHANNELS.some((c) => src[c] !== undefined);
+  if (!heeftPerKanaal && src.count !== undefined) {
+    const n = parseChannelCap(src.count);
+    return { whatsapp: n, email: n };
+  }
+  const out = {};
+  for (const c of SEND_CHANNELS) {
+    out[c] = src[c] === undefined ? DEFAULT_MAX_SENDS_PER_DAY[c] : parseChannelCap(src[c]);
+  }
+  return out;
+}
+
+/** step_type → kanaal-sleutel van de cap. Onbekend type → null (geen cap). */
+export function channelOfStepType(stepType) {
+  const t = String(stepType || '').toLowerCase();
+  return SEND_CHANNELS.includes(t) ? t : null;
+}
+
+/** Leest app_settings.dunning_max_sends_per_day. Fail-soft → { whatsapp: 1, email: 1 }. */
 export async function readMaxSendsPerDaySetting(db) {
   try {
     const { data } = await db
@@ -220,11 +268,11 @@ export async function readMaxSendsPerDaySetting(db) {
       .select('value')
       .eq('key', MAX_SENDS_SETTING_KEY)
       .maybeSingle();
-    if (!data) return DEFAULT_MAX_SENDS_PER_DAY;
-    return parseMaxSendsPerDay(data?.value?.count);
+    if (!data) return { ...DEFAULT_MAX_SENDS_PER_DAY };
+    return parseMaxSendsPerDay(data.value);
   } catch (e) {
-    console.warn('[dunning-overdue-guard] dagcap-setting fail-soft, default 1:', e?.message || e);
-    return DEFAULT_MAX_SENDS_PER_DAY;
+    console.warn('[dunning-overdue-guard] dagcap-setting fail-soft, default 1/1:', e?.message || e);
+    return { ...DEFAULT_MAX_SENDS_PER_DAY };
   }
 }
 

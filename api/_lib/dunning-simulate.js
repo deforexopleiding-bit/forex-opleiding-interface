@@ -38,6 +38,9 @@ import {
   resolveWorkflowStartDays,
   DEFAULT_LADDER,
   DEFAULT_GRACE_DAYS,
+  DEFAULT_MAX_SENDS_PER_DAY,
+  parseMaxSendsPerDay,
+  channelOfStepType,
 } from './dunning-overdue-guard.js';
 
 import {
@@ -100,9 +103,10 @@ const TERMINAL_STAGES = new Set(['opgelost', 'afschrijven']);
  * @param {object} [opts]
  *   - horizonDays              (default 8)
  *   - maxSendsPerCustomerPerDay  overschrijft de dagcap uit de settings
- *     (`settings.maxSendsPerDay`, default 1). De cap zit sinds de dagcap-
- *     commit ECHT in de motor; deze optie is er om what-if-scenario's mee te
- *     rekenen.
+ *     (`settings.maxSendsPerDay`, default { whatsapp: 1, email: 1 }). Accepteert
+ *     een kaal getal (beide kanalen) of `{ whatsapp, email }`. De cap zit sinds
+ *     de dagcap-commit ECHT in de motor; deze optie is er om what-if-scenario's
+ *     mee te rekenen.
  *   - disableDailyCap          what-if "zonder enige maatregel": zet de
  *     dagcap volledig uit. Bestaat alleen in de simulator.
  *   - backfillPointer          SIMULATIE-KNOP voor het voorstel "eenmalige
@@ -112,13 +116,14 @@ const TERMINAL_STAGES = new Set(['opgelost', 'afschrijven']);
  */
 export function simulateEngine(snapshot, opts = {}) {
   const horizonDays = Number.isFinite(Number(opts.horizonDays)) ? Number(opts.horizonDays) : 8;
+  // Dagcap per kanaal — spiegelt de motor: { whatsapp, email }.
   const maxPerDay = opts.disableDailyCap === true
     ? null
-    : (Number.isFinite(Number(opts.maxSendsPerCustomerPerDay))
-        ? Number(opts.maxSendsPerCustomerPerDay)
-        : (Number.isFinite(Number(snapshot?.settings?.maxSendsPerDay))
-            ? Number(snapshot.settings.maxSendsPerDay)
-            : 1));
+    : parseMaxSendsPerDay(
+        opts.maxSendsPerCustomerPerDay !== undefined && opts.maxSendsPerCustomerPerDay !== null
+          ? opts.maxSendsPerCustomerPerDay
+          : (snapshot?.settings?.maxSendsPerDay ?? { ...DEFAULT_MAX_SENDS_PER_DAY })
+      );
   const backfillPointer = opts.backfillPointer === true;
   // Alleen om de situatie VÓÓR de fix na te spelen (scenario "zonder
   // maatregel"). De motor klemt altijd; dit is puur een what-if.
@@ -180,19 +185,29 @@ export function simulateEngine(snapshot, opts = {}) {
   // te laat is meteen het passende bericht in plaats van de hele reeks.
   if (backfillPointer) {
     for (const run of runs) {
-      if (run.status !== 'active') continue;
+      if (run.status !== 'active' && run.status !== 'paused') continue;
       const meta = wfMeta.get(run.workflow_id);
       const cust = customers.find((c) => c.id === run.customer_id);
       if (!meta || !cust) continue;
       const signed = daysOverdueSigned(oldestDueIso(cust.invoices), startIso);
       if (signed == null) continue;
-      let target = null;
+      const bereikt = [];
       for (const st of meta.steps) {
         if (!isSendStep(st.step_type)) continue;
         const tier = resolveStepTierDays(st, templates.get(st?.config?.template_id) || null, ladder);
-        if (tier != null && signed >= tier) target = st;
+        if (tier != null && signed >= tier) bereikt.push(st);
       }
-      if (target) run.current_step_id = target.id;
+      if (!bereikt.length) continue;
+      // Toon-beslissing, gelijk aan scripts/dunning-pointer-backfill.js: een
+      // run die gepauzeerd is door een LOPEND GESPREK landt één sport lager.
+      const gespreksPauze = run.status === 'paused' && !!run.paused_by_conversation_id;
+      const target = (gespreksPauze && bereikt.length >= 2)
+        ? bereikt[bereikt.length - 2]
+        : bereikt[bereikt.length - 1];
+      // Nooit terugzetten: alleen vooruit (idempotentie, zoals het script).
+      const cur = meta.stepById.get(run.current_step_id) || null;
+      if (cur && Number(cur.step_order) >= Number(target.step_order)) continue;
+      run.current_step_id = target.id;
     }
   }
 
@@ -302,9 +317,10 @@ export function simulateEngine(snapshot, opts = {}) {
               run.next_action_at = new Date(ymdMs(due) + tierPre * DAY_MS).toISOString();
               break;
             }
-            if (maxPerDay != null) {                                        // dagcap
-              const key = `${cust.id}|${dayIso}`;
-              if ((sentPerCustomerPerDay.get(key) || 0) >= maxPerDay) {
+            const chan = channelOfStepType(step.step_type);
+            if (maxPerDay != null && chan) {                                // dagcap per kanaal
+              const key = `${cust.id}|${dayIso}|${chan}`;
+              if ((sentPerCustomerPerDay.get(key) || 0) >= maxPerDay[chan]) {
                 run.next_action_at = nextSendSlotIso(tickAt, officeHours, 1);
                 break;
               }
@@ -314,6 +330,7 @@ export function simulateEngine(snapshot, opts = {}) {
             messages.push({
               date: dayIso,
               hour,
+              channel: chan,
               customer_id: cust.id,
               customer_name: cust.name,
               workflow_id: run.workflow_id,
@@ -326,8 +343,10 @@ export function simulateEngine(snapshot, opts = {}) {
               run_was_existing: !run._simulated,
             });
             lastSendByCustomer.set(cust.id, tickAt.toISOString());
-            const key = `${cust.id}|${dayIso}`;
-            sentPerCustomerPerDay.set(key, (sentPerCustomerPerDay.get(key) || 0) + 1);
+            if (chan) {
+              const key = `${cust.id}|${dayIso}|${chan}`;
+              sentPerCustomerPerDay.set(key, (sentPerCustomerPerDay.get(key) || 0) + 1);
+            }
           }
 
           const nextStep = meta.steps.find((st) => Number(st.step_order) > Number(step.step_order)) || null;
@@ -423,12 +442,19 @@ function buildReport({ startIso, horizonDays, messages, startedRuns, skipLog, sn
     const byDay = {};
     for (const m of list) (byDay[m.date] ||= []).push(m);
     for (const [date, ms] of Object.entries(byDay)) {
-      if (ms.length > 1) {
+      // Een WhatsApp + e-mail van DEZELFDE ronde is geen inhaalgolf maar het
+      // bedoelde koppel. Alleen twee berichten op HETZELFDE kanaal tellen als
+      // burst.
+      const perKanaal = {};
+      for (const m of ms) perKanaal[m.channel || 'onbekend'] = (perKanaal[m.channel || 'onbekend'] || 0) + 1;
+      const maxPerKanaal = Math.max(0, ...Object.values(perKanaal));
+      if (maxPerKanaal > 1) {
         burstSameDay.push({
           customer_id: cid,
           customer_name: ms[0].customer_name,
           date,
           count: ms.length,
+          per_channel: perKanaal,
           templates: ms.map((m) => m.template),
           hours: ms.map((m) => m.hour),
           days_overdue: ms[0].days_overdue,
@@ -471,6 +497,7 @@ function buildReport({ startIso, horizonDays, messages, startedRuns, skipLog, sn
       customers_in_snapshot: (snapshot?.customers || []).length,
       existing_runs_in_snapshot: (snapshot?.runs || []).length,
       max_sends_per_day: options?.maxSendsPerCustomerPerDay ?? null,
+      by_channel: true,
       options: options || {},
     },
     days,

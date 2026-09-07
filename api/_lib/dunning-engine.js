@@ -54,6 +54,7 @@ import {
   ladderLabel,
   earliestSendIso,
   readMaxSendsPerDaySetting,
+  channelOfStepType,
   zonedDayStartIso,
 } from './dunning-overdue-guard.js';
 
@@ -449,15 +450,18 @@ function aggregatePerCustomer(rows) {
 }
 
 /**
- * Tel per klant hoeveel aanmaan-berichten er VANDAAG al zijn verstuurd
- * (lokale kalenderdag, Europe/Amsterdam). Bron: dunning_log-events
- * 'email_sent' / 'whatsapp_sent' over ALLE runs van die klant — de dagcap is
+ * Tel per klant én PER KANAAL hoeveel aanmaan-berichten er VANDAAG al zijn
+ * verstuurd (lokale kalenderdag, Europe/Amsterdam). Bron: dunning_log-events
+ * 'whatsapp_sent' / 'email_sent' over ALLE runs van die klant — de dagcap is
  * per KLANT, niet per run, zodat twee runs samen de cap niet omzeilen.
+ *
+ * Per kanaal, omdat de productie-workflow per ronde een WhatsApp én een
+ * e-mail vlak na elkaar stuurt; een gedeelde cap zou dat koppel breken.
  *
  * Fail-soft: bij een DB-fout komt er een lege Map terug en laat de cap alles
  * door (oud gedrag). Beter een bericht te veel dan een stilgevallen motor.
  *
- * @returns {Promise<Map<string, number>>} customer_id → aantal sends vandaag
+ * @returns {Promise<Map<string, {whatsapp: number, email: number}>>}
  */
 async function countSendsTodayByCustomer(customerIds, dayStartIso) {
   const out = new Map();
@@ -484,13 +488,17 @@ async function countSendsTodayByCustomer(customerIds, dayStartIso) {
       const slice = runIds.slice(i, i + CHUNK);
       const logs = await fetchAllRows(() => supabaseAdmin
         .from('dunning_log')
-        .select('run_id')
+        .select('run_id, event_type')
         .in('run_id', slice)
         .in('event_type', ['email_sent', 'whatsapp_sent'])
         .gte('created_at', dayStartIso));
       for (const l of logs) {
         const cid = custByRun.get(l.run_id);
-        if (cid) out.set(cid, (out.get(cid) || 0) + 1);
+        if (!cid) continue;
+        const chan = l.event_type === 'whatsapp_sent' ? 'whatsapp' : 'email';
+        const cur = out.get(cid) || { whatsapp: 0, email: 0 };
+        cur[chan] += 1;
+        out.set(cid, cur);
       }
     }
   } catch (e) {
@@ -1158,11 +1166,14 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
   // vertrekken — niet de stap-pointer en niet het getal in de templatenaam.
   const ladder    = await readLadderSetting(supabaseAdmin);
 
-  // ── DAGCAP: hoogstens N berichten per klant per kalenderdag ─────────────
+  // ── DAGCAP: hoogstens N berichten per klant per kalenderdag, PER KANAAL ──
   // Permanent vangnet tegen de inhaalgolf. Instelbaar via
-  // app_settings.dunning_max_sends_per_day, default 1. De teller start bij
-  // lokale middernacht (Europe/Amsterdam) en wordt binnen deze invocatie
-  // meegeteld, zodat twee stappen in dezelfde run-lus ook meetellen.
+  // app_settings.dunning_max_sends_per_day ({ whatsapp, email }), default 1/1.
+  // De teller start bij lokale middernacht (Europe/Amsterdam) en wordt binnen
+  // deze invocatie meegeteld, zodat twee stappen in dezelfde run-lus ook
+  // meetellen. Per kanaal, zodat het WhatsApp+e-mail-koppel van dezelfde ronde
+  // samen de deur uit gaat en alleen een TWEEDE bericht op hetzelfde kanaal
+  // wordt tegengehouden.
   const maxSendsPerDay = await readMaxSendsPerDaySetting(supabaseAdmin);
   const dayStartIso    = zonedDayStartIso(todayIso);
   const sendsToday     = await countSendsTodayByCustomer(runCustomerIds, dayStartIso);
@@ -1409,13 +1420,17 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           }
         }
 
-        // ── DAGCAP-guard: hoogstens N berichten per klant per kalenderdag ──
+        // ── DAGCAP-guard: per klant PER KANAAL hoogstens N per kalenderdag ──
         // Staat NA de ladder-guard (die weet of deze stap überhaupt mag) en
         // VÓÓR de kantooruren-guard. Bij bereikte cap: pointer blijft staan,
         // next_action_at naar het eerstvolgende verzendslot op een latere dag.
+        // De e-mail van dezelfde ronde heeft zijn eigen teller en gaat dus
+        // gewoon mee met de WhatsApp.
         if (isSendStep(currentStep.step_type)) {
-          const alToday = sendsToday.get(run.customer_id) || 0;
-          if (alToday >= maxSendsPerDay) {
+          const chan = channelOfStepType(currentStep.step_type);
+          const used = (sendsToday.get(run.customer_id) || {})[chan] || 0;
+          const cap  = maxSendsPerDay[chan];
+          if (chan && Number.isFinite(cap) && used >= cap) {
             const resumeAt = nextSendSlotIso(new Date(), officeHoursCfg, 1);
             await supabaseAdmin
               .from('dunning_workflow_runs')
@@ -1427,11 +1442,13 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
               event_type: 'send_skipped_daily_cap',
               payload: {
                 step_type:       currentStep.step_type,
-                sends_today:     alToday,
-                max_per_day:     maxSendsPerDay,
+                channel:         chan,
+                sends_today:     used,
+                max_per_day:     cap,
+                caps:            maxSendsPerDay,
                 today_amsterdam: todayIso,
                 next_action_at:  resumeAt,
-                reason:          'dagcap bereikt voor deze klant',
+                reason:          `dagcap ${chan} bereikt voor deze klant`,
               },
             });
             runAdvanced = true;
@@ -1589,7 +1606,12 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         // Alleen bij status 'ok' — een 'skipped' send (geen telefoonnummer,
         // template-fout) verbruikt geen cap.
         if (isAanmaningSendSuccess(stepResult)) {
-          sendsToday.set(run.customer_id, (sendsToday.get(run.customer_id) || 0) + 1);
+          const chan = channelOfStepType(currentStep.step_type);
+          if (chan) {
+            const cur = sendsToday.get(run.customer_id) || { whatsapp: 0, email: 0 };
+            cur[chan] += 1;
+            sendsToday.set(run.customer_id, cur);
+          }
         }
 
         if (isAanmaningSendSuccess(stepResult)) {

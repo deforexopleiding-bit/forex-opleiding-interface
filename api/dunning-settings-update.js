@@ -1,7 +1,7 @@
 // api/dunning-settings-update.js
 // POST { dunning_cooldown_days?: int, dunning_grace_days?: int,
 //        dunning_ladder?: { <templatenaam>: <dagen na vervaldatum> },
-//        dunning_max_sends_per_day?: int }
+//        dunning_max_sends_per_day?: int | { whatsapp?: int, email?: int } }
 //   → upsert in app_settings. Minstens één key is verplicht; ontbrekende
 //     keys blijven ongewijzigd (back-compat: de bestaande UI stuurt alleen
 //     dunning_cooldown_days).
@@ -28,6 +28,8 @@ import {
   parseLadder,
   MAX_SENDS_SETTING_KEY,
   MAX_MAX_SENDS_PER_DAY,
+  SEND_CHANNELS,
+  parseMaxSendsPerDay,
 } from './_lib/dunning-overdue-guard.js';
 
 const KEY = 'dunning_cooldown_days';
@@ -71,14 +73,31 @@ export default async function handler(req, res) {
     });
   }
 
+  // Dagcap per kanaal. Geaccepteerd: een kaal getal (beide kanalen) of een
+  // object { whatsapp, email }. Elke opgegeven waarde moet integer 1..10 zijn;
+  // 0 zou het kanaal stilzetten en wordt geweigerd.
   let cap = null;
   if (hasCap) {
-    cap = Number(body.dunning_max_sends_per_day);
-    if (!Number.isFinite(cap) || Math.trunc(cap) !== cap || cap < 1 || cap > MAX_MAX_SENDS_PER_DAY) {
-      return res.status(400).json({
-        error: `dunning_max_sends_per_day moet integer 1..${MAX_MAX_SENDS_PER_DAY} zijn (1 = hoogstens één bericht per klant per dag)`,
-      });
+    const raw = body.dunning_max_sends_per_day;
+    const geldig = (v) => Number.isFinite(Number(v)) && Math.trunc(Number(v)) === Number(v)
+                       && Number(v) >= 1 && Number(v) <= MAX_MAX_SENDS_PER_DAY;
+    const fout = `dunning_max_sends_per_day moet integer 1..${MAX_MAX_SENDS_PER_DAY} zijn per kanaal `
+               + `(bv. { "whatsapp": 1, "email": 1 }); 1 = hoogstens één bericht per klant per dag per kanaal`;
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      const keys = Object.keys(raw);
+      if (!keys.length) return res.status(400).json({ error: fout });
+      for (const k of keys) {
+        if (!SEND_CHANNELS.includes(k)) {
+          return res.status(400).json({ error: `dunning_max_sends_per_day: onbekend kanaal '${k}' (verwacht: ${SEND_CHANNELS.join(', ')})` });
+        }
+        if (!geldig(raw[k])) return res.status(400).json({ error: fout });
+      }
+    } else if (!geldig(raw)) {
+      return res.status(400).json({ error: fout });
     }
+    // parseMaxSendsPerDay vult de ontbrekende kanalen aan, zodat de opgeslagen
+    // rij altijd compleet is.
+    cap = parseMaxSendsPerDay(raw);
   }
 
   let n = null;
@@ -126,7 +145,7 @@ export default async function handler(req, res) {
     if (hasCooldown) await upsertSetting(KEY, value);
     if (hasGrace)    await upsertSetting(GRACE_SETTING_KEY, { days: g });
     if (hasLadder)   await upsertSetting(LADDER_SETTING_KEY, { rungs });
-    if (hasCap)      await upsertSetting(MAX_SENDS_SETTING_KEY, { count: cap });
+    if (hasCap)      await upsertSetting(MAX_SENDS_SETTING_KEY, cap);
 
     // Audit-log (fail-soft).
     try {
@@ -139,13 +158,13 @@ export default async function handler(req, res) {
           ...(hasCooldown ? { [KEY]: value } : {}),
           ...(hasGrace    ? { [GRACE_SETTING_KEY]: { days: g } } : {}),
           ...(hasLadder   ? { [LADDER_SETTING_KEY]: { rungs } } : {}),
-          ...(hasCap      ? { [MAX_SENDS_SETTING_KEY]: { count: cap } } : {}),
+          ...(hasCap      ? { [MAX_SENDS_SETTING_KEY]: cap } : {}),
         },
         reason_text: [
           hasCooldown ? `Cooldown gezet op ${n} dagen` : null,
           hasGrace    ? `Gratieperiode gezet op ${g} dagen` : null,
           hasLadder   ? `Ladder gezet op ${Object.entries(rungs).map(([k, v]) => `${k}=dag ${v}`).join(', ')}` : null,
-          hasCap      ? `Dagcap gezet op ${cap} bericht(en) per klant per dag` : null,
+          hasCap      ? `Dagcap gezet op ${SEND_CHANNELS.map((c) => `${c}=${cap[c]}`).join(', ')} per klant per dag` : null,
         ].filter(Boolean).join(' · '),
         ip_address : getClientIp(req),
       });
