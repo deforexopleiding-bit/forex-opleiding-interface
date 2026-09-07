@@ -1134,3 +1134,35 @@ test('isContact geeft null bij een onbekend resultaat, niet true en niet false',
   assert.equal(isContact({ soort: 'call', richting: 'uit', resultaat: 'iets nieuws' }), null);
   assert.equal(isContact({ soort: 'call', richting: 'uit', resultaat: null }), null);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HET RAPPORT SCHRIJFT OVER HET WERK, NIET OVER DE PERSOON
+// ═══════════════════════════════════════════════════════════════════════════
+// Het heette 'Dagrapport — Dave Heylen' en oordeelde in woorden die over een
+// mens gaan: nalatigheid, te weinig moeite. Maxims regel: het is een overzicht
+// van de opvolging van leads en van de sales, en de naam mag eruit zodat
+// niemand zich aangevallen voelt. De namen van de LEADS blijven staan — dat is
+// de inhoud van het rapport.
+
+test('geen enkele bevinding draagt het woord nalatigheid of moeite', () => {
+  const labels = Object.values(JSON.parse(
+    JSON.stringify(BRON.match(/const BEVINDING_SOORTEN = \{[\s\S]*?\n\};/)[0]
+      .match(/label: '[^']+'/g).map((x) => x.slice(8, -1))),
+  ));
+  for (const l of labels) {
+    assert.doesNotMatch(l, /MOEITE/, 'moeite is een eigenschap van een mens: ' + l);
+  }
+  assert.ok(labels.includes('TE WEINIG POGINGEN'), 'pogingen zijn rijen met een tijdstempel');
+  assert.doesNotMatch(BRON, /ernst: 'nalatigheid'/, 'nalatigheid is een oordeel over een mens');
+});
+
+test('de bevindingteksten nemen de LEAD als onderwerp, niet de verkoper', () => {
+  // Elke sjabloon-tekst begint met de naam van de lead of met een aantal, en
+  // nergens met een handelende persoon.
+  const teksten = BRON.match(/tekst: `[^`]+`/g) || [];
+  assert.ok(teksten.length >= 8, 'er horen bevindingteksten te zijn');
+  for (const t of teksten) {
+    assert.doesNotMatch(t, /\bDave\b/i, t);
+    assert.doesNotMatch(t, /\bhij (belde|liet|vergat|deed)\b/i, t);
+  }
+});

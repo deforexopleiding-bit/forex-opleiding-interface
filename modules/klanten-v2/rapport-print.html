@@ -69,7 +69,7 @@ body{
 /* ── Bevindingen ───────────────────────────────────────────────────────── */
 .bev{border:1px solid var(--lijn);border-left-width:3px;background:var(--opp);
   padding:8px 11px;margin:0 0 6px;break-inside:avoid}
-.bev.nalatigheid {border-left-color:var(--kritiek);      background:#fdf3f3}
+.bev.blijft_liggen {border-left-color:var(--kritiek);      background:#fdf3f3}
 .bev.twijfelgeval{border-left-color:var(--ernstig);      background:#fdf6f2}
 .bev.blinde_vlek {border-left-color:var(--waarschuwing); background:#fffbf1}
 .bev .rij{display:flex;align-items:center;gap:8px}
@@ -112,12 +112,12 @@ tr{break-inside:avoid}
 .bol{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:0}
 .bol.goed{background:var(--goed)} .bol.grijs{background:var(--muted)}
 .bol.donker{background:var(--ink2)} .bol.rood{background:var(--kritiek)}
+.tl{margin:6px 0 10px;break-inside:avoid}
+.tl-kop{font-size:11px;margin-bottom:3px;color:var(--muted)}
+.tl-noot{font-size:10px;font-style:italic;color:var(--muted);margin-top:3px}
+.uitleg{font-size:11px;color:var(--muted);margin:0 0 6px}
 .ritme{margin:6px 0 10px;break-inside:avoid}
 .ritme-kop{font-size:11px;margin-bottom:3px}
-.ritme-balk{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:2px;align-items:end;height:40px}
-.ritme-uur{display:flex;flex-direction:column;justify-content:flex-end;height:100%}
-.ritme-staaf{background:#334155;min-height:1px}
-.ritme-label{font-size:8px;color:var(--muted);text-align:center;margin-top:2px}
 .ritme-bev{font-size:11px;margin-top:4px;padding:3px 6px;background:#fef3c7;border-radius:3px}
 .subkop{font-size:12px;font-weight:600;margin:9px 0 3px}
 .leeg{font-style:italic;color:var(--muted);font-size:11.5px}
@@ -155,7 +155,7 @@ tr{break-inside:avoid}
   // dus in de PDF én op het scherm. Zie je hier een ander nummer dan wat er in
   // de repo staat, dan kijk je naar een oude build en heeft verder zoeken geen
   // zin. Ophogen bij elke inhoudelijke wijziging aan dit bestand.
-  const OPMAAK_VERSIE = 'rp-5';
+  const OPMAAK_VERSIE = 'rp-8';
 
 // HET RAPPORT HEET NAAR HET WERK, NIET NAAR DE PERSOON.
 //
@@ -253,37 +253,49 @@ tr{break-inside:avoid}
         'moment, niet het eindresultaat. Calls die nog moeten plaatsvinden worden niet beoordeeld.</div>';
     }
 
-    h += sectieAandacht(d) + sectieDekking(d) + sectieVolume(d) +
-         sectieVensters(d) + sectieZoomcalls(d) + sectieWerkritme(d) + sectieAfgehandeld(d);
+    // sectieTijdlijn draagt nu ook de twee werkritme-bevindingen; een apart
+    // sectieWerkritme zou hetzelfde onderwerp een tweede keer openen.
+    h += sectieAandacht(d) + sectieDekking(d) + sectieTijdlijn(d) + sectieVolume(d) +
+         sectieVensters(d) + sectieZoomcalls(d) + sectieAfgehandeld(d);
 
     h += '<div class="voet"><span>' + esc(titel) + '</span>' +
       '<span>' + esc(periodeTekst) + ' &middot; ' + esc(OPMAAK_VERSIE) + '</span></div>';
     return h;
   }
 
-  // ── Werkritme ────────────────────────────────────────────────────────────
-  // De uren komen van de server in Amsterdamse tijd. Hier NIET opnieuw
-  // omrekenen: elke tweede omrekening is een kans om er twee uur naast te
-  // zitten, en dan gaat Dave terecht in beroep tegen zijn eigen rapport.
-  function sectieWerkritme(d) {
-    const dagen = d.werkritme || [];
+  // ── De dag: tijdlijn plus de twee rekensommen ────────────────────────────
+  // Deze twee stonden als aparte secties op de rol (tijdlijn en werkritme) en
+  // gaan over hetzelfde: de verdeling van het werk over de dag. Twee blokken
+  // onder elkaar is niet twee keer beter maar een rommelig rapport, dus ze
+  // staan hier samen: het beeld, en eronder de bevindingen die het in cijfers
+  // zeggen. De uur-balk is vervallen — de kwartierstrook in de tijdlijn laat
+  // hetzelfde zien, alleen fijner.
+  //
+  // De SVG komt kant-en-klaar van de server. Hier niets tekenen: zou de
+  // browser dat na het laden doen, dan is juist deze pagina leeg of half.
+  function sectieTijdlijn(d) {
+    const dagen = d.tijdlijn || [];
+    if (!dagen.length) return '';
     const dr = d.drempels || {};
-    let h = '<div class="sectie">' + sectiekop('Werkritme',
+    const ritmeVan = (dag) => (d.werkritme || []).find((r) => r.dag === dag) || null;
+
+    let h = '<div class="sectie">' + sectiekop('De dag',
       (dr.werkuur_van ?? 9) + ':00-' + (dr.werkuur_tot ?? 21) + ':00');
-    if (!dagen.length) return h + '<div class="leeg">Geen werkritme berekend.</div></div>';
-    for (const r of dagen) {
-      const top = Math.max(1, ...r.per_uur.map((u) => u.aantal));
-      h += '<div class="ritme"><div class="ritme-kop">' + esc(nlDatum(r.dag)) + ' &middot; ' +
-        r.totaal + ' acties &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren</div>' +
-        '<div class="ritme-balk">' + r.per_uur.map((u) =>
-          '<div class="ritme-uur"><div class="ritme-staaf" style="height:' +
-          Math.round((u.aantal / top) * 100) + '%"></div>' +
-          '<div class="ritme-label">' + u.uur + '</div></div>').join('') + '</div>';
-      for (const b of r.bevindingen) h += '<div class="ritme-bev">' + esc(b.tekst) + '</div>';
+    h += '<div class="uitleg">De hoogte van een staaf is de gespreksduur. Een leeg stuk is een blinde ' +
+      'vlek, geen verwijt: deze module ziet alleen wat er in Opvolging gebeurt.</div>';
+    for (const t of dagen) {
+      const r = ritmeVan(t.dag);
+      h += '<div class="tl"><div class="tl-kop">' + esc(nlDatum(t.dag)) + ' &middot; ' +
+        esc(t.venster.van) + '-' + esc(t.venster.tot) +
+        (r ? ' &middot; ' + r.totaal + ' acties &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren' : '') +
+        '</div>' + t.svg +
+        (t.verruimd ? '<div class="tl-noot">' + esc(t.verruimd.reden) + '</div>' : '');
+      for (const b of (r ? r.bevindingen : [])) h += '<div class="ritme-bev">' + esc(b.tekst) + '</div>';
       h += '</div>';
     }
     return h + '</div>';
   }
+
 
   // ── Afgehandeld ──────────────────────────────────────────────────────────
   // Dezelfde driedeling en dezelfde berekening als het scherm: die komt van de
@@ -317,7 +329,6 @@ tr{break-inside:avoid}
              '<td class="getalkolom">' + esc(nlDatum(a.dag)) + '</td></tr>');
     return h + '</div>';
   }
-
   // ── 1 · Wat vraagt aandacht ─────────────────────────────────────────────
   function sectieAandacht(d) {
     const lijst = d.aandacht || [];

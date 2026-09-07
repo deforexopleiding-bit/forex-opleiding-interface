@@ -1438,6 +1438,11 @@
 .opv .opvr-regel{padding:8px 10px;border-left:3px solid var(--o-line);background:#fafbfc;border-radius:0 8px 8px 0}
 .opv .opvr-regel.opvr-rood{border-left-color:var(--o-red);background:var(--o-reds)}
 .opv .opvr-regel.opvr-groen{border-left-color:#16a34a;background:#f0fdf4}
+.opv .opvr-tl{margin:10px 0 6px}
+.opv .opvr-tl-kop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:12.5px;margin-bottom:4px}
+.opv .opvr-tl-kop span{color:var(--o-muted);font-size:11.5px}
+.opv .opvr-tl-legenda{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11px;color:var(--o-muted)}
+.opv .opvr-tl-legenda i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .opv .opvr-regel.opvr-grijs{border-left-color:#d1d5db;background:#f7f8f9}
 .opv .opvr-t{font-size:13.5px;font-weight:600}
 .opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
@@ -2923,7 +2928,7 @@
           const ok = a.bel_dagen >= ARCHIEF_MIN_DAGEN && a.wa_totaal >= ARCHIEF_MIN_WA;
           const oordeel = nvt
             ? '<span class="tag t-grey" title="de lead zei tijdens de call zelf nee">n.v.t.</span>'
-            : (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>');
+            : (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig pogingen</span>');
           return '<tr><td><b>' + esc(a.naam) + '</b></td><td style="color:#6b7280">' + esc(a.archief_reden || '') + '</td>' +
             '<td>' + a.bel_totaal + '&times; gebeld op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') + ' &middot; ' + a.wa_totaal + '&times; WhatsApp ' +
             oordeel + '</td></tr>';
@@ -2955,7 +2960,7 @@
         '<div style="font-size:12.5px;color:#6b7280">' + esc(a.archief_reden || '') + '</div></td>' +
         '<td><span class="tag t-grey">' + esc((REDEN_LABEL[a.reden] || [a.reden])[0]) + '</span></td>' +
         '<td>' + a.bel_totaal + '&times; &#9742; op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') + ' &middot; ' + a.wa_totaal + '&times; &#128172; ' +
-        (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>') + '</td>' +
+        (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig pogingen</span>') + '</td>' +
         '<td style="color:#6b7280">' + esc(a.gearchiveerd_at ? nl(iso(a.gearchiveerd_at)) : '') + '</td></tr>';
     }).join('');
     return h + '</tbody></table></div></div>' + modalHtml();
@@ -4315,9 +4320,12 @@
 
     h += sectieAandacht(d);
     h += sectieDekking(d);
+    h += sectieTijdlijn(d);
     h += sectieVensters(d);
     h += sectieZoomcalls(d);
-    h += sectieWerkritme(d);
+    // sectieWerkritme is opgegaan in sectieTijdlijn hierboven: allebei gingen
+    // ze over de verdeling van het werk over de dag, en twee blokken daarover
+    // onder elkaar is niet twee keer beter maar een rommelig rapport.
     h += sectieAfgehandeld(d);
     h += sectieVolume(d);
     return h + '</div>';
@@ -4426,6 +4434,59 @@
       '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
       '</div><div class="opvr-u">' + r.bel + '&times; gebeld op ' + r.bel_dagen + ' dag' + (r.bel_dagen === 1 ? '' : 'en') +
       ' &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+    return h + '</div>';
+  }
+
+  // ── 2b · De tijdlijn ─────────────────────────────────────────────────────
+  // De SVG komt kant-en-klaar van de server, precies zoals de printweergave
+  // hem krijgt. Hier niets narekenen en niets tekenen: één grafiek, één bron.
+  function sectieTijdlijn(d) {
+    const dagen = d.tijdlijn || [];
+    let h = '<div class="card opvr-sectie"><h3>2b &middot; De dag</h3>';
+    if (!dagen.length) return h + '<div class="empty">Geen tijdlijn berekend voor deze periode.</div></div>';
+
+    // DE TOON. Een gat is een BLINDE VLEK, geen verwijt: deze module ziet
+    // alleen wat er in Opvolging gebeurt, niet de zoomcalls zelf en niet het
+    // andere werk van de dag. Zonder die zin leest stilte als een aanklacht.
+    h += '<div class="ronde">Elke belpoging, WhatsApp en ingeplande zoomcall op hun eigen tijdstip. ' +
+      'De <b>hoogte</b> van een staaf is de gespreksduur — op een as van twaalf uur is een gesprek ' +
+      'van anderhalve minuut te smal om te zien. <b>Een leeg stuk is een blinde vlek, geen verwijt:</b> ' +
+      'deze module ziet alleen wat er in Opvolging gebeurt, niet het gesprek in een zoomcall en niet ' +
+      'het werk dat elders is vastgelegd.</div>';
+
+    // De twee rekensommen van het werkritme horen ONDER het beeld, niet in een
+    // eigen blok: ze zeggen in cijfers wat de tijdlijn laat zien. De uur-balk
+    // die daar eerst bij hoorde is vervallen — de kwartierstrook in de tijdlijn
+    // toont hetzelfde, alleen fijner.
+    const dr = d.drempels || {};
+    const ritmeVan = (dag) => (d.werkritme || []).find((r) => r.dag === dag) || null;
+    h += '<div class="ronde zacht">De werkdag loopt van <b>' + (dr.werkuur_van ?? 9) + ':00 tot ' +
+      (dr.werkuur_tot ?? 21) + ':00</b>. Een stilte binnen die uren heet een gat vanaf <b>' +
+      Math.round((dr.gat_drempel_min ?? 120) / 60) + ' uur</b>; onder <b>' +
+      Math.round((dr.bezetting_drempel ?? 0.6) * 100) + '%</b> bezetting heet de dag geklonterd.</div>';
+
+    for (const t of dagen) {
+      const r = ritmeVan(t.dag);
+      h += '<div class="opvr-tl"><div class="opvr-tl-kop"><b>' + esc(nl(t.dag)) + '</b>' +
+        '<span>' + t.aantallen.bel + ' belpoging' + (t.aantallen.bel === 1 ? '' : 'en') +
+        ' &middot; ' + t.aantallen.whatsapp + '&times; WhatsApp &middot; ' +
+        t.aantallen.zoomcalls + ' zoomcall' + (t.aantallen.zoomcalls === 1 ? '' : 's') +
+        ' &middot; ' + esc(t.venster.van) + '&ndash;' + esc(t.venster.tot) +
+        (r ? ' &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren' : '') +
+        '</span></div>' +
+        t.svg +
+        (t.verruimd ? '<div class="ronde zacht">' + esc(t.verruimd.reden) + '</div>' : '');
+      for (const b of (r ? r.bevindingen : [])) h += '<div class="warn">' + esc(b.tekst) + '</div>';
+      h += '</div>';
+    }
+    h += '<div class="opvr-tl-legenda">' +
+      '<span><i style="background:#07835A"></i>gesprek (hoogte = duur)</span>' +
+      '<span><i style="background:#E4F5EE;border:1px dashed #07835A"></i>gesproken, lengte onbekend</span>' +
+      '<span><i style="background:#fff;border:1px solid #C22B3E"></i>niet opgenomen</span>' +
+      '<span><i style="background:#E7EEFA;border:1px solid #1B5FBF"></i>WhatsApp uit</span>' +
+      '<span><i style="background:#FBF0DE;border:1px solid #C2700A"></i>antwoord</span>' +
+      '<span><i style="background:#EDE7FB;border:1px solid #6D3FD4"></i>zoomcall</span>' +
+      '</div>';
     return h + '</div>';
   }
 
@@ -4538,46 +4599,7 @@
     return h + '</div>';
   }
 
-  // ── 4b · Werkritme — is het werk verdeeld of geklonterd? ─────────────────
-  // Maxims eis: niet één keer snel snel alles en dan de hele dag niets. Het
-  // balkje toont ELK werkuur, ook de lege — een ontbrekend uur leest als 'niet
-  // gemeten', een uur met nul leest als 'niets gedaan', en dat is het punt.
-  //
-  // De uren komen van de server in Amsterdamse tijd. Hier NIET opnieuw
-  // omrekenen: alles staat in UTC in de databank en elke tweede omrekening is
-  // een kans om er twee uur naast te zitten.
-  function sectieWerkritme(d) {
-    const dagen = d.werkritme || [];
-    let h = '<div class="card opvr-sectie"><h3>4b &middot; Werkritme</h3>';
-    if (!dagen.length) return h + '<div class="empty">Geen werkritme berekend voor deze periode.</div></div>';
 
-    const dr = d.drempels || {};
-    h += '<div class="ronde">De werkdag loopt van <b>' + (dr.werkuur_van ?? 9) + ':00 tot ' +
-      (dr.werkuur_tot ?? 21) + ':00</b>. Een stilte binnen die uren heet een gat vanaf <b>' +
-      Math.round((dr.gat_drempel_min ?? 120) / 60) + ' uur</b>; onder <b>' +
-      Math.round((dr.bezetting_drempel ?? 0.6) * 100) + '%</b> bezetting van de werkuren heet de dag geklonterd.</div>';
-
-    for (const r of dagen) {
-      const top = Math.max(1, ...r.per_uur.map((u) => u.aantal));
-      h += '<div class="opvr-ritme">' +
-        '<div class="opvr-ritme-kop"><b>' + esc(nl(r.dag)) + '</b>' +
-          '<span>' + r.totaal + ' actie' + (r.totaal === 1 ? '' : 's') +
-          ' &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren' +
-          (r.buiten_werkuren ? ' &middot; ' + r.buiten_werkuren + ' buiten werkuren' : '') + '</span></div>' +
-        '<div class="opvr-balk">' + r.per_uur.map((u) =>
-          '<div class="opvr-uur" title="' + u.uur + ':00 &mdash; ' + u.aantal + ' acties">' +
-            '<div class="opvr-staaf' + (u.aantal ? '' : ' opvr-leeg') + '" style="height:' +
-              Math.round((u.aantal / top) * 100) + '%"></div>' +
-            '<div class="opvr-uurlabel">' + u.uur + '</div>' +
-            '<div class="opvr-uuraantal">' + (u.aantal || '') + '</div>' +
-          '</div>').join('') + '</div>';
-      for (const b of r.bevindingen) {
-        h += '<div class="warn">' + esc(b.tekst) + '</div>';
-      }
-      h += '</div>';
-    }
-    return h + '</div>';
-  }
 
   // ── 5 · Afgehandeld ──────────────────────────────────────────────────────
   // Heette 'Uit de lijst gehaald' en toonde alleen archiveringen. Bryan en
@@ -4640,7 +4662,7 @@
     // aan te doen viel.
     if (m.staat === 'nvt') return '<span class="tag t-grey" title="' + esc(m.reden || '') + '">n.v.t.</span>';
     if (m.staat === 'genoeg') return '<span class="tag t-green">ok</span>';
-    return '<span class="tag t-red">te weinig</span>';
+    return '<span class="tag t-red">te weinig pogingen</span>';
   }
 
   // ── 6 · Volume ───────────────────────────────────────────────────────────
