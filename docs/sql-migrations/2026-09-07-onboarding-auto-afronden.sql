@@ -78,6 +78,17 @@ SELECT p.id, 'signals.hoofdmentor.receive', true
     OR lower(p.email) = 'maxim@deforexopleiding.nl'           -- Maxim
 ON CONFLICT (user_id, feature_key) DO UPDATE SET allowed = true;
 
+-- ⚠ CONTROLEER OOK `students.all.view`. De melding over een gemiste eerste
+-- call wijst naar Aandachtspunten (/modules/students-overview.html?tab=signals);
+-- afhandelen gebeurt daar via student-signals-handle.js, dat op
+-- `students.all.view` gegate is. Heeft een van de twee dat recht niet, dan
+-- landt 'ie op een scherm waar hij niks mee kan:
+--   SELECT p.email, public.user_has_permission(p.id, 'students.all.view')
+--     FROM public.profiles p
+--    WHERE p.id = '9f4cd827-9529-4647-bdd3-2db4cd340bab'
+--       OR lower(p.email) = 'maxim@deforexopleiding.nl';
+-- Zo nodig bijzetten met dezelfde INSERT-vorm en feature_key 'students.all.view'.
+
 -- Controle ACHTERAF — wie heeft het recht nu:
 --   SELECT p.email, p.full_name, up.allowed
 --     FROM public.user_permissions up

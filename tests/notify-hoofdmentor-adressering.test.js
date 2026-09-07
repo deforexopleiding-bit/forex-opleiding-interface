@@ -186,3 +186,25 @@ test('CONTRACT: een gemiste eerste call valt NIET terug op de sessie-mentor', ()
   assert.match(NOSHOW, /eerste_call_zonder_ontvanger/,
     'zonder ontvanger moet dat geteld en gemeld worden, niet stil opgelost');
 });
+
+// ── 5) Het bericht moet ergens uitkomen waar het signaal ook STAAT ──────────
+
+const OVERZICHT = readFileSync(
+  new URL('../modules/students-overview.html', import.meta.url), 'utf8');
+
+test('CONTRACT: een gemiste eerste call verwijst NIET naar de no-show-tab van de mentor', () => {
+  // Die tab filtert op type='no_show' en toont alleen de eigen studenten van
+  // de ingelogde mentor. De hoofdmentor zou daar op een leeg scherm landen.
+  const eersteCallTak = NOSHOW.slice(NOSHOW.indexOf('linkUrl:'));
+  assert.match(eersteCallTak, /isEersteCall[\s\S]{0,120}students-overview\.html\?tab=signals/,
+    'de eerste-call-melding verwijst niet naar Aandachtspunten');
+});
+
+test('CONTRACT: Aandachtspunten kent het type eerste_call_no_show', () => {
+  assert.match(OVERZICHT, /eerste_call_no_show\s*:\s*'Eerste call gemist'/,
+    'het type heeft geen leesbaar label en toont dus de ruwe sleutel');
+  assert.match(OVERZICHT, /AUTO_SIGNAL_TYPES\s*=\s*\['no_show',\s*'eerste_call_no_show'\]/,
+    'het type telt niet als automatisch signaal en belandt onder de mentor-meldingen');
+  assert.match(OVERZICHT, /so-tab\[data-pane="'\s*\+\s*gevraagd/,
+    'de diep-link ?tab=signals werkt niet, dus de melding landt op het verkeerde tabblad');
+});

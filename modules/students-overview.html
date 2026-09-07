@@ -324,6 +324,7 @@
             <option value="all">Alle</option>
             <option value="meldingen">Meldingen (mentor)</option>
             <option value="no_show">No-shows (auto)</option>
+            <option value="eerste_call_no_show">Eerste call gemist (auto)</option>
           </select>
         </label>
         <label><input type="checkbox" id="apShowHistory" /> Toon afgehandelde historie</label>
@@ -488,7 +489,7 @@ const state = {
   signals        : [],          // raw lijst student_signals (admin-shape)
   signalsLoaded  : false,
   apShowHistory  : false,       // toggle: ook afgehandelde tonen?
-  apTypeFilter   : 'all',       // 'all' | 'meldingen' | 'no_show'
+  apTypeFilter   : 'all',       // 'all' | 'meldingen' | 'no_show' | 'eerste_call_no_show'
   apHandleRow    : null,        // huidige rij in de handle-modal
   apHandleBusy   : false,
   // D — Beoordelingshistorie (admin-only)
@@ -1072,6 +1073,16 @@ function wireTabs() {
   document.querySelectorAll('.so-tab[data-pane]').forEach((b) => {
     b.addEventListener('click', () => switchPane(b.dataset.pane));
   });
+  // Diep-link vanuit een melding: ?tab=signals opent meteen Aandachtspunten.
+  // Zonder dit landt wie op een eerste-call-melding klikt op het Studenten-
+  // tabblad en moet 'ie zelf op zoek — precies het soort halve doorverwijzing
+  // waardoor een signaal blijft liggen.
+  try {
+    const gevraagd = new URLSearchParams(location.search).get('tab');
+    if (gevraagd && document.querySelector('.so-tab[data-pane="' + gevraagd + '"]')) {
+      switchPane(gevraagd);
+    }
+  } catch (e) { /* geen diep-link, gewoon het standaard tabblad */ }
 }
 function switchPane(p) {
   state.currentPane = p;
@@ -1520,7 +1531,15 @@ const SIGNAL_TYPE_LABELS = {
   geen_reactie_bellen : 'Geen reactie — bellen',
   anders              : 'Anders',
   no_show             : 'No-show',
+  eerste_call_no_show : 'Eerste call gemist',
 };
+
+// Signaaltypes die AUTOMATISCH ontstaan uit een gemiste sessie (cron), tegenover
+// de handmatige meldingen van een mentor. Staat hier één keer zodat het
+// type-filter en de rij-opmaak niet uit elkaar kunnen lopen — dat gebeurde bij
+// de invoering van 'eerste_call_no_show', dat door een `!== 'no_show'`-filter
+// stilletjes onder "Meldingen (mentor)" belandde.
+const AUTO_SIGNAL_TYPES = ['no_show', 'eerste_call_no_show'];
 const SIGNAL_STATUS_LABELS = {
   open             : 'Open',
   opnieuw_opvolgen : 'Opnieuw opvolgen',
@@ -1535,8 +1554,9 @@ function renderSignalsTable() {
     ? state.signals
     : state.signals.filter((s) => s.status === 'open' || s.status === 'opnieuw_opvolgen');
   // Type-filter.
-  if (state.apTypeFilter === 'no_show')        list = list.filter((s) => s.type === 'no_show');
-  else if (state.apTypeFilter === 'meldingen') list = list.filter((s) => s.type !== 'no_show');
+  if (state.apTypeFilter === 'no_show')                 list = list.filter((s) => s.type === 'no_show');
+  else if (state.apTypeFilter === 'eerste_call_no_show') list = list.filter((s) => s.type === 'eerste_call_no_show');
+  else if (state.apTypeFilter === 'meldingen')           list = list.filter((s) => !AUTO_SIGNAL_TYPES.includes(s.type));
   const info = document.getElementById('apCountInfo');
   if (info) info.textContent = list.length + ' ' + (list.length === 1 ? 'punt' : 'punten');
   if (list.length === 0) {
@@ -1553,6 +1573,11 @@ function renderSignalsTable() {
       ? '<button type="button" class="so-btn primary ap-handle-btn" data-idx="' + idx + '"><i class="ti ti-check"></i> Afhandelen</button>'
       : '<span class="so-mentor-none">afgehandeld</span>';
     // No-show rijen krijgen extra labels: auto-bron + reden van mentor (of "wacht op reden").
+    // Alleen een GEWONE no-show kent de "reden van de mentor"-stap; een gemiste
+    // eerste call gaat naar de hoofdmentor en heeft die stap niet (het
+    // reden-endpoint weigert 'm ook). Daarom hier niet op AUTO_SIGNAL_TYPES
+    // filteren maar op het gewone type — anders staat er "Wacht op reden" bij
+    // een signaal waar niemand een reden kan geven.
     const isNoshow   = (s.type === 'no_show');
     const autoBadge  = (s.source === 'auto_noshow')
       ? '<span class="ap-badge open" style="background:rgba(59,130,246,0.14);color:#1d4ed8;margin-left:6px">auto</span>'

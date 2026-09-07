@@ -310,7 +310,15 @@ export default async function handler(req, res) {
                   body:          isEersteCall
                     ? ((studentName || 'Student') + ' miste de eerste call. Kort opvolgen om te voorkomen dat dit een wanbetaler wordt.')
                     : ((studentName || 'Student') + ' — geef de reden voor de no-show op'),
-                  linkUrl:       '/modules/mentor-students.html?tab=noshows',
+                  // WAAR de ontvanger heen moet verschilt per soort.
+                  // De No-shows-tab van de mentor toont alleen type='no_show'
+                  // en alleen de eigen studenten — een gemiste eerste call
+                  // staat daar dus niet in, en de hoofdmentor is niet per se
+                  // de mentor van die student. Die gaat naar Aandachtspunten,
+                  // waar het signaal wél staat en afgehandeld kan worden.
+                  linkUrl:       isEersteCall
+                    ? '/modules/students-overview.html?tab=signals'
+                    : '/modules/mentor-students.html?tab=noshows',
                   entityType:    'student_signal',
                   entityId:      insRow.id,
                   priority:      'high',

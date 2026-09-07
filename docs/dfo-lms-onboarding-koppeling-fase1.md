@@ -442,6 +442,24 @@ De signaalrij zelf verandert niet: één rij per sessie, unieke index op
 `session_id`, `mentor_user_id` blijft de mentor van die sessie. Alleen wie er
 bericht van krijgt is anders.
 
+**En waar dat bericht heen wijst.** De No-shows-tab van de mentor
+(`/modules/mentor-students.html?tab=noshows`) filtert op `type === 'no_show'`
+en toont bovendien alleen de eigen studenten van de ingelogde mentor — een
+gemiste eerste call staat daar dus niet in, en de hoofdmentor is niet per se de
+mentor van die student. De melding wijst daarom naar **Aandachtspunten**
+(`/modules/students-overview.html?tab=signals`), waar het signaal wél staat en
+via `student-signals-handle.js` afgehandeld kan worden. Daarvoor is
+`students.all.view` nodig — **controleer dat beide hoofdmentoren dat recht
+hebben** voor je de toekenning draait; zo niet, dan is dat een tweede rij in
+`user_permissions`.
+
+Bijkomend: `eerste_call_no_show` had in Aandachtspunten geen leesbaar label
+(ruwe sleutel in de tabel) en viel door een `!== 'no_show'`-filter onder
+"Meldingen (mentor)". Beide rechtgezet, met `AUTO_SIGNAL_TYPES` als één plek
+zodat filter en rij-opmaak niet opnieuw uit elkaar kunnen lopen. De
+"Wacht op reden"-regel blijft bewust alléén bij een gewone no-show staan: het
+reden-endpoint weigert het nieuwe type, dus daar kán niemand een reden geven.
+
 ### Bewust niet omgezet: de betaalherinnering
 
 `api/cron/first-call-payment-reminder.js` blijft op Bubble staan en is
