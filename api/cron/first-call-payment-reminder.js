@@ -1,21 +1,42 @@
 // api/cron/first-call-payment-reminder.js
 //
-// Uur-cron — stuurt 24u vóór een in Bubble geplande 1-op-1 call een
-// betaalherinnering (WhatsApp + e-mail) als de eerste factuur van de klant
-// nog onbetaald is. Idempotent per call via tabel
-// first_call_payment_reminders (unique op bubble_session_id).
+// Uur-cron — stuurt 24u vóór een geplande 1-op-1 call een betaalherinnering
+// (WhatsApp + e-mail) als de eerste factuur van de klant nog onbetaald is.
+//
+// ── BRON: hlms_sessie in dfo-lms (NIET meer Bubble) ──────────────────────
+// De mentoren werken sinds augustus 2026 in het nieuwe LMS. Deze cron keek
+// nog naar Bubble-'1-1-session', vond daar niets, en meldde elk uur netjes
+// `checked: 0` — wat las als "er stond niets gepland". Gevolg: klanten met
+// een openstaande eerste factuur kregen géén herinnering meer, en niemand
+// zag dat, want de cron zag er kerngezond uit.
+//
+// Daarom geeft de uitkomst nu ALTIJD `bron_status` mee. Een mislukte
+// bevraging eindigt met ok:false en een 502; alleen bij `bron_status:
+// 'gelezen'` betekent `checked: 0` echt dat er niets gepland stond.
+// Zie api/_lib/dfo-lms-sessies.js.
+//
+// ── LET OP DE KOLOMNAAM `bubble_session_id` ──────────────────────────────
+// De idempotentie-marker staat in first_call_payment_reminders, uniek op
+// `bubble_session_id`. Daar gaat nu een hlms_sessie-uuid in. De NAAM klopt
+// dus niet meer, de WERKING wel: een uuid en een Bubble-id kunnen nooit
+// botsen, dus oude en nieuwe markers staan elkaar niet in de weg en geen
+// enkele klant krijgt een dubbele herinnering.
+//
+// Bewust niet hernoemd: dat is een migratie op een productietabel voor
+// alleen een naam, en migraties lopen hier via een mens. Wil je 'm alsnog
+// hernoemen, doe dat dan samen met de andere Bubble-restanten in één keer.
 //
 // AUTH: Authorization: Bearer ${CRON_SECRET}. 401 zonder.
 //
 // FLOW (per sessie, fail-soft):
-//   1) Bubble 1-1-session waar starting_date_date ∈ (now, now+24u).
+//   1) hlms_sessie waar start_tijd ∈ (now, now+24u), afgehandelde sessies
+//      (status 'afgerond' / 'no_show') eruit, student-e-mail erbij.
 //   2) Per sessie:
 //      - sessionId + member resolven; skip bij ontbrekend.
 //      - Idempotentie-precheck: bestaat al een rij in
-//        first_call_payment_reminders met deze bubble_session_id? → skip.
-//      - student-email via bubbleGet('user', member) +
-//        bubbleUserDisplay (mirror mentorStudents.js: genest pad
-//        authentication.email.email + fallbacks; al lowercased).
+//        first_call_payment_reminders met dit sessie-id? → skip.
+//      - student-e-mail komt uit hlms_student via sessie.student_id,
+//        al genormaliseerd naar kleine letters door de bron.
 //      - customer matchen op (case-insensitive) email; geen → skip.
 //      - actieve onboarding van klant (status NOT IN gearchiveerd|afgerond
 //        AND archived_at IS NULL); geen → skip.
@@ -31,7 +52,7 @@
 // Return: { ok, checked, sent_wa, sent_email, skipped, errors }.
 
 import { supabaseAdmin } from '../supabase.js';
-import { bubbleList, bubbleGet, bubbleUserDisplay } from '../_lib/bubble.js';
+import { haalSessiesInVenster, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
 import { sendOnboardingTemplateGeneric } from '../_lib/onboarding-template-send.js';
 import { sendOnboardingMail } from '../mailer.js';
 import { ensureInvoicePaymentLink } from '../_lib/invoice-payment-link.js';
@@ -39,12 +60,6 @@ import { ensureInvoicePaymentLink } from '../_lib/invoice-payment-link.js';
 const WA_TEMPLATE = 'betaalherinnering_eerste_call';
 const FETCH_CAP   = 200;
 
-// Mirror van noshow-detect: defensieve readers voor Bubble's suffix-conventie.
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) if (u[k] !== undefined) return u[k];
-  return undefined;
-}
 function escHtml(s) {
   if (s == null) return '';
   return String(s)
@@ -96,6 +111,16 @@ export default async function handler(req, res) {
 
   const result = {
     ok: true,
+    // De BRON expliciet in de uitkomst. Zonder dit is 'checked: 0' niet te
+    // onderscheiden van een mislukte bevraging — precies de verwarring die
+    // deze cron maandenlang stil hield toen Bubble leegliep.
+    bron: 'hlms_sessie',
+    bron_status: null,
+    venster: null,
+    totaal_in_venster: 0,
+    overgeslagen_afgehandeld: 0,
+    zonder_student: 0,
+    zonder_email: 0,
     checked: 0,
     sent_wa: 0,
     sent_email: 0,
@@ -107,36 +132,52 @@ export default async function handler(req, res) {
     const now   = new Date();
     const in24h = new Date(now.getTime() + 24 * 3_600_000);
 
-    let sessions = [];
-    try {
-      const { results } = await bubbleList('1-1-session', [
-        { key: 'starting_date_date', constraint_type: 'greater than', value: now.toISOString() },
-        { key: 'starting_date_date', constraint_type: 'less than',    value: in24h.toISOString() },
-      ], { limit: FETCH_CAP });
-      sessions = Array.isArray(results) ? results : [];
-    } catch (e) {
-      console.error('[first-call-payment-reminder] bubble fetch failed:', e?.message || e);
-      return res.status(502).json({ ok: false, error: 'bubble fetch failed: ' + (e?.message || e), result });
+    result.venster = { van: now.toISOString(), tot: in24h.toISOString() };
+
+    const bron = await haalSessiesInVenster({
+      vanIso: now.toISOString(),
+      totIso: in24h.toISOString(),
+      limiet: FETCH_CAP,
+    });
+
+    result.bron_status              = bron.bron_status;
+    result.totaal_in_venster        = bron.totaal_in_venster;
+    result.overgeslagen_afgehandeld = bron.overgeslagen_afgehandeld;
+    result.zonder_student           = bron.zonder_student;
+    result.zonder_email             = bron.zonder_email;
+
+    // MISLUKTE BEVRAGING IS GEEN LEGE UITKOMST. Stoppen met een duidelijke
+    // fout, zodat een storing niet als 'er stond niets gepland' voorbijgaat.
+    if (bron.bron_status !== BRON_GELEZEN) {
+      result.ok = false;
+      result.error = 'sessies niet gelezen (' + bron.bron_status + '): '
+        + (bron.fout || 'reden onbekend');
+      console.error('[first-call-payment-reminder]', result.error);
+      return res.status(502).json(result);
     }
+
+    const sessions = bron.sessies;
     result.checked = sessions.length;
+
+    // Vanaf hier is 'checked: 0' een FEIT: de bron is gelezen en er stonden
+    // geen open sessies in het venster van 24 uur.
+    if (sessions.length === 0) {
+      console.log('[first-call-payment-reminder] bron gelezen, geen open sessies in venster'
+        + ' (totaal ' + bron.totaal_in_venster + ', afgehandeld ' + bron.overgeslagen_afgehandeld + ')');
+    }
 
     for (const s of sessions) {
       try {
-        const sessionId = String(s?._id || '').trim();
-        const memberRaw = readFirst(s, ['member_user']);
-        const callAt    = readFirst(s, ['starting_date_date', 'starting date']) || null;
-
-        // Bubble-list kan member als array of string teruggeven.
-        let memberId = null;
-        if (Array.isArray(memberRaw)) memberId = String(memberRaw[0] || '').trim();
-        else if (memberRaw)            memberId = String(memberRaw).trim();
-
-        if (!sessionId || !memberId) { result.skipped++; continue; }
+        const sessionId    = s.id;
+        const callAt       = s.start_tijd || null;
+        const studentEmail = s.email;   // komt al genormaliseerd uit de bron
 
         // Idempotentie-precheck.
         const { data: existing, error: exErr } = await supabaseAdmin
           .from('first_call_payment_reminders')
           .select('id')
+          // Kolomnaam is historisch: hier gaat sinds de LMS-overgang een
+          // hlms_sessie-uuid in. Zie de toelichting in de kop.
           .eq('bubble_session_id', sessionId)
           .maybeSingle();
         if (exErr) {
@@ -145,19 +186,6 @@ export default async function handler(req, res) {
           continue;
         }
         if (existing) { result.skipped++; continue; }
-
-        // Student e-mail via Bubble.
-        let studentEmail = '';
-        try {
-          const stu = await bubbleGet('user', memberId);
-          if (stu) {
-            const disp = bubbleUserDisplay(stu);
-            studentEmail = disp.email ? String(disp.email).trim().toLowerCase() : '';
-          }
-        } catch (e) {
-          console.warn('[first-call-payment-reminder] bubble user fetch failed for', memberId, ':', e?.message || e);
-        }
-        if (!studentEmail) { result.skipped++; continue; }
 
         // Customer matchen (case-insensitive exact).
         const { data: cust, error: custErr } = await supabaseAdmin
@@ -272,6 +300,7 @@ export default async function handler(req, res) {
           const { error: insErr } = await supabaseAdmin
             .from('first_call_payment_reminders')
             .insert({
+              // Historische naam, zie kop: dit is nu een hlms_sessie-uuid.
               bubble_session_id: sessionId,
               onboarding_id:     onboarding.id,
               customer_id:       cust.id,
