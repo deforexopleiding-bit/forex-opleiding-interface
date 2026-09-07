@@ -83,6 +83,15 @@
 //      overgang, niet aan de staat van de rij. Komt de cron opnieuw langs, dan
 //      is `auto_afgerond_sessie_id` gevuld en komt hij niet eens in de buurt.
 //
+// VOLUME — ÉÉN melding per onboarding, voor de hele levensduur van die klant.
+// Niet per sessie. De bovengrens is dus de instroom van nieuwe klanten: gemeten
+// op 7-9-2026 zo'n vijf per week, ongeveer één per werkdag. Dat is meteen de
+// grens: bij tien per dag leest niemand ze meer en is dit ruis in plaats van
+// een alarm. AFSPRAAK: wordt het structureel meer, dan een DAGELIJKSE
+// SAMENVATTING in plaats van losse meldingen — niet uitzetten, niet filteren.
+// Zie docs/dfo-lms-onboarding-koppeling-fase1.md voor de meting en de
+// hertoets-query.
+//
 // AUTH: Authorization: Bearer ${CRON_SECRET}. 401 zonder.
 
 import { supabaseAdmin } from '../supabase.js';
