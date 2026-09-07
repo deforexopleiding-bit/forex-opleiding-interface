@@ -206,7 +206,10 @@ export async function haalNoShowsSinds({ sindsIso, limiet = STANDAARD_LIMIET, cl
       .order('start_tijd', { ascending: true })
       .limit(limiet);
     if (error) throw new Error(error.message);
-    rijen = Array.isArray(data) ? data : [];
+    const sindsMs = new Date(sindsIso).getTime();
+    rijen = (Array.isArray(data) ? data : []).filter((r) =>
+      String(r?.status || '').trim().toLowerCase() === 'no_show'
+      && r?.start_tijd && new Date(r.start_tijd).getTime() > sindsMs);
   } catch (e) {
     const msg = e?.message || String(e);
     console.error('[dfo-lms-sessies] no-shows lezen mislukt:', msg);
@@ -371,4 +374,213 @@ export async function haalSessieOverzichtPerStudent({ bubbleUserIds, nu = new Da
   }
 
   return { bron_status: BRON_GELEZEN, perStudent, fout: null };
+}
+
+
+/**
+ * De EERSTE sessie per student: de vroegste `start_tijd`, ongeacht status.
+ *
+ * Beide regels van 7 september 2026 hangen hieraan:
+ *   - is die eerste sessie 'afgerond'  → de onboarding is klaar;
+ *   - is die eerste sessie 'no_show'   → een signaal met een eigen type,
+ *     want dan moet er iemand kort op zitten.
+ *
+ * "Eerste" is puur chronologisch. Er bestaat GEEN soort-onderscheid: geen
+ * kennismakingsgesprek, geen Alpha/Delta. Elke coachingsessie telt mee, en
+ * de vroegste is de eerste. Voeg hier dus geen type- of leertype-filter toe.
+ *
+ * @param {{studentIds: string[], client?: object}} arg
+ * @returns {Promise<{bron_status, perStudent: Map<string, {id, start_tijd, status}>, fout}>}
+ */
+export async function haalEersteSessiePerStudent({ studentIds, client = null }) {
+  const leeg = { bron_status: BRON_ONBEREIKBAAR, perStudent: new Map(), fout: null };
+
+  const ids = Array.from(new Set((studentIds || [])
+    .map((v) => String(v || '').trim()).filter(Boolean)));
+  if (ids.length === 0) return { ...leeg, bron_status: BRON_GELEZEN, fout: null };
+
+  const lms = client || getDfoLmsClient();
+  if (!lms) {
+    return { ...leeg, bron_status: BRON_NIET_GECONFIGUREERD,
+      fout: 'DFO_LMS_SUPABASE_URL/KEY ontbreekt' };
+  }
+
+  let rijen;
+  try {
+    const { data, error } = await lms
+      .from('hlms_sessie')
+      .select('id, start_tijd, status, student_id')
+      .in('student_id', ids)
+      .order('start_tijd', { ascending: true });
+    if (error) throw new Error(error.message);
+    rijen = Array.isArray(data) ? data : [];
+  } catch (e) {
+    const msg = 'hlms_sessie lezen mislukt: ' + (e?.message || e);
+    console.error('[dfo-lms-sessies]', msg);
+    return { ...leeg, bron_status: BRON_ONBEREIKBAAR, fout: msg };
+  }
+
+  // Niet vertrouwen op de sorteervolgorde van de bron: expliciet de vroegste
+  // kiezen. Een sessie zonder start_tijd kan per definitie niet de eerste zijn.
+  const perStudent = new Map();
+  for (const r of rijen) {
+    if (!r?.student_id || !r?.start_tijd) continue;
+    const sleutel = String(r.student_id);
+    const ms = new Date(r.start_tijd).getTime();
+    if (!Number.isFinite(ms)) continue;
+    const huidige = perStudent.get(sleutel);
+    if (!huidige || ms < new Date(huidige.start_tijd).getTime()) {
+      perStudent.set(sleutel, {
+        id: String(r.id),
+        start_tijd: new Date(r.start_tijd).toISOString(),
+        status: String(r.status || '').trim().toLowerCase() || null,
+      });
+    }
+  }
+
+  return { bron_status: BRON_GELEZEN, perStudent, fout: null };
+}
+
+/**
+ * De VROEGSTE AFGERONDE sessie per student, sinds een watermerk.
+ *
+ * Voor api/cron/onboarding-eerste-sessie-afronden.js.
+ *
+ * ── LET OP HET VERSCHIL ──────────────────────────────────────────────────
+ * Dit is NIET "de eerste sessie van de student, mits afgerond", maar "de
+ * vroegste sessie MET status afgerond". Dat onderscheid doet ertoe zodra de
+ * eerste sessie een no-show was: dan sluit die no-show niets af (er komt een
+ * signaal uit), en sluit de eerstvolgende sessie die wél afgerond raakt de
+ * onboarding alsnog. Anders zou één gemiste eerste call de onboarding voor
+ * altijd open laten staan.
+ *
+ * Het watermerk voorkomt een terugwerkende vloedgolf. Ligt de vroegste
+ * afgeronde sessie van een student vóór het watermerk, dan had die de
+ * onboarding destijds al moeten sluiten; die slaan we bewust over en tellen
+ * we als `eerdere_afgeronde_buiten_venster`, zodat het zichtbaar blijft in
+ * plaats van stil te verdwijnen.
+ *
+ * @param {{sindsIso: string, limiet?: number, client?: object}} arg
+ */
+export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_LIMIET, client = null }) {
+  const leeg = {
+    bron_status: BRON_ONBEREIKBAAR, sessies: [],
+    totaal_afgerond: 0, eerdere_afgeronde_buiten_venster: 0,
+    zonder_bubble_koppeling: 0, fout: null,
+  };
+
+  const lms = client || getDfoLmsClient();
+  if (!lms) {
+    return { ...leeg, bron_status: BRON_NIET_GECONFIGUREERD,
+      fout: 'DFO_LMS_SUPABASE_URL/KEY ontbreekt' };
+  }
+
+  // 1) Afgeronde sessies sinds het watermerk.
+  let kandidaten;
+  try {
+    const { data, error } = await lms
+      .from('hlms_sessie')
+      .select('id, start_tijd, status, student_id')
+      .eq('status', 'afgerond')
+      .gt('start_tijd', sindsIso)
+      .order('start_tijd', { ascending: true })
+      .limit(limiet);
+    if (error) throw new Error(error.message);
+    // Ook in JS toetsen. De bevraging filtert al server-side, maar zo hangt
+    // de regel niet af van waar hij wordt afgedwongen — en blijft hij
+    // toetsbaar zonder databank.
+    const sindsMs = new Date(sindsIso).getTime();
+    kandidaten = (Array.isArray(data) ? data : []).filter((r) =>
+      String(r?.status || '').trim().toLowerCase() === 'afgerond'
+      && r?.start_tijd && new Date(r.start_tijd).getTime() > sindsMs);
+  } catch (e) {
+    const msg = 'afgeronde sessies lezen mislukt: ' + (e?.message || e);
+    console.error('[dfo-lms-sessies]', msg);
+    return { ...leeg, bron_status: BRON_ONBEREIKBAAR, fout: msg };
+  }
+
+  if (kandidaten.length === 0) {
+    return { ...leeg, bron_status: BRON_GELEZEN, fout: null };
+  }
+
+  // 2) Is dit ook echt de VROEGSTE afgeronde sessie van die student? Dat moet
+  // over ALLE afgeronde sessies, niet alleen die na het watermerk.
+  const studentIds = Array.from(new Set(kandidaten.map((r) => r.student_id).filter(Boolean)));
+  let vroegsteAfgerond = new Map();
+  try {
+    const { data, error } = await lms
+      .from('hlms_sessie')
+      .select('id, start_tijd, status, student_id')
+      .eq('status', 'afgerond')
+      .in('student_id', studentIds);
+    if (error) throw new Error(error.message);
+    for (const r of (data || [])) {
+      if (!r?.student_id || !r?.start_tijd) continue;
+      if (String(r.status || '').trim().toLowerCase() !== 'afgerond') continue;
+      const k = String(r.student_id);
+      const ms = new Date(r.start_tijd).getTime();
+      if (!Number.isFinite(ms)) continue;
+      const h = vroegsteAfgerond.get(k);
+      if (!h || ms < new Date(h.start_tijd).getTime()) {
+        vroegsteAfgerond.set(k, { id: String(r.id), start_tijd: new Date(r.start_tijd).toISOString() });
+      }
+    }
+  } catch (e) {
+    const msg = 'vroegste afgeronde bepalen mislukt: ' + (e?.message || e);
+    console.error('[dfo-lms-sessies]', msg);
+    return { ...leeg, bron_status: BRON_ONBEREIKBAAR, fout: msg };
+  }
+
+  const echtEerste = kandidaten.filter((r) => {
+    const v = vroegsteAfgerond.get(String(r.student_id));
+    return v && v.id === String(r.id);
+  });
+  const buitenVenster = kandidaten.length - echtEerste.length;
+
+  if (echtEerste.length === 0) {
+    return { ...leeg, bron_status: BRON_GELEZEN,
+      totaal_afgerond: kandidaten.length,
+      eerdere_afgeronde_buiten_venster: buitenVenster, fout: null };
+  }
+
+  // 3) De brug naar het CRM erbij.
+  let studentById = new Map();
+  try {
+    const ids = Array.from(new Set(echtEerste.map((r) => r.student_id)));
+    const { data, error } = await lms
+      .from('hlms_student')
+      .select('id, email, voornaam, achternaam, bubble_user_id')
+      .in('id', ids);
+    if (error) throw new Error(error.message);
+    for (const r of (data || [])) studentById.set(String(r.id), r);
+  } catch (e) {
+    const msg = 'hlms_student lezen mislukt: ' + (e?.message || e);
+    console.error('[dfo-lms-sessies]', msg);
+    return { ...leeg, bron_status: BRON_ONBEREIKBAAR, fout: msg };
+  }
+
+  const sessies = [];
+  let zonderBrug = 0;
+  for (const r of echtEerste) {
+    const stu = studentById.get(String(r.student_id)) || null;
+    const brug = String(stu?.bubble_user_id || '').trim();
+    if (!brug) { zonderBrug++; continue; }
+    sessies.push({
+      id: String(r.id),
+      start_tijd: new Date(r.start_tijd).toISOString(),
+      student_id: String(r.student_id),
+      bubble_user_id: brug,
+      email: String(stu?.email || '').trim().toLowerCase() || null,
+      voornaam: stu?.voornaam || null,
+      achternaam: stu?.achternaam || null,
+    });
+  }
+
+  return {
+    bron_status: BRON_GELEZEN, sessies,
+    totaal_afgerond: kandidaten.length,
+    eerdere_afgeronde_buiten_venster: buitenVenster,
+    zonder_bubble_koppeling: zonderBrug,
+    fout: null,
+  };
 }

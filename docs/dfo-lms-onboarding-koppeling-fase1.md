@@ -349,6 +349,63 @@ heeft. Dat is niet leeg maar **onwaar**, en het zet iemand tot een verkeerde
 handeling aan: bellen wie al lang bezig is. De frontend patcht alleen bij een
 niet-lege waarde, dus een leeg antwoord laat de vorige stand staan.
 
+### De eerste sessie sluit de onboarding — `api/cron/onboarding-eerste-sessie-afronden.js`
+
+**De regel (Maxim, 7 september 2026):** de **vroegste afgeronde** sessie van
+een student sluit diens onboarding automatisch af. Geen soort-onderscheid:
+er bestaat geen kennismakingsgesprek en geen Alpha/Delta — elke coachingsessie
+telt.
+
+Let op het verschil met "de eerste sessie mits afgerond". Was de eerste sessie
+een no-show, dan sluit die niets af; de eerstvolgende sessie die wél afgerond
+raakt doet het alsnog. Anders zou één gemiste eerste call de onboarding voor
+altijd open laten staan.
+
+**Wat er wordt vastgelegd**, en waarom dat een harde eis is: niet alleen dát de
+onboarding afgerond is maar **welke sessie het deed** —
+`auto_afgerond_sessie_id`, `auto_afgerond_sessie_op` en `auto_afgerond_op`.
+Die staan ook in het detailscherm onder *Afgerond*, niet alleen in de databank.
+Een onboarding die "afgerond" zegt zonder aanwijsbare oorzaak is precies het
+schermsoort dat dit project twee keer een halve dag heeft gekost.
+
+**Idempotent op drie manieren.** `auto_afgerond_sessie_id` is de sterkste:
+staat die gevuld, dan gebeurt er nooit meer iets — óók niet wanneer iemand de
+onboarding daarna handmatig heropent. Een mens die bewust heropent mag niet
+door dezelfde sessie opnieuw dichtgetrokken worden. Daarnaast een
+optimistische `.is(..., null)` op de update zelf, en een overslaan-tak voor
+gearchiveerde en geannuleerde onboardings.
+
+**Geen terugwerkende vloedgolf.** Watermerk `onboarding_autocomplete_since` in
+`app_settings`, zelfde patroon als de no-show-cron: ontbreekt het, dan zet de
+eerste run het op nu en doet verder niets.
+
+**Meten vóór aanzetten:** `GET ?dry=1&since=<iso>` draait exact dezelfde logica
+zonder één schrijfactie, en geeft `afgesloten` plus tot twintig `voorbeelden`
+terug. `since` werkt alleen samen met `dry=1`, zodat een echte run nooit
+breder kan lopen dan het watermerk.
+
+**Eén ding om te weten:** dit sluit de onboarding ook wanneer de klant de
+wizard nog niet heeft afgemaakt. `api/onboarding-complete.js` valideert de
+verplichte velden; deze weg doet dat niet. Dat is bewust — de onboarding is
+volgens de regel klaar zodra de eerste call gedaan is.
+
+### Gemiste eerste call krijgt een eigen signaal
+
+Is de chronologisch eerste sessie van een student een no-show, dan krijgt het
+signaal type **`eerste_call_no_show`** in plaats van `no_show`. De reden is een
+andere: daar moet iemand kort op zitten om te voorkomen dat het een wanbetaler
+wordt.
+
+Bewust **geen tweede signaal** naast het gewone. Er staat een unique index op
+`student_signals.session_id`, dus twee signalen voor één sessie kan sowieso
+niet — en het zou de mentor twee keer laten rinkelen voor één gebeurtenis. Eén
+signaal met een type dat het onderscheid draagt is juister én routeerbaar.
+
+**De ontvanger is voorlopig de mentor van de sessie.** De rol *hoofdmentor*
+bestaat nog niet in het LMS. Er is bewust geen ontvanger verzonnen: het signaal
+landt waar de andere signalen landen, met dat aparte type, zodat de routering
+erop gezet kan worden zodra die rol er is.
+
 ### Bewust niet omgezet: de betaalherinnering
 
 `api/cron/first-call-payment-reminder.js` blijft op Bubble staan en is

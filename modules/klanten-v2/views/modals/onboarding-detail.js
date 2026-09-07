@@ -166,7 +166,7 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>Laatste no-show</span><span>${o.last_noshow_at ? `<span style="color:var(--rose)">${fmtIntake(o.last_noshow_at)}</span>` : fmtIntake(null)}</span></div>
       <div class="kv-onb-meta-row"><span>Toegewezen</span><span>${fmtDT(o.assigned_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Gestart</span><span>${fmtDT(o.started_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Afgerond</span><span>${fmtDT(o.completed_at)}</span></div>
+      <div class="kv-onb-meta-row"><span>Afgerond</span><span>${fmtDT(o.completed_at)}${autoAfgerondNoot(o)}</span></div>
       ${o.archived_at ? `<div class="kv-onb-meta-row"><span>Gearchiveerd</span><span>${fmtDT(o.archived_at)}</span></div>` : ''}
       <div class="kv-onb-meta-row"><span>Betaling</span><span>${o.paid ? '<span class="kv-onb-pill kv-onb-pill-ok">Betaald</span>' : '<span class="kv-onb-pill kv-onb-pill-warn">Niet betaald</span>'}</span></div>
     </div>
@@ -265,6 +265,24 @@ function renderAccountTab() {
     </div>
 
     ${renderDfoLmsSection(o)}`;
+}
+
+// Waarom deze onboarding automatisch is afgerond, in het scherm zelf.
+//
+// Sinds 7 september 2026 sluit de eerste AFGERONDE sessie van een student de
+// onboarding automatisch af. Zonder deze regel staat er alleen 'Afgerond' met
+// een datum, en dan is niet na te gaan waardoor — precies het schermsoort dat
+// ons deze week twee keer een halve dag heeft gekost. Hier staat dus welke
+// sessie het deed en wanneer die was.
+function autoAfgerondNoot(o) {
+  if (!o.auto_afgerond_op) return '';
+  const wanneer = o.auto_afgerond_sessie_op ? fmtDT(o.auto_afgerond_sessie_op) : 'onbekend';
+  const sid = o.auto_afgerond_sessie_id ? String(o.auto_afgerond_sessie_id) : null;
+  return `<div style="margin-top:3px;font-size:11.5px;color:var(--text-3);line-height:1.45">
+      Automatisch afgerond op ${esc(fmtDT(o.auto_afgerond_op))} door de eerste
+      afgeronde sessie van ${esc(wanneer)}.
+      ${sid ? `<br><span class="mono" style="font-size:11px">sessie ${esc(sid)}</span>` : ''}
+    </div>`;
 }
 
 // ── dfo-lms (het NIEUWE LMS) ───────────────────────────────────────────────

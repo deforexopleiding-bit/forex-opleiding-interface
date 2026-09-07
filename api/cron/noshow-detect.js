@@ -40,7 +40,7 @@
 // hlms_sessie.student_id is nooit leeg (0 van 44 gemeten).
 
 import { supabaseAdmin } from '../supabase.js';
-import { haalNoShowsSinds, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
+import { haalNoShowsSinds, haalEersteSessiePerStudent, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
 import { createNotification } from '../_lib/notify.js';
 
 const SETTING_KEY     = 'noshow_detect_since';
@@ -103,6 +103,8 @@ export default async function handler(req, res) {
     // maandenlang gezond leek terwijl er geen enkel signaal meer ontstond.
     bron: 'hlms_sessie', bron_status: null,
     fetched: 0, inserted: 0, skipped: 0,
+    // Hoeveel van de signalen gingen over de EERSTE sessie van een student.
+    eerste_call: 0, eerste_bepaling_mislukt: 0,
     zonder_bubble_koppeling: 0, zonder_mentor_koppeling: 0,
     errors: [],
   };
@@ -173,6 +175,27 @@ export default async function handler(req, res) {
       return res.status(502).json(result);
     }
 
+    // Was dit de EERSTE sessie van deze student? Dan krijgt het signaal een
+    // eigen type. De reden is een andere: bij een gemiste eerste call moet er
+    // iemand kort op zitten om te voorkomen dat het een wanbetaler wordt.
+    //
+    // Bewust GEEN tweede signaal naast het gewone: er staat een unique index
+    // op student_signals.session_id, dus twee signalen voor dezelfde sessie
+    // kan sowieso niet — en het zou de mentor ook twee keer laten rinkelen
+    // voor één gebeurtenis. Eén signaal, met een type dat het onderscheid
+    // draagt, is zowel juister als routeerbaar zodra de rol 'hoofdmentor'
+    // bestaat.
+    const eerste = await haalEersteSessiePerStudent({
+      studentIds: rows.map((r) => r.student_id).filter(Boolean),
+    });
+    const eersteBekend = eerste.bron_status === BRON_GELEZEN;
+    if (!eersteBekend) {
+      // Niet blokkeren: liever een gewoon no-show-signaal dan geen signaal.
+      // Wel zichtbaar tellen, want dan mist er een onderscheid dat we wilden.
+      console.warn('[noshow-detect] eerste-sessie niet te bepalen ('
+        + eerste.bron_status + '): ' + (eerste.fout || 'reden onbekend'));
+    }
+
     // Verwerken — hoogste verwerkte start_tijd bijhouden voor de advance.
     let highestMs = isoToMs(watermark) || 0;
 
@@ -184,6 +207,12 @@ export default async function handler(req, res) {
         const memberUser   = row.bubble_user_id;   // de brug naar het CRM
         const studentEmail = row.email || null;
         const studentName  = [row.voornaam, row.achternaam].filter(Boolean).join(' ').trim() || null;
+
+        const eersteVanStudent = eersteBekend
+          ? (eerste.perStudent.get(String(row.student_id)) || null)
+          : null;
+        const isEersteCall = !!(eersteVanStudent && eersteVanStudent.id === sessionId);
+        if (!eersteBekend) result.eerste_bepaling_mislukt++;
 
         const mentorUserId = mentorByEmail.get(row.mentor_email) || null;
         if (!mentorUserId) {
@@ -202,13 +231,19 @@ export default async function handler(req, res) {
           bubble_student_id : memberUser,
           student_name      : studentName,
           student_email     : studentEmail,
-          type              : 'no_show',
+          // Eigen type voor een gemiste EERSTE call — zie de toelichting
+          // hierboven. De routering naar de hoofdmentor kan hierop gezet
+          // worden zodra die rol bestaat.
+          type              : isEersteCall ? 'eerste_call_no_show' : 'no_show',
           source            : 'auto_noshow',
           status            : 'open',
           mentor_user_id    : mentorUserId,
           session_id        : sessionId,
-          toelichting       : sd ? ('No-show op ' + fmtDateNl(sd)) : 'No-show',
+          toelichting       : (isEersteCall ? 'EERSTE call gemist' : 'No-show')
+            + (sd ? (' op ' + fmtDateNl(sd)) : '')
+            + (isEersteCall ? ' — kort opvolgen, voorkom dat dit een wanbetaler wordt.' : ''),
         };
+        if (isEersteCall) result.eerste_call++;
         const { data: insRow, error: insErr } = await supabaseAdmin
           .from('student_signals').insert(insertRow).select('id').maybeSingle();
         if (insErr) {
@@ -230,7 +265,7 @@ export default async function handler(req, res) {
               await createNotification({
                 toUserId:      mentorUserId,
                 type:          'student.noshow_review',
-                title:         'No-show — geef reden',
+                title:         isEersteCall ? 'EERSTE call gemist — kort opvolgen' : 'No-show — geef reden',
                 body:          (studentName || 'Student') + ' — geef de reden voor de no-show op',
                 linkUrl:       '/modules/mentor-students.html?tab=noshows',
                 entityType:    'student_signal',
