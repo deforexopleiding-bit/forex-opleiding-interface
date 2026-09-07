@@ -34,8 +34,16 @@ test('R1-tekst bevat geen bedrag, factuurnummer of vervaldatum', () => {
   const txt = buildReminder1Text({ voornaam: 'Nanida', naam: 'Nanida Van Veen' });
   assert.ok(!/\d/.test(txt), 'geen enkel cijfer in de tekst: ' + txt);
   assert.ok(!/EUR|€/i.test(txt), 'geen bedrag');
-  assert.ok(!/factuur/i.test(txt), 'geen factuurverwijzing');
   assert.ok(!/dagen te laat|vervald/i.test(txt), 'geen vervaldatum/achterstand');
+});
+
+test('R1-tekst noemt de openstaande factuur wél (UTILITY-grond), zonder cijfers', () => {
+  // Beslissing Maxim: de bijzin blijft staan omdat de transactieverwijzing is
+  // wat de Meta-template op UTILITY houdt. Zonder cijfers, dus geen
+  // bedragen-bericht. Zelfde strekking als de template opvolging_geen_reactie.
+  const txt = buildReminder1Text({ voornaam: 'Nanida' });
+  assert.ok(/openstaande factuur/i.test(txt), txt);
+  assert.ok(!/\d/.test(txt), 'nog steeds geen cijfers');
 });
 
 test('R1-tekst is niet ondertekend met een persoonsnaam', () => {
@@ -122,7 +130,7 @@ const OPVOLGING_TEMPLATE = {
   language: 'nl',
   status: 'APPROVED',
   header_type: 'NONE',
-  body_text: 'Hey {{1}}, ik heb nog geen reactie van je ontvangen. Laat je even weten hoe we dit dossier kunnen afronden? Alvast bedankt.',
+  body_text: 'Hey {{1}}, ik heb nog geen reactie van je ontvangen op mijn bericht over je openstaande factuur. Laat je even weten hoe we dit kunnen afronden? Alvast bedankt.',
   meta_param_mapping: { body: { 1: 'klant.voornaam' } },
   buttons: null,
 };

@@ -107,6 +107,8 @@ function nowIso() { return new Date().toISOString(); }
  *
  * NEUTRAAL sinds deze branch (beslissing Maxim): geen bedragen, geen
  * factuurnummers, geen vervaldata en GEEN ondertekening met een persoonsnaam.
+ * De bijzin over de openstaande factuur staat er bewust wel in: die verwijzing
+ * naar de transactie houdt de bijbehorende Meta-template op UTILITY-grond.
  * Het bericht moet overkomen als een bericht van de afzender zelf, niet als
  * een geautomatiseerde aanmaning van "Joost".
  *
@@ -125,7 +127,7 @@ export function buildReminder1Text({ voornaam, naam } = {}) {
   const lines = [
     `Hey ${aanhef},`,
     ``,
-    `Ik heb nog geen reactie van je ontvangen. Laat je even weten hoe we dit dossier kunnen afronden?`,
+    `Ik heb nog geen reactie van je ontvangen op mijn bericht over je openstaande factuur. Laat je even weten hoe we dit kunnen afronden?`,
     ``,
     `Alvast bedankt.`,
   ];

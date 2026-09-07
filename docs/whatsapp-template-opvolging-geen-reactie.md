@@ -42,22 +42,30 @@ Vandaar deze template.
 | `body` | zie hieronder |
 | Variabelen | 1 stuks: voornaam |
 
-### Body — variant A (letterlijk Maxims tekst)
-
-```
-Hey {{klant.voornaam}}, ik heb nog geen reactie van je ontvangen. Laat je even weten hoe we dit dossier kunnen afronden? Alvast bedankt.
-```
-
-### Body — variant B (aanbevolen, zie §4)
+### Body — definitief (besluit Maxim)
 
 ```
 Hey {{klant.voornaam}}, ik heb nog geen reactie van je ontvangen op mijn bericht over je openstaande factuur. Laat je even weten hoe we dit kunnen afronden? Alvast bedankt.
 ```
 
-Beide varianten bevatten **geen bedrag, geen factuurnummer, geen vervaldatum en
-geen ondertekening met een persoonsnaam** — precies zoals gevraagd. Het verschil
-tussen A en B is één bijzin, en dat verschil gaat uitsluitend over de
-Meta-categorie (§4).
+Geen bedrag, geen factuurnummer, geen vervaldatum, geen ondertekening met een
+persoonsnaam. De bijzin *"op mijn bericht over je openstaande factuur"* staat er
+bewust in: die verwijzing naar de transactie is wat de template op
+UTILITY-grond houdt (§4). Een eerdere variant zonder die bijzin is afgewogen en
+afgewezen — de neutraliteit die dat opleverde woog niet op tegen de kans dat
+Meta hem als MARKETING classificeert.
+
+**Ter vergelijking, de bestaande R2-template `joost_reminder_2_nl` (APPROVED,
+UTILITY):**
+
+```
+Hoi {{klant.voornaam}}, Ik heb nog geen reactie van je gekregen over factuur {{factuur.nummer}} van EUR {{factuur.bedrag}}, inmiddels {{factuur.dagen_overdue}} dagen open. Laat je even weten hoe je het wilt oplossen? Dan kunnen we er samen uitkomen. Team De Forex Opleiding
+```
+
+Twee verschillen die opzet zijn: de nieuwe R1 noemt geen cijfers, en hij
+ondertekent niet. R2 sluit af met "Team De Forex Opleiding" — dat is geen
+persoonsnaam, dus die mag blijven staan; R1 heeft bewust helemaal geen
+ondertekening zodat hij overkomt als een bericht van de afzender zelf.
 
 ### Waarom `{{klant.voornaam}}` en niet `{{1}}`
 
@@ -100,14 +108,24 @@ Het CRM kan zelf indienen bij Meta; Meta Business Manager is niet nodig.
    * Header: geen · Footer: leeg · Buttons: geen
    * Body: variant A of B uit §2, met de variabele-chip **Voornaam** op de plek
      van `{{klant.voornaam}}`.
-4. Klik **Opslaan**. De template blijft dan lokaal staan (status `LOCAL`) — de
-   bevestiging zegt dat letterlijk: *"Wordt niet naar Meta gestuurd — blijft
-   lokaal totdat je Submit → Meta klikt"*. Dit is de stap waar je kunt stoppen
-   als je er nog even naar wilt kijken.
-5. Wanneer je hem wilt indienen: **Submit** op de regel van de template (of
-   meteen **Opslaan + Submit → Meta** in stap 4). Status wordt `SUBMITTED`.
+4. Klik **Opslaan** — en stop daar. De template blijft lokaal staan (status
+   `LOCAL`); de bevestiging zegt dat letterlijk: *"Wordt niet naar Meta gestuurd
+   — blijft lokaal totdat je Submit → Meta klikt"*. **Klik hier niet op
+   "Opslaan + Submit → Meta".**
+5. Indienen doet Maxim zelf: **Submit** op de regel van de template in de lijst.
+   Status wordt `SUBMITTED`.
 6. Wacht op de beoordeling van Meta. Status wordt `APPROVED` of `REJECTED`.
-7. **Controleer na goedkeuring de categorie** — zie §4, dit is geen formaliteit.
+7. **Controleer na goedkeuring het veld `category`, niet alleen `status`** — zie
+   §4. Een als UTILITY ingediende template die WhatsApp als MARKETING beoordeelt
+   wordt stilzwijgend goedgekeurd ALS MARKETING; je ziet dan gewoon "APPROVED"
+   staan. Dit is geen formaliteit.
+8. Pas ná een goedkeuring mét `category = UTILITY`: vul
+   `reminder_1_template_name` in (§5).
+
+**Alternatief voor stap 1–4:** `docs/sql-migrations/2026-09-07-wa-template-opvolging-geen-reactie.sql`
+zet dezelfde rij op status `LOCAL` neer. Dat script stuurt niets naar Meta.
+Doe één van beide — de UI of het script — niet allebei; een dubbele run is
+overigens veilig (ON CONFLICT, en een al ingediende rij wordt niet teruggezet).
 
 Endpoints erachter, voor wie het wil nalezen:
 `api/admin-meta-templates-upsert.js` (stap 4) en
@@ -141,24 +159,25 @@ specificiteit en duidelijkheid". "Payment reminder" staat in dezelfde
 documentatie expliciet genoemd als voorbeeld van UTILITY, onder *account updates
 or alerts*.
 
-### Waarom dat hier spannend is
+### Waarom dat hier spannend was
 
-De aanmaan-templates (`aanmaning_dag7` t/m `aanmaning_dag37`) vallen comfortabel
-in die definitie: ze noemen een factuurnummer, een bedrag en een vervaldatum, en
-zijn daarmee onmiskenbaar "clearly related to their … transactions". Dat is de
-grond waarop een betalingsherinnering UTILITY is.
+Uit productie (uitgelezen door Maxim, 7 sep 2026): **alle vijf de
+`aanmaning_dagNN`-templates staan op `category = UTILITY`, `status = APPROVED`,
+zonder `category_warning`, en ze bevatten allemaal een factuurnummer én een
+bedrag.** Hetzelfde geldt voor `joost_reminder_2_nl`. Dat is geen bewijs van
+oorzaak, maar het is wel het patroon dat de gepubliceerde criteria voorspellen:
+de transactieverwijzing is wat deze berichten "clearly related to their …
+transactions" maakt, en daarmee UTILITY.
 
-**Precies die grond haalt variant A weg.** Zonder bedrag, factuurnummer of
-vervaldatum verwijst de tekst nog maar naar één ding: "dit dossier". Dat is voor
-een mens duidelijk (hij staat in dezelfde WhatsApp-draad), maar de classifier
-beoordeelt de template los van de gespreksgeschiedenis. Of "dossier" volstaat als
-verwijzing naar *order, account, services or transactions* weet ik niet, en ik
-heb geen bron die dat beslist.
+**Precies die grond haalde de eerste, volledig neutrale variant weg.** Zonder
+bedrag, factuurnummer of vervaldatum verwees die tekst nog maar naar één ding:
+"dit dossier". Voor een mens duidelijk — hij staat in dezelfde WhatsApp-draad —
+maar de classifier beoordeelt de template los van de gespreksgeschiedenis.
 
-**Mijn inschatting, als inschatting:** het risico is reëel maar niet groot —
-matig. De tekst is niet promotioneel (geen aanbod, geen aansporing tot kopen),
-en dat is de helft van de toets die hij zeker haalt. De andere helft hangt op één
-woord.
+Daarom staat de bijzin over de openstaande factuur er nu in: hij zet de
+verwijzing naar de transactie terug in de template zelf, zonder ook maar één
+cijfer. Het risico is daarmee kleiner, niet nul: ik kan Meta's classifier niet
+voorspellen en heb geen bron waarmee ik een uitkomst hard kan maken.
 
 ### Wat er misgaat als het misgaat — en waarom je het niet vanzelf merkt
 
@@ -181,34 +200,22 @@ scherp genoeg is om op te bouwen.
 Bezwaar maken kan: je kunt binnen **60 dagen** een review aanvragen, ook voor een
 utility-template die naar marketing is omgezet.
 
-### De kleinst mogelijke aanpassing die hem UTILITY houdt
+### Wat de bijzin kost aan neutraliteit
 
-Variant B voegt één bijzin toe: *"op mijn bericht over je openstaande factuur"*.
-Daarmee staat de verwijzing naar de transactie weer expliciet in de template
-zelf, zonder dat er ook maar één cijfer in staat — geen bedrag, geen
-factuurnummer, geen datum.
+Het woord "factuur" maakt het bericht weer herkenbaar als een geldkwestie, ook in
+de melding op een vergrendeld scherm waar iemand anders kan meekijken. Dat is
+precies wat de volledig neutrale variant wilde vermijden. Wat overblijft: de toon
+is zacht (een vraag, geen sommatie), er staat geen enkel getal in, en er is geen
+ondertekening. Dat is de prijs die betaald is voor de UTILITY-grond, en die
+afweging is bewust gemaakt.
 
-**Wat dat kost aan neutraliteit, eerlijk:** het woord "factuur" maakt het bericht
-weer herkenbaar als een geldkwestie. Dat is precies wat variant A wilde
-vermijden, en het is zichtbaar in de melding op een vergrendeld scherm, waar
-iemand anders kan meekijken. De toon blijft wel zacht (het is een vraag, geen
-sommatie) en er staat geen enkel getal in.
+### Wat ik nog steeds niet kan vaststellen
 
-Dat is de afweging voor Maxim: variant A is neutraler en loopt meer kans om als
-MARKETING te eindigen; variant B is bijna net zo zacht en staat steviger in de
-UTILITY-definitie. Ik zou B nemen, maar dit is een merk-keuze, niet een
-technische.
-
-### Wat ik NIET heb kunnen vaststellen
-
-Hoe de bestaande `aanmaning_dagNN`-templates destijds zijn ingediend en op welke
-grond Meta ze als UTILITY heeft goedgekeurd, staat nergens in deze repo. De
-categorie leeft in `whatsapp_meta_templates.category` in de productie-database,
-en die kan ik vanuit deze omgeving niet lezen. Wat ik hierboven schrijf over
-"waarom die UTILITY zijn" is dus een redenering op basis van de gepubliceerde
-criteria en hun inhoud, geen weergave van een besluit dat ik heb gezien. Wil je
-het zeker weten: in Instellingen → WhatsApp staat de categorie per template in de
-lijst.
+Dat de vijf aanmaan-templates UTILITY zijn, is nu bekend. **Waaróm** Meta ze zo
+heeft geclassificeerd is dat niet: Meta publiceert per template geen motivering,
+en het ontbreken van een `category_warning` zegt alleen dat er niets is
+omgezet. De redenering hierboven blijft dus een redenering op basis van de
+gepubliceerde criteria, geen weergave van een besluit dat iemand heeft gezien.
 
 **Bronnen**
 
@@ -224,13 +231,25 @@ lijst.
 De koppeling zit al in deze branch, achter bestaande config, en doet **niets**
 zolang niemand hem invult.
 
+Huidige productie-config (`joost_config`, module `finance`,
+`autonomy_config.no_reply`, stand 7 sep 2026):
+
+| Sleutel | Waarde |
+|---|---|
+| `reminder_1_hours` | 20 |
+| `reminder_2_hours` | 24 |
+| `resume_after_hours` | 24 |
+| `reminder_2_template_name` | `joost_reminder_2_nl` (APPROVED, UTILITY) |
+| `reminder_1_template_name` | **bestaat nog niet — bewust leeg** |
+
 Nieuwe optionele config-sleutel:
 `joost_config.autonomy_config.no_reply.reminder_1_template_name`.
 
-* **Niet gezet (nu, en na deze branch nog steeds):** reminder 1 valt terug op
-  `reminder_2_template_name` — exact het gedrag van vóór deze branch.
-* **Gezet op `opvolging_geen_reactie`:** reminder 1 gebruikt die template,
-  reminder 2 blijft z'n eigen template houden.
+* **Niet gezet (zo blijft het tot de template APPROVED is):** reminder 1 valt
+  terug op `reminder_2_template_name` — exact het gedrag van vóór deze branch.
+  Reminder 1 stuurt dan dus nog de template mét factuurnummer en bedrag.
+* **Gezet op `opvolging_geen_reactie`:** reminder 1 gebruikt de neutrale
+  template, reminder 2 blijft `joost_reminder_2_nl` houden.
 
 In te vullen in **Instellingen → Joost AI → Autonomy**, veld
 `reminder_1_template_name`, direct boven het bestaande veld voor reminder 2.
@@ -249,7 +268,9 @@ vervaldata meer in, en geen ondertekening.
 ## 6. Wat deze branch NIET doet
 
 * Niets ingediend bij Meta.
+* `reminder_1_template_name` is en blijft leeg tot de template APPROVED is.
 * `reminder_1_hours` staat nog op 20 en `reminder_2_hours` bestaat nog. De
   instelling die Maxim wil (24 uur, R2 laten vervallen) is een wijziging in
   `joost_config` in productie en is bewust niet doorgevoerd.
-* Geen migratie, geen seed, geen wijziging aan bestaande templates.
+* Geen wijziging aan bestaande templates. De seed-SQL is aanwezig maar niet
+  gedraaid — SQL-migraties draaien hier altijd met de hand.
