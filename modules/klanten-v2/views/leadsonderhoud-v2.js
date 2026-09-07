@@ -926,8 +926,29 @@
       wrap.innerHTML = _lsInbRenderRight(row);
       const el = wrap.firstElementChild;
       if (el) { if (oldRight) split.replaceChild(el, oldRight); else split.appendChild(el); }
+      // Mobiel master/detail: markeer container zodat CSS naar "toon-thread"
+      // schakelt (@media ≤760px in klanten-v2.css). Desktop negeert dit attr.
+      split.setAttribute('data-has-sel', '1');
     }
     queueMicrotask(() => _lsInbLoadThread(id));
+  };
+  // Mobiel master/detail: wist selectie zodat de lijst weer full-width
+  // getoond wordt. Surgisch (geen full render) — spiegelt __lsInbSel.
+  window.__lsInbDeselect = () => {
+    _lsInb.sel = null;
+    _lsInbResetThread();
+    document.querySelectorAll('#lsInbList .ls-inb-row.on').forEach(el => el.classList.remove('on'));
+    const split = document.querySelector('.ls-inb-split');
+    if (!split) return;
+    const oldRight = split.querySelector('.ls-inb-right');
+    if (oldRight) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'ls-inb-right';
+      placeholder.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px';
+      placeholder.textContent = 'Selecteer een lead';
+      split.replaceChild(placeholder, oldRight);
+    }
+    split.setAttribute('data-has-sel', '0');
   };
   // FEAT-2: toggle gelezen/ongelezen — hergebruikt bestaande
   // /api/leadsonderhoud-gesprek-mark-read endpoint. Surgical DOM-update
@@ -1725,6 +1746,10 @@
           ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Nog geen berichten in deze draad.</div>`
           : '';
     return `<div class="ls-inb-right" style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
+      <button type="button" class="mob-back" onclick="__lsInbDeselect()" aria-label="Terug naar lijst">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Terug naar lijst
+      </button>
       <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap">
           <span style="font-size:11.5px;padding:3px 10px;border-radius:12px;background:var(--teal-soft);color:var(--teal)">Leadsonderhoud</span>
@@ -1953,7 +1978,7 @@
         : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Nog geen lead-gesprekken.</div>`;
 
     const filterChip = (v, label, count) => `<button class="chip ${flt === v ? 'on' : ''}" onclick="window.__lsInbSetFilter('${v}')" style="font-size:11px;padding:3px 9px">${label}${count != null ? ` <span style="opacity:.7">(${count})</span>` : ''}</button>`;
-    return `<div class="ls-inb-split" style="display:flex;height:calc(100dvh - 110px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+    return `<div class="ls-inb-split" data-has-sel="${sel ? '1' : '0'}" style="display:flex;height:calc(100dvh - 110px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
       ${_lsExtModalHtml()}
       <div id="lsInbList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto">
         <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
