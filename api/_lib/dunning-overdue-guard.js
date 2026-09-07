@@ -67,6 +67,53 @@ export function todayIsoInTz(now = new Date(), tz = AMSTERDAM_TZ) {
   }
 }
 
+/**
+ * Offset van een tijdzone (in ms) op een concreet moment. DST-aware.
+ * Positief voor tijdzones ten oosten van UTC (Europe/Amsterdam: +1u of +2u).
+ */
+function tzOffsetMs(atMs, tz) {
+  try {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    const map = {};
+    for (const p of dtf.formatToParts(new Date(atMs))) if (p.type !== 'literal') map[p.type] = p.value;
+    const asUtc = Date.UTC(
+      Number(map.year), Number(map.month) - 1, Number(map.day),
+      Number(map.hour), Number(map.minute), Number(map.second)
+    );
+    return asUtc - atMs;
+  } catch (_) {
+    return 0;
+  }
+}
+
+/**
+ * Het exacte MOMENT (epoch-ms) waarop een lokale kalenderdag begint.
+ * `zonedDayStartMs('2026-09-07')` → 2026-09-06T22:00:00Z (CEST, UTC+2).
+ *
+ * Nodig voor de dagcap: "hoeveel berichten gingen er VANDAAG al uit" moet
+ * geteld worden vanaf lokale middernacht, niet vanaf UTC-middernacht — anders
+ * telt de cap tussen 00:00 en 02:00 nog de vorige dag mee.
+ *
+ * Twee iteraties zodat een DST-overgang op die dag zelf ook klopt.
+ */
+export function zonedDayStartMs(dateIso, tz = AMSTERDAM_TZ) {
+  const naive = Date.parse(`${String(dateIso).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(naive)) return null;
+  let ms = naive - tzOffsetMs(naive, tz);
+  ms = naive - tzOffsetMs(ms, tz);
+  return ms;
+}
+
+/** Idem, als ISO-string. */
+export function zonedDayStartIso(dateIso, tz = AMSTERDAM_TZ) {
+  const ms = zonedDayStartMs(dateIso, tz);
+  return ms == null ? null : new Date(ms).toISOString();
+}
+
 /** 'YYYY-MM-DD…' → epoch-ms op UTC-middernacht, of null bij onparseerbaar. */
 function ymdToUtcMs(iso) {
   if (!iso) return null;
@@ -138,6 +185,46 @@ export async function readGraceDaysSetting(db) {
   } catch (e) {
     console.warn('[dunning-overdue-guard] grace-setting fail-soft, default 0:', e?.message || e);
     return DEFAULT_GRACE_DAYS;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dagcap: hoeveel berichten mag één klant per kalenderdag krijgen?
+// ---------------------------------------------------------------------------
+//
+// Permanent vangnet tegen een inhaalgolf: een klant die al lang te laat is
+// heeft ALLE ladder-sporten gepasseerd, en de motor doet per uurlijkse tick
+// één send-stap. Zonder cap loopt zo'n run de hele ladder in één ochtend af.
+// De cooldown (`dunning_cooldown_days`) vangt dat niet af — die geldt alleen
+// bij het STARTEN van een nieuwe run, niet tussen de stappen van een lopende.
+
+export const MAX_SENDS_SETTING_KEY   = 'dunning_max_sends_per_day';
+export const DEFAULT_MAX_SENDS_PER_DAY = 1;
+export const MAX_MAX_SENDS_PER_DAY     = 10;
+
+/** Normaliseer naar integer 1..10 (default 1). Nooit 0: dat zou de motor stilzetten. */
+export function parseMaxSendsPerDay(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_MAX_SENDS_PER_DAY;
+  const t = Math.trunc(n);
+  if (t < 1) return DEFAULT_MAX_SENDS_PER_DAY;
+  if (t > MAX_MAX_SENDS_PER_DAY) return MAX_MAX_SENDS_PER_DAY;
+  return t;
+}
+
+/** Leest app_settings.dunning_max_sends_per_day. Fail-soft → 1. */
+export async function readMaxSendsPerDaySetting(db) {
+  try {
+    const { data } = await db
+      .from('app_settings')
+      .select('value')
+      .eq('key', MAX_SENDS_SETTING_KEY)
+      .maybeSingle();
+    if (!data) return DEFAULT_MAX_SENDS_PER_DAY;
+    return parseMaxSendsPerDay(data?.value?.count);
+  } catch (e) {
+    console.warn('[dunning-overdue-guard] dagcap-setting fail-soft, default 1:', e?.message || e);
+    return DEFAULT_MAX_SENDS_PER_DAY;
   }
 }
 

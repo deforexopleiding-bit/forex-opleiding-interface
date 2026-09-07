@@ -1,6 +1,7 @@
 // api/dunning-settings-get.js
 // GET → { dunning_cooldown_days: <int>, dunning_grace_days: <int>,
-//         dunning_ladder: { <templatenaam>: <dagen na vervaldatum> } }
+//         dunning_ladder: { <templatenaam>: <dagen na vervaldatum> },
+//         dunning_max_sends_per_day: <int> }
 // Permission: finance.dunning.view.
 //
 // dunning_grace_days = extra respijt NA de vervaldag voordat de motor mag
@@ -21,6 +22,10 @@ import {
   DEFAULT_LADDER,
   MAX_LADDER_DAYS,
   parseLadder,
+  MAX_SENDS_SETTING_KEY,
+  DEFAULT_MAX_SENDS_PER_DAY,
+  MAX_MAX_SENDS_PER_DAY,
+  parseMaxSendsPerDay,
 } from './_lib/dunning-overdue-guard.js';
 
 const DEFAULT_COOLDOWN_DAYS = 7;
@@ -61,6 +66,13 @@ export default async function handler(req, res) {
       .maybeSingle();
     const ladder = ladderRow ? parseLadder(ladderRow?.value) : { ...DEFAULT_LADDER };
 
+    const { data: capRow } = await supabaseAdmin
+      .from('app_settings')
+      .select('value, updated_at')
+      .eq('key', MAX_SENDS_SETTING_KEY)
+      .maybeSingle();
+    const maxSendsPerDay = capRow ? parseMaxSendsPerDay(capRow?.value?.count) : DEFAULT_MAX_SENDS_PER_DAY;
+
     return res.status(200).json({
       dunning_cooldown_days: days,
       is_default: !data,
@@ -74,6 +86,10 @@ export default async function handler(req, res) {
       dunning_ladder_is_default: !ladderRow,
       dunning_ladder_updated_at: ladderRow?.updated_at || null,
       dunning_ladder_max_days: MAX_LADDER_DAYS,
+      dunning_max_sends_per_day: maxSendsPerDay,
+      dunning_max_sends_per_day_is_default: !capRow,
+      dunning_max_sends_per_day_updated_at: capRow?.updated_at || null,
+      dunning_max_sends_per_day_max: MAX_MAX_SENDS_PER_DAY,
     });
   } catch (e) {
     console.error('[dunning-settings-get]', e?.message || e);

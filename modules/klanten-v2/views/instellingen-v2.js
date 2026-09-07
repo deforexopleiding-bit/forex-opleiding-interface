@@ -5113,7 +5113,7 @@
      update via bestaand endpoint) + office-hours read-only (direct-supabase op
      app_settings.dunning_office_hours; er is geen set-endpoint, editor volgt in
      aparte brok met audit-log). Motor onaangeraakt. */
-  const _dsv = { loading: false, fetched: false, error: null, cooldown: null, grace: null, ladder: null, office: null, busy: false, graceBusy: false, ladderBusy: false };
+  const _dsv = { loading: false, fetched: false, error: null, cooldown: null, grace: null, ladder: null, cap: null, office: null, busy: false, graceBusy: false, ladderBusy: false, capBusy: false };
   async function fetchDunningVenster() {
     if (_dsv.loading || _dsv.fetched) return;
     _dsv.loading = true; _dsv.error = null; if (render) render();
@@ -5135,6 +5135,11 @@
         defaults: (cRes?.dunning_ladder_defaults && typeof cRes.dunning_ladder_defaults === 'object') ? cRes.dunning_ladder_defaults : {},
         is_default: !!cRes?.dunning_ladder_is_default,
         updated_at: cRes?.dunning_ladder_updated_at || null,
+      };
+      _dsv.cap = {
+        count: Number.isFinite(Number(cRes?.dunning_max_sends_per_day)) ? Number(cRes.dunning_max_sends_per_day) : 1,
+        is_default: !!cRes?.dunning_max_sends_per_day_is_default,
+        updated_at: cRes?.dunning_max_sends_per_day_updated_at || null,
       };
       if (_dsv.ladder.rungs && Object.keys(_dsv.ladder.rungs).length) {
         _ladder.rungs = _dsv.ladder.rungs;
@@ -5187,6 +5192,24 @@
       finally { _dsv.graceBusy = false; if (render) render(); }
     });
   };
+  window.__setDsvCapSave = () => {
+    const el = document.querySelector('[data-dsv-field="cap"]');
+    const n = Number(el?.value);
+    if (!Number.isFinite(n) || n < 1 || n > 10 || Math.trunc(n) !== n) { showToast('Dagcap moet integer 1..10 zijn', 'warn'); return; }
+    openConfirm(`Dagcap op ${n} bericht(en) per klant per dag zetten? Dit is het vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan krijgt er hoogstens ${n} per dag.`, async () => {
+      _dsv.capBusy = true; if (render) render();
+      try {
+        const j = await tryFetch('dun-settings-update-cap', '/api/dunning-settings-update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dunning_max_sends_per_day: n }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Dagcap bijgewerkt naar ' + n, 'ok');
+        _dsv.fetched = false; fetchDunningVenster();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _dsv.capBusy = false; if (render) render(); }
+    });
+  };
   window.__setDsvLadderSave = () => {
     const rows = Array.from(document.querySelectorAll('[data-dsv-ladder-name]'));
     const rungs = {};
@@ -5221,6 +5244,7 @@
     const c = _dsv.cooldown;
     const g = _dsv.grace;
     const lad = _dsv.ladder;
+    const cap = _dsv.cap;
     // Sporten in oplopende volgorde van drempel — zo lees je de ladder van
     // boven naar beneden zoals de klant 'm ervaart.
     const ladderRows = lad
@@ -5231,7 +5255,7 @@
     const activeDays = Array.isArray(o?.days) ? o.days.map(d => dayNames[d] || String(d)) : [];
     return `<div style="max-width:1000px">
       <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Cooldown, gratieperiode en ladder schrijfbaar; verzendvenster + dagen alleen-lezen.</b> Cooldown bepaalt hoeveel dagen er tussen 2 aanmaningen voor dezelfde klant moet zitten. Gratieperiode bepaalt hoe lang de motor ná de vervaldag wacht (0 = vanaf de dag erna). De ladder bepaalt op welke dag ná de vervaldatum elke template vertrekt. Het verzendvenster (uren/dagen/tijdzone) leeft in <code>app_settings.dunning_office_hours</code> zonder set-endpoint — schrijven vereist aparte brok met audit-log.
+        <b>Cooldown, gratieperiode, dagcap en ladder schrijfbaar; verzendvenster + dagen alleen-lezen.</b> Cooldown bepaalt hoeveel dagen er tussen 2 aanmaningen voor dezelfde klant moet zitten. Gratieperiode bepaalt hoe lang de motor ná de vervaldag wacht (0 = vanaf de dag erna). De ladder bepaalt op welke dag ná de vervaldatum elke template vertrekt. Het verzendvenster (uren/dagen/tijdzone) leeft in <code>app_settings.dunning_office_hours</code> zonder set-endpoint — schrijven vereist aparte brok met audit-log.
       </div>
       ${_dsv.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_dsv.error)}</div>` : ''}
 
@@ -5263,6 +5287,24 @@
           </div>
         </div>
         ${g?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(g.updated_at)}</div>` : ''}
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
+          <div>
+            <div style="font-size:13px;font-weight:600">Dagcap — berichten per klant per dag</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5">
+              Nu: <b>${cap?.count ?? 1}</b>${cap?.is_default ? ' (default)' : ''}. Vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan — omdat hij al lang te laat is — krijgt er hoogstens ${cap?.count ?? 1} per kalenderdag (Europe/Amsterdam).
+              De cooldown geldt alleen bij het <i>starten</i> van een run; deze cap geldt óók binnen een lopende run.
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" min="1" max="10" step="1" data-dsv-field="cap" value="${esc(String(cap?.count ?? 1))}" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            <span style="font-size:12px;color:var(--text-3)">per dag</span>
+            <button class="btn btn-primary btn-sm" ${_dsv.capBusy ? 'disabled' : ''} onclick="window.__setDsvCapSave()">${_dsv.capBusy ? 'Bezig…' : 'Opslaan'}</button>
+          </div>
+        </div>
+        ${cap?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(cap.updated_at)}</div>` : ''}
       </div>
 
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">

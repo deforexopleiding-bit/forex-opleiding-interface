@@ -172,6 +172,42 @@ export async function readOfficeHoursSetting(supabaseAdmin) {
   }
 }
 
+/**
+ * Het eerstvolgende VERZENDSLOT op een LATERE dag dan `now`: de openingstijd
+ * van het kantooruren-venster op de eerstvolgende toegestane dag.
+ *
+ * Gebruikt om `next_action_at` na een wait-stap te klemmen. Zonder die klem
+ * kan een ladder-dag die al in het verleden ligt `next_action_at` op "nu"
+ * zetten, waarna de volgende UURLIJKSE tick de run meteen weer oppakt en de
+ * klant de hele ladder in één ochtend krijgt.
+ *
+ * @param {Date}   nowDate
+ * @param {object} cfgRaw          office-hours-config
+ * @param {number} [minDaysAhead]  minimaal aantal dagen vooruit (default 1)
+ * @returns {string} ISO-timestamp
+ */
+export function nextSendSlotIso(nowDate, cfgRaw, minDaysAhead = 1) {
+  const cfg = parseOfficeHoursConfig(cfgRaw);
+  const start = parseHHMM(cfg.start) || parseHHMM(DEFAULT_OFFICE_HOURS.start);
+  const now = (nowDate instanceof Date && !Number.isNaN(nowDate.getTime())) ? nowDate : new Date();
+  const step = Math.max(1, Math.trunc(Number(minDaysAhead) || 1));
+
+  // Loop dag voor dag vooruit tot een toegestane weekdag. 14 pogingen is ruim:
+  // zelfs bij een config met één actieve dag per week zit je er binnen.
+  for (let i = step; i < step + 14; i++) {
+    const probe = new Date(now.getTime() + i * 86400000);
+    const local = getLocalDayHourMinute(probe, cfg.tz);
+    if (!local) break;                       // tz-glitch → fallback hieronder
+    if (!cfg.days.includes(local.day)) continue;
+
+    // Zet dit moment terug naar de lokale openingstijd van diezelfde dag.
+    const deltaMin = (start.hour * 60 + start.minute) - (local.hour * 60 + local.minute);
+    return new Date(probe.getTime() + deltaMin * 60000).toISOString();
+  }
+  // Fallback: exact `step` dagen vooruit, zelfde kloktijd.
+  return new Date(now.getTime() + step * 86400000).toISOString();
+}
+
 // Human-leesbare label voor log-payload zodat je in de audit ziet welk
 // venster de check toen gebruikte (belangrijk als je 't later verandert).
 export function officeHoursLabel(cfg) {

@@ -1,6 +1,7 @@
 // api/dunning-settings-update.js
 // POST { dunning_cooldown_days?: int, dunning_grace_days?: int,
-//        dunning_ladder?: { <templatenaam>: <dagen na vervaldatum> } }
+//        dunning_ladder?: { <templatenaam>: <dagen na vervaldatum> },
+//        dunning_max_sends_per_day?: int }
 //   → upsert in app_settings. Minstens één key is verplicht; ontbrekende
 //     keys blijven ongewijzigd (back-compat: de bestaande UI stuurt alleen
 //     dunning_cooldown_days).
@@ -25,6 +26,8 @@ import {
   LADDER_SETTING_KEY,
   MAX_LADDER_DAYS,
   parseLadder,
+  MAX_SENDS_SETTING_KEY,
+  MAX_MAX_SENDS_PER_DAY,
 } from './_lib/dunning-overdue-guard.js';
 
 const KEY = 'dunning_cooldown_days';
@@ -61,10 +64,21 @@ export default async function handler(req, res) {
   const hasCooldown = body?.dunning_cooldown_days !== undefined && body?.dunning_cooldown_days !== null;
   const hasGrace    = body?.dunning_grace_days    !== undefined && body?.dunning_grace_days    !== null;
   const hasLadder   = body?.dunning_ladder        !== undefined && body?.dunning_ladder        !== null;
-  if (!hasCooldown && !hasGrace && !hasLadder) {
+  const hasCap      = body?.dunning_max_sends_per_day !== undefined && body?.dunning_max_sends_per_day !== null;
+  if (!hasCooldown && !hasGrace && !hasLadder && !hasCap) {
     return res.status(400).json({
-      error: 'dunning_cooldown_days, dunning_grace_days en/of dunning_ladder is verplicht',
+      error: 'dunning_cooldown_days, dunning_grace_days, dunning_ladder en/of dunning_max_sends_per_day is verplicht',
     });
+  }
+
+  let cap = null;
+  if (hasCap) {
+    cap = Number(body.dunning_max_sends_per_day);
+    if (!Number.isFinite(cap) || Math.trunc(cap) !== cap || cap < 1 || cap > MAX_MAX_SENDS_PER_DAY) {
+      return res.status(400).json({
+        error: `dunning_max_sends_per_day moet integer 1..${MAX_MAX_SENDS_PER_DAY} zijn (1 = hoogstens één bericht per klant per dag)`,
+      });
+    }
   }
 
   let n = null;
@@ -112,6 +126,7 @@ export default async function handler(req, res) {
     if (hasCooldown) await upsertSetting(KEY, value);
     if (hasGrace)    await upsertSetting(GRACE_SETTING_KEY, { days: g });
     if (hasLadder)   await upsertSetting(LADDER_SETTING_KEY, { rungs });
+    if (hasCap)      await upsertSetting(MAX_SENDS_SETTING_KEY, { count: cap });
 
     // Audit-log (fail-soft).
     try {
@@ -124,11 +139,13 @@ export default async function handler(req, res) {
           ...(hasCooldown ? { [KEY]: value } : {}),
           ...(hasGrace    ? { [GRACE_SETTING_KEY]: { days: g } } : {}),
           ...(hasLadder   ? { [LADDER_SETTING_KEY]: { rungs } } : {}),
+          ...(hasCap      ? { [MAX_SENDS_SETTING_KEY]: { count: cap } } : {}),
         },
         reason_text: [
           hasCooldown ? `Cooldown gezet op ${n} dagen` : null,
           hasGrace    ? `Gratieperiode gezet op ${g} dagen` : null,
           hasLadder   ? `Ladder gezet op ${Object.entries(rungs).map(([k, v]) => `${k}=dag ${v}`).join(', ')}` : null,
+          hasCap      ? `Dagcap gezet op ${cap} bericht(en) per klant per dag` : null,
         ].filter(Boolean).join(' · '),
         ip_address : getClientIp(req),
       });
@@ -139,6 +156,7 @@ export default async function handler(req, res) {
       ...(hasCooldown ? { dunning_cooldown_days: n } : {}),
       ...(hasGrace    ? { dunning_grace_days: g } : {}),
       ...(hasLadder   ? { dunning_ladder: rungs } : {}),
+      ...(hasCap      ? { dunning_max_sends_per_day: cap } : {}),
     });
   } catch (e) {
     console.error('[dunning-settings-update]', e?.message || e);

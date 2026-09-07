@@ -16,9 +16,10 @@
 //   detect : cooldown → harde vervaldatum-poort → startdrempel (ladder) →
 //            klanttype → min. openstaand → terminale pipeline-fase →
 //            bestaande run → run_once → arrangement_breached
-//   advance: openstaand>0 → blokkerende actie → kantooruren (send-stappen) →
-//            vervaldatum-poort → ladder-sport → stap uitvoeren →
-//            pointer door (wait mikt op de ladder-dag van de volgende send)
+//   advance: openstaand>0 → blokkerende actie → vervaldatum-poort →
+//            ladder-sport → dagcap → kantooruren → stap uitvoeren →
+//            pointer door (wait mikt op de ladder-dag van de volgende send,
+//            geklemd op een LATERE dag)
 //
 // AANNAMES (bewust, staan ook in de rapport-header van het script):
 //   * niemand betaalt tijdens het simulatievenster
@@ -42,6 +43,7 @@ import {
 import {
   isSendStep,
   isWithinOfficeHours,
+  nextSendSlotIso,
   DEFAULT_OFFICE_HOURS,
 } from './dunning-office-hours.js';
 
@@ -97,10 +99,12 @@ const TERMINAL_STAGES = new Set(['opgelost', 'afschrijven']);
  * @param {object} snapshot   zie scripts/dunning-dry-run-simulatie.js voor de opbouw
  * @param {object} [opts]
  *   - horizonDays              (default 8)
- *   - maxSendsPerCustomerPerDay  SIMULATIE-KNOP voor het voorstel "max één
- *     ladder-sport per klant per dag". null = spiegel de huidige branch.
- *     Zit BEWUST alleen hier en niet in de motor: dit is een what-if, geen
- *     gedragswijziging.
+ *   - maxSendsPerCustomerPerDay  overschrijft de dagcap uit de settings
+ *     (`settings.maxSendsPerDay`, default 1). De cap zit sinds de dagcap-
+ *     commit ECHT in de motor; deze optie is er om what-if-scenario's mee te
+ *     rekenen.
+ *   - disableDailyCap          what-if "zonder enige maatregel": zet de
+ *     dagcap volledig uit. Bestaat alleen in de simulator.
  *   - backfillPointer          SIMULATIE-KNOP voor het voorstel "eenmalige
  *     backfill": zet bij aanvang de pointer van elke bestaande run op de
  *     hoogste ladder-sport die de klant al voorbij is, zonder te verzenden.
@@ -108,9 +112,17 @@ const TERMINAL_STAGES = new Set(['opgelost', 'afschrijven']);
  */
 export function simulateEngine(snapshot, opts = {}) {
   const horizonDays = Number.isFinite(Number(opts.horizonDays)) ? Number(opts.horizonDays) : 8;
-  const maxPerDay   = Number.isFinite(Number(opts.maxSendsPerCustomerPerDay))
-    ? Number(opts.maxSendsPerCustomerPerDay) : null;
+  const maxPerDay = opts.disableDailyCap === true
+    ? null
+    : (Number.isFinite(Number(opts.maxSendsPerCustomerPerDay))
+        ? Number(opts.maxSendsPerCustomerPerDay)
+        : (Number.isFinite(Number(snapshot?.settings?.maxSendsPerDay))
+            ? Number(snapshot.settings.maxSendsPerDay)
+            : 1));
   const backfillPointer = opts.backfillPointer === true;
+  // Alleen om de situatie VÓÓR de fix na te spelen (scenario "zonder
+  // maatregel"). De motor klemt altijd; dit is puur een what-if.
+  const disableWaitClamp = opts.disableWaitClamp === true;
   const startIso    = snapshot?.today || todayIsoInTz();
 
   const settings    = snapshot?.settings || {};
@@ -281,23 +293,23 @@ export function simulateEngine(snapshot, opts = {}) {
           if (!step) { run.status = 'completed'; break; }
 
           if (isSendStep(step.step_type)) {
-            if (!isWithinOfficeHours(tickAt, officeHours)) break;          // wacht op volgende tick
-            if (maxPerDay != null) {                                        // what-if-throttle
-              const key = `${cust.id}|${dayIso}`;
-              if ((sentPerCustomerPerDay.get(key) || 0) >= maxPerDay) {
-                run.next_action_at = new Date(ymdMs(dayIso) + DAY_MS).toISOString();
-                break;
-              }
-            }
             if (!isOverdue(due, dayIso, graceDays)) {                       // harde poort
               run.next_action_at = new Date(ymdMs(due) + (graceDays + 1) * DAY_MS).toISOString();
               break;
             }
-            const tier = resolveStepTierDays(step, templates.get(step?.config?.template_id) || null, ladder);
-            if (tier != null && signed != null && signed < tier) {          // ladder-sport
-              run.next_action_at = new Date(ymdMs(due) + tier * DAY_MS).toISOString();
+            const tierPre = resolveStepTierDays(step, templates.get(step?.config?.template_id) || null, ladder);
+            if (tierPre != null && signed != null && signed < tierPre) {    // ladder-sport
+              run.next_action_at = new Date(ymdMs(due) + tierPre * DAY_MS).toISOString();
               break;
             }
+            if (maxPerDay != null) {                                        // dagcap
+              const key = `${cust.id}|${dayIso}`;
+              if ((sentPerCustomerPerDay.get(key) || 0) >= maxPerDay) {
+                run.next_action_at = nextSendSlotIso(tickAt, officeHours, 1);
+                break;
+              }
+            }
+            if (!isWithinOfficeHours(tickAt, officeHours)) break;           // wacht op volgende tick
             const tpl = templates.get(step?.config?.template_id) || null;
             messages.push({
               date: dayIso,
@@ -324,8 +336,12 @@ export function simulateEngine(snapshot, opts = {}) {
             const waitDays = Number(step?.config?.days) || 0;
             const tier = nextSendTierAfter(run.workflow_id, step.step_order);
             const ladderMs = (tier != null && due) ? (ymdMs(due) + tier * DAY_MS) : null;
-            const nextMs = ladderMs != null ? Math.max(tickMs, ladderMs) : (tickMs + waitDays * DAY_MS);
-            run.next_action_at = new Date(nextMs).toISOString();
+            const targetMs = ladderMs != null ? ladderMs : (tickMs + waitDays * DAY_MS);
+            // KLEM: nooit in het verleden of op "nu" — anders pikt de
+            // eerstvolgende uurtick de run meteen weer op (zie motor).
+            run.next_action_at = (targetMs > tickMs || disableWaitClamp)
+              ? new Date(Math.max(tickMs, targetMs)).toISOString()
+              : nextSendSlotIso(tickAt, officeHours, 1);
             run.current_step_id = nextStep ? nextStep.id : null;
             if (!nextStep) run.status = 'completed';
             break;
@@ -343,7 +359,7 @@ export function simulateEngine(snapshot, opts = {}) {
   return buildReport({
     startIso, horizonDays, messages, startedRuns, skipLog, snapshot,
     cooldownDays, graceDays, ladder,
-    options: { maxSendsPerCustomerPerDay: maxPerDay, backfillPointer },
+    options: { maxSendsPerCustomerPerDay: maxPerDay, backfillPointer, disableWaitClamp },
   });
 }
 
@@ -454,6 +470,7 @@ function buildReport({ startIso, horizonDays, messages, startedRuns, skipLog, sn
       ladder,
       customers_in_snapshot: (snapshot?.customers || []).length,
       existing_runs_in_snapshot: (snapshot?.runs || []).length,
+      max_sends_per_day: options?.maxSendsPerCustomerPerDay ?? null,
       options: options || {},
     },
     days,

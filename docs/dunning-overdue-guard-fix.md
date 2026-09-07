@@ -173,14 +173,16 @@ met alleen nog-niet-vervallen facturen nooit incasso-kandidaat wordt — ook nie
 als `min_days_overdue` op `null` (uit) staat.
 
 ### `api/dunning-settings-get.js` / `api/dunning-settings-update.js`
-`dunning_grace_days` (0..90, default 0) en `dunning_ladder` erbij. Alle keys
+`dunning_grace_days` (0..90, default 0), `dunning_ladder` en
+`dunning_max_sends_per_day` (1..10, default 1) erbij. Alle keys
 zijn optioneel bij POST; de bestaande UI die alleen `dunning_cooldown_days`
 stuurt blijft werken. Ladder-sporten valideren op integer 1..365 — **0 wordt
 geweigerd**, want dat zou de vervaldag zelf toestaan.
 
 ### `modules/klanten-v2/views/instellingen-v2.js`
-Kaarten "Gratieperiode na de vervaldag" en "Aanmaan-ladder — dagen ná de
-vervaldatum" (vijf bewerkbare drempels) naast de bestaande cooldown-kaart. In
+Kaarten "Gratieperiode na de vervaldag", "Dagcap — berichten per klant per
+dag" en "Aanmaan-ladder — dagen ná de vervaldatum" (vijf bewerkbare drempels)
+naast de bestaande cooldown-kaart. In
 de workflow-editor staat het ladder-moment bij elke template in de picker, en
 is "Min. dagen sinds factuurdatum" gemarkeerd als **genegeerd**.
 
@@ -229,7 +231,7 @@ verifieert de simulator op synthetische snapshots.
 Aannames (maken de uitkomst een **bovengrens**): niemand betaalt, niemand
 antwoordt, geen nieuwe facturen, elke send slaagt, niemand grijpt handmatig in.
 
-### Inhaalgolf — bevestigd risico
+### Inhaalgolf — bevestigd risico, en wat we eraan doen
 
 Een klant die al lang te laat is terwijl zijn run-pointer nog op stap 1 staat,
 heeft **alle** ladder-sporten al gepasseerd. De motor doet maximaal één
@@ -238,17 +240,46 @@ ochtend: vijf berichten tussen 08:00 en 12:00. De cooldown van 7 dagen vangt
 dat **niet** af — die geldt alleen bij het STARTEN van een nieuwe run, niet
 tussen de stappen van een lopende run.
 
-Twee maatregelen, beide als what-if-knop in de simulator (`--max-per-dag=1`,
-`--backfill`) zodat het effect vooraf te meten is:
+Drie maatregelen, alle drie geleverd:
 
-* **Max één ladder-sport per klant per dag** — smeert de reeks uit, maar de
-  klant krijgt nog steeds alle vijf de berichten (dag 1 t/m 5).
-* **Eenmalige pointer-backfill** — zet de pointer van elke lopende run op de
-  sport die bij de huidige `days_overdue` hoort, zonder te versturen. De klant
-  krijgt dan één passend bericht in plaats van de hele reeks.
+1. **Wait-klem (oorzaak).** Na een `wait`-stap mag `next_action_at` nooit in
+   het verleden of op "nu" landen. Ligt de ladder-dag al achter ons, dan wordt
+   het het eerstvolgende verzendslot op een **latere** dag
+   (`nextSendSlotIso()` in `dunning-office-hours.js`). Dit repareert de
+   regressie bij de bron: zonder klem zette de wait `next_action_at = nu` en
+   pikte de eerstvolgende uurtick de run meteen weer op.
+2. **Dagcap (permanent vangnet).** Hoogstens N berichten per klant per
+   kalenderdag (Europe/Amsterdam), `app_settings.dunning_max_sends_per_day`,
+   **default 1**. De teller loopt per KLANT over al zijn runs, start bij lokale
+   middernacht en telt sends binnen dezelfde invocatie mee. Bij een bereikte
+   cap: pointer blijft staan, `next_action_at` naar het volgende verzendslot,
+   log-regel `send_skipped_daily_cap`.
+3. **Eenmalige pointer-backfill** (`scripts/dunning-pointer-backfill.js`).
+   Zet de pointer van elke lopende run op de sport die bij de werkelijke
+   `days_overdue` hoort. Verstuurt niets, dry-run is de default, elke
+   verzetting komt als `pointer_backfill` in `dunning_log`. **Gepauzeerde runs
+   doen mee** — die sturen nu niets, maar cascaderen alsnog zodra hun pauze
+   wegvalt.
 
-De twee zijn te combineren: de backfill haalt de golf weg, de dagcap is het
-vangnet voor gevallen die de backfill mist.
+### Wat dat doet op dag 1 (gemeten live verdeling, 2026-09-07)
+
+156 klanten in de wanbetalerslijst: 21 actieve runs (16 met 30+ dagen te
+laat), 68 gepauzeerd (49 met 30+ dagen), 67 zonder run en nog niet vervallen.
+
+| Scenario | Dag 1 | Totaal over 8 dagen | Klanten met dagburst |
+|---|---|---|---|
+| Zonder maatregel | **92** | 121 | 20 (tot 5 op één ochtend) |
+| Alleen de dagcap | **21** | 121 (uitgesmeerd) | 0 |
+| Backfill + dagcap | **21** | **50** | 0 |
+
+De dagcap verplaatst berichten, de backfill schrapt ze. Zonder backfill krijgen
+alle 21 op dag 1 nog `aanmaning_dag7` — "misschien had je het gemist" naar
+iemand die anderhalve maand te laat is. Mét backfill krijgen de 16 zware
+gevallen meteen `aanmaning_dag37` en is hun ladder daarna klaar.
+
+De cijfers staan als assertions in `tests/dunning-simulate.test.js`
+(*"SCENARIO: dag 1 na deploy op de gemeten live verdeling"*), dus ze zijn
+narekenbaar en bewegen mee als de logica verandert.
 
 ## 6. Nog te doen buiten deze PR (DB-config)
 

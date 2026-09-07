@@ -110,7 +110,7 @@ test('simulatie: verse klant loopt de ladder af op de afgesproken dagen', () => 
 });
 
 // ── INHAALGOLF ────────────────────────────────────────────────────────────
-test('INHAALGOLF: bestaande run met vroege pointer bij een klant die 60 dagen te laat is', () => {
+test('INHAALGOLF (zonder maatregel): bestaande run met vroege pointer bij 60 dagen te laat', () => {
   const snap = snapshot({
     today: '2026-09-07',
     customers: [klant('A', '2026-07-09')],   // 60 dagen te laat
@@ -119,7 +119,9 @@ test('INHAALGOLF: bestaande run met vroege pointer bij een klant die 60 dagen te
       current_step_id: 's1', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
     }],
   });
-  const r = simulateEngine(snap, { horizonDays: 3 });
+  // disableDailyCap = de situatie VÓÓR de dagcap: dit is wat er zonder
+  // vangnet zou gebeuren.
+  const r = simulateEngine(snap, { horizonDays: 3, disableDailyCap: true, disableWaitClamp: true });
 
   // Alle vijf sporten zijn al voorbij → alle vijf mogen, en de motor doet
   // er maximaal één per uurlijkse tick. Resultaat: vijf berichten op dag 1.
@@ -140,7 +142,7 @@ test('INHAALGOLF: bestaande run met vroege pointer bij een klant die 60 dagen te
   assert.equal(mm.cooldown_would_cover, false);
 });
 
-test('INHAALGOLF: één sport per klant per dag dempt de golf tot 1/dag', () => {
+test('DAGCAP (default 1): dempt diezelfde golf tot één bericht per dag', () => {
   const snap = snapshot({
     today: '2026-09-07',
     customers: [klant('A', '2026-07-09')],
@@ -149,7 +151,10 @@ test('INHAALGOLF: één sport per klant per dag dempt de golf tot 1/dag', () => 
       current_step_id: 's1', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
     }],
   });
-  const r = simulateEngine(snap, { horizonDays: 8, maxSendsPerCustomerPerDay: 1 });
+  // Geen opties: de simulator neemt de dagcap uit de settings (default 1),
+  // net als de motor.
+  const r = simulateEngine(snap, { horizonDays: 8 });
+  assert.equal(r.meta.options.maxSendsPerCustomerPerDay, 1, 'cap komt uit de settings');
   assert.equal(r.same_day_bursts.length, 0, 'geen enkele dag met 2 berichten');
   assert.deepEqual(r.days.slice(0, 5).map((d) => d.total), [1, 1, 1, 1, 1]);
   assert.equal(r.totals.messages, 5, 'zelfde vijf berichten, uitgesmeerd over vijf dagen');
@@ -170,7 +175,7 @@ test('INHAALGOLF: pointer-backfill levert één passend bericht in plaats van vi
   assert.equal(r.same_day_bursts.length, 0);
 });
 
-test('INHAALGOLF: klant die pas 8 dagen te laat is haalt maximaal 2 sporten in', () => {
+test('INHAALGOLF (zonder maatregel): klant die pas 8 dagen te laat is haalt 2 sporten in', () => {
   const snap = snapshot({
     today: '2026-09-07',
     customers: [klant('A', '2026-08-30')],   // 8 dagen te laat
@@ -179,9 +184,14 @@ test('INHAALGOLF: klant die pas 8 dagen te laat is haalt maximaal 2 sporten in',
       current_step_id: 's1', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
     }],
   });
-  const r = simulateEngine(snap, { horizonDays: 2 });
-  assert.equal(r.days[0].total, 2);
-  assert.deepEqual(r.days[0].by_template, { aanmaning_dag7: 1, aanmaning_dag14: 1 });
+  const zonder = simulateEngine(snap, { horizonDays: 2, disableDailyCap: true, disableWaitClamp: true });
+  assert.equal(zonder.days[0].total, 2);
+  assert.deepEqual(zonder.days[0].by_template, { aanmaning_dag7: 1, aanmaning_dag14: 1 });
+
+  // Met de dagcap: één op dag 1, de tweede op dag 2.
+  const met = simulateEngine(snap, { horizonDays: 2 });
+  assert.deepEqual(met.days.map((d) => d.total), [1, 1]);
+  assert.equal(met.same_day_bursts.length, 0);
 });
 
 // ── Cooldown ──────────────────────────────────────────────────────────────
@@ -207,8 +217,11 @@ test('cooldown: is niet van toepassing binnen één lopende run', () => {
       current_step_id: 's1', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
     }],
   });
-  const r = simulateEngine(snap, { horizonDays: 2 });
+  const r = simulateEngine(snap, { horizonDays: 2, disableDailyCap: true, disableWaitClamp: true });
   assert.equal(r.totals.messages, 5, 'cooldown remt de stappen binnen de run niet');
+  // De dagcap doet dat wél — dát is het verschil tussen de twee mechanismen.
+  const metCap = simulateEngine(snap, { horizonDays: 2 });
+  assert.equal(metCap.totals.messages, 2, 'dagcap: één per dag, dus 2 in 2 dagen');
 });
 
 // ── Overige guards ────────────────────────────────────────────────────────
@@ -323,4 +336,107 @@ test('rapportage: buildReportText rendert alle vier de secties zonder te crashen
   assert.match(txt, /aanmaning_dag7/);
   // De what-if-regels moeten echte getallen tonen, geen undefined/NaN.
   assert.doesNotMatch(txt, /undefined|NaN/);
+});
+
+// ── SCENARIO-BEREKENING op de gemeten live verdeling ──────────────────────
+//
+// Gemeten via de CRM-API op 2026-09-07 (156 klanten in de wanbetalerslijst):
+//   run_status active =  21, waarvan 16 met 30+ dagen te laat
+//   run_status paused =  68, waarvan 49 met 30+ dagen te laat
+//   zonder run        =  67, allemaal nog niet vervallen
+//
+// De 5 actieve runs onder de 30 dagen hebben we niet per klant gemeten; die
+// modelleren we op een gespreide reeks (3/8/12/18/25 dagen te laat). Pas
+// ACTIVE_ONDER_30 aan als de echte verdeling bekend is — de 16 zware gevallen
+// en de dag-1-conclusie veranderen daar niet van.
+const ACTIVE_30PLUS      = 16;
+const ACTIVE_ONDER_30    = [3, 8, 12, 18, 25];
+const PAUSED_30PLUS      = 49;
+const PAUSED_ONDER_30    = 19;
+const ZONDER_RUN         = 67;
+
+function liveSnapshot() {
+  const customers = [];
+  const runs = [];
+  const push = (id, dagenTeLaat, runStatus) => {
+    const due = new Date(Date.parse('2026-09-07T00:00:00Z') - dagenTeLaat * 86400000)
+      .toISOString().slice(0, 10);
+    customers.push({
+      id, name: `Klant ${id}`, is_company: false, stage_slug: 'aangemaand',
+      invoices: [{ id: `inv-${id}`, invoice_number: `2026/${id}`, due_date: due, open_amount: 450 }],
+    });
+    if (runStatus) {
+      runs.push({
+        id: `run-${id}`, workflow_id: 'wf1', customer_id: id, status: runStatus,
+        current_step_id: 's1', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
+        ...(runStatus === 'paused' ? { paused_by_conversation_id: `conv-${id}` } : {}),
+      });
+    }
+  };
+  for (let i = 0; i < ACTIVE_30PLUS; i++)   push(`A30-${i}`, 45, 'active');
+  ACTIVE_ONDER_30.forEach((d, i) =>          push(`A-${i}`, d, 'active'));
+  for (let i = 0; i < PAUSED_30PLUS; i++)   push(`P30-${i}`, 45, 'paused');
+  for (let i = 0; i < PAUSED_ONDER_30; i++) push(`P-${i}`, 10, 'paused');
+  for (let i = 0; i < ZONDER_RUN; i++) {
+    // Nog niet vervallen: vervaldatum 1 t/m 20 dagen in de toekomst.
+    const due = new Date(Date.parse('2026-09-07T00:00:00Z') + ((i % 20) + 1) * 86400000)
+      .toISOString().slice(0, 10);
+    customers.push({
+      id: `N-${i}`, name: `NietVervallen ${i}`, is_company: false, stage_slug: null,
+      invoices: [{ id: `inv-N${i}`, invoice_number: `2026/N${i}`, due_date: due, open_amount: 300 }],
+    });
+  }
+  return snapshot({ today: '2026-09-07', customers, runs });
+}
+
+test('SCENARIO: dag 1 na deploy op de gemeten live verdeling', () => {
+  const snap = liveSnapshot();
+  assert.equal(snap.customers.length, 156, 'de verdeling telt op tot 156 klanten');
+  assert.equal(snap.runs.filter((r) => r.status === 'active').length, 21);
+  assert.equal(snap.runs.filter((r) => r.status === 'paused').length, 68);
+
+  // 1) Zonder maatregel — de branch zoals die was vóór deze commit.
+  const zonder = simulateEngine(snap, { horizonDays: 8, disableDailyCap: true, disableWaitClamp: true });
+  // 16 klanten × 5 sporten + de 5 lichtere actieve runs met hun eigen sporten.
+  assert.equal(zonder.days[0].total, 92, '92 berichten op één ochtend');
+  assert.equal(zonder.days[0].by_template.aanmaning_dag37, 16, '16× de zwaarste template op dag 1');
+  // 20 van de 21 actieve runs krijgen meerdere berichten op dag 1; alleen de
+  // klant die pas 3 dagen te laat is heeft maar één sport bereikt.
+  assert.equal(new Set(zonder.same_day_bursts.map((b) => b.customer_id)).size, 20);
+
+  // 2) Alleen de dagcap (zonder de wait-klem) — één per klant per dag.
+  const capOnly = simulateEngine(snap, { horizonDays: 8, disableWaitClamp: true });
+  assert.equal(capOnly.days[0].total, 21, 'elke actieve run precies één bericht');
+  assert.equal(capOnly.same_day_bursts.length, 0);
+  assert.equal(capOnly.days[0].by_template.aanmaning_dag7, 21, 'allemaal nog het vriendelijke duwtje');
+
+  // 3) Backfill + dagcap (de geleverde combinatie).
+  const beide = simulateEngine(snap, { horizonDays: 8, backfillPointer: true });
+  assert.equal(beide.days[0].total, 21);
+  assert.equal(beide.same_day_bursts.length, 0);
+  assert.equal(beide.days[0].by_template.aanmaning_dag37, 16, 'de 16 krijgen meteen de juiste sport');
+  // Geen "misschien had je het gemist" naar iemand die 45 dagen te laat is.
+  // (De klant die pas 3 dagen te laat is krijgt terecht wél aanmaning_dag7.)
+  const zwaar = beide.messages.filter((m) => m.customer_id.startsWith('A30-'));
+  assert.equal(zwaar.length, 16);
+  assert.ok(zwaar.every((m) => m.template === 'aanmaning_dag37'),
+    'de zware gevallen krijgen uitsluitend de sport die bij hun achterstand hoort');
+
+  // Over acht dagen: de dagcap verplaatst berichten, de backfill schrapt ze.
+  assert.equal(zonder.totals.messages, 121);
+  assert.equal(capOnly.totals.messages, 121, 'dagcap smeert uit, schrapt niets');
+  assert.equal(beide.totals.messages, 50, 'backfill schrapt de ingehaalde sporten');
+  assert.deepEqual(capOnly.days.map((d) => d.total), [21, 20, 23, 22, 21, 5, 5, 4]);
+  assert.deepEqual(beide.days.map((d) => d.total),   [21,  0,  5,  5,  5, 5, 5, 4]);
+
+  // De geleverde branch (wait-klem + dagcap, zonder backfill) gedraagt zich op
+  // dag 1 als scenario 2: de klem alleen dempt de golf al tot 1 per dag.
+  const branch = simulateEngine(snap, { horizonDays: 8 });
+  assert.equal(branch.days[0].total, 21);
+  assert.equal(branch.same_day_bursts.length, 0);
+
+  // Gepauzeerde runs sturen niets zolang ze gepauzeerd zijn — hun 49 zware
+  // gevallen zijn de landmijn die de backfill moet ontmantelen.
+  const paused = new Set(snap.runs.filter((r) => r.status === 'paused').map((r) => r.customer_id));
+  assert.equal(zonder.messages.filter((m) => paused.has(m.customer_id)).length, 0);
 });

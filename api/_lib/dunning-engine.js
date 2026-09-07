@@ -41,6 +41,7 @@ import {
   isWithinOfficeHours,
   readOfficeHoursSetting,
   officeHoursLabel,
+  nextSendSlotIso,
 } from './dunning-office-hours.js';
 import {
   todayIsoInTz,
@@ -52,6 +53,8 @@ import {
   readLadderSetting,
   ladderLabel,
   earliestSendIso,
+  readMaxSendsPerDaySetting,
+  zonedDayStartIso,
 } from './dunning-overdue-guard.js';
 
 // OPEN_STATUSES komt nu uit dunning-pipeline.js (OPEN_INVOICE_STATUSES) — één
@@ -443,6 +446,58 @@ function aggregatePerCustomer(rows) {
     agg.days_since_oldest_invoice = daysSinceInvoice;
   }
   return per;
+}
+
+/**
+ * Tel per klant hoeveel aanmaan-berichten er VANDAAG al zijn verstuurd
+ * (lokale kalenderdag, Europe/Amsterdam). Bron: dunning_log-events
+ * 'email_sent' / 'whatsapp_sent' over ALLE runs van die klant — de dagcap is
+ * per KLANT, niet per run, zodat twee runs samen de cap niet omzeilen.
+ *
+ * Fail-soft: bij een DB-fout komt er een lege Map terug en laat de cap alles
+ * door (oud gedrag). Beter een bericht te veel dan een stilgevallen motor.
+ *
+ * @returns {Promise<Map<string, number>>} customer_id → aantal sends vandaag
+ */
+async function countSendsTodayByCustomer(customerIds, dayStartIso) {
+  const out = new Map();
+  if (!customerIds?.length || !dayStartIso) return out;
+  const CHUNK = 200;   // .in()-lijsten kort houden (URL-lengte bij PostgREST)
+  try {
+    // 1) alle runs van deze klanten (ook completed/cancelled — een send van
+    //    vanochtend telt mee, ook als die run intussen is afgerond).
+    const runRows = [];
+    for (let i = 0; i < customerIds.length; i += CHUNK) {
+      const slice = customerIds.slice(i, i + CHUNK);
+      const rows = await fetchAllRows(() => supabaseAdmin
+        .from('dunning_workflow_runs')
+        .select('id, customer_id')
+        .in('customer_id', slice));
+      runRows.push(...rows);
+    }
+    if (!runRows.length) return out;
+    const custByRun = new Map(runRows.map((r) => [r.id, r.customer_id]));
+
+    // 2) sends van vandaag over die runs.
+    const runIds = Array.from(custByRun.keys());
+    for (let i = 0; i < runIds.length; i += CHUNK) {
+      const slice = runIds.slice(i, i + CHUNK);
+      const logs = await fetchAllRows(() => supabaseAdmin
+        .from('dunning_log')
+        .select('run_id')
+        .in('run_id', slice)
+        .in('event_type', ['email_sent', 'whatsapp_sent'])
+        .gte('created_at', dayStartIso));
+      for (const l of logs) {
+        const cid = custByRun.get(l.run_id);
+        if (cid) out.set(cid, (out.get(cid) || 0) + 1);
+      }
+    }
+  } catch (e) {
+    console.warn('[dunning-engine] dagcap-telling fail-soft, cap laat door:', e?.message || e);
+    return new Map();
+  }
+  return out;
 }
 
 /**
@@ -1103,6 +1158,15 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
   // vertrekken — niet de stap-pointer en niet het getal in de templatenaam.
   const ladder    = await readLadderSetting(supabaseAdmin);
 
+  // ── DAGCAP: hoogstens N berichten per klant per kalenderdag ─────────────
+  // Permanent vangnet tegen de inhaalgolf. Instelbaar via
+  // app_settings.dunning_max_sends_per_day, default 1. De teller start bij
+  // lokale middernacht (Europe/Amsterdam) en wordt binnen deze invocatie
+  // meegeteld, zodat twee stappen in dezelfde run-lus ook meetellen.
+  const maxSendsPerDay = await readMaxSendsPerDaySetting(supabaseAdmin);
+  const dayStartIso    = zonedDayStartIso(todayIso);
+  const sendsToday     = await countSendsTodayByCustomer(runCustomerIds, dayStartIso);
+
   for (const run of runs || []) {
     if (elapsed(startedAt) > abortMs) break;
 
@@ -1345,6 +1409,36 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           }
         }
 
+        // ── DAGCAP-guard: hoogstens N berichten per klant per kalenderdag ──
+        // Staat NA de ladder-guard (die weet of deze stap überhaupt mag) en
+        // VÓÓR de kantooruren-guard. Bij bereikte cap: pointer blijft staan,
+        // next_action_at naar het eerstvolgende verzendslot op een latere dag.
+        if (isSendStep(currentStep.step_type)) {
+          const alToday = sendsToday.get(run.customer_id) || 0;
+          if (alToday >= maxSendsPerDay) {
+            const resumeAt = nextSendSlotIso(new Date(), officeHoursCfg, 1);
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ next_action_at: resumeAt, updated_at: nowIso() })
+              .eq('id', run.id);
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStep.id,
+              event_type: 'send_skipped_daily_cap',
+              payload: {
+                step_type:       currentStep.step_type,
+                sends_today:     alToday,
+                max_per_day:     maxSendsPerDay,
+                today_amsterdam: todayIso,
+                next_action_at:  resumeAt,
+                reason:          'dagcap bereikt voor deze klant',
+              },
+            });
+            runAdvanced = true;
+            break;
+          }
+        }
+
         // ── Kantooruren-guard voor SEND-stappen (email/whatsapp) ──────────
         // Buiten venster: NIET uitvoeren, NIET pointer doorschuiven, NIET
         // next_action_at muteren → volgende engine-tick (elk uur) pikt de
@@ -1491,6 +1585,13 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         // sends binnen dezelfde run no-op én voorkomt dat 'in_gesprek'/
         // 'opgelost' teruggezet worden. Fail-soft: stage-update mag de
         // engine niet omvallen.
+        // Dagcap-teller bijwerken zodra er echt een bericht de deur uit is.
+        // Alleen bij status 'ok' — een 'skipped' send (geen telefoonnummer,
+        // template-fout) verbruikt geen cap.
+        if (isAanmaningSendSuccess(stepResult)) {
+          sendsToday.set(run.customer_id, (sendsToday.get(run.customer_id) || 0) + 1);
+        }
+
         if (isAanmaningSendSuccess(stepResult)) {
           try {
             const { isAutoEnabled, ensurePipelineCustomer, setStage } = await import('./dunning-pipeline.js');
@@ -1586,9 +1687,16 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           const ladderIso = (nextTier != null)
             ? earliestSendIso(agg?.oldest_due_iso || null, nextTier)
             : null;
-          update.next_action_at = ladderIso
-            ? new Date(Math.max(Date.now(), Date.parse(ladderIso))).toISOString()
-            : new Date(nextMs).toISOString();
+          // KLEM: na een wait mag next_action_at NOOIT in het verleden (of op
+          // "nu") landen. Anders pikt de eerstvolgende UURLIJKSE tick de run
+          // meteen weer op en loopt een achterstallige klant de hele ladder in
+          // één ochtend af — de regressie die de ladder-wijziging introduceerde.
+          // Ligt de doeldag al achter ons, dan wordt het het eerstvolgende
+          // verzendslot op een LATERE dag.
+          const targetMs = ladderIso ? Date.parse(ladderIso) : nextMs;
+          update.next_action_at = (Number.isFinite(targetMs) && targetMs > Date.now())
+            ? new Date(targetMs).toISOString()
+            : nextSendSlotIso(new Date(), officeHoursCfg, 1);
           update.current_step_id = nextStep ? nextStep.id : null;
           if (!nextStep) {
             update.status = 'completed';
