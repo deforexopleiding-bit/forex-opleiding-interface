@@ -90,7 +90,7 @@ export default async function handler(req, res) {
                created_by, created_at,
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
                dfo_lms_student_id, dfo_lms_provisioned, dfo_lms_provisioned_at, dfo_lms_provision_error,
-               auto_afgerond_sessie_id, auto_afgerond_sessie_op, auto_afgerond_op,
+               auto_afgerond_sessie_id, auto_afgerond_sessie_op, auto_afgerond_sessie_titel, auto_afgerond_op,
                invite_sent_at,
                credentials_email_sent_at, credentials_wa_sent_at,
                mentor_intake_status,

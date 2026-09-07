@@ -365,7 +365,7 @@ test('onbekende student-brug levert simpelweg geen rij op', async () => {
 //   - een no-show sluit NIETS af;
 //   - het watermerk voorkomt een terugwerkende vloedgolf.
 
-import { haalAfgerondeEersteSessies } from '../api/_lib/dfo-lms-sessies.js';
+import { haalAfgerondeEersteSessies, haalSessieTitels, LMS_SESSIE_TITEL_KOLOM } from '../api/_lib/dfo-lms-sessies.js';
 
 const WM = '2026-09-01T00:00:00.000Z';
 const ses = (id, tijd, status, stu = 'stu-1') =>
@@ -655,4 +655,90 @@ test('CONTRACT: beide crons stoppen bij een onleesbare bron', () => {
     assert.match(bron, /bron_status !== BRON_GELEZEN/,
       naam + ': een mislukte bevraging wordt niet onderscheiden van een lege uitkomst');
   }
+});
+
+
+// ── 8) De titel van de sluitende sessie ─────────────────────────────────────
+//
+// Waarom die er is: de regel kijkt naar status 'afgerond' en niet naar het
+// soort sessie, dus een testsessie die per ongeluk op afgerond wordt gezet
+// sluit een echte onboarding. Er komt bewust GEEN filter op woorden in de
+// titel — raden op een titel valt later stil de verkeerde kant op. De titel
+// staat er zodat wie het dossier opent meteen ziet wát er sloot.
+
+test('de titel van de sluitende sessie komt mee', async () => {
+  const r = await haalAfgerondeEersteSessies({
+    sindsIso: WM,
+    client: clientMet({
+      sessies: [{ ...ses('s1', '2026-09-10T10:00:00.000Z', 'afgerond'),
+        [LMS_SESSIE_TITEL_KOLOM]: 'Testsessie (verificatie)' }],
+      studenten: [student({ id: 'stu-1', bubble_user_id: 'bub-1' })],
+    }),
+  });
+  assert.equal(r.sessies.length, 1);
+  assert.equal(r.sessies[0].titel, 'Testsessie (verificatie)');
+  assert.equal(r.titels_gelezen, true);
+});
+
+test('DE TITEL MAG HET AFSLUITEN NOOIT OMLEGGEN', async () => {
+  // Dit is de reden dat de titel in een APARTE bevraging zit. Zou hij in de
+  // hoofdbevraging staan, dan gaf één verkeerde kolomnaam een fout op die
+  // bevraging, ging bron_status op onbereikbaar, en sloot de cron helemaal
+  // niets meer af — een sierveld dat het hele afsluiten omlegt.
+  //
+  // De neppe databank laat ALLE hlms_sessie-bevragingen mislukken zodra we dat
+  // zeggen, dus hier bootsen we het na op de enige manier die telt: een
+  // client die bij de titel-opzoeking faalt.
+  const stuk = {
+    from(tabel) {
+      const k = {
+        select: (kolommen) => { k._kolommen = String(kolommen || ''); return k; },
+        eq: () => k, gt: () => k, in: () => k, order: () => k, limit: () => k,
+        then: (res, rej) => {
+          const vraagtTitel = tabel === 'hlms_sessie'
+            && k._kolommen.includes(LMS_SESSIE_TITEL_KOLOM);
+          if (vraagtTitel) {
+            return Promise.resolve({ data: null,
+              error: { message: 'column hlms_sessie.' + LMS_SESSIE_TITEL_KOLOM + ' does not exist' } })
+              .then(res, rej);
+          }
+          const bron = tabel === 'hlms_sessie'
+            ? [ses('s1', '2026-09-10T10:00:00.000Z', 'afgerond')]
+            : [student({ id: 'stu-1', bubble_user_id: 'bub-1' })];
+          return Promise.resolve({ data: bron, error: null }).then(res, rej);
+        },
+      };
+      return k;
+    },
+  };
+  const r = await haalAfgerondeEersteSessies({ sindsIso: WM, client: stuk });
+  assert.equal(r.bron_status, BRON_GELEZEN, 'een kapotte titel is GEEN kapotte bron');
+  assert.equal(r.sessies.length, 1, 'de onboarding sluit gewoon');
+  assert.equal(r.sessies[0].id, 's1');
+  assert.equal(r.sessies[0].titel, null, 'alleen de titel ontbreekt');
+  assert.equal(r.titels_gelezen, false, 'en dat is een EIGEN feit, geen stilte');
+  assert.match(r.titels_fout, /does not exist/);
+});
+
+test('geen titel is iets anders dan een mislukte opzoeking', async () => {
+  // Een sessie zonder titel levert null op met titels_gelezen=true; een
+  // mislukte opzoeking levert null op met titels_gelezen=false. Zonder dat
+  // onderscheid is 'deze sessie heet niets' niet te scheiden van 'we konden
+  // het niet ophalen' — precies de fout die dit hele spoor begon.
+  const r = await haalAfgerondeEersteSessies({
+    sindsIso: WM,
+    client: clientMet({
+      sessies: [{ ...ses('s1', '2026-09-10T10:00:00.000Z', 'afgerond'),
+        [LMS_SESSIE_TITEL_KOLOM]: '   ' }],
+      studenten: [student({ id: 'stu-1', bubble_user_id: 'bub-1' })],
+    }),
+  });
+  assert.equal(r.sessies[0].titel, null);
+  assert.equal(r.titels_gelezen, true, 'de bevraging lukte — er staat gewoon niets');
+});
+
+test('haalSessieTitels: lege lijst is geen bevraging en dus geen storing', async () => {
+  const r = await haalSessieTitels({ sessieIds: [], client: clientMet({}) });
+  assert.equal(r.ok, true);
+  assert.equal(r.titels.size, 0);
 });

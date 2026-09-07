@@ -59,6 +59,17 @@
 // Zouden we het watermerk op de oorzaak zetten, dan wilde dat terug in de
 // tijd en kwam dezelfde rij elke ochtend opnieuw langs.
 //
+// ── DE TITEL VAN DE SLUITENDE SESSIE ─────────────────────────────────────
+// `auto_afgerond_sessie_titel` legt vast WAT er sloot, niet alleen wanneer.
+// Reden: de regel kijkt naar status 'afgerond' en niet naar het soort sessie,
+// dus een testsessie die per ongeluk op afgerond wordt gezet sluit een echte
+// onboarding. Er komt BEWUST geen filter op woorden in die titel — raden op
+// een titel is precies het soort regel dat later stil de verkeerde kant op
+// valt. Wat er wel gebeurt: wie het dossier opent ziet meteen wat er sloot.
+//
+// Het is nadrukkelijk geen alarm. Er gaat geen bericht uit bij een
+// automatische afsluiting; dat is een aparte beslissing.
+//
 // AUTH: Authorization: Bearer ${CRON_SECRET}. 401 zonder.
 
 import { supabaseAdmin } from '../supabase.js';
@@ -112,6 +123,10 @@ export default async function handler(req, res) {
     // Alles wat buiten de filter viel wordt geteld: een cron die alleen zegt
     // wat hij deed en niet wat hij oversloeg, stelt ten onrechte gerust.
     afgeronde_sessies: 0, gesloten_op_eerdere_sessie: 0, zonder_bubble_koppeling: 0,
+    // De titel van de sluitende sessie is sierwerk voor het dossier, maar of
+    // hij GELEZEN is blijft een eigen feit — anders is 'geen titel' niet te
+    // onderscheiden van 'titel niet opgehaald'.
+    titels_gelezen: null, titels_fout: null,
     kandidaten: 0, afgesloten: 0,
     geen_onboarding: 0, al_afgerond: 0, al_automatisch: 0, niet_aanraken: 0,
     voorbeelden: [], errors: [],
@@ -139,6 +154,8 @@ export default async function handler(req, res) {
     result.bron_status             = bron.bron_status;
     result.afgeronde_sessies       = bron.totaal_afgerond;
     result.gesloten_op_eerdere_sessie = bron.gesloten_op_eerdere_sessie;
+    result.titels_gelezen             = bron.titels_gelezen ?? null;
+    result.titels_fout                = bron.titels_fout ?? null;
     result.zonder_bubble_koppeling = bron.zonder_bubble_koppeling;
 
     // MISLUKTE BEVRAGING IS GEEN LEGE UITKOMST. Stoppen zonder het watermerk
@@ -217,6 +234,7 @@ export default async function handler(req, res) {
               status_nu: ob.status,
               sessie_id: sess.id,
               sessie_op: sess.start_tijd,
+              sessie_titel: sess.titel || null,
               // Zichtbaar maken wanneer de oorzaak ouder is dan het watermerk.
               op_eerdere_sessie: !!sess.op_eerdere_sessie,
               aanleiding_op: sess.aanleiding_op || null,
@@ -234,6 +252,9 @@ export default async function handler(req, res) {
                 completed_at: nowIso,
                 auto_afgerond_sessie_id: sess.id,
                 auto_afgerond_sessie_op: sess.start_tijd,
+                // Mag leeg zijn: de titel stuurt niets aan. Dat 'ie ontbreekt
+                // staat in titels_gelezen, niet in deze kolom.
+                auto_afgerond_sessie_titel: sess.titel || null,
                 auto_afgerond_op: nowIso,
                 updated_at: nowIso,
               })

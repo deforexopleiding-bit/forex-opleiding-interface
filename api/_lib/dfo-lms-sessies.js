@@ -442,6 +442,64 @@ export async function haalEersteSessiePerStudent({ studentIds, client = null }) 
 }
 
 /**
+ * De naam van de titelkolom op `hlms_sessie`.
+ *
+ * ── DIT IS DE ENIGE AANNAME IN DIT BESTAND ───────────────────────────────
+ * Het LMS-schema staat nergens in deze repo; alle andere bevragingen hier
+ * gebruiken alleen kolommen die gemeten zijn (id, start_tijd, status,
+ * student_id, mentor_id). Dat de sessie een titel HEEFT is bekend — Maxim
+ * telde er op 7 september twee met "test" of "verificatie" erin — maar hoe die
+ * kolom heet is niet geverifieerd.
+ *
+ * Daarom staat de titel bewust NIET in de bevraging die het afsluiten
+ * aanstuurt. Klopt deze naam niet, dan blijft de titel leeg en draait de rest
+ * gewoon door. Zou de titel in die hoofdbevraging staan, dan gaf één verkeerde
+ * kolomnaam een fout op de hele bevraging, ging `bron_status` op onbereikbaar,
+ * en sloot de cron NIETS meer af — een sierveld dat het hele afsluiten
+ * omlegt. Klopt de naam niet, dan is dit één woord om te wijzigen.
+ */
+export const LMS_SESSIE_TITEL_KOLOM = 'titel';
+
+/**
+ * Titels bij een reeks sessie-ids. Los van het afsluiten, en met opzet
+ * FAALZACHT: deze titel stuurt geen enkele beslissing aan, hij staat er zodat
+ * een mens die naar een dossier kijkt meteen ziet WAT er is afgesloten.
+ *
+ * Geen `bron_status` dus, maar `ok`. Mislukt de bevraging, dan is de titel
+ * onbekend en zegt de aanroeper dat — het afsluiten zelf gaat door.
+ *
+ * @param {{sessieIds: string[], client?: object}} arg
+ * @returns {Promise<{ok: boolean, titels: Map<string,string>, fout: string|null}>}
+ */
+export async function haalSessieTitels({ sessieIds, client = null }) {
+  const titels = new Map();
+  const ids = Array.from(new Set((sessieIds || []).filter(Boolean).map(String)));
+  if (ids.length === 0) return { ok: true, titels, fout: null };
+
+  const lms = client || getDfoLmsClient();
+  if (!lms) return { ok: false, titels, fout: 'DFO_LMS_SUPABASE_URL/KEY ontbreekt' };
+
+  try {
+    const { data, error } = await lms
+      .from('hlms_sessie')
+      .select('id, ' + LMS_SESSIE_TITEL_KOLOM)
+      .in('id', ids);
+    if (error) throw new Error(error.message);
+    for (const r of (data || [])) {
+      if (!r?.id) continue;
+      const t = String(r[LMS_SESSIE_TITEL_KOLOM] ?? '').trim();
+      if (t) titels.set(String(r.id), t);
+    }
+    return { ok: true, titels, fout: null };
+  } catch (e) {
+    const msg = 'sessietitels lezen mislukt (kolom "' + LMS_SESSIE_TITEL_KOLOM
+      + '"?): ' + (e?.message || e);
+    console.warn('[dfo-lms-sessies]', msg);
+    return { ok: false, titels, fout: msg };
+  }
+}
+
+/**
  * De VROEGSTE AFGERONDE sessie per student, sinds een watermerk.
  *
  * Voor api/cron/onboarding-eerste-sessie-afronden.js.
@@ -486,7 +544,7 @@ export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_
   const leeg = {
     bron_status: BRON_ONBEREIKBAAR, sessies: [],
     totaal_afgerond: 0, gesloten_op_eerdere_sessie: 0,
-    zonder_bubble_koppeling: 0, fout: null,
+    zonder_bubble_koppeling: 0, titels_gelezen: false, titels_fout: null, fout: null,
   };
 
   const lms = client || getDfoLmsClient();
@@ -621,11 +679,26 @@ export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_
     });
   }
 
+  // 4) De titel van de OORZAAK erbij — apart, faalzacht, en na al het werk
+  // dat er wel toe doet. Een testsessie die per ongeluk op 'afgerond' is gezet
+  // sluit namelijk een echte onboarding, en dan hoort er in het dossier te
+  // staan dat 'Testsessie (verificatie)' dat deed en niet alleen een datum.
+  // Bewust GEEN filter op die titel: raden op woorden in een titel is precies
+  // het soort regel dat later stil de verkeerde kant op valt.
+  const titelUitkomst = await haalSessieTitels({
+    sessieIds: sessies.map((r) => r.id), client: lms,
+  });
+  for (const r of sessies) r.titel = titelUitkomst.titels.get(r.id) || null;
+
   return {
     bron_status: BRON_GELEZEN, sessies,
     totaal_afgerond: kandidaten.length,
     gesloten_op_eerdere_sessie: opEerdereSessie,
     zonder_bubble_koppeling: zonderBrug,
+    // Of de titels gelezen zijn is een EIGEN feit. Zonder dit zou een lege
+    // titel niet te onderscheiden zijn van een mislukte opzoeking.
+    titels_gelezen: titelUitkomst.ok,
+    titels_fout: titelUitkomst.fout,
     fout: null,
   };
 }

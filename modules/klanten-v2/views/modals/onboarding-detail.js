@@ -278,9 +278,16 @@ function autoAfgerondNoot(o) {
   if (!o.auto_afgerond_op) return '';
   const wanneer = o.auto_afgerond_sessie_op ? fmtDT(o.auto_afgerond_sessie_op) : 'onbekend';
   const sid = o.auto_afgerond_sessie_id ? String(o.auto_afgerond_sessie_id) : null;
+  // De TITEL van de sessie die sloot. Staat er 'Testsessie (verificatie)', dan
+  // is in één oogopslag duidelijk dat hier een echte klant is afgesloten op
+  // iets dat geen call was. Ontbreekt de titel — een rij van vóór deze kolom,
+  // of een LMS dat even niet antwoordde — dan valt hij gewoon weg; de datum en
+  // het sessie-nummer staan er nog.
+  const titel = o.auto_afgerond_sessie_titel
+    ? String(o.auto_afgerond_sessie_titel).trim() : '';
   return `<div style="margin-top:3px;font-size:11.5px;color:var(--text-3);line-height:1.45">
       Automatisch afgerond op ${esc(fmtDT(o.auto_afgerond_op))} door de eerste
-      afgeronde sessie van ${esc(wanneer)}.
+      afgeronde sessie${titel ? ` <strong>${esc(titel)}</strong>` : ''} van ${esc(wanneer)}.
       ${sid ? `<br><span class="mono" style="font-size:11px">sessie ${esc(sid)}</span>` : ''}
     </div>`;
 }

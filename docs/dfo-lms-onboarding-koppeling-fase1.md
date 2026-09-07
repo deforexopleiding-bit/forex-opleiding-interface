@@ -506,6 +506,50 @@ De teller heet daarom nu `gesloten_op_eerdere_sessie` in plaats van
 `eerdere_afgeronde_buiten_venster`: hij telt niet meer wat wegviel, maar wat
 werd afgesloten op een sessie ouder dan het watermerk.
 
+### De titel van de sluitende sessie
+
+De regel kijkt naar **status `afgerond`** en niet naar het soort sessie. Een
+testsessie die per ongeluk op afgerond wordt gezet sluit dus een echte
+onboarding. Gemeten op 7 september: twee sessies in het LMS met "test" of
+"verificatie" in de titel, waarvan één afgerond. Klein, niet nul, en het groeit
+zodra iemand iets uitprobeert.
+
+**Er komt geen titelfilter.** Raden op woorden in een titel is precies het soort
+regel dat later stil de verkeerde kant op valt: iemand noemt een echte sessie
+"testfase 2" en die sluit niets meer, of een testsessie heet "call 1" en glipt er
+alsnog door. Wat er wél is: `onboardings.auto_afgerond_sessie_titel` legt vast
+wát er sloot, en het detailscherm zet die titel vet in de afgerond-regel. Wie
+kijkt begrijpt meteen wat hij ziet.
+
+**Het is geen alarm** en het wordt ook niet als alarm verkocht. Er gaat geen
+bericht uit bij een automatische afsluiting; iemand moet het dossier nog steeds
+openen. Een melding bij elke automatische afsluiting is een nieuw soort bericht
+naar mensen en dus een aparte beslissing — die staat open, niet gebouwd.
+
+De goedkoopste bescherming blijft de mensenregel: **geen testsessies op een
+echte student afronden.** Geen enkele kolom haalt het daarbij.
+
+#### Waarom de titel in een aparte bevraging zit
+
+Het LMS-schema staat nergens in deze repo. Alle bevragingen hier gebruiken
+alleen kolommen die gemeten zijn (`id`, `start_tijd`, `status`, `student_id`,
+`mentor_id`). Dát een sessie een titel heeft is bekend; hóé die kolom heet niet.
+
+Die naam staat daarom als één constante in `api/_lib/dfo-lms-sessies.js`
+(`LMS_SESSIE_TITEL_KOLOM`), en de opzoeking is een **aparte, faalzachte** stap
+ná al het werk dat er wel toe doet. Zou de titel in de hoofdbevraging staan, dan
+gaf één verkeerde kolomnaam een fout op die bevraging, ging `bron_status` op
+onbereikbaar, en sloot de cron **niets** meer af — een sierveld dat het hele
+afsluiten omlegt. Nu blijft de titel leeg en draait de rest door. Klopt de naam
+niet, dan is dat één woord om te wijzigen. Er staat een test op die rood wordt
+zodra iemand de titel alsnog in de hoofdbevraging zet.
+
+En omdat "leeg" en "niet gelukt" ook hier niet hetzelfde mogen zijn: de uitkomst
+draagt `titels_gelezen` (en `titels_fout`). Een sessie zonder titel geeft `null`
+met `titels_gelezen: true`; een mislukte opzoeking geeft `null` met
+`titels_gelezen: false`. In de kolom staat in beide gevallen niets — het
+onderscheid hoort in de cron-uitkomst en de log, niet in een sierveld.
+
 ### Bewust niet omgezet: de betaalherinnering
 
 `api/cron/first-call-payment-reminder.js` blijft op Bubble staan en is
