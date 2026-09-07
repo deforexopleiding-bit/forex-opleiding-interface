@@ -5830,7 +5830,12 @@
   // student uit; die horen niet bij team). Bevat exact wat api/_lib/crm-roles.js
   // definieert.
   const VALID_ROLES = ['super_admin','admin','manager','sales','mentor','marketing','administratie','viewer'];
-  const CRM_STAFF_ROLES_PICKER = ['super_admin','admin','manager','sales','mentor','administratie','marketing'];
+  // BP1 (2026-09-07): 'appointmentsetter' toegevoegd zodat de rol via de
+  // "Rol (canoniek)"-dropdown gekozen kan worden (nieuwe-gebruiker + bewerken).
+  // Backend accepteert 'em al (VALID_ROLES in api/admin-users.js + BP1-migratie
+  // CHECK-constraints); alleen deze UI-picker miste 'em nog. Positie: naast
+  // 'sales' — setter-flow is sales-adjacent.
+  const CRM_STAFF_ROLES_PICKER = ['super_admin','admin','manager','sales','appointmentsetter','mentor','administratie','marketing'];
   // v=80 uitbreiding: `nw` = state voor "Nieuwe gebruiker"-modal (open + form).
   const _users = { loading: false, error: null, fetched: false, items: [], busy: {}, ed: null, nw: null };
   async function fetchUsers(force) {
