@@ -1,40 +1,52 @@
 // api/cron/noshow-detect.js
 //
-// Dagelijkse cron — detecteert nieuwe no-shows in Bubble en zet er een
-// auto-signal voor in student_signals (type='no_show', source='auto_noshow').
+// Dagelijkse cron — detecteert nieuwe no-shows in het LMS (hlms_sessie met
+// status 'no_show') en zet er een auto-signal voor in student_signals
+// (type='no_show', source='auto_noshow').
+//
+// ── BRON: hlms_sessie in dfo-lms (NIET meer Bubble) ──────────────────────
+// De mentoren werken sinds augustus 2026 in het nieuwe LMS. Deze cron keek
+// nog naar Bubble, vond daar niets, en sloot elke ochtend gezond af met
+// `fetched: 0` — terwijl er geen enkel no-show-signaal meer ontstond en dus
+// ook geen mentor-melding. Niet leeg, maar blind.
+//
+// Daarom draagt de uitkomst nu `bron_status`. Een mislukte bevraging eindigt
+// met ok:false en een 502 ZONDER het watermerk te verzetten; alleen bij
+// `bron_status: 'gelezen'` betekent `fetched: 0` echt dat er geen nieuwe
+// no-shows waren.
+//
+// ── DE TWEE KOPPELINGEN ──────────────────────────────────────────────────
+//   student → CRM : hlms_student.bubble_user_id (299 van de 304 rijen dragen
+//                   'm en die waarden zijn uniek; gemeten 7-9-2026). Die
+//                   waarde gaat in student_signals.bubble_student_id, dat
+//                   daardoor gewoon blijft werken.
+//   mentor  → CRM : op E-MAILADRES (hlms_personeel.email ↔ team_members.email),
+//                   want het LMS kent geen 'Created By' zoals Bubble. De
+//                   toerekening loopt daar via mentor_id, wat eerlijker is:
+//                   niet wie de rij aanmaakte, maar wiens sessie het was.
 //
 // AUTH: Authorization: Bearer ${CRON_SECRET}. 401 zonder.
 //
 // WATERMARK (app_settings.key='noshow_detect_since', value={ iso }):
 //   - ontbreekt -> initialize op nu, return zonder verwerken (geen backfill).
-//   - aanwezig  -> query Bubble 1-1-session waar isdone+noshow én
-//                  starting_date_date > watermark. Per sessie: mentor +
-//                  student resolven; signal inserten met session_id zodat
-//                  de unique index de dedup afdwingt. Advance watermark
-//                  naar hoogste verwerkte starting_date_date.
+//   - aanwezig  -> query hlms_sessie waar status='no_show' én start_tijd >
+//                  watermark. Per sessie: mentor + student resolven; signal
+//                  inserten met session_id zodat de unique index de dedup
+//                  afdwingt. Advance watermark naar hoogste verwerkte
+//                  start_tijd.
 //
-// Robuust: per-rij try/catch (één fout stopt de batch niet); orphan
-// no-shows (geen member_user) overgeslagen.
+// Robuust: per-rij try/catch (één fout stopt de batch niet). De oude
+// wees-tak voor no-shows zonder gekoppelde student is vervallen:
+// hlms_sessie.student_id is nooit leeg (0 van 44 gemeten).
 
 import { supabaseAdmin } from '../supabase.js';
-import { bubbleList, bubbleGet, bubbleUserDisplay } from '../_lib/bubble.js';
-import { createNotification } from '../_lib/notify.js';
+import { haalNoShowsSinds, haalEersteSessiePerStudent, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
+import { createNotification, resolveOntvangersVoorRecht } from '../_lib/notify.js';
 
 const SETTING_KEY     = 'noshow_detect_since';
 const FETCH_CAP       = 1000;
 const SETTING_AUDIT_USER = null; // cron heeft geen user_id
 
-// Defensieve readers voor Bubble's suffix-conventie.
-function readFirst(u, keys) {
-  if (!u) return undefined;
-  for (const k of keys) if (u[k] !== undefined) return u[k];
-  return undefined;
-}
-function asBool(v) {
-  if (typeof v === 'boolean') return v;
-  if (typeof v === 'string')  return v.toLowerCase() === 'true';
-  return false;
-}
 function isoToMs(iso) {
   if (!iso) return null;
   const t = Date.parse(iso);
@@ -86,7 +98,18 @@ export default async function handler(req, res) {
 
   const result = {
     ok: true, initialized: false, watermark_before: null, watermark_after: null,
-    fetched: 0, inserted: 0, skipped: 0, orphans: 0, errors: [],
+    // BRON expliciet in de uitkomst. Zonder dit is 'fetched: 0' niet te
+    // onderscheiden van een mislukte bevraging — precies waardoor deze cron
+    // maandenlang gezond leek terwijl er geen enkel signaal meer ontstond.
+    bron: 'hlms_sessie', bron_status: null,
+    fetched: 0, inserted: 0, skipped: 0,
+    // Hoeveel van de signalen gingen over de EERSTE sessie van een student.
+    eerste_call: 0, eerste_bepaling_mislukt: 0,
+    // Hoofdmentoren die bericht kregen over een gemiste eerste call, en
+    // hoe vaak er NIEMAND te vinden was. Dat laatste mag nooit stil zijn.
+    hoofdmentor_ontvangers: 0, eerste_call_zonder_ontvanger: 0,
+    zonder_bubble_koppeling: 0, zonder_mentor_koppeling: 0,
+    errors: [],
   };
 
   try {
@@ -103,82 +126,121 @@ export default async function handler(req, res) {
       return res.status(200).json(result);
     }
 
-    // Bubble fetch — server-side filter op isdone + noshow + starting_date > watermark.
-    // greater-than op date-constraint is strikt in Bubble; we sturen direct de iso door.
-    const constraints = [
-      { key: 'isdone_boolean',     constraint_type: 'equals',       value: 'true' },
-      { key: 'noshow_boolean',     constraint_type: 'equals',       value: 'true' },
-      { key: 'starting_date_date', constraint_type: 'greater than', value: watermark },
-    ];
-    let rows = [];
-    try {
-      const { results } = await bubbleList('1-1-session', constraints, { limit: FETCH_CAP });
-      rows = Array.isArray(results) ? results : [];
-    } catch (e) {
-      console.error('[noshow-detect] bubble fetch failed:', e?.message || e);
-      return res.status(502).json({ ok: false, error: 'bubble fetch failed: ' + (e?.message || e), result });
+    // ── BRON: hlms_sessie met status 'no_show' ───────────────────────────
+    // Voorheen Bubble-'1-1-session' met isdone+noshow. De mentoren werken
+    // sinds augustus 2026 in het LMS, dus die bron liep leeg en er ontstond
+    // geen enkel signaal meer — terwijl de cron elke ochtend gezond afsloot.
+    const bron = await haalNoShowsSinds({ sindsIso: watermark, limiet: FETCH_CAP });
+    result.bron_status              = bron.bron_status;
+    result.zonder_bubble_koppeling  = bron.zonder_bubble_koppeling;
+    result.zonder_mentor_koppeling  = bron.zonder_mentor;
+
+    // MISLUKTE BEVRAGING IS GEEN LEGE UITKOMST. Stoppen zonder het watermerk
+    // te verzetten, zodat een storing niet stilzwijgend no-shows overslaat.
+    if (bron.bron_status !== BRON_GELEZEN) {
+      result.ok = false;
+      result.error = 'no-shows niet gelezen (' + bron.bron_status + '): '
+        + (bron.fout || 'reden onbekend');
+      console.error('[noshow-detect]', result.error);
+      return res.status(502).json(result);
     }
+
+    const rows = bron.sessies;
     result.fetched = rows.length;
 
     if (rows.length === 0) {
-      // Geen nieuwe no-shows — watermark blijft staan (geen advance zonder data).
+      // De bron IS gelezen: er zijn echt geen nieuwe no-shows. Watermerk
+      // blijft staan (geen advance zonder data).
       result.watermark_after = watermark;
       return res.status(200).json(result);
     }
 
-    // Verwerken — track hoogste verwerkte starting_date_date voor de
-    // advance achteraf.
+    // Mentoren één keer ophalen: de brug tussen LMS en CRM loopt via het
+    // e-mailadres (hlms_personeel.email ↔ team_members.email). Bewust geen
+    // .ilike() per rij: `_` en `%` zijn jokertekens in een LIKE-patroon en
+    // `_` is geldig in een e-mailadres. Vergelijken doen we in JS.
+    const mentorByEmail = new Map();
+    try {
+      const { data: tms, error: tmErr } = await supabaseAdmin
+        .from('team_members')
+        .select('user_id, email, is_active')
+        .eq('is_active', true);
+      if (tmErr) throw new Error(tmErr.message);
+      for (const t of (tms || [])) {
+        const e = String(t?.email || '').trim().toLowerCase();
+        if (e && t.user_id && !mentorByEmail.has(e)) mentorByEmail.set(e, t.user_id);
+      }
+    } catch (e) {
+      const msg = 'team_members lezen mislukt: ' + (e?.message || e);
+      console.error('[noshow-detect]', msg);
+      result.ok = false;
+      result.error = msg;
+      return res.status(502).json(result);
+    }
+
+    // Was dit de EERSTE sessie van deze student? Dan krijgt het signaal een
+    // eigen type. De reden is een andere: bij een gemiste eerste call moet er
+    // iemand kort op zitten om te voorkomen dat het een wanbetaler wordt.
+    //
+    // Bewust GEEN tweede signaal naast het gewone: er staat een unique index
+    // op student_signals.session_id, dus twee signalen voor dezelfde sessie
+    // kan sowieso niet — en het zou de mentor ook twee keer laten rinkelen
+    // voor één gebeurtenis. Eén signaal, met een type dat het onderscheid
+    // draagt, is zowel juister als routeerbaar zodra de rol 'hoofdmentor'
+    // bestaat.
+    const eerste = await haalEersteSessiePerStudent({
+      studentIds: rows.map((r) => r.student_id).filter(Boolean),
+    });
+    const eersteBekend = eerste.bron_status === BRON_GELEZEN;
+    if (!eersteBekend) {
+      // Niet blokkeren: liever een gewoon no-show-signaal dan geen signaal.
+      // Wel zichtbaar tellen, want dan mist er een onderscheid dat we wilden.
+      console.warn('[noshow-detect] eerste-sessie niet te bepalen ('
+        + eerste.bron_status + '): ' + (eerste.fout || 'reden onbekend'));
+    }
+
+    // ── ONTVANGERS VAN HET EERSTE-CALL-SIGNAAL ────────────────────────────
+    // Een gemiste EERSTE call gaat NIET naar de mentor van die sessie maar
+    // naar de hoofdmentor. Die rol bestaat nog niet in het LMS, en
+    // `profiles.role` is enkelvoudig — iemand 'hoofdmentor' maken zou zijn
+    // huidige rol wegnemen. Daarom adresseren we op een RECHT: geef het aan
+    // een rol zodra die er is, of nu aan de betrokken personen. Zie
+    // resolveOntvangersVoorRecht() in api/_lib/notify.js.
+    const HOOFDMENTOR_RECHT = 'signals.hoofdmentor.receive';
+    const hoofdmentoren = await resolveOntvangersVoorRecht(HOOFDMENTOR_RECHT);
+    result.hoofdmentor_ontvangers = hoofdmentoren.userIds.length;
+    if (!hoofdmentoren.ok || hoofdmentoren.userIds.length === 0) {
+      console.warn('[noshow-detect] NIEMAND heeft het recht ' + HOOFDMENTOR_RECHT
+        + (hoofdmentoren.error ? (' (' + hoofdmentoren.error + ')') : '')
+        + ' — een gemiste eerste call levert dan wel een signaal op, maar geen bericht.');
+    }
+
+    // Verwerken — hoogste verwerkte start_tijd bijhouden voor de advance.
     let highestMs = isoToMs(watermark) || 0;
 
     for (const row of rows) {
       try {
-        const sd        = readFirst(row, ['starting_date_date', 'starting date']) || null;
-        const sdMs      = isoToMs(sd);
-        const sessionId = String(row?._id || '').trim();
-        const done      = asBool(readFirst(row, ['isdone_boolean', 'isDone']));
-        const noshow    = asBool(readFirst(row, ['noshow_boolean', 'NoShow']));
-        const createdBy = readFirst(row, ['Created By', 'created_by']);
-        const memberRaw = readFirst(row, ['member_user']);
+        const sessionId    = row.id;
+        const sd           = row.start_tijd || null;
+        const sdMs         = isoToMs(sd);
+        const memberUser   = row.bubble_user_id;   // de brug naar het CRM
+        const studentEmail = row.email || null;
+        const studentName  = [row.voornaam, row.achternaam].filter(Boolean).join(' ').trim() || null;
 
-        if (!sessionId || !done || !noshow) { result.skipped++; continue; }
-        if (!memberRaw || String(memberRaw).trim() === '') {
-          result.orphans++; continue;
-        }
-        if (!createdBy || String(createdBy).trim() === '') {
-          // Geen mentor-attributie mogelijk — sla over (zonder mentor kan
-          // de signal niet ingevuld worden).
-          result.skipped++; continue;
-        }
-        const memberUser = String(memberRaw).trim();
-        const cbBubbleId = String(createdBy).trim();
+        const eersteVanStudent = eersteBekend
+          ? (eerste.perStudent.get(String(row.student_id)) || null)
+          : null;
+        const isEersteCall = !!(eersteVanStudent && eersteVanStudent.id === sessionId);
+        if (!eersteBekend) result.eerste_bepaling_mislukt++;
 
-        // Mentor resolven via team_members (active row wint).
-        const { data: tms } = await supabaseAdmin
-          .from('team_members')
-          .select('user_id, is_active')
-          .eq('bubble_user_id', cbBubbleId);
-        let mentorUserId = null;
-        if (Array.isArray(tms) && tms.length > 0) {
-          const active = tms.find((t) => t.is_active !== false);
-          mentorUserId = (active || tms[0]).user_id || null;
-        }
+        const mentorUserId = mentorByEmail.get(row.mentor_email) || null;
         if (!mentorUserId) {
-          // Geen DB-koppeling voor deze mentor — sla over.
-          result.skipped++; continue;
-        }
-
-        // Student name/email resolven via bubbleGet. Per-rij try/catch:
-        // een 404 of netwerk-probleem voor één student stopt de batch niet.
-        let studentName = null, studentEmail = null;
-        try {
-          const stu = await bubbleGet('user', memberUser);
-          if (stu) {
-            const disp = bubbleUserDisplay(stu);
-            studentName  = disp.name || null;
-            studentEmail = disp.email ? String(disp.email).trim().toLowerCase() : null;
-          }
-        } catch (e) {
-          console.warn('[noshow-detect] bubble student fetch failed for', memberUser, ':', e?.message || e);
+          // Mentor bestaat in het LMS maar niet als actief teamlid in het
+          // CRM. Zonder mentor kan het signaal niet ingevuld worden.
+          console.warn('[noshow-detect] geen CRM-mentor voor', row.mentor_email);
+          result.zonder_mentor_koppeling++;
+          result.skipped++;
+          continue;
         }
 
         // Insert. Unique index op session_id vangt dubbele inserts af; bij
@@ -188,13 +250,19 @@ export default async function handler(req, res) {
           bubble_student_id : memberUser,
           student_name      : studentName,
           student_email     : studentEmail,
-          type              : 'no_show',
+          // Eigen type voor een gemiste EERSTE call — zie de toelichting
+          // hierboven. De routering naar de hoofdmentor kan hierop gezet
+          // worden zodra die rol bestaat.
+          type              : isEersteCall ? 'eerste_call_no_show' : 'no_show',
           source            : 'auto_noshow',
           status            : 'open',
           mentor_user_id    : mentorUserId,
           session_id        : sessionId,
-          toelichting       : sd ? ('No-show op ' + fmtDateNl(sd)) : 'No-show',
+          toelichting       : (isEersteCall ? 'EERSTE call gemist' : 'No-show')
+            + (sd ? (' op ' + fmtDateNl(sd)) : '')
+            + (isEersteCall ? ' — kort opvolgen, voorkom dat dit een wanbetaler wordt.' : ''),
         };
+        if (isEersteCall) result.eerste_call++;
         const { data: insRow, error: insErr } = await supabaseAdmin
           .from('student_signals').insert(insertRow).select('id').maybeSingle();
         if (insErr) {
@@ -211,28 +279,61 @@ export default async function handler(req, res) {
           // is niet zinvol (deze insertie IS het triggerpoint); we dedupen op
           // (type, entity_id) binnen 24u zodat een handmatige her-run
           // dezelfde bel niet nog eens laat rinkelen.
-          if (mentorUserId && insRow?.id) {
-            try {
-              await createNotification({
-                toUserId:      mentorUserId,
-                type:          'student.noshow_review',
-                title:         'No-show — geef reden',
-                body:          (studentName || 'Student') + ' — geef de reden voor de no-show op',
-                linkUrl:       '/modules/mentor-students.html?tab=noshows',
-                entityType:    'student_signal',
-                entityId:      insRow.id,
-                priority:      'high',
-                dedupWithinMs: 24 * 60 * 60 * 1000,
-              });
-            } catch (nErr) {
-              console.warn('[noshow-detect] notify fail-soft:', nErr?.message || nErr);
+          if (insRow?.id) {
+            // WIE er bericht krijgt hangt af van WELKE no-show dit is.
+            //
+            // Gemiste EERSTE call → de hoofdmentor, niet de mentor van de
+            // sessie. Er moet iemand kort op zitten om te voorkomen dat dit
+            // een wanbetaler wordt, en dat is een andere verantwoordelijkheid
+            // dan het opvolgen van een gewone no-show.
+            //
+            // Geen terugval op de sessie-mentor als er geen hoofdmentor
+            // gevonden wordt: dan zou het bericht alsnog belanden waar het
+            // uitdrukkelijk NIET heen mag. Het signaal zelf staat er wel, en
+            // is zichtbaar voor iedereen met students.all.view.
+            const ontvangers = isEersteCall
+              ? hoofdmentoren.userIds
+              : (mentorUserId ? [mentorUserId] : []);
+
+            if (isEersteCall && ontvangers.length === 0) {
+              result.eerste_call_zonder_ontvanger++;
+              console.error('[noshow-detect] gemiste eerste call zonder ontvanger — '
+                + 'signaal ' + insRow.id + ' staat er wel, maar er ging geen bericht uit');
+            }
+
+            for (const ontvanger of ontvangers) {
+              try {
+                await createNotification({
+                  toUserId:      ontvanger,
+                  type:          isEersteCall ? 'student.eerste_call_no_show' : 'student.noshow_review',
+                  title:         isEersteCall ? 'EERSTE call gemist — kort opvolgen' : 'No-show — geef reden',
+                  body:          isEersteCall
+                    ? ((studentName || 'Student') + ' miste de eerste call. Kort opvolgen om te voorkomen dat dit een wanbetaler wordt.')
+                    : ((studentName || 'Student') + ' — geef de reden voor de no-show op'),
+                  // WAAR de ontvanger heen moet verschilt per soort.
+                  // De No-shows-tab van de mentor toont alleen type='no_show'
+                  // en alleen de eigen studenten — een gemiste eerste call
+                  // staat daar dus niet in, en de hoofdmentor is niet per se
+                  // de mentor van die student. Die gaat naar Aandachtspunten,
+                  // waar het signaal wél staat en afgehandeld kan worden.
+                  linkUrl:       isEersteCall
+                    ? '/modules/students-overview.html?tab=signals'
+                    : '/modules/mentor-students.html?tab=noshows',
+                  entityType:    'student_signal',
+                  entityId:      insRow.id,
+                  priority:      'high',
+                  dedupWithinMs: 24 * 60 * 60 * 1000,
+                });
+              } catch (nErr) {
+                console.warn('[noshow-detect] notify fail-soft:', nErr?.message || nErr);
+              }
             }
           }
         }
 
         if (sdMs != null && sdMs > highestMs) highestMs = sdMs;
       } catch (e) {
-        const sid = String(row?._id || '');
+        const sid = String(row?.id || '');
         console.error('[noshow-detect] row fail', sid, e?.message || e);
         result.errors.push({ session_id: sid, error: e?.message || String(e) });
       }

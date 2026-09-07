@@ -30,6 +30,11 @@ export function laadConfig() {
     toegestaneIps  : lees('ALLOWED_IPS').split(',').map((s) => s.trim()).filter(Boolean),
     crmBase        : crmBase.replace(/\/+$/, ''),
     webhookPad     : lees('CRM_WEBHOOK_PATH', '/api/opvolging-whatsapp-webhook'),
+    // De hartslag heeft zijn eigen pad; zie lib/hartslag.js. Het interval staat
+    // bewust ruim onder de alarmdrempel van het CRM (12 min), zodat een trage
+    // of mislukte levering nooit een mail oplevert.
+    hartslagPad      : lees('CRM_HARTSLAG_PATH', '/api/brug-hartslag'),
+    hartslagIntervalMs: Math.max(30, Number(lees('HARTSLAG_INTERVAL_SEC', '120')) || 120) * 1000,
     nummersPad     : lees('CRM_NUMMERS_PATH', '/api/opvolging-whatsapp-nummers'),
     nummersIntervalMs: Math.max(60, Number(lees('NUMMERS_INTERVAL_SEC', '300')) || 300) * 1000,
     sessiePad      : lees('SESSIE_PAD', './.wwebjs_auth'),

@@ -71,7 +71,7 @@
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
-    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond'] },
+    { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport'] },
 
     { g: 'Verkoop & Financiën',    id: 'sales',            naam: 'Sales',             icon: I.sales,    color: 'violet',  roles: SAMSM,                tabs: ['Dashboard', 'Offertes', 'Bonussen', 'Retentie', 'Verkoopprestaties'] },
     { g: 'Verkoop & Financiën',    id: 'finance',          naam: 'Finance',           icon: I.finance,  color: 'blue',    roles: SAMS,                 tabs: ['Dashboard', 'Facturen', 'Abonnementen', "Creditnota's", 'Bank', 'Omzet & MRR'] },
@@ -89,7 +89,7 @@
 
     { g: 'Groei',                  id: 'leads',            naam: 'Leads',             icon: I.target,   color: 'amber',   roles: SAMMK.concat('sales'),tabs: ['Actief', 'Gearchiveerd'] },
     { g: 'Groei',                  id: 'nieuwsbrief',      naam: 'Nieuwsbrief',       icon: I.mail,     color: 'teal',    roles: ['marketing'],        tabs: [] },
-    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Vragenlijst', 'Statistieken'] },
+    { g: 'Groei',                  id: 'leadsonderhoud',   naam: 'Leadsonderhoud',    icon: I.repeat,   color: 'teal',    roles: SAMS.concat(['appointmentsetter']), permKey: 'leads.view', tabs: ['Overzicht', 'Contacten', 'Wachtrij', 'Gesprekken', 'Opstartsessies', 'Toegang-aanvragen', 'Templates', 'Bronnen', 'Funnels', 'E-mails', 'Vragenlijst', 'Statistieken'] },
     // BP2 v3 (2026-09-01) Directe shortcut "Gesprekken" voor Romy — deep-linkt
     // naar leadsonderhoud/Gesprekken. Alleen zichtbaar voor appointmentsetter
     // (SAMS heeft leadsonderhoud > Gesprekken al één klik verderop). `deeplink`
@@ -117,9 +117,46 @@
     { g: 'Systeem',                id: 'binnenkort',       naam: 'Binnenkort',        icon: I.rocket,   color: 'slate',   roles: SAM,                  tabs: [] },
   ];
 
+  /* Zichtbare tab-LABELS los van de route-KEY. De tab-string in `tabs` blijft
+     de sleutel voor VIEWS[mod+'/'+tab], goTab() en TAB_RESTRICT; alleen de
+     getoonde tekst loopt via tabLabel(). Zo kunnen we een tab hernoemen in de
+     UI zonder de view-registratie (bv. VIEWS['leadsonderhoud/Opstartsessies'])
+     te breken. */
+  const TAB_LABELS = { Opstartsessies: 'Kennismakingsgesprekken' };
+  const tabLabel = t => TAB_LABELS[t] || t;
+
   /* Rol-gates. TAB_RESTRICT verbergt specifieke tabs voor rollen die
      de module wél mogen openen; MOD_LOCK toont de module in het menu
      met een slot-icoon en render't `comingSoonView` i.p.v. de content. */
+  /* TAB_PERM verbergt een tab op basis van een RBAC-sleutel in plaats van een
+     rol. TAB_RESTRICT hierboven kijkt naar rollen; dat kan niet uit de voeten
+     met een schakelaar die een beheerder per rol aanzet.
+
+     Puur additief: een tab zonder regel hier gedraagt zich precies zoals
+     voorheen. En bewust fail-open — staat RBAC nog niet geladen of gaat de
+     lookup mis, dan blijft de tab staan. Een tab verbergen omdat de rechten
+     nog niet binnen waren zou erger zijn dan hem tonen, want de endpoints
+     erachter doen hun eigen controle.
+
+     LET OP WAT DIT WEL EN NIET IS. Dit is navigatie, geen datapoort. De drie
+     opvolging-tabs hangen aan endpoints die ook door de Kanban in
+     Automatiseringen gebruikt worden; server-side dichtzetten zou die module
+     breken. Wie de module mag openen kan de gegevens dus nog steeds langs een
+     andere weg zien. Deze drie sleutels bepalen wat er in beeld komt, niet wat
+     er op te halen valt — en zo staan ze ook in het register. */
+  const TAB_PERM = {
+    'opvolging/Vandaag' : 'opvolging.dag.view',
+    'opvolging/Dashboard': 'opvolging.dashboard.view',
+    'opvolging/Afgerond': 'opvolging.archief.view',
+    // Eigen sleutel, niet meeliftend op opvolging.dashboard.view: Maxim wil
+    // later kunnen omzetten of Dave zijn eigen rapport ziet zonder dat daar
+    // een coderegel voor nodig is. Vandaag staat hij voor dezelfde rollen op
+    // true. LET OP: dit is de navigatie-gate en die is fail-open (zie de kop
+    // hierboven); /api/opvolging-rapport doet zijn eigen strikte check en valt
+    // daar NIET terug op een andere sleutel.
+    'opvolging/Rapport' : 'opvolging.rapport.view',
+  };
+
   const TAB_RESTRICT = {
     'logboek/Tijdlijn':        ['super_admin'],    // #logboek-v1: unified stream + snapshots = super_admin-only
     'events/Statistieken': ['super_admin', 'manager'],
@@ -134,6 +171,8 @@
     // beheer-tabs (Bronnen/Vragenlijst) of aggregate stats voor Romy.
     'leadsonderhoud/Overzicht':        SAMS,
     'leadsonderhoud/Bronnen':          SAMS,
+    'leadsonderhoud/Funnels':          SAMS,
+    'leadsonderhoud/E-mails':          SAMS,
     'leadsonderhoud/Vragenlijst':      SAMS,
     'leadsonderhoud/Statistieken':     SAMS,
     // BP2 v3 (2026-09-01): Wachtrij + Toegang-aanvragen ook alleen voor
@@ -213,7 +252,24 @@
   const curMod     = () => visMods().find(m => m.id === S.mod)
                         || (MODS.find(m => m.id === S.mod && _reachableViaDeepLink(m.id)))
                         || visMods()[0];
-  const roleTabs   = m => m.tabs.filter(t => { const r = TAB_RESTRICT[m.id + '/' + t]; return !r || r.some(x => S.roles.includes(x)); });
+  /* Fail-open: alleen een bewezen 'nee' verbergt de tab. */
+  const tabPermOk = (sleutel) => {
+    if (!sleutel) return true;
+    try {
+      const R = window.RBAC;
+      if (!R || typeof R.canSync !== 'function') return true;
+      // canSync() zegt bij een mislukte load overal false — hetzelfde antwoord
+      // als 'niet toegestaan'. Alleen als de rechten aantoonbaar geladen zijn,
+      // telt een 'nee' als een echt nee.
+      if (typeof R.permissiesGeladen === 'function' && !R.permissiesGeladen()) return true;
+      return R.canSync(sleutel) === true;
+    } catch (_) { return true; }
+  };
+  const roleTabs   = m => m.tabs.filter(t => {
+    const r = TAB_RESTRICT[m.id + '/' + t];
+    if (r && !r.some(x => S.roles.includes(x))) return false;
+    return tabPermOk(TAB_PERM[m.id + '/' + t]);
+  });
   const modCanOpen = id => visMods().some(m => m.id === id);
   // Additief lock-semantiek: alleen lock als ELKE rol-toegang die de user
   // heeft in MOD_LOCK[id] zit. Voorbeeld: sales heeft inbox in MOD_LOCK
@@ -251,7 +307,7 @@
     if (!m) return '';
     return `<div class="empty" style="padding:82px 20px">
       <div class="empty-ico" style="width:54px;height:54px;border-radius:16px;background:var(--${m.color}-soft);color:var(--${m.color})">${svg(I.rocket, 'width:25px;height:25px')}</div>
-      <div class="empty-t" style="font-size:16px">${m.naam}${S.tab ? ' · ' + S.tab : ''}</div>
+      <div class="empty-t" style="font-size:16px">${m.naam}${S.tab ? ' · ' + tabLabel(S.tab) : ''}</div>
       <div class="empty-s">Deze view is nog niet gebouwd. In productie wordt hier de module-content gerenderd.</div>
     </div>`;
   };
@@ -411,13 +467,13 @@
     if (crumb) {
       crumb.innerHTML = S.dossier
         ? `<span class="title-dot"></span><span style="cursor:pointer;color:var(--text-3);font-weight:500" onclick="DFO.S.dossier=null;DFO.render()">${m.naam}</span><span class="crumb-sep">/</span><span>${S.dossier}</span>`
-        : `<span class="title-dot"></span>${m.naam}${tabs.length > 1 ? `<span class="crumb-sep">/</span><span class="crumb-cur">${S.tab}</span>` : ''}`;
+        : `<span class="title-dot"></span>${m.naam}${tabs.length > 1 ? `<span class="crumb-sep">/</span><span class="crumb-cur">${tabLabel(S.tab)}</span>` : ''}`;
     }
     const locked = modLocked(m.id);
     const tb = document.getElementById('tabs');
     if (tb) {
       tb.style.display = (tabs.length > 1 && !S.dossier && !locked) ? 'flex' : 'none';
-      tb.innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'active' : ''}" onclick="DFO.goTab('${t.replace(/'/g, "\\'")}')">${t}</button>`).join('');
+      tb.innerHTML = tabs.map(t => `<button class="tab ${S.tab === t ? 'active' : ''}" onclick="DFO.goTab('${t.replace(/'/g, "\\'")}')">${tabLabel(t)}</button>`).join('');
     }
     const c = document.getElementById('content');
     if (c) {
@@ -534,6 +590,75 @@
   };
 
   /* ── Public API ──────────────────────────────────────────────────── */
+  /* ── Herbruikbare prompt/confirm-modals (CRM-breed) ──────────────────
+     dfoPrompt({title, message?, value?, placeholder?, okLabel?, cancelLabel?})
+       → Promise<string|null>   (null = geannuleerd)
+     dfoConfirm({title, message?, okLabel?, cancelLabel?, danger?})
+       → Promise<boolean>
+     Zelfstandige, gestylede dialoog (navy #10284A / geel #FFC21A-focus,
+     afgeronde hoeken, overlay). Onafhankelijk van de grote detail-modal
+     (openModal) zodat 'ie overal — ook buiten de shell — bruikbaar is. */
+  function ensureDlgCss() {
+    if (document.getElementById('dfo-dlg-css')) return;
+    const s = document.createElement('style');
+    s.id = 'dfo-dlg-css';
+    s.textContent = `
+.dfo-dlg{position:fixed;inset:0;background:rgba(16,40,74,.45);backdrop-filter:blur(3px);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;animation:dfoDlgFade .12s ease}
+.dfo-dlg-box{width:420px;max-width:100%;background:var(--surface,#fff);border-radius:16px;box-shadow:0 18px 50px rgba(16,40,74,.28);padding:22px 22px 16px;border:1px solid var(--border,#e6e8ee);animation:dfoDlgPop .14s cubic-bezier(.2,.9,.3,1.2)}
+.dfo-dlg-title{font-size:16px;font-weight:700;color:var(--text-1,#10284A);margin:0 0 8px}
+.dfo-dlg-msg{font-size:13.5px;color:var(--text-2,#4a5568);line-height:1.55;margin:0 0 14px}
+.dfo-dlg-input{width:100%;padding:10px 12px;border:1.5px solid var(--border,#d6dae4);border-radius:10px;font-size:14px;background:var(--surface,#fff);color:var(--text-1,#10284A);outline:none;margin:0 0 16px;box-sizing:border-box}
+.dfo-dlg-input:focus{border-color:#10284A;box-shadow:0 0 0 3px rgba(255,194,26,.4)}
+.dfo-dlg-foot{display:flex;justify-content:flex-end;gap:10px}
+.dfo-dlg-btn{padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:filter .12s,background .12s}
+.dfo-dlg-cancel{background:transparent;border-color:var(--border,#d6dae4);color:var(--text-2,#4a5568)}
+.dfo-dlg-cancel:hover{background:var(--surface-2,#f3f5f9)}
+.dfo-dlg-ok{background:#10284A;color:#fff}
+.dfo-dlg-ok:hover{filter:brightness(1.14)}
+.dfo-dlg-ok.danger{background:#c0392b}
+@keyframes dfoDlgFade{from{opacity:0}to{opacity:1}}
+@keyframes dfoDlgPop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}`;
+    document.head.appendChild(s);
+  }
+  function dfoDialog(opts) {
+    const o = opts || {};
+    const kind = o.kind === 'prompt' ? 'prompt' : 'confirm';
+    const escq = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return new Promise((resolve) => {
+      ensureDlgCss();
+      const ov = document.createElement('div');
+      ov.className = 'dfo-dlg';
+      const okText = o.okLabel || (kind === 'prompt' ? 'Opslaan' : 'OK');
+      ov.innerHTML = `<div class="dfo-dlg-box" role="dialog" aria-modal="true">
+        <div class="dfo-dlg-title">${escq(o.title || '')}</div>
+        ${o.message ? `<div class="dfo-dlg-msg">${escq(o.message)}</div>` : ''}
+        ${kind === 'prompt' ? `<input class="dfo-dlg-input" type="text" value="${escq(o.value)}" placeholder="${escq(o.placeholder || '')}">` : ''}
+        <div class="dfo-dlg-foot">
+          <button type="button" class="dfo-dlg-btn dfo-dlg-cancel">${escq(o.cancelLabel || 'Annuleren')}</button>
+          <button type="button" class="dfo-dlg-btn dfo-dlg-ok${o.danger ? ' danger' : ''}">${escq(okText)}</button>
+        </div></div>`;
+      document.body.appendChild(ov);
+      const input = ov.querySelector('.dfo-dlg-input');
+      const done = (result) => { document.removeEventListener('keydown', onKey, true); ov.remove(); resolve(result); };
+      const cancel = () => done(kind === 'prompt' ? null : false);
+      const ok = () => done(kind === 'prompt' ? (input ? input.value : '') : true);
+      ov.querySelector('.dfo-dlg-cancel').onclick = cancel;
+      ov.querySelector('.dfo-dlg-ok').onclick = ok;
+      ov.addEventListener('mousedown', (e) => { if (e.target === ov) cancel(); });
+      function onKey(e) {
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
+        else if (e.key === 'Enter' && (kind === 'confirm' || (input && document.activeElement === input))) { e.preventDefault(); ok(); }
+      }
+      document.addEventListener('keydown', onKey, true);
+      requestAnimationFrame(() => { if (input) { input.focus(); input.select(); } else ov.querySelector('.dfo-dlg-ok').focus(); });
+    });
+  }
+  function dfoPrompt(o) { return dfoDialog(Object.assign({}, o, { kind: 'prompt' })); }
+  function dfoConfirm(o) { return dfoDialog(Object.assign({}, o, { kind: 'confirm' })); }
+  // Ook als losse globals zodat modules zonder DFO-referentie ze kunnen gebruiken.
+  window.dfoPrompt = dfoPrompt;
+  window.dfoConfirm = dfoConfirm;
+
   Object.assign(NS, {
     ROLES, A, SA, SAM, SAMS, SAMSM, SAMMK,
     MODS, TAB_RESTRICT, MOD_LOCK, GLOW,
@@ -543,6 +668,7 @@
     setRole, setRoles, goMod, goTab, render, renderNav, applyColor, toggleNav,
     openPanel, closePanel, stepRow, showHint,
     openModal, closeModal,
+    dfoPrompt, dfoConfirm,
     toggleTheme, applyStoredTheme,
     avc, ini, eur, eur0,
   });

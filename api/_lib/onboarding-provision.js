@@ -30,20 +30,7 @@ import {
 } from './bubble.js';
 import { sendCredentialsEmail } from './onboarding-credentials.js';
 import { vindOfMaakAccount, zetGrant, zetWachtwoord } from './lms-provisioning.js';
-
-// Maand-arithmetiek met clamp op laatste dag van de maand (15 → +1 = 15;
-// 31 jan + 1 maand = 28/29 feb). Bubble-side wordt dit als datum opgeslagen
-// — voor 1-op-1 / Alpha is dit slechts een placeholder die later bij echte
-// activatie wordt bijgewerkt.
-function addMonths(date, months) {
-  const n = Math.max(0, Math.floor(Number(months) || 0));
-  const d = new Date(date.getTime());
-  const day = d.getUTCDate();
-  d.setUTCMonth(d.getUTCMonth() + n);
-  // Clamp: als de doelmaand minder dagen heeft kan setUTCMonth doorrollen.
-  if (d.getUTCDate() < day) d.setUTCDate(0);
-  return d;
-}
+import { addMonths } from './onboarding-window.js';
 
 // Bubble workflow-response kan op meerdere plaatsen het user-id zetten:
 // soms { user_id: '...' } direct, soms genest in { response: { user_id }}.
@@ -451,7 +438,23 @@ export async function provisionOnboardingStudent(onboardingId) {
   // succes als idempotentie-marker / zichtbaarheid in de admin-UI.
   // Het LMS-blok wordt ALLEEN meegestuurd als de LMS-provisioning hierboven
   // daadwerkelijk een account + wachtwoord opleverde (lmsPassword gezet).
-  if (tempPassword) {
+  // ── BUBBLE-INLOGGEGEVENSMAIL: GEDOOFD (spoor A stap 1) ──────────────────
+  // De klant krijgt zijn inloggegevens voortaan van het LMS, niet van Bubble.
+  // Het Bubble-ACCOUNT blijft wél aangemaakt worden: dertig bestanden lezen
+  // bubble_user_id, en zonder dat id vallen de mentor-studentenlijsten, de
+  // Studenten-module en de archiveercron stil. Alleen de MAIL gaat uit, zodat
+  // de klant er één krijgt in plaats van twee en niet naar een systeem wordt
+  // gestuurd dat we aan het afbouwen zijn.
+  //
+  // Weg terug zonder code-wijziging: zet BUBBLE_CREDENTIALS_MAIL=on.
+  const bubbleMailAan = String(process.env.BUBBLE_CREDENTIALS_MAIL || '').trim().toLowerCase() === 'on';
+
+  if (tempPassword && !bubbleMailAan) {
+    console.log('[onboarding-provision] Bubble-inloggegevensmail gedoofd '
+      + '(spoor A stap 1) — de klant wordt door het LMS uitgenodigd');
+  }
+
+  if (tempPassword && bubbleMailAan) {
     try {
       const credEmailRes = await sendCredentialsEmail({
         onboarding: { id: onboardingId },
@@ -476,7 +479,7 @@ export async function provisionOnboardingStudent(onboardingId) {
     } catch (e) {
       console.error('[onboarding-provision] cred-email exception:', e?.message || e);
     }
-  } else {
+  } else if (!tempPassword) {
     console.warn('[onboarding-provision] geen temp_password in WF-respons — credentials-mail geskipt');
   }
 

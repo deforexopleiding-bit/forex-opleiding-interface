@@ -2768,8 +2768,22 @@
     const laatste = t.laatste_poging
       ? `<span style="font-size:10.5px;color:var(--text-3);white-space:nowrap" title="Laatste poging op ${esc(_opvFmtDateTime(t.laatste_poging))}">· laatst ${esc(_opvFmtDateTime(t.laatste_poging))}</span>`
       : '';
-    const badgeChip = t.badge_label
-      ? `<span title="${esc(t.badge_label)}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(t.badge_label)}</span>`
+    // Etiket via de gedeelde helper, niet rauw uit badge_label: die is
+    // platgeslagen en droeg bij oude rijen het volledige postadres mee, wat de
+    // naam ernaast wegduwde. Zie _opvolging-badge.js.
+    //
+    // ANDERE AFWEG DAN IN opvolging-v2.js, en dat is met opzet. Daar stopt de
+    // module als de helper ontbreekt, want daar IS het etiket onderdeel van het
+    // scherm. Hier is het één chip op een kanban-kaart in een andere module;
+    // die kaart onbruikbaar maken zou zwaarder zijn dan het probleem.
+    //
+    // Maar niet stil terugvallen op badge_label — dan staat het volledige
+    // postadres er weer, precies de fout die we net weggehaald hebben. De chip
+    // valt dan gewoon weg, en de opvolgmodule zelf meldt luid dat er een
+    // bestand ontbreekt.
+    const badgeTxt = (typeof H.opvBadgeTekst === 'function') ? H.opvBadgeTekst(t) : '';
+    const badgeChip = badgeTxt
+      ? `<span title="${esc(badgeTxt)}" style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:${accent.soft};color:${accent.c};border:1px solid ${accent.line};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${esc(badgeTxt)}</span>`
       : '';
     const redenChip = redenLbl
       ? `<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--surface-2);color:var(--text-2);border:1px solid var(--border);white-space:nowrap">${esc(redenLbl)}</span>`
@@ -3552,6 +3566,7 @@
           <div style="text-align:right">
             <div style="font-size:18px;font-weight:700;color:var(--text-1);font-variant-numeric:tabular-nums">${esc(c.count == null ? '—' : String(c.count))}</div>
             <div style="font-size:10px;color:var(--text-3)">actieve runs</div>
+            ${c.completed_7d != null ? `<div style="font-size:10px;color:var(--emerald);margin-top:3px" title="Completed + exited in de laatste 7 dagen">✓ ${esc(String(c.completed_7d))} afgerond (7d)</div>` : ''}
           </div>
         </div>`;
       }).join('') || `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen automations gevonden</div>`;
@@ -3617,7 +3632,8 @@
       if (!autos.length) return `<div style="font-size:12px;color:var(--text-3);padding:14px;text-align:center;font-style:italic">Geen automations</div>`;
       return autos.map((a) => {
         const info = perAuto[a.id] || { steps: [] };
-        const stepsRows = (info.steps || []).map((s) => _flowStepRowHtml({
+        const steps = Array.isArray(info.steps) ? info.steps : [];
+        const stepsRows = steps.map((s) => _flowStepRowHtml({
           title: s.label,
           count: s.count,
           countLabel: 'runs actief',
@@ -3626,12 +3642,21 @@
         const pill = a.enabled
           ? '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--emerald-soft);color:var(--emerald);border:1px solid var(--emerald-line);font-weight:600">enabled</span>'
           : '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:var(--surface-2);color:var(--text-3);border:1px solid var(--border);font-weight:600">disabled</span>';
+        // BP3 v44 (2026-09-06) — Context-regel "afgerond afgelopen 7 dagen".
+        // Als fetch faalde (recent_completed_7d = null): laat 't context-deel
+        // weg. Actieve-tel is som van step-counts (defensief tegen count:null).
+        const actiefTotaal = steps.reduce((n, s) => n + (Number(s.count) || 0), 0);
+        const recent = info.recent_completed_7d;
+        const contextTxt = (recent == null)
+          ? `${actiefTotaal} nu actief`
+          : `${actiefTotaal} nu actief · ${recent} afgerond (7 dagen)`;
         return `<div style="margin-bottom:16px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
             <span style="font-size:13px;font-weight:700;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.name || '—')}</span>
             ${pill}
             <span style="font-size:10.5px;color:var(--text-3);margin-left:auto">${esc(a.trigger_type || '')}</span>
           </div>
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:8px;font-variant-numeric:tabular-nums">${esc(contextTxt)}</div>
           ${_tgSpineHtml(stepsRows)}
         </div>`;
       }).join('');

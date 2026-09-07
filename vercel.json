@@ -163,6 +163,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/onboarding-eerste-sessie-afronden",
+      "schedule": "0 7 * * *"
+    },
+    {
       "path": "/api/cron/future-call-reminder",
       "schedule": "0 7 * * *"
     },
@@ -209,6 +213,18 @@
     {
       "path": "/api/cron-opvolging-wacht-check",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron-opvolging-aanmeldingen",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron-opvolging-gezondheid",
+      "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron-brug-waakhond",
+      "schedule": "*/5 * * * *"
     }
   ],
   "redirects": [

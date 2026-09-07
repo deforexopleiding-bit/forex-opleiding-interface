@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dagrapport — Opvolging</title>
+<!--
+  PRINTWEERGAVE VAN HET DAGRAPPORT (fase 3).
+
+  Een APARTE pagina, alleen voor papier ontworpen — niet het rapportscherm met
+  @media print eroverheen. Er komt geen PDF-bibliotheek en geen Chromium op de
+  server aan te pas: dit scherm haalt hetzelfde /api/opvolging-rapport op,
+  rendert de printversie en roept window.print() aan. De gebruiker kiest
+  'Bewaar als PDF' in de printdialoog en krijgt Chrome's eigen PDF-engine.
+
+  GEEN TWEEDE BEREKENING. Elk cijfer hier komt rechtstreeks uit het antwoord van
+  het endpoint. Geen eigen drempels, geen eigen woorden voor dezelfde dingen —
+  anders staat er over een maand iets anders in de PDF dan op het scherm en weet
+  niemand welke van de twee liegt. tests/opvolging-rapport-print.test.js bewaakt
+  dat.
+
+  NIET PUBLIEK. Dit rapport toont namen van leads. De pagina doet requireAuth
+  vóór er iets opgehaald wordt, en het endpoint erachter doet zijn eigen
+  strikte permissiecheck (opvolging.rapport.view). Geen aparte regel dus, en
+  geen route die zonder sessie iets laat zien.
+-->
+<style>
+@page { size: A4; margin: 16mm 14mm 18mm; }
+
+:root{
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --lijn:#e1e0d9; --rule:#c3c2b7; --opp:#fcfcfb;
+  --merk:#12385c; --goed:#0ca30c; --waarschuwing:#fab219;
+  --ernstig:#ec835a; --kritiek:#d03b3b;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font:13px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color:var(--ink); background:#fff;
+  /* Zonder dit drukt Chrome elke achtergrondkleur weg en verdwijnen de
+     gekleurde randen van de bevindingen — juist het enige dat de ernst
+     zichtbaar maakt. */
+  -webkit-print-color-adjust:exact; print-color-adjust:exact;
+}
+.blad{max-width:186mm;margin:0 auto;padding:10mm 0 0}
+@media screen { body{background:#f4f4f2;padding:18px} .blad{background:#fff;padding:14mm;box-shadow:0 1px 4px rgba(0,0,0,.12)} }
+
+/* ── Kop ───────────────────────────────────────────────────────────────── */
+.kop{display:flex;justify-content:space-between;align-items:flex-end;gap:20px}
+.kop h1{margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em}
+.kop .datum{margin-top:2px;font-size:12px;color:var(--ink2)}
+.kop .meta{text-align:right;font-size:10.5px;color:var(--muted);line-height:1.45}
+.koplijn{height:2px;background:var(--merk);margin:8px 0 14px}
+
+/* ── De dag loopt nog ──────────────────────────────────────────────────── */
+.loopt{border-left:3px solid var(--waarschuwing);background:#fffaf0;
+  padding:7px 11px;margin:0 0 14px;font-size:11.5px;color:var(--ink2)}
+.loopt b{color:var(--ink)}
+
+/* ── Sectiekop ─────────────────────────────────────────────────────────── */
+.sectie{margin:0 0 16px}
+.skop{display:flex;justify-content:space-between;align-items:baseline;
+  border-bottom:1px solid var(--rule);padding-bottom:4px;margin:0 0 9px}
+.skop .t{font-size:10px;font-weight:700;letter-spacing:.09em;color:var(--muted);text-transform:uppercase}
+.skop .n{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* ── Bevindingen ───────────────────────────────────────────────────────── */
+.bev{border:1px solid var(--lijn);border-left-width:3px;background:var(--opp);
+  padding:8px 11px;margin:0 0 6px;break-inside:avoid}
+.bev.nalatigheid {border-left-color:var(--kritiek);      background:#fdf3f3}
+.bev.twijfelgeval{border-left-color:var(--ernstig);      background:#fdf6f2}
+.bev.blinde_vlek {border-left-color:var(--waarschuwing); background:#fffbf1}
+.bev .rij{display:flex;align-items:center;gap:8px}
+.bev .soort{font-size:8.5px;font-weight:700;letter-spacing:.07em;
+  border:1px solid var(--rule);border-radius:3px;padding:1px 5px;color:var(--ink2);white-space:nowrap}
+.bev .kern{font-size:12px;font-weight:600}
+.bev .tekst{font-size:11.5px;margin-top:3px}
+.bev .uitleg{font-size:11px;color:var(--muted);margin-top:3px}
+
+/* ── Tegels ────────────────────────────────────────────────────────────── */
+.tegels{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;
+  background:var(--lijn);border:1px solid var(--lijn);break-inside:avoid;margin:0 0 10px}
+.tegel{background:#fff;padding:9px 11px;min-width:0}
+.tegel .getal{font-size:26px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
+.tegel .label{font-size:10.5px;color:var(--ink2);margin-top:2px}
+.tegel .noot{font-size:10px;color:var(--muted);margin-top:2px}
+
+/* ── Meetregel: het belangrijkste zinnetje van het rapport ─────────────── */
+.meetregel{border-left:3px solid var(--merk);background:#f4f7fa;padding:7px 11px;
+  margin:0 0 10px;font-size:11px;color:var(--ink2)}
+.meetregel b{color:var(--ink)}
+
+/* ── Verhoudingsbalk ───────────────────────────────────────────────────── */
+.balk{display:flex;height:13px;background:var(--lijn);break-inside:avoid;margin:2px 0 5px}
+.balk span{display:block}
+.balk .a{background:var(--goed)}
+.balk .b{background:var(--kritiek);margin-left:2px}
+.legende{display:flex;gap:14px;font-size:10px;color:var(--ink2);margin:0 0 10px}
+.legende i{display:inline-block;width:8px;height:8px;margin-right:5px;vertical-align:-1px}
+
+/* ── Tabellen ──────────────────────────────────────────────────────────── */
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{text-align:left;font-size:9.5px;font-weight:700;letter-spacing:.06em;color:var(--muted);
+  text-transform:uppercase;border-bottom:1px solid var(--rule);padding:0 8px 3px 0}
+td{padding:4px 8px 4px 0;border-bottom:1px solid var(--lijn);vertical-align:top}
+tr{break-inside:avoid}
+.getalkolom{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;
+  /* Padding houden, anders plakt de tijd tegen de kolom ernaast. */
+  padding-left:14px}
+.bol{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:0}
+.bol.goed{background:var(--goed)} .bol.grijs{background:var(--muted)}
+.bol.donker{background:var(--ink2)} .bol.rood{background:var(--kritiek)}
+.leeg{font-style:italic;color:var(--muted);font-size:11.5px}
+
+/* ── Voettekst op elke pagina ──────────────────────────────────────────── */
+.voet{position:fixed;bottom:0;left:0;right:0;
+  border-top:1px solid var(--lijn);padding-top:3px;
+  font-size:9.5px;color:var(--muted);display:flex;justify-content:space-between}
+@media screen { .voet{position:static;margin-top:16px} }
+
+.melding{padding:14px;border:1px solid var(--lijn);background:var(--opp);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="blad" id="blad"><div class="melding">Rapport wordt opgehaald…</div></div>
+
+<script src="/modules/shared/supabase-client.js"></script>
+<script>
+(async function () {
+  'use strict';
+
+  // De naam waarover dit rapport gaat, en de firma in de kop. GEEN VAN BEIDE
+  // KOMT UIT DE DATA — het endpoint kent geen persoon en geen bedrijfsnaam, en
+  // opvolging_taken.eigenaar_id wordt nergens gevuld. Ze staan hier dus als
+  // constante, zichtbaar op één plek in plaats van verspreid door de opmaak.
+  // WELKE VERSIE VAN DEZE PAGINA KIJK JE AAN.
+  //
+  // Op 7 september stond de reparatie van een crash op main terwijl de server
+  // nog de oude pagina uitleverde. Twee uur zoeken ging op aan de vraag of de
+  // fix wel gemerged was — en die vraag was van buitenaf niet te beantwoorden,
+  // want een HTML-pagina draagt geen versienummer zoals de .js-bestanden dat
+  // doen via ?v=.
+  //
+  // Vandaar dit merkteken. Het staat rechtsboven in de kop en in de voettekst,
+  // dus in de PDF én op het scherm. Zie je hier een ander nummer dan wat er in
+  // de repo staat, dan kijk je naar een oude build en heeft verder zoeken geen
+  // zin. Ophogen bij elke inhoudelijke wijziging aan dit bestand.
+  const OPMAAK_VERSIE = 'rp-3';
+
+  const RAPPORT_OVER = 'Dave Heylen';
+  const FIRMA        = 'De Forex Opleiding NL B.V.';
+
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const blad = document.getElementById('blad');
+  const toon = (html) => { blad.innerHTML = html; };
+  // Het merkteken hoort óók bij een foutmelding te staan: juist als er iets
+  // misgaat wil je weten welke versie je aankijkt.
+  const melding = (t) => toon('<div class="melding">' + esc(t) +
+    '<div style="margin-top:10px;font-size:10px;color:var(--muted)">Opmaak ' +
+    esc(OPMAAK_VERSIE) + '</div></div>');
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // EERST ALLES DEFINIËREN, DAARNA PAS UITVOEREN.
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Deze volgorde is niet cosmetisch. De uitvoering stond eerst bovenaan en de
+  // opbouw eronder, en dat werkte tot bouw() een `const` aanraakte die verderop
+  // stond: `ReferenceError: Cannot access 'nlDatum' before initialization`. Een
+  // function declaration wordt gehesen, een const-pijlfunctie niet — die zit tot
+  // zijn eigen regel in de temporal dead zone.
+  //
+  // De pagina bleef daardoor eeuwig op 'Rapport wordt opgehaald' staan: de
+  // uitzondering viel buiten elke try, dus er kwam geen melding en geen
+  // printdialoog. Wie op de knop drukte zag een leeg venster en dacht dat het
+  // traag was.
+  //
+  // Twee dingen voorkomen dat dit terugkomt. Deze volgorde — alles wat gebruikt
+  // wordt staat boven de plek waar het gebruikt wordt — en de try/catch om
+  // bouw() heen verderop. En tests/opvolging-rapport-print-uitvoeren.test.js
+  // draait dit hele bestand van boven naar beneden zoals de browser dat doet,
+  // in plaats van de losse functies aan te roepen.
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // OPBOUW
+  // ═══════════════════════════════════════════════════════════════════════
+
+  const nlDatum = (iso) => {
+    if (!iso) return '';
+    const [j, m, d] = iso.split('-');
+    const maanden = ['januari','februari','maart','april','mei','juni','juli',
+                     'augustus','september','oktober','november','december'];
+    return Number(d) + ' ' + maanden[Number(m) - 1] + ' ' + j;
+  };
+  const mmss = (sec) => {
+    const s = Math.max(0, Number(sec || 0));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  };
+
+  function titelVoor(p) {
+    if (p.dagen === 1) return 'Dagrapport';
+    return p.dagen <= 7 ? 'Weekrapport' : 'Periodeoverzicht';
+  }
+
+  function sectiekop(titel, telling) {
+    return '<div class="skop"><div class="t">' + esc(titel) + '</div>' +
+      '<div class="n">' + esc(telling || '') + '</div></div>';
+  }
+
+  function tegel(getal, label, noot) {
+    return '<div class="tegel"><div class="getal">' + esc(String(getal)) + '</div>' +
+      '<div class="label">' + esc(label) + '</div>' +
+      (noot ? '<div class="noot">' + esc(noot) + '</div>' : '') + '</div>';
+  }
+
+  function bouw(d) {
+    const p = d.periode;
+    const titel = titelVoor(p);
+    const periodeTekst = p.dagen === 1 ? nlDatum(p.van)
+      : nlDatum(p.van) + ' tot en met ' + nlDatum(p.tot);
+    const opgemaakt = new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    }).format(new Date());
+
+    let h = '<div class="kop"><div>' +
+      '<h1>' + esc(titel) + ' — ' + esc(RAPPORT_OVER) + '</h1>' +
+      '<div class="datum">' + esc(periodeTekst) + '</div></div>' +
+      '<div class="meta">' + esc(FIRMA) + '<br>Opgemaakt ' + esc(opgemaakt) +
+      '<br>Module Opvolging &middot; ' + esc(OPMAAK_VERSIE) + '</div></div><div class="koplijn"></div>';
+
+    if (p.bevat_vandaag) {
+      h += '<div class="loopt"><b>De dag loopt nog.</b> Wat hier staat is de stand van dit ' +
+        'moment, niet het eindresultaat. Calls die nog moeten plaatsvinden worden niet beoordeeld.</div>';
+    }
+
+    h += sectieAandacht(d) + sectieDekking(d) + sectieVolume(d) +
+         sectieVensters(d) + sectieZoomcalls(d) + sectieArchief(d);
+
+    h += '<div class="voet"><span>' + esc(titel + ' — ' + RAPPORT_OVER) + '</span>' +
+      '<span>' + esc(periodeTekst) + ' &middot; ' + esc(OPMAAK_VERSIE) + '</span></div>';
+    return h;
+  }
+
+  // ── 1 · Wat vraagt aandacht ─────────────────────────────────────────────
+  function sectieAandacht(d) {
+    const lijst = d.aandacht || [];
+    let h = '<div class="sectie">' + sectiekop('Wat vraagt aandacht',
+      lijst.length ? lijst.length + (lijst.length === 1 ? ' bevinding' : ' bevindingen') : 'geen');
+    if (!lijst.length) {
+      return h + '<div class="leeg">Niets bijzonders in deze periode. Alle onderdelen konden gemeten worden.</div></div>';
+    }
+    h += lijst.map((a) =>
+      '<div class="bev ' + esc(a.ernst || 'twijfelgeval') + '">' +
+      '<div class="rij"><span class="soort">' + esc(a.label || 'BEVINDING') + '</span>' +
+      (a.naam ? '<span class="kern">' + esc(a.naam) + '</span>' : '') + '</div>' +
+      '<div class="tekst">' + esc(a.tekst) + '</div>' +
+      (a.uitleg ? '<div class="uitleg">' + esc(a.uitleg) + '</div>' : '') +
+      '</div>').join('');
+    return h + '</div>';
+  }
+
+  // ── 2 · Dekking ─────────────────────────────────────────────────────────
+  function sectieDekking(d) {
+    const k = d.dekking;
+    const open = k.openstaand || [];
+    const gedaan = open.filter((r) => r.behandeld);
+    const niet = (k.onbehandeld || []).length;
+    let h = '<div class="sectie">' + sectiekop('Dekking',
+      k.openstaand_bekend ? open.length + ' leads op de lijst' : 'lijst niet bewaard');
+
+    h += '<div class="tegels">' +
+      tegel(k.openstaand_bekend ? open.length : '—', 'leads op de lijst',
+        k.openstaand_bekend ? null : 'niet te bepalen voor een voorbije dag') +
+      tegel(k.openstaand_bekend ? gedaan.length : '—', 'kregen een poging') +
+      tegel(k.openstaand_bekend ? niet : '—', 'kregen niets') +
+      tegel(k.behandeld.length, 'leads met een poging') + '</div>';
+
+    if (k.openstaand_bekend && open.length) {
+      const pctA = Math.round((gedaan.length / open.length) * 100);
+      h += '<div class="balk"><span class="a" style="width:' + pctA + '%"></span>' +
+        '<span class="b" style="width:' + (100 - pctA) + '%"></span></div>' +
+        '<div class="legende">' +
+        '<span><i style="background:var(--goed)"></i>Kreeg een poging (' + gedaan.length + ')</span>' +
+        '<span><i style="background:var(--kritiek)"></i>Kreeg niets (' + niet + ')</span></div>';
+    } else if (!k.openstaand_bekend) {
+      h += '<div class="leeg">De werklijst van een voorbije dag is niet bewaard, dus hoeveel leads er ' +
+        'die dag actie nodig hadden staat hier bewust niet.</div>';
+    }
+
+    const rijen = k.behandeld || [];
+    if (rijen.length) {
+      h += '<table><thead><tr><th>Lead</th><th>Actie</th>' +
+        '<th class="getalkolom">Laatste poging</th></tr></thead><tbody>' +
+        rijen.map((r) =>
+          '<tr><td><span class="bol ' + (r.bel + r.wa > 0 ? 'goed' : 'rood') + '"></span>' +
+          esc(r.naam || 'Naamloos') + '</td>' +
+          '<td>' + r.bel + '× gebeld' + (r.bel_dagen > 1 ? ' op ' + r.bel_dagen + ' dagen' : '') +
+          ' · ' + r.wa + '× WhatsApp</td>' +
+          '<td class="getalkolom">' + esc(tijdKort(r.laatste)) + '</td></tr>').join('') +
+        '</tbody></table>';
+    }
+    return h + '</div>';
+  }
+
+  function tijdKort(iso) {
+    if (!iso) return '—';
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return '—';
+    return new Intl.DateTimeFormat('nl-NL', {
+      timeZone: 'Europe/Amsterdam', day: '2-digit', month: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    }).format(new Date(t));
+  }
+
+  // ── 3 · Volume en gesprekstijd ──────────────────────────────────────────
+  function sectieVolume(d) {
+    const v = d.volume;
+    let h = '<div class="sectie">' + sectiekop('Volume en gesprekstijd',
+      v.bel.uit + ' belpogingen');
+
+    // DE MEETREGEL. Als Dave een cijfer betwist moet de regel er zwart op wit
+    // bij staan, anders gaat het gesprek over de meting in plaats van over het
+    // werk. De grens komt uit het endpoint, niet uit dit bestand.
+    h += '<div class="meetregel">Een call telt als <b>gesprek</b> vanaf ' +
+      '<b>' + esc(String(d.drempels.gesprek_min_sec)) + ' seconden</b>. Korter dan dat is ' +
+      'opnemen en wegdrukken, of een beltoon: het telt wel als poging, niet als gesprek.</div>';
+
+    h += '<div class="tegels">' +
+      tegel(v.bel.uit, 'belpogingen') +
+      tegel(v.bel.gesproken, 'werden een gesprek',
+        [v.bel.te_kort ? v.bel.te_kort + '× te kort' : null,
+         v.bel.niet_opgenomen ? v.bel.niet_opgenomen + '× niet opgenomen' : null,
+        ].filter(Boolean).join(' · ') || null) +
+      tegel(mmss(v.bel.seconden), 'gesprekstijd (m:ss)',
+        v.bel.zonder_duur ? v.bel.zonder_duur + '× geen duur vastgelegd' : null) +
+      tegel(v.wa.uit + v.spraak.uit, 'WhatsApp uit',
+        (v.wa.in + v.spraak.in) + '× in · ' + v.spraak.uit + '× spraak') + '</div>';
+    return h + '</div>';
+  }
+
+  // ── 4 · De twee vensters ────────────────────────────────────────────────
+  function sectieVensters(d) {
+    const v = d.vensters;
+    const u = (n) => String(n).padStart(2, '0') + ':00';
+    let h = '<div class="sectie">' + sectiekop('De twee vensters per zoomcall',
+      'spraak vóór ' + u(d.drempels.spraak_voor_uur) + ' · nabellen ' +
+      u(d.drempels.nabel_van_uur) + '–' + u(d.drempels.nabel_tot_uur));
+    h += '<div class="tegels">' +
+      tegel(v.spraak.op_tijd, 'spraak op tijd') +
+      tegel(v.spraak.te_laat, 'spraak te laat') +
+      tegel(v.spraak.niet_gedaan, 'geen spraakbericht') +
+      tegel(v.nabel.niet_gedaan, 'niet nagebeld') + '</div>';
+    if ((v.zonder_taak || []).length) {
+      h += '<div class="leeg">' + v.zonder_taak.length + ' ingeplande call' +
+        (v.zonder_taak.length === 1 ? '' : 's') + ' staan niet in de takenlijst, dus daar valt ' +
+        'niets over te zeggen. Ze tellen hierboven niet mee — als ‘geen spraakbericht’ zou dat ' +
+        'een oordeel zijn over iets wat we niet gemeten hebben.</div>';
+    }
+    return h + '</div>';
+  }
+
+  // ── 5 · Zoomcalls ───────────────────────────────────────────────────────
+  const BOL_VOOR = {
+    vastgelegd  : 'goed',
+    gepland     : 'grijs',
+    geannuleerd : 'donker',
+    verplaatst  : 'donker',
+    onbeoordeelbaar: 'donker',
+    zonder      : 'rood',
+  };
+
+  function sectieZoomcalls(d) {
+    const lijst = d.zoomcalls || [];
+    let h = '<div class="sectie">' + sectiekop('Zoomcalls',
+      lijst.length ? lijst.length + (lijst.length === 1 ? ' afspraak' : ' afspraken') : 'geen');
+    if (!lijst.length) return h + '<div class="leeg">Geen zoomcalls in deze periode.</div></div>';
+
+    h += '<table><thead><tr><th>Lead</th><th class="getalkolom">Tijd</th>' +
+      '<th>Staat</th><th>Gebeld die dag</th><th>Notitie</th></tr></thead><tbody>' +
+      lijst.map((c) => {
+        const bol = c.vastgelegd ? BOL_VOOR.vastgelegd
+          : (BOL_VOOR[c.staat] || BOL_VOOR.zonder);
+        const staat = c.vastgelegd ? String(c.uitkomst).replace(/_/g, ' ')
+          : (c.staat === 'gepland' ? 'moet nog plaatsvinden'
+            : c.staat === 'geannuleerd' ? 'geannuleerd' + (c.annulering_reden ? ' — ' + c.annulering_reden : '')
+            : c.staat === 'verplaatst' ? 'verzet'
+            : c.staat === 'onbeoordeelbaar' ? String(c.status_ruw || 'onbekend')
+            : 'geen uitkomst vastgelegd');
+        return '<tr><td><span class="bol ' + bol + '"></span>' + esc(c.naam || 'Naamloos') + '</td>' +
+          '<td class="getalkolom">' + esc(c.tijd || '') + '</td>' +
+          '<td>' + esc(staat) + '</td>' +
+          // Het bewijsmateriaal bij de call. De zin komt van de server, zodat
+          // deze print, het rapportscherm en het dagscherm niet uiteenlopen.
+          '<td>' + esc(!c.belpogingen ? ''
+            : !c.belpogingen.gekoppeld ? 'niet aan een taak gekoppeld'
+            : c.belpogingen.samenvatting +
+              (c.belpogingen.pogingen.length
+                ? ' (' + c.belpogingen.pogingen.map((p) =>
+                    (p.tijd || '') + (p.duur_sec === null ? '' : ' ' + p.duur_sec + 's')).join(', ') + ')'
+                : '')) + '</td>' +
+          '<td>' + esc(c.notitie || '') + '</td></tr>';
+      }).join('') + '</tbody></table>';
+
+    h += '<div class="legende">' +
+      '<span><i style="background:var(--goed)"></i>Uitkomst vastgelegd</span>' +
+      '<span><i style="background:var(--muted)"></i>Moet nog plaatsvinden</span>' +
+      '<span><i style="background:var(--ink2)"></i>Geannuleerd of verzet</span>' +
+      '<span><i style="background:var(--kritiek)"></i>Gebeurd zonder uitkomst</span></div>';
+    return h + '</div>';
+  }
+
+  // ── 6 · Uit de lijst gehaald ────────────────────────────────────────────
+  function sectieArchief(d) {
+    const lijst = d.archief || [];
+    let h = '<div class="sectie">' + sectiekop('Uit de lijst gehaald',
+      lijst.length ? lijst.length + ' leads' : 'geen');
+    if (!lijst.length) {
+      return h + '<div class="leeg">Er is in deze periode niemand uit de lijst gehaald.</div></div>';
+    }
+    h += '<table><thead><tr><th>Lead</th><th>Moeite ervóór</th><th>Reden</th></tr></thead><tbody>' +
+      lijst.map((a) => {
+        const st = a.moeite && a.moeite.staat;
+        const bol = st === 'genoeg' ? 'goed' : (st === 'nvt' ? 'grijs' : 'rood');
+        const oordeel = st === 'genoeg' ? 'genoeg' : (st === 'nvt' ? 'n.v.t.' : 'te weinig');
+        return '<tr><td><span class="bol ' + bol + '"></span>' + esc(a.naam || 'Naamloos') + '</td>' +
+          '<td>' + a.bel_totaal + '× gebeld op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') +
+          ' · ' + a.wa_totaal + '× WhatsApp — ' + esc(oordeel) + '</td>' +
+          '<td>' + esc(a.archief_reden || '') + '</td></tr>';
+      }).join('') + '</tbody></table>';
+    return h + '</div>';
+  }
+
+  const q = new URLSearchParams(location.search);
+  const DATUM = /^\d{4}-\d{2}-\d{2}$/;
+  const van = DATUM.test(q.get('van') || '') ? q.get('van') : null;
+  const tot = DATUM.test(q.get('tot') || '') ? q.get('tot') : van;
+  if (!van) { melding('Geen geldige periode meegegeven.'); return; }
+
+  // AUTH VÓÓR ALLES. Dit rapport toont namen van leads, dus er mag niets
+  // opgehaald of getoond worden voordat vaststaat wie er kijkt. requireAuth
+  // stuurt zelf door naar /login als er geen sessie is.
+  try {
+    await window._authSharedReady;
+    const profiel = await window.AuthShared.requireAuth();
+    if (!profiel) return;               // requireAuth heeft doorgestuurd
+  } catch (e) {
+    melding('Kon de sessie niet controleren. Log opnieuw in.');
+    return;
+  }
+
+  let data;
+  try {
+    const token = await window.AuthShared.getAccessToken();
+    const resp = await fetch('/api/opvolging-rapport?van=' + encodeURIComponent(van) +
+      '&tot=' + encodeURIComponent(tot), { headers: { Authorization: 'Bearer ' + token } });
+    const tekst = await resp.text();
+    let j = null; try { j = tekst ? JSON.parse(tekst) : null; } catch (_) {}
+    if (!resp.ok) {
+      // Het endpoint doet zijn eigen strikte permissiecheck. Een 403 hier
+      // betekent dat de sleutel opvolging.rapport.view ontbreekt — dat tonen we
+      // eerlijk in plaats van een leeg rapport af te drukken.
+      melding((j && j.error) || ('Kon het rapport niet ophalen (HTTP ' + resp.status + ').'));
+      return;
+    }
+    data = j;
+  } catch (e) {
+    melding('Kon het rapport niet ophalen: ' + (e && e.message ? e.message : 'netwerkfout'));
+    return;
+  }
+
+  // EEN UITZONDERING MAG NOOIT STIL ZIJN.
+  //
+  // Hier stond `toon(bouw(data))` kaal. Ging er iets mis in bouw(), dan viel de
+  // uitzondering buiten elke try: geen melding, geen printdialoog, en de pagina
+  // bleef staan op 'Rapport wordt opgehaald'. Dat leest als traag, niet als
+  // stuk — dus wachtte je erop in plaats van het te melden.
+  //
+  // En let op de volgorde hieronder: print() staat BINNEN de try, ná het
+  // tekenen. Een lege printdialoog boven een mislukt rapport is erger dan geen
+  // dialoog, want dan bewaar je een leeg papier als PDF.
+  try {
+    toon(bouw(data));
+    // Pas printen als alles staat. Eén frame wachten zodat de opmaak berekend
+    // is; anders meet Chrome de pagina's op een half getekend document.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  } catch (e) {
+    // De echte tekst erbij. Een generieke zin zou hier niets waard zijn: dit
+    // scherm heeft geen tweede weg om te achterhalen wat er misging.
+    const tekst = (e && e.message) ? e.message : String(e);
+    // Via melding(), niet met eigen HTML: die functie plakt het merkteken erbij,
+    // en juist bij een fout wil je weten naar welke versie je kijkt.
+    melding('Het rapport kon niet opgemaakt worden. ' + tekst +
+      ' — Er is niets afgedrukt. Meld deze tekst, dan is de oorzaak terug te vinden.');
+    console.error('[rapport-print] opmaken faalde:', e);
+  }
+
+})();
+</script>
+</body>
+</html>

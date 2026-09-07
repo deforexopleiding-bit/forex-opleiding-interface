@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  bepaalDoorrol, beslisWachtInplanning, hoortBijLead, WACHT_UREN,
+  bepaalDoorrol, beslisWachtInplanning, beslisWachtVerplaatsing, hoortBijLead, WACHT_UREN,
 } from '../api/_lib/opvolging-doorrol.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -177,4 +177,71 @@ test('lege velden matchen nooit met elkaar', () => {
   assert.equal(hoortBijLead({ naam: 'Karel Jansen' }, { lead_name: null }), false);
   assert.equal(hoortBijLead(null, afspraak()), false);
   assert.equal(hoortBijLead(wachter(), null), false);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE 48-UURBESLISSING BIJ EEN VERPLAATSING
+// ═══════════════════════════════════════════════════════════════════════════
+// Zelfde vorm als hierboven, ANDER bewijs: hier een aanmelding op een ander
+// event, daar een afspraak in de agenda. Precies daarom zijn het twee statussen
+// gebleven — met één status zou een gevonden afspraak een openstaande
+// verplaatsing kunnen afsluiten, en dan gaat een kaart om de verkeerde reden
+// dicht. Dat merkt niemand, want de kaart is dan weg.
+
+const verplaatser = (over) => ({
+  id: 'v1', naam: 'Karel Jansen', email: 'karel@example.com', telefoon: '+32470111222',
+  status: 'wacht_verplaatsing',
+  bron_ref: { event_id: 'ev-oud', attendee_id: 'att-oud', verplaatst_gemeld_at: urenGeleden(10) },
+  ...over,
+});
+const aanmelding = (over) => ({
+  id: 'att-nieuw', event_id: 'ev-nieuw', status: 'aangemeld',
+  first_name: 'Karel', last_name: 'Jansen', email: 'karel@example.com', phone: '+32470111222',
+  ...over,
+});
+const beslisV = (taak, lijst) => beslisWachtVerplaatsing({ taak, aanmeldingen: lijst, nu: NU });
+
+test('een aanmelding op een ander event bevestigt de verplaatsing', () => {
+  const b = beslisV(verplaatser(), [aanmelding()]);
+  assert.equal(b.actie, 'verplaatst');
+  assert.equal(b.aanmelding.id, 'att-nieuw');
+});
+
+test('een rij op HETZELFDE event is geen verplaatsing', () => {
+  // Anders bevestigt de kaart zichzelf met de rij waar hij zelf aan hangt.
+  assert.equal(beslisV(verplaatser(), [aanmelding({ event_id: 'ev-oud' })]).actie, 'wacht');
+  assert.equal(beslisV(verplaatser(), [aanmelding({ id: 'att-oud', event_id: 'ev-nieuw' })]).actie, 'wacht');
+});
+
+test('een rij van iemand anders telt niet mee', () => {
+  const b = beslisV(verplaatser({ bron_ref: { event_id: 'ev-oud', attendee_id: 'att-oud', verplaatst_gemeld_at: urenGeleden(60) } }),
+    [aanmelding({ first_name: 'Iemand', last_name: 'Anders', email: 'anders@example.com', phone: '+31612345678' })]);
+  assert.equal(b.actie, 'terug');
+});
+
+test('alleen een rij met status aangemeld telt als bewijs', () => {
+  for (const status of ['geannuleerd', 'no_show', 'wachtlijst', 'switched_to_other_event', '']) {
+    assert.equal(beslisV(verplaatser(), [aanmelding({ status })]).actie, 'wacht', status);
+  }
+});
+
+test('binnen de termijn zonder bewijs blijft het wachten, erna komt hij terug', () => {
+  assert.equal(beslisV(verplaatser({ bron_ref: { event_id: 'ev-oud', verplaatst_gemeld_at: urenGeleden(WACHT_UREN - 1) } }), []).actie, 'wacht');
+  assert.equal(beslisV(verplaatser({ bron_ref: { event_id: 'ev-oud', verplaatst_gemeld_at: urenGeleden(WACHT_UREN) } }), []).actie, 'terug');
+});
+
+test('zonder meldmoment wordt er niets besloten', () => {
+  // Geen klok om af te lopen; terugzetten zou willekeurig zijn.
+  assert.equal(beslisV(verplaatser({ bron_ref: { event_id: 'ev-oud' } }), []).actie, 'wacht');
+  assert.equal(beslisV(verplaatser({ bron_ref: {} }), []).actie, 'wacht');
+  assert.equal(beslisV({ id: 'x' }, []).actie, 'wacht');
+});
+
+test('herkennen gaat op telefoon, e-mail of exacte naam', () => {
+  // Zelfde regels als bij de agenda-controle: naam exact, want 'Karel' laten
+  // matchen op 'Karel Jansen' zou de verkeerde persoon als bewijs gebruiken.
+  assert.equal(beslisV(verplaatser(), [aanmelding({ email: null, phone: '0470111222' })]).actie, 'verplaatst');
+  assert.equal(beslisV(verplaatser(), [aanmelding({ email: 'KAREL@example.com', phone: null })]).actie, 'verplaatst');
+  assert.equal(beslisV(verplaatser(), [aanmelding({ email: null, phone: null })]).actie, 'verplaatst', 'naam matcht');
+  assert.equal(beslisV(verplaatser(), [aanmelding({ first_name: 'Karel', last_name: null, email: null, phone: null })]).actie, 'wacht');
 });

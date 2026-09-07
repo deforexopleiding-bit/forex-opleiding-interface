@@ -23,7 +23,7 @@
 // afspraakrecords zelf worden alleen gelezen.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { beslisWachtInplanning, WACHT_UREN } from './_lib/opvolging-doorrol.js';
+import { beslisWachtInplanning, beslisWachtVerplaatsing, WACHT_UREN } from './_lib/opvolging-doorrol.js';
 
 const ABORT_MS = 25_000;
 const ZONE     = 'Europe/Amsterdam';
@@ -58,6 +58,8 @@ export default async function handler(req, res) {
     ingepland   : 0,
     teruggezet  : 0,
     wacht_nog   : 0,
+    verplaatst_bevestigd: 0,
+    verplaatst_terug    : 0,
     errors      : [],
     duration_ms : 0,
   };
@@ -150,6 +152,13 @@ export default async function handler(req, res) {
         console.error('[cron-opvolging-wacht-check] taak faalde', taak.id, e?.message || e);
       }
     }
+
+    // ── Tweede tak: wacht op verplaatsing ────────────────────────────────────
+    // Dave gaf aan dat hij iemand naar een ander event verplaatst. Dat is een
+    // belofte; hier zoeken we het bewijs. Zelfde vorm als hierboven, ander
+    // bewijs — en juist daarom een eigen status: met één status zou een
+    // gevonden afspraak een openstaande verplaatsing kunnen afsluiten.
+    await verwerkVerplaatsingen(summary, startedAt, vandaag);
   } catch (e) {
     console.error('[cron-opvolging-wacht-check] fataal:', e?.message || e);
     summary.errors.push({ phase: 'fataal', error: e?.message || String(e) });
@@ -177,4 +186,70 @@ async function schrijfPoging(taakId, soort, resultaat) {
 function notitieMetRegel(bestaand, regel) {
   const oud = String(bestaand || '').trim();
   return oud ? `${regel}\n\n${oud}` : regel;
+}
+
+/**
+ * De taken die op 'wacht_verplaatsing' staan. Gevonden op een ander event →
+ * kaart dicht; na 48 uur zonder bewijs → terug in de lijst, zodat een belofte
+ * die nooit is doorgevoerd niet stil blijft liggen.
+ */
+async function verwerkVerplaatsingen(summary, startedAt, vandaag) {
+  const { data: taken, error } = await supabaseAdmin
+    .from('opvolging_taken')
+    .select('id, naam, email, telefoon, status, bron_ref, notitie')
+    .eq('status', 'wacht_verplaatsing')
+    .limit(300);
+  if (error) throw new Error('verplaatsingen lezen: ' + error.message);
+  if (!taken || taken.length === 0) return;
+
+  // Alle kandidaat-aanmeldingen in één keer: één query in plaats van één per
+  // taak, want het tijdbudget van deze functie is dertig seconden.
+  const { data: aanmeldingen, error: aErr } = await supabaseAdmin
+    .from('event_attendees')
+    .select('id, event_id, first_name, last_name, email, phone, status, registered_at')
+    .eq('status', 'aangemeld')
+    .eq('is_test', false)
+    .limit(3000);
+  if (aErr) throw new Error('aanmeldingen lezen: ' + aErr.message);
+
+  for (const taak of taken) {
+    if (Date.now() - startedAt > ABORT_MS) {
+      summary.errors.push({ phase: 'time_budget', message: 'verplaatsingen afgebroken' });
+      break;
+    }
+    try {
+      const besluit = beslisWachtVerplaatsing({ taak, aanmeldingen: aanmeldingen || [], nu: Date.now() });
+      if (besluit.actie === 'wacht') { summary.wacht_nog += 1; continue; }
+
+      const nu = new Date().toISOString();
+      if (besluit.actie === 'verplaatst') {
+        const { error: uErr } = await supabaseAdmin.from('opvolging_taken').update({
+          status         : 'gearchiveerd',
+          archief_reden  : 'verplaatst naar ander event',
+          gearchiveerd_at: nu,
+          notitie        : notitieMetRegel(taak.notitie,
+            `${vandaag} · Verplaatsing bevestigd: staat als aanmelding op een ander event.`),
+          updated_at     : nu,
+        }).eq('id', taak.id).eq('status', 'wacht_verplaatsing');
+        if (uErr) throw new Error('bevestigen: ' + uErr.message);
+        summary.verplaatst_bevestigd += 1;
+        continue;
+      }
+
+      // 'terug' — 48 uur voorbij en nergens een nieuwe aanmelding gevonden.
+      const { error: tErr } = await supabaseAdmin.from('opvolging_taken').update({
+        status    : 'open',
+        due       : vandaag,
+        later     : false,
+        notitie   : notitieMetRegel(taak.notitie,
+          `${vandaag} · Als verplaatst aangeduid, maar na ${WACHT_UREN} uur staat deze persoon nergens als aanmelding op een ander event. Terug in de lijst.`),
+        updated_at: nu,
+      }).eq('id', taak.id).eq('status', 'wacht_verplaatsing');
+      if (tErr) throw new Error('terugzetten: ' + tErr.message);
+      summary.verplaatst_terug += 1;
+    } catch (e) {
+      summary.errors.push({ taak_id: taak.id, error: e?.message || String(e) });
+      console.error('[cron-opvolging-wacht-check] verplaatsing faalde', taak.id, e?.message || e);
+    }
+  }
 }

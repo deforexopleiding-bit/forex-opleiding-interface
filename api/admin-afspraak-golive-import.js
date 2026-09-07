@@ -164,6 +164,10 @@ export default async function handler(req, res) {
           owner_id: process.env.DAVE_PROFILE_ID || null,
           ghl_calendar_id: cal.id,
           updated_at: new Date().toISOString(),
+          // Historische import → markeer als reeds-gemeld zodat de interne
+          // "nieuwe afspraak"-melding (cron-afspraak-reminders) deze rijen niet
+          // alsnog verstuurt bij een herdraai.
+          intern_notify_sent_at: new Date().toISOString(),
         };
         const { error } = await supabaseAdmin.from('follow_up_appointments').insert(row);
         if (error) summary.fouten += 1; else summary.geimporteerd += 1;

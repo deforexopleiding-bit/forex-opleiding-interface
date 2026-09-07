@@ -40,3 +40,18 @@ export async function listActiveCalendars(opts) {
 export async function listActiveCalendarIds(opts) {
   return (await listActiveCalendars(opts)).map((c) => c.id);
 }
+
+// In-memory gecachete id→naam-map (TTL ~15 min), fail-soft. Voor het tonen van
+// de agenda-naam bij directe GHL-calls in de Opstartsessies-lijst — géén
+// GHL-call per lijst-load.
+let _nameCache = { map: null, ts: 0 };
+const NAME_TTL_MS = 15 * 60 * 1000;
+export async function getCalendarNameMap(opts) {
+  const now = Date.now();
+  if (_nameCache.map && (now - _nameCache.ts) < NAME_TTL_MS) return _nameCache.map;
+  const cals = await listCalendars(opts); // fail-soft → []
+  const m = new Map();
+  for (const c of cals) if (c.id) m.set(c.id, c.name || null);
+  if (m.size > 0) { _nameCache = { map: m, ts: now }; return m; }
+  return _nameCache.map || m; // val terug op oude cache of lege map
+}

@@ -50,6 +50,15 @@ export function maakLeadlijst(cfg) {
     ververs,
     /** Het privacyfilter. Standaard nee. */
     mag(nummer) { return isToegestaan(nummer, toegestaan); },
+    /**
+     * De toegestane nummers zelf, voor de LID-kaart.
+     *
+     * Die vraagt WhatsApp per bekend nummer welke identiteit erbij hoort. Dat
+     * mag alleen over nummers die al op deze lijst staan — over wie er niet op
+     * staat wordt niets gevraagd. Vandaar dat deze lijst binnen de service
+     * blijft en nergens in een antwoord of een log terechtkomt.
+     */
+    nummers() { return [...toegestaan.vol]; },
     status() {
       return { aantal: toegestaan.aantal, laatste_ophaal: laatsteOphaal, laatste_fout: laatsteFout };
     },

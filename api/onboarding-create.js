@@ -26,6 +26,8 @@ import crypto from 'node:crypto';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { provisionOnboardingStudent } from './_lib/onboarding-provision.js';
+import { provisionDfoLmsStudent, noteerUitnodiging } from './_lib/dfo-lms-student.js';
+import { stuurLmsUitnodiging } from './_lib/dfo-lms-uitnodiging.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
@@ -199,6 +201,37 @@ export default async function handler(req, res) {
       provision = { ok: false, error: e?.message || 'provision-threw' };
     }
 
+    // Fase 1 dfo-lms — studentrij in het NIEUWE LMS (hlms_student). Staat
+    // LOS van de Bubble-provisioning hierboven en van het lms_provision-blok
+    // (trial-site); zie api/_lib/dfo-lms-db.js voor het waarom van de naam.
+    // Fail-soft en awaited: een LMS-fout mag de aanmelding niet 500'en, maar
+    // we willen 'm wel afgerond hebben voor we de respons sturen zodat de
+    // admin-UI direct de juiste status toont. De helper schrijft een
+    // mislukking zelf naar dfo_lms_provision_error.
+    let dfoLms = { ok: false, error: 'unknown' };
+    try {
+      dfoLms = await provisionDfoLmsStudent(inserted.id);
+    } catch (e) {
+      console.error('[onboarding-create] dfo-lms threw:', e?.message || e);
+      dfoLms = { ok: false, error: e?.message || 'dfo-lms-threw' };
+    }
+
+    // Spoor A stap 1 — LMS-uitnodiging. Draait ALLEEN als de studentrij
+    // hierboven gelukt is; zonder rij is er niets om uit te nodigen.
+    // Faalzacht: een mislukte uitnodiging mag de aanmelding niet raken —
+    // een klant zonder mail is herstelbaar, een mislukte aanmelding niet.
+    // De grendel op uitnodiging_verstuurd_op zit in de helper zelf.
+    let dfoLmsUitnodiging = null;
+    if (dfoLms && dfoLms.ok === true && dfoLms.email) {
+      try {
+        dfoLmsUitnodiging = await stuurLmsUitnodiging({ email: dfoLms.email });
+      } catch (e) {
+        console.error('[onboarding-create] lms-uitnodiging threw:', e?.message || e);
+        dfoLmsUitnodiging = { ok: false, fout: e?.message || 'uitnodiging-threw' };
+      }
+      await noteerUitnodiging(inserted.id, dfoLmsUitnodiging);
+    }
+
     // Fase C1 — Onboarding-invite (WhatsApp-template). Fail-soft: helper
     // gooit NOOIT door (alle fouten als {sent:false, reason}). Geen send
     // wanneer module of template niet geconfigureerd is — dat is verwacht
@@ -235,6 +268,8 @@ export default async function handler(req, res) {
       onboarding : inserted,
       link       : '/modules/onboarding.html?t=' + encodeURIComponent(inserted.token),
       provision  : provision,
+      dfo_lms    : dfoLms,
+      dfo_lms_uitnodiging: dfoLmsUitnodiging,
       invite     : invite,
     });
   } catch (e) {

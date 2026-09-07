@@ -463,12 +463,41 @@ export default async function handler(req, res) {
       }
     }
 
+    // FASE-1 event-kwalificatie: koppel de kwalificatie-inzending per aanwezige
+    // (event_kwalificatie_submissions.attendee_id). Losstaand van de oude
+    // assessment. Fail-soft als de tabel nog niet bestaat (pre-migratie).
+    const kwalByAttendee = new Map();
+    try {
+      const attIds = (rows || []).map((r) => r.id).filter(Boolean);
+      if (attIds.length) {
+        const { data: kwal, error: kErr } = await supabaseAdmin
+          .from('event_kwalificatie_submissions')
+          .select('attendee_id, resultaat, score, drempel, noshow_akkoord, antwoorden, created_at')
+          .in('attendee_id', attIds)
+          .order('created_at', { ascending: true });
+        if (kErr) {
+          // 42703/PGRST204 = kolom, PGRST205 = tabel nog niet in schema (pre-migratie) → stil.
+          if (!['42703', 'PGRST204', 'PGRST205'].includes(kErr.code)) {
+            console.warn('[events-attendees-list kwalificatie]', kErr.code || '?', kErr.message);
+          }
+        } else {
+          for (const k of (kwal || [])) {
+            if (k.attendee_id) kwalByAttendee.set(k.attendee_id, k); // asc → laatste wint
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[events-attendees-list kwalificatie] exception (soft):', e?.message || e);
+    }
+
     const items = (rows || []).map((r) => {
       const saleInfo = (r.deal_id && signedDealIds.has(r.deal_id))
         ? (saleInfoByDealId.get(r.deal_id) || null)
         : null;
       return {
         ...r,
+        // FASE-1 kwalificatievragenlijst (null als geen inzending gekoppeld).
+        kwalificatie: kwalByAttendee.get(r.id) || null,
         tags: tagsByAttendee.get(r.id) || [],
         has_signed_deal: !!(r.deal_id && signedDealIds.has(r.deal_id)),
         // Blok B: sale-info per attendee. Frontend toont

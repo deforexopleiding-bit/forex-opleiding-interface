@@ -19,6 +19,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { bubblePatch } from './_lib/bubble.js';
 import { createNotification } from './_lib/notify.js';
+import { syncDfoLmsMentor } from './_lib/dfo-lms-student.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -126,6 +127,20 @@ export default async function handler(req, res) {
       bubble = { ok: false, skipped: true, reason: reasons.join(',') };
     }
 
+    // 4b) dfo-lms — mentor doorschrijven naar hlms_student.mentor_id. Zelfde
+    // faalzachte opzet als het Bubble-blok hierboven: de toewijzing in het
+    // CRM staat al, dus een LMS-fout mag de 200 niet breken. Doet niets
+    // wanneer deze onboarding nog geen studentrij in dfo-lms heeft — die
+    // krijgt de mentor vanzelf mee bij het aanmaken.
+    let dfoLms = null;
+    try {
+      dfoLms = await syncDfoLmsMentor(onboardingId, mentorUserId);
+    } catch (e) {
+      const msg = e?.message || String(e);
+      console.error('[onboarding-assign-mentor] dfo-lms mentor-sync fail:', msg);
+      dfoLms = { ok: false, error: msg };
+    }
+
     // 5) Fase 3b — reassign-notificaties. ALLEEN wanneer er daadwerkelijk
     // gewisseld is van mentor (oldMentor != nieuwe), én er was een vorige
     // mentor: laat 'm weten dat de student is overgedragen via het unified
@@ -189,6 +204,7 @@ export default async function handler(req, res) {
       mentor_user_id: updated.mentor_user_id,
       assigned_at   : updated.assigned_at,
       bubble        : bubble,
+      dfo_lms       : dfoLms,
     });
   } catch (e) {
     console.error('[onboarding-assign-mentor]', e?.message || e);

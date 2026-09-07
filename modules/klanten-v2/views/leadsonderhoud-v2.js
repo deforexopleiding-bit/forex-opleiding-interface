@@ -64,6 +64,9 @@
     // bereikbaar blijft. Filter-state per tab (periode/resultaat/bron) leeft
     // apart zodat we bij tab-switch niet refetchen.
     bronnen:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', lastKey: null },
+    funnels:        { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'all', lastKey: null },
+    emails:         { loading: false, fetched: false, error: null, data: null, _seq: 0, filter: 'alle', mailbox: 'alle' },
+    emailPreview:   { open: false, naam: '', html: '' },
     opstartsessies: { loading: false, fetched: false, error: null, data: null, _seq: 0, periode: 'alles', resultaat: 'alle', bron: '', tijd: 'aankomend', lastKey: null },
     vragenlijst:    { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     // v=17 (2026-08-28): Toegang-aanvragen tab (WhatsApp-gate).
@@ -923,8 +926,29 @@
       wrap.innerHTML = _lsInbRenderRight(row);
       const el = wrap.firstElementChild;
       if (el) { if (oldRight) split.replaceChild(el, oldRight); else split.appendChild(el); }
+      // Mobiel master/detail: markeer container zodat CSS naar "toon-thread"
+      // schakelt (@media ≤760px in klanten-v2.css). Desktop negeert dit attr.
+      split.setAttribute('data-has-sel', '1');
     }
     queueMicrotask(() => _lsInbLoadThread(id));
+  };
+  // Mobiel master/detail: wist selectie zodat de lijst weer full-width
+  // getoond wordt. Surgisch (geen full render) — spiegelt __lsInbSel.
+  window.__lsInbDeselect = () => {
+    _lsInb.sel = null;
+    _lsInbResetThread();
+    document.querySelectorAll('#lsInbList .ls-inb-row.on').forEach(el => el.classList.remove('on'));
+    const split = document.querySelector('.ls-inb-split');
+    if (!split) return;
+    const oldRight = split.querySelector('.ls-inb-right');
+    if (oldRight) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'ls-inb-right';
+      placeholder.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px';
+      placeholder.textContent = 'Selecteer een lead';
+      split.replaceChild(placeholder, oldRight);
+    }
+    split.setAttribute('data-has-sel', '0');
   };
   // FEAT-2: toggle gelezen/ongelezen — hergebruikt bestaande
   // /api/leadsonderhoud-gesprek-mark-read endpoint. Surgical DOM-update
@@ -1722,6 +1746,10 @@
           ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Nog geen berichten in deze draad.</div>`
           : '';
     return `<div class="ls-inb-right" style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
+      <button type="button" class="mob-back" onclick="__lsInbDeselect()" aria-label="Terug naar lijst">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Terug naar lijst
+      </button>
       <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap">
           <span style="font-size:11.5px;padding:3px 10px;border-radius:12px;background:var(--teal-soft);color:var(--teal)">Leadsonderhoud</span>
@@ -1950,7 +1978,7 @@
         : `<div style="padding:44px 20px;text-align:center;color:var(--text-3)">Nog geen lead-gesprekken.</div>`;
 
     const filterChip = (v, label, count) => `<button class="chip ${flt === v ? 'on' : ''}" onclick="window.__lsInbSetFilter('${v}')" style="font-size:11px;padding:3px 9px">${label}${count != null ? ` <span style="opacity:.7">(${count})</span>` : ''}</button>`;
-    return `<div class="ls-inb-split" style="display:flex;height:calc(100dvh - 110px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+    return `<div class="ls-inb-split" data-has-sel="${sel ? '1' : '0'}" style="display:flex;height:calc(100dvh - 110px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
       ${_lsExtModalHtml()}
       <div id="lsInbList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);overflow-y:auto">
         <div style="padding:11px 14px;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between;align-items:center">
@@ -2155,7 +2183,7 @@
   };
   window._lsCopyLink = function(url, btn){
     try { navigator.clipboard.writeText(url); if (btn){ const t = btn.textContent; btn.textContent = 'Gekopieerd ✓'; setTimeout(()=>{ btn.textContent = t; }, 1200); } }
-    catch (_) { prompt('Kopieer de link:', url); }
+    catch (_) { window.dfoPrompt({ title: 'Kopieer de link', message: 'Selecteer en kopieer de link hieronder.', value: url }); }
   };
 
   // v=16 (2026-08-27): _lsBeheerKnop verwijderd — alles is nu v2-native.
@@ -2196,9 +2224,11 @@
     } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
   };
 
-  const _lsBronForm = { slug: '', label: '', busy: false, error: null };
+  const _lsBronForm = { slug: '', label: '', vragenlijst: true, busy: false, error: null };
   window._lsBronSetSlug  = function(el){ _lsBronForm.slug  = String(el.value || '').trim().toLowerCase(); };
   window._lsBronSetLabel = function(el){ _lsBronForm.label = String(el.value || '').trim(); };
+  // Vragenlijst aan/uit-keuze in het toevoeg-formulier (default AAN = DB-default).
+  window._lsBronFormVragenlijst = function(){ _lsBronForm.vragenlijst = !_lsBronForm.vragenlijst; if (window.DFO?.render) window.DFO.render(); };
   window._lsBronToevoegen = async function(){
     if (_lsBronForm.busy) return;
     const slug  = _lsBronForm.slug;
@@ -2208,27 +2238,68 @@
     _lsBronForm.busy = true; _lsBronForm.error = null; if (window.DFO?.render) window.DFO.render();
     try {
       await window.KV.authedJson('/api/booking-sources-upsert', {
-        method: 'POST', body: JSON.stringify({ slug, label, actief: true }),
+        method: 'POST', body: JSON.stringify({ slug, label, actief: true, vragenlijst: _lsBronForm.vragenlijst }),
       });
       window.KV.toast('Bron "' + label + '" toegevoegd.', 'ok');
-      _lsBronForm.slug = ''; _lsBronForm.label = ''; _lsBronForm.busy = false;
+      _lsBronForm.slug = ''; _lsBronForm.label = ''; _lsBronForm.vragenlijst = true; _lsBronForm.busy = false;
       fetchBronnen(true);
     } catch (e) {
       window.KV.toast('Toevoegen mislukt: ' + (e?.message || 'onbekend'), 'warn');
       _lsBronForm.busy = false; if (window.DFO?.render) window.DFO.render();
     }
   };
-  window._lsBronBewerken = async function(idx){
+  // Bewerken-modal: label-veld + vragenlijst aan/uit-switch, samen opslaan.
+  // Eigen kleine modal in de CRM-modalstijl (.dfo-dlg/.vl-switch) omdat dfoPrompt
+  // maar één tekstveld ondersteunt.
+  window._lsBronBewerken = function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
-    const nieuwLabel = prompt('Nieuw label voor "' + b.slug + '":', b.label);
-    if (nieuwLabel == null) return;
-    const label = String(nieuwLabel).trim(); if (!label) return;
-    try {
-      await window.KV.authedJson('/api/booking-sources-upsert', {
-        method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label, actief: b.actief }),
-      });
-      window.KV.toast('Bron bijgewerkt.', 'ok'); fetchBronnen(true);
-    } catch (e) { window.KV.toast('Bewerken mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    let vl = b.vragenlijst !== false;
+    const escq = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const ov = document.createElement('div');
+    ov.className = 'dfo-dlg';
+    ov.innerHTML = `<div class="dfo-dlg-box" role="dialog" aria-modal="true">
+      <div class="dfo-dlg-title">Bron bewerken</div>
+      <div class="dfo-dlg-msg">Bron "${escq(b.slug)}"</div>
+      <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Label</label>
+      <input class="dfo-dlg-input" type="text" value="${escq(b.label)}" placeholder="Label">
+      <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:2px 0 6px">Vragenlijst</label>
+      <button type="button" class="vl-switch${vl ? ' on' : ''}" data-vl role="switch" aria-checked="${vl}" style="margin-bottom:16px">
+        <span class="vl-track"><span class="vl-knob"></span></span><span class="vl-label">${vl ? 'Aan' : 'Uit'}</span>
+      </button>
+      <div class="dfo-dlg-foot">
+        <button type="button" class="dfo-dlg-btn dfo-dlg-cancel" data-cancel>Annuleren</button>
+        <button type="button" class="dfo-dlg-btn dfo-dlg-ok" data-ok>Opslaan</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    const input = ov.querySelector('.dfo-dlg-input');
+    const sw = ov.querySelector('[data-vl]');
+    const close = () => { document.removeEventListener('keydown', onKey, true); ov.remove(); };
+    sw.onclick = () => {
+      vl = !vl;
+      sw.classList.toggle('on', vl);
+      sw.setAttribute('aria-checked', String(vl));
+      sw.querySelector('.vl-label').textContent = vl ? 'Aan' : 'Uit';
+    };
+    const save = async () => {
+      const label = String(input.value || '').trim();
+      if (!label) { window.KV.toast('Label vereist.', 'warn'); return; }
+      close();
+      try {
+        await window.KV.authedJson('/api/booking-sources-upsert', {
+          method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label, actief: b.actief, vragenlijst: vl }),
+        });
+        window.KV.toast('Bron bijgewerkt.', 'ok'); fetchBronnen(true);
+      } catch (e) { window.KV.toast('Bewerken mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+    };
+    ov.querySelector('[data-cancel]').onclick = close;
+    ov.querySelector('[data-ok]').onclick = save;
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    function onKey(e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'Enter' && document.activeElement === input) { e.preventDefault(); save(); }
+    }
+    document.addEventListener('keydown', onKey, true);
+    requestAnimationFrame(() => { input.focus(); input.select(); });
   };
   window._lsBronToggle = async function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
@@ -2239,10 +2310,34 @@
       window.KV.toast(b.actief ? 'Bron gedeactiveerd.' : 'Bron geactiveerd.', 'ok'); fetchBronnen(true);
     } catch (e) { window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
   };
+  // Vragenlijst aan/uit per bron. Kopie van _lsBronToggle: stuurt de volle
+  // rij mee + de omgekeerde vragenlijst-waarde. AAN = quiz/intake→scoring→
+  // toelating vóór boeken; UIT = simpel boekingsformulier (geen quiz).
+  window._lsBronVragenlijst = async function(idx){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
+    const nieuw = !(b.vragenlijst !== false); // huidige (default true) omdraaien
+    // Optimistisch: de switch klapt direct om; bij fout draaien we terug via
+    // refetch. Zo voelt de klik responsief en is de interactie onmiskenbaar.
+    b.vragenlijst = nieuw;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      await window.KV.authedJson('/api/booking-sources-upsert', {
+        method: 'POST', body: JSON.stringify({ id: b.id, slug: b.slug, label: b.label, actief: b.actief, vragenlijst: nieuw }),
+      });
+      window.KV.toast(nieuw ? 'Vragenlijst aangezet voor deze bron.' : 'Vragenlijst uitgezet — bezoekers krijgen het simpele boekingsformulier.', 'ok');
+      fetchBronnen(true);
+    } catch (e) {
+      window.KV.toast('Wijzigen mislukt: ' + (e?.message || 'onbekend'), 'warn');
+      fetchBronnen(true); // authoritatieve herlaad → draait de optimistische flip terug
+    }
+  };
   window._lsBronRegistreren = async function(idx){
     const b = (_live.bronnen.data?.items || [])[idx]; if (!b) return;
     const suggest = b.slug.charAt(0).toUpperCase() + b.slug.slice(1);
-    const lbl = prompt('Label voor "' + b.slug + '" (typo of nieuwe bron):', suggest);
+    const lbl = await window.dfoPrompt({
+      title: 'Bron registreren', message: 'Label voor "' + b.slug + '" (typo of nieuwe bron)',
+      value: suggest, placeholder: 'Label',
+    });
     if (lbl == null) return;
     const label = String(lbl).trim(); if (!label) return;
     try {
@@ -2251,6 +2346,24 @@
       });
       window.KV.toast('Bron geregistreerd.', 'ok'); fetchBronnen(true);
     } catch (e) { window.KV.toast('Registreren mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
+  };
+  // Verwijderen: haalt alleen de config-rij weg (link + vragenlijst-instelling).
+  // Reeds geboekte calls behouden hun booking_source-slug op de afspraken/leads
+  // (losse tekst, geen FK) — die boekingen blijven dus bestaan.
+  window._lsBronVerwijderen = async function(idx){
+    const b = (_live.bronnen.data?.items || [])[idx]; if (!b || !b.id) return;
+    const ok = await window.dfoConfirm({
+      title: 'Agenda verwijderen',
+      message: 'Weet je zeker dat je deze agenda wilt verwijderen? Dit kan niet ongedaan worden gemaakt.',
+      okLabel: 'Verwijderen', cancelLabel: 'Annuleren', danger: true,
+    });
+    if (!ok) return;
+    try {
+      await window.KV.authedJson('/api/booking-sources-delete', {
+        method: 'POST', body: JSON.stringify({ id: b.id }),
+      });
+      window.KV.toast('Bron verwijderd.', 'ok'); fetchBronnen(true);
+    } catch (e) { window.KV.toast('Verwijderen mislukt: ' + (e?.message || 'onbekend'), 'warn'); }
   };
 
   function bronnenView() {
@@ -2272,7 +2385,8 @@
         : '<span style="color:var(--amber);font-weight:600;font-size:11.5px" title="Slug komt op boekingen voor maar staat niet in de bronnenlijst">⚠ Onbekend</span>';
       const acties = b.is_registered
         ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-right:4px" onclick="window._lsBronBewerken(${i})">Bewerken</button>
-           <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronToggle(${i})">${b.actief ? 'Deactiveren' : 'Activeren'}</button>`
+           <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;margin-right:4px" onclick="window._lsBronToggle(${i})">${b.actief ? 'Deactiveren' : 'Activeren'}</button>
+           <button class="btn btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--rose)" onclick="window._lsBronVerwijderen(${i})" title="Verwijder deze agenda-bron (boekingen blijven bestaan)">Verwijderen</button>`
         : `<button class="btn btn-primary" style="font-size:11px;padding:3px 8px" onclick="window._lsBronRegistreren(${i})" title="Toevoegen aan bronnenlijst met deze slug">Registreren</button>`;
       // BP2 Deel A: setter-koppeling per bron.
       const setterCell = b.is_registered
@@ -2281,6 +2395,13 @@
             ${staff.map((s) => `<option value="${esc(s.id)}" ${String(b.owner_user_id || '') === String(s.id) ? 'selected' : ''}>${esc(s.full_name || s.email || s.id)}</option>`).join('')}
           </select>`
         : '<span style="color:var(--text-3);font-size:11px">—</span>';
+      // Vragenlijst per bron (alleen geregistreerde bronnen). AAN = quiz vóór
+      // boeken; UIT = simpel boekingsformulier. Default AAN. In de lijst
+      // ALLEEN-LEZEN status; wijzigen gebeurt via Bewerken of bij toevoegen.
+      const vlAan = b.vragenlijst !== false;
+      const vragenlijstCell = b.is_registered
+        ? `<span style="font-size:11.5px;font-weight:600;color:${vlAan ? 'var(--emerald)' : 'var(--text-3)'}" title="Wijzigen via Bewerken of bij het toevoegen van een bron">${vlAan ? 'Aan' : 'Uit'}</span>`
+        : '<span style="color:var(--text-3);font-size:11px">—</span>';
       return `<tr style="border-bottom:1px solid var(--border)">
         <td style="padding:8px 10px">
           <div style="font-weight:600">${esc(b.label)}</div>
@@ -2288,6 +2409,7 @@
         </td>
         <td style="padding:8px 10px">${statusBadge}</td>
         <td style="padding:8px 10px">${setterCell}</td>
+        <td style="padding:8px 10px">${vragenlijstCell}</td>
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${b.calls || 0}</td>
         <td style="padding:8px 10px">
           <div style="display:flex;align-items:center;gap:6px">
@@ -2297,11 +2419,11 @@
         </td>
         <td style="padding:8px 10px;white-space:nowrap">${acties}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="6" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Nog geen bronnen — voeg er hieronder één toe.'}</td></tr>`;
+    }).join('') : `<tr><td colspan="7" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Nog geen bronnen — voeg er hieronder één toe.'}</td></tr>`;
 
     return `
       <div style="padding:12px 14px;background:var(--surface-2);border-radius:var(--r-sm);font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:12px">
-        Attributie-bronnen voor <code>deforexopleiding.nl/agenda/&lt;slug&gt;</code>. Elke link telt binnenkomende Opstartsessie-boekingen. Onbekende/typo-slugs verschijnen apart en blijven telbaar.
+        Attributie-bronnen voor <code>deforexopleiding.nl/agenda/&lt;slug&gt;</code>. Elke link telt binnenkomende Kennismakingsgesprek-boekingen. Onbekende/typo-slugs verschijnen apart en blijven telbaar.
       </div>
       ${st.error ? `<div style="padding:12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:var(--r-sm);color:var(--rose);font-size:12.5px;margin-bottom:12px">⚠ ${esc(st.error)}</div>` : ''}
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
@@ -2309,7 +2431,7 @@
           <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
           ${filterChips}
         </div>
-        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (`${data.total_calls || 0} geboekte Opstartsessies · ${st.periode === 'week' ? 'deze week' : st.periode === 'maand' ? 'deze maand' : 'alle tijd'}`)}</span>
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : (`${data.total_calls || 0} geboekte Kennismakingsgesprekken · ${st.periode === 'week' ? 'deze week' : st.periode === 'maand' ? 'deze maand' : 'alle tijd'}`)}</span>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
         <div style="overflow-x:auto">
@@ -2319,6 +2441,7 @@
                 <th style="padding:8px 10px">Bron</th>
                 <th style="padding:8px 10px">Status</th>
                 <th style="padding:8px 10px">Setter</th>
+                <th style="padding:8px 10px">Vragenlijst</th>
                 <th style="padding:8px 10px;text-align:right">Calls</th>
                 <th style="padding:8px 10px">Link</th>
                 <th style="padding:8px 10px">Acties</th>
@@ -2339,9 +2462,15 @@
             <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Label</label>
             <input type="text" placeholder="bv. Instagram Story" value="${esc(_lsBronForm.label)}" oninput="window._lsBronSetLabel(this)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12.5px" ${_lsBronForm.busy ? 'disabled' : ''}>
           </div>
+          <div style="flex:0 0 auto">
+            <label style="display:block;font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Vragenlijst</label>
+            <button type="button" class="vl-switch${_lsBronForm.vragenlijst ? ' on' : ''}" role="switch" aria-checked="${_lsBronForm.vragenlijst}" onclick="window._lsBronFormVragenlijst()" title="${_lsBronForm.vragenlijst ? 'Aan — quiz + toelating vóór boeken' : 'Uit — simpel boekingsformulier (geen quiz)'}" ${_lsBronForm.busy ? 'disabled' : ''}>
+              <span class="vl-track"><span class="vl-knob"></span></span><span class="vl-label">${_lsBronForm.vragenlijst ? 'Aan' : 'Uit'}</span>
+            </button>
+          </div>
           <button class="btn btn-primary" style="font-size:12.5px;padding:7px 16px" onclick="window._lsBronToevoegen()" ${_lsBronForm.busy ? 'disabled' : ''}>${_lsBronForm.busy ? 'Bezig…' : '+ Toevoegen'}</button>
         </div>
-        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">Slug = lowercase, alfanumeriek + hyphen (max 64 tekens). Wordt onderdeel van de link.</div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">Slug = lowercase, alfanumeriek + hyphen (max 64 tekens). Wordt onderdeel van de link. Vragenlijst uit = bezoekers krijgen het simpele boekingsformulier.</div>
       </div>`;
   }
 
@@ -2936,10 +3065,14 @@
     // zodat gedeelde testnummers geen valse vinkjes geven.
     const eurFmt = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' });
     const rows = items.length ? items.map(s => {
-      const badge = s.resultaat === 'toegelaten'
-        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
-        : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>';
-      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>';
+      const isCall = s.bron_type === 'ghl_call';
+      const badge = isCall
+        ? '<span style="color:var(--text-3)">–</span>'
+        : (s.resultaat === 'toegelaten'
+          ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Toegelaten</span>'
+          : '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:12px;font-size:11.5px;font-weight:600">Afgewezen</span>');
+      const akkoord = isCall ? '<span style="color:var(--text-3)">–</span>'
+        : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓</span>' : '<span style="color:var(--text-3)">–</span>');
       // BP3 v12 — appointment_status-badge: cancelled/no_show → grijze/rose
       // pill zodat je in "Toon geannuleerd"-modus meteen ziet welke rijen dat
       // zijn. Anders standaard "✓ Geboekt" / "–".
@@ -2988,10 +3121,10 @@
           <div style="font-weight:600">${esc(s.naam || '—')}</div>
           <div style="color:var(--text-3);font-size:11px">${esc(contact || '—')}</div>
         </td>
-        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || '—')}</div></td>
+        <td style="padding:8px 10px">${esc(s.bron_label)}<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(s.booking_source || (isCall ? 'GHL-agenda' : '—'))}</div></td>
         <td style="padding:8px 10px">${badge}</td>
         <td style="padding:8px 10px;text-align:center">${akkoord}</td>
-        <td style="padding:8px 10px">${esc(s.gekozen_slot || '—')}</td>
+        <td style="padding:8px 10px">${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</td>
         <td style="padding:8px 10px">${afsp}</td>
         <td style="padding:8px 10px">${bevCel}</td>
         <td style="padding:8px 10px;text-align:center">${saleCell}</td>
@@ -3028,7 +3161,7 @@
         </div>
         <button class="chip ${st.showCancelled ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetOpShowCancelled(${st.showCancelled ? 'false' : 'true'})" title="Toggle: standaard worden geannuleerde/no-show/verwijderde calls verborgen">${st.showCancelled ? '✓ Toon geannuleerd' : 'Toon geannuleerd'}</button>
         <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:4px 10px;color:#fff;margin-left:auto" onclick="window._lsOpCreateOpen()" title="Plan handmatig een nieuwe call in Dave's agenda">+ Nieuwe call</button>
-        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : ((data.total || items.length) + ' submissions')}</span>
+        <span style="font-size:12px;color:var(--text-3)">${st.loading ? 'Laden…' : ((data.total_submissions ?? data.total ?? items.length) + ' submissions' + (data.total_calls ? ' · ' + data.total_calls + ' directe calls' : ''))}</span>
       </div>`;
 
     // ── Agenda-view ────────────────────────────────────────────────────
@@ -3083,6 +3216,10 @@
     const byDay = new Map();
     for (const it of items) {
       if (!it.gekozen_start_at) continue;
+      // Alleen ECHT geboekte afspraken in de agenda: submissions mét
+      // appointment_id + de directe calls. Toegelaten-maar-niet-geboekte
+      // aanmeldingen bezetten geen slot → niet in de agenda (wél in de lijst).
+      if (!it.appointment_id) continue;
       const d = new Date(it.gekozen_start_at);
       if (isNaN(d.getTime())) continue;
       if (d.getFullYear() !== y || d.getMonth() !== m) continue;
@@ -3118,15 +3255,14 @@
       }
       const k = `${y}-${m}-${day}`;
       const entries = (byDay.get(k) || []).sort((a,b) => a.time - b.time);
-      const chips = entries.slice(0, 3).map(({ time, item }) => `
+      // Toon ALLE items van de dag (geen cap) — cel groeit mee in hoogte.
+      const chips = entries.map(({ time, item }) => `
         <div onclick="event.stopPropagation();window._lsOpenOpstartDetail('${esc(String(item.id))}')"
           title="${esc(item.naam || '')} · ${esc(item.email || '')}"
           style="display:block;padding:2px 6px;margin:2px 0;background:var(--brand-soft, rgba(10,116,144,.12));color:var(--brand,#0A7490);border-radius:4px;font-size:10.5px;line-height:1.35;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
           <span style="font-weight:600">${esc(fmtTime(time))}</span> ${esc(item.naam || '—')}
         </div>`).join('');
-      const meer = entries.length > 3
-        ? `<div style="font-size:10px;color:var(--text-3);margin-top:2px">+${entries.length - 3} meer</div>`
-        : '';
+      const meer = '';
       const dayColor = isToday(day) ? 'var(--brand,#0A7490)' : 'var(--text-2)';
       const dayWeight = isToday(day) ? '700' : '500';
       const bg = isToday(day) ? 'var(--brand-soft, rgba(10,116,144,.06))' : 'var(--surface)';
@@ -3203,7 +3339,11 @@
     _lsOpDetail.open = true; _lsOpDetail.id = id; _lsOpDetail.loading = true; _lsOpDetail.error = null; _lsOpDetail.data = null;
     if (window.DFO?.render) window.DFO.render();
     try {
-      const j = await window.KV.authedJson('/api/leadsonderhoud-opstartsessies-detail?id=' + encodeURIComponent(id));
+      // Directe GHL-call → id-prefix 'appt:' ⇒ detail op appointment_id.
+      const qs = String(id).startsWith('appt:')
+        ? 'appointment_id=' + encodeURIComponent(String(id).slice(5))
+        : 'id=' + encodeURIComponent(id);
+      const j = await window.KV.authedJson('/api/leadsonderhoud-opstartsessies-detail?' + qs);
       _lsOpDetail.loading = false; _lsOpDetail.data = j?.item || null;
       if (!_lsOpDetail.data) _lsOpDetail.error = 'Geen data teruggekregen.';
     } catch (e) {
@@ -3267,11 +3407,17 @@
       body = `<div style="padding:24px;color:var(--rose)">⚠ ${esc(_lsOpDetail.error)}</div>`;
     } else if (_lsOpDetail.data) {
       const s = _lsOpDetail.data;
-      const badge = s.resultaat === 'toegelaten'
-        ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
-        : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>';
-      const akkoord = s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>';
-      const antwoordenHtml = (s.antwoorden || []).map((a, i) => {
+      const isCall = !!s.is_ghl_call;
+      const badge = isCall
+        ? '<span style="color:var(--text-3)">–</span>'
+        : (s.resultaat === 'toegelaten'
+          ? '<span style="background:var(--emerald-soft);color:var(--emerald);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Toegelaten</span>'
+          : '<span style="background:var(--surface-2);color:var(--text-3);padding:4px 12px;border-radius:12px;font-size:12.5px;font-weight:600">Afgewezen</span>');
+      const akkoord = isCall ? '<span style="color:var(--text-3)">–</span>'
+        : (s.noshow_akkoord ? '<span style="color:var(--emerald);font-weight:600">✓ Ja</span>' : '<span style="color:var(--text-3)">Nee</span>');
+      const antwoordenHtml = isCall
+        ? '<div style="color:var(--text-3);padding:12px 0;font-size:12.5px">Geen gekoppelde vragenlijst-antwoorden bij deze boeking.</div>'
+        : (s.antwoorden || []).map((a, i) => {
         const afw = a.afwijzer ? '<span style="background:var(--rose-soft);color:var(--rose);padding:1px 6px;border-radius:8px;font-size:10.5px;margin-left:6px">afwijzer</span>' : '';
         return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
           <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Vraag ${i + 1}</div>
@@ -3331,7 +3477,7 @@
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Bron</div><b>${esc(s.bron_label)}</b><div style="font-family:var(--mono,monospace);font-size:11px;color:var(--text-3)">${esc(s.booking_source || '—')}</div></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Score</div><b>${s.score != null ? s.score : '—'}</b><span style="color:var(--text-3)"> / drempel ${s.drempel != null ? s.drempel : '—'}</span></div>
           <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">€50 akkoord</div><b>${akkoord}</b></div>
-          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || '—')}</b></div>
+          <div><div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Gekozen moment</div><b>${esc(s.gekozen_slot || (s.gekozen_start_at ? kortDt(s.gekozen_start_at) : '—'))}</b></div>
         </div>
         <div>
           <div style="font-weight:600;margin-bottom:8px;font-size:13px">Vragenlijst-antwoorden</div>
@@ -3342,7 +3488,7 @@
     return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseOpstartDetail()">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(720px,100%);max-height:90vh;overflow-y:auto">
         <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px;position:sticky;top:0;background:var(--surface);z-index:1">
-          <div style="font-size:14px;font-weight:600">Opstartsessie-submission</div>
+          <div style="font-size:14px;font-weight:600">${_lsOpDetail.data?.is_ghl_call ? 'Boeking' : 'Kennismakingsgesprek-submission'}</div>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseOpstartDetail()">✕</button>
         </div>
         <div style="padding:16px 20px">${body}</div>
@@ -4061,8 +4207,205 @@
     </div>`;
   }
 
+  // ── Funnels-tab ────────────────────────────────────────────────────────────
+  // Hardcoded registry (bron van waarheid = dfo-website BRON_TOEGESTAAN + routes).
+  // Uitbreiden = hier een regel toevoegen. status: 'actief' | 'geparkeerd'.
+  const FUNNEL_REGISTRY = [
+    { bron: '7-daagse-v1',            naam: '7-daagse (v1)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v1',            status: 'actief' },
+    { bron: '7-daagse-v2',            naam: '7-daagse (v2)',   product: '7-daagse',   route: 'https://deforexopleiding.nl/7-daagse-v2',            status: 'actief' },
+    { bron: 'kennismakingscursus-v1', naam: 'Mini-cursus (v1)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v1', status: 'actief' },
+    { bron: 'kennismakingscursus-v2', naam: 'Mini-cursus (v2)', product: 'minicursus', route: 'https://deforexopleiding.nl/kennismakingscursus-v2', status: 'actief' },
+    { bron: 'website',                naam: 'Hoofdsite (algemeen)', product: '—',      route: 'https://deforexopleiding.nl',                       status: 'actief' },
+  ];
+  async function fetchFunnels(force) {
+    const st = _live.funnels;
+    const key = 'p=' + st.periode;
+    if (!force && st.lastKey === key && st.fetched && !st.error) return;
+    st.loading = true; st.error = null; st.lastKey = key;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/leads-per-bron-count?period=' + encodeURIComponent(st.periode));
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      const status = e?.status ? ' (HTTP ' + e.status + ')' : '';
+      st.error = 'Kon funnels niet laden' + status;
+      console.error('[ls-v2] funnels fetch fail:', e?.status, e?.body || e?.message);
+    }
+    st.loading = false; st.fetched = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsSetFunnelsPeriode = function (p) { _live.funnels.periode = p; fetchFunnels(true); };
+  function _lsFunnelStatusBadge(status) {
+    return status === 'geparkeerd'
+      ? '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Geparkeerd</span>'
+      : '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Actief</span>';
+  }
+  function _lsFunnelRowHtml(naam, product, route, statusBadge, aantal, mono) {
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 10px;font-weight:600">${esc(naam)}${mono ? `<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(mono)}</div>` : ''}</td>
+      <td style="padding:8px 10px">${esc(product || '—')}</td>
+      <td style="padding:8px 10px">${statusBadge}</td>
+      <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">${aantal == null ? '—' : esc(String(aantal))}</td>
+      <td style="padding:8px 10px">${route ? `<a href="${esc(route)}" target="_blank" rel="noopener" style="color:var(--brand)">Open ↗</a>` : '—'}</td>
+    </tr>`;
+  }
+  function funnelsView() {
+    const st = _live.funnels;
+    if (!st.fetched && !st.loading && !st.error) queueMicrotask(() => fetchFunnels(false));
+    const data = st.data || {};
+    const by = data.by_bron || {};
+    const chips = [['today', 'Vandaag'], ['week', 'Deze week'], ['month', 'Deze maand'], ['all', 'Alles']]
+      .map(([v, l]) => `<button class="chip ${st.periode === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetFunnelsPeriode('${v}')">${l}</button>`).join('');
+    const regBrons = new Set(FUNNEL_REGISTRY.map((f) => f.bron));
+    const funnelRows = FUNNEL_REGISTRY
+      .map((f) => _lsFunnelRowHtml(f.naam, f.product, f.route, _lsFunnelStatusBadge(f.status), by[f.bron] || 0, f.bron)).join('');
+    // Bron-waarden zonder registry-entry (bv. handmatig/meta): "overig".
+    const overigKeys = Object.keys(by).filter((b) => !regBrons.has(b)).sort((a, b) => a.localeCompare(b, 'nl'));
+    const overigRows = overigKeys
+      .map((b) => _lsFunnelRowHtml(b || '(leeg)', '—', null, '<span style="color:var(--text-3);font-size:11px">niet-funnel</span>', by[b], null)).join('');
+    const periodeLabel = { today: 'vandaag', week: 'deze week', month: 'deze maand', all: 'alle tijd' }[st.periode] || st.periode;
+    return `<div style="max-width:900px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Periode</span>
+        ${chips}
+        <span style="font-size:12px;color:var(--text-3);margin-left:auto">${st.loading ? 'Laden…' : `${data.total || 0} leads · ${periodeLabel}`}</span>
+      </div>
+      ${st.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+            <th style="padding:8px 10px">Funnel</th><th style="padding:8px 10px">Product</th><th style="padding:8px 10px">Status</th>
+            <th style="padding:8px 10px;text-align:right">Leads (${esc(periodeLabel)})</th><th style="padding:8px 10px">Pagina</th>
+          </tr></thead>
+          <tbody>${funnelRows}${overigRows ? `<tr><td colspan="5" style="padding:6px 10px;background:var(--surface-2);color:var(--text-3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Overig / niet-funnel</td></tr>${overigRows}` : ''}</tbody>
+        </table></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">Tellingen op basis van <code>leads.bron</code> (test-emails + afwijzers eruit). De funnellijst wordt beheerd in de code-registry; bron van waarheid voor de routes is dfo-website (BRON_TOEGESTAAN).</div>
+    </div>`;
+  }
+
+  // ── E-mails-tab (overzicht van alle mail-templates/verzenders) ──────────────
+  async function fetchEmails(force) {
+    const st = _live.emails;
+    if (!force && st.fetched && !st.error) return;
+    st.loading = true; st.error = null;
+    const seq = ++st._seq;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const j = await window.KV.authedJson('/api/email-overzicht');
+      if (seq !== st._seq) return;
+      st.data = j;
+    } catch (e) {
+      if (seq !== st._seq) return;
+      const status = e?.status ? ' (HTTP ' + e.status + ')' : '';
+      st.error = 'Kon e-mailoverzicht niet laden' + status;
+      console.error('[ls-v2] emails fetch fail:', e?.status, e?.body || e?.message);
+    }
+    st.loading = false; st.fetched = true;
+    if (window.DFO?.render) window.DFO.render();
+  }
+  window._lsSetEmailFilter  = function (f) { _live.emails.filter = f; if (window.DFO?.render) window.DFO.render(); };
+  window._lsSetEmailMailbox = function (sel) { _live.emails.mailbox = String(sel.value || 'alle'); if (window.DFO?.render) window.DFO.render(); };
+  function _lsAlleEmailRijen() {
+    const c = (_live.emails.data && _live.emails.data.categories) || {};
+    return [].concat(c.email_templates || [], c.onderhoud_sjablonen || [], c.code || []);
+  }
+  window._lsEmailPreview = function (bron, id) {
+    const row = _lsAlleEmailRijen().find((r) => r.bron === bron && String(r.id) === String(id));
+    if (!row) return;
+    _live.emailPreview = { open: true, naam: row.naam || '', html: row.preview_html || '' };
+    if (window.DFO?.render) window.DFO.render();
+  };
+  window._lsCloseEmailPreview = function () { _live.emailPreview = { open: false, naam: '', html: '' }; if (window.DFO?.render) window.DFO.render(); };
+  window._lsEmailBewerk = function () { if (window.DFO?.goMod) window.DFO.goMod('instellingen'); };
+  function _lsEmailBronBadge(bron) {
+    if (bron === 'email_templates') return '<span style="background:var(--emerald-soft);color:var(--emerald);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">DB · email_templates</span>';
+    if (bron === 'onderhoud_sjablonen') return '<span style="background:var(--brand-soft, rgba(10,116,144,.12));color:var(--brand,#0A7490);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">DB · sjablonen</span>';
+    return '<span style="background:var(--surface-2);color:var(--text-3);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">Code</span>';
+  }
+  function emailsView() {
+    const st = _live.emails;
+    if (!st.fetched && !st.loading && !st.error) queueMicrotask(() => fetchEmails(false));
+    let rows = _lsAlleEmailRijen();
+    // Functionele categorie-filter
+    if (st.filter !== 'alle') rows = rows.filter((r) => r.categorie === st.filter);
+    // Mailbox-filter
+    const mailboxen = [...new Set(_lsAlleEmailRijen().map((r) => r.mailbox).filter(Boolean))].sort();
+    if (st.mailbox !== 'alle') rows = rows.filter((r) => r.mailbox === st.mailbox);
+
+    // Categorie-chips uit de response (functionele categorieën) + tellingen.
+    const catLabels = (_live.emails.data && _live.emails.data.categorie_labels) || {};
+    const alleRijen = _lsAlleEmailRijen();
+    const catCount = (v) => v === 'alle' ? alleRijen.length : alleRijen.filter((r) => r.categorie === v).length;
+    const catChip = (v, l) => `<button class="chip ${st.filter === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 10px" onclick="window._lsSetEmailFilter('${v}')">${esc(l)} <span style="opacity:.7">(${catCount(v)})</span></button>`;
+    const mailboxOpts = ['<option value="alle">Alle mailboxen</option>']
+      .concat(mailboxen.map((mb) => `<option value="${esc(mb)}" ${st.mailbox === mb ? 'selected' : ''}>${esc(mb)}</option>`)).join('');
+
+    const rowHtml = (r) => {
+      const bew = r.bewerkbaar
+        ? '<span style="color:var(--emerald);font-weight:600">✓ ja</span>'
+        : '<span style="color:var(--text-3)">nee (read-only)</span>';
+      const previewBtn = r.preview_html
+        ? `<button class="btn btn-secondary" style="font-size:11px;padding:3px 8px" onclick="window._lsEmailPreview('${esc(r.bron)}','${esc(String(r.id))}')">Preview</button>`
+        : '';
+      const bewerkBtn = r.bron === 'email_templates'
+        ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 8px;color:var(--brand)" title="Bewerk in Instellingen → E-mailtemplates" onclick="window._lsEmailBewerk()">Bewerk ↗</button>`
+        : '';
+      const codeBestand = r.bestand ? `<div style="color:var(--text-3);font-size:10.5px;font-family:var(--mono,monospace)">${esc(r.bestand)}</div>` : '';
+      const inact = r.actief === false ? ' <span style="color:var(--rose);font-size:10.5px">(inactief)</span>' : '';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;font-weight:600">${esc(r.naam || '—')}${inact}${r.subject ? `<div style="color:var(--text-3);font-size:10.5px">${esc(r.subject)}</div>` : ''}</td>
+        <td style="padding:8px 10px">${esc(r.trigger || r.doel || '—')}${codeBestand}</td>
+        <td style="padding:8px 10px;white-space:nowrap">${esc(r.mailbox || '—')}</td>
+        <td style="padding:8px 10px">${_lsEmailBronBadge(r.bron)}</td>
+        <td style="padding:8px 10px">${bew}</td>
+        <td style="padding:8px 10px;white-space:nowrap">${previewBtn} ${bewerkBtn}</td>
+      </tr>`;
+    };
+
+    const body = rows.length
+      ? rows.map(rowHtml).join('')
+      : `<tr><td colspan="6" style="padding:34px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen e-mails in dit filter.'}</td></tr>`;
+
+    const previewModal = _live.emailPreview.open ? `
+      <div style="position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:grid;place-items:center;padding:20px" onclick="if(event.target===this)window._lsCloseEmailPreview()">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:min(760px,100%);max-height:90vh;overflow:hidden;display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);gap:10px">
+            <div style="font-size:14px;font-weight:600">Preview — ${esc(_live.emailPreview.naam)}</div>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="window._lsCloseEmailPreview()">✕</button>
+          </div>
+          <iframe sandbox style="width:100%;height:62vh;border:0;background:#fff" srcdoc="${String(_live.emailPreview.html || '<p>(geen HTML-inhoud)</p>').replace(/&/g, '&amp;').replace(/"/g, '&quot;')}"></iframe>
+        </div>
+      </div>` : '';
+
+    return `<div style="max-width:960px">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em">Categorie</span>
+        ${catChip('alle', 'Alles')}${Object.keys(catLabels).map((k) => catChip(k, catLabels[k])).join('')}
+        <select onchange="window._lsSetEmailMailbox(this)" style="padding:5px 9px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);font-size:12px;margin-left:auto">${mailboxOpts}</select>
+      </div>
+      ${st.error ? `<div style="padding:10px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:10px">${esc(st.error)}</div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
+            <th style="padding:8px 10px">Naam</th><th style="padding:8px 10px">Doel / trigger</th><th style="padding:8px 10px">Mailbox</th>
+            <th style="padding:8px 10px">Bron</th><th style="padding:8px 10px">Bewerkbaar</th><th style="padding:8px 10px"></th>
+          </tr></thead>
+          <tbody>${body}</tbody>
+        </table></div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text-3)">DB-templates (email_templates) zijn bewerkbaar via Instellingen → E-mailtemplates. onderhoud_sjablonen (toelating/afwijzing) worden op dfo-website beheerd — hier alleen preview. Code-mails zijn hardcoded (bestand vermeld).</div>
+      ${previewModal}
+    </div>`;
+  }
+
   window.DFO.VIEWS['leadsonderhoud/Toegang-aanvragen'] = toegangAanvragenView;
   window.DFO.VIEWS['leadsonderhoud/Bronnen']        = bronnenView;
+  window.DFO.VIEWS['leadsonderhoud/Funnels']        = funnelsView;
+  window.DFO.VIEWS['leadsonderhoud/E-mails']        = emailsView;
   window.DFO.VIEWS['leadsonderhoud/Opstartsessies'] = opstartsessiesView;
   window.DFO.VIEWS['leadsonderhoud/Vragenlijst']    = vragenlijstView;
   window.DFO.VIEWS['leadsonderhoud/Templates']      = templatesView;

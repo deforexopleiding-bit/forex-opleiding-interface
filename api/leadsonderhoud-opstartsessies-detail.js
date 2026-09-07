@@ -23,6 +23,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { getCalendarNameMap } from './_lib/ghl-calendars.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -36,6 +37,42 @@ export default async function handler(req, res) {
   if (authErr || !user) return res.status(401).json({ error: 'Niet geauthenticeerd' });
   if (!(await requirePermission(req, 'leads.view'))) {
     return res.status(403).json({ error: 'Geen rechten (leads.view)' });
+  }
+
+  // ── Directe GHL-call (geen submission) → detail op appointment_id ──
+  const apptId = String((req.query || {}).appointment_id || '').trim();
+  if (apptId) {
+    if (!UUID_RE.test(apptId)) return res.status(400).json({ error: 'appointment_id ongeldig' });
+    try {
+      const { data: a } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, ghl_calendar_id, annulering_reden, annulering_reden_code')
+        .eq('id', apptId).maybeSingle();
+      if (!a) return res.status(404).json({ error: 'Afspraak niet gevonden' });
+      let bronLabel = 'GHL-agenda';
+      try { const m = await getCalendarNameMap(); bronLabel = m.get(a.ghl_calendar_id) || 'GHL-agenda'; } catch (_) { /* fallback */ }
+      return res.status(200).json({
+        item: {
+          id: 'appt:' + a.id,
+          is_ghl_call: true,
+          created_at: null,
+          booking_source: null,
+          bron_label: bronLabel,
+          naam: a.lead_name, email: a.lead_email, telefoon: a.lead_phone,
+          gekozen_slot: null, gekozen_start_at: a.scheduled_at,
+          antwoorden: [],                 // directe agenda-boeking → geen vragenlijst
+          score: null, drempel: null, resultaat: null, noshow_akkoord: null,
+          appointment_id: a.id, lead_id: null,
+          afspraak: {
+            scheduled_at: a.scheduled_at, status: a.status, zoom_join_url: a.zoom_join_url,
+            annulering_reden: a.annulering_reden, annulering_reden_code: a.annulering_reden_code,
+          },
+        },
+      });
+    } catch (e) {
+      console.error('[leadsonderhoud-opstartsessies-detail] appt:', e?.message || e);
+      return res.status(500).json({ error: 'Detail laden mislukt' });
+    }
   }
 
   const id = String((req.query || {}).id || '').trim();

@@ -89,6 +89,8 @@ export default async function handler(req, res) {
                started_at, completed_at, assigned_at, archived_at, start_date,
                created_by, created_at,
                bubble_provisioned, bubble_provisioned_at, bubble_provision_error, bubble_user_id,
+               dfo_lms_student_id, dfo_lms_provisioned, dfo_lms_provisioned_at, dfo_lms_provision_error,
+               auto_afgerond_sessie_id, auto_afgerond_sessie_op, auto_afgerond_sessie_titel, auto_afgerond_op,
                invite_sent_at,
                credentials_email_sent_at, credentials_wa_sent_at,
                mentor_intake_status,
@@ -317,6 +319,19 @@ export default async function handler(req, res) {
         bubble_provisioned_at  : row.bubble_provisioned_at || null,
         bubble_provision_error : row.bubble_provision_error || null,
         bubble_user_id            : row.bubble_user_id || null,
+        // dfo-lms (nieuw LMS). NIET verwarren met lms_provision — dat is de
+        // trial-site; zie api/_lib/dfo-lms-db.js.
+        dfo_lms_student_id        : row.dfo_lms_student_id || null,
+        dfo_lms_provisioned       : row.dfo_lms_provisioned === true,
+        dfo_lms_provisioned_at    : row.dfo_lms_provisioned_at || null,
+        dfo_lms_provision_error   : row.dfo_lms_provision_error || null,
+        // Waarom deze onboarding automatisch is afgerond: WELKE sessie het
+        // deed en wanneer. Een 'afgerond' zonder aanwijsbare oorzaak is
+        // precies het scherm waar we dit project al twee keer een halve dag
+        // aan kwijt waren.
+        auto_afgerond_sessie_id   : row.auto_afgerond_sessie_id || null,
+        auto_afgerond_sessie_op   : row.auto_afgerond_sessie_op || null,
+        auto_afgerond_op          : row.auto_afgerond_op || null,
         invite_sent_at            : row.invite_sent_at || null,
         credentials_email_sent_at : row.credentials_email_sent_at || null,
         credentials_wa_sent_at    : row.credentials_wa_sent_at || null,

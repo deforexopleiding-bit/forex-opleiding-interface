@@ -133,3 +133,51 @@ export function beslisWachtInplanning({ taak, afspraken, nu = Date.now() }) {
   if (nu - gestuurd >= WACHT_UREN * 3600 * 1000) return { actie: 'terug' };
   return { actie: 'wacht' };
 }
+
+/**
+ * De 48-uurbeslissing voor een taak die op 'wacht_verplaatsing' staat.
+ *
+ * Dave gaf aan dat hij deze persoon naar een ander event verplaatst. Dat is een
+ * belofte, geen meting — vandaar dit vangnet, met dezelfde vorm als
+ * beslisWachtInplanning() hierboven: zoek bewijs, en zonder bewijs komt de
+ * kaart na 48 uur terug.
+ *
+ * Het bewijs is een ANDER bewijs dan bij wacht_inplanning, en dat is precies
+ * waarom die twee statussen apart zijn gebleven: hier zoeken we een rij in
+ * event_attendees met status 'aangemeld' op een ander event, daar een afspraak
+ * in follow_up_appointments. Met één status zou een gevonden afspraak een
+ * openstaande verplaatsing kunnen afsluiten, en dan gaat een kaart om de
+ * verkeerde reden dicht.
+ *
+ *   taak       — { id, bron_ref: { attendee_id, event_id, verplaatst_gemeld_at } }
+ *   aanmeldingen — kandidaat-rijen ({ id, event_id, email, phone, status })
+ *   nu         — referentiemoment in ms
+ */
+export function beslisWachtVerplaatsing({ taak, aanmeldingen, nu = Date.now() }) {
+  const ref = (taak && taak.bron_ref) || {};
+  const gemeld = ref.verplaatst_gemeld_at ? new Date(ref.verplaatst_gemeld_at).getTime() : NaN;
+
+  const gevonden = (Array.isArray(aanmeldingen) ? aanmeldingen : []).find((a) => {
+    if (!a || String(a.status || '') !== 'aangemeld') return false;
+    // Op een ANDER event: op hetzelfde event staan is geen verplaatsing.
+    if (!a.event_id || a.event_id === ref.event_id) return false;
+    // En niet de rij waar deze kaart zelf aan hangt.
+    if (a.id && a.id === ref.attendee_id) return false;
+    // hoortBijLead() is geschreven op de veldnamen van een afspraak; een
+    // deelnemerrij heet anders. Vertalen is eerlijker dan die functie oprekken.
+    return hoortBijLead(taak, {
+      lead_name : [a.first_name, a.last_name].filter(Boolean).join(' ') || null,
+      lead_email: a.email || null,
+      lead_phone: a.phone || null,
+    });
+  });
+  if (gevonden) return { actie: 'verplaatst', aanmelding: gevonden };
+
+  if (!Number.isFinite(gemeld)) {
+    // Geen meldmoment bekend: dan is er geen klok om af te lopen. Laat staan en
+    // laat het opvallen in plaats van willekeurig terug te zetten.
+    return { actie: 'wacht' };
+  }
+  if (nu - gemeld >= WACHT_UREN * 3600 * 1000) return { actie: 'terug' };
+  return { actie: 'wacht' };
+}

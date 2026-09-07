@@ -4,7 +4,8 @@
 // _openDetailModal (regel ~1500-1600). 4 sub-tabs:
 //   1. Overzicht — klant/status/mentor + acties (note, resolve, start-date,
 //      mentor-select, archive, cancel-preview-execute).
-//   2. Account & Bubble — bubble-status, provision-retry, invite-send (WA).
+//   2. Account & LMS — bubble-status, provision-retry, invite-send (WA) en
+//      de koppeling met het nieuwe LMS (dfo-lms / hlms_student).
 //   3. Vragenlijst — beschikbaarheid + answers-jsonb.
 //   4. Tijdlijn — mentor_updates + status-events.
 //
@@ -20,6 +21,8 @@
 //                             / {onboarding_id, reason, confirm:true}
 //   POST /api/onboarding-provision-retry {onboarding_id}
 //   POST /api/onboarding-invite-send {onboarding_id, force?}
+//   POST /api/onboarding-intake-status {onboarding_ids:[uuid]}
+//   POST /api/onboarding-dfo-lms-provision {onboarding_id}
 //
 // Modal-primitive: DFO.openModal (bestaande .mdl-* CSS in app-shell.css).
 // GEEN nieuwe ongestylede modal-klassen (recidive-fix).
@@ -63,6 +66,36 @@ async function loadMentors() {
   } catch (e) { console.warn('[onb-detail] mentor-list fail:', e?.message); _mentorsCache = []; }
   return _mentorsCache;
 }
+// De drie call-velden (gepland / voltooid / no-show) komen NIET uit
+// /api/onboarding-detail — dat endpoint geeft ze sinds de perf-refactor
+// hardgecodeerd als null terug (zie api/onboarding-detail.js: "de traagste
+// externe Bubble-call is VERWIJDERD uit het kritieke pad"). De bedoeling was
+// dat de frontend ze lazy bijhaalt via de sidecar; het lijstscherm doet dat
+// wel (onboarding-v2.js), deze modal deed dat niet. Gevolg: alle drie stonden
+// altijd op '—', wat leest als "er is nog niets gebeurd" terwijl het in
+// werkelijkheid "niet opgehaald" betekende. Vandaar deze loader plus een
+// formatter die die twee toestanden uit elkaar houdt.
+async function loadIntake(id) {
+  const j = await K().authedJson('/api/onboarding-intake-status', {
+    method: 'POST',
+    body: JSON.stringify({ onboarding_ids: [id] }),
+  });
+  const items = Array.isArray(j?.items) ? j.items : [];
+  return items.find((it) => it && it.onboarding_id === id) || null;
+}
+
+// 'laden' zolang de sidecar loopt, 'fout' als die faalde, anders de datum of
+// een streepje. Nooit een streepje tonen voor iets wat we niet weten.
+function fmtIntake(iso) {
+  if (state.intakeStatus === 'laden') {
+    return '<span style="color:var(--text-3)">laden…</span>';
+  }
+  if (state.intakeStatus === 'fout') {
+    return '<span style="color:var(--amber,#B45309)" title="De agenda-gegevens konden niet worden opgehaald. Dit betekent NIET dat er geen call is.">niet opgehaald</span>';
+  }
+  return fmtDT(iso);
+}
+
 async function loadDetail(id) {
   const j = await K().authedJson('/api/onboarding-detail?id=' + encodeURIComponent(id));
   return j?.onboarding || null;
@@ -86,7 +119,7 @@ function renderTabs() {
   const t = state.tab;
   const items = [
     { k: 'overzicht',  l: 'Overzicht' },
-    { k: 'account',    l: 'Account & Bubble' },
+    { k: 'account',    l: 'Account & LMS' },
     { k: 'vragenlijst', l: 'Vragenlijst' },
     { k: 'tijdlijn',   l: 'Tijdlijn' },
   ];
@@ -128,12 +161,12 @@ function renderOverzichtTab() {
       <div class="kv-onb-meta-row"><span>Mentor</span><b>${esc(o.mentor_name || '— nog geen mentor —')}</b></div>
       <div class="kv-onb-meta-row"><span>Aangemeld</span><span>${fmtDT(o.created_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Startdatum</span><span>${fmtDate(o.start_date)}</span></div>
-      <div class="kv-onb-meta-row"><span>Eerste call gepland</span><span>${fmtDT(o.planned_call_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Laatste call voltooid</span><span>${fmtDT(o.last_completed_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Laatste no-show</span><span>${o.last_noshow_at ? `<span style="color:var(--rose)">${fmtDT(o.last_noshow_at)}</span>` : '—'}</span></div>
+      <div class="kv-onb-meta-row"><span>Eerste call gepland</span><span>${fmtIntake(o.planned_call_at)}</span></div>
+      <div class="kv-onb-meta-row"><span>Laatste call voltooid</span><span>${fmtIntake(o.last_completed_at)}</span></div>
+      <div class="kv-onb-meta-row"><span>Laatste no-show</span><span>${o.last_noshow_at ? `<span style="color:var(--rose)">${fmtIntake(o.last_noshow_at)}</span>` : fmtIntake(null)}</span></div>
       <div class="kv-onb-meta-row"><span>Toegewezen</span><span>${fmtDT(o.assigned_at)}</span></div>
       <div class="kv-onb-meta-row"><span>Gestart</span><span>${fmtDT(o.started_at)}</span></div>
-      <div class="kv-onb-meta-row"><span>Afgerond</span><span>${fmtDT(o.completed_at)}</span></div>
+      <div class="kv-onb-meta-row"><span>Afgerond</span><span>${fmtDT(o.completed_at)}${autoAfgerondNoot(o)}</span></div>
       ${o.archived_at ? `<div class="kv-onb-meta-row"><span>Gearchiveerd</span><span>${fmtDT(o.archived_at)}</span></div>` : ''}
       <div class="kv-onb-meta-row"><span>Betaling</span><span>${o.paid ? '<span class="kv-onb-pill kv-onb-pill-ok">Betaald</span>' : '<span class="kv-onb-pill kv-onb-pill-warn">Niet betaald</span>'}</span></div>
     </div>
@@ -229,6 +262,106 @@ function renderAccountTab() {
         </button>
       </div>
       <div class="kv-onb-hint">De uitnodiging wordt via e-mail verzonden naar het klant-adres. Het onboarding-token blijft geldig; een bestaande link blijft dus werken.</div>
+    </div>
+
+    ${renderDfoLmsSection(o)}`;
+}
+
+// Waarom deze onboarding automatisch is afgerond, in het scherm zelf.
+//
+// Sinds 7 september 2026 sluit de eerste AFGERONDE sessie van een student de
+// onboarding automatisch af. Zonder deze regel staat er alleen 'Afgerond' met
+// een datum, en dan is niet na te gaan waardoor — precies het schermsoort dat
+// ons deze week twee keer een halve dag heeft gekost. Hier staat dus welke
+// sessie het deed en wanneer die was.
+function autoAfgerondNoot(o) {
+  if (!o.auto_afgerond_op) return '';
+  const wanneer = o.auto_afgerond_sessie_op ? fmtDT(o.auto_afgerond_sessie_op) : 'onbekend';
+  const sid = o.auto_afgerond_sessie_id ? String(o.auto_afgerond_sessie_id) : null;
+  // De TITEL van de sessie die sloot. Staat er 'Testsessie (verificatie)', dan
+  // is in één oogopslag duidelijk dat hier een echte klant is afgesloten op
+  // iets dat geen call was. Ontbreekt de titel — een rij van vóór deze kolom,
+  // of een LMS dat even niet antwoordde — dan valt hij gewoon weg; de datum en
+  // het sessie-nummer staan er nog.
+  const titel = o.auto_afgerond_sessie_titel
+    ? String(o.auto_afgerond_sessie_titel).trim() : '';
+  return `<div style="margin-top:3px;font-size:11.5px;color:var(--text-3);line-height:1.45">
+      Automatisch afgerond op ${esc(fmtDT(o.auto_afgerond_op))} door de eerste
+      afgeronde sessie${titel ? ` <strong>${esc(titel)}</strong>` : ''} van ${esc(wanneer)}.
+      ${sid ? `<br><span class="mono" style="font-size:11px">sessie ${esc(sid)}</span>` : ''}
+    </div>`;
+}
+
+// ── dfo-lms (het NIEUWE LMS) ───────────────────────────────────────────────
+// Let op de naamgeving: dit is hlms_student in het dfo-lms-project. Het heeft
+// NIETS te maken met onboardings.lms_provision — dat is de trial-site voor
+// leads (7-daagse / mini-cursus). Zie api/_lib/dfo-lms-db.js.
+// Stabiele voorvoegsels uit api/_lib/dfo-lms-uitnodiging.js. Ze staan hier
+// letterlijk omdat een browserbestand geen server-lib kan importeren; wijzig
+// je ze daar, wijzig ze dan hier mee.
+const UITNODIGING_HERSTELBAAR   = 'UITNODIGING_MAIL_MISLUKT:';
+const UITNODIGING_ACTIE_VEREIST = 'UITNODIGING_WACHTWOORD_NIET_GEZET:';
+
+// De twee uitkomsten van de LMS-uitnodiging die WEZENLIJK verschillen, en
+// die daarom nooit als één "er ging iets mis" mogen worden getoond:
+//
+//   mail_mislukt  → er is niets veranderd, het bestaande wachtwoord van de
+//                   student werkt door. Vervelend, veilig opnieuw te proberen.
+//   wachtwoord_niet_gezet
+//                 → de mail is de deur uit MET een wachtwoord dat niet werkt.
+//                   De student kan er NU NIET IN. Opnieuw versturen is geen
+//                   keuze maar een noodzaak, en hoe eerder hoe beter.
+function uitnodigingWaarschuwing(fout) {
+  if (!fout) return '';
+  if (String(fout).startsWith(UITNODIGING_ACTIE_VEREIST)) {
+    return `<div class="kv-edit-banner" style="background:#FEE2E2;border-color:#FCA5A5;color:#991B1B">
+      <b>Actie vereist — de student kan niet inloggen.</b><br>
+      De welkomstmail is verstuurd, maar het wachtwoord is niet gezet. Verstuur
+      de uitnodiging opnieuw; wachten lost dit niet op.
+    </div>`;
+  }
+  if (String(fout).startsWith(UITNODIGING_HERSTELBAAR)) {
+    return `<div class="kv-edit-banner" style="background:#FEF3C7;border-color:#FCD34D;color:#92400E">
+      <b>Mail niet verstuurd.</b><br>
+      Er is niets veranderd en een bestaand wachtwoord blijft werken. Veilig om
+      opnieuw te proberen.
+    </div>`;
+  }
+  return '';
+}
+
+function renderDfoLmsSection(o) {
+  const gekoppeld = !!o.dfo_lms_provisioned && !!o.dfo_lms_student_id;
+  const fout      = o.dfo_lms_provision_error || null;
+  const pill = gekoppeld
+    ? '<span class="kv-onb-pill kv-onb-pill-ok">Gekoppeld</span>'
+    : (fout
+        ? '<span class="kv-onb-pill kv-onb-pill-danger">Mislukt</span>'
+        : '<span class="kv-onb-pill kv-onb-pill-warn">Nog niet</span>');
+
+  return `
+    <div class="kv-onb-section">
+      <div class="kv-onb-section-title">LMS (dfo-lms)</div>
+      <div class="kv-onb-meta">
+        <div class="kv-onb-meta-row"><span>Studentkoppeling</span><span>${pill}</span></div>
+        <div class="kv-onb-meta-row"><span>Student-id</span><span class="mono">${esc(o.dfo_lms_student_id || '—')}</span></div>
+        <div class="kv-onb-meta-row"><span>Gekoppeld op</span><span>${fmtDT(o.dfo_lms_provisioned_at)}</span></div>
+        ${fout ? `<div class="kv-onb-meta-row"><span>Fout</span><span style="color:var(--rose)">${esc(fout)}</span></div>` : ''}
+      </div>
+      ${uitnodigingWaarschuwing(fout)}
+      <div class="kv-onb-action-row">
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-dfolms ${state.savingAction ? 'disabled' : ''}>
+          ${state.savingAction === 'dfolms'
+            ? 'Bezig…'
+            : (gekoppeld ? 'Koppeling opnieuw controleren' : 'Student aanmaken in LMS')}
+        </button>
+        <button type="button" class="ds-btn ds-btn-ghost ds-btn-sm" data-kv-onb-lmsinvite ${state.savingAction || !gekoppeld ? 'disabled' : ''} title="Verstuurt de welkomstmail van het LMS. Is er al eerder uitgenodigd, dan gebeurt er niets.">
+          ${state.savingAction === 'lmsinvite' ? 'Versturen…' : 'LMS-uitnodiging versturen'}
+        </button>
+      </div>
+      <div class="kv-onb-hint">${gekoppeld
+        ? 'De studentrij bestaat al. Opnieuw uitvoeren maakt nooit een tweede student aan — er wordt eerst gezocht op onboarding en op e-mailadres.'
+        : 'Maakt de studentrij voor deze klant aan in het nieuwe LMS. Nieuwe onboardings gaan automatisch; deze knop is voor bestaande klanten en wordt per klant handmatig gebruikt.'}</div>
     </div>`;
 }
 
@@ -457,6 +590,86 @@ async function actCancelPreview() {
 async function actProvision() {
   await callAction('provision', '/api/onboarding-provision-retry', { onboarding_id: state.id });
 }
+
+// De uitnodiging is een APARTE knop en geen bijwerking van 'student aanmaken'.
+// Deze knop wordt op bestaande klanten gebruikt, en die horen niet onverwacht
+// een mail te krijgen omdat iemand de koppeling wilde controleren. Daarom
+// stuurt de server pas iets bij een uitdrukkelijke send_invite.
+async function actLmsInvite() {
+  state.savingAction = 'lmsinvite'; state.globalError = null; state.saveOk = null;
+  rerender();
+  let j = null;
+  try {
+    j = await K().authedJson('/api/onboarding-dfo-lms-provision', {
+      method: 'POST',
+      body: JSON.stringify({ onboarding_id: state.id, send_invite: true }),
+    });
+  } catch (e) {
+    state.savingAction = null;
+    state.globalError = e?.message || 'Uitnodiging mislukt';
+    rerender();
+    return;
+  }
+
+  state.savingAction = null;
+  try { state.data = await loadDetail(state.id); } catch (_) { /* bijzaak */ }
+
+  const u = j && j.uitnodiging;
+  if (!u) {
+    state.globalError = 'Geen uitnodiging-resultaat ontvangen.';
+  } else if (u.ok === true && u.overgeslagen) {
+    // De grendel sloeg aan: er was al eerder gemaild. Dit is GOED nieuws,
+    // geen fout — hier is een tweede mail juist voorkomen.
+    state.saveOk = 'Er was al eerder een uitnodiging verstuurd'
+      + (u.uitnodiging_verstuurd_op ? ' op ' + fmtDT(u.uitnodiging_verstuurd_op) : '')
+      + ' — er is niets opnieuw gestuurd.';
+  } else if (u.ok === true) {
+    state.saveOk = 'LMS-uitnodiging verstuurd.';
+  } else {
+    state.globalError = 'Uitnodiging mislukt: ' + (u.fout || 'onbekende fout');
+  }
+
+  if (typeof state.onSuccess === 'function') state.onSuccess();
+  rerender();
+}
+
+// Eigen handler in plaats van callAction: dit endpoint is fail-soft en geeft
+// een mislukking terug als 200 met { ok:false, error }. callAction zou dat als
+// 'Opgeslagen' tonen, en juist bij het aanmaken van een echt studentaccount
+// mag een fout nooit als succes op het scherm komen.
+async function actDfoLms() {
+  state.savingAction = 'dfolms'; state.globalError = null; state.saveOk = null;
+  rerender();
+  let j = null;
+  try {
+    j = await K().authedJson('/api/onboarding-dfo-lms-provision', {
+      method: 'POST',
+      body: JSON.stringify({ onboarding_id: state.id }),
+    });
+  } catch (e) {
+    state.savingAction = null;
+    state.globalError = e?.message || 'Koppeling mislukt';
+    rerender();
+    return;
+  }
+
+  state.savingAction = null;
+  try { state.data = await loadDetail(state.id); } catch (_) { /* detail-refresh is bijzaak */ }
+
+  if (!j || j.ok !== true) {
+    state.globalError = 'LMS-koppeling mislukt: ' + (j?.error || j?.reason || 'onbekende fout');
+  } else if (j.created) {
+    state.saveOk = 'Student aangemaakt in het LMS.'
+      + (j.mentor_warning ? ' Let op: mentor niet gekoppeld (' + j.mentor_warning + ').' : '');
+  } else if (j.adopted) {
+    state.saveOk = 'Bestaande student in het LMS gevonden en gekoppeld — geen nieuwe aangemaakt.';
+  } else {
+    state.saveOk = 'Al gekoppeld — er is niets gewijzigd.';
+  }
+
+  if (typeof state.onSuccess === 'function') state.onSuccess();
+  rerender();
+}
 async function actResend() {
   const cid = state.data?.customer_id;
   if (!cid) { K().toast('Geen klant-koppeling — kan uitnodiging niet versturen'); return; }
@@ -580,6 +793,8 @@ function wire() {
   box.querySelector('[data-kv-onb-cancel-preview]')?.addEventListener('click', actCancelPreview);
   box.querySelector('[data-kv-onb-provision]')?.addEventListener('click', actProvision);
   box.querySelector('[data-kv-onb-resend]')?.addEventListener('click', actResend);
+  box.querySelector('[data-kv-onb-dfolms]')?.addEventListener('click', actDfoLms);
+  box.querySelector('[data-kv-onb-lmsinvite]')?.addEventListener('click', actLmsInvite);
 }
 function rerender() {
   D().openModal({ head: renderHead(), body: renderBody(), foot: renderFoot() });
@@ -595,6 +810,8 @@ export async function openOnboardingDetailModal({ onboardingId, onSuccess } = {}
     loading: true, error: null, data: null,
     draftNote: '', savingAction: null, globalError: null, saveOk: null,
     onSuccess: onSuccess || null,
+    // 'laden' | 'klaar' | 'fout' — staat van de lazy intake-sidecar.
+    intakeStatus: 'laden',
   };
   rerender();
   const [data] = await Promise.all([
@@ -608,4 +825,27 @@ export async function openOnboardingDetailModal({ onboardingId, onSuccess } = {}
     state.loading = false; state.data = data;
   }
   rerender();
+
+  // Sidecar NA het eerste render: de Bubble-call erachter is traag en mag de
+  // modal niet ophouden. Faalt 'ie, dan zegt fmtIntake eerlijk 'niet
+  // opgehaald' in plaats van een streepje.
+  if (state.data) {
+    const id = state.id;
+    try {
+      const it = await loadIntake(id);
+      if (!state || state.id !== id) return;   // modal is intussen gesloten/gewisseld
+      if (it) {
+        state.data.intake_status     = it.intake_status     ?? state.data.intake_status;
+        state.data.planned_call_at   = it.planned_call_at   ?? null;
+        state.data.last_completed_at = it.last_completed_at ?? null;
+        state.data.last_noshow_at    = it.last_noshow_at    ?? null;
+      }
+      state.intakeStatus = 'klaar';
+    } catch (e) {
+      console.warn('[onb-detail] intake-status fail:', e?.message);
+      if (!state || state.id !== id) return;
+      state.intakeStatus = 'fout';
+    }
+    rerender();
+  }
 }
