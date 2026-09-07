@@ -125,6 +125,47 @@ export function dueVoorRondeA({ vandaag, registratie = null }) {
 export const dueVoorAanmelding = dueVoorRondeB;
 
 /**
+ * IN WELKE RONDE ZIT DEZE KAART?
+ *
+ * Het scherm zei dit nergens, en daardoor las Maxim de kaart verkeerd: hij
+ * dacht dat 'Bevestigd' de kaart liet verdwijnen, terwijl de code hem netjes
+ * doorschuift naar event min vier. De knop deed al het goede; alleen was dat
+ * onzichtbaar.
+ *
+ * Deze functie verzint geen nieuwe indeling — hij LEEST dezelfde grens die
+ * bepaalTaakActie hanteert: dueVoorRondeB is event min vier, en zodra vandaag
+ * daar is of voorbij, is dit de laatste ronde. Verandert
+ * WAKKER_DAGEN_VOOR_EVENT ooit, dan schuift het etiket vanzelf mee.
+ *
+ * Geen eventdag bekend? Dan geen etiket. Een verzonnen ronde is erger dan geen
+ * ronde — zie de blinde-vlek-regel in docs/opvolging-module.md.
+ */
+export function bepaalRonde({ eventDag, vandaag }) {
+  if (!eventDag || !vandaag) return null;
+  const wakker = dagPlus(eventDag, -WAKKER_DAGEN_VOOR_EVENT);
+  if (!wakker) return null;
+
+  if (vandaag >= wakker) {
+    return {
+      ronde   : 'B',
+      label   : 'Bevestigingsronde',
+      uitleg  : 'Komt hij echt? Dit is de laatste ronde voor het event.',
+      laatste : true,
+      terug_op: null,
+    };
+  }
+  return {
+    ronde   : 'A',
+    label   : 'Opwarmronde',
+    uitleg  : 'Check of de inschrijving gelukt is en of alles duidelijk is.',
+    laatste : false,
+    // Wat 'Bevestigd' doet: de kaart schuift door naar event min vier en komt
+    // dan terug. Dat is de datum die op de kaart hoort te staan.
+    terug_op: wakker,
+  };
+}
+
+/**
  * Wat moet er met deze deelnemer gebeuren?
  *
  *   attendee — { id, status, registered_at, switched_from_event_id }
