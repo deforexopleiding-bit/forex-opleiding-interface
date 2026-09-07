@@ -284,6 +284,88 @@ onboarding een `dfo_lms_student_id` heeft. Die klant hoort in het LMS, en een
 Bubble-wachtwoord helpt hem niet. Bestaande, Bubble-only studenten houden de
 knop gewoon.
 
+## Spoor C — sessies uit het LMS
+
+De mentoren werken sinds augustus 2026 in het nieuwe LMS. Het CRM las nog
+Bubble-`1-1-session`, en dat is een bron waar het echte werk niet meer
+gebeurt. Twee plekken zijn nu omgezet.
+
+**Geen leertype-filter meer.** De Bubble-lezers filterden op
+`learn_type1 = 'Alpha Program'`. Dat onderscheid is vervallen (beslissing
+Maxim, 7 september 2026): elke coachingsessie telt mee. Voeg dus nergens een
+leertype-filter toe — een sessie is een sessie.
+
+### De gedeelde lezer: `api/_lib/dfo-lms-sessies.js`
+
+Eén regel staat centraal: **"leeg" en "niet gelukt" mogen nooit hetzelfde
+zijn.** Elke Bubble-lezer in het CRM vangt zijn fouten af naar een lege
+lijst, waardoor een storing en "er is niets" er identiek uitzien. Precies
+daardoor kon de verschuiving maandenlang onopgemerkt blijven.
+
+Elke functie geeft daarom `bron_status` terug:
+
+| | |
+|---|---|
+| `gelezen` | de bevraging is gelukt. Nul rijen betekent dan **echt** nul. |
+| `onbereikbaar` | de bevraging is mislukt. Het aantal zegt niets. |
+| `niet-geconfigureerd` | de `DFO_LMS_*`-variabelen ontbreken. |
+
+Daarnaast telt de module wat er **buiten de filter viel** —
+`overgeslagen_afgehandeld`, `zonder_student`, `zonder_email`,
+`zonder_bubble_koppeling` — zodat een uitkomst niet alleen zegt wat er
+doorkwam maar ook wat er wegviel.
+
+### De twee koppelingen
+
+- **Student → CRM:** `hlms_student.bubble_user_id`. Gemeten op 7 september
+  2026: 299 van de 304 rijen dragen 'm, en die waarden zijn uniek. De vijf
+  zonder zijn vier handmatige adminrijen en de eerste CRM-aanmaak. Dankzij
+  die brug blijft `student_signals.bubble_student_id` gewoon werken.
+- **Mentor → CRM:** op **e-mailadres** (`hlms_personeel.email` ↔
+  `team_members.email`). Het LMS kent geen `Created By` zoals Bubble; de
+  toerekening loopt via `mentor_id`, wat eerlijker is: niet wie de rij
+  aanmaakte, maar wiens sessie het was.
+
+### No-show-detectie — `api/cron/noshow-detect.js`
+
+Leest nu `hlms_sessie` met `status='no_show'` sinds het watermerk. Bij een
+mislukte bevraging eindigt de cron met een 502 **zonder het watermerk te
+verzetten**, zodat een storing geen no-shows overslaat.
+
+De oude wees-tak (no-shows zonder gekoppelde student) is vervallen:
+`hlms_sessie.student_id` is nooit leeg — 0 van 44 gemeten.
+
+### Afgeleide intake-status — `api/onboarding-intake-status.js`
+
+Kijkt nu per **student** in plaats van per mentor. Dat lost twee dingen
+tegelijk op: de Bubble-bron is leeg, én een student van een mentor zonder
+Bubble-koppeling viel voorheen sowieso buiten beeld.
+
+**Kon de bron niet gelezen worden, dan wordt er niets afgeleid** —
+`intake_status: null` in plaats van een status. Zou je wel afleiden, dan komt
+elke student op `nog_te_benaderen` (rang 4 in `INTAKE_RANK`) en dus
+**bovenaan** de probleemlijst, ook iemand die dertien sessies achter de rug
+heeft. Dat is niet leeg maar **onwaar**, en het zet iemand tot een verkeerde
+handeling aan: bellen wie al lang bezig is. De frontend patcht alleen bij een
+niet-lege waarde, dus een leeg antwoord laat de vorige stand staan.
+
+### Bewust niet omgezet: de betaalherinnering
+
+`api/cron/first-call-payment-reminder.js` blijft op Bubble staan en is
+daarmee stil. Dat is een **keuze**, geen vergetelheid.
+
+In het ontwerp van Maxim gaat de openstaande factuur een andere weg: de
+mentor ziet bij zijn student dat er iets openstaat en spreekt de klant daar
+tijdens de sessie op aan; een openstaande factuur geeft een waarschuwing bij
+het inplannen, twee of meer een harde stop. Mensenwerk met een rem dus.
+
+En zwaarder: die cron ligt al weken stil. Hem repareren betekent dat klanten
+ineens weer herinneringen krijgen die ze al die tijd niet gekregen hebben —
+een gedragsverandering richting betalende klanten, geen bugfix. De omzetting
+is wél gemaakt en geparkeerd op branch
+`claude/geparkeerd-betaalherinnering-lms-bron`, mocht het ontwerp anders
+uitpakken.
+
 ## Bekende beperking: tellers die alleen tellen wat ze zagen
 
 Dit is geen fout in één cron maar een patroon dat op meerdere plaatsen in het
