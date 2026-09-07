@@ -54,6 +54,8 @@ export const NIET_OPGENOMEN = 'niet_opgenomen';
 /** Afgehandeld via iemand anders: wel een resultaat, geen eigen gesprek. */
 export const VIA_ANDER      = 'via_ander';
 export const ONBEKEND       = 'onbekend';
+/** Wij hingen op voordat er werd opgenomen: geen poging van de lead én geen van ons. */
+export const AFGEBROKEN      = 'afgebroken';
 
 /**
  * Classificeer de vrije tekst in `resultaat`.
@@ -68,6 +70,9 @@ export function classificeerResultaat(resultaat) {
   if (!t) return ONBEKEND;
   if (t.startsWith('via ander') || t.startsWith('bevestigd via')) return VIA_ANDER;
   if (t.startsWith('gesproken')) return GESPROKEN;
+  // Wij braken af voordat er werd opgenomen. Geen contact, en ook geen
+  // 'niet opgenomen' — dat laatste zou een uitspraak over de lead zijn.
+  if (t.startsWith('afgebroken')) return AFGEBROKEN;
   if (t.startsWith('niet opgenomen') || t.startsWith('niet_opgenomen')
       || t.startsWith('geen gehoor') || t.startsWith('geen_gehoor')) return NIET_OPGENOMEN;
   return ONBEKEND;
@@ -136,7 +141,7 @@ export function isContact(p) {
   if (p.soort === 'call') {
     const k = classificeerResultaat(p.resultaat);
     if (k === GESPROKEN) return true;
-    if (k === NIET_OPGENOMEN || k === VIA_ANDER) return false;
+    if (k === NIET_OPGENOMEN || k === VIA_ANDER || k === AFGEBROKEN) return false;
     // ONBEKEND: we weten het niet. Null, geen false — de aanroeper telt die
     // apart en het rapport meldt hem als blinde vlek. Stil op 'geen contact'
     // zetten zou iemand uit de lijst laten vallen op een aanname.

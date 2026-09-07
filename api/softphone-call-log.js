@@ -32,7 +32,10 @@ import { kiesTaakVoorCall, bouwCallPoging, telefoonStaart } from './_lib/opvolgi
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LINES = new Set(['nl','be']);
-const OUTCOMES = new Set(['answered','no_answer','busy','failed','local_cancel']);
+// 'afgebroken_voor_opnemen' erbij: wij hingen op voordat er werd opgenomen.
+// Dat is iets anders dan no_answer, en dat verschil hoort in de data te staan
+// in plaats van in een oordeel over de lead te verdwijnen.
+const OUTCOMES = new Set(['answered','no_answer','busy','failed','local_cancel','afgebroken_voor_opnemen']);
 const MAX_META_BYTES = 2000;
 
 // Bel-log accepteert elke telefoon-notatie die de SIP-flow accepteerde.
