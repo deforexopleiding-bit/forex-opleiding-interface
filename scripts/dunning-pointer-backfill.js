@@ -29,10 +29,11 @@
 //
 // TOON-BESLISSING (Maxim): runs die gepauzeerd zijn door een LOPEND GESPREK
 // (`paused_by_conversation_id` gezet) landen op ÉÉN SPORT LAGER dan de
-// hoogste bereikte sport. Die klanten zaten net nog met Dave in gesprek; met
-// de deur in huis vallen met een laatste waarschuwing past niet. Is er maar
-// één sport bereikt, dan blijft die staan. Alle andere runs — actief, of
-// gepauzeerd om een andere reden — gaan wel naar de hoogste bereikte sport.
+// hoogste bereikte sport. Deze runs staan stil omdat er een lopend gesprek
+// met de klant in de inbox is; meteen het slotbericht sturen terwijl er nog
+// een uitwisseling loopt past niet. Is er maar één sport bereikt, dan blijft
+// die staan. Alle andere runs — actief, of gepauzeerd om een andere reden —
+// gaan wel naar de hoogste bereikte sport.
 //
 // IDEMPOTENT: staat de pointer al goed, dan gebeurt er niets. Een tweede run
 // rapporteert nul verzettingen.
@@ -172,12 +173,14 @@ export function planBackfill(snap) {
     if (!bereikt.length) { skipped.push({ run_id: run.id, customer_name: naam, reason: 'geen ladder-sport bereikt' }); continue; }
 
     // TOON-BESLISSING (Maxim): een run die gepauzeerd is door een LOPEND
-    // GESPREK mag niet in één keer op het slotbericht landen. Die klanten
-    // zaten net nog met Dave aan de lijn; met de deur in huis vallen met een
-    // laatste waarschuwing past niet. Zij gaan één sport LAGER dan de hoogste
-    // bereikte sport — is de hoogste `aanmaning_dag37`, dan wordt het
-    // `aanmaning_dag21`. Is er maar één sport bereikt, dan blijft die staan:
-    // nooit lager dan de laagste bereikte sport.
+    // GESPREK mag niet in één keer op het slotbericht landen. Deze runs staan
+    // stil omdat er een lopend gesprek met de klant in de inbox is; meteen het
+    // slotbericht sturen terwijl er nog een uitwisseling loopt past niet.
+    // (`paused_by_conversation_id` zegt alleen DAT er een gespreksdraadje is —
+    // niet wie er aan de andere kant zit of via welk kanaal.) Zij gaan één
+    // sport LAGER dan de hoogste bereikte sport — is de hoogste
+    // `aanmaning_dag37`, dan wordt het `aanmaning_dag21`. Is er maar één sport
+    // bereikt, dan blijft die staan: nooit lager dan de laagste bereikte sport.
     //
     // Alle andere runs (actief, of gepauzeerd om een andere reden dan een
     // gesprek) gaan wel naar de hoogste bereikte sport.

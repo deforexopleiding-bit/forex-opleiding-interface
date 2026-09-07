@@ -278,9 +278,12 @@ Drie maatregelen, alle drie geleverd:
    **Toon-beslissing (Maxim):** runs die gepauzeerd zijn door een **lopend
    gesprek** (`paused_by_conversation_id` gezet) landen op **één sport lager**
    dan de hoogste bereikte sport — is de hoogste `aanmaning_dag37`, dan wordt
-   het `aanmaning_dag21`. Die klanten zaten net nog met Dave in gesprek; met
-   de deur in huis vallen met een laatste waarschuwing past niet. Is er maar
-   één sport bereikt, dan blijft die staan (nooit lager dan de laagste
+   het `aanmaning_dag21`. Deze runs staan stil omdat er een lopend gesprek met
+   de klant in de inbox is; meteen het slotbericht sturen terwijl er nog een
+   uitwisseling loopt past niet. (`paused_by_conversation_id` zegt alleen dát
+   er een gespreksdraadje loopt — niet wie er aan de andere kant zit of via
+   welk kanaal.) Is er maar één sport bereikt, dan blijft die staan (nooit
+   lager dan de laagste
    bereikte sport), en de idempotentiecheck blijft gelden: nooit terug naar
    een stap die de pointer al voorbij is. Alle andere runs — actief, of
    gepauzeerd om een andere reden — gaan wel naar de hoogste bereikte sport.
