@@ -1061,7 +1061,16 @@
 
     const st = _live.convs;
     const rows = asArr(st.items);
-    const sel  = rows.find(r => String(r.id) === String(_thread.convId)) || rows[0] || null;
+    // Auto-select van rows[0] alleen op desktop. Op mobiel (≤760px) zou
+    // dat data-has-sel="1" bij mount zetten → CSS verbergt de lijst → user
+    // ziet direct de thread van rows[0] i.p.v. de lijst, en kan geen andere
+    // conv tikken totdat 'ie op "← Terug" tikt. Leadsonderhoud doet ook
+    // geen auto-select (zie leadsonderhoud-v2.js gesprekkenView) — parity.
+    const isMobile = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width:760px)').matches;
+    const sel = rows.find(r => String(r.id) === String(_thread.convId))
+      || (isMobile ? null : (rows[0] || null));
     if (sel && (!_thread.conversation || String(_thread.conversation.id) !== String(sel.id)) && !_thread.loading) {
       queueMicrotask(() => _loadThread(sel.id));
     }
