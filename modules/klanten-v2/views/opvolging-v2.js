@@ -1188,6 +1188,15 @@
 .opv .nudoen .nudl{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;color:var(--o-muted);white-space:nowrap}
 .opv .nudoen.laat .nudl{color:var(--o-amb)}
 .opv .ronde{font-size:12.5px;color:var(--o-muted);margin:0 0 10px 2px}
+.opv .belr{margin-top:5px;font-size:11.5px;color:var(--o-muted);display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
+.opv .belr b{font-weight:600;color:#4b5563}
+.opv .belr.belraak b{color:#166534}
+.opv .belr.leeg{font-style:italic}
+.opv .bps{display:inline-flex;flex-wrap:wrap;gap:4px}
+.opv .belbol{padding:1px 6px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:11px}
+.opv .belbol.gsp{background:#dcfce7;color:#166534}
+.opv .belbol.kort{background:#fef3c7;color:#92400e}
+.opv .belbol.onb{background:#e5e7eb;color:#4b5563}
 .opv .rnd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;width:100%;
   margin:0 0 8px;padding:5px 9px;border-radius:7px;font-size:12px;line-height:1.45}
 .opv .rnd b{font-size:12.5px;letter-spacing:.01em}
@@ -1432,6 +1441,9 @@
 .opv .opvr-t{font-size:13.5px;font-weight:600}
 .opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
 .opv .opvr-notitie{white-space:pre-wrap;margin-top:4px}
+.opv .opvr-bel{margin-top:4px;display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
+.opv .opvr-bel.belraak{color:#166534}
+.opv .opvr-bps{display:inline-flex;flex-wrap:wrap;gap:4px}
 .opv details.opvr-rijen{margin-top:10px}
 .opv details.opvr-rijen>summary{cursor:pointer;font-size:12.5px;color:var(--o-acc);padding:4px 0;user-select:none}
 .opv details.opvr-rijen[open]>summary{margin-bottom:6px}
@@ -1612,6 +1624,79 @@
   }
 
   /**
+   * BELPOGINGEN VAN DIE DAG BIJ DEZE CALL — het bewijsmateriaal.
+   *
+   * Shudino Andrade stond als no-show terwijl er die dag om 17:23 een gesprek
+   * van 41 seconden met hem was. Dat stond gewoon in onze data en was nergens
+   * te zien, dus moest de collega die hem gebeld had op zijn woord geloofd
+   * worden. Precies het bewijs waar deze module voor bedoeld is.
+   *
+   * ALLE pogingen van die dag, niet alleen het nabelvenster van 12 tot 13. Dat
+   * venster beantwoordt een andere vraag — is er op tijd nagebeld — en een
+   * gesprek om kwart over vijf telt voor deze vraag net zo hard.
+   *
+   * belZin() is de tweeling van belZin() in api/opvolging-rapport.js, zodat het
+   * dagscherm en het rapport dezelfde zin geven. tests/opvolging-belzin-
+   * tweeling.test.js houdt ze gelijk.
+   */
+  const GESPREK_MIN_SEC = 10;
+
+  function belZin(aantal, gesproken, seconden) {
+    if (!aantal) return 'Die dag niet gebeld.';
+    const keer = aantal + '\u00d7 gebeld';
+    if (!gesproken) return 'Die dag ' + keer + ', geen gesprek van betekenis.';
+    const duur = seconden >= 90 ? Math.round(seconden / 60) + ' min' : seconden + ' s';
+    return 'Die dag ' + keer + ', waarvan ' +
+      (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken') + ' van samen ' + duur + '.';
+  }
+
+  /**
+   * De duur van een poging, of null.
+   *
+   * Number(null) is 0 en 0 is finite: zonder deze check wordt een ontbrekende
+   * duur stilletjes een call van nul seconden, en dus 'te kort'. Onbekend is
+   * geen nee — zelfde regel als isGesprek() aan de serverkant.
+   */
+  function duurVan(p) {
+    const ruw = p && p.duur_sec;
+    if (ruw === null || ruw === undefined || !Number.isFinite(Number(ruw))) return null;
+    return Number(ruw);
+  }
+
+  /** De uitgaande belpogingen van één dag uit de historiek van een taak. */
+  function belVanDag(taak, dag) {
+    const alles = (taak && taak.pogingen) || [];
+    const rij = alles.filter((p) =>
+      p && String(p.soort || '') === 'call' &&
+      (!p.richting || String(p.richting) === 'uit') &&
+      iso(p.tijdstip) === dag);
+    let gesproken = 0;
+    let seconden = 0;
+    for (const p of rij) {
+      const d = duurVan(p);
+      if (d !== null && d >= GESPREK_MIN_SEC) { gesproken += 1; seconden += d; }
+    }
+    return { aantal: rij.length, gesproken, seconden, pogingen: rij };
+  }
+
+  /** Het regeltje onder een call. Geen taak = geen historiek, en dat zeggen we. */
+  function belRegel(taak, dag) {
+    if (!taak) {
+      return '<div class="belr leeg">Deze lead staat niet in de takenlijst, dus er is geen belhistoriek om bij te zetten.</div>';
+    }
+    const b = belVanDag(taak, dag);
+    const stippen = b.pogingen.map((p) => {
+      const d = duurVan(p);
+      const kl = d === null ? 'onb' : d >= GESPREK_MIN_SEC ? 'gsp' : 'kort';
+      return '<span class="belbol ' + kl + '">' + esc(uur(p.tijdstip)) +
+        (d === null ? '' : ' &middot; ' + d + ' s') + '</span>';
+    }).join('');
+    return '<div class="belr' + (b.gesproken ? ' belraak' : '') + '">' +
+      '<b>' + esc(belZin(b.aantal, b.gesproken, b.seconden)) + '</b>' +
+      (stippen ? '<span class="bps">' + stippen + '</span>' : '') + '</div>';
+  }
+
+  /**
    * Calls van vandaag — de bezette momenten uit de agenda, als werkrij.
    *
    * Bewust géén eigen administratie: dit blok leest de agenda en schrijft
@@ -1650,7 +1735,8 @@
         '<div class="tijd">' + esc(c.tijd) + '</div>' +
         '<div class="who"><div class="nm">' + esc(c.naam) + '</div>' +
         '<div class="sub">' + esc(c.telefoon || 'geen nummer bekend') +
-          (taak ? ' &middot; staat al in je lijst' : '') + '</div></div>' +
+          (taak ? ' &middot; staat al in je lijst' : '') + '</div>' +
+        belRegel(taak, dag) + '</div>' +
         '<div class="act">' + knoppen + '</div></div>';
     }).join('');
   }
@@ -4372,6 +4458,19 @@
         // liggen, en dat verschil is precies wat op 6 september gerepareerd is.
         // En een call die nog moet komen krijgt hier zijn eigen zin, geen klacht.
         : '<i>' + esc(c.reden_leeg || 'Geen uitkomst vastgelegd.') + '</i>') + '</div>' +
+      // Het bewijsmateriaal bij de call. De zin komt van de server, zodat het
+      // dagscherm, dit scherm en de print niet uit elkaar lopen.
+      (c.belpogingen && c.belpogingen.gekoppeld
+        ? '<div class="opvr-u opvr-bel' + (c.belpogingen.gesproken ? ' belraak' : '') + '">' +
+          esc(c.belpogingen.samenvatting) +
+          (c.belpogingen.pogingen.length
+            ? ' <span class="opvr-bps">' + c.belpogingen.pogingen.map((p) =>
+                '<span class="belbol ' + (p.soort === 'gesprek' ? 'gsp' : p.soort === 'te_kort' ? 'kort' : 'onb') + '">' +
+                esc(p.tijd || '') + (p.duur_sec === null ? '' : ' &middot; ' + p.duur_sec + ' s') + '</span>').join('') +
+              '</span>' : '') + '</div>'
+        : c.belpogingen
+          ? '<div class="opvr-u opvr-bel"><i>Deze call is niet aan een taak gekoppeld; er is geen belhistoriek om bij te zetten.</i></div>'
+          : '') +
       (c.notitie ? '<div class="opvr-u opvr-notitie">' + esc(c.notitie) + '</div>' : '') +
       '</div>').join('') + '</div>';
     return h + '</div>';

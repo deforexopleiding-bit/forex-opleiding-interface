@@ -329,7 +329,9 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 4 · DE ZOOMCALLS ZELF
   // ═══════════════════════════════════════════════════════════════════════
-  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs: Date.now() });
+  // De belpogingen van die dag horen BIJ de call: zie belpogingenVoorCalls.
+  const belBijCall = belpogingenVoorCalls({ afspraken, taken: alleTaken, pogingen });
+  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs: Date.now(), belBijCall });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 5 · UIT DE LIJST GEHAALD
@@ -540,6 +542,133 @@ async function bouwDekking({ pogingen, taakVan, dagen, vandaag, blindeVlekken })
 }
 
 // ── Sectie 3 ───────────────────────────────────────────────────────────────
+/**
+ * NUMMER → TAAK. Eén huis, want twee kopieën lopen uiteen.
+ *
+ * Eerst exact op de volle cijferreeks, dan op de laatste 9 voor de lokaal
+ * geschreven variant. Alleen bij precies één treffer: twee klanten met dezelfde
+ * staart is een niet-gekoppelde call, geen 'kies de eerste'. Zie CLAUDE.md
+ * lesson 18.
+ *
+ * Stond eerst binnen bouwVensters. De belpogingen bij een zoomcall hebben exact
+ * dezelfde koppeling nodig, en een tweede versie ervan zou vroeg of laat een
+ * ander antwoord geven op dezelfde vraag.
+ */
+export function maakTaakZoeker(taken) {
+  const exact = new Map();
+  const staart = new Map();
+  for (const t of taken || []) {
+    const d = telCijfers(t.telefoon);
+    if (!d) continue;
+    if (!exact.has(d)) exact.set(d, []);
+    exact.get(d).push(t);
+    if (d.length >= 9) {
+      const s = d.slice(-9);
+      if (!staart.has(s)) staart.set(s, []);
+      staart.get(s).push(t);
+    }
+  }
+  return (tel) => {
+    const d = telCijfers(tel);
+    if (!d) return null;
+    const e = exact.get(d);
+    if (e && e.length === 1) return e[0];
+    if (d.length >= 9) {
+      const s = staart.get(d.slice(-9));
+      if (s && s.length === 1) return s[0];
+    }
+    return null;
+  };
+}
+
+/**
+ * ALLE BELPOGINGEN VAN DIE DAG BIJ DIE ZOOMCALL.
+ *
+ * Shudino Andrade stond op 7 september als no-show, en de collega die hem nog
+ * gebeld had moest op zijn woord geloofd worden. Terwijl het gewoon in onze
+ * data stond: een uitgaande call van 41 seconden om 17:23. Dat is precies het
+ * bewijsmateriaal waar deze module voor bedoeld is, en het was nergens te zien.
+ *
+ * NIET ALLEEN HET NABELVENSTER. bouwVensters kijkt naar 12-13 uur, want dat is
+ * de afspraak over wannéér er nagebeld hoort te worden. Deze functie beantwoordt
+ * een andere vraag — is er die dag contact gezocht? — en daar telt een gesprek
+ * om kwart over vijf net zo hard. Twee vragen, twee antwoorden; ze door elkaar
+ * halen was de reden dat dit bewijs onzichtbaar bleef.
+ *
+ * GEEN GEKOPPELDE TAAK IS NIET NUL. Een call zonder taak-koppeling heeft geen
+ * belhistoriek die we kunnen lezen; dat als '0×' tonen zou een verwijt zijn
+ * over iets wat we niet gemeten hebben. Dan is `gekoppeld:false` het eerlijke
+ * antwoord — dezelfde regel als bij de blinde vlekken.
+ */
+/** 'Die dag 2× gebeld, waarvan 1 gesprek van 41 s.' Eén formulering, drie schermen. */
+export function belZin(aantal, gesproken, seconden) {
+  if (!aantal) return 'Die dag niet gebeld.';
+  const keer = aantal + '\u00d7 gebeld';
+  if (!gesproken) return 'Die dag ' + keer + ', geen gesprek van betekenis.';
+  const duur = seconden >= 90
+    ? Math.round(seconden / 60) + ' min'
+    : seconden + ' s';
+  return 'Die dag ' + keer + ', waarvan ' +
+    (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken') + ' van samen ' + duur + '.';
+}
+
+export function belpogingenVoorCalls({ afspraken, taken, pogingen, minSec = GESPREK_MIN_SEC }) {
+  const zoekTaak = maakTaakZoeker(taken);
+  const perTaakDag = new Map();
+  for (const p of pogingen || []) {
+    if (!p || !p.taak_id) continue;
+    if (String(p.soort || '') !== 'call') continue;
+    // Uitgaand: wat Dave zelf gedaan heeft. Een inkomend telefoontje is ander
+    // bewijs en hoort niet in deze telling.
+    if (p.richting && String(p.richting) !== 'uit') continue;
+    const dag = dagVan(p.tijdstip);
+    if (!dag) continue;
+    const sleutel = p.taak_id + '|' + dag;
+    if (!perTaakDag.has(sleutel)) perTaakDag.set(sleutel, []);
+    perTaakDag.get(sleutel).push(p);
+  }
+
+  const uit = new Map();
+  for (const a of afspraken || []) {
+    const dag = dagVan(a.scheduled_at);
+    const t = zoekTaak(a.lead_phone);
+    if (!t) { uit.set(String(a.id), { gekoppeld: false, aantal: 0, gesproken: 0, seconden: 0, pogingen: [] }); continue; }
+    const rij = (perTaakDag.get(t.id + '|' + dag) || [])
+      .slice()
+      .sort((x, y) => String(x.tijdstip).localeCompare(String(y.tijdstip)));
+    let gesproken = 0;
+    let seconden = 0;
+    const lijst = rij.map((p) => {
+      // LET OP: Number(null) is 0, en 0 is finite. Zonder de null-check werd een
+      // ontbrekende duur stilletjes een call van nul seconden en dus 'te kort'.
+      // Onbekend is geen nee — dezelfde regel als isGesprek() in
+      // api/_lib/opvolging-poging-telling.js.
+      const ruw = p.duur_sec;
+      const d = (ruw === null || ruw === undefined || !Number.isFinite(Number(ruw))) ? null : Number(ruw);
+      const isGesprek = d !== null && d >= minSec;
+      if (isGesprek) { gesproken += 1; seconden += d; }
+      return {
+        tijd: tijdVan(p.tijdstip),
+        duur_sec: d,
+        // Drie uitkomsten, geen twee: onbekende duur is niet 'te kort'.
+        soort: d === null ? 'duur_onbekend' : isGesprek ? 'gesprek' : 'te_kort',
+        resultaat: p.resultaat || null,
+        automatisch: p.automatisch === true,
+      };
+    });
+    uit.set(String(a.id), {
+      gekoppeld: true, taak_id: t.id,
+      aantal: lijst.length, gesproken, seconden, pogingen: lijst,
+      // DE ZIN HOORT HIER, NIET DRIE KEER IN DE VIEWS. Het dagscherm, het
+      // rapportscherm en de printweergave tonen alle drie hetzelfde; drie
+      // kopieën van dezelfde formulering lopen vroeg of laat uiteen. Zelfde
+      // reden als reden_leeg hierboven.
+      samenvatting: belZin(lijst.length, gesproken, seconden),
+    });
+  }
+  return uit;
+}
+
 export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
   // Wie in de vensters hoort zijn de leads met een zoomcall op die dag — niet
   // iedereen op de lijst. Een masterclass-aanmelding hoort geen
@@ -551,34 +680,7 @@ export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
     pogPerTaak.get(p.taak_id).push(p);
   }
 
-  // Nummer → taak. Eerst exact op het volle cijferreeks, dan op de laatste 9
-  // voor de lokaal geschreven variant. Alleen bij precies één treffer: twee
-  // klanten met dezelfde staart is een niet-gekoppelde call, geen 'kies de
-  // eerste'. Zie CLAUDE.md lesson 18.
-  const exact = new Map();
-  const staart = new Map();
-  for (const t of taken) {
-    const d = telCijfers(t.telefoon);
-    if (!d) continue;
-    if (!exact.has(d)) exact.set(d, []);
-    exact.get(d).push(t);
-    if (d.length >= 9) {
-      const s = d.slice(-9);
-      if (!staart.has(s)) staart.set(s, []);
-      staart.get(s).push(t);
-    }
-  }
-  const zoekTaak = (tel) => {
-    const d = telCijfers(tel);
-    if (!d) return null;
-    const e = exact.get(d);
-    if (e && e.length === 1) return e[0];
-    if (d.length >= 9) {
-      const s = staart.get(d.slice(-9));
-      if (s && s.length === 1) return s[0];
-    }
-    return null;
-  };
+  const zoekTaak = maakTaakZoeker(taken);
 
   const rijen = [];
   const zonderTaak = [];
@@ -736,7 +838,7 @@ export function relevanteAfspraken(afspraken, nuMs) {
 }
 
 // ── Sectie 4 ───────────────────────────────────────────────────────────────
-export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }) {
+export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), belBijCall = null }) {
   // DE LIJST ZELF MOET KLOPPEN, NIET ALLEEN DE BEVINDING.
   //
   // Op 7 september stonden er zes rijen voor drie calls: een verplaatste
@@ -793,6 +895,10 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }
             ? 'Er is voor deze call geen uitkomst vastgelegd.'
             : 'Uitkomsten worden voor deze periode nog niet bewaard.'),
       notitie : a.snelle_notitie || null,
+      // HET BEWIJSMATERIAAL BIJ DE CALL. Zonder dit moest Maxim geloven op zijn
+      // woord dat er nog gebeld was voor een no-show. Null = niet meegegeven
+      // (oudere aanroeper), en dat is iets anders dan 'niet gebeld'.
+      belpogingen: belBijCall ? (belBijCall.get(String(a.id)) || null) : null,
     };
   });
 }
