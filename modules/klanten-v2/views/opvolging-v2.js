@@ -1448,6 +1448,17 @@
 .opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
 .opv .opvr-notitie{white-space:pre-wrap;margin-top:4px}
 .opv .opvr-bel{margin-top:4px;display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
+.opv .opvr-ritme{margin:10px 0 4px}
+.opv .opvr-ritme-kop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:12.5px;margin-bottom:6px}
+.opv .opvr-ritme-kop span{color:var(--o-muted);font-size:11.5px}
+.opv .opvr-balk{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:3px;align-items:end;height:74px}
+.opv .opvr-uur{display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0;text-align:center}
+.opv .opvr-staaf{background:#2563eb;border-radius:3px 3px 0 0;min-height:3px}
+.opv .opvr-staaf.opvr-leeg{background:#e5e7eb;height:3px!important}
+.opv .opvr-uurlabel{font-size:9.5px;color:var(--o-muted);margin-top:3px}
+.opv .opvr-uuraantal{font-size:10px;color:#374151;font-weight:600;height:12px}
+.opv .opvr-blokkop{margin:14px 0 6px;font-size:13px;display:flex;align-items:center;gap:7px}
+.opv .opvr-blokkop span{font-size:11px;color:var(--o-muted);background:#f3f4f6;border-radius:999px;padding:1px 7px}
 .opv .opvr-bel.belraak{color:#166534}
 .opv .opvr-bps{display:inline-flex;flex-wrap:wrap;gap:4px}
 .opv details.opvr-rijen{margin-top:10px}
@@ -4312,7 +4323,10 @@
     h += sectieTijdlijn(d);
     h += sectieVensters(d);
     h += sectieZoomcalls(d);
-    h += sectieArchief(d);
+    // sectieWerkritme is opgegaan in sectieTijdlijn hierboven: allebei gingen
+    // ze over de verdeling van het werk over de dag, en twee blokken daarover
+    // onder elkaar is niet twee keer beter maar een rommelig rapport.
+    h += sectieAfgehandeld(d);
     h += sectieVolume(d);
     return h + '</div>';
   }
@@ -4428,7 +4442,7 @@
   // hem krijgt. Hier niets narekenen en niets tekenen: één grafiek, één bron.
   function sectieTijdlijn(d) {
     const dagen = d.tijdlijn || [];
-    let h = '<div class="card opvr-sectie"><h3>2b &middot; De dag als tijdlijn</h3>';
+    let h = '<div class="card opvr-sectie"><h3>2b &middot; De dag</h3>';
     if (!dagen.length) return h + '<div class="empty">Geen tijdlijn berekend voor deze periode.</div></div>';
 
     // DE TOON. Een gat is een BLINDE VLEK, geen verwijt: deze module ziet
@@ -4440,15 +4454,30 @@
       'deze module ziet alleen wat er in Opvolging gebeurt, niet het gesprek in een zoomcall en niet ' +
       'het werk dat elders is vastgelegd.</div>';
 
+    // De twee rekensommen van het werkritme horen ONDER het beeld, niet in een
+    // eigen blok: ze zeggen in cijfers wat de tijdlijn laat zien. De uur-balk
+    // die daar eerst bij hoorde is vervallen — de kwartierstrook in de tijdlijn
+    // toont hetzelfde, alleen fijner.
+    const dr = d.drempels || {};
+    const ritmeVan = (dag) => (d.werkritme || []).find((r) => r.dag === dag) || null;
+    h += '<div class="ronde zacht">De werkdag loopt van <b>' + (dr.werkuur_van ?? 9) + ':00 tot ' +
+      (dr.werkuur_tot ?? 21) + ':00</b>. Een stilte binnen die uren heet een gat vanaf <b>' +
+      Math.round((dr.gat_drempel_min ?? 120) / 60) + ' uur</b>; onder <b>' +
+      Math.round((dr.bezetting_drempel ?? 0.6) * 100) + '%</b> bezetting heet de dag geklonterd.</div>';
+
     for (const t of dagen) {
+      const r = ritmeVan(t.dag);
       h += '<div class="opvr-tl"><div class="opvr-tl-kop"><b>' + esc(nl(t.dag)) + '</b>' +
         '<span>' + t.aantallen.bel + ' belpoging' + (t.aantallen.bel === 1 ? '' : 'en') +
         ' &middot; ' + t.aantallen.whatsapp + '&times; WhatsApp &middot; ' +
         t.aantallen.zoomcalls + ' zoomcall' + (t.aantallen.zoomcalls === 1 ? '' : 's') +
-        ' &middot; ' + esc(t.venster.van) + '&ndash;' + esc(t.venster.tot) + '</span></div>' +
+        ' &middot; ' + esc(t.venster.van) + '&ndash;' + esc(t.venster.tot) +
+        (r ? ' &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren' : '') +
+        '</span></div>' +
         t.svg +
-        (t.verruimd ? '<div class="ronde zacht">' + esc(t.verruimd.reden) + '</div>' : '') +
-        '</div>';
+        (t.verruimd ? '<div class="ronde zacht">' + esc(t.verruimd.reden) + '</div>' : '');
+      for (const b of (r ? r.bevindingen : [])) h += '<div class="warn">' + esc(b.tekst) + '</div>';
+      h += '</div>';
     }
     h += '<div class="opvr-tl-legenda">' +
       '<span><i style="background:#07835A"></i>gesprek (hoogte = duur)</span>' +
@@ -4570,27 +4599,61 @@
     return h + '</div>';
   }
 
-  // ── 5 · Uit de lijst gehaald ─────────────────────────────────────────────
-  function sectieArchief(d) {
-    const lijst = d.archief || [];
-    let h = '<div class="card opvr-sectie"><h3>5 &middot; Uit de lijst gehaald</h3>';
-    if (!lijst.length) return h + '<div class="empty">Er is in deze periode niemand uit de lijst gehaald.</div></div>';
-    const teWeinig = lijst.filter((a) => a.moeite.staat === 'te_weinig');
-    h += '<div class="ronde zacht">De pogingen hiernaast tellen over de <b>hele levensloop</b> van de kaart, niet over deze periode: ' +
-      'de vraag is of er genoeg gedaan was vóórdat de kaart dicht ging. De afspraak is ' +
-      d.drempels.archief_min_dagen + ' belpogingen op ' + d.drempels.archief_min_dagen +
-      ' verschillende dagen plus ' + d.drempels.archief_min_wa + ' WhatsApp.</div>';
-    h += '<div class="opvr-kpi">' + rapCel(lijst.length, 'uit de lijst') + rapCel(teWeinig.length, 'met te weinig pogingen') + '</div>';
-    h += '<div class="card"><table><thead><tr><th>Naam</th><th>Reden</th><th>Moeite</th><th>Dag</th></tr></thead><tbody>' +
-      lijst.map((a) =>
-        '<tr><td><b>' + esc(a.naam || 'Naamloos') + '</b></td>' +
-        '<td style="color:#6b7280">' + esc(a.archief_reden || '') + '</td>' +
-        '<td>' + a.bel_totaal + '&times; &#9742; op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') +
-        ' &middot; ' + a.wa_totaal + '&times; &#128172; ' + moeiteWoord(a.moeite) + '</td>' +
-        '<td style="color:#6b7280">' + esc(nl(a.dag)) + '</td></tr>').join('') +
-      '</tbody></table></div>';
+
+
+  // ── 5 · Afgehandeld ──────────────────────────────────────────────────────
+  // Heette 'Uit de lijst gehaald' en toonde alleen archiveringen. Bryan en
+  // Peter kregen op 7 september een beslissing en bleven open met een due
+  // vooruit; die stonden nergens, en daardoor leek dat werk verdwenen.
+  //
+  // Dezelfde driedeling en DEZELFDE BEREKENING als het scherm Vandaag gedaan —
+  // die komt van de server (d.afgehandeld), zodat scherm en PDF niet zeven
+  // tegenover acht kunnen zeggen.
+  function blokLeeg(zin) { return '<div class="empty"><i>' + esc(zin) + '</i></div>'; }
+
+  function sectieAfgehandeld(d) {
+    const dagen = d.afgehandeld || [];
+    let h = '<div class="card opvr-sectie"><h3>5 &middot; Afgehandeld</h3>';
+    if (!dagen.length) return h + blokLeeg('Er is voor deze periode niets berekend.') + '</div>';
+
+    const som = (k) => dagen.reduce((n, x) => n + x.aantallen[k], 0);
+    h += '<div class="opvr-kpi">' +
+      rapCel(som('afgesloten'), 'afgesloten') +
+      rapCel(som('doorgeschoven'), 'doorgeschoven') +
+      rapCel(som('aangeraakt'), 'aangeraakt') + '</div>';
+
+    const alles = (k) => dagen.flatMap((x) => x[k].map((r) => ({ ...r, dag: x.dag })));
+
+    const afgesloten = alles('afgesloten');
+    h += '<h4 class="opvr-blokkop">Afgesloten <span>' + afgesloten.length + '</span></h4>';
+    h += afgesloten.length
+      ? '<div class="opvr-lijst">' + afgesloten.map((a) =>
+          '<div class="opvr-regel"><div class="opvr-t">' + esc(a.naam) + '</div>' +
+          '<div class="opvr-u">' + esc(a.reden || 'zonder reden vastgelegd') +
+          ' &middot; ' + esc(nl(a.dag)) + '</div></div>').join('') + '</div>'
+      : blokLeeg('Er is niemand definitief uit de lijst gehaald.');
+
+    const door = alles('doorgeschoven');
+    h += '<h4 class="opvr-blokkop">Doorgeschoven <span>' + door.length + '</span></h4>';
+    h += door.length
+      ? '<div class="opvr-lijst">' + door.map((a) =>
+          '<div class="opvr-regel"><div class="opvr-t">' + esc(a.naam) + '</div>' +
+          '<div class="opvr-u">' + esc(a.wat) + ', komt terug op <b>' + esc(nl(a.terug_op)) +
+          '</b>' + (a.notitie ? ' &mdash; ' + esc(a.notitie) : '') + '</div></div>').join('') + '</div>'
+      : blokLeeg('Er is niemand doorgeschoven naar een volgende ronde.');
+
+    const aan = alles('aangeraakt');
+    h += '<h4 class="opvr-blokkop">Aangeraakt, nog open <span>' + aan.length + '</span></h4>';
+    h += aan.length
+      ? '<div class="opvr-lijst">' + aan.map((a) =>
+          '<div class="opvr-regel"><div class="opvr-t">' + esc(a.naam) + '</div>' +
+          '<div class="opvr-u">' + a.pogingen + ' poging' + (a.pogingen === 1 ? '' : 'en') +
+          ', zonder beslissing</div></div>').join('') + '</div>'
+      : blokLeeg('Er is niemand benaderd zonder dat er een beslissing viel.');
+
     return h + '</div>';
   }
+
 
   function moeiteWoord(m) {
     if (!m) return '';
