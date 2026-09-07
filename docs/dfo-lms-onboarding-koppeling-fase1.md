@@ -284,6 +284,199 @@ onboarding een `dfo_lms_student_id` heeft. Die klant hoort in het LMS, en een
 Bubble-wachtwoord helpt hem niet. Bestaande, Bubble-only studenten houden de
 knop gewoon.
 
+## Spoor C — sessies uit het LMS
+
+De mentoren werken sinds augustus 2026 in het nieuwe LMS. Het CRM las nog
+Bubble-`1-1-session`, en dat is een bron waar het echte werk niet meer
+gebeurt. Twee plekken zijn nu omgezet.
+
+**Geen leertype-filter meer.** De Bubble-lezers filterden op
+`learn_type1 = 'Alpha Program'`. Dat onderscheid is vervallen (beslissing
+Maxim, 7 september 2026): elke coachingsessie telt mee. Voeg dus nergens een
+leertype-filter toe — een sessie is een sessie.
+
+### De gedeelde lezer: `api/_lib/dfo-lms-sessies.js`
+
+Eén regel staat centraal: **"leeg" en "niet gelukt" mogen nooit hetzelfde
+zijn.** Elke Bubble-lezer in het CRM vangt zijn fouten af naar een lege
+lijst, waardoor een storing en "er is niets" er identiek uitzien. Precies
+daardoor kon de verschuiving maandenlang onopgemerkt blijven.
+
+Elke functie geeft daarom `bron_status` terug:
+
+| | |
+|---|---|
+| `gelezen` | de bevraging is gelukt. Nul rijen betekent dan **echt** nul. |
+| `onbereikbaar` | de bevraging is mislukt. Het aantal zegt niets. |
+| `niet-geconfigureerd` | de `DFO_LMS_*`-variabelen ontbreken. |
+
+Daarnaast telt de module wat er **buiten de filter viel** —
+`overgeslagen_afgehandeld`, `zonder_student`, `zonder_email`,
+`zonder_bubble_koppeling` — zodat een uitkomst niet alleen zegt wat er
+doorkwam maar ook wat er wegviel.
+
+### De twee koppelingen
+
+- **Student → CRM:** `hlms_student.bubble_user_id`. Gemeten op 7 september
+  2026: 299 van de 304 rijen dragen 'm, en die waarden zijn uniek. De vijf
+  zonder zijn vier handmatige adminrijen en de eerste CRM-aanmaak. Dankzij
+  die brug blijft `student_signals.bubble_student_id` gewoon werken.
+- **Mentor → CRM:** op **e-mailadres** (`hlms_personeel.email` ↔
+  `team_members.email`). Het LMS kent geen `Created By` zoals Bubble; de
+  toerekening loopt via `mentor_id`, wat eerlijker is: niet wie de rij
+  aanmaakte, maar wiens sessie het was.
+
+### No-show-detectie — `api/cron/noshow-detect.js`
+
+Leest nu `hlms_sessie` met `status='no_show'` sinds het watermerk. Bij een
+mislukte bevraging eindigt de cron met een 502 **zonder het watermerk te
+verzetten**, zodat een storing geen no-shows overslaat.
+
+De oude wees-tak (no-shows zonder gekoppelde student) is vervallen:
+`hlms_sessie.student_id` is nooit leeg — 0 van 44 gemeten.
+
+### Afgeleide intake-status — `api/onboarding-intake-status.js`
+
+Kijkt nu per **student** in plaats van per mentor. Dat lost twee dingen
+tegelijk op: de Bubble-bron is leeg, én een student van een mentor zonder
+Bubble-koppeling viel voorheen sowieso buiten beeld.
+
+**Kon de bron niet gelezen worden, dan wordt er niets afgeleid** —
+`intake_status: null` in plaats van een status. Zou je wel afleiden, dan komt
+elke student op `nog_te_benaderen` (rang 4 in `INTAKE_RANK`) en dus
+**bovenaan** de probleemlijst, ook iemand die dertien sessies achter de rug
+heeft. Dat is niet leeg maar **onwaar**, en het zet iemand tot een verkeerde
+handeling aan: bellen wie al lang bezig is. De frontend patcht alleen bij een
+niet-lege waarde, dus een leeg antwoord laat de vorige stand staan.
+
+### De eerste sessie sluit de onboarding — `api/cron/onboarding-eerste-sessie-afronden.js`
+
+**De regel (Maxim, 7 september 2026):** de **vroegste afgeronde** sessie van
+een student sluit diens onboarding automatisch af. Geen soort-onderscheid:
+er bestaat geen kennismakingsgesprek en geen Alpha/Delta — elke coachingsessie
+telt.
+
+Let op het verschil met "de eerste sessie mits afgerond". Was de eerste sessie
+een no-show, dan sluit die niets af; de eerstvolgende sessie die wél afgerond
+raakt doet het alsnog. Anders zou één gemiste eerste call de onboarding voor
+altijd open laten staan.
+
+**Wat er wordt vastgelegd**, en waarom dat een harde eis is: niet alleen dát de
+onboarding afgerond is maar **welke sessie het deed** —
+`auto_afgerond_sessie_id`, `auto_afgerond_sessie_op` en `auto_afgerond_op`.
+Die staan ook in het detailscherm onder *Afgerond*, niet alleen in de databank.
+Een onboarding die "afgerond" zegt zonder aanwijsbare oorzaak is precies het
+schermsoort dat dit project twee keer een halve dag heeft gekost.
+
+**Idempotent op drie manieren.** `auto_afgerond_sessie_id` is de sterkste:
+staat die gevuld, dan gebeurt er nooit meer iets — óók niet wanneer iemand de
+onboarding daarna handmatig heropent. Een mens die bewust heropent mag niet
+door dezelfde sessie opnieuw dichtgetrokken worden. Daarnaast een
+optimistische `.is(..., null)` op de update zelf, en een overslaan-tak voor
+gearchiveerde en geannuleerde onboardings.
+
+**Geen terugwerkende vloedgolf.** Watermerk `onboarding_autocomplete_since` in
+`app_settings`, zelfde patroon als de no-show-cron: ontbreekt het, dan zet de
+eerste run het op nu en doet verder niets.
+
+**Meten vóór aanzetten:** `GET ?dry=1&since=<iso>` draait exact dezelfde logica
+zonder één schrijfactie, en geeft `afgesloten` plus tot twintig `voorbeelden`
+terug. `since` werkt alleen samen met `dry=1`, zodat een echte run nooit
+breder kan lopen dan het watermerk.
+
+**Eén ding om te weten:** dit sluit de onboarding ook wanneer de klant de
+wizard nog niet heeft afgemaakt. `api/onboarding-complete.js` valideert de
+verplichte velden; deze weg doet dat niet. Dat is bewust — de onboarding is
+volgens de regel klaar zodra de eerste call gedaan is.
+
+### Gemiste eerste call krijgt een eigen signaal
+
+Is de chronologisch eerste sessie van een student een no-show, dan krijgt het
+signaal type **`eerste_call_no_show`** in plaats van `no_show`. De reden is een
+andere: daar moet iemand kort op zitten om te voorkomen dat het een wanbetaler
+wordt.
+
+Bewust **geen tweede signaal** naast het gewone. Er staat een unique index op
+`student_signals.session_id`, dus twee signalen voor één sessie kan sowieso
+niet — en het zou de mentor twee keer laten rinkelen voor één gebeurtenis. Eén
+signaal met een type dat het onderscheid draagt is juister én routeerbaar.
+
+**De ontvanger is de hoofdmentor, niet de mentor van de sessie.** Er moet
+iemand kort op zitten om te voorkomen dat het een wanbetaler wordt, en dat is
+een andere verantwoordelijkheid dan het opvolgen van een gewone no-show.
+
+De rol *hoofdmentor* bestaat nog niet. Rollen zijn wél **meervoudig** —
+`user_roles` draagt ze allemaal en `profiles.role` is daar de afgeleide
+hoofdrol van (`ROLE_PRIORITY` in `api/_lib/roles.js`) — dus een extra rol naast
+mentor zou op zichzelf kunnen. Maar 'hoofdmentor' staat niet in
+`VALID_SUPABASE_ROLES` en de CHECK op `user_roles.role` /
+`role_permissions.role` laat 'm niet toe: die rol invoeren is een migratie plus
+werk in het gebruikersbeheer, en dat is een aparte beslissing. Twee namen in de
+code zetten is de andere kant van het probleem — dan verhuist de beslissing
+naar een deploy.
+
+Daarom loopt de adressering via een **recht**: `signals.hoofdmentor.receive`.
+`resolveOntvangersVoorRecht()` in `api/_lib/notify.js` leest twee bronnen:
+
+- `role_permissions` × `user_roles` — het recht aan een hele rol. Zodra
+  'hoofdmentor' bestaat is één rij daar genoeg en verandert er niets aan de
+  code. Bewust `user_roles` en niet `profiles.role`: wie de rol als *tweede*
+  rol heeft staat niet in die afgeleide kolom. Dit is hetzelfde pad dat
+  `user_has_permission()` (migratie 016) en de bestaande `toRole`-uitwaaiering
+  in `createNotification()` volgen.
+- `user_permissions` — het recht aan één persoon. De weg voor nu; zie
+  migratie 016 en het precedent in 044.
+
+**Geen super_admin-omweg.** `user_has_permission()` laat super_admins overal
+door, maar dat is een *toegangs*-regel (mag je dit zien). Hier gaat het om
+*adressering* (wie hoort hierover gebeld te worden). Die twee laten samenvallen
+zou elk zulk bericht ook bij het systeemaccount laten belanden.
+
+**Geen terugval.** Heeft niemand het recht, dan gaat er geen bericht uit —
+niet naar de sessie-mentor, want daar mag het uitdrukkelijk niet heen. Het
+signaal zelf staat er wél en is zichtbaar voor iedereen met
+`students.all.view`. De cron telt dat als `eerste_call_zonder_ontvanger` en
+logt het als fout, zodat het niet stil blijft.
+
+De signaalrij zelf verandert niet: één rij per sessie, unieke index op
+`session_id`, `mentor_user_id` blijft de mentor van die sessie. Alleen wie er
+bericht van krijgt is anders.
+
+**En waar dat bericht heen wijst.** De No-shows-tab van de mentor
+(`/modules/mentor-students.html?tab=noshows`) filtert op `type === 'no_show'`
+en toont bovendien alleen de eigen studenten van de ingelogde mentor — een
+gemiste eerste call staat daar dus niet in, en de hoofdmentor is niet per se de
+mentor van die student. De melding wijst daarom naar **Aandachtspunten**
+(`/modules/students-overview.html?tab=signals`), waar het signaal wél staat en
+via `student-signals-handle.js` afgehandeld kan worden. Daarvoor is
+`students.all.view` nodig — **controleer dat beide hoofdmentoren dat recht
+hebben** voor je de toekenning draait; zo niet, dan is dat een tweede rij in
+`user_permissions`.
+
+Bijkomend: `eerste_call_no_show` had in Aandachtspunten geen leesbaar label
+(ruwe sleutel in de tabel) en viel door een `!== 'no_show'`-filter onder
+"Meldingen (mentor)". Beide rechtgezet, met `AUTO_SIGNAL_TYPES` als één plek
+zodat filter en rij-opmaak niet opnieuw uit elkaar kunnen lopen. De
+"Wacht op reden"-regel blijft bewust alléén bij een gewone no-show staan: het
+reden-endpoint weigert het nieuwe type, dus daar kán niemand een reden geven.
+
+### Bewust niet omgezet: de betaalherinnering
+
+`api/cron/first-call-payment-reminder.js` blijft op Bubble staan en is
+daarmee stil. Dat is een **keuze**, geen vergetelheid.
+
+In het ontwerp van Maxim gaat de openstaande factuur een andere weg: de
+mentor ziet bij zijn student dat er iets openstaat en spreekt de klant daar
+tijdens de sessie op aan; een openstaande factuur geeft een waarschuwing bij
+het inplannen, twee of meer een harde stop. Mensenwerk met een rem dus.
+
+En zwaarder: die cron ligt al weken stil. Hem repareren betekent dat klanten
+ineens weer herinneringen krijgen die ze al die tijd niet gekregen hebben —
+een gedragsverandering richting betalende klanten, geen bugfix. De omzetting
+is wél gemaakt en geparkeerd op branch
+`claude/geparkeerd-betaalherinnering-lms-bron`, mocht het ontwerp anders
+uitpakken.
+
 ## Bekende beperking: tellers die alleen tellen wat ze zagen
 
 Dit is geen fout in één cron maar een patroon dat op meerdere plaatsen in het
