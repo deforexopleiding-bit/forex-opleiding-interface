@@ -24,6 +24,7 @@
 // met entry_kind='outcome' + Nederlands leesbare tekst. Bij 42703 op
 // entry_kind fallback zonder die kolom (schema-vriendelijk).
 
+import { bevestigingPatch } from './_lib/event-attendee-bevestigen.js';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
@@ -848,9 +849,11 @@ export default async function handler(req, res) {
         if (outcome === 'bevestigd' || outcome === 'komt_niet') {
           const beforeStatus = String(attendeeBeforeSnapshot?.status || '').toLowerCase();
           if (outcome === 'bevestigd') {
-            if (beforeStatus === 'geannuleerd' || beforeStatus === 'switched_to_other_event') {
-              patchAttendee.status = 'aangemeld';
-            }
+            // WAT 'BEVESTIGD' BETEKENT STAAT OP ÉÉN PLEK. Sinds de opvolgmodule
+            // dezelfde handeling heeft (de knop Bevestigd op een aanmeldkaart)
+            // zijn er twee callers, en twee kopieën van deze regels zouden
+            // vroeg of laat uiteenlopen. Zie _lib/event-attendee-bevestigen.js.
+            Object.assign(patchAttendee, bevestigingPatch({ huidigeStatus: beforeStatus, nowIso }));
           } else { // komt_niet
             if (beforeStatus !== 'sale' && beforeStatus !== 'aanwezig') {
               patchAttendee.status = 'geannuleerd';
