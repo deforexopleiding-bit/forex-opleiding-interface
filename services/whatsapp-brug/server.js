@@ -29,11 +29,35 @@ import { maakAuth } from './lib/auth.js';
 import { maakLeadlijst } from './lib/leadlijst.js';
 import { maakWebhook } from './lib/webhook.js';
 import { maakWhatsapp } from './lib/whatsapp.js';
+import { maakHartslag } from './lib/hartslag.js';
 
 const cfg = laadConfig();
 const leadlijst = maakLeadlijst(cfg);
 const webhook = maakWebhook(cfg);
 const wa = maakWhatsapp({ cfg, leadlijst, webhook });
+
+// ── De hartslag ────────────────────────────────────────────────────────────
+// De brug meldt zelf dat hij leeft, in plaats van te wachten tot iemand het
+// hem vraagt. Alleen het feit dat hij leeft plus tellingen — nooit een nummer
+// en nooit berichttekst. Zie lib/hartslag.js.
+const hartslag = maakHartslag({
+  duw  : (g) => webhook.duwNaar(cfg.hartslagPad, g),
+  stand: () => {
+    const t = wa.tellers ? wa.tellers() : {};
+    const som = (o) => Object.values(o || {}).reduce((n, v) => n + (Number(v) || 0), 0);
+    return {
+      verbonden  : wa.staat.verbonden,
+      gezien     : som(t.gezien),
+      doorgelaten: som(t.doorgelaten),
+      sinds      : wa.staat.laatsteActie || null,
+      herverbinden: wa.herverbindStand ? wa.herverbindStand() : null,
+    };
+  },
+  intervalMs: cfg.hartslagIntervalMs,
+  log: (...a) => console.warn(...a),
+});
+// Zodat een verbroken verbinding op het moment zelf gemeld wordt.
+wa.zetMelder((soort, extra) => hartslag.meld(soort, extra));
 
 const app = express();
 app.disable('x-powered-by');
@@ -186,6 +210,7 @@ app.use((_req, res) => res.status(404).json({ error: 'Onbekende route' }));
 
 leadlijst.start();
 wa.start();
+hartslag.start();
 
 const server = app.listen(cfg.port, cfg.bind, () => {
   console.log(`[brug] luistert op ${cfg.bind}:${cfg.port}`);

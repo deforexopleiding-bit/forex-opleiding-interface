@@ -339,6 +339,7 @@ EnvironmentFile=/opt/whatsapp-brug/.env
 ExecStart=/usr/bin/node server.js
 Restart=always
 RestartSec=10
+StartLimitIntervalSec=0
 # Chromium is zwaar; zonder deze grens kan één vastlopende browser de VPS vullen.
 MemoryMax=1500M
 

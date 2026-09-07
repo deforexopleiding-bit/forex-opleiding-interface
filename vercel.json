@@ -221,6 +221,10 @@
     {
       "path": "/api/cron-opvolging-gezondheid",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron-brug-waakhond",
+      "schedule": "*/5 * * * *"
     }
   ],
   "redirects": [
