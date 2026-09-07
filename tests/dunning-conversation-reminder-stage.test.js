@@ -38,15 +38,30 @@ const NR_CFG = {
 };
 
 // ── count=0: r1-gate op inbound-age ──────────────────────────────────
-test('count=0 + inbound 21h geleden -> r1', () => {
+test('count=0 + ons bericht 21h geleden, klant zweeg daarna -> r1', () => {
+  // De klok loopt vanaf ONS laatste bericht, niet vanaf het laatste
+  // klant-bericht. De klant schreef hier eerder (30h) en bleef daarna stil.
   const run = { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null };
   const stage = determineStage({
     run,
-    convLastInboundAt: iso(NOW - 21 * H),
+    convLastInboundAt:  iso(NOW - 30 * H),
+    convLastOutboundAt: iso(NOW - 21 * H),
     noReplyCfg: NR_CFG,
     nowMs: NOW,
   });
   assert.equal(stage, 'r1');
+});
+
+test('count=0 + klant schreef als laatste, 21h geleden -> null (bal bij ons)', () => {
+  const run = { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null };
+  const stage = determineStage({
+    run,
+    convLastInboundAt:  iso(NOW - 21 * H),
+    convLastOutboundAt: iso(NOW - 40 * H),
+    noReplyCfg: NR_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, null);
 });
 
 test('count=0 + inbound 5h geleden -> null (te vroeg)', () => {
@@ -161,11 +176,12 @@ test('count=2 + last_reminder 5h geleden -> null (te vroeg voor rz)', () => {
 // ── Config-defaults (noReplyCfg leeg -> 20/24/24 defaults) ───────────
 test('lege noReplyCfg gebruikt defaults 20/24/24', () => {
   const run = { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null };
+  const inbound = iso(NOW - 96 * H);   // klant lang geleden, daarna stil
   const early = determineStage({
-    run, convLastInboundAt: iso(NOW - 19 * H), noReplyCfg: {}, nowMs: NOW,
+    run, convLastInboundAt: inbound, convLastOutboundAt: iso(NOW - 19 * H), noReplyCfg: {}, nowMs: NOW,
   });
   const ontime = determineStage({
-    run, convLastInboundAt: iso(NOW - 21 * H), noReplyCfg: {}, nowMs: NOW,
+    run, convLastInboundAt: inbound, convLastOutboundAt: iso(NOW - 21 * H), noReplyCfg: {}, nowMs: NOW,
   });
   assert.equal(early,  null);
   assert.equal(ontime, 'r1');

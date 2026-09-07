@@ -11,13 +11,23 @@
 //   arrangement — die pauze-reden blijft leidend).
 //
 // Timing (canonical config in joost_config.autonomy_config.no_reply):
-//   reminder_1_hours     (default 20) — uren stil na klant-inbound  → reminder 1
-//   reminder_2_hours     (default 24) — uren stil na reminder 1     → reminder 2
-//   resume_after_hours   (default 24) — uren stil na reminder 2     → hervat run
+//   reminder_1_hours     (default 20) — uren stil na ONS bericht → reminder 1
+//   reminder_2_hours     (default 24) — uren stil na ons bericht → reminder 2
+//   resume_after_hours   (default 24) — uren stil na reminder 2  → hervat run
+//
+// DE KLOK LOOPT VANAF ONS LAATSTE UITGAANDE BERICHT, niet vanaf het laatste
+// bericht van de klant. En zolang het laatste bericht in de draad van de KLANT
+// is en onbeantwoord, gaat er geen enkele herinnering uit — dan ligt de bal bij
+// ons. Zie de kop van _lib/conv-reminder-stage.js voor het geval dat dit aan
+// het licht bracht.
 //
 // Reminder 1: vrij tekst-bericht (voorspelbaar, geen LLM). Vereist dat het
 //             24u-venster van Meta nog open is (conv.last_inbound_at <= 24u
 //             geleden). Als dicht → skip naar reminder 2 (template).
+//             LET OP: sinds de klok vanaf ONS bericht loopt, is r1 op
+//             reminder_1_hours >= 24 per definitie buiten dat venster —
+//             het venster telt namelijk vanaf de laatste klant-inbound, en
+//             die ligt vóór ons bericht. Zie de PR-bespreking bij deze fix.
 // Reminder 2: Meta-approved template (naam in no_reply.reminder_2_template_name).
 //             Zonder goedgekeurde template → skip met duidelijke reden.
 //
