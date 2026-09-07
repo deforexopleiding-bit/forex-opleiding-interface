@@ -112,6 +112,14 @@ tr{break-inside:avoid}
 .bol{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:0}
 .bol.goed{background:var(--goed)} .bol.grijs{background:var(--muted)}
 .bol.donker{background:var(--ink2)} .bol.rood{background:var(--kritiek)}
+.ritme{margin:6px 0 10px;break-inside:avoid}
+.ritme-kop{font-size:11px;margin-bottom:3px}
+.ritme-balk{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:2px;align-items:end;height:40px}
+.ritme-uur{display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+.ritme-staaf{background:#334155;min-height:1px}
+.ritme-label{font-size:8px;color:var(--muted);text-align:center;margin-top:2px}
+.ritme-bev{font-size:11px;margin-top:4px;padding:3px 6px;background:#fef3c7;border-radius:3px}
+.subkop{font-size:12px;font-weight:600;margin:9px 0 3px}
 .leeg{font-style:italic;color:var(--muted);font-size:11.5px}
 
 /* ── Voettekst op elke pagina ──────────────────────────────────────────── */
@@ -147,7 +155,7 @@ tr{break-inside:avoid}
   // dus in de PDF én op het scherm. Zie je hier een ander nummer dan wat er in
   // de repo staat, dan kijk je naar een oude build en heeft verder zoeken geen
   // zin. Ophogen bij elke inhoudelijke wijziging aan dit bestand.
-  const OPMAAK_VERSIE = 'rp-6';
+  const OPMAAK_VERSIE = 'rp-7';
 
 // HET RAPPORT HEET NAAR HET WERK, NIET NAAR DE PERSOON.
 //
@@ -246,11 +254,68 @@ tr{break-inside:avoid}
     }
 
     h += sectieAandacht(d) + sectieDekking(d) + sectieVolume(d) +
-         sectieVensters(d) + sectieZoomcalls(d) + sectieArchief(d);
+         sectieVensters(d) + sectieZoomcalls(d) + sectieWerkritme(d) + sectieAfgehandeld(d);
 
     h += '<div class="voet"><span>' + esc(titel) + '</span>' +
       '<span>' + esc(periodeTekst) + ' &middot; ' + esc(OPMAAK_VERSIE) + '</span></div>';
     return h;
+  }
+
+  // ── Werkritme ────────────────────────────────────────────────────────────
+  // De uren komen van de server in Amsterdamse tijd. Hier NIET opnieuw
+  // omrekenen: elke tweede omrekening is een kans om er twee uur naast te
+  // zitten, en dan gaat Dave terecht in beroep tegen zijn eigen rapport.
+  function sectieWerkritme(d) {
+    const dagen = d.werkritme || [];
+    const dr = d.drempels || {};
+    let h = '<div class="sectie">' + sectiekop('Werkritme',
+      (dr.werkuur_van ?? 9) + ':00-' + (dr.werkuur_tot ?? 21) + ':00');
+    if (!dagen.length) return h + '<div class="leeg">Geen werkritme berekend.</div></div>';
+    for (const r of dagen) {
+      const top = Math.max(1, ...r.per_uur.map((u) => u.aantal));
+      h += '<div class="ritme"><div class="ritme-kop">' + esc(nlDatum(r.dag)) + ' &middot; ' +
+        r.totaal + ' acties &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren</div>' +
+        '<div class="ritme-balk">' + r.per_uur.map((u) =>
+          '<div class="ritme-uur"><div class="ritme-staaf" style="height:' +
+          Math.round((u.aantal / top) * 100) + '%"></div>' +
+          '<div class="ritme-label">' + u.uur + '</div></div>').join('') + '</div>';
+      for (const b of r.bevindingen) h += '<div class="ritme-bev">' + esc(b.tekst) + '</div>';
+      h += '</div>';
+    }
+    return h + '</div>';
+  }
+
+  // ── Afgehandeld ──────────────────────────────────────────────────────────
+  // Dezelfde driedeling en dezelfde berekening als het scherm: die komt van de
+  // server (d.afgehandeld). Twee tellingen zeggen vroeg of laat zeven tegenover
+  // acht en dan weet niemand welke van de twee liegt.
+  function sectieAfgehandeld(d) {
+    const dagen = d.afgehandeld || [];
+    let h = '<div class="sectie">' + sectiekop('Afgehandeld',
+      dagen.reduce((n, x) => n + x.aantallen.afgesloten + x.aantallen.doorgeschoven + x.aantallen.aangeraakt, 0) || 'geen');
+    if (!dagen.length) return h + '<div class="leeg">Er is niets berekend.</div></div>';
+    const alles = (k) => dagen.flatMap((x) => x[k].map((r) => ({ ...r, dag: x.dag })));
+
+    const blok = (titel, rijen, leegZin, regel) =>
+      '<div class="subkop">' + esc(titel) + ' (' + rijen.length + ')</div>' +
+      (rijen.length
+        ? '<table><tbody>' + rijen.map(regel).join('') + '</tbody></table>'
+        : '<div class="leeg"><i>' + esc(leegZin) + '</i></div>');
+
+    h += blok('Afgesloten', alles('afgesloten'),
+      'Er is niemand definitief uit de lijst gehaald.',
+      (a) => '<tr><td>' + esc(a.naam) + '</td><td>' + esc(a.reden || 'zonder reden') + '</td>' +
+             '<td class="getalkolom">' + esc(nlDatum(a.dag)) + '</td></tr>');
+    h += blok('Doorgeschoven', alles('doorgeschoven'),
+      'Er is niemand doorgeschoven naar een volgende ronde.',
+      (a) => '<tr><td>' + esc(a.naam) + '</td><td>' + esc(a.wat) + ', komt terug op ' +
+             esc(nlDatum(a.terug_op)) + '</td><td class="getalkolom">' + esc(nlDatum(a.dag)) + '</td></tr>');
+    h += blok('Aangeraakt, nog open', alles('aangeraakt'),
+      'Er is niemand benaderd zonder dat er een beslissing viel.',
+      (a) => '<tr><td>' + esc(a.naam) + '</td><td>' + a.pogingen + ' poging' +
+             (a.pogingen === 1 ? '' : 'en') + ', zonder beslissing</td>' +
+             '<td class="getalkolom">' + esc(nlDatum(a.dag)) + '</td></tr>');
+    return h + '</div>';
   }
 
   // ── 1 · Wat vraagt aandacht ─────────────────────────────────────────────
