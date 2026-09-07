@@ -160,7 +160,17 @@ export default async function handler(req, res) {
 // HET REKENWERK
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso }) {
+/**
+ * Geëxporteerd zodat de dagelijkse gezondheidscontrole exact HETZELFDE
+ * rekenwerk kan draaien als het endpoint.
+ *
+ * Zou die controle het rapport via HTTP opvragen, dan loopt hij tegen het
+ * gedocumenteerde anti-pattern van een self-call binnen dezelfde Vercel-
+ * deployment (zie de kop van api/_lib/joost-suggest-core.js). Deze weg is
+ * bovendien strenger: de controle rekent met dezelfde functie, niet met een
+ * nabootsing ervan.
+ */
+export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso }) {
   const blindeVlekken = [];
   const aandacht = [];
 
