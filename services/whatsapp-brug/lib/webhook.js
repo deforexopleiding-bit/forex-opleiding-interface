@@ -12,8 +12,8 @@ export function maakWebhook(cfg) {
   let mislukt = 0;
   let laatste = null;
 
-  async function duw(gebeurtenis) {
-    const url = cfg.crmBase + cfg.webhookPad;
+  async function duwNaar(pad, gebeurtenis) {
+    const url = cfg.crmBase + pad;
     for (let poging = 1; poging <= POGINGEN; poging++) {
       try {
         const res = await fetch(url, {
@@ -40,5 +40,10 @@ export function maakWebhook(cfg) {
     return false;
   }
 
-  return { duw, status: () => ({ verstuurd, mislukt, laatste }) };
+  // De hartslag gaat NIET door de berichten-route: die doet leadlijst-filtering
+  // en bericht-afhandeling, en een hartslag is geen bericht. Eén transport, twee
+  // paden.
+  const duw = (gebeurtenis) => duwNaar(cfg.webhookPad, gebeurtenis);
+
+  return { duw, duwNaar, status: () => ({ verstuurd, mislukt, laatste }) };
 }

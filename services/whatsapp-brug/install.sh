@@ -171,6 +171,11 @@ EnvironmentFile=${DOEL_MAP}/.env
 ExecStart=/usr/bin/node ${DOEL_MAP}/server.js
 Restart=always
 RestartSec=10
+# De brug mag het NOOIT opgeven. Zonder deze regel geldt de systemd-standaard
+# van 5 starts per 10 seconden; die wordt met RestartSec=10 nooit gehaald, maar
+# iemand die die 10 ooit naar 1 zet zou de service in 'failed' laten staan
+# zonder dat er iets herstart. Nul betekent: geen bovengrens, altijd opnieuw.
+StartLimitIntervalSec=0
 # Chromium is zwaar. Zonder deze grens kan één vastlopende browser de VPS
 # volledig vullen en neemt hij de rest van de machine mee.
 MemoryMax=1500M

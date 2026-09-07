@@ -10,6 +10,7 @@
 // en die mogen deze service niet verlaten. Er is bewust geen enkele plek waar
 // een tekst langskomt vóór die controle.
 
+import { maakHerverbinder } from './herverbinden.js';
 import pkg from 'whatsapp-web.js';
 import qrcode from 'qrcode';
 import { normaliseerNummer, naarChatId } from './nummers.js';
@@ -792,11 +793,29 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     }
   });
 
+  // ── Zelfherstel ──────────────────────────────────────────────────────────
+  // whatsapp-web.js 1.34.7 doet bij een verbroken verbinding `destroy()` en
+  // verder niets (src/Client.js 847-853). Het proces blijft dan draaien met
+  // verbonden=false en systemd ziet een gezonde service — de brug ligt stil tot
+  // iemand hem met de hand herstart. Dat gat dicht deze herverbinder.
+  //
+  // De hartslag hangt zich later aan via zetMelder(), vandaar het haakje.
+  let melder = null;
+  const herverbinder = maakHerverbinder({
+    verbind : async () => { await client.initialize(); },
+    plan    : (ms, fn) => setTimeout(fn, ms),
+    annuleer: (h) => clearTimeout(h),
+    beeindig: (code) => process.exit(code),
+    meld    : (soort, data) => { try { if (melder) melder(soort, data); } catch (_) {} },
+    log     : (...a) => console.warn(...a),
+  });
+
   client.on('ready', () => {
     staat.verbonden = true;
     staat.qrDataUrl = null;      // gekoppeld; de QR is nergens meer goed voor
     staat.qrSindsIso = null;
     staat.laatsteFout = null;
+    herverbinder.gelukt();
     staat.nummer = normaliseerNummer(client.info?.wid?.user || client.info?.me?.user || '');
     raakAan();
     console.log('[brug] verbonden als', staat.nummer || '(nummer onbekend)');
@@ -821,11 +840,17 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     staat.verbonden = false;
     staat.laatsteFout = 'authenticatie mislukt: ' + m;
     console.error('[brug] authenticatie mislukt — sessie mogelijk verlopen, scan opnieuw');
+    if (melder) melder('verbinding_verbroken', { reden: 'auth_failure' });
+    herverbinder.verbroken('auth_failure');
   });
   client.on('disconnected', (reden) => {
     staat.verbonden = false;
     staat.laatsteFout = 'verbinding verbroken: ' + reden;
     console.warn('[brug] verbinding verbroken:', reden);
+    // MELDEN OP HET MOMENT ZELF. Een verbroken verbinding is een gebeurtenis,
+    // geen toestand die je pas bij de volgende meting ontdekt.
+    if (melder) melder('verbinding_verbroken', { reden: String(reden || 'onbekend') });
+    herverbinder.verbroken(reden);
   });
 
   // ── Binnenkomend antwoord ────────────────────────────────────────────────
@@ -999,6 +1024,10 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     lidProbe: probeerLid,
     /** Handmatig opnieuw opbouwen, voor de /lidkaart-route. */
     herbouwLidkaart: bouwLidkaart,
+    /** De hartslag hangt zich hier aan zodat de brug direct kan melden. */
+    zetMelder(fn) { melder = typeof fn === 'function' ? fn : null; },
+    /** Stand voor de hartslag: alleen tellers, geen persoonsdata. */
+    herverbindStand: () => herverbinder.stand(),
     start() {
       console.log('[brug] WhatsApp-client starten…');
       client.initialize().catch((e) => {
