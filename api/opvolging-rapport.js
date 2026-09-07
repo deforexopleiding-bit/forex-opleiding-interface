@@ -310,7 +310,11 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 3 · DE TWEE VENSTERS
   // ═══════════════════════════════════════════════════════════════════════
-  const vensters = bouwVensters({ afspraken, taken: alleTaken, pogingen, dagen });
+  // DEZELFDE GEFILTERDE SET als de zoomcall-lijst. Zonder dit telt de blinde
+  // vlek 'calls die niet in de takenlijst staan' ook de geannuleerde en de
+  // verzette mee, en dan staat er een groter getal onder een kortere lijst.
+  const vensterAfspraken = relevanteAfspraken(afspraken, Date.now());
+  const vensters = bouwVensters({ afspraken: vensterAfspraken, taken: alleTaken, pogingen, dagen });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 4 · DE ZOOMCALLS ZELF
@@ -379,7 +383,26 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
 
 // ── Sectie 6 ───────────────────────────────────────────────────────────────
 export function telVolume(pogingen, taakVan) {
-  const bel   = { uit: 0, seconden: 0, zonder_duur: 0, gesproken: 0, te_kort: 0 };
+  // VIER EMMERS DIE ELKAAR UITSLUITEN, EN DIE SAMEN `uit` ZIJN.
+  //
+  // Er stonden er drie, en ze telden niet op. Op 7 september gaf het endpoint
+  // {uit: 9, gesproken: 5, te_kort: 1} — vijf plus één is zes, terwijl er negen
+  // pogingen waren. Drie calls vielen in geen enkele emmer.
+  //
+  // De oorzaak: `te_kort` telde alleen mee als isContact(p) waar was, en drie
+  // van de negen calls hadden resultaat 'niet opgenomen'. Die kwamen dus nooit
+  // ergens terecht. Dat is geen randgeval maar een ontbrekende categorie: een
+  // call die niet werd opgenomen is iets anders dan een korte call.
+  //
+  // 'te_kort' zou de verkeerde naam zijn voor een niet-opgenomen call, en na de
+  // woordenronde van gisteren is dat precies wat we niet meer doen. Dus een
+  // vierde emmer, met de invariant erbij:
+  //
+  //   niet_opgenomen + zonder_duur + gesproken + te_kort === uit
+  //
+  // Een test bewaakt die optelling, want dit hoort per definitie te kloppen en
+  // niet bij toeval.
+  const bel   = { uit: 0, seconden: 0, niet_opgenomen: 0, zonder_duur: 0, gesproken: 0, te_kort: 0 };
   const wa    = { uit: 0, in: 0 };
   const spraak = { uit: 0, in: 0 };
   const rijen = [];
@@ -391,15 +414,23 @@ export function telVolume(pogingen, taakVan) {
       // niet als soort en zouden hier dus niet horen te staan.
       if (!uitgaand) continue;
       bel.uit += 1;
-      if (Number.isFinite(p.duur_sec) && p.duur_sec !== null) bel.seconden += Number(p.duur_sec);
-      else bel.zonder_duur += 1;
-      // DRIE UITKOMSTEN, GEEN TWEE. isGesprek geeft null terug als de duur
-      // ontbreekt: dan weten we het niet, en dat is iets anders dan nee. Een
-      // call onder de drempel blijft een poging — Dave heeft gebeld — maar
-      // telt niet als gesprek.
-      const gesprek = isGesprek(p, GESPREK_MIN_SEC);
-      if (gesprek === true) bel.gesproken += 1;
-      else if (gesprek === false && isContact(p)) bel.te_kort += 1;
+      const duurBekend = p.duur_sec !== null && p.duur_sec !== undefined
+        && Number.isFinite(Number(p.duur_sec));
+      if (duurBekend) bel.seconden += Number(p.duur_sec);
+
+      // Precies één emmer per call, in deze volgorde.
+      if (!isContact(p)) {
+        // Er is niemand opgenomen. Blijft een poging — Dave heeft gebeld.
+        bel.niet_opgenomen += 1;
+      } else if (!duurBekend) {
+        // Opgenomen, maar we weten niet hoe lang. ONBEKEND is geen nee: het
+        // telt niet als gesprek en ook niet als te kort.
+        bel.zonder_duur += 1;
+      } else if (isGesprek(p, GESPREK_MIN_SEC) === true) {
+        bel.gesproken += 1;
+      } else {
+        bel.te_kort += 1;
+      }
     } else if (p.soort === 'whatsapp') {
       if (uitgaand) wa.uit += 1; else wa.in += 1;
     } else if (p.soort === 'spraakbericht') {
@@ -669,6 +700,31 @@ function persoonSleutel(a) {
   return 'n:' + String(a.lead_name || '').trim().toLowerCase();
 }
 
+/**
+ * DE AFSPRAKEN DIE ECHT MEETELLEN — ÉÉN PLEK, VOOR ALLES WAT ERUIT VOLGT.
+ *
+ * De zoomcall-lijst werd gefilterd, maar de tellingen die eruit volgen niet.
+ * Gevolg op 7 september: de lijst toonde terecht 5 rijen (3 gepland, 2
+ * geannuleerd, Yasmine nog maar één keer), en de blinde vlek eronder zei nog
+ * steeds "6 ingeplande calls staan niet in de takenlijst" — het oude,
+ * ongefilterde getal. Dat is de omgekeerde versie van de fout van de week
+ * ervoor, toen de bevinding ontdubbeld werd maar de lijst bleef staan.
+ *
+ * Daarom nu één functie die de set bepaalt, en iedereen die er iets uit afleidt
+ * gebruikt diezelfde set. Een geannuleerde call heeft geen spraakbericht nodig
+ * en kan dus geen venster missen; een verzette voorganger evenmin.
+ */
+export function relevanteAfspraken(afspraken, nuMs) {
+  const heeftOpvolgerHier = new Set(
+    (afspraken || []).map((a) => a.parent_appointment_id).filter(Boolean).map(String),
+  );
+  return (afspraken || []).filter((a) => {
+    if (String(a.status || '') === 'verplaatst' && heeftOpvolgerHier.has(String(a.id))) return false;
+    const staat = callStaat(a, nuMs);
+    return staat === 'gepland' || staat === 'te_beoordelen';
+  });
+}
+
 // ── Sectie 4 ───────────────────────────────────────────────────────────────
 export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }) {
   // DE LIJST ZELF MOET KLOPPEN, NIET ALLEEN DE BEVINDING.
@@ -772,6 +828,10 @@ export function bouwArchief({ gearchiveerd, histPerTaak }) {
     const bel = moeiteRijen.filter((p) => p.soort === 'call');
     const wa  = moeiteRijen.filter((p) => WA_SOORTEN.has(p.soort));
     const belDagen = new Set(bel.map((p) => dagVan(p.tijdstip))).size;
+    // Is er van ÉÉN call een duur bekend? Zo niet, dan valt er over de kwaliteit
+    // van die belpogingen niets te zeggen en hoort er geen oordeel te vallen.
+    const duurBekend = bel.some((p) => p.duur_sec !== null && p.duur_sec !== undefined
+      && Number.isFinite(Number(p.duur_sec)));
     return {
       taak_id: t.id,
       naam   : t.naam,
@@ -785,7 +845,14 @@ export function bouwArchief({ gearchiveerd, histPerTaak }) {
       // Over de HELE levensloop van de kaart, niet over de periode: de vraag
       // is of er genoeg gedaan was vóórdat hij dicht ging.
       moeite_over: 'levensloop',
-      moeite: beoordeelMoeite({ bel_dagen: belDagen, wa_totaal: wa.length, reden_code: t.reden_code }),
+      duur_bekend: duurBekend,
+      moeite: beoordeelMoeite({
+        bel_dagen: belDagen, wa_totaal: wa.length, reden_code: t.reden_code,
+        // Geen calls gedaan? Dan is er ook geen duur die ontbreekt; dan gaat het
+        // oordeel gewoon over de moeite. Alleen wél gebeld maar nergens een duur
+        // is het onbekende geval.
+        duur_bekend: bel.length === 0 ? true : duurBekend,
+      }),
     };
   });
 }
@@ -924,6 +991,18 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
         uitleg: c.reden_leeg, appointment_id: c.appointment_id,
       });
     }
+  }
+
+  // Gearchiveerd zonder dat er ooit een gespreksduur gemeten is. Geen verwijt —
+  // we weten het niet — maar ook niet verzwijgen, want dan leest stilte als
+  // goedkeuring.
+  const zonderDuur = archief.filter((a) => a.moeite && a.moeite.staat === 'onbekend');
+  if (zonderDuur.length) {
+    aandacht.push({
+      soort: 'blinde_vlek', sectie: 'archief', naam: null,
+      tekst: `Bij ${zonderDuur.length} uit de lijst gehaalde lead${zonderDuur.length === 1 ? '' : 's'} is van geen enkele call de duur vastgelegd.`,
+      uitleg: 'Of er genoeg moeite gedaan is valt daarover niet te zeggen. duur_sec wordt alleen gevuld door calls die via de softphone-koppeling binnenkwamen; deze zijn handmatig geregistreerd.',
+    });
   }
 
   for (const a of archief) {

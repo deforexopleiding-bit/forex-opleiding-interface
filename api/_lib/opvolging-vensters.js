@@ -158,9 +158,25 @@ export function telVensters(taken, dag) {
  * call zélf nee zei. Daar 'te weinig moeite' op zetten is een verwijt voor iets
  * waar niets aan te doen viel.
  */
-export function beoordeelMoeite({ bel_dagen, wa_totaal, reden_code } = {}) {
+export function beoordeelMoeite({ bel_dagen, wa_totaal, reden_code, duur_bekend } = {}) {
   if (reden_code === 'zoom_geen_interesse') {
     return { staat: 'nvt', reden: 'de lead zei tijdens de call zelf nee' };
+  }
+  // ONBEKEND IS GEEN NEE.
+  //
+  // Op 7 september waren er drie gearchiveerde taken. Alle drie hadden
+  // pogingen, en bij alle drie was duur_sec NULL — er is nooit een duur
+  // gemeten. Er is dus geen enkel geval van 'gearchiveerd na een korte call';
+  // er zijn drie gevallen van 'gearchiveerd zonder dat we weten hoe lang er
+  // gebeld is'.
+  //
+  // Zou de gesprekgrens daar zonder meer op losgelaten worden, dan werden die
+  // drie morgen alle drie een verwijt aan Dave voor iets wat de meting niet
+  // weet. Dat is precies de valse beschuldiging waar dit rapport al drie keer
+  // op is bijgestuurd. Onbekend hoort in de blinde vlekken, niet in de
+  // bevindingen — zelfde principe als de calls die niet in de takenlijst staan.
+  if (duur_bekend === false) {
+    return { staat: 'onbekend', reden: 'van geen enkele call is de duur vastgelegd' };
   }
   const dagen = Number(bel_dagen || 0);
   const wa    = Number(wa_totaal || 0);
