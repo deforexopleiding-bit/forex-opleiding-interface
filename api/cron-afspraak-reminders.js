@@ -31,10 +31,17 @@ import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR } from './_lib/afspraak-berichten.js';
+import { getCalendarNameMap } from './_lib/ghl-calendars.js';
+import { bouwInternMail, waVars, bronVan } from './_lib/afspraak-intern-notify.js';
 
 const NACHT_START_HOUR = 21;
 const NACHT_EIND_HOUR  = 8;
 const MAIL_FROM = 'welkom@deforexopleiding.nl'; // afspraak-mails naar leads vanaf welkom@ (zelfde lijn als de toegang-gate)
+
+// Interne "nieuwe afspraak ingeboekt"-melding (los van de lead-reminders).
+const INTERN_MAIL_TO     = 'leads@deforexopleiding.nl'; // leads@ = env IMAP_PASS; fallback welkom@
+const INTERN_WA_TO       = '+31655270212';              // alleen dit nummer
+const INTERN_WA_TEMPLATE = 'interne_nieuwe_afspraak_nl';
 
 function aanUit(v) {
   return ['1', 'true', 'aan', 'on', 'ja'].includes(String(v || '').trim().toLowerCase());
@@ -189,6 +196,77 @@ async function verstuur(appt, moment, welkomPhoneId) {
   return uitkomst;
 }
 
+// ── INTERNE MELDING: kandidaten = ECHTE nieuwe boekingen die nog niet gemeld
+// zijn. GEEN 25u-venster (melden bij binnenkomst). Filter:
+//   status='scheduled' + ghl_calendar_id NOT NULL + parent_appointment_id NULL
+//   (sluit reschedule-kinderen uit) + intern_notify_sent_at NULL (nog niet
+//   gemeld — historische rijen zijn via de backfill op now() gezet).
+async function haalInternKandidaten() {
+  const { data, error } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select('id, lead_name, lead_email, lead_phone, scheduled_at, booking_source, ghl_calendar_id')
+    .eq('status', 'scheduled')
+    .not('ghl_calendar_id', 'is', null)
+    .is('parent_appointment_id', null)
+    .is('intern_notify_sent_at', null)
+    .order('scheduled_at', { ascending: true })
+    .limit(200);
+  if (error) throw new Error('intern-kandidaten-query: ' + error.message);
+  return data || [];
+}
+
+// Verstuur de interne melding voor één afspraak: mail (leads@, fallback welkom@)
+// + WhatsApp (vast nummer, welkom-lijn, template). Beide fail-soft; mail staat
+// LOS van WA-approval.
+async function verstuurIntern(appt, bron, welkomPhoneId) {
+  const uit = { mail: null, wa: null };
+
+  // ── Mail ──
+  const { subject, text, html } = bouwInternMail(appt, bron);
+  try {
+    let r = await sendEmailViaSmtp({ fromMailbox: INTERN_MAIL_TO, to: INTERN_MAIL_TO, subject, text, html });
+    // leads@ niet geconfigureerd (IMAP_PASS ontbreekt) → val terug op welkom@.
+    if (!r?.ok && r?.code === 'SMTP_NOT_CONFIGURED') {
+      r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: INTERN_MAIL_TO, subject, text, html });
+    }
+    uit.mail = r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };
+  } catch (e) {
+    uit.mail = { ok: false, error: e?.message || String(e) };
+  }
+
+  // ── WhatsApp (fail-soft; ook als het template nog niet APPROVED is) ──
+  if (!welkomPhoneId) {
+    uit.wa = { ok: false, skipped: 'welkom-phone-ontbreekt' };
+  } else {
+    try {
+      const variables = waVars(appt, bron);
+      const { wamid } = await sendTemplate({
+        to: INTERN_WA_TO,
+        templateName: INTERN_WA_TEMPLATE,
+        languageCode: 'nl',
+        variables,
+        phoneNumberId: welkomPhoneId,
+      });
+      const varsMap = {};
+      variables.forEach((v, i) => { varsMap[String(i + 1)] = v; });
+      await logOutboundWa(supabaseAdmin, {
+        toPhone: INTERN_WA_TO,
+        phoneNumberId: welkomPhoneId,
+        body: `WhatsApp-template '${INTERN_WA_TEMPLATE}' — ${variables.join(' · ')}`,
+        wamid,
+        templateName: INTERN_WA_TEMPLATE,
+        templateVariables: varsMap,
+        source: 'afspraak-intern-notify',
+      });
+      uit.wa = { ok: true, wamid };
+    } catch (e) {
+      if (e instanceof MetaNotConfiguredError) uit.wa = { ok: false, skipped: 'meta-niet-geconfigureerd' };
+      else uit.wa = { ok: false, error: e?.message || String(e) };
+    }
+  }
+  return uit;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -247,6 +325,39 @@ export default async function handler(req, res) {
       }
       summary.momenten[moment.key] = vak;
     }
+
+    // 4) INTERNE MELDING bij nieuwe boekingen — eigen query (geen 25u-venster),
+    //    GEEN nachtvenster (interne alert voor de eigenaar), eigen live-flag.
+    //    Atomaire claim per rij op intern_notify_sent_at → precies één melding.
+    const internLive = aanUit(process.env.AFSPRAAK_INTERN_NOTIFY_LIVE);
+    const internVak = { live: internLive, kandidaten: 0, gemeld: 0, resultaten: [] };
+    try {
+      const nieuw = await haalInternKandidaten();
+      internVak.kandidaten = nieuw.length;
+      if (internLive && nieuw.length) {
+        let calNameMap = new Map();
+        try { calNameMap = await getCalendarNameMap(); } catch (_) { /* fail-soft → '—' */ }
+        // Welkom-lijn: hergebruik de al-geresolvede id, of resolve nu (reminder
+        // kan dry-run zijn terwijl de interne melding wél live is).
+        const waPhoneId = welkomPhoneId || await resolveWelkomPhoneId();
+        for (const appt of nieuw) {
+          const gotClaim = await claimRow(appt.id, 'intern_notify_sent_at');
+          if (!gotClaim) continue; // andere run pakte 'm al
+          const bron = bronVan(appt, calNameMap);
+          const r = await verstuurIntern(appt, bron, waPhoneId);
+          // Mail staat los van WA-approval: als mail OF WA lukt, blijft de claim
+          // staan (geen dubbele melding). Alleen als BEIDE falen → terugdraaien.
+          const ietsGelukt = r.mail?.ok || r.wa?.ok;
+          if (!ietsGelukt) await unclaimRow(appt.id, 'intern_notify_sent_at');
+          else internVak.gemeld += 1;
+          internVak.resultaten.push({ id: appt.id, mail: r.mail, wa: r.wa, teruggedraaid: !ietsGelukt });
+        }
+      }
+    } catch (e) {
+      internVak.error = e?.message || String(e);
+      summary.errors.push({ step: 'intern-notify', error: internVak.error });
+    }
+    summary.intern_notify = internVak;
   } catch (e) {
     summary.errors.push({ step: 'run', error: e?.message || String(e) });
   }
