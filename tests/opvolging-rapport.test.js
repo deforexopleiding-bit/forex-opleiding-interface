@@ -226,8 +226,13 @@ test('calls zonder duur worden geteld, niet geschat', () => {
   ], new Map());
   assert.equal(v.bel.uit, 3);
   assert.equal(v.bel.seconden, 120);      // niet 360, niet 180
-  assert.equal(v.bel.zonder_duur, 2);
   assert.equal(v.bel.gesproken, 1);
+  // De twee zonder duur zijn hier ook NIET OPGENOMEN, en dat is sinds de
+  // vier-emmers-fix de eerste vraag: een call waar niemand opnam heeft geen
+  // ontbrekende duur maar geen gesprek. zonder_duur is voortaan 'opgenomen,
+  // maar we weten niet hoe lang'.
+  assert.equal(v.bel.niet_opgenomen, 2);
+  assert.equal(v.bel.zonder_duur, 0);
 });
 
 test('agenda_doorgestuurd en ingepland zijn geen volume', () => {
@@ -335,10 +340,12 @@ test('het venster-oordeel gebruikt de pogingen van die lead', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('de moeite naast een gearchiveerde lead telt zijn hele historiek', () => {
+  // Met een gemeten duur erbij: zonder dat is het oordeel terecht 'onbekend'
+  // en meet deze test niet meer wat hij wil meten.
   const hist = new Map([['t1', [
-    { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-20T09:00:00Z' },
-    { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-21T09:00:00Z' },
-    { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-22T09:00:00Z' },
+    { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-20T09:00:00Z', duur_sec: 40 },
+    { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-21T09:00:00Z', duur_sec: 35 },
+    { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-22T09:00:00Z', duur_sec: 50 },
     { taak_id: 't1', soort: 'whatsapp', richting: 'uit', tijdstip: '2026-08-22T10:00:00Z' },
   ]]]);
   const [a] = bouwArchief({
@@ -448,7 +455,9 @@ test('het endpoint haalt de taken achter de zoomcalls apart op', () => {
 });
 
 test('bouwVensters krijgt de samengevoegde takenset, niet alleen de pogingen-set', () => {
-  assert.match(BRON, /bouwVensters\(\{ afspraken, taken: alleTaken, pogingen, dagen \}\)/);
+  // De afspraken-parameter heet sinds de filterfix vensterAfspraken; de
+  // takenset is nog steeds de samengevoegde.
+  assert.match(BRON, /bouwVensters\(\{ afspraken: vensterAfspraken, taken: alleTaken, pogingen, dagen \}\)/);
 });
 
 test('een afgekapte takenlijst wordt gemeld en niet stil geslikt', () => {
@@ -792,4 +801,150 @@ test('de uitkomst-kolommen zitten alleen in de eerste select', () => {
   const selects = BRON.match(/\.select\('id, lead_name[^']*'\)/g) || [];
   assert.match(selects[0], /uitkomst, uitkomst_op/);
   assert.doesNotMatch(selects[1], /uitkomst/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE EMMERS MOETEN OPTELLEN — PER DEFINITIE, NIET BIJ TOEVAL
+// ═══════════════════════════════════════════════════════════════════════════
+// Het live endpoint gaf {uit: 9, gesproken: 5, te_kort: 1}: vijf plus één is
+// zes, terwijl er negen pogingen waren. Drie calls vielen in geen enkele emmer,
+// want te_kort telde alleen mee als de call was opgenomen — en drie stonden op
+// 'niet opgenomen'.
+
+import { relevanteAfspraken } from '../api/opvolging-rapport.js';
+
+/** De negen echte calls van 7 september, met hun echte resultaat. */
+const NEGEN_CALLS = [
+  { duur: 26, res: 'gesproken' },      { duur: 24, res: 'gesproken' },
+  { duur: 4,  res: 'gesproken' },      { duur: 29, res: 'gesproken' },
+  { duur: 1,  res: 'niet opgenomen' }, { duur: 1,  res: 'niet opgenomen' },
+  { duur: 22, res: 'gesproken' },      { duur: 24, res: 'gesproken' },
+  { duur: 2,  res: 'niet opgenomen' },
+].map((c, i) => ({
+  taak_id: 't1', soort: 'call', richting: 'uit',
+  tijdstip: '2026-09-07T08:0' + i + ':00Z', duur_sec: c.duur, resultaat: c.res,
+}));
+
+test('de vier emmers tellen op tot het aantal pogingen', () => {
+  const v = telVolume(NEGEN_CALLS, new Map());
+  assert.equal(
+    v.bel.gesproken + v.bel.te_kort + v.bel.zonder_duur + v.bel.niet_opgenomen,
+    v.bel.uit,
+    'elke call hoort in precies één emmer te vallen',
+  );
+});
+
+test('de echte dag van 7 september valt goed uit elkaar', () => {
+  const v = telVolume(NEGEN_CALLS, new Map());
+  assert.equal(v.bel.uit, 9);
+  assert.equal(v.bel.gesproken, 5, '26, 24, 29, 22 en 24 seconden');
+  assert.equal(v.bel.te_kort, 1, 'alleen de call van 4 seconden werd opgenomen');
+  assert.equal(v.bel.niet_opgenomen, 3, '1, 1 en 2 seconden — niemand nam op');
+  assert.equal(v.bel.zonder_duur, 0);
+  assert.equal(v.bel.seconden, 133);
+});
+
+test('een niet-opgenomen call heet niet "te kort"', () => {
+  // Na de woordenronde: te_kort betekent opgenomen-maar-kort. Een call waar
+  // niemand opnam is iets anders en hoort zijn eigen naam te hebben.
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: 2, resultaat: 'niet opgenomen' }], new Map());
+  assert.equal(v.bel.te_kort, 0);
+  assert.equal(v.bel.niet_opgenomen, 1);
+});
+
+test('opgenomen zonder bekende duur valt in zonder_duur, niet in te_kort', () => {
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: null, resultaat: 'gesproken' }], new Map());
+  assert.equal(v.bel.zonder_duur, 1);
+  assert.equal(v.bel.te_kort, 0);
+  assert.equal(v.bel.gesproken, 0);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WAT UIT DE ZOOMCALL-SET VOLGT, GEBRUIKT DEZELFDE SET
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('geannuleerde en verzette afspraken tellen niet mee voor de vensters', () => {
+  // De lijst toonde 5 rijen en de blinde vlek eronder zei 6. Een geannuleerde
+  // call heeft geen spraakbericht nodig en kan dus geen venster missen.
+  const relevant = relevanteAfspraken(DAG_7_SEP, OM_09_43);
+  assert.equal(relevant.length, 3, 'drie echte calls, niet zes rijen');
+  assert.deepEqual(relevant.map((a) => a.id).sort(), ['san', 'shu', 'y-nw']);
+});
+
+test('de blinde vlek over calls zonder taak telt de gefilterde set', () => {
+  const relevant = relevanteAfspraken(DAG_7_SEP, OM_09_43);
+  const v = bouwVensters({ afspraken: relevant, taken: [], pogingen: [], dagen: ['2026-09-07'] });
+  assert.equal(v.zonder_taak.length, 3, 'niet 6 — de geannuleerde tellen niet mee');
+});
+
+test('het endpoint voedt de vensters met relevanteAfspraken, niet met de ruwe lijst', () => {
+  // Anders staat er weer een groter getal onder een kortere lijst.
+  assert.match(BRON, /const vensterAfspraken = relevanteAfspraken\(afspraken, Date\.now\(\)\)/);
+  assert.match(BRON, /bouwVensters\(\{ afspraken: vensterAfspraken/);
+  // Op de AANROEP, niet op de definitie: `export function bouwVensters({
+  // afspraken, taken, ... })` matcht anders altijd en dan bewaakt dit niets.
+  assert.doesNotMatch(BRON, /[^n] bouwVensters\(\{ afspraken, /);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A · ONBEKENDE DUUR IS ONBEKEND, GEEN VERWIJT
+// ═══════════════════════════════════════════════════════════════════════════
+// Alle drie de gearchiveerde taken hebben pogingen, en bij alle drie is
+// duur_sec NULL. Er is geen enkel geval van 'gearchiveerd na een korte call';
+// er zijn drie gevallen van 'we weten niet hoe lang er gebeld is'.
+
+const DRIE_ZONDER_DUUR = new Map([['t1', [
+  { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-20T09:00:00Z', duur_sec: null, resultaat: 'gesproken' },
+  { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-21T09:00:00Z', duur_sec: null, resultaat: 'gesproken' },
+]]]);
+
+test('een gearchiveerde lead zonder gemeten duur krijgt geen oordeel', () => {
+  const [a] = bouwArchief({
+    gearchiveerd: [{ id: 't1', naam: 'Onbekend', gearchiveerd_at: '2026-09-07T10:00:00Z' }],
+    histPerTaak: DRIE_ZONDER_DUUR,
+  });
+  assert.equal(a.moeite.staat, 'onbekend');
+  assert.equal(a.duur_bekend, false);
+  assert.notEqual(a.moeite.staat, 'te_weinig', 'geen verwijt voor iets wat de meting niet weet');
+});
+
+test('onbekende duur komt in de blinde vlekken, niet in de bevindingen', () => {
+  const archief = bouwArchief({
+    gearchiveerd: [{ id: 't1', naam: 'Onbekend', gearchiveerd_at: '2026-09-07T10:00:00Z' }],
+    histPerTaak: DRIE_ZONDER_DUUR,
+  });
+  const aandacht = [];
+  vulAandacht({
+    aandacht, blindeVlekken: [],
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] }, zoomcalls: [], archief,
+  });
+  assert.equal(aandacht.length, 1);
+  assert.equal(aandacht[0].soort, 'blinde_vlek');
+  assert.match(aandacht[0].tekst, /geen enkele call de duur vastgelegd/);
+  assert.equal(aandacht.filter((x) => x.soort === 'te_weinig_moeite').length, 0);
+});
+
+test('mét een gemeten duur valt het oordeel gewoon', () => {
+  // Zonder deze test zou 'alles onbekend noemen' er groen doorheen komen.
+  const hist = new Map([['t1', [
+    { taak_id: 't1', soort: 'call', richting: 'uit', tijdstip: '2026-08-20T09:00:00Z', duur_sec: 30, resultaat: 'gesproken' },
+  ]]]);
+  const [a] = bouwArchief({
+    gearchiveerd: [{ id: 't1', naam: 'Wel gemeten', gearchiveerd_at: '2026-09-07T10:00:00Z' }],
+    histPerTaak: hist,
+  });
+  assert.equal(a.moeite.staat, 'te_weinig');
+});
+
+test('een lead zonder enkele call krijgt gewoon het moeite-oordeel', () => {
+  // Er ontbreekt dan geen duur; er is niet gebeld. Dat is een verwijt over de
+  // moeite, geen blinde vlek over de meting.
+  const [a] = bouwArchief({
+    gearchiveerd: [{ id: 't1', naam: 'Niets gedaan', gearchiveerd_at: '2026-09-07T10:00:00Z' }],
+    histPerTaak: new Map(),
+  });
+  assert.equal(a.moeite.staat, 'te_weinig');
 });

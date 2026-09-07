@@ -4363,6 +4363,10 @@
       rapCel(v.bel.gesproken, 'werden een gesprek') +
       rapCel(v.wa.uit + v.spraak.uit, 'WhatsApp uit') +
       rapCel(v.wa.in + v.spraak.in, 'WhatsApp in') + '</div>';
+    if (v.bel.niet_opgenomen) {
+      h += '<div class="ronde zacht">' + v.bel.niet_opgenomen + ' van de ' + v.bel.uit +
+        ' belpogingen werd niet opgenomen. Dat is een poging, geen gesprek.</div>';
+    }
     if (v.bel.te_kort) {
       // Een call van vier seconden is geen gesprek. Meetellen zou het rapport
       // iets anders laten meten dan het zegt, en wel in Daves voordeel.

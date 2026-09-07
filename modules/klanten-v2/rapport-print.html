@@ -335,7 +335,9 @@ tr{break-inside:avoid}
     h += '<div class="tegels">' +
       tegel(v.bel.uit, 'belpogingen') +
       tegel(v.bel.gesproken, 'werden een gesprek',
-        v.bel.te_kort ? v.bel.te_kort + '× te kort' : null) +
+        [v.bel.te_kort ? v.bel.te_kort + '× te kort' : null,
+         v.bel.niet_opgenomen ? v.bel.niet_opgenomen + '× niet opgenomen' : null,
+        ].filter(Boolean).join(' · ') || null) +
       tegel(mmss(v.bel.seconden), 'gesprekstijd (m:ss)',
         v.bel.zonder_duur ? v.bel.zonder_duur + '× geen duur vastgelegd' : null) +
       tegel(v.wa.uit + v.spraak.uit, 'WhatsApp uit',
