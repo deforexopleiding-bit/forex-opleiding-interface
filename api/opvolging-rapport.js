@@ -901,6 +901,17 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
   // kon meten hierboven stil blijven, en dan leest 'geen afwijkingen' als
   // 'alles in orde'. Dat is de duurste fout die dit rapport kan maken.
   for (const bv of blindeVlekken) {
+    // 'periode' hoort HIER niet, en dat is de enige uitzondering.
+    //
+    // 'De dag van vandaag loopt nog' is een eigenschap van de gekozen periode,
+    // geen bevinding over Dave. Hij staat al als gele balk bovenaan het rapport
+    // — twee keer dezelfde mededeling binnen twee centimeter van elkaar, en de
+    // tweede leest bovendien als een verwijt terwijl er niets aan de hand is.
+    //
+    // Hij blijft wél in `blinde_vlekken` staan: daar hoort het overzicht van wat
+    // dit rapport niet weet compleet te zijn. Alleen de aandachtlijst, die over
+    // een persoon gaat, slaat hem over.
+    if (bv.sectie === 'periode') continue;
     aandacht.push({ soort: 'blinde_vlek', sectie: bv.sectie, tekst: bv.wat, uitleg: bv.waarom, naam: null });
   }
 
