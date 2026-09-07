@@ -19,7 +19,19 @@
 //
 //   ok           — gemeten, en het klopt.
 //   fout         — gemeten, en het klopt niet.
-//   niet_gemeten — er viel niets te meten, of de bron was niet bereikbaar.
+//   niet_gemeten — er viel niets te meten.
+//
+// EN NIET_GEMETEN IS SMAL. Alleen twee gevallen tellen: (a) we weten VOORAF dat
+// we niets kunnen meten — een ontbrekende omgevingsvariabele of koppeling — en
+// (b) de meting is leeg: nul rijen, er is niets gebeurd. Een ANTWOORD DAT WE
+// KREGEN en dat niet deugt — een 401, een 500, een tijdslimiet, een exception,
+// een verminkte vorm — is een FOUT.
+//
+// Op 7 september riep controle 5 de brug aan met een verzonnen variabelenaam en
+// de verkeerde header, kreeg een 401, en boekte die als NIET_GEMETEN. Een echte
+// storing verdween zo in de emmer voor ontbrekende configuratie; die controle
+// had jaren stil kunnen falen. Vier andere plekken deden hetzelfde en zijn
+// tegelijk rechtgezet.
 //
 // 'niet_gemeten' telt in de mail net zo zwaar als 'fout': allebei betekenen ze
 // dat je vandaag niet weet of het goed gaat.
@@ -80,8 +92,10 @@ export function controleerInstroom({ taken, vandaag, dagPlus }) {
 
 export function controleerOptelling({ rapport }) {
   if (!rapport || !rapport.volume || !rapport.volume.bel) {
-    return uit('optelling', NIET_GEMETEN, {},
-      'Het rapport gaf geen volume terug; er viel niets op te tellen.');
+    // Een antwoord dat we KREGEN en dat niet deugt. Een rapport zonder
+    // volume-blok is een kapot rapport, geen blinde vlek.
+    return uit('optelling', FOUT, { volume: 'ontbreekt' },
+      'Het rapport gaf geen volume-blok terug. Dat is een verminkt antwoord, geen ontbrekende meting.');
   }
   const b = rapport.volume.bel;
   const som = (b.gesproken || 0) + (b.te_kort || 0) + (b.niet_opgenomen || 0) + (b.zonder_duur || 0);
@@ -110,7 +124,9 @@ export function controleerOptelling({ rapport }) {
 export function controleerDubbels({ rapport }) {
   const lijst = rapport && Array.isArray(rapport.zoomcalls) ? rapport.zoomcalls : null;
   if (!lijst) {
-    return uit('dubbels', NIET_GEMETEN, {}, 'Het rapport gaf geen zoomcall-lijst terug.');
+    // Idem: geen lijst is iets anders dan een lege lijst. Zie hieronder.
+    return uit('dubbels', FOUT, { zoomcalls: 'ontbreekt' },
+      'Het rapport gaf geen zoomcall-lijst terug. Dat is een verminkt antwoord, geen ontbrekende meting.');
   }
   if (lijst.length === 0) {
     return uit('dubbels', NIET_GEMETEN, { regels: 0 },

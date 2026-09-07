@@ -104,6 +104,96 @@ in plaats van het onderwerp zelf.** En allemaal waren ze groen.
 
 ---
 
+## ⚠ De blinde vlek die geen blinde vlek was
+
+Dit is de belangrijkste vondst van de bewakingsronde, en hij hoort naast de
+alibi-test hierboven omdat het dezelfde ziekte is in een ander orgaan: **iets
+boeken als "onbekend" terwijl je het antwoord wél had.**
+
+### Wat er gebeurde
+
+De dagelijkse gezondheidscontrole (`api/cron-opvolging-gezondheid.js`) heeft een
+vijfde controle die kijkt of de WhatsApp-brug bericht doorlaat. Die controle
+riep de brug aan met een **verzonnen variabelenaam** (`WHATSAPP_BRUG_TOKEN` —
+komt nergens anders in deze repo voor; het geheim heet `WHATSAPP_BRUG_SECRET`)
+en met de **verkeerde header** (`Authorization: Bearer` in plaats van
+`X-Brug-Secret`). De brug antwoordde dus met **401**.
+
+En toen ging het pas echt mis:
+
+```js
+if (!resp.ok) return controleerBrug({ status: null, fout: 'HTTP ' + resp.status });
+//                                    ^^^^^^^^^^^^ → NIET_GEMETEN
+```
+
+Die 401 werd geboekt als **niet gemeten** — de emmer voor "we konden hier niets
+over zeggen". In de dagmail stond netjes `[NIET GEMETEN] brug`, wat leest als
+"er ontbreekt nog een instelling". Er ontbrak niets. De controle was kapot.
+
+**Zonder de vraag "waarom is die niet gemeten, de variabelen staan er toch?" had
+deze controle jaren stil kunnen falen.** Een bewaker die zijn eigen storing als
+blinde vlek rapporteert is erger dan geen bewaker: hij geeft dekking.
+
+### De regel
+
+> **`niet_gemeten` mag alleen als je VOORAF weet dat je niets kunt meten.**
+>
+> Dat zijn twee gevallen, en niet meer dan twee:
+> 1. **een ontbrekende instelling of koppeling** — de variabele staat er niet,
+>    de brug is niet ingericht, het adres is onbekend;
+> 2. **een lege meting** — nul rijen, er is die dag niets gebeurd.
+>
+> **Een antwoord dat je WEL kreeg maar niet leuk vindt — een 401, een 500, een
+> tijdslimiet, een exception, een verminkte antwoordvorm — is een `fout`.**
+
+Het verschil is niet cosmetisch. `fout` betekent "iemand kijkt hiernaar";
+`niet_gemeten` betekent in de praktijk "dit staat er al weken en niemand kijkt
+er meer naar". Een storing in de tweede emmer is een storing die niemand ziet.
+
+### Het stond op vijf plekken
+
+Nadat de brug-controle door de mand viel, zijn de andere vier nagelopen. Vier
+deden precies hetzelfde:
+
+| plek | boekte als | is in werkelijkheid |
+| --- | --- | --- |
+| brug: elke niet-ok HTTP-status | niet gemeten | storing |
+| printweergave: HTTP 500 op de pagina | niet gemeten | storing |
+| instroom: leesfout op `opvolging_taken` | niet gemeten | storing |
+| optelling + dubbels: exception uit `bouwRapport()` | niet gemeten | storing |
+| optelling: rapport zonder `volume`-blok | niet gemeten | verminkt antwoord |
+
+Die laatste is de scherpste: een rapportmotor die crasht is precies wat deze
+bewaking hoort te vangen, en juist die crash verdween in de blinde-vlek-emmer.
+
+Wat wél blinde vlek blijft: nul open aanmeldingen, nul zoomcalls op een dag, een
+brug die verbonden is maar sinds de herstart niets zag. Dat zijn lege metingen,
+geen geweigerde antwoorden. Er staat een test op die dat vasthoudt, want "dan
+maken we alles maar `fout`" is de tegenovergestelde fout en levert een dagmail
+op waar niemand meer naar kijkt.
+
+### En de test zag het niet, om de bekende reden
+
+Er stónden tests op `controleerBrug()`. Ze waren groen. Alle drie de fouten
+zaten een laag dieper, in `meetBrug()` — de variabelenaam, de header en de
+staat-toekenning. De pure functie kreeg keurig `{status: null}` aangereikt en
+oordeelde daar keurig over.
+
+Erger nog: **drie tests cementeerden de verwarring**, met een storing als bewijs
+voor een blinde vlek:
+
+```js
+test('onbereikbaar is NIET GEMETEN, geen fout en zeker geen ok', () => {
+  const r = beoordeelPrintweergave({ bereikbaar: false, fout: 'HTTP 500' });
+  assert.equal(r.staat, NIET_GEMETEN);
+});
+```
+
+Een HTTP 500 als bewijs voor "niet gemeten". Geschreven een paar uur nadat dit
+document over precies die vorm werd geschreven. Zie de alibi-test hierboven: de
+regel is niet moeilijk te begrijpen, hij is moeilijk toe te passen op je eigen
+werk van vijf minuten geleden.
+
 ## Twee instroommomenten
 
 Sinds de reparatie van 7 september kent een aanmeldkaart twee momenten, en die
