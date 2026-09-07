@@ -191,7 +191,7 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
   // terugwerkende kracht, in tegenstelling tot `status`.
   const { data: apptRuw, error: e3 } = await supabaseAdmin
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_phone, lead_email, scheduled_at, status, snelle_notitie, uitkomst, uitkomst_op')
+    .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, snelle_notitie, uitkomst, uitkomst_op')
     .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
     .order('scheduled_at', { ascending: true });
 
@@ -204,7 +204,7 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
     uitkomstKolommen = false;
     const { data: fallback, error: e3b } = await supabaseAdmin
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_phone, lead_email, scheduled_at, status, snelle_notitie')
+      .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, snelle_notitie')
       .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
       .order('scheduled_at', { ascending: true });
     if (e3b) throw e3b;
@@ -315,7 +315,7 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 4 · DE ZOOMCALLS ZELF
   // ═══════════════════════════════════════════════════════════════════════
-  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen });
+  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs: Date.now() });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 5 · UIT DE LIJST GEHAALD
@@ -328,6 +328,18 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
   // Als laatste gebouwd, uit de vijf secties hierboven. Bewust afgeleid: een
   // afwijking die hier staat moet elders in het rapport terug te vinden zijn,
   // anders is het een mening zonder rijen eronder.
+  // DE DAG IS NOG NIET AF. Bevat de periode vandaag, dan wordt hier een
+  // onvoltooide dag beoordeeld. Dat mag, maar het moet erbij staan — anders
+  // leest een half rapport als een heel rapport, en dat is bij een rapport over
+  // een persoon het verschil tussen een gesprek en een verwijt.
+  if (dagen.includes(vandaag)) {
+    blindeVlekken.push({
+      sectie: 'periode',
+      wat   : 'De dag van vandaag loopt nog.',
+      waarom: 'Wat hier staat is de stand van dit moment, niet het eindresultaat. Calls die nog moeten plaatsvinden staan als gepland en worden niet beoordeeld.',
+    });
+  }
+
   vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief });
 
   return {
@@ -562,7 +574,53 @@ export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
 const leegTel = () => ({ totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 });
 
 // ── Sectie 4 ───────────────────────────────────────────────────────────────
-export function bouwZoomcalls({ afspraken, uitkomstKolommen }) {
+// Hoeveel speling een call krijgt nadat hij is afgelopen, voordat het rapport
+// er iets van vindt. Een call van 20:30 mag om 20:35 niet al rood staan: hij is
+// dan nog bezig, en daarna moet er ook nog even tijd zijn om iets vast te
+// leggen. Duur plus dit getal.
+const UITKOMST_SPELING_MIN = 15;
+const STANDAARD_DUUR_MIN   = 30;
+
+/**
+ * Mag deze call al beoordeeld worden?
+ *
+ * Zonder deze vraag beoordeelde het rapport élke afspraak in de periode, ook
+ * die van vanavond half negen. Dan staat er om acht uur 's ochtends al een
+ * lijst met verwijten over werk dat nog niet gedaan hoefde te zijn — en dat is
+ * precies het soort onterecht cijfer waar dit rapport zijn geloofwaardigheid
+ * mee verspeelt.
+ */
+export function callStaat(a, nuMs) {
+  // Een verzette afspraak is geen gemiste uitkomst. follow-up-verplaats-call
+  // zet de oude rij op 'verplaatst' en maakt een nieuwe; die oude rij hoort
+  // helemaal niet beoordeeld te worden.
+  if (String(a.status || '') === 'verplaatst') return 'verplaatst';
+  const start = Date.parse(a.scheduled_at);
+  if (!Number.isFinite(start)) return 'te_beoordelen';
+  const duur = Number.isFinite(a.duration_minutes) && a.duration_minutes > 0
+    ? a.duration_minutes : STANDAARD_DUUR_MIN;
+  const klaar = start + (duur + UITKOMST_SPELING_MIN) * 60000;
+  return nuMs < klaar ? 'gepland' : 'te_beoordelen';
+}
+
+/**
+ * Wie is dit, voor het samenvoegen van dubbele afspraken?
+ *
+ * E-mail eerst, dan het nummer op cijfers, dan de naam. Een naam alleen is
+ * zwak, maar twee rijen met dezelfde naam op dezelfde dag zijn precies wat we
+ * willen samenvoegen — en als het toevallig twee verschillende mensen zijn,
+ * dan is 'er staan twee afspraken' nog steeds de juiste melding.
+ */
+function persoonSleutel(a) {
+  const mail = String(a.lead_email || '').trim().toLowerCase();
+  if (mail) return 'e:' + mail;
+  const tel = telCijfers(a.lead_phone);
+  if (tel) return 't:' + (tel.length >= 9 ? tel.slice(-9) : tel);
+  return 'n:' + String(a.lead_name || '').trim().toLowerCase();
+}
+
+// ── Sectie 4 ───────────────────────────────────────────────────────────────
+export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }) {
   return afspraken.map((a) => {
     // GEEN TERUGVAL OP status. 'completed' dekt zowel sale als gesprek_gehad,
     // en 'cancelled' zowel wilt_niet_meer als niet_geschikt. Uit de status
@@ -570,24 +628,63 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen }) {
     // notitietekst uitparseren — en net zo fout. Staat er geen uitkomst, dan
     // is het eerlijke antwoord dat er geen uitkomst vastgelegd is.
     const heeft = uitkomstKolommen && !!a.uitkomst;
+    const staat = callStaat(a, nuMs);
     return {
       appointment_id: a.id,
       naam    : a.lead_name,
       dag     : dagVan(a.scheduled_at),
       tijd    : tijdVan(a.scheduled_at),
+      staat,                       // gepland | verplaatst | te_beoordelen
+      persoon : persoonSleutel(a),
       uitkomst: heeft ? a.uitkomst : null,
       uitkomst_op: heeft ? a.uitkomst_op : null,
       vastgelegd : heeft,
       // Waarom er niets staat. Het verschil tussen 'Dave vulde niets in' en
       // 'het systeem legde het niet vast' is precies wat we op 6 september
       // gerepareerd hebben, en dat verschil hoort zichtbaar te blijven.
+      // 'gepland' is een derde geval: er is nog niets te melden.
       reden_leeg: heeft ? null
-        : (uitkomstKolommen
+        : (staat === 'gepland' ? 'Deze call moet nog plaatsvinden.'
+          : staat === 'verplaatst' ? 'Deze afspraak is verzet; de nieuwe staat er apart bij.'
+          : uitkomstKolommen
             ? 'Er is voor deze call geen uitkomst vastgelegd.'
             : 'Uitkomsten worden voor deze periode nog niet bewaard.'),
       notitie : a.snelle_notitie || null,
     };
   });
+}
+
+/**
+ * Dezelfde persoon, meerdere afspraken op dezelfde dag.
+ *
+ * Twee identieke verwijten naast elkaar is geen bevinding maar een telfout —
+ * Yasmine Aouada stond op 7 september twee keer in de aandachtlijst met exact
+ * dezelfde tekst. Eén regel dus, en de dubbeling is dan zelf het aandachtspunt.
+ *
+ * Verzette rijen tellen niet mee: die zijn verklaard. Blijven er daarna twee
+ * over, dan is het een echte dubbele boeking.
+ */
+export function groepeerDubbele(zoomcalls) {
+  const per = new Map();
+  for (const c of zoomcalls) {
+    const k = c.dag + '|' + c.persoon;
+    if (!per.has(k)) per.set(k, []);
+    per.get(k).push(c);
+  }
+  const dubbel = [];
+  for (const [, rijen] of per) {
+    const levend = rijen.filter((r) => r.staat !== 'verplaatst');
+    if (levend.length >= 2) {
+      dubbel.push({
+        naam : levend[0].naam,
+        dag  : levend[0].dag,
+        tijden: levend.map((r) => r.tijd).filter(Boolean),
+        appointment_ids: levend.map((r) => r.appointment_id),
+        verzet_ernaast : rijen.length - levend.length,
+      });
+    }
+  }
+  return dubbel;
 }
 
 // ── Sectie 5 ───────────────────────────────────────────────────────────────
@@ -658,7 +755,35 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
     });
   }
 
+  // Dubbele afspraken eerst, en de personen daaruit onthouden: anders staan er
+  // voor Yasmine twee identieke 'geen uitkomst'-regels naast de melding dat er
+  // twee afspraken zijn. Dat is drie regels voor één gegeven.
+  const dubbeleGroepen = groepeerDubbele(zoomcalls);
+  const alGemeld = new Set();
+  for (const d of dubbeleGroepen) {
+    aandacht.push({
+      soort: 'dubbele_afspraak', sectie: 'zoomcalls', naam: d.naam,
+      tekst: `Er staan ${d.tijden.length} afspraken voor ${d.naam || 'dezelfde persoon'} op ${d.dag}` +
+        (d.tijden.length ? ` (${d.tijden.join(' en ')})` : '') + '.',
+      uitleg: d.verzet_ernaast
+        ? 'Er staat daarnaast nog een verzette rij; die telt hier niet mee.'
+        : 'Geen van beide is als verzet gemarkeerd, dus dit lijkt een dubbele boeking.',
+      appointment_ids: d.appointment_ids,
+    });
+    for (const id of d.appointment_ids) alGemeld.add(id);
+  }
+
   for (const c of zoomcalls) {
+    // Een call die nog moet plaatsvinden is geen gemiste uitkomst, en een
+    // verzette rij evenmin. Zonder deze regel staat er om acht uur 's ochtends
+    // al een verwijt over de call van vanavond half negen.
+    // Alleen een EXPLICIETE 'gepland' of 'verplaatst' onderdrukt de melding.
+    // Andersom — alleen 'te_beoordelen' toelaten — zou een call met een
+    // ontbrekende staat stilletjes laten wegvallen, en dat is precies de
+    // stille vorm die dit rapport nergens mag hebben. Onbekend hoort beoordeeld
+    // te worden, niet verstopt.
+    if (c.staat === 'gepland' || c.staat === 'verplaatst') continue;
+    if (alGemeld.has(c.appointment_id)) continue;
     if (!c.vastgelegd) {
       aandacht.push({
         soort: 'geen_uitkomst', sectie: 'zoomcalls', naam: c.naam,
