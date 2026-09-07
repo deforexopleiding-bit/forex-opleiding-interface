@@ -659,6 +659,9 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
 
       if (uit.paren.length > 0) {
         const kaart = new Map(uit.paren);
+        // Eerst leegmaken: sleutel_opslag hoort de HUIDIGE kaart te beschrijven,
+        // niet de som van alle herbouwrondes sinds de start.
+        tellers.sleutelOpslagReset();
         await lidkaart.bouw(nummers, async (n) => kaart.get(n) || null,
           (vorm) => tellers.sleutelOpslag(vorm));
         // Welke weg het deed staat in de tellers; hier alleen dát er een was.
@@ -698,7 +701,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
    * van de jid zelf. Dat is precies het gedrag van vóór deze wijziging, dus een
    * mislukte oplossing maakt het nooit slechter dan het was.
    */
-  async function bepaalNummer(jid) {
+  async function bepaalNummer(jid, eventType) {
     if (!jid) { tellers.oplossing('geen_jid'); return null; }
     if (isTelefoonJid(jid)) {
       const n = normaliseerNummer(jid);
@@ -717,7 +720,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     // apart geteld — dat aantal is de meting waarmee we zien of dat
     // achtervoegsel inderdaad de oorzaak was.
     const uitKaart = lidkaart.zoekNummer(jid);
-    tellers.sleutelZoek(uitKaart.vorm, !!uitKaart.nummer);
+    tellers.sleutelZoek(uitKaart.vorm, !!uitKaart.nummer, eventType);
     if (uitKaart.nummer) {
       onthoud(uitKaart.nummer, jid);
       tellers.oplossing(uitKaart.via === 'basis' ? 'lidkaart_basis' : 'lidkaart', uitKaart.nummer);
@@ -840,7 +843,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // Allebei lezen ze de envelop, niet de inhoud; het filter staat nog altijd
       // vóór elk gebruik van nummer of tekst.
       const ruw = bekijkRuweBericht(msg);
-      const nummer = ruw.nummer || await bepaalNummer(van);
+      const nummer = ruw.nummer || await bepaalNummer(van, 'message');
       // FILTER. Alles hieronder raakt de tekst aan, en pas hierna wordt er iets
       // van dit bericht onthouden.
       if (!leadlijst.mag(nummer)) { negeer('message', 'niet_op_leadlijst', van); return; }
@@ -896,7 +899,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
       // Eerst de identiteit oplossen, dan filteren. Zonder deze stap filteren we
       // op de cijfers van een LID, en die staan nergens op de leadlijst.
       const ruw = bekijkRuweBericht(msg);
-      const nummer = ruw.nummer || await bepaalNummer(msg?.to);
+      const nummer = ruw.nummer || await bepaalNummer(msg?.to, 'message_create');
       // FILTER, en pas hierna wordt het nummer of de tekst ergens voor gebruikt.
       if (!leadlijst.mag(nummer)) { negeer('message_create', 'niet_op_leadlijst', msg?.to); return; }
       if (isSysteemBericht('message_create', msg, msg?.to)) return;
@@ -934,7 +937,7 @@ export function maakWhatsapp({ cfg, leadlijst, webhook }) {
     try {
       const jid = msg?.to || msg?.from;
       if (isGroep(jid)) { negeer('message_ack', 'groep', jid); return; }
-      const nummer = await bepaalNummer(jid);
+      const nummer = await bepaalNummer(jid, 'message_ack');
       if (!leadlijst.mag(nummer)) { negeer('message_ack', 'niet_op_leadlijst', jid); return; }
       // Een ack op een e2e_notification is net zo min een verstuurd bericht als
       // die notification zelf er een was.

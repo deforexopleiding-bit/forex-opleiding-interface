@@ -23,6 +23,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   deelSleutel, sleutelVorm, beoordeelKandidaat, kanTelefoonnummerZijn,
@@ -203,4 +204,56 @@ test('onbruikbaar is een eigen uitkomst en telt niet als contact-succes', () => 
   const st = t.status();
   assert.equal(st.opgelost.onbruikbaar, 1);
   assert.equal(st.opgelost.contact, 0, 'een fout antwoord mag nooit als contact-succes tellen');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE TELLERS MOETEN TE DUIDEN ZIJN
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('sleutel_opslag beschrijft de huidige kaart, niet de som van alle rondes', () => {
+  // Stond op 116 voor 29 leads: vier herbouwrondes opgeteld. Als momentopname
+  // van de kaart was dat getal onbruikbaar.
+  const t = maakTellers();
+  t.sleutelOpslag('lid/14'); t.sleutelOpslag('lid/14');
+  assert.equal(t.status().sleutel_opslag['lid/14'], 2);
+  t.sleutelOpslagReset();
+  t.sleutelOpslag('lid/14');
+  assert.equal(t.status().sleutel_opslag['lid/14'], 1, 'na een reset telt de nieuwe ronde vanaf nul');
+});
+
+test('opzoekingen worden per event-type geteld', () => {
+  // Eén verstuurd bericht levert één message_create plus meerdere acks op, en
+  // die lossen allemaal dezelfde persoon opnieuw op. Zonder deze splitsing zijn
+  // opgelost.* en gezien.* niet naast elkaar te leggen.
+  const t = maakTellers();
+  t.sleutelZoek('lid/15', true,  'message_create');
+  t.sleutelZoek('lid/15', true,  'message_ack');
+  t.sleutelZoek('lid/14', false, 'message_create');
+  const st = t.status();
+  assert.deepEqual(st.sleutel_zoek_per_type.message_create, { zoek: 2, raak: 1 });
+  assert.deepEqual(st.sleutel_zoek_per_type.message_ack,    { zoek: 1, raak: 1 });
+});
+
+test('een onbekend event-type vervuilt de splitsing niet', () => {
+  const t = maakTellers();
+  t.sleutelZoek('lid/15', true, 'iets_anders');
+  assert.deepEqual(t.status().sleutel_zoek_per_type, {});
+  // De totalen blijven wél kloppen.
+  assert.deepEqual(t.status().sleutel_zoek, { 'lid/15': 1 });
+});
+
+test('de drie aanroepers geven hun event-type mee', () => {
+  // Anders blijft sleutel_zoek_per_type leeg en is de splitsing er alleen op
+  // papier — precies het soort fix dat niet op het gelopen pad ligt.
+  const bron = readFileSync(new URL('../services/whatsapp-brug/lib/whatsapp.js', import.meta.url), 'utf8');
+  assert.match(bron, /bepaalNummer\(van, 'message'\)/);
+  assert.match(bron, /bepaalNummer\(msg\?\.to, 'message_create'\)/);
+  assert.match(bron, /bepaalNummer\(jid, 'message_ack'\)/);
+});
+
+test('de kaartopbouw reset de opslagteller voordat hij vult', () => {
+  const bron = readFileSync(new URL('../services/whatsapp-brug/lib/whatsapp.js', import.meta.url), 'utf8');
+  const i = bron.indexOf('sleutelOpslagReset()');
+  const j = bron.indexOf('lidkaart.bouw(', i);
+  assert.ok(i > 0 && j > i, 'de reset hoort vóór de opbouw te staan, niet erna');
 });
