@@ -39,6 +39,26 @@
 // schrijfacties. `since` werkt ALLEEN samen met dry=1, zodat een echte run
 // nooit per ongeluk breder kan lopen dan het watermerk.
 //
+// ── HET WATERMERK VERZET OP EEN BESLUIT, NIET OP EEN SCHRIJFACTIE ────────
+// Overslaan is ook een besluit. Stond dit alleen op de schrijf-tak (zoals in
+// de eerste versie), dan gebeurden er twee dingen: op een ochtend waarin alle
+// rijen werden overgeslagen liep het watermerk helemaal niet vooruit, en een
+// overgeslagen rij die vóór een geschreven rij lag raakte er alsnog áchter
+// zonder ooit verwerkt te zijn. Dat laatste is geen randgeval — de meeste
+// studenten met een afgeronde sessie hebben (nog) geen onboardingrij.
+//
+// Alleen een echte FOUT houdt het watermerk tegen, en dan voor de hele rest
+// van de ronde: de rijen komen oplopend binnen, dus doorschuiven over een
+// mislukte rij heen maakt die definitief kwijt.
+//
+// ── AANLEIDING EN OORZAAK ────────────────────────────────────────────────
+// De lezer geeft per student twee sessies terug: de OORZAAK (de vroegste
+// afgeronde sessie, ook van vóór het watermerk — die maakte het onboarden af)
+// en de AANLEIDING (de sessie binnen het venster die ons erop attendeerde).
+// Vastleggen doen we de oorzaak, het watermerk verzetten op de aanleiding.
+// Zouden we het watermerk op de oorzaak zetten, dan wilde dat terug in de
+// tijd en kwam dezelfde rij elke ochtend opnieuw langs.
+//
 // AUTH: Authorization: Bearer ${CRON_SECRET}. 401 zonder.
 
 import { supabaseAdmin } from '../supabase.js';
@@ -91,7 +111,7 @@ export default async function handler(req, res) {
     watermark_before: null, watermark_after: null,
     // Alles wat buiten de filter viel wordt geteld: een cron die alleen zegt
     // wat hij deed en niet wat hij oversloeg, stelt ten onrechte gerust.
-    afgeronde_sessies: 0, eerdere_afgeronde_buiten_venster: 0, zonder_bubble_koppeling: 0,
+    afgeronde_sessies: 0, gesloten_op_eerdere_sessie: 0, zonder_bubble_koppeling: 0,
     kandidaten: 0, afgesloten: 0,
     geen_onboarding: 0, al_afgerond: 0, al_automatisch: 0, niet_aanraken: 0,
     voorbeelden: [], errors: [],
@@ -118,7 +138,7 @@ export default async function handler(req, res) {
     const bron = await haalAfgerondeEersteSessies({ sindsIso: sinds, limiet: FETCH_CAP });
     result.bron_status             = bron.bron_status;
     result.afgeronde_sessies       = bron.totaal_afgerond;
-    result.eerdere_afgeronde_buiten_venster = bron.eerdere_afgeronde_buiten_venster;
+    result.gesloten_op_eerdere_sessie = bron.gesloten_op_eerdere_sessie;
     result.zonder_bubble_koppeling = bron.zonder_bubble_koppeling;
 
     // MISLUKTE BEVRAGING IS GEEN LEGE UITKOMST. Stoppen zonder het watermerk
@@ -133,11 +153,35 @@ export default async function handler(req, res) {
 
     result.kandidaten = bron.sessies.length;
     let highestMs = new Date(sinds).getTime() || 0;
+    // Zodra één rij FAALT gaat het watermerk niet verder, ook niet voor de
+    // rijen erna. De bevraging is oplopend gesorteerd, dus doorschuiven over
+    // een mislukte rij heen zou die rij definitief kwijtmaken — en dat is
+    // precies de stille vorm van gegevensverlies die we hier aan het
+    // opruimen zijn. Liever zichtbaar blijven staan: de fout staat in
+    // `errors` én in de log, en morgen komt dezelfde rij terug.
+    let blokkade = false;
 
     for (const sess of bron.sessies) {
-      try {
-        const sdMs = new Date(sess.start_tijd).getTime();
+      // Het watermerk verzet mee op de AANLEIDING (de sessie die in het
+      // venster viel), niet op de oorzaak. De oorzaak mag van vóór het
+      // watermerk zijn; die als watermerk gebruiken zou het terug in de tijd
+      // willen zetten en de rij eeuwig laten terugkomen.
+      const aanleidingMs = new Date(sess.aanleiding_op || sess.start_tijd).getTime();
 
+      // Is deze rij tot een BESLUIT gekomen? Overslaan is ook een besluit.
+      //
+      // Dit stond eerder alleen op de schrijf-tak, en dat was fout: de
+      // bevraging is oplopend gesorteerd met een limiet, dus een overgeslagen
+      // sessie die vóór een geschreven sessie ligt raakte alsnog áchter het
+      // watermerk — zonder ooit verwerkt te zijn. Bovendien liep het watermerk
+      // helemaal niet meer vooruit op een ochtend waarin alles werd
+      // overgeslagen, en dat is hier de regel en niet de uitzondering: de
+      // meeste studenten met een afgeronde sessie hebben geen onboardingrij.
+      //
+      // Alleen een echte FOUT laat het watermerk staan, zodat die rij morgen
+      // opnieuw langskomt.
+      let afgehandeld = false;
+      try {
         // Onboarding zoeken via de brug bubble_user_id.
         const { data: ob, error: obErr } = await supabaseAdmin
           .from('onboardings')
@@ -148,60 +192,72 @@ export default async function handler(req, res) {
           .maybeSingle();
         if (obErr) throw new Error('onboarding lookup: ' + obErr.message);
 
-        if (!ob?.id) { result.geen_onboarding++; continue; }
-
-        // IDEMPOTENT — drie afzonderlijke redenen om niets te doen.
+        // IDEMPOTENT — vier afzonderlijke redenen om niets te doen. Als keten
+        // en niet als reeks `continue`s, zodat het besluit ná de try nog
+        // bereikt wordt.
         //
         // `auto_afgerond_sessie_id` is de sterkste: staat die gevuld, dan
         // heeft deze cron zijn werk al gedaan. Ook wanneer iemand de
         // onboarding daarna handmatig heropende laten we 'm met rust — een
         // mens die bewust heropent mag niet door dezelfde sessie opnieuw
         // dichtgetrokken worden.
-        if (ob.auto_afgerond_sessie_id) { result.al_automatisch++; continue; }
-        if (ob.archived_at || NIET_MEER_AANRAKEN.has(String(ob.status || '').toLowerCase())) {
-          result.niet_aanraken++; continue;
+        if (!ob?.id) {
+          result.geen_onboarding++;
+        } else if (ob.auto_afgerond_sessie_id) {
+          result.al_automatisch++;
+        } else if (ob.archived_at || NIET_MEER_AANRAKEN.has(String(ob.status || '').toLowerCase())) {
+          result.niet_aanraken++;
+        } else if (String(ob.status || '').toLowerCase() === 'afgerond') {
+          result.al_afgerond++;
+        } else {
+          if (result.voorbeelden.length < 20) {
+            result.voorbeelden.push({
+              onboarding_id: ob.id,
+              klant: ob.customer_name || null,
+              status_nu: ob.status,
+              sessie_id: sess.id,
+              sessie_op: sess.start_tijd,
+              // Zichtbaar maken wanneer de oorzaak ouder is dan het watermerk.
+              op_eerdere_sessie: !!sess.op_eerdere_sessie,
+              aanleiding_op: sess.aanleiding_op || null,
+            });
+          }
+
+          if (dry) {
+            result.afgesloten++;
+          } else {
+            const nowIso = new Date().toISOString();
+            const { data: upd, error: updErr } = await supabaseAdmin
+              .from('onboardings')
+              .update({
+                status: 'afgerond',
+                completed_at: nowIso,
+                auto_afgerond_sessie_id: sess.id,
+                auto_afgerond_sessie_op: sess.start_tijd,
+                auto_afgerond_op: nowIso,
+                updated_at: nowIso,
+              })
+              .eq('id', ob.id)
+              // Optimistische sluiting: als een andere run of een mens
+              // tussendoor al iets deed, raakt deze update niets.
+              .is('auto_afgerond_sessie_id', null)
+              .select('id')
+              .maybeSingle();
+            if (updErr) throw new Error('onboarding afsluiten: ' + updErr.message);
+            if (upd?.id) result.afgesloten++;
+            else         result.al_automatisch++;
+          }
         }
-        if (String(ob.status || '').toLowerCase() === 'afgerond') { result.al_afgerond++; continue; }
 
-        if (result.voorbeelden.length < 20) {
-          result.voorbeelden.push({
-            onboarding_id: ob.id,
-            klant: ob.customer_name || null,
-            status_nu: ob.status,
-            sessie_id: sess.id,
-            sessie_op: sess.start_tijd,
-          });
-        }
-
-        if (dry) { result.afgesloten++; if (sdMs > highestMs) highestMs = sdMs; continue; }
-
-        const nowIso = new Date().toISOString();
-        const { data: upd, error: updErr } = await supabaseAdmin
-          .from('onboardings')
-          .update({
-            status: 'afgerond',
-            completed_at: nowIso,
-            auto_afgerond_sessie_id: sess.id,
-            auto_afgerond_sessie_op: sess.start_tijd,
-            auto_afgerond_op: nowIso,
-            updated_at: nowIso,
-          })
-          .eq('id', ob.id)
-          // Optimistische sluiting: als een andere run of een mens tussendoor
-          // al iets deed, raakt deze update niets.
-          .is('auto_afgerond_sessie_id', null)
-          .select('id')
-          .maybeSingle();
-        if (updErr) throw new Error('onboarding afsluiten: ' + updErr.message);
-        if (upd?.id) result.afgesloten++;
-        else         result.al_automatisch++;
-
-        if (sdMs > highestMs) highestMs = sdMs;
+        afgehandeld = true;
       } catch (e) {
         const msg = e?.message || String(e);
         console.error('[onboarding-eerste-sessie] rij mislukt', sess?.id, msg);
         result.errors.push({ sessie_id: sess?.id || null, error: msg });
+        blokkade = true;
       }
+
+      if (!blokkade && afgehandeld && aanleidingMs > highestMs) highestMs = aanleidingMs;
     }
 
     // Watermerk vooruit — nooit in een droogloop.

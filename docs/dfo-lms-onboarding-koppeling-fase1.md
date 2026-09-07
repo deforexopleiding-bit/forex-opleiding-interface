@@ -460,6 +460,52 @@ zodat filter en rij-opmaak niet opnieuw uit elkaar kunnen lopen. De
 "Wacht op reden"-regel blijft bewust alléén bij een gewone no-show staan: het
 reden-endpoint weigert het nieuwe type, dus daar kán niemand een reden geven.
 
+### Aanleiding en oorzaak: waarom een oude sessie tóch mag sluiten
+
+Twee fouten die op 7 september zijn rechtgezet, allebei van de stille soort:
+de code deed niets verkeerds, hij liet dingen liggen.
+
+**1. Een student met een afgeronde sessie vóór het watermerk kon nooit meer
+sluiten.** De eerste versie liet een kandidaat vallen zodra hij niet zelf de
+vroegste afgeronde sessie was (`echtEerste`-filter), en telde dat als
+`eerdere_afgeronde_buiten_venster`. Dat gold dan voor élke volgende sessie van
+die student: niet de tweede, niet de tiende. De onboarding stond eeuwig open,
+en het enige spoor was een teller waar niets mee gebeurde.
+
+De scheiding die dat oplost:
+
+- **Aanleiding** — een afgeronde sessie ná het watermerk. Dít is de grens die
+  een inhaalslag over de historie tegenhoudt.
+- **Oorzaak** — de vroegste afgeronde sessie van die student, ook van vóór het
+  watermerk. Die maakte het onboarden af, en die wordt vastgelegd in
+  `auto_afgerond_sessie_id` / `_op`.
+
+De cron sluit dus op de oorzaak en verzet zijn watermerk op de aanleiding.
+Andersom zou het watermerk terug in de tijd willen en kwam dezelfde rij elke
+ochtend opnieuw langs. Heeft een student **alleen** sessies van vóór het
+watermerk en daarna niets meer, dan is er geen aanleiding en gebeurt er niets —
+dat is de enige grens tussen dit gat dichten en alsnog over de historie lopen,
+en daar staat de zwaarste test op.
+
+**2. Het watermerk verzette alleen na een geslaagde schrijfactie.** Elk
+oversla-pad deed `continue` vóór die regel. Dat klinkt behoudend en was het
+omgekeerde: de bevraging is oplopend gesorteerd met een limiet, dus een
+overgeslagen sessie die vóór een geschreven sessie lag raakte áchter het
+watermerk zonder ooit verwerkt te zijn — waarna fout 1 'm permanent
+onbereikbaar maakte. En op een ochtend waarin álles werd overgeslagen bewoog
+het watermerk helemaal niet. Dat is hier de regel, niet de uitzondering: van de
+twaalf studenten met een afgeronde sessie hadden er elf geen onboardingrij.
+
+Nu verzet het watermerk op elk **besluit** — overslaan is ook een besluit.
+Alleen een echte fout houdt het tegen, en dan voor de rest van de ronde:
+doorschuiven over een mislukte rij heen zou die definitief kwijtmaken. Een
+vastgelopen watermerk is zichtbaar (`errors` in de uitkomst plus een
+`console.error`); een overgeslagen rij was dat niet.
+
+De teller heet daarom nu `gesloten_op_eerdere_sessie` in plaats van
+`eerdere_afgeronde_buiten_venster`: hij telt niet meer wat wegviel, maar wat
+werd afgesloten op een sessie ouder dan het watermerk.
+
 ### Bewust niet omgezet: de betaalherinnering
 
 `api/cron/first-call-payment-reminder.js` blijft op Bubble staan en is
