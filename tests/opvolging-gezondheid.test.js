@@ -89,8 +89,16 @@ test('de gerepareerde verdeling telt wél op', () => {
   assert.equal(r.getallen.bevindingen, 2);
 });
 
-test('een rapport zonder volume is NIET GEMETEN', () => {
-  assert.equal(controleerOptelling({ rapport: {} }).staat, NIET_GEMETEN);
+// Derde test die de verwarring cementeerde: een rapport zonder volume-blok is
+// een ANTWOORD dat we kregen en dat niet deugt, geen blinde vlek. De echte lege
+// meting bij deze controle is een dag met nul uitgaande calls, en die hoort
+// gewoon te kloppen (0+0+0+0 === 0) — dus die is 'ok', niet 'niet gemeten'.
+test('een dag met nul uitgaande calls telt gewoon op en is ok', () => {
+  const r = controleerOptelling({ rapport: {
+    volume: { bel: { uit: 0, gesproken: 0, te_kort: 0, niet_opgenomen: 0, zonder_duur: 0 } },
+    aandacht: [],
+  } });
+  assert.equal(r.staat, OK);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -341,4 +349,44 @@ test('de logregel noemt de controles bij naam, niet alleen hun aantal', async ()
   assert.match(regel, /niet gemeten: brug/);
   assert.match(regel, /ok: instroom, optelling/);
   assert.doesNotMatch(regel, /^\d+ fout/);           // niet meer alleen tellen
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DEZELFDE VERWARRING BIJ DE ANDERE VIER CONTROLES
+// ═══════════════════════════════════════════════════════════════════════════
+// Nadat de brug-controle een 401 als NIET_GEMETEN bleek te boeken, zijn de
+// overige vier nagelopen op hetzelfde patroon. Vier plekken deden het ook:
+//
+//   · de leesfout op opvolging_taken            → 'de takenlijst was niet te lezen'
+//   · een uitzondering uit bouwRapport()         → 'het rapport kon niet gebouwd worden'
+//   · een rapport zonder volume-blok             → 'er viel niets op te tellen'
+//   · een rapport zonder zoomcall-lijst          → 'geen lijst teruggekregen'
+//
+// Alle vier zijn ANTWOORDEN DIE WE KREGEN. Een Supabase-fout, een exception uit
+// de rapportmotor en een verminkte antwoordvorm zijn storingen, geen blinde
+// vlekken. Ze horen in de emmer waar iemand naar kijkt.
+
+test('optelling: een rapport zonder volume-blok is FOUT, geen blinde vlek', () => {
+  const r = controleerOptelling({ rapport: { aandacht: [] } });
+  assert.equal(r.staat, FOUT);
+});
+
+test('dubbels: een rapport zonder zoomcall-lijst is FOUT, geen blinde vlek', () => {
+  const r = controleerDubbels({ rapport: { volume: {} } });
+  assert.equal(r.staat, FOUT);
+});
+
+// ── En de twee die WEL een blinde vlek blijven ──────────────────────────────
+// Een lege meting is iets anders dan een geweigerd antwoord: nul zoomcalls op
+// een dag is geen storing. Deze twee blijven dus staan, en er is een test die
+// dat vasthoudt zodat 'alles maar FOUT maken' niet stilletjes doorglipt.
+
+test('dubbels: nul zoomcalls blijft een blinde vlek, geen FOUT', () => {
+  const r = controleerDubbels({ rapport: { zoomcalls: [] } });
+  assert.equal(r.staat, NIET_GEMETEN);
+});
+
+test('instroom: geen open aanmeldingen blijft een blinde vlek, geen FOUT', () => {
+  const r = controleerInstroom({ taken: [], vandaag: '2026-09-07', dagPlus: (d) => d });
+  assert.equal(r.staat, NIET_GEMETEN);
 });

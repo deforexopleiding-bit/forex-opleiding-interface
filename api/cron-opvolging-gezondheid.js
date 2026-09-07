@@ -66,8 +66,9 @@ export default async function handler(req, res) {
       .map((t) => ({ naam: t.naam, due: t.due, aangemaakt_op: String(t.created_at || '').slice(0, 10) }));
     uitkomsten.push(controleerInstroom({ taken: zonderPoging, vandaag, dagPlus }));
   } catch (e) {
-    uitkomsten.push({ naam: 'instroom', staat: NIET_GEMETEN, getallen: { fout: kort(e) },
-      uitleg: 'De takenlijst was niet te lezen.' });
+    // Een leesfout van de databank is een storing, geen blinde vlek.
+    uitkomsten.push({ naam: 'instroom', staat: FOUT, getallen: { fout: kort(e) },
+      uitleg: 'De takenlijst was niet te lezen: ' + kort(e) });
   }
 
   // ── 2 en 3 · Het rapport van vandaag ─────────────────────────────────────
@@ -80,7 +81,10 @@ export default async function handler(req, res) {
       totIso: new Date(vanMs + 22 * 3600 * 1000).toISOString(),
     });
   } catch (e) {
-    const reden = { staat: NIET_GEMETEN, getallen: { fout: kort(e) }, uitleg: 'Het rapport kon niet gebouwd worden.' };
+    // Een exception uit de rapportmotor is juist DE storing die deze bewaking
+    // hoort te zien. Die als 'niet gemeten' boeken zou hem onzichtbaar maken.
+    const reden = { staat: FOUT, getallen: { fout: kort(e) },
+      uitleg: 'Het rapport kon niet gebouwd worden: ' + kort(e) };
     uitkomsten.push({ naam: 'optelling', ...reden }, { naam: 'dubbels', ...reden });
   }
   if (rapport) {
