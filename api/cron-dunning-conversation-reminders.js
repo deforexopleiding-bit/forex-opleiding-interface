@@ -23,11 +23,17 @@
 //
 // Reminder 1: vrij tekst-bericht (voorspelbaar, geen LLM). Vereist dat het
 //             24u-venster van Meta nog open is (conv.last_inbound_at <= 24u
-//             geleden). Als dicht → skip naar reminder 2 (template).
+//             geleden). Als dicht → template.
 //             LET OP: sinds de klok vanaf ONS bericht loopt, is r1 op
 //             reminder_1_hours >= 24 per definitie buiten dat venster —
 //             het venster telt namelijk vanaf de laatste klant-inbound, en
 //             die ligt vóór ons bericht. Zie de PR-bespreking bij deze fix.
+//             De template voor r1 staat op no_reply.reminder_1_template_name
+//             (optioneel; niet gezet → val terug op reminder_2_template_name,
+//             het gedrag van vóór deze branch). Zie
+//             docs/whatsapp-template-opvolging-geen-reactie.md.
+//             De tekst is NEUTRAAL: geen bedragen, factuurnummers of
+//             vervaldata, en geen ondertekening met een persoonsnaam.
 // Reminder 2: Meta-approved template (naam in no_reply.reminder_2_template_name).
 //             Zonder goedgekeurde template → skip met duidelijke reden.
 //
@@ -97,19 +103,53 @@ function elapsed(startedAt) { return Date.now() - startedAt; }
 function nowIso() { return new Date().toISOString(); }
 
 /**
- * Reminder-1 tekst (vast, met bestaande variabelen). Geen LLM — voorspelbaar
- * eerste-contact-bericht.
+ * Reminder-1 tekst (vast, geen LLM — voorspelbaar bericht).
+ *
+ * NEUTRAAL sinds deze branch (beslissing Maxim): geen bedragen, geen
+ * factuurnummers, geen vervaldata en GEEN ondertekening met een persoonsnaam.
+ * Het bericht moet overkomen als een bericht van de afzender zelf, niet als
+ * een geautomatiseerde aanmaning van "Joost".
+ *
+ * Zelfde strekking als de Meta-template `opvolging_geen_reactie` die dit
+ * bericht stuurt zodra het 24-uursvenster dicht is; zie
+ * docs/whatsapp-template-opvolging-geen-reactie.md. Beide paden zeggen
+ * hetzelfde, zodat het niet uitmaakt welke van de twee vertrekt.
+ *
+ * `voornaam` valt terug op `naam` (volledige naam) en daarna op 'daar', zodat
+ * er nooit "Hey ," uitgaat.
  */
-export function buildReminder1Text({ naam, factuur_nr, totaal_bedrag, dagen_overdue }) {
+export function buildReminder1Text({ voornaam, naam } = {}) {
+  const aanhef = (voornaam && String(voornaam).trim())
+    || (naam && String(naam).trim())
+    || 'daar';
   const lines = [
-    `Hoi ${naam || 'daar'},`,
+    `Hey ${aanhef},`,
     ``,
-    `Ik heb je eerder een bericht gestuurd, maar nog geen reactie van jou gekregen. Kun je me nog laten weten hoe je het wilt oplossen met factuur ${factuur_nr || ''} (${totaal_bedrag || ''}, ${dagen_overdue || 0} dagen te laat)?`,
+    `Ik heb nog geen reactie van je ontvangen. Laat je even weten hoe we dit dossier kunnen afronden?`,
     ``,
-    `Groet,`,
-    `Joost — De Forex Opleiding`,
+    `Alvast bedankt.`,
   ];
   return lines.join('\n');
+}
+
+/**
+ * Kies de Meta-template voor deze reminder-stage.
+ *
+ * r1 mag een EIGEN template hebben (`no_reply.reminder_1_template_name`) — de
+ * neutrale opvolg-template zonder bedragen/factuurnummer/vervaldatum. Is die
+ * niet gezet, dan valt r1 terug op `reminder_2_template_name`: exact het gedrag
+ * van vóór deze branch, zodat het invullen van de nieuwe sleutel de enige
+ * manier is om het gedrag te wijzigen.
+ *
+ * @returns {{ name: string|null, isR1Template: boolean }}
+ */
+export function resolveReminderTemplateName(stage, noReplyCfg = {}) {
+  const r1 = (noReplyCfg && noReplyCfg.reminder_1_template_name) || null;
+  const r2 = (noReplyCfg && noReplyCfg.reminder_2_template_name) || null;
+  if (stage === 'r1') {
+    return r1 ? { name: r1, isR1Template: true } : { name: r2, isR1Template: false };
+  }
+  return { name: r2, isR1Template: false };
 }
 
 export async function isWithin24hWindow(supabase, convId) {
@@ -665,11 +705,24 @@ export async function processReminderRun({
         }
 
         // Template-naam check (voor r2 en voor r1-when-window-dicht).
-        const templateName = noReplyCfg.reminder_2_template_name;
+        //
+        // r1 mag een EIGEN template hebben (no_reply.reminder_1_template_name).
+        // Dat is de neutrale opvolg-template `opvolging_geen_reactie` — geen
+        // bedragen, geen factuurnummer, geen vervaldatum, geen ondertekening;
+        // zie docs/whatsapp-template-opvolging-geen-reactie.md.
+        //
+        // Zolang die key NIET gezet is valt r1 terug op reminder_2_template_name,
+        // exact het gedrag van vóór deze branch. De config in productie wordt
+        // hier dus niet door gewijzigd: pas als iemand de naam invult in
+        // Instellingen → Joost AI → Autonomy gaat r1 de nieuwe template gebruiken.
+        const { name: templateName, isR1Template: usingR1Template } =
+          resolveReminderTemplateName(stage, noReplyCfg);
         if (willSendAs === 'template' && !templateName) {
           summary.skipped.push({
             run_id: run.id,
-            reason: 'NO_TEMPLATE_CONFIGURED: no_reply.reminder_2_template_name is null in joost_config. Zie PR-body voor template-spec.',
+            reason: stage === 'r1'
+              ? 'NO_TEMPLATE_CONFIGURED: no_reply.reminder_1_template_name en reminder_2_template_name zijn allebei null in joost_config. Zie docs/whatsapp-template-opvolging-geen-reactie.md.'
+              : 'NO_TEMPLATE_CONFIGURED: no_reply.reminder_2_template_name is null in joost_config. Zie PR-body voor template-spec.',
           });
           return;
         }
@@ -731,6 +784,12 @@ export async function processReminderRun({
             },
             legacyVars: variables,
             supabase:   supabaseAdmin,
+            // De r1-template heeft één parameter: de voornaam. Klanten zonder
+            // first_name zouden een LEGE parameter opleveren en Meta weigert
+            // die (132000-familie: "parameter value cannot be empty"). Alleen
+            // voor dit pad vullen we lege waarden met een neutrale aanhef;
+            // r2 houdt exact het bestaande gedrag.
+            emptyFallback: usingR1Template ? 'daar' : null,
           });
           if (tplPayload.warnings && tplPayload.warnings.length) {
             console.log('[conv-reminder-cron] template-payload warnings run=' + run.id + ':',
@@ -750,10 +809,8 @@ export async function processReminderRun({
             template_name: willSendAs === 'template' ? templateName : null,
             preview_text: willSendAs === 'text'
               ? buildReminder1Text({
-                  naam: variables.NAAM,
-                  factuur_nr: variables.FACTUUR_NR,
-                  totaal_bedrag: variables.TOTAAL_BEDRAG,
-                  dagen_overdue: variables.DAGEN_OVERDUE,
+                  voornaam: customer?.first_name,
+                  naam:     variables.NAAM,
                 }).slice(0, 200)
               : null,
             // computeVariables-output (5 hardcoded keys) blijft in de log voor
@@ -801,10 +858,8 @@ export async function processReminderRun({
         try {
           if (willSendAs === 'text') {
             const body = buildReminder1Text({
-              naam: variables.NAAM,
-              factuur_nr: variables.FACTUUR_NR,
-              totaal_bedrag: variables.TOTAAL_BEDRAG,
-              dagen_overdue: variables.DAGEN_OVERDUE,
+              voornaam: customer?.first_name,
+              naam:     variables.NAAM,
             });
             const r = await sendText({ to: sendTo, body, phoneNumberId: outboundPnId });
             wamid = r?.wamid || null;
@@ -850,10 +905,8 @@ export async function processReminderRun({
         let previewBody;
         if (willSendAs === 'text') {
           previewBody = buildReminder1Text({
-            naam: variables.NAAM,
-            factuur_nr: variables.FACTUUR_NR,
-            totaal_bedrag: variables.TOTAAL_BEDRAG,
-            dagen_overdue: variables.DAGEN_OVERDUE,
+            voornaam: customer?.first_name,
+            naam:     variables.NAAM,
           });
         } else {
           const preview = await renderTemplatePreview({

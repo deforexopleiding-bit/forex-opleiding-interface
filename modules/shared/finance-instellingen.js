@@ -505,7 +505,7 @@
                   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
                     <div>
                       <label class="form-label" for="noReplyReminder1Hours">reminder_1_hours</label>
-                      <input type="number" id="noReplyReminder1Hours" class="form-input" min="0" step="1" value="20" title="Uren na laatste klant-inbound → reminder 1 (vrij bericht, mits venster open)" />
+                      <input type="number" id="noReplyReminder1Hours" class="form-input" min="0" step="1" value="20" title="Uren stil na ONS laatste bericht → reminder 1. Zolang het laatste bericht van de klant is en onbeantwoord, gaat er niets uit." />
                     </div>
                     <div>
                       <label class="form-label" for="noReplyReminder2Hours">reminder_2_hours</label>
@@ -514,6 +514,13 @@
                     <div>
                       <label class="form-label" for="noReplyResumeAfterHours">resume_after_hours</label>
                       <input type="number" id="noReplyResumeAfterHours" class="form-input" min="0" step="1" value="24" title="Uren na reminder 2 → aanmaningsflow hervat (mits geen actief arrangement)" />
+                    </div>
+                  </div>
+                  <div style="margin-top:10px">
+                    <label class="form-label" for="noReplyReminder1TemplateName">reminder_1_template_name (Meta approved, optioneel)</label>
+                    <input type="text" id="noReplyReminder1TemplateName" class="form-input" placeholder="opvolging_geen_reactie" title="Eigen template voor reminder 1 (neutraal, zonder bedragen of factuurnummer). Leeg laten = reminder 1 gebruikt de template van reminder 2, zoals voorheen." />
+                    <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
+                      Leeg laten = reminder 1 valt terug op de template hieronder (huidig gedrag).
                     </div>
                   </div>
                   <div style="margin-top:10px">
@@ -895,6 +902,9 @@
       const tmplName = noReply.reminder_2_template_name;
       const tmplInput = host.querySelector('#noReplyReminder2TemplateName');
       if (tmplInput) tmplInput.value = (tmplName == null || tmplName === '') ? '' : String(tmplName);
+      const tmpl1Name  = noReply.reminder_1_template_name;
+      const tmpl1Input = host.querySelector('#noReplyReminder1TemplateName');
+      if (tmpl1Input) tmpl1Input.value = (tmpl1Name == null || tmpl1Name === '') ? '' : String(tmpl1Name);
 
       if (loading) loading.style.display = 'none';
       if (form) form.style.display = '';
@@ -1004,13 +1014,15 @@
     delete outbound.no_reply_days_per_step;
 
     // Joost fase 2 — no_reply reminders (canonical keys).
-    const _tmplRaw = (host.querySelector('#noReplyReminder2TemplateName')?.value || '').trim();
+    const _tmplRaw  = (host.querySelector('#noReplyReminder2TemplateName')?.value || '').trim();
+    const _tmpl1Raw = (host.querySelector('#noReplyReminder1TemplateName')?.value || '').trim();
     const no_reply = {
       ...(_currentAc.no_reply || {}),
       reminder_1_hours:         numVal('noReplyReminder1Hours', 20),
       reminder_2_hours:         numVal('noReplyReminder2Hours', 24),
       resume_after_hours:       numVal('noReplyResumeAfterHours', 24),
-      reminder_2_template_name: _tmplRaw ? _tmplRaw : null,
+      reminder_1_template_name: _tmpl1Raw ? _tmpl1Raw : null,
+      reminder_2_template_name: _tmplRaw  ? _tmplRaw  : null,
     };
 
     const autonomy_config = {
