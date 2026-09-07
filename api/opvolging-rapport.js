@@ -341,6 +341,9 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
   }
 
   vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief });
+  // Ernst en label erbij, ná het vullen: zo hoeft geen enkele push-plek eraan
+  // te denken en kan er ook geen bevinding zonder ernst ontstaan.
+  const aandachtMetErnst = aandacht.map(metErnst);
 
   return {
     periode: {
@@ -358,7 +361,7 @@ async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, totIso 
       // waar niemand het over kan hebben.
       gesprek_min_sec  : GESPREK_MIN_SEC,
     },
-    aandacht,
+    aandacht: aandachtMetErnst,
     blinde_vlekken: blindeVlekken,
     dekking,
     vensters,
@@ -787,6 +790,44 @@ export function bouwArchief({ gearchiveerd, histPerTaak }) {
   });
 }
 
+/**
+ * HOE ZWAAR WEEGT EEN BEVINDING, EN HOE HEET HIJ.
+ *
+ * De printweergave kleurt en labelt de bevindingen, en dat mag geen tweede
+ * beoordeling worden: dan staat er over een maand iets anders in de PDF dan op
+ * het scherm en weet niemand welke van de twee liegt. Daarom hier, naast de
+ * plek waar de bevindingen ontstaan.
+ *
+ * Drie graden, en het onderscheid is met opzet:
+ *   nalatigheid  — er is werk blijven liggen dat gedaan had moeten worden.
+ *   twijfelgeval — er is iets aan de hand, maar het kan net zo goed aan het
+ *                  systeem liggen als aan Dave. 'Geen uitkomst vastgelegd' is
+ *                  daar het schoolvoorbeeld van: dat verschil hebben we op 6
+ *                  september juist gerepareerd en het hoort zichtbaar te
+ *                  blijven, ook in de kleur.
+ *   blinde_vlek  — we hebben niet kunnen kijken. Geen verwijt, wel iets om te
+ *                  weten; stilte zou hier als goedkeuring lezen.
+ */
+const BEVINDING_SOORTEN = {
+  niet_behandeld  : { ernst: 'nalatigheid',  label: 'NIET BEHANDELD' },
+  te_weinig_moeite: { ernst: 'nalatigheid',  label: 'TE WEINIG MOEITE' },
+  venster_gemist  : { ernst: 'nalatigheid',  label: 'VENSTER GEMIST' },
+  venster_te_laat : { ernst: 'twijfelgeval', label: 'TE LAAT' },
+  geen_uitkomst   : { ernst: 'twijfelgeval', label: 'GEEN UITKOMST' },
+  dubbele_afspraak: { ernst: 'twijfelgeval', label: 'DUBBELE AFSPRAAK' },
+  blinde_vlek     : { ernst: 'blinde_vlek',  label: 'BLINDE VLEK' },
+};
+
+/** Ernst en label erbij, op één plek voor scherm en print. */
+function metErnst(bevinding) {
+  const k = BEVINDING_SOORTEN[bevinding.soort]
+    // Een onbekende soort krijgt het voorzichtigste oordeel in plaats van het
+    // zwaarste: een nieuwe bevinding hoort niet per ongeluk als nalatigheid te
+    // beginnen.
+    || { ernst: 'twijfelgeval', label: String(bevinding.soort || 'BEVINDING').replace(/_/g, ' ').toUpperCase() };
+  return { ...bevinding, ernst: k.ernst, label: k.label };
+}
+
 // ── Sectie 1 ───────────────────────────────────────────────────────────────
 export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief }) {
   // EEN BLINDE VLEK IS EEN AFWIJKING. Zonder deze lus zou een sectie die niets
@@ -806,17 +847,17 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
 
   for (const r of vensters.rijen) {
     if (r.spraak.staat === 'niet_gedaan') {
-      aandacht.push({ soort: 'venster', sectie: 'vensters', naam: r.naam,
+      aandacht.push({ soort: 'venster_gemist', sectie: 'vensters', naam: r.naam,
         tekst: `${r.naam || 'Naamloos'} had een zoomcall op ${r.dag} maar kreeg geen spraakbericht.`, uitleg: null, taak_id: r.taak_id });
     } else if (r.spraak.staat === 'te_laat') {
-      aandacht.push({ soort: 'venster', sectie: 'vensters', naam: r.naam,
+      aandacht.push({ soort: 'venster_te_laat', sectie: 'vensters', naam: r.naam,
         tekst: `Het spraakbericht voor ${r.naam || 'Naamloos'} ging om ${r.spraak.tijd}, na de afspraak van ${String(SPRAAK_DEADLINE_UUR).padStart(2, '0')}:00.`, uitleg: null, taak_id: r.taak_id });
     }
     if (r.nabel.staat === 'niet_gedaan') {
-      aandacht.push({ soort: 'venster', sectie: 'vensters', naam: r.naam,
+      aandacht.push({ soort: 'venster_gemist', sectie: 'vensters', naam: r.naam,
         tekst: `${r.naam || 'Naamloos'} kreeg een spraakbericht, antwoordde niet, en is niet nagebeld.`, uitleg: null, taak_id: r.taak_id });
     } else if (r.nabel.staat === 'te_laat') {
-      aandacht.push({ soort: 'venster', sectie: 'vensters', naam: r.naam,
+      aandacht.push({ soort: 'venster_te_laat', sectie: 'vensters', naam: r.naam,
         tekst: `${r.naam || 'Naamloos'} is om ${r.nabel.tijd} nagebeld, buiten het venster van ${NABEL_VAN_UUR}:00 tot ${NABEL_TOT_UUR}:00.`, uitleg: null, taak_id: r.taak_id });
     }
   }
