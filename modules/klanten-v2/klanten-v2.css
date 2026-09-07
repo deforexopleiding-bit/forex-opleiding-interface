@@ -3508,3 +3508,26 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
 .kv-notif-item-time { font-size: 10.5px; color: var(--text-3); margin-top: 4px; font-family: 'IBM Plex Mono', monospace; }
 .kv-notif-more { width: 100%; padding: 10px 12px; text-align: center; background: transparent; border: none; border-top: 1px solid var(--border); font-size: 11.5px; color: var(--sky, #0369a1); cursor: pointer; }
 .kv-notif-more:hover { background: var(--surface-2); }
+
+/* ═══════════════ GESPREKKEN — mobiel master/detail (≤760px) ═══════════════
+   Split-view (leadsonderhoud/Gesprekken + lisa/Gesprekken) heeft op desktop
+   een vaste lijst-kolom (360px) naast het thread-panel. Op ~375px zou dat
+   horizontaal overflowen. Op ≤760px klapt de layout naar één kolom en
+   toggelt tussen "alleen lijst" en "alleen thread" via data-has-sel="1"
+   op de container. De .mob-back-knop bovenin het thread-panel wist de
+   selectie via __lsInbDeselect / __lisaDeselectConv. Desktop-gedrag
+   ongewijzigd (data-has-sel wordt buiten deze media-query genegeerd). */
+@media (max-width:760px){
+  .ls-inb-split,
+  .lisa-gesp-split { flex-direction:column; height:calc(100dvh - 110px); }
+  .ls-inb-split #lsInbList,
+  .lisa-gesp-split #lisaConvList {
+    width:100%; max-width:100%; min-width:0; border-right:0;
+  }
+  .ls-inb-split[data-has-sel="1"] #lsInbList,
+  .lisa-gesp-split[data-has-sel="1"] #lisaConvList { display:none; }
+  .ls-inb-split:not([data-has-sel="1"]) .ls-inb-right,
+  .lisa-gesp-split:not([data-has-sel="1"]) .lisa-gesp-right { display:none; }
+  .ls-inb-split .mob-back,
+  .lisa-gesp-split .mob-back { display:flex; }
+}

@@ -249,18 +249,20 @@
     return `<div style="margin-bottom:20px">
       <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:8px">Mijn sales (geattribueerd)</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
-            <th style="padding:8px 10px">Klant</th>
-            <th style="padding:8px 10px">Offerte</th>
-            <th style="padding:8px 10px;text-align:right">Bedrag</th>
-            <th style="padding:8px 10px;text-align:right">Betaald</th>
-            <th style="padding:8px 10px">Betaalstatus</th>
-            <th style="padding:8px 10px;text-align:right">Verwachte commissie</th>
-            <th style="padding:8px 10px">Aangemaakt</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+        <div class="tbl-wrap">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
+              <th style="padding:8px 10px">Klant</th>
+              <th style="padding:8px 10px">Offerte</th>
+              <th style="padding:8px 10px;text-align:right">Bedrag</th>
+              <th style="padding:8px 10px;text-align:right">Betaald</th>
+              <th style="padding:8px 10px">Betaalstatus</th>
+              <th style="padding:8px 10px;text-align:right">Verwachte commissie</th>
+              <th style="padding:8px 10px">Aangemaakt</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
       </div>
     </div>`;
   }
@@ -324,17 +326,19 @@
       </div>` : ''}
       <div style="font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:8px">Uitbetaalregels (in periode)</div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
-          <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
-            <th style="padding:8px 10px">Klant</th>
-            <th style="padding:8px 10px">Offerte</th>
-            <th style="padding:8px 10px;text-align:right">Basis (bruto)</th>
-            <th style="padding:8px 10px;text-align:right">Commissie</th>
-            <th style="padding:8px 10px">Status</th>
-            <th style="padding:8px 10px">Datum</th>
-          </tr></thead>
-          <tbody>${rows || `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Nog geen regels in deze periode.</td></tr>`}</tbody>
-        </table>
+        <div class="tbl-wrap">
+          <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+            <thead><tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase">
+              <th style="padding:8px 10px">Klant</th>
+              <th style="padding:8px 10px">Offerte</th>
+              <th style="padding:8px 10px;text-align:right">Basis (bruto)</th>
+              <th style="padding:8px 10px;text-align:right">Commissie</th>
+              <th style="padding:8px 10px">Status</th>
+              <th style="padding:8px 10px">Datum</th>
+            </tr></thead>
+            <tbody>${rows || `<tr><td colspan="6" style="padding:28px;text-align:center;color:var(--text-3)">Nog geen regels in deze periode.</td></tr>`}</tbody>
+          </table>
+        </div>
       </div>
     </div>`;
   }
