@@ -1197,7 +1197,23 @@
 .opv .belbol.gsp{background:#dcfce7;color:#166534}
 .opv .belbol.kort{background:#fef3c7;color:#92400e}
 .opv .belbol.onb{background:#e5e7eb;color:#4b5563}
-.opv .rnd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;width:100%;
+/* HET RONDELABEL IS EEN ZIN, GEEN DERDE KOLOM.
+   Gemeten op productie: .row.rst is 633 breed met gap 14 en drie kinderen.
+   .rnd had width:100% maar GEEN flex-shorthand, dus flex-shrink:1 met
+   min-width:auto — hij mag dus niet kleiner worden dan zijn inhoud. .who heeft
+   min-width:0 en mag wél tot nul krimpen. Uitkomst: .rnd 395, .act 178, .who
+   NUL. De naam brak over twee regels en +32 473 97 98 12 viel uiteen in een
+   cijfergroepje per regel.
+   Dat is de omgekeerde wereld: de uitleg over de ronde won het van de naam van
+   de lead en het nummer dat je moet bellen.
+   Rekenen laat zien dat drie kolommen simpelweg niet passen: .who wil ~312,
+   .act 178, en het rondepaneel 741 als het niet mag afbreken — op 605
+   beschikbaar. Vandaar geen CSS-tweak maar een indelingswijziging: flex:1 0
+   100% zet hem op zijn eigen regel bovenaan, en .who houdt 633 - 178 - 14 =
+   441 over. Dat blijft ook kloppen op een smaller venster, en dat is het punt:
+   deze fout was er al bij een gewone laptopbreedte. */
+.opv .rnd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;
+  flex:1 0 100%;min-width:0;
   margin:0 0 8px;padding:5px 9px;border-radius:7px;font-size:12px;line-height:1.45}
 .opv .rnd b{font-size:12.5px;letter-spacing:.01em}
 .opv .rnd span{color:var(--o-muted)}
@@ -1367,6 +1383,10 @@
 /* De rustige kaart: naam als duidelijkste element, meer wit, alleen de
    voortgang van vandaag. Wat er nog niet is blijft stil — de teller zegt dat. */
 .opv .row.rst{padding:13px 15px}
+/* Alleen de rijen MET een rondebalk breken af; de andere kaarten in deze module
+   houden hun bestaande gedrag, want flex-wrap globaal aanzetten zou daar
+   onbedoeld iets kunnen verschuiven. */
+.opv .row.rnd-boven{flex-wrap:wrap}
 .opv .row.rst .nm2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px;font-weight:700;color:var(--o-ink);line-height:1.25}
 .opv .row.rst .mt2{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:5px}
 .opv .row.rst .tel2{font-size:13px;color:#4b5563;font-variant-numeric:tabular-nums}
@@ -1523,8 +1543,8 @@
     const r = REDEN_LABEL[t.reden] || [t.reden, 't-grey'];
     const nuDag = vandaag();
     if (inGroep) return taakKaartRustig(t, dag, nuDag);
-    return '<div class="row">' +
-      (t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '') +
+    const strook = t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '';
+    return '<div class="row' + (strook ? ' rnd-boven' : '') + '">' + strook +
       '<div class="who">' +
       '<div class="nm">' + esc(t.naam) +
         ' <span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
@@ -1571,8 +1591,8 @@
         ? '<span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
       vensterAfwijking(t, dag);
 
-    return '<div class="row rst">' +
-      (t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '') +
+    const strook = t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '';
+    return '<div class="row rst' + (strook ? ' rnd-boven' : '') + '">' + strook +
       '<div class="who">' +
       '<div class="nm2">' + esc(t.naam) +
         (t.bevestigd_op ? ' ' + bevestigdBadge(t) : '') + '</div>' +
