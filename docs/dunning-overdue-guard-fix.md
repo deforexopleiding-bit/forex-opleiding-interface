@@ -283,6 +283,14 @@ Drie maatregelen, alle drie geleverd:
    doen mee** — die sturen nu niets, maar cascaderen alsnog zodra hun pauze
    wegvalt.
 
+   **Zonder terminal:** dezelfde backfill staat als SQL in
+   `docs/sql-migrations/2026-09-07-dunning-pointer-backfill.sql`, in twee
+   blokken (blok 1 leest, blok 2 schrijft). Bedoeld voor wie geen
+   `SUPABASE_SERVICE_ROLE_KEY` heeft en alleen de Supabase SQL-editor kan
+   gebruiken. Dat de twee op exact hetzelfde plan uitkomen wordt aangetoond
+   door `scripts/dunning-backfill-sql-check.mjs`, dat beide varianten op
+   dezelfde fixture draait en veld voor veld vergelijkt.
+
    **Toon-beslissing (Maxim):** runs die gepauzeerd zijn door een **lopend
    gesprek** (`paused_by_conversation_id` gezet) landen op **één sport lager**
    dan de hoogste bereikte sport — is de hoogste `aanmaning_dag37`, dan wordt
