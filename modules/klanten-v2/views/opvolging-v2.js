@@ -4313,7 +4313,7 @@
       // periode en roept zelf print() aan; de gebruiker kiest 'Bewaar als PDF'.
       // Zelfde permissie — het endpoint erachter doet zijn eigen controle, dus
       // hier is geen aparte regel nodig.
-      '<button class="obtn" onclick="window.__opvRapportPdf()">Rapport als PDF</button>' +
+      '<button class="obtn" onclick="window.__opvRapportPdf()">Salesrapport als PDF</button>' +
       '</div>';
   }
 
