@@ -10,6 +10,7 @@
 // Dat onderscheid is precies wat er deze week zes keer misging.
 
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
@@ -67,21 +68,24 @@ test('geen enkele onaangeraakte kaart is NIET GEMETEN, geen "in orde"', () => {
 // 2 · OPTELLING
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('de te-kort-teller van vanmiddag was opgevallen', () => {
-  // Het live antwoord was {uit: 9, gesproken: 5, te_kort: 1}: 5+1 is geen 9.
+// Deze twee toetsten de oude emmers (te_kort). Ze blijven waar ze voor bedoeld
+// waren — een som die niet klopt hoort gevonden te worden — maar met de emmers
+// die er nu zijn.
+test('een som die niet opgaat wordt gevonden', () => {
+  // 5 gesproken + 0 niet opgenomen bij 9 uitgaande calls: vier vallen nergens.
   const r = controleerOptelling({ rapport: {
-    volume: { bel: { uit: 9, gesproken: 5, te_kort: 1, niet_opgenomen: 0, zonder_duur: 0 } },
+    volume: { bel: { uit: 9, gesproken: 5, niet_opgenomen: 0, onbekend_resultaat: 0, zonder_duur: 0 } },
     aandacht: [],
   } });
   assert.equal(r.staat, FOUT);
-  assert.equal(r.getallen.som, 6);
+  assert.equal(r.getallen.som, 5);
   assert.equal(r.getallen.uit, 9);
-  assert.match(r.uitleg, /tellen op tot 6/);
+  assert.match(r.uitleg, /tellen op tot 5/);
 });
 
 test('de gerepareerde verdeling telt wél op', () => {
   const r = controleerOptelling({ rapport: {
-    volume: { bel: { uit: 9, gesproken: 5, te_kort: 1, niet_opgenomen: 3, zonder_duur: 0 } },
+    volume: { bel: { uit: 9, gesproken: 6, niet_opgenomen: 3, onbekend_resultaat: 0, zonder_duur: 0 } },
     aandacht: [{}, {}],
   } });
   assert.equal(r.staat, OK);
@@ -229,10 +233,10 @@ test('de mail draagt de getallen, niet alleen een oordeel', () => {
   // Een mail die alleen 'in orde' zegt is niet na te rekenen, en daarmee precies
   // zo'n alibi als de tests die we deze week hebben opgeruimd.
   const m = bouwMail({ dag: VANDAAG, uitkomsten: [
-    controleerOptelling({ rapport: { volume: { bel: { uit: 9, gesproken: 5, te_kort: 1, niet_opgenomen: 3, zonder_duur: 0 } }, aandacht: [] } }),
+    controleerOptelling({ rapport: { volume: { bel: { uit: 9, gesproken: 6, niet_opgenomen: 3, onbekend_resultaat: 0, zonder_duur: 0 } }, aandacht: [] } }),
   ] });
   assert.match(m.text, /uit=9/);
-  assert.match(m.text, /gesproken=5/);
+  assert.match(m.text, /gesproken=6/);
   assert.match(m.text, /som=9/);
 });
 
@@ -389,4 +393,81 @@ test('dubbels: nul zoomcalls blijft een blinde vlek, geen FOUT', () => {
 test('instroom: geen open aanmeldingen blijft een blinde vlek, geen FOUT', () => {
   const r = controleerInstroom({ taken: [], vandaag: '2026-09-07', dagPlus: (d) => d });
   assert.equal(r.staat, NIET_GEMETEN);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8 SEPTEMBER — DE BEWAKING WAS NIET MEEGEGAAN MET DE MEETREGEL
+// ═══════════════════════════════════════════════════════════════════════════
+// Dezelfde les als bij duur_sec, nu op de meter zelf: we hebben de regel
+// veranderd en de controle die erop toeziet niet meegenomen.
+//
+// De oude som was gesproken + te_kort + niet_opgenomen + zonder_duur. Maar
+// `te_kort` bestaat niet meer, en `zonder_duur` is geen aparte emmer meer maar
+// een DEELVERZAMELING van gesproken. Nagerekend op de echte respons van
+// 7 september: 21 + 0 + 5 + 5 = 31 terwijl er 26 uitgaande calls zijn. De
+// controle zou dus FOUT melden terwijl de cijfers juist kloppen — en die mail
+// valt om 07:00 binnen, vlak voordat er gebeld wordt.
+
+/** De echte respons van 7 september, zoals het endpoint hem nu levert. */
+const VOLUME_7_SEP = {
+  bel: { uit: 26, seconden: 423, gesproken: 21, niet_opgenomen: 5,
+         onbekend_resultaat: 0, zonder_duur: 5, via_ander: 0 },
+  wa: { uit: 10, in: 9 }, spraak: { uit: 0, in: 0 }, rijen: [],
+};
+
+test('de echte dag van 7 september geeft GEEN vals alarm', () => {
+  const r = controleerOptelling({ rapport: { volume: VOLUME_7_SEP, aandacht: [] } });
+  assert.equal(r.staat, OK, r.uitleg);
+  assert.equal(r.getallen.som, 26, '21 gesproken + 5 niet opgenomen + 0 onbekend');
+  assert.equal(r.getallen.uit, 26);
+});
+
+test('zonder_duur telt NIET mee in de som — het is een deel van gesproken', () => {
+  // Vijf van de eenentwintig gesprekken hebben geen geregistreerde lengte. Ze
+  // apart optellen maakt van 26 calls er 31.
+  const r = controleerOptelling({ rapport: { volume: VOLUME_7_SEP, aandacht: [] } });
+  assert.ok(r.getallen.zonder_duur === 5, 'wel zichtbaar in de getallen');
+  assert.equal(r.getallen.som, 26, 'maar niet in de optelling');
+});
+
+test('een echte telfout wordt nog steeds gevangen', () => {
+  const stuk = { bel: { ...VOLUME_7_SEP.bel, gesproken: 19 }, wa: { uit: 0, in: 0 } };
+  const r = controleerOptelling({ rapport: { volume: stuk, aandacht: [] } });
+  assert.equal(r.staat, FOUT);
+  assert.match(r.uitleg, /24/);
+});
+
+test('onbekend_resultaat wordt bekeken — dat is juist de emmer waar dit voor is', () => {
+  // De bewaking keek langs precies het gat waarvoor ze bedoeld is: een
+  // resultaatwaarde die onze classificatie niet kent, telde nergens mee.
+  const metOnbekend = {
+    bel: { ...VOLUME_7_SEP.bel, gesproken: 20, onbekend_resultaat: 1 },
+    wa: { uit: 0, in: 0 },
+  };
+  const r = controleerOptelling({ rapport: { volume: metOnbekend, aandacht: [] } });
+  assert.equal(r.getallen.onbekend_resultaat, 1);
+  assert.match(r.uitleg, /onbekend/i, 'het hoort in de mail te staan');
+  assert.notEqual(r.staat, FOUT, 'maar het is geen fout — de som klopt gewoon');
+});
+
+test('de lege vorm draagt dezelfde begrippen als het echte rapport', () => {
+  // De lege vorm is wat de controle gebruikt als ze niets kan lezen. Klopt die
+  // niet, dan liegt de bewaking juist op het moment dat er iets stuk is.
+  const bron = readFileSync('api/cron-opvolging-gezondheid.js', 'utf8');
+  // COMMENTAAR ERUIT VOORDAT WE ZOEKEN. De eerste versie van deze test sloeg
+  // aan op het woord 'te_kort' in de TOELICHTING die uitlegt dat te_kort
+  // vervallen is. Dat is de commentaar-val uit docs/opvolging-module.md, nu in
+  // spiegelbeeld: niet groen op een comment, maar rood op een comment.
+  const ruw = bron.slice(bron.indexOf('const LEEG_RAPPORT'), bron.indexOf('});', bron.indexOf('const LEEG_RAPPORT')));
+  const leeg = ruw.replace(/\/\/[^\n]*/g, '');
+  assert.doesNotMatch(leeg, /te_kort/, 'te_kort bestaat niet meer');
+  assert.doesNotMatch(leeg, /gesprek_min_sec:\s*10/, 'de grens van tien seconden is vervallen');
+  assert.match(leeg, /gesprek_bron:\s*'resultaat'/);
+  assert.match(leeg, /onbekend_resultaat/);
+  // En de blokken die er sinds vandaag bij zijn gekomen.
+  // Op de SLEUTEL, niet op de substring: 'weg_tijdlijn' bevat ook 'tijdlijn',
+  // en die hernoeming kwam ongestraft door een eerdere versie van deze test.
+  for (const veld of ['werkritme', 'afgehandeld', 'tijdlijn']) {
+    assert.match(leeg, new RegExp('(^|[^\\w])' + veld + '\\s*:'), 'de lege vorm mist ' + veld);
+  }
 });
