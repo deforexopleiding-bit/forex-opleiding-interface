@@ -11,7 +11,9 @@
 //   'r2' → reminder 2 sturen (r1 al gestuurd + ons laatste bericht is
 //          >= reminder_2_hours oud én de klant heeft daarna niets gestuurd)
 //   'rz' → resume run (r2 al gestuurd + stil >= resume_after_hours)
-//   null → niets doen (nog te vroeg, al voltooid, of de bal ligt bij ons)
+//   'rz_blocked' → hervatten geweigerd: de bal ligt bij ons (aparte waarde
+//          i.p.v. null zodat de cron het als eigen reden kan loggen)
+//   null → niets doen (nog te vroeg, of al voltooid)
 //
 // ── DE KLOK LOOPT VANAF ONS LAATSTE UITGAANDE BERICHT ────────────────────
 //
@@ -34,8 +36,26 @@
 //      conversatie (dat kan de aanmaning zijn, een reminder, of het antwoord
 //      van een medewerker).
 //
-// De resume-stap ('rz') is bewust ongemoeid gelaten: dat is geen herinnering
-// maar het hervatten van de aanmaanladder.
+// ── DE REGEL GELDT OOK VOOR HET HERVATTEN ('rz') ─────────────────────────
+//
+// De eerste versie van deze fix liet 'rz' met opzet ongemoeid, met als
+// redenering: bij een onbeantwoord gesprek komt de teller nooit op 2, want
+// dan is r1 al niet vertrokken. Dat klopt alleen als de klant de héle tijd
+// stil blijft. Het gat:
+//
+//   klant stil -> r1 gaat uit -> klant nog steeds stil -> r2 gaat uit
+//   -> DAARNA stuurt de klant een bericht dat niemand beantwoordt.
+//
+// Nu is de teller 2, de bal ligt bij ons, en de count>=2-tak keek daar niet
+// naar. Vierentwintig uur na r2 vuurde 'rz', unpauseRunsForConversation zette
+// de run weer aan, en de aanmaanladder liep verder bovenop een onbeantwoord
+// bericht van die klant. Dat is exact het gedrag dat deze fix moet stoppen,
+// alleen een laag dieper: niet de herinnering zelf maar het hervatten.
+//
+// Daarom geldt dezelfde regel voor 'rz'. Ligt het laatste bericht bij de klant
+// en is het onbeantwoord, dan blijft de run gepauzeerd tot een mens antwoordt.
+// Dat is geen uitstel maar een stop: er is geen timer die het alsnog laat
+// gebeuren — pas een uitgaand bericht van ons haalt de blokkade weg.
 
 /**
  * @param {object} args
@@ -57,7 +77,7 @@
  *   klok zelf vanaf ons laatste bericht loopt is dat per constructie al
  *   afgedekt. De key mag in de config blijven staan en stuurt niets aan.
  * @param {number} args.nowMs            Date.now() (injecteerbaar voor tests).
- * @returns {'r1'|'r2'|'rz'|null}
+ * @returns {'r1'|'r2'|'rz'|'rz_blocked'|null}
  */
 export function determineStage({ run, convLastInboundAt, convLastOutboundAt = null, noReplyCfg, nowMs }) {
   const count = Number(run?.paused_conversation_reminder_count || 0);
@@ -109,9 +129,13 @@ export function determineStage({ run, convLastInboundAt, convLastOutboundAt = nu
     return null;
   }
   if (count >= 2) {
-    // Resume is geen herinnering maar het hervatten van de aanmaanladder;
-    // bewust ongemoeid gelaten bij deze fix.
     if (!lastReminderAt) return null;
+    // Hervatten is geen herinnering, maar het zet de aanmaanladder wél weer
+    // in beweging. Ligt de bal bij ons, dan gebeurt dat niet: de run blijft
+    // gepauzeerd tot een mens antwoordt. Aparte returnwaarde zodat de cron
+    // dit als eigen reden logt in plaats van het te laten verdwijnen in
+    // NOT_DUE_YET — dit is een blokkade, geen "nog even wachten".
+    if (balLigtBijOns()) return 'rz_blocked';
     if (nowMs - lastReminderAt >= rzh * HOUR) return 'rz';
     return null;
   }

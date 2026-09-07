@@ -7,6 +7,11 @@
 //   1. Is het laatste bericht in de draad van de klant en onbeantwoord, dan
 //      gaat er geen herinnering uit — de bal ligt bij ons.
 //   2. Anders loopt de klok vanaf ONS laatste uitgaande bericht.
+//
+// Regel 1 geldt ook voor het HERVATTEN ('rz'). Dat is geen herinnering, maar
+// het zet de aanmaanladder wél weer in beweging — bovenop een onbeantwoord
+// bericht van de klant, wat precies het gedrag is dat deze fix moet stoppen.
+// Zie het scenario onderaan dit bestand.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -266,7 +271,7 @@ test('BUG 1 FIX: klant reageerde NA r1 blijft blocker (reply-respect is ONVERAND
   assert.equal(stage, null, 'inbound > lastReminder → altijd null, ongeacht outbound-tijd');
 });
 
-test('count=2: rz onaangeroerd door outbound-guard (resume is puur timing)', () => {
+test('count=2: hebben WIJ als laatste gesproken, dan hervat rz gewoon op timing', () => {
   const stage = determineStage({
     run: {
       paused_conversation_reminder_count: 2,
@@ -277,6 +282,86 @@ test('count=2: rz onaangeroerd door outbound-guard (resume is puur timing)', () 
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  // rz is een resume-actie (geen send), dus outbound-guard geldt niet.
+  // Het laatste bericht is van ons (1u geleden) en de klant zweeg daarna al
+  // 50 uur — de bal ligt bij de klant. Hervatten mag, puur op timing.
   assert.equal(stage, 'rz');
+});
+
+// ── SCENARIO 4: het gat in de eerste versie van deze fix ──────────────
+//
+// De eerste versie liet 'rz' met opzet ongemoeid: bij een onbeantwoord gesprek
+// zou de teller nooit op 2 komen, want dan vertrekt r1 al niet. Dat klopt
+// alleen als de klant de héle tijd stil blijft. Deze vier tests spelen het
+// scenario na waarin dat niet zo is.
+
+test('DE GAT-CASE: r1, r2, dan een onbeantwoord klantbericht → GEEN hervatting', () => {
+  // Tijdlijn:
+  //   T-72u  ons laatste bericht (de aanmaning)
+  //   T-52u  r1 gaat uit
+  //   T-28u  r2 gaat uit           -> teller staat op 2
+  //   T-3u   de klant schrijft iets. Niemand antwoordt.
+  //   nu     28u na r2, dus ruim voorbij resume_after_hours (24u)
+  //
+  // Vóór deze fix: 'rz' -> unpauseRunsForConversation -> de aanmaanladder
+  // loopt verder bovenop een onbeantwoorde vraag van de klant.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 28 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 3  * HOUR).toISOString(), // klant, onbeantwoord
+    convLastOutboundAt: new Date(NOW - 28 * HOUR).toISOString(), // r2, ouder dan de inbound
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz_blocked', 'de run moet gepauzeerd blijven tot een mens antwoordt');
+});
+
+test('de blokkade is een stop, geen uitstel — ook weken later niet hervatten', () => {
+  // Er is geen timer die dit alsnog laat gebeuren: alleen een uitgaand bericht
+  // van ons haalt de blokkade weg.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 600 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 500 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 600 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz_blocked');
+});
+
+test('zodra een mens antwoordt is de blokkade weg', () => {
+  // Zelfde run als de gat-case, maar nu heeft een medewerker gereageerd op het
+  // bericht van de klant. De bal ligt weer bij de klant, dus hervatten mag.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 28 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 3 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // medewerker antwoordde
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz', 'na menselijke opvolging hervat de ladder weer');
+});
+
+test('rz_blocked wint van de timing-check: te vroeg én bal bij ons blijft geblokkeerd', () => {
+  // Volgorde in de code: eerst de bal-check, dan de timer. Anders zou een run
+  // die nog "te vroeg" is als NOT_DUE_YET in de log komen en zou niemand zien
+  // dat er een onbeantwoord bericht ligt.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 5 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 1 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 5 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz_blocked');
 });

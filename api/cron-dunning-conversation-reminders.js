@@ -175,6 +175,8 @@ export async function isWithin24hWindow(supabase, convId) {
  *                  + WIJ hebben niet al recenter geantwoord dan de klant)
  *   stage 'r2'  → reminder 2 moet gestuurd (1 gestuurd + stil-na-r1 >= reminder_2_hours)
  *   stage 'rz'  → resume (2 gestuurd + stil-na-r2 >= resume_after_hours)
+ *   stage 'rz_blocked' → NIET hervatten: het laatste bericht is van de klant
+ *                        en onbeantwoord. Run blijft gepauzeerd.
  *   stage null  → niets doen (nog te vroeg, al voltooid, of wij hebben al geantwoord)
  *
  * `convLastOutboundAt` (optioneel — FIX B no-reply-bug): tijdstip van laatste
@@ -559,6 +561,19 @@ export async function processReminderRun({
         });
         if (!stage) {
           summary.skipped.push({ run_id: run.id, reason: 'NOT_DUE_YET' });
+          return;
+        }
+
+        // ── Stage 'rz_blocked': hervatten geweigerd ──
+        // Het laatste bericht in de draad is van de klant en onbeantwoord.
+        // De run blijft gepauzeerd tot een mens antwoordt; er is geen timer
+        // die dit alsnog laat gebeuren. Eigen skip-reden zodat dit zichtbaar
+        // is in de cron-log en niet verdwijnt in NOT_DUE_YET.
+        if (stage === 'rz_blocked') {
+          summary.skipped.push({
+            run_id: run.id,
+            reason: 'BALL_WITH_US_NO_RESUME: laatste bericht is van de klant en onbeantwoord — run blijft gepauzeerd',
+          });
           return;
         }
 
