@@ -1099,12 +1099,39 @@
   /* ── BROK 3 WRITE-HANDLERS — arrangements ────────────────────────── */
 
   const ARR_TYPES = [
+    // TOEZEGGING staat vooraan: het is het lichtste type (geen TL-mutatie,
+    // geen approval) en het meest gebruikte in de dagelijkse praktijk —
+    // "klant belooft te betalen op datum X".
+    ['TOEZEGGING',       'Toezegging (betaalafspraak)'],
     ['UITSTEL',          'Uitstel (consolideer + herstart)'],
     ['SPLITSING',        'Splitsing in termijnen'],
     ['ABONNEMENT_PAUZE', 'Abonnement pauzeren'],
     ['ABONNEMENT_STOP',  'Abonnement stoppen'],
     ['KWIJTSCHELDING',   'Kwijtschelding (afboeking)'],
   ];
+
+  /**
+   * Zoek een lopende TOEZEGGING tussen de actieve arrangements van een klant.
+   * Returnt { date, amount, id } of null. `date` is de afgesproken
+   * betaaldatum (de laatste part-datum — dat is het moment waarop de
+   * breach-check definitief oordeelt).
+   */
+  function _toezeggingInfo(arrs) {
+    const list = Array.isArray(arrs) ? arrs : [];
+    const t = list.find((a) => String(a?.type || '').toUpperCase() === 'TOEZEGGING'
+      && String(a?.status || '').toUpperCase() === 'ACTIEF');
+    if (!t) return null;
+    const parts = Array.isArray(t.details?.parts) ? t.details.parts : [];
+    let date = null;
+    let cents = 0;
+    for (const p of parts) {
+      const d = p && typeof p.due_date === 'string' ? p.due_date.slice(0, 10) : null;
+      if (d && (!date || d > date)) date = d;
+      const c = Number(p?.amount_cents);
+      if (Number.isFinite(c) && c > 0) cents += c;
+    }
+    return { id: t.id, date, amount: cents > 0 ? cents / 100 : null };
+  }
   const _arrLive = { loading: false, error: null, items: [], fetched: false, _seq: 0 };
 
   async function _fetchArrangementsList(scope) {
@@ -1150,7 +1177,12 @@
   //   ABONNEMENT_PAUZE → { subscription_id, pause_from, pause_until, reason }
   //   ABONNEMENT_STOP  → { subscription_id, stop_date, reason }
   //   KWIJTSCHELDING   → { write_off_amount, reason }
-  const _arrForm = { open: false, customer_id: null, type: 'UITSTEL', invoice_ids: [], rationale: '', details: {}, saving: false, error: null };
+  //   TOEZEGGING       → { parts: [{ due_date, amount_cents? }] } (min 1)
+  //                      Licht type: geen pending_actions, geen TL-mutatie,
+  //                      geen approval. Gaat direct op ACTIEF en pauzeert de
+  //                      lopende aanmaan-runs via paused_by_arrangement_id.
+  //                      Bewaking door cron-arrangements-breach-check.
+  const _arrForm = { open: false, customer_id: null, type: 'TOEZEGGING', invoice_ids: [], rationale: '', details: {}, saving: false, error: null };
   window.__wbxArrPropose = async (customer_id) => {
     const cid = String(customer_id || '');
     // v=6 FIX 6: waarschuw als klant al actief arrangement heeft — server
@@ -1172,10 +1204,10 @@
     }
     _arrForm.open = true;
     _arrForm.customer_id = cid;
-    _arrForm.type = 'UITSTEL';
+    _arrForm.type = 'TOEZEGGING';
     _arrForm.invoice_ids = [];
     _arrForm.rationale = '';
-    _arrForm.details = { termijnen: 3 };
+    _arrForm.details = { due_date: '', amount: '' };
     _arrForm.saving = false; _arrForm.error = null;
     _renderArrModal();
   };
@@ -1184,6 +1216,7 @@
     if (!ARR_TYPES.some(([v]) => v === t)) return;
     _arrForm.type = t;
     // Reset type-specifieke details.
+    if (t === 'TOEZEGGING')      _arrForm.details = { due_date: '', amount: '' };
     if (t === 'UITSTEL')         _arrForm.details = { termijnen: 3 };
     if (t === 'SPLITSING')       _arrForm.details = { parts: [{ amount: '', due_date: '' }, { amount: '', due_date: '' }] };
     if (t === 'ABONNEMENT_PAUZE')_arrForm.details = { subscription_id: '', pause_from: '', pause_until: '', reason: '' };
@@ -1220,6 +1253,22 @@
     }
     // Preflight type-validatie (spiegel server-guard).
     const d = _arrForm.details || {};
+    if (t === 'TOEZEGGING') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.due_date || ''))) {
+        _arrForm.error = 'Afgesproken betaaldatum vereist.'; _renderArrModal(); return;
+      }
+      // Datum in het verleden is zinloos: de breach-check zou 'em de
+      // eerstvolgende ochtend meteen op VERBROKEN zetten.
+      const todayIso = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD, lokale tijd
+      if (String(d.due_date) < todayIso) {
+        _arrForm.error = 'De afgesproken datum ligt in het verleden.'; _renderArrModal(); return;
+      }
+      // Bedrag is optioneel (de afspraak kan "het hele openstaande bedrag"
+      // zijn), maar als het ingevuld is moet het kloppen.
+      if (String(d.amount || '').trim() !== '' && !(Number(d.amount) > 0)) {
+        _arrForm.error = 'Bedrag moet groter dan 0 zijn, of leeg blijven.'; _renderArrModal(); return;
+      }
+    }
     if (t === 'UITSTEL') {
       const n = Number(d.termijnen);
       if (!Number.isInteger(n) || n < 2 || n > 60) { _arrForm.error = 'Termijnen: integer 2..60.'; _renderArrModal(); return; }
@@ -1248,25 +1297,51 @@
       if (!d.reason) { _arrForm.error = 'reason vereist.'; _renderArrModal(); return; }
     }
     // Confirm-samenvatting vóór POST.
+    const isToezegging = t === 'TOEZEGGING';
     const summary = `<div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12.5px;line-height:1.6">
       <div><b>Type:</b> ${esc((ARR_TYPES.find(x => x[0] === t) || [])[1] || t)}</div>
       ${!isSubAction ? `<div><b>Facturen:</b> ${_arrForm.invoice_ids.length}</div>` : ''}
+      ${isToezegging ? `<div><b>Betaalt op:</b> ${esc(_fmtDate(d.due_date))}</div>` : ''}
+      ${isToezegging && String(d.amount || '').trim() !== '' ? `<div><b>Bedrag:</b> ${eur(Number(d.amount))}</div>` : ''}
       ${t === 'UITSTEL' ? `<div><b>Termijnen:</b> ${d.termijnen}</div>` : ''}
       ${t === 'SPLITSING' ? `<div><b>Termijnen:</b> ${d.parts.length}</div>` : ''}
       ${t === 'KWIJTSCHELDING' ? `<div><b>Bedrag:</b> ${eur(Number(d.write_off_amount))}</div>` : ''}
     </div>
-    <div style="margin-top:10px;padding:9px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.5">
-      Dit maakt een <b>payment_arrangement</b> aan + pending_actions per stap. Geen TL-mutatie tot Approve.
-    </div>`;
+    ${isToezegging
+      ? `<div style="margin-top:10px;padding:9px 12px;background:var(--emerald-soft, #E6F6EF);color:var(--emerald);border-radius:6px;font-size:12px;line-height:1.5">
+          De aanmaningen naar deze klant <b>stoppen direct</b> en blijven stil tot ${esc(_fmtDate(d.due_date))}.
+          Op die datum kijkt het systeem zelf of de factuur betaald is: wél betaald → dossier afgerond,
+          niet betaald → de afspraak geldt als verbroken en de workflow "Betaalafspraak verbroken" pakt het op.
+          Geen goedkeuring nodig, geen wijziging in TeamLeader.
+        </div>`
+      : `<div style="margin-top:10px;padding:9px 12px;background:var(--amber-soft);color:var(--amber);border-radius:6px;font-size:12px;line-height:1.5">
+          Dit maakt een <b>payment_arrangement</b> aan + pending_actions per stap. Geen TL-mutatie tot Approve.
+        </div>`}`;
     _closeConfirmModal();
-    const ok = await _askConfirm('Arrangement voorstellen?', summary, { okLabel: 'Ja, maak aan' });
+    const ok = await _askConfirm(
+      isToezegging ? 'Betaalafspraak vastleggen?' : 'Arrangement voorstellen?',
+      summary,
+      { okLabel: isToezegging ? 'Ja, leg vast' : 'Ja, maak aan' }
+    );
     if (!ok) { _renderArrModal(); return; }
     _arrForm.saving = true; _renderArrModal();
+    // TOEZEGGING: het formulier heeft één datum + optioneel één bedrag in
+    // euro's; de server verwacht `parts: [{ due_date, amount_cents? }]`.
+    // invoice_id per part blijft leeg — de datum geldt dan voor alle
+    // aangevinkte facturen, precies wat "betaalt alles op datum X" betekent.
+    let detailsOut = d;
+    if (t === 'TOEZEGGING') {
+      const part = { due_date: String(d.due_date) };
+      if (String(d.amount || '').trim() !== '') {
+        part.amount_cents = Math.round(Number(d.amount) * 100);
+      }
+      detailsOut = { parts: [part] };
+    }
     const payload = {
       customer_id: _arrForm.customer_id,
       type: t,
       invoice_ids: isSubAction ? [] : _arrForm.invoice_ids,
-      details: d,
+      details: detailsOut,
       rationale: _arrForm.rationale || '(geen)',
     };
     const r = await apiPost('/api/arrangements-propose', payload);
@@ -1275,7 +1350,15 @@
     _arrForm.open = false; _closeConfirmModal();
     _arrLive.fetched = false; _fetchArrangementsList('ACTIEF');
     _live.pendingActs.fetched = false; _fetchPendingActs();
-    _toast('Arrangement voorgesteld — bekijk pending_actions voor de uitvoerstappen.', 'success');
+    // Overzicht + case-sheet moeten de nieuwe pauze meteen tonen.
+    _live.arrangements.fetched = false; _live.arrangements.byCust = null;
+    queueMicrotask(_fetchArrangements);
+    _toast(
+      isToezegging
+        ? 'Betaalafspraak vastgelegd — de aanmaningen staan stil tot ' + _fmtDate(d.due_date) + '.'
+        : 'Arrangement voorgesteld — bekijk pending_actions voor de uitvoerstappen.',
+      'success'
+    );
   };
   window.__wbxArrToggleInvoice = (invoice_id) => {
     const s = new Set(_arrForm.invoice_ids);
@@ -1330,7 +1413,27 @@
     }
 
     let detailsBlock = '';
-    if (t === 'UITSTEL') {
+    if (t === 'TOEZEGGING') {
+      const selCount = _arrForm.invoice_ids.length;
+      detailsBlock = `<div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Klant betaalt op</div>
+            <input type="date" value="${esc(d.due_date || '')}" oninput="__wbxArrSetDetail('due_date', this.value)" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+          </div>
+          <div>
+            <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Bedrag (EUR, optioneel)</div>
+            <input type="number" step="0.01" min="0" value="${esc(String(d.amount || ''))}" oninput="__wbxArrSetDetail('amount', this.value)" placeholder="Leeg = het hele openstaande bedrag" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:12.5px;outline:none;box-sizing:border-box" />
+          </div>
+        </div>
+        <div style="padding:9px 12px;background:var(--surface-2);border-radius:6px;font-size:11.5px;color:var(--text-2);line-height:1.55">
+          Vanaf nu tot die datum krijgt deze klant <b>geen aanmaningen</b> meer${selCount ? ` voor de ${selCount} aangevinkte factu${selCount === 1 ? 'ur' : 'ren'}` : ''}.
+          Op de afgesproken dag controleert het systeem zelf of er betaald is. Zo ja: dossier afgerond.
+          Zo nee: de afspraak geldt als verbroken en de workflow "Betaalafspraak verbroken" pakt het op.
+          Er verandert niets in TeamLeader en er is geen goedkeuring nodig.
+        </div>
+      </div>`;
+    } else if (t === 'UITSTEL') {
       detailsBlock = `<div>
         <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Aantal termijnen (2-60)</div>
         <input type="number" min="2" max="60" step="1" value="${esc(String(d.termijnen || 3))}" oninput="__wbxArrSetDetail('termijnen', Number(this.value))" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1);font:inherit;font-size:13px;outline:none;box-sizing:border-box" />
@@ -1390,7 +1493,7 @@
     root.id = 'wbxConfirmRoot';
     root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(17,23,33,.48);padding:20px';
     root.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.32);padding:22px;max-width:640px;width:calc(100vw - 40px);max-height:calc(100vh - 60px);overflow:auto">
-      <div style="font-size:15.5px;font-weight:600;margin-bottom:6px">Nieuw arrangement voorstellen</div>
+      <div style="font-size:15.5px;font-weight:600;margin-bottom:6px">${t === 'TOEZEGGING' ? 'Betaalafspraak vastleggen' : 'Nieuw arrangement voorstellen'}</div>
       <div style="font-size:12.5px;color:var(--text-3);margin-bottom:14px">Klant: <b style="color:var(--text-1)">${esc(custName)}</b></div>
       <div style="margin-bottom:14px">
         <div style="font-size:11.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Type</div>
@@ -1409,7 +1512,7 @@
       ${_arrForm.error ? `<div style="padding:9px 12px;background:var(--rose-soft);color:var(--rose);border-radius:6px;font-size:12px;margin-bottom:12px">⚠ ${esc(_arrForm.error)}</div>` : ''}
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn btn-ghost btn-sm" onclick="__wbxArrCancelForm()">Annuleren</button>
-        <button class="btn btn-primary btn-sm" ${_arrForm.saving ? 'disabled' : ''} style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;opacity:${_arrForm.saving ? '.55' : '1'};cursor:${_arrForm.saving ? 'not-allowed' : 'pointer'}" onclick="__wbxArrSubmit()">${_arrForm.saving ? 'Voorstellen…' : 'Voorstellen'}</button>
+        <button class="btn btn-primary btn-sm" ${_arrForm.saving ? 'disabled' : ''} style="background:var(--brand,#0A7490);border-color:var(--brand,#0A7490);color:#fff;opacity:${_arrForm.saving ? '.55' : '1'};cursor:${_arrForm.saving ? 'not-allowed' : 'pointer'}" onclick="__wbxArrSubmit()">${_arrForm.saving ? 'Bezig…' : (t === 'TOEZEGGING' ? 'Leg vast' : 'Voorstellen')}</button>
       </div>
     </div>`;
     root.addEventListener('click', (e) => { if (e.target === root) window.__wbxArrCancelForm(); });
@@ -2069,7 +2172,14 @@
         </label>
         <div>
           <div style="font-weight:500">${esc(name)}</div>
-          ${hasArr ? `<div style="font-size:10.5px;color:var(--amber);margin-top:2px" title="Actief payment_arrangement: dunning gepauzeerd">⏸ Dunning gepauzeerd (arrangement actief)</div>` : ''}
+          ${(() => {
+            if (!hasArr) return '';
+            const tz = _toezeggingInfo(arrsMap[cid]);
+            if (tz) {
+              return `<div style="font-size:10.5px;color:var(--emerald);margin-top:2px" title="Betaalafspraak: de aanmaningen staan stil tot deze datum">🤝 Toezegging${tz.date ? ' tot ' + esc(_fmtDate(tz.date)) : ''}${tz.amount != null ? ' · ' + esc(eur(tz.amount)) : ''}</div>`;
+            }
+            return `<div style="font-size:10.5px;color:var(--amber);margin-top:2px" title="Actief payment_arrangement: dunning gepauzeerd">⏸ Dunning gepauzeerd (arrangement actief)</div>`;
+          })()}
         </div>
         <div class="mono" style="text-align:right;color:${openAmt > 0 ? 'var(--amber)' : 'var(--text-3)'};font-weight:600">${eur(openAmt)}</div>
         <div class="mono" style="text-align:right;color:var(--text-3)">${invCount}</div>
@@ -4798,7 +4908,14 @@
       <div style="min-width:0;flex:1">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
           <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px" onclick="__wbxCloseCase()" title="Sluit (Esc)">← Terug</button>
-          ${activeArr ? '<span style="font-size:10.5px;padding:2px 8px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">⏸ Arrangement</span>' : ''}
+          ${(() => {
+            if (!activeArr) return '';
+            const tz = _toezeggingInfo(arrs);
+            if (tz) {
+              return `<span style="font-size:10.5px;padding:2px 8px;border-radius:5px;background:var(--emerald-soft, #E6F6EF);color:var(--emerald);font-weight:600" title="Betaalafspraak: aanmaningen staan stil">🤝 Toezegging${tz.date ? ' tot ' + esc(_fmtDate(tz.date)) : ''}</span>`;
+            }
+            return '<span style="font-size:10.5px;padding:2px 8px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">⏸ Arrangement</span>';
+          })()}
           ${_caseBriefBadgeHtml(cid)}
         </div>
         <div style="font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</div>
@@ -4814,6 +4931,7 @@
     </div>
     ${_caseFlowStripHtml(stageSlug)}
     <div class="wbx-drawer-scroll">
+      ${_caseToezeggingCardHtml(cid, arrs)}
       ${_caseFactuurCardHtml(cid, pipe, focus, daysN)}
       ${_caseBellenCardHtml(cid, phone, name)}
       ${_caseGesprekCardHtml(cid)}
@@ -4821,6 +4939,47 @@
       ${_caseTijdlijnCardHtml(cid)}
     </div>
     ${_caseSheetActionBarHtml(cid, stageSlug)}`;
+  }
+
+  /**
+   * Kaart bovenaan het dossier wanneer er een lopende TOEZEGGING is.
+   *
+   * Bestaansreden: zonder deze kaart is een klant die "stil" is niet te
+   * onderscheiden van een klant die vergeten is. Hier staat zwart-op-wit
+   * waarom er niets gebeurt, tot wanneer, en wat er daarna vanzelf gebeurt.
+   * Leest alleen uit de al opgehaalde arrangements — geen extra fetch.
+   */
+  function _caseToezeggingCardHtml(cid, arrs) {
+    const tz = _toezeggingInfo(arrs);
+    if (!tz) return '';
+    const dagen = (() => {
+      if (!tz.date) return null;
+      const t = new Date(tz.date + 'T00:00:00').getTime();
+      if (!Number.isFinite(t)) return null;
+      const vandaag = new Date(); vandaag.setHours(0, 0, 0, 0);
+      return Math.round((t - vandaag.getTime()) / 86400000);
+    })();
+    const nogTxt = dagen == null ? ''
+      : dagen > 1  ? `nog ${dagen} dagen`
+      : dagen === 1 ? 'morgen'
+      : dagen === 0 ? 'vandaag'
+      : `${Math.abs(dagen)} dag${Math.abs(dagen) === 1 ? '' : 'en'} geleden verstreken`;
+    const verstreken = dagen != null && dagen < 0;
+    return `<div class="wbx-drawer-card" style="border-color:${verstreken ? 'var(--amber)' : 'var(--emerald)'}">
+      <div class="wbx-drawer-card-h">
+        <span>🤝 Betaalafspraak loopt</span>
+        <span style="font-size:11.5px;font-weight:600;color:${verstreken ? 'var(--amber)' : 'var(--emerald)'}">${esc(nogTxt)}</span>
+      </div>
+      <div class="wbx-drawer-card-b">
+        <div class="wbx-kv-row"><div class="wbx-kv-l">Betaalt op</div><div><b>${esc(_fmtDate(tz.date))}</b></div></div>
+        ${tz.amount != null ? `<div class="wbx-kv-row"><div class="wbx-kv-l">Bedrag</div><div class="mono">${esc(eur(tz.amount))}</div></div>` : ''}
+        <div style="margin-top:8px;padding:8px 10px;background:var(--surface-2);border-radius:6px;font-size:11.5px;line-height:1.55;color:var(--text-2)">
+          ${verstreken
+            ? 'De afgesproken datum is verstreken. De dagelijkse controle zet de afspraak op verbroken zodra de factuur nog openstaat; daarna pakt de workflow "Betaalafspraak verbroken" het weer op.'
+            : 'Daarom is het hier stil: de aanmaningen zijn gepauzeerd tot deze datum. Op die dag controleert het systeem zelf of er betaald is — wél betaald sluit het dossier, niet betaald laat de workflow "Betaalafspraak verbroken" starten.'}
+        </div>
+      </div>
+    </div>`;
   }
 
   function _caseStagePillHtml(stageSlug) {
@@ -7211,6 +7370,7 @@
   console.debug('[wanbetalers-v2] v=34 BROK WB-FIX-5: (#1) Volgende-badge mapt nu op ECHTE overzicht-velden next_action_step_type (email/whatsapp/wait/task/stop/resume_dunning) + next_action_step_title heuristiek (Bel/Brief/Incasso/Herinnering). Voorheen: mijn code checkte non-bestaande velden -> altijd "Actie"-fallback. (#2) MANUAL_FOLLOWUP-splitting op payload.kind: kind=call -> "📞 Belafspraak" (Bel-knop OK), kind=letter -> "✉ Brief-taak" (Bel-knop weg, "Naar brief-flow"-knop naar SURFACE B WIK-card), kind=other -> "📝 Follow-up". Fallback: title-regex (bv. "Stuur WIK-14-dagenbrief" -> letter). Groepering ook via effectieve type — brief-taken en bel-taken vallen nu in APARTE groepen. Ook: MANUAL_PROPOSE_ARRANGEMENT label naar "Regeling voorstellen" (v1-parity, was "Arrangement voorstellen").');
   console.debug('[wanbetalers-v2] v=33 BROK WB-POLISH-4: dead-code cleanup — gesprekkenView + _gspListInnerHtml + _gspDetailHtml body volledig verwijderd (~180 regels dood-code weg). _repaintGspList + _repaintGspDetail zijn no-op stubs (callers _fetchCallLog/_fetchTimeline/__wbxCallSave/__wbxCallSet* + __wbxNoteSave triggeren nu geen render meer; case-sheet SURFACE B doet z\'n eigen repaint). __wbxCallSet*/__wbxGspSelect/__wbxGspSearch* blijven als window-refs (geen callers meer; volgende cleanup-brok kan die schrappen).');
   console.debug('[wanbetalers-v2] v=32 BROK WB-POLISH-3: arrangement-detail drawer. Body-level right-slide (760px) + scrim + Escape. Data via /api/arrangements-detail?id=X. Secties: header (type — klant + status-pill), Arrangement kv-grid (type/status/dates/reden), Facturen-lijst (indien invs), Pending actions-tabel, footer met ✕ Annuleer (danger, delegates naar __wbxArrCancel voor ACTIEF/VOORGESTELD). Klik op Actieve arrangementen-rij (actiesView) opent drawer; cancel-btn heeft event.stopPropagation.');
+  console.debug('[wanbetalers-v2] v=33 TOEZEGGING: extra type in de afsprakenwizard (Toezegging = betaalafspraak). Klein formulier (facturen + datum + optioneel bedrag + toelichting) -> payment_arrangement type TOEZEGGING, direct ACTIEF, geen pending_actions, geen TL-mutatie, geen approval. Pauze via bestaande paused_by_arrangement_id; bewaking via cron-arrangements-breach-check + workflow "Betaalafspraak verbroken". Zichtbaar in overzichtsrij (toezegging tot datum), case-sheet-badge en een eigen kaart bovenaan het dossier. De bestaande knop Betaalafspraak (logregel) is NIET aangeraakt.');
   console.debug('[wanbetalers-v2] v=31 BROK WB-POLISH-2: pipeline multi-select — checkbox per kaart, shift-klik range binnen dezelfde fase, bulk-bar met count + fase-picker + Verplaats-knop. Typ-to-confirm "VERPLAATS" (of "TERMINAAL" bij opgelost/afschrijven met extra rood-danger-hint "motor stopt voor N klanten"). Race-guard per cid (stageBusy) + globale pipeBulkBusy. Skip no-ops (klant al in target-fase). Invalidate overzicht na move -> kolom-tellingen updaten zonder scroll-reset.');
   console.debug('[wanbetalers-v2] v=30 BROK WB-POLISH-1: overzicht klikbare kolom-headers (open/dagen/fase/next/name sort, asc/desc toggle, next-null onderaan). Brieven: zoek-input (naam/e-mail 200ms debounce), select-all in header (per zichtbare filter), bulk-verwijderen met typ-to-confirm "VERWIJDER".');
   console.debug('[wanbetalers-v2] v=29 BROK WB-FIX-4: (#1) BE-lijn regressie -> altijd tonen (+ ensureReady on-demand); (#2) Volgende-badge "actie g,..." fix -> kanaal-mapping + volle datetime; (#3) thread scroll: sync+RAF, 5s loop, force clear pas na daadwerkelijk bodemen; (#4) type-label chip OP de kaart (v1-parity); (#5) drawer-kop lege staat "Geen open factuur" i.p.v. "Factuur — · €0,00 · 0 dagen"; (#6) thread-kop fallback KLANTNAAM (via ctx.customer.name) i.p.v. phone. Minor: klant-info-blok +e-mail; invoice-modal accepteert c.name; poging-teller min 4 dots + cadence store in _fetchCallLog.');

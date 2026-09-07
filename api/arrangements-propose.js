@@ -147,7 +147,7 @@ export default async function handler(req, res) {
   if (!isUuid(customerId))  return res.status(400).json({ error: 'customer_id (uuid) vereist' });
   if (!typeRaw || !(typeRaw in TYPE_ALIASES)) {
     return res.status(400).json({
-      error: 'type vereist (UITSTEL | SPLITSING | ABONNEMENT_PAUZE | ABONNEMENT_STOP | KWIJTSCHELDING)',
+      error: 'type vereist (TOEZEGGING | UITSTEL | SPLITSING | ABONNEMENT_PAUZE | ABONNEMENT_STOP | KWIJTSCHELDING)',
     });
   }
   const type         = TYPE_ALIASES[typeRaw];
