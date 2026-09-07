@@ -144,48 +144,26 @@ tr{break-inside:avoid}
   const toon = (html) => { blad.innerHTML = html; };
   const melding = (t) => toon('<div class="melding">' + esc(t) + '</div>');
 
-  const q = new URLSearchParams(location.search);
-  const DATUM = /^\d{4}-\d{2}-\d{2}$/;
-  const van = DATUM.test(q.get('van') || '') ? q.get('van') : null;
-  const tot = DATUM.test(q.get('tot') || '') ? q.get('tot') : van;
-  if (!van) { melding('Geen geldige periode meegegeven.'); return; }
-
-  // AUTH VÓÓR ALLES. Dit rapport toont namen van leads, dus er mag niets
-  // opgehaald of getoond worden voordat vaststaat wie er kijkt. requireAuth
-  // stuurt zelf door naar /login als er geen sessie is.
-  try {
-    await window._authSharedReady;
-    const profiel = await window.AuthShared.requireAuth();
-    if (!profiel) return;               // requireAuth heeft doorgestuurd
-  } catch (e) {
-    melding('Kon de sessie niet controleren. Log opnieuw in.');
-    return;
-  }
-
-  let data;
-  try {
-    const token = await window.AuthShared.getAccessToken();
-    const resp = await fetch('/api/opvolging-rapport?van=' + encodeURIComponent(van) +
-      '&tot=' + encodeURIComponent(tot), { headers: { Authorization: 'Bearer ' + token } });
-    const tekst = await resp.text();
-    let j = null; try { j = tekst ? JSON.parse(tekst) : null; } catch (_) {}
-    if (!resp.ok) {
-      // Het endpoint doet zijn eigen strikte permissiecheck. Een 403 hier
-      // betekent dat de sleutel opvolging.rapport.view ontbreekt — dat tonen we
-      // eerlijk in plaats van een leeg rapport af te drukken.
-      melding((j && j.error) || ('Kon het rapport niet ophalen (HTTP ' + resp.status + ').'));
-      return;
-    }
-    data = j;
-  } catch (e) {
-    melding('Kon het rapport niet ophalen: ' + (e && e.message ? e.message : 'netwerkfout'));
-    return;
-  }
-
-  toon(bouw(data));
-  // Pas printen als alles staat. Eén frame wachten zodat de opmaak berekend is;
-  // anders meet Chrome de pagina's op een half getekend document.
-  requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  // ═══════════════════════════════════════════════════════════════════════
+  // EERST ALLES DEFINIËREN, DAARNA PAS UITVOEREN.
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Deze volgorde is niet cosmetisch. De uitvoering stond eerst bovenaan en de
+  // opbouw eronder, en dat werkte tot bouw() een `const` aanraakte die verderop
+  // stond: `ReferenceError: Cannot access 'nlDatum' before initialization`. Een
+  // function declaration wordt gehesen, een const-pijlfunctie niet — die zit tot
+  // zijn eigen regel in de temporal dead zone.
+  //
+  // De pagina bleef daardoor eeuwig op 'Rapport wordt opgehaald' staan: de
+  // uitzondering viel buiten elke try, dus er kwam geen melding en geen
+  // printdialoog. Wie op de knop drukte zag een leeg venster en dacht dat het
+  // traag was.
+  //
+  // Twee dingen voorkomen dat dit terugkomt. Deze volgorde — alles wat gebruikt
+  // wordt staat boven de plek waar het gebruikt wordt — en de try/catch om
+  // bouw() heen verderop. En tests/opvolging-rapport-print-uitvoeren.test.js
+  // draait dit hele bestand van boven naar beneden zoals de browser dat doet,
+  // in plaats van de losse functies aan te roepen.
 
   // ═══════════════════════════════════════════════════════════════════════
   // OPBOUW
@@ -427,6 +405,70 @@ tr{break-inside:avoid}
       }).join('') + '</tbody></table>';
     return h + '</div>';
   }
+
+  const q = new URLSearchParams(location.search);
+  const DATUM = /^\d{4}-\d{2}-\d{2}$/;
+  const van = DATUM.test(q.get('van') || '') ? q.get('van') : null;
+  const tot = DATUM.test(q.get('tot') || '') ? q.get('tot') : van;
+  if (!van) { melding('Geen geldige periode meegegeven.'); return; }
+
+  // AUTH VÓÓR ALLES. Dit rapport toont namen van leads, dus er mag niets
+  // opgehaald of getoond worden voordat vaststaat wie er kijkt. requireAuth
+  // stuurt zelf door naar /login als er geen sessie is.
+  try {
+    await window._authSharedReady;
+    const profiel = await window.AuthShared.requireAuth();
+    if (!profiel) return;               // requireAuth heeft doorgestuurd
+  } catch (e) {
+    melding('Kon de sessie niet controleren. Log opnieuw in.');
+    return;
+  }
+
+  let data;
+  try {
+    const token = await window.AuthShared.getAccessToken();
+    const resp = await fetch('/api/opvolging-rapport?van=' + encodeURIComponent(van) +
+      '&tot=' + encodeURIComponent(tot), { headers: { Authorization: 'Bearer ' + token } });
+    const tekst = await resp.text();
+    let j = null; try { j = tekst ? JSON.parse(tekst) : null; } catch (_) {}
+    if (!resp.ok) {
+      // Het endpoint doet zijn eigen strikte permissiecheck. Een 403 hier
+      // betekent dat de sleutel opvolging.rapport.view ontbreekt — dat tonen we
+      // eerlijk in plaats van een leeg rapport af te drukken.
+      melding((j && j.error) || ('Kon het rapport niet ophalen (HTTP ' + resp.status + ').'));
+      return;
+    }
+    data = j;
+  } catch (e) {
+    melding('Kon het rapport niet ophalen: ' + (e && e.message ? e.message : 'netwerkfout'));
+    return;
+  }
+
+  // EEN UITZONDERING MAG NOOIT STIL ZIJN.
+  //
+  // Hier stond `toon(bouw(data))` kaal. Ging er iets mis in bouw(), dan viel de
+  // uitzondering buiten elke try: geen melding, geen printdialoog, en de pagina
+  // bleef staan op 'Rapport wordt opgehaald'. Dat leest als traag, niet als
+  // stuk — dus wachtte je erop in plaats van het te melden.
+  //
+  // En let op de volgorde hieronder: print() staat BINNEN de try, ná het
+  // tekenen. Een lege printdialoog boven een mislukt rapport is erger dan geen
+  // dialoog, want dan bewaar je een leeg papier als PDF.
+  try {
+    toon(bouw(data));
+    // Pas printen als alles staat. Eén frame wachten zodat de opmaak berekend
+    // is; anders meet Chrome de pagina's op een half getekend document.
+    requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+  } catch (e) {
+    // De echte tekst erbij. Een generieke zin zou hier niets waard zijn: dit
+    // scherm heeft geen tweede weg om te achterhalen wat er misging.
+    const tekst = (e && e.message) ? e.message : String(e);
+    toon('<div class="melding"><b>Het rapport kon niet opgemaakt worden.</b><br>' +
+      esc(tekst) + '<br><br>Er is niets afgedrukt. Meld deze tekst, dan is de ' +
+      'oorzaak terug te vinden.</div>');
+    console.error('[rapport-print] opmaken faalde:', e);
+  }
+
 })();
 </script>
 </body>
