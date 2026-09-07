@@ -299,6 +299,10 @@
     // R · het dagrapport. Eigen staat en een eigen endpoint: dit gaat over een
     // periode, de rest over één dag.
     rapport: { loading: false, error: null, data: null, key: null },
+    // 'Vandaag gedaan' — de drie blokken bovenaan Afgerond. Ze komen uit het
+    // RAPPORT-endpoint, niet uit een eigen telling: scherm en PDF moeten
+    // dezelfde getallen tonen, en dat kan alleen als er één berekening is.
+    gedaan: { loading: false, error: null, data: null, key: null },
   };
   const _ui = {
     dagView: null,          // null = vandaag
@@ -405,6 +409,27 @@
     if (j.__error) st.error = j.__error; else st.data = j;
     render();
   }
+  /**
+   * De drie blokken van vandaag, uit hetzelfde endpoint als het rapport.
+   *
+   * BEWUST GEEN EIGEN TELLING. Twee tellingen zeggen vroeg of laat zeven
+   * tegenover acht, en dan weet niemand welke van de twee liegt. De server
+   * rekent één keer (verdeelVandaagGedaan) en levert dat aan allebei.
+   *
+   * Faalt dit, dan blijft de rest van het scherm staan: het archief eronder
+   * heeft een eigen bron en hoeft hier niet op te wachten.
+   */
+  async function fetchGedaan(dag) {
+    const st = _live.gedaan;
+    if (st.loading || st.key === dag) return;
+    st.loading = true; st.error = null; st.key = dag;
+    const j = await haal('/api/opvolging-rapport?van=' + dag + '&tot=' + dag);
+    st.loading = false;
+    if (j.__error) { st.error = j.__error; st.data = null; }
+    else { st.error = null; st.data = j; }
+    render();
+  }
+
   async function fetchArchief() {
     const st = _live.archief;
     if (st.loading || st.data) return;
@@ -1442,6 +1467,13 @@
 .opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
 .opv .opvr-notitie{white-space:pre-wrap;margin-top:4px}
 .opv .opvr-bel{margin-top:4px;display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
+.opv .opvg-blok{margin:0 0 12px}
+.opv .opvg-kop{display:flex;align-items:center;gap:7px;margin:0 0 6px;font-size:13.5px}
+.opv .opvg-kop span{font-size:11px;color:var(--o-muted);background:#f3f4f6;border-radius:999px;padding:1px 7px}
+.opv .opvg-lijst{display:flex;flex-direction:column;gap:4px}
+.opv .opvg-regel{background:#fff;border:1px solid var(--o-lijn);border-radius:8px;padding:7px 10px}
+.opv .opvg-nm{font-weight:600;font-size:13px}
+.opv .opvg-sub{font-size:11.5px;color:var(--o-muted);margin-top:1px}
 .opv .opvr-ritme{margin:10px 0 4px}
 .opv .opvr-ritme-kop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:12.5px;margin-bottom:6px}
 .opv .opvr-ritme-kop span{color:var(--o-muted);font-size:11.5px}
@@ -2908,6 +2940,64 @@
   // ═════════════════════════════════════════════════════════════════════════
   // VIEW · AFGEROND
   // ═════════════════════════════════════════════════════════════════════════
+  /**
+   * VANDAAG GEDAAN — drie blokken, in deze volgorde.
+   *
+   * Dave drukte op 7 september om 18:12 bij Bryan en om 18:35 bij Peter op
+   * Bevestigd. Hun kaarten gingen naar event min vier en bleven open — precies
+   * goed — maar ze stonden nergens, en daardoor leek dat werk verdwenen.
+   * Anais, Joelle en Valerie deden hetzelfde en verschenen wél hier, want bij
+   * hen was het de laatste ronde.
+   *
+   * Het scherm heette naar de UITKOMST van een kaart, terwijl de vraag aan het
+   * eind van de dag is wat er GEDAAN is. Een kaart die doorschuift is geen
+   * mislukking en geen afronding maar een derde ding, en zolang dat nergens
+   * staat lijkt het alsof het werk weg is.
+   */
+  function gedaanBlok(titel, rijen, leegZin, regel) {
+    return '<div class="opvg-blok"><h4 class="opvg-kop">' + esc(titel) +
+      '<span>' + rijen.length + '</span></h4>' +
+      (rijen.length
+        ? '<div class="opvg-lijst">' + rijen.map(regel).join('') + '</div>'
+        : '<div class="empty"><i>' + esc(leegZin) + '</i></div>') + '</div>';
+  }
+
+  function gedaanBlokken(dag) {
+    const st = _live.gedaan;
+    if (!st.loading && st.key !== dag) straks(() => fetchGedaan(dag));
+
+    const kop = '<div class="sh"><div class="ic" style="background:var(--o-accs)">&#9989;</div>' +
+      '<h3>Vandaag gedaan</h3></div>';
+    if (st.error) {
+      // Niet stil terugvallen op nul: een nul leest als 'niets gedaan'.
+      return kop + '<div class="warn2"><b>De dagstand is nu niet op te halen.</b> ' +
+        esc(st.error) + ' Wat hieronder staat is het archief, niet de dag van vandaag.</div>';
+    }
+    if (!st.data) return kop + '<div class="empty">Dagstand laden&hellip;</div>';
+
+    const d = (st.data.afgehandeld || []).find((x) => x.dag === dag) || null;
+    if (!d) return kop + '<div class="empty">Voor vandaag is nog niets berekend.</div>';
+
+    return kop +
+      gedaanBlok('Afgesloten', d.afgesloten,
+        'Er is vandaag niemand definitief uit de lijst gehaald.',
+        (a) => '<div class="opvg-regel"><div class="opvg-nm">' + esc(a.naam) + '</div>' +
+          '<div class="opvg-sub">' + esc(a.reden || 'zonder reden vastgelegd') +
+          (a.om ? ' &middot; ' + esc(uur(a.om)) : '') + '</div></div>') +
+      gedaanBlok('Doorgeschoven', d.doorgeschoven,
+        'Er is vandaag niemand doorgeschoven naar een volgende ronde.',
+        (a) => '<div class="opvg-regel"><div class="opvg-nm">' + esc(a.naam) + '</div>' +
+          '<div class="opvg-sub">' + esc(a.wat) + ' om ' + esc(uur(a.om)) +
+          ' &middot; komt terug op <b>' + esc(nl(a.terug_op)) + '</b>' +
+          (a.notitie ? ' &mdash; ' + esc(a.notitie) : '') + '</div></div>') +
+      gedaanBlok('Aangeraakt, nog open', d.aangeraakt,
+        'Er is vandaag niemand benaderd zonder dat er een beslissing viel.',
+        (a) => '<div class="opvg-regel"><div class="opvg-nm">' + esc(a.naam) + '</div>' +
+          '<div class="opvg-sub">' + a.pogingen + ' poging' + (a.pogingen === 1 ? '' : 'en') +
+          ', zonder beslissing' + (a.laatste ? ' &middot; laatst ' + esc(uur(a.laatste)) : '') +
+          '</div></div>');
+  }
+
   function afgerondView() {
     stijl();
     const st = _live.archief;
@@ -2916,9 +3006,25 @@
     let h = '<div class="opv">';
     if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>';
     if (st.loading || !st.data) return h + skel() + '</div>';
-    if (!st.data.length) return h + '<div class="empty">Nog niets afgerond.</div></div>';
+    // Let op de volgorde: een leeg archief mag de drie blokken van vandaag niet
+    // wegdrukken. Dat is juist het geval waarin Dave wil zien wat hij gedaan
+    // heeft — een verse lijst met werk erin.
+    if (!st.data.length) {
+      return h + gedaanBlokken(vandaag()) +
+        '<div class="empty">Er is nog nooit een kaart definitief afgerond.</div></div>' + modalHtml();
+    }
 
-    h += '<div class="ronde">Klik op een naam om te zien hoe vaak er gebeld en geappt is voor die lead afgesloten werd.</div>' +
+    h += gedaanBlokken(vandaag());
+
+    // AFWIJKING VAN DE OPDRACHT, BEWUST. Er waren drie blokken gevraagd; dit
+    // is een vierde. De historische lijst draagt het moeite-oordeel (genoeg
+    // gebeld en geappt voordat een kaart dichtging) en dat is het bewijsstuk
+    // waar de rest van de module naar verwijst. Weghalen zou dat oordeel
+    // vernietigen om een schermindeling te halen. Hij staat dus onder de drie,
+    // met een eigen kop zodat de dag bovenaan blijft.
+    h += '<div class="sh"><div class="ic" style="background:var(--o-purs)">&#128218;</div>' +
+      '<h3>Eerder afgerond</h3><span class="n">' + st.data.length + '</span></div>' +
+      '<div class="ronde">Klik op een naam om te zien hoe vaak er gebeld en geappt is voor die lead afgesloten werd.</div>' +
       '<div class="card"><table><thead><tr><th>Naam</th><th>Reden</th><th>Moeite</th><th>Afgerond</th></tr></thead><tbody>';
     h += st.data.map((a) => {
       const ok = a.bel_dagen >= ARCHIEF_MIN_DAGEN && a.wa_totaal >= ARCHIEF_MIN_WA;
