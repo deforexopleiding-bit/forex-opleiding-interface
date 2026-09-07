@@ -310,12 +310,58 @@ De cijfers staan als assertions in `tests/dunning-simulate.test.js`
 (*"SCENARIO: dag 1 na deploy op de gemeten live verdeling"*), dus ze zijn
 narekenbaar en bewegen mee als de logica verandert.
 
-## 5c. Tijdlijn per stap — `scripts/dunning-workflow-tijdlijn.js`
+## 5c. Tijdlijn per stap — de definitieve doorrekening
+
+De enige actieve aanmaan-workflow is **"Aanmaningen"**
+(`9805c900-1c74-4326-9d15-a1e49f754eb0`), met
+`trigger_conditions = { "min_days_overdue": 1 }` en 22 stappen. Dagen geteld
+vanaf de vervaldatum; dag 0 is de vervaldag zelf.
+
+| Stap | Type | Wat | Dag VOOR | Dag NA | Verschil |
+|---:|---|---|---:|---:|---:|
+| 0 | whatsapp | `aanmaning_dag7` | 1 | 1 | 0 |
+| 1 | email | Aanmaning dag 7 (E-mail) | 1 | 1 | 0 |
+| 2 | wait | wacht 7 dagen | 1 | 1 | 0 |
+| 3 | whatsapp | `aanmaning_dag14` | 8 | 7 | **−1** |
+| 4 | email | Aanmaning dag 14 (E-mail) | 8 | 7 | **−1** |
+| 5 | wait | wacht 1 dag | 8 | 7 | −1 |
+| 6 | **task** | belmoment | 9 | 14 | **+5** |
+| 7 | wait | wacht 2 dagen | 9 | 14 | +5 |
+| 8 | whatsapp | `aanmaning_dag17` | 11 | 15 | **+4** |
+| 9 | email | Aanmaning dag 17 (E-mail) | 11 | 15 | **+4** |
+| 10 | **task** | belmoment | 11 | 15 | **+4** |
+| 11 | wait | wacht 4 dagen | 11 | 15 | +4 |
+| 12 | whatsapp | `aanmaning_dag21` | 15 | 21 | **+6** |
+| 13 | email | Aanmaning dag 21 (E-mail) | 15 | 21 | **+6** |
+| 14 | **task** | belmoment | 15 | 21 | **+6** |
+| 15 | **task** | taak | 15 | 21 | **+6** |
+| 16 | wait | wacht 15 dagen | 15 | 21 | +6 |
+| 17 | **task** | belmoment | 30 | 30 | 0 |
+| 18 | wait | wacht 1 dag | 30 | 30 | 0 |
+| 19 | whatsapp | `aanmaning_dag37` | 31 | 31 | 0 |
+| 20 | email | Aanmaning dag 37 (E-mail) | 31 | 31 | 0 |
+| 21 | stop | stop | 31 | 31 | 0 |
+
+Kop en staart komen op dezelfde dag uit; het midden rekt op. Twee dingen zijn
+niet vanzelfsprekend:
+
+* **Ronde 2 gaat een dag naar voren.** De wait van 7 dagen bracht je vanaf dag
+  1 op dag 8; de ladder-sport van `aanmaning_dag14` is dag 7.
+* **Ronde 3 landt op dag 15, niet op 14.** Stap 6 wordt wakker op dag 14 (de
+  sport van `aanmaning_dag17`), en de wait op stap 7 mikt op diezelfde sport.
+  De klem laat `next_action_at` nooit op dezelfde dag landen, dus die schuift
+  naar dag 15.
+
+De staart komt toevallig samen uit: de wait van 15 dagen op stap 16 brengt je
+vanaf dag 15 op dag 30, en dat is precies de ladder-sport van
+`aanmaning_dag37`.
+
+### Het script
 
 Omdat `next_action_at` na een wait nu op de **ladderdag van de eerstvolgende
 send-stap** mikt, verschuiven ook de stappen die tussen die wait en de volgende
-send staan — de bel-taken voor Dave. Dit read-only script rekent per stap uit
-op welke dag na de vervaldatum hij landt, vóór en na deze branch:
+send staan — de bel-taken. Dit read-only script rekent per stap uit op welke
+dag na de vervaldatum hij landt, vóór en na deze branch:
 
 ```
 SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
