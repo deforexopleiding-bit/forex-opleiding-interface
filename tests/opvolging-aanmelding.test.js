@@ -42,21 +42,31 @@ const doe = (over = {}) => bepaalTaakActie({ attendee: att(over.attendee), event
 // MOMENT A EN B — ÉÉN KAART
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('een verse aanmelding ver vooraf krijgt een slapende kaart', () => {
-  // Event op 20 september, dus wakker op de 16e. Tot dan staat hij niet in de
-  // lijst: de dagweergave toont alleen due <= vandaag.
+test('een verse aanmelding komt meteen in ronde A, niet in slaap', () => {
+  // DEZE TEST STOND OMGEKEERD, EN LEGDE DE FOUT VAST ALS EIS.
+  //
+  // Hij heette 'krijgt een slapende kaart' en eiste due 2026-09-16 voor een
+  // event op de 20e — event min vier. Dat is ronde B, en die hoort pas ná ronde
+  // A te komen. Zo kreeg élke aanmelding meteen de due van ronde B: op 7
+  // september stonden er kaarten van 5 september met due 19 en 22 september,
+  // veertien tot zeventien dagen niets, en niemand die zich aanmeldde werd
+  // binnen 24 uur gebeld.
+  //
+  // Een test die het bestaande gedrag beschrijft in plaats van het bedoelde is
+  // geen bewaking maar een bevestiging.
   const r = doe();
   assert.equal(r.actie, 'aanmaken');
   assert.equal(r.reden, 'aanmelding');
-  assert.equal(r.due, '2026-09-16');
+  assert.equal(r.due, dagPlus(VANDAAG, 1), 'de dag na de aanmelding');
   assert.equal(r.event_dag, '2026-09-20');
 });
 
-test('meldt iemand zich binnen vier dagen aan, dan vallen A en B samen', () => {
-  // Event overmorgen: wakker-dag ligt in het verleden, dus vandaag.
+test('meldt iemand zich vlak voor het event aan, dan is er maar één ronde', () => {
+  // Ronde A is dan het enige moment dat er nog is. De due hangt aan de
+  // aanmelding, niet aan het event — ook hier.
   const r = doe({ event: { starts_at: '2026-09-07T17:00:00Z' } });
   assert.equal(r.actie, 'aanmaken');
-  assert.equal(r.due, VANDAAG, 'één kaart, meteen in de lijst');
+  assert.equal(r.due, dagPlus(VANDAAG, 1), 'één kaart, en die staat op ronde A');
 });
 
 test('de due ligt nooit in het verleden', () => {
@@ -152,7 +162,10 @@ test('een event laat op de avond blijft op de juiste dag staan', () => {
   assert.equal(dagInZone(Date.parse('2026-09-19T22:30:00Z')), '2026-09-20');
   const r = doe({ event: { starts_at: '2026-09-19T22:30:00Z' } });
   assert.equal(r.event_dag, '2026-09-20');
-  assert.equal(r.due, '2026-09-16');
+  // De due bij het AANMAKEN is ronde A; de wakker-dag hoort bij ronde B en
+  // wordt hieronder los gecontroleerd.
+  assert.equal(r.due, dagPlus(VANDAAG, 1));
+  assert.equal(dueVoorAanmelding({ eventDag: '2026-09-20', vandaag: VANDAAG }), '2026-09-16');
 });
 
 test('de wakker-dag klopt over een tijdzonesprong heen', () => {

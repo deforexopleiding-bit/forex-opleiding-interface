@@ -80,12 +80,49 @@ export function dagenTussen(vanaf, tot) {
  * een due van gisteren zou meteen als 'bleef liggen' binnenkomen terwijl er
  * niets bleef liggen.
  */
-export function dueVoorAanmelding({ eventDag, vandaag }) {
+export function dueVoorRondeB({ eventDag, vandaag }) {
   if (!eventDag || !vandaag) return vandaag || null;
   const wakker = dagPlus(eventDag, -WAKKER_DAGEN_VOOR_EVENT);
   if (!wakker) return vandaag;
   return wakker <= vandaag ? vandaag : wakker;
 }
+
+/**
+ * RONDE A — bellen binnen 24 uur na de aanmelding.
+ *
+ * DIT ONTBRAK, EN DAT IS DE HELE REDEN DAT DEZE FUNCTIE BESTAAT.
+ *
+ * Elke aanmeldkaart kreeg meteen de due van ronde B (event min vier), ook als
+ * de aanmelding weken eerder binnenkwam. De kaart werd dus geboren in
+ * slaaptoestand: op 7 september stonden er kaarten van 5 september met due 19
+ * en 22 september — veertien tot zeventien dagen niets. Bij events die dichtbij
+ * lagen zag het er goed uit, maar dat was toeval: dan ligt event min vier
+ * vanzelf al op vandaag of morgen.
+ *
+ * De due hangt aan het moment van AANMELDEN, niet aan het moment waarop de cron
+ * toevallig draait. Anders schuift de kaart elke ronde een dag mee en komt hij
+ * nooit boven. Ontbreekt registered_at, dan valt hij terug op vandaag plus een.
+ *
+ * Ronde B komt pas NA ronde A: de kaart schuift naar event min vier op het
+ * moment dat Dave hem afhandelt zonder hem te sluiten — dat gebeurt in
+ * api/opvolging-aanmelding-actie.js bij 'bevestigd'. Niet hier, en niet bij het
+ * aanmaken.
+ */
+export function dueVoorRondeA({ vandaag, registratie = null }) {
+  if (!vandaag) return null;
+  const dagVanAanmelding = registratie ? dagInZone(Date.parse(registratie)) : null;
+  const basis = dagVanAanmelding || vandaag;
+  return dagPlus(basis, 1) || vandaag;
+}
+
+/**
+ * Oude naam, ongewijzigd gedrag.
+ *
+ * Blijft bestaan omdat bestaande tests en aanroepers hem bij naam noemen. Wat
+ * hij berekent is ronde B; de naam suggereerde dat het DE due van een
+ * aanmelding was, en precies die aanname zat achter de ontbrekende ronde A.
+ */
+export const dueVoorAanmelding = dueVoorRondeB;
 
 /**
  * Wat moet er met deze deelnemer gebeuren?
@@ -126,12 +163,16 @@ export function bepaalTaakActie({ attendee, event, taak = null, nu = Date.now() 
   // neemt 'Event afronden' het over (Punt B in events-complete-core).
   if (eventDag < vandaag) return { actie: 'niets' };
 
-  const due = dueVoorAanmelding({ eventDag, vandaag });
+  // TWEE VERSCHILLENDE VRAGEN, TWEE VERSCHILLENDE ANTWOORDEN.
+  //   aanmaken     → ronde A: bellen binnen 24 uur na de aanmelding.
+  //   wakker_maken → ronde B: vier dagen voor het event.
+  // Eén gedeelde `due` voor allebei is precies hoe ronde A verdween.
+  const dueB = dueVoorRondeB({ eventDag, vandaag });
 
   if (!taak) {
     return {
       actie      : 'aanmaken',
-      due,
+      due        : dueVoorRondeA({ vandaag, registratie: attendee.registered_at }),
       reden      : 'aanmelding',
       event_dag  : eventDag,
       badge_label: badgeVoorEvent(event),
@@ -145,8 +186,8 @@ export function bepaalTaakActie({ attendee, event, taak = null, nu = Date.now() 
   if (taak.status !== 'open') return { actie: 'niets' };
 
   // Moment B: het event komt eraan en de kaart staat nog verder weg.
-  if (String(taak.due || '') > due) {
-    return { actie: 'wakker_maken', taak_id: taak.id, due };
+  if (String(taak.due || '') > dueB) {
+    return { actie: 'wakker_maken', taak_id: taak.id, due: dueB };
   }
   return { actie: 'niets' };
 }
