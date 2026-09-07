@@ -9,6 +9,7 @@ import {
   bouwTijdlijn, staafHoogte, spreid, minutenInZone,
   REFERENTIE_SEC, BREEDTE, MARGE, KLEUR,
 } from '../api/_lib/opvolging-tijdlijn.js';
+import { bouwWerkritme } from '../api/_lib/opvolging-werkritme.js';
 
 const call = (uurUtc, min, res, duur) => ({
   soort: 'call', richting: 'uit', duur_sec: duur, resultaat: res,
@@ -163,4 +164,106 @@ test('de tijdlijn is opmaak, geen script', () => {
 test('het uur komt uit Amsterdamse tijd, niet uit de ISO-tekst', () => {
   assert.equal(minutenInZone('2026-09-07T08:11:00Z'), 10 * 60 + 11);
   assert.equal(minutenInZone('2026-12-07T08:11:00Z'), 9 * 60 + 11, 'wintertijd');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8 SEPTEMBER — DE WHATSAPP-LAAG KREEG DE SPREIDING NIET
+// ═══════════════════════════════════════════════════════════════════════════
+// Gemeten uit de gerenderde SVG op productie. Uitgaand stond drie keer op
+// exact x=688.3 en twee keer op 674.7; inkomend vier keer op 671.9 en daarna
+// nog drie keer dubbel. Alle negentien rechthoeken zaten in de SVG, ze lagen
+// alleen op elkaar: van 19 handelingen waren er ongeveer zeven te zien.
+//
+// En uitgerekend daar doet het pijn: die negen inkomende zijn het
+// antwoordenspervuur van Joelle, en dat is het BEWIJS dat één WhatsApp drie
+// bevestigingen opleverde. Opgestapeld leest het als één tikje.
+
+/** Negen antwoorden binnen een paar minuten, zoals de echte dag. */
+function negenAntwoorden() {
+  return [0, 0, 0, 0, 1, 1, 1, 2, 3].map((m, i) => ({
+    soort: 'whatsapp', richting: 'in',
+    tijdstip: `2026-09-07T17:0${m}:0${i}Z`,
+  }));
+}
+
+const xenVan = (svg, kleur) => [...svg.matchAll(
+  new RegExp('<rect x="([\\d.]+)"[^>]*stroke="' + kleur + '"', 'g'))].map((m) => Number(m[1]));
+
+test('negen antwoorden binnen drie minuten leveren negen zichtbare blokjes op', () => {
+  const t = bouwTijdlijn({ pogingen: negenAntwoorden(), afspraken: [], dag: '2026-09-07' });
+  const xs = xenVan(t.svg, '#C2700A');
+  assert.equal(xs.length, 9, 'alle negen horen getekend te worden');
+  assert.equal(new Set(xs).size, 9, 'en op negen verschillende plekken: ' + xs.join(' '));
+});
+
+test('de whatsapp-blokjes houden minstens de minimale tussenruimte', () => {
+  const t = bouwTijdlijn({ pogingen: negenAntwoorden(), afspraken: [], dag: '2026-09-07' });
+  const xs = xenVan(t.svg, '#C2700A').sort((a, b) => a - b);
+  for (let i = 1; i < xs.length; i++) {
+    assert.ok(xs[i] - xs[i - 1] >= 7 - 1e-6, `afstand ${(xs[i] - xs[i - 1]).toFixed(1)} is te klein`);
+  }
+});
+
+test('uitgaand en inkomend worden APART gespreid en verdringen elkaar niet', () => {
+  // Twee lanen: een uitgaand bericht op hetzelfde moment als een antwoord mag
+  // dat antwoord niet wegduwen, want ze staan boven en onder de lijn.
+  const zelfdeMoment = [
+    { soort: 'whatsapp', richting: 'uit', tijdstip: '2026-09-07T17:00:00Z' },
+    { soort: 'whatsapp', richting: 'in',  tijdstip: '2026-09-07T17:00:00Z' },
+  ];
+  const t = bouwTijdlijn({ pogingen: zelfdeMoment, afspraken: [], dag: '2026-09-07' });
+  const uit = xenVan(t.svg, '#1B5FBF');
+  const inn = xenVan(t.svg, '#C2700A');
+  assert.equal(uit.length, 1);
+  assert.equal(inn.length, 1);
+  assert.equal(uit[0], inn[0], 'op hetzelfde tijdstip horen ze op dezelfde x te staan');
+});
+
+// ── De zoombandjes dragen wie en hoe laat ─────────────────────────────────
+
+test('een zoombandje draagt de naam en het tijdstip', () => {
+  const t = bouwTijdlijn({ pogingen: [], dag: '2026-09-07', afspraken: [
+    { scheduled_at: '2026-09-07T12:00:00Z', duration_minutes: 30, status: 'scheduled', lead_name: 'Yasmine Aouada' },
+  ] });
+  assert.match(t.svg, /Yasmine Aouada/);
+  assert.match(t.svg, />14:00/);
+});
+
+test('bij een geannuleerde zoomcall staat het woord geannuleerd in beeld', () => {
+  // De stippellijn alleen is te subtiel; je moet het kunnen lezen.
+  const t = bouwTijdlijn({ pogingen: [], dag: '2026-09-07', afspraken: [
+    { scheduled_at: '2026-09-07T12:00:00Z', duration_minutes: 30, status: 'cancelled', lead_name: 'X' },
+  ] });
+  assert.match(t.svg, /geannuleerd/);
+});
+
+// ── Het gat staat in het beeld, niet alleen in de tekst ───────────────────
+
+test('het langste gat wordt in de grafiek zelf gemarkeerd', () => {
+  // 5 uur 28 stilte stond wel als bevinding onder de grafiek maar was in het
+  // beeld niet te zien; dan moet je de tekst lezen om te weten waar het zit.
+  const pogingen = [
+    { soort: 'call', richting: 'uit', resultaat: 'gesproken', duur_sec: 30, tijdstip: '2026-09-07T08:11:00Z' },
+    { soort: 'call', richting: 'uit', resultaat: 'gesproken', duur_sec: 30, tijdstip: '2026-09-07T14:55:00Z' },
+  ];
+  // Het gat komt van bouwWerkritme — één berekening, doorgegeven. Zou de
+  // tijdlijn hem zelf uitrekenen, dan kan het kader een andere stilte tonen
+  // dan de zin eronder.
+  const r = bouwWerkritme({ pogingen, dag: '2026-09-07' });
+  const t = bouwTijdlijn({ pogingen, afspraken: [], dag: '2026-09-07', gat: r.langste_gat });
+  assert.ok(t.gat, 'het gat hoort in beeld te staan');
+  assert.match(t.svg, /class="gat"/, 'en als kader in beeld te staan');
+  assert.match(t.svg, /10:11/);
+  assert.match(t.svg, /16:55/);
+});
+
+test('een dag zonder noemenswaardig gat krijgt geen kader', () => {
+  const elkUur = [];
+  for (let u = 7; u < 19; u++) {
+    elkUur.push({ soort: 'call', richting: 'uit', resultaat: 'gesproken', duur_sec: 20,
+      tijdstip: `2026-09-07T${String(u).padStart(2, '0')}:15:00Z` });
+  }
+  const r = bouwWerkritme({ pogingen: elkUur, dag: '2026-09-07' });
+  const t = bouwTijdlijn({ pogingen: elkUur, afspraken: [], dag: '2026-09-07', gat: r.langste_gat });
+  assert.doesNotMatch(t.svg, /class="gat"/);
 });

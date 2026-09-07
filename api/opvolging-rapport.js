@@ -384,6 +384,13 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     });
   }
 
+  // ── Werkritme ────────────────────────────────────────────────────────────
+  // Per dag, want een balk per uur over een hele week zou de klontering juist
+  // uitsmeren — en dat is precies wat dit blok moet laten zien.
+  const werkritme = dagen.map((d) => bouwWerkritme({
+    pogingen: pogingen.filter((p) => dagVan(p.tijdstip) === d), dag: d,
+  }));
+
   // ── De tijdlijn per dag ──────────────────────────────────────────────────
   // Statische SVG uit hetzelfde endpoint, zodat scherm en print exact dezelfde
   // grafiek krijgen. Zou de browser hem na het laden tekenen, dan is de
@@ -392,14 +399,12 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     pogingen : pogingen.filter((p) => dagVan(p.tijdstip) === d),
     afspraken: afspraken.filter((a) => dagVan(a.scheduled_at) === d),
     dag      : d,
+    // Het gat komt van bouwWerkritme, niet uit een tweede berekening: anders
+    // toont het kader een andere stilte dan de zin eronder.
+    gat          : (werkritme.find((r) => r.dag === d) || {}).langste_gat || null,
+    gatDrempelMin: GAT_DREMPEL_MIN,
   }));
 
-  // ── Werkritme ────────────────────────────────────────────────────────────
-  // Per dag, want een balk per uur over een hele week zou de klontering juist
-  // uitsmeren — en dat is precies wat dit blok moet laten zien.
-  const werkritme = dagen.map((d) => bouwWerkritme({
-    pogingen: pogingen.filter((p) => dagVan(p.tijdstip) === d), dag: d,
-  }));
 
   // ── Afgehandeld ──────────────────────────────────────────────────────────
   // Dezelfde berekening als het scherm Vandaag gedaan. Één helper, geen tweede

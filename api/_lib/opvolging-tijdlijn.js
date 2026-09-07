@@ -58,6 +58,8 @@ const Y_AS        = 272;  const Y_UUR = 286;
 /** Vaste referentie voor de staafhoogte. Zie punt 1 hierboven. */
 export const REFERENTIE_SEC = 120;
 const MIN_AFSTAND = 7;
+/** De blokjes zijn 6 breed; 7,5 houdt er een haarlijn tussen. */
+export const WA_MIN_AFSTAND = 7.5;
 
 // ── Kleuren ───────────────────────────────────────────────────────────────
 // Op één plek en met een naam, niet als losse hexcodes door de tekencode heen.
@@ -114,7 +116,16 @@ export function spreid(xs, minAfstand = MIN_AFSTAND, rechterrand = BREEDTE - MAR
   return uit;
 }
 
-export function bouwTijdlijn({ pogingen, afspraken, dag }) {
+/**
+ * @param {object} p
+ * @param {object} [p.gat]  het langste gat, ZOALS bouwWerkritme het al berekende
+ *   ({van:'11:27', tot:'16:55', minuten}). Bewust doorgegeven en niet hier
+ *   opnieuw uitgerekend: twee berekeningen van dezelfde stilte zouden vroeg of
+ *   laat twee verschillende tijdstippen tonen, en dan spreekt het beeld de zin
+ *   eronder tegen.
+ * @param {number} [p.gatDrempelMin]  onder deze grens tekenen we geen kader.
+ */
+export function bouwTijdlijn({ pogingen, afspraken, dag, gat = null, gatDrempelMin = 120 }) {
   const bel = [];
   const wa  = [];
   for (const p of pogingen || []) {
@@ -181,6 +192,15 @@ export function bouwTijdlijn({ pogingen, afspraken, dag }) {
       const my = Y_ZOOM + H_ZOOM / 2;
       d.push(`<line x1="${x1.toFixed(1)}" y1="${my}" x2="${(x1 + b).toFixed(1)}" y2="${my}" stroke="${KLEUR.zoom}" stroke-width="1"/>`);
     }
+    // WIE EN HOE LAAT, LEESBAAR. Vier paarse pillen zonder label zeggen niets,
+    // en dat er twee geannuleerd zijn was alleen aan een stippellijn te zien.
+    // Gecentreerd boven het bandje en binnen de as geklemd, zodat een afspraak
+    // aan de rand niet half buiten beeld valt.
+    const label = (z.naam ? z.naam + ' · ' : '') + klok(z.min) + (z.vervallen ? ' · geannuleerd' : '');
+    const breedte = label.length * 4.6;
+    const mx = Math.min(BREEDTE - MARGE - breedte / 2, Math.max(MARGE + breedte / 2, x1 + b / 2));
+    d.push(`<text x="${mx.toFixed(1)}" y="${Y_ZOOM - 4}" font-size="9" text-anchor="middle"` +
+      ` fill="${z.vervallen ? KLEUR.tekst_zacht : KLEUR.tekst}">${esc(label)}</text>`);
   }
 
   // Hulplijnen op 30 en 60 seconden — altijd, ook op een dag zonder lange
@@ -219,12 +239,26 @@ export function bouwTijdlijn({ pogingen, afspraken, dag }) {
   });
   d.push(`<line x1="${MARGE}" y1="${Y_BEL}" x2="${BREEDTE - MARGE}" y2="${Y_BEL}" stroke="${KLEUR.tekst_zacht}" stroke-width="1"/>`);
 
-  // WhatsApp.
-  for (const w of wa) {
-    const wx = x(w.min);
-    d.push(`<rect x="${(wx - WA_B / 2).toFixed(1)}" y="${w.uit ? Y_WA - WA_H - 1 : Y_WA + 1}" width="${WA_B}" height="${WA_H}" rx="1.5"` +
-      ` fill="${w.uit ? KLEUR.wa_uit_zacht : KLEUR.wa_in_zacht}" stroke="${w.uit ? KLEUR.wa_uit : KLEUR.wa_in}" stroke-width="1">` +
-      `<title>${klok(w.min)} — ${w.uit ? 'uitgaand' : 'antwoord van de lead'}</title></rect>`);
+  // WhatsApp — MET SPREIDING, PER LAAG APART.
+  //
+  // Dit ontbrak, en het was precies de fout die dit ontwerp maakt: de staven
+  // werden wél gespreid, de blokjes niet. Gemeten op productie stonden drie
+  // uitgaande berichten op exact dezelfde x en vier antwoorden ook; van
+  // negentien handelingen waren er zo'n zeven te zien. Alle rechthoeken zaten
+  // in de SVG — ze lagen op elkaar, en dat is werk dat stil uit beeld valt.
+  //
+  // Uitgaand en inkomend gaan APART door spreid(): ze staan boven en onder de
+  // lijn, dus een uitgaand bericht hoeft een antwoord op hetzelfde moment niet
+  // opzij te duwen.
+  for (const laag of [true, false]) {
+    const rij = wa.filter((w) => w.uit === laag).sort((a, b) => a.min - b.min);
+    const xs = spreid(rij.map((w) => x(w.min)), WA_MIN_AFSTAND);
+    rij.forEach((w, i) => {
+      const wx = xs[i];
+      d.push(`<rect x="${(wx - WA_B / 2).toFixed(1)}" y="${w.uit ? Y_WA - WA_H - 1 : Y_WA + 1}" width="${WA_B}" height="${WA_H}" rx="1.5"` +
+        ` fill="${w.uit ? KLEUR.wa_uit_zacht : KLEUR.wa_in_zacht}" stroke="${w.uit ? KLEUR.wa_uit : KLEUR.wa_in}" stroke-width="1">` +
+        `<title>${klok(w.min)} — ${w.uit ? 'uitgaand' : 'antwoord van de lead'}</title></rect>`);
+    });
   }
   d.push(`<line x1="${MARGE}" y1="${Y_WA}" x2="${BREEDTE - MARGE}" y2="${Y_WA}" stroke="${KLEUR.raster}" stroke-width="1"/>`);
 
@@ -243,11 +277,29 @@ export function bouwTijdlijn({ pogingen, afspraken, dag }) {
   }
   d.push(`<line x1="${MARGE}" y1="${Y_AS}" x2="${BREEDTE - MARGE}" y2="${Y_AS}" stroke="${KLEUR.tekst}" stroke-width="1"/>`);
 
+  // HET LANGSTE GAT, IN HET BEELD ZELF. Het stond alleen als zin onder de
+  // grafiek; dan moet je de tekst lezen om te weten waar de stilte zit.
+  const naarMin = (t) => {
+    const m = String(t || '').match(/^(\d{1,2}):(\d{2})$/);
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const gatVan = gat ? naarMin(gat.van) : null;
+  const gatTot = gat ? naarMin(gat.tot) : null;
+  const gatZichtbaar = gat && gatVan !== null && gatTot !== null
+    && Number(gat.minuten) >= gatDrempelMin;
+  if (gatZichtbaar) {
+    const gx1 = x(gatVan); const gx2 = x(gatTot);
+    d.unshift(`<rect class="gat" x="${gx1.toFixed(1)}" y="14" width="${(gx2 - gx1).toFixed(1)}" height="${Y_AS - 14}"` +
+      ` fill="rgba(17,23,33,0.035)" stroke="${KLEUR.raster}" stroke-width="1" stroke-dasharray="4 3"/>`);
+    d.push(`<text x="${((gx1 + gx2) / 2).toFixed(1)}" y="${Y_BEL - 92}" font-size="9" text-anchor="middle" fill="${KLEUR.tekst_zacht}">` +
+      `${esc(gat.van)}–${esc(gat.tot)} stil</text>`);
+  }
+
   const svg = `<svg viewBox="0 0 ${BREEDTE} ${HOOGTE}" width="100%" height="auto" role="img" ` +
     `aria-label="Tijdlijn van ${esc(dag)}" xmlns="http://www.w3.org/2000/svg">${d.join('')}</svg>`;
 
   return {
-    dag, svg, verruimd,
+    dag, svg, verruimd, gat: gatZichtbaar ? gat : null,
     venster: { van: klok(vanMin), tot: klok(totMin) },
     aantallen: { bel: bel.length, whatsapp: wa.length, zoomcalls: zoom.length },
     drukste_kwartier: drukste,
