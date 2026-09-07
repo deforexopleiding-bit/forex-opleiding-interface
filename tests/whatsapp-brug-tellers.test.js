@@ -286,8 +286,20 @@ test('zonder jid blijft de vorm-teller leeg', () => {
 test('de oploswegen zijn een vaste lijst', () => {
   // 'lidkaart' is erbij gekomen: de weg via de leadlijst, die als enige een LID
   // écht naar een telefoonnummer vertaalt.
+  //
+  // 7 september, twee erbij, en allebei om dezelfde reden:
+  //   lidkaart_basis — de kaart raakte pas na het afsnijden van het
+  //                    apparaat-achtervoegsel. Apart van 'lidkaart', want dat
+  //                    getal IS de meting die het vermoeden staaft of onderuit
+  //                    haalt.
+  //   onbruikbaar    — er kwam een antwoord, maar het was geen telefoonnummer.
+  //                    Dat stond eerder als opgelost.contact geboekt: succes
+  //                    dus, terwijl er niets vertaald was.
+  //
+  // Deze test hoort rood te worden bij elke uitbreiding — dat is zijn functie.
   assert.deepEqual([...OPLOS_WEGEN].sort(),
-    ['contact', 'contact_zonder_nummer', 'geen_jid', 'jid', 'lidkaart', 'mislukt']);
+    ['contact', 'contact_zonder_nummer', 'geen_jid', 'jid', 'lidkaart',
+     'lidkaart_basis', 'mislukt', 'onbruikbaar']);
 });
 
 test('elke weg wordt apart geteld', () => {
@@ -338,15 +350,29 @@ test('het filter staat nog altijd vóór elk gebruik van tekst', () => {
     'de tekst hoort pas aangeraakt te worden nadat het filter door is');
 });
 
-test('een mislukte oplossing valt terug op de jid, zoals het was', () => {
-  // Dan is het gedrag precies dat van vóór deze wijziging: normaliseerNummer op
-  // msg.to. Een mislukking maakt het dus nooit slechter dan het was.
+test('een mislukte oplossing geeft geen LID door aan het filter', () => {
+  // DEZE TEST STOND OMGEKEERD, EN DAT WAS DE TWEEDE DEUR NAAR DEZELFDE FOUT.
+  //
+  // Hij eiste `return normaliseerNummer(jid)` met als redenering: dan is het
+  // gedrag precies dat van vóór de wijziging, dus een mislukking maakt het
+  // nooit slechter. Die redenering klopte niet. Bij een LID-jid levert
+  // normaliseerNummer de LID-cijfers op, en die gingen als 'telefoonnummer' de
+  // leadlijst in. Daar werden ze terecht geweigerd met 'niet_op_leadlijst' — en
+  // zo viel op 7 september al het WhatsApp-verkeer weg met een reden die klopte
+  // terwijl de oorzaak ergens anders zat.
+  //
+  // 'Precies zoals het was' is geen kwaliteit als het was fout. Het nieuwe
+  // contract: bij een mislukking geven we de jid alleen terug als die een
+  // telefoonnummer KAN zijn; anders null, en dat is het eerlijke antwoord — we
+  // weten niet wie dit is.
   const bron = readFileSync(WA, 'utf8');
   const i = bron.indexOf('async function bepaalNummer');
-  // Ruimer venster: er staat nu een lidkaart-tak vóór de terugval.
-  const blok = bron.slice(i, i + 2600);
+  const blok = bron.slice(i, i + 3600);
   assert.match(blok, /catch \(e\)[\s\S]*oplossing\('mislukt'\)/);
-  assert.match(blok, /return normaliseerNummer\(jid\);/);
+  assert.match(blok, /beoordeelKandidaat\(kaal, jid\)/, 'de terugval hoort beoordeeld te worden');
+  assert.match(blok, /return null;/, 'een onbruikbare jid hoort null op te leveren');
+  assert.doesNotMatch(blok, /return normaliseerNummer\(jid\);/,
+    'de kale terugval op de jid hoort weg te zijn — dat was de tweede deur');
 });
 
 test('het oplossen logt geen jid en geen tekst', () => {
