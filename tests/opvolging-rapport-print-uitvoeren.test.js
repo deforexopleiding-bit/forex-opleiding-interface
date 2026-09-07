@@ -210,3 +210,28 @@ test('alles wat bouw() gebruikt staat boven de plek waar bouw() wordt aangeroepe
       'const ' + naam + ' staat ná de aanroep van bouw() — dat is de temporal dead zone');
   }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WELKE VERSIE KIJK JE AAN
+// ═══════════════════════════════════════════════════════════════════════════
+// Op 7 september stond de crashreparatie op main terwijl de server nog de oude
+// pagina uitleverde. De vraag "kijk ik naar de versie die ik gemerged heb?" was
+// van buitenaf niet te beantwoorden: een .js krijgt een ?v=, een HTML-pagina
+// niet. Er ging twee uur op aan het zoeken naar een fout die al gerepareerd was.
+
+test('het merkteken staat in de kop, de voettekst én in een foutmelding', async () => {
+  const b = await draai({ antwoord: ANTWOORD });
+  const treffers = (b.el.innerHTML.match(/rp-\d+/g) || []).length;
+  assert.ok(treffers >= 2, 'het merkteken hoort in de kop én in de voettekst te staan');
+
+  // En juist bij een fout wil je weten welke versie je aankijkt.
+  const stuk = await draai({ antwoord: { drempels: {}, volume: {} } });
+  assert.match(stuk.el.innerHTML, /rp-\d+/, 'ook een foutmelding draagt het merkteken');
+});
+
+test('het merkteken staat op één plek in de bron', () => {
+  // Twee plekken lopen uiteen, en dan wijst het naar de verkeerde build.
+  const script = scriptUit(PAGINA);
+  const declaraties = script.match(/OPMAAK_VERSIE\s*=\s*'/g) || [];
+  assert.equal(declaraties.length, 1);
+});

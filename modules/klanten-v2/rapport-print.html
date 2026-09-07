@@ -135,6 +135,20 @@ tr{break-inside:avoid}
   // KOMT UIT DE DATA — het endpoint kent geen persoon en geen bedrijfsnaam, en
   // opvolging_taken.eigenaar_id wordt nergens gevuld. Ze staan hier dus als
   // constante, zichtbaar op één plek in plaats van verspreid door de opmaak.
+  // WELKE VERSIE VAN DEZE PAGINA KIJK JE AAN.
+  //
+  // Op 7 september stond de reparatie van een crash op main terwijl de server
+  // nog de oude pagina uitleverde. Twee uur zoeken ging op aan de vraag of de
+  // fix wel gemerged was — en die vraag was van buitenaf niet te beantwoorden,
+  // want een HTML-pagina draagt geen versienummer zoals de .js-bestanden dat
+  // doen via ?v=.
+  //
+  // Vandaar dit merkteken. Het staat rechtsboven in de kop en in de voettekst,
+  // dus in de PDF én op het scherm. Zie je hier een ander nummer dan wat er in
+  // de repo staat, dan kijk je naar een oude build en heeft verder zoeken geen
+  // zin. Ophogen bij elke inhoudelijke wijziging aan dit bestand.
+  const OPMAAK_VERSIE = 'rp-2';
+
   const RAPPORT_OVER = 'Dave Heylen';
   const FIRMA        = 'De Forex Opleiding NL B.V.';
 
@@ -142,7 +156,11 @@ tr{break-inside:avoid}
     .replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const blad = document.getElementById('blad');
   const toon = (html) => { blad.innerHTML = html; };
-  const melding = (t) => toon('<div class="melding">' + esc(t) + '</div>');
+  // Het merkteken hoort óók bij een foutmelding te staan: juist als er iets
+  // misgaat wil je weten welke versie je aankijkt.
+  const melding = (t) => toon('<div class="melding">' + esc(t) +
+    '<div style="margin-top:10px;font-size:10px;color:var(--muted)">Opmaak ' +
+    esc(OPMAAK_VERSIE) + '</div></div>');
 
   // ═══════════════════════════════════════════════════════════════════════
   // EERST ALLES DEFINIËREN, DAARNA PAS UITVOEREN.
@@ -211,7 +229,7 @@ tr{break-inside:avoid}
       '<h1>' + esc(titel) + ' — ' + esc(RAPPORT_OVER) + '</h1>' +
       '<div class="datum">' + esc(periodeTekst) + '</div></div>' +
       '<div class="meta">' + esc(FIRMA) + '<br>Opgemaakt ' + esc(opgemaakt) +
-      '<br>Module Opvolging</div></div><div class="koplijn"></div>';
+      '<br>Module Opvolging &middot; ' + esc(OPMAAK_VERSIE) + '</div></div><div class="koplijn"></div>';
 
     if (p.bevat_vandaag) {
       h += '<div class="loopt"><b>De dag loopt nog.</b> Wat hier staat is de stand van dit ' +
@@ -222,7 +240,7 @@ tr{break-inside:avoid}
          sectieVensters(d) + sectieZoomcalls(d) + sectieArchief(d);
 
     h += '<div class="voet"><span>' + esc(titel + ' — ' + RAPPORT_OVER) + '</span>' +
-      '<span>' + esc(periodeTekst) + '</span></div>';
+      '<span>' + esc(periodeTekst) + ' &middot; ' + esc(OPMAAK_VERSIE) + '</span></div>';
     return h;
   }
 
@@ -463,9 +481,10 @@ tr{break-inside:avoid}
     // De echte tekst erbij. Een generieke zin zou hier niets waard zijn: dit
     // scherm heeft geen tweede weg om te achterhalen wat er misging.
     const tekst = (e && e.message) ? e.message : String(e);
-    toon('<div class="melding"><b>Het rapport kon niet opgemaakt worden.</b><br>' +
-      esc(tekst) + '<br><br>Er is niets afgedrukt. Meld deze tekst, dan is de ' +
-      'oorzaak terug te vinden.</div>');
+    // Via melding(), niet met eigen HTML: die functie plakt het merkteken erbij,
+    // en juist bij een fout wil je weten naar welke versie je kijkt.
+    melding('Het rapport kon niet opgemaakt worden. ' + tekst +
+      ' — Er is niets afgedrukt. Meld deze tekst, dan is de oorzaak terug te vinden.');
     console.error('[rapport-print] opmaken faalde:', e);
   }
 
