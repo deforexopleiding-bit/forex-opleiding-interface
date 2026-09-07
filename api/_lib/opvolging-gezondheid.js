@@ -147,10 +147,16 @@ export function controleerDubbels({ rapport }) {
 //
 // De beoordeling is puur; het ophalen en uitvoeren gebeurt in de cron.
 
-export function beoordeelPrintweergave({ bereikbaar, fout, html, versie, verwachteVersie }) {
+export function beoordeelPrintweergave({ bereikbaar, fout, html, versie, verwachteVersie, configFout }) {
   if (!bereikbaar) {
-    return uit('printweergave', NIET_GEMETEN, { fout: fout || 'onbekend' },
-      'De printweergave was niet op te halen of niet uit te voeren. Onbekend is niet hetzelfde als goed.');
+    // configFout betekent: wij weten niet WAAR we moeten kijken. Al het andere
+    // betekent: we wisten het wel en er kwam geen bruikbare pagina terug — dat
+    // is een storing en hoort niet in de emmer voor ontbrekende instellingen.
+    return configFout
+      ? uit('printweergave', NIET_GEMETEN, { fout: fout || 'onbekend' },
+          'De printweergave was niet op te halen: ' + (fout || 'onbekend') + '. Onbekend is niet hetzelfde als goed.')
+      : uit('printweergave', FOUT, { fout: fout || 'onbekend' },
+          'De printweergave gaf geen bruikbare pagina terug: ' + (fout || 'onbekend') + '.');
   }
   const fouten = [];
   if (fout) fouten.push('uitzondering tijdens het tekenen: ' + fout);
@@ -173,10 +179,17 @@ export function beoordeelPrintweergave({ bereikbaar, fout, html, versie, verwach
 // doorgelaten. Verbonden zijn is niet genoeg — een brug die alles ziet en niets
 // doorlaat is net zo stuk als een brug die eruit ligt, alleen stiller.
 
-export function controleerBrug({ status, fout }) {
+export function controleerBrug({ status, fout, configFout }) {
   if (!status) {
-    return uit('brug', NIET_GEMETEN, { fout: fout || 'onbekend' },
-      'De brug-status was niet op te halen. Dan weet je niet of er WhatsApp binnenkomt.');
+    // Zie de kop van dit blok: alleen ONTBREKENDE CONFIGURATIE is 'niet
+    // gemeten'. Een 401, een 500 of een VPS die niet opneemt zijn storingen.
+    // Die twee door elkaar halen laat een echte storing verdwijnen in de bak
+    // voor 'nog niet ingesteld' — precies wat op 7 september gebeurde.
+    return configFout
+      ? uit('brug', NIET_GEMETEN, { fout: fout || 'onbekend' },
+          'De brug is niet geconfigureerd: ' + (fout || 'onbekend') + '. Dan weet je niet of er WhatsApp binnenkomt.')
+      : uit('brug', FOUT, { fout: fout || 'onbekend' },
+          'De brug antwoordde niet: ' + (fout || 'onbekend') + '. Er komt mogelijk geen WhatsApp binnen.');
   }
   const t = status.tellers || {};
   const gezien = Object.values(t.gezien || {}).reduce((n, v) => n + (Number(v) || 0), 0);

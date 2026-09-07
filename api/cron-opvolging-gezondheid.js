@@ -27,9 +27,10 @@
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { bouwRapport } from './opvolging-rapport.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
+import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
-  beoordeelPrintweergave, controleerBrug, bouwMail, FOUT, NIET_GEMETEN,
+  beoordeelPrintweergave, controleerBrug, bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
 
 const ZONE = 'Europe/Amsterdam';
@@ -109,12 +110,28 @@ export default async function handler(req, res) {
 
   const problemen = uitkomsten.filter((u) => u.staat === FOUT).length;
   const ongemeten = uitkomsten.filter((u) => u.staat === NIET_GEMETEN).length;
-  console.log(`[opvolging-gezondheid] ${vandaag} — ${problemen} fout, ${ongemeten} niet gemeten`);
+  // De logregel noemt de controles BIJ NAAM. '0 fout, 2 niet gemeten' dwong op
+  // 7 september tot naslaan welke twee dat waren; dat is precies de stilte die
+  // deze bewaking hoort weg te nemen.
+  console.log('[opvolging-gezondheid] ' + vandaag + ' — ' + samenvatting(uitkomsten));
 
   return res.status(200).json({ ok: true, dag: vandaag, problemen, ongemeten, uitkomsten, mail, subject });
 }
 
 const kort = (e) => String(e?.message || e).slice(0, 200);
+
+/** Eén regel die per staat de namen noemt, met de reden bij wat niet klopt. */
+export function samenvatting(uitkomsten) {
+  const groep = (staat, metReden) => uitkomsten
+    .filter((u) => u.staat === staat)
+    .map((u) => u.naam + (metReden ? ` (${String(u.uitleg || '').slice(0, 80)})` : ''))
+    .join(', ');
+  const delen = [];
+  const f = groep(FOUT, true);         if (f) delen.push('FOUT: ' + f);
+  const n = groep(NIET_GEMETEN, true); if (n) delen.push('niet gemeten: ' + n);
+  const o = groep(OK, false);          if (o) delen.push('ok: ' + o);
+  return delen.join(' | ') || 'geen enkele controle gedraaid';
+}
 
 /**
  * De printweergave ophalen ZOALS DE SERVER HEM UITLEVERT en zijn script draaien.
@@ -133,7 +150,10 @@ async function meetPrintweergave(vandaag) {
   const basis = process.env.PUBLIEKE_BASIS_URL || process.env.VERCEL_URL
     ? (process.env.PUBLIEKE_BASIS_URL || 'https://' + process.env.VERCEL_URL) : null;
   if (!basis) {
-    return beoordeelPrintweergave({ bereikbaar: false, fout: 'geen basis-URL (PUBLIEKE_BASIS_URL of VERCEL_URL)' });
+    return beoordeelPrintweergave({
+      bereikbaar: false, configFout: true,
+      fout: 'geen basis-URL (PUBLIEKE_BASIS_URL of VERCEL_URL)',
+    });
   }
   let html;
   try {
@@ -194,18 +214,31 @@ const LEEG_RAPPORT = (dag) => ({
             wa: { uit: 0, in: 0 }, spraak: { uit: 0, in: 0 }, rijen: [] },
 });
 
-/** De brug draait op een eigen VPS; alleen /status wordt gelezen. */
-async function meetBrug() {
-  const basis = process.env.WHATSAPP_BRUG_URL || '';
-  if (!basis) return controleerBrug({ status: null, fout: 'WHATSAPP_BRUG_URL ontbreekt' });
+/**
+ * De brug draait op een eigen VPS; alleen /status wordt gelezen.
+ *
+ * VIA DE BESTAANDE CLIENT, NIET VIA EEN EIGEN KOPIE. De eerste versie hiervan
+ * las WHATSAPP_BRUG_TOKEN uit (een naam die nergens anders in deze repo
+ * voorkomt) en stuurde 'Authorization: Bearer'. De brug leest
+ * WHATSAPP_BRUG_SECRET en de header 'X-Brug-Secret'. Gevolg: een 401, en die
+ * werd geboekt als 'niet gemeten'. Met brugFetch() is er nog maar één plek
+ * waar die namen staan.
+ *
+ * De fetcher is injecteerbaar zodat een test dit pad echt kan draaien.
+ */
+export async function meetBrug(haal = brugFetch) {
+  const cfg = brugConfig();
+  if (!cfg.ok) return controleerBrug({ status: null, fout: cfg.melding, configFout: true });
   try {
-    const resp = await fetch(basis.replace(/\/$/, '') + '/status', {
-      headers: process.env.WHATSAPP_BRUG_TOKEN
-        ? { Authorization: 'Bearer ' + process.env.WHATSAPP_BRUG_TOKEN } : {},
-    });
-    if (!resp.ok) return controleerBrug({ status: null, fout: 'HTTP ' + resp.status });
-    return controleerBrug({ status: await resp.json() });
+    return controleerBrug({ status: await haal('/status') });
   } catch (e) {
-    return controleerBrug({ status: null, fout: kort(e) });
+    // ONBEREIKBAAR en BRUG_FOUT zijn STORINGEN. Alleen GEEN_CONFIG is een
+    // ontbrekende instelling. Die twee door elkaar halen laat een echte
+    // storing verdwijnen in de bak voor 'nog niet ingesteld'.
+    return controleerBrug({
+      status: null,
+      fout: kort(e) + (e?.status ? ` (HTTP ${e.status})` : ''),
+      configFout: e?.code === 'GEEN_CONFIG',
+    });
   }
 }

@@ -163,8 +163,12 @@ test('een pagina die tekent is in orde', () => {
   assert.equal(r.staat, OK);
 });
 
-test('onbereikbaar is NIET GEMETEN, geen fout en zeker geen ok', () => {
-  const r = beoordeelPrintweergave({ bereikbaar: false, fout: 'HTTP 500' });
+// Deze test nam 'HTTP 500' als bewijs voor NIET_GEMETEN en cementeerde daarmee
+// de verwarring tussen een storing en een ontbrekende instelling. Hij toetst nu
+// waar hij over gaat: niet weten WAAR je moet kijken. De storing-kant staat
+// onderaan dit bestand.
+test('niet weten waar je moet kijken is NIET GEMETEN, geen fout en zeker geen ok', () => {
+  const r = beoordeelPrintweergave({ bereikbaar: false, fout: 'geen basis-URL', configFout: true });
   assert.equal(r.staat, NIET_GEMETEN);
 });
 
@@ -203,8 +207,10 @@ test('gezien én doorgelaten is in orde', () => {
   assert.equal(r.getallen.doorgelaten, 7);
 });
 
-test('geen status is NIET GEMETEN', () => {
-  assert.equal(controleerBrug({ status: null, fout: 'timeout' }).staat, NIET_GEMETEN);
+// Idem: 'timeout' is een storing. Deze test gaat over de niet-geconfigureerde brug.
+test('een niet-geconfigureerde brug is NIET GEMETEN', () => {
+  const r = controleerBrug({ status: null, fout: 'WHATSAPP_BRUG_URL ontbreekt', configFout: true });
+  assert.equal(r.staat, NIET_GEMETEN);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -237,4 +243,102 @@ test('niet-gemeten staat apart in de onderwerpregel', () => {
   ] });
   assert.match(m.subject, /1 niet gemeten/);
   assert.doesNotMatch(m.subject, /2\/2 in orde/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7 SEPTEMBER — DE BRUG-CONTROLE MAT DE VERKEERDE DINGEN
+// ═══════════════════════════════════════════════════════════════════════════
+// Controle 5 kwam terug als 'niet gemeten' terwijl WHATSAPP_BRUG_URL en
+// WHATSAPP_BRUG_SECRET allebei in Vercel stonden. Drie fouten tegelijk:
+//
+//   1. De cron las WHATSAPP_BRUG_TOKEN uit — die naam bestaat nergens anders in
+//      deze repo. Het geheim heet WHATSAPP_BRUG_SECRET.
+//   2. Hij stuurde 'Authorization: Bearer'. De brug leest 'X-Brug-Secret'.
+//   3. En het ergste: een 401 of een onbereikbare VPS werd geboekt als
+//      NIET_GEMETEN — de emmer voor ontbrekende configuratie. Een echte
+//      storing verdween daarmee in de bak voor 'nog niet ingesteld'.
+//
+// Fout 3 is dezelfde vorm als de tests die we deze week opruimden: de controle
+// beweerde iets anders te meten dan hij mat.
+
+test('brug: een 401 van de brug is een STORING, geen ontbrekende instelling', () => {
+  const r = controleerBrug({ status: null, fout: 'De brug antwoordde met 401.' });
+  assert.equal(r.staat, FOUT);
+});
+
+test('brug: een onbereikbare VPS is een storing, geen ontbrekende instelling', () => {
+  const r = controleerBrug({ status: null, fout: 'De WhatsApp-brug is niet bereikbaar.' });
+  assert.equal(r.staat, FOUT);
+});
+
+test('brug: ontbrekende configuratie blijft wél niet_gemeten', () => {
+  const r = controleerBrug({ status: null, fout: 'WHATSAPP_BRUG_SECRET ontbreekt', configFout: true });
+  assert.equal(r.staat, NIET_GEMETEN);
+});
+
+test('printweergave: een HTTP 500 is een storing, geen ontbrekende instelling', () => {
+  const r = beoordeelPrintweergave({ bereikbaar: false, fout: 'HTTP 500' });
+  assert.equal(r.staat, FOUT);
+});
+
+test('printweergave: geen basis-URL blijft wél niet_gemeten', () => {
+  const r = beoordeelPrintweergave({ bereikbaar: false, fout: 'geen basis-URL', configFout: true });
+  assert.equal(r.staat, NIET_GEMETEN);
+});
+
+// ── En het pad zelf, niet alleen de beoordeling ─────────────────────────────
+// De drie fouten hierboven zaten in meetBrug(), niet in controleerBrug(). Een
+// test die alleen de pure functie voedt had ze geen van drieën gezien — dat is
+// de 'hulpfunctie'-vorm uit docs/opvolging-module.md. Deze draait meetBrug echt.
+
+test('meetBrug: een 401 van de brug komt als FOUT terug, niet als niet_gemeten', async () => {
+  process.env.WHATSAPP_BRUG_URL = 'https://brug.test';
+  process.env.WHATSAPP_BRUG_SECRET = 'x'.repeat(32);
+  const { meetBrug } = await import('../api/cron-opvolging-gezondheid.js');
+  const r = await meetBrug(async () => {
+    const e = new Error('De brug antwoordde met 401.'); e.code = 'BRUG_FOUT'; e.status = 401; throw e;
+  });
+  assert.equal(r.staat, FOUT);
+  assert.match(String(r.getallen.fout), /401/);
+});
+
+test('meetBrug: zonder configuratie is het niet_gemeten, niet FOUT', async () => {
+  const url = process.env.WHATSAPP_BRUG_URL, sec = process.env.WHATSAPP_BRUG_SECRET;
+  delete process.env.WHATSAPP_BRUG_URL; delete process.env.WHATSAPP_BRUG_SECRET;
+  const { meetBrug } = await import('../api/cron-opvolging-gezondheid.js');
+  const r = await meetBrug(async () => { throw new Error('had niet aangeroepen mogen worden'); });
+  assert.equal(r.staat, NIET_GEMETEN);
+  process.env.WHATSAPP_BRUG_URL = url; process.env.WHATSAPP_BRUG_SECRET = sec;
+});
+
+test('meetBrug stuurt X-Brug-Secret uit WHATSAPP_BRUG_SECRET — de namen die de brug kent', async () => {
+  process.env.WHATSAPP_BRUG_URL = 'https://brug.test';
+  process.env.WHATSAPP_BRUG_SECRET = 'geheim'.padEnd(32, '0');
+  const echt = globalThis.fetch;
+  let gezien = null;
+  globalThis.fetch = async (url, opties) => {
+    gezien = { url: String(url), headers: opties?.headers || {} };
+    return { ok: true, status: 200, json: async () => ({
+      verbonden: true, tellers: { gezien: { message: 9 }, doorgelaten: { message: 9 } } }) };
+  };
+  try {
+    const { meetBrug } = await import('../api/cron-opvolging-gezondheid.js');
+    const r = await meetBrug();                       // géén stub: het echte pad
+    assert.equal(r.staat, OK);
+    assert.equal(gezien.url, 'https://brug.test/status');
+    assert.equal(gezien.headers['X-Brug-Secret'], process.env.WHATSAPP_BRUG_SECRET);
+    assert.equal(gezien.headers.Authorization, undefined);
+  } finally { globalThis.fetch = echt; }
+});
+
+test('de logregel noemt de controles bij naam, niet alleen hun aantal', async () => {
+  const { samenvatting } = await import('../api/cron-opvolging-gezondheid.js');
+  const regel = samenvatting([
+    { naam: 'instroom', staat: OK, uitleg: 'geen slapers' },
+    { naam: 'optelling', staat: OK, uitleg: 'klopt' },
+    { naam: 'brug', staat: NIET_GEMETEN, uitleg: 'De brug is niet geconfigureerd' },
+  ]);
+  assert.match(regel, /niet gemeten: brug/);
+  assert.match(regel, /ok: instroom, optelling/);
+  assert.doesNotMatch(regel, /^\d+ fout/);           // niet meer alleen tellen
 });
