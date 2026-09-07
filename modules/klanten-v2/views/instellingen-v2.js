@@ -5074,7 +5074,7 @@
      update via bestaand endpoint) + office-hours read-only (direct-supabase op
      app_settings.dunning_office_hours; er is geen set-endpoint, editor volgt in
      aparte brok met audit-log). Motor onaangeraakt. */
-  const _dsv = { loading: false, fetched: false, error: null, cooldown: null, office: null, busy: false };
+  const _dsv = { loading: false, fetched: false, error: null, cooldown: null, grace: null, office: null, busy: false, graceBusy: false };
   async function fetchDunningVenster() {
     if (_dsv.loading || _dsv.fetched) return;
     _dsv.loading = true; _dsv.error = null; if (render) render();
@@ -5082,6 +5082,13 @@
       const cRes = await tryFetch('dun-settings-get', '/api/dunning-settings-get');
       if (cRes?.__error || cRes?.error) throw new Error(cRes?.__error || cRes?.error);
       _dsv.cooldown = { days: cRes?.dunning_cooldown_days ?? 7, is_default: !!cRes?.is_default, updated_at: cRes?.updated_at || null };
+      // Gratieperiode: extra respijt NA de vervaldag. 0 = motor mag vanaf de
+      // dag na de vervaldag aanmanen; op/vóór de vervaldag nooit.
+      _dsv.grace = {
+        days: Number.isFinite(Number(cRes?.dunning_grace_days)) ? Number(cRes.dunning_grace_days) : 0,
+        is_default: !!cRes?.dunning_grace_days_is_default,
+        updated_at: cRes?.dunning_grace_days_updated_at || null,
+      };
       // Office-hours: direct-supabase (read-only). Fail-soft: bij RLS-error tonen we defaults.
       try {
         if (window.supabase?.from) {
@@ -5111,15 +5118,34 @@
       finally { _dsv.busy = false; if (render) render(); }
     });
   };
+  window.__setDsvGraceSave = () => {
+    const el = document.querySelector('[data-dsv-field="grace"]');
+    const n = Number(el?.value);
+    if (!Number.isFinite(n) || n < 0 || n > 90 || Math.trunc(n) !== n) { showToast('Gratieperiode moet integer 0..90 zijn', 'warn'); return; }
+    openConfirm(`Gratieperiode op ${n} dag${n===1?'':'en'} zetten? De motor manet dan pas ${n === 0 ? 'vanaf de dag ná de vervaldag' : `${n} dag${n===1?'':'en'} ná de vervaldag`}. Effect vanaf volgende cron-run.`, async () => {
+      _dsv.graceBusy = true; if (render) render();
+      try {
+        const j = await tryFetch('dun-settings-update-grace', '/api/dunning-settings-update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dunning_grace_days: n }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Gratieperiode bijgewerkt naar ' + n + ' dagen', 'ok');
+        _dsv.fetched = false; fetchDunningVenster();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _dsv.graceBusy = false; if (render) render(); }
+    });
+  };
   function bodyVenster() {
     if (!_dsv.fetched && !_dsv.loading) queueMicrotask(() => fetchDunningVenster());
     const c = _dsv.cooldown;
+    const g = _dsv.grace;
     const o = _dsv.office;
     const dayNames = ['zo','ma','di','wo','do','vr','za'];
     const activeDays = Array.isArray(o?.days) ? o.days.map(d => dayNames[d] || String(d)) : [];
     return `<div style="max-width:1000px">
       <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Cooldown schrijfbaar; verzendvenster + dagen alleen-lezen.</b> Cooldown bepaalt hoeveel dagen er tussen 2 aanmaningen voor dezelfde klant moet zitten. Het verzendvenster (uren/dagen/tijdzone) leeft in <code>app_settings.dunning_office_hours</code> zonder set-endpoint — schrijven vereist aparte brok met audit-log.
+        <b>Cooldown en gratieperiode schrijfbaar; verzendvenster + dagen alleen-lezen.</b> Cooldown bepaalt hoeveel dagen er tussen 2 aanmaningen voor dezelfde klant moet zitten. Gratieperiode bepaalt hoe lang de motor ná de vervaldag wacht (0 = vanaf de dag erna). Het verzendvenster (uren/dagen/tijdzone) leeft in <code>app_settings.dunning_office_hours</code> zonder set-endpoint — schrijven vereist aparte brok met audit-log.
       </div>
       ${_dsv.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_dsv.error)}</div>` : ''}
 
@@ -5136,6 +5162,21 @@
           </div>
         </div>
         ${c?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(c.updated_at)}</div>` : ''}
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
+          <div>
+            <div style="font-size:13px;font-weight:600">Gratieperiode na de vervaldag</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Nu: <b>${g?.days ?? 0} dag${(g?.days??0)===1?'':'en'}</b>${g?.is_default ? ' (default)' : ''}. Op en vóór de vervaldag gaat er sowieso <b>niets</b> uit; met ${g?.days ?? 0} extra dag${(g?.days??0)===1?'':'en'} manet de motor vanaf dag ${(g?.days ?? 0) + 1} ná de vervaldag.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" min="0" max="90" step="1" data-dsv-field="grace" value="${esc(String(g?.days ?? 0))}" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            <span style="font-size:12px;color:var(--text-3)">dagen</span>
+            <button class="btn btn-primary btn-sm" ${_dsv.graceBusy ? 'disabled' : ''} onclick="window.__setDsvGraceSave()">${_dsv.graceBusy ? 'Bezig…' : 'Opslaan'}</button>
+          </div>
+        </div>
+        ${g?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(g.updated_at)}</div>` : ''}
       </div>
 
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
