@@ -4141,6 +4141,15 @@
     return h + '</div>';
   }
 
+  window.__opvRapportPdf = () => {
+    const { van, tot } = periodeReeks(_ui.rapportPeriode, _ui.rapportEigen);
+    // Een nieuw tabblad, zodat het rapportscherm blijft staan waar het stond.
+    // De printweergave doet zelf requireAuth: dit rapport toont namen van
+    // leads en mag nooit zonder sessie iets tonen.
+    window.open('/modules/klanten-v2/rapport-print.html?van=' + encodeURIComponent(van) +
+      '&tot=' + encodeURIComponent(tot), '_blank', 'noopener');
+  };
+
   window.__opvRapportHerlaad = () => {
     _live.rapport.key = null; _live.rapport.data = null; _live.rapport.error = null;
     render();
@@ -4157,7 +4166,14 @@
         '<input type="date" id="opv-rap-tot" value="' + esc(tot) + '">' +
         '<button class="obtn' + (_ui.rapportPeriode === 'eigen' ? ' p' : '') +
           '" onclick="window.__opvRapportEigen()">Toon</button>' +
-      '</div></div>';
+      '</div>' +
+      // De printweergave is een APARTE pagina met eigen opmaak, geen @media
+      // print over dit scherm. Hij haalt hetzelfde endpoint op met dezelfde
+      // periode en roept zelf print() aan; de gebruiker kiest 'Bewaar als PDF'.
+      // Zelfde permissie — het endpoint erachter doet zijn eigen controle, dus
+      // hier is geen aparte regel nodig.
+      '<button class="obtn" onclick="window.__opvRapportPdf()">Rapport als PDF</button>' +
+      '</div>';
   }
 
   // ── 1 · Wat vraagt aandacht ──────────────────────────────────────────────
