@@ -98,21 +98,59 @@ export function controleerOptelling({ rapport }) {
       'Het rapport gaf geen volume-blok terug. Dat is een verminkt antwoord, geen ontbrekende meting.');
   }
   const b = rapport.volume.bel;
-  const som = (b.gesproken || 0) + (b.te_kort || 0) + (b.niet_opgenomen || 0) + (b.zonder_duur || 0);
+
+  // DE SOM IS MEEGEGAAN MET DE MEETREGEL. Hij was
+  // gesproken + te_kort + niet_opgenomen + zonder_duur, en dat klopt sinds
+  // 8 september niet meer op twee punten:
+  //
+  //   · `te_kort` bestaat niet meer — die emmer beweerde iets over de kwaliteit
+  //     van een gesprek op basis van duur_sec, en dat getal meet de tijd tussen
+  //     kiezen en ophangen.
+  //   · `zonder_duur` is geen aparte emmer meer maar een DEELVERZAMELING van
+  //     gesproken: er is gesproken, alleen de lengte is niet vastgelegd. Dat
+  //     gebeurt bij één op de drie gesprekken.
+  //
+  // Op de echte dag van 7 september gaf de oude som 21 + 0 + 5 + 5 = 31 bij 26
+  // uitgaande calls: FOUT gemeld terwijl de cijfers juist klopten, in een mail
+  // die om 07:00 binnenvalt vlak voordat er gebeld wordt. Een bewaker die
+  // afgaat als er niets aan de hand is, is binnen een week een bewaker waar
+  // niemand meer op reageert.
+  //
+  // De emmers die elkaar wél uitsluiten en samen `uit` zijn:
+  const som = (b.gesproken || 0) + (b.niet_opgenomen || 0)
+            + (b.via_ander || 0) + (b.onbekend_resultaat || 0);
   const bevindingen = Array.isArray(rapport.aandacht) ? rapport.aandacht.length : null;
 
   const fouten = [];
   if (som !== (b.uit || 0)) {
-    fouten.push(`de vier belemmers tellen op tot ${som}, maar er zijn ${b.uit} uitgaande calls`);
+    fouten.push(`de emmers tellen op tot ${som}, maar er zijn ${b.uit} uitgaande calls`);
   }
   if (bevindingen === null) fouten.push('de bevindingenlijst ontbreekt');
 
+  // ONBEKEND_RESULTAAT KRIJGT EEN EIGEN REGEL. Dat is juist de emmer die we
+  // hebben ingevoerd om te voorkomen dat een onbekende resultaatwaarde stil als
+  // contact meetelt — en de bewaking keek er volledig langs. Het is geen FOUT
+  // (de som klopt gewoon), maar het betekent wel dat er een waarde binnenkomt
+  // die onze classificatie niet kent, en dat hoort iemand te lezen.
+  const onbekend = b.onbekend_resultaat || 0;
+  const zonderDuur = b.zonder_duur || 0;
+  const staarten = [];
+  if (onbekend) {
+    staarten.push(`${onbekend} call${onbekend === 1 ? '' : 's'} met een ONBEKEND resultaat — ` +
+      'een waarde die de classificatie niet kent, en die dus nergens als contact meetelt');
+  }
+  if (zonderDuur) {
+    staarten.push(`${zonderDuur} van de ${b.gesproken} gesprekken zonder geregistreerde lengte`);
+  }
+
   return uit('optelling', fouten.length ? FOUT : OK, {
-    uit: b.uit, gesproken: b.gesproken, te_kort: b.te_kort,
-    niet_opgenomen: b.niet_opgenomen, zonder_duur: b.zonder_duur, som,
-    bevindingen,
-  }, fouten.length ? fouten.join('; ')
-    : `${som} van ${b.uit} calls in vier emmers, en ${bevindingen} bevinding(en) in de lijst.`);
+    uit: b.uit, gesproken: b.gesproken, niet_opgenomen: b.niet_opgenomen,
+    onbekend_resultaat: onbekend, via_ander: b.via_ander || 0,
+    zonder_duur: zonderDuur, som, bevindingen,
+  }, fouten.length
+    ? fouten.join('; ')
+    : [`${som} van ${b.uit} calls in de emmers, en ${bevindingen} bevinding(en) in de lijst.`,
+       ...staarten].join(' · '));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
