@@ -382,17 +382,17 @@
     const trajectOpts = Array.from(trajectSet).sort();
 
     const rowHtml = items.length
-      ? `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
+      ? `<div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12.5px">
           <thead>
             <tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
               <th style="padding:8px 10px">Naam</th>
               <th style="padding:8px 10px">Traject</th>
               <th style="padding:8px 10px">Warmte</th>
               <th style="padding:8px 10px">Call</th>
-              <th style="padding:8px 10px">Bron</th>
+              <th class="optional" style="padding:8px 10px">Bron</th>
               <th style="padding:8px 10px">Status</th>
-              <th style="padding:8px 10px">Aangemaakt</th>
-              <th style="padding:8px 10px">Toegang tot</th>
+              <th class="optional" style="padding:8px 10px">Aangemaakt</th>
+              <th class="optional" style="padding:8px 10px">Toegang tot</th>
               <th style="padding:8px 10px;text-align:right">Acties</th>
             </tr>
           </thead>
@@ -426,10 +426,10 @@
                 <td style="padding:8px 10px">${esc(l.traject || '—')}</td>
                 <td style="padding:8px 10px">${warmteBar(l.score)}</td>
                 <td style="padding:8px 10px">${callBadge}${heeftCall ? `<div style="color:var(--text-3);font-size:11px;margin-top:2px">${esc(fmtDatumAbsoluut(l.afspraak_op))}</div>` : ''}</td>
-                <td style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span></td>
+                <td class="optional" style="padding:8px 10px"><span style="font-size:11px;color:var(--text-3)">${esc(l.bron || l.soort || '—')}</span></td>
                 <td style="padding:8px 10px"><span style="font-size:11px">${esc(l.status || '—')}</span></td>
-                <td style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
-                <td style="padding:8px 10px">${fmtToegangTot(_live.access && _live.access.map ? _live.access.map[l.id] : null)}</td>
+                <td class="optional" style="padding:8px 10px;color:var(--text-3)">${esc(fmtDatum(l.aangemaakt))}</td>
+                <td class="optional" style="padding:8px 10px">${fmtToegangTot(_live.access && _live.access.map ? _live.access.map[l.id] : null)}</td>
                 <td style="padding:8px 10px;text-align:right;white-space:nowrap">${geefToegangBtn}${extendBtn}</td>
               </tr>`;
             }).join('')}
@@ -3170,7 +3170,7 @@
       bodyHtml = _lsOpstartAgendaHtml(items, st);
     } else {
       bodyHtml = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden">
-        <div style="overflow-x:auto">
+        <div class="tbl-wrap">
           <table style="width:100%;border-collapse:collapse;font-size:12.5px">
             <thead>
               <tr style="text-align:left;color:var(--text-3);border-bottom:1px solid var(--border)">
