@@ -17,6 +17,22 @@
 - Redirect-URLs toevoegen in Supabase dashboard (Authentication → URL Configuration): LMS productie-URL + (tijdelijk) preview-URLs.
 - Losse Supabase-sleutel uit het LMS-prototype verwijderen zodra de login via het endpoint werkt (uit code, `.env` én Vercel-env).
 
+### 🅿️ Geparkeerd — diep-link vanuit de afsluit-melding (7 september 2026)
+- De melding bij een automatische onboarding-afsluiting (`onboarding.auto_afgerond`)
+  wijst naar `/modules/onboarding-hub.html`, niet naar het dossier zelf. Bewust:
+  klanten-v2 kent geen `?onboarding=<id>`-parameter, dus zo'n link zou het dossier
+  níét openen en stil op een overzicht landen — dezelfde halve doorverwijzing die
+  we op 7 september bij het eerste-call-signaal hebben rechtgezet.
+- **Wat het zou kosten**: `window.__onbOpen(id)` (in
+  `modules/klanten-v2/views/onboarding-v2.js`) opent de modal al, en `?v2tab=`
+  bestaat al in `modules/klanten-v2/klanten-v2.js`. Het is dus een klein stuk
+  frontendwerk: één parameter uitlezen na de eerste render, plus de `linkUrl` in
+  `api/cron/onboarding-eerste-sessie-afronden.js`.
+- **Waarom nu niet** (Maxim, 7 september 2026): eerst zien of die melding in de
+  praktijk gebruikt wordt vóór we er frontendwerk aan hangen. De titel van de
+  sluitende sessie staat al in de tekst van de melding zelf, dus het doel — in
+  één oogopslag zien dat er "Testsessie" staat — is nu al gehaald.
+
 ### ⚠️ BEVEILIGINGSAFSPRAKEN — niet vergeten (bewuste volgorde)
 - **PREVIEW-WILDCARD** in de redirect-URLs (`https://dfo-lms-prototype-*.vercel.app`) is alleen voor de BOUWFASE. Vóór echte livegang vervangen door alleen de vaste productie-URL. Een permanente wildcard-redirect is een risico.
 - **RLS-STATUS**: RLS staat nog niet volledig op orde (17 tabellen met policies, maar bewuste uitzonderingen o.a. `customers` / PII; CLAUDE.md waarschuwt: RLS-uitbreiding gefaseerd, eerst inventariseren).
