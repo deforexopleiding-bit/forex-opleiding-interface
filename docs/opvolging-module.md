@@ -254,6 +254,57 @@ neemt; de uitgang wordt een handeling van Dave, geen stille verschuiving.
 
 Bouw hier dus geen parkeer-logica in. Die zou er later weer uit moeten.
 
+## Uitgesteld — de bedenktijd-kaart
+
+**Wat het zou zijn.** Een `later_opnieuw`-uitkomst ("bedenktijd, opvolgen over
+3 maanden") maakt automatisch een kaart in de werklijst met `due` op de
+afgesproken datum, zodat een belofte aan de klant niet in een vrij tekstveld
+blijft liggen.
+
+**Waarom het nu niet gebouwd wordt.** Twee redenen, en de tweede is de
+belangrijkste:
+
+1. Het gaat om ongeveer **vier gevallen per maand**. De zestien die er op
+   7 september lagen zijn met de hand opgepakt; een automatisme daarvoor bouwen
+   terwijl er grotere dingen open staan, is de moeite niet waard.
+2. **De basis zou nu wankel zijn.** De oude gevallen zijn alleen te herkennen
+   aan losse tekst in `snelle_notitie` ("bedenktijd opvolgen over 3 maanden").
+   Matchen op die zin breekt zodra iemand hem anders formuleert — precies de
+   fragiele weg die deze module elders juist heeft afgeschaft.
+
+**Wanneer het wél de moeite is.** Zodra `follow_up_appointments.uitkomst`
+structureel gevuld is — dat gebeurt sinds 7 september bij elke uitkomst via
+`writeUitkomst()` in `api/follow-up-appointment-outcome.js`. Dan is dit een
+handvol regels op een enum in plaats van tekstherkenning: lees `uitkomst =
+'later_opnieuw'`, lees de maanden, zet de `due`. Geen parser, geen giswerk.
+
+**Let op bij het oppakken:** `follow_up_leads` is hier niet de plek. Zie de
+waarschuwing hieronder.
+
+## ⚠ `follow_up_leads` is een administratie die nooit gewerkt heeft
+
+De tabel is leeg — nul rijen, geen RLS-fout. Toch bestaat de code die hem zou
+vullen al lang: `createFollowupLead()` in
+`api/follow-up-appointment-outcome.js` wordt aangeroepen bij `no_show`,
+`later_opnieuw` en `terugbel`.
+
+Elke fout daarvan verdwijnt hier:
+
+```js
+} catch (e) {
+  extraWarnings.push('follow_up_lead-aanmaak mislukt: ' + (e.message || 'onbekend'));
+}
+```
+
+Een waarschuwing in het antwoord die niemand leest. De uitkomst slaagt, de
+notitie wordt geschreven, de status wordt gezet — en de klant verdwijnt. Op
+7 september bleken er **225 mensen** op die manier uit beeld: 94 no-shows,
+88 zelf-geannuleerd, 23 gesprek-gehad-zonder-beslissing, 16 bedenktijd, 4
+wacht-op-nieuwe-afspraak. Daves werklijst telde er op dat moment 34.
+
+**Nieuwe opvolgkaarten horen in `opvolging_taken`** — de lijst waar Dave uit
+werkt. Niet in `follow_up_leads`, en zeker niet in allebei.
+
 ## Openstaand — de uitgang, in een eigen ronde
 
 **Knop "Annuleren voor event" op de aanmeldkaart.** Dave gebruikt hem wanneer er

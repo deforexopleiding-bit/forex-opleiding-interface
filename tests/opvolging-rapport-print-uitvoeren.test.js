@@ -55,7 +55,8 @@ function maakBrowser({ antwoord, status = 200 } = {}) {
 
   const ctx = createContext({
     window,
-    document: { getElementById: (id) => (id === 'blad' ? el : null) },
+    // document.title wordt de BESTANDSNAAM van de bewaarde PDF, dus die meten we.
+    document: { title: '', getElementById: (id) => (id === 'blad' ? el : null) },
     location: window.location,
     URLSearchParams,
     fetch: async () => ({ ok: status < 400, status, text: async () => JSON.stringify(antwoord) }),
@@ -148,12 +149,25 @@ test('de pagina blijft niet op "wordt opgehaald" staan', async () => {
 test('het rapport draagt de gegevens uit het antwoord', async () => {
   const b = await draai({ antwoord: ANTWOORD });
   const h = b.el.innerHTML;
-  assert.match(h, /Dagrapport/);
+  // Het rapport heet naar het werk, niet naar de persoon: 'Dagrapport — Dave
+  // Heylen' is 'Salesrapport' geworden, met de periode eronder. Zodra er een
+  // tweede verkoper bijkomt hoeft er niets te veranderen.
+  assert.match(h, /Salesrapport/);
+  assert.doesNotMatch(h, /Dagrapport|Dave Heylen/, 'de oude naam hoort nergens meer te staan');
   assert.match(h, /7 september 2026/, 'nlDatum hoort te werken — die was de crash');
   assert.match(h, /Jan Jansen/);
   assert.match(h, /NIET BEHANDELD/);
   assert.match(h, /2:13/, 'gesprekstijd als m:ss uit 133 seconden');
   assert.match(h, /10 seconden/, 'de meetregel met de drempel uit het endpoint');
+});
+
+test('de bestandsnaam van de PDF draagt de naam en de periode', async () => {
+  // document.title is wat de browser voorstelt als bestandsnaam bij 'Bewaar
+  // als PDF'. Die stond statisch in de <title>, dus elke bewaarde PDF heette
+  // hetzelfde en was later niet uit elkaar te houden.
+  const b = await draai({ antwoord: ANTWOORD });
+  assert.match(b.ctx.document.title, /^Salesrapport/);
+  assert.match(b.ctx.document.title, /7 september 2026/);
 });
 
 test('er wordt geprint als het rapport staat', async () => {

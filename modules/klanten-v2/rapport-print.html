@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Dagrapport — Opvolging</title>
+<title>Salesrapport</title>
 <!--
   PRINTWEERGAVE VAN HET DAGRAPPORT (fase 3).
 
@@ -147,9 +147,18 @@ tr{break-inside:avoid}
   // dus in de PDF én op het scherm. Zie je hier een ander nummer dan wat er in
   // de repo staat, dan kijk je naar een oude build en heeft verder zoeken geen
   // zin. Ophogen bij elke inhoudelijke wijziging aan dit bestand.
-  const OPMAAK_VERSIE = 'rp-3';
+  const OPMAAK_VERSIE = 'rp-4';
 
-  const RAPPORT_OVER = 'Dave Heylen';
+// HET RAPPORT HEET NAAR HET WERK, NIET NAAR DE PERSOON.
+//
+// Het heette 'Dagrapport — Dave Heylen'. Twee bezwaren, en het tweede weegt
+// het zwaarst: het gaat over het werk en niet over de man, en zodra er een
+// tweede verkoper bijkomt hoeft er niets veranderd te worden.
+//
+// De periode staat eronder en doet het werk dat 'Dag'/'Week' eerst deed. Daar
+// staat 'vrijdag 7 september 2026' of '1 tot en met 7 september 2026' — dat is
+// preciezer dan een woord dat de lezer zelf moet vertalen.
+  const RAPPORT_TITEL = 'Salesrapport';
   const FIRMA        = 'De Forex Opleiding NL B.V.';
 
   const esc = (s) => String(s == null ? '' : s)
@@ -199,11 +208,6 @@ tr{break-inside:avoid}
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   };
 
-  function titelVoor(p) {
-    if (p.dagen === 1) return 'Dagrapport';
-    return p.dagen <= 7 ? 'Weekrapport' : 'Periodeoverzicht';
-  }
-
   function sectiekop(titel, telling) {
     return '<div class="skop"><div class="t">' + esc(titel) + '</div>' +
       '<div class="n">' + esc(telling || '') + '</div></div>';
@@ -217,7 +221,7 @@ tr{break-inside:avoid}
 
   function bouw(d) {
     const p = d.periode;
-    const titel = titelVoor(p);
+    const titel = RAPPORT_TITEL;
     const periodeTekst = p.dagen === 1 ? nlDatum(p.van)
       : nlDatum(p.van) + ' tot en met ' + nlDatum(p.tot);
     const opgemaakt = new Intl.DateTimeFormat('nl-NL', {
@@ -225,8 +229,13 @@ tr{break-inside:avoid}
       hour: '2-digit', minute: '2-digit',
     }).format(new Date());
 
+    // DE BESTANDSNAAM VAN DE PDF KOMT UIT document.title. Die stond statisch in
+    // de <title>, dus elke bewaarde PDF heette hetzelfde en was later niet uit
+    // elkaar te houden. Nu draagt hij de periode.
+    document.title = titel + ' — ' + periodeTekst;
+
     let h = '<div class="kop"><div>' +
-      '<h1>' + esc(titel) + ' — ' + esc(RAPPORT_OVER) + '</h1>' +
+      '<h1>' + esc(titel) + '</h1>' +
       '<div class="datum">' + esc(periodeTekst) + '</div></div>' +
       '<div class="meta">' + esc(FIRMA) + '<br>Opgemaakt ' + esc(opgemaakt) +
       '<br>Module Opvolging &middot; ' + esc(OPMAAK_VERSIE) + '</div></div><div class="koplijn"></div>';
@@ -239,7 +248,7 @@ tr{break-inside:avoid}
     h += sectieAandacht(d) + sectieDekking(d) + sectieVolume(d) +
          sectieVensters(d) + sectieZoomcalls(d) + sectieArchief(d);
 
-    h += '<div class="voet"><span>' + esc(titel + ' — ' + RAPPORT_OVER) + '</span>' +
+    h += '<div class="voet"><span>' + esc(titel) + '</span>' +
       '<span>' + esc(periodeTekst) + ' &middot; ' + esc(OPMAAK_VERSIE) + '</span></div>';
     return h;
   }
