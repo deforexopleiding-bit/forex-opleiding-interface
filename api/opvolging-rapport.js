@@ -45,7 +45,10 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { isMoeite, isContact, isGesprek, WA_SOORTEN } from './_lib/opvolging-poging-telling.js';
+import {
+  isMoeite, isContact, isGesprek, gesprekDuur, classificeerResultaat, WA_SOORTEN,
+  GESPROKEN, NIET_OPGENOMEN, VIA_ANDER,
+} from './_lib/opvolging-poging-telling.js';
 import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
 import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
 import {
@@ -428,10 +431,17 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
       archief_min_wa   : ARCHIEF_MIN_WA,
       // Zichtbaar, niet verstopt: een grens die niemand kan zien is een grens
       // waar niemand het over kan hebben.
-      gesprek_min_sec  : GESPREK_MIN_SEC,
+      // DE GRENS VAN TIEN SECONDEN IS VERVALLEN. Hij stond op `duur_sec`, en
+      // dat is de tijd tussen kiezen en ophangen — inclusief overgaan. Bij
+      // 'niet opgenomen' staan duren tot 43 seconden, bij 'gesproken' vanaf 4;
+      // een grens daarop scheidt niets. Sinds 8 september beslist het veld
+      // `resultaat` of er contact was, en zegt de duur alleen hoe lang, en
+      // alleen waar er gesproken is.
+      gesprek_bron: 'resultaat',
+      gesprek_min_sec: null,
       // WAT ALS WERKUUR TELT BEPAALT DE HELE BEOORDELING van het werkritme, en
       // dat mag geen verborgen aanname zijn. 09:00 tot 21:00, twaalf uren: de
-      // module eist zelf een spraakbericht vóór 09:00 en Daves zoomcalls lopen
+      // module eist zelf een spraakbericht vóór 09:00 en de zoomcalls lopen
       // tot half negen 's avonds.
       werkuur_van: WERKUUR_VAN,
       werkuur_tot: WERKUUR_TOT,
@@ -464,24 +474,25 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
 export function telVolume(pogingen, taakVan) {
   // VIER EMMERS DIE ELKAAR UITSLUITEN, EN DIE SAMEN `uit` ZIJN.
   //
-  // Er stonden er drie, en ze telden niet op. Op 7 september gaf het endpoint
-  // {uit: 9, gesproken: 5, te_kort: 1} — vijf plus één is zes, terwijl er negen
-  // pogingen waren. Drie calls vielen in geen enkele emmer.
+  //   gesproken + niet_opgenomen + onbekend_resultaat === uit
   //
-  // De oorzaak: `te_kort` telde alleen mee als isContact(p) waar was, en drie
-  // van de negen calls hadden resultaat 'niet opgenomen'. Die kwamen dus nooit
-  // ergens terecht. Dat is geen randgeval maar een ontbrekende categorie: een
-  // call die niet werd opgenomen is iets anders dan een korte call.
+  // 8 SEPTEMBER — DE EMMERS ZIJN OMGEZET. Ze hingen aan een grens van tien
+  // seconden op `duur_sec`, en dat getal is de tijd tussen KIEZEN en OPHANGEN,
+  // dus inclusief overgaan. De meting: bij 'niet opgenomen' staan duren tot 43
+  // seconden, bij 'gesproken' vanaf 4. Een grens daarop noemt 43 seconden
+  // overgaan een gesprek en 4 seconden gesprek een niet-gesprek.
   //
-  // 'te_kort' zou de verkeerde naam zijn voor een niet-opgenomen call, en na de
-  // woordenronde van gisteren is dat precies wat we niet meer doen. Dus een
-  // vierde emmer, met de invariant erbij:
+  // 'te_kort' bestaat daarom niet meer als categorie: hij beweerde iets over de
+  // kwaliteit van een gesprek op basis van een getal dat er niet over ging. Wat
+  // ervoor in de plaats komt is `onbekend_resultaat` — calls waarvan het
+  // resultaat-veld niets bruikbaars zegt. Die horen in de blinde vlekken, niet
+  // in een oordeel.
   //
-  //   niet_opgenomen + zonder_duur + gesproken + te_kort === uit
-  //
-  // Een test bewaakt die optelling, want dit hoort per definitie te kloppen en
-  // niet bij toeval.
-  const bel   = { uit: 0, seconden: 0, niet_opgenomen: 0, zonder_duur: 0, gesproken: 0, te_kort: 0 };
+  // `zonder_duur` telt binnen de gesproken calls: er is gesproken, maar de
+  // lengte is niet vastgelegd. Dat is geen aparte uitkomst maar een ontbrekend
+  // getal, en het rapport zegt dan 'lengte niet geregistreerd' in plaats van 0.
+  const bel = { uit: 0, seconden: 0, gesproken: 0, niet_opgenomen: 0,
+                onbekend_resultaat: 0, zonder_duur: 0, via_ander: 0 };
   const wa    = { uit: 0, in: 0 };
   const spraak = { uit: 0, in: 0 };
   const rijen = [];
@@ -493,22 +504,23 @@ export function telVolume(pogingen, taakVan) {
       // niet als soort en zouden hier dus niet horen te staan.
       if (!uitgaand) continue;
       bel.uit += 1;
-      const duurBekend = p.duur_sec !== null && p.duur_sec !== undefined
-        && Number.isFinite(Number(p.duur_sec));
-      if (duurBekend) bel.seconden += Number(p.duur_sec);
+      const soort = classificeerResultaat(p.resultaat);
+      const duur = gesprekDuur(p);
 
-      // Precies één emmer per call, in deze volgorde.
-      if (!isContact(p)) {
-        // Er is niemand opgenomen. Blijft een poging — Dave heeft gebeld.
-        bel.niet_opgenomen += 1;
-      } else if (!duurBekend) {
-        // Opgenomen, maar we weten niet hoe lang. ONBEKEND is geen nee: het
-        // telt niet als gesprek en ook niet als te kort.
-        bel.zonder_duur += 1;
-      } else if (isGesprek(p, GESPREK_MIN_SEC) === true) {
+      // Precies één emmer per call. Het RESULTAAT beslist, niet de duur.
+      if (soort === GESPROKEN) {
         bel.gesproken += 1;
+        // Seconden tellen alleen mee waar er echt gesproken is; anders telden
+        // we overgaantijd op bij gesprekstijd.
+        if (duur.sec === null) bel.zonder_duur += 1;
+        else bel.seconden += duur.sec;
+      } else if (soort === NIET_OPGENOMEN) {
+        bel.niet_opgenomen += 1;
+      } else if (soort === VIA_ANDER) {
+        // Afgehandeld via iemand anders: wel werk, geen eigen gesprek.
+        bel.via_ander += 1;
       } else {
-        bel.te_kort += 1;
+        bel.onbekend_resultaat += 1;
       }
     } else if (p.soort === 'whatsapp') {
       if (uitgaand) wa.uit += 1; else wa.in += 1;
@@ -667,19 +679,25 @@ export function maakTaakZoeker(taken) {
  * over iets wat we niet gemeten hebben. Dan is `gekoppeld:false` het eerlijke
  * antwoord — dezelfde regel als bij de blinde vlekken.
  */
-/** 'Die dag 2× gebeld, waarvan 1 gesprek van 41 s.' Eén formulering, drie schermen. */
+/**
+ * 'Die dag 2x gebeld, waarvan 1 gesprek van 41 s.' Eén formulering, drie schermen.
+ *
+ * Seconden komen alleen van calls waar het resultaat 'gesproken' zegt. Is er
+ * gesproken maar staat de lengte er niet, dan zeggen we dat — een nul zou
+ * lezen als een gesprek van nul seconden.
+ */
 export function belZin(aantal, gesproken, seconden) {
   if (!aantal) return 'Die dag niet gebeld.';
   const keer = aantal + '\u00d7 gebeld';
-  if (!gesproken) return 'Die dag ' + keer + ', geen gesprek van betekenis.';
-  const duur = seconden >= 90
-    ? Math.round(seconden / 60) + ' min'
-    : seconden + ' s';
-  return 'Die dag ' + keer + ', waarvan ' +
-    (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken') + ' van samen ' + duur + '.';
+  if (!gesproken) return 'Die dag ' + keer + ', niemand nam op.';
+  const kop = 'Die dag ' + keer + ', waarvan ' +
+    (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken');
+  if (!seconden) return kop + '; de lengte is niet geregistreerd.';
+  const duur = seconden >= 90 ? Math.round(seconden / 60) + ' min' : seconden + ' s';
+  return kop + ' van samen ' + duur + '.';
 }
 
-export function belpogingenVoorCalls({ afspraken, taken, pogingen, minSec = GESPREK_MIN_SEC }) {
+export function belpogingenVoorCalls({ afspraken, taken, pogingen }) {
   const zoekTaak = maakTaakZoeker(taken);
   const perTaakDag = new Map();
   for (const p of pogingen || []) {
@@ -706,19 +724,19 @@ export function belpogingenVoorCalls({ afspraken, taken, pogingen, minSec = GESP
     let gesproken = 0;
     let seconden = 0;
     const lijst = rij.map((p) => {
-      // LET OP: Number(null) is 0, en 0 is finite. Zonder de null-check werd een
-      // ontbrekende duur stilletjes een call van nul seconden en dus 'te kort'.
-      // Onbekend is geen nee — dezelfde regel als isGesprek() in
-      // api/_lib/opvolging-poging-telling.js.
-      const ruw = p.duur_sec;
-      const d = (ruw === null || ruw === undefined || !Number.isFinite(Number(ruw))) ? null : Number(ruw);
-      const isGesprek = d !== null && d >= minSec;
-      if (isGesprek) { gesproken += 1; seconden += d; }
+      // HET RESULTAAT BESLIST, DE DUUR ZEGT ALLEEN HOE LANG. Een duur bij een
+      // niet-opgenomen call is overgaantijd en hoort niet getoond te worden.
+      const k = classificeerResultaat(p.resultaat);
+      const duur = gesprekDuur(p);
+      if (k === GESPROKEN) { gesproken += 1; if (duur.sec !== null) seconden += duur.sec; }
       return {
         tijd: tijdVan(p.tijdstip),
-        duur_sec: d,
-        // Drie uitkomsten, geen twee: onbekende duur is niet 'te kort'.
-        soort: d === null ? 'duur_onbekend' : isGesprek ? 'gesprek' : 'te_kort',
+        // Alleen gevuld waar er gesproken is; null betekent hier 'lengte niet
+        // geregistreerd', niet 'nul seconden'.
+        duur_sec: duur.toon ? duur.sec : null,
+        soort: k === GESPROKEN ? 'gesprek'
+             : k === NIET_OPGENOMEN ? 'niet_opgenomen'
+             : k === VIA_ANDER ? 'via_ander' : 'onbekend_resultaat',
         resultaat: p.resultaat || null,
         automatisch: p.automatisch === true,
       };
@@ -959,8 +977,12 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), 
           : staat === 'geannuleerd' ? 'Deze afspraak is geannuleerd; een uitkomst hoort hier niet.'
           : staat === 'onbeoordeelbaar' ? 'De status van deze afspraak (' + String(a.status || '') + ') zegt niet of de call heeft plaatsgevonden.'
           : uitkomstKolommen
-            ? 'Er is voor deze call geen uitkomst vastgelegd.'
-            : 'Uitkomsten worden voor deze periode nog niet bewaard.'),
+            // ZEG WELKE CALL. Deze zin staat vlak onder een regel over
+            // belpogingen, en werd daardoor gelezen als 'er is niet gebeld' —
+            // terwijl Shudino gewoon een gesprek van 41 seconden had. Hij gaat
+            // over de ZOOMCALL, en dat hoort er te staan.
+            ? 'Er is voor deze zoomcall geen uitkomst vastgelegd.'
+            : 'Uitkomsten van zoomcalls worden voor deze periode nog niet bewaard.'),
       notitie : a.snelle_notitie || null,
       // HET BEWIJSMATERIAAL BIJ DE CALL. Zonder dit moest Maxim geloven op zijn
       // woord dat er nog gebeld was voor een no-show. Null = niet meegegeven
@@ -1181,7 +1203,7 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
         soort: 'geen_uitkomst', sectie: 'zoomcalls', naam: c.naam,
         // De formulering is met opzet passief: het kan aan Dave liggen én aan
         // het systeem, en dat verschil weten we hier niet.
-        tekst: `Voor de call met ${c.naam || 'onbekend'} op ${c.dag} is geen uitkomst vastgelegd.`,
+        tekst: `Voor de zoomcall met ${c.naam || 'onbekend'} op ${c.dag} is geen uitkomst vastgelegd.`,
         uitleg: c.reden_leeg, appointment_id: c.appointment_id,
       });
     }

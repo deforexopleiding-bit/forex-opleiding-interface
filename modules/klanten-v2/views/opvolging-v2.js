@@ -1437,6 +1437,7 @@
 .opv .opvr-lijst{display:flex;flex-direction:column;gap:2px}
 .opv .opvr-regel{padding:8px 10px;border-left:3px solid var(--o-line);background:#fafbfc;border-radius:0 8px 8px 0}
 .opv .opvr-regel.opvr-rood{border-left-color:var(--o-red);background:var(--o-reds)}
+.opv .opvr-regel.opvr-groen{border-left-color:#16a34a;background:#f0fdf4}
 .opv .opvr-regel.opvr-grijs{border-left-color:#d1d5db;background:#f7f8f9}
 .opv .opvr-t{font-size:13.5px;font-weight:600}
 .opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
@@ -1650,15 +1651,33 @@
    * dagscherm en het rapport dezelfde zin geven. tests/opvolging-belzin-
    * tweeling.test.js houdt ze gelijk.
    */
-  const GESPREK_MIN_SEC = 10;
+  // HET RESULTAAT BESLIST, NIET DE DUUR — tweeling van classificeerResultaat()
+  // in api/_lib/opvolging-poging-telling.js. De grens van tien seconden is op
+  // 8 september vervallen: duur_sec is de tijd tussen kiezen en ophangen, dus
+  // inclusief overgaan. Meting over de laatste weken: bij 'niet opgenomen'
+  // staan duren tot 43 seconden, bij 'gesproken' vanaf 4.
+  //
+  // Vrije tekst, dus op VOORVOEGSEL: 'gesproken: bevestigd — neemt laptop mee'
+  // hoort gewoon bij gesproken.
+  function classificeerResultaat(r) {
+    const t = String(r == null ? '' : r).toLowerCase().trim().replace(/\s+/g, ' ');
+    if (!t) return 'onbekend';
+    if (t.startsWith('via ander') || t.startsWith('bevestigd via')) return 'via_ander';
+    if (t.startsWith('gesproken')) return 'gesproken';
+    if (t.startsWith('niet opgenomen') || t.startsWith('niet_opgenomen')
+        || t.startsWith('geen gehoor') || t.startsWith('geen_gehoor')) return 'niet_opgenomen';
+    return 'onbekend';
+  }
 
   function belZin(aantal, gesproken, seconden) {
     if (!aantal) return 'Die dag niet gebeld.';
     const keer = aantal + '\u00d7 gebeld';
-    if (!gesproken) return 'Die dag ' + keer + ', geen gesprek van betekenis.';
+    if (!gesproken) return 'Die dag ' + keer + ', niemand nam op.';
+    const kop = 'Die dag ' + keer + ', waarvan ' +
+      (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken');
+    if (!seconden) return kop + '; de lengte is niet geregistreerd.';
     const duur = seconden >= 90 ? Math.round(seconden / 60) + ' min' : seconden + ' s';
-    return 'Die dag ' + keer + ', waarvan ' +
-      (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken') + ' van samen ' + duur + '.';
+    return kop + ' van samen ' + duur + '.';
   }
 
   /**
@@ -1684,8 +1703,12 @@
     let gesproken = 0;
     let seconden = 0;
     for (const p of rij) {
+      if (classificeerResultaat(p.resultaat) !== 'gesproken') continue;
+      gesproken += 1;
+      // Een op de drie gesproken calls heeft geen duur; dat is het normale
+      // geval, geen randgeval. Tel er dus geen nul bij op.
       const d = duurVan(p);
-      if (d !== null && d >= GESPREK_MIN_SEC) { gesproken += 1; seconden += d; }
+      if (d !== null) seconden += d;
     }
     return { aantal: rij.length, gesproken, seconden, pogingen: rij };
   }
@@ -1697,10 +1720,16 @@
     }
     const b = belVanDag(taak, dag);
     const stippen = b.pogingen.map((p) => {
-      const d = duurVan(p);
-      const kl = d === null ? 'onb' : d >= GESPREK_MIN_SEC ? 'gsp' : 'kort';
-      return '<span class="belbol ' + kl + '">' + esc(uur(p.tijdstip)) +
-        (d === null ? '' : ' &middot; ' + d + ' s') + '</span>';
+      const k = classificeerResultaat(p.resultaat);
+      const d = k === 'gesproken' ? duurVan(p) : null;
+      const kl = k === 'gesproken' ? 'gsp' : k === 'niet_opgenomen' ? 'kort' : 'onb';
+      // Alleen bij gesproken een duur. Bij een niet-opgenomen call zou dat
+      // overgaantijd zijn, en bij gesproken-zonder-duur is de eerlijke tekst
+      // dat de lengte niet geregistreerd is — geen nul.
+      return '<span class="belbol ' + kl + '" title="' + esc(p.resultaat || 'geen resultaat vastgelegd') + '">' +
+        esc(uur(p.tijdstip)) +
+        (k === 'gesproken' ? (d === null ? ' &middot; lengte onbekend' : ' &middot; ' + d + ' s') : '') +
+        '</span>';
     }).join('');
     return '<div class="belr' + (b.gesproken ? ' belraak' : '') + '">' +
       '<b>' + esc(belZin(b.aantal, b.gesproken, b.seconden)) + '</b>' +
@@ -4354,11 +4383,32 @@
     if (k.openstaand_bekend) {
       const open = k.openstaand || [];
       const gedaan = open.filter((r) => r.behandeld);
+      // HET LOSSE VIERDE GETAL IS WEG, EN VERVANGEN DOOR WAT HET BETEKENDE.
+      //
+      // Er stond '10 leads op de lijst · 9 kregen een poging · 1 kreeg niets ·
+      // 15 leads met een poging'. Dat leest als een telfout, terwijl het het
+      // interessantste getal van de sectie was: Dave had zes leads afgewerkt
+      // die niet eens op zijn lijst stonden. Het rapport meldde dus wél de ene
+      // vergeten lead en verstopte de zes extra — precies de verkeerde kant op
+      // voor een rapport dat inspanning eerlijk hoort te tonen.
+      //
+      // Nu met naam en herkomst, in een eigen blok.
+      const opLijst = new Set(open.map((r) => r.taak_id || r.naam));
+      const extra = (k.behandeld || []).filter((r) => !opLijst.has(r.taak_id || r.naam));
       h += '<div class="opvr-kpi">' +
         rapCel(open.length, 'leads op de lijst') +
         rapCel(gedaan.length, 'kregen een poging') +
         rapCel(open.length - gedaan.length, 'kregen niets') +
-        rapCel(k.behandeld.length, 'leads met een poging') + '</div>';
+        rapCel(extra.length, 'erbij, buiten de lijst') + '</div>';
+      if (extra.length) {
+        h += '<div class="ronde"><b>' + extra.length + ' lead' + (extra.length === 1 ? '' : 's') +
+          ' die niet op de lijst stond' + (extra.length === 1 ? '' : 'en') +
+          ' zijn toch afgewerkt.</b> Dat is werk dat nergens anders zichtbaar wordt; ' +
+          'zie <i>Afgehandeld</i> voor wat er met die kaarten gebeurd is.</div>';
+        h += rijenBlok('Erbij, buiten de lijst', extra, (r) =>
+          '<div class="opvr-regel opvr-groen"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
+          '</div><div class="opvr-u">' + r.bel + '&times; gebeld &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+      }
       h += rijenBlok('Kregen niets', k.onbehandeld || [], (r) =>
         '<div class="opvr-regel opvr-rood"><div class="opvr-t">' + esc(r.naam || 'Naamloos') + '</div></div>');
       h += rijenBlok('Kregen minstens één poging', gedaan, (r) =>
