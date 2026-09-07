@@ -518,7 +518,7 @@
                   </div>
                   <div style="margin-top:10px">
                     <label class="form-label" for="noReplyReminder1TemplateName">reminder_1_template_name (Meta approved, optioneel)</label>
-                    <input type="text" id="noReplyReminder1TemplateName" class="form-input" placeholder="opvolging_geen_reactie" title="Eigen template voor reminder 1 (neutraal, zonder bedragen of factuurnummer). Leeg laten = reminder 1 gebruikt de template van reminder 2, zoals voorheen." />
+                    <input type="text" id="noReplyReminder1TemplateName" class="form-input" placeholder="opvolging_geen_reactie2" title="Eigen template voor reminder 1 (neutraal, zonder bedragen of factuurnummer). Leeg laten = reminder 1 gebruikt de template van reminder 2, zoals voorheen." />
                     <div style="font-size:11px;color:var(--text-faint);margin-top:4px">
                       Leeg laten = reminder 1 valt terug op de template hieronder (huidig gedrag).
                     </div>

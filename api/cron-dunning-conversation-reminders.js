@@ -112,7 +112,7 @@ function nowIso() { return new Date().toISOString(); }
  * Het bericht moet overkomen als een bericht van de afzender zelf, niet als
  * een geautomatiseerde aanmaning van "Joost".
  *
- * Zelfde strekking als de Meta-template `opvolging_geen_reactie` die dit
+ * Zelfde strekking als de Meta-template `opvolging_geen_reactie2` die dit
  * bericht stuurt zodra het 24-uursvenster dicht is; zie
  * docs/whatsapp-template-opvolging-geen-reactie.md. Beide paden zeggen
  * hetzelfde, zodat het niet uitmaakt welke van de twee vertrekt.
@@ -724,7 +724,7 @@ export async function processReminderRun({
         // Template-naam check (voor r2 en voor r1-when-window-dicht).
         //
         // r1 mag een EIGEN template hebben (no_reply.reminder_1_template_name).
-        // Dat is de neutrale opvolg-template `opvolging_geen_reactie` — geen
+        // Dat is de neutrale opvolg-template `opvolging_geen_reactie2` — geen
         // bedragen, geen factuurnummer, geen vervaldatum, geen ondertekening;
         // zie docs/whatsapp-template-opvolging-geen-reactie.md.
         //

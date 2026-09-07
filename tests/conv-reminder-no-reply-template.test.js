@@ -1,7 +1,7 @@
 // tests/conv-reminder-no-reply-template.test.js
 //
 // Punt B van de no-reply-opdracht: reminder 1 krijgt een eigen, NEUTRALE
-// Meta-template (`opvolging_geen_reactie`) achter een optionele config-sleutel.
+// Meta-template (`opvolging_geen_reactie2`) achter een optionele config-sleutel.
 //
 // Wat hier vastligt:
 //   1. De R1-tekst is neutraal — geen bedrag, geen factuurnummer, geen
@@ -40,7 +40,7 @@ test('R1-tekst bevat geen bedrag, factuurnummer of vervaldatum', () => {
 test('R1-tekst noemt de openstaande factuur wél (UTILITY-grond), zonder cijfers', () => {
   // Beslissing Maxim: de bijzin blijft staan omdat de transactieverwijzing is
   // wat de Meta-template op UTILITY houdt. Zonder cijfers, dus geen
-  // bedragen-bericht. Zelfde strekking als de template opvolging_geen_reactie.
+  // bedragen-bericht. Zelfde strekking als de template opvolging_geen_reactie2.
   const txt = buildReminder1Text({ voornaam: 'Nanida' });
   assert.ok(/openstaande factuur/i.test(txt), txt);
   assert.ok(!/\d/.test(txt), 'nog steeds geen cijfers');
@@ -81,17 +81,17 @@ test('r1 zonder reminder_1_template_name valt terug op de R2-template (huidig ge
 
 test('r1 met reminder_1_template_name gebruikt de neutrale opvolg-template', () => {
   const cfg = {
-    reminder_1_template_name: 'opvolging_geen_reactie',
+    reminder_1_template_name: 'opvolging_geen_reactie2',
     reminder_2_template_name: 'joost_reminder_2_nl',
   };
   const r = resolveReminderTemplateName('r1', cfg);
-  assert.equal(r.name, 'opvolging_geen_reactie');
+  assert.equal(r.name, 'opvolging_geen_reactie2');
   assert.equal(r.isR1Template, true);
 });
 
 test('r2 gebruikt altijd de R2-template, ook als de R1-template gezet is', () => {
   const cfg = {
-    reminder_1_template_name: 'opvolging_geen_reactie',
+    reminder_1_template_name: 'opvolging_geen_reactie2',
     reminder_2_template_name: 'joost_reminder_2_nl',
   };
   const r = resolveReminderTemplateName('r2', cfg);
@@ -126,7 +126,7 @@ function fakeSupabase(templatesByName) {
 }
 
 const OPVOLGING_TEMPLATE = {
-  name: 'opvolging_geen_reactie',
+  name: 'opvolging_geen_reactie2',
   language: 'nl',
   status: 'APPROVED',
   header_type: 'NONE',
@@ -143,10 +143,10 @@ const LEGACY_VARS = {
 test('opvolg-template stuurt precies 1 parameter: de voornaam', async () => {
   resetReminderTemplateCache();
   const payload = await buildReminderTemplatePayload({
-    templateName: 'opvolging_geen_reactie',
+    templateName: 'opvolging_geen_reactie2',
     ctx: { customer: { first_name: 'Nanida', last_name: 'Van Veen' }, openInvoices: [], invoice: null },
     legacyVars: LEGACY_VARS,
-    supabase: fakeSupabase({ opvolging_geen_reactie: [OPVOLGING_TEMPLATE] }),
+    supabase: fakeSupabase({ opvolging_geen_reactie2: [OPVOLGING_TEMPLATE] }),
     emptyFallback: 'daar',
   });
   assert.equal(payload.mode, 'mapping');
@@ -158,10 +158,10 @@ test('opvolg-template stuurt precies 1 parameter: de voornaam', async () => {
 test('klant zonder voornaam levert geen LEGE parameter op (Meta weigert die)', async () => {
   resetReminderTemplateCache();
   const payload = await buildReminderTemplatePayload({
-    templateName: 'opvolging_geen_reactie',
+    templateName: 'opvolging_geen_reactie2',
     ctx: { customer: { first_name: '', company_name: 'Handelsonderneming Veys' }, openInvoices: [], invoice: null },
     legacyVars: LEGACY_VARS,
-    supabase: fakeSupabase({ opvolging_geen_reactie: [OPVOLGING_TEMPLATE] }),
+    supabase: fakeSupabase({ opvolging_geen_reactie2: [OPVOLGING_TEMPLATE] }),
     emptyFallback: 'daar',
   });
   const body = payload.components.find((c) => c.type === 'body');
@@ -172,10 +172,10 @@ test('klant zonder voornaam levert geen LEGE parameter op (Meta weigert die)', a
 test('zonder emptyFallback blijft het bestaande gedrag (R2 wordt niet geraakt)', async () => {
   resetReminderTemplateCache();
   const payload = await buildReminderTemplatePayload({
-    templateName: 'opvolging_geen_reactie',
+    templateName: 'opvolging_geen_reactie2',
     ctx: { customer: { first_name: '' }, openInvoices: [], invoice: null },
     legacyVars: LEGACY_VARS,
-    supabase: fakeSupabase({ opvolging_geen_reactie: [OPVOLGING_TEMPLATE] }),
+    supabase: fakeSupabase({ opvolging_geen_reactie2: [OPVOLGING_TEMPLATE] }),
   });
   const body = payload.components.find((c) => c.type === 'body');
   assert.equal(body.parameters[0].text, '', 'ongewijzigd gedrag zonder de nieuwe optie');
@@ -184,10 +184,10 @@ test('zonder emptyFallback blijft het bestaande gedrag (R2 wordt niet geraakt)',
 test('niet-approved opvolg-template wordt niet gebruikt (val terug op legacy)', async () => {
   resetReminderTemplateCache();
   const payload = await buildReminderTemplatePayload({
-    templateName: 'opvolging_geen_reactie',
+    templateName: 'opvolging_geen_reactie2',
     ctx: { customer: { first_name: 'Nanida' }, openInvoices: [], invoice: null },
     legacyVars: LEGACY_VARS,
-    supabase: fakeSupabase({ opvolging_geen_reactie: [{ ...OPVOLGING_TEMPLATE, status: 'LOCAL' }] }),
+    supabase: fakeSupabase({ opvolging_geen_reactie2: [{ ...OPVOLGING_TEMPLATE, status: 'LOCAL' }] }),
     emptyFallback: 'daar',
   });
   assert.equal(payload.mode, 'legacy', 'LOCAL-template mag niet als approved gelden');
