@@ -948,3 +948,53 @@ test('een lead zonder enkele call krijgt gewoon het moeite-oordeel', () => {
   });
   assert.equal(a.moeite.staat, 'te_weinig');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 'DE DAG LOOPT NOG' IS GEEN BEVINDING OVER DAVE
+// ═══════════════════════════════════════════════════════════════════════════
+// Hij stond twee keer op de pagina: als gele balk bovenaan én als eerste
+// bevinding in sectie 1, binnen twee centimeter van elkaar. De tweede leest
+// bovendien als een verwijt terwijl het een eigenschap van de periode is.
+
+test('de periode-blinde-vlek staat niet in de aandachtlijst', () => {
+  const aandacht = [];
+  vulAandacht({
+    aandacht,
+    blindeVlekken: [
+      { sectie: 'periode', wat: 'De dag van vandaag loopt nog.', waarom: 'Stand van dit moment.' },
+      { sectie: 'dekking', wat: 'De lijst is niet bewaard.', waarom: 'due wordt overschreven.' },
+    ],
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] }, zoomcalls: [], archief: [],
+  });
+  assert.equal(aandacht.length, 1, 'alleen de dekking-vlek hoort hier');
+  assert.equal(aandacht[0].sectie, 'dekking');
+  assert.doesNotMatch(JSON.stringify(aandacht), /loopt nog/);
+});
+
+test('hij blijft wél in blinde_vlekken staan', () => {
+  // Het overzicht van wat het rapport niet weet hoort compleet te blijven; het
+  // is alleen geen bevinding over een persoon.
+  const blindeVlekken = [{ sectie: 'periode', wat: 'De dag van vandaag loopt nog.', waarom: 'x' }];
+  vulAandacht({
+    aandacht: [], blindeVlekken,
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] }, zoomcalls: [], archief: [],
+  });
+  assert.equal(blindeVlekken.length, 1, 'vulAandacht hoort de lijst niet te legen');
+  assert.equal(blindeVlekken[0].sectie, 'periode');
+});
+
+test('andere blinde vlekken komen nog steeds wél in de aandachtlijst', () => {
+  // Zonder deze test zou 'alle blinde vlekken overslaan' er groen doorheen
+  // komen, en dan leest stilte weer als goedkeuring.
+  const aandacht = [];
+  vulAandacht({
+    aandacht,
+    blindeVlekken: [{ sectie: 'volume', wat: 'Van 3 calls is geen duur vastgelegd.', waarom: 'x' }],
+    dekking: { behandeld: [], onbehandeld: null },
+    vensters: { rijen: [], zonder_taak: [] }, zoomcalls: [], archief: [],
+  });
+  assert.equal(aandacht.length, 1);
+  assert.equal(aandacht[0].soort, 'blinde_vlek');
+});
