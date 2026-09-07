@@ -67,13 +67,27 @@
 // een titel is precies het soort regel dat later stil de verkeerde kant op
 // valt. Wat er wel gebeurt: wie het dossier opent ziet meteen wat er sloot.
 //
-// Het is nadrukkelijk geen alarm. Er gaat geen bericht uit bij een
-// automatische afsluiting; dat is een aparte beslissing.
+// ── EN ER GAAT EEN MELDING UIT ───────────────────────────────────────────
+// Bij ELKE automatische afsluiting, met de titel erin, langs dezelfde weg als
+// het eerste-call-signaal: het recht `signals.hoofdmentor.receive`. Zo hoeft
+// niemand een dossier te openen om te zien dat er 'Testsessie (verificatie)'
+// staat. Geen filter op die titel, geen raden — de mens leest 'm.
+//
+// Drie randvoorwaarden, alle drie hieronder afgedwongen:
+//   1. FAALZACHT — mislukt de melding, dan blijft de onboarding afgesloten en
+//      staat de reden in de logregel. Andersom (afsluiting terugdraaien omdat
+//      een bericht niet aankwam) zou erger zijn.
+//   2. GEEN TERUGVAL — heeft niemand het recht, dan gaat er niets uit. Niet
+//      alsnog naar de mentor van de sessie. Wel geteld en gelogd.
+//   3. HOOGSTENS ÉÉN per afsluiting — de melding hangt aan de GESLAAGDE
+//      overgang, niet aan de staat van de rij. Komt de cron opnieuw langs, dan
+//      is `auto_afgerond_sessie_id` gevuld en komt hij niet eens in de buurt.
 //
 // AUTH: Authorization: Bearer ${CRON_SECRET}. 401 zonder.
 
 import { supabaseAdmin } from '../supabase.js';
 import { haalAfgerondeEersteSessies, BRON_GELEZEN } from '../_lib/dfo-lms-sessies.js';
+import { createNotification, resolveOntvangersVoorRecht } from '../_lib/notify.js';
 
 const SETTING_KEY = 'onboarding_autocomplete_since';
 const FETCH_CAP   = 500;
@@ -104,6 +118,76 @@ async function writeWatermark(iso) {
   }
 }
 
+function fmtDateNl(iso) {
+  try {
+    return new Date(iso).toLocaleDateString('nl-NL',
+      { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch (e) { return String(iso); }
+}
+
+/**
+ * Meldt één automatische afsluiting aan de hoofdmentoren.
+ *
+ * FAALZACHT en met opzet niet ge-`throw`d: de onboarding IS al afgesloten
+ * wanneer dit draait. Zou een mislukte melding de rij naar de foutafhandeling
+ * sturen, dan blokkeerde hij bovendien het watermerk en kwam morgen dezelfde
+ * rij terug — die dan `al_automatisch` is en dus nooit meer een melding
+ * oplevert. Dat is precies de verkeerde kant op falen.
+ *
+ * De titel staat in de tekst zonder er iets mee te doen. Staat er 'Testsessie
+ * (verificatie)', dan ziet een mens dat in één oogopslag. Er wordt niet op
+ * woorden geraden.
+ */
+async function meldAfsluiting({ ob, sess, ontvangers, result }) {
+  if (!Array.isArray(ontvangers) || ontvangers.length === 0) {
+    result.meldingen_zonder_ontvanger++;
+    console.error('[onboarding-eerste-sessie] afgesloten zonder ontvanger — '
+      + 'onboarding ' + ob.id + ' is dicht, maar er ging geen melding uit');
+    return;
+  }
+
+  const klant  = ob.customer_name || 'Een klant';
+  const titel  = sess.titel ? String(sess.titel).trim() : '';
+  const wanneer = sess.start_tijd ? fmtDateNl(sess.start_tijd) : 'onbekende datum';
+  // Ontbreekt de titel, dan zeggen we DAT — niet niets. Anders leest een
+  // melding zonder titel als 'er was geen titel' terwijl het net zo goed een
+  // onbereikbaar LMS kan zijn.
+  const sessieOmschrijving = titel
+    ? ('\u201c' + titel + '\u201d van ' + wanneer)
+    : ('van ' + wanneer + ' (titel niet opgehaald)');
+
+  for (const ontvanger of ontvangers) {
+    try {
+      await createNotification({
+        toUserId:   ontvanger,
+        type:       'onboarding.auto_afgerond',
+        title:      'Onboarding automatisch afgerond',
+        body:       klant + ' — afgesloten door de eerste afgeronde sessie '
+                    + sessieOmschrijving + '.',
+        // Zelfde bestemming als elke andere onboarding-melding in dit
+        // systeem. BEWUST geen '?onboarding=<id>': klanten-v2 kent die
+        // parameter niet, dus zo'n link opent het dossier niet en landt
+        // stilletjes op een overzicht. Het belangrijkste — de titel — staat
+        // hierboven al in de tekst zelf.
+        linkUrl:    '/modules/onboarding-hub.html',
+        entityType: 'onboarding',
+        entityId:   ob.id,
+        priority:   'normal',
+        // Tweede slot bovenop de eenmalige overgang. De sleutel is de
+        // onboarding zelf, dus ook een handmatige herhaling van de cron levert
+        // binnen deze termijn geen tweede melding op.
+        dedupWithinMs: 7 * 24 * 60 * 60 * 1000,
+      });
+      result.meldingen_verstuurd++;
+    } catch (e) {
+      result.meldingen_mislukt++;
+      console.warn('[onboarding-eerste-sessie] melding mislukt voor onboarding '
+        + ob.id + ': ' + (e?.message || e)
+        + ' — de onboarding blijft afgesloten.');
+    }
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');
@@ -127,6 +211,10 @@ export default async function handler(req, res) {
     // hij GELEZEN is blijft een eigen feit — anders is 'geen titel' niet te
     // onderscheiden van 'titel niet opgehaald'.
     titels_gelezen: null, titels_fout: null,
+    // Meldingen over automatische afsluitingen. `zonder_ontvanger` mag nooit
+    // stil zijn: dan sluit er wel iets, maar kijkt er niemand naar.
+    hoofdmentor_ontvangers: 0, meldingen_verstuurd: 0, meldingen_zonder_ontvanger: 0,
+    meldingen_mislukt: 0,
     kandidaten: 0, afgesloten: 0,
     geen_onboarding: 0, al_afgerond: 0, al_automatisch: 0, niet_aanraken: 0,
     voorbeelden: [], errors: [],
@@ -169,6 +257,32 @@ export default async function handler(req, res) {
     }
 
     result.kandidaten = bron.sessies.length;
+
+    // ── ONTVANGERS ────────────────────────────────────────────────────────
+    // Eén keer opzoeken voor de hele ronde, langs hetzelfde recht als het
+    // eerste-call-signaal. Zodra de rol 'hoofdmentor' bestaat verandert hier
+    // niets: resolveOntvangersVoorRecht leest role_permissions x user_roles
+    // én user_permissions.
+    //
+    // Mislukt deze opzoeking, dan gaan we door met afsluiten. Een onboarding
+    // niet sluiten omdat we niet weten wie we moeten bellen is de verkeerde
+    // kant op falen.
+    const HOOFDMENTOR_RECHT = 'signals.hoofdmentor.receive';
+    let ontvangers = [];
+    try {
+      const hm = await resolveOntvangersVoorRecht(HOOFDMENTOR_RECHT);
+      ontvangers = hm.userIds || [];
+      result.hoofdmentor_ontvangers = ontvangers.length;
+      if (!hm.ok || ontvangers.length === 0) {
+        console.warn('[onboarding-eerste-sessie] NIEMAND heeft het recht '
+          + HOOFDMENTOR_RECHT + (hm.error ? (' (' + hm.error + ')') : '')
+          + ' — er wordt wel afgesloten, maar er gaat geen melding uit.');
+      }
+    } catch (e) {
+      // Geen terugval op een andere ontvanger: liever niemand dan de verkeerde.
+      console.error('[onboarding-eerste-sessie] ontvangers bepalen mislukt:',
+        e?.message || e);
+    }
     let highestMs = new Date(sinds).getTime() || 0;
     // Zodra één rij FAALT gaat het watermerk niet verder, ook niet voor de
     // rijen erna. De bevraging is oplopend gesorteerd, dus doorschuiven over
@@ -265,8 +379,15 @@ export default async function handler(req, res) {
               .select('id')
               .maybeSingle();
             if (updErr) throw new Error('onboarding afsluiten: ' + updErr.message);
-            if (upd?.id) result.afgesloten++;
-            else         result.al_automatisch++;
+            if (upd?.id) {
+              result.afgesloten++;
+              // Hangt aan de GESLAAGDE overgang. `.is('auto_afgerond_sessie_id',
+              // null)` maakt die overgang eenmalig, dus dit is hoogstens één
+              // melding per afsluiting — ook als de cron opnieuw langskomt.
+              await meldAfsluiting({ ob, sess, ontvangers, result });
+            } else {
+              result.al_automatisch++;
+            }
           }
         }
 

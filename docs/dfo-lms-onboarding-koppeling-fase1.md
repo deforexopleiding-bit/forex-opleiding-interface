@@ -521,10 +521,35 @@ alsnog door. Wat er wél is: `onboardings.auto_afgerond_sessie_titel` legt vast
 wát er sloot, en het detailscherm zet die titel vet in de afgerond-regel. Wie
 kijkt begrijpt meteen wat hij ziet.
 
-**Het is geen alarm** en het wordt ook niet als alarm verkocht. Er gaat geen
-bericht uit bij een automatische afsluiting; iemand moet het dossier nog steeds
-openen. Een melding bij elke automatische afsluiting is een nieuw soort bericht
-naar mensen en dus een aparte beslissing — die staat open, niet gebouwd.
+**En sinds 7 september gaat er ook een melding uit.** Bij elke automatische
+afsluiting, met de titel in de tekst, naar de houders van
+`signals.hoofdmentor.receive` — dezelfde weg als het eerste-call-signaal. Zo
+hoeft niemand een dossier te openen om te zien dat er *Testsessie
+(verificatie)* staat. Nog steeds geen filter op die titel: de mens leest 'm.
+
+Drie randvoorwaarden, alle drie met een test die rood wordt als ze wegvallen:
+
+1. **Faalzacht.** Mislukt de melding, dan blijft de onboarding gewoon
+   afgesloten en staat de reden in de logregel plus in `meldingen_mislukt`. De
+   melding wordt bewust *niet* doorgeworpen naar de foutafhandeling van de rij:
+   dat zou het watermerk blokkeren, en morgen komt diezelfde rij terug als
+   `al_automatisch` — waarna er nooit meer een melding volgt. Andersom falen
+   (afsluiting terugdraaien omdat een bericht niet aankwam) is erger.
+2. **Geen terugval.** Heeft niemand het recht, dan gaat er niets uit — zeker
+   niet alsnog naar de mentor van de sessie. Geteld als
+   `meldingen_zonder_ontvanger` en gelogd als fout. Een kapotte
+   rechten-opzoeking blokkeert het afsluiten evenmin: een onboarding niet
+   sluiten omdat we niet weten wie we moeten bellen is de verkeerde kant op
+   falen.
+3. **Hoogstens één per afsluiting.** De melding hangt aan de *geslaagde
+   overgang*, niet aan de staat van de rij. `.is('auto_afgerond_sessie_id',
+   null)` maakt die overgang eenmalig, dus een herhaalde cron-run komt niet
+   eens in de buurt. Daarbovenop een dedup van 7 dagen op de onboarding-id.
+
+De melding wijst naar `/modules/onboarding-hub.html`, hetzelfde doel als elke
+andere onboarding-melding hier. Bewust géén `?onboarding=<id>`: klanten-v2 kent
+die parameter niet, dus zo'n link zou het dossier niet openen en stil op een
+overzicht landen. Het belangrijkste — de titel — staat al in de tekst zelf.
 
 De goedkoopste bescherming blijft de mensenregel: **geen testsessies op een
 echte student afronden.** Geen enkele kolom haalt het daarbij.
