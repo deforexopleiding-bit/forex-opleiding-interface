@@ -454,18 +454,38 @@ export async function haalEersteSessiePerStudent({ studentIds, client = null }) 
  * onboarding alsnog. Anders zou één gemiste eerste call de onboarding voor
  * altijd open laten staan.
  *
- * Het watermerk voorkomt een terugwerkende vloedgolf. Ligt de vroegste
- * afgeronde sessie van een student vóór het watermerk, dan had die de
- * onboarding destijds al moeten sluiten; die slaan we bewust over en tellen
- * we als `eerdere_afgeronde_buiten_venster`, zodat het zichtbaar blijft in
- * plaats van stil te verdwijnen.
+ * ── AANLEIDING EN OORZAAK ZIJN TWEE DINGEN ───────────────────────────────
+ * Het watermerk voorkomt een terugwerkende vloedgolf: alleen een student met
+ * een afgeronde sessie NA het watermerk komt in aanmerking. Dat is de
+ * AANLEIDING.
+ *
+ * Wat er vervolgens wordt vastgelegd is de OORZAAK: de vroegste afgeronde
+ * sessie van die student, ook als die vóór het watermerk ligt. Want die maakte
+ * het onboarden af — de latere sessie attendeerde ons er alleen op.
+ *
+ * Die twee zijn eerder samengevallen, en dat was fout. De eerste versie liet
+ * een kandidaat vallen zodra hij niet zelf de vroegste was, en telde dat als
+ * `eerdere_afgeronde_buiten_venster`. Gevolg: een student met een afgeronde
+ * sessie vóór het watermerk kon NOOIT meer sluiten — niet bij de tweede sessie,
+ * niet bij de tiende. Geen overgeslagen inhaalslag maar een permanent gat, en
+ * alleen zichtbaar als een teller waar niets mee gebeurde.
+ *
+ * De grens blijft waar hij hoort: heeft een student ALLEEN sessies van vóór
+ * het watermerk en daarna niets meer, dan is er geen aanleiding en gebeurt er
+ * niets. Dat is het verschil tussen dit dichten en alsnog over de historie
+ * lopen.
+ *
+ * Elke teruggegeven rij draagt daarom allebei: `id`/`start_tijd` van de
+ * oorzaak, en `aanleiding_id`/`aanleiding_op` van de sessie die in het venster
+ * viel. De aanroeper legt de oorzaak vast en verzet zijn watermerk op de
+ * aanleiding — anders zou het watermerk terug in de tijd willen.
  *
  * @param {{sindsIso: string, limiet?: number, client?: object}} arg
  */
 export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_LIMIET, client = null }) {
   const leeg = {
     bron_status: BRON_ONBEREIKBAAR, sessies: [],
-    totaal_afgerond: 0, eerdere_afgeronde_buiten_venster: 0,
+    totaal_afgerond: 0, gesloten_op_eerdere_sessie: 0,
     zonder_bubble_koppeling: 0, fout: null,
   };
 
@@ -531,16 +551,36 @@ export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_
     return { ...leeg, bron_status: BRON_ONBEREIKBAAR, fout: msg };
   }
 
-  const echtEerste = kandidaten.filter((r) => {
-    const v = vroegsteAfgerond.get(String(r.student_id));
-    return v && v.id === String(r.id);
-  });
-  const buitenVenster = kandidaten.length - echtEerste.length;
+  // Eén rij per student: de vroegste afgeronde sessie als OORZAAK, de laatste
+  // kandidaat binnen het venster als AANLEIDING. Kandidaten komen oplopend
+  // binnen, dus de laatste overschrijving is de hoogste — en daarmee de waarde
+  // waarop de aanroeper zijn watermerk mag verzetten zonder rijen over te
+  // slaan.
+  const perStudent = new Map();
+  for (const r of kandidaten) {
+    const sid = String(r.student_id);
+    const oorzaak = vroegsteAfgerond.get(sid);
+    if (!oorzaak) continue; // kan niet: stap 2 zag deze rij ook. Defensief.
+    const bestaand = perStudent.get(sid);
+    perStudent.set(sid, {
+      id            : oorzaak.id,
+      start_tijd    : oorzaak.start_tijd,
+      student_id    : sid,
+      aanleiding_id : String(r.id),
+      aanleiding_op : new Date(r.start_tijd).toISOString(),
+      // Sluit deze onboarding op een sessie van vóór het watermerk? Dan is het
+      // vermeldenswaard, maar geen reden om 'm te laten liggen.
+      op_eerdere_sessie: oorzaak.id !== String(r.id)
+        ? true : (bestaand?.op_eerdere_sessie || false),
+    });
+  }
+  const echtEerste = Array.from(perStudent.values());
+  const opEerdereSessie = echtEerste.filter((r) => r.op_eerdere_sessie).length;
 
   if (echtEerste.length === 0) {
     return { ...leeg, bron_status: BRON_GELEZEN,
       totaal_afgerond: kandidaten.length,
-      eerdere_afgeronde_buiten_venster: buitenVenster, fout: null };
+      gesloten_op_eerdere_sessie: opEerdereSessie, fout: null };
   }
 
   // 3) De brug naar het CRM erbij.
@@ -566,8 +606,13 @@ export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_
     const brug = String(stu?.bubble_user_id || '').trim();
     if (!brug) { zonderBrug++; continue; }
     sessies.push({
+      // OORZAAK — dit is wat de aanroeper vastlegt.
       id: String(r.id),
       start_tijd: new Date(r.start_tijd).toISOString(),
+      // AANLEIDING — hierop verzet de aanroeper zijn watermerk.
+      aanleiding_id: String(r.aanleiding_id),
+      aanleiding_op: String(r.aanleiding_op),
+      op_eerdere_sessie: !!r.op_eerdere_sessie,
       student_id: String(r.student_id),
       bubble_user_id: brug,
       email: String(stu?.email || '').trim().toLowerCase() || null,
@@ -579,7 +624,7 @@ export async function haalAfgerondeEersteSessies({ sindsIso, limiet = STANDAARD_
   return {
     bron_status: BRON_GELEZEN, sessies,
     totaal_afgerond: kandidaten.length,
-    eerdere_afgeronde_buiten_venster: buitenVenster,
+    gesloten_op_eerdere_sessie: opEerdereSessie,
     zonder_bubble_koppeling: zonderBrug,
     fout: null,
   };

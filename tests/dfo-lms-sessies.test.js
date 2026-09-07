@@ -431,20 +431,50 @@ test('REGEL: geen soort-onderscheid — elke afgeronde coachingsessie telt', asy
   assert.equal(r.sessies.length, 1);
 });
 
-test('WATERMERK: een afgeronde sessie VÓÓR het watermerk sluit niets af', async () => {
+test('DE GRENS: alleen sessies van vóór het watermerk en daarna niets = ONAANGERAAKT', async () => {
+  // Dit is de belangrijkste test van dit bestand.
+  //
+  // Sinds we een student met een afgeronde sessie vóór het watermerk WEL
+  // kunnen sluiten (zodra er een nieuwe sessie binnenkomt), ligt hier de enige
+  // grens tussen "een gat dichten" en "alsnog een inhaalslag over de historie
+  // doen". Zonder aanleiding NA het watermerk gebeurt er niets — hoeveel
+  // afgeronde sessies er in het verleden ook staan.
+  //
+  // Zou die grens ooit wegvallen, dan sluit één cron-run in één keer de
+  // onboardings van honderd bestaande klanten. Precies wat Maxim bij de
+  // eerste uitrol uitdrukkelijk verboden heeft.
+  //
+  // Eerlijk over wat deze test WEL en NIET dekt: de grens ligt op twee
+  // plekken, in de bevraging (`.gt('start_tijd', sindsIso)`) en nog eens in
+  // JS. De neppe databank negeert bevragings-filters, dus wat hier wordt
+  // vastgelegd is de JS-laag. Dat is bewust de laag die zonder databank
+  // toetsbaar is — en de reden dat die tweede laag er überhaupt staat.
   const r = await haalAfgerondeEersteSessies({
     sindsIso: WM,
     client: clientMet({
-      sessies: [ses('oud', '2026-08-01T10:00:00.000Z', 'afgerond')],
+      sessies: [
+        ses('oud-1', '2026-08-01T10:00:00.000Z', 'afgerond'),
+        ses('oud-2', '2026-08-15T10:00:00.000Z', 'afgerond'),
+        ses('oud-3', '2026-08-25T10:00:00.000Z', 'afgerond'),
+      ],
       studenten: [student({ id: 'stu-1', bubble_user_id: 'bub-1' })],
     }),
   });
+  assert.equal(r.bron_status, BRON_GELEZEN, 'de bron is gelezen — nul is hier een feit');
   assert.equal(r.sessies.length, 0, 'geen terugwerkende vloedgolf');
+  assert.equal(r.totaal_afgerond, 0, 'geen enkele kandidaat: er is niets ná het watermerk');
+  assert.equal(r.gesloten_op_eerdere_sessie, 0);
 });
 
-test('WATERMERK: ligt de vroegste afgeronde erbuiten, dan telt de latere NIET mee', async () => {
-  // De onboarding had destijds al gesloten moeten worden. Dat alsnog doen zou
-  // vandaag een oude gebeurtenis als nieuw laten lijken. Wel zichtbaar tellen.
+test('VROEGSTE VÓÓR het watermerk + één ERNA = sluiten, op de VROEGSTE sessie', async () => {
+  // Dit was het gat. De vorige versie liet deze student vallen omdat zijn
+  // vroegste afgeronde sessie buiten het venster lag — en dat gold dan voor
+  // ELKE volgende sessie, dus die onboarding stond eeuwig open.
+  //
+  // De sessie ná het watermerk is de AANLEIDING (daarom kijken we), de sessie
+  // ervoor is de OORZAAK (die maakte het onboarden af). Vastleggen doen we de
+  // oorzaak; anders staat er in het dossier een datum waarop niets bijzonders
+  // gebeurde.
   const r = await haalAfgerondeEersteSessies({
     sindsIso: WM,
     client: clientMet({
@@ -455,8 +485,47 @@ test('WATERMERK: ligt de vroegste afgeronde erbuiten, dan telt de latere NIET me
       studenten: [student({ id: 'stu-1', bubble_user_id: 'bub-1' })],
     }),
   });
-  assert.equal(r.sessies.length, 0);
-  assert.equal(r.eerdere_afgeronde_buiten_venster, 1, 'wat wegvalt moet zichtbaar blijven');
+  assert.equal(r.sessies.length, 1, 'deze onboarding MOET sluiten');
+  assert.equal(r.sessies[0].id, 'oud', 'de vastgelegde oorzaak is de VROEGSTE afgeronde sessie');
+  assert.equal(r.sessies[0].start_tijd, '2026-08-01T10:00:00.000Z');
+  assert.equal(r.sessies[0].aanleiding_id, 'nieuw', 'de aanleiding is de sessie in het venster');
+  assert.equal(r.sessies[0].aanleiding_op, '2026-09-10T10:00:00.000Z');
+  assert.equal(r.sessies[0].op_eerdere_sessie, true);
+  assert.equal(r.gesloten_op_eerdere_sessie, 1, 'zichtbaar dat de oorzaak ouder is dan het watermerk');
+});
+
+test('AANLEIDING is de HOOGSTE sessie in het venster, niet de eerste', async () => {
+  // De aanroeper verzet zijn watermerk hierop. Zou dit de laagste zijn, dan
+  // bleven de sessies daartussen elke ochtend terugkomen en groeit het venster
+  // tot het de limiet raakt — waarna nieuwe sessies er stil buiten vallen.
+  const r = await haalAfgerondeEersteSessies({
+    sindsIso: WM,
+    client: clientMet({
+      sessies: [
+        ses('oud',  '2026-08-01T10:00:00.000Z', 'afgerond'),
+        ses('mid',  '2026-09-10T10:00:00.000Z', 'afgerond'),
+        ses('laat', '2026-09-12T10:00:00.000Z', 'afgerond'),
+      ],
+      studenten: [student({ id: 'stu-1', bubble_user_id: 'bub-1' })],
+    }),
+  });
+  assert.equal(r.sessies.length, 1, 'één rij per student');
+  assert.equal(r.sessies[0].id, 'oud', 'oorzaak blijft de vroegste');
+  assert.equal(r.sessies[0].aanleiding_op, '2026-09-12T10:00:00.000Z');
+});
+
+test('vroegste ná het watermerk: oorzaak en aanleiding vallen samen', async () => {
+  const r = await haalAfgerondeEersteSessies({
+    sindsIso: WM,
+    client: clientMet({
+      sessies: [ses('enige', '2026-09-10T10:00:00.000Z', 'afgerond')],
+      studenten: [student({ id: 'stu-1', bubble_user_id: 'bub-1' })],
+    }),
+  });
+  assert.equal(r.sessies[0].id, 'enige');
+  assert.equal(r.sessies[0].aanleiding_id, 'enige');
+  assert.equal(r.sessies[0].op_eerdere_sessie, false);
+  assert.equal(r.gesloten_op_eerdere_sessie, 0);
 });
 
 test('twee studenten krijgen elk hun eigen vroegste afgeronde', async () => {
