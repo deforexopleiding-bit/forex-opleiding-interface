@@ -483,7 +483,7 @@ async function bouwDekking({ pogingen, taakVan, dagen, vandaag, blindeVlekken })
     blindeVlekken.push({
       sectie: 'dekking',
       wat   : 'Hoeveel leads er op een dag in het verleden actie nodig hadden, is niet te zeggen.',
-      waarom: 'De werklijst van een voorbije dag is niet bewaard: due wordt door de doorrol-cron overschreven, en twee van de statusovergangen hebben geen eigen tijdstempel. Wat hieronder staat is wie er wél moeite kreeg — dat volgt wel uit tijdstempels.',
+      waarom: 'De werklijst van een voorbije dag is niet bewaard: due wordt door de doorrol-cron overschreven, en twee van de statusovergangen hebben geen eigen tijdstempel. Wat hieronder staat is welke leads minstens één poging kregen — dat volgt wel uit tijdstempels.',
     });
   }
 
