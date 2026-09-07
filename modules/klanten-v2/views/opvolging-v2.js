@@ -1188,6 +1188,15 @@
 .opv .nudoen .nudl{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px;color:var(--o-muted);white-space:nowrap}
 .opv .nudoen.laat .nudl{color:var(--o-amb)}
 .opv .ronde{font-size:12.5px;color:var(--o-muted);margin:0 0 10px 2px}
+.opv .rnd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;width:100%;
+  margin:0 0 8px;padding:5px 9px;border-radius:7px;font-size:12px;line-height:1.45}
+.opv .rnd b{font-size:12.5px;letter-spacing:.01em}
+.opv .rnd span{color:var(--o-muted)}
+.opv .rnd .terug{font-style:italic}
+.opv .rnd.rA{background:#eef4ff;color:#1e3a8a}
+.opv .rnd.rA b{color:#1d4ed8}
+.opv .rnd.rB{background:#fff4e6;color:#7c3a03}
+.opv .rnd.rB b{color:#b45309}
 .opv .ronde.zacht{margin:8px 0 0 2px;font-size:11.5px;font-style:italic}
 .opv .row{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:13px 16px;display:flex;align-items:flex-start;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
 .opv .row .who{flex:1;min-width:0}
@@ -1485,7 +1494,9 @@
     const r = REDEN_LABEL[t.reden] || [t.reden, 't-grey'];
     const nuDag = vandaag();
     if (inGroep) return taakKaartRustig(t, dag, nuDag);
-    return '<div class="row"><div class="who">' +
+    return '<div class="row">' +
+      (t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '') +
+      '<div class="who">' +
       '<div class="nm">' + esc(t.naam) +
         ' <span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
         (t.reden_code ? ' <span class="tag t-grey">' + esc(t.reden_code) + '</span>' : '') +
@@ -1531,7 +1542,9 @@
         ? '<span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
       vensterAfwijking(t, dag);
 
-    return '<div class="row rst"><div class="who">' +
+    return '<div class="row rst">' +
+      (t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '') +
+      '<div class="who">' +
       '<div class="nm2">' + esc(t.naam) +
         (t.bevestigd_op ? ' ' + bevestigdBadge(t) : '') + '</div>' +
       '<div class="mt2">' +
@@ -2338,6 +2351,48 @@
 
   /** De eventgegevens die de cron in bron_ref heeft gezet. */
   const evVan = (t) => (t && t.bron_ref) || {};
+
+  /**
+   * IN WELKE RONDE ZIT DEZE KAART? — tweeling van bepaalRonde() in
+   * api/_lib/opvolging-aanmelding.js. Een browser-view kan daar niet uit
+   * importeren; tests/opvolging-ronde-tweeling.test.js houdt de twee gelijk.
+   *
+   * Het scherm zei dit nergens, en daardoor werd de kaart verkeerd gelezen:
+   * 'Bevestigd' lijkt de kaart te laten verdwijnen, terwijl de code hem
+   * doorschuift naar event min vier. De knop deed al het goede; alleen was dat
+   * onzichtbaar. Dit etiket zegt wat de code al doet — het verandert niets aan
+   * het gedrag.
+   */
+  const WAKKER_DAGEN_VOOR_EVENT = 4;
+
+  function bepaalRonde(eventDag, nuDag) {
+    if (!eventDag || !nuDag) return null;
+    const ms = Date.parse(eventDag + 'T12:00:00Z');
+    if (!Number.isFinite(ms)) return null;
+    const wakker = new Date(ms - WAKKER_DAGEN_VOOR_EVENT * 86400000).toISOString().slice(0, 10);
+    if (nuDag >= wakker) {
+      return { ronde: 'B', label: 'Bevestigingsronde',
+        uitleg: 'Komt hij echt? Dit is de laatste ronde voor het event.',
+        laatste: true, terug_op: null };
+    }
+    return { ronde: 'A', label: 'Opwarmronde',
+      uitleg: 'Check of de inschrijving gelukt is en of alles duidelijk is.',
+      laatste: false, terug_op: wakker };
+  }
+
+  /** Het strookje bovenaan de aanmeldkaart. Geen eventdag = geen etiket. */
+  function rondeStrook(t, nuDag) {
+    const r = bepaalRonde(evVan(t).event_dag || null, nuDag);
+    if (!r) return '';
+    return '<div class="rnd r' + r.ronde + '">' +
+      '<b>' + esc(r.label) + '</b>' +
+      '<span>' + esc(r.uitleg) + '</span>' +
+      (r.terug_op
+        ? '<span class="terug">Na &#8220;Bevestigd&#8221; komt deze kaart terug op ' + esc(nl(r.terug_op)) + '.</span>'
+        : '<span class="terug">Na &#8220;Bevestigd&#8221; is deze kaart klaar.</span>') +
+      '</div>';
+  }
+
 
   /**
    * Kaarten groeperen per event, op eventdatum. De groepskop draagt de context
