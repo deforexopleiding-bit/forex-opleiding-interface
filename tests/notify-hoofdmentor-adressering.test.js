@@ -5,11 +5,13 @@
 // iemand kort op zitten om te voorkomen dat het een wanbetaler wordt, en dat
 // is een andere verantwoordelijkheid dan het opvolgen van een gewone no-show.
 //
-// De rol 'hoofdmentor' bestaat nog niet, en `profiles.role` is enkelvoudig —
-// iemand die rol geven zou zijn huidige rol wegnemen. Daarom loopt de
-// adressering via een RECHT, dat aan een rol óf aan een persoon gegeven kan
-// worden. Deze tests bewaken dat die keuze niet stilletjes verschuift naar
-// twee namen in de code of terug naar de sessie-mentor.
+// De rol 'hoofdmentor' bestaat nog niet en staat ook niet in
+// VALID_SUPABASE_ROLES, dus invoeren is een migratie plus werk in het
+// gebruikersbeheer. Daarom loopt de adressering via een RECHT, dat aan een rol
+// óf aan een persoon gegeven kan worden. Deze tests bewaken dat die keuze niet
+// stilletjes verschuift naar twee namen in de code of terug naar de
+// sessie-mentor — en dat de rol-tak `user_roles` leest en niet de afgeleide
+// hoofdrol in `profiles.role`.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,20 +21,31 @@ import { resolveOntvangersVoorRecht } from '../api/_lib/notify.js';
 
 const KEY = 'signals.hoofdmentor.receive';
 
-/** Antwoordt per tabel; een Error laat die bevraging mislukken. */
+/**
+ * Antwoordt per tabel; een Error laat die bevraging mislukken.
+ * `bevraagd` houdt bij welke tabellen én welke kolom-filters langskwamen,
+ * zodat een test kan vastleggen WAAR de rol vandaan gehaald wordt.
+ */
 function nepDb(perTabel = {}) {
   const antwoord = (bron) => (bron instanceof Error
     ? { data: null, error: { message: bron.message } }
     : { data: bron || [], error: null });
-  return {
+  const bevraagd = [];
+  const db = {
+    bevraagd,
     from(tabel) {
+      const filters = [];
+      bevraagd.push({ tabel, filters });
       const k = {
-        select: () => k, eq: () => k, in: () => k,
+        select: () => k,
+        eq: (kolom) => { filters.push(kolom); return k; },
+        in: (kolom) => { filters.push(kolom); return k; },
         then: (res, rej) => Promise.resolve(antwoord(perTabel[tabel])).then(res, rej),
       };
       return k;
     },
   };
+  return db;
 }
 
 // ── 1) Het recht via een ROL ────────────────────────────────────────────────
@@ -40,7 +53,8 @@ function nepDb(perTabel = {}) {
 test('een rol met het recht levert alle actieve profielen met die rol op', async () => {
   const r = await resolveOntvangersVoorRecht(KEY, nepDb({
     role_permissions: [{ role: 'hoofdmentor', allowed: true }],
-    profiles: [{ id: 'u1', is_active: true }, { id: 'u2', is_active: true }],
+    user_roles: [{ user_id: 'u1' }, { user_id: 'u2' }],
+    profiles: [{ id: 'u1' }, { id: 'u2' }],
     user_permissions: [],
   }));
   assert.equal(r.ok, true);
@@ -48,10 +62,49 @@ test('een rol met het recht levert alle actieve profielen met die rol op', async
   assert.equal(r.viaRol, 2);
 });
 
+test('de rol wordt uit user_roles gehaald, niet uit de afgeleide profiles.role', async () => {
+  // Rollen zijn meervoudig: user_roles draagt ze allemaal, profiles.role is
+  // daar de afgeleide HOOFDrol van. Wie 'hoofdmentor' als tweede rol heeft
+  // staat dus NIET in profiles.role. Zou deze functie daarop filteren, dan
+  // kreeg die persoon geen bericht — stil, en pas merkbaar als er een eerste
+  // call gemist is.
+  const db = nepDb({
+    role_permissions: [{ role: 'hoofdmentor', allowed: true }],
+    user_roles: [{ user_id: 'tweede-rol' }],
+    profiles: [{ id: 'tweede-rol' }],
+    user_permissions: [],
+  });
+  const r = await resolveOntvangersVoorRecht(KEY, db);
+  assert.deepEqual(r.userIds, ['tweede-rol']);
+
+  const rolTak = db.bevraagd.filter((b) => b.tabel === 'user_roles');
+  assert.equal(rolTak.length, 1, 'user_roles is niet bevraagd');
+  const profielTak = db.bevraagd.filter((b) => b.tabel === 'profiles');
+  for (const t of profielTak) {
+    assert.ok(!t.filters.includes('role'),
+      'er wordt op profiles.role gefilterd — dat mist ieders tweede rol');
+  }
+});
+
+test('een niet-actief profiel krijgt geen bericht', async () => {
+  // De profiles-tak filtert op is_active; de neppe databank levert alleen
+  // wat die filter overlaat, dus een lege profiles-uitkomst staat hier voor
+  // "iedereen met die rol is inactief".
+  const r = await resolveOntvangersVoorRecht(KEY, nepDb({
+    role_permissions: [{ role: 'hoofdmentor', allowed: true }],
+    user_roles: [{ user_id: 'weg' }],
+    profiles: [],
+    user_permissions: [],
+  }));
+  assert.deepEqual(r.userIds, []);
+  assert.equal(r.viaRol, 0);
+});
+
 test('een rol met allowed=false telt NIET mee', async () => {
   const r = await resolveOntvangersVoorRecht(KEY, nepDb({
     role_permissions: [{ role: 'hoofdmentor', allowed: false }],
-    profiles: [{ id: 'u1', is_active: true }],
+    user_roles: [{ user_id: 'u1' }],
+    profiles: [{ id: 'u1' }],
     user_permissions: [],
   }));
   assert.deepEqual(r.userIds, []);
@@ -74,7 +127,8 @@ test('rol én persoon samen leveren ieder één keer op', async () => {
   // blijft staan, dan mag niemand twee keer bericht krijgen.
   const r = await resolveOntvangersVoorRecht(KEY, nepDb({
     role_permissions: [{ role: 'hoofdmentor', allowed: true }],
-    profiles: [{ id: 'maxim', is_active: true }],
+    user_roles: [{ user_id: 'maxim' }],
+    profiles: [{ id: 'maxim' }],
     user_permissions: [{ user_id: 'maxim', allowed: true }],
   }));
   assert.deepEqual(r.userIds, ['maxim']);

@@ -64,11 +64,13 @@ function _now() { return new Date().toISOString(); }
  * een gemiste eerste call gaat bijvoorbeeld naar de hoofdmentor — niet naar
  * de mentor van die sessie.
  *
- * Die rol bestaat nog niet, en `profiles.role` is enkelvoudig: iemand
- * 'hoofdmentor' maken zou zijn huidige rol (manager, mentor, …) WEGNEMEN,
- * met gevolgen tot in de RLS-policies. Twee namen in de code zetten is de
- * andere kant van hetzelfde probleem: dan verhuist de beslissing naar een
- * deploy.
+ * Die rol bestaat nog niet. Rollen zijn wél meervoudig (`user_roles`), dus
+ * een EXTRA rol naast mentor zou op zichzelf kunnen — maar 'hoofdmentor'
+ * staat niet in VALID_SUPABASE_ROLES (api/_lib/roles.js) en de CHECK op
+ * user_roles.role / role_permissions.role laat 'm niet toe. Die rol invoeren
+ * is dus een migratie plus werk in het gebruikersbeheer, en dat is een aparte
+ * beslissing. Twee namen in de code zetten is de andere kant van hetzelfde
+ * probleem: dan verhuist de beslissing naar een deploy.
  *
  * Daarom adresseren we op een recht. Dat recht kan op twee manieren gegeven
  * worden, en deze functie leest ze allebei:
@@ -77,6 +79,11 @@ function _now() { return new Date().toISOString(); }
  *                            aan de code);
  *   - `user_permissions`  — aan één persoon (de weg voor nu; zie migratie
  *                            016 en het precedent in 044).
+ *
+ * Geen super_admin-omweg. `user_has_permission()` laat super_admins overal
+ * door, maar dat is een TOEGANGS-regel: mag je dit zien. Hier gaat het om
+ * ADRESSERING: wie hoort hierover gebeld te worden. Die twee mogen niet
+ * samenvallen, anders belandt elk zulk bericht ook bij het systeemaccount.
  *
  * Levert bewust GEEN terugval op een andere ontvanger. Heeft niemand het
  * recht, dan is de lege lijst het antwoord — de aanroeper hoort dat
@@ -97,7 +104,7 @@ export async function resolveOntvangersVoorRecht(featureKey, client = null) {
   let viaGebruiker = 0;
 
   try {
-    // 1) Rollen die dit recht hebben → de actieve profielen met die rol.
+    // 1) Rollen die dit recht hebben → de gebruikers met die rol.
     const { data: rp, error: rpErr } = await db
       .from('role_permissions')
       .select('role, allowed')
@@ -107,13 +114,28 @@ export async function resolveOntvangersVoorRecht(featureKey, client = null) {
     const rollen = (rp || []).filter((r) => r?.allowed !== false)
       .map((r) => r.role).filter(Boolean);
     if (rollen.length > 0) {
-      const { data: profs, error: pErr } = await db
-        .from('profiles')
-        .select('id, is_active')
-        .in('role', rollen)
-        .eq('is_active', true);
-      if (pErr) throw new Error('profiles: ' + pErr.message);
-      for (const p of (profs || [])) if (p?.id) { ids.add(String(p.id)); viaRol++; }
+      // BEWUST `user_roles` en NIET `profiles.role`. Rollen zijn meervoudig:
+      // user_roles draagt ze allemaal, profiles.role is daar de afgeleide
+      // HOOFDrol van (zie ROLE_PRIORITY in api/_lib/roles.js). Wie manager is
+      // als tweede rol staat dus wel in user_roles en niet in profiles.role.
+      // Dit is hetzelfde pad dat user_has_permission() (migratie 016) en de
+      // toRole-uitwaaiering hieronder volgen.
+      const { data: urs, error: urErr } = await db
+        .from('user_roles')
+        .select('user_id')
+        .in('role', rollen);
+      if (urErr) throw new Error('user_roles: ' + urErr.message);
+      const viaRolIds = Array.from(new Set(
+        (urs || []).map((r) => r?.user_id).filter(Boolean).map(String)));
+      if (viaRolIds.length > 0) {
+        const { data: profs, error: pErr } = await db
+          .from('profiles')
+          .select('id')
+          .in('id', viaRolIds)
+          .eq('is_active', true);
+        if (pErr) throw new Error('profiles: ' + pErr.message);
+        for (const p of (profs || [])) if (p?.id) { ids.add(String(p.id)); viaRol++; }
+      }
     }
 
     // 2) Personen die dit recht persoonlijk hebben.

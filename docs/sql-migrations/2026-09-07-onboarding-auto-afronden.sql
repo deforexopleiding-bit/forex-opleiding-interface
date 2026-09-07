@@ -51,27 +51,36 @@ COMMIT;
 -- deze wijziging: zonder deze rijen levert een gemiste eerste call wel een
 -- signaal op, maar gaat er GEEN bericht uit.
 --
--- Waarom een recht en geen rol: 'hoofdmentor' bestaat niet als rol, en
--- profiles.role is enkelvoudig — die rol geven zou de huidige rol (manager,
--- mentor, ...) wegnemen, met gevolgen tot in de RLS. Waarom geen namen in de
+-- Waarom een recht en geen rol: 'hoofdmentor' staat niet in
+-- VALID_SUPABASE_ROLES (api/_lib/roles.js) en de CHECK op user_roles.role laat
+-- 'm niet toe — die rol invoeren is een migratie plus werk in het
+-- gebruikersbeheer, en dat is een aparte beslissing. Waarom geen namen in de
 -- code: dan verhuist de beslissing naar een deploy.
 --
 -- Zodra de rol 'hoofdmentor' wél bestaat, volstaat één rij in
 -- role_permissions en kunnen deze persoonlijke rechten weg. De code hoeft
--- daarvoor niet te wijzigen.
+-- daarvoor niet te wijzigen: resolveOntvangersVoorRecht() leest role_permissions
+-- × user_roles én user_permissions, en dedupliceert.
 --
--- ⚠ CONTROLEER DE TWEE ADRESSEN voor je dit draait. maxim@deforexopleiding.nl
--- staat in de mentorlijst; gerber.forex@gmail.com is daar het adres van
--- Chesney Gerber, maar dat is afgeleid en niet bevestigd.
+-- CHESNEY staat met uuid in migratie 044 (softphone.use) — die nemen we over,
+-- geen gok op een e-mailadres. MAXIM gaat op e-mailadres; controleer met de
+-- SELECT hieronder dát die rij gevonden wordt vóór je de INSERT draait.
+
+-- Controle VOORAF — verwacht: 2 rijen (Chesney + Maxim).
+--   SELECT id, email, full_name, is_active FROM public.profiles
+--    WHERE id = '9f4cd827-9529-4647-bdd3-2db4cd340bab'
+--       OR lower(email) = 'maxim@deforexopleiding.nl';
 
 INSERT INTO public.user_permissions (user_id, feature_key, allowed)
 SELECT p.id, 'signals.hoofdmentor.receive', true
   FROM public.profiles p
- WHERE lower(p.email) IN ('maxim@deforexopleiding.nl', 'gerber.forex@gmail.com')
+ WHERE p.id = '9f4cd827-9529-4647-bdd3-2db4cd340bab'          -- Chesney (uit migratie 044)
+    OR lower(p.email) = 'maxim@deforexopleiding.nl'           -- Maxim
 ON CONFLICT (user_id, feature_key) DO UPDATE SET allowed = true;
 
--- Controleren wie het recht nu heeft:
---   SELECT p.email, up.allowed FROM public.user_permissions up
+-- Controle ACHTERAF — wie heeft het recht nu:
+--   SELECT p.email, p.full_name, up.allowed
+--     FROM public.user_permissions up
 --     JOIN public.profiles p ON p.id = up.user_id
 --    WHERE up.feature_key = 'signals.hoofdmentor.receive';
 

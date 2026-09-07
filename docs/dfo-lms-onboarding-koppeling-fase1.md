@@ -405,19 +405,32 @@ signaal met een type dat het onderscheid draagt is juister én routeerbaar.
 iemand kort op zitten om te voorkomen dat het een wanbetaler wordt, en dat is
 een andere verantwoordelijkheid dan het opvolgen van een gewone no-show.
 
-De rol *hoofdmentor* bestaat nog niet, en `profiles.role` is **enkelvoudig**:
-iemand die rol geven zou zijn huidige rol (manager, mentor, …) wegnemen, met
-gevolgen tot in `is_crm_staff()` en de RLS-policies. Twee namen in de code
-zetten is de andere kant van hetzelfde probleem — dan verhuist de beslissing
+De rol *hoofdmentor* bestaat nog niet. Rollen zijn wél **meervoudig** —
+`user_roles` draagt ze allemaal en `profiles.role` is daar de afgeleide
+hoofdrol van (`ROLE_PRIORITY` in `api/_lib/roles.js`) — dus een extra rol naast
+mentor zou op zichzelf kunnen. Maar 'hoofdmentor' staat niet in
+`VALID_SUPABASE_ROLES` en de CHECK op `user_roles.role` /
+`role_permissions.role` laat 'm niet toe: die rol invoeren is een migratie plus
+werk in het gebruikersbeheer, en dat is een aparte beslissing. Twee namen in de
+code zetten is de andere kant van het probleem — dan verhuist de beslissing
 naar een deploy.
 
 Daarom loopt de adressering via een **recht**: `signals.hoofdmentor.receive`.
 `resolveOntvangersVoorRecht()` in `api/_lib/notify.js` leest twee bronnen:
 
-- `role_permissions` — het recht aan een hele rol. Zodra 'hoofdmentor' bestaat
-  is één rij daar genoeg en verandert er niets aan de code.
+- `role_permissions` × `user_roles` — het recht aan een hele rol. Zodra
+  'hoofdmentor' bestaat is één rij daar genoeg en verandert er niets aan de
+  code. Bewust `user_roles` en niet `profiles.role`: wie de rol als *tweede*
+  rol heeft staat niet in die afgeleide kolom. Dit is hetzelfde pad dat
+  `user_has_permission()` (migratie 016) en de bestaande `toRole`-uitwaaiering
+  in `createNotification()` volgen.
 - `user_permissions` — het recht aan één persoon. De weg voor nu; zie
   migratie 016 en het precedent in 044.
+
+**Geen super_admin-omweg.** `user_has_permission()` laat super_admins overal
+door, maar dat is een *toegangs*-regel (mag je dit zien). Hier gaat het om
+*adressering* (wie hoort hierover gebeld te worden). Die twee laten samenvallen
+zou elk zulk bericht ook bij het systeemaccount laten belanden.
 
 **Geen terugval.** Heeft niemand het recht, dan gaat er geen bericht uit —
 niet naar de sessie-mentor, want daar mag het uitdrukkelijk niet heen. Het
