@@ -356,11 +356,16 @@ export function simulateEngine(snapshot, opts = {}) {
             const tier = nextSendTierAfter(run.workflow_id, step.step_order);
             const ladderMs = (tier != null && due) ? (ymdMs(due) + tier * DAY_MS) : null;
             const targetMs = ladderMs != null ? ladderMs : (tickMs + waitDays * DAY_MS);
-            // KLEM: nooit in het verleden of op "nu" — anders pikt de
-            // eerstvolgende uurtick de run meteen weer op (zie motor).
-            run.next_action_at = (targetMs > tickMs || disableWaitClamp)
-              ? new Date(Math.max(tickMs, targetMs)).toISOString()
-              : nextSendSlotIso(tickAt, officeHours, 1);
+            // KLEM: nooit in het VERLEDEN. Een doeldag die op vandaag valt mag
+            // blijven staan — dan vertrekt het bericht vandaag nog. Spiegelt de
+            // motor; de dagcap per kanaal is de rem, niet deze klem.
+            if (targetMs > tickMs || disableWaitClamp) {
+              run.next_action_at = new Date(Math.max(tickMs, targetMs)).toISOString();
+            } else if (msYmd(targetMs) === dayIso) {
+              run.next_action_at = new Date(tickMs).toISOString();
+            } else {
+              run.next_action_at = nextSendSlotIso(tickAt, officeHours, 1);
+            }
             run.current_step_id = nextStep ? nextStep.id : null;
             if (!nextStep) run.status = 'completed';
             break;

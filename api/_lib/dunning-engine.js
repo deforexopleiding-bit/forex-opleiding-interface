@@ -1709,16 +1709,33 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           const ladderIso = (nextTier != null)
             ? earliestSendIso(agg?.oldest_due_iso || null, nextTier)
             : null;
-          // KLEM: na een wait mag next_action_at NOOIT in het verleden (of op
-          // "nu") landen. Anders pikt de eerstvolgende UURLIJKSE tick de run
-          // meteen weer op en loopt een achterstallige klant de hele ladder in
-          // één ochtend af — de regressie die de ladder-wijziging introduceerde.
-          // Ligt de doeldag al achter ons, dan wordt het het eerstvolgende
-          // verzendslot op een LATERE dag.
+          // KLEM: na een wait mag next_action_at nooit in het VERLEDEN landen.
+          // Zonder klem pikt de eerstvolgende uurlijkse tick de run meteen weer
+          // op en loopt een achterstallige klant de hele ladder in één ochtend
+          // af — de regressie die de ladder-wijziging introduceerde.
+          //
+          // Maar de klem geldt alleen voor een doeldag die ECHT vóór vandaag
+          // ligt. Valt de ladderdag op VANDAAG, dan mag het bericht vandaag nog
+          // weg: `earliestSendIso()` levert UTC-middernacht van die dag, dus
+          // dat tijdstip ligt bijna altijd achter ons terwijl de dag zelf klopt.
+          // Doorschuiven naar morgen liet ronde 3 en ronde 5 telkens een dag te
+          // laat vertrekken (dag 15 i.p.v. 14, dag 31 i.p.v. 30).
+          //
+          // Dat is veilig: de rem tegen een inhaalgolf is de per-kanaal dagcap
+          // (1 WhatsApp + 1 e-mail per klant per kalenderdag), niet deze klem.
+          // Staan er tien ladderdagen tegelijk open, dan gaat er per kanaal nog
+          // steeds maar één bericht per dag uit.
           const targetMs = ladderIso ? Date.parse(ladderIso) : nextMs;
-          update.next_action_at = (Number.isFinite(targetMs) && targetMs > Date.now())
-            ? new Date(targetMs).toISOString()
-            : nextSendSlotIso(new Date(), officeHoursCfg, 1);
+          const nu       = Date.now();
+          if (!Number.isFinite(targetMs)) {
+            update.next_action_at = nextSendSlotIso(new Date(), officeHoursCfg, 1);
+          } else if (targetMs > nu) {
+            update.next_action_at = new Date(targetMs).toISOString();
+          } else if (todayIsoInTz(new Date(targetMs)) === todayIso) {
+            update.next_action_at = nowIso();          // vandaag nog, binnen het venster
+          } else {
+            update.next_action_at = nextSendSlotIso(new Date(), officeHoursCfg, 1);
+          }
           update.current_step_id = nextStep ? nextStep.id : null;
           if (!nextStep) {
             update.status = 'completed';

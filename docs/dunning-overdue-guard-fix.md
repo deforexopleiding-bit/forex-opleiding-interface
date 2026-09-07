@@ -245,11 +245,19 @@ tussen de stappen van een lopende run.
 Drie maatregelen, alle drie geleverd:
 
 1. **Wait-klem (oorzaak).** Na een `wait`-stap mag `next_action_at` nooit in
-   het verleden of op "nu" landen. Ligt de ladder-dag al achter ons, dan wordt
-   het het eerstvolgende verzendslot op een **latere** dag
-   (`nextSendSlotIso()` in `dunning-office-hours.js`). Dit repareert de
-   regressie bij de bron: zonder klem zette de wait `next_action_at = nu` en
-   pikte de eerstvolgende uurtick de run meteen weer op.
+   het **verleden** landen. Ligt de doeldag écht vóór vandaag, dan wordt het
+   het eerstvolgende verzendslot op een latere dag (`nextSendSlotIso()` in
+   `dunning-office-hours.js`). Dit repareert de regressie bij de bron: zonder
+   klem zette de wait `next_action_at = nu` en pikte de eerstvolgende uurtick
+   de run meteen weer op.
+
+   Valt de doeldag op **vandaag**, dan blijft hij staan en mag het bericht
+   vandaag nog weg. `earliestSendIso()` levert UTC-middernacht van de
+   ladderdag, dus dat tijdstip ligt bijna altijd achter ons terwijl de dag zelf
+   klopt; alles doorschuiven liet ronde 3 en ronde 5 telkens een dag te laat
+   vertrekken. Dat is veilig omdat de rem tegen een inhaalgolf de **dagcap**
+   is, niet de klem: staan er tien ladderdagen tegelijk open, dan gaat er per
+   kanaal nog steeds maar één bericht per dag uit.
 2. **Dagcap (permanent vangnet), PER KANAAL.** Hoogstens N berichten per klant
    per kalenderdag (Europe/Amsterdam) **per kanaal**,
    `app_settings.dunning_max_sends_per_day` (`{ whatsapp, email }`),
@@ -327,10 +335,10 @@ vanaf de vervaldatum; dag 0 is de vervaldag zelf.
 | 5 | wait | wacht 1 dag | 8 | 7 | −1 |
 | 6 | **task** | belmoment | 9 | 14 | **+5** |
 | 7 | wait | wacht 2 dagen | 9 | 14 | +5 |
-| 8 | whatsapp | `aanmaning_dag17` | 11 | 15 | **+4** |
-| 9 | email | Aanmaning dag 17 (E-mail) | 11 | 15 | **+4** |
-| 10 | **task** | belmoment | 11 | 15 | **+4** |
-| 11 | wait | wacht 4 dagen | 11 | 15 | +4 |
+| 8 | whatsapp | `aanmaning_dag17` | 11 | 14 | **+3** |
+| 9 | email | Aanmaning dag 17 (E-mail) | 11 | 14 | **+3** |
+| 10 | **task** | belmoment | 11 | 14 | **+3** |
+| 11 | wait | wacht 4 dagen | 11 | 14 | +3 |
 | 12 | whatsapp | `aanmaning_dag21` | 15 | 21 | **+6** |
 | 13 | email | Aanmaning dag 21 (E-mail) | 15 | 21 | **+6** |
 | 14 | **task** | belmoment | 15 | 21 | **+6** |
@@ -338,30 +346,25 @@ vanaf de vervaldatum; dag 0 is de vervaldag zelf.
 | 16 | wait | wacht 15 dagen | 15 | 21 | +6 |
 | 17 | **task** | belmoment | 30 | 30 | 0 |
 | 18 | wait | wacht 1 dag | 30 | 30 | 0 |
-| 19 | whatsapp | `aanmaning_dag37` | 31 | 31 | 0 |
-| 20 | email | Aanmaning dag 37 (E-mail) | 31 | 31 | 0 |
-| 21 | stop | stop | 31 | 31 | 0 |
+| 19 | whatsapp | `aanmaning_dag37` | 31 | 30 | **−1** |
+| 20 | email | Aanmaning dag 37 (E-mail) | 31 | 30 | **−1** |
+| 21 | stop | stop | 31 | 30 | −1 |
 
-Kop en staart komen op dezelfde dag uit; het midden rekt op. Twee dingen zijn
-niet vanzelfsprekend:
+**De vijf herinneringen landen exact op hun ladderdag: 1, 7, 14, 21 en 30.**
+Dat is het doel van deze PR, en de tabel laat zien dat het klopt.
 
-* **Ronde 2 gaat een dag naar voren.** De wait van 7 dagen bracht je vanaf dag
-  1 op dag 8; de ladder-sport van `aanmaning_dag14` is dag 7.
-* **Ronde 3 landt op dag 15, niet op 14.** Stap 6 wordt wakker op dag 14 (de
-  sport van `aanmaning_dag17`), en de wait op stap 7 mikt op diezelfde sport.
-  De klem laat `next_action_at` nooit op dezelfde dag landen, dus die schuift
-  naar dag 15.
-
-De staart komt toevallig samen uit: de wait van 15 dagen op stap 16 brengt je
-vanaf dag 15 op dag 30, en dat is precies de ladder-sport van
-`aanmaning_dag37`.
+* **Ronde 2 en ronde 5 gaan een dag naar voren** (8 → 7 en 31 → 30). De
+  wachtdagen brachten je telkens net voorbij de sport; de ladder brengt ze
+  terug op de dag die de ladder aanwijst.
+* **Ronde 3 en ronde 4 schuiven naar achteren** (11 → 14 en 15 → 21), omdat de
+  wachtdagen daar korter waren dan het gat tussen twee sporten.
+* **De taak-stappen schuiven mee** met de wait waar ze achter staan. Die
+  timing is geen doel van deze PR.
 
 ### Het script
 
-Omdat `next_action_at` na een wait nu op de **ladderdag van de eerstvolgende
-send-stap** mikt, verschuiven ook de stappen die tussen die wait en de volgende
-send staan — de bel-taken. Dit read-only script rekent per stap uit op welke
-dag na de vervaldatum hij landt, vóór en na deze branch:
+Dit read-only script rekent per stap uit op welke dag na de vervaldatum hij
+landt, vóór en na deze branch:
 
 ```
 SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \

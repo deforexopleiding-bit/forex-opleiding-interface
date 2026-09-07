@@ -67,44 +67,59 @@ test('PRODUCTIE "Aanmaningen": startdag blijft dag 1 — min_days_overdue is exp
   assert.equal(t.start_na, 1);
 });
 
+test('PRODUCTIE "Aanmaningen": de vijf rondes landen exact op hun ladderdag', () => {
+  // Dit is waar het om gaat: elke herinnering vertrekt op de dag die de ladder
+  // aanwijst — 1, 7, 14, 21, 30 — niet een dag later.
+  const t = aanmaningenTijdlijn();
+  const dagNa = (o) => t.rijen.find((r) => r.step_order === o).dag_na;
+  const rondes = [
+    [0, 1, 'aanmaning_dag7'],
+    [3, 7, 'aanmaning_dag14'],
+    [8, 14, 'aanmaning_dag17'],
+    [12, 21, 'aanmaning_dag21'],
+    [19, 30, 'aanmaning_dag37'],
+  ];
+  for (const [whatsappStap, sport, naam] of rondes) {
+    assert.equal(dagNa(whatsappStap), sport, `${naam} op dag ${sport}`);
+    // De e-mail van dezelfde ronde staat er direct achter en gaat mee.
+    assert.equal(dagNa(whatsappStap + 1), sport, `e-mail bij ${naam} op dezelfde dag`);
+  }
+});
+
 test('PRODUCTIE "Aanmaningen": de volledige tijdlijn, voor en na', () => {
   const t = aanmaningenTijdlijn();
   const perStap = Object.fromEntries(t.rijen.map((r) => [r.step_order, [r.dag_voor, r.dag_na]]));
   assert.deepEqual(perStap, {
-    0:  [1, 1],    1:  [1, 1],    2:  [1, 1],       // ronde 1 + wait
-    3:  [8, 7],    4:  [8, 7],    5:  [8, 7],       // ronde 2 gaat een dag NAAR VOREN
-    6:  [9, 14],                                    // eerste bel-taak: +5
+    0:  [1, 1],    1:  [1, 1],    2:  [1, 1],       // ronde 1 op sport dag 1
+    3:  [8, 7],    4:  [8, 7],    5:  [8, 7],       // ronde 2 op sport dag 7
+    6:  [9, 14],                                    // taak (timing buiten scope)
     7:  [9, 14],
-    8:  [11, 15],  9:  [11, 15],  10: [11, 15],     // ronde 3 + taak: +4
-    11: [11, 15],
-    12: [15, 21],  13: [15, 21],  14: [15, 21], 15: [15, 21],   // ronde 4 + 2 taken: +6
+    8:  [11, 14],  9:  [11, 14],  10: [11, 14],     // ronde 3 op sport dag 14
+    11: [11, 14],
+    12: [15, 21],  13: [15, 21],  14: [15, 21], 15: [15, 21],   // ronde 4 op sport dag 21
     16: [15, 21],
-    17: [30, 30],  18: [30, 30],                    // staart komt weer samen
-    19: [31, 31],  20: [31, 31],  21: [31, 31],
+    17: [30, 30],  18: [30, 30],
+    19: [31, 30],  20: [31, 30],  21: [31, 30],     // ronde 5 op sport dag 30
   });
 });
 
-test('PRODUCTIE "Aanmaningen": alleen het midden rekt op, de staart niet', () => {
+test('PRODUCTIE "Aanmaningen": ronde 3 en ronde 5 lopen niet meer een dag uit', () => {
+  // Vóór de klem-versoepeling landden deze twee een dag te laat (15 en 31),
+  // omdat hun ladderdag op "vandaag" viel en de klem alles doorschoof naar
+  // morgen. Nu vertrekken ze op hun eigen sport.
   const t = aanmaningenTijdlijn();
-  const verschil = (o) => t.rijen.find((r) => r.step_order === o).verschil;
-  assert.equal(verschil(0),   0, 'ronde 1 ongewijzigd');
-  assert.equal(verschil(3),  -1, 'ronde 2 een dag naar voren');
-  assert.equal(verschil(6),  +5, 'eerste bel-taak');
-  assert.equal(verschil(8),  +4, 'ronde 3');
-  assert.equal(verschil(10), +4, 'taak bij ronde 3');
-  assert.equal(verschil(12), +6, 'ronde 4');
-  assert.equal(verschil(14), +6, 'taken bij ronde 4');
-  assert.equal(verschil(17),  0, 'taak stap 17 blijft op dag 30');
-  assert.equal(verschil(19),  0, 'ronde 5 blijft op dag 31');
+  assert.equal(t.rijen.find((r) => r.step_order === 8).dag_na, 14, 'ronde 3, niet 15');
+  assert.equal(t.rijen.find((r) => r.step_order === 19).dag_na, 30, 'ronde 5, niet 31');
 });
 
-test('PRODUCTIE "Aanmaningen": de wait op stap 7 kan niet op dezelfde dag uitkomen', () => {
-  // Stap 6 landt op dag 14 (de sport van aanmaning_dag17). De wait op stap 7
-  // mikt op diezelfde sport, dus de klem schuift 'm naar dag 15 — daarom
-  // vertrekt ronde 3 op 15 en niet op 14.
+test('PRODUCTIE "Aanmaningen": een wait die op de huidige dag uitkomt blijft staan', () => {
+  // Stap 6 (taak) landt op dag 14. De wait op stap 7 mikt op de sport van
+  // aanmaning_dag17, óók dag 14 — dat mag blijven staan, want de doeldag ligt
+  // niet in het verleden.
   const t = aanmaningenTijdlijn();
   assert.equal(t.rijen.find((r) => r.step_order === 6).dag_na, 14);
-  assert.equal(t.rijen.find((r) => r.step_order === 8).dag_na, 15);
+  assert.equal(t.rijen.find((r) => r.step_order === 7).dag_na, 14);
+  assert.equal(t.rijen.find((r) => r.step_order === 8).dag_na, 14);
 });
 
 // ── Synthetische variant: de drie richtingen van de verschuiving ──────────
@@ -202,6 +217,30 @@ test('taak na een wait die precies op de ladderdag uitkomt verschuift niet', () 
   assert.equal(dagVan(t, 6, 'dag_voor'), 14);
   assert.equal(dagVan(t, 6, 'dag_na'), 14);
   assert.equal(dagVan(t, 6, 'verschil'), 0);
+});
+
+test('KLEM: een doeldag die op de huidige dag valt schuift NIET door naar morgen', () => {
+  // De send-stap na de taak deelt zijn ladderdag met de taak. Vroeger schoof de
+  // klem die naar de volgende dag; nu vertrekt het bericht op zijn eigen sport.
+  const t = tijdlijn(6);
+  assert.equal(dagVan(t, 6, 'dag_na'), 14, 'taak op dag 14');
+  assert.equal(dagVan(t, 7, 'dag_na'), 14, 'de send erna óók op dag 14');
+});
+
+test('KLEM: een doeldag die ECHT in het verleden ligt schuift wél door', () => {
+  const rijen = loopStappen({
+    steps: [
+      { step_order: 0, step_type: 'whatsapp', config: { template_id: 'w21' } },
+      { step_order: 1, step_type: 'wait',     config: { days: 0 } },
+      { step_order: 2, step_type: 'whatsapp', config: { template_id: 'w14' } },
+    ],
+    templates: { w21: { meta_template_name: 'aanmaning_dag21' }, w14: { meta_template_name: 'aanmaning_dag14' } },
+    ladder: DEFAULT_LADDER, caps: { whatsapp: 1, email: 1 }, startDay: 21,
+  });
+  assert.equal(rijen[0].dag, 21);
+  // De volgende send hoort bij sport dag 7 — die ligt achter ons, dus de klem
+  // schuift naar de volgende dag (en de dagcap zou 'm daar sowieso houden).
+  assert.equal(rijen[2].dag, 22);
 });
 
 test('taak na een LANGE wait schuift juist NAAR VOREN', () => {

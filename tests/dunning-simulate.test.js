@@ -578,3 +578,135 @@ test('KOPPEL: de wait-klem is de eerste rem, de dagcap het vangnet', () => {
   assert.equal(dag1.length, 2, 'alleen ronde 1 op dag 1, ondanks een ruime cap');
   assert.deepEqual(dag1.map((m) => m.channel).sort(), ['email', 'whatsapp']);
 });
+
+// ── DE ECHTE WORKFLOW "Aanmaningen" DOOR DE SIMULATOR ─────────────────────
+//
+// Stapconfiguratie uitgelezen uit productie (9805c900-1c74-4326-9d15-a1e49f754eb0),
+// 22 stappen, trigger_conditions { min_days_overdue: 1 }. Deze tests leggen
+// vast dat elke herinnering op zijn eigen ladderdag vertrekt.
+const AANM_TPL = {
+  w7:  { id: 'w7',  name: 'Aanmaning WA dag 7',        meta_template_name: 'aanmaning_dag7'  },
+  e7:  { id: 'e7',  name: 'Aanmaning dag 7 (E-mail)',  meta_template_name: null },
+  w14: { id: 'w14', name: 'Aanmaning WA dag 14',       meta_template_name: 'aanmaning_dag14' },
+  e14: { id: 'e14', name: 'Aanmaning dag 14 (E-mail)', meta_template_name: null },
+  w17: { id: 'w17', name: 'Aanmaning WA dag 17',       meta_template_name: 'aanmaning_dag17' },
+  e17: { id: 'e17', name: 'Aanmaning dag 17 (E-mail)', meta_template_name: null },
+  w21: { id: 'w21', name: 'Aanmaning WA dag 21',       meta_template_name: 'aanmaning_dag21' },
+  e21: { id: 'e21', name: 'Aanmaning dag 21 (E-mail)', meta_template_name: null },
+  w37: { id: 'w37', name: 'Aanmaning WA dag 37',       meta_template_name: 'aanmaning_dag37' },
+  e37: { id: 'e37', name: 'Aanmaning dag 37 (E-mail)', meta_template_name: null },
+};
+
+const AANM_STEPS = [
+  { id: 'a0',  step_order: 0,  step_type: 'whatsapp', config: { template_id: 'w7'  } },
+  { id: 'a1',  step_order: 1,  step_type: 'email',    config: { template_id: 'e7'  } },
+  { id: 'a2',  step_order: 2,  step_type: 'wait',     config: { days: 7 } },
+  { id: 'a3',  step_order: 3,  step_type: 'whatsapp', config: { template_id: 'w14' } },
+  { id: 'a4',  step_order: 4,  step_type: 'email',    config: { template_id: 'e14' } },
+  { id: 'a5',  step_order: 5,  step_type: 'wait',     config: { days: 1 } },
+  { id: 'a6',  step_order: 6,  step_type: 'task',     config: { title: 'belmoment' } },
+  { id: 'a7',  step_order: 7,  step_type: 'wait',     config: { days: 2 } },
+  { id: 'a8',  step_order: 8,  step_type: 'whatsapp', config: { template_id: 'w17' } },
+  { id: 'a9',  step_order: 9,  step_type: 'email',    config: { template_id: 'e17' } },
+  { id: 'a10', step_order: 10, step_type: 'task',     config: { title: 'belmoment' } },
+  { id: 'a11', step_order: 11, step_type: 'wait',     config: { days: 4 } },
+  { id: 'a12', step_order: 12, step_type: 'whatsapp', config: { template_id: 'w21' } },
+  { id: 'a13', step_order: 13, step_type: 'email',    config: { template_id: 'e21' } },
+  { id: 'a14', step_order: 14, step_type: 'task',     config: { title: 'belmoment' } },
+  { id: 'a15', step_order: 15, step_type: 'task',     config: { title: 'taak' } },
+  { id: 'a16', step_order: 16, step_type: 'wait',     config: { days: 15 } },
+  { id: 'a17', step_order: 17, step_type: 'task',     config: { title: 'belmoment' } },
+  { id: 'a18', step_order: 18, step_type: 'wait',     config: { days: 1 } },
+  { id: 'a19', step_order: 19, step_type: 'whatsapp', config: { template_id: 'w37' } },
+  { id: 'a20', step_order: 20, step_type: 'email',    config: { template_id: 'e37' } },
+  { id: 'a21', step_order: 21, step_type: 'stop',     config: {} },
+];
+
+/** Snapshot met één klant die vandaag precies `dagenTeLaat` dagen te laat is. */
+function aanmaningenSnapshot(dagenTeLaat, { today = '2026-09-07' } = {}) {
+  const due = new Date(Date.parse(`${today}T00:00:00Z`) - dagenTeLaat * 86400000)
+    .toISOString().slice(0, 10);
+  return {
+    today,
+    settings: {
+      graceDays: 0, cooldownDays: 7, maxSendsPerDay: { whatsapp: 1, email: 1 },
+      ladder: DEFAULT_LADDER,
+      officeHours: { tz: 'Europe/Amsterdam', start: '08:00', end: '20:00', days: [0,1,2,3,4,5,6] },
+    },
+    templates: AANM_TPL,
+    workflows: [{
+      id: 'wf-aanm', name: 'Aanmaningen', priority: 10,
+      trigger_conditions: { min_days_overdue: 1 }, steps: AANM_STEPS,
+    }],
+    customers: [{
+      id: 'K', name: 'Klant K', is_company: false, stage_slug: 'nieuw',
+      invoices: [{ id: 'inv-K', invoice_number: '2026/K', due_date: due, open_amount: 750 }],
+    }],
+    runs: [], everRan: [], lastSendByCustomer: {}, blockedCustomers: [], breachedByCustomer: {},
+  };
+}
+
+test('AANMANINGEN: de vijf rondes vertrekken op dag 1, 7, 14, 21 en 30', () => {
+  // Klant is vandaag 1 dag te laat; we volgen hem 35 dagen.
+  const r = simulateEngine(aanmaningenSnapshot(1), { horizonDays: 35 });
+  const dagVanaf = (datum) => Math.round(
+    (Date.parse(`${datum}T00:00:00Z`) - Date.parse('2026-09-06T00:00:00Z')) / 86400000
+  );
+  const perTemplate = {};
+  for (const m of r.messages) {
+    perTemplate[m.template] = perTemplate[m.template] ?? dagVanaf(m.date);
+  }
+  assert.equal(perTemplate['aanmaning_dag7'],  1);
+  assert.equal(perTemplate['aanmaning_dag14'], 7);
+  assert.equal(perTemplate['aanmaning_dag17'], 14);
+  assert.equal(perTemplate['aanmaning_dag21'], 21);
+  assert.equal(perTemplate['aanmaning_dag37'], 30);
+});
+
+test('AANMANINGEN: elke ronde is een compleet WhatsApp+e-mail-koppel op één dag', () => {
+  const r = simulateEngine(aanmaningenSnapshot(1), { horizonDays: 35 });
+  const perDag = {};
+  for (const m of r.messages) (perDag[m.date] ||= []).push(m.channel);
+  const dagen = Object.keys(perDag).sort();
+  assert.equal(dagen.length, 5, 'vijf verzenddagen, één per ronde');
+  for (const d of dagen) {
+    assert.deepEqual(perDag[d].sort(), ['email', 'whatsapp'], `${d}: koppel compleet`);
+  }
+  assert.equal(r.same_day_bursts.length, 0);
+});
+
+test('AANMANINGEN: geen enkele ronde loopt een dag uit door de wait-klem', () => {
+  // Ronde 3 (na de taak op stap 6) en ronde 5 (na de taak op stap 17) deelden
+  // hun ladderdag met een taak-stap. Vroeger schoof de klem ze een dag door.
+  const r = simulateEngine(aanmaningenSnapshot(1), { horizonDays: 35 });
+  const datumVan = (tpl) => r.messages.find((m) => m.template === tpl).date;
+  assert.equal(datumVan('aanmaning_dag17'), '2026-09-20', 'dag 14, niet 15');
+  assert.equal(datumVan('aanmaning_dag37'), '2026-10-06', 'dag 30, niet 31');
+});
+
+test('AANMANINGEN: 60 dagen te laat → hoogstens 1 WhatsApp én 1 e-mail per dag', () => {
+  // Alle vijf sporten zijn gepasseerd. De dagcap is nu de rem: per kanaal één
+  // bericht per kalenderdag, dus de reeks wordt uitgesmeerd in plaats van in
+  // één ochtend afgevuurd.
+  const snap = aanmaningenSnapshot(60);
+  snap.runs = [{
+    id: 'run-K', workflow_id: 'wf-aanm', customer_id: 'K', status: 'active',
+    current_step_id: 'a0', next_action_at: '2026-09-07T00:00:00Z', needs_attention: false,
+  }];
+  const r = simulateEngine(snap, { horizonDays: 14 });
+
+  const perDagPerKanaal = {};
+  for (const m of r.messages) {
+    const k = `${m.date}|${m.channel}`;
+    perDagPerKanaal[k] = (perDagPerKanaal[k] || 0) + 1;
+  }
+  for (const [k, n] of Object.entries(perDagPerKanaal)) {
+    assert.ok(n <= 1, `${k}: ${n} berichten — de dagcap is doorbroken`);
+  }
+  assert.equal(r.same_day_bursts.length, 0, 'nooit twee van hetzelfde kanaal op één dag');
+  // Alle vijf de rondes gaan uiteindelijk uit, uitgesmeerd over losse dagen.
+  assert.equal(r.messages.filter((m) => m.channel === 'whatsapp').length, 5);
+  assert.equal(r.messages.filter((m) => m.channel === 'email').length, 5);
+  const verzenddagen = new Set(r.messages.map((m) => m.date));
+  assert.equal(verzenddagen.size, 5, 'vijf losse dagen, niet één ochtend');
+});

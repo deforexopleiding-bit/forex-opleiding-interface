@@ -105,8 +105,9 @@ export function loopStappen({
       if (waitTargetsLadder) {
         const tier = volgendeSendTier(st.step_order);
         if (tier != null) doel = tier;
-        // KLEM: nooit terug in de tijd of op dezelfde dag → minstens morgen.
-        if (doel <= dag) doel = dag + 1;
+        // KLEM: nooit terug in de tijd. Een doeldag die op DEZELFDE dag valt
+        // mag blijven staan — dan vertrekt het bericht die dag nog.
+        if (doel < dag) doel = dag + 1;
       }
       dag = doel;
       continue;
