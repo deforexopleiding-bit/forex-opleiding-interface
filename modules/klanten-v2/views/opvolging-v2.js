@@ -1380,23 +1380,52 @@
 .opv .tl li{display:flex;gap:12px;padding:9px 0;font-size:13.5px;border-bottom:1px solid #f3f4f6}
 .opv .tl li:last-child{border:0}
 .opv .tl .d{flex:0 0 120px;color:var(--o-muted);font-size:12.5px}
-/* R · het dagrapport. Alles onder .opv, zoals de rest van deze module. */
-.opv .rap-kop{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
-.opv .rap-knoppen{display:flex;gap:6px;flex-wrap:wrap}
-.opv .rap-eigen{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--o-muted)}
-.opv .rap-eigen input{font:inherit;padding:5px 8px;border:1px solid var(--o-line);border-radius:8px;color:var(--o-ink)}
-.opv .rap-sectie{margin:0 0 16px;padding:16px 18px}
-.opv .rap-sectie h3{margin:0 0 12px;font-size:15px;font-weight:700}
-.opv .rap-lijst{display:flex;flex-direction:column;gap:2px}
-.opv .rap-regel{padding:8px 10px;border-left:3px solid var(--o-line);background:#fafbfc;border-radius:0 8px 8px 0}
-.opv .rap-regel.rood{border-left-color:var(--o-red);background:var(--o-reds)}
-.opv .rap-regel.grijs{border-left-color:#d1d5db;background:#f7f8f9}
-.opv .rap-regel .t{font-size:13.5px;font-weight:600}
-.opv .rap-regel .u{font-size:12px;color:var(--o-muted);font-weight:400}
-.opv .rap-regel .notitie{white-space:pre-wrap;margin-top:4px}
-.opv details.rap-rijen{margin-top:10px}
-.opv details.rap-rijen>summary{cursor:pointer;font-size:12.5px;color:var(--o-acc);padding:4px 0;user-select:none}
-.opv details.rap-rijen[open]>summary{margin-bottom:6px}
+/* ─── R · HET DAGRAPPORT ───────────────────────────────────────────────────
+   EIGEN NAMESPACE, EN DIT IS DE REDEN.
+
+   Het rapport gebruikte .kpi met kinderen .cell / .n / .l. Drie dingen gingen
+   daar mis, en geen ervan gaf een foutmelding:
+
+   · .opv .kpi bestaat al in DEZE module, maar als ENKELVOUDIGE kaart met
+     kinderen .k / .v / .s. Het rapport gebruikte hem als rij van vier. Hij
+     kreeg dus de doos van één kaart en geen enkele indeling.
+   · .cell heeft nergens in deze module een regel. app-shell.css heeft alleen
+     .cell-main en .cell-sub — die matchen niet.
+   · .n en .l bestaan wel, maar in een andere context (.sh .n en .wkd .l), dus
+     ook die grepen niet.
+
+   Alles viel daardoor terug op display:block: getal, label, getal, label,
+   onder elkaar in een lege witte doos. Namen als cell, n en l horen sowieso
+   niet in een gedeelde stylesheet; die botsen vroeg of laat met iets anders.
+
+   tests/opvolging-rapport-css.test.js bewaakt dat elke klasse die het rapport
+   tekent ook echt een regel heeft, en dat geen enkele naam botst met
+   app-shell.css. */
+.opv .opvr-kop{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+.opv .opvr-knoppen{display:flex;gap:6px;flex-wrap:wrap}
+.opv .opvr-eigen{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--o-muted)}
+.opv .opvr-eigen input{font:inherit;padding:5px 8px;border:1px solid var(--o-line);border-radius:8px;color:var(--o-ink)}
+.opv .opvr-sectie{margin:0 0 16px;padding:16px 18px}
+.opv .opvr-sectie h3{margin:0 0 12px;font-size:15px;font-weight:700}
+/* De cijferrij. minmax(0,1fr) zodat een lange waarde de kolom laat krimpen in
+   plaats van het grid te laten afbreken — zelfde redenering als bij de
+   weekbalk hierboven. */
+.opv .opvr-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));
+ gap:1px;background:var(--o-line);border:1px solid var(--o-line);border-radius:12px;
+ overflow:hidden;margin:0 0 12px}
+.opv .opvr-cel{background:#fff;padding:12px 14px;min-width:0}
+.opv .opvr-getal{font-size:24px;font-weight:750;line-height:1.15;font-variant-numeric:tabular-nums}
+.opv .opvr-label{font-size:11.5px;color:var(--o-muted);margin-top:3px}
+.opv .opvr-lijst{display:flex;flex-direction:column;gap:2px}
+.opv .opvr-regel{padding:8px 10px;border-left:3px solid var(--o-line);background:#fafbfc;border-radius:0 8px 8px 0}
+.opv .opvr-regel.opvr-rood{border-left-color:var(--o-red);background:var(--o-reds)}
+.opv .opvr-regel.opvr-grijs{border-left-color:#d1d5db;background:#f7f8f9}
+.opv .opvr-t{font-size:13.5px;font-weight:600}
+.opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
+.opv .opvr-notitie{white-space:pre-wrap;margin-top:4px}
+.opv details.opvr-rijen{margin-top:10px}
+.opv details.opvr-rijen>summary{cursor:pointer;font-size:12.5px;color:var(--o-acc);padding:4px 0;user-select:none}
+.opv details.opvr-rijen[open]>summary{margin-bottom:6px}
 `;
     document.head.appendChild(el);
     return '';
@@ -4080,12 +4109,12 @@
     if (!rijen || !rijen.length) return '';
     // <details> is hier bewust: geen bibliotheek, geen eigen staat, en dit
     // scherm hertekent niet uit zichzelf — er lopen geen timers op deze tab.
-    return '<details class="rap-rijen"><summary>' + esc(titel) + ' (' + rijen.length + ')</summary>' +
-      '<div class="rap-lijst">' + rijen.map(maakRij).join('') + '</div></details>';
+    return '<details class="opvr-rijen"><summary>' + esc(titel) + ' (' + rijen.length + ')</summary>' +
+      '<div class="opvr-lijst">' + rijen.map(maakRij).join('') + '</div></details>';
   }
 
   const rapCel = (getal, label) =>
-    '<div class="cell"><div class="n">' + getal + '</div><div class="l">' + esc(label) + '</div></div>';
+    '<div class="opvr-cel"><div class="opvr-getal">' + getal + '</div><div class="opvr-label">' + esc(label) + '</div></div>';
 
   function rapportView() {
     stijl();
@@ -4120,9 +4149,9 @@
   function periodeKiezer(van, tot) {
     const knop = (k) => '<button class="obtn' + (_ui.rapportPeriode === k ? ' p' : '') +
       '" onclick="window.__opvRapportPeriode(\'' + k + '\')">' + esc(PERIODE_LABEL[k]) + '</button>';
-    return '<div class="rap-kop">' +
-      '<div class="rap-knoppen">' + ['vandaag', 'gisteren', 'deze_week', 'vorige_week'].map(knop).join('') + '</div>' +
-      '<div class="rap-eigen">' +
+    return '<div class="opvr-kop">' +
+      '<div class="opvr-knoppen">' + ['vandaag', 'gisteren', 'deze_week', 'vorige_week'].map(knop).join('') + '</div>' +
+      '<div class="opvr-eigen">' +
         '<input type="date" id="opv-rap-van" value="' + esc(van) + '">' +
         '<span>tot en met</span>' +
         '<input type="date" id="opv-rap-tot" value="' + esc(tot) + '">' +
@@ -4134,17 +4163,17 @@
   // ── 1 · Wat vraagt aandacht ──────────────────────────────────────────────
   function sectieAandacht(d) {
     const lijst = d.aandacht || [];
-    let h = '<div class="card rap-sectie"><h3>1 &middot; Wat vraagt aandacht</h3>';
+    let h = '<div class="card opvr-sectie"><h3>1 &middot; Wat vraagt aandacht</h3>';
     if (!lijst.length) {
       // Deze zin mag alleen staan als er ook echt niets is. Blinde vlekken
       // komen als aandachtspunt binnen, dus een lege lijst betekent hier: alle
       // zes de secties konden kijken, en er is niets afwijkends gevonden.
       return h + '<div class="empty">Niets bijzonders in deze periode. Alle onderdelen konden gemeten worden.</div></div>';
     }
-    h += '<div class="rap-lijst">' + lijst.map((a) => {
-      const merk = a.soort === 'blinde_vlek' ? 'grijs' : 'rood';
-      return '<div class="rap-regel ' + merk + '"><div class="t">' + esc(a.tekst) + '</div>' +
-        (a.uitleg ? '<div class="u">' + esc(a.uitleg) + '</div>' : '') + '</div>';
+    h += '<div class="opvr-lijst">' + lijst.map((a) => {
+      const merk = a.soort === 'blinde_vlek' ? 'opvr-grijs' : 'opvr-rood';
+      return '<div class="opvr-regel ' + merk + '"><div class="opvr-t">' + esc(a.tekst) + '</div>' +
+        (a.uitleg ? '<div class="opvr-u">' + esc(a.uitleg) + '</div>' : '') + '</div>';
     }).join('') + '</div>';
     return h + '</div>';
   }
@@ -4152,31 +4181,31 @@
   // ── 2 · Dekking ──────────────────────────────────────────────────────────
   function sectieDekking(d) {
     const k = d.dekking;
-    let h = '<div class="card rap-sectie"><h3>2 &middot; Dekking</h3>';
+    let h = '<div class="card opvr-sectie"><h3>2 &middot; Dekking</h3>';
     if (k.openstaand_bekend) {
       const open = k.openstaand || [];
       const gedaan = open.filter((r) => r.behandeld);
-      h += '<div class="kpi">' +
+      h += '<div class="opvr-kpi">' +
         rapCel(open.length, 'leads op de lijst') +
-        rapCel(gedaan.length, 'kregen actie') +
+        rapCel(gedaan.length, 'kregen een poging') +
         rapCel(open.length - gedaan.length, 'kregen niets') +
-        rapCel(k.behandeld.length, 'leads aangeraakt') + '</div>';
+        rapCel(k.behandeld.length, 'leads met een poging') + '</div>';
       h += rijenBlok('Kregen niets', k.onbehandeld || [], (r) =>
-        '<div class="rap-regel rood"><div class="t">' + esc(r.naam || 'Naamloos') + '</div></div>');
-      h += rijenBlok('Kregen wel actie', gedaan, (r) =>
-        '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Naamloos') +
-        '</div><div class="u">' + r.bel + '&times; gebeld &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+        '<div class="opvr-regel opvr-rood"><div class="opvr-t">' + esc(r.naam || 'Naamloos') + '</div></div>');
+      h += rijenBlok('Kregen minstens één poging', gedaan, (r) =>
+        '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
+        '</div><div class="opvr-u">' + r.bel + '&times; gebeld &middot; ' + r.wa + '&times; WhatsApp</div></div>');
     } else {
       // Geen nul en geen schatting: de vraag is voor deze periode niet te
       // stellen. Een nul zou lezen als een meting.
       h += '<div class="warn"><b>De lijst van een voorbije dag is niet bewaard.</b> ' +
         'Hoeveel leads er die dag actie nodig hadden, is dus niet te zeggen — dat cijfer staat hier bewust niet. ' +
         'Wat er wél uit tijdstempels volgt, staat hieronder: wie er in deze periode moeite kreeg.</div>';
-      h += '<div class="kpi">' + rapCel(k.behandeld.length, 'leads aangeraakt') + '</div>';
+      h += '<div class="opvr-kpi">' + rapCel(k.behandeld.length, 'leads met een poging') + '</div>';
     }
-    h += rijenBlok('Alle aangeraakte leads', k.behandeld, (r) =>
-      '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Naamloos') +
-      '</div><div class="u">' + r.bel + '&times; gebeld op ' + r.bel_dagen + ' dag' + (r.bel_dagen === 1 ? '' : 'en') +
+    h += rijenBlok('Alle leads met minstens één poging', k.behandeld, (r) =>
+      '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
+      '</div><div class="opvr-u">' + r.bel + '&times; gebeld op ' + r.bel_dagen + ' dag' + (r.bel_dagen === 1 ? '' : 'en') +
       ' &middot; ' + r.wa + '&times; WhatsApp</div></div>');
     return h + '</div>';
   }
@@ -4185,22 +4214,22 @@
   function sectieVensters(d) {
     const v = d.vensters;
     const uu = (n) => String(n).padStart(2, '0') + ':00';
-    let h = '<div class="card rap-sectie"><h3>3 &middot; De twee vensters per zoomcall</h3>' +
+    let h = '<div class="card opvr-sectie"><h3>3 &middot; De twee vensters per zoomcall</h3>' +
       '<div class="ronde zacht">Spraakbericht vóór ' + uu(d.drempels.spraak_voor_uur) + ', nabellen tussen ' +
       uu(d.drempels.nabel_van_uur) + ' en ' + uu(d.drempels.nabel_tot_uur) + '. ' +
       'Alleen leads met een zoomcall op die dag tellen mee.</div>';
     if (!v.rijen.length && !v.zonder_taak.length) {
       return h + '<div class="empty">Geen zoomcalls in deze periode.</div></div>';
     }
-    h += '<div class="kpi">' +
+    h += '<div class="opvr-kpi">' +
       rapCel(v.spraak.op_tijd, 'spraak op tijd') +
       rapCel(v.spraak.te_laat, 'spraak te laat') +
       rapCel(v.spraak.niet_gedaan, 'geen spraakbericht') +
       rapCel(v.nabel.niet_gedaan, 'niet nagebeld') + '</div>';
     h += rijenBlok('Per zoomcall', v.rijen, (r) =>
-      '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Naamloos') +
-      ' <span class="u">' + esc(nl(r.dag)) + ' &middot; call ' + esc(r.call_tijd || '') + '</span></div>' +
-      '<div class="u">Spraak: ' + vensterWoord(r.spraak) + ' &middot; Nabellen: ' + vensterWoord(r.nabel) + '</div></div>');
+      '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
+      ' <span class="opvr-u">' + esc(nl(r.dag)) + ' &middot; call ' + esc(r.call_tijd || '') + '</span></div>' +
+      '<div class="opvr-u">Spraak: ' + vensterWoord(r.spraak) + ' &middot; Nabellen: ' + vensterWoord(r.nabel) + '</div></div>');
     if (v.zonder_taak.length) {
       h += '<div class="ronde zacht">' + v.zonder_taak.length + ' ingeplande call' +
         (v.zonder_taak.length === 1 ? '' : 's') + ' staan niet in de takenlijst, dus daar valt niets over te zeggen. ' +
@@ -4220,7 +4249,7 @@
   // ── 4 · De zoomcalls zelf ────────────────────────────────────────────────
   function sectieZoomcalls(d) {
     const lijst = d.zoomcalls || [];
-    let h = '<div class="card rap-sectie"><h3>4 &middot; De zoomcalls en hun uitkomst</h3>';
+    let h = '<div class="card opvr-sectie"><h3>4 &middot; De zoomcalls en hun uitkomst</h3>';
     if (!lijst.length) return h + '<div class="empty">Geen zoomcalls in deze periode.</div></div>';
     // Een call die nog moet plaatsvinden telt niet als 'zonder uitkomst'. Zo
     // stond er om acht uur 's ochtends zeven keer een verwijt over werk dat nog
@@ -4235,7 +4264,7 @@
     // geen calls die doorgaan. Op 7 september meldde dit getal er zes terwijl
     // er drie waren, en dan is elke telling eronder verdacht.
     const echt = teBeoordelen.length + gepland.length;
-    h += '<div class="kpi">' +
+    h += '<div class="opvr-kpi">' +
       rapCel(echt, 'zoomcalls') +
       rapCel(metUitkomst.length, 'met uitkomst') +
       rapCel(teBeoordelen.length - metUitkomst.length, 'zonder uitkomst') +
@@ -4257,22 +4286,22 @@
         esc([...new Set(onbekend.map((c) => c.status_ruw))].join(', ')) +
         '). Die krijgen geen oordeel &mdash; dat zou een gok zijn.</div>';
     }
-    h += '<div class="rap-lijst">' + lijst.map((c) =>
-      '<div class="rap-regel' + (c.vastgelegd ? '' : ' grijs') + '">' +
-      '<div class="t">' + esc(c.naam || 'Naamloos') + ' <span class="u">' + esc(nl(c.dag)) +
+    h += '<div class="opvr-lijst">' + lijst.map((c) =>
+      '<div class="opvr-regel' + (c.vastgelegd ? '' : ' opvr-grijs') + '">' +
+      '<div class="opvr-t">' + esc(c.naam || 'Naamloos') + ' <span class="opvr-u">' + esc(nl(c.dag)) +
       ' &middot; ' + esc(c.tijd || '') +
       (c.staat === 'gepland' ? ' &middot; <span class="tag t-grey">gepland</span>' : '') +
       (c.staat === 'verplaatst' ? ' &middot; <span class="tag t-grey">verzet</span>' : '') +
       (c.staat === 'geannuleerd' ? ' &middot; <span class="tag t-grey">geannuleerd</span>' : '') +
       (c.staat === 'onbeoordeelbaar' ? ' &middot; <span class="tag t-grey">' + esc(c.status_ruw || '') + '</span>' : '') +
       '</span></div>' +
-      '<div class="u">' + (c.vastgelegd
+      '<div class="opvr-u">' + (c.vastgelegd
         ? 'Uitkomst: <b>' + esc(String(c.uitkomst).replaceAll('_', ' ')) + '</b>'
         // NIET 'Dave vulde niets in'. Dat het ontbreekt kan ook aan het systeem
         // liggen, en dat verschil is precies wat op 6 september gerepareerd is.
         // En een call die nog moet komen krijgt hier zijn eigen zin, geen klacht.
         : '<i>' + esc(c.reden_leeg || 'Geen uitkomst vastgelegd.') + '</i>') + '</div>' +
-      (c.notitie ? '<div class="u notitie">' + esc(c.notitie) + '</div>' : '') +
+      (c.notitie ? '<div class="opvr-u opvr-notitie">' + esc(c.notitie) + '</div>' : '') +
       '</div>').join('') + '</div>';
     return h + '</div>';
   }
@@ -4280,14 +4309,14 @@
   // ── 5 · Uit de lijst gehaald ─────────────────────────────────────────────
   function sectieArchief(d) {
     const lijst = d.archief || [];
-    let h = '<div class="card rap-sectie"><h3>5 &middot; Uit de lijst gehaald</h3>';
+    let h = '<div class="card opvr-sectie"><h3>5 &middot; Uit de lijst gehaald</h3>';
     if (!lijst.length) return h + '<div class="empty">Er is in deze periode niemand uit de lijst gehaald.</div></div>';
     const teWeinig = lijst.filter((a) => a.moeite.staat === 'te_weinig');
     h += '<div class="ronde zacht">De moeite hiernaast telt over de <b>hele levensloop</b> van de kaart, niet over deze periode: ' +
       'de vraag is of er genoeg gedaan was vóórdat hij dicht ging. De afspraak is ' +
       d.drempels.archief_min_dagen + ' belpogingen op ' + d.drempels.archief_min_dagen +
       ' verschillende dagen plus ' + d.drempels.archief_min_wa + ' WhatsApp.</div>';
-    h += '<div class="kpi">' + rapCel(lijst.length, 'uit de lijst') + rapCel(teWeinig.length, 'met te weinig moeite') + '</div>';
+    h += '<div class="opvr-kpi">' + rapCel(lijst.length, 'uit de lijst') + rapCel(teWeinig.length, 'met te weinig moeite') + '</div>';
     h += '<div class="card"><table><thead><tr><th>Naam</th><th>Reden</th><th>Moeite</th><th>Dag</th></tr></thead><tbody>' +
       lijst.map((a) =>
         '<tr><td><b>' + esc(a.naam || 'Naamloos') + '</b></td>' +
@@ -4312,10 +4341,10 @@
   // ── 6 · Volume ───────────────────────────────────────────────────────────
   function sectieVolume(d) {
     const v = d.volume;
-    let h = '<div class="card rap-sectie"><h3>6 &middot; Volume</h3>';
-    h += '<div class="kpi">' +
+    let h = '<div class="card opvr-sectie"><h3>6 &middot; Volume</h3>';
+    h += '<div class="opvr-kpi">' +
       rapCel(v.bel.uit, 'belpogingen') +
-      rapCel(v.bel.gesproken, 'daarvan gesproken') +
+      rapCel(v.bel.gesproken, 'werden een gesprek') +
       rapCel(v.wa.uit + v.spraak.uit, 'WhatsApp uit') +
       rapCel(v.wa.in + v.spraak.in, 'WhatsApp in') + '</div>';
     if (v.bel.te_kort) {
@@ -4325,20 +4354,29 @@
         ' calls kwam wel tot stand maar duurde korter dan ' + d.drempels.gesprek_min_sec +
         ' seconden. Die tellen als poging, niet als gesprek.</div>';
     }
+    // WOORDEN MOETEN HETZELFDE BETEKENEN ALS IN DE CODE. Hier stond 'over alle
+    // 9 gesprekken' terwijl het negen POGINGEN waren, waarvan er vijf een
+    // gesprek werden. Als het rapport Dave beoordeelt en de woorden kloppen
+    // niet, discussieert hij terecht over de meting in plaats van over zijn
+    // werk.
+    //
+    //   poging  — Dave heeft gebeld. Telt altijd.
+    //   gesprek — de verbinding kwam tot stand én duurde lang genoeg.
+    //   contact — de verbinding kwam tot stand, ook een korte.
     h += '<div class="ronde zacht">Gemeten gesprekstijd: <b>' + minuten(v.bel.seconden) + '</b>' +
       (v.bel.zonder_duur
         // Geen gemiddelde over de rest schatten. Dat zou een som van aannames
         // zijn, en dat is precies wat dit rapport niet doet.
-        ? ' over ' + (v.bel.uit - v.bel.zonder_duur) + ' van de ' + v.bel.uit + ' gesprekken. ' +
+        ? ' over ' + (v.bel.uit - v.bel.zonder_duur) + ' van de ' + v.bel.uit + ' belpogingen. ' +
           'Van de andere ' + v.bel.zonder_duur + ' is geen duur vastgelegd; die worden niet geschat.'
-        : ' over alle ' + v.bel.uit + ' gesprekken.') + '</div>';
-    h += '<div class="kpi">' +
+        : ' over alle ' + v.bel.uit + ' belpogingen.') + '</div>';
+    h += '<div class="opvr-kpi">' +
       rapCel(v.wa.uit, 'tekst uit') + rapCel(v.wa.in, 'tekst in') +
       rapCel(v.spraak.uit, 'spraak uit') + rapCel(v.spraak.in, 'spraak in') + '</div>';
     h += rijenBlok('Alle gebeurtenissen', v.rijen, (r) =>
-      '<div class="rap-regel"><div class="t">' + esc(r.naam || 'Onbekende lead') +
-      ' <span class="u">' + esc(nl(r.dag)) + ' ' + esc(r.tijd || '') + '</span></div>' +
-      '<div class="u">' + esc(r.soort) + ' &middot; ' + (r.richting === 'in' ? 'binnengekomen' : 'verstuurd') +
+      '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Onbekende lead') +
+      ' <span class="opvr-u">' + esc(nl(r.dag)) + ' ' + esc(r.tijd || '') + '</span></div>' +
+      '<div class="opvr-u">' + esc(r.soort) + ' &middot; ' + (r.richting === 'in' ? 'binnengekomen' : 'verstuurd') +
       (r.duur_sec != null ? ' &middot; ' + r.duur_sec + ' sec' : '') + '</div></div>');
     return h + '</div>';
   }
