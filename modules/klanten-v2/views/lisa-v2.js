@@ -58,7 +58,12 @@
     stats:    { loading: false, fetched: false, error: null, data: null, _seq: 0, period: 'week' },
     settings: { loading: false, fetched: false, error: null, data: null, _seq: 0 },
     logs:     { loading: false, fetched: false, error: null, data: null, _seq: 0 },
-    convs:    { loading: false, fetched: false, error: null, items: [], _seq: 0, statusFilter: 'active', q: '', _searchTimer: null, _searchSeq: 0 },
+    // BP3 (2026-09-07): default statusFilter 'all' i.p.v. 'active'. De 'active'-
+    // filter verstopt phase='cold'-gesprekken die door cron-lisa-conversations-
+    // poll worden aangemaakt (outbound-only zonder recente reply). Op mount
+    // ziet Romy nu álle niet-sandbox gesprekken; ze kan alsnog naar Actief
+    // klappen voor triage.
+    convs:    { loading: false, fetched: false, error: null, items: [], _seq: 0, statusFilter: 'all', q: '', _searchTimer: null, _searchSeq: 0 },
     statsAll: {},
   };
   const _thread = {
@@ -227,8 +232,10 @@
     if (!surgical && !silent && window.DFO?.render) window.DFO.render();
     const parts = [
       'action=list_live',
-      'status=' + encodeURIComponent(st.statusFilter || 'active'),
-      'limit=100',
+      // BP3 (2026-09-07) — default 'all' (was 'active') + limit 500 (was 100)
+      // om alle poll-ingest cold-conversaties zichtbaar te maken zonder cap.
+      'status=' + encodeURIComponent(st.statusFilter || 'all'),
+      'limit=500',
     ];
     const qTrim = String(st.q || '').trim();
     if (qTrim) parts.push('q=' + encodeURIComponent(qTrim));
@@ -258,7 +265,12 @@
     bodyEl.innerHTML = html;
     // Update de counter naast de status-chip regel.
     const counterEl = listEl.querySelector('#lisaConvListCount');
-    if (counterEl) counterEl.textContent = rows.length + ' gesprek' + (rows.length === 1 ? '' : 'ken') + (String(st.q || '').trim() ? ' · zoekterm actief' : '');
+    // BP3 (2026-09-07) — cap-waarschuwing bij server-max (500). Zichtbaar
+    // signaal dat de laatste-500 zijn getoond en verder pagineren op later
+    // toegevoegd moet worden als de dataset structureel groter wordt.
+    if (counterEl) counterEl.textContent = rows.length + ' gesprek' + (rows.length === 1 ? '' : 'ken')
+      + (rows.length >= 500 ? ' · cap bereikt (laatste 500)' : '')
+      + (String(st.q || '').trim() ? ' · zoekterm actief' : '');
     // Als de huidige geselecteerde conv niet meer in de results zit,
     // reset thread + swap right-pane naar neutrale placeholder zodat je
     // geen dood detail ziet.
@@ -793,7 +805,7 @@
     _poll.running = true;
     try {
       if (document.querySelector('.lisa-gesp-split')) {
-        const url = '/api/lisa-conversations?action=list_live&status=' + encodeURIComponent(_live.convs.statusFilter || 'active') + '&limit=100';
+        const url = '/api/lisa-conversations?action=list_live&status=' + encodeURIComponent(_live.convs.statusFilter || 'all') + '&limit=500';
         const j = await tryFetch('poll-convs', url);
         if (j && Array.isArray(j.conversations)) {
           const hashOld = _live.convs.items.map(x => [x.id, x.last_message_at || '', x.phase, x.preview || ''].join('|')).join('||');
@@ -1075,7 +1087,7 @@
       queueMicrotask(() => _loadThread(sel.id));
     }
 
-    const filter = st.statusFilter || 'active';
+    const filter = st.statusFilter || 'all';
     const filterChips = ['active', 'qualified', 'disqualified', 'cold', 'all'].map(v => {
       const label = v === 'active' ? 'Actief' : v === 'qualified' ? 'Gekwal.' : v === 'disqualified' ? 'Disq.' : v === 'cold' ? 'Cold' : 'Alle';
       return `<button class="chip ${filter === v ? 'on' : ''}" style="font-size:11.5px;padding:3px 10px" onclick="__lisaSetStatus('${v}')">${label}</button>`;
@@ -1110,7 +1122,7 @@
           ${searchBar}
           <div style="display:flex;gap:5px;flex-wrap:wrap">${filterChips}</div>
           <div style="font-size:11.5px;color:var(--text-3);display:flex;justify-content:space-between">
-            <span id="lisaConvListCount">${rows.length} gesprek${rows.length === 1 ? '' : 'ken'}${qHasVal ? ' · zoekterm actief' : ''}</span>
+            <span id="lisaConvListCount">${rows.length} gesprek${rows.length === 1 ? '' : 'ken'}${rows.length >= 500 ? ' · cap bereikt (laatste 500)' : ''}${qHasVal ? ' · zoekterm actief' : ''}</span>
             ${st.loading ? '<span>laden…</span>' : ''}
           </div>
         </div>
