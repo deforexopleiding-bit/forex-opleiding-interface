@@ -62,6 +62,20 @@ export default async function handler(req, res) {
   // Normaliseer variables naar string-array, cap per waarde.
   const variables = rawVars.map(v => String(v == null ? '' : v).slice(0, MAX_VAR_LEN));
 
+  // Guard tegen lege template-parameters. Meta rejects met code 132001
+  // ("Parameter format does not match format in the created template" /
+  // "Parameter can't be empty") zodra een verplichte {{N}} als lege string
+  // wordt meegestuurd. In plaats van de Meta-error terug te sturen (die
+  // niet uitlegt WAT te doen), weigeren we met een leesbare 400 zodat de
+  // user meteen weet welke variabele leeg was.
+  const leegIdx = variables.findIndex(v => v.trim() === '');
+  if (leegIdx >= 0) {
+    return res.status(400).json({
+      error: `Variabele #${leegIdx + 1} is leeg — vul alle variabelen in voordat je de template verstuurt.`,
+      leeg_index: leegIdx,
+    });
+  }
+
   try {
     // Lead + traject-check (mirror -gesprek-antwoord).
     const { data: lead, error: leadErr } = await supabaseAdmin
