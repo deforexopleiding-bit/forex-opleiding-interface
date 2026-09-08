@@ -72,6 +72,33 @@ export function doorrolDag(nuMs) {
   }).format(new Date(nuMs));
 }
 
+/** Zoveel ids bewaart het merkteken als steekproef voor de ochtendcontrole. */
+export const VOORBEELDEN_MAX = 25;
+
+/**
+ * Het merkteken dat de doorrol achterlaat voor de controle van 07:00.
+ *
+ * Staat hier als pure functie om dezelfde reden als doorrolDag hierboven: de
+ * inhoud ervan IS het bewijsmateriaal van de ochtendcontrole, en die inhoud
+ * hoort in een test te staan in plaats van los in een handler. Een merkteken
+ * zonder tijdstip of zonder ids ziet er in een log net zo goed uit als een
+ * volledig merkteken, maar maakt controle 7 blind.
+ *
+ * Zie controleerDoorrol in api/_lib/opvolging-gezondheid.js voor wat er mee
+ * gebeurt.
+ */
+export function bouwMerkteken({ vandaag, gedraaidMs, doorgerold, bekeken, aangeraakt }) {
+  return {
+    dag        : vandaag,
+    gedraaid_op: new Date(gedraaidMs).toISOString(),
+    doorgerold : Number(doorgerold) || 0,
+    bekeken    : Number(bekeken) || 0,
+    // De steekproef waar de controle de rijen zelf mee nakijkt. Leeg maken
+    // haalt de rijcontrole stilletjes weg, dus dat mag hier niet zomaar.
+    voorbeelden: (Array.isArray(aangeraakt) ? aangeraakt : []).slice(0, VOORBEELDEN_MAX),
+  };
+}
+
 export function bepaalDoorrol({ taken, vandaag }) {
   if (!DATUM_RE.test(String(vandaag || ''))) return [];
   const uit = [];

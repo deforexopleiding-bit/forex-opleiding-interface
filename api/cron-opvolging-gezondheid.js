@@ -25,12 +25,13 @@
 // wat de server uitlevert. Zie controle 4.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { DOORROL_MERKTEKEN } from './cron-opvolging-doorrol.js';
 import { bouwRapport } from './opvolging-rapport.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
-  beoordeelPrintweergave, controleerBrug, controleerDagritme,
+  beoordeelPrintweergave, controleerBrug, controleerDagritme, controleerDoorrol,
   bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
 
@@ -116,6 +117,31 @@ export default async function handler(req, res) {
     // Een leesfout is een storing, geen blinde vlek.
     uitkomsten.push({ naam: 'dagritme', staat: FOUT, getallen: { fout: kort(e) },
       uitleg: 'De openstaande kaarten waren niet te lezen: ' + kort(e) });
+  }
+
+  // ── 7 · De doorrol zelf ──────────────────────────────────────────────────
+  // Controle 6 kijkt naar een due in het VERLEDEN. De fout van 8 september
+  // maakte er een in de TOEKOMST en was daar dus onzichtbaar. Deze rekent na
+  // op welke dag de doorrol vannacht richtte. Zie controleerDoorrol.
+  try {
+    const { data: rij, error } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', DOORROL_MERKTEKEN).maybeSingle();
+    if (error) throw error;
+    const merkteken = rij?.value || null;
+    const ids = Array.isArray(merkteken?.voorbeelden) ? merkteken.voorbeelden : [];
+    let steekproef = [];
+    if (ids.length) {
+      const { data: t, error: tErr } = await supabaseAdmin
+        .from('opvolging_taken')
+        .select('id, naam, due, updated_at')
+        .in('id', ids);
+      if (tErr) throw tErr;
+      steekproef = t || [];
+    }
+    uitkomsten.push(controleerDoorrol({ merkteken, taken: steekproef, vandaag }));
+  } catch (e) {
+    uitkomsten.push({ naam: 'doorrol', staat: FOUT, getallen: { fout: kort(e) },
+      uitleg: 'Het merkteken van de doorrol was niet te lezen: ' + kort(e) });
   }
 
   // ── De mail ──────────────────────────────────────────────────────────────

@@ -489,3 +489,65 @@ te staan, en ze staan hier omdat ze in dit geval geen van beide gesteld waren:
 
 Een regel die naar *vandaag* rekent in plaats van naar *morgen* beantwoordt ze
 allebei tegelijk.
+
+### Naschrift: de zelfhelende regel repareerde de schade niet
+
+Bij de fix hierboven schreef ik dat de zelfhelende regel de vijf kaarten van 7
+september vanzelf zou repareren. **Dat was fout, en Maxim ving het.**
+
+De regel is `due < vandaag` → `due = vandaag`. De vijf stonden op
+`due 2026-09-09`, en dat ligt op de 8e in de **toekomst**:
+
+```
+'2026-09-09' < '2026-09-08'  →  false
+```
+
+Ze werden dus niet aangeraakt. Ze duiken op de 9e vanzelf op, en 8 september
+blijft de dag die ze hebben overgeslagen.
+
+De les zit in het onderscheid: een zelfhelende regel voorkomt het probleem
+**vanaf nu**, maar hij haalt de bestaande schade niet weg. Dat zijn twee
+verschillende opdrachten, en de eerste voelt alsof hij de tweede meeneemt. Dat
+doet hij niet.
+
+De reparatie is met de hand gedaan: de vijf zijn eenmalig naar 8 september
+gehaald. De vingerafdruk daarvoor is `status='open'` + `due = 2026-09-09` +
+een `updated_at` in het venster van de kapotte doorrol — dat laatste is het
+beslissende deel, want er stonden ook kaarten die terecht op 9 september
+hoorden, en 01:59 Amsterdamse tijd is een moment waarop geen mens een kaart
+verzet.
+
+### En de zesde controle was niet genoeg
+
+`controleerDagritme` kijkt of er een open kaart met een due in het **verleden**
+staat. Deze fout maakte er een in de **toekomst**. Die controle had hem dus
+nooit gezien — de controle die uit de fout geboren werd, kon de fout zelf niet
+vangen.
+
+Daarom is er een zevende: `controleerDoorrol`. Die rekent na op welke dag de
+doorrol vannacht richtte.
+
+**Waarom dat niet met een vuistregel op de rijen kan.** "Een open kaart die ver
+vooruit staat is verdacht" geeft vals alarm op precies de kaarten die het goed
+doen: een bevestigde aanmelding slaapt legitiem tot vier dagen voor het event,
+en `cron-opvolging-aanmeldingen` draait elk kwartier — ook 's nachts — en maakt
+dan kaarten met een due weken vooruit. Een nachtvenster is dus geen
+vingerafdruk.
+
+De doorrol laat daarom een merkteken achter in `app_settings`
+(`opvolging_doorrol_laatste`): de dag waarop hij richtte, het moment waarop hij
+draaide, hoeveel kaarten hij verzette en een greep uit de ids. De controle leidt
+de dag **opnieuw** af uit dat ruwe tijdstip — daar zat de fout — en vergelijkt.
+Geen zelfbevestiging, want de twee komen langs verschillende wegen.
+
+**En er zit geen marge op, terwijl de opdracht "meer dan een dag vooruit" was.**
+Gemeten: `updated_at 2026-09-07T23:59Z` is in Amsterdam `2026-09-08`, en de due
+werd `2026-09-09`. Dat is precies **één** dag. Een drempel op *meer dan* een dag
+had deze fout dus óók gemist. Na een doorrol hoort de due exact de dag van de
+run te zijn; alles daarvoor of daarna is fout. Het teruggezette drempelgedrag is
+als sabotage getest: drie rode tests.
+
+Dat is deze week de derde keer dat een drempel net verkeerd genoeg stond om het
+ding te missen waarvoor hij bedacht was — na de tien seconden gespreksduur en
+de vaste schaal op de tijdlijn. **Bij een drempel hoort de vraag: wat is de
+gemeten waarde van het geval dat ik wil vangen, en valt die er ruim binnen?**
