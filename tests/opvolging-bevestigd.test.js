@@ -164,16 +164,16 @@ test('de doorrol raakt een slapende bevestigde kaart niet aan', () => {
     { id: 'slaapt', status: 'open', due: '2026-09-16' },   // bevestigd, wacht op ronde B
     { id: 'loopt-achter', status: 'open', due: '2026-09-04' },
   ];
-  const uit = bepaalDoorrol({ taken, vandaag: '2026-09-06' });
+  const uit = bepaalDoorrol({ taken, morgen: '2026-09-06' });
   assert.deepEqual(uit.map((u) => u.id), ['loopt-achter'],
     'alleen wat achterloopt schuift door; een bevestigde kaart staat vooruit');
 });
 
 test('ook op de wakker-dag zelf trekt de doorrol hem niet naar voren', () => {
-  // Rand: vandaag is precies de wakker-dag. `due >= vandaag` hoort dan te gelden.
+  // Rand: morgen is precies de wakker-dag. `due >= morgen` hoort dan te gelden.
   const uit = bepaalDoorrol({
     taken: [{ id: 'slaapt', status: 'open', due: '2026-09-16' }],
-    vandaag: '2026-09-16',
+    morgen: '2026-09-16',
   });
   assert.deepEqual(uit, []);
 });

@@ -1,6 +1,6 @@
 // api/_lib/opvolging-gezondheid.js
 //
-// DE ZES CONTROLES, ALS PURE FUNCTIES.
+// DE VIJF CONTROLES, ALS PURE FUNCTIES.
 //
 // Deze week stonden zes keer alle tests groen terwijl productie stuk was, en
 // elke keer was de TEST het probleem: hij raakte iets aan wat lijkt op het
@@ -263,61 +263,6 @@ export function controleerBrug({ status, fout, configFout }) {
   }
   return uit('brug', OK, { verbonden: true, gezien, doorgelaten: door },
     `${door} van ${gezien} gebeurtenissen doorgelaten.`);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 6 · HET DAGRITME — staat er een open kaart in het verleden?
-// ═══════════════════════════════════════════════════════════════════════════
-// Zou de verdwenen doorrol dezelfde ochtend gemeld hebben. De nachtelijke cron
-// zette elke openstaande kaart op MORGEN terwijl het in Amsterdam al de nieuwe
-// dag was, waardoor iedereen precies een dag oversloeg: de vijf leads van 7
-// september stonden op de 9e, en op de 8e dus nergens. Deze controle draait om
-// 07:00, meteen na de doorrol, en zag er niets van — er ging geen enkel
-// belletje af terwijl er vijf kaarten uit de dag waren verdwenen.
-//
-// De vier controles hierboven kijken naar een CIJFER. Deze gaat over het
-// dagritme zelf, en dat is de reden dat hij bestaat: niet elke storing laat
-// zich zien als een som die niet klopt.
-//
-// De regel is hard en heeft geen drempel nodig: wat OPEN staat hoort vandaag of
-// later te staan. Een open kaart met een due in het verleden staat op geen
-// enkele lijst en komt niemand meer tegen — die hoort per definitie niet te
-// bestaan.
-
-export function controleerDagritme({ taken, vandaag }) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(vandaag || ''))) {
-    return uit('dagritme', NIET_GEMETEN, { bekeken: 0 },
-      'Zonder geldige dag valt er niets af te meten.');
-  }
-  const rijen = Array.isArray(taken) ? taken : [];
-  if (rijen.length === 0) {
-    // Een lege lijst is GEEN bewijs dat het dagritme werkt. Zie de kop.
-    return uit('dagritme', NIET_GEMETEN, { bekeken: 0 },
-      'Er staan geen openstaande kaarten. Er valt dus niets te controleren — dat is iets anders dan goed.');
-  }
-
-  // ONBEKEND IS GEEN VERLEDEN. Een rij zonder bruikbare due is een ander
-  // probleem, en die hier als 'de doorrol is stuk' melden zou de melding
-  // onbetrouwbaar maken op precies het moment dat je hem nodig hebt.
-  const zonderDue = rijen.filter((t) => !/^\d{4}-\d{2}-\d{2}$/.test(String(t && t.due || '')));
-  const achter = rijen.filter((t) => /^\d{4}-\d{2}-\d{2}$/.test(String(t && t.due || '')) && String(t.due) < vandaag);
-
-  const getallen = {
-    bekeken     : rijen.length,
-    achterstallig: achter.length,
-    zonder_due  : zonderDue.length,
-    namen       : achter.slice(0, 12).map((t) => `${t.naam || 'Naamloos'} (${t.due})`),
-    oudste      : achter.length ? achter.map((t) => t.due).sort()[0] : null,
-  };
-
-  if (achter.length === 0) {
-    return uit('dagritme', OK, getallen,
-      `Alle ${rijen.length} openstaande kaarten staan op vandaag of later.`);
-  }
-  return uit('dagritme', FOUT, getallen,
-    `${achter.length} openstaande ${achter.length === 1 ? 'kaart staat' : 'kaarten staan'} op een dag `
-    + `die al voorbij is (oudste: ${getallen.oudste}). Die staan op geen enkele lijst. `
-    + 'Vrijwel altijd betekent dit dat de nachtelijke doorrol niet gedraaid heeft of zijn werk niet deed.');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

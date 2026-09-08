@@ -45,7 +45,6 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { bouwTijdlijn } from './_lib/opvolging-tijdlijn.js';
-import { haalMetTestvlag, scheidTestrijen, filterPogingen, testZin, isKolomOnbekend } from './_lib/opvolging-testrijen.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import {
   isMoeite, isContact, isGesprek, gesprekDuur, classificeerResultaat, WA_SOORTEN,
@@ -185,29 +184,24 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ── De pogingen in de periode ────────────────────────────────────────────
   // Dit is de enige bron die per definitie een gebeurtenis is: elke rij heeft
   // een tijdstip en wordt nooit overschreven.
-  const pogHaal = await haalMetTestvlag(
-    (kolommen) => supabaseAdmin
-      .from('opvolging_pogingen')
-      .select(kolommen)
-      .gte('tijdstip', vanIso).lt('tijdstip', totIso)
-      .order('tijdstip', { ascending: true }),
-    'id, taak_id, soort, tijdstip, resultaat, richting, duur_sec, automatisch',
-  );
-  if (pogHaal.error) throw pogHaal.error;
-  const pogingenRuw = pogHaal.data;
-  const testKolomAanwezig = pogHaal.kolomAanwezig;
+  const { data: pogRuw, error: e1 } = await supabaseAdmin
+    .from('opvolging_pogingen')
+    .select('id, taak_id, soort, tijdstip, resultaat, richting, duur_sec, automatisch')
+    .gte('tijdstip', vanIso).lt('tijdstip', totIso)
+    .order('tijdstip', { ascending: true });
+  if (e1) throw e1;
+  const pogingen = pogRuw || [];
 
   // ── De kaarten die in de periode dicht gingen ────────────────────────────
   // gearchiveerd_at is een echt moment en wordt op alle archiveerpaden gezet.
-  const archHaal = await haalMetTestvlag(
-    (k) => supabaseAdmin.from('opvolging_taken').select(k)
-      .eq('status', 'gearchiveerd')
-      .gte('gearchiveerd_at', vanIso).lt('gearchiveerd_at', totIso)
-      .order('gearchiveerd_at', { ascending: true }),
-    'id, naam, telefoon, reden, reden_code, archief_reden, gearchiveerd_at, created_at',
-  );
-  if (archHaal.error) throw archHaal.error;
-  const gearchiveerd = scheidTestrijen(archHaal.data).echt;
+  const { data: archRuw, error: e2 } = await supabaseAdmin
+    .from('opvolging_taken')
+    .select('id, naam, telefoon, reden, reden_code, archief_reden, gearchiveerd_at, created_at')
+    .eq('status', 'gearchiveerd')
+    .gte('gearchiveerd_at', vanIso).lt('gearchiveerd_at', totIso)
+    .order('gearchiveerd_at', { ascending: true });
+  if (e2) throw e2;
+  const gearchiveerd = archRuw || [];
 
   // ── De zoomcalls van de periode ──────────────────────────────────────────
   // scheduled_at is het moment waarop de call stond. Dat verandert niet met
@@ -242,37 +236,17 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   }
 
   // ── De taken achter die pogingen en calls ────────────────────────────────
-  // OP DE RUWE LIJST, EN DAT MOET OOK. De testrijen worden pas verderop
-  // gefilterd, en dat kan niet eerder: om te weten welke poging op een
-  // TESTKAART hangt moet je die kaarten eerst opgehaald hebben. De volgorde is
-  // dus: alle taak_ids verzamelen -> kaarten ophalen -> zien welke is_test zijn
-  // -> pas dan de pogingen splitsen.
-  //
-  // Hier stond `pogingen`, en dat is de gefilterde lijst die pas op regel ~316
-  // gedeclareerd wordt. Een const in de temporal dead zone gooit geen
-  // waarschuwing bij het inlezen maar een ReferenceError bij het DRAAIEN — en
-  // dus gaf /api/opvolging-rapport 500 voor elke dag, ongeacht de data.
-  const taakIds = new Set(pogingenRuw.map((p) => p.taak_id).filter(Boolean));
+  const taakIds = new Set(pogingen.map((p) => p.taak_id).filter(Boolean));
   for (const a of gearchiveerd) taakIds.add(a.id);
 
   const { data: taakRuw, error: e4 } = taakIds.size
     ? await supabaseAdmin
         .from('opvolging_taken')
-        .select('id, naam, telefoon, reden, reden_code, status, due, archief_reden, gearchiveerd_at, is_test')
+        .select('id, naam, telefoon, reden, reden_code, status, due, archief_reden, gearchiveerd_at')
         .in('id', [...taakIds])
     : { data: [], error: null };
-  // Zonder de kolom faalt deze select in zijn geheel; dan nog eens zonder.
-  let taakRuwVeilig = taakRuw;
-  if (e4 && isKolomOnbekend(e4)) {
-    const { data, error } = taakIds.size
-      ? await supabaseAdmin.from('opvolging_taken')
-          .select('id, naam, telefoon, reden, reden_code, status, due, archief_reden, gearchiveerd_at')
-          .in('id', [...taakIds])
-      : { data: [], error: null };
-    if (error) throw error;
-    taakRuwVeilig = data;
-  } else if (e4) throw e4;
-  const taakVan = new Map((taakRuwVeilig || []).map((t) => [t.id, t]));
+  if (e4) throw e4;
+  const taakVan = new Map((taakRuw || []).map((t) => [t.id, t]));
 
   // ── De taken achter de ZOOMCALLS, en waarom dat een tweede query is ──────
   // De set hierboven bevat alleen taken die in de periode een poging kregen of
@@ -291,16 +265,13 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   let telefoonTaken = [];
   let telefoonAfgekapt = false;
   if (afspraken.length) {
-    // MET TERUGVAL, want zonder faalt de HELE select en zou telefoonTaken leeg
-    // blijven — dan verdwijnen alle koppelingen tussen zoomcalls en taken, en
-    // dat is precies de stille onderrapportage die dit blok moet voorkomen.
-    const telHaal = await haalMetTestvlag(
-      (k) => supabaseAdmin.from('opvolging_taken').select(k)
-        .not('telefoon', 'is', null).limit(TAKEN_LIMIET),
-      'id, naam, telefoon',
-    );
-    if (telHaal.error) throw telHaal.error;
-    telefoonTaken = telHaal.data;
+    const { data, error: e4b } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, naam, telefoon')
+      .not('telefoon', 'is', null)
+      .limit(TAKEN_LIMIET);
+    if (e4b) throw e4b;
+    telefoonTaken = data || [];
     // Zit de lijst precies op de limiet, dan is hij waarschijnlijk afgekapt en
     // kunnen er koppelingen ontbreken. Dat melden we, in plaats van een
     // onvolledig vensteroordeel als volledig te presenteren.
@@ -315,24 +286,8 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   }
   // De twee sets samenvoegen op id, zodat een lead die in allebei zit één keer
   // meedoet en de rijkste versie wint.
-  // TESTRIJEN ERUIT, OP ÉÉN PLEK. Scherm, rapport, PDF en de gezondheids-
-  // controle lezen allemaal dit resultaat; zou elk daarvan zelf filteren, dan
-  // telt de een 27 waar de ander 26 toont en slaat de bewaking alarm over zijn
-  // eigen filter.
-  const testTaakIds = new Set(
-    [...taakVan.values(), ...telefoonTaken].filter((t) => t?.is_test === true).map((t) => t.id),
-  );
-  const pogSplit = filterPogingen(pogingenRuw, testTaakIds);
-  const pogingen = pogSplit.echt;
-  const testTelling = {
-    kolom_aanwezig: testKolomAanwezig,
-    pogingen: pogSplit.aantalTest,
-    taken   : testTaakIds.size,
-    zin     : testZin({ pogingen: pogSplit.aantalTest, taken: testTaakIds.size, kolomAanwezig: testKolomAanwezig }),
-  };
-
-  const alleTaken = [...taakVan.values()].filter((t) => t?.is_test !== true);
-  for (const t of telefoonTaken) if (!taakVan.has(t.id) && t?.is_test !== true) alleTaken.push(t);
+  const alleTaken = [...taakVan.values()];
+  for (const t of telefoonTaken) if (!taakVan.has(t.id)) alleTaken.push(t);
 
   // ── De volledige historiek van de gearchiveerde kaarten ──────────────────
   // De moeite naast een gearchiveerde lead telt over de HELE levensloop van
@@ -520,9 +475,6 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     zoomcalls,
     archief,
     volume,
-    // Zichtbaar, niet stil: een filter dat je niet ziet is een filter dat je op
-    // een dag vergeet, en dan zoek je een uur naar twee ontbrekende pogingen.
-    testrijen: testTelling,
     // De verdeling over de dag, en wat er afgehandeld is. Per dag, zodat een
     // weekrapport de klontering niet uitsmeert.
     //

@@ -244,8 +244,8 @@ precies wat er op 7 september gebeurde: `5 + 1` bij negen pogingen.
 
 Belt Dave in ronde A en neemt niemand op, dan gebeurt er **niets bijzonders**.
 De poging wordt geregistreerd, de kaart blijft open, en `cron-opvolging-doorrol`
-haalt hem 's nachts naar de dag waarop die cron draait. De volgende dag staat
-hij er weer, en zo elke dag tot het event.
+zet hem 's nachts op morgen. De volgende dag staat hij er weer, en zo elke dag
+tot het event.
 
 **Dat is een bewuste keuze, geen omissie** (Maxim, 7 september 2026). Er komt
 géén automatisme dat de kaart bij uitblijvend contact naar event min vier
@@ -396,96 +396,3 @@ zeggen.
 weg voordat er iets van werd vastgelegd, dus er valt niets te herstellen. Het
 rapport hoort daarover te zeggen dat het het venster niet kon meten — niet dat
 er geen bericht is gestuurd.
-
-## ⚠ De doorrol sloeg elke nacht een dag over
-
-Dit is de duurste van de vier vondsten in deze reeks, want hij deed niet één
-keer iets fout maar **elke nacht sinds de module bestaat**, en het enige spoor
-was een datum die er op het eerste gezicht redelijk uitzag.
-
-### Wat er gebeurde
-
-Maxim meldde dat de openstaande kaarten van de opwarmronde van 7 september niet
-waren meegekomen naar de 8e. De vijf leads die Dave die dag niet te pakken
-kreeg — Achraf Deflaoui, Kris Sienaert, Said Hachemi, Gevorg Khetchoumian en
-Werner De Kesel — stonden alle vijf op `due 2026-09-09`.
-
-Dat is niet 'blijven liggen'. Dat is een dag **overslaan**: op 8 september
-stonden ze op geen enkele lijst. Alle vijf droegen `updated_at 2026-09-07T23:59`,
-dus de doorrol had ze wél aangeraakt en er de verkeerde datum op gezet. De twee
-die Dave wél afrondde stonden correct op 19 en 22 september, dus de bevestigflow
-klopte. En de 19 taken die op de 8e wel in de lijst stonden, stonden daar al
-vóór de doorrol liep.
-
-### De oorzaak
-
-In `vercel.json` staat de cron op `59 23 * * *`, en **Vercel draait crons in
-UTC**. 23:59 UTC is 01:59 in Amsterdam — het is dan dus al de volgende dag. De
-cron rekende vervolgens keurig uit wat 'morgen' was vanuit Amsterdams
-perspectief, en kwam daarmee op overmorgen uit.
-
-Het pijnlijke detail: in de code stond een comment dat precies deze val
-beschreef, maar met de richting verkeerd om. Er is nooit iemand geweest die het
-nagerekend heeft, en in ons geheugen stond dat deze cron om 23:59 *Amsterdamse*
-tijd draaide. Dat klopte niet.
-
-### De fix is geen tijdzonecorrectie
-
-`59 21 * * *` invullen klopt in de zomer en is in de winter weer mis, want
-Nederland schuift twee keer per jaar. Elk vast UTC-uur is dus de helft van het
-jaar verkeerd.
-
-De regel is daarom **zelfhelend** gemaakt: de doorrol redeneert niet meer in
-morgen maar in **vandaag**. Elke openstaande taak met een `due` vóór de huidige
-Amsterdamse datum krijgt die datum.
-
-| | |
-|---|---|
-| idempotent | twee keer draaien verandert de tweede keer niets |
-| tijdstip-onafhankelijk | het maakt niet uit hoe laat de cron valt, zomer of winter |
-| zelfhelend | slaat een nacht over of faalt een run, dan haalt de volgende run alles alsnog naar voren |
-
-Dat laatste is het punt. Het verschil tussen *werkt* en *blijft werken* is dat
-de tweede zichzelf herstelt in plaats van kaarten voorgoed in het verleden te
-laten hangen. Het repareert daarmee ook de vijf van 7 september, zonder aparte
-inhaalquery.
-
-De som zelf staat nu als `doorrolDag(nuMs)` in `api/_lib/opvolging-doorrol.js`,
-met een test eronder die vastlegt dat `2026-09-07T23:59:00Z` de **8e** oplevert.
-In een handler zie je zo'n rekensommetje alleen in productie werken.
-
-### En de belangrijkste helft: waarom wist het systeem dit niet zelf?
-
-De gezondheidscontrole draait elke ochtend om 07:00, **meteen na de doorrol**,
-en heeft dit niet gezien. Vijf kaarten verdwenen uit de dag en er ging geen
-enkel belletje af. Maxim moest het zelf opmerken — en hij wordt het terecht beu
-dat hij telkens degene is die scherp moet zijn.
-
-Daarom is er een **zesde controle** bij: staat er een openstaande taak met een
-`due` in het verleden? Die hoort er per definitie nooit te zijn — alles wat open
-is hoort vandaag of later te staan. Het is een van de weinige controles die niet
-over een cijfer gaat maar over **de gezondheid van het dagritme zelf**.
-
-De vier eerdere controles kijken allemaal naar een som, een dubbeling of een
-teller. Dat is precies waarom deze ontbrak: niet elke storing laat zich zien als
-een getal dat niet klopt. Was hij er op 8 september geweest, dan had Maxim het
-die ochtend van het systeem gehoord in plaats van het zelf te moeten zien.
-
-Hij meldt de namen mee (`Achraf Deflaoui (2026-09-07)` …), want weten dát er iets
-mis is zonder te weten bij wie kost nog steeds een halve ochtend. En nul open
-kaarten is `NIET_GEMETEN`, niet `ok`: een lege lijst bewijst niets over het
-dagritme.
-
-### De les
-
-Een cron die een datum uitrekent, rekent hem uit in de tijdzone van de machine
-en niet in die van de gebruiker. Twee vragen horen daarom bij elke geplande taak
-te staan, en ze staan hier omdat ze in dit geval geen van beide gesteld waren:
-
-1. **In welke tijdzone draait dit, en heb ik dat nagerekend?** Niet: wat staat
-   erover in een comment.
-2. **Wat gebeurt er als deze run overslaat?** Een taak die alleen goed werkt als
-   hij élke keer draait, is een taak die stil kapotgaat.
-
-Een regel die naar *vandaag* rekent in plaats van naar *morgen* beantwoordt ze
-allebei tegelijk.
