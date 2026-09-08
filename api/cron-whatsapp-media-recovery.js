@@ -18,11 +18,12 @@
 //   4) Bij succes → updateInboundMediaUrl() overschrijft media_url naar
 //      de publieke bucket-URL (LIKE-guard voorkomt race met een parallel-
 //      recovery van dezelfde rij).
-//   5) Bij Meta 404 (media verlopen — Meta bewaart ~30d) → markeer als
+//   5) Bij permanente Meta-fout (400 / 404 / "Object does not exist" /
+//      "Unsupported get request" — typisch verlopen na ~30d) → markeer als
 //      `media_url = 'meta-media-expired:<id>'` zodat de LIKE-selector 'em
 //      niet meer oppikt. UI (_shared-v2.js) toont dan "media verlopen".
-//   6) Andere fouten → console.warn + stats.failed; volgende run probeert
-//      opnieuw (typisch transiente Meta-timeout of storage-hiccup).
+//   6) Transiente fouten (5xx / timeout / netwerk) → console.warn +
+//      stats.failed; volgende run probeert opnieuw.
 //
 // 0 incasso-writes. Raakt alleen whatsapp_messages.media_url + bucket
 // `whatsapp-media` (via helper).
@@ -110,11 +111,27 @@ export default async function handler(req, res) {
         }
       } else {
         const errStr = String(dl.error || '');
-        // Meta 404 = media verlopen (>~30d). Markeer met eigen prefix zodat:
-        //   (a) de LIKE-selector 'em niet meer oppikt (geen retry-storm).
-        //   (b) de UI-render in _shared-v2.js kan detecteren + "media verlopen"
-        //       tonen i.p.v. "kon niet geladen worden".
-        if (/HTTP 404/.test(errStr) || /Media not found/i.test(errStr)) {
+        // Permanente fouten van Meta = media niet meer te downloaden.
+        // Meta returnt voor verlopen/onbestaande media-id's typisch HTTP 400
+        // (niet 404!) met body "Unsupported get request. Object with ID '<id>'
+        // does not exist" of "(#100) Object does not exist". 404 komt zelden
+        // voor bij de metadata-call maar we dekken 'em defensief mee.
+        //
+        // De vorige versie checkte alleen op /HTTP 404/ → 400-cases werden
+        // als transient behandeld → oneindige retry elke 10 min → cron loopt
+        // stuk in retry-storm op verlopen media. Deze fix markeert 400 ook
+        // als permanent zodat de rij de LIKE-selector verlaat.
+        //
+        // Alleen echte tijdelijke fouten (5xx, timeout, network) blijven
+        // retryen — die kunnen later alsnog slagen.
+        const isPermanent = /HTTP 400/.test(errStr)
+          || /HTTP 404/.test(errStr)
+          || /Media not found/i.test(errStr)
+          || /Object does not exist/i.test(errStr)
+          || /Unsupported get request/i.test(errStr)
+          || /Object with ID.*does not exist/i.test(errStr);
+
+        if (isPermanent) {
           const { error: markErr } = await supabaseAdmin
             .from('whatsapp_messages')
             .update({ media_url: 'meta-media-expired:' + mediaId })
@@ -125,10 +142,15 @@ export default async function handler(req, res) {
             if (stats.errors.length < 5) stats.errors.push({ id: row.id, err: 'mark-expired: ' + markErr.message });
           } else {
             stats.expired++;
+            // Log de eerste paar expired-cases zodat Vercel-logs tonen wat
+            // Meta terug gaf — helpt bij toekomstige diagnose van andere
+            // 400-varianten die we mogelijk nog niet dekken.
+            if (stats.errors.length < 5) stats.errors.push({ id: row.id, expired: errStr.slice(0, 200) });
           }
         } else {
-          // Transiente fout — volgende run probeert opnieuw. Log de eerste
-          // paar zodat Vercel-logs de kern-oorzaak laten zien.
+          // Transiente fout (5xx / timeout / netwerk) — volgende run probeert
+          // opnieuw. Log de eerste paar zodat Vercel-logs de kern-oorzaak
+          // laten zien.
           stats.failed++;
           if (stats.errors.length < 5) stats.errors.push({ id: row.id, err: 'download: ' + errStr.slice(0, 200) });
         }
