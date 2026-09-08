@@ -71,11 +71,15 @@ export default async function handler(req, res) {
     if (conv) {
       const { data: waMsgs } = await supabaseAdmin
         .from('whatsapp_messages')
-        .select('id, direction, body, media_type, template_name, created_at')
+        .select('id, direction, body, media_type, media_url, template_name, created_at')
         .eq('conversation_id', conv.id)
         .order('created_at', { ascending: true })
         .limit(200);
       for (const m of waMsgs || []) {
+        // 2026-09-08: body-fallback naar '[image]' etc. blijft voor placeholder-
+        // detectie in renderChatBody; die triggert alleen als er OOK geen
+        // media_url is (of media_url is 'meta-media-expired:...'). Zie
+        // _shared-v2.js:362-378 voor de render-branches.
         const tekst = m.body || (m.template_name ? '[sjabloon] ' + m.template_name : '')
           || (m.media_type ? '[' + m.media_type + ']' : '') || '';
         items.push({
@@ -84,6 +88,13 @@ export default async function handler(req, res) {
           direction: m.direction === 'out' ? 'out' : 'in',
           body: tekst,
           ts: m.created_at,
+          // Gelijkgetrokken met inbox-v2/wanbetalers-v2: media-info in `meta`
+          // zodat renderChatBody (_shared-v2.js) `<img>` kan tonen i.p.v.
+          // "media niet beschikbaar". Endpoint viel eerder terug op de
+          // placeholder-tekst en gooide media_url weg.
+          media_type: m.media_type || null,
+          media_url:  m.media_url || null,
+          meta: { media_type: m.media_type || null, media_url: m.media_url || null },
         });
       }
       if (markRead && (conv.unread_count || 0) > 0) {
