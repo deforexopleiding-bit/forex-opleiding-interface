@@ -23,22 +23,17 @@
 
 BEGIN;
 
--- 1) info_only-vlag op questionnaires (default false → oude rij ongewijzigd).
-ALTER TABLE public.assessment_questionnaires
-  ADD COLUMN IF NOT EXISTS info_only boolean NOT NULL DEFAULT false;
-
-COMMENT ON COLUMN public.assessment_questionnaires.info_only IS
-  'true = INFO-ONLY vervolgvragenlijst (niet gescoord, geen pass/reject, geen annulering). Wordt expliciet op id aangesproken door de Stap-2-endpoints; NOOIT is_active=true.';
-
--- 2) De vervolg-questionnaire (niet actief, info-only).
-INSERT INTO public.assessment_questionnaires (slug, name, is_active, info_only)
-VALUES ('event-vervolg', 'Event vervolgvragen (definitief maken)', false, true)
+-- 1) De vervolg-questionnaire (NIET actief). De info-only aard zit in het feit
+--    dat alle vragen is_routing=false zijn en de flow deze slug apart aanspreekt
+--    — er is GEEN info_only-kolom nodig (die is bewust verwijderd; de endpoints
+--    lezen 'm niet, en een niet-bestaande kolom liet de context met 500 crashen).
+INSERT INTO public.assessment_questionnaires (slug, name, is_active)
+VALUES ('event-vervolg', 'Event vervolgvragen (definitief maken)', false)
 ON CONFLICT (slug) DO UPDATE SET
   name      = EXCLUDED.name,
-  info_only = true,
   updated_at = now();
 
--- 3) Startset vragen (info-only, is_routing=false). Eigen keys (prefix
+-- 2) Startset vragen (info-only, is_routing=false). Eigen keys (prefix
 --    'vervolg_') zodat de globale UNIQUE(key) niet botst met de bestaande set.
 --    Idempotent op key (ON CONFLICT (key) DO NOTHING).
 INSERT INTO public.assessment_questions
@@ -85,10 +80,10 @@ COMMIT;
 
 -- ============================================================================
 -- Verificatie:
---   SELECT id, slug, is_active, info_only FROM public.assessment_questionnaires WHERE slug='event-vervolg';
+--   SELECT id, slug, is_active FROM public.assessment_questionnaires WHERE slug='event-vervolg';
 --   SELECT count(*) FROM public.assessment_questions
 --     WHERE questionnaire_id=(SELECT id FROM public.assessment_questionnaires WHERE slug='event-vervolg');  -- 8
 --   -- De ACTIEVE (oude) questionnaire moet ongemoeid is_active=true blijven:
 --   SELECT slug, is_active FROM public.assessment_questionnaires WHERE is_active=true;
--- Vergeet niet:  NOTIFY pgrst, 'reload schema';
+-- (Geen schemawijziging meer nodig; NOTIFY pgrst niet vereist.)
 -- ============================================================================

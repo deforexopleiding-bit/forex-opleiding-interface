@@ -21,6 +21,14 @@ const DFO_BASE      = (process.env.DFO_WEBSITE_BASE_URL || 'https://www.deforexo
 const TEMPLATE_NAME = process.env.EVENTS_VERVOLG_TEMPLATE_NAME || 'event_vragenlijst_definitief';
 const TEMPLATE_LANG = 'nl';
 
+// Body-variabele-mapping voor het WhatsApp-template. Wordt als fallback
+// meegegeven aan sendEventWhatsAppTemplate zodat de send ook werkt wanneer de
+// template-rij (nog) geen meta_param_mapping in de DB heeft — anders zou Meta
+// een 4-variabelen-template met 0 parameters weigeren (132000) en kwam er geen
+// WhatsApp binnen. Zet meta_param_mapping óók in de DB (zie de seed-SQL) zodat
+// het CRM-templatescherm de mapping toont.
+const PARAM_MAPPING = { body: { 1: 'attendee.voornaam', 2: 'event.titel', 3: 'event.datum', 4: 'attendee.vervolg_link' } };
+
 function escHtml(s) {
   if (s == null) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -99,7 +107,7 @@ export async function sendEventAttendeeVervolg({ attendeeId, sentByUserId = null
     const vervolgLink = `${DFO_BASE}/vervolg?t=${encodeURIComponent(attendee.choice_token)}`;
 
     const [waResult, mailResult] = await Promise.all([
-      sendEventWhatsAppTemplate({ attendee, event, templateName: TEMPLATE_NAME, languageCode: TEMPLATE_LANG, sentByUserId }),
+      sendEventWhatsAppTemplate({ attendee, event, templateName: TEMPLATE_NAME, languageCode: TEMPLATE_LANG, sentByUserId, paramMappingOverride: PARAM_MAPPING }),
       sendVervolgMail({ firstName: attendee.first_name, vervolgLink, eventTitle: event.title, eventStartsAt: event.starts_at, toEmail: attendee.email }),
     ]);
 

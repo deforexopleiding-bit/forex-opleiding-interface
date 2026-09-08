@@ -69,6 +69,11 @@ export async function sendEventWhatsAppTemplate({
   templateName,
   languageCode = 'nl',
   sentByUserId = null,
+  // Fallback-mapping (positie → variabele-key) voor het geval de template-rij
+  // GEEN meta_param_mapping heeft. Additief en optioneel: bestaande callers
+  // geven dit niet mee → gedrag exact ongewijzigd. Voorkomt dat een template
+  // met {{N}}-body maar zonder DB-mapping als 0 params naar Meta gaat (132000).
+  paramMappingOverride = null,
 } = {}) {
   if (!templateName) {
     return { ok: false, skipped: true, reason: 'no-template-name' };
@@ -140,10 +145,16 @@ export async function sendEventWhatsAppTemplate({
     return { ok: false, error: 'conv upsert failed: ' + (e?.message || 'unknown') };
   }
 
-  // 5) Variabelen resolven via meta_param_mapping.body (of legacy flat).
-  const bodyMapping = (templateRow.meta_param_mapping && typeof templateRow.meta_param_mapping === 'object')
+  // 5) Variabelen resolven via meta_param_mapping.body (of legacy flat), met
+  //    fallback op de meegegeven paramMappingOverride als de DB-rij géén mapping
+  //    heeft (voorkomt een 0-param send → Meta 132000).
+  const dbMapping = (templateRow.meta_param_mapping && typeof templateRow.meta_param_mapping === 'object')
     ? (templateRow.meta_param_mapping.body || templateRow.meta_param_mapping)
     : null;
+  const overrideMapping = (paramMappingOverride && typeof paramMappingOverride === 'object')
+    ? (paramMappingOverride.body || paramMappingOverride)
+    : null;
+  const bodyMapping = dbMapping || overrideMapping;
 
   const ctx = { event, attendee, moduleContext };
 
