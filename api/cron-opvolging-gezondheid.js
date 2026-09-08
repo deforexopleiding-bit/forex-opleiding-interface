@@ -30,7 +30,8 @@ import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
-  beoordeelPrintweergave, controleerBrug, bouwMail, OK, FOUT, NIET_GEMETEN,
+  beoordeelPrintweergave, controleerBrug, controleerDagritme,
+  bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
 
 const ZONE = 'Europe/Amsterdam';
@@ -97,6 +98,25 @@ export default async function handler(req, res) {
 
   // ── 5 · De WhatsApp-brug ─────────────────────────────────────────────────
   uitkomsten.push(await meetBrug());
+
+  // ── 6 · Het dagritme ─────────────────────────────────────────────────────
+  // Draait bewust NA de doorrol van 23:59 en vóór Daves ochtend. Wat open staat
+  // hoort vandaag of later te staan; alles daarvoor is uit de dag verdwenen
+  // zonder dat iemand het merkt. Zie de kop van controleerDagritme.
+  try {
+    const { data: taken, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, naam, due')
+      .eq('status', 'open')
+      .order('due', { ascending: true })
+      .limit(2000);
+    if (error) throw error;
+    uitkomsten.push(controleerDagritme({ taken: taken || [], vandaag }));
+  } catch (e) {
+    // Een leesfout is een storing, geen blinde vlek.
+    uitkomsten.push({ naam: 'dagritme', staat: FOUT, getallen: { fout: kort(e) },
+      uitleg: 'De openstaande kaarten waren niet te lezen: ' + kort(e) });
+  }
 
   // ── De mail ──────────────────────────────────────────────────────────────
   const { subject, text } = bouwMail({ uitkomsten, dag: vandaag });
