@@ -1389,6 +1389,29 @@
     // Vorige waarden pre-fillen (FIX H).
     const saved = _lsTplValues[tpl.name] || {};
 
+    // Auto-fill voornaam (2026-09-07): als een template één variabele heeft
+    // die naar de voornaam wijst ({{1}}, {{voornaam}}, {{lead.voornaam}},
+    // {{klant.voornaam}}), pre-fill met de voornaam uit de conversation-row.
+    // Voorkomt lege parameter → Meta 132001 "Parameter can't be empty".
+    // Alleen bij eerste-render (saved[key] leeg); user kan overschrijven.
+    (function _autoFillVoornaam() {
+      const convVoornaam = String(
+        (conv && (conv.voornaam || conv.lead_voornaam)) ||
+        String(_lsInbRowVan(conv) || '').trim().split(/\s+/)[0] || ''
+      ).trim();
+      if (!convVoornaam) return;
+      for (const k of keys) {
+        if (saved[k] && String(saved[k]).length) continue;
+        const kLow = String(k).toLowerCase();
+        const isVoornaamKey = k === '1'
+          || kLow === 'voornaam'
+          || kLow === 'naam'
+          || kLow.endsWith('.voornaam')
+          || kLow.endsWith('.naam');
+        if (isVoornaamKey) saved[k] = convVoornaam;
+      }
+    })();
+
     // Placeholder → veilige HTML-id (elke niet-woord char wordt _).
     const idFor = (k) => 'lsTplPh_' + String(k).replace(/[^a-zA-Z0-9_]/g, '_');
     const inpIdFor = (k) => 'lsTplVar_' + String(k).replace(/[^a-zA-Z0-9_]/g, '_');
