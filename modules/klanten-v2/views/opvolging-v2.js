@@ -1197,7 +1197,23 @@
 .opv .belbol.gsp{background:#dcfce7;color:#166534}
 .opv .belbol.kort{background:#fef3c7;color:#92400e}
 .opv .belbol.onb{background:#e5e7eb;color:#4b5563}
-.opv .rnd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;width:100%;
+/* HET RONDELABEL IS EEN ZIN, GEEN DERDE KOLOM.
+   Gemeten op productie: .row.rst is 633 breed met gap 14 en drie kinderen.
+   .rnd had width:100% maar GEEN flex-shorthand, dus flex-shrink:1 met
+   min-width:auto — hij mag dus niet kleiner worden dan zijn inhoud. .who heeft
+   min-width:0 en mag wél tot nul krimpen. Uitkomst: .rnd 395, .act 178, .who
+   NUL. De naam brak over twee regels en +32 473 97 98 12 viel uiteen in een
+   cijfergroepje per regel.
+   Dat is de omgekeerde wereld: de uitleg over de ronde won het van de naam van
+   de lead en het nummer dat je moet bellen.
+   Rekenen laat zien dat drie kolommen simpelweg niet passen: .who wil ~312,
+   .act 178, en het rondepaneel 741 als het niet mag afbreken — op 605
+   beschikbaar. Vandaar geen CSS-tweak maar een indelingswijziging: flex:1 0
+   100% zet hem op zijn eigen regel bovenaan, en .who houdt 633 - 178 - 14 =
+   441 over. Dat blijft ook kloppen op een smaller venster, en dat is het punt:
+   deze fout was er al bij een gewone laptopbreedte. */
+.opv .rnd{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;
+  flex:1 0 100%;min-width:0;
   margin:0 0 8px;padding:5px 9px;border-radius:7px;font-size:12px;line-height:1.45}
 .opv .rnd b{font-size:12.5px;letter-spacing:.01em}
 .opv .rnd span{color:var(--o-muted)}
@@ -1367,6 +1383,10 @@
 /* De rustige kaart: naam als duidelijkste element, meer wit, alleen de
    voortgang van vandaag. Wat er nog niet is blijft stil — de teller zegt dat. */
 .opv .row.rst{padding:13px 15px}
+/* Alleen de rijen MET een rondebalk breken af; de andere kaarten in deze module
+   houden hun bestaande gedrag, want flex-wrap globaal aanzetten zou daar
+   onbedoeld iets kunnen verschuiven. */
+.opv .row.rnd-boven{flex-wrap:wrap}
 .opv .row.rst .nm2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:15px;font-weight:700;color:var(--o-ink);line-height:1.25}
 .opv .row.rst .mt2{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:5px}
 .opv .row.rst .tel2{font-size:13px;color:#4b5563;font-variant-numeric:tabular-nums}
@@ -1437,11 +1457,28 @@
 .opv .opvr-lijst{display:flex;flex-direction:column;gap:2px}
 .opv .opvr-regel{padding:8px 10px;border-left:3px solid var(--o-line);background:#fafbfc;border-radius:0 8px 8px 0}
 .opv .opvr-regel.opvr-rood{border-left-color:var(--o-red);background:var(--o-reds)}
+.opv .opvr-regel.opvr-groen{border-left-color:#16a34a;background:#f0fdf4}
+.opv .opvr-tl{margin:10px 0 6px}
+.opv .opvr-tl-kop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:12.5px;margin-bottom:4px}
+.opv .opvr-tl-kop span{color:var(--o-muted);font-size:11.5px}
+.opv .opvr-tl-legenda{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:11px;color:var(--o-muted)}
+.opv .opvr-tl-legenda i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .opv .opvr-regel.opvr-grijs{border-left-color:#d1d5db;background:#f7f8f9}
 .opv .opvr-t{font-size:13.5px;font-weight:600}
 .opv .opvr-u{font-size:12px;color:var(--o-muted);font-weight:400}
 .opv .opvr-notitie{white-space:pre-wrap;margin-top:4px}
 .opv .opvr-bel{margin-top:4px;display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 8px}
+.opv .opvr-ritme{margin:10px 0 4px}
+.opv .opvr-ritme-kop{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-size:12.5px;margin-bottom:6px}
+.opv .opvr-ritme-kop span{color:var(--o-muted);font-size:11.5px}
+.opv .opvr-balk{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:3px;align-items:end;height:74px}
+.opv .opvr-uur{display:flex;flex-direction:column;justify-content:flex-end;height:100%;min-width:0;text-align:center}
+.opv .opvr-staaf{background:#2563eb;border-radius:3px 3px 0 0;min-height:3px}
+.opv .opvr-staaf.opvr-leeg{background:#e5e7eb;height:3px!important}
+.opv .opvr-uurlabel{font-size:9.5px;color:var(--o-muted);margin-top:3px}
+.opv .opvr-uuraantal{font-size:10px;color:#374151;font-weight:600;height:12px}
+.opv .opvr-blokkop{margin:14px 0 6px;font-size:13px;display:flex;align-items:center;gap:7px}
+.opv .opvr-blokkop span{font-size:11px;color:var(--o-muted);background:#f3f4f6;border-radius:999px;padding:1px 7px}
 .opv .opvr-bel.belraak{color:#166534}
 .opv .opvr-bps{display:inline-flex;flex-wrap:wrap;gap:4px}
 .opv details.opvr-rijen{margin-top:10px}
@@ -1506,8 +1543,8 @@
     const r = REDEN_LABEL[t.reden] || [t.reden, 't-grey'];
     const nuDag = vandaag();
     if (inGroep) return taakKaartRustig(t, dag, nuDag);
-    return '<div class="row">' +
-      (t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '') +
+    const strook = t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '';
+    return '<div class="row' + (strook ? ' rnd-boven' : '') + '">' + strook +
       '<div class="who">' +
       '<div class="nm">' + esc(t.naam) +
         ' <span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
@@ -1554,8 +1591,8 @@
         ? '<span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
       vensterAfwijking(t, dag);
 
-    return '<div class="row rst">' +
-      (t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '') +
+    const strook = t.reden === 'aanmelding' ? rondeStrook(t, nuDag) : '';
+    return '<div class="row rst' + (strook ? ' rnd-boven' : '') + '">' + strook +
       '<div class="who">' +
       '<div class="nm2">' + esc(t.naam) +
         (t.bevestigd_op ? ' ' + bevestigdBadge(t) : '') + '</div>' +
@@ -1639,15 +1676,33 @@
    * dagscherm en het rapport dezelfde zin geven. tests/opvolging-belzin-
    * tweeling.test.js houdt ze gelijk.
    */
-  const GESPREK_MIN_SEC = 10;
+  // HET RESULTAAT BESLIST, NIET DE DUUR — tweeling van classificeerResultaat()
+  // in api/_lib/opvolging-poging-telling.js. De grens van tien seconden is op
+  // 8 september vervallen: duur_sec is de tijd tussen kiezen en ophangen, dus
+  // inclusief overgaan. Meting over de laatste weken: bij 'niet opgenomen'
+  // staan duren tot 43 seconden, bij 'gesproken' vanaf 4.
+  //
+  // Vrije tekst, dus op VOORVOEGSEL: 'gesproken: bevestigd — neemt laptop mee'
+  // hoort gewoon bij gesproken.
+  function classificeerResultaat(r) {
+    const t = String(r == null ? '' : r).toLowerCase().trim().replace(/\s+/g, ' ');
+    if (!t) return 'onbekend';
+    if (t.startsWith('via ander') || t.startsWith('bevestigd via')) return 'via_ander';
+    if (t.startsWith('gesproken')) return 'gesproken';
+    if (t.startsWith('niet opgenomen') || t.startsWith('niet_opgenomen')
+        || t.startsWith('geen gehoor') || t.startsWith('geen_gehoor')) return 'niet_opgenomen';
+    return 'onbekend';
+  }
 
   function belZin(aantal, gesproken, seconden) {
     if (!aantal) return 'Die dag niet gebeld.';
     const keer = aantal + '\u00d7 gebeld';
-    if (!gesproken) return 'Die dag ' + keer + ', geen gesprek van betekenis.';
+    if (!gesproken) return 'Die dag ' + keer + ', niemand nam op.';
+    const kop = 'Die dag ' + keer + ', waarvan ' +
+      (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken');
+    if (!seconden) return kop + '; de lengte is niet geregistreerd.';
     const duur = seconden >= 90 ? Math.round(seconden / 60) + ' min' : seconden + ' s';
-    return 'Die dag ' + keer + ', waarvan ' +
-      (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken') + ' van samen ' + duur + '.';
+    return kop + ' van samen ' + duur + '.';
   }
 
   /**
@@ -1673,8 +1728,12 @@
     let gesproken = 0;
     let seconden = 0;
     for (const p of rij) {
+      if (classificeerResultaat(p.resultaat) !== 'gesproken') continue;
+      gesproken += 1;
+      // Een op de drie gesproken calls heeft geen duur; dat is het normale
+      // geval, geen randgeval. Tel er dus geen nul bij op.
       const d = duurVan(p);
-      if (d !== null && d >= GESPREK_MIN_SEC) { gesproken += 1; seconden += d; }
+      if (d !== null) seconden += d;
     }
     return { aantal: rij.length, gesproken, seconden, pogingen: rij };
   }
@@ -1686,10 +1745,16 @@
     }
     const b = belVanDag(taak, dag);
     const stippen = b.pogingen.map((p) => {
-      const d = duurVan(p);
-      const kl = d === null ? 'onb' : d >= GESPREK_MIN_SEC ? 'gsp' : 'kort';
-      return '<span class="belbol ' + kl + '">' + esc(uur(p.tijdstip)) +
-        (d === null ? '' : ' &middot; ' + d + ' s') + '</span>';
+      const k = classificeerResultaat(p.resultaat);
+      const d = k === 'gesproken' ? duurVan(p) : null;
+      const kl = k === 'gesproken' ? 'gsp' : k === 'niet_opgenomen' ? 'kort' : 'onb';
+      // Alleen bij gesproken een duur. Bij een niet-opgenomen call zou dat
+      // overgaantijd zijn, en bij gesproken-zonder-duur is de eerlijke tekst
+      // dat de lengte niet geregistreerd is — geen nul.
+      return '<span class="belbol ' + kl + '" title="' + esc(p.resultaat || 'geen resultaat vastgelegd') + '">' +
+        esc(uur(p.tijdstip)) +
+        (k === 'gesproken' ? (d === null ? ' &middot; lengte onbekend' : ' &middot; ' + d + ' s') : '') +
+        '</span>';
     }).join('');
     return '<div class="belr' + (b.gesproken ? ' belraak' : '') + '">' +
       '<b>' + esc(belZin(b.aantal, b.gesproken, b.seconden)) + '</b>' +
@@ -2883,7 +2948,7 @@
           const ok = a.bel_dagen >= ARCHIEF_MIN_DAGEN && a.wa_totaal >= ARCHIEF_MIN_WA;
           const oordeel = nvt
             ? '<span class="tag t-grey" title="de lead zei tijdens de call zelf nee">n.v.t.</span>'
-            : (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>');
+            : (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig pogingen</span>');
           return '<tr><td><b>' + esc(a.naam) + '</b></td><td style="color:#6b7280">' + esc(a.archief_reden || '') + '</td>' +
             '<td>' + a.bel_totaal + '&times; gebeld op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') + ' &middot; ' + a.wa_totaal + '&times; WhatsApp ' +
             oordeel + '</td></tr>';
@@ -2915,7 +2980,7 @@
         '<div style="font-size:12.5px;color:#6b7280">' + esc(a.archief_reden || '') + '</div></td>' +
         '<td><span class="tag t-grey">' + esc((REDEN_LABEL[a.reden] || [a.reden])[0]) + '</span></td>' +
         '<td>' + a.bel_totaal + '&times; &#9742; op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') + ' &middot; ' + a.wa_totaal + '&times; &#128172; ' +
-        (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig</span>') + '</td>' +
+        (ok ? '<span class="tag t-green">ok</span>' : '<span class="tag t-red">te weinig pogingen</span>') + '</td>' +
         '<td style="color:#6b7280">' + esc(a.gearchiveerd_at ? nl(iso(a.gearchiveerd_at)) : '') + '</td></tr>';
     }).join('');
     return h + '</tbody></table></div></div>' + modalHtml();
@@ -4275,9 +4340,13 @@
 
     h += sectieAandacht(d);
     h += sectieDekking(d);
+    h += sectieTijdlijn(d);
     h += sectieVensters(d);
     h += sectieZoomcalls(d);
-    h += sectieArchief(d);
+    // sectieWerkritme is opgegaan in sectieTijdlijn hierboven: allebei gingen
+    // ze over de verdeling van het werk over de dag, en twee blokken daarover
+    // onder elkaar is niet twee keer beter maar een rommelig rapport.
+    h += sectieAfgehandeld(d);
     h += sectieVolume(d);
     return h + '</div>';
   }
@@ -4342,11 +4411,32 @@
     if (k.openstaand_bekend) {
       const open = k.openstaand || [];
       const gedaan = open.filter((r) => r.behandeld);
+      // HET LOSSE VIERDE GETAL IS WEG, EN VERVANGEN DOOR WAT HET BETEKENDE.
+      //
+      // Er stond '10 leads op de lijst · 9 kregen een poging · 1 kreeg niets ·
+      // 15 leads met een poging'. Dat leest als een telfout, terwijl het het
+      // interessantste getal van de sectie was: Dave had zes leads afgewerkt
+      // die niet eens op zijn lijst stonden. Het rapport meldde dus wél de ene
+      // vergeten lead en verstopte de zes extra — precies de verkeerde kant op
+      // voor een rapport dat inspanning eerlijk hoort te tonen.
+      //
+      // Nu met naam en herkomst, in een eigen blok.
+      const opLijst = new Set(open.map((r) => r.taak_id || r.naam));
+      const extra = (k.behandeld || []).filter((r) => !opLijst.has(r.taak_id || r.naam));
       h += '<div class="opvr-kpi">' +
         rapCel(open.length, 'leads op de lijst') +
         rapCel(gedaan.length, 'kregen een poging') +
         rapCel(open.length - gedaan.length, 'kregen niets') +
-        rapCel(k.behandeld.length, 'leads met een poging') + '</div>';
+        rapCel(extra.length, 'erbij, buiten de lijst') + '</div>';
+      if (extra.length) {
+        h += '<div class="ronde"><b>' + extra.length + ' lead' + (extra.length === 1 ? '' : 's') +
+          ' die niet op de lijst stond' + (extra.length === 1 ? '' : 'en') +
+          ' zijn toch afgewerkt.</b> Dat is werk dat nergens anders zichtbaar wordt; ' +
+          'zie <i>Afgehandeld</i> voor wat er met die kaarten gebeurd is.</div>';
+        h += rijenBlok('Erbij, buiten de lijst', extra, (r) =>
+          '<div class="opvr-regel opvr-groen"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
+          '</div><div class="opvr-u">' + r.bel + '&times; gebeld &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+      }
       h += rijenBlok('Kregen niets', k.onbehandeld || [], (r) =>
         '<div class="opvr-regel opvr-rood"><div class="opvr-t">' + esc(r.naam || 'Naamloos') + '</div></div>');
       h += rijenBlok('Kregen minstens één poging', gedaan, (r) =>
@@ -4364,6 +4454,59 @@
       '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
       '</div><div class="opvr-u">' + r.bel + '&times; gebeld op ' + r.bel_dagen + ' dag' + (r.bel_dagen === 1 ? '' : 'en') +
       ' &middot; ' + r.wa + '&times; WhatsApp</div></div>');
+    return h + '</div>';
+  }
+
+  // ── 2b · De tijdlijn ─────────────────────────────────────────────────────
+  // De SVG komt kant-en-klaar van de server, precies zoals de printweergave
+  // hem krijgt. Hier niets narekenen en niets tekenen: één grafiek, één bron.
+  function sectieTijdlijn(d) {
+    const dagen = d.tijdlijn || [];
+    let h = '<div class="card opvr-sectie"><h3>2b &middot; De dag</h3>';
+    if (!dagen.length) return h + '<div class="empty">Geen tijdlijn berekend voor deze periode.</div></div>';
+
+    // DE TOON. Een gat is een BLINDE VLEK, geen verwijt: deze module ziet
+    // alleen wat er in Opvolging gebeurt, niet de zoomcalls zelf en niet het
+    // andere werk van de dag. Zonder die zin leest stilte als een aanklacht.
+    h += '<div class="ronde">Elke belpoging, WhatsApp en ingeplande zoomcall op hun eigen tijdstip. ' +
+      'De <b>hoogte</b> van een staaf is de gespreksduur — op een as van twaalf uur is een gesprek ' +
+      'van anderhalve minuut te smal om te zien. <b>Een leeg stuk is een blinde vlek, geen verwijt:</b> ' +
+      'deze module ziet alleen wat er in Opvolging gebeurt, niet het gesprek in een zoomcall en niet ' +
+      'het werk dat elders is vastgelegd.</div>';
+
+    // De twee rekensommen van het werkritme horen ONDER het beeld, niet in een
+    // eigen blok: ze zeggen in cijfers wat de tijdlijn laat zien. De uur-balk
+    // die daar eerst bij hoorde is vervallen — de kwartierstrook in de tijdlijn
+    // toont hetzelfde, alleen fijner.
+    const dr = d.drempels || {};
+    const ritmeVan = (dag) => (d.werkritme || []).find((r) => r.dag === dag) || null;
+    h += '<div class="ronde zacht">De werkdag loopt van <b>' + (dr.werkuur_van ?? 9) + ':00 tot ' +
+      (dr.werkuur_tot ?? 21) + ':00</b>. Een stilte binnen die uren heet een gat vanaf <b>' +
+      Math.round((dr.gat_drempel_min ?? 120) / 60) + ' uur</b>; onder <b>' +
+      Math.round((dr.bezetting_drempel ?? 0.6) * 100) + '%</b> bezetting heet de dag geklonterd.</div>';
+
+    for (const t of dagen) {
+      const r = ritmeVan(t.dag);
+      h += '<div class="opvr-tl"><div class="opvr-tl-kop"><b>' + esc(nl(t.dag)) + '</b>' +
+        '<span>' + t.aantallen.bel + ' belpoging' + (t.aantallen.bel === 1 ? '' : 'en') +
+        ' &middot; ' + t.aantallen.whatsapp + '&times; WhatsApp &middot; ' +
+        t.aantallen.zoomcalls + ' zoomcall' + (t.aantallen.zoomcalls === 1 ? '' : 's') +
+        ' &middot; ' + esc(t.venster.van) + '&ndash;' + esc(t.venster.tot) +
+        (r ? ' &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren' : '') +
+        '</span></div>' +
+        t.svg +
+        (t.verruimd ? '<div class="ronde zacht">' + esc(t.verruimd.reden) + '</div>' : '');
+      for (const b of (r ? r.bevindingen : [])) h += '<div class="warn">' + esc(b.tekst) + '</div>';
+      h += '</div>';
+    }
+    h += '<div class="opvr-tl-legenda">' +
+      '<span><i style="background:#07835A"></i>gesprek (hoogte = duur)</span>' +
+      '<span><i style="background:#E4F5EE;border:1px dashed #07835A"></i>gesproken, lengte onbekend</span>' +
+      '<span><i style="background:#fff;border:1px solid #C22B3E"></i>niet opgenomen</span>' +
+      '<span><i style="background:#E7EEFA;border:1px solid #1B5FBF"></i>WhatsApp uit</span>' +
+      '<span><i style="background:#FBF0DE;border:1px solid #C2700A"></i>antwoord</span>' +
+      '<span><i style="background:#EDE7FB;border:1px solid #6D3FD4"></i>zoomcall</span>' +
+      '</div>';
     return h + '</div>';
   }
 
@@ -4476,27 +4619,61 @@
     return h + '</div>';
   }
 
-  // ── 5 · Uit de lijst gehaald ─────────────────────────────────────────────
-  function sectieArchief(d) {
-    const lijst = d.archief || [];
-    let h = '<div class="card opvr-sectie"><h3>5 &middot; Uit de lijst gehaald</h3>';
-    if (!lijst.length) return h + '<div class="empty">Er is in deze periode niemand uit de lijst gehaald.</div></div>';
-    const teWeinig = lijst.filter((a) => a.moeite.staat === 'te_weinig');
-    h += '<div class="ronde zacht">De moeite hiernaast telt over de <b>hele levensloop</b> van de kaart, niet over deze periode: ' +
-      'de vraag is of er genoeg gedaan was vóórdat hij dicht ging. De afspraak is ' +
-      d.drempels.archief_min_dagen + ' belpogingen op ' + d.drempels.archief_min_dagen +
-      ' verschillende dagen plus ' + d.drempels.archief_min_wa + ' WhatsApp.</div>';
-    h += '<div class="opvr-kpi">' + rapCel(lijst.length, 'uit de lijst') + rapCel(teWeinig.length, 'met te weinig moeite') + '</div>';
-    h += '<div class="card"><table><thead><tr><th>Naam</th><th>Reden</th><th>Moeite</th><th>Dag</th></tr></thead><tbody>' +
-      lijst.map((a) =>
-        '<tr><td><b>' + esc(a.naam || 'Naamloos') + '</b></td>' +
-        '<td style="color:#6b7280">' + esc(a.archief_reden || '') + '</td>' +
-        '<td>' + a.bel_totaal + '&times; &#9742; op ' + a.bel_dagen + ' dag' + (a.bel_dagen === 1 ? '' : 'en') +
-        ' &middot; ' + a.wa_totaal + '&times; &#128172; ' + moeiteWoord(a.moeite) + '</td>' +
-        '<td style="color:#6b7280">' + esc(nl(a.dag)) + '</td></tr>').join('') +
-      '</tbody></table></div>';
+
+
+  // ── 5 · Afgehandeld ──────────────────────────────────────────────────────
+  // Heette 'Uit de lijst gehaald' en toonde alleen archiveringen. Bryan en
+  // Peter kregen op 7 september een beslissing en bleven open met een due
+  // vooruit; die stonden nergens, en daardoor leek dat werk verdwenen.
+  //
+  // Dezelfde driedeling en DEZELFDE BEREKENING als het scherm Vandaag gedaan —
+  // die komt van de server (d.afgehandeld), zodat scherm en PDF niet zeven
+  // tegenover acht kunnen zeggen.
+  function blokLeeg(zin) { return '<div class="empty"><i>' + esc(zin) + '</i></div>'; }
+
+  function sectieAfgehandeld(d) {
+    const dagen = d.afgehandeld || [];
+    let h = '<div class="card opvr-sectie"><h3>5 &middot; Afgehandeld</h3>';
+    if (!dagen.length) return h + blokLeeg('Er is voor deze periode niets berekend.') + '</div>';
+
+    const som = (k) => dagen.reduce((n, x) => n + x.aantallen[k], 0);
+    h += '<div class="opvr-kpi">' +
+      rapCel(som('afgesloten'), 'afgesloten') +
+      rapCel(som('doorgeschoven'), 'doorgeschoven') +
+      rapCel(som('aangeraakt'), 'aangeraakt') + '</div>';
+
+    const alles = (k) => dagen.flatMap((x) => x[k].map((r) => ({ ...r, dag: x.dag })));
+
+    const afgesloten = alles('afgesloten');
+    h += '<h4 class="opvr-blokkop">Afgesloten <span>' + afgesloten.length + '</span></h4>';
+    h += afgesloten.length
+      ? '<div class="opvr-lijst">' + afgesloten.map((a) =>
+          '<div class="opvr-regel"><div class="opvr-t">' + esc(a.naam) + '</div>' +
+          '<div class="opvr-u">' + esc(a.reden || 'zonder reden vastgelegd') +
+          ' &middot; ' + esc(nl(a.dag)) + '</div></div>').join('') + '</div>'
+      : blokLeeg('Er is niemand definitief uit de lijst gehaald.');
+
+    const door = alles('doorgeschoven');
+    h += '<h4 class="opvr-blokkop">Doorgeschoven <span>' + door.length + '</span></h4>';
+    h += door.length
+      ? '<div class="opvr-lijst">' + door.map((a) =>
+          '<div class="opvr-regel"><div class="opvr-t">' + esc(a.naam) + '</div>' +
+          '<div class="opvr-u">' + esc(a.wat) + ', komt terug op <b>' + esc(nl(a.terug_op)) +
+          '</b>' + (a.notitie ? ' &mdash; ' + esc(a.notitie) : '') + '</div></div>').join('') + '</div>'
+      : blokLeeg('Er is niemand doorgeschoven naar een volgende ronde.');
+
+    const aan = alles('aangeraakt');
+    h += '<h4 class="opvr-blokkop">Aangeraakt, nog open <span>' + aan.length + '</span></h4>';
+    h += aan.length
+      ? '<div class="opvr-lijst">' + aan.map((a) =>
+          '<div class="opvr-regel"><div class="opvr-t">' + esc(a.naam) + '</div>' +
+          '<div class="opvr-u">' + a.pogingen + ' poging' + (a.pogingen === 1 ? '' : 'en') +
+          ', zonder beslissing</div></div>').join('') + '</div>'
+      : blokLeeg('Er is niemand benaderd zonder dat er een beslissing viel.');
+
     return h + '</div>';
   }
+
 
   function moeiteWoord(m) {
     if (!m) return '';
@@ -4505,7 +4682,7 @@
     // aan te doen viel.
     if (m.staat === 'nvt') return '<span class="tag t-grey" title="' + esc(m.reden || '') + '">n.v.t.</span>';
     if (m.staat === 'genoeg') return '<span class="tag t-green">ok</span>';
-    return '<span class="tag t-red">te weinig</span>';
+    return '<span class="tag t-red">te weinig pogingen</span>';
   }
 
   // ── 6 · Volume ───────────────────────────────────────────────────────────
@@ -4552,6 +4729,11 @@
       ' <span class="opvr-u">' + esc(nl(r.dag)) + ' ' + esc(r.tijd || '') + '</span></div>' +
       '<div class="opvr-u">' + esc(r.soort) + ' &middot; ' + (r.richting === 'in' ? 'binnengekomen' : 'verstuurd') +
       (r.duur_sec != null ? ' &middot; ' + r.duur_sec + ' sec' : '') + '</div></div>');
+    // ZICHTBAAR, NIET STIL. Een filter dat je niet ziet is een filter dat je op
+    // een dag vergeet, en dan zoek je een uur naar twee ontbrekende belpogingen.
+    if (d.testrijen && d.testrijen.zin) {
+      h += '<div class="ronde zacht">' + esc(d.testrijen.zin) + '</div>';
+    }
     return h + '</div>';
   }
 

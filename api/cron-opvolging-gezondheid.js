@@ -30,7 +30,8 @@ import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
-  beoordeelPrintweergave, controleerBrug, bouwMail, OK, FOUT, NIET_GEMETEN,
+  beoordeelPrintweergave, controleerBrug, controleerDagritme,
+  bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
 
 const ZONE = 'Europe/Amsterdam';
@@ -97,6 +98,25 @@ export default async function handler(req, res) {
 
   // ── 5 · De WhatsApp-brug ─────────────────────────────────────────────────
   uitkomsten.push(await meetBrug());
+
+  // ── 6 · Het dagritme ─────────────────────────────────────────────────────
+  // Draait bewust NA de doorrol van 23:59 en vóór Daves ochtend. Wat open staat
+  // hoort vandaag of later te staan; alles daarvoor is uit de dag verdwenen
+  // zonder dat iemand het merkt. Zie de kop van controleerDagritme.
+  try {
+    const { data: taken, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, naam, due')
+      .eq('status', 'open')
+      .order('due', { ascending: true })
+      .limit(2000);
+    if (error) throw error;
+    uitkomsten.push(controleerDagritme({ taken: taken || [], vandaag }));
+  } catch (e) {
+    // Een leesfout is een storing, geen blinde vlek.
+    uitkomsten.push({ naam: 'dagritme', staat: FOUT, getallen: { fout: kort(e) },
+      uitleg: 'De openstaande kaarten waren niet te lezen: ' + kort(e) });
+  }
 
   // ── De mail ──────────────────────────────────────────────────────────────
   const { subject, text } = bouwMail({ uitkomsten, dag: vandaag });
@@ -206,16 +226,33 @@ async function meetPrintweergave(vandaag) {
 /** Een minimaal maar volledig geldig rapport-antwoord voor controle 4. */
 const LEEG_RAPPORT = (dag) => ({
   periode: { van: dag, tot: dag, dagen: 1, vandaag: dag, bevat_verleden: false, bevat_vandaag: true },
+  // DEZE VORM MOET MEEBEWEGEN MET HET ECHTE RAPPORT. Hij is wat de controle
+  // gebruikt als ze niets kan lezen; klopt hij niet, dan liegt de bewaking
+  // juist op het moment dat er iets stuk is. Hij stond nog op gesprek_min_sec
+  // 10 en een te_kort-emmer, allebei vervallen op 8 september.
   drempels: { spraak_voor_uur: 9, nabel_van_uur: 12, nabel_tot_uur: 13,
-              archief_min_dagen: 3, archief_min_wa: 1, gesprek_min_sec: 10 },
+              archief_min_dagen: 3, archief_min_wa: 1,
+              gesprek_bron: 'resultaat', gesprek_min_sec: null,
+              werkuur_van: 9, werkuur_tot: 21,
+              gat_drempel_min: 120, bezetting_drempel: 0.6 },
   aandacht: [], blinde_vlekken: [],
   dekking: { openstaand_bekend: true, openstaand: [], onbehandeld: [], behandeld: [] },
   vensters: { spraak: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 },
               nabel: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 },
               rijen: [], zonder_taak: [] },
   zoomcalls: [], archief: [],
-  volume: { bel: { uit: 0, seconden: 0, niet_opgenomen: 0, zonder_duur: 0, gesproken: 0, te_kort: 0 },
+  volume: { bel: { uit: 0, seconden: 0, gesproken: 0, niet_opgenomen: 0,
+                   onbekend_resultaat: 0, zonder_duur: 0, via_ander: 0 },
             wa: { uit: 0, in: 0 }, spraak: { uit: 0, in: 0 }, rijen: [] },
+  // De blokken die er op 7 en 8 september bij zijn gekomen. Ontbreken ze hier,
+  // dan tekent de printweergave in deze proef iets anders dan in het echt.
+  werkritme: [{ dag, per_uur: [], totaal: 0, binnen_werkuren: 0, buiten_werkuren: 0,
+                actieve_uren: 0, werkuren: 12, langste_gat: null, bevindingen: [] }],
+  afgehandeld: [{ dag, afgesloten: [], doorgeschoven: [], aangeraakt: [],
+                  aantallen: { afgesloten: 0, doorgeschoven: 0, aangeraakt: 0 } }],
+  tijdlijn: [{ dag, svg: '<svg viewBox="0 0 1000 300" width="100%"></svg>',
+               verruimd: null, gat: null, venster: { van: '09:00', tot: '21:00' },
+               aantallen: { bel: 0, whatsapp: 0, zoomcalls: 0 }, drukste_kwartier: 1 }],
 });
 
 /**

@@ -20,6 +20,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { bubblePatch } from './_lib/bubble.js';
 import { createNotification } from './_lib/notify.js';
 import { syncDfoLmsMentor } from './_lib/dfo-lms-student.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -198,6 +199,9 @@ export default async function handler(req, res) {
         createdBy:  user.id,
       }).catch(() => {});
     }
+
+    // Spiegel naar het LMS — faalzacht, na de geslaagde hoofdactie.
+    await spiegelNaActie(onboardingId, 'onboarding-assign-mentor');
 
     return res.status(200).json({
       ok            : true,

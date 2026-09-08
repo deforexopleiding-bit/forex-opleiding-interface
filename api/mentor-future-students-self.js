@@ -23,25 +23,14 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+// DE bedenktijd-berekening staat in _lib. Er stonden vier kopieën van
+// deze functie, en die waren NIET identiek — zie de toelichting daar.
+import { computeBedenktijd, findWaiverConsentKey } from './_lib/onboarding-bedenktijd.js';
 import {
   findAvailabilityBlock,
   buildAvailabilityView,
 } from './_lib/onboarding-wizard-default.js';
 
-// Spiegel van findWaiverConsentKey + computeBedenktijd in
-// api/admin-future-students-list.js (zelfde semantiek; geen _lib-export).
-function findWaiverConsentKey(structure) {
-  if (!structure || typeof structure !== 'object') return null;
-  const pages = Array.isArray(structure.pages) ? structure.pages : [];
-  for (const p of pages) {
-    for (const b of (p?.blocks || [])) {
-      if (!b || !b.is_waiver) continue;
-      if (b.type === 'file_download' && b.consent_key) return b.consent_key;
-      if (b.type === 'consent'       && b.key)         return b.key;
-    }
-  }
-  return null;
-}
 // Bouwt een leesbare vraag→antwoord-lijst uit de gepubliceerde wizard-
 // structuur. Per blok pakken we (label, value) waarbij value uit answers
 // komt op block.key of block.consent_key. Skipt blocks zonder bruikbare
@@ -94,21 +83,6 @@ function buildAnswersView(structure, answers) {
   }
   return out;
 }
-function computeBedenktijd(waiver, offerteOp) {
-  const vervaltOp = offerteOp ? new Date(new Date(offerteOp).getTime() + 14 * 24 * 60 * 60 * 1000).toISOString() : null;
-  const waived = !!(waiver && waiver.agreed);
-  if (waived && offerteOp) {
-    return { status:'vervallen', reason:'afstand',    waived_at:(waiver.at||null), offerte_op:offerteOp, vervalt_op:vervaltOp };
-  }
-  if (offerteOp && new Date().toISOString() > vervaltOp) {
-    return { status:'vervallen', reason:'verstreken', waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
-  }
-  if (offerteOp) {
-    return { status:'lopend',    reason:null,         waived_at:null,              offerte_op:offerteOp, vervalt_op:vervaltOp };
-  }
-  return   { status:'onbekend',  reason:null,         waived_at:(waived?waiver.at:null), offerte_op:null,  vervalt_op:null };
-}
-
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/json');

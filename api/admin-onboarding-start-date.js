@@ -15,6 +15,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { createNotification } from './_lib/notify.js';
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // YYYY-MM-DD (Postgres date kolom). Voor losse ISO-timestamps slicen we
@@ -121,6 +122,9 @@ export default async function handler(req, res) {
         createdBy:  user.id,
       }).catch(() => {});
     }
+
+    // Spiegel naar het LMS — faalzacht, na de geslaagde hoofdactie.
+    await spiegelNaActie(onboardingId, 'admin-onboarding-start-date');
 
     return res.status(200).json({
       ok:         true,

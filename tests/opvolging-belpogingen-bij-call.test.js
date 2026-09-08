@@ -9,16 +9,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { belpogingenVoorCalls, belZin, bouwZoomcalls, GESPREK_MIN_SEC } from '../api/opvolging-rapport.js';
+import { belpogingenVoorCalls, belZin, bouwZoomcalls } from '../api/opvolging-rapport.js';
 
 const TAAK = { id: 'taak-shudino', telefoon: '+31612345678' };
 const CALL = {
   id: 'appt-shudino', lead_name: 'Shudino Andrade', lead_phone: '0612345678',
   lead_email: 's@x.nl', scheduled_at: '2026-09-07T16:00:00Z', status: 'no_show',
 };
+// 8 SEPTEMBER: het RESULTAAT bepaalt of dit een gesprek was, niet de 41
+// seconden. Die 41 zijn de tijd tussen kiezen en ophangen; bij een call die
+// niet werd opgenomen zou dat gewoon overgaantijd zijn geweest.
 const POGING_1723 = {
   id: 'p1', taak_id: 'taak-shudino', soort: 'call', richting: 'uit',
-  tijdstip: '2026-09-07T15:23:00Z', duur_sec: 41,
+  tijdstip: '2026-09-07T15:23:00Z', duur_sec: 41, resultaat: 'gesproken',
 };
 
 test('het gesprek van 41 seconden staat bij de call van Shudino', () => {
@@ -35,13 +38,13 @@ test('het gesprek van 41 seconden staat bij de call van Shudino', () => {
 test('ALLE pogingen van die dag tellen, niet alleen het nabelvenster', () => {
   // Dit is de kern van de klacht: 17:23 valt ver buiten 12-13 uur en telde
   // daarom nergens mee. Een gesprek om kwart over vijf is evengoed bewijs.
-  const ochtend = { ...POGING_1723, id: 'p0', tijdstip: '2026-09-07T06:30:00Z', duur_sec: 4 };
-  const middag  = { ...POGING_1723, id: 'pm', tijdstip: '2026-09-07T10:15:00Z', duur_sec: 0 };
+  const ochtend = { ...POGING_1723, id: 'p0', tijdstip: '2026-09-07T06:30:00Z', duur_sec: 4, resultaat: 'niet opgenomen' };
+  const middag  = { ...POGING_1723, id: 'pm', tijdstip: '2026-09-07T10:15:00Z', duur_sec: 0, resultaat: 'niet opgenomen' };
   const m = belpogingenVoorCalls({ afspraken: [CALL], taken: [TAAK], pogingen: [ochtend, middag, POGING_1723] });
   const b = m.get('appt-shudino');
   assert.equal(b.aantal, 3, 'alle drie de pogingen van die dag');
   assert.equal(b.gesproken, 1, 'alleen die van 41 s is een gesprek');
-  assert.deepEqual(b.pogingen.map((p) => p.soort), ['te_kort', 'te_kort', 'gesprek']);
+  assert.deepEqual(b.pogingen.map((p) => p.soort), ['niet_opgenomen', 'niet_opgenomen', 'gesprek']);
   assert.deepEqual(b.pogingen.map((p) => p.tijd), ['08:30', '12:15', '17:23']);
 });
 
@@ -52,11 +55,22 @@ test('een poging van gisteren telt niet mee bij de call van vandaag', () => {
   assert.equal(b.samenvatting, 'Die dag niet gebeld.');
 });
 
-test('een onbekende duur is geen te korte call — drie uitkomsten, geen twee', () => {
+test('gesproken zonder bekende lengte blijft een gesprek, met een lege duur', () => {
+  // Onder de oude regel viel dit als 'duur_onbekend' buiten de gesprekken. De
+  // duur zegt alleen HOE LANG; of er gesproken is zegt het resultaat.
   const zonder = { ...POGING_1723, id: 'pz', duur_sec: null };
   const b = belpogingenVoorCalls({ afspraken: [CALL], taken: [TAAK], pogingen: [zonder] }).get('appt-shudino');
-  assert.equal(b.pogingen[0].soort, 'duur_onbekend');
-  assert.equal(b.gesproken, 0);
+  assert.equal(b.pogingen[0].soort, 'gesprek');
+  assert.equal(b.pogingen[0].duur_sec, null, 'geen nul: de lengte is niet geregistreerd');
+  assert.equal(b.gesproken, 1);
+});
+
+test('bij een niet-opgenomen call wordt GEEN duur getoond — dat is overgaantijd', () => {
+  const gemist = { ...POGING_1723, id: 'pn', duur_sec: 43, resultaat: 'niet opgenomen' };
+  const b = belpogingenVoorCalls({ afspraken: [CALL], taken: [TAAK], pogingen: [gemist] }).get('appt-shudino');
+  assert.equal(b.pogingen[0].soort, 'niet_opgenomen');
+  assert.equal(b.pogingen[0].duur_sec, null, '43 seconden overgaan mag nergens als gesprekstijd staan');
+  assert.equal(b.seconden, 0);
 });
 
 test('WhatsApp en inkomende calls staan niet in de beltelling', () => {
@@ -97,9 +111,10 @@ function browserBelZin() {
   const bron = readFileSync('modules/klanten-v2/views/opvolging-v2.js', 'utf8');
   const m = bron.match(/function belZin\(aantal, gesproken, seconden\) \{[\s\S]*?\n  \}/);
   assert.ok(m, 'belZin niet gevonden in de browser-view');
-  const min = bron.match(/const GESPREK_MIN_SEC = (\d+);/);
-  assert.ok(min, 'GESPREK_MIN_SEC niet gevonden in de browser-view');
-  assert.equal(Number(min[1]), GESPREK_MIN_SEC, 'browser en server hanteren een andere gespreksdrempel');
+  // De gespreksdrempel is op 8 september vervallen: het resultaat beslist of er
+  // gesproken is, niet de duur. De browser mag hem dus ook niet meer hanteren.
+  assert.doesNotMatch(bron, /const GESPREK_MIN_SEC = \d+;\s*\n\s*function belZin/,
+    'de browser hoort geen eigen gespreksdrempel meer te hanteren');
   const ctx = vm.createContext({ Math });
   vm.runInContext(m[0], ctx);
   return (a, g, s) => vm.runInContext(`belZin(${a}, ${g}, ${s})`, ctx);
@@ -107,7 +122,7 @@ function browserBelZin() {
 
 test('dagscherm en rapport geven exact dezelfde zin', () => {
   const browser = browserBelZin();
-  for (const [a, g, s] of [[0, 0, 0], [1, 1, 41], [2, 1, 41], [3, 0, 0], [4, 2, 190], [2, 2, 89]]) {
+  for (const [a, g, s] of [[0, 0, 0], [1, 1, 41], [2, 1, 41], [3, 0, 0], [4, 2, 190], [2, 2, 89], [1, 1, 0]]) {
     assert.equal(browser(a, g, s), belZin(a, g, s), `zin loopt uiteen bij ${a}/${g}/${s}`);
   }
 });

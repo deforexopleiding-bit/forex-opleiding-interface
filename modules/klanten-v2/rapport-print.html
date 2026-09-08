@@ -69,7 +69,7 @@ body{
 /* ── Bevindingen ───────────────────────────────────────────────────────── */
 .bev{border:1px solid var(--lijn);border-left-width:3px;background:var(--opp);
   padding:8px 11px;margin:0 0 6px;break-inside:avoid}
-.bev.nalatigheid {border-left-color:var(--kritiek);      background:#fdf3f3}
+.bev.blijft_liggen {border-left-color:var(--kritiek);      background:#fdf3f3}
 .bev.twijfelgeval{border-left-color:var(--ernstig);      background:#fdf6f2}
 .bev.blinde_vlek {border-left-color:var(--waarschuwing); background:#fffbf1}
 .bev .rij{display:flex;align-items:center;gap:8px}
@@ -112,6 +112,14 @@ tr{break-inside:avoid}
 .bol{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:0}
 .bol.goed{background:var(--goed)} .bol.grijs{background:var(--muted)}
 .bol.donker{background:var(--ink2)} .bol.rood{background:var(--kritiek)}
+.tl{margin:6px 0 10px;break-inside:avoid}
+.tl-kop{font-size:11px;margin-bottom:3px;color:var(--muted)}
+.tl-noot{font-size:10px;font-style:italic;color:var(--muted);margin-top:3px}
+.uitleg{font-size:11px;color:var(--muted);margin:0 0 6px}
+.ritme{margin:6px 0 10px;break-inside:avoid}
+.ritme-kop{font-size:11px;margin-bottom:3px}
+.ritme-bev{font-size:11px;margin-top:4px;padding:3px 6px;background:#fef3c7;border-radius:3px}
+.subkop{font-size:12px;font-weight:600;margin:9px 0 3px}
 .leeg{font-style:italic;color:var(--muted);font-size:11.5px}
 
 /* ── Voettekst op elke pagina ──────────────────────────────────────────── */
@@ -147,7 +155,7 @@ tr{break-inside:avoid}
   // dus in de PDF én op het scherm. Zie je hier een ander nummer dan wat er in
   // de repo staat, dan kijk je naar een oude build en heeft verder zoeken geen
   // zin. Ophogen bij elke inhoudelijke wijziging aan dit bestand.
-  const OPMAAK_VERSIE = 'rp-4';
+  const OPMAAK_VERSIE = 'rp-10';
 
 // HET RAPPORT HEET NAAR HET WERK, NIET NAAR DE PERSOON.
 //
@@ -245,14 +253,82 @@ tr{break-inside:avoid}
         'moment, niet het eindresultaat. Calls die nog moeten plaatsvinden worden niet beoordeeld.</div>';
     }
 
-    h += sectieAandacht(d) + sectieDekking(d) + sectieVolume(d) +
-         sectieVensters(d) + sectieZoomcalls(d) + sectieArchief(d);
+    // sectieTijdlijn draagt nu ook de twee werkritme-bevindingen; een apart
+    // sectieWerkritme zou hetzelfde onderwerp een tweede keer openen.
+    h += sectieAandacht(d) + sectieDekking(d) + sectieTijdlijn(d) + sectieVolume(d) +
+         sectieVensters(d) + sectieZoomcalls(d) + sectieAfgehandeld(d);
 
     h += '<div class="voet"><span>' + esc(titel) + '</span>' +
       '<span>' + esc(periodeTekst) + ' &middot; ' + esc(OPMAAK_VERSIE) + '</span></div>';
     return h;
   }
 
+  // ── De dag: tijdlijn plus de twee rekensommen ────────────────────────────
+  // Deze twee stonden als aparte secties op de rol (tijdlijn en werkritme) en
+  // gaan over hetzelfde: de verdeling van het werk over de dag. Twee blokken
+  // onder elkaar is niet twee keer beter maar een rommelig rapport, dus ze
+  // staan hier samen: het beeld, en eronder de bevindingen die het in cijfers
+  // zeggen. De uur-balk is vervallen — de kwartierstrook in de tijdlijn laat
+  // hetzelfde zien, alleen fijner.
+  //
+  // De SVG komt kant-en-klaar van de server. Hier niets tekenen: zou de
+  // browser dat na het laden doen, dan is juist deze pagina leeg of half.
+  function sectieTijdlijn(d) {
+    const dagen = d.tijdlijn || [];
+    if (!dagen.length) return '';
+    const dr = d.drempels || {};
+    const ritmeVan = (dag) => (d.werkritme || []).find((r) => r.dag === dag) || null;
+
+    let h = '<div class="sectie">' + sectiekop('De dag',
+      (dr.werkuur_van ?? 9) + ':00-' + (dr.werkuur_tot ?? 21) + ':00');
+    h += '<div class="uitleg">De hoogte van een staaf is de gespreksduur. Een leeg stuk is een blinde ' +
+      'vlek, geen verwijt: deze module ziet alleen wat er in Opvolging gebeurt.</div>';
+    for (const t of dagen) {
+      const r = ritmeVan(t.dag);
+      h += '<div class="tl"><div class="tl-kop">' + esc(nlDatum(t.dag)) + ' &middot; ' +
+        esc(t.venster.van) + '-' + esc(t.venster.tot) +
+        (r ? ' &middot; ' + r.totaal + ' acties &middot; ' + r.actieve_uren + ' van ' + r.werkuren + ' werkuren' : '') +
+        '</div>' + t.svg +
+        (t.verruimd ? '<div class="tl-noot">' + esc(t.verruimd.reden) + '</div>' : '');
+      for (const b of (r ? r.bevindingen : [])) h += '<div class="ritme-bev">' + esc(b.tekst) + '</div>';
+      h += '</div>';
+    }
+    return h + '</div>';
+  }
+
+
+  // ── Afgehandeld ──────────────────────────────────────────────────────────
+  // Dezelfde driedeling en dezelfde berekening als het scherm: die komt van de
+  // server (d.afgehandeld). Twee tellingen zeggen vroeg of laat zeven tegenover
+  // acht en dan weet niemand welke van de twee liegt.
+  function sectieAfgehandeld(d) {
+    const dagen = d.afgehandeld || [];
+    let h = '<div class="sectie">' + sectiekop('Afgehandeld',
+      dagen.reduce((n, x) => n + x.aantallen.afgesloten + x.aantallen.doorgeschoven + x.aantallen.aangeraakt, 0) || 'geen');
+    if (!dagen.length) return h + '<div class="leeg">Er is niets berekend.</div></div>';
+    const alles = (k) => dagen.flatMap((x) => x[k].map((r) => ({ ...r, dag: x.dag })));
+
+    const blok = (titel, rijen, leegZin, regel) =>
+      '<div class="subkop">' + esc(titel) + ' (' + rijen.length + ')</div>' +
+      (rijen.length
+        ? '<table><tbody>' + rijen.map(regel).join('') + '</tbody></table>'
+        : '<div class="leeg"><i>' + esc(leegZin) + '</i></div>');
+
+    h += blok('Afgesloten', alles('afgesloten'),
+      'Er is niemand definitief uit de lijst gehaald.',
+      (a) => '<tr><td>' + esc(a.naam) + '</td><td>' + esc(a.reden || 'zonder reden') + '</td>' +
+             '<td class="getalkolom">' + esc(nlDatum(a.dag)) + '</td></tr>');
+    h += blok('Doorgeschoven', alles('doorgeschoven'),
+      'Er is niemand doorgeschoven naar een volgende ronde.',
+      (a) => '<tr><td>' + esc(a.naam) + '</td><td>' + esc(a.wat) + ', komt terug op ' +
+             esc(nlDatum(a.terug_op)) + '</td><td class="getalkolom">' + esc(nlDatum(a.dag)) + '</td></tr>');
+    h += blok('Aangeraakt, nog open', alles('aangeraakt'),
+      'Er is niemand benaderd zonder dat er een beslissing viel.',
+      (a) => '<tr><td>' + esc(a.naam) + '</td><td>' + a.pogingen + ' poging' +
+             (a.pogingen === 1 ? '' : 'en') + ', zonder beslissing</td>' +
+             '<td class="getalkolom">' + esc(nlDatum(a.dag)) + '</td></tr>');
+    return h + '</div>';
+  }
   // ── 1 · Wat vraagt aandacht ─────────────────────────────────────────────
   function sectieAandacht(d) {
     const lijst = d.aandacht || [];
@@ -347,6 +423,8 @@ tr{break-inside:avoid}
         v.bel.zonder_duur ? v.bel.zonder_duur + '× geen duur vastgelegd' : null) +
       tegel(v.wa.uit + v.spraak.uit, 'WhatsApp uit',
         (v.wa.in + v.spraak.in) + '× in · ' + v.spraak.uit + '× spraak') + '</div>';
+    // Ook in de PDF, want die is wat bewaard wordt.
+    if (d.testrijen && d.testrijen.zin) h += '<div class="tl-noot">' + esc(d.testrijen.zin) + '</div>';
     return h + '</div>';
   }
 

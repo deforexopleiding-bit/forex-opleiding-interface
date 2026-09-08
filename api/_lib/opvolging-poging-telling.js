@@ -22,6 +22,79 @@
 // wat vóór deze kolom is weggeschreven was op één soort na uitgaand — en de
 // opruim-query zet de inkomende rijen die er nog staan expliciet op 'in'.
 
+// ═══════════════════════════════════════════════════════════════════════════
+// HET RESULTAAT ZEGT OF ER CONTACT WAS. DE DUUR ZEGT ALLEEN HOE LANG.
+// ═══════════════════════════════════════════════════════════════════════════
+// Op 7 september is dit hele bouwwerk op `duur_sec` gezet met een grens van
+// tien seconden. Dat was fout, en de meting bewijst het:
+//
+//   · duur_sec is het verschil tussen KIEZEN en OPHANGEN, dus inclusief
+//     overgaan. Zie api/softphone-call-log.js: started_at wordt gezet vóór
+//     inviter.invite().
+//   · Bij rijen met resultaat 'niet opgenomen' staan duren tot 43 seconden.
+//     Dat is overgaantijd, geen gesprek.
+//   · Bij 'gesproken' loopt het van 4 tot 90 seconden, mediaan 24. Een gesprek
+//     van 4 seconden bestaat dus echt.
+//
+// Een grens op dat getal scheidt dus niets: hij noemt 43 seconden overgaan een
+// gesprek en 4 seconden gesprek een niet-gesprek. De tien seconden zijn
+// daarmee vervallen als scheidslijn.
+//
+// WAT WEL WERKT is het veld dat er al was: `resultaat`. Dat is vrije tekst —
+// er staat 'gesproken', 'niet opgenomen', 'gesproken: bevestigd' en
+// 'gesproken: bevestigd — <notitie van Dave>' in — dus geen exacte
+// gelijkheid maar een nette classificatie, op één plek.
+//
+// EN EEN ONBEKENDE WAARDE TELT NOOIT STIL ALS CONTACT. Die levert `null` op:
+// niet gemeten. Liever niet gemeten dan onterecht groen — dezelfde regel als
+// in de dagelijkse gezondheidscontrole.
+
+export const GESPROKEN      = 'gesproken';
+export const NIET_OPGENOMEN = 'niet_opgenomen';
+/** Afgehandeld via iemand anders: wel een resultaat, geen eigen gesprek. */
+export const VIA_ANDER      = 'via_ander';
+export const ONBEKEND       = 'onbekend';
+
+/**
+ * Classificeer de vrije tekst in `resultaat`.
+ *
+ * Op VOORVOEGSEL, niet op gelijkheid: 'gesproken: bevestigd — hij komt met de
+ * trein' hoort gewoon bij 'gesproken'. En 'via ander' wordt eerst getoetst,
+ * want die tekst begint bewust NIET met 'gesproken' — er is namelijk niet
+ * gesproken.
+ */
+export function classificeerResultaat(resultaat) {
+  const t = String(resultaat == null ? '' : resultaat).toLowerCase().trim().replace(/\s+/g, ' ');
+  if (!t) return ONBEKEND;
+  if (t.startsWith('via ander') || t.startsWith('bevestigd via')) return VIA_ANDER;
+  if (t.startsWith('gesproken')) return GESPROKEN;
+  if (t.startsWith('niet opgenomen') || t.startsWith('niet_opgenomen')
+      || t.startsWith('geen gehoor') || t.startsWith('geen_gehoor')) return NIET_OPGENOMEN;
+  return ONBEKEND;
+}
+
+/**
+ * De familie PLUS Daves eigen woorden, apart.
+ *
+ * Drie rijen hebben de vorm 'gesproken: bevestigd — neemt laptop mee' of
+ * '... — Englese man'. Dat is de enige plek waar Daves oordeel over de uitkomst
+ * bewaard is; die tekst hoort niet in een classificatie te verdwijnen.
+ */
+export function ontleedResultaat(resultaat) {
+  const familie = classificeerResultaat(resultaat);
+  const ruw = String(resultaat == null ? '' : resultaat).trim();
+  // Alles na de eerste dubbele punt of gedachtestreepje is toelichting.
+  const m = ruw.match(/^[^:—-]+(?:[:—-]\s*)(.+)$/);
+  const staart = m ? m[1].trim() : '';
+  // 'bevestigd' is de uitkomst zelf, geen notitie; wat daarná komt wel.
+  const naBevestigd = staart.match(/^bevestigd\s*[—-]\s*(.+)$/i);
+  return {
+    familie,
+    uitkomst: staart ? staart.split(/\s*[—-]\s*/)[0].trim() || null : null,
+    notitie : naBevestigd ? naBevestigd[1].trim() : null,
+  };
+}
+
 /** De soorten die als WhatsApp-moeite tellen. */
 const WA_SOORTEN = new Set(['whatsapp', 'spraakbericht']);
 
@@ -60,41 +133,58 @@ export function isContact(p) {
   // één plek geschreven: bouwCallPoging in _lib/opvolging-call-link.js. Dat is
   // iets anders dan de richting uit een zin afleiden — maar als deze ooit ook
   // een kolom verdient, is dit de plek.
-  if (p.soort === 'call') return /gesproken/.test(String(p.resultaat || '').toLowerCase());
+  if (p.soort === 'call') {
+    const k = classificeerResultaat(p.resultaat);
+    if (k === GESPROKEN) return true;
+    if (k === NIET_OPGENOMEN || k === VIA_ANDER) return false;
+    // ONBEKEND: we weten het niet. Null, geen false — de aanroeper telt die
+    // apart en het rapport meldt hem als blinde vlek. Stil op 'geen contact'
+    // zetten zou iemand uit de lijst laten vallen op een aanname.
+    return null;
+  }
   return false;
 }
 
 /**
- * Kwam er een GESPREK tot stand, en niet alleen een verbinding?
+ * Kwam er een GESPREK tot stand?
  *
- * DIT IS EEN ANDERE VRAAG DAN isContact, EN MET OPZET APART.
+ * SINDS 8 SEPTEMBER BESLIST HET RESULTAAT, NIET DE DUUR. De vorige versie
+ * hanteerde een grens van tien seconden op `duur_sec`; die grens is vervallen
+ * omdat dat getal de tijd tussen kiezen en ophangen meet, inclusief overgaan.
+ * Zie de kop van dit bestand voor de meting waarmee dat is vastgesteld.
  *
- * isContact beantwoordt 'is de verbinding tot stand gekomen' — de vraag achter
- * de archiveerregel: heeft deze lead ooit gereageerd, of geven we hem te snel
- * op. Een opgenomen-en-weggedrukte call telt daar mee, want er is iemand
- * geweest.
+ * Drie uitkomsten, geen twee:
+ *   true  — resultaat zegt 'gesproken' (of het is een binnengekomen bericht)
+ *   false — 'niet opgenomen', of afgehandeld via iemand anders
+ *   null  — het resultaat zegt niets bruikbaars: niet gemeten
  *
- * Het dagrapport stelt een andere vraag: hoeveel gesprekken heeft Dave gevoerd.
- * Op 7 september duurden negen uitgaande calls 26, 24, 4, 29, 1, 1, 22, 24 en 2
- * seconden, en het rapport meldde er zes als 'gesproken'. Drie daarvan duurden
- * één, één en twee seconden. Dat is opnemen en wegdrukken, of een beltoon —
- * geen gesprek. Zo meet het rapport iets anders dan het zegt, en wel in Daves
- * voordeel, en dat is precies wat een rapport over een persoon niet mag doen.
- *
- * Waarom hier en niet in het rapport: 'wat telt als contact' stond op 6
- * september op drie plekken tegelijk en de slechtste van de drie draaide. Deze
- * vraag hoort naast zijn buurvraag te staan, in één bestand, zodat het verschil
- * tussen de twee zichtbaar is in plaats van verspreid.
- *
- * Een call zonder duur levert `null` op, niet `false`: we weten het niet, en
- * dat is een derde geval. De aanroeper telt die apart.
+ * `minSec` wordt nog geaccepteerd zodat bestaande aanroepers niet breken, maar
+ * er wordt niets meer mee gedaan. Hij verdwijnt zodra de laatste aanroeper 'm
+ * niet meer meestuurt.
  */
-export function isGesprek(p, minSec) {
-  if (!isContact(p)) return false;
-  if (!p || p.soort !== 'call') return true;   // een WhatsApp-antwoord heeft geen duur
-  const d = p.duur_sec;
-  if (d === null || d === undefined || !Number.isFinite(Number(d))) return null;
-  return Number(d) >= Number(minSec);
+export function isGesprek(p, _minSecVervallen) {
+  const contact = isContact(p);
+  if (contact === null) return null;
+  if (!contact) return false;
+  return true;
+}
+
+/**
+ * Mag de duur van deze poging getoond worden, en zo ja welke?
+ *
+ * Alleen waar het resultaat zegt dat er gesproken is. Staat de duur er dan
+ * niet, dan is het antwoord NIET nul maar 'niet geregistreerd' — een nul leest
+ * als 'een gesprek van nul seconden' en dat is iets anders dan 'we weten de
+ * lengte niet'.
+ */
+export function gesprekDuur(p) {
+  if (!p || p.soort !== 'call') return { toon: false, sec: null };
+  if (classificeerResultaat(p.resultaat) !== GESPROKEN) return { toon: false, sec: null };
+  const ruw = p.duur_sec;
+  if (ruw === null || ruw === undefined || !Number.isFinite(Number(ruw))) {
+    return { toon: true, sec: null };     // gesproken, lengte onbekend
+  }
+  return { toon: true, sec: Number(ruw) };
 }
 
 /**

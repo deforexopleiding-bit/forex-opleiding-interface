@@ -249,3 +249,26 @@ test('het merkteken staat op één plek in de bron', () => {
   const declaraties = script.match(/OPMAAK_VERSIE\s*=\s*'/g) || [];
   assert.equal(declaraties.length, 1);
 });
+
+// ── De tijdlijn hoort in de PDF, niet alleen op het scherm ─────────────────
+// De PDF is wat bewaard wordt. Een blok dat alleen op het scherm staat is voor
+// de lezer van de PDF niet gebouwd — en dat merk je pas als iemand hem opslaat.
+
+test('de tijdlijn staat in de printweergave, met de SVG erin', async () => {
+  const met = JSON.parse(JSON.stringify(ANTWOORD));
+  met.tijdlijn = [{
+    dag: met.periode.van, venster: { van: '09:00', tot: '21:00' }, verruimd: null, gat: null,
+    aantallen: { bel: 3, whatsapp: 2, zoomcalls: 1 },
+    svg: '<svg viewBox="0 0 1000 300" width="100%"><rect class="proef" x="1" y="1" width="2" height="2"/></svg>',
+  }];
+  met.werkritme = [{
+    dag: met.periode.van, per_uur: [], totaal: 3, actieve_uren: 2, werkuren: 12,
+    langste_gat: null, bevindingen: [{ soort: 'lang_gat', tekst: 'Tussen 11:27 en 16:55 is er niets gedaan.', getallen: {} }],
+  }];
+  const b = await draai({ antwoord: met });
+  const h = b.el.innerHTML;
+  assert.match(h, /<svg viewBox="0 0 1000 300"/, 'de SVG hoort in de PDF te staan');
+  assert.match(h, /class="proef"/, 'en het is de SVG van de server, niet een hier getekende');
+  assert.match(h, /Tussen 11:27 en 16:55/, 'met de bevinding eronder');
+  assert.match(h, /blinde\s+vlek, geen verwijt/, 'en de toon erbij');
+});

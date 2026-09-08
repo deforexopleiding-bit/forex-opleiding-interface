@@ -30,6 +30,7 @@ import { getOnboardingScope } from './_lib/onboardingScope.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { bubblePatch } from './_lib/bubble.js';
 import { createNotification } from './_lib/notify.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -430,6 +431,14 @@ export default async function handler(req, res) {
       entityId:   onboardingId,
       createdBy:  user.id,
     }).catch(() => {});
+
+    // Spiegel naar het LMS. Bij een annulering is dit een VERWIJDERING:
+    // spiegelOnboarding() ziet dat de onboarding niet meer zichtbaar hoort
+    // te zijn en haalt de rij weg. Daarmee verdwijnt de student overal in
+    // het LMS — bij de mentor en straks bij de hoofdmentor. Mislukt het,
+    // dan haalt de hersync van morgen 'm alsnog weg: de verwachte
+    // verzameling daar sluit geannuleerde onboardings per definitie uit.
+    await spiegelNaActie(ctx.ob.id, 'onboarding-cancel');
 
     return res.status(200).json({
       ok:              true,
