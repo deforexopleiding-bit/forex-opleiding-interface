@@ -32,6 +32,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { bubbleGet } from '../_lib/bubble.js';
+import { spiegelNaActie } from '../_lib/onboarding-spiegel.js';
 
 const DEFAULT_MAX_PER_RUN = 300;
 const TRAJECT_TYPE_1OP1   = '1op1';
@@ -172,7 +173,13 @@ export default async function handler(req, res) {
           .select('id')
           .maybeSingle();
         if (updErr) throw new Error(updErr.message);
-        if (upd && upd.id) archived.push(upd.id);
+        if (upd && upd.id) {
+          archived.push(upd.id);
+          // Weg uit het LMS. De hersync zou 'm om 07:20 ook opruimen, maar
+          // deze cron draait om 03:30 — dan staat een gearchiveerde student
+          // vier uur lang in het oppak-blok van zijn mentor.
+          await spiegelNaActie(upd.id, 'archive-completed-onboardings');
+        }
       } catch (e) {
         const msg = 'archive update: ' + (e?.message || e);
         console.error('[archive-completed-onboardings] db fail:', ob.id, msg);

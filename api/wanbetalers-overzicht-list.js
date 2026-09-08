@@ -33,6 +33,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { customerDisplayName } from './_lib/customer-name.js';
+import { todayIsoInTz, daysOverdueSigned, isOverdue } from './_lib/dunning-overdue-guard.js';
 
 const OPEN_STATUSES = ['open', 'partially_paid', 'overdue'];
 const CLOSED_STAGES = new Set(['opgelost', 'afschrijven']);
@@ -44,14 +45,19 @@ function openAmount(inv) {
   return Math.max(0, t - p - c);
 }
 
-// Dagen te laat vanaf due_date (YYYY-MM-DD). Negatief → 0. Vandaag → 0.
-function daysOverdueFromIso(iso) {
-  if (!iso) return 0;
-  const d = new Date(String(iso).slice(0, 10) + 'T00:00:00');
-  if (Number.isNaN(d.getTime())) return 0;
-  const now = new Date(); now.setHours(0, 0, 0, 0);
-  const diff = Math.floor((now.getTime() - d.getTime()) / 86400000);
-  return diff > 0 ? diff : 0;
+// Dagen te laat vanaf due_date (YYYY-MM-DD), GECLAMPT op 0 — bewaard voor
+// back-compat: de UI sorteert/filtert numeriek op dit veld.
+//
+// LET OP: door de clamp is "vervalt over 12 dagen" hier niet te onderscheiden
+// van "vervalt vandaag" — beide lezen als 0. Dat was precies de reden dat
+// niet-vervallen facturen als wanbetaler telden. Gebruik daarom voor elke
+// beslissing (en voor UI-tekst "N dagen te laat") de nieuwe velden hieronder:
+//   is_overdue          — true zodra due_date < vandaag (Europe/Amsterdam)
+//   days_overdue_signed — ONGECLAMPT; negatief = vervalt over |n| dagen
+//   days_until_due      — 0 als al vervallen, anders het aantal dagen tot verval
+function daysOverdueFromIso(iso, todayIso) {
+  const n = daysOverdueSigned(iso, todayIso);
+  return n != null && n > 0 ? n : 0;
 }
 
 export default async function handler(req, res) {
@@ -187,6 +193,7 @@ export default async function handler(req, res) {
     }
 
     // 6) Bouw response-items.
+    const todayIso = todayIsoInTz();   // Europe/Amsterdam, niet UTC.
     let sumDaysOverdue = 0;
     let activeConversations = 0;
     const items = [];
@@ -195,7 +202,9 @@ export default async function handler(req, res) {
       const run = runByCust.get(cid) || null;
       const step = run?.current_step_id ? (stepById.get(run.current_step_id) || null) : null;
       const conv = convByCust.get(cid) || null;
-      const daysOverdue = daysOverdueFromIso(agg.oldest_due_iso);
+      const daysOverdue       = daysOverdueFromIso(agg.oldest_due_iso, todayIso);
+      const daysOverdueSigned_ = daysOverdueSigned(agg.oldest_due_iso, todayIso);
+      const rowIsOverdue       = isOverdue(agg.oldest_due_iso, todayIso, 0);
       sumDaysOverdue += daysOverdue;
       if (conv) activeConversations++;
       items.push({
@@ -206,6 +215,13 @@ export default async function handler(req, res) {
         open_invoice_count:       agg.openInvoices.length,
         total_open_cents:         agg.total_open_cents,
         days_overdue:             daysOverdue,
+        // Nieuw sinds de overdue-fix: hiermee is "nog niet vervallen"
+        // onderscheidbaar van "vandaag vervallen".
+        is_overdue:               rowIsOverdue,
+        days_overdue_signed:      daysOverdueSigned_,
+        days_until_due:           (daysOverdueSigned_ == null || daysOverdueSigned_ >= 0)
+                                    ? 0
+                                    : Math.abs(daysOverdueSigned_),
         oldest_due_iso:           agg.oldest_due_iso,
         stage_slug:               pc?.stage_slug || null,
         stage_changed_at:         pc?.stage_changed_at || null,
@@ -239,6 +255,9 @@ export default async function handler(req, res) {
     const totals = {
       open_cents:           items.reduce((s, x) => s + x.total_open_cents, 0),
       customers:            items.length,
+      // Hoeveel van die klanten zijn ECHT te laat (rest is nog niet vervallen).
+      overdue_customers:    items.filter((x) => x.is_overdue).length,
+      not_yet_due_customers: items.filter((x) => !x.is_overdue).length,
       avg_days_overdue:     items.length ? Math.round(sumDaysOverdue / items.length) : 0,
       active_conversations: activeConversations,
     };

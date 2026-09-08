@@ -1,18 +1,54 @@
 // api/dunning-settings-update.js
-// POST { dunning_cooldown_days: int } → upsert in app_settings.
+// POST { dunning_cooldown_days?: int, dunning_grace_days?: int,
+//        dunning_ladder?: { <templatenaam>: <dagen na vervaldatum> },
+//        dunning_max_sends_per_day?: int | { whatsapp?: int, email?: int } }
+//   → upsert in app_settings. Minstens één key is verplicht; ontbrekende
+//     keys blijven ongewijzigd (back-compat: de bestaande UI stuurt alleen
+//     dunning_cooldown_days).
 //
 // Waarom een aparte wrapper i.p.v. hergebruik van api/app-settings.js:
 // dat endpoint eist super_admin voor PUT. Deze wrapper accepteert
 // finance.dunning.execute — passend bij de finance-user die de dunning-
 // engine beheert — en beperkt de scope tot precies één key.
 //
-// Waarde-validatie: integer 1..90. Onvalid → 400. Audit-log fail-soft.
+// Waarde-validatie: cooldown integer 1..90, grace integer 0..90 (0 = geen
+// extra respijt; de vervaldag zelf blijft sowieso beschermd), ladder-sporten
+// integer 1..365 per templatenaam (1 = de dag ná de vervaldatum; 0 zou de
+// vervaldag zelf toestaan en wordt daarom geweigerd). Onvalid → 400.
+// Audit-log fail-soft.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import {
+  GRACE_SETTING_KEY,
+  MAX_GRACE_DAYS,
+  LADDER_SETTING_KEY,
+  MAX_LADDER_DAYS,
+  parseLadder,
+  MAX_SENDS_SETTING_KEY,
+  MAX_MAX_SENDS_PER_DAY,
+  SEND_CHANNELS,
+  parseMaxSendsPerDay,
+} from './_lib/dunning-overdue-guard.js';
 
 const KEY = 'dunning_cooldown_days';
+
+// 2-staps upsert (net als app-settings.js) → geen ON CONFLICT nodig op
+// partial UNIQUE indexen.
+async function upsertSetting(key, value) {
+  const { data: existing } = await supabaseAdmin
+    .from('app_settings').select('key').eq('key', key).maybeSingle();
+  if (existing) {
+    const { error } = await supabaseAdmin
+      .from('app_settings').update({ value, updated_at: new Date().toISOString() }).eq('key', key);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabaseAdmin
+      .from('app_settings').insert({ key, value });
+    if (error) throw new Error(error.message);
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -27,27 +63,89 @@ export default async function handler(req, res) {
   }
 
   const body = (req.body && typeof req.body === 'object') ? req.body : null;
-  const raw  = body?.dunning_cooldown_days;
-  const n    = Number(raw);
-  if (!Number.isFinite(n) || n < 1 || n > 90 || Math.trunc(n) !== n) {
-    return res.status(400).json({ error: 'dunning_cooldown_days moet integer 1..90 zijn' });
+  const hasCooldown = body?.dunning_cooldown_days !== undefined && body?.dunning_cooldown_days !== null;
+  const hasGrace    = body?.dunning_grace_days    !== undefined && body?.dunning_grace_days    !== null;
+  const hasLadder   = body?.dunning_ladder        !== undefined && body?.dunning_ladder        !== null;
+  const hasCap      = body?.dunning_max_sends_per_day !== undefined && body?.dunning_max_sends_per_day !== null;
+  if (!hasCooldown && !hasGrace && !hasLadder && !hasCap) {
+    return res.status(400).json({
+      error: 'dunning_cooldown_days, dunning_grace_days, dunning_ladder en/of dunning_max_sends_per_day is verplicht',
+    });
   }
-  const value = { days: n };
+
+  // Dagcap per kanaal. Geaccepteerd: een kaal getal (beide kanalen) of een
+  // object { whatsapp, email }. Elke opgegeven waarde moet integer 1..10 zijn;
+  // 0 zou het kanaal stilzetten en wordt geweigerd.
+  let cap = null;
+  if (hasCap) {
+    const raw = body.dunning_max_sends_per_day;
+    const geldig = (v) => Number.isFinite(Number(v)) && Math.trunc(Number(v)) === Number(v)
+                       && Number(v) >= 1 && Number(v) <= MAX_MAX_SENDS_PER_DAY;
+    const fout = `dunning_max_sends_per_day moet integer 1..${MAX_MAX_SENDS_PER_DAY} zijn per kanaal `
+               + `(bv. { "whatsapp": 1, "email": 1 }); 1 = hoogstens één bericht per klant per dag per kanaal`;
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      const keys = Object.keys(raw);
+      if (!keys.length) return res.status(400).json({ error: fout });
+      for (const k of keys) {
+        if (!SEND_CHANNELS.includes(k)) {
+          return res.status(400).json({ error: `dunning_max_sends_per_day: onbekend kanaal '${k}' (verwacht: ${SEND_CHANNELS.join(', ')})` });
+        }
+        if (!geldig(raw[k])) return res.status(400).json({ error: fout });
+      }
+    } else if (!geldig(raw)) {
+      return res.status(400).json({ error: fout });
+    }
+    // parseMaxSendsPerDay vult de ontbrekende kanalen aan, zodat de opgeslagen
+    // rij altijd compleet is.
+    cap = parseMaxSendsPerDay(raw);
+  }
+
+  let n = null;
+  if (hasCooldown) {
+    n = Number(body.dunning_cooldown_days);
+    if (!Number.isFinite(n) || n < 1 || n > 90 || Math.trunc(n) !== n) {
+      return res.status(400).json({ error: 'dunning_cooldown_days moet integer 1..90 zijn' });
+    }
+  }
+
+  let g = null;
+  if (hasGrace) {
+    g = Number(body.dunning_grace_days);
+    if (!Number.isFinite(g) || g < 0 || g > MAX_GRACE_DAYS || Math.trunc(g) !== g) {
+      return res.status(400).json({ error: `dunning_grace_days moet integer 0..${MAX_GRACE_DAYS} zijn` });
+    }
+  }
+
+  let rungs = null;
+  if (hasLadder) {
+    const raw = body.dunning_ladder;
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      return res.status(400).json({ error: 'dunning_ladder moet een object zijn { templatenaam: dagen }' });
+    }
+    // Elke opgegeven sport hard valideren; parseLadder vult daarna de
+    // ontbrekende sporten aan met de defaults zodat de opgeslagen rij
+    // compleet is (geen half-ingevulde ladder in de DB).
+    for (const [name, val] of Object.entries(raw)) {
+      if (!String(name || '').trim()) {
+        return res.status(400).json({ error: 'dunning_ladder: lege templatenaam is niet toegestaan' });
+      }
+      const d = Number(val);
+      if (!Number.isFinite(d) || Math.trunc(d) !== d || d < 1 || d > MAX_LADDER_DAYS) {
+        return res.status(400).json({
+          error: `dunning_ladder.${name} moet integer 1..${MAX_LADDER_DAYS} zijn (1 = de dag ná de vervaldatum)`,
+        });
+      }
+    }
+    rungs = parseLadder(raw);
+  }
+
+  const value = hasCooldown ? { days: n } : null;
 
   try {
-    // 2-staps upsert (net als app-settings.js) → geen ON CONFLICT nodig
-    // op partial UNIQUE indexen.
-    const { data: existing } = await supabaseAdmin
-      .from('app_settings').select('key').eq('key', KEY).maybeSingle();
-    if (existing) {
-      const { error: uErr } = await supabaseAdmin
-        .from('app_settings').update({ value, updated_at: new Date().toISOString() }).eq('key', KEY);
-      if (uErr) throw new Error(uErr.message);
-    } else {
-      const { error: iErr } = await supabaseAdmin
-        .from('app_settings').insert({ key: KEY, value });
-      if (iErr) throw new Error(iErr.message);
-    }
+    if (hasCooldown) await upsertSetting(KEY, value);
+    if (hasGrace)    await upsertSetting(GRACE_SETTING_KEY, { days: g });
+    if (hasLadder)   await upsertSetting(LADDER_SETTING_KEY, { rungs });
+    if (hasCap)      await upsertSetting(MAX_SENDS_SETTING_KEY, cap);
 
     // Audit-log (fail-soft).
     try {
@@ -56,13 +154,29 @@ export default async function handler(req, res) {
         action     : 'dunning_settings.update',
         entity_type: 'app_settings',
         entity_id  : null,
-        after_json : { key: KEY, value },
-        reason_text: `Cooldown gezet op ${n} dagen`,
+        after_json : {
+          ...(hasCooldown ? { [KEY]: value } : {}),
+          ...(hasGrace    ? { [GRACE_SETTING_KEY]: { days: g } } : {}),
+          ...(hasLadder   ? { [LADDER_SETTING_KEY]: { rungs } } : {}),
+          ...(hasCap      ? { [MAX_SENDS_SETTING_KEY]: cap } : {}),
+        },
+        reason_text: [
+          hasCooldown ? `Cooldown gezet op ${n} dagen` : null,
+          hasGrace    ? `Gratieperiode gezet op ${g} dagen` : null,
+          hasLadder   ? `Ladder gezet op ${Object.entries(rungs).map(([k, v]) => `${k}=dag ${v}`).join(', ')}` : null,
+          hasCap      ? `Dagcap gezet op ${SEND_CHANNELS.map((c) => `${c}=${cap[c]}`).join(', ')} per klant per dag` : null,
+        ].filter(Boolean).join(' · '),
         ip_address : getClientIp(req),
       });
     } catch (e) { console.warn('[dunning-settings-update] audit soft-fail', e?.message || e); }
 
-    return res.status(200).json({ ok: true, dunning_cooldown_days: n });
+    return res.status(200).json({
+      ok: true,
+      ...(hasCooldown ? { dunning_cooldown_days: n } : {}),
+      ...(hasGrace    ? { dunning_grace_days: g } : {}),
+      ...(hasLadder   ? { dunning_ladder: rungs } : {}),
+      ...(hasCap      ? { dunning_max_sends_per_day: cap } : {}),
+    });
   } catch (e) {
     console.error('[dunning-settings-update]', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Interne fout' });

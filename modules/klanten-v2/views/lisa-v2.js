@@ -447,6 +447,9 @@
       wrap.innerHTML = _renderConvDetail(row);
       const el = wrap.firstElementChild;
       if (el) { if (oldRight) split.replaceChild(el, oldRight); else split.appendChild(el); }
+      // Mobiel master/detail: markeer container zodat CSS naar "toon-thread"
+      // schakelt (@media ≤760px in klanten-v2.css). Desktop negeert dit attr.
+      split.setAttribute('data-has-sel', '1');
     }
     queueMicrotask(() => _loadThread(id));
     // BP3 v7 (2026-09-02) — mark-as-read op open. Optimistic UI-update
@@ -463,6 +466,23 @@
         console.warn('[lisa] mark-as-read faalde:', e?.message || e);
       }
     }
+  };
+  // Mobiel master/detail: wist selectie zodat de lijst weer full-width
+  // getoond wordt. Surgisch (geen full render) — spiegelt __lisaSelConv.
+  window.__lisaDeselectConv = () => {
+    _resetThread();
+    document.querySelectorAll('#lisaConvList .lisa-conv-row.on').forEach(el => el.classList.remove('on'));
+    const split = document.querySelector('.lisa-gesp-split');
+    if (!split) return;
+    const oldRight = split.querySelector('.lisa-gesp-right');
+    if (oldRight) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'lisa-gesp-right';
+      placeholder.style.cssText = 'flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:13px';
+      placeholder.textContent = 'Selecteer een gesprek';
+      split.replaceChild(placeholder, oldRight);
+    }
+    split.setAttribute('data-has-sel', '0');
   };
 
   /* ── Compose (DEEL A intervene) ─────────────────────────────────────── */
@@ -1041,7 +1061,16 @@
 
     const st = _live.convs;
     const rows = asArr(st.items);
-    const sel  = rows.find(r => String(r.id) === String(_thread.convId)) || rows[0] || null;
+    // Auto-select van rows[0] alleen op desktop. Op mobiel (≤760px) zou
+    // dat data-has-sel="1" bij mount zetten → CSS verbergt de lijst → user
+    // ziet direct de thread van rows[0] i.p.v. de lijst, en kan geen andere
+    // conv tikken totdat 'ie op "← Terug" tikt. Leadsonderhoud doet ook
+    // geen auto-select (zie leadsonderhoud-v2.js gesprekkenView) — parity.
+    const isMobile = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width:760px)').matches;
+    const sel = rows.find(r => String(r.id) === String(_thread.convId))
+      || (isMobile ? null : (rows[0] || null));
     if (sel && (!_thread.conversation || String(_thread.conversation.id) !== String(sel.id)) && !_thread.loading) {
       queueMicrotask(() => _loadThread(sel.id));
     }
@@ -1075,7 +1104,7 @@
           style="position:absolute;top:50%;right:6px;transform:translateY(-50%);width:20px;height:20px;padding:0;border:0;background:transparent;color:var(--text-3);font-size:14px;cursor:pointer;visibility:${qHasVal ? 'visible' : 'hidden'}">×</button>
       </div>`;
 
-    return `<div data-lisa-view="gesprekken" class="lisa-gesp-split" style="display:flex;height:calc(100dvh - 110px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
+    return `<div data-lisa-view="gesprekken" class="lisa-gesp-split" data-has-sel="${sel ? '1' : '0'}" style="display:flex;height:calc(100dvh - 110px);min-height:520px;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;background:var(--surface)">
       <div id="lisaConvList" style="width:360px;min-width:280px;max-width:40%;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column">
         <div style="padding:11px 14px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px;flex-shrink:0">
           ${searchBar}
@@ -1209,6 +1238,10 @@
       </div>`;
 
     return `<div class="lisa-gesp-right" style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
+      <button type="button" class="mob-back" onclick="__lisaDeselectConv()" aria-label="Terug naar lijst">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        Terug naar lijst
+      </button>
       <div style="padding:14px 20px;background:var(--surface);border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:13px;margin-bottom:${!isSandbox ? '10px' : '0'}">
           ${H.av(name || '?', 42)}

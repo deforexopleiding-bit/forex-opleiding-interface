@@ -96,7 +96,16 @@ function heeftRegel(css, klasse) {
 // Klassen die het rapport bewust deelt met de rest van de module. Die hebben
 // hun regel elders in hetzelfde blok en horen NIET geprefixt te worden.
 const GEDEELD = new Set(['opv', 'card', 'ronde', 'zacht', 'warn', 'empty', 'tag',
-  't-green', 't-grey', 't-red', 't-amber', 't-blue', 't-purple', 'obtn', 'p', 'info']);
+  't-green', 't-grey', 't-red', 't-amber', 't-blue', 't-purple', 'obtn', 'p', 'info',
+  // De belpogingen bij een zoomcall zien er op het DAGSCHERM en in het RAPPORT
+  // bewust identiek uit: het is hetzelfde bewijsmateriaal, en twee verschillende
+  // vormen ervoor zou de lezer laten twijfelen of het hetzelfde betekent. Deze
+  // twee zijn dus echt gedeeld, en niet rapport-eigen.
+  //
+  // Ze heetten eerst 'bp' en 'raak'. Deze test wees dat terecht af — dat zijn
+  // precies de korte namen die botsen. De nieuwe namen zijn lang genoeg om
+  // uniek te zijn en staan hier daarom als uitzondering, niet als versoepeling.
+  'belbol', 'belraak', 'gsp', 'kort', 'onb']);
 
 function rapportBlok() {
   const i = VIEW.indexOf('  // R · HET DAGRAPPORT');

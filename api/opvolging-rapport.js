@@ -44,8 +44,15 @@
 // archiveerdrempel: api/_lib/opvolging-vensters.js.
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
+import { bouwTijdlijn } from './_lib/opvolging-tijdlijn.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { isMoeite, isContact, isGesprek, WA_SOORTEN } from './_lib/opvolging-poging-telling.js';
+import {
+  isMoeite, isContact, isGesprek, gesprekDuur, classificeerResultaat, WA_SOORTEN,
+  GESPROKEN, NIET_OPGENOMEN, VIA_ANDER,
+} from './_lib/opvolging-poging-telling.js';
+import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
+import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
+import { leadlijstDektDag, DEKKING_VANAF } from './_lib/opvolging-leadlijst-venster.js';
 import {
   beoordeelDag, telVensters, beoordeelMoeite, dagVan,
   SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
@@ -303,6 +310,28 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 6 · VOLUME
   // ═══════════════════════════════════════════════════════════════════════
+  // DE DOORGESCHOVEN KAARTEN. Bryan en Peter kregen op 7 september om 18:12 en
+  // 18:35 een beslissing en bleven open met een due vooruit — precies goed,
+  // maar ze stonden nergens. Ze zitten niet per se in taakVan (die hangt aan
+  // pogingen), dus ze worden apart opgehaald; een kaart die je mist is exact
+  // de bug die dit blok moet oplossen.
+  let bevestigdTaken = [];
+  {
+    const { data, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, naam, status, due, bevestigd_op, bevestigd_notitie, archief_reden, gearchiveerd_at')
+      .gte('bevestigd_op', vanIso).lt('bevestigd_op', totIso);
+    if (error) {
+      blindeVlekken.push({
+        sectie: 'afgehandeld',
+        wat   : 'De doorgeschoven kaarten konden niet gelezen worden.',
+        waarom: error.message,
+      });
+    } else {
+      bevestigdTaken = data || [];
+    }
+  }
+
   const volume = telVolume(pogingen, taakVan);
   if (volume.bel.zonder_duur > 0) {
     blindeVlekken.push({
@@ -329,7 +358,9 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 4 · DE ZOOMCALLS ZELF
   // ═══════════════════════════════════════════════════════════════════════
-  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs: Date.now() });
+  // De belpogingen van die dag horen BIJ de call: zie belpogingenVoorCalls.
+  const belBijCall = belpogingenVoorCalls({ afspraken, taken: alleTaken, pogingen });
+  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs: Date.now(), belBijCall });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 5 · UIT DE LIJST GEHAALD
@@ -354,7 +385,52 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     });
   }
 
+  // ── Werkritme ────────────────────────────────────────────────────────────
+  // Per dag, want een balk per uur over een hele week zou de klontering juist
+  // uitsmeren — en dat is precies wat dit blok moet laten zien.
+  const werkritme = dagen.map((d) => bouwWerkritme({
+    pogingen: pogingen.filter((p) => dagVan(p.tijdstip) === d), dag: d,
+  }));
+
+  // ── De tijdlijn per dag ──────────────────────────────────────────────────
+  // Statische SVG uit hetzelfde endpoint, zodat scherm en print exact dezelfde
+  // grafiek krijgen. Zou de browser hem na het laden tekenen, dan is de
+  // printweergave leeg of half — en dat valt pas op als iemand een PDF opslaat.
+  const tijdlijn = dagen.map((d) => bouwTijdlijn({
+    pogingen : pogingen.filter((p) => dagVan(p.tijdstip) === d),
+    afspraken: afspraken.filter((a) => dagVan(a.scheduled_at) === d),
+    dag      : d,
+    // Het gat komt van bouwWerkritme, niet uit een tweede berekening: anders
+    // toont het kader een andere stilte dan de zin eronder.
+    gat          : (werkritme.find((r) => r.dag === d) || {}).langste_gat || null,
+    gatDrempelMin: GAT_DREMPEL_MIN,
+  }));
+
+
+  // ── Afgehandeld ──────────────────────────────────────────────────────────
+  // Dezelfde berekening als het scherm Vandaag gedaan. Één helper, geen tweede
+  // telling: anders zegt het scherm zeven en de PDF acht, en weet niemand welke
+  // van de twee liegt.
+  const takenVoorGedaan = [...new Map(
+    [...alleTaken, ...gearchiveerd, ...bevestigdTaken].map((t) => [t.id, t]),
+  ).values()];
+  const afgehandeld = dagen.map((d) => verdeelVandaagGedaan({
+    taken: takenVoorGedaan, pogingen, dag: d, dagVan,
+
+  }));
+
   vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief });
+
+  // De werkritme-bevindingen horen in de aandachtlijst: het zijn rekensommen
+  // met een zichtbare drempel, precies zoals de andere bevindingen.
+  for (const r of werkritme) {
+    for (const b of r.bevindingen) {
+      aandacht.push({
+        soort: b.soort, sectie: 'werkritme', naam: null, dag: r.dag,
+        tekst: b.tekst, uitleg: null, getallen: b.getallen,
+      });
+    }
+  }
   // Ernst en label erbij, ná het vullen: zo hoeft geen enkele push-plek eraan
   // te denken en kan er ook geen bevinding zonder ernst ontstaan.
   const aandachtMetErnst = aandacht.map(metErnst);
@@ -373,7 +449,24 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
       archief_min_wa   : ARCHIEF_MIN_WA,
       // Zichtbaar, niet verstopt: een grens die niemand kan zien is een grens
       // waar niemand het over kan hebben.
-      gesprek_min_sec  : GESPREK_MIN_SEC,
+      // DE GRENS VAN TIEN SECONDEN IS VERVALLEN. Hij stond op `duur_sec`, en
+      // dat is de tijd tussen kiezen en ophangen — inclusief overgaan. Bij
+      // 'niet opgenomen' staan duren tot 43 seconden, bij 'gesproken' vanaf 4;
+      // een grens daarop scheidt niets. Sinds 8 september beslist het veld
+      // `resultaat` of er contact was, en zegt de duur alleen hoe lang, en
+      // alleen waar er gesproken is.
+      gesprek_bron: 'resultaat',
+      gesprek_min_sec: null,
+      // WAT ALS WERKUUR TELT BEPAALT DE HELE BEOORDELING van het werkritme, en
+      // dat mag geen verborgen aanname zijn. 09:00 tot 21:00, twaalf uren: de
+      // module eist zelf een spraakbericht vóór 09:00 en de zoomcalls lopen
+      // tot half negen 's avonds.
+      werkuur_van: WERKUUR_VAN,
+      werkuur_tot: WERKUUR_TOT,
+      // Een stilte binnen werkuren is pas een bevinding vanaf twee uur, en een
+      // dag heet geklonterd onder 60% bezetting van de werkuren.
+      gat_drempel_min: GAT_DREMPEL_MIN,
+      bezetting_drempel: BEZETTING_DREMPEL,
     },
     aandacht: aandachtMetErnst,
     blinde_vlekken: blindeVlekken,
@@ -382,6 +475,16 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     zoomcalls,
     archief,
     volume,
+    // De verdeling over de dag, en wat er afgehandeld is. Per dag, zodat een
+    // weekrapport de klontering niet uitsmeert.
+    //
+    // `tijdlijn` en `werkritme` horen bij elkaar: de eerste is het beeld, de
+    // tweede zijn de twee rekensommen eronder. Het scherm toont ze als ÉÉN
+    // blok — twee blokken over de verdeling van de dag onder elkaar is niet
+    // twee keer beter maar een rommelig rapport.
+    tijdlijn,
+    werkritme,
+    afgehandeld,
   };
 }
 
@@ -395,24 +498,25 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
 export function telVolume(pogingen, taakVan) {
   // VIER EMMERS DIE ELKAAR UITSLUITEN, EN DIE SAMEN `uit` ZIJN.
   //
-  // Er stonden er drie, en ze telden niet op. Op 7 september gaf het endpoint
-  // {uit: 9, gesproken: 5, te_kort: 1} — vijf plus één is zes, terwijl er negen
-  // pogingen waren. Drie calls vielen in geen enkele emmer.
+  //   gesproken + niet_opgenomen + onbekend_resultaat === uit
   //
-  // De oorzaak: `te_kort` telde alleen mee als isContact(p) waar was, en drie
-  // van de negen calls hadden resultaat 'niet opgenomen'. Die kwamen dus nooit
-  // ergens terecht. Dat is geen randgeval maar een ontbrekende categorie: een
-  // call die niet werd opgenomen is iets anders dan een korte call.
+  // 8 SEPTEMBER — DE EMMERS ZIJN OMGEZET. Ze hingen aan een grens van tien
+  // seconden op `duur_sec`, en dat getal is de tijd tussen KIEZEN en OPHANGEN,
+  // dus inclusief overgaan. De meting: bij 'niet opgenomen' staan duren tot 43
+  // seconden, bij 'gesproken' vanaf 4. Een grens daarop noemt 43 seconden
+  // overgaan een gesprek en 4 seconden gesprek een niet-gesprek.
   //
-  // 'te_kort' zou de verkeerde naam zijn voor een niet-opgenomen call, en na de
-  // woordenronde van gisteren is dat precies wat we niet meer doen. Dus een
-  // vierde emmer, met de invariant erbij:
+  // 'te_kort' bestaat daarom niet meer als categorie: hij beweerde iets over de
+  // kwaliteit van een gesprek op basis van een getal dat er niet over ging. Wat
+  // ervoor in de plaats komt is `onbekend_resultaat` — calls waarvan het
+  // resultaat-veld niets bruikbaars zegt. Die horen in de blinde vlekken, niet
+  // in een oordeel.
   //
-  //   niet_opgenomen + zonder_duur + gesproken + te_kort === uit
-  //
-  // Een test bewaakt die optelling, want dit hoort per definitie te kloppen en
-  // niet bij toeval.
-  const bel   = { uit: 0, seconden: 0, niet_opgenomen: 0, zonder_duur: 0, gesproken: 0, te_kort: 0 };
+  // `zonder_duur` telt binnen de gesproken calls: er is gesproken, maar de
+  // lengte is niet vastgelegd. Dat is geen aparte uitkomst maar een ontbrekend
+  // getal, en het rapport zegt dan 'lengte niet geregistreerd' in plaats van 0.
+  const bel = { uit: 0, seconden: 0, gesproken: 0, niet_opgenomen: 0,
+                onbekend_resultaat: 0, zonder_duur: 0, via_ander: 0 };
   const wa    = { uit: 0, in: 0 };
   const spraak = { uit: 0, in: 0 };
   const rijen = [];
@@ -424,22 +528,23 @@ export function telVolume(pogingen, taakVan) {
       // niet als soort en zouden hier dus niet horen te staan.
       if (!uitgaand) continue;
       bel.uit += 1;
-      const duurBekend = p.duur_sec !== null && p.duur_sec !== undefined
-        && Number.isFinite(Number(p.duur_sec));
-      if (duurBekend) bel.seconden += Number(p.duur_sec);
+      const soort = classificeerResultaat(p.resultaat);
+      const duur = gesprekDuur(p);
 
-      // Precies één emmer per call, in deze volgorde.
-      if (!isContact(p)) {
-        // Er is niemand opgenomen. Blijft een poging — Dave heeft gebeld.
-        bel.niet_opgenomen += 1;
-      } else if (!duurBekend) {
-        // Opgenomen, maar we weten niet hoe lang. ONBEKEND is geen nee: het
-        // telt niet als gesprek en ook niet als te kort.
-        bel.zonder_duur += 1;
-      } else if (isGesprek(p, GESPREK_MIN_SEC) === true) {
+      // Precies één emmer per call. Het RESULTAAT beslist, niet de duur.
+      if (soort === GESPROKEN) {
         bel.gesproken += 1;
+        // Seconden tellen alleen mee waar er echt gesproken is; anders telden
+        // we overgaantijd op bij gesprekstijd.
+        if (duur.sec === null) bel.zonder_duur += 1;
+        else bel.seconden += duur.sec;
+      } else if (soort === NIET_OPGENOMEN) {
+        bel.niet_opgenomen += 1;
+      } else if (soort === VIA_ANDER) {
+        // Afgehandeld via iemand anders: wel werk, geen eigen gesprek.
+        bel.via_ander += 1;
       } else {
-        bel.te_kort += 1;
+        bel.onbekend_resultaat += 1;
       }
     } else if (p.soort === 'whatsapp') {
       if (uitgaand) wa.uit += 1; else wa.in += 1;
@@ -540,6 +645,139 @@ async function bouwDekking({ pogingen, taakVan, dagen, vandaag, blindeVlekken })
 }
 
 // ── Sectie 3 ───────────────────────────────────────────────────────────────
+/**
+ * NUMMER → TAAK. Eén huis, want twee kopieën lopen uiteen.
+ *
+ * Eerst exact op de volle cijferreeks, dan op de laatste 9 voor de lokaal
+ * geschreven variant. Alleen bij precies één treffer: twee klanten met dezelfde
+ * staart is een niet-gekoppelde call, geen 'kies de eerste'. Zie CLAUDE.md
+ * lesson 18.
+ *
+ * Stond eerst binnen bouwVensters. De belpogingen bij een zoomcall hebben exact
+ * dezelfde koppeling nodig, en een tweede versie ervan zou vroeg of laat een
+ * ander antwoord geven op dezelfde vraag.
+ */
+export function maakTaakZoeker(taken) {
+  const exact = new Map();
+  const staart = new Map();
+  for (const t of taken || []) {
+    const d = telCijfers(t.telefoon);
+    if (!d) continue;
+    if (!exact.has(d)) exact.set(d, []);
+    exact.get(d).push(t);
+    if (d.length >= 9) {
+      const s = d.slice(-9);
+      if (!staart.has(s)) staart.set(s, []);
+      staart.get(s).push(t);
+    }
+  }
+  return (tel) => {
+    const d = telCijfers(tel);
+    if (!d) return null;
+    const e = exact.get(d);
+    if (e && e.length === 1) return e[0];
+    if (d.length >= 9) {
+      const s = staart.get(d.slice(-9));
+      if (s && s.length === 1) return s[0];
+    }
+    return null;
+  };
+}
+
+/**
+ * ALLE BELPOGINGEN VAN DIE DAG BIJ DIE ZOOMCALL.
+ *
+ * Shudino Andrade stond op 7 september als no-show, en de collega die hem nog
+ * gebeld had moest op zijn woord geloofd worden. Terwijl het gewoon in onze
+ * data stond: een uitgaande call van 41 seconden om 17:23. Dat is precies het
+ * bewijsmateriaal waar deze module voor bedoeld is, en het was nergens te zien.
+ *
+ * NIET ALLEEN HET NABELVENSTER. bouwVensters kijkt naar 12-13 uur, want dat is
+ * de afspraak over wannéér er nagebeld hoort te worden. Deze functie beantwoordt
+ * een andere vraag — is er die dag contact gezocht? — en daar telt een gesprek
+ * om kwart over vijf net zo hard. Twee vragen, twee antwoorden; ze door elkaar
+ * halen was de reden dat dit bewijs onzichtbaar bleef.
+ *
+ * GEEN GEKOPPELDE TAAK IS NIET NUL. Een call zonder taak-koppeling heeft geen
+ * belhistoriek die we kunnen lezen; dat als '0×' tonen zou een verwijt zijn
+ * over iets wat we niet gemeten hebben. Dan is `gekoppeld:false` het eerlijke
+ * antwoord — dezelfde regel als bij de blinde vlekken.
+ */
+/**
+ * 'Die dag 2x gebeld, waarvan 1 gesprek van 41 s.' Eén formulering, drie schermen.
+ *
+ * Seconden komen alleen van calls waar het resultaat 'gesproken' zegt. Is er
+ * gesproken maar staat de lengte er niet, dan zeggen we dat — een nul zou
+ * lezen als een gesprek van nul seconden.
+ */
+export function belZin(aantal, gesproken, seconden) {
+  if (!aantal) return 'Die dag niet gebeld.';
+  const keer = aantal + '\u00d7 gebeld';
+  if (!gesproken) return 'Die dag ' + keer + ', niemand nam op.';
+  const kop = 'Die dag ' + keer + ', waarvan ' +
+    (gesproken === 1 ? '1 gesprek' : gesproken + ' gesprekken');
+  if (!seconden) return kop + '; de lengte is niet geregistreerd.';
+  const duur = seconden >= 90 ? Math.round(seconden / 60) + ' min' : seconden + ' s';
+  return kop + ' van samen ' + duur + '.';
+}
+
+export function belpogingenVoorCalls({ afspraken, taken, pogingen }) {
+  const zoekTaak = maakTaakZoeker(taken);
+  const perTaakDag = new Map();
+  for (const p of pogingen || []) {
+    if (!p || !p.taak_id) continue;
+    if (String(p.soort || '') !== 'call') continue;
+    // Uitgaand: wat Dave zelf gedaan heeft. Een inkomend telefoontje is ander
+    // bewijs en hoort niet in deze telling.
+    if (p.richting && String(p.richting) !== 'uit') continue;
+    const dag = dagVan(p.tijdstip);
+    if (!dag) continue;
+    const sleutel = p.taak_id + '|' + dag;
+    if (!perTaakDag.has(sleutel)) perTaakDag.set(sleutel, []);
+    perTaakDag.get(sleutel).push(p);
+  }
+
+  const uit = new Map();
+  for (const a of afspraken || []) {
+    const dag = dagVan(a.scheduled_at);
+    const t = zoekTaak(a.lead_phone);
+    if (!t) { uit.set(String(a.id), { gekoppeld: false, aantal: 0, gesproken: 0, seconden: 0, pogingen: [] }); continue; }
+    const rij = (perTaakDag.get(t.id + '|' + dag) || [])
+      .slice()
+      .sort((x, y) => String(x.tijdstip).localeCompare(String(y.tijdstip)));
+    let gesproken = 0;
+    let seconden = 0;
+    const lijst = rij.map((p) => {
+      // HET RESULTAAT BESLIST, DE DUUR ZEGT ALLEEN HOE LANG. Een duur bij een
+      // niet-opgenomen call is overgaantijd en hoort niet getoond te worden.
+      const k = classificeerResultaat(p.resultaat);
+      const duur = gesprekDuur(p);
+      if (k === GESPROKEN) { gesproken += 1; if (duur.sec !== null) seconden += duur.sec; }
+      return {
+        tijd: tijdVan(p.tijdstip),
+        // Alleen gevuld waar er gesproken is; null betekent hier 'lengte niet
+        // geregistreerd', niet 'nul seconden'.
+        duur_sec: duur.toon ? duur.sec : null,
+        soort: k === GESPROKEN ? 'gesprek'
+             : k === NIET_OPGENOMEN ? 'niet_opgenomen'
+             : k === VIA_ANDER ? 'via_ander' : 'onbekend_resultaat',
+        resultaat: p.resultaat || null,
+        automatisch: p.automatisch === true,
+      };
+    });
+    uit.set(String(a.id), {
+      gekoppeld: true, taak_id: t.id,
+      aantal: lijst.length, gesproken, seconden, pogingen: lijst,
+      // DE ZIN HOORT HIER, NIET DRIE KEER IN DE VIEWS. Het dagscherm, het
+      // rapportscherm en de printweergave tonen alle drie hetzelfde; drie
+      // kopieën van dezelfde formulering lopen vroeg of laat uiteen. Zelfde
+      // reden als reden_leeg hierboven.
+      samenvatting: belZin(lijst.length, gesproken, seconden),
+    });
+  }
+  return uit;
+}
+
 export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
   // Wie in de vensters hoort zijn de leads met een zoomcall op die dag — niet
   // iedereen op de lijst. Een masterclass-aanmelding hoort geen
@@ -551,34 +789,7 @@ export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
     pogPerTaak.get(p.taak_id).push(p);
   }
 
-  // Nummer → taak. Eerst exact op het volle cijferreeks, dan op de laatste 9
-  // voor de lokaal geschreven variant. Alleen bij precies één treffer: twee
-  // klanten met dezelfde staart is een niet-gekoppelde call, geen 'kies de
-  // eerste'. Zie CLAUDE.md lesson 18.
-  const exact = new Map();
-  const staart = new Map();
-  for (const t of taken) {
-    const d = telCijfers(t.telefoon);
-    if (!d) continue;
-    if (!exact.has(d)) exact.set(d, []);
-    exact.get(d).push(t);
-    if (d.length >= 9) {
-      const s = d.slice(-9);
-      if (!staart.has(s)) staart.set(s, []);
-      staart.get(s).push(t);
-    }
-  }
-  const zoekTaak = (tel) => {
-    const d = telCijfers(tel);
-    if (!d) return null;
-    const e = exact.get(d);
-    if (e && e.length === 1) return e[0];
-    if (d.length >= 9) {
-      const s = staart.get(d.slice(-9));
-      if (s && s.length === 1) return s[0];
-    }
-    return null;
-  };
+  const zoekTaak = maakTaakZoeker(taken);
 
   const rijen = [];
   const zonderTaak = [];
@@ -736,7 +947,7 @@ export function relevanteAfspraken(afspraken, nuMs) {
 }
 
 // ── Sectie 4 ───────────────────────────────────────────────────────────────
-export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }) {
+export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), belBijCall = null }) {
   // DE LIJST ZELF MOET KLOPPEN, NIET ALLEEN DE BEVINDING.
   //
   // Op 7 september stonden er zes rijen voor drie calls: een verplaatste
@@ -790,9 +1001,17 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now() }
           : staat === 'geannuleerd' ? 'Deze afspraak is geannuleerd; een uitkomst hoort hier niet.'
           : staat === 'onbeoordeelbaar' ? 'De status van deze afspraak (' + String(a.status || '') + ') zegt niet of de call heeft plaatsgevonden.'
           : uitkomstKolommen
-            ? 'Er is voor deze call geen uitkomst vastgelegd.'
-            : 'Uitkomsten worden voor deze periode nog niet bewaard.'),
+            // ZEG WELKE CALL. Deze zin staat vlak onder een regel over
+            // belpogingen, en werd daardoor gelezen als 'er is niet gebeld' —
+            // terwijl Shudino gewoon een gesprek van 41 seconden had. Hij gaat
+            // over de ZOOMCALL, en dat hoort er te staan.
+            ? 'Er is voor deze zoomcall geen uitkomst vastgelegd.'
+            : 'Uitkomsten van zoomcalls worden voor deze periode nog niet bewaard.'),
       notitie : a.snelle_notitie || null,
+      // HET BEWIJSMATERIAAL BIJ DE CALL. Zonder dit moest Maxim geloven op zijn
+      // woord dat er nog gebeld was voor een no-show. Null = niet meegegeven
+      // (oudere aanroeper), en dat is iets anders dan 'niet gebeld'.
+      belpogingen: belBijCall ? (belBijCall.get(String(a.id)) || null) : null,
     };
   });
 }
@@ -876,9 +1095,17 @@ export function bouwArchief({ gearchiveerd, histPerTaak }) {
  * plek waar de bevindingen ontstaan.
  *
  * Drie graden, en het onderscheid is met opzet:
- *   nalatigheid  — er is werk blijven liggen dat gedaan had moeten worden.
+ * SCHRIJF OVER HET WERK, NIET OVER DE PERSOON. Dit rapport heet Salesrapport
+ * en draagt geen naam van een verkoper meer. Dat is niet alleen de titel: de
+ * bevindingen nemen de LEAD als onderwerp ('deze lead kreeg geen poging'),
+ * nooit de verkoper ('hij liet deze lead liggen'). Het woord 'nalatigheid' was
+ * daar de laatste uitzondering op — dat is een oordeel over een mens, niet een
+ * meting aan een lijst.
+ *
+ *   blijft_liggen — er is werk blijven liggen dat gedaan had moeten worden.
  *   twijfelgeval — er is iets aan de hand, maar het kan net zo goed aan het
- *                  systeem liggen als aan Dave. 'Geen uitkomst vastgelegd' is
+ *                  systeem liggen als aan de uitvoering. 'Geen uitkomst
+ *                  vastgelegd' is
  *                  daar het schoolvoorbeeld van: dat verschil hebben we op 6
  *                  september juist gerepareerd en het hoort zichtbaar te
  *                  blijven, ook in de kleur.
@@ -886,9 +1113,12 @@ export function bouwArchief({ gearchiveerd, histPerTaak }) {
  *                  weten; stilte zou hier als goedkeuring lezen.
  */
 const BEVINDING_SOORTEN = {
-  niet_behandeld  : { ernst: 'nalatigheid',  label: 'NIET BEHANDELD' },
-  te_weinig_moeite: { ernst: 'nalatigheid',  label: 'TE WEINIG MOEITE' },
-  venster_gemist  : { ernst: 'nalatigheid',  label: 'VENSTER GEMIST' },
+  // 'TE WEINIG MOEITE' is vervangen door 'TE WEINIG POGINGEN'. Moeite is een
+  // eigenschap van een mens; pogingen zijn rijen met een tijdstempel. Alleen
+  // het tweede is gemeten.
+  niet_behandeld  : { ernst: 'blijft_liggen', label: 'NIET BEHANDELD' },
+  te_weinig_moeite: { ernst: 'blijft_liggen', label: 'TE WEINIG POGINGEN' },
+  venster_gemist  : { ernst: 'blijft_liggen', label: 'VENSTER GEMIST' },
   venster_te_laat : { ernst: 'twijfelgeval', label: 'TE LAAT' },
   geen_uitkomst   : { ernst: 'twijfelgeval', label: 'GEEN UITKOMST' },
   dubbele_afspraak: { ernst: 'twijfelgeval', label: 'DUBBELE AFSPRAAK' },
@@ -907,6 +1137,43 @@ function metErnst(bevinding) {
 
 // ── Sectie 1 ───────────────────────────────────────────────────────────────
 export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief }) {
+  // ── DE BRUG MOET DEZELFDE MENSEN KENNEN ALS DIT BLOK BEOORDEELT ──────────
+  // Dit blok staat bewust VÓÓR de lus hieronder: die zet blinde vlekken om in
+  // afwijkingen, en wat er ná die lus bij komt zou alleen in het overzicht
+  // onderaan belanden en nooit bovenaan opvallen.
+  //
+  // Op 8 september bleek dat de leadlijst waarop de brug filtert uitsluitend
+  // uit opvolging_taken werd gebouwd, terwijl dit blok leads met een ZOOMCALL
+  // beoordeelt. Acht zoomcalls, nul taken: elk spraakbericht naar die mensen
+  // werd door de brug weggegooid als 'niet_op_leadlijst' (20 op message_create,
+  // 21 op message), en dit blok meldde vervolgens 'geen spraakbericht' over
+  // iemand die haar werk wél gedaan had.
+  //
+  // Voor een dag vóór DEKKING_VANAF is dit dus GEEN bevinding maar een blinde
+  // vlek. Het verschil tussen 'niet gedaan' en 'niet gemeten' is de hele reden
+  // dat dit rapport bestaat.
+  //
+  // PER DAG, niet per rapport: een weekrapport dat over de deploy heen loopt
+  // hoort de gedekte dagen gewoon te beoordelen en alleen over de dagen ervoor
+  // te zwijgen.
+  const ongedekteDagen = [
+    ...(vensters.rijen || []).map((r) => r.dag),
+    ...(vensters.zonder_taak || []).map((r) => r.dag),
+  ].filter((d) => !leadlijstDektDag(d));
+  if (ongedekteDagen.length) {
+    const uniek = [...new Set(ongedekteDagen)].sort();
+    blindeVlekken.push({
+      sectie: 'vensters',
+      wat   : 'Of er een spraakbericht is gestuurd, is voor ' +
+              (uniek.length === 1 ? uniek[0] : uniek[0] + ' t/m ' + uniek[uniek.length - 1]) +
+              ' niet te meten.',
+      waarom: 'De WhatsApp-brug filtert op een leadlijst die tot ' + DEKKING_VANAF +
+              ' alleen uit opvolgtaken werd gebouwd. Leads met alleen een zoomcall stonden ' +
+              'daar niet in, dus werden hun berichten weggegooid voordat ze geregistreerd ' +
+              'konden worden. Dat betekent NIET dat er geen spraakbericht is gestuurd.',
+    });
+  }
+
   // EEN BLINDE VLEK IS EEN AFWIJKING. Zonder deze lus zou een sectie die niets
   // kon meten hierboven stil blijven, en dan leest 'geen afwijkingen' als
   // 'alles in orde'. Dat is de duurste fout die dit rapport kan maken.
@@ -934,6 +1201,8 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
   }
 
   for (const r of vensters.rijen) {
+    // Geen verwijt over een dag waarop de brug de berichten niet eens kon zien.
+    if (!leadlijstDektDag(r.dag)) continue;
     if (r.spraak.staat === 'niet_gedaan') {
       aandacht.push({ soort: 'venster_gemist', sectie: 'vensters', naam: r.naam,
         tekst: `${r.naam || 'Naamloos'} had een zoomcall op ${r.dag} maar kreeg geen spraakbericht.`, uitleg: null, taak_id: r.taak_id });
@@ -1008,7 +1277,7 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
         soort: 'geen_uitkomst', sectie: 'zoomcalls', naam: c.naam,
         // De formulering is met opzet passief: het kan aan Dave liggen én aan
         // het systeem, en dat verschil weten we hier niet.
-        tekst: `Voor de call met ${c.naam || 'onbekend'} op ${c.dag} is geen uitkomst vastgelegd.`,
+        tekst: `Voor de zoomcall met ${c.naam || 'onbekend'} op ${c.dag} is geen uitkomst vastgelegd.`,
         uitleg: c.reden_leeg, appointment_id: c.appointment_id,
       });
     }

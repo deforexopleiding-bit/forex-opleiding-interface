@@ -31,6 +31,7 @@ import { stuurLmsUitnodiging } from './_lib/dfo-lms-uitnodiging.js';
 import { sendOnboardingInvite } from './_lib/onboarding-invite.js';
 import { enrollForTrigger as enrollOnboardingAutomations } from './_lib/onboarding-automation-engine.js';
 import { assertStartDateNotTooEarly } from './_lib/onboarding-start-date.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -262,6 +263,12 @@ export default async function handler(req, res) {
     ).catch((e) => {
       console.error('[onboarding-create] automation enroll fail:', e?.message || e);
     });
+
+    // Is er in deze aanmelding meteen geprovisioneerd, dan bestaat
+    // dfo_lms_student_id nu al en hoort de student direct in het oppak-blok.
+    // Is dat niet zo, dan doet de spiegel niets (geen student-id = geen rij)
+    // en komt hij vanzelf zodra de provisioning alsnog draait.
+    await spiegelNaActie(inserted.id, 'onboarding-create');
 
     return res.status(200).json({
       ok         : true,

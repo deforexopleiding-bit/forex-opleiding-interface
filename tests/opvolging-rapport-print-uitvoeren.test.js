@@ -55,7 +55,8 @@ function maakBrowser({ antwoord, status = 200 } = {}) {
 
   const ctx = createContext({
     window,
-    document: { getElementById: (id) => (id === 'blad' ? el : null) },
+    // document.title wordt de BESTANDSNAAM van de bewaarde PDF, dus die meten we.
+    document: { title: '', getElementById: (id) => (id === 'blad' ? el : null) },
     location: window.location,
     URLSearchParams,
     fetch: async () => ({ ok: status < 400, status, text: async () => JSON.stringify(antwoord) }),
@@ -148,12 +149,25 @@ test('de pagina blijft niet op "wordt opgehaald" staan', async () => {
 test('het rapport draagt de gegevens uit het antwoord', async () => {
   const b = await draai({ antwoord: ANTWOORD });
   const h = b.el.innerHTML;
-  assert.match(h, /Dagrapport/);
+  // Het rapport heet naar het werk, niet naar de persoon: 'Dagrapport — Dave
+  // Heylen' is 'Salesrapport' geworden, met de periode eronder. Zodra er een
+  // tweede verkoper bijkomt hoeft er niets te veranderen.
+  assert.match(h, /Salesrapport/);
+  assert.doesNotMatch(h, /Dagrapport|Dave Heylen/, 'de oude naam hoort nergens meer te staan');
   assert.match(h, /7 september 2026/, 'nlDatum hoort te werken — die was de crash');
   assert.match(h, /Jan Jansen/);
   assert.match(h, /NIET BEHANDELD/);
   assert.match(h, /2:13/, 'gesprekstijd als m:ss uit 133 seconden');
   assert.match(h, /10 seconden/, 'de meetregel met de drempel uit het endpoint');
+});
+
+test('de bestandsnaam van de PDF draagt de naam en de periode', async () => {
+  // document.title is wat de browser voorstelt als bestandsnaam bij 'Bewaar
+  // als PDF'. Die stond statisch in de <title>, dus elke bewaarde PDF heette
+  // hetzelfde en was later niet uit elkaar te houden.
+  const b = await draai({ antwoord: ANTWOORD });
+  assert.match(b.ctx.document.title, /^Salesrapport/);
+  assert.match(b.ctx.document.title, /7 september 2026/);
 });
 
 test('er wordt geprint als het rapport staat', async () => {
@@ -234,4 +248,27 @@ test('het merkteken staat op één plek in de bron', () => {
   const script = scriptUit(PAGINA);
   const declaraties = script.match(/OPMAAK_VERSIE\s*=\s*'/g) || [];
   assert.equal(declaraties.length, 1);
+});
+
+// ── De tijdlijn hoort in de PDF, niet alleen op het scherm ─────────────────
+// De PDF is wat bewaard wordt. Een blok dat alleen op het scherm staat is voor
+// de lezer van de PDF niet gebouwd — en dat merk je pas als iemand hem opslaat.
+
+test('de tijdlijn staat in de printweergave, met de SVG erin', async () => {
+  const met = JSON.parse(JSON.stringify(ANTWOORD));
+  met.tijdlijn = [{
+    dag: met.periode.van, venster: { van: '09:00', tot: '21:00' }, verruimd: null, gat: null,
+    aantallen: { bel: 3, whatsapp: 2, zoomcalls: 1 },
+    svg: '<svg viewBox="0 0 1000 300" width="100%"><rect class="proef" x="1" y="1" width="2" height="2"/></svg>',
+  }];
+  met.werkritme = [{
+    dag: met.periode.van, per_uur: [], totaal: 3, actieve_uren: 2, werkuren: 12,
+    langste_gat: null, bevindingen: [{ soort: 'lang_gat', tekst: 'Tussen 11:27 en 16:55 is er niets gedaan.', getallen: {} }],
+  }];
+  const b = await draai({ antwoord: met });
+  const h = b.el.innerHTML;
+  assert.match(h, /<svg viewBox="0 0 1000 300"/, 'de SVG hoort in de PDF te staan');
+  assert.match(h, /class="proef"/, 'en het is de SVG van de server, niet een hier getekende');
+  assert.match(h, /Tussen 11:27 en 16:55/, 'met de bevinding eronder');
+  assert.match(h, /blinde\s+vlek, geen verwijt/, 'en de toon erbij');
 });

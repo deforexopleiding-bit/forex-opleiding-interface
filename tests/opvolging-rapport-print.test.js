@@ -130,11 +130,11 @@ test('de knop opent de printweergave met dezelfde periode als het scherm', () =>
   assert.match(blok, /rapport-print\.html\?van=/);
 });
 
-test('de knop heet Rapport als PDF en staat bij de periodekiezer', () => {
+test('de knop heet Salesrapport als PDF en staat bij de periodekiezer', () => {
   const i = VIEW.indexOf('function periodeKiezer');
   const j = VIEW.indexOf('\n  }', i);
   const blok = VIEW.slice(i, j);
-  assert.match(blok, /Rapport als PDF/);
+  assert.match(blok, /Salesrapport als PDF/);
   assert.match(blok, /__opvRapportPdf/);
 });
 

@@ -27,6 +27,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createNotification } from './_lib/notify.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // YYYY-MM-DD (Postgres date kolom) — spiegel admin-onboarding-start-date.js.
@@ -229,6 +230,9 @@ export default async function handler(req, res) {
 
     // Backwards-compat: response.update blijft het status/note-log-record
     // (of null bij pure start_date-call). Plus aparte start_date-velden.
+    // Spiegel naar het LMS — faalzacht, na de geslaagde hoofdactie.
+    await spiegelNaActie(onboardingId, 'mentor-future-student-update');
+
     return res.status(200).json({
       ok: true,
       update: inserted,

@@ -19,6 +19,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_ACTIONS = new Set(['archive', 'restore']);
@@ -84,6 +85,9 @@ export default async function handler(req, res) {
       .update(patch)
       .eq('id', onboardingId);
     if (updErr) throw new Error('onboarding update: ' + updErr.message);
+
+    // Spiegel naar het LMS — faalzacht, na de geslaagde hoofdactie.
+    await spiegelNaActie(onboardingId, 'onboarding-archive');
 
     return res.status(200).json({ ok: true, status: newStatus });
   } catch (e) {

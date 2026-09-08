@@ -14,6 +14,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
+import { isContact, ontleedResultaat } from '../api/_lib/opvolging-poging-telling.js';
+import { DEKKING_VANAF } from '../api/_lib/opvolging-leadlijst-venster.js';
 import {
   telVolume, bouwVensters, bouwZoomcalls, bouwArchief, vulAandacht,
 } from '../api/opvolging-rapport.js';
@@ -22,6 +24,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BRON = readFileSync(join(ROOT, 'api/opvolging-rapport.js'), 'utf8');
 
 const DAG = '2026-09-01';
+// Een dag waarop de leadlijst de zoomcall-leads dekt. Vóór DEKKING_VANAF kon de
+// brug hun berichten niet eens zien, en dan hoort sectie 3 een blinde vlek te
+// melden in plaats van een oordeel — zie tests/opvolging-leadlijst-zoomcalls.
+// Tests die over iets anders gaan, gebruiken daarom een gedekte dag.
+const DAG_MEETBAAR = DEKKING_VANAF;
 const op = (uur, min = 0) => `${DAG}T${String(uur - 2).padStart(2, '0')}:${String(min).padStart(2, '0')}:00Z`;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -141,7 +148,7 @@ test('de aandachtlijst is alleen leeg als er echt niets is', () => {
   vulAandacht({
     aandacht, blindeVlekken: [],
     dekking: { behandeld: [{ naam: 'Jan' }], onbehandeld: [] },
-    vensters: { rijen: [{ naam: 'Jan', dag: DAG, spraak: { staat: 'op_tijd', tijd: '08:30' }, nabel: { staat: 'niet_nodig', reden: 'heeft geantwoord' } }], zonder_taak: [] },
+    vensters: { rijen: [{ naam: 'Jan', dag: DAG_MEETBAAR, spraak: { staat: 'op_tijd', tijd: '08:30' }, nabel: { staat: 'niet_nodig', reden: 'heeft geantwoord' } }], zonder_taak: [] },
     zoomcalls: [{ naam: 'Jan', dag: DAG, vastgelegd: true, uitkomst: 'sale' }],
     archief: [{ naam: 'Jan', moeite: { staat: 'genoeg' }, bel_totaal: 3, bel_dagen: 3, wa_totaal: 1 }],
   });
@@ -184,7 +191,7 @@ test('calls zonder taak melden zich als blinde vlek, niet als gemist spraakberic
   vulAandacht({
     aandacht, blindeVlekken: [],
     dekking: { behandeld: [], onbehandeld: null },
-    vensters: { rijen: [], zonder_taak: [{ appointment_id: 'a1', naam: 'Los' }] },
+    vensters: { rijen: [], zonder_taak: [{ appointment_id: 'a1', naam: 'Los', dag: DAG_MEETBAAR }] },
     zoomcalls: [], archief: [],
   });
   assert.equal(aandacht.length, 1);
@@ -724,42 +731,71 @@ test('een status die we niet kennen wordt niet beoordeeld, maar ook niet verzweg
 // en 2 seconden — dat is opnemen en wegdrukken, of een beltoon. Zo meet het
 // rapport iets anders dan het zegt, en wel in Daves voordeel.
 
+// 8 SEPTEMBER — DEZE VIER TESTS PINDEN EEN VERVALLEN REGEL VAST.
+//
+// Ze toetsten een grens van tien seconden op `duur_sec`. Dat getal is de tijd
+// tussen KIEZEN en OPHANGEN, dus inclusief overgaan: bij rijen met resultaat
+// 'niet opgenomen' staan duren tot 43 seconden, bij 'gesproken' vanaf 4. Een
+// grens daarop noemt 43 seconden overgaan een gesprek en 4 seconden gesprek
+// een niet-gesprek — hij scheidt niets.
+//
+// Sinds 8 september beslist het veld `resultaat`. Deze tests toetsen nu dat.
+
 const CALLS_7_SEP = [26, 24, 4, 29, 1, 1, 22, 24, 2].map((sec, i) => ({
   taak_id: 't1', soort: 'call', richting: 'uit',
   tijdstip: '2026-09-07T08:0' + (i % 10) + ':00Z',
-  duur_sec: sec, resultaat: 'gesproken',
+  duur_sec: sec,
+  // Vier van de negen werden niet opgenomen; hun 'duur' is overgaantijd.
+  resultaat: [4, 1, 1, 2].includes(sec) ? 'niet opgenomen' : 'gesproken',
 }));
 
-test('de korte calls van 7 september tellen niet als gesprek', () => {
+test('het resultaat bepaalt wat een gesprek is, niet de duur', () => {
   const v = telVolume(CALLS_7_SEP, new Map());
   assert.equal(v.bel.uit, 9, 'alle negen blijven een poging');
-  assert.equal(v.bel.gesproken, 5, '26, 24, 29, 22 en 24 seconden — niet de 4, 1, 1 en 2');
-  assert.equal(v.bel.seconden, 133);
+  assert.equal(v.bel.gesproken, 5, 'de vijf met resultaat gesproken');
+  assert.equal(v.bel.niet_opgenomen, 4);
+  assert.equal(v.bel.seconden, 125, 'alleen de seconden van gesproken calls: 26+24+29+22+24');
 });
 
-test('een call korter dan de drempel telt wel als poging', () => {
-  // De moeite blijft staan: Dave heeft gebeld. Alleen het gesprek niet.
-  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit', tijdstip: '2026-09-07T08:00:00Z', duur_sec: 2, resultaat: 'gesproken' }], new Map());
-  assert.equal(v.bel.uit, 1);
-  assert.equal(v.bel.gesproken, 0);
-  assert.equal(v.bel.te_kort, 1);
+test('een korte call met resultaat gesproken IS een gesprek', () => {
+  // Dit is de omkering ten opzichte van de oude regel, en de meting geeft hem
+  // gelijk: bij 'gesproken' begint de reeks bij 4 seconden.
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: 4, resultaat: 'gesproken' }], new Map());
+  assert.equal(v.bel.gesproken, 1);
+  assert.equal(v.bel.seconden, 4);
 });
 
-test('een call zonder duur telt niet als gesprek en niet als te kort', () => {
-  // We weten het niet. Dat is een derde geval, geen nul en geen ja.
-  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit', tijdstip: '2026-09-07T08:00:00Z', duur_sec: null, resultaat: 'gesproken' }], new Map());
-  assert.equal(v.bel.uit, 1);
+test('een lange call die niet werd opgenomen is GEEN gesprek', () => {
+  // 43 seconden overgaan telde onder de oude regel als een gesprek van 43 s.
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: 43, resultaat: 'niet opgenomen' }], new Map());
   assert.equal(v.bel.gesproken, 0);
+  assert.equal(v.bel.niet_opgenomen, 1);
+  assert.equal(v.bel.seconden, 0, 'overgaantijd mag niet bij de gesprekstijd opgeteld worden');
+});
+
+test('gesproken zonder bekende lengte telt als gesprek, maar niet als nul seconden', () => {
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: null, resultaat: 'gesproken' }], new Map());
+  assert.equal(v.bel.gesproken, 1);
   assert.equal(v.bel.zonder_duur, 1);
-  assert.equal(v.bel.te_kort, 0);
+  assert.equal(v.bel.seconden, 0);
 });
 
-test('de gespreksdrempel staat zichtbaar in de drempels, niet verstopt in de code', () => {
-  // Een grens die niemand kan zien is een grens waar niemand het over kan
-  // hebben. Hij hoort in het antwoord te staan, naast de andere drempels.
-  assert.equal(typeof GESPREK_MIN_SEC, 'number');
-  assert.ok(GESPREK_MIN_SEC > 0);
-  assert.match(BRON, /gesprek_min_sec\s*:\s*GESPREK_MIN_SEC/);
+test('een onbekend resultaat telt NOOIT stil als contact', () => {
+  // Liever niet gemeten dan onterecht groen.
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: 30, resultaat: 'iets wat niemand kent' }], new Map());
+  assert.equal(v.bel.gesproken, 0);
+  assert.equal(v.bel.onbekend_resultaat, 1);
+});
+
+test('de bron van het oordeel staat zichtbaar in de drempels', () => {
+  // De grens van tien seconden is vervallen; wat ervoor in de plaats kwam hoort
+  // net zo zichtbaar te zijn als die grens was.
+  assert.match(BRON, /gesprek_bron: 'resultaat'/);
+  assert.match(BRON, /gesprek_min_sec: null/);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -825,40 +861,45 @@ const NEGEN_CALLS = [
   tijdstip: '2026-09-07T08:0' + i + ':00Z', duur_sec: c.duur, resultaat: c.res,
 }));
 
-test('de vier emmers tellen op tot het aantal pogingen', () => {
+test('de emmers tellen op tot het aantal pogingen', () => {
   const v = telVolume(NEGEN_CALLS, new Map());
   assert.equal(
-    v.bel.gesproken + v.bel.te_kort + v.bel.zonder_duur + v.bel.niet_opgenomen,
+    v.bel.gesproken + v.bel.niet_opgenomen + v.bel.via_ander + v.bel.onbekend_resultaat,
     v.bel.uit,
     'elke call hoort in precies één emmer te vallen',
   );
 });
 
 test('de echte dag van 7 september valt goed uit elkaar', () => {
+  // MET DE NIEUWE REGEL. De call van 4 seconden heeft resultaat 'gesproken' en
+  // is dus een gesprek — onder de oude drempel viel hij als 'te kort' weg,
+  // terwijl de meting laat zien dat gesprekken bij 4 seconden beginnen.
   const v = telVolume(NEGEN_CALLS, new Map());
   assert.equal(v.bel.uit, 9);
-  assert.equal(v.bel.gesproken, 5, '26, 24, 29, 22 en 24 seconden');
-  assert.equal(v.bel.te_kort, 1, 'alleen de call van 4 seconden werd opgenomen');
+  assert.equal(v.bel.gesproken, 6, '26, 24, 4, 29, 22 en 24 — alles met resultaat gesproken');
   assert.equal(v.bel.niet_opgenomen, 3, '1, 1 en 2 seconden — niemand nam op');
   assert.equal(v.bel.zonder_duur, 0);
-  assert.equal(v.bel.seconden, 133);
+  assert.equal(v.bel.onbekend_resultaat, 0);
+  assert.equal(v.bel.seconden, 129, '26+24+4+29+22+24, zonder de overgaantijd');
 });
 
-test('een niet-opgenomen call heet niet "te kort"', () => {
-  // Na de woordenronde: te_kort betekent opgenomen-maar-kort. Een call waar
-  // niemand opnam is iets anders en hoort zijn eigen naam te hebben.
+test('een niet-opgenomen call telt nergens als gesprek, hoe lang hij ook duurde', () => {
   const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
-    tijdstip: '2026-09-07T08:00:00Z', duur_sec: 2, resultaat: 'niet opgenomen' }], new Map());
-  assert.equal(v.bel.te_kort, 0);
-  assert.equal(v.bel.niet_opgenomen, 1);
-});
-
-test('opgenomen zonder bekende duur valt in zonder_duur, niet in te_kort', () => {
-  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
-    tijdstip: '2026-09-07T08:00:00Z', duur_sec: null, resultaat: 'gesproken' }], new Map());
-  assert.equal(v.bel.zonder_duur, 1);
-  assert.equal(v.bel.te_kort, 0);
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: 43, resultaat: 'niet opgenomen' }], new Map());
   assert.equal(v.bel.gesproken, 0);
+  assert.equal(v.bel.niet_opgenomen, 1);
+  assert.equal(v.bel.seconden, 0);
+});
+
+test('via een ander bevestigd telt als werk, maar niet als gesprek', () => {
+  // Joelle bevestigde op 7 september via WhatsApp ook voor Anais en Valerie.
+  // Drie kaarten afgehandeld, één contact — Dave verdient krediet voor het
+  // eerste, niet voor het tweede.
+  const v = telVolume([{ taak_id: 't', soort: 'call', richting: 'uit',
+    tijdstip: '2026-09-07T08:00:00Z', duur_sec: null, resultaat: 'via ander: Joelle' }], new Map());
+  assert.equal(v.bel.gesproken, 0);
+  assert.equal(v.bel.via_ander, 1);
+  assert.equal(v.bel.niet_opgenomen, 0, 'het is geen mislukte poging');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -997,4 +1038,137 @@ test('andere blinde vlekken komen nog steeds wél in de aandachtlijst', () => {
   });
   assert.equal(aandacht.length, 1);
   assert.equal(aandacht[0].soort, 'blinde_vlek');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE ECHTE DAGEN, GETELD OP HET RESULTAAT-VELD
+// ═══════════════════════════════════════════════════════════════════════════
+// Gemeten op productie, 8 september. Dit is meer waard dan tien tests die
+// controleren of een functie bestaat: het zijn de getallen die eruit moeten
+// komen, en ze laten zien wat de oude regel Dave heeft aangedaan.
+//
+// 7 september: 26 calls, 21 gesproken, 5 niet opgenomen, 0 onbekend.
+// Onder de oude grens van tien seconden op duur_sec:
+//   · drie gesprekken (4, 6 en 9 seconden) heetten 'te kort';
+//   · vijf gesprekken zonder duur vielen in 'zonder uitkomst';
+//   · en de niet-opgenomen van 43 seconden telde als gesprek.
+// Negen van de 26 rijen stonden verkeerd, op een dag dat Dave 21 mensen aan
+// de lijn had. Dat laat een goede dag als een matige dag lezen.
+
+/** De 26 calls van 7 september, met hun echte resultaat en duurverdeling. */
+function calls7September() {
+  const rij = [];
+  const zet = (n, res, duur) => {
+    for (let i = 0; i < n; i++) {
+      rij.push({ taak_id: 't' + rij.length, soort: 'call', richting: 'uit',
+        tijdstip: '2026-09-07T09:00:00Z', duur_sec: duur, resultaat: res });
+    }
+  };
+  zet(3, 'gesproken', 4);        // de drie onder de oude grens: 4, 6 en 9 s
+  rij[1].duur_sec = 6; rij[2].duur_sec = 9;
+  zet(5, 'gesproken', null);     // vijf gesprekken zonder geregistreerde lengte
+  zet(13, 'gesproken', 30);      // de rest, ruim boven elke oude grens
+  zet(1, 'niet opgenomen', 43);  // de valse positief van de oude regel
+  zet(4, 'niet opgenomen', 5);
+  return rij;
+}
+
+test('7 september geeft 21 gesproken en 5 niet opgenomen, en niets onbekends', () => {
+  const v = telVolume(calls7September(), new Map());
+  assert.equal(v.bel.uit, 26);
+  assert.equal(v.bel.gesproken, 21);
+  assert.equal(v.bel.niet_opgenomen, 5);
+  assert.equal(v.bel.onbekend_resultaat, 0);
+});
+
+test('de acht gesprekken die de oude regel wegzette, tellen nu mee', () => {
+  const v = telVolume(calls7September(), new Map());
+  // Drie onder de tien seconden plus vijf zonder duur.
+  assert.equal(v.bel.zonder_duur, 5, 'wel een gesprek, alleen de lengte ontbreekt');
+  const onderOudeGrens = calls7September()
+    .filter((p) => p.resultaat === 'gesproken' && p.duur_sec !== null && p.duur_sec < 10).length;
+  assert.equal(onderOudeGrens, 3);
+  assert.equal(v.bel.gesproken, 21, 'alle 21 tellen, ook die acht');
+});
+
+test('de niet-opgenomen van 43 seconden telt NIET als gesprek', () => {
+  const v = telVolume(calls7September(), new Map());
+  assert.equal(v.bel.seconden, 4 + 6 + 9 + 13 * 30, '4+6+9 plus dertien maal 30, zonder de 43');
+});
+
+test('een verstuurde of gelezen WhatsApp is inspanning, geen contact', () => {
+  // 13 uitgaand op 7 september: verstuurd, afgeleverd, gelezen. Geen daarvan
+  // zegt dat er iemand geantwoord heeft. Stond dit als contact, dan zou de
+  // archiveerregel op los zand staan voor elke kaart die alleen ge-appt is.
+  assert.equal(isContact({ soort: 'whatsapp', richting: 'uit', resultaat: 'gelezen' }), false);
+  assert.equal(isContact({ soort: 'whatsapp', richting: 'uit', resultaat: 'afgeleverd' }), false);
+  // En de 11 inkomende zijn wél contact: daar staat de tekst van de lead in.
+  assert.equal(isContact({ soort: 'whatsapp', richting: 'in', resultaat: 'antwoord ontvangen' }), true);
+});
+
+test('Daves eigen woorden blijven bewaard naast de classificatie', () => {
+  const r = ontleedResultaat('gesproken: bevestigd — neemt laptop mee');
+  assert.equal(r.familie, 'gesproken');
+  assert.equal(r.uitkomst, 'bevestigd');
+  assert.equal(r.notitie, 'neemt laptop mee');
+});
+
+// ── Twee gaten die een sabotage-ronde blootlegde ───────────────────────────
+// Bij het narekenen bleken twee opzettelijke fouten GEEN enkele test rood te
+// maken: 'overgaantijd bij de gesprekstijd optellen' en 'een onbekend resultaat
+// stil als contact tellen'. Beide gingen over een pad dat wel bestond maar
+// nergens werd nagerekend. Zonder deze twee tests bewaakt de rest niets.
+
+test('overgaantijd komt NOOIT bij de gesprekstijd, ook niet via een omweg', () => {
+  const v = telVolume([
+    { taak_id: 'a', soort: 'call', richting: 'uit', tijdstip: '2026-09-07T09:00:00Z',
+      duur_sec: 20, resultaat: 'gesproken' },
+    { taak_id: 'b', soort: 'call', richting: 'uit', tijdstip: '2026-09-07T09:05:00Z',
+      duur_sec: 43, resultaat: 'niet opgenomen' },
+    { taak_id: 'c', soort: 'call', richting: 'uit', tijdstip: '2026-09-07T09:09:00Z',
+      duur_sec: 30, resultaat: 'onbekende waarde' },
+  ], new Map());
+  assert.equal(v.bel.seconden, 20, 'alleen de 20 van het gesprek — niet de 43 en niet de 30');
+});
+
+test('isContact geeft null bij een onbekend resultaat, niet true en niet false', () => {
+  // Drie uitkomsten, geen twee. Null betekent 'niet gemeten' en hoort in de
+  // blinde vlekken; stil op true zou een kaart laten archiveren op een aanname,
+  // stil op false zou iemand in de lijst houden die wél gereageerd heeft.
+  assert.equal(isContact({ soort: 'call', richting: 'uit', resultaat: 'gesproken' }), true);
+  assert.equal(isContact({ soort: 'call', richting: 'uit', resultaat: 'niet opgenomen' }), false);
+  assert.equal(isContact({ soort: 'call', richting: 'uit', resultaat: 'iets nieuws' }), null);
+  assert.equal(isContact({ soort: 'call', richting: 'uit', resultaat: null }), null);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HET RAPPORT SCHRIJFT OVER HET WERK, NIET OVER DE PERSOON
+// ═══════════════════════════════════════════════════════════════════════════
+// Het heette 'Dagrapport — Dave Heylen' en oordeelde in woorden die over een
+// mens gaan: nalatigheid, te weinig moeite. Maxims regel: het is een overzicht
+// van de opvolging van leads en van de sales, en de naam mag eruit zodat
+// niemand zich aangevallen voelt. De namen van de LEADS blijven staan — dat is
+// de inhoud van het rapport.
+
+test('geen enkele bevinding draagt het woord nalatigheid of moeite', () => {
+  const labels = Object.values(JSON.parse(
+    JSON.stringify(BRON.match(/const BEVINDING_SOORTEN = \{[\s\S]*?\n\};/)[0]
+      .match(/label: '[^']+'/g).map((x) => x.slice(8, -1))),
+  ));
+  for (const l of labels) {
+    assert.doesNotMatch(l, /MOEITE/, 'moeite is een eigenschap van een mens: ' + l);
+  }
+  assert.ok(labels.includes('TE WEINIG POGINGEN'), 'pogingen zijn rijen met een tijdstempel');
+  assert.doesNotMatch(BRON, /ernst: 'nalatigheid'/, 'nalatigheid is een oordeel over een mens');
+});
+
+test('de bevindingteksten nemen de LEAD als onderwerp, niet de verkoper', () => {
+  // Elke sjabloon-tekst begint met de naam van de lead of met een aantal, en
+  // nergens met een handelende persoon.
+  const teksten = BRON.match(/tekst: `[^`]+`/g) || [];
+  assert.ok(teksten.length >= 8, 'er horen bevindingteksten te zijn');
+  for (const t of teksten) {
+    assert.doesNotMatch(t, /\bDave\b/i, t);
+    assert.doesNotMatch(t, /\bhij (belde|liet|vergat|deed)\b/i, t);
+  }
 });
