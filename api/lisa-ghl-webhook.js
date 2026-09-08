@@ -72,7 +72,17 @@ export default async function handler(req, res) {
       // BP3 (2026-09-02) — GHL Custom Data 'Message Id' + 'Message Attachments'
       // worden nu via customData meegestuurd. Val terug op body.message.id /
       // body.messageId voor backward-compat.
-      messageId: customData.messageId || body.message?.id || body.messageId,
+      // 2026-09-07: extra fallbacks toegevoegd (body.id, body.contact?.lastMessageId)
+      // omdat sommige GHL-webhook-varianten (bv. legacy custom-webhook zonder
+      // 'Message Id' in Custom Data) de id op andere plekken hangen. Bewijs:
+      // een tweede inbound-insert voor dezelfde message kwam binnen zonder
+      // customData.messageId → ghl_message_id NULL → dedup mislukt.
+      messageId: customData.messageId
+        || body.message?.id
+        || body.messageId
+        || body.id
+        || body.contact?.lastMessageId
+        || null,
       attachments: customData.attachments != null ? customData.attachments
         : (body.message?.attachments != null ? body.message.attachments : body.attachments),
       message: customData.message || body.message?.body || (typeof body.message === 'string' ? body.message : null),
@@ -95,6 +105,21 @@ export default async function handler(req, res) {
     // bericht (foto, reel, sticker, story-reply, voice). Alleen skippen als
     // er GEEN contactId is (dan kunnen we het bericht nergens aan hangen).
     if (!contactId) return res.status(200).json({ skipped: 'missing_contact_id' });
+
+    // 2026-09-07: dedup-anker verplicht. Zonder ghl_message_id kunnen webhook
+    // en poll niet dedupereren — een tweede fire van dezelfde message zou
+    // een duplicaat opleveren (bewezen: conv 7611d2b7, "Ik ben zelf PAS
+    // actief.", 2 rijen 3s uit elkaar, één met id, één met NULL).
+    // Beter een gemiste dan een duplicaat: de poll-cron (elke 15 min) haalt
+    // het bericht alsnog uit /conversations/{id}/messages met de correcte id
+    // en insert 'em daar; dedup werkt dan wél via de partial UNIQUE index.
+    if (!messageId) {
+      await logWebhookError('missing_message_id — poll pakt op');
+      return res.status(200).json({
+        ok: true, skipped: 'no_message_id',
+        note: 'poll-cron ingest deze inbound alsnog met correcte ghl_message_id',
+      });
+    }
     // resolveContent() geeft altijd { message_type <whitelist>, content <niet-leeg>,
     // attachment_url <string|null> }. Attachments-input komt uit customData
     // (Message Attachments) én de standaard-body-paden als fallback.
