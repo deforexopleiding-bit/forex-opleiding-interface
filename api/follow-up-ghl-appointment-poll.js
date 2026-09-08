@@ -48,47 +48,91 @@ export default async function handler(req, res) {
     if (calendarIds.length === 0) {
       console.warn('[follow-up-ghl-poll] geen actieve calendars gevonden (of calendars-list faalde)');
     }
-    let events = [];
-    // 2026-09-08: paginatie-truncatie-detectie voor safety-gate (PR A).
-    // GHL /calendars/events returnt default ~100 events per call zonder cursor-
-    // handling in deze code. Als een agenda exact ~100 events oplevert, is de
-    // response HOOGSTWAARSCHIJNLIJK afgekapt en missen we events erna. In dat
-    // geval mag ghost-cleanup + auto-resolve NIET draaien (zou latere weken
-    // ten onrechte op 'wacht_op_reschedule' zetten). PR B lost dit definitief
-    // op met echte paginatie; PR A is de bloeding-stop.
-    const TRUNCATION_THRESHOLD = 99;  // GHL default ~100, marge 1 voor edge-cases
+    // 2026-09-08 (PR B — paginatie via date-chunking):
+    // GHL /calendars/events heeft geen native cursor/nextPageToken en returnt
+    // default ~100 events per call. Bij >100 events per agenda in het 30d-
+    // window werd de rest gemist → ghost-cleanup flipte legitieme toekomstige
+    // calls op 'wacht_op_reschedule'.
+    // Fix: hak het 30d-window in chunks van 7 dagen zodat per fetch << 100
+    // events opgeleverd worden (kennismakings-agenda ~50/week piek). Dedup
+    // op event.id voor de zeldzame boundary-hits.
+    //
+    // PR A safety-gate blijft actief als vangnet: als ondanks chunking toch
+    // een chunk >= 99 events oplevert (extreem druk boekingsschema), wordt
+    // calendarsLikelyTruncated++ en slaan ghost-cleanup + auto-resolve alsnog
+    // over. Twee lagen defensie.
+    const CHUNK_DAYS = 7;
+    const chunks = [];
+    for (let cursor = startDate.getTime(); cursor < endDate.getTime(); cursor += CHUNK_DAYS * 86400000) {
+      const chunkEnd = Math.min(cursor + CHUNK_DAYS * 86400000, endDate.getTime());
+      chunks.push({ startMs: cursor, endMs: chunkEnd });
+    }
+    const eventsById = new Map();  // dedup + pas laatste versie toe bij boundary-overlap
+    // Safety-gate tracking (PR A) — nu op chunk-niveau i.p.v. calendar-niveau,
+    // want met chunking is truncatie per-chunk het beter signaal.
+    const TRUNCATION_THRESHOLD = 99;
     let calendarsLikelyTruncated = 0;
-    const calendarFetchCounts = [];
+    const chunkFetchCounts = [];
+    // Diagnostiek voor eerste run — laat één keer de response-shape zien
+    // zodat we later exact weten of GHL cursor-fields levert.
+    let shapeLogged = false;
     for (const calId of calendarIds) {
-      const url = new URL(`${GHL_API_BASE}/calendars/events`);
-      url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
-      url.searchParams.set('calendarId', calId);
-      url.searchParams.set('startTime',  String(startDate.getTime()));
-      url.searchParams.set('endTime',    String(endDate.getTime()));
-      try {
-        const ghlRes = await fetch(url.toString(), {
-          headers: { Authorization: `Bearer ${process.env.GHL_API_KEY}`, Version: '2021-04-15' },
-        });
-        if (!ghlRes.ok) {
-          const errText = await ghlRes.text().catch(() => '');
-          console.error('[follow-up-ghl-poll] GHL events fout voor calendar', calId, ghlRes.status, (errText || '').slice(0, 200));
-          continue; // fail-soft per agenda — één stukke agenda mag de rest niet blokkeren
+      for (const ch of chunks) {
+        const url = new URL(`${GHL_API_BASE}/calendars/events`);
+        url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
+        url.searchParams.set('calendarId', calId);
+        url.searchParams.set('startTime',  String(ch.startMs));
+        url.searchParams.set('endTime',    String(ch.endMs));
+        url.searchParams.set('limit',      '200');  // hint; GHL kan 'em negeren
+        try {
+          const ghlRes = await fetch(url.toString(), {
+            headers: { Authorization: `Bearer ${process.env.GHL_API_KEY}`, Version: '2021-04-15' },
+          });
+          if (!ghlRes.ok) {
+            const errText = await ghlRes.text().catch(() => '');
+            console.error('[follow-up-ghl-poll] GHL events fout',
+              'calendar:', calId, 'chunk:', new Date(ch.startMs).toISOString().slice(0, 10),
+              'status:', ghlRes.status, (errText || '').slice(0, 200));
+            continue;
+          }
+          const json = await ghlRes.json();
+          if (!shapeLogged) {
+            console.log('[follow-up-ghl-poll] response-shape diagnostiek (eerste chunk):',
+              'keys:', Object.keys(json || {}),
+              'total:', json?.total, 'count:', json?.count,
+              'pagination:', JSON.stringify(json?.pagination || null),
+              'meta:', JSON.stringify(json?.meta || null));
+            shapeLogged = true;
+          }
+          const evs = json.events || json.data || [];
+          for (const e of evs) {
+            if (!e.calendarId) e.calendarId = calId;
+            if (e.id) eventsById.set(e.id, e);  // dedup op id
+          }
+          // PR A safety-gate op chunk-niveau: elke chunk die >= 99 events
+          // levert is verdacht afgekapt. Ghost-cleanup + auto-resolve worden
+          // dan overgeslagen (vangnet naast paginatie).
+          chunkFetchCounts.push({ calId, chunk: new Date(ch.startMs).toISOString().slice(0, 10), count: evs.length });
+          if (evs.length >= TRUNCATION_THRESHOLD) {
+            calendarsLikelyTruncated++;
+            console.warn('[follow-up-ghl-poll] chunk mogelijk afgekapt (>= threshold)',
+              'calendar:', calId, 'chunk:', new Date(ch.startMs).toISOString().slice(0, 10),
+              'events:', evs.length);
+          }
+        } catch (e) {
+          console.warn('[follow-up-ghl-poll] events-fetch exception',
+            'calendar:', calId, 'chunk:', new Date(ch.startMs).toISOString().slice(0, 10),
+            e?.message || e);
         }
-        const json = await ghlRes.json();
-        const evs = json.events || json.data || [];
-        for (const e of evs) { if (!e.calendarId) e.calendarId = calId; }
-        events = events.concat(evs);
-        calendarFetchCounts.push({ calId, count: evs.length });
-        if (evs.length >= TRUNCATION_THRESHOLD) calendarsLikelyTruncated++;
-      } catch (e) {
-        console.warn('[follow-up-ghl-poll] events-fetch exception voor calendar', calId, e?.message || e);
       }
     }
+    const events = Array.from(eventsById.values());
+    console.log('[follow-up-ghl-poll] events opgehaald (dedup):', events.length,
+      'over', calendarIds.length, 'calendars ×', chunks.length, 'chunks');
     if (calendarsLikelyTruncated > 0) {
       console.warn('[follow-up-ghl-poll] TRUNCATIE-VERDENKING:',
-        calendarsLikelyTruncated, 'van', calendarIds.length,
-        'agenda(s) leverde >=', TRUNCATION_THRESHOLD, 'events op.',
-        'Detail:', JSON.stringify(calendarFetchCounts));
+        calendarsLikelyTruncated, 'chunk(s) leverde >=', TRUNCATION_THRESHOLD, 'events op.',
+        'Detail:', JSON.stringify(chunkFetchCounts));
     }
 
     // Haal Dave's upcoming Zoom-meetings op (graceful: lege array bij fout)
