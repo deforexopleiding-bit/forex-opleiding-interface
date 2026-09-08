@@ -93,9 +93,13 @@ export default async function handler(req, res) {
 
     // 3) Vragen bijwerken (bestaande id) of aanmaken (geen/onbekende id).
     for (const v of genormaliseerd) {
+      // LET OP: website_quiz_questions heeft GEEN updated_at-kolom (anders dan
+      // website_quizzes). Een updated_at meesturen liet PostgREST met PGRST204
+      // ("column not found") falen, waardoor élke vraag-upsert crashte en de
+      // hele werk-versie niet werd opgeslagen. Daarom hier bewust weggelaten.
       const rij = {
         quiz_id: quiz.id, order_index: v.order_index, label: v.label,
-        options: v.options, active: v.active, updated_at: new Date().toISOString(),
+        options: v.options, active: v.active,
       };
       if (v.id && huidigeIds.has(v.id)) {
         const { error } = await supabaseAdmin.from('website_quiz_questions').update(rij).eq('id', v.id);
