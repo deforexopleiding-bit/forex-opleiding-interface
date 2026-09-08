@@ -9,6 +9,7 @@
 // Raakt de oude GHL-flow niet: puur tekst-builders, geen DB-writes.
 
 import { wrapEmailHtml } from '../mailer.js';
+import { mdToHtml } from './md-to-html.js';
 
 const ZONE = 'Europe/Amsterdam';
 
@@ -38,10 +39,13 @@ export function bevestigingMail({ voornaam, titel, datum, starttijd, locatie, de
   const naam = voornaam || 'jij';
   const ev = titel || 'het event';
   const subject = `Je plek voor ${ev} staat nu definitief vast ✅`;
-  const extra = descriptionMd && String(descriptionMd).trim()
-    ? `\n\nMeer praktische info:\n${String(descriptionMd).trim()}`
-    : '';
-  const text =
+  const heeftInfo = !!(descriptionMd && String(descriptionMd).trim());
+  const info = heeftInfo ? String(descriptionMd).trim() : '';
+
+  // Kern (t/m "…in de gaten.") en afsluiting apart, zodat het description_md-
+  // blok ertussen kan met een EIGEN opmaakpad: plain-text houdt de ruwe tekst,
+  // maar in de HTML-mail zetten we de Markdown netjes om (geen zichtbare ** / -).
+  const body1 =
 `Hoi ${naam},
 
 Top — je vragenlijst is binnen en daarmee staat je plek voor de ${ev} op ${datum} nu definitief vast! 🎉
@@ -57,11 +61,19 @@ In de bijlage vind je alle praktische info: de routebeschrijving naar de locatie
 
 Let op: je kunt vanaf ${starttijd} binnenwandelen. We starten de masterclass stipt 30 minuten later, dus zorg dat je op tijd binnen bent zodat je niets mist.
 
-De komende dagen sturen we je een paar berichten om je optimaal voor te bereiden, zodat je er straks maximaal uithaalt. Hou je WhatsApp dus in de gaten.${extra}
+De komende dagen sturen we je een paar berichten om je optimaal voor te bereiden, zodat je er straks maximaal uithaalt. Hou je WhatsApp dus in de gaten.`;
+  const body2 = `Tot snel!\nTeam De Forex Opleiding`;
 
-Tot snel!
-Team De Forex Opleiding`;
-  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text)) };
+  const text = body1
+    + (heeftInfo ? `\n\nMeer praktische info:\n${info}` : '')
+    + `\n\n${body2}`;
+
+  const html = wrapEmailHtml(subject,
+    tekstNaarHtml(body1)
+    + (heeftInfo ? `<p><strong>Meer praktische info:</strong></p>\n${mdToHtml(info)}` : '')
+    + tekstNaarHtml(body2));
+
+  return { subject, text, html };
 }
 
 // ── 2) Warmup (~120u) — rapport A.2 ─────────────────────────────────────────
