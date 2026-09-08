@@ -415,10 +415,130 @@ export default async function handler(req, res) {
       console.log(`[follow-up-ghl-poll] ${resolvedCount} wacht_op_reschedule auto-resolved`);
     }
 
+    // ── 2026-09-08 (PR C) — REVERSE HEAL: herstel eerder onterecht geflipte rijen ──
+    // Vereist een compleet events-beeld (PR B paginatie + PR A safety-gate).
+    // Voor rijen die momenteel op 'wacht_op_reschedule' staan maar wier
+    // ghl_appointment_id NU wél weer in de events voorkomt: terug naar
+    // 'scheduled'. Idem voor de secundaire slachtoffers (status='cancelled'
+    // met audit-reason "Klant heeft nieuwe afspraak ingepland" via
+    // follow_up_events_log.event_type='appointment_auto_resolved') sinds
+    // 2026-09-04 — die zijn identificeerbaar via de audit-log.
+    //
+    // Self-heal: elke poll-run pikt eventuele misgeflipte rijen op zodra
+    // de fetch compleet is. Idempotent — een rij die correct 'cancelled' is
+    // geworden om andere redenen wordt niet geraakt (audit-log filter).
+    let reverseHealedGhosts = 0;
+    let reverseHealedResolved = 0;
+    // Alleen doorgaan als de events-lijst betrouwbaar is. Zonder PR A gate
+    // is calendarsLikelyTruncated undefined → check op !== true zodat 't
+    // niet blocked wordt (dan is fetch al pagineerd via PR B).
+    if (events.length > 0 && typeof calendarsLikelyTruncated !== 'undefined' && calendarsLikelyTruncated > 0) {
+      console.warn('[follow-up-ghl-poll] REVERSE HEAL overgeslagen — truncatie-verdenking');
+    } else if (events.length > 0) {
+      const ghlIdsForHeal = new Set(events.map(e => e.id));
+
+      // Fase 1: wacht_op_reschedule rijen die weer in GHL zichtbaar zijn.
+      const { data: waitingRows } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id, ghl_appointment_id, lead_name, scheduled_at')
+        .eq('status', 'wacht_op_reschedule')
+        .not('ghl_appointment_id', 'is', null)
+        .gte('scheduled_at', startDate.toISOString())
+        .lt('scheduled_at', endDate.toISOString());
+      const healable = (waitingRows || []).filter(r => ghlIdsForHeal.has(r.ghl_appointment_id));
+      for (const row of healable) {
+        const { error: updErr } = await supabaseAdmin
+          .from('follow_up_appointments')
+          .update({ status: 'scheduled', updated_at: new Date().toISOString() })
+          .eq('id', row.id)
+          .eq('status', 'wacht_op_reschedule');  // race-guard
+        if (updErr) {
+          console.error('[follow-up-ghl-poll] reverse-heal update failed:', row.id, updErr?.message);
+          continue;
+        }
+        await supabaseAdmin.from('follow_up_events_log').insert({
+          source: 'cron',
+          event_type: 'appointment_reverse_healed',
+          payload: {
+            appointment_id: row.id,
+            ghl_appointment_id: row.ghl_appointment_id,
+            lead_name: row.lead_name,
+            scheduled_at: row.scheduled_at,
+            from_status: 'wacht_op_reschedule',
+            to_status: 'scheduled',
+            reason: 'GHL levert event nu weer — eerdere ghost-flip was foutief',
+          },
+          processed: true,
+        });
+        reverseHealedGhosts++;
+      }
+
+      // Fase 2: auto-resolve-slachtoffers ('cancelled' met audit-marker).
+      // Beperk tot flips van na 2026-09-04 zodat we niet oude legitieme
+      // cancels aanraken. Cap op 500 audit-log rijen per run (typisch veel
+      // minder; guard tegen timeout).
+      const { data: autoResolvedLog } = await supabaseAdmin
+        .from('follow_up_events_log')
+        .select('payload')
+        .eq('event_type', 'appointment_auto_resolved')
+        .gte('created_at', '2026-09-04T00:00:00Z')
+        .limit(500);
+      const autoResolvedApptIds = [...new Set(
+        (autoResolvedLog || [])
+          .map(l => l.payload?.appointment_id)
+          .filter(Boolean)
+      )];
+      if (autoResolvedApptIds.length > 0) {
+        const { data: candidates } = await supabaseAdmin
+          .from('follow_up_appointments')
+          .select('id, ghl_appointment_id, lead_name, scheduled_at, status')
+          .in('id', autoResolvedApptIds)
+          .eq('status', 'cancelled')
+          .not('ghl_appointment_id', 'is', null);
+        for (const row of (candidates || [])) {
+          if (!ghlIdsForHeal.has(row.ghl_appointment_id)) continue;
+          const { error: updErr } = await supabaseAdmin
+            .from('follow_up_appointments')
+            .update({ status: 'scheduled', updated_at: new Date().toISOString() })
+            .eq('id', row.id)
+            .eq('status', 'cancelled');  // race-guard
+          if (updErr) {
+            console.error('[follow-up-ghl-poll] reverse-heal (auto-resolve) update failed:', row.id, updErr?.message);
+            continue;
+          }
+          await supabaseAdmin.from('follow_up_events_log').insert({
+            source: 'cron',
+            event_type: 'appointment_reverse_healed',
+            payload: {
+              appointment_id: row.id,
+              ghl_appointment_id: row.ghl_appointment_id,
+              lead_name: row.lead_name,
+              scheduled_at: row.scheduled_at,
+              from_status: 'cancelled',
+              to_status: 'scheduled',
+              reason: 'GHL levert event nu weer — auto-resolve flip was foutief',
+              via: 'auto_resolved_backfill',
+            },
+            processed: true,
+          });
+          reverseHealedResolved++;
+        }
+      }
+      if (reverseHealedGhosts + reverseHealedResolved > 0) {
+        console.log(`[follow-up-ghl-poll] REVERSE HEAL: ${reverseHealedGhosts} ghosts + ${reverseHealedResolved} auto-resolved teruggezet op scheduled`);
+      }
+    }
+
     const ok     = results.filter(r => r.ok).length;
     const failed = results.filter(r => !r.ok && !r.skipped).length;
     console.log(`[follow-up-ghl-poll] ${ok} gesynchroniseerd, ${failed} mislukt van ${events.length} events`);
-    return res.status(200).json({ synced: ok, failed, total: events.length, ghosts: ghostsHandled, resolved: resolvedCount, results });
+    return res.status(200).json({
+      synced: ok, failed, total: events.length,
+      ghosts: ghostsHandled, resolved: resolvedCount,
+      reverse_healed_ghosts: reverseHealedGhosts,
+      reverse_healed_auto_resolved: reverseHealedResolved,
+      results,
+    });
   } catch (err) {
     console.error('[follow-up-ghl-poll] onverwachte fout:', err.message);
     return res.status(500).json({ error: err.message });
