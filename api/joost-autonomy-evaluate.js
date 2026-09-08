@@ -86,9 +86,13 @@
 //   abonnement_pauze / abonnement_stop / kwijtschelding: {enabled, requires_human_approval}
 //
 // autonomy_config.no_reply (Joost fase 2 — gespreks-pauze reminder-cron):
-//   reminder_1_hours         (int)      default 20  — uren na klant-inbound → reminder 1
+//   reminder_1_hours         (int)      default 20  — uren stil na ONS bericht → reminder 1
 //   reminder_2_hours         (int)      default 24  — uren na reminder 1     → reminder 2
 //   resume_after_hours       (int)      default 24  — uren na reminder 2     → hervat run
+//   reminder_1_template_name (string|null) — optioneel: eigen approved Meta-template
+//                                            voor R1 (neutraal, zonder bedragen).
+//                                            Niet gezet → R1 gebruikt de R2-template.
+//                                            Zie docs/whatsapp-template-opvolging-geen-reactie.md
 //   reminder_2_template_name (string|null) — naam van approved Meta-template voor R2
 //   Gelezen door: api/cron-dunning-conversation-reminders.js
 //

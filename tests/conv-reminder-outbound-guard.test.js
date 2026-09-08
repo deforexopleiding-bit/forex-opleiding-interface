@@ -1,14 +1,17 @@
 // tests/conv-reminder-outbound-guard.test.js
 //
-// Bewijst FIX B voor de no-reply-reminder bug: als WIJ recenter hebben
-// gestuurd dan de klant, mag determineStage GEEN r1/r2 returnen. Terwijl
-// een échte no-reply-situatie (klant stil, wij ook stil) wel een reminder
-// blijft opleveren. Pure unit-tests op determineStage — geen DB, geen HTTP.
+// Unit-tests op determineStage — geen DB, geen HTTP.
 //
-// Achtergrond: de reminder-tekst zegt "nog geen reactie van jou gekregen".
-// Als wij intussen wél hebben geantwoord (via inbox-send) is dat onwaar en
-// verwarrend voor de klant. Fix A ontpauzeert de run direct bij een send;
-// deze test dekt fix B als vangnet in de cron zelf.
+// De reminder-tekst zegt "nog geen reactie van jou gekregen". Die zin mag
+// alleen weg als wíj als laatste iets hebben gezegd. Twee regels:
+//   1. Is het laatste bericht in de draad van de klant en onbeantwoord, dan
+//      gaat er geen herinnering uit — de bal ligt bij ons.
+//   2. Anders loopt de klok vanaf ONS laatste uitgaande bericht.
+//
+// Regel 1 geldt ook voor het HERVATTEN ('rz'). Dat is geen herinnering, maar
+// het zet de aanmaanladder wél weer in beweging — bovenop een onbeantwoord
+// bericht van de klant, wat precies het gedrag is dat deze fix moet stoppen.
+// Zie het scenario onderaan dit bestand.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -71,7 +74,7 @@ test('count=1: r1 verstuurd 30u geleden, wij handmatig antwoord 5u geleden → G
 
 // ── SCENARIO 2: terecht — niemand heeft gereageerd ────────────────────
 
-test('count=0: klant stuurde 25u geleden, geen outbound → WEL r1 (terecht)', () => {
+test('count=0: klant stuurde 25u geleden, wij hebben nooit iets gestuurd → GEEN r1', () => {
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 25 * HOUR).toISOString(),
@@ -79,12 +82,14 @@ test('count=0: klant stuurde 25u geleden, geen outbound → WEL r1 (terecht)', (
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  assert.equal(stage, 'r1', 'Echte no-reply moet nog gewoon reminder krijgen');
+  assert.equal(stage, null, 'zonder eigen bericht is "nog geen reactie" per definitie onwaar');
 });
 
-test('count=0: klant stuurde 25u geleden, onze outbound ouder dan inbound → WEL r1', () => {
-  // Bv. wij stuurden 40u geleden een aanmaning → klant reageerde 25u geleden →
-  // wij hebben daarna niet gereageerd. Echte no-reply-situatie.
+test('DE BUG: klant schreef als laatste en kreeg geen antwoord → GEEN r1', () => {
+  // Precies conversatie c7e20f96-f02a-46b7-ac1e-a862a99ec1b5: wij stuurden
+  // 40u geleden een aanmaning, de klant reageerde 25u geleden met een vraag,
+  // en niemand antwoordde. Vóór deze fix ging hier 20u na HAAR bericht een
+  // reminder uit met "nog geen reactie van jou gekregen".
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 25 * HOUR).toISOString(),
@@ -92,7 +97,31 @@ test('count=0: klant stuurde 25u geleden, onze outbound ouder dan inbound → WE
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
+  assert.equal(stage, null, 'de bal ligt bij ons — dit hoort op een werklijst, niet in een automaat');
+});
+
+test('DE KLOK: klant zweeg na ONS bericht → r1 op reminder_1_hours ná ons bericht', () => {
+  // Wij stuurden 21u geleden, de klant reageerde daarvóór (30u geleden) en is
+  // sindsdien stil. Nu is het een echte no-reply en telt de klok vanaf ons.
+  const stage = determineStage({
+    run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
+    convLastInboundAt: new Date(NOW - 30 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 21 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
   assert.equal(stage, 'r1');
+});
+
+test('DE KLOK: ons bericht 19u oud → nog te vroeg, ook al zweeg de klant al dagen', () => {
+  const stage = determineStage({
+    run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
+    convLastInboundAt: new Date(NOW - 96 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 19 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, null, '19u < reminder_1_hours 20 — de klok loopt vanaf ons bericht');
 });
 
 test('count=1: r1 verstuurd 26u geleden, geen inbound & geen latere outbound → WEL r2', () => {
@@ -111,9 +140,9 @@ test('count=1: r1 verstuurd 26u geleden, geen inbound & geen latere outbound →
 
 // ── EDGE CASES ────────────────────────────────────────────────────────
 
-test('count=0: geen outbound-info doorgegeven → gedrag valt terug op oud (alleen inbound-check)', () => {
-  // Als de cron de outbound-query mist (fail-soft), moet 'ie NIET stuk gaan.
-  // Gedrag is dan hetzelfde als vóór fix B: reminder gaat af op inbound-timing.
+test('geen outbound-info doorgegeven → fail-closed, geen reminder', () => {
+  // Als de cron de outbound-query mist (fail-soft), mag er geen reminder uit:
+  // zonder ons eigen bericht is er geen klok en kunnen we niets beweren.
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 25 * HOUR).toISOString(),
@@ -121,7 +150,7 @@ test('count=0: geen outbound-info doorgegeven → gedrag valt terug op oud (alle
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  assert.equal(stage, 'r1');
+  assert.equal(stage, null);
 });
 
 test('count=0: klant net gereageerd (5u geleden), wij nog niet → nog te vroeg (null)', () => {
@@ -182,8 +211,8 @@ test('BUG 1 FIX: count=0 + inbound 25u geleden + outbound 24.5u geleden → r1 m
   assert.equal(stage, 'r1');
 });
 
-test('BUG 1 FIX: count=0 + inbound 25u geleden + outbound 23u geleden → guard actief (binnen drempel)', () => {
-  // Binnen de drempel — mens heeft nog tijd, cirkel wacht.
+test('inbound 25u + onze outbound 23u geleden → r1, want de klok loopt vanaf ons', () => {
+  // Wij antwoordden ná de klant en zij bleef stil. 23u >= reminder_1_hours 20.
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
@@ -191,7 +220,7 @@ test('BUG 1 FIX: count=0 + inbound 25u geleden + outbound 23u geleden → guard 
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  assert.equal(stage, null, '23u < 24u drempel → nog binnen "wij hebben net gereageerd"-venster');
+  assert.equal(stage, 'r1');
 });
 
 test('BUG 1 FIX: configureerbaar — drempel op 48u → outbound 20u geleden nog binnen guard', () => {
@@ -210,16 +239,19 @@ test('BUG 1 FIX: configureerbaar — drempel op 48u → outbound 20u geleden nog
   assert.equal(stage, null, 'met 48u-drempel is 20u-oude outbound nog binnen guard');
 });
 
-test('BUG 1 FIX: drempel 0 → guard uitgeschakeld → altijd door (nog steeds r1 na tijd)', () => {
+test('suppress_reminder_after_outbound_hours wordt niet meer gelezen', () => {
+  // De oude guard is overbodig geworden: de klok loopt nu zelf vanaf ons
+  // laatste bericht, dus "wij hebben net gereageerd" is per constructie al
+  // afgedekt. De key mag in de config blijven staan; hij stuurt niets aan.
   const cfg = { ...DEFAULT_CFG, suppress_reminder_after_outbound_hours: 0 };
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // net gestuurd
+    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // wij net gestuurd
     noReplyCfg: cfg,
     nowMs: NOW,
   });
-  assert.equal(stage, 'r1', 'drempel 0 → outbound-recency is irrelevant');
+  assert.equal(stage, null, '1u sinds ons bericht → nog lang niet aan de beurt');
 });
 
 test('BUG 1 FIX: klant reageerde NA r1 blijft blocker (reply-respect is ONVERANDERD)', () => {
@@ -239,7 +271,7 @@ test('BUG 1 FIX: klant reageerde NA r1 blijft blocker (reply-respect is ONVERAND
   assert.equal(stage, null, 'inbound > lastReminder → altijd null, ongeacht outbound-tijd');
 });
 
-test('count=2: rz onaangeroerd door outbound-guard (resume is puur timing)', () => {
+test('count=2: hebben WIJ als laatste gesproken, dan hervat rz gewoon op timing', () => {
   const stage = determineStage({
     run: {
       paused_conversation_reminder_count: 2,
@@ -250,6 +282,86 @@ test('count=2: rz onaangeroerd door outbound-guard (resume is puur timing)', () 
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  // rz is een resume-actie (geen send), dus outbound-guard geldt niet.
+  // Het laatste bericht is van ons (1u geleden) en de klant zweeg daarna al
+  // 50 uur — de bal ligt bij de klant. Hervatten mag, puur op timing.
   assert.equal(stage, 'rz');
+});
+
+// ── SCENARIO 4: het gat in de eerste versie van deze fix ──────────────
+//
+// De eerste versie liet 'rz' met opzet ongemoeid: bij een onbeantwoord gesprek
+// zou de teller nooit op 2 komen, want dan vertrekt r1 al niet. Dat klopt
+// alleen als de klant de héle tijd stil blijft. Deze vier tests spelen het
+// scenario na waarin dat niet zo is.
+
+test('DE GAT-CASE: r1, r2, dan een onbeantwoord klantbericht → GEEN hervatting', () => {
+  // Tijdlijn:
+  //   T-72u  ons laatste bericht (de aanmaning)
+  //   T-52u  r1 gaat uit
+  //   T-28u  r2 gaat uit           -> teller staat op 2
+  //   T-3u   de klant schrijft iets. Niemand antwoordt.
+  //   nu     28u na r2, dus ruim voorbij resume_after_hours (24u)
+  //
+  // Vóór deze fix: 'rz' -> unpauseRunsForConversation -> de aanmaanladder
+  // loopt verder bovenop een onbeantwoorde vraag van de klant.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 28 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 3  * HOUR).toISOString(), // klant, onbeantwoord
+    convLastOutboundAt: new Date(NOW - 28 * HOUR).toISOString(), // r2, ouder dan de inbound
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz_blocked', 'de run moet gepauzeerd blijven tot een mens antwoordt');
+});
+
+test('de blokkade is een stop, geen uitstel — ook weken later niet hervatten', () => {
+  // Er is geen timer die dit alsnog laat gebeuren: alleen een uitgaand bericht
+  // van ons haalt de blokkade weg.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 600 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 500 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 600 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz_blocked');
+});
+
+test('zodra een mens antwoordt is de blokkade weg', () => {
+  // Zelfde run als de gat-case, maar nu heeft een medewerker gereageerd op het
+  // bericht van de klant. De bal ligt weer bij de klant, dus hervatten mag.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 28 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 3 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // medewerker antwoordde
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz', 'na menselijke opvolging hervat de ladder weer');
+});
+
+test('rz_blocked wint van de timing-check: te vroeg én bal bij ons blijft geblokkeerd', () => {
+  // Volgorde in de code: eerst de bal-check, dan de timer. Anders zou een run
+  // die nog "te vroeg" is als NOT_DUE_YET in de log komen en zou niemand zien
+  // dat er een onbeantwoord bericht ligt.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 5 * HOUR).toISOString(),
+    },
+    convLastInboundAt:  new Date(NOW - 1 * HOUR).toISOString(),
+    convLastOutboundAt: new Date(NOW - 5 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
+  assert.equal(stage, 'rz_blocked');
 });
