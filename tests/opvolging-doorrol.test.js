@@ -17,17 +17,21 @@ import {
 } from '../api/_lib/opvolging-doorrol.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// DOORROLLEN — 23:59
+// DOORROLLEN — NAAR VANDAAG
 // ═══════════════════════════════════════════════════════════════════════════
 
-const MORGEN = '2026-09-05';
+// De huidige Amsterdamse datum. Heette hier eerst VANDAAG, en die naam wás de
+// bug: de cron draait om 01:59 Amsterdamse tijd, dus 'morgen' wees een dag te
+// ver en elke openstaande kaart sloeg een dag over. Zie
+// tests/opvolging-doorrol-vandaag.test.js voor de meting.
+const VANDAAG = '2026-09-05';
 const taak = (over) => ({ id: 't1', status: 'open', due: '2026-09-04', later: false, ...over });
-const rol = (taken) => bepaalDoorrol({ taken, morgen: MORGEN });
+const rol = (taken) => bepaalDoorrol({ taken, vandaag: VANDAAG });
 
-test('wat vandaag bleef liggen staat morgen terug', () => {
+test('wat gisteren bleef liggen staat vandaag terug', () => {
   const uit = rol([taak()]);
   assert.equal(uit.length, 1);
-  assert.deepEqual(uit[0], { id: 't1', patch: { due: MORGEN, later: false } });
+  assert.deepEqual(uit[0], { id: 't1', patch: { due: VANDAAG, later: false } });
 });
 
 test('de tweede ronde wordt losgelaten, anders blijft hij daar eeuwig staan', () => {
@@ -40,13 +44,13 @@ test('de tweede ronde wordt losgelaten, anders blijft hij daar eeuwig staan', ()
 
 test('een taak die al veel langer ligt rolt ook door', () => {
   const uit = rol([taak({ due: '2026-06-01' })]);
-  assert.equal(uit[0].patch.due, MORGEN);
+  assert.equal(uit[0].patch.due, VANDAAG);
 });
 
 test('wat de gebruiker zelf vooruit zette blijft staan', () => {
   // Een taak die bewust op volgende week is gezet mag deze cron nooit naar
   // morgen trekken — dan zou doorschuiven zinloos worden.
-  assert.deepEqual(rol([taak({ due: MORGEN })]), []);
+  assert.deepEqual(rol([taak({ due: VANDAAG })]), []);
   assert.deepEqual(rol([taak({ due: '2026-09-20' })]), []);
 });
 
@@ -61,22 +65,22 @@ test('rommel wordt overgeslagen in plaats van doorgegeven', () => {
   assert.deepEqual(uit.map((x) => x.id), ['goed']);
 });
 
-test('zonder geldige morgen-datum gebeurt er niets', () => {
+test('zonder geldige datum gebeurt er niets', () => {
   // Liever niets doen dan elke taak op een onzin-datum zetten: dat laatste
   // haalt de hele lijst in één nacht onderuit.
   for (const m of [null, '', 'morgen', '2026-9-5']) {
-    assert.deepEqual(bepaalDoorrol({ taken: [taak()], morgen: m }), [], String(m));
+    assert.deepEqual(bepaalDoorrol({ taken: [taak()], vandaag: m }), [], String(m));
   }
 });
 
 test('een lege of ontbrekende lijst levert een lege lijst', () => {
-  assert.deepEqual(bepaalDoorrol({ taken: [], morgen: MORGEN }), []);
-  assert.deepEqual(bepaalDoorrol({ taken: null, morgen: MORGEN }), []);
+  assert.deepEqual(bepaalDoorrol({ taken: [], vandaag: VANDAAG }), []);
+  assert.deepEqual(bepaalDoorrol({ taken: null, vandaag: VANDAAG }), []);
 });
 
 test('alleen taken die echt veranderen komen terug', () => {
   // Geen zinloze updates, en geen updated_at die verschuift zonder reden.
-  const uit = rol([taak({ id: 'a' }), taak({ id: 'b', due: MORGEN }), taak({ id: 'c', due: '2026-09-01' })]);
+  const uit = rol([taak({ id: 'a' }), taak({ id: 'b', due: VANDAAG }), taak({ id: 'c', due: '2026-09-01' })]);
   assert.deepEqual(uit.map((x) => x.id).sort(), ['a', 'c']);
 });
 
