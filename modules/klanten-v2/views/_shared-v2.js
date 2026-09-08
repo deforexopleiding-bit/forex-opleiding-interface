@@ -360,6 +360,13 @@
     // Placeholder-detectie: backend genereert [image]/[video]/[document] als
     // body leeg is. Als er ook een media_url is → gebruik die ipv de tekst.
     const isPlaceholder = /^\[(image|video|audio|voice|document|sticker|file)\]$/i.test(bodyRaw.trim());
+    // Verlopen media — cron-whatsapp-media-recovery markeert rijen als
+    // 'meta-media-expired:<id>' zodra Meta 404 (media bewaard ~30d).
+    // Toont nette tekst i.p.v. broken <img> of "kon niet geladen worden".
+    if (typeof mediaUrl === 'string' && mediaUrl.startsWith('meta-media-expired:')) {
+      const kindRaw = isPlaceholder ? bodyRaw.replace(/[\[\]]/g, '') : (mediaType || 'media');
+      return `<span style="font-style:italic;opacity:.7;font-size:12px">🕒 ${_esc(kindRaw)} verlopen bij Meta (>30 dagen)</span>`;
+    }
     if (mediaUrl && (mediaType.startsWith('image') || (isPlaceholder && /image/i.test(bodyRaw)))) {
       const caption = isPlaceholder ? '' : bodyRaw;
       return `<a href="${_esc(mediaUrl)}" target="_blank" rel="noopener" style="display:block;line-height:0">

@@ -55,6 +55,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron-whatsapp-media-recovery",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/cron-finance-sync",
       "schedule": "0 * * * *"
     },
