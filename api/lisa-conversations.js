@@ -65,7 +65,10 @@ export default async function handler(req, res) {
 
     // LIVE-lijst
     if (action === 'list_live') {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+      // BP3 (2026-09-07) — max cap verhoogd van 200 -> 500 zodat de UI het
+      // volledige poll-ingest volume kan tonen zonder gaten. Default 50 blijft
+      // voor callers die geen limit meesturen (backward-compat).
+      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 500);
       let q = supabaseAdmin.from('lisa_conversations')
         // BP3 (2026-09-02) — unread_count meesturen zodat de UI ongelezen
         // gesprekken duidelijk kan markeren.
