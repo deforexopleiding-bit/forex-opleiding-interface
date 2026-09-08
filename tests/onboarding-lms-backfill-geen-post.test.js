@@ -124,7 +124,7 @@ test('de import-afsluiting is compleet en klein genoeg om te begrijpen', () => {
   // Als dit getal ineens explodeert, is er iets binnengehaald dat er niet
   // hoort. Een pad dat 22 klanten raakt hoort overzichtelijk te zijn.
   assert.ok(AFSLUITING.has(START), 'het startbestand hoort in zijn eigen afsluiting');
-  assert.ok(AFSLUITING.size <= 8,
+  assert.ok(AFSLUITING.size <= 10,
     'de afsluiting is gegroeid naar ' + AFSLUITING.size + ' bestanden: '
     + [...AFSLUITING].join(', ') + ' — kijk na wat erbij is gekomen');
 });
@@ -220,17 +220,29 @@ test('BEWIJS 4: provisionDfoLmsStudent zelf verstuurt niets', () => {
 const BACKFILL = readFileSync(join(ROOT, START), 'utf8');
 
 test('BEWIJS 5: zonder ?uitvoeren=ja doet de inhaalslag NIETS', () => {
-  assert.match(BACKFILL, /const wilUitvoeren = String\(req\.query\?\.uitvoeren \|\| ''\) === 'ja'/,
-    'de droogloop is niet de standaard');
+  // Bewust losjes op spaties, streng op de betekenis: uitvoeren moet uit een
+  // expliciete parameter komen, en er moet een harde uitgang staan vóór er
+  // ook maar iets geschreven wordt.
+  assert.match(BACKFILL, /wilUitvoeren\s*=\s*String\(req\.query\?\.uitvoeren[^)]*\)\s*===\s*'ja'/,
+    'uitvoeren komt niet uit een expliciete ?uitvoeren=ja');
   assert.match(BACKFILL, /if \(!wilUitvoeren\) return res\.status\(200\)\.json\(result\)/,
     'er is geen harde uitgang vóór de schrijf-lus');
+
+  // En die uitgang moet ECHT vóór de lus staan, niet erna.
+  const iUitgang = BACKFILL.indexOf('if (!wilUitvoeren) return res.status(200)');
+  const iLus     = BACKFILL.indexOf('for (const regel of result.rijen)');
+  assert.ok(iUitgang > -1 && iLus > -1 && iUitgang < iLus,
+    'de uitgang staat niet vóór de schrijf-lus');
 });
 
-test('BEWIJS 6: uitvoeren vereist het getal uit de droogloop', () => {
-  // Zo kan er niets veranderd zijn tussen kijken en doen, en kan niemand dit
-  // aanzetten zonder eerst gekeken te hebben.
-  assert.match(BACKFILL, /bevestigd !== result\.zou_aanmaken/,
-    'het bevestigingsgetal wordt niet tegen de droogloop gehouden');
+test('BEWIJS 6: uitvoeren vereist BEIDE getallen uit de droogloop', () => {
+  // Twee getallen, want koppelen en aanmaken zijn verschillende acties met
+  // een verschillend risico. Zo kan er niets veranderd zijn tussen kijken en
+  // doen, en kan niemand dit aanzetten zonder eerst gekeken te hebben.
+  assert.match(BACKFILL, /bevestigKoppel === result\.zou_koppelen/,
+    'het koppel-getal wordt niet tegen de droogloop gehouden');
+  assert.match(BACKFILL, /bevestigMaak\s+=== result\.zou_aanmaken/,
+    'het aanmaak-getal wordt niet tegen de droogloop gehouden');
   assert.match(BACKFILL, /status\(409\)/,
     'een verkeerd bevestigingsgetal hoort te weigeren, niet door te lopen');
 });
@@ -242,12 +254,107 @@ test('BEWIJS 7: een klant die op naam matcht met een ander adres wordt overgesla
     'er wordt niet op naam-dubbelen gecontroleerd');
   assert.match(BACKFILL, /besluit = 'overslaan_naam_treffer'/,
     'een naam-treffer leidt niet tot overslaan');
-  assert.match(BACKFILL, /if \(regel\.besluit !== 'zou_aanmaken'\) continue;/,
+  // De schrijf-lus mag UITSLUITEND op de twee doe-besluiten afgaan. Alles wat
+  // de droogloop heeft overgeslagen blijft overgeslagen.
+  assert.match(BACKFILL, /if \(!koppelen && !maken\) continue;/,
     'de schrijf-lus filtert niet op het besluit uit de droogloop');
+  assert.match(BACKFILL, /const koppelen = regel\.besluit === 'zou_koppelen'/);
+  assert.match(BACKFILL, /const maken\s+= regel\.besluit === 'zou_aanmaken'/);
 });
 
 test('de uitkomst zegt zelf dat er geen mail uitgaat', () => {
   // Zodat wie de JSON leest het niet hoeft te geloven op basis van een
   // commit-tekst die hij niet ziet.
   assert.match(BACKFILL, /verstuurt_mail: false/);
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TESTRIJEN. Dit is geen theoretisch randgeval: de testonboarding op
+// maxim.delombaerde96+onbtest@gmail.com stond in de eerste versie gewoon
+// tussen de kandidaten — terwijl we die LMS-rij diezelfde ochtend juist
+// hadden opgeruimd. Zonder filter had de inhaalslag 'm meteen opnieuw
+// aangemaakt. Vandaar drie tests in plaats van één.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('TESTRIJEN 1: de onboarding-selectie sluit is_test uit', () => {
+  assert.match(BACKFILL, /\.eq\('is_test', false\)/,
+    'de kandidaten-query filtert niet op onboardings.is_test');
+});
+
+test('TESTRIJEN 2: ook een testKLANT wordt uitgesloten', () => {
+  // Een echte onboarding op een testklant is net zo goed een testrij. De
+  // vlag staat op beide tabellen (migratie 036 voor customers,
+  // onboardings sinds api/onboarding-counts.js:95).
+  assert.match(BACKFILL, /select\('id, first_name, last_name, email, is_test'\)/,
+    'de klanten-query haalt is_test niet op');
+  assert.match(BACKFILL, /klant\?\.is_test === true\)\s*besluit = 'overslaan_testrij'/,
+    'een testklant leidt niet tot overslaan');
+});
+
+test('TESTRIJEN 3: de testrij-check staat VOOR alle andere besluiten', () => {
+  // Volgorde doet ertoe: zou 'zou_koppelen' eerder staan, dan koppelt hij
+  // een testonboarding alsnog aan een bestaande rij.
+  const blok = BACKFILL.slice(BACKFILL.indexOf('let besluit;'));
+  const iTest    = blok.indexOf("'overslaan_testrij'");
+  const iKoppel  = blok.indexOf("'zou_koppelen'");
+  const iMaak    = blok.indexOf("'zou_aanmaken'");
+  assert.ok(iTest > -1, 'er is geen testrij-tak');
+  assert.ok(iTest < iKoppel && iTest < iMaak,
+    'de testrij-check staat niet als eerste — dan glipt een testrij er alsnog door');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KOPPELEN IS IETS ANDERS DAN AANMAKEN
+// ═══════════════════════════════════════════════════════════════════════════
+
+const STUDENT_LIB = readFileSync(join(ROOT, 'api/_lib/dfo-lms-student.js'), 'utf8');
+
+test('KOPPELEN 1: een bestaande rij op e-mail wordt GEKOPPELD, niet overgeslagen', () => {
+  // Zestien van de tweeëntwintig zitten in dit geval. Ze overslaan zou
+  // betekenen dat het mentorblok voor die zestien leeg blijft.
+  assert.match(BACKFILL, /else if \(alOpEmail\)\s+besluit = 'zou_koppelen'/,
+    'een bestaande rij op e-mail leidt niet tot koppelen');
+  assert.match(BACKFILL, /koppelBestaandeStudent\(regel\.onboarding_id, regel\.bestaat_op_email\)/,
+    'er wordt niet daadwerkelijk gekoppeld');
+});
+
+test('KOPPELEN 2: de logregel zegt WELKE van de twee er gebeurd is', () => {
+  assert.match(BACKFILL, /GEKOPPELD/, 'de logregel onderscheidt koppelen niet');
+  assert.match(BACKFILL, /AANGEMAAKT/, 'de logregel onderscheidt aanmaken niet');
+  assert.match(BACKFILL, /gekoppeld aan bestaande rij/);
+  assert.match(BACKFILL, /nieuwe studentrij aangemaakt/);
+  // En apart geteld, niet op één hoop.
+  assert.match(BACKFILL, /zou_koppelen: 0, gekoppeld: 0/);
+  assert.match(BACKFILL, /zou_aanmaken: 0, aangemaakt: 0/);
+});
+
+test('KOPPELEN 3: koppelen raakt PRECIES één kolom aan', () => {
+  // Naam, traject en aantal calls van die zestien komen uit de
+  // Bubble-migratie en mogen niet met CRM-waarden overschreven worden.
+  const fn = STUDENT_LIB.slice(STUDENT_LIB.indexOf('export async function koppelBestaandeStudent'));
+  const einde = fn.indexOf('\n}\n');
+  const body = fn.slice(0, einde);
+  const update = body.slice(body.indexOf('.update('));
+  assert.match(update, /\.update\(\{ crm_onboarding_id: onboardingId \}\)/,
+    'koppelen schrijft meer dan crm_onboarding_id');
+  for (const verboden of ['voornaam', 'achternaam', 'traject_maanden', 'calls_totaal',
+                          'mentor_id', 'product_soort', 'start_datum', 'eind_datum']) {
+    assert.ok(!update.includes(verboden),
+      'koppelen raakt ' + verboden + ' aan — dat is een Bubble-waarde en die blijft staan');
+  }
+});
+
+test('KOPPELEN 4: koppelen kapt geen rij die aan een ANDERE onboarding hangt', () => {
+  const fn = STUDENT_LIB.slice(STUDENT_LIB.indexOf('export async function koppelBestaandeStudent'));
+  assert.match(fn, /rij\.crm_onboarding_id !== onboardingId/,
+    'er is geen bescherming tegen het kapen van een gekoppelde rij');
+});
+
+test('KOPPELEN 5: de mentor-vraag wordt gemeld, niet stilletjes beantwoord', () => {
+  // Bij koppelen blijft een LMS-rij zonder mentor zonder mentor, ook als het
+  // CRM er wél een weet. Dat hoort zichtbaar te zijn in de droogloop zodat
+  // een mens erover beslist.
+  assert.match(BACKFILL, /lms_mentor_leeg/);
+  assert.match(BACKFILL, /crm_kent_mentor/);
 });

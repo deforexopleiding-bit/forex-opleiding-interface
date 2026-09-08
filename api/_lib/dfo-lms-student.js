@@ -564,3 +564,72 @@ export async function syncDfoLmsMentor(onboardingId, mentorUserId) {
     return { ok: false, error: msg };
   }
 }
+
+/**
+ * Een BESTAANDE hlms_student-rij vastknopen aan een onboarding.
+ *
+ * ── WAAROM DIT NAAST provisionDfoLmsStudent BESTAAT ──────────────────────
+ * Gemeten 8 september 2026: van de 22 lopende onboardings zonder koppeling
+ * bestaan er ZESTIEN al als hlms_student, allemaal met
+ * `herkomst='imported_from_bubble'` en allemaal met een auth-account. Die
+ * hoeven niet aangemaakt te worden — die moeten alleen gekoppeld worden.
+ *
+ * Koppelen en aanmaken zijn niet hetzelfde en mogen ook niet hetzelfde doen.
+ * De adoptie-tak in `provisionDfoLmsStudent()` vult namelijk óók `mentor_id`
+ * in als die aan LMS-kant leeg is. Voor deze inhaalslag mag dat niet: naam,
+ * traject en aantal calls van die zestien rijen komen uit de Bubble-migratie
+ * en worden NIET overschreven met CRM-waarden voordat Maxim daar apart naar
+ * gekeken heeft. Vandaar een eigen functie die precies één kolom aanraakt.
+ *
+ * Wat deze functie WEL doet:
+ *   - `hlms_student.crm_onboarding_id` zetten (en verder niets in het LMS);
+ *   - aan CRM-kant `dfo_lms_student_id` + de provisioning-vlaggen zetten,
+ *     zodat de spiegel weet dat er een studentrij is.
+ *
+ * Verstuurt niets. Geen uitnodiging, geen wachtwoord, geen bericht.
+ *
+ * @param {string} onboardingId
+ * @param {string} studentId  de bestaande hlms_student.id
+ * @returns {Promise<{ok: boolean, actie?: string, error?: string}>}
+ */
+export async function koppelBestaandeStudent(onboardingId, studentId) {
+  if (!onboardingId || !studentId) {
+    return { ok: false, error: 'onboardingId en studentId zijn beide vereist' };
+  }
+  const lms = getDfoLmsClient();
+  if (!lms) return { ok: false, error: 'dfo-lms-niet-geconfigureerd' };
+
+  try {
+    const { data: rij, error: leesErr } = await lms
+      .from('hlms_student')
+      .select('id, crm_onboarding_id, email')
+      .eq('id', studentId)
+      .maybeSingle();
+    if (leesErr) throw new Error('hlms_student lezen: ' + leesErr.message);
+    if (!rij) return { ok: false, error: 'studentrij bestaat niet (meer)' };
+
+    // Hangt 'ie al aan een ANDERE onboarding, dan kapen we 'm niet.
+    if (rij.crm_onboarding_id && rij.crm_onboarding_id !== onboardingId) {
+      return { ok: false,
+        error: 'studentrij hangt al aan onboarding ' + rij.crm_onboarding_id };
+    }
+
+    if (!rij.crm_onboarding_id) {
+      // PRECIES één kolom. Geen naam, geen traject, geen calls, geen mentor.
+      const { error } = await lms
+        .from('hlms_student')
+        .update({ crm_onboarding_id: onboardingId })
+        .eq('id', studentId)
+        // Optimistisch slot: raakt niets als een ander 'm intussen koppelde.
+        .is('crm_onboarding_id', null);
+      if (error) throw new Error('hlms_student koppelen: ' + error.message);
+    }
+
+    await markeerGekoppeld(onboardingId, studentId);
+    return { ok: true, actie: 'gekoppeld' };
+  } catch (e) {
+    const msg = e?.message || String(e);
+    console.error('[dfo-lms-student] koppelen mislukt', onboardingId, msg);
+    return { ok: false, error: msg };
+  }
+}

@@ -29,6 +29,30 @@
 // gaf. Klopt dat niet, dan weigert hij. Zo kan niemand dit per ongeluk
 // aanzetten en kan er niets veranderd zijn tussen kijken en doen.
 //
+// ── KOPPELEN IS IETS ANDERS DAN AANMAKEN ─────────────────────────────────
+// Gemeten 8 september 2026: van de 22 lopende onboardings zonder koppeling
+// bestaan er ZESTIEN al als hlms_student — allemaal `imported_from_bubble`,
+// allemaal met een auth-account. Die hoeven niet aangemaakt te worden, alleen
+// vastgeknoopt. Vijf hebben echt geen rij.
+//
+// Die twee doen dus verschillende dingen en zeggen dat ook verschillend in de
+// uitkomst (`gekoppeld` versus `aangemaakt`), want achteraf terug kunnen lezen
+// wát er met een klant gebeurd is, is het halve werk.
+//
+// Bij KOPPELEN wordt precies één kolom aangeraakt: `crm_onboarding_id`. Naam,
+// traject en aantal calls van die zestien komen uit de Bubble-migratie en
+// worden NIET overschreven met CRM-waarden. Daarom loopt koppelen via
+// `koppelBestaandeStudent()` en niet via de adoptie-tak van
+// `provisionDfoLmsStudent()` — die vult namelijk ook `mentor_id` in als die
+// leeg is, en dat is "iets anders".
+//
+// ── TESTRIJEN DOEN NIET MEE ──────────────────────────────────────────────
+// `onboardings.is_test` EN `customers.is_test` worden uitgesloten. Dat is
+// geen theorie: de testonboarding op maxim.delombaerde96+onbtest@gmail.com
+// stond in de eerste versie gewoon tussen de kandidaten, terwijl we die
+// LMS-rij diezelfde ochtend juist hadden opgeruimd. Zonder filter maakt de
+// inhaalslag 'm meteen opnieuw aan.
+//
 // ── DUBBELE KLANTEN ──────────────────────────────────────────────────────
 // Er is een klant die in beide systemen onder twee verschillende adressen
 // staat. De droogloop meldt daarom per rij drie dingen:
@@ -48,7 +72,8 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from '../_lib/dfo-lms-db.js';
-import { provisionDfoLmsStudent } from '../_lib/dfo-lms-student.js';
+import { provisionDfoLmsStudent, koppelBestaandeStudent } from '../_lib/dfo-lms-student.js';
+import { spiegelNaActie } from '../_lib/onboarding-spiegel.js';
 
 // 24 lopende onboardings vandaag; deze grens is er tegen een runaway, niet
 // tegen groei. Wordt hij geraakt, dan staat dat zichtbaar in de uitkomst.
@@ -70,8 +95,11 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const wilUitvoeren = String(req.query?.uitvoeren || '') === 'ja';
-  const bevestigd    = Number(req.query?.aantal);
+  const wilUitvoeren   = String(req.query?.uitvoeren || '') === 'ja';
+  // TWEE getallen, niet één. Koppelen en aanmaken zijn verschillende acties
+  // met een verschillend risico, dus je bevestigt ze los van elkaar.
+  const bevestigKoppel = Number(req.query?.koppelen);
+  const bevestigMaak   = Number(req.query?.aanmaken);
 
   const result = {
     ok: true,
@@ -79,9 +107,12 @@ export default async function handler(req, res) {
     // Expliciet in de uitkomst, zodat niemand hoeft te vertrouwen op een
     // belofte in een commit-tekst.
     verstuurt_mail: false,
-    bekeken: 0, zou_aanmaken: 0, aangemaakt: 0,
-    overgeslagen_bestaat_al: 0, overgeslagen_naam_treffer: 0,
-    overgeslagen_geen_email: 0, mislukt: 0,
+    bekeken: 0,
+    // Koppelen en aanmaken apart geteld — het zijn verschillende dingen.
+    zou_koppelen: 0, gekoppeld: 0,
+    zou_aanmaken: 0, aangemaakt: 0,
+    overgeslagen_al_gekoppeld: 0, overgeslagen_naam_treffer: 0,
+    overgeslagen_geen_email: 0, overgeslagen_testrij: 0, mislukt: 0,
     geraakte_limiet: 0,
     rijen: [], errors: [],
   };
@@ -97,10 +128,13 @@ export default async function handler(req, res) {
     // ── 1) De kandidaten: lopend, geen LMS-student ──────────────────────
     const { data: obs, error: obErr } = await supabaseAdmin
       .from('onboardings')
-      .select('id, customer_id, customer_name, traject_id, status, start_date, mentor_user_id')
+      .select('id, customer_id, customer_name, traject_id, status, start_date, mentor_user_id, is_test')
       .neq('status', 'geannuleerd')
       .is('archived_at', null)
       .is('dfo_lms_student_id', null)
+      // Testrijen doen NIET mee. Zie de kop: de testonboarding stond er in de
+      // eerste versie gewoon tussen.
+      .eq('is_test', false)
       .order('start_date', { ascending: true, nullsFirst: false })
       .limit(CAP + 1);
     if (obErr) throw new Error('onboardings lezen: ' + obErr.message);
@@ -122,7 +156,7 @@ export default async function handler(req, res) {
       (async () => {
         if (klantIds.length === 0) return new Map();
         const { data, error } = await supabaseAdmin
-          .from('customers').select('id, first_name, last_name, email').in('id', klantIds);
+          .from('customers').select('id, first_name, last_name, email, is_test').in('id', klantIds);
         if (error) throw new Error('customers lezen: ' + error.message);
         return new Map((data || []).map((r) => [r.id, r]));
       })(),
@@ -147,7 +181,7 @@ export default async function handler(req, res) {
     // kunnen we ook op naam vergelijken zonder N bevragingen.
     const { data: lmsRijen, error: lmsErr } = await lms
       .from('hlms_student')
-      .select('id, email, voornaam, achternaam, crm_onboarding_id');
+      .select('id, email, voornaam, achternaam, crm_onboarding_id, mentor_id, herkomst');
     if (lmsErr) throw new Error('hlms_student lezen: ' + lmsErr.message);
 
     const lmsOpEmail      = new Map();
@@ -180,11 +214,15 @@ export default async function handler(req, res) {
         .filter((r) => String(r.email || '').trim().toLowerCase() !== email);
 
       let besluit;
-      if (alOpOnboarding)        besluit = 'bestaat_al_op_onboarding';
-      else if (alOpEmail)        besluit = 'bestaat_al_op_email';
-      else if (!email)           besluit = 'overslaan_geen_email';
+      if (klant?.is_test === true)      besluit = 'overslaan_testrij';
+      else if (alOpOnboarding)          besluit = 'al_gekoppeld';
+      // Bestaat er een rij op dit e-mailadres, dan is dat GEEN reden om over
+      // te slaan maar de reden om te KOPPELEN. Zestien van de tweeëntwintig
+      // zitten in dit geval.
+      else if (alOpEmail)               besluit = 'zou_koppelen';
+      else if (!email)                  besluit = 'overslaan_geen_email';
       else if (naamTreffers.length > 0) besluit = 'overslaan_naam_treffer';
-      else                       besluit = 'zou_aanmaken';
+      else                              besluit = 'zou_aanmaken';
 
       const regel = {
         onboarding_id : ob.id,
@@ -200,10 +238,22 @@ export default async function handler(req, res) {
         naam_treffers         : naamTreffers.map((r) => ({ id: r.id, email: r.email })),
       };
 
-      if (besluit === 'zou_aanmaken')                 result.zou_aanmaken++;
+      // OPEN VRAAG, bewust niet zelf beantwoord. Bij koppelen raken we alleen
+      // crm_onboarding_id aan, dus een LMS-rij zonder mentor blijft zonder
+      // mentor — ook als het CRM er wél een weet. Dat staat hier zodat Maxim
+      // per klant kan zien of dat erg is, in plaats van dat een script het
+      // stilletjes invult.
+      if (besluit === 'zou_koppelen') {
+        regel.lms_mentor_leeg  = !alOpEmail?.mentor_id;
+        regel.crm_kent_mentor  = !!ob.mentor_user_id;
+      }
+
+      if      (besluit === 'zou_aanmaken')            result.zou_aanmaken++;
+      else if (besluit === 'zou_koppelen')            result.zou_koppelen++;
       else if (besluit === 'overslaan_naam_treffer')  result.overgeslagen_naam_treffer++;
       else if (besluit === 'overslaan_geen_email')    result.overgeslagen_geen_email++;
-      else                                            result.overgeslagen_bestaat_al++;
+      else if (besluit === 'overslaan_testrij')       result.overgeslagen_testrij++;
+      else                                            result.overgeslagen_al_gekoppeld++;
 
       result.rijen.push(regel);
     }
@@ -211,33 +261,54 @@ export default async function handler(req, res) {
     // ── 5) Uitvoeren? Alleen met het juiste getal erbij ─────────────────
     if (!wilUitvoeren) return res.status(200).json(result);
 
-    if (!Number.isInteger(bevestigd) || bevestigd !== result.zou_aanmaken) {
+    const koppelOk = Number.isInteger(bevestigKoppel) && bevestigKoppel === result.zou_koppelen;
+    const maakOk    = Number.isInteger(bevestigMaak)   && bevestigMaak   === result.zou_aanmaken;
+    if (!koppelOk || !maakOk) {
       result.ok = false;
-      result.error = 'bevestiging klopt niet: droogloop zegt ' + result.zou_aanmaken
-        + ' aan te maken, aanroep zegt ' + (req.query?.aantal ?? '(niets)')
-        + '. Draai eerst de droogloop en geef dat getal mee als ?aantal=.';
+      result.error = 'bevestiging klopt niet: droogloop zegt '
+        + result.zou_koppelen + ' te koppelen en ' + result.zou_aanmaken
+        + ' aan te maken; aanroep zegt koppelen=' + (req.query?.koppelen ?? '(niets)')
+        + ' en aanmaken=' + (req.query?.aanmaken ?? '(niets)')
+        + '. Draai eerst de droogloop en geef beide getallen mee.';
       return res.status(409).json(result);
     }
 
     for (const regel of result.rijen) {
-      if (regel.besluit !== 'zou_aanmaken') continue;
+      const koppelen = regel.besluit === 'zou_koppelen';
+      const maken    = regel.besluit === 'zou_aanmaken';
+      if (!koppelen && !maken) continue;
+
       try {
-        // Dit is de ENIGE schrijfactie in dit bestand, en hij maakt een
-        // studentrij aan. Geen uitnodiging, geen wachtwoord, geen bericht.
-        const uit = await provisionDfoLmsStudent(regel.onboarding_id);
+        // Twee verschillende acties, en de logregel zegt welke het was. Een
+        // gekoppelde klant en een nieuw aangemaakte klant zien er in de
+        // databank straks hetzelfde uit; in het logboek niet.
+        const uit = koppelen
+          ? await koppelBestaandeStudent(regel.onboarding_id, regel.bestaat_op_email)
+          : await provisionDfoLmsStudent(regel.onboarding_id);
+
         if (uit?.ok) {
-          result.aangemaakt++;
-          regel.uitkomst = 'aangemaakt';
+          if (koppelen) { result.gekoppeld++;  regel.uitkomst = 'gekoppeld aan bestaande rij ' + regel.bestaat_op_email; }
+          else          { result.aangemaakt++; regel.uitkomst = 'nieuwe studentrij aangemaakt'; }
+          console.log('[lms-backfill] ' + (koppelen ? 'GEKOPPELD' : 'AANGEMAAKT') + ' — '
+            + (regel.naam || 'zonder naam') + ' <' + (regel.email || 'geen adres') + '> '
+            + 'onboarding=' + regel.onboarding_id
+            + (koppelen ? (' student=' + regel.bestaat_op_email) : ''));
+
+          // De spiegelvelden bijwerken. Die staan in hlms_crm_onboarding en
+          // NIET op hlms_student, dus dit raakt de Bubble-waarden niet aan.
+          await spiegelNaActie(regel.onboarding_id, 'lms-backfill');
         } else {
           result.mislukt++;
-          regel.uitkomst = 'mislukt: ' + (uit?.error || uit?.reason || 'onbekend');
+          regel.uitkomst = (koppelen ? 'koppelen' : 'aanmaken') + ' mislukt: '
+            + (uit?.error || uit?.reason || 'onbekend');
+          console.error('[lms-backfill] ' + regel.uitkomst + ' — onboarding=' + regel.onboarding_id);
           if (result.errors.length < 20) {
             result.errors.push({ onboarding_id: regel.onboarding_id, error: regel.uitkomst });
           }
         }
       } catch (e) {
         result.mislukt++;
-        regel.uitkomst = 'mislukt: ' + (e?.message || e);
+        regel.uitkomst = (koppelen ? 'koppelen' : 'aanmaken') + ' mislukt: ' + (e?.message || e);
         console.error('[lms-backfill] rij mislukt', regel.onboarding_id, e?.message || e);
         if (result.errors.length < 20) {
           result.errors.push({ onboarding_id: regel.onboarding_id, error: e?.message || String(e) });

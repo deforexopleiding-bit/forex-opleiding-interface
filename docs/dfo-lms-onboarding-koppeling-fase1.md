@@ -729,9 +729,38 @@ waar dit hele spoor over gaat.
 
 `api/cron/onboarding-lms-backfill.js`.
 
+**Koppelen is iets anders dan aanmaken.** Nagemeten op 8 september: van de 22
+lopende onboardings zonder koppeling bestaan er **zestien al** als
+`hlms_student` — allemaal `herkomst='imported_from_bubble'`, allemaal met een
+auth-account. Die hoeven niet aangemaakt te worden, alleen vastgeknoopt. Vijf
+echte klanten hebben geen rij; de zesde zonder rij was de testonboarding.
+
+De twee acties doen verschillende dingen en zeggen dat ook verschillend in de
+uitkomst en in de log (`GEKOPPELD` versus `AANGEMAAKT`, met aparte tellers), want
+achteraf terug kunnen lezen wát er met een klant gebeurd is, is het halve werk.
+
+Bij **koppelen** wordt precies één kolom aangeraakt: `crm_onboarding_id`. Naam,
+traject en aantal calls van die zestien komen uit de Bubble-migratie en worden
+niet overschreven met CRM-waarden. Daarom loopt koppelen via
+`koppelBestaandeStudent()` en **niet** via de adoptie-tak van
+`provisionDfoLmsStudent()` — die vult namelijk ook `mentor_id` in als die leeg
+is, en dat is "iets anders".
+
+Die mentor-vraag is bewust niet zelf beantwoord: de droogloop meldt per
+koppel-rij `lms_mentor_leeg` en `crm_kent_mentor`, zodat een mens kan beslissen
+of dat erg is in plaats van dat een script het invult.
+
+**Testrijen doen niet mee.** `onboardings.is_test` én `customers.is_test`
+worden uitgesloten, en die check staat vóór alle andere besluiten. Dat is geen
+theorie: de eerste versie filterde er **niet** op, en de testonboarding op
+`maxim.delombaerde96+onbtest@gmail.com` stond gewoon tussen de kandidaten —
+terwijl we die LMS-rij diezelfde ochtend juist hadden opgeruimd. Zonder filter
+had de inhaalslag 'm meteen opnieuw aangemaakt. Drie tests bewaken dat nu.
+
 **Droogloop is de standaard.** Zonder parameters doet hij niets. Uitvoeren
-vraagt `?uitvoeren=ja&aantal=<N>`, waarbij N exact het getal moet zijn dat de
-droogloop als `zou_aanmaken` gaf. Klopt dat niet: 409. Zo kan niemand dit per
+vraagt `?uitvoeren=ja&koppelen=<K>&aanmaken=<A>` — twee getallen, want twee
+acties met een verschillend risico, en allebei moeten ze exact overeenkomen met
+wat de droogloop gaf. Klopt er één niet: 409. Zo kan niemand dit per
 ongeluk aanzetten, en kan er niets veranderd zijn tussen kijken en doen.
 
 **Dubbele klanten.** Er is een klant die in beide systemen onder twee
