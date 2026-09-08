@@ -1941,9 +1941,15 @@
     if (!tag) return;
     _post('/api/events-attendee-tag-remove', { id: attId, tag: tag.trim() }, 'Tag verwijderd', eventId);
   };
-  window.__evAttDelete = (attId, eventId) => {
-    if (!window.confirm('Deelnemer verwijderen? Dit is permanent en verwijdert ook eventuele vragenlijst-antwoorden.')) return;
-    _post('/api/events-attendee-delete', { id: attId }, 'Verwijderd', eventId);
+  window.__evAttDelete = async (attId, eventId) => {
+    const vraag = 'Deze aanmelding definitief verwijderen? Dit is permanent en verwijdert ook eventuele vragenlijst-antwoorden.';
+    const ok = (typeof window.dfoConfirm === 'function')
+      ? await window.dfoConfirm({ title: 'Deelnemer verwijderen', message: vraag, okLabel: 'Verwijderen', cancelLabel: 'Annuleren', danger: true })
+      : window.confirm(vraag);
+    if (!ok) return;
+    // Endpoint leest het attendee-uuid uit de query (?id=), niet uit de body —
+    // vandaar de query-param. (Body blijft meegestuurd; wordt genegeerd.)
+    _post('/api/events-attendee-delete?id=' + encodeURIComponent(attId), { id: attId }, 'Verwijderd', eventId);
   };
 
   // ═══════════════════════════════════════════════════════════════════════
