@@ -49,6 +49,16 @@ export default async function handler(req, res) {
       console.warn('[follow-up-ghl-poll] geen actieve calendars gevonden (of calendars-list faalde)');
     }
     let events = [];
+    // 2026-09-08: paginatie-truncatie-detectie voor safety-gate (PR A).
+    // GHL /calendars/events returnt default ~100 events per call zonder cursor-
+    // handling in deze code. Als een agenda exact ~100 events oplevert, is de
+    // response HOOGSTWAARSCHIJNLIJK afgekapt en missen we events erna. In dat
+    // geval mag ghost-cleanup + auto-resolve NIET draaien (zou latere weken
+    // ten onrechte op 'wacht_op_reschedule' zetten). PR B lost dit definitief
+    // op met echte paginatie; PR A is de bloeding-stop.
+    const TRUNCATION_THRESHOLD = 99;  // GHL default ~100, marge 1 voor edge-cases
+    let calendarsLikelyTruncated = 0;
+    const calendarFetchCounts = [];
     for (const calId of calendarIds) {
       const url = new URL(`${GHL_API_BASE}/calendars/events`);
       url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
@@ -68,9 +78,17 @@ export default async function handler(req, res) {
         const evs = json.events || json.data || [];
         for (const e of evs) { if (!e.calendarId) e.calendarId = calId; }
         events = events.concat(evs);
+        calendarFetchCounts.push({ calId, count: evs.length });
+        if (evs.length >= TRUNCATION_THRESHOLD) calendarsLikelyTruncated++;
       } catch (e) {
         console.warn('[follow-up-ghl-poll] events-fetch exception voor calendar', calId, e?.message || e);
       }
+    }
+    if (calendarsLikelyTruncated > 0) {
+      console.warn('[follow-up-ghl-poll] TRUNCATIE-VERDENKING:',
+        calendarsLikelyTruncated, 'van', calendarIds.length,
+        'agenda(s) leverde >=', TRUNCATION_THRESHOLD, 'events op.',
+        'Detail:', JSON.stringify(calendarFetchCounts));
     }
 
     // Haal Dave's upcoming Zoom-meetings op (graceful: lege array bij fout)
@@ -232,8 +250,17 @@ export default async function handler(req, res) {
     }
 
     // ── Ghost-cleanup: scheduled DB-rijen die GHL niet meer teruggeeft ────────
+    // 2026-09-08 (PR A safety-gate): sla ghost-cleanup EN auto-resolve over
+    // zodra de events-response mogelijk afgekapt is. Zonder complete lijst
+    // zou de ghost-check DB-rijen ten onrechte als "verweesd" markeren
+    // (bewijs: sep-2026 kennismakings-agenda 76% van week 14+ op
+    // 'wacht_op_reschedule' door truncatie). Bloeding-stop tot PR B echte
+    // paginatie invoert.
     let ghostsHandled = 0;
-    if (events.length > 0) {
+    if (calendarsLikelyTruncated > 0) {
+      console.warn('[follow-up-ghl-poll] safety-gate ACTIEF — ghost-cleanup + auto-resolve OVERGESLAGEN',
+        'wegens truncatie-verdenking (', calendarsLikelyTruncated, 'agenda(s))');
+    } else if (events.length > 0) {
       const ghlIds = new Set(events.map(e => e.id));
 
       const { data: dbScheduled } = await supabaseAdmin
@@ -290,11 +317,17 @@ export default async function handler(req, res) {
     }
 
     // ── Auto-resolve: wacht_op_reschedule rijen waarvan de lead een nieuwe scheduled heeft ──
-    const { data: waitingList } = await supabaseAdmin
-      .from('follow_up_appointments')
-      .select('id, lead_ghl_contact_id, lead_name, scheduled_at')
-      .eq('status', 'wacht_op_reschedule')
-      .not('lead_ghl_contact_id', 'is', null);
+    // 2026-09-08 (PR A safety-gate): óók de auto-resolve overslaan bij
+    // truncatie-verdenking. Deze loop kan 'wacht_op_reschedule' → 'cancelled'
+    // flippen op basis van dezelfde onvolledige data — nog een cascade-stap
+    // die verkeerde status-drift veroorzaakt.
+    const { data: waitingList } = (calendarsLikelyTruncated > 0)
+      ? { data: [] }
+      : await supabaseAdmin
+          .from('follow_up_appointments')
+          .select('id, lead_ghl_contact_id, lead_name, scheduled_at')
+          .eq('status', 'wacht_op_reschedule')
+          .not('lead_ghl_contact_id', 'is', null);
 
     let resolvedCount = 0;
     for (const waiting of (waitingList || [])) {
