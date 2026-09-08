@@ -25,6 +25,8 @@ import { validateAnswers, loadActiveQuestions } from './_lib/assessment-validati
 import { getConfirmedCount, getOpenEventsWithSpace } from './_lib/event-registration.js';
 import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 import { getVervolgQuestionnaire, getAttendeeByToken, getEvent, isUuid } from './_lib/event-vervolg.js';
+import { sendEventAttendeeBevestiging } from './_lib/events-bevestiging-send.js';
+import { reedsVerstuurd, markeerVerstuurd, SOORTEN } from './_lib/event-website-berichten.js';
 
 function alt(e) {
   return { id: e.id, titel: e.title, starts_at: e.starts_at, ends_at: e.ends_at, locatie: e.location, vrij: e.has_space ? Math.max(0, (e.capacity || 0) - (e.confirmed_count || 0)) : 0 };
@@ -142,6 +144,16 @@ export default async function handler(req, res) {
     // Fail-soft: auto-close-triplet als het event hierdoor vol raakt.
     try { await onConfirmedAttendeeMutation([attendee.event_id], { reason: 'event-vervolg-finalize' }); }
     catch (e) { console.error('[event-vervolg-finalize] auto-close (soft):', e?.message || e); }
+
+    // FUNNEL-EIGEN bevestiging (mail + WhatsApp) — fail-soft + idempotent via de
+    // logtabel (soort='bevestiging'). Blokkeert de response nooit. Alleen dit
+    // website-pad; raakt event_automations/automation_enabled niet.
+    try {
+      if (!(await reedsVerstuurd(attendee.id, SOORTEN.BEVESTIGING))) {
+        const r = await sendEventAttendeeBevestiging({ attendeeId: attendee.id });
+        if (r?.ok) await markeerVerstuurd(attendee.id, attendee.event_id, SOORTEN.BEVESTIGING, 'mail+whatsapp');
+      }
+    } catch (e) { console.error('[event-vervolg-finalize] bevestiging (soft):', e?.message || e); }
 
     return res.status(200).json({
       status: 'definitief',
