@@ -717,6 +717,69 @@ bevat al een `studentSectie()` die studenten in `oppikken` / `onboarding` /
 die dode kolom. Die functie wordt nergens aangeroepen; er staat dus een leeg
 raamwerk klaar dat op de verkeerde bron was aangesloten.
 
+### De inhaalslag: studentrijen voor de lopende onboardings
+
+**Waarom hij nodig is.** Gemeten 7 september 2026: van de 24 lopende
+onboardings heeft er maar **twee** een `dfo_lms_student_id` — 14 met status
+*aangemeld* (nul geprovisioneerd, 8 met mentor) en 10 met status *bezig* (twee
+geprovisioneerd, 3 met mentor). Provisioning was per klant een operator-vinkje
+en dat is zelden aangezet. Zonder inhaalslag ziet elke mentor een leeg blok
+terwijl er elf klanten mét mentor op hem wachten — precies het lege scherm
+waar dit hele spoor over gaat.
+
+`api/cron/onboarding-lms-backfill.js`.
+
+**Droogloop is de standaard.** Zonder parameters doet hij niets. Uitvoeren
+vraagt `?uitvoeren=ja&aantal=<N>`, waarbij N exact het getal moet zijn dat de
+droogloop als `zou_aanmaken` gaf. Klopt dat niet: 409. Zo kan niemand dit per
+ongeluk aanzetten, en kan er niets veranderd zijn tussen kijken en doen.
+
+**Dubbele klanten.** Er is een klant die in beide systemen onder twee
+verschillende adressen staat. De droogloop meldt per rij `bestaat_op_onboarding`
+(gekoppeld via `crm_onboarding_id`), `bestaat_op_email`, en `naam_treffers`:
+LMS-rijen met dezelfde naam maar een **ander** adres. Rijen met een naam-treffer
+worden bij uitvoeren **overgeslagen** — op naam matchen is raden, en dat is een
+besluit voor een mens, geen script.
+
+#### Er kan geen post uit — en dat is gerekend, niet beweerd
+
+De uitnodiging is een aparte beslissing en die is niet genomen. Dit pad raakt 22
+echte klanten tegelijk, dus "er zit geen mail in" is een eis en geen
+geruststelling.
+
+`tests/onboarding-lms-backfill-geen-post.test.js` rekent de **volledige
+transitieve import-afsluiting** uit — statische én dynamische imports, want die
+tweede vorm bestaat in deze repo en zou anders een gat zijn. Het resultaat is
+**vijf bestanden**:
+
+```
+api/cron/onboarding-lms-backfill.js
+api/supabase.js
+api/_lib/dfo-lms-db.js
+api/_lib/dfo-lms-student.js
+api/_lib/onboarding-window.js
+```
+
+Daarop staan zeven bewijzen. De sterkste is **BEWIJS 2b**: in geen van die vijf
+bestanden staat ook maar één manier om een uitgaande verbinding te maken — geen
+`fetch(`, geen axios, geen http-module. Post verlaat het pand via een
+netwerk-call; kan die niet gemaakt worden, dan kan er niets vertrekken, hoe de
+functies ook heten. Een **tegenbewijs** toetst dat `dfo-lms-uitnodiging.js` die
+call wél heeft, zodat 2b niet stilletjes een test kan worden die nergens naar
+kijkt.
+
+Eén eerlijk detail. BEWIJS 2 (het woordenfilter) sloeg eerst aan op
+`noteerUitnodiging()` in `dfo-lms-student.js`. Die functie verstuurt niets — hij
+schrijft de uitkomst van een uitnodiging weg in
+`onboardings.dfo_lms_provision_error`, één UPDATE in het CRM. Het woord is uit
+de lijst gehaald, maar niet zonder er iets sterkers voor terug te zetten: dat is
+waar BEWIJS 2b vandaan komt. De reden staat in de test zelf, zodat niemand later
+denkt dat de lijst is uitgekleed tot hij groen was.
+
+Drie manieren rood bewezen: de uitnodigingsmodule alsnog importeren (4 bewijzen
+vallen om), de droogloop niet meer de standaard maken (BEWIJS 5), en de
+naam-treffer-rem eruit halen (BEWIJS 7).
+
 ### Nog niet gebouwd: on-hold
 
 On-hold bestaat **nergens** in het CRM — geen kolom, geen endpoint, geen knop.
