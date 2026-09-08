@@ -323,3 +323,76 @@ geannuleerd is.
 Beide staan hier zodat ze niet wegzakken, en beide krijgen hun eigen ronde. De
 volgorde is met opzet: eerst het bellen helemaal af, dan pas de uitgang. Een
 knop die er tussendoor komt laat het bellen half af achter.
+
+## ⚠ Het rapport beoordeelde een verzameling waar de brug nooit van gehoord had
+
+Derde geval van dezelfde ziekte als de twee hierboven, en het scherpste: **twee
+onderdelen die over "dezelfde" mensen gaan, maar die verzameling verschillend
+opbouwen.** Zolang niemand ze naast elkaar legt, ziet het er aan beide kanten
+gezond uit.
+
+### Wat er gebeurde
+
+De WhatsApp-brug mag alleen gesprekken doorgeven van nummers die op de leadlijst
+staan. Dat is een privacygrens en geen bug: Daves privécontacten lopen over
+dezelfde telefoon. Die lijst komt uit `api/opvolging-whatsapp-nummers.js`, en die
+bouwde hem **uitsluitend uit `opvolging_taken`**.
+
+Sectie 3 van het rapport vraagt iets anders: kreeg elke lead **met een zoomcall**
+die dag vóór 09:00 een spraakbericht? Dat is een andere verzameling.
+
+Gemeten op 8 september: **acht zoomcalls, nul bijbehorende opvolgtaken.** De brug
+had letterlijk nooit van die mensen gehoord en gooide elk bericht weg als
+`niet_op_leadlijst` — 20 keer op `message_create`, 21 keer op `message`. De brug
+leefde, de logging werkte, de cijfers waren nul. En sectie 3 concludeerde
+vervolgens "geen spraakbericht" over iemand die haar werk wél gedaan had.
+
+Beide kanten deden precies wat ze moesten doen. De fout zat in de ruimte
+ertussen.
+
+### Wat eraan is gedaan
+
+1. **De leadlijst kent nu ook de zoomcall-leads** — een tweede bron op
+   `follow_up_appointments`, maar **alleen binnen een krap venster**: van
+   gisteren tot drie dagen vooruit, en alleen bij een levende status. Grenzen en
+   uitleg staan in `api/_lib/opvolging-leadlijst-venster.js`.
+
+   Krap houden is geen detail. De hele afsprakenhistorie toevoegen zou de
+   privacygrens permanent verbreden, en dat is precies wat dit filter moet
+   voorkomen. Iemand met een afspraak van drie maanden geleden hoort er niet in.
+   De vorm van het antwoord verandert niet: alleen cijferreeksen, geen namen,
+   geen ids, nog steeds achter `X-Brug-Secret`.
+
+2. **Het rapport zwijgt over de dagen die het niet kon meten** —
+   `DEKKING_VANAF` in datzelfde bestand. Een dag vóór die datum levert een
+   **blinde vlek** op sectie 3 in plaats van een verwijt, met de zin erbij dat
+   dit *niet* betekent dat er geen spraakbericht is gestuurd. Per dag, dus een
+   weekrapport dat over de deploydag heen loopt beoordeelt de dagen erna gewoon.
+
+   Waarom een datum en geen berekening: of een nummer op de lijst stond op het
+   moment dat het bericht ging, is achteraf nergens uit af te leiden — de lijst
+   wordt live opgebouwd en niet bewaard. Het enige harde feit is de dag waarop de
+   fix live ging. **Schuift de deploy op, dan moet die datum meeschuiven**,
+   anders beweert het rapport iets gemeten te hebben wat het niet kon meten.
+
+3. **Een test die de grens vastlegt** — `tests/opvolging-leadlijst-zoomcalls.test.js`
+   legt vast dat een lead met alleen een zoomcall in het venster **wel** in de
+   lijst zit en een afspraak van drie maanden geleden **niet**. Zonder die test
+   schuift de privacygrens ooit stilletjes op zonder dat iemand het merkt.
+
+### De les
+
+Als twee onderdelen over "dezelfde" mensen gaan maar die verzameling elk apart
+opbouwen, lopen ze uiteen — en dan meet het ene iets over een populatie die het
+andere nooit gezien heeft. Er is geen foutmelding die dat zichtbaar maakt: beide
+kanten rapporteren keurig hun eigen nul.
+
+De vraag om te stellen bij elke controle die over een groep gaat: **kijkt de
+meting naar precies dezelfde lijst als de uitvoering?** Zo niet, dan is het
+resultaat geen oordeel maar een blinde vlek, en dan hoort het rapport dat te
+zeggen.
+
+**Wat de berichten van 8 september betreft: die zijn weg.** De brug gooide ze
+weg voordat er iets van werd vastgelegd, dus er valt niets te herstellen. Het
+rapport hoort daarover te zeggen dat het het venster niet kon meten — niet dat
+er geen bericht is gestuurd.

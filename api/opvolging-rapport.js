@@ -52,6 +52,7 @@ import {
 } from './_lib/opvolging-poging-telling.js';
 import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
 import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
+import { leadlijstDektDag, DEKKING_VANAF } from './_lib/opvolging-leadlijst-venster.js';
 import {
   beoordeelDag, telVensters, beoordeelMoeite, dagVan,
   SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
@@ -1136,6 +1137,43 @@ function metErnst(bevinding) {
 
 // ── Sectie 1 ───────────────────────────────────────────────────────────────
 export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomcalls, archief }) {
+  // ── DE BRUG MOET DEZELFDE MENSEN KENNEN ALS DIT BLOK BEOORDEELT ──────────
+  // Dit blok staat bewust VÓÓR de lus hieronder: die zet blinde vlekken om in
+  // afwijkingen, en wat er ná die lus bij komt zou alleen in het overzicht
+  // onderaan belanden en nooit bovenaan opvallen.
+  //
+  // Op 8 september bleek dat de leadlijst waarop de brug filtert uitsluitend
+  // uit opvolging_taken werd gebouwd, terwijl dit blok leads met een ZOOMCALL
+  // beoordeelt. Acht zoomcalls, nul taken: elk spraakbericht naar die mensen
+  // werd door de brug weggegooid als 'niet_op_leadlijst' (20 op message_create,
+  // 21 op message), en dit blok meldde vervolgens 'geen spraakbericht' over
+  // iemand die haar werk wél gedaan had.
+  //
+  // Voor een dag vóór DEKKING_VANAF is dit dus GEEN bevinding maar een blinde
+  // vlek. Het verschil tussen 'niet gedaan' en 'niet gemeten' is de hele reden
+  // dat dit rapport bestaat.
+  //
+  // PER DAG, niet per rapport: een weekrapport dat over de deploy heen loopt
+  // hoort de gedekte dagen gewoon te beoordelen en alleen over de dagen ervoor
+  // te zwijgen.
+  const ongedekteDagen = [
+    ...(vensters.rijen || []).map((r) => r.dag),
+    ...(vensters.zonder_taak || []).map((r) => r.dag),
+  ].filter((d) => !leadlijstDektDag(d));
+  if (ongedekteDagen.length) {
+    const uniek = [...new Set(ongedekteDagen)].sort();
+    blindeVlekken.push({
+      sectie: 'vensters',
+      wat   : 'Of er een spraakbericht is gestuurd, is voor ' +
+              (uniek.length === 1 ? uniek[0] : uniek[0] + ' t/m ' + uniek[uniek.length - 1]) +
+              ' niet te meten.',
+      waarom: 'De WhatsApp-brug filtert op een leadlijst die tot ' + DEKKING_VANAF +
+              ' alleen uit opvolgtaken werd gebouwd. Leads met alleen een zoomcall stonden ' +
+              'daar niet in, dus werden hun berichten weggegooid voordat ze geregistreerd ' +
+              'konden worden. Dat betekent NIET dat er geen spraakbericht is gestuurd.',
+    });
+  }
+
   // EEN BLINDE VLEK IS EEN AFWIJKING. Zonder deze lus zou een sectie die niets
   // kon meten hierboven stil blijven, en dan leest 'geen afwijkingen' als
   // 'alles in orde'. Dat is de duurste fout die dit rapport kan maken.
@@ -1163,6 +1201,8 @@ export function vulAandacht({ aandacht, blindeVlekken, dekking, vensters, zoomca
   }
 
   for (const r of vensters.rijen) {
+    // Geen verwijt over een dag waarop de brug de berichten niet eens kon zien.
+    if (!leadlijstDektDag(r.dag)) continue;
     if (r.spraak.staat === 'niet_gedaan') {
       aandacht.push({ soort: 'venster_gemist', sectie: 'vensters', naam: r.naam,
         tekst: `${r.naam || 'Naamloos'} had een zoomcall op ${r.dag} maar kreeg geen spraakbericht.`, uitleg: null, taak_id: r.taak_id });
