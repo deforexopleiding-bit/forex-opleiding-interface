@@ -52,6 +52,9 @@ import {
 } from './_lib/opvolging-poging-telling.js';
 import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
 import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
+import {
+  oorspronkelijkeDag, oorspronkelijkeTijd, verzetNaar, toonStaat,
+} from './_lib/opvolging-dagbeeld.js';
 import { leadlijstDektDag, DEKKING_VANAF } from './_lib/opvolging-leadlijst-venster.js';
 import {
   beoordeelDag, telVensters, beoordeelMoeite, dagVan,
@@ -206,11 +209,35 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ── De zoomcalls van de periode ──────────────────────────────────────────
   // scheduled_at is het moment waarop de call stond. Dat verandert niet met
   // terugwerkende kracht, in tegenstelling tot `status`.
-  const { data: apptRuw, error: e3 } = await supabaseAdmin
+  // OOK WAT VAN DEZE DAGEN WEG IS VERPLAATST. Een afspraak die in dezelfde rij
+  // naar een andere dag is gezet heeft een scheduled_at buiten deze periode,
+  // maar stond wél op een dag erbinnen. Zonder de tweede voorwaarde verdwijnt
+  // hij stil uit sectie 4 en klopt het rapport over die dag niet meer.
+  // Zie _lib/opvolging-dagbeeld.js.
+  const apptVenster = `and(scheduled_at.gte.${vanIso},scheduled_at.lt.${totIso}),`
+                    + `and(eerst_gepland_op.gte.${vanIso},eerst_gepland_op.lt.${totIso})`;
+  let dagbeeldVolledig = true;
+  let { data: apptRuw, error: e3 } = await supabaseAdmin
     .from('follow_up_appointments')
-    .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, parent_appointment_id, annulering_reden, snelle_notitie, uitkomst, uitkomst_op')
-    .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
+    .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, parent_appointment_id, annulering_reden, snelle_notitie, uitkomst, uitkomst_op, eerst_gepland_op')
+    .or(apptVenster)
     .order('scheduled_at', { ascending: true });
+
+  // Kolom bestaat nog niet: terug naar precies de query van hiervoor, en het
+  // gat melden in plaats van het te verzwijgen.
+  // OP DE KOLOMNAAM, NIET OP DE FOUTCODE ALLEEN. 42703 betekent 'een kolom
+  // bestaat niet' en zegt niet WELKE. Ontbreekt alleen `uitkomst`, dan zou een
+  // terugval op de code hier het dagbeeld uitzetten voor een kolom die er wél
+  // is — en dan verdwijnen de verzette afspraken om een reden die er niets mee
+  // te maken heeft.
+  if (e3 && e3.code === '42703' && /eerst_gepland_op/.test(e3.message || '')) {
+    dagbeeldVolledig = false;
+    ({ data: apptRuw, error: e3 } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, parent_appointment_id, annulering_reden, snelle_notitie, uitkomst, uitkomst_op')
+      .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
+      .order('scheduled_at', { ascending: true }));
+  }
 
   // Draait de migratie nog niet, dan bestaan uitkomst/uitkomst_op niet en
   // faalt de hele select. Eén keer opnieuw zonder die twee kolommen, en de
@@ -233,6 +260,21 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
     });
   } else {
     afspraken = apptRuw || [];
+  }
+
+  // ZEGGEN DAT HET DAGBEELD ONVOLLEDIG IS, niet doen alsof het klopt. Zolang
+  // eerst_gepland_op ontbreekt missen we elke afspraak die in dezelfde rij naar
+  // een andere dag is verzet — en dat zijn juist de rijen die dit blok moet
+  // laten zien.
+  if (!dagbeeldVolledig) {
+    blindeVlekken.push({
+      sectie: 'zoomcalls',
+      wat   : 'Afspraken die naar een andere dag zijn verzet ontbreken in dit overzicht.',
+      waarom: 'De kolom eerst_gepland_op bestaat nog niet, dus van een afspraak die in dezelfde rij '
+            + 'naar een andere dag is verplaatst is niet meer te zien dat hij hier stond. Draai '
+            + 'docs/sql-migrations/2026-09-08-eerst-gepland-op.sql; vanaf dat moment blijft de '
+            + 'oorspronkelijke dag bewaard.',
+    });
   }
 
   // ── De taken achter die pogingen en calls ────────────────────────────────
@@ -978,8 +1020,14 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), 
     return {
       appointment_id: a.id,
       naam    : a.lead_name,
-      dag     : dagVan(a.scheduled_at),
-      tijd    : tijdVan(a.scheduled_at),
+      // DE DAG WAAROP HIJ STOND, niet de dag waar hij inmiddels heen is. Een
+      // afspraak die verzet is hoort op zijn oorspronkelijke dag te blijven
+      // staan, anders klopt het rapport over die dag morgen niet meer.
+      dag     : oorspronkelijkeDag(a),
+      tijd    : oorspronkelijkeTijd(a),
+      // Waarheen, als de rij het zelf weet (verzetting in dezelfde rij).
+      verzet_naar: verzetNaar(a),
+      toon    : toonStaat(a, nuMs),
       // gepland | verplaatst | geannuleerd | onbeoordeelbaar | te_beoordelen
       staat,
       // De ruwe status erbij, zodat een onbekende waarde te herkennen is

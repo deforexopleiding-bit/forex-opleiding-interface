@@ -485,7 +485,15 @@
     const j = await haal('/api/opvolging-agenda?van=' + dag + '&tot=' + dag);
     st.loading = false;
     if (j.__error) { st.error = j.__error; st.data = null; }
-    else { st.data = ((j.dagen || [])[0] || { bezet: [] }).bezet || []; }
+    else {
+      // HET DAGBEELD, NIET DE BEZETTE MOMENTEN. `gepland` draagt alles wat voor
+      // die dag stond, inclusief verzet, geannuleerd en niet-gekomen; `bezet`
+      // is de smallere lijst die bepaalt welke vrije momenten wegvallen.
+      // Terugval op `bezet` zodat een oudere server nog gewoon werkt.
+      const d0 = (j.dagen || [])[0] || {};
+      st.data = d0.gepland || d0.bezet || [];
+      st.onvolledig = j.dagbeeld_volledig === false ? (j.dagbeeld_melding || null) : null;
+    }
     render();
   }
 
@@ -1297,6 +1305,11 @@
 .opv .call{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
 .opv .call .tijd{font-size:16px;font-weight:750;font-variant-numeric:tabular-nums;flex:0 0 52px;color:var(--o-acc)}
 .opv .call.geweest .tijd{color:#a2a9b4}
+.opv .call.vervallen{background:#fafbfc;border-style:dashed;box-shadow:none}
+.opv .call.vervallen .nm{color:#8b939f}
+.opv .call.vervallen .nm,.opv .call.vervallen .tijd{text-decoration:line-through;text-decoration-color:#c3c8d0}
+.opv .call.vervallen .nm .tag{text-decoration:none}
+.opv .call.vervallen .sub{color:#a2a9b4}
 .opv .call .who{flex:1;min-width:0}
 .opv .call .nm{font-weight:650;font-size:14.5px}
 .opv .call .sub{font-size:12.5px;color:var(--o-muted);margin-top:3px}
@@ -1788,17 +1801,30 @@
     if (_calls.data.length === 0) return kop + '<div class="empty">Geen calls ingepland op deze dag.</div>';
 
     const nuMs = Date.now();
-    return kop + _calls.data.map((c, i) => {
+    // Ontbreekt de kolom nog, dan kan deze lijst verzette afspraken missen. Dat
+    // hoort er te staan: een onvolledig dagbeeld dat zich voordoet als volledig
+    // is precies waar we vandaag op zijn vastgelopen.
+    const waarschuwing = _calls.onvolledig
+      ? '<div class="ronde zacht">' + esc(_calls.onvolledig) + '</div>' : '';
+
+    return kop + waarschuwing + _calls.data.map((c, i) => {
       const geweest = c.start && new Date(c.start).getTime() < nuMs;
       const taak = taakVoorNummer(c.telefoon);
-      const knoppen =
+      // WAT ER NIET MEER DOORGAAT KRIJGT GEEN KNOPPEN. Een Zoom-knop bij een
+      // afspraak die verzet is nodigt uit tot een call die niemand verwacht.
+      const dood = c.doorgehaald === true;
+      const knoppen = dood ? '' :
         (c.zoom_url ? '<a class="obtn zoom" href="' + esc(c.zoom_url) + '" target="_blank" rel="noopener">&#127909; Zoom</a>' : '') +
         (c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(' + i + ')">&#9742; Bellen</button>' : '') +
         (c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(' + i + ')">&#128172; WhatsApp</button>' : '') +
         '<button class="obtn" onclick="window.__opvCallAfrond(' + i + ')">Afronden &rarr;</button>';
-      return '<div class="call' + (geweest ? ' geweest' : '') + '">' +
+      // Het label komt van de server (api/_lib/opvolging-dagbeeld.js), zodat het
+      // scherm, het rapport en de printweergave dezelfde woorden gebruiken.
+      const label = c.label
+        ? '<span class="tag t-grey">' + esc(c.label) + '</span>' : '';
+      return '<div class="call' + (geweest ? ' geweest' : '') + (dood ? ' vervallen' : '') + '">' +
         '<div class="tijd">' + esc(c.tijd) + '</div>' +
-        '<div class="who"><div class="nm">' + esc(c.naam) + '</div>' +
+        '<div class="who"><div class="nm">' + esc(c.naam) + ' ' + label + '</div>' +
         '<div class="sub">' + esc(c.telefoon || 'geen nummer bekend') +
           (taak ? ' &middot; staat al in je lijst' : '') + '</div>' +
         belRegel(taak, dag) + '</div>' +

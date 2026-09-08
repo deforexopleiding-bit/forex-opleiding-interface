@@ -830,13 +830,28 @@ test('elke kolom die bouwZoomcalls leest, wordt ook echt opgehaald', () => {
   }
 });
 
-test('de uitkomst-kolommen zitten alleen in de eerste select', () => {
-  // De tweede is de terugval voor als de migratie nog niet gedraaid is; die
-  // mag uitkomst/uitkomst_op juist NIET noemen, anders faalt hij op precies
+test('er is een terugval-select die uitkomst NIET noemt', () => {
+  // De terugval voor als de uitkomst-migratie nog niet gedraaid is mag
+  // uitkomst/uitkomst_op juist NIET noemen, anders faalt hij op precies
   // dezelfde ontbrekende kolom.
+  //
+  // Op index gezocht tot 8 september; toen kwam er een derde select bij (de
+  // terugval voor eerst_gepland_op) en wees selects[1] ineens naar een andere
+  // query. Nu op INHOUD, want dat is wat de regel bedoelt.
   const selects = BRON.match(/\.select\('id, lead_name[^']*'\)/g) || [];
-  assert.match(selects[0], /uitkomst, uitkomst_op/);
-  assert.doesNotMatch(selects[1], /uitkomst/);
+  assert.ok(selects.length >= 2, 'er horen minstens twee selects te zijn');
+  assert.match(selects[0], /uitkomst, uitkomst_op/, 'de eerste probeert alles');
+  assert.ok(selects.some((s) => !/uitkomst/.test(s)),
+    'geen enkele terugval laat uitkomst weg — dan valt het rapport om zonder die migratie');
+});
+
+test('de terugval voor eerst_gepland_op laat uitkomst gewoon staan', () => {
+  // Anders kost een ontbrekende dagbeeld-kolom ook de uitkomsten, en die staan
+  // daar helemaal los van.
+  const selects = BRON.match(/\.select\('id, lead_name[^']*'\)/g) || [];
+  const zonderDagbeeld = selects.filter((s) => !/eerst_gepland_op/.test(s));
+  assert.ok(zonderDagbeeld.some((s) => /uitkomst, uitkomst_op/.test(s)),
+    'de terugval zonder eerst_gepland_op hoort uitkomst wél mee te nemen');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

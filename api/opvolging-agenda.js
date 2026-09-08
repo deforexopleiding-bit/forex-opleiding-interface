@@ -172,23 +172,48 @@ async function lees(req, res, supabase) {
   // (een slot dat GHL zelf al kent) is klein.
   let afspraken = [];
   let bezetMelding = null;
-  try {
+  let dagbeeldVolledig = true;
+  {
     const vanMs = zoneMiddernachtMs(van);
     const totMs = zoneMiddernachtMs(tot) + 24 * 3600 * 1000;
-    const { data, error } = await supabase
+    const vanIso = new Date(vanMs).toISOString();
+    const totIso = new Date(totMs).toISOString();
+
+    // OOK WAT VAN DEZE DAG WEG IS VERPLAATST. Een afspraak die in dezelfde rij
+    // naar een andere dag is gezet heeft een scheduled_at buiten dit venster,
+    // maar stond wél op deze dag. Zonder de tweede voorwaarde verdwijnt hij
+    // stil uit het dagbeeld, en dan klopt de dag van gisteren morgen niet meer.
+    // Zie _lib/opvolging-dagbeeld.js.
+    const venster = `and(scheduled_at.gte.${vanIso},scheduled_at.lt.${totIso}),`
+                  + `and(eerst_gepland_op.gte.${vanIso},eerst_gepland_op.lt.${totIso})`;
+    const KOLOMMEN = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url';
+
+    // Mét de nieuwe kolom, en bij 42703 (kolom bestaat nog niet) terugvallen op
+    // precies de query van hiervoor. In beide volgordes van deploy en migratie
+    // blijft het scherm werken; alleen het dagbeeld is dan onvolledig, en dat
+    // melden we in plaats van het te verzwijgen.
+    let { data, error } = await supabase
       .from('follow_up_appointments')
-      // lead_phone / lead_email / zoom_join_url zijn fase 3a: het blok
-      // 'Calls van vandaag' hangt aan dezelfde bezette momenten en heeft de
-      // Zoom-link en het nummer nodig. Extra kolommen, geen ander filter.
-      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url')
-      .gte('scheduled_at', new Date(vanMs).toISOString())
-      .lt('scheduled_at', new Date(totMs).toISOString())
+      .select(KOLOMMEN + ', eerst_gepland_op')
+      .or(venster)
       .order('scheduled_at', { ascending: true });
-    if (error) throw error;
-    afspraken = data || [];
-  } catch (e) {
-    console.warn('[opvolging-agenda] afspraken lezen faalde:', e?.message || e);
-    bezetMelding = 'De geboekte afspraken konden niet geladen worden; vrije momenten kloppen mogelijk niet helemaal.';
+
+    if (error && (error.code === '42703' || /eerst_gepland_op/.test(error.message || ''))) {
+      dagbeeldVolledig = false;
+      ({ data, error } = await supabase
+        .from('follow_up_appointments')
+        .select(KOLOMMEN)
+        .gte('scheduled_at', vanIso)
+        .lt('scheduled_at', totIso)
+        .order('scheduled_at', { ascending: true }));
+    }
+
+    if (error) {
+      console.warn('[opvolging-agenda] afspraken lezen faalde:', error.message || error);
+      bezetMelding = 'De geboekte afspraken konden niet geladen worden; vrije momenten kloppen mogelijk niet helemaal.';
+    } else {
+      afspraken = data || [];
+    }
   }
 
   const dagen = voegAgendaSamen({ slots, afspraken, van, tot, timeZone: timezone });
@@ -199,6 +224,15 @@ async function lees(req, res, supabase) {
     window: { van, tot },
     dagen,
     agenda_beschikbaar: !melding,
+    // TWEE MELDINGEN, TWEE VELDEN. Ze stonden hieronder in één `melding`, en
+    // dan verdwijnt een mislukte lezing van de afspraken achter een
+    // GHL-storing — precies op het moment dat je wilt weten waarom het
+    // dagbeeld leeg is.
+    afspraken_melding: bezetMelding,
+    dagbeeld_volledig: dagbeeldVolledig,
+    dagbeeld_melding : dagbeeldVolledig ? null
+      : 'De kolom eerst_gepland_op bestaat nog niet. Afspraken die naar een andere dag zijn verzet '
+      + 'ontbreken daardoor in dit dagbeeld. Draai docs/sql-migrations/2026-09-08-eerst-gepland-op.sql.',
     melding: melding || bezetMelding || (vrijTotaal === 0 ? 'Geen vrije momenten in deze week.' : null),
   });
 }

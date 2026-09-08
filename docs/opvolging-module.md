@@ -396,3 +396,66 @@ zeggen.
 weg voordat er iets van werd vastgelegd, dus er valt niets te herstellen. Het
 rapport hoort daarover te zeggen dat het het venster niet kon meten — niet dat
 er geen bericht is gestuurd.
+
+## Een dag moet achteraf te reconstrueren zijn
+
+Maxims eis, in zijn woorden: *"als de zoom gepland is moet die gewoon hard
+blijven staan op die dag, en dan in het grijs, niet altijd weggaan als hij
+herpland is — anders verliezen we het overzicht van wat er effectief op die dag
+stond."*
+
+De reden erachter is scherper dan de wens zelf. Verdwijnt een afspraak stil uit
+een dag zodra iemand hem verzet, dan klopt het dagbeeld van gisteren morgen niet
+meer — en dan is **het rapport over die dag ook niet meer waar**. Wat er op een
+dag stond is een feit over die dag, en dat verandert niet meer door wat er
+daarna met de afspraak gebeurt.
+
+### Twee soorten verzetten, en alleen de tweede is een probleem
+
+| | wat er gebeurt | is de oude dag nog bekend? |
+|---|---|---|
+| **nieuwe rij** | `follow-up-verplaats-call.js` zet de oude rij op `verplaatst` en maakt een nieuwe met `parent_appointment_id` | ja, in de oude rij |
+| **dezelfde rij** | de GHL-poll schrijft `scheduled_at` over met wat GHL zegt | **nee, overschreven** |
+
+De tweede is de stille. De poll schrijft elke vijf minuten een *volledige* rij
+weg; wordt de afspraak in GHL verplaatst, dan verhuist onze rij mee. Geen
+opvolger, geen melding, geen spoor. sander De groot ging zo van 7 naar 15
+september, en op 7 september was daarna niet meer te zien dat hij er ooit stond.
+
+### De oplossing: één kolom die nooit meebeweegt
+
+`follow_up_appointments.eerst_gepland_op`, gezet bij het aanmaken en daarna
+onveranderlijk. De dagweergave zoekt op `scheduled_at` **OF** `eerst_gepland_op`,
+en toont de afspraak op de dag waarop hij stónd.
+
+**De onveranderlijkheid zit in een database-trigger, niet in discipline.** Dat is
+geen overdaad: de poll schrijft onvoorwaardelijk een volledige rij, dus elke
+schrijver die ooit een kolomlijst uitbreidt of een rij doorlust naar een update
+zou de waarde meenemen. Met de trigger is dat onmogelijk, ongeacht wat de code
+doet — en de applicatiecode hoeft de kolom alleen te *lezen*.
+
+Bijvangst die precies goed uitkomt: staat `eerst_gepland_op` op een andere dag
+dan `scheduled_at`, dan wéten we waarheen het verzet is. Juist het moeilijke
+geval geeft de bestemming gratis: *"verzet naar 15 september om 15:00"*.
+
+### Twee lijsten, en dat moet zo blijven
+
+De agenda geeft per dag nu `bezet` **en** `gepland`, en dat is met opzet:
+
+- **`bezet`** bepaalt welke vrije momenten wegvallen. Daar horen alleen
+  `scheduled` en `in_progress` in. Zou een geannuleerde afspraak hier meetellen,
+  dan blokkeert een afzegging voorgoed een slot dat vrij is — en dat merk je pas
+  als iemand niet meer kan boeken.
+- **`gepland`** is het dagbeeld: alles wat voor die dag stond, met een staat en
+  een label erbij.
+
+Twee vragen, twee antwoorden. Ze bij elkaar trekken is de fout die zich pas
+maanden later meldt.
+
+### Wat er niet meer terugkomt
+
+Alles wat vóór deze migratie in dezelfde rij verzet is, is weg. De backfill zet
+`eerst_gepland_op = scheduled_at`, en voor die rijen is dat de *nieuwe* dag. Dat
+is het beste wat er nog is en het is eerlijk — het zegt "voor zover wij weten
+stond hij hier" — maar het herstelt de oude dag niet. Vanaf de migratie wordt
+het wél bewaard.

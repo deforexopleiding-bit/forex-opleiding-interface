@@ -15,6 +15,10 @@
 //
 // Pure functie, geen netwerk, geen database — zie tests/opvolging-agenda-merge.test.js.
 
+import {
+  oorspronkelijkeDag, oorspronkelijkeTijd, verzetNaar, toonStaat,
+} from './opvolging-dagbeeld.js';
+
 /** Statussen die een moment daadwerkelijk bezet houden. */
 const BEZET_STATUSSEN = new Set(['scheduled', 'in_progress']);
 
@@ -99,9 +103,45 @@ export function dagenTussen(van, tot) {
  * Uitvoer per dag: { dag, vrij: [{tijd}], bezet: [{tijd, naam, status}] }.
  * Een tijd die in allebei voorkomt telt als bezet en verdwijnt uit vrij.
  */
-export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe/Amsterdam' }) {
+export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe/Amsterdam', nuMs = Date.now() }) {
   const dagen = dagenTussen(van, tot);
   const inVenster = new Set(dagen);
+
+  // ── WAT ER OP DIE DAG STOND, ONGEACHT WAT ERVAN GEWORDEN IS ─────────────
+  // `bezet` hieronder is iets anders en moet iets anders blijven: dat bepaalt
+  // welke vrije momenten wegvallen, en daar hoort een geannuleerde afspraak
+  // NIET in — anders blokkeert een afzegging voorgoed een slot dat vrij is.
+  //
+  // `gepland` is het dagbeeld: alles wat voor die dag gepland stond, met de
+  // staat erbij. Twee lijsten dus, met opzet, want ze beantwoorden twee
+  // verschillende vragen. Ze bij elkaar trekken is precies de fout die je pas
+  // merkt als iemand niet meer kan boeken.
+  //
+  // En de dag komt uit oorspronkelijkeDag(), niet uit scheduled_at: een
+  // afspraak die in dezelfde rij naar een andere dag is verplaatst hoort op de
+  // dag te blijven staan waarop hij stónd. Zie _lib/opvolging-dagbeeld.js.
+  const geplandPerDag = new Map();
+  for (const a of (Array.isArray(afspraken) ? afspraken : [])) {
+    if (!a || !a.scheduled_at) continue;
+    const dag = oorspronkelijkeDag(a);
+    if (!dag || !inVenster.has(dag)) continue;
+    const toon = toonStaat(a, nuMs);
+    if (!geplandPerDag.has(dag)) geplandPerDag.set(dag, []);
+    geplandPerDag.get(dag).push({
+      tijd          : oorspronkelijkeTijd(a),
+      naam          : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+      status        : String(a.status || 'scheduled').toLowerCase(),
+      staat         : toon.staat,
+      label         : toon.label,
+      doorgehaald   : toon.doorgehaald,
+      verzet_naar   : verzetNaar(a),
+      appointment_id: a.id || null,
+      telefoon      : a.lead_phone || null,
+      email         : a.lead_email || null,
+      zoom_url      : a.zoom_join_url || null,
+      start         : a.scheduled_at || null,
+    });
+  }
 
   // ── Bezet eerst: dat bepaalt wat er van vrij overblijft. ──────────────────
   const bezetPerDag = new Map();
@@ -161,5 +201,9 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
     vrij : [...(vrijPerDag.get(dag) || new Set())].sort()
       .map((tijd) => ({ tijd, iso: zoneMomentNaarIso(dag, tijd, timeZone) })),
     bezet: [...(bezetPerDag.get(dag) || new Map()).values()].sort((a, b) => a.tijd.localeCompare(b.tijd)),
+    // Het dagbeeld: alles wat voor deze dag gepland stond. Zie de kop van dit
+    // blok voor waarom dit naast `bezet` staat en niet in plaats daarvan.
+    gepland: (geplandPerDag.get(dag) || [])
+      .sort((a, b) => String(a.tijd || '').localeCompare(String(b.tijd || ''))),
   }));
 }
