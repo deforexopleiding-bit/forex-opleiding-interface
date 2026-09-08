@@ -32,6 +32,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalLijn, trajectSlugs, normNummer } from './_lib/leadsonderhoud-gesprekken.js';
 import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { renderTemplatePreview } from './_lib/render-template-preview.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_NAME = 200;
@@ -113,11 +114,36 @@ export default async function handler(req, res) {
     const nu = new Date().toISOString();
 
     // Log-bubbel voor de thread: whatsapp_messages met template_name + body
-    // = de gerenderde tekst (als we die kunnen bouwen; anders template-naam).
-    // Hier laten we de body leeg vs. gerender-tekst aan de caller — server
-    // heeft geen body_text van de template ingelezen (dat vraagt een extra
-    // fetch die de flow niet nodig heeft). Frontend appent optimistisch met
-    // de door hem gerenderde tekst.
+    // = de gerenderde tekst. Voorheen bleef body='' → CRM-thread en lijst-
+    // preview toonden "[sjabloon] naam" via leadsonderhoud-gesprek-berichten.js
+    // regel 79. Nu renderen we de body via de bestaande render-template-
+    // preview-helper (zelfde patroon als inbox-send-template.js), zodat de
+    // gerenderde tekst persistent zichtbaar is bij page-refresh.
+    //
+    // De variables-array is positioneel (variables[0] = {{1}}, etc.). De
+    // helper verwacht templateVariables als object { "1": val, "2": val }.
+    const templateVarsMap = variables.length
+      ? Object.fromEntries(variables.map((v, i) => [String(i + 1), String(v ?? '')]))
+      : null;
+    let renderedBody = null;
+    try {
+      const preview = await renderTemplatePreview({
+        templateName,
+        templateVariables: templateVarsMap,
+        supabase: supabaseAdmin,
+      });
+      // source='meta_template' = geslaagde render; source='legacy_label' /
+      // 'no_template_name' = fallback naar '[template] naam'. In de
+      // legacy-fallback willen we body='' laten (leadsonderhoud-gesprek-
+      // berichten.js regel 79 vult dan alsnog '[sjabloon] naam' — beter
+      // consistent gedrag dan '[template] naam' in de rauwe body).
+      if (preview && preview.source === 'meta_template' && preview.body) {
+        renderedBody = preview.body;
+      }
+    } catch (e) {
+      console.warn('[ls-gesprek-template] renderTemplatePreview soft-fail:', e?.message || e);
+    }
+
     if (conv) {
       try {
         await supabaseAdmin
@@ -127,14 +153,18 @@ export default async function handler(req, res) {
             direction: 'out',
             meta_wamid: wamid,
             template_name: templateName,
-            body: '', // template-body is voor de user-side; de gerenderde tekst zit optimistisch in de UI
+            template_variables: templateVarsMap,
+            body: renderedBody || '',
             status: 'queued',
             sent_at: nu,
             sent_by_user_id: user.id,
           });
         await supabaseAdmin
           .from('whatsapp_conversations')
-          .update({ last_message_at: nu, last_message_preview: 'template: ' + templateName })
+          .update({
+            last_message_at: nu,
+            last_message_preview: (renderedBody || ('template: ' + templateName)).slice(0, 120),
+          })
           .eq('id', conv.id);
       } catch (e) {
         console.error('[ls-gesprek-template] log-insert soft-fail:', e?.message || e);
