@@ -1,25 +1,9 @@
 // api/cron-opvolging-doorrol.js
 //
-// Fase 3a — de achterstand naar vandaag halen. Draait dagelijks (zie
-// vercel.json), en het maakt niet meer uit hoe laat.
+// Fase 3a — de dag afsluiten. Draait dagelijks om 23:59 (zie vercel.json).
 //
-// Elke taak die open staat met een `due` VOOR de huidige Amsterdamse datum
-// krijgt die datum, en `later` gaat terug naar false.
-//
-// ── WAAROM 'VANDAAG' EN NIET 'MORGEN' ────────────────────────────────────
-// Dit stond eerder op morgen, en dat kostte elke nacht een dag. De cron staat
-// in vercel.json op `59 23 * * *`, Vercel draait crons in UTC, en 23:59 UTC is
-// 01:59 in Amsterdam — het is dan al de volgende dag. 'Morgen' werd daarmee
-// overmorgen, en elke openstaande kaart sloeg precies een dag over. Gemeten op
-// 8 september: de vijf leads van de dag ervoor stonden op de 9e, dus op de 8e
-// nergens, met updated_at 07-09T23:59 als bewijs dat de cron ze wel degelijk
-// had aangeraakt.
-//
-// De schema-tijd verzetten repareert dat niet duurzaam: Nederland schuift twee
-// keer per jaar, dus wat in de zomer klopt is in de winter weer mis. Redeneren
-// in vandaag haalt de klok uit de vergelijking — en het belangrijkste: slaat er
-// een nacht over, dan haalt de volgende run alles alsnog naar voren in plaats
-// van kaarten voorgoed in het verleden te laten hangen.
+// Elke taak die open staat met een `due` van vóór morgen krijgt morgen als
+// nieuwe dag, en `later` gaat terug naar false.
 //
 // Die reset is niet cosmetisch. Wie vandaag op "later vandaag" drukt zakt naar
 // de tweede ronde; zonder deze cron blijft hij daar staan, ook morgen en
@@ -35,10 +19,20 @@
 // Schrijft uitsluitend in opvolging_taken.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { bepaalDoorrol, doorrolDag } from './_lib/opvolging-doorrol.js';
+import { bepaalDoorrol } from './_lib/opvolging-doorrol.js';
 
 const ABORT_MS  = 25_000;
 const PAGINA    = 500;
+const ZONE      = 'Europe/Amsterdam';
+
+// De dag zoals Dave hem ziet, niet zoals UTC hem telt. Om 23:59 Amsterdamse
+// tijd is het in UTC al de volgende dag in de winter — dan zou 'morgen'
+// overmorgen worden en verdwijnt de hele lijst een dag.
+function dagInZone(ms) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(ms));
+}
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -52,14 +46,11 @@ export default async function handler(req, res) {
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
   const startedAt = Date.now();
-  // GEEN ETMAAL ERBIJ. Dat was de fout: op het moment dat deze cron draait is
-  // het in Amsterdam al de nieuwe dag, en dan wijst 'morgen' een dag te ver.
-  // De som staat in de lib, met een test eronder.
-  const vandaag = doorrolDag(startedAt);
-  console.log('[cron-opvolging-doorrol] start vandaag=' + vandaag);
+  const morgen = dagInZone(startedAt + 24 * 3600 * 1000);
+  console.log('[cron-opvolging-doorrol] start morgen=' + morgen);
 
   const summary = {
-    vandaag,
+    morgen,
     bekeken       : 0,
     doorgerold    : 0,
     later_gereset : 0,
@@ -81,14 +72,14 @@ export default async function handler(req, res) {
         .from('opvolging_taken')
         .select('id, status, due, later')
         .eq('status', 'open')
-        .lt('due', vandaag)
+        .lt('due', morgen)
         .order('due', { ascending: true })
         .range(offset, offset + PAGINA - 1);
       if (error) throw new Error('lezen: ' + error.message);
       if (!taken || taken.length === 0) break;
 
       summary.bekeken += taken.length;
-      for (const { id, patch } of bepaalDoorrol({ taken, vandaag })) {
+      for (const { id, patch } of bepaalDoorrol({ taken, morgen })) {
         try {
           const vorige = taken.find((t) => t.id === id);
           const { error: upErr } = await supabaseAdmin

@@ -18,29 +18,12 @@ export const WACHT_UREN = 48;
 const DATUM_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * Wat er met de achterstallige openstaande taken gebeurt.
+ * Wat er 's nachts met de openstaande taken gebeurt.
  *
- * DE REGEL IS 'NAAR VANDAAG', NIET 'NAAR MORGEN', EN DAT IS EEN GEMETEN LES.
- *
- * De oude regel zette alles op morgen. Dat werkt alleen als de cron ook echt
- * vóór middernacht draait, en dat deed hij niet: in vercel.json staat hij op
- * `59 23 * * *`, Vercel draait crons in UTC, en 23:59 UTC is 01:59 in
- * Amsterdam. Het was dan dus al de volgende dag, 'morgen' werd overmorgen, en
- * elke openstaande kaart sloeg precies een dag over. Op 8 september stonden de
- * vijf leads van de dag ervoor daardoor op 9 september — niet blijven liggen,
- * maar een dag onzichtbaar.
- *
- * Een tijdzonecorrectie op het schema lost dat niet op: `59 21 * * *` klopt in
- * de zomer en is in de winter weer mis, want Nederland schuift twee keer per
- * jaar. Redeneren in VANDAAG haalt de klok uit de vergelijking. Het gevolg:
- *
- *   · idempotent — twee keer draaien verandert de tweede keer niets;
- *   · tijdstip-onafhankelijk — het maakt niet uit hoe laat de cron valt;
- *   · zelfhelend — slaat een nacht over of faalt een run, dan haalt de
- *     volgende run alles alsnog naar voren, in plaats van kaarten voorgoed in
- *     het verleden te laten hangen.
- *
- * Dat laatste is het verschil tussen 'werkt' en 'blijft werken'.
+ * Elke taak die open staat en een `due` van vóór morgen heeft, krijgt morgen
+ * als nieuwe dag. De lijst van vandaag is dan morgen weer compleet, met de
+ * melding "bleef liggen" die de kaart zelf al toont zodra due in het verleden
+ * ligt — daarom zetten we due op morgen en niet op de dag van doorrollen.
  *
  * `later` gaat expliciet terug naar false. Dat is het punt van deze cron:
  * zonder die reset blijft een taak die vandaag naar de tweede ronde is gezet
@@ -48,43 +31,25 @@ const DATUM_RE = /^\d{4}-\d{2}-\d{2}$/;
  * van bovenaan de eerste ronde te beginnen. Dan lijkt hij afgehandeld terwijl
  * er nooit meer iemand naar kijkt.
  *
- *   taken   — [{ id, status, due, later }]
- *   vandaag — 'YYYY-MM-DD', de huidige Amsterdamse datum
+ *   taken  — [{ id, status, due, later }]
+ *   morgen — 'YYYY-MM-DD'
  *
  * Geeft alleen de taken terug die echt veranderen, met de patch erbij. Wat al
  * goed staat blijft ongemoeid — geen zinloze updates, en geen updated_at die
  * verschuift zonder reden.
  */
-const ZONE = 'Europe/Amsterdam';
-
-/**
- * De dag waarop de doorrol moet richten: VANDAAG in Amsterdam.
- *
- * Staat hier als pure functie en niet als regel in de cron, omdat juist dit
- * rekensommetje de fout bevatte. `dagInZone(nu + 24 uur)` leest als 'morgen' en
- * was dat ook — maar de cron draait om 01:59 Amsterdamse tijd, dus 'morgen' was
- * al overmorgen. Zo'n som hoort in een test te staan waar je hem kunt naslaan,
- * niet in een handler waar je hem alleen in productie ziet werken.
- */
-export function doorrolDag(nuMs) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(nuMs));
-}
-
-export function bepaalDoorrol({ taken, vandaag }) {
-  if (!DATUM_RE.test(String(vandaag || ''))) return [];
+export function bepaalDoorrol({ taken, morgen }) {
+  if (!DATUM_RE.test(String(morgen || ''))) return [];
   const uit = [];
   for (const t of (Array.isArray(taken) ? taken : [])) {
     if (!t || !t.id) continue;
     if (String(t.status || '') !== 'open') continue;
     const due = String(t.due || '');
     if (!DATUM_RE.test(due)) continue;
-    // Alleen wat achterloopt. Een taak van vandaag is niet achterstallig, en
-    // een taak die de gebruiker zelf vooruit heeft gezet mag deze cron nooit
-    // naar voren trekken.
-    if (due >= vandaag) continue;
-    uit.push({ id: t.id, patch: { due: vandaag, later: false } });
+    // Alleen wat achterloopt. Een taak die de gebruiker zelf vooruit heeft
+    // gezet (due in de toekomst) mag deze cron nooit naar morgen trekken.
+    if (due >= morgen) continue;
+    uit.push({ id: t.id, patch: { due: morgen, later: false } });
   }
   return uit;
 }
