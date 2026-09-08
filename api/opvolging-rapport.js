@@ -242,17 +242,7 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   }
 
   // ── De taken achter die pogingen en calls ────────────────────────────────
-  // OP DE RUWE LIJST, EN DAT MOET OOK. De testrijen worden pas verderop
-  // gefilterd, en dat kan niet eerder: om te weten welke poging op een
-  // TESTKAART hangt moet je die kaarten eerst opgehaald hebben. De volgorde is
-  // dus: alle taak_ids verzamelen -> kaarten ophalen -> zien welke is_test zijn
-  // -> pas dan de pogingen splitsen.
-  //
-  // Hier stond `pogingen`, en dat is de gefilterde lijst die pas op regel ~316
-  // gedeclareerd wordt. Een const in de temporal dead zone gooit geen
-  // waarschuwing bij het inlezen maar een ReferenceError bij het DRAAIEN — en
-  // dus gaf /api/opvolging-rapport 500 voor elke dag, ongeacht de data.
-  const taakIds = new Set(pogingenRuw.map((p) => p.taak_id).filter(Boolean));
+  const taakIds = new Set(pogingen.map((p) => p.taak_id).filter(Boolean));
   for (const a of gearchiveerd) taakIds.add(a.id);
 
   const { data: taakRuw, error: e4 } = taakIds.size
