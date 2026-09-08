@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import { isContact, ontleedResultaat } from '../api/_lib/opvolging-poging-telling.js';
+import { DEKKING_VANAF } from '../api/_lib/opvolging-leadlijst-venster.js';
 import {
   telVolume, bouwVensters, bouwZoomcalls, bouwArchief, vulAandacht,
 } from '../api/opvolging-rapport.js';
@@ -23,6 +24,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BRON = readFileSync(join(ROOT, 'api/opvolging-rapport.js'), 'utf8');
 
 const DAG = '2026-09-01';
+// Een dag waarop de leadlijst de zoomcall-leads dekt. Vóór DEKKING_VANAF kon de
+// brug hun berichten niet eens zien, en dan hoort sectie 3 een blinde vlek te
+// melden in plaats van een oordeel — zie tests/opvolging-leadlijst-zoomcalls.
+// Tests die over iets anders gaan, gebruiken daarom een gedekte dag.
+const DAG_MEETBAAR = DEKKING_VANAF;
 const op = (uur, min = 0) => `${DAG}T${String(uur - 2).padStart(2, '0')}:${String(min).padStart(2, '0')}:00Z`;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -142,7 +148,7 @@ test('de aandachtlijst is alleen leeg als er echt niets is', () => {
   vulAandacht({
     aandacht, blindeVlekken: [],
     dekking: { behandeld: [{ naam: 'Jan' }], onbehandeld: [] },
-    vensters: { rijen: [{ naam: 'Jan', dag: DAG, spraak: { staat: 'op_tijd', tijd: '08:30' }, nabel: { staat: 'niet_nodig', reden: 'heeft geantwoord' } }], zonder_taak: [] },
+    vensters: { rijen: [{ naam: 'Jan', dag: DAG_MEETBAAR, spraak: { staat: 'op_tijd', tijd: '08:30' }, nabel: { staat: 'niet_nodig', reden: 'heeft geantwoord' } }], zonder_taak: [] },
     zoomcalls: [{ naam: 'Jan', dag: DAG, vastgelegd: true, uitkomst: 'sale' }],
     archief: [{ naam: 'Jan', moeite: { staat: 'genoeg' }, bel_totaal: 3, bel_dagen: 3, wa_totaal: 1 }],
   });
@@ -185,7 +191,7 @@ test('calls zonder taak melden zich als blinde vlek, niet als gemist spraakberic
   vulAandacht({
     aandacht, blindeVlekken: [],
     dekking: { behandeld: [], onbehandeld: null },
-    vensters: { rijen: [], zonder_taak: [{ appointment_id: 'a1', naam: 'Los' }] },
+    vensters: { rijen: [], zonder_taak: [{ appointment_id: 'a1', naam: 'Los', dag: DAG_MEETBAAR }] },
     zoomcalls: [], archief: [],
   });
   assert.equal(aandacht.length, 1);
