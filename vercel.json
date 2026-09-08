@@ -11,6 +11,10 @@
   },
   "crons": [
     {
+      "path": "/api/cron-whatsapp-media-recovery",
+      "schedule": "*/10 * * * *"
+    },
+    {
       "path": "/api/sync-emails",
       "schedule": "*/5 * * * *"
     },
@@ -53,10 +57,6 @@
     {
       "path": "/api/cron-lisa-delayed",
       "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron-whatsapp-media-recovery",
-      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron-finance-sync",
