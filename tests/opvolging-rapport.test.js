@@ -468,9 +468,14 @@ test('bouwVensters krijgt de samengevoegde takenset, niet alleen de pogingen-set
 });
 
 test('een afgekapte takenlijst wordt gemeld en niet stil geslikt', () => {
-  const i = BRON.indexOf('telefoonAfgekapt = ');
-  assert.ok(i > 0);
-  const blok = BRON.slice(i, i + 700);
+  // LET OP DE VORM VAN DEZE TEST. Hij knipte 700 tekens vanaf de toewijzing en
+  // zocht daarin naar de melding. Toen er commentaar bij kwam schoof de melding
+  // buiten dat venster en werd hij rood terwijl de code klopte — de
+  // venster-alibi uit docs/opvolging-module.md, in spiegelbeeld.
+  // Nu op het BLOK zelf: van de if tot zijn sluitaccolade.
+  const i = BRON.indexOf('if (telefoonAfgekapt) {');
+  assert.ok(i > 0, 'het blok hoort te bestaan');
+  const blok = BRON.slice(i, BRON.indexOf('\n    }', i));
   assert.match(blok, /blindeVlekken\.push/);
 });
 

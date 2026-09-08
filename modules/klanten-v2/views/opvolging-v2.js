@@ -4729,6 +4729,11 @@
       ' <span class="opvr-u">' + esc(nl(r.dag)) + ' ' + esc(r.tijd || '') + '</span></div>' +
       '<div class="opvr-u">' + esc(r.soort) + ' &middot; ' + (r.richting === 'in' ? 'binnengekomen' : 'verstuurd') +
       (r.duur_sec != null ? ' &middot; ' + r.duur_sec + ' sec' : '') + '</div></div>');
+    // ZICHTBAAR, NIET STIL. Een filter dat je niet ziet is een filter dat je op
+    // een dag vergeet, en dan zoek je een uur naar twee ontbrekende belpogingen.
+    if (d.testrijen && d.testrijen.zin) {
+      h += '<div class="ronde zacht">' + esc(d.testrijen.zin) + '</div>';
+    }
     return h + '</div>';
   }
 
