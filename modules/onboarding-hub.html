@@ -285,6 +285,7 @@
     <button type="button" class="ob-sectie-tab active" data-sectie="overzicht"><i class="ti ti-list-details"></i> Overzicht</button>
     <button type="button" class="ob-sectie-tab" data-sectie="wizard"><i class="ti ti-edit"></i> Wizard</button>
     <button type="button" class="ob-sectie-tab" data-sectie="automations"><i class="ti ti-bolt"></i> Automations</button>
+    <button type="button" class="ob-sectie-tab" data-sectie="lmskoppeling" id="obTabLms" style="display:none"><i class="ti ti-link"></i> LMS-koppeling</button>
   </nav>
 
   <!-- Overzicht-sectie: OnboardingOverzicht-mount + compacte client-side tellers. -->
@@ -325,6 +326,39 @@
     </div>
     <div id="ob-automations-host"></div>
   </section>
+
+  <!-- LMS-koppeling: de inhaalslag. Twee knoppen, en de tweede kan pas nadat
+       de eerste iets getoond heeft. Gegate op students.all.view — dezelfde
+       sleutel als het admin-studentenoverzicht; sales/mentor krijgen deze
+       sectie niet te zien. De server gate't hetzelfde, dus verbergen is
+       gemak, geen beveiliging. -->
+  <section class="ob-sectie" id="ob-sectie-lmskoppeling" data-sectie="lmskoppeling">
+    <div style="max-width:900px">
+      <h3 style="margin:0 0 6px">Studenten koppelen aan het LMS</h3>
+      <p style="margin:0 0 4px;color:var(--text-2);font-size:13.5px;line-height:1.55">
+        Lopende onboardings zonder LMS-student krijgen hier hun koppeling. Bestaat de
+        student al in het LMS, dan wordt hij <strong>gekoppeld</strong>; bestaat hij niet,
+        dan wordt er een <strong>nieuwe rij aangemaakt</strong>. Testrijen doen niet mee.
+      </p>
+      <p style="margin:0 0 14px;color:var(--text-2);font-size:13.5px;line-height:1.55">
+        <strong>Er gaat geen enkele mail uit.</strong> Geen uitnodiging, geen wachtwoord,
+        geen bericht. Uitnodigen is een aparte beslissing en zit niet in deze knop.
+      </p>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <button type="button" id="obLmsDroogloop" class="btn">
+          <i class="ti ti-eye"></i> Droogloop &mdash; laat zien wat er zou gebeuren
+        </button>
+        <button type="button" id="obLmsUitvoeren" class="btn primary" disabled
+                title="Draai eerst de droogloop">
+          <i class="ti ti-player-play"></i> Uitvoeren
+        </button>
+        <span id="obLmsStatus" style="font-size:13px;color:var(--text-2)"></span>
+      </div>
+
+      <div id="obLmsUitkomst"></div>
+    </div>
+  </section>
 </div>
 
 <script src="/modules/shared/supabase-client.js"></script>
@@ -352,6 +386,16 @@
     } catch (e) {
       console.warn('[onboarding-hub] RBAC load faalde:', e && e.message ? e.message : e);
     }
+    // De LMS-koppeling-sectie is gegate op students.all.view — dezelfde
+    // sleutel als het admin-studentenoverzicht. De server gate't hetzelfde,
+    // dus dit verbergen is gemak en geen beveiliging.
+    try {
+      if (window.RBAC && window.RBAC.canSync && window.RBAC.canSync('students.all.view')) {
+        const t = document.getElementById('obTabLms');
+        if (t) t.style.display = '';
+      }
+    } catch (e) { /* geen tab, geen probleem */ }
+
     // Fase 2a: hub-toegang uitgebreid met onboarding.view_own zodat een
     // mentor de hub kan openen en z'n eigen studenten kan zien. Wizard
     // en Automations blijven onboarding.wizard.edit resp.
@@ -451,7 +495,183 @@
       // Lazy mount: Wizard / Automations pas opbouwen bij eerste opening.
       if (next === 'wizard')      mountWizardIfNeeded();
       if (next === 'automations') mountAutomationsIfNeeded();
+      if (next === 'lmskoppeling') mountLmsKoppelingIfNeeded();
     });
+  }
+
+  // ── LMS-koppeling: de inhaalslag ────────────────────────────────────────
+  //
+  // Twee knoppen, en de tweede kan pas nadat de eerste iets getoond heeft.
+  // Dat is hier niet alleen een uitgegrijsde knop: de server eist bij
+  // uitvoeren de twee getallen uit de droogloop, en weigert met 409 als ze
+  // niet exact kloppen. Een handmatig samengesteld verzoek komt er dus ook
+  // niet langs. De knop-staat is gemak, de server is de grendel.
+  let _lmsGemount = false;
+  let _lmsDroogloop = null;   // de laatste droogloop-uitkomst
+  let _lmsBezig = false;
+
+  function mountLmsKoppelingIfNeeded() {
+    if (_lmsGemount) return;
+    _lmsGemount = true;
+    const dro = document.getElementById('obLmsDroogloop');
+    const uit = document.getElementById('obLmsUitvoeren');
+    if (dro) dro.addEventListener('click', () => lmsDraai(false));
+    if (uit) uit.addEventListener('click', () => lmsDraai(true));
+  }
+
+  function lmsStatus(tekst, kleur) {
+    const el = document.getElementById('obLmsStatus');
+    if (el) { el.textContent = tekst || ''; el.style.color = kleur || 'var(--text-2)'; }
+  }
+
+  async function lmsDraai(uitvoeren) {
+    if (_lmsBezig) return;
+    // Uitvoeren kan alleen met een droogloop in de hand.
+    if (uitvoeren && !_lmsDroogloop) {
+      lmsStatus('Draai eerst de droogloop.', 'var(--rose)');
+      return;
+    }
+    if (uitvoeren) {
+      const k = _lmsDroogloop.zou_koppelen || 0;
+      const a = _lmsDroogloop.zou_aanmaken || 0;
+      if (k === 0 && a === 0) {
+        lmsStatus('Er is niets te doen — de droogloop vond nul koppelingen en nul aanmaakacties.', 'var(--text-2)');
+        return;
+      }
+      const akkoord = window.confirm(
+        'Dit koppelt ' + k + ' student' + (k === 1 ? '' : 'en') +
+        ' en maakt ' + a + ' nieuwe rij' + (a === 1 ? '' : 'en') + ' aan in het LMS.\n\n' +
+        'Er gaat geen mail uit. Doorgaan?');
+      if (!akkoord) return;
+    }
+
+    _lmsBezig = true;
+    const dro = document.getElementById('obLmsDroogloop');
+    const uitBtn = document.getElementById('obLmsUitvoeren');
+    if (dro) dro.disabled = true;
+    if (uitBtn) uitBtn.disabled = true;
+    lmsStatus(uitvoeren ? 'Bezig met uitvoeren…' : 'Bezig met de droogloop…');
+
+    const payload = uitvoeren
+      ? { uitvoeren: true,
+          koppelen: _lmsDroogloop.zou_koppelen || 0,
+          aanmaken: _lmsDroogloop.zou_aanmaken || 0 }
+      : {};
+
+    try {
+      const r = await window.AgentShared.apiFetch('/api/onboarding-lms-backfill-run', {
+        method: 'POST', body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) {
+        lmsStatus('Mislukt: ' + ((d && d.error) || ('HTTP ' + r.status)), 'var(--rose)');
+        lmsRender(d, uitvoeren);
+        return;
+      }
+      if (!uitvoeren) {
+        _lmsDroogloop = d;
+        if (uitBtn) {
+          uitBtn.disabled = false;
+          uitBtn.title = '';
+        }
+        lmsStatus('Droogloop klaar — niets gewijzigd.');
+      } else {
+        // Na uitvoeren is de oude droogloop verlopen: opnieuw kijken is de
+        // enige manier om te weten wat er nu nog open staat.
+        _lmsDroogloop = null;
+        if (uitBtn) { uitBtn.disabled = true; uitBtn.title = 'Draai eerst opnieuw de droogloop'; }
+        lmsStatus('Uitgevoerd. Draai de droogloop opnieuw om te zien wat er nu nog open staat.');
+      }
+      lmsRender(d, uitvoeren);
+    } catch (e) {
+      lmsStatus('Mislukt: ' + (e && e.message ? e.message : e), 'var(--rose)');
+    } finally {
+      _lmsBezig = false;
+      if (dro) dro.disabled = false;
+    }
+  }
+
+  const LMS_LABEL = {
+    zou_koppelen           : 'wordt gekoppeld',
+    zou_aanmaken           : 'wordt aangemaakt',
+    al_gekoppeld           : 'al gekoppeld',
+    overslaan_geen_email   : 'overgeslagen — geen e-mailadres',
+    overslaan_naam_treffer : 'overgeslagen — zelfde naam, ander adres',
+    overslaan_testrij      : 'overgeslagen — testrij',
+  };
+
+  function lmsRender(d, uitvoeren) {
+    const host = document.getElementById('obLmsUitkomst');
+    if (!host) return;
+    if (!d) { host.innerHTML = ''; return; }
+    const esc = (window.AgentShared && window.AgentShared.esc)
+      ? window.AgentShared.esc
+      : (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
+          { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+    const rijen = Array.isArray(d.rijen) ? d.rijen : [];
+    const tel = (n, w) => '<span style="margin-right:16px"><strong>' + n + '</strong> ' + w + '</span>';
+
+    let html = '<div style="background:var(--bg-elev);border:1px solid var(--border);'
+      + 'border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px">'
+      + '<div style="margin-bottom:6px"><strong>'
+      + (uitvoeren ? 'Uitgevoerd' : 'Droogloop — er is niets gewijzigd') + '</strong></div>'
+      + (uitvoeren
+          ? tel(d.gekoppeld || 0, 'gekoppeld') + tel(d.aangemaakt || 0, 'aangemaakt')
+          : tel(d.zou_koppelen || 0, 'te koppelen') + tel(d.zou_aanmaken || 0, 'aan te maken'))
+      + tel(d.mislukt || 0, 'mislukt')
+      + tel(d.overgeslagen_al_gekoppeld || 0, 'al gekoppeld')
+      + tel(d.overgeslagen_naam_treffer || 0, 'naam-treffer')
+      + tel(d.overgeslagen_geen_email || 0, 'geen adres')
+      + tel(d.overgeslagen_testrij || 0, 'testrij')
+      + '</div>';
+
+    if (d.error) {
+      html += '<div style="background:var(--rose-soft);border:1px solid var(--rose-line);'
+        + 'color:var(--rose);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">'
+        + esc(d.error) + '</div>';
+    }
+
+    if (rijen.length === 0) {
+      html += '<div style="color:var(--text-2);font-size:13.5px">Geen kandidaten.</div>';
+      host.innerHTML = html;
+      return;
+    }
+
+    html += '<table class="data-table" style="width:100%;font-size:13px"><thead><tr>'
+      + '<th>Klant</th><th>E-mail</th><th>Traject</th><th>Mentor</th>'
+      + '<th>Start</th><th>' + (uitvoeren ? 'Wat er gebeurd is' : 'Wat er zou gebeuren') + '</th>'
+      + '</tr></thead><tbody>';
+    for (const r of rijen) {
+      // Bij uitvoeren staat in `uitkomst` wat er ECHT gebeurd is, inclusief de
+      // reden bij een mislukking. Alleen tellen wat gelukt is zou de helft
+      // van het verhaal zijn.
+      const wat = uitvoeren
+        ? (r.uitkomst || LMS_LABEL[r.besluit] || r.besluit)
+        : (LMS_LABEL[r.besluit] || r.besluit);
+      const mislukt = /mislukt/i.test(String(wat));
+      const doet = r.besluit === 'zou_koppelen' || r.besluit === 'zou_aanmaken';
+      let extra = '';
+      if (r.besluit === 'overslaan_naam_treffer' && Array.isArray(r.naam_treffers)) {
+        extra = '<div style="color:var(--text-3);font-size:11.5px">ook in LMS als: '
+          + r.naam_treffers.map((t) => esc(t.email || t.id)).join(', ') + '</div>';
+      }
+      if (r.besluit === 'zou_koppelen' && r.lms_mentor_leeg && r.crm_kent_mentor) {
+        extra += '<div style="color:var(--amber,#b45309);font-size:11.5px">'
+          + 'LMS-rij heeft geen mentor; het CRM wel. Koppelen vult die niet in.</div>';
+      }
+      html += '<tr>'
+        + '<td>' + esc(r.naam || '—') + '</td>'
+        + '<td>' + esc(r.email || '—') + '</td>'
+        + '<td>' + esc(r.traject || '—') + '</td>'
+        + '<td>' + esc(r.mentor || '—') + '</td>'
+        + '<td>' + esc(r.start_datum || '—') + '</td>'
+        + '<td style="' + (mislukt ? 'color:var(--rose)' : (doet ? 'font-weight:600' : 'color:var(--text-2)')) + '">'
+        + esc(wat) + extra + '</td>'
+        + '</tr>';
+    }
+    html += '</tbody></table>';
+    host.innerHTML = html;
   }
 
   // ── Compacte tellers — afgeleid uit de geladen Overzicht-lijst via

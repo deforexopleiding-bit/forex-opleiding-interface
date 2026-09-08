@@ -757,6 +757,34 @@ theorie: de eerste versie filterde er **niet** op, en de testonboarding op
 terwijl we die LMS-rij diezelfde ochtend juist hadden opgeruimd. Zonder filter
 had de inhaalslag 'm meteen opnieuw aangemaakt. Drie tests bewaken dat nu.
 
+**Er is een knop, en die is wat we gebruiken.** De inhaalslag zat eerst alleen
+achter `CRON_SECRET`, en dat betekent dat iemand met een sleutel een commando
+moet typen. Zo werkt het hier niet: Maxim werkt met knoppen, en een geheim in
+een terminal is precies de plek waar het misgaat.
+
+De logica staat daarom in `api/_lib/onboarding-lms-backfill.js` met **twee dunne
+ingangen**: `api/onboarding-lms-backfill-run.js` (de knop, sessie +
+`students.all.view`) en `api/cron/onboarding-lms-backfill.js` (het geheim,
+blijft bestaan voor later). Eén implementatie; er is geen tweede versie die kan
+afwijken, en het post-bewijs rekent de afsluiting van **alle drie** uit.
+
+Het scherm: **Onboarding-hub → tabblad "LMS-koppeling"**
+(`/modules/onboarding-hub.html`). Twee knoppen, in deze volgorde: *Droogloop* en
+daarna pas *Uitvoeren*. Dat is niet alleen een uitgegrijsde knop — de server
+eist bij uitvoeren de twee getallen uit de droogloop en weigert met 409 als ze
+niet exact kloppen. Ook een handmatig samengesteld verzoek komt er dus niet
+langs.
+
+**De uitkomst is per klant.** Gekoppeld, aangemaakt, of de reden waarom het
+misging — niet een totaalgetal dat alleen telt wat gelukt is. Bij een
+koppel-rij zonder mentor in het LMS staat er bovendien een waarschuwing dat
+koppelen die niet invult.
+
+De rechtensleutel is `students.all.view`, dezelfde als het
+admin-studentenoverzicht: manager en super_admin. `onboarding.admin` zou ruimer
+zijn geweest (ook sales), en dat is voor een knop die twintig echte klanten
+raakt te ruim.
+
 **Droogloop is de standaard.** Zonder parameters doet hij niets. Uitvoeren
 vraagt `?uitvoeren=ja&koppelen=<K>&aanmaken=<A>` — twee getallen, want twee
 acties met een verschillend risico, en allebei moeten ze exact overeenkomen met
