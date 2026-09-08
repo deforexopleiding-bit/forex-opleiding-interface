@@ -510,12 +510,12 @@ De les zit in het onderscheid: een zelfhelende regel voorkomt het probleem
 verschillende opdrachten, en de eerste voelt alsof hij de tweede meeneemt. Dat
 doet hij niet.
 
-De reparatie staat als eenmalige actie in
-[`docs/sql-migrations/2026-09-08-doorrol-inhaalactie-vijf-kaarten.sql`](sql-migrations/2026-09-08-doorrol-inhaalactie-vijf-kaarten.sql),
-met de vingerafdruk `status='open'` + `due = 2026-09-09` + `updated_at` in het
-venster van de kapotte doorrol — want er staan ook kaarten die terecht op 9
-september horen. Het script **weigert te draaien als het er geen vijf zijn**:
-een verkeerde aanname over de vingerafdruk mag geen halve reparatie opleveren.
+De reparatie is met de hand gedaan: de vijf zijn eenmalig naar 8 september
+gehaald. De vingerafdruk daarvoor is `status='open'` + `due = 2026-09-09` +
+een `updated_at` in het venster van de kapotte doorrol — dat laatste is het
+beslissende deel, want er stonden ook kaarten die terecht op 9 september
+hoorden, en 01:59 Amsterdamse tijd is een moment waarop geen mens een kaart
+verzet.
 
 ### En de zesde controle was niet genoeg
 
