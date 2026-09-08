@@ -3528,10 +3528,14 @@ input.ib-input::-webkit-datetime-edit-fields-wrapper { color: var(--text, #11172
     width:100% !important; max-width:100% !important; min-width:0 !important;
     border-right:0;
   }
+  /* !important overrulet inline display:flex op #lisaConvList en op de
+     .lisa-gesp-right / .ls-inb-right placeholders. Zonder dit blijft de
+     lijst zichtbaar na tap (thread rendert eronder in de column-layout)
+     en toont de placeholder onder de lijst bij initial mount. */
   .ls-inb-split[data-has-sel="1"] #lsInbList,
-  .lisa-gesp-split[data-has-sel="1"] #lisaConvList { display:none; }
+  .lisa-gesp-split[data-has-sel="1"] #lisaConvList { display:none !important; }
   .ls-inb-split:not([data-has-sel="1"]) .ls-inb-right,
-  .lisa-gesp-split:not([data-has-sel="1"]) .lisa-gesp-right { display:none; }
+  .lisa-gesp-split:not([data-has-sel="1"]) .lisa-gesp-right { display:none !important; }
   .ls-inb-split .mob-back,
   .lisa-gesp-split .mob-back { display:flex; }
 }
