@@ -108,3 +108,102 @@ test('annuleren telt het aantal bevestigden opnieuw', () => {
   const blok = bron.slice(i, bron.indexOf("if (actie === 'bevestigd')"));
   assert.match(blok, /onConfirmedAttendeeMutation\(/);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE TWEE DINGEN DIE DE BOVENSTAANDE TESTS NIET ZAGEN
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Bij het opnieuw nakijken van deze PR (hij lag 27 commits achter) zijn er twee
+// bewuste regressies ingebouwd die NUL rood gaven:
+//
+//   · de herberekening van het aantal bevestigden overslaan;
+//   · een deelnemer die niet meer bestaat als succes melden.
+//
+// De eerste is uitgerekend het punt dat de kop van
+// api/_lib/event-attendee-bevestigen.js zelf aanwijst als 'wat je vergeet als
+// je even een tweede weg bouwt' — aan dat aantal hangt het openen en sluiten
+// van de inschrijving. Een test die het belangrijkste punt van een bestand niet
+// bewaakt is precies de alibi-test die we deze week zes keer hebben opgeruimd.
+
+/** Een supabaseAdmin die genoeg kan voor deze functie, en verder niets. */
+function nepAdmin({ rij, schrijfFout = null }) {
+  const geschreven = [];
+  return {
+    geschreven,
+    from() {
+      const q = {
+        select: () => q,
+        eq    : () => q,
+        maybeSingle: async () => ({ data: rij, error: null }),
+        update: (patch) => { geschreven.push(patch); return { eq: async () => ({ error: schrijfFout }) }; },
+      };
+      return q;
+    },
+  };
+}
+
+test('het aantal bevestigden wordt herberekend zodra de status meebeweegt', async () => {
+  // Hieraan hangt het openen en sluiten van de inschrijving. Sla je dit over,
+  // dan blijft een event onnodig dicht en ziet niemand waarom.
+  const gebeld = [];
+  const uit = await bevestigDeelnemer({
+    supabaseAdmin: nepAdmin({ rij: { id: 'a1', event_id: 'ev-1', status: 'geannuleerd', call_status: null } }),
+    attendeeId: 'a1', nowIso: NU, bron: 'test',
+    herbereken: async (eventId, opts) => { gebeld.push({ eventId, opts }); },
+  });
+  assert.equal(uit.ok, true);
+  assert.equal(uit.status_hersteld, 'geannuleerd');
+  assert.equal(gebeld.length, 1, 'de teller hoort precies één keer herberekend te worden');
+  assert.equal(gebeld[0].eventId, 'ev-1');
+});
+
+test('stond de deelnemer al gewoon aangemeld, dan verandert het aantal niet', async () => {
+  // Geen status-wijziging betekent geen ander aantal bevestigden. Dan is een
+  // herberekening zinloos werk op elke bevestiging.
+  const gebeld = [];
+  const uit = await bevestigDeelnemer({
+    supabaseAdmin: nepAdmin({ rij: { id: 'a1', event_id: 'ev-1', status: 'aangemeld', call_status: null } }),
+    attendeeId: 'a1', nowIso: NU,
+    herbereken: async () => { gebeld.push(1); },
+  });
+  assert.equal(uit.ok, true);
+  assert.equal(gebeld.length, 0);
+});
+
+test('een mislukte herberekening maakt de bevestiging niet ongedaan, maar wordt wel gemeld', async () => {
+  const uit = await bevestigDeelnemer({
+    supabaseAdmin: nepAdmin({ rij: { id: 'a1', event_id: 'ev-1', status: 'geannuleerd' } }),
+    attendeeId: 'a1', nowIso: NU,
+    herbereken: async () => { throw new Error('teller stuk'); },
+  });
+  assert.equal(uit.ok, true, 'de bevestiging zelf is geschreven en blijft staan');
+  assert.match(String(uit.telling), /mislukt/);
+  assert.match(String(uit.telling), /teller stuk/);
+});
+
+test('een deelnemer die niet meer bestaat is GEEN succes', async () => {
+  // Ok teruggeven zou de caller laten melden dat de eventmodule bijgewerkt is
+  // terwijl er niets gebeurd is. Overgeslagen, met de reden erbij.
+  const uit = await bevestigDeelnemer({
+    supabaseAdmin: nepAdmin({ rij: null }), attendeeId: 'weg', nowIso: NU,
+    herbereken: async () => {},
+  });
+  assert.equal(uit.ok, false);
+  assert.equal(uit.overgeslagen, true);
+  assert.match(uit.fout, /bestaat niet meer/);
+});
+
+test('zonder attendee_id gebeurt er niets, en dat is geen fout om over te loggen', async () => {
+  // Een opvolgkaart hoeft niet aan een deelnemer te hangen. Dan is er niets te
+  // synchroniseren, en dat hoort geen foutmelding op te leveren.
+  const uit = await bevestigDeelnemer({ supabaseAdmin: nepAdmin({ rij: null }), attendeeId: null, nowIso: NU });
+  assert.equal(uit.ok, false);
+  assert.equal(uit.overgeslagen, true);
+});
+
+test('de velden die weggeschreven worden zijn precies de bevestigingPatch', async () => {
+  const admin = nepAdmin({ rij: { id: 'a1', event_id: 'ev-1', status: 'aangemeld' } });
+  await bevestigDeelnemer({ supabaseAdmin: admin, attendeeId: 'a1', nowIso: NU, herbereken: async () => {} });
+  assert.equal(admin.geschreven.length, 1);
+  assert.deepEqual(admin.geschreven[0], bevestigingPatch({ huidigeStatus: 'aangemeld', nowIso: NU }));
+});

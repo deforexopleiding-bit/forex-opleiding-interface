@@ -55,7 +55,13 @@ export function bevestigingPatch({ huidigeStatus, nowIso }) {
  * niet op stuklopen — maar geeft `{ ok:false, fout }` terug, en de caller zet
  * dat in het antwoord én in console.error.
  */
-export async function bevestigDeelnemer({ supabaseAdmin, attendeeId, nowIso, bron }) {
+export async function bevestigDeelnemer({
+  supabaseAdmin, attendeeId, nowIso, bron,
+  // Injecteerbaar, zodat een test kan vastleggen DAT de teller herberekend
+  // wordt. Dat is het punt dat de kop hierboven aanwijst als 'wat je vergeet',
+  // en zonder deze haak was het alleen in productie te zien.
+  herbereken = onConfirmedAttendeeMutation,
+}) {
   if (!attendeeId) return { ok: false, fout: 'geen attendee_id', overgeslagen: true };
   try {
     const { data: voor, error: leesErr } = await supabaseAdmin
@@ -72,7 +78,7 @@ export async function bevestigDeelnemer({ supabaseAdmin, attendeeId, nowIso, bro
     let telling = null;
     if (patch.status !== undefined && voor.event_id) {
       try {
-        await onConfirmedAttendeeMutation(voor.event_id, { reason: bron || 'opvolging-bevestigd' });
+        await herbereken(voor.event_id, { reason: bron || 'opvolging-bevestigd' });
         telling = 'herberekend';
       } catch (e) {
         telling = 'mislukt: ' + (e?.message || e);
