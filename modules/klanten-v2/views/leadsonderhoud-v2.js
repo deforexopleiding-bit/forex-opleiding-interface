@@ -842,6 +842,13 @@
       at: m.ts || null,
       is_read: !!m.is_read,
       template_name: m.template_name || m.templateName || null,
+      // 2026-09-08: media-info doorgeven aan renderChatBody (_shared-v2.js)
+      // zodat inbound WA-afbeeldingen als <img> renderen. Gelijkgetrokken
+      // met inbox-v2:944 pattern; endpoint levert media_url + media_type
+      // in top-level en in `meta` (dubbele gate, renderer leest beide).
+      media_url:  m.media_url || null,
+      media_type: m.media_type || null,
+      meta: m.meta || { media_url: m.media_url || null, media_type: m.media_type || null },
     }));
     _lsInb.thread.conversation = j.conversation || null;
     _lsInb.thread.loading = false;
