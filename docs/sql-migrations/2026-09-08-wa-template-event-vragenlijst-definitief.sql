@@ -53,6 +53,9 @@ Vul je gegevens niet in, dan vervalt je plek automatisch.',
    '4', 'attendee.vervolg_link'
  )),
  'LOCAL')
+-- LET OP: status bewust NIET overschrijven op conflict — anders zou re-runnen
+-- een reeds APPROVED template terugzetten naar LOCAL (en dan stopt de WA-send,
+-- want die eist status=APPROVED). We laten de bestaande status staan.
 ON CONFLICT (business_account_id, name, language) DO UPDATE SET
   category          = EXCLUDED.category,
   header_type       = EXCLUDED.header_type,
@@ -60,7 +63,6 @@ ON CONFLICT (business_account_id, name, language) DO UPDATE SET
   body_examples     = EXCLUDED.body_examples,
   buttons           = EXCLUDED.buttons,
   meta_param_mapping= EXCLUDED.meta_param_mapping,
-  status            = 'LOCAL',
   updated_at        = now();
 
 COMMIT;
