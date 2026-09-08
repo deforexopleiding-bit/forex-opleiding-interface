@@ -11,6 +11,11 @@
 import { supabaseAdmin } from '../supabase.js';
 import { customerDisplayName } from './customer-name.js';
 import { createDossierCore } from './incasso-dossier.js';
+import {
+  todayIsoInTz,
+  daysOverdueSigned,
+  readGraceDaysSetting,
+} from './dunning-overdue-guard.js';
 
 const SETTINGS_KEY = 'incasso_auto';
 const OPEN_INV_STATUSES = ['open', 'partially_paid', 'overdue'];
@@ -73,18 +78,24 @@ function openAmountEur(inv) {
   const c = Number(inv?.credited_amount) || 0;
   return Math.max(0, t - p - c);
 }
-function daysOverdue(iso, nowMs) {
-  if (!iso) return null;
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t) || t >= nowMs) return 0;
-  return Math.floor((nowMs - t) / (24 * 3600 * 1000));
+// ONGECLAMPTE dagen te laat t.o.v. vandaag in Europe/Amsterdam.
+// Negatief = de factuur vervalt PAS over |n| dagen. null = geen due_date.
+// Voorheen werd hier op 0 geclampt, waardoor een toekomstige vervaldatum als
+// "0 dagen te laat" telde en dus door de drempels heen kon glippen.
+function daysOverdue(iso, todayIso) {
+  return daysOverdueSigned(iso, todayIso);
 }
 
 // evaluateIncassoCandidates() — draait tegen huidige settings + DB, returnt
 // de kandidatenlijst. Geen side effects.
 export async function evaluateIncassoCandidates(opts = {}) {
   const settings = opts.settings || await getIncassoAutoSettings();
-  const nowMs = Date.now();
+  const todayIso = todayIsoInTz();
+  // Gedeelde gratieperiode met de aanmaan-motor (app_settings
+  // 'dunning_grace_days', default 0).
+  const graceDays = Number.isFinite(Number(opts.graceDays))
+    ? Number(opts.graceDays)
+    : await readGraceDaysSetting(supabaseAdmin);
 
   // 1) Open facturen aggregeren per klant.
   const { data: invRows, error: iErr } = await supabaseAdmin
@@ -98,13 +109,21 @@ export async function evaluateIncassoCandidates(opts = {}) {
     if (!inv.customer_id) continue;
     const openEur = openAmountEur(inv);
     if (openEur <= 0) continue;
-    const dOverdue = daysOverdue(inv.due_date, nowMs);
+    const dOverdue = daysOverdue(inv.due_date, todayIso);
     const agg = perCustomer.get(inv.customer_id) || {
-      customer_id: inv.customer_id, open_invoice_count: 0, total_open_eur: 0, max_days_overdue: 0,
+      customer_id: inv.customer_id, open_invoice_count: 0, total_open_eur: 0,
+      max_days_overdue: 0,
+      // Ongeclampte variant: null zolang geen enkele factuur een due_date had.
+      max_days_overdue_signed: null,
     };
     agg.open_invoice_count += 1;
     agg.total_open_eur     += openEur;
-    if (dOverdue != null && dOverdue > agg.max_days_overdue) agg.max_days_overdue = dOverdue;
+    if (dOverdue != null) {
+      if (agg.max_days_overdue_signed == null || dOverdue > agg.max_days_overdue_signed) {
+        agg.max_days_overdue_signed = dOverdue;
+      }
+      if (dOverdue > agg.max_days_overdue) agg.max_days_overdue = dOverdue;
+    }
     perCustomer.set(inv.customer_id, agg);
   }
 
@@ -173,6 +192,14 @@ export async function evaluateIncassoCandidates(opts = {}) {
     const cust = custById.get(cid);
     if (!cust) continue;
     if (cust.is_test || cust.archived_at || cust.anonymized_at) continue;
+
+    // HARDE POORT: minstens één factuur moet ECHT te laat zijn
+    // (due_date + grace < vandaag, Europe/Amsterdam). Staat vóór de
+    // instelbare drempels, zodat een klant met alleen nog-niet-vervallen
+    // facturen nooit als incasso-kandidaat opduikt — ook niet als
+    // min_days_overdue uit staat (null).
+    if (agg.max_days_overdue_signed == null) continue;
+    if (agg.max_days_overdue_signed <= graceDays) continue;
 
     // Drempels (AND, alleen indien ingesteld).
     if (S.min_amount_open_eur != null && agg.total_open_eur < S.min_amount_open_eur) continue;

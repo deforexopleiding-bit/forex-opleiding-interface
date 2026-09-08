@@ -5311,9 +5311,9 @@
                     Min openstaand bedrag (EUR)
                     <input id="dunWfTrgMinAmount" type="number" class="fin-input" min="0" value="0"/>
                   </label>
-                  <label style="font-size:11px;color:var(--text-dim)">
-                    Min dagen NA factuurdatum (dag-N-duwtje)
-                    <input id="dunWfTrgMinDaysSinceInvoice" type="number" class="fin-input" min="0" placeholder="leeg = niet gebruiken"/>
+                  <label style="font-size:11px;color:var(--text-dim)" title="GENEGEERD door de motor: de vervaldatum uit TeamLeader is de enige ankerdatum. Het veld blijft staan zodat bestaande waarden niet stilletjes verdwijnen.">
+                    Min dagen NA factuurdatum <span style="color:var(--rose)">(genegeerd)</span>
+                    <input id="dunWfTrgMinDaysSinceInvoice" type="number" class="fin-input" min="0" placeholder="wordt niet gelezen"/>
                   </label>
                   <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:6px;padding-top:16px">
                     <input id="dunWfTrgRunOnce" type="checkbox" style="width:auto;margin:0"/>
@@ -9418,6 +9418,40 @@
   let _dunWfTemplatesCache = null;     // cache van /api/finance-dunning-templates-list
   let _dunWfWired = false;
 
+  // Aanmaan-ladder: templatenaam → dagen NA de vervaldatum
+  // (app_settings.dunning_ladder). De Meta-namen zijn bij Meta goedgekeurd en
+  // blijven ongewijzigd; het getal erin zegt NIETS over het moment van
+  // verzenden (aanmaning_dag7 vertrekt op dag 1). Daarom zetten we het echte
+  // moment overal als label bij de stap.
+  let _dunLadderCache = null;          // null = niet geladen, {} = geladen zonder ladder
+  async function loadDunLadderCache() {
+    if (_dunLadderCache) return _dunLadderCache;
+    try {
+      const r = await window.AgentShared.apiFetch('/api/dunning-settings-get');
+      const d = await r.json().catch(() => ({}));
+      _dunLadderCache = (r.ok && d.dunning_ladder && typeof d.dunning_ladder === 'object')
+        ? d.dunning_ladder : {};
+    } catch (e) {
+      console.error('[dunWf ladder cache]', e.message);
+      _dunLadderCache = {};
+    }
+    return _dunLadderCache;
+  }
+  /** "verstuurd op dag 1 na vervaldatum" — null als de template niet op de ladder staat. */
+  function dunLadderLabel(templateName) {
+    if (!_dunLadderCache) return null;
+    const name = typeof templateName === 'string' ? templateName.trim() : '';
+    if (!name) return null;
+    const n = Number(_dunLadderCache[name]);
+    if (!Number.isFinite(n)) return null;
+    return n <= 0 ? 'verstuurd vanaf de vervaldatum' : `verstuurd op dag ${Math.trunc(n)} na vervaldatum`;
+  }
+  /** Templatenaam + ladder-moment, voor <option>-labels. */
+  function dunTplOptionLabel(t) {
+    const lbl = dunLadderLabel(t?.meta_template_name) || dunLadderLabel(t?.name);
+    return `${t?.name || ''}${lbl ? ' — ' + lbl : ''}`;
+  }
+
   async function loadDunWfTemplatesCache() {
     if (_dunWfTemplatesCache) return _dunWfTemplatesCache;
     try {
@@ -9542,7 +9576,7 @@
     document.getElementById('dunWfTrgMinDays').value      = (tc.min_days_overdue != null) ? tc.min_days_overdue : 14;
     document.getElementById('dunWfTrgCustomerType').value = tc.customer_type || 'any';
     document.getElementById('dunWfTrgMinAmount').value    = (tc.min_amount != null) ? tc.min_amount : 0;
-    // Nieuwe dag-N-duwtje-velden: leeg = niet gebruiken (engine default).
+    // min_days_since_invoice_date: alleen nog ter informatie — genegeerd.
     document.getElementById('dunWfTrgMinDaysSinceInvoice').value = (tc.min_days_since_invoice_date != null) ? tc.min_days_since_invoice_date : '';
     document.getElementById('dunWfTrgRunOnce').checked           = tc.run_once_per_customer_per_workflow === true;
     // Fase 2b: arrangement_breached-trigger checkbox.
@@ -9617,6 +9651,11 @@
       // Fire-and-forget: laad approved-lijst en re-render steps zodra klaar.
       loadApprovedMetaTemplates().then(() => { try { renderDunWfSteps(steps); } catch (_) {} });
     }
+    if (_dunLadderCache === null) {
+      // Idem voor de ladder — zodra binnen staat het echte verzendmoment bij
+      // elke template in de picker.
+      loadDunLadderCache().then(() => { try { renderDunWfSteps(steps); } catch (_) {} });
+    }
     wrap.innerHTML = steps.map((s, idx) => {
       const type = s.step_type || 'wait';
       const cfg  = s.config || {};
@@ -9633,7 +9672,7 @@
           ? filtered.filter((t) => t.meta_template_name && approvedMetaNames && approvedMetaNames.has(t.meta_template_name))
           : filtered;
         const opts = selectable
-          .map((t) => `<option value="${esc(t.id)}" ${cfg.template_id === t.id ? 'selected' : ''}>${esc(t.name)}</option>`)
+          .map((t) => `<option value="${esc(t.id)}" ${cfg.template_id === t.id ? 'selected' : ''}>${esc(dunTplOptionLabel(t))}</option>`)
           .join('');
         // Als de huidige geselecteerde WhatsApp-template niet in de
         // whitelist zit, tonen we hem als disabled-optie zodat de UI zijn
@@ -9643,7 +9682,7 @@
         if (isWa && cfg.template_id && !selectable.some((t) => t.id === cfg.template_id)) {
           const currentTpl = filtered.find((t) => t.id === cfg.template_id);
           if (currentTpl) {
-            disabledCurrent = `<option value="${esc(currentTpl.id)}" selected disabled>${esc(currentTpl.name)} — ⚠ geen goedgekeurde Meta-template</option>`;
+            disabledCurrent = `<option value="${esc(currentTpl.id)}" selected disabled>${esc(dunTplOptionLabel(currentTpl))} — ⚠ geen goedgekeurde Meta-template</option>`;
           }
         }
         // Loading-hint zolang approved-lijst nog niet binnen is (isWa-only).
@@ -9652,16 +9691,27 @@
           : '';
         return `<option value="">— kies template —</option>${disabledCurrent}${loadingHint}${opts}`;
       };
+      // Ladder-hint onder de picker: het moment komt uit de ladder, niet uit
+      // de (bij Meta goedgekeurde) templatenaam.
+      const curTplRow = cfg.template_id ? templates.find((t) => t.id === cfg.template_id) : null;
+      const curLadderLbl = curTplRow
+        ? (dunLadderLabel(curTplRow.meta_template_name) || dunLadderLabel(curTplRow.name))
+        : null;
+      const ladderHint = curLadderLbl
+        ? `<div style="font-size:10.5px;color:#34d399;margin-top:3px">⏱ ${esc(curTplRow.meta_template_name || curTplRow.name)} — ${esc(curLadderLbl)} <span style="color:var(--text-faint)">(moment komt uit de ladder, niet uit de naam)</span></div>`
+        : '';
       let cfgHtml = '';
       if (type === 'email') {
         cfgHtml = `<label style="font-size:11px;color:var(--text-dim);grid-column:1/-1">
           E-mail template
           <select class="fin-input" data-stepfield="template_id">${tplOptions('email')}</select>
+          ${ladderHint}
         </label>`;
       } else if (type === 'whatsapp') {
         cfgHtml = `<label style="font-size:11px;color:var(--text-dim);grid-column:1/-1">
           WhatsApp template
           <select class="fin-input" data-stepfield="template_id">${tplOptions('whatsapp')}</select>
+          ${ladderHint}
         </label>`;
       } else if (type === 'wait') {
         cfgHtml = `<label style="font-size:11px;color:var(--text-dim)">
@@ -9808,14 +9858,16 @@
     if (!Number.isInteger(priority)) return showDunWfErr('Priority moet integer zijn');
 
     const trigger_conditions = {};
-    // min_days_overdue leeg laten → engine gebruikt default 14 (backwards-compat).
-    // Voor het dag-N-duwtje kan Jeffrey dit veld leegmaken; dan bepaalt alleen
-    // min_days_since_invoice_date wanneer de workflow vuurt.
+    // min_days_overdue leeg laten → de motor neemt de laagste ladder-sport van
+    // de eigen send-stappen (of 14 als geen enkele stap op de ladder staat).
+    // min_days_since_invoice_date stuurt NIETS meer aan: de vervaldatum uit
+    // TeamLeader is de enige ankerdatum.
     const minDaysInput = document.getElementById('dunWfTrgMinDays').value;
     if (minDaysInput !== '' && Number.isFinite(minDays) && minDays >= 0) trigger_conditions.min_days_overdue = minDays;
     if (custType && custType !== 'any')               trigger_conditions.customer_type   = custType;
     if (Number.isFinite(minAmount) && minAmount > 0)  trigger_conditions.min_amount      = minAmount;
-    // Dag-N-duwtje-velden: leeg = niet meesturen (engine ziet geen key).
+    // min_days_since_invoice_date: blijft bewaard voor wie 'm ooit invulde,
+    // maar wordt door de motor genegeerd (zie dunning-engine.js).
     const minDaysSinceInvoiceInput = document.getElementById('dunWfTrgMinDaysSinceInvoice').value;
     if (minDaysSinceInvoiceInput !== '') {
       const n = Number(minDaysSinceInvoiceInput);
@@ -11649,10 +11701,18 @@
       const cfgPreview = s.config && typeof s.config === 'object'
         ? Object.entries(s.config).slice(0, 3).map(([k, v]) => `${k}=${String(v).slice(0, 30)}`).join(' · ')
         : '';
+      // Ladder-moment erbij als de caches al warm zijn (fail-soft: geen
+      // extra fetch vanuit deze modal, geen label als er niets bekend is).
+      const tplRow = (s.config?.template_id && Array.isArray(_dunWfTemplatesCache))
+        ? _dunWfTemplatesCache.find((t) => t.id === s.config.template_id)
+        : null;
+      const ladderLbl = tplRow
+        ? (dunLadderLabel(tplRow.meta_template_name) || dunLadderLabel(tplRow.name))
+        : null;
       return `<div style="${bg};border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:8px">
         <div style="font-size:11.5px;color:var(--text-faint);min-width:32px">#${esc(s.step_order)}</div>
         <div style="flex:1">
-          <div style="font-size:12.5px;font-weight:600">${marker}${esc(s.step_type)}</div>
+          <div style="font-size:12.5px;font-weight:600">${marker}${esc(s.step_type)}${ladderLbl ? ` <span style="font-weight:400;color:#34d399;font-size:11px">· ${esc(tplRow.meta_template_name || tplRow.name)} — ${esc(ladderLbl)}</span>` : ''}</div>
           ${cfgPreview ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px;font-family:ui-monospace,Menlo,Consolas,monospace">${esc(cfgPreview)}</div>` : ''}
         </div>
       </div>`;

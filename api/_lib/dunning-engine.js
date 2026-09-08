@@ -41,7 +41,22 @@ import {
   isWithinOfficeHours,
   readOfficeHoursSetting,
   officeHoursLabel,
+  nextSendSlotIso,
 } from './dunning-office-hours.js';
+import {
+  todayIsoInTz,
+  daysOverdueSigned,
+  isOverdue,
+  readGraceDaysSetting,
+  resolveStepTierDays,
+  resolveWorkflowStartDays,
+  readLadderSetting,
+  ladderLabel,
+  earliestSendIso,
+  readMaxSendsPerDaySetting,
+  channelOfStepType,
+  zonedDayStartIso,
+} from './dunning-overdue-guard.js';
 
 // OPEN_STATUSES komt nu uit dunning-pipeline.js (OPEN_INVOICE_STATUSES) — één
 // gedeelde bron-van-waarheid voor "open factuur", zie import bovenaan.
@@ -366,7 +381,10 @@ async function fetchActiveArrangementInvoiceIds(customerId = null) {
  * met { customer, openInvoices, total_open_eur, oldest_due_iso, days_overdue }.
  */
 function aggregatePerCustomer(rows) {
-  const todayMs = todayMidnightMs();
+  const todayMs  = todayMidnightMs();
+  // Kalenderdag in Europe/Amsterdam — NOOIT de UTC-datum, die schuift tussen
+  // 00:00 en 02:00 (zomertijd) een dag terug.
+  const todayIso = todayIsoInTz();
   const per = new Map();
   for (const inv of rows) {
     const cust = inv.customers;
@@ -411,6 +429,12 @@ function aggregatePerCustomer(rows) {
       days = Math.floor((todayMs - oldestMs) / 86400000);
     }
     agg.days_overdue = days;
+    // ONGECLAMPTE teller naast de geclampte. Negatief = de oudste openstaande
+    // factuur vervalt PAS over |n| dagen. De geclampte `days_overdue` blijft
+    // bestaan voor back-compat (log-payloads, bestaande lezers), maar mag
+    // NOOIT meer als poort voor een send dienen — zie isOverdue hieronder.
+    agg.days_overdue_signed = daysOverdueSigned(agg.oldest_due_iso, todayIso);
+    agg.is_overdue          = isOverdue(agg.oldest_due_iso, todayIso, 0);
     // days_since_oldest_invoice — leeftijd van de oudste openstaande factuur.
     // Wordt gebruikt door workflows met trigger_conditions.min_days_since_invoice_date
     // (bv. het vriendelijke dag-7-duwtje). Gebruikt dezelfde dueDateMs-parser
@@ -423,6 +447,91 @@ function aggregatePerCustomer(rows) {
     agg.days_since_oldest_invoice = daysSinceInvoice;
   }
   return per;
+}
+
+/**
+ * Tel per klant én PER KANAAL hoeveel aanmaan-berichten er VANDAAG al zijn
+ * verstuurd (lokale kalenderdag, Europe/Amsterdam). Bron: dunning_log-events
+ * 'whatsapp_sent' / 'email_sent' over ALLE runs van die klant — de dagcap is
+ * per KLANT, niet per run, zodat twee runs samen de cap niet omzeilen.
+ *
+ * Per kanaal, omdat de productie-workflow per ronde een WhatsApp én een
+ * e-mail vlak na elkaar stuurt; een gedeelde cap zou dat koppel breken.
+ *
+ * Fail-soft: bij een DB-fout komt er een lege Map terug en laat de cap alles
+ * door (oud gedrag). Beter een bericht te veel dan een stilgevallen motor.
+ *
+ * @returns {Promise<Map<string, {whatsapp: number, email: number}>>}
+ */
+async function countSendsTodayByCustomer(customerIds, dayStartIso) {
+  const out = new Map();
+  if (!customerIds?.length || !dayStartIso) return out;
+  const CHUNK = 200;   // .in()-lijsten kort houden (URL-lengte bij PostgREST)
+  try {
+    // 1) alle runs van deze klanten (ook completed/cancelled — een send van
+    //    vanochtend telt mee, ook als die run intussen is afgerond).
+    const runRows = [];
+    for (let i = 0; i < customerIds.length; i += CHUNK) {
+      const slice = customerIds.slice(i, i + CHUNK);
+      const rows = await fetchAllRows(() => supabaseAdmin
+        .from('dunning_workflow_runs')
+        .select('id, customer_id')
+        .in('customer_id', slice));
+      runRows.push(...rows);
+    }
+    if (!runRows.length) return out;
+    const custByRun = new Map(runRows.map((r) => [r.id, r.customer_id]));
+
+    // 2) sends van vandaag over die runs.
+    const runIds = Array.from(custByRun.keys());
+    for (let i = 0; i < runIds.length; i += CHUNK) {
+      const slice = runIds.slice(i, i + CHUNK);
+      const logs = await fetchAllRows(() => supabaseAdmin
+        .from('dunning_log')
+        .select('run_id, event_type')
+        .in('run_id', slice)
+        .in('event_type', ['email_sent', 'whatsapp_sent'])
+        .gte('created_at', dayStartIso));
+      for (const l of logs) {
+        const cid = custByRun.get(l.run_id);
+        if (!cid) continue;
+        const chan = l.event_type === 'whatsapp_sent' ? 'whatsapp' : 'email';
+        const cur = out.get(cid) || { whatsapp: 0, email: 0 };
+        cur[chan] += 1;
+        out.set(cid, cur);
+      }
+    }
+  } catch (e) {
+    console.warn('[dunning-engine] dagcap-telling fail-soft, cap laat door:', e?.message || e);
+    return new Map();
+  }
+  return out;
+}
+
+/**
+ * Haal de templates op die bij een set workflow-stappen horen.
+ * Returnt Map<template_id, { id, name, meta_template_name }>.
+ *
+ * Nodig om de ladder-sport van een send-stap op te zoeken (de ladder is
+ * gesleuteld op templatenaam). Eén query per workflow/run, fail-soft: zonder
+ * templates vervalt alleen de ladder-check — de harde vervaldatum-poort blijft.
+ */
+async function fetchStepTemplates(steps) {
+  const out = new Map();
+  try {
+    const ids = Array.from(new Set(
+      (steps || []).map((st) => st?.config?.template_id).filter(Boolean)
+    ));
+    if (!ids.length) return out;
+    const { data } = await supabaseAdmin
+      .from('dunning_templates')
+      .select('id, name, meta_template_name')
+      .in('id', ids);
+    for (const t of data || []) out.set(t.id, t);
+  } catch (e) {
+    console.warn('[dunning-engine] ladder-template lookup fail-soft:', e?.message || e);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +568,19 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   }
   const cooldownCutoffIso = new Date(Date.now() - cooldownDays * 24 * 60 * 60 * 1000).toISOString();
 
+  // ── Gratieperiode één keer per engine-run laden ────────────────────────
+  // app_settings key 'dunning_grace_days' ({ days: int 0..90 }), default 0.
+  // Samen met de harde vervaldatum-poort hieronder: er gaat NIETS uit op of
+  // vóór de vervaldag, en met grace N pas vanaf N dagen daarna.
+  const graceDays = await readGraceDaysSetting(supabaseAdmin);
+  const todayIso  = todayIsoInTz();
+
+  // ── Ladder één keer per engine-run laden ───────────────────────────────
+  // app_settings key 'dunning_ladder': templatenaam → dagen NA de vervaldatum.
+  // Bepaalt zowel vanaf welke dag een workflow mag starten (laagste sport)
+  // als, in de advance-fase, wanneer elke send-stap mag vertrekken.
+  const ladder = await readLadderSetting(supabaseAdmin);
+
   // ── Pipeline-hook: nieuwe wanbetalers → 'nieuw'-fase (batch, geen N+1) ─
   // Eén ronde per engine-run: verzamel alle unieke customer_ids met een
   // te late factuur, roep ensurePipelineCustomer per klant aan (idempotent
@@ -475,7 +597,12 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   try {
     const { isAutoEnabled, ensurePipelineCustomer } = await import('./dunning-pipeline.js');
     if (await isAutoEnabled('on_overdue_to_nieuw')) {
-      const today = new Date().toISOString().slice(0, 10);
+      // Cutoff = vandaag (Europe/Amsterdam) minus de gratieperiode. `lt`
+      // sluit de dag zelf uit, dus met grace 0 stroomt een factuur pas in
+      // vanaf de dag NA de vervaldag. Voorheen stond hier de UTC-datum.
+      const today = new Date(
+        Date.parse(`${todayIso}T00:00:00Z`) - graceDays * 86400000
+      ).toISOString().slice(0, 10);
       // Gepagineerd via fetchAllRows — bij >1000 overdue-rijen mistten we
       // customer_ids die verderop nooit door de count-query zouden komen,
       // dus die klanten stroomden nooit in.
@@ -624,32 +751,36 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     console.warn('[dunning-engine] grace-resolve sweep soft-fail:', e?.message || e);
   }
 
+  // Telt hoe vaak de harde vervaldatum-poort een start heeft tegengehouden.
+  // Zichtbaar in de cron-log zodat een verkeerd geconfigureerde workflow
+  // (die op niet-vervallen facturen mikt) meteen opvalt.
+  let skippedNotOverdue = 0;
+
   outer: for (const workflow of workflows || []) {
     if (elapsed(startedAt) > abortMs) break;
 
     const tc = workflow.trigger_conditions || {};
-    // Backwards-compat: als NIETS gezet is (nieuwe workflows zonder velden) →
-    // fallback default 14 dagen overdue (huidige gedrag). Als er WEL een
-    // min_days_since_invoice_date is gezet zonder min_days_overdue, moet de
-    // overdue-check GEEN default 14 gebruiken (anders zou een dag-7 duwtje
-    // pas dag-21 vuren). We zetten minDays op -1 zodat de overdue-check
-    // effectief altijd slaagt (days_overdue >= 0).
-    const hasOverdueTrigger      = Number.isFinite(tc.min_days_overdue);
-    const hasIssueDateTrigger    = Number.isFinite(tc.min_days_since_invoice_date);
+    // ANKERDATUM = de vervaldatum uit TeamLeader, en niets anders.
+    // `min_days_since_invoice_date` (de oude "N dagen na factuurdatum"-
+    // trigger) wordt NIET meer gelezen: een betaaltermijn zit al in de
+    // vervaldatum verwerkt en is niet bij elke klant 7 dagen (regelingen,
+    // splitsingen, afwijkende termijnen). Zelf dagen bij de factuurdatum
+    // optellen leverde precies de bug op waarbij niet-vervallen facturen
+    // een aanmaning kregen. De key blijft ongemoeid in de DB staan; we
+    // negeren 'm alleen, met een waarschuwing zodat het opvalt.
+    if (Number.isFinite(tc.min_days_since_invoice_date)) {
+      console.warn(
+        `[dunning-engine] workflow ${workflow.id} (${workflow.name}) heeft ` +
+        `min_days_since_invoice_date=${tc.min_days_since_invoice_date} — GENEGEERD: ` +
+        'de vervaldatum is de enige ankerdatum.'
+      );
+    }
     // Fase 2b: arrangement_breached-trigger. Wanneer true → workflow vuurt
     // alleen voor klanten met een payment_arrangement in status VERBROKEN
     // dat nog niet is afgehandeld (breach_handled_at IS NULL). Combineerbaar
     // met andere condities (customer_type / min_total_amount). GEEN default:
     // workflows zonder deze key gedragen zich EXACT als vroeger.
     const arrangementBreached    = tc.arrangement_breached === true;
-    // Bij een arrangement_breached-workflow is de overdue-guard niet
-    // relevant — een breach kán ook op een factuur zijn die net verstreken
-    // is. Zet minDays op -1 tenzij de workflow expliciet een min_days_overdue
-    // heeft geconfigureerd.
-    const minDays                = hasOverdueTrigger
-      ? tc.min_days_overdue
-      : ((hasIssueDateTrigger || arrangementBreached) ? -1 : 14);
-    const minDaysSinceInvoice    = hasIssueDateTrigger ? tc.min_days_since_invoice_date : null;
     const customerType           = tc.customer_type || 'any';
     const minTotal               = Number.isFinite(tc.min_total_amount) ? tc.min_total_amount : 0;
     // Extra guard voor workflows die maar 1x per customer mogen vuren
@@ -715,6 +846,31 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
       continue;
     }
 
+    // ── Startdrempel uit de LADDER afleiden ────────────────────────────────
+    // Zonder expliciete trigger_conditions.min_days_overdue bepaalt de
+    // LAAGSTE ladder-sport onder de eigen send-stappen vanaf welke dag deze
+    // workflow mag starten. Zo vertrekt het eerste bericht op zijn eigen dag
+    // (dag 1 voor `aanmaning_dag7`) in plaats van pas bij de oude default van
+    // 14 — en start de run nooit zó laat dat meerdere sporten tegelijk
+    // openstaan. Staat geen enkele stap op de ladder, dan blijft de
+    // historische default van 14 gelden (1 bij een arrangement_breached-
+    // workflow, want daar is de breach de trigger). Nooit lager dan 1: op en
+    // vóór de vervaldag gaat er niets uit.
+    const stepTemplates = await fetchStepTemplates(steps);
+    const stepTierDays = (steps || [])
+      .filter((st) => isSendStep(st.step_type))
+      .map((st) => resolveStepTierDays(st, stepTemplates.get(st?.config?.template_id) || null, ladder))
+      .filter((n) => Number.isFinite(n));
+    const minDays = resolveWorkflowStartDays({
+      triggerConditions: tc,
+      stepTierDays,
+      fallbackDays: arrangementBreached ? 1 : 14,
+    });
+    console.log(
+      `[dunning-engine] workflow ${workflow.name}: start vanaf dag ${minDays} na vervaldatum ` +
+      `(ladder-sporten: ${stepTierDays.length ? stepTierDays.join(', ') : 'geen'})`
+    );
+
     for (const [customerId, agg] of perCustomer) {
       if (elapsed(startedAt) > abortMs) break outer;
 
@@ -727,11 +883,25 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
         if (!arrangementIdForBreach) continue;
       }
 
-      if (agg.days_overdue < minDays) continue;
-      // Issue-date-trigger: alleen relevant als workflow expliciet
-      // min_days_since_invoice_date heeft (bv. het vriendelijke dag-7-duwtje
-      // dat vóór de vervaldatum vuurt). NULL = geen filter.
-      if (minDaysSinceInvoice != null && agg.days_since_oldest_invoice < minDaysSinceInvoice) continue;
+      // ── HARDE POORT: de factuur moet ECHT vervallen zijn ───────────────
+      // Dit is de fix voor de bug waarbij niet-vervallen facturen automatisch
+      // een aanmaning kregen. De poort staat BEWUST vóór alle workflow-
+      // condities: geen enkele trigger (arrangement_breached, min_total_amount)
+      // mag 'm omzeilen. Vóór deze fix viel `minDays` bij zulke triggers terug
+      // op -1, en omdat de oude teller op 0 geclampt was slaagde
+      // `days_overdue < -1` altijd — óók bij een vervaldatum in de toekomst.
+      //
+      // Regel: due_date + graceDays < vandaag (Europe/Amsterdam). Op en vóór
+      // de vervaldag gaat er dus niets uit. Met de default grace 0 betekent
+      // dat: pas vanaf days_overdue >= 1.
+      if (!isOverdue(agg.oldest_due_iso, todayIso, graceDays)) {
+        skippedNotOverdue++;
+        continue;
+      }
+
+      // Startdrempel van de workflow, gemeten in ECHTE dagen na de
+      // vervaldatum (ongeclampt; door de poort hierboven altijd >= 1).
+      if ((agg.days_overdue_signed ?? 0) < minDays) continue;
 
       // F5.1 mentor-hook: zodra vaststaat dat de klant te laat is, openstaande
       // bonus-entries (pending) van die klant op 'wachten_op_betaling' zetten.
@@ -912,6 +1082,10 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     }
   }
 
+  if (skippedNotOverdue > 0) {
+    console.log(`[dunning-engine] overdue-poort: ${skippedNotOverdue} klant-match(es) geweigerd (nog niet vervallen, grace=${graceDays}d, vandaag=${todayIso})`);
+  }
+
   return started;
 }
 
@@ -980,6 +1154,30 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
   const officeHoursCfg   = await readOfficeHoursSetting(supabaseAdmin);
   const officeHoursDebug = officeHoursLabel(officeHoursCfg);
 
+  // ── Vervaldatum-poort ook in de ADVANCE-fase (defense in depth) ─────────
+  // Een run die ooit (terecht of door de oude bug) gestart is, mag nog steeds
+  // geen bericht sturen zolang de oudste openstaande factuur niet echt te
+  // laat is. Denk aan: de te late factuur wordt betaald en er blijft alleen
+  // een toekomstige factuur open — dan schuift de run door naar de volgende
+  // send-stap terwijl er niets te manen valt.
+  const graceDays = await readGraceDaysSetting(supabaseAdmin);
+  const todayIso  = todayIsoInTz();
+  // De ladder bepaalt per send-stap vanaf welke dag NA de vervaldatum hij mag
+  // vertrekken — niet de stap-pointer en niet het getal in de templatenaam.
+  const ladder    = await readLadderSetting(supabaseAdmin);
+
+  // ── DAGCAP: hoogstens N berichten per klant per kalenderdag, PER KANAAL ──
+  // Permanent vangnet tegen de inhaalgolf. Instelbaar via
+  // app_settings.dunning_max_sends_per_day ({ whatsapp, email }), default 1/1.
+  // De teller start bij lokale middernacht (Europe/Amsterdam) en wordt binnen
+  // deze invocatie meegeteld, zodat twee stappen in dezelfde run-lus ook
+  // meetellen. Per kanaal, zodat het WhatsApp+e-mail-koppel van dezelfde ronde
+  // samen de deur uit gaat en alleen een TWEEDE bericht op hetzelfde kanaal
+  // wordt tegengehouden.
+  const maxSendsPerDay = await readMaxSendsPerDaySetting(supabaseAdmin);
+  const dayStartIso    = zonedDayStartIso(todayIso);
+  const sendsToday     = await countSendsTodayByCustomer(runCustomerIds, dayStartIso);
+
   for (const run of runs || []) {
     if (elapsed(startedAt) > abortMs) break;
 
@@ -993,6 +1191,10 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         .eq('workflow_id', run.workflow_id)
         .order('step_order', { ascending: true });
       if (stepsErr) throw stepsErr;
+
+      // Templatenamen bij de steps zoeken — nodig om de ladder-sport van een
+      // send-stap op te zoeken. Eén query per run.
+      const tplById = await fetchStepTemplates(steps);
 
       // ── BINNENLUS: verwerk opeenvolgende NIET-wait stappen in één keer.
       //    Effect: email + whatsapp van dezelfde ronde gaan samen de deur uit.
@@ -1145,6 +1347,115 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
 
         const nextStep = (steps || []).find((s) => s.step_order > currentStep.step_order) || null;
 
+        // ── Vervaldatum- + tier-guard voor SEND-stappen ───────────────────
+        // (a) HARDE POORT: oudste openstaande factuur moet echt te laat zijn
+        //     (due_date + grace < vandaag, Europe/Amsterdam).
+        // (b) LADDER: elke send-stap heeft een drempel in ECHTE dagen na de
+        //     vervaldatum (app_settings.dunning_ladder). Vóór deze fix
+        //     bepaalde alleen de stap-pointer + wait-stappen wanneer een
+        //     template vertrok — daardoor kon 'aanmaning_dag14' bij 0 dagen
+        //     te laat de deur uit ("staat inmiddels 0 dagen open"). Let op:
+        //     het getal IN de templatenaam is NIET de drempel; de ladder is.
+        // In beide gevallen: geen pointer-mutatie, alleen next_action_at
+        // vooruit naar de dag waarop het WEL mag. De run blijft dus intact
+        // en pakt vanzelf door zodra de datum bereikt is.
+        if (isSendStep(currentStep.step_type)) {
+          const dueIso = agg?.oldest_due_iso || null;
+          const signed = daysOverdueSigned(dueIso, todayIso);
+
+          if (!isOverdue(dueIso, todayIso, graceDays)) {
+            // Zonder due_date valt er niets te berekenen — dan een dag
+            // vooruit zodat we niet elk uur dezelfde regel loggen.
+            const resumeAt = earliestSendIso(dueIso, graceDays + 1)
+              || new Date(Date.now() + 86400000).toISOString();
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ next_action_at: resumeAt, updated_at: nowIso() })
+              .eq('id', run.id);
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStep.id,
+              event_type: 'send_skipped_not_overdue',
+              payload: {
+                step_type:          currentStep.step_type,
+                oldest_due_date:    dueIso,
+                days_overdue:       signed,   // ONGECLAMPT: negatief = nog niet vervallen
+                grace_days:         graceDays,
+                today_amsterdam:    todayIso,
+                next_action_at:     resumeAt,
+                reason:             'factuur nog niet vervallen',
+              },
+            });
+            runAdvanced = true;
+            break;
+          }
+
+          const stepTpl  = tplById.get(currentStep?.config?.template_id) || null;
+          const tierDays = resolveStepTierDays(currentStep, stepTpl, ladder);
+          if (tierDays != null && signed != null && signed < tierDays) {
+            const resumeAt = earliestSendIso(dueIso, tierDays)
+              || new Date(Date.now() + 86400000).toISOString();
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ next_action_at: resumeAt, updated_at: nowIso() })
+              .eq('id', run.id);
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStep.id,
+              event_type: 'send_postponed_tier_not_reached',
+              payload: {
+                step_type:       currentStep.step_type,
+                template_name:   stepTpl?.meta_template_name || stepTpl?.name || null,
+                ladder_label:    ladderLabel(stepTpl?.meta_template_name || stepTpl?.name, ladder),
+                tier_min_days:   tierDays,
+                days_overdue:    signed,
+                oldest_due_date: dueIso,
+                today_amsterdam: todayIso,
+                next_action_at:  resumeAt,
+                reason:          'ladder-sport nog niet bereikt',
+              },
+            });
+            runAdvanced = true;
+            break;
+          }
+        }
+
+        // ── DAGCAP-guard: per klant PER KANAAL hoogstens N per kalenderdag ──
+        // Staat NA de ladder-guard (die weet of deze stap überhaupt mag) en
+        // VÓÓR de kantooruren-guard. Bij bereikte cap: pointer blijft staan,
+        // next_action_at naar het eerstvolgende verzendslot op een latere dag.
+        // De e-mail van dezelfde ronde heeft zijn eigen teller en gaat dus
+        // gewoon mee met de WhatsApp.
+        if (isSendStep(currentStep.step_type)) {
+          const chan = channelOfStepType(currentStep.step_type);
+          const used = (sendsToday.get(run.customer_id) || {})[chan] || 0;
+          const cap  = maxSendsPerDay[chan];
+          if (chan && Number.isFinite(cap) && used >= cap) {
+            const resumeAt = nextSendSlotIso(new Date(), officeHoursCfg, 1);
+            await supabaseAdmin
+              .from('dunning_workflow_runs')
+              .update({ next_action_at: resumeAt, updated_at: nowIso() })
+              .eq('id', run.id);
+            await supabaseAdmin.from('dunning_log').insert({
+              run_id: run.id,
+              step_id: currentStep.id,
+              event_type: 'send_skipped_daily_cap',
+              payload: {
+                step_type:       currentStep.step_type,
+                channel:         chan,
+                sends_today:     used,
+                max_per_day:     cap,
+                caps:            maxSendsPerDay,
+                today_amsterdam: todayIso,
+                next_action_at:  resumeAt,
+                reason:          `dagcap ${chan} bereikt voor deze klant`,
+              },
+            });
+            runAdvanced = true;
+            break;
+          }
+        }
+
         // ── Kantooruren-guard voor SEND-stappen (email/whatsapp) ──────────
         // Buiten venster: NIET uitvoeren, NIET pointer doorschuiven, NIET
         // next_action_at muteren → volgende engine-tick (elk uur) pikt de
@@ -1291,6 +1602,18 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         // sends binnen dezelfde run no-op én voorkomt dat 'in_gesprek'/
         // 'opgelost' teruggezet worden. Fail-soft: stage-update mag de
         // engine niet omvallen.
+        // Dagcap-teller bijwerken zodra er echt een bericht de deur uit is.
+        // Alleen bij status 'ok' — een 'skipped' send (geen telefoonnummer,
+        // template-fout) verbruikt geen cap.
+        if (isAanmaningSendSuccess(stepResult)) {
+          const chan = channelOfStepType(currentStep.step_type);
+          if (chan) {
+            const cur = sendsToday.get(run.customer_id) || { whatsapp: 0, email: 0 };
+            cur[chan] += 1;
+            sendsToday.set(run.customer_id, cur);
+          }
+        }
+
         if (isAanmaningSendSuccess(stepResult)) {
           try {
             const { isAutoEnabled, ensurePipelineCustomer, setStage } = await import('./dunning-pipeline.js');
@@ -1370,7 +1693,49 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
         if (currentStep.step_type === 'wait') {
           const days = Number(currentStep?.config?.days) || 0;
           const nextMs = Date.now() + days * 86400000;
-          update.next_action_at = new Date(nextMs).toISOString();
+          // De LADDER is leidend voor het moment van de volgende send-stap,
+          // niet het aantal wachtdagen: die telt vanaf het vorige bericht en
+          // schuift daardoor mee met elke vertraging (kantooruren, retry,
+          // pauze). Staat de volgende send-stap op de ladder, dan mikken we
+          // op ZIJN dag na de vervaldatum. Ligt die dag al in het verleden →
+          // nu (de ladder-guard hierboven laat 'm dan door). Zonder
+          // ladder-sport blijft het oude wachtdagen-gedrag intact.
+          const nextSendStep = (steps || []).find(
+            (st) => st.step_order > currentStep.step_order && isSendStep(st.step_type)
+          ) || null;
+          const nextTier = nextSendStep
+            ? resolveStepTierDays(nextSendStep, tplById.get(nextSendStep?.config?.template_id) || null, ladder)
+            : null;
+          const ladderIso = (nextTier != null)
+            ? earliestSendIso(agg?.oldest_due_iso || null, nextTier)
+            : null;
+          // KLEM: na een wait mag next_action_at nooit in het VERLEDEN landen.
+          // Zonder klem pikt de eerstvolgende uurlijkse tick de run meteen weer
+          // op en loopt een achterstallige klant de hele ladder in één ochtend
+          // af — de regressie die de ladder-wijziging introduceerde.
+          //
+          // Maar de klem geldt alleen voor een doeldag die ECHT vóór vandaag
+          // ligt. Valt de ladderdag op VANDAAG, dan mag het bericht vandaag nog
+          // weg: `earliestSendIso()` levert UTC-middernacht van die dag, dus
+          // dat tijdstip ligt bijna altijd achter ons terwijl de dag zelf klopt.
+          // Doorschuiven naar morgen liet ronde 3 en ronde 5 telkens een dag te
+          // laat vertrekken (dag 15 i.p.v. 14, dag 31 i.p.v. 30).
+          //
+          // Dat is veilig: de rem tegen een inhaalgolf is de per-kanaal dagcap
+          // (1 WhatsApp + 1 e-mail per klant per kalenderdag), niet deze klem.
+          // Staan er tien ladderdagen tegelijk open, dan gaat er per kanaal nog
+          // steeds maar één bericht per dag uit.
+          const targetMs = ladderIso ? Date.parse(ladderIso) : nextMs;
+          const nu       = Date.now();
+          if (!Number.isFinite(targetMs)) {
+            update.next_action_at = nextSendSlotIso(new Date(), officeHoursCfg, 1);
+          } else if (targetMs > nu) {
+            update.next_action_at = new Date(targetMs).toISOString();
+          } else if (todayIsoInTz(new Date(targetMs)) === todayIso) {
+            update.next_action_at = nowIso();          // vandaag nog, binnen het venster
+          } else {
+            update.next_action_at = nextSendSlotIso(new Date(), officeHoursCfg, 1);
+          }
           update.current_step_id = nextStep ? nextStep.id : null;
           if (!nextStep) {
             update.status = 'completed';
