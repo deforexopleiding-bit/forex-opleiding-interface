@@ -31,6 +31,8 @@
 // Schrijft in opvolging_taken en opvolging_pogingen, en bij die ene actie in
 // event_attendees.status. Geen bestaand endpoint gewijzigd.
 
+import { bevestigDeelnemer } from './_lib/event-attendee-bevestigen.js';
+import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { dagPlus, WAKKER_DAGEN_VOOR_EVENT } from './_lib/opvolging-aanmelding.js';
@@ -90,8 +92,24 @@ export default async function handler(req, res) {
         .eq('id', attendeeId)
         .in('status', ['aangemeld', 'wachtlijst']);
       if (error) throw new Error('annuleren: ' + error.message);
+      // HETZELFDE GAT, DE ANDERE KANT OP. Deze knop schreef de status wel weg
+      // maar liet het aantal bevestigden ongemoeid, terwijl daar het openen en
+      // sluiten van de inschrijving aan hangt. Een annulering die de teller
+      // niet bijwerkt houdt een event onnodig dicht.
+      let telling = null;
+      try {
+        const { data: ev } = await supabaseAdmin
+          .from('event_attendees').select('event_id').eq('id', attendeeId).maybeSingle();
+        if (ev?.event_id) {
+          await onConfirmedAttendeeMutation(ev.event_id, { reason: 'opvolging-annuleer-in-event' });
+          telling = 'herberekend';
+        }
+      } catch (e) {
+        telling = 'mislukt: ' + (e?.message || e);
+        console.error('[opvolging-actie] telling na annuleren mislukt:', attendeeId, e?.message || e);
+      }
       await schrijfNotitie(taak, `${vandaag} · In de eventmodule op geannuleerd gezet vanuit de opvolgmodule.`);
-      return res.status(200).json({ success: true, geannuleerd: true });
+      return res.status(200).json({ success: true, geannuleerd: true, telling });
     }
 
     // ── Bevestigd: de lead komt ──────────────────────────────────────────────
@@ -135,8 +153,28 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('opvolging_taken').update(patch).eq('id', taak.id);
       if (error) throw new Error(error.message);
+
+      // ÉÉN ADMINISTRATIE, NIET TWEE. De eventmodule toont per deelnemer
+      // 'bevestigd' of 'voicemail'; die stond los van deze knop en moest met
+      // de hand overgezet worden. bevestigDeelnemer() is dezelfde weg die
+      // follow-up-lead-outcome.js al gebruikt — niet een tweede ernaast.
+      //
+      // Niet blokkerend: de opvolgkaart is hier al bijgewerkt en die mag niet
+      // stuklopen op de eventmodule. Maar ook NIET stil: de uitkomst gaat mee
+      // in het antwoord en een fout gaat naar console.error. Dat is de les van
+      // createFollowupLead(), waar de fout in een waarschuwingslijst verdween
+      // die niemand las.
+      const eventSync = await bevestigDeelnemer({
+        supabaseAdmin, attendeeId, nowIso: nu, bron: 'opvolging-aanmelding-actie',
+      });
+      if (!eventSync.ok && !eventSync.overgeslagen) {
+        console.error('[opvolging-actie] bevestiging niet doorgeschreven naar de eventmodule:',
+          taak.id, attendeeId, eventSync.fout);
+      }
+
       return res.status(200).json({
         success: true,
+        event_sync: eventSync,
         slaapt_tot: nogEenRonde ? wakker : null,
         gearchiveerd: !nogEenRonde,
       });
