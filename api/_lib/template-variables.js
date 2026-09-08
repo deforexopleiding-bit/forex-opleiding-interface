@@ -231,6 +231,7 @@ export const AVAILABLE_VARIABLES = [
   { key: 'attendee.telefoon',   label: 'Telefoon',        category: 'attendee', example: '+31 6 12345678',                                                                                                 requires_context: 'attendee' },
   { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
   { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
+  { key: 'attendee.vervolg_link',     label: 'Vervolg-link (Stap 2, dfo-website)', category: 'attendee', example: 'https://www.deforexopleiding.nl/vervolg?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
 
   // ── onboarding (Comms C1) — vereist context.onboarding (onboardings-row).
   //   Onboarding-invite-flow geeft een onboarding-context mee zodat we de
@@ -684,6 +685,14 @@ function getAttendeeValue(attendee, key) {
       const token = attendee.choice_token;
       if (!token) return '';
       return `${PUBLIC_BASE_URL}/modules/assessment.html?t=${encodeURIComponent(String(token))}`;
+    }
+    case 'attendee.vervolg_link': {
+      // STAP 2 — branded dfo-website vervolgpagina (merk-domein). Los van
+      // PUBLIC_BASE_URL (dat is het CRM-domein).
+      const token = attendee.choice_token;
+      if (!token) return '';
+      const dfoBase = (process.env.DFO_WEBSITE_BASE_URL || 'https://www.deforexopleiding.nl').replace(/\/+$/, '');
+      return `${dfoBase}/vervolg?t=${encodeURIComponent(String(token))}`;
     }
     default: return '';
   }

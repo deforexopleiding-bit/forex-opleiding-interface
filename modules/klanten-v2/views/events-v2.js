@@ -1558,9 +1558,17 @@
               `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(a.phone || a.telefoon || '—')}</span>`,
               H.pill(sc, sl),
               `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(_fmtDate(a.registered_at || a.created_at))}</span>`,
-              hasQuest
-                ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
-                : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`,
+              // STAP 2 — gate-aanmelders (created_via='website') tonen een
+              // duidelijke Definitief/In-afwachting-pill (afgeleid van de
+              // assessment-koppeling). Alle andere (oude-flow) rijen houden de
+              // bestaande ✓/✗-weergave ongewijzigd.
+              (a.created_via === 'website'
+                ? (hasQuest
+                    ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--emerald-soft);color:var(--emerald)" title="Vragenlijst ingevuld — telt mee voor capaciteit">Definitief</span>`
+                    : `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--amber-soft);color:var(--amber)" title="Toegelaten, vragenlijst nog niet ingevuld — telt nog niet mee">In afwachting</span>`)
+                : (hasQuest
+                    ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
+                    : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`)),
               _belStatusDropdown(a, id),
               `<div style="position:relative;display:inline-block"><button class="icon-btn" title="Meer" onclick="event.stopPropagation();window.__evAttKebab('${esc(a.id)}','${esc(id)}')" style="width:26px;height:26px">${svg(I.dots || I.settings,'width:13px;height:13px')}</button>${_ui.attKebabOpen === a.id ? _evAttKebabHtml(a.id, id) : ''}</div>`,
             ];
