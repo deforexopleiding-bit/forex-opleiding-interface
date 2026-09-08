@@ -35,10 +35,26 @@
 // Schrijft uitsluitend in opvolging_taken.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { bepaalDoorrol, doorrolDag } from './_lib/opvolging-doorrol.js';
+import { bepaalDoorrol, doorrolDag, bouwMerkteken, VOORBEELDEN_MAX } from './_lib/opvolging-doorrol.js';
 
 const ABORT_MS  = 25_000;
 const PAGINA    = 500;
+
+/**
+ * Waar de doorrol achterlaat wat hij gedaan heeft.
+ *
+ * De ochtendcontrole rekent dat na (controle 7 in
+ * api/_lib/opvolging-gezondheid.js). Zonder merkteken is achteraf niet vast te
+ * stellen op welke dag deze cron richtte — en juist dat was de fout die maanden
+ * onzichtbaar bleef.
+ *
+ * In app_settings en niet in een eigen tabel: het is één rij die steeds
+ * overschreven wordt, en dat scheelt een migratie die eerst gedraaid moet
+ * worden voordat de controle iets kan zien. Zelfde afweging als bij de
+ * hartslag van de brug.
+ */
+export const DOORROL_MERKTEKEN = 'opvolging_doorrol_laatste';
+
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -57,6 +73,11 @@ export default async function handler(req, res) {
   // De som staat in de lib, met een test eronder.
   const vandaag = doorrolDag(startedAt);
   console.log('[cron-opvolging-doorrol] start vandaag=' + vandaag);
+
+  // De ids die deze run echt verzet heeft, als steekproef voor de controle van
+  // 07:00. Alleen wat gelukt is — een mislukte update hoort niet als bewijs te
+  // gelden dat de kaart goed staat.
+  const aangeraakt = [];
 
   const summary = {
     vandaag,
@@ -98,6 +119,7 @@ export default async function handler(req, res) {
             .eq('status', 'open');   // niets doen als hij intussen dicht is
           if (upErr) throw new Error(upErr.message);
           summary.doorgerold += 1;
+          if (aangeraakt.length < VOORBEELDEN_MAX) aangeraakt.push(id);
           if (vorige && vorige.later) summary.later_gereset += 1;
         } catch (e) {
           // Per taak vangen: één rij die weigert mag de rest van de lijst niet
@@ -115,6 +137,30 @@ export default async function handler(req, res) {
     summary.errors.push({ phase: 'fataal', error: e?.message || String(e) });
     summary.duration_ms = Date.now() - startedAt;
     return res.status(500).json({ ok: false, summary });
+  }
+
+  // ── Het merkteken voor de ochtendcontrole ────────────────────────────────
+  // Fail-soft: lukt dit niet, dan is de doorrol zelf wél gelukt en mag dat niet
+  // als mislukt gerapporteerd worden. De controle van 07:00 meldt het dan als
+  // NIET GEMETEN, en dat is precies de juiste uitkomst.
+  try {
+    const merk = {
+      key  : DOORROL_MERKTEKEN,
+      value: bouwMerkteken({
+        vandaag, gedraaidMs: startedAt,
+        doorgerold: summary.doorgerold, bekeken: summary.bekeken, aangeraakt,
+      }),
+      updated_at: new Date().toISOString(),
+    };
+    const { data: bestaat } = await supabaseAdmin
+      .from('app_settings').select('key').eq('key', DOORROL_MERKTEKEN).maybeSingle();
+    const { error } = bestaat
+      ? await supabaseAdmin.from('app_settings').update(merk).eq('key', DOORROL_MERKTEKEN)
+      : await supabaseAdmin.from('app_settings').insert(merk);
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    summary.errors.push({ phase: 'merkteken', error: e?.message || String(e) });
+    console.error('[cron-opvolging-doorrol] merkteken opslaan faalde:', e?.message || e);
   }
 
   summary.duration_ms = Date.now() - startedAt;

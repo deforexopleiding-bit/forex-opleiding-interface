@@ -1,6 +1,6 @@
 // api/_lib/opvolging-gezondheid.js
 //
-// DE ZES CONTROLES, ALS PURE FUNCTIES.
+// DE ZEVEN CONTROLES, ALS PURE FUNCTIES.
 //
 // Deze week stonden zes keer alle tests groen terwijl productie stuk was, en
 // elke keer was de TEST het probleem: hij raakte iets aan wat lijkt op het
@@ -318,6 +318,100 @@ export function controleerDagritme({ taken, vandaag }) {
     `${achter.length} openstaande ${achter.length === 1 ? 'kaart staat' : 'kaarten staan'} op een dag `
     + `die al voorbij is (oudste: ${getallen.oudste}). Die staan op geen enkele lijst. `
     + 'Vrijwel altijd betekent dit dat de nachtelijke doorrol niet gedraaid heeft of zijn werk niet deed.');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7 · DE DOORROL — heeft hij op de goede dag gericht?
+// ═══════════════════════════════════════════════════════════════════════════
+// Controle 6 hierboven zou de fout van 8 september NIET gezien hebben, en dat
+// is de les die deze controle bestaansrecht geeft: de kapotte doorrol zette
+// kaarten een dag te ver VOORUIT (op de 9e terwijl ze op de 8e hoorden), en een
+// due in de toekomst is voor 'staat er iets in het verleden' onzichtbaar.
+//
+// EEN VUISTREGEL OP DE RIJEN KAN DIT NIET. 'Een open kaart die ver vooruit
+// staat is verdacht' geeft vals alarm op precies de kaarten die het goed doen:
+// een bevestigde aanmelding slaapt legitiem tot vier dagen voor het event, en
+// cron-opvolging-aanmeldingen draait elk kwartier — ook 's nachts — en maakt
+// dan kaarten met een due weken vooruit. Een nachtvenster als vingerafdruk is
+// dus geen vingerafdruk.
+//
+// Daarom laat de doorrol een merkteken achter (app_settings, zie
+// DOORROL_MERKTEKEN in api/cron-opvolging-doorrol.js) met de dag waarop hij
+// richtte, het moment waarop hij draaide, hoeveel kaarten hij verzette en een
+// greep uit de ids. Deze controle rekent dat na.
+//
+// Dat is GEEN zelfbevestiging: de dag wordt hier opnieuw afgeleid uit het ruwe
+// tijdstip van de run, en juist dáár zat de fout. Draaide hij op 07-09T23:59Z
+// (in Amsterdam de 8e) en zette hij kaarten op de 9e, dan lopen die twee uit
+// elkaar en is dat meteen zichtbaar.
+//
+// EN ER ZIT GEEN MARGE OP. Het verschil was precies EEN dag, dus een controle
+// op 'meer dan een dag vooruit' had hem óók gemist. Na een doorrol hoort de due
+// exact de dag van de run te zijn.
+
+export function controleerDoorrol({ merkteken, taken, vandaag }) {
+  const m = merkteken && typeof merkteken === 'object' ? merkteken : null;
+  if (!m || !m.gedraaid_op || !m.dag) {
+    // De eerste ochtend na de deploy, of een cron die nooit gelopen heeft. Dat
+    // als groen boeken zou de controle waardeloos maken op het moment dat je
+    // hem juist wilt vertrouwen.
+    return uit('doorrol', NIET_GEMETEN, { merkteken: 'ontbreekt' },
+      'De doorrol heeft nog geen merkteken achtergelaten. Er valt dus niets na te rekenen — dat is iets anders dan goed.');
+  }
+  const gedraaidMs = Date.parse(m.gedraaid_op);
+  if (!Number.isFinite(gedraaidMs)) {
+    return uit('doorrol', NIET_GEMETEN, { gedraaid_op: String(m.gedraaid_op) },
+      'Het merkteken draagt geen bruikbaar tijdstip, dus de dag van de run is niet af te leiden.');
+  }
+
+  // De dag van de run, ONAFHANKELIJK opnieuw uitgerekend.
+  const dagVanDeRun = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date(gedraaidMs));
+
+  const getallen = {
+    dag_gezet     : String(m.dag),
+    dag_van_de_run: dagVanDeRun,
+    gedraaid_op   : new Date(gedraaidMs).toISOString(),
+    doorgerold    : Number(m.doorgerold) || 0,
+  };
+
+  if (String(m.dag) !== dagVanDeRun) {
+    return uit('doorrol', FOUT, getallen,
+      `De doorrol draaide op ${dagVanDeRun} maar zette kaarten op ${m.dag}. `
+      + 'Elke openstaande kaart slaat daarmee een dag over en staat die dag op geen enkele lijst. '
+      + 'Dit is precies de fout van 8 september.');
+  }
+  if (dagVanDeRun !== vandaag) {
+    return uit('doorrol', FOUT, getallen,
+      `De laatste doorrol was op ${dagVanDeRun}: vannacht heeft hij dus niet gedraaid. `
+      + 'Wat gisteren bleef liggen staat vandaag niet in de lijst.');
+  }
+
+  // ── En de rijen die hij zelf zegt te hebben aangeraakt ─────────────────
+  // Alleen kaarten die sinds de run niet meer zijn aangeraakt: verzet een mens
+  // er tussen 02:00 en 07:00 eentje vooruit, dan is die due terecht anders en
+  // mag dat geen alarm geven.
+  const ids = new Set((Array.isArray(m.voorbeelden) ? m.voorbeelden : []).map(String));
+  const kandidaten = (Array.isArray(taken) ? taken : []).filter((t) => {
+    if (!t || !ids.has(String(t.id))) return false;
+    const up = t.updated_at ? Date.parse(t.updated_at) : NaN;
+    // Een paar minuten speling: de cron werkt de rijen niet op dezelfde
+    // milliseconde bij als het moment dat hij in het merkteken zet.
+    return !Number.isFinite(up) || up <= gedraaidMs + 10 * 60 * 1000;
+  });
+  const mis = kandidaten.filter((t) => String(t.due || '') !== dagVanDeRun);
+  getallen.rijen_gecontroleerd = kandidaten.length;
+  getallen.rijen_mis = mis.length;
+  if (mis.length) {
+    getallen.namen = mis.slice(0, 12).map((t) => `${t.naam || 'Naamloos'} (${t.due})`);
+    return uit('doorrol', FOUT, getallen,
+      `${mis.length} van de ${kandidaten.length} nagekeken kaarten staan niet op ${dagVanDeRun}, `
+      + 'terwijl de doorrol ze vannacht wel heeft aangeraakt.');
+  }
+
+  return uit('doorrol', OK, getallen,
+    `De doorrol draaide op ${dagVanDeRun} en zette ${getallen.doorgerold} kaart(en) op diezelfde dag.`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
