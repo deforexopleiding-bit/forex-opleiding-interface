@@ -34,6 +34,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { provisionDfoLmsStudent, noteerUitnodiging } from './_lib/dfo-lms-student.js';
 import { stuurLmsUitnodiging } from './_lib/dfo-lms-uitnodiging.js';
+import { spiegelNaActie } from './_lib/onboarding-spiegel.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -134,6 +135,12 @@ export default async function handler(req, res) {
     result.uitnodiging = { ok: false, overgeslagen: true,
       fout: 'uitnodiging niet geprobeerd: ' + nietGebeldOmdat };
   }
+
+  // Provisioning is het EERSTE moment waarop dfo_lms_student_id bestaat, en
+  // dus het eerste moment waarop de spiegel kán bestaan. Zonder deze aanroep
+  // verschijnt een net aangemaakte student pas de volgende ochtend in het
+  // oppak-blok van zijn mentor — precies de student die je snel wil zien.
+  await spiegelNaActie(onboardingId, 'onboarding-dfo-lms-provision');
 
   return res.status(200).json(result);
 }
