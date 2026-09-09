@@ -14,6 +14,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { sendEventMail, wrapEmailHtml } from '../mailer.js';
+import { FUNNEL_FOOTER_HTML } from './event-website-teksten.js';
 import { sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapMailStatus, mapSendStatus } from './comms-log.js';
 
@@ -61,7 +62,7 @@ async function sendVervolgMail({ firstName, vervolgLink, eventTitle, eventStarts
     </p>
     <p>Vul je gegevens niet in, dan vervalt je plek automatisch.</p>
     <p style="margin-top:32px">Tot snel!<br>— Team De Forex Opleiding</p>
-  `);
+  `, { footerHtml: FUNNEL_FOOTER_HTML });
   const text = `Hoi ${naam}, je bent toegelaten voor ${titleStr}${datumLine}. Maak je inschrijving definitief via de korte vragenlijst: ${vervolgLink} — Team De Forex Opleiding`;
 
   try {
