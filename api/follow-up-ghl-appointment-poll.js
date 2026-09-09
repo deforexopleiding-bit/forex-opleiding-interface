@@ -517,8 +517,13 @@ export default async function handler(req, res) {
     // Gates die intact blijven: `completeCalendarIds` (per-calendar) +
     // `scheduled_at IN [fetchStartISO, fetchEndISO]` (window).
 
-    // TIJDELIJK — grenswaarde voor cancelled/no_show recovery. Zet dit terug
-    // op strikter zodra alle collateral verifieerbaar hersteld is.
+    // TIJDELIJK — verwijderen zodra collateral hersteld is (start 2026-09-09).
+    // Grenswaarde voor cancelled/no_show recovery. Rijen met updated_at
+    // vóór deze grens zijn (op enkele auto-resolve-slachtoffers na, zie
+    // backfill-pass hieronder) handmatig gezet en mogen NIET automatisch
+    // terug naar scheduled. Wanneer de opstartsessies-lijst weer klopt en
+    // geen ghost-flip meer optreedt: dit block + BUG_WINDOW_START + de
+    // audit-log backfill-pass in één opruim-PR eruit halen.
     const BUG_WINDOW_START = '2026-09-08T00:00:00Z';
     const GHL_ACTIVE_STATUSES = new Set(['confirmed', 'booked', 'scheduled', 'showed']);
 
@@ -549,6 +554,10 @@ export default async function handler(req, res) {
       // updated_at is bewust de filter (niet scheduled_at) omdat we
       // rijen willen vangen die BINNEN het bug-window naar hidden zijn
       // geflipt — hun scheduled_at kan buiten dat window liggen.
+      // TIJDELIJK — verwijderen zodra collateral hersteld is (2026-09-09):
+      // de wacht_op_reschedule-bron (bron 1 hierboven) blijft dan als
+      // enige reguliere heal-pad; deze cancelled/no_show-uitbreiding raakt
+      // pas rijen aan als ze in het bug-window zijn geflipt.
       const { data: hiddenRows } = await supabaseAdmin
         .from('follow_up_appointments')
         .select('id, ghl_appointment_id, ghl_calendar_id, lead_name, scheduled_at, status, updated_at')
@@ -609,10 +618,20 @@ export default async function handler(req, res) {
         else if (row.status === 'no_show')             reverseHealedNoShow++;
       }
 
-      // ── Backfill: audit-log-based rijen die BUITEN het bug-window vallen ──
+      // ── TIJDELIJK — verwijderen zodra collateral hersteld is (2026-09-09). ──
+      // Backfill: audit-log-based rijen die BUITEN het bug-window vallen.
       // Rijen die door 'appointment_auto_resolved' tussen 2026-09-04 en
-      // BUG_WINDOW_START naar 'cancelled' zijn geflipt — hun updated_at
-      // valt vóór BUG_WINDOW_START, dus Bron 2 mist ze. Cap 500.
+      // BUG_WINDOW_START naar 'cancelled' / 'no_show' zijn geflipt — hun
+      // updated_at valt vóór BUG_WINDOW_START, dus Bron 2 mist ze.
+      //
+      // Deze pass hanteert EXACT dezelfde poort-set als de hoofd-pass:
+      //   * completeCalendarIds  (per-calendar safety-gate)
+      //   * scheduled_at IN [fetchStartISO, fetchEndISO]  (window-gate)
+      //   * event moet in de huidige GHL-fetch zitten     (evt lookup)
+      //   * appointmentStatus ∈ GHL_ACTIVE_STATUSES        (active-gate)
+      //   * doelstatus via mapGhlStatus(ghlStatus)
+      //   * race-guard .eq('status', row.status) op de UPDATE
+      // Cap 500 audit-log rijen per run tegen timeout.
       const { data: autoResolvedLog } = await supabaseAdmin
         .from('follow_up_events_log')
         .select('payload')
@@ -633,12 +652,14 @@ export default async function handler(req, res) {
           .in('id', autoResolvedApptIds)
           .in('status', ['cancelled', 'no_show'])
           .not('ghl_appointment_id', 'is', null)
-          .in('ghl_calendar_id', completeCalendarIds);
+          .in('ghl_calendar_id', completeCalendarIds)      // per-calendar gate
+          .gte('scheduled_at', fetchStartISO)              // window-gate (identiek aan hoofd-pass)
+          .lt('scheduled_at', fetchEndISO);
         for (const row of (candidates || [])) {
           const evt = eventsByGhlId.get(row.ghl_appointment_id);
-          if (!evt) continue;
+          if (!evt) continue;                              // event moet in huidige GHL-fetch zitten
           const ghlStatus = String(evt.appointmentStatus || '').toLowerCase();
-          if (!GHL_ACTIVE_STATUSES.has(ghlStatus)) continue;
+          if (!GHL_ACTIVE_STATUSES.has(ghlStatus)) continue; // active-gate (identiek aan hoofd-pass)
           const target = mapGhlStatus(ghlStatus);
           if (!target || target === row.status) continue;
 
@@ -646,7 +667,7 @@ export default async function handler(req, res) {
             .from('follow_up_appointments')
             .update({ status: target, updated_at: new Date().toISOString() })
             .eq('id', row.id)
-            .eq('status', row.status);
+            .eq('status', row.status);                     // race-guard
           if (updErr) {
             console.error('[follow-up-ghl-poll] reverse-heal (backfill) update failed:',
               row.id, row.lead_name, updErr?.message);
@@ -674,6 +695,7 @@ export default async function handler(req, res) {
           reverseHealedBackfill++;
         }
       }
+      // ── EINDE TIJDELIJK — backfill-pass ────────────────────────────────────
 
       const totalHealed = reverseHealedGhosts + reverseHealedCancelled + reverseHealedNoShow + reverseHealedBackfill;
       if (totalHealed > 0) {
