@@ -7,8 +7,10 @@
 //   3) Vervallen: 24u na 48u-reminder zonder reactie → status='vervallen'
 //   4) Dag-6 check-in (alleen 7-daagse, status='gereageerd' + provisioned)
 //
-// Regels — spiegelt cron-leadsonderhoud.js:
-//   - Nacht-venster: niets tussen 21:00 en 08:00 (Amsterdam)
+// Regels:
+//   - 24/7 draaien: geen nacht-venster meer (2026-09-10 verwijderd; late
+//     aanmeldingen kregen anders pas de ochtend erna hun bevestiging + de
+//     hele reminder-cadans schoof mee op)
 //   - Droogloopstand default AAN; live pas als TOEGANG_AANVRAGEN_LIVE === '1'
 //   - Fail-soft per rij; één fout mag de rest van de batch niet blokkeren
 //
@@ -31,8 +33,10 @@ import { logOutboundWa } from './_lib/wa-outbound-log.js';
 // een gedeelde module, zodat de E-mails-tab er ook een echte preview van rendert.
 import { mailBevestigingA, mailBevestigingB, mailDag6A, mailDag6B } from './_lib/toegang-cron-mails.js';
 
-const NACHT_START_HOUR = 21;
-const NACHT_EIND_HOUR  = 8;
+// 2026-09-10 — Nacht-venster verwijderd. Bevestigingen + reminders + dag-6
+// draaien 24/7. `cron-leadsonderhoud` blijft z'n eigen stille uren houden
+// (aparte drip-motor met andere semantiek); die aanpassing is bewust NIET
+// doorgevoerd hier.
 const VERVALLEN_UREN_NA_48U = 24;   // na 48u-reminder + 24u zonder reactie → vervallen
 const DAG6_UREN = 6 * 24;
 
@@ -112,19 +116,6 @@ const TEMPLATES = {
 
 function aanUit(v) {
   return ['1','true','aan','on','ja'].includes(String(v||'').trim().toLowerCase());
-}
-
-// Amsterdam-uur (respecteert DST).
-function amsUur(ms) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Amsterdam', hourCycle: 'h23', hour: '2-digit',
-  });
-  return Number(dtf.format(new Date(ms)));
-}
-
-function isNacht(nowMs) {
-  const u = amsUur(nowMs);
-  return u >= NACHT_START_HOUR || u < NACHT_EIND_HOUR;
 }
 
 async function stuurWa(a, cfg, live, welkomPhoneId, varsOverride) {
@@ -226,10 +217,6 @@ export default async function handler(req, res) {
     items: [],   // v=6: per-lead outcome (id/wa/mail/step) voor observability
   };
 
-  // Nacht-guard geldt alleen voor het VERZENDEN, niet voor status-transities
-  // zoals 'vervallen' (die is stille administratie).
-  const nachtNu = isNacht(nowMs);
-
   // ── Atomic claim/unclaim helpers (v=10 2026-08-30) ─────────────────────
   // Concurrent cron-runs kunnen dezelfde rij tegelijk SELECTen zolang de
   // guard-kolom (bevestiging_sent_at / reminder_*_at / dag6_sent_at) nog
@@ -278,7 +265,7 @@ export default async function handler(req, res) {
   }
 
   // ── 1) BEVESTIGING (created_at + 2 min) ────────────────────────────────
-  if (!nachtNu) try {
+  try {
     const grens = new Date(nowMs - 2 * 60 * 1000).toISOString();
     const { data: rows } = await supabaseAdmin
       .from('toegang_aanvragen')
@@ -341,7 +328,7 @@ export default async function handler(req, res) {
   } catch (e) { summary.errors.push({ step: 'bevestiging-loop', error: e?.message || String(e) }); }
 
   // ── 2) REMINDERS ────────────────────────────────────────────────────────
-  if (!nachtNu) for (const [uren, kolom, cfgKey, counter] of [
+  for (const [uren, kolom, cfgKey, counter] of [
     [ 2, 'reminder_2u_at',  'reminder_2u',  'reminders_2u'  ],
     [24, 'reminder_24u_at', 'reminder_24u', 'reminders_24u' ],
     [48, 'reminder_48u_at', 'reminder_48u', 'reminders_48u' ],
@@ -391,7 +378,7 @@ export default async function handler(req, res) {
   } catch (e) { summary.errors.push({ step: 'vervallen-loop', error: e?.message || String(e) }); }
 
   // ── 4) DAG-6 CHECK-IN (alleen 7-daagse, gereageerd + provisioned) ─────
-  if (!nachtNu) try {
+  try {
     const grens = new Date(nowMs - DAG6_UREN * 3600 * 1000).toISOString();
     const { data: rows } = await supabaseAdmin
       .from('toegang_aanvragen')
