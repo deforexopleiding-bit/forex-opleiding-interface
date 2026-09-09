@@ -31,6 +31,7 @@ import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { MOMENTEN, bouwContext, resolveWelkomPhoneId, MIN, UUR } from './_lib/afspraak-berichten.js';
+import { logAfspraakFail } from './_lib/afspraak-faillog.js';
 import { getCalendarNameMap } from './_lib/ghl-calendars.js';
 import { bouwInternMail, waVars, bronVan } from './_lib/afspraak-intern-notify.js';
 
@@ -60,7 +61,7 @@ function isoMinuut(d) {
   return new Date(d).toISOString().slice(0, 16);
 }
 
-const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, zoom_meeting_id, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at, bevestigd_at, afspraak_token';
+const APPT_COLS = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, zoom_meeting_id, bevestiging_sent_at, bevestiging_wa_sent_at, bevestiging_mail_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at, bevestigd_at, afspraak_token';
 
 // Near-term geplande afspraken uit een GHL-agenda-import (ghl_calendar_id NOT
 // NULL). Verbreed van alleen-opstartsessie naar ALLE afspraak-agenda's; rijen
@@ -79,6 +80,124 @@ async function haalKandidaten(nowMs) {
     .limit(500);
   if (error) throw new Error('kandidaten-query: ' + error.message);
   return appts || [];
+}
+
+// ── BEVESTIGING: eigen, BREED kandidaatvenster ─────────────────────────────
+// Losgekoppeld van haalKandidaten() (dat is afgestemd op de reminders,
+// now+25u). De bevestiging moet afgaan zodra de Zoom-link binnen is —
+// ongeacht hoe ver de call vooruit ligt. Daarom hier ALLE toekomstige,
+// geplande GHL-afspraken met zoom-link die nog niet volledig bevestigd zijn.
+// De reminders gebruiken haalKandidaten() ONGEWIJZIGD en worden bovendien nog
+// steeds door hun eigen tijd-tot-event-conditie gegate → deze verbreding laat
+// reminders NIET eerder/vaker vuren.
+async function haalBevestigingKandidaten(nowMs) {
+  const nowIso = new Date(nowMs).toISOString();
+  const { data, error } = await supabaseAdmin
+    .from('follow_up_appointments')
+    .select(APPT_COLS)
+    .eq('status', 'scheduled')
+    .not('ghl_calendar_id', 'is', null)
+    .not('zoom_join_url', 'is', null)
+    .is('bevestiging_sent_at', null)
+    .gt('scheduled_at', nowIso)
+    .order('scheduled_at', { ascending: true })
+    .limit(500);
+  if (error) throw new Error('bevestiging-kandidaten-query: ' + error.message);
+  return data || [];
+}
+
+// Eén WhatsApp-bevestiging versturen (+ succes-log). Returnt per-kanaal-uitkomst.
+async function stuurWaBevestiging(appt, moment, ctx, welkomPhoneId) {
+  const variables = moment.waVars(appt, ctx).map((v) => String(v ?? ''));
+  try {
+    const { wamid } = await sendTemplate({
+      to: appt.lead_phone, templateName: moment.waTemplate, languageCode: 'nl', variables, phoneNumberId: welkomPhoneId,
+    });
+    const varsMap = {}; variables.forEach((v, i) => { varsMap[String(i + 1)] = v; });
+    await logOutboundWa(supabaseAdmin, {
+      toPhone: appt.lead_phone, phoneNumberId: welkomPhoneId,
+      body: `WhatsApp-template '${moment.waTemplate}' — ${variables.join(' · ')}`,
+      wamid, templateName: moment.waTemplate, templateVariables: varsMap, source: 'afspraak-bevestiging-cron',
+    });
+    return { ok: true, wamid, template: moment.waTemplate };
+  } catch (e) {
+    if (e instanceof MetaNotConfiguredError) return { ok: false, skipped: 'meta-niet-geconfigureerd' };
+    return { ok: false, error: e?.message || String(e), http_status: e?.httpStatus ?? null };
+  }
+}
+
+// Eén bevestigings-mail versturen. Returnt per-kanaal-uitkomst.
+async function stuurMailBevestiging(appt, moment, ctx) {
+  try {
+    const { subject, text, html } = moment.mail(appt, ctx);
+    const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html });
+    return r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+// Verwerk het bevestiging-moment met PER-KANAAL-markers: WhatsApp en mail
+// worden los geclaimd/gemarkeerd, zodat een mislukte WhatsApp in een volgende
+// run opnieuw wordt geprobeerd ZONDER de mail nog een keer te sturen. Zodra
+// beide toepasselijke kanalen klaar zijn, wordt bevestiging_sent_at gezet
+// (de "volledig-klaar"-guard + kandidaatfilter). Respecteert het nachtvenster.
+async function verwerkBevestiging({ rows, moment, welkomPhoneId, nachtNu, live }) {
+  const vak = { kandidaten: rows.length, onderdrukt: nachtNu ? 'nachtvenster' : null, verstuurd: 0, resultaten: [] };
+  if (nachtNu) return vak;                          // bevestiging is nachtGevoelig
+  if (!live) { vak.resultaten = rows.map((a) => ({ id: a.id, naam: a.lead_name, dry: true })); return vak; }
+
+  for (const appt of rows) {
+    const ctx = bouwContext(appt);
+    const res = { id: appt.id, wa: null, mail: null };
+    const waApplicable = !!welkomPhoneId && !!appt.lead_phone;
+    const mailApplicable = !!appt.lead_email;
+
+    // ── WhatsApp (per-kanaal claim + retry) ──
+    if (!waApplicable) {
+      res.wa = { ok: false, skipped: !welkomPhoneId ? 'welkom-phone-ontbreekt' : 'geen-telefoon' };
+    } else if (appt.bevestiging_wa_sent_at) {
+      res.wa = { ok: true, alreadySent: true };
+    } else if (await claimRow(appt.id, 'bevestiging_wa_sent_at')) {
+      const r = await stuurWaBevestiging(appt, moment, ctx, welkomPhoneId);
+      res.wa = r;
+      if (!r.ok) {
+        await unclaimRow(appt.id, 'bevestiging_wa_sent_at'); // vrijgeven → volgende run retryt WA (mail blijft ongemoeid)
+        await logAfspraakFail({ appointmentId: appt.id, moment: 'bevestiging', kanaal: 'whatsapp', templateName: moment.waTemplate, reason: r.error || r.skipped || 'onbekend', httpStatus: r.http_status ?? null, toPhone: appt.lead_phone });
+      }
+    } else {
+      res.wa = { ok: false, skipped: 'claim-race' };
+    }
+
+    // ── Mail (per-kanaal claim + retry, NOOIT dubbel) ──
+    if (!mailApplicable) {
+      res.mail = { ok: false, skipped: 'geen-email' };
+    } else if (appt.bevestiging_mail_sent_at) {
+      res.mail = { ok: true, alreadySent: true };
+    } else if (await claimRow(appt.id, 'bevestiging_mail_sent_at')) {
+      const r = await stuurMailBevestiging(appt, moment, ctx);
+      res.mail = r;
+      if (!r.ok) {
+        await unclaimRow(appt.id, 'bevestiging_mail_sent_at');
+        await logAfspraakFail({ appointmentId: appt.id, moment: 'bevestiging', kanaal: 'email', reason: r.error || 'onbekend' });
+      }
+    } else {
+      res.mail = { ok: false, skipped: 'claim-race' };
+    }
+
+    // ── Volledig klaar? Alle TOEPASSELIJKE kanalen gemarkeerd → zet de guard. ──
+    const waKlaar = !waApplicable || res.wa?.ok || res.wa?.alreadySent;
+    const mailKlaar = !mailApplicable || res.mail?.ok || res.mail?.alreadySent;
+    if (waKlaar && mailKlaar) {
+      await claimRow(appt.id, 'bevestiging_sent_at'); // idempotent (WHERE … IS NULL)
+      if (res.wa?.ok || res.mail?.ok) vak.verstuurd += 1;
+      res.klaar = true;
+    } else {
+      res.klaar = false;
+    }
+    vak.resultaten.push(res);
+  }
+  return vak;
 }
 
 // Gerichte Zoom-backfill: vul zoom_join_url voor near-term rijen die 'm missen.
@@ -178,6 +297,10 @@ async function verstuur(appt, moment, welkomPhoneId) {
     } catch (e) {
       if (e instanceof MetaNotConfiguredError) uitkomst.wa = { ok: false, skipped: 'meta-niet-geconfigureerd' };
       else uitkomst.wa = { ok: false, error: e?.message || String(e), http_status: e?.httpStatus ?? null };
+      // Faillog (alleen zichtbaarheid; verandert de reminder-logica niet).
+      if (uitkomst.wa && uitkomst.wa.error) {
+        await logAfspraakFail({ appointmentId: appt.id, moment: moment.key, kanaal: 'whatsapp', templateName: moment.waTemplate, reason: uitkomst.wa.error, httpStatus: uitkomst.wa.http_status ?? null, toPhone: appt.lead_phone });
+      }
     }
   }
 
@@ -295,8 +418,21 @@ export default async function handler(req, res) {
     const welkomPhoneId = live ? await resolveWelkomPhoneId() : null;
     if (live) summary.welkom_phone = welkomPhoneId ? 'ok' : 'ontbreekt';
 
-    // 3) Per moment: kandidaten bepalen + (indien live) claimen en versturen.
+    // 3a) BEVESTIGING — eigen, breed venster (los van haalKandidaten) + per-
+    //     kanaal-markers. Zodra de Zoom-link binnen is, ongeacht hoe ver de
+    //     call vooruit ligt. Respecteert het nachtvenster.
+    try {
+      const bevMoment = MOMENTEN.find((m) => m.key === 'bevestiging');
+      const bevRows = await haalBevestigingKandidaten(nowMs);
+      summary.momenten.bevestiging = await verwerkBevestiging({ rows: bevRows, moment: bevMoment, welkomPhoneId, nachtNu, live });
+    } catch (e) {
+      summary.errors.push({ step: 'bevestiging', error: e?.message || String(e) });
+    }
+
+    // 3b) REMINDERS — ONGEWIJZIGD (near-term venster + eigen tijd-condities).
+    //     bevestiging is hierboven al apart afgehandeld → hier overslaan.
     for (const moment of MOMENTEN) {
+      if (moment.key === 'bevestiging') continue;
       const onderdrukNacht = moment.nachtGevoelig && nachtNu;
       const rows = kandidaten.filter((k) => moment.match(k, nowMs));
       const vak = { kandidaten: rows.length, onderdrukt: onderdrukNacht ? 'nachtvenster' : null, verstuurd: 0, resultaten: [] };
