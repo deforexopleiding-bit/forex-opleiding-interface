@@ -182,6 +182,57 @@ export function dagenVoorAfspraak(a, nuMs = Date.now()) {
   return uit;
 }
 
+/**
+ * Welke knoppen horen er bij deze regel?
+ *
+ * ── WAAROM DIT MEER IS DAN OPMAAK ────────────────────────────────────────
+ * Dave kan alleen afronden bij een call die hij ZIET. Zolang de dagweergave op
+ * `scheduled` filterde, verdween een afspraak uit de lijst zodra hij een andere
+ * status kreeg — en daarmee verdween ook de kans om er een uitkomst aan te
+ * hangen. Mehran Jahani en Sebastian Kolodziejski kregen op 9 september de
+ * status no_show en waren uit beeld voordat iemand er iets mee kon. Ze zijn niet
+ * vergeten door nalatigheid; het scherm toonde ze niet meer.
+ *
+ * Het dagbeeld is dus niet alleen een weergavefix: het is wat die uitkomst
+ * alsnog vastlegbaar maakt. Een regel die je wél ziet maar niets mee kunt, maakt
+ * het probleem zichtbaar zonder het op te lossen.
+ *
+ * Vandaar dat 'doorgehaald' NIET bepaalt of er knoppen zijn. Een no-show is
+ * grijs én afrondbaar; dat is precies de regel waar het om gaat.
+ *
+ * api/follow-up-appointment-outcome.js weigert een afspraak met een andere
+ * status niet — hij haalt de rij op, controleert de rol en gaat door. De knop
+ * werkt dus ook op een afspraak van gisteren die al op no_show staat.
+ */
+export function knoppenVoor(a, nuMs = Date.now(), { opNieuweDag = false } = {}) {
+  const status = String((a && a.status) || 'scheduled').toLowerCase();
+  const heeftNummer = !!(a && a.lead_phone);
+  const start = a ? Date.parse(a.scheduled_at) : NaN;
+  const geweest = Number.isFinite(start) && start < nuMs;
+
+  // De regel op zijn OUDE dag, van een afspraak die inmiddels verplaatst is:
+  // de uitkomst hoort bij de nieuwe datum, niet hier. Anders legt Dave een
+  // no-show vast op een call die gewoon verzet is.
+  const verplaatstWeg = !opNieuweDag && !!verzetNaar(a);
+
+  // Nergens meer iets aan te doen.
+  const dood = verplaatstWeg
+    || status === 'cancelled' || status === 'canceled'
+    || status === 'verwijderd' || status === 'verplaatst'
+    || status === 'wacht_op_reschedule';
+
+  return {
+    // Afronden mag bij alles wat echt heeft plaatsgevonden of nog moet
+    // plaatsvinden — inclusief een no-show, want DAT is de hele reden.
+    afronden: !dood,
+    bellen  : !dood && heeftNummer,
+    whatsapp: !dood && heeftNummer,
+    // De Zoom-link bij een call die al geweest is nodigt uit tot een gesprek
+    // dat niemand verwacht.
+    zoom    : !dood && !geweest && !!(a && a.zoom_join_url),
+  };
+}
+
 const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',
   'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
 

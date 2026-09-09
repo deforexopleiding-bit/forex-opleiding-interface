@@ -18,6 +18,7 @@ import assert from 'node:assert/strict';
 
 import {
   oorspronkelijkeDag, oorspronkelijkeTijd, verzetNaar, toonStaat, nlDatum, dagenVoorAfspraak,
+  knoppenVoor,
   ACTIEF_STAAT, VERZET, GEANNULEERD, NIET_GEKOMEN, GEWEEST, ONBEKEND,
 } from '../api/_lib/opvolging-dagbeeld.js';
 import { voegAgendaSamen } from '../api/_lib/opvolging-agenda-merge.js';
@@ -285,4 +286,95 @@ test('een afspraak die niet verplaatst is levert precies een dag op', () => {
     scheduled_at: '2026-09-08T13:00:00Z', eerst_gepland_op: '2026-09-08T13:00:00Z',
   }, NU);
   assert.equal(plekken.length, 1);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GRIJS BETEKENT NIET ONAANRAAKBAAR
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// De koppeling die dit blok belangrijk maakt: Dave kan alleen afronden bij een
+// call die hij ZIET. Mehran Jahani en Sebastian Kolodziejski kregen op 9
+// september de status no_show en verdwenen daarmee uit de lijst voordat iemand
+// er iets mee kon. Ze zijn niet vergeten door nalatigheid — het scherm toonde
+// ze niet meer.
+//
+// Het dagbeeld is dus niet alleen een weergavefix; het is wat die uitkomst
+// alsnog vastlegbaar maakt. Een regel die je wél ziet maar niets mee kunt maakt
+// het probleem zichtbaar zonder het op te lossen.
+//
+// Mijn eerste versie deed precies dat verkeerd: die verborg de knoppen op elke
+// doorgehaalde regel. Deze tests leggen vast dat 'grijs' en 'onaanraakbaar'
+// twee verschillende dingen zijn.
+
+// De dag ERNA, want dat is de situatie: Mehran was no-show op 8 september en
+// Dave kijkt er op de 9e naar. Met NU (8 september 12:00) zou zijn call van
+// 18:00 nog in de toekomst liggen — een no-show die nog moet gebeuren bestaat
+// niet, en de test viel daar terecht over.
+const MORGEN_OCHTEND = Date.parse('2026-09-09T07:00:00Z');
+
+const NO_SHOW = {
+  id: 'm', lead_name: 'Mehran Jahani', status: 'no_show',
+  scheduled_at: '2026-09-08T16:00:00Z', eerst_gepland_op: '2026-09-08T16:00:00Z',
+  lead_phone: '+32470111222', zoom_join_url: 'https://zoom.us/j/1',
+};
+
+test('een no-show is doorgehaald EN afrondbaar', () => {
+  assert.equal(toonStaat(NO_SHOW, MORGEN_OCHTEND).doorgehaald, true);
+  assert.equal(knoppenVoor(NO_SHOW, MORGEN_OCHTEND).afronden, true,
+    'zonder deze knop is de no-show zichtbaar maar niet vastlegbaar');
+});
+
+test('en nabellen kan ook — dat is de hele bedoeling', () => {
+  const k = knoppenVoor(NO_SHOW, MORGEN_OCHTEND);
+  assert.equal(k.bellen, true);
+  assert.equal(k.whatsapp, true);
+});
+
+test('de Zoom-link verdwijnt zodra de call geweest is', () => {
+  // Een Zoom-knop bij een call van gisteren nodigt uit tot een gesprek dat
+  // niemand verwacht.
+  assert.equal(knoppenVoor(NO_SHOW, MORGEN_OCHTEND).zoom, false, 'de call van gisteren 18:00 is geweest');
+  // eerst_gepland_op MEE verzetten: alleen scheduled_at veranderen maakt er een
+  // verplaatste afspraak van, en die is per definitie dood op zijn oude dag.
+  const straks = { ...NO_SHOW, status: 'scheduled',
+    scheduled_at: '2026-09-09T16:00:00Z', eerst_gepland_op: '2026-09-09T16:00:00Z' };
+  assert.equal(knoppenVoor(straks, MORGEN_OCHTEND).zoom, true, 'een call van straks krijgt hem wel');
+});
+
+test('een afspraak waarvan de tijd voorbij is en die nog op scheduled staat, is afrondbaar', () => {
+  // yeivi medinw van 8 september 15:00. Precies het geval dat nu blijft hangen.
+  const yeivi = { id: 'y', lead_name: 'yeivi medinw', status: 'scheduled',
+    scheduled_at: '2026-09-08T13:00:00Z', lead_phone: '+32470999888' };
+  assert.equal(knoppenVoor(yeivi, MORGEN_OCHTEND).afronden, true);
+});
+
+test('bij een geannuleerde of verwijderde afspraak valt er niets af te ronden', () => {
+  for (const status of ['cancelled', 'verwijderd']) {
+    const k = knoppenVoor({ ...NO_SHOW, status }, MORGEN_OCHTEND);
+    assert.deepEqual([k.afronden, k.bellen, k.whatsapp, k.zoom], [false, false, false, false], status);
+  }
+});
+
+test('op de OUDE dag van een verplaatste afspraak hoort geen afrondknop', () => {
+  // De uitkomst hoort bij de nieuwe datum. Anders legt Dave een no-show vast
+  // op een call die gewoon verzet is.
+  const k = knoppenVoor(INGESCHOVEN, NU, { opNieuweDag: false });
+  assert.equal(k.afronden, false);
+});
+
+test('op de NIEUWE dag van diezelfde afspraak wel', () => {
+  const k = knoppenVoor(INGESCHOVEN, NU, { opNieuweDag: true });
+  assert.equal(k.afronden, true);
+});
+
+test('en de agenda stuurt die knoppen mee, per regel', () => {
+  const [dag] = voegAgendaSamen({
+    slots: [], van: '2026-09-08', tot: '2026-09-08', nuMs: MORGEN_OCHTEND,
+    afspraken: [NO_SHOW, { id: 'c', lead_name: 'Afgezegd', status: 'cancelled',
+      scheduled_at: '2026-09-08T09:00:00Z', lead_phone: '+32470000000' }],
+  });
+  const mehran = dag.gepland.find((g) => g.naam === 'Mehran Jahani');
+  assert.equal(mehran.doorgehaald, true);
+  assert.equal(mehran.knoppen.afronden, true);
+  assert.equal(dag.gepland.find((g) => g.naam === 'Afgezegd').knoppen.afronden, false);
 });

@@ -15,7 +15,7 @@
 //
 // Pure functie, geen netwerk, geen database — zie tests/opvolging-agenda-merge.test.js.
 
-import { verzetNaar, dagenVoorAfspraak } from './opvolging-dagbeeld.js';
+import { verzetNaar, dagenVoorAfspraak, knoppenVoor } from './opvolging-dagbeeld.js';
 
 /** Statussen die een moment daadwerkelijk bezet houden. */
 const BEZET_STATUSSEN = new Set(['scheduled', 'in_progress']);
@@ -135,6 +135,10 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
         doorgehaald   : plek.toon.doorgehaald,
         verzet_naar   : plek.verzet_van ? null : verzetNaar(a),
         verzet_van    : plek.verzet_van || null,
+        // Welke knoppen hier horen. Server-side, zodat de regel op één plek
+        // staat — en zodat 'grijs' niet stilzwijgend 'onaanraakbaar' gaat
+        // betekenen. Zie knoppenVoor.
+        knoppen       : knoppenVoor(a, nuMs, { opNieuweDag: !!plek.verzet_van }),
         appointment_id: a.id || null,
         telefoon      : a.lead_phone || null,
         email         : a.lead_email || null,

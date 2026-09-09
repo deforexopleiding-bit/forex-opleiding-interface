@@ -1812,12 +1812,18 @@
       const taak = taakVoorNummer(c.telefoon);
       // WAT ER NIET MEER DOORGAAT KRIJGT GEEN KNOPPEN. Een Zoom-knop bij een
       // afspraak die verzet is nodigt uit tot een call die niemand verwacht.
+      // GRIJS BETEKENT NIET ONAANRAAKBAAR. Een no-show is doorgehaald én
+      // afrondbaar — juist dat is de reden dat hij hier staat: Dave kan alleen
+      // afronden bij een call die hij ziet. Welke knoppen mogen komt van de
+      // server (knoppenVoor in api/_lib/opvolging-dagbeeld.js); de terugval
+      // geldt voor een oudere server die het veld nog niet meestuurt.
+      const k = c.knoppen || { afronden: true, bellen: !!c.telefoon, whatsapp: !!c.telefoon, zoom: !!c.zoom_url };
+      const knoppen =
+        (k.zoom && c.zoom_url ? '<a class="obtn zoom" href="' + esc(c.zoom_url) + '" target="_blank" rel="noopener">&#127909; Zoom</a>' : '') +
+        (k.bellen && c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(' + i + ')">&#9742; Bellen</button>' : '') +
+        (k.whatsapp && c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(' + i + ')">&#128172; WhatsApp</button>' : '') +
+        (k.afronden ? '<button class="obtn" onclick="window.__opvCallAfrond(' + i + ')">Afronden &rarr;</button>' : '');
       const dood = c.doorgehaald === true;
-      const knoppen = dood ? '' :
-        (c.zoom_url ? '<a class="obtn zoom" href="' + esc(c.zoom_url) + '" target="_blank" rel="noopener">&#127909; Zoom</a>' : '') +
-        (c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(' + i + ')">&#9742; Bellen</button>' : '') +
-        (c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(' + i + ')">&#128172; WhatsApp</button>' : '') +
-        '<button class="obtn" onclick="window.__opvCallAfrond(' + i + ')">Afronden &rarr;</button>';
       // Het label komt van de server (api/_lib/opvolging-dagbeeld.js), zodat het
       // scherm, het rapport en de printweergave dezelfde woorden gebruiken.
       const label = c.label

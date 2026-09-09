@@ -497,6 +497,48 @@ Dat zijn twee verschillende feiten: wat er die dag **stond**, en wat er die dag
 `wacht_op_reschedule`, `verwijderd`) krijgt géén tweede dag — die twee keer
 doorgehaald tonen zou twee lege regels opleveren.
 
+### Grijs betekent niet onaanraakbaar
+
+De koppeling die dit blok van een weergavefix in een werkende functie verandert:
+**Dave kan alleen afronden bij een call die hij ziet.**
+
+Mehran Jahani en Sebastian Kolodziejski kregen op 9 september de status
+`no_show` en verdwenen daarmee uit de dagweergave — vóórdat iemand er een
+uitkomst aan kon hangen. Ze zijn niet vergeten door nalatigheid; het scherm
+toonde ze niet meer. Het dagbeeld is dus niet alleen een weergavefix, het is wat
+die uitkomst alsnog vastlegbaar maakt.
+
+Mijn eerste versie deed daar precies het verkeerde mee:
+
+```js
+const dood = c.doorgehaald === true;
+const knoppen = dood ? '' : …          // ← fout
+```
+
+Een regel die je wél ziet maar niets mee kunt, maakt het probleem zichtbaar
+zonder het op te lossen. `doorgehaald` gaat over hoe iets eruitziet;
+`knoppenVoor()` gaat over wat er nog kan, en dat zijn twee verschillende vragen:
+
+| | afronden | bellen / WhatsApp | Zoom |
+|---|---|---|---|
+| ingepland, nog te gaan | ja | ja | ja |
+| ingepland, tijd voorbij | **ja** | ja | nee |
+| niet gekomen (`no_show`) | **ja** — dít is de reden | **ja** | nee |
+| geweest (`completed`) | ja | ja | nee |
+| geannuleerd / verwijderd | nee | nee | nee |
+| verzet, op de **oude** dag | nee — de uitkomst hoort bij de nieuwe datum | nee | nee |
+| verzet, op de **nieuwe** dag | ja | ja | ja |
+
+`api/follow-up-appointment-outcome.js` weigert een afspraak met een andere
+status niet: hij haalt de rij op, controleert de rol en gaat door. Er hoefde
+dus **niets** aan de backend te veranderen — de knop werkt op een afspraak van
+gisteren die al op `no_show` staat.
+
+En er komt geen nieuwe machinerie bij. De bestaande knop blijft de enige weg
+waarlangs een no-show een kaart maakt; die weg werkt aantoonbaar (vier kaarten
+met `bron_ref.source = 'opvolging-call'`). Het enige wat ontbrak was dat je hem
+kon indrukken.
+
 ### Wat er wél en niet kan zonder de migratie
 
 De kolom is op 9 september nog niet gedraaid. De grens is scherp, en hij ligt
