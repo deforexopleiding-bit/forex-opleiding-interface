@@ -15,6 +15,8 @@
 //
 // Pure functie, geen netwerk, geen database — zie tests/opvolging-agenda-merge.test.js.
 
+import { afrondActie } from './opvolging-call-afgerond.js';
+
 /** Statussen die een moment daadwerkelijk bezet houden. */
 const BEZET_STATUSSEN = new Set(['scheduled', 'in_progress']);
 
@@ -134,8 +136,50 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
         email         : a.lead_email || null,
         zoom_url      : a.zoom_join_url || null,
         start         : a.scheduled_at || null,
+        // Heeft Dave deze al afgerond, en waarmee? Server-side bepaald, zodat
+        // de regel op één plek staat. Zie _lib/opvolging-call-afgerond.js.
+        afrond        : afrondActie(a),
       });
     }
+  }
+
+  // ── WAT DAVE ZELF AL AFGEROND HEEFT ──────────────────────────────────────
+  // Zodra hij een uitkomst vastlegt gaat de afspraak naar `completed`,
+  // `no_show` of `cancelled` — en die vallen geen van drieën in
+  // BEZET_STATUSSEN. De regel verdween daarmee uit het callsblok op het moment
+  // dat hij hem afrondde, en dan kan 'Afgerond' per definitie nooit zichtbaar
+  // zijn. Precies wat Dave 's middags moet kunnen terugzien.
+  //
+  // Vandaar een APARTE lijst en geen verbreding van `bezet`. Dat is met opzet:
+  // `bezet` bepaalt welke vrije momenten wegvallen, en daar hoort een
+  // afgezegde call niet in — anders blokkeert een annulering voorgoed een slot
+  // dat vrij is. Twee vragen, twee antwoorden.
+  //
+  // De grens is onze EIGEN uitkomst en niets anders. Een status die van elders
+  // komt telt hier niet mee; de module praat geen externe waarheid na.
+  const afgerondPerDag = new Map();
+  for (const a of (Array.isArray(afspraken) ? afspraken : [])) {
+    if (!a || !a.scheduled_at) continue;
+    const oordeel = afrondActie(a);
+    if (oordeel.toon !== 'uitkomst') continue;
+    const ms = Date.parse(a.scheduled_at);
+    if (!Number.isFinite(ms)) continue;
+    const { dag, tijd } = delenInZone(ms, timeZone);
+    if (!inVenster.has(dag)) continue;
+    // Staat hij al bij bezet, dan hoort hij daar en niet twee keer.
+    if ((bezetPerDag.get(dag) || new Map()).has(tijd)) continue;
+    if (!afgerondPerDag.has(dag)) afgerondPerDag.set(dag, []);
+    afgerondPerDag.get(dag).push({
+      tijd,
+      naam          : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+      status        : String(a.status || '').toLowerCase(),
+      appointment_id: a.id || null,
+      telefoon      : a.lead_phone || null,
+      email         : a.lead_email || null,
+      zoom_url      : a.zoom_join_url || null,
+      start         : a.scheduled_at || null,
+      afrond        : oordeel,
+    });
   }
 
   // ── Vrij, minus wat bezet is. ─────────────────────────────────────────────
@@ -161,5 +205,8 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
     vrij : [...(vrijPerDag.get(dag) || new Set())].sort()
       .map((tijd) => ({ tijd, iso: zoneMomentNaarIso(dag, tijd, timeZone) })),
     bezet: [...(bezetPerDag.get(dag) || new Map()).values()].sort((a, b) => a.tijd.localeCompare(b.tijd)),
+    // Wat Dave die dag zelf heeft afgerond. Apart van `bezet`, zie het blok
+    // hierboven; het callsblok toont ze samen.
+    afgerond: (afgerondPerDag.get(dag) || []).sort((a, b) => a.tijd.localeCompare(b.tijd)),
   }));
 }
