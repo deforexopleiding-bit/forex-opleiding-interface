@@ -137,10 +137,13 @@
 
   .dave{border-color:rgba(182,130,12,.34);background:var(--dave-bg)}
   .dave > h3{color:var(--gold)}
-  .dave-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:14px 16px}
-  .dstat{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:12px;padding:12px 13px}
-  .dstat .l{font-size:12px;color:var(--gold);font-weight:600}
-  .dstat .v{font-family:"Bricolage Grotesque";font-weight:800;font-size:38px;margin-top:6px;line-height:1}
+  /* 7 tegels op exact één rij (nooit wrappen). min-width:0 laat elke kolom
+     krimpen binnen de bordbreedte i.p.v. over de rand te lopen. Compacter
+     gemaakt (kleinere padding/cijfers/labels) zodat alle 7 op ±1450px passen. */
+  .dave-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:12px 14px}
+  .dstat{background:var(--panel-2);border:1px solid var(--line-soft);border-radius:10px;padding:9px 10px;min-width:0}
+  .dstat .l{font-size:10.5px;color:var(--gold);font-weight:600;line-height:1.2}
+  .dstat .v{font-family:"Bricolage Grotesque";font-weight:800;font-size:26px;margin-top:4px;line-height:1}
 
   .duo{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:16px;min-height:0}
   .ev-list{padding:8px 12px 12px;overflow:hidden;display:flex;flex-direction:column;gap:9px}
