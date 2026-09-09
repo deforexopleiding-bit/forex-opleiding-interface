@@ -12,6 +12,10 @@
       "maxDuration": 60,
       "memory": 1024
     },
+    "api/admin-recon-persons.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024
