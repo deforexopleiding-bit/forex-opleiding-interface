@@ -104,18 +104,63 @@ export default async function handler(req, res) {
       .select('id, created_at, booking_source, naam, email, telefoon, gekozen_slot, gekozen_start_at, score, drempel, resultaat, noshow_akkoord, appointment_id, lead_id', { count: 'exact' })
       .limit(limit);
 
+    // 2026-09-09 fix — Verzette calls (submission.gekozen_start_at bevroren,
+    // appointment.scheduled_at is de waarheid) moeten in het tijd-filter
+    // meelopen op de LIVE datum, niet de bevroren datum. Voorbeeld: Redouane
+    // Jerroudi — gekozen_start_at = 4 sep (verleden), maar de call is
+    // verplaatst naar 11 sep. Zonder deze fix stond hij in verleden i.p.v.
+    // aankomend. Pre-fetch de appointment-ids voor de gewenste tijd-eis en
+    // voeg ze via OR-clause toe aan de submissions-query.
+    async function preFetchApptIds(cmp) {
+      // cmp = 'gte' voor aankomend, 'lt' voor verleden.
+      let aq = supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id')
+        .not('id', 'is', null);
+      aq = cmp === 'gte' ? aq.gte('scheduled_at', nowIso) : aq.lt('scheduled_at', nowIso);
+      const { data: apts } = await aq;
+      return (apts || []).map(a => a.id).filter(Boolean);
+    }
+
     if (useRange) {
-      qry = qry.order('gekozen_start_at', { ascending: true })
-              .gte('gekozen_start_at', rawFrom).lt('gekozen_start_at', rawTo);
+      // 2026-09-09 fix — Agenda maand-range moet óók verzette calls op
+      // basis van live scheduled_at binnenhalen. Zonder deze OR staan
+      // verplaatste calls in de verkeerde maand-cell (op de bevroren
+      // gekozen_start_at) of vallen ze buiten de fetch.
+      const { data: rangeAppts } = await supabaseAdmin
+        .from('follow_up_appointments')
+        .select('id')
+        .gte('scheduled_at', rawFrom)
+        .lt('scheduled_at', rawTo);
+      const rangeApptIds = (rangeAppts || []).map(a => a.id).filter(Boolean);
+      const rangeOr = [`and(gekozen_start_at.gte.${rawFrom},gekozen_start_at.lt.${rawTo})`];
+      if (rangeApptIds.length > 0) rangeOr.push(`appointment_id.in.(${rangeApptIds.join(',')})`);
+      qry = qry.or(rangeOr.join(','))
+              .order('gekozen_start_at', { ascending: true });
     } else if (tijd === 'aankomend') {
-      // Aankomend: gekozen_start_at >= nu, oplopend. Rijen zonder
-      // gekozen_start_at (nog geen moment gekozen / afgewezen) blijven
-      // ook zichtbaar zodat Romy niet-geplande submissions kan opvolgen.
-      qry = qry.or(`gekozen_start_at.gte.${nowIso},gekozen_start_at.is.null`)
+      // Aankomend: gekozen_start_at >= nu OR gekoppelde appointment
+      // scheduled_at >= nu OR gekozen_start_at IS NULL (nog geen moment
+      // gekozen / afgewezen). Verzette calls die op de bevroren
+      // gekozen_start_at verleden zouden zijn, komen zo via de tweede tak
+      // alsnog in aankomend terecht.
+      const upcomingApptIds = await preFetchApptIds('gte');
+      const orClauses = [`gekozen_start_at.gte.${nowIso}`, `gekozen_start_at.is.null`];
+      if (upcomingApptIds.length > 0) {
+        orClauses.push(`appointment_id.in.(${upcomingApptIds.join(',')})`);
+      }
+      qry = qry.or(orClauses.join(','))
               .order('gekozen_start_at', { ascending: true, nullsFirst: false });
     } else if (tijd === 'verleden') {
-      // Verleden: gekozen_start_at < nu, meest recent bovenaan.
-      qry = qry.lt('gekozen_start_at', nowIso)
+      // Verleden: gekozen_start_at < nu OR gekoppelde appointment
+      // scheduled_at < nu. Analoog aan aankomend, spiegel-geval:
+      // een verplaatste call die op de bevroren waarde verleden lijkt
+      // maar op de live-datum aankomend is, hoort HIER NIET meer bij.
+      const pastApptIds = await preFetchApptIds('lt');
+      const orClauses = [`gekozen_start_at.lt.${nowIso}`];
+      if (pastApptIds.length > 0) {
+        orClauses.push(`appointment_id.in.(${pastApptIds.join(',')})`);
+      }
+      qry = qry.or(orClauses.join(','))
               .order('gekozen_start_at', { ascending: false });
     } else {
       // Alles: geen tijd-filter; nieuwste created_at eerst — client-side
@@ -159,7 +204,7 @@ export default async function handler(req, res) {
     if (apptIds.length > 0) {
       const { data: appts } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, status, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
+        .select('id, status, scheduled_at, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
         .in('id', apptIds);
       for (const a of (appts || [])) { apptStatusById.set(a.id, a.status); apptById.set(a.id, a); }
     }
@@ -262,6 +307,22 @@ export default async function handler(req, res) {
       const emailLower  = String(r.email || '').trim().toLowerCase();
       const saleChecked = !!emailLower && matchableEmails.has(emailLower);
       const saleInfo    = saleChecked ? (saleByEmail.get(emailLower) || null) : null;
+      // 2026-09-09 fix — Als er een gekoppelde appointment is, dan is
+      // follow_up_appointments.scheduled_at de bron voor DATUM/TIJD (zowel
+      // kalenderplaatsing als tijd-label). De bevroren submission.gekozen_
+      // start_at + gekozen_slot mogen alleen als fallback dienen wanneer er
+      // GEEN appointment is (bv. afgewezen submissions, of nog niet
+      // geboekt). Zonder deze override stond een verzette call op de
+      // originele slot-datum in de agenda (bewijs: Redouane Jerroudi —
+      // gekozen_start_at 4 sep, scheduled_at 11 sep).
+      const apt              = r.appointment_id ? apptById.get(r.appointment_id) : null;
+      const aptScheduledAt   = apt?.scheduled_at || null;
+      const effGekozenStart  = aptScheduledAt || r.gekozen_start_at;
+      // Slot-label bevat de originele "vr 4 sep om 18:30"-tekst; die klopt
+      // niet meer zodra er verplaatst is. Null'en → frontend valt terug op
+      // kortDt(gekozen_start_at) (Europe/Amsterdam) via de bestaande
+      // template-ternary in leadsonderhoud-v2.js.
+      const effGekozenSlot   = aptScheduledAt ? null : r.gekozen_slot;
       return {
         id              : r.id,
         bron_type       : 'submission',
@@ -271,8 +332,8 @@ export default async function handler(req, res) {
         naam            : r.naam,
         email           : r.email,
         telefoon        : r.telefoon,
-        gekozen_slot    : r.gekozen_slot,
-        gekozen_start_at: r.gekozen_start_at,
+        gekozen_slot    : effGekozenSlot,
+        gekozen_start_at: effGekozenStart,
         score           : r.score,
         drempel         : r.drempel,
         resultaat       : r.resultaat,
