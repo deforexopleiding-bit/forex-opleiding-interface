@@ -8,14 +8,18 @@
 // Bronnen (allemaal server-side, geen self-HTTP):
 //   leads   → computeLeadsByTraject (_lib/leads-per-traject-compute)  — total_incl_afwijzer + by_traject_incl_afwijzer, matcht v2-dashboard
 //   sales   → computeSignedDealsTotal (_lib/sales-signed-deals-compute) met recent_ids voor bling
-//   calls   → follow_up_appointments: zoom_meeting_id IS NOT NULL AND status='completed' (Jeffrey: alleen afgeronde Zoom-calls)
-//   dave    → computeMetrics(supabaseAdmin, {ownerScope: daveUserId}) uit follow-up-metrics
-//               - retentie_gebeld    = appointments_completed
-//               - follow_ups_gedraaid = outcomes_total (ANDERE bron dan retentie)
-//               - voicememos_sent    = voicememos_sent
-//   1-op-1  → getBubbleOneOnOneCountToday (_lib/bubble-one-on-one-count) — 8-min cache, één Bubble-query all-mentor
+//   calls   → follow_up_appointments: geboekt (created_at) + afgeronde Zoom-calls (status='completed')
+//   opvolging → opvolging_pogingen (bedrijfsbreed, NL-vandaag, richting='uit')
+//               - belpogingen    = soort='call'
+//               - gesprekken     = soort='call' + classificeerResultaat='gesproken'
+//               - voicememos     = soort='spraakbericht'
+//               - whatsapp       = soort='whatsapp'
+//               en opvolging_taken: open_taken (status='open' AND due<=vandaag),
+//               taken_afgerond (gearchiveerd_at in vandaag)
+//   1-op-1  → hlms_sessie (nieuw LMS, aparte dfo-lms-client): status='afgerond'
+//               (+ no_show) met start_tijd in NL-vandaag. Vervangt Bubble.
 //   rank    → activity_log group by user_id (whitelist, env-override)
-//   feed    → 6-way UNION, top-15, DESC
+//   feed    → UNION (leads/sales/opvolging-call/opvolging-voicememo/events), top-15, DESC
 //
 // Robuustheid: Promise.allSettled over 14 bronnen + eigen safeAwait() voor
 // alle secundaire lookups. Falen van één bron degradeert die tegel, rest
@@ -25,16 +29,19 @@
 import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { checkRateLimit } from './_lib/rate-limit.js';
-import { computeMetrics } from './follow-up-metrics.js';
 import {
   nlDayStart, nlDayEndExclusive, nlDateString,
   nlWeekStart, nlWeekEndExclusive, nlMonthStart, nlMonthEndExclusive,
 } from './_lib/nl-period.js';
 import { computeLeadsByTraject } from './_lib/leads-per-traject-compute.js';
 import { computeSignedDealsTotal } from './_lib/sales-signed-deals-compute.js';
-import { getBubbleOneOnOneCountToday } from './_lib/bubble-one-on-one-count.js';
 import { computeSalesStreak } from './_lib/sales-streak-compute.js';
 import { getConfirmedCount } from './_lib/event-registration.js';
+// 1-op-1 calls: nieuwe LMS (dfo-lms, eigen Supabase-project) i.p.v. Bubble.
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
+// Opvolging-module: bedrijfsbrede dag-tellingen uit opvolging_pogingen.
+// classificeerResultaat scheidt echte gesprekken van 'niet opgenomen' e.d.
+import { classificeerResultaat, GESPROKEN } from './_lib/opvolging-poging-telling.js';
 
 const CACHE_TTL_MS = 10_000;
 let _cache = { at: 0, payload: null };
@@ -77,24 +84,6 @@ function trimName(name) {
   return `${first} ${last.charAt(0).toUpperCase()}.`;
 }
 
-// ── Dave-lookup: env-var primair, name-match alleen bij exact 1 hit ──────
-async function resolveDave() {
-  const envId = process.env.DISPLAY_DAVE_USER_ID;
-  if (envId) return { user_id: envId, source: 'env' };
-  try {
-    const { data } = await supabaseAdmin
-      .from('profiles').select('id, full_name')
-      .ilike('full_name', '%dave%').eq('is_active', true);
-    const rows = data || [];
-    if (rows.length === 1) return { user_id: rows[0].id, source: 'name-match' };
-    console.warn('[display-metrics] Dave niet eenduidig gevonden: rows=' + rows.length + ' — zet DISPLAY_DAVE_USER_ID');
-    return { user_id: null, source: 'unresolved' };
-  } catch (e) {
-    console.warn('[display-metrics] Dave-lookup fout:', e?.message || e);
-    return { user_id: null, source: 'unresolved' };
-  }
-}
-
 // ── Token-check tegen display_tokens ──────────────────────────────────────
 async function verifyToken(plaintext) {
   if (!plaintext || typeof plaintext !== 'string' || plaintext.length < 16) return false;
@@ -115,6 +104,34 @@ async function verifyToken(plaintext) {
 async function safeAwait(promise, fallback, label) {
   try { return await promise; }
   catch (e) { console.warn('[display-metrics] secondary ' + label + ' failed:', e?.message); return fallback; }
+}
+
+// ── 1-op-1 calls vandaag uit het nieuwe LMS (hlms_sessie) ──────────────────
+// Vervangt de oude Bubble-telling. Leest via de aparte dfo-lms-client
+// (env DFO_LMS_SUPABASE_URL/DFO_LMS_SUPABASE_SERVICE_ROLE_KEY). Ontbreekt die
+// config, dan count=null → het bord toont "—" i.p.v. misleidend 0.
+// Bedrijfsbreed: alle mentoren, geen owner-scope. start_tijd in NL-vandaag.
+async function getOneOnOneToday({ dayStartIso, dayEndIso }) {
+  const lms = getDfoLmsClient();
+  if (!lms) return { count: null, no_show: null, source: 'lms-unconfigured', as_of: new Date().toISOString() };
+  try {
+    const [done, noShow] = await Promise.all([
+      lms.from('hlms_sessie').select('id', { count: 'exact', head: true })
+        .eq('status', 'afgerond').gte('start_tijd', dayStartIso).lt('start_tijd', dayEndIso),
+      lms.from('hlms_sessie').select('id', { count: 'exact', head: true })
+        .eq('status', 'no_show').gte('start_tijd', dayStartIso).lt('start_tijd', dayEndIso),
+    ]);
+    if (done.error) throw new Error(done.error.message);
+    return {
+      count:   typeof done.count === 'number' ? done.count : null,
+      no_show: (noShow && !noShow.error && typeof noShow.count === 'number') ? noShow.count : null,
+      source:  'dfo-lms',
+      as_of:   new Date().toISOString(),
+    };
+  } catch (e) {
+    console.warn('[display-metrics] LMS 1-op-1 count failed:', e?.message);
+    return { count: null, no_show: null, source: 'lms-error', as_of: new Date().toISOString() };
+  }
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────
@@ -152,7 +169,6 @@ export default async function handler(req, res) {
     const monthStart = nlMonthStart(dayStart);
     const monthEnd   = nlMonthEndExclusive(dayStart);
 
-    const dave = await resolveDave();
     const rankingActions = process.env.DISPLAY_RANKING_ACTIONS
       ? process.env.DISPLAY_RANKING_ACTIONS.split(',').map(s => s.trim()).filter(Boolean)
       : RANKING_ACTIONS_DEFAULT;
@@ -191,34 +207,25 @@ export default async function handler(req, res) {
               // outcomes-insert). Index leeg gelaten zodat pick(8-16)
               // niet schuift.
               Promise.resolve({ data: [] }),
-      /* 8 */ // v3-fix: voicememo_sent_at (echte send-timestamp) i.p.v.
-              // updated_at (batch-updates clusterden alles → feed leek bevroren).
-              supabaseAdmin.from('follow_up_appointments').select('id, lead_name, voicememo_sent_at')
-                .eq('voicememo_status', 'sent').gte('voicememo_sent_at', dayStartIso).lt('voicememo_sent_at', dayEndIso)
-                .order('voicememo_sent_at', { ascending: false }).limit(20),
-      /* 9 */ // v3: verrijkt met inner-join op follow_up_appointments.lead_name
-              // zodat de feed "Call afgerond: <naam>" kan tonen. Vervangt
-              // ook bron 7 (die op appointments.updated_at joinde en 's
-              // nachts spookitems gaf).
-              supabaseAdmin.from('follow_up_outcomes')
-                .select('id, created_at, follow_up_appointments!inner(lead_name)')
-                .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
-                .order('created_at', { ascending: false }).limit(20),
+      /* 8 */ // 2026-09-09: feed-voicememo's komen nu uit de Opvolging-module
+              //   (bron #24: opvolging_pogingen soort='spraakbericht'), niet meer
+              //   uit follow_up_appointments. Index leeg gelaten zodat pick(9-22)
+              //   niet schuift.
+              Promise.resolve({ data: [] }),
+      /* 9 */ // 2026-09-09: feed "Call" komt nu uit de Opvolging-module
+              //   (bron #23: opvolging_pogingen soort='call', gesproken), niet
+              //   meer uit follow_up_outcomes. Index leeg gelaten.
+              Promise.resolve({ data: [] }),
       /*10 */ supabaseAdmin.from('event_signup_inbox').select('id, first_name, event_date_label, created_at')
                 .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
                 .order('created_at', { ascending: false }).limit(20),
-      /*11 */ dave.user_id
-                ? computeMetrics(supabaseAdmin, { period: 'today', ownerScope: dave.user_id })
-                : Promise.resolve(null),
-      /*12 */ dave.user_id
-                ? supabaseAdmin.from('follow_up_appointments')
-                    .select('id, lead_name, scheduled_at').eq('owner_id', dave.user_id)
-                    .eq('voicememo_status', 'sent')
-                    // [Fix 4] voicememo_sent_at (echte send-timestamp) i.p.v. updated_at
-                    .gte('voicememo_sent_at', dayStartIso).lt('voicememo_sent_at', dayEndIso)
-                    .order('voicememo_sent_at', { ascending: false }).limit(10)
-                : Promise.resolve({ data: [] }),
-      /*13 */ getBubbleOneOnOneCountToday({ start: dayStart, endExclusive: dayEnd }),
+      /*11 */ // 2026-09-09: de "Vandaag"-box is herbedraad van het oude,
+              //   Dave-gescopte follow_up_*-systeem naar de bedrijfsbrede
+              //   Opvolging-module (bronnen #23-#27). Index leeg gelaten zodat
+              //   pick(12-22) niet schuift.
+              Promise.resolve(null),
+      /*12 */ Promise.resolve({ data: [] }),
+      /*13 */ getOneOnOneToday({ dayStartIso, dayEndIso }),
       // ─── execution-score bronnen (APPENDED, geen index-shift van 5-13) ───
       /*14 */ // A: afgeronde calls per owner (NL-vandaag)
               supabaseAdmin.from('follow_up_appointments').select('owner_id')
@@ -271,6 +278,35 @@ export default async function handler(req, res) {
               supabaseAdmin.from('event_attendees').select('id', { count: 'exact', head: true })
                 .not('call_status', 'is', null)
                 .gte('call_status_at', dayStartIso).lt('call_status_at', dayEndIso),
+      // ─── Opvolging-module bronnen (APPENDED, geen index-shift van 5-22) ───
+      // Bedrijfsbreed, NL-vandaag, richting='uit' (= moeite van het team, geen
+      // binnenkomende antwoorden). Zie api/_lib/opvolging-poging-telling.js.
+      /*23 */ // Belpogingen (soort=call) — rijen incl. resultaat + taak-naam
+              //   zodat we hieruit ZOWEL de teller (belpogingen + gesprekken via
+              //   classificeerResultaat) ALS de live-feed ("Call: <naam>") maken.
+              supabaseAdmin.from('opvolging_pogingen')
+                .select('id, tijdstip, resultaat, opvolging_taken(naam)')
+                .eq('soort', 'call').eq('richting', 'uit')
+                .gte('tijdstip', dayStartIso).lt('tijdstip', dayEndIso)
+                .order('tijdstip', { ascending: false }).limit(200),
+      /*24 */ // Voicememo's verstuurd (soort=spraakbericht) — rijen incl.
+              //   taak-naam voor teller + feed ("Voicememo: <naam>").
+              supabaseAdmin.from('opvolging_pogingen')
+                .select('id, tijdstip, opvolging_taken(naam)')
+                .eq('soort', 'spraakbericht').eq('richting', 'uit')
+                .gte('tijdstip', dayStartIso).lt('tijdstip', dayEndIso)
+                .order('tijdstip', { ascending: false }).limit(100),
+      /*25 */ // WhatsApp verstuurd (soort=whatsapp) — alleen teller.
+              supabaseAdmin.from('opvolging_pogingen').select('id', { count: 'exact', head: true })
+                .eq('soort', 'whatsapp').eq('richting', 'uit')
+                .gte('tijdstip', dayStartIso).lt('tijdstip', dayEndIso),
+      /*26 */ // Open taken (nog te bellen): status=open EN due <= vandaag (NL).
+              //   due is een date-kolom → vergelijk op de NL-datumstring.
+              supabaseAdmin.from('opvolging_taken').select('id', { count: 'exact', head: true })
+                .eq('status', 'open').lte('due', sinceStr),
+      /*27 */ // Taken afgerond vandaag: gearchiveerd_at in NL-vandaag.
+              supabaseAdmin.from('opvolging_taken').select('id', { count: 'exact', head: true })
+                .gte('gearchiveerd_at', dayStartIso).lt('gearchiveerd_at', dayEndIso),
     ]);
 
     const pick = (i, fallback) => {
@@ -287,12 +323,10 @@ export default async function handler(req, res) {
     const feedLeadsRes       = pick(5,  { data: [] });
     const feedSalesRes       = pick(6,  { data: [] });
     const feedCallsCompleted = pick(7,  { data: [] });
-    const feedVoicememoRes   = pick(8,  { data: [] });
-    const feedOutcomesRes    = pick(9,  { data: [] });
+    const feedVoicememoRes   = pick(8,  { data: [] });  // (leeg — feed komt uit #24)
+    const feedOutcomesRes    = pick(9,  { data: [] });  // (leeg — feed komt uit #23)
     const feedEventsRes      = pick(10, { data: [] });
-    const daveMetrics        = pick(11, null);
-    const daveVoicememoRes   = pick(12, { data: [] });
-    const oneOnOne           = pick(13, { count: null, as_of: new Date().toISOString(), source: 'bubble-error' });
+    const oneOnOne           = pick(13, { count: null, no_show: null, as_of: new Date().toISOString(), source: 'lms-error' });
     // Execution-score bronnen A/B/C (appended):
     const rankCallsRes       = pick(14, { data: [] });
     const rankVoicememoRes   = pick(15, { data: [] });
@@ -304,6 +338,31 @@ export default async function handler(req, res) {
     const eventsRes          = pick(20, { data: [] });
     const streakVal          = pick(21, 0);
     const eventCallsRes      = pick(22, { count: 0 });
+    // Opvolging-module (bedrijfsbreed, NL-vandaag):
+    const opvCallsRes        = pick(23, { data: [] });
+    const opvVoicememoRes    = pick(24, { data: [] });
+    const opvWhatsappRes     = pick(25, { count: 0 });
+    const opvOpenTakenRes    = pick(26, { count: 0 });
+    const opvTakenAfgerondRes = pick(27, { count: 0 });
+
+    // ── Opvolging-tellingen ───────────────────────────────────────────────
+    // Belpogingen = alle uitgaande call-pogingen vandaag. Gesprekken = de
+    // subset waar het resultaat als 'gesproken' classificeert (rest = niet
+    // opgenomen / via ander / onbekend → telt niet als gesprek).
+    const opvCallRows = opvCallsRes.data || [];
+    const opvBelpogingen = opvCallRows.length;
+    const opvGesprekken  = opvCallRows.filter((r) => classificeerResultaat(r.resultaat) === GESPROKEN).length;
+    const opvVoicememoRows = opvVoicememoRes.data || [];
+    const opvVoicememos  = opvVoicememoRows.length;
+    const opvWhatsapp    = opvWhatsappRes.count || 0;
+    const opvOpenTaken   = opvOpenTakenRes.count || 0;
+    const opvTakenAfgerond = opvTakenAfgerondRes.count || 0;
+    // Naam uit de embedded taak (object of array, afhankelijk van PostgREST-vorm).
+    const taakNaam = (row) => {
+      const t = row.opvolging_taken;
+      const naam = Array.isArray(t) ? t[0]?.naam : t?.naam;
+      return naam || '';
+    };
 
     // ── Secundaire queries — safeAwait ────────────────────────────────────
     const callsBookedRes = await safeAwait(
@@ -453,21 +512,19 @@ export default async function handler(req, res) {
       ts: s.accepted_at, type: 'sale',
       text: `Sale: ${s.customer_label}`,
     });
-    // (Bron 7 items verwijderd — waren de 01:45-spookitems.
-    //  "Call afgerond" komt nu uit bron 9 met de echte afrond-timestamp.)
-    for (const v of (feedVoicememoRes.data || [])) feed.push({
-      // v3: voicememo_sent_at (echte send-timestamp) matcht teller/ranglijst.
-      ts: new Date(v.voicememo_sent_at).toISOString(), type: 'voicememo',
-      text: `Voicememo: ${trimName(v.lead_name || '')}`,
+    // 2026-09-09: feed-voicememo's + calls komen nu uit de Opvolging-module
+    // (bronnen #24/#23). Voicememo = elke uitgaande spraakbericht-poging;
+    // "Call" = een uitgaande call-poging waar écht gesproken is (classificatie
+    // 'gesproken') — niet-opgenomen belletjes vullen de feed niet.
+    for (const v of opvVoicememoRows) feed.push({
+      ts: new Date(v.tijdstip).toISOString(), type: 'voicememo',
+      text: `Voicememo: ${trimName(taakNaam(v))}`,
     });
-    for (const o of (feedOutcomesRes.data || [])) {
-      // PostgREST-join levert appointment als object of array — beide vormen zien we.
-      const fa = o.follow_up_appointments;
-      const leadName = Array.isArray(fa) ? fa[0]?.lead_name : fa?.lead_name;
+    for (const c of opvCallRows) {
+      if (classificeerResultaat(c.resultaat) !== GESPROKEN) continue;
       feed.push({
-        ts: new Date(o.created_at).toISOString(),
-        type: 'call',
-        text: `Call afgerond: ${trimName(leadName || '')}`,
+        ts: new Date(c.tijdstip).toISOString(), type: 'call',
+        text: `Call: ${trimName(taakNaam(c))}`,
       });
     }
     for (const s of (feedEventsRes.data || [])) feed.push({
@@ -475,18 +532,6 @@ export default async function handler(req, res) {
       text: `Event-signup: ${trimName(s.first_name || '')}${s.event_date_label ? ' → ' + s.event_date_label : ''}`,
     });
     feed.sort((a, b) => (a.ts < b.ts ? 1 : -1));
-
-    // ── Dave — distinct velden: retentie ≠ follow-ups ─────────────────────
-    const daveRetentie          = daveMetrics?.appointments_completed ?? 0;
-    const daveFollowups         = daveMetrics?.outcomes_total ?? 0;
-    // Fix 2 (2026-08-26): voicememos_sent uit dezelfde bron als ranking-B
-    // (rankVoicememoRes = updated_at NL-vandaag). computeMetrics gebruikte
-    // scheduled_at-in-vandaag → gaf Dave 6 terwijl ranglijst 16 telde. Beide
-    // tegels tonen nu identiek getal — 1 bron, 0 dubbeltelling.
-    const daveVoicememosSent = dave.user_id
-      ? (rankVoicememoRes.data || []).filter(r => r.owner_id === dave.user_id).length
-      : 0;
-    const daveVoicememosPending = daveMetrics?.achterstallig_voicememos ?? 0;
 
     // ── Optionele diagnose-scan (achter env-flag, alleen tijdens tuning) ─
     if (process.env.DISPLAY_DEBUG_ACTIONS === '1') {
@@ -535,22 +580,21 @@ export default async function handler(req, res) {
         booked_today: callsBookedCount,        // GEBOEKTE calls vandaag (created_at) → hero v-calls
         next:         callsNext,
       },
-      dave: {
-        resolved: dave,
-        retentie_gebeld: daveRetentie,
-        follow_ups_gedraaid: daveFollowups,
-        voicememos_sent: daveVoicememosSent,
-        voicememos_pending: daveVoicememosPending,
-        voicememos_recent: (daveVoicememoRes?.data || []).map(v => ({
-          id: v.id,
-          lead_label: trimName(v.lead_name || ''),
-          scheduled_at: v.scheduled_at ? new Date(v.scheduled_at).toISOString() : null,
-        })),
+      // Opvolging-module (bedrijfsbreed, NL-vandaag). Vervangt de oude,
+      // Dave-gescopte `dave`-tak die op follow_up_* draaide.
+      opvolging: {
+        belpogingen:    opvBelpogingen,
+        gesprekken:     opvGesprekken,
+        voicememos:     opvVoicememos,
+        whatsapp:       opvWhatsapp,
+        open_taken:     opvOpenTaken,
+        taken_afgerond: opvTakenAfgerond,
       },
       one_on_one: {
         count_today: oneOnOne.count,
-        source: oneOnOne.source,
-        as_of: oneOnOne.as_of,
+        no_show:     oneOnOne.no_show,
+        source:      oneOnOne.source,
+        as_of:       oneOnOne.as_of,
       },
       staff_ranking: staffRanking,
       targets: {
