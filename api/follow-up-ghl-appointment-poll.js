@@ -48,91 +48,134 @@ export default async function handler(req, res) {
     if (calendarIds.length === 0) {
       console.warn('[follow-up-ghl-poll] geen actieve calendars gevonden (of calendars-list faalde)');
     }
-    // 2026-09-08 (PR B — paginatie via date-chunking):
-    // GHL /calendars/events heeft geen native cursor/nextPageToken en returnt
-    // default ~100 events per call. Bij >100 events per agenda in het 30d-
-    // window werd de rest gemist → ghost-cleanup flipte legitieme toekomstige
-    // calls op 'wacht_op_reschedule'.
-    // Fix: hak het 30d-window in chunks van 7 dagen zodat per fetch << 100
-    // events opgeleverd worden (kennismakings-agenda ~50/week piek). Dedup
-    // op event.id voor de zeldzame boundary-hits.
+    // 2026-09-08 (PR reparatie) — Rollback van de PR B date-chunking:
+    // GHL /calendars/events accepteerde de `limit=200`-hint niet en gaf
+    // 422 Unprocessable Entity op elke chunk-fetch → sync viel volledig
+    // stuk, functie 504't op 30s timeout. De opdracht van PR B (paginatie)
+    // was ook niet nodig: GHL retourneert ALLE events in een start/end
+    // window in één response zonder cursor-limiet, zolang alleen startTime
+    // + endTime worden gestuurd. Terug naar één fetch per calendar over
+    // een breder window (now-7d t/m now+90d) om ook net-verleden en
+    // ver-toekomstige boekingen mee te nemen.
     //
-    // PR A safety-gate blijft actief als vangnet: als ondanks chunking toch
-    // een chunk >= 99 events oplevert (extreem druk boekingsschema), wordt
-    // calendarsLikelyTruncated++ en slaan ghost-cleanup + auto-resolve alsnog
-    // over. Twee lagen defensie.
-    const CHUNK_DAYS = 7;
-    const chunks = [];
-    for (let cursor = startDate.getTime(); cursor < endDate.getTime(); cursor += CHUNK_DAYS * 86400000) {
-      const chunkEnd = Math.min(cursor + CHUNK_DAYS * 86400000, endDate.getTime());
-      chunks.push({ startMs: cursor, endMs: chunkEnd });
-    }
-    const eventsById = new Map();  // dedup + pas laatste versie toe bij boundary-overlap
-    // Safety-gate tracking (PR A) — nu op chunk-niveau i.p.v. calendar-niveau,
-    // want met chunking is truncatie per-chunk het beter signaal.
-    const TRUNCATION_THRESHOLD = 99;
-    let calendarsLikelyTruncated = 0;
-    const chunkFetchCounts = [];
-    // Diagnostiek voor eerste run — laat één keer de response-shape zien
-    // zodat we later exact weten of GHL cursor-fields levert.
+    // Safety-gate (PR A) blijft actief PER CALENDAR: als de fetch voor
+    // een specifieke agenda faalt (422 / 5xx / timeout / exception), wordt
+    // die agenda gemarkeerd als incompleet. Ghost-cleanup + auto-resolve
+    // slaan dan calls op die agenda over — nooit een 'scheduled'-rij
+    // ten onrechte flippen omdat de events voor die agenda ontbraken.
+    const eventsById = new Map();     // dedup over calendars, id-based
+    const calendarsWithCompleteFetch = new Set();  // set van calId's waar de fetch WEL gelukt is
     let shapeLogged = false;
+    // Verbreed window: 7 dagen terug (bevestigde no-shows) t/m 90 dagen
+    // vooruit (zicht op langere-termijn boekingen).
+    let fetchStartMs = startDate.getTime() - 7 * 86400000;
+    let fetchEndMs   = startDate.getTime() + 90 * 86400000;
+
+    // 2026-09-09 — Window-dekking DB-check: als er 'scheduled' rijen in de
+    // DB staan die verder liggen dan de default 90d-horizon, verbreed het
+    // fetch-window zodat ghost-cleanup + auto-resolve nooit een rij buiten
+    // het gefetchte window aanraken. Zonder deze check zouden events voor
+    // die verre rijen niet in de fetch zitten, en zou de cleanup ze
+    // (afgeschermd door de aparte scheduled_at-bounds hieronder) simpelweg
+    // overslaan — dan draaien we blind langs ver-toekomstige geboekte calls.
+    const { data: maxRow } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('scheduled_at')
+      .eq('status', 'scheduled')
+      .not('ghl_appointment_id', 'is', null)
+      .order('scheduled_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const maxScheduledMs = maxRow?.scheduled_at ? new Date(maxRow.scheduled_at).getTime() : null;
+    if (maxScheduledMs && maxScheduledMs > fetchEndMs) {
+      const bufferedEndMs = maxScheduledMs + 7 * 86400000; // 7d buffer voorbij max
+      console.log('[follow-up-ghl-poll] fetch-window verbreed:',
+        'max scheduled_at in DB is', new Date(maxScheduledMs).toISOString(),
+        '— fetchEnd verplaatst naar', new Date(bufferedEndMs).toISOString());
+      fetchEndMs = bufferedEndMs;
+    }
+    const fetchStartISO = new Date(fetchStartMs).toISOString();
+    const fetchEndISO   = new Date(fetchEndMs).toISOString();
+
     for (const calId of calendarIds) {
-      for (const ch of chunks) {
-        const url = new URL(`${GHL_API_BASE}/calendars/events`);
-        url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
-        url.searchParams.set('calendarId', calId);
-        url.searchParams.set('startTime',  String(ch.startMs));
-        url.searchParams.set('endTime',    String(ch.endMs));
-        url.searchParams.set('limit',      '200');  // hint; GHL kan 'em negeren
-        try {
-          const ghlRes = await fetch(url.toString(), {
-            headers: { Authorization: `Bearer ${process.env.GHL_API_KEY}`, Version: '2021-04-15' },
-          });
-          if (!ghlRes.ok) {
-            const errText = await ghlRes.text().catch(() => '');
-            console.error('[follow-up-ghl-poll] GHL events fout',
-              'calendar:', calId, 'chunk:', new Date(ch.startMs).toISOString().slice(0, 10),
-              'status:', ghlRes.status, (errText || '').slice(0, 200));
-            continue;
-          }
-          const json = await ghlRes.json();
-          if (!shapeLogged) {
-            console.log('[follow-up-ghl-poll] response-shape diagnostiek (eerste chunk):',
-              'keys:', Object.keys(json || {}),
-              'total:', json?.total, 'count:', json?.count,
-              'pagination:', JSON.stringify(json?.pagination || null),
-              'meta:', JSON.stringify(json?.meta || null));
-            shapeLogged = true;
-          }
-          const evs = json.events || json.data || [];
-          for (const e of evs) {
-            if (!e.calendarId) e.calendarId = calId;
-            if (e.id) eventsById.set(e.id, e);  // dedup op id
-          }
-          // PR A safety-gate op chunk-niveau: elke chunk die >= 99 events
-          // levert is verdacht afgekapt. Ghost-cleanup + auto-resolve worden
-          // dan overgeslagen (vangnet naast paginatie).
-          chunkFetchCounts.push({ calId, chunk: new Date(ch.startMs).toISOString().slice(0, 10), count: evs.length });
-          if (evs.length >= TRUNCATION_THRESHOLD) {
-            calendarsLikelyTruncated++;
-            console.warn('[follow-up-ghl-poll] chunk mogelijk afgekapt (>= threshold)',
-              'calendar:', calId, 'chunk:', new Date(ch.startMs).toISOString().slice(0, 10),
-              'events:', evs.length);
-          }
-        } catch (e) {
-          console.warn('[follow-up-ghl-poll] events-fetch exception',
-            'calendar:', calId, 'chunk:', new Date(ch.startMs).toISOString().slice(0, 10),
-            e?.message || e);
+      // 2026-09-09 — Defensieve pagination-detectie. LeadConnector
+      // /calendars/events (Version 2021-04-15) retourneert per spec ALLE
+      // events binnen het window in één response, zonder cursor/nextPage/
+      // total-veld. HTTP 200 = compleet. We loggen echter de response-keys
+      // + eventuele `total`/`count`/`nextPageToken`/`meta.pagination`, zodat
+      // een stille API-wijziging (nieuwe cursor of impliciete cap) hier
+      // opvalt: bij aanwijzing van truncatie markeren we de kalender NIET
+      // als compleet, waardoor de safety-gate ghost-cleanup blokkeert voor
+      // die agenda i.p.v. te flippen op onvolledige data.
+      const url = new URL(`${GHL_API_BASE}/calendars/events`);
+      url.searchParams.set('locationId', process.env.GHL_LOCATION_ID);
+      url.searchParams.set('calendarId', calId);
+      url.searchParams.set('startTime',  String(fetchStartMs));
+      url.searchParams.set('endTime',    String(fetchEndMs));
+      try {
+        const ghlRes = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${process.env.GHL_API_KEY}`, Version: '2021-04-15' },
+        });
+        if (!ghlRes.ok) {
+          const errText = await ghlRes.text().catch(() => '');
+          console.error('[follow-up-ghl-poll] GHL events fout',
+            'calendar:', calId, 'status:', ghlRes.status, (errText || '').slice(0, 400));
+          continue; // fail-soft — safety-gate voorkomt ghost-flip voor deze agenda
         }
+        const json = await ghlRes.json();
+        if (!shapeLogged) {
+          console.log('[follow-up-ghl-poll] response-shape diagnostiek (eerste calendar):',
+            'keys:', Object.keys(json || {}),
+            'total:', json?.total, 'count:', json?.count,
+            'nextPageToken:', json?.nextPageToken ?? json?.nextPage ?? json?.next_page_token ?? null,
+            'meta:', json?.meta ? Object.keys(json.meta) : null,
+            'events_length:', (json?.events || json?.data || []).length);
+          shapeLogged = true;
+        }
+        const evs = json.events || json.data || [];
+
+        // Pagination-drift detectie. Als één van deze signalen opduikt, kan
+        // de response afgekapt zijn en is de kalender NIET veilig compleet.
+        const hasNextCursor = !!(json?.nextPageToken || json?.nextPage
+          || json?.next_page_token || json?.meta?.nextPageToken
+          || json?.meta?.pagination?.nextPage || json?.pagination?.nextPage);
+        const totalHint = Number.isFinite(json?.total) ? json.total : null;
+        const truncated = hasNextCursor || (totalHint !== null && totalHint > evs.length);
+
+        for (const e of evs) {
+          if (!e.calendarId) e.calendarId = calId;
+          if (e.id) eventsById.set(e.id, e);
+        }
+
+        if (truncated) {
+          console.warn('[follow-up-ghl-poll] mogelijke truncatie gedetecteerd',
+            'calendar:', calId, 'events_length:', evs.length,
+            'total:', totalHint, 'hasNextCursor:', hasNextCursor,
+            '— kalender NIET als compleet gemarkeerd, ghost-cleanup skipt deze run');
+          // GEEN calendarsWithCompleteFetch.add() — safety-gate blijft
+          // dicht voor deze agenda deze run. Zodra de shape-diagnostiek in
+          // logs de nieuwe cursor-vorm laat zien, kan hier een echte
+          // page-through loop komen (analoog aan andere GHL-endpoints).
+        } else {
+          calendarsWithCompleteFetch.add(calId);
+        }
+      } catch (e) {
+        console.warn('[follow-up-ghl-poll] events-fetch exception',
+          'calendar:', calId, e?.message || e);
       }
     }
     const events = Array.from(eventsById.values());
-    console.log('[follow-up-ghl-poll] events opgehaald (dedup):', events.length,
-      'over', calendarIds.length, 'calendars ×', chunks.length, 'chunks');
-    if (calendarsLikelyTruncated > 0) {
-      console.warn('[follow-up-ghl-poll] TRUNCATIE-VERDENKING:',
-        calendarsLikelyTruncated, 'chunk(s) leverde >=', TRUNCATION_THRESHOLD, 'events op.',
-        'Detail:', JSON.stringify(chunkFetchCounts));
+    console.log('[follow-up-ghl-poll] events opgehaald:', events.length,
+      'over', calendarsWithCompleteFetch.size, '/', calendarIds.length, 'calendars (compleet)',
+      'window:', fetchStartISO, '→', fetchEndISO);
+    // Safety-gate signalering: als NIET alle calendars gelukt zijn, log het
+    // en gebruik verderop calendarsWithCompleteFetch om per-calendar te
+    // beslissen of ghost-cleanup mag draaien.
+    const someCalendarsFailed = calendarsWithCompleteFetch.size < calendarIds.length;
+    if (someCalendarsFailed) {
+      console.warn('[follow-up-ghl-poll] safety-gate — niet alle agenda\'s compleet:',
+        calendarIds.length - calendarsWithCompleteFetch.size, 'agenda(s) faalden;',
+        'ghost-cleanup wordt voor die agenda\'s overgeslagen.');
     }
 
     // Haal Dave's upcoming Zoom-meetings op (graceful: lege array bij fout)
@@ -294,26 +337,33 @@ export default async function handler(req, res) {
     }
 
     // ── Ghost-cleanup: scheduled DB-rijen die GHL niet meer teruggeeft ────────
-    // 2026-09-08 (PR A safety-gate): sla ghost-cleanup EN auto-resolve over
-    // zodra de events-response mogelijk afgekapt is. Zonder complete lijst
-    // zou de ghost-check DB-rijen ten onrechte als "verweesd" markeren
-    // (bewijs: sep-2026 kennismakings-agenda 76% van week 14+ op
-    // 'wacht_op_reschedule' door truncatie). Bloeding-stop tot PR B echte
-    // paginatie invoert.
+    // 2026-09-08 (PR A safety-gate — PER CALENDAR):
+    // Ghost-cleanup mag ALLEEN draaien op rijen waar de events-fetch voor die
+    // specifieke agenda gelukt is. Zonder complete lijst per agenda zou de
+    // ghost-check DB-rijen ten onrechte als "verweesd" markeren (bewijs:
+    // sep-2026 kennismakings-agenda 76% van week 14+ op 'wacht_op_reschedule'
+    // door truncatie). Faalt een agenda-fetch (422 / 5xx / timeout), dan
+    // slaan we cleanup voor die agenda over — de rest gaat wél door.
     let ghostsHandled = 0;
-    if (calendarsLikelyTruncated > 0) {
-      console.warn('[follow-up-ghl-poll] safety-gate ACTIEF — ghost-cleanup + auto-resolve OVERGESLAGEN',
-        'wegens truncatie-verdenking (', calendarsLikelyTruncated, 'agenda(s))');
+    const completeCalendarIds = Array.from(calendarsWithCompleteFetch);
+    if (completeCalendarIds.length === 0) {
+      console.warn('[follow-up-ghl-poll] safety-gate ACTIEF — geen enkele agenda compleet, ghost-cleanup + auto-resolve OVERGESLAGEN');
     } else if (events.length > 0) {
       const ghlIds = new Set(events.map(e => e.id));
 
+      // 2026-09-09 — Cleanup-scope is STRIKT gelijk aan het fetch-window.
+      // Een 'scheduled' rij buiten [fetchStartISO, fetchEndISO] mag NOOIT
+      // naar wacht_op_reschedule, want daar hebben we geen events voor
+      // opgehaald. Fetch-window is bovendien dynamisch verbreed als de DB
+      // een rij verder dan de default 90d bevat (zie block bovenaan).
       const { data: dbScheduled } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, ghl_appointment_id, lead_name, scheduled_at')
+        .select('id, ghl_appointment_id, ghl_calendar_id, lead_name, scheduled_at')
         .eq('status', 'scheduled')
         .not('ghl_appointment_id', 'is', null)
-        .gte('scheduled_at', startDate.toISOString())
-        .lt('scheduled_at', endDate.toISOString());
+        .in('ghl_calendar_id', completeCalendarIds)  // per-calendar safety-gate
+        .gte('scheduled_at', fetchStartISO)          // window-safety-gate
+        .lt('scheduled_at', fetchEndISO);
 
       const ghosts = (dbScheduled || []).filter(a => !ghlIds.has(a.ghl_appointment_id));
       console.log('[follow-up-ghl-poll] ghosts found:', ghosts.length);
@@ -361,17 +411,21 @@ export default async function handler(req, res) {
     }
 
     // ── Auto-resolve: wacht_op_reschedule rijen waarvan de lead een nieuwe scheduled heeft ──
-    // 2026-09-08 (PR A safety-gate): óók de auto-resolve overslaan bij
-    // truncatie-verdenking. Deze loop kan 'wacht_op_reschedule' → 'cancelled'
-    // flippen op basis van dezelfde onvolledige data — nog een cascade-stap
-    // die verkeerde status-drift veroorzaakt.
-    const { data: waitingList } = (calendarsLikelyTruncated > 0)
+    // 2026-09-08 (PR A safety-gate — PER CALENDAR): auto-resolve mag alleen
+    // draaien voor rijen op agenda's waar de events-fetch compleet is. Deze
+    // loop kan 'wacht_op_reschedule' → 'cancelled' flippen op basis van
+    // dezelfde onvolledige data — nog een cascade-stap die verkeerde
+    // status-drift veroorzaakt bij incomplete fetch.
+    const { data: waitingList } = (completeCalendarIds.length === 0)
       ? { data: [] }
       : await supabaseAdmin
           .from('follow_up_appointments')
           .select('id, lead_ghl_contact_id, lead_name, scheduled_at')
           .eq('status', 'wacht_op_reschedule')
-          .not('lead_ghl_contact_id', 'is', null);
+          .not('lead_ghl_contact_id', 'is', null)
+          .in('ghl_calendar_id', completeCalendarIds)  // per-calendar safety-gate
+          .gte('scheduled_at', fetchStartISO)           // window-safety-gate
+          .lt('scheduled_at', fetchEndISO);
 
     let resolvedCount = 0;
     for (const waiting of (waitingList || [])) {
@@ -429,22 +483,26 @@ export default async function handler(req, res) {
     // geworden om andere redenen wordt niet geraakt (audit-log filter).
     let reverseHealedGhosts = 0;
     let reverseHealedResolved = 0;
-    // Alleen doorgaan als de events-lijst betrouwbaar is. Zonder PR A gate
-    // is calendarsLikelyTruncated undefined → check op !== true zodat 't
-    // niet blocked wordt (dan is fetch al pagineerd via PR B).
-    if (events.length > 0 && typeof calendarsLikelyTruncated !== 'undefined' && calendarsLikelyTruncated > 0) {
-      console.warn('[follow-up-ghl-poll] REVERSE HEAL overgeslagen — truncatie-verdenking');
-    } else if (events.length > 0) {
+    // Alleen doorgaan als de events-lijst per agenda betrouwbaar is
+    // (safety-gate PER CALENDAR — zie ghost-cleanup hierboven).
+    if (events.length === 0 || completeCalendarIds.length === 0) {
+      if (completeCalendarIds.length === 0) {
+        console.warn('[follow-up-ghl-poll] REVERSE HEAL overgeslagen — geen enkele agenda compleet');
+      }
+    } else {
       const ghlIdsForHeal = new Set(events.map(e => e.id));
 
       // Fase 1: wacht_op_reschedule rijen die weer in GHL zichtbaar zijn.
+      // Alleen rijen op agenda's waar de fetch compleet was (per-calendar gate)
+      // en binnen het fetch-window (window-safety-gate).
       const { data: waitingRows } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, ghl_appointment_id, lead_name, scheduled_at')
+        .select('id, ghl_appointment_id, ghl_calendar_id, lead_name, scheduled_at')
         .eq('status', 'wacht_op_reschedule')
         .not('ghl_appointment_id', 'is', null)
-        .gte('scheduled_at', startDate.toISOString())
-        .lt('scheduled_at', endDate.toISOString());
+        .in('ghl_calendar_id', completeCalendarIds)
+        .gte('scheduled_at', fetchStartISO)
+        .lt('scheduled_at', fetchEndISO);
       const healable = (waitingRows || []).filter(r => ghlIdsForHeal.has(r.ghl_appointment_id));
       for (const row of healable) {
         const { error: updErr } = await supabaseAdmin

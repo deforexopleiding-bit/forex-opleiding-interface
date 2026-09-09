@@ -4,6 +4,10 @@
       "maxDuration": 300,
       "memory": 1024
     },
+    "api/follow-up-ghl-appointment-poll.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024
