@@ -810,10 +810,13 @@ test('de bron van het oordeel staat zichtbaar in de drempels', () => {
 // bouwZoomcalls gebruikt er ook in staat.
 
 test('elke kolom die bouwZoomcalls leest, wordt ook echt opgehaald', () => {
-  const selects = BRON.match(/\.select\('id, lead_name[^']*'\)/g) || [];
-  assert.ok(selects.length >= 2, 'beide afspraken-selects horen te bestaan (met en zonder uitkomst-kolommen)');
-
-  // Wat de bouwer daadwerkelijk van een afspraak-rij leest.
+  // De select wordt sinds de dagtoewijzing samengesteld uit een vaste lijst en
+  // een lijst optionele kolommen, dus de oude match op één select-string zei
+  // niets meer. De EIS is onveranderd: wat de bouwer leest moet gevraagd zijn,
+  // anders krijgt hij undefined en doet de fix niets.
+  const vast = BRON.match(/const APPT_VAST = '([^']*)'\s*\n\s*\+ '([^']*)'/);
+  assert.ok(vast, 'de vaste kolomlijst is niet gevonden');
+  const kolommen = (vast[1] + vast[2]);
   const nodig = [
     'id', 'lead_name', 'lead_email', 'lead_phone', 'scheduled_at',
     'duration_minutes',        // callStaat: hoelang de call duurt
@@ -822,21 +825,23 @@ test('elke kolom die bouwZoomcalls leest, wordt ook echt opgehaald', () => {
     'annulering_reden',        // de annulering tonen zonder oordeel
     'snelle_notitie',
   ];
-  for (const s of selects) {
-    for (const kolom of nodig) {
-      assert.ok(new RegExp('\\b' + kolom + '\\b').test(s),
-        `de select mist ${kolom} — dan krijgt bouwZoomcalls undefined en doet de fix niets:\n  ${s}`);
-    }
+  for (const kolom of nodig) {
+    assert.ok(new RegExp('\\b' + kolom + '\\b').test(kolommen),
+      `de select mist ${kolom} — dan krijgt bouwZoomcalls undefined en doet de fix niets`);
   }
 });
 
-test('de uitkomst-kolommen zitten alleen in de eerste select', () => {
-  // De tweede is de terugval voor als de migratie nog niet gedraaid is; die
-  // mag uitkomst/uitkomst_op juist NIET noemen, anders faalt hij op precies
-  // dezelfde ontbrekende kolom.
-  const selects = BRON.match(/\.select\('id, lead_name[^']*'\)/g) || [];
-  assert.match(selects[0], /uitkomst, uitkomst_op/);
-  assert.doesNotMatch(selects[1], /uitkomst/);
+test('de optionele kolommen staan apart, zodat er per kolom teruggevallen kan worden', () => {
+  // Elk uit een eigen migratie. Zaten ze in de vaste lijst, dan valt de HELE
+  // query om zodra er één ontbreekt — dat is precies wat #1504 deed.
+  const opt = BRON.match(/const APPT_OPTIONEEL = \[([^\]]*)\]/);
+  assert.ok(opt, 'de optionele kolomlijst is niet gevonden');
+  for (const kolom of ['uitkomst', 'uitkomst_op', 'eerst_gepland_op', 'is_test']) {
+    assert.match(opt[1], new RegExp("'" + kolom + "'"));
+  }
+  const vast = BRON.match(/const APPT_VAST = '([^']*)'/)[1];
+  assert.doesNotMatch(vast, /uitkomst|eerst_gepland_op|is_test/,
+    'een optionele kolom in de vaste lijst maakt de terugval onmogelijk');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -922,7 +927,7 @@ test('de blinde vlek over calls zonder taak telt de gefilterde set', () => {
 
 test('het endpoint voedt de vensters met relevanteAfspraken, niet met de ruwe lijst', () => {
   // Anders staat er weer een groter getal onder een kortere lijst.
-  assert.match(BRON, /const vensterAfspraken = relevanteAfspraken\(afspraken, Date\.now\(\)\)/);
+  assert.match(BRON, /const vensterAfspraken = relevanteAfspraken\(afspraken, Date\.now\(\), dagen\)/);
   assert.match(BRON, /bouwVensters\(\{ afspraken: vensterAfspraken/);
   // Op de AANROEP, niet op de definitie: `export function bouwVensters({
   // afspraken, taken, ... })` matcht anders altijd en dan bewaakt dit niets.
