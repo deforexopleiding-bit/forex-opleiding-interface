@@ -235,6 +235,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron-opvolging-no-show",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron-opvolging-gezondheid",
       "schedule": "0 5 * * *"
     },
