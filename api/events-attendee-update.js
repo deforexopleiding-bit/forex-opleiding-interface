@@ -22,7 +22,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason', 'called', 'notes'];
+const EDITABLE_FIELDS = ['first_name', 'last_name', 'email', 'phone', 'customer_id', 'follow_up_flagged', 'follow_up_reason', 'called', 'call_status', 'notes'];
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -78,6 +78,12 @@ export default async function handler(req, res) {
       case 'called':
         patch.called_at = v ? new Date().toISOString() : null;
         break;
+      case 'call_status':
+        // Belstatus (vrije text-kolom, geen DB-CHECK — zie migratie 023).
+        // Lege waarde → null ('— nog niet gebeld —'); stempel call_status_at.
+        patch.call_status = (v === null || v === '') ? null : String(v).trim().toLowerCase();
+        patch.call_status_at = new Date().toISOString();
+        break;
       case 'notes':
         // FEATURE B — vrije-tekst notitie. Lege string → null zodat een
         // gewiste notitie ook echt weg is (in plaats van een lege string).
@@ -108,7 +114,7 @@ export default async function handler(req, res) {
     // Before-state ophalen voor audit-log diff
     const { data: before, error: beforeErr } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, event_id, first_name, last_name, email, phone, customer_id, follow_up_flagged, follow_up_reason')
+      .select('id, event_id, first_name, last_name, email, phone, customer_id, follow_up_flagged, follow_up_reason, call_status')
       .eq('id', id)
       .maybeSingle();
     if (beforeErr) throw new Error('before-fetch: ' + beforeErr.message);
