@@ -13,6 +13,14 @@ import { mdToHtml } from './md-to-html.js';
 
 const ZONE = 'Europe/Amsterdam';
 
+// Footer voor onze FUNNEL-EIGEN mails: alleen de bedrijfsnaam. We geven 'm
+// per-mail mee via wrapEmailHtml(..., { footerHtml }) — de gedeelde default
+// (met "Agency Command Center — Follow-up Module", o.a. gebruikt door de oude
+// GHL/dunning-mails) blijft dus GLOBAAL ONGEWIJZIGD.
+export const FUNNEL_FOOTER_HTML =
+  '<p style="margin:0; color:#6b7280; font-size:12px;">De Forex Opleiding NL B.V.</p>';
+const FOOTER_OPTS = { footerHtml: FUNNEL_FOOTER_HTML };
+
 export function datumNL(iso) {
   if (!iso) return '';
   try {
@@ -71,7 +79,7 @@ De komende dagen sturen we je een paar berichten om je optimaal voor te bereiden
   const html = wrapEmailHtml(subject,
     tekstNaarHtml(body1)
     + (heeftInfo ? `<p><strong>Meer praktische info:</strong></p>\n${mdToHtml(info)}` : '')
-    + tekstNaarHtml(body2));
+    + tekstNaarHtml(body2), FOOTER_OPTS);
 
   return { subject, text, html };
 }
@@ -99,7 +107,7 @@ We kijken ernaar uit je binnenkort persoonlijk te verwelkomen.
 Tot snel!
 
 Team De Forex Opleiding`;
-  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text)) };
+  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text), FOOTER_OPTS) };
 }
 
 // ── 3) Reminder 24u — rapport A.3 ───────────────────────────────────────────
@@ -127,7 +135,7 @@ Vragen of loop je morgen ergens tegenaan? Reageer gerust op deze mail.
 Tot morgen!
 
 Team De Forex Opleiding`;
-  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text)) };
+  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text), FOOTER_OPTS) };
 }
 
 // ── 4) Reminder laatste uren (~1u) — rapport A.4 ────────────────────────────
@@ -143,7 +151,7 @@ Over een uur zien we je bij de ${ev}! De inloop is vanaf ${starttijd} op ${locat
 Kom je er onderweg niet uit, sta je in de file of loop je vast? Bel of app ons gerust op +31 85 580 36 26, dan helpen we je meteen verder.
 
 Neem iets om mee te schrijven mee. Tot zo - het wordt een waardevolle sessie!`;
-  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text)) };
+  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text), FOOTER_OPTS) };
 }
 
 // ── 5) Vervolg-herinnering (2u/24u, naar /vervolg) — rapport C ──────────────
@@ -162,5 +170,5 @@ Zodra je gegevens binnen zijn, staat je plek definitief vast en sturen we je de 
 
 Tot snel!
 Team De Forex Opleiding`;
-  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text)) };
+  return { subject, text, html: wrapEmailHtml(subject, tekstNaarHtml(text), FOOTER_OPTS) };
 }
