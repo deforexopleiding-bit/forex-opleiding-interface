@@ -316,6 +316,33 @@
     },
   };
 
+  /* Gedeelde ladder-state — de drempels uit app_settings.dunning_ladder
+     (templatenaam → dagen NA de vervaldatum). Gebruikt door zowel de
+     workflow-editor (label bij de template-keuze) als de wanbetalers-venster-
+     tab (bewerkbare kaart). De Meta-namen (aanmaning_dagNN) zijn goedgekeurd
+     en blijven ongewijzigd; het getal erin zegt NIETS over het moment van
+     verzenden — vandaar dat we het echte moment er overal bij zetten. */
+  const _ladder = { loading: false, fetched: false, rungs: null };
+  async function fetchLadder() {
+    if (_ladder.loading || _ladder.fetched) return;
+    _ladder.loading = true;
+    const j = await tryFetch('dun-ladder-get', '/api/dunning-settings-get');
+    _ladder.loading = false; _ladder.fetched = true;
+    if (j && !j.__error && j.dunning_ladder && typeof j.dunning_ladder === 'object') {
+      _ladder.rungs = j.dunning_ladder;
+    }
+    if (render) render();
+  }
+  /** "verstuurd op dag 1 na vervaldatum" — null als de template niet op de ladder staat. */
+  function ladderLabel(templateName) {
+    const rungs = _ladder.rungs;
+    const name = typeof templateName === 'string' ? templateName.trim() : '';
+    if (!rungs || !name) return null;
+    const n = Number(rungs[name]);
+    if (!Number.isFinite(n)) return null;
+    return n <= 0 ? 'verstuurd vanaf de vervaldatum' : `verstuurd op dag ${Math.trunc(n)} na vervaldatum`;
+  }
+
   // Bekende motor-keys (gelezen door dunning-engine.js). Zie discovery-rapport
   // 2026-08-23. Alles buiten deze set = tcExtras (ongewijzigd bewaard).
   const WKF_TC_KNOWN = new Set(['min_days_overdue','min_days_since_invoice_date','customer_type','min_total_amount','arrangement_breached','run_once_per_customer_per_workflow']);
@@ -357,16 +384,17 @@
     const brk = tc.arrangement_breached === true;
     const sinceInv = has('min_days_since_invoice_date') ? Number(tc.min_days_since_invoice_date) : null;
     const overdue  = has('min_days_overdue') ? Number(tc.min_days_overdue) : null;
-    const defaultShifted = (sinceInv !== null) || brk;
-    const effOverdue = overdue !== null ? overdue : (defaultShifted ? -1 : 14);
     const ct = tc.customer_type || 'any';
     const minEur = has('min_total_amount') ? Number(tc.min_total_amount) : 0;
     const runOnce = tc.run_once_per_customer_per_workflow === true;
     const parts = [];
+    parts.push('met ≥ 1 factuur die <b>echt vervallen</b> is (dag 1 of later ná de vervaldatum)');
     if (brk) parts.push('waarvan de <b>betaalafspraak verbroken</b> is (en onbeheerd blijft)');
-    if (sinceInv !== null) parts.push(`waar de oudste factuur <b>≥ ${sinceInv} dagen</b> geleden is opgemaakt`);
-    if (effOverdue >= 0) parts.push(`met ≥ 1 factuur <b>≥ ${effOverdue} dagen overdue</b>`);
-    else parts.push('ongeacht overdue-status');
+    // min_days_since_invoice_date wordt door de motor GENEGEERD: de
+    // vervaldatum is de enige ankerdatum.
+    if (sinceInv !== null) parts.push('<b>(min. dagen sinds factuurdatum wordt genegeerd)</b>');
+    if (overdue !== null) parts.push(`met ≥ 1 factuur <b>≥ ${overdue} dagen te laat</b>`);
+    else parts.push('startdrempel volgt de <b>laagste ladder-sport</b> van de eigen stappen');
     if (minEur > 0) parts.push(`met totaal openstaand <b>≥ €${minEur}</b>`);
     if (ct === 'b2b') parts.push('van type <b>zakelijk (b2b)</b>');
     else if (ct === 'b2c') parts.push('van type <b>particulier (b2c)</b>');
@@ -728,14 +756,14 @@
       const tc = _wkf.ed.workflow.trigger_conditions || {};
       const prev = document.querySelector('[data-wf-tc-preview="1"]');
       if (prev) prev.innerHTML = _wkfTcPreview(tc);
-      // Warning: run_once=true zonder breach én zonder min_days_since_invoice_date.
+      // Warning: run_once=true zonder breach-trigger. De factuurdatum-trigger
+      // telt hier niet meer mee — die wordt door de motor genegeerd.
       const runOnceUnsafe = tc.run_once_per_customer_per_workflow === true
-        && !tc.arrangement_breached
-        && (tc.min_days_since_invoice_date == null);
+        && !tc.arrangement_breached;
       const warnEl = document.querySelector('[data-wf-tc-warn="run_once"]');
       if (warnEl) warnEl.style.display = runOnceUnsafe ? '' : 'none';
-      // Default-shift note: als min_days_since_invoice_date OF arrangement_breached gezet.
-      const shifted = (tc.min_days_since_invoice_date != null) || (tc.arrangement_breached === true);
+      // Genegeerd-note: alleen nog als min_days_since_invoice_date gezet is.
+      const shifted = (tc.min_days_since_invoice_date != null);
       const shiftEl = document.querySelector('[data-wf-tc-note="default_shift"]');
       if (shiftEl) shiftEl.style.display = shifted ? '' : 'none';
     } catch (_) { /* fail-soft */ }
@@ -769,6 +797,16 @@
     const tpls = isTpl && tplState ? tplState.items : [];
     const curId = s.config?.template_id || '';
     const inList = isTpl && tpls.some((t) => t.id === curId);
+    // Ladder-labels: de goedgekeurde Meta-naam zegt niets over het moment van
+    // verzenden (aanmaning_dag7 vertrekt op dag 1). Zet het echte moment erbij
+    // zodat niemand de naam verwart met de drempel.
+    if (isTpl && !_ladder.fetched && !_ladder.loading) queueMicrotask(() => fetchLadder());
+    const tplLabel = (t) => {
+      const lbl = ladderLabel(t.meta_template_name) || ladderLabel(t.name);
+      return `${t.name} (${t.language || 'nl'})${lbl ? ' — ' + lbl : ''}`;
+    };
+    const curTpl = isTpl ? tpls.find((t) => t.id === curId) : null;
+    const curLadderLbl = curTpl ? (ladderLabel(curTpl.meta_template_name) || ladderLabel(curTpl.name)) : null;
     const fallbackOpt = (isTpl && curId && !inList)
       ? `<option value="${esc(curId)}" selected>${esc(curId)} — id bestaat niet in actieve ${esc(kind)}-lijst</option>` : '';
     return `<div data-wf-step-idx="${idx}" style="display:grid;grid-template-columns:auto 80px 1fr auto;gap:8px;align-items:start;padding:8px;background:var(--surface-2);border-radius:6px;margin-bottom:6px">
@@ -790,9 +828,10 @@
             : `<select data-wf-step-field="template_id" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:11.5px;box-sizing:border-box">
                  <option value="" ${!curId ? 'selected' : ''}>— kies actieve ${esc(kind)}-template —</option>
                  ${fallbackOpt}
-                 ${tpls.map((t) => `<option value="${esc(t.id)}" ${curId === t.id ? 'selected' : ''}>${esc(t.name)} (${esc(t.language || 'nl')})</option>`).join('')}
+                 ${tpls.map((t) => `<option value="${esc(t.id)}" ${curId === t.id ? 'selected' : ''}>${esc(tplLabel(t))}</option>`).join('')}
                </select>
-               <div style="font-size:10px;color:var(--text-3);margin-top:2px">${tpls.length} actieve ${esc(kind)}-templates${tplState?.loading ? ' · laden…' : ''}</div>`
+               ${curLadderLbl ? `<div style="font-size:10px;color:var(--emerald);margin-top:2px">⏱ ${esc(curTpl.meta_template_name || curTpl.name)} — ${esc(curLadderLbl)}</div>` : ''}
+               <div style="font-size:10px;color:var(--text-3);margin-top:2px">${tpls.length} actieve ${esc(kind)}-templates${tplState?.loading ? ' · laden…' : ''}${curLadderLbl ? ' · moment komt uit de ladder, niet uit de naam' : ''}</div>`
         ) : ''}
         ${kind === 'wait' ? `
           <label style="font-size:10px;color:var(--text-3);display:block;margin-bottom:2px">Wacht (dagen)</label>
@@ -821,8 +860,8 @@
            Deze worden door de motor <b>NIET</b> gelezen (bv. legacy <code>min_amount</code> uit de oude v1-editor).
            Ze blijven ongewijzigd bewaard in de payload — verwijderen kan alleen via de rauwe JSON-tab.
          </div>` : '';
-    const shiftNoteStyle = ((tc.min_days_since_invoice_date != null) || (tc.arrangement_breached === true)) ? '' : 'display:none';
-    const runOnceUnsafe = tc.run_once_per_customer_per_workflow === true && !tc.arrangement_breached && tc.min_days_since_invoice_date == null;
+    const shiftNoteStyle = (tc.min_days_since_invoice_date != null) ? '' : 'display:none';
+    const runOnceUnsafe = tc.run_once_per_customer_per_workflow === true && !tc.arrangement_breached;
     const runOnceWarnStyle = runOnceUnsafe ? '' : 'display:none';
     const cur = {
       min_days_overdue: tc.min_days_overdue,
@@ -842,12 +881,12 @@
         <div style="padding:12px;background:var(--surface-2);border-radius:6px;display:flex;flex-direction:column;gap:10px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div>
-              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="Minimaal aantal dagen dat een factuur overdue moet zijn om te triggeren. Default: 14 (of -1 als min_days_since_invoice_date of arrangement_breached is gezet).">Min. dagen overdue <span style="color:var(--text-3)">(int)</span></label>
-              <input type="number" data-wf-tc="min_days_overdue" oninput="window.__setWkfTcBuilderInput()" value="${cur.min_days_overdue != null ? esc(String(cur.min_days_overdue)) : ''}" placeholder="leeg = default 14" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box" />
+              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="Minimaal aantal dagen NA de vervaldatum voordat deze workflow mag starten. Leeg = de laagste ladder-sport van de eigen send-stappen (of 14 als geen enkele stap op de ladder staat). Nooit lager dan 1 — op en vóór de vervaldag gaat er niets uit.">Min. dagen te laat <span style="color:var(--text-3)">(int, ná vervaldatum)</span></label>
+              <input type="number" data-wf-tc="min_days_overdue" oninput="window.__setWkfTcBuilderInput()" value="${cur.min_days_overdue != null ? esc(String(cur.min_days_overdue)) : ''}" placeholder="leeg = laagste ladder-sport" min="1" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box" />
             </div>
             <div>
-              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="Optioneel — voor pre-vervaldatum-duwtjes. Als gezet, matcht op ouderdom van issue-datum (niet overdue).">Min. dagen sinds factuurdatum <span style="color:var(--text-3)">(int, opt)</span></label>
-              <input type="number" data-wf-tc="min_days_since_invoice_date" oninput="window.__setWkfTcBuilderInput()" value="${cur.min_days_since_invoice_date != null ? esc(String(cur.min_days_since_invoice_date)) : ''}" placeholder="leeg = uit" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);font-size:12px;box-sizing:border-box" />
+              <label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px" title="GENEGEERD door de motor sinds de ankerdatum-beslissing: de vervaldatum uit TeamLeader is de enige waarheid. Het veld blijft alleen staan zodat bestaande waarden niet stilletjes verdwijnen.">Min. dagen sinds factuurdatum <span style="color:var(--rose)">(genegeerd)</span></label>
+              <input type="number" data-wf-tc="min_days_since_invoice_date" oninput="window.__setWkfTcBuilderInput()" value="${cur.min_days_since_invoice_date != null ? esc(String(cur.min_days_since_invoice_date)) : ''}" placeholder="wordt niet gelezen" min="0" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface-2);color:var(--text-3);font-size:12px;box-sizing:border-box" />
             </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -874,10 +913,10 @@
           </label>
 
           <div data-wf-tc-note="default_shift" style="${shiftNoteStyle};padding:6px 10px;background:var(--sky-soft,#e0f2fe);color:var(--sky,#0369a1);border-radius:4px;font-size:10.5px;line-height:1.5">
-            ℹ Default-shift actief: min_days_overdue-default is nu <b>-1</b> (motor negeert de 14-dagen-default) omdat 'sinds factuurdatum' of 'verbroken betaalafspraak' de trigger is.
+            ⛔ <b>Min. dagen sinds factuurdatum wordt door de motor genegeerd.</b> De vervaldatum uit TeamLeader is de enige ankerdatum — een betaaltermijn zit daar al in verwerkt en is niet bij elke klant 7 dagen (regelingen, splitsingen, afwijkende termijnen). De waarde blijft bewaard maar stuurt niets aan.
           </div>
           <div data-wf-tc-warn="run_once" style="${runOnceWarnStyle};padding:6px 10px;background:var(--amber-soft);color:var(--amber);border-radius:4px;font-size:10.5px;line-height:1.5">
-            ⚠ <b>run_once=true</b> zonder breach-trigger of factuurdatum-filter: elke matchende klant krijgt <b>precies 1× ooit</b> deze workflow — daarna nooit meer, zelfs bij nieuwe facturen. Bewust?
+            ⚠ <b>run_once=true</b> zonder breach-trigger: elke matchende klant krijgt <b>precies 1× ooit</b> deze workflow — daarna nooit meer, zelfs bij nieuwe facturen. Bewust?
           </div>
 
           <div data-wf-tc-preview="1" style="margin-top:4px;padding:8px 10px;background:var(--emerald-soft);color:var(--emerald);border-radius:4px;font-size:11px;line-height:1.5">${_wkfTcPreview(tc)}</div>
@@ -5074,7 +5113,7 @@
      update via bestaand endpoint) + office-hours read-only (direct-supabase op
      app_settings.dunning_office_hours; er is geen set-endpoint, editor volgt in
      aparte brok met audit-log). Motor onaangeraakt. */
-  const _dsv = { loading: false, fetched: false, error: null, cooldown: null, office: null, busy: false };
+  const _dsv = { loading: false, fetched: false, error: null, cooldown: null, grace: null, ladder: null, cap: null, office: null, busy: false, graceBusy: false, ladderBusy: false, capBusy: false };
   async function fetchDunningVenster() {
     if (_dsv.loading || _dsv.fetched) return;
     _dsv.loading = true; _dsv.error = null; if (render) render();
@@ -5082,6 +5121,35 @@
       const cRes = await tryFetch('dun-settings-get', '/api/dunning-settings-get');
       if (cRes?.__error || cRes?.error) throw new Error(cRes?.__error || cRes?.error);
       _dsv.cooldown = { days: cRes?.dunning_cooldown_days ?? 7, is_default: !!cRes?.is_default, updated_at: cRes?.updated_at || null };
+      // Gratieperiode: extra respijt NA de vervaldag. 0 = motor mag vanaf de
+      // dag na de vervaldag aanmanen; op/vóór de vervaldag nooit.
+      _dsv.grace = {
+        days: Number.isFinite(Number(cRes?.dunning_grace_days)) ? Number(cRes.dunning_grace_days) : 0,
+        is_default: !!cRes?.dunning_grace_days_is_default,
+        updated_at: cRes?.dunning_grace_days_updated_at || null,
+      };
+      // Ladder: templatenaam → dagen NA de vervaldatum. Ook in de gedeelde
+      // _ladder-state zetten zodat de workflow-editor dezelfde labels toont.
+      _dsv.ladder = {
+        rungs: (cRes?.dunning_ladder && typeof cRes.dunning_ladder === 'object') ? cRes.dunning_ladder : {},
+        defaults: (cRes?.dunning_ladder_defaults && typeof cRes.dunning_ladder_defaults === 'object') ? cRes.dunning_ladder_defaults : {},
+        is_default: !!cRes?.dunning_ladder_is_default,
+        updated_at: cRes?.dunning_ladder_updated_at || null,
+      };
+      // Dagcap is per kanaal: { whatsapp, email }. Back-compat met een kaal
+      // getal uit een oudere API-versie.
+      const capRaw = cRes?.dunning_max_sends_per_day;
+      const capObj = (capRaw && typeof capRaw === 'object') ? capRaw : { whatsapp: capRaw, email: capRaw };
+      _dsv.cap = {
+        whatsapp: Number.isFinite(Number(capObj.whatsapp)) ? Number(capObj.whatsapp) : 1,
+        email:    Number.isFinite(Number(capObj.email))    ? Number(capObj.email)    : 1,
+        is_default: !!cRes?.dunning_max_sends_per_day_is_default,
+        updated_at: cRes?.dunning_max_sends_per_day_updated_at || null,
+      };
+      if (_dsv.ladder.rungs && Object.keys(_dsv.ladder.rungs).length) {
+        _ladder.rungs = _dsv.ladder.rungs;
+        _ladder.fetched = true;
+      }
       // Office-hours: direct-supabase (read-only). Fail-soft: bij RLS-error tonen we defaults.
       try {
         if (window.supabase?.from) {
@@ -5111,15 +5179,93 @@
       finally { _dsv.busy = false; if (render) render(); }
     });
   };
+  window.__setDsvGraceSave = () => {
+    const el = document.querySelector('[data-dsv-field="grace"]');
+    const n = Number(el?.value);
+    if (!Number.isFinite(n) || n < 0 || n > 90 || Math.trunc(n) !== n) { showToast('Gratieperiode moet integer 0..90 zijn', 'warn'); return; }
+    openConfirm(`Gratieperiode op ${n} dag${n===1?'':'en'} zetten? De motor manet dan pas ${n === 0 ? 'vanaf de dag ná de vervaldag' : `${n} dag${n===1?'':'en'} ná de vervaldag`}. Effect vanaf volgende cron-run.`, async () => {
+      _dsv.graceBusy = true; if (render) render();
+      try {
+        const j = await tryFetch('dun-settings-update-grace', '/api/dunning-settings-update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dunning_grace_days: n }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Gratieperiode bijgewerkt naar ' + n + ' dagen', 'ok');
+        _dsv.fetched = false; fetchDunningVenster();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _dsv.graceBusy = false; if (render) render(); }
+    });
+  };
+  window.__setDsvCapSave = () => {
+    const lees = (kanaal) => Number(document.querySelector(`[data-dsv-field="cap-${kanaal}"]`)?.value);
+    const wa = lees('whatsapp');
+    const em = lees('email');
+    for (const [label, n] of [['WhatsApp', wa], ['E-mail', em]]) {
+      if (!Number.isFinite(n) || n < 1 || n > 10 || Math.trunc(n) !== n) {
+        showToast(`Dagcap ${label} moet integer 1..10 zijn`, 'warn'); return;
+      }
+    }
+    openConfirm(`Dagcap zetten op ${wa} WhatsApp en ${em} e-mail per klant per dag? Vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan krijgt er hoogstens dit aantal per dag per kanaal. Het WhatsApp+e-mail-koppel van dezelfde ronde blijft samen vertrekken.`, async () => {
+      _dsv.capBusy = true; if (render) render();
+      try {
+        const j = await tryFetch('dun-settings-update-cap', '/api/dunning-settings-update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dunning_max_sends_per_day: { whatsapp: wa, email: em } }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast(`Dagcap bijgewerkt: ${wa} WhatsApp / ${em} e-mail per dag`, 'ok');
+        _dsv.fetched = false; fetchDunningVenster();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _dsv.capBusy = false; if (render) render(); }
+    });
+  };
+  window.__setDsvLadderSave = () => {
+    const rows = Array.from(document.querySelectorAll('[data-dsv-ladder-name]'));
+    const rungs = {};
+    for (const el of rows) {
+      const name = el.getAttribute('data-dsv-ladder-name');
+      const n = Number(el.value);
+      if (!Number.isFinite(n) || n < 1 || n > 365 || Math.trunc(n) !== n) {
+        showToast(`${name}: drempel moet integer 1..365 zijn (1 = de dag ná de vervaldatum)`, 'warn');
+        return;
+      }
+      rungs[name] = n;
+    }
+    if (!Object.keys(rungs).length) { showToast('Geen ladder-sporten om op te slaan', 'warn'); return; }
+    const overzicht = Object.entries(rungs).map(([k, v]) => `${k} → dag ${v}`).join(', ');
+    openConfirm(`Ladder opslaan? ${overzicht}. De motor gebruikt dit vanaf de volgende cron-run; de Meta-templatenamen blijven ongewijzigd.`, async () => {
+      _dsv.ladderBusy = true; if (render) render();
+      try {
+        const j = await tryFetch('dun-settings-update-ladder', '/api/dunning-settings-update', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dunning_ladder: rungs }),
+        });
+        if (j?.__error || j?.error) throw new Error(j?.__error || j?.error);
+        showToast('Ladder bijgewerkt', 'ok');
+        _dsv.fetched = false; _ladder.fetched = false; _ladder.rungs = null;
+        fetchDunningVenster();
+      } catch (err) { showToast('Opslaan mislukt: ' + (err?.message || 'onbekend'), 'warn'); }
+      finally { _dsv.ladderBusy = false; if (render) render(); }
+    });
+  };
   function bodyVenster() {
     if (!_dsv.fetched && !_dsv.loading) queueMicrotask(() => fetchDunningVenster());
     const c = _dsv.cooldown;
+    const g = _dsv.grace;
+    const lad = _dsv.ladder;
+    const cap = _dsv.cap;
+    // Sporten in oplopende volgorde van drempel — zo lees je de ladder van
+    // boven naar beneden zoals de klant 'm ervaart.
+    const ladderRows = lad
+      ? Object.entries(lad.rungs || {}).sort((a, b) => Number(a[1]) - Number(b[1]))
+      : [];
     const o = _dsv.office;
     const dayNames = ['zo','ma','di','wo','do','vr','za'];
     const activeDays = Array.isArray(o?.days) ? o.days.map(d => dayNames[d] || String(d)) : [];
     return `<div style="max-width:1000px">
       <div style="padding:12px 14px;background:var(--amber-soft);color:var(--amber);border-radius:8px;font-size:12.5px;line-height:1.55;margin-bottom:14px">
-        <b>Cooldown schrijfbaar; verzendvenster + dagen alleen-lezen.</b> Cooldown bepaalt hoeveel dagen er tussen 2 aanmaningen voor dezelfde klant moet zitten. Het verzendvenster (uren/dagen/tijdzone) leeft in <code>app_settings.dunning_office_hours</code> zonder set-endpoint — schrijven vereist aparte brok met audit-log.
+        <b>Cooldown, gratieperiode, dagcap en ladder schrijfbaar; verzendvenster + dagen alleen-lezen.</b> Cooldown bepaalt hoeveel dagen er tussen 2 aanmaningen voor dezelfde klant moet zitten. Gratieperiode bepaalt hoe lang de motor ná de vervaldag wacht (0 = vanaf de dag erna). De ladder bepaalt op welke dag ná de vervaldatum elke template vertrekt. Het verzendvenster (uren/dagen/tijdzone) leeft in <code>app_settings.dunning_office_hours</code> zonder set-endpoint — schrijven vereist aparte brok met audit-log.
       </div>
       ${_dsv.error ? `<div style="padding:12px 14px;background:var(--rose-soft);color:var(--rose);border-radius:8px;font-size:12.5px;margin-bottom:12px">⚠ ${esc(_dsv.error)}</div>` : ''}
 
@@ -5136,6 +5282,74 @@
           </div>
         </div>
         ${c?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(c.updated_at)}</div>` : ''}
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
+          <div>
+            <div style="font-size:13px;font-weight:600">Gratieperiode na de vervaldag</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">Nu: <b>${g?.days ?? 0} dag${(g?.days??0)===1?'':'en'}</b>${g?.is_default ? ' (default)' : ''}. Op en vóór de vervaldag gaat er sowieso <b>niets</b> uit; met ${g?.days ?? 0} extra dag${(g?.days??0)===1?'':'en'} manet de motor vanaf dag ${(g?.days ?? 0) + 1} ná de vervaldag.</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="number" min="0" max="90" step="1" data-dsv-field="grace" value="${esc(String(g?.days ?? 0))}" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            <span style="font-size:12px;color:var(--text-3)">dagen</span>
+            <button class="btn btn-primary btn-sm" ${_dsv.graceBusy ? 'disabled' : ''} onclick="window.__setDsvGraceSave()">${_dsv.graceBusy ? 'Bezig…' : 'Opslaan'}</button>
+          </div>
+        </div>
+        ${g?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(g.updated_at)}</div>` : ''}
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">
+          <div>
+            <div style="font-size:13px;font-weight:600">Dagcap — berichten per klant per dag, per kanaal</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5">
+              Nu: <b>${cap?.whatsapp ?? 1} WhatsApp</b> en <b>${cap?.email ?? 1} e-mail</b> per kalenderdag (Europe/Amsterdam)${cap?.is_default ? ' — default' : ''}.
+              Vangnet tegen een inhaalgolf: een klant die meerdere ladder-sporten tegelijk heeft openstaan — omdat hij al lang te laat is — krijgt er hoogstens dit aantal per dag.
+              <b>Per kanaal</b>, zodat de WhatsApp en de e-mail van dezelfde aanmaanronde samen vertrekken; alleen een tweede bericht op hetzelfde kanaal wordt tegengehouden.
+              De cooldown geldt alleen bij het <i>starten</i> van een run; deze cap geldt óók binnen een lopende run.
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:flex-end">
+            <label style="font-size:10.5px;color:var(--text-3);display:flex;flex-direction:column;gap:3px">WhatsApp
+              <input type="number" min="1" max="10" step="1" data-dsv-field="cap-whatsapp" value="${esc(String(cap?.whatsapp ?? 1))}" style="width:70px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            </label>
+            <label style="font-size:10.5px;color:var(--text-3);display:flex;flex-direction:column;gap:3px">E-mail
+              <input type="number" min="1" max="10" step="1" data-dsv-field="cap-email" value="${esc(String(cap?.email ?? 1))}" style="width:70px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+            </label>
+            <button class="btn btn-primary btn-sm" ${_dsv.capBusy ? 'disabled' : ''} onclick="window.__setDsvCapSave()">${_dsv.capBusy ? 'Bezig…' : 'Opslaan'}</button>
+          </div>
+        </div>
+        ${cap?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(cap.updated_at)}</div>` : ''}
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px">
+          <div>
+            <div style="font-size:13px;font-weight:600">Aanmaan-ladder — dagen ná de vervaldatum</div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5">
+              Bepaalt wanneer elke template vertrekt, geteld vanaf de <b>vervaldatum</b> (de datum die uit TeamLeader komt) — niet vanaf de factuurdatum en niet vanaf de vorige stap.
+              De Meta-namen zijn goedgekeurd en blijven zoals ze zijn: <b>het getal in de naam is niet het moment</b>.${lad?.is_default ? ' Nu: de standaard-ladder (geen rij in app_settings).' : ''}
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" ${_dsv.ladderBusy ? 'disabled' : ''} onclick="window.__setDsvLadderSave()" style="white-space:nowrap">${_dsv.ladderBusy ? 'Bezig…' : 'Ladder opslaan'}</button>
+        </div>
+        ${ladderRows.length ? `<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+          ${ladderRows.map(([name, days]) => `
+            <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:6px 8px;background:var(--surface-2);border-radius:6px">
+              <div style="min-width:0">
+                <div style="font-size:12px;font-family:'IBM Plex Mono',monospace">${esc(name)}</div>
+                <div style="font-size:10.5px;color:var(--text-3)">verstuurd op dag ${esc(String(days))} na vervaldatum${Number(days) === 1 ? ' — het vriendelijke duwtje' : ''}</div>
+              </div>
+              <input type="number" min="1" max="365" step="1" data-dsv-ladder-name="${esc(name)}" value="${esc(String(days))}" style="width:80px;padding:4px 8px;font-size:13px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" />
+              <span style="font-size:12px;color:var(--text-3)">dagen</span>
+            </div>`).join('')}
+        </div>` : `<div style="font-size:12px;color:var(--text-3);padding:6px 0">${_dsv.loading ? 'Laden…' : 'Geen ladder geladen.'}</div>`}
+        <div style="margin-top:8px;font-size:10.5px;color:var(--text-3);line-height:1.55">
+          Minimum is 1: op en vóór de vervaldag gaat er niets uit — TeamLeader zet de factuur pas daarna op “Te laat”.
+          Een stap kan deze drempel overrulen met <code>config.min_days_overdue</code>.
+        </div>
+        ${lad?.updated_at ? `<div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Laatst bijgewerkt: ${esc(lad.updated_at)}</div>` : ''}
       </div>
 
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">

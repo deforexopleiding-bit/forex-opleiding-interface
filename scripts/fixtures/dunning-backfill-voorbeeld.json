@@ -1,0 +1,1575 @@
+{
+  "_comment": "SYNTHETISCHE voorbeelddata voor scripts/dunning-pointer-backfill.js --fixture. Nagebouwd op de gemeten live verdeling van 2026-09-07 (21 active / 68 paused), plus twee randgevallen. Bevat GEEN echte klantgegevens.",
+  "today": "2026-09-07",
+  "ladder": {
+    "aanmaning_dag7": 1,
+    "aanmaning_dag14": 7,
+    "aanmaning_dag17": 14,
+    "aanmaning_dag21": 21,
+    "aanmaning_dag37": 30
+  },
+  "runs": [
+    {
+      "id": "run-a30-0",
+      "workflow_id": "wf1",
+      "customer_id": "a30-0",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-1",
+      "workflow_id": "wf1",
+      "customer_id": "a30-1",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-2",
+      "workflow_id": "wf1",
+      "customer_id": "a30-2",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-3",
+      "workflow_id": "wf1",
+      "customer_id": "a30-3",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-4",
+      "workflow_id": "wf1",
+      "customer_id": "a30-4",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-5",
+      "workflow_id": "wf1",
+      "customer_id": "a30-5",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-6",
+      "workflow_id": "wf1",
+      "customer_id": "a30-6",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-7",
+      "workflow_id": "wf1",
+      "customer_id": "a30-7",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-8",
+      "workflow_id": "wf1",
+      "customer_id": "a30-8",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-9",
+      "workflow_id": "wf1",
+      "customer_id": "a30-9",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-10",
+      "workflow_id": "wf1",
+      "customer_id": "a30-10",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-11",
+      "workflow_id": "wf1",
+      "customer_id": "a30-11",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-12",
+      "workflow_id": "wf1",
+      "customer_id": "a30-12",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-13",
+      "workflow_id": "wf1",
+      "customer_id": "a30-13",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-14",
+      "workflow_id": "wf1",
+      "customer_id": "a30-14",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a30-15",
+      "workflow_id": "wf1",
+      "customer_id": "a30-15",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a-0",
+      "workflow_id": "wf1",
+      "customer_id": "a-0",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a-1",
+      "workflow_id": "wf1",
+      "customer_id": "a-1",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a-2",
+      "workflow_id": "wf1",
+      "customer_id": "a-2",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a-3",
+      "workflow_id": "wf1",
+      "customer_id": "a-3",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-a-4",
+      "workflow_id": "wf1",
+      "customer_id": "a-4",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-0",
+      "workflow_id": "wf1",
+      "customer_id": "p30-0",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-0",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-1",
+      "workflow_id": "wf1",
+      "customer_id": "p30-1",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-1",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-2",
+      "workflow_id": "wf1",
+      "customer_id": "p30-2",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-2",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-3",
+      "workflow_id": "wf1",
+      "customer_id": "p30-3",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-3",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-4",
+      "workflow_id": "wf1",
+      "customer_id": "p30-4",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-4",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-5",
+      "workflow_id": "wf1",
+      "customer_id": "p30-5",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-5",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-6",
+      "workflow_id": "wf1",
+      "customer_id": "p30-6",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-6",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-7",
+      "workflow_id": "wf1",
+      "customer_id": "p30-7",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-7",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-8",
+      "workflow_id": "wf1",
+      "customer_id": "p30-8",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-8",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-9",
+      "workflow_id": "wf1",
+      "customer_id": "p30-9",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-9",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-10",
+      "workflow_id": "wf1",
+      "customer_id": "p30-10",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-10",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-11",
+      "workflow_id": "wf1",
+      "customer_id": "p30-11",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-11",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-12",
+      "workflow_id": "wf1",
+      "customer_id": "p30-12",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-12",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-13",
+      "workflow_id": "wf1",
+      "customer_id": "p30-13",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-13",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-14",
+      "workflow_id": "wf1",
+      "customer_id": "p30-14",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-14",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-15",
+      "workflow_id": "wf1",
+      "customer_id": "p30-15",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-15",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-16",
+      "workflow_id": "wf1",
+      "customer_id": "p30-16",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-16",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-17",
+      "workflow_id": "wf1",
+      "customer_id": "p30-17",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-17",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-18",
+      "workflow_id": "wf1",
+      "customer_id": "p30-18",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-18",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-19",
+      "workflow_id": "wf1",
+      "customer_id": "p30-19",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-19",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-20",
+      "workflow_id": "wf1",
+      "customer_id": "p30-20",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-20",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-21",
+      "workflow_id": "wf1",
+      "customer_id": "p30-21",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-21",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-22",
+      "workflow_id": "wf1",
+      "customer_id": "p30-22",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-22",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-23",
+      "workflow_id": "wf1",
+      "customer_id": "p30-23",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-23",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-24",
+      "workflow_id": "wf1",
+      "customer_id": "p30-24",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-24",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-25",
+      "workflow_id": "wf1",
+      "customer_id": "p30-25",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-25",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-26",
+      "workflow_id": "wf1",
+      "customer_id": "p30-26",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-26",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-27",
+      "workflow_id": "wf1",
+      "customer_id": "p30-27",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-27",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-28",
+      "workflow_id": "wf1",
+      "customer_id": "p30-28",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-28",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-29",
+      "workflow_id": "wf1",
+      "customer_id": "p30-29",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-29",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-30",
+      "workflow_id": "wf1",
+      "customer_id": "p30-30",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-30",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-31",
+      "workflow_id": "wf1",
+      "customer_id": "p30-31",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-31",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-32",
+      "workflow_id": "wf1",
+      "customer_id": "p30-32",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-32",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-33",
+      "workflow_id": "wf1",
+      "customer_id": "p30-33",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-33",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-34",
+      "workflow_id": "wf1",
+      "customer_id": "p30-34",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-34",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-35",
+      "workflow_id": "wf1",
+      "customer_id": "p30-35",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-35",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-36",
+      "workflow_id": "wf1",
+      "customer_id": "p30-36",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-36",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-37",
+      "workflow_id": "wf1",
+      "customer_id": "p30-37",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-37",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-38",
+      "workflow_id": "wf1",
+      "customer_id": "p30-38",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-38",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-39",
+      "workflow_id": "wf1",
+      "customer_id": "p30-39",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-39",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-40",
+      "workflow_id": "wf1",
+      "customer_id": "p30-40",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-40",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-41",
+      "workflow_id": "wf1",
+      "customer_id": "p30-41",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-41",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-42",
+      "workflow_id": "wf1",
+      "customer_id": "p30-42",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-42",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-43",
+      "workflow_id": "wf1",
+      "customer_id": "p30-43",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-43",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-44",
+      "workflow_id": "wf1",
+      "customer_id": "p30-44",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": "arr-44",
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-45",
+      "workflow_id": "wf1",
+      "customer_id": "p30-45",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": "arr-45",
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-46",
+      "workflow_id": "wf1",
+      "customer_id": "p30-46",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": "arr-46",
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-47",
+      "workflow_id": "wf1",
+      "customer_id": "p30-47",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": "arr-47",
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p30-48",
+      "workflow_id": "wf1",
+      "customer_id": "p30-48",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": null,
+      "paused_by_arrangement_id": "arr-48",
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-0",
+      "workflow_id": "wf1",
+      "customer_id": "p-0",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l0",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-1",
+      "workflow_id": "wf1",
+      "customer_id": "p-1",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l1",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-2",
+      "workflow_id": "wf1",
+      "customer_id": "p-2",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l2",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-3",
+      "workflow_id": "wf1",
+      "customer_id": "p-3",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l3",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-4",
+      "workflow_id": "wf1",
+      "customer_id": "p-4",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l4",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-5",
+      "workflow_id": "wf1",
+      "customer_id": "p-5",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l5",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-6",
+      "workflow_id": "wf1",
+      "customer_id": "p-6",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l6",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-7",
+      "workflow_id": "wf1",
+      "customer_id": "p-7",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l7",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-8",
+      "workflow_id": "wf1",
+      "customer_id": "p-8",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l8",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-9",
+      "workflow_id": "wf1",
+      "customer_id": "p-9",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l9",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-10",
+      "workflow_id": "wf1",
+      "customer_id": "p-10",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l10",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-11",
+      "workflow_id": "wf1",
+      "customer_id": "p-11",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l11",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-12",
+      "workflow_id": "wf1",
+      "customer_id": "p-12",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l12",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-13",
+      "workflow_id": "wf1",
+      "customer_id": "p-13",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l13",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-14",
+      "workflow_id": "wf1",
+      "customer_id": "p-14",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l14",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-15",
+      "workflow_id": "wf1",
+      "customer_id": "p-15",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l15",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-16",
+      "workflow_id": "wf1",
+      "customer_id": "p-16",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l16",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-17",
+      "workflow_id": "wf1",
+      "customer_id": "p-17",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l17",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-p-18",
+      "workflow_id": "wf1",
+      "customer_id": "p-18",
+      "status": "paused",
+      "current_step_id": "s1",
+      "needs_attention": false,
+      "paused_by_conversation_id": "conv-l18",
+      "paused_by_arrangement_id": null,
+      "paused_manual_reason": null
+    },
+    {
+      "id": "run-x-ok",
+      "workflow_id": "wf1",
+      "customer_id": "x-ok",
+      "status": "active",
+      "current_step_id": "s9",
+      "needs_attention": false
+    },
+    {
+      "id": "run-x-att",
+      "workflow_id": "wf1",
+      "customer_id": "x-att",
+      "status": "active",
+      "current_step_id": "s1",
+      "needs_attention": true
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "workflow_id": "wf1",
+      "step_order": 1,
+      "step_type": "whatsapp",
+      "config": {
+        "template_id": "t7"
+      }
+    },
+    {
+      "id": "s2",
+      "workflow_id": "wf1",
+      "step_order": 2,
+      "step_type": "wait",
+      "config": {
+        "days": 6
+      }
+    },
+    {
+      "id": "s3",
+      "workflow_id": "wf1",
+      "step_order": 3,
+      "step_type": "whatsapp",
+      "config": {
+        "template_id": "t14"
+      }
+    },
+    {
+      "id": "s4",
+      "workflow_id": "wf1",
+      "step_order": 4,
+      "step_type": "wait",
+      "config": {
+        "days": 7
+      }
+    },
+    {
+      "id": "s5",
+      "workflow_id": "wf1",
+      "step_order": 5,
+      "step_type": "whatsapp",
+      "config": {
+        "template_id": "t17"
+      }
+    },
+    {
+      "id": "s6",
+      "workflow_id": "wf1",
+      "step_order": 6,
+      "step_type": "wait",
+      "config": {
+        "days": 7
+      }
+    },
+    {
+      "id": "s7",
+      "workflow_id": "wf1",
+      "step_order": 7,
+      "step_type": "whatsapp",
+      "config": {
+        "template_id": "t21"
+      }
+    },
+    {
+      "id": "s8",
+      "workflow_id": "wf1",
+      "step_order": 8,
+      "step_type": "wait",
+      "config": {
+        "days": 9
+      }
+    },
+    {
+      "id": "s9",
+      "workflow_id": "wf1",
+      "step_order": 9,
+      "step_type": "whatsapp",
+      "config": {
+        "template_id": "t37"
+      }
+    }
+  ],
+  "templates": {
+    "t7": {
+      "id": "t7",
+      "name": "Aanmaning WA dag 7",
+      "meta_template_name": "aanmaning_dag7"
+    },
+    "t14": {
+      "id": "t14",
+      "name": "Aanmaning WA dag 14",
+      "meta_template_name": "aanmaning_dag14"
+    },
+    "t17": {
+      "id": "t17",
+      "name": "Aanmaning WA dag 17",
+      "meta_template_name": "aanmaning_dag17"
+    },
+    "t21": {
+      "id": "t21",
+      "name": "Aanmaning WA dag 21",
+      "meta_template_name": "aanmaning_dag21"
+    },
+    "t37": {
+      "id": "t37",
+      "name": "Aanmaning WA dag 37",
+      "meta_template_name": "aanmaning_dag37"
+    }
+  },
+  "customers": {
+    "a30-0": {
+      "id": "a30-0",
+      "name": "Actief 30plus 0",
+      "oldest_due": "2026-07-29"
+    },
+    "a30-1": {
+      "id": "a30-1",
+      "name": "Actief 30plus 1",
+      "oldest_due": "2026-07-28"
+    },
+    "a30-2": {
+      "id": "a30-2",
+      "name": "Actief 30plus 2",
+      "oldest_due": "2026-07-27"
+    },
+    "a30-3": {
+      "id": "a30-3",
+      "name": "Actief 30plus 3",
+      "oldest_due": "2026-07-26"
+    },
+    "a30-4": {
+      "id": "a30-4",
+      "name": "Actief 30plus 4",
+      "oldest_due": "2026-07-25"
+    },
+    "a30-5": {
+      "id": "a30-5",
+      "name": "Actief 30plus 5",
+      "oldest_due": "2026-07-24"
+    },
+    "a30-6": {
+      "id": "a30-6",
+      "name": "Actief 30plus 6",
+      "oldest_due": "2026-07-23"
+    },
+    "a30-7": {
+      "id": "a30-7",
+      "name": "Actief 30plus 7",
+      "oldest_due": "2026-07-22"
+    },
+    "a30-8": {
+      "id": "a30-8",
+      "name": "Actief 30plus 8",
+      "oldest_due": "2026-07-21"
+    },
+    "a30-9": {
+      "id": "a30-9",
+      "name": "Actief 30plus 9",
+      "oldest_due": "2026-07-20"
+    },
+    "a30-10": {
+      "id": "a30-10",
+      "name": "Actief 30plus 10",
+      "oldest_due": "2026-07-19"
+    },
+    "a30-11": {
+      "id": "a30-11",
+      "name": "Actief 30plus 11",
+      "oldest_due": "2026-07-18"
+    },
+    "a30-12": {
+      "id": "a30-12",
+      "name": "Actief 30plus 12",
+      "oldest_due": "2026-07-17"
+    },
+    "a30-13": {
+      "id": "a30-13",
+      "name": "Actief 30plus 13",
+      "oldest_due": "2026-07-16"
+    },
+    "a30-14": {
+      "id": "a30-14",
+      "name": "Actief 30plus 14",
+      "oldest_due": "2026-07-15"
+    },
+    "a30-15": {
+      "id": "a30-15",
+      "name": "Actief 30plus 15",
+      "oldest_due": "2026-07-14"
+    },
+    "a-0": {
+      "id": "a-0",
+      "name": "Actief licht 0",
+      "oldest_due": "2026-09-04"
+    },
+    "a-1": {
+      "id": "a-1",
+      "name": "Actief licht 1",
+      "oldest_due": "2026-08-30"
+    },
+    "a-2": {
+      "id": "a-2",
+      "name": "Actief licht 2",
+      "oldest_due": "2026-08-26"
+    },
+    "a-3": {
+      "id": "a-3",
+      "name": "Actief licht 3",
+      "oldest_due": "2026-08-20"
+    },
+    "a-4": {
+      "id": "a-4",
+      "name": "Actief licht 4",
+      "oldest_due": "2026-08-13"
+    },
+    "p30-0": {
+      "id": "p30-0",
+      "name": "Gepauzeerd 30plus 0",
+      "oldest_due": "2026-08-03"
+    },
+    "p30-1": {
+      "id": "p30-1",
+      "name": "Gepauzeerd 30plus 1",
+      "oldest_due": "2026-08-02"
+    },
+    "p30-2": {
+      "id": "p30-2",
+      "name": "Gepauzeerd 30plus 2",
+      "oldest_due": "2026-08-01"
+    },
+    "p30-3": {
+      "id": "p30-3",
+      "name": "Gepauzeerd 30plus 3",
+      "oldest_due": "2026-07-31"
+    },
+    "p30-4": {
+      "id": "p30-4",
+      "name": "Gepauzeerd 30plus 4",
+      "oldest_due": "2026-07-30"
+    },
+    "p30-5": {
+      "id": "p30-5",
+      "name": "Gepauzeerd 30plus 5",
+      "oldest_due": "2026-07-29"
+    },
+    "p30-6": {
+      "id": "p30-6",
+      "name": "Gepauzeerd 30plus 6",
+      "oldest_due": "2026-07-28"
+    },
+    "p30-7": {
+      "id": "p30-7",
+      "name": "Gepauzeerd 30plus 7",
+      "oldest_due": "2026-07-27"
+    },
+    "p30-8": {
+      "id": "p30-8",
+      "name": "Gepauzeerd 30plus 8",
+      "oldest_due": "2026-07-26"
+    },
+    "p30-9": {
+      "id": "p30-9",
+      "name": "Gepauzeerd 30plus 9",
+      "oldest_due": "2026-07-25"
+    },
+    "p30-10": {
+      "id": "p30-10",
+      "name": "Gepauzeerd 30plus 10",
+      "oldest_due": "2026-07-24"
+    },
+    "p30-11": {
+      "id": "p30-11",
+      "name": "Gepauzeerd 30plus 11",
+      "oldest_due": "2026-07-23"
+    },
+    "p30-12": {
+      "id": "p30-12",
+      "name": "Gepauzeerd 30plus 12",
+      "oldest_due": "2026-07-22"
+    },
+    "p30-13": {
+      "id": "p30-13",
+      "name": "Gepauzeerd 30plus 13",
+      "oldest_due": "2026-07-21"
+    },
+    "p30-14": {
+      "id": "p30-14",
+      "name": "Gepauzeerd 30plus 14",
+      "oldest_due": "2026-07-20"
+    },
+    "p30-15": {
+      "id": "p30-15",
+      "name": "Gepauzeerd 30plus 15",
+      "oldest_due": "2026-07-19"
+    },
+    "p30-16": {
+      "id": "p30-16",
+      "name": "Gepauzeerd 30plus 16",
+      "oldest_due": "2026-07-18"
+    },
+    "p30-17": {
+      "id": "p30-17",
+      "name": "Gepauzeerd 30plus 17",
+      "oldest_due": "2026-07-17"
+    },
+    "p30-18": {
+      "id": "p30-18",
+      "name": "Gepauzeerd 30plus 18",
+      "oldest_due": "2026-07-16"
+    },
+    "p30-19": {
+      "id": "p30-19",
+      "name": "Gepauzeerd 30plus 19",
+      "oldest_due": "2026-07-15"
+    },
+    "p30-20": {
+      "id": "p30-20",
+      "name": "Gepauzeerd 30plus 20",
+      "oldest_due": "2026-07-14"
+    },
+    "p30-21": {
+      "id": "p30-21",
+      "name": "Gepauzeerd 30plus 21",
+      "oldest_due": "2026-07-13"
+    },
+    "p30-22": {
+      "id": "p30-22",
+      "name": "Gepauzeerd 30plus 22",
+      "oldest_due": "2026-07-12"
+    },
+    "p30-23": {
+      "id": "p30-23",
+      "name": "Gepauzeerd 30plus 23",
+      "oldest_due": "2026-07-11"
+    },
+    "p30-24": {
+      "id": "p30-24",
+      "name": "Gepauzeerd 30plus 24",
+      "oldest_due": "2026-07-10"
+    },
+    "p30-25": {
+      "id": "p30-25",
+      "name": "Gepauzeerd 30plus 25",
+      "oldest_due": "2026-07-09"
+    },
+    "p30-26": {
+      "id": "p30-26",
+      "name": "Gepauzeerd 30plus 26",
+      "oldest_due": "2026-07-08"
+    },
+    "p30-27": {
+      "id": "p30-27",
+      "name": "Gepauzeerd 30plus 27",
+      "oldest_due": "2026-07-07"
+    },
+    "p30-28": {
+      "id": "p30-28",
+      "name": "Gepauzeerd 30plus 28",
+      "oldest_due": "2026-07-06"
+    },
+    "p30-29": {
+      "id": "p30-29",
+      "name": "Gepauzeerd 30plus 29",
+      "oldest_due": "2026-07-05"
+    },
+    "p30-30": {
+      "id": "p30-30",
+      "name": "Gepauzeerd 30plus 30",
+      "oldest_due": "2026-07-04"
+    },
+    "p30-31": {
+      "id": "p30-31",
+      "name": "Gepauzeerd 30plus 31",
+      "oldest_due": "2026-07-03"
+    },
+    "p30-32": {
+      "id": "p30-32",
+      "name": "Gepauzeerd 30plus 32",
+      "oldest_due": "2026-07-02"
+    },
+    "p30-33": {
+      "id": "p30-33",
+      "name": "Gepauzeerd 30plus 33",
+      "oldest_due": "2026-07-01"
+    },
+    "p30-34": {
+      "id": "p30-34",
+      "name": "Gepauzeerd 30plus 34",
+      "oldest_due": "2026-06-30"
+    },
+    "p30-35": {
+      "id": "p30-35",
+      "name": "Gepauzeerd 30plus 35",
+      "oldest_due": "2026-06-29"
+    },
+    "p30-36": {
+      "id": "p30-36",
+      "name": "Gepauzeerd 30plus 36",
+      "oldest_due": "2026-06-28"
+    },
+    "p30-37": {
+      "id": "p30-37",
+      "name": "Gepauzeerd 30plus 37",
+      "oldest_due": "2026-06-27"
+    },
+    "p30-38": {
+      "id": "p30-38",
+      "name": "Gepauzeerd 30plus 38",
+      "oldest_due": "2026-06-26"
+    },
+    "p30-39": {
+      "id": "p30-39",
+      "name": "Gepauzeerd 30plus 39",
+      "oldest_due": "2026-06-25"
+    },
+    "p30-40": {
+      "id": "p30-40",
+      "name": "Gepauzeerd 30plus 40",
+      "oldest_due": "2026-08-03"
+    },
+    "p30-41": {
+      "id": "p30-41",
+      "name": "Gepauzeerd 30plus 41",
+      "oldest_due": "2026-08-02"
+    },
+    "p30-42": {
+      "id": "p30-42",
+      "name": "Gepauzeerd 30plus 42",
+      "oldest_due": "2026-08-01"
+    },
+    "p30-43": {
+      "id": "p30-43",
+      "name": "Gepauzeerd 30plus 43",
+      "oldest_due": "2026-07-31"
+    },
+    "p30-44": {
+      "id": "p30-44",
+      "name": "Gepauzeerd 30plus 44",
+      "oldest_due": "2026-07-30"
+    },
+    "p30-45": {
+      "id": "p30-45",
+      "name": "Gepauzeerd 30plus 45",
+      "oldest_due": "2026-07-29"
+    },
+    "p30-46": {
+      "id": "p30-46",
+      "name": "Gepauzeerd 30plus 46",
+      "oldest_due": "2026-07-28"
+    },
+    "p30-47": {
+      "id": "p30-47",
+      "name": "Gepauzeerd 30plus 47",
+      "oldest_due": "2026-07-27"
+    },
+    "p30-48": {
+      "id": "p30-48",
+      "name": "Gepauzeerd 30plus 48",
+      "oldest_due": "2026-07-26"
+    },
+    "p-0": {
+      "id": "p-0",
+      "name": "Gepauzeerd licht 0",
+      "oldest_due": "2026-08-28"
+    },
+    "p-1": {
+      "id": "p-1",
+      "name": "Gepauzeerd licht 1",
+      "oldest_due": "2026-08-28"
+    },
+    "p-2": {
+      "id": "p-2",
+      "name": "Gepauzeerd licht 2",
+      "oldest_due": "2026-08-28"
+    },
+    "p-3": {
+      "id": "p-3",
+      "name": "Gepauzeerd licht 3",
+      "oldest_due": "2026-08-28"
+    },
+    "p-4": {
+      "id": "p-4",
+      "name": "Gepauzeerd licht 4",
+      "oldest_due": "2026-08-28"
+    },
+    "p-5": {
+      "id": "p-5",
+      "name": "Gepauzeerd licht 5",
+      "oldest_due": "2026-08-28"
+    },
+    "p-6": {
+      "id": "p-6",
+      "name": "Gepauzeerd licht 6",
+      "oldest_due": "2026-08-28"
+    },
+    "p-7": {
+      "id": "p-7",
+      "name": "Gepauzeerd licht 7",
+      "oldest_due": "2026-08-28"
+    },
+    "p-8": {
+      "id": "p-8",
+      "name": "Gepauzeerd licht 8",
+      "oldest_due": "2026-08-28"
+    },
+    "p-9": {
+      "id": "p-9",
+      "name": "Gepauzeerd licht 9",
+      "oldest_due": "2026-08-28"
+    },
+    "p-10": {
+      "id": "p-10",
+      "name": "Gepauzeerd licht 10",
+      "oldest_due": "2026-08-28"
+    },
+    "p-11": {
+      "id": "p-11",
+      "name": "Gepauzeerd licht 11",
+      "oldest_due": "2026-08-28"
+    },
+    "p-12": {
+      "id": "p-12",
+      "name": "Gepauzeerd licht 12",
+      "oldest_due": "2026-08-28"
+    },
+    "p-13": {
+      "id": "p-13",
+      "name": "Gepauzeerd licht 13",
+      "oldest_due": "2026-08-28"
+    },
+    "p-14": {
+      "id": "p-14",
+      "name": "Gepauzeerd licht 14",
+      "oldest_due": "2026-08-28"
+    },
+    "p-15": {
+      "id": "p-15",
+      "name": "Gepauzeerd licht 15",
+      "oldest_due": "2026-08-28"
+    },
+    "p-16": {
+      "id": "p-16",
+      "name": "Gepauzeerd licht 16",
+      "oldest_due": "2026-08-28"
+    },
+    "p-17": {
+      "id": "p-17",
+      "name": "Gepauzeerd licht 17",
+      "oldest_due": "2026-08-28"
+    },
+    "p-18": {
+      "id": "p-18",
+      "name": "Gepauzeerd licht 18",
+      "oldest_due": "2026-08-28"
+    },
+    "x-ok": {
+      "id": "x-ok",
+      "name": "Pointer al goed",
+      "oldest_due": "2026-07-24"
+    },
+    "x-att": {
+      "id": "x-att",
+      "name": "Needs attention",
+      "oldest_due": "2026-07-24"
+    }
+  }
+}

@@ -129,6 +129,12 @@ export function buildLegacyPositionalVariables(variables) {
  *   DAGEN_OVERDUE, VERVAL_DATUM } — pre-berekende waarden uit
  *   computeVariables, gebruikt als fallback.
  * @param {object} [args.supabase]  injectie voor tests
+ * @param {string|null} [args.emptyFallback]  wanneer gezet: lege body-waarden
+ *   uit de mapping worden hiermee vervangen. Meta weigert lege parameters
+ *   (132000-familie: "parameter value cannot be empty"), dus een template met
+ *   {{1}} = klant.voornaam faalt op elke klant zonder first_name. Alleen
+ *   callers die dat expliciet willen zetten dit; default (null) laat het
+ *   bestaande gedrag ongemoeid.
  *
  * @returns {Promise<{
  *   mode: 'mapping'|'legacy',
@@ -139,7 +145,7 @@ export function buildLegacyPositionalVariables(variables) {
  *   warnings: string[],
  * }>}
  */
-export async function buildReminderTemplatePayload({ templateName, ctx, legacyVars, supabase }) {
+export async function buildReminderTemplatePayload({ templateName, ctx, legacyVars, supabase, emptyFallback = null }) {
   const warnings = [];
 
   const { template, warnings: fetchWarnings } = await fetchReminderTemplate(templateName, { supabase });
@@ -154,6 +160,14 @@ export async function buildReminderTemplatePayload({ templateName, ctx, legacyVa
   if (hasUsableMapping) {
     // MAPPING PAD (voorkeur — matcht altijd wat de template verwacht).
     const bodyVariables = buildMetaVariablesFromMapping(bodyMapping, ctx);
+    if (emptyFallback != null && String(emptyFallback) !== '') {
+      for (const k of Object.keys(bodyVariables)) {
+        if (String(bodyVariables[k] ?? '').trim() === '') {
+          bodyVariables[k] = String(emptyFallback);
+          warnings.push(`lege waarde voor {{${k}}} (${bodyMapping[k]}) vervangen door fallback '${emptyFallback}'`);
+        }
+      }
+    }
     const { components, warnings: buildWarnings } = buildSendComponents({
       template,
       bodyVariables,
