@@ -1629,7 +1629,8 @@
       + (tags.length > 3 ? `<span style="font-size:10px;color:var(--text-3)">+${tags.length - 3}</span>` : '');
   }
   window.__evAttFilter = (v) => { _ui.attStatusFilter = v; if (window.DFO?.render) window.DFO.render(); };
-  // Bug 2: attendee-kebab-dropdown ipv window.prompt() met 8 opties.
+  // Attendee-kebab-dropdown: keuzelink versturen, vragenlijst, verplaatsen,
+  // verwijderen. (Bewerken/offerte/tags zijn hier bewust weggehaald.)
   window.__evAttKebab = (attId, eventId) => {
     _ui.attKebabOpen = _ui.attKebabOpen === attId ? null : attId;
     _ui.rowMenuOpen = null;
@@ -1637,14 +1638,10 @@
   };
   function _evAttKebabHtml(attId, eventId) {
     const items = [
-      { l: 'Bewerken',                     k: 'edit' },
-      { l: 'Stuur keuze-link',             k: 'invite' },
-      { l: 'Stuur vragenlijst',            k: 'quest' },
-      { l: 'Verplaatsen naar ander event', k: 'move' },
-      { l: 'Offerte aanmaken',             k: 'offerte' },
-      { l: 'Tag toevoegen',                k: 'tagadd' },
-      { l: 'Tag verwijderen',              k: 'tagrem' },
-      { l: 'Verwijderen',                  k: 'delete', danger: true },
+      { l: 'Verstuur keuzelink ander event', k: 'invite' },
+      { l: 'Stuur vragenlijst',              k: 'quest' },
+      { l: 'Verplaatsen naar ander event',   k: 'move' },
+      { l: 'Verwijderen',                    k: 'delete', danger: true },
     ];
     return `<div class="ev-kebab-menu" style="position:absolute;top:30px;right:0;min-width:220px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:100;padding:4px 0" onclick="event.stopPropagation()">
       ${items.map((it) => `<button style="width:100%;text-align:left;padding:8px 14px;background:none;border:none;color:${it.danger ? 'var(--rose)' : 'var(--text)'};font-size:12.5px;cursor:pointer" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='none'" onclick="window.__evAttKebabDo('${esc(attId)}','${esc(eventId)}','${esc(it.k)}')">${esc(it.l)}</button>`).join('')}
@@ -1653,13 +1650,9 @@
   window.__evAttKebabDo = (attId, eventId, k) => {
     _ui.attKebabOpen = null;
     const actions = {
-      edit:    () => window.__evAttEdit(attId, eventId),
       invite:  () => window.__evAttSendInvite(attId, eventId),
       quest:   () => window.__evAttSendQuest(attId, eventId),
       move:    () => window.__evAttMove(attId, eventId),
-      offerte: () => window.__evAttToOfferte(attId, eventId),
-      tagadd:  () => window.__evAttTagAdd(attId, eventId),
-      tagrem:  () => window.__evAttTagRemove(attId, eventId),
       delete:  () => window.__evAttDelete(attId, eventId),
     };
     const fn = actions[k]; if (fn) fn();
@@ -1726,38 +1719,126 @@
       return j;
     } catch (e) { alert('Actie mislukt: ' + (e?.message || 'onbekende fout')); return null; }
   }
-  window.__evAttEdit = (attId, eventId) => {
-    const nieuweStatus = window.prompt('Nieuwe status? (aangemeld / aanwezig / no_show / sale / switched_to_other_event / geannuleerd)');
-    if (!nieuweStatus) return;
-    _post('/api/events-attendee-status-change', { attendee_id: attId, status: nieuweStatus.trim() }, 'Status bijgewerkt', eventId);
+  // ── Gestylede dialoog-helpers (dfo-stijl, navy #10284A) — lokaal aan de
+  //    events-module. Vermijdt native window.prompt/confirm/alert en zorgt
+  //    dat acties nooit stil falen. Zelfstandig (geen shared-CSS-afhankelijk-
+  //    heid); z-index boven de attendee-detail-modal (100000).
+  function _evDlgBase(innerHtml, wire) {
+    return new Promise((resolve) => {
+      const ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;background:rgba(16,40,74,.45);backdrop-filter:blur(3px);z-index:100001;display:flex;align-items:center;justify-content:center;padding:20px';
+      ov.innerHTML = `<div role="dialog" aria-modal="true" style="width:440px;max-width:100%;background:var(--surface,#fff);border:1px solid var(--border,#e6e8ee);border-radius:16px;box-shadow:0 18px 50px rgba(16,40,74,.28);padding:22px 22px 16px;box-sizing:border-box">${innerHtml}</div>`;
+      document.body.appendChild(ov);
+      const close = (result) => { document.removeEventListener('keydown', onKey, true); ov.remove(); resolve(result); };
+      function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(null); } }
+      ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(null); });
+      document.addEventListener('keydown', onKey, true);
+      wire(ov.firstElementChild, close);
+    });
+  }
+  function _evAlert(title, message, opts = {}) {
+    const okColor = opts.danger ? '#c0392b' : '#10284A';
+    return _evDlgBase(
+      `<div style="font-size:16px;font-weight:700;color:var(--text-1,#10284A);margin:0 0 8px">${esc(title || '')}</div>
+       <div style="font-size:13.5px;color:var(--text-2,#4a5568);line-height:1.55;margin:0 0 16px">${esc(message || '')}</div>
+       <div style="display:flex;justify-content:flex-end"><button type="button" class="_ev-ok" style="padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid transparent;background:${okColor};color:#fff">Sluiten</button></div>`,
+      (box, close) => { const ok = box.querySelector('._ev-ok'); ok.onclick = () => close(true); requestAnimationFrame(() => ok.focus()); }
+    );
+  }
+  function _evMovePicker(events) {
+    const opts = events.map((e) => `<option value="${esc(e.id)}">${esc(e.title || '(zonder titel)')} — ${esc(_fmtDateTime(e.starts_at) || 'datum onbekend')}</option>`).join('');
+    return _evDlgBase(
+      `<div style="font-size:16px;font-weight:700;color:var(--text-1,#10284A);margin:0 0 8px">Verplaatsen naar ander event</div>
+       <div style="font-size:13.5px;color:var(--text-2,#4a5568);line-height:1.55;margin:0 0 12px">Kies het event waar je deze deelnemer naartoe verplaatst.</div>
+       <select class="_ev-sel" style="width:100%;padding:10px 12px;border:1.5px solid var(--border,#d6dae4);border-radius:10px;font-size:14px;background:var(--surface,#fff);color:var(--text-1,#10284A);outline:none;margin:0 0 16px;box-sizing:border-box">${opts}</select>
+       <div style="display:flex;justify-content:flex-end;gap:10px">
+         <button type="button" class="_ev-cancel" style="padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid var(--border,#d6dae4);background:transparent;color:var(--text-2,#4a5568)">Annuleren</button>
+         <button type="button" class="_ev-ok" style="padding:9px 16px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;border:1px solid transparent;background:#10284A;color:#fff">Verplaatsen</button>
+       </div>`,
+      (box, close) => {
+        const sel = box.querySelector('._ev-sel');
+        box.querySelector('._ev-cancel').onclick = () => close(null);
+        box.querySelector('._ev-ok').onclick = () => close(sel && sel.value ? sel.value : null);
+        requestAnimationFrame(() => { if (sel) sel.focus(); });
+      }
+    );
+  }
+  // Per-kanaal resultaat van send-invite / send-questionnaire (endpoints
+  // rapporteren mail + whatsapp los en geven 200 óók als beide kanalen zijn
+  // overgeslagen). We vertalen dat naar een eerlijke melding zodat een
+  // niet-verzonden link nooit als "verstuurd" langsvliegt.
+  const _SEND_REASON_NL = {
+    'no-email': 'geen e-mailadres bekend', 'no_email': 'geen e-mailadres bekend',
+    'no-phone': 'geen telefoonnummer bekend', 'no_phone': 'geen telefoonnummer bekend',
+    'disabled': 'kanaal uitgeschakeld', 'not-configured': 'kanaal niet geconfigureerd',
   };
-  window.__evAttSendInvite = (attId, eventId) => {
-    if (!window.confirm('Keuze-link opnieuw sturen naar deze deelnemer?')) return;
-    _post('/api/events-attendee-send-invite', { attendee_id: attId }, 'Keuze-link verstuurd');
-  };
-  window.__evAttSendQuest = (attId, eventId) => {
-    if (!window.confirm('Vragenlijst-link sturen naar deze deelnemer?')) return;
-    _post('/api/events-attendee-send-questionnaire', { attendee_id: attId }, 'Vragenlijst verstuurd');
-  };
+  function _reasonNL(r) { return _SEND_REASON_NL[r] || String(r || 'onbekende reden').replace(/[-_]/g, ' '); }
+  function _describeSendResult(j) {
+    const sent = [], failed = [];
+    for (const [name, r] of [['e-mail', j?.mail], ['WhatsApp', j?.whatsapp]]) {
+      if (!r) continue;
+      if (r.ok) sent.push(name);
+      else if (r.skipped) failed.push(`${name} overgeslagen (${_reasonNL(r.reason)})`);
+      else failed.push(`${name} mislukt${r.error ? ' (' + r.error + ')' : ''}`);
+    }
+    return { sent, failed };
+  }
+  async function _evSendChannels({ url, attId, confirmTitle, confirmMsg, label }) {
+    const doIt = (typeof window.dfoConfirm === 'function')
+      ? await window.dfoConfirm({ title: confirmTitle, message: confirmMsg, okLabel: 'Versturen', cancelLabel: 'Annuleren' })
+      : window.confirm(confirmMsg);
+    if (!doIt) return;
+    let j;
+    try {
+      j = await window.KV.authedJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attendee_id: attId }) });
+    } catch (e) {
+      await _evAlert(label + ' mislukt', e?.message || 'Onbekende fout bij versturen.', { danger: true });
+      return;
+    }
+    const { sent, failed } = _describeSendResult(j);
+    if (sent.length) _showToast(`${label} verstuurd via ${sent.join(' + ')}.`);
+    else await _evAlert(label + ' niet verstuurd', 'Er is niets verzonden — ' + (failed.join('; ') || 'geen kanaal beschikbaar') + '.', { danger: true });
+  }
+  // "Verstuur keuzelink ander event" → keuzelink /modules/event-keuze.html
+  // (CRM-eigen datum-keuzepagina, WhatsApp events_keuze_link + e-mail).
+  window.__evAttSendInvite = (attId /* , eventId */) =>
+    _evSendChannels({
+      url: '/api/events-attendee-send-invite', attId,
+      confirmTitle: 'Keuzelink versturen',
+      confirmMsg: 'De keuzelink (deelnemer kiest zelf de datum voor het event) via WhatsApp + e-mail versturen?',
+      label: 'Keuzelink',
+    });
+  // "Stuur vragenlijst" → /modules/assessment.html (CRM-eigen vragenlijst,
+  // WhatsApp vragenlijst_herinnering_v3 + e-mail).
+  window.__evAttSendQuest = (attId /* , eventId */) =>
+    _evSendChannels({
+      url: '/api/events-attendee-send-questionnaire', attId,
+      confirmTitle: 'Vragenlijst versturen',
+      confirmMsg: 'De vragenlijst-link via WhatsApp + e-mail naar deze deelnemer versturen?',
+      label: 'Vragenlijst',
+    });
   window.__evAttMove = async (attId, eventId) => {
-    const target = window.prompt('Doel event-ID? (kopieer uit URL of Overzicht)');
+    // Nette keuzelijst i.p.v. native prompt om een event-UID. Actieve events
+    // ophalen (draft + published, chronologisch) en het huidige event
+    // uitsluiten; verplaatsen via het bestaande events-attendee-move endpoint.
+    let events = [];
+    try {
+      const j = await window.KV.authedJson('/api/events-list?status=draft,published&limit=200', { method: 'GET' });
+      events = (j?.items || []).filter((e) => e.id !== eventId);
+    } catch (e) {
+      await _evAlert('Kon eventlijst niet laden', e?.message || 'Onbekende fout.', { danger: true });
+      return;
+    }
+    if (!events.length) { await _evAlert('Geen ander event beschikbaar', 'Er zijn geen andere actieve events om naartoe te verplaatsen.'); return; }
+    const target = await _evMovePicker(events);
     if (!target) return;
-    _post('/api/events-attendee-move', { attendee_id: attId, target_event_id: target.trim() }, 'Verplaatst', eventId);
-  };
-  // v=2026-08-27 fix: v2 ⋯-menu "Offerte aanmaken" was kapot — riep
-  // /api/events-attendee-link-deal aan met { id, action:'create_deal' }
-  // terwijl het endpoint { attendee_id, deal_id } óf { attendee_id, unlink }
-  // verwacht. 400 gegarandeerd. Er is geen "create nieuwe deal vanuit
-  // attendee"-endpoint in de repo — het bedoelde v1-gedrag was "koppel een
-  // BESTAANDE deal aan deze attendee". Herbrand naar wat 'ie werkelijk doet:
-  // open de deal-search-modal (dezelfde als de afronden-flow, met attendee-
-  // context voor prefill + same-customer boost). Wie een nieuwe offerte wil
-  // aanmaken doet dat in de Sales-module en koppelt hem daarna hier.
-  window.__evAttToOfferte = (attId, eventId) => {
-    if (typeof window.__evCompleteOpenDealSearch === 'function') {
-      window.__evCompleteOpenDealSearch(attId, eventId);
-    } else {
-      if (window.KV?.toast) window.KV.toast('Deal-koppel-modal niet beschikbaar — herlaad de pagina.', 'warn');
+    try {
+      await window.KV.authedJson('/api/events-attendee-move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attendee_id: attId, target_event_id: target }) });
+      _showToast('Deelnemer verplaatst.');
+      _live.attendees.data[eventId] = null;
+      queueMicrotask(() => fetchAttendees(eventId));
+    } catch (e) {
+      await _evAlert('Verplaatsen mislukt', e?.message || 'Onbekende fout.', { danger: true });
     }
   };
 
@@ -1939,16 +2020,6 @@
     </div>`;
   }
 
-  window.__evAttTagAdd = (attId, eventId) => {
-    const tag = window.prompt('Tag om toe te voegen?');
-    if (!tag) return;
-    _post('/api/events-attendee-tag-add', { attendee_id: attId, tag_slug: tag.trim() }, 'Tag toegevoegd', eventId);
-  };
-  window.__evAttTagRemove = (attId, eventId) => {
-    const tag = window.prompt('Tag om te verwijderen?');
-    if (!tag) return;
-    _post('/api/events-attendee-tag-remove', { attendee_id: attId, tag_slug: tag.trim() }, 'Tag verwijderd', eventId);
-  };
   window.__evAttDelete = async (attId, eventId) => {
     const vraag = 'Deze aanmelding definitief verwijderen? Dit is permanent en verwijdert ook eventuele vragenlijst-antwoorden.';
     const ok = (typeof window.dfoConfirm === 'function')
