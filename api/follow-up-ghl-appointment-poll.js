@@ -217,12 +217,9 @@ export default async function handler(req, res) {
       // (Geen user-filter meer — we pollen alle agenda's.)
 
       // Check of dit appointment al bestaat met een handmatig gemuteerde status
-      // TIJDELIJK — extra kolommen `lead_name, scheduled_at, updated_at` in de
-      // select voor de diagnose-logregel hieronder. Verwijderen zodra de
-      // "handmatig gemuteerd"-guard-diagnose klaar is.
       const { data: existing } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, status, zoom_meeting_id, zoom_join_url, ghl_calendar_id, lead_name, scheduled_at, updated_at')
+        .select('id, status, zoom_meeting_id, zoom_join_url, ghl_calendar_id')
         .eq('ghl_appointment_id', event.id)
         .maybeSingle();
 
@@ -238,29 +235,7 @@ export default async function handler(req, res) {
       const wasVerplaatst = existing?.status === 'verplaatst';
 
       if (existing && manualStatuses.includes(existing.status)) {
-        // TIJDELIJK — verwijderen zodra de "handmatig gemuteerd"-guard-diagnose
-        // klaar is (2026-09-09). De guard hierboven is een pure hardcoded
-        // whitelist over `existing.status`; er is GEEN manual_override kolom,
-        // GEEN status_source veld, GEEN updated_at vs ghl_synced vergelijking.
-        // Elke rij die door de ghost-flip bug op wacht_op_reschedule /
-        // cancelled / no_show is beland wordt daardoor als "handmatig"
-        // behandeld en NIET automatisch teruggezet — alleen de reverse-heal
-        // fase kan die rijen nog herstellen. Deze log toont per getroffen rij
-        // of het GHL-event momenteel actief is, zodat we in Vercel logs
-        // kunnen zien hoeveel cat-B "actief in GHL" rijen door deze guard
-        // vastgehouden worden.
-        const GHL_ACTIVE_STATUSES_DIAG = new Set(['confirmed', 'booked', 'scheduled', 'showed']);
-        const ghlStatusRaw = String(event.appointmentStatus || '').toLowerCase();
-        const isGhlActive  = GHL_ACTIVE_STATUSES_DIAG.has(ghlStatusRaw);
-        console.log('[follow-up-ghl-poll] status behouden (handmatig gemuteerd):',
-          'db_id:', existing.id,
-          '| naam:', existing.lead_name || event.title || event.contactName || '?',
-          '| db_status:', existing.status,
-          '| scheduled_at:', existing.scheduled_at,
-          '| updated_at:', existing.updated_at,
-          '| ghl_status_raw:', ghlStatusRaw || '(leeg)',
-          '| ghl_active:', isGhlActive ? 'JA' : 'nee',
-          '| ghl_appt_id:', event.id);
+        console.log('[follow-up-ghl-poll] status behouden (handmatig gemuteerd):', event.id, existing.status);
       }
 
       // Email/phone: GHL calendar events bevatten niet altijd deze velden.
@@ -521,38 +496,32 @@ export default async function handler(req, res) {
       console.log(`[follow-up-ghl-poll] ${resolvedCount} wacht_op_reschedule auto-resolved`);
     }
 
-    // ── REVERSE HEAL — TIJDELIJKE opruim-pass voor flip-bug collateral ─────
+    // ── REVERSE HEAL — divergentie-vangnet (permanent) ──────────────────────
     //
-    // BELANGRIJK: de manualStatuses-guard in de main-sync-loop blijft
-    // ONGEWIJZIGD. GHL wordt NIET leidend. Deze pass is puur eenmalig
-    // opruimen van rijen die door de flip-bug (PR B #1531 → 422 → poll
-    // ghost-flip → auto-resolve cascade) verkeerd op cancelled of
-    // wacht_op_reschedule zijn beland.
-    //
-    // Bron-set:
-    //   * wacht_op_reschedule → altijd herstellen als GHL-event actief is.
-    //   * cancelled           → altijd herstellen als GHL-event actief is.
-    //   * no_show             → NIET herstellen (setter-eigen; blijft van
-    //                            de appointment-setter zelf).
+    // Zet rijen die op 'wacht_op_reschedule' of 'cancelled' staan terug naar
+    // 'scheduled' / 'completed' zodra het GHL-event weer actief is
+    // (confirmed / booked / scheduled / showed). De manualStatuses-guard in
+    // de main-sync-loop blijft ongewijzigd — GHL wordt NIET leidend. Deze
+    // pass raakt alleen divergentie: als een gebruiker een call ECHT
+    // annuleert in het CRM propageert dat via api/follow-up-annuleer.js of
+    // api/leadsonderhoud-opstartsessie-annuleer.js naar GHL → GHL zegt dan
+    // ook 'cancelled' → deze heal ziet 'em niet als actief → laat 'em met
+    // rust. Alleen als DB en GHL uiteenlopen (poll-bug, race, GHL-side
+    // reactivate) haalt deze pass de status weer in lijn.
     //
     // Doel-status via mapGhlStatus (spiegelt de main-sync-loop):
-    //   confirmed / booked / scheduled → scheduled
-    //   showed                          → completed
+    //   confirmed / booked / scheduled → 'scheduled'
+    //   showed                          → 'completed'
     //   GHL cancelled / noshow / invalid → NIET herstellen.
     //
-    // Gates die intact blijven:
+    // no_show is bewust weggelaten uit de bron-set (setter-eigen, blijft
+    // handmatig).
+    //
+    // Gates:
     //   * completeCalendarIds (per-calendar safety-gate)
     //   * scheduled_at IN [fetchStartISO, fetchEndISO] (window-gate)
     //   * event moet in de huidige GHL-fetch zitten (evt lookup)
     //   * race-guard .eq('status', row.status) op de UPDATE
-    //
-    // TIJDELIJK — verwijderen zodra:
-    //   1. de collateral verifieerbaar weg is (recon-endpoint → 0
-    //      cat-B rijen met actief GHL-event), én
-    //   2. CRM→GHL annuleren-stap er is (dan is de gebruikers-cancel
-    //      idempotent aan beide kanten en heeft deze auto-heal geen
-    //      opruimtaak meer).
-    // Dan gaat dit HELE reverse-heal-blok eruit in één opruim-PR.
     const GHL_ACTIVE_STATUSES = new Set(['confirmed', 'booked', 'scheduled', 'showed']);
 
     let reverseHealedGhosts    = 0;   // uit bron wacht_op_reschedule
@@ -565,9 +534,6 @@ export default async function handler(req, res) {
     } else {
       const eventsByGhlId = new Map(events.map(e => [e.id, e]));
 
-      // Kandidaat-rijen: wacht_op_reschedule + cancelled (no_show bewust weg).
-      // Geen updated_at-datumgate meer — de bug-window was te smal en liet
-      // pre-2026-09-08 collateral (auto-resolve-slachtoffers Sep 4-8) hangen.
       const { data: sourceRows } = await supabaseAdmin
         .from('follow_up_appointments')
         .select('id, ghl_appointment_id, ghl_calendar_id, lead_name, scheduled_at, status, updated_at')
@@ -609,15 +575,10 @@ export default async function handler(req, res) {
             from_status: row.status,
             to_status: target,
             ghl_status: ghlStatus,
-            reason: 'TIJDELIJKE opruim-pass flip-bug collateral — GHL-event weer actief',
+            reason: 'GHL-event actief terwijl DB verborgen was — divergentie-heal',
           },
           processed: true,
         });
-
-        // Per-rij logging (Vercel-log tuning): id + naam + oude → nieuwe status.
-        console.log('[follow-up-ghl-poll] reverse-heal:',
-          row.id, '|', row.lead_name, '|', row.status, '->', target,
-          '(ghl:', ghlStatus + ')');
 
         if (row.status === 'wacht_op_reschedule')  reverseHealedGhosts++;
         else if (row.status === 'cancelled')       reverseHealedCancelled++;
@@ -625,12 +586,11 @@ export default async function handler(req, res) {
 
       const totalHealed = reverseHealedGhosts + reverseHealedCancelled;
       if (totalHealed > 0) {
-        console.log('[follow-up-ghl-poll] REVERSE HEAL totaal:', totalHealed,
+        console.log('[follow-up-ghl-poll] REVERSE HEAL:', totalHealed,
           '(wacht_op_reschedule:', reverseHealedGhosts,
           '| cancelled:', reverseHealedCancelled + ')');
       }
     }
-    // ── EINDE REVERSE HEAL — TIJDELIJKE opruim-pass ─────────────────────────
 
     const ok     = results.filter(r => r.ok).length;
     const failed = results.filter(r => !r.ok && !r.skipped).length;
