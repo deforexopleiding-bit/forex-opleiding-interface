@@ -175,15 +175,26 @@ async function lees(req, res, supabase) {
   try {
     const vanMs = zoneMiddernachtMs(van);
     const totMs = zoneMiddernachtMs(tot) + 24 * 3600 * 1000;
-    const { data, error } = await supabase
+    const KOLOMMEN = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url';
+    const haal = (kolommen) => supabase
       .from('follow_up_appointments')
       // lead_phone / lead_email / zoom_join_url zijn fase 3a: het blok
       // 'Calls van vandaag' hangt aan dezelfde bezette momenten en heeft de
       // Zoom-link en het nummer nodig. Extra kolommen, geen ander filter.
-      .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url')
+      .select(kolommen)
       .gte('scheduled_at', new Date(vanMs).toISOString())
       .lt('scheduled_at', new Date(totMs).toISOString())
       .order('scheduled_at', { ascending: true });
+
+    // `uitkomst` vertelt of Dave deze call al heeft afgerond; zie
+    // _lib/opvolging-call-afgerond.js. De kolom komt uit de migratie van
+    // 6 september en hoeft er niet te zijn: een select die hem noemt faalt dan
+    // met 42703 en neemt de HELE query mee. Dus één keer mét, en bij precies
+    // die fout één keer zonder — dan gedraagt het blok zich als voorheen.
+    let { data, error } = await haal(KOLOMMEN + ', uitkomst, uitkomst_op');
+    if (error && error.code === '42703' && /\buitkomst\b/.test(error.message || '')) {
+      ({ data, error } = await haal(KOLOMMEN));
+    }
     if (error) throw error;
     afspraken = data || [];
   } catch (e) {
