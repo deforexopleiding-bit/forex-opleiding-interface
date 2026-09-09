@@ -172,34 +172,75 @@ async function lees(req, res, supabase) {
   // (een slot dat GHL zelf al kent) is klein.
   let afspraken = [];
   let bezetMelding = null;
+  let ontbrekend = [];
   try {
-    const vanMs = zoneMiddernachtMs(van);
-    const totMs = zoneMiddernachtMs(tot) + 24 * 3600 * 1000;
-    const KOLOMMEN = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url';
-    const haal = (kolommen) => supabase
-      .from('follow_up_appointments')
-      // lead_phone / lead_email / zoom_join_url zijn fase 3a: het blok
-      // 'Calls van vandaag' hangt aan dezelfde bezette momenten en heeft de
-      // Zoom-link en het nummer nodig. Extra kolommen, geen ander filter.
-      .select(kolommen)
-      .gte('scheduled_at', new Date(vanMs).toISOString())
-      .lt('scheduled_at', new Date(totMs).toISOString())
-      .order('scheduled_at', { ascending: true });
+    const vanIso = new Date(zoneMiddernachtMs(van)).toISOString();
+    const totIso = new Date(zoneMiddernachtMs(tot) + 24 * 3600 * 1000).toISOString();
 
-    // `uitkomst` vertelt of Dave deze call al heeft afgerond; zie
-    // _lib/opvolging-call-afgerond.js. De kolom komt uit de migratie van
-    // 6 september en hoeft er niet te zijn: een select die hem noemt faalt dan
-    // met 42703 en neemt de HELE query mee. Dus één keer mét, en bij precies
-    // die fout één keer zonder — dan gedraagt het blok zich als voorheen.
-    let { data, error } = await haal(KOLOMMEN + ', uitkomst, uitkomst_op');
-    if (error && error.code === '42703' && /\buitkomst\b/.test(error.message || '')) {
-      ({ data, error } = await haal(KOLOMMEN));
+    // lead_phone / lead_email / zoom_join_url zijn fase 3a: het blok 'Calls van
+    // vandaag' hangt aan dezelfde momenten en heeft de Zoom-link en het nummer
+    // nodig.
+    const VAST = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url';
+
+    // ── DRIE KOLOMMEN DIE ER NIET HOEVEN TE ZIJN ─────────────────────────
+    // Elk uit een eigen migratie, en elk in een eigen tempo gedraaid. Een
+    // select die een ontbrekende kolom noemt faalt met 42703 en neemt de HÉLE
+    // query mee — dus niet één kolom weg, maar het complete dagbeeld.
+    //
+    // 42703 zegt WEL dat een kolom ontbreekt en NIET welke. Daarom matchen we
+    // op de kolomnaam in de foutmelding: zonder dat zou het ontbreken van
+    // `uitkomst` ook `eerst_gepland_op` uitzetten, en dan verdwijnen de
+    // verzette afspraken om een reden die er niets mee te maken heeft.
+    const OPTIONEEL = ['uitkomst', 'uitkomst_op', 'eerst_gepland_op', 'is_test'];
+    let beschikbaar = [...OPTIONEEL];
+    let data = null;
+    let error = null;
+
+    // Hooguit zo vaak als er optionele kolommen zijn: elke ronde valt er
+    // minstens één af, anders stoppen we.
+    for (let poging = 0; poging <= OPTIONEEL.length; poging += 1) {
+      const heeftEerst = beschikbaar.includes('eerst_gepland_op');
+      let q = supabase
+        .from('follow_up_appointments')
+        .select([VAST, ...beschikbaar].join(', '));
+
+      // OOK WAT VAN DEZE DAG WEG IS VERPLAATST. Een afspraak die in dezelfde
+      // rij naar een andere dag is gezet heeft een scheduled_at buiten dit
+      // venster, maar stond wél op deze dag. Zonder de tweede voorwaarde
+      // verdwijnt hij stil uit het dagbeeld — precies het gat dat dicht moet.
+      q = heeftEerst
+        ? q.or(`and(scheduled_at.gte.${vanIso},scheduled_at.lt.${totIso}),`
+             + `and(eerst_gepland_op.gte.${vanIso},eerst_gepland_op.lt.${totIso})`)
+        : q.gte('scheduled_at', vanIso).lt('scheduled_at', totIso);
+
+      ({ data, error } = await q.order('scheduled_at', { ascending: true }));
+      if (!error) break;
+      if (error.code !== '42703') break;
+
+      const weg = beschikbaar.filter((k) => new RegExp('\\b' + k + '\\b').test(error.message || ''));
+      if (weg.length === 0) break;              // 42703 om een andere kolom: niet blijven proberen.
+      beschikbaar = beschikbaar.filter((k) => !weg.includes(k));
     }
+
     if (error) throw error;
     afspraken = data || [];
+    ontbrekend = OPTIONEEL.filter((k) => !beschikbaar.includes(k));
   } catch (e) {
     console.warn('[opvolging-agenda] afspraken lezen faalde:', e?.message || e);
     bezetMelding = 'De geboekte afspraken konden niet geladen worden; vrije momenten kloppen mogelijk niet helemaal.';
+  }
+
+  // Zeggen wat er ontbreekt in plaats van doen alsof het dagbeeld klopt. Een
+  // onvolledig beeld dat zich voordoet als volledig is precies waar we deze
+  // week op zijn vastgelopen.
+  const dagbeeldMeldingen = [];
+  if (ontbrekend.includes('eerst_gepland_op')) {
+    dagbeeldMeldingen.push('De kolom eerst_gepland_op bestaat nog niet, dus afspraken die naar een andere dag '
+      + 'zijn verzet ontbreken in dit dagbeeld. Draai docs/sql-migrations/2026-09-08-eerst-gepland-op.sql.');
+  }
+  if (ontbrekend.includes('is_test')) {
+    dagbeeldMeldingen.push('De kolom is_test bestaat nog niet, dus proefafspraken staan hier gewoon tussen. '
+      + 'Draai docs/sql-migrations/2026-09-09-follow-up-appointments-is-test.sql.');
   }
 
   const dagen = voegAgendaSamen({ slots, afspraken, van, tot, timeZone: timezone });
@@ -210,6 +251,12 @@ async function lees(req, res, supabase) {
     window: { van, tot },
     dagen,
     agenda_beschikbaar: !melding,
+    // TWEE MELDINGEN, TWEE VELDEN. Ze stonden in één `melding`, en dan
+    // verdwijnt een mislukte lezing van de afspraken achter een GHL-storing —
+    // precies op het moment dat je wilt weten waarom het dagbeeld leeg is.
+    afspraken_melding: bezetMelding,
+    dagbeeld_volledig: dagbeeldMeldingen.length === 0,
+    dagbeeld_melding : dagbeeldMeldingen.join(' ') || null,
     melding: melding || bezetMelding || (vrijTotaal === 0 ? 'Geen vrije momenten in deze week.' : null),
   });
 }
