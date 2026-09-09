@@ -116,9 +116,11 @@ export const ONBEKEND       = 'onbekend';
  * als 'geweest' boeken zou een dagbeeld opleveren dat niet klopt. Zelfde regel
  * als callStaat in het rapport.
  */
-export function toonStaat(a, nuMs = Date.now()) {
+export function toonStaat(a, nuMs = Date.now(), { negeerVerplaatsing = false } = {}) {
   const status = String((a && a.status) || 'scheduled').toLowerCase();
-  const naar   = verzetNaar(a);
+  // Op de NIEUWE dag is de verplaatsing geen bijzonderheid meer: daar staat hij
+  // gewoon. Alleen zijn eigen status telt dan nog.
+  const naar   = negeerVerplaatsing ? null : verzetNaar(a);
 
   if (status === 'verplaatst' || status === 'wacht_op_reschedule' || naar) {
     return {
@@ -141,6 +143,43 @@ export function toonStaat(a, nuMs = Date.now()) {
     return { staat: ACTIEF_STAAT, doorgehaald: false, label: null };
   }
   return { staat: ONBEKEND, doorgehaald: true, label: 'status onbekend (' + status + ')' };
+}
+
+/**
+ * De statussen waarbij de rij op zijn NIEUWE dag nog iets voorstelt.
+ *
+ * Een afspraak die van 1 naar 8 september is verplaatst vindt op de 8e echt
+ * plaats, en hoort daar dus ook te staan — anders verdwijnt hij van de dag
+ * waarop hij gebeurt, en dat is precies het gat dat dit bestand moet dichten,
+ * alleen de andere kant op.
+ *
+ * `verplaatst`, `wacht_op_reschedule`, `cancelled` en `verwijderd` niet: die
+ * rij gaat nergens meer door, dus die hoort ook op geen tweede dag te staan.
+ */
+const LEEFT_OP_NIEUWE_DAG = new Set(['scheduled', 'in_progress', 'completed', 'no_show', 'noshow']);
+
+/**
+ * Op welke dag of dagen hoort deze afspraak te staan?
+ *
+ * Meestal één. Twee als de rij zelf naar een andere dag is verplaatst: op de
+ * oude dag als 'verzet naar …', op de nieuwe dag als de afspraak zelf. Dat is
+ * geen dubbeling maar twee verschillende feiten — wat er die dag stond, en wat
+ * er die dag staat.
+ */
+export function dagenVoorAfspraak(a, nuMs = Date.now()) {
+  const oud = oorspronkelijkeDag(a);
+  const nu  = a ? (dagEnTijd(a.scheduled_at) || {}).dag : null;
+  const uit = [];
+  if (oud) uit.push({ dag: oud, tijd: oorspronkelijkeTijd(a), toon: toonStaat(a, nuMs) });
+  if (nu && nu !== oud && LEEFT_OP_NIEUWE_DAG.has(String((a && a.status) || '').toLowerCase())) {
+    uit.push({
+      dag : nu,
+      tijd: (dagEnTijd(a.scheduled_at) || {}).tijd,
+      toon: toonStaat(a, nuMs, { negeerVerplaatsing: true }),
+      verzet_van: oud,
+    });
+  }
+  return uit;
 }
 
 const MAANDEN = ['januari', 'februari', 'maart', 'april', 'mei', 'juni',

@@ -17,7 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  oorspronkelijkeDag, oorspronkelijkeTijd, verzetNaar, toonStaat, nlDatum,
+  oorspronkelijkeDag, oorspronkelijkeTijd, verzetNaar, toonStaat, nlDatum, dagenVoorAfspraak,
   ACTIEF_STAAT, VERZET, GEANNULEERD, NIET_GEKOMEN, GEWEEST, ONBEKEND,
 } from '../api/_lib/opvolging-dagbeeld.js';
 import { voegAgendaSamen } from '../api/_lib/opvolging-agenda-merge.js';
@@ -219,4 +219,70 @@ test('MET de kolom komt precies die ene terug', () => {
   });
   assert.equal(dag.gepland.length, 1);
   assert.match(dag.gepland[0].label, /verzet naar 15 september/);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EEN AFSPRAAK DIE NAAR EEN DAG TOE IS VERPLAATST
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// De andere kant van hetzelfde gat, gevonden nadat de migratie gedraaid was.
+// De eerste versie zette een verplaatste afspraak alléén op zijn oorspronkelijke
+// dag — en dan verdwijnt hij van de dag waarop hij ECHT plaatsvindt. Dat is
+// dezelfde fout, alleen in de andere richting.
+//
+// Twee dagen dus, en dat is geen dubbeling maar twee verschillende feiten:
+// wat er die dag STOND, en wat er die dag STAAT.
+
+const INGESCHOVEN = {
+  id: 'x', lead_name: 'Ingeschoven', status: 'scheduled',
+  scheduled_at: '2026-09-08T13:00:00Z', eerst_gepland_op: '2026-09-01T13:00:00Z',
+};
+
+test('een verplaatste afspraak staat op BEIDE dagen', () => {
+  const plekken = dagenVoorAfspraak(INGESCHOVEN, NU);
+  assert.deepEqual(plekken.map((p) => p.dag), ['2026-09-01', '2026-09-08']);
+});
+
+test('op de oude dag als verzet, op de nieuwe dag gewoon als afspraak', () => {
+  const [oud, nieuw] = dagenVoorAfspraak(INGESCHOVEN, NU);
+  assert.equal(oud.toon.staat, VERZET);
+  assert.match(oud.toon.label, /verzet naar 8 september/);
+  assert.equal(nieuw.toon.staat, ACTIEF_STAAT, 'op de dag zelf is de verplaatsing geen bijzonderheid meer');
+  assert.equal(nieuw.toon.doorgehaald, false);
+  assert.equal(nieuw.verzet_van, '2026-09-01');
+});
+
+test('en in de agenda komt hij op allebei die dagen terug', () => {
+  const nu = NU;
+  const [een]  = voegAgendaSamen({ slots: [], afspraken: [INGESCHOVEN], van: '2026-09-01', tot: '2026-09-01', nuMs: nu });
+  const [acht] = voegAgendaSamen({ slots: [], afspraken: [INGESCHOVEN], van: '2026-09-08', tot: '2026-09-08', nuMs: nu });
+  assert.equal(een.gepland.length, 1);
+  assert.equal(een.gepland[0].doorgehaald, true);
+  assert.equal(acht.gepland.length, 1, 'hij verdween van de dag waarop hij plaatsvindt');
+  assert.equal(acht.gepland[0].doorgehaald, false);
+  assert.equal(acht.gepland[0].verzet_van, '2026-09-01');
+});
+
+test('een DODE rij krijgt geen tweede dag', () => {
+  // Een geannuleerde of als verplaatst gemarkeerde rij gaat nergens meer door;
+  // die twee keer tonen zou twee doorgehaalde regels voor niets opleveren.
+  for (const status of ['cancelled', 'verplaatst', 'wacht_op_reschedule', 'verwijderd']) {
+    const plekken = dagenVoorAfspraak({ ...INGESCHOVEN, status }, NU);
+    assert.equal(plekken.length, 1, status + ' hoort maar op een dag te staan');
+    assert.equal(plekken[0].dag, '2026-09-01');
+  }
+});
+
+test('een afgeronde call die verplaatst was telt op zijn nieuwe dag als geweest', () => {
+  const [, nieuw] = dagenVoorAfspraak({ ...INGESCHOVEN, status: 'completed' }, NU);
+  assert.equal(nieuw.toon.staat, GEWEEST);
+  assert.equal(nieuw.toon.doorgehaald, false);
+});
+
+test('een afspraak die niet verplaatst is levert precies een dag op', () => {
+  const plekken = dagenVoorAfspraak({
+    id: 'g', lead_name: 'Gewoon', status: 'scheduled',
+    scheduled_at: '2026-09-08T13:00:00Z', eerst_gepland_op: '2026-09-08T13:00:00Z',
+  }, NU);
+  assert.equal(plekken.length, 1);
 });

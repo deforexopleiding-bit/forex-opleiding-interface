@@ -477,6 +477,26 @@ De agenda geeft per dag nu `bezet` **en** `gepland`, en dat is met opzet:
 Twee vragen, twee antwoorden. Ze bij elkaar trekken is de fout die zich pas
 maanden later meldt.
 
+### Twee dagen, en dat is geen dubbeling
+
+Gevonden nadat de migratie gedraaid was, en het is dezelfde fout in de andere
+richting: de eerste versie zette een verplaatste afspraak **alleen** op zijn
+oorspronkelijke dag. Daarmee verdween hij van de dag waarop hij écht
+plaatsvindt.
+
+Een afspraak die van 1 naar 8 september is verplaatst hoort op allebei te
+staan:
+
+| dag | wat je ziet |
+|---|---|
+| 1 september | grijs, doorgehaald: *verzet naar 8 september om 15:00* |
+| 8 september | gewoon, actief — daar is de verplaatsing geen bijzonderheid meer |
+
+Dat zijn twee verschillende feiten: wat er die dag **stond**, en wat er die dag
+**staat**. Een rij die nergens meer doorgaat (`cancelled`, `verplaatst`,
+`wacht_op_reschedule`, `verwijderd`) krijgt géén tweede dag — die twee keer
+doorgehaald tonen zou twee lege regels opleveren.
+
 ### Wat er wél en niet kan zonder de migratie
 
 De kolom is op 9 september nog niet gedraaid. De grens is scherp, en hij ligt

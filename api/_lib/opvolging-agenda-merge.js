@@ -15,9 +15,7 @@
 //
 // Pure functie, geen netwerk, geen database — zie tests/opvolging-agenda-merge.test.js.
 
-import {
-  oorspronkelijkeDag, oorspronkelijkeTijd, verzetNaar, toonStaat,
-} from './opvolging-dagbeeld.js';
+import { verzetNaar, dagenVoorAfspraak } from './opvolging-dagbeeld.js';
 
 /** Statussen die een moment daadwerkelijk bezet houden. */
 const BEZET_STATUSSEN = new Set(['scheduled', 'in_progress']);
@@ -123,24 +121,27 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
   const geplandPerDag = new Map();
   for (const a of (Array.isArray(afspraken) ? afspraken : [])) {
     if (!a || !a.scheduled_at) continue;
-    const dag = oorspronkelijkeDag(a);
-    if (!dag || !inVenster.has(dag)) continue;
-    const toon = toonStaat(a, nuMs);
-    if (!geplandPerDag.has(dag)) geplandPerDag.set(dag, []);
-    geplandPerDag.get(dag).push({
-      tijd          : oorspronkelijkeTijd(a),
-      naam          : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
-      status        : String(a.status || 'scheduled').toLowerCase(),
-      staat         : toon.staat,
-      label         : toon.label,
-      doorgehaald   : toon.doorgehaald,
-      verzet_naar   : verzetNaar(a),
-      appointment_id: a.id || null,
-      telefoon      : a.lead_phone || null,
-      email         : a.lead_email || null,
-      zoom_url      : a.zoom_join_url || null,
-      start         : a.scheduled_at || null,
-    });
+    // Kan er twee opleveren: de oude dag ('verzet naar …') en de nieuwe dag,
+    // waar de afspraak echt plaatsvindt. Zie dagenVoorAfspraak.
+    for (const plek of dagenVoorAfspraak(a, nuMs)) {
+      if (!plek.dag || !inVenster.has(plek.dag)) continue;
+      if (!geplandPerDag.has(plek.dag)) geplandPerDag.set(plek.dag, []);
+      geplandPerDag.get(plek.dag).push({
+        tijd          : plek.tijd,
+        naam          : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+        status        : String(a.status || 'scheduled').toLowerCase(),
+        staat         : plek.toon.staat,
+        label         : plek.toon.label,
+        doorgehaald   : plek.toon.doorgehaald,
+        verzet_naar   : plek.verzet_van ? null : verzetNaar(a),
+        verzet_van    : plek.verzet_van || null,
+        appointment_id: a.id || null,
+        telefoon      : a.lead_phone || null,
+        email         : a.lead_email || null,
+        zoom_url      : a.zoom_join_url || null,
+        start         : a.scheduled_at || null,
+      });
+    }
   }
 
   // ── Bezet eerst: dat bepaalt wat er van vrij overblijft. ──────────────────
