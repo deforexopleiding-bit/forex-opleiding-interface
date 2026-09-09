@@ -157,6 +157,87 @@ async function buildReport() {
     }
   }
 
+  // ── Herstel-SQL: verborgen in CRM maar actief in GHL ─────────────────────
+  // Spiegelt de mapGhlStatus() uit follow-up-ghl-appointment-poll.js:
+  //   confirmed / booked / scheduled → 'scheduled'
+  //   showed                         → 'completed'
+  // Alleen rijen die momenteel in een verborgen status staan
+  // (cancelled / no_show / wacht_op_reschedule) én waarvan het GHL-event
+  // nog in ACTIEVE staat te zien is, komen in aanmerking. 'verwijderd'
+  // valt bewust buiten scope — dat is een expliciete UI-actie.
+  const HIDDEN_RESTORABLE = new Set(['cancelled', 'no_show', 'wacht_op_reschedule']);
+  const GHL_TO_TARGET = { confirmed: 'scheduled', booked: 'scheduled', scheduled: 'scheduled', showed: 'completed' };
+  const herstelCandidates = [];
+  for (const b of catB) {
+    if (!HIDDEN_RESTORABLE.has(b.db_status)) continue;
+    if (!b.still_in_ghl) continue;
+    const ghlStatus = String(b.ghl_status_now || '').toLowerCase();
+    const target = GHL_TO_TARGET[ghlStatus];
+    if (!target) continue;                        // onbekende GHL-status → skip
+    if (target === b.db_status) continue;         // niets te wijzigen
+    herstelCandidates.push({
+      db_id: b.db_id,
+      lead_name: b.name,
+      scheduled_at: b.db_start,
+      current_status: b.db_status,
+      target_status: target,
+      ghl_appointment_id: b.ghl_id,
+      ghl_status_now: ghlStatus,
+    });
+  }
+
+  // SQL-safe string escape: single-quote doubling. GHL-ids zijn in de
+  // praktijk alfanumeriek maar we escapen defensief zodat een rare id
+  // nooit uit een string kan breken.
+  const sq = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  const ids = herstelCandidates.map(r => r.ghl_appointment_id);
+
+  const sqlPreview = herstelCandidates.length === 0
+    ? '-- Geen kandidaten — niks te herstellen op basis van huidige GHL-status.\n'
+    :
+`-- BLOK 1 — PREVIEW (SELECT, verandert niks).
+-- Toont exact welke DB-rijen naar welke doelstatus zouden gaan.
+SELECT
+  a.id,
+  a.lead_name,
+  a.scheduled_at,
+  a.status AS huidige_status,
+  v.doelstatus,
+  a.ghl_appointment_id
+FROM public.follow_up_appointments AS a
+JOIN (VALUES
+${herstelCandidates.map(r => `  (${sq(r.ghl_appointment_id)}::text, ${sq(r.target_status)}::text)`).join(',\n')}
+) AS v(ghl_appointment_id, doelstatus)
+  ON a.ghl_appointment_id = v.ghl_appointment_id
+WHERE a.status IN ('cancelled','no_show','wacht_op_reschedule')
+ORDER BY a.scheduled_at;
+`;
+
+  const sqlRestore = herstelCandidates.length === 0
+    ? '-- Geen kandidaten — geen UPDATE nodig.\n'
+    :
+`-- BLOK 2 — RESTORE (UPDATE, pas draaien NA akkoord op preview).
+-- Zelfde CASE-doelstatus per ghl_appointment_id. WHERE ook op status
+-- IN (verborgen) zodat een rij die inmiddels alweer 'scheduled' staat
+-- niet opnieuw geraakt wordt (idempotent, race-veilig).
+BEGIN;
+
+UPDATE public.follow_up_appointments AS a
+   SET status     = v.doelstatus,
+       updated_at = now()
+  FROM (VALUES
+${herstelCandidates.map(r => `    (${sq(r.ghl_appointment_id)}::text, ${sq(r.target_status)}::text)`).join(',\n')}
+  ) AS v(ghl_appointment_id, doelstatus)
+ WHERE a.ghl_appointment_id = v.ghl_appointment_id
+   AND a.status IN ('cancelled','no_show','wacht_op_reschedule')
+RETURNING a.id, a.lead_name, a.scheduled_at, a.status;
+
+-- Verifieer aantal RETURNED matches met het preview-aantal.
+-- Klopt: COMMIT;   Wijkt af: ROLLBACK;
+-- COMMIT;
+-- ROLLBACK;
+`;
+
   // Status-verdeling DB
   const statusCount = {};
   for (const r of (dbRows || [])) statusCount[r.status] = (statusCount[r.status] || 0) + 1;
@@ -191,6 +272,12 @@ async function buildReport() {
     cat_b: catB,
     cat_c: catC,
     cat_d: catD,
+    herstel: {
+      count: herstelCandidates.length,
+      candidates: herstelCandidates,
+      sql_preview: sqlPreview,
+      sql_restore: sqlRestore,
+    },
   };
 }
 
@@ -224,6 +311,10 @@ function htmlShell() {
   .flag-no  { color: #b91c1c; font-weight: 600; }
   .err { padding: 16px; background: #fee2e2; border: 1px solid #fca5a5; border-radius: 6px; color: #7f1d1d; }
   .loading { padding: 40px; text-align: center; color: #6b7280; }
+  .sql-box { position: relative; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 14px 16px 14px 16px; font: 12px/1.5 "SF Mono","Menlo","Consolas",monospace; white-space: pre; overflow-x: auto; margin: 8px 0 20px; }
+  .sql-box .copy { position: absolute; top: 8px; right: 8px; background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 4px; padding: 4px 10px; font: 11px/1.2 -apple-system,sans-serif; cursor: pointer; }
+  .sql-box .copy:hover { background: #334155; color: #f1f5f9; }
+  .hint { color: #6b7280; font-size: 12px; margin: 4px 0 10px; }
 </style>
 </head>
 <body>
@@ -348,7 +439,46 @@ function htmlShell() {
     '<h2>D — Kalenders met events maar NIET gepolld · ' + t.cat_d_not_polled_with_events + ' totaal, eerste 20</h2>' +
     '<table><thead><tr><th>naam</th><th>id</th><th>isActive</th><th>events sep</th></tr></thead><tbody>' + catD_rows + '</tbody></table>';
 
-  document.getElementById('content').innerHTML = html;
+  // ── Herstel-SQL sectie ────────────────────────────────────────────────
+  const herstel = data.herstel || { count: 0, candidates: [], sql_preview: '', sql_restore: '' };
+  const herstelRows = capped(herstel.candidates || [], 20).map(r =>
+    '<tr>' +
+      '<td>' + esc(r.lead_name || '—') + '</td>' +
+      '<td>' + fmt(r.scheduled_at) + '</td>' +
+      '<td><code>' + esc(r.current_status) + '</code></td>' +
+      '<td>→ <code>' + esc(r.target_status) + '</code></td>' +
+      '<td><code>' + esc(r.ghl_status_now) + '</code></td>' +
+      '<td><code>' + shortId(r.ghl_appointment_id) + '</code></td>' +
+    '</tr>'
+  ).join('') || '<tr><td colspan="6" class="empty">geen</td></tr>';
+
+  const herstelHtml =
+    '<h2>Herstel-SQL — verborgen in CRM maar actief in GHL · ' + herstel.count + ' kandidaten</h2>' +
+    '<div class="hint">Regels die momenteel in <code>cancelled</code> / <code>no_show</code> / <code>wacht_op_reschedule</code> staan, terwijl het GHL-event nog een actieve status heeft (<code>confirmed</code> / <code>booked</code> / <code>scheduled</code> / <code>showed</code>). Doelstatus is bepaald via dezelfde <code>mapGhlStatus()</code> die de poll gebruikt.</div>' +
+    '<table><thead><tr><th>naam</th><th>DB start</th><th>huidige status</th><th>doelstatus</th><th>GHL status nu</th><th>ghl_id</th></tr></thead><tbody>' + herstelRows + '</tbody></table>' +
+    '<h2>BLOK 1 — PREVIEW (SELECT)</h2>' +
+    '<div class="hint">Read-only. Draai dit in de Supabase SQL-editor om exact te zien welke rijen naar welke doelstatus zouden gaan.</div>' +
+    '<div class="sql-box"><button class="copy" data-target="sql-preview">Kopieer</button><span id="sql-preview">' + esc(herstel.sql_preview || '') + '</span></div>' +
+    '<h2>BLOK 2 — RESTORE (UPDATE, pas draaien NA akkoord op preview)</h2>' +
+    '<div class="hint">Zit in <code>BEGIN;</code> — <code>COMMIT;</code> pas als het RETURNING-aantal klopt met preview, anders <code>ROLLBACK;</code>. Zelfde WHERE-guard (status in verborgen set) maakt \'t idempotent.</div>' +
+    '<div class="sql-box"><button class="copy" data-target="sql-restore">Kopieer</button><span id="sql-restore">' + esc(herstel.sql_restore || '') + '</span></div>';
+
+  document.getElementById('content').innerHTML = html + herstelHtml;
+
+  // Kopieer-knop delegatie
+  document.querySelectorAll('.sql-box .copy').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const tgt = document.getElementById(btn.getAttribute('data-target'));
+      if (!tgt) return;
+      try {
+        await navigator.clipboard.writeText(tgt.textContent);
+        const orig = btn.textContent; btn.textContent = 'Gekopieerd ✓';
+        setTimeout(() => { btn.textContent = orig; }, 1400);
+      } catch (e) {
+        btn.textContent = 'Kopieer mislukt';
+      }
+    });
+  });
 })();
 </script>
 </body>
