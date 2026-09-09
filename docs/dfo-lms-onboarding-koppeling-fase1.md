@@ -729,9 +729,66 @@ waar dit hele spoor over gaat.
 
 `api/cron/onboarding-lms-backfill.js`.
 
+**Koppelen is iets anders dan aanmaken.** Nagemeten op 8 september: van de 22
+lopende onboardings zonder koppeling bestaan er **zestien al** als
+`hlms_student` — allemaal `herkomst='imported_from_bubble'`, allemaal met een
+auth-account. Die hoeven niet aangemaakt te worden, alleen vastgeknoopt. Vijf
+echte klanten hebben geen rij; de zesde zonder rij was de testonboarding.
+
+De twee acties doen verschillende dingen en zeggen dat ook verschillend in de
+uitkomst en in de log (`GEKOPPELD` versus `AANGEMAAKT`, met aparte tellers), want
+achteraf terug kunnen lezen wát er met een klant gebeurd is, is het halve werk.
+
+Bij **koppelen** wordt precies één kolom aangeraakt: `crm_onboarding_id`. Naam,
+traject en aantal calls van die zestien komen uit de Bubble-migratie en worden
+niet overschreven met CRM-waarden. Daarom loopt koppelen via
+`koppelBestaandeStudent()` en **niet** via de adoptie-tak van
+`provisionDfoLmsStudent()` — die vult namelijk ook `mentor_id` in als die leeg
+is, en dat is "iets anders".
+
+Die mentor-vraag is bewust niet zelf beantwoord: de droogloop meldt per
+koppel-rij `lms_mentor_leeg` en `crm_kent_mentor`, zodat een mens kan beslissen
+of dat erg is in plaats van dat een script het invult.
+
+**Testrijen doen niet mee.** `onboardings.is_test` én `customers.is_test`
+worden uitgesloten, en die check staat vóór alle andere besluiten. Dat is geen
+theorie: de eerste versie filterde er **niet** op, en de testonboarding op
+`maxim.delombaerde96+onbtest@gmail.com` stond gewoon tussen de kandidaten —
+terwijl we die LMS-rij diezelfde ochtend juist hadden opgeruimd. Zonder filter
+had de inhaalslag 'm meteen opnieuw aangemaakt. Drie tests bewaken dat nu.
+
+**Er is een knop, en die is wat we gebruiken.** De inhaalslag zat eerst alleen
+achter `CRON_SECRET`, en dat betekent dat iemand met een sleutel een commando
+moet typen. Zo werkt het hier niet: Maxim werkt met knoppen, en een geheim in
+een terminal is precies de plek waar het misgaat.
+
+De logica staat daarom in `api/_lib/onboarding-lms-backfill.js` met **twee dunne
+ingangen**: `api/onboarding-lms-backfill-run.js` (de knop, sessie +
+`students.all.view`) en `api/cron/onboarding-lms-backfill.js` (het geheim,
+blijft bestaan voor later). Eén implementatie; er is geen tweede versie die kan
+afwijken, en het post-bewijs rekent de afsluiting van **alle drie** uit.
+
+Het scherm: **Onboarding-hub → tabblad "LMS-koppeling"**
+(`/modules/onboarding-hub.html`). Twee knoppen, in deze volgorde: *Droogloop* en
+daarna pas *Uitvoeren*. Dat is niet alleen een uitgegrijsde knop — de server
+eist bij uitvoeren de twee getallen uit de droogloop en weigert met 409 als ze
+niet exact kloppen. Ook een handmatig samengesteld verzoek komt er dus niet
+langs.
+
+**De uitkomst is per klant.** Gekoppeld, aangemaakt, of de reden waarom het
+misging — niet een totaalgetal dat alleen telt wat gelukt is. Bij een
+koppel-rij zonder mentor in het LMS staat er bovendien een waarschuwing dat
+koppelen die niet invult.
+
+De rechtensleutel is `students.all.view`, dezelfde als het
+admin-studentenoverzicht: manager en super_admin. `onboarding.admin` zou ruimer
+zijn geweest (ook sales), en dat is voor een knop die twintig echte klanten
+raakt te ruim.
+
 **Droogloop is de standaard.** Zonder parameters doet hij niets. Uitvoeren
-vraagt `?uitvoeren=ja&aantal=<N>`, waarbij N exact het getal moet zijn dat de
-droogloop als `zou_aanmaken` gaf. Klopt dat niet: 409. Zo kan niemand dit per
+vraagt `?uitvoeren=ja&koppelen=<K>&aanmaken=<A>` — twee getallen, want twee
+acties met een verschillend risico, en allebei moeten ze exact overeenkomen met
+wat de droogloop gaf. Klopt er één niet: 409. Zo kan niemand dit per
 ongeluk aanzetten, en kan er niets veranderd zijn tussen kijken en doen.
 
 **Dubbele klanten.** Er is een klant die in beide systemen onder twee
