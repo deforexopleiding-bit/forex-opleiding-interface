@@ -217,9 +217,12 @@ export default async function handler(req, res) {
       // (Geen user-filter meer — we pollen alle agenda's.)
 
       // Check of dit appointment al bestaat met een handmatig gemuteerde status
+      // TIJDELIJK — extra kolommen `lead_name, scheduled_at, updated_at` in de
+      // select voor de diagnose-logregel hieronder. Verwijderen zodra de
+      // "handmatig gemuteerd"-guard-diagnose klaar is.
       const { data: existing } = await supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, status, zoom_meeting_id, zoom_join_url, ghl_calendar_id')
+        .select('id, status, zoom_meeting_id, zoom_join_url, ghl_calendar_id, lead_name, scheduled_at, updated_at')
         .eq('ghl_appointment_id', event.id)
         .maybeSingle();
 
@@ -235,7 +238,29 @@ export default async function handler(req, res) {
       const wasVerplaatst = existing?.status === 'verplaatst';
 
       if (existing && manualStatuses.includes(existing.status)) {
-        console.log('[follow-up-ghl-poll] status behouden (handmatig gemuteerd):', event.id, existing.status);
+        // TIJDELIJK — verwijderen zodra de "handmatig gemuteerd"-guard-diagnose
+        // klaar is (2026-09-09). De guard hierboven is een pure hardcoded
+        // whitelist over `existing.status`; er is GEEN manual_override kolom,
+        // GEEN status_source veld, GEEN updated_at vs ghl_synced vergelijking.
+        // Elke rij die door de ghost-flip bug op wacht_op_reschedule /
+        // cancelled / no_show is beland wordt daardoor als "handmatig"
+        // behandeld en NIET automatisch teruggezet — alleen de reverse-heal
+        // fase kan die rijen nog herstellen. Deze log toont per getroffen rij
+        // of het GHL-event momenteel actief is, zodat we in Vercel logs
+        // kunnen zien hoeveel cat-B "actief in GHL" rijen door deze guard
+        // vastgehouden worden.
+        const GHL_ACTIVE_STATUSES_DIAG = new Set(['confirmed', 'booked', 'scheduled', 'showed']);
+        const ghlStatusRaw = String(event.appointmentStatus || '').toLowerCase();
+        const isGhlActive  = GHL_ACTIVE_STATUSES_DIAG.has(ghlStatusRaw);
+        console.log('[follow-up-ghl-poll] status behouden (handmatig gemuteerd):',
+          'db_id:', existing.id,
+          '| naam:', existing.lead_name || event.title || event.contactName || '?',
+          '| db_status:', existing.status,
+          '| scheduled_at:', existing.scheduled_at,
+          '| updated_at:', existing.updated_at,
+          '| ghl_status_raw:', ghlStatusRaw || '(leeg)',
+          '| ghl_active:', isGhlActive ? 'JA' : 'nee',
+          '| ghl_appt_id:', event.id);
       }
 
       // Email/phone: GHL calendar events bevatten niet altijd deze velden.
