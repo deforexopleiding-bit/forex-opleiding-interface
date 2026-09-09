@@ -165,36 +165,50 @@ async function buildReport() {
   // (cancelled / no_show / wacht_op_reschedule) én waarvan het GHL-event
   // nog in ACTIEVE staat te zien is, komen in aanmerking. 'verwijderd'
   // valt bewust buiten scope — dat is een expliciete UI-actie.
-  const HIDDEN_RESTORABLE = new Set(['cancelled', 'no_show', 'wacht_op_reschedule']);
-  const GHL_TO_TARGET = { confirmed: 'scheduled', booked: 'scheduled', scheduled: 'scheduled', showed: 'completed' };
-  const herstelCandidates = [];
-  for (const b of catB) {
-    if (!HIDDEN_RESTORABLE.has(b.db_status)) continue;
-    if (!b.still_in_ghl) continue;
-    const ghlStatus = String(b.ghl_status_now || '').toLowerCase();
-    const target = GHL_TO_TARGET[ghlStatus];
-    if (!target) continue;                        // onbekende GHL-status → skip
-    if (target === b.db_status) continue;         // niets te wijzigen
-    herstelCandidates.push({
-      db_id: b.db_id,
-      lead_name: b.name,
-      scheduled_at: b.db_start,
-      current_status: b.db_status,
-      target_status: target,
-      ghl_appointment_id: b.ghl_id,
-      ghl_status_now: ghlStatus,
-    });
-  }
+  //
+  // Gate rondom deze berekening: mag NOOIT de rest van het rapport
+  // sabelen. Alle guard-clauses zijn defensief (null/empty/onbekende
+  // status → skip); een onverwachte exception belandt in herstelError
+  // en de shell blijft renderen.
+  let herstelCandidates = [];
+  let sqlPreview = '';
+  let sqlRestore = '';
+  let herstelError = null;
+  try {
+    const HIDDEN_RESTORABLE = new Set(['cancelled', 'no_show', 'wacht_op_reschedule']);
+    const GHL_TO_TARGET = { confirmed: 'scheduled', booked: 'scheduled', scheduled: 'scheduled', showed: 'completed' };
+    for (const b of (catB || [])) {
+      if (!b || !b.db_status) continue;
+      if (!HIDDEN_RESTORABLE.has(b.db_status)) continue;
+      if (!b.still_in_ghl) continue;
+      const ghlId = b.ghl_id ? String(b.ghl_id).trim() : '';
+      if (!ghlId) continue;                              // geen GHL-koppeling → skip
+      const ghlStatus = String(b.ghl_status_now || '').toLowerCase().trim();
+      if (!ghlStatus) continue;                          // lege status → skip
+      const target = GHL_TO_TARGET[ghlStatus];
+      if (!target) continue;                             // onbekende GHL-status → skip
+      if (target === b.db_status) continue;              // niks te wijzigen
+      herstelCandidates.push({
+        db_id: b.db_id,
+        lead_name: b.name,
+        scheduled_at: b.db_start,
+        current_status: b.db_status,
+        target_status: target,
+        ghl_appointment_id: ghlId,
+        ghl_status_now: ghlStatus,
+      });
+    }
 
-  // SQL-safe string escape: single-quote doubling. GHL-ids zijn in de
-  // praktijk alfanumeriek maar we escapen defensief zodat een rare id
-  // nooit uit een string kan breken.
-  const sq = (s) => `'${String(s).replace(/'/g, "''")}'`;
-  const ids = herstelCandidates.map(r => r.ghl_appointment_id);
+    // SQL-safe string escape: single-quote doubling. GHL-ids zijn in de
+    // praktijk alfanumeriek maar we escapen defensief zodat een rare id
+    // nooit uit een string kan breken.
+    const sq = (s) => `'${String(s).replace(/'/g, "''")}'`;
 
-  const sqlPreview = herstelCandidates.length === 0
-    ? '-- Geen kandidaten — niks te herstellen op basis van huidige GHL-status.\n'
-    :
+    if (herstelCandidates.length === 0) {
+      sqlPreview = '-- 0 kandidaten — niks te herstellen op basis van huidige GHL-status.\n';
+      sqlRestore = '-- 0 kandidaten — geen UPDATE nodig.\n';
+    } else {
+      sqlPreview =
 `-- BLOK 1 — PREVIEW (SELECT, verandert niks).
 -- Toont exact welke DB-rijen naar welke doelstatus zouden gaan.
 SELECT
@@ -213,9 +227,7 @@ WHERE a.status IN ('cancelled','no_show','wacht_op_reschedule')
 ORDER BY a.scheduled_at;
 `;
 
-  const sqlRestore = herstelCandidates.length === 0
-    ? '-- Geen kandidaten — geen UPDATE nodig.\n'
-    :
+      sqlRestore =
 `-- BLOK 2 — RESTORE (UPDATE, pas draaien NA akkoord op preview).
 -- Zelfde CASE-doelstatus per ghl_appointment_id. WHERE ook op status
 -- IN (verborgen) zodat een rij die inmiddels alweer 'scheduled' staat
@@ -237,6 +249,16 @@ RETURNING a.id, a.lead_name, a.scheduled_at, a.status;
 -- COMMIT;
 -- ROLLBACK;
 `;
+    }
+  } catch (e) {
+    // Faalt de herstel-SQL-berekening? Nooit het hele rapport crashen.
+    // Log server-side + zet de error in de response zodat de UI 't toont.
+    console.error('[admin-recon-appointments] herstel-SQL berekening faalde:', e?.stack || e);
+    herstelError = e?.message || String(e);
+    herstelCandidates = [];
+    sqlPreview = `-- Kon herstel-SQL niet berekenen: ${herstelError}\n`;
+    sqlRestore = `-- Kon herstel-SQL niet berekenen: ${herstelError}\n`;
+  }
 
   // Status-verdeling DB
   const statusCount = {};
@@ -277,6 +299,7 @@ RETURNING a.id, a.lead_name, a.scheduled_at, a.status;
       candidates: herstelCandidates,
       sql_preview: sqlPreview,
       sql_restore: sqlRestore,
+      error: herstelError,
     },
   };
 }
@@ -338,16 +361,28 @@ function htmlShell() {
   if (!token) { document.getElementById('content').innerHTML = '<div class="err">Geen sessie — log eerst in.</div>'; return; }
 
   let data;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 60_000);
   try {
-    const res = await fetch('/api/admin-recon-appointments?data=1', { headers: { Authorization: 'Bearer ' + token } });
+    const res = await fetch('/api/admin-recon-appointments?data=1', {
+      headers: { Authorization: 'Bearer ' + token },
+      signal: ac.signal,
+    });
+    clearTimeout(timer);
     if (!res.ok) {
       const txt = await res.text().catch(()=>'');
-      document.getElementById('content').innerHTML = '<div class="err">HTTP ' + res.status + ' — ' + esc(txt.slice(0, 400)) + '</div>';
+      document.getElementById('content').innerHTML =
+        '<div class="err"><strong>HTTP ' + res.status + '</strong> — ' + esc(res.statusText || '') + '<br><br>' +
+        '<pre style="white-space:pre-wrap;margin:0;font-size:12px;">' + esc(txt.slice(0, 500)) + '</pre></div>';
       return;
     }
     data = await res.json();
   } catch (e) {
-    document.getElementById('content').innerHTML = '<div class="err">Fetch mislukt: ' + esc(e.message) + '</div>';
+    clearTimeout(timer);
+    const msg = e?.name === 'AbortError'
+      ? 'Fetch afgebroken na 60s — endpoint heeft niet binnen de timeout gereageerd. Check Vercel logs voor stacktrace.'
+      : 'Fetch mislukt: ' + (e?.message || String(e));
+    document.getElementById('content').innerHTML = '<div class="err">' + esc(msg) + '</div>';
     return;
   }
 
@@ -452,8 +487,12 @@ function htmlShell() {
     '</tr>'
   ).join('') || '<tr><td colspan="6" class="empty">geen</td></tr>';
 
+  const herstelErrorHtml = herstel.error
+    ? '<div class="err" style="margin:8px 0 16px;"><strong>Herstel-SQL-berekening faalde:</strong> ' + esc(herstel.error) + ' — rest van het rapport hierboven is wel volledig.</div>'
+    : '';
   const herstelHtml =
     '<h2>Herstel-SQL — verborgen in CRM maar actief in GHL · ' + herstel.count + ' kandidaten</h2>' +
+    herstelErrorHtml +
     '<div class="hint">Regels die momenteel in <code>cancelled</code> / <code>no_show</code> / <code>wacht_op_reschedule</code> staan, terwijl het GHL-event nog een actieve status heeft (<code>confirmed</code> / <code>booked</code> / <code>scheduled</code> / <code>showed</code>). Doelstatus is bepaald via dezelfde <code>mapGhlStatus()</code> die de poll gebruikt.</div>' +
     '<table><thead><tr><th>naam</th><th>DB start</th><th>huidige status</th><th>doelstatus</th><th>GHL status nu</th><th>ghl_id</th></tr></thead><tbody>' + herstelRows + '</tbody></table>' +
     '<h2>BLOK 1 — PREVIEW (SELECT)</h2>' +
@@ -517,7 +556,14 @@ export default async function handler(req, res) {
     const report = await buildReport();
     return res.status(200).json(report);
   } catch (e) {
-    console.error('[admin-recon-appointments] fout:', e?.stack || e);
-    return res.status(500).json({ error: e?.message || String(e) });
+    // Log FULL stacktrace zodat Vercel-logs de root-cause tonen. De
+    // frontend krijgt alleen de message + naam terug (geen stack, geen
+    // interne paden — die zijn intern eigendom van de server-logs).
+    console.error('[admin-recon-appointments] buildReport crash — stack:\n', e?.stack || String(e));
+    console.error('[admin-recon-appointments] error name:', e?.name, 'message:', e?.message);
+    return res.status(500).json({
+      error: e?.message || String(e),
+      name:  e?.name  || 'Error',
+    });
   }
 }
