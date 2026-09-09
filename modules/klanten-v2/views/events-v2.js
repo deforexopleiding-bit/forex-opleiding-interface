@@ -1729,20 +1729,20 @@
   window.__evAttEdit = (attId, eventId) => {
     const nieuweStatus = window.prompt('Nieuwe status? (aangemeld / aanwezig / no_show / sale / switched_to_other_event / geannuleerd)');
     if (!nieuweStatus) return;
-    _post('/api/events-attendee-status-change', { id: attId, status: nieuweStatus.trim() }, 'Status bijgewerkt', eventId);
+    _post('/api/events-attendee-status-change', { attendee_id: attId, status: nieuweStatus.trim() }, 'Status bijgewerkt', eventId);
   };
   window.__evAttSendInvite = (attId, eventId) => {
     if (!window.confirm('Keuze-link opnieuw sturen naar deze deelnemer?')) return;
-    _post('/api/events-attendee-send-invite', { id: attId }, 'Keuze-link verstuurd');
+    _post('/api/events-attendee-send-invite', { attendee_id: attId }, 'Keuze-link verstuurd');
   };
   window.__evAttSendQuest = (attId, eventId) => {
     if (!window.confirm('Vragenlijst-link sturen naar deze deelnemer?')) return;
-    _post('/api/events-attendee-send-questionnaire', { id: attId }, 'Vragenlijst verstuurd');
+    _post('/api/events-attendee-send-questionnaire', { attendee_id: attId }, 'Vragenlijst verstuurd');
   };
   window.__evAttMove = async (attId, eventId) => {
     const target = window.prompt('Doel event-ID? (kopieer uit URL of Overzicht)');
     if (!target) return;
-    _post('/api/events-attendee-move', { id: attId, target_event_id: target.trim() }, 'Verplaatst', eventId);
+    _post('/api/events-attendee-move', { attendee_id: attId, target_event_id: target.trim() }, 'Verplaatst', eventId);
   };
   // v=2026-08-27 fix: v2 ⋯-menu "Offerte aanmaken" was kapot — riep
   // /api/events-attendee-link-deal aan met { id, action:'create_deal' }
@@ -1942,12 +1942,12 @@
   window.__evAttTagAdd = (attId, eventId) => {
     const tag = window.prompt('Tag om toe te voegen?');
     if (!tag) return;
-    _post('/api/events-attendee-tag-add', { id: attId, tag: tag.trim() }, 'Tag toegevoegd', eventId);
+    _post('/api/events-attendee-tag-add', { attendee_id: attId, tag_slug: tag.trim() }, 'Tag toegevoegd', eventId);
   };
   window.__evAttTagRemove = (attId, eventId) => {
     const tag = window.prompt('Tag om te verwijderen?');
     if (!tag) return;
-    _post('/api/events-attendee-tag-remove', { id: attId, tag: tag.trim() }, 'Tag verwijderd', eventId);
+    _post('/api/events-attendee-tag-remove', { attendee_id: attId, tag_slug: tag.trim() }, 'Tag verwijderd', eventId);
   };
   window.__evAttDelete = async (attId, eventId) => {
     const vraag = 'Deze aanmelding definitief verwijderen? Dit is permanent en verwijdert ook eventuele vragenlijst-antwoorden.';
