@@ -149,3 +149,74 @@ test('een verzette afspraak blokkeert zijn NIEUWE moment, niet zijn oude', () =>
   });
   assert.equal(vijftien.bezet.length, 1, 'daar houdt hij het moment wél bezet');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WAT ER WERKT ZOLANG DE MIGRATIE NIET GEDRAAID IS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Gemeten op 9 september: de kolom eerst_gepland_op bestaat nog niet op
+// productie. De grens tussen wat dan wél en niet kan is scherp, en hij hoort
+// vast te liggen — anders wordt hij op een dag stilletjes een andere grens.
+//
+// De aanleiding: het dagscherm toonde voor 8 september maar EEN afspraak, van
+// de zeven die er stonden. Alles met een uitkomst — afgerond, niet gekomen,
+// geannuleerd — viel weg omdat de weergave op status 'scheduled' filterde. Juist
+// de interessantste feiten van die dag waren daardoor onzichtbaar.
+
+const GISTEREN = '2026-09-08';
+/** De zeven rijen van 8 september, zonder eerst_gepland_op. */
+const ZEVEN_ZONDER_KOLOM = [
+  { id: '1', lead_name: 'Martin Van Pijkeren',    status: 'completed', scheduled_at: '2026-09-08T08:00:00Z' },
+  { id: '2', lead_name: 'yeivi medinw',           status: 'scheduled', scheduled_at: '2026-09-08T13:00:00Z' },
+  { id: '3', lead_name: 'Mehran Jahani',          status: 'no_show',   scheduled_at: '2026-09-08T16:00:00Z' },
+  { id: '4', lead_name: 'Sebastian Kolodziejski', status: 'no_show',   scheduled_at: '2026-09-08T18:30:00Z' },
+];
+
+test('ZONDER de kolom: alle vier de afspraken van 8 september staan er, met hun uitkomst', () => {
+  // Dit is de winst die NIET op de migratie wacht. Het statusfilter weghalen
+  // heeft niets met eerst_gepland_op te maken.
+  const [dag] = voegAgendaSamen({
+    slots: [], afspraken: ZEVEN_ZONDER_KOLOM, van: GISTEREN, tot: GISTEREN, nuMs: NU,
+  });
+  assert.equal(dag.bezet.length, 1, 'het oude gedrag toonde er precies een');
+  assert.equal(dag.bezet[0].naam, 'yeivi medinw');
+
+  assert.deepEqual(dag.gepland.map((g) => g.naam),
+    ['Martin Van Pijkeren', 'yeivi medinw', 'Mehran Jahani', 'Sebastian Kolodziejski']);
+  assert.deepEqual(dag.gepland.map((g) => g.label),
+    ['geweest', null, 'niet gekomen', 'niet gekomen']);
+});
+
+test('ZONDER de kolom: een verzetting via een NIEUWE rij blijft gewoon zichtbaar', () => {
+  // De oude rij houdt zijn eigen scheduled_at, dus die heeft de kolom niet nodig.
+  const [dag] = voegAgendaSamen({
+    slots: [], van: '2026-09-07', tot: '2026-09-07', nuMs: NU,
+    afspraken: [{ id: 'v1', lead_name: 'Verzet via nieuwe rij', status: 'verplaatst',
+      scheduled_at: '2026-09-07T13:00:00Z' }],
+  });
+  assert.equal(dag.gepland.length, 1);
+  assert.equal(dag.gepland[0].label, 'verzet');
+  assert.equal(dag.gepland[0].verzet_naar, null, 'de bestemming weten we hier niet');
+});
+
+test('ZONDER de kolom: een verzetting in DEZELFDE rij is en blijft onvindbaar', () => {
+  // De grens. scheduled_at is overschreven naar de 15e; er is niets meer wat
+  // zegt dat hij op de 7e stond. Dit legt vast dat we dat niet stilletjes gaan
+  // gokken — de endpoints melden het als blinde vlek.
+  const [dag] = voegAgendaSamen({
+    slots: [], van: '2026-09-07', tot: '2026-09-07', nuMs: NU,
+    afspraken: [{ id: 'v2', lead_name: 'sander De groot', status: 'scheduled',
+      scheduled_at: '2026-09-15T13:00:00Z' }],
+  });
+  assert.equal(dag.gepland.length, 0);
+});
+
+test('MET de kolom komt precies die ene terug', () => {
+  const [dag] = voegAgendaSamen({
+    slots: [], van: '2026-09-07', tot: '2026-09-07', nuMs: NU,
+    afspraken: [{ id: 'v2', lead_name: 'sander De groot', status: 'scheduled',
+      scheduled_at: '2026-09-15T13:00:00Z', eerst_gepland_op: '2026-09-07T13:00:00Z' }],
+  });
+  assert.equal(dag.gepland.length, 1);
+  assert.match(dag.gepland[0].label, /verzet naar 15 september/);
+});

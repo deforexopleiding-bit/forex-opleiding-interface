@@ -410,6 +410,31 @@ meer — en dan is **het rapport over die dag ook niet meer waar**. Wat er op ee
 dag stond is een feit over die dag, en dat verandert niet meer door wat er
 daarna met de afspraak gebeurt.
 
+### Het gat was groter dan verzetten alleen
+
+Gemeten op 9 september, kijkend naar de dag ervoor. In `follow_up_appointments`
+stonden voor 8 september **zeven** afspraken. Het scherm toonde er **één**.
+
+| | | |
+|---|---|---|
+| Martin Van Pijkeren | 10:00 | `completed` |
+| **yeivi medinw** | **15:00** | **`scheduled`** ← de enige die te zien was |
+| Mehran Jahani | 18:00 | `no_show` |
+| Sebastian Kolodziejski | 20:30 | `no_show` |
+| drie proefrijen | | |
+
+De oorzaak: de dagweergave filterde op de statussen die een moment *bezet
+houden* (`scheduled`, `in_progress`). Alles wat een **uitkomst** had gekregen
+viel daarmee uit de dag — een afgeronde call, een no-show, een annulering, een
+verzetting. En dat zijn nou juist de interessantste feiten van die dag.
+
+Een dag waarop iemand een gesprek had en twee mensen niet kwamen opdagen, zag er
+achteraf uit als een dag met één afspraak.
+
+Het is dezelfde ziekte als de rest van deze week, in de weergavelaag: een filter
+dat voor de ene vraag klopt (wat blokkeert een vrij moment?) werd gebruikt voor
+een andere (wat stond er op deze dag?).
+
 ### Twee soorten verzetten, en alleen de tweede is een probleem
 
 | | wat er gebeurt | is de oude dag nog bekend? |
@@ -451,6 +476,23 @@ De agenda geeft per dag nu `bezet` **en** `gepland`, en dat is met opzet:
 
 Twee vragen, twee antwoorden. Ze bij elkaar trekken is de fout die zich pas
 maanden later meldt.
+
+### Wat er wél en niet kan zonder de migratie
+
+De kolom is op 9 september nog niet gedraaid. De grens is scherp, en hij ligt
+vast in `tests/opvolging-dagbeeld.test.js`:
+
+| | zonder de kolom |
+|---|---|
+| alle statussen op hun dag, met label | **werkt** — dat hangt niet aan de kolom |
+| verzetting via een nieuwe rij (`verplaatst`) | **werkt**, met label `verzet`, zonder bestemming |
+| verzetting in dezelfde rij | **kan niet** — `scheduled_at` is overschreven |
+| `verzet naar 15 september` | alleen bij de laatste, dus pas na de migratie |
+
+De winst die het meeste opleverde — de zes onzichtbare afspraken van 8 september
+— wacht dus **niet** op de migratie. Alleen het terughalen van een in dezelfde
+rij verplaatste afspraak doet dat, en zolang dat niet kan meldt het rapport het
+als blinde vlek.
 
 ### Wat er niet meer terugkomt
 

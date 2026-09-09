@@ -6,6 +6,26 @@
 
 ---
 
+## 📅 Opvolging — dagbeeld en afspraken (9 september 2026)
+
+Gevonden bij het verbreden van het dagbeeld. Alle drie apart houden, niet
+bundelen — de les van 8 september.
+
+- [ ] **Testrijen uit de afsprakenlijst.** `follow_up_appointments` heeft geen
+  `is_test`. Sinds het dagbeeld alle statussen toont staan de drie proefrijen
+  van `jeffrey-test` / `jef testo` gewoon bij 8 september. Dezelfde aanpak als
+  de teruggedraaide testrijen-PR: een expliciete vlag, geen filter op de naam —
+  een verdwijnende echte afspraak is erger dan een testrij die meetelt.
+- [ ] **Bevinding: afspraak voorbij zonder uitkomst.** yeivi medinw stond op
+  8 september om 15:00 en staat de dag erna nog steeds op `scheduled`. Dat is
+  geen weergavefout maar een gat in de opvolging: de tijd is voorbij en er is
+  niets vastgelegd. Hoort in het rapport als bevinding, met dezelfde
+  voorzichtigheid als elders — het zegt dat er niets is vastgelegd, niet dat er
+  niets gebeurd is.
+- [ ] **Migratie `eerst_gepland_op` draaien** (`docs/sql-migrations/2026-09-08-eerst-gepland-op.sql`).
+  Zolang die niet gedraaid is mist het dagbeeld afspraken die in dezelfde rij
+  naar een andere dag zijn verzet. Dat wordt als blinde vlek gemeld.
+
 ## 🔗 LMS-koppeling (extern LMS ↔ CRM) — status & openstaande afspraken
 
 ### CRM-kant VOLTOOID (live op main)
