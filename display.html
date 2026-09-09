@@ -234,7 +234,7 @@
     <div class="kpi one" id="k-one">
       <div class="cap"><span class="ico">◎</span> 1-op-1 calls</div>
       <div class="num big" id="v-one">0</div>
-      <div class="foot">gedraaid vandaag</div>
+      <div class="foot">afgerond vandaag<span id="v-one-ns"></span></div>
     </div>
   </div>
 
@@ -290,12 +290,15 @@
         <div class="leadstrip" id="leads"></div>
       </div>
       <div class="card dave">
-        <h3>🎤 Vandaag <span class="tag">retentie &amp; opvolging</span></h3>
+        <h3>🎤 Vandaag <span class="tag">opvolging</span></h3>
         <div class="dave-grid">
-          <div class="dstat"><div class="l">Retentie gebeld</div><div class="num v" id="d-ret">0</div></div>
-          <div class="dstat"><div class="l">Follow-ups gedraaid</div><div class="num v" id="d-fu">0</div></div>
-          <div class="dstat"><div class="l">Event-bellijst gebeld</div><div class="num v" id="d-events">0</div></div>
+          <div class="dstat"><div class="l">Belpogingen</div><div class="num v" id="d-bel">0</div></div>
+          <div class="dstat"><div class="l">Gesprekken gevoerd</div><div class="num v" id="d-gespr">0</div></div>
           <div class="dstat"><div class="l">Voicememo's verstuurd</div><div class="num v" id="d-vm">0</div></div>
+          <div class="dstat"><div class="l">WhatsApp verstuurd</div><div class="num v" id="d-wa">0</div></div>
+          <div class="dstat"><div class="l">Event-bellijst gebeld</div><div class="num v" id="d-events">0</div></div>
+          <div class="dstat"><div class="l">Open taken</div><div class="num v" id="d-open">0</div></div>
+          <div class="dstat"><div class="l">Taken afgerond</div><div class="num v" id="d-afg">0</div></div>
         </div>
       </div>
       <div class="duo">
@@ -382,7 +385,7 @@
   /* ---------- state ---------- */
   var state = {
     salesRev:0, salesCnt:0, leads:0, calls:0, one:0,
-    daveRet:0, daveFu:0, daveVm:0, eventCalls:0,
+    opvBel:0, opvGespr:0, opvVm:0, opvWa:0, eventCalls:0, opvOpen:0, opvAfg:0,
     weekAmt:0,  weekTarget:null,  weekPct:null,  weekPace:null,
     monthAmt:0, monthTarget:null, monthPct:null, monthPace:null,
     biggest:null, lastSaleMin:null, avgDeal:null, streak:0,
@@ -497,10 +500,13 @@
     countUp(el('v-leads'), prev ? prev.leads : state.leads, state.leads);
     countUp(el('v-calls'), prev ? prev.calls : state.calls, state.calls);
     countUp(el('v-one'),   prev ? prev.one   : state.one,   state.one);
-    if (el('d-ret'))    el('d-ret').textContent    = state.daveRet;
-    if (el('d-fu'))     el('d-fu').textContent     = state.daveFu;
+    if (el('d-bel'))    el('d-bel').textContent    = state.opvBel;
+    if (el('d-gespr'))  el('d-gespr').textContent  = state.opvGespr;
+    if (el('d-vm'))     el('d-vm').textContent     = state.opvVm;
+    if (el('d-wa'))     el('d-wa').textContent     = state.opvWa;
     if (el('d-events')) el('d-events').textContent = state.eventCalls;
-    if (el('d-vm'))     el('d-vm').textContent     = state.daveVm;
+    if (el('d-open'))   el('d-open').textContent   = state.opvOpen;
+    if (el('d-afg'))    el('d-afg').textContent    = state.opvAfg;
   }
   function renderTargets(){
     setGauge('g-week',  'g-week-pct',  state.weekPct);
@@ -685,12 +691,19 @@
     state.calls    = d.calls.booked_today || 0;
     state.one      = d.one_on_one.count_today || 0;
     state.eventCalls = d.event_calls_today ?? 0;
-    state.daveRet  = d.dave.retentie_gebeld || 0;
-    state.daveFu   = d.dave.follow_ups_gedraaid || 0;
-    state.daveVm   = d.dave.voicememos_sent || 0;
+    var opv = d.opvolging || {};
+    state.opvBel   = opv.belpogingen    || 0;
+    state.opvGespr = opv.gesprekken     || 0;
+    state.opvVm    = opv.voicememos     || 0;
+    state.opvWa    = opv.whatsapp       || 0;
+    state.opvOpen  = opv.open_taken     || 0;
+    state.opvAfg   = opv.taken_afgerond || 0;
     renderKPIs(prev);
     var _cs = el('v-calls-sub');
     if (_cs) _cs.textContent = (d.calls.count_today == null ? '—' : d.calls.count_today);
+    /* 1-op-1 no-show subtekst (LMS). Alleen tonen als er no-shows zijn. */
+    var _ns = el('v-one-ns');
+    if (_ns) _ns.textContent = (d.one_on_one.no_show ? ' · ' + d.one_on_one.no_show + ' no-show' : '');
     if (state.salesRev === 0 && d.sales.total_incl_vat == null) el('v-sales-rev').textContent = '—';
     if (d.leads.total == null) el('v-leads').textContent = '—';
     if (d.calls.booked_today == null) el('v-calls').textContent = '—';
