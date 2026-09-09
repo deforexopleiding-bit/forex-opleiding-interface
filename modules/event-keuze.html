@@ -352,11 +352,13 @@
         }
 
         if (!a.has_assessment) {
-          // CTA naar assessment.html?t=<token>. De koppelflow (signup-first
-          // → assessment koppelen) wordt in Fase 2c bedraad; voor nu sturen
-          // we de gebruiker naar de bestaande assessment-pagina met token in
-          // de URL zodat 2c die alvast kan oppikken.
-          const cta = '/modules/assessment.html?t=' + encodeURIComponent(token);
+          // CTA naar de STAP-2 vervolgpagina op het merk-domein
+          // (dfo-website /vervolg?t=<token>): de info-only vragenlijst die de
+          // inschrijving definitief maakt. Absolute URL want deze keuzepagina
+          // draait op het interface-domein. (Voorheen: /modules/assessment.html
+          // — de oude gescoorde assessment; die flow blijft bestaan maar wordt
+          // hier niet meer gelinkt.)
+          const cta = 'https://www.deforexopleiding.nl/vervolg?t=' + encodeURIComponent(token);
           $warnNoAss.hidden = false;
           $warnNoAss.innerHTML =
               'Je hebt de vragenlijst nog niet ingevuld. Doe dat eerst voor een persoonlijk advies. '

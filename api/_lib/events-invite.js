@@ -23,6 +23,16 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-
 const TEMPLATE_NAME   = process.env.EVENTS_KEUZE_LINK_TEMPLATE_NAME || 'events_keuze_link';
 const TEMPLATE_LANG   = 'nl';
 
+// Body-variabele-mapping voor het WhatsApp-template (positie → variabele-key).
+// Meegegeven als fallback aan sendEventWhatsAppTemplate zodat de send óók werkt
+// wanneer de template-rij (nog) geen meta_param_mapping in de DB heeft — anders
+// zou Meta een {{N}}-body met 0 parameters weigeren (132000) en kwam er geen
+// WhatsApp binnen. Zet meta_param_mapping bij voorkeur óók in de DB (via het
+// CRM-templatescherm) zodat het scherm de mapping toont. Spiegelt de aanpak in
+// events-vervolg-invite.js. Body: {{1}}=voornaam, {{2}}=event-titel,
+// {{3}}=keuze-link (…/modules/event-keuze.html?t=<choice_token>).
+const PARAM_MAPPING = { body: { 1: 'attendee.voornaam', 2: 'event.titel', 3: 'attendee.keuze_link' } };
+
 function escHtml(s) {
   if (s == null) return '';
   return String(s)
@@ -99,6 +109,7 @@ export async function sendEventAttendeeInvite({ attendeeId, sentByUserId }) {
         templateName : TEMPLATE_NAME,
         languageCode : TEMPLATE_LANG,
         sentByUserId : sentByUserId || null,
+        paramMappingOverride : PARAM_MAPPING,
       }),
       sendInviteMail({
         firstName: attendee.first_name,

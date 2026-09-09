@@ -1808,13 +1808,17 @@
       confirmMsg: 'De keuzelink (deelnemer kiest zelf de datum voor het event) via WhatsApp + e-mail versturen?',
       label: 'Keuzelink',
     });
-  // "Stuur vragenlijst" → /modules/assessment.html (CRM-eigen vragenlijst,
-  // WhatsApp vragenlijst_herinnering_v3 + e-mail).
+  // "Stuur vragenlijst" → STAP-2 vervolg-link op de dfo-website
+  // (${DFO_WEBSITE_BASE_URL}/vervolg?t=…, info-only vragenlijst die de
+  // inschrijving definitief maakt). WhatsApp event_vragenlijst_definitief +
+  // e-mail. NB: bewust NIET meer /modules/assessment.html (oude gescoorde
+  // assessment) — die flow blijft ongemoeid, we linken er alleen niet meer
+  // vanuit deze actie naartoe.
   window.__evAttSendQuest = (attId /* , eventId */) =>
     _evSendChannels({
-      url: '/api/events-attendee-send-questionnaire', attId,
+      url: '/api/events-attendee-send-vervolg', attId,
       confirmTitle: 'Vragenlijst versturen',
-      confirmMsg: 'De vragenlijst-link via WhatsApp + e-mail naar deze deelnemer versturen?',
+      confirmMsg: 'De vragenlijst-link (deelnemer maakt z\'n inschrijving definitief) via WhatsApp + e-mail versturen?',
       label: 'Vragenlijst',
     });
   window.__evAttMove = async (attId, eventId) => {
