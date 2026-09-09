@@ -16,6 +16,7 @@
 // Pure functie, geen netwerk, geen database — zie tests/opvolging-agenda-merge.test.js.
 
 import { afrondActie } from './opvolging-call-afgerond.js';
+import { dagenVoorAfspraak, knoppenVoor } from './opvolging-dagbeeld.js';
 
 /** Statussen die een moment daadwerkelijk bezet houden. */
 const BEZET_STATUSSEN = new Set(['scheduled', 'in_progress']);
@@ -101,13 +102,83 @@ export function dagenTussen(van, tot) {
  * Uitvoer per dag: { dag, vrij: [{tijd}], bezet: [{tijd, naam, status}] }.
  * Een tijd die in allebei voorkomt telt als bezet en verdwijnt uit vrij.
  */
-export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe/Amsterdam' }) {
+export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe/Amsterdam', nuMs = Date.now() }) {
   const dagen = dagenTussen(van, tot);
   const inVenster = new Set(dagen);
 
+  // ── PROEFRIJEN HOREN NIET IN HET DAGBEELD ────────────────────────────────
+  // Eén filter, helemaal bovenaan, zodat een testrij nergens half doorlekt —
+  // niet in `bezet`, niet in `gepland`, niet in `afgerond`.
+  //
+  // OP DE KOLOM, NOOIT OP DE NAAM. Filteren op 'test' in lead_name zou de
+  // eerste echte klant die Tessa of Testerink heet uit Daves dag laten
+  // verdwijnen, en dat merkt niemand tot de call gemist is. De kolom is
+  // expliciet gezet en na te kijken; een naampatroon is een gok die zich
+  // voordoet als een regel.
+  //
+  // Bestaat de kolom nog niet, dan is `is_test` overal undefined en filtert
+  // dit niets weg — het dagbeeld gedraagt zich dan als voorheen.
+  //
+  // ALLEEN HIER, NIET IN HET RAPPORT. Deze functie wordt uitsluitend door
+  // api/opvolging-agenda.js gebruikt; het rapport telt zijn eigen rijen en
+  // blijft ongemoeid.
+  const echt = (Array.isArray(afspraken) ? afspraken : []).filter((a) => a && a.is_test !== true);
+
+  // ── WAT ER OP DIE DAG STOND, ONGEACHT WAT ERVAN GEWORDEN IS ─────────────
+  // Maxims eis: een zoomcall die verzet is blijft hard op zijn oorspronkelijke
+  // dag staan, in het grijs, met de bestemming erbij. Hij mag niet meer stil
+  // uit de dag verdwijnen, want dan klopt het dagbeeld van gisteren morgen niet
+  // meer.
+  //
+  // DRIE LIJSTEN, MET OPZET, want ze beantwoorden drie vragen:
+  //   bezet    — welke vrije momenten vallen weg? Een geannuleerde afspraak
+  //              hoort daar NIET in, anders blokkeert een afzegging voorgoed
+  //              een slot dat vrij is.
+  //   afgerond — wat heeft Dave zelf afgerond? Leest alleen `uitkomst`.
+  //   gepland  — wat stond er die dag? Het dagbeeld.
+  // Ze bij elkaar trekken is precies de fout die je pas merkt als iemand niet
+  // meer kan boeken.
+  //
+  // De dag komt uit oorspronkelijkeDag(), niet uit scheduled_at: een afspraak
+  // die in dezelfde rij naar een andere dag is verplaatst hoort te blijven
+  // staan op de dag waarop hij stónd. Zie _lib/opvolging-dagbeeld.js.
+  const geplandPerDag = new Map();
+  for (const a of echt) {
+    if (!a || !a.scheduled_at) continue;
+    // Kan er twee opleveren: de oude dag ('verzet naar …') en de nieuwe dag,
+    // waar de afspraak echt plaatsvindt. Zie dagenVoorAfspraak.
+    for (const plek of dagenVoorAfspraak(a)) {
+      if (!plek.dag || !inVenster.has(plek.dag)) continue;
+      if (!geplandPerDag.has(plek.dag)) geplandPerDag.set(plek.dag, []);
+      geplandPerDag.get(plek.dag).push({
+        tijd          : plek.tijd,
+        naam          : (a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+        status        : String(a.status || 'scheduled').toLowerCase(),
+        // Het agendafeit, en niets anders. Geen label uit een status: wat er
+        // voor Dave waar is staat in `afrond` hieronder.
+        label         : plek.feit.label,
+        doorgehaald   : plek.feit.doorgehaald,
+        verzet_naar   : plek.verzet_van ? null : plek.feit.naar,
+        verzet_van    : plek.verzet_van || null,
+        // Heeft Dave deze al afgerond, en waarmee? Dezelfde chip als in het
+        // callsblok — de ENIGE plek waar een uitkomst getoond wordt.
+        afrond        : afrondActie(a),
+        // Welke knoppen hier horen. Server-side, zodat de regel op één plek
+        // staat — en zodat 'grijs' niet stilzwijgend 'onaanraakbaar' gaat
+        // betekenen. Zie knoppenVoor.
+        knoppen       : knoppenVoor(a, nuMs, { opNieuweDag: !!plek.verzet_van }),
+        appointment_id: a.id || null,
+        telefoon      : a.lead_phone || null,
+        email         : a.lead_email || null,
+        zoom_url      : a.zoom_join_url || null,
+        start         : a.scheduled_at || null,
+      });
+    }
+  }
+
   // ── Bezet eerst: dat bepaalt wat er van vrij overblijft. ──────────────────
   const bezetPerDag = new Map();
-  for (const a of (Array.isArray(afspraken) ? afspraken : [])) {
+  for (const a of echt) {
     if (!a || !a.scheduled_at) continue;
     const status = String(a.status || '').toLowerCase();
     // Geannuleerd of verplaatst houdt niets bezet — anders blijft een slot
@@ -158,7 +229,7 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
   // De grens is onze EIGEN uitkomst en niets anders. Een status die van elders
   // komt telt hier niet mee; de module praat geen externe waarheid na.
   const afgerondPerDag = new Map();
-  for (const a of (Array.isArray(afspraken) ? afspraken : [])) {
+  for (const a of echt) {
     if (!a || !a.scheduled_at) continue;
     const oordeel = afrondActie(a);
     if (oordeel.toon !== 'uitkomst') continue;
@@ -208,5 +279,10 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
     // Wat Dave die dag zelf heeft afgerond. Apart van `bezet`, zie het blok
     // hierboven; het callsblok toont ze samen.
     afgerond: (afgerondPerDag.get(dag) || []).sort((a, b) => a.tijd.localeCompare(b.tijd)),
+    // Het dagbeeld: alles wat voor deze dag gepland stond, verzet inbegrepen.
+    // Zie de kop van het blok hierboven voor waarom dit naast `bezet` staat en
+    // niet in plaats daarvan.
+    gepland: (geplandPerDag.get(dag) || [])
+      .sort((a, b) => String(a.tijd || '').localeCompare(String(b.tijd || ''))),
   }));
 }

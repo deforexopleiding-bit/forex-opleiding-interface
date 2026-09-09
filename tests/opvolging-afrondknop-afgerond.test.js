@@ -155,19 +155,27 @@ test('het callsblok leest bezet EN afgerond, op tijd gesorteerd', () => {
   const view = readFileSync('modules/klanten-v2/views/opvolging-v2.js', 'utf8');
   const i = view.indexOf('async function fetchCalls');
   const blok = view.slice(i, i + 1200);
+  assert.match(blok, /d0\.gepland/,
+    'het callsblok hoort het dagbeeld te lezen');
   assert.match(blok, /d0\.bezet \|\| \[\]/);
   assert.match(blok, /d0\.afgerond \|\| \[\]/,
-    'zonder deze lijst verdwijnt elke afgeronde call weer uit het blok');
+    'de terugval voor een oudere server hoort afgerond mee te nemen, anders '
+    + 'verdwijnt elke afgeronde call weer uit het blok');
   assert.match(blok, /sort\(/);
 });
 
 test('het endpoint haalt uitkomst op, met een terugval als de kolom ontbreekt', () => {
   const bron = readFileSync('api/opvolging-agenda.js', 'utf8')
     .split('\n').filter((r) => !r.trim().startsWith('//')).join('\n');
-  assert.match(bron, /uitkomst, uitkomst_op/);
-  assert.match(bron, /error\.code === '42703'/,
+  // `uitkomst` staat sinds het dagbeeld in een lijst met de andere optionele
+  // kolommen; wat blijft gelden is dat hij gevraagd wordt en dat 42703 niet het
+  // hele blok omgooit.
+  assert.match(bron, /'uitkomst'/);
+  assert.match(bron, /'uitkomst_op'/);
+  assert.match(bron, /error\.code !== '42703'/,
     'zonder terugval valt het hele blok om zolang de migratie niet gedraaid is');
-  assert.match(bron, /await haal\(KOLOMMEN\)/, 'de terugval hoort zonder die kolommen te draaien');
+  assert.match(bron, /beschikbaar\.filter/,
+    'de terugval hoort de ontbrekende kolom weg te laten en het opnieuw te proberen');
 });
 
 /**
@@ -180,12 +188,28 @@ function rendereerAfrond(c) {
   const VIEW = readFileSync('modules/klanten-v2/views/opvolging-v2.js', 'utf8');
   const start = VIEW.indexOf("((c.afrond && c.afrond.toon === 'uitkomst')");
   assert.ok(start > 0, 'de afrond-uitdrukking is niet gevonden in de view');
-  // Niet op de eerste puntkomma zoeken: die zit in de HTML-entiteit `&rarr;`.
-  const eind = VIEW.indexOf("</button>');", start);
-  assert.ok(eind > start, 'het einde van de uitdrukking is niet gevonden');
-  const bron = 'const uit = ' + VIEW.slice(start, eind + "</button>')".length) + ';\nuit;';
+  // HAAKJES TELLEN, niet op een letterlijk einde mikken. Het vorige anker
+  // zocht "</button>');" en brak stil zodra de knop achter een voorwaarde
+  // kwam te staan — een test die niet meer draait terwijl hij groen oogt is
+  // precies wat we hier aan het uitroeien zijn. Loopt de balans niet af, dan
+  // faalt deze test luid in plaats van een halve uitdrukking te draaien.
+  let diep = 0;
+  let eind = -1;
+  for (let n = start; n < VIEW.length; n += 1) {
+    const ch = VIEW[n];
+    // Quotes overslaan: er staan haakjes in de HTML-teksten zelf.
+    if (ch === "'") { n = VIEW.indexOf("'", n + 1); if (n < 0) break; continue; }
+    if (ch === '(') diep += 1;
+    else if (ch === ')') { diep -= 1; if (diep === 0) { eind = n; break; } }
+  }
+  assert.ok(eind > start, 'de uitdrukking loopt niet af — anker of code is stuk');
+  const bron = 'const uit = ' + VIEW.slice(start, eind + 1) + ';\nuit;';
   const ctx = createContext({
     c, i: 0,
+    // De knoppenregel komt van de server; hier staat hij aan zodat deze test
+    // over de afrondchip gaat en niet over de knoppenregel. Die heeft een
+    // eigen test in tests/opvolging-dagbeeld.test.js.
+    k: { afronden: true, bellen: true, whatsapp: true, zoom: true },
     esc: (s) => String(s == null ? '' : s),
     nl : (s) => String(s == null ? '' : s),
     iso: (s) => String(s == null ? '' : s),

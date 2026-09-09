@@ -486,12 +486,16 @@
     st.loading = false;
     if (j.__error) { st.error = j.__error; st.data = null; }
     else {
-      // Bezet plus wat Dave zelf al afgerond heeft. Dat tweede is een aparte
-      // lijst omdat een afgeronde call uit BEZET_STATUSSEN valt en dus uit
-      // `bezet` verdwijnt — precies op het moment dat je hem wilt terugzien.
+      // HET DAGBEELD, NIET DE BEZETTE MOMENTEN. `gepland` draagt alles wat
+      // voor die dag stond, verzette calls inbegrepen; `bezet` is de smallere
+      // lijst die bepaalt welke vrije momenten wegvallen.
+      //
+      // Terugval op bezet + afgerond zodat een oudere server nog gewoon werkt:
+      // dan gedraagt het blok zich als vóór het dagbeeld.
       const d0 = (j.dagen || [])[0] || {};
-      st.data = [...(d0.bezet || []), ...(d0.afgerond || [])]
+      st.data = d0.gepland || [...(d0.bezet || []), ...(d0.afgerond || [])]
         .sort((a, b) => String(a.tijd || '').localeCompare(String(b.tijd || '')));
+      st.onvolledig = j.dagbeeld_volledig === false ? (j.dagbeeld_melding || null) : null;
     }
     render();
   }
@@ -1304,6 +1308,11 @@
 .opv .call{background:#fff;border:1px solid var(--o-line);border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:14px;margin-bottom:9px;box-shadow:var(--o-sh)}
 .opv .call .tijd{font-size:16px;font-weight:750;font-variant-numeric:tabular-nums;flex:0 0 52px;color:var(--o-acc)}
 .opv .call.geweest .tijd{color:#a2a9b4}
+.opv .call.vervallen{background:#fafbfc;border-style:dashed;box-shadow:none}
+.opv .call.vervallen .nm{color:#8b939f}
+.opv .call.vervallen .nm,.opv .call.vervallen .tijd{text-decoration:line-through;text-decoration-color:#c3c8d0}
+.opv .call.vervallen .nm .tag{text-decoration:none}
+.opv .call.vervallen .sub{color:#a2a9b4}
 .opv .obtn.klaar{background:var(--o-grns);color:#08794a;border-color:transparent;cursor:default;font-weight:650}
 .opv .call .who{flex:1;min-width:0}
 .opv .call .nm{font-weight:650;font-size:14.5px}
@@ -1796,13 +1805,28 @@
     if (_calls.data.length === 0) return kop + '<div class="empty">Geen calls ingepland op deze dag.</div>';
 
     const nuMs = Date.now();
-    return kop + _calls.data.map((c, i) => {
+    // Ontbreekt een kolom nog, dan kan deze lijst verzette afspraken missen of
+    // proefrijen tonen. Dat hoort er te staan: een onvolledig dagbeeld dat zich
+    // voordoet als volledig is precies waar we deze week op zijn vastgelopen.
+    const waarschuwing = _calls.onvolledig
+      ? '<div class="ronde zacht">' + esc(_calls.onvolledig) + '</div>' : '';
+
+    return kop + waarschuwing + _calls.data.map((c, i) => {
       const geweest = c.start && new Date(c.start).getTime() < nuMs;
       const taak = taakVoorNummer(c.telefoon);
+      // WAT HIER NIET MEER DOORGAAT KRIJGT GEEN KNOPPEN. Een Zoom-knop bij een
+      // call die verzet is nodigt uit tot een gesprek dat niemand verwacht, en
+      // de uitkomst hoort bij de nieuwe datum.
+      //
+      // GRIJS BETEKENT NIET ONAANRAAKBAAR. Alleen een verzetting haalt knoppen
+      // weg — een status van buiten niet. Welke knoppen mogen komt van de
+      // server (knoppenVoor in api/_lib/opvolging-dagbeeld.js); de terugval
+      // geldt voor een oudere server die het veld nog niet meestuurt.
+      const k = c.knoppen || { afronden: true, bellen: !!c.telefoon, whatsapp: !!c.telefoon, zoom: !!c.zoom_url };
       const knoppen =
-        (c.zoom_url ? '<a class="obtn zoom" href="' + esc(c.zoom_url) + '" target="_blank" rel="noopener">&#127909; Zoom</a>' : '') +
-        (c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(' + i + ')">&#9742; Bellen</button>' : '') +
-        (c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(' + i + ')">&#128172; WhatsApp</button>' : '') +
+        (k.zoom && c.zoom_url ? '<a class="obtn zoom" href="' + esc(c.zoom_url) + '" target="_blank" rel="noopener">&#127909; Zoom</a>' : '') +
+        (k.bellen && c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(' + i + ')">&#9742; Bellen</button>' : '') +
+        (k.whatsapp && c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(' + i + ')">&#128172; WhatsApp</button>' : '') +
         // AL AFGEROND? DAN STAAT DAT ER, en geen knop die uitnodigt om het nog
         // eens te doen. Dave rondt er 's ochtends twee af, kijkt 's middags
         // opnieuw, en moet kunnen zien welke twee — anders doet hij het dubbel
@@ -1813,10 +1837,15 @@
         ((c.afrond && c.afrond.toon === 'uitkomst')
           ? '<span class="obtn klaar" title="' + esc('Afgerond' + (c.afrond.vastgelegd.op ? ' op ' + nl(iso(c.afrond.vastgelegd.op)) : '')) + '">'
             + '&#10003; Afgerond &middot; ' + esc(c.afrond.vastgelegd.label) + '</span>'
-          : '<button class="obtn" onclick="window.__opvCallAfrond(' + i + ')">Afronden &rarr;</button>');
-      return '<div class="call' + (geweest ? ' geweest' : '') + '">' +
+          : (k.afronden ? '<button class="obtn" onclick="window.__opvCallAfrond(' + i + ')">Afronden &rarr;</button>' : ''));
+      const dood = c.doorgehaald === true;
+      // ALLEEN HET AGENDAFEIT. Dit label zegt 'verzet naar 15 september' en
+      // verder niets: een uitkomst tonen doet uitsluitend de afrondchip
+      // hierboven, en die leest alleen wat Dave zelf heeft vastgelegd.
+      const label = c.label ? ' <span class="tag t-grey">' + esc(c.label) + '</span>' : '';
+      return '<div class="call' + (geweest ? ' geweest' : '') + (dood ? ' vervallen' : '') + '">' +
         '<div class="tijd">' + esc(c.tijd) + '</div>' +
-        '<div class="who"><div class="nm">' + esc(c.naam) + '</div>' +
+        '<div class="who"><div class="nm">' + esc(c.naam) + label + '</div>' +
         '<div class="sub">' + esc(c.telefoon || 'geen nummer bekend') +
           (taak ? ' &middot; staat al in je lijst' : '') + '</div>' +
         belRegel(taak, dag) + '</div>' +
