@@ -30,8 +30,10 @@ import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
-  beoordeelPrintweergave, controleerBrug, bouwMail, OK, FOUT, NIET_GEMETEN,
+  beoordeelPrintweergave, controleerBrug, controleerWachtrij, bouwMail,
+  OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
+import { WACHT_UREN } from './_lib/opvolging-doorrol.js';
 
 const ZONE = 'Europe/Amsterdam';
 const MAIL_VAN = 'leads@deforexopleiding.nl';
@@ -97,6 +99,23 @@ export default async function handler(req, res) {
 
   // ── 5 · De WhatsApp-brug ─────────────────────────────────────────────────
   uitkomsten.push(await meetBrug());
+
+  // ── 6 · De wachtrij ──────────────────────────────────────────────────────
+  // Leest ALLE wachtenden, ook die met een lege klok — juist die rijen zijn het
+  // geval dat nooit vanzelf oplost. Een filter op 'agenda_doorgestuurd_at is
+  // not null' zou ze wegpoetsen en de controle een vals groen geven.
+  try {
+    const { data: taken, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, naam, status, agenda_doorgestuurd_at, bron_ref')
+      .in('status', ['wacht_inplanning', 'wacht_verplaatsing'])
+      .limit(500);
+    if (error) throw error;
+    uitkomsten.push(controleerWachtrij({ taken: taken || [], nu: Date.now(), wachtUren: WACHT_UREN }));
+  } catch (e) {
+    uitkomsten.push({ naam: 'wachtrij', staat: FOUT, getallen: { fout: kort(e) },
+      uitleg: 'De wachtrij was niet te lezen: ' + kort(e) });
+  }
 
   // ── De mail ──────────────────────────────────────────────────────────────
   const { subject, text } = bouwMail({ uitkomsten, dag: vandaag });

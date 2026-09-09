@@ -1,6 +1,6 @@
 // api/_lib/opvolging-gezondheid.js
 //
-// DE VIJF CONTROLES, ALS PURE FUNCTIES.
+// DE ZES CONTROLES, ALS PURE FUNCTIES.
 //
 // Deze week stonden zes keer alle tests groen terwijl productie stuk was, en
 // elke keer was de TEST het probleem: hij raakte iets aan wat lijkt op het
@@ -263,6 +263,101 @@ export function controleerBrug({ status, fout, configFout }) {
   }
   return uit('brug', OK, { verbonden: true, gezien, doorgelaten: door },
     `${door} van ${gezien} gebeurtenissen doorgelaten.`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6 · WACHTRIJ — komt er ooit iemand terug uit 'wacht'?
+// ═══════════════════════════════════════════════════════════════════════════
+// De 48-uurcontrole (api/cron-opvolging-wacht-check.js) draait elk uur en heeft
+// in productie nog NOOIT iets gedaan: één taak kreeg ooit een agenda, er is nul
+// keer een afspraak gevonden en nul keer iemand teruggezet. De beslisfunctie is
+// met de hand nagerekend tegen een gezette klok en klopt in alle vijf gevallen,
+// maar dat zegt niets over de vraag of die cron 's nachts ook echt draait en
+// schrijft. Dat blijkt pas uit de eerste echte ronde.
+//
+// Deze controle vangt het geval waarin dat NIET gebeurt. Een kaart die blijft
+// staan valt namelijk uit alle beelden weg: hij staat niet in Daves daglijst
+// (die filtert op status 'open') en er is niets dat hem terugbrengt. Zonder deze
+// controle merken we het pas als Maxim het toevallig ziet.
+//
+// TWEE MANIEREN WAAROP EEN KAART BLIJFT HANGEN, en ze hebben elk een eigen
+// oorzaak — vandaar dat ze apart geteld worden:
+//
+//   verlopen     — de klok is af (langer dan WACHT_UREN plus marge) en de kaart
+//                  staat er nog. De cron heeft niet gedraaid, of is op deze rij
+//                  gestruikeld: hij vangt fouten per taak op en gaat door, dus
+//                  één rij kan stil blijven liggen terwijl de rest goed gaat.
+//   zonder_klok  — er is geen doorstuurmoment. beslisWachtInplanning() geeft dan
+//                  bewust 'wacht' terug ("laat het opvallen"), maar er was tot nu
+//                  toe niets dat het liet opvallen: zo'n kaart wacht voor altijd,
+//                  want er is geen klok die kan aflopen. Hier geldt geen marge —
+//                  status en tijdstip worden in één schrijfactie gezet, dus dit
+//                  is geen wedloop maar een kapotte rij.
+//
+// WAAROM DIT NIET beslisWachtInplanning() AANROEPT. Een controle die dezelfde
+// functie gebruikt als het ding dat hij bewaakt, keurt zijn eigen huiswerk goed:
+// een fout in die functie zou hier precies zo meelopen en dus onzichtbaar zijn.
+// Dat is exact de vorm van vals groen die deze hele bewaking moet uitsluiten.
+// Daarom kijkt dit alleen naar het FEIT — deze rij staat er nog en zijn klok is
+// af — en niet naar wat de beslisser ervan vindt.
+//
+// De marge is er omdat de cron per uur draait: één uur vertraging is normaal,
+// drie uur betekent dat er minstens drie rondes zijn overgeslagen.
+
+export const WACHT_MARGE_UREN = 3;
+
+const KLOK_VAN = {
+  wacht_inplanning  : (t) => (t && t.agenda_doorgestuurd_at) || null,
+  wacht_verplaatsing: (t) => (t && t.bron_ref && t.bron_ref.verplaatst_gemeld_at) || null,
+};
+
+export function controleerWachtrij({ taken, nu, wachtUren }) {
+  const rijen = Array.isArray(taken) ? taken : [];
+  if (!Number.isFinite(wachtUren)) {
+    // Zonder termijn is er geen grens, en dan zou (nu - klok) >= NaN voor ELKE
+    // kaart onwaar zijn: alles telt als gezond wachtend en de controle meldt
+    // opgewekt dat het goed gaat. Een kapotte aanroep moet luid falen, niet
+    // stilletjes groen worden — dat is dezelfde val als een 401 die als 'niet
+    // gemeten' werd geboekt.
+    return uit('wachtrij', FOUT, { bekeken: rijen.length, wacht_uren: String(wachtUren) },
+      'De controle is aangeroepen zonder geldige wachttermijn. Er is niets beoordeeld.');
+  }
+  const grensUren = wachtUren + WACHT_MARGE_UREN;
+  if (rijen.length === 0) {
+    // Nul wachtenden is niet 'gezond', het is 'niets gezien'. Precies de stand
+    // van vandaag: de wacht-check heeft nog nooit iets te doen gehad, en daarom
+    // weten we ook niet of hij werkt.
+    return uit('wachtrij', NIET_GEMETEN, { bekeken: 0, grens_uren: grensUren },
+      'Er staat niemand op wacht_inplanning of wacht_verplaatsing. Er valt dus niets te controleren — dat is iets anders dan goed.');
+  }
+
+  const verlopen = [];
+  const zonderKlok = [];
+  let wachtend = 0;
+
+  for (const t of rijen) {
+    const lees = KLOK_VAN[String((t && t.status) || '')];
+    if (!lees) continue;                       // andere status: niet van ons.
+    const stempel = lees(t);
+    const ms = stempel ? new Date(stempel).getTime() : NaN;
+    const wie = `${(t && t.naam) || '?'} (${t.status})`;
+    if (!Number.isFinite(ms)) { zonderKlok.push(wie); continue; }
+    const uren = Math.floor((nu - ms) / 3600000);
+    if (uren >= grensUren) verlopen.push(`${wie} — ${uren} uur`);
+    else wachtend += 1;
+  }
+
+  const vast = verlopen.length + zonderKlok.length;
+  return uit('wachtrij', vast ? FOUT : OK, {
+    bekeken: rijen.length,
+    verlopen: verlopen.length,
+    zonder_klok: zonderKlok.length,
+    wachtend,
+    grens_uren: grensUren,
+    namen: [...verlopen, ...zonderKlok].slice(0, 12),
+  }, vast
+    ? `${vast} kaart(en) komen niet meer uit de wachtrij: ${verlopen.length} staan er langer dan ${grensUren} uur, ${zonderKlok.length} hebben helemaal geen doorstuurmoment. De 48-uurcontrole heeft ze niet opgepakt; ze staan op geen enkele lijst meer.`
+    : `Alle ${wachtend} wachtende kaart(en) staan binnen ${grensUren} uur en hebben een klok die loopt.`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
