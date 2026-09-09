@@ -373,10 +373,17 @@ export default async function handler(req, res) {
     let callItems = [];
     let totalCalls = 0;
     if (resultaat === 'alle' && !bron) {
+      // 2026-09-09 fix — marker voor "echte GHL-call" is ghl_appointment_id
+      // NOT NULL, niet ghl_calendar_id. Een appointment dat via GHL is
+      // aangemaakt heeft altijd een appointment-id; de calendar-id kan
+      // ontbreken (import-restanten, oude rijen, GHL-sync-hikjes). De
+      // vorige guard sloot Gauthier Dhooge (appt a47c9fec-…, calendar_id
+      // NULL, status completed) én andere legitieme GHL-afspraken uit
+      // van de kennismakingsgesprekken-agenda.
       let cq = supabaseAdmin
         .from('follow_up_appointments')
-        .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, ghl_calendar_id, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
-        .not('ghl_calendar_id', 'is', null)
+        .select('id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, ghl_calendar_id, ghl_appointment_id, bevestigd_at, bevestiging_sent_at, reminder_24u_at, reminder_2u_at, reminder_30m_at, zoom_5min_at')
+        .not('ghl_appointment_id', 'is', null)
         .limit(limit);
       if (useRange) {
         cq = cq.gte('scheduled_at', rawFrom).lt('scheduled_at', rawTo).order('scheduled_at', { ascending: true });
