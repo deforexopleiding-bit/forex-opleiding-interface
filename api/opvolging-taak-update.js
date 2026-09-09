@@ -8,6 +8,8 @@
 //                                                telt dat als uitgesteld_zonder_poging
 //   actie 'ingepland'       { afspraak_ref }   → status ingepland
 //   actie 'agenda_gestuurd' → status wacht_inplanning + agenda_doorgestuurd_at
+//   actie 'terug_in_lijst'  → het spiegelbeeld daarvan: status open,
+//                             agenda_doorgestuurd_at leeg, due vandaag
 //   actie 'archiveer'       { archief_reden }  → status gearchiveerd (reden verplicht)
 //   actie 'notitie'         { notitie }
 //
@@ -15,8 +17,23 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { terugInLijstPatch } from './_lib/opvolging-terug-in-lijst.js';
 
 const isoDag = (d) => new Date(d).toISOString().slice(0, 10);
+
+// DE DAG ZOALS DAVE HEM ZIET, niet zoals UTC hem telt.
+//
+// `isoDag` hierboven is UTC en geeft tussen 00:00 en 02:00 Amsterdamse tijd de
+// dag van gisteren terug — dezelfde val die de nachtelijke doorrol een dag liet
+// overslaan (zie api/_lib/opvolging-doorrol.js). Voor 'terug in de lijst' is
+// dat het verschil tussen een kaart die vandaag op het scherm staat en een die
+// er gisteren op had moeten staan.
+//
+// `isoDag` zelf laat ik staan: die bepaalt ook het telvenster van 'verplaats',
+// en dat is een aparte wijziging met een eigen meting.
+const dagInZone = (ms) => new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(new Date(ms));
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -80,6 +97,16 @@ export default async function handler(req, res) {
     } else if (b.actie === 'agenda_gestuurd') {
       patch.status = 'wacht_inplanning';
       patch.agenda_doorgestuurd_at = new Date().toISOString();
+
+    } else if (b.actie === 'terug_in_lijst') {
+      // HET SPIEGELBEELD VAN 'agenda_gestuurd', en dat is meer dan een datum.
+      // De knop postte tot 9 september 'verplaats' met due=vandaag; dat liet de
+      // status op wacht_inplanning staan en deed dus niets zichtbaars — de due
+      // stond al op vandaag. Sofia Vanat en Shudino Andrade zaten daardoor vast
+      // zonder weg terug. Zie _lib/opvolging-terug-in-lijst.js.
+      const terug = terugInLijstPatch({ vandaag: dagInZone(Date.now()) });
+      if (!terug) return res.status(400).json({ error: 'geen geldige dag' });
+      Object.assign(patch, terug);
 
     } else if (b.actie === 'archiveer') {
       // Archiveren heeft een eigen sleutel: het haalt een lead definitief uit

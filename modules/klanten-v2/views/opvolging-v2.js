@@ -4080,8 +4080,14 @@
   };
 
   window.__opvTerug = async (id) => {
+    // NIET 'verplaats'. Die actie verzet alleen de datum, en omdat de due van
+    // een wachtende kaart al op vandaag staat deed deze knop letterlijk niets:
+    // de status bleef wacht_inplanning en agenda_doorgestuurd_at bleef gevuld.
+    // Sofia Vanat en Shudino Andrade zaten daardoor vast zonder weg terug.
+    // 'terug_in_lijst' draait de hele toestand terug — zie
+    // api/_lib/opvolging-terug-in-lijst.js.
     try {
-      await post('/api/opvolging-taak-update', { taak_id: id, actie: 'verplaats', due: vandaag() });
+      await post('/api/opvolging-taak-update', { taak_id: id, actie: 'terug_in_lijst' });
       leegTakenCache(); render();
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
   };
