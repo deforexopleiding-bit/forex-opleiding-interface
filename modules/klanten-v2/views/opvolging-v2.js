@@ -1192,6 +1192,20 @@
     _calls.data = null; _calls.key = null; _calls.error = null; _calls.achterstand = [];
   };
 
+  /**
+   * Een korte melding onderin. Via window.KV.toast, want dit bestand heeft
+   * geen eigen toast.
+   *
+   * Twee bestaande aanroepen deden `showToast(...)` zonder dat die naam hier
+   * bestaat — dat is een ReferenceError op het moment dat je 'm nodig hebt, en
+   * dus precies dan geen melding. Eén helper, met een guard, en een alert als
+   * laatste redmiddel: een melding die niemand ziet is geen melding.
+   */
+  function opvToast(msg) {
+    if (window.KV && typeof window.KV.toast === 'function') { window.KV.toast(msg); return; }
+    alert(msg);
+  }
+
   async function post(url, body) {
     _ui.bezig = true;
     try {
@@ -3517,8 +3531,8 @@
             : 'Het event is dichtbij, dus dit is de laatste ronde. De kaart gaat dicht.',
           "window.__opvAanmeldActie('bevestigd')") +
         opt('&#128172;', 'var(--o-grns)', 'Gesprek gehad', 'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.', "window.__opvAanmeldActie('gesprek_gehad')") +
-        opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Archiveren. Hij moet dan ook in de eventmodule op geannuleerd.', "window.__opvAanmeldActie('geen_interesse')") +
-        opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Wacht op bevestiging; na 48 uur zonder nieuwe aanmelding komt hij terug.', "window.__opvAanmeldActie('verplaatst')");
+        opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Kaart dicht, en in de eventmodule op Komt niet.', "window.__opvAanmeldActie('geen_interesse')") +
+        opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Kies het nieuwe event; hij staat daar meteen als bevestigd.', "window.__opvVerplaatsNaarEvent()");
       return scrim('Wat nu met ' + esc(t.naam) + '?',
         eventKopTekst(e) || 'Aanmelding', body);
     }
@@ -3549,20 +3563,23 @@
           '<textarea id="opv-an" rows="3" placeholder="Bijvoorbeeld: alles goed verlopen, komt zeker"></textarea>' +
           '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'gesprek_gehad\')">Vastleggen en afronden</button>');
       }
-      const watHeet = u === 'geen_interesse' ? 'Geen interesse' : 'Verplaatst naar een ander event';
+      // GEEN INTERESSE — ÉÉN KNOP, EN DE EVENTMODULE GAAT MEE.
+      //
+      // Hier stonden twee knoppen ('Archiveren én in de eventmodule
+      // annuleren' / 'Alleen archiveren') met een gele waarschuwing erboven.
+      // Dat maakte van één handeling een keuze, en de tweede knop liet de
+      // aanwezigenlijst achter met iemand die net had afgezegd. Dave hoeft
+      // hier niets te kiezen: afmelden is afmelden, op allebei de plekken.
       const uitleg = u === 'geen_interesse'
-        ? 'De kaart gaat dicht.'
+        ? 'De kaart gaat dicht. In de eventmodule komt hij op \'Komt niet\' en zijn inschrijving wordt geannuleerd.'
         : 'De kaart wacht op bevestiging. Staat deze persoon binnen 48 uur nergens als aanmelding op een ander event, dan komt hij terug in je lijst.';
+      const watHeet = u === 'geen_interesse' ? 'Geen interesse' : 'Verplaatst naar een ander event';
+      const knopTekst = u === 'geen_interesse' ? 'Vastleggen &mdash; komt niet' : 'Vastleggen';
       return scrim(watHeet, esc(t.naam),
-        '<div class="warn"><b>Zet hem ook in de eventmodule op geannuleerd.</b> ' +
-        'Anders blijft hij daar meetellen als aanmelding. De knop hieronder doet dat meteen ' +
-        'voor je &mdash; en gebeurt het niet, dan valt het later alsnog op.</div>' +
         '<div class="ronde">' + uitleg + '</div>' +
         '<textarea id="opv-an" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
-        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'' + esc(u) + '\', true)">' +
-        'Archiveren &eacute;n in de eventmodule annuleren</button>' +
-        '<button class="obtn" style="width:100%;margin-top:8px" onclick="window.__opvAanmeldBevestig(\'' + esc(u) + '\', false)">' +
-        'Alleen archiveren</button>');
+        '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'' + esc(u) + '\')">' +
+        knopTekst + '</button>');
     }
 
     if (m.soort === 'watnu') {
@@ -4311,34 +4328,74 @@
     render();
   };
 
-  window.__opvAanmeldBevestig = async (uitkomst, ookAnnuleren) => {
+  window.__opvAanmeldBevestig = async (uitkomst) => {
     const m = _ui.modal; if (!m || _ui.bezig) return;
     const el = document.getElementById('opv-an');
     const notitie = (el && el.value || '').trim();
     if (uitkomst === 'gesprek_gehad' && !notitie) { alert('Schrijf eerst op wat er gezegd is.'); return; }
     try {
       const antwoord = await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: uitkomst, notitie: notitie || null });
-      // De belstatus in de eventmodule hangt aan dezelfde knop, maar wordt daar
-      // fail-soft geschreven: de bevestiging zelf mag er niet op stuklopen.
-      // Lukte het niet, dan blijft daar '— nog niet gebeld —' staan en belt de
-      // volgende hem opnieuw; dat is precies het soort stilte dat we niet
-      // willen, dus zeg het meteen.
+
+      // ── DE EVENTMODULE GAAT MEE, EN FALEN MAG NOOIT STIL ───────────────
+      // Allebei de schrijfacties hieronder zijn fail-soft op de server: de
+      // kaart staat op dat moment al vast en mag er niet op stuklopen. Maar
+      // een mislukking die niemand ziet laat de aanwezigenlijst achter met
+      // een verkeerde stand, en dan belt de volgende dezelfde persoon nog
+      // eens. Dus: hier altijd een melding.
       if (antwoord && antwoord.belstatus === 'mislukt') {
         alert('Bevestigd in Opvolging, maar de belstatus in de eventmodule kon niet op "bevestigd" gezet worden. Zet hem daar even met de hand.');
       }
-      // De knop die het meteen in de eventmodule doet. Mislukt dat, dan is de
-      // kaart wél weg — daarom een duidelijke melding en geen stilte; de
-      // 48-uurcontrole en de signaleringslijst vangen de rest op.
-      if (ookAnnuleren) {
-        try {
-          await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: 'annuleer_in_event' });
-        } catch (e) {
-          alert('De kaart is gearchiveerd, maar in de eventmodule op geannuleerd zetten lukte niet: ' +
-            (e.message || 'onbekende fout') + '\nDoe dat daar even met de hand.');
-        }
+      if (antwoord && antwoord.eventmodule === 'mislukt') {
+        alert('Afgemeld in Opvolging, maar in de eventmodule kon hij niet op "Komt niet" gezet worden. Zet hem daar even met de hand.');
       }
       _ui.modal = null; leegTakenCache(); render();
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
+  };
+
+  /**
+   * VERPLAATSEN NAAR EEN ANDER EVENT — dezelfde keuzelijst als de eventmodule.
+   *
+   * Geen tussenvenster meer: de vraag is 'naar welk event', en die stelt de
+   * keuzelijst zelf. Annuleren daar betekent dat er niets gebeurt en de kaart
+   * gewoon blijft staan — dat is de veilige uitkomst, want er is dan ook niets
+   * beloofd aan de lead.
+   *
+   * De keuzelijst komt uit events-v2.js (window.KV.evKiesAnderEvent). Beide
+   * views staan in dezelfde pagina, dus die functie bestaat. Bestaat hij toch
+   * niet, dan zeggen we dat — een knop die stil niets doet is erger dan een
+   * knop die uitlegt waarom.
+   */
+  window.__opvVerplaatsNaarEvent = async () => {
+    const m = _ui.modal; if (!m || _ui.bezig) return;
+    const t = zoekTaak(m.taakId);
+    if (!t) { alert('Deze kaart is niet meer te vinden. Ververs even.'); return; }
+    if (!window.KV || typeof window.KV.evKiesAnderEvent !== 'function') {
+      alert('De eventlijst is hier niet beschikbaar. Ververs de pagina en probeer opnieuw.');
+      return;
+    }
+
+    const ev = evVan(t);
+    const doel = await window.KV.evKiesAnderEvent({ eventId: ev.event_id || null, naam: t.naam || null });
+    if (!doel) return;   // annuleren: er gebeurt niets
+
+    try {
+      const antwoord = await post('/api/opvolging-aanmelding-actie', {
+        taak_id: m.taakId, actie: 'verplaats_naar_event', target_event_id: doel,
+      });
+      const waarheen = (antwoord && antwoord.event_titel) || 'het nieuwe event';
+      opvToast(antwoord && antwoord.slaapt_tot
+        ? 'Verplaatst naar ' + waarheen + ' — bevestigd, komt terug op ' + nl(antwoord.slaapt_tot)
+        : 'Verplaatst naar ' + waarheen + ' — bevestigd');
+      if (antwoord && antwoord.belstatus === 'mislukt') {
+        alert('Verplaatst, maar de belstatus op het nieuwe event kon niet op "bevestigd" gezet worden. Zet hem daar even met de hand.');
+      }
+      _ui.modal = null; leegTakenCache(); render();
+    } catch (e) {
+      // De letterlijke melding van de server: 'Doel-event is vol (12/12 met
+      // ingevulde vragenlijst)' zegt precies wat er aan de hand is. De kaart
+      // blijft staan.
+      alert('Verplaatsen mislukt: ' + (e.message || 'onbekende fout'));
+    }
   };
 
   window.__opvWeek = (stap) => {
@@ -4597,7 +4654,7 @@
     const van = (document.getElementById('opv-rap-van') || {}).value || '';
     const tot = (document.getElementById('opv-rap-tot') || {}).value || '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(van) || !/^\d{4}-\d{2}-\d{2}$/.test(tot) || tot < van) {
-      showToast('Kies een begindatum en een einddatum, met het einde niet vóór het begin.', 'error');
+      opvToast('Kies een begindatum en een einddatum, met het einde niet vóór het begin.');
       return;
     }
     _ui.rapportEigen = { van, tot };

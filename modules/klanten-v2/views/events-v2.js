@@ -1745,10 +1745,17 @@
       (box, close) => { const ok = box.querySelector('._ev-ok'); ok.onclick = () => close(true); requestAnimationFrame(() => ok.focus()); }
     );
   }
-  function _evMovePicker(events) {
+  function _evMovePicker(events, naam) {
     const opts = events.map((e) => `<option value="${esc(e.id)}">${esc(e.title || '(zonder titel)')} — ${esc(_fmtDateTime(e.starts_at) || 'datum onbekend')}</option>`).join('');
+    // De naam erbij als de aanroeper 'm kent. Vanuit de aanmeldkaart is dat
+    // het enige wat zegt over WIE je aan het verplaatsen bent — daar staat
+    // geen rij omheen zoals in de aanwezigenlijst.
+    const wie = naam
+      ? `<div style="font-size:13.5px;font-weight:650;color:var(--text-1,#10284A);margin:0 0 8px">${esc(naam)}</div>`
+      : '';
     return _evDlgBase(
       `<div style="font-size:16px;font-weight:700;color:var(--text-1,#10284A);margin:0 0 8px">Verplaatsen naar ander event</div>
+       ${wie}
        <div style="font-size:13.5px;color:var(--text-2,#4a5568);line-height:1.55;margin:0 0 12px">Kies het event waar je deze deelnemer naartoe verplaatst.</div>
        <select class="_ev-sel" style="width:100%;padding:10px 12px;border:1.5px solid var(--border,#d6dae4);border-radius:10px;font-size:14px;background:var(--surface,#fff);color:var(--text-1,#10284A);outline:none;margin:0 0 16px;box-sizing:border-box">${opts}</select>
        <div style="display:flex;justify-content:flex-end;gap:10px">
@@ -1821,20 +1828,46 @@
       confirmMsg: 'De vragenlijst-link (deelnemer maakt z\'n inschrijving definitief) via WhatsApp + e-mail versturen?',
       label: 'Vragenlijst',
     });
-  window.__evAttMove = async (attId, eventId) => {
-    // Nette keuzelijst i.p.v. native prompt om een event-UID. Actieve events
-    // ophalen (draft + published, chronologisch) en het huidige event
-    // uitsluiten; verplaatsen via het bestaande events-attendee-move endpoint.
+  /**
+   * DE KEUZELIJST 'VERPLAATSEN NAAR ANDER EVENT' — één keer, voor twee modules.
+   *
+   * Stond binnen __evAttMove en was daarmee alleen bruikbaar vanuit de
+   * aanwezigenlijst. De aanmeldkaart in Opvolging heeft precies dezelfde vraag
+   * te stellen, aan precies dezelfde lijst. Een tweede keuzelijst zou binnen
+   * een maand een ander filter hebben (wel of geen concepten, wel of niet het
+   * huidige event eruit) en dan biedt hetzelfde scherm twee verschillende
+   * verzamelingen aan.
+   *
+   * Hangt aan window.KV omdat de opvolgmodule een eigen script is: beide views
+   * staan in modules/klanten-v2/index.html, dus dit bestaat zodra de pagina
+   * geladen is.
+   *
+   * @returns {Promise<?string>} het gekozen event-id, of null bij annuleren of
+   *   als er niets te kiezen valt. Null is hier geen fout: de aanroeper laat
+   *   de kaart dan gewoon staan.
+   */
+  window.KV = window.KV || {};
+  window.KV.evKiesAnderEvent = async ({ eventId, naam } = {}) => {
     let events = [];
     try {
       const j = await window.KV.authedJson('/api/events-list?status=draft,published&limit=200', { method: 'GET' });
       events = (j?.items || []).filter((e) => e.id !== eventId);
     } catch (e) {
       await _evAlert('Kon eventlijst niet laden', e?.message || 'Onbekende fout.', { danger: true });
-      return;
+      return null;
     }
-    if (!events.length) { await _evAlert('Geen ander event beschikbaar', 'Er zijn geen andere actieve events om naartoe te verplaatsen.'); return; }
-    const target = await _evMovePicker(events);
+    if (!events.length) {
+      await _evAlert('Geen ander event beschikbaar', 'Er zijn geen andere actieve events om naartoe te verplaatsen.');
+      return null;
+    }
+    return await _evMovePicker(events, naam);
+  };
+
+  window.__evAttMove = async (attId, eventId) => {
+    // Nette keuzelijst i.p.v. native prompt om een event-UID. Zelfde lijst en
+    // zelfde venster als de aanmeldkaart in Opvolging gebruikt; verplaatsen
+    // via het bestaande events-attendee-move endpoint.
+    const target = await window.KV.evKiesAnderEvent({ eventId });
     if (!target) return;
     try {
       await window.KV.authedJson('/api/events-attendee-move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attendee_id: attId, target_event_id: target }) });
