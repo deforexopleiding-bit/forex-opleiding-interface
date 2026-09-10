@@ -190,10 +190,17 @@ test('niet weten waar je moet kijken is NIET GEMETEN, geen fout en zeker geen ok
 
 test('de LID-storing van vanochtend was opgevallen', () => {
   // 92 gezien, 1 doorgelaten — maar zelfs 0 doorgelaten hield de brug 'verbonden'.
+  //
+  // DE SLEUTEL IS `gebeurtenissen`, EN DAT IS GEEN DETAIL. Deze tests voedden
+  // controleerBrug met `{ tellers: … }`, een vorm die de echte brug nooit
+  // teruggeeft (server.js: `gebeurtenissen: wa.tellers()`). Ze waren dus groen
+  // terwijl de controle op productie ALTIJD 'niet gemeten' zei en deze hele
+  // FOUT-tak nooit kon afgaan. Zelfde les als bij ronde A: een test die de
+  // verkeerde vorm vastlegt maakt de bug onzichtbaar.
   const r = controleerBrug({ status: {
     verbonden: true,
-    tellers: { gezien: { message: 21, message_create: 38, message_ack: 33 },
-               doorgelaten: { message: 0, message_create: 0, message_ack: 0 } },
+    gebeurtenissen: { gezien: { message: 21, message_create: 38, message_ack: 33 },
+                      doorgelaten: { message: 0, message_create: 0, message_ack: 0 } },
   } });
   assert.equal(r.staat, FOUT);
   assert.equal(r.getallen.gezien, 92);
@@ -201,22 +208,54 @@ test('de LID-storing van vanochtend was opgevallen', () => {
 });
 
 test('een brug die eruit ligt is fout', () => {
-  assert.equal(controleerBrug({ status: { verbonden: false, tellers: {} } }).staat, FOUT);
+  const r = controleerBrug({ status: {
+    verbonden: false,
+    gebeurtenissen: { gezien: { message: 3 }, doorgelaten: { message: 0 } },
+  } });
+  assert.equal(r.staat, FOUT);
+  assert.match(r.uitleg, /niet verbonden/);
 });
 
 test('verbonden maar niets gezien is NIET GEMETEN', () => {
   // Zondagochtend: er is niets gebeurd. Dat is geen bewijs dat het werkt.
-  const r = controleerBrug({ status: { verbonden: true, tellers: { gezien: {}, doorgelaten: {} } } });
+  const r = controleerBrug({ status: { verbonden: true, gebeurtenissen: { gezien: {}, doorgelaten: {} } } });
   assert.equal(r.staat, NIET_GEMETEN);
+  assert.match(r.uitleg, /niets gezien/);
+});
+
+test('GEEN TELLERS is een eigen uitkomst — niet hetzelfde als nul gezien', () => {
+  // Een brug die dit blok helemaal niet meestuurt (oudere versie op de VPS)
+  // hebben we niet gemeten. 'Verbonden maar niets gezien' zou daar een
+  // bewering zijn over cijfers die we nooit gekregen hebben.
+  for (const status of [{ verbonden: true }, { verbonden: true, gebeurtenissen: {} }]) {
+    const r = controleerBrug({ status });
+    assert.equal(r.staat, NIET_GEMETEN, JSON.stringify(status));
+    assert.match(r.uitleg, /geen tellers terug \(andere versie\?\)/);
+  }
+});
+
+test('een oudere brug die de cijfers nog onder `tellers` zet werkt ook', () => {
+  // Terugval, want de VPS loopt altijd achter op een deploy.
+  const r = controleerBrug({ status: {
+    verbonden: true, tellers: { gezien: { message: 10 }, doorgelaten: { message: 7 } },
+  } });
+  assert.equal(r.staat, OK);
+  assert.equal(r.getallen.gezien, 10);
 });
 
 test('gezien én doorgelaten is in orde', () => {
+  // De cijfers van 10 september, zoals /status ze die dag echt teruggaf.
   const r = controleerBrug({ status: {
     verbonden: true,
-    tellers: { gezien: { message: 10 }, doorgelaten: { message: 7 } },
+    gebeurtenissen: {
+      gezien     : { message: 87, message_create: 165, message_ack: 149 },
+      doorgelaten: { message: 23, message_create: 36,  message_ack: 59  },
+    },
   } });
   assert.equal(r.staat, OK);
-  assert.equal(r.getallen.doorgelaten, 7);
+  assert.equal(r.getallen.gezien, 401);
+  assert.equal(r.getallen.doorgelaten, 118);
+  assert.match(r.uitleg, /118 van 401 gebeurtenissen doorgelaten/);
 });
 
 // Idem: 'timeout' is een storing. Deze test gaat over de niet-geconfigureerde brug.
@@ -331,7 +370,7 @@ test('meetBrug stuurt X-Brug-Secret uit WHATSAPP_BRUG_SECRET — de namen die de
   globalThis.fetch = async (url, opties) => {
     gezien = { url: String(url), headers: opties?.headers || {} };
     return { ok: true, status: 200, json: async () => ({
-      verbonden: true, tellers: { gezien: { message: 9 }, doorgelaten: { message: 9 } } }) };
+      verbonden: true, gebeurtenissen: { gezien: { message: 9 }, doorgelaten: { message: 9 } } }) };
   };
   try {
     const { meetBrug } = await import('../api/cron-opvolging-gezondheid.js');
