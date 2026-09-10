@@ -14,6 +14,11 @@
 //                           daarna het bewijs op. Ook hier vraag_annuleren.
 //   'annuleer_in_event'   — zet event_attendees.status op 'geannuleerd'.
 //
+// 'bevestigd' zet daarnaast de belstatus van de deelnemer in de eventmodule op
+// 'bevestigd'. Zonder dat blijft daar '— nog niet gebeld —' staan terwijl Dave
+// die persoon net aan de lijn had; op 10 september stonden 12 van de 18
+// bevestigingen daar zo. Zie zetBelstatusBevestigd() onderaan.
+//
 // 'bevestigd' is de meest voorkomende uitkomst en tegelijk de enige die geen
 // eindpunt is. Wie ruim voor het event bevestigt moet vandaag uit de lijst maar
 // vier dagen voor het event terugkomen voor de reminder-call: niet meer met de
@@ -135,10 +140,17 @@ export default async function handler(req, res) {
 
       const { error } = await supabaseAdmin.from('opvolging_taken').update(patch).eq('id', taak.id);
       if (error) throw new Error(error.message);
+
+      // Pas nadat de kaart vaststaat: de eventmodule mag nooit 'bevestigd'
+      // tonen voor een kaart die zelf niet is weggeschreven. Andersom is wel
+      // te overzien — de view vertelt het dan aan Dave.
+      const belstatus = await zetBelstatusBevestigd(attendeeId, nu);
+
       return res.status(200).json({
         success: true,
         slaapt_tot: nogEenRonde ? wakker : null,
         gearchiveerd: !nogEenRonde,
+        belstatus,
       });
     }
 
@@ -191,6 +203,39 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[opvolging-aanmelding-actie]', e?.message || e);
     return res.status(500).json({ error: 'Interne fout' });
+  }
+}
+
+/**
+ * Zet de belstatus van de deelnemer in de eventmodule op 'bevestigd'.
+ *
+ * Dave belt vanuit de opvolgmodule, maar de aanwezigenlijst van het event leest
+ * `event_attendees.call_status`. Werd die niet meegeschreven, dan staat daar
+ * '— nog niet gebeld —' bij iemand die net heeft bevestigd, en belt de volgende
+ * hem nog eens. Dezelfde drie velden als api/follow-up-lead-outcome.js bij
+ * outcome 'bevestigd' schrijft, zodat beide wegen dezelfde badge opleveren.
+ *
+ * De inschrijvings-`status` blijft met opzet ongemoeid: bevestigen zegt iets
+ * over de belronde, niet over aangemeld/wachtlijst/geannuleerd. Wie dat wil
+ * wijzigen gebruikt de knop 'annuleer_in_event' hierboven.
+ *
+ * Fail-soft: een fout hier mag de bevestiging niet terugdraaien. De uitkomst
+ * gaat als tekst mee in het antwoord zodat de view het aan Dave kan melden.
+ *
+ * @returns {Promise<'geen_deelnemer'|'bijgewerkt'|'mislukt'>}
+ */
+export async function zetBelstatusBevestigd(attendeeId, nuIso, db = supabaseAdmin) {
+  if (!attendeeId) return 'geen_deelnemer';
+  try {
+    const { error } = await db
+      .from('event_attendees')
+      .update({ call_status: 'bevestigd', call_status_at: nuIso, called: true })
+      .eq('id', attendeeId);
+    if (error) throw new Error(error.message);
+    return 'bijgewerkt';
+  } catch (e) {
+    console.warn('[opvolging-aanmelding-actie] belstatus (soft):', e?.message || e);
+    return 'mislukt';
   }
 }
 

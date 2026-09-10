@@ -4085,7 +4085,15 @@
     const notitie = (el && el.value || '').trim();
     if (uitkomst === 'gesprek_gehad' && !notitie) { alert('Schrijf eerst op wat er gezegd is.'); return; }
     try {
-      await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: uitkomst, notitie: notitie || null });
+      const antwoord = await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: uitkomst, notitie: notitie || null });
+      // De belstatus in de eventmodule hangt aan dezelfde knop, maar wordt daar
+      // fail-soft geschreven: de bevestiging zelf mag er niet op stuklopen.
+      // Lukte het niet, dan blijft daar '— nog niet gebeld —' staan en belt de
+      // volgende hem opnieuw; dat is precies het soort stilte dat we niet
+      // willen, dus zeg het meteen.
+      if (antwoord && antwoord.belstatus === 'mislukt') {
+        alert('Bevestigd in Opvolging, maar de belstatus in de eventmodule kon niet op "bevestigd" gezet worden. Zet hem daar even met de hand.');
+      }
       // De knop die het meteen in de eventmodule doet. Mislukt dat, dan is de
       // kaart wél weg — daarom een duidelijke melding en geen stilte; de
       // 48-uurcontrole en de signaleringslijst vangen de rest op.
