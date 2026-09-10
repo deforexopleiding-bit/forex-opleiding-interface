@@ -2,7 +2,7 @@
 //
 // Afspraak-reminders — cron-motor voor de OPSTARTSESSIE/kennismakings-calls.
 // Model van cron-toegang-aanvragen.js: auth via CRON_SECRET, live-flag,
-// nachtvenster (Amsterdam), claim-per-rij.
+// claim-per-rij. (2026-09-10: nachtvenster verwijderd, analoog aan #1557.)
 //
 // Fase A (fundament): guards/kolommen + dry-run.
 // Fase B (deze): verstuurt mail + WhatsApp per moment ZODRA
@@ -18,8 +18,10 @@
 //      en mail + WhatsApp versturen (WA op de welkom-lijn, zodat replies in
 //      dezelfde inbox landen als de toegang-flow).
 //
-// VERFIJNING: nachtvenster 21:00–08:00 Amsterdam geldt ALLEEN voor bevestiging
-// + 24u. De 2u/30m/5-min reminders gaan altijd door (tijdkritisch t.o.v. call).
+// 2026-09-10: alle momenten draaien 24/7. Bevestiging + 24u-reminder waren
+// eerder onderdrukt tussen 21:00-08:00 Amsterdam; late boekingen (bv. 22:33)
+// kregen daardoor pas de ochtend erna hun WA + mail. De vereistZoom-guard op
+// de bevestiging blijft: geen Zoom-link → geen bevestiging, ongeacht tijd.
 //
 // SCOPE: alle afspraken uit een GHL-agenda-import (ghl_calendar_id NOT NULL).
 // De toegang_aanvragen-flow (cron-toegang-aanvragen) blijft ongemoeid.
@@ -35,8 +37,6 @@ import { logAfspraakFail } from './_lib/afspraak-faillog.js';
 import { getCalendarNameMap } from './_lib/ghl-calendars.js';
 import { bouwInternMail, waVars, bronVan } from './_lib/afspraak-intern-notify.js';
 
-const NACHT_START_HOUR = 21;
-const NACHT_EIND_HOUR  = 8;
 const MAIL_FROM = 'welkom@deforexopleiding.nl'; // afspraak-mails naar leads vanaf welkom@ (zelfde lijn als de toegang-gate)
 
 // Interne "nieuwe afspraak ingeboekt"-melding (los van de lead-reminders).
@@ -46,16 +46,6 @@ const INTERN_WA_TEMPLATE = 'interne_nieuwe_afspraak_nl';
 
 function aanUit(v) {
   return ['1', 'true', 'aan', 'on', 'ja'].includes(String(v || '').trim().toLowerCase());
-}
-function amsUur(ms) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Europe/Amsterdam', hourCycle: 'h23', hour: '2-digit',
-  });
-  return Number(dtf.format(new Date(ms)));
-}
-function isNacht(nowMs) {
-  const u = amsUur(nowMs);
-  return u >= NACHT_START_HOUR || u < NACHT_EIND_HOUR;
 }
 function isoMinuut(d) {
   return new Date(d).toISOString().slice(0, 16);
@@ -141,10 +131,9 @@ async function stuurMailBevestiging(appt, moment, ctx) {
 // worden los geclaimd/gemarkeerd, zodat een mislukte WhatsApp in een volgende
 // run opnieuw wordt geprobeerd ZONDER de mail nog een keer te sturen. Zodra
 // beide toepasselijke kanalen klaar zijn, wordt bevestiging_sent_at gezet
-// (de "volledig-klaar"-guard + kandidaatfilter). Respecteert het nachtvenster.
-async function verwerkBevestiging({ rows, moment, welkomPhoneId, nachtNu, live }) {
-  const vak = { kandidaten: rows.length, onderdrukt: nachtNu ? 'nachtvenster' : null, verstuurd: 0, resultaten: [] };
-  if (nachtNu) return vak;                          // bevestiging is nachtGevoelig
+// (de "volledig-klaar"-guard + kandidaatfilter).
+async function verwerkBevestiging({ rows, moment, welkomPhoneId, live }) {
+  const vak = { kandidaten: rows.length, onderdrukt: null, verstuurd: 0, resultaten: [] };
   if (!live) { vak.resultaten = rows.map((a) => ({ id: a.id, naam: a.lead_name, dry: true })); return vak; }
 
   for (const appt of rows) {
@@ -400,10 +389,9 @@ export default async function handler(req, res) {
   const live  = aanUit(process.env.AFSPRAAK_REMINDERS_LIVE);
   const now   = new Date();
   const nowMs = now.getTime();
-  const nachtNu = isNacht(nowMs);
 
   const summary = {
-    live, verzendt: live, nacht: nachtNu,
+    live, verzendt: live,
     momenten: {}, zoom_backfill: null, errors: [],
   };
 
@@ -420,51 +408,48 @@ export default async function handler(req, res) {
 
     // 3a) BEVESTIGING — eigen, breed venster (los van haalKandidaten) + per-
     //     kanaal-markers. Zodra de Zoom-link binnen is, ongeacht hoe ver de
-    //     call vooruit ligt. Respecteert het nachtvenster.
+    //     call vooruit ligt.
     try {
       const bevMoment = MOMENTEN.find((m) => m.key === 'bevestiging');
       const bevRows = await haalBevestigingKandidaten(nowMs);
-      summary.momenten.bevestiging = await verwerkBevestiging({ rows: bevRows, moment: bevMoment, welkomPhoneId, nachtNu, live });
+      summary.momenten.bevestiging = await verwerkBevestiging({ rows: bevRows, moment: bevMoment, welkomPhoneId, live });
     } catch (e) {
       summary.errors.push({ step: 'bevestiging', error: e?.message || String(e) });
     }
 
-    // 3b) REMINDERS — ONGEWIJZIGD (near-term venster + eigen tijd-condities).
+    // 3b) REMINDERS — near-term venster + eigen tijd-condities.
     //     bevestiging is hierboven al apart afgehandeld → hier overslaan.
     for (const moment of MOMENTEN) {
       if (moment.key === 'bevestiging') continue;
-      const onderdrukNacht = moment.nachtGevoelig && nachtNu;
       const rows = kandidaten.filter((k) => moment.match(k, nowMs));
-      const vak = { kandidaten: rows.length, onderdrukt: onderdrukNacht ? 'nachtvenster' : null, verstuurd: 0, resultaten: [] };
+      const vak = { kandidaten: rows.length, onderdrukt: null, verstuurd: 0, resultaten: [] };
 
-      if (!onderdrukNacht) {
-        for (const appt of rows) {
-          if (!live) {
-            // Dry-run: alleen tonen wat verstuurd ZOU worden. Geen claim/send.
-            vak.resultaten.push({ id: appt.id, naam: appt.lead_name, dry: true });
-            continue;
-          }
-          // Live: atomair claimen vóór de sends (race-veilig).
-          const gotClaim = await claimRow(appt.id, moment.kolom);
-          if (!gotClaim) continue;
-          const r = await verstuur(appt, moment, welkomPhoneId);
-          const ietsGelukt = r.wa?.ok || r.mail?.ok;
-          if (!ietsGelukt) {
-            // Beide kanalen faalden → guard terugdraaien zodat een volgende run
-            // 'em opnieuw probeert (transiente fout mag geen bericht kosten).
-            await unclaimRow(appt.id, moment.kolom);
-          } else {
-            vak.verstuurd += 1;
-          }
-          vak.resultaten.push({ id: appt.id, wa: r.wa, mail: r.mail, teruggedraaid: !ietsGelukt });
+      for (const appt of rows) {
+        if (!live) {
+          // Dry-run: alleen tonen wat verstuurd ZOU worden. Geen claim/send.
+          vak.resultaten.push({ id: appt.id, naam: appt.lead_name, dry: true });
+          continue;
         }
+        // Live: atomair claimen vóór de sends (race-veilig).
+        const gotClaim = await claimRow(appt.id, moment.kolom);
+        if (!gotClaim) continue;
+        const r = await verstuur(appt, moment, welkomPhoneId);
+        const ietsGelukt = r.wa?.ok || r.mail?.ok;
+        if (!ietsGelukt) {
+          // Beide kanalen faalden → guard terugdraaien zodat een volgende run
+          // 'em opnieuw probeert (transiente fout mag geen bericht kosten).
+          await unclaimRow(appt.id, moment.kolom);
+        } else {
+          vak.verstuurd += 1;
+        }
+        vak.resultaten.push({ id: appt.id, wa: r.wa, mail: r.mail, teruggedraaid: !ietsGelukt });
       }
       summary.momenten[moment.key] = vak;
     }
 
     // 4) INTERNE MELDING bij nieuwe boekingen — eigen query (geen 25u-venster),
-    //    GEEN nachtvenster (interne alert voor de eigenaar), eigen live-flag.
-    //    Atomaire claim per rij op intern_notify_sent_at → precies één melding.
+    //    eigen live-flag. Atomaire claim per rij op intern_notify_sent_at →
+    //    precies één melding.
     const internLive = aanUit(process.env.AFSPRAAK_INTERN_NOTIFY_LIVE);
     const internVak = { live: internLive, kandidaten: 0, gemeld: 0, resultaten: [] };
     try {
