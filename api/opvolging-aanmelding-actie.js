@@ -277,6 +277,9 @@ async function verplaatsNaarEvent({ res, taak, attendeeId, nu, vandaag, b }) {
   if (!uitkomst.ok) return res.status(uitkomst.status).json(uitkomst.body);
 
   const nieuweAttendeeId = uitkomst.body.new_attendee && uitkomst.body.new_attendee.id;
+  // De proefvlag reist mee. De kern zet 'm op de nieuwe deelnemer; zonder deze
+  // regel zou de opvolgkaart ernaast alsnog als echt werk in Daves lijst staan.
+  const isTest = !!(uitkomst.body.new_attendee && uitkomst.body.new_attendee.is_test === true);
 
   // Het doel-event, voor de notitie en voor de reminder-dag.
   let doelEvent = null;
@@ -318,7 +321,7 @@ async function verplaatsNaarEvent({ res, taak, attendeeId, nu, vandaag, b }) {
   const wakker = eventDag ? dagPlus(eventDag, -WAKKER_DAGEN_VOOR_EVENT) : null;
   const nogEenRonde = !!wakker && wakker > vandaag;
   const nieuweTaakId = await maakBevestigdeKaart({
-    taak, nieuweAttendeeId, doelEvent, eventDag, nu, vandaag, wakker, nogEenRonde,
+    taak, nieuweAttendeeId, doelEvent, eventDag, nu, vandaag, wakker, nogEenRonde, isTest,
   });
 
   // ── 4 · De belstatus op de nieuwe rij ──────────────────────────────────
@@ -344,7 +347,7 @@ async function verplaatsNaarEvent({ res, taak, attendeeId, nu, vandaag, b }) {
  *
  * @returns {Promise<?string>} de id van de nieuwe kaart, of null.
  */
-async function maakBevestigdeKaart({ taak, nieuweAttendeeId, doelEvent, eventDag, nu, vandaag, wakker, nogEenRonde }) {
+async function maakBevestigdeKaart({ taak, nieuweAttendeeId, doelEvent, eventDag, nu, vandaag, wakker, nogEenRonde, isTest }) {
   if (!nieuweAttendeeId) return null;
   try {
     const regel = `${vandaag} · Bevestigd bij het verplaatsen: hij komt naar dit event.` +
@@ -379,6 +382,9 @@ async function maakBevestigdeKaart({ taak, nieuweAttendeeId, doelEvent, eventDag
       bevestigd_notitie: 'Bevestigd bij het verplaatsen naar dit event.',
       notitie         : regel,
       eigenaar_id     : null,
+      // Een proefdeelnemer levert een proefkaart op, geen echt werk in de
+      // dagelijkse lijst van Dave.
+      is_test         : isTest === true,
     };
     if (nogEenRonde) {
       velden.status = 'open';

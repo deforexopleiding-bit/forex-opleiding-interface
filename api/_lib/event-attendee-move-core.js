@@ -65,7 +65,8 @@ export async function verplaatsDeelnemer({ attendeeId, targetEventId, sendInvite
     .from('event_attendees')
     .select(`
       id, event_id, first_name, last_name, email, phone, status,
-      customer_id, deal_id, assessment_response_id, source, automation_enabled
+      customer_id, deal_id, assessment_response_id, source, automation_enabled,
+      is_test
     `)
     .eq('id', attendeeId)
     .maybeSingle();
@@ -126,6 +127,17 @@ export async function verplaatsDeelnemer({ attendeeId, targetEventId, sendInvite
     // Behoud automation-opt-in van de bron-rij. Stilte attendees blijven
     // stil; opt-in attendees krijgen op het nieuwe event hun automation-flow.
     automation_enabled:      source.automation_enabled !== false,
+    // EEN PROEFRIJ BLIJFT EEN PROEFRIJ.
+    //
+    // Dit ontbrak, en dat werd gemeten: een verplaatste testdeelnemer kwam op
+    // het doel-event terug als is_test=false — dus als ECHTE aanmelding. Hij
+    // telde daarna mee in de capaciteit, in de dagbeelden, in het rapport, en
+    // de automations gingen op hem af. Een test die zichzelf in productie
+    // verandert is het ergste soort test.
+    //
+    // `=== true` en niet `!== false`: bestaat de kolom op de bronrij nog niet
+    // (undefined), dan is dit een gewone aanmelding en geen proefrij.
+    is_test:                 source.is_test === true,
     created_by_user_id:      userId || null,
   };
 
@@ -137,6 +149,7 @@ export async function verplaatsDeelnemer({ attendeeId, targetEventId, sendInvite
       customer_id, deal_id, subscription_id,
       ghl_contact_id, ghl_form_submission_id, assessment_response_id,
       switched_from_event_id, switched_at,
+      is_test,
       registered_at, attended_at, no_show_marked_at, sale_at,
       follow_up_flagged, follow_up_reason,
       created_at, updated_at

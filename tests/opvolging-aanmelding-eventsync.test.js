@@ -379,7 +379,11 @@ test('de keuzelijst staat als herbruikbare GLOBALE functie', () => {
   assert.match(ev, /window\.KV\.evKiesAnderEvent = \(opties\) => window\.__evKiesAnderEvent\(opties\)/,
     'de KV-alias mag blijven, als gemak');
   assert.match(ev, /\/api\/events-list\?status=draft,published&limit=200/);
-  assert.match(ev, /\.filter\(\(e\) => e\.id !== eventId\)/, 'het huidige event valt weg');
+  // Het filteren zit sinds de polish-PR in _evToekomstigeEvents: huidige event
+  // eruit, voorbije events eruit, chronologisch. Zie
+  // tests/opvolging-verplaats-polish.test.js voor de regels zelf.
+  assert.match(ev, /events = _evToekomstigeEvents\(j\?\.items, eventId\)/,
+    'het huidige event valt weg, en alles wat al geweest is');
   assert.match(ev, /return await _evMovePicker\(events, naam\)/);
 });
 
