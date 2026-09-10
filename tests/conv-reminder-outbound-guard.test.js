@@ -34,7 +34,7 @@ test('count=0: klant stuurde 25u geleden, wij antwoorden 5u geleden → GEEN r1'
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 25 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 5 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 5 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -49,7 +49,7 @@ test('count=0: klant stuurde 30u geleden, wij antwoorden 25u geleden → WEL r1 
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 30 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 25 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 25 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -65,7 +65,7 @@ test('count=1: r1 verstuurd 30u geleden, wij handmatig antwoord 5u geleden → G
       paused_conversation_last_reminder_at: new Date(NOW - 30 * HOUR).toISOString(),
     },
     convLastInboundAt: new Date(NOW - 40 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 5 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 5 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -78,7 +78,7 @@ test('count=0: klant stuurde 25u geleden, wij hebben nooit iets gestuurd → GEE
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 25 * HOUR).toISOString(),
-    convLastOutboundAt: null,
+    convLastAnswerAt: null,
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -93,7 +93,7 @@ test('DE BUG: klant schreef als laatste en kreeg geen antwoord → GEEN r1', () 
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 25 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 40 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 40 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -106,7 +106,7 @@ test('DE KLOK: klant zweeg na ONS bericht → r1 op reminder_1_hours ná ons ber
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 30 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 21 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 21 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -117,7 +117,7 @@ test('DE KLOK: ons bericht 19u oud → nog te vroeg, ook al zweeg de klant al da
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 96 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 19 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 19 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -131,7 +131,7 @@ test('count=1: r1 verstuurd 26u geleden, geen inbound & geen latere outbound →
       paused_conversation_last_reminder_at: new Date(NOW - 26 * HOUR).toISOString(),
     },
     convLastInboundAt: new Date(NOW - 50 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 26 * HOUR).toISOString(), // r1 zelf, geen latere
+    convLastAnswerAt: new Date(NOW - 26 * HOUR).toISOString(), // r1 zelf, geen latere
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -157,7 +157,7 @@ test('count=0: klant net gereageerd (5u geleden), wij nog niet → nog te vroeg 
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: new Date(NOW - 5 * HOUR).toISOString(),
-    convLastOutboundAt: null,
+    convLastAnswerAt: null,
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -172,7 +172,7 @@ test('count=0: outbound = inbound (exact tijd) → GEEN r1 (equal telt als "wij 
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt: t,
-    convLastOutboundAt: t,
+    convLastAnswerAt: t,
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -192,7 +192,7 @@ test('BUG 1 FIX: count=1 + r1 30u geleden + wij antwoord 30u geleden → r2 mag 
       paused_conversation_last_reminder_at: new Date(NOW - 30 * HOUR).toISOString(),
     },
     convLastInboundAt:  new Date(NOW - 40 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 30 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 30 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -204,7 +204,7 @@ test('BUG 1 FIX: count=0 + inbound 25u geleden + outbound 24.5u geleden → r1 m
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 24.5 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 24.5 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -216,7 +216,7 @@ test('inbound 25u + onze outbound 23u geleden → r1, want de klok loopt vanaf o
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 23 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 23 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -232,7 +232,7 @@ test('BUG 1 FIX: configureerbaar — drempel op 48u → outbound 20u geleden nog
       paused_conversation_last_reminder_at: new Date(NOW - 30 * HOUR).toISOString(),
     },
     convLastInboundAt:  new Date(NOW - 40 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 20 * HOUR).toISOString(), // na r1 + < 48u
+    convLastAnswerAt: new Date(NOW - 20 * HOUR).toISOString(), // na r1 + < 48u
     noReplyCfg: cfg,
     nowMs: NOW,
   });
@@ -247,7 +247,7 @@ test('suppress_reminder_after_outbound_hours wordt niet meer gelezen', () => {
   const stage = determineStage({
     run: { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null },
     convLastInboundAt:  new Date(NOW - 25 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // wij net gestuurd
+    convLastAnswerAt: new Date(NOW - 1 * HOUR).toISOString(), // wij net gestuurd
     noReplyCfg: cfg,
     nowMs: NOW,
   });
@@ -264,26 +264,42 @@ test('BUG 1 FIX: klant reageerde NA r1 blijft blocker (reply-respect is ONVERAND
       paused_conversation_last_reminder_at: new Date(NOW - 30 * HOUR).toISOString(),
     },
     convLastInboundAt:  new Date(NOW - 5 * HOUR).toISOString(), // klant reageerde na r1
-    convLastOutboundAt: new Date(NOW - 100 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 100 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
   assert.equal(stage, null, 'inbound > lastReminder → altijd null, ongeacht outbound-tijd');
 });
 
-test('count=2: hebben WIJ als laatste gesproken, dan hervat rz gewoon op timing', () => {
+test('count=2: hervatten telt vanaf ONS laatste bericht, ook als dat een antwoord was', () => {
   const stage = determineStage({
     run: {
       paused_conversation_reminder_count: 2,
       paused_conversation_last_reminder_at: new Date(NOW - 25 * HOUR).toISOString(),
     },
     convLastInboundAt: new Date(NOW - 50 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // wij hebben net gestuurd
+    convLastAnswerAt: new Date(NOW - 1 * HOUR).toISOString(), // wij hebben net gestuurd
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  // Het laatste bericht is van ons (1u geleden) en de klant zweeg daarna al
-  // 50 uur — de bal ligt bij de klant. Hervatten mag, puur op timing.
+  // De bal ligt bij de klant (hij zweeg 50 uur), dus geen rz_blocked. Maar wij
+  // hebben één uur geleden nog iets gestuurd, en de aanmaanladder hervatten
+  // bovenop een gesprek dat net nog liep hoort niet. Anker = ons laatste
+  // bericht, niet alleen de vorige herinnering.
+  assert.equal(stage, null);
+});
+
+test('count=2: hervat wél zodra ONS laatste bericht ver genoeg terug ligt', () => {
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 2,
+      paused_conversation_last_reminder_at: new Date(NOW - 25 * HOUR).toISOString(),
+    },
+    convLastInboundAt: new Date(NOW - 50 * HOUR).toISOString(),
+    convLastAnswerAt:  new Date(NOW - 30 * HOUR).toISOString(),
+    noReplyCfg: DEFAULT_CFG,
+    nowMs: NOW,
+  });
   assert.equal(stage, 'rz');
 });
 
@@ -310,7 +326,7 @@ test('DE GAT-CASE: r1, r2, dan een onbeantwoord klantbericht → GEEN hervatting
       paused_conversation_last_reminder_at: new Date(NOW - 28 * HOUR).toISOString(),
     },
     convLastInboundAt:  new Date(NOW - 3  * HOUR).toISOString(), // klant, onbeantwoord
-    convLastOutboundAt: new Date(NOW - 28 * HOUR).toISOString(), // r2, ouder dan de inbound
+    convLastAnswerAt: new Date(NOW - 28 * HOUR).toISOString(), // r2, ouder dan de inbound
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
@@ -326,27 +342,29 @@ test('de blokkade is een stop, geen uitstel — ook weken later niet hervatten',
       paused_conversation_last_reminder_at: new Date(NOW - 600 * HOUR).toISOString(),
     },
     convLastInboundAt:  new Date(NOW - 500 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 600 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 600 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
   assert.equal(stage, 'rz_blocked');
 });
 
-test('zodra een mens antwoordt is de blokkade weg', () => {
+test('zodra een mens antwoordt is de blokkade weg (maar de klok begint opnieuw)', () => {
   // Zelfde run als de gat-case, maar nu heeft een medewerker gereageerd op het
-  // bericht van de klant. De bal ligt weer bij de klant, dus hervatten mag.
+  // bericht van de klant. De bal ligt weer bij de klant, dus geen rz_blocked
+  // meer — wel opnieuw wachten, want ons antwoord is nog geen uur oud.
   const stage = determineStage({
     run: {
       paused_conversation_reminder_count: 2,
       paused_conversation_last_reminder_at: new Date(NOW - 28 * HOUR).toISOString(),
     },
     convLastInboundAt:  new Date(NOW - 3 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 1 * HOUR).toISOString(), // medewerker antwoordde
+    convLastAnswerAt: new Date(NOW - 1 * HOUR).toISOString(), // medewerker antwoordde
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });
-  assert.equal(stage, 'rz', 'na menselijke opvolging hervat de ladder weer');
+  assert.notEqual(stage, 'rz_blocked', 'de blokkade is opgeheven');
+  assert.equal(stage, null, 'maar hervatten pas 24u na ons antwoord');
 });
 
 test('rz_blocked wint van de timing-check: te vroeg én bal bij ons blijft geblokkeerd', () => {
@@ -359,7 +377,7 @@ test('rz_blocked wint van de timing-check: te vroeg én bal bij ons blijft geblo
       paused_conversation_last_reminder_at: new Date(NOW - 5 * HOUR).toISOString(),
     },
     convLastInboundAt:  new Date(NOW - 1 * HOUR).toISOString(),
-    convLastOutboundAt: new Date(NOW - 5 * HOUR).toISOString(),
+    convLastAnswerAt: new Date(NOW - 5 * HOUR).toISOString(),
     noReplyCfg: DEFAULT_CFG,
     nowMs: NOW,
   });

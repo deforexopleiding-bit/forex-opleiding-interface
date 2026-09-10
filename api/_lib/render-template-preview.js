@@ -88,13 +88,13 @@ async function fetchTemplateBody(templateName, supabase) {
   const now = Date.now();
   const cached = _tplCache.get(templateName);
   if (cached && (now - cached.fetchedAt) < CACHE_TTL_MS) {
-    return cached.body_text;
+    return { body_text: cached.body_text, mapping: cached.mapping || null };
   }
 
   try {
     const { data, error } = await supabase
       .from('whatsapp_meta_templates')
-      .select('name, status, body_text')
+      .select('name, status, body_text, meta_param_mapping')
       .eq('name', templateName)
       .limit(5); // tolereert dubbelen; we pakken de eerste approved
     if (error) {
@@ -104,12 +104,51 @@ async function fetchTemplateBody(templateName, supabase) {
     const approved = (Array.isArray(data) ? data : [])
       .find((r) => String(r.status || '').toLowerCase() === 'approved');
     const body_text = approved?.body_text || null;
-    _tplCache.set(templateName, { fetchedAt: now, body_text });
-    return body_text;
+    const mapping   = approved?.meta_param_mapping?.body || null;
+    _tplCache.set(templateName, { fetchedAt: now, body_text, mapping });
+    return { body_text, mapping };
   } catch (e) {
     console.warn('[render-template-preview] exception:', e?.message || e);
     return null;
   }
+}
+
+/**
+ * Vervang NAMED placeholders ({{klant.voornaam}}) met behulp van de
+ * positie→naam-mapping van de template.
+ *
+ * WAAROM (gemeten in productie, 10 sep 2026): templates die via de nieuwe
+ * editor zijn ingevoerd bewaren hun body met NAMED placeholders; de conversie
+ * naar {{1}} gebeurt pas bij het indienen bij Meta. `substituteNumericPlaceholders`
+ * kent alleen {{N}}, dus bleef de preview van zo'n template letterlijk
+ * "{{klant.voornaam}}" en "{{factuur.nummer}}" tonen — precies wat er in de
+ * inbox stond bij de joost_reminder_2_nl-herinneringen. Oudere templates met
+ * positionele body (aanmaning_dag21) waren wél netjes gerenderd, wat de
+ * verwarring compleet maakte.
+ *
+ * Dit raakt alleen de weergave. Wat de klant kreeg is altijd door Meta zelf
+ * gerenderd uit de goedgekeurde body plus de meegestuurde parameters.
+ *
+ * PURE.
+ *
+ * @param {string} body     body-tekst met {{categorie.veld}}-slots
+ * @param {object} mapping  { "1": "klant.voornaam", ... }
+ * @param {object} vars     { "1": "Ingrid", ... }
+ */
+export function substituteNamedPlaceholders(body, mapping, vars) {
+  if (!body || typeof body !== 'string') return '';
+  if (!mapping || typeof mapping !== 'object') return body;
+  if (!vars || typeof vars !== 'object') return body;
+  let out = body;
+  for (const pos of Object.keys(mapping)) {
+    if (!/^\d+$/.test(pos)) continue;
+    const naam = mapping[pos];
+    if (typeof naam !== 'string' || !naam.trim()) continue;
+    if (!Object.prototype.hasOwnProperty.call(vars, pos)) continue;
+    const re = new RegExp('\\{\\{\\s*' + escapeRegExp(naam.trim()) + '\\s*\\}\\}', 'g');
+    out = out.replace(re, String(vars[pos] == null ? '' : vars[pos]));
+  }
+  return out;
 }
 
 /**
@@ -131,16 +170,19 @@ export async function renderTemplatePreview({ templateName, templateVariables, s
     return { body: '[bericht]', source: 'no_template_name' };
   }
 
-  const bodyText = await fetchTemplateBody(name, supabase);
+  const fetched = await fetchTemplateBody(name, supabase);
+  const bodyText = fetched?.body_text || null;
   if (!bodyText) {
     return { body: '[template] ' + name, source: 'legacy_label' };
   }
 
   // Substitutie werkt óók als templateVariables leeg/null is — dan blijven
   // {{N}}-slots letterlijk in de tekst staan (voorkeur boven crash of blank).
-  const rendered = substituteNumericPlaceholders(
-    bodyText,
-    (templateVariables && typeof templateVariables === 'object') ? templateVariables : {},
-  );
+  const vars = (templateVariables && typeof templateVariables === 'object') ? templateVariables : {};
+  // Eerst positioneel ({{1}}), dan named ({{klant.voornaam}}) via de mapping.
+  // Een template heeft in de praktijk één van beide vormen; beide draaien is
+  // goedkoper dan raden en kan elkaar niet in de weg zitten.
+  let rendered = substituteNumericPlaceholders(bodyText, vars);
+  rendered = substituteNamedPlaceholders(rendered, fetched?.mapping || null, vars);
   return { body: rendered, source: 'meta_template' };
 }

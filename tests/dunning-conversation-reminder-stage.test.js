@@ -45,7 +45,7 @@ test('count=0 + ons bericht 21h geleden, klant zweeg daarna -> r1', () => {
   const stage = determineStage({
     run,
     convLastInboundAt:  iso(NOW - 30 * H),
-    convLastOutboundAt: iso(NOW - 21 * H),
+    convLastAnswerAt: iso(NOW - 21 * H),
     noReplyCfg: NR_CFG,
     nowMs: NOW,
   });
@@ -57,7 +57,7 @@ test('count=0 + klant schreef als laatste, 21h geleden -> null (bal bij ons)', (
   const stage = determineStage({
     run,
     convLastInboundAt:  iso(NOW - 21 * H),
-    convLastOutboundAt: iso(NOW - 40 * H),
+    convLastAnswerAt: iso(NOW - 40 * H),
     noReplyCfg: NR_CFG,
     nowMs: NOW,
   });
@@ -96,6 +96,7 @@ test('count=1 + last_reminder 25h geleden + geen inbound sindsdien -> r2', () =>
   const stage = determineStage({
     run,
     // Inbound was VOOR de reminder -> klant heeft niet gereageerd na r1.
+    convLastAnswerAt:  iso(NOW - 26 * H),
     convLastInboundAt: iso(lastReminderMs - 5 * H),
     noReplyCfg: NR_CFG,
     nowMs: NOW,
@@ -152,6 +153,7 @@ test('count=2 + last_reminder 25h geleden -> rz (resume, geen send)', () => {
   };
   const stage = determineStage({
     run,
+    convLastAnswerAt:  iso(NOW - 26 * H),
     convLastInboundAt: iso(NOW - 50 * H),
     noReplyCfg: NR_CFG,
     nowMs: NOW,
@@ -166,6 +168,7 @@ test('count=2 + last_reminder 5h geleden -> null (te vroeg voor rz)', () => {
   };
   const stage = determineStage({
     run,
+    convLastAnswerAt:  iso(NOW - 26 * H),
     convLastInboundAt: iso(NOW - 50 * H),
     noReplyCfg: NR_CFG,
     nowMs: NOW,
@@ -178,10 +181,10 @@ test('lege noReplyCfg gebruikt defaults 20/24/24', () => {
   const run = { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null };
   const inbound = iso(NOW - 96 * H);   // klant lang geleden, daarna stil
   const early = determineStage({
-    run, convLastInboundAt: inbound, convLastOutboundAt: iso(NOW - 19 * H), noReplyCfg: {}, nowMs: NOW,
+    run, convLastInboundAt: inbound, convLastAnswerAt: iso(NOW - 19 * H), noReplyCfg: {}, nowMs: NOW,
   });
   const ontime = determineStage({
-    run, convLastInboundAt: inbound, convLastOutboundAt: iso(NOW - 21 * H), noReplyCfg: {}, nowMs: NOW,
+    run, convLastInboundAt: inbound, convLastAnswerAt: iso(NOW - 21 * H), noReplyCfg: {}, nowMs: NOW,
   });
   assert.equal(early,  null);
   assert.equal(ontime, 'r1');

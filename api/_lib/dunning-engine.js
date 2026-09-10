@@ -295,11 +295,19 @@ async function fetchOpenInvoices(customerId = null, opts = {}) {
  * unit-testen mogelijk zonder DB-mocking op modulescope.
  */
 export async function hasReplyAfterLastSend(customerId, runId, db = supabaseAdmin) {
+  // `conversation_reminder_sent` telt mee als send van deze run. Zonder die
+  // regel bleef `lastSentAt` staan op de laatste engine-aanmaning terwijl de
+  // no-reply-cron intussen dagen doorstuurde, en herkende deze functie dezelfde
+  // oude klantreactie eindeloos opnieuw als vers. Gemeten bij Samuel Yago (run
+  // 473750ce-518c-41e1-b7d3-595aab3fd539): drie keer `paused_customer_replied`
+  // — 05-09, 08-09 en 10-09 — allemaal op de ene inbound van 04-09 16:21 resp.
+  // 07-09 10:07, met een teller die daardoor telkens op nul ging en de cyclus
+  // nooit bij hervatten liet uitkomen.
   const { data: lastSendRows, error: sendErr } = await db
     .from('dunning_log')
     .select('created_at')
     .eq('run_id', runId)
-    .in('event_type', ['email_sent', 'whatsapp_sent'])
+    .in('event_type', ['email_sent', 'whatsapp_sent', 'conversation_reminder_sent'])
     .order('created_at', { ascending: false })
     .limit(1);
   if (sendErr) throw sendErr;

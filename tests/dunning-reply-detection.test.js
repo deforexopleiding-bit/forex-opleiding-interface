@@ -201,3 +201,48 @@ test('klant zonder e-mail -> alleen WA-check, mail overgeslagen', async () => {
   assert.equal(r.replied, true);
   assert.equal(r.channel, 'whatsapp');
 });
+
+// ── (f) de no-reply-herinnering telt mee als send van deze run ──────────
+//
+// GEMETEN IN PRODUCTIE (10 sep 2026). De reminder-cron schreef niets naar
+// dunning_log, dus bleef `lastSentAt` staan op de laatste engine-aanmaning
+// terwijl de cron dagenlang doorstuurde. Gevolg: dezelfde oude klantreactie
+// werd bij elke engine-tick opnieuw als vers herkend, de run werd opnieuw
+// gepauzeerd en de teller ging op nul — waardoor de cyclus altijd op r1 bleef
+// hangen en nooit bij hervatten uitkwam. Bij Samuel Yago (run
+// 473750ce-518c-41e1-b7d3-595aab3fd539) leverde dat drie
+// `paused_customer_replied`-regels op voor twee inbounds: 05-09, 08-09 en
+// 10-09. Zes andere klanten kregen op dezelfde manier vijf tot negen
+// herinneringen na hun laatste bericht.
+
+test('(f) conversation_reminder_sent telt als laatste send -> oude reactie is niet meer vers', async () => {
+  const db = makeMockDb({
+    dunning_log: [
+      // De engine-aanmaning van 04-09, en daarna alleen nog herinneringen.
+      // (De nep-db negeert .order(); nieuwste eerst, zoals PostgREST teruggeeft.)
+      { run_id: RUN_ID, event_type: 'conversation_reminder_sent', created_at: T_SEND },
+      { run_id: RUN_ID, event_type: 'whatsapp_sent',              created_at: T_EARLY },
+    ],
+    // De klant reageerde ná de aanmaning maar vóór de laatste herinnering.
+    whatsapp_conversations: [{ id: 'conv-1', customer_id: CUST_ID, last_inbound_at: '2026-08-10T14:00:00.000Z' }],
+    customers: [{ id: CUST_ID, email: CUST_MAIL }],
+    email_messages: [],
+  });
+  const res = await hasReplyAfterLastSend(CUST_ID, RUN_ID, db);
+  assert.equal(res.replied, false, 'de reactie is ouder dan onze laatste herinnering — niet opnieuw pauzeren');
+});
+
+test('(f2) een reactie NA de laatste herinnering telt wél gewoon', async () => {
+  const db = makeMockDb({
+    dunning_log: [
+      { run_id: RUN_ID, event_type: 'conversation_reminder_sent', created_at: T_SEND },
+      { run_id: RUN_ID, event_type: 'whatsapp_sent',              created_at: T_EARLY },
+    ],
+    whatsapp_conversations: [{ id: 'conv-1', customer_id: CUST_ID, last_inbound_at: T_LATE }],
+    customers: [{ id: CUST_ID, email: CUST_MAIL }],
+    email_messages: [],
+  });
+  const res = await hasReplyAfterLastSend(CUST_ID, RUN_ID, db);
+  assert.equal(res.replied, true);
+  assert.equal(res.channel, 'whatsapp');
+});
