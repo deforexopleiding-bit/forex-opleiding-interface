@@ -85,28 +85,36 @@ export default async function handler(req, res) {
     // spookbadge zonder inhoud). We haalt daarom eerst de conv-ids op en
     // filteren dan op conv-ids die minstens 1 message hebben. Één extra
     // batch-query, geen N+1.
+    // FASE 2: haal ALLE conversaties op de leadsonderhoud-lijn op (niet alleen
+    // lead-gematchte), gesorteerd op recentste eerst, zodat we straks óók
+    // lead-loze conversaties als aparte rijen kunnen tonen. convsAll + nonEmpty
+    // + kandidaatMap blijven beschikbaar voor de lead-loze pass verderop.
     const waOpLeadId = new Map();
-    if (lijn.phoneNumberId && leadOpNummer.size) {
+    let convsAll = [];
+    let nonEmpty = new Set();       // conv-ids met ≥1 whatsapp_message
+    const kandidaatMap = new Map(); // convId -> {conv, lead}  (nummer-match op een lead)
+    if (lijn.phoneNumberId) {
       const { data: convs } = await supabaseAdmin
         .from('whatsapp_conversations')
         .select('id, phone_number, last_message_at, last_message_preview, unread_count, last_inbound_at')
         .eq('phone_number_id', lijn.phoneNumberId)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
         .limit(500);
+      convsAll = convs || [];
       // Kandidaat-convs = convs waarvan het nummer matcht met een lead-telnr.
-      const kandidaatMap = new Map(); // convId -> {conv, lead}
-      for (const c of convs || []) {
+      for (const c of convsAll) {
         if (!c.phone_number || c.phone_number.startsWith('+99999')) continue;
         const lead = leadOpNummer.get(normNummer(c.phone_number));
         if (lead) kandidaatMap.set(c.id, { conv: c, lead });
       }
-      // Batch-check: welke van deze conv-ids heeft ≥1 whatsapp_messages?
-      const convIds = Array.from(kandidaatMap.keys());
+      // Batch-check over ALLE conv-ids: welke heeft ≥1 whatsapp_messages?
+      const convIds = convsAll.map(c => c.id).filter(Boolean);
       if (convIds.length) {
         const { data: msgIds } = await supabaseAdmin
           .from('whatsapp_messages')
           .select('conversation_id')
           .in('conversation_id', convIds);
-        const nonEmpty = new Set((msgIds || []).map(m => m.conversation_id));
+        nonEmpty = new Set((msgIds || []).map(m => m.conversation_id));
         for (const [cid, entry] of kandidaatMap.entries()) {
           if (nonEmpty.has(cid)) waOpLeadId.set(entry.lead.id, entry.conv);
         }
@@ -238,6 +246,36 @@ export default async function handler(req, res) {
         has_wa: !!wa,
         has_mail: !!mail,
         afspraak_op: afspraakOp,
+        _t: laatste,
+      });
+    }
+
+    // FASE 2: lead-loze conversaties op de leadsonderhoud-lijn als aparte rijen.
+    // Overslaan als de conv al aan een lead-rij hangt (conversation_id in items)
+    // of aan een lead matchte (kandidaatMap) → geen dubbele rijen. Alleen convs
+    // met ≥1 bericht. Naam/nummer komen uit de conversatie zelf; geen lead-info
+    // (afspraak_op/has_mail/email blijven leeg → de frontend gate't lead-only UI
+    // op lead_id==null).
+    const usedConvIds = new Set(items.map(i => i.conversation_id).filter(Boolean));
+    for (const c of convsAll) {
+      if (!c.phone_number || c.phone_number.startsWith('+99999')) continue;
+      if (!nonEmpty.has(c.id)) continue;      // geen berichten → geen rij
+      if (usedConvIds.has(c.id)) continue;    // al als lead-rij getoond
+      if (kandidaatMap.has(c.id)) continue;   // matchte aan een lead (dedup)
+      const laatste = c.last_message_at ? new Date(c.last_message_at).getTime() : 0;
+      items.push({
+        lead_id: null,
+        conversation_id: c.id,
+        naam: c.phone_number,
+        phone_number: c.phone_number,
+        email: null,
+        last_activity_at: c.last_message_at ? new Date(c.last_message_at).toISOString() : null,
+        last_preview: c.last_message_preview || '',
+        unread: c.unread_count || 0,
+        can_send_text: binnenVenster(c.last_inbound_at),
+        has_wa: true,
+        has_mail: false,
+        afspraak_op: null,
         _t: laatste,
       });
     }

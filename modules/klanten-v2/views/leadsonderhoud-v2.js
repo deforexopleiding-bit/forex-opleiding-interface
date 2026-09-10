@@ -819,6 +819,14 @@
     const k = String(key);
     return _lsInb.convs.items.find(c => _lsInbRowKey(c) === k) || null;
   }
+  // FASE 2: endpoint-identiteit voor een rij. Lead-rij → { lead_id }; lead-loze
+  // conversatie → { conversation_id } (de Fase 0-endpointpaden). Compose-state
+  // wordt daarentegen ALTIJD op de rowKey gesleuteld (zie _lsInbRowKey), zodat
+  // lead-loze rijen niet op een null lead_id botsen.
+  function _lsInbSendKeys(conv) {
+    if (conv && conv.lead_id) return { lead_id: conv.lead_id };
+    return { conversation_id: conv ? conv.conversation_id : null };
+  }
 
   /* ── Fetchers ────────────────────────────────────────────────────────── */
   async function _lsInbFetchConvs() {
@@ -1108,7 +1116,7 @@
   window.__lsInbSendWa = async () => {
     const conv = _lsInbCurrentConv();
     if (!conv) return;
-    const leadId = conv.lead_id;
+    const leadId = _lsInbRowKey(conv);
     if (!conv.has_wa || !conv.can_send_text) {
       // Buiten 24u-venster of geen WA-lijn: template-modus.
       // BP1 2026-08-31: vriendelijker hint i.p.v. technische foutmelding.
@@ -1127,7 +1135,7 @@
     try {
       const resp = await window.KV.authedFetch('/api/leadsonderhoud-gesprek-antwoord', {
         method: 'POST',
-        body: JSON.stringify({ lead_id: leadId, body }),
+        body: JSON.stringify({ ..._lsInbSendKeys(conv), body }),
       });
       if (resp.status === 422) {
         // BP1 2026-08-31: vriendelijker hint i.p.v. rauwe 422-error.
@@ -1160,7 +1168,9 @@
   window.__lsInbSendMail = async () => {
     const conv = _lsInbCurrentConv();
     if (!conv) return;
-    const leadId = conv.lead_id;
+    // Mail is lead-only (lead-loze convs hebben geen e-mail → hieronder early
+    // return). Compose-state op rowKey; de payload gebruikt het echte lead_id.
+    const leadId = _lsInbRowKey(conv);
     if (!conv.email) { _lsInbToast('Lead heeft geen e-mailadres', 'warn'); return; }
     if (_lsInb.compose.sending === leadId) return;
     const subject = String(_lsInb.compose.draftsMailSubject[leadId] || '').trim();
@@ -1174,7 +1184,7 @@
     _lsInb.compose.sending = leadId;
     _lsInbRepaintCompose();
     try {
-      const payload = { lead_id: leadId, subject, text };
+      const payload = { lead_id: conv.lead_id, subject, text };
       if (origineel) payload.origineel_email_id = origineel;
       const resp = await window.KV.authedFetch('/api/leadsonderhoud-gesprek-mailantwoord', {
         method: 'POST',
@@ -1241,7 +1251,7 @@
       _lsInbToast('Selecteer eerst een gesprek links om een template in te voegen.', 'warn');
       return;
     }
-    const leadId = conv.lead_id;
+    const leadId = _lsInbRowKey(conv);
     const naam   = conv.contact_name || conv.voornaam || _lsInbRowVan(conv) || '';
     const useMail = target === 'mail';
     const label  = useMail ? 'E-mail' : 'WhatsApp';
@@ -1536,13 +1546,14 @@
       );
       if (!ok) { _lsInbOpenTemplateForm(conv, tpl); return; }
       _lsInbCloseModal();
-      _lsInb.compose.sending = conv.lead_id;
+      const _tplKey = _lsInbRowKey(conv);
+      _lsInb.compose.sending = _tplKey;
       _lsInbRepaintCompose();
       try {
         const resp = await window.KV.authedFetch('/api/leadsonderhoud-gesprek-template', {
           method: 'POST',
           body: JSON.stringify({
-            lead_id: conv.lead_id,
+            ..._lsInbSendKeys(conv),
             template_name: tpl.name,
             language: tpl.language || 'nl',
             variables,
@@ -1552,8 +1563,8 @@
           const j = await resp.json().catch(() => ({}));
           throw new Error(j.error || j.meta_error || ('HTTP ' + resp.status));
         }
-        _lsInbOptimisticAppend(conv.lead_id, 'whatsapp', rendered);
-        _lsInb.compose.mode[conv.lead_id] = 'text';
+        _lsInbOptimisticAppend(_tplKey, 'whatsapp', rendered);
+        _lsInb.compose.mode[_tplKey] = 'text';
         // v=8: bij succesvolle send de bewaarde variabelewaarden voor deze
         // template opruimen (voorkomt dat de volgende template-send met
         // stale data start).
@@ -1714,7 +1725,8 @@
   function _lsInbRenderCompose() {
     const conv = _lsInbCurrentConv();
     if (!conv) return '';
-    const leadId = conv.lead_id;
+    // FASE 2: compose-state op rowKey (werkt óók voor lead-loze convs).
+    const leadId = _lsInbRowKey(conv);
     const sending = _lsInb.compose.sending === leadId;
     const mode = _lsInb.compose.mode[leadId] || 'text';
     const showMail = !!_lsInb.compose.showMail[leadId];
@@ -1781,7 +1793,7 @@
     </div>`;
   }
   function _lsInbRenderMailForm(conv, sending) {
-    const leadId = conv.lead_id;
+    const leadId = _lsInbRowKey(conv);
     const subj = esc(_lsInb.compose.draftsMailSubject[leadId] || '');
     const txt  = esc(_lsInb.compose.draftsMailText[leadId] || '');
     const mailEnabled = !!conv.email;
@@ -1815,9 +1827,11 @@
     // 'ie geboekt is.
     const heeftCall = !!row.afspraak_op;
     // v=8 FIX D: absolute datum ipv relatief (toekomst "1m" was betekenisloos).
-    const callBadge = heeftCall
+    // FASE 2: de call-badge is lead-georiënteerd → alleen voor lead-rijen tonen
+    // (een lead-loze WA-conversatie heeft geen afspraak-context).
+    const callBadge = !row.lead_id ? '' : (heeftCall
       ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--emerald-soft);color:var(--emerald)" title="Geboekt op ${esc(row.afspraak_op)}">✓ call geboekt · ${esc(fmtDatumAbsoluut(row.afspraak_op))}</span>`
-      : `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--amber-soft);color:var(--amber)">— nog geen call</span>`;
+      : `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--amber-soft);color:var(--amber)">— nog geen call</span>`);
     const chanBadges = [
       row.has_wa   ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--teal-soft);color:var(--teal)">WA</span>` : '',
       row.has_mail ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--blue-soft);color:var(--blue)">mail</span>` : '',
@@ -1843,15 +1857,17 @@
             ${row.conversation_id ? (() => {
               const isUnread = (row.unread || 0) > 0;
               const targetUnread = !isUnread;
-              const rowIdEsc = String(row.lead_id || '').replace(/'/g, "\\'");
+              // FASE 2: data-row-id is de rowKey (lead_id óf 'conv:<id>').
+              const rowIdEsc = String(_lsInbRowKey(row) || '').replace(/'/g, "\\'");
               const convIdEsc = String(row.conversation_id).replace(/'/g, "\\'");
               return `<button class="btn btn-ghost btn-sm" onclick="__lsInbToggleRead('${convIdEsc}', ${targetUnread}, '${rowIdEsc}')"
                 title="${isUnread ? 'Markeer als gelezen' : 'Markeer als ongelezen'}">
                 ${isUnread ? '✓ Markeer gelezen' : '● Markeer ongelezen'}
               </button>`;
             })() : ''}
+            ${row.lead_id ? `
             <button class="btn btn-primary btn-sm" onclick="__lsInbOpenAppointmentPicker()" title="Direct een Zoom-afspraak inschieten (bestaande GHL-contact vereist)">${svg(I.cal || I.check, 'width:13px;height:13px')} Direct inschieten</button>
-            <button class="btn btn-ghost btn-sm" onclick="__lsInbBookingLinkHelp()" title="Boekingslink verstuurroute (Route B)">Boekingslink…</button>
+            <button class="btn btn-ghost btn-sm" onclick="__lsInbBookingLinkHelp()" title="Boekingslink verstuurroute (Route B)">Boekingslink…</button>` : ''}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:13px">
