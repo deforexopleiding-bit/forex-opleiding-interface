@@ -577,14 +577,23 @@
     spiegelStatus(dry ? 'Tellen…' : 'Bezig met hersyncen…');
 
     try {
-      const d = await window.KV.authedJson('/api/onboarding-spiegel-sync-run', {
+      // Zelfde weg als de twee knoppen hierboven: AgentShared.apiFetch levert
+      // een Response, dus de body moet er nog uit. `window.KV` bestaat wel,
+      // maar in modules/klanten-v2 — een script dat deze pagina niet laadt.
+      const r = await window.AgentShared.apiFetch('/api/onboarding-spiegel-sync-run', {
         method: 'POST',
         body: JSON.stringify({ dry: !!dry }),
       });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) {
+        spiegelRender(d || { ok: false, error: 'HTTP ' + r.status }, dry);
+        spiegelStatus('Mislukt: ' + ((d && d.error) || ('HTTP ' + r.status)), 'var(--rose)');
+        return;
+      }
       spiegelRender(d, dry);
-      if (d && d.ok === false) {
+      if (d.ok === false) {
         spiegelStatus('Mislukt — zie hieronder', 'var(--rose)');
-      } else if (d && d.mislukt) {
+      } else if (d.mislukt) {
         spiegelStatus(d.mislukt + ' van de ' + (d.verwacht || 0) + ' mislukt', 'var(--rose)');
       } else {
         spiegelStatus(dry ? 'Droogloop klaar' : 'Klaar', 'var(--green)');
@@ -607,20 +616,32 @@
       ? window.AgentShared.esc
       : (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
           { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-    const tel = (n, w) => '<span style="margin-right:16px"><strong>' + n + '</strong> ' + w + '</span>';
+    // ── NUL IS EEN METING, GEEN NOODGREEP ──────────────────────────────
+    // Ging de ronde niet door, dan is er NIETS geteld en horen de tellers
+    // geen 0 te tonen. Vier keer nul plus een foutregel ziet er precies zo
+    // uit als een geslaagde droogloop op een lege spiegel — wie alleen naar
+    // de cijfers keek dacht dat er niets te doen was. Dat is exact het
+    // patroon dat we deze week aan het uitroeien zijn, en het stond hier
+    // door mijn eigen `|| 0`.
+    const gemeten = d.ok !== false;
+    const tel = (n, w) => '<span style="margin-right:16px"><strong>'
+      + (gemeten && Number.isFinite(Number(n)) ? Number(n) : '—')
+      + '</strong> ' + w + '</span>';
 
     let html = '<div style="background:var(--bg-elev);border:1px solid var(--border);'
       + 'border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px">'
       + '<div style="margin-bottom:6px"><strong>'
-      + (dry ? 'Droogloop — er is niets gewijzigd' : 'Hersync uitgevoerd') + '</strong></div>'
-      + tel(d.verwacht || 0, 'onboardings verwacht')
-      + tel(d.aanwezig || 0, 'nu in de spiegel')
-      + (dry ? '' : tel(d.geschreven || 0, 'geschreven'))
-      + (dry ? '' : tel(d.afwezig || 0, 'zonder studentrij'))
-      + tel(d.overtollig_verwijderd || 0, dry ? 'zou verwijderd worden' : 'verwijderd')
-      + (d.mislukt
+      + (!gemeten ? 'Niet uitgevoerd — er is niets geteld'
+                  : (dry ? 'Droogloop — er is niets gewijzigd' : 'Hersync uitgevoerd'))
+      + '</strong></div>'
+      + tel(d.verwacht, 'onboardings verwacht')
+      + tel(d.aanwezig, 'nu in de spiegel')
+      + (dry ? '' : tel(d.geschreven, 'geschreven'))
+      + (dry ? '' : tel(d.afwezig, 'zonder studentrij'))
+      + tel(d.overtollig_verwijderd, dry ? 'zou verwijderd worden' : 'verwijderd')
+      + (gemeten && d.mislukt
           ? '<span style="color:var(--rose)"><strong>' + d.mislukt + '</strong> mislukt</span>'
-          : tel(0, 'mislukt'))
+          : tel(d.mislukt, 'mislukt'))
       + '</div>';
 
     if (d.error) {
@@ -735,20 +756,27 @@
           { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 
     const rijen = Array.isArray(d.rijen) ? d.rijen : [];
-    const tel = (n, w) => '<span style="margin-right:16px"><strong>' + n + '</strong> ' + w + '</span>';
+    // Zelfde regel als bij de hersync hieronder: ging de ronde niet door, dan
+    // is er niets geteld en tonen we een streepje in plaats van 0.
+    const gemeten = d.ok !== false;
+    const tel = (n, w) => '<span style="margin-right:16px"><strong>'
+      + (gemeten && Number.isFinite(Number(n)) ? Number(n) : '—')
+      + '</strong> ' + w + '</span>';
 
     let html = '<div style="background:var(--bg-elev);border:1px solid var(--border);'
       + 'border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px">'
       + '<div style="margin-bottom:6px"><strong>'
-      + (uitvoeren ? 'Uitgevoerd' : 'Droogloop — er is niets gewijzigd') + '</strong></div>'
+      + (!gemeten ? 'Niet uitgevoerd — er is niets geteld'
+                  : (uitvoeren ? 'Uitgevoerd' : 'Droogloop — er is niets gewijzigd'))
+      + '</strong></div>'
       + (uitvoeren
-          ? tel(d.gekoppeld || 0, 'gekoppeld') + tel(d.aangemaakt || 0, 'aangemaakt')
-          : tel(d.zou_koppelen || 0, 'te koppelen') + tel(d.zou_aanmaken || 0, 'aan te maken'))
-      + tel(d.mislukt || 0, 'mislukt')
-      + tel(d.overgeslagen_al_gekoppeld || 0, 'al gekoppeld')
-      + tel(d.overgeslagen_naam_treffer || 0, 'naam-treffer')
-      + tel(d.overgeslagen_geen_email || 0, 'geen adres')
-      + tel(d.overgeslagen_testrij || 0, 'testrij')
+          ? tel(d.gekoppeld, 'gekoppeld') + tel(d.aangemaakt, 'aangemaakt')
+          : tel(d.zou_koppelen, 'te koppelen') + tel(d.zou_aanmaken, 'aan te maken'))
+      + tel(d.mislukt, 'mislukt')
+      + tel(d.overgeslagen_al_gekoppeld, 'al gekoppeld')
+      + tel(d.overgeslagen_naam_treffer, 'naam-treffer')
+      + tel(d.overgeslagen_geen_email, 'geen adres')
+      + tel(d.overgeslagen_testrij, 'testrij')
       // De spiegel apart: koppelen en spiegelen kunnen los van elkaar
       // mislukken, en dat mag niet achter één totaal verdwijnen.
       + (uitvoeren
