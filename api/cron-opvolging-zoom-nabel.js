@@ -48,10 +48,14 @@ const ZONE = 'Europe/Amsterdam';
 export const VENSTER_VAN_UUR = 12;
 export const VENSTER_TOT_UUR = 21;
 
-// De statussen waarbij de taak nog leeft. Tweeling van LOPEND in
-// api/opvolging-whatsapp-webhook.js — die bepaalt welke kaart een binnenkomend
-// bericht opvangt, deze welke kaart een tweede voorkomt. Lopen ze uiteen, dan
-// maakt de cron een tweede kaart naast een die net een antwoord kreeg.
+// De statussen waarbij er al werk op de lijst staat voor deze lead, en er dus
+// geen tweede kaart bij hoeft.
+//
+// SMALLER DAN LOPEND IN DE WEBHOOK, en dat is bewust. Die lijst draagt ook
+// 'ingepland', want een bericht van een lead met een geboekte afspraak hoort
+// wél bij die kaart. Maar 'ingepland' is precies de toestand van iedere lead
+// die deze cron bekijkt — ze hebben allemaal een zoomcall vandaag. Zou die
+// status hier meetellen, dan zou de cron nooit één kaart maken.
 const LOPEND = ['open', 'wacht_inplanning'];
 
 /** De twee redenen, en het verschil ertussen is de reden dat het er twee zijn. */
