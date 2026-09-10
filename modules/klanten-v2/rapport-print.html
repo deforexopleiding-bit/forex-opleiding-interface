@@ -471,7 +471,7 @@ tr{break-inside:avoid}
         const staat = c.vastgelegd ? String(c.uitkomst).replace(/_/g, ' ')
           : (c.staat === 'gepland' ? 'moet nog plaatsvinden'
             : c.staat === 'geannuleerd' ? 'geannuleerd' + (c.annulering_reden ? ' — ' + c.annulering_reden : '')
-            : c.staat === 'verplaatst' ? 'verzet'
+            : c.staat === 'verplaatst' ? (c.verzet_label || 'verzet')
             : c.staat === 'onbeoordeelbaar' ? String(c.status_ruw || 'onbekend')
             : 'geen uitkomst vastgelegd');
         return '<tr><td><span class="bol ' + bol + '"></span>' + esc(c.naam || 'Naamloos') + '</td>' +

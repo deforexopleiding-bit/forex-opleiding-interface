@@ -52,6 +52,9 @@ import {
 } from './_lib/opvolging-poging-telling.js';
 import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
 import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
+import {
+  verzetNaar, oorspronkelijkeDag, oorspronkelijkeTijd, nlDatum,
+} from './_lib/opvolging-dagbeeld.js';
 import { leadlijstDektDag, DEKKING_VANAF } from './_lib/opvolging-leadlijst-venster.js';
 import {
   beoordeelDag, telVensters, beoordeelMoeite, dagVan,
@@ -204,35 +207,96 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   const gearchiveerd = archRuw || [];
 
   // ── De zoomcalls van de periode ──────────────────────────────────────────
-  // scheduled_at is het moment waarop de call stond. Dat verandert niet met
-  // terugwerkende kracht, in tegenstelling tot `status`.
-  const { data: apptRuw, error: e3 } = await supabaseAdmin
-    .from('follow_up_appointments')
-    .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, parent_appointment_id, annulering_reden, snelle_notitie, uitkomst, uitkomst_op')
-    .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
-    .order('scheduled_at', { ascending: true });
+  // WELKE RIJEN, EN OP WELKE DAG ZE THUISHOREN. Twee gaten die Maxim op het
+  // draaiende endpoint heeft gemeten, en ze zitten allebei in deze query:
+  //
+  //   1. PROEFRIJEN TELDEN MEE. Het rapport over 8 september gaf zeven
+  //      zoomcalls, waaronder jeffrey-test om 10:30 en jef testo om 14:00 en
+  //      20:30. Het scherm toonde er vier. Sinds de migratie van 9 september
+  //      staat `is_test` op follow_up_appointments, dus dit is een filter op
+  //      een kolom en geen gok op een naam.
+  //
+  //   2. EEN VERZETTE AFSPRAAK VERDWEEN VAN ZIJN DAG. Het filter stond alleen
+  //      op scheduled_at. Jeroen Dorrestein stond op 9 september 15:00 en is
+  //      verzet naar de 18e; Abdel Ben stond op 9 september 16:30 en is verzet
+  //      naar de 21e. Allebei op het scherm van vandaag, allebei weg uit het
+  //      rapport van vandaag — terwijl `eerst_gepland_op` bij allebei gewoon
+  //      9 september vasthoudt.
+  //
+  // Een rij telt daarom op de dag waarop hij GEPLAND STOND, en op precies één
+  // dag: niet ook nog eens op zijn nieuwe. Dat is het verschil met het
+  // dagbeeld, dat hem met opzet op beide dagen tekent — daar is het weergave,
+  // hier is het telling, en dubbel tellen maakt elk cijfer eronder verdacht.
+  //
+  // ── DRIE OPTIONELE KOLOMMEN, ELK UIT EEN EIGEN MIGRATIE ─────────────────
+  // Een select die een ontbrekende kolom noemt faalt met 42703 en neemt de
+  // HELE query mee — dus niet één kolom weg, maar het complete rapport. Dat is
+  // precies wat #1504 deed: het rapport gaf 500 op elke dag.
+  //
+  // 42703 zegt WEL dat een kolom ontbreekt en NIET welke. Daarom matchen we op
+  // de kolomnaam in de foutmelding en laten we alleen díe vallen. Zonder dat
+  // zou het ontbreken van `uitkomst` ook `eerst_gepland_op` uitzetten, en dan
+  // verdwijnen de verzette afspraken om een reden die er niets mee te maken
+  // heeft.
+  const APPT_VAST = 'id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, '
+                  + 'status, parent_appointment_id, annulering_reden, snelle_notitie';
+  const APPT_OPTIONEEL = ['uitkomst', 'uitkomst_op', 'eerst_gepland_op', 'is_test'];
 
-  // Draait de migratie nog niet, dan bestaan uitkomst/uitkomst_op niet en
-  // faalt de hele select. Eén keer opnieuw zonder die twee kolommen, en de
-  // sectie meldt het als blinde vlek in plaats van als storing.
-  let afspraken = [];
-  let uitkomstKolommen = true;
-  if (e3) {
-    uitkomstKolommen = false;
-    const { data: fallback, error: e3b } = await supabaseAdmin
+  let apptBeschikbaar = [...APPT_OPTIONEEL];
+  let apptRuw = null;
+  let e3 = null;
+  for (let poging = 0; poging <= APPT_OPTIONEEL.length; poging += 1) {
+    const heeftEerst = apptBeschikbaar.includes('eerst_gepland_op');
+    let q = supabaseAdmin
       .from('follow_up_appointments')
-      .select('id, lead_name, lead_phone, lead_email, scheduled_at, duration_minutes, status, parent_appointment_id, annulering_reden, snelle_notitie')
-      .gte('scheduled_at', vanIso).lt('scheduled_at', totIso)
-      .order('scheduled_at', { ascending: true });
-    if (e3b) throw e3b;
-    afspraken = fallback || [];
+      .select([APPT_VAST, ...apptBeschikbaar].join(', '));
+    // Ook wat van deze dagen weg is verzet: die rij heeft een scheduled_at
+    // buiten de periode maar stond er wél in.
+    q = heeftEerst
+      ? q.or(`and(scheduled_at.gte.${vanIso},scheduled_at.lt.${totIso}),`
+           + `and(eerst_gepland_op.gte.${vanIso},eerst_gepland_op.lt.${totIso})`)
+      : q.gte('scheduled_at', vanIso).lt('scheduled_at', totIso);
+
+    ({ data: apptRuw, error: e3 } = await q.order('scheduled_at', { ascending: true }));
+    if (!e3) break;
+    if (e3.code !== '42703') break;
+    const weg = apptBeschikbaar.filter((k) => new RegExp('\\b' + k + '\\b').test(e3.message || ''));
+    if (weg.length === 0) break;
+    apptBeschikbaar = apptBeschikbaar.filter((k) => !weg.includes(k));
+  }
+  if (e3) throw e3;
+
+  const apptOntbreekt = APPT_OPTIONEEL.filter((k) => !apptBeschikbaar.includes(k));
+  const uitkomstKolommen = !apptOntbreekt.includes('uitkomst');
+
+  // PROEFRIJEN TELLEN NERGENS MEE. Op de kolom, nooit op de naam: filteren op
+  // 'test' in lead_name zou de eerste echte klant die Testerink heet uit het
+  // rapport laten vallen, en dat merkt niemand.
+  const afspraken = (apptRuw || []).filter((a) => a && a.is_test !== true);
+
+  if (!uitkomstKolommen) {
     blindeVlekken.push({
       sectie: 'zoomcalls',
       wat   : 'De uitkomst van een zoomcall is voor deze periode nergens vastgelegd.',
       waarom: 'De kolommen uitkomst en uitkomst_op bestaan nog niet. Draai docs/sql-migrations/2026-09-06-opvolging-rapport.sql; vanaf dat moment wordt elke nieuwe uitkomst wel bewaard.',
     });
-  } else {
-    afspraken = apptRuw || [];
+  }
+  if (apptOntbreekt.includes('eerst_gepland_op')) {
+    blindeVlekken.push({
+      sectie: 'zoomcalls',
+      wat   : 'Afspraken die naar een andere dag zijn verzet ontbreken in dit overzicht.',
+      waarom: 'De kolom eerst_gepland_op bestaat nog niet, dus van een afspraak die in dezelfde rij '
+            + 'naar een andere dag is verplaatst is niet meer te zien dat hij hier stond. Draai '
+            + 'docs/sql-migrations/2026-09-08-eerst-gepland-op.sql.',
+    });
+  }
+  if (apptOntbreekt.includes('is_test')) {
+    blindeVlekken.push({
+      sectie: 'zoomcalls',
+      wat   : 'Proefafspraken tellen in dit overzicht gewoon mee.',
+      waarom: 'De kolom is_test bestaat nog niet, dus een proefrij is niet van een echte afspraak te '
+            + 'onderscheiden. Draai docs/sql-migrations/2026-09-09-follow-up-appointments-is-test.sql.',
+    });
   }
 
   // ── De taken achter die pogingen en calls ────────────────────────────────
@@ -352,15 +416,15 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // DEZELFDE GEFILTERDE SET als de zoomcall-lijst. Zonder dit telt de blinde
   // vlek 'calls die niet in de takenlijst staan' ook de geannuleerde en de
   // verzette mee, en dan staat er een groter getal onder een kortere lijst.
-  const vensterAfspraken = relevanteAfspraken(afspraken, Date.now());
+  const vensterAfspraken = relevanteAfspraken(afspraken, Date.now(), dagen);
   const vensters = bouwVensters({ afspraken: vensterAfspraken, taken: alleTaken, pogingen, dagen });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 4 · DE ZOOMCALLS ZELF
   // ═══════════════════════════════════════════════════════════════════════
   // De belpogingen van die dag horen BIJ de call: zie belpogingenVoorCalls.
-  const belBijCall = belpogingenVoorCalls({ afspraken, taken: alleTaken, pogingen });
-  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs: Date.now(), belBijCall });
+  const belBijCall = belpogingenVoorCalls({ afspraken, taken: alleTaken, pogingen, dagen });
+  const zoomcalls = bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs: Date.now(), belBijCall, dagen });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 5 · UIT DE LIJST GEHAALD
@@ -721,7 +785,7 @@ export function belZin(aantal, gesproken, seconden) {
   return kop + ' van samen ' + duur + '.';
 }
 
-export function belpogingenVoorCalls({ afspraken, taken, pogingen }) {
+export function belpogingenVoorCalls({ afspraken, taken, pogingen, dagen = null }) {
   const zoekTaak = maakTaakZoeker(taken);
   const perTaakDag = new Map();
   for (const p of pogingen || []) {
@@ -739,7 +803,10 @@ export function belpogingenVoorCalls({ afspraken, taken, pogingen }) {
 
   const uit = new Map();
   for (const a of afspraken || []) {
-    const dag = dagVan(a.scheduled_at);
+    // De dag waaronder deze call in het rapport staat. Het bewijsmateriaal moet
+    // van diezelfde dag komen: een call die op 9 september stond en naar de 18e
+    // is verzet, hoort de belpogingen van de 9e te tonen — niet die van de 18e.
+    const dag = rapportDag(a, dagen);
     const t = zoekTaak(a.lead_phone);
     if (!t) { uit.set(String(a.id), { gekoppeld: false, aantal: 0, gesproken: 0, seconden: 0, pogingen: [] }); continue; }
     const rij = (perTaakDag.get(t.id + '|' + dag) || [])
@@ -796,7 +863,11 @@ export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
   const perDag = new Map();
 
   for (const a of afspraken) {
-    const dag = dagVan(a.scheduled_at);
+    // Bewijsbaar dezelfde waarde als dagVan(a.scheduled_at) voor elke rij die
+    // hier aankomt: relevanteAfspraken() heeft de verzette al weggefilterd, en
+    // zonder verzetting vallen de twee dagen samen. Toch rapportDag(), zodat
+    // deze regel niet als enige achterblijft als die filter ooit verschuift.
+    const dag = rapportDag(a, dagen);
     if (!dagen.includes(dag)) continue;
     const t = zoekTaak(a.lead_phone);
     if (!t) {
@@ -869,6 +940,40 @@ const UITKOMST_SPELING_MIN = 15;
 const STANDAARD_DUUR_MIN   = 30;
 
 /**
+ * Op welke dag telt deze afspraak mee in het rapport?
+ *
+ * De dag waarop hij GEPLAND STOND — behalve wanneer die dag buiten de periode
+ * valt. Dan telt hij op de dag waarop hij daadwerkelijk plaatsvindt.
+ *
+ * ── HET RANDGEVAL DAT ANDERS EEN NIEUW GAT SLAAT ────────────────────────
+ * Abdel Ben stond op 9 september en is verzet naar de 21e. Zonder die tweede
+ * regel zou hij ALLEEN op 9 september tellen, en dan mist het rapport over
+ * 21 september een call die daar echt heeft plaatsgevonden — één gat dicht en
+ * een volgend open. Met deze regel:
+ *
+ *   · rapport over 9 september   → Abdel telt mee, met 'verzet naar 21 sep',
+ *                                  en krijgt geen oordeel.
+ *   · rapport over 21 september  → Abdel telt gewoon mee als afspraak.
+ *   · rapport over 9 t/m 21 sep  → één keer, op de 9e. Geen dubbeltelling.
+ *
+ * Dat laatste is de eis: een rij telt op precies één dag.
+ */
+export function rapportDag(a, dagen = null) {
+  const oud = oorspronkelijkeDag(a);
+  const nu  = dagVan(a && a.scheduled_at);
+  if (!oud) return nu;
+  if (!Array.isArray(dagen) || dagen.includes(oud)) return oud;
+  return nu;
+}
+
+/** Wordt deze afspraak getoond op de dag waar hij VANDAAN is verzet? */
+function opOudeDag(a, dagen = null) {
+  const naar = verzetNaar(a);
+  if (!naar) return false;
+  return rapportDag(a, dagen) !== dagVan(a.scheduled_at);
+}
+
+/**
  * Mag deze call al beoordeeld worden?
  *
  * Zonder deze vraag beoordeelde het rapport élke afspraak in de periode, ook
@@ -877,7 +982,7 @@ const STANDAARD_DUUR_MIN   = 30;
  * precies het soort onterecht cijfer waar dit rapport zijn geloofwaardigheid
  * mee verspeelt.
  */
-export function callStaat(a, nuMs) {
+export function callStaat(a, nuMs, dagen = null) {
   // EEN TOELATINGSLIJST, GEEN WEIGERLIJST — en dat is hier andersom dan bij de
   // WhatsApp-systeemtypes, met reden.
   //
@@ -891,6 +996,17 @@ export function callStaat(a, nuMs) {
   //
   // Wat er niet in staat verdwijnt daarom ook niet: onbekende statussen komen
   // terug als 'onbeoordeelbaar' en worden als blinde vlek gemeld.
+  // HET AGENDAFEIT EERST, EN DAT IS GEEN STATUS. Staat `eerst_gepland_op` op
+  // een andere dag dan `scheduled_at`, dan is deze rij verzet — ongeacht wat
+  // zijn status zegt. Bij een verzetting in DEZELFDE rij (de GHL-poll schrijft
+  // scheduled_at over) blijft de status gewoon 'scheduled', en dan zou hij
+  // hieronder als 'te beoordelen' langskomen: een verwijt over een call die
+  // die dag niet heeft plaatsgevonden. Jeroen Dorrestein en Abdel Ben zijn
+  // precies dat geval.
+  // ...maar alleen op de dag waar hij vandaan komt. Op zijn nieuwe dag is hij
+  // een gewone afspraak die gewoon beoordeeld hoort te worden.
+  if (opOudeDag(a, dagen)) return 'verplaatst';
+
   const status = String(a.status || 'scheduled');   // NOT NULL met default 'scheduled'
   if (status === 'cancelled')  return 'geannuleerd';
   if (status === 'verplaatst') return 'verplaatst';
@@ -935,19 +1051,19 @@ function persoonSleutel(a) {
  * gebruikt diezelfde set. Een geannuleerde call heeft geen spraakbericht nodig
  * en kan dus geen venster missen; een verzette voorganger evenmin.
  */
-export function relevanteAfspraken(afspraken, nuMs) {
+export function relevanteAfspraken(afspraken, nuMs, dagen = null) {
   const heeftOpvolgerHier = new Set(
     (afspraken || []).map((a) => a.parent_appointment_id).filter(Boolean).map(String),
   );
   return (afspraken || []).filter((a) => {
     if (String(a.status || '') === 'verplaatst' && heeftOpvolgerHier.has(String(a.id))) return false;
-    const staat = callStaat(a, nuMs);
+    const staat = callStaat(a, nuMs, dagen);
     return staat === 'gepland' || staat === 'te_beoordelen';
   });
 }
 
 // ── Sectie 4 ───────────────────────────────────────────────────────────────
-export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), belBijCall = null }) {
+export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), belBijCall = null, dagen = null }) {
   // DE LIJST ZELF MOET KLOPPEN, NIET ALLEEN DE BEVINDING.
   //
   // Op 7 september stonden er zes rijen voor drie calls: een verplaatste
@@ -974,12 +1090,20 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), 
     // notitietekst uitparseren — en net zo fout. Staat er geen uitkomst, dan
     // is het eerlijke antwoord dat er geen uitkomst vastgelegd is.
     const heeft = uitkomstKolommen && !!a.uitkomst;
-    const staat = callStaat(a, nuMs);
+    const staat = callStaat(a, nuMs, dagen);
+    const naar  = opOudeDag(a, dagen) ? verzetNaar(a) : null;
     return {
       appointment_id: a.id,
       naam    : a.lead_name,
-      dag     : dagVan(a.scheduled_at),
-      tijd    : tijdVan(a.scheduled_at),
+      // DE DAG WAAROP HIJ STOND, niet waar hij nu staat. Anders verdwijnt een
+      // verzette afspraak uit het rapport over die dag — en op precies één
+      // dag, want dubbel tellen maakt elk cijfer eronder verdacht.
+      dag     : rapportDag(a, dagen),
+      tijd    : opOudeDag(a, dagen) ? (oorspronkelijkeTijd(a) || tijdVan(a.scheduled_at)) : tijdVan(a.scheduled_at),
+      // Waarheen, als we dat weten. Het agendafeit uit onze eigen kolom — niet
+      // uit een status, en het staat er alleen als er echt een bestemming is.
+      verzet_naar: naar,
+      verzet_label: naar ? 'verzet naar ' + nlDatum(naar.dag) + (naar.tijd ? ' om ' + naar.tijd : '') : null,
       // gepland | verplaatst | geannuleerd | onbeoordeelbaar | te_beoordelen
       staat,
       // De ruwe status erbij, zodat een onbekende waarde te herkennen is
@@ -997,7 +1121,10 @@ export function bouwZoomcalls({ afspraken, uitkomstKolommen, nuMs = Date.now(), 
       // 'gepland' is een derde geval: er is nog niets te melden.
       reden_leeg: heeft ? null
         : (staat === 'gepland' ? 'Deze call moet nog plaatsvinden.'
-          : staat === 'verplaatst' ? 'Deze afspraak is verzet; de opvolger valt buiten deze periode.'
+          : staat === 'verplaatst'
+            ? (naar ? 'Deze afspraak is ' + 'verzet naar ' + nlDatum(naar.dag)
+                      + (naar.tijd ? ' om ' + naar.tijd : '') + '; daar hoort de uitkomst.'
+                    : 'Deze afspraak is verzet; de opvolger valt buiten deze periode.')
           : staat === 'geannuleerd' ? 'Deze afspraak is geannuleerd; een uitkomst hoort hier niet.'
           : staat === 'onbeoordeelbaar' ? 'De status van deze afspraak (' + String(a.status || '') + ') zegt niet of de call heeft plaatsgevonden.'
           : uitkomstKolommen

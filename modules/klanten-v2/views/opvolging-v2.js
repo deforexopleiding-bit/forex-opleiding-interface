@@ -4630,8 +4630,11 @@
         ' &mdash; deze tellen niet mee en krijgen geen oordeel.</div>';
     }
     if (verzet.length) {
+      // Ze stonden op deze dag en zijn verzet. Ze blijven staan — anders klopt
+      // het dagbeeld van gisteren morgen niet meer — maar ze krijgen geen
+      // oordeel, want de call was er die dag niet.
       h += '<div class="ronde zacht">' + verzet.length + ' afspraak' + (verzet.length === 1 ? '' : 'en') +
-        ' hieronder is verzet naar buiten deze periode. Die worden niet beoordeeld.</div>';
+        ' hieronder stond op deze dag en is verzet. Die worden niet beoordeeld.</div>';
     }
     if (onbekend.length) {
       h += '<div class="warn">' + onbekend.length + ' afspraak' + (onbekend.length === 1 ? '' : 'en') +
@@ -4644,7 +4647,11 @@
       '<div class="opvr-t">' + esc(c.naam || 'Naamloos') + ' <span class="opvr-u">' + esc(nl(c.dag)) +
       ' &middot; ' + esc(c.tijd || '') +
       (c.staat === 'gepland' ? ' &middot; <span class="tag t-grey">gepland</span>' : '') +
-      (c.staat === 'verplaatst' ? ' &middot; <span class="tag t-grey">verzet</span>' : '') +
+      // DE BESTEMMING ERBIJ, als we hem weten. Die komt van de server uit
+      // eerst_gepland_op — het agendafeit, niet een gok op een status. Zonder
+      // bestemming blijft het bij 'verzet', want dan wéten we het niet.
+      (c.staat === 'verplaatst'
+        ? ' &middot; <span class="tag t-grey">' + esc(c.verzet_label || 'verzet') + '</span>' : '') +
       (c.staat === 'geannuleerd' ? ' &middot; <span class="tag t-grey">geannuleerd</span>' : '') +
       (c.staat === 'onbeoordeelbaar' ? ' &middot; <span class="tag t-grey">' + esc(c.status_ruw || '') + '</span>' : '') +
       '</span></div>' +
