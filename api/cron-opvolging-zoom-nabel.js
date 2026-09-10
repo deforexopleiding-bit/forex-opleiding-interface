@@ -37,7 +37,7 @@
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import { leadlijstDektDag } from './_lib/opvolging-leadlijst-venster.js';
-import { haalWaRegels, regelsVoorNummer } from './_lib/opvolging-call-wa.js';
+import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
 import { inZone } from './_lib/opvolging-vensters.js';
 
 const ZONE = 'Europe/Amsterdam';
@@ -186,12 +186,10 @@ export default async function handler(req, res) {
     for (const a of afspraken) {
       try {
         const z = inZone(a.scheduled_at);
-        const waPog = regelsVoorNummer(regels, a.lead_phone)
-          .map((r) => ({
-            soort   : SPRAAK.has(String(r.media_type || '').toLowerCase()) ? 'spraakbericht' : 'whatsapp',
-            richting: r.richting === 'in' ? 'in' : 'uit',
-            tijdstip: r.tijdstip,
-          }));
+        // waPogingenVoorNummer en niet een eigen map: wat een spraakbericht IS
+        // hoort op één plek te staan. Twee kopieën van die beslissing laten
+        // hetzelfde bericht hier anders tellen dan op het scherm.
+        const waPog = waPogingenVoorNummer(regels, a.lead_phone);
 
         const besluit = bepaalKaart(waPog, vandaag);
         if (!besluit.kaart) { summary.overgeslagen_antwoord += 1; continue; }
@@ -224,8 +222,6 @@ export default async function handler(req, res) {
   console.log('[cron-opvolging-zoom-nabel] klaar', JSON.stringify(summary));
   return res.status(200).json({ ok: true, summary });
 }
-
-const SPRAAK = new Set(['ptt', 'audio', 'voice']);
 
 /**
  * Kunnen we vandaag überhaupt meten of er een spraakbericht ging?
