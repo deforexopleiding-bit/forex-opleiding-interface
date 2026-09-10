@@ -59,17 +59,39 @@ test('product_soort: geeft ALLEEN ooit mentorship of membership terug', () => {
 // ── 2) calls_totaal ─────────────────────────────────────────────────────────
 
 test('calls_totaal: calls wint van alpha_calls_total', () => {
-  assert.equal(bepaalCallsTotaal({ calls: 24, alpha_calls_total: 48 }), 24);
+  assert.equal(bepaalCallsTotaal({ calls: 24, alpha_calls_total: 48 }, 'mentorship'), 24);
 });
 
 test('calls_totaal: valt terug op alpha_calls_total', () => {
-  assert.equal(bepaalCallsTotaal({ calls: null, alpha_calls_total: 48 }), 48);
+  assert.equal(bepaalCallsTotaal({ calls: null, alpha_calls_total: 48 }, 'mentorship'), 48);
 });
 
-test('calls_totaal: 0 en onzin geven null (geen 0 als sentinel)', () => {
-  assert.equal(bepaalCallsTotaal({ calls: 0, alpha_calls_total: 0 }), null);
-  assert.equal(bepaalCallsTotaal({}), null);
-  assert.equal(bepaalCallsTotaal(null), null);
+test('calls_totaal: mentorship zonder aantal geeft null (geen 0 als sentinel)', () => {
+  // 0 zou hier betekenen dat een 1-op-1-klant zijn traject als "0 calls" ziet.
+  // Liever null, zodat de aanmaak luidruchtig stopt.
+  assert.equal(bepaalCallsTotaal({ calls: 0, alpha_calls_total: 0 }, 'mentorship'), null);
+  assert.equal(bepaalCallsTotaal({}, 'mentorship'), null);
+  assert.equal(bepaalCallsTotaal(null, 'mentorship'), null);
+});
+
+test('calls_totaal: membership geeft ALTIJD 0, nooit null', () => {
+  // Dit was de bug van 9 september: hlms_student.calls_totaal staat op NOT
+  // NULL, en een membership-traject heeft geen calls — dus rolde er null uit
+  // en sloeg de insert af op de constraint. Zie
+  // tests/dfo-lms-membership-calls.test.js voor de hele weg.
+  for (const t of [{}, null, { calls: null, alpha_calls_total: null },
+    { calls: 0 }, { calls: 12, alpha_calls_total: 24 }]) {
+    assert.equal(bepaalCallsTotaal(t, 'membership'), 0,
+      'membership hoort 0 te geven voor ' + JSON.stringify(t));
+  }
+});
+
+test('calls_totaal: membership geeft een GETAL, niet iets dat op 0 lijkt', () => {
+  // null, undefined en '' laten de kolom allemaal vallen en dan slaat
+  // dezelfde constraint alsnog toe.
+  const uit = bepaalCallsTotaal({}, 'membership');
+  assert.equal(typeof uit, 'number');
+  assert.ok(Number.isFinite(uit));
 });
 
 // ── 3) Datum-rekenkunde ─────────────────────────────────────────────────────
