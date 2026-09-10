@@ -4360,22 +4360,26 @@
    * gewoon blijft staan — dat is de veilige uitkomst, want er is dan ook niets
    * beloofd aan de lead.
    *
-   * De keuzelijst komt uit events-v2.js (window.KV.evKiesAnderEvent). Beide
-   * views staan in dezelfde pagina, dus die functie bestaat. Bestaat hij toch
-   * niet, dan zeggen we dat — een knop die stil niets doet is erger dan een
-   * knop die uitlegt waarom.
+   * De keuzelijst komt uit events-v2.js, via window.__evKiesAnderEvent. Bewust
+   * de GLOBALE en niet window.KV.evKiesAnderEvent: klanten-v2.js is een module
+   * en draait na alle views, en die verving KV in zijn geheel — waardoor de
+   * functie op 10 september uit allebei de modules verdween. Zie de kop van
+   * die functie in events-v2.js.
+   *
+   * Bestaat hij toch niet, dan zeggen we dat — een knop die stil niets doet is
+   * erger dan een knop die uitlegt waarom.
    */
   window.__opvVerplaatsNaarEvent = async () => {
     const m = _ui.modal; if (!m || _ui.bezig) return;
     const t = zoekTaak(m.taakId);
     if (!t) { alert('Deze kaart is niet meer te vinden. Ververs even.'); return; }
-    if (!window.KV || typeof window.KV.evKiesAnderEvent !== 'function') {
+    if (typeof window.__evKiesAnderEvent !== 'function') {
       alert('De eventlijst is hier niet beschikbaar. Ververs de pagina en probeer opnieuw.');
       return;
     }
 
     const ev = evVan(t);
-    const doel = await window.KV.evKiesAnderEvent({ eventId: ev.event_id || null, naam: t.naam || null });
+    const doel = await window.__evKiesAnderEvent({ eventId: ev.event_id || null, naam: t.naam || null });
     if (!doel) return;   // annuleren: er gebeurt niets
 
     try {
