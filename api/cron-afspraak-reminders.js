@@ -116,11 +116,37 @@ async function stuurWaBevestiging(appt, moment, ctx, welkomPhoneId) {
   }
 }
 
+// Log een zojuist verstuurde afspraak-mail als email_replies-rij, zodat 'ie in
+// de Leadsonderhoud-gespreksdraad verschijnt. De thread-weergave
+// (leadsonderhoud-gesprek-berichten.js) leest uitgaande mail uit email_replies
+// waar from_address == mailAfzender() (welkom@) en to_address == lead.email —
+// dus dezelfde bron/afzender als deze cron. sent_by_id=null (cron is geen user;
+// zelfde patroon als api/_lib/sanne-send-mail.js). PUUR een extra insert:
+// verzendlogica en -timing blijven ongemoeid. Fail-soft: een log-fout mag de
+// cron-run nooit breken.
+async function logAfspraakMailInThread({ toEmail, subject, text }) {
+  if (!toEmail) return;
+  try {
+    await supabaseAdmin.from('email_replies').insert({
+      email_id:      null,
+      email_subject: subject || null,
+      final_reply:   text || '',
+      from_address:  MAIL_FROM,
+      to_address:    toEmail,
+      sent_at:       new Date().toISOString(),
+      sent_by_id:    null,
+    });
+  } catch (e) {
+    console.warn('[cron-afspraak-reminders] email_replies-thread-log (soft):', e?.message || e);
+  }
+}
+
 // Eén bevestigings-mail versturen. Returnt per-kanaal-uitkomst.
 async function stuurMailBevestiging(appt, moment, ctx) {
   try {
     const { subject, text, html } = moment.mail(appt, ctx);
     const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html });
+    if (r?.ok) await logAfspraakMailInThread({ toEmail: appt.lead_email, subject, text });
     return r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };
   } catch (e) {
     return { ok: false, error: e?.message || String(e) };
@@ -300,6 +326,7 @@ async function verstuur(appt, moment, welkomPhoneId) {
     try {
       const { subject, text, html } = moment.mail(appt, ctx);
       const r = await sendEmailViaSmtp({ fromMailbox: MAIL_FROM, to: appt.lead_email, subject, text, html });
+      if (r?.ok) await logAfspraakMailInThread({ toEmail: appt.lead_email, subject, text });
       uitkomst.mail = r?.ok ? { ok: true, messageId: r.messageId || null } : { ok: false, error: r?.reason || 'onbekend', code: r?.code };
     } catch (e) {
       uitkomst.mail = { ok: false, error: e?.message || String(e) };
