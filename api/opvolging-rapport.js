@@ -53,8 +53,9 @@ import {
 import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
 import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
 import { leadlijstDektDag, DEKKING_VANAF } from './_lib/opvolging-leadlijst-venster.js';
+import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
 import {
-  beoordeelDag, telVensters, beoordeelMoeite, dagVan,
+  beoordeelDag, beoordeelMoeite, dagVan,
   SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
   ARCHIEF_MIN_DAGEN, ARCHIEF_MIN_WA,
 } from './_lib/opvolging-vensters.js';
@@ -353,7 +354,26 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // vlek 'calls die niet in de takenlijst staan' ook de geannuleerde en de
   // verzette mee, en dan staat er een groter getal onder een kortere lijst.
   const vensterAfspraken = relevanteAfspraken(afspraken, Date.now());
-  const vensters = bouwVensters({ afspraken: vensterAfspraken, taken: alleTaken, pogingen, dagen });
+
+  // DE WHATSAPP-BERICHTEN ERBIJ. Een zoomlead heeft meestal geen opvolgtaak, en
+  // dus geen pogingen-historiek; zijn spraakbericht staat wél in
+  // opvolging_wa_berichten (aan een NUMMER, niet aan een kaart). Zonder deze
+  // regels meet sectie 3 structureel nul voor precies die groep.
+  //
+  // Een leesfout is een BLINDE VLEK, geen nul: bouwVensters krijgt dan null
+  // mee en behandelt elke call zonder taak als 'zonder_taak', net als voorheen.
+  const waLezing = await haalWaRegels(supabaseAdmin, vanIso, totIso);
+  if (waLezing.fout) {
+    blindeVlekken.push({
+      sectie: 'vensters',
+      wat   : 'De WhatsApp-berichten konden niet gelezen worden.',
+      waarom: 'Het spraakbericht per zoomcall wordt daaruit afgelezen voor leads zonder opvolgtaak. Zonder die rijen is er voor die leads niets gemeten; ze staan hieronder als niet-beoordeelbaar en niet als gemist.',
+    });
+  }
+  const vensters = bouwVensters({
+    afspraken: vensterAfspraken, taken: alleTaken, pogingen, dagen,
+    waRegels : waLezing.fout ? null : waLezing.regels,
+  });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 4 · DE ZOOMCALLS ZELF
@@ -778,7 +798,13 @@ export function belpogingenVoorCalls({ afspraken, taken, pogingen }) {
   return uit;
 }
 
-export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
+/**
+ * @param {?Array} waRegels de gespreksregels uit opvolging_wa_berichten, of
+ *   NULL als ze niet gelezen konden worden. Null en [] zijn NIET hetzelfde:
+ *   een lege lijst betekent 'er ging die dagen niets', null betekent 'we weten
+ *   het niet' — en dan blijft een call zonder taak gewoon onbeoordeelbaar.
+ */
+export function bouwVensters({ afspraken, taken, pogingen, dagen, waRegels = null }) {
   // Wie in de vensters hoort zijn de leads met een zoomcall op die dag — niet
   // iedereen op de lijst. Een masterclass-aanmelding hoort geen
   // ochtendspraakbericht te krijgen en hoeft tussen 12 en 13 niet nagebeld.
@@ -799,43 +825,85 @@ export function bouwVensters({ afspraken, taken, pogingen, dagen }) {
     const dag = dagVan(a.scheduled_at);
     if (!dagen.includes(dag)) continue;
     const t = zoekTaak(a.lead_phone);
-    if (!t) {
+
+    // ── DE WHATSAPP-BERICHTEN VAN DIE LEAD ───────────────────────────────
+    // Alleen op een dag die de leadlijst dekt. Daarvoor gooide de webhook een
+    // bericht van een nummer zonder kaart weg, dus is een lege lijst daar geen
+    // meting maar een gat — en dan blijft het oude gedrag staan.
+    const waPog = (waRegels && leadlijstDektDag(dag))
+      ? waPogingenVoorNummer(waRegels, a.lead_phone) : null;
+
+    if (!t && !waPog) {
       // Niet te beoordelen: er is geen pogingen-historiek voor. Als 'geen
       // spraakbericht' meetellen zou een oordeel zijn over iets wat we niet
       // gemeten hebben.
       zonderTaak.push({ appointment_id: a.id, naam: a.lead_name, dag, tijd: tijdVan(a.scheduled_at) });
       continue;
     }
-    const sleutel = dag + '|' + t.id;
-    if (perDag.has(sleutel)) continue;   // twee calls voor dezelfde persoon = één taak
+
+    // Zonder kaart is het nummer de identiteit: twee calls voor hetzelfde
+    // nummer op één dag blijven één rij, net als twee calls voor één taak.
+    //
+    // De laatste negen cijfers, niet de volle reeks — het CRM noteert nummers
+    // ook lokaal terwijl de agenda ze met landcode draagt, en dat is dezelfde
+    // persoon. Zelfde identiteitsregel als maakTaakZoeker hierboven hanteert
+    // voor een lead mét kaart; een andere zou dezelfde lead met kaart één rij
+    // geven en zonder kaart twee.
+    const sleutel = dag + '|' + (t ? t.id : 'nr:' + nummerSleutel(a.lead_phone));
+    if (perDag.has(sleutel)) continue;
     perDag.set(sleutel, true);
 
-    const taakMetHist = { ...t, pogingen: pogPerTaak.get(t.id) || [] };
-    const oordeel = beoordeelDag(taakMetHist, dag);
+    const pog = (t ? (pogPerTaak.get(t.id) || []) : []).concat(waPog || []);
+    const oordeel = beoordeelDag({ pogingen: pog }, dag);
+
+    // ZONDER KAART IS NABELLEN NIET GEMETEN, niet 'niet gedaan'. Een belpoging
+    // hangt aan een taak; die er niet is betekent dat we het niet kunnen zien.
+    // Het spraakbericht is hier wél gemeten — dat komt uit de gespreksregels.
+    const nabel = (!t && oordeel.nabel.staat === 'niet_gedaan')
+      ? { staat: 'niet_gemeten', reden: 'geen opvolgtaak, dus belpogingen niet zichtbaar', tijd: null }
+      : oordeel.nabel;
+
     rijen.push({
-      taak_id: t.id, appointment_id: a.id, naam: t.naam || a.lead_name,
+      // Null en niet een verzonnen id: wie deze rij terugleest moet kunnen zien
+      // dat er geen kaart achter zit.
+      taak_id: t ? t.id : null,
+      appointment_id: a.id, naam: (t && t.naam) || a.lead_name,
       dag, call_tijd: tijdVan(a.scheduled_at),
-      spraak: oordeel.spraak, nabel: oordeel.nabel,
+      spraak: oordeel.spraak, nabel,
     });
   }
 
-  // Tellingen per dag optellen: telVensters rekent per dag, en een lead met
-  // een call op twee dagen hoort twee keer beoordeeld te worden.
+  // ── DE TELLING KOMT UIT DE RIJEN ZELF ──────────────────────────────────
+  // Stond eerder als een tweede telVensters-ronde over gereconstrueerde taken.
+  // Dat kon niet meer: de rijen zonder kaart dragen hun pogingen niet in
+  // pogPerTaak, en hun nabel-oordeel is hier al bijgesteld naar 'niet_gemeten'.
+  // Twee keer hetzelfde uitrekenen langs twee wegen is precies hoe scherm en
+  // rapport uit elkaar lopen — dus tellen we wat er in de lijst staat.
   const totaal = { spraak: leegTel(), nabel: leegTel() };
-  for (const dag of dagen) {
-    const takenVanDag = rijen.filter((r) => r.dag === dag)
-      .map((r) => ({ id: r.taak_id, pogingen: pogPerTaak.get(r.taak_id) || [] }));
-    const t = telVensters(takenVanDag, dag);
-    for (const k of ['totaal', 'op_tijd', 'te_laat', 'niet_gedaan', 'niet_nodig']) {
-      totaal.spraak[k] += t.spraak[k];
-      totaal.nabel[k]  += t.nabel[k];
-    }
+  for (const r of rijen) {
+    totaal.spraak.totaal += 1;
+    totaal.spraak[r.spraak.staat] += 1;
+    if (r.nabel.staat === 'niet_gemeten') { totaal.nabel.niet_gemeten += 1; continue; }
+    if (r.nabel.staat === 'niet_nodig')   { totaal.nabel.niet_nodig += 1; continue; }
+    totaal.nabel.totaal += 1;
+    totaal.nabel[r.nabel.staat] += 1;
   }
 
-  return { spraak: totaal.spraak, nabel: totaal.nabel, rijen, zonder_taak: zonderTaak };
+  return {
+    spraak: totaal.spraak, nabel: totaal.nabel, rijen, zonder_taak: zonderTaak,
+    // Apart en met naam, zodat een scherm het niet per ongeluk als 'gemist'
+    // optelt. Zie de kop hierboven.
+    nabel_niet_gemeten: totaal.nabel.niet_gemeten,
+  };
 }
 
-const leegTel = () => ({ totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 });
+const leegTel = () => ({ totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0, niet_gemeten: 0 });
+
+/** De identiteit van een telefoonnummer zonder kaart. Zie de sleutel hierboven. */
+function nummerSleutel(tel) {
+  const d = telCijfers(tel).replace(/^00/, '');
+  return d.length >= 9 ? d.slice(-9) : (d || 'onbekend');
+}
 
 // ── Sectie 4 ───────────────────────────────────────────────────────────────
 // Hoeveel speling een call krijgt nadat hij is afgelopen, voordat het rapport

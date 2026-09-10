@@ -123,7 +123,9 @@ test('alleen echte berichten worden een gespreksregel, geen statussen', () => {
   assert.ok(i > 0, 'de helper hoort te bestaan');
   const blok = bron.slice(i, i + 900);
   assert.match(blok, /richting = soort === 'antwoord_ontvangen' \? 'in' : soort === 'uitgaand' \? 'uit' : null/);
-  assert.match(blok, /if \(!richting\) return;/, 'de rest valt eruit');
+  // return FALSE, geen kale return: een nummer zonder opvolgkaart krijgt dit
+  // antwoord als `bewaard` mee terug, en dan moet er een boolean staan.
+  assert.match(blok, /if \(!richting\) return false;/, 'de rest valt eruit');
 });
 
 test('de gespreksregel is fail-soft en idempotent', () => {

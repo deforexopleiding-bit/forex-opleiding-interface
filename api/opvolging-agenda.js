@@ -37,6 +37,8 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { voegAgendaSamen, dagenTussen } from './_lib/opvolging-agenda-merge.js';
+import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
+import { leadlijstDektDag } from './_lib/opvolging-leadlijst-venster.js';
 import fetch from 'node-fetch';
 
 const GHL_BASE    = 'https://services.leadconnectorhq.com';
@@ -246,6 +248,11 @@ async function lees(req, res, supabase) {
   const dagen = voegAgendaSamen({ slots, afspraken, van, tot, timeZone: timezone });
   const vrijTotaal = dagen.reduce((n, d) => n + d.vrij.length, 0);
 
+  // De WhatsApp-pogingen bij elke geplande call. Zie de kop van
+  // hangWhatsAppAanCalls: `wa` is een lijst of NULL, en NULL betekent 'niet
+  // gemeten' — niet 'geen spraakbericht'.
+  const waMelding = await hangWhatsAppAanCalls(dagen, van, tot);
+
   return res.status(200).json({
     timezone,
     window: { van, tot },
@@ -257,9 +264,80 @@ async function lees(req, res, supabase) {
     afspraken_melding: bezetMelding,
     dagbeeld_volledig: dagbeeldMeldingen.length === 0,
     dagbeeld_melding : dagbeeldMeldingen.join(' ') || null,
+    // Waarom `wa` op sommige calls null staat. Null zonder uitleg zou het
+    // scherm laten kiezen tussen zwijgen en gokken.
+    wa_melding       : waMelding,
     melding: melding || bezetMelding || (vrijTotaal === 0 ? 'Geen vrije momenten in deze week.' : null),
   });
 }
+
+/**
+ * DE WHATSAPP-BERICHTEN BIJ ELKE GEPLANDE CALL.
+ *
+ * ── WAAROM DIT HIER HANGT EN NIET IN DE VIEW ────────────────────────────
+ * De twee vensters (spraakbericht vóór 09:00, nabellen 12-13) worden beoordeeld
+ * op `opvolging_pogingen`, en die hangen aan een taak. Een zoomlead heeft er
+ * meestal geen: hij boekte zelf een call en kwam nooit in de werklijst. Het
+ * scherm zei daarom '7 ingeplande calls, maar geen ervan staat in de
+ * takenlijst' terwijl er die ochtend gewoon spraakberichten waren gegaan.
+ *
+ * De berichten staan wél in `opvolging_wa_berichten` (sinds de webhook ze ook
+ * zonder taak bewaart). Die hangen we hier aan de call, zodat het scherm met de
+ * BESTAANDE beoordeelSpraak/beoordeelNabel kan rekenen.
+ *
+ * ── NULL IS NIET LEEG ────────────────────────────────────────────────────
+ * `wa` is een array (gemeten) óf null (niet gemeten). Een lege array betekent
+ * 'die dag ging er niets naar dit nummer'; null betekent 'we kunnen het niet
+ * weten'. Vier redenen voor null, en elk is er één waarbij een lege lijst een
+ * verwijt zou worden:
+ *   · de dag valt vóór DEKKING_VANAF — de webhook gooide toen nog weg;
+ *   · het lezen van de berichten mislukte;
+ *   · de call heeft geen telefoonnummer;
+ *   · de call gaat niet door (verzet, geannuleerd, doorgehaald).
+ *
+ * ── supabaseAdmin, EN DAT IS EEN BEWUSTE KEUZE ──────────────────────────
+ * Dit endpoint zit al achter opvolging.module.access. Zou hier de user-client
+ * staan, dan leest een RLS-nul als 'geen spraakbericht' — een verwijt dat
+ * ontstaat uit een rechtenkwestie. Liever alles of een expliciete melding.
+ *
+ * @returns {Promise<?string>} een melding voor het scherm, of null.
+ */
+async function hangWhatsAppAanCalls(dagen, van, tot) {
+  const geplandeCalls = [];
+  for (const d of dagen || []) {
+    for (const c of (d.gepland || [])) geplandeCalls.push({ dag: d.dag, call: c });
+  }
+  if (geplandeCalls.length === 0) return null;
+
+  // Alleen de dagen waarop de leadlijst de zoomcall-leads dekte. Buiten dat
+  // bereik hoeven we niet eens te lezen.
+  const meetbareDagen = new Set((dagen || []).map((d) => d.dag).filter(leadlijstDektDag));
+  for (const { call } of geplandeCalls) call.wa = null;
+  if (meetbareDagen.size === 0) return null;
+
+  const vanIso = new Date(zoneMiddernachtMs(van)).toISOString();
+  const totIso = new Date(zoneMiddernachtMs(tot) + 24 * 3600 * 1000).toISOString();
+  const { regels, fout } = await haalWaRegels(supabaseAdmin, vanIso, totIso);
+  if (fout) {
+    return 'De WhatsApp-berichten konden niet gelezen worden, dus het spraakbericht per call is niet gemeten.';
+  }
+
+  for (const { dag, call } of geplandeCalls) {
+    if (!meetbareDagen.has(dag)) continue;
+    if (!call.telefoon) continue;
+    // Een call die niet doorgaat heeft geen ochtend om over te oordelen.
+    if (call.doorgehaald === true) continue;
+    if (NIET_GEVOERD.has(String(call.status || '').toLowerCase())) continue;
+    call.wa = waPogingenVoorNummer(regels, call.telefoon);
+  }
+  return null;
+}
+
+/**
+ * Statussen waarbij de call niet gevoerd is en er dus niets te beoordelen valt.
+ * Tweeling van de filter in de view; zie de kop van hangWhatsAppAanCalls.
+ */
+const NIET_GEVOERD = new Set(['cancelled', 'verwijderd', 'verplaatst', 'wacht_op_reschedule']);
 
 function isoPlusDagen(datum, n) {
   const ms = Date.parse(`${datum}T12:00:00Z`) + n * 86400000;

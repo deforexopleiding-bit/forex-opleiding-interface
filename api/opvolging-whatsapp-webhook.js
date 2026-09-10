@@ -9,10 +9,23 @@
 // Auth: het gedeelde geheim in X-Brug-Secret. Geen user-sessie — de brug heeft
 // er geen.
 //
-// ONBEKENDE NUMMERS WORDEN STIL GENEGEERD. Niet als fout, niet met een melding
-// in het antwoord: de brug hoort niet te weten welke nummers wij kennen, en een
-// 404 op een onbekend nummer zou dat alsnog verklappen. Er wordt in dat geval
-// ook niets van de tekst gelogd.
+// EEN NUMMER ZONDER OPVOLGTAAK KRIJGT WEL EEN GESPREKSREGEL, GEEN POGING.
+//
+// Dat stond andersom, en dat was fout. Wat hier binnenkomt heeft het
+// leadlijstfilter van de brug al gepasseerd — de brug stuurt uitsluitend
+// nummers door die op onze eigen lijst staan, inclusief de zoomcall-leads uit
+// _lib/opvolging-leadlijst-venster.js. Het bericht wegdoen omdat er toevallig
+// geen KAART bij hoort, gooide dus meetbare feiten weg over mensen die we zelf
+// hebben aangedragen: op 10 september liet de brug 36 berichten door en gaf
+// /api/opvolging-whatsapp-gesprek?nummer= er nul terug voor vier zoomleads.
+//
+// Een POGING blijft wél aan een taak hangen. Die telt mee in de dekking van een
+// kaart, en zonder kaart is er niets om in te tellen. De gespreksregel draagt
+// `taak_id` NULL (de kolom is nullable) en wordt pas op het moment van rekenen
+// tot poging omgevormd — zie api/_lib/opvolging-call-wa.js.
+//
+// Het antwoord blijft `gekoppeld: false`. De brug hoort niet te weten welke
+// nummers een kaart hebben; `bewaard` zegt alleen of de regel is weggeschreven.
 //
 // Schrijft in opvolging_pogingen (de TELLING) en in opvolging_wa_berichten
 // (het GESPREK), plus updated_at op de taak. Die twee zijn bewust gescheiden:
@@ -100,10 +113,22 @@ export default async function handler(req, res) {
   const tijdstip = b.tijdstip ? new Date(b.tijdstip) : new Date();
   const tijdstipIso = isNaN(tijdstip.getTime()) ? new Date().toISOString() : tijdstip.toISOString();
 
+  // Boven de taak-lookup, want de gespreksregel van een nummer zonder kaart
+  // draagt hem ook — daar is hij de idempotency-sleutel van de partiële index.
+  const berichtId = b.bericht_id ? String(b.bericht_id).slice(0, 200) : null;
+
   try {
     const taak = await zoekTaak(nummer);
-    // Stil. Geen 404, geen melding, geen log met de tekst erin.
-    if (!taak) return res.status(200).json({ ok: true, gekoppeld: false });
+    // Geen kaart, maar wel een lead die wij zelf op de brug-lijst hebben gezet.
+    // De gespreksregel gaat door — anders is er straks niets om de twee
+    // vensters op te beoordelen. Een poging niet: die hoort bij een kaart.
+    if (!taak) {
+      const bewaard = await bewaarGesprekRegel({
+        soort, nummer, taakId: null, tijdstipIso, berichtId,
+        tekst: volledigeTekstVan(b), mediaType: b.media_type,
+      });
+      return res.status(200).json({ ok: true, gekoppeld: false, bewaard });
+    }
 
     // Zowel een ontvangen als een verstuurd spraakbericht telt als spraakbericht.
     // De richting staat nu in een KOLOM, niet in een woord. Hij was af te lezen
@@ -125,7 +150,6 @@ export default async function handler(req, res) {
     //
     // 'uitgaand' wint als hij later komt: die draagt het echte verzendmoment en
     // het media_type, en de ack draagt geen van beide betrouwbaar.
-    const berichtId = b.bericht_id ? String(b.bericht_id).slice(0, 200) : null;
     const sleutel = berichtId ? berichtId + '#' + idemSoort(soort) : null;
     let bestaandeId = null;
     if (sleutel) {
@@ -270,10 +294,14 @@ async function werkStatusBij({ taakId, sleutel, soort, isSpraak }) {
  * Idempotent op bericht_id via een partiële unique index. Een herkans van de
  * brug levert dus geen tweede regel op; 23505 is hier geen fout maar het bewijs
  * dat de regel er al stond.
+ *
+ * @returns {Promise<boolean>} of er een regel staat. Voor een nummer zonder
+ *   kaart is dat het enige signaal dat de brug terugkrijgt; de statussen
+ *   ('afgeleverd', 'gelezen') vallen er sowieso uit en leveren false op.
  */
 async function bewaarGesprekRegel({ soort, nummer, taakId, tijdstipIso, berichtId, tekst, mediaType }) {
   const richting = soort === 'antwoord_ontvangen' ? 'in' : soort === 'uitgaand' ? 'uit' : null;
-  if (!richting) return;
+  if (!richting) return false;
   try {
     const { error } = await supabaseAdmin.from('opvolging_wa_berichten').insert({
       nummer,
@@ -285,8 +313,10 @@ async function bewaarGesprekRegel({ soort, nummer, taakId, tijdstipIso, berichtI
       tijdstip  : tijdstipIso,
     });
     if (error && error.code !== '23505') throw new Error(error.message);
+    return true;
   } catch (e) {
     console.warn('[opvolging-whatsapp-webhook] gespreksregel (soft):', e?.message || e);
+    return false;
   }
 }
 

@@ -79,7 +79,18 @@ export function valtInVenster(scheduledAt, nuMs = Date.now()) {
 // ⚠ SCHUIFT DE DEPLOY OP, SCHUIF DEZE DATUM MEE. Staat hier een dag vóór de
 // echte deploy, dan beweert het rapport iets gemeten te hebben wat het niet
 // kon meten — precies de fout die dit hele blok moet voorkomen.
-export const DEKKING_VANAF = '2026-09-09';
+//
+// 11 SEPTEMBER, NIET 9. De brug liet de zoomcall-leads vanaf de 9e wél door —
+// dat deel klopte — maar api/opvolging-whatsapp-webhook.js gooide een bericht
+// van een nummer zonder opvolgtaak daarna alsnog weg (`if (!taak) return`).
+// Zoomleads hebben meestal geen taak, dus voor precies die groep werd er nog
+// steeds niets bewaard. Gemeten op 10 september: 36 doorgelaten berichten op
+// message_create, nul gespreksregels voor Rani, Nadia, Nive en Claudia.
+//
+// De webhook bewaart ze sinds deze wijziging wél. De eerste ochtend waarop dat
+// een volledige dag dekt is 11 september; de 9e en de 10e blijven dus een
+// blinde vlek, en dat is eerlijker dan een nul die eruitziet als een meting.
+export const DEKKING_VANAF = '2026-09-11';
 
 /**
  * Kon de brug op deze dag de zoomcall-leads überhaupt doorlaten?
