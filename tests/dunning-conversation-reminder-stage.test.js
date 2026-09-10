@@ -75,7 +75,7 @@ test('count=0 + inbound 5h geleden -> null (te vroeg)', () => {
   assert.equal(stage, null);
 });
 
-test('count=0 zonder inbound-ankerpunt -> null', () => {
+test('count=0 zonder inbound-ankerpunt -> geen_gesprek (fail-closed)', () => {
   const run = { paused_conversation_reminder_count: 0, paused_conversation_last_reminder_at: null };
   const stage = determineStage({
     run,
@@ -83,7 +83,10 @@ test('count=0 zonder inbound-ankerpunt -> null', () => {
     noReplyCfg: NR_CFG,
     nowMs: NOW,
   });
-  assert.equal(stage, null);
+  // Geen enkel klant-bericht = geen gesprek. Tot 10 sep 2026 gaf balLigtBijOns
+  // hier false terug en besliste de teller alsnog; nu is het een expliciete
+  // blokkade met een eigen reden in de cron-log.
+  assert.equal(stage, 'geen_gesprek');
 });
 
 // ── count=1: r2-gate + NIEUWE reply-guard ────────────────────────────

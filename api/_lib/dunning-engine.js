@@ -498,12 +498,18 @@ async function countSendsTodayByCustomer(customerIds, dayStartIso) {
         .from('dunning_log')
         .select('run_id, event_type')
         .in('run_id', slice)
-        .in('event_type', ['email_sent', 'whatsapp_sent'])
+        // `conversation_reminder_sent` telt mee als WhatsApp. De dagcap gaat
+        // over de telefoon van de klant, niet over welk subsysteem toevallig
+        // stuurt: ging er vanochtend een no-reply-herinnering uit, dan hoort
+        // de ladder er 's middags geen tweede WhatsApp bovenop te doen.
+        // Andersom niet: de reminder-cron raadpleegt deze teller niet, dus een
+        // door de cap geblokkeerde ladder-send onderdrukt geen herinnering.
+        .in('event_type', ['email_sent', 'whatsapp_sent', 'conversation_reminder_sent'])
         .gte('created_at', dayStartIso));
       for (const l of logs) {
         const cid = custByRun.get(l.run_id);
         if (!cid) continue;
-        const chan = l.event_type === 'whatsapp_sent' ? 'whatsapp' : 'email';
+        const chan = l.event_type === 'email_sent' ? 'email' : 'whatsapp';
         const cur = out.get(cid) || { whatsapp: 0, email: 0 };
         cur[chan] += 1;
         out.set(cid, cur);

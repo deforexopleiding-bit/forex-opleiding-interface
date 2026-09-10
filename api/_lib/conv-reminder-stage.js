@@ -13,6 +13,8 @@
 //   'rz' → resume run (r2 al gestuurd + stil >= resume_after_hours)
 //   'rz_blocked' → hervatten geweigerd: de bal ligt bij ons (aparte waarde
 //          i.p.v. null zodat de cron het als eigen reden kan loggen)
+//   'geen_gesprek' → er is helemaal geen klant-bericht in deze conversatie;
+//          er valt dus niets op te volgen. Zie "GEEN INBOUND" in de kop.
 //   null → niets doen (nog te vroeg, of al voltooid)
 //
 // ── DE KLOK LOOPT VANAF ONS LAATSTE UITGAANDE BERICHT ────────────────────
@@ -73,6 +75,13 @@
 // niet op het uur; de eerste tik binnen het verzendvenster van de volgende dag
 // is de eerste die telt.
 //
+// ── GEEN INBOUND = GEEN GESPREK ──────────────────────────────────────────
+//
+// Een conversatie zonder enig klant-bericht is geen gesprek. Er valt dan niets
+// op te volgen, en de hele no-reply-cyclus is niet van toepassing. Dat wordt
+// expliciet geblokkeerd ('geen_gesprek') in plaats van stilzwijgend door te
+// laten. Zie de opmerking bij die tak voor de drie productie-gevallen.
+//
 // ── DE REGEL GELDT OOK VOOR HET HERVATTEN ('rz') ─────────────────────────
 //
 // De eerste versie van deze fix liet 'rz' met opzet ongemoeid, met als
@@ -121,7 +130,7 @@
  *   "DE VERZENDTIJD MAG NIET WANDELEN" in de kop. Null → val terug op de
  *   uren-vergelijking (oud gedrag; alleen nog voor losse unit-tests).
  * @param {number} args.nowMs            Date.now() (injecteerbaar voor tests).
- * @returns {'r1'|'r2'|'rz'|'rz_blocked'|null}
+ * @returns {'r1'|'r2'|'rz'|'rz_blocked'|'geen_gesprek'|null}
  */
 export function determineStage({
   run, convLastInboundAt, convLastAnswerAt = null,
@@ -187,10 +196,25 @@ export function determineStage({
    * bij de klant en de guard voorgoed uitschakelen.
    */
   function balLigtBijOns() {
-    if (!lastInboundMs) return false;
     if (!antwoordMs) return true;                   // nooit inhoudelijk geantwoord
     return lastInboundMs > antwoordMs;
   }
+
+  // GEEN INBOUND = GEEN GESPREK. Fail-closed, vóór alle andere takken.
+  //
+  // Zonder klant-bericht bestaat er niets om een no-reply-herinnering over te
+  // sturen: "ik heb nog geen reactie van je ontvangen" slaat nergens op als de
+  // klant nooit iets gestuurd heeft. Tot deze wijziging gaf `balLigtBijOns`
+  // hier `false` terug — geen bewuste doorlaat, maar een gat: de guard greep
+  // niet in en de teller besliste alsnog.
+  //
+  // Gemeten in productie (10 sep 2026): drie runs staan gespreksgepauzeerd
+  // terwijl er nul WhatsApp-berichten bij de klant staan — Karim Alian (64
+  // dagen te laat), Priscilla Mauricia (70) en Khalid Nassiri (44). Hun
+  // aanmaanladder staat daardoor al twee maanden stil op een pauze die
+  // nergens op slaat. Eigen returnwaarde zodat dat zichtbaar wordt in de
+  // cron-log in plaats van stil te blijven.
+  if (!lastInboundMs) return 'geen_gesprek';
 
   if (count === 0) {
     if (balLigtBijOns()) return null;

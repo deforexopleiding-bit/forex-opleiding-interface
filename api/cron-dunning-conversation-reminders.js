@@ -45,8 +45,10 @@
 //     nog verder versmallen, maar kan het niet meer openzetten — dat gat liet
 //     herinneringen tot 02:15 UTC doorlopen. Buiten venster: skip zonder
 //     teller-mutatie zodat de VOLGENDE tick 'em alsnog stuurt.
-//   - Hooguit één herinnering per run per kalenderdag (Europe/Amsterdam),
-//     geteld op de eigen `conversation_reminder_sent`-regels in dunning_log.
+//   - Hooguit één herinnering per KLANT per kalenderdag (Europe/Amsterdam),
+//     geteld over alle runs van die klant op de eigen
+//     `conversation_reminder_sent`-regels in dunning_log. Per klant en niet
+//     per run, omdat 30 van de 141 wanbetalers twee lopende runs hebben.
 //   - Caps: max_messages_per_conversation_per_day + _total lezen uit
 //     joost_config.autonomy_config.communication_limits, tellers uit
 //     joost_conversation_state. Bij total-cap: aanroep van
@@ -206,6 +208,8 @@ export async function isWithin24hWindow(supabase, convId) {
  *   stage 'rz'  → resume (2 gestuurd + stil-na-r2 >= resume_after_hours)
  *   stage 'rz_blocked' → NIET hervatten: het laatste bericht is van de klant
  *                        en onbeantwoord. Run blijft gepauzeerd.
+ *   stage 'geen_gesprek' → er is nooit een klant-bericht geweest in deze
+ *                        conversatie; niets om op te volgen.
  *   stage null  → niets doen (nog te vroeg, al voltooid, of wij hebben al geantwoord)
  *
  * `convLastOutboundAt` (optioneel — FIX B no-reply-bug): tijdstip van laatste
@@ -640,6 +644,18 @@ export async function processReminderRun({
           return;
         }
 
+        // ── Stage 'geen_gesprek': er is nooit een klant-bericht geweest ──
+        // Dan is er niets om over op te volgen. Eigen skip-reden zodat deze
+        // runs opvallen: ze staan gespreksgepauzeerd op een gesprek dat niet
+        // bestaat, en hun aanmaanladder staat daardoor stil.
+        if (stage === 'geen_gesprek') {
+          summary.skipped.push({
+            run_id: run.id,
+            reason: 'GEEN_GESPREK: conversatie zonder enig klant-bericht — niets om op te volgen, ladder staat stil',
+          });
+          return;
+        }
+
         // ── Stage 'rz_blocked': hervatten geweigerd ──
         // Het laatste bericht in de draad is van de klant en onbeantwoord.
         // De run blijft gepauzeerd tot een mens antwoordt; er is geen timer
@@ -702,23 +718,34 @@ export async function processReminderRun({
           }
         }
 
-        // ─── GUARDRAIL 1b: hooguit één herinnering per kalenderdag ─────
+        // ─── GUARDRAIL 1b: hooguit één herinnering per KLANT per kalenderdag ─
         // Vangnet naast de dag-verankerde drempel in determineStage. Zelfde
-        // gedachte als de per-kanaal dagcap van de motor: wat er ook misgaat
-        // in de tellers, een klant krijgt niet twee keer op één dag een
-        // herinnering. Fail-soft: bij een DB-fout gaan we door.
+        // gedachte als de per-kanaal dagcap van de motor: het gaat over de
+        // telefoon van de klant, niet over welke run toevallig aan de beurt is.
+        //
+        // PER KLANT, niet per run. Gemeten (10 sep 2026): 30 van de 141
+        // wanbetalers hebben twee lopende runs. Op run-niveau tellen zou die
+        // groep alsnog twee herinneringen op één dag kunnen bezorgen.
+        // Fail-soft: bij een DB-fout gaan we door.
         try {
           const dagStart = zonedDayStartIso(todayIsoInTz(new Date(nowMs)));
-          const { data: vandaag } = await supabaseAdmin
-            .from('dunning_log')
+          const { data: runsVanKlant } = await supabaseAdmin
+            .from('dunning_workflow_runs')
             .select('id')
-            .eq('run_id', run.id)
-            .eq('event_type', REMINDER_LOG_EVENT)
-            .gte('created_at', dagStart)
-            .limit(1);
-          if (vandaag && vandaag.length) {
-            summary.skipped.push({ run_id: run.id, reason: 'AL_HERINNERD_VANDAAG' });
-            return;
+            .eq('customer_id', run.customer_id);
+          const runIds = (runsVanKlant || []).map((r) => r.id);
+          if (runIds.length) {
+            const { data: vandaag } = await supabaseAdmin
+              .from('dunning_log')
+              .select('id')
+              .in('run_id', runIds)
+              .eq('event_type', REMINDER_LOG_EVENT)
+              .gte('created_at', dagStart)
+              .limit(1);
+            if (vandaag && vandaag.length) {
+              summary.skipped.push({ run_id: run.id, reason: 'AL_HERINNERD_VANDAAG (klant-breed)' });
+              return;
+            }
           }
         } catch (e) {
           console.warn('[conv-reminder-cron] dagcap-check fail-soft:', e?.message);

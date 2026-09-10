@@ -172,3 +172,41 @@ test('het Joost-venster mag nog wél verder versmallen', async (t) => {
   const reden = (summary.skipped[0] || {}).reason || '';
   assert.match(reden, /Joost-venster/, 'versmallen blijft werken: ' + JSON.stringify(summary.skipped));
 });
+
+// ── Dagcap: per KLANT, niet per run ──────────────────────────────────
+//
+// GEMETEN (10 sep 2026): 30 van de 141 wanbetalers hebben in de laatste
+// dertig dagen gebeurtenissen van meer dan één run. Op run-niveau tellen zou
+// die groep twee herinneringen op één dag kunnen bezorgen — twee runs, twee
+// keer "één per dag". De cap gaat over de telefoon van de klant, dus telt hij
+// over alle runs van die klant.
+
+test('een herinnering van vanochtend blokkeert een tweede run van dezelfde klant', async (t) => {
+  t.after(() => mock.reset());
+  // Run B van dezelfde klant; run A heeft vanochtend al een herinnering
+  // gestuurd. De dagcap-lookup vindt beide runs van de klant en daarna de
+  // log-regel van run A.
+  const mod = await laadCron({
+    ...ROWS,
+    dunning_workflow_runs: [{ id: 'run-a' }, { id: 'run-b' }],
+    dunning_log: [{ id: 'log-a' }],   // de herinnering van run A, vanochtend
+  });
+  const summary = leegSummary();
+
+  await mod.processReminderRun({
+    run: { ...RUN, id: 'run-b' },
+    autonomyCfg:    { communication_limits: COMM_LIMITS_PRODUCTIE },
+    officeHoursCfg: MOTOR_VENSTER,
+    noReplyCfg:     { reminder_1_hours: 24, reminder_2_hours: 24, resume_after_hours: 24 },
+    deps:      {},
+    dryRunOn:  false,
+    nowMs:     Date.parse('2026-09-10T13:00:00Z'),   // 15:00 Amsterdam, binnen venster
+    summary,
+    logPrefix: 'test',
+  });
+
+  assert.equal(summary.r1_sent, 0);
+  const reden = (summary.skipped[0] || {}).reason || '';
+  assert.match(reden, /AL_HERINNERD_VANDAAG/, JSON.stringify(summary.skipped));
+  assert.match(reden, /klant-breed/, 'de cap telt over alle runs van de klant');
+});

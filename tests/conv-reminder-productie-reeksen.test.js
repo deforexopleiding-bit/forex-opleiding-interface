@@ -197,3 +197,50 @@ test('WANDELING: een medewerker die net antwoordde verzet het anker', () => {
   });
   assert.equal(stage, null);
 });
+
+// ── GEEN GESPREK: een pauze die nergens op slaat ─────────────────────
+//
+// GEMETEN (10 sep 2026): drie runs staan gespreksgepauzeerd terwijl er nul
+// WhatsApp-berichten bij de klant staan — Karim Alian (64 dagen te laat),
+// Priscilla Mauricia (70) en Khalid Nassiri (44), alle drie in stage
+// 'aangemaand'. Hun aanmaanladder staat daardoor al twee maanden stil.
+//
+// Tot deze wijziging gaf `balLigtBijOns` bij een ontbrekende inbound `false`
+// terug — geen bewuste doorlaat maar een gat: de guard greep niet in en de
+// teller besliste alsnog. Nu een expliciete blokkade met een eigen reden,
+// zodat zo'n run opvalt in plaats van stil te blijven staan.
+
+for (const [naam, dagen] of [['Karim Alian', 64], ['Priscilla Mauricia', 70], ['Khalid Nassiri', 44]]) {
+  test(`${naam} (${dagen} dagen te laat): geen klant-bericht → geen_gesprek, geen herinnering`, () => {
+    for (const teller of [0, 1, 2]) {
+      const stage = determineStage({
+        run: {
+          paused_conversation_reminder_count: teller,
+          paused_conversation_last_reminder_at: teller > 0 ? '2026-09-08T10:00:00Z' : null,
+        },
+        convLastInboundAt: null,          // nooit een bericht van de klant
+        convLastAnswerAt:  '2026-07-01T09:00:00Z',
+        noReplyCfg: CFG,
+        nowMs: NU,
+      });
+      assert.equal(stage, 'geen_gesprek', `teller ${teller} mag hier niets doorlaten`);
+    }
+  });
+}
+
+test('GEEN GESPREK gaat vóór alle andere takken, ook vóór de drempel', () => {
+  // Zelfs met een verse herinnering van een minuut geleden (drempel niet
+  // gehaald) is het antwoord 'geen_gesprek' en niet null: het verschil moet
+  // zichtbaar zijn in de log.
+  const stage = determineStage({
+    run: {
+      paused_conversation_reminder_count: 1,
+      paused_conversation_last_reminder_at: new Date(NU - 60 * 1000).toISOString(),
+    },
+    convLastInboundAt: null,
+    convLastAnswerAt:  null,
+    noReplyCfg: CFG,
+    nowMs: NU,
+  });
+  assert.equal(stage, 'geen_gesprek');
+});
