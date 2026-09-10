@@ -234,6 +234,14 @@ export default async function handler(req, res) {
     await supabaseAdmin.from('opvolging_taken')
       .update({ updated_at: new Date().toISOString() }).eq('id', taak.id);
 
+    // ── EEN ANTWOORD SLUIT DE NABELKAART ─────────────────────────────────
+    // De kaarten van cron-opvolging-zoom-nabel bestaan om één reden: er ging
+    // een spraakbericht en er kwam niets terug. Komt dat antwoord alsnog, dan
+    // is de reden weg. Blijft de kaart staan, dan belt Dave iemand die net
+    // zelf van zich heeft laten horen — precies de dubbeling die deze cron
+    // moet voorkomen in plaats van veroorzaken.
+    if (soort === 'antwoord_ontvangen') await sluitNabelkaart(taak);
+
     await bewaarGesprekRegel({
       soort, nummer, taakId: taak.id, tijdstipIso, berichtId,
       tekst: volledigeTekst, mediaType: b.media_type,
@@ -243,6 +251,40 @@ export default async function handler(req, res) {
   } catch (e) {
     console.error('[opvolging-whatsapp-webhook]', e?.message || e);
     return res.status(500).json({ error: 'Interne fout' });
+  }
+}
+
+/**
+ * De reden-codes van de kaarten die cron-opvolging-zoom-nabel maakt.
+ * Tweeling van REDEN_GEEN_REACTIE / REDEN_GEEN_SPRAAK in dat bestand.
+ */
+const ZOOM_NABEL_REDENEN = ['zoom_geen_reactie', 'zoom_geen_spraakbericht'];
+
+/**
+ * Archiveert een openstaande zoom-nabelkaart zodra de lead antwoordt.
+ *
+ * Alleen op de kaart die we zelf om die reden hebben gemaakt: de `.in()` op
+ * reden_code is de hele beveiliging. Zonder die voorwaarde zou elk binnenkomend
+ * bericht een willekeurige opvolgtaak sluiten, en dan verdwijnt werk waar
+ * niemand om gevraagd heeft.
+ *
+ * Fail-soft: de gespreksregel en de poging zijn hier de hoofdzaak.
+ */
+async function sluitNabelkaart(taak) {
+  if (!taak || String(taak.status || '') !== 'open') return;
+  try {
+    const { error } = await supabaseAdmin.from('opvolging_taken').update({
+      status         : 'gearchiveerd',
+      archief_reden  : 'antwoord ontvangen op WhatsApp',
+      gearchiveerd_at: new Date().toISOString(),
+      updated_at     : new Date().toISOString(),
+    })
+      .eq('id', taak.id)
+      .eq('status', 'open')                     // niets doen als hij intussen dicht is
+      .in('reden_code', ZOOM_NABEL_REDENEN);
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    console.warn('[opvolging-whatsapp-webhook] nabelkaart sluiten (soft):', e?.message || e);
   }
 }
 
@@ -329,7 +371,7 @@ async function bewaarGesprekRegel({ soort, nummer, taakId, tijdstipIso, berichtI
 async function zoekTaak(nummer) {
   const { data, error } = await supabaseAdmin
     .from('opvolging_taken')
-    .select('id, telefoon, status, updated_at')
+    .select('id, telefoon, status, reden_code, updated_at')
     .in('status', LOPEND)
     .not('telefoon', 'is', null)
     .order('updated_at', { ascending: false })

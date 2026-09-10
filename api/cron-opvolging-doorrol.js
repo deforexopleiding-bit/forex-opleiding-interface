@@ -63,6 +63,7 @@ export default async function handler(req, res) {
     bekeken       : 0,
     doorgerold    : 0,
     later_gereset : 0,
+    gearchiveerd  : 0,
     errors        : [],
     duration_ms   : 0,
   };
@@ -79,7 +80,10 @@ export default async function handler(req, res) {
       }
       const { data: taken, error } = await supabaseAdmin
         .from('opvolging_taken')
-        .select('id, status, due, later')
+        // reden_code + bron_ref: de nabelkaarten van cron-opvolging-zoom-nabel
+        // rollen niet door maar worden gearchiveerd zodra hun call voorbij is.
+        // Zie isVoorbijeNabelkaart in de lib.
+        .select('id, status, due, later, reden_code, bron_ref')
         .eq('status', 'open')
         .lt('due', vandaag)
         .order('due', { ascending: true })
@@ -97,8 +101,12 @@ export default async function handler(req, res) {
             .eq('id', id)
             .eq('status', 'open');   // niets doen als hij intussen dicht is
           if (upErr) throw new Error(upErr.message);
-          summary.doorgerold += 1;
-          if (vorige && vorige.later) summary.later_gereset += 1;
+          if (patch.status === 'gearchiveerd') {
+            summary.gearchiveerd += 1;
+          } else {
+            summary.doorgerold += 1;
+            if (vorige && vorige.later) summary.later_gereset += 1;
+          }
         } catch (e) {
           // Per taak vangen: één rij die weigert mag de rest van de lijst niet
           // laten liggen. Met de id erbij, anders is het achteraf niet te vinden.

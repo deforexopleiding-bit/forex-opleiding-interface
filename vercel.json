@@ -235,6 +235,10 @@
       "schedule": "0 5 * * *"
     },
     {
+      "path": "/api/cron-opvolging-zoom-nabel",
+      "schedule": "0 10,11 * * *"
+    },
+    {
       "path": "/api/cron-brug-waakhond",
       "schedule": "*/5 * * * *"
     },
