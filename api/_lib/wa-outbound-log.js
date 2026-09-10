@@ -46,9 +46,20 @@ export async function logOutboundWa(supabaseAdmin, {
   if (!supabaseAdmin) return { ok: false, error: 'supabaseAdmin ontbreekt' };
   if (!toPhone || !phoneNumberId) return { ok: false, error: 'toPhone + phoneNumberId vereist' };
 
-  // Normaliseer telefoon naar +E.164.
+  // Normaliseer telefoon naar +E.164 MET landcode, zodat de conv-key (phone_number)
+  // exact overeenkomt met wat de inbox verwacht (leads.telefoon_e164, +E.164). Een
+  // nationaal '06…' werd voorheen '+6…' (landcode weg) → een aparte, kapotte conv
+  // die nooit in de gespreksdraad matchte. Vier gevallen:
+  //   +316…  → ongewijzigd (al E.164)
+  //   0032…  → '+32…'  (internationaal 00-prefix)
+  //   06…    → '+316…' (nationaal, NL default)
+  //   316…   → '+316…' (kale landcode zonder +)
   const digits = String(toPhone).replace(/[^\d+]/g, '');
-  const phoneE164Plus = digits.startsWith('+') ? digits : ('+' + digits.replace(/^0+/, ''));
+  let phoneE164Plus;
+  if (digits.startsWith('+'))       phoneE164Plus = digits;
+  else if (digits.startsWith('00')) phoneE164Plus = '+' + digits.slice(2);
+  else if (digits.startsWith('0'))  phoneE164Plus = '+31' + digits.replace(/^0+/, '');
+  else                              phoneE164Plus = '+' + digits;
   if (phoneE164Plus.length < 8) return { ok: false, error: 'phone te kort' };
 
   const nowIso = new Date().toISOString();
