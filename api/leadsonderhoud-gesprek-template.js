@@ -51,6 +51,14 @@ export default async function handler(req, res) {
   }
 
   const body = req.body || {};
+  // FASE 0 — conversation_id-pad (dormant; nog geen UI roept dit aan).
+  // Autorisatie: de conv staat op de leadsonderhoud-lijn. Het lead_id-pad
+  // hieronder blijft byte-voor-byte ongewijzigd (incl. traject-gate).
+  const convIdT = String(body.conversation_id || '').trim();
+  if (convIdT) {
+    if (!UUID_RE.test(convIdT)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+    return sendTemplateByConversation(res, { user, convId: convIdT, body });
+  }
   const leadId       = String(body.lead_id || '').trim();
   const templateName = String(body.template_name || '').trim();
   const language     = String(body.language || 'nl').trim() || 'nl';
@@ -208,6 +216,88 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true, wamid });
   } catch (e) {
     console.error('[ls-gesprek-template] fout:', e?.message || e);
+    return res.status(500).json({ error: e?.message || 'Template versturen mislukt' });
+  }
+}
+
+// FASE 0 — template versturen op basis van conversation_id (geen lead). Mirror
+// van het lead-pad (validatie, Meta-send, body-render, thread-logregel), maar
+// de conv wordt direct op id geladen en de autorisatie is de leadsonderhoud-
+// lijn. GEEN berichten_log-regel (die is lead/traject-specifiek). Dormant tot
+// fase 2.
+async function sendTemplateByConversation(res, { user, convId, body }) {
+  const templateName = String(body.template_name || '').trim();
+  const language     = String(body.language || 'nl').trim() || 'nl';
+  const rawVars      = Array.isArray(body.variables) ? body.variables : [];
+  if (!templateName) return res.status(400).json({ error: 'template_name vereist' });
+  if (templateName.length > MAX_TEMPLATE_NAME) return res.status(400).json({ error: 'template_name te lang' });
+  const variables = rawVars.map(v => String(v == null ? '' : v).slice(0, MAX_VAR_LEN));
+  const leegIdx = variables.findIndex(v => v.trim() === '');
+  if (leegIdx >= 0) {
+    return res.status(400).json({
+      error: `Variabele #${leegIdx + 1} is leeg — vul alle variabelen in voordat je de template verstuurt.`,
+      leeg_index: leegIdx,
+    });
+  }
+
+  try {
+    const lijn = await haalLijn();
+    if (!lijn.phoneNumberId) return res.status(409).json({ error: 'Geen WhatsApp-lijn ingesteld' });
+
+    const { data: conv, error: convErr } = await supabaseAdmin
+      .from('whatsapp_conversations')
+      .select('id, phone_number, phone_number_id')
+      .eq('id', convId).maybeSingle();
+    if (convErr) throw convErr;
+    if (!conv) return res.status(404).json({ error: 'Gesprek niet gevonden' });
+    if (String(conv.phone_number_id) !== String(lijn.phoneNumberId)) {
+      return res.status(403).json({ error: 'Gesprek hoort niet bij de leadsonderhoud-lijn' });
+    }
+
+    let metaResult;
+    try {
+      metaResult = await sendTemplate({
+        to: conv.phone_number, templateName, languageCode: language, variables,
+        phoneNumberId: conv.phone_number_id || lijn.phoneNumberId,
+      });
+    } catch (metaErr) {
+      if (metaErr instanceof MetaNotConfiguredError) {
+        return res.status(503).json({ error: 'Meta WhatsApp niet geconfigureerd', missing: metaErr.missing });
+      }
+      console.error('[ls-gesprek-template] Meta-fout (conv):', metaErr.message);
+      return res.status(502).json({ error: 'Meta API fout', meta_error: metaErr.message });
+    }
+
+    const wamid = metaResult && metaResult.wamid ? String(metaResult.wamid) : null;
+    const nu = new Date().toISOString();
+    const templateVarsMap = variables.length
+      ? Object.fromEntries(variables.map((v, i) => [String(i + 1), String(v ?? '')]))
+      : null;
+    let renderedBody = null;
+    try {
+      const preview = await renderTemplatePreview({ templateName, templateVariables: templateVarsMap, supabase: supabaseAdmin });
+      if (preview && preview.source === 'meta_template' && preview.body) renderedBody = preview.body;
+    } catch (e) {
+      console.warn('[ls-gesprek-template] renderTemplatePreview soft-fail (conv):', e?.message || e);
+    }
+
+    try {
+      await supabaseAdmin.from('whatsapp_messages').insert({
+        conversation_id: conv.id, direction: 'out', meta_wamid: wamid,
+        template_name: templateName, template_variables: templateVarsMap,
+        body: renderedBody || '', status: 'queued', sent_at: nu, sent_by_user_id: user.id,
+      });
+      await supabaseAdmin.from('whatsapp_conversations').update({
+        last_message_at: nu,
+        last_message_preview: (renderedBody || ('template: ' + templateName)).slice(0, 120),
+      }).eq('id', conv.id);
+    } catch (e) {
+      console.error('[ls-gesprek-template] log-insert soft-fail (conv):', e?.message || e);
+    }
+
+    return res.status(200).json({ ok: true, wamid });
+  } catch (e) {
+    console.error('[ls-gesprek-template] fout (conv):', e?.message || e);
     return res.status(500).json({ error: e?.message || 'Template versturen mislukt' });
   }
 }
