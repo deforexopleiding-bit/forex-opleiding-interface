@@ -3524,15 +3524,23 @@
       const evDagB = e.event_dag || null;
       const wakkerB = evDagB ? dagPlus(evDagB, -WAKKER_DAGEN) : null;
       const nogRonde = !!wakkerB && wakkerB > vandaag();
+      // BEZIG = ALLES OP SLOT, MET EEN ZICHTBAAR TEKEN.
+      //
+      // Verplaatsen duurt ±5 seconden (de eventmodule-kern doet een
+      // capaciteitscheck, een insert, tags en twee audit-regels). Het venster
+      // bleef al die tijd onveranderd staan, dus zag Dave niet dat er iets
+      // gebeurde — en een tweede klik zou een tweede verplaatsing sturen.
+      const bezig = !!_ui.bezig;
       const body =
+        (bezig ? '<div class="ronde"><b>Bezig met verplaatsen&hellip;</b> Even wachten, dit duurt een paar seconden.</div>' : '') +
         opt('&#10003;', 'var(--o-grns)', 'Bevestigd &mdash; hij komt',
           nogRonde
             ? 'Vandaag klaar. Op ' + nl(wakkerB) + ' staat hij vanzelf terug voor de reminder-call.'
             : 'Het event is dichtbij, dus dit is de laatste ronde. De kaart gaat dicht.',
-          "window.__opvAanmeldActie('bevestigd')") +
-        opt('&#128172;', 'var(--o-grns)', 'Gesprek gehad', 'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.', "window.__opvAanmeldActie('gesprek_gehad')") +
-        opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Kaart dicht, en in de eventmodule op Komt niet.', "window.__opvAanmeldActie('geen_interesse')") +
-        opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Kies het nieuwe event; hij staat daar meteen als bevestigd.', "window.__opvVerplaatsNaarEvent()");
+          "window.__opvAanmeldActie('bevestigd')", bezig) +
+        opt('&#128172;', 'var(--o-grns)', 'Gesprek gehad', 'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.', "window.__opvAanmeldActie('gesprek_gehad')", bezig) +
+        opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Kaart dicht, en in de eventmodule op Komt niet.', "window.__opvAanmeldActie('geen_interesse')", bezig) +
+        opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Kies het nieuwe event; hij staat daar meteen als bevestigd.', "window.__opvVerplaatsNaarEvent()", bezig);
       return scrim('Wat nu met ' + esc(t.naam) + '?',
         eventKopTekst(e) || 'Aanmelding', body);
     }
@@ -3692,8 +3700,13 @@
   const DAGNAMEN = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
   const dagNaam = (d) => DAGNAMEN[new Date(d + 'T12:00:00Z').getUTCDay()] || '';
 
-  const opt = (em, bg, titel, sub, actie) =>
-    '<button class="opt" onclick="' + actie + '"><div class="em" style="background:' + bg + '">' + em + '</div>' +
+  // `uit` schakelt de knop uit terwijl er een actie loopt. Zonder dat blijft
+  // het venster er klikbaar bij staan en levert een tweede klik een tweede
+  // actie op — bij verplaatsen zou dat een tweede deelnemer op het doel-event
+  // zijn.
+  const opt = (em, bg, titel, sub, actie, uit) =>
+    '<button class="opt" onclick="' + (uit ? '' : actie) + '"' + (uit ? ' disabled style="opacity:.5;cursor:default"' : '') +
+    '><div class="em" style="background:' + bg + '">' + em + '</div>' +
     '<div><b>' + titel + '</b><span>' + sub + '</span></div></button>';
   // `scrim on`, om exact dezelfde reden als bij waPaneelHtml hierboven: zonder
   // `on` houdt de globale .scrim-regel uit het design system opacity op 0 en
@@ -4333,6 +4346,12 @@
     const el = document.getElementById('opv-an');
     const notitie = (el && el.value || '').trim();
     if (uitkomst === 'gesprek_gehad' && !notitie) { alert('Schrijf eerst op wat er gezegd is.'); return; }
+
+    // Op slot vóór de eerste await: post() doet dat ook, maar pas op het moment
+    // dat de aanroep begint. Een tweede klik in dat gaatje stuurt een tweede
+    // actie — en 'bevestigd' twee keer levert twee pogingen en twee regels in
+    // de notitie op.
+    _ui.bezig = true;
     try {
       const antwoord = await post('/api/opvolging-aanmelding-actie', { taak_id: m.taakId, actie: uitkomst, notitie: notitie || null });
 
@@ -4349,7 +4368,14 @@
         alert('Afgemeld in Opvolging, maar in de eventmodule kon hij niet op "Komt niet" gezet worden. Zet hem daar even met de hand.');
       }
       _ui.modal = null; leegTakenCache(); render();
-    } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
+    } catch (e) {
+      alert('Niet gelukt: ' + (e.message || 'onbekende fout'));
+    } finally {
+      // Altijd los, ook na een fout: anders zit Dave in een venster waarin
+      // geen enkele knop nog werkt.
+      _ui.bezig = false;
+      render();
+    }
   };
 
   /**
@@ -4382,6 +4408,16 @@
     const doel = await window.__evKiesAnderEvent({ eventId: ev.event_id || null, naam: t.naam || null });
     if (!doel) return;   // annuleren: er gebeurt niets
 
+    // ── OP SLOT, EN ZICHTBAAR ────────────────────────────────────────────
+    // De verplaatsing duurt een paar seconden. Zonder deze vlag blijft het
+    // venster er onveranderd bij staan — Dave ziet niets gebeuren — en levert
+    // een tweede klik een tweede verplaatsing op.
+    //
+    // post() zet _ui.bezig zelf ook, maar pas bij de aanroep en het valt
+    // daarna meteen terug. Hier moet het venster al op slot vóór de render
+    // hieronder, en tot het antwoord er is.
+    _ui.bezig = true;
+    render();
     try {
       const antwoord = await post('/api/opvolging-aanmelding-actie', {
         taak_id: m.taakId, actie: 'verplaats_naar_event', target_event_id: doel,
@@ -4399,6 +4435,12 @@
       // ingevulde vragenlijst)' zegt precies wat er aan de hand is. De kaart
       // blijft staan.
       alert('Verplaatsen mislukt: ' + (e.message || 'onbekende fout'));
+    } finally {
+      // ALTIJD LOS. Bleef de vlag na een fout staan, dan zit Dave met een
+      // venster waarin geen enkele knop meer werkt en is verversen zijn enige
+      // uitweg.
+      _ui.bezig = false;
+      render();
     }
   };
 

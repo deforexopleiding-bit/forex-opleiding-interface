@@ -1745,6 +1745,31 @@
       (box, close) => { const ok = box.querySelector('._ev-ok'); ok.onclick = () => close(true); requestAnimationFrame(() => ok.focus()); }
     );
   }
+  /**
+   * DE EVENTS WAAR JE IEMAND NOG NAARTOE KUNT VERPLAATSEN.
+   *
+   * VOORBIJE EVENTS HOREN ER NIET IN. De lijst toonde alles met status draft
+   * of published — dus ook het event van 9 september, en dat stond zelfs
+   * bovenaan. Iemand naar een datum verplaatsen die al geweest is levert een
+   * aanmelding op voor een middag die niet meer komt: hij verdwijnt uit elk
+   * dagbeeld, krijgt geen enkele belronde meer, en niemand merkt het tot de
+   * lead zelf belt.
+   *
+   * Chronologisch, want de eerstvolgende is verreweg het vaakst de bedoeling.
+   *
+   * Pure functie met de klok als argument, zodat de grens in een test staat.
+   * Een event zonder bruikbare starts_at valt eruit: die kun je niet plaatsen
+   * en dus ook niet aanbieden.
+   */
+  function _evToekomstigeEvents(items, eventId, nuMs = Date.now()) {
+    return (Array.isArray(items) ? items : [])
+      .filter((e) => e && e.id !== eventId)
+      .map((e) => ({ e, ms: Date.parse(e.starts_at) }))
+      .filter((x) => Number.isFinite(x.ms) && x.ms > nuMs)
+      .sort((a, b) => a.ms - b.ms)
+      .map((x) => x.e);
+  }
+
   function _evMovePicker(events, naam) {
     const opts = events.map((e) => `<option value="${esc(e.id)}">${esc(e.title || '(zonder titel)')} — ${esc(_fmtDateTime(e.starts_at) || 'datum onbekend')}</option>`).join('');
     // De naam erbij als de aanroeper 'm kent. Vanuit de aanmeldkaart is dat
@@ -1854,6 +1879,9 @@
    *   als er niets te kiezen valt. Null is hier geen fout: de aanroeper laat
    *   de kaart dan gewoon staan.
    */
+  // Getest in tests/opvolging-verplaats-polish.test.js.
+  window.__evMoveHelpers = { toekomstigeEvents: _evToekomstigeEvents };
+
   window.__evKiesAnderEvent = async ({ eventId, naam } = {}) => {
     // PAS BIJ DE KLIK, niet bij het laden. Op laadmoment bestaat window.KV nog
     // niet — dit script draait vóór klanten-v2.js.
@@ -1865,7 +1893,7 @@
     let events = [];
     try {
       const j = await haal('/api/events-list?status=draft,published&limit=200', { method: 'GET' });
-      events = (j?.items || []).filter((e) => e.id !== eventId);
+      events = _evToekomstigeEvents(j?.items, eventId);
     } catch (e) {
       await _evAlert('Kon eventlijst niet laden', e?.message || 'Onbekende fout.', { danger: true });
       return null;
