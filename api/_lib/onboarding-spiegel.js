@@ -130,12 +130,13 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     // geschreven is. Zo bestaat een halve rij niet.
     // Het traject wordt ÉÉN keer gelezen; zowel de waiver-sleutel als het
     // aantal stappen komen uit dezelfde structuur.
-    const [betaald, structure, dealRow, mentorId] = await Promise.all([
+    const [betaald, wizard, dealRow, mentorId] = await Promise.all([
       leesEersteFactuurBetaald(ob.customer_id),
-      leesTrajectStructuur(ob.traject_id),
+      leesWizardStructuur(),
       leesOfferteDeal(ob.customer_id),
       leesLmsMentorId(ob.mentor_user_id),
     ]);
+    const structure = wizard.structure;
 
     const waiver = leesWaiver(ob.answers, findWaiverConsentKey(structure));
     const bedenktijdInfo = computeBedenktijd(
@@ -155,8 +156,11 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       bedenktijd_vervalt_op  : bedenktijdInfo.vervalt_op,
       bedenktijd_reden       : bedenktijdInfo.reason,
       bijgewerkt_op          : new Date().toISOString(),
-      bron_status            : BRON_GELEZEN,
-      bron_fout              : null,
+      // Kon de wizard-structuur niet gelezen worden, dan is de bedenktijd
+      // niet vast te stellen. De rij komt er wél — een klant zonder rij is
+      // onzichtbaar — maar met de waarheid erbij dat de bron haperde.
+      bron_status            : wizard.fout ? BRON_ONBEREIKBAAR : BRON_GELEZEN,
+      bron_fout              : wizard.fout,
     };
 
     const { error: upErr } = await lms
@@ -201,13 +205,42 @@ async function leesEersteFactuurBetaald(customerId) {
   return Array.isArray(data) && data.length > 0;
 }
 
-/** De wizard-structuur van het traject — voor waiver-sleutel én stap-totaal. */
-async function leesTrajectStructuur(trajectId) {
-  if (!trajectId) return null;
+/**
+ * De wizard-structuur — voor de waiver-sleutel én het stap-totaal.
+ *
+ * ── DIT STOND FOUT, EN DE FOUT IS LEERZAAM ──────────────────────────────
+ * Hier stond `onboarding_trajecten.select('structure')`. Die kolom BESTAAT
+ * NIET; de spiegel faalde daardoor op alle 25 onboardings met
+ * `column onboarding_trajecten.structure does not exist`. Ik had een
+ * kolomnaam bedacht die paste bij wat ik verwachtte in plaats van gekeken
+ * waar de structuur echt staat.
+ *
+ * Waar hij WEL staat: `onboarding_wizard.published_structure`, één rij,
+ * `id = 1`. Dat is exact dezelfde lezing als
+ * api/admin-future-students-list.js (regel ~200) — de bron die is
+ * vastgelegd als autoritatief voor de vier feiten. Niet per traject dus,
+ * maar één gepubliceerde structuur voor het geheel.
+ *
+ * ── FAALZACHT, MAAR NIET STIL ───────────────────────────────────────────
+ * Mislukt deze lezing, dan gooit hij NIET. Eén hapering in de wizard-tabel
+ * mag niet betekenen dat er van 25 klanten geen spiegelrij is. Maar hij
+ * doet ook niet alsof er niets aan de hand is: de aanroeper zet
+ * `bron_status` op onbereikbaar en `bron_fout` op de melding, zodat het
+ * mentorscherm de bedenktijd als ONBEKEND toont in plaats van als
+ * vervallen. Onbekend en vervallen zijn niet hetzelfde — bij onbekend
+ * geldt terughoudendheid, en dat staat ook zo in het commentaar op de
+ * kolom.
+ *
+ * @returns {Promise<{structure: object|null, fout: string|null}>}
+ */
+async function leesWizardStructuur() {
   const { data, error } = await supabaseAdmin
-    .from('onboarding_trajecten').select('structure').eq('id', trajectId).maybeSingle();
-  if (error) throw new Error('traject lezen: ' + error.message);
-  return data?.structure || null;
+    .from('onboarding_wizard').select('published_structure').eq('id', 1).maybeSingle();
+  if (error) {
+    console.warn('[onboarding-spiegel] wizard-structuur lezen:', error.message);
+    return { structure: null, fout: 'wizard-structuur lezen: ' + error.message };
+  }
+  return { structure: data?.published_structure || null, fout: null };
 }
 
 /** De meest recente geaccepteerde offerte van deze klant. */
