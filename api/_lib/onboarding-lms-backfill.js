@@ -49,7 +49,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
 import { provisionDfoLmsStudent, koppelBestaandeStudent } from './dfo-lms-student.js';
-import { spiegelNaActie } from './onboarding-spiegel.js';
+import { spiegelNaActie, SPIEGEL_GESCHREVEN } from './onboarding-spiegel.js';
 
 // 24 lopende onboardings vandaag; deze grens is er tegen een runaway, niet
 // tegen groei. Wordt hij geraakt, dan staat dat zichtbaar in de uitkomst.
@@ -88,6 +88,9 @@ export async function draaiLmsBackfill(opties = {}) {
     zou_aanmaken: 0, aangemaakt: 0,
     overgeslagen_al_gekoppeld: 0, overgeslagen_naam_treffer: 0,
     overgeslagen_geen_email: 0, overgeslagen_testrij: 0, mislukt: 0,
+    // De spiegel apart van de koppeling: die twee kunnen los van elkaar
+    // lukken en mislukken, en dat moet in de uitkomst te zien zijn.
+    spiegel_geschreven: 0, spiegel_mislukt: 0,
     geraakte_limiet: 0,
     rijen: [], errors: [],
   };
@@ -271,7 +274,27 @@ export async function draaiLmsBackfill(opties = {}) {
 
           // De spiegelvelden bijwerken. Die staan in hlms_crm_onboarding en
           // NIET op hlms_student, dus dit raakt de Bubble-waarden niet aan.
-          await spiegelNaActie(regel.onboarding_id, 'lms-backfill');
+          //
+          // DE UITKOMST TELT MEE. spiegelNaActie() is faalzacht en schreef
+          // zijn reden alleen naar de log. Op 10 september 2026 stond de
+          // spiegel daardoor op NUL rijen terwijl deze knop 23 koppelingen
+          // als geslaagd rapporteerde: de koppeling lukte, de spiegel faalde,
+          // en van buiten zag dat er identiek uit. Een knop die "gelukt" zegt
+          // over werk dat maar half gebeurd is, is erger dan geen knop.
+          const sp = await spiegelNaActie(regel.onboarding_id, 'lms-backfill');
+          if (sp?.resultaat === SPIEGEL_GESCHREVEN) {
+            result.spiegel_geschreven++;
+            regel.spiegel = 'geschreven';
+          } else {
+            result.spiegel_mislukt++;
+            regel.spiegel = 'MISLUKT: ' + (sp?.fout || sp?.resultaat || 'onbekend');
+            if (result.errors.length < 20) {
+              result.errors.push({
+                onboarding_id: regel.onboarding_id,
+                error: 'spiegel niet geschreven: ' + (sp?.fout || sp?.resultaat || 'onbekend'),
+              });
+            }
+          }
         } else {
           result.mislukt++;
           regel.uitkomst = (koppelen ? 'koppelen' : 'aanmaken') + ' mislukt: '
