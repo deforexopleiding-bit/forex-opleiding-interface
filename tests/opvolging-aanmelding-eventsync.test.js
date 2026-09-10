@@ -370,9 +370,14 @@ test('een gearchiveerde kaart binnen vier dagen houdt de cron ook tegen', () => 
 // 7 · DE KEUZELIJST — één venster, twee modules
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('de keuzelijst staat als herbruikbare functie op window.KV', () => {
+test('de keuzelijst staat als herbruikbare GLOBALE functie', () => {
+  // Stond eerst alleen op window.KV, en dat brak in beide modules: klanten-v2.js
+  // is een module, draait dus na alle views, en verving KV in zijn geheel. Zie
+  // tests/klanten-v2-kv-laadvolgorde.test.js.
   const ev = readFileSync(join(ROOT, 'modules/klanten-v2/views/events-v2.js'), 'utf8');
-  assert.match(ev, /window\.KV\.evKiesAnderEvent = async \(\{ eventId, naam \} = \{\}\)/);
+  assert.match(ev, /window\.__evKiesAnderEvent = async \(\{ eventId, naam \} = \{\}\)/);
+  assert.match(ev, /window\.KV\.evKiesAnderEvent = \(opties\) => window\.__evKiesAnderEvent\(opties\)/,
+    'de KV-alias mag blijven, als gemak');
   assert.match(ev, /\/api\/events-list\?status=draft,published&limit=200/);
   assert.match(ev, /\.filter\(\(e\) => e\.id !== eventId\)/, 'het huidige event valt weg');
   assert.match(ev, /return await _evMovePicker\(events, naam\)/);
@@ -383,7 +388,7 @@ test('__evAttMove gebruikt dezelfde functie en gedraagt zich verder hetzelfde', 
   const i = ev.indexOf('window.__evAttMove = async');
   assert.ok(i > 0);
   const blok = ev.slice(i, i + 900);
-  assert.match(blok, /const target = await window\.KV\.evKiesAnderEvent\(\{ eventId \}\)/);
+  assert.match(blok, /const target = await window\.__evKiesAnderEvent\(\{ eventId \}\)/);
   assert.match(blok, /if \(!target\) return;/);
   assert.match(blok, /\/api\/events-attendee-move/, 'de eventmodule blijft haar eigen endpoint gebruiken');
   // De eigen ophaal- en filtercode is weg; die zit nu in de gedeelde functie.
@@ -393,7 +398,7 @@ test('__evAttMove gebruikt dezelfde functie en gedraagt zich verder hetzelfde', 
 test('de aanmeldkaart opent de keuzelijst en heeft geen tussenvenster meer', () => {
   const view = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
   assert.match(view, /window\.__opvVerplaatsNaarEvent = async/);
-  assert.match(view, /window\.KV\.evKiesAnderEvent\(\{ eventId: ev\.event_id \|\| null, naam: t\.naam \|\| null \}\)/);
+  assert.match(view, /window\.__evKiesAnderEvent\(\{ eventId: ev\.event_id \|\| null, naam: t\.naam \|\| null \}\)/);
   assert.match(view, /if \(!doel\) return;/, 'annuleren doet niets, de kaart blijft staan');
   assert.match(view, /actie: 'verplaats_naar_event', target_event_id: doel/);
   assert.match(view, /Kies het nieuwe event; hij staat daar meteen als bevestigd\./);

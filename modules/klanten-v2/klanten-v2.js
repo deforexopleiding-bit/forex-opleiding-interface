@@ -110,9 +110,17 @@ function renderAvatar(seed, name, size = 28) {
 }
 
 // Expose voor views
-window.KV = {
+//
+// AANVULLEN, NIET VERVANGEN. Dit bestand is type="module" (zie index.html) en
+// draait dus NA alle view-scripts. Een kale toewijzing gooit hier weg wat een
+// view net aan KV had toegevoegd — en dat is precies wat er op 10 september
+// gebeurde: events-v2.js zette window.KV.evKiesAnderEvent, deze regel maakte
+// een nieuw object, en de keuzelijst 'Verplaatsen naar ander event' was in
+// beide modules verdwenen. `navigate` en `openCustomer` overleefden dat alleen
+// doordat ze verderop in dit bestand als losse property worden gezet.
+window.KV = Object.assign(window.KV || {}, {
   $, esc, toast, authedFetch, authedJson, renderAvatar, initials,
-};
+});
 
 // ── klx-softphone dependency shim ───────────────────────────────────────
 // Shared klx-softphone.js (r191) roept window.AgentShared.apiFetch aan

@@ -1838,19 +1838,33 @@
    * huidige event eruit) en dan biedt hetzelfde scherm twee verschillende
    * verzamelingen aan.
    *
-   * Hangt aan window.KV omdat de opvolgmodule een eigen script is: beide views
-   * staan in modules/klanten-v2/index.html, dus dit bestaat zodra de pagina
-   * geladen is.
+   * ── WAAROM DIT AAN window.__evKiesAnderEvent HANGT EN NIET (ALLEEN) AAN KV
+   * Hij stond eerst op `window.KV.evKiesAnderEvent`, en dat brak allebei de
+   * modules. klanten-v2.js is type="module" en draait dus NA elk view-script;
+   * die deed `window.KV = { … }` en gooide deze functie weg. In Opvolging gaf
+   * de knop daarna 'De eventlijst is hier niet beschikbaar', en in de
+   * eventmodule — die de functie ook was gaan gebruiken — een TypeError op een
+   * knop die daarvóór gewoon werkte.
+   *
+   * Een eigen naam op window is niet mooier, maar wel onafhankelijk van de
+   * volgorde waarin scripts laden en van wat er ooit met KV gebeurt. De
+   * KV-alias blijft er als gemak; de aanroepers gebruiken de globale.
    *
    * @returns {Promise<?string>} het gekozen event-id, of null bij annuleren of
    *   als er niets te kiezen valt. Null is hier geen fout: de aanroeper laat
    *   de kaart dan gewoon staan.
    */
-  window.KV = window.KV || {};
-  window.KV.evKiesAnderEvent = async ({ eventId, naam } = {}) => {
+  window.__evKiesAnderEvent = async ({ eventId, naam } = {}) => {
+    // PAS BIJ DE KLIK, niet bij het laden. Op laadmoment bestaat window.KV nog
+    // niet — dit script draait vóór klanten-v2.js.
+    const haal = window.KV && window.KV.authedJson;
+    if (typeof haal !== 'function') {
+      await _evAlert('Nog even wachten', 'De pagina is nog niet helemaal geladen. Probeer het zo opnieuw.');
+      return null;
+    }
     let events = [];
     try {
-      const j = await window.KV.authedJson('/api/events-list?status=draft,published&limit=200', { method: 'GET' });
+      const j = await haal('/api/events-list?status=draft,published&limit=200', { method: 'GET' });
       events = (j?.items || []).filter((e) => e.id !== eventId);
     } catch (e) {
       await _evAlert('Kon eventlijst niet laden', e?.message || 'Onbekende fout.', { danger: true });
@@ -1863,11 +1877,16 @@
     return await _evMovePicker(events, naam);
   };
 
+  // Alias voor het gemak. Aanroepers gebruiken de globale hierboven: die
+  // overleeft een herschrijving van KV, deze niet.
+  window.KV = window.KV || {};
+  window.KV.evKiesAnderEvent = (opties) => window.__evKiesAnderEvent(opties);
+
   window.__evAttMove = async (attId, eventId) => {
     // Nette keuzelijst i.p.v. native prompt om een event-UID. Zelfde lijst en
     // zelfde venster als de aanmeldkaart in Opvolging gebruikt; verplaatsen
     // via het bestaande events-attendee-move endpoint.
-    const target = await window.KV.evKiesAnderEvent({ eventId });
+    const target = await window.__evKiesAnderEvent({ eventId });
     if (!target) return;
     try {
       await window.KV.authedJson('/api/events-attendee-move', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ attendee_id: attId, target_event_id: target }) });
