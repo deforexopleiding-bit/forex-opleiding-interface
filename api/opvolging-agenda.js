@@ -2,9 +2,9 @@
 //
 // Fase 2 DEEL B — de agenda achter "Opnieuw inplannen" in de opvolgmodule.
 //
-//   GET  /api/opvolging-agenda?van=YYYY-MM-DD&tot=YYYY-MM-DD
+//   GET  /api/opvolging-agenda?van=YYYY-MM-DD&tot=YYYY-MM-DD[&achterstand=1]
 //        → { timezone, window, dagen:[{ dag, vrij:[{tijd}], bezet:[{tijd,naam,status}] }],
-//            agenda_beschikbaar, melding }
+//            agenda_beschikbaar, melding, achterstand?:[…] }
 //
 //   POST /api/opvolging-agenda
 //        { taak_id, start } → boekt en zet de taak op 'ingepland'.
@@ -37,6 +37,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { voegAgendaSamen, dagenTussen } from './_lib/opvolging-agenda-merge.js';
+import { dagEnTijd } from './_lib/opvolging-dagbeeld.js';
 import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
 import { leadlijstDektDag } from './_lib/opvolging-leadlijst-venster.js';
 import fetch from 'node-fetch';
@@ -167,6 +168,8 @@ async function lees(req, res, supabase) {
   if (reeks.length === 0) return res.status(400).json({ error: 'van/tot ongeldig (verwacht YYYY-MM-DD, tot >= van)' });
   if (reeks.length > MAX_DAGEN) tot = reeks[MAX_DAGEN - 1];
 
+  const achterstandGevraagd = String(q.achterstand || '') === '1';
+
   const { slots, timezone, melding } = await haalVrijeSlots(van, tot);
 
   // Bezet uit onze eigen tabel. Fail-soft: zonder deze lijst tonen we de vrije
@@ -248,10 +251,18 @@ async function lees(req, res, supabase) {
   const dagen = voegAgendaSamen({ slots, afspraken, van, tot, timeZone: timezone });
   const vrijTotaal = dagen.reduce((n, d) => n + d.vrij.length, 0);
 
+  // De uitkomst die Dave zelf vastlegde, ook als die alleen als werklijstkaart
+  // bestaat. Zie hangAfrondUitTaak — dit is de reden dat een no-show nooit
+  // 'Afgerond' toonde.
+  await hangAfrondUitTaak(dagen);
+
   // De WhatsApp-pogingen bij elke geplande call. Zie de kop van
   // hangWhatsAppAanCalls: `wa` is een lijst of NULL, en NULL betekent 'niet
   // gemeten' — niet 'geen spraakbericht'.
   const waMelding = await hangWhatsAppAanCalls(dagen, van, tot);
+
+  // Wat er van eerdere dagen nog open staat. Alleen op verzoek van de view.
+  const achterstand = achterstandGevraagd ? await leesAchterstand() : [];
 
   return res.status(200).json({
     timezone,
@@ -267,6 +278,8 @@ async function lees(req, res, supabase) {
     // Waarom `wa` op sommige calls null staat. Null zonder uitleg zou het
     // scherm laten kiezen tussen zwijgen en gokken.
     wa_melding       : waMelding,
+    // Alleen als de view erom vraagt, en die doet dat alleen op vandaag.
+    ...(achterstandGevraagd ? { achterstand } : {}),
     melding: melding || bezetMelding || (vrijTotaal === 0 ? 'Geen vrije momenten in deze week.' : null),
   });
 }
@@ -338,6 +351,245 @@ async function hangWhatsAppAanCalls(dagen, van, tot) {
  * Tweeling van de filter in de view; zie de kop van hangWhatsAppAanCalls.
  */
 const NIET_GEVOERD = new Set(['cancelled', 'verwijderd', 'verplaatst', 'wacht_op_reschedule']);
+
+// ── DE UITKOMST DIE ALLEEN ALS WERKLIJSTKAART BESTAAT ────────────────────
+//
+// NO-SHOW TOONDE NOOIT 'AFGEROND', en dat is geen schoonheidsfoutje.
+//
+// __opvCallBevestig('no_show') maakt een werklijstkaart (reden `no_show_call`,
+// `bron_ref.appointment_id`) en schrijft met opzet NIETS naar de
+// uitkomstmotor: dat outcome maakt daar een eigen follow_up_lead aan, en dan
+// staat dezelfde persoon in twee modules op Dave te wachten. Zie het
+// waarschuwingsblok bij CALL_UITKOMST in de view — productie-incident 20 mei.
+//
+// Gevolg: `follow_up_appointments.uitkomst` blijft leeg, afrondActie() zegt
+// 'knop', en de call staat eeuwig op 'Afronden →'. Dave heeft hem wél
+// afgerond; het bewijs staat alleen in een andere tabel. En sinds de
+// achterstand hieronder zou zo'n call ook elke dag opnieuw meeschuiven.
+//
+// Dus lezen we het bewijs waar het staat. De MOTOR BLIJFT ONAANGERAAKT — dat
+// is precies de afspraak uit 20 mei.
+const AFROND_UIT_TAAK = {
+  no_show_call     : 'niet gekomen · in je werklijst',
+  wil_nog_beslissen: 'wil nog beslissen',
+};
+const AFROND_UIT_REDEN_CODE = {
+  zoom_geen_interesse: 'geen interesse',
+};
+
+/**
+ * Een PostgREST in-filter over een JSON-pad.
+ *
+ * Dubbele quotes zijn hier geen overdaad: `.filter()` krijgt de rauwe
+ * filterwaarde, en een UUID draagt koppeltekens. Zonder quotes hangt het van
+ * de parser af of dat goed gaat.
+ */
+function inLijst(ids) {
+  return '(' + ids.map((i) => '"' + String(i).replace(/"/g, '') + '"').join(',') + ')';
+}
+
+/** Het label bij een werklijstkaart, of null als deze kaart niets afrondt. */
+export function afrondLabelVanTaak(t) {
+  const code = String((t && t.reden_code) || '').trim();
+  if (code && AFROND_UIT_REDEN_CODE[code]) {
+    return { code, label: AFROND_UIT_REDEN_CODE[code] };
+  }
+  const reden = String((t && t.reden) || '').trim();
+  if (reden && AFROND_UIT_TAAK[reden]) {
+    return { code: reden, label: AFROND_UIT_TAAK[reden] };
+  }
+  return null;
+}
+
+/**
+ * Hangt de uit-een-taak-afgeleide uitkomst aan de calls die nog op 'knop' staan.
+ *
+ * Alleen waar `afrond.toon === 'knop'`: staat er al een echte uitkomst in
+ * `follow_up_appointments.uitkomst`, dan wint die. Dat is Daves eigen
+ * afrondknop en die is directer bewijs dan een afgeleide kaart.
+ *
+ * Fail-soft: zonder deze lezing gedraagt het dagbeeld zich als voorheen.
+ */
+async function hangAfrondUitTaak(dagen) {
+  const calls = [];
+  for (const d of dagen || []) {
+    for (const c of (d.gepland || [])) {
+      if (c && c.appointment_id && c.afrond && c.afrond.toon === 'knop') calls.push(c);
+    }
+  }
+  if (calls.length === 0) return;
+
+  const ids = [...new Set(calls.map((c) => String(c.appointment_id)))];
+  let taken = [];
+  try {
+    // ALLE STATUSSEN. Een 'geen interesse'-kaart wordt meteen gearchiveerd
+    // (direct_archiveren in opvolging-taak-create); die eruit filteren zou
+    // precies de afgeronde calls onzichtbaar maken.
+    const { data, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, reden, reden_code, bron_ref, created_at')
+      .filter('bron_ref->>appointment_id', 'in', inLijst(ids))
+      .order('created_at', { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    taken = data || [];
+  } catch (e) {
+    console.warn('[opvolging-agenda] afrond-uit-taak (soft):', e?.message || e);
+    return;
+  }
+
+  // Nieuwste wint: de lijst staat aflopend, dus de eerste treffer per
+  // appointment_id is de meest recente kaart.
+  const perAfspraak = new Map();
+  for (const t of taken) {
+    const aid = t && t.bron_ref && t.bron_ref.appointment_id;
+    if (!aid || perAfspraak.has(String(aid))) continue;
+    const label = afrondLabelVanTaak(t);
+    if (label) perAfspraak.set(String(aid), { ...label, op: t.created_at || null });
+  }
+
+  for (const c of calls) {
+    const vast = perAfspraak.get(String(c.appointment_id));
+    if (vast) c.afrond = { toon: 'uitkomst', vastgelegd: vast };
+  }
+}
+
+// ── ONAFGERONDE ZOOMCALLS VAN EERDERE DAGEN ──────────────────────────────
+//
+// Maxims regel: Dave rondt elke zoomcall af — klant geworden, wil nog beslissen
+// (met datum), no-show, of geen interesse. Rondt hij er een niet af, dan staat
+// die de volgende dag bovenaan: 'van gisteren, werk deze af'.
+//
+// Zonder dat blijft zo'n call op zijn eigen dag staan, en die dag kijkt niemand
+// meer terug. Gemeten: /api/opvolging-agenda van 9 september gaf 3 calls zonder
+// afronding (10:00 en 12:00 scheduled, 11:00 cancelled) en 8 september 1 (15:00).
+//
+// TWEE WEKEN TERUG, EN NOOIT VÓÓR ACHTERSTAND_VANAF. Vóór 8 september bestond
+// de afrondknop niet; alles daarvoor zou als achterstand op Daves dag landen
+// terwijl er nooit een knop was om te drukken. Dat is geen werklijst maar een
+// aanklacht over een periode waarin de functie niet bestond.
+export const ACHTERSTAND_VANAF = '2026-09-08';
+export const ACHTERSTAND_DAGEN = 14;
+// Alleen calls die GEVOERD zijn. Geannuleerd en verzet horen er niet in: daar
+// viel niets af te ronden.
+export const ACHTERSTAND_STATUS = ['scheduled', 'in_progress', 'completed', 'no_show'];
+
+/**
+ * De grenzen van het achterstandsvenster: van max(vandaag−14, ACHTERSTAND_VANAF)
+ * tot het begin van vandaag, allebei in Amsterdamse tijd.
+ *
+ * Pure functie, zodat de grens in een test staat en niet alleen in een query.
+ * `leeg` is true als er niets over is — vlak na ACHTERSTAND_VANAF is dat het
+ * normale geval en niet een randgeval.
+ */
+export function achterstandVenster(vandaag) {
+  const beginVandaagMs = zoneMiddernachtMs(vandaag);
+  const vroegsteMs = Math.max(
+    beginVandaagMs - ACHTERSTAND_DAGEN * 24 * 3600 * 1000,
+    zoneMiddernachtMs(ACHTERSTAND_VANAF),
+  );
+  return {
+    vanIso: new Date(vroegsteMs).toISOString(),
+    totIso: new Date(beginVandaagMs).toISOString(),
+    leeg  : vroegsteMs >= beginVandaagMs,
+  };
+}
+
+/** Eén afspraak als achterstandsrij. Zelfde vorm als een gepland-call. */
+export function achterstandRij(a) {
+  const dt = dagEnTijd(a && a.scheduled_at) || { dag: null, tijd: '' };
+  return {
+    dag           : dt.dag,
+    tijd          : dt.tijd,
+    naam          : (a && a.lead_name && String(a.lead_name).trim()) || 'Bezet',
+    status        : String((a && a.status) || 'scheduled').toLowerCase(),
+    label         : null,
+    doorgehaald   : false,
+    verzet_naar   : null,
+    verzet_van    : null,
+    afrond        : { toon: 'knop', vastgelegd: null },
+    // De Zoom-link niet: die call is geweest. Bellen en WhatsApp wél — daar
+    // gaat het bij een achterstand juist om.
+    knoppen       : { afronden: true, bellen: !!(a && a.lead_phone), whatsapp: !!(a && a.lead_phone), zoom: false },
+    appointment_id: (a && a.id) || null,
+    telefoon      : (a && a.lead_phone) || null,
+    email         : (a && a.lead_email) || null,
+    zoom_url      : null,
+    start         : (a && a.scheduled_at) || null,
+    // De spraak/nabel-vensters rekenen NIET met de achterstand: die hoort bij
+    // een andere dag. Null zegt hier 'niet gemeten voor vandaag'.
+    wa            : null,
+  };
+}
+
+/**
+ * De zoomcalls van eerdere dagen die nog geen uitkomst hebben.
+ *
+ * Zelfde vorm als een gepland-call, plus `dag`, zodat de view er dezelfde rij
+ * en dezelfde knoppen omheen kan tekenen.
+ *
+ * Fail-soft: bij een leesfout een lege lijst. Een achterstandsblok dat er niet
+ * staat is minder erg dan een dagbeeld dat helemaal niet laadt.
+ */
+async function leesAchterstand() {
+  const { vanIso, totIso, leeg } = achterstandVenster(vandaagInZone());
+  if (leeg) return [];
+
+  // `is_test` komt uit een eigen migratie en kan nog ontbreken. Eén retry
+  // zonder die kolom, net als het dagbeeld hierboven doet — anders verdwijnt
+  // het hele achterstandsblok om een reden die er niets mee te maken heeft.
+  //
+  // `uitkomst` NIET optioneel: zonder die kolom is 'nog geen uitkomst' niet te
+  // bepalen, en dan zou elke gevoerde call als achterstand op Daves dag landen.
+  let rijen = null;
+  for (const metIsTest of [true, false]) {
+    const kolommen = 'id, lead_name, lead_email, lead_phone, scheduled_at, status, zoom_join_url, uitkomst'
+      + (metIsTest ? ', is_test' : '');
+    const { data, error } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select(kolommen)
+      .gte('scheduled_at', vanIso)
+      .lt('scheduled_at', totIso)
+      .in('status', ACHTERSTAND_STATUS)
+      .is('uitkomst', null)
+      .order('scheduled_at', { ascending: true })
+      .limit(200);
+    if (!error) { rijen = (data || []).filter((a) => a && a.is_test !== true); break; }
+    if (metIsTest && error.code === '42703' && /\bis_test\b/.test(error.message || '')) continue;
+    console.warn('[opvolging-agenda] achterstand lezen (soft):', error.message);
+    return [];
+  }
+  if (!rijen) return [];
+  if (rijen.length === 0) return [];
+
+  // ── ZONDER OPVOLGTAAK ────────────────────────────────────────────────
+  // Een call waar Dave een werklijstkaart van maakte (no-show, wil nog
+  // beslissen, geen interesse) IS afgerond — alleen niet in de kolom
+  // `uitkomst`. Zie hangAfrondUitTaak. Die hier laten staan zou elke no-show
+  // eeuwig laten meeschuiven, en dat is precies wat we niet willen.
+  const ids = [...new Set(rijen.map((a) => String(a.id)))];
+  let metTaak = new Set();
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('bron_ref')
+      .filter('bron_ref->>appointment_id', 'in', inLijst(ids))
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    metTaak = new Set((data || [])
+      .map((t) => t && t.bron_ref && t.bron_ref.appointment_id)
+      .filter(Boolean)
+      .map(String));
+  } catch (e) {
+    // NIET DOORGAAN MET EEN HALVE FILTER. Zonder deze lezing weten we niet
+    // welke calls al afgerond zijn, en dan zou Dave kaarten terugkrijgen die
+    // hij gisteren heeft weggewerkt. Liever geen blok dan een fout blok.
+    console.warn('[opvolging-agenda] achterstand: taken lezen (soft):', e?.message || e);
+    return [];
+  }
+
+  return rijen.filter((a) => !metTaak.has(String(a.id))).map(achterstandRij);
+}
 
 function isoPlusDagen(datum, n) {
   const ms = Date.parse(`${datum}T12:00:00Z`) + n * 86400000;

@@ -154,7 +154,10 @@ test('dezelfde call staat niet twee keer in het blok', () => {
 test('het callsblok leest bezet EN afgerond, op tijd gesorteerd', () => {
   const view = readFileSync('modules/klanten-v2/views/opvolging-v2.js', 'utf8');
   const i = view.indexOf('async function fetchCalls');
-  const blok = view.slice(i, i + 1200);
+  // Ruim genomen: fetchCalls draagt sinds de achterstand ook de vraag of die
+  // meegehaald moet worden, en dat schuift de regels hieronder naar achteren.
+  // Waar ze staan doet er niet toe; dát ze er staan wel.
+  const blok = view.slice(i, i + 2000);
   assert.match(blok, /d0\.gepland/,
     'het callsblok hoort het dagbeeld te lezen');
   assert.match(blok, /d0\.bezet \|\| \[\]/);
