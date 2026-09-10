@@ -85,13 +85,15 @@ function bouwMail(args) {
 }
 
 // ── De 5 momenten ──────────────────────────────────────────────────────────
-// match(appt, nowMs) bepaalt (los van de nacht-guard) of dit moment nú van
-// toepassing is. De cron voegt de nacht-onderdrukking toe voor nachtGevoelig.
+// match(appt, nowMs) bepaalt of dit moment nú van toepassing is. Er is geen
+// nacht-guard meer (verwijderd 2026-09-10, analoog aan cron-toegang-aanvragen
+// #1557): late boekingen kregen anders pas de ochtend erna hun bevestiging.
+// De bevestiging heeft nog wel `vereistZoom: true` — geen Zoom-link →
+// geen bevestiging, ongeacht tijd.
 export const MOMENTEN = [
   {
     key: 'bevestiging',
     kolom: 'bevestiging_sent_at',
-    nachtGevoelig: true,
     vereistZoom: true,               // pas versturen zodra de Zoom-link binnen is
     match: (a, nowMs) => !a.bevestiging_sent_at && !!a.zoom_join_url && new Date(a.scheduled_at).getTime() > nowMs,
     waTemplate: 'afspraak_bevestiging_v1',
@@ -108,7 +110,6 @@ export const MOMENTEN = [
   {
     key: 'r24',
     kolom: 'reminder_24u_at',
-    nachtGevoelig: true,
     venster: { onder: 2 * UUR, boven: 24 * UUR },
     match: (a, nowMs) => { const t = new Date(a.scheduled_at).getTime() - nowMs; return !a.reminder_24u_at && t > 2 * UUR && t <= 24 * UUR; },
     waTemplate: 'afspraak_reminder_24u_v1',
@@ -125,7 +126,6 @@ export const MOMENTEN = [
   {
     key: 'r2',
     kolom: 'reminder_2u_at',
-    nachtGevoelig: false,
     venster: { onder: 30 * MIN, boven: 2 * UUR },
     match: (a, nowMs) => { const t = new Date(a.scheduled_at).getTime() - nowMs; return !a.reminder_2u_at && t > 30 * MIN && t <= 2 * UUR; },
     waTemplate: 'afspraak_reminder_2u_v1',
@@ -141,7 +141,6 @@ export const MOMENTEN = [
   {
     key: 'r30',
     kolom: 'reminder_30m_at',
-    nachtGevoelig: false,
     alleenOnbevestigd: true,          // 30m alleen als lead nog niet bevestigd heeft
     venster: { onder: 5 * MIN, boven: 30 * MIN },
     match: (a, nowMs) => { const t = new Date(a.scheduled_at).getTime() - nowMs; return !a.reminder_30m_at && !a.bevestigd_at && t > 5 * MIN && t <= 30 * MIN; },
@@ -158,7 +157,6 @@ export const MOMENTEN = [
   {
     key: 'zoom5',
     kolom: 'zoom_5min_at',
-    nachtGevoelig: false,
     venster: { onder: 0, boven: 5 * MIN },
     match: (a, nowMs) => { const t = new Date(a.scheduled_at).getTime() - nowMs; return !a.zoom_5min_at && t > 0 && t <= 5 * MIN; },
     waTemplate: 'afspraak_zoom_5min_v1',
