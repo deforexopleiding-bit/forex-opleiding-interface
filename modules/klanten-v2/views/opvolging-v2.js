@@ -854,6 +854,59 @@
   }
 
   /**
+   * GAAT DEZE CALL NOG DOOR?
+   *
+   * Een verzette of geannuleerde call heeft geen ochtend om over te oordelen.
+   * Hem meetellen zou 'geen spraakbericht' opleveren voor een afspraak die
+   * niet plaatsvindt. Tweeling van NIET_GEVOERD in api/opvolging-agenda.js.
+   */
+  const CALL_NIET_GEVOERD = ['cancelled', 'verwijderd', 'verplaatst', 'wacht_op_reschedule'];
+
+  /** De identiteit van een nummer zonder kaart. Tweeling van nummerSleutel() in het rapport. */
+  function nummerSleutel(tel) {
+    const d = String(telCijfers(tel) || '');
+    return d.length >= 9 ? d.slice(-9) : (d || 'onbekend');
+  }
+  function callGaatDoor(c) {
+    if (!c) return false;
+    if (c.doorgehaald === true) return false;
+    return CALL_NIET_GEVOERD.indexOf(String(c.status || '').toLowerCase()) === -1;
+  }
+
+  /**
+   * DE VENSTER-'TAAK' BIJ EEN CALL — met of zonder kaart.
+   *
+   * Vroeger las dit uitsluitend taakVoorNummer(): had de lead geen opvolgkaart,
+   * dan viel hij uit de meting. Zoomleads hebben er meestal geen — ze boeken
+   * zelf een call en komen nooit in de werklijst — en dus zei het scherm
+   * '7 ingeplande calls, maar geen ervan staat in de takenlijst' terwijl er die
+   * ochtend gewoon spraakberichten waren gegaan.
+   *
+   * De server hangt de WhatsApp-berichten van die dag nu aan de call (`c.wa`).
+   * Is dat een array, dan is er gemeten en bouwen we een taak-vormig object:
+   * de pogingen van de kaart (als die er is) plús de berichten. Is het null,
+   * dan is er niets gemeten en blijft het oude gedrag staan — dan zegt
+   * taakVoorNummer het laatste woord.
+   *
+   * `zonderKaart` is het signaal voor telVensters: nabellen is dan niet te
+   * meten, want een belpoging hangt aan een kaart.
+   */
+  function vensterTaakVoorCall(c) {
+    const taak = taakVoorNummer(c && c.telefoon);
+    if (!Array.isArray(c && c.wa)) return taak;   // niet gemeten → oud gedrag
+    return {
+      // De laatste negen cijfers als identiteit, net als in het rapport: de
+      // agenda draagt landcodes en het CRM soms lokale notatie, en dat is
+      // dezelfde persoon. Zie nummerSleutel() in api/opvolging-rapport.js.
+      id        : (taak && taak.id) || 'nr:' + nummerSleutel(c.telefoon),
+      zonderKaart: !taak,
+      naam      : (taak && taak.naam) || c.naam || null,
+      telefoon  : c.telefoon || (taak && taak.telefoon) || null,
+      pogingen  : ((taak && taak.pogingen) || []).concat(c.wa),
+    };
+  }
+
+  /**
    * Heeft deze taak een zoomcall op deze dag?
    *
    * Bepaalt of de venster-etiketten op de kaart zelf iets te zeggen hebben.
@@ -891,9 +944,24 @@
       return { staat: 'laden' };
     }
     if (_calls.error) return { staat: 'agenda_fout', error: _calls.error };
-    const calls = _calls.data || [];
+    // WAT NIET DOORGAAT TELT NIET MEE. Een verzette of geannuleerde call heeft
+    // geen ochtend om over te oordelen; hem meerekenen levert een rode 'geen
+    // spraakbericht' op voor een afspraak die niet plaatsvindt.
+    const calls = (_calls.data || []).filter(callGaatDoor);
     if (calls.length === 0) return { staat: 'geen_calls' };
-    const { taken, zonderTaak } = koppelCalls({ calls, zoekTaak: (c) => taakVoorNummer(c.telefoon) });
+
+    // PER CALL, NIET PER TAAK. Een zoomlead zonder opvolgkaart is nu ook te
+    // beoordelen zodra de server zijn WhatsApp-berichten meestuurt.
+    const taken = [];
+    const gezien = {};
+    const zonderTaak = [];
+    for (const c of calls) {
+      const t = vensterTaakVoorCall(c);
+      if (!t) { zonderTaak.push(c); continue; }
+      if (gezien[t.id]) continue;      // twee calls voor dezelfde lead = één rij
+      gezien[t.id] = true;
+      taken.push(t);
+    }
     if (taken.length === 0) return { staat: 'geen_taken', calls: calls.length, zonderTaak };
     return { staat: 'ok', taken, zonderTaak, calls: calls.length };
   }
@@ -922,12 +990,22 @@
 
   /** Tellingen over een hele lijst taken, voor het dashboard. */
   function telVensters(taken, dag) {
-    const leeg = { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 };
+    const leeg = { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0, niet_gemeten: 0 };
     const uit = { spraak: { ...leeg }, nabel: { ...leeg } };
     for (const t of (Array.isArray(taken) ? taken : [])) {
       const o = beoordeelDag(t, dag);
       uit.spraak.totaal += 1;
       uit.spraak[o.spraak.staat] += 1;
+
+      // ── NABELLEN ZONDER KAART IS NIET GEMETEN ──────────────────────────
+      // Een belpoging hangt aan een taak. Voor een zoomlead zonder opvolgkaart
+      // bestaat die historiek niet, dus 'niet gebeld' zou geraden zijn —
+      // precies het verwijt dat deze module nergens anders maakt. Het
+      // spraakbericht is hier wél te meten: dat staat in
+      // opvolging_wa_berichten, die aan een NUMMER hangt en geen kaart nodig
+      // heeft.
+      if (t && t.zonderKaart && o.nabel.staat === 'niet_gedaan') { uit.nabel.niet_gemeten++; continue; }
+
       // Het nabellen telt alleen mee voor wie het nodig had; anders zakt de
       // dekking door mensen die gewoon geantwoord hebben.
       if (o.nabel.staat !== 'niet_nodig') { uit.nabel.totaal += 1; uit.nabel[o.nabel.staat] += 1; }
@@ -1755,6 +1833,42 @@
     return { aantal: rij.length, gesproken, seconden, pogingen: rij };
   }
 
+  /**
+   * HET SPRAAKBERICHT ONDER EEN CALL.
+   *
+   * De vraag die Dave 's ochtends stelt is 'heb ik deze al ingesproken?', en
+   * die stond nergens per persoon — alleen als balk over de hele dag. Nu de
+   * server de berichten bij de call hangt, kan het per rij.
+   *
+   * DRIE UITKOMSTEN, en de derde is er bewust één: is `c.wa` geen array, dan is
+   * er niets gemeten en staat er NIETS. Een '🎤 Nog geen spraakbericht' op een
+   * niet-gemeten call is precies de valse nul waar deze module nergens anders
+   * in trapt.
+   *
+   * De dag komt uit inZone(), niet uit iso(): dat laatste is UTC, en dan valt
+   * een spraakbericht van 08:30 's winters op de verkeerde dag.
+   */
+  function spraakRegel(c, dag) {
+    if (!Array.isArray(c && c.wa)) return '';
+    if (!callGaatDoor(c)) return '';
+
+    const taak = taakVoorNummer(c.telefoon);
+    const pog = ((taak && taak.pogingen) || []).concat(c.wa);
+    const o = beoordeelSpraak(pog, dag);
+
+    // 'heeft geantwoord' hangt aan het NABEL-oordeel: wie antwoordde hoeft niet
+    // meer nagebeld. Dat is precies wat Dave hier wil zien staan.
+    const n = beoordeelNabel(pog, dag);
+    const geantwoord = (n.staat === 'niet_nodig' && n.reden === 'heeft geantwoord') ? ' &middot; heeft geantwoord' : '';
+
+    if (o.staat === 'niet_gedaan') {
+      return '<div class="belr leeg">&#127908; Nog geen spraakbericht' + geantwoord + '</div>';
+    }
+    const laat = o.staat === 'te_laat';
+    return '<div class="belr' + (laat ? '' : ' belraak') + '">&#127908; Spraakbericht om ' +
+      esc(o.tijd) + ' &mdash; ' + (laat ? 'na 09:00' : 'op tijd') + geantwoord + '</div>';
+  }
+
   /** Het regeltje onder een call. Geen taak = geen historiek, en dat zeggen we. */
   function belRegel(taak, dag) {
     if (!taak) {
@@ -1848,6 +1962,7 @@
         '<div class="who"><div class="nm">' + esc(c.naam) + label + '</div>' +
         '<div class="sub">' + esc(c.telefoon || 'geen nummer bekend') +
           (taak ? ' &middot; staat al in je lijst' : '') + '</div>' +
+        spraakRegel(c, dag) +
         belRegel(taak, dag) + '</div>' +
         '<div class="act">' + knoppen + '</div></div>';
     }).join('');
@@ -2199,10 +2314,15 @@
     if (bron.staat === 'geen_calls') {
       return kop + '<div class="empty">Geen zoomcalls ingepland op deze dag, dus hier valt niets te halen.</div>';
     }
-    // geen_taken: er zijn wél calls, maar geen enkele staat in de takenlijst.
-    return kop + '<div class="empty">' + bron.calls + ' ingeplande call' + (bron.calls === 1 ? '' : 's') +
-      ', maar geen ervan staat in de takenlijst &mdash; er is dus geen historiek om aan af te lezen ' +
-      'of het spraakbericht en het nabellen gebeurd zijn.</div>';
+    // geen_taken: er zijn wél calls, maar van geen enkele zijn de berichten
+    // gemeten. Dat is sinds de webhook ook zonder kaart bewaart een ANDER
+    // verhaal dan 'staat niet in de takenlijst': de kaart doet er voor het
+    // spraakbericht niet meer toe, de meting wel. Meestal is dit een dag vóór
+    // DEKKING_VANAF, of een agenda die de berichten niet kon meesturen.
+    return kop + nogNietGemeten(wat,
+      bron.calls + ' ingeplande call' + (bron.calls === 1 ? '' : 's') + ' op deze dag, maar de ' +
+      'WhatsApp-berichten erbij zijn niet gemeten. Dat kan omdat het een dag van voor de ' +
+      'koppeling is, of omdat ze niet gelezen konden worden.');
   }
 
   /** Het blok op het dagscherm: wie kreeg vanmorgen een spraakbericht? */
@@ -4587,6 +4707,14 @@
       rapCel(v.spraak.te_laat, 'spraak te laat') +
       rapCel(v.spraak.niet_gedaan, 'geen spraakbericht') +
       rapCel(v.nabel.niet_gedaan, 'niet nagebeld') + '</div>';
+    // Zoomleads zonder opvolgkaart: hun spraakbericht is wél gemeten (dat hangt
+    // aan een nummer), hun belpogingen niet (die hangen aan een kaart). Dat
+    // apart benoemen, want als 'niet nagebeld' zou het een verwijt zijn.
+    if (v.nabel_niet_gemeten) {
+      h += '<div class="ronde zacht">Bij ' + v.nabel_niet_gemeten + ' zoomcall' +
+        (v.nabel_niet_gemeten === 1 ? '' : 's') + ' is het nabellen <b>niet te meten</b>: die lead heeft geen ' +
+        'opvolgkaart, en belpogingen hangen aan een kaart. Het spraakbericht is er w&eacute;l uit af te lezen.</div>';
+    }
     h += rijenBlok('Per zoomcall', v.rijen, (r) =>
       '<div class="opvr-regel"><div class="opvr-t">' + esc(r.naam || 'Naamloos') +
       ' <span class="opvr-u">' + esc(nl(r.dag)) + ' &middot; call ' + esc(r.call_tijd || '') + '</span></div>' +
@@ -4604,6 +4732,12 @@
     if (o.staat === 'op_tijd')    return '<span class="tag t-green">op tijd' + (o.tijd ? ' ' + esc(o.tijd) : '') + '</span>';
     if (o.staat === 'te_laat')    return '<span class="tag t-red">te laat' + (o.tijd ? ' ' + esc(o.tijd) : '') + '</span>';
     if (o.staat === 'niet_gedaan') return '<span class="tag t-red">niet gebeurd</span>';
+    // NIET GEMETEN IS GEEN N.V.T. 'n.v.t.' zegt dat het niet hoefde; dit zegt
+    // dat we het niet konden zien. Ze door elkaar halen maakt van een gat een
+    // vrijspraak.
+    if (o.staat === 'niet_gemeten') {
+      return '<span class="tag t-grey">niet gemeten' + (o.reden ? ' &middot; ' + esc(o.reden) : '') + '</span>';
+    }
     return '<span class="tag t-grey">n.v.t.' + (o.reden ? ' &middot; ' + esc(o.reden) : '') + '</span>';
   }
 

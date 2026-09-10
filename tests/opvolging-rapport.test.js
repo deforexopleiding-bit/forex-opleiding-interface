@@ -463,8 +463,9 @@ test('het endpoint haalt de taken achter de zoomcalls apart op', () => {
 
 test('bouwVensters krijgt de samengevoegde takenset, niet alleen de pogingen-set', () => {
   // De afspraken-parameter heet sinds de filterfix vensterAfspraken; de
-  // takenset is nog steeds de samengevoegde.
-  assert.match(BRON, /bouwVensters\(\{ afspraken: vensterAfspraken, taken: alleTaken, pogingen, dagen \}\)/);
+  // takenset is nog steeds de samengevoegde. `waRegels` is erbij gekomen zodat
+  // een zoomlead zonder opvolgkaart ook beoordeeld kan worden.
+  assert.match(BRON, /bouwVensters\(\{\s*\n\s*afspraken: vensterAfspraken, taken: alleTaken, pogingen, dagen,\s*\n\s*waRegels : waLezing\.fout \? null : waLezing\.regels,\s*\n\s*\}\)/);
 });
 
 test('een afgekapte takenlijst wordt gemeld en niet stil geslikt', () => {
@@ -923,7 +924,7 @@ test('de blinde vlek over calls zonder taak telt de gefilterde set', () => {
 test('het endpoint voedt de vensters met relevanteAfspraken, niet met de ruwe lijst', () => {
   // Anders staat er weer een groter getal onder een kortere lijst.
   assert.match(BRON, /const vensterAfspraken = relevanteAfspraken\(afspraken, Date\.now\(\)\)/);
-  assert.match(BRON, /bouwVensters\(\{ afspraken: vensterAfspraken/);
+  assert.match(BRON, /bouwVensters\(\{\s*\n\s*afspraken: vensterAfspraken/);
   // Op de AANROEP, niet op de definitie: `export function bouwVensters({
   // afspraken, taken, ... })` matcht anders altijd en dan bewaakt dit niets.
   assert.doesNotMatch(BRON, /[^n] bouwVensters\(\{ afspraken, /);

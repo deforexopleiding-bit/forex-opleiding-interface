@@ -138,12 +138,21 @@ export function beoordeelDag(taak, dag) {
  * door mensen die gewoon geantwoord hebben.
  */
 export function telVensters(taken, dag) {
-  const leeg = { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 };
+  const leeg = { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0, niet_gemeten: 0 };
   const uit = { spraak: { ...leeg }, nabel: { ...leeg } };
   for (const t of (Array.isArray(taken) ? taken : [])) {
     const o = beoordeelDag(t, dag);
     uit.spraak.totaal += 1;
     uit.spraak[o.spraak.staat] += 1;
+
+    // ── NABELLEN ZONDER KAART IS NIET GEMETEN ────────────────────────────
+    // Een belpoging hangt aan een taak. Voor een zoomlead zonder opvolgkaart
+    // bestaat die historiek niet, dus 'niet gebeld' zou geraden zijn — precies
+    // het verwijt dat deze module nergens anders maakt. Het spraakbericht is
+    // hier wél te meten: dat staat in opvolging_wa_berichten, die aan een
+    // NUMMER hangt en geen kaart nodig heeft.
+    if (t && t.zonderKaart && o.nabel.staat === 'niet_gedaan') { uit.nabel.niet_gemeten++; continue; }
+
     if (o.nabel.staat !== 'niet_nodig') { uit.nabel.totaal += 1; uit.nabel[o.nabel.staat] += 1; }
     else uit.nabel.niet_nodig += 1;
   }
