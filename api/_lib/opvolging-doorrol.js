@@ -72,7 +72,7 @@ export function doorrolDag(nuMs) {
   }).format(new Date(nuMs));
 }
 
-export function bepaalDoorrol({ taken, vandaag }) {
+export function bepaalDoorrol({ taken, vandaag, nuMs = Date.now() }) {
   if (!DATUM_RE.test(String(vandaag || ''))) return [];
   const uit = [];
   for (const t of (Array.isArray(taken) ? taken : [])) {
@@ -84,9 +84,43 @@ export function bepaalDoorrol({ taken, vandaag }) {
     // een taak die de gebruiker zelf vooruit heeft gezet mag deze cron nooit
     // naar voren trekken.
     if (due >= vandaag) continue;
+
+    // ── EEN NABELKAART VAN EEN VOORBIJE CALL ROLT NIET DOOR ─────────────
+    // De kaarten van cron-opvolging-zoom-nabel zeggen: 'bel deze lead vóór
+    // zijn call van vanmiddag'. Is die call geweest, dan is die opdracht niet
+    // meer uit te voeren — de uitkomst komt uit de call zelf, via de
+    // afrondknop. Zou hij doorrollen, dan staat er morgen een kaart die vraagt
+    // om iets wat gisteren al niet meer kon, en dat elke dag opnieuw.
+    if (isVoorbijeNabelkaart(t, nuMs)) {
+      uit.push({ id: t.id, patch: {
+        status         : 'gearchiveerd',
+        archief_reden  : 'zoomcall voorbij — uitkomst via de call',
+        gearchiveerd_at: new Date(nuMs).toISOString(),
+      } });
+      continue;
+    }
+
     uit.push({ id: t.id, patch: { due: vandaag, later: false } });
   }
   return uit;
+}
+
+/** De reden-codes van cron-opvolging-zoom-nabel. Tweeling van dat bestand. */
+export const ZOOM_NABEL_REDENEN = ['zoom_geen_reactie', 'zoom_geen_spraakbericht'];
+
+/**
+ * Is dit een nabelkaart waarvan de call al geweest is?
+ *
+ * De starttijd staat in `bron_ref.start`. Ontbreekt hij, dan weten we het niet
+ * en rolt de kaart gewoon door — archiveren op een gok zou werk laten
+ * verdwijnen, en dat is de duurste fout die deze cron kan maken.
+ */
+export function isVoorbijeNabelkaart(taak, nuMs = Date.now()) {
+  if (!taak) return false;
+  if (!ZOOM_NABEL_REDENEN.includes(String(taak.reden_code || ''))) return false;
+  const start = taak.bron_ref && taak.bron_ref.start ? Date.parse(taak.bron_ref.start) : NaN;
+  if (!Number.isFinite(start)) return false;
+  return start < nuMs;
 }
 
 /**

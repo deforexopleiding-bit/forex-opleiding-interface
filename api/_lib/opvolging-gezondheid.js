@@ -1,6 +1,6 @@
 // api/_lib/opvolging-gezondheid.js
 //
-// DE VIJF CONTROLES, ALS PURE FUNCTIES.
+// DE ZES CONTROLES, ALS PURE FUNCTIES.
 //
 // Deze week stonden zes keer alle tests groen terwijl productie stuk was, en
 // elke keer was de TEST het probleem: hij raakte iets aan wat lijkt op het
@@ -263,6 +263,59 @@ export function controleerBrug({ status, fout, configFout }) {
   }
   return uit('brug', OK, { verbonden: true, gezien, doorgelaten: door },
     `${door} van ${gezien} gebeurtenissen doorgelaten.`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6 · DAGRITME — staat er nog werk van gisteren open?
+// ═══════════════════════════════════════════════════════════════════════════
+// De hele opvolgmodule rust op één afspraak: wat vandaag op de lijst staat,
+// wordt vandaag afgewerkt. Wat blijft liggen rolt 's nachts door naar vandaag
+// (cron-opvolging-doorrol), dus na die run hoort er GEEN open taak meer te
+// bestaan met een due van vóór vandaag.
+//
+// Staat er wél zo'n taak, dan is er iets stuk waar deze bewaking voor bedoeld
+// is: de doorrol draaide niet, of hij faalde halverwege, of iets schrijft een
+// due in het verleden. In alle drie de gevallen ziet Dave die kaart niet meer
+// in zijn daglijst — en dat is precies het soort werk dat weken later pas
+// opvalt.
+//
+// GEEN NAMEN IN DE MAIL. Het aantal is genoeg om te weten dát het misgaat, en
+// een mail met een lijst leadnamen is een lijst leadnamen in een mailbox. Wie
+// wil weten wie het zijn kijkt in de module; deze controle is een alarm, geen
+// werklijst.
+//
+// Gemeten op 10 september: 0. De eerste run hoort dus ok te zijn.
+
+export function controleerDagritme({ taken, vandaag, leesfout }) {
+  // KAN HIJ NIET LEZEN, DAN IS HET NIET GEMETEN — en dus nooit 'ok'. Zie de
+  // kop van dit bestand: een controle die niets kon meten is niet in orde.
+  if (leesfout) {
+    return uit('dagritme', NIET_GEMETEN, { fout: String(leesfout).slice(0, 200) },
+      'De openstaande taken waren niet te lezen: ' + String(leesfout).slice(0, 200)
+      + '. Of er werk van gisteren blijft hangen is dus onbekend.');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(vandaag || ''))) {
+    return uit('dagritme', NIET_GEMETEN, { fout: 'geen geldige datum' },
+      'Zonder de datum van vandaag valt er niets te vergelijken.');
+  }
+
+  const rijen = Array.isArray(taken) ? taken : [];
+  const achter = rijen.filter((t) => {
+    const due = String((t && t.due) || '');
+    return /^\d{4}-\d{2}-\d{2}$/.test(due) && due < vandaag;
+  });
+
+  // NUL IS HIER WÉL 'OK', en dat is geen tegenspraak met de rest van dit
+  // bestand. De meting is de lijst openstaande taken, en die is er: dat er
+  // niets achterloopt is een uitkomst, geen leegte.
+  return uit('dagritme', achter.length ? FOUT : OK, {
+    open   : rijen.length,
+    achter : achter.length,
+    oudste : achter.length ? achter.map((t) => String(t.due)).sort()[0] : null,
+  }, achter.length
+    ? `${achter.length} open ta${achter.length === 1 ? 'ak staat' : 'ken staan'} met een due van vóór vandaag. `
+      + 'Die staan in geen enkele daglijst. Draaide de nachtelijke doorrol?'
+    : `Alle ${rijen.length} open taken staan op vandaag of later.`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

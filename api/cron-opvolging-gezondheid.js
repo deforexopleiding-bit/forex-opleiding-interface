@@ -30,7 +30,8 @@ import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
-  beoordeelPrintweergave, controleerBrug, bouwMail, OK, FOUT, NIET_GEMETEN,
+  beoordeelPrintweergave, controleerBrug, controleerDagritme,
+  bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
 
 const ZONE = 'Europe/Amsterdam';
@@ -98,6 +99,11 @@ export default async function handler(req, res) {
   // ── 5 · De WhatsApp-brug ─────────────────────────────────────────────────
   uitkomsten.push(await meetBrug());
 
+  // ── 6 · Het dagritme ─────────────────────────────────────────────────────
+  // Na de nachtelijke doorrol hoort geen enkele open taak nog een due van vóór
+  // vandaag te hebben. Staat die er wel, dan ziet Dave die kaart niet meer.
+  uitkomsten.push(await meetDagritme(vandaag));
+
   // ── De mail ──────────────────────────────────────────────────────────────
   const { subject, text } = bouwMail({ uitkomsten, dag: vandaag });
   const ontvanger = process.env.OPVOLGING_GEZONDHEID_MAIL_TO || '';
@@ -123,6 +129,24 @@ export default async function handler(req, res) {
 }
 
 const kort = (e) => String(e?.message || e).slice(0, 200);
+
+/**
+ * De open taken, alleen hun due. Een leesfout is hier GEEN nul: dan is er
+ * niets gemeten, en 'niet gemeten' telt in de mail even zwaar als 'fout'.
+ */
+async function meetDagritme(vandaag) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('due')
+      .eq('status', 'open')
+      .limit(5000);
+    if (error) throw new Error(error.message);
+    return controleerDagritme({ taken: data || [], vandaag, leesfout: null });
+  } catch (e) {
+    return controleerDagritme({ taken: [], vandaag, leesfout: kort(e) });
+  }
+}
 
 /** Eén regel die per staat de namen noemt, met de reden bij wat niet klopt. */
 export function samenvatting(uitkomsten) {

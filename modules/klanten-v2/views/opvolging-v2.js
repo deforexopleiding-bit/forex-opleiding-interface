@@ -1628,6 +1628,9 @@
     no_show_call: ['No-show call', 't-red'],
     afgemeld: ['Afgemeld', 't-grey'],
     niet_ingepland: ['Niet ingepland', 't-red'],
+    // De kaarten van cron-opvolging-zoom-nabel. Zonder deze regel toont de
+    // badge de rauwe sleutel 'zoom_nabellen'.
+    zoom_nabellen: ['Zoomcall nabellen', 't-amber'],
   };
 
   /**
