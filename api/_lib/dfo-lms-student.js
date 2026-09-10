@@ -75,8 +75,49 @@ export function bepaalProductSoort(traject) {
 // Aantal sessies → hlms_student.calls_totaal. `calls` is het veld dat de rest
 // van het CRM toont (zie api/onboarding-detail.js); alpha_calls_total is de
 // Alpha-specifieke variant en dient als terugval.
-export function bepaalCallsTotaal(traject) {
+//
+// ── WAAROM productSoort ERBIJ MOET ────────────────────────────────────
+// `hlms_student.calls_totaal` staat aan LMS-kant op NOT NULL. Deze functie
+// keek alleen naar het traject, en een membership-traject heeft geen calls —
+// dus rolde er `null` uit en sloeg de insert af op de constraint. Dat is op
+// 9 september 2026 gebeurd bij de inhaalslag (Membership 36 maanden), maar de
+// echte schade zat elders: dezelfde weg loopt bij ELKE nieuwe
+// membership-aanmelding via onboarding-create, en daar is geen knop die het
+// je vertelt — alleen een regel in dfo_lms_provision_error.
+//
+// Twee gevallen, en ze horen zich verschillend te gedragen:
+//
+//   MEMBERSHIP → altijd 0. Een membership HÉÉFT geen calls; 0 is geen
+//   noodgreep maar de betekenis zelf. Het is ook de bestaande conventie in
+//   het LMS: van de 102 membership-studenten staan er 84 op 0 en is het
+//   minimum 0 (gemeten 9 september 2026). Staat er tegen de verwachting in
+//   toch een aantal op een membership-traject, dan negeren we dat — maar
+//   niet stilletjes: dat is een gegevensfout in het CRM en die hoort in het
+//   log te staan, niet in het LMS.
+//
+//   MENTORSHIP → het echte aantal, of `null`. Geen terugval op 0: een
+//   1-op-1-klant die zijn traject als "0 calls" ziet staan is erger dan een
+//   aanmaak die stopt. `null` betekent hier "niet vast te stellen" en de
+//   aanroeper moet er luidruchtig op stoppen — net als bij product_soort.
+//
+// @param {object|null} traject
+// @param {string|null} [productSoort] 'membership' | 'mentorship' | null
+// @returns {number|null} het aantal, of null als het niet vast te stellen is.
+export function bepaalCallsTotaal(traject, productSoort) {
   const t = traject || {};
+
+  if (productSoort === 'membership') {
+    const gevonden = [t.calls, t.alpha_calls_total]
+      .map((v) => Number(v))
+      .find((n) => Number.isFinite(n) && n > 0);
+    if (gevonden !== undefined) {
+      console.warn('[dfo-lms-student] membership-traject '
+        + JSON.stringify(t.key || t.id || null) + ' draagt ' + gevonden
+        + ' calls — genegeerd, membership krijgt calls_totaal 0');
+    }
+    return 0;
+  }
+
   for (const v of [t.calls, t.alpha_calls_total]) {
     const n = Number(v);
     if (Number.isFinite(n) && n > 0) return Math.floor(n);
@@ -356,6 +397,22 @@ export async function provisionDfoLmsStudent(onboardingId) {
     return { ok: false, error: msg };
   }
 
+  // calls_totaal MOET een getal zijn — de kolom staat aan LMS-kant op NOT
+  // NULL. Voor membership levert bepaalCallsTotaal() altijd 0; komt er hier
+  // toch null uit, dan is het een mentorship-traject zonder aantal calls.
+  // Dan stoppen we hier, met een melding die zegt wat er ontbreekt — in
+  // plaats van de databank een constraint-fout te laten geven waar niemand
+  // het traject in terugleest.
+  const callsTotaal = bepaalCallsTotaal(traject, productSoort);
+  if (callsTotaal === null) {
+    const msg = 'Traject ' + JSON.stringify(traject.key || traject.id || null)
+      + ' (' + productSoort + ') heeft geen aantal calls ingesteld — '
+      + 'calls_totaal kan niet bepaald worden. Vul `calls` (of '
+      + '`alpha_calls_total`) op onboarding_trajecten.';
+    await schrijfFout(onboardingId, msg);
+    return { ok: false, error: msg };
+  }
+
   // 4) Mentor opzoeken. Nooit blokkerend: geen match → leeg laten + melden.
   let mentorId = null;
   let mentorWarning = null;
@@ -420,7 +477,7 @@ export async function provisionDfoLmsStudent(onboardingId) {
         ? Math.floor(Number(traject.duur_maanden)) : null,
       start_datum      : startIso,
       eind_datum       : eindIso,
-      calls_totaal     : bepaalCallsTotaal(traject),
+      calls_totaal     : callsTotaal,
       mentor_id        : mentorId,
       crm_onboarding_id: onboardingId,
       herkomst         : HERKOMST_CRM,
