@@ -241,8 +241,13 @@ const LEEG_RAPPORT = (dag) => ({
               gat_drempel_min: 120, bezetting_drempel: 0.6 },
   aandacht: [], blinde_vlekken: [],
   dekking: { openstaand_bekend: true, openstaand: [], onbehandeld: [], behandeld: [] },
-  vensters: { spraak: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 },
-              nabel: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0 },
+  // `niet_gemeten` en `nabel_niet_gemeten` kwamen erbij toen zoomleads zonder
+  // opvolgkaart beoordeeld werden (leegTel in opvolging-rapport.js). Ontbreken
+  // ze hier, dan tekent de printweergave in deze proef een ander rapport dan in
+  // het echt — en dat is precies wat deze proef moet uitsluiten.
+  vensters: { spraak: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0, niet_gemeten: 0 },
+              nabel: { totaal: 0, op_tijd: 0, te_laat: 0, niet_gedaan: 0, niet_nodig: 0, niet_gemeten: 0 },
+              nabel_niet_gemeten: 0,
               rijen: [], zonder_taak: [] },
   zoomcalls: [], archief: [],
   volume: { bel: { uit: 0, seconden: 0, gesproken: 0, niet_opgenomen: 0,

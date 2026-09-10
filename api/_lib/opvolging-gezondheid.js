@@ -245,7 +245,35 @@ export function controleerBrug({ status, fout, configFout }) {
       : uit('brug', FOUT, { fout: fout || 'onbekend' },
           'De brug antwoordde niet: ' + (fout || 'onbekend') + '. Er komt mogelijk geen WhatsApp binnen.');
   }
-  const t = status.tellers || {};
+  // ── DE SLEUTEL HEET `gebeurtenissen`, NIET `tellers` ─────────────────────
+  //
+  // Dit stond op `status.tellers`, en dat veld bestaat niet. /status geeft de
+  // cijfers terug onder `gebeurtenissen` (services/whatsapp-brug/server.js:
+  // `gebeurtenissen: wa.tellers()` — de METHODE heet tellers, de sleutel niet).
+  //
+  // Gevolg: `gezien` was ALTIJD 0, dus deze controle kwam altijd uit op
+  // 'niet gemeten', en de tak eronder — gezien > 0 maar doorgelaten = 0 — kon
+  // nooit afgaan. Dat is precies de storing van 8 september (de brug zag alles
+  // en liet niets door), en de enige bewaker ertegen stond blind.
+  //
+  // Gemeten op 10 september: de gezondheidscheck zei 'niets gezien sinds de
+  // laatste herstart' terwijl /status op datzelfde moment 87 + 165 + 149
+  // gebeurtenissen meldde.
+  //
+  // `tellers` blijft als terugval staan voor een oudere brug op de VPS; die
+  // loopt altijd achter op een deploy. tests/opvolging-gezondheid-brug-
+  // contract.test.js legt de sleutel vast tegen server.js zodat een hernoeming
+  // aan één kant rood wordt in plaats van stil.
+  const t = status.gebeurtenissen || status.tellers || null;
+
+  // GEEN TELLERS IS IETS ANDERS DAN NUL GEZIEN. Draait er een brug die dit blok
+  // helemaal niet meestuurt, dan hebben we niets gemeten — en dat is een eigen
+  // reden, geen '0 gebeurtenissen'.
+  if (!t || (!t.gezien && !t.doorgelaten)) {
+    return uit('brug', NIET_GEMETEN, { verbonden: status.verbonden === true, tellers: 'ontbreken' },
+      'De brug gaf geen tellers terug (andere versie?). Zonder die cijfers valt niet te zeggen of er iets binnenkomt.');
+  }
+
   const gezien = Object.values(t.gezien || {}).reduce((n, v) => n + (Number(v) || 0), 0);
   const door   = Object.values(t.doorgelaten || {}).reduce((n, v) => n + (Number(v) || 0), 0);
 

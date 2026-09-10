@@ -155,7 +155,7 @@ tr{break-inside:avoid}
   // dus in de PDF én op het scherm. Zie je hier een ander nummer dan wat er in
   // de repo staat, dan kijk je naar een oude build en heeft verder zoeken geen
   // zin. Ophogen bij elke inhoudelijke wijziging aan dit bestand.
-  const OPMAAK_VERSIE = 'rp-9';
+  const OPMAAK_VERSIE = 'rp-10';
 
 // HET RAPPORT HEET NAAR HET WERK, NIET NAAR DE PERSOON.
 //
@@ -438,6 +438,17 @@ tr{break-inside:avoid}
       tegel(v.spraak.te_laat, 'spraak te laat') +
       tegel(v.spraak.niet_gedaan, 'geen spraakbericht') +
       tegel(v.nabel.niet_gedaan, 'niet nagebeld') + '</div>';
+    // NIET GEMETEN IS GEEN NUL, OOK NIET OP PAPIER. Het scherm meldt dit al;
+    // de printweergave zweeg erover, en dan leest een uitgeprint rapport
+    // stiller dan hetzelfde rapport op het scherm. Zoomleads zonder
+    // opvolgkaart hebben geen belhistoriek — hun spraakbericht is wél gemeten,
+    // hun belpogingen niet.
+    if (v.nabel_niet_gemeten) {
+      h += '<div class="leeg">Bij ' + v.nabel_niet_gemeten + ' zoomcall' +
+        (v.nabel_niet_gemeten === 1 ? '' : 's') + ' is het nabellen <b>niet te meten</b>: die lead ' +
+        'heeft geen opvolgkaart, en belpogingen hangen aan een kaart. Het spraakbericht is er ' +
+        'wél uit af te lezen.</div>';
+    }
     if ((v.zonder_taak || []).length) {
       h += '<div class="leeg">' + v.zonder_taak.length + ' ingeplande call' +
         (v.zonder_taak.length === 1 ? '' : 's') + ' staan niet in de takenlijst, dus daar valt ' +
