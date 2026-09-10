@@ -325,7 +325,7 @@
   // Fase 3a — de calls van de getoonde dag. Zelfde bron als de weekweergave
   // (/api/opvolging-agenda), maar dan één dag: de bezette momenten daarin
   // zijn Daves calls.
-  const _calls = { loading: false, error: null, data: null, key: null };
+  const _calls = { loading: false, error: null, data: null, key: null, achterstand: [] };
 
   // ── De WhatsApp-brug ──────────────────────────────────────────────────────
   // Een lampje rechtsboven en een paneel om opnieuw te koppelen als de sessie
@@ -482,10 +482,16 @@
     // telt óók als 'geladen', anders draait de melding in een lus rond.
     if (st.loading || (st.key === dag && (st.data || st.error))) return;
     st.loading = true; st.error = null; st.key = dag;
-    const j = await haal('/api/opvolging-agenda?van=' + dag + '&tot=' + dag);
+    // ALLEEN OP VANDAAG. De achterstand is 'wat er van eerdere dagen nog open
+    // staat, nu' — op een andere dag bekijken zou een lijst opleveren die daar
+    // niets betekent, en de server hoeft er dan ook niet voor te lezen.
+    const vraagAchterstand = dag === vandaag();
+    const j = await haal('/api/opvolging-agenda?van=' + dag + '&tot=' + dag +
+      (vraagAchterstand ? '&achterstand=1' : ''));
     st.loading = false;
-    if (j.__error) { st.error = j.__error; st.data = null; }
+    if (j.__error) { st.error = j.__error; st.data = null; st.achterstand = []; }
     else {
+      st.achterstand = vraagAchterstand ? (j.achterstand || []) : [];
       // HET DAGBEELD, NIET DE BEZETTE MOMENTEN. `gepland` draagt alles wat
       // voor die dag stond, verzette calls inbegrepen; `bezet` is de smallere
       // lijst die bepaalt welke vrije momenten wegvallen.
@@ -1068,7 +1074,7 @@
    * gemiste deadline waar niets meer voor te doen valt is geen alarm maar
    * geschiedenis, en die hoort in de tijdlijn, niet bovenaan de dag.
    */
-  function bepaalNuDoen({ dag, nu, minuut, brugZiet, calls, callsStaat, vensterTaken, openTaken }) {
+  function bepaalNuDoen({ dag, nu, minuut, brugZiet, calls, callsStaat, vensterTaken, openTaken, achterstand }) {
     if (dag !== nu) {
       return { soort: 'andere_dag', titel: 'Je kijkt naar een andere dag.',
         uitleg: '"Nu" bestaat alleen vandaag. Wat hier staat is geschiedenis of nog niet aan de beurt.',
@@ -1094,6 +1100,17 @@
     if (straks && straks.z.minuut - minuut <= CALL_VOORUIT_MIN) {
       return { soort: 'call_straks', titel: 'Call met ' + (straks.c.naam || 'onbekend') + ' om ' + straks.z.tijd,
         uitleg: 'Over ' + (straks.z.minuut - minuut) + ' minuten.', telaat: false, deadline: straks.z.tijd };
+    }
+
+    // 1b · Wat van eerdere dagen nog open staat. Na de call die nú loopt — die
+    //      heeft iemand aan de andere kant — maar vóór de twee vensters: een
+    //      call die gisteren gevoerd is en nooit is afgerond, is werk dat al
+    //      te laat is en niet vanzelf weggaat.
+    const achter = Number(achterstand) || 0;
+    if (achter > 0) {
+      return { soort: 'achterstand', telaat: true,
+        titel : achter + ' zoomcall(s) van eerdere dagen nog afronden',
+        uitleg: 'Gesproken maar zonder uitkomst. Die eerst.' };
     }
 
     // 2 en 3 · De twee vensters. Alleen als de brug uitgaande berichten ziet:
@@ -1172,7 +1189,7 @@
     _live.tijdlijn.data = null; _live.tijdlijn.key = null;
     // De calls hangen aan dezelfde dag; een nieuwe taak verandert welke
     // belknop een taak-koppeling krijgt.
-    _calls.data = null; _calls.key = null; _calls.error = null;
+    _calls.data = null; _calls.key = null; _calls.error = null; _calls.achterstand = [];
   };
 
   async function post(url, body) {
@@ -1396,6 +1413,15 @@
 .opv .call .nm{font-weight:650;font-size:14.5px}
 .opv .call .sub{font-size:12.5px;color:var(--o-muted);margin-top:3px}
 .opv .call .act{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+/* Nog af te ronden — van eerdere dagen. Oranje, want dit is te laat: gesproken
+   maar zonder uitkomst, en het gaat niet vanzelf weg. Het kader eromheen maakt
+   zichtbaar dat deze rijen NIET bij de dag eronder horen. */
+.opv .achterstand{border:1.5px solid var(--o-amb);border-radius:16px;background:#FFFBF4;padding:12px 12px 4px;margin-bottom:16px}
+.opv .achterstand .sh{margin-top:0}
+.opv .achterstand .sh h3{color:#8a5200}
+.opv .achterstand .sh .n{background:var(--o-amb);color:#fff}
+.opv .achterstand .ronde{margin-bottom:10px}
+.opv .achterstand .call .tijd{flex:0 0 74px;font-size:13px;line-height:1.35;color:#8a5200}
 .opv .obtn.zoom{background:var(--o-purs);border-color:#d9ccff;color:#5a2fd6}
 /* WhatsApp-brug — lampje rechtsboven plus het koppelpaneel. Alles onder .opv,
    zoals de rest van deze module; er staat niets globaals in. */
@@ -1890,6 +1916,54 @@
     return '<div class="belr' + (b.gesproken ? ' belraak' : '') + '">' +
       '<b>' + esc(belZin(b.aantal, b.gesproken, b.seconden)) + '</b>' +
       (stippen ? '<span class="bps">' + stippen + '</span>' : '') + '</div>';
+  }
+
+  /**
+   * NOG AF TE RONDEN — DE ZOOMCALLS VAN EERDERE DAGEN.
+   *
+   * Maxims regel: Dave rondt elke zoomcall af (klant geworden / wil nog
+   * beslissen + datum / no-show / geen interesse). Rondt hij er een niet af,
+   * dan staat die de volgende dag bovenaan: 'van gisteren, werk deze af'.
+   *
+   * Zonder dit blok blijft zo'n call op zijn eigen dag staan, en die dag kijkt
+   * niemand meer terug. Gemeten op 9 september: 3 calls zonder afronding, op
+   * 8 september 1.
+   *
+   * BOVEN 'Calls van vandaag', met opzet: wat blijft liggen gaat vóór wat er
+   * nog aan komt. De rijen dragen hun eigen dag, want 'gisteren 15:00' zegt
+   * iets anders dan '15:00'.
+   */
+  function achterstandBlok() {
+    const lijst = _calls.achterstand || [];
+    if (!lijst.length) return '';
+
+    const kop = '<div class="sh"><div class="ic" style="background:var(--o-ambs)">&#9888;</div>' +
+      '<h3>Nog af te ronden &mdash; van eerdere dagen</h3>' +
+      '<span class="n">' + lijst.length + '</span></div>';
+
+    return '<div class="achterstand">' + kop +
+      '<div class="ronde">Gesproken maar nog geen uitkomst gekozen. <b>Rond deze eerst af.</b></div>' +
+      lijst.map((c, i) => {
+        const k = c.knoppen || { afronden: true, bellen: !!c.telefoon, whatsapp: !!c.telefoon, zoom: false };
+        const knoppen =
+          (k.bellen && c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(\'a' + i + '\')">&#9742; Bellen</button>' : '') +
+          (k.whatsapp && c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(\'a' + i + '\')">&#128172; WhatsApp</button>' : '') +
+          (k.afronden ? '<button class="obtn" onclick="window.__opvCallAfrond(\'a' + i + '\')">Afronden &rarr;</button>' : '');
+        const taak = taakVoorNummer(c.telefoon);
+        return '<div class="call geweest">' +
+          '<div class="tijd">' + esc(achterstandDag(c.dag)) + '<br>' + esc(c.tijd || '') + '</div>' +
+          '<div class="who"><div class="nm">' + esc(c.naam) + '</div>' +
+          '<div class="sub">' + esc(c.telefoon || 'geen nummer bekend') +
+            (taak ? ' &middot; staat al in je lijst' : '') + '</div></div>' +
+          '<div class="act">' + knoppen + '</div></div>';
+      }).join('') + '</div>';
+  }
+
+  /** 'gisteren' als het dat was, anders 'ma 07/09'. */
+  function achterstandDag(dag) {
+    if (!dag) return '';
+    if (dag === dagPlus(vandaag(), -1)) return 'gisteren';
+    return nl(dag);
   }
 
   /**
@@ -2899,6 +2973,8 @@
       vensterTaken: bron.staat === 'ok' ? bron.taken : [],
       // Precies het getal dat eronder in de lijst staat, niet een eigen telling.
       openTaken: (st.data && st.key === dag) ? (st.data.taken || []).length : 0,
+      // Idem: precies de rijen die in het achterstandsblok staan.
+      achterstand: (_calls.key === dag) ? (_calls.achterstand || []).length : 0,
     });
     return '<div class="nudoen' + (advies.telaat ? ' laat' : '') + '">' +
       '<div class="nuic">' + (advies.telaat ? '&#9888;' : '&#9202;') + '</div>' +
@@ -2981,6 +3057,8 @@
     // Boven de takenlijst: eerst wat er vaststaat vandaag, dan wat je zelf
     // moet oppakken. De agenda hangt niet aan de takenlijst — valt hij weg,
     // dan toont dit blok een melding en gaat de rest gewoon door.
+    // Wat blijft liggen gaat vóór wat er nog aan komt.
+    h += achterstandBlok();
     h += callsBlok(dag);
 
     if (st.error) return h + fout(st.error, 'window.__opvHerlaad()') + '</div>' + modalHtml() + waPaneelHtml() + gesprekPaneelHtml();
@@ -3362,7 +3440,7 @@
   }
 
   function callModalHtml(m) {
-    const c = (_calls.data || [])[m.callIndex];
+    const c = callOp(m.callIndex);
     if (!c) return '';
     if (m.soort === 'call-afrond') {
       const b =
@@ -3627,7 +3705,7 @@
     const wens = weekOffsetVoorDag({ nu: vandaag(), d });
     _ui.weekOffset = Math.max(WEEK_MIN_OFFSET, Math.min(WEEK_MAX_OFFSET, wens));
     _live.taken.data = null; _live.taken.key = null;
-    _calls.data = null; _calls.key = null; _calls.error = null;
+    _calls.data = null; _calls.key = null; _calls.error = null; _calls.achterstand = [];
     render();
   };
 
@@ -3972,7 +4050,26 @@
   };
 
   // ── Fase 3a · de calls van vandaag ────────────────────────────────────────
-  const callOp = (i) => (_calls.data || [])[i] || null;
+  /**
+   * De call achter een index.
+   *
+   * Twee reeksen, want er staan twee lijsten op het scherm: de calls van de
+   * gekozen dag (gewoon een getal) en de achterstand van eerdere dagen
+   * ('a0', 'a1', …). Eén gedeelde nummering zou breken zodra er een rij bij
+   * komt of afvalt — dan rondt Dave de verkeerde persoon af.
+   */
+  const callOp = (i) => {
+    const sleutel = String(i);
+    if (sleutel.charAt(0) === 'a') {
+      // /^\d+$/ en niet Number(): 'a' alleen levert Number('') === 0 op, en dan
+      // pakt een kapotte verwijzing stilletjes de eerste rij. De verkeerde
+      // persoon afronden is erger dan niets doen.
+      const n = sleutel.slice(1);
+      if (!/^\d+$/.test(n)) return null;
+      return (_calls.achterstand || [])[Number(n)] || null;
+    }
+    return (_calls.data || [])[i] || null;
+  };
 
   window.__opvCallBel = async (i) => {
     const c = callOp(i); if (!c || !c.telefoon) return;
@@ -4083,6 +4180,18 @@
     }
   }
 
+  /**
+   * De dag waarop deze call stond — voor het etiket op een nieuwe kaart.
+   *
+   * Een achterstandscall is van gisteren of eerder, en dan is 'Call 10/09' een
+   * leugen op de kaart: de volgende die hem oppakt leest daar de verkeerde dag.
+   * De rij draagt zijn eigen `dag`; die wint boven de dag die op het scherm
+   * staat.
+   */
+  function callBadgeDag(c) {
+    return (c && c.dag) || _ui.dagView || vandaag();
+  }
+
   window.__opvCallBevestig = async (uitkomst) => {
     const m = _ui.modal; if (!m) return;
     const c = callOp(m.callIndex); if (!c) return;
@@ -4129,7 +4238,7 @@
           reden_code : 'zoom_geen_interesse',
           due        : vandaag(),
           notitie,
-          badge_label: 'Call ' + nl(_ui.dagView || vandaag()),
+          badge_label: 'Call ' + nl(callBadgeDag(c)),
           bron_ref   : { appointment_id: c.appointment_id || null, start: c.start || null },
           // Meteen dicht: er hoeft niets meer mee te gebeuren. De kaart bestaat
           // alleen zodat de reden bewaard blijft en terugvindbaar is.
@@ -4155,7 +4264,7 @@
         reden      : uitkomst === 'no_show' ? 'no_show_call' : 'wil_nog_beslissen',
         due        : uitkomst === 'no_show' ? vandaag() : due,
         notitie    : notitie || null,
-        badge_label: 'Call ' + nl(_ui.dagView || vandaag()),
+        badge_label: 'Call ' + nl(callBadgeDag(c)),
         bron_ref   : { appointment_id: c.appointment_id || null, start: c.start || null },
         // Alleen bij 'wil nog beslissen' een poging: dat gesprek is echt
         // gevoerd. Een no-show is géén belpoging — er is niet gebeld, er kwam
@@ -4388,6 +4497,14 @@
     zetTaken: (dag, lijst) => { _live.taken.key = dag; _live.taken.data = { taken: lijst || [], wacht: [] }; },
     zetCalls: (dag, lijst) => { _calls.key = dag; _calls.data = lijst || []; _calls.error = null; },
     zetWa: (v) => Object.assign(_wa, v),
+  };
+
+  // De achterstand van eerdere dagen, getest in
+  // tests/opvolging-achterstand-zoomcalls.test.js.
+  window.__opvAchterstandHelpers = {
+    achterstandBlok, achterstandDag, callOp, callBadgeDag,
+    zetAchterstand: (dag, lijst) => { _calls.key = dag; _calls.achterstand = lijst || []; },
+    zetCalls: (dag, lijst) => { _calls.key = dag; _calls.data = lijst || []; _calls.error = null; },
   };
 
   window.__opvWeekHelpers = {
