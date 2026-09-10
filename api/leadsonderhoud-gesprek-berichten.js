@@ -35,6 +35,17 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Geen rechten (leads.view)' });
   }
 
+  // FASE 0 — conversation_id-pad (dormant; nog geen UI roept dit aan). Geeft
+  // alleen de WhatsApp-berichten van de conv terug (geen mail-tak — een lead-
+  // loze conv heeft geen e-mail). Autorisatie: de conv staat op de
+  // leadsonderhoud-lijn. Het lead_id-pad hieronder blijft ongewijzigd (incl.
+  // 403 buiten traject).
+  const convIdQ = String(req.query.conversation_id || '').trim();
+  if (convIdQ) {
+    if (!UUID_RE.test(convIdQ)) return res.status(400).json({ error: 'conversation_id ongeldig' });
+    return threadByConversation(res, { convId: convIdQ, markRead: String(req.query.mark_as_read || '') === 'true' });
+  }
+
   const leadId = String(req.query.lead_id || '');
   if (!UUID_RE.test(leadId)) return res.status(400).json({ error: 'lead_id ontbreekt of ongeldig' });
   const markRead = String(req.query.mark_as_read || '') === 'true';
@@ -231,6 +242,68 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     console.error('leadsonderhoud-gesprek-berichten mislukt:', e.message);
+    return res.status(500).json({ error: 'Berichten laden mislukt' });
+  }
+}
+
+// FASE 0 — thread op basis van conversation_id (geen lead). Alleen WhatsApp;
+// de WA-berichten-mapping is identiek aan het lead-pad hierboven. Autorisatie:
+// de conv moet op de leadsonderhoud-lijn staan. Dormant tot fase 2.
+async function threadByConversation(res, { convId, markRead }) {
+  try {
+    const lijn = await haalLijn();
+    const { data: conv, error: convErr } = await supabaseAdmin
+      .from('whatsapp_conversations')
+      .select('id, phone_number, phone_number_id, last_inbound_at, unread_count')
+      .eq('id', convId).maybeSingle();
+    if (convErr) throw convErr;
+    if (!conv) return res.status(404).json({ error: 'Gesprek niet gevonden' });
+    if (String(conv.phone_number_id) !== String(lijn.phoneNumberId)) {
+      return res.status(403).json({ error: 'Gesprek hoort niet bij de leadsonderhoud-lijn' });
+    }
+
+    const items = [];
+    const { data: waMsgs } = await supabaseAdmin
+      .from('whatsapp_messages')
+      .select('id, direction, body, media_type, media_url, template_name, created_at')
+      .eq('conversation_id', conv.id)
+      .order('created_at', { ascending: true })
+      .limit(200);
+    for (const m of waMsgs || []) {
+      const tekst = m.body || (m.template_name ? '[sjabloon] ' + m.template_name : '')
+        || (m.media_type ? '[' + m.media_type + ']' : '') || '';
+      items.push({
+        id: 'wa:' + m.id,
+        channel: 'whatsapp',
+        direction: m.direction === 'out' ? 'out' : 'in',
+        body: tekst,
+        ts: m.created_at,
+        media_type: m.media_type || null,
+        media_url:  m.media_url || null,
+        meta: { media_type: m.media_type || null, media_url: m.media_url || null },
+      });
+    }
+    if (markRead && (conv.unread_count || 0) > 0) {
+      const { error: updErr } = await supabaseAdmin
+        .from('whatsapp_conversations').update({ unread_count: 0 }).eq('id', conv.id);
+      if (updErr) console.error('[leadsonderhoud-gesprek-berichten] mark_as_read faalde (conv):', updErr.message);
+    }
+
+    items.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    return res.status(200).json({
+      conversation: {
+        lead_id: null,
+        conversation_id: conv.id,
+        naam: conv.phone_number || 'Onbekend',
+        phone_number: conv.phone_number || null,
+        email: null,
+        can_send_text: binnenVenster(conv.last_inbound_at),
+        has_wa: true,
+      },
+      items,
+    });
+  } catch (e) {
+    console.error('leadsonderhoud-gesprek-berichten (conv) mislukt:', e.message);
     return res.status(500).json({ error: 'Berichten laden mislukt' });
   }
 }

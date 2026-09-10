@@ -802,6 +802,24 @@
     });
   }
 
+  /* ── FASE 1: rowKey — de identiteit van één lijstrij ──────────────────────
+     Alle rij-selectie/-lookup/-DOM/compose gaat voortaan via deze sleutel i.p.v.
+     rechtstreeks lead_id, zodat fase 2 lead-loze conversaties kan toevoegen
+     zonder de keying opnieuw te verbouwen. GEDRAGS-NEUTRAAL: voor een lead-rij
+     is rowKey exact het bare lead_id (identieke waarde als vóór deze refactor);
+     alleen een lead-loze conversatie (fase 2) krijgt de vorm 'conv:<uuid>'. */
+  function _lsInbRowKey(row) {
+    if (!row) return null;
+    if (row.lead_id) return String(row.lead_id);
+    if (row.conversation_id) return 'conv:' + row.conversation_id;
+    return null;
+  }
+  function _lsInbRowByKey(key) {
+    if (key == null) return null;
+    const k = String(key);
+    return _lsInb.convs.items.find(c => _lsInbRowKey(c) === k) || null;
+  }
+
   /* ── Fetchers ────────────────────────────────────────────────────────── */
   async function _lsInbFetchConvs() {
     const st = _lsInb.convs;
@@ -826,6 +844,9 @@
     _lsInb.thread._paintedFor = null;
     _lsInb.thread._markedFor = null;
   }
+  // FASE 1: `leadId` is nu de rowKey (== bare lead_id voor lead-rijen). De fetch
+  // kiest op basis van de sleutelvorm het juiste endpoint-pad; in fase 1 zijn
+  // alle rijen lead-rijen → altijd het lead_id-pad (ongewijzigd gedrag).
   async function _lsInbLoadThread(leadId) {
     if (!leadId) return;
     if (_lsInb.thread.leadId === leadId && !_lsInb.thread.error) return;
@@ -841,7 +862,11 @@
     // e-mailmodule met rust). Idempotent: 1 poging per open-actie.
     const alreadyMarked = _lsInb.thread._markedFor === leadId;
     const markParam = alreadyMarked ? '' : '&mark_as_read=true';
-    const j = await tryFetch('ls-thread ' + leadId, '/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(leadId) + markParam);
+    const _isConv = String(leadId).startsWith('conv:');
+    const _threadUrl = _isConv
+      ? '/api/leadsonderhoud-gesprek-berichten?conversation_id=' + encodeURIComponent(String(leadId).slice(5)) + markParam
+      : '/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(leadId) + markParam;
+    const j = await tryFetch('ls-thread ' + leadId, _threadUrl);
     if (seq !== _lsInb.thread._seq) return;
     if (_lsInb.thread.leadId !== leadId) return;
     if (!j) {
@@ -881,7 +906,7 @@
     // lijstrij = channel bestaat écht in de draad die je zo opent. Update
     // lokale row + het DOM badges-blok surgisch (geen render-trigger).
     try {
-      const idx2 = _lsInb.convs.items.findIndex(it => String(it.lead_id) === String(leadId));
+      const idx2 = _lsInb.convs.items.findIndex(it => _lsInbRowKey(it) === String(leadId));
       if (idx2 >= 0) {
         const hasMailReal = _lsInb.thread.items.some(m => m.channel === 'mail');
         const hasWaReal   = _lsInb.thread.items.some(m => m.channel === 'whatsapp');
@@ -903,7 +928,7 @@
     // Lokale WA-teller bijwerken + surgische DOM-patch (was mark_as_read=true).
     if (!alreadyMarked) {
       _lsInb.thread._markedFor = leadId;
-      const idx = _lsInb.convs.items.findIndex(it => String(it.lead_id) === String(leadId));
+      const idx = _lsInb.convs.items.findIndex(it => _lsInbRowKey(it) === String(leadId));
       if (idx >= 0) _lsInb.convs.items[idx] = { ..._lsInb.convs.items[idx], unread: 0 };
       const rowEl = document.querySelector('#lsInbList .ls-inb-row[data-row-id="' + String(leadId).replace(/"/g, '\\"') + '"]');
       if (rowEl) {
@@ -948,7 +973,7 @@
     // Detail-pane vervangen.
     const split = document.querySelector('.ls-inb-split');
     const oldRight = split ? split.querySelector('.ls-inb-right') : null;
-    const row = _lsInb.convs.items.find(c => String(c.lead_id) === String(id));
+    const row = _lsInbRowByKey(id);
     if (split && row) {
       const wrap = document.createElement('div');
       wrap.innerHTML = _lsInbRenderRight(row);
@@ -1013,8 +1038,9 @@
         if (el) oldRow.replaceWith(el);
       }
       // Ook de thread-header knop patchen als deze conv geopend is.
+      // FASE 1: _lsInb.thread.leadId is de rowKey; vergelijk op rowKey.
       const openLead = String(_lsInb.thread?.leadId || '');
-      if (row && openLead === String(row.lead_id)) {
+      if (row && openLead === String(_lsInbRowKey(row))) {
         const right = document.querySelector('.ls-inb-right');
         const split = document.querySelector('.ls-inb-split');
         if (right && split) {
@@ -1074,9 +1100,8 @@
     el.outerHTML = _lsInbRenderCompose();
   }
   function _lsInbCurrentConv() {
-    const leadId = _lsInb.thread.leadId;
-    if (!leadId) return null;
-    return _lsInb.convs.items.find(c => String(c.lead_id) === String(leadId)) || null;
+    // FASE 1: _lsInb.thread.leadId houdt de rowKey vast; zoek de rij daarop.
+    return _lsInbRowByKey(_lsInb.thread.leadId);
   }
 
   // ── WhatsApp reply ───────────────────────────────────────────────────
@@ -1587,7 +1612,12 @@
         }
       }
       if (_lsInb.thread.leadId) {
-        const j = await tryFetch('ls-poll-thread', '/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(_lsInb.thread.leadId));
+        // FASE 1: thread.leadId is de rowKey; kies het endpoint-pad op vorm.
+        const _pk = String(_lsInb.thread.leadId);
+        const _pollUrl = _pk.startsWith('conv:')
+          ? '/api/leadsonderhoud-gesprek-berichten?conversation_id=' + encodeURIComponent(_pk.slice(5))
+          : '/api/leadsonderhoud-gesprek-berichten?lead_id=' + encodeURIComponent(_pk);
+        const j = await tryFetch('ls-poll-thread', _pollUrl);
         if (j && Array.isArray(j.items)) {
           const seen = new Set(_lsInb.thread.items.map(x => String(x.id)));
           const additions = asArr(j.items)
@@ -1625,9 +1655,12 @@
     const tijd    = fmtDatum(row.last_activity_at);
     const preview = row.last_preview || '—';
     const ctx     = row.email || row.phone_number || '';
-    const rowIdAttr  = String(row.lead_id).replace(/"/g, '&quot;');
-    const rowIdClick = String(row.lead_id).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-    const onCls   = String(_lsInb.sel) === String(row.lead_id) ? 'on' : '';
+    // FASE 1: rij-identiteit via rowKey (== bare lead_id voor lead-rijen → waarde
+    // ongewijzigd t.o.v. voorheen). data-row-id + __lsInbSel dragen deze sleutel.
+    const rowKey     = _lsInbRowKey(row);
+    const rowIdAttr  = String(rowKey).replace(/"/g, '&quot;');
+    const rowIdClick = String(rowKey).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const onCls   = String(_lsInb.sel) === String(rowKey) ? 'on' : '';
     // Kanaal-indicatoren. BP3 v4 (2026-09-01): mail-badge verwijderd uit de
     // lijst — was ruis. WA-badge blijft omdat 'ie signaleert of Romy binnen
     // 24u-venster op WhatsApp kan reageren (relevante context voor de rij).
@@ -1793,7 +1826,7 @@
       ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Berichten laden…</div>`
       : _lsInb.thread.error
         ? `<div style="padding:22px;color:var(--rose);font-size:13px">⚠ ${esc(_lsInb.thread.error)}</div>`
-        : (!_lsInb.thread.items.length && _lsInb.thread.leadId === row.lead_id)
+        : (!_lsInb.thread.items.length && String(_lsInb.thread.leadId) === String(_lsInbRowKey(row)))
           ? `<div style="padding:22px;color:var(--text-3);font-size:13px">Nog geen berichten in deze draad.</div>`
           : '';
     return `<div class="ls-inb-right" style="display:flex;flex-direction:column;min-height:0;flex:1;background:var(--surface)">
@@ -2030,9 +2063,11 @@
     // alles gelezen was. De filter is PUUR CLIENT-SIDE; klikken op een chip
     // mag NOOIT een mark-read triggeren. Alleen expliciete rij-klik door de
     // user opent een thread (via __onbRowClick / _lsInbSelect).
-    const sel = rows.find(r => String(r.lead_id) === String(_lsInb.sel)) || null;
-    if (sel && _lsInb.thread.leadId !== sel.lead_id && !_lsInb.thread.loading) {
-      queueMicrotask(() => _lsInbLoadThread(sel.lead_id));
+    // FASE 1: selectie/thread-sleutel is de rowKey (== bare lead_id voor lead-rijen).
+    const sel = rows.find(r => String(_lsInbRowKey(r)) === String(_lsInb.sel)) || null;
+    if (sel && String(_lsInb.thread.leadId) !== String(_lsInbRowKey(sel)) && !_lsInb.thread.loading) {
+      const _selKey = _lsInbRowKey(sel);
+      queueMicrotask(() => _lsInbLoadThread(_selKey));
     }
     queueMicrotask(_lsInbPaintThread);
     queueMicrotask(_lsInbStartPoll);
