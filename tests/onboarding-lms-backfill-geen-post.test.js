@@ -458,7 +458,14 @@ test('SCHERM 3: de uitkomst toont PER KLANT wat er gebeurd is, ook bij mislukkin
     'de tabel toont de per-klant-uitkomst niet');
   assert.match(HUB, /mislukt = \/mislukt\/i\.test/,
     'een mislukte rij wordt niet als mislukt herkend');
-  assert.match(HUB, /tel\(d\.mislukt \|\| 0, 'mislukt'\)/,
+  // Op INHOUD toetsen, niet op de letterlijke uitdrukking. De `|| 0` die hier
+  // eerst stond is er met opzet uit: bij een mislukte ronde is er NIETS
+  // geteld en hoort er een streepje te staan in plaats van een 0 — vier keer
+  // nul plus een foutregel ziet er identiek uit als een geslaagde droogloop
+  // op een lege lijst. Dat gedrag wordt echt uitgevoerd en nagekeken in
+  // tests/onboarding-hub-frontend.test.js (TELLERS); hier borgen we alleen
+  // dat de teller überhaupt in de samenvatting staat.
+  assert.match(HUB, /tel\(d\.mislukt,\s*'mislukt'\)/,
     'het aantal mislukkingen staat niet in de samenvatting');
 });
 
