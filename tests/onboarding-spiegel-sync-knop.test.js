@@ -185,6 +185,10 @@ async function draai({ ids = [], aanwezig = [], spiegelUitkomst = null,
       SPIEGEL_AFWEZIG: 'afwezig', SPIEGEL_MISLUKT: 'mislukt',
       BRON_GELEZEN: 'gelezen', BRON_ONBEREIKBAAR: 'onbereikbaar',
       BRON_NIET_GECONFIGUREERD: 'niet-geconfigureerd',
+      // Een nabootsing moet ELKE export leveren die de kern importeert,
+      // anders faalt de import zelf en lijkt het of het gedrag stuk is. Komt
+      // er een export bij, dan hoort hij hier ook bij.
+      MENTOR_GEEN_IN_CRM: 'geen-mentor-in-crm',
       spiegelOnboarding: async (id) => (spiegelUitkomst
         ? spiegelUitkomst(id)
         : { resultaat: 'geschreven', bron_status: 'gelezen', fout: null }),

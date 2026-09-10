@@ -65,6 +65,13 @@ const CRM_KOLOMMEN =
   'id, customer_id, traject_id, status, archived_at, start_date, current_step, ' +
   'mentor_user_id, dfo_lms_student_id, answers';
 
+/**
+ * De reden die zegt: in het CRM staat hier gewoon nog geen mentor. Dat is
+ * GEEN mankement — het is de normale toestand van een verse onboarding. Alle
+ * andere redenen zijn dat wel, en die horen opgemerkt te worden.
+ */
+export const MENTOR_GEEN_IN_CRM = 'geen-mentor-in-crm';
+
 /** Hoort deze onboarding zichtbaar te zijn in het LMS? */
 export function hoortZichtbaarTeZijn(ob) {
   if (!ob) return false;
@@ -130,7 +137,7 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     // geschreven is. Zo bestaat een halve rij niet.
     // Het traject wordt ÉÉN keer gelezen; zowel de waiver-sleutel als het
     // aantal stappen komen uit dezelfde structuur.
-    const [betaald, wizard, dealRow, mentorId] = await Promise.all([
+    const [betaald, wizard, dealRow, mentor] = await Promise.all([
       leesEersteFactuurBetaald(ob.customer_id),
       leesWizardStructuur(),
       leesOfferteDeal(ob.customer_id),
@@ -147,7 +154,7 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
     const rij = {
       crm_onboarding_id      : ob.id,
       student_id             : ob.dfo_lms_student_id,
-      mentor_id              : mentorId,
+      mentor_id              : mentor.id,
       start_datum            : ob.start_date || null,
       wizard_stap            : Number.isFinite(Number(ob.current_step)) ? Number(ob.current_step) : null,
       wizard_stappen_totaal  : stappenTotaal,
@@ -168,7 +175,11 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       .upsert(rij, { onConflict: 'crm_onboarding_id' });
     if (upErr) throw new Error('spiegel schrijven: ' + upErr.message);
 
-    return { resultaat: SPIEGEL_GESCHREVEN, bron_status: BRON_GELEZEN, fout: null, rij };
+    // De mentor-uitkomst gaat mee naar boven, ook bij succes: de rij is
+    // geschreven, maar of daar een mentor in staat en waarom niet is een
+    // aparte vraag die de aanroeper moet kunnen beantwoorden.
+    return { resultaat: SPIEGEL_GESCHREVEN, bron_status: BRON_GELEZEN, fout: null,
+      rij, mentor };
   } catch (e) {
     const msg = e?.message || String(e);
     console.error('[onboarding-spiegel] ' + id + ': ' + msg);
@@ -264,15 +275,30 @@ async function leesOfferteDeal(customerId) {
  * er `null` en valt de student in het LMS onder "nog geen mentor".
  */
 async function leesLmsMentorId(mentorUserId) {
-  if (!mentorUserId) return null;
+  // GEEN mentor in het CRM is iets anders dan een mentor die we niet konden
+  // vertalen. Beide gaven hier `null`, en dus zag een leeg mentorveld in het
+  // LMS er identiek uit of Maxim nog niemand had toegewezen, of dat de
+  // koppeling stuk was. Op 10 september bleek dat bij 12 van de 25 rijen niet
+  // te beantwoorden zonder de databank ernaast te leggen. Vandaar de reden.
+  if (!mentorUserId) return { id: null, reden: MENTOR_GEEN_IN_CRM };
+
   const { vindDfoLmsMentorId } = await import('./dfo-lms-student.js');
   const { data, error } = await supabaseAdmin
     .from('team_members').select('user_id, email, is_active')
     .eq('user_id', mentorUserId).maybeSingle();
+  // Dit blijft gooien: een onleesbare team_members is een bronstoring en geen
+  // uitspraak over deze mentor.
   if (error) throw new Error('team_members lezen: ' + error.message);
-  if (!data?.email || data.is_active === false) return null;
+
+  if (!data)                  return { id: null, reden: 'mentor-niet-in-team_members' };
+  if (data.is_active === false) return { id: null, reden: 'mentor-niet-actief-in-crm' };
+  if (!data.email)            return { id: null, reden: 'mentor-zonder-email-in-crm' };
+
   const uitkomst = await vindDfoLmsMentorId(data.email);
-  return uitkomst?.id || null;
+  if (!uitkomst?.id) {
+    return { id: null, reden: uitkomst?.reden || 'mentor-niet-te-vertalen' };
+  }
+  return { id: uitkomst.id, reden: null };
 }
 
 /**
