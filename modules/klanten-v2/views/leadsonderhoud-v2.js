@@ -556,6 +556,9 @@
     poll: { handle: null, running: false, intervalMs: 20000 },
     // v=19: filter voor gesprekken-lijst (client-side over item.unread).
     filter: 'all',   // 'all' | 'unread' | 'read'
+    // Zoekterm (client-side over item.naam / item.phone_number, case-insensitief;
+    // digits-match voor telefoon zodat spaties/plussen niet uitmaken).
+    search: '',
   };
 
   /* ── Access-verleng-modal state (v=19) ─────────────────────────────────── */
@@ -719,6 +722,24 @@
   window.__lsInbSetFilter = (v) => {
     _lsInb.filter = String(v || 'all');
     if (window.DFO?.render) window.DFO.render();
+  };
+  // Zoek-setter: live tijdens typen. Rendert door en herstelt focus + caret
+  // op #lsInbSearch zodat de gebruiker gewoon kan doortikken. Robuust ook
+  // wanneer de 20s-poll tussendoor een render triggert.
+  window.__lsInbSetSearch = (v) => {
+    _lsInb.search = String(v == null ? '' : v);
+    const active = document.activeElement;
+    const wasSearch = !!(active && active.id === 'lsInbSearch');
+    const caret = wasSearch ? active.selectionStart : null;
+    if (window.DFO?.render) window.DFO.render();
+    if (wasSearch) {
+      requestAnimationFrame(() => {
+        const el = document.getElementById('lsInbSearch');
+        if (!el) return;
+        el.focus();
+        try { const p = caret == null ? el.value.length : caret; el.setSelectionRange(p, p); } catch (_) { /* noop */ }
+      });
+    }
   };
 
   /* ── Modal-helpers (custom confirm — geen native window.confirm) ────── */
@@ -1978,15 +1999,30 @@
       queueMicrotask(_lsInbFetchConvs);
     }
     const rowsAll = asArr(_lsInb.convs.items);
+    // Zoekterm: naam OF telefoon. Digits-only-vergelijking op telefoon zodat
+    // '06 44 64 24 95', '+31644642495' en '644642495' allemaal matchen.
+    const q = String(_lsInb.search || '').trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, '');
+    const rowsAfterSearch = !q ? rowsAll : rowsAll.filter(r => {
+      const naam  = String(r.naam || '').toLowerCase();
+      const phone = String(r.phone_number || '');
+      const phoneDigits = phone.replace(/\D/g, '');
+      if (naam.includes(q)) return true;
+      if (phone.toLowerCase().includes(q)) return true;
+      if (qDigits && phoneDigits.includes(qDigits)) return true;
+      return false;
+    });
     // v=19: client-side gelezen/ongelezen-filter over item.unread.
+    // Zoek + filter zijn onafhankelijk stapelbaar; teller-chips reflecteren
+    // altijd het zoekresultaat (na search, vóór unread/read-filter).
     const flt = _lsInb.filter || 'all';
     const rows = flt === 'unread'
-      ? rowsAll.filter(r => (r.unread || 0) > 0)
+      ? rowsAfterSearch.filter(r => (r.unread || 0) > 0)
       : flt === 'read'
-        ? rowsAll.filter(r => (r.unread || 0) === 0)
-        : rowsAll;
-    const unreadCnt = rowsAll.filter(r => (r.unread || 0) > 0).length;
-    const readCnt   = rowsAll.length - unreadCnt;
+        ? rowsAfterSearch.filter(r => (r.unread || 0) === 0)
+        : rowsAfterSearch;
+    const unreadCnt = rowsAfterSearch.filter(r => (r.unread || 0) > 0).length;
+    const readCnt   = rowsAfterSearch.length - unreadCnt;
     // v=20 KRITIEKE FIX: GEEN auto-select fallback op rows[0] bij filter-switch.
     // Voorheen ontstond een cascade: filter=unread → _lsInb.sel valt buiten
     // rows → sel=rows[0] → _lsInbLoadThread(sel) → mark_as_read=true → conv
@@ -2015,8 +2051,16 @@
           <span>Lead-gesprekken (WA + mail)</span>
           <span>${rows.length}${rows.length !== rowsAll.length ? ' / ' + rowsAll.length : ''} leads</span>
         </div>
+        <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center">
+          <input id="lsInbSearch" type="search" placeholder="Zoek op naam of telefoon…"
+                 value="${esc(_lsInb.search || '')}"
+                 oninput="window.__lsInbSetSearch(this.value)"
+                 autocomplete="off" spellcheck="false"
+                 style="flex:1;padding:5px 9px;font-size:12px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-1);outline:none">
+          ${_lsInb.search ? `<button type="button" onclick="window.__lsInbSetSearch('')" title="Wissen" style="background:none;border:none;color:var(--text-3);font-size:16px;cursor:pointer;padding:2px 6px;line-height:1">×</button>` : ''}
+        </div>
         <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;gap:5px;flex-wrap:wrap">
-          ${filterChip('all', 'Alle', rowsAll.length)}
+          ${filterChip('all', 'Alle', rowsAfterSearch.length)}
           ${filterChip('unread', 'Ongelezen', unreadCnt)}
           ${filterChip('read', 'Gelezen', readCnt)}
         </div>
