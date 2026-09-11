@@ -596,7 +596,9 @@ test('__opvBoek kiest zijn bestemming op de soort van het venster', () => {
   const bron = readFileSync(VIEW, 'utf8');
   const i = bron.indexOf('window.__opvBoek = async');
   assert.ok(i > 0);
-  const blok = bron.slice(i, i + 2400);
+  // Ruimer sinds de derde bestemming ('liever via zoom' vanaf een
+  // aanmeldkaart); de twee die deze test bewaakt zijn onveranderd.
+  const blok = bron.slice(i, i + 3400);
   assert.match(blok, /m\.soort === 'call-verzet'/);
   assert.match(blok, /appointment_id: call\.appointment_id/);
   assert.match(blok, /taak_id: m\.taakId/, 'de bestaande weg blijft');

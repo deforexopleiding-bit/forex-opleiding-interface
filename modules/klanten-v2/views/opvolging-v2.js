@@ -3594,9 +3594,32 @@
           "window.__opvAanmeldActie('bevestigd')", bezig) +
         opt('&#128172;', 'var(--o-grns)', 'Gesprek gehad', 'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.', "window.__opvAanmeldActie('gesprek_gehad')", bezig) +
         opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Kaart dicht, en in de eventmodule op Komt niet.', "window.__opvAanmeldActie('geen_interesse')", bezig) +
-        opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Kies het nieuwe event; hij staat daar meteen als bevestigd.', "window.__opvVerplaatsNaarEvent()", bezig);
+        opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Kies het nieuwe event; hij staat daar meteen als bevestigd.', "window.__opvVerplaatsNaarEvent()", bezig) +
+        // 'Liever via zoom' is GEEN afhaker, en daarom een eigen uitgang. Tot
+        // nu toe moest Dave hiervoor buiten Opvolging een zoom boeken én in de
+        // eventmodule zelf afmelden — twee administraties, en dan staat de
+        // zoom er wel en weet de aanwezigenlijst van niets.
+        opt('&#127909;', 'var(--o-accs)', 'Liever via zoom',
+          'Plan meteen een zoomcall in; hij wordt afgemeld voor het event.',
+          'window.__opvAanmeldZoom()', bezig);
       return scrim('Wat nu met ' + esc(t.naam) + '?',
         eventKopTekst(e) || 'Aanmelding', body);
+    }
+
+    // ── LIEVER VIA ZOOM ──────────────────────────────────────────────────
+    // Alleen de agenda. Geen handmatige datumkeuze: een zoomcall heeft een uur
+    // nodig, en een kale datum levert een afspraak op waar geen moment bij
+    // hoort.
+    if (m.soort === 'aanmeld-zoom') {
+      const uitleg =
+        '<div class="info">Je boekt nu een <b>zoomcall</b> op het moment dat je kiest. ' +
+        'In de eventmodule wordt ' + esc(t.naam) + ' daarna <b>afgemeld</b> voor het event, met ' +
+        'de reden <b>liever via zoom</b> &mdash; dus niet als afhaker. Deze kaart gaat dicht en ' +
+        'komt <b>niet</b> terug voor de reminder-ronde.<br><br>' +
+        'Lukt het boeken niet, dan verandert er <b>niets</b> aan het event.</div>';
+      return scrim('Liever via zoom &mdash; ' + esc(t.naam),
+        'Kies een moment voor de zoomcall.',
+        uitleg + agendaBlok({ handmatig: false }));
     }
 
     if (m.soort === 'aanmeld-actie') {
@@ -4211,6 +4234,15 @@
   };
 
   window.__opvCallAfrond = (i) => { _ui.modal = { soort: 'call-afrond', callIndex: i }; render(); };
+  window.__opvAanmeldZoom = () => {
+    const m = _ui.modal; if (!m || _ui.bezig) return;
+    // De agenda opnieuw ophalen: dit venster gaat open na een gesprek, en een
+    // slot dat bij het laden vrij was hoeft dat nu niet te zijn.
+    _agenda.data = null; _agenda.key = null; _agenda.error = null;
+    _ui.modal = { soort: 'aanmeld-zoom', taakId: m.taakId };
+    render();
+  };
+
   window.__opvCallVerzet = () => {
     const m = _ui.modal; if (!m) return;
     // De agenda opnieuw ophalen: dit venster kan uren na het vorige opengaan
@@ -4554,6 +4586,7 @@
     if (_ui.bezig) return;
 
     const verzetten = m.soort === 'call-verzet';
+    const naarZoom  = m.soort === 'aanmeld-zoom';
     const call = verzetten ? callOp(m.callIndex) : null;
     if (verzetten && !(call && call.appointment_id)) {
       opvToast('Deze call heeft geen afspraak-id, dus er is niets om te verzetten.');
@@ -4565,7 +4598,9 @@
     try {
       const antwoord = verzetten
         ? await post('/api/opvolging-agenda', { appointment_id: call.appointment_id, start: startIso })
-        : await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso });
+        : naarZoom
+          ? await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso, uitgang: 'liever_zoom' })
+          : await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso });
       _ui.modal = null;
       _agenda.data = null; _agenda.key = null;
       // leegTakenCache() leegt óók _calls, en dat is hier het punt: de oude
@@ -4577,6 +4612,17 @@
         const n = (antwoord && antwoord.kaarten_gesloten) || 0;
         opvToast('Verzet. De oude afspraak wordt niet beoordeeld.' +
           (n ? ' ' + n + ' openstaande kaart' + (n === 1 ? '' : 'en') + ' voor deze lead gesloten.' : ''));
+      }
+      if (naarZoom) {
+        // De afmelding is fail-soft aan de serverkant, en dat mag niet stil
+        // blijven: anders denkt Dave dat het event bijgewerkt is terwijl die
+        // persoon daar nog gewoon op de lijst staat.
+        const ev = antwoord && antwoord.eventmodule;
+        opvToast(ev === 'mislukt'
+          ? 'De zoomcall staat, maar afmelden in de eventmodule lukte niet. Doe dat daar even zelf.'
+          : ev === 'geen_deelnemer'
+            ? 'De zoomcall staat. Deze kaart hangt aan geen deelnemer, dus er viel niets af te melden.'
+            : 'Zoomcall geboekt en afgemeld voor het event.');
       }
     } catch (e) {
       alert((verzetten ? 'Verzetten' : 'Inplannen') + ' niet gelukt: ' + (e.message || 'onbekende fout'));

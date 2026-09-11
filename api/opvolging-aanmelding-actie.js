@@ -441,12 +441,12 @@ async function maakBevestigdeKaart({ taak, nieuweAttendeeId, doelEvent, eventDag
  *
  * @returns {Promise<'geen_deelnemer'|'bijgewerkt'|'mislukt'>}
  */
-export async function zetKomtNiet(attendeeId, nuIso, db = supabaseAdmin) {
+export async function zetKomtNiet(attendeeId, nuIso, db = supabaseAdmin, opties = {}) {
   if (!attendeeId) return 'geen_deelnemer';
   try {
     const { data: rij, error: leesErr } = await db
       .from('event_attendees')
-      .select('id, event_id, status')
+      .select('id, event_id, status, notes')
       .eq('id', attendeeId)
       .maybeSingle();
     if (leesErr) throw new Error(leesErr.message);
@@ -457,8 +457,37 @@ export async function zetKomtNiet(attendeeId, nuIso, db = supabaseAdmin) {
     const statusWijzigt = huidige === 'aangemeld' || huidige === 'wachtlijst';
     if (statusWijzigt) patch.status = 'geannuleerd';
 
+    // ── EEN AFMELDING MET EEN REDEN ──────────────────────────────────────
+    // 'Liever via zoom' is geen afhaker. Zonder eigen reden staat hij in de
+    // aanwezigenlijst naast de mensen die geen interesse hadden, en dat is een
+    // ander gesprek — ook voor de 'je inschrijving is geannuleerd'-berichten
+    // die later nog komen: die horen hier NIET af te gaan.
+    //
+    // `notes` is vrije tekst en accepteert dus zeker wat we schrijven; het
+    // gemarkeerde voorvoegsel is meteen de haak waar die automatisering later
+    // op kan filteren. `call_status` is een eigen stap hieronder, want dat is
+    // een waarde die de badge-tabellen kennen en een onbekende zou de hele
+    // update kunnen laten falen.
+    if (opties.notitieRegel) {
+      const oud = String(rij.notes || '').trim();
+      patch.notes = oud ? `${opties.notitieRegel}\n${oud}` : opties.notitieRegel;
+    }
+
     const { error } = await db.from('event_attendees').update(patch).eq('id', attendeeId);
     if (error) throw new Error(error.message);
+
+    // APART, EN FAIL-SOFT. De afmelding zelf staat nu; een call_status die de
+    // databank om welke reden ook weigert mag die niet meeslepen. Dan blijft
+    // 'komt_niet' staan — minder precies, maar niet fout.
+    if (opties.callStatus && opties.callStatus !== 'komt_niet') {
+      const { error: csErr } = await db.from('event_attendees')
+        .update({ call_status: opties.callStatus, call_status_at: nuIso })
+        .eq('id', attendeeId);
+      if (csErr) {
+        console.warn('[opvolging-aanmelding-actie] call_status ' + opties.callStatus
+          + ' (soft):', csErr.message);
+      }
+    }
 
     // Alleen bij een echte statuswijziging: er komt dan een plaats vrij, en
     // een vol event hoort weer open te gaan. Zonder wijziging is er niets
@@ -536,4 +565,36 @@ async function schrijfNotitie(taak, regel) {
 function voegRegelToe(bestaand, regel) {
   const oud = String(bestaand || '').trim();
   return oud ? `${regel}\n\n${oud}` : regel;
+}
+
+/**
+ * LIEVER VIA ZOOM — afmelden voor het event, met de juiste reden.
+ *
+ * Dave belt iemand die zich voor een masterclass heeft aangemeld en die zegt:
+ * eigenlijk heb ik liever een zoomcall. Tot nu toe moest hij dan buiten
+ * Opvolging een zoom boeken én in de eventmodule de persoon zelf afmelden —
+ * twee administraties, en precies waar het misloopt.
+ *
+ * Dit is dezelfde kern als zetKomtNiet: dezelfde statusregel (alleen
+ * 'aangemeld' en 'wachtlijst' gaan naar 'geannuleerd'), dezelfde
+ * capaciteitshook, dezelfde fail-soft. Alleen de REDEN verschilt, en dat is
+ * het hele punt — in de aanwezigenlijst mag dit niet lezen als 'geen
+ * interesse'.
+ *
+ * @param {string} attendeeId
+ * @param {string} nuIso
+ * @param {?string} momentTekst  het gekozen zoom-moment, voor de notitie
+ * @returns {Promise<'geen_deelnemer'|'bijgewerkt'|'mislukt'>}
+ */
+export const LIEVER_ZOOM_CALL_STATUS = 'liever_zoom';
+/** Het voorvoegsel waar latere automatiseringen op kunnen filteren. */
+export const LIEVER_ZOOM_MARKER = '[liever-zoom]';
+
+export async function zetLieverZoom(attendeeId, nuIso, momentTekst = null, db = supabaseAdmin) {
+  const regel = `${LIEVER_ZOOM_MARKER} ${String(nuIso).slice(0, 10)} · omgezet naar een zoomcall`
+    + (momentTekst ? ` op ${momentTekst}` : '') + ' vanuit Opvolging. Geen afhaker.';
+  return await zetKomtNiet(attendeeId, nuIso, db, {
+    callStatus   : LIEVER_ZOOM_CALL_STATUS,
+    notitieRegel : regel,
+  });
 }

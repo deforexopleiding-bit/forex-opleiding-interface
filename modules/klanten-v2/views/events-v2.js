@@ -1588,10 +1588,25 @@
     { v: 'komt_niet',     l: 'Komt niet' },
     { v: 'terugbellen',   l: 'Terugbellen' },
   ];
+
+  /**
+   * Waarden die de belstatus WEL kan hebben maar die je hier niet zelf kiest.
+   *
+   * `liever_zoom` wordt gezet door de opvolgmodule, en daar hoort méér bij dan
+   * een belstatus: de inschrijving gaat tegelijk op geannuleerd en er wordt een
+   * zoomcall geboekt. Hem in het menu zetten zou een halve handeling mogelijk
+   * maken — belstatus veranderd, inschrijving niet. Hij krijgt dus wel een
+   * nette naam, maar geen keuze.
+   */
+  const CALL_STATUS_ALLEEN_LEZEN = { liever_zoom: 'Liever via zoom' };
   function _belStatusColor(cs) {
     const s = String(cs || '').toLowerCase();
     if (s === 'bevestigd' || s === 'confirmed' || s === 'gebeld' || s === 'called' || s === 'reached') return { bg:'var(--emerald-soft)', fg:'var(--emerald)', bd:'var(--emerald-line)' };
     if (s === 'geen_gehoor' || s === 'no_answer' || s === 'voicemail' || s === 'left_message' || s === 'terugbellen') return { bg:'var(--amber-soft)', fg:'var(--amber)', bd:'var(--amber-line)' };
+    // Blauw, niet grijs: 'liever via zoom' is geen afhaker maar een omzetting.
+    // Bij komt_niet/declined staan de mensen die niet komen; deze persoon komt
+    // wél, alleen ergens anders.
+    if (s === 'liever_zoom') return { bg:'var(--blue-soft)', fg:'var(--blue)', bd:'var(--blue-line)' };
     if (s === 'komt_niet' || s === 'declined' || s === 'wrong_number' || s === 'cancelled') return { bg:'var(--slate-soft, var(--surface-2))', fg:'var(--text-2)', bd:'var(--border)' };
     return { bg:'var(--surface)', fg:'var(--text-3)', bd:'var(--border)' };
   }
@@ -1602,7 +1617,9 @@
     // Als backend enum-waarde onbekend is in onze lijst, prepend die zodat 't
     // niet magisch verandert bij render.
     const opts = CALL_STATUS_OPTIONS.slice();
-    if (cur && !opts.some((o) => o.v === cur)) opts.unshift({ v: cur, l: cur + ' (huidig)' });
+    if (cur && !opts.some((o) => o.v === cur)) {
+      opts.unshift({ v: cur, l: (CALL_STATUS_ALLEEN_LEZEN[cur] || cur) + ' (huidig)' });
+    }
     return `<select ${busy ? 'disabled' : ''} onchange="window.__evAttSetCallStatus('${esc(a.id)}','${esc(eventId)}',this.value)" style="padding:5px 8px;border:1px solid ${col.bd};background:${col.bg};color:${col.fg};border-radius:6px;font-size:12px;font-weight:500;${busy ? 'opacity:.5;cursor:wait' : 'cursor:pointer'}">
       ${opts.map((o) => `<option value="${esc(o.v)}" ${o.v === cur ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
     </select>`;
