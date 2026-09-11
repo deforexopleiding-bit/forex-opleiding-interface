@@ -63,7 +63,7 @@ export const SPIEGEL_MISLUKT    = 'mislukt';
 
 const CRM_KOLOMMEN =
   'id, customer_id, traject_id, status, archived_at, start_date, current_step, ' +
-  'mentor_user_id, dfo_lms_student_id, answers';
+  'mentor_user_id, dfo_lms_student_id, answers, completed_at';
 
 /**
  * De reden die zegt: in het CRM staat hier gewoon nog geen mentor. Dat is
@@ -71,6 +71,39 @@ const CRM_KOLOMMEN =
  * andere redenen zijn dat wel, en die horen opgemerkt te worden.
  */
 export const MENTOR_GEEN_IN_CRM = 'geen-mentor-in-crm';
+
+/**
+ * De woordenlijst voor `hlms_crm_onboarding.crm_stand`.
+ *
+ * NIET hetzelfde als hlms_student.onboarding_status — dat is een bevroren
+ * Bubble-import met zeven vrije-tekstwaarden waar niets meer aan schrijft.
+ * Zie het commentaar op de kolom in
+ * docs/sql-migrations/2026-09-11-hlms-crm-onboarding-stand.sql.
+ *
+ * `geannuleerd` en `gearchiveerd` staan hier met opzet NIET in: die
+ * onboardings hebben geen spiegelrij meer. Gemeten in api/onboarding-archive.js
+ * zet archiveren ALTIJD status én archived_at samen, dus een gearchiveerde
+ * onboarding valt sowieso al af op hoortZichtbaarTeZijn().
+ */
+export const STAND_WOORDENLIJST = Object.freeze(
+  ['aangemeld', 'bezig', 'afgerond', 'onbekend']);
+
+/**
+ * CRM-status → stand. Alles wat we niet kennen wordt `onbekend`, met een
+ * waarschuwing in het log.
+ *
+ * Bewust GEEN harde fout op een onbekende waarde: dan zou één nieuwe status
+ * in het CRM de hele spiegelrij laten mislukken, en een rij die er niet is is
+ * erger dan een stand die 'onbekend' zegt. Dezelfde afweging als bij de
+ * CHECK-constraint op de kolom.
+ */
+export function bepaalStand(status) {
+  const ruw = String(status || '').trim().toLowerCase();
+  if (STAND_WOORDENLIJST.includes(ruw) && ruw !== 'onbekend') return ruw;
+  if (ruw) console.warn('[onboarding-spiegel] onbekende CRM-status ' +
+    JSON.stringify(ruw) + ' — crm_stand op onbekend gezet');
+  return 'onbekend';
+}
 
 /** Hoort deze onboarding zichtbaar te zijn in het LMS? */
 export function hoortZichtbaarTeZijn(ob) {
@@ -156,6 +189,13 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       student_id             : ob.dfo_lms_student_id,
       mentor_id              : mentor.id,
       start_datum            : ob.start_date || null,
+      // De stand, en wanneer hij afgerond is. Een afgeronde onboarding HOUDT
+      // zijn rij (dat is de afspraak: de rij verdwijnt alleen bij annuleren
+      // of archiveren), maar tot nu zei de spiegel nergens DAT hij afgerond
+      // was. De mentorband kan daardoor lopend werk niet van afgerond werk
+      // scheiden — gemeten 11 september: 5 van de 25 rijen zijn afgerond.
+      crm_stand              : bepaalStand(ob.status),
+      afgerond_op            : ob.completed_at || null,
       wizard_stap            : Number.isFinite(Number(ob.current_step)) ? Number(ob.current_step) : null,
       wizard_stappen_totaal  : stappenTotaal,
       eerste_factuur_betaald : betaald,
