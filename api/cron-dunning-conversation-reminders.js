@@ -38,10 +38,17 @@
 //             Zonder goedgekeurde template → skip met duidelijke reden.
 //
 // Guardrails (allemaal DAADWERKELIJK geïmplementeerd — niet alleen belofte):
-//   - Office-hours: hergebruikt `isWithinOfficeHours` uit joost-autonomy-evaluate.js
-//     (exact zelfde config: office_hours_tz/days/start/end). Buiten venster:
-//     skip zonder teller-mutatie zodat de VOLGENDE tick binnen kantooruren
-//     'em alsnog stuurt (gemiste ticks laten niets vallen).
+//   - Verzendvenster: het venster van de MOTOR is leidend
+//     (`app_settings.dunning_office_hours`, default 08:00-20:00
+//     Europe/Amsterdam, via _lib/dunning-office-hours.js). Dat venster kent
+//     geen uit-knop. De Joost-config (`communication_limits`) mag daarbinnen
+//     nog verder versmallen, maar kan het niet meer openzetten — dat gat liet
+//     herinneringen tot 02:15 UTC doorlopen. Buiten venster: skip zonder
+//     teller-mutatie zodat de VOLGENDE tick 'em alsnog stuurt.
+//   - Hooguit één herinnering per KLANT per kalenderdag (Europe/Amsterdam),
+//     geteld over alle runs van die klant op de eigen
+//     `conversation_reminder_sent`-regels in dunning_log. Per klant en niet
+//     per run, omdat 30 van de 141 wanbetalers twee lopende runs hebben.
 //   - Caps: max_messages_per_conversation_per_day + _total lezen uit
 //     joost_config.autonomy_config.communication_limits, tellers uit
 //     joost_conversation_state. Bij total-cap: aanroep van
@@ -87,6 +94,12 @@ import {
   hasOpenBlockingAction,
   loadOpenActionsByCustomer,
 } from './_lib/pending-actions-guard.js';
+import {
+  isWithinOfficeHours as isWithinDunningWindow,
+  readOfficeHoursSetting,
+  officeHoursLabel,
+} from './_lib/dunning-office-hours.js';
+import { todayIsoInTz, zonedDayStartIso } from './_lib/dunning-overdue-guard.js';
 import { determineStage as _determineStageHelper } from './_lib/conv-reminder-stage.js';
 import { buildReminderTemplatePayload } from './_lib/conv-reminder-template.js';
 import { renderTemplatePreview } from './_lib/render-template-preview.js';
@@ -98,6 +111,24 @@ export { hasOpenBlockingAction, loadOpenActionsByCustomer };
 
 const ABORT_MS = 50_000;
 const MAX_RUNS_PER_TICK = 100;
+
+/**
+ * Event-type waarmee elke verstuurde no-reply-herinnering in `dunning_log`
+ * landt. Twee dingen hangen hieraan:
+ *
+ *   1. `hasReplyAfterLastSend()` in _lib/dunning-engine.js telt dit mee als
+ *      "laatste send van deze run". Zonder die regel bleef `lastSentAt` staan
+ *      op de laatste engine-aanmaning, en herkende de engine dezelfde oude
+ *      klantreactie eindeloos opnieuw als vers — de lus die Samuel Yago elke
+ *      dag een herinnering bezorgde. Zie de PR-body.
+ *   2. De lookup naar "ons laatste antwoord" sluit onze eigen vrije-tekst-r1
+ *      uit op `message_id` van deze regels.
+ *
+ * Bewust NIET `whatsapp_sent`: dat event stuurt de per-kanaal dagcap van de
+ * aanmaanmotor aan, en een gespreks-herinnering hoort daar niet in mee te
+ * tellen.
+ */
+export const REMINDER_LOG_EVENT = 'conversation_reminder_sent';
 
 function elapsed(startedAt) { return Date.now() - startedAt; }
 function nowIso() { return new Date().toISOString(); }
@@ -177,6 +208,8 @@ export async function isWithin24hWindow(supabase, convId) {
  *   stage 'rz'  → resume (2 gestuurd + stil-na-r2 >= resume_after_hours)
  *   stage 'rz_blocked' → NIET hervatten: het laatste bericht is van de klant
  *                        en onbeantwoord. Run blijft gepauzeerd.
+ *   stage 'geen_gesprek' → er is nooit een klant-bericht geweest in deze
+ *                        conversatie; niets om op te volgen.
  *   stage null  → niets doen (nog te vroeg, al voltooid, of wij hebben al geantwoord)
  *
  * `convLastOutboundAt` (optioneel — FIX B no-reply-bug): tijdstip van laatste
@@ -371,6 +404,12 @@ export default async function handler(req, res) {
     }
     const { autonomyCfg, noReplyCfg } = cfgRes;
 
+    // Verzendvenster van de MOTOR (app_settings.dunning_office_hours). Eén keer
+    // per invocatie lezen; fail-soft naar de default 08:00-20:00. Dit venster
+    // kent geen uit-knop en is vanaf nu leidend voor elke herinnering — zie
+    // GUARDRAIL 1 in processReminderRun.
+    const officeHoursCfg = await readOfficeHoursSetting(supabaseAdmin);
+
     // ── Pending gespreks-pauze runs ophalen ────────────────────────────────
     // Scope-filter (BLOK 1 · PR-scope): inner-join op customers om
     // is_test-vlag te lezen.
@@ -454,6 +493,7 @@ export default async function handler(req, res) {
       await processReminderRun({
         run,
         autonomyCfg,
+        officeHoursCfg,
         noReplyCfg,
         deps,
         dryRunOn,
@@ -512,7 +552,7 @@ export default async function handler(req, res) {
  * @param {string} args.logPrefix                      log-tag (bv. 'conv-reminder-cron' of 'sandbox-conv-reminders')
  */
 export async function processReminderRun({
-  run, autonomyCfg, noReplyCfg, deps, dryRunOn, nowMs, summary, logPrefix,
+  run, autonomyCfg, officeHoursCfg, noReplyCfg, deps, dryRunOn, nowMs, summary, logPrefix,
 }) {
   const {
     assertRecipientMatchesSandbox, sendText, sendTemplate,
@@ -532,35 +572,87 @@ export async function processReminderRun({
           return;
         }
 
-        // FIX B no-reply-bug: laatste OUTBOUND van ons in deze conv ophalen.
-        // determineStage gebruikt dit om te checken of wij al gereageerd
-        // hebben — dan géén r1/r2. Fail-soft: bij DB-fout lastOutboundMs=null
-        // → gedrag valt terug op oud (alleen last_inbound-check), fix A geeft
-        // dan alsnog dekking.
-        let lastOutboundAt = null;
+        // ONS LAATSTE INHOUDELIJKE ANTWOORD in deze conversatie.
+        //
+        // Niet de laatste outbound: een template (aanmaning, bulkronde,
+        // herinnering) is eenrichtingsverkeer en legt de bal niet terug bij de
+        // klant. Alleen vrije tekst telt — van een medewerker of van Joost, dat
+        // maakt niet uit, het is in beide gevallen een antwoord.
+        //
+        // Eén uitzondering binnen de vrije tekst: de r1-variant van deze cron
+        // zelf, die als vrije tekst uitgaat zolang het 24-uursvenster open is.
+        // Die filteren we eruit op de message_id's van onze eigen
+        // `conversation_reminder_sent`-regels in dunning_log. Zonder dat filter
+        // zou de cron via de achterdeur alsnog zijn eigen bal terugleggen.
+        //
+        // Fail-soft: bij een DB-fout blijft `lastAnswerAt` null. Dat is de
+        // veilige kant — determineStage houdt de run dan gepauzeerd in plaats
+        // van te sturen.
+        let lastAnswerAt = null;
         try {
-          const { data: outMsg } = await supabaseAdmin
+          const { data: eigenReminders } = await supabaseAdmin
+            .from('dunning_log')
+            .select('message_id')
+            .eq('run_id', run.id)
+            .eq('event_type', REMINDER_LOG_EVENT)
+            .not('message_id', 'is', null)
+            .limit(200);
+          const eigenIds = new Set((eigenReminders || []).map((r) => r.message_id));
+
+          const { data: outMsgs } = await supabaseAdmin
             .from('whatsapp_messages')
-            .select('created_at')
+            .select('id, created_at, template_name')
             .eq('conversation_id', conv.id)
             .eq('direction', 'out')
+            .is('template_name', null)          // templates tellen nooit als antwoord
             .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-          lastOutboundAt = outMsg?.created_at || null;
+            .limit(20);
+          const antwoord = (outMsgs || []).find((m) => !eigenIds.has(m.id)) || null;
+          lastAnswerAt = antwoord?.created_at || null;
         } catch (outErr) {
-          console.warn(`[conv-reminder-cron] last-outbound lookup fail-soft:`, outErr?.message || outErr);
+          console.warn(`[conv-reminder-cron] laatste-antwoord lookup fail-soft:`, outErr?.message || outErr);
+        }
+
+        // Hele kalenderdagen (Europe/Amsterdam) sinds de vorige herinnering.
+        // determineStage gebruikt dit voor r2 en rz in plaats van een rollende
+        // 24-uursklok, zodat de verzendtijd niet elke dag een kwartier
+        // opschuift en uiteindelijk de nacht in wandelt.
+        const onsLaatsteMsCron = Math.max(
+          run.paused_conversation_last_reminder_at ? Date.parse(run.paused_conversation_last_reminder_at) : 0,
+          lastAnswerAt ? Date.parse(lastAnswerAt) : 0,
+        ) || null;
+        let kalenderdagenSindsOnsBericht = null;
+        if (onsLaatsteMsCron) {
+          const dagVanOnsBericht = todayIsoInTz(new Date(onsLaatsteMsCron));
+          const vandaag          = todayIsoInTz(new Date(nowMs));
+          const verschilMs = Date.parse(`${vandaag}T00:00:00Z`) - Date.parse(`${dagVanOnsBericht}T00:00:00Z`);
+          if (Number.isFinite(verschilMs)) {
+            kalenderdagenSindsOnsBericht = Math.max(0, Math.round(verschilMs / 86400000));
+          }
         }
 
         const stage = determineStage({
           run,
           convLastInboundAt: conv.last_inbound_at,
-          convLastOutboundAt: lastOutboundAt,
+          convLastAnswerAt: lastAnswerAt,
+          kalenderdagenSindsOnsBericht,
           noReplyCfg,
           nowMs,
         });
         if (!stage) {
           summary.skipped.push({ run_id: run.id, reason: 'NOT_DUE_YET' });
+          return;
+        }
+
+        // ── Stage 'geen_gesprek': er is nooit een klant-bericht geweest ──
+        // Dan is er niets om over op te volgen. Eigen skip-reden zodat deze
+        // runs opvallen: ze staan gespreksgepauzeerd op een gesprek dat niet
+        // bestaat, en hun aanmaanladder staat daardoor stil.
+        if (stage === 'geen_gesprek') {
+          summary.skipped.push({
+            run_id: run.id,
+            reason: 'GEEN_GESPREK: conversatie zonder enig klant-bericht — niets om op te volgen, ladder staat stil',
+          });
           return;
         }
 
@@ -584,15 +676,33 @@ export async function processReminderRun({
           return;
         }
 
-        // ─── GUARDRAIL 1: office-hours ─────────────────────────────────
-        // Buiten kantooruren: skip zonder teller-mutatie zodat de volgende
+        // ─── GUARDRAIL 1: verzendvenster ───────────────────────────────
+        // Buiten het venster: skip zonder teller-mutatie zodat de volgende
         // tick binnen het venster 'em alsnog stuurt (gemiste ticks laten
-        // niets vallen — determineStage kijkt naar de tijd sinds
-        // last_inbound_at / last_reminder_at, niet naar aantal ticks).
+        // niets vallen).
+        //
+        // HET VENSTER VAN DE MOTOR IS LEIDEND — dat is de reparatie van een
+        // gat dat in productie zichtbaar werd. Deze cron hing volledig aan
+        // `joost_config.autonomy_config.communication_limits`, inclusief de
+        // schakelaar `office_hours_only`. Staat die op false (voor Joost's
+        // eigen autonomie), dan verviel het venster óók voor deze
+        // klant-herinneringen. Resultaat: reeksen die 's nachts doorliepen,
+        // tot 01:15 en 02:15 UTC — drie en vier uur 's nachts bij de klant.
+        //
+        // Het motorvenster (`app_settings.dunning_office_hours`, default
+        // 08:00-20:00 Europe/Amsterdam) kent zo'n uit-knop niet en geldt nu
+        // altijd. De Joost-config mag daarbinnen nog verder VERSMALLEN, maar
+        // kan het venster niet meer openzetten.
+        if (!isWithinDunningWindow(new Date(nowMs), officeHoursCfg)) {
+          summary.skipped.push({
+            run_id: run.id,
+            reason: `OFFICE_HOURS_CLOSED: buiten het motorvenster (${officeHoursLabel(officeHoursCfg)})`,
+          });
+          return;
+        }
         const commLimits = (autonomyCfg.communication_limits && typeof autonomyCfg.communication_limits === 'object')
           ? autonomyCfg.communication_limits : {};
-        const officeHoursOnly = commLimits.office_hours_only !== false;
-        if (officeHoursOnly) {
+        if (commLimits.office_hours_only !== false) {
           const within = isWithinOfficeHours(
             {
               tz:        commLimits.office_hours_tz   || 'Europe/Amsterdam',
@@ -603,9 +713,42 @@ export async function processReminderRun({
             new Date(nowMs),
           );
           if (!within) {
-            summary.skipped.push({ run_id: run.id, reason: 'OFFICE_HOURS_CLOSED' });
+            summary.skipped.push({ run_id: run.id, reason: 'OFFICE_HOURS_CLOSED: buiten het Joost-venster' });
             return;
           }
+        }
+
+        // ─── GUARDRAIL 1b: hooguit één herinnering per KLANT per kalenderdag ─
+        // Vangnet naast de dag-verankerde drempel in determineStage. Zelfde
+        // gedachte als de per-kanaal dagcap van de motor: het gaat over de
+        // telefoon van de klant, niet over welke run toevallig aan de beurt is.
+        //
+        // PER KLANT, niet per run. Gemeten (10 sep 2026): 30 van de 141
+        // wanbetalers hebben twee lopende runs. Op run-niveau tellen zou die
+        // groep alsnog twee herinneringen op één dag kunnen bezorgen.
+        // Fail-soft: bij een DB-fout gaan we door.
+        try {
+          const dagStart = zonedDayStartIso(todayIsoInTz(new Date(nowMs)));
+          const { data: runsVanKlant } = await supabaseAdmin
+            .from('dunning_workflow_runs')
+            .select('id')
+            .eq('customer_id', run.customer_id);
+          const runIds = (runsVanKlant || []).map((r) => r.id);
+          if (runIds.length) {
+            const { data: vandaag } = await supabaseAdmin
+              .from('dunning_log')
+              .select('id')
+              .in('run_id', runIds)
+              .eq('event_type', REMINDER_LOG_EVENT)
+              .gte('created_at', dagStart)
+              .limit(1);
+            if (vandaag && vandaag.length) {
+              summary.skipped.push({ run_id: run.id, reason: 'AL_HERINNERD_VANDAAG (klant-breed)' });
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('[conv-reminder-cron] dagcap-check fail-soft:', e?.message);
         }
 
         // ── Stage 'r1' of 'r2': render + send ──
@@ -919,6 +1062,7 @@ export async function processReminderRun({
         // '[template] naam'-label. Fail-soft: bij helper-fout returnt de
         // helper zelf al het legacy-label — send-flow breekt nooit.
         const sentAt = nowIso();
+        let sentMessageId = null;
         let previewBody;
         if (willSendAs === 'text') {
           previewBody = buildReminder1Text({
@@ -950,9 +1094,41 @@ export async function processReminderRun({
             sent_at: sentAt,
             sent_by_user_id: null,
           };
-          await supabaseAdmin.from('whatsapp_messages').insert(insertRow);
+          const { data: insertedMsg } = await supabaseAdmin
+            .from('whatsapp_messages').insert(insertRow).select('id').single();
+          sentMessageId = insertedMsg?.id || null;
         } catch (e) {
           console.warn('[conv-reminder-cron] whatsapp_messages insert fail:', e?.message);
+        }
+
+        // ── dunning_log: de herinnering is een gebeurtenis op deze run ──────
+        // Tot deze fix schreef de cron NIETS naar dunning_log. Twee dingen
+        // gingen daardoor mis:
+        //   1. `hasReplyAfterLastSend()` bepaalt de "laatste send van de run"
+        //      uit dunning_log. Die bleef staan op de laatste engine-aanmaning,
+        //      dus zag de engine dezelfde oude klantreactie telkens opnieuw als
+        //      vers, pauzeerde opnieuw en zette de teller op nul — de lus die
+        //      Samuel Yago dagelijks een herinnering bezorgde.
+        //   2. De herinneringen waren onzichtbaar in de dossiertijdlijn.
+        // Fail-soft: een mislukte log-regel mag de send niet ongedaan maken.
+        try {
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id:     run.id,
+            step_id:    null,          // een herinnering hoort bij geen enkele workflow-stap
+            message_id: sentMessageId,
+            event_type: REMINDER_LOG_EVENT,
+            payload: {
+              stage,
+              send_as:         willSendAs,
+              template_name:   willSendAs === 'template' ? templateName : null,
+              conversation_id: conv.id,
+              customer_id:     run.customer_id,
+              meta_wamid:      wamid,
+              reminder_count:  newCount,
+            },
+          });
+        } catch (e) {
+          console.warn('[conv-reminder-cron] dunning_log insert fail-soft:', e?.message);
         }
         try {
           await supabaseAdmin
