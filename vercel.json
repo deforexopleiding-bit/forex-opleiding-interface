@@ -239,6 +239,10 @@
       "schedule": "0 10,11 * * *"
     },
     {
+      "path": "/api/cron-opvolging-annuleringen",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron-brug-waakhond",
       "schedule": "*/5 * * * *"
     },
