@@ -63,7 +63,7 @@ export const SPIEGEL_MISLUKT    = 'mislukt';
 
 const CRM_KOLOMMEN =
   'id, customer_id, traject_id, status, archived_at, start_date, current_step, ' +
-  'mentor_user_id, dfo_lms_student_id, answers';
+  'mentor_user_id, dfo_lms_student_id, answers, completed_at';
 
 /**
  * De reden die zegt: in het CRM staat hier gewoon nog geen mentor. Dat is
@@ -72,11 +72,49 @@ const CRM_KOLOMMEN =
  */
 export const MENTOR_GEEN_IN_CRM = 'geen-mentor-in-crm';
 
+/**
+ * De stand zoals die in het CRM staat, LETTERLIJK.
+ *
+ * Geen vertaling, geen lower(), geen trim(), geen woordenlijst. Het woord uit
+ * `onboardings.status` gaat ongewijzigd naar `hlms_crm_onboarding.
+ * onboarding_stand`, en het LMS beslist zelf wat het met een woord doet dat
+ * het niet kent.
+ *
+ * ── WAAROM DIT BETER IS DAN VERTALEN ────────────────────────────────────
+ * Komt er in het CRM een status bij — on hold staat op de rol — dan ziet het
+ * LMS een onbekend woord en toont die rij apart: "stand onbekend, controleer
+ * in het CRM voor je belt". Bij een vertaallaag zou dat nieuwe geval
+ * stilletjes in de emmer 'loopt' of 'afgerond' vallen en zou niemand het
+ * merken. Onbekend hoort zichtbaar te zijn, niet weggemapt.
+ *
+ * Dit is bewust het TEGENOVERGESTELDE van de keuze bij product_soort in
+ * api/_lib/dfo-lms-student.js. Daar is een strikte woordenlijst juist wél
+ * goed, omdat de studentkant een onbekende waarde stil als 'onbekend' toont
+ * aan een betalende klant. Hier is de lezer een MEDEWERKER die juist moet
+ * zien dat er iets nieuws is. Wie de lezer is bepaalt of vertalen of
+ * doorgeven het veiligst is.
+ *
+ * Leeg blijft leeg: geen status in het CRM betekent geen stand hier, en niet
+ * een gok. Het LMS behandelt leeg als onbekend.
+ */
+function leesStandLetterlijk(status) {
+  return (typeof status === 'string' && status !== '') ? status : null;
+}
+
 /** Hoort deze onboarding zichtbaar te zijn in het LMS? */
+export const NIET_ZICHTBARE_STATUSSEN = Object.freeze(['geannuleerd', 'gearchiveerd']);
+
 export function hoortZichtbaarTeZijn(ob) {
   if (!ob) return false;
   if (ob.archived_at) return false;
-  return String(ob.status || '').trim().toLowerCase() !== 'geannuleerd';
+  // 'gearchiveerd' stond hier eerst NIET bij: die werd afgevangen doordat
+  // api/onboarding-archive.js status en archived_at in één patch zet. Dat is
+  // waar — nagelopen, het is de enige schrijver van die status op
+  // `onboardings` — maar het is een gevolgtrekking uit ander bestand en geen
+  // regel hier. Eén rij met status 'gearchiveerd' en een lege archived_at zou
+  // zo in het LMS belanden. Nu is het een regel.
+  return !NIET_ZICHTBARE_STATUSSEN.includes(
+    String(ob.status || '').trim().toLowerCase());
 }
 
 /**
@@ -156,6 +194,13 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       student_id             : ob.dfo_lms_student_id,
       mentor_id              : mentor.id,
       start_datum            : ob.start_date || null,
+      // De stand, en wanneer hij afgerond is. Een afgeronde onboarding HOUDT
+      // zijn rij (dat is de afspraak: de rij verdwijnt alleen bij annuleren
+      // of archiveren), maar tot nu zei de spiegel nergens DAT hij afgerond
+      // was. De mentorband kan daardoor lopend werk niet van afgerond werk
+      // scheiden — gemeten 11 september: 5 van de 25 rijen zijn afgerond.
+      onboarding_stand       : leesStandLetterlijk(ob.status),
+      afgerond_op            : ob.completed_at || null,
       wizard_stap            : Number.isFinite(Number(ob.current_step)) ? Number(ob.current_step) : null,
       wizard_stappen_totaal  : stappenTotaal,
       eerste_factuur_betaald : betaald,
