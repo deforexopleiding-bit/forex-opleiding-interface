@@ -3,8 +3,13 @@
 // GET → de takenlijst van de module Opvolging voor één dag, plus de leads die
 // op eigen initiatief zouden inplannen (status wacht_inplanning).
 //
-// Nieuw endpoint. Raakt geen enkele bestaande tabel of route aan: leest
-// uitsluitend uit opvolging_taken en opvolging_pogingen.
+// Leest uit opvolging_taken, opvolging_pogingen EN opvolging_wa_berichten.
+// Die derde kwam er op 11 september bij, en dat is geen uitbreiding maar een
+// reparatie: een bericht dat verstuurd werd vóórdat de kaart bestond heeft geen
+// rij in opvolging_pogingen — de webhook maakt die alleen als er op dat moment
+// al een taak is. Rony Van Hecke en Redouane Jerroudi kregen daardoor een kaart
+// die in zijn eigen tekst het spraakbericht van 07:16 noemde en er in dezelfde
+// adem '🎤 geen spraakbericht' bij zette. Zie de kop van _lib/opvolging-call-wa.js.
 //
 // Query:
 //   ?dag=YYYY-MM-DD   (default: vandaag)
@@ -18,8 +23,16 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { telPogingen } from './_lib/opvolging-poging-telling.js';
+import { haalWaRegelsVanaf, volledigeHistorie } from './_lib/opvolging-call-wa.js';
 
 const isoDag = (d) => new Date(d).toISOString().slice(0, 10);
+
+// ── HOE VER TERUG KIJKEN WE VOOR LOSSE BERICHTEN? ───────────────────────
+// Kaarten leven kort: de nachtelijke doorrol schuift ze door en wat afgehandeld
+// is verdwijnt naar Afgerond. Zestig dagen dekt dus ruim de hele levensloop van
+// elke kaart die nog op een lijst staat, en houdt de lezing begrensd.
+const WA_TERUG_DAGEN = 60;
+const waVanaf = () => new Date(Date.now() - WA_TERUG_DAGEN * 86400000).toISOString();
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -59,13 +72,19 @@ export default async function handler(req, res) {
         if (!perArch.has(p.taak_id)) perArch.set(p.taak_id, []);
         perArch.get(p.taak_id).push(p);
       }
+      // Ook hier, en juist hier: Afgerond is het bewijsscherm. Een kaart die
+      // daar met 'te weinig moeite' staat terwijl er 's ochtends een
+      // spraakbericht ging is een verwijt op grond van een halve meting.
+      const archWa = await leesWaRegels();
       return res.status(200).json({
         vandaag,
+        ...(archWa.melding ? { wa_melding: archWa.melding } : {}),
         archief: (arch || []).map((t) => {
           // Eén plek waar 'wat telt als moeite' staat — zie
           // _lib/opvolging-poging-telling.js. Een antwoord van de lead telt
           // niet mee: dat is het resultaat van de moeite, niet de moeite zelf.
-          return { ...t, ...telPogingen(perArch.get(t.id) || [], vandaag, isoDag) };
+          const hist = volledigeHistorie(perArch.get(t.id) || [], archWa.regels, t);
+          return { ...t, ...telPogingen(hist, vandaag, isoDag) };
         }),
       });
     }
@@ -99,7 +118,14 @@ export default async function handler(req, res) {
       perTaak.get(p.taak_id).push(p);
     }
 
-    const verrijk = (t) => ({ ...t, ...telPogingen(perTaak.get(t.id) || [], vandaag, isoDag) });
+    // De tweede bron, één keer voor het hele scherm. volledigeHistorie() voegt
+    // per kaart de losse regels van dát nummer toe; wat al een taak_id draagt
+    // blijft eruit, want daar staat de poging al. Dubbel tellen kan dus niet.
+    const wa = await leesWaRegels();
+    const verrijk = (t) => ({
+      ...t,
+      ...telPogingen(volledigeHistorie(perTaak.get(t.id) || [], wa.regels, t), vandaag, isoDag),
+    });
 
     // BP3 v32 (2026-09-04) — optionele ingepland-lijst voor Kanban 4e kolom.
     // Read-only, geen mutaties. Alleen 50 meest recent bijgewerkt.
@@ -129,6 +155,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       dag,
       vandaag,
+      // Waarom een telling mogelijk te laag is. Zwijgen zou een halve meting
+      // als hele laten lezen — precies de fout die deze PR repareert.
+      ...(wa.melding ? { wa_melding: wa.melding } : {}),
       taken: (taken || []).map(verrijk),
       wacht: (wacht || []).map(verrijk),
       ingepland,
@@ -137,4 +166,23 @@ export default async function handler(req, res) {
     console.error('[opvolging-taken]', e?.message || e);
     return res.status(500).json({ error: 'Interne fout' });
   }
+}
+
+/**
+ * De losse gespreksregels, met een melding als de lezing niet compleet is.
+ *
+ * Fail-soft: valt deze tabel weg, dan blijft de lijst werken op alleen de
+ * pogingen — de stand van vóór deze reparatie. Maar nooit stil: dan staat er
+ * bij waarom een telling te laag kan zijn.
+ */
+async function leesWaRegels() {
+  const r = await haalWaRegelsVanaf(supabaseAdmin, waVanaf());
+  let melding = null;
+  if (r.fout) {
+    melding = 'De WhatsApp-berichten waren niet te lezen (' + String(r.fout).slice(0, 120)
+      + '). Berichten van vóór het ontstaan van een kaart tellen nu niet mee.';
+  } else if (r.afgekapt) {
+    melding = 'Er zijn meer WhatsApp-berichten dan in één lezing passen; de oudste tellen mogelijk niet mee.';
+  }
+  return { regels: r.regels, melding };
 }

@@ -2310,6 +2310,19 @@
   }
 
   /**
+   * De reden waarom nabellen niet nodig was, in een zin die over NABELLEN gaat.
+   * De sleutels komen uit beoordeelNabel(); een onbekende reden gaat ongewijzigd
+   * door, want stil vervallen is erger dan een ruwe tekst.
+   */
+  const NABEL_REDEN = {
+    'geen spraakbericht': 'er ging nog geen spraakbericht',
+    'heeft geantwoord'  : 'hij antwoordde zelf',
+  };
+
+  /** Een kaart die de 12u-instroom maakte: die gaat per definitie over de call van vandaag. */
+  const isNabelKaart = (t) => !!t && t.reden === 'zoom_nabellen';
+
+  /**
    * De twee vensters op de taakkaart. Toont niets zolang de brug uitgaande
    * berichten niet kan zien: dan is 'geen spraakbericht' een bewering die we
    * niet kunnen doen.
@@ -2320,18 +2333,29 @@
     // gaan over die calls; op een aanmeldkaart hoort er niets over
     // spraakberichten te staan, en juist daar verscheen de rode 'geen
     // spraakbericht' op tien mensen tegelijk.
-    if (!heeftCallOpDag(t, dag)) return '';
+    //
+    // EEN zoom_nabellen-KAART IS DIE CALL. Hij wordt om 12:00 gemaakt juist
+    // omdat er een zoomcall van vandaag is waar niet op gereageerd is, en zijn
+    // eigen notitie noemt het spraakbericht. Hem afhankelijk maken van een
+    // tweede lezing (_calls, die van de agenda komt en er nog niet hoeft te
+    // zijn) liet de vensters dan stil weg — op precies de kaart die erover gaat.
+    if (!isNabelKaart(t) && !heeftCallOpDag(t, dag)) return '';
     const o = beoordeelDag(t, dag);
     const spraak = {
       op_tijd    : ['ok',   '&#127908; spraak ' + esc(o.spraak.tijd || '')],
       te_laat    : ['laat', '&#127908; spraak ' + esc(o.spraak.tijd || '') + ' &middot; na 09:00'],
       niet_gedaan: ['mist', '&#127908; geen spraakbericht'],
     }[o.spraak.staat];
+    // DE NABEL-CHIP ZEGT IETS OVER NABELLEN. Hij toonde de kale REDEN waarom
+    // nabellen niet nodig was, onder een telefoon-icoon: '☎ geen spraakbericht'.
+    // Dat leest als een bewering over het spraakbericht, staat pal naast de
+    // spraak-chip die hetzelfde al zegt, en op een zoom_nabellen-kaart stond
+    // het zelfs naast een notitie die het spraakbericht van 07:16 noemde.
     const nabel = {
       op_tijd    : ['ok',   '&#9742; nagebeld ' + esc(o.nabel.tijd || '')],
       te_laat    : ['laat', '&#9742; nagebeld ' + esc(o.nabel.tijd || '') + ' &middot; buiten 12&ndash;13u'],
-      niet_gedaan: ['mist', '&#9742; niet nagebeld'],
-      niet_nodig : ['nvt',  '&#9742; ' + esc(o.nabel.reden || 'niet nodig')],
+      niet_gedaan: ['mist', '&#9742; nog niet nagebeld'],
+      niet_nodig : ['nvt',  '&#9742; nabellen niet nodig &middot; ' + esc(NABEL_REDEN[o.nabel.reden] || o.nabel.reden || 'niet nodig')],
     }[o.nabel.staat];
     return '<div class="mt">' +
       '<span class="vst ' + spraak[0] + '">' + spraak[1] + '</span>' +

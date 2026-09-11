@@ -216,13 +216,33 @@ test('het dashboard rekent over dezelfde verzameling', () => {
 });
 
 test('de venster-etiketten op de kaart hangen aan een call op die dag', () => {
+  // De regel blijft: geen uitspraak over spraakberichten bij iemand zonder
+  // zoomcall. Juist daar verscheen de rode 'geen spraakbericht' ooit op tien
+  // aanmeldingen tegelijk.
+  //
+  // ÉÉN UITZONDERING, sinds 11 september: een zoom_nabellen-kaart. Die wordt om
+  // 12:00 gemaakt júist omdat er een zoomcall van vandaag is waar niet op
+  // gereageerd is, en zijn eigen notitie noemt het spraakbericht. Hem laten
+  // afhangen van _calls — een tweede lezing, die van de agenda komt en er nog
+  // niet hoeft te zijn — liet de vensters stil weg op precies de kaart die
+  // erover gaat. De uitzondering is dus geen verruiming van de regel maar een
+  // tweede manier om dezelfde voorwaarde vast te stellen.
   const bron = readFileSync(join(ROOT, 'modules/klanten-v2/views/opvolging-v2.js'), 'utf8');
   for (const naam of ['vensterBadges', 'vensterAfwijking']) {
     const i = bron.indexOf('function ' + naam + '(');
     assert.ok(i > 0, naam + ' hoort te bestaan');
-    assert.match(bron.slice(i, i + 400), /heeftCallOpDag\(t, dag\)/,
+    assert.match(bron.slice(i, i + 1400), /heeftCallOpDag\(t, dag\)/,
       naam + ' hoort alleen iets te tonen bij een lead met een call die dag');
   }
+
+  // vensterAfwijking (de rustige kaart onder een groepskop) kent de
+  // uitzondering NIET: daar staan alleen aanmeldingen, nooit een nabelkaart.
+  const iA = bron.indexOf('function vensterAfwijking(');
+  assert.doesNotMatch(bron.slice(iA, iA + 900), /isNabelKaart/);
+
+  // En de uitzondering staat er expliciet, niet als weggevallen voorwaarde.
+  const iB = bron.indexOf('function vensterBadges(');
+  assert.match(bron.slice(iB, iB + 1600), /!isNabelKaart\(t\) && !heeftCallOpDag\(t, dag\)/);
 });
 
 test('de uitleg zegt dat het over de leads met een zoomcall gaat', () => {
