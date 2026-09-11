@@ -242,3 +242,73 @@ export function nlDatum(dag, nuMs = Date.now()) {
   const zelfdeJaar = ditJaar && Number(ditJaar.dag.slice(0, 4)) === j;
   return `${d} ${MAANDEN[m - 1]}${zelfdeJaar ? '' : ' ' + j}`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE BESTEMMING VAN EEN VERZETTE AFSPRAAK — UIT DE OPVOLGER
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// agendaFeit() leest de bestemming uit `eerst_gepland_op`, en dat werkt voor de
+// ENE vorm van verzetten: dezelfde rij, scheduled_at overgezet (sander De
+// groot). Bij de ANDERE vorm — de goede, die verzetAfspraak() maakt — blijft de
+// oude rij op zijn eigen moment staan met status 'verplaatst', en woont het
+// nieuwe moment in een tweede rij met parent_appointment_id.
+//
+// Op de oude dag leverde dat 'verzet' op, zonder waarheen. Dave ziet dan wel
+// dat de call weg is, maar niet of hij morgen of over drie weken terugkomt —
+// en dat is precies het stukje dat hij nodig heeft om te weten of er nog iets
+// moet gebeuren.
+//
+// Pure functie, met de opvolgers als gewone lijst erbij. Het ophalen doet de
+// aanroeper; zo staat de regel in een test in plaats van in een query.
+
+/**
+ * Een tabel van parent-id → het moment van de opvolger.
+ *
+ * Meerdere opvolgers op dezelfde parent horen niet te bestaan, maar als het
+ * gebeurt wint de LAATSTE: dat is het moment waarop de afspraak nu staat.
+ *
+ * @param {Array} kinderen rijen met parent_appointment_id + scheduled_at
+ * @returns {Map<string,{dag:string,tijd:string}>}
+ */
+export function bestemmingPerParent(kinderen) {
+  const uit = new Map();
+  for (const k of (Array.isArray(kinderen) ? kinderen : [])) {
+    const ouder = k && k.parent_appointment_id;
+    if (!ouder) continue;
+    const m = dagEnTijd(k.scheduled_at);
+    if (!m) continue;
+    const vorige = uit.get(String(ouder));
+    if (vorige && Date.parse(k.scheduled_at) <= (vorige.ms || 0)) continue;
+    uit.set(String(ouder), { dag: m.dag, tijd: m.tijd, ms: Date.parse(k.scheduled_at) });
+  }
+  return uit;
+}
+
+/**
+ * Vult 'verzet naar …' aan op de regels waarvan de bestemming in een opvolger
+ * staat. Verandert alleen regels die AL als verzet gemarkeerd zijn — dit voegt
+ * de bestemming toe, het spreekt geen nieuw oordeel uit.
+ *
+ * @param {Array} dagen      de dagen zoals voegAgendaSamen ze oplevert
+ * @param {Map}   bestemming uit bestemmingPerParent()
+ * @returns {number} aantal aangevulde regels
+ */
+export function vulVerzetBestemming(dagen, bestemming) {
+  if (!bestemming || bestemming.size === 0) return 0;
+  let n = 0;
+  for (const d of (Array.isArray(dagen) ? dagen : [])) {
+    for (const c of ((d && d.gepland) || [])) {
+      if (!c || !c.appointment_id) continue;
+      // Alleen waar de bestemming nog ontbreekt: staat er al 'verzet naar 15
+      // september', dan komt die uit eerst_gepland_op en is hij even waar.
+      if (c.label && /verzet naar /.test(String(c.label))) continue;
+      if (String(c.label || '') !== 'verzet') continue;
+      const naar = bestemming.get(String(c.appointment_id));
+      if (!naar) continue;
+      c.label = 'verzet naar ' + nlDatum(naar.dag) + (naar.tijd ? ' om ' + naar.tijd : '');
+      c.verzet_naar = { dag: naar.dag, tijd: naar.tijd };
+      n += 1;
+    }
+  }
+  return n;
+}

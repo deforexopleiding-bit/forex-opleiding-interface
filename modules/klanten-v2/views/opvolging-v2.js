@@ -3272,7 +3272,11 @@
   // G2 heeft er nog een: '+ Lead toevoegen' máákt de taak en heeft er dus nog
   // geen. Zonder die regel sneuvelt dat venster stil op de taak-guard, precies
   // zoals de vier call-uitkomsten dat deden.
-  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst', 'tijdlijn', 'later', 'lead-nieuw']);
+  // 'call-verzet' hoort hier óók: een zoomcall heeft meestal GEEN taak — de
+  // lead boekte zelf en kwam nooit in de werklijst. Vergeten we dat, dan
+  // sneuvelt dit venster stil op de taak-guard in modalHtml(), precies zoals
+  // de vier call-uitkomsten dat ooit deden.
+  const MODAL_ZONDER_TAAK = new Set(['call-afrond', 'call-uitkomst', 'call-verzet', 'tijdlijn', 'later', 'lead-nieuw']);
   const MODAL_BALK = new Set(['tijdlijn', 'later']);
 
   /**
@@ -3464,8 +3468,34 @@
         opt('&#127881;', 'var(--o-grns)', 'Klant geworden', 'Klaar. Er komt geen taak bij.', "window.__opvCallUitkomst('klant_geworden')") +
         opt('&#129300;', 'var(--o-ambs)', 'Wil nog beslissen', 'Kies een dag en schrijf op waar hij over twijfelt.', "window.__opvCallUitkomst('wil_nog_beslissen')") +
         opt('&#128683;', 'var(--o-reds)', 'No-show', 'Kwam niet opdagen. Staat vandaag meteen terug in je lijst.', "window.__opvCallUitkomst('no_show')") +
-        opt('&#128533;', '#f0f1f4', 'Geen interesse', 'Schrijf op waarom. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_interesse')");
+        opt('&#128533;', '#f0f1f4', 'Geen interesse', 'Schrijf op waarom. Er komt geen taak bij.', "window.__opvCallUitkomst('geen_interesse')") +
+        // DE VIJFDE IS GEEN UITKOMST. De andere vier zeggen iets over een
+        // gesprek dat geweest is; deze zegt dat het gesprek nog moet komen.
+        // Daarom een eigen venster en geen __opvCallUitkomst: er wordt niets
+        // beoordeeld, er wordt verplaatst.
+        opt('&#128197;', 'var(--o-accs)', 'Opnieuw inplannen',
+          'Hij belde om te verzetten. Kies samen een nieuw moment.',
+          'window.__opvCallVerzet()');
       return scrim('Call met ' + esc(c.naam) + ' afronden', 'Wat is er uit dit gesprek gekomen?', b);
+    }
+
+    // ── OPNIEUW INPLANNEN ────────────────────────────────────────────────
+    // Alleen de agenda. De handmatige datumkeuze die onder het werklijst-
+    // venster staat hoort hier NIET: een zoomcall heeft een uur nodig, en een
+    // kale datum levert een afspraak op waar geen moment bij hoort.
+    if (m.soort === 'call-verzet') {
+      if (!c.appointment_id) {
+        return scrim('Opnieuw inplannen', esc(c.naam) + ' &middot; ' + esc(c.tijd),
+          '<div class="warn2"><b>Deze call heeft geen afspraak-id.</b> Er is dus niets om te verzetten. ' +
+          'Plan hem in vanuit je werklijst, dan hangt de nieuwe afspraak wél ergens aan.</div>');
+      }
+      const uitleg =
+        '<div class="info">De call van <b>' + esc(c.tijd) + '</b> verhuist naar het moment dat je kiest. ' +
+        'De oude afspraak blijft als <b>verzet</b> op zijn eigen dag staan en wordt <b>niet</b> beoordeeld: ' +
+        'geen no-show, geen kaart in je werklijst.</div>';
+      return scrim('Opnieuw inplannen met ' + esc(c.naam),
+        'Kies een nieuw moment in de agenda.',
+        uitleg + agendaBlok({ handmatig: false }));
     }
 
     const u = m.uitkomst;
@@ -3658,12 +3688,24 @@
    * Bezet is grijs met de naam erbij zodat zichtbaar is waaróm een moment weg
    * is; vrij is blauw en klikbaar.
    */
-  function agendaBlok() {
+  /**
+   * @param {{handmatig?:boolean}} [o] `handmatig:false` zegt dat er GEEN
+   *   datumveld onder dit blok staat. Dat verandert wat er bij een storing
+   *   moet staan: 'zet hem hieronder zelf op een dag' verwijst dan naar iets
+   *   wat er niet is, en dat is erger dan geen uitleg — je stuurt iemand naar
+   *   een knop die nergens staat.
+   */
+  function agendaBlok(o) {
+    const handmatig = !o || o.handmatig !== false;
     const van = agendaVan(), tot = agendaTot();
     if (!_agenda.data && !_agenda.loading && !_agenda.error) fetchAgenda();
 
-    const terug = _agenda.offset > 0;
-    const heen  = _agenda.offset < AGENDA_MAX_WEKEN - 1;
+    // BEZIG IS NIET ALLEEN EEN TEKSTJE. Zolang er een boeking loopt moeten de
+    // slots dood zijn: twee klikken op twee momenten leveren anders twee
+    // afspraken op, en bij verzetten een tweede keten op dezelfde lead.
+    const bezig = !!_ui.bezig;
+    const terug = _agenda.offset > 0 && !bezig;
+    const heen  = _agenda.offset < AGENDA_MAX_WEKEN - 1 && !bezig;
     const kop =
       '<div class="agh">' +
       '<button class="obtn" ' + (terug ? '' : 'disabled style="opacity:.4;cursor:default" ') +
@@ -3676,17 +3718,24 @@
     if (_agenda.loading && !_agenda.data) return kop + '<div class="agleeg">Agenda laden&hellip;</div>';
     if (_agenda.error) {
       return kop + '<div class="warn2"><b>De agenda is nu niet bereikbaar.</b> ' + esc(_agenda.error) +
-        '<br>Je kunt hem hieronder gewoon zelf op een dag zetten.</div>';
+        (handmatig
+          ? '<br>Je kunt hem hieronder gewoon zelf op een dag zetten.'
+          : '<br>Probeer het zo opnieuw. Een zoomcall heeft een uur nodig, dus een kale datum ' +
+            'is hier geen uitweg &mdash; lukt het niet, bel de lead dan even terug met een moment.') +
+        '</div>';
     }
 
     const d = _agenda.data;
     const dagen = (d && d.dagen) || [];
     const melding = d && d.melding
       ? '<div class="warn2">' + esc(d.melding) + '</div>' : '';
+    const wacht = bezig
+      ? '<div class="ronde zacht">Bezig met vastleggen&hellip;</div>' : '';
 
     const kolommen = dagen.map((dag) => {
-      const vrij = (dag.vrij || []).map((s) =>
-        '<button class="slot vrij" onclick="window.__opvBoek(\'' + esc(s.iso) + '\')">' + esc(s.tijd) + '</button>').join('');
+      const vrij = (dag.vrij || []).map((s) => bezig
+        ? '<span class="slot vrij" style="opacity:.45;cursor:default">' + esc(s.tijd) + '</span>'
+        : '<button class="slot vrij" onclick="window.__opvBoek(\'' + esc(s.iso) + '\')">' + esc(s.tijd) + '</button>').join('');
       const bezet = (dag.bezet || []).map((b) =>
         '<span class="slot bezet">' + esc(b.tijd) + '<span class="w">' + esc(b.naam) + '</span></span>').join('');
       const leeg = (!vrij && !bezet) ? '<div class="agleeg">&mdash;</div>' : '';
@@ -3694,7 +3743,12 @@
         vrij + bezet + leeg + '</div>';
     }).join('');
 
-    return kop + melding + '<div class="agw">' + kolommen + '</div>';
+    // GEEN LEEG SCHERM. Nul dagen met nul momenten is een geldig antwoord van
+    // de agenda, maar het ziet eruit als een kapot venster.
+    const niets = dagen.length === 0
+      ? '<div class="agleeg">Geen momenten in deze week. Blader naar de volgende.</div>' : '';
+
+    return kop + melding + wacht + '<div class="agw">' + kolommen + '</div>' + niets;
   }
 
   const DAGNAMEN = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
@@ -4133,6 +4187,14 @@
   };
 
   window.__opvCallAfrond = (i) => { _ui.modal = { soort: 'call-afrond', callIndex: i }; render(); };
+  window.__opvCallVerzet = () => {
+    const m = _ui.modal; if (!m) return;
+    // De agenda opnieuw ophalen: dit venster kan uren na het vorige opengaan
+    // en een slot dat toen vrij was hoeft dat nu niet te zijn.
+    _agenda.data = null; _agenda.key = null; _agenda.error = null;
+    _ui.modal = { soort: 'call-verzet', callIndex: m.callIndex };
+    render();
+  };
   window.__opvCallUitkomst = (u) => {
     const m = _ui.modal; if (!m) return;
     _ui.modal = { soort: 'call-uitkomst', callIndex: m.callIndex, uitkomst: u };
@@ -4452,20 +4514,53 @@
     render();
   };
 
+  /**
+   * Eén knop, twee bestemmingen.
+   *
+   *   soort 'inplannen'   → { taak_id }        een kaart krijgt een afspraak
+   *   soort 'call-verzet' → { appointment_id } een bestaande call verhuist
+   *
+   * De tweede tak is er omdat verzetten anders alleen via 'no-show afronden'
+   * kon, en dat is een oordeel dat niet klopt over iemand die juist belde.
+   */
   window.__opvBoek = async (startIso) => {
     const m = _ui.modal; if (!m || !startIso) return;
+    // Dubbelklik-guard. post() zet _ui.bezig zelf ook, maar pas bij de aanroep;
+    // tussen twee snelle klikken past een tweede verzoek.
     if (_ui.bezig) return;
+
+    const verzetten = m.soort === 'call-verzet';
+    const call = verzetten ? callOp(m.callIndex) : null;
+    if (verzetten && !(call && call.appointment_id)) {
+      opvToast('Deze call heeft geen afspraak-id, dus er is niets om te verzetten.');
+      return;
+    }
+    // Meteen tekenen zodat de slots dood staan vóór het verzoek vertrekt.
+    _ui.bezig = true; render();
+
     try {
-      await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso });
-      // De taak staat nu op 'ingepland' en de poging is server-side gezet;
-      // hier alleen de caches legen zodat het scherm de nieuwe stand toont.
+      const antwoord = verzetten
+        ? await post('/api/opvolging-agenda', { appointment_id: call.appointment_id, start: startIso })
+        : await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso });
       _ui.modal = null;
       _agenda.data = null; _agenda.key = null;
+      // leegTakenCache() leegt óók _calls, en dat is hier het punt: de oude
+      // call staat nu als 'verzet' op zijn eigen dag en de nieuwe verschijnt
+      // op de zijne. Zonder die verversing blijft het oude uur staan alsof er
+      // niets gebeurd is.
       leegTakenCache(); render();
+      if (verzetten) {
+        const n = (antwoord && antwoord.kaarten_gesloten) || 0;
+        opvToast('Verzet. De oude afspraak wordt niet beoordeeld.' +
+          (n ? ' ' + n + ' openstaande kaart' + (n === 1 ? '' : 'en') + ' voor deze lead gesloten.' : ''));
+      }
     } catch (e) {
-      alert('Inplannen niet gelukt: ' + (e.message || 'onbekende fout'));
+      alert((verzetten ? 'Verzetten' : 'Inplannen') + ' niet gelukt: ' + (e.message || 'onbekende fout'));
       // Het slot kan intussen bezet zijn — opnieuw ophalen zodat de week klopt.
       _agenda.data = null; _agenda.key = null; render();
+    } finally {
+      _ui.bezig = false;
+      render();
     }
   };
 

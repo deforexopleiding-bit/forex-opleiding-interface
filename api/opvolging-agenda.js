@@ -35,8 +35,11 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { verzetAfspraak, verzetBlokkade, mapGhlError as mapVerzetGhlError } from './_lib/verzet-afspraak.js';
+import { zelfdeLead } from './_lib/opvolging-annulering.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { voegAgendaSamen, dagenTussen } from './_lib/opvolging-agenda-merge.js';
+import { bestemmingPerParent, vulVerzetBestemming } from './_lib/opvolging-dagbeeld.js';
 import { dagEnTijd } from './_lib/opvolging-dagbeeld.js';
 import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
 import { leadlijstDektDag } from './_lib/opvolging-leadlijst-venster.js';
@@ -250,6 +253,12 @@ async function lees(req, res, supabase) {
 
   const dagen = voegAgendaSamen({ slots, afspraken, van, tot, timeZone: timezone });
   const vrijTotaal = dagen.reduce((n, d) => n + d.vrij.length, 0);
+
+  // WAARHEEN IS HIJ VERZET? Bij de parent/child-vorm staat het nieuwe moment in
+  // een tweede rij, buiten dit venster. Zonder deze stap leest de oude dag
+  // alleen 'verzet' — wel dat hij weg is, niet of hij morgen of over drie weken
+  // terugkomt.
+  await hangVerzetBestemming(dagen, afspraken);
 
   // De uitkomst die Dave zelf vastlegde, ook als die alleen als werklijstkaart
   // bestaat. Zie hangAfrondUitTaak — dit is de reden dat een no-show nooit
@@ -619,13 +628,34 @@ async function boek(req, res) {
   // Alleen op het boeken, niet op het lezen: de vrije momenten bekijken is
   // onschuldig, er een vastleggen is dat niet. Zonder deze regel deed de
   // schakelaar 'Agenda-afspraak boeken' in het beheerscherm helemaal niets.
+  //
+  // GEMETEN, want de opdracht vroeg om 'opvolging.taak.afronden' uit vrees dat
+  // sales het boekrecht niet heeft: in
+  // docs/sql-migrations/2026-09-04-opvolging-role-permissions.sql krijgt sales
+  // ZOWEL opvolging.taak.afronden ALS opvolging.agenda.boeken op true. De vrees
+  // gold events.attendee.create, niet dit. Daarom blijft het boekrecht staan —
+  // ook voor het verzetten hieronder, want dat is een boeking. Zou het op
+  // afronden gaan, dan boekt de knop nog steeds terwijl Jeffrey de schakelaar
+  // 'Agenda-afspraak boeken' juist heeft uitgezet.
   if (!(await requirePermission(req, 'opvolging.agenda.boeken'))) {
     return res.status(403).json({ error: 'Geen rechten (opvolging.agenda.boeken)' });
   }
   const b = req.body || {};
-  if (!b.taak_id) return res.status(400).json({ error: 'taak_id ontbreekt' });
   const start = b.start ? new Date(b.start) : null;
   if (!start || isNaN(start.getTime())) return res.status(400).json({ error: 'start (ISO) ontbreekt of is ongeldig' });
+
+  // TWEE INGANGEN, ÉÉN RECHT.
+  //
+  //   taak_id        — de werklijst: een kaart krijgt een afspraak.
+  //   appointment_id — het afrondvenster: een BESTAANDE call wordt verzet.
+  //
+  // De tweede kwam erbij omdat een lead die op de dag zelf belt om te
+  // verzetten anders alleen via 'no-show afronden' te verplaatsen was. Dat
+  // levert een valse no-show op in het rapport en een overbodige kaart in de
+  // werklijst, en allebei kloppen ze niet: hij kwam niet niet-opdagen, hij
+  // belde.
+  if (b.appointment_id) return await verzetCall(req, res, b, start);
+  if (!b.taak_id) return res.status(400).json({ error: 'taak_id of appointment_id ontbreekt' });
 
   let taak;
   try {
@@ -757,4 +787,167 @@ async function zoekLeadVoorTaak(taak) {
     owner_id  : taak.eigenaar_id || null,
     source_ref: taak.bron_ref || {},
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST · EEN BESTAANDE CALL VERZETTEN VANUIT HET AFRONDVENSTER
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ── HET PROBLEEM DAT DIT OPLOST ─────────────────────────────────────────
+// Een lead met een zoomcall vandaag belt Dave om 09:40 dat het niet lukt.
+// Tot nu toe kon Dave alleen herplannen via 'Wat nu? → Opnieuw inplannen' op
+// een werklijstkaart — en die kaart bestaat pas NADAT hij de call als no-show
+// heeft afgerond. Twee dingen die niet waar zijn: een no-show in het rapport,
+// en een kaart 'hij kwam niet opdagen' in de werklijst.
+//
+// ── WAT HET WEL DOET ────────────────────────────────────────────────────
+// Precies wat de cockpit doet: verzetAfspraak(). Oude rij op 'verplaatst',
+// nieuwe rij met parent_appointment_id, GHL blokkerend-eerst zodat er geen
+// spookafspraak op het oude uur blijft staan. GEEN uitkomst, GEEN no-show,
+// GEEN nieuwe kaart.
+//
+// ── EN WAT ER DICHTGAAT ─────────────────────────────────────────────────
+// Staat er voor deze lead al een open kaart die zegt 'plan hem opnieuw in'
+// (zoom_geannuleerd, no_show_call, zoom_nabellen), dan is die opdracht zojuist
+// uitgevoerd. Die kaart laten staan is dezelfde valse taak als in PR 8: Dave
+// belt iemand op om iets te regelen wat al geregeld is.
+const VERZET_SLUIT_REDENEN = ['zoom_geannuleerd', 'no_show_call', 'zoom_nabellen'];
+/** De statussen waarin een kaart nog werk is. Gelijk aan cron-opvolging-annuleringen. */
+const KAART_LOPEND = ['open', 'wacht_inplanning'];
+const VERZET_ARCHIEF_REDEN = 'opnieuw ingepland vanuit het afrondvenster';
+
+async function verzetCall(req, res, b, start) {
+  let afspraak;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('follow_up_appointments').select('*').eq('id', b.appointment_id).maybeSingle();
+    if (error) throw error;
+    afspraak = data;
+  } catch (e) {
+    console.error('[opvolging-agenda] afspraak lezen:', e?.message || e);
+    return res.status(500).json({ error: 'De afspraak kon niet gelezen worden' });
+  }
+  if (!afspraak) return res.status(404).json({ error: 'Afspraak niet gevonden' });
+
+  // Niet elke status is te verzetten, en de reden hoort leesbaar te zijn —
+  // 'er ging iets mis' laat Dave gokken wat hij nu moet doen.
+  const blokkade = verzetBlokkade(afspraak);
+  if (blokkade) return res.status(409).json({ error: blokkade });
+
+  let uit;
+  try {
+    uit = await verzetAfspraak({
+      supabaseAdmin,
+      afspraak,
+      nieuwStartIso: start.toISOString(),
+      duurMinuten  : afspraak.duration_minutes || DUUR_MIN,
+      doorUserId   : null,
+      bron         : 'opvolging-afronden',
+    });
+  } catch (e) {
+    if (e?.code === 'GHL_UPDATE') {
+      console.error('[opvolging-agenda] verzet GHL:', e.ghlStatus, e.ghlBody);
+      return res.status(422).json({ error: mapVerzetGhlError(e.ghlStatus, e.ghlBody), ghl_status: e.ghlStatus });
+    }
+    // De databanktekst blijft in het log. Wat Dave leest is een zin waar hij
+    // iets mee kan — 'duplicate key value violates unique constraint' leest
+    // als 'het systeem is stuk' en vertelt hem niet wat hij nu moet doen.
+    console.error('[opvolging-agenda] verzet:', e?.code || '', e?.message || e);
+    return res.status(500).json({
+      error: 'Verzetten is niet gelukt. De afspraak staat nog op zijn oude moment; probeer het opnieuw.',
+    });
+  }
+
+  // De kaarten pas NA een geslaagde verzetting. Andersom zou een mislukte
+  // GHL-call een kaart sluiten waarvan de opdracht nog gewoon openstaat.
+  const gesloten = await sluitKaartenNaVerzet(afspraak);
+
+  return res.status(200).json({
+    success: true,
+    verzet : {
+      appointment_id       : afspraak.id,
+      nieuw_appointment_id : uit.nieuweAfspraak.id,
+      van                  : afspraak.scheduled_at,
+      naar                 : uit.nieuweAfspraak.scheduled_at,
+      ghl_bijgewerkt       : uit.ghlBijgewerkt,
+      zoom_bijgewerkt      : uit.zoomBijgewerkt,
+    },
+    kaarten_gesloten: gesloten,
+  });
+}
+
+/**
+ * Sluit de open kaarten die door deze verzetting hun opdracht verliezen.
+ *
+ * Twee manieren om bij dezelfde lead te komen, want een kaart kan uit deze
+ * afspraak zijn ontstaan (bron_ref.appointment_id) óf gewoon op het nummer
+ * staan. zelfdeLead() is dezelfde matching als de annuleringen-cron gebruikt:
+ * GHL-contact eerst, dan het genormaliseerde nummer.
+ *
+ * Fail-soft per kaart: de verzetting is al gelukt en die mag hier niet meer
+ * sneuvelen. Maar nooit stil — elke misser komt in het log.
+ */
+async function sluitKaartenNaVerzet(afspraak) {
+  let kaarten = [];
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, telefoon, status, reden, bron_ref')
+      .in('status', KAART_LOPEND)
+      .in('reden', VERZET_SLUIT_REDENEN)
+      .limit(500);
+    if (error) throw new Error(error.message);
+    kaarten = data || [];
+  } catch (e) {
+    console.warn('[opvolging-agenda] kaarten lezen na verzet (soft):', e?.message || e);
+    return 0;
+  }
+
+  const raak = kaarten.filter((k) => {
+    const uitDezeAfspraak = k.bron_ref && String(k.bron_ref.appointment_id || '') === String(afspraak.id);
+    return uitDezeAfspraak || zelfdeLead(afspraak, k);
+  });
+
+  let n = 0;
+  for (const k of raak) {
+    try {
+      const nu = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('opvolging_taken').update({
+        status         : 'gearchiveerd',
+        archief_reden  : VERZET_ARCHIEF_REDEN,
+        gearchiveerd_at: nu,
+        updated_at     : nu,
+      }).eq('id', k.id).in('status', KAART_LOPEND);
+      if (error) throw new Error(error.message);
+      n += 1;
+    } catch (e) {
+      console.warn('[opvolging-agenda] kaart sluiten na verzet (soft):', k.id, e?.message || e);
+    }
+  }
+  return n;
+}
+
+/**
+ * Hangt de bestemming aan de regels die als 'verzet' gemarkeerd staan.
+ *
+ * De opvolger ligt per definitie BUITEN het gevraagde venster (anders was hij
+ * niet verzet), dus die moet apart gelezen worden. Fail-soft: zonder deze
+ * lezing blijft het label gewoon 'verzet' — minder, maar niet fout.
+ */
+async function hangVerzetBestemming(dagen, afspraken) {
+  const verzet = (afspraken || [])
+    .filter((a) => String((a && a.status) || '').toLowerCase() === 'verplaatst')
+    .map((a) => String(a.id));
+  if (verzet.length === 0) return;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id, parent_appointment_id, scheduled_at')
+      .filter('parent_appointment_id', 'in', inLijst(verzet))
+      .limit(500);
+    if (error) throw new Error(error.message);
+    vulVerzetBestemming(dagen, bestemmingPerParent(data || []));
+  } catch (e) {
+    console.warn('[opvolging-agenda] verzet-bestemming (soft):', e?.message || e);
+  }
 }
