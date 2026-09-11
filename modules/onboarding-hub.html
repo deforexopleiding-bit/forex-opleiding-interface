@@ -644,6 +644,39 @@
           : tel(d.mislukt, 'mislukt'))
       + '</div>';
 
+    // ── De mentor apart ────────────────────────────────────────────────
+    // Een leeg mentorveld heeft twee betekenissen en die horen niet op één
+    // hoop: nog niemand toegewezen in het CRM (normaal), of wel toegewezen
+    // maar niet te vertalen naar hlms_personeel (mankement).
+    if (gemeten && !dry) {
+      html += '<div style="background:var(--bg-elev);border:1px solid var(--border);'
+        + 'border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px">'
+        + '<div style="margin-bottom:6px"><strong>Mentor</strong></div>'
+        + tel(d.mentor_gespiegeld, 'met mentor')
+        + tel(d.mentor_geen_in_crm, 'nog geen mentor in het CRM')
+        + (d.mentor_niet_vertaald
+            ? '<span style="color:var(--rose)"><strong>' + d.mentor_niet_vertaald
+              + '</strong> wel in het CRM, niet te koppelen</span>'
+            : tel(0, 'wel in het CRM, niet te koppelen'))
+        + '</div>';
+
+      const open = Array.isArray(d.mentor_open) ? d.mentor_open : [];
+      if (open.length) {
+        html += '<div style="font-size:13px;margin-bottom:12px">'
+          + '<div style="margin-bottom:6px"><strong>Mentor wél toegewezen, '
+          + 'maar niet gekoppeld</strong></div>'
+          + '<table style="width:100%;border-collapse:collapse;font-size:12.5px">';
+        for (const r of open) {
+          html += '<tr style="border-top:1px solid var(--border)">'
+            + '<td style="padding:6px 8px 6px 0;white-space:nowrap;color:var(--text-2)">'
+            + esc(r.onboarding_id || '—') + '</td>'
+            + '<td style="padding:6px 0;color:var(--rose)">' + esc(r.reden || '') + '</td>'
+            + '</tr>';
+        }
+        html += '</table></div>';
+      }
+    }
+
     if (d.error) {
       html += '<div style="background:var(--rose-soft);border:1px solid var(--rose-line);'
         + 'color:var(--rose);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">'

@@ -32,6 +32,7 @@ import {
   spiegelOnboarding, SPIEGEL_TABEL,
   SPIEGEL_GESCHREVEN, SPIEGEL_VERWIJDERD, SPIEGEL_AFWEZIG,
   BRON_GELEZEN, BRON_ONBEREIKBAAR, BRON_NIET_GECONFIGUREERD,
+  MENTOR_GEEN_IN_CRM,
 } from './onboarding-spiegel.js';
 
 // Bij ~50 actieve onboardings is dit ruim. Wordt het ooit meer, dan telt
@@ -54,6 +55,16 @@ export async function draaiSpiegelSync({ dry = false, door = 'cron' } = {}) {
     bron: 'onboardings', bron_status: null,
     verwacht: 0, aanwezig: 0,
     geschreven: 0, verwijderd: 0, afwezig: 0, mislukt: 0,
+    // ── DE MENTOR APART ────────────────────────────────────────────────
+    // Een leeg mentorveld in het LMS heeft twee heel verschillende
+    // betekenissen: er is er nog geen toegewezen in het CRM (normaal), of
+    // er staat er wel een maar we konden 'm niet vertalen naar
+    // hlms_personeel (mankement). Allebei schreven ze NULL, en dus was het
+    // verschil niet te zien zonder de twee databanken naast elkaar te
+    // leggen. Nu telt het apart, en de niet-vertaalbare gevallen komen met
+    // naam en reden mee.
+    mentor_gespiegeld: 0, mentor_geen_in_crm: 0, mentor_niet_vertaald: 0,
+    mentor_open: [],
     overtollig_verwijderd: 0,
     overgeslagen_door_limiet: 0,
     errors: [],
@@ -118,6 +129,24 @@ export async function draaiSpiegelSync({ dry = false, door = 'cron' } = {}) {
       if (dry) continue;
       try {
         const uit = await spiegelOnboarding(id);
+
+        if (uit.mentor) {
+          if (uit.mentor.id) {
+            result.mentor_gespiegeld++;
+          } else if (uit.mentor.reden === MENTOR_GEEN_IN_CRM) {
+            result.mentor_geen_in_crm++;
+          } else {
+            // Hier staat in het CRM WEL een mentor. Dat dit misgaat is een
+            // mankement en hoort niet stil te blijven.
+            result.mentor_niet_vertaald++;
+            console.warn('[spiegel-sync/' + door + '] mentor niet vertaald voor '
+              + id + ': ' + uit.mentor.reden);
+            if (result.mentor_open.length < MAX_ERRORS) {
+              result.mentor_open.push({ onboarding_id: id, reden: uit.mentor.reden });
+            }
+          }
+        }
+
         if      (uit.resultaat === SPIEGEL_GESCHREVEN) result.geschreven++;
         else if (uit.resultaat === SPIEGEL_VERWIJDERD) result.verwijderd++;
         else if (uit.resultaat === SPIEGEL_AFWEZIG)    result.afwezig++;
@@ -160,7 +189,11 @@ export async function draaiSpiegelSync({ dry = false, door = 'cron' } = {}) {
 
     console.log('[spiegel-sync/' + door + '] klaar — verwacht=' + result.verwacht
       + ' geschreven=' + result.geschreven + ' mislukt=' + result.mislukt
-      + ' verwijderd=' + result.overtollig_verwijderd + (dry ? ' (droogloop)' : ''));
+      + ' verwijderd=' + result.overtollig_verwijderd
+      + ' mentor(gespiegeld/geen-in-crm/niet-vertaald)='
+      + result.mentor_gespiegeld + '/' + result.mentor_geen_in_crm + '/'
+      + result.mentor_niet_vertaald
+      + (dry ? ' (droogloop)' : ''));
 
     return { status: 200, result };
   } catch (e) {
