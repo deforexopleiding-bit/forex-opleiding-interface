@@ -3843,6 +3843,10 @@
 
     // 1) Meteen uit beeld, en onthouden dat we dit wilden — zodat een
     //    verversing die al onderweg was de badge niet terugzet.
+    //
+    //    Dit eerste stempel dekt de verversingen die vóór de klik begonnen.
+    //    Het wordt hieronder OPNIEUW gezet zodra de server bevestigt; zie daar
+    //    waarom dat geen overbodige regel is.
     const patch = U ? U.gelezenPatch() : { unread_count: 0, email_unread_count: 0, total_unread: 0 };
     const voor  = _wbxPatchUnreadRow(convId, patch);
     if (U) U.onthoud(_ui.inbox.unreadIntents, convId, patch, Date.now());
@@ -3870,6 +3874,22 @@
       _toast(`Markeren als gelezen mislukt (${welk}): ` + (waResp.error || mailResp.error), 'error');
       return false;
     }
+
+    // 3) HER-STEMPELEN. Het eerste stempel draagt het moment waarop het
+    //    schrijven BEGON, en dat is te vroeg: een verversing die tijdens de
+    //    POSTs startte heeft de nieuwe stand nog niet en wint dan van de
+    //    intentie. Afgespeeld: klik op t=1 (stempel 1), poll begint op t=2,
+    //    server commit op t=2,5, antwoord binnen op t=3 met de oude waarde en
+    //    fetchStartMs=2. De test `intentie.at > fetchStartMs` is 1 > 2, dus
+    //    onwaar — badge weer aan, tot de reconcile hem anderhalve seconde
+    //    later alsnog weghaalt. Geen blijvende fout, wél precies de flikkering
+    //    die we hier aan het opruimen zijn.
+    //
+    //    Met het tweede stempel betekent de intentie wat hij hoort te
+    //    betekenen: vanaf wanneer de server het zeker weet. Hij verliest dan
+    //    alleen nog van een verversing die dáárna begon, en dat is terecht —
+    //    die kan echt nieuwe post bevatten.
+    if (U) U.onthoud(_ui.inbox.unreadIntents, convId, patch, Date.now());
 
     if (!stil) _toast('Gemarkeerd als gelezen.', 'success');
     _wbxScheduleUnreadReconcile();
@@ -3913,6 +3933,10 @@
       _toast('Markeren als ongelezen mislukt: ' + r.error, 'error');
       return;
     }
+    // Zelfde her-stempeling als bij mark-read: het stempel van vóór de POST
+    // verliest van een verversing die tijdens het schrijven begon.
+    if (U) U.onthoud(_ui.inbox.unreadIntents, convId, patch, Date.now());
+
     const mails = Number(row?.email_unread_count) || 0;
     _toast(mails > 0
       ? 'Gemarkeerd als ongelezen (WhatsApp; de e-mailteller blijft staan).'
@@ -7429,7 +7453,7 @@
   console.debug('[wanbetalers-v2] v=34 BROK WB-FIX-5: (#1) Volgende-badge mapt nu op ECHTE overzicht-velden next_action_step_type (email/whatsapp/wait/task/stop/resume_dunning) + next_action_step_title heuristiek (Bel/Brief/Incasso/Herinnering). Voorheen: mijn code checkte non-bestaande velden -> altijd "Actie"-fallback. (#2) MANUAL_FOLLOWUP-splitting op payload.kind: kind=call -> "📞 Belafspraak" (Bel-knop OK), kind=letter -> "✉ Brief-taak" (Bel-knop weg, "Naar brief-flow"-knop naar SURFACE B WIK-card), kind=other -> "📝 Follow-up". Fallback: title-regex (bv. "Stuur WIK-14-dagenbrief" -> letter). Groepering ook via effectieve type — brief-taken en bel-taken vallen nu in APARTE groepen. Ook: MANUAL_PROPOSE_ARRANGEMENT label naar "Regeling voorstellen" (v1-parity, was "Arrangement voorstellen").');
   console.debug('[wanbetalers-v2] v=33 BROK WB-POLISH-4: dead-code cleanup — gesprekkenView + _gspListInnerHtml + _gspDetailHtml body volledig verwijderd (~180 regels dood-code weg). _repaintGspList + _repaintGspDetail zijn no-op stubs (callers _fetchCallLog/_fetchTimeline/__wbxCallSave/__wbxCallSet* + __wbxNoteSave triggeren nu geen render meer; case-sheet SURFACE B doet z\'n eigen repaint). __wbxCallSet*/__wbxGspSelect/__wbxGspSearch* blijven als window-refs (geen callers meer; volgende cleanup-brok kan die schrappen).');
   console.debug('[wanbetalers-v2] v=32 BROK WB-POLISH-3: arrangement-detail drawer. Body-level right-slide (760px) + scrim + Escape. Data via /api/arrangements-detail?id=X. Secties: header (type — klant + status-pill), Arrangement kv-grid (type/status/dates/reden), Facturen-lijst (indien invs), Pending actions-tabel, footer met ✕ Annuleer (danger, delegates naar __wbxArrCancel voor ACTIEF/VOORGESTELD). Klik op Actieve arrangementen-rij (actiesView) opent drawer; cancel-btn heeft event.stopPropagation.');
-  console.debug('[wanbetalers-v2] v=34 GELEZEN BLIJFT GELEZEN: het automatisch markeren bij openen gebruikt nu hetzelfde pad als de knop (inbox-mark-read + inbox-email-mark-read met IMAP en cache-invalidatie) in plaats van email-actions, dat alleen een auditrij schreef. Beide paden delen _wbxMarkConversationRead. Mislukte aanroepen worden niet meer weggegooid maar zetten de badge terug en tonen een fout. Markeer-intenties in shared/inbox-unread.js winnen van een verversing die al onderweg was, zodat de 6s-poll de nul niet terugdraait. Mark-unread is eerlijk WhatsApp-only en vervalst de e-mailteller niet meer.');
+  console.debug('[wanbetalers-v2] v=54 GELEZEN BLIJFT GELEZEN: het automatisch markeren bij openen gebruikt nu hetzelfde pad als de knop (inbox-mark-read + inbox-email-mark-read met IMAP en cache-invalidatie) in plaats van email-actions, dat alleen een auditrij schreef. Beide paden delen _wbxMarkConversationRead. Mislukte aanroepen worden niet meer weggegooid maar zetten de badge terug en tonen een fout. Markeer-intenties in shared/inbox-unread.js winnen van een verversing die al onderweg was, zodat de 6s-poll de nul niet terugdraait. Mark-unread is eerlijk WhatsApp-only en vervalst de e-mailteller niet meer.');
   console.debug('[wanbetalers-v2] v=33 TOEZEGGING: extra type in de afsprakenwizard (Toezegging = betaalafspraak). Klein formulier (facturen + datum + optioneel bedrag + toelichting) -> payment_arrangement type TOEZEGGING, direct ACTIEF, geen pending_actions, geen TL-mutatie, geen approval. Pauze via bestaande paused_by_arrangement_id; bewaking via cron-arrangements-breach-check + workflow "Betaalafspraak verbroken". Zichtbaar in overzichtsrij (toezegging tot datum), case-sheet-badge en een eigen kaart bovenaan het dossier. De bestaande knop Betaalafspraak (logregel) is NIET aangeraakt.');
   console.debug('[wanbetalers-v2] v=31 BROK WB-POLISH-2: pipeline multi-select — checkbox per kaart, shift-klik range binnen dezelfde fase, bulk-bar met count + fase-picker + Verplaats-knop. Typ-to-confirm "VERPLAATS" (of "TERMINAAL" bij opgelost/afschrijven met extra rood-danger-hint "motor stopt voor N klanten"). Race-guard per cid (stageBusy) + globale pipeBulkBusy. Skip no-ops (klant al in target-fase). Invalidate overzicht na move -> kolom-tellingen updaten zonder scroll-reset.');
   console.debug('[wanbetalers-v2] v=30 BROK WB-POLISH-1: overzicht klikbare kolom-headers (open/dagen/fase/next/name sort, asc/desc toggle, next-null onderaan). Brieven: zoek-input (naam/e-mail 200ms debounce), select-all in header (per zichtbare filter), bulk-verwijderen met typ-to-confirm "VERWIJDER".');

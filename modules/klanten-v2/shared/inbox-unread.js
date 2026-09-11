@@ -101,6 +101,15 @@
    * Verlopen intenties (ouder dan een minuut) worden opgeruimd zodat een
    * gesprek nooit voorgoed op "gelezen" blijft hangen.
    *
+   * Let op bij de opruiming: die loopt over ALLE intenties, ook die van
+   * gesprekken die niet in `rows` zitten. Dat gebeurt zodra er een zoekterm of
+   * een statusfilter aanstaat — de server geeft dan een kleinere lijst terug.
+   * Zo'n intentie wordt dus opgeruimd zonder dat we de bijbehorende rij hebben
+   * kunnen corrigeren. Vandaag geen bug: de rij staat niet in beeld, en de
+   * reconcile anderhalve seconde later haalt de echte stand alsnog op. Het is
+   * wel een stille aanname, dus als hier ooit iets vreemds gebeurt met een
+   * filter aan: hier zit het.
+   *
    * @param {object[]} rows            rijen zoals de server ze teruggaf
    * @param {number}   fetchStartMs    tijdstip waarop die fetch begon
    * @param {object}   intenties       { [convId]: { patch, at } } — wordt opgeruimd

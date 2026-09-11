@@ -191,3 +191,80 @@ test('bij een mislukking wordt de badge teruggezet', () => {
   assert.match(blok, /vergeet\(_ui\.inbox\.unreadIntents/);
   assert.match(blok, /_toast\(`Markeren als gelezen mislukt/);
 });
+
+// ── 5. De poll die TIJDENS het schrijven begint ──────────────────────
+//
+// Maxim vond dit bij het nalezen van de diff, en hij had gelijk. Het stempel
+// stond vóór de twee POSTs. Daarmee draagt de intentie het moment waarop het
+// schrijven BEGON, terwijl hij hoort te dragen vanaf wanneer de server de
+// nieuwe stand kent. Een verversing die tussen die twee momenten begint, haalt
+// data op die het markeren nog niet bevat — en wint, want `at > fetchStartMs`
+// is dan onwaar. De badge ging uit, weer aan, en anderhalve seconde later door
+// de reconcile weer uit. Niet blijvend fout, wél precies de flikkering die we
+// hier aan het opruimen zijn.
+//
+// De klok in deze tests, in milliseconden:
+//
+//   t=1     klik; eerste stempel
+//   t=2     de poll vertrekt  (fetchStartMs = 2)
+//   t=2,5   de server verwerkt het markeren
+//   t=3     het pollantwoord komt binnen, met de oude waarde
+//
+// Het antwoord van t=3 is niet fout — het is gewoon ouder dan het lijkt.
+
+/**
+ * Speelt die volgorde af zoals de view hem uitvoert.
+ * @param {boolean} herStempelen zet het tweede stempel (de fix)
+ */
+function speelVolgordeAf(U, herStempelen) {
+  const intenties = {};
+  const patch     = U.gelezenPatch();
+  const rij       = { id: 'conv-1', unread_count: 0, email_unread_count: 1, total_unread: 1 };
+
+  U.onthoud(intenties, 'conv-1', patch, 1);   // klik
+  U.pasToe(rij, patch);                       // optimistisch uit beeld
+
+  const fetchStartMs = 2;                     // de poll vertrekt tijdens het schrijven
+  const vanServer    = [{ id: 'conv-1', unread_count: 0, email_unread_count: 1, total_unread: 1 }];
+
+  if (herStempelen) U.onthoud(intenties, 'conv-1', patch, 2.5);  // beide responses ok
+
+  const na = U.applyServerRows(vanServer, fetchStartMs, intenties, 3);
+  return U.badge(na[0]);
+}
+
+test('een poll die tijdens het schrijven vertrekt zet de badge niet terug', () => {
+  const U = laadHelper();
+  assert.equal(speelVolgordeAf(U, true), 0,
+    'na het her-stempelen hoort de badge uit te blijven');
+});
+
+test('zonder het tweede stempel flikkert hij — daarom staat die regel er', () => {
+  const U = laadHelper();
+  assert.equal(speelVolgordeAf(U, false), 1,
+    'dit is de fout die het her-stempelen verhelpt; faalt deze test niet meer, '
+    + 'dan is de bescherming ergens anders vandaan gekomen en mag dit weg');
+});
+
+test('markeren als gelezen stempelt opnieuw nadat beide responses ok zijn', () => {
+  const i    = VIEW.indexOf('async function _wbxMarkConversationRead');
+  const eind = VIEW.indexOf('function _wbxScheduleUnreadReconcile');
+  const blok = VIEW.slice(i, eind);
+
+  const naCheck = blok.slice(blok.indexOf('if (!waResp.ok || !mailResp.ok)'));
+  assert.match(naCheck, /onthoud\(_ui\.inbox\.unreadIntents, convId, patch, Date\.now\(\)\)/,
+    'het stempel van vóór de POSTs draagt het verkeerde moment; er hoort er één ná te staan');
+
+  const stempels = blok.match(/onthoud\(_ui\.inbox\.unreadIntents/g) || [];
+  assert.equal(stempels.length, 2, 'precies twee: één bij de klik, één na de bevestiging');
+});
+
+test('markeren als ongelezen doet hetzelfde', () => {
+  const i    = VIEW.indexOf('window.__wbxInboxMarkUnread');
+  const eind = VIEW.indexOf('window.__wbxInboxPauseFlow');
+  const blok = VIEW.slice(i, eind);
+
+  const naCheck = blok.slice(blok.indexOf("_toast('Markeren als ongelezen mislukt"));
+  assert.match(naCheck, /onthoud\(_ui\.inbox\.unreadIntents, convId, patch, Date\.now\(\)\)/,
+    'ook hier vertrekt er een poll tijdens de POST');
+});
