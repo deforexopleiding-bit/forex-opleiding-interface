@@ -378,6 +378,18 @@ const AFROND_UIT_REDEN_CODE = {
 };
 
 /**
+ * Kaarten die uit de REDEN van de taak komen in plaats van uit een reden_code.
+ *
+ * Een geannuleerde call met een 'opnieuw inplannen'-kaart is afgehandeld: er
+ * ligt werk klaar. Zonder deze regel blijft hij op 'Afronden →' staan en zou
+ * hij bovendien elke dag als achterstand meeschuiven — dezelfde valkuil als
+ * bij no_show_call, alleen een andere weg erheen.
+ */
+const AFROND_UIT_TAAK_REDEN = {
+  zoom_geannuleerd: 'geannuleerd · in je werklijst',
+};
+
+/**
  * Een PostgREST in-filter over een JSON-pad.
  *
  * Dubbele quotes zijn hier geen overdaad: `.filter()` krijgt de rauwe
@@ -397,6 +409,12 @@ export function afrondLabelVanTaak(t) {
   const reden = String((t && t.reden) || '').trim();
   if (reden && AFROND_UIT_TAAK[reden]) {
     return { code: reden, label: AFROND_UIT_TAAK[reden] };
+  }
+  // NA de reden_code-lijst: een zoom_geannuleerd-kaart draagt zelf een
+  // reden_code (zelf_geannuleerd / geannuleerd_in_agenda), en die staat niet in
+  // AFROND_UIT_REDEN_CODE. Zonder deze regel valt hij dus overal doorheen.
+  if (reden && AFROND_UIT_TAAK_REDEN[reden]) {
+    return { code: reden, label: AFROND_UIT_TAAK_REDEN[reden] };
   }
   return null;
 }
