@@ -34,7 +34,7 @@ import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import {
   ANNULERING_VANAF, HERBOEKT_STATUSSEN, REDEN_ZELF,
   annuleerBron, bouwNotitie, bouwBadge, bouwNotitieRegel,
-  slaOver, heeftHerboekt, momentVan,
+  slaOver, heeftHerboekt, leadAlAfgesloten, momentVan,
 } from './_lib/opvolging-annulering.js';
 
 const ZONE = 'Europe/Amsterdam';
@@ -69,9 +69,11 @@ export default async function handler(req, res) {
     dag: vandaag, bekeken: 0, aangemaakt: 0, gesloten: 0,
     overgeslagen: {
       is_test: 0, uitkomst_al_vastgelegd: 0, geen_nummer: 0, geen_moment: 0,
-      voor_de_grens: 0, herboekt: 0, kaart_bestaat_al: 0, kaart_op_nummer: 0,
+      voor_de_grens: 0, herboekt: 0, lead_al_afgesloten: 0,
+      kaart_bestaat_al: 0, kaart_op_nummer: 0,
     },
     notitie_toegevoegd: 0,
+    gesloten_reden: { zelf_opnieuw_ingepland: 0, lead_al_afgesloten: 0 },
     per_reden: {}, errors: [], duration_ms: 0,
   };
 
@@ -95,6 +97,15 @@ export default async function handler(req, res) {
 
         // (a) Heeft hij zelf opnieuw ingepland? Dan is er geen werk.
         if (heeftHerboekt(a, afspraken)) { summary.overgeslagen.herboekt += 1; continue; }
+
+        // (a2) Is deze lead al afgesloten? Dan is 'plan hem opnieuw in' geen
+        //      opdracht maar een blunder. Dit staat VOOR de kaart-controles
+        //      hieronder, zodat een kaart die er ten onrechte al staat deze
+        //      overslaan-reden niet wegdrukt naar `kaart_bestaat_al`.
+        if (leadAlAfgesloten(a, afspraken, kaarten)) {
+          summary.overgeslagen.lead_al_afgesloten += 1;
+          continue;
+        }
 
         // (b) Bestaat er al een kaart uit precies deze afspraak? Alle statussen:
         //     een gearchiveerde kaart betekent dat het al is afgehandeld, en
@@ -133,7 +144,9 @@ export default async function handler(req, res) {
     }
 
     // ── DE KAART SLUIT ZICHZELF ─────────────────────────────────────────
-    summary.gesloten = await sluitHerboekteKaarten(kaarten, afspraken);
+    const dicht = await sluitVervallenKaarten(kaarten, afspraken);
+    summary.gesloten = dicht.zelf_opnieuw_ingepland + dicht.lead_al_afgesloten;
+    summary.gesloten_reden = dicht;
   } catch (e) {
     console.error('[cron-opvolging-annuleringen] fataal:', e?.message || e);
     summary.errors.push({ phase: 'fataal', error: e?.message || String(e) });
@@ -163,7 +176,9 @@ async function leesAfspraken(vanIso) {
 async function leesKaarten() {
   const { data, error } = await supabaseAdmin
     .from('opvolging_taken')
-    .select('id, naam, telefoon, status, reden, reden_code, notitie, bron_ref')
+    // archief_reden hoort erbij: leadAlAfgesloten() leest hem om een
+    // gearchiveerde 'geen interesse'-kaart te herkennen.
+    .select('id, naam, telefoon, status, reden, reden_code, archief_reden, notitie, bron_ref')
     .order('updated_at', { ascending: false })
     .limit(2000);
   if (error) throw new Error('taken lezen: ' + error.message);
@@ -235,7 +250,8 @@ async function maakKaart({ afspraak, vandaag }) {
     eigenaar_id: null,
   };
   const { data, error } = await supabaseAdmin
-    .from('opvolging_taken').insert(rij).select('id, telefoon, status, bron_ref').single();
+    .from('opvolging_taken')
+    .insert(rij).select('id, naam, telefoon, status, reden, reden_code, archief_reden, notitie, bron_ref').single();
   if (error) throw new Error('kaart aanmaken: ' + error.message);
   return data;
 }
@@ -243,35 +259,58 @@ async function maakKaart({ afspraak, vandaag }) {
 /**
  * SLUIT DE KAARTEN WAARVAN DE REDEN IS VERVALLEN.
  *
- * Boekt de lead alsnog zelf een nieuwe call, dan is 'plan hem opnieuw in' geen
- * opdracht meer. Een kaart die dan blijft staan is een valse taak: Dave belt
- * iemand op om iets te regelen wat al geregeld is.
+ * Twee manieren waarop 'plan hem opnieuw in' geen opdracht meer is:
+ *
+ *  1. De lead boekt alsnog zelf een nieuwe call. Dan is het al geregeld en
+ *     zou Dave iemand bellen over iets wat al staat.
+ *  2. De lead blijkt afgesloten — 'geen interesse', 'niet geschikt' of juist
+ *     klant geworden. Dat is de ergere van de twee: dan belt Dave iemand op
+ *     die net heeft gezegd dat hij niet meer wil, om een nieuwe afspraak te
+ *     maken. Precies de valse kaart van 11 september (Jeffrey Biemold).
+ *
+ * De tweede reden kan ook NA het aanmaken waar worden — Dave legt de uitkomst
+ * vast op een andere afspraak, de kaart staat er al. Vandaar dat dit een
+ * sluitregel is en niet alleen een overslaan-regel.
  *
  * Alleen ONZE eigen kaarten (reden zoom_geannuleerd) en alleen als ze open
  * staan. Fail-soft per kaart.
  */
-async function sluitHerboekteKaarten(kaarten, afspraken) {
-  let gesloten = 0;
+async function sluitVervallenKaarten(kaarten, afspraken) {
+  const geteld = { zelf_opnieuw_ingepland: 0, lead_al_afgesloten: 0 };
   const open = kaarten.filter((k) => String(k.status || '') === 'open' && String(k.reden || '') === REDEN);
   for (const k of open) {
     const aid = k.bron_ref && k.bron_ref.appointment_id;
     const bron = afspraken.find((a) => String(a.id) === String(aid));
-    if (!bron || !heeftHerboekt(bron, afspraken)) continue;
+    if (!bron) continue;
+
+    let sleutel = null;
+    let tekst = null;
+    if (heeftHerboekt(bron, afspraken)) {
+      sleutel = 'zelf_opnieuw_ingepland';
+      tekst   = 'zelf opnieuw ingepland';
+    } else if (leadAlAfgesloten(bron, afspraken, kaarten)) {
+      sleutel = 'lead_al_afgesloten';
+      tekst   = 'lead al afgesloten (geen interesse / klant)';
+    } else {
+      continue;
+    }
+
     try {
       const { error } = await supabaseAdmin.from('opvolging_taken').update({
         status         : 'gearchiveerd',
-        archief_reden  : 'zelf opnieuw ingepland',
+        archief_reden  : tekst,
         gearchiveerd_at: new Date().toISOString(),
         updated_at     : new Date().toISOString(),
       }).eq('id', k.id).eq('status', 'open');
       if (error) throw new Error(error.message);
-      k.status = 'gearchiveerd';
-      gesloten += 1;
+      k.status        = 'gearchiveerd';
+      k.archief_reden = tekst;
+      geteld[sleutel] += 1;
     } catch (e) {
       console.warn('[cron-opvolging-annuleringen] kaart sluiten (soft):', e?.message || e);
     }
   }
-  return gesloten;
+  return geteld;
 }
 
 export { REDEN, HERBOEKT_STATUSSEN, ANNULERING_VANAF, REDEN_ZELF, momentVan };

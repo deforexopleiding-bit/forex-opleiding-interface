@@ -31,6 +31,7 @@ import {
   ANNULERING_VANAF, HERBOEKT_STATUSSEN, REDEN_ZELF, REDEN_AGENDA,
   annuleerBron, bouwNotitie, bouwBadge, bouwNotitieRegel,
   slaOver, heeftHerboekt, momentVan,
+  leadAlAfgesloten, zelfdeLead, EINDPUNT_UITKOMSTEN,
 } from '../api/_lib/opvolging-annulering.js';
 import { afrondLabelVanTaak } from '../api/opvolging-agenda.js';
 
@@ -295,13 +296,14 @@ test('een open zoom_geannuleerd-kaart gaat dicht zodra de lead zelf herboekt', (
   // Een kaart die blijft staan nadat hij zelf herboekte is een valse taak:
   // Dave belt iemand op om iets te regelen wat al geregeld is.
   const bron = readFileSync(CRON, 'utf8');
-  const i = bron.indexOf('async function sluitHerboekteKaarten');
+  const i = bron.indexOf('async function sluitVervallenKaarten');
   assert.ok(i > 0);
   const blok = bron.slice(i, i + 1400);
   assert.match(blok, /String\(k\.reden \|\| ''\) === REDEN/, 'alleen onze eigen kaarten');
   assert.match(blok, /String\(k\.status \|\| ''\) === 'open'/);
   assert.match(blok, /heeftHerboekt\(bron, afspraken\)/);
-  assert.match(blok, /archief_reden\s*:\s*'zelf opnieuw ingepland'/);
+  assert.match(blok, /'zelf opnieuw ingepland'/);
+  assert.match(blok, /archief_reden\s*:\s*tekst/);
   assert.match(blok, /\.eq\('status', 'open'\)/, 'niets doen als hij intussen dicht is');
 });
 
@@ -359,4 +361,178 @@ test('de cron staat elk kwartier in vercel.json', () => {
   const rij = (cfg.crons || []).find((c) => c.path === '/api/cron-opvolging-annuleringen');
   assert.ok(rij, 'de cron hoort in vercel.json te staan');
   assert.equal(rij.schedule, '*/15 * * * *');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9 · EEN AFGESLOTEN LEAD KRIJGT GEEN KAART
+//
+// GEMETEN OP 11 SEPTEMBER, de valse vierde kaart van de eerste echte run.
+//
+// Jeffrey Biemold (+31655270212, GHL-contact ZvTcan7kmMWG8GZgyoEr) kreeg
+// 'Geannuleerd · call za 26/09 09:30 … plan hem opnieuw in'. Maar Dave had op
+// 10 september om 12:48 al `wilt_niet_meer` vastgelegd — geen interesse — op
+// een ándere afspraak van dezelfde lead ('jeffr reybiem', 9 september). De
+// call van de 26e werd waarschijnlijk juist daarom geannuleerd.
+//
+// De cron keek alleen naar `uitkomst` op de geannuleerde afspraak zelf (die
+// was leeg) en naar OPEN kaarten op het nummer (die waren er niet). Iemand die
+// 'geen interesse' zei terugbellen om opnieuw in te plannen is precies wat
+// deze module nooit mag doen.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** De geannuleerde call van 26 september, 09:30 Amsterdamse tijd. */
+const JEFFREY_GEANNULEERD = {
+  id: 'ap-j-26', lead_name: 'Jeffrey Biemold', lead_phone: '+31655270212',
+  lead_ghl_contact_id: 'ZvTcan7kmMWG8GZgyoEr',
+  scheduled_at: '2026-09-26T07:30:00.000Z', status: 'cancelled',
+  uitkomst: null, is_test: false,
+  annulering_sent_at: null, annulering_reden_code: null, annulering_reden: null,
+};
+
+/** De oudere afspraak waarop Dave 'geen interesse' vastlegde. */
+const JEFFREY_AFGESLOTEN = {
+  id: 'ap-j-09', lead_name: 'jeffr reybiem', lead_phone: '+31655270212',
+  lead_ghl_contact_id: 'ZvTcan7kmMWG8GZgyoEr',
+  scheduled_at: '2026-09-09T10:00:00.000Z', status: 'completed',
+  uitkomst: 'wilt_niet_meer', is_test: false,
+};
+
+test('het gemeten geval: wilt_niet_meer op een ándere afspraak → geen kaart', () => {
+  const alles = [JEFFREY_AFGESLOTEN, JEFFREY_GEANNULEERD];
+
+  // Vóór de fix kwam hij hier ongehinderd doorheen: slaOver ziet niets
+  // (uitkomst op de geannuleerde rij zelf is leeg) en herboekt is hij niet.
+  assert.equal(slaOver(JEFFREY_GEANNULEERD), null, 'de voorcontrole vangt hem niet');
+  assert.equal(heeftHerboekt(JEFFREY_GEANNULEERD, alles), false, 'en herboekt is hij niet');
+
+  // De nieuwe regel wél.
+  assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, alles, []), true);
+});
+
+test('idem voor sale — wie klant geworden is hoeft geen nieuwe verkoopcall', () => {
+  const klant = { ...JEFFREY_AFGESLOTEN, id: 'ap-j-sale', uitkomst: 'sale' };
+  assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [klant, JEFFREY_GEANNULEERD], []), true);
+});
+
+test('en voor de andere twee eindpunten, in beide spellingen', () => {
+  for (const u of ['geen_interesse', 'niet_geschikt', 'WILT_NIET_MEER', ' sale ']) {
+    const rij = { ...JEFFREY_AFGESLOTEN, id: 'ap-' + u, uitkomst: u };
+    assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [rij], []), true, u);
+  }
+});
+
+test('een lead die gewoon doorleeft blijft werk', () => {
+  // Deze uitkomsten staan met opzet NIET in de lijst: daar is het gesprek nog
+  // niet klaar. 'gesprek_gehad' staat wél in AGENDA_REMOVING_OUTCOMES, maar
+  // dat gaat over het opruimen van de Zoom-meeting, niet over de lead.
+  for (const u of ['gesprek_gehad', 'no_show', 'later_opnieuw', 'terugbel',
+    'verzetten', 'annuleren', 'snooze', 'whatsapp_gestuurd', 'voicemail',
+    'geen_gehoor', 'zoom_ingepland', 'bevestigd', 'komt_niet', '']) {
+    const rij = { ...JEFFREY_AFGESLOTEN, id: 'ap-' + u, uitkomst: u };
+    assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [rij], []), false, u);
+  }
+  assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [JEFFREY_GEANNULEERD], []), false);
+});
+
+test('de uitkomst van een ándere lead telt niet mee', () => {
+  // Dat zou de regel van een bescherming in een blinddoek veranderen.
+  const vreemde = {
+    id: 'ap-x', lead_phone: '+31699998888', lead_ghl_contact_id: 'ghl-x',
+    status: 'completed', uitkomst: 'wilt_niet_meer',
+  };
+  assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [vreemde], []), false);
+});
+
+test('zonder GHL-contact matcht het nummer, ook zonder landcode', () => {
+  const zonderContact = { ...JEFFREY_GEANNULEERD, lead_ghl_contact_id: null };
+  const lokaal = { id: 'ap-l', lead_phone: '0655270212', lead_ghl_contact_id: null,
+    status: 'completed', uitkomst: 'wilt_niet_meer' };
+  assert.equal(zelfdeLead(zonderContact, lokaal), true);
+  assert.equal(leadAlAfgesloten(zonderContact, [lokaal], []), true);
+});
+
+test('een gearchiveerde kaart die zegt "geen interesse" telt óók', () => {
+  // De tweede uitgang: de lead haakte af via de aanmeldkaart of de
+  // zoom-uitgang, en er is helemaal geen afspraak-uitkomst.
+  const viaCode = { id: 't1', telefoon: '+31655270212', status: 'gearchiveerd',
+    reden_code: 'zoom_geen_interesse', archief_reden: null };
+  const viaReden = { id: 't2', telefoon: '+31655270212', status: 'gearchiveerd',
+    reden_code: null, archief_reden: 'geen interesse of per ongeluk aangemeld' };
+
+  assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [], [viaCode]), true);
+  assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [], [viaReden]), true);
+});
+
+test('een gearchiveerde kaart om een ándere reden telt niet', () => {
+  // 'verplaatst naar ander event', 'gesprek gehad', 'zelf opnieuw ingepland':
+  // allemaal geen afsluiting van de lead.
+  for (const reden of ['verplaatst naar ander event', 'gesprek gehad',
+    'zelf opnieuw ingepland', 'antwoord ontvangen op WhatsApp', '']) {
+    const k = { id: 't', telefoon: '+31655270212', status: 'gearchiveerd',
+      reden_code: 'iets_anders', archief_reden: reden };
+    assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [], [k]), false, reden);
+  }
+  // En een OPEN kaart is geen afsluiting, wat er ook op staat.
+  const open = { id: 't', telefoon: '+31655270212', status: 'open',
+    reden_code: 'zoom_geen_interesse', archief_reden: null };
+  assert.equal(leadAlAfgesloten(JEFFREY_GEANNULEERD, [], [open]), false);
+});
+
+test('de woordenlijst is uit de twee outcome-motoren overgenomen, niet verzonnen', () => {
+  // De motoren blijven ongemoeid; deze test dwingt af dat elke waarde die we
+  // als eindpunt behandelen daar ook echt bestaat. Hernoemt iemand er één,
+  // dan wordt dit rood in plaats van dat de bescherming stil vervalt.
+  const woordenlijst = (bestand) => {
+    const bron = readFileSync(join(ROOT, bestand), 'utf8');
+    const i = bron.indexOf('const OUTCOMES = new Set([');
+    assert.ok(i > 0, bestand + ' hoort een OUTCOMES-lijst te hebben');
+    const blok = bron.slice(i, bron.indexOf(']);', i));
+    return new Set([...blok.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
+  };
+  const bekend = new Set([
+    ...woordenlijst('api/follow-up-appointment-outcome.js'),
+    ...woordenlijst('api/follow-up-lead-outcome.js'),
+  ]);
+  for (const u of EINDPUNT_UITKOMSTEN) {
+    assert.ok(bekend.has(u), u + ' hoort in een van de twee OUTCOMES-lijsten te staan');
+  }
+});
+
+// ── DE CRON GEBRUIKT DE REGEL OOK ECHT ─────────────────────────────────────
+
+test('de cron slaat een afgesloten lead over, vóór de kaart-controles', () => {
+  // De volgorde is geen smaak: de valse kaart van 11 september STAAT er al
+  // (gearchiveerd met de hand). Stond deze controle ná (b), dan telde de run
+  // hem als 'kaart_bestaat_al' en bleef onzichtbaar dat de regel werkt.
+  const bron = readFileSync(CRON, 'utf8');
+  const i = bron.indexOf('leadAlAfgesloten(a, afspraken, kaarten)');
+  const j = bron.indexOf('overgeslagen.kaart_bestaat_al');
+  assert.ok(i > 0, 'de cron hoort leadAlAfgesloten aan te roepen');
+  assert.ok(j > i, 'en wel vóór de kaart_bestaat_al-controle');
+  assert.match(bron, /overgeslagen\.lead_al_afgesloten \+= 1/);
+  assert.match(bron, /lead_al_afgesloten: 0/, 'de teller hoort in de summary te staan');
+});
+
+test('de cron leest archief_reden mee — anders is de halve regel blind', () => {
+  // leadAlAfgesloten leest k.archief_reden. Staat die kolom niet in de select,
+  // dan is hij altijd undefined en vervalt de kaart-tak geruisloos.
+  const bron = readFileSync(CRON, 'utf8');
+  const i = bron.indexOf('async function leesKaarten');
+  assert.ok(i > 0);
+  assert.match(bron.slice(i, i + 600), /archief_reden/);
+});
+
+test('een open kaart voor een lead die alsnog afhaakt gaat dicht', () => {
+  // De sluitregel, want de uitkomst kan NA het aanmaken worden vastgelegd:
+  // de kaart staat er dan al en zou blijven staan.
+  const bron = readFileSync(CRON, 'utf8');
+  const i = bron.indexOf('async function sluitVervallenKaarten');
+  assert.ok(i > 0);
+  const blok = bron.slice(i, i + 2200);
+  assert.match(blok, /leadAlAfgesloten\(bron, afspraken, kaarten\)/);
+  assert.match(blok, /'lead al afgesloten \(geen interesse \/ klant\)'/);
+  assert.match(blok, /\.eq\('status', 'open'\)/, 'niets doen als hij intussen dicht is');
+  // Herboekt blijft voorgaan: dat is de vrolijkere waarheid van de twee.
+  assert.ok(blok.indexOf('heeftHerboekt(bron, afspraken)')
+          < blok.indexOf('leadAlAfgesloten(bron, afspraken, kaarten)'));
 });
