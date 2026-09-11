@@ -1688,6 +1688,7 @@
         ' <span class="tag ' + r[1] + '">' + esc(r[0]) + '</span>' +
         (t.reden_code ? ' <span class="tag t-grey">' + esc(t.reden_code) + '</span>' : '') +
         (badgeTekst(t) ? ' <span class="tag t-grey">' + esc(badgeTekst(t)) + '</span>' : '') +
+        verzetChip(t, dag) +
         (t.due < nuDag ? ' <span class="tag t-red">bleef liggen</span>' : '') +
         (t.due > nuDag ? ' <span class="tag t-blue">staat op ' + nl(t.due) + '</span>' : '') +
         ((t.uitgesteld_zonder_poging || 0) >= 2 ? ' <span class="tag t-amber">' + t.uitgesteld_zonder_poging + '&times; uitgesteld zonder poging</span>' : '') +
@@ -2307,6 +2308,32 @@
         ' om ' + esc(uur(g.laatste_genegeerd.tijd)) + '.</div>';
     }
     return '<div class="tellerblok">' + h + '</div>';
+  }
+
+  /**
+   * STAAT DE CALL NOG OP HET UUR DAT OP DEZE KAART STAAT?
+   *
+   * Een nabelkaart wordt om 12:00 gemaakt en draagt het uur van dát moment —
+   * in het etiket ('Zoomcall 15:00') en in de notitie. Wordt de call daarna
+   * verzet, dan bevriest die tekst en klopt hij niet meer. Dat is geen fout in
+   * de kaart (hij beschrijft wat er om 12:00 waar was) maar het is wel het uur
+   * waar Dave naar kijkt, en dan hoort de correctie erbij te staan.
+   *
+   * De vergelijking gaat over de LIVE call uit het dagbeeld, want die draagt
+   * sinds vandaag het echte uur. Zonder dagbeeld voor deze dag: niets tonen —
+   * een correctie die we niet kunnen meten is geen correctie.
+   */
+  function verzetChip(t, dag) {
+    const start = t && t.bron_ref && t.bron_ref.start;
+    if (!start) return '';
+    if (_calls.key !== dag || !_calls.data) return '';
+    const call = callVoorTaak(t, _calls.data);
+    if (!call || !call.start) return '';
+    const oudZ = inZone(start);
+    const nuZ  = inZone(call.start);
+    if (!oudZ || !nuZ || oudZ.dag !== nuZ.dag || oudZ.tijd === nuZ.tijd) return '';
+    return ' <span class="tag t-amber" title="Deze call is verzet nadat deze kaart gemaakt werd">'
+      + 'call staat nu om ' + esc(nuZ.tijd) + '</span>';
   }
 
   /**

@@ -91,18 +91,66 @@ export function oorspronkelijkeTijd(a) {
 }
 
 /**
- * Naar welke dag is deze afspraak verzet? Null als hij niet verzet is.
+ * IS DEZE RIJ VERZET, EN WAARHEEN? — dag én uur.
+ *
+ * ── GEMETEN OP 11 SEPTEMBER, ±13:50 ──────────────────────────────────────
+ * Redouane Jerroudi (appointment ac93ae66…) was in dezelfde rij verzet van
+ * 15:00 naar 19:00, op dezelfde dag. De weekagenda toonde 19:00 (die leest
+ * `scheduled_at`), maar 'Calls van vandaag' toonde 15:00, zonder label en met
+ * alle knoppen aan. Voor Dave stond de call dus op het verkeerde uur, en niets
+ * op het scherm zei dat er iets verschoven was.
+ *
+ * De oorzaak stond hier: de vergelijking ging alleen over de DAG. Bleef die
+ * gelijk, dan was het antwoord 'niet verzet' — terwijl er vier uur tussen zat.
+ * Corne Heeren (zelfde rij, andere dag) werkte wél, en dat is precies waarom
+ * het zo lang onzichtbaar bleef: het gat zat alleen binnen één dag.
+ *
+ * @returns {?{dag:string,tijd:string,van:{dag:string,tijd:string},zelfdeDag:boolean}}
+ */
+export function verzetMoment(a) {
+  if (!a || !a.eerst_gepland_op) return null;
+  const eerst = dagEnTijd(a.eerst_gepland_op);
+  const nu    = dagEnTijd(a.scheduled_at);
+  if (!eerst || !nu) return null;
+  if (eerst.dag === nu.dag && eerst.tijd === nu.tijd) return null;
+  return {
+    dag: nu.dag, tijd: nu.tijd,
+    van: { dag: eerst.dag, tijd: eerst.tijd },
+    zelfdeDag: eerst.dag === nu.dag,
+  };
+}
+
+/**
+ * Naar welke DAG is deze afspraak verzet? Null als hij niet naar een andere dag
+ * is verzet.
+ *
+ * Bewust alleen de andere dag, want daar hangt meer aan dan een label: een
+ * verzetting naar een andere dag haalt de regel door en neemt de knoppen weg
+ * (de uitkomst hoort bij de nieuwe datum). Binnen dezelfde dag geldt dat juist
+ * NIET — die call gebeurt vandaag, alleen later, en Dave moet hem gewoon kunnen
+ * afronden. Zie binnenDagVerzet hieronder.
  *
  * Alleen het geval 'dezelfde rij': de rij draagt dan zelf de oude en de nieuwe
  * dag. Voor het geval met een opvolgerrij weet de aanroeper de bestemming uit
  * die andere rij; die koppeling hoort niet hier maar bij wie beide rijen heeft.
  */
 export function verzetNaar(a) {
-  if (!a || !a.eerst_gepland_op) return null;
-  const eerst = dagEnTijd(a.eerst_gepland_op);
-  const nu    = dagEnTijd(a.scheduled_at);
-  if (!eerst || !nu || eerst.dag === nu.dag) return null;
-  return { dag: nu.dag, tijd: nu.tijd };
+  const m = verzetMoment(a);
+  return (m && !m.zelfdeDag) ? { dag: m.dag, tijd: m.tijd } : null;
+}
+
+/**
+ * Verzet BINNEN dezelfde dag — een ander uur, dezelfde dag.
+ *
+ * Dit is geen doorhaling en geen reden om knoppen weg te nemen. Het is één
+ * mededeling: de call staat nu op een ander uur dan waarop hij geboekt was.
+ *
+ * @returns {?{van:string,naar:string}} de twee uren, of null.
+ */
+export function binnenDagVerzet(a) {
+  const m = verzetMoment(a);
+  if (!m || !m.zelfdeDag) return null;
+  return { van: m.van.tijd, naar: m.tijd };
 }
 
 // De twee statussen die een AGENDA-uitspraak doen in plaats van een oordeel
@@ -134,6 +182,19 @@ export function agendaFeit(a, { negeerVerplaatsing = false } = {}) {
   const naar   = verzetNaar(a);
   const status = String((a && a.status) || '').toLowerCase();
   if (!naar && !VERZET_STATUSSEN.has(status)) {
+    // BINNEN DEZELFDE DAG IS GEEN DOORHALING. De call gebeurt gewoon vandaag,
+    // alleen later (of eerder). `verzet: false` is hier dus geen vergissing
+    // maar het hele punt: knoppenVoor() haalt de knoppen weg bij `verzet`, en
+    // Dave moet deze call juist kunnen bellen en afronden. Alleen het LABEL
+    // vertelt dat het uur verschoven is.
+    const binnen = binnenDagVerzet(a);
+    if (binnen) {
+      return {
+        verzet: false, doorgehaald: false, naar: null,
+        label : 'verzet van ' + binnen.van,
+        binnen_dag: binnen,
+      };
+    }
     return { verzet: false, label: null, doorgehaald: false, naar: null };
   }
   return {
@@ -171,10 +232,27 @@ const LEEFT_OP_NIEUWE_DAG = new Set(['scheduled', 'in_progress', 'completed', 'n
  * er die dag staat.
  */
 export function dagenVoorAfspraak(a) {
-  const oud = oorspronkelijkeDag(a);
-  const nu  = a ? (dagEnTijd(a.scheduled_at) || {}).dag : null;
+  const oud   = oorspronkelijkeDag(a);
+  const nuMom = a ? (dagEnTijd(a.scheduled_at) || {}) : {};
+  const nu    = nuMom.dag || null;
   const uit = [];
-  if (oud) uit.push({ dag: oud, tijd: oorspronkelijkeTijd(a), feit: agendaFeit(a) });
+  if (oud) {
+    // HET UUR OP DE KAART IS HET ECHTE UUR.
+    //
+    // Voor een verzetting naar een ANDERE dag klopt het oorspronkelijke uur:
+    // die regel staat op de oude dag en zegt wat daar stónd. Maar bij een
+    // verzetting BINNEN dezelfde dag is er maar één regel, en die hoort te
+    // zeggen wanneer de call is — niet wanneer hij ooit geboekt werd.
+    // Redouane stond daardoor op 15:00 terwijl hij om 19:00 gebeld moest
+    // worden. Het uur bepaalt ook de volgorde in de lijst, dus met het oude
+    // uur staat hij bovendien op de verkeerde plek.
+    const binnenDag = (oud === nu) && !!binnenDagVerzet(a);
+    uit.push({
+      dag : oud,
+      tijd: binnenDag ? nuMom.tijd : oorspronkelijkeTijd(a),
+      feit: agendaFeit(a),
+    });
+  }
   if (nu && nu !== oud && LEEFT_OP_NIEUWE_DAG.has(String((a && a.status) || '').toLowerCase())) {
     uit.push({
       dag : nu,
