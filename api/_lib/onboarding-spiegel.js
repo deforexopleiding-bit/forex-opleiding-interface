@@ -73,43 +73,48 @@ const CRM_KOLOMMEN =
 export const MENTOR_GEEN_IN_CRM = 'geen-mentor-in-crm';
 
 /**
- * De woordenlijst voor `hlms_crm_onboarding.crm_stand`.
+ * De stand zoals die in het CRM staat, LETTERLIJK.
  *
- * NIET hetzelfde als hlms_student.onboarding_status — dat is een bevroren
- * Bubble-import met zeven vrije-tekstwaarden waar niets meer aan schrijft.
- * Zie het commentaar op de kolom in
- * docs/sql-migrations/2026-09-11-hlms-crm-onboarding-stand.sql.
+ * Geen vertaling, geen lower(), geen trim(), geen woordenlijst. Het woord uit
+ * `onboardings.status` gaat ongewijzigd naar `hlms_crm_onboarding.
+ * onboarding_stand`, en het LMS beslist zelf wat het met een woord doet dat
+ * het niet kent.
  *
- * `geannuleerd` en `gearchiveerd` staan hier met opzet NIET in: die
- * onboardings hebben geen spiegelrij meer. Gemeten in api/onboarding-archive.js
- * zet archiveren ALTIJD status én archived_at samen, dus een gearchiveerde
- * onboarding valt sowieso al af op hoortZichtbaarTeZijn().
+ * ── WAAROM DIT BETER IS DAN VERTALEN ────────────────────────────────────
+ * Komt er in het CRM een status bij — on hold staat op de rol — dan ziet het
+ * LMS een onbekend woord en toont die rij apart: "stand onbekend, controleer
+ * in het CRM voor je belt". Bij een vertaallaag zou dat nieuwe geval
+ * stilletjes in de emmer 'loopt' of 'afgerond' vallen en zou niemand het
+ * merken. Onbekend hoort zichtbaar te zijn, niet weggemapt.
+ *
+ * Dit is bewust het TEGENOVERGESTELDE van de keuze bij product_soort in
+ * api/_lib/dfo-lms-student.js. Daar is een strikte woordenlijst juist wél
+ * goed, omdat de studentkant een onbekende waarde stil als 'onbekend' toont
+ * aan een betalende klant. Hier is de lezer een MEDEWERKER die juist moet
+ * zien dat er iets nieuws is. Wie de lezer is bepaalt of vertalen of
+ * doorgeven het veiligst is.
+ *
+ * Leeg blijft leeg: geen status in het CRM betekent geen stand hier, en niet
+ * een gok. Het LMS behandelt leeg als onbekend.
  */
-export const STAND_WOORDENLIJST = Object.freeze(
-  ['aangemeld', 'bezig', 'afgerond', 'onbekend']);
-
-/**
- * CRM-status → stand. Alles wat we niet kennen wordt `onbekend`, met een
- * waarschuwing in het log.
- *
- * Bewust GEEN harde fout op een onbekende waarde: dan zou één nieuwe status
- * in het CRM de hele spiegelrij laten mislukken, en een rij die er niet is is
- * erger dan een stand die 'onbekend' zegt. Dezelfde afweging als bij de
- * CHECK-constraint op de kolom.
- */
-export function bepaalStand(status) {
-  const ruw = String(status || '').trim().toLowerCase();
-  if (STAND_WOORDENLIJST.includes(ruw) && ruw !== 'onbekend') return ruw;
-  if (ruw) console.warn('[onboarding-spiegel] onbekende CRM-status ' +
-    JSON.stringify(ruw) + ' — crm_stand op onbekend gezet');
-  return 'onbekend';
+function leesStandLetterlijk(status) {
+  return (typeof status === 'string' && status !== '') ? status : null;
 }
 
 /** Hoort deze onboarding zichtbaar te zijn in het LMS? */
+export const NIET_ZICHTBARE_STATUSSEN = Object.freeze(['geannuleerd', 'gearchiveerd']);
+
 export function hoortZichtbaarTeZijn(ob) {
   if (!ob) return false;
   if (ob.archived_at) return false;
-  return String(ob.status || '').trim().toLowerCase() !== 'geannuleerd';
+  // 'gearchiveerd' stond hier eerst NIET bij: die werd afgevangen doordat
+  // api/onboarding-archive.js status en archived_at in één patch zet. Dat is
+  // waar — nagelopen, het is de enige schrijver van die status op
+  // `onboardings` — maar het is een gevolgtrekking uit ander bestand en geen
+  // regel hier. Eén rij met status 'gearchiveerd' en een lege archived_at zou
+  // zo in het LMS belanden. Nu is het een regel.
+  return !NIET_ZICHTBARE_STATUSSEN.includes(
+    String(ob.status || '').trim().toLowerCase());
 }
 
 /**
@@ -194,7 +199,7 @@ export async function spiegelOnboarding(onboardingId, opties = {}) {
       // of archiveren), maar tot nu zei de spiegel nergens DAT hij afgerond
       // was. De mentorband kan daardoor lopend werk niet van afgerond werk
       // scheiden — gemeten 11 september: 5 van de 25 rijen zijn afgerond.
-      crm_stand              : bepaalStand(ob.status),
+      onboarding_stand       : leesStandLetterlijk(ob.status),
       afgerond_op            : ob.completed_at || null,
       wizard_stap            : Number.isFinite(Number(ob.current_step)) ? Number(ob.current_step) : null,
       wizard_stappen_totaal  : stappenTotaal,
