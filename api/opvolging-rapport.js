@@ -53,7 +53,13 @@ import {
 import { bouwWerkritme, WERKUUR_VAN, WERKUUR_TOT, GAT_DREMPEL_MIN, BEZETTING_DREMPEL } from './_lib/opvolging-werkritme.js';
 import { verdeelVandaagGedaan } from './_lib/opvolging-vandaag-gedaan.js';
 import { leadlijstDektDag, DEKKING_VANAF } from './_lib/opvolging-leadlijst-venster.js';
-import { haalWaRegels, waPogingenVoorNummer } from './_lib/opvolging-call-wa.js';
+import { haalWaRegels, waPogingenVoorNummer, haalWaRegelsVanaf, volledigeHistorie,
+         losseRegelsVoor, regelAlsPoging } from './_lib/opvolging-call-wa.js';
+
+// Hoe ver terug sectie 5 naar losse WhatsApp-berichten kijkt. Een kaart die nu
+// dichtgaat is hooguit enkele weken oud (de nachtelijke doorrol schuift door),
+// dus zestig dagen dekt de levensloop ruim en houdt de lezing begrensd.
+const ARCHIEF_WA_TERUG_DAGEN = 60;
 import {
   beoordeelDag, beoordeelMoeite, dagVan,
   SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
@@ -296,6 +302,7 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // vóórdat hij dicht ging. Een aparte query, want de periode-pogingen dekken
   // dat niet.
   let histPerTaak = new Map();
+  let archiefWaRegels = [];
   if (gearchiveerd.length) {
     const { data: histRuw, error: e5 } = await supabaseAdmin
       .from('opvolging_pogingen')
@@ -306,6 +313,32 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
       if (!histPerTaak.has(p.taak_id)) histPerTaak.set(p.taak_id, []);
       histPerTaak.get(p.taak_id).push(p);
     }
+
+    // ── EN DE BERICHTEN DIE NOOIT EEN POGING WERDEN ──────────────────────
+    // Sectie 5 velt een oordeel over één persoon ('te weinig moeite'), en dat
+    // oordeel stond op een halve meting: een spraakbericht dat vóór het
+    // ontstaan van de kaart uitging heeft geen rij in opvolging_pogingen.
+    //
+    // `moeite_over: 'levensloop'` belooft de hele levensloop, dus het venster
+    // van de PERIODE volstaat hier niet — een kaart die vandaag dichtgaat kan
+    // vorige week zijn begonnen. Vandaar een eigen lezing, begrensd op
+    // ARCHIEF_WA_TERUG_DAGEN.
+    const vanafMs = Math.min(
+      Date.parse(vanIso) || Date.now(),
+      Date.now() - ARCHIEF_WA_TERUG_DAGEN * 86400000,
+    );
+    const lezing = await haalWaRegelsVanaf(supabaseAdmin, new Date(vanafMs).toISOString());
+    if (lezing.fout || lezing.afgekapt) {
+      blindeVlekken.push({
+        sectie: 'archief',
+        wat   : lezing.fout
+          ? 'De WhatsApp-berichten konden niet gelezen worden.'
+          : 'Er zijn meer WhatsApp-berichten dan in één lezing passen.',
+        waarom: 'Berichten die vóór het ontstaan van een kaart zijn verstuurd tellen hieronder dan niet mee, '
+              + 'en het oordeel over de geleverde moeite kan daardoor te streng zijn.',
+      });
+    }
+    archiefWaRegels = lezing.regels;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -385,7 +418,7 @@ export async function bouwRapport({ supabase, van, tot, dagen, vandaag, vanIso, 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 5 · UIT DE LIJST GEHAALD
   // ═══════════════════════════════════════════════════════════════════════
-  const archief = bouwArchief({ gearchiveerd, histPerTaak });
+  const archief = bouwArchief({ gearchiveerd, histPerTaak, waRegels: archiefWaRegels });
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTIE 1 · WAT VRAAGT AANDACHT
@@ -1118,9 +1151,12 @@ export function groepeerDubbele(zoomcalls) {
 }
 
 // ── Sectie 5 ───────────────────────────────────────────────────────────────
-export function bouwArchief({ gearchiveerd, histPerTaak }) {
+export function bouwArchief({ gearchiveerd, histPerTaak, waRegels = null }) {
   return gearchiveerd.map((t) => {
-    const hist = histPerTaak.get(t.id) || [];
+    // volledigeHistorie() voegt de gespreksregels van dit nummer toe die nog
+    // geen taak_id dragen — die hebben per definitie geen poging, dus dubbel
+    // tellen kan niet. Zonder waRegels blijft dit exact de oude berekening.
+    const hist = volledigeHistorie(histPerTaak.get(t.id) || [], waRegels, t);
     const moeiteRijen = hist.filter(isMoeite);
     const bel = moeiteRijen.filter((p) => p.soort === 'call');
     const wa  = moeiteRijen.filter((p) => WA_SOORTEN.has(p.soort));

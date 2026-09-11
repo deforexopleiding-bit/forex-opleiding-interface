@@ -121,3 +121,135 @@ export async function haalWaRegels(db, vanIso, totIso) {
     return { regels: [], fout: e?.message || String(e) };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE KAART ZIET OOK WAT ER VÓÓR HEM GEBEURDE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ── GEMETEN OP 11 SEPTEMBER, ±12:15 ─────────────────────────────────────
+// Rony Van Hecke en Redouane Jerroudi (reden zoom_nabellen, kaart gemaakt om
+// 10:00 UTC door de 12u-instroom): de KAARTTEKST zegt 'geen reactie op het
+// spraakbericht van 07:16 / 07:13', en dezelfde kaart toont de chips
+// '🎤 geen spraakbericht' en '💬 geen WhatsApp'. /api/opvolging-taken gaf voor
+// allebei `pogingen: []` en `wa_totaal: 0`. Daniel Vleeshakker (no_show_call,
+// kaart 07:56 UTC) droeg alleen zijn twee calls van 09:58/09:59; het
+// spraakbericht van 05:04 en de WhatsApp van 05:05 ontbraken.
+//
+// Dezelfde berichten stonden WEL goed in /api/opvolging-agenda.
+//
+// ── DE OORZAAK ──────────────────────────────────────────────────────────
+// api/opvolging-whatsapp-webhook.js schrijft twee dingen:
+//
+//   opvolging_pogingen     de TELLING — alleen als er op dat moment een taak is
+//   opvolging_wa_berichten de gespreksregel — ALTIJD, met taak_id of NULL
+//
+// api/opvolging-taken.js las uitsluitend `opvolging_pogingen` op het eigen
+// taak_id. Een bericht dat vóór het bestaan van de kaart ging heeft geen
+// poging, dus zag de kaart het niet. De agenda toonde het wel omdat die de
+// tweede bron al leest — dat is precies het verschil.
+//
+// ── WAAROM LEZEN EN NIET ADOPTEREN ──────────────────────────────────────
+// De andere weg was: bij het aanmaken van een kaart de taak_id-loze regels van
+// dat nummer overschrijven. Drie bezwaren, en ze wegen samen zwaarder dan het
+// gemak:
+//
+//   1. Het herschrijft historische rijen, en dan is de oorspronkelijke stand
+//      weg als de regel ooit anders moet.
+//   2. Het vraagt een inhaalquery voor alles wat er nu al staat.
+//   3. Twee kaarten die vlak na elkaar voor hetzelfde nummer ontstaan (de
+//      12u-instroom en een no-show-afronding op dezelfde dag) vechten om
+//      dezelfde rijen.
+//
+// Lezen heeft geen van drieën, en het werkt meteen voor alles wat er al staat.
+//
+// ── EN WAAROM NIETS DUBBEL TELT ─────────────────────────────────────────
+// Een bericht dat al een poging heeft, heeft per definitie een `taak_id` op
+// zijn gespreksregel — de webhook schrijft ze in één adem. Een kaart telt dus:
+//
+//   · zijn eigen rijen uit opvolging_pogingen, plus
+//   · de gespreksregels van zijn nummer met taak_id NULL.
+//
+// Die twee verzamelingen kunnen elkaar niet overlappen. Hangt een regel later
+// alsnog aan een taak, dan valt hij hier vanzelf weg en telt hij nog steeds
+// één keer — via de poging.
+//
+// Regels die aan een ÁNDERE kaart hangen blijven er bewust buiten. Anders
+// bloedt de archiveerregel van een oude kaart door in een nieuwe, en dan telt
+// iemand zijn moeite van vorige maand mee voor het werk van vandaag.
+
+/**
+ * De gespreksregels die deze kaart mag meetellen.
+ *
+ * @param {Array}   regels  uit opvolging_wa_berichten (met taak_id!)
+ * @param {?string} taakId  de kaart zelf; zijn eigen regels hebben al een poging
+ */
+export function losseRegelsVoor(regels, taakId) {
+  return (Array.isArray(regels) ? regels : []).filter((r) => {
+    const t = r && r.taak_id;
+    // NULL/undefined = nog van niemand. Alles met een taak_id hoort daar, en
+    // daar staat de poging al.
+    return t == null;
+  });
+}
+
+/**
+ * De volledige historie van één kaart: eigen pogingen plus de losse
+ * gespreksregels van hetzelfde nummer, op tijd gesorteerd.
+ *
+ * De uitvoer gaat rechtstreeks naar telPogingen() en naar beoordeelSpraak/
+ * beoordeelNabel op het scherm. Er komt dus geen tweede definitie bij van 'wat
+ * telt mee' — dat is precies wat opvolging-poging-telling.js wil voorkomen.
+ *
+ * @param {Array}  pogingen  de rijen uit opvolging_pogingen van deze taak
+ * @param {Array}  regels    alle gelezen gespreksregels (van iedereen)
+ * @param {object} taak      draagt id en telefoon
+ */
+export function volledigeHistorie(pogingen, regels, taak) {
+  const eigen = Array.isArray(pogingen) ? pogingen : [];
+  const tel = taak && taak.telefoon;
+  if (!tel) return eigen;
+
+  const los = regelsVoorNummer(losseRegelsVoor(regels, taak && taak.id), tel).map(regelAlsPoging);
+  if (los.length === 0) return eigen;
+
+  return [...eigen, ...los].sort((a, b) => {
+    const x = Date.parse(a && a.tijdstip) || 0;
+    const y = Date.parse(b && b.tijdstip) || 0;
+    return x - y;
+  });
+}
+
+/**
+ * De gespreksregels voor een lijst kaarten, in één lezing.
+ *
+ * Op tijdvenster en niet op nummer: de nummers staan genormaliseerd in de ene
+ * tabel en met landcode in de andere, en een `.in('nummer', …)` zou juist de
+ * gevallen missen waar het om gaat (zie CLAUDE.md lesson 18). Filteren doet
+ * regelsVoorNummer, in JS, met dezelfde laatste-negen-regel als de rest.
+ *
+ * `vanafIso` begrenst de lezing. Zonder grens zou dit met de jaren elke
+ * kaartlezing zwaarder maken; kaarten leven kort (de nachtelijke doorrol) dus
+ * een venster van enkele weken dekt alles wat een kaart kan zien.
+ *
+ * NOOIT STIL AFKAPPEN. Loopt de lezing tegen de limiet, dan komt dat als
+ * `afgekapt` terug zodat de aanroeper het kan melden in plaats van een te lage
+ * telling als meting te laten lezen.
+ */
+export const WA_REGELS_LIMIET = 5000;
+
+export async function haalWaRegelsVanaf(db, vanafIso) {
+  try {
+    const { data, error } = await db
+      .from('opvolging_wa_berichten')
+      .select('nummer, taak_id, richting, media_type, tijdstip')
+      .gte('tijdstip', vanafIso)
+      .order('tijdstip', { ascending: true })
+      .limit(WA_REGELS_LIMIET);
+    if (error) throw new Error(error.message);
+    const regels = data || [];
+    return { regels, fout: null, afgekapt: regels.length >= WA_REGELS_LIMIET };
+  } catch (e) {
+    console.warn('[opvolging-call-wa] regels vanaf lezen:', e?.message || e);
+    return { regels: [], fout: e?.message || String(e), afgekapt: false };
+  }
+}
