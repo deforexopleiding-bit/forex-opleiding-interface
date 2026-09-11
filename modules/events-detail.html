@@ -1163,6 +1163,11 @@ function renderAttendeesTab() {
           voicemail     : { label: 'Voicemail',      bg: 'var(--amber-soft)',   fg: 'var(--amber)',   border: 'var(--amber-line)' },
           terugbellen   : { label: 'Terugbellen',    bg: 'var(--blue-soft)',    fg: 'var(--blue)',    border: 'var(--blue-line)' },
           foutief_nummer: { label: 'Fout nummer',    bg: 'var(--slate-soft)',   fg: 'var(--rose)',    border: 'var(--rose-line)' },
+          // 'Liever via zoom' is GEEN afhaker. Zonder eigen badge viel deze
+          // waarde door naar de called_at-terugval en las hij als een kaal
+          // 'Gebeld' — of erger, hij stond naast de mensen die geen interesse
+          // hadden. Blauw, want er is juist een afspraak gemaakt.
+          liever_zoom   : { label: 'Liever via zoom', bg: 'var(--blue-soft)',    fg: 'var(--blue)',    border: 'var(--blue-line)' },
         };
         let calledCell;
         if (a.call_status && CALL_STATUS_BADGES[a.call_status]) {

@@ -36,7 +36,8 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { verzetAfspraak, verzetBlokkade, mapGhlError as mapVerzetGhlError } from './_lib/verzet-afspraak.js';
-import { zelfdeLead } from './_lib/opvolging-annulering.js';
+import { zelfdeLead, momentVan } from './_lib/opvolging-annulering.js';
+import { zetLieverZoom } from './opvolging-aanmelding-actie.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
 import { voegAgendaSamen, dagenTussen } from './_lib/opvolging-agenda-merge.js';
 import { bestemmingPerParent, vulVerzetBestemming } from './_lib/opvolging-dagbeeld.js';
@@ -657,6 +658,12 @@ async function boek(req, res) {
   if (b.appointment_id) return await verzetCall(req, res, b, start);
   if (!b.taak_id) return res.status(400).json({ error: 'taak_id of appointment_id ontbreekt' });
 
+  // DERDE UITGANG: 'liever via zoom' vanaf een aanmeldkaart. Zelfde boekmotor,
+  // andere afsluiting — zie lieverZoom() onderaan. De gewone weg zet de taak op
+  // 'ingepland' en laat hem wachten op bewijs uit de agenda; voor een
+  // aanmeldkaart is dat fout, want die is met dit besluit klaar.
+  if (String(b.uitgang || '') === 'liever_zoom') return await lieverZoom(req, res, b, start);
+
   let taak;
   try {
     const { data, error } = await supabaseAdmin
@@ -679,30 +686,11 @@ async function boek(req, res) {
       durationMinutes: DUUR_MIN,
     });
   } catch (e) {
-    // Dezelfde vertaling als de cockpit-uitkomst gebruikt, zodat de melding
-    // in beide schermen hetzelfde leest.
-    if (e?.code === 'NO_GHL_CONTACT') {
-      return res.status(422).json({
-        error: 'Geen e-mail of telefoon bekend — er is niets om het GHL-contact op te vinden. Vul de gegevens aan.',
-        code : 'NO_GHL_CONTACT',
-      });
-    }
-    if (e?.code === 'GHL_CONFIG_MISSING') {
-      return res.status(500).json({ error: 'GHL is niet gekoppeld op de server (GHL_CALENDAR_ID / GHL_LOCATION_ID).' });
-    }
-    if (e?.code === 'GHL_API') {
-      console.error('[opvolging-agenda] GHL:', e.ghlStatus, e.ghlBody);
-      return res.status(422).json({ error: mapGhlError(e.ghlStatus, e.ghlBody), ghl_status: e.ghlStatus });
-    }
-    if (e?.code === 'DB_INSERT') {
-      console.error('[opvolging-agenda] DB insert:', e?.message, 'ghl:', e?.ghl_appointment_id);
-      return res.status(500).json({
-        error             : 'De afspraak staat wel in GHL maar niet bij ons — controleer de kalender voor je opnieuw boekt.',
-        ghl_appointment_id: e?.ghl_appointment_id || null,
-      });
-    }
-    console.error('[opvolging-agenda] onbekend:', e?.message || e);
-    return res.status(500).json({ error: 'Interne fout' });
+    // Dezelfde vertaling als de cockpit-uitkomst gebruikt, zodat de melding in
+    // beide schermen hetzelfde leest — en sinds de zoom-uitgang staat ze op één
+    // plek, want twee kopieën lopen bij de eerste wijziging uiteen.
+    const fout = boekFoutNaarHttp(e, 'taak');
+    return res.status(fout.status).json(fout.body);
   }
 
   // Pas nu de taak bijwerken. Faalt dit, dan staat de afspraak er wel — dat
@@ -950,4 +938,172 @@ async function hangVerzetBestemming(dagen, afspraken) {
   } catch (e) {
     console.warn('[opvolging-agenda] verzet-bestemming (soft):', e?.message || e);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POST · 'LIEVER VIA ZOOM' VANAF EEN AANMELDKAART
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ── HET PROBLEEM ────────────────────────────────────────────────────────
+// Dave belt iemand die zich voor een masterclass heeft aangemeld en die zegt:
+// eigenlijk heb ik liever een zoomcall. Het Wat-nu-venster kende die uitgang
+// niet, dus moest Dave buiten Opvolging een zoom boeken én in de eventmodule
+// de persoon zelf afmelden. Twee administraties, en precies waar het misloopt:
+// de zoom stond er wel en de aanwezigenlijst wist van niets.
+//
+// ── DE VOLGORDE, EN WAAROM ──────────────────────────────────────────────
+// 1. GHL EERST, BLOKKEREND. Lukt het boeken niet, dan wordt er NIETS aan het
+//    event veranderd. Andersom zou iemand afgemeld staan voor een masterclass
+//    zonder dat er een zoomcall tegenover staat — afgemeld én niets, en dat
+//    merkt niemand tot de dag zelf.
+// 2. Afmelden in de eventmodule, via de bestaande kern (zetLieverZoom →
+//    zetKomtNiet), dus mét de capaciteitshook. Geen eigen UPDATE: een vrije
+//    plaats moet een vol event weer openen, en dat is precies wat een losse
+//    update vorige keer niet deed.
+// 3. De kaart dicht met een EIGEN archief_reden. Niet 'geen interesse' — dit
+//    is een omzetting, geen afhaker — en niet 'ingepland', want dan blijft de
+//    kaart wachten op bewijs uit de agenda dat nooit over hem zal gaan.
+//
+// ── WAT ER MET OPZET NIET GEBEURT ───────────────────────────────────────
+// Geen werklijstkaart, en de kaart is gearchiveerd, dus de terugkeer van vier
+// dagen voor het event (ronde B) gaat niet meer af: bepaalTaakActie laat een
+// gearchiveerde kaart met rust. De nieuwe zoomcall verschijnt vanzelf in Calls
+// van vandaag op zijn eigen dag, met de gewone spraak-/nabel-/afrondflow.
+// TWEE VELDEN, TWEE LEZERS. `reden_code` is de machinesleutel waar het rapport
+// en latere automatiseringen op filteren; `archief_reden` is de zin die in
+// Afgerond op het scherm staat. Eén van de twee zou altijd de verkeerde helft
+// bedienen: 'naar_zoom' leest als code in de UI, en een hele zin is geen sleutel.
+const LIEVER_ZOOM_REDEN_CODE   = 'naar_zoom';
+const LIEVER_ZOOM_ARCHIEF_REDEN = 'liever via zoom — afspraak geboekt';
+
+async function lieverZoom(req, res, b, start) {
+  let taak;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('opvolging_taken').select('*').eq('id', b.taak_id).maybeSingle();
+    if (error) throw error;
+    taak = data;
+  } catch (e) {
+    console.error('[opvolging-agenda] taak lezen (zoom):', e?.message || e);
+    return res.status(500).json({ error: 'Taak kon niet gelezen worden' });
+  }
+  if (!taak) return res.status(404).json({ error: 'Taak niet gevonden' });
+
+  // Alleen vanaf een aanmeldkaart. Op een gewone opvolgtaak bestaat 'Opnieuw
+  // inplannen' al, en daar is geen event om iemand voor af te melden.
+  if (String(taak.reden || '') !== 'aanmelding') {
+    return res.status(409).json({
+      error: 'Deze uitgang hoort bij een aanmeldkaart. Gebruik op een gewone kaart "Opnieuw inplannen".',
+    });
+  }
+  if (String(taak.status || '') === 'gearchiveerd') {
+    return res.status(409).json({ error: 'Deze kaart is al afgerond.' });
+  }
+
+  // ── 1 · DE ZOOMCALL, BLOKKEREND ────────────────────────────────────────
+  const lead = await zoekLeadVoorTaak(taak);
+  let afspraak;
+  try {
+    afspraak = await createAppointmentForLead({
+      lead,
+      scheduledAt    : start.toISOString(),
+      durationMinutes: DUUR_MIN,
+    });
+  } catch (e) {
+    const fout = boekFoutNaarHttp(e, 'zoom');
+    return res.status(fout.status).json(fout.body);
+  }
+
+  const afspraakRef = {
+    bron               : 'opvolging-agenda',
+    uitgang            : 'liever_zoom',
+    appointment_id     : afspraak.appointment_id,
+    ghl_appointment_id : afspraak.ghl_appointment_id,
+    zoom_join_url      : afspraak.zoom_join_url,
+    scheduled_at       : afspraak.scheduled_at,
+  };
+
+  // ── 2 · AFMELDEN IN DE EVENTMODULE ─────────────────────────────────────
+  // Fail-soft, en niet stil: de zoomcall staat al, dus terugdraaien zou een
+  // afspraak weggooien die de lead net heeft afgesproken. De uitkomst gaat
+  // mee in het antwoord zodat de view het aan Dave kan melden.
+  const attendeeId = (taak.bron_ref && taak.bron_ref.attendee_id) || null;
+  const m = momentVan(afspraak.scheduled_at);
+  const eventmodule = await zetLieverZoom(attendeeId, new Date().toISOString(), m ? m.tekst : null);
+
+  // ── 3 · DE KAART DICHT, MET EIGEN REDEN ────────────────────────────────
+  const nu = new Date().toISOString();
+  try {
+    const { error } = await supabaseAdmin.from('opvolging_taken').update({
+      status         : 'gearchiveerd',
+      reden_code     : LIEVER_ZOOM_REDEN_CODE,
+      archief_reden  : LIEVER_ZOOM_ARCHIEF_REDEN,
+      gearchiveerd_at: nu,
+      afspraak_ref   : afspraakRef,
+      afspraak_gevonden_at: nu,
+      notitie        : voegNotitieRegelToe(taak.notitie,
+        `${vandaagInZone()} · Liever via zoom: afspraak op ${m ? m.tekst : 'een nieuw moment'}. `
+        + 'Afgemeld voor het event.'),
+      updated_at     : nu,
+    }).eq('id', taak.id);
+    if (error) throw error;
+  } catch (e) {
+    console.error('[opvolging-agenda] kaart sluiten (zoom):', e?.message || e);
+    return res.status(500).json({
+      error   : 'De zoomcall staat, maar de kaart kon niet afgerond worden. Zet hem handmatig weg.',
+      afspraak: afspraakRef,
+      eventmodule,
+    });
+  }
+
+  // De poging is de historiek, niet de actie zelf — fail-soft.
+  try {
+    const { error } = await supabaseAdmin.from('opvolging_pogingen').insert({
+      taak_id: taak.id, soort: 'ingepland', automatisch: true,
+      resultaat: 'gesproken: liever via zoom — afspraak geboekt', richting: 'uit',
+    });
+    if (error) throw error;
+  } catch (e) {
+    console.warn('[opvolging-agenda] poging schrijven (zoom, soft):', e?.message || e);
+  }
+
+  return res.status(200).json({ success: true, afspraak: afspraakRef, eventmodule });
+}
+
+/** Een regel vooraan de notitie, zonder de bestaande tekst te verliezen. */
+function voegNotitieRegelToe(oud, regel) {
+  const t = String(oud || '').trim();
+  if (t.includes(regel)) return t;
+  return t ? `${regel}\n\n${t}` : regel;
+}
+
+/**
+ * De fouten van createAppointmentForLead in taal waar Dave iets mee kan.
+ *
+ * Losgetrokken uit boek(): de zoom-uitgang hoort dezelfde meldingen te geven,
+ * en twee kopieën van deze vertaling lopen bij de eerste wijziging uiteen.
+ */
+function boekFoutNaarHttp(e, waar) {
+  if (e?.code === 'NO_GHL_CONTACT') {
+    return { status: 422, body: {
+      error: 'Geen e-mail of telefoon bekend — er is niets om het GHL-contact op te vinden. Vul de gegevens aan.',
+      code : 'NO_GHL_CONTACT',
+    } };
+  }
+  if (e?.code === 'GHL_CONFIG_MISSING') {
+    return { status: 500, body: { error: 'GHL is niet gekoppeld op de server (GHL_CALENDAR_ID / GHL_LOCATION_ID).' } };
+  }
+  if (e?.code === 'GHL_API') {
+    console.error('[opvolging-agenda] GHL (' + waar + '):', e.ghlStatus, e.ghlBody);
+    return { status: 422, body: { error: mapGhlError(e.ghlStatus, e.ghlBody), ghl_status: e.ghlStatus } };
+  }
+  if (e?.code === 'DB_INSERT') {
+    console.error('[opvolging-agenda] DB insert (' + waar + '):', e?.message, 'ghl:', e?.ghl_appointment_id);
+    return { status: 500, body: {
+      error             : 'De afspraak staat wel in GHL maar niet bij ons — controleer de kalender voor je opnieuw boekt.',
+      ghl_appointment_id: e?.ghl_appointment_id || null,
+    } };
+  }
+  console.error('[opvolging-agenda] onbekend (' + waar + '):', e?.message || e);
+  return { status: 500, body: { error: 'Interne fout' } };
 }

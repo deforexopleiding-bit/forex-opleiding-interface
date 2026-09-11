@@ -160,7 +160,10 @@ test('de capaciteitshook draait alleen als de status echt verandert', () => {
   const bron = readFileSync(join(ROOT, 'api/opvolging-aanmelding-actie.js'), 'utf8');
   const i = bron.indexOf('export async function zetKomtNiet');
   assert.ok(i > 0);
-  const blok = bron.slice(i, i + 2200);
+  // Ruim genomen: de kern kreeg er bij 'liever via zoom' een optionele reden
+  // bij, dus de functie is langer. De REGEL eronder is niet veranderd, en dat
+  // is wat deze test bewaakt.
+  const blok = bron.slice(i, i + 4200);
 
   assert.match(blok, /const statusWijzigt = huidige === 'aangemeld' \|\| huidige === 'wachtlijst'/);
   assert.match(blok, /if \(statusWijzigt\) patch\.status = 'geannuleerd'/);

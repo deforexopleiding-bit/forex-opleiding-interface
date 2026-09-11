@@ -200,12 +200,16 @@ test('het venster toont dat er iets gebeurt en zet de opties uit', () => {
   assert.match(view, /const bezig = !!_ui\.bezig;/);
   assert.match(view, /Bezig met verplaatsen&hellip;/);
 
-  // Alle vier de uitgangen krijgen de vlag mee, niet alleen de verplaatsknop:
-  // zolang er iets loopt hoort er niets anders klikbaar te zijn.
+  // ELKE uitgang krijgt de vlag mee, niet alleen de verplaatsknop: zolang er
+  // iets loopt hoort er niets anders klikbaar te zijn. Sinds 'Liever via zoom'
+  // zijn het er vijf — dat getal hoort mee te groeien, want een nieuwe uitgang
+  // zonder vlag is precies het gat dat deze test moet vinden.
   const i = view.indexOf("const bezig = !!_ui.bezig;");
-  const blok = view.slice(i, i + 1600);
+  const blok = view.slice(i, i + 2400);
+  const opties = (blok.match(/^\s*opt\(/gm) || []).length;
   const metVlag = (blok.match(/\)", bezig\)|\)', bezig\)/g) || []).length;
-  assert.equal(metVlag, 4, 'vier opties, vier keer de bezig-vlag');
+  assert.equal(opties, 5, 'vijf uitgangen in het Wat-nu-venster van een aanmeldkaart');
+  assert.equal(metVlag, opties, 'elke uitgang hoort de bezig-vlag mee te krijgen');
 });
 
 test('opt() maakt een uitgeschakelde knop zonder onclick', () => {

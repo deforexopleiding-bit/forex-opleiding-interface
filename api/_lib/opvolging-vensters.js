@@ -167,9 +167,24 @@ export function telVensters(taken, dag) {
  * call zélf nee zei. Daar 'te weinig moeite' op zetten is een verwijt voor iets
  * waar niets aan te doen viel.
  */
+/**
+ * De reden_codes waarbij 'te weinig moeite' een verwijt zou zijn voor iets waar
+ * niets aan te doen viel — of waar juist wél iets gebeurd is.
+ *
+ *   zoom_geen_interesse  de lead zei tijdens de call zelf nee.
+ *   naar_zoom            de lead wilde liever een zoomcall; die is geboekt en
+ *                        hij is afgemeld voor het event. Dat is het beste
+ *                        denkbare einde van zo'n kaart, en zonder deze regel
+ *                        zou het met nul belpogingen als nalatigheid lezen.
+ */
+export const MOEITE_NVT = {
+  zoom_geen_interesse: 'de lead zei tijdens de call zelf nee',
+  naar_zoom          : 'omgezet naar een zoomcall — geen afhaker',
+};
+
 export function beoordeelMoeite({ bel_dagen, wa_totaal, reden_code, duur_bekend } = {}) {
-  if (reden_code === 'zoom_geen_interesse') {
-    return { staat: 'nvt', reden: 'de lead zei tijdens de call zelf nee' };
+  if (MOEITE_NVT[reden_code]) {
+    return { staat: 'nvt', reden: MOEITE_NVT[reden_code] };
   }
   // ONBEKEND IS GEEN NEE.
   //
