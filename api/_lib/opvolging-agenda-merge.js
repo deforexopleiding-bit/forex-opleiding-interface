@@ -160,6 +160,9 @@ export function voegAgendaSamen({ slots, afspraken, van, tot, timeZone = 'Europe
         doorgehaald   : plek.feit.doorgehaald,
         verzet_naar   : plek.verzet_van ? null : plek.feit.naar,
         verzet_van    : plek.verzet_van || null,
+        // Verzet binnen dezelfde dag: geen doorhaling, wel een ander uur. Los
+        // veld zodat het na te meten is zonder het label te moeten uitparsen.
+        verzet_binnen_dag: plek.feit.binnen_dag || null,
         // Heeft Dave deze al afgerond, en waarmee? Dezelfde chip als in het
         // callsblok — de ENIGE plek waar een uitkomst getoond wordt.
         afrond        : afrondActie(a),
