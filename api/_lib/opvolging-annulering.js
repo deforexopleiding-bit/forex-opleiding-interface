@@ -36,6 +36,47 @@ export const HERBOEKT_STATUSSEN = ['scheduled', 'in_progress'];
 export const REDEN_ZELF   = 'zelf_geannuleerd';
 export const REDEN_AGENDA = 'geannuleerd_in_agenda';
 
+// ── EEN AFGESLOTEN LEAD KRIJGT GEEN NIEUWE KAART ─────────────────────────
+//
+// GEMETEN OP 11 SEPTEMBER, en dit is precies wat niet mag. Jeffrey Biemold
+// (+31655270212, GHL-contact ZvTcan7kmMWG8GZgyoEr) kreeg een kaart
+// 'Geannuleerd · call za 26/09 09:30 … plan hem opnieuw in'. Maar Dave had op
+// 10 september om 12:48 voor diezelfde lead al `wilt_niet_meer` vastgelegd —
+// geen interesse. De call van de 26e werd vandaag geannuleerd, vermoedelijk
+// juist daarom.
+//
+// De cron keek alleen naar `uitkomst` op de geannuleerde afspraak ZELF en naar
+// OPEN kaarten op het nummer. Een lead die al afgesloten is langs een ándere
+// afspraak, of via een kaart die intussen gearchiveerd is, viel daar
+// helemaal buiten. Iemand die 'geen interesse' zei terugbellen om opnieuw in
+// te plannen is het ergste wat deze module kan doen.
+//
+// ── WELKE UITKOMSTEN ZIJN EEN EINDPUNT ───────────────────────────────────
+// Uit de woordenlijsten van de twee outcome-motoren — die blijven ongemoeid,
+// hier staat alleen wat ze BETEKENEN voor deze cron:
+//
+//   api/follow-up-appointment-outcome.js → OUTCOMES
+//     sale            klant geworden
+//     wilt_niet_meer  geen interesse
+//     niet_geschikt   past niet bij ons
+//   api/follow-up-lead-outcome.js → OUTCOMES
+//     sale, geen_interesse   (dezelfde twee, andere spelling)
+//
+// NIET in deze lijst, met opzet:
+//   gesprek_gehad, no_show, later_opnieuw, terugbel, verzetten, annuleren,
+//   snooze, whatsapp_gestuurd — daar leeft de lead gewoon door. 'Gesprek
+//   gehad' staat wél in AGENDA_REMOVING_OUTCOMES, maar dat gaat over de
+//   Zoom-meeting opruimen, niet over de lead afsluiten.
+export const EINDPUNT_UITKOMSTEN = new Set([
+  'sale',
+  'wilt_niet_meer',
+  'geen_interesse',
+  'niet_geschikt',
+]);
+
+/** reden_code op een gearchiveerde kaart die zegt: deze lead is klaar. */
+export const EINDPUNT_REDEN_CODES = new Set(['zoom_geen_interesse']);
+
 const DAGNAMEN = ['zo', 'ma', 'di', 'wo', 'do', 'vr', 'za'];
 const cijfers = (s) => {
   const c = String(s == null ? '' : s).replace(/\D/g, '');
@@ -143,24 +184,71 @@ export function slaOver(afspraak) {
  * 'scheduled' staat is geen herboeking; dan zou een annulering van vandaag
  * verstommen door iets van vorige maand.
  */
-export function heeftHerboekt(afspraak, alleAfspraken) {
-  const contact = afspraak && afspraak.lead_ghl_contact_id
-    ? String(afspraak.lead_ghl_contact_id) : null;
-  const tel = cijfers(afspraak && afspraak.lead_phone);
-  const staart = tel && tel.length >= 9 ? tel.slice(-9) : null;
-  const grens = Date.parse(afspraak && afspraak.scheduled_at);
+/**
+ * Hoort deze rij bij dezelfde lead als de afspraak?
+ *
+ * GHL-contact eerst, dan het genormaliseerde nummer — een lead die via een
+ * andere weg terugkomt kan een ander contact-id hebben maar belt met dezelfde
+ * telefoon. Losgetrokken omdat zowel de herboek-vraag als de afgesloten-vraag
+ * hem nodig heeft, en twee kopieën zouden uiteenlopen.
+ */
+export function zelfdeLead(afspraak, rij) {
+  if (!afspraak || !rij) return false;
+  const contact = afspraak.lead_ghl_contact_id ? String(afspraak.lead_ghl_contact_id) : null;
+  if (contact && rij.lead_ghl_contact_id && String(rij.lead_ghl_contact_id) === contact) return true;
 
+  const tel = cijfers(afspraak.lead_phone);
+  const c = cijfers(rij.lead_phone != null ? rij.lead_phone : rij.telefoon);
+  if (!tel || !c) return false;
+  if (c === tel) return true;
+  const staart = tel.length >= 9 ? tel.slice(-9) : null;
+  return !!staart && c.length >= 9 && c.slice(-9) === staart;
+}
+
+/**
+ * IS DEZE LEAD AL AFGESLOTEN?
+ *
+ * Twee bronnen, want het antwoord kan op twee plekken staan:
+ *
+ *  1. EENDER WELKE afspraak van deze lead met een eindpunt-uitkomst. Niet
+ *     alleen de geannuleerde zelf — Jeffrey's `wilt_niet_meer` stond op een
+ *     ándere afspraak, van 9 september, en dat was precies het gat.
+ *  2. Een gearchiveerde opvolgkaart op dat nummer die zegt dat hij afhaakte:
+ *     reden_code `zoom_geen_interesse` (de zoomcall-uitgang), of een
+ *     archief_reden die met 'geen interesse' begint (de aanmeldkaart-uitgang
+ *     schrijft 'geen interesse of per ongeluk aangemeld').
+ *
+ * GEEN datumgrens. Wie ooit 'geen interesse' zei, blijft dat gezegd hebben
+ * totdat hij zelf terugkomt — en als hij terugkomt doet hij dat door een
+ * nieuwe afspraak te boeken, en dan vangt heeftHerboekt() hem al af.
+ */
+export function leadAlAfgesloten(afspraak, alleAfspraken, kaarten) {
   for (const a of (Array.isArray(alleAfspraken) ? alleAfspraken : [])) {
-    if (!a || String(a.id) === String(afspraak.id)) continue;
+    if (!a) continue;
+    const u = String(a.uitkomst || '').trim().toLowerCase();
+    if (!u || !EINDPUNT_UITKOMSTEN.has(u)) continue;
+    if (zelfdeLead(afspraak, a)) return true;
+  }
+
+  for (const k of (Array.isArray(kaarten) ? kaarten : [])) {
+    if (!k || String(k.status || '') !== 'gearchiveerd') continue;
+    const code = String(k.reden_code || '').trim();
+    const reden = String(k.archief_reden || '').trim().toLowerCase();
+    const eindpunt = EINDPUNT_REDEN_CODES.has(code) || reden.startsWith('geen interesse');
+    if (!eindpunt) continue;
+    if (zelfdeLead(afspraak, k)) return true;
+  }
+  return false;
+}
+
+export function heeftHerboekt(afspraak, alleAfspraken) {
+  const grens = Date.parse(afspraak && afspraak.scheduled_at);
+  for (const a of (Array.isArray(alleAfspraken) ? alleAfspraken : [])) {
+    if (!a || !afspraak || String(a.id) === String(afspraak.id)) continue;
     if (!HERBOEKT_STATUSSEN.includes(String(a.status || '').toLowerCase())) continue;
     const ms = Date.parse(a.scheduled_at);
     if (!Number.isFinite(ms) || !Number.isFinite(grens) || ms <= grens) continue;
-
-    if (contact && a.lead_ghl_contact_id && String(a.lead_ghl_contact_id) === contact) return true;
-    const c = cijfers(a.lead_phone);
-    if (!c || !tel) continue;
-    if (c === tel) return true;
-    if (staart && c.length >= 9 && c.slice(-9) === staart) return true;
+    if (zelfdeLead(afspraak, a)) return true;
   }
   return false;
 }
