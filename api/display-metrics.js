@@ -84,6 +84,34 @@ function trimName(name) {
   return `${first} ${last.charAt(0).toUpperCase()}.`;
 }
 
+// ── Feed-lead helpers (2026-09-13) ────────────────────────────────────────
+// Test-email-filter identiek aan _lib/leads-per-traject-compute.js, zodat de
+// feed-lead-items exact dezelfde rijen tellen als de hero/per-bron.
+function isFeedTestEmail(e) {
+  if (!e || typeof e !== 'string') return false;
+  const s = e.toLowerCase();
+  return s.includes('test') || s.includes('deforexopleiding');
+}
+// Bron-label voor een lead-feed-item: bucket-label uit traject (substring-match),
+// anders het rauwe traject, anders soort (herkomst). Leeg → ''.
+const _BRON_LABEL = { challenge: '7-daagse', mini: 'Mini-cursus', event: 'Events', webinar: 'Webinar' };
+function leadBron(traject, soort) {
+  const t = String(traject || '').trim();
+  if (t) {
+    const low = t.toLowerCase();
+    for (const b of BUCKET_MATCHERS) if (b.match.some(m => low.includes(m))) return _BRON_LABEL[b.key] || t;
+    return t; // wel een traject, maar niet gebucket → toon rauw label
+  }
+  return String(soort || '').trim();
+}
+// NL-datum/tijd voor de "Nieuwe call gepland"-feedtekst (server draait in UTC).
+function fmtNlDateTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('nl-NL', { timeZone: 'Europe/Amsterdam', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+
 // ── Token-check tegen display_tokens ──────────────────────────────────────
 async function verifyToken(plaintext) {
   if (!plaintext || typeof plaintext !== 'string' || plaintext.length < 16) return false;
@@ -191,9 +219,19 @@ export default async function handler(req, res) {
       // v3 (2026-08-26): feed-bronnen op HELE NL-vandaag i.p.v. 2h-window,
       // zodat de feed altijd gevuld is en aflopend blijft stromen.
       // Elk .limit(20) → samen max 100 kandidaten → top-15 in payload.
-      /* 5 */ supabaseAdmin.from('email_messages').select('id, from_name, date_received')
-                .eq('category', 'Nieuwe Lead').gte('date_received', dayStartIso).lt('date_received', dayEndIso)
-                .order('date_received', { ascending: false }).limit(20),
+      /* 5 */ // Feed "Nieuwe lead" — 2026-09-13: uit de LEADS-tabel (zelfde bron
+              //   als de telling/computeLeadsByTraject) i.p.v. email_messages
+              //   category='Nieuwe Lead'. Die laatste waren notificatie-mails
+              //   (from_name='De Forex Opleiding' → "De O.") incl. dubbelen en
+              //   afspraak-notificaties → feed telde anders dan de hero. Nu:
+              //   echte leads-rijen (voornaam/achternaam + traject/soort), zelfde
+              //   filter (verwijderd_op NULL, aangemaakt NL-vandaag; test-emails
+              //   JS-side eruit, idem lib). limit 30 want test-filter komt na de query.
+              supabaseAdmin.from('leads')
+                .select('voornaam, achternaam, email, traject, soort, aangemaakt')
+                .is('verwijderd_op', null)
+                .gte('aangemaakt', dayStartIso).lt('aangemaakt', dayEndIso)
+                .order('aangemaakt', { ascending: false }).limit(30),
       /* 6 */ // Feed sales: LEEG. We deriveren uit salesCompute.recent_ids
               // (clean-set die ook sales.count/total voedt). Index blijft
               // bezet zodat pick(7-13) niet schuift.
@@ -307,6 +345,14 @@ export default async function handler(req, res) {
       /*27 */ // Taken afgerond vandaag: gearchiveerd_at in NL-vandaag.
               supabaseAdmin.from('opvolging_taken').select('id', { count: 'exact', head: true })
                 .gte('gearchiveerd_at', dayStartIso).lt('gearchiveerd_at', dayEndIso),
+      /*28 */ // Feed "Nieuwe call gepland" — follow_up_appointments met created_at
+              //   in NL-vandaag. Echte nieuwe boekingen: reschedule-kinderen
+              //   (parent_appointment_id) eruit; test-afspraken JS-side gefilterd.
+              supabaseAdmin.from('follow_up_appointments')
+                .select('id, lead_name, scheduled_at, created_at, booking_source, is_test')
+                .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
+                .is('parent_appointment_id', null)
+                .order('created_at', { ascending: false }).limit(20),
     ]);
 
     const pick = (i, fallback) => {
@@ -344,6 +390,7 @@ export default async function handler(req, res) {
     const opvWhatsappRes     = pick(25, { count: 0 });
     const opvOpenTakenRes    = pick(26, { count: 0 });
     const opvTakenAfgerondRes = pick(27, { count: 0 });
+    const feedNewCallsRes    = pick(28, { data: [] });
 
     // ── Opvolging-tellingen ───────────────────────────────────────────────
     // Belpogingen = alle uitgaande call-pogingen vandaag. Gesprekken = de
@@ -386,6 +433,16 @@ export default async function handler(req, res) {
       if (!matched && cnt > 0) unmatched.push({ label, count: cnt });
     }
     if (unmatched.length) console.log('[display-metrics] leads-buckets unmatched today:', unmatched);
+    // ── "Overig"-bucket ───────────────────────────────────────────────────
+    // Alle non-test leads-van-vandaag die NIET in één van de vier lead-buckets
+    // vielen: niet-gematcht traject (unmatched) én lege/NULL traject (die zitten
+    // wél in total_incl_afwijzer maar in géén by_traject-bucket). Zo telt
+    // challenge+mini+event+webinar+overig exact op tot de hero. Alleen tonen als
+    // >0 (zie payload) — houdt de strip rustig.
+    const matchedLeadSum = buckets.challenge + buckets.mini + buckets.event + buckets.webinar;
+    const overig = (leadsCompute.total_incl_afwijzer == null)
+      ? 0
+      : Math.max(0, leadsCompute.total_incl_afwijzer - matchedLeadSum);
 
     // ── Sales — geen dubbel-trim; label komt PII-safe uit compute-helper ──
     const salesRecent = salesCompute.recent_ids || [];
@@ -504,10 +561,18 @@ export default async function handler(req, res) {
 
     // ── Feed 6-way ────────────────────────────────────────────────────────
     const feed = [];
-    for (const e of (feedLeadsRes.data || [])) feed.push({
-      ts: new Date(e.date_received).toISOString(), type: 'lead',
-      text: `Nieuwe lead: ${trimName(e.from_name || '')}`,
-    });
+    // Nieuwe leads — uit de leads-tabel (bron #5). Echte naam (geen trimName-
+    // maskering) + bron/traject. Test-emails eruit (idem telling) zodat de
+    // feed-leadtelling gelijk loopt met hero + per-bron.
+    for (const l of (feedLeadsRes.data || [])) {
+      if (isFeedTestEmail(l.email)) continue;
+      const naam = [l.voornaam, l.achternaam].filter(Boolean).join(' ').trim() || '—';
+      const bron = leadBron(l.traject, l.soort);
+      feed.push({
+        ts: new Date(l.aangemaakt).toISOString(), type: 'lead',
+        text: `Nieuwe lead: ${naam}${bron ? ' · ' + bron : ''}`,
+      });
+    }
     for (const s of feedSalesClean) feed.push({
       ts: s.accepted_at, type: 'sale',
       text: `Sale: ${s.customer_label}`,
@@ -531,6 +596,19 @@ export default async function handler(req, res) {
       ts: new Date(s.created_at).toISOString(), type: 'event',
       text: `Event-signup: ${trimName(s.first_name || '')}${s.event_date_label ? ' → ' + s.event_date_label : ''}`,
     });
+    // Nieuwe Zoom-calls gepland vandaag (bron #28). Eigen tekst ("Nieuwe call
+    // gepland: …") zodat het niet botst met de opvolging-"Call: …" (afgerond).
+    // ts = created_at (wanneer geboekt); in de tekst het geplande moment + bron.
+    for (const a of (feedNewCallsRes.data || [])) {
+      if (a.is_test === true) continue;
+      const naam    = (a.lead_name && String(a.lead_name).trim()) || '—';
+      const wanneer = fmtNlDateTime(a.scheduled_at);
+      const bron    = a.booking_source ? ' · ' + a.booking_source : '';
+      feed.push({
+        ts: new Date(a.created_at).toISOString(), type: 'call',
+        text: `Nieuwe call gepland: ${naam}${wanneer ? ' · ' + wanneer : ''}${bron}`,
+      });
+    }
     feed.sort((a, b) => (a.ts < b.ts ? 1 : -1));
 
     // ── Optionele diagnose-scan (achter env-flag, alleen tijdens tuning) ─
@@ -558,17 +636,23 @@ export default async function handler(req, res) {
       ? null
       : leadsCompute.total_incl_afwijzer;
 
+    // Lead-buckets: de vier vaste + (indien >0) "Overig", zodat challenge+mini+
+    // event+webinar+overig == hero. "Nieuwe calls" blijft de losse 6e strip-tegel
+    // (geen lead, maar geboekte calls). Overig alleen tonen als er iets in zit.
+    const leadBuckets = [
+      { key: 'challenge', label: '7-daagse',    count: buckets.challenge },
+      { key: 'mini',      label: 'Mini-cursus', count: buckets.mini      },
+      { key: 'event',     label: 'Events',      count: buckets.event     },
+      { key: 'webinar',   label: 'Webinar',     count: buckets.webinar   },
+    ];
+    if (overig > 0) leadBuckets.push({ key: 'overig', label: 'Overig', count: overig });
+    leadBuckets.push({ key: 'calls', label: 'Nieuwe calls', count: callsBookedCount ?? null });
+
     const payload = {
       generated_at: new Date().toISOString(),
       leads: {
         total: leadsTotal,
-        buckets: [
-          { key: 'challenge', label: '7-daagse',      count: buckets.challenge },
-          { key: 'mini',      label: 'Mini-cursus',   count: buckets.mini      },
-          { key: 'event',     label: 'Events',        count: buckets.event     },
-          { key: 'webinar',   label: 'Webinar',       count: buckets.webinar   },
-          { key: 'calls',     label: 'Nieuwe calls',  count: callsBookedCount ?? null },
-        ],
+        buckets: leadBuckets,
       },
       sales: {
         count: salesCompute.count,
