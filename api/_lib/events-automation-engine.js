@@ -9,6 +9,10 @@ import { supabaseAdmin } from '../supabase.js';
 import { sendEventEmail, sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapSendStatus } from './comms-log.js';
 import { onConfirmedAttendeeMutation } from './event-attendee-mutations.js';
+// plafondMs is de ENIGE plek waar 'nooit later dan X uur voor het event' wordt
+// uitgerekend — dezelfde functie die de deadline in de mailtekst zet. Zie de
+// kop van _lib/geen-gehoor-deadline.js.
+import { plafondMs } from './geen-gehoor-deadline.js';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
@@ -57,20 +61,10 @@ export function computeNextRunAt(waitConfig, fromMs) {
  * @returns {Date}
  */
 export function applyWaitCeiling(nextRunAt, waitConfig, eventStartsAt, fromMs) {
-  const rauw = waitConfig && waitConfig.uiterlijk_uren_voor_event;
-  // TYPE EERST, PAS DAN Number(). Number([]) is 0 en Number('') ook — een
-  // corrupte config zou daarmee 'uiterlijk op het moment dat het event begint'
-  // betekenen, en dat is iets heel anders dan 'geen grens'.
-  const isGetal = typeof rauw === 'number'
-    || (typeof rauw === 'string' && rauw.trim() !== '' && Number.isFinite(Number(rauw)));
-  if (!isGetal) return nextRunAt;
-  const uren = Number(rauw);
-  if (!Number.isFinite(uren) || uren < 0) return nextRunAt;
-
-  const startMs = eventStartsAt == null ? NaN : Date.parse(eventStartsAt);
-  if (!Number.isFinite(startMs)) return nextRunAt;
-
-  const grensMs = startMs - uren * 3_600_000;
+  // Geen grens in de config, onleesbare grens of onleesbare startdatum →
+  // plafondMs geeft null en de wachttijd blijft ongemoeid.
+  const grensMs = plafondMs(eventStartsAt, waitConfig && waitConfig.uiterlijk_uren_voor_event);
+  if (grensMs == null) return nextRunAt;
   if (grensMs <= fromMs) return new Date(fromMs);
 
   const gepland = nextRunAt instanceof Date ? nextRunAt.getTime() : Number(nextRunAt);
