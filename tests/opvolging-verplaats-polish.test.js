@@ -201,14 +201,22 @@ test('het venster toont dat er iets gebeurt en zet de opties uit', () => {
   assert.match(view, /Bezig met verplaatsen&hellip;/);
 
   // ELKE uitgang krijgt de vlag mee, niet alleen de verplaatsknop: zolang er
-  // iets loopt hoort er niets anders klikbaar te zijn. Sinds 'Liever via zoom'
-  // zijn het er vijf — dat getal hoort mee te groeien, want een nieuwe uitgang
-  // zonder vlag is precies het gat dat deze test moet vinden.
+  // iets loopt hoort er niets anders klikbaar te zijn.
+  //
+  // GETELD OP HET BLOK, NIET OP EEN VAST AANTAL. Hier stond `opties === 5` met
+  // een venster van 2400 tekens; bij de zesde uitgang ('Geen gehoor') viel die
+  // buiten het venster en werd deze test rood om iets wat gewoon goed stond.
+  // Wat de test moet vinden is een uitgang ZONDER vlag, en dat is precies wat
+  // er nu geteld wordt: elke opt()-aanroep hoort `bezig` in zijn laatste
+  // argument te hebben — kaal (`, bezig)`) of samengesteld
+  // (`, bezig || !dr.gehaald)`).
   const i = view.indexOf("const bezig = !!_ui.bezig;");
-  const blok = view.slice(i, i + 2400);
-  const opties = (blok.match(/^\s*opt\(/gm) || []).length;
-  const metVlag = (blok.match(/\)", bezig\)|\)', bezig\)/g) || []).length;
-  assert.equal(opties, 5, 'vijf uitgangen in het Wat-nu-venster van een aanmeldkaart');
+  const eind = view.indexOf('return scrim(', i);
+  assert.ok(eind > i, 'het blok hoort op een scrim uit te komen');
+  const blok = view.slice(i, eind);
+  const opties = (blok.match(/\bopt\(/g) || []).length;
+  const metVlag = (blok.match(/,\s*bezig(\s*\|\|[^)]*)?\)/g) || []).length;
+  assert.ok(opties >= 6, 'zes of meer uitgangen in het Wat-nu-venster van een aanmeldkaart');
   assert.equal(metVlag, opties, 'elke uitgang hoort de bezig-vlag mee te krijgen');
 });
 

@@ -168,3 +168,37 @@ test('een andere reden_code krijgt gewoon het oordeel', () => {
   // komen, en dan bewaakt de vorige test niets.
   assert.equal(lib.beoordeelMoeite({ bel_dagen: 0, wa_totaal: 0, reden_code: 'no_show' }).staat, 'te_weinig');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DE DREMPEL-UITLEG — ook een tweeling
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// drempelTekort() zegt wát er nog ontbreekt aan de archiveerdrempel. Die tekst
+// staat onder de knop 'Geen gehoor' in de view, en dezelfde functie hoort
+// server-side hetzelfde te zeggen. Lopen ze uiteen, dan zegt het scherm 'nog 1
+// belpoging' waar de lib 'genoeg' zegt over precies dezelfde lead — en dan gaat
+// er een mail uit die belooft dat we meermaals geprobeerd hebben te bereiken.
+
+const DREMPEL_GEVALLEN = [
+  {},
+  { bel_dagen: 0, wa_totaal: 0 },
+  { bel_dagen: 1, wa_totaal: 0 },
+  { bel_dagen: 2, wa_totaal: 0 },
+  { bel_dagen: 3, wa_totaal: 0 },
+  { bel_dagen: 3, wa_totaal: 1 },
+  { bel_dagen: 4, wa_totaal: 2 },
+  { bel_dagen: 0, wa_totaal: 5 },
+  { bel_dagen: null, wa_totaal: null },
+  { bel_dagen: NaN, wa_totaal: NaN },
+  { bel_dagen: 'drie', wa_totaal: 'een' },
+];
+
+for (const geval of DREMPEL_GEVALLEN) {
+  test(`tweeling · drempelTekort · ${JSON.stringify(geval)}`, () => {
+    assert.deepEqual(plat(lib.drempelTekort(geval)), plat(view.drempelTekort(geval)));
+  });
+}
+
+test('tweeling · drempelTekort zonder argument', () => {
+  assert.deepEqual(plat(lib.drempelTekort()), plat(view.drempelTekort()));
+});
