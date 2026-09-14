@@ -6,12 +6,17 @@
 // het nieuwe tijdstip opnieuw loopt, en het token wordt geroteerd (oude link
 // vervalt).
 //
-// POST { token:<uuid>, new_start_at:<ISO> }
-// 200 { ok, new_token, scheduled_at }   409 als niet meer scheduled   502 GHL-fout
+// Verzetten blijft ALTIJD mogelijk (ook >24u ervoor), maar er moet ALTIJD een
+// serieuze reden mee — zonder geldige reden geen verzetting (server-gevalideerd,
+// niet te omzeilen door de UI over te slaan). De reden slaan we op in
+// follow_up_appointments.verzet_reden zodat we 'm in de CRM kunnen terugzien.
+//
+// POST { token:<uuid>, new_start_at:<ISO>, reden:<string ≥15 tekens> }
+// 200 { ok, new_token, scheduled_at }   400 reden-verplicht   409 niet meer scheduled   502 GHL-fout
 
 import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
-import { checkSelfserviceSecret, haalAfspraakViaToken } from './_lib/afspraak-selfservice.js';
+import { checkSelfserviceSecret, haalAfspraakViaToken, redenGeldig, schoonReden } from './_lib/afspraak-selfservice.js';
 import { updateGhlAppointmentTime } from './_lib/ghl-appointment.js';
 import { stuurVerzetBericht } from './_lib/afspraak-status-notify.js';
 
@@ -26,6 +31,13 @@ export default async function handler(req, res) {
   const body = req.body || {};
   const token = (body.token || '').toString();
   const newStartRaw = (body.new_start_at || '').toString();
+
+  // Verplichte, serieuze reden — vóór alle GHL/DB-mutaties (server is de
+  // autoriteit; de UI kan dit niet omzeilen).
+  const reden = schoonReden(body.reden);
+  if (!redenGeldig(reden)) {
+    return res.status(400).json({ error: 'reden-verplicht' });
+  }
 
   const r = await haalAfspraakViaToken(token);
   if (r.error) return res.status(r.status).json({ error: r.error });
@@ -68,17 +80,25 @@ export default async function handler(req, res) {
     .eq('id', appt.id);
   if (updErr) return res.status(500).json({ error: 'db-update: ' + updErr.message });
 
-  // 3) Audit (fail-soft).
+  // 3) Reden opslaan (fail-soft: kolom verzet_reden komt uit de migratie van
+  //    deze PR; nog niet gedraaid → verzetting slaagt gewoon zonder opslag).
+  try {
+    await supabaseAdmin.from('follow_up_appointments')
+      .update({ verzet_reden: reden })
+      .eq('id', appt.id);
+  } catch (_) { /* soft — reden-opslag mag nooit de verzetting blokkeren */ }
+
+  // 4) Audit (fail-soft).
   try {
     await supabaseAdmin.from('follow_up_events_log').insert({
       source: 'self-service',
       event_type: 'appointment_selfservice_verzet',
-      payload: { appointment_id: appt.id, van: appt.scheduled_at, naar: startIso },
+      payload: { appointment_id: appt.id, van: appt.scheduled_at, naar: startIso, reden },
       processed: true,
     });
   } catch (_) { /* niet blokkerend */ }
 
-  // 4) verzet_sent_at resetten (fail-soft; kolom uit Fase 1) zodat de notifier
+  // 5) verzet_sent_at resetten (fail-soft; kolom uit Fase 1) zodat de notifier
   //    voor deze nieuwe verzetting opnieuw kan bevestigen. Daarna bevestiging.
   try { await supabaseAdmin.from('follow_up_appointments').update({ verzet_sent_at: null }).eq('id', appt.id); } catch (_) { /* soft */ }
   try { await stuurVerzetBericht(appt.id); } catch (_) { /* nooit blokkerend */ }

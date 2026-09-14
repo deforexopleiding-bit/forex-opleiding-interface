@@ -5,11 +5,16 @@
 // verdwenen GHL-afspraak (404/410) telt als geannuleerd — we spiegelen dan
 // alsnog de DB.
 //
-// POST { token:<uuid> }
-// 200 { ok }   409 als niet meer scheduled   502 GHL-fout
+// Regels (server-gevalideerd, niet te omzeilen via de UI):
+//   • Annuleren mag alleen als het NU > 2 uur vóór scheduled_at is. Binnen 2 uur
+//     → 403 te-laat-annuleren (verzetten kan dan nog wel).
+//   • Er moet ALTIJD een serieuze reden mee (zelfde accountability als verzetten).
+//
+// POST { token:<uuid>, reden:<string ≥15 tekens>, reden_code?:<string> }
+// 200 { ok }   400 reden-verplicht   403 te-laat-annuleren   409 niet meer scheduled   502 GHL-fout
 
 import { supabaseAdmin } from './supabase.js';
-import { checkSelfserviceSecret, haalAfspraakViaToken } from './_lib/afspraak-selfservice.js';
+import { checkSelfserviceSecret, haalAfspraakViaToken, redenGeldig, schoonReden, binnen2Uur } from './_lib/afspraak-selfservice.js';
 import { updateGhlAppointmentStatus } from './_lib/ghl-appointment.js';
 import { stuurAnnuleringBericht } from './_lib/afspraak-status-notify.js';
 
@@ -23,14 +28,25 @@ export default async function handler(req, res) {
 
   const body = req.body || {};
   const token = (body.token || '').toString();
-  const reden     = typeof body.reden === 'string' ? body.reden.slice(0, 500).trim() || null : null;
+  const reden     = schoonReden(body.reden);
   const redenCode = typeof body.reden_code === 'string' ? body.reden_code.slice(0, 40).trim() || null : null;
+
+  // Verplichte, serieuze reden — vóór alle GHL/DB-mutaties.
+  if (!redenGeldig(reden)) {
+    return res.status(400).json({ error: 'reden-verplicht' });
+  }
+
   const r = await haalAfspraakViaToken(token);
   if (r.error) return res.status(r.status).json({ error: r.error });
   const appt = r.appt;
 
   if (appt.status !== 'scheduled') {
     return res.status(409).json({ error: 'niet-meer-annuleerbaar', status: appt.status });
+  }
+
+  // 2-uur-grens: binnen 2 uur vóór de afspraak kan zelf annuleren niet meer.
+  if (binnen2Uur(appt.scheduled_at)) {
+    return res.status(403).json({ error: 'te-laat-annuleren', scheduled_at: appt.scheduled_at });
   }
 
   // 1) GHL cancel (validate-first). 404/410 = al weg → toch DB spiegelen.

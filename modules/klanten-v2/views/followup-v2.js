@@ -2542,6 +2542,8 @@
           </div>
         </div>` : ''}
         ${d.appointment?.snelle_notitie ? `<div style="padding:10px 12px;background:var(--amber-soft);border-radius:6px;font-size:12.5px;line-height:1.5"><b>Snelle notitie:</b> ${esc(d.appointment.snelle_notitie)}</div>` : ''}
+        ${d.appointment?.verzet_reden ? `<div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12.5px;line-height:1.5;border-left:3px solid var(--amber,#f0a500)"><b>Reden verzetting (door klant):</b> ${esc(d.appointment.verzet_reden)}</div>` : ''}
+        ${d.appointment?.annulering_reden ? `<div style="padding:10px 12px;background:var(--surface-2);border-radius:6px;font-size:12.5px;line-height:1.5;border-left:3px solid var(--rose,#e5484d)"><b>Reden annulering (door klant):</b> ${esc(d.appointment.annulering_reden)}${d.appointment.annulering_reden_code ? ` <span style="color:var(--text-3)">(${esc(d.appointment.annulering_reden_code)})</span>` : ''}</div>` : ''}
         <div style="padding:12px 14px;background:var(--surface-2);border-radius:8px">
           <div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Klant-context</div>
           ${d.customer_context ? `<div style="font-size:12px;display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
