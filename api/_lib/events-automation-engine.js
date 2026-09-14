@@ -536,10 +536,13 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
             return { niet_gemeten: true, waar: false, reden: 'geen meter voor ' + check };
           }
           const { geenReactieSindsBelstatus } = await import('./events-geen-gehoor-reactie.js');
+          // De client gaat EXPLICIET mee — zie de toelichting bij dezelfde
+          // aanroep in api/cron-events-geen-gehoor-reacties.js.
           return await geenReactieSindsBelstatus({
             phone   : attendee.phone,
             email   : attendee.email,
             sinceIso: attendee.call_status_at,
+            db      : supabaseAdmin,
           });
         },
         isStepDone: async (idx) => {

@@ -135,6 +135,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron-events-geen-gehoor-reacties",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron-events-website-berichten",
       "schedule": "*/10 * * * *"
     },
