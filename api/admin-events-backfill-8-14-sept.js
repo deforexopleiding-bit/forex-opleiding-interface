@@ -45,12 +45,20 @@
 //                                     dus altijd nadat de overdue-cancels er
 //                                     staan — geen race-venster.
 //
-// RESUMABLE — de flow is idempotent:
-//   * bestaande rij + automation_enabled=TRUE  → skip (al klaar).
-//   * bestaande rij + automation_enabled=FALSE → HERVAT: sla insert over,
-//     doe alleen preempt-cancels + flip. Repareert half-rijen van een
-//     eerder getimeoute run.
-//   * geen bestaand → NIEUW: 3-staps volgorde.
+// RESUMABLE — de flow is idempotent én raakt NOOIT rijen aan van een ander
+// pad. HERVAT werkt uitsluitend op eigen backfill-rijen
+// (created_via === 'ghl_inbound_backfill'). Vier varianten:
+//
+//   A. bestaand, created_via != backfill                → SKIP altijd
+//      (pre-existing van een ander pad — nooit aanraken, geen bevestiging
+//      naar iemand anders sturen).
+//   B. bestaand, created_via == backfill, enabled=TRUE  → SKIP
+//      (eigen backfill-rij al volledig verwerkt).
+//   C. bestaand, created_via == backfill, enabled=FALSE → HERVAT
+//      (half-rij van een getimeoute vorige run: preempt-cancels + flip).
+//   D. geen bestaand                                    → NIEUW: 3-staps
+//      volgorde (insert(disabled) → preempt-cancels → flip).
+//
 // Alleen het flip-moment (automation_enabled → true) triggert de cron; een
 // al-enabled rij wordt niet opnieuw aangeraakt → geen dubbele bevestiging.
 //
@@ -306,7 +314,8 @@ function htmlShell() {
   .status-aangemaakt { color: #059669; font-weight: 600; }
   .status-hervat { color: #b45309; font-weight: 600; }
   .status-hervat_zonder_enable, .status-aangemaakt_zonder_enable { color: #b91c1c; font-weight: 600; }
-  .status-overgeslagen { color: #6b7280; }
+  .status-overgeslagen_backfill_klaar { color: #6b7280; }
+  .status-overgeslagen_pre_existing { color: #6b7280; font-style: italic; }
   .status-dry_run { color: #4f46e5; }
   .status-no_match, .status-error { color: #b91c1c; font-weight: 600; }
   .actions { margin: 16px 0 20px; display: flex; gap: 12px; align-items: center; }
@@ -387,7 +396,8 @@ function htmlShell() {
       kpi('Totaal', data.total, '') +
       kpi(data.dry_run ? 'Zou aanmaken' : 'Aangemaakt', data.aangemaakt ?? 0, 'ok') +
       kpi(data.dry_run ? 'Zou hervatten' : 'Hervat', data.hervat ?? 0, (data.hervat > 0 ? 'warn' : '')) +
-      kpi('Al klaar (dup)', data.overgeslagen ?? 0, '') +
+      kpi('Backfill al klaar', data.overgeslagen_backfill_klaar ?? 0, '') +
+      kpi('Pre-existing (ander pad)', data.overgeslagen_pre_existing ?? 0, (data.overgeslagen_pre_existing > 0 ? 'warn' : '')) +
       kpi('No match', data.no_match ?? 0, (data.no_match > 0 ? 'warn' : '')) +
       kpi('Preempt cancels', data.preempt_cancels ?? 0, 'warn') +
       kpi('Errors', data.error ?? 0, (data.error > 0 ? 'warn' : '')) +
@@ -400,7 +410,8 @@ function htmlShell() {
         '<td><code>' + esc(id) + '</code></td>' +
         '<td>' + (e.aangemaakt ?? 0) + '</td>' +
         '<td>' + (e.hervat ?? 0) + '</td>' +
-        '<td>' + (e.overgeslagen ?? 0) + '</td>' +
+        '<td>' + (e.overgeslagen_backfill_klaar ?? 0) + '</td>' +
+        '<td>' + (e.overgeslagen_pre_existing ?? 0) + '</td>' +
       '</tr>'
     ).join('');
 
@@ -431,8 +442,8 @@ function htmlShell() {
       '<div>' + kpis + '</div>' +
       (data.note_bevestiging ? '<div class="hint" style="margin-bottom:12px">' + esc(data.note_bevestiging) + '</div>' : '') +
       '<h2>Per event</h2>' +
-      '<table><thead><tr><th>Event</th><th>id</th><th>aangemaakt</th><th>hervat</th><th>al klaar</th></tr></thead><tbody>' +
-        (perEventRows || '<tr><td colspan="5" class="empty">nog geen aanmakingen</td></tr>') +
+      '<table><thead><tr><th>Event</th><th>id</th><th>aangemaakt</th><th>hervat</th><th>backfill al klaar</th><th>pre-existing</th></tr></thead><tbody>' +
+        (perEventRows || '<tr><td colspan="6" class="empty">nog geen aanmakingen</td></tr>') +
       '</tbody></table>' +
       '<h2>Per attendee (' + (data.resultaten || []).length + ' rijen)</h2>' +
       '<table><thead><tr><th>Naam / email</th><th>Event / submitted</th><th>Status</th><th>Automations</th></tr></thead><tbody>' +
@@ -536,8 +547,9 @@ export default async function handler(req, res) {
     total          : ROWS.length,
     per_event      : {},
     aangemaakt     : 0,
-    hervat         : 0,   // bestaande rij automation_enabled=false, afgemaakt
-    overgeslagen   : 0,   // bestaande rij automation_enabled=true, al klaar
+    hervat         : 0,                    // eigen backfill-rij automation_enabled=false → afgemaakt
+    overgeslagen_backfill_klaar : 0,       // eigen backfill-rij automation_enabled=true → al klaar
+    overgeslagen_pre_existing   : 0,       // rij van een ander pad (created_via != backfill) — NIET aanraken
     no_match       : 0,
     error          : 0,
     preempt_cancels: 0,
@@ -590,26 +602,42 @@ export default async function handler(req, res) {
 
     // Voor zowel dry-run als execute: bepaal of er een bestaande rij is en
     // welke bucket dat oplevert. findExistingAttendee returnt nu ook
-    // automation_enabled zodat we een half-verwerkte rij (bv. van een
-    // eerdere getimeoute run) herkennen en KUNNEN AFMAKEN.
+    // automation_enabled + created_via.
+    //
+    // Belangrijk: we mogen ALLEEN eigen backfill-rijen aanraken
+    // (created_via === CREATED_VIA). Elke andere bestaande attendee is
+    // legitiem via een ander pad ingeschreven — daar handen af, ongeacht
+    // automation_enabled. Ander pad = we sturen daar geen bevestigingen naar
+    // en overschrijven geen state.
     const existing = await findExistingAttendee({
       eventId: chosenEvent.id,
       email  : row.email.trim().toLowerCase(),
       phone  : row.phone,
     });
+    const isOwnBackfillRow = !!(existing && existing.created_via === CREATED_VIA);
     const bucket = summary.per_event[chosenEvent.id] || {
-      title: chosenEvent.title, aangemaakt: 0, hervat: 0, overgeslagen: 0,
+      title: chosenEvent.title,
+      aangemaakt: 0, hervat: 0,
+      overgeslagen_backfill_klaar: 0, overgeslagen_pre_existing: 0,
     };
 
     if (dryRun) {
-      if (existing && existing.automation_enabled === true) {
-        rowResult.status     = 'overgeslagen';
-        rowResult.dedup_note = 'zou overgeslagen worden: bestaande attendee (automation_enabled=true, al klaar)';
-        summary.overgeslagen += 1;
-        bucket.overgeslagen  += 1;
-      } else if (existing && existing.automation_enabled === false) {
+      if (existing && !isOwnBackfillRow) {
+        rowResult.status     = 'overgeslagen_pre_existing';
+        rowResult.dedup_note = 'zou overgeslagen worden: bestaande attendee via ander pad (created_via=' +
+                               (existing.created_via || 'null') + ') — nooit aanraken';
+        rowResult.attendee_id = existing.id;
+        summary.overgeslagen_pre_existing += 1;
+        bucket.overgeslagen_pre_existing  += 1;
+      } else if (isOwnBackfillRow && existing.automation_enabled === true) {
+        rowResult.status     = 'overgeslagen_backfill_klaar';
+        rowResult.dedup_note = 'zou overgeslagen worden: eigen backfill-rij al volledig verwerkt (automation_enabled=true)';
+        rowResult.attendee_id = existing.id;
+        summary.overgeslagen_backfill_klaar += 1;
+        bucket.overgeslagen_backfill_klaar  += 1;
+      } else if (isOwnBackfillRow && existing.automation_enabled === false) {
         rowResult.status     = 'hervat';
-        rowResult.dedup_note = 'zou hervat worden: bestaande half-rij (automation_enabled=false — preempt-cancels + flip)';
+        rowResult.dedup_note = 'zou hervat worden: eigen backfill-rij automation_enabled=false — preempt-cancels + flip';
         rowResult.attendee_id = existing.id;
         summary.hervat += 1;
         bucket.hervat  += 1;
@@ -627,36 +655,53 @@ export default async function handler(req, res) {
       continue;
     }
 
-    // ── EXECUTE-pad: drie varianten op basis van 'existing'-state ─────────
-    // A. bestaand + automation_enabled=TRUE  → al klaar; skip.
-    // B. bestaand + automation_enabled=FALSE → HERVATTEN (half-rij van een
-    //    eerdere getimeoute run): sla insert over, doe preempt-cancels + flip.
-    // C. geen bestaand                       → NIEUW: 3-staps volgorde
-    //    (insert disabled → preempt-cancels → flip). skipSeatFill=true haalt
-    //    Webflow-latency uit het kritieke pad; we draaien de cascade éénmalig
-    //    per uniek event aan het EIND van deze handler.
+    // ── EXECUTE-pad: vier varianten op basis van 'existing' + created_via ──
+    // A. bestaand, created_via != backfill                → SKIP altijd
+    //    (pre-existing van een ander pad — nooit aanraken, geen bevestiging
+    //    naar iemand anders sturen).
+    // B. bestaand, created_via == backfill, enabled=TRUE  → SKIP
+    //    (eigen backfill-rij al volledig verwerkt).
+    // C. bestaand, created_via == backfill, enabled=FALSE → HERVAT
+    //    (half-rij van een getimeoute vorige run: preempt-cancels + flip).
+    // D. geen bestaand                                    → NIEUW: 3-staps
+    //    volgorde (insert disabled → preempt-cancels → flip). skipSeatFill=
+    //    true haalt Webflow-latency uit het kritieke pad; we draaien de
+    //    cascade éénmalig per uniek event aan het EIND van deze handler.
     let attendeeId = null;
     let rowMode = null;   // 'skip' | 'hervat' | 'aangemaakt'
 
-    if (existing && existing.automation_enabled === true) {
+    if (existing && !isOwnBackfillRow) {
       rowMode = 'skip';
-      rowResult.status = 'overgeslagen';
-      rowResult.dedup_note = 'bestaande attendee al volledig verwerkt (automation_enabled=true)';
+      rowResult.status = 'overgeslagen_pre_existing';
+      rowResult.dedup_note = 'bestaande attendee via ander pad (created_via=' +
+                             (existing.created_via || 'null') + ') — niet aangeraakt';
       rowResult.attendee_id = existing.id;
-      summary.overgeslagen += 1;
-      bucket.overgeslagen  += 1;
+      summary.overgeslagen_pre_existing += 1;
+      bucket.overgeslagen_pre_existing  += 1;
       summary.per_event[chosenEvent.id] = bucket;
       summary.resultaten.push(rowResult);
       continue;
     }
 
-    if (existing && existing.automation_enabled === false) {
-      // HERVAT: bestaande rij afmaken. Sla insert over.
+    if (isOwnBackfillRow && existing.automation_enabled === true) {
+      rowMode = 'skip';
+      rowResult.status = 'overgeslagen_backfill_klaar';
+      rowResult.dedup_note = 'eigen backfill-rij al volledig verwerkt (automation_enabled=true)';
+      rowResult.attendee_id = existing.id;
+      summary.overgeslagen_backfill_klaar += 1;
+      bucket.overgeslagen_backfill_klaar  += 1;
+      summary.per_event[chosenEvent.id] = bucket;
+      summary.resultaten.push(rowResult);
+      continue;
+    }
+
+    if (isOwnBackfillRow && existing.automation_enabled === false) {
+      // HERVAT: eigen backfill-rij afmaken. Sla insert over.
       rowMode = 'hervat';
       attendeeId = existing.id;
       rowResult.status = 'hervat';
       rowResult.attendee_id = attendeeId;
-      rowResult.dedup_note = 'bestaande half-rij hervat (automation_enabled=false → preempt + flip)';
+      rowResult.dedup_note = 'eigen backfill-rij hervat (automation_enabled=false → preempt + flip)';
       summary.hervat += 1;
       bucket.hervat  += 1;
     } else {
@@ -760,16 +805,21 @@ export default async function handler(req, res) {
   }
 
   summary.note_bevestiging = dryRun
-    ? 'DRY-RUN — geen writes. Buckets: aangemaakt (nieuw) / hervat (bestaande ' +
-      'half-rij automation_enabled=false — preempt + flip) / overgeslagen ' +
-      '(bestaande rij al volledig verwerkt). skip_overdue-triggers krijgen in ' +
-      'de POST-run een preemptieve cancelled-run zodat de motor ze overslaat.'
+    ? 'DRY-RUN — geen writes. Buckets:\n' +
+      '  * aangemaakt = nieuw (niet-bestaand)\n' +
+      '  * hervat = eigen backfill-rij (created_via=' + CREATED_VIA + ') met ' +
+      'automation_enabled=false — preempt + flip\n' +
+      '  * overgeslagen_backfill_klaar = eigen backfill-rij al volledig verwerkt\n' +
+      '  * overgeslagen_pre_existing = attendee via ander pad — NIET aangeraakt\n' +
+      'skip_overdue-triggers krijgen in de POST-run een preemptieve cancelled-run.'
     : `${summary.aangemaakt} aangemaakt + ${summary.hervat} hervat + ` +
-      `${summary.overgeslagen} al klaar. ${summary.preempt_cancels} preemptieve ` +
-      `cancels op overdue-triggers, ${summary.seat_fill.length} seat-fill cascades ` +
-      'aan het eind. De reguliere automations (on_signup welkom + toekomstige ' +
-      'time_before_event reminders) pikt cron-events-automations binnen ~1 min ' +
-      'automatisch op — alleen op rijen die nu automation_enabled=true kregen.';
+      `${summary.overgeslagen_backfill_klaar} backfill-al-klaar + ` +
+      `${summary.overgeslagen_pre_existing} pre-existing overgeslagen. ` +
+      `${summary.preempt_cancels} preemptieve cancels op overdue-triggers, ` +
+      `${summary.seat_fill.length} seat-fill cascades aan het eind. Alleen rijen ` +
+      'die nu automation_enabled=true kregen worden binnen ~1 min door ' +
+      'cron-events-automations opgepikt voor welkom + toekomstige reminders. ' +
+      'Pre-existing rijen zijn niet aangeraakt.';
 
   return res.status(200).json(summary);
 }
