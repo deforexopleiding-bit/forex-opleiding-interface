@@ -45,6 +45,29 @@
 //                                     dus altijd nadat de overdue-cancels er
 //                                     staan — geen race-venster.
 //
+// RESUMABLE — de flow is idempotent én raakt NOOIT rijen aan van een ander
+// pad. HERVAT werkt uitsluitend op eigen backfill-rijen
+// (created_via === 'ghl_inbound_backfill'). Vier varianten:
+//
+//   A. bestaand, created_via != backfill                → SKIP altijd
+//      (pre-existing van een ander pad — nooit aanraken, geen bevestiging
+//      naar iemand anders sturen).
+//   B. bestaand, created_via == backfill, enabled=TRUE  → SKIP
+//      (eigen backfill-rij al volledig verwerkt).
+//   C. bestaand, created_via == backfill, enabled=FALSE → HERVAT
+//      (half-rij van een getimeoute vorige run: preempt-cancels + flip).
+//   D. geen bestaand                                    → NIEUW: 3-staps
+//      volgorde (insert(disabled) → preempt-cancels → flip).
+//
+// Alleen het flip-moment (automation_enabled → true) triggert de cron; een
+// al-enabled rij wordt niet opnieuw aangeraakt → geen dubbele bevestiging.
+//
+// PERFORMANCE — de per-rij seat-fill cascade (getConfirmedCount →
+// syncGastenlijstWebflow → autoCloseIfFull) draait NIET meer per attendee
+// (Webflow-API is ~10-30s per call → 30s timeout na 1 rij). skipSeatFill=true
+// op processSignup, en aan het EIND van de handler runSeatFillCascade
+// éénmalig per uniek 'touched' event. Vercel-side: maxDuration=300.
+//
 // GET  /api/admin-events-backfill-8-14-sept?dry_run=1
 // POST /api/admin-events-backfill-8-14-sept   { "dry_run": false }
 //
@@ -55,7 +78,7 @@
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { resolveEventByLabel } from './_lib/event-label-matcher.js';
-import { processSignup, findExistingAttendee } from './_lib/event-signup-processor.js';
+import { processSignup, findExistingAttendee, runSeatFillCascade } from './_lib/event-signup-processor.js';
 
 // De CSV-rijen (bron: 262c65f5-…-csv). Test-rij jeffreybiemold@gmail.com bewust
 // weggelaten. Said Hachemi = 2 events = 2 aanmeldingen.
@@ -289,7 +312,10 @@ function htmlShell() {
   .v-skip_overdue { background: #fee2e2; color: #991b1b; }
   .v-no_match_scope, .v-no_match_trigger { background: #f3f4f6; color: #6b7280; }
   .status-aangemaakt { color: #059669; font-weight: 600; }
-  .status-overgeslagen { color: #6b7280; }
+  .status-hervat { color: #b45309; font-weight: 600; }
+  .status-hervat_zonder_enable, .status-aangemaakt_zonder_enable { color: #b91c1c; font-weight: 600; }
+  .status-overgeslagen_backfill_klaar { color: #6b7280; }
+  .status-overgeslagen_pre_existing { color: #6b7280; font-style: italic; }
   .status-dry_run { color: #4f46e5; }
   .status-no_match, .status-error { color: #b91c1c; font-weight: 600; }
   .actions { margin: 16px 0 20px; display: flex; gap: 12px; align-items: center; }
@@ -369,7 +395,9 @@ function htmlShell() {
     const kpis =
       kpi('Totaal', data.total, '') +
       kpi(data.dry_run ? 'Zou aanmaken' : 'Aangemaakt', data.aangemaakt ?? 0, 'ok') +
-      kpi('Overgeslagen (dup)', data.overgeslagen ?? 0, '') +
+      kpi(data.dry_run ? 'Zou hervatten' : 'Hervat', data.hervat ?? 0, (data.hervat > 0 ? 'warn' : '')) +
+      kpi('Backfill al klaar', data.overgeslagen_backfill_klaar ?? 0, '') +
+      kpi('Pre-existing (ander pad)', data.overgeslagen_pre_existing ?? 0, (data.overgeslagen_pre_existing > 0 ? 'warn' : '')) +
       kpi('No match', data.no_match ?? 0, (data.no_match > 0 ? 'warn' : '')) +
       kpi('Preempt cancels', data.preempt_cancels ?? 0, 'warn') +
       kpi('Errors', data.error ?? 0, (data.error > 0 ? 'warn' : '')) +
@@ -381,7 +409,9 @@ function htmlShell() {
         '<td>' + esc(e.title || '—') + '</td>' +
         '<td><code>' + esc(id) + '</code></td>' +
         '<td>' + (e.aangemaakt ?? 0) + '</td>' +
-        '<td>' + (e.overgeslagen ?? 0) + '</td>' +
+        '<td>' + (e.hervat ?? 0) + '</td>' +
+        '<td>' + (e.overgeslagen_backfill_klaar ?? 0) + '</td>' +
+        '<td>' + (e.overgeslagen_pre_existing ?? 0) + '</td>' +
       '</tr>'
     ).join('');
 
@@ -412,8 +442,8 @@ function htmlShell() {
       '<div>' + kpis + '</div>' +
       (data.note_bevestiging ? '<div class="hint" style="margin-bottom:12px">' + esc(data.note_bevestiging) + '</div>' : '') +
       '<h2>Per event</h2>' +
-      '<table><thead><tr><th>Event</th><th>id</th><th>aangemaakt</th><th>overgeslagen</th></tr></thead><tbody>' +
-        (perEventRows || '<tr><td colspan="4" class="empty">nog geen aanmakingen</td></tr>') +
+      '<table><thead><tr><th>Event</th><th>id</th><th>aangemaakt</th><th>hervat</th><th>backfill al klaar</th><th>pre-existing</th></tr></thead><tbody>' +
+        (perEventRows || '<tr><td colspan="6" class="empty">nog geen aanmakingen</td></tr>') +
       '</tbody></table>' +
       '<h2>Per attendee (' + (data.resultaten || []).length + ' rijen)</h2>' +
       '<table><thead><tr><th>Naam / email</th><th>Event / submitted</th><th>Status</th><th>Automations</th></tr></thead><tbody>' +
@@ -423,7 +453,13 @@ function htmlShell() {
     // Knop "UITVOEREN" alleen actief bij een dry-run zonder errors.
     if (data.dry_run && (data.error || 0) === 0) {
       btnRun.disabled = false;
-      btnRun.textContent = 'UITVOEREN (definitief) — ' + (data.aangemaakt ?? 0) + ' aanmaken, ' + (data.preempt_cancels ?? 0) + ' overdue-cancels';
+      const nieuw = data.aangemaakt ?? 0;
+      const herv  = data.hervat ?? 0;
+      const canc  = data.preempt_cancels ?? 0;
+      btnRun.textContent = 'UITVOEREN (definitief) — ' +
+        nieuw + ' aanmaken' +
+        (herv ? ' + ' + herv + ' hervatten' : '') +
+        (canc ? ' + ' + canc + ' overdue-cancels' : '');
     } else {
       btnRun.disabled = true;
       btnRun.textContent = data.dry_run ? 'UITVOEREN (definitief) — fix errors eerst' : 'UITGEVOERD';
@@ -511,13 +547,17 @@ export default async function handler(req, res) {
     total          : ROWS.length,
     per_event      : {},
     aangemaakt     : 0,
-    overgeslagen   : 0,   // duplicate email+event_id
+    hervat         : 0,                    // eigen backfill-rij automation_enabled=false → afgemaakt
+    overgeslagen_backfill_klaar : 0,       // eigen backfill-rij automation_enabled=true → al klaar
+    overgeslagen_pre_existing   : 0,       // rij van een ander pad (created_via != backfill) — NIET aanraken
     no_match       : 0,
     error          : 0,
     preempt_cancels: 0,
     automations_total: automations.length,
+    seat_fill      : [],  // eind-batch resultaten per uniek event
     resultaten     : [],
   };
+  const touchedEventIds = new Set();
 
   for (const row of ROWS) {
     const rowResult = {
@@ -560,30 +600,53 @@ export default async function handler(req, res) {
     });
     rowResult.automations = analysis;
 
+    // Voor zowel dry-run als execute: bepaal of er een bestaande rij is en
+    // welke bucket dat oplevert. findExistingAttendee returnt nu ook
+    // automation_enabled + created_via.
+    //
+    // Belangrijk: we mogen ALLEEN eigen backfill-rijen aanraken
+    // (created_via === CREATED_VIA). Elke andere bestaande attendee is
+    // legitiem via een ander pad ingeschreven — daar handen af, ongeacht
+    // automation_enabled. Ander pad = we sturen daar geen bevestigingen naar
+    // en overschrijven geen state.
+    const existing = await findExistingAttendee({
+      eventId: chosenEvent.id,
+      email  : row.email.trim().toLowerCase(),
+      phone  : row.phone,
+    });
+    const isOwnBackfillRow = !!(existing && existing.created_via === CREATED_VIA);
+    const bucket = summary.per_event[chosenEvent.id] || {
+      title: chosenEvent.title,
+      aangemaakt: 0, hervat: 0,
+      overgeslagen_backfill_klaar: 0, overgeslagen_pre_existing: 0,
+    };
+
     if (dryRun) {
-      // Simuleer de create-beslissing zodat de tellingen exact matchen met
-      // wat POST daadwerkelijk uitvoert. Zelfde dedup-signaal
-      // (findExistingAttendee: email-eerst, phone-fallback binnen event_id)
-      // als processSignup gebruikt — geen afwijking tussen dry-run en execute.
-      const existing = await findExistingAttendee({
-        eventId: chosenEvent.id,
-        email  : row.email.trim().toLowerCase(),
-        phone  : row.phone,
-      });
-      const bucket = summary.per_event[chosenEvent.id] || {
-        title: chosenEvent.title, aangemaakt: 0, overgeslagen: 0,
-      };
-      if (existing) {
-        rowResult.status     = 'overgeslagen';
-        rowResult.dedup_note = 'zou overgeslagen worden: bestaande attendee (email+event_id match)';
-        summary.overgeslagen += 1;
-        bucket.overgeslagen  += 1;
+      if (existing && !isOwnBackfillRow) {
+        rowResult.status     = 'overgeslagen_pre_existing';
+        rowResult.dedup_note = 'zou overgeslagen worden: bestaande attendee via ander pad (created_via=' +
+                               (existing.created_via || 'null') + ') — nooit aanraken';
+        rowResult.attendee_id = existing.id;
+        summary.overgeslagen_pre_existing += 1;
+        bucket.overgeslagen_pre_existing  += 1;
+      } else if (isOwnBackfillRow && existing.automation_enabled === true) {
+        rowResult.status     = 'overgeslagen_backfill_klaar';
+        rowResult.dedup_note = 'zou overgeslagen worden: eigen backfill-rij al volledig verwerkt (automation_enabled=true)';
+        rowResult.attendee_id = existing.id;
+        summary.overgeslagen_backfill_klaar += 1;
+        bucket.overgeslagen_backfill_klaar  += 1;
+      } else if (isOwnBackfillRow && existing.automation_enabled === false) {
+        rowResult.status     = 'hervat';
+        rowResult.dedup_note = 'zou hervat worden: eigen backfill-rij automation_enabled=false — preempt-cancels + flip';
+        rowResult.attendee_id = existing.id;
+        summary.hervat += 1;
+        bucket.hervat  += 1;
+        const overdue = analysis.filter(a => a.verdict === 'skip_overdue');
+        if (overdue.length) summary.preempt_cancels += overdue.length;
       } else {
         rowResult.status = 'aangemaakt';   // dry-run-semantiek: "zou aangemaakt worden"
         summary.aangemaakt += 1;
         bucket.aangemaakt  += 1;
-        // Preempt-cancels ALLEEN tellen wanneer we ook echt zouden inserten;
-        // bestaande dedup-rijen krijgen geen preempt in de execute-run.
         const overdue = analysis.filter(a => a.verdict === 'skip_overdue');
         if (overdue.length) summary.preempt_cancels += overdue.length;
       }
@@ -592,114 +655,171 @@ export default async function handler(req, res) {
       continue;
     }
 
-    // Race-veilige volgorde per attendee:
-    //   1. Insert attendee met automation_enabled=false → cron ziet 'em NIET.
-    //   2. Insert preemptive cancelled-runs voor alle skip_overdue-automations.
-    //      Zonder cancel-rij zou de eerstvolgende cron-tick na stap 3 direct
-    //      een overdue-nudge kunnen inschrijven (nanoseconden-window).
-    //   3. Update automation_enabled=true → cron pikt de attendee op voor de
-    //      overige (on_signup + toekomstige time_before_event) automations
-    //      en slaat de overdue automations over via de bestaande
-    //      `existing`-Set-check in enrollDueAttendees (UNIQUE (automation_id,
-    //      attendee_id)).
+    // ── EXECUTE-pad: vier varianten op basis van 'existing' + created_via ──
+    // A. bestaand, created_via != backfill                → SKIP altijd
+    //    (pre-existing van een ander pad — nooit aanraken, geen bevestiging
+    //    naar iemand anders sturen).
+    // B. bestaand, created_via == backfill, enabled=TRUE  → SKIP
+    //    (eigen backfill-rij al volledig verwerkt).
+    // C. bestaand, created_via == backfill, enabled=FALSE → HERVAT
+    //    (half-rij van een getimeoute vorige run: preempt-cancels + flip).
+    // D. geen bestaand                                    → NIEUW: 3-staps
+    //    volgorde (insert disabled → preempt-cancels → flip). skipSeatFill=
+    //    true haalt Webflow-latency uit het kritieke pad; we draaien de
+    //    cascade éénmalig per uniek event aan het EIND van deze handler.
     let attendeeId = null;
-    try {
-      const processed = await processSignup({
-        event: chosenEvent,
-        isAmbiguous: lookup.matches.length > 1,
-        matches: lookup.matches,
-        payload: {
-          first_name    : row.first,
-          last_name     : row.last,
-          email         : row.email.trim().toLowerCase(),
-          phone         : row.phone,
-          registered_at : row.submitted,
-        },
-        ghlContactId       : null,
-        ghlFormSubmissionId: null,
-        createdVia         : CREATED_VIA,
-        source             : 'ghl',
-        // STAP 1 — automation_enabled=false zodat cron-events-automations
-        // deze attendee overslaat tot stap 3 hem 'aanzet'.
-        automationEnabled  : false,
-      });
+    let rowMode = null;   // 'skip' | 'hervat' | 'aangemaakt'
 
-      rowResult.status       = processed.deduplicated ? 'overgeslagen' : 'aangemaakt';
-      rowResult.attendee_id  = processed.attendee_id;
-      rowResult.dedup_note   = processed.dedup_note;
-      rowResult.confirmed    = processed.confirmed_count;
-      rowResult.gastenlijst  = processed.gastenlijst_label;
-      attendeeId             = processed.attendee_id;
-
-      if (processed.deduplicated) summary.overgeslagen += 1;
-      else                        summary.aangemaakt   += 1;
-
-      const bucket = summary.per_event[chosenEvent.id] || {
-        title: chosenEvent.title, aangemaakt: 0, overgeslagen: 0,
-      };
-      if (processed.deduplicated) bucket.overgeslagen += 1;
-      else                        bucket.aangemaakt   += 1;
+    if (existing && !isOwnBackfillRow) {
+      rowMode = 'skip';
+      rowResult.status = 'overgeslagen_pre_existing';
+      rowResult.dedup_note = 'bestaande attendee via ander pad (created_via=' +
+                             (existing.created_via || 'null') + ') — niet aangeraakt';
+      rowResult.attendee_id = existing.id;
+      summary.overgeslagen_pre_existing += 1;
+      bucket.overgeslagen_pre_existing  += 1;
       summary.per_event[chosenEvent.id] = bucket;
-    } catch (e) {
-      rowResult.status = 'error';
-      rowResult.error = e?.message || String(e);
-      summary.error += 1;
       summary.resultaten.push(rowResult);
       continue;
     }
 
-    // STAP 2 — Preemptive-cancel voor overdue-triggers, VÓÓR we
-    // automation_enabled aanzetten. Alleen wanneer een nieuwe attendee is
-    // aangemaakt: dedup-hits raken we niet aan (bestaande automation_enabled-
-    // waarde blijft dan intact — meestal true — en oude flows blijven zoals ze
-    // waren; UNIQUE (automation_id, attendee_id) zou een preempt-insert
-    // sowieso soft-catchen, maar semantisch klopt 't niet).
-    if (rowResult.status === 'aangemaakt' && attendeeId) {
-      const cancelled = [];
-      for (const a of analysis.filter(a => a.verdict === 'skip_overdue')) {
-        const auto = automations.find(x => x.id === a.automation_id);
-        if (!auto) continue;
-        const r = await preemptCancelRun({
-          automation: auto,
-          attendeeId,
-          eventId   : chosenEvent.id,
-          reason    : a.reason || 'overdue trigger',
-        });
-        if (r.ok) { cancelled.push(auto.id); summary.preempt_cancels += 1; }
-      }
-      rowResult.preempt_cancelled_automations = cancelled;
-
-      // STAP 3 — automation_enabled=true. Cron pikt de attendee vanaf de
-      // eerstvolgende tick op voor on_signup + toekomstige time_before_event;
-      // overdue-nudges vallen weg via de reeds-ingezette cancel-rijen.
-      const { error: enableErr } = await supabaseAdmin
-        .from('event_attendees')
-        .update({ automation_enabled: true })
-        .eq('id', attendeeId);
-      if (enableErr) {
-        // Fail-hard signaleren: zonder deze flip krijgt de attendee GEEN
-        // welkom/reminders. Dat is een operationeel probleem, niet fataal
-        // voor de rest van de backfill; log + markeer in de audit.
-        console.error('[backfill] automation_enable flip mislukt:', attendeeId, enableErr.message);
-        rowResult.automation_enable_error = enableErr.message;
-        rowResult.status = 'aangemaakt_zonder_enable';
-      } else {
-        rowResult.automation_enabled = true;
-      }
+    if (isOwnBackfillRow && existing.automation_enabled === true) {
+      rowMode = 'skip';
+      rowResult.status = 'overgeslagen_backfill_klaar';
+      rowResult.dedup_note = 'eigen backfill-rij al volledig verwerkt (automation_enabled=true)';
+      rowResult.attendee_id = existing.id;
+      summary.overgeslagen_backfill_klaar += 1;
+      bucket.overgeslagen_backfill_klaar  += 1;
+      summary.per_event[chosenEvent.id] = bucket;
+      summary.resultaten.push(rowResult);
+      continue;
     }
 
+    if (isOwnBackfillRow && existing.automation_enabled === false) {
+      // HERVAT: eigen backfill-rij afmaken. Sla insert over.
+      rowMode = 'hervat';
+      attendeeId = existing.id;
+      rowResult.status = 'hervat';
+      rowResult.attendee_id = attendeeId;
+      rowResult.dedup_note = 'eigen backfill-rij hervat (automation_enabled=false → preempt + flip)';
+      summary.hervat += 1;
+      bucket.hervat  += 1;
+    } else {
+      // NIEUW: insert via processSignup met skipSeatFill=true.
+      try {
+        const processed = await processSignup({
+          event: chosenEvent,
+          isAmbiguous: lookup.matches.length > 1,
+          matches: lookup.matches,
+          payload: {
+            first_name    : row.first,
+            last_name     : row.last,
+            email         : row.email.trim().toLowerCase(),
+            phone         : row.phone,
+            registered_at : row.submitted,
+          },
+          ghlContactId       : null,
+          ghlFormSubmissionId: null,
+          createdVia         : CREATED_VIA,
+          source             : 'ghl',
+          // STAP 1 — automation_enabled=false zodat cron 'em nog niet ziet.
+          automationEnabled  : false,
+          // Webflow-sync en autoClose per rij overslaan; run 't éénmalig aan
+          // het eind (touchedEventIds).
+          skipSeatFill       : true,
+        });
+        rowMode = 'aangemaakt';
+        attendeeId = processed.attendee_id;
+        rowResult.status = 'aangemaakt';
+        rowResult.attendee_id = attendeeId;
+        rowResult.dedup_note = processed.dedup_note;
+        summary.aangemaakt += 1;
+        bucket.aangemaakt  += 1;
+      } catch (e) {
+        rowResult.status = 'error';
+        rowResult.error = e?.message || String(e);
+        summary.error += 1;
+        summary.per_event[chosenEvent.id] = bucket;
+        summary.resultaten.push(rowResult);
+        continue;
+      }
+    }
+    summary.per_event[chosenEvent.id] = bucket;
+
+    // STAP 2 — Preemptive-cancel voor overdue-triggers. Zowel bij nieuw als
+    // hervat: preemptCancelRun is idempotent (UNIQUE (automation_id, attendee_id)
+    // soft-catch), dus een 2e run schrijft geen dubbels.
+    const cancelled = [];
+    for (const a of analysis.filter(a => a.verdict === 'skip_overdue')) {
+      const auto = automations.find(x => x.id === a.automation_id);
+      if (!auto) continue;
+      const r = await preemptCancelRun({
+        automation: auto,
+        attendeeId,
+        eventId   : chosenEvent.id,
+        reason    : a.reason || 'overdue trigger',
+      });
+      if (r.ok) { cancelled.push(auto.id); summary.preempt_cancels += 1; }
+    }
+    rowResult.preempt_cancelled_automations = cancelled;
+
+    // STAP 3 — automation_enabled=true. Cron pikt op vanaf eerstvolgende
+    // tick voor on_signup + toekomstige time_before_event; overdue-nudges
+    // vallen weg via de reeds-ingezette cancel-rijen.
+    const { error: enableErr } = await supabaseAdmin
+      .from('event_attendees')
+      .update({ automation_enabled: true })
+      .eq('id', attendeeId);
+    if (enableErr) {
+      console.error('[backfill] automation_enable flip mislukt:', attendeeId, enableErr.message);
+      rowResult.automation_enable_error = enableErr.message;
+      rowResult.status = (rowMode === 'hervat') ? 'hervat_zonder_enable' : 'aangemaakt_zonder_enable';
+    } else {
+      rowResult.automation_enabled = true;
+    }
+
+    touchedEventIds.add(chosenEvent.id);
     summary.resultaten.push(rowResult);
   }
 
+  // ── Seat-fill cascade éénmalig per uniek geraakt event ──────────────────
+  // Was voorheen per-rij in processSignup → ~10-30s aan Webflow-latency per
+  // attendee → 504's. Nu batched aan het eind: 3 events × 1 cascade = veel
+  // sneller. Fail-soft; een fout hier is niet fataal voor de al-uitgevoerde
+  // attendee-inserts + flips.
+  if (!dryRun && touchedEventIds.size > 0) {
+    for (const evId of touchedEventIds) {
+      try {
+        const { data: ev } = await supabaseAdmin
+          .from('events')
+          .select('id, title, starts_at, ends_at, niveau, capacity, status, signups_closed, webflow_item_id')
+          .eq('id', evId)
+          .maybeSingle();
+        if (!ev) { summary.seat_fill.push({ event_id: evId, ok: false, error: 'event not found' }); continue; }
+        const r = await runSeatFillCascade(ev);
+        summary.seat_fill.push({ event_id: evId, title: ev.title, ...r });
+      } catch (e) {
+        summary.seat_fill.push({ event_id: evId, ok: false, error: e?.message || String(e) });
+      }
+    }
+  }
+
   summary.note_bevestiging = dryRun
-    ? 'DRY-RUN — geen writes. Onder resultaten[i].automations zie je per attendee ' +
-      'welke automations zouden vuren (enroll_now / enroll_future_window / ' +
-      'skip_overdue / no_match_*). skip_overdue-triggers krijgen in de POST-run ' +
-      'een preemptieve cancelled-run zodat de motor ze overslaat.'
-    : `${summary.aangemaakt} aangemaakt, ${summary.overgeslagen} overgeslagen, ` +
-      `${summary.preempt_cancels} preemptieve cancels voor overdue-triggers. ` +
-      'De reguliere automations (on_signup welkom + toekomstige time_before_event ' +
-      'reminders) pikt cron-events-automations binnen ~1 min automatisch op.';
+    ? 'DRY-RUN — geen writes. Buckets:\n' +
+      '  * aangemaakt = nieuw (niet-bestaand)\n' +
+      '  * hervat = eigen backfill-rij (created_via=' + CREATED_VIA + ') met ' +
+      'automation_enabled=false — preempt + flip\n' +
+      '  * overgeslagen_backfill_klaar = eigen backfill-rij al volledig verwerkt\n' +
+      '  * overgeslagen_pre_existing = attendee via ander pad — NIET aangeraakt\n' +
+      'skip_overdue-triggers krijgen in de POST-run een preemptieve cancelled-run.'
+    : `${summary.aangemaakt} aangemaakt + ${summary.hervat} hervat + ` +
+      `${summary.overgeslagen_backfill_klaar} backfill-al-klaar + ` +
+      `${summary.overgeslagen_pre_existing} pre-existing overgeslagen. ` +
+      `${summary.preempt_cancels} preemptieve cancels op overdue-triggers, ` +
+      `${summary.seat_fill.length} seat-fill cascades aan het eind. Alleen rijen ` +
+      'die nu automation_enabled=true kregen worden binnen ~1 min door ' +
+      'cron-events-automations opgepikt voor welkom + toekomstige reminders. ' +
+      'Pre-existing rijen zijn niet aangeraakt.';
 
   return res.status(200).json(summary);
 }
