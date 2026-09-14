@@ -1,6 +1,6 @@
 // api/_lib/opvolging-gezondheid.js
 //
-// DE ZES CONTROLES, ALS PURE FUNCTIES.
+// DE ZEVEN CONTROLES, ALS PURE FUNCTIES.
 //
 // Deze week stonden zes keer alle tests groen terwijl productie stuk was, en
 // elke keer was de TEST het probleem: hij raakte iets aan wat lijkt op het
@@ -315,16 +315,30 @@ export function controleerBrug({ status, fout, configFout }) {
 // Gemeten op 10 september: 0. De eerste run hoort dus ok te zijn.
 
 export function controleerDagritme({ taken, vandaag, leesfout }) {
-  // KAN HIJ NIET LEZEN, DAN IS HET NIET GEMETEN — en dus nooit 'ok'. Zie de
-  // kop van dit bestand: een controle die niets kon meten is niet in orde.
+  // EEN LEESFOUT IS EEN STORING, GEEN BLINDE VLEK.
+  //
+  // Hier stond NIET_GEMETEN, en dat is precies de vergissing die op 7 september
+  // op vier andere plekken is rechtgezet: 'niet gemeten' is smal en geldt
+  // alleen voor (a) een ontbrekende koppeling of instelling en (b) een meting
+  // die leeg is. Een ANTWOORD DAT WE KREGEN en dat niet deugt — een 500 van de
+  // databank, een tijdslimiet, 'relatie bestaat niet' — is een FOUT.
+  //
+  // Deze controle is op 10 september gebouwd, ná die opruiming, en nam de
+  // oude vorm alsnog over. Controle 1 hierboven doet het in dezelfde situatie
+  // wél goed (zie de cron: een leesfout duwt daar FOUT in de lijst). Zo
+  // verdween een echte storing in de emmer voor 'nog niet ingesteld'.
   if (leesfout) {
-    return uit('dagritme', NIET_GEMETEN, { fout: String(leesfout).slice(0, 200) },
+    return uit('dagritme', FOUT, { fout: String(leesfout).slice(0, 200) },
       'De openstaande taken waren niet te lezen: ' + String(leesfout).slice(0, 200)
-      + '. Of er werk van gisteren blijft hangen is dus onbekend.');
+      + '. Dat is een storing, geen ontbrekende meting — of er werk van gisteren '
+      + 'blijft hangen is nu onbekend.');
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(vandaag || ''))) {
-    return uit('dagritme', NIET_GEMETEN, { fout: 'geen geldige datum' },
-      'Zonder de datum van vandaag valt er niets te vergelijken.');
+    // Ook dit is een verminkte vorm en geen leegte: die datum maken we zelf,
+    // uit de klok. Komt er iets anders dan een dag uit, dan is er iets stuk.
+    return uit('dagritme', FOUT, { fout: 'geen geldige datum' },
+      'De datum van vandaag kwam er niet als datum uit. Er valt dus niets te '
+      + 'vergelijken, en dat is een fout in de meting zelf.');
   }
 
   const rijen = Array.isArray(taken) ? taken : [];
@@ -344,6 +358,164 @@ export function controleerDagritme({ taken, vandaag, leesfout }) {
     ? `${achter.length} open ta${achter.length === 1 ? 'ak staat' : 'ken staan'} met een due van vóór vandaag. `
       + 'Die staan in geen enkele daglijst. Draaide de nachtelijke doorrol?'
     : `Alle ${rijen.length} open taken staan op vandaag of later.`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 7 · DE OPWARMRONDE — heeft elke geboekte zoomcall zijn kaart, en klopt hij?
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Sinds 14 september hoort elke geboekte zoomcall de dag ná het boeken in
+// Daves lijst te staan voor een bevestigingsgesprek (cron-opvolging-zoom-opwarm).
+// Dat is een nieuwe meetregel, en DE LES VAN 7 SEPTEMBER is dat een nieuwe
+// regel zonder meter erop een bewaking oplevert die zelf gaat liegen: controle
+// 1 kijkt uitsluitend naar `bron='event' AND reden='aanmelding'`, dus een
+// opwarmkaart die te ver vooruit staat of nooit ontstaat ziet niemand.
+//
+// Drie dingen die stuk kunnen, en alle drie zijn ze stil:
+//
+//   1. DE KAART ONTSTAAT NIET. De call staat er, en er is niemand die belt.
+//      Precies het gat waarvoor deze hele ronde bestaat.
+//   2. DE KAART GAAT NIET DICHT OP DE CALLDAG. Dat is niet alleen rommel:
+//      heeftAlKaart() in cron-opvolging-zoom-nabel matcht óók op
+//      telefoonnummer, dus een open opwarmkaart VERHINDERT de nabelkaart van
+//      12:00. Een bestaande, werkende functie valt dan weg zonder één
+//      foutmelding.
+//   3. DE KAART SLAAPT TE LANG. Een due ná de calldag betekent dat hij pas
+//      wakker wordt als de call al geweest is — dezelfde vorm als de
+//      verdwenen ronde A, en net zo onzichtbaar.
+//
+// ── DE WACHTRIJ IS GEEN GAT ─────────────────────────────────────────────
+// De achterstand van 36 boekingen komt gespreid binnen: tien per dag, de
+// eerstvolgende calls eerst. Een call die nog geen kaart heeft is dus niet
+// automatisch fout. Het onderscheid is meetbaar: had de dripfeed vandaag nog
+// RUIMTE in zijn dagquota en staat er tóch iets onbedekt, dan draait de cron
+// niet of slaat hij rijen over. Is de quota op, dan is precies dát de
+// bedoeling en hoort de wachtrij alleen geteld te worden.
+//
+// ── EN EEN VERSE BOEKING IS OOK GEEN GAT ────────────────────────────────
+// De cron draait elk kwartier, deze controle om 05:00 UTC. Een call die vijf
+// minuten geleden geboekt is heeft terecht nog geen kaart. Vandaar de
+// gratieperiode: pas wat langer dan GRATIE_UREN geleden geboekt is telt mee.
+
+/** De reden van een opwarmkaart. Gelijk aan REDEN in _lib/opvolging-zoom-opwarm.js. */
+export const OPWARM_REDEN = 'zoom_bevestigen';
+
+/** Hoelang mag een verse boeking nog zonder kaart staan? */
+export const GRATIE_UREN = 3;
+
+/** De statussen waarin een kaart nog werk is. Gelijk aan de crons. */
+const KAART_LOPEND = new Set(['open', 'wacht_inplanning']);
+
+/** Cijfers uit een nummer, zonder landcode-notatie. Gelijk aan de crons. */
+function cijfers(s) {
+  const c = String(s == null ? '' : s).replace(/\D/g, '');
+  if (!c) return null;
+  return c.startsWith('00') ? (c.slice(2) || null) : c;
+}
+
+/** Zelfde match als zoekTaak in de webhook: exact, anders de laatste negen. */
+function zelfdeNummer(a, b) {
+  const x = cijfers(a); const y = cijfers(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  return x.length >= 9 && y.length >= 9 && x.slice(-9) === y.slice(-9);
+}
+
+/**
+ * @param {object} o
+ * @param {Array}  o.afspraken  toekomstige scheduled calls:
+ *                              { id, telefoon, calldag, geboekt_uren_geleden }
+ * @param {Array}  o.kaarten    alle taken die meetellen:
+ *                              { id, status, due, reden, telefoon, appointment_id, calldag }
+ * @param {string} o.vandaag
+ * @param {number} o.dagquota            MAX_ACHTERSTAND_PER_DAG
+ * @param {number} o.achterstandVandaag  hoeveel er vandaag al uit de achterstand kwamen
+ * @param {?string} o.leesfout
+ */
+export function controleerOpwarmronde({
+  afspraken, kaarten, vandaag, dagquota = 10, achterstandVandaag = 0, leesfout = null,
+}) {
+  // Een leesfout is een antwoord dat we kregen en dat niet deugt. Zie controle
+  // 6 hierboven: dat is een storing, geen blinde vlek.
+  if (leesfout) {
+    return uit('opwarmronde', FOUT, { fout: String(leesfout).slice(0, 200) },
+      'De afspraken of de kaarten waren niet te lezen: ' + String(leesfout).slice(0, 200)
+      + '. Of elke geboekte zoomcall zijn opwarmkaart heeft is nu onbekend.');
+  }
+  if (!Array.isArray(afspraken) || !Array.isArray(kaarten)) {
+    return uit('opwarmronde', FOUT, { afspraken: typeof afspraken, kaarten: typeof kaarten },
+      'De meting kwam niet als twee lijsten terug. Dat is een verminkt antwoord, geen ontbrekende meting.');
+  }
+
+  // ── Deel 2 en 3 · staan de bestaande kaarten goed? ────────────────────
+  // Bewust vóór de leegte-controle hieronder: een open opwarmkaart die de
+  // nabelronde blokkeert is een fout, ook op een dag zonder enige toekomstige
+  // call (dat is juist hoe zo'n kaart blijft hangen).
+  const opwarmOpen = kaarten.filter((k) =>
+    k && k.reden === OPWARM_REDEN && KAART_LOPEND.has(String(k.status || '')));
+  const naCalldag = opwarmOpen.filter((k) => k.calldag && String(k.calldag) <= vandaag);
+  const slapers   = opwarmOpen.filter((k) => k.calldag && String(k.due || '') > String(k.calldag));
+
+  if (afspraken.length === 0 && opwarmOpen.length === 0) {
+    return uit('opwarmronde', NIET_GEMETEN, { calls: 0, open_kaarten: 0 },
+      'Er staan geen geboekte zoomcalls in de toekomst en geen open opwarmkaarten. '
+      + 'Er valt dus niets te controleren — dat is iets anders dan goed.');
+  }
+
+  // ── Deel 1 · heeft elke toekomstige call zijn kaart? ──────────────────
+  const perAfspraak = new Set(kaarten.map((k) => k && k.appointment_id).filter(Boolean).map(String));
+  const lopend = kaarten.filter((k) => k && KAART_LOPEND.has(String(k.status || '')));
+
+  const onbedekt = [];
+  let gedekt = 0;
+  let leadInLijst = 0;
+  let teVers = 0;
+  for (const a of afspraken) {
+    if (perAfspraak.has(String(a.id))) { gedekt += 1; continue; }
+    if (lopend.some((k) => zelfdeNummer(k.telefoon, a.telefoon))) { leadInLijst += 1; continue; }
+    if (Number(a.geboekt_uren_geleden) < GRATIE_UREN) { teVers += 1; continue; }
+    onbedekt.push(a);
+  }
+
+  const ruimte = Math.max(0, (Number(dagquota) || 0) - (Number(achterstandVandaag) || 0));
+  const fouten = [];
+  // De wachtrij is alleen een gat als de dripfeed vandaag nog ruimte had en
+  // die niet gebruikt heeft. Dan draait de cron niet, of slaat hij rijen over.
+  if (onbedekt.length && ruimte > 0) {
+    fouten.push(`${onbedekt.length} geboekte zoomcall(s) hebben geen kaart terwijl er vandaag nog `
+      + `ruimte was voor ${ruimte} — de instroom draait niet of slaat rijen over`);
+  }
+  if (naCalldag.length) {
+    fouten.push(`${naCalldag.length} opwarmkaart(en) staan nog open terwijl de calldag geweest is; `
+      + 'die blokkeren de nabelkaart van 12:00, want die matcht op telefoonnummer');
+  }
+  if (slapers.length) {
+    fouten.push(`${slapers.length} opwarmkaart(en) worden pas wakker ná hun eigen call`);
+  }
+
+  const getallen = {
+    calls: afspraken.length,
+    gedekt,
+    lead_al_in_lijst: leadInLijst,
+    te_vers: teVers,
+    wachtrij: onbedekt.length,
+    quota: dagquota,
+    vandaag_uit_achterstand: achterstandVandaag,
+    ruimte,
+    open_kaarten: opwarmOpen.length,
+    na_calldag: naCalldag.length,
+    slapend: slapers.length,
+  };
+
+  return uit('opwarmronde', fouten.length ? FOUT : OK, getallen, fouten.length
+    ? fouten.join('; ')
+    : `${gedekt} van ${afspraken.length} geboekte zoomcalls hebben hun kaart`
+      + (leadInLijst ? `, ${leadInLijst} staan al om een andere reden in de lijst` : '')
+      + (teVers ? `, ${teVers} zijn net geboekt` : '')
+      + (onbedekt.length
+        ? `. ${onbedekt.length} wachten nog op de dripfeed; de quota van ${dagquota} per dag is op.`
+        : '.')
+      + ` ${opwarmOpen.length} kaart(en) staan open, allemaal vóór hun calldag.`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
