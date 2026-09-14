@@ -55,7 +55,7 @@
 
 import { supabaseAdmin, verifyAdmin } from './supabase.js';
 import { resolveEventByLabel } from './_lib/event-label-matcher.js';
-import { processSignup } from './_lib/event-signup-processor.js';
+import { processSignup, findExistingAttendee } from './_lib/event-signup-processor.js';
 
 // De CSV-rijen (bron: 262c65f5-…-csv). Test-rij jeffreybiemold@gmail.com bewust
 // weggelaten. Said Hachemi = 2 events = 2 aanmeldingen.
@@ -561,10 +561,33 @@ export default async function handler(req, res) {
     rowResult.automations = analysis;
 
     if (dryRun) {
-      // Alleen tellen wat er ZOU gebeuren — geen writes.
-      rowResult.status = 'dry_run';
-      const overdue = analysis.filter(a => a.verdict === 'skip_overdue');
-      if (overdue.length) summary.preempt_cancels += overdue.length;
+      // Simuleer de create-beslissing zodat de tellingen exact matchen met
+      // wat POST daadwerkelijk uitvoert. Zelfde dedup-signaal
+      // (findExistingAttendee: email-eerst, phone-fallback binnen event_id)
+      // als processSignup gebruikt — geen afwijking tussen dry-run en execute.
+      const existing = await findExistingAttendee({
+        eventId: chosenEvent.id,
+        email  : row.email.trim().toLowerCase(),
+        phone  : row.phone,
+      });
+      const bucket = summary.per_event[chosenEvent.id] || {
+        title: chosenEvent.title, aangemaakt: 0, overgeslagen: 0,
+      };
+      if (existing) {
+        rowResult.status     = 'overgeslagen';
+        rowResult.dedup_note = 'zou overgeslagen worden: bestaande attendee (email+event_id match)';
+        summary.overgeslagen += 1;
+        bucket.overgeslagen  += 1;
+      } else {
+        rowResult.status = 'aangemaakt';   // dry-run-semantiek: "zou aangemaakt worden"
+        summary.aangemaakt += 1;
+        bucket.aangemaakt  += 1;
+        // Preempt-cancels ALLEEN tellen wanneer we ook echt zouden inserten;
+        // bestaande dedup-rijen krijgen geen preempt in de execute-run.
+        const overdue = analysis.filter(a => a.verdict === 'skip_overdue');
+        if (overdue.length) summary.preempt_cancels += overdue.length;
+      }
+      summary.per_event[chosenEvent.id] = bucket;
       summary.resultaten.push(rowResult);
       continue;
     }
