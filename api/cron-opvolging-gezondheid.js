@@ -31,8 +31,10 @@ import { brugConfig, brugFetch } from './_lib/whatsapp-brug-client.js';
 import {
   controleerInstroom, controleerOptelling, controleerDubbels,
   beoordeelPrintweergave, controleerBrug, controleerDagritme,
+  controleerOpwarmronde, OPWARM_REDEN,
   bouwMail, OK, FOUT, NIET_GEMETEN,
 } from './_lib/opvolging-gezondheid.js';
+import { MAX_ACHTERSTAND_PER_DAG, dagInZone as opwarmDag } from './_lib/opvolging-zoom-opwarm.js';
 
 const ZONE = 'Europe/Amsterdam';
 const MAIL_VAN = 'leads@deforexopleiding.nl';
@@ -104,6 +106,13 @@ export default async function handler(req, res) {
   // vandaag te hebben. Staat die er wel, dan ziet Dave die kaart niet meer.
   uitkomsten.push(await meetDagritme(vandaag));
 
+  // ── 7 · De opwarmronde ───────────────────────────────────────────────────
+  // Elke geboekte zoomcall in de toekomst hoort een kaart te hebben, en elke
+  // open opwarmkaart hoort vóór zijn eigen calldag te staan. Zie de kop van
+  // controle 7 in _lib/opvolging-gezondheid.js voor waarom die tweede regel
+  // niet cosmetisch is: een open opwarmkaart blokkeert de nabelkaart van 12:00.
+  uitkomsten.push(await meetOpwarmronde(vandaag));
+
   // ── De mail ──────────────────────────────────────────────────────────────
   const { subject, text } = bouwMail({ uitkomsten, dag: vandaag });
   const ontvanger = process.env.OPVOLGING_GEZONDHEID_MAIL_TO || '';
@@ -145,6 +154,82 @@ async function meetDagritme(vandaag) {
     return controleerDagritme({ taken: data || [], vandaag, leesfout: null });
   } catch (e) {
     return controleerDagritme({ taken: [], vandaag, leesfout: kort(e) });
+  }
+}
+
+/**
+ * DE OPWARMRONDE — twee lezingen, en een leesfout is hier een FOUT.
+ *
+ * De afspraken: alle scheduled calls die nog moeten komen, met hetzelfde
+ * filter als cron-opvolging-zoom-opwarm hanteert (nummer gevuld, geen
+ * proefafspraak). Wijkt dat filter af, dan meet deze controle iets anders dan
+ * de cron doet en gaat de bewaking zelf liegen — precies de les van
+ * 7 september.
+ *
+ * De kaarten: alles wat een afspraak kan dekken. Niet alleen opwarmkaarten:
+ * staat een lead al om een andere reden in de lijst, dan is hij niet
+ * onzichtbaar.
+ */
+async function meetOpwarmronde(vandaag) {
+  const nu = Date.now();
+  try {
+    const totIso = new Date(nu + 180 * 86400000).toISOString();
+    const { data: appts, error: aErr } = await supabaseAdmin
+      .from('follow_up_appointments')
+      .select('id, lead_phone, scheduled_at, status, is_test, created_at')
+      .eq('status', 'scheduled')
+      .gt('scheduled_at', new Date(nu).toISOString())
+      .lt('scheduled_at', totIso)
+      .not('lead_phone', 'is', null)
+      .limit(1000);
+    if (aErr) throw new Error('afspraken: ' + aErr.message);
+
+    const { data: taken, error: tErr } = await supabaseAdmin
+      .from('opvolging_taken')
+      .select('id, status, due, reden, telefoon, bron_ref, created_at')
+      .limit(5000);
+    if (tErr) throw new Error('taken: ' + tErr.message);
+
+    const afspraken = (appts || [])
+      .filter((a) => a && a.is_test !== true && String(a.lead_phone || '').trim())
+      .map((a) => ({
+        id      : a.id,
+        telefoon: a.lead_phone,
+        calldag : opwarmDag(Date.parse(a.scheduled_at)),
+        geboekt_uren_geleden: (nu - Date.parse(a.created_at || 0)) / 3600000,
+      }))
+      // Een call van vandaag valt onder de nabelronde van 12:00 en niet onder
+      // de opwarmronde. Zelfde grens als slaOver() in de cron.
+      .filter((a) => a.calldag > vandaag);
+
+    const kaarten = (taken || []).map((t) => ({
+      id      : t.id,
+      status  : t.status,
+      due     : t.due,
+      reden   : t.reden,
+      telefoon: t.telefoon,
+      appointment_id: (t.bron_ref && t.bron_ref.appointment_id) || null,
+      calldag : (t.bron_ref && t.bron_ref.start)
+        ? opwarmDag(Date.parse(t.bron_ref.start)) : null,
+      achterstand: !!(t.bron_ref && t.bron_ref.achterstand),
+      gemaakt_op : opwarmDag(Date.parse(t.created_at || 0)),
+    }));
+
+    // Hoeveel kaarten kwamen er vandaag uit de ACHTERSTAND? Dat getal bepaalt
+    // of een onbedekte call een wachtrij is of een gat.
+    const achterstandVandaag = kaarten.filter((k) =>
+      k.reden === OPWARM_REDEN && k.achterstand && k.gemaakt_op === vandaag).length;
+
+    return controleerOpwarmronde({
+      afspraken, kaarten, vandaag,
+      dagquota: MAX_ACHTERSTAND_PER_DAG,
+      achterstandVandaag,
+      leesfout: null,
+    });
+  } catch (e) {
+    return controleerOpwarmronde({
+      afspraken: [], kaarten: [], vandaag, leesfout: kort(e),
+    });
   }
 }
 

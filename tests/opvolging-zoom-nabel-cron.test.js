@@ -341,14 +341,28 @@ test('GEEN NAMEN in de getallen — dit is een alarm, geen werklijst in een mail
   assert.doesNotMatch(JSON.stringify(u), /Rani/);
 });
 
-test('kan hij niet lezen, dan is het NIET GEMETEN en nooit ok', () => {
-  // Zie de kop van opvolging-gezondheid.js: een controle die niets kon meten
-  // is niet in orde, en 'niet gemeten' telt in de mail even zwaar als 'fout'.
+test('kan hij niet lezen, dan is het FOUT en nooit ok', () => {
+  // AANGESCHERPT OP 14 SEPTEMBER, en dat is strenger dan het was.
+  //
+  // Deze test legde NIET_GEMETEN vast bij een leesfout. Dat is de vorm die op
+  // 7 september op vier andere plekken juist is weggehaald: 'niet gemeten' is
+  // smal en geldt alleen voor een ontbrekende koppeling of een lege meting.
+  // 'relatie bestaat niet' is een ANTWOORD dat we kregen en dat niet deugt —
+  // een storing dus, en die hoort niet in de emmer voor 'nog niet ingesteld'.
+  // Controle 1 doet het in dezelfde situatie al goed; deze controle is later
+  // gebouwd en nam de oude vorm over.
+  //
+  // Beide staten wegen in de mail even zwaar, dus wat hier verandert is de
+  // onderwerpregel en het log: 'FOUT: dagritme (de openstaande taken waren
+  // niet te lezen)' in plaats van iets wat leest als een blinde vlek.
   const u = controleerDagritme({ taken: [], vandaag: DAG, leesfout: 'relatie bestaat niet' });
-  assert.equal(u.staat, NIET_GEMETEN);
+  assert.equal(u.staat, FOUT);
   assert.match(u.uitleg, /relatie bestaat niet/);
+  assert.notEqual(u.staat, NIET_GEMETEN);
 
-  assert.equal(controleerDagritme({ taken: [], vandaag: 'gisteren', leesfout: null }).staat, NIET_GEMETEN);
+  // Een datum die er niet als datum uitkomt is net zo goed een verminkte vorm:
+  // die maken we zelf, uit de klok.
+  assert.equal(controleerDagritme({ taken: [], vandaag: 'gisteren', leesfout: null }).staat, FOUT);
 });
 
 test('een lege takenlijst is hier WEL ok — de meting is er, hij is alleen leeg', () => {
