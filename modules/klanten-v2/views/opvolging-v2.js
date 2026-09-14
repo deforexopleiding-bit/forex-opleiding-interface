@@ -3767,7 +3767,7 @@
           return scrim('Geen gehoor &mdash; nog niet', esc(t.naam),
             '<div class="warn"><b>De drempel is nog niet gehaald.</b> ' + esc(drB.redenen.join(' en ')) +
             '. De afspraak is minstens <b>3 belpogingen op 3 verschillende dagen</b> ' +
-            '&eacute;&eacute;n WhatsApp, want de mail die hierna uitgaat zegt dat we je ' +
+            '&eacute;n &eacute;&eacute;n WhatsApp, want de mail die hierna uitgaat zegt dat we je ' +
             '<i>meermaals</i> geprobeerd hebben te bereiken.</div>');
         }
         const evDagG = evVan(t).event_dag || null;
