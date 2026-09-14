@@ -485,3 +485,81 @@ try {
 ## Eerdere sessies
 
 *(Fase A, B, C — zie commits tot en met 9adb307)*
+
+---
+
+## Sessie 14 september 2026 — Geen gehoor: van belstatus naar automatisatie
+
+### Les 7 — Een uitkomst die nergens heen gaat, gaat nergens heen
+
+**Symptoom:** 15 rijen op `event_attendees.call_status = 'geen_gehoor'`, allemaal met de hand
+gezet, en niemand van die mensen had ooit iets te horen gekregen. Werner De Kesel (Forex
+Masterclass Gent 26/09) stond op `aangemeld` met een LEGE belstatus terwijl hij al meermaals
+gebeld was.
+
+**Oorzaak:** het belwerk in Opvolging schreef precies één uitkomst door naar de eventmodule —
+`bevestigd`, via `zetBelstatusBevestigd`. Elke andere uitkomst bleef in Opvolging hangen. En
+aan de andere kant keek geen van de vier bestaande event-triggers naar `call_status`. Er was
+dus geen enkele weg van 'niemand te bereiken' naar 'er gebeurt iets'.
+
+**Algemene regel:** bij een nieuwe uitkomst op een kaart hoort de vraag *waar gaat die heen?*
+Een status die alleen in één module leeft is een status die niemand leest. Concreet checkje:
+schrijft de actie hem door naar de systemen die erop kunnen handelen, en bestaat daar een
+trigger die hem oppakt? Zo niet, dan is de knop een dagboek.
+
+### Les 8 — Niet gemeten is niet waar, en dat moet in de code staan
+
+De conditie `geen_reactie_sinds_belstatus` beslist of iemands plek vervalt. Vijf manieren
+waarop die meting kan mislukken (geen nummer én geen mailadres, geen `call_status_at`, een
+gefaalde query, een meter die gooit, een meter die ontbreekt) geven alle vijf `false` — niet
+`true`, en ook niet 'dan slaan we de check maar over'.
+
+Let op de asymmetrie met het bestaande gedrag van diezelfde engine: `evaluateCondition` laat
+een ONBEKENDE check bewust doorvallen naar `true` ("onbekende check blokkeert niet"). Dat is
+verdedigbaar voor een check die niets afneemt, en onverdedigbaar hier. Een nieuwe check die
+iets onherroepelijks doet mag dus nooit op de default leunen; hij heeft zijn eigen case nodig
+met een expliciete `niet_gemeten`-tak, en het run-log moet dat woord letterlijk bevatten.
+Anders is 'pass: false' niet te onderscheiden van 'gemeten en er kwam een antwoord'.
+
+### Les 9 — Eén getal op drie plekken is drie getallen
+
+De deadline (48 uur, maar nooit later dan 48 uur vóór het event) leeft in de wachtstap van de
+automatisatie, in de mailtekst en in de melding aan Maxim. Drie eigen sommetjes zouden
+betekenen dat de mail een moment belooft waarop de automatisatie al gehandeld heeft.
+
+Oplossing: `api/_lib/geen-gehoor-deadline.js` met `plafondMs()` als enige plek waar de grens
+gerekend wordt, en een test die vier gevallen langsloopt en eist dat `geenGehoorDeadline()` en
+`applyWaitCeiling()` hetzelfde moment noemen. Zelfde patroon als de tweeling-tests van
+`opvolging-vensters.js`: niet 'we letten erop', maar een test die rood wordt.
+
+### Les 10 — Number() maakt van een corrupte config een stille nul
+
+`Number([])` is `0` en `Number('')` ook. Bij een optionele bovengrens (`uiterlijk_uren_voor_event`)
+betekent `0` iets heel anders dan 'geen grens': namelijk 'uiterlijk op het moment dat het event
+begint'. Een leeggemaakt invoerveld dat als `''` in de jsonb belandt zou de wachtstap dus stil
+naar het begin van het event verschuiven.
+
+**Algemene regel:** bij een optioneel getal in een config: eerst `typeof`, dan `Number()`. En in
+de UI de SLEUTEL verwijderen bij een leeg veld, niet `''` of `0` wegschrijven — zie
+`__autEvStepConfigNum` / `__autEvStepConfigOpt`.
+
+### Les 11 — Een mock.module-cache bijt bij een lib met een default-client
+
+`meetInkomendeReacties({ ... })` had `db = supabaseAdmin` als default, uit zijn eigen import.
+In de tests wordt de cron met een cache-buster opnieuw geïmporteerd, maar de lib eronder NIET —
+die bleef aan de supabaseAdmin van de eerste test hangen. Gevolg: drie tests die met de tabellen
+van een andere test meetten.
+
+Dat is niet alleen een testprobleem: het betekent dat de meting aan de module-instantie hangt in
+plaats van aan de handler. Oplossing: de client gaat expliciet mee bij elke aanroep
+(`db: supabaseAdmin`), in de cron én in de engine. Een default die alleen werkt zolang er precies
+één instantie is, is een default die je een keer verrast.
+
+### Les 12 — Een test met een vast aantal tekens breekt op de eerstvolgende uitbreiding
+
+Twee bestaande tests lazen `bron.slice(i, i + 2600)` en `i + 2400` vanaf het begin van het
+Wat-nu-venster, en eisten *exact vijf* uitgangen. Bij de zesde viel de laatste buiten het venster
+en werden ze rood om iets wat gewoon goed stond. Grenzen horen op een echt anker te liggen (hier:
+`return scrim(` — het einde van het blok), en een telling hoort de EIGENSCHAP te toetsen ('elke
+uitgang draagt de bezig-vlag') in plaats van een getal dat bij elke uitbreiding met de hand mee
+moet. Het commentaar in die tests vroeg daar zelf al om.
