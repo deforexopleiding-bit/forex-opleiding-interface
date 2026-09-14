@@ -33,10 +33,17 @@
 //                                     8 dagen terug matcht ONMIDDELLIJK op
 //                                     een 24u/48u/72u-nudge → assessment-
 //                                     verwijt gaat direct uit.
-//                                     → We inserten PREEMPTIEF een
-//                                     event_automation_runs-rij met
-//                                     status='cancelled' zodat de motor 'em
-//                                     overslaat. GEEN send.
+//                                     → 3-staps race-veilige volgorde:
+//                                       1. insert attendee met
+//                                          automation_enabled=false (cron
+//                                          negeert 'em).
+//                                       2. insert event_automation_runs-rij
+//                                          met status='cancelled' voor elke
+//                                          skip_overdue-automation.
+//                                       3. UPDATE automation_enabled=true.
+//                                     Cron pikt de attendee pas op NA stap 3,
+//                                     dus altijd nadat de overdue-cancels er
+//                                     staan — geen race-venster.
 //
 // GET  /api/admin-events-backfill-8-14-sept?dry_run=1
 // POST /api/admin-events-backfill-8-14-sept   { "dry_run": false }
@@ -323,6 +330,16 @@ export default async function handler(req, res) {
       continue;
     }
 
+    // Race-veilige volgorde per attendee:
+    //   1. Insert attendee met automation_enabled=false → cron ziet 'em NIET.
+    //   2. Insert preemptive cancelled-runs voor alle skip_overdue-automations.
+    //      Zonder cancel-rij zou de eerstvolgende cron-tick na stap 3 direct
+    //      een overdue-nudge kunnen inschrijven (nanoseconden-window).
+    //   3. Update automation_enabled=true → cron pikt de attendee op voor de
+    //      overige (on_signup + toekomstige time_before_event) automations
+    //      en slaat de overdue automations over via de bestaande
+    //      `existing`-Set-check in enrollDueAttendees (UNIQUE (automation_id,
+    //      attendee_id)).
     let attendeeId = null;
     try {
       const processed = await processSignup({
@@ -340,6 +357,9 @@ export default async function handler(req, res) {
         ghlFormSubmissionId: null,
         createdVia         : CREATED_VIA,
         source             : 'ghl',
+        // STAP 1 — automation_enabled=false zodat cron-events-automations
+        // deze attendee overslaat tot stap 3 hem 'aanzet'.
+        automationEnabled  : false,
       });
 
       rowResult.status       = processed.deduplicated ? 'overgeslagen' : 'aangemaakt';
@@ -366,11 +386,12 @@ export default async function handler(req, res) {
       continue;
     }
 
-    // Preemptive-cancel voor overdue-triggers zodat de motor die overslaat.
-    // Alleen wanneer een nieuwe attendee is aangemaakt — bij deduplicated bestaat
-    // 'ie al en heeft de motor 'em (waarschijnlijk) al eens verwerkt/overgeslagen;
-    // niet nogmaals insertsen (UNIQUE zou 'em anders soft-catchen, maar semantisch
-    // klopt 't niet om een oud dedup-geval te 'skipen').
+    // STAP 2 — Preemptive-cancel voor overdue-triggers, VÓÓR we
+    // automation_enabled aanzetten. Alleen wanneer een nieuwe attendee is
+    // aangemaakt: dedup-hits raken we niet aan (bestaande automation_enabled-
+    // waarde blijft dan intact — meestal true — en oude flows blijven zoals ze
+    // waren; UNIQUE (automation_id, attendee_id) zou een preempt-insert
+    // sowieso soft-catchen, maar semantisch klopt 't niet).
     if (rowResult.status === 'aangemaakt' && attendeeId) {
       const cancelled = [];
       for (const a of analysis.filter(a => a.verdict === 'skip_overdue')) {
@@ -385,6 +406,24 @@ export default async function handler(req, res) {
         if (r.ok) { cancelled.push(auto.id); summary.preempt_cancels += 1; }
       }
       rowResult.preempt_cancelled_automations = cancelled;
+
+      // STAP 3 — automation_enabled=true. Cron pikt de attendee vanaf de
+      // eerstvolgende tick op voor on_signup + toekomstige time_before_event;
+      // overdue-nudges vallen weg via de reeds-ingezette cancel-rijen.
+      const { error: enableErr } = await supabaseAdmin
+        .from('event_attendees')
+        .update({ automation_enabled: true })
+        .eq('id', attendeeId);
+      if (enableErr) {
+        // Fail-hard signaleren: zonder deze flip krijgt de attendee GEEN
+        // welkom/reminders. Dat is een operationeel probleem, niet fataal
+        // voor de rest van de backfill; log + markeer in de audit.
+        console.error('[backfill] automation_enable flip mislukt:', attendeeId, enableErr.message);
+        rowResult.automation_enable_error = enableErr.message;
+        rowResult.status = 'aangemaakt_zonder_enable';
+      } else {
+        rowResult.automation_enabled = true;
+      }
     }
 
     summary.resultaten.push(rowResult);

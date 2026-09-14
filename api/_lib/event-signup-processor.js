@@ -59,6 +59,7 @@ export async function createAttendee({
   event, payload, status = 'aangemeld', followUpReason = null,
   ghlContactId = null, ghlFormSubmissionId = null,
   createdVia = 'ghl_inbound', source = 'ghl',
+  automationEnabled,
 }) {
   const row = {
     event_id              : event.id,
@@ -76,6 +77,13 @@ export async function createAttendee({
     follow_up_reason      : followUpReason || null,
     registered_at         : payload.registered_at || new Date().toISOString(),
   };
+  // automation_enabled alleen expliciet zetten wanneer caller 'em meestuurt.
+  // Weglaten → DB-default (true) blijft actief; bestaand inbound-gedrag
+  // onveranderd. Backfill zet 'em bewust op false om het enroll-race-venster
+  // te sluiten tussen insert en preemptive-cancel van overdue automations.
+  if (automationEnabled === true || automationEnabled === false) {
+    row.automation_enabled = automationEnabled;
+  }
   const { data, error } = await supabaseAdmin
     .from('event_attendees')
     .insert(row)
@@ -108,6 +116,7 @@ export async function processSignup({
   event, isAmbiguous = false, matches = null,
   payload, ghlContactId = null, ghlFormSubmissionId = null,
   createdVia = 'ghl_inbound', source = 'ghl',
+  automationEnabled,
 }) {
   const followUpReason = isAmbiguous
     ? `AMBIGUOUS_LABEL: ${matches?.length ?? 2} candidates`
@@ -136,6 +145,7 @@ export async function processSignup({
     const created = await createAttendee({
       event, payload, status: inschrijfStatus, followUpReason,
       ghlContactId, ghlFormSubmissionId, createdVia, source,
+      automationEnabled,
     });
     attendeeId = created.row.id;
     if (created.deduplicated) dedupNote = 'deduplicated: race-condition dup detected';
