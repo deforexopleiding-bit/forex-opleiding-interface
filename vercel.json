@@ -243,6 +243,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron-opvolging-zoom-opwarm",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron-brug-waakhond",
       "schedule": "*/5 * * * *"
     },

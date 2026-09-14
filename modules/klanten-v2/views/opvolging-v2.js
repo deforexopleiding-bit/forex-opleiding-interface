@@ -1645,6 +1645,10 @@
     // De kaarten van cron-opvolging-zoom-nabel. Zonder deze regel toont de
     // badge de rauwe sleutel 'zoom_nabellen'.
     zoom_nabellen: ['Zoomcall nabellen', 't-amber'],
+    // De kaarten van cron-opvolging-annuleringen en cron-opvolging-zoom-opwarm.
+    // Zonder deze regels toont de badge de rauwe sleutel.
+    zoom_geannuleerd: ['Zoomcall geannuleerd', 't-red'],
+    zoom_bevestigen: ['Zoomcall bevestigen', 't-purple'],
   };
 
   /**
