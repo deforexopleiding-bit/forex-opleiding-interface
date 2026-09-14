@@ -29,12 +29,32 @@ import {
   autoCloseIfFull,
 } from './event-registration.js';
 
+// Losse re-export voor callers die de cascade zelf willen aansturen (bv. de
+// backfill die 'em één keer aan het eind draait per uniek event).
+export async function runSeatFillCascade(event) {
+  try {
+    const confirmedCount = await getConfirmedCount(event.id);
+    const gastenlijst    = await syncGastenlijstWebflow(event, confirmedCount);
+    const autoClose      = await autoCloseIfFull(event, confirmedCount);
+    return {
+      ok: true, confirmed_count: confirmedCount,
+      gastenlijst_label: gastenlijst?.label || null,
+      auto_closed: !!autoClose?.auto_closed,
+    };
+  } catch (e) {
+    console.error('[event-signup-processor] runSeatFillCascade:', e.message);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 export async function findExistingAttendee({ eventId, email, phone }) {
   // Email-eerst dedup (bestaande partial UNIQUE op (event_id, lower(email))).
+  // automation_enabled meegeleverd zodat callers (bv. de backfill) een
+  // half-verwerkte rij (enabled=false) kunnen detecteren voor resume.
   if (email) {
     const { data, error } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, email, phone')
+      .select('id, email, phone, automation_enabled, created_via')
       .eq('event_id', eventId)
       .ilike('email', email)
       .maybeSingle();
@@ -44,7 +64,7 @@ export async function findExistingAttendee({ eventId, email, phone }) {
   if (phone) {
     const { data, error } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, email, phone')
+      .select('id, email, phone, automation_enabled, created_via')
       .eq('event_id', eventId)
       .eq('phone', phone)
       .limit(1)
@@ -117,6 +137,12 @@ export async function processSignup({
   payload, ghlContactId = null, ghlFormSubmissionId = null,
   createdVia = 'ghl_inbound', source = 'ghl',
   automationEnabled,
+  // skipSeatFill: sla de seat-fill cascade (getConfirmedCount →
+  // syncGastenlijstWebflow → autoCloseIfFull) over. De backfill zet dit op
+  // true en draait de sync éénmalig aan het eind per uniek event, om per-rij
+  // Webflow-API-latency (10-30s) uit de kritieke pad te halen. Live inbound
+  // laat 'em default false → gedrag onveranderd.
+  skipSeatFill = false,
 }) {
   const followUpReason = isAmbiguous
     ? `AMBIGUOUS_LABEL: ${matches?.length ?? 2} candidates`
@@ -151,16 +177,20 @@ export async function processSignup({
     if (created.deduplicated) dedupNote = 'deduplicated: race-condition dup detected';
   }
 
-  // Seat-fill helpers (best-effort; faal blokkeert flow niet).
+  // Seat-fill helpers (best-effort; faal blokkeert flow niet). In backfill-
+  // mode overslaan we deze cascade en draait de caller 'em één keer per
+  // uniek event aan het eind (Webflow-API is ~10-30s per call).
   let confirmedCount = 0;
   let gastenlijst = null;
   let autoClose = null;
-  try {
-    confirmedCount = await getConfirmedCount(event.id);
-    gastenlijst    = await syncGastenlijstWebflow(event, confirmedCount);
-    autoClose      = await autoCloseIfFull(event, confirmedCount);
-  } catch (e) {
-    console.error('[event-signup-processor] seat-fill cascade:', e.message);
+  if (!skipSeatFill) {
+    try {
+      confirmedCount = await getConfirmedCount(event.id);
+      gastenlijst    = await syncGastenlijstWebflow(event, confirmedCount);
+      autoClose      = await autoCloseIfFull(event, confirmedCount);
+    } catch (e) {
+      console.error('[event-signup-processor] seat-fill cascade:', e.message);
+    }
   }
 
   return {
