@@ -30,6 +30,54 @@ export function computeNextRunAt(waitConfig, fromMs) {
   return new Date(fromMs + amount * ms);
 }
 
+/**
+ * DE BOVENGRENS OP EEN WACHTSTAP: nooit later dan X uur voor het event.
+ *
+ * Optioneel, via `waitConfig.uiterlijk_uren_voor_event`. Een deadline van 48
+ * uur op een aanmelding van morgen valt anders ná het event, en dan gaat de
+ * vervolgstap (plek vervalt, melding aan Maxim) over een middag die al geweest
+ * is.
+ *
+ * LOS VAN computeNextRunAt, EN MET OPZET. Die functie is puur en kent alleen
+ * zijn eigen config; de grens heeft `event.starts_at` nodig. Ze apart houden
+ * betekent dat allebei zonder databank te testen zijn en dat de bestaande
+ * wait-stappen letterlijk niets merken van deze uitbreiding.
+ *
+ *   · geen grens in de config, of onleesbaar → de wachttijd blijft ongemoeid;
+ *   · geen leesbare starts_at → GEEN grens. Een grens verzinnen op een event
+ *     zonder datum zou de run vooruitduwen op een schatting;
+ *   · de grens ligt al in het verleden → wachttijd nul, de run gaat meteen
+ *     door. De deadline is dan verstreken op het moment dat hij gesteld werd,
+ *     en wachten zou de vervolgstap alleen maar verder ná het event zetten.
+ *
+ * @param {Date}    nextRunAt  uitkomst van computeNextRunAt
+ * @param {object}  waitConfig
+ * @param {?string} eventStartsAt
+ * @param {number}  fromMs     het nu-moment in ms
+ * @returns {Date}
+ */
+export function applyWaitCeiling(nextRunAt, waitConfig, eventStartsAt, fromMs) {
+  const rauw = waitConfig && waitConfig.uiterlijk_uren_voor_event;
+  // TYPE EERST, PAS DAN Number(). Number([]) is 0 en Number('') ook — een
+  // corrupte config zou daarmee 'uiterlijk op het moment dat het event begint'
+  // betekenen, en dat is iets heel anders dan 'geen grens'.
+  const isGetal = typeof rauw === 'number'
+    || (typeof rauw === 'string' && rauw.trim() !== '' && Number.isFinite(Number(rauw)));
+  if (!isGetal) return nextRunAt;
+  const uren = Number(rauw);
+  if (!Number.isFinite(uren) || uren < 0) return nextRunAt;
+
+  const startMs = eventStartsAt == null ? NaN : Date.parse(eventStartsAt);
+  if (!Number.isFinite(startMs)) return nextRunAt;
+
+  const grensMs = startMs - uren * 3_600_000;
+  if (grensMs <= fromMs) return new Date(fromMs);
+
+  const gepland = nextRunAt instanceof Date ? nextRunAt.getTime() : Number(nextRunAt);
+  if (!Number.isFinite(gepland)) return new Date(grensMs);
+  return new Date(Math.min(gepland, grensMs));
+}
+
 export function buildConditionState(attendee, event) {
   const status = attendee && attendee.status;
   // Fase 4A: event_niveau uit het gekoppelde event mee zodat
@@ -43,8 +91,32 @@ export function buildConditionState(attendee, event) {
   };
 }
 
+/**
+ * Checks die een meting BUITEN de attendee-rij nodig hebben.
+ *
+ * buildConditionState leest alleen de rij zelf; deze checks kijken in
+ * whatsapp_messages en email_messages. advanceRun haalt de meting op via
+ * deps.measureCondition en zet 'm als `state.meting`, zodat
+ * evaluateCondition puur blijft.
+ */
+export const GEMETEN_CONDITION_CHECKS = new Set(['geen_reactie_sinds_belstatus']);
+
 export function evaluateCondition(check, state) {
   switch (check) {
+    // ── GEEN REACTIE SINDS DE BELSTATUS ────────────────────────────────
+    // Waar = er is sinds call_status_at niets binnengekomen: geen WhatsApp en
+    // geen inkomende mail. Op deze uitkomst vervalt iemands plek, dus:
+    //
+    // NIET GEMETEN IS NIET WAAR. Geen meting (geen nummer en geen mailadres,
+    // geen nulpunt, of een query die faalde) → false, en de vervolgstappen
+    // draaien niet. We nemen nooit een plek af op een controle die niet kon
+    // draaien. Ontbreekt de meting helemaal, dan is dat hetzelfde geval: geen
+    // meting, dus niet waar.
+    case 'geen_reactie_sinds_belstatus': {
+      const m = state && state.meting;
+      if (!m || m.niet_gemeten === true || m.meetbaar === false) return false;
+      return m.waar === true;
+    }
     case 'assessment_completed':     return state.assessment_completed === true;
     case 'assessment_not_completed': return state.assessment_completed === false;
     case 'still_registered':         return state.still_registered === true;
@@ -79,6 +151,9 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
 
     if (type === 'wait') {
       nextRunAt = computeNextRunAt(step.config, nowMs);
+      // De bovengrens LOS erbovenop, met event.starts_at als argument — zie
+      // applyWaitCeiling. Zonder config-sleutel verandert er niets.
+      nextRunAt = applyWaitCeiling(nextRunAt, step.config, event && event.starts_at, nowMs);
       // Automation-tester: test-runs versnellen elke wait naar TEST_WAIT_MS.
       // Override gebeurt NA computeNextRunAt zodat de pure helper unit-
       // testbaar blijft zonder is_test-context.
@@ -90,9 +165,40 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
     }
 
     if (type === 'condition') {
-      const state = buildConditionState(attendee, event);
-      const pass = evaluateCondition(step.config && step.config.check, state);
-      await deps.recordLog(idx, 'condition', { ok: true, pass, check: step.config && step.config.check });
+      const check = step.config && step.config.check;
+      let state = buildConditionState(attendee, event);
+
+      // Checks die buiten de rij moeten kijken krijgen hun meting hier, via
+      // deps — zo blijft evaluateCondition puur en offline testbaar. Geen
+      // meter beschikbaar (een oudere caller, of een test die deze dep niet
+      // meegeeft) is 'niet gemeten', niet 'geen reactie'.
+      let meting = null;
+      if (GEMETEN_CONDITION_CHECKS.has(check)) {
+        if (typeof deps.measureCondition === 'function') {
+          try {
+            meting = await deps.measureCondition(check, { attendee, event, stepIndex: idx });
+          } catch (e) {
+            meting = { niet_gemeten: true, waar: false, reden: 'meting gooide: ' + ((e && e.message) || e) };
+          }
+        } else {
+          meting = { niet_gemeten: true, waar: false, reden: 'geen meter beschikbaar voor ' + check };
+        }
+        state = { ...state, meting };
+      }
+
+      const pass = evaluateCondition(check, state);
+      // NOOIT STIL SLAGEN: een meting die niet kon draaien staat als
+      // niet_gemeten in het log, met de reden erbij. Anders is 'pass: false'
+      // niet te onderscheiden van 'gemeten en er kwam een antwoord'.
+      await deps.recordLog(idx, 'condition', {
+        ok: true, pass, check,
+        ...(meting ? {
+          niet_gemeten: meting.niet_gemeten === true,
+          meting_reden: meting.reden || null,
+          meting_kanalen: meting.kanalen || null,
+          meting_treffers: typeof meting.aantal_treffers === 'number' ? meting.aantal_treffers : null,
+        } : {}),
+      });
       if (pass) { idx += 1; attempts = 0; continue; }
       const onFail = (step.config && step.config.on_fail) || 'exit';
       if (onFail === 'skip_to_end') { idx = steps.length; continue; }
@@ -390,7 +496,10 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
     try {
       const { data: attendee } = await supabaseAdmin
         .from('event_attendees')
-        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id')
+        // call_status + call_status_at: nodig voor de condition-check
+        // 'geen_reactie_sinds_belstatus' (call_status_at is het nulpunt) en
+        // voor de idempotency van update_attendee_status.call_status.
+        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id, call_status, call_status_at')
         .eq('id', run.attendee_id)
         .maybeSingle();
       if (!attendee) {
@@ -420,6 +529,25 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         .maybeSingle();
 
       const deps = {
+        // ── DE METING VOOR 'geen_reactie_sinds_belstatus' ────────────────
+        // In een eigen lib zodat de antwoord-melding-cron
+        // (cron-events-geen-gehoor-reacties) dezelfde meting doet en niet zijn
+        // eigen definitie van 'heeft geantwoord' krijgt.
+        //
+        // Nooit throwen: elke tak van de lib komt terug met niet_gemeten +
+        // reden, en die gaan als zodanig in het run-log. Een plek vervalt
+        // nooit op een meting die niet kon draaien.
+        measureCondition: async (check) => {
+          if (check !== 'geen_reactie_sinds_belstatus') {
+            return { niet_gemeten: true, waar: false, reden: 'geen meter voor ' + check };
+          }
+          const { geenReactieSindsBelstatus } = await import('./events-geen-gehoor-reactie.js');
+          return await geenReactieSindsBelstatus({
+            phone   : attendee.phone,
+            email   : attendee.email,
+            sinceIso: attendee.call_status_at,
+          });
+        },
         isStepDone: async (idx) => {
           const { data } = await supabaseAdmin
             .from('event_automation_run_log')
@@ -545,23 +673,44 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         updateAttendeeStatus: async (step) => {
           const newStatus = step?.config?.new_status;
           if (!newStatus) return { ok: false, error: 'new_status ontbreekt' };
-          if (attendee.status === newStatus) {
+          // OPTIONELE BELSTATUS. Zonder deze sleutel doet de stap exact wat hij
+          // altijd deed. Mét: dezelfde stap zet status 'geannuleerd' én
+          // belstatus 'komt_niet', zodat de aanwezigenlijst niet achterblijft
+          // met 'geen gehoor' bij iemand wiens plek net vervallen is.
+          const newCallStatus = step?.config?.call_status || null;
+          const statusAlGoed     = attendee.status === newStatus;
+          const belstatusAlGoed  = !newCallStatus || attendee.call_status === newCallStatus;
+          if (statusAlGoed && belstatusAlGoed) {
             return { ok: true, skipped: true, reason: 'already-status' };
           }
           try {
+            const patch = { updated_at: nowIso };
+            if (!statusAlGoed) patch.status = newStatus;
+            if (!belstatusAlGoed) {
+              patch.call_status    = newCallStatus;
+              patch.call_status_at = nowIso;
+            }
             const { error } = await supabaseAdmin
               .from('event_attendees')
-              .update({ status: newStatus, updated_at: nowIso })
+              .update(patch)
               .eq('id', attendee.id);
             if (error) return { ok: false, error: error.message };
             // Fill: status kan aangepast worden naar 'aangemeld'/'aanwezig' op
             // een rij met assessment_response_id → confirmed rise → event kan
             // vol raken. DB-trigger flipt signups_closed; helper doet Webflow/
             // GHL outbound + reopen-check.
+            // DE CASCADE BLIJFT DRAAIEN ZOALS HIJ DRAAIDE. Een vervallen plek
+            // komt vrij, en een vol event hoort dan weer open te gaan.
             await onConfirmedAttendeeMutation(event.id, {
               reason: 'automation-updateAttendeeStatus',
             });
-            return { ok: true, new_status: newStatus, previous_status: attendee.status };
+            return {
+              ok: true,
+              new_status: newStatus, previous_status: attendee.status,
+              ...(newCallStatus ? {
+                new_call_status: newCallStatus, previous_call_status: attendee.call_status || null,
+              } : {}),
+            };
           } catch (e) {
             return { ok: false, error: e?.message || 'status-update failed' };
           }

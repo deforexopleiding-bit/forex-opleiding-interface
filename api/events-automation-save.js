@@ -28,7 +28,11 @@ const STEP_TYPES = ['wait', 'condition', 'send_email', 'send_whatsapp', 'set_tag
 const WAIT_UNITS = ['minutes', 'hours', 'days'];
 // Fase 4A: niveau_is_basis / niveau_is_gevorderd toegevoegd.
 // date_chosen SKIPPED — geen DB-veld of bestaande logica; TODO bij design fase 4b.
-const COND_CHECKS = ['assessment_completed', 'assessment_not_completed', 'still_registered', 'niveau_is_basis', 'niveau_is_gevorderd'];
+// 'geen_reactie_sinds_belstatus' meet buiten de attendee-rij (whatsapp_messages
+// + email_messages sinds call_status_at) — zie _lib/events-geen-gehoor-reactie.js.
+// Niet-meetbaar is NIET waar, zodat een plek nooit vervalt op een controle die
+// niet kon draaien.
+const COND_CHECKS = ['assessment_completed', 'assessment_not_completed', 'still_registered', 'niveau_is_basis', 'niveau_is_gevorderd', 'geen_reactie_sinds_belstatus'];
 const COND_FAIL = ['exit', 'skip_to_end'];
 const ATTENDEE_STATUSES = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -43,6 +47,13 @@ export function validateSteps(steps) {
     if (s.type === 'wait') {
       if (!(Number(c.amount) > 0)) return `stap ${i + 1}: wait.amount > 0 vereist`;
       if (!WAIT_UNITS.includes(c.unit)) return `stap ${i + 1}: wait.unit ongeldig`;
+      // Optionele bovengrens: nooit later dan X uur voor het event. Alleen
+      // valideren als hij MEEGESTUURD is — een wait zonder grens blijft een
+      // geldige wait, en dat is de bestaande situatie.
+      if (c.uiterlijk_uren_voor_event != null
+          && !(Number.isFinite(Number(c.uiterlijk_uren_voor_event)) && Number(c.uiterlijk_uren_voor_event) >= 0)) {
+        return `stap ${i + 1}: wait.uiterlijk_uren_voor_event moet een getal >= 0 zijn`;
+      }
     } else if (s.type === 'condition') {
       if (!COND_CHECKS.includes(c.check)) return `stap ${i + 1}: condition.check ongeldig`;
       if (c.on_fail && !COND_FAIL.includes(c.on_fail)) return `stap ${i + 1}: condition.on_fail ongeldig`;
@@ -57,6 +68,12 @@ export function validateSteps(steps) {
     } else if (s.type === 'update_attendee_status') {
       if (!c.new_status || !ATTENDEE_STATUSES.includes(c.new_status)) {
         return `stap ${i + 1}: update_attendee_status.new_status moet ${ATTENDEE_STATUSES.join('|')} zijn`;
+      }
+      // Optionele belstatus, zodat dezelfde stap status 'geannuleerd' en
+      // belstatus 'komt_niet' kan zetten. Ontbreekt hij, dan blijft de
+      // belstatus ongemoeid — het bestaande gedrag.
+      if (c.call_status != null && !CALL_STATUSES.includes(c.call_status)) {
+        return `stap ${i + 1}: update_attendee_status.call_status moet ${CALL_STATUSES.join('|')} zijn`;
       }
     } else if (s.type === 'send_internal_notification') {
       if (!c.subject || typeof c.subject !== 'string') return `stap ${i + 1}: send_internal_notification.subject vereist`;
