@@ -40,11 +40,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from './supabase.js';
 import { extractClientIp, hashIp } from './_lib/assessment-validation.js';
 import { resolveEventByLabel } from './_lib/event-label-matcher.js';
-import {
-  getConfirmedCount,
-  syncGastenlijstWebflow,
-  autoCloseIfFull,
-} from './_lib/event-registration.js';
+import { processSignup } from './_lib/event-signup-processor.js';
 
 const RATE_LIMIT_SECONDS = 5;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -185,70 +181,9 @@ async function patchInboxRow(id, patch) {
   if (error) console.error('[events-signup-inbound] inbox patch:', error.message);
 }
 
-async function findExistingAttendee({ eventId, email, phone }) {
-  // Email-eerst dedup (bestaande partial UNIQUE op (event_id, lower(email))).
-  if (email) {
-    const { data, error } = await supabaseAdmin
-      .from('event_attendees')
-      .select('id, email, phone')
-      .eq('event_id', eventId)
-      .ilike('email', email)
-      .maybeSingle();
-    if (error) console.error('[events-signup-inbound] email dedup:', error.message);
-    if (data) return data;
-  }
-  // Geen email -> code-level dedup op phone (geen UNIQUE in DB).
-  if (phone) {
-    const { data, error } = await supabaseAdmin
-      .from('event_attendees')
-      .select('id, email, phone')
-      .eq('event_id', eventId)
-      .eq('phone', phone)
-      .limit(1)
-      .maybeSingle();
-    if (error) console.error('[events-signup-inbound] phone dedup:', error.message);
-    if (data) return data;
-  }
-  return null;
-}
-
-async function createAttendee({ event, payload, status = 'aangemeld', followUpReason = null, ghlContactId, ghlFormSubmissionId }) {
-  const row = {
-    event_id              : event.id,
-    first_name            : payload.first_name,
-    last_name             : payload.last_name,
-    email                 : payload.email,
-    phone                 : payload.phone,
-    status                : status,
-    created_via           : 'ghl_inbound',
-    source                : 'ghl',
-    ghl_contact_id        : ghlContactId,
-    ghl_form_submission_id: ghlFormSubmissionId,
-    assessment_response_id: null,
-    follow_up_flagged     : !!followUpReason,
-    follow_up_reason      : followUpReason || null,
-    registered_at         : new Date().toISOString(),
-  };
-  const { data, error } = await supabaseAdmin
-    .from('event_attendees')
-    .insert(row)
-    .select('id, event_id, email, phone, status, follow_up_flagged, follow_up_reason')
-    .maybeSingle();
-  if (error) {
-    // 23505 = unique_violation op (event_id, lower(email))
-    if (error.code === '23505' || /duplicate key/i.test(error.message || '')) {
-      // Race: tussen findExistingAttendee en insert is iemand anders erin
-      // gekomen. Probeer 'm alsnog op te halen.
-      const dup = await findExistingAttendee({
-        eventId: event.id, email: payload.email, phone: payload.phone,
-      });
-      if (dup) return { row: dup, deduplicated: true };
-    }
-    throw new Error('attendee insert: ' + error.message);
-  }
-  if (!data) throw new Error('attendee insert returnde geen rij');
-  return { row: data, deduplicated: false };
-}
+// dedup/create helpers geëxtraheerd naar _lib/event-signup-processor.js
+// zodat de backfill exact hetzelfde pad kan draaien. Zie processSignup()
+// hieronder voor de post-resolve flow (identiek gedrag als vóór de refactor).
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -375,83 +310,47 @@ export default async function handler(req, res) {
     });
   }
 
-  // 9) 1+ match -> attendee aanmaken (bij ambiguous: pak de eerste + flag).
+  // 9) 1+ match -> attendee aanmaken via de gedeelde processor.
   // reason='unique-canonical-match' | 'endtime-tiebreaker' | 'niveau-tiebreaker'
   // -> 1 match (matched). Andere reasons met >=2 matches -> ambiguous.
   const isAmbiguous = matches.length > 1;
   const chosenEvent = matches[0];
-  const followUpReason = isAmbiguous
-    ? `AMBIGUOUS_LABEL: ${matches.length} candidates after ${lookup.reason}`
-    : null;
 
-  // Dedup-check vooraf zodat we niet onnodig insert+catch hoeven.
-  const existing = await findExistingAttendee({
-    eventId: chosenEvent.id, email, phone,
-  });
-  let attendeeId, dedupNote = null;
-  if (existing) {
-    attendeeId = existing.id;
-    dedupNote  = 'deduplicated: existing attendee re-used';
-  } else {
-    // Punt 2 — capaciteitscheck vóór de insert: is het event (strikte telling)
-    // al vol, dan als 'wachtlijst' toevoegen i.p.v. 'aangemeld' (niet weggooien).
-    // Deze persoon heeft nog geen assessment, dus telt zelf nog niet mee.
-    let inschrijfStatus = 'aangemeld';
-    try {
-      const cap = Number(chosenEvent.capacity);
-      if (Number.isInteger(cap) && cap > 0 && (await getConfirmedCount(chosenEvent.id)) >= cap) {
-        inschrijfStatus = 'wachtlijst';
-      }
-    } catch (e) {
-      console.error('[events-signup-inbound] capaciteitscheck (soft):', e.message);
-    }
-    try {
-      const created = await createAttendee({
-        event: chosenEvent,
-        payload: { first_name: firstName, last_name: lastName, email, phone },
-        status: inschrijfStatus,
-        followUpReason,
-        ghlContactId,
-        ghlFormSubmissionId,
-      });
-      attendeeId = created.row.id;
-      if (created.deduplicated) dedupNote = 'deduplicated: race-condition dup detected';
-    } catch (e) {
-      console.error('[events-signup-inbound] attendee create:', e.message);
-      await patchInboxRow(inboxId, {
-        match_status        : isAmbiguous ? 'ambiguous' : 'matched',
-        matched_event_id    : chosenEvent.id,
-        match_candidate_ids : matches.map((m) => m.id),
-        notes               : 'attendee create failed: ' + e.message,
-      });
-      return res.status(200).json({
-        ok: false, inbox_id: inboxId,
-        match_status: isAmbiguous ? 'ambiguous' : 'matched',
-        matched_event_id: chosenEvent.id,
-        error: 'attendee create failed', message: e.message,
-      });
-    }
-  }
-
-  // 10) Seat-fill helpers (best-effort; faal blokkeert webhook niet).
-  let confirmedCount = 0;
-  let gastenlijst = null;
-  let autoClose = null;
+  let processed;
   try {
-    confirmedCount = await getConfirmedCount(chosenEvent.id);
-    gastenlijst    = await syncGastenlijstWebflow(chosenEvent, confirmedCount);
-    autoClose      = await autoCloseIfFull(chosenEvent, confirmedCount);
+    processed = await processSignup({
+      event: chosenEvent,
+      isAmbiguous,
+      matches,
+      payload: { first_name: firstName, last_name: lastName, email, phone },
+      ghlContactId,
+      ghlFormSubmissionId,
+      createdVia: 'ghl_inbound',
+      source: 'ghl',
+    });
   } catch (e) {
-    console.error('[events-signup-inbound] seat-fill cascade:', e.message);
+    console.error('[events-signup-inbound] processSignup:', e.message);
+    await patchInboxRow(inboxId, {
+      match_status        : isAmbiguous ? 'ambiguous' : 'matched',
+      matched_event_id    : chosenEvent.id,
+      match_candidate_ids : matches.map((m) => m.id),
+      notes               : 'attendee create failed: ' + e.message,
+    });
+    return res.status(200).json({
+      ok: false, inbox_id: inboxId,
+      match_status: isAmbiguous ? 'ambiguous' : 'matched',
+      matched_event_id: chosenEvent.id,
+      error: 'attendee create failed', message: e.message,
+    });
   }
 
-  // 11) Inbox-rij definitief bijwerken.
+  // 10) Inbox-rij definitief bijwerken.
   const noteParts = [`resolve_reason=${lookup.reason}`];
-  if (dedupNote) noteParts.push(dedupNote);
+  if (processed.dedup_note) noteParts.push(processed.dedup_note);
   await patchInboxRow(inboxId, {
     match_status        : isAmbiguous ? 'ambiguous' : 'matched',
     matched_event_id    : chosenEvent.id,
-    matched_attendee_id : attendeeId,
+    matched_attendee_id : processed.attendee_id,
     match_candidate_ids : matches.map((m) => m.id),
     notes               : noteParts.join('; '),
   });
@@ -461,12 +360,12 @@ export default async function handler(req, res) {
     inbox_id         : inboxId,
     match_status     : isAmbiguous ? 'ambiguous' : 'matched',
     matched_event_id : chosenEvent.id,
-    attendee_id      : attendeeId,
+    attendee_id      : processed.attendee_id,
     candidate_count  : matches.length,
-    deduplicated     : !!dedupNote,
-    confirmed_count  : confirmedCount,
-    gastenlijst_label: gastenlijst?.label || null,
-    auto_closed      : !!autoClose?.auto_closed,
+    deduplicated     : processed.deduplicated,
+    confirmed_count  : processed.confirmed_count,
+    gastenlijst_label: processed.gastenlijst_label,
+    auto_closed      : processed.auto_closed,
     resolve_reason   : lookup.reason,
   });
 }
