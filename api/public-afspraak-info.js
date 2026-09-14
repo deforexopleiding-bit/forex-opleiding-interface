@@ -6,9 +6,12 @@
 // verzetten haalt de pagina via de bestaande /api/opstartsessie/free-slots-proxy.
 //
 // GET ?token=<uuid>
-// 200 { ok, afspraak:{ voornaam, scheduled_at, duration_minutes, status, actief } }
+// 200 { ok, afspraak:{ voornaam, scheduled_at, duration_minutes, status, actief,
+//                      verzetbaar, annuleerbaar } }
+//   • verzetbaar  = de afspraak staat nog (scheduled) → altijd verzetbaar (met reden)
+//   • annuleerbaar = scheduled én > 2 uur vóór het tijdstip (binnen 2 uur: alleen verzetten)
 
-import { checkSelfserviceSecret, haalAfspraakViaToken, voornaamVan } from './_lib/afspraak-selfservice.js';
+import { checkSelfserviceSecret, haalAfspraakViaToken, voornaamVan, binnen2Uur } from './_lib/afspraak-selfservice.js';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
@@ -23,6 +26,7 @@ export default async function handler(req, res) {
   if (r.error) return res.status(r.status).json({ error: r.error });
 
   const a = r.appt;
+  const actief = a.status === 'scheduled';
   return res.status(200).json({
     ok: true,
     afspraak: {
@@ -30,7 +34,9 @@ export default async function handler(req, res) {
       scheduled_at: a.scheduled_at,
       duration_minutes: a.duration_minutes,
       status: a.status,
-      actief: a.status === 'scheduled',   // alleen dan verzetbaar/annuleerbaar
+      actief,                                       // alleen dan verzetbaar
+      verzetbaar: actief,                           // verzetten kan altijd zolang gepland (met reden)
+      annuleerbaar: actief && !binnen2Uur(a.scheduled_at), // annuleren alleen > 2 uur vooraf
     },
   });
 }

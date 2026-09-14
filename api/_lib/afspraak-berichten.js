@@ -84,6 +84,19 @@ function bouwMail(args) {
   };
 }
 
+// Self-service-voetnoot, afgestemd op de nieuwe regels:
+//   • > 2 uur vóór de afspraak: verzetten óf annuleren mag (we vragen kort een reden).
+//   • ≤ 2 uur vóór de afspraak: annuleren kan niet meer — alleen verzetten (met reden).
+// De pagina /afspraak/<token> is en blijft de bron van waarheid; deze tekst volgt
+// alleen de situatie op het moment van versturen.
+function selfServiceVoetnoot(appt, c) {
+  const binnen2u = new Date(appt.scheduled_at).getTime() - Date.now() <= 2 * UUR;
+  if (binnen2u) {
+    return `Komt het nu echt niet uit? Je kunt je afspraak nog <a href="${c.selfUrl}" style="color:#10284A">verzetten naar een ander moment</a> — we vragen je daarbij kort om een reden. Annuleren kan binnen 2 uur voor de afspraak niet meer.`;
+  }
+  return `Kan het onverhoopt niet doorgaan? Je kunt je afspraak <a href="${c.selfUrl}" style="color:#10284A">verzetten of annuleren</a> — we vragen je daarbij kort om een reden.`;
+}
+
 // ── De 5 momenten ──────────────────────────────────────────────────────────
 // match(appt, nowMs) bepaalt of dit moment nú van toepassing is. Er is geen
 // nacht-guard meer (verwijderd 2026-09-10, analoog aan cron-toegang-aanvragen
@@ -104,7 +117,7 @@ export const MOMENTEN = [
       inleiding: `Hoi ${c.voornaam}, gelukt! Je kennismakingsgesprek met De Forex Opleiding staat gepland. In ongeveer 20 minuten kijken we samen naar jouw situatie en je doelen, en maken we een persoonlijk plan. Geen verplichtingen.`,
       details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
       cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
-      voetnoot: `Kan het onverhoopt niet doorgaan? Je kunt je afspraak <a href="${c.selfUrl}" style="color:#10284A">verzetten of annuleren</a>.`,
+      voetnoot: selfServiceVoetnoot(a, c),
     }),
   },
   {
@@ -120,7 +133,7 @@ export const MOMENTEN = [
       inleiding: `Hoi ${c.voornaam}, nog even een vriendelijke herinnering: morgen staat je kennismakingsgesprek met De Forex Opleiding gepland. Zorg dat je er een paar minuten van tevoren klaar voor zit.`,
       details: [{ label: 'Wanneer', waarde: c.momentNL }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
       cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
-      voetnoot: `Komt het net niet uit? Je kunt je afspraak nog <a href="${c.selfUrl}" style="color:#10284A">verzetten naar een ander moment</a>.`,
+      voetnoot: selfServiceVoetnoot(a, c),
     }),
   },
   {
@@ -136,6 +149,7 @@ export const MOMENTEN = [
       inleiding: `Hoi ${c.voornaam}, over 2 uur (om ${c.tijdNL}) start je kennismakingsgesprek met De Forex Opleiding. We hebben speciaal tijd voor jou vrijgemaakt.`,
       details: [{ label: 'Wanneer', waarde: `Vandaag om ${c.tijdNL}` }, { label: 'Waar', waarde: zoomDetail(c.zoom) }],
       cta: c.zoom ? { label: 'Deelnemen via Zoom', url: c.zoom } : null,
+      voetnoot: selfServiceVoetnoot(a, c),
     }),
   },
   {

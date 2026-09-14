@@ -38,3 +38,35 @@ export function voornaamVan(naam) {
   const eerste = String(naam || '').trim().split(/\s+/)[0];
   return eerste || 'daar';
 }
+
+// ── Self-service-regels (gedeeld door info/verzetten/annuleren) ──────────────
+// 1) Annuleren mag alleen als het NU meer dan 2 uur vóór scheduled_at is.
+// 2) Zowel verzetten als annuleren vereisen ALTIJD een serieuze reden.
+export const TWEE_UUR_MS = 2 * 60 * 60 * 1000;
+export const REDEN_MIN_LENGTE = 15;
+
+// true zodra er ≤ 2 uur tot de afspraak resteert (of de afspraak al voorbij is).
+export function binnen2Uur(scheduledAt) {
+  const t = new Date(scheduledAt).getTime();
+  if (!Number.isFinite(t)) return false;
+  return t - Date.now() <= TWEE_UUR_MS;
+}
+
+// Serieuze reden: ≥15 tekens, genoeg letters (geen losse cijfers/leestekens) en
+// niet één herhaald teken ("aaaaaaaaaaaaaaa"). Bewust mild — de bedoeling is
+// nietszeggende invoer weren, niet de klant frustreren.
+export function redenGeldig(reden) {
+  const t = String(reden || '').trim();
+  if (t.length < REDEN_MIN_LENGTE) return false;
+  const letters = (t.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+  if (letters < 8) return false;
+  const uniek = new Set(t.toLowerCase().replace(/\s+/g, '')).size;
+  if (uniek < 5) return false;
+  return true;
+}
+
+// Normaliseer + kap een aangeleverde reden (of null als leeg).
+export function schoonReden(reden, max = 500) {
+  const t = String(reden || '').replace(/\s+/g, ' ').trim();
+  return t ? t.slice(0, max) : null;
+}
