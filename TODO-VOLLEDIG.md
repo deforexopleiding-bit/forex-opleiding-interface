@@ -1340,3 +1340,48 @@ Module is live in productie. Dave en Jeffrey gebruiken het actief.
 - **[todo-clean-2]** Polish-items 3-9 zijn voltooid (commit f235696), markeren als ✅ in sectie.
 - **[todo-clean-3]** Strategisch Plan bestand toevoegen aan `docs/sessie-logs/Strategisch-Plan-De-Forex-Opleiding.md` (12 mei 2026, momenteel alleen in chat-context geüpload).
 - **[todo-clean-4]** Volledig consistent format toepassen op TODO-VOLLEDIG.md (alle items met dezelfde tags, dezelfde status-emojis).
+
+---
+
+## Sessie 14 september 2026 — Geen gehoor (PR #1595)
+
+Vijf commits op één branch: knop in Opvolging, trigger `on_call_status`, drie
+staputbreidingen, de automatisatie + teksten als SQL, en de antwoordmelding-cron.
+
+### ⚠ Openstaand — moet gedraaid worden
+- **[gg-1]** `docs/sql-migrations/2026-09-14-events-geen-gehoor-laatste-kans.sql` draaien.
+  BLOKKEREND voor stap 1 (de CHECK op `trigger_type`): zonder die stap weigert Postgres elke
+  automatisatie met `on_call_status`, ook via de UI. Stap 3 en 4 raken PRODUCTIETEKST die
+  klanten lezen — draai de preflight-SELECT per stap en lees 'huidige body' naast 'body na de
+  update' voordat je de UPDATE uitvoert.
+- **[gg-2]** Na de migratie: de automatisatie staat op `enabled = false`. Aanzetten in de
+  eventmodule. Vanaf dat moment geldt `enabled_at` als grens voor `new_only`.
+- **[gg-3]** De 15 bestaande `geen_gehoor`-rijen blijven BUITEN de flow (Maxims vierde
+  beslissing: nooit een plek afnemen van iemand die de regel niet te zien kreeg). Wie van hen
+  alsnog mee moet, krijgt eerst een nieuwe belronde — dat zet een nieuwe `call_status_at` en
+  dan pakt de trigger hem op.
+
+### Nog te bouwen
+- **[gg-4]** De WhatsApp-stap. Wacht op goedkeuring van de Meta-template. Hoort TUSSEN stap 0
+  (de mail) en stap 1 (het wachten): eerst beide kanalen, dan de klok. Het kant-en-klare
+  `jsonb_insert`-statement staat onderaan de migratie. Named placeholders met een non-null
+  `meta_param_mapping`, en de link in de BODY niet in een button.
+- **[gg-5]** Lopende runs krijgen die stap NIET: `steps_snapshot` wordt bij enrollment bevroren.
+  Wie al onderweg is en hem toch moet hebben: run cancellen en opnieuw laten inschrijven.
+
+### Bekende beperkingen / geparkeerd
+- **[gg-6]** De `update_attendee_status`-editor in
+  `modules/klanten-v2/views/automatiseringen-v2.js` schrijft `cfg.status` terwijl de engine en
+  de save-validator `cfg.new_status` lezen. Idem `cfg.tag` (vs `tag_slug`) en `cfg.message`
+  (vs `subject`/`body`). Staat er sinds fase 4A; bewust niet aangeraakt in deze puur-additieve
+  PR, met een commentaarregel erbij. `modules/events-automations.html` is de editor die de
+  canonieke sleutels gebruikt. Opruimen = een aparte fix-PR.
+- **[gg-7]** De cron `cron-events-geen-gehoor-reacties` bewaart gemelde bericht-ids in
+  `event_automation_runs.context.gemelde_reacties`. Bewust geen eigen tabel (geen migratie die
+  de cron kan blokkeren), maar het betekent wel: twee overlappende cron-runs kunnen elkaars
+  merge overschrijven en dan komt er één dubbele melding. Bij `*/15` en runs van seconden is
+  dat theoretisch; wordt het praktisch, dan is een eigen tabel met UNIQUE op het bericht-id de
+  volgende stap.
+- **[gg-8]** De mailtekst gebruikt `{{event.locatie}}` in plaats van een vaste 'Gent': de
+  automatisatie hangt aan een niveau en pakt elke masterclass. Voor 26/09 rendert dat letterlijk
+  'in Gent'.

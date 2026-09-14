@@ -402,7 +402,21 @@ const TRIGGER_LABELS = {
   on_assessment_completed: 'Bij vragenlijst ingevuld',
   time_before_event: 'Tijd vóór het event',
   on_assessment_not_completed_after: 'Vragenlijst niet ingevuld na X uur',
+  on_call_status: 'Bij een belstatus',
 };
+// De belstatussen waar een automatisatie op kan aanslaan. Spiegelt
+// CALL_STATUSES in api/events-automation-save.js; loopt die lijst uiteen, dan
+// kiest de editor iets wat de server weigert.
+const CALL_STATUS_TRIGGER_OPTIONS = [
+  { v: 'geen_gehoor',     l: 'Geen gehoor' },
+  { v: 'voicemail',       l: 'Voicemail' },
+  { v: 'terugbellen',     l: 'Terugbellen' },
+  { v: 'foutief_nummer',  l: 'Foutief nummer' },
+  { v: 'gebeld',          l: 'Gebeld' },
+  { v: 'bevestigd',       l: 'Bevestigd' },
+  { v: 'komt_niet',       l: 'Komt niet' },
+  { v: 'liever_zoom',     l: 'Liever via zoom' },
+];
 const SCOPE_LABELS = {
   all: 'Alle events',
   niveau: 'Per niveau',
@@ -414,6 +428,7 @@ const COND_CHECK_LABELS = {
   still_registered: 'Nog ingeschreven',
   niveau_is_basis: 'Niveau is Basis',
   niveau_is_gevorderd: 'Niveau is Gevorderd',
+  geen_reactie_sinds_belstatus: 'Geen reactie sinds de belstatus',
 };
 // Fase 4A: extra step-type labels.
 const ATTENDEE_STATUS_LABELS = {
@@ -579,6 +594,11 @@ function summarizeTrigger(a) {
     const h = Number(a.trigger_config?.hours_before) || 0;
     if (h % 24 === 0 && h >= 24) return `${h / 24} dagen vóór event`;
     return `${h} uur vóór event`;
+  }
+  if (a.trigger_type === 'on_call_status') {
+    const cs = a.trigger_config?.call_status || '';
+    const lbl = CALL_STATUS_TRIGGER_OPTIONS.find((o) => o.v === cs)?.l || cs || '?';
+    return `Belstatus: ${lbl}`;
   }
   return TRIGGER_LABELS[a.trigger_type] || a.trigger_type;
 }
@@ -795,6 +815,7 @@ function renderEditor() {
             <option value="on_assessment_completed"          ${a.trigger_type === 'on_assessment_completed' ? 'selected' : ''}>Bij vragenlijst ingevuld</option>
             <option value="time_before_event"                ${a.trigger_type === 'time_before_event' ? 'selected' : ''}>Tijd vóór het event</option>
             <option value="on_assessment_not_completed_after" ${a.trigger_type === 'on_assessment_not_completed_after' ? 'selected' : ''}>Vragenlijst niet ingevuld na X uur</option>
+            <option value="on_call_status"                   ${a.trigger_type === 'on_call_status' ? 'selected' : ''}>Bij een belstatus</option>
           </select>
         </div>
         <div id="fTriggerExtra"></div>
@@ -861,6 +882,11 @@ function renderEditor() {
         && !(Number(a.trigger_config?.hours_after_signup) > 0)) {
       a.trigger_config = { hours_after_signup: 48 };
     }
+    // Geen gehoor is waar deze trigger voor gebouwd is; de rest van de lijst
+    // staat er voor later.
+    if (a.trigger_type === 'on_call_status' && !a.trigger_config?.call_status) {
+      a.trigger_config = { call_status: 'geen_gehoor' };
+    }
     renderTriggerExtra();
   });
   document.getElementById('fScope').addEventListener('change', async (e) => {
@@ -899,6 +925,24 @@ function renderTriggerExtra() {
       const v = Math.max(1, Math.floor(Number(e.target.value) || 0));
       a.trigger_config = { hours_after_signup: v };
     });
+    return;
+  }
+  if (a.trigger_type === 'on_call_status') {
+    const cur = a.trigger_config?.call_status || 'geen_gehoor';
+    host.innerHTML = `
+      <div class="form-field">
+        <label>Welke belstatus? <span class="req">*</span></label>
+        <select id="fCallStatus">
+          ${CALL_STATUS_TRIGGER_OPTIONS.map((o) =>
+            `<option value="${o.v}" ${cur === o.v ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+        </select>
+        <div class="form-help">Start zodra <code>event_attendees.call_status</code> op deze waarde staat.
+          Alleen deelnemers die nog op <b>aangemeld</b> staan bij een event dat nog moet komen.
+          Met enrollment <b>alleen nieuwe</b> geldt de grens op <code>call_status_at</code>, dus
+          bestaande rijen met deze belstatus worden niet met terugwerkende kracht ingeschreven.</div>
+      </div>`;
+    const el = document.getElementById('fCallStatus');
+    if (el) el.addEventListener('change', (e) => { a.trigger_config = { call_status: e.target.value }; });
     return;
   }
   if (a.trigger_type !== 'time_before_event') { host.innerHTML = ''; return; }
@@ -1016,6 +1060,15 @@ function renderStepCard(s, idx, total) {
             <option value="days"    ${c.unit === 'days'    ? 'selected' : ''}>dagen</option>
           </select>
         </div>
+      </div>
+      <div class="form-field">
+        <label>Maar uiterlijk (uren vóór het event)</label>
+        <input type="number" min="0" step="1" placeholder="leeg = geen bovengrens"
+               value="${c.uiterlijk_uren_voor_event != null ? esc(String(c.uiterlijk_uren_voor_event)) : ''}"
+               data-step-field="uiterlijk_uren_voor_event" data-idx="${idx}" />
+        <div class="form-help">Leeg laten = wachten zoals hierboven. Vul je bijvoorbeeld 48 in, dan
+          wacht deze stap nooit tot later dan 48 uur vóór de start van het event. Ligt dat moment al
+          in het verleden, dan gaat de flow meteen door — een deadline ná het event is geen deadline.</div>
       </div>`;
   } else if (s.type === 'condition') {
     const c = s.config || {};
@@ -1029,7 +1082,13 @@ function renderStepCard(s, idx, total) {
             <option value="still_registered"         ${c.check === 'still_registered' ? 'selected' : ''}>Nog ingeschreven</option>
             <option value="niveau_is_basis"          ${c.check === 'niveau_is_basis' ? 'selected' : ''}>Niveau is Basis</option>
             <option value="niveau_is_gevorderd"      ${c.check === 'niveau_is_gevorderd' ? 'selected' : ''}>Niveau is Gevorderd</option>
+            <option value="geen_reactie_sinds_belstatus" ${c.check === 'geen_reactie_sinds_belstatus' ? 'selected' : ''}>Geen reactie sinds de belstatus</option>
           </select>
+          ${c.check === 'geen_reactie_sinds_belstatus' ? `<div class="form-help">Waar als er sinds
+            <code>call_status_at</code> geen inkomende WhatsApp en geen inkomende mail van deze persoon is.
+            Kan het niet gemeten worden (geen nummer én geen mailadres, of een query die faalt), dan is
+            de uitkomst <b>niet waar</b> en stopt de flow — er vervalt nooit een plek op een controle
+            die niet kon draaien.</div>` : ''}
         </div>
         <div class="form-field">
           <label>Anders</label>
@@ -1098,6 +1157,10 @@ function renderStepCard(s, idx, total) {
       ['no_show', 'No-show'],
       ['sale', 'Sale'],
       ['switched_to_other_event', 'Verplaatst naar ander event'],
+      // 'geannuleerd' stond hier niet terwijl de server hem wél toestaat. Een
+      // automatisatie die de plek laat vervallen kwam daardoor als 'aangemeld'
+      // uit de editor zodra iemand hem opende en bewaarde.
+      ['geannuleerd', 'Geannuleerd'],
     ];
     body = `
       <div class="form-field">
@@ -1106,6 +1169,17 @@ function renderStepCard(s, idx, total) {
           ${statuses.map(([v, l]) => `<option value="${v}" ${c.new_status === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
         <div class="form-help">Status van de aanwezige op het event. Idempotent — slaat over als de status al klopt.</div>
+      </div>
+      <div class="form-field">
+        <label>Belstatus er meteen bij zetten</label>
+        <select data-step-field="call_status" data-idx="${idx}">
+          <option value="" ${!c.call_status ? 'selected' : ''}>— laat de belstatus zoals hij is —</option>
+          ${CALL_STATUS_TRIGGER_OPTIONS.map((o) =>
+            `<option value="${o.v}" ${c.call_status === o.v ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+        </select>
+        <div class="form-help">Optioneel. Zo kan één stap de inschrijving op 'Geannuleerd' zetten
+          én de belstatus op 'Komt niet', zodat de aanwezigenlijst niet achterblijft met 'Geen gehoor'
+          bij iemand wiens plek net vervallen is.</div>
       </div>`;
   } else if (s.type === 'send_internal_notification') {
     const c = s.config || {};
@@ -1303,6 +1377,12 @@ document.addEventListener('change', (ev) => {
   const t = ev.target.closest('[data-step-field][data-idx]');
   if (!t || state.view !== 'editor') return;
   applyStepFieldChange(t);
+  // De conditie-keuze heeft eigen uitleg eronder (wat 'niet gemeten' doet), en
+  // die hoort meteen te verschijnen. Alleen voor dit ene veld hertekenen: de
+  // hele stappenlijst opnieuw opbouwen bij elke toetsaanslag zou een half
+  // getypte mailtekst wissen, en daarom hangt dit aan 'change' van een select
+  // en niet aan 'input'.
+  if (t.dataset.stepField === 'check') renderSteps();
 });
 
 function applyStepFieldChange(input) {
@@ -1320,6 +1400,17 @@ function applyStepFieldChange(input) {
   else if (field === 'template_name') step.config.template_name = input.value;
   else if (field === 'tag_slug')      step.config.tag_slug = input.value;
   else if (field === 'new_status')    step.config.new_status = input.value;
+  else if (field === 'call_status') {
+    // Leeg = sleutel weg, niet call_status: ''. Een lege string zou als
+    // 'zet de belstatus op niets' gelezen kunnen worden.
+    if (input.value) step.config.call_status = input.value;
+    else delete step.config.call_status;
+  }
+  else if (field === 'uiterlijk_uren_voor_event') {
+    const v = input.value.trim();
+    if (v === '') delete step.config.uiterlijk_uren_voor_event;
+    else step.config.uiterlijk_uren_voor_event = Math.max(0, Number(v) || 0);
+  }
   else if (field === 'to_email')      step.config.to_email = input.value;
   else if (field === 'hasButton') {
     if (input.checked) {
@@ -1417,6 +1508,10 @@ function readAndValidateEditor() {
   } else if (a.trigger_type === 'on_assessment_not_completed_after') {
     const hrs = Math.max(1, Math.floor(Number(document.getElementById('fHoursAfterSignup')?.value) || 0));
     a.trigger_config = { hours_after_signup: hrs };
+  } else if (a.trigger_type === 'on_call_status') {
+    a.trigger_config = {
+      call_status: document.getElementById('fCallStatus')?.value || a.trigger_config?.call_status || '',
+    };
   } else {
     a.trigger_config = {};
   }
@@ -1444,6 +1539,10 @@ function readAndValidateEditor() {
       && !(Number.isInteger(Number(a.trigger_config?.hours_after_signup)) && Number(a.trigger_config?.hours_after_signup) > 0)) {
     return 'Vul een geldig aantal uur (>= 1) na aanmelding in.';
   }
+  if (a.trigger_type === 'on_call_status'
+      && !CALL_STATUS_TRIGGER_OPTIONS.some((o) => o.v === a.trigger_config?.call_status)) {
+    return 'Kies een belstatus.';
+  }
   if (a.scope_type === 'niveau' && !a.scope_config?.niveau) return 'Kies een niveau.';
   if (a.scope_type === 'events' && (!Array.isArray(a.scope_config?.event_ids) || a.scope_config.event_ids.length === 0)) {
     return 'Kies minimaal één event.';
@@ -1457,7 +1556,8 @@ function readAndValidateEditor() {
       if (!['minutes', 'hours', 'days'].includes(c.unit)) return `Stap ${i + 1}: kies een eenheid.`;
     } else if (s.type === 'condition') {
       if (!['assessment_completed', 'assessment_not_completed', 'still_registered',
-            'niveau_is_basis', 'niveau_is_gevorderd'].includes(c.check)) return `Stap ${i + 1}: kies een conditie.`;
+            'niveau_is_basis', 'niveau_is_gevorderd',
+            'geen_reactie_sinds_belstatus'].includes(c.check)) return `Stap ${i + 1}: kies een conditie.`;
     } else if (s.type === 'send_email') {
       if (!c.subject) return `Stap ${i + 1}: onderwerp is verplicht.`;
       if (!c.body) return `Stap ${i + 1}: bericht is verplicht.`;
@@ -1467,8 +1567,11 @@ function readAndValidateEditor() {
     } else if (s.type === 'set_tag') {
       if (!c.tag_slug) return `Stap ${i + 1}: kies een tag.`;
     } else if (s.type === 'update_attendee_status') {
-      if (!['aangemeld','aanwezig','no_show','sale','switched_to_other_event'].includes(c.new_status)) {
+      if (!['aangemeld','aanwezig','no_show','sale','switched_to_other_event','geannuleerd'].includes(c.new_status)) {
         return `Stap ${i + 1}: kies een nieuwe status.`;
+      }
+      if (c.call_status && !CALL_STATUS_TRIGGER_OPTIONS.some((o) => o.v === c.call_status)) {
+        return `Stap ${i + 1}: onbekende belstatus.`;
       }
     } else if (s.type === 'send_internal_notification') {
       if (!c.subject) return `Stap ${i + 1}: onderwerp interne notificatie is verplicht.`;

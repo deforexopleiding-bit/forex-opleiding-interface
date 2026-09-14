@@ -207,3 +207,52 @@ export function beoordeelMoeite({ bel_dagen, wa_totaal, reden_code, duur_bekend 
   if (dagen >= ARCHIEF_MIN_DAGEN && wa >= ARCHIEF_MIN_WA) return { staat: 'genoeg', reden: null };
   return { staat: 'te_weinig', reden: null };
 }
+
+/**
+ * WAT ER NOG ONTBREEKT AAN DE ARCHIVEERDREMPEL — LETTERLIJK OPGESCHREVEN.
+ *
+ * beoordeelMoeite() hierboven geeft één woord terug ('genoeg' / 'te_weinig').
+ * Dat is genoeg voor het dagrapport, maar niet voor een knop die uitgeschakeld
+ * staat: daar hoort te staan wát er nog moet gebeuren, anders is het een grijze
+ * knop zonder uitleg.
+ *
+ * Draait op DEZELFDE twee constanten als beoordeelMoeite — ARCHIEF_MIN_DAGEN en
+ * ARCHIEF_MIN_WA. Er is dus geen tweede definitie van de drempel; alleen een
+ * tweede manier om er over te praten.
+ *
+ * Bewust GEEN reden_code-uitzonderingen zoals MOEITE_NVT: dit is de poort voor
+ * 'geen gehoor', en die zin ('we hebben je meermaals proberen te bereiken')
+ * moet waar zijn ongeacht hoe de kaart verder afloopt.
+ *
+ * @returns {{gehaald: boolean, redenen: string[]}}
+ */
+export function drempelTekort({ bel_dagen, wa_totaal } = {}) {
+  const dagen = getal(bel_dagen);
+  const wa    = getal(wa_totaal);
+  const redenen = [];
+
+  const dagenTekort = ARCHIEF_MIN_DAGEN - dagen;
+  if (dagenTekort > 0) {
+    redenen.push('nog ' + dagenTekort + ' belpoging' + (dagenTekort === 1 ? '' : 'en')
+      + ' op een andere dag');
+  }
+
+  const waTekort = ARCHIEF_MIN_WA - wa;
+  if (waTekort > 0) {
+    // Nul verstuurd leest anders dan 'er moet er nog een bij': 'nog 1 WhatsApp'
+    // suggereert dat er al een reeks staat. Bij de huidige drempel (1) is dit
+    // altijd de eerste tak; de tweede staat er voor als de drempel ooit omhoog
+    // gaat, zodat die tekst dan niet meeliegt.
+    redenen.push(wa === 0
+      ? 'nog geen WhatsApp verstuurd'
+      : 'nog ' + waTekort + ' WhatsApp' + (waTekort === 1 ? '' : 's'));
+  }
+
+  return { gehaald: redenen.length === 0, redenen };
+}
+
+/** NaN en null zijn nul pogingen, niet 'onbekend dus maar goedkeuren'. */
+function getal(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}

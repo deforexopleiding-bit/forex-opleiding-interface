@@ -4,7 +4,23 @@ import { requirePermission } from './_lib/requirePermission.js';
 // Fase 4A: 'on_assessment_not_completed_after' toegevoegd. Vereist eerst
 // docs/sql-migrations/2026-06-18-events-automations-fase-4a.sql op prod;
 // daarna laat de DB-CHECK 'em toe.
-const TRIGGERS = ['on_signup', 'on_assessment_completed', 'time_before_event', 'on_assessment_not_completed_after'];
+//
+// 'on_call_status' vereist idem docs/sql-migrations/2026-09-14-events-geen-
+// gehoor-laatste-kans.sql: die zet de CHECK op trigger_type opnieuw. Zonder
+// die migratie geeft opslaan een 23514 vanuit Postgres — de app-validatie
+// hieronder laat 'em door, de databank niet.
+const TRIGGERS = ['on_signup', 'on_assessment_completed', 'time_before_event', 'on_assessment_not_completed_after', 'on_call_status'];
+
+// De belstatussen waar een automatisatie op kan aanslaan. Spiegelt
+// CALL_STATUS_OPTIONS in modules/klanten-v2/views/events-v2.js plus de twee
+// die daar bewust geen keuze zijn ('liever_zoom', 'foutief_nummer'): een
+// trigger mag op elke waarde die de kolom kan hebben, ook op een die je niet
+// met de hand kiest. Lege belstatus is geen trigger — dat is 'nog niet
+// gebeld', en daar is on_signup voor.
+const CALL_STATUSES = [
+  'bevestigd', 'gebeld', 'geen_gehoor', 'voicemail', 'komt_niet',
+  'terugbellen', 'foutief_nummer', 'liever_zoom',
+];
 const SCOPES = ['all', 'niveau', 'events'];
 const ENROLL = ['new_only', 'include_existing'];
 // Fase 4A: 3 nieuwe step-types (pure app-validatie).
@@ -12,7 +28,11 @@ const STEP_TYPES = ['wait', 'condition', 'send_email', 'send_whatsapp', 'set_tag
 const WAIT_UNITS = ['minutes', 'hours', 'days'];
 // Fase 4A: niveau_is_basis / niveau_is_gevorderd toegevoegd.
 // date_chosen SKIPPED — geen DB-veld of bestaande logica; TODO bij design fase 4b.
-const COND_CHECKS = ['assessment_completed', 'assessment_not_completed', 'still_registered', 'niveau_is_basis', 'niveau_is_gevorderd'];
+// 'geen_reactie_sinds_belstatus' meet buiten de attendee-rij (whatsapp_messages
+// + email_messages sinds call_status_at) — zie _lib/events-geen-gehoor-reactie.js.
+// Niet-meetbaar is NIET waar, zodat een plek nooit vervalt op een controle die
+// niet kon draaien.
+const COND_CHECKS = ['assessment_completed', 'assessment_not_completed', 'still_registered', 'niveau_is_basis', 'niveau_is_gevorderd', 'geen_reactie_sinds_belstatus'];
 const COND_FAIL = ['exit', 'skip_to_end'];
 const ATTENDEE_STATUSES = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event', 'geannuleerd'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -27,6 +47,13 @@ export function validateSteps(steps) {
     if (s.type === 'wait') {
       if (!(Number(c.amount) > 0)) return `stap ${i + 1}: wait.amount > 0 vereist`;
       if (!WAIT_UNITS.includes(c.unit)) return `stap ${i + 1}: wait.unit ongeldig`;
+      // Optionele bovengrens: nooit later dan X uur voor het event. Alleen
+      // valideren als hij MEEGESTUURD is — een wait zonder grens blijft een
+      // geldige wait, en dat is de bestaande situatie.
+      if (c.uiterlijk_uren_voor_event != null
+          && !(Number.isFinite(Number(c.uiterlijk_uren_voor_event)) && Number(c.uiterlijk_uren_voor_event) >= 0)) {
+        return `stap ${i + 1}: wait.uiterlijk_uren_voor_event moet een getal >= 0 zijn`;
+      }
     } else if (s.type === 'condition') {
       if (!COND_CHECKS.includes(c.check)) return `stap ${i + 1}: condition.check ongeldig`;
       if (c.on_fail && !COND_FAIL.includes(c.on_fail)) return `stap ${i + 1}: condition.on_fail ongeldig`;
@@ -41,6 +68,12 @@ export function validateSteps(steps) {
     } else if (s.type === 'update_attendee_status') {
       if (!c.new_status || !ATTENDEE_STATUSES.includes(c.new_status)) {
         return `stap ${i + 1}: update_attendee_status.new_status moet ${ATTENDEE_STATUSES.join('|')} zijn`;
+      }
+      // Optionele belstatus, zodat dezelfde stap status 'geannuleerd' en
+      // belstatus 'komt_niet' kan zetten. Ontbreekt hij, dan blijft de
+      // belstatus ongemoeid — het bestaande gedrag.
+      if (c.call_status != null && !CALL_STATUSES.includes(c.call_status)) {
+        return `stap ${i + 1}: update_attendee_status.call_status moet ${CALL_STATUSES.join('|')} zijn`;
       }
     } else if (s.type === 'send_internal_notification') {
       if (!c.subject || typeof c.subject !== 'string') return `stap ${i + 1}: send_internal_notification.subject vereist`;
@@ -78,6 +111,16 @@ export default async function handler(req, res) {
   if (body.trigger_type === 'on_assessment_not_completed_after'
       && !(Number.isInteger(Number(trigger_config.hours_after_signup)) && Number(trigger_config.hours_after_signup) > 0)) {
     return res.status(400).json({ error: 'on_assessment_not_completed_after vereist trigger_config.hours_after_signup als positief geheel getal' });
+  }
+  // Een on_call_status zonder belstatus zou elke deelnemer kandideren: de
+  // engine returnt dan [] (geen kandidaten), dus stil niets doen. Hier hard
+  // weigeren zodat het verschil tussen 'verkeerd opgeslagen' en 'nog niemand
+  // in die belstatus' zichtbaar blijft.
+  if (body.trigger_type === 'on_call_status'
+      && !CALL_STATUSES.includes(trigger_config.call_status)) {
+    return res.status(400).json({
+      error: 'on_call_status vereist trigger_config.call_status uit: ' + CALL_STATUSES.join(', '),
+    });
   }
   const scope_config = (body.scope_config && typeof body.scope_config === 'object') ? body.scope_config : {};
   if (scope_type === 'niveau' && !scope_config.niveau) return res.status(400).json({ error: 'scope niveau vereist scope_config.niveau' });

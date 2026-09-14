@@ -9,6 +9,10 @@ import { supabaseAdmin } from '../supabase.js';
 import { sendEventEmail, sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapSendStatus } from './comms-log.js';
 import { onConfirmedAttendeeMutation } from './event-attendee-mutations.js';
+// plafondMs is de ENIGE plek waar 'nooit later dan X uur voor het event' wordt
+// uitgerekend — dezelfde functie die de deadline in de mailtekst zet. Zie de
+// kop van _lib/geen-gehoor-deadline.js.
+import { plafondMs } from './geen-gehoor-deadline.js';
 
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
@@ -30,6 +34,44 @@ export function computeNextRunAt(waitConfig, fromMs) {
   return new Date(fromMs + amount * ms);
 }
 
+/**
+ * DE BOVENGRENS OP EEN WACHTSTAP: nooit later dan X uur voor het event.
+ *
+ * Optioneel, via `waitConfig.uiterlijk_uren_voor_event`. Een deadline van 48
+ * uur op een aanmelding van morgen valt anders ná het event, en dan gaat de
+ * vervolgstap (plek vervalt, melding aan Maxim) over een middag die al geweest
+ * is.
+ *
+ * LOS VAN computeNextRunAt, EN MET OPZET. Die functie is puur en kent alleen
+ * zijn eigen config; de grens heeft `event.starts_at` nodig. Ze apart houden
+ * betekent dat allebei zonder databank te testen zijn en dat de bestaande
+ * wait-stappen letterlijk niets merken van deze uitbreiding.
+ *
+ *   · geen grens in de config, of onleesbaar → de wachttijd blijft ongemoeid;
+ *   · geen leesbare starts_at → GEEN grens. Een grens verzinnen op een event
+ *     zonder datum zou de run vooruitduwen op een schatting;
+ *   · de grens ligt al in het verleden → wachttijd nul, de run gaat meteen
+ *     door. De deadline is dan verstreken op het moment dat hij gesteld werd,
+ *     en wachten zou de vervolgstap alleen maar verder ná het event zetten.
+ *
+ * @param {Date}    nextRunAt  uitkomst van computeNextRunAt
+ * @param {object}  waitConfig
+ * @param {?string} eventStartsAt
+ * @param {number}  fromMs     het nu-moment in ms
+ * @returns {Date}
+ */
+export function applyWaitCeiling(nextRunAt, waitConfig, eventStartsAt, fromMs) {
+  // Geen grens in de config, onleesbare grens of onleesbare startdatum →
+  // plafondMs geeft null en de wachttijd blijft ongemoeid.
+  const grensMs = plafondMs(eventStartsAt, waitConfig && waitConfig.uiterlijk_uren_voor_event);
+  if (grensMs == null) return nextRunAt;
+  if (grensMs <= fromMs) return new Date(fromMs);
+
+  const gepland = nextRunAt instanceof Date ? nextRunAt.getTime() : Number(nextRunAt);
+  if (!Number.isFinite(gepland)) return new Date(grensMs);
+  return new Date(Math.min(gepland, grensMs));
+}
+
 export function buildConditionState(attendee, event) {
   const status = attendee && attendee.status;
   // Fase 4A: event_niveau uit het gekoppelde event mee zodat
@@ -43,8 +85,32 @@ export function buildConditionState(attendee, event) {
   };
 }
 
+/**
+ * Checks die een meting BUITEN de attendee-rij nodig hebben.
+ *
+ * buildConditionState leest alleen de rij zelf; deze checks kijken in
+ * whatsapp_messages en email_messages. advanceRun haalt de meting op via
+ * deps.measureCondition en zet 'm als `state.meting`, zodat
+ * evaluateCondition puur blijft.
+ */
+export const GEMETEN_CONDITION_CHECKS = new Set(['geen_reactie_sinds_belstatus']);
+
 export function evaluateCondition(check, state) {
   switch (check) {
+    // ── GEEN REACTIE SINDS DE BELSTATUS ────────────────────────────────
+    // Waar = er is sinds call_status_at niets binnengekomen: geen WhatsApp en
+    // geen inkomende mail. Op deze uitkomst vervalt iemands plek, dus:
+    //
+    // NIET GEMETEN IS NIET WAAR. Geen meting (geen nummer en geen mailadres,
+    // geen nulpunt, of een query die faalde) → false, en de vervolgstappen
+    // draaien niet. We nemen nooit een plek af op een controle die niet kon
+    // draaien. Ontbreekt de meting helemaal, dan is dat hetzelfde geval: geen
+    // meting, dus niet waar.
+    case 'geen_reactie_sinds_belstatus': {
+      const m = state && state.meting;
+      if (!m || m.niet_gemeten === true || m.meetbaar === false) return false;
+      return m.waar === true;
+    }
     case 'assessment_completed':     return state.assessment_completed === true;
     case 'assessment_not_completed': return state.assessment_completed === false;
     case 'still_registered':         return state.still_registered === true;
@@ -79,6 +145,9 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
 
     if (type === 'wait') {
       nextRunAt = computeNextRunAt(step.config, nowMs);
+      // De bovengrens LOS erbovenop, met event.starts_at als argument — zie
+      // applyWaitCeiling. Zonder config-sleutel verandert er niets.
+      nextRunAt = applyWaitCeiling(nextRunAt, step.config, event && event.starts_at, nowMs);
       // Automation-tester: test-runs versnellen elke wait naar TEST_WAIT_MS.
       // Override gebeurt NA computeNextRunAt zodat de pure helper unit-
       // testbaar blijft zonder is_test-context.
@@ -90,9 +159,40 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
     }
 
     if (type === 'condition') {
-      const state = buildConditionState(attendee, event);
-      const pass = evaluateCondition(step.config && step.config.check, state);
-      await deps.recordLog(idx, 'condition', { ok: true, pass, check: step.config && step.config.check });
+      const check = step.config && step.config.check;
+      let state = buildConditionState(attendee, event);
+
+      // Checks die buiten de rij moeten kijken krijgen hun meting hier, via
+      // deps — zo blijft evaluateCondition puur en offline testbaar. Geen
+      // meter beschikbaar (een oudere caller, of een test die deze dep niet
+      // meegeeft) is 'niet gemeten', niet 'geen reactie'.
+      let meting = null;
+      if (GEMETEN_CONDITION_CHECKS.has(check)) {
+        if (typeof deps.measureCondition === 'function') {
+          try {
+            meting = await deps.measureCondition(check, { attendee, event, stepIndex: idx });
+          } catch (e) {
+            meting = { niet_gemeten: true, waar: false, reden: 'meting gooide: ' + ((e && e.message) || e) };
+          }
+        } else {
+          meting = { niet_gemeten: true, waar: false, reden: 'geen meter beschikbaar voor ' + check };
+        }
+        state = { ...state, meting };
+      }
+
+      const pass = evaluateCondition(check, state);
+      // NOOIT STIL SLAGEN: een meting die niet kon draaien staat als
+      // niet_gemeten in het log, met de reden erbij. Anders is 'pass: false'
+      // niet te onderscheiden van 'gemeten en er kwam een antwoord'.
+      await deps.recordLog(idx, 'condition', {
+        ok: true, pass, check,
+        ...(meting ? {
+          niet_gemeten: meting.niet_gemeten === true,
+          meting_reden: meting.reden || null,
+          meting_kanalen: meting.kanalen || null,
+          meting_treffers: typeof meting.aantal_treffers === 'number' ? meting.aantal_treffers : null,
+        } : {}),
+      });
       if (pass) { idx += 1; attempts = 0; continue; }
       const onFail = (step.config && step.config.on_fail) || 'exit';
       if (onFail === 'skip_to_end') { idx = steps.length; continue; }
@@ -219,7 +319,10 @@ async function loadCandidatesForAutomation(auto, now) {
     // FK-gekwalificeerd (event_attendees_event_id_fkey): event_attendees heeft
     // TWEE FK's naar events (event_id + switched_from_event_id), dus een kaal
     // 'events!inner' is ambigu → PGRST201. Alias blijft 'events'.
-    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, events!event_attendees_event_id_fkey!inner(starts_at)')
+    // call_status + call_status_at meelezen voor de trigger 'on_call_status':
+    // de eerste is het filter, de tweede is zowel de new_only-grens als het
+    // nulpunt van de deadline in de mail.
+    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, call_status, call_status_at, events!event_attendees_event_id_fkey!inner(starts_at)')
     // Opt-in herontwerp: attendees met automation_enabled=false zijn stil
     // toegevoegd door admin en mogen geen automation-flow krijgen. Filter
     // hier zodat ALLE trigger-types (on_signup / time_before_event /
@@ -261,6 +364,48 @@ async function loadCandidatesForAutomation(auto, now) {
     const cutoff = new Date(now.getTime() - hours * 3_600_000).toISOString();
     q = q.is('assessment_response_id', null).lte('registered_at', cutoff);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
+  } else if (auto.trigger_type === 'on_call_status') {
+    // ── DE BELSTATUS ALS TRIGGER ──────────────────────────────────────────
+    // Tot nu toe keek geen enkele trigger naar het belwerk. Gemeten op 14
+    // september op event_attendees.call_status: 85 leeg, 65 bevestigd, 16
+    // komt_niet, 15 geen_gehoor, 6 voicemail, 3 terugbellen, 1 foutief_nummer.
+    // Die 15 geen_gehoor-rijen kregen nooit iets te horen en hun plek bleef
+    // bezet tot iemand het met de hand opruimde.
+    //
+    // Bewust op trigger_config.call_status en niet hardgecodeerd op
+    // 'geen_gehoor': dezelfde trigger dekt later 'voicemail' en
+    // 'foutief_nummer' zonder een tweede trigger_type.
+    const wanted = auto.trigger_config && auto.trigger_config.call_status;
+    if (!wanted || typeof wanted !== 'string') return [];
+    q = q.eq('call_status', wanted);
+
+    // ALLEEN WIE NOG INGESCHREVEN STAAT. Iemand die inmiddels zelf afzegde
+    // (geannuleerd) of aanwezig was hoeft geen 'je plek vervalt'-mail; die
+    // plek is al geregeld. Bewust alleen 'aangemeld' — 'wachtlijst' heeft geen
+    // plek om te verliezen, en 'sale'/'aanwezig' zijn eindstanden.
+    q = q.eq('status', 'aangemeld');
+
+    // HET EVENT MOET NOG KOMEN. Een deadline van 48 uur op een middag die al
+    // geweest is, is een mail over een plek die niet meer bestaat.
+    // FK-gekwalificeerd om dezelfde reden als bij on_assessment_completed:
+    // event_attendees heeft TWEE FK's naar events (event_id +
+    // switched_from_event_id), dus een kaal 'events!inner' is ambigu →
+    // PGRST201.
+    q = q.gt('events.starts_at', nowIso);
+
+    // ── NEW_ONLY TOETST OP call_status_at, NIET OP registered_at ──────────
+    // Dit is de regel die de 15 bestaande geen_gehoor-rijen buiten de flow
+    // houdt. Zonder hem worden die bij het aanzetten van de automatisatie
+    // allemaal in één keer ingeschreven en krijgen mensen die weken geleden
+    // gebeld zijn vandaag een deadline van 48 uur.
+    //
+    // Geen call_status_at betekent NIET nieuw: een rij die met de hand gezet
+    // is heeft die kolom vaak leeg, en dan is er geen nulpunt voor de deadline.
+    // Een NOT NULL-filter erbij zodat die rijen niet stil op de enabled_at-
+    // vergelijking meeliften.
+    if (newOnly) {
+      q = q.not('call_status_at', 'is', null).gte('call_status_at', auto.enabled_at);
+    }
   } else {
     return [];
   }
@@ -345,7 +490,10 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
     try {
       const { data: attendee } = await supabaseAdmin
         .from('event_attendees')
-        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id')
+        // call_status + call_status_at: nodig voor de condition-check
+        // 'geen_reactie_sinds_belstatus' (call_status_at is het nulpunt) en
+        // voor de idempotency van update_attendee_status.call_status.
+        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id, call_status, call_status_at')
         .eq('id', run.attendee_id)
         .maybeSingle();
       if (!attendee) {
@@ -375,6 +523,28 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         .maybeSingle();
 
       const deps = {
+        // ── DE METING VOOR 'geen_reactie_sinds_belstatus' ────────────────
+        // In een eigen lib zodat de antwoord-melding-cron
+        // (cron-events-geen-gehoor-reacties) dezelfde meting doet en niet zijn
+        // eigen definitie van 'heeft geantwoord' krijgt.
+        //
+        // Nooit throwen: elke tak van de lib komt terug met niet_gemeten +
+        // reden, en die gaan als zodanig in het run-log. Een plek vervalt
+        // nooit op een meting die niet kon draaien.
+        measureCondition: async (check) => {
+          if (check !== 'geen_reactie_sinds_belstatus') {
+            return { niet_gemeten: true, waar: false, reden: 'geen meter voor ' + check };
+          }
+          const { geenReactieSindsBelstatus } = await import('./events-geen-gehoor-reactie.js');
+          // De client gaat EXPLICIET mee — zie de toelichting bij dezelfde
+          // aanroep in api/cron-events-geen-gehoor-reacties.js.
+          return await geenReactieSindsBelstatus({
+            phone   : attendee.phone,
+            email   : attendee.email,
+            sinceIso: attendee.call_status_at,
+            db      : supabaseAdmin,
+          });
+        },
         isStepDone: async (idx) => {
           const { data } = await supabaseAdmin
             .from('event_automation_run_log')
@@ -500,23 +670,44 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         updateAttendeeStatus: async (step) => {
           const newStatus = step?.config?.new_status;
           if (!newStatus) return { ok: false, error: 'new_status ontbreekt' };
-          if (attendee.status === newStatus) {
+          // OPTIONELE BELSTATUS. Zonder deze sleutel doet de stap exact wat hij
+          // altijd deed. Mét: dezelfde stap zet status 'geannuleerd' én
+          // belstatus 'komt_niet', zodat de aanwezigenlijst niet achterblijft
+          // met 'geen gehoor' bij iemand wiens plek net vervallen is.
+          const newCallStatus = step?.config?.call_status || null;
+          const statusAlGoed     = attendee.status === newStatus;
+          const belstatusAlGoed  = !newCallStatus || attendee.call_status === newCallStatus;
+          if (statusAlGoed && belstatusAlGoed) {
             return { ok: true, skipped: true, reason: 'already-status' };
           }
           try {
+            const patch = { updated_at: nowIso };
+            if (!statusAlGoed) patch.status = newStatus;
+            if (!belstatusAlGoed) {
+              patch.call_status    = newCallStatus;
+              patch.call_status_at = nowIso;
+            }
             const { error } = await supabaseAdmin
               .from('event_attendees')
-              .update({ status: newStatus, updated_at: nowIso })
+              .update(patch)
               .eq('id', attendee.id);
             if (error) return { ok: false, error: error.message };
             // Fill: status kan aangepast worden naar 'aangemeld'/'aanwezig' op
             // een rij met assessment_response_id → confirmed rise → event kan
             // vol raken. DB-trigger flipt signups_closed; helper doet Webflow/
             // GHL outbound + reopen-check.
+            // DE CASCADE BLIJFT DRAAIEN ZOALS HIJ DRAAIDE. Een vervallen plek
+            // komt vrij, en een vol event hoort dan weer open te gaan.
             await onConfirmedAttendeeMutation(event.id, {
               reason: 'automation-updateAttendeeStatus',
             });
-            return { ok: true, new_status: newStatus, previous_status: attendee.status };
+            return {
+              ok: true,
+              new_status: newStatus, previous_status: attendee.status,
+              ...(newCallStatus ? {
+                new_call_status: newCallStatus, previous_call_status: attendee.call_status || null,
+              } : {}),
+            };
           } catch (e) {
             return { ok: false, error: e?.message || 'status-update failed' };
           }

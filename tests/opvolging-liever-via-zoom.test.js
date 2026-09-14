@@ -423,7 +423,13 @@ test('het Wat-nu-venster van de aanmeldkaart heeft een vijfde uitgang', () => {
   const bron = readFileSync(VIEW, 'utf8');
   const i = bron.indexOf("if (m.soort === 'watnu' && isAanmelding(t))");
   assert.ok(i > 0);
-  const blok = bron.slice(i, i + 2600);
+  // TOT HET EINDE VAN HET BLOK, NIET TOT TEKEN 2600. Dat getal was een
+  // schatting van de lengte van dit venster, en zodra er een uitgang bijkomt
+  // valt de laatste erbuiten — dan wordt deze test rood om een uitgang die er
+  // gewoon staat. Zelfde correctie als bij __opvBoek verderop.
+  const eind = bron.indexOf('return scrim(', i);
+  assert.ok(eind > i, 'het blok hoort op een scrim uit te komen');
+  const blok = bron.slice(i, eind);
   for (const bestaand of ['bevestigd', 'gesprek_gehad', 'geen_interesse']) {
     assert.match(blok, new RegExp("__opvAanmeldActie\\('" + bestaand + "'\\)"), bestaand + ' hoort te blijven');
   }

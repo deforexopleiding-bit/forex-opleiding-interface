@@ -15,6 +15,11 @@
 // Backward-compat: legacy templates (mapping = NULL) blijven werken via
 // caller-supplied variables in inbox-send-template.js.
 //
+// Eén import, en die is puur: _lib/geen-gehoor-deadline.js heeft zelf geen
+// imports en raakt geen databank. Zie de kop van dat bestand voor waarom de
+// deadline één definitie heeft.
+import { geenGehoorDeadline, formatDeadlineNl } from './geen-gehoor-deadline.js';
+
 // Geen DB-import op module-niveau. SQL queries gebeuren in resolveVariables
 // via een meegegeven supabaseAdmin client (callers reuse hun eigen).
 
@@ -232,6 +237,10 @@ export const AVAILABLE_VARIABLES = [
   { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
   { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
   { key: 'attendee.vervolg_link',     label: 'Vervolg-link (Stap 2, dfo-website)', category: 'attendee', example: 'https://www.deforexopleiding.nl/vervolg?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
+  // Hangt tussen attendee en event in: 48 uur na attendee.call_status_at, maar
+  // nooit later dan 48 uur vóór event.starts_at. Vandaar de special-case in
+  // resolveVariableValue — getAttendeeValue ziet het event niet.
+  { key: 'attendee.geen_gehoor_deadline', label: 'Deadline laatste kans (geen gehoor)', category: 'attendee', example: 'woensdag 16 september om 13:05', requires_context: 'attendee' },
 
   // ── onboarding (Comms C1) — vereist context.onboarding (onboardings-row).
   //   Onboarding-invite-flow geeft een onboarding-context mee zodat we de
@@ -723,6 +732,30 @@ export function resolveVariableValue(key, context) {
   // string bij ontbrekende context, nooit throwen. Raakt expliciet alleen
   // deze key; alle andere onboarding.*-resolutie valt door naar
   // getOnboardingValue ongewijzigd.
+  // ── DE DEADLINE VAN DE LAATSTE-KANS-MAIL ──────────────────────────────
+  // Deze key heeft ZOWEL de attendee (call_status_at als nulpunt) als het event
+  // (starts_at voor de bovengrens) nodig, en getAttendeeValue ziet het event
+  // niet. Zelfde special-case-patroon als onboarding.bubble_gebruikersnaam
+  // hieronder.
+  //
+  // De berekening zelf staat in _lib/geen-gehoor-deadline.js, dezelfde
+  // plafondMs die de wachtstap van de automatisatie gebruikt. Zou hier een
+  // eigen sommetje staan, dan belooft de mail een moment waarop de
+  // automatisatie al gehandeld heeft.
+  //
+  // Geen nulpunt → lege string, net als elke andere ontbrekende context. Een
+  // datum verzinnen zou een belofte zijn die niemand nakomt.
+  if (key === 'attendee.geen_gehoor_deadline') {
+    const att = (context && context.attendee) || null;
+    const ev  = (context && context.event)    || null;
+    if (!att) return '';
+    const d = geenGehoorDeadline({
+      callStatusAt : att.call_status_at || null,
+      eventStartsAt: ev ? (ev.starts_at || null) : null,
+    });
+    return d ? formatDeadlineNl(d) : '';
+  }
+
   if (key === 'onboarding.bubble_gebruikersnaam') {
     const email = (context && context.customer && context.customer.email) || null;
     const fallback = (context && context.onboarding && context.onboarding.bubble_username) || null;

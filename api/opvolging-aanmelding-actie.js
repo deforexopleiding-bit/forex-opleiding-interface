@@ -13,6 +13,9 @@
 //   'verplaatst'          — naar 'wacht_verplaatsing'; de 48-uurcontrole zoekt
 //                           daarna het bewijs op. Ook hier vraag_annuleren.
 //   'annuleer_in_event'   — zet event_attendees.status op 'geannuleerd'.
+//   'geen_gehoor'         — niemand te bereiken. Archiveert de kaart en zet de
+//                           BELSTATUS in de eventmodule op 'geen_gehoor'. De
+//                           inschrijving blijft staan; zie hieronder.
 //
 // 'bevestigd' zet daarnaast de belstatus van de deelnemer in de eventmodule op
 // 'bevestigd'. Zonder dat blijft daar '— nog niet gebeld —' staan terwijl Dave
@@ -44,7 +47,7 @@ import { verplaatsDeelnemer } from './_lib/event-attendee-move-core.js';
 
 const ACTIES = new Set([
   'bevestigd', 'gesprek_gehad', 'geen_interesse', 'verplaatst',
-  'annuleer_in_event', 'verplaats_naar_event',
+  'annuleer_in_event', 'verplaats_naar_event', 'geen_gehoor',
 ]);
 const ZONE = 'Europe/Amsterdam';
 const dagInZone = (ms) => new Intl.DateTimeFormat('en-CA', {
@@ -101,6 +104,43 @@ export default async function handler(req, res) {
       if (eventmodule === 'mislukt') return res.status(500).json({ error: 'Afmelden in de eventmodule lukte niet.' });
       await schrijfNotitie(taak, `${vandaag} · In de eventmodule op 'komt niet' gezet vanuit de opvolgmodule.`);
       return res.status(200).json({ success: true, geannuleerd: true, eventmodule });
+    }
+
+    // ── Geen gehoor: niemand te bereiken ───────────────────────────────────
+    // DE INSCHRIJVING BLIJFT STAAN. Geen gehoor is geen afmelding: deze persoon
+    // heeft nooit gezegd dat hij niet komt, we hebben hem alleen niet te pakken
+    // gekregen. Het wegnemen van de plek doet de automatisatie
+    // 'Geen gehoor — laatste kans' pas ná de mail met deadline, en pas als daar
+    // niets op terugkomt. Zou dit endpoint hem nu al op 'geannuleerd' zetten,
+    // dan nemen we een plek af van iemand die de regel nooit te zien kreeg —
+    // precies wat Maxims vierde beslissing verbiedt.
+    //
+    // EN ER GAAT GEEN POGING IN. Dat is het hele verschil met 'bevestigd' en
+    // 'gesprek gehad', die een poging 'gesproken: ...' schrijven zodat
+    // isEchtContact() ze herkent. Hier was er geen contact; een poging met
+    // 'gesproken' ervoor zou de historiek laten liegen, en de belpogingen zelf
+    // staan al in opvolging_pogingen van de belronde.
+    if (actie === 'geen_gehoor') {
+      const { error } = await supabaseAdmin.from('opvolging_taken').update({
+        status         : 'gearchiveerd',
+        archief_reden  : 'geen gehoor',
+        gearchiveerd_at: nu,
+        notitie        : voegRegelToe(taak.notitie,
+          `${vandaag} · Geen gehoor — niemand te bereiken.` +
+          (notitie ? ` ${notitie}` : '')),
+        updated_at     : nu,
+      }).eq('id', taak.id);
+      if (error) throw new Error(error.message);
+
+      // Pas nadat de kaart vaststaat, en fail-soft — zelfde afspraak als bij
+      // 'bevestigd'. De uitkomst gaat als tekst mee zodat de view het aan Dave
+      // kan melden; stil mislukken zou betekenen dat de automatisatie nooit
+      // aangaat en niemand dat merkt.
+      const belstatus = await zetBelstatusGeenGehoor(attendeeId, nu);
+
+      return res.status(200).json({
+        success: true, gearchiveerd: true, belstatus,
+      });
     }
 
     // ── Verplaatsen naar een ander event, vanuit de aanmeldkaart ────────────
@@ -536,6 +576,44 @@ export async function zetBelstatusBevestigd(attendeeId, nuIso, db = supabaseAdmi
     return 'bijgewerkt';
   } catch (e) {
     console.warn('[opvolging-aanmelding-actie] belstatus (soft):', e?.message || e);
+    return 'mislukt';
+  }
+}
+
+/**
+ * Zet de belstatus van de deelnemer in de eventmodule op 'geen_gehoor'.
+ *
+ * Dit is het startsignaal van de automatisatie 'Geen gehoor — laatste kans':
+ * trigger_type 'on_call_status' zoekt precies op deze drie velden, en
+ * `call_status_at` is daar zowel de new_only-grens als het nulpunt van de
+ * 48-uurdeadline in de mail. Wordt dit niet geschreven, dan gebeurt er verder
+ * niets — de kaart is dan wel dicht maar de deelnemer krijgt nooit iets te
+ * horen, en zijn plek blijft eeuwig bezet.
+ *
+ * Dezelfde drie velden als zetBelstatusBevestigd hierboven, en om dezelfde
+ * reden: de aanwezigenlijst leest `event_attendees.call_status`, en daar hoorde
+ * tot nu toe '— nog niet gebeld —' te staan bij iemand die al drie keer
+ * geprobeerd was. Werner De Kesel (Forex Masterclass Gent 26/09) stond zo in
+ * de lijst; de 15 rijen die er wél goed staan zijn met de hand gezet.
+ *
+ * De inschrijvings-`status` blijft met opzet ongemoeid — zie de tak hierboven.
+ *
+ * Fail-soft: een fout hier mag het archiveren niet terugdraaien. De uitkomst
+ * gaat als tekst mee in het antwoord zodat de view het aan Dave kan melden.
+ *
+ * @returns {Promise<'geen_deelnemer'|'bijgewerkt'|'mislukt'>}
+ */
+export async function zetBelstatusGeenGehoor(attendeeId, nuIso, db = supabaseAdmin) {
+  if (!attendeeId) return 'geen_deelnemer';
+  try {
+    const { error } = await db
+      .from('event_attendees')
+      .update({ call_status: 'geen_gehoor', call_status_at: nuIso, called: true })
+      .eq('id', attendeeId);
+    if (error) throw new Error(error.message);
+    return 'bijgewerkt';
+  } catch (e) {
+    console.warn('[opvolging-aanmelding-actie] belstatus geen gehoor (soft):', e?.message || e);
     return 'mislukt';
   }
 }

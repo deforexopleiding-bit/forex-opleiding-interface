@@ -107,6 +107,46 @@
   const ARCHIEF_MIN_DAGEN = 3;   // belpogingen op zoveel verschillende dagen
   const ARCHIEF_MIN_WA = 1;
 
+  /**
+   * WAT ER NOG ONTBREEKT AAN DE ARCHIVEERDREMPEL — LETTERLIJK OPGESCHREVEN.
+   *
+   * Tweeling van drempelTekort() in api/_lib/opvolging-vensters.js; zie de kop
+   * van dat bestand voor waarom er twee kopieën zijn (een browser-script kan
+   * daar niet uit importeren). tests/opvolging-vensters-tweeling.test.js draait
+   * beide op dezelfde invoer.
+   *
+   * Leest dezelfde twee constanten hierboven, dus er komt geen tweede
+   * definitie van de drempel bij — alleen een tweede manier om er over te
+   * praten. Nodig voor de knop 'Geen gehoor': die staat uitgeschakeld zolang de
+   * drempel niet gehaald is, en dan hoort er te staan wát er nog moet gebeuren.
+   */
+  function drempelTekort(t) {
+    const dagen = drempelGetal(t && t.bel_dagen);
+    const wa    = drempelGetal(t && t.wa_totaal);
+    const redenen = [];
+
+    const dagenTekort = ARCHIEF_MIN_DAGEN - dagen;
+    if (dagenTekort > 0) {
+      redenen.push('nog ' + dagenTekort + ' belpoging' + (dagenTekort === 1 ? '' : 'en')
+        + ' op een andere dag');
+    }
+
+    const waTekort = ARCHIEF_MIN_WA - wa;
+    if (waTekort > 0) {
+      redenen.push(wa === 0
+        ? 'nog geen WhatsApp verstuurd'
+        : 'nog ' + waTekort + ' WhatsApp' + (waTekort === 1 ? '' : 's'));
+    }
+
+    return { gehaald: redenen.length === 0, redenen };
+  }
+
+  /** NaN en null zijn nul pogingen, niet 'onbekend dus maar goedkeuren'. */
+  function drempelGetal(v) {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
   // ═════════════════════════════════════════════════════════════════════════
   // HERTEKENEN — ALLEEN ALS ER ECHT IETS VERANDERD IS
   // ═════════════════════════════════════════════════════════════════════════
@@ -3639,6 +3679,26 @@
           "window.__opvAanmeldActie('bevestigd')", bezig) +
         opt('&#128172;', 'var(--o-grns)', 'Gesprek gehad', 'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.', "window.__opvAanmeldActie('gesprek_gehad')", bezig) +
         opt('&#128533;', '#f0f1f4', 'Geen interesse of per ongeluk aangemeld', 'Kaart dicht, en in de eventmodule op Komt niet.', "window.__opvAanmeldActie('geen_interesse')", bezig) +
+        // ── GEEN GEHOOR — ALTIJD ZICHTBAAR, MAAR NIET ALTIJD KLIKBAAR ──────
+        // De knop staat er ook als hij niet mag: een knop die pas verschijnt
+        // als je hem al mag gebruiken vertelt niemand dat hij bestaat, en dan
+        // wordt in plaats daarvan 'geen interesse' gedrukt voor iemand die
+        // gewoon niet opnam.
+        //
+        // Uitgeschakeld zolang de archiveerdrempel niet gehaald is (3
+        // belpogingen op 3 verschillende dagen + 1 WhatsApp), mét de letterlijke
+        // reden erbij. Die drempel is Maxims vijfde beslissing en ze is er om
+        // één zin: de mail die hierna uitgaat zegt 'we hebben je meermaals
+        // proberen te bereiken'. Eén belletje eerder mag die zin niet liegen.
+        (() => {
+          const dr = drempelTekort(t);
+          return opt('&#9742;', 'var(--o-ambs)', 'Geen gehoor &mdash; niemand te bereiken',
+            dr.gehaald
+              ? 'Kaart dicht, belstatus op geen gehoor. Hij krijgt een mail met een deadline; ' +
+                'reageert hij niet, dan vervalt zijn plek.'
+              : 'Nog niet: ' + esc(dr.redenen.join(' en ')) + '.',
+            "window.__opvAanmeldActie('geen_gehoor')", bezig || !dr.gehaald);
+        })() +
         opt('&#128257;', 'var(--o-accs)', 'Verplaatst naar een ander event', 'Kies het nieuwe event; hij staat daar meteen als bevestigd.', "window.__opvVerplaatsNaarEvent()", bezig) +
         // 'Liever via zoom' is GEEN afhaker, en daarom een eigen uitgang. Tot
         // nu toe moest Dave hiervoor buiten Opvolging een zoom boeken én in de
@@ -3693,6 +3753,38 @@
           '<textarea id="opv-an" rows="3" placeholder="Bijvoorbeeld: alles goed verlopen, komt zeker"></textarea>' +
           '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'gesprek_gehad\')">Vastleggen en afronden</button>');
       }
+      // ── GEEN GEHOOR — WAT ER GEBEURT, EN WAT ER NÍET GEBEURT ───────────
+      // Hier staat met opzet dat de inschrijving BLIJFT staan. Dat is het
+      // verschil met 'geen interesse' twee blokken hieronder, en zonder die
+      // zin zou Dave denken dat hij iemand net heeft afgemeld die alleen maar
+      // niet opnam.
+      if (u === 'geen_gehoor') {
+        const drB = drempelTekort(t);
+        // Tweede poort. De knop hierboven staat al op slot, maar dit venster is
+        // ook te bereiken met een oud tabblad of een dubbele render, en dan mag
+        // de vastleg-knop niet alsnog werken.
+        if (!drB.gehaald) {
+          return scrim('Geen gehoor &mdash; nog niet', esc(t.naam),
+            '<div class="warn"><b>De drempel is nog niet gehaald.</b> ' + esc(drB.redenen.join(' en ')) +
+            '. De afspraak is minstens <b>3 belpogingen op 3 verschillende dagen</b> ' +
+            '&eacute;n &eacute;&eacute;n WhatsApp, want de mail die hierna uitgaat zegt dat we je ' +
+            '<i>meermaals</i> geprobeerd hebben te bereiken.</div>');
+        }
+        const evDagG = evVan(t).event_dag || null;
+        return scrim('Geen gehoor &mdash; ' + esc(t.naam), 'Niemand te bereiken',
+          '<div class="ronde">Deze kaart gaat dicht en in de eventmodule komt hij op ' +
+          '<b>geen gehoor</b>. Zijn inschrijving <b>blijft staan</b> &mdash; geen gehoor is geen ' +
+          'afmelding.<br><br>' +
+          'Daarna gaat er automatisch een mail uit met een <b>deadline van 48 uur</b>' +
+          (evDagG ? ' (en nooit later dan 48 uur voor ' + esc(nl(evDagG)) + ')' : '') +
+          '. Reageert hij niet, dan vervalt zijn plek. Reageert hij w&eacute;l, dan krijgt ' +
+          'Maxim daar een melding van en blijft de plek staan.<br><br>' +
+          'Er wordt <b>geen belpoging</b> bijgeschreven: er was geen contact.</div>' +
+          '<textarea id="opv-an" rows="2" placeholder="Notitie (mag leeg) \u2014 bv. 4x gebeld, nooit opgenomen"></textarea>' +
+          '<button class="obtn p" style="width:100%;margin-top:12px" onclick="window.__opvAanmeldBevestig(\'geen_gehoor\')">' +
+          'Geen gehoor vastleggen</button>');
+      }
+
       // GEEN INTERESSE — ÉÉN KNOP, EN DE EVENTMODULE GAAT MEE.
       //
       // Hier stonden twee knoppen ('Archiveren én in de eventmodule
@@ -4603,7 +4695,21 @@
       // een verkeerde stand, en dan belt de volgende dezelfde persoon nog
       // eens. Dus: hier altijd een melding.
       if (antwoord && antwoord.belstatus === 'mislukt') {
-        alert('Bevestigd in Opvolging, maar de belstatus in de eventmodule kon niet op "bevestigd" gezet worden. Zet hem daar even met de hand.');
+        alert(uitkomst === 'geen_gehoor'
+          // Bij geen gehoor is dit meer dan een verkeerde badge: de belstatus
+          // IS het startsignaal van de laatste-kans-mail. Mislukt hij, dan gaat
+          // er niets uit en blijft de plek bezet zonder dat iemand het merkt.
+          ? 'Gearchiveerd in Opvolging, maar de belstatus in de eventmodule kon niet op '
+            + '"geen gehoor" gezet worden. Daardoor gaat de laatste-kans-mail NIET uit. '
+            + 'Zet hem daar even met de hand op geen gehoor.'
+          : 'Bevestigd in Opvolging, maar de belstatus in de eventmodule kon niet op "bevestigd" gezet worden. Zet hem daar even met de hand.');
+      }
+      // Geen deelnemer = geen rij in de eventmodule = geen automatisatie. Bij
+      // 'bevestigd' is dat hinderlijk maar onschadelijk; hier valt de hele
+      // bedoeling van de knop weg, dus dat wordt gezegd.
+      if (uitkomst === 'geen_gehoor' && antwoord && antwoord.belstatus === 'geen_deelnemer') {
+        alert('Gearchiveerd in Opvolging. Let op: deze kaart hangt niet aan een deelnemer in de '
+          + 'eventmodule, dus er gaat GEEN laatste-kans-mail uit en zijn plek vervalt niet automatisch.');
       }
       if (antwoord && antwoord.eventmodule === 'mislukt') {
         alert('Afgemeld in Opvolging, maar in de eventmodule kon hij niet op "Komt niet" gezet worden. Zet hem daar even met de hand.');
@@ -5509,6 +5615,7 @@
   window.__opvVensterHelpers = {
     inZone, beoordeelSpraak, beoordeelNabel, beoordeelDag, telVensters,
     isSpraakVerstuurd, isAntwoord, koppelCalls, callVoorTaak,
+    drempelTekort,
     SPRAAK_DEADLINE_UUR, NABEL_VAN_UUR, NABEL_TOT_UUR,
   };
 
