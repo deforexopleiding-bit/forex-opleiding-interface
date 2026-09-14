@@ -42,6 +42,12 @@ import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
 // Opvolging-module: bedrijfsbrede dag-tellingen uit opvolging_pogingen.
 // classificeerResultaat scheidt echte gesprekken van 'niet opgenomen' e.d.
 import { classificeerResultaat, GESPROKEN } from './_lib/opvolging-poging-telling.js';
+// SPRAAK_TYPES = de media_types die de Opvolging-module als "spraakbericht"
+// (voicememo) telt. Voicememo's zijn WhatsApp-spraaknotities die in
+// opvolging_wa_berichten landen (media_type ptt/audio/voice); voor leads ZONDER
+// opvolgtaak worden ze nooit een opvolging_pogingen-rij. De module verzoent
+// beide bronnen via regelAlsPoging — wij tellen ze hier op dezelfde manier mee.
+import { SPRAAK_TYPES, normaliseerNummer } from './_lib/opvolging-call-wa.js';
 
 const CACHE_TTL_MS = 10_000;
 let _cache = { at: 0, payload: null };
@@ -353,6 +359,17 @@ export default async function handler(req, res) {
                 .gte('created_at', dayStartIso).lt('created_at', dayEndIso)
                 .is('parent_appointment_id', null)
                 .order('created_at', { ascending: false }).limit(20),
+      /*29 */ // Taak-LOZE uitgaande WhatsApp-berichten van vandaag. Deze werden
+              //   NOOIT een opvolging_pogingen-rij (geen taak), maar de module
+              //   telt ze wél mee (regelAlsPoging op opvolging_wa_berichten).
+              //   media_type ∈ SPRAAK_TYPES → voicememo, anders → whatsapp.
+              //   taak_id IS NULL voorkomt dubbeltelling met de pogingen-bronnen
+              //   (#24/#25): berichten mét taak hebben daar al hun rij.
+              supabaseAdmin.from('opvolging_wa_berichten')
+                .select('nummer, media_type, tijdstip')
+                .eq('richting', 'uit').is('taak_id', null)
+                .gte('tijdstip', dayStartIso).lt('tijdstip', dayEndIso)
+                .order('tijdstip', { ascending: false }).limit(300),
     ]);
 
     const pick = (i, fallback) => {
@@ -391,6 +408,7 @@ export default async function handler(req, res) {
     const opvOpenTakenRes    = pick(26, { count: 0 });
     const opvTakenAfgerondRes = pick(27, { count: 0 });
     const feedNewCallsRes    = pick(28, { data: [] });
+    const waLosRes           = pick(29, { data: [] });
 
     // ── Opvolging-tellingen ───────────────────────────────────────────────
     // Belpogingen = alle uitgaande call-pogingen vandaag. Gesprekken = de
@@ -400,8 +418,18 @@ export default async function handler(req, res) {
     const opvBelpogingen = opvCallRows.length;
     const opvGesprekken  = opvCallRows.filter((r) => classificeerResultaat(r.resultaat) === GESPROKEN).length;
     const opvVoicememoRows = opvVoicememoRes.data || [];
-    const opvVoicememos  = opvVoicememoRows.length;
-    const opvWhatsapp    = opvWhatsappRes.count || 0;
+    // ── Voicememo's + WhatsApp: opvolging_pogingen (taak-gebonden) + de
+    //    taak-loze opvolging_wa_berichten (bron #29). Zo telt het bord exact wat
+    //    de Opvolging-module telt, inclusief de automatische vóór-09:00-
+    //    spraakberichten naar zoom-leads (die geen taak hebben → alleen in
+    //    wa_berichten). Geen dubbeltelling: taak-gebonden berichten zitten in de
+    //    pogingen, taak-loze in #29 (taak_id IS NULL).
+    const waLosRows = waLosRes.data || [];
+    const isSpraak = (r) => SPRAAK_TYPES.has(String(r?.media_type || '').toLowerCase());
+    const waSpraakLos   = waLosRows.filter(isSpraak);
+    const waWhatsappLos = waLosRows.filter((r) => !isSpraak(r));
+    const opvVoicememos  = opvVoicememoRows.length + waSpraakLos.length;
+    const opvWhatsapp    = (opvWhatsappRes.count || 0) + waWhatsappLos.length;
     const opvOpenTaken   = opvOpenTakenRes.count || 0;
     const opvTakenAfgerond = opvTakenAfgerondRes.count || 0;
     // Naam uit de embedded taak (object of array, afhankelijk van PostgREST-vorm).
@@ -410,6 +438,27 @@ export default async function handler(req, res) {
       const naam = Array.isArray(t) ? t[0]?.naam : t?.naam;
       return naam || '';
     };
+
+    // Namen voor de taak-loze voicememo-feed-items: lead opzoeken op +E.164
+    // (nummer uit wa_berichten is zonder '+'; leads.telefoon_e164 mét '+').
+    // Exacte match — een onbekend nummer krijgt géén feed-item (telt wél mee in
+    // de tegel). Fail-soft.
+    const waVmNaamByPlus = new Map();
+    if (waSpraakLos.length) {
+      const plusNums = [...new Set(waSpraakLos.map((r) => {
+        const c = normaliseerNummer(r.nummer);
+        return c ? '+' + c : null;
+      }).filter(Boolean))];
+      if (plusNums.length) {
+        const res = await safeAwait(
+          supabaseAdmin.from('leads').select('voornaam, achternaam, telefoon_e164').in('telefoon_e164', plusNums),
+          { data: [] }, 'waVmLeadNames'
+        );
+        for (const l of (res.data || [])) {
+          if (l.telefoon_e164) waVmNaamByPlus.set(l.telefoon_e164, [l.voornaam, l.achternaam].filter(Boolean).join(' ').trim());
+        }
+      }
+    }
 
     // ── Secundaire queries — safeAwait ────────────────────────────────────
     const callsBookedRes = await safeAwait(
@@ -585,6 +634,18 @@ export default async function handler(req, res) {
       ts: new Date(v.tijdstip).toISOString(), type: 'voicememo',
       text: `Voicememo: ${trimName(taakNaam(v))}`,
     });
+    // Taak-loze voicememo's (bron #29) — zelfde feed-stream, naam via de
+    // lead-lookup op telefoonnummer. Zonder gevonden naam geen feed-item (het
+    // bericht telt wél mee in de tegel).
+    for (const r of waSpraakLos) {
+      const c = normaliseerNummer(r.nummer);
+      const naam = c ? waVmNaamByPlus.get('+' + c) : '';
+      if (!naam) continue;
+      feed.push({
+        ts: new Date(r.tijdstip).toISOString(), type: 'voicememo',
+        text: `Voicememo: ${trimName(naam)}`,
+      });
+    }
     for (const c of opvCallRows) {
       if (classificeerResultaat(c.resultaat) !== GESPROKEN) continue;
       feed.push({
