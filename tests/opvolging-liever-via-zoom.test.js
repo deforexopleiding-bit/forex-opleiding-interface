@@ -448,7 +448,13 @@ test('het zoom-venster toont de agenda en geen handmatige datumkeuze', () => {
 test('__opvBoek kent nu drie bestemmingen', () => {
   const bron = readFileSync(VIEW, 'utf8');
   const i = bron.indexOf('window.__opvBoek = async');
-  const blok = bron.slice(i, i + 3000);
+  // TOT DE VOLGENDE HANDLER, NIET TOT TEKEN 3000. Dat getal was een schatting
+  // van de lengte van deze functie, en zodra er een bestemming bijkomt valt
+  // `finally {` erbuiten — dan wordt deze test rood om een reden die niets met
+  // zijn onderwerp te maken heeft. De asserties eronder zijn ongewijzigd; ze
+  // lezen nu gewoon de hele functie.
+  const einde = bron.indexOf('window.__opvTerug =', i);
+  const blok = bron.slice(i, einde > i ? einde : i + 3000);
   assert.match(blok, /m\.soort === 'aanmeld-zoom'/);
   assert.match(blok, /uitgang: 'liever_zoom'/);
   assert.match(blok, /appointment_id: call\.appointment_id/, 'verzetten blijft');

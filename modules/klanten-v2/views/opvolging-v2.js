@@ -2744,6 +2744,20 @@
   const AANMELD_REDEN = 'aanmelding';
   const isAanmelding = (t) => t && t.reden === AANMELD_REDEN;
 
+  // ── DE OPWARMKAART ────────────────────────────────────────────────────────
+  // De kaarten van cron-opvolging-zoom-opwarm: een zoomcall die geboekt is en
+  // nog moet komen. Ze hebben andere uitgangen dan een gewone werklijstkaart —
+  // er staat al een afspraak, dus 'opnieuw inplannen' en 'agenda doorgestuurd'
+  // slaan nergens op — en andere dan een aanmeldkaart, want er is geen event.
+  //
+  // De sleutel is dezelfde als REDEN in api/_lib/opvolging-zoom-opwarm.js. Een
+  // browser-view kan daar niet uit importeren, dus hij staat hier opnieuw;
+  // tests/opvolging-zoom-actie.test.js legt vast dat de twee gelijk blijven.
+  const OPWARM_REDEN = 'zoom_bevestigen';
+  const isOpwarm = (t) => !!t && t.reden === OPWARM_REDEN;
+  /** Het afspraak-id waar deze kaart aan hangt, of null. */
+  const opwarmAfspraak = (t) => (t && t.bron_ref && t.bron_ref.appointment_id) || null;
+
   /**
    * De plaats, maar alleen als het er één is.
    *
@@ -3698,6 +3712,84 @@
         knopTekst + '</button>');
     }
 
+    // ── DE OPWARMKAART: VIER UITGANGEN ───────────────────────────────────
+    // Er staat al een afspraak, dus de vraag is niet 'krijg ik hem te pakken'
+    // maar 'gaat deze call door'. Zolang er niemand bereikt is blijven de
+    // gewone bel- en WhatsApp-knoppen en de doorrol gewoon werken; dit venster
+    // is er voor het moment dat Dave hem wél aan de lijn heeft.
+    if (m.soort === 'watnu' && isOpwarm(t)) {
+      const bezig = !!_ui.bezig;
+      const heeftAfspraak = !!opwarmAfspraak(t);
+      const geenAfspraak = heeftAfspraak ? '' :
+        '<div class="warn2"><b>Deze kaart hangt niet aan een afspraak.</b> Verzetten en annuleren ' +
+        'kunnen daarom niet; bevestigen en een gesprek vastleggen wel.</div>';
+      const b =
+        geenAfspraak +
+        opt('&#10003;', 'var(--o-grns)', 'Bevestigd &mdash; de call gaat door',
+          'Vandaag klaar. Deze kaart gaat dicht en komt niet terug: de calldag zelf is al gedekt.',
+          "window.__opvOpwarmActie('bevestigd')", bezig) +
+        opt('&#128197;', 'var(--o-accs)', 'Verplaatsen',
+          'Hij kan niet op dit moment. Kies samen een nieuw moment in de agenda.',
+          "window.__opvOpwarmVerzet()", bezig || !heeftAfspraak) +
+        opt('&#128683;', 'var(--o-reds)', 'Annuleren',
+          'De call gaat niet door en er komt niets voor in de plaats.',
+          "window.__opvOpwarmActie('annuleren')", bezig || !heeftAfspraak) +
+        opt('&#128172;', 'var(--o-ambs)', 'Gesprek gehad',
+          'Schrijf op wat er gezegd is. Daarmee is deze kaart klaar.',
+          "window.__opvOpwarmActie('gesprek_gehad')", bezig);
+      return scrim('Wat nu met ' + esc(t.naam) + '?',
+        badgeTekst(t) ? esc(badgeTekst(t)) : 'Geboekte zoomcall', b);
+    }
+
+    // ── OPWARMKAART · VERPLAATSEN ────────────────────────────────────────
+    // Alleen de agenda, geen handmatige datumkeuze: een zoomcall heeft een uur
+    // nodig, en een kale datum levert een afspraak op waar geen moment bij
+    // hoort. Dezelfde motor als de cockpit (_lib/verzet-afspraak.js): de
+    // BESTAANDE GHL-afspraak verhuist, dus er blijft geen spookafspraak op het
+    // oude uur staan.
+    if (m.soort === 'opwarm-verzet') {
+      const uitleg =
+        '<div class="info">De zoomcall verhuist naar het moment dat je kiest. ' +
+        'De oude afspraak blijft als <b>verzet</b> op zijn eigen dag staan en wordt <b>niet</b> ' +
+        'beoordeeld: geen no-show, geen verwijt in het rapport.<br><br>' +
+        'Deze kaart gaat dicht; voor de nieuwe afspraak komt er vanzelf een nieuwe.<br><br>' +
+        'Lukt het verzetten niet, dan verandert er <b>niets</b> aan de afspraak.</div>';
+      return scrim('Verplaatsen &mdash; ' + esc(t.naam),
+        'Kies een nieuw moment in de agenda.',
+        uitleg + agendaBlok({ handmatig: false }));
+    }
+
+    // ── OPWARMKAART · DE BEVESTIGINGSVENSTERS ────────────────────────────
+    if (m.soort === 'opwarm-actie') {
+      const u = m.uitkomst;
+      if (u === 'bevestigd') {
+        return scrim(esc(t.naam) + ' bevestigt', badgeTekst(t) ? esc(badgeTekst(t)) : 'Geboekte zoomcall',
+          '<div class="ronde">Deze kaart gaat dicht en komt <b>niet</b> terug. Op de calldag zelf ' +
+          'krijgt hij het spraakbericht van vanochtend, en om 12:00 staat hij in je lijst als hij ' +
+          'daar niet op reageert.</div>' +
+          '<textarea id="opv-zn" rows="2" placeholder="Notitie (mag leeg)"></textarea>' +
+          '<button class="obtn p" style="width:100%;margin-top:12px" ' +
+          'onclick="window.__opvOpwarmBevestig(\'bevestigd\')">Bevestigd vastleggen</button>');
+      }
+      if (u === 'gesprek_gehad') {
+        return scrim('Gesprek gehad met ' + esc(t.naam), 'Wat is er gezegd?',
+          '<div class="ronde">Zonder deze zin is het een vinkje zonder inhoud, en weet de volgende ' +
+          'die hem oppakt nog niets.</div>' +
+          '<textarea id="opv-zn" rows="3" placeholder="Bijvoorbeeld: komt zeker, heeft de link al getest"></textarea>' +
+          '<button class="obtn p" style="width:100%;margin-top:12px" ' +
+          'onclick="window.__opvOpwarmBevestig(\'gesprek_gehad\')">Vastleggen en afronden</button>');
+      }
+      // annuleren
+      return scrim('Zoomcall annuleren', esc(t.naam) + (badgeTekst(t) ? ' &middot; ' + esc(badgeTekst(t)) : ''),
+        '<div class="ronde">De afspraak wordt <b>eerst in de agenda</b> geannuleerd en pas daarna bij ' +
+        'ons. Lukt dat niet, dan verandert er niets en blijft deze kaart staan.<br><br>' +
+        'Hij komt <b>niet</b> terug met \'plan opnieuw in\': je hebt hem net gesproken, en dat is iets ' +
+        'anders dan iemand die zelf via de link afzegt.</div>' +
+        '<textarea id="opv-zn" rows="2" placeholder="Reden (mag leeg) — deze gaat mee in de afzegging"></textarea>' +
+        '<button class="obtn p" style="width:100%;margin-top:12px" ' +
+        'onclick="window.__opvOpwarmBevestig(\'annuleren\')">Annuleren vastleggen</button>');
+    }
+
     if (m.soort === 'watnu') {
       const gp = (t.bel_vandaag || 0) + (t.wa_vandaag || 0) > 0;
       body =
@@ -4593,6 +4685,61 @@
     }
   };
 
+  // ── De opwarmkaart: vier uitgangen ────────────────────────────────────────
+  //
+  // Dezelfde vorm als de aanmeldkaart: eerst een keuzevenster, dan per uitgang
+  // een venster dat zegt wat er gaat gebeuren. Geen enkele van deze knoppen
+  // schrijft rechtstreeks — dat doet altijd __opvOpwarmBevestig, zodat er maar
+  // één plek is waar het misgaat en maar één plek die het meldt.
+  window.__opvOpwarmActie = (u) => {
+    const m = _ui.modal; if (!m || _ui.bezig) return;
+    _ui.modal = { soort: 'opwarm-actie', taakId: m.taakId, uitkomst: u };
+    render();
+  };
+
+  window.__opvOpwarmVerzet = () => {
+    const m = _ui.modal; if (!m || _ui.bezig) return;
+    // De agenda opnieuw ophalen: dit venster gaat open tijdens een gesprek, en
+    // een slot dat bij het laden vrij was hoeft dat nu niet te zijn.
+    _agenda.data = null; _agenda.key = null; _agenda.error = null;
+    _ui.modal = { soort: 'opwarm-verzet', taakId: m.taakId };
+    render();
+  };
+
+  window.__opvOpwarmBevestig = async (uitkomst) => {
+    const m = _ui.modal; if (!m || _ui.bezig) return;
+    const el = document.getElementById('opv-zn');
+    const notitie = (el && el.value || '').trim();
+    if (uitkomst === 'gesprek_gehad' && !notitie) { alert('Schrijf eerst op wat er gezegd is.'); return; }
+
+    // Op slot vóór de eerste await: post() doet dat ook, maar pas op het moment
+    // dat de aanroep begint. Een tweede klik in dat gaatje stuurt een tweede
+    // actie — en bij annuleren zou dat een tweede GHL-annulering zijn.
+    _ui.bezig = true;
+    render();
+    try {
+      await post('/api/opvolging-zoom-actie', {
+        taak_id: m.taakId, actie: uitkomst, notitie: notitie || null,
+      });
+      opvToast(uitkomst === 'annuleren'
+        ? 'Geannuleerd in de agenda en bij ons. Hij komt niet terug als opnieuw-inplannen-kaart.'
+        : uitkomst === 'bevestigd'
+          ? 'Bevestigd. Deze kaart is klaar en komt niet terug.'
+          : 'Vastgelegd. Deze kaart is klaar.');
+      _ui.modal = null; leegTakenCache(); render();
+    } catch (e) {
+      // De letterlijke melding van de server: 'Kan alleen scheduled annuleren'
+      // of 'GHL is tijdelijk niet beschikbaar' zegt precies wat er aan de hand
+      // is. De kaart blijft staan — de opdracht is niet uitgevoerd.
+      alert('Niet gelukt: ' + (e.message || 'onbekende fout'));
+    } finally {
+      // Altijd los, ook na een fout: anders zit Dave in een venster waarin geen
+      // enkele knop nog werkt.
+      _ui.bezig = false;
+      render();
+    }
+  };
+
   window.__opvWeek = (stap) => {
     const n = _agenda.offset + stap;
     if (n < 0 || n >= AGENDA_MAX_WEKEN) return;
@@ -4618,6 +4765,8 @@
 
     const verzetten = m.soort === 'call-verzet';
     const naarZoom  = m.soort === 'aanmeld-zoom';
+    // De vierde: een opwarmkaart waarvan de call verhuist. Zie __opvOpwarmVerzet.
+    const opwarmVerzet = m.soort === 'opwarm-verzet';
     const call = verzetten ? callOp(m.callIndex) : null;
     if (verzetten && !(call && call.appointment_id)) {
       opvToast('Deze call heeft geen afspraak-id, dus er is niets om te verzetten.');
@@ -4627,7 +4776,9 @@
     _ui.bezig = true; render();
 
     try {
-      const antwoord = verzetten
+      const antwoord = opwarmVerzet
+        ? await post('/api/opvolging-zoom-actie', { taak_id: m.taakId, actie: 'verplaatsen', start: startIso })
+        : verzetten
         ? await post('/api/opvolging-agenda', { appointment_id: call.appointment_id, start: startIso })
         : naarZoom
           ? await post('/api/opvolging-agenda', { taak_id: m.taakId, start: startIso, uitgang: 'liever_zoom' })
@@ -4644,6 +4795,7 @@
         opvToast('Verzet. De oude afspraak wordt niet beoordeeld.' +
           (n ? ' ' + n + ' openstaande kaart' + (n === 1 ? '' : 'en') + ' voor deze lead gesloten.' : ''));
       }
+      if (opwarmVerzet) opvToast('Verzet. Voor de nieuwe afspraak komt er vanzelf een kaart.');
       if (naarZoom) {
         // De afmelding is fail-soft aan de serverkant, en dat mag niet stil
         // blijven: anders denkt Dave dat het event bijgewerkt is terwijl die
@@ -4656,7 +4808,7 @@
             : 'Zoomcall geboekt en afgemeld voor het event.');
       }
     } catch (e) {
-      alert((verzetten ? 'Verzetten' : 'Inplannen') + ' niet gelukt: ' + (e.message || 'onbekende fout'));
+      alert(((verzetten || opwarmVerzet) ? 'Verzetten' : 'Inplannen') + ' niet gelukt: ' + (e.message || 'onbekende fout'));
       // Het slot kan intussen bezet zijn — opnieuw ophalen zodat de week klopt.
       _agenda.data = null; _agenda.key = null; render();
     } finally {
