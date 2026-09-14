@@ -8,10 +8,6 @@
       "maxDuration": 300,
       "memory": 1024
     },
-    "api/admin-events-backfill-8-14-sept.js": {
-      "maxDuration": 300,
-      "memory": 1024
-    },
     "api/**/*.js": {
       "maxDuration": 30,
       "memory": 1024
