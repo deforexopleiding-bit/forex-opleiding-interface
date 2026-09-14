@@ -219,7 +219,10 @@ async function loadCandidatesForAutomation(auto, now) {
     // FK-gekwalificeerd (event_attendees_event_id_fkey): event_attendees heeft
     // TWEE FK's naar events (event_id + switched_from_event_id), dus een kaal
     // 'events!inner' is ambigu → PGRST201. Alias blijft 'events'.
-    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, events!event_attendees_event_id_fkey!inner(starts_at)')
+    // call_status + call_status_at meelezen voor de trigger 'on_call_status':
+    // de eerste is het filter, de tweede is zowel de new_only-grens als het
+    // nulpunt van de deadline in de mail.
+    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, call_status, call_status_at, events!event_attendees_event_id_fkey!inner(starts_at)')
     // Opt-in herontwerp: attendees met automation_enabled=false zijn stil
     // toegevoegd door admin en mogen geen automation-flow krijgen. Filter
     // hier zodat ALLE trigger-types (on_signup / time_before_event /
@@ -261,6 +264,48 @@ async function loadCandidatesForAutomation(auto, now) {
     const cutoff = new Date(now.getTime() - hours * 3_600_000).toISOString();
     q = q.is('assessment_response_id', null).lte('registered_at', cutoff);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
+  } else if (auto.trigger_type === 'on_call_status') {
+    // ── DE BELSTATUS ALS TRIGGER ──────────────────────────────────────────
+    // Tot nu toe keek geen enkele trigger naar het belwerk. Gemeten op 14
+    // september op event_attendees.call_status: 85 leeg, 65 bevestigd, 16
+    // komt_niet, 15 geen_gehoor, 6 voicemail, 3 terugbellen, 1 foutief_nummer.
+    // Die 15 geen_gehoor-rijen kregen nooit iets te horen en hun plek bleef
+    // bezet tot iemand het met de hand opruimde.
+    //
+    // Bewust op trigger_config.call_status en niet hardgecodeerd op
+    // 'geen_gehoor': dezelfde trigger dekt later 'voicemail' en
+    // 'foutief_nummer' zonder een tweede trigger_type.
+    const wanted = auto.trigger_config && auto.trigger_config.call_status;
+    if (!wanted || typeof wanted !== 'string') return [];
+    q = q.eq('call_status', wanted);
+
+    // ALLEEN WIE NOG INGESCHREVEN STAAT. Iemand die inmiddels zelf afzegde
+    // (geannuleerd) of aanwezig was hoeft geen 'je plek vervalt'-mail; die
+    // plek is al geregeld. Bewust alleen 'aangemeld' — 'wachtlijst' heeft geen
+    // plek om te verliezen, en 'sale'/'aanwezig' zijn eindstanden.
+    q = q.eq('status', 'aangemeld');
+
+    // HET EVENT MOET NOG KOMEN. Een deadline van 48 uur op een middag die al
+    // geweest is, is een mail over een plek die niet meer bestaat.
+    // FK-gekwalificeerd om dezelfde reden als bij on_assessment_completed:
+    // event_attendees heeft TWEE FK's naar events (event_id +
+    // switched_from_event_id), dus een kaal 'events!inner' is ambigu →
+    // PGRST201.
+    q = q.gt('events.starts_at', nowIso);
+
+    // ── NEW_ONLY TOETST OP call_status_at, NIET OP registered_at ──────────
+    // Dit is de regel die de 15 bestaande geen_gehoor-rijen buiten de flow
+    // houdt. Zonder hem worden die bij het aanzetten van de automatisatie
+    // allemaal in één keer ingeschreven en krijgen mensen die weken geleden
+    // gebeld zijn vandaag een deadline van 48 uur.
+    //
+    // Geen call_status_at betekent NIET nieuw: een rij die met de hand gezet
+    // is heeft die kolom vaak leeg, en dan is er geen nulpunt voor de deadline.
+    // Een NOT NULL-filter erbij zodat die rijen niet stil op de enabled_at-
+    // vergelijking meeliften.
+    if (newOnly) {
+      q = q.not('call_status_at', 'is', null).gte('call_status_at', auto.enabled_at);
+    }
   } else {
     return [];
   }

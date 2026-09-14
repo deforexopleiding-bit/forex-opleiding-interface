@@ -111,6 +111,15 @@
       }
       delete cfg.value; delete cfg.unit;
     }
+    // on_call_status heeft één sleutel. Zonder deze regel staat er bij het
+    // wisselen van trigger-type een lege config terwijl het scherm wél
+    // 'Geen gehoor' toont, en weigert de server het opslaan met een 400 over
+    // een veld dat de gebruiker gewoon ziet staan.
+    if (t === 'on_call_status' && !cfg.call_status) {
+      cfg.call_status = 'geen_gehoor';
+      delete cfg.hours_before; delete cfg.hours_after_signup;
+      delete cfg.value; delete cfg.unit;
+    }
   }
 
   // Onboarding trigger_config: canoniek = hours_after_signup OF
@@ -771,6 +780,20 @@
     { v: 'on_assessment_completed',         l: 'Bij ingevulde vragenlijst' },
     { v: 'time_before_event',               l: 'X tijd vóór event' },
     { v: 'on_assessment_not_completed_after', l: 'X tijd na aanmelding, vragenlijst nog niet in' },
+    { v: 'on_call_status',                  l: 'Bij een belstatus' },
+  ];
+  // Spiegelt CALL_STATUSES in api/events-automation-save.js en
+  // CALL_STATUS_TRIGGER_OPTIONS in modules/events-automations.html. Lopen ze
+  // uiteen, dan kiest deze editor iets wat de server weigert.
+  const EV_CALL_STATUSSEN = [
+    { v: 'geen_gehoor',    l: 'Geen gehoor' },
+    { v: 'voicemail',      l: 'Voicemail' },
+    { v: 'terugbellen',    l: 'Terugbellen' },
+    { v: 'foutief_nummer', l: 'Foutief nummer' },
+    { v: 'gebeld',         l: 'Gebeld' },
+    { v: 'bevestigd',      l: 'Bevestigd' },
+    { v: 'komt_niet',      l: 'Komt niet' },
+    { v: 'liever_zoom',    l: 'Liever via zoom' },
   ];
   const EV_SCOPES  = ['all', 'niveau', 'events'];
   const EV_ENROLL  = ['new_only', 'include_existing'];
@@ -1058,6 +1081,18 @@
             <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Alleen uren — event-cron rekent in hele uren.</div>
           </div>`;
         })() : ''}
+        ${a.trigger_type === 'on_call_status' ? (() => {
+          // trigger_config.call_status — het filter van de engine. Default
+          // 'geen_gehoor': dat is waar deze trigger voor gebouwd is.
+          const cur = a.trigger_config?.call_status || 'geen_gehoor';
+          return `<div>
+            <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Welke belstatus?</label>
+            <select onchange="window.__autEvTrigCallStatus(this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+              ${EV_CALL_STATUSSEN.map((o) => `<option value="${o.v}" ${cur === o.v ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+            </select>
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:4px">Start zodra event_attendees.call_status hierop staat. Alleen deelnemers op 'aangemeld' bij een event dat nog moet komen. Bij enroll-mode new_only geldt de grens op call_status_at, dus bestaande rijen worden niet met terugwerkende kracht ingeschreven.</div>
+          </div>`;
+        })() : ''}
         <div>
           <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Enroll-mode</label>
           <select onchange="window.__autEvField('enroll_mode', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
@@ -1191,7 +1226,16 @@
   }
 
   // Events editor handlers
-  window.__autEvField = (k, v) => { if (_ui.ev.editing) _ui.ev.editing[k] = v; if (window.DFO?.render && (k === 'trigger_type' || k === 'scope_type')) window.DFO.render(); };
+  window.__autEvField = (k, v) => {
+    if (_ui.ev.editing) {
+      _ui.ev.editing[k] = v;
+      // Na een wissel van trigger-type hoort de config bij het NIEUWE type.
+      // _normalizeEvTrigger zet de default van on_call_status, zodat het
+      // scherm en de opslag hetzelfde zeggen.
+      if (k === 'trigger_type') _normalizeEvTrigger(_ui.ev.editing);
+    }
+    if (window.DFO?.render && (k === 'trigger_type' || k === 'scope_type')) window.DFO.render();
+  };
   window.__autEvTrigConfig = (k, v) => { if (_ui.ev.editing) { _ui.ev.editing.trigger_config = _ui.ev.editing.trigger_config || {}; _ui.ev.editing.trigger_config[k] = v; } };
   // Trigger-config canoniek: schrijft hours_before OF hours_after_signup afhankelijk
   // van trigger_type; ruimt legacy value/unit keys op zodat re-save schoon is.
@@ -1202,6 +1246,13 @@
     if (t === 'time_before_event') cfg.hours_before = h;
     else if (t === 'on_assessment_not_completed_after') cfg.hours_after_signup = h;
     delete cfg.value; delete cfg.unit;
+  };
+  // on_call_status heeft één sleutel en die vervangt de hele config: een
+  // achtergebleven hours_before op een belstatus-trigger is verwarrende ballast
+  // in de jsonb die niemand meer leest.
+  window.__autEvTrigCallStatus = (v) => {
+    if (!_ui.ev.editing) return;
+    _ui.ev.editing.trigger_config = { call_status: String(v || '') };
   };
   window.__autEvScopeConfig = (k, v) => { if (_ui.ev.editing) { _ui.ev.editing.scope_config = _ui.ev.editing.scope_config || {}; _ui.ev.editing.scope_config[k] = v; } };
   window.__autEvStepAdd = () => { if (_ui.ev.editing) { _ui.ev.editing.steps = asArr(_ui.ev.editing.steps); _ui.ev.editing.steps.push({ type:'wait', config:{ amount:1, unit:'days' } }); if (window.DFO?.render) window.DFO.render(); } };

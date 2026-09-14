@@ -402,7 +402,21 @@ const TRIGGER_LABELS = {
   on_assessment_completed: 'Bij vragenlijst ingevuld',
   time_before_event: 'Tijd vóór het event',
   on_assessment_not_completed_after: 'Vragenlijst niet ingevuld na X uur',
+  on_call_status: 'Bij een belstatus',
 };
+// De belstatussen waar een automatisatie op kan aanslaan. Spiegelt
+// CALL_STATUSES in api/events-automation-save.js; loopt die lijst uiteen, dan
+// kiest de editor iets wat de server weigert.
+const CALL_STATUS_TRIGGER_OPTIONS = [
+  { v: 'geen_gehoor',     l: 'Geen gehoor' },
+  { v: 'voicemail',       l: 'Voicemail' },
+  { v: 'terugbellen',     l: 'Terugbellen' },
+  { v: 'foutief_nummer',  l: 'Foutief nummer' },
+  { v: 'gebeld',          l: 'Gebeld' },
+  { v: 'bevestigd',       l: 'Bevestigd' },
+  { v: 'komt_niet',       l: 'Komt niet' },
+  { v: 'liever_zoom',     l: 'Liever via zoom' },
+];
 const SCOPE_LABELS = {
   all: 'Alle events',
   niveau: 'Per niveau',
@@ -579,6 +593,11 @@ function summarizeTrigger(a) {
     const h = Number(a.trigger_config?.hours_before) || 0;
     if (h % 24 === 0 && h >= 24) return `${h / 24} dagen vóór event`;
     return `${h} uur vóór event`;
+  }
+  if (a.trigger_type === 'on_call_status') {
+    const cs = a.trigger_config?.call_status || '';
+    const lbl = CALL_STATUS_TRIGGER_OPTIONS.find((o) => o.v === cs)?.l || cs || '?';
+    return `Belstatus: ${lbl}`;
   }
   return TRIGGER_LABELS[a.trigger_type] || a.trigger_type;
 }
@@ -795,6 +814,7 @@ function renderEditor() {
             <option value="on_assessment_completed"          ${a.trigger_type === 'on_assessment_completed' ? 'selected' : ''}>Bij vragenlijst ingevuld</option>
             <option value="time_before_event"                ${a.trigger_type === 'time_before_event' ? 'selected' : ''}>Tijd vóór het event</option>
             <option value="on_assessment_not_completed_after" ${a.trigger_type === 'on_assessment_not_completed_after' ? 'selected' : ''}>Vragenlijst niet ingevuld na X uur</option>
+            <option value="on_call_status"                   ${a.trigger_type === 'on_call_status' ? 'selected' : ''}>Bij een belstatus</option>
           </select>
         </div>
         <div id="fTriggerExtra"></div>
@@ -861,6 +881,11 @@ function renderEditor() {
         && !(Number(a.trigger_config?.hours_after_signup) > 0)) {
       a.trigger_config = { hours_after_signup: 48 };
     }
+    // Geen gehoor is waar deze trigger voor gebouwd is; de rest van de lijst
+    // staat er voor later.
+    if (a.trigger_type === 'on_call_status' && !a.trigger_config?.call_status) {
+      a.trigger_config = { call_status: 'geen_gehoor' };
+    }
     renderTriggerExtra();
   });
   document.getElementById('fScope').addEventListener('change', async (e) => {
@@ -899,6 +924,24 @@ function renderTriggerExtra() {
       const v = Math.max(1, Math.floor(Number(e.target.value) || 0));
       a.trigger_config = { hours_after_signup: v };
     });
+    return;
+  }
+  if (a.trigger_type === 'on_call_status') {
+    const cur = a.trigger_config?.call_status || 'geen_gehoor';
+    host.innerHTML = `
+      <div class="form-field">
+        <label>Welke belstatus? <span class="req">*</span></label>
+        <select id="fCallStatus">
+          ${CALL_STATUS_TRIGGER_OPTIONS.map((o) =>
+            `<option value="${o.v}" ${cur === o.v ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}
+        </select>
+        <div class="form-help">Start zodra <code>event_attendees.call_status</code> op deze waarde staat.
+          Alleen deelnemers die nog op <b>aangemeld</b> staan bij een event dat nog moet komen.
+          Met enrollment <b>alleen nieuwe</b> geldt de grens op <code>call_status_at</code>, dus
+          bestaande rijen met deze belstatus worden niet met terugwerkende kracht ingeschreven.</div>
+      </div>`;
+    const el = document.getElementById('fCallStatus');
+    if (el) el.addEventListener('change', (e) => { a.trigger_config = { call_status: e.target.value }; });
     return;
   }
   if (a.trigger_type !== 'time_before_event') { host.innerHTML = ''; return; }
@@ -1417,6 +1460,10 @@ function readAndValidateEditor() {
   } else if (a.trigger_type === 'on_assessment_not_completed_after') {
     const hrs = Math.max(1, Math.floor(Number(document.getElementById('fHoursAfterSignup')?.value) || 0));
     a.trigger_config = { hours_after_signup: hrs };
+  } else if (a.trigger_type === 'on_call_status') {
+    a.trigger_config = {
+      call_status: document.getElementById('fCallStatus')?.value || a.trigger_config?.call_status || '',
+    };
   } else {
     a.trigger_config = {};
   }
@@ -1443,6 +1490,10 @@ function readAndValidateEditor() {
   if (a.trigger_type === 'on_assessment_not_completed_after'
       && !(Number.isInteger(Number(a.trigger_config?.hours_after_signup)) && Number(a.trigger_config?.hours_after_signup) > 0)) {
     return 'Vul een geldig aantal uur (>= 1) na aanmelding in.';
+  }
+  if (a.trigger_type === 'on_call_status'
+      && !CALL_STATUS_TRIGGER_OPTIONS.some((o) => o.v === a.trigger_config?.call_status)) {
+    return 'Kies een belstatus.';
   }
   if (a.scope_type === 'niveau' && !a.scope_config?.niveau) return 'Kies een niveau.';
   if (a.scope_type === 'events' && (!Array.isArray(a.scope_config?.event_ids) || a.scope_config.event_ids.length === 0)) {

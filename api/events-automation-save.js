@@ -4,7 +4,23 @@ import { requirePermission } from './_lib/requirePermission.js';
 // Fase 4A: 'on_assessment_not_completed_after' toegevoegd. Vereist eerst
 // docs/sql-migrations/2026-06-18-events-automations-fase-4a.sql op prod;
 // daarna laat de DB-CHECK 'em toe.
-const TRIGGERS = ['on_signup', 'on_assessment_completed', 'time_before_event', 'on_assessment_not_completed_after'];
+//
+// 'on_call_status' vereist idem docs/sql-migrations/2026-09-14-events-geen-
+// gehoor-laatste-kans.sql: die zet de CHECK op trigger_type opnieuw. Zonder
+// die migratie geeft opslaan een 23514 vanuit Postgres — de app-validatie
+// hieronder laat 'em door, de databank niet.
+const TRIGGERS = ['on_signup', 'on_assessment_completed', 'time_before_event', 'on_assessment_not_completed_after', 'on_call_status'];
+
+// De belstatussen waar een automatisatie op kan aanslaan. Spiegelt
+// CALL_STATUS_OPTIONS in modules/klanten-v2/views/events-v2.js plus de twee
+// die daar bewust geen keuze zijn ('liever_zoom', 'foutief_nummer'): een
+// trigger mag op elke waarde die de kolom kan hebben, ook op een die je niet
+// met de hand kiest. Lege belstatus is geen trigger — dat is 'nog niet
+// gebeld', en daar is on_signup voor.
+const CALL_STATUSES = [
+  'bevestigd', 'gebeld', 'geen_gehoor', 'voicemail', 'komt_niet',
+  'terugbellen', 'foutief_nummer', 'liever_zoom',
+];
 const SCOPES = ['all', 'niveau', 'events'];
 const ENROLL = ['new_only', 'include_existing'];
 // Fase 4A: 3 nieuwe step-types (pure app-validatie).
@@ -78,6 +94,16 @@ export default async function handler(req, res) {
   if (body.trigger_type === 'on_assessment_not_completed_after'
       && !(Number.isInteger(Number(trigger_config.hours_after_signup)) && Number(trigger_config.hours_after_signup) > 0)) {
     return res.status(400).json({ error: 'on_assessment_not_completed_after vereist trigger_config.hours_after_signup als positief geheel getal' });
+  }
+  // Een on_call_status zonder belstatus zou elke deelnemer kandideren: de
+  // engine returnt dan [] (geen kandidaten), dus stil niets doen. Hier hard
+  // weigeren zodat het verschil tussen 'verkeerd opgeslagen' en 'nog niemand
+  // in die belstatus' zichtbaar blijft.
+  if (body.trigger_type === 'on_call_status'
+      && !CALL_STATUSES.includes(trigger_config.call_status)) {
+    return res.status(400).json({
+      error: 'on_call_status vereist trigger_config.call_status uit: ' + CALL_STATUSES.join(', '),
+    });
   }
   const scope_config = (body.scope_config && typeof body.scope_config === 'object') ? body.scope_config : {};
   if (scope_type === 'niveau' && !scope_config.niveau) return res.status(400).json({ error: 'scope niveau vereist scope_config.niveau' });
