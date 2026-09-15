@@ -41,11 +41,30 @@ export default async function handler(req, res) {
     // toont dan geen nav-items; RBAC-feature-keys blijven autoritatief
     // voor endpoint-toegang).
     const shell_roles = pickShellRoles(roles);
+
+    // Weergave-switch (2026-09-15): assigned_roles = de rollen die de user écht
+    // heeft (user_roles, bron van waarheid voor knop-zichtbaarheid ≥2 rollen).
+    // active_role = de gekozen weergave-rol, maar alleen geldig als 'ie in
+    // assigned_roles zit; anders val terug op de hoogste rol. Additief — de
+    // bestaande velden blijven ongewijzigd.
+    let assigned_roles = [];
+    try {
+      const { data } = await supabaseAdmin.rpc('get_user_all_roles', { user_uuid: user.id });
+      if (Array.isArray(data)) assigned_roles = data;
+    } catch (_) { /* soft: geen knop bij lookup-fout */ }
+    let active_role = primary_role;
+    try {
+      const { data: prof } = await supabaseAdmin.from('profiles').select('active_role').eq('id', user.id).maybeSingle();
+      if (prof?.active_role && assigned_roles.includes(prof.active_role)) active_role = prof.active_role;
+    } catch (_) { /* soft: val terug op primary_role */ }
+
     return res.status(200).json({
       user_id: user.id,
       primary_role,
       roles,
       shell_roles,
+      assigned_roles,
+      active_role,
     });
   } catch (e) {
     console.error('[user-effective-roles] error:', e?.message);

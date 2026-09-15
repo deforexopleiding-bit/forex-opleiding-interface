@@ -566,6 +566,17 @@ export default async function handler(req, res) {
       if (newRole === 'super_admin' && admin.profile.role !== 'super_admin') {
         return res.status(403).json({ error: 'Alleen super_admin kan de super_admin-rol toekennen.' });
       }
+      // Weergave-switch-guard (2026-09-15): set_canonical_role WIST alle andere
+      // user_roles-rijen. Voor een multi-rol-gebruiker (bv. mentor + super_admin
+      // met de weergave-schakelknop) zou dat zijn tweede rol — en daarmee de
+      // mentor-koppelingen/permissies — slopen. Weiger daarom bij ≥2 rollen;
+      // gebruik add_role/remove_role om gericht één rol te wijzigen.
+      const { data: curCanonRoles } = await supabaseAdmin.from('user_roles').select('role').eq('user_id', userId);
+      if ((curCanonRoles || []).length >= 2) {
+        return res.status(409).json({
+          error: 'Deze gebruiker heeft meerdere rollen (multi-rol). Gebruik rol toevoegen/verwijderen i.p.v. de canonieke rol te overschrijven, zodat de andere rol behouden blijft.',
+        });
+      }
       // 1) Verwijder alle andere user_roles-rijen. 2) Insert (of upsert) target.
       // Volgorde bewust: eerst delete-others, dan insert-target — atomicair
       // t.a.v. permission-checks die "any of user_roles" testen.

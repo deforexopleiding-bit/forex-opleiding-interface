@@ -484,7 +484,11 @@
       try { await window.AuthShared.getSession(); } catch (_) {}
       profile = await window.AuthShared.getProfile();
     }
-    var role = profile && profile.role;
+    // Weergave-switch (2026-09-15): de dashboard-link volgt de ACTIEVE rol
+    // (profiles.active_role) als die gezet is, anders de primaire rol. NULL =
+    // default ⇒ identiek aan voorheen. getProfile() doet select('*'), dus
+    // active_role zit in het profiel.
+    var role = profile && (profile.active_role || profile.role);
     if (!role) return null;
     return window.AuthShared.getRoleLandingUrl(role) || null;
   }
