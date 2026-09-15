@@ -374,9 +374,41 @@ async function loadCandidatesForAutomation(auto, now) {
     // Opt-in herontwerp: attendees met automation_enabled=false zijn stil
     // toegevoegd door admin en mogen geen automation-flow krijgen. Filter
     // hier zodat ALLE trigger-types (on_signup / time_before_event /
-    // on_assessment_completed / on_assessment_not_completed_after) consistent
-    // overslaan.
+    // on_assessment_completed / on_assessment_not_completed_after /
+    // on_call_status) consistent overslaan.
     .eq('automation_enabled', true)
+    // ── GEEN TESTDEELNEMER IN EEN ECHTE AUTOMATISATIE ────────────────────
+    //
+    // GEMETEN op 15 september. De testdeelnemer van één testrun
+    // (2ea7e337-68f2-4279-ab0e-aa2d1b72be99, is_test=true) had DRIE runs:
+    //
+    //   e65d8d6b  'Geen gehoor - laatste kans'   is_test=true    exited op stap 3
+    //   273a3cdd  'Welkom + vragenlijst'         is_test=FALSE   completed
+    //   b1018890  'Vragenlijst-herinnering'      is_test=FALSE   ACTIVE
+    //
+    // Binnen twee seconden stroomde een synthetische rij dus in twee LIVE
+    // on_signup-automatisaties, en de derde stond nog te draaien toen hij
+    // gevonden werd — op het event van 26 september, waar hij daarna ook de
+    // time_before_event-reminders had opgepikt.
+    //
+    // De oorzaak: deze functie filterde `is_test` niet, en
+    // event_attendees.automation_enabled staat default true (migratie
+    // 2026-06-19-event-attendees-automation-enabled.sql). Een verse
+    // testdeelnemer matchte daarmee het on_signup-filter
+    // (assessment_response_id IS NULL + registered_at >= enabled_at) als
+    // gewone kandidaat.
+    //
+    // DE FILTER STAAT HIER, OP DE BASIS-QUERY, en niet per trigger: het geldt
+    // voor alle vijf de trigger-types en een nieuwe trigger krijgt hem gratis
+    // mee. Dat is precies waarom het lek kon ontstaan — de per-trigger-takken
+    // hieronder dachten elk aan hun eigen filters.
+    //
+    // DIT BREEKT DE TESTER NIET. api/events-automation-test.js loopt niet via
+    // enrollment: die INSERT'et zijn run zelf, met is_test=true. Dat blijft de
+    // enige weg waarlangs een testdeelnemer een run krijgt — en daarmee ook de
+    // enige weg waarlangs de engine-guard op update_attendee_status
+    // (run.is_test && !attendee.is_test) iets te weigeren heeft.
+    .eq('is_test', false)
     .limit(500);
   if (allowedEventIds != null) q = q.in('event_id', allowedEventIds);
 
@@ -405,6 +437,12 @@ async function loadCandidatesForAutomation(auto, now) {
     q = q.in('status', CONFIRMED_STATUSES);
     // Een proefrij krijgt geen echte bevestiging. De automation-tester schrijft
     // zijn run rechtstreeks weg en komt hier niet langs, dus dit breekt 'm niet.
+    //
+    // INMIDDELS DUBBELOP: sinds de is_test-filter op de basis-query hierboven
+    // geldt dit voor alle trigger-types. Bewust laten staan — twee keer
+    // dezelfde `.eq` levert in PostgREST dezelfde uitkomst, en deze regel
+    // documenteert dat déze tak er los al aan dacht. Wie hier ooit opruimt:
+    // haal deze weg, niet die op de basis-query.
     q = q.eq('is_test', false);
     // Guard (b) — vangnet: de motor mag NOOIT een verstreken event bevestigen.
     // Ook als een verstreken rij ondanks guard (a) toch een plek heeft
