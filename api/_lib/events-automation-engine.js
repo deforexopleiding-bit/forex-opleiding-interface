@@ -9,6 +9,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { sendEventEmail, sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapSendStatus } from './comms-log.js';
 import { onConfirmedAttendeeMutation } from './event-attendee-mutations.js';
+import { isPlekBezet } from './event-registration.js';
 // plafondMs is de ENIGE plek waar 'nooit later dan X uur voor het event' wordt
 // uitgerekend — dezelfde functie die de deadline in de mailtekst zet. Zie de
 // kop van _lib/geen-gehoor-deadline.js.
@@ -79,6 +80,9 @@ export function buildConditionState(attendee, event) {
   const niveau = (event && typeof event.niveau === 'string') ? event.niveau.trim().toLowerCase() : '';
   return {
     assessment_completed: !!(attendee && attendee.assessment_response_id),
+    // Sinds 15 sep 2026: de plek kan ook via de belstatus vaststaan. Dezelfde
+    // regel als isPlekBezet in api/_lib/event-registration.js.
+    plek_bevestigd:      isPlekBezet(attendee),
     status,
     still_registered: status !== 'switched_to_other_event' && status !== 'no_show',
     event_niveau:        niveau,
@@ -112,7 +116,22 @@ export function evaluateCondition(check, state) {
       return m.waar === true;
     }
     case 'assessment_completed':     return state.assessment_completed === true;
-    case 'assessment_not_completed': return state.assessment_completed === false;
+
+    // ── "VRAGENLIJST NIET INGEVULD" IS EEN VRAAG OVER DE PLEK ─────────────
+    // De enige automatisatie die hierop gate't ("Vragenlijst-herinnering",
+    // on_signup) stuurt letterlijk: "je plek is nog NIET definitief bevestigd".
+    // Sinds 15 sep 2026 kan die plek óók via belstatus 'bevestigd' vaststaan —
+    // en dan is dat bericht gewoon onwaar. Wie zijn plek al heeft, laat deze
+    // check dus falen (in die automatisatie: skip_to_end, dus geen bericht).
+    //
+    // De vraag "heeft hij de vragenlijst ingevuld?" blijft beantwoordbaar via
+    // assessment_completed hierboven; die is met opzet NIET aangepast.
+    //
+    // plek_bevestigd ontbreekt bij een oudere caller die alleen
+    // assessment_completed meegeeft; dan valt hij terug op het oude gedrag.
+    case 'assessment_not_completed':
+      if (state.plek_bevestigd === true) return false;
+      return state.assessment_completed === false;
     case 'still_registered':         return state.still_registered === true;
     // Fase 4A: niveau-checks. ILIKE-gedrag via lowercase compare.
     case 'niveau_is_basis':          return state.event_niveau === 'basis';
@@ -493,7 +512,8 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         // call_status + call_status_at: nodig voor de condition-check
         // 'geen_reactie_sinds_belstatus' (call_status_at is het nulpunt) en
         // voor de idempotency van update_attendee_status.call_status.
-        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id, call_status, call_status_at')
+            // is_test hoort erbij voor isPlekBezet (buildConditionState.plek_bevestigd).
+        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id, is_test, call_status, call_status_at')
         .eq('id', run.attendee_id)
         .maybeSingle();
       if (!attendee) {

@@ -8,11 +8,19 @@
 // event_website_berichten.
 //
 // Berichttypes (allemaal created_via='website' AND is_test=false):
-//   vervolg_2u    — nog niet Definitief, 2–24u na aanmelding  → herinnering /vervolg
-//   vervolg_24u   — nog niet Definitief, >=24u na aanmelding   → herinnering /vervolg
-//   warmup        — Definitief, event over 24–120u             → warmup
-//   reminder_24u  — Definitief, event over 1–24u               → reminder 24u
-//   reminder_1u   — Definitief, event binnen 1u                → reminder laatste uren
+//   vervolg_2u    — nog GEEN PLEK, 2–24u na aanmelding  → herinnering /vervolg
+//   vervolg_24u   — nog GEEN PLEK, >=24u na aanmelding   → herinnering /vervolg
+//   warmup        — HEEFT EEN PLEK, event over 24–120u   → warmup
+//   reminder_24u  — HEEFT EEN PLEK, event over 1–24u     → reminder 24u
+//   reminder_1u   — HEEFT EEN PLEK, event binnen 1u      → reminder laatste uren
+//
+// "HEEFT EEN PLEK" volgt sinds 15 sep 2026 de regel uit isPlekBezet: vragenlijst
+// ingevuld OF belstatus bevestigd. Twee kanten op:
+//   · De twee vervolg-herinneringen ("je plek is nog niet definitief") gaan NIET
+//     meer naar wie telefonisch bevestigd is — die plek staat wél vast.
+//   · De drie praktische berichten (warmup + de twee reminders) gaan nu ook naar
+//     wie zijn plek via de bel heeft. Die komt immers gewoon; hem niet
+//     herinneren aan tijd en locatie was het echte verlies.
 //
 // (De bevestiging bij Definitief wordt direct in event-vervolg-finalize
 //  verstuurd, niet hier.)
@@ -20,6 +28,7 @@
 // Auth: Authorization: Bearer $CRON_SECRET (checkCronAuth). Schedule: */10 * * * *.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
+import { applyPlekBezetFilter, PLEK_BEZET_CALL_STATUS } from './_lib/event-registration.js';
 import {
   SOORTEN, reedsVerstuurd, markeerVerstuurd, stuurWaEnMail, kiesVervolgTemplate, vervolgLink,
 } from './_lib/event-website-berichten.js';
@@ -29,9 +38,14 @@ import {
 
 const SELECT = `
   id, event_id, first_name, last_name, email, phone, choice_token, customer_id,
-  registered_at, assessment_response_id, status,
+  registered_at, assessment_response_id, status, call_status,
   events!event_attendees_event_id_fkey!inner(id, title, starts_at, ends_at, location)
 `;
+
+// "Nog geen plek via de belstatus" als PostgREST-filter. NULL-veilig: een kaal
+// `not.ilike` zou elke rij met een lege call_status wegfilteren (NOT NULL is
+// NULL, dus niet waar) — en dat zijn juist de meeste rijen.
+const GEEN_PLEK_VIA_BELSTATUS = `call_status.is.null,call_status.not.ilike.${PLEK_BEZET_CALL_STATUS}`;
 
 function baseQuery() {
   // GEDEELDE harde eis: alleen onze eigen funnel-aanmelders, geen testrijen.
@@ -90,30 +104,31 @@ export default async function handler(req, res) {
       mail: vervolgHerinneringMail({ voornaam: a.first_name, titel: e.title, vervolgLink: vervolgLink(a.choice_token) }),
     });
 
-    // 1) vervolg_2u — nog niet Definitief, 2–24u na aanmelding, event nog komend.
+    // 1) vervolg_2u — nog geen plek, 2–24u na aanmelding, event nog komend.
     {
       const { data, error } = await baseQuery()
         .is('assessment_response_id', null).eq('status', 'aangemeld')
+        .or(GEEN_PLEK_VIA_BELSTATUS)
         .lte('registered_at', cutoff2h).gt('registered_at', cutoff24h)
         .gt('events.starts_at', nowIso);
       if (error) throw new Error('vervolg_2u select: ' + error.message);
       summary.per_soort.vervolg_2u = await verwerk(SOORTEN.VERVOLG_2U, data, bouwVervolg);
     }
 
-    // 2) vervolg_24u — nog niet Definitief, >=24u na aanmelding, event nog komend.
+    // 2) vervolg_24u — nog geen plek, >=24u na aanmelding, event nog komend.
     {
       const { data, error } = await baseQuery()
         .is('assessment_response_id', null).eq('status', 'aangemeld')
+        .or(GEEN_PLEK_VIA_BELSTATUS)
         .lte('registered_at', cutoff24h)
         .gt('events.starts_at', nowIso);
       if (error) throw new Error('vervolg_24u select: ' + error.message);
       summary.per_soort.vervolg_24u = await verwerk(SOORTEN.VERVOLG_24U, data, bouwVervolg);
     }
 
-    // 3) warmup — Definitief, event over 24–120u.
+    // 3) warmup — heeft een plek, event over 24–120u.
     {
-      const { data, error } = await baseQuery()
-        .not('assessment_response_id', 'is', null).in('status', ['aangemeld', 'aanwezig'])
+      const { data, error } = await applyPlekBezetFilter(baseQuery())
         .gt('events.starts_at', plus24h).lte('events.starts_at', plus120h);
       if (error) throw new Error('warmup select: ' + error.message);
       summary.per_soort.warmup = await verwerk(SOORTEN.WARMUP, data, (a, e) => ({
@@ -122,10 +137,9 @@ export default async function handler(req, res) {
       }));
     }
 
-    // 4) reminder_24u — Definitief, event over 1–24u.
+    // 4) reminder_24u — heeft een plek, event over 1–24u.
     {
-      const { data, error } = await baseQuery()
-        .not('assessment_response_id', 'is', null).in('status', ['aangemeld', 'aanwezig'])
+      const { data, error } = await applyPlekBezetFilter(baseQuery())
         .gt('events.starts_at', plus1h).lte('events.starts_at', plus24h);
       if (error) throw new Error('reminder_24u select: ' + error.message);
       summary.per_soort.reminder_24u = await verwerk(SOORTEN.REMINDER_24U, data, (a, e) => ({
@@ -134,10 +148,9 @@ export default async function handler(req, res) {
       }));
     }
 
-    // 5) reminder_1u — Definitief, event binnen 1u.
+    // 5) reminder_1u — heeft een plek, event binnen 1u.
     {
-      const { data, error } = await baseQuery()
-        .not('assessment_response_id', 'is', null).in('status', ['aangemeld', 'aanwezig'])
+      const { data, error } = await applyPlekBezetFilter(baseQuery())
         .gt('events.starts_at', nowIso).lte('events.starts_at', plus1h);
       if (error) throw new Error('reminder_1u select: ' + error.message);
       summary.per_soort.reminder_1u = await verwerk(SOORTEN.REMINDER_1U, data, (a, e) => ({
