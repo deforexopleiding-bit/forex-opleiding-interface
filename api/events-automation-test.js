@@ -51,7 +51,15 @@
 // dat je iets test wat uitstaat; het antwoord draagt `automation_enabled` mee
 // zodat de UI dat na de start nog een keer kan laten zien.
 //
-// Response 200: { ok:true, attendee_id, run_id }
+// ── DE BEGINTOESTAND VAN DE TRIGGER ─────────────────────────────────────
+// De testdeelnemer wordt aangemaakt IN de toestand die de trigger van die
+// automatisatie voorschrijft. Voor 'on_call_status' zijn dat call_status +
+// call_status_at; zonder die twee voldeed de testdeelnemer niet aan de
+// startvoorwaarde van de flow die hij moest testen, en stopte de run bij de
+// eerste conditie op 'niet gemeten'. Zie _lib/events-test-begintoestand.js
+// voor de meting en de reden.
+//
+// Response 200: { ok:true, attendee_id, run_id, begintoestand, begintoestand_tekst }
 // Response 400: validatie-fout
 // Response 403: geen rechten
 // Response 404: automation of event niet gevonden
@@ -59,6 +67,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { beginToestandVoorTrigger } from './_lib/events-test-begintoestand.js';
 
 const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -115,7 +124,9 @@ export default async function handler(req, res) {
     // FK-violation).
     const { data: autom, error: autErr } = await supabaseAdmin
       .from('event_automations')
-      .select('id, name, enabled, steps')
+      // trigger_type + trigger_config: nodig om te weten in welke toestand de
+      // testdeelnemer geboren moet worden — zie _lib/events-test-begintoestand.js.
+      .select('id, name, enabled, steps, trigger_type, trigger_config')
       .eq('id', automationId)
       .maybeSingle();
     if (autErr) throw new Error('automation-lookup: ' + autErr.message);
@@ -140,10 +151,22 @@ export default async function handler(req, res) {
     if (evErr) throw new Error('event-lookup: ' + evErr.message);
     if (!ev)   return res.status(404).json({ error: 'Event niet gevonden' });
 
+    // ── DE BEGINTOESTAND, VÓÓR ER IETS GESCHREVEN WORDT ────────────────
+    // Lukt dit niet, dan weigeren we HIER — geen testdeelnemer, geen run.
+    // Een run starten die drie stappen later op een voorwaarde stukloopt laat
+    // het lijken alsof de automatisatie kapot is, terwijl de tester het was.
+    const nowIso = new Date().toISOString();
+    const begin = beginToestandVoorTrigger(autom, nowIso);
+    if (begin.fout) {
+      return res.status(400).json({
+        error: begin.fout,
+        trigger_type: autom.trigger_type || null,
+      });
+    }
+
     // 1) INSERT test-attendee. Name geprefixt met "TEST · " zodat de rij in
     //    UI's die de filter (per ongeluk) niet toepassen ook visueel niet
     //    voor echte data doorgaat.
-    const nowIso = new Date().toISOString();
     const { data: att, error: attInsErr } = await supabaseAdmin
       .from('event_attendees')
       .insert({
@@ -157,6 +180,11 @@ export default async function handler(req, res) {
         source:             'automation_test',
         registered_at:      nowIso,
         created_by_user_id: user.id,
+        // DE BEGINTOESTAND VAN DE TRIGGER. Voor on_call_status zijn dat
+        // call_status + call_status_at; voor de andere trigger-types is deze
+        // patch leeg en verandert er niets. Zie de kop van
+        // _lib/events-test-begintoestand.js voor de gemeten bug hierachter.
+        ...begin.patch,
       })
       .select('id')
       .single();
@@ -206,6 +234,12 @@ export default async function handler(req, res) {
       automation_enabled: autom.enabled === true,
       automation_name:    autom.name || null,
       steps:              Array.isArray(autom.steps) ? autom.steps.length : 0,
+      // WAT ER GEZET IS, ZODAT HET SCHERM HET KAN TONEN. Zonder deze regel
+      // weet de tester niet vanaf welk punt er gemeten wordt — en juist dat
+      // punt was de bug.
+      begintoestand:      begin.patch,
+      begintoestand_tekst: begin.tekst,
+      trigger_type:       autom.trigger_type || null,
     });
   } catch (e) {
     console.error('[events-automation-test]', e?.message || e);
