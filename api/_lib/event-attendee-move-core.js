@@ -139,6 +139,22 @@ export async function verplaatsDeelnemer({ attendeeId, targetEventId, sendInvite
     // (undefined), dan is dit een gewone aanmelding en geen proefrij.
     is_test:                 source.is_test === true,
     created_by_user_id:      userId || null,
+    // DE BELSTATUS GAAT MET OPZET NIET MEE.
+    //
+    // Sinds 15 sep 2026 neemt belstatus 'bevestigd' een plek in. Een
+    // verplaatste deelnemer die zijn plek enkel aan de bel ontleende, komt op
+    // het doel-event dus binnen ZONDER plek — en telt daar pas mee zodra hij
+    // de vragenlijst invult of opnieuw bevestigt.
+    //
+    // Dat is het bedoelde gedrag, niet een vergeten kolom. Maxim, 15 sep 2026:
+    // "als hij verplaatst wordt komt hij zonder bevestigd terug in de flow
+    // terecht." Hij is bevestigd voor een dátum, niet voor het merk; op een
+    // andere datum moet die bevestiging opnieuw gehaald worden. Meekopiëren
+    // zou bovendien de belronde-automatisering (trigger on_call_status, met
+    // call_status_at als nulpunt) op een oud tijdstempel laten lopen.
+    //
+    // Niet "repareren" — tests/events-verplaatsen-zonder-belstatus.test.js
+    // legt dit vast.
   };
 
   const { data: newRow, error: insErr } = await supabaseAdmin
