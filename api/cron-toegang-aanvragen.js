@@ -20,7 +20,7 @@
 //
 // Template-namen (aan te dienen in Meta Business Manager door Jeffrey):
 //   bevestig_toegang_a    (call_geboekt=true;  vars: [voornaam])
-//   bevestig_toegang_b    (call_geboekt=false; vars: [voornaam, call_link])
+//   bevestig_toegang_b    (call_geboekt=false; vars: [voornaam] — statische URL-knop)
 //   reminder_toegang_2u   (vars: [voornaam])
 //   reminder_toegang_24u  (vars: [voornaam])
 //   reminder_toegang_48u  (vars: [voornaam])
@@ -120,7 +120,10 @@ const TEMPLATES = {
   // roept haalCallMoment(a) 1× aan en geeft dan een varsOverride mee zodat de
   // echte call-datum gebruikt wordt.
   bevestig_a:   { name: 'bevestig_toegang_a',  vars: (a) => [a.voornaam || 'daar', 'het geplande moment'] },
-  bevestig_b:   { name: 'bevestig_toegang_b',  vars: (a) => [a.voornaam || 'daar', process.env.OPSTARTSESSIE_CALL_URL || 'https://deforexopleiding.nl/agenda'] },
+  // bevestig_b is APPROVED met 1 body-placeholder ({{1}}=voornaam) + een
+  // STATISCHE URL-knop (deforexopleiding.nl/agenda, 0 parameters). Dus maar 1
+  // body-param meesturen — 2 gaf Meta 132000 (param-count mismatch).
+  bevestig_b:   { name: 'bevestig_toegang_b',  vars: (a) => [a.voornaam || 'daar'] },
   reminder_2u:  { name: 'reminder_toegang_2u', vars: (a) => [a.voornaam || 'daar'] },
   reminder_24u: { name: 'reminder_toegang_24u',vars: (a) => [a.voornaam || 'daar'] },
   reminder_48u: { name: 'reminder_toegang_48u_v3',vars: (a) => [a.voornaam || 'daar'] },
