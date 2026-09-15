@@ -482,16 +482,6 @@ export default async function handler(req, res) {
       if (!matched && cnt > 0) unmatched.push({ label, count: cnt });
     }
     if (unmatched.length) console.log('[display-metrics] leads-buckets unmatched today:', unmatched);
-    // ── "Overig"-bucket ───────────────────────────────────────────────────
-    // Alle non-test leads-van-vandaag die NIET in één van de vier lead-buckets
-    // vielen: niet-gematcht traject (unmatched) én lege/NULL traject (die zitten
-    // wél in total_incl_afwijzer maar in géén by_traject-bucket). Zo telt
-    // challenge+mini+event+webinar+overig exact op tot de hero. Alleen tonen als
-    // >0 (zie payload) — houdt de strip rustig.
-    const matchedLeadSum = buckets.challenge + buckets.mini + buckets.event + buckets.webinar;
-    const overig = (leadsCompute.total_incl_afwijzer == null)
-      ? 0
-      : Math.max(0, leadsCompute.total_incl_afwijzer - matchedLeadSum);
 
     // ── Sales — geen dubbel-trim; label komt PII-safe uit compute-helper ──
     const salesRecent = salesCompute.recent_ids || [];
@@ -697,16 +687,14 @@ export default async function handler(req, res) {
       ? null
       : leadsCompute.total_incl_afwijzer;
 
-    // Lead-buckets: de vier vaste + (indien >0) "Overig", zodat challenge+mini+
-    // event+webinar+overig == hero. "Nieuwe calls" blijft de losse 6e strip-tegel
-    // (geen lead, maar geboekte calls). Overig alleen tonen als er iets in zit.
+    // Lead-buckets: de vier vaste bron-tegels. "Nieuwe calls" blijft de losse 5e
+    // strip-tegel (geen lead, maar geboekte calls vandaag).
     const leadBuckets = [
       { key: 'challenge', label: '7-daagse',    count: buckets.challenge },
       { key: 'mini',      label: 'Mini-cursus', count: buckets.mini      },
       { key: 'event',     label: 'Events',      count: buckets.event     },
       { key: 'webinar',   label: 'Webinar',     count: buckets.webinar   },
     ];
-    if (overig > 0) leadBuckets.push({ key: 'overig', label: 'Overig', count: overig });
     leadBuckets.push({ key: 'calls', label: 'Nieuwe calls', count: callsBookedCount ?? null });
 
     const payload = {
