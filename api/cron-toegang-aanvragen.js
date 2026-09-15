@@ -2,10 +2,14 @@
 //
 // DEEL C — Cron-motor van de WhatsApp-gate. Draait elke minuut (vercel.json).
 // Verwerkt public.toegang_aanvragen:
-//   1) Bevestiging (na ~2 min na aanmelding) — WA-template + e-mail
-//   2) Reminders op bevestiging+2u / +24u / +48u
-//   3) Vervallen: 24u na 48u-reminder zonder reactie → status='vervallen'
-//   4) Dag-6 check-in (alleen 7-daagse, status='gereageerd' + provisioned)
+//   1)  Bevestiging (na ~2 min na aanmelding) — WA-template + e-mail
+//   2)  Reminders op bevestiging+2u / +24u / +48u
+//   2b) Provisioning retry — belProvisioning opnieuw voor rijen die op
+//       status='gereageerd' + provisioned_at NULL + provisioned_error <> NULL
+//       staan (typisch: gate-timeout). Window 72u, atomic claim,
+//       verstuurt bij succes alsnog de welkom-WA.
+//   3)  Vervallen: 24u na 48u-reminder zonder reactie → status='vervallen'
+//   4)  Dag-6 check-in (alleen 7-daagse, status='gereageerd' + provisioned)
 //
 // Regels:
 //   - 24/7 draaien: geen nacht-venster meer (2026-09-10 verwijderd; late
@@ -26,9 +30,10 @@
 // 0 incasso-writes.
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
-import { sendTemplate, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
+import { sendTemplate, sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
 import { sendWelkomMail } from './mailer.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
+import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
 // E-mail-builders (welkom/bevestiging + dag-6) staan als pure render-functies in
 // een gedeelde module, zodat de E-mails-tab er ook een echte preview van rendert.
 import { mailBevestigingA, mailBevestigingB, mailDag6A, mailDag6B } from './_lib/toegang-cron-mails.js';
@@ -39,6 +44,15 @@ import { mailBevestigingA, mailBevestigingB, mailDag6A, mailDag6B } from './_lib
 // doorgevoerd hier.
 const VERVALLEN_UREN_NA_48U = 24;   // na 48u-reminder + 24u zonder reactie → vervallen
 const DAG6_UREN = 6 * 24;
+
+// Retry-window voor provisioning-fails. Voorbij 72u draaien we niet meer
+// automatisch — te oude leads moeten via de admin-UI/handmatig ingrijpen.
+const PROVISIONING_RETRY_WINDOW_UREN = 72;
+// Klein per tick zodat een backlog nooit het tijdsbudget van de */2-cron
+// (bevestigingen/reminders) kan opeten. Bij een retry-only tick van 5 ×
+// max 20s = 100s ruimte; nog steeds ruim binnen 300s Vercel-limit met
+// marge voor de overige loops. Drains vanzelf over meerdere ticks.
+const PROVISIONING_RETRY_BATCH_LIMIT = 5;
 
 // v=5 (2026-08-28): expliciete afzendlijn = welkom-nummer via bestaande
 // whatsapp_module_config-rij module='leadsonderhoud' (label "Esmee" —
@@ -213,6 +227,7 @@ export default async function handler(req, res) {
     welkom_phone: welkomPhoneId ? 'ok' : 'ontbreekt',
     bevestiging: 0, reminders_2u: 0, reminders_24u: 0, reminders_48u: 0,
     vervallen: 0, dag6: 0, provisioning_calls: 0,
+    provisioning_retries: 0, provisioning_retry_ok: 0, provisioning_retry_fail: 0,
     errors: [],
     items: [],   // v=6: per-lead outcome (id/wa/mail/step) voor observability
   };
@@ -358,6 +373,124 @@ export default async function handler(req, res) {
       }
     }
   } catch (e) { summary.errors.push({ step: `reminder-loop-${uren}`, error: e?.message || String(e) }); }
+
+  // ── 2b) PROVISIONING RETRY — leads die op status='gereageerd' hangen
+  //        met provisioned_at IS NULL + provisioned_error <> NULL. Typisch
+  //        pattern: gate flipte de rij naar 'gereageerd', maar de
+  //        belProvisioning-call timeoutte (of gaf 5xx) → geen inlogmail en
+  //        geen "je bent binnen"-WA. Zonder deze retry blijft de lead in
+  //        het luchtledige tot iemand handmatig ingrijpt.
+  //
+  //   Selectie-eisen:
+  //     * status = 'gereageerd'
+  //     * provisioned_at IS NULL     (nooit dubbel provisionen)
+  //     * provisioned_error IS NOT NULL  (fault-signaal van de gate)
+  //     * reacted_at >= now - 72u    (voorbij dit venster handmatig ingrijpen)
+  //     * limit 20 per tick
+  //
+  //   Atomic claim: zet provisioned_error=NULL vóór de belProvisioning-call,
+  //   met WHERE-guard (provisioned_at IS NULL AND provisioned_error IS NOT
+  //   NULL). Twee concurrent runs krijgen maar één winnaar op de UPDATE
+  //   (Postgres serialiseert); de race-loser retourneert 0 rows en slaat de
+  //   rij stil over. Ok-flow zet daarna provisioned_at (nog een IS NULL
+  //   guard tegen race met een parallel-webhook die inmiddels ook slaagde),
+  //   en verstuurt exact dezelfde "Top <naam>! ✅ Je inloggegevens…" welkom-
+  //   WA als inbox-webhook.js:1562-1590. Fail-terug: bij fout schrijven we
+  //   de nieuwe error weer op de rij zodat een volgende tick 'em kan
+  //   proberen (binnen het 72u-venster).
+  if (live) try {
+    const grens = new Date(nowMs - PROVISIONING_RETRY_WINDOW_UREN * 3600 * 1000).toISOString();
+    const { data: rows } = await supabaseAdmin
+      .from('toegang_aanvragen')
+      .select('id, voornaam, email, telefoon, soort, provisioned_error, reacted_at')
+      .eq('status', 'gereageerd')
+      .is('provisioned_at', null)
+      .not('provisioned_error', 'is', null)
+      .gte('reacted_at', grens)
+      .order('reacted_at', { ascending: true })
+      .limit(PROVISIONING_RETRY_BATCH_LIMIT);
+
+    for (const row of (rows || [])) {
+      // Atomic claim: nul de error VOORDAT we bellen. Race-loser krijgt
+      // 0 rows terug en slaat over.
+      const { data: claim } = await supabaseAdmin
+        .from('toegang_aanvragen')
+        .update({ provisioned_error: null })
+        .eq('id', row.id)
+        .is('provisioned_at', null)
+        .not('provisioned_error', 'is', null)
+        .select('id')
+        .maybeSingle();
+      if (!claim?.id) continue;
+
+      summary.provisioning_retries++;
+      const r = await belProvisioning({
+        email: row.email, voornaam: row.voornaam, soort: row.soort,
+      });
+
+      if (r.ok) {
+        // Race-safe: guard tegen parallel-webhook die intussen ook slaagde.
+        // Alleen als WIJ de provisioned_at-flag zetten (from NULL → now),
+        // sturen we ook de welkom-WA. Anders is die al eerder verstuurd.
+        const { data: updated, error: guardErr } = await supabaseAdmin
+          .from('toegang_aanvragen')
+          .update({
+            provisioned_at   : new Date().toISOString(),
+            provisioned_error: null,
+          })
+          .eq('id', row.id)
+          .is('provisioned_at', null)
+          .select('id')
+          .maybeSingle();
+
+        if (!guardErr && updated?.id) {
+          summary.provisioning_retry_ok++;
+          // Welkom-WA — spiegelt inbox-webhook.js:1562-1590. Fail-soft:
+          // provisioning is al gelukt, de inlogmail is al onderweg via
+          // dfo-website; de bevestigings-WA is nice-to-have.
+          try {
+            if (!welkomPhoneId) {
+              console.warn('[cron-toegang-aanvragen] retry-ok maar welkomPhoneId ontbreekt — WA-skip:', row.id);
+            } else if (!row.telefoon) {
+              console.warn('[cron-toegang-aanvragen] retry-ok maar telefoon ontbreekt — WA-skip:', row.id);
+            } else {
+              const naam = row.voornaam || 'daar';
+              const wabody =
+                `Top ${naam}! ✅ Je inloggegevens zijn direct per mail naar je toegestuurd.\n\n` +
+                `Nog een vraagje, ben je ook al bekend met traden of is dit volledig nieuw?`;
+              const sendRes = await sendText({ to: row.telefoon, body: wabody, phoneNumberId: welkomPhoneId });
+              await logOutboundWa(supabaseAdmin, {
+                toPhone      : row.telefoon,
+                phoneNumberId: welkomPhoneId,
+                body         : wabody,
+                wamid        : sendRes?.wamid || null,
+                source       : 'toegang-provisioning-retry-cron',
+              });
+            }
+          } catch (waErr) {
+            if (waErr instanceof MetaNotConfiguredError) {
+              console.warn('[cron-toegang-aanvragen] welkom-WA meta niet geconfigureerd (soft):', row.id);
+            } else {
+              console.warn('[cron-toegang-aanvragen] welkom-WA (soft):', row.id, waErr?.message || waErr);
+            }
+          }
+        } else {
+          // Race verloren: parallel-webhook heeft 'em al geprovisioneerd
+          // en de welkom-WA al verstuurd. Niet nogmaals.
+          console.log('[cron-toegang-aanvragen] retry: parallel-provisioning al gelukt — skip WA:', row.id);
+        }
+      } else {
+        // Fout terug op de rij zodat een volgende tick opnieuw kan proberen
+        // (mits nog binnen 72u-venster).
+        summary.provisioning_retry_fail++;
+        await supabaseAdmin.from('toegang_aanvragen')
+          .update({ provisioned_error: (r.error || 'onbekend').slice(0, 500) })
+          .eq('id', row.id);
+      }
+    }
+  } catch (e) {
+    summary.errors.push({ step: 'provisioning-retry-loop', error: e?.message || String(e) });
+  }
 
   // ── 3) VERVALLEN — 24u na 48u-reminder zonder reactie ──────────────────
   try {
