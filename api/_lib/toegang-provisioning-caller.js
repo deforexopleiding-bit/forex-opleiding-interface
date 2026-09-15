@@ -34,7 +34,14 @@
 //                                 provisioned_error terecht + admin ziet 'em
 //                                 in de Toegang-aanvragen-tab
 
-const PROVISIONING_TIMEOUT_MS = 8000;
+// 2026-09-15 — verhoogd van 8000 naar 20000. De dfo-website provisioning-
+// cascade (Bubble LMS + Strato SMTP + Webflow member-invite) is regelmatig
+// 8-12s; op 8s brachten legitieme succesvolle calls het niet en belandden
+// leads op status='gereageerd' + provisioned_error='timeout' zonder
+// automatische retry. 20s past ruim binnen Vercel's 30s webhook-limit én
+// binnen de cron-tick van 2 minuten. Retry-branch in cron-toegang-aanvragen.js
+// vangt alsnog restanten op mocht 't 20s ook overschrijden.
+const PROVISIONING_TIMEOUT_MS = 20000;
 
 /**
  * @param {{ email:string, voornaam:string|null, soort:'7-daagse'|'minicursus' }} lead
