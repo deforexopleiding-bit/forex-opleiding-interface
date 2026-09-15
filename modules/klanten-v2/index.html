@@ -67,6 +67,10 @@
              (admin-impersonate-flow), die volledig intact blijft. De sync-code in
              klanten-v2.js:1025-1029 is óók weg — geen dode refs meer. -->
 
+        <!-- Weergave-switch (2026-09-15): rol-schakelknop, alleen zichtbaar bij
+             ≥2 rollen in user_roles. Gevuld door klanten-v2.js → renderRoleSwitch(). -->
+        <div id="roleSwitch" class="role-switch" style="display:none;margin:0 0 10px"></div>
+
         <div class="user-row">
           <div class="avatar" id="userAv">—</div>
           <div style="flex:1;min-width:0">

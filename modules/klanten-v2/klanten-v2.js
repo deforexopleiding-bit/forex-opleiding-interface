@@ -191,6 +191,58 @@ function paintUser(profile) {
   }
 }
 
+// ── Weergave-switch (2026-09-15) — rol-schakelknop ─────────────────────────
+// De user wisselt zijn EIGEN actieve rol (profiles.active_role) tussen de
+// rollen die hij echt heeft (user_roles). Puur weergave: permissies blijven de
+// union. Server (api/role-switch.js) valideert dat de rol toegekend is.
+function roleLabelNL(r) {
+  return ({
+    super_admin: 'Superadmin', admin: 'Admin', manager: 'Manager', sales: 'Sales',
+    mentor: 'Mentor', marketing: 'Marketing', administratie: 'Administratie',
+    appointmentsetter: 'Appointmentsetter', viewer: 'Viewer',
+  })[r] || r;
+}
+async function doRoleSwitch(targetRole, btn) {
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = 'Wisselen…'; }
+    const token = window.AuthShared && typeof window.AuthShared.getAccessToken === 'function'
+      ? await window.AuthShared.getAccessToken() : null;
+    if (!token) throw new Error('geen sessie');
+    const r = await fetch('/api/role-switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ target_role: targetRole }),
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
+    // Herladen zodat landing/menu én api/lms-whoami de nieuwe actieve rol oppikken.
+    window.location.reload();
+  } catch (e) {
+    alert('Wisselen lukte niet: ' + (e && e.message ? e.message : 'onbekende fout'));
+    if (btn) { btn.disabled = false; }
+  }
+}
+function renderRoleSwitch(eff) {
+  const box = document.getElementById('roleSwitch');
+  if (!box) return;
+  const assigned = (eff && Array.isArray(eff.assigned_roles)) ? eff.assigned_roles : [];
+  // Alleen tonen bij ≥2 toegekende rollen — anders valt er niets te wisselen.
+  if (assigned.length < 2) { box.innerHTML = ''; box.style.display = 'none'; return; }
+  const active = (eff && eff.active_role) || assigned[0];
+  const others = assigned.filter((r) => r !== active);
+  box.style.display = '';
+  const btnStyle = 'display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px;'
+    + 'border-radius:8px;border:1px solid var(--kv-line,#2a3346);background:transparent;'
+    + 'color:inherit;font:inherit;cursor:pointer';
+  box.innerHTML =
+    '<div style="font-size:11px;color:var(--kv-text-dim,#8a93a5);margin:0 0 6px">'
+    + 'Actief: <b style="color:var(--kv-text,#e7ecf3)">' + roleLabelNL(active) + '</b></div>'
+    + others.map((r) => '<button type="button" data-role="' + r + '" style="' + btnStyle + '">'
+        + 'Switch naar ' + roleLabelNL(r) + '</button>').join('');
+  box.querySelectorAll('button[data-role]').forEach((b) => {
+    b.addEventListener('click', () => doRoleSwitch(b.getAttribute('data-role'), b));
+  });
+}
+
 // ── Impersonatie-banner (v=1ey) ─────────────────────────────────────────────
 // Detectie: `AuthShared.isImpersonating()` (leest localStorage-marker
 // 'impersonation_state' die admin-impersonate-flow zet). Bij true monteert
@@ -1027,10 +1079,11 @@ function wireTopbarActionsToShell() {
   //    endpoint faalt (offline / netwerkfout) — dan werkt de shell nog
   //    steeds, alleen zonder de additieve rollen.
   let shellRoles = null;
+  let effData = null;
   if (window.DFORoles && typeof window.DFORoles.fetchEffectiveRoles === 'function') {
-    const eff = await window.DFORoles.fetchEffectiveRoles();
-    if (eff && Array.isArray(eff.shell_roles) && eff.shell_roles.length) {
-      shellRoles = eff.shell_roles;
+    effData = await window.DFORoles.fetchEffectiveRoles();
+    if (effData && Array.isArray(effData.shell_roles) && effData.shell_roles.length) {
+      shellRoles = effData.shell_roles;
     }
   }
   if (!shellRoles) {
@@ -1060,6 +1113,13 @@ function wireTopbarActionsToShell() {
   wireTopbarActionsToShell();
 
   window.DFO.setRoles(shellRoles);
+
+  // ── Weergave-switch (2026-09-15): rol-schakelknop in de sidebar-foot ──────
+  // Alleen zichtbaar als de user ≥2 rollen in user_roles heeft. Wisselt
+  // profiles.active_role via /api/role-switch en herlaadt zodat landing + de
+  // rol die api/lms-whoami teruggeeft de nieuwe modus tonen. Permissies (de
+  // union over user_roles) veranderen NIET — dit is puur weergave.
+  try { renderRoleSwitch(effData); } catch (e) { console.warn('[role-switch] render:', e && e.message); }
 
   // v=1f1 (2026-08-25) — "Bekijk als"-rolebox verwijderd uit index.html.
   // roleSel-lookup + waarde-sync eruit — element bestaat niet meer, dead code.

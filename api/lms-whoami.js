@@ -91,7 +91,7 @@ export default async function handler(req, res) {
   try {
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('role, is_active, full_name')
+      .select('role, is_active, full_name, active_role')
       .eq('id', user.id)
       .maybeSingle();
     // Geen profiel of gedeactiveerd account → { role: null, name: null }.
@@ -99,8 +99,23 @@ export default async function handler(req, res) {
     // deterministische shape leest, niet in error-handling belandt voor
     // een verwachte case).
     if (!profile || !profile.is_active) return res.status(200).json({ role: null, name: null });
+
+    // Weergave-switch (2026-09-15): geef de ACTIEVE rol terug i.p.v. de primaire,
+    // zodat de LMS de mentor-weergave toont zodra de gebruiker op 'mentor' staat.
+    // Alleen als active_role een rol is die de gebruiker ook ECHT heeft
+    // (user_roles) — een blijven-staande active_role na rol-intrekking mag geen
+    // verkeerde weergave geven. Fallback op profiles.role.
+    let effectiveRole = profile.role || null;
+    if (profile.active_role && profile.active_role !== profile.role) {
+      try {
+        const { data: allRoles } = await supabaseAdmin.rpc('get_user_all_roles', { user_uuid: user.id });
+        if (Array.isArray(allRoles) && allRoles.includes(profile.active_role)) {
+          effectiveRole = profile.active_role;
+        }
+      } catch (_) { /* soft: val terug op profiles.role */ }
+    }
     return res.status(200).json({
-      role: profile.role || null,
+      role: effectiveRole,
       name: profile.full_name || null,
     });
   } catch (_) {
