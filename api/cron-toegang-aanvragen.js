@@ -48,7 +48,11 @@ const DAG6_UREN = 6 * 24;
 // Retry-window voor provisioning-fails. Voorbij 72u draaien we niet meer
 // automatisch — te oude leads moeten via de admin-UI/handmatig ingrijpen.
 const PROVISIONING_RETRY_WINDOW_UREN = 72;
-const PROVISIONING_RETRY_BATCH_LIMIT = 20;
+// Klein per tick zodat een backlog nooit het tijdsbudget van de */2-cron
+// (bevestigingen/reminders) kan opeten. Bij een retry-only tick van 5 ×
+// max 20s = 100s ruimte; nog steeds ruim binnen 300s Vercel-limit met
+// marge voor de overige loops. Drains vanzelf over meerdere ticks.
+const PROVISIONING_RETRY_BATCH_LIMIT = 5;
 
 // v=5 (2026-08-28): expliciete afzendlijn = welkom-nummer via bestaande
 // whatsapp_module_config-rij module='leadsonderhoud' (label "Esmee" —
