@@ -331,6 +331,12 @@ async function verstuur(appt, moment, welkomPhoneId) {
     } catch (e) {
       uitkomst.mail = { ok: false, error: e?.message || String(e) };
     }
+    // Faillog voor mislukte reminder-mail (spiegel van de WhatsApp-tak). Puur
+    // zichtbaarheid — verandert de guard-/claim-logica NIET. Zonder dit waren
+    // reminder-mailfouten nergens persistent zichtbaar (alleen WA werd gelogd).
+    if (uitkomst.mail && !uitkomst.mail.ok && !uitkomst.mail.skipped) {
+      await logAfspraakFail({ appointmentId: appt.id, moment: moment.key, kanaal: 'mail', reason: uitkomst.mail.error || uitkomst.mail.code || 'onbekend' });
+    }
   }
   return uitkomst;
 }
@@ -508,6 +514,25 @@ export default async function handler(req, res) {
     summary.intern_notify = internVak;
   } catch (e) {
     summary.errors.push({ step: 'run', error: e?.message || String(e) });
+  }
+
+  // Heartbeat: ELKE run (ook een lege) een marker wegschrijven, zodat
+  // api/cron-reminder-alarm.js kan zien dat de cron nog draait. Fail-soft en
+  // los van de heeftActie-samenvatting hieronder (die alleen bij actie logt).
+  try {
+    await supabaseAdmin.from('follow_up_events_log').insert({
+      source: 'cron',
+      event_type: 'reminder-cron-heartbeat',
+      payload: {
+        at: new Date().toISOString(),
+        live,
+        kandidaten: summary.kandidaten_totaal ?? 0,
+        errors: summary.errors?.length || 0,
+      },
+      processed: true,
+    });
+  } catch (hbErr) {
+    console.warn('[cron-afspraak-reminders] heartbeat (soft):', hbErr?.message || hbErr);
   }
 
   const heeftActie =
