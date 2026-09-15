@@ -15,6 +15,11 @@ import { supabase, supabaseAdmin } from './supabase.js';
 import { getEffectiveRoles, pickShellRoles, computeHighestRole } from './_lib/roles.js';
 
 export default async function handler(req, res) {
+  // Nooit cachen: dit is user-specifiek en muteert (active_role via role-switch).
+  // Zonder no-store kon een gecachete respons na een switch de oude actieve rol
+  // tonen (huispatroon zoals de meeste endpoints).
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Type', 'application/json');
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
     return res.status(405).json({ error: 'Method not allowed' });

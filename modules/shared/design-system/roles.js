@@ -101,8 +101,13 @@
       }
       const token = await window.AuthShared.getAccessToken();
       if (!token) return null;
-      const resp = await fetch('/api/user-effective-roles', {
-        headers: { Authorization: `Bearer ${token}` },
+      // no-store + cache-buster: na een rol-switch + reload MOET dit de verse
+      // active_role/assigned_roles teruggeven. Zonder dit kon een (heuristisch)
+      // gecachete respons de oude actieve rol tonen, waardoor een switch naar een
+      // niet-default rol niet leek te "pakken" (bug: super_admin → mentor).
+      const resp = await fetch('/api/user-effective-roles?_=' + Date.now(), {
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${token}`, 'Cache-Control': 'no-store' },
       });
       if (!resp.ok) {
         console.warn('[DFORoles] fetchEffectiveRoles HTTP', resp.status);

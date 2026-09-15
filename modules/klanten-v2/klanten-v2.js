@@ -213,8 +213,13 @@ async function doRoleSwitch(targetRole, btn) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ target_role: targetRole }),
     });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
-    // Herladen zodat landing/menu én api/lms-whoami de nieuwe actieve rol oppikken.
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { throw new Error(j.error || ('HTTP ' + r.status)); }
+    // Werk de knop meteen bij uit de AUTORITATIEVE respons (cache-immuun), zodat
+    // de nieuwe modus direct klopt en de knop de vórige rol aanbiedt. Daarna
+    // herladen zodat landing/menu én api/lms-whoami (externe LMS) volgen. De
+    // reload haalt de rollen vers op (no-store + cache-buster in fetchEffectiveRoles).
+    try { renderRoleSwitch({ active_role: j.active_role, assigned_roles: j.roles }); } catch (_) { /* niet blokkerend */ }
     window.location.reload();
   } catch (e) {
     alert('Wisselen lukte niet: ' + (e && e.message ? e.message : 'onbekende fout'));
@@ -224,10 +229,21 @@ async function doRoleSwitch(targetRole, btn) {
 function renderRoleSwitch(eff) {
   const box = document.getElementById('roleSwitch');
   if (!box) return;
-  const assigned = (eff && Array.isArray(eff.assigned_roles)) ? eff.assigned_roles : [];
+  // Accepteer zowel de GET-shape (assigned_roles, uit /api/user-effective-roles)
+  // als de POST-shape (roles, uit /api/role-switch) zodat we de knop meteen na
+  // een switch uit de autoritatieve respons kunnen bijwerken.
+  const assigned = (eff && Array.isArray(eff.assigned_roles)) ? eff.assigned_roles
+    : ((eff && Array.isArray(eff.roles)) ? eff.roles : []);
   // Alleen tonen bij ≥2 toegekende rollen — anders valt er niets te wisselen.
   if (assigned.length < 2) { box.innerHTML = ''; box.style.display = 'none'; return; }
-  const active = (eff && eff.active_role) || assigned[0];
+  // Huidige actieve rol = de server-waarde, maar alleen als 'ie echt toegekend
+  // is; anders robuust terug naar de hoogste rol (niet zomaar assigned[0], wat
+  // van de RPC-volgorde afhing). Zo wijst de knop ALTIJD naar de andere rol(len)
+  // — in beide richtingen, ongeacht welke rol nu actief is.
+  const hoogste = (window.DFORoles && typeof window.DFORoles.computeHighestRole === 'function')
+    ? window.DFORoles.computeHighestRole(assigned) : assigned[0];
+  const active = (eff && eff.active_role && assigned.indexOf(eff.active_role) !== -1)
+    ? eff.active_role : hoogste;
   const others = assigned.filter((r) => r !== active);
   box.style.display = '';
   const btnStyle = 'display:block;width:100%;text-align:left;margin:0 0 6px;padding:8px 10px;'
