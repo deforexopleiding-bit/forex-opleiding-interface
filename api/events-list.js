@@ -21,9 +21,9 @@
 //         ghl_sync_status,     ghl_last_synced_at,
 //         created_at, updated_at,
 //         attendee_count_active   (= getConfirmedCount: status IN
-//                                  ('aangemeld','aanwezig') AND
-//                                  assessment_response_id IS NOT NULL —
-//                                  Fase 1 capaciteits-regel),
+//                                  ('aangemeld','aanwezig') AND is_test=false
+//                                  AND (vragenlijst ingevuld OF belstatus
+//                                  bevestigd) — de capaciteits-regel),
 //         attendee_count_total    (alle statussen),
 //         seats_remaining
 //       }, ...
@@ -113,12 +113,11 @@ export default async function handler(req, res) {
     const { data: rows, error, count } = await query;
     if (error) throw new Error('events-list: ' + error.message);
 
-    // Per event: tel actieve attendees + totaal. Twee parallelle counts.
-    // active = getConfirmedCount = status IN ('aangemeld','aanwezig') AND
-    // assessment_response_id IS NOT NULL (Fase 1 single source of truth voor
-    // capaciteit). Eerder: ACTIVE_ATTENDEE_STATUSES ['aangemeld','aanwezig','sale']
-    // zonder assessment-filter — dat is na deze fix de verkeerde regel; we
-    // volgen voortaan getConfirmedCount.
+    // Per event: tel bezette plekken + totaal. Twee parallelle counts.
+    // active = getConfirmedCount = isPlekBezet: status IN ('aangemeld',
+    // 'aanwezig') AND is_test=false AND (vragenlijst ingevuld OF belstatus
+    // bevestigd). Single source of truth voor capaciteit; sinds 15 sep 2026
+    // neemt belstatus 'bevestigd' óók een plek in (zie event-registration.js).
     const items = await Promise.all((rows || []).map(async (row) => {
       let activeCount = 0;
       let totalCount = 0;

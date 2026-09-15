@@ -35,7 +35,10 @@ export async function getAttendeeByToken(token) {
   if (!isUuid(token)) return null;
   const { data, error } = await supabaseAdmin
     .from('event_attendees')
-    .select('id, event_id, first_name, last_name, email, phone, status, customer_id, source, choice_token, assessment_response_id, created_via')
+    // call_status + is_test: nodig voor isPlekBezet — wie al een plek inneemt
+    // via belstatus 'bevestigd' mag niet op 'vol' stuklopen bij het invullen
+    // van zijn eigen vragenlijst.
+    .select('id, event_id, first_name, last_name, email, phone, status, customer_id, source, choice_token, assessment_response_id, created_via, call_status, is_test')
     .eq('choice_token', token)
     .maybeSingle();
   if (error) throw new Error('getAttendeeByToken: ' + error.message);

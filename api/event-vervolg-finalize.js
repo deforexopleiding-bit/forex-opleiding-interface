@@ -10,7 +10,9 @@
 //   2. Antwoorden valideren tegen de 'event-vervolg'-vragen (GEEN scoring).
 //   3. Doel-event = target_event_id (indien meegegeven) anders het huidige.
 //   4. Capaciteit herchecken (getConfirmedCount vs capacity). VOL →
-//      { status:'vol', alternatives:[…] } (niet finaliseren).
+//      { status:'vol', alternatives:[…] } (niet finaliseren). Overgeslagen als
+//      de rij op het huidige event al een plek inneemt (belstatus bevestigd)
+//      én er niet verhuisd wordt — hij zit dan zélf al in de telling.
 //   5. Bij ander doel-event: verhuizen via switched_from/to-mechaniek (nieuwe
 //      rij op doel, bron → 'switched_to_other_event'); daarna op de nieuwe rij.
 //   6. assessment_responses-rij (info-only) schrijven + koppelen aan de rij
@@ -18,11 +20,11 @@
 //
 // OUDE-FLOW-VEILIG: schrijft NOOIT via assessment-submit, raakt de actieve
 // questionnaire niet, en muteert alleen deze eigen gate-rij (created_via='website').
-// De capaciteitsregel (getConfirmedCount) blijft ongewijzigd.
+// De capaciteitsregel blijft die van getConfirmedCount / isPlekBezet.
 
 import { supabaseAdmin } from './supabase.js';
 import { validateAnswers, loadActiveQuestions } from './_lib/assessment-validation.js';
-import { getConfirmedCount, getOpenEventsWithSpace } from './_lib/event-registration.js';
+import { getConfirmedCount, getOpenEventsWithSpace, isPlekBezet } from './_lib/event-registration.js';
 import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 import { getVervolgQuestionnaire, getAttendeeByToken, getEvent, isUuid } from './_lib/event-vervolg.js';
 import { sendEventAttendeeBevestiging } from './_lib/events-bevestiging-send.js';
@@ -102,8 +104,16 @@ export default async function handler(req, res) {
     const doel = await getEvent(doelId);
     if (!doel) return res.status(404).json({ error: 'Doel-event niet gevonden' });
 
+    // Neemt deze rij op zijn HUIDIGE event al een plek in (belstatus
+    // 'bevestigd', sinds 15 sep 2026) en blijft hij daar, dan zit hij zélf al
+    // in getConfirmedCount. De vol-check meet dan inclusief hemzelf en zou
+    // hem van zijn eigen stoel duwen. Verhuist hij naar een ander event, dan
+    // geldt daar wél de gewone capaciteitscheck: die stoel is nog niet van hem.
+    const verhuist = !!(targetEventId && targetEventId !== attendee.event_id);
+    const heeftAlPlek = !verhuist && isPlekBezet(attendee);
+
     const cap = Number.isInteger(Number(doel.capacity)) ? Number(doel.capacity) : null;
-    if (cap && cap > 0) {
+    if (cap && cap > 0 && !heeftAlPlek) {
       const count = await getConfirmedCount(doel.id);
       if (count >= cap) {
         return res.status(200).json({ status: 'vol', alternatives: await buildAlternatives(doel.id, doel.niveau) });
@@ -111,7 +121,7 @@ export default async function handler(req, res) {
     }
 
     // Verhuizen indien een ander event gekozen is.
-    if (targetEventId && targetEventId !== attendee.event_id) {
+    if (verhuist) {
       attendee = await verhuisAttendee(attendee, targetEventId);
     }
 

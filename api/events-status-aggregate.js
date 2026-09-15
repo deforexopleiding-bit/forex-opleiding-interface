@@ -1,9 +1,12 @@
 // api/events-status-aggregate.js
 // GET → per-event aggregate voor dashboard "Eerstkomende events" rij.
-// Per event: aantal actieve attendees (aangemeld+aanwezig) dat een vragenlijst
-// heeft ingevuld (assessment_response_id NOT NULL) en aantal dat gebeld is
-// (called_at NOT NULL). Alleen actieve (aangemeld/aanwezig, NIET is_test)
-// tellen mee, consistent met getConfirmedCount() in events-list.
+// Per event: aantal actieve attendees (aangemeld+aanwezig, NIET is_test) dat
+// een vragenlijst heeft ingevuld (assessment_response_id NOT NULL), aantal dat
+// een plek inneemt (vragenlijst OF belstatus bevestigd — de capaciteits-regel
+// uit isPlekBezet) en aantal dat gebeld is (called_at NOT NULL).
+//
+// questionnaire_count is LETTERLIJK "vragenlijst ingevuld" en blijft dat: de
+// dashboard-tegel heet zo. plek_bezet_count is de capaciteits-regel.
 //
 // Query-params:
 //   event_ids   comma-separated UUIDs (verplicht; max 20 per call)
@@ -11,7 +14,7 @@
 // Response:
 //   {
 //     items: [
-//       { event_id, active_count, questionnaire_count, called_count },
+//       { event_id, active_count, questionnaire_count, plek_bezet_count, called_count },
 //       ...
 //     ]
 //   }
@@ -21,7 +24,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { CONFIRMED_STATUSES } from './_lib/event-registration.js';
+import { CONFIRMED_STATUSES, isPlekBezet } from './_lib/event-registration.js';
 
 const MAX_EVENTS = 20;
 
@@ -47,7 +50,7 @@ export default async function handler(req, res) {
     // Eén batch-query voor alle events. In-memory aggregeren.
     const { data, error } = await supabaseAdmin
       .from('event_attendees')
-      .select('event_id, status, assessment_response_id, called_at, is_test')
+      .select('event_id, status, assessment_response_id, call_status, called_at, is_test')
       .in('event_id', ids)
       .eq('is_test', false)
       .in('status', CONFIRMED_STATUSES)
@@ -55,12 +58,13 @@ export default async function handler(req, res) {
     if (error) throw new Error('event_attendees: ' + error.message);
 
     const byEvent = new Map();
-    for (const id of ids) byEvent.set(id, { event_id: id, active_count: 0, questionnaire_count: 0, called_count: 0 });
+    for (const id of ids) byEvent.set(id, { event_id: id, active_count: 0, questionnaire_count: 0, plek_bezet_count: 0, called_count: 0 });
     for (const row of (data || [])) {
       const agg = byEvent.get(row.event_id);
       if (!agg) continue;
       agg.active_count += 1;
       if (row.assessment_response_id) agg.questionnaire_count += 1;
+      if (isPlekBezet(row))           agg.plek_bezet_count += 1;
       if (row.called_at)              agg.called_count += 1;
     }
 

@@ -26,6 +26,27 @@
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const fmtNum = (n) => (Number(n || 0)).toLocaleString('nl-NL');
 
+  // ── "Neemt een plek in" — browser-spiegel van isPlekBezet ────────────────
+  //
+  //   status IN ('aangemeld','aanwezig') AND is_test = false
+  //   AND ( vragenlijst ingevuld OF lower(trim(call_status)) = 'bevestigd' )
+  //
+  // Sinds 15 sep 2026: belstatus "Bevestigd" overrult de vragenlijst voor de
+  // capaciteit. Serverkant: api/_lib/event-registration.js (isPlekBezet /
+  // getConfirmedCount); DB-kant: event_attendee_is_confirmed(…,call_status).
+  // Wijzig je er één, wijzig ze alle drie.
+  const PLEK_BEZET_STATUSSEN = ['aangemeld', 'aanwezig'];
+  const PLEK_BEZET_BELSTATUS = 'bevestigd';
+  const _belstatusNorm = (v) => String(v == null ? '' : v).trim().toLowerCase();
+  const _heeftVragenlijst = (a) => !!(a && (a.assessment_response_id || a.questionnaire_completed_at));
+  const _isPlekBezet = (a) => {
+    if (!a || a.is_test === true) return false;
+    if (!PLEK_BEZET_STATUSSEN.includes(a.status)) return false;
+    return _heeftVragenlijst(a) || _belstatusNorm(a.call_status) === PLEK_BEZET_BELSTATUS;
+  };
+  /** Heeft een plek zónder vragenlijst — puur via de belstatus. */
+  const _plekViaBevestiging = (a) => _isPlekBezet(a) && !_heeftVragenlijst(a);
+
   const _live = {
     events:      { loading: false, error: null, data: null, filter: 'published' },
     completed:   { loading: false, error: null, data: null },
@@ -580,12 +601,12 @@
     // Client-side extra zoek (server-side q ondersteunt ook, dus overlap ok)
     const rows = q ? items.filter((e) => String(e.title || '').toLowerCase().includes(q.toLowerCase()) || String(e.location || '').toLowerCase().includes(q.toLowerCase())) : items;
 
-    // FIX (2026-08-18): 'bezetting' hangt overal aan dezelfde definitie
-    // als getConfirmedCount: status IN ('aangemeld','aanwezig') AND
-    // is_test=false AND assessment_response_id IS NOT NULL. Server geeft
-    // dit door als attendee_count_active. Een 'switched_to_other_event'/
-    // 'geannuleerd'/'wachtlijst'/'no_show'-attendee mag NIET meetellen
-    // voor bezetting — anders zeg je vol terwijl er plek vrij is.
+    // 'bezetting' hangt overal aan dezelfde definitie als getConfirmedCount:
+    // status IN ('aangemeld','aanwezig') AND is_test=false AND (vragenlijst
+    // ingevuld OF belstatus bevestigd). Server geeft dit door als
+    // attendee_count_active. Een 'switched_to_other_event'/'geannuleerd'/
+    // 'wachtlijst'/'no_show'-attendee mag NIET meetellen voor bezetting —
+    // anders zeg je vol terwijl er plek vrij is.
     const activeAttendees = items.reduce((a, e) => a + Number(e.attendee_count_active || 0), 0);
     const totalCap = items.reduce((a, e) => a + Number(e.capacity || 0), 0);
     const bezetting = totalCap > 0 ? Math.round((activeAttendees / totalCap) * 100) : 0;
@@ -626,11 +647,12 @@
         </style>` + H.table(
           [{l:'Event'},{l:'Datum',cls:'optional'},{l:'Locatie',cls:'optional'},{l:'Niveau',cls:'optional'},{l:'<div style="text-align:center">Aanm/Cap</div>',cls:'kv-evcap-cell'},{l:'Sync',cls:'r optional'},{l:'Status'},{l:'',cls:'r'}],
           rows.map((e) => {
-            // Aanm = BEVESTIGDE deelnemers (vragenlijst ingevuld):
-            // attendee_count_active telt attendees waar assessment_response_id
-            // IS NOT NULL (zie server-lib getConfirmedCount + events-v2.js:822).
-            // Was voorheen attendee_count_total (alle aanmeldingen incl.
-            // no-show/afgemeld) — die is niet wat de mentor als 'bezetting' wil.
+            // Aanm = deelnemers die een PLEK INNEMEN: vragenlijst ingevuld
+            // OF belstatus bevestigd (zie server-lib getConfirmedCount /
+            // isPlekBezet en _isPlekBezet hierboven). attendee_count_active
+            // draagt die telling aan. Niet attendee_count_total (alle
+            // aanmeldingen incl. no-show/afgemeld) — dat is niet wat de
+            // mentor als 'bezetting' wil.
             const aanm = Number(e.attendee_count_active || 0);
             const cap = Number(e.capacity || 0);
             const ratio = cap > 0 ? aanm / cap : 0;
@@ -642,7 +664,7 @@
             const [sc, sl] = STATUS_META[e.status] || ['neutral', e.status || '—'];
             const busy = _ui.busy[e.id];
             const capCell = cap > 0
-              ? `<div class="kv-evcap-inner" title="${aanm} bevestigd · cap ${cap} (${Math.round(ratio * 100)}%)"><span class="kv-evcap-num">${aanm}/${cap}</span><div class="kv-evcap-bar"><i class="${barCol}" style="width:${Math.min(100, ratio * 100)}%"></i></div></div>`
+              ? `<div class="kv-evcap-inner" title="${aanm} plekken bezet — vragenlijst ingevuld of belstatus bevestigd · cap ${cap} (${Math.round(ratio * 100)}%)"><span class="kv-evcap-num">${aanm}/${cap}</span><div class="kv-evcap-bar"><i class="${barCol}" style="width:${Math.min(100, ratio * 100)}%"></i></div></div>`
               : `<span class="kv-evcap-num">${aanm}${e.status === 'afgerond' ? ' (afg)' : ''}</span>`;
             return [
               `<a href="#" onclick="event.preventDefault();window.__evGoDetail('${esc(e.id)}')" style="color:inherit;text-decoration:none"><span class="cell-main">${esc(e.title || '—')}</span></a>`,
@@ -864,19 +886,14 @@
     const attList = asArr(_live.attendees.data[ev.id]);
     const attLoading = _live.attendees.loading[ev.id];
     const attErr = _live.attendees.error[ev.id];
-    // FIX (2026-08-18): 'Aangemeld' toont de bezetting-teller — exact dezelfde
-    // definitie als getConfirmedCount (status IN ('aangemeld','aanwezig') AND
-    // is_test=false AND assessment_response_id IS NOT NULL). Een switched_to_
-    // other_event / geannuleerd / wachtlijst / no_show / is_test-attendee valt
-    // buiten de bezetting — anders leek een event vol terwijl er plek was.
-    // Sub-teller toont het totaal aantal rijen in de lijst (voor context bij
-    // afwijking); alleen zichtbaar als verschillend van de bezetting.
-    const CONFIRMED_STATUSES = ['aangemeld', 'aanwezig'];
-    const confirmed = attList.filter((a) =>
-      !a.is_test &&
-      CONFIRMED_STATUSES.includes(a.status) &&
-      !!a.assessment_response_id
-    ).length;
+    // 'Aangemeld' toont de bezetting-teller — exact dezelfde definitie als
+    // getConfirmedCount / isPlekBezet: status IN ('aangemeld','aanwezig') AND
+    // is_test=false AND (vragenlijst ingevuld OF belstatus bevestigd). Een
+    // switched_to_other_event / geannuleerd / wachtlijst / no_show / is_test-
+    // attendee valt buiten de bezetting — anders leek een event vol terwijl
+    // er plek was. Sub-teller toont het totaal aantal rijen in de lijst (voor
+    // context bij afwijking); alleen zichtbaar als verschillend van de bezetting.
+    const confirmed = attList.filter(_isPlekBezet).length;
     const showTot = attErr ? '—' : attLoading && attList.length === 0 ? '…' : String(confirmed);
     const showSub = (attList.length > 0 && confirmed !== attList.length)
       ? ` <span style="font-size:11px;color:var(--text-3)">(van ${attList.length} in lijst)</span>`
@@ -889,9 +906,9 @@
         attendees_list_length: attList.length,
         attendees_loading: attLoading,
         attendees_error: attErr,
-        confirmed_with_assessment: confirmed,
+        plek_bezet: confirmed,
         events_detail_counts: ev.counts,
-        first_attendee: attList[0] ? { id: attList[0].id, status: attList[0].status, assessment_response_id: attList[0].assessment_response_id } : null,
+        first_attendee: attList[0] ? { id: attList[0].id, status: attList[0].status, assessment_response_id: attList[0].assessment_response_id, call_status: attList[0].call_status } : null,
       });
     }
     return `<div class="pad" style="padding-top:14px"><div class="grid g2">
@@ -1550,7 +1567,11 @@
           rows.map((a) => {
             const naam = [a.first_name || a.voornaam, a.last_name || a.achternaam].filter(Boolean).join(' ') || a.name || a.email || '—';
             const [sc, sl] = ATT_STATUS_META[a.status] || ['neutral', a.status || '—'];
-            const hasQuest = !!(a.assessment_response_id || a.questionnaire_completed_at);
+            const hasQuest = _heeftVragenlijst(a);
+            // Geen vragenlijst, maar de belstatus staat op Bevestigd: die plek
+            // is vergeven. De kolom blijft eerlijk over de vragenlijst, maar
+            // "telt nog niet mee" mag er niet meer staan.
+            const plekViaBel = _plekViaBevestiging(a);
             // BUG 6 — belstatus als dropdown ipv pill
             return [
               `<a href="#" onclick="event.preventDefault();window.__evAttOpen('${esc(a.id)}','${esc(id)}')" title="Bekijk deelnemer-detail" style="color:inherit;text-decoration:none;display:inline-block"><div class="row-avatar">${H.av(naam, 26)}<span class="cell-main" style="text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(naam)}</span></div></a>`,
@@ -1558,17 +1579,22 @@
               `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(a.phone || a.telefoon || '—')}</span>`,
               H.pill(sc, sl),
               `<span class="mono" style="color:var(--text-3);font-size:12px">${esc(_fmtDate(a.registered_at || a.created_at))}</span>`,
-              // STAP 2 — gate-aanmelders (created_via='website') tonen een
-              // duidelijke Definitief/In-afwachting-pill (afgeleid van de
-              // assessment-koppeling). Alle andere (oude-flow) rijen houden de
-              // bestaande ✓/✗-weergave ongewijzigd.
+              // De kolom blijft over de VRAGENLIJST gaan. Gate-aanmelders
+              // (created_via='website') tonen daarvoor een pill, in drie
+              // smaken: Definitief (vragenlijst binnen) · Plek via bevestiging
+              // (geen vragenlijst, maar belstatus Bevestigd, dus de stoel is
+              // wél vergeven) · In afwachting (geen van beide). Alle andere
+              // (oude-flow) rijen houden hun ✓/✗; alleen de tooltip bij ✗
+              // vertelt erbij dat de plek via de bel toch meetelt.
               (a.created_via === 'website'
                 ? (hasQuest
                     ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--emerald-soft);color:var(--emerald)" title="Vragenlijst ingevuld — telt mee voor capaciteit">Definitief</span>`
-                    : `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--amber-soft);color:var(--amber)" title="Toegelaten, vragenlijst nog niet ingevuld — telt nog niet mee">In afwachting</span>`)
+                    : plekViaBel
+                      ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--emerald-soft);color:var(--emerald)" title="Vragenlijst niet ingevuld — telt mee voor de capaciteit via belstatus Bevestigd">Plek via bevestiging</span>`
+                      : `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:10px;font-size:11px;font-weight:600;background:var(--amber-soft);color:var(--amber)" title="Toegelaten, vragenlijst nog niet ingevuld — telt nog niet mee">In afwachting</span>`)
                 : (hasQuest
                     ? `<span title="Vragenlijst ingevuld" style="color:var(--emerald);font-size:14px">✓</span>`
-                    : `<span title="Vragenlijst nog niet ingevuld" style="color:var(--rose);font-size:14px">✗</span>`)),
+                    : `<span title="${plekViaBel ? 'Vragenlijst nog niet ingevuld — telt wel mee via belstatus Bevestigd' : 'Vragenlijst nog niet ingevuld'}" style="color:var(--rose);font-size:14px">✗</span>`)),
               _belStatusDropdown(a, id),
               `<div style="position:relative;display:inline-block"><button class="icon-btn" title="Meer" onclick="event.stopPropagation();window.__evAttKebab('${esc(a.id)}','${esc(id)}')" style="width:26px;height:26px">${svg(I.dots || I.settings,'width:13px;height:13px')}</button>${_ui.attKebabOpen === a.id ? _evAttKebabHtml(a.id, id) : ''}</div>`,
             ];

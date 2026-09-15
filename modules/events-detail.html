@@ -972,11 +972,11 @@ function _renderAttKwalBlok(k) {
 function renderAttendeesTab() {
   const c = state.counts;
   const active = c?.active || 0;
-  // Fase 1: "actief" = (status IN ('aangemeld','aanwezig')) AND
-  // assessment_response_id IS NOT NULL. Telt mee voor X/capacity. De
-  // aangemeld-zonder-vragenlijst rijen staan in de lijst maar tellen NIET
-  // mee voor capaciteit (totdat hun assessment alsnog gekoppeld wordt).
-  const aangemeldNoAss = c?.aangemeld_no_assessment || 0;
+  // "actief" = (status IN ('aangemeld','aanwezig')) AND is_test=false AND
+  // (vragenlijst ingevuld OF belstatus bevestigd). Telt mee voor X/capacity.
+  // De rijen zonder vragenlijst én zonder bevestiging staan in de lijst maar
+  // tellen NIET mee, totdat hun vragenlijst binnenkomt of ze bevestigen.
+  const aangemeldZonderPlek = c?.aangemeld_zonder_plek ?? c?.aangemeld_no_assessment ?? 0;
   const cap = state.event.capacity || 0;
   const capClass = capPillClass(active, cap);
   const canAdd = can('events.attendee.create');
@@ -1009,8 +1009,8 @@ function renderAttendeesTab() {
 
   // Helper-strip: maakt expliciet wat actief telt voor capaciteit + waarschuwt
   // visueel als er aangemeld-zonder-vragenlijst rijen klaarliggen.
-  const helperStrip = aangemeldNoAss > 0
-    ? `<span style="font-size:11.5px;color:#b45309;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:3px 9px" title="Deze rijen staan in de lijst maar tellen niet mee voor capaciteit totdat hun assessment gekoppeld is."><i class="ti ti-alert-circle"></i> ${aangemeldNoAss} aangemeld zonder vragenlijst</span>`
+  const helperStrip = aangemeldZonderPlek > 0
+    ? `<span style="font-size:11.5px;color:#b45309;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:8px;padding:3px 9px" title="Deze rijen staan in de lijst maar tellen niet mee voor capaciteit: geen vragenlijst ingevuld en belstatus staat niet op Bevestigd."><i class="ti ti-alert-circle"></i> ${aangemeldZonderPlek} aangemeld zonder plek</span>`
     : '';
   document.getElementById('tab-attendees').innerHTML = `
     <div class="att-toolbar">

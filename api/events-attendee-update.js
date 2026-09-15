@@ -18,6 +18,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { onAttendeePlekChange } from './_lib/event-attendee-mutations.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -114,7 +115,11 @@ export default async function handler(req, res) {
     // Before-state ophalen voor audit-log diff
     const { data: before, error: beforeErr } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, event_id, first_name, last_name, email, phone, customer_id, follow_up_flagged, follow_up_reason, call_status')
+      // status / assessment_response_id / is_test staan erbij voor de
+      // plek-vergelijking na de write: belstatus 'bevestigd' neemt sinds
+      // 15 sep 2026 een plek in, dus een belstatuswijziging kan een event
+      // vol maken of juist weer openen.
+      .select('id, event_id, first_name, last_name, email, phone, customer_id, follow_up_flagged, follow_up_reason, call_status, status, assessment_response_id, is_test')
       .eq('id', id)
       .maybeSingle();
     if (beforeErr) throw new Error('before-fetch: ' + beforeErr.message);
@@ -144,6 +149,20 @@ export default async function handler(req, res) {
       throw new Error('attendee-update: ' + error.message);
     }
     if (!row) return res.status(404).json({ error: 'Deelnemer niet gevonden' });
+
+    // Kruist de belstatus de plek-grens, dan moet het event mee: vol raken
+    // (sluiten) of weer plek krijgen (heropenen). Alleen bij een ECHTE
+    // kanteling, en volledig fail-soft — de update staat al vast en mag
+    // hier nooit meer op stuklopen.
+    if (patch.call_status !== undefined) {
+      // De update-select geeft is_test niet terug; die verandert hier ook
+      // nooit, dus de waarde uit de before-state geldt voor beide kanten.
+      await onAttendeePlekChange(
+        before,
+        { ...row, event_id: row.event_id || before.event_id, is_test: before.is_test },
+        { reason: 'events-attendee-update' }
+      );
+    }
 
     // Audit-log per veld dat veranderde (fail-soft)
     try {
