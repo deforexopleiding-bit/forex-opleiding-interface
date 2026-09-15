@@ -23,7 +23,7 @@ import { geenGehoorDeadline, formatDeadlineNl } from './geen-gehoor-deadline.js'
 // geen databank. Bewust NIET via event-registration.js — dat bouwt op
 // module-niveau een Supabase-client op, en dat is precies wat dit bestand niet
 // doet. Nodig voor attendee.plek_reden hieronder.
-import { isPlekBezet, heeftVragenlijst } from './plek-bezet.js';
+import { plekReden } from './plek-bezet.js';
 
 // Geen DB-import op module-niveau. SQL queries gebeuren in resolveVariables
 // via een meegegeven supabaseAdmin client (callers reuse hun eigen).
@@ -708,11 +708,7 @@ function getAttendeeValue(attendee, key) {
     // mogen voorkomen. Gebeurt het tóch (een template die te vroeg gaat, of een
     // rij zonder call_status in de select), dan is de bestaande zin het minst
     // verrassende antwoord — beter dan een lege plek midden in een zin.
-    case 'attendee.plek_reden': {
-      if (heeftVragenlijst(attendee)) return 'je vragenlijst is binnen';
-      if (isPlekBezet(attendee))      return 'je hebt je deelname bevestigd';
-      return 'je vragenlijst is binnen';
-    }
+    case 'attendee.plek_reden': return plekReden(attendee);
     case 'attendee.email':      return String(attendee.email || '');
     case 'attendee.telefoon':   return String(attendee.phone || '');
     case 'attendee.keuze_link': {

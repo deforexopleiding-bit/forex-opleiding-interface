@@ -9,6 +9,8 @@
 // Raakt de oude GHL-flow niet: puur tekst-builders, geen DB-writes.
 
 import { wrapEmailHtml } from '../mailer.js';
+// Pure module zonder imports; levert de default-reden voor bevestigingMail.
+import { PLEK_REDEN_VRAGENLIJST } from './plek-bezet.js';
 import { mdToHtml } from './md-to-html.js';
 
 const ZONE = 'Europe/Amsterdam';
@@ -43,8 +45,13 @@ function tekstNaarHtml(text) {
 }
 
 // ── 1) Bevestiging (na Definitief) — rapport A.1 ────────────────────────────
-export function bevestigingMail({ voornaam, titel, datum, starttijd, locatie, descriptionMd }) {
+export function bevestigingMail({ voornaam, titel, datum, starttijd, locatie, descriptionMd, reden }) {
   const naam = voornaam || 'jij';
+  // WAAROM STAAT DIE PLEK VAST? — 'je vragenlijst is binnen' (het oude, vaste
+  // begin) of 'je hebt je deelname bevestigd' voor wie telefonisch bevestigd
+  // is. Zie plekReden() in _lib/plek-bezet.js; de default houdt elke bestaande
+  // caller op de oude tekst.
+  const waarom = (reden && String(reden).trim()) || PLEK_REDEN_VRAGENLIJST;
   const ev = titel || 'het event';
   const subject = `Je plek voor ${ev} staat nu definitief vast ✅`;
   const heeftInfo = !!(descriptionMd && String(descriptionMd).trim());
@@ -56,7 +63,7 @@ export function bevestigingMail({ voornaam, titel, datum, starttijd, locatie, de
   const body1 =
 `Hoi ${naam},
 
-Top — je vragenlijst is binnen en daarmee staat je plek voor de ${ev} op ${datum} nu definitief vast! 🎉
+Top — ${waarom} en daarmee staat je plek voor de ${ev} op ${datum} nu definitief vast! 🎉
 
 Je hebt zonet een belangrijke stap gezet. De meeste mensen blijven eindeloos twijfelen; jij komt in actie. Precies die instelling gaat het verschil maken in je trading.
 

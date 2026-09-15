@@ -70,6 +70,34 @@ export function heeftVragenlijst(row) {
 }
 
 /**
+ * plekReden(row) — waarom staat de plek van deze deelnemer vast?
+ *
+ * Levert het zinsdeel voor "Top — <reden> en daarmee staat je plek ... nu
+ * definitief vast!". Drie uitkomsten, in deze volgorde:
+ *   1. vragenlijst ingevuld         -> 'je vragenlijst is binnen'
+ *   2. plek via belstatus bevestigd -> 'je hebt je deelname bevestigd'
+ *   3. geen van beide (fallback)    -> 'je vragenlijst is binnen'
+ *
+ * Die fallback is met opzet het oude gedrag: deze tekst hoort alleen in
+ * berichten die pas gaan zodra de plek vaststaat, dus geval 3 zou niet mogen
+ * voorkomen. Gebeurt het tóch (een template dat te vroeg gaat, of een rij
+ * zonder call_status in de select), dan is de bestaande zin het minst
+ * verrassende antwoord — beter dan een gat midden in een zin.
+ *
+ * Twee lezers: de templatevariabele {{attendee.plek_reden}} en de
+ * funnel-eigen bevestigingsmail (events-bevestiging-send). Eén definitie,
+ * zodat beide dezelfde woorden gebruiken.
+ */
+export const PLEK_REDEN_VRAGENLIJST = 'je vragenlijst is binnen';
+export const PLEK_REDEN_BEVESTIGD   = 'je hebt je deelname bevestigd';
+
+export function plekReden(row) {
+  if (heeftVragenlijst(row)) return PLEK_REDEN_VRAGENLIJST;
+  if (isPlekBezet(row))      return PLEK_REDEN_BEVESTIGD;
+  return PLEK_REDEN_VRAGENLIJST;
+}
+
+/**
  * De OR-tak van de regel als PostgREST-filterstring.
  *
  * `ilike` doet het hoofdlettergedeelte van lower(); trimmen kan PostgREST niet

@@ -1,7 +1,10 @@
 // api/_lib/events-bevestiging-send.js
 //
-// FUNNEL-EIGEN bevestiging zodra een website-aanmelder Definitief wordt
-// (assessment_response_id gezet in event-vervolg-finalize). Stuurt WhatsApp
+// FUNNEL-EIGEN bevestiging zodra de plek van een website-aanmelder vaststaat:
+// vanuit event-vervolg-finalize (vragenlijst ingevuld) of vanuit
+// cron-events-website-berichten (belstatus bevestigd, geen vragenlijst — sinds
+// 15 sep 2026). Beide gaan via dezelfde logtabel (soort='bevestiging'), dus
+// nooit twee keer. Stuurt WhatsApp
 // 'bevestiging_pdf' + de bevestigingsmail (exacte tekst uit rapport A.1), met
 // praktische info uit de events-rij (location/starts_at + optioneel
 // description_md).
@@ -13,11 +16,12 @@
 import { supabaseAdmin } from '../supabase.js';
 import { stuurWaEnMail, SOORTEN } from './event-website-berichten.js';
 import { bevestigingMail, datumNL, tijdNL } from './event-website-teksten.js';
+import { plekReden } from './plek-bezet.js';
 
-const TEMPLATE = 'bevestiging_pdf';
+export const BEVESTIGING_TEMPLATE = 'bevestiging_pdf';
 // bevestiging_pdf heeft in de DB al een meta_param_mapping; we geven 'm óók als
 // fallback mee zodat de send niet stukloopt mocht die ooit ontbreken.
-const WA_MAPPING = { body: { 1: 'attendee.voornaam', 2: 'event.titel', 3: 'event.datum', 4: 'event.starttijd' } };
+export const BEVESTIGING_WA_MAPPING = { body: { 1: 'attendee.voornaam', 2: 'event.titel', 3: 'event.datum', 4: 'event.starttijd' } };
 
 /**
  * @param {object} o
@@ -29,7 +33,10 @@ export async function sendEventAttendeeBevestiging({ attendeeId }) {
   try {
     const { data: attendee, error: attErr } = await supabaseAdmin
       .from('event_attendees')
-      .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, assessment_response_id, created_via')
+      // status / is_test / call_status staan erbij voor plekReden(): de mail
+      // opent met "je vragenlijst is binnen" óf "je hebt je deelname
+      // bevestigd", afhankelijk van waaróm die plek vaststaat.
+      .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, assessment_response_id, status, is_test, call_status, created_via')
       .eq('id', attendeeId)
       .maybeSingle();
     if (attErr) throw new Error('attendee fetch: ' + attErr.message);
@@ -50,9 +57,10 @@ export async function sendEventAttendeeBevestiging({ attendeeId }) {
       starttijd: tijdNL(event.starts_at),
       locatie: event.location || '',
       descriptionMd: event.description_md || '',
+      reden: plekReden(attendee),
     });
 
-    return await stuurWaEnMail({ attendee, event, waTemplate: TEMPLATE, waMappingOverride: WA_MAPPING, mail, soort: SOORTEN.BEVESTIGING });
+    return await stuurWaEnMail({ attendee, event, waTemplate: BEVESTIGING_TEMPLATE, waMappingOverride: BEVESTIGING_WA_MAPPING, mail, soort: SOORTEN.BEVESTIGING });
   } catch (e) {
     console.error('[events-bevestiging-send] fatal:', e?.message || e);
     return { ok: false, error: e?.message || 'bevestiging send failed' };

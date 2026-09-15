@@ -8,6 +8,7 @@
 // event_website_berichten.
 //
 // Berichttypes (allemaal created_via='website' AND is_test=false):
+//   bevestiging   — plek via belstatus bevestigd, GEEN vragenlijst → bevestiging
 //   vervolg_2u    — nog GEEN PLEK, 2–24u na aanmelding  → herinnering /vervolg
 //   vervolg_24u   — nog GEEN PLEK, >=24u na aanmelding   → herinnering /vervolg
 //   warmup        — HEEFT EEN PLEK, event over 24–120u   → warmup
@@ -22,24 +23,31 @@
 //     wie zijn plek via de bel heeft. Die komt immers gewoon; hem niet
 //     herinneren aan tijd en locatie was het echte verlies.
 //
-// (De bevestiging bij Definitief wordt direct in event-vervolg-finalize
-//  verstuurd, niet hier.)
+// DE BEVESTIGING, TWEE WEGEN NAAR ÉÉN BERICHT.
+// Wie de vragenlijst invult krijgt 'm direct uit event-vervolg-finalize. Wie
+// wij telefonisch bevestigen komt daar nooit langs — die pakt deze cron op.
+// Beide schrijven soort='bevestiging' in event_website_berichten en checken die
+// vooraf, dus niemand krijgt er twee. Vult zo iemand later alsnog de
+// vragenlijst in, dan ziet finalize de logregel staan en stuurt niets meer.
 //
 // Auth: Authorization: Bearer $CRON_SECRET (checkCronAuth). Schedule: */10 * * * *.
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
-import { applyPlekBezetFilter, PLEK_BEZET_CALL_STATUS } from './_lib/event-registration.js';
+import { applyPlekBezetFilter, PLEK_BEZET_CALL_STATUS } from './_lib/plek-bezet.js';
 import {
   SOORTEN, reedsVerstuurd, markeerVerstuurd, stuurWaEnMail, kiesVervolgTemplate, vervolgLink,
 } from './_lib/event-website-berichten.js';
 import {
-  vervolgHerinneringMail, warmupMail, reminder24uMail, reminder1uMail, datumNL, tijdNL,
+  bevestigingMail, vervolgHerinneringMail, warmupMail, reminder24uMail, reminder1uMail,
+  datumNL, tijdNL,
 } from './_lib/event-website-teksten.js';
+import { BEVESTIGING_TEMPLATE, BEVESTIGING_WA_MAPPING } from './_lib/events-bevestiging-send.js';
+import { plekReden } from './_lib/plek-bezet.js';
 
 const SELECT = `
   id, event_id, first_name, last_name, email, phone, choice_token, customer_id,
-  registered_at, assessment_response_id, status, call_status,
-  events!event_attendees_event_id_fkey!inner(id, title, starts_at, ends_at, location)
+  registered_at, assessment_response_id, status, call_status, is_test,
+  events!event_attendees_event_id_fkey!inner(id, title, starts_at, ends_at, location, description_md)
 `;
 
 // "Nog geen plek via de belstatus" als PostgREST-filter. NULL-veilig: een kaal
@@ -103,6 +111,31 @@ export default async function handler(req, res) {
       waMapping: vervolg.mapping,
       mail: vervolgHerinneringMail({ voornaam: a.first_name, titel: e.title, vervolgLink: vervolgLink(a.choice_token) }),
     });
+
+    // 0) bevestiging — plek via belstatus bevestigd ZONDER vragenlijst.
+    //    Wie de vragenlijst wél invulde kreeg 'm al uit event-vervolg-finalize;
+    //    die valt hier weg op de assessment_response_id-filter. Geen
+    //    registered_at-venster: de bevestiging hangt aan het moment dat de plek
+    //    vaststaat, en dat kan dagen na de aanmelding zijn.
+    {
+      const { data, error } = await baseQuery()
+        .is('assessment_response_id', null)
+        .in('status', ['aangemeld', 'aanwezig'])
+        .ilike('call_status', PLEK_BEZET_CALL_STATUS)
+        .gt('events.starts_at', nowIso);
+      if (error) throw new Error('bevestiging select: ' + error.message);
+      summary.per_soort.bevestiging = await verwerk(SOORTEN.BEVESTIGING, data, (a, e) => ({
+        waTemplate: BEVESTIGING_TEMPLATE, waMapping: BEVESTIGING_WA_MAPPING,
+        mail: bevestigingMail({
+          voornaam: a.first_name, titel: e.title,
+          datum: datumNL(e.starts_at), starttijd: tijdNL(e.starts_at),
+          locatie: e.location || '', descriptionMd: e.description_md || '',
+          // 'je hebt je deelname bevestigd' — dezelfde woorden als
+          // {{attendee.plek_reden}} en als event-vervolg-finalize.
+          reden: plekReden(a),
+        }),
+      }));
+    }
 
     // 1) vervolg_2u — nog geen plek, 2–24u na aanmelding, event nog komend.
     {

@@ -261,8 +261,17 @@ test('on_assessment_completed houdt zijn eigen status-lijst', async (t) => {
   });
   assert.deepEqual(stap(attendeeKeten, 'in', 'status'),
     ['in', 'status', ['aangemeld', 'aanwezig']]);
-  assert.deepEqual(stap(attendeeKeten, 'gte', 'assessment_linked_at'),
-    ['gte', 'assessment_linked_at', AUTO.enabled_at]);
+
+  // Sinds 15 sep 2026 hangt deze trigger aan de PLEK (vragenlijst OF belstatus
+  // bevestigd), niet meer aan de vragenlijst alleen. De losse
+  // gte('assessment_linked_at') is daarmee opgegaan in één or()-string waarin
+  // elke tak zijn eigen nulpunt draagt — anders zou die gte de bevestigd-tak
+  // alsnog leegvegen. Zie tests/events-bevestiging-bij-belstatus.test.js.
+  assert.equal(stap(attendeeKeten, 'gte', 'assessment_linked_at'), undefined);
+  const or = attendeeKeten.stappen.find((s) => s[0] === 'or');
+  assert.ok(or, 'de plek-regel staat in een or()');
+  assert.match(or[1], new RegExp(`assessment_linked_at\\.gte\\.${AUTO.enabled_at.replace(/[.+]/g, '\\$&')}`));
+  assert.match(or[1], new RegExp(`call_status_at\\.gte\\.${AUTO.enabled_at.replace(/[.+]/g, '\\$&')}`));
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
