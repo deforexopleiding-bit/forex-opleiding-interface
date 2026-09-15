@@ -180,7 +180,11 @@ async function initAuth() {
 function paintUser(profile) {
   if (!profile) return;
   const name = profile.full_name || profile.email || 'Onbekend';
-  const role = profile.role || '—';
+  // Zichtbaar rol-label volgt de ACTIEVE rol (profiles.active_role) als die
+  // gezet is, anders de primaire rol. Puur cosmetisch — permissies/menu blijven
+  // op de union (super_admin behoudt volledige toegang). getProfile() levert
+  // active_role al mee via select('*').
+  const role = profile.active_role || profile.role || '—';
 
   const un = document.getElementById('userName');   if (un) un.textContent = name;
   const ur = document.getElementById('userRole');   if (ur) ur.textContent = role;
