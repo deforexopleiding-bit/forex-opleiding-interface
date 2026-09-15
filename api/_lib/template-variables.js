@@ -19,6 +19,11 @@
 // imports en raakt geen databank. Zie de kop van dat bestand voor waarom de
 // deadline één definitie heeft.
 import { geenGehoorDeadline, formatDeadlineNl } from './geen-gehoor-deadline.js';
+// Tweede pure import: _lib/plek-bezet.js heeft zelf geen enkele import en raakt
+// geen databank. Bewust NIET via event-registration.js — dat bouwt op
+// module-niveau een Supabase-client op, en dat is precies wat dit bestand niet
+// doet. Nodig voor attendee.plek_reden hieronder.
+import { isPlekBezet, heeftVragenlijst } from './plek-bezet.js';
 
 // Geen DB-import op module-niveau. SQL queries gebeuren in resolveVariables
 // via een meegegeven supabaseAdmin client (callers reuse hun eigen).
@@ -241,6 +246,11 @@ export const AVAILABLE_VARIABLES = [
   // nooit later dan 48 uur vóór event.starts_at. Vandaar de special-case in
   // resolveVariableValue — getAttendeeValue ziet het event niet.
   { key: 'attendee.geen_gehoor_deadline', label: 'Deadline laatste kans (geen gehoor)', category: 'attendee', example: 'woensdag 16 september om 13:05', requires_context: 'attendee' },
+  // WAAROM STAAT DIE PLEK VAST? — zie getAttendeeValue voor de drie uitkomsten.
+  // Bedoeld als invulling in "Top — {{attendee.plek_reden}} en daarmee staat je
+  // plek voor de … nu definitief vast!", zodat diezelfde zin klopt voor wie de
+  // vragenlijst invulde én voor wie telefonisch bevestigde.
+  { key: 'attendee.plek_reden',  label: 'Reden dat de plek vaststaat', category: 'attendee', example: 'je vragenlijst is binnen', requires_context: 'attendee' },
 
   // ── onboarding (Comms C1) — vereist context.onboarding (onboardings-row).
   //   Onboarding-invite-flow geeft een onboarding-context mee zodat we de
@@ -682,6 +692,26 @@ function getAttendeeValue(attendee, key) {
         .map((s) => (s == null ? '' : String(s).trim()))
         .filter((s) => s.length > 0);
       return parts.join(' ');
+    }
+    // ── WAAROM STAAT DIE PLEK VAST? ───────────────────────────────────────
+    // De bevestigingsmail opende met "Top — je vragenlijst is binnen en
+    // daarmee staat je plek nu definitief vast". Sinds 15 sep 2026 kan die
+    // plek ook via belstatus 'bevestigd' vaststaan, en dan is die zin onwaar.
+    //
+    // Drie uitkomsten, in deze volgorde:
+    //   1. vragenlijst ingevuld        -> 'je vragenlijst is binnen'
+    //   2. plek via belstatus bevestigd -> 'je hebt je deelname bevestigd'
+    //   3. geen van beide (fallback)   -> 'je vragenlijst is binnen'
+    //
+    // Die fallback is met opzet het oude gedrag: deze variabele hoort alleen in
+    // berichten die pas gaan zodra de plek vaststaat, dus geval 3 zou niet
+    // mogen voorkomen. Gebeurt het tóch (een template die te vroeg gaat, of een
+    // rij zonder call_status in de select), dan is de bestaande zin het minst
+    // verrassende antwoord — beter dan een lege plek midden in een zin.
+    case 'attendee.plek_reden': {
+      if (heeftVragenlijst(attendee)) return 'je vragenlijst is binnen';
+      if (isPlekBezet(attendee))      return 'je hebt je deelname bevestigd';
+      return 'je vragenlijst is binnen';
     }
     case 'attendee.email':      return String(attendee.email || '');
     case 'attendee.telefoon':   return String(attendee.phone || '');
