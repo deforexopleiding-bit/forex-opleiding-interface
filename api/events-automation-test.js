@@ -16,6 +16,7 @@
 // Body:
 //   {
 //     automation_id: uuid (verplicht),
+//     // (zie allow_disabled onderaan dit blok)
 //     event_id     : uuid (verplicht — koppel test-attendee aan dit event),
 //     first_name   : string,
 //     last_name    : string,
@@ -25,7 +26,30 @@
 //                       is_test=true; deze flag is in de body alleen voor
 //                       forward-compat (false zou de engine straks de normale
 //                       wait-tijden laten respecteren).
+//     allow_disabled  : boolean (default false) — expliciet toestaan dat de
+//                       automatisatie UITSTAAT. Zie het blok hieronder.
 //   }
+//
+// ── EEN AUTOMATISATIE DIE UITSTAAT TESTEN ───────────────────────────────
+// Tot 15 september gaf dit endpoint een harde 400 zodra `enabled=false`
+// ("zet 'm eerst aan"). Dat blokkeerde precies het geval waarvoor de tester
+// bedoeld is: Maxim wil een flow één keer end-to-end zien draaien VOORDAT hij
+// hem op echte deelnemers aanzet.
+//
+// Die 400 was geen veiligheidsmechanisme, en dat is te bewijzen:
+//   · dit endpoint omzeilt de enrollment volledig — het INSERT'et zelf een
+//     event_automation_runs-rij en raakt enrollDueAttendees (die wél op
+//     `enabled` filtert) niet aan;
+//   · stepDueRuns selecteert runs op status='active' en joint NIET op
+//     event_automations.enabled.
+// De motor draait een testrun van een uitstaande automatisatie dus gewoon; de
+// 400 hield alleen de knop tegen.
+//
+// De 400 blijft staan voor iedere caller die niets meestuurt — dat gedrag
+// verandert niet. Alleen een caller die EXPLICIET `allow_disabled: true`
+// meegeeft, mag door. De tester-UI doet dat en zegt in het venster onomwonden
+// dat je iets test wat uitstaat; het antwoord draagt `automation_enabled` mee
+// zodat de UI dat na de start nog een keer kan laten zien.
 //
 // Response 200: { ok:true, attendee_id, run_id }
 // Response 400: validatie-fout
@@ -63,6 +87,9 @@ export default async function handler(req, res) {
   const lastName     = typeof body.last_name === 'string'     ? body.last_name.trim()     : '';
   const email        = typeof body.email === 'string'         ? body.email.trim()         : '';
   const phone        = typeof body.phone === 'string'         ? body.phone.trim()         : '';
+  // === true, niet truthy: een meegestuurde 'false'-string of 0 mag geen
+  // toestemming worden.
+  const allowDisabled = body.allow_disabled === true;
 
   if (!automationId || !UUID_RE.test(automationId)) {
     return res.status(400).json({ error: 'automation_id (uuid) vereist' });
@@ -93,8 +120,16 @@ export default async function handler(req, res) {
       .maybeSingle();
     if (autErr) throw new Error('automation-lookup: ' + autErr.message);
     if (!autom)  return res.status(404).json({ error: 'Automation niet gevonden' });
-    if (!autom.enabled) {
-      return res.status(400).json({ error: 'Automation staat uit — zet \'m eerst aan' });
+    // ZIE HET BLOK BOVENAAN. Zonder expliciete toestemming precies dezelfde
+    // 400 als voorheen — inclusief dezelfde tekst, zodat bestaande callers en
+    // logs niets merken. De reden staat er nu wel bij, zodat wie hem tegenkomt
+    // weet dat er een weg omheen is.
+    if (!autom.enabled && !allowDisabled) {
+      return res.status(400).json({
+        error: 'Automation staat uit — zet \'m eerst aan',
+        hint : 'Wil je hem juist testen ZONDER hem aan te zetten, stuur dan allow_disabled: true mee.',
+        automation_enabled: false,
+      });
     }
 
     const { data: ev, error: evErr } = await supabaseAdmin
@@ -160,10 +195,17 @@ export default async function handler(req, res) {
       throw new Error('automation-run insert: ' + runInsErr.message);
     }
 
+    // automation_enabled gaat MEE in het antwoord. Test je een uitstaande
+    // automatisatie, dan hoort het scherm dat na de start nog een keer te
+    // zeggen: de run draait, maar echte deelnemers stromen er niet in tot de
+    // automatisatie aangezet wordt.
     return res.status(200).json({
-      ok:          true,
-      attendee_id: att.id,
-      run_id:      run.id,
+      ok:                 true,
+      attendee_id:        att.id,
+      run_id:             run.id,
+      automation_enabled: autom.enabled === true,
+      automation_name:    autom.name || null,
+      steps:              Array.isArray(autom.steps) ? autom.steps.length : 0,
     });
   } catch (e) {
     console.error('[events-automation-test]', e?.message || e);

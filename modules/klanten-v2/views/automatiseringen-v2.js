@@ -162,6 +162,10 @@
     overview:    { loading: false, error: null, data: null },   // BP3 v35 (2026-09-04) — /api/automations-overview (flow-kaartjes)
     evAutos:     { loading: false, error: null, data: null },   // events-automations-list
     evRuns:      { loading: {}, error: {}, data: {} },          // per automation_id
+    // Tester: de lijst events om uit te kiezen, en de per-stap-historie van
+    // één run. Los van evRuns (dat is run-niveau, dit is stap-niveau).
+    evEvents:    { loading: false, error: null, data: null },
+    evRunDetail: { loading: {}, error: {}, data: {} },          // per run_id
     obAutos:     { loading: false, error: null, data: null },   // onboarding-automations-list
     obRuns:      { loading: {}, error: {}, data: {} },
     lsInst:      { loading: false, error: null, data: null },   // leadsonderhoud-instellingen
@@ -186,7 +190,7 @@
 
   const _ui = {
     // Editor state per module — voorkomt dat we tussen sub-tabs interferereren
-    ev: { subtab: 'flows', editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all', berichtEdit: null },
+    ev: { subtab: 'flows', editing: null, wizardStep: 1, testModal: null, testResult: null, runsModal: null, filter: 'all', berichtEdit: null },
     ob: { subtab: 'flows', editing: null, wizardStep: 1, testModal: null, runsModal: null, filter: 'all', berichtEdit: null },
     ls: {
       subtab: 'flows',             // 'flows' | 'berichten' | 'instellingen' | 'log'
@@ -242,6 +246,50 @@
     if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.automations || j?.items);
     if (window.DFO?.render) window.DFO.render();
   }
+  // ── DE EVENTS OM UIT TE KIEZEN ────────────────────────────────────────
+  // Hier stond een tekstveld waarin je met de hand een event-uuid moest
+  // plakken ('Zoek in Events > Overzicht > kopieer event-ID'). Dat is geen
+  // testknop, dat is huiswerk. /api/events-list levert id + titel + starts_at
+  // chronologisch; het filter op 'moet nog komen' doen we hier, zodat het
+  // bestaande endpoint ongemoeid blijft.
+  async function fetchEvEvents() {
+    const st = _live.evEvents; if (st.loading || st.data) return;
+    st.loading = true; st.error = null;
+    const j = await tryFetch('evEvents', '/api/events-list?status=draft,published&limit=200');
+    st.loading = false;
+    if (j && j.__error) st.error = j.__error; else st.data = asArr(j?.items || j?.events);
+    if (window.DFO?.render) window.DFO.render();
+  }
+  /** Alleen events die nog moeten komen, chronologisch. */
+  function _toekomstigeEvents() {
+    const nu = Date.now();
+    return asArr(_live.evEvents.data)
+      .filter((e) => {
+        const ms = e && e.starts_at ? Date.parse(e.starts_at) : NaN;
+        return Number.isFinite(ms) && ms > nu;
+      })
+      .sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
+  }
+
+  // ── DE PER-STAP HISTORIE VAN ÉÉN RUN ──────────────────────────────────
+  // /api/events-automation-runs?run_id= geeft { run, log }; het log is
+  // event_automation_run_log, één rij per uitgevoerde stap met het result-jsonb.
+  // `force` omzeilt de 'al geladen'-guard, want tijdens een testrun verandert
+  // dit elke 15 seconden.
+  async function fetchEvRunDetail(runId, force) {
+    const st = _live.evRunDetail;
+    if (!runId) return;
+    if (st.loading[runId]) return;
+    if (st.data[runId] && !force) return;
+    st.loading[runId] = true; st.error[runId] = null;
+    const j = await tryFetch('evRunDetail:' + runId,
+      '/api/events-automation-runs?run_id=' + encodeURIComponent(runId));
+    st.loading[runId] = false;
+    if (j && j.__error) st.error[runId] = j.__error;
+    else st.data[runId] = { run: j?.run || null, log: asArr(j?.log) };
+    if (window.DFO?.render) window.DFO.render();
+  }
+
   async function fetchEvRuns(automationId) {
     const st = _live.evRuns; if (st.loading[automationId] || st.data[automationId]) return;
     st.loading[automationId] = true; st.error[automationId] = null;
@@ -812,6 +860,13 @@
     // Full-screen editor/modal-modes hebben voorrang boven subtab-toolbar
     if (_ui.ev.editing) return _evEditor(_ui.ev.editing) + _confirmModalHtml();
     if (_ui.ev.testModal) return _evTestModal() + _confirmModalHtml();
+    // De uitkomst van een testrun: de run-historie per stap, direct na de start.
+    if (_ui.ev.testResult) return _evTestResultModal() + _confirmModalHtml();
+    // DE RUNS-KNOP STAAT IN DE FLOWS-LIJST, NIET ALLEEN OP DE LOG-TAB.
+    // Zonder deze regel zette __autEvRuns netjes _ui.ev.runsModal en hertekende
+    // de view — waarna er niets verscheen, want alleen _evLogView() rendert die
+    // modal. Klikken op Runs deed dus letterlijk niets op de Flows-tab.
+    if (_ui.ev.runsModal) return _evRunsModal() + _confirmModalHtml();
     // Subtab-router
     const sub = _ui.ev.subtab || 'flows';
     let content;
@@ -836,6 +891,10 @@
       ${[['all','Alles'],['enabled','Actief'],['disabled','Uit']].map(([v, l]) => `<button class="chip ${filter === v ? 'on' : ''}" onclick="window.__autEvFilter('${v}')">${esc(l)}<span class="cnt">${v === 'all' ? all.length : (v === 'enabled' ? all.filter((a) => a.enabled).length : all.filter((a) => !a.enabled).length)}</span></button>`).join('')}
       <div class="tb-right" style="margin-left:auto;display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" onclick="window.__flowOpenDrawer('events_steps')" title="Live actieve runs per stap">🔍 Per stap</button>
+        <!-- OPRUIMEN HOORT BIJ TESTEN. Zonder deze knop op hetzelfde scherm
+             blijven de synthetische deelnemers van elke testrun staan, en dan
+             is de tester een bron van rommel in plaats van een hulpmiddel. -->
+        <button class="btn btn-ghost btn-sm" onclick="window.__autEvTestCleanup()" ${_busy('evCleanup') ? 'disabled' : ''} title="Verwijder alle testdeelnemers (is_test=true) en hun runs">${_busy('evCleanup') ? '…' : svg(I.trash || I.x, 'width:13px;height:13px') + 'Testrijen opruimen'}</button>
         <button class="btn btn-primary btn-sm" onclick="window.__autEvNew()">${svg(I.plus)}Nieuwe automation</button>
       </div>
     </div>
@@ -912,23 +971,39 @@
       { confirmLabel: 'Ja, verwijderen', danger: true }
     );
   };
+  // ── DE TESTKNOP ────────────────────────────────────────────────────────
+  // Hier stond `if (!a.enabled) return _toast('Zet de automation eerst aan…')`,
+  // en dáár liep de knop op stuk: hij blokkeerde precies het geval waarvoor de
+  // tester bestaat — een flow één keer end-to-end zien draaien VOORDAT je hem
+  // op echte deelnemers aanzet. Het venster werd nooit gerenderd en de toast
+  // (2,4s, onderaan het midden, zonder foutkleur) zag niemand.
+  //
+  // Uitstaand is nu geen blokkade meer maar een MELDING IN HET VENSTER, en de
+  // POST draagt allow_disabled mee. Zie het kopblok van
+  // api/events-automation-test.js voor waarom dat veilig is.
   window.__autEvTest = (id) => {
     const a = asArr(_live.evAutos.data).find((x) => x.id === id);
-    if (!a) return;
-    if (!a.enabled) return _toast('Zet de automation eerst aan voordat je een test-run doet.');
+    // GEEN STILLE GUARD. 'return' zonder melding was de tweede reden dat deze
+    // knop ongrijpbaar was: bij een nog-niet-geladen lijst gebeurde er niets.
+    if (!a) return _toast('Deze automatisatie is niet (meer) in de lijst te vinden. Ververs de pagina.');
     _ui.ev.testModal = {
       automation_id: id,
       automation_name: a.name || '—',
+      automation_enabled: a.enabled === true,
+      stappen: asArr(a.steps).length,
       event_id: '',
       first_name: 'TEST',
       last_name: 'Jeffrey',
       email: 'biemoldjeffrey@gmail.com',
       phone: '+31600000000',
     };
+    // De eventlijst hoort er te staan zodra het venster opengaat.
+    if (!_live.evEvents.data && !_live.evEvents.loading) queueMicrotask(fetchEvEvents);
     if (window.DFO?.render) window.DFO.render();
   };
   window.__autEvRuns = (id) => {
-    _ui.ev.runsModal = { automation_id: id };
+    const a = asArr(_live.evAutos.data).find((x) => x.id === id);
+    _ui.ev.runsModal = { automation_id: id, automation_name: (a && a.name) || '—' };
     if (!_live.evRuns.data[id]) queueMicrotask(() => fetchEvRuns(id));
     if (window.DFO?.render) window.DFO.render();
   };
@@ -937,7 +1012,20 @@
   window.__autEvTestField = (k, v) => { if (_ui.ev.testModal) _ui.ev.testModal[k] = v; };
   window.__autEvTestSubmit = async () => {
     const t = _ui.ev.testModal; if (!t) return;
-    if (!t.event_id || !t.first_name || !t.last_name || !t.email || !t.phone) return _toast('Alle velden zijn verplicht.');
+    // ELKE WEIGERING ZEGT WÁT ER MIST, en blijft in het venster staan in plaats
+    // van als vluchtige toast langs te komen.
+    const mist = [];
+    if (!t.event_id)   mist.push('een event');
+    if (!t.first_name) mist.push('een voornaam');
+    if (!t.last_name)  mist.push('een achternaam');
+    if (!t.email)      mist.push('een e-mailadres');
+    if (!t.phone)      mist.push('een telefoonnummer');
+    if (mist.length) {
+      t.fout = 'Nog niet compleet: er ontbreekt ' + mist.join(', ') + '.';
+      if (window.DFO?.render) window.DFO.render();
+      return;
+    }
+    t.fout = null;
     _setBusy('evTestSubmit', true);
     try {
       const j = await window.KV.authedJson('/api/events-automation-test', {
@@ -945,31 +1033,177 @@
         body: JSON.stringify({
           automation_id: t.automation_id, event_id: t.event_id,
           first_name: t.first_name, last_name: t.last_name, email: t.email, phone: t.phone,
+          // EXPLICIETE TOESTEMMING, alleen als de automatisatie echt uitstaat.
+          // De server weigert zonder deze vlag nog steeds met dezelfde 400.
+          allow_disabled: t.automation_enabled !== true,
         }),
       });
-      if (j?.error) throw new Error(j.error);
-      _toast('Test gestart. Attendee-ID: ' + (j?.attendee_id || '—') + '\nRun-ID: ' + (j?.run_id || '—') + '\n\nDe automation loopt nu ECHT met versnelde wait-stappen. Berichten worden verstuurd naar het opgegeven email/nummer.');
+      if (j?.error) throw new Error(j.error + (j.hint ? ' — ' + j.hint : ''));
+
+      // Meteen door naar de run-historie: de hele reden voor een testknop is
+      // dat je ZIET wat er per stap gebeurt.
+      const ev = _toekomstigeEvents().find((e) => e.id === t.event_id) || null;
+      const auto = asArr(_live.evAutos.data).find((x) => x.id === t.automation_id);
+      _ui.ev.testResult = {
+        run_id            : j?.run_id || null,
+        attendee_id       : j?.attendee_id || null,
+        automation_id     : t.automation_id,
+        automation_name   : t.automation_name,
+        automation_enabled: j?.automation_enabled === true,
+        stappen           : Number(j?.steps) || t.stappen || 0,
+        // DE STAPPENLIJST GAAT MEE. Zonder deze kopie staat het venster leeg in
+        // de seconden tussen 'gestart' en 'run geladen': `steps_snapshot` komt
+        // pas met de run mee, en dan mapt de render over een lege lijst terwijl
+        // hij wél zes stappen meldt. Zodra de run binnen is, is steps_snapshot
+        // de waarheid — dat is letterlijk wat DEZE run doet.
+        stappen_lijst     : asArr(auto && auto.steps),
+        event_titel       : ev ? (ev.title || '—') : '—',
+        gestart_op        : new Date().toISOString(),
+      };
       _ui.ev.testModal = null;
+      if (j?.run_id) queueMicrotask(() => fetchEvRunDetail(j.run_id, true));
+      _startTestPoll();
       if (window.DFO?.render) window.DFO.render();
-    } catch (e) { _toast('Test mislukt: ' + (e?.message || 'onbekende fout')); }
+    } catch (e) {
+      // NIET ALLEEN EEN TOAST. De fout blijft in het venster staan zodat je 'm
+      // kunt lezen, kopiëren en erop kunt reageren.
+      t.fout = 'Test mislukt: ' + (e?.message || 'onbekende fout');
+      if (window.DFO?.render) window.DFO.render();
+    }
     finally { _setBusy('evTestSubmit', false); }
   };
 
+  // ── DE POLL TIJDENS EEN TESTRUN ────────────────────────────────────────
+  // Wait-stappen zijn in test-modus 15s (TEST_WAIT_MS in de motor) en de cron
+  // tikt elke minuut, dus de stappen druppelen binnen. Elke 5s verversen tot
+  // de run klaar is; handle in module-scope en ALTIJD eerst clearen, zelfde
+  // patroon als de hoofdnav-badge (lesson learned 20).
+  let _testPollTimer = null;
+  function _stopTestPoll() {
+    if (_testPollTimer) { clearInterval(_testPollTimer); _testPollTimer = null; }
+  }
+  function _startTestPoll() {
+    _stopTestPoll();
+    _testPollTimer = setInterval(() => {
+      const r = _ui.ev.testResult;
+      if (!r || !r.run_id) return _stopTestPoll();
+      const d = _live.evRunDetail.data[r.run_id];
+      const st = d && d.run && String(d.run.status || '').toLowerCase();
+      // Klaar is klaar: completed / exited / cancelled / failed hoeven niet
+      // verder gepolld te worden.
+      if (st && st !== 'active') return _stopTestPoll();
+      fetchEvRunDetail(r.run_id, true);
+    }, 5000);
+  }
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('beforeunload', _stopTestPoll);
+  }
+
+  window.__autEvTestResultClose = () => {
+    _stopTestPoll();
+    _ui.ev.testResult = null;
+    // De runs-lijst van deze automatisatie is nu verouderd.
+    const id = _ui.ev.runsModal && _ui.ev.runsModal.automation_id;
+    if (id) delete _live.evRuns.data[id];
+    if (window.DFO?.render) window.DFO.render();
+  };
+  // ── TESTRIJEN OPRUIMEN ─────────────────────────────────────────────────
+  // POST naar api/events-test-attendees-cleanup: DELETE op event_attendees
+  // WHERE is_test=true, waarna FK-CASCADE de runs, het run-log, de tags en de
+  // audit-regels meeneemt. Achter een confirm, want het is onomkeerbaar — al
+  // raakt het per definitie geen echte deelnemer.
+  //
+  // Meldt het AANTAL terug. 'Opgeruimd' zonder getal is niet te onderscheiden
+  // van 'er stond niets', en dan weet je na een testronde niet of het gelukt is.
+  window.__autEvTestCleanup = () => {
+    askConfirm(
+      'Testrijen opruimen?',
+      `<p>Dit verwijdert <b>alle</b> testdeelnemers (<span class="mono">is_test=true</span>) en
+        alles wat eraan hangt: hun automation-runs, het run-log, tags en audit-regels.</p>
+       <p style="color:var(--text-3);font-size:12px">Echte deelnemers worden niet geraakt —
+        de DELETE staat vast op <span class="mono">is_test=true</span>. Onomkeerbaar.</p>`,
+      async () => {
+        _setBusy('evCleanup', true);
+        if (window.DFO?.render) window.DFO.render();
+        try {
+          const j = await window.KV.authedJson('/api/events-test-attendees-cleanup', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+          });
+          if (j?.error) throw new Error(j.error);
+          const n = Number(j?.deleted) || 0;
+          const w = Number(j?.orphan_runs) || 0;
+          const wStuk = w ? ' (plus ' + w + ' losse testrun' + (w === 1 ? '' : 's') + ')' : '';
+          _toast(n === 0 && w === 0
+            ? 'Er stond geen enkele testrij — niets opgeruimd.'
+            : n + ' ' + (n === 1 ? 'testdeelnemer' : 'testdeelnemers') + ' verwijderd' + wStuk + '.');
+          // De runs-lijsten en de run-detail zijn nu weg; state mee opruimen
+          // zodat het scherm geen verdwenen rijen blijft tonen.
+          _live.evRuns.data = {}; _live.evRunDetail.data = {};
+          _stopTestPoll();
+          _ui.ev.testResult = null;
+        } catch (e) {
+          _toast('Opruimen mislukt: ' + (e?.message || 'onbekende fout'));
+        } finally {
+          _setBusy('evCleanup', false);
+          if (window.DFO?.render) window.DFO.render();
+        }
+      },
+      { confirmLabel: 'Ja, opruimen', danger: true }
+    );
+  };
+
+  window.__autEvTestResultRefresh = () => {
+    const r = _ui.ev.testResult; if (!r || !r.run_id) return;
+    fetchEvRunDetail(r.run_id, true);
+  };
+
+  // ── HET TESTVENSTER ────────────────────────────────────────────────────
+  //
+  // `class="scrim on"` en niet een eigen inline overlay: zonder `on` houdt de
+  // globale .scrim-regel uit het design system opacity op 0 en pointer-events
+  // op none (app-shell.css r156-158), en dan staat het venster er onzichtbaar
+  // bij. Dat is exact het beeld dat op 15 september gemeld werd — een scrim met
+  // opacity 0 en lege inhoud. Dat element was toevallig de mobiele nav-overlay
+  // van de shell, maar de valkuil is echt.
   function _evTestModal() {
     const t = _ui.ev.testModal; if (!t) return '';
     const busy = _busy('evTestSubmit');
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autEvTestClose()">
+    const uit  = t.automation_enabled !== true;
+
+    // ── DE MELDING BIJ EEN UITSTAANDE AUTOMATISATIE ──────────────────────
+    // Geen blokkade: dit is juist het geval waarvoor je test. Maar wel
+    // onomwonden, want het verschil telt — de run draait, en er stroomt
+    // niemand anders in.
+    const uitBlok = uit ? `<div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;color:var(--amber);font-size:12.5px;line-height:1.5;margin-bottom:12px">
+      <b>Deze automatisatie staat UIT.</b> Je test hem nu <b>zonder hem aan te zetten</b> — precies
+      de bedoeling. De testdeelnemer krijgt de hele flow; echte deelnemers stromen er niet in
+      zolang de automatisatie uitstaat.
+    </div>` : '';
+
+    const foutBlok = t.fout ? `<div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:8px;color:var(--rose);font-size:12.5px;line-height:1.5;margin-bottom:12px">
+      ${esc(t.fout)}
+    </div>` : '';
+
+    return `<div class="scrim on" style="z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autEvTestClose()">
       <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:560px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-          <div style="font-size:14px;font-weight:600;flex:1">Test-run: ${esc(t.automation_name)}</div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:600">Test-run: ${esc(t.automation_name)}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(String(t.stappen || 0))} ${(t.stappen === 1 ? 'stap' : 'stappen')} &middot; ${uit ? 'staat uit' : 'staat aan'}</div>
+          </div>
           <button class="icon-btn" onclick="window.__autEvTestClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
         </div>
         <div style="padding:16px 18px">
+          ${uitBlok}
+          ${foutBlok}
           <div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:8px;color:var(--rose);font-size:12.5px;line-height:1.5;margin-bottom:14px">
-            <b>⚠ TEST STUURT ECHT.</b> Dit is <b>geen dry-run</b> — de automation-engine INSERT'et een test-attendee (is_test=true) en verstuurt daadwerkelijk berichten (met verkorte wait van 15s). Gebruik je eigen email/nummer om te voorkomen dat klanten test-berichten krijgen.
+            <b>&#9888; TEST STUURT ECHT.</b> Dit is <b>geen dry-run</b> — de motor maakt een
+            testdeelnemer (<span class="mono">is_test=true</span>) en verstuurt daadwerkelijk
+            berichten, met een verkorte wachttijd van 15s per wait-stap. Gebruik je eigen
+            e-mail en nummer, anders krijgt een klant je testbericht.
           </div>
           <div style="display:flex;flex-direction:column;gap:10px">
-            ${_field('Event-ID (uuid)', 'event_id', t.event_id, 'text', 'Zoek in Events > Overzicht > kopieer event-ID')}
+            ${_evTestEventKiezer(t)}
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
               ${_field('Voornaam', 'first_name', t.first_name, 'text')}
               ${_field('Achternaam', 'last_name', t.last_name, 'text')}
@@ -984,6 +1218,7 @@
         </div>
       </div>
     </div>`;
+
     function _field(label, key, val, kind, hint) {
       return `<div>
         <label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">${esc(label)}</label>
@@ -993,15 +1228,202 @@
     }
   }
 
+  // ── DE EVENT-KIEZER ────────────────────────────────────────────────────
+  // Drie toestanden, en alle drie ZEGGEN ze wat er is. Hier stond een kaal
+  // tekstveld met de instructie 'kopieer het event-ID uit Events > Overzicht';
+  // dat is de reden dat deze knop ook voor een aanstaande automatisatie
+  // nauwelijks bruikbaar was.
+  function _evTestEventKiezer(t) {
+    const st = _live.evEvents;
+    const label = '<label style="font-size:12px;color:var(--text-2);display:block;margin-bottom:4px">Event (alleen events die nog moeten komen)</label>';
+
+    if (st.loading && !st.data) {
+      return `<div>${label}<div style="font-size:12px;color:var(--text-3);padding:8px 0">Events laden&hellip;</div></div>`;
+    }
+    if (st.error) {
+      return `<div>${label}<div style="padding:8px 10px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:6px;color:var(--rose);font-size:12px;line-height:1.5">
+        De eventlijst kon niet geladen worden: ${esc(st.error)}.
+        <button class="btn btn-ghost btn-sm" style="margin-left:6px;padding:2px 8px;font-size:11px" onclick="window.__autEvEventsRetry()">Opnieuw</button>
+      </div></div>`;
+    }
+    const lijst = _toekomstigeEvents();
+    if (lijst.length === 0) {
+      // NIET STIL. Zonder toekomstig event is testen onmogelijk, en dan hoort
+      // dat er te staan in plaats van een lege dropdown.
+      return `<div>${label}<div style="padding:8px 10px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:6px;color:var(--amber);font-size:12px;line-height:1.5">
+        Er is <b>geen enkel event dat nog moet komen</b> (status draft of published). Een testrun
+        heeft een toekomstig event nodig: de flow rekent met <span class="mono">starts_at</span> en
+        een deadline n&aacute; het event is geen deadline. Maak eerst een event aan.
+      </div></div>`;
+    }
+    return `<div>${label}
+      <select onchange="window.__autEvTestField('event_id', this.value)" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box">
+        <option value="" ${!t.event_id ? 'selected' : ''}>&mdash; kies een event &mdash;</option>
+        ${lijst.map((e) => `<option value="${esc(e.id)}" ${t.event_id === e.id ? 'selected' : ''}>${esc(_fmtDateTime(e.starts_at))} &middot; ${esc(e.title || '(zonder titel)')}${e.location ? ' &middot; ' + esc(e.location) : ''}</option>`).join('')}
+      </select>
+      <div style="font-size:10.5px;color:var(--text-3);margin-top:3px">${lijst.length} ${lijst.length === 1 ? 'event' : 'events'} beschikbaar</div>
+    </div>`;
+  }
+
+  window.__autEvEventsRetry = () => {
+    _live.evEvents.data = null; _live.evEvents.error = null; _live.evEvents.loading = false;
+    queueMicrotask(fetchEvEvents);
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  // ── DE UITKOMST VAN EEN TESTRUN, PER STAP ──────────────────────────────
+  //
+  // Dit is waar de testknop voor bestaat: niet 'gestart' in een toast die na
+  // 2,4 seconden weg is, maar per stap zien wat er gebeurde. De bron is
+  // event_automation_run_log — één rij per uitgevoerde stap, met het
+  // result-jsonb van de motor erin. Ververst zichzelf elke 5s zolang de run
+  // actief is (wait-stappen zijn 15s in test-modus).
+  //
+  // WAT ER NIET IS, IS OOK INFORMATIE. Een stap zonder logregel heeft nog niet
+  // gedraaid; die staat als 'wacht' in de lijst in plaats van weggelaten te
+  // worden, want anders lijkt een flow van zes stappen er ineens twee te
+  // hebben.
+  function _evTestResultModal() {
+    const r = _ui.ev.testResult; if (!r) return '';
+    const d   = r.run_id ? _live.evRunDetail.data[r.run_id] : null;
+    const err = r.run_id ? _live.evRunDetail.error[r.run_id] : null;
+    const bezig = r.run_id ? _live.evRunDetail.loading[r.run_id] : false;
+    const run = d && d.run;
+    const log = asArr(d && d.log);
+
+    // De stappen die deze run draait staan in steps_snapshot — bevroren bij
+    // inschrijving, dus dit is letterlijk wat DEZE run doet. Zolang de run nog
+    // niet geladen is, de kopie die bij de start is meegenomen; anders staat
+    // het venster leeg terwijl het 'zes stappen' meldt.
+    const snapshot = asArr(run && run.steps_snapshot);
+    const stappen  = snapshot.length ? snapshot : asArr(r.stappen_lijst);
+    const aantal   = stappen.length || r.stappen || 0;
+    const logByIdx = new Map(log.map((l) => [Number(l.step_index), l]));
+    const huidige = run ? Number(run.current_step_index || 0) : 0;
+    const runStatus = run ? String(run.status || '').toLowerCase() : null;
+
+    const uitBlok = r.automation_enabled ? '' : `<div style="padding:9px 11px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;color:var(--amber);font-size:12px;line-height:1.5;margin-bottom:12px">
+      De automatisatie staat nog <b>UIT</b>. Deze testrun draait wel; echte deelnemers stromen er niet in.
+    </div>`;
+
+    return `<div class="scrim on" style="z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autEvTestResultClose()">
+      <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:760px;width:100%;max-height:88vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:600">Test-run gestart: ${esc(r.automation_name)}</div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px">${esc(r.event_titel)} &middot; ${aantal} ${aantal === 1 ? 'stap' : 'stappen'}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.__autEvTestResultRefresh()" ${bezig ? 'disabled' : ''}>${bezig ? '…' : 'Verversen'}</button>
+          <button class="icon-btn" onclick="window.__autEvTestResultClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
+        </div>
+        <div style="padding:16px 18px">
+          ${uitBlok}
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+            ${runStatus ? _runStatusPill(runStatus) : H.pill('neutral', 'wordt opgepikt…')}
+            ${H.pill('warn', 'TEST')}
+            <span class="mono" style="font-size:10.5px;color:var(--text-3)">run ${esc(String(r.run_id || '—').slice(0, 8))}… &middot; deelnemer ${esc(String(r.attendee_id || '—').slice(0, 8))}…</span>
+          </div>
+
+          ${!run && !err ? `<div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:12.5px;color:var(--text-2);line-height:1.5">
+            De run staat klaar en wordt door <span class="mono">cron-events-automations</span> opgepikt
+            (die tikt elke minuut). Dit venster ververst zichzelf; stap 0 verschijnt zodra de motor
+            hem gedaan heeft.
+          </div>` : ''}
+
+          ${err ? `<div style="padding:10px 12px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:8px;color:var(--rose);font-size:12.5px;line-height:1.5">
+            De run-historie kon niet geladen worden: ${esc(err)}. De run zelf loopt hier niet op stuk —
+            probeer Verversen.
+          </div>` : ''}
+
+          ${aantal === 0 ? `<div style="padding:10px 12px;background:var(--amber-soft);border:1px solid var(--amber-line);border-radius:8px;color:var(--amber);font-size:12.5px;line-height:1.5">
+            Deze automatisatie heeft <b>geen stappen</b>. Er valt dus niets te draaien.
+          </div>` : `<div style="display:flex;flex-direction:column;gap:6px">
+            ${stappen.map((st, i) => _evStapRegel(st, i, logByIdx.get(i), huidige, runStatus)).join('')}
+          </div>`}
+
+          ${run && run.last_error ? `<div style="margin-top:12px;padding:9px 11px;background:var(--rose-soft);border:1px solid var(--rose-line);border-radius:8px;color:var(--rose);font-size:12px;line-height:1.5">
+            <b>last_error op de run:</b> ${esc(run.last_error)}
+          </div>` : ''}
+        </div>
+        <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:space-between;align-items:center">
+          <button class="btn btn-ghost btn-sm" onclick="window.__autEvTestCleanup()">${svg(I.trash || I.x, 'width:13px;height:13px')}Testrijen opruimen</button>
+          <button class="btn btn-primary btn-sm" onclick="window.__autEvTestResultClose()">Sluiten</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  /** De run-status van event_automation_runs (niet die van _statusPill). */
+  function _runStatusPill(s) {
+    if (s === 'active')    return H.pill('ok', 'loopt');
+    if (s === 'completed') return H.pill('ok', 'afgerond');
+    if (s === 'exited')    return H.pill('neutral', 'gestopt op een voorwaarde');
+    if (s === 'cancelled') return H.pill('neutral', 'geannuleerd');
+    if (s === 'failed')    return H.pill('danger', 'gefaald');
+    return H.pill('neutral', s || '—');
+  }
+
+  /** Eén stap: wat hij is, of hij gedraaid heeft, en wat eruit kwam. */
+  function _evStapRegel(step, idx, logRij, huidige, runStatus) {
+    const type = (step && step.type) || 'onbekend';
+    const label = (EV_STEP_TYPES.find((x) => x.v === type) || {}).l || type;
+
+    let staat, kleur, detail = '';
+    if (logRij) {
+      const res = logRij.result || {};
+      const okStap = res.ok !== false;
+      // Een condition die niet doorging is GEEN fout — die heeft gewoon
+      // 'nee' gemeten. Dat onderscheid hoort zichtbaar te zijn.
+      if (type === 'condition') {
+        staat = res.pass === true ? 'waar — door' : 'niet waar — flow stopt hier';
+        kleur = res.pass === true ? 'ok' : 'neutral';
+        const stukjes = [];
+        if (res.check) stukjes.push('check: ' + res.check);
+        if (res.niet_gemeten === true) stukjes.push('NIET GEMETEN');
+        if (res.meting_reden) stukjes.push(res.meting_reden);
+        detail = stukjes.join(' · ');
+      } else if (res.skipped) {
+        staat = 'overgeslagen'; kleur = 'neutral';
+        detail = res.reason || res.error || '';
+      } else if (okStap) {
+        staat = 'gedaan'; kleur = 'ok';
+        detail = [res.to, res.tag_slug, res.new_status, res.new_call_status,
+          res.meta_wamid ? 'wamid ' + String(res.meta_wamid).slice(0, 12) + '…' : null]
+          .filter(Boolean).join(' · ');
+      } else {
+        staat = 'mislukt'; kleur = 'danger';
+        detail = res.error || 'geen fouttekst';
+      }
+    } else if (runStatus === 'active' && idx === huidige) {
+      staat = 'nu bezig'; kleur = 'warn';
+    } else if (runStatus && runStatus !== 'active' && idx >= huidige) {
+      staat = 'niet meer gedraaid'; kleur = 'neutral';
+    } else {
+      staat = 'wacht'; kleur = 'neutral';
+    }
+
+    return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="mono" style="font-size:11px;color:var(--text-3);min-width:22px">${idx}</span>
+        <span style="font-size:12.5px;font-weight:550">${esc(label)}</span>
+        ${H.pill(kleur, staat)}
+        ${logRij && logRij.executed_at ? `<span class="mono" style="font-size:10.5px;color:var(--text-3);margin-left:auto">${esc(_fmtDateTime(logRij.executed_at))}</span>` : ''}
+      </div>
+      ${detail ? `<div class="mono" style="font-size:10.5px;color:var(--text-3);margin-top:3px;word-break:break-word">${esc(detail)}</div>` : ''}
+    </div>`;
+  }
+
   function _evRunsModal() {
     const m = _ui.ev.runsModal; if (!m) return '';
     const runs = asArr(_live.evRuns.data[m.automation_id]);
     const loading = _live.evRuns.loading[m.automation_id];
     const err = _live.evRuns.error[m.automation_id];
-    return `<div style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autEvRunsClose()">
+    // `scrim on`, niet een eigen inline overlay — zie de toelichting bij
+    // _evTestModal hierboven.
+    return `<div class="scrim on" style="z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px" onclick="if(event.target===this)window.__autEvRunsClose()">
       <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);max-width:720px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
         <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-          <div style="font-size:14px;font-weight:600;flex:1">Runs-log</div>
+          <div style="font-size:14px;font-weight:600;flex:1">Runs-log${m.automation_name ? ' &middot; ' + esc(m.automation_name) : ''}</div>
           <button class="icon-btn" onclick="window.__autEvRunsClose()" title="Sluiten" style="width:28px;height:28px">${svg(I.x || I.close, 'width:13px;height:13px')}</button>
         </div>
         <div style="padding:16px 18px">

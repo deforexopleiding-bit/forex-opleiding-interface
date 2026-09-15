@@ -753,6 +753,31 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         updateAttendeeStatus: async (step) => {
           const newStatus = step?.config?.new_status;
           if (!newStatus) return { ok: false, error: 'new_status ontbreekt' };
+
+          // ── EEN TESTRUN RAAKT NOOIT EEN ECHTE DEELNEMER ─────────────────
+          // Dit is de enige stap in de motor die iets ONHERROEPELIJKS doet aan
+          // een inschrijving: 'geannuleerd' zetten neemt iemands plek af, en
+          // de automatisatie 'Geen gehoor - laatste kans' doet precies dat.
+          //
+          // De tester maakt zijn eigen synthetische deelnemer (is_test=true) en
+          // hangt de run daaraan, dus in de praktijk kan hij niet bij een echte
+          // rij komen. Maar 'in de praktijk' is geen garantie: een POST met een
+          // eigen attendee_id, een hergebruik van dit endpoint, of een
+          // toekomstige codepad dat een testrun aan een bestaande rij koppelt,
+          // zou zonder deze regel een echte inschrijving annuleren.
+          //
+          // Daarom hard, en NIET stil: de weigering gaat als fout in het
+          // run-log, dus je ziet 'm terug in de run-historie op het scherm.
+          if (run.is_test === true && attendee.is_test !== true) {
+            console.error('[events-automation] testrun', run.id,
+              'wilde de status van een ECHTE deelnemer wijzigen:', attendee.id, '→', newStatus);
+            return {
+              ok: false,
+              error: 'geweigerd: een testrun mag de status van een echte deelnemer niet wijzigen'
+                + ' (attendee ' + attendee.id + ' heeft is_test=false)',
+            };
+          }
+
           // OPTIONELE BELSTATUS. Zonder deze sleutel doet de stap exact wat hij
           // altijd deed. Mét: dezelfde stap zet status 'geannuleerd' én
           // belstatus 'komt_niet', zodat de aanwezigenlijst niet achterblijft
