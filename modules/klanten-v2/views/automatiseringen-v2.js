@@ -1051,6 +1051,11 @@
         automation_name   : t.automation_name,
         automation_enabled: j?.automation_enabled === true,
         stappen           : Number(j?.steps) || t.stappen || 0,
+        // WAT DE TESTDEELNEMER MEEKREEG. Zonder deze regel op het scherm weet
+        // je niet vanaf welk punt gemeten wordt — en precies dat punt ontbrak
+        // in de eerste testrun (call_status_at was niet gezet, dus de conditie
+        // kon niets meten en de flow stopte bij stap 3).
+        begintoestand_tekst: j?.begintoestand_tekst || null,
         // DE STAPPENLIJST GAAT MEE. Zonder deze kopie staat het venster leeg in
         // de seconden tussen 'gestart' en 'run geladen': `steps_snapshot` komt
         // pas met de run mee, en dan mapt de render over een lege lijst terwijl
@@ -1323,6 +1328,10 @@
             ${H.pill('warn', 'TEST')}
             <span class="mono" style="font-size:10.5px;color:var(--text-3)">run ${esc(String(r.run_id || '—').slice(0, 8))}… &middot; deelnemer ${esc(String(r.attendee_id || '—').slice(0, 8))}…</span>
           </div>
+
+          ${r.begintoestand_tekst ? `<div style="padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px">
+            <b>Begintoestand:</b> ${esc(r.begintoestand_tekst)}
+          </div>` : ''}
 
           ${!run && !err ? `<div style="padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:12.5px;color:var(--text-2);line-height:1.5">
             De run staat klaar en wordt door <span class="mono">cron-events-automations</span> opgepikt
