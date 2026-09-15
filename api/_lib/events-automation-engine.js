@@ -9,7 +9,36 @@ import { supabaseAdmin } from '../supabase.js';
 import { sendEventEmail, sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapSendStatus } from './comms-log.js';
 import { onConfirmedAttendeeMutation } from './event-attendee-mutations.js';
-import { isPlekBezet } from './event-registration.js';
+import {
+  isPlekBezet, CONFIRMED_STATUSES, PLEK_BEZET_CALL_STATUS, PLEK_BEZET_OR_FILTER,
+} from './plek-bezet.js';
+
+/**
+ * ONDERGRENS VOOR DE BEVESTIGD-TAK VAN on_assessment_completed.
+ *
+ * null = gebruik enabled_at van de automatisatie zelf, net als de
+ * vragenlijst-tak. Zet hier een vaste ISO-datum neer om de inhaalbeurt uit te
+ * sluiten: op 15 sep 2026 stonden er zeven deelnemers op komende events die
+ * bevestigd zijn zónder vragenlijst (Pres Uwadiae, Ella Depp, Zakaria Bazar,
+ * Ahmed Albattniji op 19-09; Bryan Van Der Heyden, Alain Nzisabira op 23-09;
+ * Omar Adamu op 26-09). Met enabled_at (19-06-2026) als grens krijgen die
+ * alsnog hun bevestiging bij de eerstvolgende cron-tick. Wil Maxim dat niet,
+ * dan is dit de ene regel die het uitzet.
+ */
+export const BEVESTIGD_TRIGGER_VANAF = null;
+
+/**
+ * Normaliseert een tijdstempel naar een schone ISO-string voor gebruik BINNEN
+ * een PostgREST or()-filter. Daar kunnen we geen parameter-encoding gebruiken,
+ * dus een waarde met een '+' (zoals '2026-06-19T08:23:11+00:00') is vragen om
+ * problemen. toISOString() levert altijd de Z-vorm zonder '+'.
+ * Onleesbaar → null; de caller weigert dan liever in te schrijven dan te gokken.
+ */
+function isoVoorFilter(waarde) {
+  if (!waarde) return null;
+  const d = new Date(waarde);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
 // plafondMs is de ENIGE plek waar 'nooit later dan X uur voor het event' wordt
 // uitgerekend — dezelfde functie die de deadline in de mailtekst zet. Zie de
 // kop van _lib/geen-gehoor-deadline.js.
@@ -361,19 +390,53 @@ async function loadCandidatesForAutomation(auto, now) {
     q = q.is('assessment_response_id', null);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_completed') {
-    q = q.not('assessment_response_id', 'is', null);
-    // Capaciteits-gate: alleen bevestigen wie een bevestigde plek heeft. Overflow-
-    // rijen staan op 'wachtlijst' en vallen hier weg → géén deelnemer-bevestiging.
-    // Raakt UITSLUITEND on_assessment_completed (o.a. "Bevestiging aanmelding");
-    // on_signup/time_before_event (welkom/reminders) blijven ongemoeid. Sluit ook
-    // 'sale'/'no_show'/'geannuleerd' uit; wie eerder als 'aangemeld' al bevestigd
-    // is, krijgt door de isStepDone-idempotency geen dubbele.
-    q = q.in('status', ['aangemeld', 'aanwezig']);
+    // ── DE BEVESTIGING HANGT AAN DE PLEK, NIET AAN DE VRAGENLIJST ─────────
+    // Maxim, 15 sep 2026: "Ja, nadat wij bevestigd hebben krijgen ze die mail
+    // — de automatisatie zoals wanneer de vragenlijst werd ingevuld wordt
+    // getriggerd." De trigger heet nog on_assessment_completed (dat is
+    // opgeslagen data), maar de kandidaat-regel is nu de plek-regel:
+    // vragenlijst ingevuld OF belstatus bevestigd.
+    //
+    // Capaciteits-gate: alleen wie een plek heeft. Overflow-rijen staan op
+    // 'wachtlijst' en vallen hier weg → géén deelnemer-bevestiging. Sluit ook
+    // 'sale'/'no_show'/'geannuleerd' uit. Raakt UITSLUITEND deze trigger
+    // (o.a. "Bevestiging aanmelding"); on_signup/time_before_event blijven
+    // ongemoeid.
+    q = q.in('status', CONFIRMED_STATUSES);
+    // Een proefrij krijgt geen echte bevestiging. De automation-tester schrijft
+    // zijn run rechtstreeks weg en komt hier niet langs, dus dit breekt 'm niet.
+    q = q.eq('is_test', false);
     // Guard (b) — vangnet: de motor mag NOOIT een verstreken event bevestigen.
-    // Ook als een verstreken rij ondanks guard (a) toch een assessment_response_id
-    // heeft gekregen, valt hij hier weg (events.starts_at > nu).
+    // Ook als een verstreken rij ondanks guard (a) toch een plek heeft
+    // gekregen, valt hij hier weg (events.starts_at > nu).
     q = q.gt('events.starts_at', nowIso);
-    if (newOnly) q = q.gte('assessment_linked_at', auto.enabled_at);
+
+    if (newOnly) {
+      // ── HET PLEK-MOMENT, PER TAK EEN EIGEN NULPUNT ────────────────────
+      // Vroeger: gte('assessment_linked_at', enabled_at). Nu heeft elke tak
+      // zijn eigen tijdstempel — assessment_linked_at voor wie via de
+      // vragenlijst binnenkomt, call_status_at voor wie via bevestigd
+      // binnenkomt. Beide in ÉÉN or()-string met PostgREST-nesting; twee
+      // .or()-aanroepen op dezelfde query leveren twee or=-parameters op en
+      // daar rekenen we niet op (zie applyPlekBezetFilter).
+      //
+      // Geen tijdstempel = NIET nieuw: een rij zonder assessment_linked_at of
+      // zonder call_status_at valt door de gte weg. Dezelfde defensieve keuze
+      // als bij on_call_status — zonder nulpunt is er geen "sinds wanneer",
+      // en dan liever niet inschrijven dan een oude rij alsnog mailen.
+      const vragenlijstVanaf = isoVoorFilter(auto.enabled_at);
+      const bevestigdVanaf   = isoVoorFilter(BEVESTIGD_TRIGGER_VANAF || auto.enabled_at);
+      if (!vragenlijstVanaf || !bevestigdVanaf) {
+        console.warn('[events-automation candidates] on_assessment_completed: onleesbare ondergrens, geen kandidaten', auto.id);
+        return [];
+      }
+      q = q.or(
+        `and(assessment_response_id.not.is.null,assessment_linked_at.gte.${vragenlijstVanaf}),`
+        + `and(call_status.ilike.${PLEK_BEZET_CALL_STATUS},call_status_at.gte.${bevestigdVanaf})`
+      );
+    } else {
+      q = q.or(PLEK_BEZET_OR_FILTER);
+    }
   } else if (auto.trigger_type === 'time_before_event') {
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_not_completed_after') {
