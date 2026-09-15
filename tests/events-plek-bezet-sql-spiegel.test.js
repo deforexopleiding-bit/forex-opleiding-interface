@@ -88,11 +88,15 @@ test('aantal_vragenlijst_ingevuld blijft letterlijk de vragenlijst', () => {
 });
 
 test('Node en SQL verwijzen naar elkaar', () => {
-  // Wie de een aanpast moet de ander vinden zonder te zoeken.
+  // Wie de een aanpast moet de ander vinden zonder te zoeken. De regel zelf
+  // woont in plek-bezet.js; event-registration.js her-exporteert hem en draagt
+  // dezelfde verwijzing, zodat je vanuit beide bestanden bij de migratie komt.
   assert.match(sql, /api\/_lib\/event-registration\.js/);
-  const js = readFileSync(join(ROOT, 'api/_lib/event-registration.js'), 'utf8');
-  assert.match(js, /event_attendee_is_confirmed\(text, uuid, boolean, text\)/);
-  assert.match(js, /2026-09-15-events-belstatus-bevestigd-telt-mee\.sql/);
+  for (const pad of ['api/_lib/plek-bezet.js', 'api/_lib/event-registration.js']) {
+    const js = readFileSync(join(ROOT, pad), 'utf8');
+    assert.match(js, /event_attendee_is_confirmed\(text, uuid, boolean, text\)/, pad);
+    assert.match(js, /2026-09-15-events-belstatus-bevestigd-telt-mee\.sql/, pad);
+  }
 });
 
 test('de gevallen uit tests/events-plek-bezet.test.js voldoen aan de SQL-regel', () => {
