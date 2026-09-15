@@ -81,6 +81,7 @@ import { getActiveQuestionnaire } from './_lib/assessment-questionnaires.js';
 import {
   CONFIRMED_STATUSES,
   getConfirmedCount,
+  isPlekBezet,
 } from './_lib/event-registration.js';
 import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
 
@@ -264,7 +265,9 @@ export default async function handler(req, res) {
         .from('event_attendees')
         // FK-gekwalificeerd: event_attendees heeft 2 FK's naar events; kaal
         // 'events!inner' is ambigu → PGRST201. Alias blijft 'events'.
-        .select('id, event_id, first_name, last_name, status, events!event_attendees_event_id_fkey!inner(starts_at)')
+        // call_status + is_test: nodig om te zien of deze rij al een plek
+        // inneemt via belstatus 'bevestigd' (sinds 15 sep 2026).
+        .select('id, event_id, first_name, last_name, status, call_status, is_test, events!event_attendees_event_id_fkey!inner(starts_at)')
         .ilike('email', email)
         .is('assessment_response_id', null)
         .gt('events.starts_at', lateLinkNowIso);
@@ -294,10 +297,15 @@ export default async function handler(req, res) {
           // Punt 3 — overflow-check: als deze 'aangemeld'-rij zou bevestigen
           // terwijl de strikte telling EXCLUSIEF deze persoon al >= capaciteit is,
           // dan op de wachtlijst zetten (geen bevestiging via de engine-scope).
-          // getConfirmedCount telt deze rij nu nog niet (assessment_response_id is
-          // nog NULL), dus dit is de telling zónder deze persoon.
+          //
+          // MAAR: staat deze rij al op belstatus 'bevestigd', dan NEEMT ZE AL
+          // EEN PLEK IN en zit ze zélf in getConfirmedCount. De telling is dan
+          // niet "zonder deze persoon" en de check zou haar van haar eigen
+          // stoel duwen — met haar eigen vragenlijst als aanleiding. Die rij
+          // slaat de overflow-check dus over en blijft gewoon 'aangemeld'.
+          const neemtAlPlek = isPlekBezet(att);
           let overflow = false;
-          if (!willBeCancelled && !isIncomplete && att.status === 'aangemeld' && att.event_id) {
+          if (!willBeCancelled && !isIncomplete && att.status === 'aangemeld' && att.event_id && !neemtAlPlek) {
             try {
               const { data: ev } = await supabaseAdmin
                 .from('events').select('capacity').eq('id', att.event_id).maybeSingle();
@@ -327,6 +335,9 @@ export default async function handler(req, res) {
           // Rise-check: rij eindigt in CONFIRMED_STATUSES én was daar al vóór
           // deze patch (dan miste 'ie enkel de assessment_response_id). Overflow-
           // rijen (nu 'wachtlijst') laten we buiten de auto-close-triplet.
+          // Rijen die al via 'bevestigd' meetelden zijn geen stijging, maar de
+          // cascade is idempotent — hem overslaan levert niets op en risicoloos
+          // meenemen houdt het Gastenlijst-label vers.
           if (att.event_id
               && !willBeCancelled
               && !overflow

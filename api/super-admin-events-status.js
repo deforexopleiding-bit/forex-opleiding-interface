@@ -10,11 +10,12 @@
 //       {
 //         id, title, starts_at, ends_at, location, capacity,
 //         counts: {
-//           vragenlijst_ingevuld: N,  // Fase 1: getConfirmedCount pattern
+//           vragenlijst_ingevuld: N,  // LETTERLIJK: vragenlijst ingevuld
+//           plek_bezet:           N,  // capaciteits-regel (getConfirmedCount)
 //           ingeschreven:         N,  // alle actieve statussen (aangemeld/aanwezig)
 //           gebeld:               N,  // event_attendees.call_status IS NOT NULL
 //         },
-//         seats_remaining: N,  // capacity - vragenlijst_ingevuld
+//         seats_remaining: N,  // capacity - plek_bezet
 //         deep_link: '/modules/events-detail.html?id=<id>'
 //       }, ...
 //     ]
@@ -22,8 +23,12 @@
 //
 // Tellingen — bron: event_attendees, is_test=false altijd:
 //   * vragenlijst_ingevuld = status IN (aangemeld,aanwezig) AND assessment_response_id NOT NULL
-//     (== getConfirmedCount uit api/_lib/event-registration.js, Fase 1 capaciteits-regel)
-//   * ingeschreven         = status IN (aangemeld,aanwezig)  (Fase 1 actieve)
+//     Dit is LETTERLIJK "heeft de vragenlijst ingevuld" — bewust NIET de
+//     capaciteits-regel; de tegel in het super-admin-dashboard heet ook zo.
+//   * plek_bezet           = de capaciteits-regel (getConfirmedCount /
+//     isPlekBezet uit api/_lib/event-registration.js): vragenlijst ingevuld
+//     OF belstatus bevestigd. seats_remaining rekent hiermee.
+//   * ingeschreven         = status IN (aangemeld,aanwezig)  (actieve statussen)
 //   * gebeld               = call_status IS NOT NULL  (canoniek — beide UI's lezen dit)
 //
 // Belstatus-bron: event_attendees.call_status (bevestigd in recon 2026-08-01).
@@ -35,6 +40,7 @@
 
 import { supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { applyPlekBezetFilter } from './_lib/event-registration.js';
 
 async function countAttendeeMetric(eventId, kind) {
   let q = supabaseAdmin
@@ -45,6 +51,10 @@ async function countAttendeeMetric(eventId, kind) {
 
   if (kind === 'vragenlijst_ingevuld') {
     q = q.in('status', ['aangemeld', 'aanwezig']).not('assessment_response_id', 'is', null);
+  } else if (kind === 'plek_bezet') {
+    // applyPlekBezetFilter zet zelf is_test=false + de status-lijst; de .eq
+    // hierboven is idempotent, dus dubbel filteren is onschadelijk.
+    q = applyPlekBezetFilter(q);
   } else if (kind === 'ingeschreven') {
     q = q.in('status', ['aangemeld', 'aanwezig']);
   } else if (kind === 'gebeld') {
@@ -58,12 +68,13 @@ async function countAttendeeMetric(eventId, kind) {
 }
 
 async function loadEventCounts(eventId) {
-  const [vragenlijst, ingeschreven, gebeld] = await Promise.all([
+  const [vragenlijst, plekBezet, ingeschreven, gebeld] = await Promise.all([
     countAttendeeMetric(eventId, 'vragenlijst_ingevuld'),
+    countAttendeeMetric(eventId, 'plek_bezet'),
     countAttendeeMetric(eventId, 'ingeschreven'),
     countAttendeeMetric(eventId, 'gebeld'),
   ]);
-  return { vragenlijst_ingevuld: vragenlijst, ingeschreven, gebeld };
+  return { vragenlijst_ingevuld: vragenlijst, plek_bezet: plekBezet, ingeschreven, gebeld };
 }
 
 export default async function handler(req, res) {
@@ -92,8 +103,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ events: [] });
     }
 
-    // Per event N=3 count-queries parallel. Bij N events = 3N queries; blijft
-    // ruim onder 60s Vercel-timeout bij limit=5 (15 queries totaal).
+    // Per event N=4 count-queries parallel. Bij N events = 4N queries; blijft
+    // ruim onder 60s Vercel-timeout bij limit=5 (20 queries totaal).
     const withCounts = await Promise.all(events.map(async (ev) => {
       try {
         const counts = await loadEventCounts(ev.id);
@@ -105,7 +116,7 @@ export default async function handler(req, res) {
           location: ev.location,
           capacity: ev.capacity,
           counts,
-          seats_remaining: Math.max(0, (ev.capacity || 0) - counts.vragenlijst_ingevuld),
+          seats_remaining: Math.max(0, (ev.capacity || 0) - counts.plek_bezet),
           deep_link: `/modules/events-detail.html?id=${ev.id}`,
         };
       } catch (e) {
@@ -118,7 +129,7 @@ export default async function handler(req, res) {
           ends_at: ev.ends_at,
           location: ev.location,
           capacity: ev.capacity,
-          counts: { vragenlijst_ingevuld: null, ingeschreven: null, gebeld: null },
+          counts: { vragenlijst_ingevuld: null, plek_bezet: null, ingeschreven: null, gebeld: null },
           seats_remaining: null,
           deep_link: `/modules/events-detail.html?id=${ev.id}`,
           error: e?.message || 'unknown',

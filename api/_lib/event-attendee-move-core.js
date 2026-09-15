@@ -89,20 +89,20 @@ export async function verplaatsDeelnemer({ attendeeId, targetEventId, sendInvite
     return mislukt(409, { code: 'EVENT_ARCHIVED', error: 'Doel-event is gearchiveerd' });
   }
 
-  // Capacity-check op doel-event — telt alleen inschrijvingen die de
-  // vragenlijst hebben ingevuld (assessment_response_id IS NOT NULL).
-  // Fase 1 canonical semantiek: gebruikt de shared helper getConfirmedCount
-  // zodat move/add/list/detail/auto-close allemaal dezelfde regel volgen.
-  // Voorheen: inline count met ACTIVE_STATUSES (incl. 'sale') ZONDER
-  // assessment-filter → 8 inschrijvingen met 6 vragenlijsten telde als 8
-  // → onterecht 'vol'. Nu telt 't als 6 en zijn er nog 2 plekken.
+  // Capacity-check op doel-event — telt de bezette plekken: status IN
+  // ('aangemeld','aanwezig') AND is_test=false AND (vragenlijst ingevuld OF
+  // belstatus bevestigd). Canonical semantiek via de shared helper
+  // getConfirmedCount, zodat move/add/list/detail/auto-close allemaal dezelfde
+  // regel volgen. Sinds 15 sep 2026 telt belstatus 'bevestigd' ook zonder
+  // vragenlijst mee — die stoel is immers vergeven.
   //
-  // Aanvaard overboek-risico: als N late vragenlijsten binnenkomen ná deze
-  // move, kan confirmed_count > capacity worden. Bewuste keuze — gebeurt
-  // zelden en admin-actie moet niet blokkeren op toekomstige gebeurtenissen.
+  // Aanvaard overboek-risico: als N late vragenlijsten of bevestigingen
+  // binnenkomen ná deze move, kan confirmed_count > capacity worden. Bewuste
+  // keuze — gebeurt zelden en admin-actie moet niet blokkeren op toekomstige
+  // gebeurtenissen.
   const cnt = await getConfirmedCount(targetEventId);
   if (targetEvent.capacity != null && cnt >= targetEvent.capacity) {
-    return mislukt(409, { code: 'SEATS_FULL', error: `Doel-event is vol (${cnt}/${targetEvent.capacity} met ingevulde vragenlijst)` });
+    return mislukt(409, { code: 'SEATS_FULL', error: `Doel-event is vol (${cnt}/${targetEvent.capacity} plekken bezet)` });
   }
 
   const nowIso = new Date().toISOString();

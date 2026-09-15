@@ -195,12 +195,11 @@ export default async function handler(req, res) {
     const candidateIds = (rows || []).map((r) => r.id);
     const activeCountById = new Map();
     if (candidateIds.length > 0) {
-      // Fase 1 canonical: telt alleen inschrijvingen met ingevulde vragenlijst
-      // (status IN ('aangemeld','aanwezig') AND assessment_response_id IS NOT
-      // NULL AND is_test=false). Consistent met PR #1017 (move/add) +
-      // events-list/detail/auto-close. Voorheen: inline count met
-      // ACTIVE_STATUSES incl. 'sale' zonder assessment-filter → bel-overlay
-      // toonde events als vol terwijl er nog vrije vragenlijst-plekken waren.
+      // Canonical: telt de bezette plekken (status IN ('aangemeld','aanwezig')
+      // AND is_test=false AND (vragenlijst ingevuld OF belstatus bevestigd)).
+      // Consistent met move/add + events-list/detail/auto-close. Sinds
+      // 15 sep 2026 neemt belstatus 'bevestigd' ook zonder vragenlijst een
+      // plek in — anders bood de bel-overlay stoelen aan die al vergeven zijn.
       await Promise.all(candidateIds.map(async (eid) => {
         try {
           const cnt = await getConfirmedCount(eid);

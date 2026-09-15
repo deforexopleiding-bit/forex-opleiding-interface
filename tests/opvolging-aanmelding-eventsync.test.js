@@ -153,23 +153,32 @@ test('een deelnemer die niet bestaat is een mislukking, geen stilte', async () =
 // 2 · DE CAPACITEITSHOOK — alleen bij een echte statuswijziging
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('de capaciteitshook draait alleen als de status echt verandert', () => {
-  // Zonder wijziging is er niets veranderd aan de bezetting; de cascade zou
-  // dan werk voor niets zijn. Mét wijziging komt er een plaats vrij en hoort
+test('de capaciteitshook draait alleen als de PLEK echt kantelt', () => {
+  // Zonder kanteling is er niets veranderd aan de bezetting; de cascade zou
+  // dan werk voor niets zijn. Mét kanteling komt er een plaats vrij en hoort
   // een vol event weer open te gaan — dat miste in de oude actie volledig.
+  //
+  // De gate hing tot 15 sep 2026 aan de STATUS. Dat was te smal geworden:
+  // belstatus 'bevestigd' neemt sindsdien ook een plek in, dus iemand op
+  // 'aanwezig' die zijn plek enkel aan de bel ontleende, geeft er bij
+  // 'komt niet' een vrij zónder dat zijn status verandert. De gate kijkt nu
+  // naar de plek-toestand vóór en ná (onAttendeePlekChange), en die dekt de
+  // oude statuswijziging gewoon mee.
   const bron = readFileSync(join(ROOT, 'api/opvolging-aanmelding-actie.js'), 'utf8');
   const i = bron.indexOf('export async function zetKomtNiet');
   assert.ok(i > 0);
-  // Ruim genomen: de kern kreeg er bij 'liever via zoom' een optionele reden
-  // bij, dus de functie is langer. De REGEL eronder is niet veranderd, en dat
-  // is wat deze test bewaakt.
-  const blok = bron.slice(i, i + 4200);
+  const blok = bron.slice(i, i + 4800);
 
+  // De statusregel zelf is ongemoeid.
   assert.match(blok, /const statusWijzigt = huidige === 'aangemeld' \|\| huidige === 'wachtlijst'/);
   assert.match(blok, /if \(statusWijzigt\) patch\.status = 'geannuleerd'/);
-  assert.match(blok, /if \(statusWijzigt && rij\.event_id\)/,
-    'de hook hangt aan de statuswijziging, niet aan de schrijfactie');
-  assert.match(blok, /onConfirmedAttendeeMutation\(rij\.event_id, \{ reason: 'opvolging-aanmelding-actie' \}\)/);
+
+  // De hook hangt aan de plek-vergelijking, niet meer aan de status alleen.
+  assert.doesNotMatch(blok, /if \(statusWijzigt && rij\.event_id\)/);
+  assert.match(blok, /onAttendeePlekChange\)\(\s*rij,/);
+  assert.match(blok, /reason: 'opvolging-aanmelding-actie'/);
+  // En de rij wordt met de plek-velden gelezen, anders valt er niets te vergelijken.
+  assert.match(blok, /\.select\(PLEK_SELECT \+ ', notes'\)/);
 });
 
 test('de uitkomstmotor wordt niet aangeraakt', () => {

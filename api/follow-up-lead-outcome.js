@@ -27,7 +27,9 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { createAppointmentForLead, mapGhlError } from './_lib/create-appointment-from-lead.js';
-import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
+import {
+  onConfirmedAttendeeMutation, onAttendeePlekChange, PLEK_SELECT,
+} from './_lib/event-attendee-mutations.js';
 import { cadansVoor, BIJ_MAX } from './_lib/followup-cadans.js';
 import { maakWhatsappTaak } from './_lib/whatsapp-taak.js';
 
@@ -306,8 +308,10 @@ export default async function handler(req, res) {
               }
             }
             // Fill: undo kan status terugzetten (bv. 'geannuleerd' → 'aangemeld'
-            // = confirmed rise → event kan vol raken). Helper draait cascade.
-            if (restoreAttendee.status !== undefined) {
+            // = rise → event kan vol raken) én de belstatus (bv. terug naar
+            // 'bevestigd', wat sinds 15 sep 2026 óók een plek inneemt). Beide
+            // muteren de bezetting, dus beide draaien de cascade.
+            if (restoreAttendee.status !== undefined || restoreAttendee.call_status !== undefined) {
               try {
                 const { data: aEv } = await supabaseAdmin
                   .from('event_attendees').select('event_id')
@@ -870,18 +874,35 @@ export default async function handler(req, res) {
             .update(patchAttendee)
             .eq('id', sourceRef.attendee_id);
           // Fill: patchAttendee.status kan naar 'aangemeld' (rise) of
-          // 'geannuleerd' (drop). Beide muteren confirmed_count → helper
-          // opent/sluit event indien nodig. Alleen bij succesvolle write
-          // draaien; fetch event_id éénmaal.
-          if (!aErr && patchAttendee.status !== undefined) {
+          // 'geannuleerd' (drop), en patchAttendee.call_status kan 'bevestigd'
+          // zetten of verlaten — sinds 15 sep 2026 neemt die belstatus óók een
+          // plek in. Alle vier muteren de bezetting, dus de cascade hangt nu
+          // aan beide velden. Alleen bij succesvolle write; één extra read.
+          if (!aErr && (patchAttendee.status !== undefined || patchAttendee.call_status !== undefined)) {
             try {
-              const { data: aEv } = await supabaseAdmin
-                .from('event_attendees').select('event_id')
+              const { data: naRij } = await supabaseAdmin
+                .from('event_attendees').select(PLEK_SELECT)
                 .eq('id', sourceRef.attendee_id).maybeSingle();
-              if (aEv?.event_id) {
-                await onConfirmedAttendeeMutation(aEv.event_id, {
-                  reason: 'follow-up-lead-outcome',
-                });
+              if (naRij?.event_id) {
+                // De before-snapshot draagt alleen status + call_status; de
+                // rest (is_test, vragenlijst) verandert hier niet, dus die
+                // komt uit de zojuist gelezen rij.
+                const snap = attendeeBeforeSnapshot;
+                if (snap && typeof snap === 'object') {
+                  const voorRij = {
+                    ...naRij,
+                    status     : 'status'      in snap ? (snap.status ?? naRij.status) : naRij.status,
+                    call_status: 'call_status' in snap ? snap.call_status              : naRij.call_status,
+                  };
+                  await onAttendeePlekChange(voorRij, naRij, { reason: 'follow-up-lead-outcome' });
+                } else {
+                  // Geen bruikbare before-state (de snapshot-fetch faalde).
+                  // Dan niet gokken: draai de cascade gewoon — die is
+                  // idempotent en sluit/heropent alleen als het klopt.
+                  await onConfirmedAttendeeMutation(naRij.event_id, {
+                    reason: 'follow-up-lead-outcome',
+                  });
+                }
               }
             } catch (e) {
               console.warn('[follow-up-lead-outcome] auto-close hook (soft):', e?.message || e);

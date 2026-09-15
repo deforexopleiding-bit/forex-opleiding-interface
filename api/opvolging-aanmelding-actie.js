@@ -42,7 +42,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { dagPlus, WAKKER_DAGEN_VOOR_EVENT, badgeVoorEvent } from './_lib/opvolging-aanmelding.js';
-import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
+import { onAttendeePlekChange, PLEK_SELECT } from './_lib/event-attendee-mutations.js';
 import { verplaatsDeelnemer } from './_lib/event-attendee-move-core.js';
 
 const ACTIES = new Set([
@@ -486,7 +486,10 @@ export async function zetKomtNiet(attendeeId, nuIso, db = supabaseAdmin, opties 
   try {
     const { data: rij, error: leesErr } = await db
       .from('event_attendees')
-      .select('id, event_id, status, notes')
+      // De plek-velden staan erbij (PLEK_SELECT + notes): 'komt niet' kan een
+      // plek vrijgeven zónder dat de status verandert — namelijk bij iemand
+      // die zijn plek enkel aan belstatus 'bevestigd' ontleende.
+      .select(PLEK_SELECT + ', notes')
       .eq('id', attendeeId)
       .maybeSingle();
     if (leesErr) throw new Error(leesErr.message);
@@ -529,21 +532,49 @@ export async function zetKomtNiet(attendeeId, nuIso, db = supabaseAdmin, opties 
       }
     }
 
-    // Alleen bij een echte statuswijziging: er komt dan een plaats vrij, en
-    // een vol event hoort weer open te gaan. Zonder wijziging is er niets
+    // Alleen als de PLEK-toestand echt kantelt: dan komt er een plaats vrij en
+    // hoort een vol event weer open te gaan. Zonder kanteling is er niets
     // veranderd aan de bezetting en zou de cascade werk voor niets zijn.
-    if (statusWijzigt && rij.event_id) {
-      try {
-        await onConfirmedAttendeeMutation(rij.event_id, { reason: 'opvolging-aanmelding-actie' });
-      } catch (e) {
-        // De afmelding staat; de cascade is de opruiming erna.
-        console.warn('[opvolging-aanmelding-actie] capaciteitshook (soft):', e?.message || e);
-      }
-    }
+    //
+    // Twee wegen naar zo'n kanteling, en de tweede is er sinds 15 sep 2026 bij:
+    //   1. de status gaat naar 'geannuleerd' (aangemeld/wachtlijst);
+    //   2. de status blijft, maar de belstatus verlaat 'bevestigd' bij iemand
+    //      zonder vragenlijst — die plek was er dus een, en is het nu niet meer.
+    const naCallStatus = (opties.callStatus && opties.callStatus !== 'komt_niet')
+      ? opties.callStatus
+      : 'komt_niet';
+    await (opties.cascade || onAttendeePlekChange)(
+      rij,
+      { ...rij, ...patch, call_status: naCallStatus },
+      { reason: 'opvolging-aanmelding-actie' },
+    );
     return 'bijgewerkt';
   } catch (e) {
     console.warn('[opvolging-aanmelding-actie] komt-niet (soft):', e?.message || e);
     return 'mislukt';
+  }
+}
+
+/**
+ * Leest de vier velden die bepalen of een rij een plek inneemt.
+ *
+ * Fail-soft en met opzet zonder harde eis aan de databank-dubbelganger: lukt
+ * het lezen niet, dan geven we null terug en slaat de cascade over. Een gemiste
+ * heropening is vervelend; een belstatus die niet geschreven wordt omdat het
+ * vóórlezen struikelde, is erger.
+ */
+async function leesPlekRij(attendeeId, db) {
+  try {
+    const { data, error } = await db
+      .from('event_attendees')
+      .select(PLEK_SELECT)
+      .eq('id', attendeeId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data || null;
+  } catch (e) {
+    console.warn('[opvolging-aanmelding-actie] plek-voorlezing (soft):', e?.message || e);
+    return null;
   }
 }
 
@@ -565,19 +596,27 @@ export async function zetKomtNiet(attendeeId, nuIso, db = supabaseAdmin, opties 
  *
  * @returns {Promise<'geen_deelnemer'|'bijgewerkt'|'mislukt'>}
  */
-export async function zetBelstatusBevestigd(attendeeId, nuIso, db = supabaseAdmin) {
+export async function zetBelstatusBevestigd(attendeeId, nuIso, db = supabaseAdmin, opties = {}) {
   if (!attendeeId) return 'geen_deelnemer';
+  const voor = await leesPlekRij(attendeeId, db);
   try {
     const { error } = await db
       .from('event_attendees')
       .update({ call_status: 'bevestigd', call_status_at: nuIso, called: true })
       .eq('id', attendeeId);
     if (error) throw new Error(error.message);
-    return 'bijgewerkt';
   } catch (e) {
     console.warn('[opvolging-aanmelding-actie] belstatus (soft):', e?.message || e);
     return 'mislukt';
   }
+  // Bevestigd neemt sinds 15 sep 2026 een plek in, óók zonder vragenlijst.
+  // Wie hierdoor over de capaciteit gaat, sluit het event. Alleen bij een
+  // echte kanteling en volledig fail-soft — de belstatus staat al.
+  await (opties.cascade || onAttendeePlekChange)(
+    voor, { ...(voor || {}), call_status: 'bevestigd' },
+    { reason: 'opvolging-bevestigd' },
+  );
+  return 'bijgewerkt';
 }
 
 /**
@@ -603,19 +642,26 @@ export async function zetBelstatusBevestigd(attendeeId, nuIso, db = supabaseAdmi
  *
  * @returns {Promise<'geen_deelnemer'|'bijgewerkt'|'mislukt'>}
  */
-export async function zetBelstatusGeenGehoor(attendeeId, nuIso, db = supabaseAdmin) {
+export async function zetBelstatusGeenGehoor(attendeeId, nuIso, db = supabaseAdmin, opties = {}) {
   if (!attendeeId) return 'geen_deelnemer';
+  const voor = await leesPlekRij(attendeeId, db);
   try {
     const { error } = await db
       .from('event_attendees')
       .update({ call_status: 'geen_gehoor', call_status_at: nuIso, called: true })
       .eq('id', attendeeId);
     if (error) throw new Error(error.message);
-    return 'bijgewerkt';
   } catch (e) {
     console.warn('[opvolging-aanmelding-actie] belstatus geen gehoor (soft):', e?.message || e);
     return 'mislukt';
   }
+  // De andere kant op: stond hij op bevestigd ZONDER vragenlijst, dan komt
+  // die plek nu vrij en mag een vol event weer open.
+  await (opties.cascade || onAttendeePlekChange)(
+    voor, { ...(voor || {}), call_status: 'geen_gehoor' },
+    { reason: 'opvolging-geen-gehoor' },
+  );
+  return 'bijgewerkt';
 }
 
 /** Fail-soft: de poging is de historiek, niet de actie zelf. */

@@ -13,17 +13,21 @@
 //       attendees_total:          <int>,
 //       byStatus:                 { aangemeld, aanwezig, no_show, sale, switched_to_other_event },
 //       active:                   <int>  (= getConfirmedCount: status IN
-//                                          ('aangemeld','aanwezig') AND
-//                                          assessment_response_id IS NOT NULL),
-//       aangemeld_no_assessment:  <int>  (aangemeld zonder voltooide assessment —
-//                                          staat in lijst, telt NIET mee voor capaciteit),
+//                                          ('aangemeld','aanwezig') AND is_test=false
+//                                          AND (vragenlijst ingevuld OF belstatus
+//                                          bevestigd)),
+//       aangemeld_zonder_plek:    <int>  (aangemeld zonder vragenlijst én zonder
+//                                          belstatus bevestigd — staat in de lijst,
+//                                          telt NIET mee voor capaciteit),
+//       aangemeld_no_assessment:  <int>  (alias van aangemeld_zonder_plek — oude
+//                                          sleutel, blijft voor bestaande clients),
 //       seats_remaining:          <int>  (capacity - active)
 //     }
 //   }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { getConfirmedCount } from './_lib/event-registration.js';
+import { getConfirmedCount, PLEK_BEZET_CALL_STATUS } from './_lib/event-registration.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STATUS_KEYS = ['aangemeld', 'aanwezig', 'no_show', 'sale', 'switched_to_other_event'];
@@ -106,11 +110,10 @@ export default async function handler(req, res) {
       console.error('[events-detail total-attendees]', e.message);
     }
 
-    // Fase 1 capaciteits-regel: active = getConfirmedCount (status IN
-    // ('aangemeld','aanwezig') AND assessment_response_id IS NOT NULL).
-    // Eerder: ACTIVE_KEYS-reduce ['aangemeld','aanwezig','sale'] zonder
-    // assessment-filter. byStatus per status BLIJFT zoals voorheen — alleen
-    // de "telt-mee voor capaciteit"-laag is strikter geworden.
+    // Capaciteits-regel: active = getConfirmedCount (status IN ('aangemeld',
+    // 'aanwezig') AND is_test=false AND (vragenlijst ingevuld OF belstatus
+    // bevestigd)). byStatus per status BLIJFT zoals voorheen — de "telt-mee
+    // voor capaciteit"-laag ligt daar bovenop.
     let active = 0;
     try {
       active = await getConfirmedCount(id);
@@ -118,10 +121,11 @@ export default async function handler(req, res) {
       console.error('[events-detail active-count]', e.message);
     }
 
-    // Extra UI-teller: aangemeld zonder voltooide assessment (in de lijst,
-    // niet meegerekend voor capaciteit). Maakt het onderscheid expliciet in
-    // de Aanwezigen-tab.
-    let aangemeldNoAssessment = 0;
+    // Extra UI-teller: aangemeld ZONDER PLEK — geen vragenlijst én geen
+    // belstatus bevestigd. Die rijen staan wel in de lijst maar tellen niet
+    // mee voor de capaciteit. Sinds 15 sep 2026 valt 'aangemeld zonder
+    // vragenlijst maar wél bevestigd' hier dus buiten: die heeft een plek.
+    let aangemeldZonderPlek = 0;
     try {
       const { count } = await supabaseAdmin
         .from('event_attendees')
@@ -129,10 +133,13 @@ export default async function handler(req, res) {
         .eq('event_id', id)
         .eq('is_test', false)
         .eq('status', 'aangemeld')
-        .is('assessment_response_id', null);
-      aangemeldNoAssessment = typeof count === 'number' ? count : 0;
+        .is('assessment_response_id', null)
+        // NULL-veilig: `not.ilike` alleen zou NULL-call_status wegfilteren
+        // (NOT NULL = NULL = niet waar), en dat zijn juist de meeste rijen.
+        .or(`call_status.is.null,call_status.not.ilike.${PLEK_BEZET_CALL_STATUS}`);
+      aangemeldZonderPlek = typeof count === 'number' ? count : 0;
     } catch (e) {
-      console.error('[events-detail aangemeld-no-assessment]', e.message);
+      console.error('[events-detail aangemeld-zonder-plek]', e.message);
     }
 
     const seatsRemaining = Math.max(0, (ev.capacity || 0) - active);
@@ -169,7 +176,9 @@ export default async function handler(req, res) {
         attendees_total:         totalAttendees,
         byStatus,
         active,
-        aangemeld_no_assessment: aangemeldNoAssessment,
+        aangemeld_zonder_plek:   aangemeldZonderPlek,
+        // Oude sleutel, zelfde (nieuwe) betekenis — voor clients die 'm nog lezen.
+        aangemeld_no_assessment: aangemeldZonderPlek,
         seats_remaining:         seatsRemaining,
       },
     });

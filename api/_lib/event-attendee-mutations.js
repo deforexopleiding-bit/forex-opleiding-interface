@@ -2,9 +2,9 @@
 //
 // Central shared helper voor de "na-de-write"-cascade op event_attendees.
 //
-// Doel: elk endpoint dat een BEVESTIGDE attendee kan creëren of promoveren
-// (status IN ('aangemeld','aanwezig') AND assessment_response_id IS NOT NULL
-// AND is_test=false) roept ÉÉN functie aan i.p.v. de triplet
+// Doel: elk endpoint dat een attendee een plek kan laten innemen of vrijgeven
+// (status IN ('aangemeld','aanwezig') AND is_test=false AND (vragenlijst
+// ingevuld OF belstatus bevestigd)) roept ÉÉN functie aan i.p.v. de triplet
 // getConfirmedCount + syncGastenlijstWebflow + autoCloseIfFull +
 // herevalueerCapaciteit los te schrijven. Voorkomt gaten zoals eerder in
 // events-attendee-move en events-signup-inbound.
@@ -27,7 +27,53 @@ import {
   syncGastenlijstWebflow,
   autoCloseIfFull,
   herevalueerCapaciteit,
+  isPlekBezet,
 } from './event-registration.js';
+
+/**
+ * De vier velden die samen bepalen of een rij een plek inneemt. Wie de cascade
+ * op een schrijfactie wil hangen, leest hiermee de before-state.
+ */
+export const PLEK_SELECT = 'id, event_id, status, assessment_response_id, is_test, call_status';
+
+/**
+ * plekToestandGewijzigd(voor, na) — kantelde de rij van "neemt een plek in"
+ * naar "neemt er geen" of andersom?
+ *
+ * Alleen die kanteling raakt de bezetting. Een belstatus van 'gebeld' naar
+ * 'voicemail' verandert er niets aan en hoeft de close/reopen-cascade niet te
+ * kosten; 'bevestigd' -> 'geen_gehoor' (bij iemand zonder vragenlijst) wél,
+ * want dat geeft een plek terug.
+ */
+export function plekToestandGewijzigd(voor, na) {
+  return isPlekBezet(voor) !== isPlekBezet(na);
+}
+
+/**
+ * onAttendeePlekChange(voor, na, opts)
+ *
+ * Draait onConfirmedAttendeeMutation, maar alleen als de plek-toestand
+ * daadwerkelijk gekanteld is. Volledig fail-soft: een fout hier mag de
+ * onderliggende schrijfactie (de belstatuswijziging) nooit laten mislukken —
+ * die staat op dit punt al vast.
+ *
+ * @param {?object} voor  rij-state vóór de write (PLEK_SELECT-velden). null
+ *   (niet kunnen lezen) leest als "nam geen plek in".
+ * @param {?object} na    rij-state ná de write.
+ * @returns {Promise<{changed:boolean, results?:Array, reason?:string}>}
+ */
+export async function onAttendeePlekChange(voor, na, opts = {}) {
+  try {
+    if (!plekToestandGewijzigd(voor, na)) return { changed: false, reason: 'plek-toestand ongewijzigd' };
+    const eventId = (na && na.event_id) || (voor && voor.event_id) || null;
+    if (!eventId) return { changed: false, reason: 'geen event_id' };
+    const results = await onConfirmedAttendeeMutation(eventId, opts);
+    return { changed: true, results };
+  } catch (e) {
+    console.warn(`[onAttendeePlekChange:${opts?.reason || 'unspecified'}] (soft):`, e?.message || e);
+    return { changed: false, reason: e?.message || 'exception' };
+  }
+}
 
 /**
  * onConfirmedAttendeeMutation(eventIds, opts)

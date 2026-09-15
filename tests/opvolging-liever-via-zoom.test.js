@@ -268,10 +268,13 @@ test('zetLieverZoom gebruikt de bestaande kern, niet een eigen UPDATE', () => {
   assert.match(blok, /return await zetKomtNiet\(/, 'via de bestaande kern');
   assert.doesNotMatch(blok, /from\('event_attendees'\)/, 'geen eigen UPDATE');
 
-  // En die kern doet nog steeds de hook + de statusregel.
+  // En die kern doet nog steeds de hook + de statusregel. De hook hangt sinds
+  // 15 sep 2026 aan de PLEK-toestand in plaats van alleen aan de status:
+  // belstatus 'bevestigd' neemt óók een plek in, dus 'komt niet' kan er een
+  // vrijgeven zonder dat de status verandert.
   const j = bron.indexOf('export async function zetKomtNiet');
-  const kern = bron.slice(j, j + 4200);
-  assert.match(kern, /onConfirmedAttendeeMutation/);
+  const kern = bron.slice(j, j + 4800);
+  assert.match(kern, /onAttendeePlekChange/);
   assert.match(kern, /huidige === 'aangemeld' \|\| huidige === 'wachtlijst'/);
   assert.match(kern, /patch\.status = 'geannuleerd'/);
 });
