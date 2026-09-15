@@ -35,9 +35,11 @@ const AR = '11111111-2222-3333-4444-555555555555'; // assessment_response_id
 /**
  * De gevallentabel. Elke regel: [omschrijving, rij, verwacht].
  *
- * Dezelfde gevallen staan als verwachting in het commentaar van
+ * Elk geval moet dezelfde uitkomst geven als de regel in het commentaar van
  * docs/sql-migrations/2026-09-15-events-belstatus-bevestigd-telt-mee.sql —
- * wijkt er één af, dan lopen Node en de DB-trigger uit de pas.
+ * wijkt er één af, dan lopen Node en de DB-trigger uit de pas. Dat verband
+ * wordt hard getoetst in tests/events-plek-bezet-sql-spiegel.test.js, die de
+ * migratie inleest en hem tegen isPlekBezet legt.
  */
 const GEVALLEN = [
   // ── Vragenlijst ingevuld: telt mee, wat de belstatus ook doet ──────────
