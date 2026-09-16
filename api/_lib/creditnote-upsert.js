@@ -92,22 +92,43 @@ export async function upsertCreditNoteFromTl(tlCreditNoteId) {
  */
 export async function recomputeCreditedAmount(invoiceIds) {
   const stats = { updated: 0, errors: 0 };
+  // Klanten waarvan het gecrediteerde bedrag ECHT verschoven is. Pas na de
+  // lus spiegelen we die naar het LMS: één klant met vier gecrediteerde
+  // facturen hoort één keer doorgerekend te worden, niet vier keer.
+  const geraakteKlanten = new Set();
+
   for (const invoiceId of invoiceIds) {
     if (!invoiceId) continue;
     try {
       const { data: rows } = await supabaseAdmin
         .from('credit_notes').select('amount_total').eq('invoice_id', invoiceId);
       const sum = Math.round((rows || []).reduce((a, r) => a + (Number(r.amount_total) || 0), 0) * 100) / 100;
-      const { error } = await supabaseAdmin
+      // De update geeft de rij terug: zo weten we bij WELKE klant dit hoorde
+      // en of het bedrag daadwerkelijk anders is dan wat er stond. Dat scheelt
+      // de spiegel een ronde bij elke hersync die niets verandert.
+      const { data: naRij, error } = await supabaseAdmin
         .from('invoices')
         .update({ credited_amount: sum, updated_at: new Date().toISOString() })
-        .eq('id', invoiceId);
+        .eq('id', invoiceId)
+        .select('customer_id, credited_amount')
+        .maybeSingle();
       if (error) throw new Error(error.message);
       stats.updated++;
+      if (naRij?.customer_id) geraakteKlanten.add(naRij.customer_id);
     } catch (e) {
       stats.errors++;
       console.error('[creditnote-upsert] recompute', invoiceId, e.message);
     }
   }
+
+  // LMS-spiegel: een creditering verlaagt het restbedrag en kan een factuur
+  // uit de telling halen. Faalzacht — deze aanroep gooit nooit.
+  if (geraakteKlanten.size > 0) {
+    const { spiegelFactuurstandNaWijziging } = await import('./factuurstand-spiegel.js');
+    for (const klantId of geraakteKlanten) {
+      await spiegelFactuurstandNaWijziging(klantId, 'creditnote-recompute');
+    }
+  }
+
   return stats;
 }

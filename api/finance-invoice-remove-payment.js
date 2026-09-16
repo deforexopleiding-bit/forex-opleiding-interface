@@ -14,6 +14,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { tlFetch } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { spiegelFactuurstandNaWijziging } from './_lib/factuurstand-spiegel.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function tlCall(path, body, attempt = 0) {
@@ -106,6 +107,11 @@ export default async function handler(req, res) {
       amount_paid: newPaid, status: newStatus, paid_date: null, updated_at: new Date().toISOString(),
     }).eq('id', inv.id);
     if (upErr) { console.error('[finance-remove-payment] invoice update', upErr.message); return res.status(500).json({ error: 'TL bijgewerkt, maar DB-update faalde: ' + upErr.message }); }
+
+    // 4b. LMS-spiegel: het terugdraaien van een betaling zet de factuur weer
+    // open, en dus kan de mentoropvolging in het LMS er weer één vervallen
+    // factuur bij krijgen. Faalzacht; houdt deze actie nooit tegen.
+    await spiegelFactuurstandNaWijziging(inv.customer_id, 'finance-remove-payment');
 
     // 5. Audit.
     try {

@@ -383,6 +383,35 @@
       </div>
 
       <div id="obSpiegelUitkomst"></div>
+
+      <hr style="margin:24px 0;border:0;border-top:1px solid var(--border)">
+
+      <h3 style="margin:0 0 6px">Factuurstand naar het LMS</h3>
+      <p style="margin:0 0 4px;color:var(--text-2);font-size:13.5px;line-height:1.55">
+        Het LMS krijgt per actieve mentorship-student de stand van zijn facturen: hoeveel
+        er openstaan en hoeveel er <strong>vervallen</strong> zijn. Daar hangt de
+        mentoropvolging aan &mdash; &eacute;&eacute;n vervallen factuur is bespreken, twee of meer
+        is een rood signaal. Het CRM blijft de bron; dit is alleen de spiegel.
+      </p>
+      <p style="margin:0 0 14px;color:var(--text-2);font-size:13.5px;line-height:1.55">
+        <strong>Draai eerst de droogloop.</strong> Die telt alles door en schrijft niets:
+        hoeveel studenten er gekoppeld zijn en via welke weg, hoeveel er 1 en hoeveel er
+        2 of meer vervallen facturen hebben, en welke er niet te koppelen zijn. Er gaat
+        <strong>geen enkel bericht</strong> naar een klant, er verandert niets aan een
+        factuur en niets aan de wanbetalersmotor.
+      </p>
+
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <button type="button" id="obFactDroogloop" class="btn">
+          <i class="ti ti-eye"></i> Droogloop &mdash; alleen tellen
+        </button>
+        <button type="button" id="obFactUitvoeren" class="btn primary">
+          <i class="ti ti-refresh"></i> Nu doorrekenen
+        </button>
+        <span id="obFactStatus" style="font-size:13px;color:var(--text-2)"></span>
+      </div>
+
+      <div id="obFactUitkomst"></div>
     </div>
   </section>
 </div>
@@ -548,6 +577,11 @@
     const sUit = document.getElementById('obSpiegelUitvoeren');
     if (sDro) sDro.addEventListener('click', () => spiegelDraai(true));
     if (sUit) sUit.addEventListener('click', () => spiegelDraai(false));
+
+    const fDro = document.getElementById('obFactDroogloop');
+    const fUit = document.getElementById('obFactUitvoeren');
+    if (fDro) fDro.addEventListener('click', () => factuurstandDraai(true));
+    if (fUit) fUit.addEventListener('click', () => factuurstandDraai(false));
   }
 
   function lmsStatus(tekst, kleur) {
@@ -698,6 +732,197 @@
           + '</tr>';
       }
       html += '</table></div>';
+    }
+
+    host.innerHTML = html;
+  }
+
+  // ── De factuurstand-spiegel ─────────────────────────────────────────────
+  //
+  // Zelfde vorm als de hersync hierboven, met één verschil in wat de uitkomst
+  // moet laten zien: hier gaan de getallen in het LMS GEDRAG sturen (een
+  // mentor die straks niet kan inplannen), dus toont de droogloop niet alleen
+  // hoeveel rijen er komen maar ook hoe ze verdeeld zijn over de twee
+  // drempels van die regel — 1 vervallen factuur en 2 of meer — en welke
+  // studenten er juist NIET aan een klant te koppelen zijn.
+  let _factBezig = false;
+
+  function factStatus(tekst, kleur) {
+    const el = document.getElementById('obFactStatus');
+    if (el) { el.textContent = tekst || ''; el.style.color = kleur || 'var(--text-2)'; }
+  }
+
+  async function factuurstandDraai(dry) {
+    if (_factBezig) return;
+    if (!dry) {
+      const akkoord = window.confirm(
+        'Dit schrijft de factuurstand van elke actieve mentorship-student naar het LMS.\n\n'
+        + 'Er gaat geen bericht naar klanten en er verandert niets aan facturen of aan de '
+        + 'wanbetalersmotor. Doorgaan?');
+      if (!akkoord) return;
+    }
+    _factBezig = true;
+    const dro = document.getElementById('obFactDroogloop');
+    const uit = document.getElementById('obFactUitvoeren');
+    if (dro) dro.disabled = true;
+    if (uit) uit.disabled = true;
+    factStatus(dry ? 'Tellen…' : 'Bezig met doorrekenen…');
+
+    try {
+      const r = await window.AgentShared.apiFetch('/api/factuurstand-spiegel-sync-run', {
+        method: 'POST',
+        body: JSON.stringify({ dry: !!dry }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d) {
+        factRender(d || { ok: false, error: 'HTTP ' + r.status }, dry);
+        factStatus('Mislukt: ' + ((d && d.error) || ('HTTP ' + r.status)), 'var(--rose)');
+        return;
+      }
+      factRender(d, dry);
+      if (d.ok === false) {
+        factStatus('Mislukt — zie hieronder', 'var(--rose)');
+      } else if (d.mislukt) {
+        factStatus(d.mislukt + ' van de ' + (d.studenten_actief_mentorship || 0)
+          + ' mislukt', 'var(--rose)');
+      } else {
+        factStatus(dry ? 'Droogloop klaar — er is niets geschreven' : 'Klaar', 'var(--green)');
+      }
+    } catch (e) {
+      factRender({ ok: false, error: (e && e.message) || String(e) }, dry);
+      factStatus('Mislukt — zie hieronder', 'var(--rose)');
+    } finally {
+      _factBezig = false;
+      if (dro) dro.disabled = false;
+      if (uit) uit.disabled = false;
+    }
+  }
+
+  function factRender(d, dry) {
+    const host = document.getElementById('obFactUitkomst');
+    if (!host) return;
+    if (!d) { host.innerHTML = ''; return; }
+    const esc = (window.AgentShared && window.AgentShared.esc)
+      ? window.AgentShared.esc
+      : (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
+          { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+    // NUL IS EEN METING, GEEN NOODGREEP — zelfde regel als bij de hersync
+    // hierboven. Ging de ronde niet door, dan staat er een streepje en geen 0.
+    const gemeten = d.ok !== false;
+    const tel = (n, w, kleur) => '<span style="margin-right:16px' + (kleur ? ';color:' + kleur : '')
+      + '"><strong>' + (gemeten && Number.isFinite(Number(n)) ? Number(n) : '—')
+      + '</strong> ' + w + '</span>';
+
+    let html = '<div style="background:var(--bg-elev);border:1px solid var(--border);'
+      + 'border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px">'
+      + '<div style="margin-bottom:6px"><strong>'
+      + (!gemeten ? 'Niet uitgevoerd — er is niets geteld'
+                  : (dry ? 'Droogloop — er is niets geschreven' : 'Doorgerekend en geschreven'))
+      + '</strong>'
+      + (gemeten && d.peildatum
+          ? '<span style="color:var(--text-2);font-weight:400"> · peildatum '
+            + esc(d.peildatum) + ' · gratieperiode ' + esc(String(d.gratiedagen))
+            + ' dag(en), dezelfde grens als de wanbetalersmotor</span>'
+          : '')
+      + '</div>'
+      + tel(d.studenten_actief_mentorship, 'actieve mentorship-studenten')
+      + tel(d.gelezen, 'gelezen')
+      + tel(d.niet_gekoppeld, 'niet gekoppeld')
+      + tel(d.onbereikbaar, 'onbereikbaar', gemeten && d.onbereikbaar ? 'var(--rose)' : null)
+      + '</div>';
+
+    // De twee drempels van de LMS-regel.
+    html += '<div style="background:var(--bg-elev);border:1px solid var(--border);'
+      + 'border-radius:10px;padding:12px 14px;margin-bottom:12px;font-size:13.5px">'
+      + '<div style="margin-bottom:6px"><strong>Wat het LMS hiervan zou zien</strong></div>'
+      + tel(d.zonder_vervallen, 'zonder vervallen factuur')
+      + tel(d.met_1_vervallen, 'met 1 vervallen (bespreken)')
+      + tel(d.met_2_of_meer_vervallen, 'met 2 of meer (rood signaal)')
+      + '<div style="margin-top:8px;color:var(--text-2)">'
+      + 'Gekoppeld via: ' + tel(d.via_onboarding, 'onboarding') + tel(d.via_bubble, 'bubble-id')
+      + tel(d.via_email, 'e-mailadres')
+      + '</div>'
+      + '<div style="margin-top:6px;color:var(--text-2)">'
+      + tel(d.facturen_meegeteld, 'openstaande facturen meegeteld')
+      + tel(d.is_historical_meegeteld, 'daarvan is_historical')
+      + '</div>'
+      + '</div>';
+
+    if (d.tabel_ontbreekt) {
+      html += '<div style="background:var(--amber-soft,#fff7e6);border:1px solid var(--border);'
+        + 'padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">'
+        + '<strong>hlms_crm_factuurstand bestaat nog niet in het LMS.</strong> De droogloop '
+        + 'werkt gewoon; schrijven kan pas als de LMS-kant die tabel heeft aangemaakt.</div>';
+    }
+
+    if (d.error) {
+      html += '<div style="background:var(--rose-soft);border:1px solid var(--rose-line);'
+        + 'color:var(--rose);padding:10px 12px;border-radius:8px;margin-bottom:12px;font-size:13px">'
+        + esc(d.error) + '</div>';
+    }
+
+    const tabel = (titel, kop, rijen, maak) => {
+      if (!rijen || !rijen.length) return '';
+      let t = '<div style="font-size:13px;margin-bottom:12px"><div style="margin-bottom:6px">'
+        + '<strong>' + esc(titel) + '</strong></div>'
+        + '<table style="width:100%;border-collapse:collapse"><tr>';
+      for (const k of kop) t += '<th style="text-align:left;padding:4px 8px 4px 0;'
+        + 'color:var(--text-2);font-weight:500">' + esc(k) + '</th>';
+      t += '</tr>';
+      for (const r of rijen) {
+        t += '<tr style="border-top:1px solid var(--border)">';
+        for (const cel of maak(r)) t += '<td style="padding:6px 8px 6px 0">' + cel + '</td>';
+        t += '</tr>';
+      }
+      return t + '</table></div>';
+    };
+
+    html += tabel('Voorbeelden — studenten met vervallen facturen',
+      ['Student', 'Via', 'Vervallen', 'Open', 'Oudste vervaldatum', 'Openstaand'],
+      d.voorbeelden && d.voorbeelden.vervallen,
+      (r) => [esc(r.student), esc(r.via || '—'),
+        '<strong>' + esc(String(r.vervallen)) + '</strong>', esc(String(r.open)),
+        esc(r.oudste_vervaldatum || '—'),
+        r.openstaand_bedrag == null ? '—' : '€ ' + esc(Number(r.openstaand_bedrag).toFixed(2))]);
+
+    html += tabel('Voorbeelden — niet aan een klant te koppelen',
+      ['Student', 'E-mailadres', 'Weg', 'Reden'],
+      d.voorbeelden && d.voorbeelden.niet_gekoppeld,
+      (r) => [esc(r.student), esc(r.email || '—'), esc(r.via || '—'),
+        '<span style="color:var(--text-2)">' + esc(r.reden || '') + '</span>']);
+
+    html += tabel('Voorbeelden — bron onbereikbaar',
+      ['Student', 'Wat er misging'],
+      d.voorbeelden && d.voorbeelden.onbereikbaar,
+      (r) => [esc(r.student), '<span style="color:var(--rose)">' + esc(r.fout || '') + '</span>']);
+
+    // De bestaande no-show-signalen. Die worden NIET aangeraakt; ze staan hier
+    // alleen zodat er een beslissing over genomen kan worden op grond van een
+    // getal. Alleen de droogloop telt ze.
+    if (d.signalen) {
+      if (d.signalen.fout) {
+        html += '<div style="font-size:13px;color:var(--rose);margin-bottom:12px">'
+          + 'Signalen niet te tellen: ' + esc(d.signalen.fout) + '</div>';
+      } else {
+        const rijen = [];
+        const per = d.signalen.per_type_en_status || {};
+        for (const type of Object.keys(per)) {
+          for (const status of Object.keys(per[type])) {
+            rijen.push({ type, status, n: per[type][status] });
+          }
+        }
+        html += tabel('Bestaande signalen in het CRM (alleen geteld, niet aangeraakt)',
+          ['Type', 'Status', 'Aantal'], rijen,
+          (r) => [esc(r.type), esc(r.status), '<strong>' + esc(String(r.n)) + '</strong>']);
+      }
+    }
+
+    const errs = Array.isArray(d.errors) ? d.errors : [];
+    if (errs.length) {
+      html += tabel('Waarom het misging', ['Student', 'Fout'], errs,
+        (e) => [esc(e.student_id || '—'),
+          '<span style="color:var(--rose)">' + esc(e.error || '') + '</span>']);
     }
 
     host.innerHTML = html;

@@ -11,6 +11,7 @@
 import { verifyAdmin, supabaseAdmin } from './supabase.js';
 import { tlFetch, getActiveToken } from './_lib/teamleader-token.js';
 import { getClientIp } from './_lib/audit-customer.js';
+import { recomputeCreditedAmount } from './_lib/creditnote-upsert.js';
 
 const SYNC_FROM = '2026-01-01';
 const DEPARTMENTS = [
@@ -140,12 +141,12 @@ export default async function handler(req, res) {
 }
 
 // Herbereken invoices.credited_amount = som van gekoppelde credit_notes (incl. btw).
+//
+// Hier stond een TWEEDE, eigen kopie van dezelfde lus. Dezelfde som, dezelfde
+// update, alleen een andere logregel — en sinds de LMS-factuurstand-spiegel
+// zou die kopie stilletjes afwijken: de gedeelde versie meldt een creditering
+// aan de spiegel, deze niet. Precies het patroon dat bij computeBedenktijd
+// vier uiteenlopende kopieën opleverde, dus nu doorgeleid naar de bron.
 async function recompute(affectedSet) {
-  for (const invoiceId of affectedSet) {
-    try {
-      const { data: rows } = await supabaseAdmin.from('credit_notes').select('amount_total').eq('invoice_id', invoiceId);
-      const sum = Math.round((rows || []).reduce((a, r) => a + (Number(r.amount_total) || 0), 0) * 100) / 100;
-      await supabaseAdmin.from('invoices').update({ credited_amount: sum, updated_at: new Date().toISOString() }).eq('id', invoiceId);
-    } catch (e) { console.error('[creditnote-sync] recompute', invoiceId, e.message); }
-  }
+  await recomputeCreditedAmount(affectedSet);
 }
