@@ -57,9 +57,12 @@ const zonderUitleg = (t) => t.split('\n')
 // 1 · HET STATUSVOCABULAIRE — één definitie, en niets valt stil weg
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('de drie statussen die niet meer komen', () => {
+test('de statussen die geen reminder meer krijgen', () => {
+  // Exact deze vier, zodat er niets stil bij komt of afgaat. 'wachtlijst' is
+  // er op 16 september bij gekomen: geen plek in de zaal, dus geen 'tot
+  // morgen'. Zie de toelichting bij de lijst in de engine.
   assert.deepEqual([...NIET_MEER_KOMEND_STATUSSEN].sort(),
-    ['geannuleerd', 'no_show', 'switched_to_other_event']);
+    ['geannuleerd', 'no_show', 'switched_to_other_event', 'wachtlijst']);
 });
 
 test('EEN NIEUWE STATUS KAN NIET STIL WEGVALLEN', () => {
@@ -72,13 +75,55 @@ test('EEN NIEUWE STATUS KAN NIET STIL WEGVALLEN', () => {
   assert.ok(m, 'ATTENDEE_STATUSES hoort in de save-validator te staan');
   const alle = m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean).sort();
 
+  // ── ATTENDEE_STATUSES IS NIET HET HELE VOCABULAIRE ──────────────────
+  // Gemeten op 16 september met een query op de DATA in plaats van op de
+  // code: er staan 3 rijen op 'wachtlijst', en die status staat NIET in
+  // ATTENDEE_STATUSES. Deze test was dus groen terwijl 'wachtlijst' buiten
+  // beide lijsten viel en daarmee stil geen reminders kreeg.
+  //
+  // Dat ATTENDEE_STATUSES hem mist is overigens JUIST: die lijst is wat een
+  // automatisatie mag ZETTEN via update_attendee_status, en iemand op de
+  // wachtlijst zetten is geen automatisatie-actie. 'wachtlijst' ontstaat bij
+  // inschrijving als het event vol is (api/_lib/event-signup-processor.js en
+  // api/assessment-submit.js). Daarom staat hij hier apart, met de bron
+  // erbij, in plaats van dat ATTENDEE_STATUSES opgerekt wordt.
+  //
+  // Komt er een status bij die buiten de save-validator ontstaat, dan hoort
+  // hij HIER in deze lijst én in een van de twee engine-lijsten. Beide
+  // asserties hieronder vallen dan rood om.
+  const BUITEN_DE_SAVE_VALIDATOR = ['wachtlijst'];
+  const alleBekend = [...new Set([...alle, ...BUITEN_DE_SAVE_VALIDATOR])].sort();
+
   const gedekt = [...REMINDER_STATUSSEN, ...NIET_MEER_KOMEND_STATUSSEN].sort();
-  assert.deepEqual(gedekt, alle,
+  assert.deepEqual(gedekt, alleBekend,
     'elke bekende attendee-status hoort in precies één van de twee lijsten te zitten');
+  // En elke status die een automatisatie kan ZETTEN is afzonderlijk gedekt,
+  // zodat een toevoeging in de save-validator niet stil kan wegvallen.
+  for (const s of alle) {
+    assert.ok(gedekt.includes(s), s + ' staat in ATTENDEE_STATUSES maar in geen van beide lijsten');
+  }
   // En in precies één: geen overlap.
   for (const s of REMINDER_STATUSSEN) {
     assert.equal(NIET_MEER_KOMEND_STATUSSEN.includes(s), false, s + ' staat in beide lijsten');
   }
+});
+
+test('wachtlijst krijgt GEEN reminders — en dat is een keuze', () => {
+  // Maxim, 16 september: wie op de wachtlijst staat heeft geen plek in de
+  // zaal, dus 'tot morgen, we zien je daar' zou onwaar zijn. Schuift hij door
+  // naar 'aangemeld', dan pikt hij vanaf dat moment alles weer op.
+  assert.equal(komtNietMeer({ status: 'wachtlijst' }), true);
+  assert.equal(REMINDER_STATUSSEN.includes('wachtlijst'), false);
+  // En de reden staat in de code, zodat de volgende lezer niet denkt dat het
+  // een vergetelheid is — dat WAS het namelijk, tot deze regel.
+  const bron = readFileSync(join(ROOT, 'api/_lib/events-automation-engine.js'), 'utf8');
+  assert.match(bron, /'wachtlijst' IS EEN KEUZE, GEEN VERGETELHEID/);
+});
+
+test('een lopende reminder stuurt niets meer bij status wachtlijst', async () => {
+  const { verstuurd, gelogd } = await draaiReminder('wachtlijst');
+  assert.deepEqual(verstuurd, [], 'geen mail en geen WhatsApp naar de wachtlijst');
+  for (const g of gelogd) assert.equal(g.r.skipped, true);
 });
 
 test("'sale' krijgt nog steeds reminders", () => {
