@@ -14,6 +14,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
 import { releaseProportionalForPayment } from './mentor-ledger-engine.js';
 import { createNotification } from './notify.js';
+import { spiegelFactuurstandNaWijziging } from './factuurstand-spiegel.js';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -191,6 +192,13 @@ export async function registerPaymentInternal(opts) {
     console.error('[register-payment-internal] invoice update', upErr.message);
     throw new RegisterPaymentError('db', 'TL+payment OK maar invoice update faalde: ' + upErr.message);
   }
+
+  // 5a. LMS-spiegel: de factuurstand die de mentoropvolging in het LMS
+  // stuurt. Een betaling verandert het restbedrag en dus mogelijk het aantal
+  // vervallen facturen; zonder deze aanroep zou een student die vanochtend
+  // betaald heeft tot vannacht rood blijven staan bij zijn mentor. Faalzacht:
+  // deze aanroep gooit nooit en houdt de betaalregistratie nooit tegen.
+  await spiegelFactuurstandNaWijziging(inv.customer_id, 'register-payment-internal');
 
   // 5b. F5.2 mentor-hook: bij ELKE betaling (partial of full) wordt het
   // evenredige deel van de openstaande bonus-obligaties vrijgegeven via

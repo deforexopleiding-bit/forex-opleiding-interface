@@ -191,6 +191,10 @@
       "schedule": "20 7 * * *"
     },
     {
+      "path": "/api/cron/factuurstand-spiegel-sync",
+      "schedule": "10 2 * * *"
+    },
+    {
       "path": "/api/cron/future-call-reminder",
       "schedule": "0 7 * * *"
     },

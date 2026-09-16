@@ -29,6 +29,7 @@
 import { supabaseAdmin } from '../supabase.js';
 import { tlFetch } from './teamleader-token.js';
 import { upsertInvoiceFromTl } from './invoice-upsert.js';
+import { recomputeCreditedAmount } from './creditnote-upsert.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -126,13 +127,13 @@ export async function creditInvoiceCore(invoiceId, opts = {}) {
         if (ex) await supabaseAdmin.from('credit_notes').update(row).eq('id', ex.id);
         else    await supabaseAdmin.from('credit_notes').insert(row);
 
-        // credited_amount op de factuur herberekenen.
-        const { data: rows } = await supabaseAdmin.from('credit_notes')
-          .select('amount_total').eq('invoice_id', inv.id);
-        const sum = r2((rows || []).reduce((a, r) => a + (Number(r.amount_total) || 0), 0));
-        await supabaseAdmin.from('invoices')
-          .update({ credited_amount: sum, updated_at: new Date().toISOString() })
-          .eq('id', inv.id);
+        // credited_amount op de factuur herberekenen. Hier stond dezelfde som
+        // nog een derde keer uitgeschreven; hij loopt nu via de gedeelde
+        // versie, die ook de LMS-factuurstand-spiegel bijwerkt. Een
+        // creditering verlaagt het restbedrag en kan een factuur uit de
+        // mentoropvolging halen — dat hoort niet van welk endpoint de
+        // creditnota binnenkwam af te hangen.
+        await recomputeCreditedAmount([inv.id]);
         synced = true;
       } else {
         console.error('[invoice-credit-core] creditNotes.info HTTP', cr.status);

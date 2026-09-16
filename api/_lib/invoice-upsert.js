@@ -142,8 +142,14 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     resolvedDealId = sub?.deal_id || null;
   }
 
-  const { data: existing } = await supabaseAdmin.from('invoices').select('id, status, deal_id').eq('tl_invoice_id', inv.id).maybeSingle();
+  const { data: existing } = await supabaseAdmin.from('invoices')
+    .select('id, status, deal_id, amount_paid').eq('tl_invoice_id', inv.id).maybeSingle();
   const oldStatus = existing?.status || null;
+  // `amount_paid` komt er alleen bij voor de LMS-spiegel onderaan: die
+  // moet kunnen zien of er ECHT iets veranderd is. Een uurlijkse
+  // volledige TL-sync raakt elke factuur aan; zonder dit vergelijkpunt
+  // zou hij ook elke factuur doorgeven aan de spiegel.
+  const oldPaid = existing ? (Number(existing.amount_paid) || 0) : null;
 
   // NON-CLOBBER GARANTIE: een reeds gezette invoices.deal_id blijft ALTIJD staan.
   // We COALESCEn op app-niveau met de VERS uit de DB gelezen existing.deal_id als
@@ -188,6 +194,26 @@ export async function upsertInvoiceFromTl(tlInvoiceId, opts = {}) {
     }
   } catch (e) {
     console.warn('[invoice-upsert] sales-bonus hook soft-fail', invId, e?.message || e);
+  }
+
+  // LMS-spiegel: de factuurstand voor de mentoropvolging. Dit is het
+  // choke-point voor alles wat IN Teamleader gebeurt — een betaling die de
+  // boekhouder daar boekt, een creditering, een nieuwe factuur.
+  //
+  // ALLEEN BIJ EEN ECHTE WIJZIGING. De uurlijkse volledige sync loopt langs
+  // elke factuur; zou de spiegel bij elke passage aangeroepen worden, dan
+  // deed hij duizenden keren per dag hetzelfde werk voor niets. Nieuw, of
+  // status veranderd, of het betaalde bedrag veranderd: dat zijn precies de
+  // drie gevallen waarin het aantal openstaande of vervallen facturen kan
+  // schuiven. (Een creditering komt binnen als status-wijziging óf via
+  // recomputeCreditedAmount() in creditnote-upsert.js, dat zijn eigen
+  // aanroep doet.)
+  const echtGewijzigd = !existing
+    || status !== oldStatus
+    || (Number(row.amount_paid) || 0) !== oldPaid;
+  if (echtGewijzigd && row.customer_id) {
+    const { spiegelFactuurstandNaWijziging } = await import('./factuurstand-spiegel.js');
+    await spiegelFactuurstandNaWijziging(row.customer_id, 'invoice-upsert');
   }
 
   return { id: invId, invoice_number: invoiceNumber, status, action };
