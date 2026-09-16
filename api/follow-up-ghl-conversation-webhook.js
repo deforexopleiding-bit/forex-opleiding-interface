@@ -379,25 +379,28 @@ export default async function handler(req, res) {
         // zonder + doorsturen, en de toegang_aanvragen.telefoon staat als E.164).
         const digits = String(rawPhone).replace(/\D/g, '');
         const last9 = digits.slice(-9);
-        // Zoek 'wachtend' aanvraag met matchend telefoonnummer (last-9-match).
-        // v=2: order by created_at ASC → bij meerdere matches (bv. jeffr +
-        // jeffrey-test met zelfde nummer) pakken we deterministisch de OUDSTE.
-        // v=2026-08-31 tiebreaker: id ASC als 2e sortkey — bij 2 rijen met
-        // identieke created_at (dezelfde ms) is "oudste" anders non-deterministisch.
-        // Status='wachtend' filter (al aanwezig) borgt dat een oude gereageerd/
-        // provisioned rij nooit als primair wordt gekozen — nieuwe wachtend-
-        // aanmelding krijgt gegarandeerd haar bevestiging.
-        const { data: rows } = await supabaseAdmin
-          .from('toegang_aanvragen')
-          .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
-          .eq('status', 'wachtend')
-          .order('created_at', { ascending: true })
-          .order('id', { ascending: true })
-          .limit(50);
-        const kandidaten = (rows || []).filter((r) => {
-          const rd = String(r.telefoon || '').replace(/\D/g, '');
-          return rd && (rd === digits || rd.slice(-9) === last9);
-        });
+        // v=2026-09-16 — DB-side match op generated column
+        // toegang_aanvragen.telefoon_last9 (partial index WHERE
+        // status='wachtend'). Was: LIMIT 50 + in-memory filter → bij >50
+        // wachtenden viel de juiste rij buiten de set. Nu: PostgREST filtert
+        // direct op last9 tegen ALLE wachtenden. Zelfde deterministische
+        // sortering (created_at ASC, id ASC) — primair = oudste. Ondergrens
+        // op last9-lengte tegen valse matches op te korte inbound-nummers.
+        let kandidaten = [];
+        let matchStrategy = 'db_last9_indexed';
+        if (last9.length < 6) {
+          matchStrategy = 'skipped_short_inbound';
+        } else {
+          const { data: rows } = await supabaseAdmin
+            .from('toegang_aanvragen')
+            .select('id, voornaam, email, telefoon, soort, provisioned_at, created_at')
+            .eq('status', 'wachtend')
+            .eq('telefoon_last9', last9)
+            .order('created_at', { ascending: true })
+            .order('id', { ascending: true })
+            .limit(50);
+          kandidaten = rows || [];
+        }
         // v=2026-08-30 (dubbele-rijen-fix): ALLE openstaande zusterrijen
         // sluiten, niet alleen kandidaten[0]. Primaire = OUDSTE (created_at
         // ASC) — enige die provisioning + "je bent binnen" krijgt, en alleen
@@ -406,17 +409,17 @@ export default async function handler(req, res) {
         const zusterrijen = kandidaten.slice(1);
         const nowIso = new Date().toISOString();
         console.log('[ghl-conversation-webhook] toegang-gate:',
-          'wachtend-rijen=', rows?.length ?? 0,
+          'strategy=', matchStrategy,
           'kandidaten=', kandidaten.length,
           'primair=', primair?.id || 'geen',
           'zusterrijen=', zusterrijen.length,
           'inbound-last9=', last9);
         pushTrace('gate-lookup', {
-          wachtend_rijen: rows?.length ?? 0,
           kandidaten: kandidaten.length,
           match_id: primair?.id || null,
           zusterrijen_ids: zusterrijen.map((z) => z.id),
           inbound_last9: last9,
+          match_strategy: matchStrategy,
         });
 
         // Zusterrijen sluiten (alleen status-flip, geen provisioning + geen
