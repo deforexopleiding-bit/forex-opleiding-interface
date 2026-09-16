@@ -44,6 +44,61 @@ function isoVoorFilter(waarde) {
 // kop van _lib/geen-gehoor-deadline.js.
 import { plafondMs } from './geen-gehoor-deadline.js';
 
+// ── WIE KOMT NIET MEER ──────────────────────────────────────────────────
+//
+// GEMETEN op 16 september. De tak `time_before_event` in
+// loadCandidatesForAutomation had GEEN enkele statusfilter — anders dan
+// on_call_status (.eq('status','aangemeld')) en on_assessment_completed
+// (.in('status', CONFIRMED_STATUSES)). De drie reminders keken dus niet naar
+// de status.
+//
+// 'Warmup vroeg (waarde)' (120u) en 'Reminder laatste uren' (1u) hebben wel een
+// condition-stap, maar die checkt `assessment_completed`: wie de vragenlijst
+// invulde en daarna geannuleerd werd, glipt er gewoon door. 'Reminder 24u'
+// heeft helemaal geen condition. En `still_registered` in buildConditionState
+// sluit alleen switched_to_other_event en no_show uit, dus 'geannuleerd' leest
+// daar als nog-ingeschreven.
+//
+// Gevolg: wie Dave op 'geen interesse' zette, of wie via
+// 'Geen gehoor - laatste kans' zijn plek verloor, kreeg daarna alsnog 'morgen
+// is het zover' — de dag na een mail die zei dat zijn plek vervallen is.
+//
+// ── WAAROM EEN POSITIEVE LIJST EN GEEN .not('status','in',…) ────────────
+// Bij een negatieve lijst valt een NIEUWE status automatisch in de
+// 'wel sturen'-kant. Precies zo is dit gat ontstaan: het statusvocabulaire
+// groeide, de filter niet. Een positieve lijst faalt de andere kant op — een
+// nieuwe status krijgt geen reminder — en dat is de veilige kant: geen
+// verkeerd bericht naar een klant.
+//
+// DAT MAG ALLEEN NIET STIL GEBEUREN, en daar is een positieve lijst op zich
+// niet genoeg voor. Vandaar dat beide lijsten geëxporteerd zijn en
+// tests/events-reminders-niet-naar-afgezegd.test.js afdwingt dat hun UNIE
+// gelijk is aan ATTENDEE_STATUSES in api/events-automation-save.js. Wie daar
+// een status toevoegt zonder hier te kiezen waar hij hoort, krijgt een rode
+// test in plaats van een reminder die stil wegvalt.
+//
+// De lijst is bewust ALLE bekende statussen min de drie die niet meer komen,
+// en niet CONFIRMED_STATUSES: 'sale' hoort er nu ook bij, en die stil laten
+// vervallen zou betekenen dat iemand die gekocht heeft geen reminder meer
+// krijgt — een gedragswijziging die niemand heeft gevraagd.
+export const NIET_MEER_KOMEND_STATUSSEN = Object.freeze([
+  'geannuleerd', 'no_show', 'switched_to_other_event',
+]);
+export const REMINDER_STATUSSEN = Object.freeze(['aangemeld', 'aanwezig', 'sale']);
+
+/**
+ * Komt deze deelnemer niet meer? Pure functie, één definitie voor de
+ * kandidaat-filter bij enrollment én de stop-guard op lopende runs.
+ *
+ * Een LEGE of onbekende status leest hier als 'komt nog' — dat is dezelfde
+ * kant op als de positieve lijst hierboven faalt, en voorkomt dat een rij met
+ * een rare status stil uit de reminders valt zonder dat iemand het ziet.
+ */
+export function komtNietMeer(attendee) {
+  const s = attendee && attendee.status == null ? '' : String((attendee || {}).status || '');
+  return NIET_MEER_KOMEND_STATUSSEN.includes(s);
+}
+
 const UNIT_MS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 };
 const MAX_SEND_ATTEMPTS = 3;
 const RETRY_BACKOFF_MS = 5 * 60_000;
@@ -250,6 +305,43 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
 
     if (type === 'send_email' || type === 'send_whatsapp') {
       if (await deps.isStepDone(idx)) { idx += 1; attempts = 0; continue; }
+
+      // ── GEEN BERICHT MEER NAAR WIE NIET MEER KOMT ────────────────────
+      //
+      // De kandidaat-filter hierboven houdt nieuwe inschrijvingen tegen, maar
+      // niet een run die AL liep toen de deelnemer afzegde. 'Reminder 24u'
+      // wordt 120 uur voor het event ingeschreven; wordt iemand daarna
+      // geannuleerd, dan stond het bericht al klaar.
+      //
+      // ── DEZE GUARD IS MET OPZET GESCOPED OP SENDS ────────────────────
+      // Hier zit de valkuil van deze wijziging. 'Geen gehoor - laatste kans'
+      // zet in stap 4 ZELF de status op geannuleerd, en stuurt in stap 5 de
+      // interne melding naar Maxim dat de plek vervallen is. Een guard naast
+      // de bestaande switched_to_other_event-guard in stepDueRuns zou die run
+      // afbreken en die melding voorgoed laten verdwijnen — een stille fout
+      // precies in de flow die dit hele project moest opleveren.
+      //
+      // Daarom raakt deze guard ALLEEN send_email en send_whatsapp.
+      // send_internal_notification (intern, naar ons) en
+      // update_attendee_status (de administratie zelf) blijven ongemoeid, en
+      // ook set_tag. tests/events-reminders-niet-naar-afgezegd.test.js draait
+      // de hele geen-gehoor-flow en eist dat stap 5 nog gaat.
+      //
+      // SKIPPEN EN DOORGAAN, niet de run afbreken: een flow die na een
+      // reminder nog een interne stap heeft moet die stap houden. En NIET
+      // STIL — de overgeslagen stap komt met reden en status in het run-log,
+      // dus in de historie op het scherm is te zien wat er niet verstuurd is
+      // en waarom.
+      if (komtNietMeer(attendee)) {
+        await deps.recordLog(idx, type, {
+          ok: true, skipped: true,
+          reason: 'niet-meer-komend: status ' + String(attendee.status || '(leeg)')
+                + ' — geen bericht meer naar wie afgezegd is',
+          attendee_status: attendee.status || null,
+        });
+        idx += 1; attempts = 0; continue;
+      }
+
       let result;
       try {
         // FIX 4: stepIndex meegeven via ctx zodat de deps-wrappers naar de
@@ -476,6 +568,10 @@ async function loadCandidatesForAutomation(auto, now) {
       q = q.or(PLEK_BEZET_OR_FILTER);
     }
   } else if (auto.trigger_type === 'time_before_event') {
+    // GEEN REMINDER NAAR WIE NIET MEER KOMT. Zie het blok bij
+    // REMINDER_STATUSSEN bovenaan dit bestand voor de meting en voor waarom
+    // dit een positieve lijst is en geen .not('status','in',…).
+    q = q.in('status', REMINDER_STATUSSEN);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_not_completed_after') {
     // Fase 4A: attendees X uur na aanmelding zonder voltooid assessment.
@@ -838,6 +934,21 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
               .update(patch)
               .eq('id', attendee.id);
             if (error) return { ok: false, error: error.message };
+
+            // ── DE RIJ IN HET GEHEUGEN MEE BIJWERKEN ─────────────────────
+            // advanceRun leest `attendee` door de hele run; die was tot nu toe
+            // de stand van vóór deze stap. Dat gaat goed zolang niemand ernaar
+            // kijkt, maar de stop-guard op sends hierboven doet dat wél: een
+            // flow die eerst op 'geannuleerd' zet en daarna nog een mail
+            // stuurt, zou die mail op een verouderde status alsnog versturen.
+            // Zo'n flow bestaat vandaag niet — 'Geen gehoor - laatste kans'
+            // heeft na stap 4 alleen nog de interne melding — maar de guard
+            // hoort niet van die volgorde af te hangen.
+            const vorigeStatus     = attendee.status;
+            const vorigeCallStatus = attendee.call_status;
+            if (!statusAlGoed)    attendee.status      = newStatus;
+            if (!belstatusAlGoed) attendee.call_status = newCallStatus;
+
             // Fill: status kan aangepast worden naar 'aangemeld'/'aanwezig' op
             // een rij met assessment_response_id → confirmed rise → event kan
             // vol raken. DB-trigger flipt signups_closed; helper doet Webflow/
@@ -849,9 +960,12 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
             });
             return {
               ok: true,
-              new_status: newStatus, previous_status: attendee.status,
+              // previous_* uit de bewaarde waarden, want attendee is hierboven
+              // net bijgewerkt. Zonder die twee variabelen zou het run-log
+              // 'geannuleerd -> geannuleerd' melden.
+              new_status: newStatus, previous_status: vorigeStatus,
               ...(newCallStatus ? {
-                new_call_status: newCallStatus, previous_call_status: attendee.call_status || null,
+                new_call_status: newCallStatus, previous_call_status: vorigeCallStatus || null,
               } : {}),
             };
           } catch (e) {
