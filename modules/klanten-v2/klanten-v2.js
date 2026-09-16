@@ -1110,6 +1110,17 @@ function wireTopbarActionsToShell() {
       shellRoles = effData.shell_roles;
     }
   }
+  // ── Weergave-scope (Fase 3): schakelde de gebruiker naar een NIET-hoogste
+  //    rol (bv. mentor), dan tonen we exact het beeld van iemand met ALLEEN die
+  //    rol. active_role/primary_role komen vers uit /api/user-effective-roles
+  //    (no-store). scopeToActive is FALSE bij default/reset (active_role ===
+  //    hoogste), single-role en niet-geswitchte union-users → gedrag ongewijzigd.
+  const scopeToActive = !!(effData && effData.active_role && effData.primary_role
+    && effData.active_role !== effData.primary_role);
+  if (scopeToActive && window.DFORoles && typeof window.DFORoles.pickShellRoles === 'function') {
+    const scopedShell = window.DFORoles.pickShellRoles([effData.active_role]);
+    if (scopedShell && scopedShell.length) shellRoles = scopedShell; // gate-1 (S.roles) → alleen de actieve rol
+  }
   if (!shellRoles) {
     // BP2 (2026-09-01) fail-closed: bij netwerk-fout of onbekende rol
     // pickShellRoles retourneert nu null/lege array (was 'super_admin'
@@ -1135,6 +1146,19 @@ function wireTopbarActionsToShell() {
   wireLegacyFallback();
   wireLegacyNavClickCatcher();
   wireTopbarActionsToShell();
+
+  // Weergave-scope óók op de RBAC-permissies (gate-2: permKey via canSync). Zet
+  // de scope, gooi de eerder (union) geladen set weg (regel ~1094) en herlaad
+  // gescoped, zodat visMods/canSync in setRoles de mentor-only permissies zien.
+  // scopeToActive false → setActiveScope(null) = huidige union-/bypass-logica.
+  // Fail-soft: bij een fout blijft de eerder geladen set staan.
+  try {
+    if (window.RBAC && typeof window.RBAC.setActiveScope === 'function') {
+      window.RBAC.setActiveScope(scopeToActive ? effData.active_role : null);
+      if (typeof window.RBAC.resetPermissionsCache === 'function') window.RBAC.resetPermissionsCache();
+      if (typeof window.RBAC.ensurePermissionsLoaded === 'function') await window.RBAC.ensurePermissionsLoaded();
+    }
+  } catch (e) { console.warn('[klanten-v2] RBAC scope reload (fail-soft):', e && e.message); }
 
   window.DFO.setRoles(shellRoles);
 

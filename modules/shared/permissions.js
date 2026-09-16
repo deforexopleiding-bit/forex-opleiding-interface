@@ -32,6 +32,13 @@
   var _permsOk = false;
   var _rolesCache = null;     // string[] | null
   var _loadPromise = null;    // Promise<Set<string>> | null
+  // Weergave-switch (Fase 3): als de gebruiker naar een NIET-hoogste rol
+  // schakelt (bv. mentor), scopet de klanten-v2-shell de zichtbare permissies
+  // tot ALLEEN die rol via setActiveScope(role). null = geen scope = huidige
+  // union-/super_admin-logica (default op elke pagina die deze module laadt).
+  // Puur UI-scoping; de server-side autorisatie (user_has_permission) is
+  // hierdoor NIET geraakt.
+  var _activeScope = null;    // string | null
 
   async function loadPermissions() {
     if (_loadPromise) return _loadPromise;
@@ -43,6 +50,31 @@
         var profile = window.AuthShared ? await window.AuthShared.getProfile() : null;
         var userId = profile && profile.id;
         if (!supa || !userId) return new Set();
+
+        // ── WEERGAVE-SCOPE (Fase 3): actieve rol ≠ super_admin ───────────
+        // De klanten-v2-shell zet _activeScope wanneer de gebruiker naar een
+        // NIET-hoogste rol schakelde (bv. mentor). Dan tonen we exact het beeld
+        // van een gebruiker met ALLEEN die rol: GÉÉN super_admin-bypass en GÉÉN
+        // union — puur de permissies van de gescopede rol + de eigen
+        // user_permissions-overrides. Deze tak staat bewust VÓÓR de super_admin-
+        // bypass hieronder. Server-side autorisatie (user_has_permission) is niet
+        // geraakt; dit is enkel wat de UI toont.
+        if (_activeScope && _activeScope !== 'super_admin') {
+          var scopedRoles = [_activeScope];
+          _rolesCache = scopedRoles;
+          var scopedSet = new Set();
+          var rpRes = await supa.from('role_permissions')
+            .select('feature_key').in('role', scopedRoles).eq('allowed', true);
+          if (rpRes.error) { console.warn('[RBAC] role_permissions (scope):', rpRes.error.message); _permsOk = false; return new Set(); }
+          (rpRes.data || []).forEach(function (p) { scopedSet.add(p.feature_key); });
+          // Per-user allowlist blijft gelden (zoals in de union-tak); fail-soft.
+          var upScoped = await supa.from('user_permissions')
+            .select('feature_key').eq('user_id', userId).eq('allowed', true);
+          if (upScoped.error) { console.warn('[RBAC] user_permissions (scope):', upScoped.error.message); }
+          else (upScoped.data || []).forEach(function (p) { scopedSet.add(p.feature_key); });
+          _permsOk = true;
+          return scopedSet;   // NOOIT Set(['*']) in gescopede modus
+        }
 
         // ── BACKEND-SYMMETRIC SUPER_ADMIN-BYPASS ─────────────────────────
         // Backend-RPC user_has_permission (migratie 002, regel 112-132) is
@@ -134,6 +166,12 @@
 
   function resetPermissionsCache() { _permsCache = null; _rolesCache = null; _loadPromise = null; _permsOk = false; }
 
+  // Weergave-scope zetten (Fase 3). role = een niet-hoogste rol (bv. 'mentor')
+  // → volgende load scopet de zichtbare permissies tot ALLEEN die rol. null /
+  // 'super_admin' → geen scope (huidige union-/bypass-logica). Zet dit vóór
+  // resetPermissionsCache() + ensurePermissionsLoaded() zodat het effect heeft.
+  function setActiveScope(role) { _activeScope = (typeof role === 'string' && role) ? role : null; }
+
   /**
    * Zijn de rechten daadwerkelijk geladen, of weten we het gewoon niet?
    *
@@ -150,6 +188,7 @@
     permissiesGeladen: permissiesGeladen,
     ensurePermissionsLoaded: ensurePermissionsLoaded,
     getUserRoles: getUserRoles,
-    resetPermissionsCache: resetPermissionsCache
+    resetPermissionsCache: resetPermissionsCache,
+    setActiveScope: setActiveScope
   };
 })();
