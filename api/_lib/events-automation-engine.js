@@ -83,6 +83,23 @@ import { plafondMs } from './geen-gehoor-deadline.js';
 // krijgt — een gedragswijziging die niemand heeft gevraagd.
 export const NIET_MEER_KOMEND_STATUSSEN = Object.freeze([
   'geannuleerd', 'no_show', 'switched_to_other_event',
+  // 'wachtlijst' IS EEN KEUZE, GEEN VERGETELHEID — Maxim, 16 september.
+  //
+  // Wie op de wachtlijst staat heeft GEEN plek in de zaal: event-signup-
+  // processor.js:166 en assessment-submit.js:324 zetten hem daarop zodra het
+  // event vol is. 'Tot morgen, we zien je daar' zou dan onwaar zijn, dus die
+  // reminder gaat niet. Schuift hij door naar 'aangemeld', dan pikt hij vanaf
+  // dat moment alles gewoon weer op — de status bepaalt het, niet een vlag
+  // die ergens blijft hangen.
+  //
+  // WAAROM DIT HIER EXPLICIET STAAT. Tot deze regel viel 'wachtlijst' buiten
+  // BEIDE lijsten, en daarmee stil buiten de reminders — precies de stilte
+  // waar deze twee lijsten vanaf moesten. De unie-test kon dat niet zien: die
+  // meet tegen ATTENDEE_STATUSES in api/events-automation-save.js, en daar
+  // staat 'wachtlijst' niet in. Gemeten in de data (16 sep, is_test=false):
+  // 3 rijen op wachtlijst. Het event van 26 september staat op 8/8, dus de
+  // volgende inschrijving daarvoor belandt er automatisch op.
+  'wachtlijst',
 ]);
 export const REMINDER_STATUSSEN = Object.freeze(['aangemeld', 'aanwezig', 'sale']);
 
