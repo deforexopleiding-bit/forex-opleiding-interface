@@ -177,14 +177,18 @@ async function initAuth() {
  * overschrijven ze met de échte user zodat de mock-persona uit
  * ROLES niet aan de gebruiker getoond wordt.
  */
-function paintUser(profile) {
+function paintUser(profile, activeRoleVers) {
   if (!profile) return;
   const name = profile.full_name || profile.email || 'Onbekend';
-  // Zichtbaar rol-label volgt de ACTIEVE rol (profiles.active_role) als die
-  // gezet is, anders de primaire rol. Puur cosmetisch — permissies/menu blijven
-  // op de union (super_admin behoudt volledige toegang). getProfile() levert
-  // active_role al mee via select('*').
-  const role = profile.active_role || profile.role || '—';
+  // Zichtbaar rol-label volgt de ACTIEVE rol. BRON VAN WAARHEID = de VERSE
+  // active_role uit /api/user-effective-roles (no-store + cache-buster sinds
+  // #1608), die de boot al ophaalt en waar renderRoleSwitch ook op leunt.
+  // NIET profile.active_role gebruiken als primaire bron: getProfile() is een
+  // PostgREST select('*')-GET die na de switch-reload nog een gecachete rij kan
+  // teruggeven (dát was de bug — label bleef super_admin terwijl de knop al
+  // "Actief: Mentor" toonde). Fallbacks: het profielobject, dan de primaire rol.
+  // Puur cosmetisch — permissies/menu blijven de union (super_admin volledige toegang).
+  const role = activeRoleVers || profile.active_role || profile.role || '—';
 
   const un = document.getElementById('userName');   if (un) un.textContent = name;
   const ur = document.getElementById('userRole');   if (ur) ur.textContent = role;
@@ -1226,8 +1230,12 @@ function wireTopbarActionsToShell() {
   // eerste render moet expliciet want boot-goMod is idempotent na wrap).
   renderTopbarActions();
 
-  // 5) Vervang shell-sidebar user-persona met échte Supabase-user.
-  paintUser(profile);
+  // 5) Vervang shell-sidebar user-persona met échte Supabase-user. Geef de
+  //    VERSE active_role uit effData (/api/user-effective-roles, no-store) mee
+  //    zodat het rol-label na een switch klopt, ook als getProfile() een
+  //    gecachete rij teruggaf. effData kan null zijn (fetch faalde) → paintUser
+  //    valt dan terug op het profiel.
+  paintUser(profile, effData && effData.active_role);
 
   // 6) v=1eq — meldingen-bel wiring + badge-poller (port v1 sidebar.js:1372-1667).
   //    Auth-only, elke rol. Endpoint: /api/notifications-list (bestaat).
