@@ -30,7 +30,8 @@ import {
   REDEN_MEERDERE_KLANTEN, REDEN_GEEN_KANDIDAAT,
   VIA_ONBOARDING, VIA_BUBBLE, VIA_EMAIL,
   restbedrag, teltMeeAlsOpen, telFactuurstand,
-  isActieveMentorshipStudent, isEchteKlant,
+  isActieveMentorshipStudent, redenNietActief, isEchteKlant,
+  NIET_MENTORSHIP, ZONDER_ACCOUNT, TRAJECT_AFGELOPEN,
   kiesKlant, bepaalOnbereikbaarPatch, isTabelOntbreekt,
 } from '../api/_lib/factuurstand-spiegel.js';
 import { isOverdue } from '../api/_lib/dunning-overdue-guard.js';
@@ -334,21 +335,76 @@ test('een testklant is geen kandidaat', () => {
 // 5) WIE KRIJGT EEN RIJ
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Een student die aan alle drie de eisen voldoet. */
+function student(extra = {}) {
+  return { id: 's1', email: 'piet@example.com', product_soort: 'mentorship',
+    auth_id: 'auth-1', eind_datum: null, ...extra };
+}
+
 test('alleen mentorship-studenten krijgen een rij', () => {
-  assert.equal(isActieveMentorshipStudent({ product_soort: 'mentorship' }, VANDAAG), true);
-  assert.equal(isActieveMentorshipStudent({ product_soort: 'membership' }, VANDAAG), false);
-  assert.equal(isActieveMentorshipStudent({ product_soort: null }, VANDAAG), false);
-  assert.equal(isActieveMentorshipStudent({ product_soort: 'MENTORSHIP' }, VANDAAG), true,
+  assert.equal(isActieveMentorshipStudent(student(), VANDAAG), true);
+  assert.equal(isActieveMentorshipStudent(student({ product_soort: 'membership' }), VANDAAG), false);
+  assert.equal(isActieveMentorshipStudent(student({ product_soort: null }), VANDAAG), false);
+  assert.equal(isActieveMentorshipStudent(student({ product_soort: 'MENTORSHIP' }), VANDAAG), true,
     'hoofdletters mogen het antwoord niet veranderen');
 });
 
+test('een student zonder auth-account krijgt GEEN rij', () => {
+  // Het LMS leest alleen studenten met een account. Een rij voor iemand
+  // zonder account wordt daar nooit gelezen — die hoort er niet te staan.
+  assert.equal(isActieveMentorshipStudent(student({ auth_id: null }), VANDAAG), false);
+  assert.equal(isActieveMentorshipStudent(student({ auth_id: '' }), VANDAAG), false);
+  assert.equal(isActieveMentorshipStudent(student({ auth_id: '   ' }), VANDAAG), false);
+});
+
 test('een afgelopen traject valt af, een lopend of open einde blijft', () => {
-  const m = (eind) => isActieveMentorshipStudent(
-    { product_soort: 'mentorship', eind_datum: eind }, VANDAAG);
+  const m = (eind) => isActieveMentorshipStudent(student({ eind_datum: eind }), VANDAAG);
   assert.equal(m('2026-09-15'), false, 'gisteren afgelopen');
   assert.equal(m('2026-09-16'), true, 'loopt vandaag nog');
   assert.equal(m('2027-01-01'), true);
   assert.equal(m(null), true, 'geen einddatum leest als "loopt door" — de voorzichtige kant');
+});
+
+test('de reden van afvallen is per eis te onderscheiden', () => {
+  // De droogloop telt hierop. Eén emmer "afgevallen" maakt het getal
+  // "zoveel studenten in de lijst" onnarekenbaar.
+  assert.equal(redenNietActief(student(), VANDAAG), null);
+  assert.equal(redenNietActief(student({ product_soort: 'membership' }), VANDAAG), NIET_MENTORSHIP);
+  assert.equal(redenNietActief(student({ auth_id: null }), VANDAAG), ZONDER_ACCOUNT);
+  assert.equal(redenNietActief(student({ eind_datum: '2026-09-15' }), VANDAAG), TRAJECT_AFGELOPEN);
+  assert.equal(redenNietActief(null, VANDAAG), NIET_MENTORSHIP);
+});
+
+test('CONTRACT: de twee uitspraken over "actief" komen uit dezelfde functie', () => {
+  // isActieveMentorshipStudent() en redenNietActief() mogen nooit uiteen
+  // lopen: dan zou de droogloop iets anders melden dan de ronde doet.
+  const gevallen = [
+    student(), student({ product_soort: 'membership' }), student({ auth_id: null }),
+    student({ eind_datum: '2026-09-15' }), student({ eind_datum: '2026-09-16' }), null,
+  ];
+  for (const g of gevallen) {
+    assert.equal(isActieveMentorshipStudent(g, VANDAAG),
+      redenNietActief(g, VANDAAG) === null, JSON.stringify(g));
+  }
+});
+
+test('de spiegel voldoet aan de grenzen van de LMS-tabel', () => {
+  // De doeltabel heeft CHECK-beperkingen: vervallen <= open, en geen
+  // negatieve waarden. Een rij die daar tegenaan loopt wordt geweigerd en
+  // laat de student stilletjes zonder stand achter. Dus hier vastgepind.
+  const situaties = [
+    [], [factuur()], [factuur({ due_date: '2026-12-01' })],
+    [factuur({ status: 'paid', amount_paid: 100 })],
+    [factuur(), factuur({ due_date: '2026-07-01' }), factuur({ due_date: '2027-01-01' })],
+    [factuur({ amount_paid: 150 })],
+  ];
+  for (const set of situaties) {
+    const uit = telFactuurstand(set, { todayIso: VANDAAG });
+    assert.ok(uit.vervallen_aantal <= uit.open_aantal,
+      'vervallen (' + uit.vervallen_aantal + ') > open (' + uit.open_aantal + ')');
+    assert.ok(uit.open_aantal >= 0 && uit.vervallen_aantal >= 0);
+    assert.ok(uit.openstaand_bedrag >= 0);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

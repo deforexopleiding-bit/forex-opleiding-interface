@@ -1,8 +1,8 @@
 # Opvolging mentoren fase 1 — de factuurstand naar het LMS (CRM-kant)
 
-> **Status:** gebouwd, **nog niet echt geschreven.** De eerste schrijfronde
-> gebeurt pas na de droogloop met Maxim. Alles is faalzacht bij een
-> ontbrekende LMS-tabel, dus mergen kan vooruit.
+> **Status:** gebouwd. `hlms_crm_factuurstand` staat sinds 16 september op
+> productie; de eerste schrijfronde gebeurt via de knop, na de droogloop.
+> Alles blijft faalzacht bij een ontbrekende LMS-tabel.
 
 Het LMS krijgt een opvolgsysteem voor mentoren en hoofdmentor. Eén van de
 regels daar: **één vervallen factuur = de mentor moet het bespreken, twee of
@@ -24,6 +24,12 @@ spiegel, en alleen die.
 
 Doeltabel (wordt aan **LMS-kant** aangemaakt; het CRM maakt hem niet en gaat
 er faalzacht mee om zolang hij ontbreekt):
+
+De tabel staat sinds 16 september op productie, met `CHECK`-beperkingen op
+`bron_status`, op `vervallen_aantal <= open_aantal` en op niet-negatieve
+aantallen. RLS: lezen alleen hoofdmentor/admin, schrijven alleen via de
+service role — wat de spiegel gebruikt. Een toets pint vast dat de teller
+nooit een rij oplevert die tegen die beperkingen aan loopt.
 
 ```sql
 hlms_crm_factuurstand (
@@ -137,11 +143,21 @@ tijdstempel mee. Bestond er nog geen rij, dan komt er wel één (nullen +
 rij, want geen rij ziet er in het LMS identiek uit als een student die nog
 nooit gespiegeld is.
 
-**Wie krijgt een rij:** elke `hlms_student` met `product_soort='mentorship'`
-waarvan het traject nog loopt (`eind_datum` leeg of ≥ vandaag). Er is aan
-LMS-kant géén `actief`-kolom op `hlms_student` (wel op `hlms_personeel`),
-vandaar die afleiding — en vandaar dat de droogloop apart meldt hoeveel
-studenten er op welke grond afvielen.
+**Wie krijgt een rij:** elke `hlms_student` die aan **drie** eisen voldoet —
+`product_soort='mentorship'`, **`auth_id` gevuld**, en een traject dat nog
+loopt (`eind_datum` leeg of ≥ vandaag). Dat is precies de verzameling die het
+LMS leest (bevestigd 16 september); de spiegel hoort geen rijen te schrijven
+die daar nooit gelezen worden. Zonder `auth_id` bestaat de student wel als
+rij, maar kan er niemand inloggen — dat zijn de handmatige adminrijen en half
+afgeronde uitnodigingen.
+
+Er is aan LMS-kant géén `actief`-kolom op `hlms_student` (wel op
+`hlms_personeel`), vandaar die afleiding. `isActieveMentorshipStudent()` en
+`redenNietActief()` zijn één functie met twee ingangen, zodat de droogloop
+niet iets anders kan melden dan de ronde doet: die telt per grond
+(`afgevallen_membership` / `afgevallen_zonder_account` /
+`afgevallen_traject_afgelopen`), want anders is "er staan er maar zoveel in de
+lijst" niet na te rekenen.
 
 ## 3. Wanneer
 
@@ -192,7 +208,9 @@ behalve schrijven, en geeft terug:
 * `facturen_meegeteld` en `is_historical_meegeteld`;
 * voorbeelden (max 10 per geval) van studenten mét vervallen facturen, van
   niet-koppelbare studenten en van onbereikbare bronnen;
-* de telling van `student_signals` per type en status (zie §5).
+* de telling van `student_signals` per type en status (zie §5);
+* en waaróm de rest van de LMS-studenten afviel: geen mentorship, geen
+  account, of traject afgelopen.
 
 **De matchgraad is met opzet niet in dit document ingevuld.** Deze sessie
 heeft geen toegang tot de productiedatabank, en een getal uit een schatting
@@ -224,9 +242,8 @@ hoort vóór de eerste schrijfronde te gebeuren.
 
 ## 7. Volgorde van in gebruik nemen
 
-1. **Mergen.** Alles is faalzacht bij een ontbrekende LMS-tabel; de cron
-   draait en meldt netjes dat de tabel er nog niet is.
-2. **LMS-kant maakt `hlms_crm_factuurstand` aan.**
+1. ~~Mergen.~~ ✅
+2. ~~LMS-kant maakt `hlms_crm_factuurstand` aan.~~ ✅ 16 september.
 3. **Droogloop** via de knop in de Onboarding-hub. Matchgraad en verdeling
    met Maxim doornemen; hier valt ook de beslissing over `is_historical` en
    over de oude `student_signals`-signalen.

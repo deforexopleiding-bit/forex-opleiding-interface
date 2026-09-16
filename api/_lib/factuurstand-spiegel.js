@@ -87,7 +87,7 @@ export const PRODUCT_MENTORSHIP = 'mentorship';
 // — dat is precies de fout die de onboarding-spiegel op 25 rijen liet vallen.
 const STUDENT_KOLOMMEN =
   'id, email, voornaam, achternaam, product_soort, start_datum, eind_datum, ' +
-  'bubble_user_id, crm_onboarding_id';
+  'auth_id, bubble_user_id, crm_onboarding_id';
 
 const FACTUUR_KOLOMMEN =
   'id, customer_id, amount_total, amount_paid, credited_amount, due_date, ' +
@@ -192,24 +192,55 @@ export function telFactuurstand(facturen, { todayIso, graceDays = DEFAULT_GRACE_
 /**
  * Hoort deze student een rij in de spiegel te hebben?
  *
- * Twee eisen. MENTORSHIP, want membership-studenten hebben geen mentor die
- * ze opvolgt. En ACTIEF, wat hier betekent: het traject is nog niet
- * afgelopen. Een eind_datum die ontbreekt leest als "loopt door" — dat is de
- * voorzichtige kant, want een student die ten onrechte in de lijst staat is
- * zichtbaar en corrigeerbaar, eentje die er ten onrechte uit valt niet.
+ * DRIE eisen, en ze komen alle drie van de leeskant. Het LMS leest precies
+ * deze verzameling (bevestigd door Maxim, 16 september 2026), en de spiegel
+ * hoort geen rijen te schrijven die daar nooit gelezen worden:
+ *
+ *   1. MENTORSHIP — membership-studenten hebben geen mentor die ze opvolgt.
+ *   2. AUTH_ID GEVULD — zonder account bestaat de student in het LMS wel als
+ *      rij, maar is er niemand die kan inloggen en niets wat er getoond
+ *      wordt. Dit zijn de handmatige adminrijen en half afgeronde
+ *      uitnodigingen (zie api/_lib/dfo-lms-uitnodiging.js).
+ *   3. TRAJECT NOG NIET AFGELOPEN — een eind_datum die ontbreekt leest als
+ *      "loopt door". Dat is de voorzichtige kant: een student die ten
+ *      onrechte in de lijst staat is zichtbaar en corrigeerbaar, eentje die
+ *      er ten onrechte uit valt niet.
  *
  * Er is aan LMS-kant GEEN `actief`-kolom op hlms_student (wel op
- * hlms_personeel). Vandaar deze afleiding uit de einddatum, en vandaar dat
- * de droogloop apart meldt hoeveel studenten er op welke grond afvielen.
+ * hlms_personeel). Vandaar deze afleiding, en vandaar dat de droogloop apart
+ * meldt hoeveel studenten er op welke van de drie gronden afvielen — anders
+ * is "er staan er maar zoveel in de lijst" niet na te rekenen.
  *
  * PURE.
  */
 export function isActieveMentorshipStudent(student, todayIso) {
-  if (!student) return false;
-  if (String(student.product_soort || '').trim().toLowerCase() !== PRODUCT_MENTORSHIP) return false;
+  return redenNietActief(student, todayIso) === null;
+}
+
+// De gronden waarop een student buiten de spiegel valt. Eén per eis, zodat
+// de droogloop ze uit elkaar kan houden.
+export const NIET_MENTORSHIP  = 'niet-mentorship';
+export const ZONDER_ACCOUNT   = 'zonder-auth-account';
+export const TRAJECT_AFGELOPEN = 'traject-afgelopen';
+
+/**
+ * Waarom valt deze student af? `null` = hij valt niet af.
+ *
+ * Dezelfde regel als isActieveMentorshipStudent(), maar dan met het antwoord
+ * op de vraag "waarom". Bewust één functie voor allebei: twee losse zouden
+ * uiteen kunnen lopen, en dan zegt de droogloop iets anders dan de ronde doet.
+ *
+ * PURE.
+ */
+export function redenNietActief(student, todayIso) {
+  if (!student) return NIET_MENTORSHIP;
+  if (String(student.product_soort || '').trim().toLowerCase() !== PRODUCT_MENTORSHIP) {
+    return NIET_MENTORSHIP;
+  }
+  if (!String(student.auth_id || '').trim()) return ZONDER_ACCOUNT;
   const eind = student.eind_datum ? String(student.eind_datum).slice(0, 10) : null;
-  if (!eind) return true;
-  return eind >= String(todayIso).slice(0, 10);
+  if (eind && eind < String(todayIso).slice(0, 10)) return TRAJECT_AFGELOPEN;
+  return null;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

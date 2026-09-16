@@ -830,6 +830,16 @@
       + tel(d.gelezen, 'gelezen')
       + tel(d.niet_gekoppeld, 'niet gekoppeld')
       + tel(d.onbereikbaar, 'onbereikbaar', gemeten && d.onbereikbaar ? 'var(--rose)' : null)
+      // Waarom de rest afvalt. Zonder deze drie is "er staan er maar zoveel
+      // in de lijst" niet na te rekenen, en dat is precies de vraag die je
+      // bij een droogloop stelt.
+      + '<div style="margin-top:8px;color:var(--text-2)">Van de '
+      + (gemeten && Number.isFinite(Number(d.studenten_in_lms)) ? Number(d.studenten_in_lms) : '—')
+      + ' studenten in het LMS vielen af: '
+      + tel(d.afgevallen_membership, 'geen mentorship')
+      + tel(d.afgevallen_zonder_account, 'zonder account')
+      + tel(d.afgevallen_traject_afgelopen, 'traject afgelopen')
+      + '</div>'
       + '</div>';
 
     // De twee drempels van de LMS-regel.

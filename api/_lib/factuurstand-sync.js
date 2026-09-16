@@ -42,7 +42,8 @@ import {
   BRON_GELEZEN, BRON_NIET_GEKOPPELD, BRON_ONBEREIKBAAR,
   SPIEGEL_GESCHREVEN, SPIEGEL_BEHOUDEN, SPIEGEL_MISLUKT, SPIEGEL_TABEL_ONTBREEKT,
   REDEN_GEEN_KANDIDAAT,
-  isActieveMentorshipStudent, isEchteKlant, teltMeeAlsOpen, isTabelOntbreekt,
+  redenNietActief, isEchteKlant, teltMeeAlsOpen,
+  isTabelOntbreekt, NIET_MENTORSHIP, ZONDER_ACCOUNT, TRAJECT_AFGELOPEN,
   spiegelFactuurstandVoorStudent, leesOpenFacturen, maakContext,
 } from './factuurstand-spiegel.js';
 
@@ -187,7 +188,10 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
 
     // Wat er aan studenten gevonden is.
     studenten_in_lms: 0, studenten_actief_mentorship: 0,
-    afgevallen_membership: 0, afgevallen_traject_afgelopen: 0,
+    // Waarom een student buiten de spiegel valt, per grond. Op één hoop is
+    // "er staan er maar zoveel in de lijst" niet na te rekenen.
+    afgevallen_membership: 0, afgevallen_zonder_account: 0,
+    afgevallen_traject_afgelopen: 0,
 
     // Wat er geschreven zou worden / geschreven is.
     geschreven: 0, behouden: 0, mislukt: 0, overtollig_verwijderd: 0,
@@ -240,10 +244,11 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
 
     let studenten = [];
     for (const s of studentenRuw) {
-      if (isActieveMentorshipStudent(s, ctx.todayIso)) { studenten.push(s); continue; }
-      const soort = String(s?.product_soort || '').trim().toLowerCase();
-      if (soort !== 'mentorship') result.afgevallen_membership++;
-      else result.afgevallen_traject_afgelopen++;
+      const reden = redenNietActief(s, ctx.todayIso);
+      if (reden === null) { studenten.push(s); continue; }
+      if      (reden === NIET_MENTORSHIP)   result.afgevallen_membership++;
+      else if (reden === ZONDER_ACCOUNT)    result.afgevallen_zonder_account++;
+      else if (reden === TRAJECT_AFGELOPEN) result.afgevallen_traject_afgelopen++;
     }
     if (studenten.length > CAP) {
       result.overgeslagen_door_limiet = studenten.length - CAP;
