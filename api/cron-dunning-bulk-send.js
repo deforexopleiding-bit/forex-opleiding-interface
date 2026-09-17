@@ -30,6 +30,7 @@
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { sendTemplate } from './_lib/meta-whatsapp.js';
+import { haalHoldStand, holdBlokkade, holdStandSamenvatting } from './_lib/lms-hold.js';
 import { buildSendComponents } from './_lib/meta-template-components-builder.js';
 import { buildMetaVariablesFromMapping } from './_lib/template-variables.js';
 import { upsertOutboundConversation } from './_lib/conv-upsert.js';
@@ -86,6 +87,9 @@ export default async function handler(req, res) {
     sent           : 0,
     failed         : 0,
     skipped        : 0,
+    // Apart van `skipped`: een hold is UITGESTELD, niet overgeslagen. De
+    // ontvanger blijft pending en gaat de volgende ronde mee.
+    on_hold        : 0,
     jobs_touched   : 0,
     jobs_completed : 0,
     errors         : [],
@@ -120,6 +124,27 @@ export default async function handler(req, res) {
       .limit(BATCH_SIZE);
     if (recErr) throw new Error('recipients fetch: ' + recErr.message);
 
+    // ── ON HOLD IN HET LMS ────────────────────────────────────────────
+    // Een goedgekeurde bulk-aanmaanronde kan uren of dagen oud zijn. Zet de
+    // hoofdmentor in die tussentijd een student on hold, dan mag die klant
+    // alsnog niets krijgen — een goedkeuring van gisteren is geen vrijbrief
+    // voor vandaag. Zelfde plek en zelfde vorm als de bestaande send-time
+    // hercheck op "heeft de klant intussen betaald".
+    //
+    // Eén bevraging per cron-run, vóór de lus. Is het LMS onbereikbaar, dan
+    // blijven de betrokken ontvangers gewoon op 'pending' staan (zie de
+    // skip-tak hieronder) en gaan ze de volgende ronde mee.
+    const onHoldRedenen = new Map();   // recipient_id → reden, voor één logregel
+    let holdStand = null;
+    try {
+      holdStand = await haalHoldStand();
+      console.log('[bulk-send] ' + holdStandSamenvatting(holdStand));
+    } catch (e) {
+      console.error('[bulk-send] hold-stand ophalen gooide: ' + (e?.message || e));
+      const { BRON_ONBEREIKBAAR } = await import('./_lib/lms-hold.js');
+      holdStand = { bron_status: BRON_ONBEREIKBAAR, holds: new Map(), vangnet: new Set() };
+    }
+
     if (!pendingRecips || pendingRecips.length === 0) {
       // Geen pending → check of we jobs kunnen completen.
       for (const job of jobs) {
@@ -151,6 +176,26 @@ export default async function handler(req, res) {
 
     for (const rec of pendingRecips) {
       summary.processed++;
+
+      // 3a-0) On hold in het LMS? Dan gaat er niets uit.
+      //
+      // BEWUST VÓÓR de claim, en bewust ZONDER statuswijziging. De ontvanger
+      // blijft gewoon 'pending' staan en gaat de volgende ronde mee — een
+      // hold is tijdelijk, dus 'skipped' zou te veel zeggen: dan krijgt de
+      // klant zijn aanmaning ook ná de pauze nooit meer. Door vóór de claim
+      // te toetsen is er ook geen statuswissel heen-en-weer, en dat scheelt
+      // bij een lange pauze honderden schrijfacties per dag.
+      //
+      // Gevolg dat een mens moet weten: zolang de pauze loopt blijft de job
+      // openstaan (er zijn immers nog pending ontvangers). Dat is correct —
+      // er is nog wél iets te versturen, alleen nu niet.
+      const holdBlok = holdBlokkade(holdStand, rec.customer_id);
+      if (holdBlok) {
+        summary.on_hold++;
+        onHoldRedenen.set(rec.id, holdBlok.reden);
+        continue;
+      }
+
       // 3a) ATOMISCHE CLAIM.
       const { data: claim, error: claimErr } = await supabaseAdmin
         .from('dunning_bulk_recipients')
@@ -404,7 +449,15 @@ export default async function handler(req, res) {
       } catch (_) { /* fail-soft */ }
     }
 
+    if (summary.on_hold > 0) {
+      const eerste = Array.from(onHoldRedenen.values())[0];
+      console.log('[bulk-send] ' + summary.on_hold + ' ontvanger(s) uitgesteld — '
+        + 'on hold in het LMS (bv. "' + eerste + '"). Ze blijven pending en '
+        + 'gaan mee zodra de pauze afloopt.');
+    }
+
     // 4) Per touched job: check of 'ie leeg is → completed.
+
     for (const jid of touchedJobIds) {
       const { count: leftover } = await supabaseAdmin
         .from('dunning_bulk_recipients')
