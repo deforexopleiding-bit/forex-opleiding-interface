@@ -12,8 +12,14 @@
 
 const NAVY = '#10284A';
 const GEEL = '#FFC21A';
+// 2026-09-17 — canonieke URL (was forex-opleiding-interface.vercel.app die een
+// 307-redirect deed naar deze host; sommige mail-clients volgen redirects niet
+// bij <img>-tags en tonen dan een broken-image-plaatje). Bevestigd 200 OK op
+// crm.deforexopleiding.nl/dfo-logo-email.png (23 KB PNG, 360×204 native px).
 const LOGO_URL = process.env.MAIL_LOGO_URL
-  || 'https://forex-opleiding-interface.vercel.app/dfo-logo-email.png';
+  || 'https://crm.deforexopleiding.nl/dfo-logo-email.png';
+const LOGO_W = 150;
+const LOGO_H = 85; // 150 / (360/204) ≈ 85 — native aspect ratio behouden
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => (
@@ -65,7 +71,7 @@ export function renderAfspraakMail({ titel, inleiding = '', details = [], cta = 
         </td></tr>
         <!-- footer -->
         <tr><td style="padding:20px 30px 26px;border-top:1px solid #edf0f4;text-align:center">
-          <img src="${esc(LOGO_URL)}" alt="De Forex Opleiding" width="150" style="width:150px;max-width:60%;height:auto;opacity:.9">
+          <img src="${esc(LOGO_URL)}" alt="De Forex Opleiding" width="${LOGO_W}" height="${LOGO_H}" style="width:${LOGO_W}px;max-width:60%;height:auto;opacity:.9;display:inline-block;border:0" />
         </td></tr>
       </table>
     </td></tr>
