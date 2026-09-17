@@ -257,6 +257,14 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
   let nextRunAt = null;
   let attempts = run.attempts || 0;
   let lastError = run.last_error || null;
+  // ── EEN DEFINITIEVE WEIGERING MAG NIET WEGGEPOETST WORDEN ─────────────
+  // `lastError` wordt bij elke geslaagde volgende stap op null gezet (zie de
+  // send-tak en de set_tag/update/notification-tak). Een permanent geweigerde
+  // WhatsApp op stap 1 zou dus onzichtbaar worden zodra stap 3 lukt — en dat
+  // is precies hoe run 994c0636 op 'completed' met last_error NULL eindigde
+  // terwijl Meta de WhatsApp had afgewezen. Deze variabele blijft staan en
+  // wint bij het teruggeven.
+  let permanenteWeigering = null;
 
   for (let i = 0; i < maxIterations; i++) {
     if (idx >= steps.length) { status = 'completed'; nextRunAt = null; break; }
@@ -373,10 +381,56 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
         await deps.recordLog(idx, type, result);
         idx += 1; attempts = 0; lastError = null; continue;
       }
-      if (result && (result.skipped || result.permanent)) {
-        // skipped: no-phone / template niet APPROVED — niets om te retry-en.
-        // permanent: Meta 4xx / bekende validatie-code (zie events-send.js).
-        // Retry zou exact dezelfde payload sturen → exact dezelfde error.
+      // skipped ZONDER permanent: er was niets te versturen (geen nummer,
+      // template niet APPROVED). Geen fout, niets om te melden.
+      if (result && result.skipped && !result.permanent) {
+        await deps.recordLog(idx, type, result);
+        idx += 1; attempts = 0; continue;
+      }
+      // ── EEN DEFINITIEVE WEIGERING IS EEN FOUT, GEEN 'SKIP' ───────────
+      //
+      // GEMETEN 16 september, run 994c0636 ('Welkom + vragenlijst') op
+      // telefoon '0472223752':
+      //   stap 0  send_email     ok:true
+      //   stap 1  send_whatsapp  ok:FALSE — Meta 131009 "Het telefoonnummer is
+      //           onjuist ingedeeld", permanent:true
+      // en tóch stond die run op 'completed' met last_error NULL. Op het
+      // scherm zag dat eruit alsof alles gelukt was.
+      //
+      // De oorzaak stond hier: `skipped` en `permanent` zaten in één tak, en
+      // die tak liet `lastError` ongemoeid. Een weigering door Meta is geen
+      // 'er was niets te doen' — we hebben het geprobeerd en het is afgewezen.
+      //
+      // DRIE DINGEN, EN DE DERDE IS DE VALKUIL:
+      //   1. de reden komt op de RUN (via permanenteWeigering, die niet door
+      //      een latere geslaagde stap gewist wordt);
+      //   2. de reden komt op de DEELNEMER, zodat het in de lijst staat en
+      //      niet drie klikken diep in het staplogboek;
+      //   3. de flow gaat gewoon DOOR. De mail van stap 0 is al weg en de
+      //      volgende stappen horen te lopen. Afbreken op een mislukte
+      //      WhatsApp zou een halve flow achterlaten — erger dan het
+      //      probleem. Doorgaan, maar luid registreren.
+      if (result && result.permanent) {
+        await deps.recordLog(idx, type, result);
+        const reden = (result && result.error) || 'definitief geweigerd zonder reden';
+        permanenteWeigering = 'stap ' + idx + ' ' + type + ': ' + reden;
+        // Alleen WhatsApp markeert de deelnemer als onbereikbaar: een
+        // geweigerd e-mailadres is een ander probleem met een andere
+        // oplossing, en die samen in één markering gooien maakt de melding
+        // onbruikbaar. Fail-soft — een mislukte markering mag de flow niet
+        // stoppen, dat zou punt 3 hierboven ongedaan maken.
+        if (type === 'send_whatsapp' && typeof deps.markeerWhatsappOnbereikbaar === 'function') {
+          try {
+            await deps.markeerWhatsappOnbereikbaar({ attendee, reden, stepIndex: idx });
+          } catch (e) {
+            console.error('[events-automation] markeren onbereikbaar faalde:', e?.message || e);
+          }
+        }
+        idx += 1; attempts = 0; continue;
+      }
+      // Overgebleven geval: permanent niet gezet én niet skipped → tijdelijk,
+      // dus retry-waardig. Ongewijzigd.
+      if (result && result.skipped) {
         await deps.recordLog(idx, type, result);
         idx += 1; attempts = 0; continue;
       }
@@ -430,7 +484,9 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
     status,
     next_run_at: nextRunAt,
     attempts,
-    last_error: lastError,
+    // De permanente weigering wint: die mag niet verdwijnen doordat een
+    // latere stap wél lukte. Zie de toelichting bij permanenteWeigering.
+    last_error: permanenteWeigering || lastError,
     completed_at: status === 'completed' ? new Date(nowMs) : (run.completed_at || null),
   };
 }
@@ -727,7 +783,7 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         // 'geen_reactie_sinds_belstatus' (call_status_at is het nulpunt) en
         // voor de idempotency van update_attendee_status.call_status.
             // is_test hoort erbij voor isPlekBezet (buildConditionState.plek_bevestigd).
-        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id, is_test, call_status, call_status_at')
+        .select('id, event_id, first_name, last_name, email, phone, choice_token, customer_id, status, assessment_response_id, is_test, call_status, call_status_at, follow_up_flagged, follow_up_reason')
         .eq('id', run.attendee_id)
         .maybeSingle();
       if (!attendee) {
@@ -901,6 +957,53 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         },
         // Fase 4A: update_attendee_status — UPDATE event_attendees.status.
         // Idempotent: skip wanneer status al gelijk.
+        // ── 'WHATSAPP ONBEREIKBAAR' OP DE DEELNEMER ZELF ──────────────
+        //
+        // Een Meta-weigering stond tot nu toe alleen in het staplogboek van de
+        // run: drie klikken diep, en alleen als je wist dat je moest kijken.
+        // Met 159 rijen met een onbruikbaar nummer is dat niet te overzien.
+        //
+        // De markering gebruikt follow_up_flagged + follow_up_reason — de
+        // bestaande 'needs_review'-vlag uit F1, die al in de opvolglijsten
+        // gerenderd wordt. Geen nieuwe kolom, geen migratie.
+        //
+        // TWEE DINGEN DIE HET NIET MAG DOEN:
+        //   · een bestaande reden overschrijven. Wie al gevlagd stond om een
+        //     andere reden houdt die; de markering komt ernaast.
+        //   · bij elke run opnieuw aangroeien. Staat de markering er al, dan
+        //     verandert er niets meer.
+        markeerWhatsappOnbereikbaar: async ({ attendee: att, reden }) => {
+          const MARKERING = 'WHATSAPP_ONBEREIKBAAR';
+          const bestaand  = typeof att.follow_up_reason === 'string' ? att.follow_up_reason : '';
+          // Idempotent: al gemarkeerd → niets te doen. Voorkomt een update per
+          // run en een reden die bij elke poging langer wordt.
+          if (bestaand.includes(MARKERING)) return { ok: true, ongewijzigd: true };
+
+          const kort = String(reden || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+          const nieuweReden = bestaand
+            ? bestaand + ' · ' + MARKERING + ': ' + kort
+            : MARKERING + ': ' + kort;
+
+          const { error } = await supabaseAdmin
+            .from('event_attendees')
+            .update({
+              follow_up_flagged: true,
+              follow_up_reason : nieuweReden.slice(0, 500),
+            })
+            .eq('id', att.id);
+          if (error) {
+            // Luid, niet stil: dit IS de zichtbaarheidsmaatregel, dus als hij
+            // faalt moet dat in de logs staan.
+            console.error('[events-automation] onbereikbaar-markering niet opgeslagen'
+              + ' (attendee ' + att.id + '):', error.message);
+            return { ok: false, error: error.message };
+          }
+          // Ook in het geheugen, zodat een tweede weigering in dezelfde run
+          // niet nog een keer dezelfde markering aanzet.
+          att.follow_up_flagged = true;
+          att.follow_up_reason  = nieuweReden.slice(0, 500);
+          return { ok: true };
+        },
         updateAttendeeStatus: async (step) => {
           const newStatus = step?.config?.new_status;
           if (!newStatus) return { ok: false, error: 'new_status ontbreekt' };
