@@ -1,5 +1,43 @@
 // api/cron/noshow-detect.js
 //
+// ╔══════════════════════════════════════════════════════════════════════╗
+// ║  UITGEZET — 17 september 2026. DEZE CRON MAAKT GEEN SIGNALEN MEER.   ║
+// ╚══════════════════════════════════════════════════════════════════════╝
+//
+// ÉÉN BRON VOOR SIGNALEN. De opvolging van studenten gebeurt voortaan
+// volledig in het LMS: `hlms_signaal`, zichtbaar op het hoofdmentorbord
+// (https://lms.deforexopleiding.nl/hoofdmentor/). Daar bestaat de regel
+// `twee_noshows_op_rij` al en komt `eerste_sessie_no_show` erbij.
+//
+// Twee systemen die over dezelfde student iets zeggen is erger dan één die
+// het zegt op een plek waar niet iedereen kijkt: een no-show die in het CRM
+// op 'open' staat en in het LMS is afgehandeld (of andersom) laat niemand
+// meer zien wat er écht nog moet gebeuren. Vandaar: de CRM-kant gaat uit,
+// niet allebei half aan.
+//
+// WAT ER IS GEBEURD, EN WAT NIET:
+//   • De cron-entry is uit `vercel.json` gehaald, en de handler hieronder
+//     stopt METEEN — ook als iemand 'm met de hand aanroept. Twee sloten,
+//     want een cron-entry is zo weer teruggezet.
+//   • Het BESTAND blijft staan, inclusief de hele leeslogica. Dit is de
+//     huisregel voor uitgezette crons (zie AUDIT-VOLLEDIG.md): weggooien
+//     maakt terugdraaien duur, en de LMS-leesfuncties eronder zijn
+//     zelfstandig nog juist.
+//   • De BESTAANDE signalen worden NIET verwijderd. Ze worden één keer
+//     afgesloten door
+//     docs/sql-migrations/2026-09-17-noshow-signalen-naar-lms.sql, dat eerst
+//     elke geraakte id in een logtabel zet zodat het terug te draaien is.
+//   • De auto-afsluiting van onboardings via de eerste AFGERONDE LMS-sessie
+//     (api/cron/onboarding-eerste-sessie-afronden.js) blijft gewoon lopen.
+//     Die is een andere cron, met een eigen watermerk en een eigen bron; hij
+//     leest `student_signals` niet en is hier niet aangeraakt.
+//
+// TERUGZETTEN (mocht dat ooit nodig zijn): haal het `UITGEZET`-blok in de
+// handler weg en zet de entry terug in vercel.json. Verder is er niets
+// gewijzigd aan de logica hieronder.
+//
+// ── Hieronder de oorspronkelijke toelichting, ongewijzigd ────────────────
+//
 // Dagelijkse cron — detecteert nieuwe no-shows in het LMS (hlms_sessie met
 // status 'no_show') en zet er een auto-signal voor in student_signals
 // (type='no_show', source='auto_noshow').
@@ -96,6 +134,26 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  // ── UITGEZET ────────────────────────────────────────────────────────────
+  // Zie de kop van dit bestand. Geen 4xx maar een gewone 200: dit is geen
+  // fout, het is een beslissing. Een cron die met een foutcode eindigt gaat
+  // in de monitoring rinkelen, en dan gaat iemand zoeken naar een storing
+  // die er niet is.
+  //
+  // Het watermerk (`app_settings.noshow_detect_since`) wordt bewust NIET
+  // verzet en niet gewist: wie deze cron ooit terugzet, hervat precies waar
+  // hij gebleven was in plaats van een gat te hebben of alles opnieuw te
+  // doen.
+  return res.status(200).json({
+    ok: true,
+    uitgezet: true,
+    sinds: '2026-09-17',
+    reden: 'No-shows worden opgevolgd in het LMS (hoofdmentorbord). Deze cron '
+      + 'maakt geen student_signals meer aan; zie de kop van dit bestand.',
+    opvolging: 'https://lms.deforexopleiding.nl/hoofdmentor/',
+  });
+
+  // eslint-disable-next-line no-unreachable
   const result = {
     ok: true, initialized: false, watermark_before: null, watermark_after: null,
     // BRON expliciet in de uitkomst. Zonder dit is 'fetched: 0' niet te

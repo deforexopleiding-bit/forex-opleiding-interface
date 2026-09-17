@@ -274,6 +274,15 @@
     </div>
 
     <div id="tabNoshows" class="tab-panel" hidden>
+      <!-- Zie students-overview.html: no-shows worden sinds 17-09-2026 in het
+           LMS opgevolgd. Deze tab toont alleen nog wat er vóór die datum in
+           het CRM stond. -->
+      <div style="display:flex;gap:8px;align-items:flex-start;padding:10px 12px;margin-bottom:10px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:8px;font-size:12.5px;line-height:1.5">
+        <i class="ti ti-info-circle" style="margin-top:1px"></i>
+        <div><strong>No-shows worden opgevolgd in het LMS.</strong>
+          Er komen hier geen nieuwe bij; kijk op het
+          <a href="https://lms.deforexopleiding.nl/hoofdmentor/" target="_blank" rel="noopener">hoofdmentorbord</a>.</div>
+      </div>
       <div class="sub-tab-strip" role="tablist">
         <button class="sub-tab-btn active" data-noshow-sub="open" type="button">Te beoordelen<span class="sub-count" id="noshowSubCountOpen"></span></button>
         <button class="sub-tab-btn"        data-noshow-sub="done" type="button">Afgerond</button>
@@ -376,7 +385,10 @@
     const wrap = document.getElementById('noshowOpenWrap');
     if (!wrap) return;
     if (!_noshows.open.length) {
-      wrap.innerHTML = '<div class="empty-state">Geen openstaande no-shows 🎉</div>';
+      // Niet "geen no-shows 🎉" — dat leest als een uitspraak over de
+      // studenten, terwijl de opvolging gewoon ergens anders staat.
+      wrap.innerHTML = '<div class="empty-state">Geen openstaande no-shows in het CRM — '
+        + 'no-shows worden opgevolgd in het LMS (hoofdmentorbord).</div>';
       return;
     }
     wrap.innerHTML = _noshows.open.map((s) => (

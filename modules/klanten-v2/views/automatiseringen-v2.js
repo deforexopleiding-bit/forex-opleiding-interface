@@ -4137,6 +4137,12 @@
       const openW  = (w.openstaand      && w.openstaand.count)      ?? 0;
       const taakW  = (w.taak_aangemaakt && w.taak_aangemaakt.count) ?? 0;
       return `<div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">No-show signalen · student_signals</div>
+        <div style="margin-bottom:8px;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:11.5px;color:var(--text-3);line-height:1.5">
+          ⓘ Sinds 17-09-2026 worden hier <b>geen nieuwe signalen</b> meer aangemaakt —
+          no-shows worden opgevolgd in het LMS
+          (<a href="https://lms.deforexopleiding.nl/hoofdmentor/" target="_blank" rel="noopener">hoofdmentorbord</a>).
+          De tellers hieronder gaan over wat er nog in het CRM staat.
+        </div>
         ${_tgSpineHtml(signalRows)}
         <div style="font-size:10.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;font-weight:700">14-daagse vervolg-reminder · onboardings.first_call_reminder_task_at</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
