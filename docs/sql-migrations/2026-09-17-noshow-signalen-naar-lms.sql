@@ -63,6 +63,19 @@ CREATE TABLE IF NOT EXISTS public.student_signals_lms_overdracht (
   overgedragen_op   timestamptz NOT NULL DEFAULT now()
 );
 
+-- RLS AAN, ZONDER POLICIES → alleen de service-role komt erbij.
+--
+-- TOEGEVOEGD NA DE EERSTE RUN (17-09-2026). Supabase waarschuwde terecht:
+-- zonder deze regel is de tabel via PostgREST leesbaar met de anon-sleutel,
+-- en er staan studentnamen in. Cowork heeft de regel meteen bij de hand
+-- gedraaid; hij staat hier zodat het bestand gelijk is aan productie.
+--
+-- Opnieuw draaien is een no-op: ENABLE ROW LEVEL SECURITY op een tabel die
+-- het al aan heeft doet niets. Geen policies erbij — niets in het CRM leest
+-- deze tabel met een gebruikers-token; hij bestaat alleen om terug te kunnen
+-- draaien. Zelfde patroon als migratie 017 voor student_signals zelf.
+ALTER TABLE public.student_signals_lms_overdracht ENABLE ROW LEVEL SECURITY;
+
 COMMENT ON TABLE public.student_signals_lms_overdracht IS
   'Terugdraai-spoor van de overdracht van no-show-opvolging naar het LMS '
   '(17-09-2026). Eén rij per signaal dat toen is afgesloten, met de stand '

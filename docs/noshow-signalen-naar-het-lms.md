@@ -61,6 +61,33 @@ Eigenschappen die ertoe doen:
   restlijst laten staan die we kwijt willen. Beide zijn signalen die nog op
   iemand wachten.
 
+## Wat er op 17 september daadwerkelijk gedraaid is
+
+Cowork heeft de migratie op productie gedraaid. De uitkomst, voor de
+volledigheid — en omdat de verwachting niet exact klopte:
+
+| | |
+|---|---|
+| Stap 0 | **39 × `no_show`** en **5 × `eerste_call_no_show`** open. Niet 3: er kwamen er nog twee bij tussen de meting van 16 september en het moment dat de cron uitging. |
+| Stap 1 | **44 rijen** vastgelegd in `student_signals_lms_overdracht`. |
+| Stap 2 | 42 × `no_show` + 5 × `eerste_call_no_show` op `afgehandeld` (3 `no_show` stonden al zo). |
+| Stap 3 | De andere signaaltypes onaangeroerd. |
+
+### Eén correctie achteraf: RLS op de logtabel
+
+Supabase waarschuwde terecht dat de logtabel zonder RLS werd aangemaakt.
+Postgres zet RLS standaard **uit**, en in Supabase betekent dat: leesbaar via
+PostgREST met de **anon-sleutel** — en er staan studentnamen in. Cowork heeft
+`ALTER TABLE public.student_signals_lms_overdracht ENABLE ROW LEVEL SECURITY;`
+meteen na de `CREATE TABLE` bijgedraaid, zonder policies, zodat alleen de
+service-role erbij kan.
+
+Die regel staat nu ook in het migratiebestand, zodat de repo gelijk is aan
+productie, en er staat sinds vandaag een toets op de hele repo die faalt zodra
+een migratie een tabel aanmaakt zonder er RLS op te zetten:
+`tests/sql-migraties-rls.test.js`. Zie de kop van dat bestand voor de
+nulmeting van de bestaande gaten.
+
 ## Terugzetten
 
 Haal het `UITGEZET`-blok uit de handler en zet de entry terug in
