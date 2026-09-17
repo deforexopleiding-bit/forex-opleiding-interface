@@ -179,10 +179,6 @@
       "schedule": "* * * * *"
     },
     {
-      "path": "/api/cron/noshow-detect",
-      "schedule": "0 6 * * *"
-    },
-    {
       "path": "/api/cron/onboarding-eerste-sessie-afronden",
       "schedule": "0 7 * * *"
     },

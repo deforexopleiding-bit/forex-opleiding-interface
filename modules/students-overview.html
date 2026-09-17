@@ -317,6 +317,18 @@
 
     <!-- Pane: Aandachtspunten -->
     <div class="so-pane" id="soPaneSignals">
+      <!-- No-shows worden sinds 17-09-2026 in het LMS opgevolgd. Deze regel
+           staat er permanent, niet alleen bij een lege lijst: een leeg
+           tabblad leest als "er is niets aan de hand", en dat is precies het
+           verkeerde bericht als de opvolging ergens anders staat. -->
+      <div class="so-lms-notice" style="display:flex;gap:8px;align-items:flex-start;padding:10px 12px;margin-bottom:10px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:8px;font-size:12.5px;line-height:1.5">
+        <i class="ti ti-info-circle" style="margin-top:1px"></i>
+        <div><strong>No-shows worden opgevolgd in het LMS.</strong>
+          De automatische no-show-signalen (No-shows en Eerste call gemist) worden hier
+          niet meer aangemaakt; de opvolging staat op het
+          <a href="https://lms.deforexopleiding.nl/hoofdmentor/" target="_blank" rel="noopener">hoofdmentorbord</a>.
+          De meldingen van mentoren hieronder lopen gewoon door.</div>
+      </div>
       <div class="so-status-strip">
         <label>
           Type:
@@ -1560,7 +1572,14 @@ function renderSignalsTable() {
   const info = document.getElementById('apCountInfo');
   if (info) info.textContent = list.length + ' ' + (list.length === 1 ? 'punt' : 'punten');
   if (list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="so-empty">Geen aandachtspunten ' + (state.apShowHistory ? '' : 'actief') + '.</td></tr>';
+    // Bij een filter op een auto-type is "leeg" geen uitspraak over de
+    // student maar over waar de opvolging staat. Dat hoort er dan bij.
+    const opAutoType = AUTO_SIGNAL_TYPES.includes(state.apTypeFilter);
+    const tekst = opAutoType
+      ? 'Deze signalen worden niet meer in het CRM aangemaakt — no-shows worden '
+        + 'opgevolgd in het LMS (hoofdmentorbord).'
+      : 'Geen aandachtspunten ' + (state.apShowHistory ? '' : 'actief') + '.';
+    tbody.innerHTML = '<tr><td colspan="8" class="so-empty">' + tekst + '</td></tr>';
     return;
   }
   tbody.innerHTML = list.map((s, idx) => {
