@@ -31,7 +31,7 @@
 
 import { supabaseAdmin, checkCronAuth } from './supabase.js';
 import { sendTemplate, sendText, MetaNotConfiguredError } from './_lib/meta-whatsapp.js';
-import { sendWelkomMail } from './mailer.js';
+import { sendWelkomMail, sendMail, getAdminRecipients, wrapEmailHtml } from './mailer.js';
 import { logOutboundWa } from './_lib/wa-outbound-log.js';
 import { belProvisioning } from './_lib/toegang-provisioning-caller.js';
 // E-mail-builders (welkom/bevestiging + dag-6) staan als pure render-functies in
@@ -53,6 +53,66 @@ const PROVISIONING_RETRY_WINDOW_UREN = 72;
 // max 20s = 100s ruimte; nog steeds ruim binnen 300s Vercel-limit met
 // marge voor de overige loops. Drains vanzelf over meerdere ticks.
 const PROVISIONING_RETRY_BATCH_LIMIT = 5;
+
+// Cap + exponentiële backoff (2026-09-17). Na PROVISIONING_RETRY_MAX_ATTEMPTS
+// pogingen zonder succes zetten we provisioning_gaveup_at en verzenden éénmalig
+// een admin-alarm-mail. Voorheen bonkte een structureel falende lead elke
+// */2-min tick door tot reacted_at 72u oud was — ~2160 identieke pogingen,
+// zonder mens-signaal. Backoff: wait tussen poging N-1 en N is
+// min(60 * 2^(N-1), 3600) sec → 60s, 2m, 4m, 8m, 16m, 32m, 60m; totaal
+// ~2u 3min vóór opgeven, ruim binnen het 72u-venster.
+const PROVISIONING_RETRY_MAX_ATTEMPTS = 7;
+const PROVISIONING_RETRY_BASE_BACKOFF_SEC = 60;
+const PROVISIONING_RETRY_MAX_BACKOFF_SEC = 3600;
+// Iets ruimer selecteren dan het batch-limit, zodat we client-side kunnen
+// filteren op backoff-ready zonder een tweede DB-hop.
+const PROVISIONING_RETRY_CANDIDATE_LIMIT = 20;
+// Alarm-mail: max notify's per tick — bij een piek in gaveups niet in één
+// keer 20 mails uitspuwen. Fail-soft per rij.
+const PROVISIONING_GAVEUP_NOTIFY_LIMIT = 10;
+
+/** Backoff in seconden op basis van het aantal reeds gedane pogingen. */
+function backoffSecVoorAttempts(attempts) {
+  const exp = Math.pow(2, Math.max(0, attempts));
+  return Math.min(PROVISIONING_RETRY_BASE_BACKOFF_SEC * exp, PROVISIONING_RETRY_MAX_BACKOFF_SEC);
+}
+
+/** HTML-safe escape voor waarden in de gaveup-alarm-mail. */
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// Alarm-mail-recipients voor gaveup-notify. Volgorde:
+//   1. env-var PROVISIONING_ALARM_EMAIL (comma-gescheiden, whitespace-tolerant).
+//      Instelbaar zonder deploy — zet 'em in Vercel Project Settings → Env Vars.
+//   2. Code-default (huidige eigenaar) als env-var leeg/ongeldig is.
+//   3. Fallback op getAdminRecipients (super_admin + manager-profielen) enkel
+//      wanneer óók de default onbereikbaar zou zijn — 0-mail-verzenden mag niet.
+// Retourneert [{ email }] zodat de send-loop dezelfde shape houdt als
+// getAdminRecipients.
+const DEFAULT_ALARM_EMAIL = 'biemoldjeffrey@gmail.com';
+function parseAlarmEmails(envValue) {
+  return String(envValue || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+}
+async function resolveAlarmRecipients(sb) {
+  const envList = parseAlarmEmails(process.env.PROVISIONING_ALARM_EMAIL);
+  if (envList.length) return envList.map((email) => ({ email }));
+  // Env-var niet gezet → code-default (huidige eigenaar).
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(DEFAULT_ALARM_EMAIL)) {
+    return [{ email: DEFAULT_ALARM_EMAIL }];
+  }
+  // Zeer defensief: default ook onbruikbaar → val terug op admin-set zodat
+  // 0-mail-verzenden onmogelijk is.
+  return await getAdminRecipients(sb);
+}
 
 // v=5 (2026-08-28): expliciete afzendlijn = welkom-nummer via bestaande
 // whatsapp_module_config-rij module='leadsonderhoud' (label "Esmee" —
@@ -231,6 +291,10 @@ export default async function handler(req, res) {
     bevestiging: 0, reminders_2u: 0, reminders_24u: 0, reminders_48u: 0,
     vervallen: 0, dag6: 0, provisioning_calls: 0,
     provisioning_retries: 0, provisioning_retry_ok: 0, provisioning_retry_fail: 0,
+    provisioning_retry_backoff_wait: 0,   // 2026-09-17: kandidaten die nog niet mochten
+    provisioning_gaveup_new: 0,            // 2026-09-17: rijen die deze tick 'gaveup' werden
+    provisioning_gaveup_notified: 0,       // 2026-09-17: verstuurde admin-alarms
+    provisioning_gaveup_notify_fail: 0,    // 2026-09-17: alarm-verzending mislukt
     errors: [],
     items: [],   // v=6: per-lead outcome (id/wa/mail/step) voor observability
   };
@@ -386,41 +450,75 @@ export default async function handler(req, res) {
   //
   //   Selectie-eisen:
   //     * status = 'gereageerd'
-  //     * provisioned_at IS NULL     (nooit dubbel provisionen)
+  //     * provisioned_at IS NULL         (nooit dubbel provisionen)
   //     * provisioned_error IS NOT NULL  (fault-signaal van de gate)
-  //     * reacted_at >= now - 72u    (voorbij dit venster handmatig ingrijpen)
-  //     * limit 20 per tick
+  //     * provisioning_gaveup_at IS NULL (2026-09-17: nog niet opgegeven)
+  //     * reacted_at >= now - 72u        (voorbij dit venster handmatig ingrijpen)
+  //     * limit CANDIDATE_LIMIT per tick; client-side filter op backoff-ready
   //
-  //   Atomic claim: zet provisioned_error=NULL vóór de belProvisioning-call,
-  //   met WHERE-guard (provisioned_at IS NULL AND provisioned_error IS NOT
-  //   NULL). Twee concurrent runs krijgen maar één winnaar op de UPDATE
-  //   (Postgres serialiseert); de race-loser retourneert 0 rows en slaat de
-  //   rij stil over. Ok-flow zet daarna provisioned_at (nog een IS NULL
-  //   guard tegen race met een parallel-webhook die inmiddels ook slaagde),
-  //   en verstuurt exact dezelfde "Top <naam>! ✅ Je inloggegevens…" welkom-
-  //   WA als inbox-webhook.js:1562-1590. Fail-terug: bij fout schrijven we
-  //   de nieuwe error weer op de rij zodat een volgende tick 'em kan
-  //   proberen (binnen het 72u-venster).
+  //   Cap + backoff (2026-09-17):
+  //     * Max PROVISIONING_RETRY_MAX_ATTEMPTS (7) pogingen per rij.
+  //     * Backoff-tijd = min(60 * 2^attempts_gedaan, 3600) sec sinds
+  //       provisioning_last_attempt_at (of onmiddellijk als NULL).
+  //     * Overslaan als niet backoff-ready → wachten tot volgende tick.
+  //     * Op de 7e mislukking → provisioning_gaveup_at + gaveup_reason gezet.
+  //       Éénmalige admin-alarm-mail verstuurd in stap 2c.
+  //
+  //   Atomic claim: zet provisioned_error=NULL + increment
+  //   provisioning_attempts + provisioning_last_attempt_at=now(), met
+  //   WHERE-guard (provisioned_at IS NULL AND provisioned_error IS NOT NULL
+  //   AND provisioning_gaveup_at IS NULL). Twee concurrent runs krijgen maar
+  //   één winnaar op de UPDATE (Postgres serialiseert); de race-loser
+  //   retourneert 0 rows en slaat de rij stil over. Ok-flow zet daarna
+  //   provisioned_at (nog een IS NULL guard tegen race met een parallel-
+  //   webhook die inmiddels ook slaagde), en verstuurt exact dezelfde
+  //   "Top <naam>! ✅ Je inloggegevens…" welkom-WA als inbox-webhook.js.
   if (live) try {
     const grens = new Date(nowMs - PROVISIONING_RETRY_WINDOW_UREN * 3600 * 1000).toISOString();
     const { data: rows } = await supabaseAdmin
       .from('toegang_aanvragen')
-      .select('id, voornaam, email, telefoon, soort, provisioned_error, reacted_at')
+      .select('id, voornaam, email, telefoon, soort, provisioned_error, reacted_at, provisioning_attempts, provisioning_last_attempt_at')
       .eq('status', 'gereageerd')
       .is('provisioned_at', null)
       .not('provisioned_error', 'is', null)
+      .is('provisioning_gaveup_at', null)
       .gte('reacted_at', grens)
       .order('reacted_at', { ascending: true })
-      .limit(PROVISIONING_RETRY_BATCH_LIMIT);
+      .limit(PROVISIONING_RETRY_CANDIDATE_LIMIT);
 
+    // Client-side backoff-filter: rij mag pas geretriet worden als er
+    // sinds provisioning_last_attempt_at genoeg tijd verstreken is (of als
+    // die kolom NULL is — dan is dit de eerste cron-retry na de webhook).
+    const backoffReady = [];
     for (const row of (rows || [])) {
-      // Atomic claim: nul de error VOORDAT we bellen. Race-loser krijgt
-      // 0 rows terug en slaat over.
+      const attemptsDone = row.provisioning_attempts || 0;
+      const lastAt = row.provisioning_last_attempt_at
+        ? new Date(row.provisioning_last_attempt_at).getTime() : 0;
+      const backoffMs = backoffSecVoorAttempts(attemptsDone) * 1000;
+      const ready = lastAt === 0 || (nowMs - lastAt) >= backoffMs;
+      if (ready) backoffReady.push(row);
+      else       summary.provisioning_retry_backoff_wait++;
+    }
+
+    // Neem eerst maximaal BATCH_LIMIT ready-rijen. Drains vanzelf over
+    // meerdere ticks bij een backlog.
+    const teDoen = backoffReady.slice(0, PROVISIONING_RETRY_BATCH_LIMIT);
+
+    for (const row of teDoen) {
+      // Atomic claim: verhoog attempts + zet last_attempt_at + nul error.
+      // Race-guard blijft: alleen als provisioned_at IS NULL EN gaveup NULL.
+      const nieuweAttempts = (row.provisioning_attempts || 0) + 1;
+      const attemptTs = new Date().toISOString();
       const { data: claim } = await supabaseAdmin
         .from('toegang_aanvragen')
-        .update({ provisioned_error: null })
+        .update({
+          provisioned_error           : null,
+          provisioning_attempts       : nieuweAttempts,
+          provisioning_last_attempt_at: attemptTs,
+        })
         .eq('id', row.id)
         .is('provisioned_at', null)
+        .is('provisioning_gaveup_at', null)
         .not('provisioned_error', 'is', null)
         .select('id')
         .maybeSingle();
@@ -483,16 +581,134 @@ export default async function handler(req, res) {
           console.log('[cron-toegang-aanvragen] retry: parallel-provisioning al gelukt — skip WA:', row.id);
         }
       } else {
-        // Fout terug op de rij zodat een volgende tick opnieuw kan proberen
-        // (mits nog binnen 72u-venster).
         summary.provisioning_retry_fail++;
-        await supabaseAdmin.from('toegang_aanvragen')
-          .update({ provisioned_error: (r.error || 'onbekend').slice(0, 500) })
-          .eq('id', row.id);
+        const fout = (r.error || 'onbekend').slice(0, 500);
+
+        // Als we deze poging op of over de cap zaten → OPGEVEN.
+        // Zet provisioning_gaveup_at + reason, houd provisioned_error zichtbaar
+        // (zodat de leadsonderhoud-UI het "⚠"-badge blijft tonen ook nadat
+        // een handmatige reset later provisioned_error null'd — reason blijft
+        // dan als kopie staan).
+        if (nieuweAttempts >= PROVISIONING_RETRY_MAX_ATTEMPTS) {
+          await supabaseAdmin.from('toegang_aanvragen')
+            .update({
+              provisioned_error         : fout,
+              provisioning_gaveup_at    : new Date().toISOString(),
+              provisioning_gaveup_reason: fout,
+            })
+            .eq('id', row.id);
+          summary.provisioning_gaveup_new++;
+        } else {
+          // Fout terug op de rij zodat een volgende tick opnieuw kan proberen
+          // (mits nog binnen 72u-venster + backoff-ready).
+          await supabaseAdmin.from('toegang_aanvragen')
+            .update({ provisioned_error: fout })
+            .eq('id', row.id);
+        }
       }
     }
   } catch (e) {
     summary.errors.push({ step: 'provisioning-retry-loop', error: e?.message || String(e) });
+  }
+
+  // ── 2c) PROVISIONING GAVEUP NOTIFY — éénmalige admin-alarm-mail voor
+  //        rijen die zojuist (of eerder) definitief zijn opgegeven. Selectie:
+  //        provisioning_gaveup_at IS NOT NULL AND provisioning_gaveup_notified
+  //        = false. Verstuurt naar de bestaande admin-recipients (dezelfde
+  //        set als follow-up-admin-daily/-weekly: super_admin + manager
+  //        profielen met een geldig e-mailadres). Idempotent via de
+  //        notified-flag; race-veilig via een gecombineerde UPDATE-guard.
+  if (live) try {
+    const { data: gaveupRows } = await supabaseAdmin
+      .from('toegang_aanvragen')
+      .select('id, voornaam, email, soort, telefoon, provisioning_gaveup_reason, provisioning_gaveup_at, provisioning_attempts, reacted_at')
+      .not('provisioning_gaveup_at', 'is', null)
+      .eq('provisioning_gaveup_notified', false)
+      .order('provisioning_gaveup_at', { ascending: true })
+      .limit(PROVISIONING_GAVEUP_NOTIFY_LIMIT);
+
+    if ((gaveupRows || []).length > 0) {
+      const recipients = await resolveAlarmRecipients(supabaseAdmin);
+      for (const row of gaveupRows) {
+        // Atomic claim op de notified-flag vóór verzenden, om te voorkomen
+        // dat twee cron-runs dezelfde mail sturen. Race-loser (flag was al
+        // true) krijgt 0 rows en slaat over.
+        const { data: claim } = await supabaseAdmin
+          .from('toegang_aanvragen')
+          .update({ provisioning_gaveup_notified: true })
+          .eq('id', row.id)
+          .eq('provisioning_gaveup_notified', false)
+          .select('id')
+          .maybeSingle();
+        if (!claim?.id) continue;
+
+        if (recipients.length === 0) {
+          // Geen alarm-adres beschikbaar (env-var leeg, code-default ongeldig
+          // én admin-set leeg) → notify-fail, zet flag terug zodat een
+          // volgende tick 't opnieuw probeert. Praktisch niet-bereikbaar
+          // zolang DEFAULT_ALARM_EMAIL correct blijft, maar we willen liever
+          // een retry dan een silent drop.
+          summary.provisioning_gaveup_notify_fail++;
+          await supabaseAdmin.from('toegang_aanvragen')
+            .update({ provisioning_gaveup_notified: false })
+            .eq('id', row.id);
+          summary.errors.push({ step: 'gaveup-notify', id: row.id,
+            error: 'geen alarm-recipients gevonden (PROVISIONING_ALARM_EMAIL env leeg + code-default onbruikbaar + admin-set leeg)' });
+          continue;
+        }
+
+        const attempts = row.provisioning_attempts ?? PROVISIONING_RETRY_MAX_ATTEMPTS;
+        const reden    = String(row.provisioning_gaveup_reason || 'onbekend').slice(0, 500);
+        const subject  = `⚠ Toegang-provisioning opgegeven na ${attempts}× — ${row.voornaam || row.email || row.id}`;
+        const text =
+`Toegang-provisioning is definitief opgegeven voor:
+
+  Voornaam : ${row.voornaam || '(onbekend)'}
+  E-mail   : ${row.email || '(onbekend)'}
+  Soort    : ${row.soort || '(onbekend)'}
+  Telefoon : ${row.telefoon || '(onbekend)'}
+  Pogingen : ${attempts} × ${PROVISIONING_RETRY_MAX_ATTEMPTS} (cap bereikt)
+  Reageerde: ${row.reacted_at || '(onbekend)'}
+  Gaveup   : ${row.provisioning_gaveup_at}
+
+Laatste error:
+${reden}
+
+Handmatige actie is nodig — controleer de lead in Leadsonderhoud → Toegang-aanvragen (row-id ${row.id}) en corrigeer waar nodig.`;
+        const html = wrapEmailHtml('⚠ Toegang-provisioning opgegeven', `
+<p style="margin:0 0 12px;font-size:14px;color:#111827">De cron heeft <b>${attempts}× tevergeefs</b> geprobeerd toegang te provisioneren voor deze lead. Handmatige actie is nodig.</p>
+<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:13.5px;line-height:1.55">
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Voornaam</td><td style="padding:3px 0;font-weight:600">${escapeHtml(row.voornaam || '(onbekend)')}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280">E-mail</td><td style="padding:3px 0;font-weight:600">${escapeHtml(row.email || '(onbekend)')}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Soort</td><td style="padding:3px 0">${escapeHtml(row.soort || '(onbekend)')}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Telefoon</td><td style="padding:3px 0">${escapeHtml(row.telefoon || '(onbekend)')}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Pogingen</td><td style="padding:3px 0">${attempts} × ${PROVISIONING_RETRY_MAX_ATTEMPTS} (cap bereikt)</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Reageerde op</td><td style="padding:3px 0">${escapeHtml(row.reacted_at || '(onbekend)')}</td></tr>
+  <tr><td style="padding:3px 12px 3px 0;color:#6b7280">Opgegeven op</td><td style="padding:3px 0">${escapeHtml(row.provisioning_gaveup_at)}</td></tr>
+</table>
+<p style="margin:14px 0 6px;color:#6b7280;font-size:12px">Laatste error:</p>
+<pre style="margin:0;padding:10px 12px;background:#fee2e2;border-radius:6px;color:#7f1d1d;font-size:12px;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHtml(reden)}</pre>
+<p style="margin:16px 0 0;font-size:13px;color:#374151">Controleer de lead in Leadsonderhoud → Toegang-aanvragen (row-id <code>${escapeHtml(row.id)}</code>) en corrigeer waar nodig.</p>
+`);
+        let anySent = false;
+        for (const rec of recipients) {
+          const rr = await sendMail({ to: rec.email, subject, text, html });
+          if (rr && rr.success) anySent = true;
+          else console.warn('[cron-toegang-aanvragen] gaveup-alarm mail-fail:', rec.email, rr?.error || '(onbekend)');
+        }
+        if (anySent) {
+          summary.provisioning_gaveup_notified++;
+        } else {
+          // Alle recipients faalden → zet flag terug, volgende tick nieuwe poging.
+          await supabaseAdmin.from('toegang_aanvragen')
+            .update({ provisioning_gaveup_notified: false })
+            .eq('id', row.id);
+          summary.provisioning_gaveup_notify_fail++;
+        }
+      }
+    }
+  } catch (e) {
+    summary.errors.push({ step: 'provisioning-gaveup-notify-loop', error: e?.message || String(e) });
   }
 
   // ── 3) VERVALLEN — 24u na 48u-reminder zonder reactie ──────────────────

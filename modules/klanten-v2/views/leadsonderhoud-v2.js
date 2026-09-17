@@ -3935,7 +3935,11 @@
       </td>
       <td style="padding:8px 10px;text-align:center">${r.provisioned_at
           ? '<span style="color:var(--emerald);font-weight:600" title="Inlog verstuurd">✓</span>'
-          : (r.provisioned_error ? `<span style="color:var(--rose);font-weight:600" title="${esc(r.provisioned_error)}">⚠</span>` : '<span style="color:var(--text-3)">–</span>')}</td>
+          : (r.provisioning_gaveup_at
+              ? `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:var(--rose-soft,#fee2e2);color:var(--rose,#b91c1c);border:1px solid var(--rose-line,#fca5a5);font-size:10.5px;font-weight:700;letter-spacing:.02em" title="${esc('Opgegeven ' + (r.provisioning_gaveup_at) + ' — laatste fout: ' + (r.provisioning_gaveup_reason || r.provisioned_error || 'onbekend'))}">OPGEGEVEN NA ${r.provisioning_attempts || 7}×</span>`
+              : (r.provisioned_error
+                  ? `<span style="color:var(--rose);font-weight:600" title="${esc(r.provisioned_error)}${r.provisioning_attempts ? ' (poging ' + r.provisioning_attempts + '/7)' : ''}">⚠</span>`
+                  : '<span style="color:var(--text-3)">–</span>'))}</td>
     </tr>`).join('') : `<tr><td colspan="8" style="padding:44px 20px;text-align:center;color:var(--text-3)">${st.loading ? 'Laden…' : 'Geen aanvragen in dit venster.'}</td></tr>`;
 
     return `

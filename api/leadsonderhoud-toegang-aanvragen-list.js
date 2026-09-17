@@ -45,7 +45,7 @@ export default async function handler(req, res) {
   try {
     let qry = supabaseAdmin
       .from('toegang_aanvragen')
-      .select('id, created_at, soort, bron, voornaam, email, telefoon, call_geboekt, status, bevestiging_sent_at, reminder_2u_at, reminder_24u_at, reminder_48u_at, reacted_at, provisioned_at, provisioned_error, vervallen_at, dag6_sent_at', { count: 'exact' })
+      .select('id, created_at, soort, bron, voornaam, email, telefoon, call_geboekt, status, bevestiging_sent_at, reminder_2u_at, reminder_24u_at, reminder_48u_at, reacted_at, provisioned_at, provisioned_error, vervallen_at, dag6_sent_at, provisioning_attempts, provisioning_last_attempt_at, provisioning_gaveup_at, provisioning_gaveup_reason', { count: 'exact' })
       .order('created_at', { ascending: false })
       .limit(limit);
     if (grens)          qry = qry.gte('created_at', grens);
@@ -79,6 +79,11 @@ export default async function handler(req, res) {
       reacted_at: r.reacted_at,
       provisioned_at: r.provisioned_at,
       provisioned_error: r.provisioned_error,
+      // 2026-09-17: retry-motor state — voor de "opgegeven"-badge in de UI.
+      provisioning_attempts: r.provisioning_attempts ?? 0,
+      provisioning_last_attempt_at: r.provisioning_last_attempt_at,
+      provisioning_gaveup_at: r.provisioning_gaveup_at,
+      provisioning_gaveup_reason: r.provisioning_gaveup_reason,
       vervallen_at: r.vervallen_at,
       dag6_sent: !!r.dag6_sent_at,
     }));
