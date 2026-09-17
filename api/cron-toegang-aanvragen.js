@@ -87,6 +87,33 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+// Alarm-mail-recipients voor gaveup-notify. Volgorde:
+//   1. env-var PROVISIONING_ALARM_EMAIL (comma-gescheiden, whitespace-tolerant).
+//      Instelbaar zonder deploy — zet 'em in Vercel Project Settings → Env Vars.
+//   2. Code-default (huidige eigenaar) als env-var leeg/ongeldig is.
+//   3. Fallback op getAdminRecipients (super_admin + manager-profielen) enkel
+//      wanneer óók de default onbereikbaar zou zijn — 0-mail-verzenden mag niet.
+// Retourneert [{ email }] zodat de send-loop dezelfde shape houdt als
+// getAdminRecipients.
+const DEFAULT_ALARM_EMAIL = 'biemoldjeffrey@gmail.com';
+function parseAlarmEmails(envValue) {
+  return String(envValue || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+}
+async function resolveAlarmRecipients(sb) {
+  const envList = parseAlarmEmails(process.env.PROVISIONING_ALARM_EMAIL);
+  if (envList.length) return envList.map((email) => ({ email }));
+  // Env-var niet gezet → code-default (huidige eigenaar).
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(DEFAULT_ALARM_EMAIL)) {
+    return [{ email: DEFAULT_ALARM_EMAIL }];
+  }
+  // Zeer defensief: default ook onbruikbaar → val terug op admin-set zodat
+  // 0-mail-verzenden onmogelijk is.
+  return await getAdminRecipients(sb);
+}
+
 // v=5 (2026-08-28): expliciete afzendlijn = welkom-nummer via bestaande
 // whatsapp_module_config-rij module='leadsonderhoud' (label "Esmee" —
 // phone_number_id 1232908829908396 = DFO Welkom 0644642495).
@@ -601,7 +628,7 @@ export default async function handler(req, res) {
       .limit(PROVISIONING_GAVEUP_NOTIFY_LIMIT);
 
     if ((gaveupRows || []).length > 0) {
-      const recipients = await getAdminRecipients(supabaseAdmin);
+      const recipients = await resolveAlarmRecipients(supabaseAdmin);
       for (const row of gaveupRows) {
         // Atomic claim op de notified-flag vóór verzenden, om te voorkomen
         // dat twee cron-runs dezelfde mail sturen. Race-loser (flag was al
@@ -616,15 +643,17 @@ export default async function handler(req, res) {
         if (!claim?.id) continue;
 
         if (recipients.length === 0) {
-          // Geen admin-adres beschikbaar → notify-fail, zet flag terug
-          // zodat een volgende tick 't opnieuw probeert (bv. nadat er
-          // een super_admin/manager aan profiles is toegevoegd).
+          // Geen alarm-adres beschikbaar (env-var leeg, code-default ongeldig
+          // én admin-set leeg) → notify-fail, zet flag terug zodat een
+          // volgende tick 't opnieuw probeert. Praktisch niet-bereikbaar
+          // zolang DEFAULT_ALARM_EMAIL correct blijft, maar we willen liever
+          // een retry dan een silent drop.
           summary.provisioning_gaveup_notify_fail++;
           await supabaseAdmin.from('toegang_aanvragen')
             .update({ provisioning_gaveup_notified: false })
             .eq('id', row.id);
           summary.errors.push({ step: 'gaveup-notify', id: row.id,
-            error: 'geen admin-recipients gevonden (super_admin/manager profielen leeg)' });
+            error: 'geen alarm-recipients gevonden (PROVISIONING_ALARM_EMAIL env leeg + code-default onbruikbaar + admin-set leeg)' });
           continue;
         }
 
