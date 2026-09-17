@@ -19,6 +19,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { onAttendeePlekChange } from './_lib/event-attendee-mutations.js';
+import { normaliseerStrict } from './_lib/phone-e164.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -52,9 +53,20 @@ export default async function handler(req, res) {
     switch (f) {
       case 'first_name':
       case 'last_name':
-      case 'phone':
         patch[f] = v === null || v === '' ? null : String(v).trim();
         break;
+      // TELEFOON APART — naar E.164 of een leesbare 400. Leeggooien mag, een
+      // niet-eenduidig nummer opslaan niet: dat leverde 159 rijen op waar
+      // nooit een WhatsApp aankwam. Zie _lib/phone-e164.js.
+      case 'phone': {
+        if (v === null || v === '') { patch.phone = null; break; }
+        const pn = normaliseerStrict(v);
+        if (pn.fout) {
+          return res.status(400).json({ error: pn.fout, field: 'phone', ambiguous: pn.ambigu });
+        }
+        patch.phone = pn.e164;
+        break;
+      }
       case 'email':
         if (v === null || v === '') patch.email = null;
         else {

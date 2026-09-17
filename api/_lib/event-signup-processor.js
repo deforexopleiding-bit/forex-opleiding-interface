@@ -23,6 +23,32 @@
 // reminders worden binnen ~1 min via de bestaande automations getriggerd.
 
 import { supabaseAdmin } from '../supabase.js';
+import { normaliseerStrict } from './phone-e164.js';
+
+// ── TELEFOON BIJ EEN INSCHRIJVING ────────────────────────────────────────
+// Hier zit GEEN mens die het nummer kan corrigeren: dit is het formulierpad.
+// Een 400 teruggeven zou de inschrijving weigeren, en een verloren lead is
+// erger dan een nummer dat later opgeschoond moet worden.
+//
+// Dus: omzetten wat eenduidig is ('+…' en '00…', inclusief spaties en
+// streepjes eruit), en wat NIET eenduidig is rauw laten staan zoals vandaag.
+// Niets weggooien — die rijen zijn precies wat de opschoon-migratie moet
+// kunnen vinden. Wel luid loggen, want stil overslaan is hoe dit gat 159
+// rijen groot is geworden.
+//
+// Dat er daarna geen WhatsApp naar zo'n nummer vertrekt zonder dat iemand het
+// ziet, is de taak van de send-kant (zie de Meta-weigering op de run).
+function _phoneVoorOpslag(raw, eventId) {
+  const pn = normaliseerStrict(raw);
+  if (pn.e164) return pn.e164;
+  if (pn.ambigu || pn.fout) {
+    console.warn('[event-signup-processor] telefoonnummer niet eenduidig, rauw opgeslagen'
+      + ' (event ' + eventId + '):', String(raw).slice(0, 24));
+    return raw == null ? null : String(raw).trim() || null;
+  }
+  return null;   // geen nummer gegeven
+}
+
 import {
   getConfirmedCount,
   syncGastenlijstWebflow,
@@ -86,7 +112,7 @@ export async function createAttendee({
     first_name            : payload.first_name,
     last_name             : payload.last_name,
     email                 : payload.email,
-    phone                 : payload.phone,
+    phone                 : _phoneVoorOpslag(payload.phone, event.id),
     status                : status,
     created_via           : createdVia,
     source                : source,

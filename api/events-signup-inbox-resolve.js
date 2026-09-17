@@ -32,6 +32,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
+import { normaliseerStrict } from './_lib/phone-e164.js';
 import {
   getConfirmedCount,
   syncGastenlijstWebflow,
@@ -142,7 +143,18 @@ export default async function handler(req, res) {
         first_name            : inbox.first_name,
         last_name             : inbox.last_name,
         email                 : inbox.email,
-        phone                 : inbox.phone,
+        // Eenduidig omzetten; niet-eenduidig rauw laten staan. Weigeren zou
+        // betekenen dat een inbox-rij niet meer op te lossen is, en dat
+        // blokkeert de triage. Zie _lib/phone-e164.js.
+        phone                 : (() => {
+          const pn = normaliseerStrict(inbox.phone);
+          if (pn.e164) return pn.e164;
+          if (pn.ambigu || pn.fout) {
+            console.warn('[events-signup-inbox-resolve] telefoonnummer niet eenduidig,'
+              + ' rauw opgeslagen (inbox ' + inbox.id + '):', String(inbox.phone).slice(0, 24));
+          }
+          return inbox.phone == null ? null : String(inbox.phone).trim() || null;
+        })(),
         status                : 'aangemeld',
         created_via           : 'ghl_inbound',
         ghl_contact_id        : inbox.ghl_contact_id,

@@ -38,6 +38,7 @@ import {
   getConfirmedCount,
 } from './_lib/event-registration.js';
 import { onConfirmedAttendeeMutation } from './_lib/event-attendee-mutations.js';
+import { normaliseerStrict } from './_lib/phone-e164.js';
 // Sinds opt-in herontwerp: 'send_invite' triggert nu automation_enabled i.p.v.
 // een one-shot invite. De sendEventAttendeeInvite-helper is dus niet meer nodig
 // hier (blijft beschikbaar voor andere callers zoals de move-flow).
@@ -67,7 +68,13 @@ export default async function handler(req, res) {
   const firstName = body.first_name != null ? String(body.first_name).trim() : null;
   const lastName  = body.last_name  != null ? String(body.last_name).trim()  : null;
   const email     = body.email      != null ? String(body.email).trim()      : null;
-  const phone     = body.phone      != null ? String(body.phone).trim()      : null;
+  // NUMMER NAAR E.164, OF WEIGEREN. Hier zit een mens die het nummer net
+  // getypt heeft, dus die kan het meteen corrigeren — een leesbare 400 is
+  // beter dan een rij die er goed uitziet en waar nooit een WhatsApp
+  // aankomt. Zie de kop van _lib/phone-e164.js voor de meting.
+  const phoneIn   = body.phone      != null ? String(body.phone).trim()      : null;
+  const phoneNorm = normaliseerStrict(phoneIn);
+  const phone     = phoneNorm.e164;
   const status    = body.status ? String(body.status).toLowerCase() : 'aangemeld';
   const sendInvite = body.send_invite === true || body.send_invite === 'true';
   // Optioneel: koppel de nieuwe aanwezige direct aan een bestaande klant.
@@ -85,6 +92,9 @@ export default async function handler(req, res) {
   }
   if (email && !EMAIL_RE.test(email)) {
     return res.status(400).json({ error: 'email ongeldig' });
+  }
+  if (phoneNorm.fout) {
+    return res.status(400).json({ error: phoneNorm.fout, field: 'phone', ambiguous: phoneNorm.ambigu });
   }
   if (!firstName && !lastName && !email && !phone) {
     return res.status(400).json({ error: 'minimaal 1 identificerend veld vereist (first_name/last_name/email/phone)' });
