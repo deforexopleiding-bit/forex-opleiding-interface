@@ -103,6 +103,7 @@ import { todayIsoInTz, zonedDayStartIso } from './_lib/dunning-overdue-guard.js'
 import { determineStage as _determineStageHelper } from './_lib/conv-reminder-stage.js';
 import { buildReminderTemplatePayload } from './_lib/conv-reminder-template.js';
 import { renderTemplatePreview } from './_lib/render-template-preview.js';
+import { haalHoldStand, holdBlokkade, holdStandSamenvatting } from './_lib/lms-hold.js';
 
 // Re-export voor backward-compat met tests die deze helpers vanuit deze
 // file importeerden (pre-#888 opsplitsing). Nieuwe callers importeren
@@ -460,6 +461,20 @@ export default async function handler(req, res) {
     ));
     const openActionsByCustomer = await loadOpenActionsByCustomer(winnerCustIds);
 
+    // ── ON HOLD IN HET LMS ────────────────────────────────────────────────
+    // Een herinnering is óók een bericht. Staat de student on hold, dan gaat
+    // die niet uit — zelfde regel als bij de aanmaan-motor, zelfde bron.
+    // Eén bevraging per cron-run, vóór de lus.
+    let holdStand = null;
+    try {
+      holdStand = await haalHoldStand();
+      console.log('[conv-reminder-cron] ' + holdStandSamenvatting(holdStand));
+    } catch (e) {
+      console.error('[conv-reminder-cron] hold-stand ophalen gooide: ' + (e?.message || e));
+      const { BRON_ONBEREIKBAAR } = await import('./_lib/lms-hold.js');
+      holdStand = { bron_status: BRON_ONBEREIKBAAR, holds: new Map(), vangnet: new Set() };
+    }
+
     // ── Deps + dry-run laden via shared loader ────────────────────────────
     const deps = await loadConversationReminderDeps();
     // Splitsing 2026-08-25: kies per scope. scope='test' → test-vlag,
@@ -475,6 +490,18 @@ export default async function handler(req, res) {
       if (elapsed(startedAt) > ABORT_MS) {
         console.warn('[conv-reminder-cron] abort budget overschreden');
         break;
+      }
+
+      // Hold-guard: student staat on hold in het LMS -> geen reminder. Vóór
+      // de actie-guard, want dit is de hardere regel van de twee: een open
+      // actie betekent "een mens is ermee bezig", een hold betekent "er mag
+      // niets uit". De run blijft ongemoeid; zodra de pauze afloopt pikt de
+      // volgende ronde 'm gewoon weer op.
+      const holdBlok = holdBlokkade(holdStand, run.customer_id);
+      if (holdBlok) {
+        summary.processed_count++;
+        summary.skipped.push({ run_id: run.id, reason: 'LMS_HOLD: ' + holdBlok.reden });
+        continue;
       }
 
       // Actie-guard: klant heeft open handmatige actie -> geen reminder.

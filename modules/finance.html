@@ -10320,6 +10320,7 @@
     { key: 'wacht_gesprek',           label: 'Wacht op gesprek',  group: 'wacht' },
     { key: 'wacht_handmatig',         label: 'Handmatig gepauzeerd', group: 'wacht' },
     { key: 'wacht_openstaande_actie', label: 'Openstaande actie', group: 'wacht' },
+    { key: 'wacht_lms_hold',          label: 'On hold in het LMS', group: 'wacht' },
     // Virtuele bucket: matcht op it.needs_attention === true i.p.v. it.bucket.
     // Zie speciale filter-tak in _renderDunPlList.
     { key: 'aandacht_nodig',          label: '⚠ Aandacht nodig', group: 'attention' },
@@ -10517,6 +10518,15 @@
       // Gepauzeerd → toon reden i.p.v. datum.
       const at = it.pause_reason.at ? ` · ${_dunPlFmtDate(it.pause_reason.at)}` : '';
       nextActionCell = `<span class="pl-tag wait">${esc(it.pause_reason.message)}</span><div style="font-size:11px;color:var(--ds-text-faint,#7a8b92);margin-top:3px">${esc(at.replace(/^ · /, ''))}</div>`;
+    }
+
+    // On hold in het LMS wint van de geplande datum. Een run die on hold
+    // staat is technisch active en HEEFT dus een next_action_at staan — die
+    // datum zou hier als belofte lezen ("morgen gaat er iets uit") terwijl
+    // er juist niets uitgaat. De reden hoort dan op die plek te staan, niet
+    // eronder.
+    if (it.pause_reason?.code === 'lms_hold' && it.pause_reason.message) {
+      nextActionCell = `<span class="pl-tag wait">${esc(it.pause_reason.message)}</span>`;
     }
 
     // Vooruitblik "eerstvolgend contact" — geschat, ~-prefix + info-icoon.

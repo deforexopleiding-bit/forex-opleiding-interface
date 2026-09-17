@@ -19,6 +19,7 @@ const KNOWN = Object.freeze({
   completed:              { title: 'Aanmaan-workflow afgerond' },
   paused_customer_replied:{ title: 'Klant reageerde — aanmaning gepauzeerd' },
   skipped_open_action:    { title: 'Overgeslagen: er ligt nog een openstaande actie' },
+  skipped_lms_hold:       { title: 'Overgeslagen: student staat on hold in het LMS' },
   stop_step:              { title: 'Workflow-stap: stop' },
   unknown_step_type:      { title: 'Onbekend workflow-stap-type' },
 
@@ -131,6 +132,16 @@ function humanize(raw) {
 function labelForDunningEvent(eventType, payload) {
   const known = KNOWN[eventType];
   const base = known ? { ...known } : { title: humanize(eventType) };
+
+  // On hold in het LMS: de payload draagt de zin die de hoofdmentor moet
+  // zien ("On hold in het LMS tot 30-09-2026 — betaalachterstand"). Die is
+  // al in gewone taal opgesteld door api/_lib/lms-hold.js, dus we tonen 'm
+  // zoals hij is in plaats van hier een tweede formulering te maken.
+  if (eventType === 'skipped_lms_hold') {
+    const msg = String(payload?.message || '').trim();
+    if (msg) base.detail = msg;
+    return base;
+  }
 
   // Wait-event: payload heeft geen 'wait' key meer in KNOWN — we behandelen
   // 'em hier zodat "wacht N dagen" leesbaar wordt.

@@ -37,6 +37,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
+import { GEKOPPELD_SETTING_KEY } from './lms-hold.js';
 import {
   SPIEGEL_TABEL, STUDENT_KOLOMMEN,
   BRON_GELEZEN, BRON_NIET_GEKOPPELD, BRON_ONBEREIKBAAR,
@@ -282,6 +283,9 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
 
     ctx.index = index;
 
+    // Zie schrijfAfdrukGekoppeldeKlanten() onderaan dit bestand.
+    const gekoppeldeKlanten = new Set();
+
     // ── 3) Wat er NU in de spiegel staat ────────────────────────────────
     let aanwezigeIds = new Set();
     let tabelOntbreekt = false;
@@ -324,6 +328,7 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
 
         if (uit.bron_status === BRON_GELEZEN) {
           result.gelezen++;
+          if (uit.customer_id) gekoppeldeKlanten.add(String(uit.customer_id));
           if (uit.via === 'onboarding') result.via_onboarding++;
           else if (uit.via === 'bubble') result.via_bubble++;
           else if (uit.via === 'email')  result.via_email++;
@@ -405,7 +410,13 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
       }
     }
 
-    // ── 6) De twee metingen die alleen de droogloop nodig heeft ─────────
+    // ── 6) De afdruk voor het hold-vangnet ──────────────────────────────
+    if (!dry) {
+      result.afdruk_klanten = await schrijfAfdrukGekoppeldeKlanten(
+        supabaseAdmin, gekoppeldeKlanten);
+    }
+
+    // ── 7) De twee metingen die alleen de droogloop nodig heeft ─────────
     if (dry) result.signalen = await telStudentSignalen(supabaseAdmin);
 
     console.log('[factuurstand-sync/' + door + '] klaar — actief='
@@ -425,5 +436,57 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
     result.ok = false;
     result.error = msg;
     return { status: 500, result };
+  }
+}
+
+/**
+ * Laat een AFDRUK achter van de klanten die deze ronde aan een LMS-student
+ * gekoppeld zijn, in `app_settings`.
+ *
+ * ── WAAROM DIT HIER STAAT EN NIET IN DE MOTOR ───────────────────────────
+ * De hold-poort (api/_lib/lms-hold.js) moet, als het LMS onbereikbaar is,
+ * weten wélke klanten een LMS-koppeling hebben — want díé slaat hij dan
+ * over. Twee van de drie koppelwegen staan in het CRM zelf en zijn dus ook
+ * bij een storing leesbaar. De derde, het e-mailadres, heeft aan CRM-kant
+ * geen enkel spoor: die koppeling ontstaat pas doordat een LMS-student
+ * hetzelfde adres draagt. Zonder deze afdruk zouden precies die klanten bij
+ * een storing door het vangnet heen vallen.
+ *
+ * Het is nadrukkelijk een AFDRUK en geen tweede waarheid:
+ *   • hij wordt alleen hier geschreven, door de ronde die de koppeling toch
+ *     al uitrekent — er is geen tweede plek die dit bijhoudt;
+ *   • hij wordt alleen gebruikt om het vangnet BREDER te maken, nooit om
+ *     iets te versturen of om een klant te koppelen;
+ *   • ontbreekt hij of is hij oud, dan doet het vangnet het nog steeds met
+ *     de twee CRM-wegen. Daarom gaat `bijgewerkt_op` mee.
+ *
+ * Alleen bij een ECHTE ronde, en alleen als er ook echt studenten verwerkt
+ * zijn: een ronde die halverwege afbrak mag de afdruk niet uithollen tot
+ * een handvol klanten.
+ *
+ * Faalzacht: mislukt het schrijven, dan is dat een waarschuwing. De oude
+ * afdruk blijft dan staan, en dat is precies goed — een oude afdruk is
+ * breder dan geen afdruk.
+ */
+async function schrijfAfdrukGekoppeldeKlanten(db, klanten) {
+  if (!(klanten instanceof Set) || klanten.size === 0) {
+    console.warn('[factuurstand-sync] geen gekoppelde klanten in deze ronde — '
+      + 'afdruk ONGEWIJZIGD gelaten (een lege afdruk zou het hold-vangnet legen)');
+    return null;
+  }
+  try {
+    const value = {
+      customer_ids : Array.from(klanten),
+      bijgewerkt_op: new Date().toISOString(),
+    };
+    const { error } = await db
+      .from('app_settings')
+      .upsert({ key: GEKOPPELD_SETTING_KEY, value }, { onConflict: 'key' });
+    if (error) throw new Error(error.message);
+    return klanten.size;
+  } catch (e) {
+    console.warn('[factuurstand-sync] afdruk gekoppelde klanten niet weggeschreven: '
+      + (e?.message || e) + ' — de vorige afdruk blijft staan');
+    return null;
   }
 }
