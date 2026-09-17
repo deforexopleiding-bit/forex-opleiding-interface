@@ -29,6 +29,7 @@ import { checkRateLimit } from './_lib/rate-limit.js';
 // opvolgmodule. Puur additief: alles hieronder draait pas ná de bestaande
 // call_log-insert en kan die niet beïnvloeden.
 import { kiesTaakVoorCall, bouwCallPoging, telefoonStaart } from './_lib/opvolging-call-link.js';
+import { normaliseerLenient } from './_lib/phone-e164.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LINES = new Set(['nl','be']);
@@ -39,18 +40,12 @@ const MAX_META_BYTES = 2000;
 // Normaliseer met line-context; best-effort. Onparseerbaar → return raw
 // zodat de rij toch geschreven wordt. Geen exception, geen 400: dit is
 // een LOG, geen SEND — data-verlies is erger dan een minder-net formaat.
-function _normalizeToE164(raw, line) {
-  if (!raw) return null;
-  const s = String(raw).trim().replace(/\s+/g, '').replace(/[-()]/g, '');
-  if (!s) return null;
-  if (s.startsWith('+'))  return s;                        // al E.164
-  if (s.startsWith('00')) return '+' + s.slice(2);         // 00-prefix
-  if (s.startsWith('0')) {
-    if (line === 'nl') return '+31' + s.slice(1);
-    if (line === 'be') return '+32' + s.slice(1);
-  }
-  return s;   // short-code / extension / onbekend → raw, geen 400
-}
+//
+// De functie zelf staat sinds 17 september in _lib/phone-e164.js, zodat het
+// deelnemerspad (dat WEL moet weigeren) dezelfde parser gebruikt zonder deze
+// tolerante keuze mee te erven. Gedrag hier is onveranderd; deze alias houdt
+// de aanroepen hieronder leesbaar.
+const _normalizeToE164 = normaliseerLenient;
 
 export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/json');
