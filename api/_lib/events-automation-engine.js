@@ -103,6 +103,48 @@ export const NIET_MEER_KOMEND_STATUSSEN = Object.freeze([
 ]);
 export const REMINDER_STATUSSEN = Object.freeze(['aangemeld', 'aanwezig', 'sale']);
 
+// ── GEEN GEHOOR PAUZEERT DE REMINDERS ───────────────────────────────────
+//
+// GEMETEN en in de code bevestigd. De geen-gehoor-flow laat de deelnemer MET
+// OPZET op status 'aangemeld' staan tot de deadline verstrijkt: pas stap 4 van
+// 'Geen gehoor - laatste kans' zet hem op geannuleerd. Zie het blok bij actie
+// 'geen_gehoor' in api/opvolging-aanmelding-actie.js.
+//
+// De reminderfilter uit #1617 kijkt naar `status`, niet naar `call_status`. In
+// dat venster van 48 uur staat iemand dus nog gewoon op 'aangemeld' en is hij
+// een geldige reminder-kandidaat. Bij een event dat 2 tot 5 dagen weg is valt
+// het 120-uursvenster van 'Warmup vroeg (waarde)' middenin dat venster:
+//
+//   'je plek vervalt als we je niet bereiken'   (geen-gehoor, stap 0/1)
+//   'waarom deze masterclass je dag verandert'  (Warmup vroeg, 120u)
+//
+// Twee berichten die elkaar tegenspreken, naar dezelfde persoon, in dezelfde
+// twee dagen.
+//
+// ── WAAROM DIT NIET IN komtNietMeer HOORT ───────────────────────────────
+// Verleidelijk om 'geen_gehoor' bij NIET_MEER_KOMEND_STATUSSEN te gooien, maar
+// dat is een andere soort feit: die lijst gaat over de INSCHRIJVINGSSTATUS
+// ("deze persoon komt niet meer"), en hier gaat het over de BELSTATUS ("we
+// weten nog niet of deze persoon komt"). Iemand met geen_gehoor komt mogelijk
+// wél — daarom loopt de deadline nog. Het is een PAUZE, geen afmelding.
+//
+// Bovendien wordt komtNietMeer óók door de kandidaat-filter van andere
+// triggers gebruikt; daar zou een belstatus-regel niet thuishoren.
+export const REMINDER_PAUZE_BELSTATUS = 'geen_gehoor';
+
+/**
+ * Staat deze deelnemer in het geen-gehoor-venster, en moeten reminders dus
+ * wachten? Puur op de belstatus — de inschrijvingsstatus doet hier niet mee.
+ *
+ * Een lege of andere belstatus leest als 'gewoon reminders sturen'. Dezelfde
+ * veilige kant op als de rest van #1617: liever een reminder te veel dan
+ * iemand stil uit de flow laten vallen op een leeg veld.
+ */
+export function reminderWachtOpBelronde(attendee) {
+  const cs = attendee && attendee.call_status;
+  return typeof cs === 'string' && cs.trim() === REMINDER_PAUZE_BELSTATUS;
+}
+
 /**
  * Komt deze deelnemer niet meer? Pure functie, één definitie voor de
  * kandidaat-filter bij enrollment én de stop-guard op lopende runs.
@@ -249,7 +291,14 @@ export function evaluateCondition(check, state) {
  * deps = { isStepDone(idx)->bool, recordLog(idx,type,result), sendEmail(step,ctx), sendWhatsApp(step,ctx) }
  * Returnt de nieuwe run-velden (geen DB-write hier).
  */
-export async function advanceRun({ run, attendee, event, now = new Date(), deps, maxIterations = 25 }) {
+/**
+ * @param {?string} triggerType  het trigger_type van de automatisatie achter
+ *   deze run. Nodig voor de geen-gehoor-pauze, die ALLEEN voor reminders geldt
+ *   (zie de guard in de send-tak). Weggelaten of null → de pauze wordt niet
+ *   toegepast en het gedrag is exact als voorheen, zodat bestaande aanroepers
+ *   en tests niets merken.
+ */
+export async function advanceRun({ run, attendee, event, now = new Date(), deps, maxIterations = 25, triggerType = null }) {
   const steps = Array.isArray(run.steps_snapshot) ? run.steps_snapshot : [];
   const nowMs = now instanceof Date ? now.getTime() : Number(now);
   let idx = run.current_step_index || 0;
@@ -363,6 +412,39 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
           reason: 'niet-meer-komend: status ' + String(attendee.status || '(leeg)')
                 + ' — geen bericht meer naar wie afgezegd is',
           attendee_status: attendee.status || null,
+        });
+        idx += 1; attempts = 0; continue;
+      }
+
+      // ── EN GEEN REMINDER TIJDENS DE BELRONDE ─────────────────────────
+      //
+      // Wie op 'geen_gehoor' staat, staat nog op 'aangemeld' — die combinatie
+      // is het geen-gehoor-venster. Een reminder daarin spreekt de mail die
+      // zegt dat de plek vervalt regelrecht tegen.
+      //
+      // ── WAAROM DIT OP triggerType GESCOPED IS, EN NIET OP DE BELSTATUS
+      //    ALLEEN ───────────────────────────────────────────────────────
+      // Dit is de val van deze wijziging, en een grotere dan hij lijkt.
+      // 'Geen gehoor - laatste kans' stuurt in stap 0 en 1 ZELF een mail en
+      // een WhatsApp — naar iemand die per definitie call_status='geen_gehoor'
+      // heeft, want dat is zijn trigger. Een guard die alleen naar de
+      // belstatus kijkt, zou die flow dus zijn EIGEN berichten laten
+      // overslaan: de hele geen-gehoor-functie zou stil niets meer doen.
+      //
+      // Daarom geldt de pauze uitsluitend voor trigger_type
+      // 'time_before_event' — de reminders. Elke andere trigger (on_signup,
+      // on_call_status, on_assessment_completed, on_status) stuurt gewoon.
+      //
+      // Is het trigger_type onbekend (null), dan doen we NIETS. Dat is de
+      // veilige kant: de pauze niet toepassen laat hoogstens de bestaande
+      // tegenspraak staan, terwijl hem wél toepassen een werkende flow zou
+      // breken. stepDueRuns logt luid als de opzoeking niet lukte.
+      if (triggerType === 'time_before_event' && reminderWachtOpBelronde(attendee)) {
+        await deps.recordLog(idx, type, {
+          ok: true, skipped: true,
+          reason: 'belronde loopt: call_status ' + REMINDER_PAUZE_BELSTATUS
+                + ' — geen reminder tijdens het geen-gehoor-venster',
+          attendee_call_status: attendee.call_status || null,
         });
         idx += 1; attempts = 0; continue;
       }
@@ -645,6 +727,18 @@ async function loadCandidatesForAutomation(auto, now) {
     // REMINDER_STATUSSEN bovenaan dit bestand voor de meting en voor waarom
     // dit een positieve lijst is en geen .not('status','in',…).
     q = q.in('status', REMINDER_STATUSSEN);
+    // EN NIET WIE IN HET GEEN-GEHOOR-VENSTER ZIT. Zie het blok bij
+    // reminderWachtOpBelronde bovenaan dit bestand.
+    //
+    // LET OP DE VORM. Een kale .neq('call_status','geen_gehoor') zou hier
+    // verkeerd uitpakken: SQL vergelijkt NULL met niets, dus `call_status <>
+    // 'geen_gehoor'` is NULL voor elke rij zonder belstatus en die rijen
+    // vallen dan wég. Dat is de overgrote meerderheid van de deelnemers — de
+    // reminders zouden vrijwel niemand meer bereiken. Vandaar expliciet
+    // 'is null OF niet gelijk aan'. Deze tak heeft geen andere .or(), dus er
+    // botst niets (twee .or()-aanroepen op één query leveren twee
+    // or=-parameters op; zie applyPlekBezetFilter).
+    q = q.or('call_status.is.null,call_status.neq.' + REMINDER_PAUZE_BELSTATUS);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
   } else if (auto.trigger_type === 'on_assessment_not_completed_after') {
     // Fase 4A: attendees X uur na aanmelding zonder voltooid assessment.
@@ -773,6 +867,36 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
     .order('next_run_at', { ascending: true, nullsFirst: true })
     .limit(limit);
   if (error) throw new Error('step: load runs: ' + error.message);
+
+  // ── HET TRIGGER_TYPE PER RUN, IN ÉÉN QUERY ────────────────────────────
+  // De geen-gehoor-pauze in de send-tak geldt ALLEEN voor reminders
+  // (time_before_event). Zonder die scoping zou 'Geen gehoor - laatste kans'
+  // zijn eigen mail overslaan, want die deelnemer heeft per definitie
+  // call_status='geen_gehoor'. Zie de guard in advanceRun.
+  //
+  // De run-rij kent het trigger_type niet (steps_snapshot is alles wat de
+  // stepper nodig had), dus halen we het erbij. Eén query voor de hele batch,
+  // geen N+1: bij 100 runs zijn dat een handvol unieke automatisaties.
+  //
+  // FAIL-SOFT EN LUID. Lukt de opzoeking niet, dan blijft de map leeg en is
+  // triggerType null; de pauze wordt dan niet toegepast en het gedrag is dat
+  // van vóór deze wijziging. Dat is de veilige kant — de pauze missen laat
+  // hoogstens de bestaande tegenspraak staan, de pauze verkeerd toepassen
+  // breekt een werkende flow.
+  const triggerPerAutomation = new Map();
+  const automationIds = [...new Set((runs || []).map((r) => r.automation_id).filter(Boolean))];
+  if (automationIds.length) {
+    const { data: autos, error: autoErr } = await supabaseAdmin
+      .from('event_automations')
+      .select('id, trigger_type')
+      .in('id', automationIds);
+    if (autoErr) {
+      console.error('[events-automation step] trigger_type-opzoeking faalde,'
+        + ' geen-gehoor-pauze staat deze ronde uit:', autoErr.message);
+    } else {
+      for (const a of (autos || [])) triggerPerAutomation.set(a.id, a.trigger_type || null);
+    }
+  }
 
   for (const run of (runs || [])) {
     if (Date.now() - startMs > abortMs) break;
@@ -1122,7 +1246,11 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
         },
       };
 
-      const u = await advanceRun({ run, attendee, event, now, deps });
+      const u = await advanceRun({
+        run, attendee, event, now, deps,
+        // null bij een mislukte opzoeking → pauze uit, gedrag als voorheen.
+        triggerType: triggerPerAutomation.get(run.automation_id) || null,
+      });
       await supabaseAdmin.from('event_automation_runs').update({
         current_step_index: u.current_step_index,
         status: u.status,
