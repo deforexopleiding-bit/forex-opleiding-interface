@@ -466,9 +466,9 @@
   window.__verdCertCloseUpload = () => { _ui.certUpload = null; render(); };
   window.__verdCertPickStudent = (studentId) => {
     if (!_ui.certUpload) return;
-    const stu = asArr(_live.myStudents.data?.students).find((s) => String(s.bubble_id || s.id) === String(studentId));
+    const stu = asArr(_live.myStudents.data?.students).find((s) => String(s.bubble_student_id) === String(studentId));
     if (!stu) return;
-    _ui.certUpload.studentId = String(stu.bubble_id || stu.id);
+    _ui.certUpload.studentId = String(stu.bubble_student_id);
     _ui.certUpload.studentName = String(stu.name || stu.email || 'Student');
     _ui.certUpload.step = 'upload';
     render();
@@ -1466,7 +1466,7 @@
         body = `
           <div style="padding:8px 0 14px;font-size:12.5px;color:var(--text-2)">Kies de student van wie je de funded-cert claimt. €100 bonus wordt in het maandrapport van ${fmtMonth(currentMonthKey() + '-01')} bijgeschreven.</div>
           ${students.length ? `<div style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r)">
-            ${students.map((s) => `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer" onclick="window.__verdCertPickStudent('${esc(s.bubble_id || s.id)}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
+            ${students.map((s) => `<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer" onclick="window.__verdCertPickStudent('${esc(s.bubble_student_id)}')" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background='transparent'">
               <div><div style="font-size:13px;font-weight:600">${esc(s.name || s.email || 'Student')}</div><div style="font-size:11.5px;color:var(--text-3)">${esc(s.email || '')}</div></div>
               <button class="btn btn-primary btn-sm">Kiezen →</button>
             </div>`).join('')}
