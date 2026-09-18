@@ -178,6 +178,9 @@
 
   <div id="odvSignatureBanner"></div>
   <div id="odvBody"><div class="odv-card"><div class="odv-card-b" style="color:var(--text-2)">Laden…</div></div></div>
+  <!-- 2026-09-18 — Hard-delete gevarenzone. Alleen zichtbaar bij
+       accepted/signed-state én rol IN (super_admin | sales); render() vult 'em. -->
+  <div id="odvDangerZone" style="display:none"></div>
 </div>
 
 <div class="odv-toast" id="odvToast" role="status" aria-live="polite"></div>
@@ -291,6 +294,22 @@ async function apiJson(url, init = {}) {
 
 // ── State ──────────────────────────────────────────────────────────────
 const dealId = new URLSearchParams(location.search).get('id');
+
+// 2026-09-18 — Rol voor de hard-delete "gevarenzone" (super_admin + sales).
+// Ge-fetcht bij load(). window.__odvRole blijft null tot getProfile() klaar is;
+// UI toont de knop pas als de rol daadwerkelijk gematcht is.
+window.__odvRole = null;
+async function _odvLoadRole() {
+  try {
+    if (window.AuthShared && typeof window.AuthShared.getProfile === 'function') {
+      const p = await window.AuthShared.getProfile();
+      window.__odvRole = String(p?.role || '').toLowerCase();
+    }
+  } catch (_) { /* fail-soft; knop blijft dan verborgen */ }
+}
+function _odvCanHardDelete() {
+  return ['super_admin', 'sales'].includes(String(window.__odvRole || '').toLowerCase());
+}
 // Embed-mode: gemount in een iframe binnen de klanten-v2 shell. Bij ?embed=1
 // wordt de body-class 'is-embed' gezet (verbergt back-link, transparante bg),
 // en navigate-side-effects gaan via parent.__odv* i.p.v. location.href zodat
@@ -395,7 +414,15 @@ let _dealTitle = 'Offerte';
 // ── Load + render ──────────────────────────────────────────────────────
 async function load() {
   try {
-    const d = await apiJson('/api/sales-deal-detail?id=' + encodeURIComponent(dealId));
+    // 2026-09-18 rev: rol MOET binnen zijn vóór render(), anders faalt de
+    // gevarenzone-gate op de eerste render (zone blijft verborgen ondanks
+    // super_admin/sales). _odvLoadRole() is intern fail-soft (try/catch),
+    // dus awaiten blokkeert niets bij een fout. Parallel met deal-detail-
+    // fetch zodat 'r geen tijdsverlies is.
+    const [, d] = await Promise.all([
+      _odvLoadRole(),
+      apiJson('/api/sales-deal-detail?id=' + encodeURIComponent(dealId)),
+    ]);
     render(d);
   } catch (e) {
     document.getElementById('odvBody').innerHTML = `<div class="odv-card"><div class="odv-card-b" style="color:var(--rose)">Kon offerte niet laden: ${esc(e.message)}</div></div>`;
@@ -578,7 +605,164 @@ function renderActions(deal, c) {
     btns = `${copyBtn} ${custBtn} ${tlBtn}`;
   }
   document.getElementById('odvDynamicActions').innerHTML = btns;
+
+  // 2026-09-18 — Hard-delete "gevarenzone" — alleen op getekende/accepted
+  // offertes én alleen voor super_admin | sales. Visueel apart (rode
+  // omkadering) onderaan zodat 'ie NIET naast de reguliere action-knoppen
+  // zit — voorkomt per-ongeluk-klik. Hergebruikt exact hetzelfde
+  // sales-hard-delete-preflight → typ-VERWIJDER → hard-delete-endpoint
+  // als de in-shell view (klanten-v2/views/offerte-detail-v2.js).
+  const zone = document.getElementById('odvDangerZone');
+  if (zone) {
+    if ((st === 'accepted' || st === 'signed') && _odvCanHardDelete()) {
+      zone.style.display = '';
+      zone.innerHTML = `
+        <div style="margin-top:32px;padding:18px 20px;background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;max-width:640px">
+          <div style="font-weight:700;color:#991b1b;font-size:14px;margin-bottom:6px">⚠ Gevarenzone</div>
+          <div style="font-size:13px;color:#7f1d1d;margin-bottom:12px;line-height:1.55">Definitieve verwijdering uit Teamleader én de CRM. Onherstelbaar. Weigert automatisch bij gekoppelde facturen, betalingsregelingen, sales-bonus of setter-commissie.</div>
+          <button class="btn btn-danger" style="background:#b91c1c;box-shadow:0 0 0 2px #b91c1c inset" onclick="__odvHdRun()">Definitief verwijderen (TL + CRM)</button>
+        </div>`;
+    } else {
+      zone.style.display = 'none';
+      zone.innerHTML = '';
+    }
+  }
 }
+
+// ── Hard-delete (2026-09-18) — 1-op-1 kopie van de logica uit
+//    klanten-v2/views/offerte-detail-v2.js (regels 750-860). Standalone-
+//    versie omdat deze HTML z'n eigen inline scriptblok heeft (geen shared
+//    module met de in-shell view). Endpoints en flow zijn identiek:
+//    sales-hard-delete-preflight → dubbele bevestiging + typ-VERWIJDER →
+//    sales-hard-delete-quotation.
+function _hdEur(v) { const n = Number(v || 0); return '€' + n.toFixed(2).replace('.', ','); }
+function _hdBlockerHtml(blockers) {
+  if (!blockers || !blockers.length) return '';
+  return blockers.map((b) =>
+    `<div style="padding:10px 12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;margin:6px 0"><b style="color:#7f1d1d">🚫 ${esc(b.label || b.type)}</b> — ${b.count || 0}${b.totaal_eur ? ` rij(en), totaal ${_hdEur(b.totaal_eur)}` : ' rij(en)'}<div style="font-size:12.5px;color:#7f1d1d;margin-top:4px">${esc(b.detail || '')}</div></div>`
+  ).join('');
+}
+function _hdGevolgenHtml(cascade, setNull) {
+  let out = '';
+  (cascade || []).forEach((c) => {
+    out += `<div style="padding:8px 10px;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;margin:5px 0;font-size:13px"><b>⚠ ${esc(c.label)}</b> — <span style="color:#9a3412">${c.count || 0} rij(en) worden mee-verwijderd (CASCADE, onherstelbaar)</span></div>`;
+  });
+  (setNull || []).forEach((s) => {
+    out += `<div style="padding:8px 10px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:8px;margin:5px 0;font-size:13px"><b>ℹ ${esc(s.label)}</b> — ${s.count || 0} rij(en) blijven bestaan, deal-referentie wordt NULL</div>`;
+  });
+  return out || '<div style="padding:8px 10px;background:#ecfccb;border:1px solid #bef264;border-radius:8px;font-size:13px;color:#3f6212">✓ Geen andere records gekoppeld — schone verwijdering.</div>';
+}
+function _hdConfirm(title, bodyHtml, opts) {
+  return new Promise((resolve) => {
+    const okLabel = esc(opts?.okLabel || 'Bevestig');
+    const cancelLabel = esc(opts?.cancelLabel != null ? opts.cancelLabel : 'Annuleren');
+    const danger = opts?.danger === true;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px';
+    wrap.innerHTML = `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden" onclick="event.stopPropagation()">
+      <div style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:600${danger ? ';color:#7f1d1d' : ''}">${esc(title)}</div>
+      <div style="padding:16px 18px;font-size:14px;color:#1f2937">${bodyHtml}</div>
+      <div style="padding:12px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;background:#f9fafb">
+        ${cancelLabel ? `<button id="hdCancel" class="btn btn-ghost">${cancelLabel}</button>` : ''}
+        <button id="hdOk" class="btn ${danger ? 'btn-danger' : ''}" ${danger ? 'style="background:#b91c1c"' : ''}>${okLabel}</button>
+      </div></div>`;
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) { document.body.removeChild(wrap); resolve(false); } });
+    document.body.appendChild(wrap);
+    document.getElementById('hdCancel')?.addEventListener('click', () => { document.body.removeChild(wrap); resolve(false); });
+    document.getElementById('hdOk').addEventListener('click', () => { document.body.removeChild(wrap); resolve(true); });
+  });
+}
+function _hdVerwijderPrompt(dealNaam) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9700;display:flex;align-items:center;justify-content:center;padding:20px';
+    wrap.innerHTML = `<div style="background:#fff;border:1px solid #e5e7eb;border-radius:10px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden" onclick="event.stopPropagation()">
+      <div style="padding:14px 18px;border-bottom:1px solid #e5e7eb;font-size:14px;font-weight:700;color:#7f1d1d">Definitieve verwijdering — bevestig door te typen</div>
+      <div style="padding:16px 18px;font-size:14px;color:#1f2937"><p style="margin:0 0 12px">Typ <b style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#fef3c7;padding:2px 8px;border-radius:4px">VERWIJDER</b> (exact, hoofdletters) om <b>${esc(dealNaam)}</b> onherroepelijk te verwijderen uit Teamleader én de CRM.</p>
+      <input id="hdConfirmInput" type="text" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #d5d9e2;border-radius:8px;font-size:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;letter-spacing:.08em" placeholder="Typ VERWIJDER">
+      <div id="hdConfirmHint" style="margin-top:6px;font-size:12px;color:#9ca3af">Wacht op exacte match…</div>
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;background:#f9fafb">
+        <button id="hdConfirmCancel" class="btn btn-ghost">Annuleren</button>
+        <button id="hdConfirmOk" class="btn btn-danger" disabled style="background:#b91c1c;opacity:.5;cursor:not-allowed">Definitief verwijderen</button>
+      </div></div>`;
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) { document.body.removeChild(wrap); resolve(false); } });
+    document.body.appendChild(wrap);
+    const inp = document.getElementById('hdConfirmInput');
+    const hint = document.getElementById('hdConfirmHint');
+    const ok  = document.getElementById('hdConfirmOk');
+    const upd = () => {
+      const match = inp.value === 'VERWIJDER';
+      ok.disabled = !match;
+      ok.style.opacity = match ? '1' : '.5';
+      ok.style.cursor  = match ? 'pointer' : 'not-allowed';
+      hint.textContent = match ? '✓ Match — knop is nu actief.' : 'Wacht op exacte match (hoofdlettergevoelig)…';
+      hint.style.color = match ? '#059669' : '#9ca3af';
+    };
+    inp.addEventListener('input', upd);
+    document.getElementById('hdConfirmCancel').addEventListener('click', () => { document.body.removeChild(wrap); resolve(false); });
+    ok.addEventListener('click', () => { if (!ok.disabled) { document.body.removeChild(wrap); resolve(true); } });
+    setTimeout(() => inp.focus(), 50);
+  });
+}
+window.__odvHdRun = async function () {
+  if (!dealId) return;
+  if (!_odvCanHardDelete()) { toast('Alleen super_admin en sales mogen hard-deleten'); return; }
+  // Preflight — blast-radius.
+  let pf = null;
+  try {
+    const r = await apiFetch('/api/sales-hard-delete-preflight?deal_id=' + encodeURIComponent(dealId));
+    pf = await r.json();
+    if (!r.ok) throw new Error(pf?.error || 'Preflight-fout');
+  } catch (e) { toast('Preflight faalde: ' + e.message); return; }
+
+  const d = pf.deal || {};
+  const dealNaam = (d.offerte_referentie || d.tl_quotation_id || dealId)
+    + (d.klant?.naam ? ' — ' + d.klant.naam : '');
+  const summary = '<div style="max-height:60vh;overflow:auto">'
+    + '<div style="font-size:14px;margin-bottom:10px;padding:10px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px">'
+    + `<div><b>Offerte:</b> ${esc(dealNaam)}</div>`
+    + (d.tl_quotation_status ? `<div><b>Status:</b> ${esc(d.tl_quotation_status)}</div>` : '')
+    + (d.tl_quotation_id ? `<div style="font-size:12px;color:#6b7280"><b>TL-quotation:</b> ${esc(d.tl_quotation_id)}</div>` : '')
+    + (d.tl_deal_id ? `<div style="font-size:12px;color:#6b7280"><b>TL-deal:</b> ${esc(d.tl_deal_id)}</div>` : '')
+    + '</div>'
+    + (_hdBlockerHtml(pf.blockers) ? `<div style="margin:10px 0"><b style="font-size:13px;color:#7f1d1d">🚫 BLOCKERS — hard-delete geweigerd:</b>${_hdBlockerHtml(pf.blockers)}</div>` : '')
+    + (pf.deletable ? `<div style="margin:10px 0"><b style="font-size:13px">📋 Gevolgen bij hard-delete:</b>${_hdGevolgenHtml(pf.cascade, pf.set_null)}</div>` : '')
+    + '</div>';
+
+  if (!pf.deletable) {
+    await _hdConfirm('Kan niet hard-deleten — blockers open',
+      summary + '<p style="margin:12px 0 0;font-size:13px;color:#7f1d1d">Los eerst deze blockers op. De tool raakt incasso/bonus/setter-commissie <b>niet</b> aan.</p>',
+      { okLabel: 'OK', cancelLabel: '', danger: false });
+    return;
+  }
+  const ok1 = await _hdConfirm('⚠ Definitief verwijderen — laatste waarschuwing',
+    summary + '<p style="margin:12px 0 0;font-size:13.5px"><b>Onherstelbaar.</b> Deze offerte + gekoppelde subs/regels verdwijnen PERMANENT uit de CRM én uit Teamleader.</p>',
+    { okLabel: 'Doorgaan (typ-verificatie volgt)', danger: true });
+  if (!ok1) return;
+  const ok2 = await _hdVerwijderPrompt(dealNaam);
+  if (!ok2) return;
+
+  try {
+    const r = await apiFetch('/api/sales-hard-delete-quotation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deal_id: dealId, confirm: 'VERWIJDER' }),
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      if (j.partial) {
+        await _hdConfirm('⚠ Partial delete — sync-mismatch',
+          `<p style="margin:0 0 10px">${esc(j.detail || 'Teamleader is opgeruimd maar lokaal niet.')}</p><p style="margin:0;font-size:13px;color:#7f1d1d">Admin-alarm-mail is verstuurd. Corrigeer handmatig via Supabase Studio.</p>`,
+          { okLabel: 'OK', cancelLabel: '', danger: true });
+        return;
+      }
+      toast('Hard-delete mislukt: ' + (j.detail || j.error || 'onbekend'));
+      return;
+    }
+    toast('Offerte definitief verwijderd (TL + CRM)');
+    setTimeout(() => { _odvNav('/modules/klanten-v2/?v2preview=sales'); }, 900);
+  } catch (e) { toast('Hard-delete mislukt: ' + e.message); }
+};
 
 // ── Actie-handlers (1-op-1 met v1 endpoints) ───────────────────────────
 async function doMarkAccepted() {
