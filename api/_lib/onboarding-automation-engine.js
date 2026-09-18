@@ -537,7 +537,7 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
           try {
             // Simple variable-resolve: {{klant.voornaam}}, {{onboarding.wizard_link}}
             const wizardLink = onboarding.token
-              ? `https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=${encodeURIComponent(onboarding.token)}`
+              ? `${process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl'}/modules/onboarding.html?t=${encodeURIComponent(onboarding.token)}`
               : '';
             const replacements = {
               '{{klant.voornaam}}':         String(cust?.first_name || '').trim(),

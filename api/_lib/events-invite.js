@@ -19,7 +19,7 @@ import { sendEventMail, wrapEmailHtml } from '../mailer.js';
 import { sendEventWhatsAppTemplate } from './events-send.js';
 import { logComms, mapMailStatus, mapSendStatus } from './comms-log.js';
 
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl';
 const TEMPLATE_NAME   = process.env.EVENTS_KEUZE_LINK_TEMPLATE_NAME || 'events_keuze_link';
 const TEMPLATE_LANG   = 'nl';
 

@@ -305,7 +305,7 @@ export async function sendOnboardingInvite({
 
     return {
       sent          : true,
-      wizard_link   : `${process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app'}/modules/onboarding.html?t=${encodeURIComponent(ob.token)}`,
+      wizard_link   : `${process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl'}/modules/onboarding.html?t=${encodeURIComponent(ob.token)}`,
       template_name : templateName,
       message_id    : insertedId,
       meta_wamid    : wamid,

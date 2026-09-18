@@ -239,8 +239,8 @@ export const AVAILABLE_VARIABLES = [
   { key: 'attendee.naam',       label: 'Volledige naam',  category: 'attendee', example: 'Jeffrey Biemold',                                                                                                requires_context: 'attendee' },
   { key: 'attendee.email',      label: 'E-mail',          category: 'attendee', example: 'naam@voorbeeld.nl',                                                                                              requires_context: 'attendee' },
   { key: 'attendee.telefoon',   label: 'Telefoon',        category: 'attendee', example: '+31 6 12345678',                                                                                                 requires_context: 'attendee' },
-  { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
-  { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://forex-opleiding-interface.vercel.app/modules/assessment.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
+  { key: 'attendee.keuze_link',      label: 'Keuze-link',      category: 'attendee', example: 'https://crm.deforexopleiding.nl/modules/event-keuze.html?t=00000000-0000-0000-0000-000000000000',   requires_context: 'attendee' },
+  { key: 'attendee.vragenlijst_link', label: 'Vragenlijst-link', category: 'attendee', example: 'https://crm.deforexopleiding.nl/modules/assessment.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
   { key: 'attendee.vervolg_link',     label: 'Vervolg-link (Stap 2, dfo-website)', category: 'attendee', example: 'https://www.deforexopleiding.nl/vervolg?t=00000000-0000-0000-0000-000000000000', requires_context: 'attendee' },
   // Hangt tussen attendee en event in: 48 uur na attendee.call_status_at, maar
   // nooit later dan 48 uur vóór event.starts_at. Vandaar de special-case in
@@ -258,11 +258,11 @@ export const AVAILABLE_VARIABLES = [
   //   Callers die alleen een customer hebben kunnen vóór resolveVariables
   //   loadOnboardingForCustomer(supabaseClient, customer.id) aanroepen om
   //   context.onboarding op te halen (meest recente onboardings-rij).
-  { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
+  { key: 'onboarding.persoonlijke_link', label: 'Persoonlijke onboarding-link', category: 'onboarding', example: 'https://crm.deforexopleiding.nl/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
   { key: 'onboarding.startdatum',   label: 'Startdatum',          category: 'onboarding', example: '20-06-2026', requires_context: 'onboarding' },
   { key: 'onboarding.traject',      label: 'Traject',             category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
   { key: 'onboarding.mentor',       label: 'Toegewezen mentor',   category: 'onboarding', example: 'Dave de Jong', requires_context: 'onboarding' },
-  { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://forex-opleiding-interface.vercel.app/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
+  { key: 'onboarding.wizard_link',  label: 'Wizard-link',     category: 'onboarding', example: 'https://crm.deforexopleiding.nl/modules/onboarding.html?t=00000000-0000-0000-0000-000000000000', requires_context: 'onboarding' },
   { key: 'onboarding.traject_label', label: 'Traject-label',  category: 'onboarding', example: 'Forex Masterclass 1-op-1', requires_context: 'onboarding' },
   { key: 'onboarding.status',       label: 'Onboarding-status', category: 'onboarding', example: 'aangemeld', requires_context: 'onboarding' },
   { key: 'onboarding.login_url',    label: 'Login-URL Bubble', category: 'onboarding', example: 'https://dashboard.deforexopleiding.nl', requires_context: 'onboarding' },
@@ -617,7 +617,7 @@ function getEventValue(event, key) {
 // (zelfde env-var-patroon als sales-onboarding-send / teamleader-webhook-
 // register). Productie-fallback op de Vercel-alias zodat de link altijd naar
 // productie wijst, niet naar de deployment-specifieke VERCEL_URL.
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl';
 
 // Onboarding-vars (Comms C1) — vereist context.onboarding met minstens
 // `token` voor de wizard-link. traject_label en status zijn optioneel.
