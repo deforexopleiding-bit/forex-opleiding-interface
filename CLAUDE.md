@@ -65,6 +65,18 @@ Lokaal: C:/Users/jeffr/forex-opleiding-interface
 - requireAuth(roles?): checkt sessie + profiel.is_active + rol; redirect naar /login.html?returnTo=...
 - Sidebar admin-link: zichtbaar als ADMIN_ROLES.includes(profile.role), standaard display:none
 
+### Speciale rol-sets (per feature — NIET onder ADMIN_ROLES)
+- **Sales hard-delete offerte** (2026-09-18): `['super_admin', 'sales']` — admin/manager
+  expliciet NIET toegestaan. Sales-rol = eigenaar van sales-domein (Dave), super_admin
+  = catch-all. Endpoints: `api/sales-hard-delete-preflight.js` (GET, blast-radius) +
+  `api/sales-hard-delete-quotation.js` (POST, definitief). UI-gate:
+  `_odvCanHardDelete()` in `modules/klanten-v2/views/offerte-detail-v2.js`. Dubbele
+  bevestiging (samenvatting-modal → typ "VERWIJDER" exact hoofdlettergevoelig) +
+  server-side `confirm: 'VERWIJDER'`-body-guard. Blocker-tabellen: `invoices`,
+  `payment_arrangements` (live statussen), `bonuses`, `setter_ledger_entries` (elke
+  status = geld). Bij TL-succes + lokale delete-fout → audit `status='partial'` +
+  alarm-mail via `PROVISIONING_ALARM_EMAIL` (of default `biemoldjeffrey@gmail.com`).
+
 ## Open polish-items (2026-05-15)
 - polish-11: dashboard open_taken semantiek (deadline-filter vs status='open')
 - polish-12: admin UI knoppen misleidend voor manager (server-side 403 werkt, UI niet)
