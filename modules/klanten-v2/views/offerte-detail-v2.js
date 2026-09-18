@@ -500,7 +500,14 @@
             ? `<button class="btn btn-success" style="background:var(--emerald,#07835A);border-color:var(--emerald,#07835A);color:#fff" onclick="__odvOpenOnboarding('${esc(ob.id)}')" title="Bekijk het lopende onboarding-traject van deze klant (status: ${esc(String(ob.status || 'onbekend'))})">✓ Onboarding al aangemeld</button>`
             : `<button class="btn" style="background:#0a2f63;color:#fff" onclick="obOpen()" title="Onboarding-traject aanmelden (F0.2 modal)">📋 Onboarding aanmelden</button>`)
         : '';
-      return `${convertBtn} ${onboardBtn} ${copyBtn}`;
+      // 2026-09-18 — rode "Definitief verwijderen"-knop voor GETEKENDE
+      // offertes (super_admin + sales). Doet TL hard-delete + lokale DELETE
+      // met dubbele bevestiging + typ-VERWIJDER-guard. Achteraan de rij
+      // zodat 'ie visueel apart staat van de positieve conversie-knoppen.
+      const hardBtn = _odvCanHardDelete()
+        ? '<button class="btn btn-danger" style="background:#b91c1c;box-shadow:0 0 0 2px #b91c1c inset" onclick="__odvDoHardDelete()" title="Verwijdert offerte PERMANENT uit Teamleader én de CRM (dubbele bevestiging)">Definitief verwijderen (TL + CRM)</button>'
+        : '';
+      return `${convertBtn} ${onboardBtn} ${copyBtn} ${hardBtn}`;
     }
     if (st === 'sent') {
       // Bewerken bij 'sent' — DIVERGENTIE van v1 op expliciet verzoek van
@@ -513,18 +520,11 @@
       // r145-149) — TL-quotation wordt NIET auto-geüpdatet; volgende
       // 'Opnieuw versturen' triggert de update naar de klant. Zelfde
       // gedrag als v1 sales-deal-update.
-      // 2026-09-18 — extra rode "Definitief verwijderen"-knop voor GETEKENDE
-      // offertes (super_admin + sales). Doet TL hard-delete + lokale DELETE
-      // met dubbele bevestiging + typ-VERWIJDER-guard.
-      const hardBtn = _odvCanHardDelete()
-        ? '<button class="btn btn-danger" style="background:#b91c1c;box-shadow:0 0 0 2px #b91c1c inset" onclick="__odvDoHardDelete()" title="Verwijdert offerte PERMANENT uit Teamleader én de CRM (dubbele bevestiging)">Definitief verwijderen (TL + CRM)</button>'
-        : '';
       return `<button class="btn" onclick="odvSendOpen()">Opnieuw versturen</button>
         <button class="btn" style="background:var(--amber, #C2700A);color:#fff" onclick="__odvDoMarkAccepted()">Markeer als getekend</button>
         <button class="btn btn-ghost" onclick="__odvEditDeal('${esc(deal.id)}')" title="Bewerken in v2-wizard (wijzigingen lokaal — TL-quotation niet auto-geüpdatet)">Bewerken</button>
         ${copyBtn}
-        ${_odvCanDelete() ? '<button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>' : '<button class="btn btn-danger" disabled title="Alleen super admin / manager mag verwijderen" style="opacity:.4;cursor:not-allowed">Verwijderen</button>'}
-        ${hardBtn}`;
+        ${_odvCanDelete() ? '<button class="btn btn-danger" onclick="__odvDoDelete()">Verwijderen</button>' : '<button class="btn btn-danger" disabled title="Alleen super admin / manager mag verwijderen" style="opacity:.4;cursor:not-allowed">Verwijderen</button>'}`;
     }
     if (st === 'draft') {
       const sendOrPush = deal.tl_quotation_id
