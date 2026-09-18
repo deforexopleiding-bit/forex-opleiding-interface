@@ -51,13 +51,20 @@ export default async function handler(req, res) {
 
   try {
     // 1) Deal-info + huidige customer/sales/status.
-    const { data: deal } = await supabaseAdmin.from('deals')
+    // 2026-09-18 fix: customers-tabel heeft GEEN 'name'-kolom (had 42703-fout
+    // "column customers_1.name does not exist" → embed-query error → data=null
+    // → misleidende 404 "Deal niet gevonden"). Nu selecteren we de correcte
+    // shape (is_company + company_name + first_name + last_name) en bouwen
+    // de weergavenaam in JS. Ook: `error` destructureren zodat een toekomstige
+    // embed-fout NIET stil-fail-t als 404.
+    const { data: deal, error: dealErr } = await supabaseAdmin.from('deals')
       .select(`id, customer_id, sales_user_id, tl_deal_id, tl_quotation_id,
                tl_quotation_status, tl_quotation_sent_at, tl_quotation_accepted_at,
                quote_reference, notes, archived_at,
-               customer:customers(id, name, email),
+               customer:customers(id, is_company, company_name, first_name, last_name, email),
                sales:profiles!deals_sales_user_id_fkey(id, full_name, email)`)
       .eq('id', deal_id).maybeSingle();
+    if (dealErr) return res.status(500).json({ error: 'Deal-lookup fout', detail: dealErr.message });
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
 
     // 2) BLOCKERS ─────────────────────────────────────────────────────────
@@ -184,6 +191,14 @@ export default async function handler(req, res) {
     });
 
     // Meta over de deal zelf.
+    // 2026-09-18 fix: bouw klantnaam in JS uit is_company + company_name /
+    // first_name + last_name (customers-tabel heeft géén enkele 'name'-kolom).
+    // UI (offerte-detail-v2.js:831) verwacht `deal.klant?.naam` — shape blijft
+    // identiek, alleen bron-mapping is nu correct.
+    const c = deal.customer;
+    const klantNaam = c
+      ? ((c.is_company ? c.company_name : [c.first_name, c.last_name].filter(Boolean).join(' ')) || '(onbekend)')
+      : null;
     const deletable = blockers.length === 0;
     return res.status(200).json({
       ok: true,
@@ -191,7 +206,7 @@ export default async function handler(req, res) {
       by_role: auth.profile.role,
       deal: {
         id: deal.id,
-        klant : deal.customer ? { id: deal.customer.id, naam: deal.customer.name, email: deal.customer.email } : null,
+        klant : c ? { id: c.id, naam: klantNaam, email: c.email } : null,
         sales : deal.sales ? { id: deal.sales.id, naam: deal.sales.full_name, email: deal.sales.email } : null,
         offerte_referentie: deal.quote_reference,
         tl_deal_id       : deal.tl_deal_id,
