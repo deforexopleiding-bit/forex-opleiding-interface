@@ -14,7 +14,7 @@
 // het productiedomein anders zijn.
 
 const LOGO_URL = process.env.MAIL_LOGO_URL
-  || 'https://forex-opleiding-interface.vercel.app/dfo-logo-email.png';
+  || 'https://crm.deforexopleiding.nl/dfo-logo-email.png';
 
 // Detectiereeks tegen dubbele handtekening: uniek genoeg om vals-positief te
 // vermijden, en aanwezig in zowel de tekst- als de HTML-versie.

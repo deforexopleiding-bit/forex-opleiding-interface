@@ -8,7 +8,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { sendMail, wrapEmailHtml } from './mailer.js';
 
-const BASE_URL = process.env.PUBLIC_BASE_URL || 'https://forex-opleiding-interface.vercel.app';
+const BASE_URL = process.env.PUBLIC_BASE_URL || 'https://crm.deforexopleiding.nl';
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
