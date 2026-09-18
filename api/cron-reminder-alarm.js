@@ -73,6 +73,35 @@ export default async function handler(req, res) {
   const cronAuth = checkCronAuth(req);
   if (!cronAuth.ok) return res.status(cronAuth.status).json(cronAuth.body);
 
+  // ── Selftest-modus (?selftest=1 of header x-selftest) ────────────────────
+  // Bevestigt dat de alarm-mail écht aankomt. Scant NIETS, muteert NIETS, schrijft
+  // GEEN state. Puur één vaste testmail via dezelfde afzender/route. Aparte,
+  // vroege return — raakt de normale alarm-logica hieronder niet.
+  const selftest = String(req.query?.selftest || req.headers?.['x-selftest'] || '') === '1';
+  if (selftest) {
+    const nu = new Date().toISOString();
+    let mailRes = { ok: false, reason: 'niet verstuurd' };
+    try {
+      mailRes = await sendEmailViaSmtp({
+        fromMailbox: ALARM_FROM,
+        to: ALARM_EMAIL,
+        subject: '[TEST] Reminder-alarm werkt',
+        text: `Dit is een testmail van cron-reminder-alarm (selftest).\n\n`
+          + `Als je dit leest, komt de alarm-mail aan op ${ALARM_EMAIL}.\n`
+          + `Tijdstip: ${nu}\n\n`
+          + `Er is niets gescand of gewijzigd — puur een verzendtest.`,
+      });
+    } catch (e) {
+      mailRes = { ok: false, reason: e?.message || String(e) };
+    }
+    return res.status(200).json({
+      selftest: true,
+      mailed: !!mailRes.ok,
+      to: ALARM_EMAIL,
+      reason: mailRes.ok ? undefined : (mailRes.reason || 'onbekend'),
+    });
+  }
+
   const nowMs  = Date.now();
   const nowIso = new Date(nowMs).toISOString();
   const out = { checked_at: nowIso, mailed: false, issues: {} };
