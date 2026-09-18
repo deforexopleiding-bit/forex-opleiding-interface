@@ -414,10 +414,15 @@ let _dealTitle = 'Offerte';
 // ── Load + render ──────────────────────────────────────────────────────
 async function load() {
   try {
-    // Role-fetch in parallel — de hard-delete-gevarenzone gebruikt 'em bij render.
-    // Fail-soft: als AuthShared niet resolveert, blijft de zone verborgen.
-    _odvLoadRole().catch(() => {});
-    const d = await apiJson('/api/sales-deal-detail?id=' + encodeURIComponent(dealId));
+    // 2026-09-18 rev: rol MOET binnen zijn vóór render(), anders faalt de
+    // gevarenzone-gate op de eerste render (zone blijft verborgen ondanks
+    // super_admin/sales). _odvLoadRole() is intern fail-soft (try/catch),
+    // dus awaiten blokkeert niets bij een fout. Parallel met deal-detail-
+    // fetch zodat 'r geen tijdsverlies is.
+    const [, d] = await Promise.all([
+      _odvLoadRole(),
+      apiJson('/api/sales-deal-detail?id=' + encodeURIComponent(dealId)),
+    ]);
     render(d);
   } catch (e) {
     document.getElementById('odvBody').innerHTML = `<div class="odv-card"><div class="odv-card-b" style="color:var(--rose)">Kon offerte niet laden: ${esc(e.message)}</div></div>`;
