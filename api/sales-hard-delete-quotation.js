@@ -230,10 +230,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Deal-context laden.
-    const { data: deal } = await supabaseAdmin.from('deals')
+    // 1. Deal-context laden. 2026-09-18: `error` destructureren zodat een
+    // toekomstige lookup-fout niet stil-fail-t als misleidende 404 (zoals bij
+    // de preflight-embed-fout — customers.name-kolom die niet bestond). Deze
+    // lookup gebruikt NU geen embeds en enkel bestaande kolommen (id,
+    // customer_id, sales_user_id, tl_deal_id, tl_quotation_id,
+    // tl_quotation_status, quote_reference) → geen bekende issue-vector.
+    const { data: deal, error: dealErr } = await supabaseAdmin.from('deals')
       .select('id, customer_id, sales_user_id, tl_deal_id, tl_quotation_id, tl_quotation_status, quote_reference')
       .eq('id', deal_id).maybeSingle();
+    if (dealErr) return res.status(500).json({ error: 'Deal-lookup fout', detail: dealErr.message });
     if (!deal) return res.status(404).json({ error: 'Deal niet gevonden' });
 
     // 2. Blocker-check (server-side, niet-vertrouwd op UI).
