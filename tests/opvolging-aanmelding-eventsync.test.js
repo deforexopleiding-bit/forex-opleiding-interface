@@ -171,7 +171,9 @@ test('de capaciteitshook draait alleen als de PLEK echt kantelt', () => {
 
   // De statusregel zelf is ongemoeid.
   assert.match(blok, /const statusWijzigt = huidige === 'aangemeld' \|\| huidige === 'wachtlijst'/);
-  assert.match(blok, /if \(statusWijzigt\) patch\.status = 'geannuleerd'/);
+  // De gate, niet de vorm: het blok stempelt sinds de annulatie-automatisatie
+  // ook cancelled_at, dus staan er accolades om.
+  assert.match(blok, /if \(statusWijzigt\)\s*\{?\s*patch\.status = 'geannuleerd'/);
 
   // De hook hangt aan de plek-vergelijking, niet meer aan de status alleen.
   assert.doesNotMatch(blok, /if \(statusWijzigt && rij\.event_id\)/);

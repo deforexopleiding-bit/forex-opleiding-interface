@@ -283,7 +283,11 @@ const HTML   = readFileSync(join(ROOT, 'modules/events-automations.html'), 'utf8
 const VIEW   = readFileSync(join(ROOT, 'modules/klanten-v2/views/automatiseringen-v2.js'), 'utf8');
 
 test('de server kent on_call_status en eist een belstatus', async () => {
-  assert.match(SAVE, /'on_assessment_not_completed_after', 'on_call_status'\]/);
+  // Op LIDMAATSCHAP, niet op de positie in de lijst. De oude assertie eiste
+  // dat 'on_call_status' het LAATSTE element was; toen 'on_status' erbij kwam
+  // viel die om terwijl er niets kapot was. Wat deze test bewaakt is dat de
+  // server de trigger kent, niet waar hij in het rijtje staat.
+  assert.match(SAVE, /const TRIGGERS = \[[^\]]*'on_call_status'[^\]]*\]/);
   assert.match(SAVE, /on_call_status vereist trigger_config\.call_status/);
 });
 

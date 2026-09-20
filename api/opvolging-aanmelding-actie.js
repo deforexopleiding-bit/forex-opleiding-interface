@@ -498,7 +498,23 @@ export async function zetKomtNiet(attendeeId, nuIso, db = supabaseAdmin, opties 
     const huidige = String(rij.status || '').toLowerCase();
     const patch = { call_status: 'komt_niet', call_status_at: nuIso, called: true };
     const statusWijzigt = huidige === 'aangemeld' || huidige === 'wachtlijst';
-    if (statusWijzigt) patch.status = 'geannuleerd';
+    if (statusWijzigt) {
+      patch.status = 'geannuleerd';
+      // ── HET NULPUNT VAN DE ANNULATIE ─────────────────────────────────
+      // Waar enroll_mode 'new_only' van de annulatie-automatisatie op toetst.
+      // De reden bepaalt of die mail mag afgaan, en hier zijn het er twee:
+      //
+      //   'liever_zoom'          → GEEN annulatiemail. Die persoon haakt niet
+      //     af, hij wil online meedoen; 'je plek is vrijgegeven' is onwaar.
+      //     Dat stond al als bedoeling twintig regels hieronder ("die horen
+      //     hier NIET af te gaan") en is nu ook afdwingbaar.
+      //   'opvolging_komt_niet'  → wel. Hij zei dat hij niet komt; een
+      //     bevestiging daarvan is netjes.
+      patch.cancelled_at     = nuIso;
+      patch.cancelled_reason = opties.callStatus === 'liever_zoom'
+        ? 'liever_zoom'
+        : 'opvolging_komt_niet';
+    }
 
     // ── EEN AFMELDING MET EEN REDEN ──────────────────────────────────────
     // 'Liever via zoom' is geen afhaker. Zonder eigen reden staat hij in de

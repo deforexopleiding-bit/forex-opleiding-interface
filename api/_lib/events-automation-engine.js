@@ -130,6 +130,50 @@ export const REMINDER_STATUSSEN = Object.freeze(['aangemeld', 'aanwezig', 'sale'
 //
 // Bovendien wordt komtNietMeer óók door de kandidaat-filter van andere
 // triggers gebruikt; daar zou een belstatus-regel niet thuishoren.
+// ── WAAROM IEMAND GEANNULEERD IS ────────────────────────────────────────
+//
+// `cancelled_at` is het nulpunt waar enroll_mode 'new_only' op toetst, zodat
+// het aanzetten van de annulatie-automatisatie niet in één klap de 35
+// bestaande annulaties mailt. `cancelled_reason` zegt WIE het deed, en dat is
+// nodig voor één specifieke val:
+//
+//   'Geen gehoor - laatste kans' zet in stap 4 ZELF de status op geannuleerd.
+//   Die persoon heeft net de mail 'je plek is vervallen' gehad. Zonder
+//   maatregel krijgt hij binnen de minuut ook 'je inschrijving is
+//   geannuleerd' — twee berichten over hetzelfde.
+//
+// Dus: elk pad stempelt een reden, en de annulatie-automatisatie slaat de
+// redenen over die hun eigen bericht al gestuurd hebben.
+export const CANCEL_REDEN_MANUEEL     = 'manual';              // CRM, met de hand
+export const CANCEL_REDEN_KOMT_NIET   = 'opvolging_komt_niet'; // Opvolging: 'komt niet'
+export const CANCEL_REDEN_LIEVER_ZOOM = 'liever_zoom';         // Opvolging: liever online
+export const CANCEL_REDEN_AUTOMATISATIE = 'automation';        // een automatisatie-stap
+
+/**
+ * Redenen waarbij de annulatie-automatisatie NIET mag afgaan.
+ *
+ * · 'automation'   — de flow die annuleerde heeft zijn eigen bericht al
+ *   gestuurd. Vandaag is dat 'Geen gehoor - laatste kans' (stap 0/1 = mail +
+ *   WhatsApp, stap 4 = annuleren). Elke toekomstige automatisatie die
+ *   annuleert valt hier ook onder, en dat is de bedoeling: wie zelf mailt,
+ *   mailt zelf.
+ * · 'liever_zoom'  — die persoon haakt niet af, hij wil online meedoen.
+ *   'je plek is vrijgegeven' is daar onwaar. Dit stond al als bedoeling in
+ *   api/opvolging-aanmelding-actie.js: "ook voor de 'je inschrijving is
+ *   geannuleerd'-berichten die later nog komen: die horen hier NIET af te
+ *   gaan."
+ */
+export const GEEN_ANNULATIEMAIL_REDENEN = Object.freeze([
+  CANCEL_REDEN_AUTOMATISATIE, CANCEL_REDEN_LIEVER_ZOOM,
+]);
+
+/** Mag deze geannuleerde deelnemer de annulatiemail krijgen? */
+export function magAnnulatiemailKrijgen(attendee) {
+  const r = attendee && attendee.cancelled_reason;
+  if (r == null || r === '') return true;   // onbekende reden → wel sturen
+  return !GEEN_ANNULATIEMAIL_REDENEN.includes(String(r));
+}
+
 export const REMINDER_PAUZE_BELSTATUS = 'geen_gehoor';
 
 /**
@@ -406,7 +450,21 @@ export async function advanceRun({ run, attendee, event, now = new Date(), deps,
       // STIL — de overgeslagen stap komt met reden en status in het run-log,
       // dus in de historie op het scherm is te zien wat er niet verstuurd is
       // en waarom.
-      if (komtNietMeer(attendee)) {
+      // ── EEN on_status-AUTOMATISATIE MAG JUIST WEL STUREN ─────────────
+      //
+      // Hier zit de tweede val van deze wijziging. De guard hieronder komt uit
+      // #1617 en houdt berichten tegen naar wie niet meer komt — en
+      // 'geannuleerd' staat in die lijst. De annulatie-automatisatie stuurt
+      // per definitie naar iemand met status 'geannuleerd', want dat IS zijn
+      // trigger. Ongescoped zou hij dus stil niets doen: run afgerond, twee
+      // stappen overgeslagen, geen mail, geen WhatsApp.
+      //
+      // Precies dezelfde vorm als de geen-gehoor-pauze: een trigger die op een
+      // toestand aanslaat, mag door zijn eigen toestand niet geblokkeerd
+      // worden. Alle andere triggers houden de guard onverkort — een
+      // welkomstmail of reminder naar wie afzegde blijft tegengehouden.
+      const eigenToestandIsDeTrigger = triggerType === 'on_status';
+      if (!eigenToestandIsDeTrigger && komtNietMeer(attendee)) {
         await deps.recordLog(idx, type, {
           ok: true, skipped: true,
           reason: 'niet-meer-komend: status ' + String(attendee.status || '(leeg)')
@@ -617,7 +675,7 @@ async function loadCandidatesForAutomation(auto, now) {
     // call_status + call_status_at meelezen voor de trigger 'on_call_status':
     // de eerste is het filter, de tweede is zowel de new_only-grens als het
     // nulpunt van de deadline in de mail.
-    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, call_status, call_status_at, events!event_attendees_event_id_fkey!inner(starts_at)')
+    .select('id, event_id, registered_at, assessment_response_id, assessment_linked_at, status, call_status, call_status_at, cancelled_at, cancelled_reason, events!event_attendees_event_id_fkey!inner(starts_at)')
     // Opt-in herontwerp: attendees met automation_enabled=false zijn stil
     // toegevoegd door admin en mogen geen automation-flow krijgen. Filter
     // hier zodat ALLE trigger-types (on_signup / time_before_event /
@@ -747,6 +805,46 @@ async function loadCandidatesForAutomation(auto, now) {
     const cutoff = new Date(now.getTime() - hours * 3_600_000).toISOString();
     q = q.is('assessment_response_id', null).lte('registered_at', cutoff);
     if (newOnly) q = q.gte('registered_at', auto.enabled_at);
+  } else if (auto.trigger_type === 'on_status') {
+    // ── DE INSCHRIJVINGSSTATUS ALS TRIGGER ────────────────────────────────
+    // Gebouwd naar het model van on_call_status hieronder. Tot nu toe bestond
+    // er GEEN enkele trigger op `status`, dus er vertrok niets als iemand
+    // geannuleerd werd.
+    //
+    // Bewust op trigger_config.status en niet hardgecodeerd op 'geannuleerd':
+    // dezelfde trigger dekt later 'no_show' of 'sale' zonder een tweede
+    // trigger_type.
+    const wanted = auto.trigger_config && auto.trigger_config.status;
+    if (!wanted || typeof wanted !== 'string') return [];
+    q = q.eq('status', wanted);
+
+    // Het event moet nog KOMEN. 'Je plek is vrijgegeven' over een middag die
+    // al geweest is, is onzin — en bij een no_show-trigger straks nog erger.
+    q = q.gt('events.starts_at', nowIso);
+
+    if (newOnly) {
+      // ── HET NULPUNT: cancelled_at ─────────────────────────────────────
+      // Zonder deze grens zou het AANZETTEN van de automatisatie in één klap
+      // alle bestaande annulaties mailen — 35 op het moment van bouwen.
+      // Dezelfde val die we bij geen gehoor met call_status_at ontweken.
+      //
+      // GEEN STEMPEL = NIET NIEUW. Oude rijen hebben geen cancelled_at (er is
+      // met opzet niet gebackfild), dus die vallen door de NOT NULL-check weg
+      // en kunnen nooit met terugwerkende kracht instromen. Dat is de hele
+      // reden dat de kolom bestaat.
+      const ondergrens = isoVoorFilter(auto.enabled_at);
+      if (!ondergrens) {
+        console.warn('[events-automation candidates] on_status: onleesbare enabled_at,'
+          + ' geen kandidaten', auto.id);
+        return [];
+      }
+      // Alleen zinvol voor 'geannuleerd' — dat is de enige status met een
+      // eigen tijdstempel. Een andere status zonder stempel zou hier ALLES
+      // wegfilteren, en dat is beter dan gokken op registered_at: dan zou het
+      // aanzetten alsnog oude rijen pakken. Wie on_status op een andere status
+      // wil, heeft eerst een stempel voor die status nodig.
+      q = q.not('cancelled_at', 'is', null).gte('cancelled_at', ondergrens);
+    }
   } else if (auto.trigger_type === 'on_call_status') {
     // ── DE BELSTATUS ALS TRIGGER ──────────────────────────────────────────
     // Tot nu toe keek geen enkele trigger naar het belwerk. Gemeten op 14
@@ -795,7 +893,34 @@ async function loadCandidatesForAutomation(auto, now) {
 
   const { data, error } = await q;
   if (error) throw new Error('candidates: ' + error.message);
-  return data || [];
+  let kandidaten = data || [];
+
+  // ── DE ANNULATIEREDEN ERUIT FILTEREN, IN JS EN NIET IN SQL ────────────
+  //
+  // Wie al een eigen bericht kreeg over zijn annulatie mag er geen tweede
+  // over krijgen. Zie GEEN_ANNULATIEMAIL_REDENEN bovenaan dit bestand.
+  //
+  // BEWUST NA DE QUERY. In PostgREST zou dit een
+  // `or('cancelled_reason.is.null,cancelled_reason.not.in.(…)')` moeten
+  // worden, want een kale not-in laat elke rij met een NULL-reden wegvallen —
+  // dezelfde NULL-val als bij de belstatus-filter hierboven. Die vorm is
+  // alleen niet offline te verifiëren, en een filter die we niet kunnen testen
+  // bepaalt hier wie er wel en niet gemaild wordt. In JS is het een pure
+  // functie met een unit-test eromheen, en de kosten zijn een handvol extra
+  // rijen uit een query die toch al op 500 begrensd is.
+  if (auto.trigger_type === 'on_status'
+      && auto.trigger_config && auto.trigger_config.status === 'geannuleerd') {
+    const voor = kandidaten.length;
+    kandidaten = kandidaten.filter((a) => magAnnulatiemailKrijgen(a));
+    if (kandidaten.length !== voor) {
+      // Niet stil: zichtbaar hoeveel er om welke reden afvielen.
+      console.log('[events-automation candidates] on_status/geannuleerd:'
+        + ' ' + (voor - kandidaten.length) + ' van ' + voor + ' overgeslagen'
+        + ' (eigen bericht al gestuurd: ' + GEEN_ANNULATIEMAIL_REDENEN.join(', ') + ')');
+    }
+  }
+
+  return kandidaten;
 }
 
 export async function enrollDueAttendees({ now = new Date() } = {}) {
@@ -1026,11 +1151,41 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
           return result;
         },
         sendWhatsApp: async (step, ctx) => {
+          // ── DE VARIABELE-MAPPING MOET MEE ──────────────────────────────
+          //
+          // GEMETEN 20 september. Over alle send_whatsapp-stappen in
+          // event_automation_run_log zijn er 186 mislukt. Een deel daarvan is
+          // het telefoonformaat (Meta 131009, gerepareerd in #1624 + de
+          // opkuis-migratie), maar hier zat een TWEEDE oorzaak: deze stap gaf
+          // helemaal geen mapping mee.
+          //
+          // Een template met een {{N}}-body en 0 meegestuurde parameters
+          // weigert Meta met 132000. De mapping komt normaal uit
+          // whatsapp_meta_templates.meta_param_mapping, maar 26 van de
+          // goedgekeurde templates hebben dat veld NULL — waaronder
+          // 'annulatie_bevestigd'. Voor die templates viel er dus niets te
+          // mappen en kwam er geen bericht aan.
+          //
+          // Daarom kan een stap zijn eigen mapping meegeven via
+          // config.param_mapping, in dezelfde vorm als PARAM_MAPPING in
+          // _lib/events-invite.js: { body: { 1: 'attendee.voornaam', … } }.
+          // sendEventWhatsAppTemplate gebruikt die alleen als FALLBACK — staat
+          // er wél een mapping in de DB, dan wint die. Zet hem dus bij
+          // voorkeur ook in de DB via het templatescherm, zodat het scherm 'm
+          // toont; deze regel zorgt dat de send niet van dat scherm afhangt.
+          const stapMapping = (step.config && step.config.param_mapping
+                               && typeof step.config.param_mapping === 'object')
+            ? step.config.param_mapping
+            : null;
           const result = await sendEventWhatsAppTemplate({
             attendee:    ctx.attendee,
             event:       ctx.event,
             templateName: step.config && step.config.template_name,
             sentByUserId: null,
+            // null → sendEventWhatsAppTemplate valt terug op de DB-mapping,
+            // precies het gedrag van vóór deze regel. Geen enkele bestaande
+            // stap verandert dus, alleen een stap die het veld zet.
+            paramMappingOverride: stapMapping,
           });
           // FIX 4 — log idem als bij sendEmail.
           try {
@@ -1172,6 +1327,20 @@ export async function stepDueRuns({ now = new Date(), limit = 100, abortMs = 50_
             if (!belstatusAlGoed) {
               patch.call_status    = newCallStatus;
               patch.call_status_at = nowIso;
+            }
+            // ── STEMPEL DE ANNULATIE ────────────────────────────────────
+            // cancelled_at is het nulpunt voor enroll_mode 'new_only' van de
+            // annulatie-automatisatie. cancelled_reason 'automation' zegt dat
+            // een flow dit deed, en dié annulaties slaat de annulatiemail
+            // over: 'Geen gehoor - laatste kans' heeft in stap 0 en 1 al
+            // gemaild en ge-WhatsApp't, en een tweede bericht binnen de minuut
+            // over hetzelfde is precies wat we niet willen.
+            //
+            // Alleen bij een ECHTE overgang naar geannuleerd (!statusAlGoed),
+            // zodat een tweede pass het tijdstip niet opschuift.
+            if (!statusAlGoed && newStatus === 'geannuleerd') {
+              patch.cancelled_at     = nowIso;
+              patch.cancelled_reason = CANCEL_REDEN_AUTOMATISATIE;
             }
             const { error } = await supabaseAdmin
               .from('event_attendees')
