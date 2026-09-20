@@ -3922,6 +3922,9 @@
     _metaEd.uploading = false;
     // v=82: reset picker state.
     _metaEd.varMapping = {}; _metaEd.folderId = null; _metaEd.origFolderId = null;
+    // Of de bestaande rij ECHT ingelezen is. Blijft false bij 'create' (daar
+    // is niets te laden) en bij een mislukte detail-fetch. Zie _metaEdSave.
+    _metaEd.loaded = false;
   }
   // v=82: lazy-fetch variables-registry (1× per session; cachet in _metaEd).
   async function _metaFetchVars() {
@@ -4080,7 +4083,27 @@
     const j = await tryFetch('meta-detail', '/api/admin-meta-templates-detail?id=' + encodeURIComponent(id));
     _metaEd.busy = false;
     if (j?.__error || j?.error) { _metaEd.error = j?.__error || j?.error; if (render) render(); return; }
-    const t = j?.template || j;
+    // ── DE SLEUTELNAAM WAS FOUT, EN DAT WISTE DE TEMPLATE ──────────────
+    //
+    // GEMETEN 20 september: 'Edit' op een template opende een LEEG formulier
+    // (naam leeg, body leeg, mapje op Ongegroepeerd).
+    //
+    // api/admin-meta-templates-detail.js returnt `{ item: <rij> }`, maar hier
+    // stond `j?.template || j`. `j.template` is dus undefined en de fallback
+    // pakt `j` ZELF — het omhullende object `{ item: {...} }`. Daarop is
+    // `t.name` undefined, en `String(undefined || '')` is een lege string. Elk
+    // veld viel zo terug op zijn default: body leeg, category UTILITY,
+    // header NONE, folder_id null → 'Ongegroepeerd'.
+    //
+    // Dat is niet alleen verwarrend. Wie het formulier dan invult en opslaat,
+    // schrijft de lege defaults terug over de bestaande rij: footer, buttons,
+    // body_examples, de variabele-mapping en het mapje zijn weg. De naam en de
+    // body zelf overleven het (die eist _metaEdValidate), de rest niet.
+    //
+    // `item` eerst, en de twee oude vormen blijven als fallback staan zodat
+    // een endpoint dat ooit `{ template: … }` of de rij zelf teruggeeft blijft
+    // werken.
+    const t = j?.item || j?.template || (j && typeof j.id === 'string' ? j : null);
     if (t) {
       _metaEd.fields.name         = String(t.name || '');
       _metaEd.fields.language     = String(t.language || 'nl');
@@ -4103,6 +4126,9 @@
       _metaEd.varMapping   = (t.meta_param_mapping && typeof t.meta_param_mapping === 'object' && t.meta_param_mapping.body && typeof t.meta_param_mapping.body === 'object') ? { ...t.meta_param_mapping.body } : {};
       _metaEd.folderId     = t.folder_id || null;
       _metaEd.origFolderId = t.folder_id || null;
+      // GELADEN. Zie de guard in _metaEdSave: zonder deze vlag mag een
+      // bestaande template niet overschreven worden.
+      _metaEd.loaded = true;
       // v=90 fail-soft: als DB-mapping null was maar body_examples bekend →
       // infer slots. Wacht op vars-fetch als die nog niet binnen is (edge-case
       // waarbij editor open gaat vóór _metaFetchVars() resolvet).
@@ -4148,6 +4174,29 @@
     return null;
   }
   async function _metaEdSave(alsoSubmit) {
+    // ── NIET OVERSCHRIJVEN WAT JE NOOIT GEZIEN HEBT ────────────────────────
+    //
+    // Tweede laag onder de sleutelnaam-fix hierboven. Die fix zorgt dat het
+    // formulier de bestaande waarden TOONT; deze guard zorgt dat opslaan
+    // weigert wanneer dat om welke reden ook NIET gelukt is — een mislukte
+    // detail-fetch, een time-out, een 403.
+    //
+    // Zonder deze laag is het patroon: formulier staat leeg, gebruiker vult
+    // naam en body in (die twee eist _metaEdValidate), drukt op opslaan, en de
+    // lege defaults voor footer, buttons, body_examples, de variabele-mapping
+    // en het mapje gaan over de bestaande rij. Naam en body overleven, de rest
+    // niet — en niets op het scherm zegt dat er iets verdwenen is.
+    //
+    // Alleen in 'edit'-modus: bij 'create' is er niets te laden en niets te
+    // verliezen.
+    if (_metaEd.mode === 'edit' && _metaEd.id && !_metaEd.loaded) {
+      _metaEd.error = 'Deze template is niet ingelezen, dus opslaan zou de bestaande '
+        + 'inhoud kunnen overschrijven met een leeg formulier. Sluit het venster en open '
+        + 'Edit opnieuw; blijft het leeg, dan is de detail-oproep stuk (kijk in de console '
+        + 'naar [instellingen-v2] meta-detail fail).';
+      if (render) render();
+      return;
+    }
     // Ronde-31 BLOK A: lees DOM-values voor uncontrolled inputs (buttons + examples
     // + header_url + header_text). Sync fields voor validatie + payload-build.
     _metaSyncFieldsFromDom();
