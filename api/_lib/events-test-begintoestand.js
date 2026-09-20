@@ -98,6 +98,45 @@ export function beginToestandVoorTrigger(auto, nowIso) {
     };
   }
 
+  if (type === 'on_status') {
+    // Zelfde verhaal als on_call_status hierboven, en om dezelfde reden
+    // toegevoegd: zonder begintoestand maakt de tester een deelnemer op
+    // 'aangemeld' aan, terwijl de automatisatie op (bijvoorbeeld)
+    // 'geannuleerd' triggert. De run start dan wel, maar meet niets — en dan
+    // lijkt de automatisatie kapot terwijl de tester het was. Dat was de bug
+    // uit #1606.
+    const wanted = typeof cfg.status === 'string' ? cfg.status.trim() : '';
+    if (!wanted) {
+      return {
+        patch: {},
+        tekst: null,
+        fout : 'Deze automatisatie heeft trigger_type \'on_status\' maar geen '
+             + 'trigger_config.status. Er is dus geen begintoestand te bepalen, en een testrun '
+             + 'zou een deelnemer op \'aangemeld\' aanmaken die de trigger nooit haalt. Zet '
+             + 'eerst een status op de trigger.',
+      };
+    }
+    // cancelled_at is het NULPUNT waar enroll_mode 'new_only' op toetst; zonder
+    // dat veld zou de testdeelnemer ook via de normale weg nooit instromen.
+    // Alleen zinvol bij 'geannuleerd' — dat is de enige status met een eigen
+    // stempel (zie de on_status-tak in events-automation-engine.js).
+    //
+    // De testrun zelf omzeilt de enrollment (de endpoint INSERT'et zijn run
+    // rechtstreeks), maar de deelnemer moet wél in de toestand staan die de
+    // flow beschrijft: de annulatiemail rendert {{event.datum}} en
+    // {{event.locatie}} en de stop-guard in de engine kijkt naar de status.
+    const patch = { status: wanted };
+    let tekst = 'testdeelnemer gezet op status ' + wanted;
+    if (wanted === 'geannuleerd') {
+      patch.cancelled_at = nowIso;
+      // GEEN reden 'automation': dat is precies de reden die de
+      // annulatiemail overslaat. Een testrun moet de mail wél kunnen zien.
+      patch.cancelled_reason = 'manual';
+      tekst += ' · geannuleerd op nu, reden manual (niet \'automation\', want die wordt overgeslagen)';
+    }
+    return { patch, tekst, fout: null };
+  }
+
   // Elk ander trigger-type: precies het gedrag van vóór deze wijziging.
   return { patch: {}, tekst: null, fout: null };
 }

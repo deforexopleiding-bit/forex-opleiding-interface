@@ -223,7 +223,12 @@ test('het komt-niet-pad kijkt naar de plek, niet meer alleen naar de status', ()
   const i = bron.indexOf('export async function zetKomtNiet');
   assert.ok(i > 0);
   const blok = bron.slice(i, i + 4800);
-  assert.match(blok, /if \(statusWijzigt\) patch\.status = 'geannuleerd'/, 'de status-regel zelf blijft');
+  // De GATE blijft, niet de eenregelige vorm. Sinds de annulatie-automatisatie
+  // stempelt dit blok ook cancelled_at + cancelled_reason, dus staat het in
+  // accolades. Wat hier telt is dat de statuswijziging nog steeds achter
+  // `statusWijzigt` hangt.
+  assert.match(blok, /if \(statusWijzigt\)\s*\{?\s*patch\.status = 'geannuleerd'/,
+    'de status-regel zelf blijft achter statusWijzigt hangen');
   assert.doesNotMatch(blok, /if \(statusWijzigt && rij\.event_id\)/,
     'de cascade hangt niet meer alleen aan de statuswijziging');
   assert.match(blok, /onAttendeePlekChange\)\(\s*rij,/);

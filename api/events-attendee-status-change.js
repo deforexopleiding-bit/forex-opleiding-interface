@@ -97,6 +97,17 @@ export default async function handler(req, res) {
       case 'switched_to_other_event':
         patch.switched_at = nowIso;
         break;
+      // ── DE ANNULATIE KRIJGT EEN NULPUNT ────────────────────────────────
+      // cancelled_at is waar enroll_mode 'new_only' van de annulatie-
+      // automatisatie op toetst. Zonder stempel zou het aanzetten van die
+      // automatisatie in één klap alle bestaande annulaties mailen; met
+      // stempel stromen alleen annulaties van ná het aanzetten in.
+      // De reden onderscheidt dit van een annulatie die een automatisatie
+      // zelf deed — die heeft zijn eigen bericht al gestuurd.
+      case 'geannuleerd':
+        patch.cancelled_at     = nowIso;
+        patch.cancelled_reason = 'manual';
+        break;
       default: break;
     }
 

@@ -9,7 +9,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 // gehoor-laatste-kans.sql: die zet de CHECK op trigger_type opnieuw. Zonder
 // die migratie geeft opslaan een 23514 vanuit Postgres — de app-validatie
 // hieronder laat 'em door, de databank niet.
-const TRIGGERS = ['on_signup', 'on_assessment_completed', 'time_before_event', 'on_assessment_not_completed_after', 'on_call_status'];
+const TRIGGERS = ['on_signup', 'on_assessment_completed', 'time_before_event', 'on_assessment_not_completed_after', 'on_call_status', 'on_status'];
 
 // De belstatussen waar een automatisatie op kan aanslaan. Spiegelt
 // CALL_STATUS_OPTIONS in modules/klanten-v2/views/events-v2.js plus de twee
@@ -120,6 +120,29 @@ export default async function handler(req, res) {
       && !CALL_STATUSES.includes(trigger_config.call_status)) {
     return res.status(400).json({
       error: 'on_call_status vereist trigger_config.call_status uit: ' + CALL_STATUSES.join(', '),
+    });
+  }
+  // Een on_status zonder status zou elke deelnemer kandideren: de engine
+  // returnt dan [] en doet dus stil niets. Hier hard weigeren, zelfde reden
+  // als bij on_call_status hierboven.
+  if (body.trigger_type === 'on_status'
+      && !ATTENDEE_STATUSES.includes(trigger_config.status)) {
+    return res.status(400).json({
+      error: 'on_status vereist trigger_config.status uit: ' + ATTENDEE_STATUSES.join(', '),
+    });
+  }
+  // Alleen 'geannuleerd' heeft vandaag een eigen tijdstempel (cancelled_at),
+  // en new_only heeft zo'n nulpunt nodig. Bij een andere status zou new_only
+  // ALLES wegfilteren en de automatisatie stil niemand pakken — dat is precies
+  // het soort stilte dat we niet willen, dus liever een leesbare 400.
+  if (body.trigger_type === 'on_status'
+      && trigger_config.status !== 'geannuleerd'
+      && enroll_mode === 'new_only') {
+    return res.status(400).json({
+      error: 'on_status met enroll_mode new_only werkt vandaag alleen voor status '
+           + '\'geannuleerd\' — die heeft een eigen tijdstempel (cancelled_at) als nulpunt. '
+           + 'Voor een andere status is er nog geen stempel, dus zou new_only niemand pakken. '
+           + 'Kies include_existing, of voeg eerst een tijdstempel voor die status toe.',
     });
   }
   const scope_config = (body.scope_config && typeof body.scope_config === 'object') ? body.scope_config : {};
