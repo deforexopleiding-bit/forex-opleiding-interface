@@ -103,7 +103,6 @@ import { todayIsoInTz, zonedDayStartIso } from './_lib/dunning-overdue-guard.js'
 import { determineStage as _determineStageHelper } from './_lib/conv-reminder-stage.js';
 import { buildReminderTemplatePayload } from './_lib/conv-reminder-template.js';
 import { renderTemplatePreview } from './_lib/render-template-preview.js';
-import { haalHoldStand, holdBlokkade, holdStandSamenvatting } from './_lib/lms-hold.js';
 import { haalStilteStand, stilteBlokkade, stilteStandSamenvatting } from './_lib/lms-stilte.js';
 
 // Re-export voor backward-compat met tests die deze helpers vanuit deze
@@ -462,23 +461,10 @@ export default async function handler(req, res) {
     ));
     const openActionsByCustomer = await loadOpenActionsByCustomer(winnerCustIds);
 
-    // ── ON HOLD IN HET LMS ────────────────────────────────────────────────
-    // Een herinnering is óók een bericht. Staat de student on hold, dan gaat
-    // die niet uit — zelfde regel als bij de aanmaan-motor, zelfde bron.
-    // Eén bevraging per cron-run, vóór de lus.
-    let holdStand = null;
-    try {
-      holdStand = await haalHoldStand();
-      console.log('[conv-reminder-cron] ' + holdStandSamenvatting(holdStand));
-    } catch (e) {
-      console.error('[conv-reminder-cron] hold-stand ophalen gooide: ' + (e?.message || e));
-      const { BRON_ONBEREIKBAAR } = await import('./_lib/lms-hold.js');
-      holdStand = { bron_status: BRON_ONBEREIKBAAR, holds: new Map(), vangnet: new Set() };
-    }
-
     // ── AFSPRAAK IN HET LMS ───────────────────────────────────────────────
-    // Een herinnering is ook een bericht. Loopt er een afspraak, dan gaat hij
-    // niet uit — zelfde bron en zelfde regel als bij de motor.
+    // Een herinnering is óók een bericht. Loopt er een afspraak, dan gaat hij
+    // niet uit — zelfde bron en zelfde regel als bij de motor. Eén bevraging
+    // per cron-run, vóór de lus.
     let stilteStand = null;
     try {
       stilteStand = await haalStilteStand();
@@ -506,22 +492,15 @@ export default async function handler(req, res) {
         break;
       }
 
-      // Hold-guard: student staat on hold in het LMS -> geen reminder. Vóór
+      // Stilte-guard: er loopt een afspraak in het LMS -> geen reminder. Vóór
       // de actie-guard, want dit is de hardere regel van de twee: een open
-      // actie betekent "een mens is ermee bezig", een hold betekent "er mag
-      // niets uit". De run blijft ongemoeid; zodra de pauze afloopt pikt de
-      // volgende ronde 'm gewoon weer op.
+      // actie betekent "een mens is ermee bezig", een afspraak betekent "er
+      // mag niets uit". De run blijft ongemoeid; zodra de afspraak afloopt
+      // pikt de volgende ronde 'm gewoon weer op.
       const stilteBlok = stilteBlokkade(stilteStand, run.customer_id);
       if (stilteBlok) {
         summary.processed_count++;
         summary.skipped.push({ run_id: run.id, reason: 'LMS_STILTE: ' + stilteBlok.reden });
-        continue;
-      }
-
-      const holdBlok = holdBlokkade(holdStand, run.customer_id);
-      if (holdBlok) {
-        summary.processed_count++;
-        summary.skipped.push({ run_id: run.id, reason: 'LMS_HOLD: ' + holdBlok.reden });
         continue;
       }
 

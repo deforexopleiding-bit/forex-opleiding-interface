@@ -41,13 +41,13 @@ allebei:
 
 1. **`detectAndStartRuns`** — of er een nieuwe run start. Volgorde:
    arrangement-filter → **harde vervaldatum-poort** → `markOverdue` →
-   **LMS-stilte** → LMS-hold → klanttype/bedrag → terminal-fase → start.
+   **LMS-stilte** → klanttype/bedrag → terminal-fase → start.
    Bij een lopende afspraak start er dus niet eens een run: anders zou die
    elke dag opgepikt en overgeslagen worden, en de klant tijdens zijn
    afspraak in de pipeline staan alsof er iets loopt.
 2. **`advanceActiveRuns`** — of een lopende run een stap zet. Volgorde:
-   alles-betaald → reply-stop → **LMS-stilte** → LMS-hold → openstaande
-   actie → de stap zelf. Overslaan **zonder statuswijziging**: de run blijft
+   alles-betaald → reply-stop → **LMS-stilte** → openstaande actie → de
+   stap zelf. Overslaan **zonder statuswijziging**: de run blijft
    `active` en de dagcron pikt hem morgen opnieuw op.
 
 Daarnaast de gespreksherinneringen (`cron-dunning-conversation-reminders`) —
@@ -73,10 +73,10 @@ een afspraak"). De volgende run probeert het opnieuw.
 
 **Klanten zonder LMS-koppeling gaan gewoon door.** Anders legt één storing de
 complete inning stil, ook voor de ~100 wanbetalers die niets met het LMS te
-maken hebben. Het vangnet is hetzelfde als dat van de hold-poort — CRM-side
+maken hebben. Het vangnet zit in `api/_lib/lms-koppelnet.js` — CRM-side
 koppelwegen plus de afdruk die de factuurstand-ronde achterlaat in
 `app_settings.lms_gekoppelde_klanten` (op productie bijgewerkt 21-09 om
-02:10, ~180 klanten). Dat vangnet wordt **gedeeld**, niet gekopieerd.
+02:10, ~180 klanten). Eén plek, gedeeld met de factuurspiegel.
 
 ### Langer dan een etmaal onleesbaar wordt zichtbaar
 
@@ -90,9 +90,8 @@ dagen niemand gemaand wordt zonder dat iemand het weet.
 ## Wat een medewerker ziet
 
 Eigen bak en filter-pil **"Afspraak in het LMS"** in de wanbetalers-pipeline,
-naast (niet samengevoegd met) "On hold in het LMS" — bij een hold is de
-coaching stilgelegd, bij een afspraak is er iets toegezegd mét einddatum. In
-de rij, op de plek van de geplande datum:
+— sinds 21 september de enige LMS-bak (de bak "On hold in het LMS" is met de
+hold-poort mee verdwenen). In de rij, op de plek van de geplande datum:
 
 > Afspraak in het LMS — stil tot en met 01-10-2026 · facturen open, ·
 > afgesproken door Maxim Delo (admin)
@@ -102,33 +101,67 @@ een afspraak in het LMS"* met dezelfde zin als detail. De payload draagt
 `stil_tot`, `door_naam`, `reden_soort` en `bron` mee, zodat ook aan CRM-kant
 naleesbaar is wie wat heeft afgesproken.
 
-## Verhouding tot de hold-poort (#1622) — en één vraag voor Maxim
+## De hold-poort is weg (21 september 2026)
 
-De hold-poort leest `hlms_student_hold` rechtstreeks; deze leest het
-contract. Ze staan **naast elkaar**, bewust:
+#1622 zette een tweede poort naast deze, die `hlms_student_hold` rechtstreeks
+las. Die is verwijderd op beslissing van Maxim, en de reden is precies het
+onderscheid uit de eerste alinea van dit document:
 
-* **Gemeten:** er is op productie geen enkele actieve hold zónder
-  bijbehorende stilterij (`holds_actief_zonder_stilte` = leeg). De twee
-  spreken elkaar vandaag dus niet tegen — de LMS-kant projecteert een
-  menselijke hold naar een stilte (`bron='hold'`).
-* **De vraag:** zou het LMS ooit een **automatische** betalingspauze (2+
-  vervallen facturen) als hold wegschrijven, dan blokkeert de hold-poort wél
-  en deze niet — terwijl jullie regel juist is dat zo'n pauze géén stilte
-  zet. Dan manen we iemand niet aan die we wél hadden mogen aanmanen.
-* **Waarom ik de hold-poort tóch heb laten staan:** de omgekeerde fout is
-  duurder. Zou ik hem weghalen en projecteert het LMS een menselijke hold
-  een keer niet, dan manen we tegen een afspraak in. Dat is precies de fout
-  die deze hele brug moet voorkomen. Wil je één poort in plaats van twee, dan
-  is dat één import minder in `dunning-engine.js` — zeg het en het is zo weg.
+* Het LMS kan **automatische betalingsholds** zetten (2+ vervallen facturen,
+  `door` leeg, `reden_soort='betaling'`). Die leggen alleen de coaching stil.
+  De oude poort zou ze als zwijggebod lezen en dus precies de wanbetalers
+  stilleggen die wél een aanmaning horen te krijgen — de hele doelgroep van
+  deze motor.
+* Een **menselijke** hold bereikt ons nog steeds: het LMS projecteert die
+  zelf naar een stilterij met `bron='hold'`, dus langs deze poort, met een
+  naam eronder.
 
-## Niet gewijzigd
+**Meting op 21 september, eerlijk:** op productie stond op dat moment exact
+één hold — de testpauze van Maxim op student "Maxim test", met `door` gevuld.
+**Nul** automatische betalingsholds, terwijl er 15 rode
+`factuur_vervallen`-kaarten open stonden: het LMS roept
+`hlms_hold_automatisch_aan` vandaag nog niet aan (dat zoekt Cowork aan
+LMS-kant uit). En in 8.088 `dunning_log`-regels staat geen enkele
+`skipped_lms_hold` — de poort heeft op productie nooit iemand overgeslagen.
 
-* **De handmatige bulk-flows** (`cron-dunning-bulk-send`) — eerder door Maxim
-  beslist. De hold-poort die daar al stond blijft staan; er komt geen
-  stilte-poort bij. Een contracttest bewaakt allebei die kanten.
-* **Niets geschreven naar het LMS.** Geen insert, update of delete op een
-  `hlms_`-tabel; contracttest.
-* Geen wijziging aan bedragen, facturen of templates.
+De fout is dus nog niet gebeurd. Dat is geen reden om te wachten maar de
+reden om nu te handelen: zodra het LMS de eerste automatische hold schrijft,
+valt de inning stil zonder dat er iets kapot gaat — er gaan alleen berichten
+níét uit, en dat merkt niemand meteen. Omdat er geen productiegeval is om
+naar te wijzen, bouwt `tests/lms-geen-hold-poort.test.js` het geval zelf na:
+een student met alleen een automatische betalingshold wordt gemaand, een
+student met een menselijke afspraak niet, en de motor bevraagt
+`hlms_student_hold` niet meer.
+
+### Wat er van de hold-poort over is
+
+`api/_lib/lms-hold.js` is verwijderd. Het gedeelde vangnet dat erin woonde is
+verhuisd naar **`api/_lib/lms-koppelnet.js`** — dat had nooit iets met holds
+te maken, het beantwoordt de vraag "wie hangt er aan het LMS?" en wordt
+gebruikt door de stilte-poort én door de factuurspiegel. Met de poort
+verdwenen ook het event `skipped_lms_hold`, het label in het klantdossier en
+de pipeline-bak "On hold in het LMS"; dat kon schoon omdat er geen enkele
+historische logregel met dat event bestaat.
+
+### Eén afwijking: de bulk-flow
+
+Bij #1641 gold "de handmatige bulk-flows blijven zoals ze zijn", en daar
+stond de hold-poort van #1622. Die moest nu weg. Hem alleen weghalen zou
+bulk **onbeschermd** achterlaten tegen een echte afspraak — de dure kant van
+de fout, en precies waar deze brug tegen gebouwd is. Daarom is de poort in
+`cron-dunning-bulk-send.js` **vervangen** door de stilte-poort in plaats van
+verwijderd: zelfde plek (vóór de atomische claim), zelfde gedrag (ontvanger
+blijft `pending`, teller heet nu `lms_stilte`).
+
+Bulk is daarmee even goed beschermd tegen een menselijke afspraak als
+gisteren, en gaat niet meer uit op een pauze die een script heeft gezet. Wil
+Maxim bulk tóch helemaal zonder LMS-poort, dan is dat één import en één
+`if`-blok minder in dat bestand.
+
+Eén ding is bij die verhuizing meteen rechtgezet: de stand werd opgehaald
+vóór de check "zijn er wel wachtende ontvangers?". Deze cron draait elke 3
+minuten, dus dat waren 480 bevragingen per dag voor niets. De bevraging
+staat nu ná die check.
 
 ## Bekend bij de eerste live test
 

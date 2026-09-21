@@ -10320,7 +10320,6 @@
     { key: 'wacht_gesprek',           label: 'Wacht op gesprek',  group: 'wacht' },
     { key: 'wacht_handmatig',         label: 'Handmatig gepauzeerd', group: 'wacht' },
     { key: 'wacht_openstaande_actie', label: 'Openstaande actie', group: 'wacht' },
-    { key: 'wacht_lms_hold',          label: 'On hold in het LMS', group: 'wacht' },
     { key: 'wacht_lms_stilte',        label: 'Afspraak in het LMS', group: 'wacht' },
     // Virtuele bucket: matcht op it.needs_attention === true i.p.v. it.bucket.
     // Zie speciale filter-tak in _renderDunPlList.
@@ -10528,12 +10527,8 @@
     // eronder.
     if ((it.pause_reason?.code === 'lms_stilte' || it.pause_reason?.code === 'lms_stilte_onbekend')
         && it.pause_reason.message) {
-      // Zelfde reden als hieronder bij de hold: de run is technisch active en
-      // heeft dus een next_action_at, maar er gaat juist niets uit. Die datum
-      // zou hier als belofte lezen.
-      nextActionCell = `<span class="pl-tag wait">${esc(it.pause_reason.message)}</span>`;
-    }
-    if (it.pause_reason?.code === 'lms_hold' && it.pause_reason.message) {
+      // De run is technisch active en heeft dus een next_action_at, maar er
+      // gaat juist niets uit. Die datum zou hier als belofte lezen.
       nextActionCell = `<span class="pl-tag wait">${esc(it.pause_reason.message)}</span>`;
     }
 
