@@ -269,6 +269,10 @@
     {
       "path": "/api/cron-iris-werk",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron-iris-gezondheid",
+      "schedule": "0 5 * * *"
     }
   ],
   "redirects": [

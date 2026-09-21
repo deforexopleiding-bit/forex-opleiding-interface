@@ -114,6 +114,8 @@
       recorder: null,
       stukken: [],
     },
+
+    belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
   };
 
   function hertekenen() { if (window.DFO?.render) window.DFO.render(); }
@@ -1278,6 +1280,154 @@
     </div>`;
   }
 
+  /* ── Belrij ───────────────────────────────────────────────────────────── */
+
+  async function haalBelrij() {
+    const st = S.belrij;
+    if (st.bezig) return;
+    st.bezig = true;
+    try {
+      const j = await haal('/api/iris-belrij?eigenaar=' + encodeURIComponent(st.eigenaar) + '&status=open');
+      st.items = Array.isArray(j.items) ? j.items : [];
+      st.drempel = j.escalatie_drempel || null;
+      st.fout = null;
+    } catch (e) {
+      st.fout = e?.message || 'Belrij niet opgehaald';
+    } finally {
+      st.bezig = false;
+      st.opgehaald = true;
+      hertekenen();
+    }
+  }
+
+  window.__irisBelrijEigenaar = (v) => {
+    S.belrij.eigenaar = v;
+    S.belrij.opgehaald = false;
+    haalBelrij();
+    hertekenen();
+  };
+
+  /**
+   * Bellen.
+   *
+   * Via de bestaande softphone. De context gaat mee in de meta van call_log —
+   * dat veld is er uitdrukkelijk voor, dus er is geen wijziging aan de
+   * softphone of aan opvolging_taken voor nodig.
+   */
+  window.__irisBel = (telefoon, naam, contactId, belrijId) => {
+    if (!telefoon) { toast('Geen telefoonnummer bekend.', 'warn'); return; }
+    if (!window.KlxSoftphone || typeof window.KlxSoftphone.open !== 'function') {
+      toast('De softphone is niet geladen.', 'warn');
+      return;
+    }
+    try {
+      window.KlxSoftphone.open({
+        phone: telefoon,
+        name: naam,
+        source: 'iris',
+        irisDossierId: contactId,
+        irisBelrijId: belrijId,
+      });
+    } catch (e) {
+      toast('Bellen lukte niet: ' + (e?.message || e), 'error');
+    }
+  };
+
+  window.__irisPoging = async (contactId, belrijId, uitkomst) => {
+    try {
+      const j = await haalRuw('/api/iris-belrij', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'poging', contact_id: contactId, belrij_id: belrijId, uitkomst }),
+      });
+      if (j.escalatie?.escaleren) {
+        toast('Drempel bereikt: ' + j.escalatie.reden + '. Zet een bericht klaar in de Post.', 'warn');
+      }
+      S.belrij.opgehaald = false;
+      haalBelrij();
+    } catch (e) {
+      toast(e?.message || 'Poging niet genoteerd', 'error');
+    }
+  };
+
+  window.__irisBelrijAf = async (belrijId) => {
+    try {
+      await haalRuw('/api/iris-belrij', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'afronden', belrij_id: belrijId }),
+      });
+      S.belrij.opgehaald = false;
+      haalBelrij();
+    } catch (e) {
+      toast(e?.message || 'Afronden mislukt', 'error');
+    }
+  };
+
+  function belrijTab() {
+    const st = S.belrij;
+    if (!st.opgehaald && !st.bezig) queueMicrotask(haalBelrij);
+
+    const knop = (v, l) => `<button class="chip ${st.eigenaar === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 11px"
+      onclick="__irisBelrijEigenaar('${v}')">${esc(l)}</button>`;
+
+    let lijst;
+    if (!st.opgehaald && st.bezig) lijst = skelet(6);
+    else if (st.fout) lijst = foutBlok(st.fout);
+    else if (!st.items.length) lijst = NIETS('Niemand op de belrij. Dat is goed nieuws.');
+    else lijst = st.items.map(belrijRij).join('');
+
+    return `<div style="padding:16px 20px;max-width:920px">
+      <div style="display:flex;gap:6px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+        ${knop('alle', 'Iedereen')}${knop('mij', 'Voor mij')}
+        ${st.drempel ? `<span style="font-size:11px;color:var(--text-3);margin-left:6px">
+          Escalatie na ${esc(String(st.drempel.pogingen))} pogingen op ${esc(String(st.drempel.dagen))} verschillende dagen</span>` : ''}
+      </div>
+      ${lijst}
+    </div>`;
+  }
+
+  function belrijRij(r) {
+    const t = r.telling || {};
+    const e = r.escalatie || {};
+
+    // De tellers staan er alle drie, want het verschil tussen pogingen en
+    // dagen is precies waar de escalatie op draait.
+    const tellers = `<span style="font-size:11px;color:var(--text-3)">
+      ${t.niet_opgenomen || 0} × niet bereikt op ${t.dagen_niet_opgenomen || 0} ${(t.dagen_niet_opgenomen === 1) ? 'dag' : 'dagen'}
+      ${t.vandaag ? ` · vandaag al ${t.vandaag}×` : ''}
+    </span>`;
+
+    const escalatieMerk = e.escaleren
+      ? `<div style="margin-top:8px;padding:8px 10px;border-radius:7px;background:var(--amber-soft,var(--surface-2));color:var(--amber);font-size:11.5px">
+          ⚠ ${esc(e.reden)}. Zet een bericht klaar in de Post — het venster is dan meestal dicht, dus dat wordt een template.
+        </div>`
+      : '';
+
+    const opTijd = r.mag_vandaag_nog;
+    return `<div style="border:1px solid var(--border);border-radius:9px;padding:11px 14px;margin-bottom:9px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:5px">
+        <b style="font-size:12.5px">${esc(r.naam)}</b>
+        <span style="font-size:11.5px;color:var(--text-2);flex:1;min-width:0">${esc(r.reden)}</span>
+        ${tellers}
+      </div>
+      ${r.telefoon ? `<div style="font-size:11.5px;color:var(--text-3)">📞 ${esc(r.telefoon)}</div>` : `<div style="font-size:11.5px;color:var(--amber)">Geen telefoonnummer bekend.</div>`}
+      ${escalatieMerk}
+      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+        ${!opTijd ? `<span style="font-size:11px;color:var(--amber);align-self:center;margin-right:auto">Vandaag al 2× geprobeerd — morgen weer.</span>` : ''}
+        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px"
+          onclick="__irisPoging('${esc(r.contact_id)}','${esc(r.id)}','niet_opgenomen')">Nam niet op</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px"
+          onclick="__irisPoging('${esc(r.contact_id)}','${esc(r.id)}','gesproken')">Gesproken</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px"
+          onclick="__irisBelrijAf('${esc(r.id)}')">Van de lijst</button>
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:4px 14px"
+          onclick="__irisBel('${esc(r.telefoon || '')}','${esc(String(r.naam).replace(/'/g, "\\'"))}','${esc(r.contact_id)}','${esc(r.id)}')"
+          ${r.telefoon && opTijd ? '' : 'disabled'}>Bel</button>
+      </div>
+    </div>`;
+  }
+
   function nogNiet(wat, fase) {
     return `<div style="padding:48px 20px;text-align:center;color:var(--text-3);max-width:520px;margin:0 auto">
       <div style="font-size:26px;opacity:.4;margin-bottom:10px">⏳</div>
@@ -1312,7 +1462,7 @@
     } else if (S.tab === 'opdrachten') {
       binnen = opdrachtenTab();
     } else if (S.tab === 'belrij') {
-      binnen = nogNiet('De belrij', '7');
+      binnen = belrijTab();
     } else if (S.tab === 'dossiers') {
       binnen = nogNiet('Dossiers per persoon', '3 (vervolg)');
     } else {
