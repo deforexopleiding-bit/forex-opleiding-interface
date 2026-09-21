@@ -73,7 +73,11 @@ function _fmtDateNL(iso) {
 // Multiline betaal-samenvatting voor de klant. Alleen regels tonen die
 // daadwerkelijk ingevuld zijn. Reserveringsfee-regel alleen bij een
 // goedgekeurde late-start-uitzondering met fee-akkoord (bouwstap 2/2
-// offerte-beveiliging). Returnt null als er niks te tonen valt.
+// offerte-beveiliging). Onder de betaalregeling komt (indien gevuld) het
+// klant-zichtbare vrije-tekstveld `quotation_customer_note` als tweede
+// blok "Afspraken:\n<tekst>". Bij lege notitie GEEN "Afspraken:"-kop.
+// Returnt null als er echt niks te tonen valt (geen betaalregeling én
+// geen notitie).
 function buildPaymentSummaryText(deal) {
   const parts = [];
   if (deal.payment_start_date) {
@@ -99,8 +103,20 @@ function buildPaymentSummaryText(deal) {
   if (feeApplies) {
     parts.push('- Reserveringsfee (reservering startdatum): € 100,00');
   }
-  if (!parts.length) return null;
-  return 'Betaalregeling:\n' + parts.join('\n');
+  const blocks = [];
+  if (parts.length) blocks.push('Betaalregeling:\n' + parts.join('\n'));
+
+  // Klant-zichtbare vrije notitie. Trim + cap (defense-in-depth; API
+  // whitelist doet dit ook). Leeg → geen extra blok, geen loze "Afspraken:"-
+  // kop op de PDF.
+  const noteRaw = typeof deal.quotation_customer_note === 'string'
+    ? deal.quotation_customer_note.trim().slice(0, 1000)
+    : '';
+  if (noteRaw) blocks.push('Afspraken:\n' + noteRaw);
+
+  if (!blocks.length) return null;
+  // Twee blokken gescheiden door een lege regel.
+  return blocks.join('\n\n');
 }
 
 // TL department-UUID → korte naam voor per-department env-vars.

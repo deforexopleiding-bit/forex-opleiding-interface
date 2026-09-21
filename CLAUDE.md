@@ -329,6 +329,19 @@ Werkelijke kolomnamen deals — nieuwe kolom (migratie 035):
   wanneer het abo via TL-import binnenkwam en aan een andere deal hangt.
   has_subscription = deal-match OR klant-match OR marked_done.
 
+Werkelijke kolomnamen deals — quotation_customer_note (migratie 2026-09-21):
+- quotation_customer_note text NULL (max 1000 char via API-whitelist)
+  → **KLANT-ZICHTBAAR**. Vrije tekst die sales in de sales-wizard invult
+  (stap 4 "Betalingsvoorwaarden") en die op de Teamleader-offerte-PDF
+  verschijnt als tweede blok "Afspraken:\n<tekst>" onder de bestaande
+  betaalregeling-samenvatting. Route: buildPaymentSummaryText →
+  quotationBody.text → /quotations.create. NOOIT hergebruiken als
+  intern notitieveld — voor interne notities een aparte kolom maken.
+  Alleen invulbaar bij aanmaken: api/sales-deal-update.js weigert
+  wijzigingen met 403 (`QUOTATION_CUSTOMER_NOTE_LOCKED`) zodra
+  tl_quotation_id gezet is, zodat DB en reeds-verzonden PDF niet uit
+  sync raken.
+
 Werkelijke kolomnamen whatsapp_conversations:
 - status text CHECK IN (open / closed / archived)
   UI ↔ on-wire mapping: 'open'↔'open' (actief); 'afgehandeld'↔'closed'

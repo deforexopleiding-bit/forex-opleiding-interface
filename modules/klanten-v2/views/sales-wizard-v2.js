@@ -125,6 +125,11 @@
       payment_term_count: '',            // v1 payTermCount, REQUIRED, 1..60
       payment_term_start_date: '',       // v1 payTermStartDate — met aanbetaling max=start+30d, zonder max=start-3d
       payment_term_amount: '',           // v1 payTermAmount, READONLY, auto-berekend
+      // KLANT-ZICHTBAAR vrije-tekstveld (max 1000). Verschijnt op de
+      // Teamleader-offerte-PDF via het `text`-veld van quotations.create
+      // (samen met de betaalregeling-samenvatting). Alleen invulbaar bij
+      // aanmaken; server weigert edits zodra tl_quotation_id gezet is.
+      quotation_customer_note: '',
       // Exception-goedkeuring bij low_term_amount of late_start (v1 r521-524)
       exception_flagged:      false,
       exception_reasons:      '',        // csv: 'low_term_amount' | 'late_start' (of beide)
@@ -169,6 +174,7 @@
       payment_term_count: '',
       payment_term_start_date: '',
       payment_term_amount: '',
+      quotation_customer_note: '',
       exception_flagged:      false,
       exception_reasons:      '',
       exception_reason_note:  '',
@@ -521,6 +527,7 @@
       w.payment_term_count         = deal.payment_term_count || '';
       w.payment_term_start_date    = (deal.payment_term_start_date || '').slice(0, 10);
       w.payment_term_amount        = deal.payment_term_amount || '';
+      w.quotation_customer_note    = deal.quotation_customer_note || '';
       // Bestaande klant → skipt dup-check + toont banner (v1 r910-917)
       _sw.matched_customer_id    = c.id || null;
       _sw.duplicate_check_status = 'completed';
@@ -1013,6 +1020,11 @@
           payment_term_count: Number(w.payment_term_count) || null,
           payment_term_start_date: w.payment_term_start_date || null,
           payment_term_amount: Number(w.payment_term_amount) || null,
+          // Klant-zichtbare vrije notitie. Server trim + cap op 1000; leeg → NULL
+          // (dan géén "Afspraken:"-blok op de klant-PDF).
+          quotation_customer_note: (typeof w.quotation_customer_note === 'string' && w.quotation_customer_note.trim())
+            ? w.quotation_customer_note.trim()
+            : null,
           exception_flagged:     !!w.exception_flagged,
           exception_reasons:     w.exception_flagged ? (w.exception_reasons || null) : null,
           exception_reason_note: w.exception_flagged ? (w.exception_reason_note || null) : null,
@@ -1593,6 +1605,27 @@
     _sw.wizard.payment_term_start_date = String(v || '');
     _swMarkDirty();
     // Geen computed downstream — puur state.
+  };
+  // Klant-zichtbare vrije notitie. State-mutatie + surgical preview-refresh —
+  // geen renderWizard() per keystroke (zou de focus in de textarea slopen).
+  window.__swSetQuotationCustomerNote = (v) => {
+    const raw = String(v == null ? '' : v);
+    // Client-side cap op 1000 (defense-in-depth; textarea heeft ook maxlength).
+    _sw.wizard.quotation_customer_note = raw.slice(0, 1000);
+    _swMarkDirty();
+    // Live preview-body updaten: toon "Afspraken:\n<tekst>" als niet-leeg,
+    // verberg volledig als leeg (dan géén "Afspraken:"-kop op de PDF).
+    const previewNode = _root()?.querySelector('[data-fkey-body="sw4-preview-note"]');
+    if (previewNode) {
+      const trimmed = _sw.wizard.quotation_customer_note.trim();
+      if (trimmed) {
+        previewNode.textContent = 'Afspraken:\n' + trimmed;
+        previewNode.style.display = '';
+      } else {
+        previewNode.textContent = '';
+        previewNode.style.display = 'none';
+      }
+    }
   };
   window.__swUndoException = () => {
     if (!_sw.wizard.exception_flagged) return;
@@ -2324,9 +2357,18 @@
         <span class="tk-field-hint">Auto-berekend: (totaal ${_reservationFeeApplies() ? '− €100 fee ' : ''}− aanbetaling) / aantal termijnen. Totaal offerte incl. BTW: <b>${eurFmt(totals.total)}</b>.</span>
       </label>
 
+      <label class="tk-field"><span class="tk-field-l">Afspraak-context (verschijnt op de klant-offerte)</span>
+        <textarea class="ib-input" rows="3" maxlength="1000"
+                  data-fkey="sw4-quotation-customer-note"
+                  placeholder="Bv. specifieke afspraken over startdatum, coach-voorkeur, of andere context die de klant terugziet op de offerte."
+                  oninput="__swSetQuotationCustomerNote(this.value)">${esc(w.quotation_customer_note || '')}</textarea>
+        <span class="tk-field-hint">Deze tekst staat op de offerte zoals de klant hem ziet. Alleen invulbaar bij aanmaken — daarna niet meer wijzigbaar. Max 1000 tekens.</span>
+      </label>
+
       <div class="sw-preview-box">
         <div class="tk-field-l">Wat komt er op de offerte?</div>
         <div class="sw-preview-body" data-fkey-body="sw4-preview">${previewText ? `Op offerte komt: '${esc(previewText)}'` : 'Op offerte komt: geen extra info (alleen totaalbedrag)'}</div>
+        <div class="sw-preview-body" data-fkey-body="sw4-preview-note" style="margin-top:6px;${(w.quotation_customer_note || '').trim() ? '' : 'display:none;'}white-space:pre-wrap">${(w.quotation_customer_note || '').trim() ? 'Afspraken:\n' + esc(w.quotation_customer_note.trim()) : ''}</div>
       </div>
 
       ${excBlock}

@@ -26,7 +26,7 @@ export default async function handler(req, res) {
 
   try {
     const { data: existing } = await supabaseAdmin.from('deals')
-      .select('id, tl_quotation_id, tl_quotation_status, sales_user_id')
+      .select('id, tl_quotation_id, tl_quotation_status, sales_user_id, quotation_customer_note')
       .eq('id', deal_id).maybeSingle();
     if (!existing) return res.status(404).json({ error: 'Deal niet gevonden' });
 
@@ -52,6 +52,32 @@ export default async function handler(req, res) {
         error: 'Je mag alleen je eigen offertes bewerken.',
         code:  'SALES_DEAL_NOT_OWNER',
       });
+    }
+
+    // ── Klant-zichtbare notitie is alleen invulbaar bij aanmaken ──────────
+    // Zodra de deal een tl_quotation_id heeft is de klant-PDF verstuurd (of
+    // op z'n minst als draft in TL gepusht). Verdere WIJZIGINGEN op deze
+    // kolom laten we NIET toe — anders lopen DB-waarde en reeds-verzonden
+    // PDF uit sync. Pre-push edits (tl_quotation_id IS NULL) blijven wél
+    // toegestaan zodat de wizard-edit-mode voor concept-drafts blijft werken.
+    //
+    // Belangrijk: de wizard-payload stuurt het veld áltijd mee (ook als de
+    // waarde niet is veranderd sinds de edit-prefill). Daarom vergelijken
+    // we tegen de bestaande waarde en gooien pas 403 als er echt een
+    // verandering wordt geprobeerd — een "no-op meesturen" moet niet 403.
+    if (deal_data.quotation_customer_note !== undefined && existing.tl_quotation_id) {
+      const incoming = (typeof deal_data.quotation_customer_note === 'string'
+        && deal_data.quotation_customer_note.trim())
+        ? deal_data.quotation_customer_note.trim().slice(0, 1000)
+        : null;
+      const stored = existing.quotation_customer_note || null;
+      if (incoming !== stored) {
+        return res.status(403).json({
+          error: 'Klant-notitie kan niet meer worden gewijzigd nadat de offerte naar Teamleader is verzonden.',
+          code:  'QUOTATION_CUSTOMER_NOTE_LOCKED',
+          field: 'quotation_customer_note',
+        });
+      }
     }
 
     // Department-validatie (indien gewijzigd).
@@ -110,6 +136,16 @@ export default async function handler(req, res) {
                  'traject_variant_id', 'discount_percentage', 'payment_start_date', 'payment_downpayment_amount', 'payment_downpayment_date',
                  'payment_term_count', 'payment_term_start_date', 'payment_term_amount'];
     for (const k of map) if (deal_data[k] !== undefined) patch[k] = deal_data[k] || null;
+
+    // Klant-zichtbare notitie — alleen pre-push (guard hierboven blokkeert
+    // post-push). Trim + cap op 1000. Leeg → NULL zodat er géén "Afspraken:"-
+    // blok op de klant-PDF komt bij een latere retry-push.
+    if (deal_data.quotation_customer_note !== undefined) {
+      const raw = deal_data.quotation_customer_note;
+      patch.quotation_customer_note = (typeof raw === 'string' && raw.trim())
+        ? raw.trim().slice(0, 1000)
+        : null;
+    }
 
     // BP2 setter-attributie: setter_user_id alleen wijzigbaar door
     // setter.ledger.admin (manager+). Anders stil negeren. Audit-log

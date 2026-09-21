@@ -265,6 +265,13 @@ export default async function handler(req, res) {
       payment_term_count:         deal_data.payment_term_count || null,
       payment_term_start_date:    deal_data.payment_term_start_date || null,
       payment_term_amount:        deal_data.payment_term_amount || null,
+      // Klant-zichtbare vrije notitie (verschijnt op de TL-quotation-PDF via
+      // buildPaymentSummaryText → quotationBody.text). Trim + cap op 1000
+      // tekens; leeg → NULL zodat er géén "Afspraken:"-blok wordt gerendered.
+      quotation_customer_note: (typeof deal_data.quotation_customer_note === 'string'
+        && deal_data.quotation_customer_note.trim())
+        ? deal_data.quotation_customer_note.trim().slice(0, 1000)
+        : null,
       tl_push_status:     'not_pushed',
       tl_quotation_status: 'draft',
     };
