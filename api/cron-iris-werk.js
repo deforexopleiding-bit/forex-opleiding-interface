@@ -32,6 +32,7 @@ import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { haalInstellingen } from './_lib/iris/instellingen.js';
 import { zorgVoorContact } from './_lib/iris/koppel.js';
 import { deelIn } from './_lib/iris/classificeer.js';
+import { verstuurConcept } from './iris-verstuur.js';
 import {
   OPNAME_PER_RONDE,
   bronSleutel,
@@ -65,6 +66,8 @@ export default async function handler(req, res) {
     te_bevestigen: 0,
     ingedeeld: 0,
     indeel_fouten: 0,
+    verstuurd: 0,
+    verstuur_fouten: 0,
     overgeslagen_tijd: false,
     fouten: [],
     duur_ms: 0,
@@ -188,12 +191,49 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── 5. Het vangnet onder het ongedaan-venster ────────────────────────────
+    // iris-verstuur.js plant de verzending zelf in met waitUntil() zodat een
+    // bericht na dertig seconden echt weg is en niet pas bij de volgende ronde
+    // — dat is wat de opdracht vraagt. Wat hier staat is voor het geval die
+    // functie sneuvelt: dan blijft het concept op 'goedgekeurd' staan met een
+    // verstuur_na in het verleden, en pikt deze ronde het alsnog op.
+    //
+    // De claim in verstuurConcept() (goedgekeurd -> verzonden, voorwaardelijk)
+    // zorgt dat een bericht nooit twee keer vertrekt, ook niet als de
+    // wachtende taak en deze ronde elkaar precies kruisen.
+    if (opTijd()) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('iris_concepten')
+          .select('id, gesprek_id')
+          .eq('status', 'goedgekeurd')
+          .lte('verstuur_na', new Date().toISOString())
+          .order('verstuur_na', { ascending: true })
+          .limit(20);
+        if (error) throw new Error(error.message);
+
+        for (const c of (data || [])) {
+          if (!opTijd()) { rapport.overgeslagen_tijd = true; break; }
+          try {
+            const uit = await verstuurConcept(c.id);
+            if (uit?.ok) rapport.verstuurd++;
+            else if (uit?.reden !== 'niet_geclaimd') rapport.verstuur_fouten++;
+          } catch (e) {
+            rapport.verstuur_fouten++;
+            meldFout(`versturen ${c.id}`, e);
+          }
+        }
+      } catch (e) {
+        meldFout('wachtrij lezen', e);
+      }
+    }
+
     rapport.duur_ms = Date.now() - start;
     console.log('[cron-iris-werk]', JSON.stringify(rapport));
 
     // Een ronde zonder werk hoeft niet in het logboek — dat zou het logboek
     // vol zetten met stilte.
-    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.fouten.length) {
+    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.verstuurd || rapport.fouten.length) {
       const { error: logFout } = await supabaseAdmin.from('iris_log').insert({
         wat: 'werkronde',
         resultaat: rapport.fouten.length ? 'deels' : 'ok',

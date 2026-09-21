@@ -87,6 +87,21 @@
     instellingen: { bezig: false, fout: null, data: null, opgehaald: false },
     pollTimer: null,
     _seq: 0,
+
+    // De schrijfbalk. Eén stand per gesprek zodat wisselen niets kwijtmaakt.
+    schrijf: {
+      instructie: {},      // per gesprek: wat de medewerker insprak of typte
+      concept: {},         // per gesprek: het concept dat klaarstaat
+      bezig: null,         // gesprek waarvoor Iris nu schrijft
+      fout: {},            // per gesprek
+      opname: null,        // gesprek waarvoor de microfoon aan staat
+      recorder: null,      // de MediaRecorder zelf
+      stukken: [],         // de opgenomen brokken
+      verstuurt: null,     // gesprek waarvoor een verzending loopt
+    },
+
+    // Het ongedaan-venster. Eén tegelijk: er kan er maar één aftellen.
+    ongedaan: null,        // { conceptId, gesprekId, tot, timer }
   };
 
   function hertekenen() { if (window.DFO?.render) window.DFO.render(); }
@@ -245,6 +260,223 @@
     haalDossier(id);
   };
 
+  /* ── Schrijven, inspreken, versturen ──────────────────────────────────── */
+
+  async function haalRuw(url, opties) {
+    const token = await (window.AuthShared && window.AuthShared.getAccessToken
+      ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+    const r = await fetch(url, {
+      ...opties,
+      headers: { ...(opties?.headers || {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.uitleg || j?.error || ('Fout ' + r.status));
+    return j;
+  }
+
+  window.__irisInstructie = (v) => {
+    if (!S.gekozen) return;
+    S.schrijf.instructie[S.gekozen] = String(v || '');
+    // Met opzet GEEN hertekening: dat zou de cursor uit het tekstvak gooien.
+    // Dezelfde val die _shared-v2.js met stableSearch oplost.
+  };
+
+  /**
+   * De microfoon.
+   *
+   * MediaRecorder neemt op in de browser; de ruwe brok gaat als body naar
+   * /api/iris-transcribe. Geen base64: dat maakt een opname een derde groter
+   * en moet aan twee kanten omgezet worden.
+   *
+   * Gaat er iets mis — geen toestemming, geen microfoon, geen sleutel — dan
+   * blijft typen gewoon werken. Spraak is een versnelling, geen voorwaarde.
+   */
+  window.__irisMicrofoon = async () => {
+    const gesprek = S.gekozen;
+    if (!gesprek) return;
+
+    // Al bezig? Dan stoppen we, en dat is de hele knop.
+    if (S.schrijf.opname === gesprek && S.schrijf.recorder) {
+      try { S.schrijf.recorder.stop(); } catch (_) {}
+      return;
+    }
+
+    if (!navigator.mediaDevices || typeof MediaRecorder === 'undefined') {
+      toast('Deze browser kan niet opnemen. Typen kan wel.', 'warn');
+      return;
+    }
+
+    let stroom;
+    try {
+      stroom = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      toast('Geen toegang tot de microfoon. Typen kan wel.', 'warn');
+      return;
+    }
+
+    const soort = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    const recorder = new MediaRecorder(stroom, soort ? { mimeType: soort } : undefined);
+    S.schrijf.recorder = recorder;
+    S.schrijf.opname = gesprek;
+    S.schrijf.stukken = [];
+    hertekenen();
+
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) S.schrijf.stukken.push(e.data); };
+
+    recorder.onstop = async () => {
+      // De microfoon uitzetten is geen bijzaak: een lampje dat blijft branden
+      // is precies het soort ding waar mensen een programma om wantrouwen.
+      try { stroom.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      S.schrijf.opname = null;
+      S.schrijf.recorder = null;
+      const brok = new Blob(S.schrijf.stukken, { type: recorder.mimeType || 'audio/webm' });
+      S.schrijf.stukken = [];
+      hertekenen();
+
+      if (!brok.size) { toast('Er is niets opgenomen.', 'warn'); return; }
+
+      S.schrijf.bezig = gesprek;
+      hertekenen();
+      try {
+        const j = await haalRuw('/api/iris-transcribe?taal=nl', {
+          method: 'POST',
+          headers: { 'Content-Type': (recorder.mimeType || 'audio/webm').split(';')[0] },
+          body: brok,
+        });
+        if (j.leeg || !j.tekst) { toast('Er is niets verstaan.', 'warn'); return; }
+        const huidig = S.schrijf.instructie[gesprek] || '';
+        S.schrijf.instructie[gesprek] = huidig ? huidig + ' ' + j.tekst : j.tekst;
+        // Meteen doorschrijven: inspreken en dan nóg een keer klikken is
+        // precies de handeling die we wilden weghalen.
+        await schrijfNu(gesprek, 'spraak');
+      } catch (e) {
+        S.schrijf.fout[gesprek] = e?.message || 'Transcriptie mislukt';
+        toast(S.schrijf.fout[gesprek], 'error');
+      } finally {
+        if (S.schrijf.bezig === gesprek) S.schrijf.bezig = null;
+        hertekenen();
+      }
+    };
+
+    recorder.start();
+  };
+
+  async function schrijfNu(gesprek, bron) {
+    const instructie = S.schrijf.instructie[gesprek] || '';
+    S.schrijf.bezig = gesprek;
+    S.schrijf.fout[gesprek] = null;
+    hertekenen();
+    try {
+      const bestaand = S.schrijf.concept[gesprek];
+      const j = await haalRuw('/api/iris-schrijf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gesprek_id: gesprek,
+          instructie,
+          instructie_bron: bron || 'tekst',
+          // Een herformulering overschrijft het bestaande concept. Anders staat
+          // de lijst na drie pogingen vol met concepten die niemand meer wil.
+          concept_id: bestaand?.concept?.id || undefined,
+        }),
+      });
+      S.schrijf.concept[gesprek] = j;
+      if (j.mens_nodig) toast('Dit gaat over een opzegging of klacht — Iris schrijft hier niets.', 'warn');
+    } catch (e) {
+      S.schrijf.fout[gesprek] = e?.message || 'Schrijven mislukt';
+    } finally {
+      if (S.schrijf.bezig === gesprek) S.schrijf.bezig = null;
+      hertekenen();
+    }
+  }
+
+  window.__irisSchrijf = () => { if (S.gekozen) schrijfNu(S.gekozen, 'tekst'); };
+
+  /**
+   * Verstuur, met het ongedaan-venster.
+   *
+   * De server zet het concept op 'goedgekeurd' met een verstuur_na dertig
+   * seconden verderop en plant de verzending zelf in. Hier telt alleen de
+   * knop af. Het venster is dus geen uitstel dat de browser verzint — de
+   * server houdt het bericht echt tegen, ook als dit tabblad dichtgaat.
+   */
+  window.__irisVerstuur = async () => {
+    const gesprek = S.gekozen;
+    const bundel = gesprek && S.schrijf.concept[gesprek];
+    const concept = bundel?.concept;
+    if (!concept?.id) return;
+    if (S.schrijf.verstuurt) return;
+
+    S.schrijf.verstuurt = gesprek;
+    hertekenen();
+    try {
+      const j = await haalRuw('/api/iris-verstuur', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'goedkeuren', concept_id: concept.id }),
+      });
+      startOngedaan(concept.id, gesprek, j.ongedaan_seconden || 30);
+      if (Array.isArray(j.waarschuwingen) && j.waarschuwingen.length) {
+        toast(j.waarschuwingen[0], 'warn');
+      }
+    } catch (e) {
+      S.schrijf.fout[gesprek] = e?.message || 'Versturen mislukt';
+      toast(S.schrijf.fout[gesprek], 'error');
+    } finally {
+      S.schrijf.verstuurt = null;
+      hertekenen();
+    }
+  };
+
+  function startOngedaan(conceptId, gesprekId, seconden) {
+    stopOngedaan();
+    S.ongedaan = { conceptId, gesprekId, tot: Date.now() + seconden * 1000, timer: null };
+    S.ongedaan.timer = setInterval(() => {
+      if (!S.ongedaan) { stopOngedaan(); return; }
+      if (Date.now() >= S.ongedaan.tot) {
+        const g = S.ongedaan.gesprekId;
+        stopOngedaan();
+        // Weg is weg. Het concept en de instructie ruimen we op, zodat het
+        // scherm niet de indruk wekt dat er nog iets klaarstaat.
+        delete S.schrijf.concept[g];
+        delete S.schrijf.instructie[g];
+        S.gesprek.data = null;
+        haalGesprek(g);
+        S.lijst.opgehaald = false;
+        haalLijst();
+      }
+      hertekenen();
+    }, 1000);
+    hertekenen();
+  }
+
+  function stopOngedaan() {
+    if (S.ongedaan?.timer) clearInterval(S.ongedaan.timer);
+    S.ongedaan = null;
+  }
+  window.addEventListener('beforeunload', stopOngedaan);
+
+  window.__irisOngedaan = async () => {
+    const o = S.ongedaan;
+    if (!o) return;
+    stopOngedaan();
+    hertekenen();
+    try {
+      await haalRuw('/api/iris-verstuur', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'ongedaan', concept_id: o.conceptId }),
+      });
+      toast('Tegengehouden. Het bericht is niet verstuurd.', 'success');
+    } catch (e) {
+      // Te laat is een echt antwoord, geen fout die je wegmoffelt.
+      toast(e?.message || 'Terughalen lukte niet', 'warn');
+      S.lijst.opgehaald = false;
+      haalLijst();
+    }
+    hertekenen();
+  };
+
   /* ── Opmaak: kleine stukjes ───────────────────────────────────────────── */
 
   const NIETS = (tekst) => `<div style="padding:48px 16px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(tekst)}</div>`;
@@ -400,14 +632,7 @@
       ? berichten.map(bericht).join('')
       : NIETS('Nog geen berichten in dit gesprek.');
 
-    // De schrijfbalk komt in fase 4. Tot die tijd staat hier wat er dan zou
-    // gebeuren — een lege balk zou de indruk wekken dat er iets stuk is.
-    const voet = `<div style="border-top:1px solid var(--border);background:var(--surface);padding:11px 14px;font-size:11.5px;color:var(--text-3)">
-      ${verzenden.vorm === 'template'
-        ? '🔒 Het venster is dicht — een antwoord gaat straks als goedgekeurde template.'
-        : '✎ Antwoorden en inspreken komt in de volgende stap.'}
-      ${verzenden.reden ? `<span style="opacity:.7"> · ${esc(verzenden.reden)}</span>` : ''}
-    </div>`;
+    const voet = schrijfbalk(S.gekozen, verzenden);
 
     return `<div style="display:flex;flex-direction:column;height:100%;min-width:0">
       ${kop}
@@ -433,6 +658,91 @@
         </div>
       </div>
     </div>`;
+  }
+
+  /**
+   * De schrijfbalk.
+   *
+   * Eén beweging: inspreken of typen wat je wil, Iris schrijft het, jij kiest
+   * Verstuur. Dat is de hele belofte van deze module, en alles wat hier staat
+   * is ondergeschikt aan die drie stappen.
+   *
+   * Loopt er een ongedaan-venster, dan verdwijnt de balk en staat er alleen
+   * de aftelling met één knop. Dat is met opzet: zolang er nog iets terug kan,
+   * hoort er niets anders aandacht te vragen.
+   */
+  function schrijfbalk(gesprekId, verzenden) {
+    const o = S.ongedaan;
+    if (o && o.gesprekId === gesprekId) {
+      const over = Math.max(0, Math.ceil((o.tot - Date.now()) / 1000));
+      return `<div style="border-top:1px solid var(--border);background:var(--emerald-soft,var(--surface-2));padding:12px 14px;display:flex;align-items:center;gap:12px">
+        <span style="font-size:12.5px;color:var(--emerald);font-weight:600">Verstuurd over ${over}s</span>
+        <div style="flex:1;height:3px;background:var(--border);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${Math.round((over / 30) * 100)}%;background:var(--emerald);transition:width 1s linear"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="font-size:12px;padding:5px 14px;font-weight:600" onclick="__irisOngedaan()">Toch niet</button>
+      </div>`;
+    }
+
+    const bundel = S.schrijf.concept[gesprekId];
+    const bezig = S.schrijf.bezig === gesprekId;
+    const neemtOp = S.schrijf.opname === gesprekId;
+    const verstuurt = S.schrijf.verstuurt === gesprekId;
+    const fout = S.schrijf.fout[gesprekId];
+    const instructie = S.schrijf.instructie[gesprekId] || '';
+
+    const vensterRegel = verzenden?.vorm === 'template'
+      ? `<div style="font-size:11px;color:var(--amber);margin-bottom:7px">
+          🔒 Het venster is dicht. Een antwoord gaat als goedgekeurde template — Iris kiest hem, jij ziet welke.
+        </div>`
+      : '';
+
+    // Het concept, als er een is.
+    let conceptBlok = '';
+    if (bundel?.concept?.tekst || bundel?.mens_nodig) {
+      const c = bundel.concept || {};
+      const blokkades = (bundel.blokkades || []);
+      const waarschuwingen = (bundel.waarschuwingen || []);
+      const magWeg = bundel.mag_verstuurd_worden && !bundel.mens_nodig;
+
+      conceptBlok = `<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:9px;background:var(--surface-2)">
+        ${c.onderwerp ? `<div style="font-size:11.5px;font-weight:600;margin-bottom:5px">${esc(c.onderwerp)}</div>` : ''}
+        <div style="font-size:12.5px;white-space:pre-wrap;word-break:break-word">${esc(c.tekst || '—')}</div>
+        ${bundel.toelichting ? `<div style="font-size:11px;color:var(--text-3);margin-top:7px;font-style:italic">${esc(bundel.toelichting)}</div>` : ''}
+        ${blokkades.map((b) => `<div style="font-size:11.5px;color:var(--rose);margin-top:6px">⛔ ${esc(b)}</div>`).join('')}
+        ${waarschuwingen.map((w) => `<div style="font-size:11.5px;color:var(--amber);margin-top:6px">⚠ ${esc(w)}</div>`).join('')}
+        ${(bundel.ontbrekende_gegevens || []).length
+          ? `<div style="font-size:11px;color:var(--amber);margin-top:6px">Iris miste: ${esc(bundel.ontbrekende_gegevens.join(', '))}</div>`
+          : ''}
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 11px" onclick="__irisSchrijf()" ${bezig ? 'disabled' : ''}>Opnieuw</button>
+          <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:5px 15px" onclick="__irisVerstuur()"
+            ${magWeg && !verstuurt ? '' : 'disabled'}
+            title="${magWeg ? 'Gaat weg na 30 seconden — je kunt het nog tegenhouden.' : 'Er staat nog iets in de weg.'}">
+            ${verstuurt ? 'Bezig…' : 'Verstuur'}</button>
+        </div>
+      </div>`;
+    }
+
+    const micKleur = neemtOp ? 'var(--rose)' : 'var(--text-2)';
+    const micTitel = neemtOp ? 'Stoppen met opnemen' : 'Spreek in wat je wil antwoorden';
+
+    return `<div style="border-top:1px solid var(--border);background:var(--surface);padding:11px 14px">
+      ${vensterRegel}
+      ${conceptBlok}
+      ${fout ? `<div style="font-size:11.5px;color:var(--rose);margin-bottom:7px">⚠ ${esc(fout)}</div>` : ''}
+      <div style="display:flex;gap:7px;align-items:flex-end">
+        <textarea id="irisInstructie" rows="2" placeholder="Wat wil je antwoorden? Spreek het in of typ het."
+          oninput="__irisInstructie(this.value)"
+          style="flex:1;min-width:0;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface-2);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(instructie)}</textarea>
+        <button class="btn btn-ghost btn-sm" title="${micTitel}" onclick="__irisMicrofoon()"
+          style="font-size:16px;padding:7px 11px;color:${micKleur};${neemtOp ? 'animation:irisPuls 1.2s ease-in-out infinite' : ''}">${neemtOp ? '⏹' : '🎙'}</button>
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:7px 14px;white-space:nowrap"
+          onclick="__irisSchrijf()" ${bezig ? 'disabled' : ''}>${bezig ? 'Bezig…' : 'Schrijf'}</button>
+      </div>
+      ${neemtOp ? `<div style="font-size:11px;color:var(--rose);margin-top:6px">● Aan het opnemen — klik nog eens om te stoppen.</div>` : ''}
+    </div>
+    <style>@keyframes irisPuls{0%,100%{opacity:1}50%{opacity:.45}}</style>`;
   }
 
   function dossierKolom() {
