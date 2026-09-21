@@ -102,6 +102,18 @@
 
     // Het ongedaan-venster. Eén tegelijk: er kan er maar één aftellen.
     ongedaan: null,        // { conceptId, gesprekId, tot, timer }
+
+    opdrachten: {
+      bezig: false, fout: null, items: [], opgehaald: false,
+      nieuw: '', maakt: false,
+      open: null,          // de opdracht die opengeklapt staat
+      detail: null,        // het volledige antwoord voor die opdracht
+      antwoord: '',
+      afsluitVraag: null,  // { id, uitleg, openstaand, keuzes } als er nog iets klaarstaat
+      neemtOp: false,
+      recorder: null,
+      stukken: [],
+    },
   };
 
   function hertekenen() { if (window.DFO?.render) window.DFO.render(); }
@@ -473,6 +485,218 @@
       toast(e?.message || 'Terughalen lukte niet', 'warn');
       S.lijst.opgehaald = false;
       haalLijst();
+    }
+    hertekenen();
+  };
+
+  /* ── Opdrachten ───────────────────────────────────────────────────────── */
+
+  async function haalOpdrachten() {
+    const st = S.opdrachten;
+    if (st.bezig) return;
+    st.bezig = true;
+    try {
+      const j = await haal('/api/iris-opdracht?actie=lijst');
+      st.items = Array.isArray(j.items) ? j.items : [];
+      st.fout = null;
+    } catch (e) {
+      st.fout = e?.message || 'Opdrachten niet opgehaald';
+    } finally {
+      st.bezig = false;
+      st.opgehaald = true;
+      hertekenen();
+    }
+  }
+
+  window.__irisOpdrachtTyp = (v) => { S.opdrachten.nieuw = String(v || ''); };
+
+  /**
+   * De microfoon voor een opdracht.
+   *
+   * Hetzelfde patroon als in de Post, met één verschil: hier komt de tekst in
+   * het opdrachtveld en wordt er NIET meteen doorgeschreven. Een opdracht is
+   * iets wat je eerst wilt teruglezen — "verleng de toegang van Sarah met twee
+   * weken" en "verleng de toegang van Sara met twee weken" zijn twee
+   * verschillende mensen.
+   */
+  window.__irisOpdrachtMic = async () => {
+    const st = S.opdrachten;
+    if (st.neemtOp && st.recorder) { try { st.recorder.stop(); } catch (_) {} return; }
+    if (!navigator.mediaDevices || typeof MediaRecorder === 'undefined') {
+      toast('Deze browser kan niet opnemen. Typen kan wel.', 'warn'); return;
+    }
+    let stroom;
+    try { stroom = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (_) { toast('Geen toegang tot de microfoon. Typen kan wel.', 'warn'); return; }
+
+    const soort = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
+    const recorder = new MediaRecorder(stroom, soort ? { mimeType: soort } : undefined);
+    st.recorder = recorder; st.neemtOp = true; st.stukken = [];
+    hertekenen();
+
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) st.stukken.push(e.data); };
+    recorder.onstop = async () => {
+      try { stroom.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      st.neemtOp = false; st.recorder = null;
+      const brok = new Blob(st.stukken, { type: recorder.mimeType || 'audio/webm' });
+      st.stukken = [];
+      hertekenen();
+      if (!brok.size) { toast('Er is niets opgenomen.', 'warn'); return; }
+      try {
+        const j = await haalRuw('/api/iris-transcribe?taal=nl', {
+          method: 'POST',
+          headers: { 'Content-Type': (recorder.mimeType || 'audio/webm').split(';')[0] },
+          body: brok,
+        });
+        if (j.tekst) {
+          st.nieuw = st.nieuw ? st.nieuw + ' ' + j.tekst : j.tekst;
+          hertekenen();
+        } else {
+          toast('Er is niets verstaan.', 'warn');
+        }
+      } catch (e) {
+        toast(e?.message || 'Transcriptie mislukt', 'error');
+      }
+    };
+    recorder.start();
+  };
+
+  window.__irisOpdrachtMaak = async () => {
+    const st = S.opdrachten;
+    const vraag = (st.nieuw || '').trim();
+    if (!vraag || st.maakt) return;
+    st.maakt = true;
+    st.fout = null;
+    hertekenen();
+    try {
+      const j = await haalRuw('/api/iris-opdracht', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'maak', vraag }),
+      });
+      st.nieuw = '';
+      st.open = j.opdracht?.id || null;
+      st.detail = j;
+      st.opgehaald = false;
+      haalOpdrachten();
+    } catch (e) {
+      st.fout = e?.message || 'Uitzoeken mislukt';
+    } finally {
+      st.maakt = false;
+      hertekenen();
+    }
+  };
+
+  window.__irisOpdrachtOpen = async (id) => {
+    const st = S.opdrachten;
+    if (st.open === id) { st.open = null; st.detail = null; hertekenen(); return; }
+    st.open = id;
+    st.detail = null;
+    st.afsluitVraag = null;
+    hertekenen();
+    try {
+      st.detail = await haal('/api/iris-opdracht?actie=een&id=' + encodeURIComponent(id));
+    } catch (e) {
+      st.fout = e?.message || 'Opdracht niet opgehaald';
+    }
+    hertekenen();
+  };
+
+  window.__irisOpdrachtAntwoordTyp = (v) => { S.opdrachten.antwoord = String(v || ''); };
+
+  window.__irisOpdrachtAntwoord = async (id, gekozen) => {
+    const st = S.opdrachten;
+    const tekst = (gekozen || st.antwoord || '').trim();
+    if (!tekst) return;
+    try {
+      const j = await haalRuw('/api/iris-opdracht', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'antwoord', id, antwoord: tekst }),
+      });
+      st.antwoord = '';
+      st.detail = { opdracht: j.opdracht, acties: st.detail?.acties || [] };
+      st.opgehaald = false;
+      haalOpdrachten();
+    } catch (e) {
+      toast(e?.message || 'Antwoord niet verwerkt', 'error');
+    }
+    hertekenen();
+  };
+
+  /**
+   * Afsluiten.
+   *
+   * De server weigert als er nog iets onverstuurd klaarstaat, en geeft dan de
+   * keuzes terug. Die tonen we, zonder een van de twee voor te selecteren:
+   * allebei zijn een beslissing, en een standaard zou die beslissing
+   * onzichtbaar maken.
+   */
+  window.__irisOpdrachtAfsluiten = async (id, keuze) => {
+    const st = S.opdrachten;
+    try {
+      const j = await haalRuw('/api/iris-opdracht', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'afsluiten', id, met_onverstuurd: keuze || undefined }),
+      });
+      st.afsluitVraag = null;
+      st.detail = { opdracht: j.opdracht, acties: st.detail?.acties || [] };
+      st.opgehaald = false;
+      haalOpdrachten();
+      toast('Afgesloten. Terug openen kan altijd nog.', 'success');
+    } catch (e) {
+      // De 409 met de keuzes komt hier binnen als een fout met uitleg. We
+      // halen hem apart op omdat we de knoppen willen tonen, niet de tekst.
+      try {
+        const token = await (window.AuthShared && window.AuthShared.getAccessToken
+          ? window.AuthShared.getAccessToken() : Promise.resolve(null));
+        const r = await fetch('/api/iris-opdracht', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+          body: JSON.stringify({ actie: 'afsluiten', id }),
+        });
+        const j = await r.json();
+        if (r.status === 409 && Array.isArray(j.keuzes)) {
+          st.afsluitVraag = { id, uitleg: j.uitleg, openstaand: j.openstaand || [], keuzes: j.keuzes };
+        } else {
+          toast(e?.message || 'Afsluiten mislukt', 'error');
+        }
+      } catch (_) {
+        toast(e?.message || 'Afsluiten mislukt', 'error');
+      }
+    }
+    hertekenen();
+  };
+
+  window.__irisOpdrachtHeropenen = async (id) => {
+    try {
+      const j = await haalRuw('/api/iris-opdracht', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'heropenen', id }),
+      });
+      S.opdrachten.detail = { opdracht: j.opdracht, acties: S.opdrachten.detail?.acties || [] };
+      S.opdrachten.opgehaald = false;
+      haalOpdrachten();
+    } catch (e) {
+      toast(e?.message || 'Terug openen mislukt', 'error');
+    }
+    hertekenen();
+  };
+
+  window.__irisOpdrachtAfbreken = async (id) => {
+    try {
+      await haalRuw('/api/iris-opdracht', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actie: 'afbreken', id }),
+      });
+      S.opdrachten.opgehaald = false;
+      haalOpdrachten();
+      toast('Afgebroken.', 'success');
+    } catch (e) {
+      toast(e?.message || 'Afbreken mislukt', 'error');
     }
     hertekenen();
   };
@@ -896,6 +1120,164 @@
     </div>`;
   }
 
+  /* ── Opmaak: Opdrachten ───────────────────────────────────────────────── */
+
+  const OPDRACHT_LABELS = {
+    gevraagd: 'gevraagd',
+    uitzoeken: 'uitzoeken',
+    wacht_op_ok: 'jouw ok',
+    uitgevoerd: 'uitgevoerd',
+    wacht_op_antwoord: 'wacht op antwoord',
+    geregeld: 'geregeld',
+    afgebroken: 'afgebroken',
+  };
+
+  /** De zeven toestanden als stappenbalk. Waar staat deze opdracht? */
+  function toestandBalk(status) {
+    const volgorde = ['gevraagd', 'uitzoeken', 'wacht_op_ok', 'uitgevoerd', 'wacht_op_antwoord', 'geregeld'];
+    if (status === 'afgebroken') {
+      return `<span style="font-size:11px;color:var(--text-3)">afgebroken</span>`;
+    }
+    const hier = volgorde.indexOf(status);
+    return `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+      ${volgorde.map((v, i) => {
+        const gehad = i <= hier;
+        const nu = i === hier;
+        return `<span style="font-size:10px;padding:1px 7px;border-radius:8px;white-space:nowrap;
+          background:${nu ? 'var(--brand)' : gehad ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)'};
+          color:${nu ? '#fff' : gehad ? 'var(--brand)' : 'var(--text-3)'};
+          font-weight:${nu ? '700' : '400'}">${esc(OPDRACHT_LABELS[v])}</span>`;
+      }).join('<span style="color:var(--text-3);font-size:9px">→</span>')}
+    </div>`;
+  }
+
+  function opdrachtenTab() {
+    const st = S.opdrachten;
+    if (!st.opgehaald && !st.bezig) queueMicrotask(haalOpdrachten);
+
+    const invoer = `<div style="border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:16px;background:var(--surface-2)">
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Iris, regel dit</div>
+      <div style="display:flex;gap:7px;align-items:flex-end">
+        <textarea rows="2" placeholder="Bijvoorbeeld: stuur Kevin dat hij tot vrijdag heeft."
+          oninput="__irisOpdrachtTyp(this.value)"
+          style="flex:1;min-width:0;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(st.nieuw)}</textarea>
+        <button class="btn btn-ghost btn-sm" title="${st.neemtOp ? 'Stoppen' : 'Spreek de opdracht in'}"
+          onclick="__irisOpdrachtMic()"
+          style="font-size:16px;padding:7px 11px;color:${st.neemtOp ? 'var(--rose)' : 'var(--text-2)'};${st.neemtOp ? 'animation:irisPuls 1.2s ease-in-out infinite' : ''}">${st.neemtOp ? '⏹' : '🎙'}</button>
+        <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:7px 15px;white-space:nowrap"
+          onclick="__irisOpdrachtMaak()" ${st.maakt ? 'disabled' : ''}>${st.maakt ? 'Uitzoeken…' : 'Zoek uit'}</button>
+      </div>
+      ${st.neemtOp ? `<div style="font-size:11px;color:var(--rose);margin-top:6px">● Aan het opnemen — klik nog eens om te stoppen. Je kunt het daarna nalezen.</div>` : ''}
+      ${st.fout ? `<div style="font-size:11.5px;color:var(--rose);margin-top:7px">⚠ ${esc(st.fout)}</div>` : ''}
+    </div>`;
+
+    let lijst;
+    if (!st.opgehaald && st.bezig) lijst = skelet(5);
+    else if (!st.items.length) lijst = NIETS('Nog geen opdrachten. Spreek er hierboven een in.');
+    else lijst = st.items.map(opdrachtRij).join('');
+
+    return `<div style="padding:16px 20px;max-width:920px">${invoer}${lijst}</div>
+      <style>@keyframes irisPuls{0%,100%{opacity:1}50%{opacity:.45}}</style>`;
+  }
+
+  function opdrachtRij(o) {
+    const open = S.opdrachten.open === o.id;
+    const afgerond = o.status === 'geregeld' || o.status === 'afgebroken';
+    return `<div style="border:1px solid var(--border);border-radius:9px;margin-bottom:9px;overflow:hidden;opacity:${afgerond ? '.72' : '1'}">
+      <div onclick="__irisOpdrachtOpen('${esc(o.id)}')"
+        style="padding:11px 14px;cursor:pointer;background:${open ? 'var(--surface-2)' : 'transparent'}">
+        <div style="display:flex;gap:9px;align-items:baseline;margin-bottom:6px">
+          <b style="font-size:12.5px;flex:1;min-width:0">${esc(o.titel || o.vraag || '—')}</b>
+          <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${tijdKort(o.aangemaakt_op)}</span>
+          <span style="font-size:11px;color:var(--text-3)">${open ? '▾' : '▸'}</span>
+        </div>
+        ${toestandBalk(o.status)}
+        ${o.vraag_aan_maxim ? `<div style="font-size:11.5px;color:var(--amber);margin-top:7px">❓ ${esc(o.vraag_aan_maxim)}</div>` : ''}
+      </div>
+      ${open ? opdrachtDetail(o) : ''}
+    </div>`;
+  }
+
+  function opdrachtDetail(o) {
+    const d = S.opdrachten.detail;
+    if (!d || d.opdracht?.id !== o.id) return `<div style="padding:12px 14px;border-top:1px solid var(--border)">${skelet(2)}</div>`;
+
+    const op = d.opdracht;
+    const plan = op.plan || {};
+    const av = S.opdrachten.afsluitVraag;
+
+    const stappen = (plan.stappen || []).length
+      ? `<ol style="margin:0 0 0 16px;padding:0;font-size:12px">
+          ${plan.stappen.map((s) => `<li style="margin-bottom:4px">${esc(s.omschrijving)}${s.wie ? ` <span style="color:var(--text-3)">— ${esc(s.wie)}</span>` : ''}</li>`).join('')}
+        </ol>`
+      : `<div style="font-size:11.5px;color:var(--text-3)">Geen stappen.</div>`;
+
+    const groep = plan.raakt_groep
+      ? `<div style="margin-top:9px;padding:9px 11px;border-radius:7px;background:var(--amber-soft,var(--surface-2));color:var(--amber);font-size:11.5px">
+          ⚠ Deze opdracht raakt meerdere mensen: ${esc(plan.groep_omschrijving || 'een groep')}.
+          <div style="margin-top:3px;opacity:.9">Die vraagt altijd om bevestiging, ook als de autonomie aan staat.</div>
+        </div>`
+      : '';
+
+    const geweigerd = (plan.geweigerde_stappen || []).length
+      ? `<div style="margin-top:8px;font-size:11.5px;color:var(--amber)">
+          Iris stelde ook stappen voor die niet bestaan en die zijn weggelaten: ${esc(plan.geweigerde_stappen.join(', '))}.
+        </div>`
+      : '';
+
+    const vraag = op.vraag_aan_maxim
+      ? `<div style="margin-top:12px;padding:11px 13px;border-radius:8px;border:1px solid var(--amber-line,var(--border));background:var(--amber-soft,var(--surface-2))">
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">${esc(op.vraag_aan_maxim)}</div>
+          ${(op.opties || []).length
+            ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+                ${op.opties.map((k) => `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:4px 11px"
+                  onclick="__irisOpdrachtAntwoord('${esc(op.id)}','${esc(String(k).replace(/'/g, "\\'"))}')">${esc(k)}</button>`).join('')}
+              </div>`
+            : ''}
+          <div style="display:flex;gap:6px">
+            <input type="text" placeholder="Of typ je antwoord…" oninput="__irisOpdrachtAntwoordTyp(this.value)"
+              style="flex:1;min-width:0;font-size:12px;padding:5px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)" />
+            <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:5px 12px" onclick="__irisOpdrachtAntwoord('${esc(op.id)}')">Stuur</button>
+          </div>
+        </div>`
+      : '';
+
+    // De afsluitvraag. Twee knoppen, geen van beide voorgeselecteerd.
+    const afsluiten = av && av.id === op.id
+      ? `<div style="margin-top:12px;padding:11px 13px;border-radius:8px;border:1px solid var(--rose-line,var(--border));background:var(--rose-soft,var(--surface-2))">
+          <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">${esc(av.uitleg)}</div>
+          <div style="font-size:11.5px;color:var(--text-2);margin-bottom:9px">Er verdwijnt nooit iets stil — kies wat ermee moet.</div>
+          <div style="display:flex;gap:7px;flex-wrap:wrap">
+            ${av.keuzes.map((k) => `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 12px"
+              onclick="__irisOpdrachtAfsluiten('${esc(op.id)}','${esc(k.waarde)}')">${esc(k.label)}</button>`).join('')}
+          </div>
+        </div>`
+      : '';
+
+    const afgerond = op.status === 'geregeld' || op.status === 'afgebroken';
+    const knoppen = `<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:13px;flex-wrap:wrap">
+      ${afgerond
+        ? `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 12px" onclick="__irisOpdrachtHeropenen('${esc(op.id)}')">Terug openen</button>`
+        : `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 12px" onclick="__irisOpdrachtAfbreken('${esc(op.id)}')">Afbreken</button>
+           <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:5px 14px" onclick="__irisOpdrachtAfsluiten('${esc(op.id)}')">Geregeld</button>`}
+    </div>`;
+
+    const verloop = (op.verloop || []).length
+      ? `<details style="margin-top:12px">
+          <summary style="font-size:11.5px;color:var(--text-3);cursor:pointer">Wie deed wat, en wanneer (${op.verloop.length})</summary>
+          <div style="margin-top:7px;font-size:11px;color:var(--text-2)">
+            ${op.verloop.map((v) => `<div style="padding:2px 0">${esc(tijdKort(v.op))} · ${esc(v.wat)}${v.wie ? '' : ' <span style="color:var(--text-3)">(Iris)</span>'}</div>`).join('')}
+          </div>
+        </details>`
+      : '';
+
+    return `<div style="padding:12px 14px;border-top:1px solid var(--border)">
+      <div style="font-size:12px;color:var(--text-2);margin-bottom:9px">${esc(plan.begrepen || op.vraag || '')}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Het plan</div>
+      ${stappen}${groep}${geweigerd}${vraag}${afsluiten}${knoppen}${verloop}
+    </div>`;
+  }
+
   function nogNiet(wat, fase) {
     return `<div style="padding:48px 20px;text-align:center;color:var(--text-3);max-width:520px;margin:0 auto">
       <div style="font-size:26px;opacity:.4;margin-bottom:10px">⏳</div>
@@ -928,7 +1310,7 @@
     } else if (S.tab === 'instellingen') {
       binnen = instellingenTab();
     } else if (S.tab === 'opdrachten') {
-      binnen = nogNiet('Iris, regel dit', '5');
+      binnen = opdrachtenTab();
     } else if (S.tab === 'belrij') {
       binnen = nogNiet('De belrij', '7');
     } else if (S.tab === 'dossiers') {
