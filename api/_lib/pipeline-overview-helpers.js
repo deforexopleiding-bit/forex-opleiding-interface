@@ -31,6 +31,12 @@ const BUCKET_WACHT_OPENSTAANDE_ACTIE = 'wacht_openstaande_actie';
 // de hoofdmentor en geen openstaande taak van finance — wie ernaar kijkt
 // moet weten dat er niets te doen is behalve wachten.
 const BUCKET_WACHT_LMS_HOLD         = 'wacht_lms_hold';
+// Er loopt een AFSPRAAK in het LMS (hlms_crm_stilte): een belofte met datum
+// of een pauze met reden, door een mens gemaakt. Eigen bak naast de hold,
+// want de vraag die een medewerker hier stelt is een andere: bij een hold is
+// de coaching stilgelegd, bij een afspraak is er iets toegezegd — en dat
+// laatste heeft een einddatum waar iemand op kan rekenen.
+const BUCKET_WACHT_LMS_STILTE       = 'wacht_lms_stilte';
 const BUCKET_KLAAR                  = 'klaar';
 
 // Menselijk-leesbare labels voor de UI (KPI-strip-labels).
@@ -44,6 +50,7 @@ const BUCKET_LABELS = Object.freeze({
   [BUCKET_WACHT_HANDMATIG]:         'Handmatig gepauzeerd',
   [BUCKET_WACHT_OPENSTAANDE_ACTIE]: 'Wacht op openstaande actie',
   [BUCKET_WACHT_LMS_HOLD]:          'On hold in het LMS',
+  [BUCKET_WACHT_LMS_STILTE]:        'Afspraak in het LMS',
   [BUCKET_KLAAR]:                   'Klaar (laatste 30 dagen)',
 });
 
@@ -124,6 +131,9 @@ export function classifyRunBucket(run, latestLog, nowMs) {
     const evt = String(latestLog?.event_type || '').toLowerCase();
     if (evt === 'skipped_open_action') return BUCKET_WACHT_OPENSTAANDE_ACTIE;
     if (evt === 'skipped_lms_hold')    return BUCKET_WACHT_LMS_HOLD;
+    if (evt === 'skipped_lms_stilte' || evt === 'skipped_lms_stilte_onbekend') {
+      return BUCKET_WACHT_LMS_STILTE;
+    }
 
     // Vandaag / morgen / later op basis van NL-kalenderdag.
     // Runs zonder next_action_at vallen in 'later' (kunnen niet ingeschat).
@@ -203,6 +213,17 @@ export function reconstructPauseReason(run, latestLog) {
 
   if (status === 'active') {
     const evt = String(latestLog?.event_type || '').toLowerCase();
+    if (evt === 'skipped_lms_stilte' || evt === 'skipped_lms_stilte_onbekend') {
+      const payload = latestLog?.payload || {};
+      return {
+        code:    payload.reason === 'lms_stilte_onbekend' ? 'lms_stilte_onbekend' : 'lms_stilte',
+        message: String(payload.message || '').trim()
+                 || 'Er loopt een afspraak in het LMS — de aanmaan-flow wacht tot die afloopt.',
+        at:      latestLog?.created_at || run.updated_at || null,
+        stil_tot: payload.stil_tot || null,
+        door_naam: payload.door_naam || null,
+      };
+    }
     if (evt === 'skipped_lms_hold') {
       const payload = latestLog?.payload || {};
       return {
@@ -366,6 +387,7 @@ export function buildBucketCounts(runsWithBucket) {
     [BUCKET_WACHT_HANDMATIG]:         0,
     [BUCKET_WACHT_OPENSTAANDE_ACTIE]: 0,
     [BUCKET_WACHT_LMS_HOLD]:          0,
+    [BUCKET_WACHT_LMS_STILTE]:        0,
     [BUCKET_KLAAR]:                   0,
   };
   const klaarByReason = {};   // completion_reason → count
@@ -390,6 +412,7 @@ export {
   BUCKET_WACHT_HANDMATIG,
   BUCKET_WACHT_OPENSTAANDE_ACTIE,
   BUCKET_WACHT_LMS_HOLD,
+  BUCKET_WACHT_LMS_STILTE,
   BUCKET_KLAAR,
   BUCKET_LABELS,
   nlDateOf,
