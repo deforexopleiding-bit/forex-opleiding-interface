@@ -29,22 +29,24 @@
 // onderscheid wordt aan LMS-kant gemaakt en wij nemen het over zoals het er
 // staat; wij leiden hier niets zelf af uit holds of facturen.
 //
-// ── VERHOUDING TOT DE HOLD-POORT (api/_lib/lms-hold.js, PR #1622) ────────
-// Die poort leest `hlms_student_hold` rechtstreeks. Deze leest het contract.
-// Ze staan naast elkaar en dat is een bewuste keuze, geen slordigheid:
+// ── DIT IS DE ENIGE POORT. DE HOLD-POORT IS WEG ─────────────────────────
+// #1622 zette er een tweede poort naast die `hlms_student_hold` rechtstreeks
+// las. Die is op 21 september 2026 verwijderd, op beslissing van Maxim, en
+// de reden is precies het onderscheid hierboven:
 //
-//   * Gemeten op productie, 21 september: er is geen enkele actieve hold
-//     zónder bijbehorende stilterij. De twee spreken elkaar vandaag dus niet
-//     tegen — de LMS-kant projecteert een menselijke hold naar een stilte
-//     (`bron='hold'`).
-//   * Zou het LMS ooit een AUTOMATISCHE pauze als hold wegschrijven, dan
-//     blokkeert de hold-poort wél en deze niet. Dan manen we iemand niet aan
-//     die we wél hadden mogen aanmanen. Dat is de goedkope kant van de fout:
-//     geld dat een dag later binnenkomt, geen vertrouwen dat weg is.
-//   * De omgekeerde keuze — de hold-poort weghalen omdat het contract nu
-//     bestaat — zou betekenen dat een menselijke hold die het LMS niet naar
-//     stilte projecteert ineens wél een aanmaning krijgt. Dat is de dure
-//     kant. Vandaar: allebei laten staan, en het aan Maxim melden.
+//   * Het LMS kan AUTOMATISCHE betalingsholds schrijven (2+ vervallen
+//     facturen, `door` leeg, `reden_soort='betaling'`). Die leggen alleen de
+//     coaching stil. De oude poort zou ze als zwijggebod gelezen hebben en
+//     dus precies de wanbetalers stilleggen die wél een aanmaning horen te
+//     krijgen — de hele doelgroep van deze motor.
+//   * Een MENSELIJKE hold projecteert het LMS zelf naar een stilterij met
+//     `bron='hold'`. Die bereikt ons dus nog steeds, langs deze poort, met
+//     een naam eronder.
+//
+// Daarmee is er één bron en één regel: zwijgen doen we alleen als een mens
+// dat heeft afgesproken. Leidt het LMS ooit iets nieuws af waarbij de motor
+// moet zwijgen, dan hoort dat een rij in `hlms_crm_stilte` te worden — niet
+// een tweede poort aan deze kant.
 //
 // ── FAALZACHT, NAAR DE VOORZICHTIGE KANT ─────────────────────────────────
 // Leeg is niet hetzelfde als niet-gelukt. Kan de stilte niet gelezen worden,
@@ -60,7 +62,7 @@ import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
 import { todayIsoInTz } from './dunning-overdue-guard.js';
 import { STUDENT_KOLOMMEN, zoekKlantKandidaten, kiesKlant } from './factuurstand-spiegel.js';
-import { bouwVangnet, nlDatum } from './lms-hold.js';
+import { bouwVangnet, nlDatum } from './lms-koppelnet.js';
 
 export const STILTE_TABEL = 'hlms_crm_stilte';
 
@@ -100,12 +102,13 @@ function dag(waarde) {
  *
  * `stil_tot` is INCLUSIEF — tot en met die dag. Op 1 oktober bij
  * `stil_tot = 2026-10-01` zwijgt de motor dus nog; op 2 oktober niet meer.
- * Dat is het omgekeerde van de hold-poort, waar `tot` exclusief is, en het
- * is geen slordigheid maar het contract: daar staat een periode met een
- * einde, hier staat een dag waarop de afspraak nog geldt.
+ * Let op het verschil met de oude hold-poort, waar `tot` EXCLUSIEF was:
+ * daar stond een periode met een einde, hier staat een dag waarop de
+ * afspraak nog geldt. Wie die twee door elkaar haalt, maant precies één dag
+ * te vroeg.
  *
- * Geen `stil_tot` → geen stilte. Anders dan bij de hold valt een leeg veld
- * hier NIET naar de voorzichtige kant: de kolom staat op NOT NULL, dus een
+ * Geen `stil_tot` → geen stilte. Een leeg veld valt hier NIET naar de
+ * voorzichtige kant: de kolom staat op NOT NULL, dus een
  * lege waarde is geen "loopt door" maar een rij die niet had mogen bestaan,
  * en daar een eeuwige stilte van maken zou een klant onbereikbaar maken
  * zonder dat iemand er een datum bij heeft gezet.
@@ -168,7 +171,7 @@ export async function haalStilteStand(opties = {}) {
     // Geen LMS-koppeling geconfigureerd is iets anders dan een storing: in
     // een omgeving zonder DFO_LMS_*-variabelen bestaat het LMS domweg niet,
     // en fail-closed zou daar de hele motor stilzetten voor een afspraak die
-    // niet kan bestaan. Zelfde afweging als bij de hold-poort.
+    // niet kan bestaan.
     return { bron_status: BRON_NIET_GECONFIGUREERD, stiltes: new Map(), vangnet: new Set(),
       fout: 'DFO_LMS_SUPABASE_URL/KEY ontbreekt', telling, peildatum: todayIso };
   }

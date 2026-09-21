@@ -295,8 +295,8 @@ test('CONTRACT: de koppeling is die van de factuurspiegel, geen tweede', () => {
     'de stilte-lib zoekt zelf klanten op — dat hoort via de spiegel te lopen');
 });
 
-test('CONTRACT: het vangnet is gedeeld met de hold-poort, niet gekopieerd', () => {
-  assert.match(LIB, /import \{[\s\S]{0,120}bouwVangnet[\s\S]{0,120}\} from '\.\/lms-hold\.js'/,
+test('CONTRACT: het vangnet komt uit de gedeelde plek, niet uit een kopie', () => {
+  assert.match(LIB, /import \{[\s\S]{0,120}bouwVangnet[\s\S]{0,120}\} from '\.\/lms-koppelnet\.js'/,
     'het vangnet is niet gedeeld — twee lijsten van "wie hangt aan het LMS" lopen uiteen');
 });
 
@@ -308,13 +308,29 @@ test('CONTRACT: de automatische verzendpaden vragen de stilte-poort', () => {
   }
 });
 
-test('CONTRACT: de handmatige bulk-flow is NIET aangeraakt', () => {
-  // Beslissing van Maxim: de bulk-flows blijven zoals ze zijn. De hold-poort
-  // die daar al stond blijft staan; er komt geen stilte-poort bij.
+test('CONTRACT: in de bulk-flow is de poort VERVANGEN, niet weggehaald', () => {
+  // Bij #1641 gold nog "de bulk-flow blijft zoals hij is" en stond daar de
+  // hold-poort. Die moest op 21 september weg (een automatische
+  // betalingspauze mag geen aanmaning tegenhouden), en dan is er maar één
+  // eerlijke uitkomst: vervangen door de stilte-poort. Hem alleen weghalen
+  // zou bulk juist ONbeschermd achterlaten tegen een echte afspraak, en dat
+  // is de dure kant van de fout.
   const bulk = lees('api/cron-dunning-bulk-send.js');
-  assert.doesNotMatch(bulk, /stilteBlokkade|haalStilteStand/,
-    'de bulk-flow heeft er een poort bij gekregen — dat was expliciet niet de bedoeling');
-  assert.match(bulk, /holdBlokkade\(/, 'de bestaande hold-poort in de bulk-flow is weg');
+  assert.match(bulk, /haalStilteStand\(/, 'de bulk-flow haalt de stilte-stand niet op');
+  assert.match(bulk, /stilteBlokkade\(/,  'de bulk-flow toetst de stilte-poort niet');
+  assert.doesNotMatch(bulk, /holdBlokkade\(/, 'de hold-poort staat nog in de bulk-flow');
+});
+
+test('CONTRACT: de bulk-poort staat VÓÓR de atomische claim', () => {
+  // Erna zou de ontvanger van 'pending' naar 'sending' en weer terug moeten,
+  // elke ronde opnieuw, zolang de afspraak loopt. Vóór de claim blijft hij
+  // gewoon staan en gaat hij mee zodra de afspraak af is.
+  const bulk  = lees('api/cron-dunning-bulk-send.js');
+  const poort = bulk.indexOf('const stilteBlok = stilteBlokkade(stilteStand, rec.customer_id)');
+  const claim = bulk.indexOf("3a) ATOMISCHE CLAIM");
+  assert.ok(poort > 0 && claim > 0, 'een van de twee is niet te vinden');
+  assert.ok(poort < claim, 'de stilte-poort staat na de claim — dat geeft een '
+    + 'statuswissel heen en weer bij elke ronde');
 });
 
 test('CONTRACT: de motor haalt de stand ÉÉN keer op, niet per klant', () => {

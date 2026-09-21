@@ -1,3 +1,23 @@
+> ## ⛔ ACHTERHAALD — de hold-poort bestaat niet meer (21 september 2026)
+>
+> Dit document beschrijft PR #1622. Die poort is **verwijderd**: het LMS kan
+> sinds september ook **automatische** betalingsholds zetten (2+ vervallen
+> facturen, `door` leeg, `reden_soort='betaling'`), en die horen de
+> aanmaningen juist *niet* tegen te houden. De poort zou dus precies de
+> wanbetalers stilleggen die wél een aanmaning moeten krijgen.
+>
+> Wat er nu geldt: **alleen `hlms_crm_stilte` legt de motor stil**, en daar
+> staat per rij een mens onder. Een menselijke hold bereikt ons nog steeds —
+> het LMS schrijft die zelf weg als stilterij met `bron='hold'`. Zie
+> [`docs/lms-stilte-de-motor-zwijgt.md`](lms-stilte-de-motor-zwijgt.md).
+>
+> `api/_lib/lms-hold.js` en `tests/lms-hold.test.js` zijn weg; het gedeelde
+> vangnet dat erin woonde staat nu in `api/_lib/lms-koppelnet.js`.
+>
+> Dit bestand blijft staan als verantwoording van #1622 — waarom de poort er
+> kwam, en langs welke redenering hij weer weg is. Lees het niet als
+> beschrijving van de huidige code.
+
 # On hold in het LMS pauzeert Joost
 
 > **Beslissing Maxim, 11 september 2026.** Zet de hoofdmentor een student on
