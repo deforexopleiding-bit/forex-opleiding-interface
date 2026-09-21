@@ -116,6 +116,8 @@
     },
 
     belrij: { bezig: false, fout: null, items: [], opgehaald: false, eigenaar: 'alle', drempel: null },
+    droogtest: { bezig: false, fout: null, data: null, opgehaald: false },
+    logboek: { bezig: false, fout: null, items: [], opgehaald: false, alleenFouten: false },
   };
 
   function hertekenen() { if (window.DFO?.render) window.DFO.render(); }
@@ -1069,6 +1071,9 @@
 
   function instellingenTab() {
     const st = S.instellingen;
+    if (!st.opgehaald && !st.bezig) queueMicrotask(haalInstellingen);
+    if (!S.droogtest.opgehaald && !S.droogtest.bezig) queueMicrotask(haalDroogtest);
+
     if (st.bezig && !st.data) return `<div style="padding:20px">${skelet(6)}</div>`;
     if (st.fout) return foutBlok(st.fout);
     const d = st.data;
@@ -1077,364 +1082,114 @@
     const inst = d.instellingen || {};
     const aut = inst.autonomie || {};
     const nooitZelf = new Set(d.nooit_zelf || []);
+    const dt = S.droogtest.data;
+    const perCat = new Map((dt?.items || []).map((i) => [i.categorie, i]));
+
+    const hoofd = `<div style="padding:12px 14px;border-radius:8px;border:1px solid ${d.aan ? 'var(--emerald-line,var(--border))' : 'var(--amber-line,var(--border))'};
+      background:${d.aan ? 'var(--emerald-soft,var(--surface-2))' : 'var(--amber-soft,var(--surface-2))'};margin-bottom:18px;font-size:12.5px">
+      <b>${d.aan ? 'Iris staat aan' : 'Iris staat uit'}</b>
+      <div style="font-size:11.5px;margin-top:4px;opacity:.9">
+        ${d.aan
+          ? 'De hoofdschakelaar staat aan. Wat er per categorie gebeurt, staat hieronder.'
+          : 'De hoofdschakelaar IRIS_AAN staat uit. Iris leest en deelt in, maar verstuurt niets — wat er hieronder ook staat. Die schakelaar staat in Vercel, niet hier: een knop die alles stillegt hoort buiten het systeem te staan dat hij stillegt.'}
+      </div>
+    </div>`;
+
+    const droogtestKop = dt
+      ? `<div style="margin-bottom:14px;padding:11px 13px;border-radius:8px;background:var(--surface-2);font-size:12px">
+          <b>Droogtest over ${esc(String(dt.dagen))} dagen</b> — ${esc(String(dt.totaal_berichten))} binnengekomen berichten.
+          ${dt.waarschuwing ? `<div style="color:var(--amber);margin-top:5px;font-size:11.5px">⚠ ${esc(dt.waarschuwing)}</div>` : ''}
+          ${dt.zonder_categorie?.berichten
+            ? `<div style="color:var(--text-3);margin-top:5px;font-size:11.5px">${esc(String(dt.zonder_categorie.berichten))} bericht(en) kon Iris niet indelen.</div>`
+            : ''}
+        </div>`
+      : (S.droogtest.bezig ? `<div style="margin-bottom:14px">${skelet(1)}</div>` : '');
 
     const rij = (cat) => {
       const stand = aut[cat] || 'uit';
-      const kleur = stand === 'zelf' ? 'var(--emerald)' : stand === 'concept' ? 'var(--amber)' : 'var(--text-3)';
-      return `<tr>
-        <td style="padding:6px 10px;font-size:12px">${esc(CATEGORIE_LABELS[cat] || cat)}</td>
-        <td style="padding:6px 10px;font-size:12px;color:${kleur};font-weight:600">${esc(stand)}</td>
-        <td style="padding:6px 10px;font-size:11px;color:var(--text-3)">${nooitZelf.has(cat) ? 'kan nooit op "zelf" — gaat altijd langs een mens' : ''}</td>
-      </tr>`;
+      const v = perCat.get(cat);
+      const kanNietZelf = nooitZelf.has(cat);
+      const knop = (w, l) => {
+        const actief = stand === w;
+        const uit = kanNietZelf && w === 'zelf';
+        return `<button class="chip ${actief ? 'on' : ''}" style="font-size:11px;padding:3px 10px;${uit ? 'opacity:.4;cursor:not-allowed' : ''}"
+          ${uit ? 'disabled title="Opzeggingen en klachten gaan altijd langs een mens."' : `onclick="__irisAutonomie('${cat}','${w}')"`}>${esc(l)}</button>`;
+      };
+
+      const cijfers = v && v.berichten
+        ? `<div style="font-size:11px;color:var(--text-3);margin-top:4px">
+            ${v.berichten} bericht(en) · ${v.zeker} zeker · ${v.onzeker ? `<span style="color:var(--amber)">${v.onzeker} onzeker</span>` : '0 onzeker'}
+          </div>`
+        : `<div style="font-size:11px;color:var(--text-3);margin-top:4px">Niets binnengekomen deze week.</div>`;
+
+      const advies = v?.advies
+        ? `<div style="font-size:11px;margin-top:4px;color:${v.advies.kan_zelf ? 'var(--emerald)' : 'var(--text-2)'}">${esc(v.advies.uitleg)}</div>`
+        : '';
+
+      const voorbeelden = (v?.voorbeelden || []).length
+        ? `<details style="margin-top:6px">
+            <summary style="font-size:11px;color:var(--text-3);cursor:pointer">Wat kwam er binnen (${v.voorbeelden.length})</summary>
+            ${v.voorbeelden.map((x) => `<div style="font-size:11px;color:var(--text-2);padding:3px 0 3px 12px">
+              • ${esc(x.samenvatting)}${x.zekerheid !== null ? ` <span style="color:var(--text-3)">(${Math.round(x.zekerheid * 100)}%)</span>` : ''}
+            </div>`).join('')}
+          </details>`
+        : '';
+
+      return `<div style="padding:11px 13px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <b style="font-size:12.5px;flex:1;min-width:140px">${esc(CATEGORIE_LABELS[cat] || cat)}</b>
+          <div style="display:flex;gap:4px">${knop('uit', 'uit')}${knop('concept', 'concept')}${knop('zelf', 'zelf')}</div>
+        </div>
+        ${cijfers}${advies}${voorbeelden}
+        ${kanNietZelf ? `<div style="font-size:11px;color:var(--text-3);margin-top:4px">Kan nooit op "zelf" — dat zit in de code, niet in deze knop.</div>` : ''}
+      </div>`;
     };
 
-    return `<div style="padding:20px;max-width:860px">
-      <div style="padding:12px 14px;border-radius:8px;border:1px solid ${d.aan ? 'var(--emerald-line,var(--border))' : 'var(--amber-line,var(--border))'};
-        background:${d.aan ? 'var(--emerald-soft,var(--surface-2))' : 'var(--amber-soft,var(--surface-2))'};margin-bottom:18px;font-size:12.5px">
-        <b>${d.aan ? 'Iris staat aan' : 'Iris staat uit'}</b>
-        <div style="font-size:11.5px;margin-top:4px;opacity:.9">
-          ${d.aan
-            ? 'De hoofdschakelaar staat aan. Wat er per categorie gebeurt, staat hieronder.'
-            : 'De hoofdschakelaar IRIS_AAN staat uit. Iris leest en deelt in, maar verstuurt niets — wat er hieronder ook staat.'}
-        </div>
-      </div>
+    return `<div style="padding:20px;max-width:880px">
+      ${hoofd}
       ${!inst.gelezen ? foutBlok('De instellingen konden niet gelezen worden. Wat hieronder staat is de standaard, niet wat er ingesteld is.') : ''}
+      ${droogtestKop}
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:8px">Autonomie per categorie</div>
       <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="background:var(--surface-2)">
-            <th style="text-align:left;padding:7px 10px;font-size:11px;color:var(--text-3)">Categorie</th>
-            <th style="text-align:left;padding:7px 10px;font-size:11px;color:var(--text-3)">Stand</th>
-            <th style="text-align:left;padding:7px 10px;font-size:11px;color:var(--text-3)"></th>
-          </tr></thead>
-          <tbody>${(d.categorieen || []).map(rij).join('')}</tbody>
-        </table>
+        ${(d.categorieen || []).map(rij).join('')}
       </div>
-      <div style="margin-top:16px;font-size:11.5px;color:var(--text-3)">
-        Wijzigen kan zodra de bediening er staat. Tot die tijd via
-        <code style="font-size:11px">POST /api/iris-instellingen</code>, met het recht <code style="font-size:11px">iris.instellingen</code>.
+      <div style="margin-top:16px;font-size:11.5px;color:var(--text-2);line-height:1.7">
+        <div><b>uit</b> — Iris doet niets in deze categorie.</div>
+        <div><b>concept</b> — Iris schrijft een antwoord klaar; jij drukt op Verstuur.</div>
+        <div><b>zelf</b> — Iris verstuurt zelf, binnen de stille uren en de dosering.</div>
       </div>
       <div style="margin-top:18px;font-size:11.5px;color:var(--text-2)">
         <div>Stille uren: ${esc(inst.stille_uren?.van || '—')}–${esc(inst.stille_uren?.tot || '—')}${inst.stille_uren?.zondag_stil ? ', en niet op zondag' : ''}</div>
-        <div>Escalatie: na ${esc(String(inst.escalatie?.pogingen ?? '—'))} pogingen op ${esc(String(inst.escalatie?.dagen ?? '—'))} dagen</div>
+        <div>Escalatie: na ${esc(String(inst.escalatie?.pogingen ?? '—'))} pogingen op ${esc(String(inst.escalatie?.dagen ?? '—'))} verschillende dagen</div>
         <div>Ongedaan maken kan ${esc(String(inst.ongedaan_seconden ?? '—'))} seconden</div>
+        <div>Dosering: hoogstens ${esc(String(inst.dosering?.max_per_dag_per_persoon ?? '—'))} automatische berichten per persoon per dag</div>
       </div>
     </div>`;
   }
 
-  /* ── Opmaak: Opdrachten ───────────────────────────────────────────────── */
-
-  const OPDRACHT_LABELS = {
-    gevraagd: 'gevraagd',
-    uitzoeken: 'uitzoeken',
-    wacht_op_ok: 'jouw ok',
-    uitgevoerd: 'uitgevoerd',
-    wacht_op_antwoord: 'wacht op antwoord',
-    geregeld: 'geregeld',
-    afgebroken: 'afgebroken',
-  };
-
-  /** De zeven toestanden als stappenbalk. Waar staat deze opdracht? */
-  function toestandBalk(status) {
-    const volgorde = ['gevraagd', 'uitzoeken', 'wacht_op_ok', 'uitgevoerd', 'wacht_op_antwoord', 'geregeld'];
-    if (status === 'afgebroken') {
-      return `<span style="font-size:11px;color:var(--text-3)">afgebroken</span>`;
-    }
-    const hier = volgorde.indexOf(status);
-    return `<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
-      ${volgorde.map((v, i) => {
-        const gehad = i <= hier;
-        const nu = i === hier;
-        return `<span style="font-size:10px;padding:1px 7px;border-radius:8px;white-space:nowrap;
-          background:${nu ? 'var(--brand)' : gehad ? 'var(--brand-soft,var(--surface-2))' : 'var(--surface-2)'};
-          color:${nu ? '#fff' : gehad ? 'var(--brand)' : 'var(--text-3)'};
-          font-weight:${nu ? '700' : '400'}">${esc(OPDRACHT_LABELS[v])}</span>`;
-      }).join('<span style="color:var(--text-3);font-size:9px">→</span>')}
-    </div>`;
-  }
-
-  function opdrachtenTab() {
-    const st = S.opdrachten;
-    if (!st.opgehaald && !st.bezig) queueMicrotask(haalOpdrachten);
-
-    const invoer = `<div style="border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:16px;background:var(--surface-2)">
-      <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">Iris, regel dit</div>
-      <div style="display:flex;gap:7px;align-items:flex-end">
-        <textarea rows="2" placeholder="Bijvoorbeeld: stuur Kevin dat hij tot vrijdag heeft."
-          oninput="__irisOpdrachtTyp(this.value)"
-          style="flex:1;min-width:0;font-size:12.5px;padding:8px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-1);resize:vertical;font-family:inherit;box-sizing:border-box">${esc(st.nieuw)}</textarea>
-        <button class="btn btn-ghost btn-sm" title="${st.neemtOp ? 'Stoppen' : 'Spreek de opdracht in'}"
-          onclick="__irisOpdrachtMic()"
-          style="font-size:16px;padding:7px 11px;color:${st.neemtOp ? 'var(--rose)' : 'var(--text-2)'};${st.neemtOp ? 'animation:irisPuls 1.2s ease-in-out infinite' : ''}">${st.neemtOp ? '⏹' : '🎙'}</button>
-        <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:7px 15px;white-space:nowrap"
-          onclick="__irisOpdrachtMaak()" ${st.maakt ? 'disabled' : ''}>${st.maakt ? 'Uitzoeken…' : 'Zoek uit'}</button>
-      </div>
-      ${st.neemtOp ? `<div style="font-size:11px;color:var(--rose);margin-top:6px">● Aan het opnemen — klik nog eens om te stoppen. Je kunt het daarna nalezen.</div>` : ''}
-      ${st.fout ? `<div style="font-size:11.5px;color:var(--rose);margin-top:7px">⚠ ${esc(st.fout)}</div>` : ''}
-    </div>`;
-
-    let lijst;
-    if (!st.opgehaald && st.bezig) lijst = skelet(5);
-    else if (!st.items.length) lijst = NIETS('Nog geen opdrachten. Spreek er hierboven een in.');
-    else lijst = st.items.map(opdrachtRij).join('');
-
-    return `<div style="padding:16px 20px;max-width:920px">${invoer}${lijst}</div>
-      <style>@keyframes irisPuls{0%,100%{opacity:1}50%{opacity:.45}}</style>`;
-  }
-
-  function opdrachtRij(o) {
-    const open = S.opdrachten.open === o.id;
-    const afgerond = o.status === 'geregeld' || o.status === 'afgebroken';
-    return `<div style="border:1px solid var(--border);border-radius:9px;margin-bottom:9px;overflow:hidden;opacity:${afgerond ? '.72' : '1'}">
-      <div onclick="__irisOpdrachtOpen('${esc(o.id)}')"
-        style="padding:11px 14px;cursor:pointer;background:${open ? 'var(--surface-2)' : 'transparent'}">
-        <div style="display:flex;gap:9px;align-items:baseline;margin-bottom:6px">
-          <b style="font-size:12.5px;flex:1;min-width:0">${esc(o.titel || o.vraag || '—')}</b>
-          <span style="font-size:10.5px;color:var(--text-3);white-space:nowrap">${tijdKort(o.aangemaakt_op)}</span>
-          <span style="font-size:11px;color:var(--text-3)">${open ? '▾' : '▸'}</span>
-        </div>
-        ${toestandBalk(o.status)}
-        ${o.vraag_aan_maxim ? `<div style="font-size:11.5px;color:var(--amber);margin-top:7px">❓ ${esc(o.vraag_aan_maxim)}</div>` : ''}
-      </div>
-      ${open ? opdrachtDetail(o) : ''}
-    </div>`;
-  }
-
-  function opdrachtDetail(o) {
-    const d = S.opdrachten.detail;
-    if (!d || d.opdracht?.id !== o.id) return `<div style="padding:12px 14px;border-top:1px solid var(--border)">${skelet(2)}</div>`;
-
-    const op = d.opdracht;
-    const plan = op.plan || {};
-    const av = S.opdrachten.afsluitVraag;
-
-    const stappen = (plan.stappen || []).length
-      ? `<ol style="margin:0 0 0 16px;padding:0;font-size:12px">
-          ${plan.stappen.map((s) => `<li style="margin-bottom:4px">${esc(s.omschrijving)}${s.wie ? ` <span style="color:var(--text-3)">— ${esc(s.wie)}</span>` : ''}</li>`).join('')}
-        </ol>`
-      : `<div style="font-size:11.5px;color:var(--text-3)">Geen stappen.</div>`;
-
-    const groep = plan.raakt_groep
-      ? `<div style="margin-top:9px;padding:9px 11px;border-radius:7px;background:var(--amber-soft,var(--surface-2));color:var(--amber);font-size:11.5px">
-          ⚠ Deze opdracht raakt meerdere mensen: ${esc(plan.groep_omschrijving || 'een groep')}.
-          <div style="margin-top:3px;opacity:.9">Die vraagt altijd om bevestiging, ook als de autonomie aan staat.</div>
-        </div>`
-      : '';
-
-    const geweigerd = (plan.geweigerde_stappen || []).length
-      ? `<div style="margin-top:8px;font-size:11.5px;color:var(--amber)">
-          Iris stelde ook stappen voor die niet bestaan en die zijn weggelaten: ${esc(plan.geweigerde_stappen.join(', '))}.
-        </div>`
-      : '';
-
-    const vraag = op.vraag_aan_maxim
-      ? `<div style="margin-top:12px;padding:11px 13px;border-radius:8px;border:1px solid var(--amber-line,var(--border));background:var(--amber-soft,var(--surface-2))">
-          <div style="font-size:12.5px;font-weight:600;margin-bottom:8px">${esc(op.vraag_aan_maxim)}</div>
-          ${(op.opties || []).length
-            ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
-                ${op.opties.map((k) => `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:4px 11px"
-                  onclick="__irisOpdrachtAntwoord('${esc(op.id)}','${esc(String(k).replace(/'/g, "\\'"))}')">${esc(k)}</button>`).join('')}
-              </div>`
-            : ''}
-          <div style="display:flex;gap:6px">
-            <input type="text" placeholder="Of typ je antwoord…" oninput="__irisOpdrachtAntwoordTyp(this.value)"
-              style="flex:1;min-width:0;font-size:12px;padding:5px 9px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-1)" />
-            <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:5px 12px" onclick="__irisOpdrachtAntwoord('${esc(op.id)}')">Stuur</button>
-          </div>
-        </div>`
-      : '';
-
-    // De afsluitvraag. Twee knoppen, geen van beide voorgeselecteerd.
-    const afsluiten = av && av.id === op.id
-      ? `<div style="margin-top:12px;padding:11px 13px;border-radius:8px;border:1px solid var(--rose-line,var(--border));background:var(--rose-soft,var(--surface-2))">
-          <div style="font-size:12.5px;font-weight:600;margin-bottom:4px">${esc(av.uitleg)}</div>
-          <div style="font-size:11.5px;color:var(--text-2);margin-bottom:9px">Er verdwijnt nooit iets stil — kies wat ermee moet.</div>
-          <div style="display:flex;gap:7px;flex-wrap:wrap">
-            ${av.keuzes.map((k) => `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 12px"
-              onclick="__irisOpdrachtAfsluiten('${esc(op.id)}','${esc(k.waarde)}')">${esc(k.label)}</button>`).join('')}
-          </div>
-        </div>`
-      : '';
-
-    const afgerond = op.status === 'geregeld' || op.status === 'afgebroken';
-    const knoppen = `<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:13px;flex-wrap:wrap">
-      ${afgerond
-        ? `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 12px" onclick="__irisOpdrachtHeropenen('${esc(op.id)}')">Terug openen</button>`
-        : `<button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 12px" onclick="__irisOpdrachtAfbreken('${esc(op.id)}')">Afbreken</button>
-           <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:5px 14px" onclick="__irisOpdrachtAfsluiten('${esc(op.id)}')">Geregeld</button>`}
-    </div>`;
-
-    const verloop = (op.verloop || []).length
-      ? `<details style="margin-top:12px">
-          <summary style="font-size:11.5px;color:var(--text-3);cursor:pointer">Wie deed wat, en wanneer (${op.verloop.length})</summary>
-          <div style="margin-top:7px;font-size:11px;color:var(--text-2)">
-            ${op.verloop.map((v) => `<div style="padding:2px 0">${esc(tijdKort(v.op))} · ${esc(v.wat)}${v.wie ? '' : ' <span style="color:var(--text-3)">(Iris)</span>'}</div>`).join('')}
-          </div>
-        </details>`
-      : '';
-
-    return `<div style="padding:12px 14px;border-top:1px solid var(--border)">
-      <div style="font-size:12px;color:var(--text-2);margin-bottom:9px">${esc(plan.begrepen || op.vraag || '')}</div>
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3);font-weight:700;margin-bottom:6px">Het plan</div>
-      ${stappen}${groep}${geweigerd}${vraag}${afsluiten}${knoppen}${verloop}
-    </div>`;
-  }
-
-  /* ── Belrij ───────────────────────────────────────────────────────────── */
-
-  async function haalBelrij() {
-    const st = S.belrij;
-    if (st.bezig) return;
-    st.bezig = true;
-    try {
-      const j = await haal('/api/iris-belrij?eigenaar=' + encodeURIComponent(st.eigenaar) + '&status=open');
-      st.items = Array.isArray(j.items) ? j.items : [];
-      st.drempel = j.escalatie_drempel || null;
-      st.fout = null;
-    } catch (e) {
-      st.fout = e?.message || 'Belrij niet opgehaald';
-    } finally {
-      st.bezig = false;
-      st.opgehaald = true;
-      hertekenen();
-    }
-  }
-
-  window.__irisBelrijEigenaar = (v) => {
-    S.belrij.eigenaar = v;
-    S.belrij.opgehaald = false;
-    haalBelrij();
-    hertekenen();
-  };
+  /* ── Dossiers ─────────────────────────────────────────────────────────── */
 
   /**
-   * Bellen.
+   * De Dossiers-tab.
    *
-   * Via de bestaande softphone. De context gaat mee in de meta van call_log —
-   * dat veld is er uitdrukkelijk voor, dus er is geen wijziging aan de
-   * softphone of aan opvolging_taken voor nodig.
+   * Dit is met opzet geen tweede lijst naast de Post. De dossierkaart staat al
+   * naast elk gesprek; hier krijg je hem zonder dat er een gesprek open hoeft
+   * te staan — voor als iemand belt en je wilt weten wie het is voordat je
+   * opneemt.
    */
-  window.__irisBel = (telefoon, naam, contactId, belrijId) => {
-    if (!telefoon) { toast('Geen telefoonnummer bekend.', 'warn'); return; }
-    if (!window.KlxSoftphone || typeof window.KlxSoftphone.open !== 'function') {
-      toast('De softphone is niet geladen.', 'warn');
-      return;
+  function dossiersTab() {
+    const gekozen = S.gekozen;
+    if (!gekozen) {
+      return `<div style="padding:40px 20px;max-width:560px;margin:0 auto;text-align:center">
+        <div style="font-size:24px;opacity:.4;margin-bottom:10px">👤</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:6px">Nog geen dossier gekozen</div>
+        <div style="font-size:12px;color:var(--text-3)">
+          Kies een gesprek in de Post — de dossierkaart staat daar meteen naast.
+          Deze tab toont dezelfde kaart groot, zonder het gesprek erbij.
+        </div>
+      </div>`;
     }
-    try {
-      window.KlxSoftphone.open({
-        phone: telefoon,
-        name: naam,
-        source: 'iris',
-        irisDossierId: contactId,
-        irisBelrijId: belrijId,
-      });
-    } catch (e) {
-      toast('Bellen lukte niet: ' + (e?.message || e), 'error');
-    }
-  };
-
-  window.__irisPoging = async (contactId, belrijId, uitkomst) => {
-    try {
-      const j = await haalRuw('/api/iris-belrij', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actie: 'poging', contact_id: contactId, belrij_id: belrijId, uitkomst }),
-      });
-      if (j.escalatie?.escaleren) {
-        toast('Drempel bereikt: ' + j.escalatie.reden + '. Zet een bericht klaar in de Post.', 'warn');
-      }
-      S.belrij.opgehaald = false;
-      haalBelrij();
-    } catch (e) {
-      toast(e?.message || 'Poging niet genoteerd', 'error');
-    }
-  };
-
-  window.__irisBelrijAf = async (belrijId) => {
-    try {
-      await haalRuw('/api/iris-belrij', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actie: 'afronden', belrij_id: belrijId }),
-      });
-      S.belrij.opgehaald = false;
-      haalBelrij();
-    } catch (e) {
-      toast(e?.message || 'Afronden mislukt', 'error');
-    }
-  };
-
-  function belrijTab() {
-    const st = S.belrij;
-    if (!st.opgehaald && !st.bezig) queueMicrotask(haalBelrij);
-
-    const knop = (v, l) => `<button class="chip ${st.eigenaar === v ? 'on' : ''}" style="font-size:11.5px;padding:4px 11px"
-      onclick="__irisBelrijEigenaar('${v}')">${esc(l)}</button>`;
-
-    let lijst;
-    if (!st.opgehaald && st.bezig) lijst = skelet(6);
-    else if (st.fout) lijst = foutBlok(st.fout);
-    else if (!st.items.length) lijst = NIETS('Niemand op de belrij. Dat is goed nieuws.');
-    else lijst = st.items.map(belrijRij).join('');
-
-    return `<div style="padding:16px 20px;max-width:920px">
-      <div style="display:flex;gap:6px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
-        ${knop('alle', 'Iedereen')}${knop('mij', 'Voor mij')}
-        ${st.drempel ? `<span style="font-size:11px;color:var(--text-3);margin-left:6px">
-          Escalatie na ${esc(String(st.drempel.pogingen))} pogingen op ${esc(String(st.drempel.dagen))} verschillende dagen</span>` : ''}
-      </div>
-      ${lijst}
-    </div>`;
-  }
-
-  function belrijRij(r) {
-    const t = r.telling || {};
-    const e = r.escalatie || {};
-
-    // De tellers staan er alle drie, want het verschil tussen pogingen en
-    // dagen is precies waar de escalatie op draait.
-    const tellers = `<span style="font-size:11px;color:var(--text-3)">
-      ${t.niet_opgenomen || 0} × niet bereikt op ${t.dagen_niet_opgenomen || 0} ${(t.dagen_niet_opgenomen === 1) ? 'dag' : 'dagen'}
-      ${t.vandaag ? ` · vandaag al ${t.vandaag}×` : ''}
-    </span>`;
-
-    const escalatieMerk = e.escaleren
-      ? `<div style="margin-top:8px;padding:8px 10px;border-radius:7px;background:var(--amber-soft,var(--surface-2));color:var(--amber);font-size:11.5px">
-          ⚠ ${esc(e.reden)}. Zet een bericht klaar in de Post — het venster is dan meestal dicht, dus dat wordt een template.
-        </div>`
-      : '';
-
-    const opTijd = r.mag_vandaag_nog;
-    return `<div style="border:1px solid var(--border);border-radius:9px;padding:11px 14px;margin-bottom:9px">
-      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:5px">
-        <b style="font-size:12.5px">${esc(r.naam)}</b>
-        <span style="font-size:11.5px;color:var(--text-2);flex:1;min-width:0">${esc(r.reden)}</span>
-        ${tellers}
-      </div>
-      ${r.telefoon ? `<div style="font-size:11.5px;color:var(--text-3)">📞 ${esc(r.telefoon)}</div>` : `<div style="font-size:11.5px;color:var(--amber)">Geen telefoonnummer bekend.</div>`}
-      ${escalatieMerk}
-      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
-        ${!opTijd ? `<span style="font-size:11px;color:var(--amber);align-self:center;margin-right:auto">Vandaag al 2× geprobeerd — morgen weer.</span>` : ''}
-        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px"
-          onclick="__irisPoging('${esc(r.contact_id)}','${esc(r.id)}','niet_opgenomen')">Nam niet op</button>
-        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px"
-          onclick="__irisPoging('${esc(r.contact_id)}','${esc(r.id)}','gesproken')">Gesproken</button>
-        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 10px"
-          onclick="__irisBelrijAf('${esc(r.id)}')">Van de lijst</button>
-        <button class="btn btn-primary btn-sm" style="font-size:11.5px;padding:4px 14px"
-          onclick="__irisBel('${esc(r.telefoon || '')}','${esc(String(r.naam).replace(/'/g, "\\'"))}','${esc(r.contact_id)}','${esc(r.id)}')"
-          ${r.telefoon && opTijd ? '' : 'disabled'}>Bel</button>
-      </div>
-    </div>`;
-  }
-
-  function nogNiet(wat, fase) {
-    return `<div style="padding:48px 20px;text-align:center;color:var(--text-3);max-width:520px;margin:0 auto">
-      <div style="font-size:26px;opacity:.4;margin-bottom:10px">⏳</div>
-      <div style="font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:6px">${esc(wat)}</div>
-      <div style="font-size:12px">Komt in fase ${esc(fase)}. Er staat hier met opzet nog geen knop —
-        een knop die niets doet is erger dan geen knop.</div>
-    </div>`;
+    return `<div style="max-width:620px;margin:0 auto;padding:0 0 20px">${dossierKolom()}</div>`;
   }
 
   /* ── Het scherm ───────────────────────────────────────────────────────── */
@@ -1464,9 +1219,9 @@
     } else if (S.tab === 'belrij') {
       binnen = belrijTab();
     } else if (S.tab === 'dossiers') {
-      binnen = nogNiet('Dossiers per persoon', '3 (vervolg)');
+      binnen = dossiersTab();
     } else {
-      binnen = nogNiet('Het logboek', '12');
+      binnen = logboekTab();
     }
 
     return `<div style="display:flex;flex-direction:column;min-height:0">
