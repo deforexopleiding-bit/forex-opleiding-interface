@@ -40,6 +40,9 @@ import {
   haalHoldStand, holdBlokkade, holdStandSamenvatting, HOLD_EVENT,
 } from './lms-hold.js';
 import {
+  haalStilteStand, stilteBlokkade, stilteStandSamenvatting,
+} from './lms-stilte.js';
+import {
   isSendStep,
   isWithinOfficeHours,
   readOfficeHoursSetting,
@@ -187,15 +190,44 @@ export async function runEngine({ mode = 'cron', abortMs = 50_000, scope = 'prod
     result.lms_hold = { bron_status: BRON_ONBEREIKBAAR, actief: 0, vangnet: 0, fout };
   }
 
+  // ── AFSPRAAK IN HET LMS: één keer ophalen, daarna doorgeven ──────────
+  // Het spiegelbeeld van de factuurstand-brug: daar schrijft het CRM en leest
+  // het LMS, hier schrijft het LMS (hlms_crm_stilte) en leest deze motor.
+  // Staat er een lopende afspraak — een belofte met datum of een pauze met
+  // reden, altijd door een mens gemaakt — dan gaat er niets uit.
+  //
+  // Zelfde vorm en zelfde afweging als de hold-stand hierboven, inclusief
+  // fail-closed bij een onleesbare bron. Zie api/_lib/lms-stilte.js voor de
+  // verhouding tussen die twee poorten.
+  let stilteStand = null;
   try {
-    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors, scope, holdStand);
+    stilteStand = await haalStilteStand();
+    console.log('[dunning-engine] ' + stilteStandSamenvatting(stilteStand));
+    result.lms_stilte = {
+      bron_status: stilteStand.bron_status,
+      actief: stilteStand.stiltes?.size || 0,
+      vangnet: stilteStand.vangnet?.size || 0,
+      fout: stilteStand.fout || null,
+    };
+  } catch (e) {
+    const fout = e?.message || String(e);
+    console.error('[dunning-engine] stilte-stand ophalen gooide — de motor '
+      + 'behandelt dit als onbereikbaar: ' + fout);
+    const { BRON_ONBEREIKBAAR } = await import('./lms-stilte.js');
+    stilteStand = { bron_status: BRON_ONBEREIKBAAR, stiltes: new Map(),
+      vangnet: new Set(), fout };
+    result.lms_stilte = { bron_status: BRON_ONBEREIKBAAR, actief: 0, vangnet: 0, fout };
+  }
+
+  try {
+    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors, scope, holdStand, stilteStand);
   } catch (e) {
     result.errors.push({ phase: 'detect', error: e?.message || String(e) });
     console.error('[dunning-engine] detect fatal', e);
   }
 
   try {
-    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors, scope, holdStand);
+    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors, scope, holdStand, stilteStand);
   } catch (e) {
     result.errors.push({ phase: 'advance', error: e?.message || String(e) });
     console.error('[dunning-engine] advance fatal', e);
@@ -590,7 +622,7 @@ async function fetchStepTemplates(steps) {
 // Phase 1: detect + start
 // ---------------------------------------------------------------------------
 
-async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'production', holdStand = null) {
+async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'production', holdStand = null, stilteStand = null) {
   const { data: workflows, error: wfErr } = await supabaseAdmin
     .from('dunning_workflows')
     .select('id, name, trigger_conditions, priority, is_active')
@@ -811,6 +843,8 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   // dunning_log-regel om het in te schrijven; de cron-log is de plek.
   let skippedOnHold = 0;
   const onHoldGemeld = new Set();
+  let skippedStilte = 0;
+  const stilteGemeld = new Set();
 
   outer: for (const workflow of workflows || []) {
     if (elapsed(startedAt) > abortMs) break;
@@ -993,6 +1027,26 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
         continue;
       }
 
+      // ── AFSPRAAK IN HET LMS: geen nieuwe run ──────────────────────────
+      // Zelfde plek en zelfde reden als de hold-poort hierboven: geen run
+      // starten die daarna elke dag overgeslagen moet worden, en de klant
+      // niet in de pipeline laten verschijnen alsof er iets loopt.
+      //
+      // De vervaldatum-poort staat hier al vóór. Dat is precies wat er op
+      // de dag NA `stil_tot` moet gebeuren: eerst opnieuw kijken of de
+      // factuur nog vervallen is, en pas daarna het gewone spoor. Betaalde
+      // de klant tijdens de afspraak, dan komt hij hier niet eens langs.
+      const blokkadeStilte = stilteBlokkade(stilteStand, customerId);
+      if (blokkadeStilte) {
+        skippedStilte++;
+        if (!stilteGemeld.has(customerId)) {
+          stilteGemeld.add(customerId);
+          console.log('[dunning-engine] klant ' + customerId
+            + ' overgeslagen — ' + blokkadeStilte.reden);
+        }
+        continue;
+      }
+
       if (!matchesCustomerType(agg.customer, customerType)) continue;
       if (agg.total_open_eur < minTotal) continue;
 
@@ -1161,6 +1215,10 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     }
   }
 
+  if (skippedStilte > 0) {
+    console.log('[dunning-engine] LMS-stilte-poort: ' + skippedStilte
+      + ' klant-match(es) niet gestart (' + stilteGemeld.size + ' unieke klanten)');
+  }
   if (skippedOnHold > 0) {
     console.log('[dunning-engine] LMS-hold-poort: ' + skippedOnHold
       + ' klant-match(es) niet gestart (' + onHoldGemeld.size + ' unieke klanten)');
@@ -1176,7 +1234,7 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
 // Phase 2: advance active runs
 // ---------------------------------------------------------------------------
 
-async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production', holdStand = null) {
+async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production', holdStand = null, stilteStand = null) {
   const now = nowIso();
   const { data: runs, error: runsErr } = await supabaseAdmin
     .from('dunning_workflow_runs')
@@ -1370,6 +1428,39 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           }
         } catch (e) {
           console.warn('[dunning-engine] reply-check fail-soft, doorgaan:', run.customer_id, e?.message || e);
+        }
+
+        // ── AFSPRAAK IN HET LMS -> stap overslaan, run ongemoeid ────
+        // Overslaan zonder statuswijziging, net als bij een openstaande
+        // actie: de run blijft active en de dagcron pikt hem morgen opnieuw
+        // op. Op de dag ná `stil_tot` loopt hij gewoon door — en dan pas
+        // NADAT de checks hierboven opnieuw hebben vastgesteld dat er nog
+        // iets openstaat (de 'paid'-check sluit de run af als er intussen
+        // betaald is). Er is dus geen aparte hervat-cron nodig.
+        //
+        // De dunning_log-regel draagt reden_tekst en door_naam mee, zodat
+        // ook aan CRM-kant naleesbaar is wie wat heeft afgesproken.
+        const stilteBlok = stilteBlokkade(stilteStand, run.customer_id);
+        if (stilteBlok) {
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id: run.id,
+            step_id: currentStepId,
+            event_type: stilteBlok.event,
+            payload: {
+              reason: stilteBlok.code,
+              message: stilteBlok.reden,
+              stil_tot: stilteBlok.stil_tot,
+              door_naam: stilteBlok.door_naam,
+              reden_soort: stilteBlok.reden_soort || null,
+              bron: stilteBlok.bron || null,
+              bron_status: stilteBlok.bron_status,
+              student_id: stilteBlok.student_id,
+            },
+          });
+          console.log('[dunning-engine] run ' + run.id + ' overgeslagen — '
+            + stilteBlok.reden);
+          runAdvanced = true;
+          break; // stop binnenlus; run blijft active
         }
 
         // ── ON HOLD IN HET LMS -> stap overslaan, run ongemoeid ──────

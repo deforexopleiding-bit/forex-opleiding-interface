@@ -20,6 +20,8 @@ const KNOWN = Object.freeze({
   paused_customer_replied:{ title: 'Klant reageerde — aanmaning gepauzeerd' },
   skipped_open_action:    { title: 'Overgeslagen: er ligt nog een openstaande actie' },
   skipped_lms_hold:       { title: 'Overgeslagen: student staat on hold in het LMS' },
+  skipped_lms_stilte:     { title: 'Overgeslagen: er loopt een afspraak in het LMS' },
+  skipped_lms_stilte_onbekend: { title: 'Overgeslagen: afspraak-status onbekend (LMS niet te lezen)' },
   stop_step:              { title: 'Workflow-stap: stop' },
   unknown_step_type:      { title: 'Onbekend workflow-stap-type' },
 
@@ -137,6 +139,14 @@ function labelForDunningEvent(eventType, payload) {
   // zien ("On hold in het LMS tot 30-09-2026 — betaalachterstand"). Die is
   // al in gewone taal opgesteld door api/_lib/lms-hold.js, dus we tonen 'm
   // zoals hij is in plaats van hier een tweede formulering te maken.
+  if (eventType === 'skipped_lms_stilte' || eventType === 'skipped_lms_stilte_onbekend') {
+    // De zin komt uit api/_lib/lms-stilte.js en draagt de mensentekst van
+    // het LMS plus wie het afsprak. Hier niet nog eens herformuleren.
+    const msg = String(payload?.message || '').trim();
+    if (msg) base.detail = msg;
+    return base;
+  }
+
   if (eventType === 'skipped_lms_hold') {
     const msg = String(payload?.message || '').trim();
     if (msg) base.detail = msg;

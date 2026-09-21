@@ -104,6 +104,7 @@ import { determineStage as _determineStageHelper } from './_lib/conv-reminder-st
 import { buildReminderTemplatePayload } from './_lib/conv-reminder-template.js';
 import { renderTemplatePreview } from './_lib/render-template-preview.js';
 import { haalHoldStand, holdBlokkade, holdStandSamenvatting } from './_lib/lms-hold.js';
+import { haalStilteStand, stilteBlokkade, stilteStandSamenvatting } from './_lib/lms-stilte.js';
 
 // Re-export voor backward-compat met tests die deze helpers vanuit deze
 // file importeerden (pre-#888 opsplitsing). Nieuwe callers importeren
@@ -475,6 +476,19 @@ export default async function handler(req, res) {
       holdStand = { bron_status: BRON_ONBEREIKBAAR, holds: new Map(), vangnet: new Set() };
     }
 
+    // ── AFSPRAAK IN HET LMS ───────────────────────────────────────────────
+    // Een herinnering is ook een bericht. Loopt er een afspraak, dan gaat hij
+    // niet uit — zelfde bron en zelfde regel als bij de motor.
+    let stilteStand = null;
+    try {
+      stilteStand = await haalStilteStand();
+      console.log('[conv-reminder-cron] ' + stilteStandSamenvatting(stilteStand));
+    } catch (e) {
+      console.error('[conv-reminder-cron] stilte-stand ophalen gooide: ' + (e?.message || e));
+      const { BRON_ONBEREIKBAAR } = await import('./_lib/lms-stilte.js');
+      stilteStand = { bron_status: BRON_ONBEREIKBAAR, stiltes: new Map(), vangnet: new Set() };
+    }
+
     // ── Deps + dry-run laden via shared loader ────────────────────────────
     const deps = await loadConversationReminderDeps();
     // Splitsing 2026-08-25: kies per scope. scope='test' → test-vlag,
@@ -497,6 +511,13 @@ export default async function handler(req, res) {
       // actie betekent "een mens is ermee bezig", een hold betekent "er mag
       // niets uit". De run blijft ongemoeid; zodra de pauze afloopt pikt de
       // volgende ronde 'm gewoon weer op.
+      const stilteBlok = stilteBlokkade(stilteStand, run.customer_id);
+      if (stilteBlok) {
+        summary.processed_count++;
+        summary.skipped.push({ run_id: run.id, reason: 'LMS_STILTE: ' + stilteBlok.reden });
+        continue;
+      }
+
       const holdBlok = holdBlokkade(holdStand, run.customer_id);
       if (holdBlok) {
         summary.processed_count++;

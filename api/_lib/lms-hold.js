@@ -180,11 +180,16 @@ export async function leesGekoppeldeKlanten(db = supabaseAdmin) {
  * Alle klanten die aan een LMS-student gekoppeld (kunnen) zijn — het
  * vangnet voor als het LMS niet te lezen is.
  *
+ * GEDEELD met api/_lib/lms-stilte.js: die poort heeft bij een storing
+ * exact hetzelfde vangnet nodig, en twee kopieën van "wie hangt er aan het
+ * LMS" zouden gegarandeerd uit elkaar lopen zodra er een vierde koppelweg
+ * bij komt.
+ *
  * Twee bronnen, allebei in het CRM: de onboardings die een LMS-verwijzing
  * of een Bubble-id dragen, plus de afdruk van de spiegel. Samen zo breed
  * mogelijk; dat is hier de bedoeling.
  */
-async function bouwVangnet(db) {
+export async function bouwVangnet(db) {
   const uit = new Set();
   let crmFout = null;
 

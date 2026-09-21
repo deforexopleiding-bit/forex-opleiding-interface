@@ -13,6 +13,18 @@
 // rij. Er zit dus minstens een kwartier tussen het laatste levensteken en de
 // eerste mail, en een trage of mislukte levering haalt die drempel nooit.
 //
+// ── TWEEDE WACHT: DE STILTE-BRON ───────────────────────────────────────────
+// Sinds de stilte-brug kijkt deze cron ook of de aanmaanmotor de afspraken
+// uit het LMS nog KAN lezen. Kan hij dat niet, dan houdt de motor zich in bij
+// elke klant met een LMS-koppeling — precies zoals bedoeld, maar dat mag niet
+// dagenlang stil doorgaan: dan wordt er niemand gemaand en weet niemand het.
+// Drempel: een etmaal. Korter is een hikje dat zichzelf herstelt.
+//
+// Bewust in DEZE cron en niet in een eigen: het is dezelfde vraag ("staat de
+// verbinding met het LMS nog?"), hij draait al elke vijf minuten, en hij
+// mailt al maar één keer per storing. Een tweede waakhond zou een tweede
+// filterregel in Outlook worden.
+//
 // EN HIJ MAILT MAAR EEN KEER PER STORING. Een waakhond die elke vijf minuten
 // dezelfde mail stuurt, wordt een filterregel in Outlook en daarna niets meer.
 // Zodra er weer een hartslag binnenkomt, wist de ontvangkant het meld-merk en
@@ -22,6 +34,9 @@ import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { sendEmailViaSmtp } from './_lib/send-email-core.js';
 import { beoordeelHartslag, bouwAlarmMail, STIL, LEEFT } from './_lib/brug-waakhond.js';
 import { SLEUTEL } from './brug-hartslag.js';
+import {
+  beoordeelStilteBron, BRON_SETTING_KEY as STILTE_BRON_KEY,
+} from './_lib/lms-stilte.js';
 
 const MAIL_VAN = 'leads@deforexopleiding.nl';
 
@@ -72,7 +87,49 @@ export default async function handler(req, res) {
   await supabaseAdmin.from('app_settings')
     .update({ value: nieuweStand, updated_at: nu.toISOString() }).eq('key', SLEUTEL);
 
+  // ── De stilte-bron, als tweede en onafhankelijke wacht ─────────────────
+  // Faalzacht en apart gemeld: een storing hier mag de hartslag-wacht
+  // hierboven niet omgooien, en andersom ook niet.
+  let stilte = { alarm: false, staat: 'niet_gemeten' };
+  try {
+    const { data: sData } = await supabaseAdmin
+      .from('app_settings').select('value').eq('key', STILTE_BRON_KEY).maybeSingle();
+    const sStand = sData?.value || null;
+    stilte = beoordeelStilteBron({ nuMs: nu.getTime(), stand: sStand });
+    const alGemeldStilte = !!sStand?.gemeld_op;
+    if (stilte.alarm && !alGemeldStilte) {
+      const ontvanger = process.env.OPVOLGING_GEZONDHEID_MAIL_TO || '';
+      if (!ontvanger) {
+        console.error('[brug-waakhond] stilte-bron al ' + stilte.uren_stil
+          + 'u onleesbaar, maar OPVOLGING_GEZONDHEID_MAIL_TO ontbreekt');
+      } else {
+        const r = await sendEmailViaSmtp({
+          fromMailbox: MAIL_VAN, to: ontvanger,
+          subject: 'Aanmaanmotor: afspraken uit het LMS al ' + stilte.uren_stil + 'u onleesbaar',
+          text: 'De aanmaanmotor kan hlms_crm_stilte niet lezen sinds '
+            + stilte.sinds_iso + ' (' + stilte.uren_stil + ' uur).\n\n'
+            + 'Gevolg: er gaat NIETS uit naar klanten met een LMS-koppeling — '
+            + 'dat is met opzet zo (liever een dag later manen dan manen tegen '
+            + 'een afspraak in), maar het hoort geen dagen te duren.\n\n'
+            + 'Laatste fout: ' + (stilte.laatste_fout || 'onbekend') + '\n',
+        });
+        if (r?.ok) {
+          await supabaseAdmin.from('app_settings').upsert({
+            key: STILTE_BRON_KEY,
+            value: { ...sStand, gemeld_op: nu.toISOString() },
+          }, { onConflict: 'key' });
+        } else {
+          console.error('[brug-waakhond] stilte-alarmmail faalde:', r?.reason);
+        }
+      }
+    }
+    console.log('[brug-waakhond] stilte-bron:', stilte.staat,
+      '| alarm=' + stilte.alarm, '| uren=' + (stilte.uren_stil ?? '—'));
+  } catch (e) {
+    console.error('[brug-waakhond] stilte-bron beoordelen faalde:', e?.message || e);
+  }
+
   console.log('[brug-waakhond]', oordeel.staat, '—', oordeel.uitleg,
     '| alarm=' + oordeel.alarm, '| mail=' + mail.verstuurd);
-  return res.status(200).json({ ok: true, oordeel, mail, leeft: oordeel.staat === LEEFT });
+  return res.status(200).json({ ok: true, oordeel, mail, leeft: oordeel.staat === LEEFT, stilte_bron: stilte });
 }
