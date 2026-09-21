@@ -29,6 +29,7 @@
 // nummer het altijd van een toevallige staartmatch.
 
 import { stripToDigits, last9Digits } from '../phone-normalize.js';
+import { veiligZoekwoord } from './zoekfilter.js';
 
 /** Mailadres normaliseren. Leeg of onzin wordt een lege tekst. */
 export function normaliseerEmail(ruw) {
@@ -180,9 +181,17 @@ export async function zorgVoorContact(supabase, { email, telefoon, naam } = {}) 
 
   try {
     // 1. Bestaat er al een contact met dit adres of dit nummer?
+    // Let op de opschoning. normaliseerEmail laat een adres met een komma erin
+    // door (`a,b@c.nl` voldoet aan de vorm), en zo'n komma hakt de
+    // or-tekenreeks van PostgREST in tweeën. Het telefoonnummer is al tot
+    // cijfers teruggebracht en kan niets stuk maken, maar gaat voor de
+    // duidelijkheid langs dezelfde poort.
     const orDelen = [];
-    if (mail) orDelen.push(`emails.cs.{"${mail}"}`);
-    if (tel) orDelen.push(`telefoons.cs.{"${tel}"}`);
+    const mailVeilig = veiligZoekwoord(mail, 200);
+    const telVeilig = veiligZoekwoord(tel, 30);
+    if (mailVeilig) orDelen.push(`emails.cs.{"${mailVeilig}"}`);
+    if (telVeilig) orDelen.push(`telefoons.cs.{"${telVeilig}"}`);
+    if (!orDelen.length) return null;
     const { data: bestaand, error: zoekFout } = await supabase
       .from('iris_contacten')
       .select('id, customer_id, emails, telefoons, koppelstatus, weergavenaam')

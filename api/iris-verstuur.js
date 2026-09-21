@@ -40,7 +40,7 @@
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen, leesOngedaanSeconden } from './_lib/iris/instellingen.js';
-import { keurVerzending, verstuurWhatsapp, verstuurMail, alGestuurdVandaag } from './_lib/iris/verzend.js';
+import { keurVerzending, verstuurWhatsapp, verstuurMail } from './_lib/iris/verzend.js';
 import { zetOndertekening } from './_lib/iris/toon.js';
 import { waitUntil } from '@vercel/functions';
 
@@ -368,4 +368,10 @@ export async function verstuurConcept(conceptId) {
   }
 }
 
-export { alGestuurdVandaag };
+// De doseerpoort (alGestuurdVandaag + maxPerDag in keurVerzending) staat er
+// wel, maar wordt vanuit dit bestand niet aangeroepen — en dat is juist.
+// Alles wat hier langskomt is door een MENS goedgekeurd, en de dosering gaat
+// over aandringen door software, niet over een collega die drie keer moet
+// reageren. Zodra er een pad komt waarin Iris uit zichzelf verstuurt (de stand
+// 'zelf' per categorie), hoort dat pad keurVerzending aan te roepen MET
+// doorMens: false en met de dagteller erbij. Daar staat deze notitie voor.

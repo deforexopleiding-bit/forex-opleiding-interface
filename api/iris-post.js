@@ -33,6 +33,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { haalInstellingen } from './_lib/iris/instellingen.js';
 import { vensterStand, magVersturen } from './_lib/iris/venster.js';
+import { contactZoekFilter } from './_lib/iris/zoekfilter.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const STANDAARD_LIMIET = 50;
@@ -159,11 +160,18 @@ async function geefLijst(q, res) {
   // Zoeken gaat over de contactgegevens, niet over de gesprekstabel — daar
   // staat geen naam in. Eerst de contacten zoeken, dan de gesprekken daarvan.
   if (zoek) {
-    const naald = `%${zoek}%`;
+    // Het zoekwoord gaat door contactZoekFilter heen: een komma of een haakje
+    // in de invoer zou anders de or-tekenreeks van PostgREST in tweeën hakken.
+    // Zoeken op "Janssen, Jan" gaf zo een 400, en dat ziet er voor de
+    // gebruiker uit als "zoeken is kapot".
+    const filter = contactZoekFilter(zoek);
+    if (!filter) {
+      return res.status(200).json({ items: [], totaal: 0, filter: 'wacht_op_ons', vanaf, limiet, filters: FILTERS });
+    }
     const { data: gevonden } = await supabaseAdmin
       .from('iris_contacten')
       .select('id')
-      .or(`weergavenaam.ilike.${naald},emails.cs.{"${zoek.toLowerCase()}"}`)
+      .or(filter)
       .limit(200);
     const ids = (gevonden || []).map((c) => c.id);
     if (!ids.length) {
