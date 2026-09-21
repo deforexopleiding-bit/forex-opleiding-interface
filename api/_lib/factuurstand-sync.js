@@ -37,7 +37,7 @@
 
 import { supabaseAdmin } from '../supabase.js';
 import { getDfoLmsClient } from './dfo-lms-db.js';
-import { GEKOPPELD_SETTING_KEY } from './lms-hold.js';
+import { GEKOPPELD_SETTING_KEY } from './lms-koppelnet.js';
 import {
   SPIEGEL_TABEL, STUDENT_KOLOMMEN,
   BRON_GELEZEN, BRON_NIET_GEKOPPELD, BRON_ONBEREIKBAAR,
@@ -444,7 +444,7 @@ export async function draaiFactuurstandSync({ dry = false, door = 'cron' } = {})
  * gekoppeld zijn, in `app_settings`.
  *
  * ── WAAROM DIT HIER STAAT EN NIET IN DE MOTOR ───────────────────────────
- * De hold-poort (api/_lib/lms-hold.js) moet, als het LMS onbereikbaar is,
+ * De stilte-poort (api/_lib/lms-stilte.js) moet, als het LMS onbereikbaar is,
  * weten wélke klanten een LMS-koppeling hebben — want díé slaat hij dan
  * over. Twee van de drie koppelwegen staan in het CRM zelf en zijn dus ook
  * bij een storing leesbaar. De derde, het e-mailadres, heeft aan CRM-kant

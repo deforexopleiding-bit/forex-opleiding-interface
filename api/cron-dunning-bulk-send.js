@@ -30,7 +30,7 @@
 
 import { checkCronAuth, supabaseAdmin } from './supabase.js';
 import { sendTemplate } from './_lib/meta-whatsapp.js';
-import { haalHoldStand, holdBlokkade, holdStandSamenvatting } from './_lib/lms-hold.js';
+import { haalStilteStand, stilteBlokkade, stilteStandSamenvatting } from './_lib/lms-stilte.js';
 import { buildSendComponents } from './_lib/meta-template-components-builder.js';
 import { buildMetaVariablesFromMapping } from './_lib/template-variables.js';
 import { upsertOutboundConversation } from './_lib/conv-upsert.js';
@@ -87,9 +87,9 @@ export default async function handler(req, res) {
     sent           : 0,
     failed         : 0,
     skipped        : 0,
-    // Apart van `skipped`: een hold is UITGESTELD, niet overgeslagen. De
-    // ontvanger blijft pending en gaat de volgende ronde mee.
-    on_hold        : 0,
+    // Apart van `skipped`: een lopende afspraak is UITGESTELD, niet
+    // overgeslagen. De ontvanger blijft pending en gaat de volgende ronde mee.
+    lms_stilte     : 0,
     jobs_touched   : 0,
     jobs_completed : 0,
     errors         : [],
@@ -124,27 +124,6 @@ export default async function handler(req, res) {
       .limit(BATCH_SIZE);
     if (recErr) throw new Error('recipients fetch: ' + recErr.message);
 
-    // ── ON HOLD IN HET LMS ────────────────────────────────────────────
-    // Een goedgekeurde bulk-aanmaanronde kan uren of dagen oud zijn. Zet de
-    // hoofdmentor in die tussentijd een student on hold, dan mag die klant
-    // alsnog niets krijgen — een goedkeuring van gisteren is geen vrijbrief
-    // voor vandaag. Zelfde plek en zelfde vorm als de bestaande send-time
-    // hercheck op "heeft de klant intussen betaald".
-    //
-    // Eén bevraging per cron-run, vóór de lus. Is het LMS onbereikbaar, dan
-    // blijven de betrokken ontvangers gewoon op 'pending' staan (zie de
-    // skip-tak hieronder) en gaan ze de volgende ronde mee.
-    const onHoldRedenen = new Map();   // recipient_id → reden, voor één logregel
-    let holdStand = null;
-    try {
-      holdStand = await haalHoldStand();
-      console.log('[bulk-send] ' + holdStandSamenvatting(holdStand));
-    } catch (e) {
-      console.error('[bulk-send] hold-stand ophalen gooide: ' + (e?.message || e));
-      const { BRON_ONBEREIKBAAR } = await import('./_lib/lms-hold.js');
-      holdStand = { bron_status: BRON_ONBEREIKBAAR, holds: new Map(), vangnet: new Set() };
-    }
-
     if (!pendingRecips || pendingRecips.length === 0) {
       // Geen pending → check of we jobs kunnen completen.
       for (const job of jobs) {
@@ -158,6 +137,36 @@ export default async function handler(req, res) {
       }
       summary.duration_ms = Date.now() - startedAt;
       return res.status(200).json({ ok: true, ...summary });
+    }
+
+    // ── AFSPRAAK IN HET LMS ───────────────────────────────────────────
+    // Een goedgekeurde bulk-aanmaanronde kan uren of dagen oud zijn. Maakt
+    // iemand in die tussentijd een afspraak met de klant, dan mag die alsnog
+    // niets krijgen — een goedkeuring van gisteren is geen vrijbrief voor
+    // vandaag. Zelfde plek en zelfde vorm als de bestaande send-time hercheck
+    // op "heeft de klant intussen betaald".
+    //
+    // Dit was tot 21 september 2026 de hold-poort van #1622. Die las
+    // `hlms_student_hold` rechtstreeks en zou dus ook op een AUTOMATISCHE
+    // betalingspauze afgaan — precies de wanbetalers stilleggen die een
+    // aanmaning horen te krijgen. De poort is daarom vervangen, niet
+    // weggehaald: bulk blijft even goed beschermd tegen een échte afspraak,
+    // en gaat niet meer uit op een pauze die een script heeft gezet.
+    //
+    // Eén bevraging per cron-run, vóór de lus — en pas NA de leeg-check
+    // hierboven: draait deze cron elke 3 minuten zonder werk, dan is dat
+    // 480 bevragingen per dag voor niets. Is de bron onleesbaar, dan
+    // blijven de betrokken ontvangers gewoon op 'pending' staan (zie de
+    // skip-tak hieronder) en gaan ze de volgende ronde mee.
+    const stilteRedenen = new Map();   // recipient_id → reden, voor één logregel
+    let stilteStand = null;
+    try {
+      stilteStand = await haalStilteStand();
+      console.log('[bulk-send] ' + stilteStandSamenvatting(stilteStand));
+    } catch (e) {
+      console.error('[bulk-send] stilte-stand ophalen gooide: ' + (e?.message || e));
+      const { BRON_ONBEREIKBAAR } = await import('./_lib/lms-stilte.js');
+      stilteStand = { bron_status: BRON_ONBEREIKBAAR, stiltes: new Map(), vangnet: new Set() };
     }
 
     // 3) Set touched jobs op 'running' als ze nog approved zijn.
@@ -177,22 +186,22 @@ export default async function handler(req, res) {
     for (const rec of pendingRecips) {
       summary.processed++;
 
-      // 3a-0) On hold in het LMS? Dan gaat er niets uit.
+      // 3a-0) Loopt er een afspraak in het LMS? Dan gaat er niets uit.
       //
       // BEWUST VÓÓR de claim, en bewust ZONDER statuswijziging. De ontvanger
       // blijft gewoon 'pending' staan en gaat de volgende ronde mee — een
-      // hold is tijdelijk, dus 'skipped' zou te veel zeggen: dan krijgt de
-      // klant zijn aanmaning ook ná de pauze nooit meer. Door vóór de claim
-      // te toetsen is er ook geen statuswissel heen-en-weer, en dat scheelt
-      // bij een lange pauze honderden schrijfacties per dag.
+      // afspraak is tijdelijk, dus 'skipped' zou te veel zeggen: dan krijgt
+      // de klant zijn aanmaning ook ná de afspraak nooit meer. Door vóór de
+      // claim te toetsen is er ook geen statuswissel heen-en-weer, en dat
+      // scheelt bij een lange afspraak honderden schrijfacties per dag.
       //
-      // Gevolg dat een mens moet weten: zolang de pauze loopt blijft de job
-      // openstaan (er zijn immers nog pending ontvangers). Dat is correct —
-      // er is nog wél iets te versturen, alleen nu niet.
-      const holdBlok = holdBlokkade(holdStand, rec.customer_id);
-      if (holdBlok) {
-        summary.on_hold++;
-        onHoldRedenen.set(rec.id, holdBlok.reden);
+      // Gevolg dat een mens moet weten: zolang de afspraak loopt blijft de
+      // job openstaan (er zijn immers nog pending ontvangers). Dat is
+      // correct — er is nog wél iets te versturen, alleen nu niet.
+      const stilteBlok = stilteBlokkade(stilteStand, rec.customer_id);
+      if (stilteBlok) {
+        summary.lms_stilte++;
+        stilteRedenen.set(rec.id, stilteBlok.reden);
         continue;
       }
 
@@ -449,11 +458,11 @@ export default async function handler(req, res) {
       } catch (_) { /* fail-soft */ }
     }
 
-    if (summary.on_hold > 0) {
-      const eerste = Array.from(onHoldRedenen.values())[0];
-      console.log('[bulk-send] ' + summary.on_hold + ' ontvanger(s) uitgesteld — '
-        + 'on hold in het LMS (bv. "' + eerste + '"). Ze blijven pending en '
-        + 'gaan mee zodra de pauze afloopt.');
+    if (summary.lms_stilte > 0) {
+      const eerste = Array.from(stilteRedenen.values())[0];
+      console.log('[bulk-send] ' + summary.lms_stilte + ' ontvanger(s) uitgesteld — '
+        + 'afspraak in het LMS (bv. "' + eerste + '"). Ze blijven pending en '
+        + 'gaan mee zodra de afspraak afloopt.');
     }
 
     // 4) Per touched job: check of 'ie leeg is → completed.

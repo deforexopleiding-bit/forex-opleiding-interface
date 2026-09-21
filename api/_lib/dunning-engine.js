@@ -37,9 +37,6 @@ import {
 } from './pending-actions-guard.js';
 import { shouldSkipDueToTerminalStage, OPEN_INVOICE_STATUSES as OPEN_STATUSES } from './dunning-pipeline.js';
 import {
-  haalHoldStand, holdBlokkade, holdStandSamenvatting, HOLD_EVENT,
-} from './lms-hold.js';
-import {
   haalStilteStand, stilteBlokkade, stilteStandSamenvatting,
 } from './lms-stilte.js';
 import {
@@ -155,50 +152,27 @@ export async function runEngine({ mode = 'cron', abortMs = 50_000, scope = 'prod
     duration_ms: 0,
   };
 
-  // ── ON HOLD IN HET LMS: één keer ophalen, daarna doorgeven ───────────
-  // Zet de hoofdmentor een student on hold, dan gaat er naar die klant
-  // NIETS uit — geen aanmaning, geen herinnering, geen WhatsApp (beslissing
-  // Maxim, 11 september 2026). Zie api/_lib/lms-hold.js voor de definitie.
-  //
-  // Eén bevraging per engine-run, niet per klant: de motor loopt honderden
-  // klanten langs en mag het LMS niet honderden keren bevragen.
-  //
-  // Is het LMS NIET te lezen, dan blokkeert de stand elke klant met een
-  // LMS-koppeling. Dat is met opzet het tegenovergestelde van de fail-open
-  // die elders in deze motor geldt: een glitch mag de motor niet stilzetten,
-  // maar hier zit de schade aan de VERZENDkant. Iemand aanmanen die net een
-  // pauze kreeg is niet terug te nemen; een dag later aanmanen wel.
-  let holdStand = null;
-  try {
-    holdStand = await haalHoldStand();
-    console.log('[dunning-engine] ' + holdStandSamenvatting(holdStand));
-    result.lms_hold = {
-      bron_status: holdStand.bron_status,
-      actief: holdStand.holds?.size || 0,
-      vangnet: holdStand.vangnet?.size || 0,
-      fout: holdStand.fout || null,
-    };
-  } catch (e) {
-    // haalHoldStand() gooit niet, maar mocht dat ooit veranderen dan is de
-    // veilige uitkomst hier NIET "ga door": dan weten we niets over holds.
-    const fout = e?.message || String(e);
-    console.error('[dunning-engine] hold-stand ophalen gooide — de motor '
-      + 'behandelt dit als onbereikbaar: ' + fout);
-    const { BRON_ONBEREIKBAAR } = await import('./lms-hold.js');
-    holdStand = { bron_status: BRON_ONBEREIKBAAR, holds: new Map(),
-      vangnet: new Set(), fout };
-    result.lms_hold = { bron_status: BRON_ONBEREIKBAAR, actief: 0, vangnet: 0, fout };
-  }
-
   // ── AFSPRAAK IN HET LMS: één keer ophalen, daarna doorgeven ──────────
   // Het spiegelbeeld van de factuurstand-brug: daar schrijft het CRM en leest
   // het LMS, hier schrijft het LMS (hlms_crm_stilte) en leest deze motor.
   // Staat er een lopende afspraak — een belofte met datum of een pauze met
   // reden, altijd door een mens gemaakt — dan gaat er niets uit.
   //
-  // Zelfde vorm en zelfde afweging als de hold-stand hierboven, inclusief
-  // fail-closed bij een onleesbare bron. Zie api/_lib/lms-stilte.js voor de
-  // verhouding tussen die twee poorten.
+  // DIT IS DE ENIGE LMS-POORT. De hold-poort van #1622 las
+  // `hlms_student_hold` rechtstreeks en is op 21 september 2026 verwijderd:
+  // het LMS kan daar ook AUTOMATISCHE betalingsholds in zetten, en die
+  // zouden precies de wanbetalers stilleggen die wél een aanmaning horen te
+  // krijgen. Een menselijke hold bereikt ons nog steeds — het LMS schrijft
+  // die zelf als stilterij met `bron='hold'`. Zie api/_lib/lms-stilte.js.
+  //
+  // Eén bevraging per engine-run, niet per klant: de motor loopt honderden
+  // klanten langs en mag het LMS niet honderden keren bevragen.
+  //
+  // Is de bron NIET te lezen, dan blokkeert de stand elke klant met een
+  // LMS-koppeling. Dat is met opzet het tegenovergestelde van de fail-open
+  // die elders in deze motor geldt: een glitch mag de motor niet stilzetten,
+  // maar hier zit de schade aan de VERZENDkant. Iemand manen tegen een
+  // afspraak in is niet terug te nemen; een dag later manen wel.
   let stilteStand = null;
   try {
     stilteStand = await haalStilteStand();
@@ -220,14 +194,14 @@ export async function runEngine({ mode = 'cron', abortMs = 50_000, scope = 'prod
   }
 
   try {
-    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors, scope, holdStand, stilteStand);
+    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors, scope, stilteStand);
   } catch (e) {
     result.errors.push({ phase: 'detect', error: e?.message || String(e) });
     console.error('[dunning-engine] detect fatal', e);
   }
 
   try {
-    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors, scope, holdStand, stilteStand);
+    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors, scope, stilteStand);
   } catch (e) {
     result.errors.push({ phase: 'advance', error: e?.message || String(e) });
     console.error('[dunning-engine] advance fatal', e);
@@ -622,7 +596,7 @@ async function fetchStepTemplates(steps) {
 // Phase 1: detect + start
 // ---------------------------------------------------------------------------
 
-async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'production', holdStand = null, stilteStand = null) {
+async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'production', stilteStand = null) {
   const { data: workflows, error: wfErr } = await supabaseAdmin
     .from('dunning_workflows')
     .select('id, name, trigger_conditions, priority, is_active')
@@ -839,10 +813,8 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   // Zichtbaar in de cron-log zodat een verkeerd geconfigureerde workflow
   // (die op niet-vervallen facturen mikt) meteen opvalt.
   let skippedNotOverdue = 0;
-  // Idem voor de hold-poort. Hier bestaat nog geen run, dus er is ook geen
+  // Idem voor de stilte-poort. Hier bestaat nog geen run, dus er is ook geen
   // dunning_log-regel om het in te schrijven; de cron-log is de plek.
-  let skippedOnHold = 0;
-  const onHoldGemeld = new Set();
   let skippedStilte = 0;
   const stilteGemeld = new Set();
 
@@ -1004,33 +976,18 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
         console.error('[dunning-engine] mentor-hook markOverdue:', e.message);
       }
 
-      // ── ON HOLD IN HET LMS: geen nieuwe run ───────────────────────────
+      // ── AFSPRAAK IN HET LMS: geen nieuwe run ──────────────────────────
       // Vóór de workflow-condities (customer_type, min_total_amount) en
       // vóór elke start: welke workflow ook matcht, er komt geen run.
       // Er wordt niet eens een run gestart — anders zou die run elke dag
       // opnieuw opgepikt en overgeslagen worden, en zou de klant tijdens
-      // zijn pauze in de pipeline verschijnen alsof er iets loopt.
+      // zijn afspraak in de pipeline verschijnen alsof er iets loopt.
       //
       // Wél PAS NA markOverdue hierboven. Dat is geen bericht aan de klant
       // maar interne boekhouding (mentor-bonussen op 'wachten_op_betaling'),
       // en die hoort gewoon door te lopen: de factuur ís te laat, ook als we
-      // er even niet over beginnen. Een hold houdt berichten tegen, geen
+      // er even niet over beginnen. Een afspraak houdt berichten tegen, geen
       // administratie.
-      const blokkadeStart = holdBlokkade(holdStand, customerId);
-      if (blokkadeStart) {
-        skippedOnHold++;
-        if (!onHoldGemeld.has(customerId)) {
-          onHoldGemeld.add(customerId);
-          console.log('[dunning-engine] klant ' + customerId
-            + ' overgeslagen — ' + blokkadeStart.reden);
-        }
-        continue;
-      }
-
-      // ── AFSPRAAK IN HET LMS: geen nieuwe run ──────────────────────────
-      // Zelfde plek en zelfde reden als de hold-poort hierboven: geen run
-      // starten die daarna elke dag overgeslagen moet worden, en de klant
-      // niet in de pipeline laten verschijnen alsof er iets loopt.
       //
       // De vervaldatum-poort staat hier al vóór. Dat is precies wat er op
       // de dag NA `stil_tot` moet gebeuren: eerst opnieuw kijken of de
@@ -1219,10 +1176,6 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     console.log('[dunning-engine] LMS-stilte-poort: ' + skippedStilte
       + ' klant-match(es) niet gestart (' + stilteGemeld.size + ' unieke klanten)');
   }
-  if (skippedOnHold > 0) {
-    console.log('[dunning-engine] LMS-hold-poort: ' + skippedOnHold
-      + ' klant-match(es) niet gestart (' + onHoldGemeld.size + ' unieke klanten)');
-  }
   if (skippedNotOverdue > 0) {
     console.log(`[dunning-engine] overdue-poort: ${skippedNotOverdue} klant-match(es) geweigerd (nog niet vervallen, grace=${graceDays}d, vandaag=${todayIso})`);
   }
@@ -1234,7 +1187,7 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
 // Phase 2: advance active runs
 // ---------------------------------------------------------------------------
 
-async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production', holdStand = null, stilteStand = null) {
+async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production', stilteStand = null) {
   const now = nowIso();
   const { data: runs, error: runsErr } = await supabaseAdmin
     .from('dunning_workflow_runs')
@@ -1459,39 +1412,6 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           });
           console.log('[dunning-engine] run ' + run.id + ' overgeslagen — '
             + stilteBlok.reden);
-          runAdvanced = true;
-          break; // stop binnenlus; run blijft active
-        }
-
-        // ── ON HOLD IN HET LMS -> stap overslaan, run ongemoeid ──────
-        // Zelfde vorm als de actie-guard hieronder, en om dezelfde reden:
-        // OVERSLAAN (geen statuswijziging) in plaats van pauzeren. De run
-        // blijft active, de volgende dagcron pikt 'm opnieuw op, en zodra de
-        // einddatum van de pauze voorbij is loopt alles gewoon door — precies
-        // de hercontrole die ook een beloofde betaaldatum krijgt. Er is dus
-        // GEEN aparte cron nodig om een hold te laten aflopen: de datum in
-        // het LMS is de enige waarheid en die wordt elke ronde opnieuw
-        // gelezen.
-        //
-        // De dunning_log-regel is wat een medewerker in de wanbetalersmodule
-        // ziet staan ("On hold in het LMS tot <datum>"); zonder die regel zou
-        // de klant er stil bij staan zonder dat iemand weet waarom.
-        const holdBlok = holdBlokkade(holdStand, run.customer_id);
-        if (holdBlok) {
-          await supabaseAdmin.from('dunning_log').insert({
-            run_id: run.id,
-            step_id: currentStepId,
-            event_type: HOLD_EVENT,
-            payload: {
-              reason: holdBlok.code,
-              message: holdBlok.reden,
-              tot: holdBlok.tot,
-              bron_status: holdBlok.bron_status,
-              student_id: holdBlok.student_id,
-            },
-          });
-          console.log('[dunning-engine] run ' + run.id + ' overgeslagen — '
-            + holdBlok.reden);
           runAdvanced = true;
           break; // stop binnenlus; run blijft active
         }
