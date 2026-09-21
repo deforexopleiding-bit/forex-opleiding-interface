@@ -33,6 +33,8 @@ import { haalInstellingen } from './_lib/iris/instellingen.js';
 import { zorgVoorContact } from './_lib/iris/koppel.js';
 import { deelIn } from './_lib/iris/classificeer.js';
 import { verstuurConcept } from './iris-verstuur.js';
+import { getDfoLmsClient } from './_lib/dfo-lms-db.js';
+import { haalSignalen } from './_lib/iris/signalen.js';
 import {
   OPNAME_PER_RONDE,
   bronSleutel,
@@ -68,6 +70,7 @@ export default async function handler(req, res) {
     indeel_fouten: 0,
     verstuurd: 0,
     verstuur_fouten: 0,
+    signalen_nieuw: 0,
     overgeslagen_tijd: false,
     fouten: [],
     duur_ms: 0,
@@ -228,12 +231,25 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── 6. Mentorsignalen uit het LMS ────────────────────────────────────────
+    // Alleen lezen. Een LMS dat even niet bereikbaar is, mag de post niet
+    // stilleggen — vandaar een waarschuwing en geen fout.
+    if (opTijd()) {
+      try {
+        const uit = await haalSignalen({ crmDb: supabaseAdmin, lmsClient: getDfoLmsClient() });
+        rapport.signalen_nieuw = uit.nieuw || 0;
+        if (uit.fout) console.warn('[cron-iris-werk] signalen:', uit.fout);
+      } catch (e) {
+        meldFout('signalen ophalen', e);
+      }
+    }
+
     rapport.duur_ms = Date.now() - start;
     console.log('[cron-iris-werk]', JSON.stringify(rapport));
 
     // Een ronde zonder werk hoeft niet in het logboek — dat zou het logboek
     // vol zetten met stilte.
-    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.verstuurd || rapport.fouten.length) {
+    if (rapport.opgenomen_wa || rapport.opgenomen_mail || rapport.ingedeeld || rapport.verstuurd || rapport.signalen_nieuw || rapport.fouten.length) {
       const { error: logFout } = await supabaseAdmin.from('iris_log').insert({
         wat: 'werkronde',
         resultaat: rapport.fouten.length ? 'deels' : 'ok',
