@@ -454,6 +454,44 @@ rij in `iris_gesprekken` — dan kán er niets toegewezen worden. Dat geeft een
 "opgeslagen!" gevolgd door een leeg vakje na de volgende verversing is erger dan
 een foutmelding: dan denk je dat het belegd is.
 
+### G8 (de lijst) — zeggen dat je niet alles ziet
+
+De draad kreeg echte paginering. De lijst krijgt die **niet**, en dat is geen
+halfheid maar een grens die in de gegevens zit.
+
+De lijst sorteert op `last_activity_at`, en dat is `MAX(laatste WhatsApp,
+laatste mail)` — een waarde die het endpoint zelf uitrekent, **geen kolom**.
+Juist daarom haalt hij alles op: je kunt de database niet laten sorteren op iets
+dat er niet in staat, en er dus ook geen cursor op zetten.
+
+Sorteren op `last_message_at` alleen zou wél kunnen, maar dat is precies de bug
+die eerder is opgelost: een klant met **verse mail** en oude WhatsApp zakt dan
+weg in de lijst. Een cursor die een opgeloste bug terugbrengt is geen
+vooruitgang, dus die heb ik niet gebouwd.
+
+Wat wél kan zonder de gegevens te veranderen: **zeggen** dat de lijst afgekapt
+is. Het endpoint rekende dat al uit en stuurde het mee (`cap_overflow_warning`);
+er keek alleen nooit iemand naar. Een onvolledige lijst die er volledig uitziet
+is het soort fout waar je pas maanden later achter komt — je zoekt een klant,
+vindt hem niet, en concludeert dat hij niet geschreven heeft.
+
+De banner staat er ook boven een **lege** lijst, want juist dan is hij het
+hardst nodig: "geen gesprekken in dit filter" terwijl je de helft niet hebt
+opgehaald, is ronduit misleidend.
+
+En hij belooft **niets over zoeken**. Het zoekveld filtert eerst wat er al
+geladen is; de server ziet de zoekterm pas bij de volgende poll. "Zoeken vindt
+het wel" zou dus pas na een halve minuut kloppen, en een halve waarheid op een
+waarschuwing is erger dan geen waarheid.
+
+> **Wat het écht oplost, en wat dat kost.** Een kolom `last_activity_at` op
+> `whatsapp_conversations`, bijgehouden bij elke inkomende WhatsApp én bij de
+> mailsync. Dan kan de database er op sorteren en kan er een cursor op. Dat is
+> een migratie plus twee nieuwe schrijfpaden op een tabel waar het hard gaat —
+> de moeite waard zodra het knelt, niet nu. Bij 115 gesprekken is er ruim acht
+> keer zoveel ruimte als nodig, en vanaf nu zegt het scherm het zelf als dat
+> verandert.
+
 ---
 
 ## Wat er nog ligt
@@ -464,7 +502,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus wat hierboven staat.
 |---|---|---|
 | G1 | microfoon in de gesprekken-module | Iris heeft er een (via de browser); de gesprekken-module zelf nog niet |
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
-| G8 | paginering van de LIJST | de draad is gedaan (zie hierboven); de gesprekslijst haalt nog altijd `limit=1000` in één keer op, en waarschuwt daar zelf voor met `capOverflowWarning` |
+| G8 | een cursor op de LIJST | kan pas als `last_activity_at` een kolom wordt (zie hierboven); tot dan is de lijst afgekapt-maar-eerlijk |
 
 ---
 

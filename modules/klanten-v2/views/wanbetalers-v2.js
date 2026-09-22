@@ -3249,6 +3249,11 @@
       // niet kent, laat de vlag uit staan in plaats van 'undefined' te
       // laten doorwerken als iets anders dan nee.
       st.v2 = j?.vlaggen?.gesprekken_v2 === true;
+      // G8 — de lijst kan afgekapt zijn. Het endpoint rekende dat al uit en
+      // stuurde het mee; er keek alleen nooit iemand naar, dus zag een
+      // onvolledige lijst er precies zo uit als een volledige.
+      st.afgekapt = j?.cap_overflow_warning || null;
+      st.totaal = Number.isFinite(Number(j?.total)) ? Number(j.total) : null;
     }
     st.loading = false;
     _live.inboxRealtime.lastRefresh = Date.now();
@@ -4360,6 +4365,22 @@
     // op overzicht-intersect voor legacy respons), ongelezen-eerst sortering.
     // Volledige logic in _selectVisibleInboxItems zodat _fetchInboxConvs auto-
     // open dezelfde criteria hanteert.
+    // G8 — zeg het als je niet alles ziet. Een onvolledige lijst die er
+    // volledig uitziet, is het soort fout waar je pas maanden later achter
+    // komt: je zoekt een klant, vindt hem niet, en concludeert dat hij niet
+    // geschreven heeft.
+    //
+    // Er staat BEWUST niet bij dat zoeken wel alles doorzoekt. Het zoekveld
+    // filtert eerst wat er al geladen is; de server ziet de zoekterm pas bij
+    // de volgende poll. "Zoeken vindt het wel" zou dus pas na een halve minuut
+    // kloppen, en een halve waarheid op een waarschuwing is erger dan geen
+    // waarheid.
+    const afgekaptBanner = (_gv2() && st.afgekapt)
+      ? `<div style="padding:8px 12px;background:var(--amber-soft);color:var(--amber);font-size:11px;border-bottom:1px solid var(--border)">
+          <b>Je ziet niet alle gesprekken.</b> Er zijn er ${esc(String(st.totaal ?? '?'))}; hiervan passen er ${esc(String(asArr(st.items).length))} in één keer, de oudste vallen af.
+        </div>`
+      : '';
+
     const items = _selectVisibleInboxItems(asArr(st.items));
     if (!items.length) {
       // De lege tekst moet kloppen met wat er gefilterd is. "Geen
@@ -4377,9 +4398,9 @@
         belofte_vandaag: 'Geen toezegging met de datum van vandaag.',
       };
       const tekst = LEEG[modus] || 'Geen wanbetaler-gesprekken in dit filter.';
-      return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(tekst)}</div>`;
+      return afgekaptBanner + `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(tekst)}</div>`;
     }
-    return items.map((c) => {
+    return afgekaptBanner + items.map((c) => {
       const cid = String(c.id);
       const active = _ui.inbox.selectedConv === cid;
       const name = c.customer_name || c.display_name || c.phone_number || 'Onbekend';
