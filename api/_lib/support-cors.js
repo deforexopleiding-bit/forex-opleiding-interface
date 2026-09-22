@@ -36,6 +36,21 @@ const VASTE_ORIGINS = [
 const PREVIEW_ORIGIN =
   /^https:\/\/dfo-website-[a-z0-9-]+-de-forex-opleiding-bv-s-projects\.vercel\.app$/;
 
+// De Webflow-staging van de marketingsite. Zonder deze regel blokkeert de
+// browser elke API-call vanaf staging en toont de widget daar een
+// storingsmelding — precies waar je hem juist wilt uitproberen voordat hij
+// op de live site komt.
+//
+// Bewust ÉÉN exacte hostnaam en geen patroon op webflow.io: die subdomeinen
+// zijn voor iedereen aan te maken, dus een wildcard daar zou de deur voor de
+// hele wereld openzetten. Verandert de sitenaam in Webflow, dan verandert
+// deze hostnaam mee en moet deze regel mee.
+//
+// Let op: gesprekken die vanaf staging beginnen komen in de ECHTE wachtrij
+// terecht. Test dus met een herkenbare naam, of zet de widget tijdelijk uit
+// in Support → Instellingen.
+const WEBFLOW_STAGING = 'https://dfo-2-0---2026.webflow.io';
+
 function extraOrigins() {
   const raw = process.env.SUPPORT_WIDGET_ORIGINS || '';
   return raw
@@ -55,6 +70,7 @@ function extraOrigins() {
 export function resolveSupportOrigin(origin) {
   if (typeof origin !== 'string' || !origin) return PRODUCTIE_ORIGIN;
   if (VASTE_ORIGINS.includes(origin)) return origin;
+  if (origin === WEBFLOW_STAGING) return origin;
   if (PREVIEW_ORIGIN.test(origin)) return origin;
   if (extraOrigins().includes(origin)) return origin;
   return PRODUCTIE_ORIGIN;

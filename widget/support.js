@@ -59,6 +59,7 @@
     berichten: [],
     bezig: false,
     fout: null,
+    onbereikbaar: false,
     codeVeld: false,
     codeBezig: false,
     laatsteTijd: null,
@@ -258,6 +259,16 @@
     if (st.stap === 'chat') return tekenChat();
 
     var h = '<div class="body">';
+
+    if (st.onbereikbaar) {
+      return h + '<p style="margin:0 0 12px;font-size:13.5px;line-height:1.6;color:#111721">' +
+        'De chat is op dit moment niet bereikbaar.</p>' +
+        '<p style="margin:0;font-size:13.5px;line-height:1.6;color:#586374">Mail ons gerust op ' +
+        '<a href="mailto:info@deforexopleiding.nl" style="color:#10284A;font-weight:600">info@deforexopleiding.nl</a>' +
+        ' of bel <a href="tel:+31851308362" style="color:#10284A;font-weight:600">+31 85 130 83 62</a>. ' +
+        'We komen er snel op terug.</p></div>';
+    }
+
     if (st.fout) h += '<div class="fout">' + esc(st.fout) + '</div>';
 
     if (st.stap === 'start') {
@@ -416,9 +427,12 @@
       api('support-widget-config').then(function (c) {
         if (!c || c.aan === false) { st.open = false; teken(); return; }
         st.config = c;
+        st.onbereikbaar = false;
         teken();
       }).catch(function () {
-        st.fout = 'De chat is nu niet bereikbaar. Mail ons gerust op info@deforexopleiding.nl.';
+        // Geen keuzestappen tonen die we toch niet kunnen invullen; alleen
+        // zeggen hoe de bezoeker ons dan wél bereikt.
+        st.onbereikbaar = true;
         teken();
       });
     }
@@ -624,7 +638,14 @@
       if (!c || c.aan === false) { host.remove(); return; }
       st.config = c;
       return herstel();
-    }).then(function () { teken(); }).catch(function () { /* knop blijft staan */ });
+    }).then(function () { teken(); }).catch(function () {
+      // Geen config betekent: we weten niet welke onderwerpen er zijn, of we
+      // bereikbaar zijn, of wat er al loopt. Een knop die dan tóch opent,
+      // zet de bezoeker in een keuzescherm dat nergens heen gaat. Liever
+      // helemaal geen knop dan een knop die doodloopt — de site heeft haar
+      // eigen contactpagina.
+      host.remove();
+    });
   }
 
   if (document.readyState === 'loading') {
