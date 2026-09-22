@@ -111,18 +111,39 @@ function tijdVan(t) {
  * `resultaat` volgt de answered-marker die de softphone al meestuurt:
  * 'answered' betekent dat het gesprek daadwerkelijk tot stand kwam.
  */
+/**
+ * 'NIET OPGENOMEN' IS EEN UITSPRAAK OVER DE LEAD. Alleen doen als het waar is.
+ *
+ * Braken wij af voordat er werd opgenomen, dan is dat een uitspraak over ONS,
+ * en zulke rijen telden mee in de pogingenteller, in het dagdoel van twee en in
+ * de archiveerregel. De softphone weet uit de SIP-staat wat er gebeurd is en
+ * stuurt dat mee als 'afgebroken_voor_opnemen'.
+ *
+ * GEEN DREMPEL OP DUUR. Bij drie van de negen korte calls in de historie volgt
+ * binnen minuten een echt gesprek — een grens op seconden zou dat herbelgedrag
+ * afpakken, en dat is dezelfde fout als de vervallen tien-secondengrens.
+ */
+export const AFGEBROKEN_VOOR_OPNEMEN = 'afgebroken_voor_opnemen';
+
 export function bouwCallPoging({ taakId, outcomeHint, durationSec = null, callLogId = null }) {
   if (!taakId) return null;
-  const gesproken = String(outcomeHint || '') === 'answered';
+  const hint = String(outcomeHint || '');
+  // Nooit verstuurd = niets gebeurd; die komt hier niet eens aan, maar mocht
+  // hij ooit doorlekken dan levert hij geen rij op in plaats van een verwijt.
+  if (hint === 'afgebroken_voor_invite') return null;
   const duur = Number.isFinite(durationSec) && durationSec >= 0 ? Math.round(durationSec) : null;
+  const resultaat = hint === 'answered' ? 'gesproken'
+    : hint === AFGEBROKEN_VOOR_OPNEMEN ? 'afgebroken voor opnemen'
+    : 'niet opgenomen';
   return {
     taak_id    : taakId,
     soort      : 'call',
     automatisch: true,
-    resultaat  : gesproken ? 'gesproken' : 'niet opgenomen',
+    resultaat,
     duur_sec   : duur,
     call_log_id: callLogId ? String(callLogId) : null,
-    // Een gebelde call is moeite van Dave, gesproken of niet.
+    // Een gebelde call is moeite, gesproken of niet — behalve als wij hem zelf
+    // wegdrukten voordat er iemand aan de lijn kwam.
     richting   : 'uit',
   };
 }
