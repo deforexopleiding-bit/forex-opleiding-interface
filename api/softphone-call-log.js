@@ -33,7 +33,10 @@ import { normaliseerLenient } from './_lib/phone-e164.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LINES = new Set(['nl','be']);
-const OUTCOMES = new Set(['answered','no_answer','busy','failed','local_cancel']);
+// 'afgebroken_voor_opnemen' erbij: wij hingen op voordat er werd opgenomen.
+// Dat is iets anders dan no_answer, en dat verschil hoort in de data te staan
+// in plaats van in een oordeel over de lead te verdwijnen.
+const OUTCOMES = new Set(['answered','no_answer','busy','failed','local_cancel','afgebroken_voor_opnemen']);
 const MAX_META_BYTES = 2000;
 
 // Bel-log accepteert elke telefoon-notatie die de SIP-flow accepteerde.
@@ -105,14 +108,41 @@ export default async function handler(req, res) {
     : null;
 
   try {
-    const { data, error } = await supabaseAdmin.from('call_log').insert({
+    const rij = (hint, extraMeta) => ({
       user_id: user.id, customer_id, lead_id,
       to_number, from_number, line,
       started_at: started_at.toISOString(),
       ended_at: ended_at ? ended_at.toISOString() : null,
-      duration_sec, outcome_hint, source: 'klx_softphone',
-      meta,
-    }).select('id').single();
+      duration_sec, outcome_hint: hint, source: 'klx_softphone',
+      meta: extraMeta ? { ...(meta || {}), ...extraMeta } : meta,
+    });
+
+    let { data, error } = await supabaseAdmin.from('call_log')
+      .insert(rij(outcome_hint)).select('id').single();
+
+    // ── WERKT MET ÉN ZONDER DE MIGRATIE ──────────────────────────────────
+    // `afgebroken_voor_opnemen` is nieuw. Staat er een CHECK op outcome_hint
+    // die hem nog niet kent, dan faalt de insert met 23514 — en dan zou het
+    // hele gesprek ongelogd blijven, inclusief de belpoging eronder. Dat is
+    // erger dan een iets minder precieze waarde.
+    //
+    // Terugval op 'local_cancel': die zegt ook 'wij hingen op' en is dus geen
+    // uitspraak over de lead. NOOIT 'no_answer' — dat is precies het verwijt
+    // dat we hiermee aan het weghalen zijn. De echte waarde gaat mee in meta,
+    // zodat er niets verloren gaat en de rijen na de migratie te herkennen
+    // zijn.
+    //
+    // De belpoging hieronder krijgt sowieso de ECHTE hint mee, niet de
+    // terugval: de opvolgmodule telt dus goed, of de migratie nu gedraaid is
+    // of niet. Draai docs/sql-migrations/2026-09-22-call-log-afgebroken-voor-opnemen.sql.
+    if (error && error.code === '23514' && outcome_hint === 'afgebroken_voor_opnemen') {
+      console.warn('[softphone-call-log] outcome_hint afgebroken_voor_opnemen wordt door de databank '
+        + 'geweigerd — migratie 2026-09-22-call-log-afgebroken-voor-opnemen.sql is nog niet gedraaid. '
+        + 'Gelogd als local_cancel; de echte waarde staat in meta.');
+      ({ data, error } = await supabaseAdmin.from('call_log')
+        .insert(rij('local_cancel', { werkelijke_outcome: 'afgebroken_voor_opnemen' }))
+        .select('id').single());
+    }
     if (error) throw new Error('call_log insert: ' + error.message);
     // Fase 2 DEEL A — belpoging in de opvolgmodule. Fail-soft en apart van de
     // insert hierboven: het gesprek is al gelogd, en een mislukte koppeling mag
