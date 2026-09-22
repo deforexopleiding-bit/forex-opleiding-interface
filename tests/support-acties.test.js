@@ -24,41 +24,88 @@ const stub = {
   gesprek: null,             // rij die supabase teruggeeft voor support_gesprekken
   config: null,              // rij die supabase teruggeeft voor joost_config
   actie: null,               // rij die supabase teruggeeft voor support_acties
-  patch: null,               // laatste .update()-payload, om te kunnen nakijken
+  patch: null,               // laatste .update()-payload die rijen raakte
+  geraakt: null,             // hoeveel rijen die laatste update raakte
+  schrijffout: null,         // zet dit om de SLOT-schrijfactie te laten falen
+  tussendoor: null,          // draait eenmalig vlak vóór de claim: de race
+  gedaan: 0,                 // hoe vaak er echt iets is uitgevoerd
+  berichten: [],             // wat er naar de klant geschreven is
 };
 
 mock.module('../api/_lib/dfo-lms-uitnodiging.js', {
   namedExports: {
-    stuurLmsUitnodiging: (...a) => stub.uitnodiging(...a),
+    stuurLmsUitnodiging: (...a) => { stub.gedaan++; return stub.uitnodiging(...a); },
     FOUT_PREFIX_HERSTELBAAR: 'UITNODIGING_MAIL_MISLUKT:',
     FOUT_PREFIX_ACTIE_VEREIST: 'UITNODIGING_WACHTWOORD_NIET_GEZET:',
   },
 });
 mock.module('../api/_lib/dfo-lms-student.js', {
-  namedExports: { provisionDfoLmsStudent: (...a) => stub.provision(...a) },
+  namedExports: { provisionDfoLmsStudent: (...a) => { stub.gedaan++; return stub.provision(...a); } },
 });
 mock.module('../api/_lib/notify.js', {
   namedExports: {
-    createNotification: (...a) => stub.notify(...a),
+    createNotification: (...a) => { stub.gedaan++; return stub.notify(...a); },
     resolveOntvangersVoorRecht: async () => ({ ok: true, userIds: [] }),
   },
 });
 
-// Minimale supabase-dubbel: genoeg voor .from().select().eq().maybeSingle()
-// en voor de .update().eq().select().maybeSingle() van het besluit-endpoint.
+// Supabase-dubbel dat de RIJ-GRENDEL echt nabootst. Een update met een
+// status-filter (de claim) raakt alleen een rij waarvan de stand klopt; anders
+// nul rijen. Zonder die getrouwheid zou de race-test niets bewijzen.
 mock.module('../api/supabase.js', {
   namedExports: {
     supabaseAdmin: {
       from(tabel) {
-        const rij = tabel === 'onboardings' ? stub.onboarding
-          : tabel === 'joost_config' ? stub.config
-          : tabel === 'support_acties' ? stub.actie
-          : stub.gesprek;
+        const filters = [];
+        let modus = 'select';
+        let patch = null;
+
+        const rijVoorTabel = () => (
+          tabel === 'onboardings' ? stub.onboarding
+            : tabel === 'joost_config' ? stub.config
+              : tabel === 'support_acties' ? stub.actie
+                : stub.gesprek
+        );
+        const statusFilter = () => filters.find((f) => f[1] === 'status') || null;
+        const voldoet = (rij) => {
+          const f = statusFilter();
+          if (!f) return true;
+          return f[0] === 'in' ? f[2].includes(rij?.status) : rij?.status === f[2];
+        };
+
+        async function resultaat(enkel) {
+          const leeg = enkel ? { data: null, error: null } : { data: [], error: null };
+          if (modus !== 'update') {
+            const rij = rijVoorTabel();
+            return enkel ? { data: rij, error: null } : { data: rij ? [rij] : [], error: null };
+          }
+
+          const isClaim = !!statusFilter();
+          // De race: iemand anders wijzigt de rij tussen het lezen en de claim.
+          if (isClaim && stub.tussendoor) {
+            const f = stub.tussendoor; stub.tussendoor = null; f();
+          }
+          if (!isClaim && stub.schrijffout) {
+            return { data: null, error: { message: stub.schrijffout } };
+          }
+
+          const rij = rijVoorTabel();
+          if (!rij || !voldoet(rij)) { stub.geraakt = 0; return leeg; }
+
+          Object.assign(rij, patch);
+          stub.patch = patch;
+          stub.geraakt = 1;
+          const kopie = { ...rij };
+          return enkel ? { data: kopie, error: null } : { data: [kopie], error: null };
+        }
+
         const ketting = {
           select: () => ketting,
-          eq: () => ketting,
-          update: (p) => { stub.patch = p; return ketting; },
-          maybeSingle: async () => ({ data: rij, error: null }),
+          eq: (k, v) => { filters.push(['eq', k, v]); return ketting; },
+          in: (k, v) => { filters.push(['in', k, v]); return ketting; },
+          update: (p) => { modus = 'update'; patch = p; return ketting; },
+          maybeSingle: () => resultaat(true),
+          then: (ok, nee) => resultaat(false).then(ok, nee),
         };
         return ketting;
       },
@@ -78,7 +125,9 @@ mock.module('../api/_lib/support-staff.js', {
   },
 });
 mock.module('../api/_lib/support-sessie.js', {
-  namedExports: { schrijfBericht: async () => ({ ok: true }) },
+  namedExports: {
+    schrijfBericht: async (b) => { stub.berichten.push(b); return { ok: true }; },
+  },
 });
 
 const { voerActieUit, isUitvoerbaar } = await import('../api/_lib/support-actie-uitvoeren.js');
@@ -93,6 +142,11 @@ function herstel() {
   stub.config = null;
   stub.actie = null;
   stub.patch = null;
+  stub.geraakt = null;
+  stub.schrijffout = null;
+  stub.tussendoor = null;
+  stub.gedaan = 0;
+  stub.berichten = [];
 }
 
 const ACTIE = (soort, payload = {}) => ({
@@ -236,17 +290,26 @@ test('de klant hoort alleen iets bij een bevestigde uitvoering', () => {
     'er mag geen bericht naar de klant bij een mislukte of onzekere uitvoering');
 });
 
-
-/* ── "Toch gedaan": het herstelpad na een mislukte uitvoering ─────────── */
+/* ── Het besluit-endpoint: claim → uitvoeren → vastleggen ─────────────── */
 
 const ACTIE_ID = '11111111-1111-4111-8111-111111111111';
 
-/** Roept het besluit-endpoint aan en geeft { code, body } terug. */
-async function besluit(status, keuze) {
+/** Zet een actie klaar in de gegeven stand. */
+function actieOp(status, soort = 'MENTOR_CONTACT') {
   stub.actie = {
-    id: ACTIE_ID, gesprek_id: 'g1', soort: 'MENTOR_CONTACT',
-    omschrijving: 'mentor laten bellen', payload: {}, status,
+    id: ACTIE_ID, gesprek_id: 'g1', soort, status,
+    omschrijving: 'mentor laten bellen', payload: { onboarding_id: 'o1' },
   };
+}
+
+/** Zet de S2-vlag aan en maak MENTOR_CONTACT uitvoerbaar. */
+function s2Aan() {
+  stub.config = { feature_flags: { s2_acties_uitvoeren: true } };
+  stub.onboarding = { mentor_user_id: 'm1' };
+  stub.notify = async () => ({ ok: true, count: 1 });
+}
+
+async function besluit(keuze) {
   const res = { code: null, body: null };
   res.status = (c) => { res.code = c; return res; };
   res.json = (b) => { res.body = b; return res; };
@@ -258,37 +321,109 @@ async function besluit(status, keuze) {
   return res;
 }
 
-test('een MISLUKTE actie mag alsnog op gedaan — anders is "Toch gedaan" een dode knop', async () => {
-  herstel();
-  const res = await besluit('mislukt', 'uitgevoerd');
+test('de gelukkige weg: claim, uitvoeren, vastleggen', async () => {
+  herstel(); actieOp('voorgesteld'); s2Aan();
+  const res = await besluit('goedkeuren');
   assert.equal(res.code, 200);
-  assert.equal(stub.patch.status, 'uitgevoerd');
-  assert.ok(stub.patch.uitgevoerd_op, 'het tijdstip hoort vastgelegd te worden');
+  assert.equal(res.body.uitvoering.status, 'uitgevoerd');
+  assert.equal(res.body.uitvoering.vastgelegd, true);
+  assert.equal(stub.actie.status, 'uitgevoerd');
+  assert.equal(stub.gedaan, 1);
+  assert.equal(stub.berichten.length, 1, 'de klant hoort het pas na een bevestigde uitvoering');
+});
+
+test('VERLOREN RACE: wie de claim verliest voert NIETS uit', async () => {
+  // De actie staat op 'voorgesteld' als het endpoint 'm leest, maar een
+  // collega keurt 'm goed vlak voordat onze claim landt. Zonder de grendel in
+  // de query zouden we hier de handeling een tweede keer uitvoeren.
+  herstel(); actieOp('voorgesteld'); s2Aan();
+  stub.tussendoor = () => { stub.actie.status = 'goedgekeurd'; };
+
+  const res = await besluit('goedkeuren');
+  assert.equal(res.code, 409);
+  assert.equal(stub.geraakt, 0, 'de claim hoort nul rijen te raken');
+  assert.equal(stub.gedaan, 0, 'er mag NIETS uitgevoerd zijn');
+  assert.equal(stub.berichten.length, 0, 'en de klant hoort niets');
+  assert.match(res.body.error, /inmiddels op goedgekeurd/);
+});
+
+test('VERLOREN RACE bij "Gedaan": de klant krijgt geen tweede bericht', async () => {
+  herstel(); actieOp('goedgekeurd');
+  stub.tussendoor = () => { stub.actie.status = 'uitgevoerd'; };
+
+  const res = await besluit('uitgevoerd');
+  assert.equal(res.code, 409);
+  assert.equal(stub.berichten.length, 0);
+});
+
+test('een tweede klik op een al uitgevoerde actie voert niets uit', async () => {
+  herstel(); actieOp('uitgevoerd'); s2Aan();
+  const res = await besluit('uitgevoerd');
+  assert.equal(res.code, 409);
+  assert.equal(stub.gedaan, 0);
+  assert.equal(stub.berichten.length, 0);
+});
+
+test('GEFAALDE SLOTSCHRIJFACTIE: eerlijk melden, niet stilletjes doorgaan', async () => {
+  // De handeling is gebeurd, het vastleggen niet. Dat mag geen 200 opleveren
+  // en al helemaal geen bericht aan de klant — de collega moet weten dat hij
+  // moet controleren en met de hand moet afronden.
+  herstel(); actieOp('voorgesteld'); s2Aan();
+  stub.schrijffout = 'verbinding weg';
+
+  const res = await besluit('goedkeuren');
+  assert.equal(res.code, 500);
+  assert.equal(stub.gedaan, 1, 'de handeling is wél uitgevoerd');
+  assert.equal(res.body.uitvoering.vastgelegd, false);
+  assert.match(res.body.error, /WÉL uitgevoerd/);
+  assert.match(res.body.error, /op gedaan/, 'zeg wat de collega nu moet doen');
+  assert.equal(stub.berichten.length, 0, 'geen bericht: dat komt bij "Gedaan"');
+  assert.equal(stub.actie.status, 'goedgekeurd', 'de actie blijft in de S1-toestand staan');
+});
+
+test('een MISLUKTE actie mag alsnog op gedaan — anders is "Toch gedaan" een dode knop', async () => {
+  herstel(); actieOp('mislukt');
+  const res = await besluit('uitgevoerd');
+  assert.equal(res.code, 200);
+  assert.equal(stub.actie.status, 'uitgevoerd');
+  assert.equal(stub.berichten.length, 1, 'de klant hoort nu alsnog dat het geregeld is');
 });
 
 test('een goedgekeurde actie op gedaan zetten blijft werken', async () => {
-  herstel();
-  const res = await besluit('goedgekeurd', 'uitgevoerd');
+  herstel(); actieOp('goedgekeurd');
+  const res = await besluit('uitgevoerd');
   assert.equal(res.code, 200);
-  assert.equal(stub.patch.status, 'uitgevoerd');
+  assert.equal(stub.actie.status, 'uitgevoerd');
 });
 
-test('een tweede klik op een al uitgevoerde actie geeft 409', async () => {
-  // Anders krijgt de klant een tweede "we hebben dit voor je gedaan".
-  herstel();
-  const res = await besluit('uitgevoerd', 'uitgevoerd');
-  assert.equal(res.code, 409);
-  assert.equal(stub.patch, null, 'er mag dan niets weggeschreven worden');
+test('staat de vlag uit, dan blijft het bij goedgekeurd en gebeurt er niets', async () => {
+  herstel(); actieOp('voorgesteld');
+  stub.config = { feature_flags: {} };
+  const res = await besluit('goedkeuren');
+  assert.equal(res.code, 200);
+  assert.equal(res.body.uitvoering, null);
+  assert.equal(stub.actie.status, 'goedgekeurd');
+  assert.equal(stub.gedaan, 0);
+  assert.equal(stub.berichten.length, 0);
 });
 
-test('de andere besluiten blijven ongemoeid: alleen vanuit voorgesteld', async () => {
+test('alleen vooruit: de verboden overgangen geven 409 zonder iets te doen', async () => {
   for (const [status, keuze] of [
     ['mislukt', 'goedkeuren'], ['mislukt', 'afwijzen'],
     ['goedgekeurd', 'goedkeuren'], ['afgewezen', 'uitgevoerd'],
-    ['voorgesteld', 'uitgevoerd'],
+    ['voorgesteld', 'uitgevoerd'], ['uitgevoerd', 'goedkeuren'],
   ]) {
-    herstel();
-    const res = await besluit(status, keuze);
+    herstel(); actieOp(status); s2Aan();
+    const res = await besluit(keuze);
     assert.equal(res.code, 409, `${status} + ${keuze} hoort 409 te geven`);
+    assert.equal(stub.actie.status, status, 'de stand mag niet wijzigen');
+    assert.equal(stub.gedaan, 0);
   }
+});
+
+test('afwijzen kan ook maar één keer', async () => {
+  herstel(); actieOp('voorgesteld');
+  assert.equal((await besluit('afwijzen')).code, 200);
+  assert.equal(stub.actie.status, 'afgewezen');
+  assert.equal((await besluit('afwijzen')).code, 409);
 });
