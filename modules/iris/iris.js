@@ -1236,7 +1236,11 @@
     </div>`;
   }
 
-  window.DFO.VIEWS['iris/'] = irisView;
+  // Registratie. Twee dingen zijn nodig en dit is er maar één van: de schil kent
+// de module pas als er ook een regel met `id: 'iris'` in MODS staat
+// (app-shell.js). Zonder die regel keert goMod() stil terug en blijft het
+// Dashboard staan. Zie tests/iris-schil-registratie.test.js.
+window.DFO.VIEWS['iris/'] = irisView;
   if (typeof window.KV_V2_ADD === 'function') window.KV_V2_ADD('iris');
   else (window.KV_V2_PENDING = window.KV_V2_PENDING || []).push('iris');
   console.debug('[iris] v=1 — Post leest mee. Bereikbaar via ?v2preview=iris tot de vlag omgaat.');

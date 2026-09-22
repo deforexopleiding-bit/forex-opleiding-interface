@@ -166,7 +166,7 @@
 
   <!-- ═══ APP-SHELL SCRIPTS (0-B2 + 0-D roles-helper) ═══ -->
   <script src="../shared/design-system/icons.js?v=1b1"></script>
-  <script src="../shared/design-system/app-shell.js?v=1d8"></script>
+  <script src="../shared/design-system/app-shell.js?v=1d9"></script>
   <script src="../shared/design-system/roles.js?v=1b1"></script>
   <script src="../shared/klx-softphone.js?v=1df"></script>
 
@@ -213,8 +213,13 @@
   <!-- Iris. Eigen map (modules/iris/) zoals afgesproken, maar geregistreerd als
        schil-weergave zodat navigatie, rechten en uiterlijk uit de schil komen.
        Staat NIET in V2_ACTIVE_ALLOWLIST: bereikbaar via ?v2preview=iris tot de
-       weergave af is. Zie docs/iris/01-ontwerp.md, beslissing B1. -->
-  <script src="../iris/iris.js?v=5"></script>
+       weergave af is. Zie docs/iris/01-ontwerp.md, beslissing B1.
+
+       LET OP: dit script-tag alleen is niet genoeg. De module heeft ook een
+       regel in MODS in app-shell.js nodig (`id: 'iris', preview: true`), anders
+       geeft goMod() een stille return en toont de schil Dashboard. Bewaakt door
+       tests/iris-schil-registratie.test.js. -->
+  <script src="../iris/iris.js?v=6"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
   <script type="module" src="klanten-v2.js?v=1f3"></script>
