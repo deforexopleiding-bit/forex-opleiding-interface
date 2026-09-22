@@ -12,12 +12,19 @@
 // vangt élke onbekende tab. Een verkeerde waarde in `S.tab` gaf dus niet een
 // leeg scherm maar een uitzondering.
 //
-// Dit is het soort fout dat geen enkele test in dit repo zou vangen, omdat we
-// het scherm niet in een browser draaien. Een statische controle kan het wél:
-// loop alle aanroepen na en eis dat elke naam ergens in het bestand
-// gedefinieerd staat. Dat is geen typecontrole, maar het vangt precies deze
-// klasse — een renderer die nooit geschreven is, of eentje die bij een
-// hernoeming achterbleef.
+// Een statische controle vangt een deel hiervan: loop alle aanroepen na en eis
+// dat elke naam ergens in het bestand gedefinieerd staat.
+//
+// MAAR NIET ALLES. Deze controle zoekt naar `naam(`, en `haalDroogtest` werd
+// aangeroepen als `queueMicrotask(haalDroogtest)` — een verwijzing zónder
+// haakjes. De controle keek dus precies langs het geval heen dat hij moest
+// vangen, en Maxim vond het op het scherm in plaats van wij in de testronde.
+//
+// Daarom staat het echte vangnet sinds die derde keer in
+// tests/iris-tabbladen-renderen.test.js: dat draait iris.js in een nagebootst
+// venster en laat élk tabblad zichzelf tekenen. Wat daar stuk is, valt om —
+// of het nu een aanroep, een verwijzing of een tikfout is. Dit bestand blijft
+// als goedkope voorcontrole met betere foutmeldingen.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

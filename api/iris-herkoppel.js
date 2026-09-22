@@ -29,7 +29,7 @@
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
-import { zoekKlant } from './_lib/iris/koppel.js';
+import { haalKlantenlijst, zoekKlantIn } from './_lib/iris/koppel.js';
 
 /** Hoeveel contacten we per aanroep aandurven. Vercel kapt af op 30 seconden. */
 export const STANDAARD_MAX = 500;
@@ -40,7 +40,7 @@ export const STANDAARD_MAX = 500;
  * Zuivere functie, los van de databank, zodat de regels na te rekenen zijn.
  * `null` betekent: laat staan.
  *
- * @param {{id: string, customer_id: string|null, koppelstatus: string, weergavenaam: string|null}} contact
+ * @param {{id: string, customer_id: string|null, koppelstatus: string, koppel_reden: string|null, weergavenaam: string|null}} contact
  * @param {{gelezen: boolean, status: string, id: string|null, reden: string, kandidaten?: Array}} uitkomst
  * @returns {null|object}
  */
@@ -56,7 +56,13 @@ export function bepaalWijziging(contact, uitkomst) {
 
   const nieuweKlant = uitkomst.status === 'gekoppeld' ? (uitkomst.id || null) : null;
   const zelfdeStatus = String(uitkomst.status) === String(contact.koppelstatus);
-  if (!nieuweKlant && zelfdeStatus) return null;   // er verandert niets
+  // De REDEN telt mee als verschil. Blijft de stand 'onbekend' maar staat er
+  // nog een oude foutmelding bij ("klanten niet gelezen: column
+  // customers.name does not exist"), dan hoort die vervangen te worden door
+  // wat er nú aan de hand is. Een reden die een verholpen fout blijft noemen,
+  // stuurt de volgende lezer een uur de verkeerde kant op.
+  const zelfdeReden = String(uitkomst.reden || '') === String(contact.koppel_reden || '');
+  if (!nieuweKlant && zelfdeStatus && zelfdeReden) return null;   // er verandert niets
 
   const wijziging = {
     customer_id: nieuweKlant,
@@ -113,11 +119,28 @@ export default async function handler(req, res) {
 
     const { data: contacten, error } = await supabaseAdmin
       .from('iris_contacten')
-      .select('id, customer_id, emails, telefoons, koppelstatus, weergavenaam')
+      .select('id, customer_id, emails, telefoons, koppelstatus, koppel_reden, weergavenaam')
       .is('customer_id', null)
       .order('aangemaakt_op', { ascending: true })
       .limit(max);
     if (error) throw new Error('contacten: ' + error.message);
+
+    // HET KLANTBESTAND ÉÉN KEER. Per contact opnieuw ophalen zou bij 254
+    // contacten 254 volledige opvragingen zijn; Vercel kapt af op dertig
+    // seconden en dan ziet degene die op de knop drukte helemaal niets — ook
+    // niet wat er wél gelukt was.
+    const klanten = await haalKlantenlijst(supabaseAdmin);
+    if (!klanten.gelezen) {
+      // Geen enkele beoordeling is nu iets waard. Niets schrijven en het
+      // eerlijk zeggen, in plaats van 254 rijen op "onbekend" bevestigen.
+      return res.status(503).json({
+        error: 'Klantbestand niet gelezen',
+        uitleg: klanten.reden || 'onbekend',
+        voor,
+        na: voor,
+        bekeken: 0, gewijzigd: 0, mislukt: 0,
+      });
+    }
 
     const rijen = contacten || [];
     let bekeken = 0;
@@ -132,7 +155,10 @@ export default async function handler(req, res) {
       // geen ronde.
       try {
         bekeken++;
-        const uitkomst = await zoekKlant(supabaseAdmin, {
+        // Eerste adres en eerste nummer. Een contact met twee adressen waarvan
+        // alleen het tweede matcht, blijft hier onbekend — zeldzaam, en beter
+        // dan gokken welk van de twee de echte is.
+        const uitkomst = zoekKlantIn(klanten.rijen, {
           email: (c.emails || [])[0] || null,
           telefoon: (c.telefoons || [])[0] || null,
         });

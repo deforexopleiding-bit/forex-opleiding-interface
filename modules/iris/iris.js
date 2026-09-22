@@ -286,6 +286,33 @@
     }
   }
 
+  /**
+   * De droogtest: wat zou Iris de afgelopen zeven dagen gedaan hebben?
+   *
+   * Hoort bij het Instellingen-tabblad, naast de autonomie-schakelaars — want
+   * dát is het moment waarop je wilt weten wat er uit zou komen voordat je er
+   * eentje omzet.
+   *
+   * Faalt het ophalen, dan verdwijnt alleen dit blok en blijven de
+   * schakelaars staan. Ze zijn niet van elkaar afhankelijk: je mag een
+   * categorie best op 'uit' zetten zonder te weten wat de droogtest zegt.
+   */
+  async function haalDroogtest() {
+    const st = S.droogtest;
+    if (st.bezig) return;
+    st.bezig = true;
+    try {
+      st.data = await haal('/api/iris-droogtest?dagen=7');
+      st.fout = null;
+    } catch (e) {
+      st.fout = e?.message || 'Droogtest niet opgehaald';
+    } finally {
+      st.bezig = false;
+      st.opgehaald = true;
+      hertekenen();
+    }
+  }
+
   /* ── Poll ─────────────────────────────────────────────────────────────── */
 
   function startPoll() {
