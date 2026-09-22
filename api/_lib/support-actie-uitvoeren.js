@@ -189,18 +189,32 @@ async function mentorContact(actie) {
     priority: 'high',
   });
 
-  if (!melding?.ok) {
+  // count:0 telt NIET als succes. createNotification() geeft `ok:true` ook
+  // terug wanneer het niets heeft weggeschreven — bij een lege ontvangerslijst
+  // of wanneer de dedup-tak de melding overslaat. Dat is dezelfde vorm als de
+  // LMS-grendel: geslaagd van buiten, niets gebeurd van binnen. Zouden we daar
+  // 'uitgevoerd' van maken, dan hoort de student dat zijn mentor is ingelicht
+  // terwijl er geen melding bestaat. Alleen een aantoonbaar weggeschreven rij
+  // telt.
+  if (!melding?.ok || !(melding.count > 0)) {
     return {
       status: 'mislukt',
-      resultaat: { reden: 'notificatie_mislukt', fout: melding?.error || null },
+      resultaat: {
+        reden: melding?.ok ? 'notificatie_leeg' : 'notificatie_mislukt',
+        count: melding?.count ?? null,
+        fout: melding?.error || null,
+      },
       klantBericht: null,
-      uitleg: 'De melding naar de mentor kon niet aangemaakt worden.',
+      uitleg: melding?.ok
+        ? 'Er is geen melding naar de mentor weggeschreven — mogelijk stond er al een'
+          + ' identieke melding klaar. Licht de mentor zelf even in.'
+        : 'De melding naar de mentor kon niet aangemaakt worden.',
     };
   }
 
   return {
     status: 'uitgevoerd',
-    resultaat: { mentor_user_id: mentorUserId },
+    resultaat: { mentor_user_id: mentorUserId, count: melding.count },
     klantBericht: 'Ik heb je mentor op de hoogte gebracht; die neemt contact met je op.',
     uitleg: null,
   };

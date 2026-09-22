@@ -70,8 +70,13 @@ export default async function handler(req, res) {
     if (besluit !== 'uitgevoerd' && actie.status !== 'voorgesteld') {
       return res.status(409).json({ error: `Deze actie staat al op ${actie.status}.` });
     }
-    if (besluit === 'uitgevoerd' && actie.status !== 'goedgekeurd') {
-      return res.status(409).json({ error: 'Alleen een goedgekeurde actie kan op uitgevoerd.' });
+    // Ook een MISLUKTE actie mag alsnog op uitgevoerd: de collega heeft het
+    // dan met de hand gedaan — precies waar de knop "Toch gedaan" voor is.
+    // Dat is het herstelpad bij de LMS-grendel. Een actie die al op
+    // 'uitgevoerd' (of 'afgewezen', of nog 'voorgesteld') staat mag dat niet,
+    // zodat een tweede klik de klant geen tweede bericht bezorgt.
+    if (besluit === 'uitgevoerd' && !['goedgekeurd', 'mislukt'].includes(actie.status)) {
+      return res.status(409).json({ error: `Alleen een goedgekeurde of mislukte actie kan op uitgevoerd (deze staat op ${actie.status}).` });
     }
 
     const patch = { status: besluit, besluit_reden: reden || null };

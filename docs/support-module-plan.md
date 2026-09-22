@@ -133,7 +133,7 @@ doet.
 | Soort | Uitvoerbaar | Toelichting |
 |---|---|---|
 | `LMS_PROVISIONING_OPNIEUW` | ja | `provisionDfoLmsStudent()`; drie lagen idempotentie |
-| `MENTOR_CONTACT` | ja | notificatie naar `onboardings.mentor_user_id` |
+| `MENTOR_CONTACT` | ja | notificatie naar `onboardings.mentor_user_id`; alleen een weggeschreven rij telt (`count > 0`) |
 | `LMS_UITNODIGING_OPNIEUW` | **deels** | zie de grendel hieronder |
 | `BETALINGSAFSPRAAK` | nee | raakt facturen en abonnementen in TeamLeader; blijft mensenwerk |
 | `HANDMATIG` | nee | vrije omschrijving, per definitie handwerk |
@@ -156,6 +156,39 @@ er niets verstuurd, staat dat veld leeg, en werkt opnieuw versturen wél.
 `POST /api/admin/studenten/<id>/uitnodiging/` (bijvoorbeeld `{ opnieuw: true }`),
 zodat het CRM een kapotte uitnodiging zelf kan herstellen. Zodra die er is,
 is dat één tak in `support-actie-uitvoeren.js`.
+
+### Twee vormen van "geslaagd maar er is niets gebeurd"
+
+De grendel is niet het enige antwoord dat er van buiten uitziet als succes
+terwijl er niets is weggeschreven. `createNotification()` kent dezelfde vorm:
+die geeft `ok: true` mét `count: 0` terug bij een lege ontvangerslijst of
+wanneer de dedup-tak de melding overslaat. `MENTOR_CONTACT` toetst daarom op
+`ok && count > 0` en niet alleen op `ok`; bij `count: 0` wordt het `mislukt`
+met reden `notificatie_leeg`. Zonder die toets hoorde de student dat zijn
+mentor is ingelicht terwijl er geen melding bestaat.
+
+Wie hier een derde soort aan toevoegt, stelt dus niet de vraag "gaf de helper
+een fout?" maar "heeft het onderliggende systeem bevestigd dát het iets
+gedaan heeft?" — dat zijn niet dezelfde vraag.
+
+### Het herstelpad na een mislukking
+
+Een `mislukt` actie is een eindpunt voor het systeem, niet voor de collega.
+De detailkaart toont de reden uit `besluit_reden` en een knop **Toch gedaan**,
+voor precies het geval van de grendel: iemand regelt het met de hand aan
+LMS-kant en zet de actie daarna op gedaan. De klant krijgt dan alsnog het
+bericht dat het geregeld is.
+
+Daarom staat `api/support-actie-besluit.js` de overgang naar `uitgevoerd` toe
+vanuit **`goedgekeurd` én `mislukt`**. De andere overgangen blijven strak:
+
+| Van | Naar | |
+|---|---|---|
+| `voorgesteld` | `goedgekeurd` / `afgewezen` | ja |
+| `goedgekeurd` | `uitgevoerd` | ja — de knop "Gedaan" uit S1 |
+| `mislukt` | `uitgevoerd` | ja — de knop "Toch gedaan" |
+| `uitgevoerd` | wat dan ook | **409** — anders krijgt de klant een tweede bericht |
+| `afgewezen` / `voorgesteld` | `uitgevoerd` | **409** — er is niets goedgekeurd om te doen |
 
 ## 8. Benodigde omgevingsvariabelen
 
