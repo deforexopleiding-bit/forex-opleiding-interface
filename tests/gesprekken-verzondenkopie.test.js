@@ -71,11 +71,17 @@ test('zonder Message-ID blijft het veld weg in plaats van leeg', () => {
 test('de kopie is hetzelfde bericht: opmaak, kopieontvanger en bijlage blijven', async () => {
   // Een kopie zonder de bijlage is de gevaarlijkste soort: je ziet in
   // Verzonden dat je geantwoord hebt en neemt aan dat het contract meeging.
+  //
+  // De bijlage komt hier in de vorm die send-email.js bouwt: een Buffer met
+  // encoding 'base64' ernaast. Dat die twee samen goed gaan is niet vanzelf —
+  // vandaar dat de test de BYTES terugrekent en niet alleen de bestandsnaam
+  // opzoekt. Een bijlage van nul bytes heeft ook een keurige naam.
+  const inhoud = Buffer.from('%PDF-1.4 de echte inhoud van het contract', 'utf8');
   const rauw = await bouwRauweKopie(kopieOpdracht({
     ...OPDRACHT,
     cc: 'collega@deforexopleiding.nl',
     html: '<p>Dag Jan</p>',
-    attachments: [{ filename: 'factuur.pdf', content: Buffer.from('%PDF-1.4'), contentType: 'application/pdf' }],
+    attachments: [{ filename: 'factuur.pdf', contentType: 'application/pdf', content: inhoud, encoding: 'base64' }],
   }, { messageId: '<abc@deforexopleiding.nl>' }));
 
   assert.ok(Buffer.isBuffer(rauw), 'er moeten bytes uitkomen');
@@ -86,6 +92,11 @@ test('de kopie is hetzelfde bericht: opmaak, kopieontvanger en bijlage blijven',
   assert.ok(s.includes('<p>Dag Jan</p>'), 'de opmaak hoort in de kopie');
   assert.match(s, /filename=.?factuur\.pdf/, 'de bijlage hoort in de kopie');
   assert.match(s, /application\/pdf/);
+
+  // En nu de inhoud zelf: pak het deel na de bijlage-kopregels en reken terug.
+  const na = s.slice(s.indexOf('filename=factuur.pdf'));
+  const body = na.slice(na.indexOf('\r\n\r\n') + 4).split('\r\n--')[0].replace(/\r\n/g, '');
+  assert.ok(Buffer.from(body, 'base64').equals(inhoud), 'de bijlage-inhoud hoort byte voor byte gelijk te zijn');
 });
 
 test('een onderwerp met accenten blijft leesbaar', async () => {
