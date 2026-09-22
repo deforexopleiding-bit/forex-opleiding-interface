@@ -65,22 +65,19 @@ test('_gesprekkenV2 eist én de vlag én het geladen hulpscript', () => {
   assert.match(body, /window\.GESPREKKEN_V2/);
 });
 
-test('elk gebruik van het hulpscript zit achter _gesprekkenV2()', () => {
-  // Dit is de byte-identiek-belofte, mechanisch nagelopen: window.GESPREKKEN_V2
-  // mag in dit bestand alleen voorkomen op een regel die ook de poort noemt, of
-  // binnen een uitdrukking die er al doorheen moest.
-  const regels = lees(SCHERM).split('\n');
-  const verdacht = [];
-  regels.forEach((r, i) => {
-    if (!r.includes('window.GESPREKKEN_V2')) return;
-    if (r.includes('_gesprekkenV2()')) return;           // zelfde regel: de poort staat ervoor
-    if (/^\s*(\/\/|\*)/.test(r)) return;                 // commentaar
-    // Meerregelige uitdrukking: kijk of de poort binnen drie regels ervóór staat.
-    const venster = regels.slice(Math.max(0, i - 3), i).join('\n');
-    if (venster.includes('_gesprekkenV2()')) return;
-    verdacht.push(`${i + 1}: ${r.trim()}`);
-  });
-  assert.deepEqual(verdacht, [], 'gebruik van GESPREKKEN_V2 buiten de poort:\n  ' + verdacht.join('\n  '));
+test('het hulpscript wordt nergens buiten de poort om aangeroepen', () => {
+  // Dit is de byte-identiek-belofte, mechanisch nagelopen. In plaats van te
+  // gokken hoe ver een aanroep van zijn poort af mag staan, loopt álles via
+  // _gv2(): die geeft het hulpscript terug óf niets. Daardoor hoort
+  // `window.GESPREKKEN_V2` in dit bestand op precies twee plekken te staan —
+  // de poort zelf en _gv2() — en is een derde vindplaats per definitie een
+  // aanroep die de vlag omzeilt.
+  const code = lees(SCHERM)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+  const treffers = (code.match(/window\.GESPREKKEN_V2/g) || []).length;
+  assert.equal(treffers, 3, 'verwacht: 2× in _gesprekkenV2() + 1× in _gv2()');
+  assert.match(code, /function _gv2\(\) \{\s*return _gesprekkenV2\(\) \? window\.GESPREKKEN_V2 : null;/);
 });
 
 test('de oude 24u-badge staat er nog, als terugval', () => {
@@ -106,4 +103,51 @@ test('beide scripts dragen een v-nummer', () => {
   const html = lees(INDEX);
   assert.match(html, /shared\/gesprekken-v2\.js\?v=\d+/);
   assert.match(html, /views\/wanbetalers-v2\.js\?v=\d+/);
+});
+
+/* ── G5-deels · de focus-standen ──────────────────────────────────────── */
+
+test('de focus-stand begint uit', () => {
+  const b = lees(SCHERM);
+  assert.match(b, /focusFilter:\s*'geen',/, "een andere beginstand filtert de lijst zonder dat iemand erom vroeg");
+});
+
+test('de focus-stand werkt alleen achter de vlag', () => {
+  const b = lees(SCHERM);
+  // Zonder de poort zou een oude bladwijzer of een blijven-hangen waarde de
+  // lijst ook met de vlag uit kunnen versmallen.
+  // `gv` is null zodra de vlag uit staat (of wanneer de teller expres zonder
+  // stand rekent), en dan blijft de stand 'geen'.
+  assert.match(b, /const gv = negeerFocus \? null : _gv2\(\);/);
+  assert.match(b, /const focusModus = gv \? \(_ui\.inbox\.focusFilter \|\| 'geen'\) : 'geen';/);
+});
+
+test('het zoeken gebeurt vóór de wanbetaler-poort', () => {
+  // Anders doet een zoekterm niets in de stand "niet gekoppeld": die stand
+  // kijkt naar de volledige lijst, en die was dan nog ongefilterd.
+  const b = lees(SCHERM);
+  const fn = b.slice(b.indexOf('function _selectVisibleInboxItems'));
+  const body = fn.slice(0, fn.indexOf('\n  }') + 4);
+  const zoek = body.indexOf('_ui.inbox.searchQ');
+  const poort = body.indexOf("'is_debtor' in c");
+  assert.ok(zoek > -1 && poort > -1);
+  assert.ok(zoek < poort, 'de zoekfilter staat nog ná de wanbetaler-poort');
+});
+
+test('nog eens klikken zet de stand weer uit', () => {
+  // Een filter waar je alleen uit komt door een andere knop te zoeken, blijft
+  // per ongeluk aan staan — en dan lijkt de lijst gewoon leeg.
+  const b = lees(SCHERM);
+  assert.match(b, /_ui\.inbox\.focusFilter === gewenst\) \? 'geen' : gewenst/);
+});
+
+test('de tellers tellen zichzelf niet mee', () => {
+  const b = lees(SCHERM);
+  assert.match(b, /_selectVisibleInboxItems\(alle, \{ negeerFocus: true \}\)/);
+});
+
+test('de lege-lijst-tekst hoort bij de gekozen stand', () => {
+  const b = lees(SCHERM);
+  assert.match(b, /Geen gesprekken zonder klantkoppeling\./);
+  assert.match(b, /Geen wanbetaler-gesprekken in dit filter\./, 'de oude tekst hoort te blijven voor de gewone lijst');
 });

@@ -151,3 +151,62 @@ test('alleen uitgaande WhatsApp krijgt een verzendstatus', () => {
   assert.equal(G.toontVerzendStand({ channel: 'email', direction: 'outbound' }), false, 'mail heeft geen Meta-status');
   assert.equal(G.toontVerzendStand(null), false);
 });
+
+/* ── G5-deels · de twee standen die nu al kunnen ──────────────────────── */
+
+// De lijst zoals het scherm 'em kent: `alle` is alles wat het endpoint gaf,
+// `zichtbaar` is wat de wanbetalerslijst normaal toont (klant met open
+// facturen). Een gesprek zonder klant staat wel in `alle` en niet in
+// `zichtbaar` — precies de reden dat zulke gesprekken ongezien blijven liggen.
+const ALLE = [
+  { id: 'a', customer_id: 'k1', last_inbound_at: geleden(1 * UUR) },   // ruim open
+  { id: 'b', customer_id: 'k2', last_inbound_at: geleden(23 * UUR) },  // nog 1u → bijna dicht
+  { id: 'c', customer_id: 'k3', last_inbound_at: geleden(30 * UUR) },  // verlopen
+  { id: 'd', customer_id: 'k4', last_inbound_at: null },               // nooit iets binnen
+  { id: 'e', customer_id: null, last_inbound_at: geleden(2 * UUR) },   // geen klant
+  { id: 'f', customer_id: null, last_inbound_at: geleden(23.5 * UUR) },// geen klant, bijna dicht
+];
+const ZICHTBAAR = ALLE.filter((c) => c.customer_id);
+
+test('een onbekende stand valt terug op "geen"', () => {
+  for (const ruw of [null, undefined, '', 'onzin', 'NIET_GEKOPPELD ']) {
+    const uit = G.leesFocus(ruw);
+    assert.ok(G.FOCUS_MODI.includes(uit));
+  }
+  assert.equal(G.leesFocus('onzin'), 'geen');
+  assert.equal(G.leesFocus(' NIET_GEKOPPELD '), 'niet_gekoppeld', 'hoofdletters horen te werken');
+});
+
+test('"geen" geeft letterlijk de lijst terug die er al was', () => {
+  const uit = G.focusFilter(ALLE, ZICHTBAAR, 'geen', NU);
+  assert.equal(uit, ZICHTBAAR, 'niet dezelfde array — dan is er onderweg iets gekopieerd of gesorteerd');
+});
+
+test('"venster bijna dicht" versmalt de zichtbare lijst', () => {
+  const uit = G.focusFilter(ALLE, ZICHTBAAR, 'venster_bijna_dicht', NU);
+  assert.deepEqual(uit.map((c) => c.id), ['b']);
+  // 'a' heeft nog 23 uur, 'c' is verlopen, 'd' heeft geen venster, en 'f'
+  // staat niet in de zichtbare lijst — die hoort hier dus ook niet op te duiken.
+});
+
+test('"niet gekoppeld" kijkt juist buiten de zichtbare lijst', () => {
+  // Dit is het punt van deze stand. Zou hij binnen ZICHTBAAR zoeken, dan was
+  // het antwoord altijd leeg (geen klant = geen open facturen = niet zichtbaar)
+  // en zag het eruit alsof er niets aan de hand was.
+  const uit = G.focusFilter(ALLE, ZICHTBAAR, 'niet_gekoppeld', NU);
+  assert.deepEqual(uit.map((c) => c.id), ['e', 'f']);
+});
+
+test('de tellers komen uit dezelfde functie als de lijst', () => {
+  const tel = G.focusTelling(ALLE, ZICHTBAAR, NU);
+  assert.equal(tel.venster_bijna_dicht, G.focusFilter(ALLE, ZICHTBAAR, 'venster_bijna_dicht', NU).length);
+  assert.equal(tel.niet_gekoppeld, G.focusFilter(ALLE, ZICHTBAAR, 'niet_gekoppeld', NU).length);
+  assert.deepEqual(tel, { venster_bijna_dicht: 1, niet_gekoppeld: 2 });
+});
+
+test('rommel als invoer levert een lege lijst op, geen uitzondering', () => {
+  for (const rommel of [null, undefined, 42, 'lijst', {}]) {
+    assert.deepEqual(G.focusFilter(rommel, rommel, 'niet_gekoppeld', NU), []);
+    assert.deepEqual(G.focusFilter(rommel, rommel, 'venster_bijna_dicht', NU), []);
+  }
+});
