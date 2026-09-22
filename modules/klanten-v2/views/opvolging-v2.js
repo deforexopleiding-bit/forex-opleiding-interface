@@ -210,6 +210,10 @@
     try { return fn(); } finally { _meetAlleen = false; }
   }
 
+  // De belstatus van dit moment, opnieuw gevraagd bij ELKE opbouw. Geen
+  // bewaarde waarde die kan verouderen: zie belStatusNu().
+  let _belNu = { actief: false, nummer: null };
+
   const render = () => {
     if (!window.DFO || typeof window.DFO.render !== 'function') return;
     const html = huidigeViewHtml();
@@ -1405,6 +1409,9 @@
 .opv .obtn{border:1px solid var(--o-line);background:#fff;border-radius:9px;padding:7px 11px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;color:var(--o-ink)}
 .opv .obtn:hover{border-color:#c9cfd8}
 .opv .obtn.p{background:var(--o-acc);border-color:var(--o-acc);color:#fff}
+/* Je bent met deze persoon in gesprek. Groen en zonder de klik-uitstraling
+   van een belknop: hier hoort niets gestart te worden, alleen geopend. */
+.opv .obtn.bezig{background:var(--o-grns);border-color:transparent;color:#08794a;font-weight:650}
 .opv .obtn.wa{background:var(--o-grns);border-color:#bfe9d6;color:#08794a}
 .opv .sh{display:flex;align-items:center;gap:9px;margin:22px 0 11px 2px}
 .opv .sh .ic{width:25px;height:25px;border-radius:8px;display:grid;place-items:center;font-size:12.5px}
@@ -1751,7 +1758,7 @@
       (t.notitie ? '<div class="note">' + esc(t.notitie) + '</div>' : '') +
       '</div>' +
       '<div class="act">' +
-        '<button class="obtn p" onclick="window.__opvBel(\'' + t.id + '\', \'werklijst\')">&#9742; Bellen</button>' +
+        belKnop(t.telefoon, 'window.__opvBel(\'' + t.id + '\', \'werklijst\')') +
         '<button class="obtn wa" onclick="window.__opvWa(\'' + t.id + '\')">&#128172; WhatsApp</button>' +
         '<button class="obtn" onclick="window.__opvWatNu(\'' + t.id + '\')">Wat nu? &rarr;</button>' +
       '</div></div>';
@@ -1793,7 +1800,7 @@
       (t.notitie ? '<div class="note">' + esc(t.notitie) + '</div>' : '') +
       '</div>' +
       '<div class="act">' +
-        '<button class="obtn p" onclick="window.__opvBel(\'' + t.id + '\', \'aanmeldkaart\')">&#9742; Bellen</button>' +
+        belKnop(t.telefoon, 'window.__opvBel(\'' + t.id + '\', \'aanmeldkaart\')') +
         '<button class="obtn wa" onclick="window.__opvWa(\'' + t.id + '\')">&#128172; WhatsApp</button>' +
         '<button class="obtn" onclick="window.__opvWatNu(\'' + t.id + '\')">Wat nu? &rarr;</button>' +
       '</div></div>';
@@ -1833,6 +1840,75 @@
    * mee, zodat het gesprek meteen als poging bij die taak landt in plaats van
    * pas via de match-op-nummer op de server.
    */
+  /**
+   * LOOPT ER NU EEN GESPREK, EN MET WIE?
+   *
+   * ── DE GLITCH DIE DIT OPLOST ──────────────────────────────────────────
+   * Maxim: 'als ik van scherm verander en terugkeer is de belknop weg en
+   * blijft hij bellen, of stopt hij terwijl dat niet mag'.
+   *
+   * De oorzaak is dat de view zijn eigen verhaal vertelde. Bij elke opbouw
+   * werd de kaart opnieuw getekend uit lokale gegevens, en die weten niets van
+   * een gesprek dat al loopt. Kom je terug op het scherm, dan staat er gewoon
+   * weer 'Bellen' bij iemand met wie je op dat moment aan de telefoon zit — en
+   * daar nog eens op drukken start een tweede oproep bovenop de eerste.
+   *
+   * DE SOFTPHONE IS DE BRON VAN WAARHEID, NIET DE VIEW. Bij elke opbouw wordt
+   * getStatus() gevraagd. De view bewaart niets over de verbinding en beslist
+   * er niets over; hij tekent alleen wat de softphone zegt.
+   *
+   * OPRUIMEN RAAKT ALLEEN DE WEERGAVE. Nergens in deze view wordt hangup()
+   * aangeroepen, ook niet bij het verlaten van een scherm. Het gesprek leeft in
+   * de softphone en in de callbar (die op document.body staat en dus elke
+   * her-opbouw overleeft); een scherm dat weggaat mag daar niets aan doen.
+   * Daar staat een test op.
+   */
+  function belStatusNu() {
+    const sp = window.KlxSoftphone;
+    if (!sp || typeof sp.getStatus !== 'function') return { actief: false, nummer: null };
+    let st = null;
+    try { st = sp.getStatus(); } catch (_) { return { actief: false, nummer: null }; }
+    const bezig = st && (st.state === 'dialing' || st.state === 'ringing' || st.state === 'connected');
+    if (!bezig) return { actief: false, nummer: null };
+    return {
+      actief: true,
+      fase  : st.state,
+      nummer: (st.activeCustomer && st.activeCustomer.phone) || null,
+      naam  : (st.activeCustomer && st.activeCustomer.name) || null,
+    };
+  }
+
+  /** Hangt dit nummer aan het gesprek dat nu loopt? */
+  function inGesprekMet(tel) {
+    const nu = _belNu;
+    if (!nu || !nu.actief || !nu.nummer || !tel) return false;
+    const a = telCijfers(tel);
+    const b = telCijfers(nu.nummer);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    // Zelfde staart-regel als taakVoorNummer: nummers staan niet
+    // genormaliseerd in de databank, met of zonder landcode.
+    return a.length >= 9 && b.length >= 9 && a.slice(-9) === b.slice(-9);
+  }
+
+  /**
+   * De belknop, of wat ervoor in de plaats komt.
+   *
+   * Loopt er met deze persoon een gesprek, dan staat er geen knop die een
+   * tweede oproep start maar een regel die zegt wat er aan de hand is. Klikken
+   * opent het belvenster — daar zit de ophangknop. Ophangen gebeurt NOOIT
+   * vanuit een lijstweergave: dat is een handeling met gevolgen en die hoort
+   * niet achter een knop die eruitziet als navigatie.
+   */
+  function belKnop(tel, onclick) {
+    if (inGesprekMet(tel)) {
+      return '<button class="obtn bezig" onclick="window.__opvToonGesprek()" '
+        + 'title="Je bent met deze persoon in gesprek. Klik om het belvenster te openen.">'
+        + '&#9742; In gesprek</button>';
+    }
+    return '<button class="obtn p" onclick="' + onclick + '">&#9742; Bellen</button>';
+  }
+
   function taakVoorNummer(tel) {
     const doel = telCijfers(tel);
     if (!doel || !_live.taken.data) return null;
@@ -2008,7 +2084,7 @@
       lijst.map((c, i) => {
         const k = c.knoppen || { afronden: true, bellen: !!c.telefoon, whatsapp: !!c.telefoon, zoom: false };
         const knoppen =
-          (k.bellen && c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(\'a' + i + '\')">&#9742; Bellen</button>' : '') +
+          (k.bellen && c.telefoon ? belKnop(c.telefoon, 'window.__opvCallBel(\'a' + i + '\')') : '') +
           (k.whatsapp && c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(\'a' + i + '\')">&#128172; WhatsApp</button>' : '') +
           (k.afronden ? '<button class="obtn" onclick="window.__opvCallAfrond(\'a' + i + '\')">Afronden &rarr;</button>' : '');
         const taak = taakVoorNummer(c.telefoon);
@@ -2075,7 +2151,7 @@
       const k = c.knoppen || { afronden: true, bellen: !!c.telefoon, whatsapp: !!c.telefoon, zoom: !!c.zoom_url };
       const knoppen =
         (k.zoom && c.zoom_url ? '<a class="obtn zoom" href="' + esc(c.zoom_url) + '" target="_blank" rel="noopener">&#127909; Zoom</a>' : '') +
-        (k.bellen && c.telefoon ? '<button class="obtn p" onclick="window.__opvCallBel(' + i + ')">&#9742; Bellen</button>' : '') +
+        (k.bellen && c.telefoon ? belKnop(c.telefoon, 'window.__opvCallBel(' + i + ')') : '') +
         (k.whatsapp && c.telefoon ? '<button class="obtn wa" onclick="window.__opvCallWa(' + i + ')">&#128172; WhatsApp</button>' : '') +
         // AL AFGEROND? DAN STAAT DAT ER, en geen knop die uitnodigt om het nog
         // eens te doen. Dave rondt er 's ochtends twee af, kijkt 's middags
@@ -3162,6 +3238,10 @@
   // ═════════════════════════════════════════════════════════════════════════
   function vandaagView() {
     stijl();
+    // DE SOFTPHONE VRAGEN, NIET ONTHOUDEN. Bij elke opbouw opnieuw: kom je
+    // terug op dit scherm terwijl er een gesprek loopt, dan hoort dat er te
+    // staan in plaats van een knop die een tweede oproep start.
+    _belNu = belStatusNu();
     const dag = _ui.dagView || vandaag();
     const st = _live.taken;
     if (!st.loading && !st.error && (!st.data || st.key !== dag)) straks(() => fetchTaken(dag));
@@ -4247,6 +4327,21 @@
       ...(taakId ? { opvolgingTaakId: taakId } : {}),
     });
   }
+
+  /**
+   * Het belvenster van het LOPENDE gesprek openen.
+   *
+   * Niet ophangen. Ophangen is een handeling met gevolgen en hoort niet achter
+   * een knop in een lijst die eruitziet als navigatie; de ophangknop staat in
+   * het venster en in de callbar, allebei ontworpen voor dat doel.
+   */
+  window.__opvToonGesprek = () => {
+    const sp = window.KlxSoftphone;
+    if (!sp || typeof sp.open !== 'function') return;
+    const nu = belStatusNu();
+    if (!nu.actief || !nu.nummer) { render(); return; }  // net geëindigd: opnieuw tekenen
+    sp.open({ phone: nu.nummer, name: nu.naam || '', source: 'opvolging.lopend-gesprek' });
+  };
 
   window.__opvBel = async (id, plek) => {
     const t = zoekTaak(id); if (!t) return;
