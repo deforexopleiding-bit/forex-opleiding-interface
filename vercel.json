@@ -211,6 +211,10 @@
       "schedule": "0 4 * * *"
     },
     {
+      "path": "/api/cron-support-opvolging",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/snapshot-cleanup",
       "schedule": "30 3 * * *"
     },
@@ -312,6 +316,12 @@
       "source": "/api/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/widget/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=300, s-maxage=300" }
       ]
     },
     {
