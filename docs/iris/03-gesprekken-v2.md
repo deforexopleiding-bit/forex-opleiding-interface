@@ -145,6 +145,55 @@ nu via `_gv2()`, dat het script teruggeeft óf niets. Daardoor staat
 aanroep die de vlag omzeilt geen kwestie van goed lezen meer maar van een test
 die omvalt.
 
+### G8 (het pollen) — van ≈54 MB per uur naar ≈7
+
+**Was:** de gesprekslijst werd elke **zes seconden** volledig opnieuw opgehaald.
+Het endpoint rekent zelf voor wat dat kost — bij 115 gesprekken ongeveer 90 KB
+per opvraging. Dat is 900 KB per minuut, **54 MB per uur**, 430 MB per werkdag
+per geopend tabblad; bij twee mensen het dubbele. En dat terwijl er in een rustig
+uur misschien drie berichten binnenkomen.
+
+Er was óók al een realtime-kanaal op `whatsapp_messages`. De poll is het
+vangnet, maar draaide onvoorwaardelijk mee — of dat kanaal nu werkte of niet.
+Daar zit de winst: als het vangnet weet dat er iemand anders oplet, hoeft het
+niet om de zes seconden te kijken.
+
+**Nu:** vier standen.
+
+| Stand | Interval | Per uur |
+|---|---|---|
+| tabblad verborgen | niet pollen | 0 |
+| kanaal **bewezen** | 45 s | ≈ 7 MB |
+| kanaal verbonden, **onbewezen** | 20 s | ≈ 16 MB |
+| geen kanaal | 6 s | ≈ 54 MB (zoals het was) |
+
+**Waarom drie standen en niet twee.** "Kanaal verbonden" en "kanaal werkt" zijn
+niet hetzelfde: een abonnement kan keurig `SUBSCRIBED` melden terwijl RLS elk
+bericht wegfiltert. Dan komt er nooit iets binnen en zou een trage poll betekenen
+dat je berichten drie kwartier te laat ziet. Er is geen manier om dat vooraf te
+weten, dus verdient het kanaal zijn vertrouwen: verbonden levert een matige
+versnelling op, en pas na één echt bezorgd bericht gaat de poll naar 45 s.
+Bewijs boven belofte. Valt het kanaal weg, dan gaan beide vlaggen uit en staat
+het vangnet meteen weer op zes seconden.
+
+Twee dingen die onderweg bleken:
+
+- **`CLOSED` en `TIMED_OUT` vielen stil.** De oude code keek alleen naar
+  `CHANNEL_ERROR`. Nu telt alles wat niet `SUBSCRIBED` is als "het vangnet is
+  weer alleen" — anders blijft de poll traag terwijl er niemand meer oplet.
+- **Een verborgen tabblad pollt niet**, dus bij terugkomen is de lijst zo oud als
+  je weg was. Daarom haalt hij één keer op zodra iemand weer kijkt: dát is
+  precies wanneer het uitmaakt.
+
+De timer zelf blijft elke zes seconden tikken (dat kost niets); alleen het
+*besluit* om op te halen is verplaatst naar `magOphalen()`. Het interval
+opnieuw opbouwen bij elke kanaalwissel is namelijk precies hoe je twee timers
+naast elkaar krijgt zonder het te weten.
+
+Wat G8 nog niet doet: **paginering**. De lijst haalt nog altijd `limit=1000` in
+één keer op, en de draad 200 berichten per gespreksklik. Dat is een grotere
+ingreep in het endpoint en staat los van het pollen.
+
 ---
 
 ## Wat er nog ligt
@@ -159,7 +208,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
 | G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
 | G6 | mail aan het contact, niet aan de klant | raakt `inbox-thread-unified` dieper |
 | G7 | IMAP `APPEND` naar Verzonden | raakt `send-email.js` |
-| G8 | paginering en trager pollen | het grootste getal (≈ 54 MB per uur per tabblad), en de grootste ingreep |
+| G8 | paginering | het pollen is gedaan (zie hierboven); de lijst haalt nog altijd `limit=1000` in één keer op |
 
 ---
 
@@ -172,5 +221,10 @@ aanstaat. Twee regels kunnen dan meteen ingevuld:
 |---|---|---|
 | is te zien hoeveel venster er nog is | nee | **ja** |
 | is te zien of een bericht aankwam | nee | **ja** |
+| netwerk per uur per tabblad | ≈ 54 MB | **≈ 7 MB** met een bewezen kanaal, ≈ 16 MB zonder, 0 bij een verborgen tabblad |
 
-De rest (netwerk per uur, klikken per antwoord) verandert pas met G8 en G1.
+Het netwerkgetal is een rekensom op de gekozen intervallen en de 90 KB die het
+endpoint zelf noemt, niet een meting op productie. Dat laatste kan pas als de
+vlag aanstaat — in het netwerkpaneel, met het scherm een uur open.
+
+De klikken per antwoord veranderen pas met G1 (microfoon) en G2 (ongedaan).

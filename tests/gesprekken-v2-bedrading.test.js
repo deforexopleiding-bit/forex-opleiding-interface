@@ -151,3 +151,50 @@ test('de lege-lijst-tekst hoort bij de gekozen stand', () => {
   assert.match(b, /Geen gesprekken zonder klantkoppeling\./);
   assert.match(b, /Geen wanbetaler-gesprekken in dit filter\./, 'de oude tekst hoort te blijven voor de gewone lijst');
 });
+
+/* ── G8 · de adaptieve poll ───────────────────────────────────────────── */
+
+test('de timer blijft tikken; het besluit valt in magOphalen', () => {
+  // Het interval opnieuw opbouwen bij elke kanaalwissel is precies hoe je twee
+  // timers naast elkaar krijgt zonder het te weten. De tik blijft dus staan.
+  const b = lees(SCHERM);
+  assert.match(b, /setInterval\(\(\) => \{[\s\S]{0,1500}?\}, 6000\);/);
+  assert.match(b, /gv\.magOphalen\(\{ verborgen: !!document\.hidden, verbonden: rt\.verbonden, bewezen: rt\.bewezen \}/);
+});
+
+test('zonder de vlag blijft de oude 5s-rem staan', () => {
+  const b = lees(SCHERM);
+  assert.match(b, /\} else if \(Date\.now\(\) - _live\.inboxRealtime\.lastRefresh < 5000\) \{/);
+});
+
+test('het kanaal moet zich bewijzen voordat de poll echt omlaag gaat', () => {
+  const b = lees(SCHERM);
+  // `verbonden` komt uit de subscribe-status, `bewezen` pas uit een echt event.
+  assert.match(b, /_live\.inboxRealtime\.verbonden = \(status === 'SUBSCRIBED'\);/);
+  assert.match(b, /_live\.inboxRealtime\.bewezen = true;/);
+});
+
+test('een kanaal dat wegvalt zet beide vlaggen terug', () => {
+  // CLOSED en TIMED_OUT vielen in de oude code stil: alleen CHANNEL_ERROR werd
+  // opgemerkt. Dan blijft de poll traag terwijl er niemand meer oplet.
+  const b = lees(SCHERM);
+  assert.match(b, /if \(!_live\.inboxRealtime\.verbonden\) _live\.inboxRealtime\.bewezen = false;/);
+  assert.ok(!/status === 'CHANNEL_ERROR'/.test(
+    b.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  ), 'de status wordt weer op één specifieke foutwaarde getoetst');
+});
+
+test('terugkomen op een verborgen tabblad haalt meteen op', () => {
+  // Een verborgen tabblad pollt niet, dus zonder deze haak is de lijst zo oud
+  // als je weg was — en dat merk je pas als je een bericht mist.
+  const b = lees(SCHERM);
+  assert.match(b, /document\.addEventListener\('visibilitychange', haak\)/);
+  assert.match(b, /if \(!_gv2\(\)\) return;/, 'de haak mag met de vlag uit niets doen');
+});
+
+test('de visibility-haak wordt weer losgekoppeld', () => {
+  // Blijft hij hangen, dan haalt een weggenavigeerd scherm alsnog op — en bij
+  // elke terugkeer komt er een luisteraar bij.
+  const b = lees(SCHERM);
+  assert.match(b, /removeEventListener\('visibilitychange', _live\.inboxRealtime\.zichtbaarhaak\)/);
+});

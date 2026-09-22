@@ -3215,9 +3215,16 @@
   // SURFACE A: realtime + poll-fallback state.
   _live.inboxRealtime = {
     channel:      null,      // Supabase RealtimeChannel
-    pollTimer:    null,      // setInterval handle (6s)
+    pollTimer:    null,      // setInterval handle (tikt elke 6s)
     active:       false,     // subscribed?
     lastRefresh:  0,         // ms epoch — laatste _fetchInboxConvs()
+    // G8 — twee losse feiten over het realtime-kanaal, want ze zeggen iets
+    // anders. `verbonden` is wat Supabase belooft; `bewezen` is wat het kanaal
+    // heeft waargemaakt door minstens één keer iets te bezorgen. Een
+    // abonnement kan keurig SUBSCRIBED melden terwijl RLS alles wegfiltert.
+    verbonden:    false,
+    bewezen:      false,
+    zichtbaarhaak: null,     // visibilitychange-luisteraar, voor opruimen
   };
 
   async function _fetchInboxConvs() {
@@ -3935,24 +3942,61 @@
     _live.inboxRealtime.pollTimer = setInterval(() => {
       // View-unmount detectie: als #wbxInboxList weg is, stop de poll.
       if (!document.getElementById('wbxInboxList')) { _stopInboxRealtime(); return; }
-      if (Date.now() - _live.inboxRealtime.lastRefresh < 5000) return;
+      // G8 — de timer blijft elke zes seconden tikken (dat kost niets) en
+      // hier valt het besluit of er ook echt gehaald wordt. Zo hoeft er geen
+      // interval opnieuw opgebouwd te worden elke keer dat het kanaal van
+      // gedachten verandert, en kunnen er dus ook geen twee timers naast
+      // elkaar gaan lopen.
+      const gv = _gv2();
+      if (gv) {
+        const rt = _live.inboxRealtime;
+        if (!gv.magOphalen({ verborgen: !!document.hidden, verbonden: rt.verbonden, bewezen: rt.bewezen },
+                           Date.now() - rt.lastRefresh)) return;
+      } else if (Date.now() - _live.inboxRealtime.lastRefresh < 5000) {
+        return;  // gedrag van vóór de vlag, ongewijzigd
+      }
       _live.inbox.convs.fetched = false;
       _fetchInboxConvs();
     }, 6000);
+
+    // G8 — een verborgen tabblad pollt niet, dus bij terugkomen is de lijst
+    // zo oud als je weg was. Eén keer halen op het moment dat iemand weer
+    // kijkt, want dát is precies wanneer het uitmaakt.
+    if (!_live.inboxRealtime.zichtbaarhaak) {
+      const haak = () => {
+        if (document.hidden) return;
+        if (!document.getElementById('wbxInboxList')) return;
+        if (!_gv2()) return;                       // vlag uit: niets veranderen
+        _live.inbox.convs.fetched = false;
+        _fetchInboxConvs();
+      };
+      document.addEventListener('visibilitychange', haak);
+      _live.inboxRealtime.zichtbaarhaak = haak;
+    }
     // Realtime channel — best-effort.
     try {
       if (window.supabase && typeof window.supabase.channel === 'function') {
         const ch = window.supabase
           .channel('wbx-inbox-live')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'whatsapp_messages' }, () => {
+            // G8 — hier verdient het kanaal zijn vertrouwen. Pas ná een echte
+            // bezorging mag de poll naar 45 seconden; tot die tijd blijft hij
+            // op 20. Bewijs boven belofte.
+            _live.inboxRealtime.bewezen = true;
             // Debounce: als recent ge-refreshed, skip.
             if (Date.now() - _live.inboxRealtime.lastRefresh < 2000) return;
             _live.inbox.convs.fetched = false;
             _fetchInboxConvs();
           })
           .subscribe((status) => {
+            // G8 — alles behalve SUBSCRIBED betekent: het vangnet is weer alleen.
+            // CLOSED en TIMED_OUT vielen hier eerst stil; die zetten de poll nu
+            // net zo goed terug op zes seconden, en `bewezen` gaat óók uit —
+            // een kanaal dat opnieuw opkomt moet zich opnieuw bewijzen.
+            _live.inboxRealtime.verbonden = (status === 'SUBSCRIBED');
+            if (!_live.inboxRealtime.verbonden) _live.inboxRealtime.bewezen = false;
             if (status === 'SUBSCRIBED') console.debug('[wanbetalers-v2] inbox realtime subscribed');
-            else if (status === 'CHANNEL_ERROR') console.warn('[wanbetalers-v2] inbox realtime CHANNEL_ERROR — fallback op 6s poll');
+            else console.warn('[wanbetalers-v2] inbox realtime ' + status + ' — vangnet-poll terug op 6s');
           });
         _live.inboxRealtime.channel = ch;
       }
@@ -4114,8 +4158,14 @@
     if (_live.inboxRealtime.channel && window.supabase && typeof window.supabase.removeChannel === 'function') {
       try { window.supabase.removeChannel(_live.inboxRealtime.channel); } catch (_) {}
     }
-    _live.inboxRealtime.channel = null;
-    _live.inboxRealtime.active  = false;
+    if (_live.inboxRealtime.zichtbaarhaak) {
+      document.removeEventListener('visibilitychange', _live.inboxRealtime.zichtbaarhaak);
+      _live.inboxRealtime.zichtbaarhaak = null;
+    }
+    _live.inboxRealtime.channel   = null;
+    _live.inboxRealtime.active    = false;
+    _live.inboxRealtime.verbonden = false;
+    _live.inboxRealtime.bewezen   = false;
   }
 
   function _inboxConvsListHtml() {
