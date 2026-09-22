@@ -3211,6 +3211,10 @@
       waWindowExpired:  false,
       error:            null,
     },
+    // G2 — het ongedaan-venster. Eén tegelijk: zolang er eentje aftelt, staat
+    // de schrijfbalk op de teller en kun je er geen tweede naast beginnen.
+    // { convId, tot, timer, tikker, verstuur, herstel }
+    uitstel: null,
   };
   // SURFACE A: realtime + poll-fallback state.
   _live.inboxRealtime = {
@@ -3678,6 +3682,150 @@
     _toast('Status bijgewerkt.', 'success');
   };
 
+  /* ── G2 · het ongedaan-venster ────────────────────────────────────────
+     Zie de toelichting in modules/shared/gesprekken-v2.js. Kort: het wachten
+     gebeurt hier, in het scherm. Sluit je het tabblad binnen de dertig
+     seconden, dan vertrekt het bericht niet — een beperking die de goede kant
+     op valt, want er gaat niets ongewild weg. */
+
+  function _uitstelStop() {
+    const u = _ui.inbox.uitstel;
+    if (!u) return;
+    if (u.timer)  { clearTimeout(u.timer); u.timer = null; }
+    if (u.tikker) { clearInterval(u.tikker); u.tikker = null; }
+    _ui.inbox.uitstel = null;
+  }
+
+  /**
+   * Plan een verzending in met een venster om 'em terug te halen.
+   *
+   * @param {string} convId
+   * @param {Function} verstuur  wat er moet gebeuren als de teller afloopt
+   * @param {Function} herstel   zet de schrijfbalk terug bij "Toch niet"
+   */
+  function _uitstelStart(convId, verstuur, herstel) {
+    const gv = _gv2();
+    if (!gv) { verstuur(); return; }          // vlag uit: gewoon versturen
+
+    _uitstelStop();
+    const tot = Date.now() + gv.UITSTEL_MS;
+    const u = { convId, tot, timer: null, tikker: null, verstuur, herstel };
+    _ui.inbox.uitstel = u;
+
+    // Elke seconde hertekenen zodat de teller loopt. Alleen de schrijfbalk,
+    // niet de hele draad: een lijst die elke seconde opnieuw opgebouwd wordt,
+    // springt onder je handen weg.
+    u.tikker = setInterval(() => {
+      if (_ui.inbox.uitstel !== u) return;
+      if (!document.getElementById('wbxInboxList')) { _uitstelStop(); return; }
+      try { window.DFO?.render?.(); } catch (_) {}
+    }, 1000);
+
+    u.timer = setTimeout(() => {
+      if (_ui.inbox.uitstel !== u) return;
+      _uitstelStop();
+      try { window.DFO?.render?.(); } catch (_) {}
+      verstuur();
+    }, gv.UITSTEL_MS);
+
+    try { window.DFO?.render?.(); } catch (_) {}
+  }
+
+  /* "Toch niet". Zet de tekst terug in de schrijfbalk, want negen van de tien
+     keer wil je 'em aanpassen en niet weggooien. */
+  window.__wbxInboxUitstelTerug = () => {
+    const u = _ui.inbox.uitstel;
+    if (!u) return;
+    const herstel = u.herstel;
+    _uitstelStop();
+    try { herstel && herstel(); } catch (_) {}
+    _toast('Teruggehaald. Er is niets verstuurd.', 'success');
+    try { window.DFO?.render?.(); } catch (_) {}
+  };
+
+  /* "Nu versturen" — voor wie niet wil wachten. */
+  window.__wbxInboxUitstelNu = () => {
+    const u = _ui.inbox.uitstel;
+    if (!u) return;
+    const verstuur = u.verstuur;
+    _uitstelStop();
+    try { window.DFO?.render?.(); } catch (_) {}
+    verstuur();
+  };
+
+  // Een openstaande teller mag niet ongemerkt verdampen. De browser toont zijn
+  // eigen "weet je het zeker dat je weggaat?" — en dat is precies de vraag,
+  // want weggaan betekent hier: het bericht gaat niet.
+  window.addEventListener('beforeunload', (e) => {
+    if (!_ui.inbox.uitstel) return;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  });
+
+  /* Na een geslaagde verzending: draad en lijst opnieuw ophalen, veld leeg,
+     naar beneden scrollen. Stond eerst onderaan __wbxInboxSend; nu apart
+     omdat de uitgestelde weg er net zo goed langs moet. Twee keer
+     uitschrijven is twee keer bijwerken, en dan doet de ene weg na een tijdje
+     iets anders dan de andere. */
+  function _wbxNaVerzending(convId) {
+    _ui.inbox.threadScrollBottomOnNext[String(convId)] = true;
+    _ui.inbox.threadItemCountByConv[String(convId)] = 0;
+    delete _live.inbox.thread.byConv[convId];
+    _fetchInboxThread(convId);
+    _live.inbox.convs.fetched = false; _fetchInboxConvs();
+    const composeTa = document.getElementById('wbxComposeTxt');
+    if (composeTa) composeTa.value = '';
+    try { window.DFO?.render?.(); } catch (_) {}
+    _toast('Bericht verstuurd.', 'success');
+  }
+
+  /* De twee WhatsApp-wegen, los van de knop. Ze worden aangeroepen zodra de
+     teller afloopt — of meteen, als iemand op "Nu versturen" drukt. */
+
+  async function _wbxWaTekstVerstuur(convId, body) {
+    const c = _ui.inbox.compose;
+    c.sending = true; c.error = null;
+    try { window.DFO?.render?.(); } catch (_) {}
+    const r = await apiPost('/api/inbox-send', { conversation_id: convId, mode: 'text', body });
+    c.sending = false;
+    if (!r.ok) {
+      const errStr = String(r.error || '').toLowerCase();
+      if (errStr.includes('24h_window_expired') || errStr.includes('24h window') || r.status === 422) {
+        c.waWindowExpired = true;
+        c.error = '24u-venster verlopen — kies een template.';
+        _fetchInboxTemplates(convId);
+      } else {
+        c.error = r.error || 'WA-send faalde.';
+      }
+      // De tekst komt terug in de schrijfbalk. Hij is niet verstuurd, en
+      // iemand die 'em opnieuw moet typen omdat het venster dichtviel, is
+      // terecht boos.
+      c.text = body;
+      try { window.DFO?.render?.(); } catch (_) {}
+      return;
+    }
+    _wbxNaVerzending(convId);
+  }
+
+  async function _wbxWaTemplateVerstuur(convId, tplLabel) {
+    const c = _ui.inbox.compose;
+    c.sending = true; c.error = null;
+    try { window.DFO?.render?.(); } catch (_) {}
+    const r = await apiPost('/api/inbox-send-template', {
+      conversation_id: convId, template_name: tplLabel, language: 'nl', variables: {},
+    });
+    c.sending = false;
+    if (!r.ok) {
+      c.error = r.error || 'Template-send faalde.';
+      c.templateName = tplLabel;
+      try { window.DFO?.render?.(); } catch (_) {}
+      return;
+    }
+    c.text = '';
+    _wbxNaVerzending(convId);
+  }
+
   window.__wbxInboxSend = async () => {
     const c = _ui.inbox.compose;
     const convId = _ui.inbox.selectedConv;
@@ -3706,6 +3854,15 @@
       if (useTemplate) {
         if (!c.templateName) { c.error = 'Kies een template (24u-venster is verlopen).'; try { window.DFO?.render?.(); } catch (_) {} return; }
         const tplLabel = c.templateName;
+        if (_gv2()) {
+          const tplVoorHerstel = tplLabel;
+          c.templateName = '';
+          c.error = null;
+          _uitstelStart(convId,
+            async () => { await _wbxWaTemplateVerstuur(convId, tplLabel); },
+            () => { _ui.inbox.compose.templateName = tplVoorHerstel; });
+          return;
+        }
         const ok = await _askConfirm(`Template versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> WhatsApp (template)</div><div><b>Template:</b> <span style="font-family:'IBM Plex Mono',monospace">${esc(tplLabel)}</span></div>`, { okLabel: 'Ja, verstuur' });
         if (!ok) return;
         c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
@@ -3716,6 +3873,20 @@
       } else {
         const body = (c.text || '').trim();
         if (!body) { c.error = 'Bericht is leeg.'; try { window.DFO?.render?.(); } catch (_) {} return; }
+        // G2 — met het ongedaan-venster vervalt de bevestiging vooraf. Een
+        // "weet je het zeker?" vraagt iets op het moment dat je het antwoord
+        // al hebt bedacht; na drie keer lees je 'em niet meer. De teller
+        // grijpt in wanneer het inzicht kómt: één seconde later, als je je
+        // eigen zin ziet staan.
+        if (_gv2()) {
+          const tekstVoorHerstel = body;
+          c.text = '';
+          c.error = null;
+          _uitstelStart(convId,
+            async () => { await _wbxWaTekstVerstuur(convId, body); },
+            () => { _ui.inbox.compose.text = tekstVoorHerstel; });
+          return;
+        }
         const ok = await _askConfirm(`Bericht versturen naar ${esc(custName)}?`, `<div><b>Kanaal:</b> WhatsApp</div><div style="margin-top:6px;padding:8px 11px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);font-size:12.5px">${esc(body)}</div>`, { okLabel: 'Ja, verstuur' });
         if (!ok) return;
         c.sending = true; c.error = null; try { window.DFO?.render?.(); } catch (_) {}
@@ -4359,8 +4530,43 @@
     }).join('');
   }
 
+  /** De teller met de twee knoppen die ertoe doen. */
+  function _uitstelBalkHtml(rest) {
+    // De balk loopt LEEG. Vol bij de start, leeg als het weggaat. Andersom
+    // leest als "hij is bijna klaar met laden", en dat is het tegenovergestelde
+    // van wat er gebeurt.
+    const breedte = Math.round(rest.deel * 100);
+    return `<div style="padding:11px 14px;border-top:1px solid var(--border);background:var(--emerald-soft,var(--surface-2))">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:12.5px;color:var(--emerald);font-weight:600;white-space:nowrap">Gaat weg over ${rest.seconden}s</span>
+        <div style="flex:1;min-width:80px;height:3px;background:var(--border);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${breedte}%;background:var(--emerald);transition:width 1s linear"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="font-size:12px;padding:5px 14px;font-weight:600"
+          onclick="__wbxInboxUitstelTerug()">Toch niet</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:11.5px;padding:5px 11px;color:var(--text-3)"
+          onclick="__wbxInboxUitstelNu()" title="Niet wachten">Nu versturen</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--text-3);margin-top:6px">
+        Laat dit scherm open tot de teller op nul staat — anders vertrekt het bericht niet.
+      </div>
+    </div>`;
+  }
+
   function _inboxComposeHtml(convId) {
     if (!convId) return '';
+
+    // G2 — telt er een bericht af? Dan staat de schrijfbalk op de teller en
+    // is er niets anders te doen dan wachten, terughalen of alsnog drukken.
+    // Eén tegelijk: een tweede bericht beginnen terwijl de eerste nog kan
+    // terugkomen, maakt van "welke haal ik terug?" een raadsel.
+    const u = _ui.inbox.uitstel;
+    const gvU = _gv2();
+    if (u && gvU && String(u.convId) === String(convId)) {
+      const rest = gvU.uitstelRest(u.tot);
+      if (rest.loopt) return _uitstelBalkHtml(rest);
+    }
+
     const c = _ui.inbox.compose;
     const bag = _live.inbox.thread.byConv[convId];
     const conv = bag?.conversation || null;

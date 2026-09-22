@@ -291,11 +291,76 @@
     return sinds >= wacht;
   }
 
+  /**
+   * ── G2 · het ongedaan-venster ────────────────────────────────────────────
+   *
+   * Uit de audit: `__wbxInboxSend()` roept meteen `inbox-send` aan. Verstuurd
+   * is weg. Eén verkeerde klik naar een boze klant is onherstelbaar, en het is
+   * precies bij boze klanten dat je het snelst verkeerd klikt.
+   *
+   * ── WAAROM DE BEVESTIGING VERDWIJNT ──────────────────────────────────────
+   * Er stond al een "weet je het zeker?"-venster vóór het versturen. Dat
+   * verdwijnt als dit aan staat, en dat is geen versoepeling maar het
+   * omgekeerde.
+   *
+   * Een bevestiging vooraf vraagt iets op het moment dat je het antwoord al
+   * hebt bedacht: ja, natuurlijk, daarom klik ik. Je leest 'em na de derde
+   * keer niet meer. Een ongedaan-venster grijpt in op het moment dat het
+   * inzicht kómt — één seconde nadat je klikte, als je je eigen zin ziet
+   * staan. Dat is precies wanneer je van gedachten verandert.
+   *
+   * Bijkomend: het scheelt een klik per antwoord, en de audit telde er vier.
+   *
+   * ── WAT DIT WEL EN NIET IS ───────────────────────────────────────────────
+   * Het wachten gebeurt in het scherm, niet op de server. Sluit je het tabblad
+   * binnen de dertig seconden, dan vertrekt het bericht NIET.
+   *
+   * Dat is een echte beperking, en hij valt de goede kant op: er gaat niets
+   * ongewild weg. Het alternatief — de verzending op de server parkeren —
+   * vraagt een tabel, een cron en een ingreep in de verzendweg die Joost
+   * deelt. Dat is een aparte beslissing; deze versie lost het geval op waar de
+   * klacht over ging (je klikt, je ziet het, je haalt het terug) zonder één
+   * regel aan die verzendweg te veranderen.
+   */
+  const UITSTEL_MS = 30000;
+
+  /**
+   * Hoeveel tijd is er nog om terug te krabbelen?
+   *
+   * @param {number} tot   epoch-ms waarop het bericht vertrekt
+   * @param {number} [nu]
+   * @returns {{loopt: boolean, seconden: number, deel: number}}
+   *
+   * `deel` is een getal tussen 0 en 1 voor de balk. Hij telt AF: vol bij de
+   * start, leeg als het weggaat. Andersom leest als "hij is bijna klaar met
+   * laden", en dat is het tegenovergestelde van wat er gebeurt.
+   */
+  function uitstelRest(tot, nu) {
+    const eind = Number(tot);
+    if (!Number.isFinite(eind)) return { loopt: false, seconden: 0, deel: 0 };
+    const klok = Number.isFinite(Number(nu)) ? Number(nu) : Date.now();
+    const over = eind - klok;
+    if (over <= 0) return { loopt: false, seconden: 0, deel: 0 };
+    return {
+      loopt: true,
+      // Naar boven afronden: zolang er iets over is, staat er minstens 1.
+      // "0 seconden" met een knop die nog werkt, is een tegenstrijdigheid.
+      seconden: Math.ceil(over / 1000),
+      deel: Math.max(0, Math.min(1, over / UITSTEL_MS)),
+    };
+  }
+
+  /** Mag dit bericht nog teruggehaald worden? */
+  function magNogTerug(tot, nu) {
+    return uitstelRest(tot, nu).loopt;
+  }
+
   const API = {
-    VENSTER_MS, BIJNA_DICHT_MS, FOCUS_MODI, POLL_MS,
+    VENSTER_MS, BIJNA_DICHT_MS, FOCUS_MODI, POLL_MS, UITSTEL_MS,
     vensterStand, duurKort, verzendStand, toontVerzendStand,
     leesFocus, focusFilter, focusTelling,
     pollInterval, magOphalen,
+    uitstelRest, magNogTerug,
   };
 
   if (typeof window !== 'undefined') window.GESPREKKEN_V2 = API;

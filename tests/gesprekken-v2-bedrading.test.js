@@ -198,3 +198,60 @@ test('de visibility-haak wordt weer losgekoppeld', () => {
   const b = lees(SCHERM);
   assert.match(b, /removeEventListener\('visibilitychange', _live\.inboxRealtime\.zichtbaarhaak\)/);
 });
+
+/* ── G2 · de bedrading van het ongedaan-venster ───────────────────────── */
+
+test('de vertraging zit alleen achter de vlag', () => {
+  const b = lees(SCHERM);
+  // _uitstelStart valt zonder vlag meteen door naar versturen: met de vlag uit
+  // gedraagt de knop zich precies zoals vandaag.
+  assert.match(b, /const gv = _gv2\(\);\s*\n\s*if \(!gv\) \{ verstuur\(\); return; \}/);
+  // En de bevestiging vooraf blijft bestaan voor het pad zonder vlag.
+  assert.match(b, /Bericht versturen naar \$\{esc\(custName\)\}\?/);
+  assert.match(b, /Template versturen naar \$\{esc\(custName\)\}\?/);
+});
+
+test('beide WhatsApp-wegen lopen langs de teller', () => {
+  const b = lees(SCHERM);
+  assert.match(b, /_uitstelStart\(convId,\s*\n\s*async \(\) => \{ await _wbxWaTekstVerstuur/);
+  assert.match(b, /_uitstelStart\(convId,\s*\n\s*async \(\) => \{ await _wbxWaTemplateVerstuur/);
+});
+
+test('terughalen zet de tekst terug in de schrijfbalk', () => {
+  // Negen van de tien keer wil je 'em aanpassen, niet weggooien. Wie zijn zin
+  // opnieuw moet typen omdat hij 'm terughaalde, gebruikt de knop niet meer.
+  const b = lees(SCHERM);
+  assert.match(b, /\(\) => \{ _ui\.inbox\.compose\.text = tekstVoorHerstel; \}/);
+  assert.match(b, /\(\) => \{ _ui\.inbox\.compose\.templateName = tplVoorHerstel; \}/);
+});
+
+test('een mislukte verzending geeft de tekst terug', () => {
+  // Anders is de zin weg én niet verstuurd — het slechtste van twee werelden.
+  const b = lees(SCHERM);
+  const fn = b.slice(b.indexOf('async function _wbxWaTekstVerstuur'));
+  assert.match(fn.slice(0, 1600), /c\.text = body;/);
+});
+
+test('de timers worden opgeruimd', () => {
+  // Een tikker die blijft lopen na het verlaten van het scherm, tekent elke
+  // seconde een scherm dat er niet meer is.
+  const b = lees(SCHERM);
+  const fn = b.slice(b.indexOf('function _uitstelStop()'));
+  const body = fn.slice(0, fn.indexOf('\n  }') + 4);
+  assert.match(body, /clearTimeout\(u\.timer\)/);
+  assert.match(body, /clearInterval\(u\.tikker\)/);
+  assert.match(b, /if \(!document\.getElementById\('wbxInboxList'\)\) \{ _uitstelStop\(\); return; \}/);
+});
+
+test('weggaan met een lopende teller vraagt om bevestiging', () => {
+  // Weggaan betekent hier: het bericht gaat niet. Dat mag je weten.
+  const b = lees(SCHERM);
+  assert.match(b, /addEventListener\('beforeunload'[\s\S]{0,200}if \(!_ui\.inbox\.uitstel\) return;/);
+});
+
+test('de balk zegt erbij dat het scherm open moet blijven', () => {
+  // De beperking hoort op het scherm te staan waar hij geldt, niet alleen in
+  // een commit-bericht.
+  const b = lees(SCHERM);
+  assert.match(b, /Laat dit scherm open tot de teller op nul staat/);
+});

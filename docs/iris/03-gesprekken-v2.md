@@ -194,6 +194,40 @@ Wat G8 nog niet doet: **paginering**. De lijst haalt nog altijd `limit=1000` in
 één keer op, en de draad 200 berichten per gespreksklik. Dat is een grotere
 ingreep in het endpoint en staat los van het pollen.
 
+### G2 — een ongedaan-venster van dertig seconden
+
+**Was:** `__wbxInboxSend()` riep meteen `inbox-send` aan. Verstuurd is weg. Eén
+verkeerde klik naar een boze klant is onherstelbaar, en het is precies bij boze
+klanten dat je het snelst verkeerd klikt.
+
+**Nu:** je klikt, de schrijfbalk verandert in een teller — *"Gaat weg over 30s"*
+— met **Toch niet** en **Nu versturen**. Terughalen zet je tekst terug in het
+veld, want negen van de tien keer wil je 'm aanpassen en niet weggooien.
+
+**De bevestiging vooraf verdwijnt daarmee**, en dat is geen versoepeling maar
+het omgekeerde. Een "weet je het zeker?" vraagt iets op het moment dat je het
+antwoord al hebt bedacht: ja, natuurlijk, daarom klik ik. Na de derde keer lees
+je 'm niet meer. Het ongedaan-venster grijpt in op het moment dat het inzicht
+kómt — één seconde later, als je je eigen zin ziet staan. Bijkomend: het scheelt
+een klik per antwoord, en de audit telde er vier.
+
+#### De beperking, en waarom hij de goede kant op valt
+
+Het wachten gebeurt **in het scherm**, niet op de server. Sluit je het tabblad
+binnen die dertig seconden, dan vertrekt het bericht niet. De balk zegt dat er
+zelf bij, en bij het wegklikken vraagt de browser om bevestiging.
+
+Dat is een echte beperking. Hij valt alleen de goede kant op: er gaat niets
+ongewild wég. Het alternatief — de verzending op de server parkeren — vraagt een
+tabel, een cron en een ingreep in de verzendweg die Joost deelt. Dat is een
+aparte beslissing en een aparte PR; deze versie lost het geval op waar de klacht
+over ging (je klikt, je ziet het, je haalt het terug) zonder één regel aan die
+verzendweg te veranderen.
+
+Eén bericht tegelijk: zolang er eentje aftelt, staat de schrijfbalk op de teller.
+Een tweede beginnen terwijl de eerste nog terug kan, maakt van "welke haal ik
+terug?" een raadsel.
+
 ---
 
 ## Wat er nog ligt
@@ -203,7 +237,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
 | Gat | Wat | Waarom het nog niet af is |
 |---|---|---|
 | G1 | microfoon in de gesprekken-module | Iris heeft er een (via de browser); de gesprekken-module zelf nog niet |
-| G2 | ongedaan-venster van 30 seconden | raakt de verzendweg; eigen PR waard |
+| G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
 | G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
 | G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
 | G6 | mail aan het contact, niet aan de klant | raakt `inbox-thread-unified` dieper |
