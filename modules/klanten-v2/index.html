@@ -224,7 +224,10 @@
        regel in MODS in app-shell.js nodig (`id: 'iris', preview: true`), anders
        geeft goMod() een stille return en toont de schil Dashboard. Bewaakt door
        tests/iris-schil-registratie.test.js. -->
-  <script src="../iris/iris.js?v=6"></script>
+  <!-- Spraak naar tekst. MOET vóór iris.js staan: dat scherm valt terug op
+       "deze browser kan niet meeluisteren" als window.IRIS_SPRAAK er niet is. -->
+  <script src="../iris/spraak.js?v=1"></script>
+  <script src="../iris/iris.js?v=8"></script>
 
   <!-- ═══ MODULE JS (native ES-modules; requires modern browser) ═══ -->
   <script type="module" src="klanten-v2.js?v=1f3"></script>

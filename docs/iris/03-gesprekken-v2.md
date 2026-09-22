@@ -202,7 +202,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
 
 | Gat | Wat | Waarom het nog niet af is |
 |---|---|---|
-| G1 | microfoon overal waar tekst kan | vraagt `OPENAI_API_KEY`; die zet Maxim |
+| G1 | microfoon in de gesprekken-module | Iris heeft er een (via de browser); de gesprekken-module zelf nog niet |
 | G2 | ongedaan-venster van 30 seconden | raakt de verzendweg; eigen PR waard |
 | G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
 | G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
