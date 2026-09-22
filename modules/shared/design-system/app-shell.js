@@ -83,6 +83,14 @@
     { g: 'Klanten & communicatie', id: 'iris',             naam: 'Iris',              icon: I.sparkle,  color: 'violet',  roles: [], preview: true, tabs: [] },
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
+    // Support (2026-09-22) — de CRM-kant van de widget op de website. Zie
+    // docs/support-module-plan.md. Let op: dit is KLANT-support en dus iets
+    // anders dan de Tickets-module hierboven, die een interne bug/feature-
+    // tracker is. Twee modules, twee tabellen, met opzet.
+    //
+    // permKey staat er als vangnet naast `roles`: wie de rechten heeft maar
+    // niet in de rollijst valt (administratie), ziet het item dan toch.
+    { g: 'Klanten & communicatie', id: 'support',          naam: 'Support',           icon: I.chat,     color: 'teal',    roles: SAMS.concat(['administratie']), permKey: 'support.module.access', tabs: ['Wachtrij', 'Mijn gesprekken', 'Alles', 'Afgehandeld'] },
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
     { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport'] },
 

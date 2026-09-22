@@ -331,6 +331,13 @@ const FEATURE_REGISTRY = [
     { key:'tickets.comment.create', label:'Comment plaatsen' },
     { key:'tickets.admin.view_all', label:'Alle tickets zien (admin)' },
   ]},
+  { moduleKey:'support', moduleLabel:'Support', moduleIcon:'ti-message-circle', features:[
+    { key:'support.module.access', label:'Module zichtbaar' },
+    { key:'support.reply', label:'Antwoorden in een supportgesprek' },
+    { key:'support.assign', label:'Toewijzen, status en prioriteit wijzigen' },
+    { key:'support.actie.besluit', label:'Voorgestelde actie goed- of afkeuren' },
+    { key:'support.config', label:'Supportbot en kantooruren configureren' },
+  ]},
   { moduleKey:'activity-log', moduleLabel:'Logboek', moduleIcon:'ti-history', features:[
     { key:'audit.log.view', label:'Logboek bekijken' },
   ]},

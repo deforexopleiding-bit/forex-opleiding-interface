@@ -221,6 +221,23 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   Joost-card (intent=escalation_needed) of conversation-header. Zie
   docs/joost-e11-and-f3-escalation.md voor payload + UX + roadmap F4
   (MANUAL_FOLLOWUP).
+- Support (2026-09-22) — klant-support vanaf de website. Widget
+  `/widget/support.js` (shadow DOM, één script-regel in Webflow) praat met
+  publieke CORS-endpoints `support-widget-config` / `-start` / `-bericht` /
+  `-poll` / `-verificatie-start` / `-verificatie-check`. Sessie = een token
+  van 32 bytes in de header `X-Support-Token`; in de DB staat alleen de
+  SHA-256. Persoonlijke gegevens pas na een mailcode (6 cijfers, 10 min, max
+  5 pogingen). Bot "Sam" draait op een `joost_config`-rij met
+  `module='support'`; het mandaat zit in `beslisAntwoord()` in
+  `api/_lib/support-bot-core.js` (pure functie, spiegel van
+  evaluateAutonomy). Live chat hangt aan `support_aanwezigheid` (hartslag,
+  vervalt na 5 min) plus `app_settings.support_kantooruren` —
+  `api/_lib/support-beschikbaarheid.js`, fail-CLOSED. CRM-kant is de v2-view
+  `modules/klanten-v2/views/support-v2.js` (tabs Wachtrij / Mijn gesprekken /
+  Alles / Afgehandeld). Tabellen `support_gesprekken` / `_berichten` /
+  `_verificaties` / `_aanwezigheid` / `_acties`. LET OP: dit staat los van de
+  bestaande `tickets`-tabel, die een INTERNE bug/feature-tracker is. Zie
+  docs/support-module-plan.md.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
