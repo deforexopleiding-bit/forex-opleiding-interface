@@ -116,9 +116,79 @@ iemand beschikbaar → live chat. Anders → wachtrij met mailbelofte.
 | Fase | Inhoud | Status |
 |---|---|---|
 | S1 | Datamodel, RBAC, publieke API, widget, CRM-module incl. instellingen-tab, bot met kennisbank + read-only lookups, voorgestelde acties | deze PR |
-| S2 | Uitvoeren van goedgekeurde acties (uitnodiging opnieuw sturen) | later |
+| S2 | Uitvoeren van goedgekeurde acties | deels — zie hieronder |
 | S3 | Autonoom antwoorden buiten kantooruren, per intent achter feature-flag | later |
 | S4 | Abonnement pauzeren / factuur crediteren vanuit een goedgekeurde actie | later, pas als S2 bewezen is |
+
+## 7b. Fase S2 — wat er wel en niet uitgevoerd kan worden
+
+Achter `joost_config.feature_flags.s2_acties_uitvoeren` (default UIT) voert
+`api/_lib/support-actie-uitvoeren.js` een goedgekeurde actie direct uit.
+Eén regel stuurt alles: **een actie geldt alleen als uitgevoerd wanneer het
+onderliggende systeem dat bevestigt.** Bij twijfel wordt het `mislukt` mét
+uitleg, nooit stilzwijgend `uitgevoerd` — een klant die denkt dat iets
+geregeld is terwijl dat niet zo is, kost meer dan een collega die het zelf
+doet.
+
+| Soort | Uitvoerbaar | Toelichting |
+|---|---|---|
+| `LMS_PROVISIONING_OPNIEUW` | ja | `provisionDfoLmsStudent()`; drie lagen idempotentie |
+| `MENTOR_CONTACT` | ja | notificatie naar `onboardings.mentor_user_id`; alleen een weggeschreven rij telt (`count > 0`) |
+| `LMS_UITNODIGING_OPNIEUW` | **deels** | zie de grendel hieronder |
+| `BETALINGSAFSPRAAK` | nee | raakt facturen en abonnementen in TeamLeader; blijft mensenwerk |
+| `HANDMATIG` | nee | vrije omschrijving, per definitie handwerk |
+
+### De grendel in het LMS
+
+`stuurLmsUitnodiging()` slaat stap 2 over zodra `uitnodiging_verstuurd_op`
+gevuld is, omdat een tweede mail het bestaande wachtwoord van de student
+ongeldig maakt. Dat is verstandig — maar het betekent dat juist het geval
+waarvoor deze actie bestaat (`UITNODIGING_WACHTWOORD_NIET_GEZET`: de mail
+ging eruit met een wachtwoord dat niet werkt) **niet** door die functie heen
+komt. Het LMS heeft geen force-optie en geen endpoint om dat veld te wissen.
+
+De actie meldt dat dan als `mislukt` met de reden `lms_grendel` en de uitleg
+dat iemand aan LMS-kant het wachtwoord moet resetten of
+`uitnodiging_verstuurd_op` moet leegmaken. Bij `UITNODIGING_MAIL_MISLUKT` is
+er niets verstuurd, staat dat veld leeg, en werkt opnieuw versturen wél.
+
+**Openstaand bij de compagnon**: een force-optie op
+`POST /api/admin/studenten/<id>/uitnodiging/` (bijvoorbeeld `{ opnieuw: true }`),
+zodat het CRM een kapotte uitnodiging zelf kan herstellen. Zodra die er is,
+is dat één tak in `support-actie-uitvoeren.js`.
+
+### Twee vormen van "geslaagd maar er is niets gebeurd"
+
+De grendel is niet het enige antwoord dat er van buiten uitziet als succes
+terwijl er niets is weggeschreven. `createNotification()` kent dezelfde vorm:
+die geeft `ok: true` mét `count: 0` terug bij een lege ontvangerslijst of
+wanneer de dedup-tak de melding overslaat. `MENTOR_CONTACT` toetst daarom op
+`ok && count > 0` en niet alleen op `ok`; bij `count: 0` wordt het `mislukt`
+met reden `notificatie_leeg`. Zonder die toets hoorde de student dat zijn
+mentor is ingelicht terwijl er geen melding bestaat.
+
+Wie hier een derde soort aan toevoegt, stelt dus niet de vraag "gaf de helper
+een fout?" maar "heeft het onderliggende systeem bevestigd dát het iets
+gedaan heeft?" — dat zijn niet dezelfde vraag.
+
+### Het herstelpad na een mislukking
+
+Een `mislukt` actie is een eindpunt voor het systeem, niet voor de collega.
+De detailkaart toont de reden uit `besluit_reden` en een knop **Toch gedaan**,
+voor precies het geval van de grendel: iemand regelt het met de hand aan
+LMS-kant en zet de actie daarna op gedaan. De klant krijgt dan alsnog het
+bericht dat het geregeld is.
+
+Daarom staat `api/support-actie-besluit.js` de overgang naar `uitgevoerd` toe
+vanuit **`goedgekeurd` én `mislukt`**. De andere overgangen blijven strak:
+
+| Van | Naar | |
+|---|---|---|
+| `voorgesteld` | `goedgekeurd` / `afgewezen` | ja |
+| `goedgekeurd` | `uitgevoerd` | ja — de knop "Gedaan" uit S1 |
+| `mislukt` | `uitgevoerd` | ja — de knop "Toch gedaan" |
+| `uitgevoerd` | wat dan ook | **409** — anders krijgt de klant een tweede bericht |
+| `afgewezen` / `voorgesteld` | `uitgevoerd` | **409** — er is niets goedgekeurd om te doen |
 
 ## 8. Benodigde omgevingsvariabelen
 
