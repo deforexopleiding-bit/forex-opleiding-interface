@@ -14,7 +14,11 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const AGENT_KEYS = new Set(['joost', 'simone', 'mila', 'lisa']);
+// 'support' hoort erbij sinds de supportmodule (2026-09-22): Sam leest
+// kennisbank_artikelen rechtstreeks (api/_lib/support-bot-core.js haalKennis).
+// Zonder deze sleutel zijn zijn artikelen wél te lezen maar niet te bewerken
+// vanuit de kennisbank-UI.
+const AGENT_KEYS = new Set(['joost', 'simone', 'mila', 'lisa', 'support']);
 
 function isMissingTable(err) {
   if (!err) return false;

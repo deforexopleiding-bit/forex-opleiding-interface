@@ -259,3 +259,46 @@ test('INTENTS en de databaseconfig kennen dezelfde intents', () => {
     assert.ok(sql.includes(`"${i}"`), `intent ${i} ontbreekt in de seed van joost_config`);
   }
 });
+
+/* ── 5. Instellingen en kennisbank ────────────────────────────────────── */
+
+test('de instellingen-tab is geregistreerd en zit in MODS', () => {
+  const shell = readFileSync(new URL('../modules/shared/design-system/app-shell.js', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('../modules/klanten-v2/views/support-v2.js', import.meta.url), 'utf8');
+  assert.match(shell, /'Instellingen'\]/, 'Instellingen ontbreekt in de tabs van support');
+  assert.ok(view.includes("VIEWS['support/Instellingen']"), 'de instellingen-view is niet geregistreerd');
+});
+
+test('support mag artikelen in de kennisbank hebben', () => {
+  // Zonder deze sleutel worden support-artikelen door de kennisbank-UI
+  // geweigerd bij opslaan — de bot leest ze dan wel, maar niemand kan ze
+  // nog bijwerken.
+  const api = readFileSync(new URL('../api/kennisbank-artikelen.js', import.meta.url), 'utf8');
+  const ui = readFileSync(new URL('../modules/klanten-v2/views/instellingen-v2.js', import.meta.url), 'utf8');
+  assert.match(api, /AGENT_KEYS = new Set\(\[[^\]]*'support'/, "'support' ontbreekt in AGENT_KEYS");
+  assert.match(ui, /_KB_AGENTS = \[[^\]]*'support'/, "'support' ontbreekt in _KB_AGENTS");
+});
+
+test('de kennisbank-seed gebruikt bestaande kolommen en tagt op support', () => {
+  const seed = readFileSync(new URL('../docs/sql-migrations/2026-09-22-support-kennisbank-seed.sql', import.meta.url), 'utf8');
+  assert.match(seed, /INSERT INTO public\.kennisbank_artikelen \(onderwerp, categorie, content, agents\)/);
+  assert.match(seed, /ARRAY\['support'\]::text\[\]/);
+  assert.match(seed, /WHERE NOT EXISTS/, 'de seed is niet idempotent');
+  // De categorieën moeten uit de bestaande set komen, anders vallen ze buiten
+  // het filter in de kennisbank-UI.
+  const cats = [...seed.matchAll(/^\('(?:[^']|'')+', '([^']+)',$/gm)].map((m) => m[1]);
+  assert.ok(cats.length >= 10, 'te weinig artikelen gevonden — is het formaat gewijzigd?');
+  for (const c of new Set(cats)) {
+    assert.ok(['Aanbod', 'Prijzen', 'Praktisch', 'Over ons', 'FAQ', 'Overig'].includes(c), 'onbekende categorie: ' + c);
+  }
+});
+
+test('de instellingen laten het mandaat en de vlaggen met rust', () => {
+  // autonomy_config en feature_flags mogen niet via een tekstveldje te
+  // wijzigen zijn: dat zijn beslissingen met gevolgen, geen instellingen.
+  const api = readFileSync(new URL('../api/support-instellingen.js', import.meta.url), 'utf8');
+  const schrijfblok = api.slice(api.indexOf("if (req.body?.bot"), api.indexOf('Teruglezen'));
+  for (const verboden of ['autonomy_config', 'feature_flags', 'model']) {
+    assert.ok(!new RegExp(`patch\\.${verboden}`).test(schrijfblok), verboden + ' mag niet geschreven worden');
+  }
+});

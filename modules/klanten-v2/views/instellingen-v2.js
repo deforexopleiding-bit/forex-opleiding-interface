@@ -2530,7 +2530,7 @@
      (max 10000) · agents[] (subset joost/simone/mila/lisa) · usage_count. Fail-soft
      503 MIGRATION_MISSING als tabel nog niet bestaat (nette in-page banner).
      Motor onaangeraakt (agents lezen KB read-only via bestaande queries). */
-  const _KB_AGENTS = ['joost','simone','mila','lisa'];
+  const _KB_AGENTS = ['joost','simone','mila','lisa','support'];
   const _kb = {
     loading: false, fetched: false, error: null, migrationMissing: false,
     items: [], filterQ: '', filterCat: '', filterAgent: '',

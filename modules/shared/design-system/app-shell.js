@@ -90,7 +90,7 @@
     //
     // permKey staat er als vangnet naast `roles`: wie de rechten heeft maar
     // niet in de rollijst valt (administratie), ziet het item dan toch.
-    { g: 'Klanten & communicatie', id: 'support',          naam: 'Support',           icon: I.chat,     color: 'teal',    roles: SAMS.concat(['administratie']), permKey: 'support.module.access', tabs: ['Wachtrij', 'Mijn gesprekken', 'Alles', 'Afgehandeld'] },
+    { g: 'Klanten & communicatie', id: 'support',          naam: 'Support',           icon: I.chat,     color: 'teal',    roles: SAMS.concat(['administratie']), permKey: 'support.module.access', tabs: ['Wachtrij', 'Mijn gesprekken', 'Alles', 'Afgehandeld', 'Instellingen'] },
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
     { g: 'Klanten & communicatie', id: 'opvolging',        naam: 'Opvolging',         icon: I.repeat,   color: 'teal',    roles: SAMS, permKey: 'opvolging.module.access', tabs: ['Vandaag', 'Dashboard', 'Afgerond', 'Rapport'] },
 

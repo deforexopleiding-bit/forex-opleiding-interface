@@ -14,6 +14,40 @@ import { staffUit, verkeerdeMethode, basisHeaders } from './_lib/support-staff.j
 const STATUSSEN = ['bot', 'wacht_op_ons', 'in_behandeling', 'wacht_op_klant', 'afgehandeld'];
 const MAX = 200;
 
+/**
+ * Tellers voor de KPI-strip. Bewust LOS van de lijst-query en dus ongevoelig
+ * voor de actieve filters: een strip die meetelt wat er toevallig in beeld
+ * staat, toont op het tabblad Wachtrij altijd nul bij "bij de bot" — en dan
+ * is het geen teller meer maar een herhaling van de lijst eronder.
+ *
+ * Head-counts, geen rijen over de lijn. Fail-soft per teller: één kapotte
+ * query mag de werklijst niet tegenhouden.
+ */
+async function haalTellingen(userId) {
+  const tel = async (bouw) => {
+    try {
+      const { count, error } = await bouw();
+      if (error) throw new Error(error.message);
+      return count || 0;
+    } catch (e) {
+      console.warn('[support-gesprekken-list] teller mislukt:', e?.message || e);
+      return null;
+    }
+  };
+
+  const basis = () => supabaseAdmin.from('support_gesprekken').select('id', { count: 'exact', head: true });
+
+  const [wacht, bot, behandeling, mijn, acties] = await Promise.all([
+    tel(() => basis().eq('status', 'wacht_op_ons')),
+    tel(() => basis().eq('status', 'bot')),
+    tel(() => basis().eq('status', 'in_behandeling')),
+    tel(() => basis().eq('toegewezen_aan', userId).not('status', 'eq', 'afgehandeld')),
+    tel(() => supabaseAdmin.from('support_acties').select('id', { count: 'exact', head: true }).eq('status', 'voorgesteld')),
+  ]);
+
+  return { wacht_op_ons: wacht, bot, in_behandeling: behandeling, van_mij: mijn, open_acties: acties };
+}
+
 export default async function handler(req, res) {
   basisHeaders(res);
   if (verkeerdeMethode(req, res, 'GET')) return;
@@ -71,6 +105,7 @@ export default async function handler(req, res) {
         toegewezen_naam: r.toegewezen_aan ? (namen.get(r.toegewezen_aan) || null) : null,
         open_acties: acties.get(r.id) || 0,
       })),
+      tellingen: await haalTellingen(staff.user.id),
     });
   } catch (e) {
     console.error('[support-gesprekken-list] mislukt:', e?.message || e);

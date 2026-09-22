@@ -27,9 +27,27 @@
   const { I, svg, F, setF } = window.DFO;
   const H = window.KV_V2.helpers;
 
+  // Eén stijlregel die niet inline kan: de bubbel van ons gebruikt het
+  // module-accent als achtergrond, en dat accent is in donkere modus licht.
+  // Witte tekst daarop is onleesbaar. Dezelfde correctie die app-shell.css
+  // al doet voor .btn-primary.
+  (function stijl() {
+    if (document.getElementById('sup-stijl')) return;
+    const el = document.createElement('style');
+    el.id = 'sup-stijl';
+    el.textContent = `
+      .sup-bubbel-ons{background:var(--m);color:#fff}
+      :root[data-theme="dark"] .sup-bubbel-ons{color:#0B0E13}
+      .sup-thread::-webkit-scrollbar{width:9px}
+      .sup-thread::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:5px;border:3px solid var(--surface)}
+    `;
+    document.head.appendChild(el);
+  })();
+
   const _lijst = { loading: false, error: null, data: null, seq: 0, params: '' };
   const _det = { loading: false, error: null, data: null, id: null, seq: 0, bezig: false, concept: '' };
   const _aanwezig = { loading: false, data: null, bezig: false };
+  const _inst = { loading: false, error: null, data: null, bezig: false, melding: null, concept: {} };
 
   let _hartslag = null;
   let _lijstPoll = null;
@@ -191,11 +209,16 @@
     if (window.DFO?.render) window.DFO.render();
   }
 
+  // De tellers komen van de server en tellen over ALLE gesprekken, niet over
+  // wat er toevallig in de lijst staat. Anders toont "Bij de bot" op het
+  // tabblad Wachtrij altijd nul en is de strip een herhaling van de lijst.
   function kpis() {
+    const t = _lijst.data?.tellingen || {};
     const g = _lijst.data?.gesprekken || [];
-    const wacht = g.filter((x) => x.status === 'wacht_op_ons').length;
-    const bot = g.filter((x) => x.status === 'bot').length;
-    const acties = g.reduce((s, x) => s + (x.open_acties || 0), 0);
+    const getal = (v) => (v == null ? '—' : v);
+
+    // De langst wachtende komt wél uit de lijst — die staat er alleen in als
+    // je ook echt naar de wachtrij kijkt, en dan klopt 'ie.
     const langst = g
       .filter((x) => x.status === 'wacht_op_ons' && x.laatste_klant_bericht_op)
       .map((x) => Date.parse(x.laatste_klant_bericht_op))
@@ -203,9 +226,12 @@
 
     const a = _aanwezig.data;
     return H.kpis([
-      { c: 'amber',   icon: I.alert,  label: 'Wacht op ons',    val: wacht,  sub: wacht ? 'langst: ' + geleden(langst ? new Date(langst).toISOString() : null) : 'niets openstaand', hi: wacht > 0 },
-      { c: 'violet',  icon: I.bot,    label: 'Bij de bot',      val: bot,    sub: 'zelf afgehandeld' },
-      { c: 'rose',    icon: I.check2, label: 'Open acties',     val: acties, sub: 'wachten op goedkeuring', hi: acties > 0 },
+      { c: 'amber', icon: I.alert, label: 'Wacht op ons', val: getal(t.wacht_op_ons),
+        sub: langst ? 'langst: ' + geleden(new Date(langst).toISOString()) : 'niets openstaand',
+        hi: (t.wacht_op_ons || 0) > 0 },
+      { c: 'violet', icon: I.bot, label: 'Bij de bot', val: getal(t.bot), sub: 'bot handelt zelf af' },
+      { c: 'rose', icon: I.check2, label: 'Open acties', val: getal(t.open_acties),
+        sub: 'wachten op goedkeuring', hi: (t.open_acties || 0) > 0 },
       { c: a?.live ? 'emerald' : 'slate', icon: I.chat, label: 'Live chat',
         val: a?.live ? 'Aan' : 'Uit',
         sub: a ? (a.online_namen?.length ? a.online_namen.join(', ') : (a.binnen_kantooruren ? 'niemand online' : 'buiten kantooruren')) : '…' },
@@ -226,7 +252,7 @@
         { l: 'Financieel', v: 'financieel' },
         { l: 'Informatie', v: 'informatie' },
       ], ond),
-      `<button class="btn ${aan ? '' : 'btn-primary'}" style="margin-left:auto" onclick="window.__supAanwezig()" ${_aanwezig.bezig ? 'disabled' : ''}>
+      `<button class="btn ${aan ? 'btn-ghost' : 'btn-primary'}" style="margin-left:auto" onclick="window.__supAanwezig()" ${_aanwezig.bezig ? 'disabled' : ''}>
          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
            background:${aan ? '#07835A' : '#C9D2DE'}"></span>
          ${aan ? 'Ik sta aan' : 'Zet me aan voor live chat'}
@@ -364,10 +390,11 @@
         ? `<span style="margin-left:7px;opacity:.7">${Math.round(b.meta.vertrouwen * 100)}% · ${esc(b.meta.intent || '')}</span>` : '';
       return `<div style="align-self:${vanKlant ? 'flex-start' : 'flex-end'};max-width:78%">
         ${naam ? `<div style="font-size:11px;font-weight:650;color:var(--text-2);margin-bottom:3px;text-align:right">${esc(naam)}${vertrouwen}</div>` : ''}
-        <div style="padding:9px 13px;border-radius:13px;font-size:13.3px;line-height:1.5;white-space:pre-wrap;
+        <div class="${vanKlant ? '' : 'sup-bubbel-ons'}"
+          style="padding:9px 13px;border-radius:13px;font-size:13.3px;line-height:1.5;white-space:pre-wrap;
           ${vanKlant
             ? 'background:var(--surface-2);color:var(--text);border-bottom-left-radius:4px'
-            : 'background:var(--m);color:#fff;border-bottom-right-radius:4px'}">${esc(b.tekst)}</div>
+            : 'border-bottom-right-radius:4px'}">${esc(b.tekst)}</div>
         <div style="font-size:10.5px;color:var(--text-3);margin-top:3px;text-align:${vanKlant ? 'left' : 'right'}">${dtijd(b.created_at)}</div>
       </div>`;
     }).join('');
@@ -383,6 +410,27 @@
       <span style="color:${kleur || 'var(--text)'};text-align:right;font-weight:550">${v}</span></div>`;
 
     let h = '';
+
+    // Openstaande acties bovenaan. Dat is wat er van jou gevraagd wordt; de
+    // gegevens eronder zijn achtergrond. Stonden ze onderaan, dan verdwenen
+    // ze onder de vouw van een paneel dat toch al scrollt.
+    const open = (acties || []).filter((a) => a.status === 'voorgesteld');
+    const rest = (acties || []).filter((a) => a.status !== 'voorgesteld');
+
+    if (open.length) {
+      h += blok('Wacht op jouw besluit', open.map((a) => `<div style="padding:11px 12px;border:1px solid var(--m-line);
+        background:var(--m-soft);border-radius:var(--r);margin-bottom:8px">
+        <div style="font-size:12.6px;font-weight:650;color:var(--text);margin-bottom:3px">${esc(ACTIE_LABEL[a.soort] || a.soort)}</div>
+        <div style="font-size:12.2px;color:var(--text-2);line-height:1.5;margin-bottom:9px">${esc(a.omschrijving)}</div>
+        ${a.payload?.lms_reden ? `<div style="font-size:11.4px;color:var(--text-3);margin-bottom:9px">reden: ${esc(a.payload.lms_reden)}</div>` : ''}
+        <div style="display:flex;gap:7px">
+          <button class="btn btn-primary btn-sm" onclick="window.__supActie('${a.id}','goedkeuren')">Goedkeuren</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.__supActie('${a.id}','afwijzen')">Afwijzen</button>
+        </div></div>`).join('')
+        + `<div style="font-size:11.4px;color:var(--text-3);line-height:1.5">
+             Goedkeuren legt vast dát het mag — uitvoeren doe je zelf en zet je daarna op &ldquo;gedaan&rdquo;.
+             De klant krijgt pas bericht bij &ldquo;gedaan&rdquo;.</div>`);
+    }
 
     h += blok('Contact', [
       regel('Naam', esc(g.naam || '—')),
@@ -432,7 +480,7 @@
       ].join(''));
 
       if (ctx.customer_id) {
-        h += `<a class="btn btn-sm" style="display:block;text-align:center;margin-bottom:16px"
+        h += `<a class="btn btn-ghost btn-sm" style="display:block;text-align:center;margin-bottom:16px"
           href="/modules/klanten-v2/?mod=klanten&klant=${esc(ctx.customer_id)}">Open het klantdossier</a>`;
       }
     } else if (g.geverifieerd) {
@@ -441,34 +489,14 @@
         Mailadres bevestigd, maar er staat geen klant met dit adres in het systeem.</div>`;
     }
 
-    const open = (acties || []).filter((a) => a.status === 'voorgesteld');
-    const rest = (acties || []).filter((a) => a.status !== 'voorgesteld');
-
-    if (open.length || rest.length) {
-      h += blok('Voorgestelde acties', [
-        ...open.map((a) => `<div style="padding:11px 12px;border:1px solid var(--m-line);background:var(--m-soft);
-          border-radius:var(--r);margin-bottom:8px">
-          <div style="font-size:12.6px;font-weight:650;color:var(--text);margin-bottom:3px">${esc(ACTIE_LABEL[a.soort] || a.soort)}</div>
-          <div style="font-size:12.2px;color:var(--text-2);line-height:1.5;margin-bottom:9px">${esc(a.omschrijving)}</div>
-          ${a.payload?.lms_reden ? `<div style="font-size:11.4px;color:var(--text-3);margin-bottom:9px">reden: ${esc(a.payload.lms_reden)}</div>` : ''}
-          <div style="display:flex;gap:7px">
-            <button class="btn btn-sm btn-primary" onclick="window.__supActie('${a.id}','goedkeuren')">Goedkeuren</button>
-            <button class="btn btn-sm" onclick="window.__supActie('${a.id}','afwijzen')">Afwijzen</button>
-          </div></div>`),
-        ...rest.map((a) => `<div style="padding:9px 12px;border:1px solid var(--border);border-radius:var(--r);
-          margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px">
-          <div><div style="font-size:12.3px;color:var(--text)">${esc(ACTIE_LABEL[a.soort] || a.soort)}</div>
-          <div style="font-size:11.4px;color:var(--text-3)">${esc(a.status)}</div></div>
-          ${a.status === 'goedgekeurd'
-            ? `<button class="btn btn-sm" onclick="window.__supActie('${a.id}','uitgevoerd')">Gedaan</button>` : ''}
-        </div>`),
-      ].join(''));
-
-      if (open.length) {
-        h += `<div style="font-size:11.4px;color:var(--text-3);line-height:1.5;margin-top:-6px;margin-bottom:16px">
-          Goedkeuren legt vast dát het mag — uitvoeren doe je zelf en zet je daarna op “gedaan”.
-          De klant krijgt pas bericht bij “gedaan”.</div>`;
-      }
+    if (rest.length) {
+      h += blok('Eerdere acties', rest.map((a) => `<div style="padding:9px 12px;border:1px solid var(--border);
+        border-radius:var(--r);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div><div style="font-size:12.3px;color:var(--text)">${esc(ACTIE_LABEL[a.soort] || a.soort)}</div>
+        <div style="font-size:11.4px;color:var(--text-3)">${esc(a.status)}</div></div>
+        ${a.status === 'goedgekeurd'
+          ? `<button class="btn btn-ghost btn-sm" onclick="window.__supActie('${a.id}','uitgevoerd')">Gedaan</button>` : ''}
+      </div>`).join(''));
     }
 
     return h;
@@ -488,7 +516,7 @@
     if (_det.error) {
       return `<div style="margin:16px 20px;padding:14px;border:1px solid var(--rose-line);background:var(--rose-soft);
         border-radius:var(--r);color:var(--rose)">${esc(_det.error)}
-        <button class="btn btn-sm" style="margin-left:12px" onclick="window.__supTerug()">Terug</button></div>`;
+        <button class="btn btn-ghost btn-sm" style="margin-left:12px" onclick="window.__supTerug()">Terug</button></div>`;
     }
 
     const d = _det.data;
@@ -499,7 +527,7 @@
 
     return `
     <div style="padding:16px 20px 0">
-      <button class="btn btn-sm" onclick="window.__supTerug()">&lsaquo; Terug naar de lijst</button>
+      <button class="btn btn-ghost btn-sm" onclick="window.__supTerug()">&lsaquo; Terug naar de lijst</button>
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;padding:14px 20px 20px;align-items:start">
@@ -515,11 +543,11 @@
           </div>
           ${H.pill(pc, pl)}
           ${!g.toegewezen_aan && !klaar ? `<button class="btn btn-sm btn-primary" onclick="window.__supPak()">Oppakken</button>` : ''}
-          ${!klaar ? `<button class="btn btn-sm" onclick="window.__supStatus('afgehandeld')">Afronden</button>`
-                   : `<button class="btn btn-sm" onclick="window.__supStatus('in_behandeling')">Heropenen</button>`}
+          ${!klaar ? `<button class="btn btn-ghost btn-sm" onclick="window.__supStatus('afgehandeld')">Afronden</button>`
+                   : `<button class="btn btn-ghost btn-sm" onclick="window.__supStatus('in_behandeling')">Heropenen</button>`}
         </div>
 
-        <div id="sup-thread" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px">
+        <div id="sup-thread" class="sup-thread" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px">
           ${thread(d.berichten)}
         </div>
 
@@ -548,6 +576,179 @@
     </div>`;
   }
 
+  /* ── instellingen ─────────────────────────────────────────────────────── */
+  //
+  // Alles hier stond eerst alleen in de database. Zonder dit scherm is
+  // "we zijn voortaan tot 18:00 bereikbaar" een SQL-opdracht, en dan
+  // verandert het nooit.
+
+  const DAGEN = [[1, 'ma'], [2, 'di'], [3, 'wo'], [4, 'do'], [5, 'vr'], [6, 'za'], [0, 'zo']];
+
+  async function laadInstellingen() {
+    _inst.loading = true; _inst.error = null;
+    if (window.DFO?.render) window.DFO.render();
+    const r = await haal('instellingen', '/api/support-instellingen');
+    _inst.loading = false;
+    if (!r) _inst.error = 'Kon de instellingen niet ophalen.';
+    else { _inst.data = r; _inst.concept = {}; }
+    if (window.DFO?.render) window.DFO.render();
+  }
+
+  // Wijzigingen verzamelen in _inst.concept en pas bij Opslaan versturen.
+  // Per toetsaanslag opslaan zou betekenen dat een half ingetypte tijd ook
+  // echt de kantooruren wordt.
+  window.__supInst = (pad, waarde) => {
+    const [groep, veld] = pad.split('.');
+    _inst.concept[groep] = _inst.concept[groep] || {};
+    _inst.concept[groep][veld] = waarde;
+  };
+
+  window.__supInstDag = (dag, el) => {
+    const huidig = _inst.concept.kantooruren?.dagen
+      || _inst.data?.kantooruren?.dagen || [1, 2, 3, 4, 5];
+    const set = new Set(huidig.map(Number));
+    if (el.checked) set.add(Number(dag)); else set.delete(Number(dag));
+    window.__supInst('kantooruren.dagen', [...set].sort((a, b) => a - b));
+  };
+
+  window.__supInstOpslaan = async () => {
+    if (_inst.bezig) return;
+    // De kantooruren gaan als geheel mee: de server valideert start, eind,
+    // dagen en tijdzone samen, en een half object zou de andere velden
+    // wissen.
+    const body = {};
+    if (_inst.concept.kantooruren) {
+      body.kantooruren = { ...(_inst.data?.kantooruren || {}), ...(_inst.concept.kantooruren) };
+    }
+    if (_inst.concept.widget) body.widget = _inst.concept.widget;
+    if (_inst.concept.bot) body.bot = _inst.concept.bot;
+    if (!Object.keys(body).length) { if (window.KV?.toast) window.KV.toast('Er is niets gewijzigd'); return; }
+
+    _inst.bezig = true;
+    if (window.DFO?.render) window.DFO.render();
+    try {
+      const r = await stuur('instellingen', '/api/support-instellingen', body, 'PATCH');
+      _inst.data = r; _inst.concept = {};
+      if (window.KV?.toast) window.KV.toast('Opgeslagen');
+    } catch (e) {
+      _inst.error = e.message;
+      if (window.KV?.toast) window.KV.toast(e.message, 'err');
+    }
+    _inst.bezig = false;
+    if (window.DFO?.render) window.DFO.render();
+  };
+
+  window.__supKopieer = async (tekst) => {
+    try {
+      await navigator.clipboard.writeText(tekst);
+      if (window.KV?.toast) window.KV.toast('Gekopieerd');
+    } catch (_) {
+      if (window.KV?.toast) window.KV.toast('Kopiëren lukte niet — selecteer de regel handmatig', 'err');
+    }
+  };
+
+  function kaart(titel, uitleg, inhoud) {
+    return `<div style="border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);
+      padding:18px;margin-bottom:16px">
+      <div style="font-size:14px;font-weight:650;color:var(--text);margin-bottom:3px">${titel}</div>
+      ${uitleg ? `<div style="font-size:12.4px;color:var(--text-2);line-height:1.5;margin-bottom:14px">${uitleg}</div>` : ''}
+      ${inhoud}</div>`;
+  }
+
+  function veld(label, inner, hint) {
+    return `<div style="margin-bottom:13px">
+      <label style="display:block;font-size:12.3px;font-weight:600;color:var(--text);margin-bottom:5px">${label}</label>
+      ${inner}
+      ${hint ? `<div style="font-size:11.4px;color:var(--text-3);margin-top:4px;line-height:1.45">${hint}</div>` : ''}
+    </div>`;
+  }
+
+  const invoerStijl = 'width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:9px;'
+    + 'font:inherit;font-size:13.2px;background:var(--surface);color:var(--text);outline:none';
+
+  function instellingenView() {
+    if (!_inst.data && !_inst.loading && !_inst.error) queueMicrotask(laadInstellingen);
+    if (_inst.loading && !_inst.data) return `<div style="padding:42px;text-align:center;color:var(--text-3)">Instellingen laden…</div>`;
+    if (_inst.error && !_inst.data) {
+      return `<div style="margin:16px 20px;padding:14px;border:1px solid var(--rose-line);background:var(--rose-soft);
+        border-radius:var(--r);color:var(--rose)">${esc(_inst.error)}</div>`;
+    }
+
+    const d = _inst.data || {};
+    const uren = { ...(d.kantooruren || { tz: 'Europe/Amsterdam', dagen: [1, 2, 3, 4, 5], start: '09:00', eind: '17:30' }), ...(_inst.concept.kantooruren || {}) };
+    const w = { ...(d.widget || {}), ...(_inst.concept.widget || {}) };
+    const bot = { ...(d.bot || {}), ...(_inst.concept.bot || {}) };
+    const mag = d.mag_wijzigen !== false;
+    const ro = mag ? '' : ' disabled';
+
+    return `<div style="max-width:780px;padding:18px 20px 30px">
+
+      ${!mag ? `<div style="margin-bottom:16px;padding:11px 13px;border:1px solid var(--border);
+        background:var(--surface-2);border-radius:var(--r);font-size:12.4px;color:var(--text-2)">
+        Je kunt deze instellingen bekijken maar niet wijzigen — daarvoor is het recht
+        <code>support.config</code> nodig.</div>` : ''}
+
+      ${kaart('De widget op de website',
+        'Eén regel in Webflow → Site settings → Custom code → Footer. Staat die er eenmaal, dan is alles hieronder aan te passen zonder de website aan te raken.',
+        `<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
+           <code style="flex:1;padding:9px 11px;background:var(--surface-2);border-radius:9px;
+             font-family:'IBM Plex Mono',monospace;font-size:11.8px;color:var(--text-2);overflow-x:auto;white-space:nowrap">${esc(d.widget_snippet || '')}</code>
+           <button class="btn btn-ghost btn-sm" onclick="window.__supKopieer(this.previousElementSibling.textContent)">Kopieer</button>
+         </div>
+         ${veld('Widget staat aan',
+           `<label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer">
+              <input type="checkbox" ${w.aan ? 'checked' : ''}${ro}
+                onchange="window.__supInst('widget.aan', this.checked)">
+              <span>Bezoekers zien de chatknop</span></label>`,
+           'Uit betekent: de knop verschijnt niet meer. Lopende gesprekken blijven gewoon in de module staan.')}
+         ${veld('Titel', `<input style="${invoerStijl}" value="${esc(w.titel || '')}"${ro} oninput="window.__supInst('widget.titel', this.value)">`)}
+         ${veld('Welkomstzin', `<input style="${invoerStijl}" value="${esc(w.welkom || '')}"${ro} oninput="window.__supInst('widget.welkom', this.value)">`)}
+         ${veld('Antwoordadres',
+           `<input style="${invoerStijl}" value="${esc(w.antwoord_mailbox || '')}"${ro} oninput="window.__supInst('widget.antwoord_mailbox', this.value)">`,
+           'Moet een eigen @deforexopleiding.nl-mailbox zijn — een ander domein komt niet door SPF en belandt in de spam.')}
+         ${veld('Link naar de agenda', `<input style="${invoerStijl}" value="${esc(w.agenda_url || '')}"${ro} oninput="window.__supInst('widget.agenda_url', this.value)">`)}
+         ${veld('Link naar de events', `<input style="${invoerStijl}" value="${esc(w.events_url || '')}"${ro} oninput="window.__supInst('widget.events_url', this.value)">`)}`)}
+
+      ${kaart('Bereikbaarheid',
+        `Binnen deze uren én met minstens één collega op &ldquo;ik sta aan&rdquo; belooft de widget live chat. Daarbuiten krijgt de bezoeker te horen dat het antwoord per mail komt. Nu ingesteld: <b>${esc(d.kantooruren_label || '—')}</b>.`,
+        `${veld('Dagen',
+          `<div style="display:flex;gap:6px;flex-wrap:wrap">${DAGEN.map(([n, l]) => `
+             <label style="display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--border);
+               border-radius:9px;font-size:12.5px;color:var(--text-2);cursor:pointer;background:${(uren.dagen || []).includes(n) ? 'var(--m-soft)' : 'var(--surface)'}">
+               <input type="checkbox" ${(uren.dagen || []).includes(n) ? 'checked' : ''}${ro}
+                 onchange="window.__supInstDag(${n}, this)">${l}</label>`).join('')}</div>`)}
+         <div style="display:flex;gap:12px">
+           <div style="flex:1">${veld('Van', `<input style="${invoerStijl}" value="${esc(uren.start || '')}" placeholder="09:00"${ro} oninput="window.__supInst('kantooruren.start', this.value)">`)}</div>
+           <div style="flex:1">${veld('Tot', `<input style="${invoerStijl}" value="${esc(uren.eind || '')}" placeholder="17:30"${ro} oninput="window.__supInst('kantooruren.eind', this.value)">`)}</div>
+         </div>
+         ${veld('Tijdzone', `<input style="${invoerStijl}" value="${esc(uren.tz || '')}"${ro} oninput="window.__supInst('kantooruren.tz', this.value)">`,
+           'Een IANA-zone zoals Europe/Amsterdam, geen +02:00 — dan klopt de zomertijd vanzelf.')}`)}
+
+      ${kaart('De bot',
+        `Sam beantwoordt wat 'ie zeker weet en zet de rest door naar de wachtrij. Welke onderwerpen hij zelf mag doen en bij welk vertrouwen, staat in <code>joost_config.autonomy_config</code> — dat is bewust geen veldje hier.`,
+        `${veld('Bot staat aan',
+           `<label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer">
+              <input type="checkbox" ${bot.is_enabled ? 'checked' : ''}${ro}
+                onchange="window.__supInst('bot.is_enabled', this.checked)">
+              <span>Sam antwoordt zelf</span></label>`,
+           'Uit betekent: elk gesprek gaat direct naar de wachtrij. Handig als je even wilt meekijken.')}
+         ${veld('Naam', `<input style="${invoerStijl}" value="${esc(bot.persona_name || '')}"${ro} oninput="window.__supInst('bot.persona_name', this.value)">`)}
+         ${veld('Instructie',
+           `<textarea style="${invoerStijl};min-height:190px;line-height:1.5;resize:vertical;font-family:'IBM Plex Mono',monospace;font-size:12.2px"${ro}
+             oninput="window.__supInst('bot.system_prompt_template', this.value)">${esc(bot.system_prompt_template || '')}</textarea>`,
+           'Dit is letterlijk wat Sam als opdracht meekrijgt. <code>{klant_naam}</code> wordt vervangen door de voornaam als die bekend is.')}
+         ${veld('Temperatuur', `<input style="${invoerStijl};max-width:120px" value="${esc(String(bot.temperature ?? 0.3))}"${ro} oninput="window.__supInst('bot.temperature', this.value)">`,
+           'Tussen 0 en 1. Laag is voorspelbaar en saai, hoog is losser en minder betrouwbaar. 0.3 is een goede plek voor support.')}
+         ${bot.feature_flags ? `<div style="font-size:11.6px;color:var(--text-3);line-height:1.6;margin-top:6px">
+            Fases: ${Object.entries(bot.feature_flags).map(([k, v]) => `<code>${esc(k)}</code> ${v ? 'aan' : 'uit'}`).join(' · ')}</div>` : ''}`)}
+
+      ${mag ? `<button class="btn btn-primary" onclick="window.__supInstOpslaan()" ${_inst.bezig ? 'disabled' : ''}
+        style="padding:10px 20px">${_inst.bezig ? 'Opslaan…' : 'Wijzigingen opslaan'}</button>` : ''}
+      ${_inst.error ? `<div style="margin-top:12px;padding:11px 13px;border:1px solid var(--rose-line);
+        background:var(--rose-soft);border-radius:var(--r);color:var(--rose);font-size:12.6px">${esc(_inst.error)}</div>` : ''}
+    </div>`;
+  }
+
   /* ── tabs ─────────────────────────────────────────────────────────────── */
   function lijstView(tab) {
     const params = lijstParams(tab);
@@ -566,6 +767,7 @@
 
   function wrap(tab) {
     return () => {
+      if (tab === 'Instellingen') { stopDetailPoll(); return instellingenView(); }
       if (urlParam('gesprek')) return detailView();
       stopDetailPoll();
       if (_det.id) { _det.id = null; _det.data = null; _det.error = null; }
@@ -577,6 +779,7 @@
   window.DFO.VIEWS['support/Mijn gesprekken'] = wrap('Mijn gesprekken');
   window.DFO.VIEWS['support/Alles']           = wrap('Alles');
   window.DFO.VIEWS['support/Afgehandeld']     = wrap('Afgehandeld');
+  window.DFO.VIEWS['support/Instellingen']   = wrap('Instellingen');
 
   // Opruimen. Een setInterval die een modulewissel overleeft blijft de
   // server bevragen voor een scherm dat niemand ziet — en dat is in dit

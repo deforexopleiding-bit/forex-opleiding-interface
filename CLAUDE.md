@@ -236,8 +236,13 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   `modules/klanten-v2/views/support-v2.js` (tabs Wachtrij / Mijn gesprekken /
   Alles / Afgehandeld). Tabellen `support_gesprekken` / `_berichten` /
   `_verificaties` / `_aanwezigheid` / `_acties`. LET OP: dit staat los van de
-  bestaande `tickets`-tabel, die een INTERNE bug/feature-tracker is. Zie
-  docs/support-module-plan.md.
+  bestaande `tickets`-tabel, die een INTERNE bug/feature-tracker is.
+  Kennis uit `kennisbank_artikelen` met `agents @> ['support']`; onbeantwoorde
+  vragen naar `kennisbank_unmatched` (`agent_key='support'`). Kantooruren,
+  widgetteksten en de bot zijn in de module zelf in te stellen
+  (tab Instellingen, recht `support.config`, endpoint
+  `api/support-instellingen.js`) — `autonomy_config`, `feature_flags` en
+  `model` bewust NIET, die blijven SQL. Zie docs/support-module-plan.md.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)

@@ -58,6 +58,11 @@ Eigen `support_*`-namespace, los van de interne `tickets`-tabel.
 - **`support_acties`** — door de bot of een medewerker voorgestelde actie met
   status `voorgesteld` → `goedgekeurd`/`afgewezen` → `uitgevoerd`/`mislukt`.
 
+Kennis komt uit `kennisbank_artikelen` met `agents @> ['support']` — dezelfde
+tabel die Joost, Simone, Mila en Lisa gebruiken, dus één plek om bij te
+houden. Wat de bot niet wist, landt in `kennisbank_unmatched` met
+`agent_key='support'`: dat lijstje ís de achterstand in de kennisbank.
+
 Bot-configuratie krijgt **geen eigen tabel**: een rij `module='support'` in
 `joost_config` hergebruikt persona, prompt, kennisbank, model, mandaat en
 feature-flags, inclusief de bestaande admin-UI-patronen.
@@ -110,7 +115,7 @@ iemand beschikbaar → live chat. Anders → wachtrij met mailbelofte.
 
 | Fase | Inhoud | Status |
 |---|---|---|
-| S1 | Datamodel, RBAC, publieke API, widget, CRM-module, bot met kennisbank + read-only lookups, voorgestelde acties | deze PR |
+| S1 | Datamodel, RBAC, publieke API, widget, CRM-module incl. instellingen-tab, bot met kennisbank + read-only lookups, voorgestelde acties | deze PR |
 | S2 | Uitvoeren van goedgekeurde acties (uitnodiging opnieuw sturen) | later |
 | S3 | Autonoom antwoorden buiten kantooruren, per intent achter feature-flag | later |
 | S4 | Abonnement pauzeren / factuur crediteren vanuit een goedgekeurde actie | later, pas als S2 bewezen is |
@@ -120,6 +125,7 @@ iemand beschikbaar → live chat. Anders → wachtrij met mailbelofte.
 | Variabele | Waarvoor | Zonder |
 |---|---|---|
 | `SUPPORT_WIDGET_ORIGINS` | komma-gescheiden extra toegestane origins | alleen de ingebouwde allowlist |
+| `DFO_LMS_SUPABASE_URL` + `_SERVICE_ROLE_KEY` | LMS-status opzoeken | bot zegt "dat kan ik nu niet zien" |
 | `ANTHROPIC_API_KEY` | de bot | 503, widget valt terug op "we nemen contact op" |
 | `IMAP_PASS_INFO` | verificatiecodes en antwoordmails vanaf info@ | verificatie onmogelijk (503) |
 
@@ -136,4 +142,11 @@ iemand beschikbaar → live chat. Anders → wachtrij met mailbelofte.
    dat hoort niet standaard bij een mentor. Wil je dat mentoren
    LMS-vragen oppakken, zet dan `support.module.access` en `support.reply`
    voor mentor aan — het paneel toont dan ook de facturen.
-4. Kantooruren controleren in `app_settings.support_kantooruren`.
+4. Kantooruren, widgetteksten en de bot instellen in **Support →
+   Instellingen** (recht `support.config`). Daar staat ook het script-snippet
+   met een kopieerknop, zodat niemand het hoeft over te typen.
+5. Optioneel: `docs/sql-migrations/2026-09-22-support-kennisbank-seed.sql`
+   draaien voor zeventien startartikelen (LMS, Discord, traject, financieel,
+   events, contact). Overslaan mag — de bot werkt dan gewoon, hij weet
+   alleen minder en escaleert vaker. Daarna bij te houden in
+   Instellingen → Kennisbank.
