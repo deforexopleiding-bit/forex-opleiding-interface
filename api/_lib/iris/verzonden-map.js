@@ -132,6 +132,34 @@ export function codeerKop(tekst) {
  * @returns {Promise<{ok: boolean, map?: string, reden?: string}>}
  */
 export async function zetInVerzonden({ mailbox, naar, onderwerp, tekst, messageId, inReplyTo = null }) {
+  let rauw;
+  try {
+    rauw = bouwRfc822({ van: mailbox, naar, onderwerp, tekst, messageId, inReplyTo });
+  } catch (e) {
+    return { ok: false, reden: e?.message || 'bericht niet op te bouwen' };
+  }
+  return zetRauwInVerzonden({ mailbox, rauw });
+}
+
+/**
+ * Zet een KANT-EN-KLAAR bericht in de map Verzonden.
+ *
+ * Het verschil met zetInVerzonden(): daar bouwen we zelf een eenvoudig
+ * platte-tekstbericht, hier krijgen we de bytes aangereikt. Dat is wat
+ * api/send-email.js nodig heeft — die mail kan opmaak, kopieontvangers en
+ * bijlagen hebben, en een kopie die dat alles kwijt is, is een kopie die
+ * liegt over wat je verstuurd hebt.
+ *
+ * Deze functie was eerst alleen voor Iris. Ze is het nu niet meer: het gat dat
+ * ze dicht (G7) zit in de gewone antwoordknop net zo goed. Het bestand mag bij
+ * een volgende opruiming naar de gedeelde laag; dat is geen bijvangst van deze
+ * bouw.
+ *
+ * Gooit nooit. De mail is op het moment dat dit draait al verstuurd.
+ *
+ * @returns {Promise<{ok: boolean, map?: string, reden?: string}>}
+ */
+export async function zetRauwInVerzonden({ mailbox, rauw, vlaggen = ['\\Seen'] }) {
   const wachtwoordVar = WACHTWOORDEN[String(mailbox || '').toLowerCase()];
   if (!wachtwoordVar) {
     return { ok: false, reden: `onbekende mailbox: ${mailbox}` };
@@ -141,6 +169,9 @@ export async function zetInVerzonden({ mailbox, naar, onderwerp, tekst, messageI
   if (!wachtwoord || !host) {
     // Alleen de NAAM van de ontbrekende variabele, nooit de waarde.
     return { ok: false, reden: `ontbreekt in omgeving: ${!host ? 'IMAP_HOST' : wachtwoordVar}` };
+  }
+  if (!rauw || (typeof rauw !== 'string' && !Buffer.isBuffer(rauw))) {
+    return { ok: false, reden: 'geen bericht om neer te zetten' };
   }
 
   let client;
@@ -161,8 +192,7 @@ export async function zetInVerzonden({ mailbox, naar, onderwerp, tekst, messageI
       return { ok: false, reden: 'geen map Verzonden gevonden' };
     }
 
-    const rauw = bouwRfc822({ van: mailbox, naar, onderwerp, tekst, messageId, inReplyTo });
-    await client.append(doel, rauw, ['\\Seen']);
+    await client.append(doel, rauw, vlaggen);
     return { ok: true, map: doel };
   } catch (e) {
     // De mail is op dit moment al verstuurd. Dit mislukken verandert niets aan
