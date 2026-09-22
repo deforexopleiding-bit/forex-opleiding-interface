@@ -4399,6 +4399,12 @@
         : (c.last_message_at ? _wbxRelativeTime(c.last_message_at) : '');
       const unread = Number(c.total_unread ?? c.unread_count) || 0;
       const briefBadge = c.brief_sent ? '<span title="Brief verstuurd" style="font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--blue-soft);color:var(--blue);font-weight:600;margin-left:4px">✉</span>' : '';
+      // G4 — van wie is dit? In de LIJST, want dat is waar je scant. Alleen de
+      // initialen: een hele naam duwt de klantnaam weg, en de hele naam staat
+      // in de tooltip en in de kop van het gesprek.
+      const eigenaarBadge = (_gv2() && c.toegewezen_naam)
+        ? `<span title="Toegewezen aan ${esc(c.toegewezen_naam)}" style="font-size:9px;padding:1px 4px;border-radius:4px;background:var(--brand-soft,#E2F1F5);color:var(--brand);font-weight:700;margin-left:4px">${esc(_initialen(c.toegewezen_naam))}</span>`
+        : '';
       // BROK WB-FIDELITY-1 goedkoop: avatar-initialen cirkel links.
       const initials = _wbxInitialsFor(name);
       const bg = active
@@ -4409,7 +4415,7 @@
         <div style="width:32px;height:32px;border-radius:50%;background:var(--brand-soft,#E2F1F5);color:var(--brand);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;letter-spacing:.05em;text-transform:uppercase">${esc(initials)}</div>
         <div style="min-width:0;flex:1">
           <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
-            <div style="font-weight:${unread > 0 ? '700' : '500'};font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(name)}${briefBadge}</div>
+            <div style="font-weight:${unread > 0 ? '700' : '500'};font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(name)}${briefBadge}${eigenaarBadge}</div>
             <div style="font-size:10.5px;color:${unread > 0 ? 'var(--rose)' : 'var(--text-3)'};white-space:nowrap;font-weight:${unread > 0 ? '600' : '400'}">${esc(when)}</div>
           </div>
           <div style="font-size:11.5px;color:${unread > 0 ? 'var(--text-1)' : 'var(--text-3)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;font-weight:${unread > 0 ? '500' : '400'}">${esc(preview)}</div>
@@ -4488,6 +4494,16 @@
      `window.GESPREKKEN_V2` in dit bestand op precies twee plekken staat — hier
      en in de poort hierboven. Een aanroep die de poort omzeilt is dan geen
      kwestie van goed lezen meer, maar van een test die omvalt. */
+  /* Twee letters uit een naam. "Dave Jansen" -> "DJ", "Maxim" -> "MA".
+     Een badge met een hele naam duwt de klantnaam uit beeld, en de klantnaam
+     is waar je op zoekt. De volledige naam staat in de tooltip. */
+  function _initialen(naam) {
+    const delen = String(naam || '').trim().split(/\s+/).filter(Boolean);
+    if (!delen.length) return '?';
+    if (delen.length === 1) return delen[0].slice(0, 2).toUpperCase();
+    return (delen[0][0] + delen[delen.length - 1][0]).toUpperCase();
+  }
+
   function _gv2() {
     return _gesprekkenV2() ? window.GESPREKKEN_V2 : null;
   }
@@ -5066,6 +5082,104 @@
      Bevat: naam · Brief-tag · <spacer> · 24h-badge · ✓ Afhandelen · + Nieuwe
      actie · 👤 Klantgegevens · ⋮ kebab-menu (8 v1-items).
      Klik op ⋮ toont dropdown-panel; klik buiten (of nieuwe klik) sluit. */
+  /* ── G4 — wie pakt dit op? ─────────────────────────────────────────────────
+     Nergens stond van wie een gesprek was. Bij twee mensen op één postbus is
+     dat geen randgeval maar de normale gang van zaken: twee mensen antwoorden,
+     of niemand doet het omdat allebei aannemen dat de ander al bezig is.
+
+     Het veld bestond al (iris_gesprekken.toegewezen_aan, met NULL als "Iris
+     houdt het vast"). Er was alleen niets dat het zette of toonde.
+
+     Een gewone <select> en geen eigen uitklapmenu: die werkt met het
+     toetsenbord, sluit vanzelf bij scrollen, en heeft geen van de
+     position:fixed-kunstgrepen nodig die elders in dit bestand staan. */
+  function _inboxToewijzingHtml(convId, row) {
+    const gv = _gv2();
+    if (!gv || !convId) return '';
+    const mensen = asArr(_live.inbox.toewijzen?.mensen);
+    const naam = row && row.toegewezen_naam ? String(row.toegewezen_naam) : null;
+    const huidig = row && row.toegewezen_aan ? String(row.toegewezen_aan) : '';
+    const bezig = !!(_live.inbox.toewijzen && _live.inbox.toewijzen.bezig === String(convId));
+
+    // Nog geen lijst? Dan tonen we alleen van wie het is, en halen we de lijst
+    // op zodra iemand kijkt. Een leeg keuzemenu is misleidender dan geen menu.
+    if (!mensen.length) {
+      if (!_live.inbox.toewijzen?.geladen && !_live.inbox.toewijzen?.laadt) {
+        queueMicrotask(() => _fetchInboxToewijsbaar());
+      }
+      return naam
+        ? `<span title="Toegewezen aan ${esc(naam)}" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--brand-soft,#E2F1F5);color:var(--brand);font-weight:600">👤 ${esc(naam)}</span>`
+        : '';
+    }
+
+    const opties = ['<option value="">Niemand · Iris houdt het vast</option>']
+      .concat(mensen.map((m) => {
+        const gekozen = String(m.id) === huidig ? ' selected' : '';
+        const label = m.ben_ik ? `${m.naam} (ik)` : m.naam;
+        return `<option value="${esc(m.id)}"${gekozen}>${esc(label)}</option>`;
+      }))
+      .join('');
+
+    return `<select ${bezig ? 'disabled' : ''} title="Wie pakt dit gesprek op?"
+      onchange="window.__wbxInboxToewijzen('${esc(convId)}', this.value)"
+      style="font-size:10px;padding:2px 5px;border-radius:5px;border:1px solid var(--border);background:${huidig ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface-2)'};color:${huidig ? 'var(--brand)' : 'var(--text-3)'};font-weight:600;max-width:150px;opacity:${bezig ? '0.6' : '1'}">
+      ${opties}
+    </select>`;
+  }
+
+  async function _fetchInboxToewijsbaar() {
+    _live.inbox.toewijzen = _live.inbox.toewijzen || {};
+    if (_live.inbox.toewijzen.laadt || _live.inbox.toewijzen.geladen) return;
+    _live.inbox.toewijzen.laadt = true;
+    const j = await tryFetch('inbox:toewijsbaar', '/api/inbox-gesprek-toewijzen', 8000);
+    _live.inbox.toewijzen.laadt = false;
+    // Geladen blijft true ook bij een fout: anders probeert elke hertekening
+    // het opnieuw en tikt een kapot endpoint aan als een verkapte poll.
+    _live.inbox.toewijzen.geladen = true;
+    _live.inbox.toewijzen.mensen = (j && !j.error) ? asArr(j.mensen) : [];
+    if (j && j.error) console.warn('[wbx toewijzen] lijst niet opgehaald:', j.error);
+    else _repaintInboxThreadHeader();
+  }
+
+  window.__wbxInboxToewijzen = async (convId, profileId) => {
+    const gv = _gv2();
+    if (!gv || !convId) return;
+    _live.inbox.toewijzen = _live.inbox.toewijzen || {};
+    _live.inbox.toewijzen.bezig = String(convId);
+    _repaintInboxThreadHeader();
+
+    const r = await apiPost('/api/inbox-gesprek-toewijzen', {
+      conversation_id: convId,
+      profile_id: profileId ? String(profileId) : null,
+    });
+    _live.inbox.toewijzen.bezig = null;
+
+    if (!r.ok) {
+      // Een gesprek dat Iris nog niet verwerkt heeft, heeft geen rij om aan te
+      // hangen. Dat is geen fout van wie het probeert, dus zeg wat er aan de
+      // hand is en niet alleen "mislukt".
+      _toast(r.json?.code === 'GEEN_GESPREKSRIJ'
+        ? 'Iris heeft dit gesprek nog niet verwerkt; toewijzen kan zo nog niet.'
+        : ('Toewijzen mislukt: ' + (r.error || 'onbekend')), 'error');
+      // Terugtekenen op de waarde die er in de lijst staat, zodat het vakje
+      // niet blijft hangen op een keuze die niet is opgeslagen.
+      _repaintInboxThreadHeader();
+      return;
+    }
+
+    // De lijstregel bijwerken zodat de kop en de lijst hetzelfde zeggen; de
+    // volgende poll zou dat ook doen, maar dan staat er tot 45 seconden lang
+    // iets anders dan wat je net gekozen hebt.
+    const rij = (_live.inbox.convs.items || []).find((x) => String(x.id) === String(convId));
+    if (rij) {
+      rij.toegewezen_aan = r.json?.toegewezen_aan || null;
+      rij.toegewezen_naam = r.json?.toegewezen_naam || null;
+    }
+    _toast(r.json?.toegewezen_naam ? ('Toegewezen aan ' + r.json.toegewezen_naam) : 'Toewijzing weggehaald.', 'success');
+    _repaintInboxThreadHeader();
+    _repaintInboxList();
+  };
+
   function _inboxThreadHeaderHtml(convId) {
     if (!convId) return '';
     const bag  = _live.inbox.thread.byConv[convId];
@@ -5131,6 +5245,7 @@
         <span style="display:flex;gap:5px;align-items:center;flex-shrink:0">
           ${briefBadge}
           ${window24}
+          ${_inboxToewijzingHtml(convId, row)}
         </span>
       </div>
       <div style="display:flex;gap:4px;align-items:center;justify-content:flex-end;flex-wrap:wrap">

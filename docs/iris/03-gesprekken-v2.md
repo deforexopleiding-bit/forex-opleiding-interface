@@ -413,6 +413,47 @@ erger zijn, want dan verbergt een filter een gesprek omdat het toevallig in het
 blok zat dat misging. Om dezelfde reden krijgt een gesprek dat Iris nog niet
 gezien heeft `null` als stand en niet `nieuw` — niet-weten is geen status.
 
+### G4 — wie pakt dit op?
+
+Nergens stond van wie een gesprek was. Bij twee mensen op één postbus is dat
+geen randgeval maar de normale gang van zaken: twee mensen antwoorden, of
+niemand doet het omdat allebei aannemen dat de ander al bezig is.
+
+Het veld bestond al — `iris_gesprekken.toegewezen_aan`, met NULL als "Iris houdt
+het vast, er is nog geen mens aan toegewezen". Er was alleen niets dat het zette
+of toonde. Dus ook hier: **geen migratie**.
+
+**In de kop een keuzelijst, in de lijst de initialen.** De lijst is waar je
+scant, dus daar hoort te staan van wie iets is — maar alleen de initialen, want
+een hele naam duwt de klantnaam uit beeld en dat is juist waar je op zoekt. De
+volledige naam staat in de tooltip en in de kop van het gesprek.
+
+Een gewone `<select>` en geen eigen uitklapmenu: die werkt met het toetsenbord,
+sluit vanzelf bij scrollen, en heeft geen van de `position:fixed`-kunstgrepen
+nodig die elders in dit bestand staan.
+
+**`finance.inbox.send`, hetzelfde recht als antwoorden.** Wie mag antwoorden mag
+het ook claimen; dat is precies dezelfde groep mensen, dus geen nieuw recht en
+geen migratie. Om diezelfde reden zit de lijst met mensen in dít endpoint en
+niet in een beheer-endpoint: wie de inbox bedient heeft geen beheerrechten, en
+zonder die lijst kan hij niets kiezen.
+
+**Een viewer staat er niet bij.** Die mag niet antwoorden, dus een gesprek aan
+hem toewijzen betekent dat het stil blijft liggen bij iemand die er niets mee
+kan — het ziet eruit alsof het belegd is, en dat is erger dan onbelegd. De
+server controleert dat zelf en vertrouwt er niet op dat het scherm alleen
+geldige mensen aanbiedt.
+
+**"Niemand" is een keuze, geen ontbrekende waarde.** Terug naar Iris moet
+kunnen. Zou een lege waarde als "veld vergeten" gelezen worden, dan kun je een
+toewijzing nooit meer weghalen.
+
+**Nooit stil slagen.** Een gesprek dat Iris nog niet verwerkt heeft, heeft geen
+rij in `iris_gesprekken` — dan kán er niets toegewezen worden. Dat geeft een
+`409` met een eigen code terug en het scherm zegt wat er aan de hand is, want
+"opgeslagen!" gevolgd door een leeg vakje na de volgende verversing is erger dan
+een foutmelding: dan denk je dat het belegd is.
+
 ---
 
 ## Wat er nog ligt
@@ -423,7 +464,6 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus wat hierboven staat.
 |---|---|---|
 | G1 | microfoon in de gesprekken-module | Iris heeft er een (via de browser); de gesprekken-module zelf nog niet |
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
-| G4 | toewijzing aan Maxim, Dave of Iris | `iris_gesprekken.toegewezen_aan` bestaat al en wordt nu al meegestuurd met de lijst; wat ontbreekt is het tonen en het zetten |
 | G8 | paginering van de LIJST | de draad is gedaan (zie hierboven); de gesprekslijst haalt nog altijd `limit=1000` in één keer op, en waarschuwt daar zelf voor met `capOverflowWarning` |
 
 ---

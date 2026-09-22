@@ -102,3 +102,18 @@ export function metWerkstand(regel, standen, namen, contactenMetBelofte) {
   uit.belofte_vandaag = !!(stand?.contact_id && contactenMetBelofte && contactenMetBelofte.has(stand.contact_id));
   return uit;
 }
+
+/**
+ * Wie kan een gesprek oppakken?
+ *
+ * Actieve mensen, behalve 'viewer' — die mag niet antwoorden, dus een gesprek
+ * aan hem toewijzen betekent dat het stil blijft liggen bij iemand die er
+ * niets mee kan. Het ziet er dan uit alsof het belegd is, en dat is erger dan
+ * onbelegd.
+ *
+ * Staat hier en niet in het endpoint, zodat een test deze lijst kan nakijken
+ * zonder de databaselaag op te starten.
+ */
+export const TOEWIJSBARE_ROLLEN = Object.freeze([
+  'super_admin', 'admin', 'manager', 'sales', 'mentor', 'administratie',
+]);
