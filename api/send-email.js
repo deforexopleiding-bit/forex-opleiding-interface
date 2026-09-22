@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer';
 import { createUserClient } from './supabase.js';
 import { requirePermissionFailOpen } from './_lib/requirePermission.js';
 import { metHandtekening } from './_lib/email-handtekening.js';
+import { waitUntil } from '@vercel/functions';
+import { magKopieMaken, plaatsKopieInVerzonden } from './_lib/gesprekken-verzondenkopie.js';
 
 // Mailbox → wachtwoord env-var (zelfde als IMAP)
 const SMTP_ACCOUNTS = {
@@ -170,9 +172,42 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── Een kopie in de map Verzonden (gat G7) ──────────────────────────
+    // Strato's SMTP zet onze uitgaande mail nergens in de mailbox zelf neer.
+    // Zonder dit staat je eigen antwoord alleen in ons systeem: wie in
+    // Thunderbird kijkt of op zijn telefoon, ziet het niet — en antwoordt een
+    // tweede keer omdat niets laat zien dat er al geantwoord is.
+    //
+    // Achter GESPREKKEN_V2. Vlag uit = letterlijk het gedrag van vandaag.
+    //
+    // Niet awaited: de mail is hier al weg, en een IMAP-verbinding kost een
+    // paar seconden die de gebruiker anders staat te wachten op iets dat aan
+    // zijn verzending niets meer verandert. waitUntil() houdt de functie in
+    // leven tot de kopie er staat; bestaat die niet (buiten Vercel), dan loopt
+    // de belofte gewoon door. Mislukken doet hij stil — plaatsKopieInVerzonden
+    // gooit nooit.
+    let kopieGepland = false;
+    if (magKopieMaken(process.env)) {
+      const kopie = plaatsKopieInVerzonden({
+        mailbox: from_mailbox,
+        verzendOpdracht: mailOpts,
+        messageId: info.messageId || null,
+      }).then((r) => {
+        // Zonder deze regel is een ontbrekende IMAP_HOST een stilte: de kopie
+        // komt er nooit, niemand ziet waarom, en het lijkt alsof de vlag niets
+        // doet. De reden noemt alleen de NAAM van wat ontbreekt.
+        if (r?.ok) console.log(`[send-email] kopie in map ${r.map}`);
+        else console.warn('[send-email] geen kopie in Verzonden:', r?.reden || 'onbekend');
+        return r;
+      });
+      kopieGepland = true;
+      try { waitUntil(kopie); } catch (_) { /* geen Vercel: loopt vanzelf af */ }
+    }
+
     return res.status(200).json({
       ok:        true,
       messageId: info.messageId,
+      kopieGepland,
       accepted:  info.accepted || [],
       dbSaved:   !dbErr,
     });

@@ -267,11 +267,68 @@ Met een klant blijft de bestaande weg staan: die kijkt naar wat er aan de
 > concludeert ten onrechte dat er geen contact is. Staat nu als waarschuwing bij
 > de functie die de rijen vult.
 
+### G7 — je eigen antwoord terugzien in je mailbox
+
+`send-email.js` verstuurde via Strato's SMTP en schreef een regel in
+`email_replies`. Meer niet. Strato zet uitgaande mail **nergens in de mailbox
+zelf** neer, dus wie in Thunderbird kijkt of op zijn telefoon, ziet zijn eigen
+antwoord niet staan.
+
+Dat is niet alleen onhandig. Het is de directe aanleiding voor een tweede
+antwoord op dezelfde mail — door dezelfde persoon een dag later, of door een
+collega — omdat niets laat zien dat er al geantwoord is.
+
+Iris deed dit al voor haar eigen verzendingen. Dit is dezelfde beweging voor de
+knop waar een mens op drukt.
+
+**De kopie wordt niet opnieuw opgebouwd.** De verleiding is om, zoals Iris doet,
+een eenvoudig platte-tekstbericht in elkaar te zetten. Dat kan hier niet: deze
+mail kan opmaak hebben, kopieontvangers, en bijlagen. Een kopie die de bijlage
+kwijt is, is erger dan geen kopie — dan zie je in Verzonden staan dát je
+geantwoord hebt, en neem je aan dat het contract meeging.
+
+Daarom bouwt `_lib/gesprekken-verzondenkopie.js` de kopie met dezelfde opsteller
+die de verzending gebruikt (nodemailer), uit exact dezelfde opdracht. Wat de
+klant kreeg en wat er in Verzonden komt, is hetzelfde bericht — tot en met het
+`Message-ID`, zodat een mailprogramma de kopie aan de draad hangt in plaats van
+er een los bericht naast te zetten.
+
+Drie dingen liggen vast in tests, want dit zijn de manieren waarop een kopie
+kan liegen over wat je verstuurd hebt:
+
+- **Opmaak, kopieontvanger en bijlage blijven mee.**
+- **Het `Message-ID` gaat mee.** Zonder dat krijgt de kopie een nieuw id en
+  staat hij als tweede, losstaand bericht naast het origineel.
+- **De regeleindes worden rechtgetrokken.** nodemailer zet de kopregels op
+  CRLF maar laat de *tekst* staan zoals hij binnenkwam, en die komt uit een
+  webformulier — dus met kale LF's. Bij het versturen is dat onzichtbaar, want
+  de SMTP-laag trekt het alsnog recht. Bij een `APPEND` doet niemand dat: daar
+  gaan de bytes er precies zo in als wij ze aanleveren. Een strenge server
+  weigert het bericht dan, een minder strenge bewaart een kopie die als één
+  lange regel oogt. Dit is de enige van de drie die de test hier heeft gevonden
+  en niet het ontwerp.
+
+Een blinde kopieontvanger blijft in *onze* kopie wél staan. De echte verzending
+haalt die kopregel eruit — anders zien de ontvangers wie er meelas — maar deze
+bytes gaan alleen naar onze eigen map Verzonden, en daar wil je later juist
+kunnen terugzien wie je meegestuurd hebt.
+
+**Er wordt niet op gewacht.** De mail is weg op het moment dat de kopie begint;
+een IMAP-verbinding kost een paar seconden waar de gebruiker anders op staat te
+wachten voor iets dat aan zijn verzending niets meer verandert. `waitUntil()`
+houdt de functie in leven tot de kopie er staat. Mislukken doet hij stil, maar
+niet ongemerkt: de reden komt in de logs, met alleen de *naam* van wat ontbreekt.
+
+> **Let op bij het aanzetten.** Dit endpoint bedient ook de e-mailmodule en de
+> events-module. Met `GESPREKKEN_V2` aan krijgen die er dus net zo goed een
+> kopie bij. Dat is gewenst — het gat zit daar even hard — maar het is meer dan
+> alleen "de gesprekken", en dat hoor je te weten voordat je de vlag omzet.
+
 ---
 
 ## Wat er nog ligt
 
-Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
+Ongewijzigd ten opzichte van de tabel in de audit, minus wat hierboven staat.
 
 | Gat | Wat | Waarom het nog niet af is |
 |---|---|---|
@@ -279,7 +336,6 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
 | G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
 | G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
-| G7 | IMAP `APPEND` naar Verzonden | raakt `send-email.js` |
 | G8 | paginering | het pollen is gedaan (zie hierboven); de lijst haalt nog altijd `limit=1000` in één keer op |
 
 ---
