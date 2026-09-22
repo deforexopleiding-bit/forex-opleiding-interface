@@ -424,7 +424,7 @@ Dat is niet niks. De gaten zitten elders:
 | G7 | Geen kopie in Verzonden | Je eigen antwoord is buiten het CRM onvindbaar. |
 | G8 | Geen paginering | `limit=1000` op de lijst, `limit=200` op de draad. Groeit mee tot het knapt. |
 | G9 | Verzendstatus niet zichtbaar | `delivered_at` / `read_at` / `failed_reason` staan in de databank maar niet op het scherm. |
-| G10 | `onboarding@` heeft geen scherm | De mail komt binnen en blijft liggen. |
+| G10 | `onboarding@` ontbreekt in het Inbox-overzicht | De mail komt binnen en staat in de E-mail-module, maar niet in de bronnenlijst van `inbox-v2.js`. |
 
 G1, G2, G3 en G9 zijn het zwaarst en worden als eerste aangepakt.
 

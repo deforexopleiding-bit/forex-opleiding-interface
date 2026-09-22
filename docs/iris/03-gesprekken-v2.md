@@ -82,6 +82,31 @@ Twee keuzes die de moeite van het opschrijven waard zijn:
 
 Mail en inkomende berichten krijgen geen teken; die hebben geen Meta-status.
 
+### G10 — `onboarding@` staat in het Inbox-overzicht
+
+Deze staat buiten de vlag, want er valt niets aan te zetten: het is een bron die
+ontbrak.
+
+**Was:** `inbox-v2.js` kende acht bronnen en twee daarvan waren postbussen —
+`administratie@` en `info@`. `onboarding@` werd al elke vijf minuten opgehaald
+door `sync-emails` en is in de E-mail-module gewoon te openen, maar wie het
+Inbox-overzicht gebruikt als het bakje-waar-alles-in-komt, zag die postbus nooit.
+
+**Nu:** `m_onb` staat in de rail, onder Klantcontact.
+
+De bron erbij zetten was één regel; het werk zat in de regels eromheen. De
+bronnenlijst stond in vijf opsommingen (registry, groepen, endpoints,
+`_VALID_SRCS`, de staat) plus twee plekken die de e-mailbronnen bij naam noemden
+(`v === 'm_adm' || v === 'm_info'`). Drie daarvan vergeten valt niet op: de bron
+verschijnt gewoon, telt alleen verkeerd. `_VALID_SRCS` en de staat worden nu uit
+de registry afgeleid, de teltakken vragen naar het **soort** bron, en een test
+loopt de resterende opsommingen tegen elkaar na.
+
+**Correctie op de audit.** Daar stond "`onboarding@` heeft geen scherm". Dat was
+te sterk — de E-mail-module heeft alle zeven postbussen. Het gat was kleiner dan
+opgeschreven, en dat staat nu ook zo in
+[`02-gesprekken-audit.md`](02-gesprekken-audit.md).
+
 ---
 
 ## Wat er nog ligt
@@ -97,7 +122,6 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus de twee hierboven.
 | G6 | mail aan het contact, niet aan de klant | raakt `inbox-thread-unified` dieper |
 | G7 | IMAP `APPEND` naar Verzonden | raakt `send-email.js` |
 | G8 | paginering en trager pollen | het grootste getal (≈ 54 MB per uur per tabblad), en de grootste ingreep |
-| G10 | `onboarding@` erbij in de lijst | los van dit alles; kleine eigen PR |
 
 ---
 
