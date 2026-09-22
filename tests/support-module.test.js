@@ -34,6 +34,28 @@ test('CORS laat een preview van het eigen websiteproject door', () => {
   assert.equal(resolveSupportOrigin(o), o);
 });
 
+test('CORS laat de eigen Webflow-staging door, maar geen ander webflow.io-adres', () => {
+  // Zonder deze regel blokkeert de browser elke API-call vanaf staging en
+  // toont de widget daar een storingsmelding. Een patroon op webflow.io mag
+  // niet: die subdomeinen kan iedereen aanmaken.
+  const staging = 'https://dfo-2-0---2026.webflow.io';
+  assert.equal(resolveSupportOrigin(staging), staging);
+  for (const o of ['https://iemand-anders.webflow.io', 'https://dfo-2-0---2026.webflow.io.evil.com', 'http://dfo-2-0---2026.webflow.io']) {
+    assert.notEqual(resolveSupportOrigin(o), o, o + ' mag niet toegestaan zijn');
+  }
+});
+
+test('de widget verdwijnt als de configuratie niet geladen kan worden', () => {
+  // Een knop die opent naar een keuzescherm dat nergens heen gaat, is erger
+  // dan geen knop: de bezoeker denkt dat 'ie geholpen wordt.
+  const w = readFileSync(new URL('../widget/support.js', import.meta.url), 'utf8');
+  const start = w.slice(w.indexOf('function startWidget'));
+  assert.match(start, /catch\(function \(\) \{[\s\S]*?host\.remove\(\);/,
+    'startWidget moet de widget verwijderen als de config-fetch faalt');
+  assert.match(w, /st\.onbereikbaar = true/, 'er is geen onbereikbaar-toestand');
+  assert.match(w, /info@deforexopleiding\.nl/, 'het uitwijkscherm noemt geen mailadres');
+});
+
 test('CORS weigert alles daarbuiten', () => {
   const geweigerd = [
     'https://evil.com',
