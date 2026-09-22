@@ -208,10 +208,18 @@ Dat betekent dat een **mislukt** bericht er hetzelfde uitziet als een
 afgeleverd bericht. Je denkt dat je geantwoord hebt. Dit is het stilste van
 alle gaten en daarom het gemeenste.
 
-### G10 — `onboarding@` heeft geen scherm
+### G10 — `onboarding@` ontbreekt in het Inbox-overzicht
 
-De mail komt binnen (zie de inventaris) en blijft liggen. `inbox-v2.js` toont
-alleen `administratie@` en `info@`.
+De mail komt binnen (zie de inventaris) en `inbox-v2.js` toont alleen
+`administratie@` en `info@`, dus wie het Inbox-overzicht gebruikt als het
+bakje-waar-alles-in-komt, ziet die postbus nooit.
+
+> **Correctie, 22 september.** De eerste versie van deze regel zei dat
+> `onboarding@` "geen scherm" heeft. Dat is te sterk: de E-mail-module
+> (`email-v2.js`, `MAILBOXES`) heeft alle zeven postbussen, `onboarding@`
+> inbegrepen. Wat ontbrak was de bron in het Inbox-overzicht. Het gat is dus
+> kleiner dan het hier stond, en dat hoort in het document te staan in plaats
+> van stilletjes rechtgezet te worden.
 
 ## 6. Wat er goed is, en dus blijft
 

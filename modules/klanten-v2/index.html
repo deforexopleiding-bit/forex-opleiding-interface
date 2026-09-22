@@ -184,7 +184,7 @@
   <script src="views/kanban-v2.js?v=4"></script>
   <script src="views/tickets-v2.js?v=8"></script>
   <script src="views/followup-v2.js?v=26"></script>
-  <script src="views/inbox-v2.js?v=9"></script>
+  <script src="views/inbox-v2.js?v=10"></script>
   <script src="views/taken-v2.js?v=14"></script>
   <script src="views/sales-v2.js?v=20"></script>
   <script src="views/sales-wizard-v2.js?v=22"></script>
@@ -207,7 +207,12 @@
   <script src="views/lisa-v2.js?v=19"></script>
   <script src="views/instellingen-v2.js?v=106"></script>
   <script src="views/binnenkort-v2.js?v=3"></script>
-  <script src="views/wanbetalers-v2.js?v=53"></script>
+  <!-- Gesprekken-v2: de twee rekensommen achter GESPREKKEN_V2 (venster-
+       aftelling + verzendstatus). MOET vóór wanbetalers-v2.js staan; dat
+       scherm valt terug op de oude opmaak als window.GESPREKKEN_V2 er niet
+       is. Zie docs/iris/02-gesprekken-audit.md, gaten G3 en G9. -->
+  <script src="../shared/gesprekken-v2.js?v=1"></script>
+  <script src="views/wanbetalers-v2.js?v=54"></script>
   <script src="views/setter-payout-v2.js?v=4"></script>
   <script src="views/opvolging-v2.js?v=68"></script>
   <!-- Iris. Eigen map (modules/iris/) zoals afgesproken, maar geregistreerd als

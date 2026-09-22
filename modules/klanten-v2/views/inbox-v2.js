@@ -13,6 +13,7 @@
 //   Leadsonderhoud   lo      /api/leadsonderhoud-overzicht                (deep-link only)
 //   E-mail admin@    m_adm   /api/email-inbox-list?mailbox=administratie  (deep-link only)
 //   E-mail info@     m_info  /api/email-inbox-list?mailbox=info           (deep-link only)
+//   E-mail onboard@  m_onb   /api/email-inbox-list?mailbox=onboarding     (deep-link only)
 //   Tickets          tk      /api/tickets?status=open                     (deep-link only)
 //
 // Thread-render:
@@ -24,7 +25,7 @@
 //       fail-soft: 1 poging, geen retry.
 //   - Lisa: /api/lisa-conversations?id=X → items met role user/assistant.
 //     → Zelfde append-only pattern.
-//   - lo/tk/m_adm/m_info: geen thread. Detail-pane toont preview + knop
+//   - lo/tk/m_adm/m_info/m_onb: geen thread. Detail-pane toont preview + knop
 //     "Open in <module>" naar de bron-module (E-mail / Tickets /
 //     Leadsonderhoud). Vermijdt dupliceren met de nu-live modules.
 //
@@ -61,11 +62,16 @@
     ['lo',      'Leadsonderhoud',        I.repeat,   'teal',    'leadsonderhoud','leadsonderhoud'],
     ['m_adm',   'E-mail administratie@', I.mail,     'blue',    'email',         'email'],
     ['m_info',  'E-mail info@',          I.mail,     'emerald', 'email',         'email'],
+    // G10 (docs/iris/02-gesprekken-audit.md) — onboarding@ werd al elke vijf
+    // minuten opgehaald door sync-emails en is in de E-mail-module gewoon te
+    // openen, maar ontbrak hier. Wie het Inbox-overzicht gebruikt als het
+    // bakje-waar-alles-in-komt, zag die postbus dus nooit.
+    ['m_onb',   'E-mail onboarding@',    I.mail,     'teal',    'email',         'email'],
     ['tk',      'Tickets',               I.ticket,   'rose',    'tickets',       'tickets'],
   ];
   const IB_GRP = [
     ['Aandacht',     IB_SRC.filter(x => ['wb', 'lisa'].includes(x[0]))],
-    ['Klantcontact', IB_SRC.filter(x => ['ev', 'ob', 'm_adm', 'm_info'].includes(x[0]))],
+    ['Klantcontact', IB_SRC.filter(x => ['ev', 'ob', 'm_adm', 'm_info', 'm_onb'].includes(x[0]))],
     ['Overig',       IB_SRC.filter(x => ['lo', 'tk'].includes(x[0]))],
   ];
   // Per-source endpoint-map + response-key voor de items array. `mailbox`
@@ -78,6 +84,7 @@
     lo:     { url: '/api/leadsonderhoud-overzicht',                                                  itemsKey: 'items' },
     m_adm:  { url: '/api/email-inbox-list?mailbox=administratie&folder=inbox&limit=100',             itemsKey: 'items', mailbox: 'administratie' },
     m_info: { url: '/api/email-inbox-list?mailbox=info&folder=inbox&limit=100',                      itemsKey: 'items', mailbox: 'info' },
+    m_onb:  { url: '/api/email-inbox-list?mailbox=onboarding&folder=inbox&limit=100',              itemsKey: 'items', mailbox: 'onboarding' },
     tk:     { url: '/api/tickets?status=open',                                                       itemsKey: 'tickets' },
   };
 
@@ -89,7 +96,7 @@
   // bron opent. Gelezen + gewist bij inboxView() (niet in IIFE-scope,
   // want die draait maar 1× bij script-load — módule-navigatie triggert
   // die niet opnieuw).
-  const _VALID_SRCS = ['wb', 'ev', 'ob', 'lisa', 'lo', 'm_adm', 'm_info', 'tk'];
+  const _VALID_SRCS = IB_SRC.map((x) => x[0]);
   function _applyPreSrcHint() {
     try {
       const pre = sessionStorage.getItem('inbox-pre-src');
@@ -109,7 +116,9 @@
     error: null,
     fetched: false, // eenmalige-bundle-guard
     // per source: { items:[], raw:<response>, error:<msg|null> } of null bij fail
-    sources: { wb: null, ev: null, ob: null, lisa: null, lo: null, m_adm: null, m_info: null, tk: null },
+    // Eén sleutel per bron, afgeleid uit IB_SRC. Handmatig bijhouden betekent
+    // dat een nieuwe bron stilletjes zonder plek in de staat zit.
+    sources: Object.fromEntries(IB_SRC.map((x) => [x[0], null])),
   };
   let _fetchSeq = 0;
 
@@ -744,6 +753,15 @@
   }
 
   /* ── Source-teller ─────────────────────────────────────────────────── */
+  /* Is dit een e-mail-bron? Afgeleid uit IB_SRC, niet opgesomd. De twee
+     plekken hieronder stonden eerst als `v === 'm_adm' || v === 'm_info'`, en
+     dat is precies de soort opsomming die je vergeet bij te werken als er een
+     derde postbus bij komt — dan telt die bron ineens items in plaats van het
+     echte totaal, zonder dat er iets stuk lijkt. */
+  function _isEmailSrc(v) {
+    return (IB_SRC.find((x) => x[0] === v) || [])[4] === 'email';
+  }
+
   function srcCount(v) {
     const s = _live.sources[v];
     if (!s) return null;                             // nog niet geladen
@@ -756,7 +774,7 @@
     }
     // BROK 2: E-mail — response bevat 'total' (kan groter zijn dan limit=100).
     // Toon het echte totaal. srcCountDisplay() rendert daarna evt. '100+' vs '113'.
-    if (v === 'm_adm' || v === 'm_info') {
+    if (_isEmailSrc(v)) {
       const total = Number(s.raw?.total || 0);
       if (Number.isFinite(total) && total > 0) return total;
       return s.items.length;
@@ -771,7 +789,7 @@
   // limit → dan '100+'.
   function srcCountDisplay(v, cnt) {
     if (cnt == null) return '—';
-    if (v === 'm_adm' || v === 'm_info') {
+    if (_isEmailSrc(v)) {
       const s = _live.sources[v];
       const total = Number(s?.raw?.total || 0);
       if (!Number.isFinite(total) || total <= 0) {

@@ -26,11 +26,12 @@
 // Response: { items: [{ id, phone_number, display_name, customer_id, customer_name,
 //                       status, last_message_at, last_message_preview, unread_count,
 //                       last_inbound_at, can_send_text, brief_sent, brief_sent_at }],
-//              total, configured, module }
+//              total, configured, module, vlaggen: { gesprekken_v2 } }
 
 import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getEmailUnreadByCustomerEmail } from './_lib/email-unread-per-customer.js';
+import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 // NOTE: Fase 2b mentor-scoping op de onboarding-tak is bewust uitgezet:
 // per ontwerp is de onboarding-inbox gedeeld voor iedereen met
 // onboarding.inbox.view (alle mentoren zien elkaars studenten-convs).
@@ -117,6 +118,7 @@ export default async function handler(req, res) {
         total: 0,
         configured: false,
         module: moduleRaw,
+        vlaggen: { gesprekken_v2: gesprekkenV2Aan() },
         warning: `Geen actieve ${moduleRaw}-config in whatsapp_module_config — vraag een admin om in te stellen.`,
       });
     }
@@ -440,6 +442,12 @@ export default async function handler(req, res) {
       total: totalCount,
       configured: true,
       module: moduleRaw,
+      // GESPREKKEN_V2 (opdracht sectie 1c). Het scherm mag de vlag niet zelf
+      // raden: een omgevingsvariabele is server-side. Hij reist mee met de
+      // lijst die het scherm toch al ophaalt, zodat er geen tweede opvraging
+      // bij komt. Staat hij uit, dan tekent het scherm exact wat het altijd
+      // tekende — zie docs/iris/02-gesprekken-audit.md, sectie 7.
+      vlaggen: { gesprekken_v2: gesprekkenV2Aan() },
       // Diagnostic voor de e-mail-unread-verrijking (fail-soft). Bij lege
       // items of ontbrekende IMAP-config staat hier de reden — UI kan 'em
       // negeren of tonen als debug-info.

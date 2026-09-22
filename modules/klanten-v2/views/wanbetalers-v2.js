@@ -3180,7 +3180,10 @@
      (via /api/inbox-send-template + /api/inbox-template-list). Mail via
      /api/email-send-v2. Custom confirm-modal vóór ELKE send. */
   _live.inbox = {
-    convs:        { loading: false, fetched: false, error: null, items: [], _seq: 0 },
+    // `v2` is de stand van GESPREKKEN_V2, zoals het lijst-endpoint 'em
+    // meestuurt. Onbekend leest als uit: zolang er geen antwoord is,
+    // tekent het scherm precies wat het altijd tekende.
+    convs:        { loading: false, fetched: false, error: null, items: [], v2: false, _seq: 0 },
     thread:       { loading: {}, error: {}, byConv: {}, _seq: 0 }, // per conv
     ctx:          { loading: {}, byConv: {} },
     templates:    { loading: {}, byConv: {} },
@@ -3226,7 +3229,13 @@
     const j = await tryFetch('inbox:convs', '/api/inbox-conversations-list?' + q.toString(), 10000);
     if (mySeq !== st._seq) return;
     if (j && j.error) st.error = j.error;
-    else { st.items = asArr(j?.items); st.fetched = true; }
+    else {
+      st.items = asArr(j?.items); st.fetched = true;
+      // Alleen een uitdrukkelijke true. Een ouder endpoint dat het veld
+      // niet kent, laat de vlag uit staan in plaats van 'undefined' te
+      // laten doorwerken als iets anders dan nee.
+      st.v2 = j?.vlaggen?.gesprekken_v2 === true;
+    }
     st.loading = false;
     _live.inboxRealtime.lastRefresh = Date.now();
     // SURFACE A: auto-open eerste gesprek na eerste fetch. Filtert de wanbetaler-
@@ -4167,6 +4176,21 @@
     </div>`;
   }
 
+  /* GESPREKKEN_V2 (opdracht sectie 1c, gaten G3 en G9 uit
+     docs/iris/02-gesprekken-audit.md).
+
+     Twee voorwaarden, en allebei moeten ze waar zijn:
+       1. het lijst-endpoint zegt dat de vlag aanstaat;
+       2. modules/shared/gesprekken-v2.js is daadwerkelijk geladen.
+
+     De tweede is geen overdaad. Blijft dat script om welke reden dan ook weg
+     (script-tag vergeten na een herschikking, netwerkfout, blokkade), dan valt
+     het scherm terug op precies de opmaak van hiervoor in plaats van te
+     struikelen over een ontbrekende functie halverwege een draad. */
+  function _gesprekkenV2() {
+    return _live.inbox.convs.v2 === true && !!(window.GESPREKKEN_V2 && window.GESPREKKEN_V2.vensterStand);
+  }
+
   function _inboxThreadHtml(convId) {
     if (!convId) return `<div style="padding:60px 20px;text-align:center;color:var(--text-3);font-size:13px">← Kies een gesprek links.</div>`;
     const loading = _live.inbox.thread.loading[convId];
@@ -4195,11 +4219,29 @@
       const bodyHtml = (window.KV_V2 && window.KV_V2.helpers && window.KV_V2.helpers.renderChatBody)
         ? window.KV_V2.helpers.renderChatBody(m, esc)
         : esc(m.body || '');
+      // G9 — verzendstatus. Tot nu toe zag een MISLUKT bericht er precies zo
+      // uit als een afgeleverd bericht: je denkt dat je geantwoord hebt. De
+      // gegevens stonden er al (whatsapp_messages.status + failed_reason), ze
+      // werden alleen niet getoond.
+      const stand = _gesprekkenV2() && window.GESPREKKEN_V2.toontVerzendStand(m)
+        ? window.GESPREKKEN_V2.verzendStand(m.meta?.status, m.meta?.failed_reason)
+        : null;
+      const standKleur = stand
+        ? (stand.kleur === 'rood' ? 'var(--rose,#D14343)' : (stand.kleur === 'blue' ? 'var(--blue)' : 'var(--text-3)'))
+        : '';
+      // Een geslaagd bericht krijgt alleen zijn vinkje; de woorden staan in de
+      // tooltip. Een MISLUKT bericht krijgt de reden uitgeschreven onder het
+      // bericht — een waarschuwing die je moet aanwijzen om te lezen, lees je
+      // niet, en dit is nu juist het geval waarin je het moet weten.
+      const standHtml = stand
+        ? `<div style="font-size:10px;color:${standKleur};margin-top:4px;text-align:right;font-weight:${stand.code === 'failed' ? '600' : '500'}" title="${esc(stand.label)}">${stand.teken}${stand.code === 'failed' || stand.code === 'onbekend' ? ' ' + esc(stand.label) : ''}</div>`
+        : '';
       return `<div style="display:flex;justify-content:${align};margin-bottom:9px">
         <div style="max-width:78%;padding:8px 11px;background:${bg};border:1px solid var(--border);border-radius:var(--r-sm)">
           <div style="font-size:10.5px;color:var(--text-3);margin-bottom:3px">${chBadge}${esc(_fmtDateTime(m.at))}</div>
           ${subj}
           <div style="font-size:12.5px;white-space:pre-wrap;word-break:break-word">${bodyHtml}</div>
+          ${standHtml}
         </div>
       </div>`;
     }).join('');
@@ -4599,9 +4641,27 @@
     const briefBadge = briefSent
       ? '<span title="WIK-brief verstuurd" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">✓ Brief</span>'
       : '<span title="Nog geen WIK-brief" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--surface-2);color:var(--text-3);font-weight:600">× Brief</span>';
-    const window24 = canSend24h
-      ? '<span title="24u-venster open — vrije tekst mag" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">24u ✓</span>'
-      : '<span title="24u-venster verlopen — alleen templates" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">24u ×</span>';
+    // G3 — het venster was er alleen als eindtoestand: "verlopen" verscheen pas
+    // als het te laat was. Hoeveel tijd er nog is, stond nergens, terwijl
+    // last_inbound_at al in de lijst meekomt. De aftreksom is kleiner dan het
+    // gat. Is de vlag uit, of weten we het laatste inkomende bericht niet, dan
+    // staat hier letterlijk de badge van hiervoor.
+    const vst = _gesprekkenV2()
+      ? window.GESPREKKEN_V2.vensterStand(row.last_inbound_at || conv?.last_inbound_at || null)
+      : null;
+    let window24;
+    if (vst && vst.bekend && vst.open) {
+      // Bijna dicht wordt amber terwijl het nog open is — dat is het moment
+      // waarop je nog iets kunt doen, en dus het moment om het te zien.
+      const kleur = vst.bijnaDicht ? 'amber' : 'emerald';
+      window24 = `<span title="${esc(vst.titel)}" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--${kleur}-soft);color:var(--${kleur});font-weight:600">24u ✓ · ${esc(vst.tekst)}</span>`;
+    } else if (vst && vst.bekend) {
+      window24 = `<span title="${esc(vst.titel)}" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">24u × · verlopen</span>`;
+    } else {
+      window24 = canSend24h
+        ? '<span title="24u-venster open — vrije tekst mag" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--emerald-soft);color:var(--emerald);font-weight:600">24u ✓</span>'
+        : '<span title="24u-venster verlopen — alleen templates" style="font-size:10px;padding:2px 7px;border-radius:5px;background:var(--amber-soft);color:var(--amber);font-weight:600">24u ×</span>';
+    }
 
     const kebab = _ui.inbox.kebabOpen ? _inboxKebabMenuHtml(convId, { isArchived, isDone, totalUnread, custId }) : '';
 
