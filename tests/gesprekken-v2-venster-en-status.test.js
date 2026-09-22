@@ -210,3 +210,65 @@ test('rommel als invoer levert een lege lijst op, geen uitzondering', () => {
     assert.deepEqual(G.focusFilter(rommel, rommel, 'venster_bijna_dicht', NU), []);
   }
 });
+
+/* ── G8 · hoe vaak de lijst opnieuw opgehaald wordt ───────────────────── */
+
+test('zonder realtime blijft het zes seconden — precies zoals nu', () => {
+  // De terugval moet het oude gedrag zijn, anders is "de vlag uit verandert
+  // niets" niet waar voor de poll.
+  assert.equal(G.pollInterval({}), 6000);
+  assert.equal(G.pollInterval({ verbonden: false }), 6000);
+  assert.equal(G.pollInterval({ verbonden: false, bewezen: true }), 6000,
+    'bewezen zonder verbinding is een oude vlag, geen reden om te vertragen');
+});
+
+test('een verbonden kanaal geeft een matige versnelling, een bewezen kanaal de volle', () => {
+  assert.equal(G.pollInterval({ verbonden: true }), 20000);
+  assert.equal(G.pollInterval({ verbonden: true, bewezen: true }), 45000);
+});
+
+test('een verborgen tabblad pollt helemaal niet', () => {
+  assert.equal(G.pollInterval({ verborgen: true }), null);
+  assert.equal(G.pollInterval({ verborgen: true, verbonden: true, bewezen: true }), null);
+});
+
+test('alleen een echte true telt — undefined is geen belofte', () => {
+  // Deze standen komen uit losse velden op een state-object. Een veld dat er
+  // (nog) niet is mag niet als "ja" gelezen worden: dan zou een half
+  // geïnitialiseerde staat de poll vertragen zonder dat er een kanaal is.
+  assert.equal(G.pollInterval({ verbonden: 'ja' }), 6000);
+  assert.equal(G.pollInterval({ verbonden: 1 }), 6000);
+  assert.equal(G.pollInterval({ verborgen: 'nee', verbonden: true }), 20000);
+  assert.equal(G.pollInterval(null), 6000);
+  assert.equal(G.pollInterval(undefined), 6000);
+});
+
+test('magOphalen wacht de gekozen tijd af', () => {
+  const bewezen = { verbonden: true, bewezen: true };
+  assert.equal(G.magOphalen(bewezen, 44999), false);
+  assert.equal(G.magOphalen(bewezen, 45000), true, 'precies op de grens mag het');
+  assert.equal(G.magOphalen({}, 5999), false);
+  assert.equal(G.magOphalen({}, 6000), true);
+});
+
+test('een verborgen tabblad haalt nooit op, hoe lang het ook geleden is', () => {
+  assert.equal(G.magOphalen({ verborgen: true }, 10 * 60 * 1000), false);
+});
+
+test('een onbekende "sinds" haalt op in plaats van te blijven wachten', () => {
+  // Bij een verse staat is lastRefresh 0 en is de aftreksom onzin. Dan is één
+  // keer te veel ophalen goedkoper dan een lijst die nooit vult.
+  for (const rommel of [NaN, null, undefined, 'lang']) {
+    assert.equal(G.magOphalen({ verbonden: true, bewezen: true }, rommel), true);
+  }
+});
+
+test('de gekozen tijden zijn de tijden waar de winst op gerekend is', () => {
+  // 90 KB per opvraging (het endpoint rekent dat zelf voor bij 115 gesprekken):
+  //   6 s → 600 opvragingen per uur → ≈ 54 MB
+  //  20 s → 180                     → ≈ 16 MB
+  //  45 s →  80                     → ≈  7 MB
+  // Verandert een van deze getallen, dan klopt die som in de documentatie niet
+  // meer — en dan hoort iemand dat te merken.
+  assert.deepEqual(G.POLL_MS, { geen_kanaal: 6000, onbewezen: 20000, bewezen: 45000 });
+});

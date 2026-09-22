@@ -220,10 +220,82 @@
     return richting === 'out' || richting === 'outbound';
   }
 
+  /**
+   * ── G8 · hoe vaak de lijst opnieuw opgehaald moet worden ──────────────────
+   *
+   * De meting uit de audit: de gesprekslijst wordt elke ZES seconden volledig
+   * opnieuw opgehaald, met limit=1000 en zonder paginering. Het endpoint rekent
+   * zelf voor wat dat kost — bij 115 gesprekken ongeveer 90 KB per opvraging.
+   * Dat is 900 KB per minuut, 54 MB per uur, 430 MB per werkdag per geopend
+   * tabblad. Bij twee mensen het dubbele. En dat terwijl er in een rustig uur
+   * misschien drie berichten binnenkomen.
+   *
+   * Er is óók een realtime-kanaal op `whatsapp_messages`. De poll is bedoeld
+   * als vangnet, maar draait onvoorwaardelijk mee — of dat kanaal nu werkt of
+   * niet. Dáár zit de winst: als het vangnet weet dat er iemand anders oplet,
+   * hoeft het niet om de zes seconden te kijken.
+   *
+   * ── WAAROM DRIE STANDEN EN NIET TWEE ─────────────────────────────────────
+   * "Kanaal verbonden" en "kanaal werkt" zijn niet hetzelfde. Een abonnement
+   * kan keurig SUBSCRIBED melden terwijl RLS elk bericht wegfiltert; dan komt
+   * er nooit iets binnen en zou een trage poll betekenen dat je berichten drie
+   * kwartier te laat ziet. Er is geen manier om dat vooraf te weten.
+   *
+   * Dus verdient het kanaal zijn vertrouwen: verbonden levert een matige
+   * versnelling op, en pas als er daadwerkelijk één gebeurtenis binnenkwam
+   * gaat de poll echt omlaag. Bewijs boven belofte.
+   *
+   *   verborgen tabblad         →  niet pollen (en bij terugkomen meteen één keer)
+   *   kanaal bewezen            →  45 s   ≈ 7 MB per uur
+   *   kanaal verbonden, onbewezen →  20 s ≈ 16 MB per uur
+   *   geen kanaal               →   6 s   ≈ 54 MB per uur  (zoals het nu is)
+   */
+  const POLL_MS = Object.freeze({
+    geen_kanaal: 6000,
+    onbewezen: 20000,
+    bewezen: 45000,
+  });
+
+  /**
+   * @param {{verborgen?: boolean, verbonden?: boolean, bewezen?: boolean}} stand
+   * @returns {number|null} wachttijd in ms, of null = helemaal niet pollen
+   */
+  function pollInterval(stand) {
+    const s2 = (stand && typeof stand === 'object') ? stand : {};
+    if (s2.verborgen === true) return null;
+    if (s2.verbonden !== true) return POLL_MS.geen_kanaal;
+    return s2.bewezen === true ? POLL_MS.bewezen : POLL_MS.onbewezen;
+  }
+
+  /**
+   * Mag er nu opgehaald worden?
+   *
+   * Aparte functie van pollInterval() omdat de tik van de timer en het besluit
+   * om te halen twee verschillende dingen zijn: de timer blijft gewoon elke zes
+   * seconden tikken (dat kost niets), en hier valt het besluit. Zo hoeft er
+   * geen interval opnieuw opgebouwd te worden elke keer dat het kanaal van
+   * gedachten verandert — en dat scheelt precies het soort race waarbij je twee
+   * timers hebt zonder het te weten.
+   */
+  function magOphalen(stand, sindsLaatsteMs) {
+    const wacht = pollInterval(stand);
+    if (wacht === null) return false;
+    // Let op de eerste regel. Number(null) is 0 en Number('') is 0, allebei
+    // keurig eindig — zonder die controle leest "ik weet niet hoe lang het
+    // geleden is" als "nul milliseconden geleden", en dan wordt er juist NOOIT
+    // opgehaald. Dat is de verkeerde kant om: bij twijfel één keer te veel
+    // halen is goedkoper dan een lijst die nooit vult.
+    if (sindsLaatsteMs === null || sindsLaatsteMs === undefined || sindsLaatsteMs === '') return true;
+    const sinds = Number(sindsLaatsteMs);
+    if (!Number.isFinite(sinds)) return true;
+    return sinds >= wacht;
+  }
+
   const API = {
-    VENSTER_MS, BIJNA_DICHT_MS, FOCUS_MODI,
+    VENSTER_MS, BIJNA_DICHT_MS, FOCUS_MODI, POLL_MS,
     vensterStand, duurKort, verzendStand, toontVerzendStand,
     leesFocus, focusFilter, focusTelling,
+    pollInterval, magOphalen,
   };
 
   if (typeof window !== 'undefined') window.GESPREKKEN_V2 = API;
