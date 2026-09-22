@@ -315,3 +315,54 @@ test('rommel telt als voorbij, niet als eeuwig', () => {
     assert.equal(G.magNogTerug(r, 1000), false);
   }
 });
+
+// ── de bladzijdegrens van de draad (G8) ─────────────────────────────────────
+//
+// De draad haalt de nieuwste 200 op; zit er meer, dan vraagt het scherm door
+// met ?voor=<grens>. Die grens is KLEINER-OF-GELIJK, dus het grensbericht komt
+// zelf mee terug — en alles dat op dezelfde seconde staat ook. Hier gooien we
+// die er weer uit.
+
+const maakItem = (id, channel = 'whatsapp') => ({ id: String(id), channel, at: 'x' });
+
+test('het grensbericht komt er niet twee keer in', () => {
+  // Zonder dit groeit de draad met een duplicaat bij elke klik op "toon
+  // oudere berichten".
+  const bestaand = [maakItem(10), maakItem(11)];
+  const binnen = [maakItem(8), maakItem(9), maakItem(10)];
+  const r = G.nieuweDraadItems(bestaand, binnen);
+  assert.equal(r.nieuw.length, 2);
+  assert.deepEqual(r.nieuw.map((i) => i.id), ['8', '9']);
+  assert.equal(r.vooruitgang, true);
+});
+
+test('een bladzijde zonder iets nieuws meldt dat, zodat het scherm stopt', () => {
+  // Als de hele bladzijde op dezelfde tijdstempel staat, kom je met
+  // doorvragen niet verder. Zonder dit signaal haalt het scherm eindeloos
+  // dezelfde bladzijde op.
+  const bestaand = [maakItem(1), maakItem(2)];
+  const r = G.nieuweDraadItems(bestaand, bestaand);
+  assert.equal(r.nieuw.length, 0);
+  assert.equal(r.vooruitgang, false);
+});
+
+test('hetzelfde id op een ander kanaal is een ANDER bericht', () => {
+  // WhatsApp en mail komen uit verschillende tabellen; hun id's zeggen niets
+  // over elkaar. Alleen op id ontdubbelen zou een mail laten verdwijnen omdat
+  // er toevallig een WhatsApp-bericht met datzelfde id bestaat.
+  const r = G.nieuweDraadItems([maakItem(1, 'whatsapp')], [maakItem(1, 'email')]);
+  assert.equal(r.nieuw.length, 1);
+});
+
+test('een bericht zonder id wordt nooit weggegooid', () => {
+  // Liever één keer dubbel in beeld dan een bericht dat je niet te zien krijgt.
+  const r = G.nieuweDraadItems([maakItem(1)], [{ channel: 'whatsapp', at: 'x' }]);
+  assert.equal(r.nieuw.length, 1);
+  assert.equal(G.draadSleutel({ channel: 'whatsapp' }), null);
+  assert.equal(G.draadSleutel(null), null);
+});
+
+test('ontdubbelen valt niet om over lege invoer', () => {
+  assert.deepEqual(G.nieuweDraadItems(null, null).nieuw, []);
+  assert.equal(G.nieuweDraadItems(null, [maakItem(1)]).nieuw.length, 1);
+});

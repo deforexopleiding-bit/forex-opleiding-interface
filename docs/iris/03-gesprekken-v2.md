@@ -324,6 +324,55 @@ niet ongemerkt: de reden komt in de logs, met alleen de *naam* van wat ontbreekt
 > kopie bij. Dat is gewenst — het gat zit daar even hard — maar het is meer dan
 > alleen "de gesprekken", en dat hoor je te weten voordat je de vlag omzet.
 
+### G8 (de rest) — het gesprek in bladzijden
+
+De draad toonde de laatste 200 berichten. Twee dingen waren daar mis mee, en ze
+waren allebei stil.
+
+**Het werk groeide mee met de geschiedenis.** Het endpoint haalde *alle*
+WhatsApp-berichten van een gesprek op, plus alle mail van de klant, voegde die
+samen, en gooide daarna alles weg behalve de laatste 200. Dat werkt tot het niet
+meer werkt — en dan is het een tijdslimiet op het gesprek met precies die klant
+met wie je het meest gepraat hebt.
+
+**Wat je niet kreeg, zag je niet.** Het endpoint meldde al hoeveel er waren
+(`counts.total`) tegenover hoeveel het teruggaf (`counts.returned`), maar het
+scherm deed daar niets mee. Je las een gesprek dat halverwege begon zonder dat
+iets dat zei.
+
+**Nu** haalt elke bron — WhatsApp, mail en onze eigen antwoorden, langs het
+klant-pad én langs het contact-pad uit G6 — de **nieuwste** rijen op, één meer
+dan er getoond wordt, en draait die om. Die ene extra rij is het hele antwoord
+op "is er nog meer?", zonder een tweede opvraging die alleen maar telt. Per bron
+n+1 halen en dan samenvoegen geeft gegarandeerd de juiste nieuwste n.
+
+`heeft_meer` en `oudste_at` komen mee in de respons; doorvragen gaat met
+`?voor=<tijdstempel>`.
+
+**De grens is kleiner-of-gelijk, niet kleiner.** Bij mail is de tijdstempel op
+de seconde nauwkeurig, dus twee berichten in dezelfde seconde is geen bedenksel
+— en met "kleiner dan" zou zo'n bericht op de bladzijdegrens verdwijnen zonder
+dat iemand het merkt. Liever één bericht dubbel ophalen en het in het scherm
+eruit halen (`nieuweDraadItems()`, op kanaal + id, want een WhatsApp-bericht en
+een mail komen uit verschillende tabellen en hun id's zeggen niets over elkaar).
+
+In het scherm staat boven de draad **"↑ Toon oudere berichten"**, achter de
+vlag, en alleen als er echt meer is — een knop die niets oplevert is erger dan
+geen knop. Twee dingen die die knop goed moet doen:
+
+1. **Niet naar beneden springen.** Er komt inhoud *boven* je te staan, dus de
+   plek waar je las schuift weg. De gewone repaint springt omlaag zodra er
+   berichten bij zijn; dat klopt bij een nieuw binnengekomen bericht en is hier
+   precies verkeerd. Er is daarom een eigen repaint die meet hoeveel hoger de
+   draad is geworden en de schuifbalk evenveel meeschuift.
+2. **Stoppen als er niets bij komt.** Levert een bladzijde alleen berichten op
+   die we al hadden, dan komen we niet verder — dan gaat de knop weg in plaats
+   van eindeloos hetzelfde op te halen.
+
+> **Let op bij `counts`.** Die tellen nu wat er in *deze* bladzijde zit, niet
+> wat er in totaal bestaat. Voor "is er meer" is `heeft_meer` het antwoord. Een
+> telling van alles zou een tweede opvraging kosten die niemand gebruikt.
+
 ---
 
 ## Wat er nog ligt
@@ -336,7 +385,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus wat hierboven staat.
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
 | G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
 | G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
-| G8 | paginering | het pollen is gedaan (zie hierboven); de lijst haalt nog altijd `limit=1000` in één keer op |
+| G8 | paginering van de LIJST | de draad is gedaan (zie hierboven); de gesprekslijst haalt nog altijd `limit=1000` in één keer op, en waarschuwt daar zelf voor met `capOverflowWarning` |
 
 ---
 
