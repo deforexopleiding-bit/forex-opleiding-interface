@@ -68,6 +68,19 @@
     { g: 'Klanten & communicatie', id: 'klanten',          naam: 'Klanten',           icon: I.users,    color: 'emerald', roles: SAMS, permKey: 'customer.module.access', tabs: ['Overzicht'] },
     { g: 'Klanten & communicatie', id: 'studenten',        naam: 'Studenten',         icon: I.grad,     color: 'teal',    roles: ['mentor', 'super_admin', 'admin', 'manager'], tabs: [] },
     { g: 'Klanten & communicatie', id: 'wanbetalers',      naam: 'Wanbetalers',       icon: I.alert,    color: 'amber',   roles: SAM,tabs: ['Vandaag', 'Gesprekken', 'Acties', 'Overzicht', 'Pipeline', 'Brieven', 'Motor'] },
+    // Iris (2026-09-21) — SLAPEND. Geen `roles` en geen `permKey`, dus
+    // visMods() laat 'em standaard weg: geen sidebar-item, voor niemand.
+    // Hij wordt alleen bereikbaar met `preview: true` + `?v2preview=iris`
+    // in de URL, zodat de module bekeken kan worden voordat hij vrijgegeven
+    // wordt. Vrijgeven = later `roles:`/`permKey: 'iris.view'` invullen; de
+    // rechten (iris.view, iris.versturen, …) staan al in role_permissions.
+    //
+    // DEZE ENTRY IS NIET OPTIONEEL. Een view registreren in DFO.VIEWS is
+    // maar de helft: zonder regel in MODS geeft goMod() een stille `return`
+    // (`const m = MODS.find(...); if (!m) return;`) en valt curMod() terug
+    // op visMods()[0] — het scherm toont dan Dashboard zonder enige fout in
+    // de console. Precies dat gebeurde bij de eerste Iris-deploy.
+    { g: 'Klanten & communicatie', id: 'iris',             naam: 'Iris',              icon: I.sparkle,  color: 'violet',  roles: [], preview: true, tabs: [] },
     { g: 'Klanten & communicatie', id: 'email',            naam: 'E-mail',            icon: I.mail,     color: 'teal',    roles: SAMS,tabs: [] },
     { g: 'Klanten & communicatie', id: 'tickets',          naam: 'Tickets',           icon: I.ticket,   color: 'rose',    roles: SAMSM,                tabs: ['Open', 'Wacht op klant', 'Afgehandeld'] },
     { g: 'Klanten & communicatie', id: 'followup',         naam: 'Follow-up',         icon: I.phone,    color: 'violet',  roles: SAMS, permKey: 'followup.module.access', tabs: ['Werklijst', 'Event-bellijst', 'Opvolglijst', 'Retenties', 'Afspraken', 'Kalender', 'Agenda', 'Statistieken', 'Zoeken', 'Overige'] },
@@ -242,7 +255,20 @@
     try { return !!(window.RBAC && typeof window.RBAC.canSync === 'function' && window.RBAC.canSync(m.permKey)); }
     catch (_) { return false; }
   };
-  const visMods    = () => MODS.filter(m => m.roles.some(r => S.roles.includes(r)) || _permGrantsVis(m));
+  // Slapende modules (`preview: true`) zijn onzichtbaar tot je ze uitdrukkelijk
+  // opvraagt met `?v2preview=<id>` — hetzelfde vlaggetje waar klanten-v2.js de
+  // in-shell-override mee doet. Zonder dat vlaggetje verandert er niets: een
+  // MOD zonder `preview` loopt exact het pad van hiervoor.
+  const _previewIds = (() => {
+    const set = new Set();
+    try {
+      const raw = new URLSearchParams(window.location.search).get('v2preview');
+      if (raw) raw.split(',').map(s2 => s2.trim()).filter(Boolean).forEach(id => set.add(id));
+    } catch (_) { /* geen window/URL: laat de set leeg */ }
+    return set;
+  })();
+  const _previewGrantsVis = (m) => m.preview === true && _previewIds.has(m.id);
+  const visMods    = () => MODS.filter(m => m.roles.some(r => S.roles.includes(r)) || _permGrantsVis(m) || _previewGrantsVis(m));
   // BP3 v4 (2026-09-01) — deeplink-targets zijn bereikbaar zonder in visMods
   // te staan: als een zichtbare MOD een `deeplink.mod` heeft die naar target
   // T wijst, is T bereikbaar (maar wordt niet in de sidebar getoond). Zo kan
