@@ -1751,7 +1751,7 @@
       (t.notitie ? '<div class="note">' + esc(t.notitie) + '</div>' : '') +
       '</div>' +
       '<div class="act">' +
-        '<button class="obtn p" onclick="window.__opvBel(\'' + t.id + '\')">&#9742; Bellen</button>' +
+        '<button class="obtn p" onclick="window.__opvBel(\'' + t.id + '\', \'werklijst\')">&#9742; Bellen</button>' +
         '<button class="obtn wa" onclick="window.__opvWa(\'' + t.id + '\')">&#128172; WhatsApp</button>' +
         '<button class="obtn" onclick="window.__opvWatNu(\'' + t.id + '\')">Wat nu? &rarr;</button>' +
       '</div></div>';
@@ -1793,7 +1793,7 @@
       (t.notitie ? '<div class="note">' + esc(t.notitie) + '</div>' : '') +
       '</div>' +
       '<div class="act">' +
-        '<button class="obtn p" onclick="window.__opvBel(\'' + t.id + '\')">&#9742; Bellen</button>' +
+        '<button class="obtn p" onclick="window.__opvBel(\'' + t.id + '\', \'aanmeldkaart\')">&#9742; Bellen</button>' +
         '<button class="obtn wa" onclick="window.__opvWa(\'' + t.id + '\')">&#128172; WhatsApp</button>' +
         '<button class="obtn" onclick="window.__opvWatNu(\'' + t.id + '\')">Wat nu? &rarr;</button>' +
       '</div></div>';
@@ -4204,30 +4204,54 @@
     } catch (e) { alert('Niet gelukt: ' + (e.message || 'onbekende fout')); }
   };
 
-  window.__opvBel = async (id) => {
-    const t = zoekTaak(id); if (!t) return;
-    if (!t.telefoon) { alert('Geen telefoonnummer bekend.'); return; }
-    // Fase 2 — de poging wordt NIET meer hier geschreven. De softphone stuurt
-    // de taak-id mee in zijn call-log, en /api/softphone-call-log maakt daar
-    // de poging van: met de echte duur, en met 'gesproken' of 'niet opgenomen'
-    // in plaats van 'gebeld via de softphone'. Hier óók loggen zou elk gesprek
-    // dubbel laten tellen, en juist die telling bepaalt het oordeel in Afgerond.
-    //
-    // De naam van de global was hier fout (window.KLX); de softphone heet
-    // window.KlxSoftphone, zoals overal elders. Daardoor belde deze knop in
-    // fase 1 helemaal niet.
+  /**
+   * DE ENIGE WEG NAAR DE SOFTPHONE VANUIT OPVOLGING.
+   *
+   * Vier knoppen (werklijst, aanmeldkaart, nog af te ronden, zoomcalls) komen
+   * hier uit, en ze doen alle vier hetzelfde: het BELVENSTER openen. Pas 'Bel
+   * nu' belt.
+   *
+   * ── WAAROM NIET MEER RECHTSTREEKS call() ────────────────────────────────
+   * call() belde meteen, en dan kiest het systeem zelf de lijn en het
+   * uitgaande nummer. Dave zag niet waarmee hij belde en kon er niets aan
+   * veranderen — terwijl juist het nummer dat de lead op zijn scherm ziet
+   * bepaalt of er wordt opgenomen. Met open() staat die keuze vóór het bellen,
+   * zichtbaar en aanpasbaar.
+   *
+   * ── EEN WEG, GEEN TWEEDE IMPLEMENTATIE ──────────────────────────────────
+   * Vier aanroepplekken met elk hun eigen opts is vier plekken waar de
+   * taak-id vergeten kan worden. Die id is niet cosmetisch: zonder hem maakt
+   * /api/softphone-call-log er geen belpoging van die aan de juiste kaart
+   * hangt. Daarom precies één functie, met de plek als parameter zodat de
+   * call-log wel laat zien waar vandaan er gebeld is.
+   */
+  function belVenster(plek, { nummer, naam, taakId }) {
+    if (!nummer) { alert('Geen telefoonnummer bekend.'); return; }
     const sp = window.KlxSoftphone;
-    if (!sp || typeof sp.call !== 'function') {
+    if (!sp || typeof sp.open !== 'function') {
       alert('De softphone is niet beschikbaar op deze pagina.');
       return;
     }
-    try {
-      await sp.call(t.telefoon, { displayName: t.naam || '', opvolgingTaakId: id });
-    } catch (e) {
-      // KlxSoftphone toont zelf al een toast met de reden; hier niet nog een
-      // tweede melding overheen.
-      console.warn('[opvolging-v2] bellen mislukt:', (e && e.message) || e);
-    }
+    // De poging wordt NIET hier geschreven. De softphone stuurt de taak-id mee
+    // in zijn call-log en /api/softphone-call-log maakt daar de poging van:
+    // met de echte duur en de echte uitkomst. Hier óók loggen zou elk gesprek
+    // dubbel laten tellen, en juist die telling bepaalt het oordeel in
+    // Afgerond.
+    sp.open({
+      phone : nummer,
+      name  : naam || '',
+      source: 'opvolging.' + plek,
+      // Alleen meesturen als we hem hebben: een lege waarde zou in de
+      // softphone door de UUID-check vallen en dan is het verschil tussen
+      // 'geen taak' en 'taak vergeten' niet meer te zien.
+      ...(taakId ? { opvolgingTaakId: taakId } : {}),
+    });
+  }
+
+  window.__opvBel = async (id, plek) => {
+    const t = zoekTaak(id); if (!t) return;
+    if (!t.telefoon) { alert('Geen telefoonnummer bekend.'); return; }
+    belVenster(plek || 'werklijst', { nummer: t.telefoon, naam: t.naam, taakId: id });
   };
 
   // ── Het gesprek openen ────────────────────────────────────────────────────
@@ -4422,20 +4446,14 @@
 
   window.__opvCallBel = async (i) => {
     const c = callOp(i); if (!c || !c.telefoon) return;
-    const sp = window.KlxSoftphone;
-    if (!sp || typeof sp.call !== 'function') { alert('De softphone is niet beschikbaar op deze pagina.'); return; }
     // Bestaat er al een taak voor dit nummer, dan gaat de koppeling mee zodat
     // het gesprek daar direct als poging landt. Zo niet, dan doet de server
     // alsnog zijn match-op-nummer — hier hoeft niets bedacht te worden.
     const taak = taakVoorNummer(c.telefoon);
-    try {
-      await sp.call(c.telefoon, {
-        displayName: c.naam || '',
-        ...(taak ? { opvolgingTaakId: taak.id } : {}),
-      });
-    } catch (e) {
-      console.warn('[opvolging-v2] bellen mislukt:', (e && e.message) || e);
-    }
+    // De 'a'-prefix betekent dat de regel uit de achterstand komt: nog af te
+    // ronden calls van eerdere dagen, niet de zoomcalls van vandaag.
+    const plek = String(i).startsWith('a') ? 'nog-af-te-ronden' : 'zoomcalls';
+    belVenster(plek, { nummer: c.telefoon, naam: c.naam, taakId: taak ? taak.id : null });
   };
 
   window.__opvCallWa = (i) => {

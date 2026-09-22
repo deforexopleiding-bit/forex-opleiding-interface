@@ -202,7 +202,9 @@ test('wat er wél gedaan is, staat er zonder etiket bij', () => {
 
 test('de drie knoppen blijven staan', () => {
   const h = taakKaart(kaart(), '2026-09-05', { inGroep: true });
-  assert.match(h, /__opvBel\('tk-1'\)/);
+  // Met de plek erbij sinds het belvenster: de call-log laat daardoor zien
+  // dat er vanaf een aanmeldkaart gebeld is en niet uit de werklijst.
+  assert.match(h, /__opvBel\('tk-1', 'aanmeldkaart'\)/);
   assert.match(h, /__opvWa\('tk-1'\)/);
   assert.match(h, /__opvWatNu\('tk-1'\)/);
 });
