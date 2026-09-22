@@ -3411,6 +3411,14 @@
     else {
       bag.items = asArr(j?.items);
       bag.conversation = j?.conversation || null;
+      // G8 — de draad is één bladzijde. Het endpoint zegt of er nog
+      // geschiedenis vóór items[0] zit, en geeft de grens mee om mee door te
+      // vragen. Zonder deze twee velden lees je een gesprek dat halverwege
+      // begint zonder dat iets dat zegt.
+      bag.heeftMeer = !!j?.heeft_meer;
+      bag.oudsteAt  = j?.oudste_at || null;
+      bag.ouderOp   = false;   // niets aan het ophalen
+      bag.ouderEind = false;   // en we zijn nog niet bij het begin
       // Als 24u-venster nog niet expired volgens conv, reset de UI-toggle.
       if (bag.conversation && bag.conversation.can_send_text) _ui.inbox.compose.waWindowExpired = false;
       else if (bag.conversation && bag.conversation.can_send_text === false) _ui.inbox.compose.waWindowExpired = true;
@@ -4023,6 +4031,11 @@
     const bag = _live.inbox.thread.byConv[convId] = _live.inbox.thread.byConv[convId] || { items: [], conversation: null };
     bag.items = asArr(j.items);
     bag.conversation = j.conversation || bag.conversation;
+    // Ook langs dit pad de bladzijde-stand meenemen (G8). Anders staat de bag
+    // er zonder, en blijft "toon oudere berichten" weg bij een gesprek dat
+    // toevallig eerst via het kebab-menu geladen werd.
+    bag.heeftMeer = !!j.heeft_meer;
+    bag.oudsteAt  = j.oudste_at || null;
     return bag;
   }
   // Zet lokaal alle unread-counters op 0 (of ≥1 bij mark-unread) en repaint
@@ -4473,6 +4486,95 @@
     return _gesprekkenV2() ? window.GESPREKKEN_V2 : null;
   }
 
+  /* ── G8 — de rest van het gesprek ophalen ──────────────────────────────────
+     De draad toont de nieuwste 200 berichten. Zat er meer, dan stond dat er
+     tot nu toe niet bij: je las een gesprek dat halverwege begon en niets zei
+     dat er meer was. De gegevens waren er al (het endpoint meldde `total`
+     naast `returned`), ze werden alleen niet gebruikt.
+
+     Twee dingen die deze knop goed moet doen:
+
+     1. NIET naar beneden springen. Er komt inhoud BOVEN je, dus de plek waar
+        je aan het lezen was schuift weg. We tellen hoeveel hoger de draad is
+        geworden en schuiven de schuifbalk evenveel mee — dan blijft hetzelfde
+        bericht onder je ogen staan.
+     2. Stoppen als er niets meer bij komt. De grens is kleiner-of-gelijk, dus
+        het grensbericht komt zelf mee terug. Levert een bladzijde alleen maar
+        berichten op die we al hadden, dan komen we niet verder en zetten we de
+        knop uit in plaats van hem eindeloos hetzelfde te laten ophalen. */
+  window.__wbxInboxOuder = async (convId) => {
+    const gv = _gv2();
+    if (!gv || !convId) return;
+    const bag = _live.inbox.thread.byConv[convId];
+    if (!bag || bag.ouderOp || bag.ouderEind || !bag.oudsteAt) return;
+
+    bag.ouderOp = true;
+    _repaintInboxThreadBehoudPositie(convId);
+    try {
+      const j = await tryFetch(
+        'inbox:thread:ouder:' + convId,
+        `/api/inbox-thread-unified?conversation_id=${encodeURIComponent(convId)}&include_email=1&limit=200&voor=${encodeURIComponent(bag.oudsteAt)}`,
+        10000,
+      );
+      if (j && j.error) {
+        // Faalzacht: de draad die je al hebt blijft staan. De knop blijft ook
+        // staan, want opnieuw proberen is hier het juiste antwoord.
+        showToast?.('Oudere berichten ophalen lukte niet', 'error');
+      } else {
+        const binnen = asArr(j?.items);
+        const { nieuw, vooruitgang } = gv.nieuweDraadItems(bag.items, binnen);
+        if (vooruitgang) {
+          bag.items = nieuw.concat(bag.items);
+          bag.heeftMeer = !!j?.heeft_meer;
+          bag.oudsteAt  = j?.oudste_at || bag.oudsteAt;
+        } else {
+          // Niets nieuws: doorvragen brengt ons niet verder.
+          bag.heeftMeer = false;
+          bag.ouderEind = true;
+        }
+      }
+    } catch (e) {
+      showToast?.('Oudere berichten ophalen lukte niet', 'error');
+    } finally {
+      bag.ouderOp = false;
+      _repaintInboxThreadBehoudPositie(convId);
+    }
+  };
+
+  /* Opnieuw tekenen zonder de leesplek kwijt te raken.
+     _repaintInboxThread springt naar onder zodra er berichten bij zijn — dat
+     klopt bij een nieuw binnengekomen bericht en is precies verkeerd als de
+     aanwas BOVEN je staat. */
+  function _repaintInboxThreadBehoudPositie(convId) {
+    const el = document.getElementById('wbxInboxThreadScroll');
+    if (!el) { try { window.DFO?.render?.(); } catch (_) {} return; }
+    const hoogteVoor = el.scrollHeight;
+    const topVoor    = el.scrollTop;
+    el.innerHTML = _inboxThreadHtml(convId);
+    // Tel de telling bij, anders denkt de gewone repaint straks dat al deze
+    // oude berichten zojuist zijn binnengekomen en springt hij alsnog omlaag.
+    _ui.inbox.threadItemCountByConv[convId] = asArr(_live.inbox.thread.byConv[convId]?.items).length;
+    el.scrollTop = topVoor + (el.scrollHeight - hoogteVoor);
+  }
+
+  /* De regel boven de draad. Alleen als er echt meer is — een knop die niets
+     oplevert is erger dan geen knop. */
+  function _inboxOuderKnopHtml(convId) {
+    const gv = _gv2();
+    if (!gv) return '';
+    const bag = _live.inbox.thread.byConv[convId];
+    if (!bag || !bag.heeftMeer || bag.ouderEind) return '';
+    const bezig = !!bag.ouderOp;
+    return `<div style="padding:10px 14px;text-align:center">
+      <button type="button" ${bezig ? 'disabled' : ''}
+        onclick="window.__wbxInboxOuder('${esc(convId)}')"
+        style="font-size:12px;padding:6px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-2);cursor:${bezig ? 'default' : 'pointer'};opacity:${bezig ? '0.6' : '1'}">
+        ${bezig ? 'Bezig…' : '↑ Toon oudere berichten'}
+      </button>
+      <div style="font-size:10.5px;color:var(--text-3);margin-top:5px">Je ziet het recentste deel van dit gesprek.</div>
+    </div>`;
+  }
+
   function _inboxThreadHtml(convId) {
     if (!convId) return `<div style="padding:60px 20px;text-align:center;color:var(--text-3);font-size:13px">← Kies een gesprek links.</div>`;
     const loading = _live.inbox.thread.loading[convId];
@@ -4488,7 +4590,7 @@
     }
     const noreplyBanner = _inboxNoreplyBannerHtml(convId);
     const gvDraad = _gv2();
-    return noreplyBanner + items.map((m) => {
+    return noreplyBanner + _inboxOuderKnopHtml(convId) + items.map((m) => {
       const isOut = m.direction === 'outbound' || m.direction === 'out';
       const bg = isOut ? 'var(--brand-soft,#E2F1F5)' : 'var(--surface-2)';
       const align = isOut ? 'flex-end' : 'flex-start';

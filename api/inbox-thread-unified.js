@@ -9,7 +9,8 @@
 // Query:
 //   ?conversation_id=<uuid>   (verplicht — WA-conv geeft ook meteen customer_id)
 //   ?include_email=1|0        (default 1)
-//   ?limit=200                (max items totaal, oldest-first)
+//   ?limit=200                (max items per bladzijde, oldest-first)
+//   ?voor=<ISO-tijdstempel>   (optioneel — alleen wat op of vóór dit moment zit)
 //
 // Response 200:
 //   {
@@ -19,8 +20,27 @@
 //       ...
 //     ],
 //     conversation: { id, customer_id, can_send_text, phone_number },
-//     counts: { whatsapp, email, total }
+//     counts: { whatsapp, email, total },
+//     heeft_meer: boolean,      // er zit nog geschiedenis vóór items[0]
+//     oudste_at: string|null    // de grens om mee door te vragen (?voor=)
 //   }
+//
+// ── G8: één bladzijde tegelijk ───────────────────────────────────────────────
+// Elke bron wordt NIEUWSTE-EERST opgehaald met één rij meer dan we tonen, en
+// daarna omgedraaid. Voorheen haalde dit endpoint álles op om vervolgens
+// alles weg te gooien behalve de laatste 200 — dat groeit mee met de
+// geschiedenis, dus precies bij de klant met wie je het meest gepraat hebt
+// loopt het als eerste tegen de tijdslimiet.
+//
+// LET OP bij `counts`: die tellen wat er in DEZE bladzijde zit, niet wat er in
+// totaal bestaat. Voor "is er meer" is `heeft_meer` het antwoord; een telling
+// van alles zou een tweede opvraging kosten die niemand gebruikt.
+//
+// `?voor=` is KLEINER-OF-GELIJK, niet kleiner. Bij mail is de tijdstempel op
+// de seconde nauwkeurig, dus twee berichten in dezelfde seconde is geen
+// bedenksel, en met "kleiner dan" zou zo'n bericht op de bladzijdegrens
+// verdwijnen. Het scherm ontdubbelt op kanaal+id — zie nieuweDraadItems() in
+// modules/shared/gesprekken-v2.js.
 //
 // Permission: finance.inbox.view (dezelfde als inbox-messages-list).
 
@@ -29,6 +49,7 @@ import { requirePermission } from './_lib/requirePermission.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
 import { mailadressenVan, telefoonSleutels, viaContactZoeken, orReeks } from './_lib/gesprekken-mailkoppel.js';
 import { pickEmailPreviewBody } from './_lib/email-body-strip.js';
+import { leesGrens, ophaalAantal, venster } from './_lib/gesprekken-draadvenster.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -60,6 +81,10 @@ export default async function handler(req, res) {
   }
   const includeEmail = String(q.include_email ?? '1') === '1';
   const limit = clampInt(q.limit, 200, 10, 500);
+  // De grens voor de vorige bladzijde. Onleesbaar → null, en dan halen we
+  // gewoon de nieuwste bladzijde op; NOOIT "dan maar alles".
+  const grens = leesGrens(q.voor);
+  const perBron = ophaalAantal(limit);
 
   try {
     // 1) Conv-details.
@@ -79,14 +104,20 @@ export default async function handler(req, res) {
     }
 
     // 2) WhatsApp-messages voor deze conv.
-    const { data: waMsgs, error: waErr } = await supabaseAdmin
+    let waVraag = supabaseAdmin
       .from('whatsapp_messages')
       // failed_reason erbij (G9): zonder die kolom ziet een mislukt bericht er
       // in het scherm precies zo uit als een afgeleverd bericht.
       .select('id, direction, body, media_url, media_type, template_name, status, sent_at, delivered_at, read_at, failed_reason, meta_wamid, created_at')
-      .eq('conversation_id', convId)
-      .order('created_at', { ascending: true });
+      .eq('conversation_id', convId);
+    if (grens) waVraag = waVraag.lte('created_at', grens);
+    // Nieuwste eerst ophalen en daarna omdraaien (G8) — zie de kop van dit
+    // bestand. De rest van de verwerking verwacht oplopend.
+    const { data: waRuw, error: waErr } = await waVraag
+      .order('created_at', { ascending: false })
+      .limit(perBron);
     if (waErr) throw new Error('whatsapp: ' + waErr.message);
+    const waMsgs = (waRuw || []).slice().reverse();
 
     // 3) Email-messages voor gekoppelde klant (indien any).
     // imap_uid + message_id worden meegegeven zodat de client de composite
@@ -139,37 +170,46 @@ export default async function handler(req, res) {
     const orUitgaand = orReeks('to_address', contactAdressen);
     if (includeEmail && orInkomend && orUitgaand) {
       try {
-        const { data: eMsgs, error: eErr } = await supabaseAdmin
+        let cmVraag = supabaseAdmin
           .from('email_messages')
           .select('id, mailbox, imap_uid, from_address, from_name, subject, snippet, body_text, body_html, date_received, message_id, category, attachments')
-          .or(orInkomend)
-          .order('date_received', { ascending: true });
+          .or(orInkomend);
+        if (grens) cmVraag = cmVraag.lte('date_received', grens);
+        const { data: eMsgs, error: eErr } = await cmVraag
+          .order('date_received', { ascending: false })
+          .limit(perBron);
         if (eErr) console.warn('[inbox-thread-unified] contact-mail fetch:', eErr.message);
-        else emailMsgs = eMsgs || [];
+        else emailMsgs = (eMsgs || []).slice().reverse();
 
-        const { data: replies, error: rErr } = await supabaseAdmin
+        let crVraag = supabaseAdmin
           .from('email_replies')
           .select('id, email_id, email_subject, final_reply, from_address, to_address, cc_address, sent_at, sent_by_id, attachments')
-          .or(orUitgaand)
-          .order('sent_at', { ascending: true });
+          .or(orUitgaand);
+        if (grens) crVraag = crVraag.lte('sent_at', grens);
+        const { data: replies, error: rErr } = await crVraag
+          .order('sent_at', { ascending: false })
+          .limit(perBron);
         if (rErr) console.warn('[inbox-thread-unified] contact-replies fetch:', rErr.message);
-        else emailReplies = replies || [];
+        else emailReplies = (replies || []).slice().reverse();
       } catch (mEx) {
         console.warn('[inbox-thread-unified] contact-mail uitzondering:', mEx?.message || mEx);
       }
     }
 
     if (includeEmail && conv.customer_id) {
-      const { data: eMsgs, error: eErr } = await supabaseAdmin
+      let kmVraag = supabaseAdmin
         .from('email_messages')
         .select('id, mailbox, imap_uid, from_address, from_name, subject, snippet, body_text, body_html, date_received, message_id, category, attachments')
-        .eq('customer_id', conv.customer_id)
-        .order('date_received', { ascending: true });
+        .eq('customer_id', conv.customer_id);
+      if (grens) kmVraag = kmVraag.lte('date_received', grens);
+      const { data: eMsgs, error: eErr } = await kmVraag
+        .order('date_received', { ascending: false })
+        .limit(perBron);
       if (eErr) {
         // Fail-soft: email-fetch mag WA-thread niet blokkeren.
         console.warn('[inbox-thread-unified] email fetch failed:', eErr.message);
       } else {
-        emailMsgs = eMsgs || [];
+        emailMsgs = (eMsgs || []).slice().reverse();
       }
 
       // Onze verzonden replies. Match op customer.email (case-insensitive
@@ -184,15 +224,18 @@ export default async function handler(req, res) {
           .maybeSingle();
         const custEmail = String(custRow?.email || '').trim().toLowerCase();
         if (custEmail) {
-          const { data: replies, error: rErr } = await supabaseAdmin
+          let krVraag = supabaseAdmin
             .from('email_replies')
             .select('id, email_id, email_subject, final_reply, from_address, to_address, cc_address, sent_at, sent_by_id, attachments')
-            .ilike('to_address', custEmail)
-            .order('sent_at', { ascending: true });
+            .ilike('to_address', custEmail);
+          if (grens) krVraag = krVraag.lte('sent_at', grens);
+          const { data: replies, error: rErr } = await krVraag
+            .order('sent_at', { ascending: false })
+            .limit(perBron);
           if (rErr) {
             console.warn('[inbox-thread-unified] email_replies fetch failed:', rErr.message);
           } else {
-            emailReplies = replies || [];
+            emailReplies = (replies || []).slice().reverse();
           }
         }
       } catch (rEx) {
@@ -306,11 +349,10 @@ export default async function handler(req, res) {
     }
     items.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
 
-    // Truncate op limit — meest recente eerst behouden bij overflow.
-    let trimmed = items;
-    if (items.length > limit) {
-      trimmed = items.slice(items.length - limit);
-    }
+    // Eén bladzijde: de nieuwste `limit`, plus het antwoord op "zit er nog
+    // meer vóór?". Dat laatste komt uit de extra rij die per bron is
+    // opgehaald — geen tweede opvraging die alleen maar telt.
+    const { zichtbaar: trimmed, heeftMeer, oudsteAt } = venster(items, limit);
 
     return res.status(200).json({
       items: trimmed,
@@ -330,9 +372,13 @@ export default async function handler(req, res) {
         email: emailMsgs.length,
         email_replies: emailReplies.length,       // onze verzonden mails
         email_total: emailMsgs.length + emailReplies.length, // inbound + outbound samen
+        // LET OP: dit telt wat er in DEZE bladzijde zit, niet wat er in totaal
+        // bestaat. Voor "is er meer" is heeft_meer het antwoord.
         total: items.length,
         returned: trimmed.length,
       },
+      heeft_meer: heeftMeer,
+      oudste_at: oudsteAt,
     });
   } catch (e) {
     console.error('[inbox-thread-unified]', e?.message || e);

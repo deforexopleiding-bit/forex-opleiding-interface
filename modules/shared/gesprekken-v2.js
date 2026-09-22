@@ -355,12 +355,59 @@
     return uitstelRest(tot, nu).loopt;
   }
 
+  // ── De draad in bladzijden (G8) ────────────────────────────────────────────
+  //
+  // De draad haalt de nieuwste 200 berichten op. Zit er meer, dan zegt het
+  // endpoint dat met `heeft_meer` en geeft het de grens mee (`oudste_at`).
+  // Doorvragen gaat met `?voor=<grens>`, en dat is KLEINER-OF-GELIJK: bij mail
+  // is de tijdstempel op de seconde nauwkeurig, dus twee berichten in dezelfde
+  // seconde is geen bedenksel, en met "kleiner dan" zou zo'n bericht op de
+  // bladzijdegrens verdwijnen. Liever één bericht dubbel ophalen en het hier
+  // eruit halen, dan het kwijtraken.
+
+  /**
+   * Waarop we een bericht herkennen.
+   *
+   * Niet het id alleen: een WhatsApp-bericht en een mail komen uit
+   * verschillende tabellen, dus hun id's zeggen niets over elkaar. Alleen op
+   * id ontdubbelen zou een mail laten verdwijnen omdat er toevallig een
+   * WhatsApp-bericht met datzelfde id bestaat.
+   */
+  function draadSleutel(item) {
+    if (!item || item.id === null || item.id === undefined) return null;
+    return String(item.channel || '?') + ':' + String(item.id);
+  }
+
+  /**
+   * Wat van de opgehaalde bladzijde is echt nieuw?
+   *
+   * Geeft ook terug of er iets bij zat. Zo niet, dan bestaat de hele
+   * bladzijde uit berichten die we al hadden — dan komt doorvragen niet
+   * verder en moet het scherm stoppen in plaats van dezelfde bladzijde
+   * eindeloos op te halen.
+   */
+  function nieuweDraadItems(bestaand, binnengekomen) {
+    const bekend = {};
+    (Array.isArray(bestaand) ? bestaand : []).forEach(function (i) {
+      const s = draadSleutel(i);
+      if (s) bekend[s] = true;
+    });
+    const nieuw = (Array.isArray(binnengekomen) ? binnengekomen : []).filter(function (i) {
+      const s = draadSleutel(i);
+      // Zonder id kunnen we niets vergelijken. Liever één keer dubbel in beeld
+      // dan een bericht dat je niet te zien krijgt.
+      return s ? !bekend[s] : true;
+    });
+    return { nieuw: nieuw, vooruitgang: nieuw.length > 0 };
+  }
+
   const API = {
     VENSTER_MS, BIJNA_DICHT_MS, FOCUS_MODI, POLL_MS, UITSTEL_MS,
     vensterStand, duurKort, verzendStand, toontVerzendStand,
     leesFocus, focusFilter, focusTelling,
     pollInterval, magOphalen,
     uitstelRest, magNogTerug,
+    draadSleutel, nieuweDraadItems,
   };
 
   if (typeof window !== 'undefined') window.GESPREKKEN_V2 = API;
