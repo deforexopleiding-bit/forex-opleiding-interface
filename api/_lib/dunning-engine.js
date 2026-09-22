@@ -39,6 +39,12 @@ import { shouldSkipDueToTerminalStage, OPEN_INVOICE_STATUSES as OPEN_STATUSES } 
 import {
   haalStilteStand, stilteBlokkade, stilteStandSamenvatting,
 } from './lms-stilte.js';
+// De derde poort, naast lms-hold en lms-stilte: een betaalafspraak die Iris
+// vastlegde. Staat IRIS_PAUZEERT_JOOST niet op 'true', dan geeft haalStand een
+// lege stand en blokkeert er niets — byte-identiek aan vandaag.
+import {
+  haalIrisPauzeStand, irisPauzeBlokkade, pauzeStandSamenvatting,
+} from './iris/joost-pauze.js';
 import {
   isSendStep,
   isWithinOfficeHours,
@@ -193,15 +199,40 @@ export async function runEngine({ mode = 'cron', abortMs = 50_000, scope = 'prod
     result.lms_stilte = { bron_status: BRON_ONBEREIKBAAR, actief: 0, vangnet: 0, fout };
   }
 
+  // ── BELOFTE VIA IRIS: één keer ophalen, daarna doorgeven ─────────────
+  // Zelfde vorm als de twee poorten hierboven, met één verschil dat in
+  // api/_lib/iris/joost-pauze.js is uitgeschreven: deze valt fail-OPEN. Een
+  // fout in een gloednieuwe tabel mag de bestaande aanmaanmotor niet
+  // stilleggen — Iris draait naast Joost, niet bovenop hem.
+  //
+  // Staat IRIS_PAUZEERT_JOOST niet aan, dan doet dit blok geen enkele
+  // opvraging en blokkeert irisPauzeBlokkade() altijd null.
+  let irisPauzeStand = { aan: false, beloftes: new Map(), fout: null };
   try {
-    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors, scope, stilteStand);
+    irisPauzeStand = await haalIrisPauzeStand({ db: supabaseAdmin });
+    if (irisPauzeStand.aan) {
+      console.log('[dunning-engine] ' + pauzeStandSamenvatting(irisPauzeStand));
+      result.iris_beloftes = {
+        actief: irisPauzeStand.beloftes?.size || 0,
+        fout: irisPauzeStand.fout || null,
+      };
+    }
+  } catch (e) {
+    // haalIrisPauzeStand() gooit niet, maar mocht dat ooit veranderen dan is
+    // doorlopen hier de veilige uitkomst — zie de toelichting in die module.
+    console.error('[dunning-engine] Iris-beloftes ophalen gooide — de motor '
+      + 'loopt door: ' + (e?.message || e));
+  }
+
+  try {
+    result.detected = await detectAndStartRuns(startedAt, abortMs, result.errors, scope, stilteStand, irisPauzeStand);
   } catch (e) {
     result.errors.push({ phase: 'detect', error: e?.message || String(e) });
     console.error('[dunning-engine] detect fatal', e);
   }
 
   try {
-    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors, scope, stilteStand);
+    result.runs_advanced = await advanceActiveRuns(startedAt, abortMs, result.errors, scope, stilteStand, irisPauzeStand);
   } catch (e) {
     result.errors.push({ phase: 'advance', error: e?.message || String(e) });
     console.error('[dunning-engine] advance fatal', e);
@@ -596,7 +627,7 @@ async function fetchStepTemplates(steps) {
 // Phase 1: detect + start
 // ---------------------------------------------------------------------------
 
-async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'production', stilteStand = null) {
+async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'production', stilteStand = null, irisPauzeStand = null) {
   const { data: workflows, error: wfErr } = await supabaseAdmin
     .from('dunning_workflows')
     .select('id, name, trigger_conditions, priority, is_active')
@@ -816,6 +847,8 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
   // Idem voor de stilte-poort. Hier bestaat nog geen run, dus er is ook geen
   // dunning_log-regel om het in te schrijven; de cron-log is de plek.
   let skippedStilte = 0;
+  let skippedIrisBelofte = 0;
+  const irisGemeld = new Set();
   const stilteGemeld = new Set();
 
   outer: for (const workflow of workflows || []) {
@@ -1004,6 +1037,21 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
         continue;
       }
 
+      // ── BELOFTE VIA IRIS: geen nieuwe run ─────────────────────────────
+      // De derde poort, in dezelfde vorm en op dezelfde plek als de twee
+      // hierboven. Staat IRIS_PAUZEERT_JOOST niet aan, dan geeft deze
+      // aanroep altijd null en verandert er niets.
+      const blokkadeIris = irisPauzeBlokkade(irisPauzeStand, customerId);
+      if (blokkadeIris) {
+        skippedIrisBelofte++;
+        if (!irisGemeld.has(customerId)) {
+          irisGemeld.add(customerId);
+          console.log('[dunning-engine] klant ' + customerId
+            + ' overgeslagen — ' + blokkadeIris.reden);
+        }
+        continue;
+      }
+
       if (!matchesCustomerType(agg.customer, customerType)) continue;
       if (agg.total_open_eur < minTotal) continue;
 
@@ -1172,6 +1220,10 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
     }
   }
 
+  if (skippedIrisBelofte > 0) {
+    console.log('[dunning-engine] Iris-beloftepoort: ' + skippedIrisBelofte
+      + ' factu(u)r(en) overgeslagen omdat er een betaalafspraak loopt.');
+  }
   if (skippedStilte > 0) {
     console.log('[dunning-engine] LMS-stilte-poort: ' + skippedStilte
       + ' klant-match(es) niet gestart (' + stilteGemeld.size + ' unieke klanten)');
@@ -1187,7 +1239,7 @@ async function detectAndStartRuns(startedAt, abortMs, errors, scope = 'productio
 // Phase 2: advance active runs
 // ---------------------------------------------------------------------------
 
-async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production', stilteStand = null) {
+async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production', stilteStand = null, irisPauzeStand = null) {
   const now = nowIso();
   const { data: runs, error: runsErr } = await supabaseAdmin
     .from('dunning_workflow_runs')
@@ -1412,6 +1464,37 @@ async function advanceActiveRuns(startedAt, abortMs, errors, scope = 'production
           });
           console.log('[dunning-engine] run ' + run.id + ' overgeslagen — '
             + stilteBlok.reden);
+          runAdvanced = true;
+          break; // stop binnenlus; run blijft active
+        }
+
+        // ── BELOFTE VIA IRIS -> stap overslaan, run ongemoeid ────────
+        // Zelfde vorm en zelfde reden als de stilte-poort hierboven:
+        // OVERSLAAN, niet pauzeren. De run blijft active, de volgende
+        // dagronde pikt 'm opnieuw op, en zodra de beloofde dag voorbij is
+        // loopt alles gewoon door. Dat is precies de hercontrole die een
+        // betaaltoezegging hoort te krijgen — en betaalde de klant
+        // intussen, dan valt de factuur vanzelf uit scope.
+        //
+        // Staat IRIS_PAUZEERT_JOOST niet aan, dan geeft deze aanroep altijd
+        // null en verandert er niets aan wat de motor doet.
+        const irisBlok = irisPauzeBlokkade(irisPauzeStand, run.customer_id);
+        if (irisBlok) {
+          await supabaseAdmin.from('dunning_log').insert({
+            run_id: run.id,
+            step_id: currentStepId,
+            event_type: irisBlok.event,
+            payload: {
+              reason: irisBlok.code,
+              message: irisBlok.reden,
+              tot: irisBlok.tot,
+              bedrag: irisBlok.bedrag,
+              bron: irisBlok.bron,
+              belofte_id: irisBlok.belofte_id,
+            },
+          });
+          console.log('[dunning-engine] run ' + run.id + ' overgeslagen — '
+            + irisBlok.reden);
           runAdvanced = true;
           break; // stop binnenlus; run blijft active
         }
