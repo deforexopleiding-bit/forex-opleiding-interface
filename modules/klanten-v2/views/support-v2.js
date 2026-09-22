@@ -389,7 +389,14 @@
       if (!u) { window.KV.toast('Goedgekeurd — voer ’m uit en zet hem daarna op gedaan'); return; }
       if (u.status === 'uitgevoerd') { window.KV.toast('Goedgekeurd en uitgevoerd, de klant heeft bericht'); return; }
       window.KV.toast('Goedgekeurd, maar uitvoeren lukte niet — zie de reden bij de actie', 'err');
-    } catch (e) { if (window.KV?.toast) window.KV.toast(e.message, 'err'); }
+    } catch (e) {
+      // Ook na een fout opnieuw laden. Bij een 409 was een collega je voor en
+      // klopt het scherm per definitie niet meer; bij een mislukte
+      // slotschrijfactie staat de actie inmiddels op goedgekeurd. In beide
+      // gevallen is de oude kaart misleidend.
+      try { await laadDetail(_det.id); } catch (_) { /* de melding is leidend */ }
+      if (window.KV?.toast) window.KV.toast(e.message, 'err');
+    }
   };
 
   function thread(berichten) {

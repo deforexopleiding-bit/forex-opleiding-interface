@@ -190,6 +190,45 @@ vanuit **`goedgekeurd` én `mislukt`**. De andere overgangen blijven strak:
 | `uitgevoerd` | wat dan ook | **409** — anders krijgt de klant een tweede bericht |
 | `afgewezen` / `voorgesteld` | `uitgevoerd` | **409** — er is niets goedgekeurd om te doen |
 
+### Drie schrijfacties, in deze volgorde
+
+Uitvoeren zit tussen twee schrijfacties in, en dat is geen detail:
+
+1. **Claim** — de actie van zijn huidige stand naar de nieuwe zetten, mét een
+   grendel op die huidige stand in de query zelf:
+   `.update({…}).eq('id', id).in('status', TOEGESTAAN).select()`. Nul geraakte
+   rijen betekent dat een collega je net voor was → **409**, en er is dan nog
+   **niets** uitgevoerd. De database beslist wie wint, niet de volgorde waarin
+   twee verzoeken binnenkomen.
+2. **Uitvoeren** — alleen door wie de claim won.
+3. **Vastleggen** — de uitkomst (`status`, `uitgevoerd_op`,
+   `uitvoer_resultaat`) wegschrijven.
+
+Waarom niet alles in één schrijfactie vooraf: dan staat een actie op
+`uitgevoerd` voordat het onderliggende systeem iets bevestigd heeft, en dat is
+precies wat deze fase moet voorkomen. Waarom niet alles in één schrijfactie
+achteraf: tussen het lezen en het schrijven zit dan de hele uitvoering, dus
+twee collega's kunnen dezelfde handeling allebei uitvoeren — twee
+LMS-uitnodigingen, twee mentormeldingen.
+
+De claim gebruikt `goedgekeurd` als tussenstand en heeft daarom **geen nieuwe
+status en geen migratie** nodig. Dat pakt ook goed uit als het proces
+halverwege omvalt: de actie blijft op `goedgekeurd` staan, en dat is exact de
+S1-toestand waar de knop "Gedaan" voor bestaat. Een collega pakt 'm op zoals
+hij dat vóór S2 ook deed.
+
+### Als stap 3 faalt
+
+De handeling is dan gebeurd, de administratie niet. Dat gaat **luid** de log in
+(`UITGEVOERD MAAR NIET VASTGELEGD`, met soort, gesprek, uitkomst en resultaat,
+zodat het handmatig terug te vinden is) en de collega krijgt een **500** met
+een eerlijke melding: de actie is wél uitgevoerd, maar niet vastgelegd —
+controleer het en zet 'm daarna op gedaan.
+
+De klant krijgt op dat moment **geen** bericht. De actie staat nog op
+`goedgekeurd`, dus zodra de collega 'm op gedaan zet gaat het bericht alsnog
+uit. Zouden we nu al sturen, dan kreeg de klant er twee.
+
 ## 8. Benodigde omgevingsvariabelen
 
 | Variabele | Waarvoor | Zonder |
