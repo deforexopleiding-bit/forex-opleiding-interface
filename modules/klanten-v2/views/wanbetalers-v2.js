@@ -4541,7 +4541,7 @@
       if (j && j.error) {
         // Faalzacht: de draad die je al hebt blijft staan. De knop blijft ook
         // staan, want opnieuw proberen is hier het juiste antwoord.
-        showToast?.('Oudere berichten ophalen lukte niet', 'error');
+        _toast('Oudere berichten ophalen lukte niet', 'error');
       } else {
         const binnen = asArr(j?.items);
         const { nieuw, vooruitgang } = gv.nieuweDraadItems(bag.items, binnen);
@@ -4556,7 +4556,7 @@
         }
       }
     } catch (e) {
-      showToast?.('Oudere berichten ophalen lukte niet', 'error');
+      _toast('Oudere berichten ophalen lukte niet', 'error');
     } finally {
       bag.ouderOp = false;
       _repaintInboxThreadBehoudPositie(convId);
