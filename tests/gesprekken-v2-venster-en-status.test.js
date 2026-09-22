@@ -272,3 +272,46 @@ test('de gekozen tijden zijn de tijden waar de winst op gerekend is', () => {
   // meer — en dan hoort iemand dat te merken.
   assert.deepEqual(G.POLL_MS, { geen_kanaal: 6000, onbewezen: 20000, bewezen: 45000 });
 });
+
+/* ── G2 · het ongedaan-venster ────────────────────────────────────────── */
+
+test('de teller staat op dertig seconden', () => {
+  // Lang genoeg om je te bedenken, kort genoeg om niet in de weg te lopen.
+  // Verandert dit getal, dan klopt de tekst in de balk niet meer.
+  assert.equal(G.UITSTEL_MS, 30000);
+});
+
+test('de balk loopt leeg, niet vol', () => {
+  // Vol bij de start, leeg als het weggaat. Andersom leest als "hij is bijna
+  // klaar met laden", en dat is het tegenovergestelde van wat er gebeurt.
+  const nu = 1_000_000;
+  assert.equal(G.uitstelRest(nu + 30000, nu).deel, 1);
+  assert.equal(G.uitstelRest(nu + 15000, nu).deel, 0.5);
+  assert.equal(G.uitstelRest(nu + 1, nu).deel > 0, true);
+});
+
+test('zolang er iets over is, staat er minstens 1 seconde', () => {
+  // "0 seconden" met een knop die nog werkt is een tegenstrijdigheid; naar
+  // boven afronden houdt de tekst en de knop met elkaar eens.
+  const nu = 1_000_000;
+  assert.equal(G.uitstelRest(nu + 1, nu).seconden, 1);
+  assert.equal(G.uitstelRest(nu + 999, nu).seconden, 1);
+  assert.equal(G.uitstelRest(nu + 1001, nu).seconden, 2);
+});
+
+test('op nul is het voorbij', () => {
+  const nu = 1_000_000;
+  assert.equal(G.uitstelRest(nu, nu).loopt, false);
+  assert.equal(G.uitstelRest(nu - 1, nu).loopt, false);
+  assert.equal(G.magNogTerug(nu - 1, nu), false);
+  assert.equal(G.magNogTerug(nu + 1, nu), true);
+});
+
+test('rommel telt als voorbij, niet als eeuwig', () => {
+  // Een kapotte tijd mag geen bericht laten hangen dat nooit vertrekt én
+  // nooit teruggehaald kan worden.
+  for (const r of [null, undefined, NaN, 'straks', {}]) {
+    assert.equal(G.uitstelRest(r, 1000).loopt, false);
+    assert.equal(G.magNogTerug(r, 1000), false);
+  }
+});
