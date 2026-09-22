@@ -148,3 +148,11 @@
 .klx-call-sheet-btn.hangup  { background: #ef4444; border-color: #b91c1c; }
 .klx-call-sheet-btn.hangup:hover { background: #dc2626; }
 .klx-call-sheet-btn.mute.on { background: #eab308; color: #111; border-color: #ca8a04; }
+
+/* Geen uitbelnummers ingesteld voor deze lijn. Staat waar anders de keuzelijst
+   staat, zodat de plek niet leeg blijft: een leeg vak leest als 'het is
+   geregeld', en dan belt Dave op een nummer dat niemand gekozen heeft. */
+.klx-call-sheet-cid-leeg{
+  flex:1;font-size:12px;line-height:1.35;color:#8b939f;
+  background:#fafbfc;border:1px dashed #d7dbe0;border-radius:8px;padding:6px 9px;
+}

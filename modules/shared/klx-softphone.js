@@ -81,9 +81,27 @@
       } catch (_) { return 'auto'; }
     })(),
     numberOverride : null,
-    selectedCallerId: (function () {
-      try { return localStorage.getItem('klx-softphone-caller-id') || ''; }
-      catch (_) { return ''; }
+    // HET UITGAANDE NUMMER, PER LIJN ONTHOUDEN.
+    //
+    // Eén globale sleutel kan niet kloppen: een NL-nummer hoort nooit over de
+    // BE-lijn te gaan, en andersom. resolveEffectiveCallerId() filtert dat al
+    // weg, maar dan zag Dave zijn keuze op de andere lijn stilletjes terugvallen
+    // op 'Voys · standaard' zonder te begrijpen waarom. Nu heeft elke lijn zijn
+    // eigen geheugen en klopt wat er staat met wat er gebeurt.
+    //
+    // De oude globale sleutel wordt nog één keer gelezen zodat een bestaande
+    // keuze niet verdwijnt; hoort hij niet bij die lijn, dan filtert
+    // resolveEffectiveCallerId() hem alsnog weg. Dat is precies de vangnet-rol
+    // die daar al zat.
+    callerIdByLine: (function () {
+      const lees = (sleutel) => {
+        try { return localStorage.getItem(sleutel) || ''; } catch (_) { return ''; }
+      };
+      const oud = lees('klx-softphone-caller-id');
+      return {
+        nl: lees('klx-softphone-caller-id-nl') || oud,
+        be: lees('klx-softphone-caller-id-be') || oud,
+      };
     })(),
     // Actieve klant-context (naam + telefoon + optionele meta) voor de sheet-
     // header. Wordt gezet bij open() en gewist bij closeSheet().
@@ -251,8 +269,22 @@
   // Effectieve CID: alleen doorsturen als 'ie in de lijst van de huidige
   // lijn zit (voorkomt dat een NL-nummer per ongeluk over de BE-lijn gaat).
   // Lege waarde = "Voys · standaard" = geen extraHeaders in INVITE.
+  /** De keuze zoals hij voor DEZE lijn is opgeslagen. */
+  function selectedCallerIdForLine(line) {
+    return String(state.callerIdByLine?.[line] || '').trim();
+  }
+  /**
+   * Welke env-var de nummers voor deze lijn levert.
+   *
+   * Staat er niets, dan hoort er te staan WAT er ontbreekt. 'Voys · standaard'
+   * zonder verdere uitleg leest als 'het is geregeld', terwijl er in
+   * werkelijkheid niets is ingesteld en niemand weet waar hij moet kijken.
+   */
+  function callerIdEnvVoor(line) {
+    return line === 'be' ? 'VOYS_BE_CALLER_IDS' : 'VOYS_CALLER_IDS';
+  }
   function resolveEffectiveCallerId(line) {
-    const cid = String(state.selectedCallerId || '').trim();
+    const cid = selectedCallerIdForLine(line);
     if (!cid) return '';
     const list = callerIdsForLine(line);
     return list.includes(cid) ? cid : '';
@@ -299,6 +331,23 @@
       if (s && sub != null) s.textContent = sub;
     }
   }
+  /**
+   * De ondertitel van de callbar: wie je belt, en WAARMEE.
+   *
+   * Dat tweede stond er niet, en juist dat nummer ziet de lead op zijn scherm.
+   * Wie tijdens het gesprek wil weten of hij met het goede nummer belt, moest
+   * het belvenster weer opendoen — en dat is precies het moment waarop je daar
+   * niet mee bezig wilt zijn.
+   *
+   * Staat er geen keuze, dan staat er niets: 'via Voys · standaard' erbij
+   * zetten suggereert een keuze die niemand gemaakt heeft.
+   */
+  function callbarOndertitel(displayName, effPhone, line) {
+    const wie = displayName ? `${displayName} — ${effPhone}` : String(effPhone || '');
+    const via = resolveEffectiveCallerId(line);
+    return via ? `${wie} · via ${via}` : wie;
+  }
+
   function updateCallbarStatus(title, sub) {
     const bar = document.getElementById('klxSoftphoneCallbar');
     if (!bar || bar.hidden) return;
@@ -652,14 +701,14 @@
               }
             }, 500);
           }
-          updateCallbarStatus('Gaat over…', displayName ? `${displayName} — ${effPhone}` : effPhone);
+          updateCallbarStatus('Gaat over…', callbarOndertitel(displayName, effPhone, line));
           renderSheet();
         } else if (s === 'Established') {
           ringback.stop();
           _stopEarlyMediaPoll();
           state.lastState = 'connected';
           _bindRemoteAudio(); // zet audio als 'ie nog niet was gebonden
-          updateCallbarStatus('In gesprek', displayName ? `${displayName} — ${effPhone}` : effPhone);
+          updateCallbarStatus('In gesprek', callbarOndertitel(displayName, effPhone, line));
           startCallTimer();
           renderSheet();
           state.callLogEstablished = true;   // #call-log-B: 'answered'-marker
@@ -752,7 +801,7 @@
       // ontstaat niet. Zie de kop van ringback.
       try { await ringback.primen(); } catch (_) { /* geluid is nooit blokkerend */ }
       state.armeren = { bezig: true, afgebroken: false, sinds: Date.now() };
-      updateCallbarStatus('Verbinden…', displayName ? `${displayName} — ${effPhone}` : effPhone);
+      updateCallbarStatus('Verbinden…', callbarOndertitel(displayName, effPhone, line));
       renderSheet();
       await new Promise((r) => setTimeout(r, ARMEER_MS));
       if (state.armeren?.afgebroken) {
@@ -895,11 +944,20 @@
     const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
-    // v=1da: uitgaand-nummer keuze — dropdown "Voys · standaard" + per-lijn
-    // caller_ids uit /api/voys-sip-config. Alleen tonen wanneer er ≥1 optie
-    // beschikbaar is (anders zou 'ie een lege lijst tonen).
+    // HET UITGAANDE NUMMER STAAT ER ALTIJD.
+    //
+    // Hiervoor verscheen dit blok alleen als er nummers waren. Bij een lege
+    // lijst zag Dave dus niets — geen keuze, geen uitleg — en belde hij op
+    // 'Voys · standaard' zonder te weten dat er niets was ingesteld. Dat leest
+    // als 'het is geregeld'.
+    //
+    // Nu staat het blok er altijd: met één nummer erin staat er wat er uitgaat,
+    // en bij nul staat er dát het niet geregeld is, met de naam van de
+    // ontbrekende env-var erbij zodat het na te kijken is in plaats van te
+    // raden.
     const availableCids = callerIdsForLine(line);
-    const selectedCid = String(state.selectedCallerId || '');
+    const selectedCid = selectedCallerIdForLine(line);
+    const cidEnv = callerIdEnvVoor(line);
     body.innerHTML = `
       <div class="klx-call-sheet-top">
         <div class="klx-call-sheet-label"><i class="ti ti-phone"></i> Uitbellen via</div>
@@ -909,15 +967,17 @@
           ${beAvailable ? `<option value="be" ${ov === 'be' ? 'selected' : ''}>BE-lijn (+32)</option>` : ''}
         </select>
       </div>
-      ${availableCids.length ? `
-        <div class="klx-call-sheet-top" style="margin-top:6px">
-          <div class="klx-call-sheet-label"><i class="ti ti-user"></i> Uitgaand nummer</div>
-          <select class="klx-call-sheet-lineselect" id="klxCallCidSel" ${inCall ? 'disabled' : ''} title="Kies welk Voys-nummer als beller-ID uitgaat. 'Voys · standaard' laat Voys de account-default kiezen.">
+      <div class="klx-call-sheet-top" style="margin-top:6px">
+        <div class="klx-call-sheet-label"><i class="ti ti-user"></i> Uitgaand nummer</div>
+        ${availableCids.length ? `
+          <select class="klx-call-sheet-lineselect" id="klxCallCidSel" ${inCall ? 'disabled' : ''} title="Dit nummer ziet de lead op zijn scherm. 'Voys · standaard' laat Voys de account-default kiezen.">
             <option value=""${selectedCid ? '' : ' selected'}>Voys · standaard</option>
             ${availableCids.map((n) => `<option value="${esc(n)}"${selectedCid === n ? ' selected' : ''}>${esc(n)}</option>`).join('')}
           </select>
-        </div>
-      ` : ''}
+        ` : `
+          <span class="klx-call-sheet-cid-leeg" id="klxCallCidLeeg">Geen uitbelnummers ingesteld voor deze lijn (${esc(cidEnv)})</span>
+        `}
+      </div>
       <div class="klx-call-sheet-conn ${connState}" aria-live="polite">
         <span class="klx-call-sheet-conn-label">${esc(connLabel)}</span>
         <button type="button" class="klx-call-sheet-conn-retry" id="klxCallConnRetry" ${showConnRetry ? '' : 'hidden'} title="Opnieuw verbinden"><i class="ti ti-refresh"></i></button>
@@ -965,8 +1025,14 @@
     if (cidSel) {
       cidSel.addEventListener('change', (e) => {
         const v = String(e.target.value || '');
-        state.selectedCallerId = v;
-        try { localStorage.setItem('klx-softphone-caller-id', v); } catch (_) { /* private mode */ }
+        // Per lijn, niet globaal: een NL-nummer hoort nooit op de BE-lijn
+        // terecht te komen. Welke lijn het nu is komt uit dezelfde bron als
+        // waarmee de lijst getekend is, zodat keuze en lijst niet uiteenlopen.
+        const huidige = resolveEffectiveLine(
+          resolveEffectivePhone((state.activeCustomer || {}).phone || ''));
+        state.callerIdByLine = { ...(state.callerIdByLine || {}), [huidige]: v };
+        try { localStorage.setItem('klx-softphone-caller-id-' + huidige, v); } catch (_) { /* private mode */ }
+        renderSheet();
       });
     }
     const retryBtn = body.querySelector('#klxCallConnRetry');
