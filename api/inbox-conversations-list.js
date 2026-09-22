@@ -32,6 +32,7 @@ import { createUserClient, supabaseAdmin } from './supabase.js';
 import { requirePermission } from './_lib/requirePermission.js';
 import { getEmailUnreadByCustomerEmail } from './_lib/email-unread-per-customer.js';
 import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
+import { werkSleutel, inBlokken, isVandaag, metWerkstand } from './_lib/gesprekken-werkstand.js';
 // NOTE: Fase 2b mentor-scoping op de onboarding-tak is bewust uitgezet:
 // per ontwerp is de onboarding-inbox gedeeld voor iedereen met
 // onboarding.inbox.view (alle mentoren zien elkaars studenten-convs).
@@ -346,7 +347,7 @@ export default async function handler(req, res) {
     }
 
     const now = Date.now();
-    const items = (data || []).map(row => {
+    let items = (data || []).map(row => {
       const cust = row.customer || null;
       let customerName = null;
       if (cust) {
@@ -416,6 +417,65 @@ export default async function handler(req, res) {
         brief_sent_at : row.customer_id ? (briefSentByCustomer.get(row.customer_id) || null) : null,
       };
     });
+
+    // ── G4/G5 — waar wacht dit op, en van wie is het? ─────────────────────
+    // De gegevens bestonden al in iris_gesprekken en iris_beloftes; ze werden
+    // alleen niet gelezen door het scherm dat ze nodig heeft. Zie
+    // _lib/gesprekken-werkstand.js voor het waarom van de blokken en van de
+    // lokale dag.
+    //
+    // Faalzacht en in zijn geheel: lukt deze omweg niet, dan krijgt elke regel
+    // gewoon geen werkstand en toont de lijst wat hij altijd toonde. Een halve
+    // uitkomst zou erger zijn — dan zou een filter een gesprek verbergen omdat
+    // het tóevallig in het blok zat dat misging.
+    if (gesprekkenV2Aan()) {
+      try {
+        const sleutels = items.map((r) => werkSleutel(r.id)).filter(Boolean);
+        const standen = new Map();
+        for (const blok of inBlokken(sleutels)) {
+          const { data, error } = await supabaseAdmin
+            .from('iris_gesprekken')
+            .select('extern_uniek, status, toegewezen_aan, contact_id')
+            .in('extern_uniek', blok);
+          if (error) throw new Error('iris_gesprekken: ' + error.message);
+          for (const rij of (data || [])) standen.set(rij.extern_uniek, rij);
+        }
+
+        // De namen van wie het heeft. Zonder naam staat er een uuid in beeld,
+        // en dan is "van wie is dit" geen antwoord maar een nieuwe vraag.
+        const namen = new Map();
+        const toegewezenIds = [...new Set([...standen.values()]
+          .map((r) => r.toegewezen_aan).filter(Boolean))];
+        for (const blok of inBlokken(toegewezenIds)) {
+          const { data } = await supabaseAdmin
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', blok);
+          for (const p of (data || [])) namen.set(p.id, p.full_name || p.email || null);
+        }
+
+        // Beloftes van vandaag. NIET de status 'belofte_loopt': die staat wel
+        // in de tabel maar wordt door niets gezet, en een filter die altijd
+        // leeg is leert je dat het scherm niet klopt.
+        const contactIds = [...new Set([...standen.values()]
+          .map((r) => r.contact_id).filter(Boolean))];
+        const metBelofte = new Set();
+        for (const blok of inBlokken(contactIds)) {
+          const { data } = await supabaseAdmin
+            .from('iris_beloftes')
+            .select('contact_id, datum')
+            .eq('status', 'actief')
+            .in('contact_id', blok);
+          for (const b of (data || [])) {
+            if (isVandaag(b.datum)) metBelofte.add(b.contact_id);
+          }
+        }
+
+        items = items.map((r) => metWerkstand(r, standen, namen, metBelofte));
+      } catch (wEx) {
+        console.warn('[inbox-conversations-list] werkstand overgeslagen:', wEx?.message || wEx);
+      }
+    }
 
     // Server-side sort op last_activity_at DESC. Sinds fetchRange = limit
     // (geen dubbele-page-heuristiek meer), is een expliciete slice niet meer

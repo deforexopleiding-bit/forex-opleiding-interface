@@ -35,6 +35,8 @@ import { renderTemplatePreview } from './_lib/render-template-preview.js';
 // ontpauzeren + reminder-teller resetten zodat de no-reply-cron pas opnieuw
 // begint na een NIEUWE klant-inbound. Fail-soft.
 import { unpauseRunsForConversation } from './_lib/dunning-arrangement-hooks.js';
+import { gesprekkenV2Aan } from './_lib/gesprekken-vlag.js';
+import { werkSleutel } from './_lib/gesprekken-werkstand.js';
 
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -355,6 +357,38 @@ export default async function handler(req, res) {
       }
     } catch (unpauseErr) {
       console.warn('[inbox-send] unpause exception (fail-soft):', unpauseErr?.message || unpauseErr);
+    }
+
+    // ── G5 — dit gesprek wacht nu op de KLANT ─────────────────────────────
+    // iris_gesprekken.status werd tot nu toe alleen door Iris zelf bijgewerkt:
+    // 'wacht_op_ons' als er iets binnenkwam, 'wacht_op_klant' als ZIJ iets
+    // stuurde. Antwoordde een mens vanuit dit scherm, dan bleef het op
+    // 'wacht_op_ons' staan.
+    //
+    // Dat maakt het filter "wacht op ons" onbruikbaar: het blijft gesprekken
+    // tonen die je net beantwoord hebt. Een filter die je werk niet ziet,
+    // leert je binnen een dag om het filter niet te gebruiken.
+    //
+    // Faalzacht: het bericht is hier al bij Meta. Een fout hier verandert
+    // niets aan wat de klant kreeg.
+    if (gesprekkenV2Aan()) {
+      try {
+        const sleutel = werkSleutel(convId);
+        if (sleutel) {
+          const { error: wFout } = await supabaseAdmin
+            .from('iris_gesprekken')
+            .update({ status: 'wacht_op_klant', bijgewerkt_op: new Date().toISOString() })
+            .eq('extern_uniek', sleutel)
+            // Een gesprek dat 'geregeld' is of waar een belofte loopt, zetten
+            // we NIET terug: dat zijn standen die een mens bewust heeft
+            // gekozen, en die overschrijven met een automatisme is precies hoe
+            // je iemands werk kwijtraakt.
+            .in('status', ['nieuw', 'wacht_op_ons']);
+          if (wFout) console.warn('[inbox-send] werkstand niet bijgewerkt:', wFout.message);
+        }
+      } catch (wEx) {
+        console.warn('[inbox-send] werkstand uitzondering (faalzacht):', wEx?.message || wEx);
+      }
     }
 
     return res.status(200).json({

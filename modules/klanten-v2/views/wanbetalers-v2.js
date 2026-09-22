@@ -4365,12 +4365,18 @@
       // De lege tekst moet kloppen met wat er gefilterd is. "Geen
       // wanbetaler-gesprekken" onder de stand 'niet gekoppeld' is ronduit
       // verwarrend: die stand zoekt juist buiten de wanbetalers.
+      // Een opzoeklijst en geen geneste vraagtekens: bij het volgende filter
+      // dat erbij komt vergeet je een tak, en dan staat er "geen
+      // wanbetaler-gesprekken" onder een filter dat daar niet over gaat.
       const modus = _gesprekkenV2() ? (_ui.inbox.focusFilter || 'geen') : 'geen';
-      const tekst = modus === 'niet_gekoppeld'
-        ? 'Geen gesprekken zonder klantkoppeling.'
-        : (modus === 'venster_bijna_dicht'
-          ? 'Geen gesprek waarvan het venster binnen twee uur dichtgaat.'
-          : 'Geen wanbetaler-gesprekken in dit filter.');
+      const LEEG = {
+        niet_gekoppeld: 'Geen gesprekken zonder klantkoppeling.',
+        venster_bijna_dicht: 'Geen gesprek waarvan het venster binnen twee uur dichtgaat.',
+        wacht_op_ons: 'Niets dat op een antwoord van ons wacht.',
+        wacht_op_klant: 'Geen gesprek waar wij als laatste iets stuurden.',
+        belofte_vandaag: 'Geen toezegging met de datum van vandaag.',
+      };
+      const tekst = LEEG[modus] || 'Geen wanbetaler-gesprekken in dit filter.';
       return `<div style="padding:44px 14px;text-align:center;color:var(--text-3);font-size:12.5px">${esc(tekst)}</div>`;
     }
     return items.map((c) => {
@@ -5017,6 +5023,9 @@
         <span style="font-size:9.5px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Focus</span>
         ${focusBtn('venster_bijna_dicht', 'Venster bijna dicht', tel.venster_bijna_dicht, 'Minder dan twee uur over om vrije tekst te sturen. Nogmaals klikken zet het filter uit.')}
         ${focusBtn('niet_gekoppeld', 'Niet gekoppeld', tel.niet_gekoppeld, 'Gesprekken zonder klant. Die staan normaal NIET in deze lijst — er zijn geen open facturen om ze binnen te halen. Nogmaals klikken zet het filter uit.')}
+        ${focusBtn('wacht_op_ons', 'Wacht op ons', tel.wacht_op_ons, 'De klant heeft als laatste iets gestuurd en er is nog niet geantwoord. Nogmaals klikken zet het filter uit.')}
+        ${focusBtn('wacht_op_klant', 'Wacht op klant', tel.wacht_op_klant, 'Wij hebben als laatste iets gestuurd. Nogmaals klikken zet het filter uit.')}
+        ${focusBtn('belofte_vandaag', 'Belofte vandaag', tel.belofte_vandaag, 'Er loopt een toezegging met de datum van vandaag. Nogmaals klikken zet het filter uit.')}
       </div>`;
     }
 

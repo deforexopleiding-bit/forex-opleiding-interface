@@ -373,6 +373,46 @@ geen knop. Twee dingen die die knop goed moet doen:
 > wat er in totaal bestaat. Voor "is er meer" is `heeft_meer` het antwoord. Een
 > telling van alles zou een tweede opvraging kosten die niemand gebruikt.
 
+### G5 (de rest) — wacht op ons · wacht op klant · belofte vandaag
+
+De drie filters die er nog niet waren. Ze hoefden **geen** nieuwe tabel: de
+gegevens lagen er al en werden alleen niet gelezen.
+
+- `iris_gesprekken.status` — `cron-iris-werk` zet `wacht_op_ons` zodra er iets
+  binnenkomt, `iris-verstuur` zet `wacht_op_klant` zodra Iris iets stuurt.
+- `iris_beloftes` — een toezegging met een datum, status `actief`.
+
+**Wat er wél moest gebeuren, en waarom het filter zonder dat onbruikbaar was.**
+`wacht_op_klant` werd alleen door *Iris* gezet. Antwoordde een mens vanuit dit
+scherm, dan bleef het gesprek op `wacht_op_ons` staan. Het filter "wacht op ons"
+zou dus gesprekken blijven tonen die je net beantwoord hebt — en een filter dat
+je eigen werk niet ziet, leer je binnen een dag te negeren. `inbox-send` zet die
+stand nu ook, faalzacht (het bericht is op dat moment al bij Meta) en nooit over
+een stand heen die een mens bewust koos: `geregeld` en een lopende belofte
+blijven staan.
+
+**"Belofte vandaag" leunt op de beloftes zelf, niet op de status
+`belofte_loopt`.** Die status staat wel in de tabel maar wordt door niets gezet;
+een filter daarop zou altijd leeg zijn, en dat leert je binnen een dag dat het
+scherm niet klopt.
+
+**Vandaag is de lokale dag.** Met `toISOString()` zou een toezegging voor morgen
+er om half elf 's avonds al als "vandaag" uitzien. Dat is de off-by-one waar dit
+project eerder op stukliep; hier zou hij een belofte een dag te vroeg laten
+oplichten.
+
+**De opvraging gaat in blokken van 150.** De lijst kan tot 1000 gesprekken
+teruggeven, en een `.in()` met 1000 sleutels van ruim veertig tekens wordt een
+URL van tientallen kilobytes — die knapt ergens tussen PostgREST en de proxy,
+niet met een nette fout maar met een lege lijst of een 414. Bij de 115
+gesprekken van vandaag is het gewoon één blok.
+
+Lukt de hele omweg niet, dan krijgt elke regel géén werkstand en toont de lijst
+wat hij altijd toonde. Uitdrukkelijk in zijn geheel: een halve uitkomst zou
+erger zijn, want dan verbergt een filter een gesprek omdat het toevallig in het
+blok zat dat misging. Om dezelfde reden krijgt een gesprek dat Iris nog niet
+gezien heeft `null` als stand en niet `nieuw` — niet-weten is geen status.
+
 ---
 
 ## Wat er nog ligt
@@ -383,8 +423,7 @@ Ongewijzigd ten opzichte van de tabel in de audit, minus wat hierboven staat.
 |---|---|---|
 | G1 | microfoon in de gesprekken-module | Iris heeft er een (via de browser); de gesprekken-module zelf nog niet |
 | G2 | het uitstel op de SERVER parkeren | de huidige versie wacht in het scherm; zie hieronder |
-| G4 | toewijzing aan Maxim, Dave of Iris | heeft `iris_gesprekken` nodig |
-| G5 | de drie overige filters | wacht op ons · wacht op klant · belofte vandaag — die hebben de toestand per gesprek uit G4 nodig |
+| G4 | toewijzing aan Maxim, Dave of Iris | `iris_gesprekken.toegewezen_aan` bestaat al en wordt nu al meegestuurd met de lijst; wat ontbreekt is het tonen en het zetten |
 | G8 | paginering van de LIJST | de draad is gedaan (zie hierboven); de gesprekslijst haalt nog altijd `limit=1000` in één keer op, en waarschuwt daar zelf voor met `capOverflowWarning` |
 
 ---
