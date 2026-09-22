@@ -79,7 +79,9 @@ export default async function handler(req, res) {
     // 2) WhatsApp-messages voor deze conv.
     const { data: waMsgs, error: waErr } = await supabaseAdmin
       .from('whatsapp_messages')
-      .select('id, direction, body, media_url, media_type, template_name, status, sent_at, delivered_at, read_at, meta_wamid, created_at')
+      // failed_reason erbij (G9): zonder die kolom ziet een mislukt bericht er
+      // in het scherm precies zo uit als een afgeleverd bericht.
+      .select('id, direction, body, media_url, media_type, template_name, status, sent_at, delivered_at, read_at, failed_reason, meta_wamid, created_at')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true });
     if (waErr) throw new Error('whatsapp: ' + waErr.message);
@@ -177,6 +179,7 @@ export default async function handler(req, res) {
           media_type: m.media_type,
           template_name: m.template_name,
           status: m.status,
+          failed_reason: m.failed_reason || null,
           wamid: m.meta_wamid,
           raw_direction: m.direction, // voor debugging
         },
@@ -253,6 +256,11 @@ export default async function handler(req, res) {
         id: conv.id,
         customer_id: conv.customer_id,
         can_send_text: canSendText,
+        // last_inbound_at erbij (G3): can_send_text is een ja/nee, en daarmee
+        // kan het scherm niet uitrekenen hoeveel venster er nog is. Dat is
+        // precies het verschil tussen "je loopt tegen een muur" en "je ziet de
+        // muur aankomen".
+        last_inbound_at: conv.last_inbound_at || null,
         phone_number: conv.phone_number,
       },
       counts: {
