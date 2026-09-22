@@ -135,6 +135,13 @@
     informatie: 'Informatie', event: 'Event', inschrijving: 'Inschrijving',
     call: 'Gesprek inplannen', overig: 'Overig',
   };
+  const STATUS_ACTIE = {
+    voorgesteld: 'wacht op besluit',
+    goedgekeurd: 'goedgekeurd — nog doen',
+    afgewezen: 'afgewezen',
+    uitgevoerd: 'gedaan',
+    mislukt: 'uitvoeren mislukt',
+  };
   const ACTIE_LABEL = {
     LMS_UITNODIGING_OPNIEUW: 'LMS-uitnodiging opnieuw sturen',
     LMS_PROVISIONING_OPNIEUW: 'LMS-account opnieuw aanmaken',
@@ -369,11 +376,19 @@
 
   window.__supActie = async (actieId, besluit) => {
     try {
-      await stuur('actie', '/api/support-actie-besluit', { actie_id: actieId, besluit });
+      const r = await stuur('actie', '/api/support-actie-besluit', { actie_id: actieId, besluit });
       await laadDetail(_det.id);
-      if (window.KV?.toast) window.KV.toast(
-        besluit === 'goedkeuren' ? 'Goedgekeurd — voer ’m uit en zet hem daarna op gedaan'
-          : besluit === 'uitgevoerd' ? 'Op uitgevoerd gezet, de klant krijgt bericht' : 'Afgewezen');
+      if (!window.KV?.toast) return;
+
+      // De melding moet zeggen wat er ECHT gebeurde. Sinds S2 kan een
+      // goedkeuring de handeling direct uitvoeren — of proberen en falen.
+      if (besluit === 'afwijzen') { window.KV.toast('Afgewezen'); return; }
+      if (besluit === 'uitgevoerd') { window.KV.toast('Op gedaan gezet, de klant krijgt bericht'); return; }
+
+      const u = r && r.uitvoering;
+      if (!u) { window.KV.toast('Goedgekeurd — voer ’m uit en zet hem daarna op gedaan'); return; }
+      if (u.status === 'uitgevoerd') { window.KV.toast('Goedgekeurd en uitgevoerd, de klant heeft bericht'); return; }
+      window.KV.toast('Goedgekeurd, maar uitvoeren lukte niet — zie de reden bij de actie', 'err');
     } catch (e) { if (window.KV?.toast) window.KV.toast(e.message, 'err'); }
   };
 
@@ -490,13 +505,22 @@
     }
 
     if (rest.length) {
-      h += blok('Eerdere acties', rest.map((a) => `<div style="padding:9px 12px;border:1px solid var(--border);
-        border-radius:var(--r);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px">
-        <div><div style="font-size:12.3px;color:var(--text)">${esc(ACTIE_LABEL[a.soort] || a.soort)}</div>
-        <div style="font-size:11.4px;color:var(--text-3)">${esc(a.status)}</div></div>
-        ${a.status === 'goedgekeurd'
-          ? `<button class="btn btn-ghost btn-sm" onclick="window.__supActie('${a.id}','uitgevoerd')">Gedaan</button>` : ''}
-      </div>`).join(''));
+      h += blok('Eerdere acties', rest.map((a) => {
+        const mislukt = a.status === 'mislukt';
+        return `<div style="padding:9px 12px;border:1px solid ${mislukt ? 'var(--rose-line)' : 'var(--border)'};
+          background:${mislukt ? 'var(--rose-soft)' : 'transparent'};border-radius:var(--r);margin-bottom:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <div><div style="font-size:12.3px;color:var(--text)">${esc(ACTIE_LABEL[a.soort] || a.soort)}</div>
+            <div style="font-size:11.4px;color:${mislukt ? 'var(--rose)' : 'var(--text-3)'}">${esc(STATUS_ACTIE[a.status] || a.status)}</div></div>
+            ${a.status === 'goedgekeurd'
+              ? `<button class="btn btn-ghost btn-sm" onclick="window.__supActie('${a.id}','uitgevoerd')">Gedaan</button>` : ''}
+            ${mislukt
+              ? `<button class="btn btn-ghost btn-sm" onclick="window.__supActie('${a.id}','uitgevoerd')">Toch gedaan</button>` : ''}
+          </div>
+          ${mislukt && a.besluit_reden
+            ? `<div style="font-size:11.6px;color:var(--rose);line-height:1.5;margin-top:7px">${esc(a.besluit_reden)}</div>` : ''}
+        </div>`;
+      }).join(''));
     }
 
     return h;

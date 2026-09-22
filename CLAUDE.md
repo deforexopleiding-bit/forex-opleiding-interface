@@ -242,7 +242,14 @@ heropent NIET auto bij inbound; `closed`/afgehandeld doet dat wel).
   widgetteksten en de bot zijn in de module zelf in te stellen
   (tab Instellingen, recht `support.config`, endpoint
   `api/support-instellingen.js`) — `autonomy_config`, `feature_flags` en
-  `model` bewust NIET, die blijven SQL. Zie docs/support-module-plan.md.
+  `model` bewust NIET, die blijven SQL. S2: achter
+  `feature_flags.s2_acties_uitvoeren` (default UIT) voert
+  `api/_lib/support-actie-uitvoeren.js` een goedgekeurde actie direct uit —
+  maar alleen als het onderliggende systeem bevestigt; bij twijfel `mislukt`
+  met uitleg. LET OP de grendel in `stuurLmsUitnodiging()`: die slaat stap 2
+  over zodra `uitnodiging_verstuurd_op` gevuld is, dus juist het geval
+  UITNODIGING_WACHTWOORD_NIET_GEZET kan het CRM NIET zelf herstellen; dat
+  vraagt een force-optie aan LMS-kant. Zie docs/support-module-plan.md.
 - /modules/shared/agent-shared.js — cross-modulaire functies 
   (showToast, esc, formatMd, relTime, showReport, approval-helpers,
    getAvatarUrl, renderUserSection, initAuth)
